@@ -526,6 +526,9 @@ function rh_ai_local_intent(string $t): ?array
     if (($fact = rh_ai_hotel_fact_intent($t)) !== null) {
         return $fact;
     }
+    if (($rates = rh_ai_room_rates_intent($t)) !== null) {
+        return $rates; // the room price list or the child charge (one named room type: rh_ai_room_intent)
+    }
     if (preg_match('/^(who(\'s| is| are) (in.?house|staying( with us)?( now| tonight)?)|(guests )?in.?house( guests)?( now| tonight)?|(show |list )?(the )?in.?house( guests| list)?)\??$/u', $t)) {
         return ['in_house', []];
     }
@@ -708,6 +711,475 @@ function rh_ai_hotel_fact_question(string $tok): bool
     return (bool)preg_match('/\b(opening|closing|open(s)? (at|from|until|till|for|on|now|today)|clos(e|es) at|hours|what time|menu|dish(es)?|facilit\w*|amenit\w*|polic(y|ies)|address|phone number|contact (details|number)|wi-?fi|pool|spa|parking|restaurant|bar|coffee (bar|shop)|caf[eé]|gym|fitness|conference rooms?|meeting rooms?|venues?|upcoming events|about (the|this|our) hotel|check.?(in|out) times?)\b/u', mb_strtolower($tok));
 }
 
+/** Words that make a question a change, a stay or a figure for a period, never the plain price list or child charge. */
+function rh_ai_rates_not_list_re(): string
+{
+    return '/\b(book\w*|reserv\w*|create|make|change|set|update|raise|lower|increase|reduce|adjust|edit|move|add|cancel\w*|discount\w*|deals?|plans?|adults?|people|persons|guests|pax|couple|(?:two|three|four|five|six|seven|eight|nine|ten) nights|from|until|till|between|week|month|year|weekend|tonight|today|tomorrow|yesterday|january|february|march|april|june|july|august|september|october|november|december|jan|feb|mar|apr|jun|jul|aug|sept?|oct|nov|dec|revpar|adr|average|owe\w*|paid|balance|bill|invoice|refund\w*|breakfast|menu|food|drinks?|gym|conference|event\w*)\b/u';
+}
+
+/**
+ * The room price list and the child charge, answered locally (owner question 2026-10-28). $t is lower-case with polite
+ * words removed. Never a stay to price (a number, a date, a party), a change, or occupancy as a % ("occupancy rate").
+ * @return array{0:string,1:array}|null ['room_rates', ['args' => [], '_view' => 'list'|'children']]
+ */
+function rh_ai_room_rates_intent(string $t): ?array
+{
+    if (mb_strlen($t) > 70 || strpos($t, '[') !== false || preg_match('/\d/u', $t) || preg_match(rh_ai_rates_not_list_re(), $t)) {
+        return null;
+    }
+    $kid = '(?:child|children|kids?|a child|a kid|each child|per child|infants?|babies|a baby)';
+    if (preg_match('/^(?:what(?:\'s| is| are) )?(?:the |our |your )?(?:child|children|kids?)(?:\'s|s\')? (?:policy|policies|rates?|prices?|pricing|charges?|fees?|rules?)\??$/u', $t)
+        || preg_match('/^(?:do|does) (?:you|we|the hotel) (?:charge|bill) (?:extra )?(?:for )?' . $kid . '\??$/u', $t)
+        || preg_match('/^(?:are|is) ' . $kid . ' (?:free|charged|extra)\??$|^(?:do|does) ' . $kid . ' (?:stay|go|sleep) (?:for )?free\??$/u', $t)
+        || preg_match('/^how much (?:do (?:you|we) charge|is it|does it cost|is the charge|are) (?:for )?' . $kid . '\??$/u', $t)
+        || preg_match('/^(?:what(?:\'s| is) )?(?:the )?(?:charge|price|rate|cost|fee) (?:for|per) ' . $kid . '\??$/u', $t)
+        || preg_match('/^(?:can|may) ' . $kid . ' stay(?: here| with us)?\??$/u', $t)) {
+        return ['room_rates', ['args' => [], '_view' => 'children']];
+    }
+    $tier = (bool)preg_match('/\b(single|double|triple)\b/u', $t);
+    if (($tier && preg_match('/\b(rates?|prices?|costs?|charges?|how much)\b/u', $t) && !preg_match('/\b(occupancy rate|occupancy %|percent)\b/u', $t))
+        || preg_match('/^(?:what are |what\'s |whats |show |list )?(?:the |our |your )?(?:room )?occupancy (?:rates|prices) (?:for|of|per) (?:each |every |all |the |our )?(?:rooms?|room types?)\??$/u', $t)
+        || preg_match('/^(?:what are |what\'s |whats |show |list |see )?(?:the |our |your )?(?:rooms? |room type )?(?:rates|prices|price list|tariffs?|rack rates?)(?: (?:for|of|per) (?:the |our |all |each |every )?(?:rooms?|room types?|night))?\??$/u', $t)
+        || preg_match('/^(?:what are |what\'s |whats )?(?:the |our )?(?:rooms?|room types?) (?:rates|prices|price list)\??$/u', $t)
+        || preg_match('/^how much (?:is|are|does|do|for) (?:a |the |our |your |one )?(?:room|rooms|night)(?: cost| costs)?(?: (?:a|per|for (?:a|one)) night)?\??$/u', $t)) {
+        return ['room_rates', ['args' => [], '_view' => 'list']];
+    }
+    return null;
+}
+
+/**
+ * Number words a party is said in ("two adults", "a 7 year old"). null = not a count.
+ */
+function rh_ai_count_word(string $w): ?int
+{
+    $w = trim(mb_strtolower($w));
+    if (ctype_digit($w)) {
+        return (int)$w;
+    }
+    $words = ['a' => 1, 'an' => 1, 'one' => 1, 'two' => 2, 'three' => 3, 'four' => 4, 'five' => 5, 'six' => 6, 'seven' => 7, 'eight' => 8, 'nine' => 9, 'ten' => 10];
+    return $words[$w] ?? null;
+}
+
+/**
+ * The party in a question: adults, children and rooms, or null when it names no adults. "2 adults and a 7 year old",
+ * "a couple and two kids", "3 guests", "4 people including 2 children", "2 rooms".
+ * @return array{adults:int,children:int,rooms:int}|null
+ */
+function rh_ai_parse_party(string $t): ?array
+{
+    $n = '(\d{1,2}|an?|one|two|three|four|five|six|seven|eight|nine|ten)';
+    $adults = 0;
+    $children = 0;
+    $total = 0;
+    if (preg_match_all('/\b' . $n . ' (?:adults?|grown.?ups?)\b/u', $t, $m)) {
+        foreach ($m[1] as $w) {
+            $adults += (int)rh_ai_count_word($w);
+        }
+    }
+    if (preg_match('/\b(?:a|one) couple\b/u', $t)) {
+        $adults += 2;
+    }
+    if (preg_match_all('/\b' . $n . ' (?:children|child|kids?|infants?|bab(?:y|ies)|toddlers?|minors?)\b/u', $t, $m)) {
+        foreach ($m[1] as $w) {
+            $children += (int)rh_ai_count_word($w);
+        }
+    }
+    if ($children === 0 && preg_match_all('/\b' . $n . ' \d{1,2}[- ]?(?:years?|yrs?)[- ]?olds?\b/u', $t, $m)) {
+        foreach ($m[1] as $w) {
+            $children += (int)rh_ai_count_word($w);
+        }
+    }
+    if (preg_match('/\b(\d{1,2}|two|three|four|five|six|seven|eight|nine|ten) (?:people|persons|guests|pax)\b/u', $t, $m)) {
+        $total = (int)rh_ai_count_word($m[1]);
+    }
+    if ($adults === 0 && $total > 0) {
+        $adults = preg_match('/\b(including|incl\.?|of (?:them|whom))\b/u', $t) ? max(1, $total - $children) : $total;
+    }
+    if ($adults < 1 || $adults > 40 || $children > 20) {
+        return null;
+    }
+    $rooms = 1;
+    if (preg_match('/\b(\d{1,2}|two|three|four|five|six|seven|eight|nine|ten) rooms\b/u', $t, $m)) {
+        $rooms = max(1, min(10, (int)rh_ai_count_word($m[1])));
+    }
+    return ['adults' => $adults, 'children' => $children, 'rooms' => $rooms];
+}
+
+/**
+ * Check-in and check-out dates in a question, or null: "5 to 7 November", "from the 5th to the 7th of Nov", "Nov 5 - 7",
+ * "5 Nov to 2 Dec 2026", "2026-11-05 to 2026-11-07", "on 5 November for 2 nights". A date with no year is the next one
+ * (today or later). Stays of 1 to 60 nights only.
+ * @return array{0:string,1:string}|null
+ */
+function rh_ai_parse_stay_dates(string $t, ?string $today = null): ?array
+{
+    $today = $today ?? rh_ai_today();
+    $months = ['jan' => 1, 'feb' => 2, 'mar' => 3, 'apr' => 4, 'may' => 5, 'jun' => 6, 'jul' => 7, 'aug' => 8, 'sep' => 9, 'oct' => 10, 'nov' => 11, 'dec' => 12];
+    $M = '(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|june?|july?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)';
+    $D = '(?:the )?(\d{1,2})(?:st|nd|rd|th)?';
+    $to = '\s*(?:to|until|till|-|–|and|through|thru)\s*';
+    $mon = static fn(string $s): int => $months[mb_substr(mb_strtolower($s), 0, 3)] ?? 0;
+    $ci = $co = null;
+    $nightsRe = '/\bfor (\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten) nights?\b/u';
+    $make = static function (int $y, int $m, int $d): ?string {
+        return ($m >= 1 && $m <= 12 && checkdate($m, $d, $y)) ? sprintf('%04d-%02d-%02d', $y, $m, $d) : null;
+    };
+    $year = (int)substr($today, 0, 4);
+    if (preg_match('/\b(\d{4}-\d{2}-\d{2})\b' . $to . '(\d{4}-\d{2}-\d{2})\b/u', $t, $m)) {
+        [$ci, $co] = [$m[1], $m[2]];
+    } elseif (preg_match('/\b(\d{4}-\d{2}-\d{2})\b/u', $t, $m) && preg_match($nightsRe, $t, $nm)) {
+        $ci = $m[1];
+        $co = date('Y-m-d', strtotime($ci . ' +' . (int)rh_ai_count_word($nm[1]) . ' day'));
+    } else {
+        $parts = null; // [d1, m1 (0 = same as m2), d2, m2, year or 0]
+        if (preg_match('/\b' . $D . '(?:\s+(?:of\s+)?' . $M . '(?:,?\s+\d{4})?)?' . $to . $D . '\s+(?:of\s+)?' . $M . '(?:,?\s+(\d{4}))?\b/u', $t, $m)) {
+            $parts = [(int)$m[1], ($m[2] ?? '') !== '' ? $mon($m[2]) : 0, (int)$m[3], $mon($m[4]), (int)($m[5] ?? 0)];
+        } elseif (preg_match('/\b' . $M . '\s+' . $D . $to . '(?:' . $M . '\s+)?' . $D . '(?:,?\s+(\d{4}))?\b/u', $t, $m)) {
+            $parts = [(int)$m[2], $mon($m[1]), (int)$m[4], ($m[3] ?? '') !== '' ? $mon($m[3]) : $mon($m[1]), (int)($m[5] ?? 0)];
+        } elseif (preg_match($nightsRe, $t, $nm) && (preg_match('/\b' . $D . '\s+(?:of\s+)?' . $M . '(?:,?\s+(\d{4}))?\b/u', $t, $m) || preg_match('/\b' . $M . '\s+' . $D . '(?:,?\s+(\d{4}))?\b/u', $t, $m2))) {
+            $d = isset($m[1]) ? (int)$m[1] : (int)$m2[2];
+            $mo = isset($m[2]) ? $mon($m[2]) : $mon($m2[1]);
+            $y = (int)($m[3] ?? ($m2[3] ?? 0));
+            $start = $make($y ?: $year, $mo, $d);
+            if ($start === null) {
+                return null;
+            }
+            if (!$y && $start < $today) {
+                $start = $make($year + 1, $mo, $d);
+            }
+            $ci = $start;
+            $co = $start !== null ? date('Y-m-d', strtotime($start . ' +' . (int)rh_ai_count_word($nm[1]) . ' day')) : null;
+        }
+        if ($parts !== null) {
+            [$d1, $m1, $d2, $m2, $y] = $parts;
+            if ($m1 === 0) {
+                $m1 = $d1 > $d2 ? ($m2 === 1 ? 12 : $m2 - 1) : $m2; // "30 to 2 December": 30 November
+            }
+            $y1 = $y ?: $year;
+            $ci = $make($m1 > $m2 && $y ? $y - 1 : $y1, $m1, $d1);
+            if ($ci !== null && !$y && $ci < $today) {
+                $y1++;
+                $ci = $make($y1, $m1, $d1);
+            }
+            $co = $ci !== null ? $make($m2 < $m1 && !$y ? $y1 + 1 : ($y ?: $y1), $m2, $d2) : null;
+        }
+    }
+    if ($ci === null || $co === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$ci) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', (string)$co) || $co <= $ci) {
+        return null;
+    }
+    $nights = rh_ai_nights($ci, $co);
+    return $nights >= 1 && $nights <= 60 ? [$ci, $co] : null;
+}
+
+/** Active room types (id, lower-case name and slug), longest name first, read once per request. */
+function rh_ai_room_type_names(PDO $db): array
+{
+    if (isset($GLOBALS['__rh_ai_memo']['room_names'])) {
+        return $GLOBALS['__rh_ai_memo']['room_names'];
+    }
+    try {
+        $rows = $db->query("SELECT id, name, slug FROM rooms WHERE is_active = 1 ORDER BY display_order, id LIMIT 200")->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        $rows = [];
+    }
+    $out = [];
+    foreach ($rows as $r) {
+        $out[] = ['id' => (int)$r['id'], 'name' => (string)$r['name'], 'l' => mb_strtolower(trim((string)$r['name'])), 'slug' => str_replace('-', ' ', mb_strtolower((string)$r['slug']))];
+    }
+    usort($out, static fn($a, $b) => mb_strlen($b['l']) <=> mb_strlen($a['l']));
+    if (isset($GLOBALS['__rh_ai_memo'])) {
+        $GLOBALS['__rh_ai_memo']['room_names'] = $out;
+    }
+    return $out;
+}
+
+/**
+ * Room questions that need the hotel's room type names (owner 2026-10-28), answered locally:
+ *  - a party with dates ("2 adults and a 7 year old in the Superior Suite from 5 to 7 November") -> always a real
+ *    quote_stay, never left to the model (['quote_stay', args]; no room type named: ['stay_any', args]);
+ *  - one named room type's rates ("how much is the Superior Suite?") -> ['room_rates', ['args' => ['room_type' => id]]].
+ * A change ("book ...", "please reserve ..."), a booking already made (a reference or a guest token) or money owed is
+ * never one of these: it goes on to the cards / the model.
+ * @return array{0:string,1:array}|null
+ */
+function rh_ai_room_intent(PDO $db, string $tok): ?array
+{
+    $t = trim((string)preg_replace('/\s+/u', ' ', mb_strtolower($tok)));
+    $t = trim((string)preg_replace('/^(?:please|pls|hi|hello|hey)[,\s]+/u', '', $t));
+    if ($t === '' || mb_strlen($t) > 220 || strpos($t, '[') !== false
+        || preg_match('/^(?:book|reserve|hold|create|make|add|put|change|move|extend|cancel|amend|modify|update|check (?:in|out)|assign|upgrade|switch)\b/u', $t)
+        // book / reserve / hold used as a verb anywhere ("I want to book", "we need to reserve", "let's book"): the
+        // booking card path, never a local quote (QA 2026-10-28). Nouns stay fine: "booking ref", "the booking", "bookings".
+        || preg_match('/\b(?:book|books|booked|reserve|reserves|reserved|reserving|hold|holds|holding)\b|\b(?:create|make) a (?:booking|reservation)\b/u', $t)
+        || preg_match('/\b(owe\w*|paid|balance|refund\w*|invoice|receipt|booking (?:ref\w*|number|no)|[a-z]{2,4}-\d{4,})\b/u', $t)) {
+        return null;
+    }
+    $named = null;
+    foreach (rh_ai_room_type_names($db) as $rt) {
+        foreach (array_unique([$rt['l'], $rt['slug']]) as $nm) {
+            if (mb_strlen($nm) >= 3 && preg_match('/(?<![\p{L}\p{N}])' . preg_quote($nm, '/') . '(?![\p{L}\p{N}])/u', $t)) {
+                $named = $rt;
+                break 2;
+            }
+        }
+    }
+    $dates = rh_ai_parse_stay_dates($t);
+    $party = rh_ai_parse_party($t);
+    if ($dates !== null && $party !== null) {
+        $args = ['check_in' => $dates[0], 'check_out' => $dates[1], 'adults' => $party['adults'], 'children' => $party['children'], 'rooms' => $party['rooms']];
+        if ($named !== null) {
+            return ['quote_stay', $args + ['room_type' => (string)$named['id']]];
+        }
+        return ['stay_any', $args];
+    }
+    if ($named !== null && $dates === null && $party === null && !preg_match('/\d/u', $t)
+        && preg_match('/\b(rates?|prices?|price list|costs?|tariffs?|how much|charges?)\b/u', $t)
+        && !preg_match('/\b(free|availab\w*|left|sold|occupancy rate|occupied|revenue|sales|sold|performance|deals?|plans?)\b/u', $t)) {
+        return ['room_rates', ['args' => ['room_type' => (string)$named['id']], '_view' => 'one']];
+    }
+    return null;
+}
+
+/** Money as the local answers show it ("MWK 120,000.00"). */
+function rh_ai_fmt_cur(string $cur, $v): string
+{
+    return ($cur !== '' ? $cur . ' ' : '') . number_format((float)$v, 2);
+}
+
+/** "2 adults and 1 child" (and "in 2 rooms"). */
+function rh_ai_party_text(int $adults, int $children, int $rooms = 1): string
+{
+    $s = $adults . ' adult' . ($adults === 1 ? '' : 's') . ($children > 0 ? ' and ' . $children . ' child' . ($children === 1 ? '' : 'ren') : '');
+    return $s . ($rooms > 1 ? ' in ' . $rooms . ' rooms' : '');
+}
+
+/** The local answer for the room price list / child charge / one room type (from the room_rates result). */
+function rh_ai_rates_local_text(array $view, array $r): string
+{
+    $cur = (string)($r['currency'] ?? '');
+    $types = array_values(array_filter((array)($r['room_types'] ?? []), 'is_array'));
+    if (!$types) {
+        return (int)($r['room_types_in_all'] ?? 0) === 0 ? 'There are no active room types set up yet (0 in Room Management).' : '';
+    }
+    $guests = static fn(array $x): string => 'up to ' . (int)$x['max_guests'] . ' guest' . ((int)$x['max_guests'] === 1 ? '' : 's');
+    $prices = static function (array $x) use ($cur): string {
+        if (!empty($x['joined_room'])) {
+            return rh_ai_fmt_cur($cur, $x['price_per_night']) . (isset($x['price_per_night_up_to']) ? ' to ' . rh_ai_fmt_cur($cur, $x['price_per_night_up_to']) : '') . ' a night (' . $x['joined_room'] . ')';
+        }
+        $occ = (array)($x['occupancy_prices'] ?? []);
+        if (!$occ) {
+            return rh_ai_fmt_cur($cur, $x['price_per_night']) . ' a night';
+        }
+        $parts = [];
+        foreach ($occ as $o => $p) {
+            $parts[] = $o . ' ' . rh_ai_fmt_cur($cur, $p);
+        }
+        return implode(' · ', $parts) . ' a night';
+    };
+    $view = (string)($view['_view'] ?? 'list');
+    $foot = trim((string)($r['prices_include'] ?? '') . ' ' . (string)($r['rate_plans'] ?? ''));
+    if ($view === 'one') {
+        $x = $types[0];
+        $lines = ['**Prices:** ' . $prices($x), '**Guests:** ' . $guests($x) . ' per room', '**Children:** ' . (string)$x['child_charge']];
+        if (!empty($x['bed_type'])) {
+            $lines[] = '**Bed:** ' . $x['bed_type'];
+        }
+        return '**' . $x['room_type'] . '**' . "\n- " . implode("\n- ", $lines) . ($foot !== '' ? "\n\n" . $foot : '');
+    }
+    if ($view === 'children') {
+        $byRule = [];
+        foreach ($types as $x) {
+            $byRule[(string)$x['child_charge']][] = (string)$x['room_type'];
+        }
+        if (count($byRule) === 1 && count($types) === (int)($r['room_types_in_all'] ?? count($types))) {
+            $out = '**Children, every room type:** ' . array_key_first($byRule);
+        } else {
+            $lines = [];
+            foreach ($types as $x) {
+                $lines[] = '**' . $x['room_type'] . ':** ' . $x['child_charge'] . ' Room holds ' . $guests($x) . '.';
+            }
+            $out = '**Children, by room type:**' . rh_ai_local_lines($lines);
+        }
+        $extra = trim((string)($r['rate_plans'] ?? ''));
+        return $out . "\n\nA child takes one of the room's guest places." . ($extra !== '' ? ' ' . $extra : '');
+    }
+    $lines = [];
+    foreach ($types as $x) {
+        $lines[] = '**' . $x['room_type'] . ':** ' . $prices($x) . ' · ' . $guests($x) . ' · children: ' . lcfirst(rtrim((string)$x['child_charge'], '.'));
+    }
+    $all = (int)($r['room_types_in_all'] ?? count($types));
+    $more = $all > count($types) ? "\n\n" . count($types) . ' of ' . $all . ' room types shown; ask about one by name for the rest.' : '';
+    return '**Room prices' . ($cur !== '' ? ' (' . $cur . ')' : '') . ':**' . rh_ai_local_lines($lines) . $more . ($foot !== '' ? "\n\n" . $foot : '');
+}
+
+/** One priced option as a line ("Joined Room · MWK 300,000.00 a night · MWK 600,000.00 in all"). */
+function rh_ai_option_line(array $o, string $cur, bool $withDates): string
+{
+    $s = (string)($o['room_type'] ?? '');
+    if ($withDates && !empty($o['check_in'])) {
+        $s .= ' · ' . date('j M', strtotime((string)$o['check_in'])) . ' to ' . date('j M Y', strtotime((string)$o['check_out']));
+    }
+    if (isset($o['price_per_night'])) {
+        $s .= ' · ' . rh_ai_fmt_cur((string)($o['currency'] ?? $cur), $o['price_per_night']) . ' a night';
+    }
+    if (isset($o['total'])) {
+        $s .= ' · ' . rh_ai_fmt_cur((string)($o['currency'] ?? $cur), $o['total']) . ' in all';
+    }
+    return $s . (!empty($o['note']) ? ' (' . $o['note'] . ')' : '');
+}
+
+/** The alternatives block of a quote / availability result, or '' (the "nothing free" line when that is what came back). */
+function rh_ai_alternatives_text(array $alt, string $cur, string $head): string
+{
+    if (isset($alt['none'])) {
+        return (string)$alt['none'];
+    }
+    $lines = [];
+    foreach ((array)($alt['other_room_types'] ?? []) as $o) {
+        $lines[] = rh_ai_option_line((array)$o, $cur, false);
+    }
+    foreach ((array)($alt['joined_rooms'] ?? []) as $o) {
+        $lines[] = rh_ai_option_line((array)$o, $cur, false);
+    }
+    foreach ((array)($alt['other_dates'] ?? []) as $o) {
+        $lines[] = rh_ai_option_line((array)$o, $cur, true);
+    }
+    return $lines ? $head . rh_ai_local_lines($lines) : '';
+}
+
+/** The local answer for one priced stay (from the quote_stay result). */
+function rh_ai_quote_local_text(array $q, array $args): string
+{
+    $cur = (string)($q['currency'] ?? rh_ai_currency());
+    $ci = (string)($q['check_in'] ?? $args['check_in']);
+    $co = (string)($q['check_out'] ?? $args['check_out']);
+    $n = rh_ai_nights($ci, $co);
+    $head = '**' . (string)($q['room_type'] ?? 'That room type') . ', ' . date('j M', strtotime($ci)) . ' to ' . date('j M Y', strtotime($co)) . ' (' . $n . ' night' . ($n === 1 ? '' : 's') . '), '
+        . rh_ai_party_text((int)$args['adults'], (int)($args['children'] ?? 0), (int)($args['rooms'] ?? 1)) . '**';
+    $alt = is_array($q['alternatives'] ?? null) ? rh_ai_alternatives_text($q['alternatives'], $cur, 'What would work instead:') : '';
+    if (!empty($q['error'])) {
+        $why = !empty($q['does_not_fit']) ? "This party doesn't fit: " . $q['error'] : (string)$q['error'];
+        return $head . "\n\n" . $why . ($alt !== '' ? "\n\n" . $alt : '');
+    }
+    $bits = [rh_ai_fmt_cur($cur, $q['price_per_night']) . ' a night (' . $q['occupancy'] . ' occupancy' . (!empty($q['rate_plan']) ? ', rate plan ' . $q['rate_plan'] : '') . ')'];
+    if ((float)($q['child_charge'] ?? 0) > BALANCE_TOLERANCE) {
+        $bits[] = 'child charge ' . rh_ai_fmt_cur($cur, $q['child_charge']);
+    } elseif ((int)($args['children'] ?? 0) > 0) {
+        $bits[] = 'no charge for the child' . ((int)$args['children'] === 1 ? '' : 'ren');
+    }
+    if ((float)($q['vat'] ?? 0) > BALANCE_TOLERANCE) {
+        $bits[] = 'VAT ' . rh_ai_fmt_cur($cur, $q['vat']);
+    }
+    if ((float)($q['levy'] ?? 0) > BALANCE_TOLERANCE) {
+        $bits[] = 'tourism levy ' . rh_ai_fmt_cur($cur, $q['levy']);
+    }
+    $out = $head . "\n\n" . implode(' · ', $bits) . "\n\n**Total: " . rh_ai_fmt_cur($cur, $q['total']) . '**';
+    $notes = array_values(array_filter(array_map('strval', (array)($q['notes'] ?? []))));
+    $out .= !empty($q['available']) ? "\n\nFree on those dates." : "\n\nNot free on those dates" . ($notes ? ': ' . implode(' ', $notes) : '.');
+    if (!empty($q['available']) && $notes) {
+        $out .= ' ' . implode(' ', $notes);
+    }
+    return $out . ($alt !== '' ? "\n\n" . $alt : '');
+}
+
+/**
+ * A party with dates, priced locally with the real tools (zero model tokens): the room type named gets quote_stay
+ * (with the exact reason and the alternatives when it does not fit or is not free); no type named gets
+ * check_availability and then quote_stay for up to ai_alt_max types that take the party and are free.
+ * null = this person may not price a stay (the model answers with what they may use).
+ * @return array{text:string,links:array,tools:array}|null
+ */
+function rh_ai_stay_local(PDO $db, array $user, int $conv, string $kind, array $args): ?array
+{
+    if (!rh_ai_tool_allowed($user, 'quote_stay')) {
+        return null;
+    }
+    $links = [];
+    $run = static function (string $tool, array $a) use ($db, $user, $conv, &$links): array {
+        $r = rh_ai_run_tool($db, $user, $conv, $tool, $a);
+        rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => $tool, 'args' => $a, 'result' => $r['json'], 'agent' => 'local']);
+        foreach ($r['links'] as $l) {
+            if (!in_array($l, $links, true)) {
+                $links[] = $l;
+            }
+        }
+        return $r;
+    };
+    if ($kind === 'quote_stay') {
+        $r = $run('quote_stay', $args);
+        return ['text' => rh_ai_quote_local_text((array)$r['result'], $args), 'links' => $links, 'tools' => ['quote_stay']];
+    }
+    $ca = $run('check_availability', ['check_in' => $args['check_in'], 'check_out' => $args['check_out'], 'adults' => $args['adults'], 'children' => $args['children']]);
+    $res = (array)$ca['result'];
+    $n = rh_ai_nights($args['check_in'], $args['check_out']);
+    $head = '**' . date('j M', strtotime($args['check_in'])) . ' to ' . date('j M Y', strtotime($args['check_out'])) . ' (' . $n . ' night' . ($n === 1 ? '' : 's') . '), '
+        . rh_ai_party_text((int)$args['adults'], (int)$args['children'], (int)$args['rooms']) . '**';
+    if (!empty($res['error'])) {
+        return ['text' => $head . "\n\n" . $res['error'], 'links' => $links, 'tools' => ['check_availability']];
+    }
+    $cur = rh_ai_currency();
+    $lines = [];
+    $max = rh_ai_num('ai_alt_max');
+    foreach ((array)($res['room_types'] ?? []) as $row) {
+        if (count($lines) >= $max) {
+            break;
+        }
+        if (!is_array($row) || empty($row['available']) || empty($row['fits_party_in_one_room'])) {
+            continue;
+        }
+        $q = $run('quote_stay', $args + ['room_type' => (string)$row['room_type_id']]);
+        $qr = (array)$q['result'];
+        if (empty($qr['error']) && !empty($qr['available'])) {
+            $lines[] = rh_ai_option_line($qr, $cur, false);
+        }
+    }
+    if ($lines) {
+        return ['text' => $head . "\n\nFree and priced for this party:" . rh_ai_local_lines($lines), 'links' => $links, 'tools' => ['check_availability', 'quote_stay']];
+    }
+    $why = [];
+    foreach ((array)($res['room_types'] ?? []) as $row) {
+        if (is_array($row) && !empty($row['does_not_fit'])) {
+            $why[] = (string)$row['does_not_fit'];
+        }
+    }
+    $alt = is_array($res['alternatives'] ?? null) ? $res['alternatives']
+        : rh_ai_room_alternatives($db, $user, null, (string)$args['check_in'], (string)$args['check_out'], (int)$args['adults'], (int)$args['children'], (int)$args['rooms']);
+    $altText = rh_ai_alternatives_text($alt, $cur, 'What would work instead:');
+    $count = count((array)($res['room_types'] ?? []));
+    return ['text' => $head . "\n\nNo single room type of the " . $count . ' checked is free for this party on those dates.' . ($why ? rh_ai_local_lines($why) : '') . ($altText !== '' ? "\n\n" . $altText : ''),
+        'links' => $links, 'tools' => ['check_availability', 'quote_stay']];
+}
+
+/**
+ * An answer built from this question's own lookup results, when the model gave back nothing usable (owner fault
+ * 2026-10-28: "(Looked up: room_types.)" reached the person). Only tools whose local answer states whole-set totals
+ * (price list, a quote, in house, room board, who is online, my access); '' for anything else.
+ */
+function rh_ai_answer_from_results(array $results): string
+{
+    foreach (array_reverse($results) as [$tool, $res, $args]) {
+        $res = (array)$res;
+        if (!empty($res['error'])) {
+            continue;
+        }
+        if ($tool === 'room_rates') {
+            $txt = rh_ai_rates_local_text(['_view' => !empty($args['room_type']) ? 'one' : 'list'], $res);
+        } elseif ($tool === 'quote_stay' && isset($res['total'], $res['adults'])) {
+            $txt = rh_ai_quote_local_text($res, ['check_in' => $res['check_in'], 'check_out' => $res['check_out'], 'adults' => $res['adults'], 'children' => $res['children'] ?? 0, 'rooms' => $res['rooms'] ?? 1]);
+        } elseif (in_array($tool, ['in_house', 'room_board', 'who_is_online', 'my_access'], true)) {
+            $txt = rh_ai_local_format($tool, [], $res);
+        } else {
+            // No generic dump of other results (QA 2026-10-28): a filtered search's "0 matches" must never go out as
+            // "none" without the checked total. The caller says plainly that it could not put the answer together.
+            $txt = '';
+        }
+        if (trim($txt) !== '') {
+            return $txt;
+        }
+    }
+    return '';
+}
+
 /** The local answer for a hotel fact (from the de-identified hotel_info result; phone numbers and emails stay tokens until shown). */
 function rh_ai_hotel_local_text(array $view, array $r): string
 {
@@ -807,6 +1279,9 @@ function rh_ai_local_format(string $tool, array $view, array $r): string
     }
     if ($tool === 'search_bookings') {
         return rh_ai_bookings_local_text($r);
+    }
+    if ($tool === 'room_rates') {
+        return rh_ai_rates_local_text($view, $r);
     }
     $room = static function (array $x): string {
         return ($x['room_type'] ?? '') . (!empty($x['room_number']) ? ' · room ' . $x['room_number'] : ' · no room yet');
@@ -1028,6 +1503,11 @@ function rh_ai_followup_chips(array $user, array $toolsUsed): array
             $add('arrivals_departures', 'Arrivals today');
         } elseif ($t === 'check_availability') {
             $add('quote_stay', 'Quote that stay');
+        } elseif ($t === 'room_rates') {
+            $add('room_rates', 'How much do we charge for children?');
+            $add('rate_plans_and_deals', 'Which rate plans are on?');
+        } elseif ($t === 'quote_stay') {
+            $add('room_rates', 'Show the room price list');
         } elseif ($t === 'how_to' || $t === 'summarise_guide') {
             $add('how_to', 'Show me the steps again');
         } elseif ($t === 'order_status') {
@@ -1251,7 +1731,7 @@ function rh_ai_specialists(): array
     return [
         'front_desk' => ['label' => 'Front Desk & Rooms', 'brief' => 'reservations, availability, quotes, arrivals, departures, in-house guests, room assignment and guest history',
             'core' => ['search_bookings', 'get_booking', 'arrivals_departures', 'in_house', 'check_availability'],
-            'tools' => ['search_bookings', 'get_booking', 'check_availability', 'quote_stay', 'arrivals_departures', 'in_house', 'room_board', 'guest_history', 'rate_plans_and_deals', 'hotel_info']],
+            'tools' => ['search_bookings', 'get_booking', 'check_availability', 'quote_stay', 'room_rates', 'arrivals_departures', 'in_house', 'room_board', 'guest_history', 'rate_plans_and_deals', 'hotel_info']],
         'housekeeping' => ['label' => 'Housekeeping & Maintenance', 'brief' => 'room status, cleaning jobs, maintenance tasks, rooms off sale and rooms not ready for arrivals',
             'core' => ['work_queues', 'room_board'], 'tools' => ['work_queues', 'room_board']],
         'restaurant' => ['label' => 'Restaurant & Bar', 'brief' => 'till sales, top sellers, voids, refunds, slow tickets at the kitchen, bar and coffee stations, and where one order is',
@@ -1263,7 +1743,7 @@ function rh_ai_specialists(): array
         'events_gym' => ['label' => 'Events, Conference & Gym', 'brief' => 'conference bookings coming up or one booking, event enquiries, gym memberships ending, one gym member, gym classes and slots, and gym enquiries',
             'core' => ['events_pipeline', 'gym_watch'], 'tools' => ['events_pipeline', 'gym_watch']],
         'revenue' => ['label' => 'Revenue & Sales', 'brief' => 'occupancy, ADR, RevPAR, pace against last year, pickup, lead time, unsold nights and where bookings come from; you recommend, you never change prices or deals',
-            'core' => ['room_performance', 'booking_pace'], 'tools' => ['room_performance', 'booking_pace', 'rate_plans_and_deals', 'events_pipeline', 'rate_suggestions', 'lost_demand', 'upsell_finder', 'hotel_report']],
+            'core' => ['room_performance', 'booking_pace'], 'tools' => ['room_performance', 'booking_pace', 'room_rates', 'rate_plans_and_deals', 'events_pipeline', 'rate_suggestions', 'lost_demand', 'upsell_finder', 'hotel_report']],
         'guest_voice' => ['label' => 'Guest voice', 'brief' => 'reviews, guest messages and enquiries waiting, the guest experience, local tips and replies to guests in the hotel\'s voice (as drafts for staff)',
             'core' => ['guest_voice'], 'tools' => ['guest_voice', 'get_booking', 'guest_history', 'search_bookings', 'reply_queue', 'review_insights', 'hotel_info']],
         'system_guide' => ['label' => 'System Guide', 'brief' => 'how to do things in this portal, from the staff guides only',
@@ -1866,7 +2346,7 @@ function rh_ai_maybe_summarise(PDO $db, int $uid, int $conv, array $models): voi
 function rh_ai_lane_words(): array
 {
     return [
-        'front_desk'   => '/\b(book(ing|ings|ed)?|reserv\w*|arriv\w*|depart\w*|check.?(in|out|ins|outs)|in.?house|guests?|stay\w*|nights?|free|availab\w*|vacan\w*|quote|room types?|assign\w*|due out|leav\w*|walk.?in|extend|cancel\w*)\b/u',
+        'front_desk'   => '/\b(book(ing|ings|ed)?|reserv\w*|arriv\w*|depart\w*|check.?(in|out|ins|outs)|in.?house|guests?|stay\w*|nights?|free|availab\w*|vacan\w*|quote|room types?|assign\w*|due out|leav\w*|walk.?in|extend|cancel\w*|child(ren)?|kids?|infants?|single|double|triple|occupancy (rates?|prices?)|price list|tariffs?)\b/u',
         'housekeeping' => '/\b(housekeep\w*|clean\w*|dirty|maintenance|repair\w*|broken|fix\w*|room status|status of room|not ready|off sale|out of order|inspect\w*|jobs?|tasks?)\b/u',
         'restaurant'   => '/\b(restaurant|bar|kitchen|till|food|drinks?|meals?|orders?|top sell\w*|voids?|tickets?|coffee|breakfast|lunch|dinner|dishes|tabs?|tables?|room service|receipts?)\b/u',
         'money'        => '/\b(owe[sd]?|owing|balances?|unpaid|paid|payments?|refunds?|discounts?|money|cash|debts?|invoices?|losing|leaks?|revenue|takings|spend\w*)\b/u',
@@ -2094,8 +2574,11 @@ function rh_ai_flatten_tool_turns(array $msgs): array
         }
         $flush();
         if ($role === 'assistant' && !empty($m['tool_calls'])) {
-            $names = implode(', ', array_map(static fn($c) => (string)($c['name'] ?? ''), (array)$m['tool_calls']));
-            $out[] = ['role' => 'assistant', 'content' => trim((string)($m['content'] ?? '') . ' (Looked up: ' . $names . '.)')];
+            // Only what the model itself said goes on; no "(Looked up: ...)" stand-in a model could copy as its answer
+            // (owner fault 2026-10-28). The results follow as plain data in the next turn.
+            if (trim((string)($m['content'] ?? '')) !== '') {
+                $out[] = ['role' => 'assistant', 'content' => trim((string)$m['content'])];
+            }
             continue;
         }
         $push(['role' => $role, 'content' => (string)($m['content'] ?? '')]);
@@ -2276,7 +2759,28 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
         return $finish((string)$hit['reply_tok'], 'cache', ['links' => (array)($hit['links'] ?? []), 'chips' => (array)($hit['chips'] ?? [])]);
     }
     // 1f. Exact lookups straight from a read tool, and follow-ups of them ("and tomorrow?")
-    $intent = $contradict ? null : (rh_ai_local_intent($tok) ?? rh_ai_followup_local($tok, $lastLocal));
+    $intent = $contradict ? null : rh_ai_local_intent($tok);
+    // 1f+. Room questions that need the room type names (owner 2026-10-28): one type's rates locally, and a party with
+    // dates always priced by quote_stay here (the exact reason and real alternatives when it does not fit), zero tokens.
+    if (!$contradict && $intent === null && ($room = rh_ai_room_intent($db, $tok)) !== null) {
+        if ($room[0] === 'room_rates') {
+            $intent = $room;
+        } elseif (!rh_ai_module_on('bookings')) {
+            $help = rh_ai_can_help_line($user);
+            return $finish(rh_ai_not_offered_line('quote_stay') . ($help !== '' ? "\n\n" . $help : ''), 'declined', ['chips' => ['What can I do here?']]);
+        } else {
+            rh_ai_step_set($db, $uid, rh_ai_tool_step('quote_stay'));
+            $sl = rh_ai_stay_local($db, $user, $conv, $room[0], $room[1]);
+            if ($sl !== null) {
+                $chips = rh_ai_followup_chips($user, $sl['tools']);
+                rh_ai_cache_put($db, $answerKey, $uid, ['reply_tok' => $sl['text'], 'links' => $sl['links'], 'chips' => $chips], RH_AI_ANSWER_CACHE_SECONDS);
+                return $finish($sl['text'], 'local', ['links' => $sl['links'], 'chips' => $chips]);
+            }
+        }
+    }
+    if (!$contradict && $intent === null) {
+        $intent = rh_ai_followup_local($tok, $lastLocal);
+    }
     if ($intent !== null) {
         [$tool, $view] = $intent;
         if (!rh_ai_tool_allowed($user, $tool)) {
@@ -2364,7 +2868,8 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
     // What a reply may draw figures from: this turn's tool results, the question, the context sent, the chat so far.
     $budget = ['rounds' => RH_AI_MAX_TOOL_ROUNDS, 'tokens_cap' => rh_ai_turn_token_cap(), 'in' => 0, 'out' => 0, 'cost' => 0.0, 'ms' => 0,
         'evidence' => $frozen . "\n" . $userBlock . "\n" . $hist['summary'] . "\n" . implode("\n", array_column($hist['messages'], 'content')) . "\n" . $tok,
-        'links' => [], 'tools_used' => [], 'cards' => []];
+        'links' => [], 'tools_used' => [], 'cards' => [], 'results' => []];
+    $emptyAsked = false;
     $seenCalls = [];   // lookup key => the result it gave (a repeated call gets it again, not run again)
     $seenResults = []; // results already in hand (a round that adds none of new ends the lookups)
     $prefetched = false;
@@ -2522,6 +3027,9 @@ RECHECK: the person says the last answer was wrong. A search that found nothing 
                     $json = $tr['json'];
                     $view = $tr['view']; // the model gets the summary; the full result stays here as evidence
                     $budget['tools_used'][] = $name;
+                    if ($tr['ok']) {
+                        $budget['results'][] = [$name, (array)$tr['result'], (array)$c['args']]; // an answer can be built from these if the model gives none
+                    }
                     foreach ($tr['links'] as $l) {
                         if (count($budget['links']) < 3 && !in_array($l, $budget['links'], true)) {
                             $budget['links'][] = $l;
@@ -2574,6 +3082,28 @@ RECHECK: the person says the last answer was wrong. A search that found nothing 
             continue;
         }
         $text = trim(str_replace('[[ESCALATE]]', '', (string)preg_replace('/\[\[NEED:[a-z_]*\]\]/', '', $text)));
+        // An empty reply, or only a "(Looked up: ...)" stand-in, after lookups (owner fault 2026-10-28): asked once more
+        // with the results as plain data, then built from the results themselves. Never a placeholder.
+        $text = trim((string)preg_replace('/\(\s*looked up:[^)]*\)\.?/iu', '', $text));
+        if ($text === '' && $budget['tools_used'] && !$budget['cards']) {
+            // (a call with no tools that still asks for lookups would only ask again: built from the results at once)
+            if (!$emptyAsked && !$r['tool_calls'] && ($budget['in'] + $budget['out']) < $budget['tokens_cap']) {
+                $emptyAsked = true;
+                $budget['rounds'] = 0; // no tools on the next call: the lookups go as plain data
+                $messages[] = ['role' => 'user', 'content' => 'CHECK BEFORE ANSWERING: your reply was empty. Answer the question now in plain sentences from the lookup results above, figures exactly as given. If they do not answer it, say what they do show and the next step.'];
+                continue;
+            }
+            $text = rh_ai_answer_from_results($budget['results']);
+            if ($text !== '') { // built here from the lookups themselves: every figure is the tool's own
+                [$absFacts, $absLine] = rh_ai_absence_conflicts($db, $user, $text); // the absence guard still applies
+                $final = $absFacts ? rh_ai_absence_correct($text, $absFacts, $absLine) : $text;
+                break;
+            }
+            // Nothing to build from: say so plainly, never a "none" (a filtered search's 0 is not a checked total)
+            $final = "I looked that up but couldn't put the answer together. Please ask again a little more narrowly"
+                . ($budget['links'] ? ', or open the screen below.' : '.');
+            break;
+        }
         // Never guesses: every figure, reference, date or name token must come from this turn's data.
         $bad = $text !== '' ? rh_ai_reply_unsupported($text, $budget['evidence'] . "\n" . $volatile) : [];
         if ($bad && !$regenerated && ($budget['in'] + $budget['out']) < $budget['tokens_cap']) {

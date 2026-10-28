@@ -176,17 +176,42 @@ function rh_ai_prefs_set(PDO $db, int $uid, array $p): array
     return $p;
 }
 
+/**
+ * The hotel's VAT and tourism levy rule in plain words (the prompt and the price list say the same). Matches
+ * rh_stay_totals (includes/pricing.php, owner 2026-10-24): a room price is ALWAYS all-in, VAT and levy are taken out of
+ * it in every vat_pricing_mode, nothing is added on top. Arguments are for tests; null = read from Settings.
+ */
+function rh_ai_tax_text(?float $vatPct = null, ?float $levyPct = null): string
+{
+    if ($vatPct === null) {
+        $vatPct = (function_exists('vat_mode') ? vat_mode() : 'off') === 'off' ? 0.0 : (function_exists('getSetting') ? (float)getSetting('vat_rate', 0) : 0.0);
+    }
+    if ($levyPct === null) {
+        $levyOn = function_exists('getSetting') && in_array(getSetting('tourism_levy_enabled', '0'), ['1', 1, true, 'true', 'on'], true);
+        $levyPct = $levyOn ? max(0.0, (float)getSetting('tourism_levy_percent', 0)) : 0.0;
+    }
+    $pct = static fn(float $p): string => rtrim(rtrim(number_format($p, 2, '.', ''), '0'), '.') . '%';
+    $vat = $vatPct > 0 ? 'VAT ' . $pct($vatPct) : '';
+    $levy = $levyPct > 0 ? 'the ' . $pct($levyPct) . ' tourism levy' : '';
+    if ($vat !== '' && $levy !== '') {
+        return 'Room prices include ' . $vat . ' and ' . $levy . '; nothing is added on top.';
+    }
+    if ($vat !== '') {
+        return 'Room prices include ' . $vat . '; nothing is added on top. There is no tourism levy.';
+    }
+    if ($levy !== '') {
+        return 'Room prices include ' . $levy . '; nothing is added on top. VAT is not charged.';
+    }
+    return 'VAT is not charged and there is no tourism levy; room prices are the full price.';
+}
+
 /** Part 1: role brief, rules and the hotel profile. No date, no person, no live figures. */
 function rh_ai_context_frozen(PDO $db): string
 {
     $hotel = function_exists('getSetting') ? (string)getSetting('site_name', 'Hotel') : 'the hotel';
     $cur = rh_ai_currency();
-    $vatMode = function_exists('vat_mode') ? vat_mode() : 'off';
-    $vatRate = function_exists('getSetting') ? (float)getSetting('vat_rate', 0) : 0;
-    $vatText = $vatMode === 'off' ? 'VAT is not charged.' : ('VAT ' . rtrim(rtrim(number_format($vatRate, 2, '.', ''), '0'), '.') . '% ' . ($vatMode === 'inclusive' ? 'is included in room prices.' : 'is added on top of room prices.'));
-    $levyOn = function_exists('getSetting') && in_array(getSetting('tourism_levy_enabled', '0'), ['1', 1, true, 'true', 'on'], true);
-    $levyText = $levyOn ? ('Tourism levy ' . (float)getSetting('tourism_levy_percent', 0) . '% (outside the VAT base).') : 'No tourism levy.';
-    $ci = function_exists('getSetting') ? (string)getSetting('check_in_time', '') : '';
+    $taxText = rh_ai_tax_text();
+    $ci =function_exists('getSetting') ? (string)getSetting('check_in_time', '') : '';
     $co = function_exists('getSetting') ? (string)getSetting('check_out_time', '') : '';
     $cancel = function_exists('getCancellationRefundModeLabel') ? getCancellationRefundModeLabel() : '';
 
@@ -236,7 +261,7 @@ function rh_ai_context_frozen(PDO $db): string
         '- Nobody can take payments or refunds, or change prices, rates, deals, stock, recipes, till orders, invoices, credit notes, closes, settings or users here: say so in one line and point to the screen.',
         '- How-to questions: answer from how_to / summarise_guide text only, never add steps. There is no link to MRA or any tax authority; never say anything is reported or submitted.',
         mb_strtoupper($biz['noun']),
-        "- $hotel." . ($hasRooms ? " $vatText $levyText Check-in from " . ($ci !== '' ? $ci : 'the set time') . ', check-out by ' . ($co !== '' ? $co : 'the set time') . '.' : ''),
+        "- $hotel." . ($hasRooms ? " $taxText Check-in from " . ($ci !== '' ? $ci : 'the set time') . ', check-out by ' . ($co !== '' ? $co : 'the set time') . '.' : ''),
         '- ' . ucfirst(rh_ai_and_list($facts)) . ': hotel_info. A time it says is not set is not set.',
         $hasRooms && $cancel !== '' ? '- A cancelled booking: ' . $cancel . '. Refunds are done by staff on screen.' : null,
         $hasRooms ? '- Room types: ' . ($rooms ? implode('; ', $rooms) : 'none set up') . '.' : null,

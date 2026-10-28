@@ -53,6 +53,8 @@
         {"id": "ground_gym_members", "q": "how many gym members", "daily": true, "expect": {"route": ["local"], "figure_from": {"tool": "gym_watch", "path": "members.all"}}},
         {"id": "ground_stock_items", "q": "How many stock items do we have?", "model": true, "expect": {"route_not": ["declined"], "no_card": true, "figure_from": {"tool": "inventory_watch", "path": "items_on_file"}}},
         {"id": "ground_purchase_orders_waiting", "q": "How many purchase orders are waiting for delivery?", "model": true, "expect": {"route_not": ["declined"], "no_card": true, "figure_from": {"tool": "inventory_watch", "path": "purchase_orders_waiting"}}},
-        {"id": "ground_conference_upcoming", "q": "How many conference bookings are coming up in the next 30 days?", "model": true, "expect": {"route_not": ["declined"], "no_card": true, "modules": ["conference"], "figure_from": {"tool": "events_pipeline", "path": "conference.upcoming_total"}}}
+        {"id": "ground_conference_upcoming", "q": "How many conference bookings are coming up in the next 30 days?", "model": true, "expect": {"route_not": ["declined"], "no_card": true, "modules": ["conference"], "figure_from": {"tool": "events_pipeline", "path": "conference.upcoming_total"}}},
+        {"id": "room_price_list", "q": "What are the single and double occupancy rates for each room?", "expect": {"route": ["local"], "modules": ["bookings"], "not_contains": ["Looked up"]}},
+        {"id": "child_charge", "q": "How much do you charge for children?", "expect": {"route": ["local"], "modules": ["bookings"], "not_contains": ["Looked up"]}}
     ]
 }

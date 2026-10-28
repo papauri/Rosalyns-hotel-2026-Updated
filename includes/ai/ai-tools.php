@@ -105,6 +105,11 @@ function rh_ai_tool_registry(): array
             'schema' => ['properties' => ['room_type' => ['type' => 'string', 'maxLength' => 80, 'description' => 'Room type name or id'], 'check_in' => $date, 'check_out' => $date, 'adults' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 40], 'children' => ['type' => 'integer', 'minimum' => 0, 'maximum' => 20], 'rooms' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 10], 'occupancy' => ['type' => 'string', 'enum' => ['single', 'double', 'triple']]], 'required' => ['room_type', 'check_in', 'check_out', 'adults']],
             'perm' => ['create_booking'], 'module' => ['bookings'], 'cache' => 60, 'handler' => 'rh_ai_t_quote_stay',
         ],
+        'room_rates' => [
+            'description' => 'The room price list: each room type\'s nightly price and its enabled single / double / triple occupancy prices, most guests, whether children may stay, the child charge, and whether prices include VAT and levy. Read only. One stay\'s exact price: quote_stay.',
+            'schema' => ['properties' => ['room_type' => ['type' => 'string', 'maxLength' => 80, 'description' => 'Optional: one room type name or id']]],
+            'perm' => ['create_booking'], 'module' => ['bookings'], 'cache' => 60, 'handler' => 'rh_ai_t_room_rates', 'step' => 'Reading the room price list',
+        ],
         'arrivals_departures' => [
             'description' => 'Arrivals and departures for a day (default today), as on the Dashboard: who is still to arrive, who has no room assigned, who is due out and what they still owe.',
             'schema' => ['properties' => ['date' => $date]],
@@ -434,7 +439,7 @@ function rh_ai_paged_tools(): array
 {
     return ['search_bookings', 'arrivals_departures', 'in_house', 'room_board', 'balances_due', 'guest_history', 'money_leaks', 'inventory_watch',
         'work_queues', 'events_pipeline', 'guest_voice', 'reply_queue', 'kitchen_tickets', 'restaurant_sales', 'upsell_finder', 'who_is_online', 'check_availability', 'hotel_info',
-        'order_status', 'gym_watch'];
+        'order_status', 'gym_watch', 'room_rates'];
 }
 
 /** Provider-ready tool list [{name, description, schema}] for this person. */
@@ -820,18 +825,21 @@ function rh_ai_t_check_availability(PDO $db, array $user, array $a): array
     } else {
         $types = $db->query("SELECT * FROM rooms WHERE is_active = 1 ORDER BY display_order, id")->fetchAll(PDO::FETCH_ASSOC);
     }
+    require_once dirname(__DIR__, 2) . '/includes/pricing.php';
     $rows = [];
     $anyFree = false;
     foreach ($types as $t) {
         $av = checkRoomAvailability((int)$t['id'], $a['check_in'], $a['check_out'], null, $children, 1); // one room per type checked
-        $fits = (int)$t['max_guests'] >= ($adults + $children);
-        $anyFree = $anyFree || (!empty($av['available']) && $fits);
+        $rule = rh_child_rule($t);
+        $fit = rh_ai_party_fit((string)$t['name'], (int)$t['max_guests'], !empty(resolveOccupancyPolicy($t, null)['children_allowed']), $rule['max'] !== null ? (int)$rule['max'] : null, $adults, $children, 1);
+        $anyFree = $anyFree || (!empty($av['available']) && $fit === null);
         $rows[] = [
             'room_type_id' => (int)$t['id'], 'room_type' => $t['name'],
             'available' => !empty($av['available']),
             'rooms_left' => isset($av['remaining_rooms']) ? (int)$av['remaining_rooms'] : null,
             'max_guests' => (int)$t['max_guests'],
-            'fits_party_in_one_room' => $fits,
+            'fits_party_in_one_room' => $fit === null,
+            'does_not_fit' => $fit['text'] ?? null,
             'reason' => empty($av['available']) ? (string)($av['error'] ?? 'Not available') : null,
         ];
     }
@@ -1014,6 +1022,157 @@ function rh_ai_room_alternatives(PDO $db, array $user, ?int $askedTypeId, string
 }
 
 /**
+ * Why a party cannot stay in a room type, or null when it fits (owner fault 2026-10-28: a party too big for the room was
+ * told "does not accommodate children"). Checked in this order: children not allowed (or 0 children per room), more
+ * guests than the rooms hold, more children than the rooms take. $cap = guests one room holds; $qty = rooms asked.
+ * @return array{reason:string,text:string}|null
+ */
+function rh_ai_party_fit(string $name, int $cap, bool $childrenAllowed, ?int $maxChildren, int $adults, int $children, int $qty = 1): ?array
+{
+    $qty = max(1, $qty);
+    $cap = max(1, $cap);
+    $children = max(0, $children);
+    $party = max(0, $adults) + $children;
+    $guests = static fn(int $n): string => $n . ' guest' . ($n === 1 ? '' : 's');
+    $kids = static fn(int $n): string => $n . ' child' . ($n === 1 ? '' : 'ren');
+    if ($children > 0 && (!$childrenAllowed || $maxChildren === 0)) {
+        return ['reason' => 'children_not_allowed', 'text' => $name . ' is adults only: children cannot stay in it.'];
+    }
+    if ($party > $cap * $qty) {
+        return ['reason' => 'over_max_guests', 'text' => $name . ' holds at most ' . $guests($cap) . ' per room' . ($qty > 1 ? ' (' . $guests($cap * $qty) . ' in ' . $qty . ' rooms)' : '')
+            . '; this party is ' . $guests($party) . '.'];
+    }
+    if ($maxChildren !== null && $children > $maxChildren * $qty) {
+        return ['reason' => 'over_max_children', 'text' => $name . ' takes at most ' . $kids($maxChildren) . ' per room; this party has ' . $kids($children) . '.'];
+    }
+    return null;
+}
+
+/** One occupancy tier's nightly price for a room type row, read as Create Booking reads it (a tier with no price of its own uses the nightly price). */
+function rh_ai_tier_price(array $row, string $occ): float
+{
+    $col = 'price_' . $occ . '_occupancy';
+    return in_array($occ, ['single', 'double', 'triple'], true) && !empty($row[$col]) ? (float)$row[$col] : (float)$row['price_per_night'];
+}
+
+/**
+ * A room type's child charge in plain words, from the rule Create Booking prices with (rh_child_rule):
+ * "First 2 children free, then each child pays 50% of the room rate a night (at most 3 per room)."
+ */
+function rh_ai_child_rule_text(array $rule, bool $childrenAllowed, string $cur): string
+{
+    if (!$childrenAllowed || ($rule['max'] !== null && (int)$rule['max'] === 0)) {
+        return 'Adults only: children cannot stay in this room type.';
+    }
+    $free = (int)$rule['free'];
+    $charge = '';
+    if ($rule['mode'] === 'fixed') {
+        if ((float)$rule['amount'] > BALANCE_TOLERANCE) {
+            $charge = 'a fixed ' . ($cur !== '' ? $cur . ' ' : '') . number_format((float)$rule['amount'], 2) . ' a night';
+        }
+    } elseif ((float)$rule['percent'] > 0) {
+        $charge = rtrim(rtrim(number_format((float)$rule['percent'], 2, '.', ''), '0'), '.') . '% of the room rate a night';
+    }
+    if ($charge === '') {
+        $text = 'Children stay free';
+    } elseif ($free > 0) {
+        $text = 'First ' . $free . ' child' . ($free === 1 ? '' : 'ren') . ' free, then each child pays ' . $charge;
+    } else {
+        $text = 'Each child pays ' . $charge;
+    }
+    if ($rule['max'] !== null) {
+        $text .= ' (at most ' . (int)$rule['max'] . ' child' . ((int)$rule['max'] === 1 ? '' : 'ren') . ' per room)';
+    }
+    return $text . '.';
+}
+
+/**
+ * The room price list (owner question 2026-10-28: "occupancy rates for the rooms and charges for children"): per active
+ * room type the nightly price, each ENABLED occupancy price (resolveOccupancyPolicy, as Create Booking), most guests (the
+ * same capacity quote_stay uses), whether children may stay, the child charge (rh_child_rule) and, once, the VAT / levy
+ * rule and how many active rate plans can change a price. Joined (family) rooms show their combination rate. Read only,
+ * nothing hard-coded; at most RH_AI_TOOL_ROWS types read, with the checked total.
+ */
+function rh_ai_t_room_rates(PDO $db, array $user, array $a): array
+{
+    require_once dirname(__DIR__, 2) . '/includes/pricing.php';
+    $cur = rh_ai_currency();
+    $one = trim((string)($a['room_type'] ?? ''));
+    $where = 'r.is_active = 1';
+    $params = [];
+    if ($one !== '') {
+        $t = rh_ai_find_room_type($db, $one);
+        if (!$t) {
+            $names = $db->query("SELECT name FROM rooms WHERE is_active = 1 ORDER BY display_order, id LIMIT " . RH_AI_TOOL_ROWS)->fetchAll(PDO::FETCH_COLUMN);
+            return ['error' => 'No room type matches "' . $one . '".', 'room_types_here' => $names];
+        }
+        $where .= ' AND r.id = ?';
+        $params[] = (int)$t['id'];
+    }
+    $total = (int)$db->query("SELECT COUNT(*) FROM rooms WHERE is_active = 1")->fetchColumn();
+    $st = $db->prepare("SELECT r.*, GREATEST(r.max_guests,
+                            COALESCE((SELECT MAX(ir.max_guests_override) FROM individual_rooms ir WHERE ir.room_type_id = r.id AND ir.is_active = 1), 0),
+                            COALESCE((SELECT MAX(rc.max_guests_combined) FROM room_combinations rc WHERE rc.combined_room_type_id = r.id AND rc.is_active = 1), 0)) AS max_guests,
+                            (SELECT COUNT(*) FROM room_combinations rc2 WHERE rc2.combined_room_type_id = r.id AND rc2.is_active = 1) AS joined_pairs,
+                            (SELECT MIN(COALESCE(rc3.price_override, r.price_per_night)) FROM room_combinations rc3 WHERE rc3.combined_room_type_id = r.id AND rc3.is_active = 1) AS joined_from,
+                            (SELECT MAX(COALESCE(rc4.price_override, r.price_per_night)) FROM room_combinations rc4 WHERE rc4.combined_room_type_id = r.id AND rc4.is_active = 1) AS joined_to
+                        FROM rooms r WHERE $where ORDER BY r.display_order, r.id LIMIT " . RH_AI_TOOL_ROWS);
+    $st->execute($params);
+    $list = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $policy = resolveOccupancyPolicy($r, null);
+        $rule = rh_child_rule($r);
+        $allowed = !empty($policy['children_allowed']);
+        $row = ['room_type' => (string)$r['name'], 'price_per_night' => rh_ai_money((float)$r['price_per_night'])];
+        if ((int)$r['joined_pairs'] > 0) {
+            $from = rh_ai_money((float)$r['joined_from']);
+            $to = rh_ai_money((float)$r['joined_to']);
+            $row['price_per_night'] = $from;
+            if ($to - $from > BALANCE_TOLERANCE) {
+                $row['price_per_night_up_to'] = $to;
+            }
+            $row['joined_room'] = 'two joined rooms sold as one family room, one price whoever stays';
+        } else {
+            $occ = [];
+            foreach (['single', 'double', 'triple'] as $o) {
+                if (!empty($policy[$o . '_enabled'])) {
+                    $occ[$o] = rh_ai_money(rh_ai_tier_price($r, $o));
+                }
+            }
+            $row['occupancy_prices'] = $occ; // only the tiers that are switched on (a tier switched off is not offered)
+        }
+        $row['max_guests'] = (int)$r['max_guests'];
+        $row['children_allowed'] = $allowed && !($rule['max'] !== null && (int)$rule['max'] === 0);
+        if ($row['children_allowed'] && $rule['max'] !== null) {
+            $row['max_children'] = (int)$rule['max'];
+        }
+        $row['child_charge'] = rh_ai_child_rule_text($rule, $allowed, $cur);
+        if (trim((string)($r['bed_type'] ?? '')) !== '') {
+            $row['bed_type'] = (string)$r['bed_type'];
+        }
+        if ((float)($r['size_sqm'] ?? 0) > 0) {
+            $row['size_sqm'] = (float)$r['size_sqm'];
+        }
+        $list[] = $row;
+    }
+    try {
+        $plans = (int)$db->query("SELECT COUNT(*) FROM rate_plans WHERE is_active = 1")->fetchColumn();
+    } catch (Throwable $e) {
+        $plans = null;
+    }
+    // Staff read these lines as they are (local answers): plain words, never a tool name.
+    $exact = 'Give me the dates and who is staying for the exact total.';
+    return [
+        'currency' => $cur, 'room_types' => $list, 'room_types_in_all' => $total,
+        'prices_include' => rh_ai_tax_text(),
+        'rate_plans' => $plans === null ? 'Rate plans could not be checked just now. ' . $exact
+            : ($plans > 0 ? $plans . ' active rate plan' . ($plans === 1 ? '' : 's') . ' can change these prices on some dates. ' . $exact
+                : 'No rate plans are active, so these are the prices. ' . $exact),
+        'link' => 'room-management.php', 'link_label' => 'Open Room Management',
+    ];
+}
+
+/**
  * Price a stay with the same helpers, in the same order, as admin/create-booking.php (one room line):
  * occupancy price (joined-room combination rate when the type is a joined pair) -> applyDynamicPricing
  * -> x nights + rh_child_supplement for the children seated in that room -> rh_stay_totals('price').
@@ -1107,6 +1266,12 @@ function rh_ai_quote_stay_run(PDO $db, array $user, array $a): array
         return ['error' => 'Occupancy "' . $occ . '" is not enabled for ' . $r['name'] . '.'];
     }
     $rule = rh_child_rule_for($db, $rid, null);
+    // Why the party does not fit, said exactly (a party too big is never told "no children"): then other types, joined rooms
+    $fit = rh_ai_party_fit((string)$r['name'], (int)$r['max_guests'], !empty($policy['children_allowed']), $rule['max'] !== null ? (int)$rule['max'] : null, $adults, $children, $qty);
+    if ($fit !== null) {
+        return ['error' => $fit['text'], 'does_not_fit' => $fit['reason'], 'room_type_id' => $rid, 'room_type' => (string)$r['name'], 'max_guests' => (int)$r['max_guests'],
+            'adults' => $adults, 'children' => $children, 'rooms' => $qty, 'check_in' => $ci, 'check_out' => $co, 'nights' => $nights, '_alt' => $rid];
+    }
     $rows = [];
     for ($q = 0; $q < $qty; $q++) {
         $rows[] = ['max_children' => $rule['max'], 'capacity' => max(1, (int)$r['max_guests']), 'children_allowed' => !empty($policy['children_allowed']),
@@ -1155,12 +1320,7 @@ function rh_ai_quote_stay_run(PDO $db, array $user, array $a): array
             $cr = ($queue[$i]['price_override'] !== null && $queue[$i]['price_override'] !== '') ? (float)$queue[$i]['price_override'] : $base_price;
             $row['price_per_night'] = $row['price_single_occupancy'] = $row['price_double_occupancy'] = $row['price_triple_occupancy'] = $cr;
         }
-        $price = match ($occ) {
-            'single' => !empty($row['price_single_occupancy']) ? (float)$row['price_single_occupancy'] : (float)$row['price_per_night'],
-            'double' => !empty($row['price_double_occupancy']) ? (float)$row['price_double_occupancy'] : (float)$row['price_per_night'],
-            'triple' => !empty($row['price_triple_occupancy']) ? (float)$row['price_triple_occupancy'] : (float)$row['price_per_night'],
-            default  => (float)$row['price_per_night'],
-        };
+        $price = rh_ai_tier_price($row, $occ);
         $dyn = applyDynamicPricing($db, $rid, $ci, $co, $nights, $price);
         $price = $dyn['final_price'];
         $seated = (int)($split['rows'][$i]['children'] ?? 0);

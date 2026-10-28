@@ -2467,7 +2467,8 @@ $lt = ['front_desk' => [], 'money' => [], 'revenue' => [], 'housekeeping' => [],
 check(rh_ai_lanes_for($lt, 'how can I lift next month\'s occupancy?') === ['revenue'] && rh_ai_lanes_for($lt, 'Is the Deluxe Room free next Friday?') === ['front_desk'] && rh_ai_lanes_for(['front_desk' => []], 'who still owes money?') === [], 'questions are sorted into the departments they are about, among the person\'s own', json_encode(rh_ai_lanes_for($lt, 'how can I lift next month\'s occupancy?')));
 check(rh_ai_change_cards('who is in house?') === [] && in_array('create_booking', rh_ai_change_cards('book a deluxe room for [GUEST_1]'), true) && in_array('check_out', rh_ai_change_cards('check out [GUEST_2]'), true), 'cards are offered only when the question asks for that change');
 $fl = rh_ai_flatten_tool_turns([['role' => 'user', 'content' => 'q'], ['role' => 'assistant', 'content' => '', 'tool_calls' => [['id' => 't', 'name' => 'in_house', 'args' => []]]], ['role' => 'tool', 'tool_call_id' => 't', 'name' => 'in_house', 'content' => '{"in_house":2}']]);
-check(count($fl) === 3 && empty($fl[1]['tool_calls']) && strpos($fl[2]['content'], 'in_house: {"in_house":2}') !== false, 'a call without tools carries earlier lookups as plain data (no tool turn without its tool)');
+check(count($fl) === 1 && $fl[0]['role'] === 'user' && empty($fl[0]['tool_calls']) && strpos($fl[0]['content'], 'in_house: {"in_house":2}') !== false && strpos(json_encode($fl), 'Looked up') === false,
+    'a call without tools carries earlier lookups as plain data (no tool turn without its tool, no "(Looked up: ...)" stand-in a model could copy)', json_encode($fl));
 
 if (!$chatReady || !rh_ai_memory_ready($pdo)) {
     skip('speed and cost database checks (Assistant migrations not run here)');
@@ -2984,6 +2985,109 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
         $kbWant = rh_ai_guide_links($pdo, $admX, rh_ai_scrub_outbound($pdo, (int)$r['conversation_id'], 'what is the late checkout fee for the honeymoon package?'));
         check($r['ok'] && $chipsOk && !in_array('Give me the tea', (array)$r['chips'], true) && (!$kbWant || array_intersect(array_column($kbWant, 'url'), array_column((array)$r['links'], 'url'))),
             '"I can\'t find...": starter questions for this screen as chips and the best guide sections as links', json_encode([$r['chips'], $r['links']]));
+
+        // ── Room price list, child charge, a party with dates (owner question 2026-10-28) ──
+        $insR = $pdo->prepare("INSERT INTO rooms (name, slug, description, price_per_night, price_single_occupancy, price_double_occupancy, price_triple_occupancy, single_occupancy_enabled, double_occupancy_enabled, triple_occupancy_enabled,
+                               max_guests, children_allowed, max_children, child_charge_mode, child_price_multiplier, child_charge_amount, free_children, total_rooms, rooms_available, display_order, is_active)
+                               VALUES (?, ?, 'AITest', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 1, ?, 1)");
+        $insR->execute(['AITest Rates Suite', 'aitest-rates-suite', 120000, 100000, 120000, 140000, 1, 1, 0, 3, 1, null, 'percent', 50, null, 1, -9]);
+        $insR->execute(['AITest Rates Lodge', 'aitest-rates-lodge', 150000, 130000, 150000, 160000, 1, 1, 1, 4, 1, 2, 'fixed', 0, 15000, 0, -8]);
+        $insR->execute(['AITest Rates Adults', 'aitest-rates-adults', 90000, null, null, null, 1, 1, 0, 2, 0, null, 'percent', 50, null, 0, -7]);
+        $insR->execute(['AITest Rates Small', 'aitest-rates-small', 80000, null, null, null, 1, 1, 0, 2, 1, null, 'percent', 0, null, 0, -6]);
+        $cur = rh_ai_currency();
+        $rl = rh_ai_t_room_rates($pdo, $admX, []);
+        $byName = [];
+        foreach ((array)($rl['room_types'] ?? []) as $x) {
+            $byName[$x['room_type']] = $x;
+        }
+        $sA = $byName['AITest Rates Suite'] ?? [];
+        $sB = $byName['AITest Rates Lodge'] ?? [];
+        $sC = $byName['AITest Rates Adults'] ?? [];
+        $dbA = $pdo->query("SELECT price_single_occupancy, price_double_occupancy FROM rooms WHERE slug = 'aitest-rates-suite'")->fetch(PDO::FETCH_ASSOC);
+        check(($sA['occupancy_prices'] ?? null) === ['single' => (float)$dbA['price_single_occupancy'], 'double' => (float)$dbA['price_double_occupancy']] && ($sB['occupancy_prices']['triple'] ?? null) === 160000.0
+            && (int)($rl['room_types_in_all'] ?? 0) === (int)$pdo->query('SELECT COUNT(*) FROM rooms WHERE is_active = 1')->fetchColumn() && ($rl['prices_include'] ?? '') === rh_ai_tax_text(),
+            'price list: only the ENABLED occupancy prices, read from the database (triple switched off is not offered), the checked total and the VAT / levy text', json_encode([$sA, $sB['occupancy_prices'] ?? null, $rl['prices_include'] ?? null]));
+        check(($sA['child_charge'] ?? '') === 'First 1 child free, then each child pays 50% of the room rate a night.'
+            && ($sB['child_charge'] ?? '') === 'Each child pays a fixed ' . ($cur !== '' ? $cur . ' ' : '') . '15,000.00 a night (at most 2 children per room).'
+            && ($sC['child_charge'] ?? '') === 'Adults only: children cannot stay in this room type.' && ($sC['children_allowed'] ?? null) === false
+            && rh_ai_child_rule_text(['mode' => 'percent', 'percent' => 0, 'amount' => 0, 'free' => 0, 'max' => null], true, 'MWK') === 'Children stay free.'
+            && rh_ai_child_rule_text(['mode' => 'fixed', 'percent' => 50, 'amount' => 5000, 'free' => 2, 'max' => null], true, 'MWK') === 'First 2 children free, then each child pays a fixed MWK 5,000.00 a night.',
+            'child charge in plain words from the Create Booking rule: percent with free children, fixed with a per-room limit, adults only, free', json_encode([$sA['child_charge'] ?? '', $sB['child_charge'] ?? '', $sC['child_charge'] ?? '']));
+        $r = $turnX('What are the single and double occupancy rates for each room?');
+        check($r['route'] === 'local' && !$GLOBALS['ai2_calls'] && strpos($r['reply'], 'Room prices') !== false && strpos($r['reply'], 'AITest Rates Suite:** single ' . rh_ai_fmt_cur($cur, 100000) . ' · double ' . rh_ai_fmt_cur($cur, 120000) . ' a night') !== false
+            && strpos($r['reply'], 'Looked up') === false, 'single / double occupancy rates: the price list, locally (0 tokens), enabled tiers only', $r['reply']);
+        $ratesReplies = [$r['reply']];
+        $r = $turnX('How much do you charge for children?');
+        $ratesReplies[] = $r['reply'];
+        check($r['route'] === 'local' && !$GLOBALS['ai2_calls'] && strpos($r['reply'], 'AITest Rates Lodge:** Each child pays a fixed') !== false && strpos($r['reply'], 'AITest Rates Adults:** Adults only') !== false,
+            'child charge question: each room type\'s rule, locally (0 tokens)', $r['reply']);
+        $r = $turnX('How much is the AITest Rates Suite?');
+        check($r['route'] === 'local' && !$GLOBALS['ai2_calls'] && strpos($r['reply'], '**AITest Rates Suite**') === 0 && strpos($r['reply'], 'triple') === false && strpos($r['reply'], 'up to 3 guests') !== false,
+            'one named room type\'s rates, locally (0 tokens)', $r['reply']);
+        $ratesReplies[] = $r['reply'];
+        // All-in prices (includes/pricing.php, owner 2026-10-24): never "added on top", in every VAT / levy combination
+        $tx = [rh_ai_tax_text(17.5, 1.0), rh_ai_tax_text(17.5, 0.0), rh_ai_tax_text(0.0, 1.0), rh_ai_tax_text(0.0, 0.0)];
+        check($tx[0] === 'Room prices include VAT 17.5% and the 1% tourism levy; nothing is added on top.'
+            && $tx[1] === 'Room prices include VAT 17.5%; nothing is added on top. There is no tourism levy.'
+            && $tx[2] === 'Room prices include the 1% tourism levy; nothing is added on top. VAT is not charged.'
+            && $tx[3] === 'VAT is not charged and there is no tourism levy; room prices are the full price.'
+            && !preg_grep('/added on top of|outside the VAT base|exclusive/i', $tx) && strpos(rh_ai_context_frozen($pdo), rh_ai_tax_text()) !== false && rh_ai_context_frozen($pdo) === rh_ai_context_frozen($pdo),
+            'VAT / levy text: all-in with both, VAT only, levy only and none; the same words in the (cache-stable) prompt', json_encode($tx));
+        // Staff-facing local replies never name an internal tool
+        $toolRe = '/\b(' . implode('|', array_map('preg_quote', array_keys(rh_ai_tool_registry()))) . ')\b/';
+        $named = array_values(array_filter($ratesReplies, static fn($x) => preg_match($toolRe, (string)$x)));
+        check(count($ratesReplies) === 3 && $named === [], 'price list, child charge and one room type replies name no internal tool (quote_stay, rate_plans_and_deals ...)', json_encode($named));
+        // Local intents never catch a booking request or a dated quote
+        $dq = date('Y-m-05', strtotime('first day of +7 months'));
+        $mon = date('F Y', strtotime($dq));
+        check(rh_ai_local_intent('book a room for 2 adults from 5 to 7 ' . $mon) === null && rh_ai_room_intent($pdo, 'book the AITest Rates Suite for 2 adults from 5 to 7 ' . $mon) === null
+            && rh_ai_room_intent($pdo, 'please reserve the AITest Rates Suite for 2 adults from 5 to 7 ' . $mon) === null && rh_ai_local_intent('How much for 2 adults in the AITest Rates Suite from 5 to 7 ' . $mon . '?') === null
+            && rh_ai_local_intent('what is our occupancy rate?') === null && rh_ai_local_intent('What is the occupancy rate this week?') === null
+            && (rh_ai_room_intent($pdo, 'How much for 2 adults in the AITest Rates Suite from 5 to 7 ' . $mon . '?')[0] ?? '') === 'quote_stay',
+            'the price-list and child intents never catch "book a room for...", a dated quote or occupancy %; a dated party goes to quote_stay');
+        $bookAsks = ['I want to book the AITest Rates Suite for 2 adults 5 to 7 ' . $mon, "I'd like to book the AITest Rates Suite for 2 adults 5 to 7 " . $mon,
+            'we need to reserve the AITest Rates Suite for 2 adults 5 to 7 ' . $mon, "let's book the AITest Rates Suite for 2 adults 5 to 7 " . $mon];
+        $leaked = array_values(array_filter($bookAsks, static fn($q) => rh_ai_room_intent($pdo, $q) !== null));
+        check($leaked === [] && (rh_ai_room_intent($pdo, 'how much is the AITest Rates Suite for 2 adults 5 to 7 ' . $mon)[0] ?? '') === 'quote_stay'
+            && (rh_ai_room_intent($pdo, 'how much is the AITest Rates Suite for 2 adults 5 to 7 ' . $mon . ', for the bookings team')[0] ?? '') === 'quote_stay',
+            'book / reserve as a verb anywhere ("I want to book", "I\'d like to book", "we need to reserve", "let\'s book") goes to the booking cards; "how much is ... for 2 adults ..." stays a local quote', json_encode($leaked));
+        // A party over max guests: the exact reason (never "no children") and real alternatives, locally
+        $r = $turnX('How much for 2 adults and a 7 year old in the AITest Rates Small from 5 to 7 ' . $mon . '?');
+        check($r['route'] === 'local' && !$GLOBALS['ai2_calls'] && strpos($r['reply'], "This party doesn't fit: AITest Rates Small holds at most 2 guests per room; this party is 3 guests.") !== false
+            && stripos($r['reply'], 'children cannot') === false && stripos($r['reply'], 'adults only') === false
+            && (strpos($r['reply'], 'What would work instead:') !== false || strpos($r['reply'], 'Nothing is free') !== false || strpos($r['reply'], 'could not be checked') !== false),
+            'a party over max guests: "holds at most 2 guests ... this party is 3", then the alternatives, by quote_stay locally', $r['reply']);
+        $qa = rh_ai_t_quote_stay($pdo, $admX, ['room_type' => 'AITest Rates Small', 'check_in' => $dq, 'check_out' => date('Y-m-d', strtotime($dq . ' +2 day')), 'adults' => 2, 'children' => 1]);
+        check(($qa['does_not_fit'] ?? '') === 'over_max_guests' && is_array($qa['alternatives'] ?? null), 'quote_stay: over max guests carries its reason and the alternatives', json_encode($qa));
+        $qc = rh_ai_t_quote_stay($pdo, $admX, ['room_type' => 'AITest Rates Adults', 'check_in' => $dq, 'check_out' => date('Y-m-d', strtotime($dq . ' +2 day')), 'adults' => 1, 'children' => 1]);
+        $qm = rh_ai_t_quote_stay($pdo, $admX, ['room_type' => 'AITest Rates Lodge', 'check_in' => $dq, 'check_out' => date('Y-m-d', strtotime($dq . ' +2 day')), 'adults' => 1, 'children' => 3]);
+        check(($qc['does_not_fit'] ?? '') === 'children_not_allowed' && strpos((string)$qc['error'], 'adults only') !== false && is_array($qc['alternatives'] ?? null)
+            && ($qm['does_not_fit'] ?? '') === 'over_max_children' && strpos((string)$qm['error'], 'at most 2 children per room') !== false,
+            'children not allowed and too many children: each gets its own reason (and alternatives)', json_encode([$qc['error'] ?? '', $qm['error'] ?? '']));
+        // The empty reply / "(Looked up: X.)" stand-in never reaches the person
+        $r = $turnX('Tell me about our room types and deals', [['tool_calls' => [['id' => 'rr1', 'name' => 'room_rates', 'args' => []]]], ['text' => '(Looked up: room_types.)'], ['text' => '']]);
+        $b = array_map(static fn($c) => json_decode((string)$c['body'], true) ?: [], $GLOBALS['ai2_calls']);
+        check($r['ok'] && strpos($r['reply'], 'Looked up') === false && strpos($r['reply'], 'Room prices') !== false && count($b) === 3 && empty($b[2]['tools']) && strpos(json_encode($b[2]), 'your reply was empty') !== false,
+            'an empty reply after lookups is asked once more, then answered from the lookup results (never "(Looked up: ...)")', json_encode([$r['reply'], count($b)]));
+        $r = $turnX('Tell me about our room types and deals', [['tool_calls' => [['id' => 'rr2', 'name' => 'room_rates', 'args' => []]]], ['text' => ''], ['text' => 'The prices are in the room price list.']]);
+        check($r['ok'] && $r['reply'] === 'The prices are in the room price list.', 'an empty reply: the second answer is used when it comes back', $r['reply']);
+        // An empty reply after a search with 0 matches, while bookings exist: never "none" (no bare 0 without the checked total)
+        $absRoom = (int)$pdo->query("SELECT id FROM rooms WHERE slug = 'aitest-rates-suite'")->fetchColumn();
+        $pdo->prepare("INSERT INTO bookings (booking_reference, room_id, guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights, number_of_guests, adult_guests, child_guests, total_amount, total_with_vat, amount_paid, amount_due, status)
+                       VALUES ('AITABS0001', ?, 'AITest Absence Guest', 'abs.assist.test@example.com', '+265 991 000 222', ?, ?, 2, 1, 1, 0, 0, 0, 0, 0, 'confirmed')")
+            ->execute([$absRoom, $dq, date('Y-m-d', strtotime($dq . ' +2 day'))]);
+        $r = $turnX('Find the booking for Zzyzx Qwertyuiop', [['tool_calls' => [['id' => 'ab1', 'name' => 'search_bookings', 'args' => ['query' => 'Zzyzx Qwertyuiop']]]], ['text' => ''], ['text' => '']]);
+        check((int)$pdo->query('SELECT COUNT(*) FROM bookings WHERE deleted_at IS NULL')->fetchColumn() > 0 && $r['ok'] && isset(rh_ai_tools_for_user($admX)['search_bookings'])
+            && !preg_match('/\b(none|no bookings?|nothing found|0)\b/i', $r['reply']) && strpos($r['reply'], 'Total') === false && strpos($r['reply'], "couldn't put the answer together") !== false,
+            'an empty reply after a 0-match search while bookings exist: a plain "could not put the answer together", never "none" or a bare 0', $r['reply']);
+        check(rh_ai_answer_from_results([['in_house', ['in_house' => 0, 'list' => []], []]]) !== '' && rh_ai_answer_from_results([]) === '', 'answers built from results use the lookup itself; none without a lookup');
+        // Room bookings not offered here: "not offered here", for the price list and for a dated quote
+        $GLOBALS['__rh_ai_module_override']['bookings'] = false;
+        $r1 = $turnX('room rates');
+        $r2 = $turnX('How much for 2 adults in the AITest Rates Suite from 5 to 7 ' . $mon . '?');
+        $GLOBALS['__rh_ai_module_override']['bookings'] = true;
+        check($r1['route'] === 'declined' && strpos($r1['reply'], "Room bookings aren't taken here.") === 0 && $r2['route'] === 'declined' && strpos($r2['reply'], "Room bookings aren't taken here.") === 0 && !$GLOBALS['ai2_calls'],
+            'room bookings switched off: the price list and a quote get "not offered here", no tokens', json_encode([$r1['reply'], $r2['reply']]));
     } catch (Throwable $e) {
         bad('alternatives checks threw', $e->getMessage() . ' @' . $e->getLine());
     } finally {
