@@ -4313,6 +4313,18 @@ check(in_array('#guest', $rtA, true) && !preg_grep('/guest_3|\[/', $rtA) && rh_a
     && rh_ai_route_target_ok('room_board') && rh_ai_route_target_ok('card:block_dates') && !rh_ai_route_target_ok('propose_check_out') && !rh_ai_route_target_ok('card:reply_review') && !rh_ai_route_target_ok('payment_add')
     && rh_ai_route_pattern('arrivals tomorrow', ['date' => date('Y-m-d', strtotime('2026-11-01 +1 day'))], '2026-11-01') === ['date' => '{tomorrow}'] && rh_ai_route_pattern('who is Mr Banda', ['query' => 'Banda'], '2026-11-01') === null,
     'router: privacy tokens become their kind (no value kept), features are deterministic, only read lookups or guided cards can be learned, argument patterns are filled from the question or refused');
+// QA LATER 2026-10-30: route examples (and the matching) are redacted first; the training's time budget covers every loop
+$rtR = rh_ai_route_terms('bookings for john.banda@example.com or +265 999 123 456 today');
+check(!array_intersect(['john', 'banda', 'example', 'com'], $rtR) && in_array('email', $rtR, true) && !preg_grep('/999|123|456/', $rtR) && rh_ai_route_terms('bookings for [EMAIL_2] today') !== [],
+    'router: an email or phone number the vault missed never reaches the stored examples of a learned route (rh_ai_memory_redact before the terms)', json_encode($rtR));
+check(rh_ai_num('ai_route_train_seconds') === 20 && rh_ai_route_samples($pdo, microtime(true) - 1) === [],
+    'router: the training time budget is a setting (ai_route_train_seconds, 20) and also bounds reading the samples (a passed deadline reads none)');
+check(rh_ai_num('ai_period_max_days') === 366 && rh_ai_period_parse('arrivals in the last 366 days', '2026-10-30') !== null && rh_ai_period_parse('arrivals in the last 367 days', '2026-10-30') === null,
+    'period words: "the last N days" is capped by the ai_period_max_days setting (366), not a number in the code');
+$gymU = rh_ai_money_gym_unread_text('**A** (GM1)', 'could not be read');
+$gymP = rh_ai_money_gym_unread_text('**A** (GM1)', 'not shown to this account (gym invoicing or reports access needed)');
+check(stripos($gymU, 'could not read') !== false && stripos($gymU, 'Gym Inquiries') !== false && !preg_match('/not shown|nothing|fully paid|\b0\b|none/i', $gymU) && stripos($gymP, 'not shown to your account') !== false,
+    'gym balance that could not be read says so plainly and points to the Gym screen (never "not shown", never zero or nothing owed); a permission gap still says not shown', json_encode([$gymU, $gymP]));
 
 if (!$chatReady || !rh_ai_memory_ready($pdo)) {
     skip('owner round database checks (Assistant migrations not run here)');
@@ -4783,6 +4795,34 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
             && rh_ai_claim_consistency('7 of 5 rooms are sold.') && rh_ai_claim_consistency("- **[STAFF_1]** (Administrator) · 0 logged actions · last seen Thu 29 Oct, 00:50\nStaff active today: 1")
             && !rh_ai_claim_consistency("**Rooms: 12** (3 dirty, 9 available)") && !rh_ai_claim_consistency("**Arrivals today: 3** (2 still to arrive, 1 with no room assigned)\n- a\n- b\n- c");
         check($ccIn, 'claim check: the reply must agree with itself - a count beside a longer list, status parts that do not add up, a wrong total, "7 of 5", and "active" with 0 actions and nothing that made them active are caught; consistent ones pass');
+        // QA LATER 2026-10-30: a pattern that cannot run is "could not verify" (never passed unchecked); a text cut
+        // mid-character is still read; the index's derived lists are capped while they are built
+        $jitWas = ini_get('pcre.jit');
+        $btWas = ini_get('pcre.backtrack_limit');
+        ini_set('pcre.jit', '0');
+        ini_set('pcre.backtrack_limit', '1');
+        $gErr = rh_ai_claim_guard('There are 47 arrivals today.', 'how many arrivals?', ['results' => [], 'today' => $ccT]);
+        ini_set('pcre.backtrack_limit', (string)$btWas);
+        ini_set('pcre.jit', (string)$jitWas);
+        check(!empty($gErr['error']) && $gErr['changed'] && $gErr['need_recheck'] && $gErr['steps']['d'] === 1 && strpos($gErr['text'], '47') === false && !rh_ai_claim_preg_error(),
+            'claim check: a pattern that fails to run (backtrack limit) is "could not verify" - the reply is not shown, the Primary model is asked again (step d), the mark is cleared after', json_encode($gErr));
+        $incErr = rh_ai_claim_incident($pdo, $gErr, ['question' => 'how many arrivals?', 'route' => 'fast', 'model' => 'fake', 'reply' => 'There are 47 arrivals today.']);
+        $incKind = $incErr > 0 ? (string)$pdo->query('SELECT kind FROM ai_incidents WHERE id = ' . (int)$incErr)->fetchColumn() : '';
+        check($incKind === 'claim_check_error', 'claim check: a check that could not run is logged as a claim_check_error incident', $incKind);
+        $gOk = $ccG('There are 3 arrivals today; 2 are still to arrive.');
+        $ckCut = rh_ai_claim_check("There are 3 arrivals today \xE2\x80", $ccE, []);
+        $ckCutBad = rh_ai_claim_check("There are 47 arrivals today \xE2\x80", $ccE, []);
+        check(empty($gOk['error']) && !$gOk['changed'] && empty($ckCut['error']) && !$ckCut['bad'] && empty($ckCutBad['error']) && $ckCutBad['bad'],
+            'claim check: normal replies carry no error; a text cut mid-character is still read (broken bytes blanked, same offsets): right figures pass, wrong ones are caught', json_encode([$ckCut, $ckCutBad]));
+        $bigSib = [];
+        for ($i = 1; $i <= 30; $i++) {
+            $bigSib['f' . $i] = $i * 7.5;
+        }
+        $bigEv = implode("\n", array_fill(0, 120, json_encode(['a' => $bigSib, 'b' => array_map(static fn($v) => $v + 1000, $bigSib)])));
+        $ixBig = rh_ai_claim_index($bigEv, ['today' => $ccT]);
+        $capC = rh_ai_num('ai_claim_evidence_cap');
+        check(count($ixBig['derived']) <= $capC * 4 && count($ixBig['pcts']) <= $capC * 4 && count($ixBig['leaves']) <= $capC && in_array(15.0, $ixBig['derived'], true),
+            'claim index: derived sums / differences, percentages and fields stop at their caps while built (never grown whole then cut)', json_encode([count($ixBig['derived']), count($ixBig['pcts']), count($ixBig['leaves'])]));
         // Permissions: the checker draws only on this chat's own lookups (another person's chat is never evidence)
         $insC2 = $pdo->prepare("INSERT INTO ai_conversations (user_id, title, page_path) VALUES (?, 'AITest claims', 'dashboard.php')");
         $insC2->execute([(int)$admR['id']]);

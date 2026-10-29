@@ -296,6 +296,18 @@ function rh_ai_money_booking_text(PDO $db, array $res, string $ask, int $id): st
 }
 
 /**
+ * A gym balance that is not a figure, in plain words. Two different cases, never worded as "nothing owed": the account
+ * may not see gym money (the lookup says "not shown ..."), or the bills could not be read (anything else).
+ */
+function rh_ai_money_gym_unread_text(string $who, $bal): string
+{
+    if (strpos((string)$bal, 'not shown') === 0) {
+        return $who . ': the gym bills are not shown to your account - the Gym Inquiries screen (gym invoicing) or Gym Reports shows them.';
+    }
+    return $who . ': I could not read their gym bills just now, so I cannot say what is owed. Check the balance on the Gym Inquiries screen (gym invoicing) or Gym Reports.';
+}
+
+/**
  * Answer a money question locally. null = not one (or nothing to tie it to: the model or the focus answers go on).
  * @return array|null ['text','links','chips','route'?,'focus'?,'focus_offer'?]
  */
@@ -348,7 +360,7 @@ function rh_ai_money_read_reply(PDO $db, array $user, int $conv, array $mi, arra
         $bal = $mem['balance_owed'] ?? null;
         $who = '**' . ($mem['guest_name'] ?? '') . '** (' . ($mem['member_number'] ?? '') . ')';
         if (!is_numeric($bal)) {
-            return ['text' => $who . ': the gym bills are not shown to your account - the Gym Inquiries screen (gym invoicing) or Gym Reports shows them.', 'links' => $r['links'], 'chips' => []];
+            return ['text' => rh_ai_money_gym_unread_text($who, $bal), 'links' => $r['links'], 'chips' => []];
         }
         $owed = (float)$bal;
         $text = $owed <= BALANCE_TOLERANCE ? $who . ': **fully paid** - nothing is owed on their gym bills.' : $who . ': **' . rh_ai_fmt_cur($cur, $owed) . ' still to pay** on their gym bills.';

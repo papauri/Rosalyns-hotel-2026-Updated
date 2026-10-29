@@ -225,6 +225,8 @@ function rh_ai_setting_defaults(): array
         'ai_claim_max_claims'       => '60',  // claims checked in one reply at most (bounded work on a very long reply)
         'ai_claim_evidence_cap'     => '4000', // figures read from one question's evidence at most (bounded work)
         'ai_followup_max_days'      => '31',  // a period asked of a one-day lookup ("arrivals in the last 2 weeks") is looked up day by day, this many days at most
+        'ai_period_max_days'        => '366', // "the last / next N days, weeks or months" is read as a period up to this many units (a bigger N is not a period)
+        'ai_route_train_seconds'    => '20',  // the daily learned-route training stops after this many seconds (bounded work)
     ];
 }
 

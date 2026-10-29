@@ -41,6 +41,84 @@ function rh_ai_claim_pct_tolerance(): float
     return is_numeric($v) && (float)$v >= 0 ? (float)$v : 0.5;
 }
 
+// ── Pattern matching that never fails open ──────────────────────────────────
+// A pattern that cannot run (bad UTF-8, backtrack / JIT limit) returns false or null. Every pattern in this file goes
+// through these: the failure is remembered, and the guard then treats the reply as "could not verify" (never shown
+// unchecked: rebuilt from the lookups, or the Primary model asked again) and logs a claim_check_error incident.
+
+/** Read (no argument), set (true) or reset (false) the "a pattern could not run" mark. Returns the mark before the call. */
+function rh_ai_claim_preg_error(?bool $set = null): bool
+{
+    static $err = false;
+    $was = $err;
+    if ($set !== null) {
+        $err = $set;
+    }
+    return $was;
+}
+
+/**
+ * A text cut mid-character (a byte window beside a claim, a capped evidence string) cannot be read by a /u pattern.
+ * Each broken byte becomes a space: the same length, so every offset still points at the same place, and the claims
+ * are still read from the same characters (this is not a guess: only bytes that are not text are blanked).
+ */
+function rh_ai_claim_utf8_blank(string $s): string
+{
+    $r = preg_replace_callback('/[\x00-\x7F]+|[\xC2-\xDF][\x80-\xBF]|\xE0[\xA0-\xBF][\x80-\xBF]|[\xE1-\xEC\xEE\xEF][\x80-\xBF]{2}|\xED[\x80-\x9F][\x80-\xBF]|\xF0[\x90-\xBF][\x80-\xBF]{2}|[\xF1-\xF3][\x80-\xBF]{3}|\xF4[\x80-\x8F][\x80-\xBF]{2}|(.)/s',
+        static fn($m) => isset($m[1]) ? ' ' : $m[0], $s);
+    return $r ?? $s; // could not blank it: the retry fails again and the mark is set
+}
+
+/** Run one pattern call; a broken-text failure is retried on the blanked copy once; any other failure sets the mark. */
+function rh_ai_claim_preg_run(callable $call, string $s, $fail)
+{
+    $r = $call($s);
+    if ($r === $fail && in_array(preg_last_error(), [PREG_BAD_UTF8_ERROR, PREG_BAD_UTF8_OFFSET_ERROR], true)) {
+        $r = $call(rh_ai_claim_utf8_blank($s));
+    }
+    if ($r === $fail) {
+        rh_ai_claim_preg_error(true);
+    }
+    return $r;
+}
+
+function rh_ai_claim_pm(string $re, $s, &$m = null, int $flags = 0, int $off = 0): int
+{
+    $r = rh_ai_claim_preg_run(static function (string $x) use ($re, &$m, $flags, $off) {
+        return preg_match($re, $x, $m, $flags, $off);
+    }, (string)$s, false);
+    if ($r === false) {
+        $m = [];
+        return 0;
+    }
+    return $r;
+}
+
+function rh_ai_claim_pma(string $re, $s, &$m = null, int $flags = 0, int $off = 0): int
+{
+    $r = rh_ai_claim_preg_run(static function (string $x) use ($re, &$m, $flags, $off) {
+        return preg_match_all($re, $x, $m, $flags, $off);
+    }, (string)$s, false);
+    if ($r === false) {
+        $m = [];
+        return 0;
+    }
+    return $r;
+}
+
+/** preg_replace; on failure '' (nothing unchecked survives) and the mark is set. */
+function rh_ai_claim_pr($re, $rep, $s): string
+{
+    $r = rh_ai_claim_preg_run(static fn(string $x) => preg_replace($re, $rep, $x), (string)$s, null);
+    return $r === null ? '' : $r;
+}
+
+function rh_ai_claim_ps(string $re, $s, int $limit = -1, int $flags = 0): array
+{
+    $r = rh_ai_claim_preg_run(static fn(string $x) => preg_split($re, $x, $limit, $flags), (string)$s, false);
+    return $r === false ? [(string)$s] : $r;
+}
+
 // ── Words ───────────────────────────────────────────────────────────────────
 
 function rh_ai_claim_number_words(): array
@@ -63,7 +141,7 @@ function rh_ai_claim_word_value(string $w): ?float
     if (isset($map[$w])) {
         return (float)$map[$w];
     }
-    if (preg_match('/^(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)[\s-](one|two|three|four|five|six|seven|eight|nine)$/u', $w, $m)) {
+    if (rh_ai_claim_pm('/^(twenty|thirty|forty|fifty|sixty|seventy|eighty|ninety)[\s-](one|two|three|four|five|six|seven|eight|nine)$/u', $w, $m)) {
         return (float)($map[$m[1]] + $map[$m[2]]);
     }
     return null;
@@ -141,7 +219,7 @@ function rh_ai_claim_sentences(string $text): array
     $out = [];
     $pos = 0;
     $len = strlen($text);
-    if (preg_match_all('/(?<=[.!?])\s+|\n+/u', $text, $m, PREG_OFFSET_CAPTURE)) {
+    if (rh_ai_claim_pma('/(?<=[.!?])\s+|\n+/u', $text, $m, PREG_OFFSET_CAPTURE)) {
         foreach ($m[0] as [$sep, $off]) {
             if ($off > $pos) {
                 $out[] = [$pos, $off];
@@ -187,20 +265,20 @@ function rh_ai_claim_extract(string $text, ?string $today = null): array
     foreach (['/\]\([^)\s]*\)/u', '/https?:\/\/\S+/u', '/\b[\w\-]+\.(?:php|html?)\S*/u', '/^[ \t]*(?:\d{1,2}[.)]|[-*•])[ \t]/mu', '/\b(?:step|page|option|part|phase|section|tip|line|point|no\.)\s+\d{1,2}\b/iu', '/\b24\s*\/\s*7\b/u',
               // examples of what to type ("for example "5 to 7 Nov" or "2 nights from tomorrow"") are not claims
               '/\((?:for example|for instance|e\.g\.|such as)[^)\n]*\)/iu', '/\b(?:for example|for instance|e\.g\.|such as|say|try|ask)\s*[:,]?\s*(?:"[^"\n]*"|“[^”\n]*”)(?:\s*(?:,|or|and)\s*(?:"[^"\n]*"|“[^”\n]*”))*/iu'] as $re) {
-        if (preg_match_all($re, $mask, $m, PREG_OFFSET_CAPTURE)) {
+        if (rh_ai_claim_pma($re, $mask, $m, PREG_OFFSET_CAPTURE)) {
             foreach ($m[0] as [$s, $o]) {
                 $blank($o, strlen($s));
             }
         }
     }
     // Privacy tokens
-    if (preg_match_all('/\[(GUEST|EMAIL|PHONE|BK|STAFF)_\d+\]/', $mask, $m, PREG_OFFSET_CAPTURE)) {
+    if (rh_ai_claim_pma('/\[(GUEST|EMAIL|PHONE|BK|STAFF)_\d+\]/', $mask, $m, PREG_OFFSET_CAPTURE)) {
         foreach ($m[0] as $i => [$s, $o]) {
             $add(['kind' => 'token', 'raw' => $s, 'value' => $s, 'type' => $m[1][$i][0], 'start' => $o, 'end' => $o + strlen($s)]);
         }
     }
     // ISO dates (with a time)
-    if (preg_match_all('/\b(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::\d{2})?)?\b/', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+    if (rh_ai_claim_pma('/\b(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::\d{2})?)?\b/', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
         foreach ($m as $g) {
             $d = checkdate((int)$g[2][0], (int)$g[3][0], (int)$g[1][0]) ? $g[1][0] . '-' . $g[2][0] . '-' . $g[3][0] : '';
             if ($d === '') {
@@ -221,7 +299,7 @@ function rh_ai_claim_extract(string $text, ?string $today = null): array
     $months = rh_ai_claim_months();
     foreach (['/\b(?:' . $wd . '\.?,?\s+)?(?:the\s+)?(?<d>\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?' . $mo . '\b(?:,?\s+(?<y>\d{4})\b)?/iu',
               '/\b(?:' . $wd . '\.?,?\s+)?' . $mo . '\.?\s+(?<d>\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s+(?<y>\d{4})\b)?/iu'] as $re) {
-        if (!preg_match_all($re, $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE | PREG_UNMATCHED_AS_NULL)) {
+        if (!rh_ai_claim_pma($re, $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE | PREG_UNMATCHED_AS_NULL)) {
             continue;
         }
         foreach ($m as $g) {
@@ -245,7 +323,7 @@ function rh_ai_claim_extract(string $text, ?string $today = null): array
         }
     }
     // Today / tonight / tomorrow / yesterday (the hotel's own today)
-    if (preg_match_all('/\b(today|tonight|tomorrow|yesterday)\b/iu', $mask, $m, PREG_OFFSET_CAPTURE)) {
+    if (rh_ai_claim_pma('/\b(today|tonight|tomorrow|yesterday)\b/iu', $mask, $m, PREG_OFFSET_CAPTURE)) {
         foreach ($m[1] as [$s, $o]) {
             $w = strtolower($s);
             $d = $w === 'tomorrow' ? date('Y-m-d', strtotime($today . ' +1 day')) : ($w === 'yesterday' ? date('Y-m-d', strtotime($today . ' -1 day')) : $today);
@@ -253,7 +331,7 @@ function rh_ai_claim_extract(string $text, ?string $today = null): array
         }
     }
     // Times: "18:00", "6:30 pm", "6pm"
-    if (preg_match_all('/(?<![\d:.])([01]?\d|2[0-3]):([0-5]\d)(?::\d{2})?(?:\s?([ap]\.?m\.?))?(?![\d:])/iu', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE | PREG_UNMATCHED_AS_NULL)) {
+    if (rh_ai_claim_pma('/(?<![\d:.])([01]?\d|2[0-3]):([0-5]\d)(?::\d{2})?(?:\s?([ap]\.?m\.?))?(?![\d:])/iu', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE | PREG_UNMATCHED_AS_NULL)) {
         foreach ($m as $g) {
             $v = rh_ai_claim_hhmm((int)$g[1][0], (int)$g[2][0], (string)($g[3][0] ?? ''));
             if ($v !== '') {
@@ -261,15 +339,15 @@ function rh_ai_claim_extract(string $text, ?string $today = null): array
             }
         }
     }
-    if (preg_match_all('/(?<![\d:.])(1[0-2]|0?[1-9])\s?([ap]\.?m\.?)(?![a-z])/iu', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+    if (rh_ai_claim_pma('/(?<![\d:.])(1[0-2]|0?[1-9])\s?([ap]\.?m\.?)(?![a-z])/iu', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
         foreach ($m as $g) {
             $add(['kind' => 'time', 'raw' => $g[0][0], 'value' => rh_ai_claim_hhmm((int)$g[1][0], 0, $g[2][0]), 'start' => (int)$g[0][1], 'end' => (int)$g[0][1] + strlen($g[0][0])]);
         }
     }
     // References: booking / order / member numbers written as they are ("ORD-20261028-003", "GYM-0012", "LSH2026999999")
-    if (preg_match_all('/\b[A-Z]{2,8}-?\d[\dA-Z]*(?:-[\dA-Z]+)*\b/', $mask, $m, PREG_OFFSET_CAPTURE)) {
+    if (rh_ai_claim_pma('/\b[A-Z]{2,8}-?\d[\dA-Z]*(?:-[\dA-Z]+)*\b/', $mask, $m, PREG_OFFSET_CAPTURE)) {
         foreach ($m[0] as [$s, $o]) {
-            if (preg_match('/\d{3,}/', $s) || strpos($s, '-') !== false) {
+            if (rh_ai_claim_pm('/\d{3,}/', $s) || strpos($s, '-') !== false) {
                 $add(['kind' => 'ref', 'raw' => $s, 'value' => $s, 'start' => $o, 'end' => $o + strlen($s)]);
             }
         }
@@ -283,7 +361,7 @@ function rh_ai_claim_extract(string $text, ?string $today = null): array
     $numRe = '(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)';
     $scaleRe = '(?:\s?(k|m|bn|mn|million|thousand)\b)?';
     $money = [];
-    if (preg_match_all('/(?<![\w.])(?:' . $cur . ')\s?-?' . $numRe . $scaleRe . '/u', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE | PREG_UNMATCHED_AS_NULL)) {
+    if (rh_ai_claim_pma('/(?<![\w.])(?:' . $cur . ')\s?-?' . $numRe . $scaleRe . '/u', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE | PREG_UNMATCHED_AS_NULL)) {
         foreach ($m as $g) {
             $money[] = [$g[0][0], (int)$g[0][1], $g[1][0], (string)($g[2][0] ?? '')];
         }
@@ -292,12 +370,12 @@ function rh_ai_claim_extract(string $text, ?string $today = null): array
         $add(rh_ai_claim_money($raw, $o, $n, $sc));
     }
     $money = [];
-    if (preg_match_all('/(?<![\w.,])' . $numRe . $scaleRe . '\s?(?:MWK|kwacha|dollars|usd|rand)\b/iu', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE | PREG_UNMATCHED_AS_NULL)) {
+    if (rh_ai_claim_pma('/(?<![\w.,])' . $numRe . $scaleRe . '\s?(?:MWK|kwacha|dollars|usd|rand)\b/iu', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE | PREG_UNMATCHED_AS_NULL)) {
         foreach ($m as $g) {
             $money[] = [$g[0][0], (int)$g[0][1], $g[1][0], (string)($g[2][0] ?? '')];
         }
     }
-    if (preg_match_all('/(?<![\w.,])(\d+(?:\.\d+)?)(k|m|bn)\b/u', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+    if (rh_ai_claim_pma('/(?<![\w.,])(\d+(?:\.\d+)?)(k|m|bn)\b/u', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
         foreach ($m as $g) {
             $money[] = [$g[0][0], (int)$g[0][1], $g[1][0], $g[2][0]];
         }
@@ -311,7 +389,7 @@ function rh_ai_claim_extract(string $text, ?string $today = null): array
         }
     }
     // Percentages
-    if (preg_match_all('/(?<![\w.,])(-?\d+(?:\.\d+)?)\s?(%|percent\b|per cent\b)/iu', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+    if (rh_ai_claim_pma('/(?<![\w.,])(-?\d+(?:\.\d+)?)\s?(%|percent\b|per cent\b)/iu', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
         foreach ($m as $g) {
             $dec = strpos($g[1][0], '.') !== false ? strlen(substr(strrchr($g[1][0], '.'), 1)) : 0;
             $add(['kind' => 'pct', 'raw' => $g[0][0], 'value' => abs((float)$g[1][0]), 'tol' => max(rh_ai_claim_pct_tolerance(), 0.5 * 10 ** -$dec), 'start' => (int)$g[0][1], 'end' => (int)$g[0][1] + strlen($g[0][0])]);
@@ -319,12 +397,12 @@ function rh_ai_claim_extract(string $text, ?string $today = null): array
     }
     // Durations: "2 nights", "3 days", "2 h 5 min", "45 minutes"
     $nw = rh_ai_claim_word_re();
-    if (preg_match_all('/(?<![\w.,])(\d+) h(?:ours?|rs?)? (\d+) min(?:utes?|s)?\b/iu', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+    if (rh_ai_claim_pma('/(?<![\w.,])(\d+) h(?:ours?|rs?)? (\d+) min(?:utes?|s)?\b/iu', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
         foreach ($m as $g) {
             $add(['kind' => 'duration', 'raw' => $g[0][0], 'value' => (float)((int)$g[1][0] * 60 + (int)$g[2][0]), 'unit' => 'minute', 'start' => (int)$g[0][1], 'end' => (int)$g[0][1] + strlen($g[0][0])]);
         }
     }
-    if (preg_match_all('/(?<![\w.,])(\d+(?:\.\d+)?|' . $nw . ')[\s-](nights?|days?|weeks?|months?|hours?|hrs?|h|minutes?|mins?|min)\b/iu', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+    if (rh_ai_claim_pma('/(?<![\w.,])(\d+(?:\.\d+)?|' . $nw . ')[\s-](nights?|days?|weeks?|months?|hours?|hrs?|h|minutes?|mins?|min)\b/iu', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
         foreach ($m as $g) {
             $v = is_numeric($g[1][0]) ? (float)$g[1][0] : rh_ai_claim_word_value($g[1][0]);
             if ($v === null) {
@@ -336,7 +414,7 @@ function rh_ai_claim_extract(string $text, ?string $today = null): array
         }
     }
     // Room numbers: "room 12", "Room GD301"
-    if (preg_match_all('/\b(?:room|rm)\.?\s*(?:no\.?\s*|number\s*|#)?([A-Z]{0,3}\d{1,4}[A-Z]?)\b/iu', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+    if (rh_ai_claim_pma('/\b(?:room|rm)\.?\s*(?:no\.?\s*|number\s*|#)?([A-Z]{0,3}\d{1,4}[A-Z]?)\b/iu', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
         foreach ($m as $g) {
             $add(['kind' => 'room', 'raw' => $g[1][0], 'value' => $g[1][0], 'start' => (int)$g[1][1], 'end' => (int)$g[1][1] + strlen($g[1][0])]);
         }
@@ -351,13 +429,13 @@ function rh_ai_claim_extract(string $text, ?string $today = null): array
     ];
     $notNames = '/^(?:the|this|that|room|rooms|today|tonight|tomorrow|yesterday|booking|bookings|screen|portal|system|administrator|admin|manager|assistant|reception|front|desk|housekeeping|restaurant|bar|kitchen|check|confirm|open|guest|guests|staff|total|none|no|yes|online|offline|active|occupancy|arrivals?|departures?|in|house|status|deluxe|standard|executive|family|suite|single|double|twin|king|queen|monday|tuesday|wednesday|thursday|friday|saturday|sunday|january|february|march|april|may|june|july|august|september|october|november|december|money|stock|reports?|settings|bookings|payments?|invoices?|i|we|you|they|he|she|it|please|thanks|note|tip|step|account|accounts)$/iu';
     foreach ($nameRes as $re) {
-        if (preg_match_all($re, $mask, $m, PREG_OFFSET_CAPTURE)) {
+        if (rh_ai_claim_pma($re, $mask, $m, PREG_OFFSET_CAPTURE)) {
             foreach ($m[1] as $i => [$s, $o]) {
-                $words = preg_split('/\s+/u', trim($s));
-                while ($words && preg_match($notNames, (string)end($words))) {
+                $words = rh_ai_claim_ps('/\s+/u', trim($s));
+                while ($words && rh_ai_claim_pm($notNames, (string)end($words))) {
                     array_pop($words); // "Mr Banda Room" -> "Banda"
                 }
-                if (!$words || preg_match($notNames, $words[0])) {
+                if (!$words || rh_ai_claim_pm($notNames, $words[0])) {
                     continue;
                 }
                 $name = implode(' ', $words);
@@ -368,22 +446,22 @@ function rh_ai_claim_extract(string $text, ?string $today = null): array
     }
     // Counts: "N of M", a number (digits or words) before what it counts, "Label: N"
     $nouns = rh_ai_claim_count_nouns();
-    if (preg_match_all('/(?<![\w.,\-\/])(\d{1,3}(?:,\d{3})+|\d+)(?:\*\*)?\s+(?:of|out of)\s+(\d{1,3}(?:,\d{3})+|\d+)\b/u', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+    if (rh_ai_claim_pma('/(?<![\w.,\-\/])(\d{1,3}(?:,\d{3})+|\d+)(?:\*\*)?\s+(?:of|out of)\s+(\d{1,3}(?:,\d{3})+|\d+)\b/u', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
         foreach ($m as $g) {
             foreach ([1, 2] as $k) {
                 $add(['kind' => 'count', 'raw' => $g[$k][0], 'value' => (float)str_replace(',', '', $g[$k][0]), 'start' => (int)$g[$k][1], 'end' => (int)$g[$k][1] + strlen($g[$k][0])]);
             }
         }
     }
-    if (preg_match_all('/(?<![\w.,\-\/])(\d{1,3}(?:,\d{3})+|\d+|' . $nw . ')(?=(?:\*\*)?\s+(?:[a-z][\w\-]*\s+){0,2}(?:' . $nouns . ')\b)/iu', $mask, $m, PREG_OFFSET_CAPTURE)) {
+    if (rh_ai_claim_pma('/(?<![\w.,\-\/])(\d{1,3}(?:,\d{3})+|\d+|' . $nw . ')(?=(?:\*\*)?\s+(?:[a-z][\w\-]*\s+){0,2}(?:' . $nouns . ')\b)/iu', $mask, $m, PREG_OFFSET_CAPTURE)) {
         foreach ($m[1] as [$s, $o]) {
             $v = is_numeric(str_replace(',', '', $s)) ? (float)str_replace(',', '', $s) : rh_ai_claim_word_value($s);
-            if ($v !== null && !($s === 'one' && preg_match('/^one\s+(?:of|thing|more|moment|at|by|way|day)\b/iu', substr($mask, $o, 20)))) {
+            if ($v !== null && !($s === 'one' && rh_ai_claim_pm('/^one\s+(?:of|thing|more|moment|at|by|way|day)\b/iu', substr($mask, $o, 20)))) {
                 $add(['kind' => 'count', 'raw' => $s, 'value' => $v, 'start' => $o, 'end' => $o + strlen($s)]);
             }
         }
     }
-    if (preg_match_all('/\b[\p{L}][\p{L}\d \'’()\-]{1,60}:\s*(?:\*\*)?\s*(\d{1,3}(?:,\d{3})+|\d+)(?:\*\*)?(?=\s*(?:$|[\n(·,.;]|\*\*|of\b))/mu', $mask, $m, PREG_OFFSET_CAPTURE)) {
+    if (rh_ai_claim_pma('/\b[\p{L}][\p{L}\d \'’()\-]{1,60}:\s*(?:\*\*)?\s*(\d{1,3}(?:,\d{3})+|\d+)(?:\*\*)?(?=\s*(?:$|[\n(·,.;]|\*\*|of\b))/mu', $mask, $m, PREG_OFFSET_CAPTURE)) {
         foreach ($m[1] as [$s, $o]) {
             $add(['kind' => 'count', 'raw' => $s, 'value' => (float)str_replace(',', '', $s), 'start' => $o, 'end' => $o + strlen($s)]);
         }
@@ -413,7 +491,7 @@ function rh_ai_claim_money(string $raw, int $off, string $num, string $scale): a
 /** A key that holds a record id (never a figure a reply may quote as a count or an amount). */
 function rh_ai_claim_is_id_key(string $k): bool
 {
-    return (bool)preg_match('/(?:^|_)id$|^id_|(?:^|_)(?:num|uuid|hash)$/i', $k);
+    return (bool)rh_ai_claim_pm('/(?:^|_)id$|^id_|(?:^|_)(?:num|uuid|hash)$/i', $k);
 }
 
 /**
@@ -430,7 +508,7 @@ function rh_ai_claim_walk($v, string $path, array &$acc, int &$budget): void
         if ($v) {
             $acc['nums'][(string)count($v)] = true;
             if ($path !== '') {
-                $acc['leaves'][] = [$path . '.count', (float)count($v)]; // "3 arrivals" may count the arrivals list
+                rh_ai_claim_leaf($acc, $path . '.count', (float)count($v)); // "3 arrivals" may count the arrivals list
             }
         }
         foreach ($v as $x) {
@@ -453,18 +531,18 @@ function rh_ai_claim_walk($v, string $path, array &$acc, int &$budget): void
         if ((is_int($x) || is_float($x) || is_numeric($s)) && !rh_ai_claim_is_id_key((string)$k)) {
             $f = abs((float)$s);
             $acc['nums'][(string)$f] = true;
-            $acc['leaves'][] = [$p, $f];
+            rh_ai_claim_leaf($acc, $p, $f);
             $acc['doc'][(string)$f] = $f;
             if (count($sib) < 30) {
                 $sib[] = $f;
             }
-        } elseif (preg_match('/^(\d{4}-\d{2}-\d{2})/', $s, $dm)) {
-            $acc['leaves'][] = [$p, $dm[1]];
+        } elseif (rh_ai_claim_pm('/^(\d{4}-\d{2}-\d{2})/', $s, $dm)) {
+            rh_ai_claim_leaf($acc, $p, $dm[1]);
             if (count($sd) < 12) {
                 $sd[] = $dm[1];
             }
-        } elseif (preg_match('/^\[(?:GUEST|STAFF|BK|EMAIL|PHONE)_\d+\]$/', $s)) {
-            $acc['leaves'][] = [$p, $s];
+        } elseif (rh_ai_claim_pm('/^\[(?:GUEST|STAFF|BK|EMAIL|PHONE)_\d+\]$/', $s)) {
+            rh_ai_claim_leaf($acc, $p, $s);
         }
     }
     $n = count($sib);
@@ -472,14 +550,35 @@ function rh_ai_claim_walk($v, string $path, array &$acc, int &$budget): void
         for ($j = $i + 1; $j < $n; $j++) {
             $a = $sib[$i];
             $b = $sib[$j];
-            $acc['derived'][] = $a + $b;
-            $acc['derived'][] = abs($a - $b);
-            if ($a > 0 && $b > 0) {
-                $acc['pcts'][] = min($a, $b) / max($a, $b) * 100;
-            }
+            rh_ai_claim_derive($acc, $a, $b);
         }
     }
     rh_ai_claim_gaps($sd, $acc);
+}
+
+/**
+ * The sum, the difference and the ratio (%) of two figures of one lookup, kept while the index's lists are under their
+ * caps (the same first-found values the cut afterwards kept: the derived list is unique by value as before).
+ */
+function rh_ai_claim_derive(array &$acc, float $a, float $b): void
+{
+    $max = (int)($acc['max_derived'] ?? PHP_INT_MAX);
+    foreach ([$a + $b, abs($a - $b)] as $x) {
+        if (count($acc['derived']) < $max) {
+            $acc['derived'][(string)$x] = $x;
+        }
+    }
+    if ($a > 0 && $b > 0 && count($acc['pcts']) < $max) {
+        $acc['pcts'][] = min($a, $b) / max($a, $b) * 100;
+    }
+}
+
+/** One lookup field (path, value) for the label checks, while under the cap. */
+function rh_ai_claim_leaf(array &$acc, string $path, $value): void
+{
+    if (count($acc['leaves']) < (int)($acc['max_leaves'] ?? PHP_INT_MAX)) {
+        $acc['leaves'][] = [$path, $value];
+    }
 }
 
 /** Day gaps between a few dates (nights; days of a period count both ends). */
@@ -504,10 +603,11 @@ function rh_ai_claim_index(string $evidence, array $opt = []): array
     $today = (string)($opt['today'] ?? rh_ai_today());
     $cap = rh_ai_num('ai_claim_evidence_cap');
     $evidence = strlen($evidence) > 600000 ? substr($evidence, 0, 600000) : $evidence;
-    $acc = ['nums' => [], 'leaves' => [], 'derived' => [], 'pcts' => [], 'gaps' => []];
+    // Each list stops growing at its cap while it is built (never built whole and cut afterwards)
+    $acc = ['nums' => [], 'leaves' => [], 'derived' => [], 'pcts' => [], 'gaps' => [], 'max_derived' => $cap * 4, 'max_leaves' => $cap];
     $jsons = (array)($opt['json'] ?? []);
     $plain = [];
-    foreach (preg_split('/\n/', $evidence) as $line) {
+    foreach (rh_ai_claim_ps('/\n/', $evidence) as $line) {
         $t = trim($line);
         if ($t !== '' && ($t[0] === '{' || $t[0] === '[') && count($jsons) < 120 && is_array($d = json_decode($t, true))) {
             $jsons[] = $d;
@@ -523,21 +623,17 @@ function rh_ai_claim_index(string $evidence, array $opt = []): array
         $dv = array_values(array_slice($acc['doc'], 0, 40));
         for ($i = 0, $n = count($dv); $i < $n; $i++) {
             for ($k = $i + 1; $k < $n; $k++) {
-                $acc['derived'][] = $dv[$i] + $dv[$k];
-                $acc['derived'][] = abs($dv[$i] - $dv[$k]);
-                if ($dv[$i] > 0 && $dv[$k] > 0) {
-                    $acc['pcts'][] = min($dv[$i], $dv[$k]) / max($dv[$i], $dv[$k]) * 100;
-                }
+                rh_ai_claim_derive($acc, $dv[$i], $dv[$k]);
             }
         }
     }
     // Figures written as text (the context, earlier answers, the person's words): dates, times, ids and references
     // are taken out first, so "29" from "29 Oct" or "12" from "[GUEST_12]" never back a count.
-    $masked = (string)preg_replace(['/\[(?:GUEST|EMAIL|PHONE|BK|STAFF)_\d+\]/', '/\b\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?\b/', '/\b\d{1,2}:\d{2}(?::\d{2})?\b/',
+    $masked = (string)rh_ai_claim_pr(['/\[(?:GUEST|EMAIL|PHONE|BK|STAFF)_\d+\]/', '/\b\d{4}-\d{2}-\d{2}(?:[ T]\d{2}:\d{2}(?::\d{2})?)?\b/', '/\b\d{1,2}:\d{2}(?::\d{2})?\b/',
         '/"[a-z_]*id"\s*:\s*"?\d+"?/i', '/\b[A-Z]{2,8}-?\d[\dA-Z]*(?:-[\dA-Z]+)*\b/'], ' ', $evidence);
-    $masked = (string)preg_replace('/\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?(?:,?\s+\d{4})?/iu', ' ', $masked);
-    $masked = (string)preg_replace('/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?\b(?:,?\s+\d{4})?/iu', ' ', $masked);
-    if (preg_match_all('/\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?/', $masked, $m)) {
+    $masked = (string)rh_ai_claim_pr('/\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?(?:,?\s+\d{4})?/iu', ' ', $masked);
+    $masked = (string)rh_ai_claim_pr('/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?\s+\d{1,2}(?:st|nd|rd|th)?\b(?:,?\s+\d{4})?/iu', ' ', $masked);
+    if (rh_ai_claim_pma('/\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?/', $masked, $m)) {
         foreach ($m[0] as $x) {
             if (count($acc['nums']) >= $cap) {
                 break;
@@ -547,18 +643,18 @@ function rh_ai_claim_index(string $evidence, array $opt = []): array
     }
     $recent = implode("\n", array_slice($plain, -60));
     foreach (rh_ai_claim_number_words() as $w => $v) { // "two guests" in the person's words backs "2 guests"
-        if (strpos($w, ' ') === false && preg_match('/\b' . $w . '\b/i', $recent)) {
+        if (strpos($w, ' ') === false && rh_ai_claim_pm('/\b' . $w . '\b/i', $recent)) {
             $acc['nums'][(string)(float)$v] = true;
         }
     }
     $vals = array_map('floatval', array_keys($acc['nums']));
     sort($vals);
-    $derived = array_slice(array_values(array_unique($acc['derived'])), 0, $cap * 4);
+    $derived = array_values($acc['derived']); // unique already (keyed by value), at most $cap * 4
     sort($derived);
-    $pcts = array_slice($acc['pcts'], 0, $cap * 4);
+    $pcts = $acc['pcts'];
     sort($pcts);
     $dates = [$today => true];
-    if (preg_match_all('/\b(\d{4})-(\d{2})-(\d{2})\b/', $evidence, $m, PREG_SET_ORDER)) {
+    if (rh_ai_claim_pma('/\b(\d{4})-(\d{2})-(\d{2})\b/', $evidence, $m, PREG_SET_ORDER)) {
         foreach ($m as $g) {
             if (checkdate((int)$g[2], (int)$g[3], (int)$g[1])) {
                 $dates[$g[0]] = true;
@@ -567,7 +663,7 @@ function rh_ai_claim_index(string $evidence, array $opt = []): array
     }
     $plainText = implode("\n", $plain);
     $textDates = rh_ai_claim_extract_dates_only($plainText, $today);
-    if (preg_match_all('/\b\d{4}-\d{2}-\d{2}\b/', $plainText, $m)) {
+    if (rh_ai_claim_pma('/\b\d{4}-\d{2}-\d{2}\b/', $plainText, $m)) {
         $textDates = array_merge($textDates, $m[0]);
     }
     foreach ($textDates as $d) {
@@ -575,18 +671,18 @@ function rh_ai_claim_index(string $evidence, array $opt = []): array
     }
     rh_ai_claim_gaps(array_slice(array_values(array_unique($textDates)), 0, 20), $acc); // "30 Oct to 2 Nov" in the question -> 3 nights
     $times = [];
-    if (preg_match_all('/(?<![\d:])([01]?\d|2[0-3]):([0-5]\d)(?::\d{2})?(?:\s?([ap]\.?m\.?))?/iu', $evidence, $m, PREG_SET_ORDER | PREG_UNMATCHED_AS_NULL)) {
+    if (rh_ai_claim_pma('/(?<![\d:])([01]?\d|2[0-3]):([0-5]\d)(?::\d{2})?(?:\s?([ap]\.?m\.?))?/iu', $evidence, $m, PREG_SET_ORDER | PREG_UNMATCHED_AS_NULL)) {
         foreach ($m as $g) {
             $times[rh_ai_claim_hhmm((int)$g[1], (int)$g[2], (string)($g[3] ?? ''))] = true;
         }
     }
-    if (preg_match_all('/(?<![\d:.])(1[0-2]|0?[1-9])\s?([ap]\.?m\.?)(?![a-z])/iu', $evidence, $m, PREG_SET_ORDER)) {
+    if (rh_ai_claim_pma('/(?<![\d:.])(1[0-2]|0?[1-9])\s?([ap]\.?m\.?)(?![a-z])/iu', $evidence, $m, PREG_SET_ORDER)) {
         foreach ($m as $g) {
             $times[rh_ai_claim_hhmm((int)$g[1], 0, $g[2])] = true;
         }
     }
     $tokens = [];
-    if (preg_match_all('/\[(?:GUEST|EMAIL|PHONE|BK|STAFF)_\d+\]/', $evidence, $m)) {
+    if (rh_ai_claim_pma('/\[(?:GUEST|EMAIL|PHONE|BK|STAFF)_\d+\]/', $evidence, $m)) {
         $tokens = array_fill_keys($m[0], true);
     }
     $names = [];
@@ -596,7 +692,7 @@ function rh_ai_claim_index(string $evidence, array $opt = []): array
         }
     }
     return ['nums' => $vals, 'derived' => $derived, 'pcts' => $pcts, 'gaps' => $acc['gaps'], 'dates' => $dates, 'times' => $times, 'tokens' => $tokens, 'names' => $names,
-        'text' => mb_strtolower($evidence), 'leaves' => array_slice($acc['leaves'], 0, $cap), 'today' => $today];
+        'text' => mb_strtolower($evidence), 'leaves' => $acc['leaves'], 'today' => $today];
 }
 
 /** Dates (Y-m-d) in a text, natural ("30 Oct", "Thu 29 Oct 2026") and relative (today, tomorrow...). Bounded. */
@@ -605,7 +701,7 @@ function rh_ai_claim_extract_dates_only(string $text, string $today): array
     $out = [];
     $mo = '(january|february|march|april|may|june|july|august|september|october|november|december|sept|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)';
     $months = rh_ai_claim_months();
-    if (preg_match_all('/\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?' . $mo . '\b\.?(?:,?\s+(\d{4})\b)?/iu', $text, $m, PREG_SET_ORDER | PREG_UNMATCHED_AS_NULL)) {
+    if (rh_ai_claim_pma('/\b(\d{1,2})(?:st|nd|rd|th)?\s+(?:of\s+)?' . $mo . '\b\.?(?:,?\s+(\d{4})\b)?/iu', $text, $m, PREG_SET_ORDER | PREG_UNMATCHED_AS_NULL)) {
         foreach (array_slice($m, 0, 200) as $g) {
             $d = rh_ai_claim_date_ymd((int)$g[1], (int)$months[strtolower($g[2])], $g[3] !== null ? (int)$g[3] : null, $today);
             if ($d !== '') {
@@ -613,7 +709,7 @@ function rh_ai_claim_extract_dates_only(string $text, string $today): array
             }
         }
     }
-    if (preg_match_all('/\b' . $mo . '\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s+(\d{4})\b)?/iu', $text, $m, PREG_SET_ORDER | PREG_UNMATCHED_AS_NULL)) {
+    if (rh_ai_claim_pma('/\b' . $mo . '\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b(?:,?\s+(\d{4})\b)?/iu', $text, $m, PREG_SET_ORDER | PREG_UNMATCHED_AS_NULL)) {
         foreach (array_slice($m, 0, 200) as $g) {
             $d = rh_ai_claim_date_ymd((int)$g[2], (int)$months[strtolower($g[1])], $g[3] !== null ? (int)$g[3] : null, $today);
             if ($d !== '') {
@@ -621,7 +717,7 @@ function rh_ai_claim_extract_dates_only(string $text, string $today): array
             }
         }
     }
-    if (preg_match_all('/\b(today|tonight|tomorrow|yesterday)\b/iu', $text, $m)) {
+    if (rh_ai_claim_pma('/\b(today|tonight|tomorrow|yesterday)\b/iu', $text, $m)) {
         foreach ($m[1] as $w) {
             $w = strtolower($w);
             $out[] = $w === 'tomorrow' ? date('Y-m-d', strtotime($today . ' +1 day')) : ($w === 'yesterday' ? date('Y-m-d', strtotime($today . ' -1 day')) : $today);
@@ -680,16 +776,16 @@ function rh_ai_claim_supported(array $c, array $ix): bool
             return isset($ix['times'][$c['value']]);
         case 'ref':
         case 'room':
-            return (bool)preg_match('/(?<![\w])' . preg_quote(mb_strtolower((string)$c['value']), '/') . '(?![\w])/u', $ix['text']);
+            return (bool)rh_ai_claim_pm('/(?<![\w])' . preg_quote(mb_strtolower((string)$c['value']), '/') . '(?![\w])/u', $ix['text']);
         case 'name':
             $n = mb_strtolower((string)$c['value']);
-            if (preg_match('/(?<![\p{L}])' . preg_quote($n, '/') . '(?![\p{L}])/u', $ix['text'])) {
+            if (rh_ai_claim_pm('/(?<![\p{L}])' . preg_quote($n, '/') . '(?![\p{L}])/u', $ix['text'])) {
                 return true;
             }
             foreach ($ix['names'] as $real) { // the real value behind a token that is in the evidence
                 $all = true;
-                foreach (preg_split('/\s+/u', $n) as $w) {
-                    if (!preg_match('/(?<![\p{L}])' . preg_quote($w, '/') . '/u', $real)) {
+                foreach (rh_ai_claim_ps('/\s+/u', $n) as $w) {
+                    if (!rh_ai_claim_pm('/(?<![\p{L}])' . preg_quote($w, '/') . '/u', $real)) {
                         $all = false;
                         break;
                     }
@@ -766,7 +862,7 @@ function rh_ai_claim_consistency(string $text): array
     $out = [];
     $tol = rh_ai_claim_pct_tolerance();
     // N of M (P%)
-    if (preg_match_all('/(?<![\w.,\-])(\d{1,3}(?:,\d{3})+|\d+)(?:\*\*)?\s+(?:of|out of)\s+(\d{1,3}(?:,\d{3})+|\d+)\b(?:[^\n(]{0,40}\((\d+(?:\.\d+)?)\s?%\))?/u', $text, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE | PREG_UNMATCHED_AS_NULL)) {
+    if (rh_ai_claim_pma('/(?<![\w.,\-])(\d{1,3}(?:,\d{3})+|\d+)(?:\*\*)?\s+(?:of|out of)\s+(\d{1,3}(?:,\d{3})+|\d+)\b(?:[^\n(]{0,40}\((\d+(?:\.\d+)?)\s?%\))?/u', $text, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE | PREG_UNMATCHED_AS_NULL)) {
         foreach ($m as $g) {
             $n = (float)str_replace(',', '', $g[1][0]);
             $t = (float)str_replace(',', '', $g[2][0]);
@@ -778,7 +874,7 @@ function rh_ai_claim_consistency(string $text): array
         }
     }
     // A bullet list longer than the count it follows (no "and N more" paging)
-    $lines = preg_split('/\n/', $text);
+    $lines = rh_ai_claim_ps('/\n/', $text);
     $offs = [];
     $p = 0;
     foreach ($lines as $l) {
@@ -787,7 +883,7 @@ function rh_ai_claim_consistency(string $text): array
     }
     $nouns = rh_ai_claim_count_nouns();
     for ($i = 0, $n = count($lines); $i < $n; $i++) {
-        if (preg_match('/^\s*[-*•]\s/u', $lines[$i]) || trim($lines[$i]) === '') {
+        if (rh_ai_claim_pm('/^\s*[-*•]\s/u', $lines[$i]) || trim($lines[$i]) === '') {
             continue;
         }
         $k = $i + 1;
@@ -796,8 +892,8 @@ function rh_ai_claim_consistency(string $text): array
         }
         $items = 0;
         $more = 0;
-        while ($k < $n && preg_match('/^\s*[-*•]\s/u', $lines[$k])) {
-            if (preg_match('/^\s*[-*•]\s+and (\d+) more/u', $lines[$k], $mm)) {
+        while ($k < $n && rh_ai_claim_pm('/^\s*[-*•]\s/u', $lines[$k])) {
+            if (rh_ai_claim_pm('/^\s*[-*•]\s+and (\d+) more/u', $lines[$k], $mm)) {
                 $more = (int)$mm[1];
             } else {
                 $items++;
@@ -809,9 +905,9 @@ function rh_ai_claim_consistency(string $text): array
         }
         $head = $lines[$i];
         // The count the list belongs to: "only N", a bold headline "**X: N**", "N <noun>" at the end of a line that leads into the list
-        if (preg_match('/\b(?:only|just)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b/iu', $head, $hm, PREG_OFFSET_CAPTURE)
-            || preg_match('/^\s*\*\*[^*\n]*?:\s*(\d+)\*\*/u', $head, $hm, PREG_OFFSET_CAPTURE)
-            || preg_match('/(?<![\w.,])(\d+)\s+(?:[a-z\-]+\s+){0,2}(?:' . $nouns . ')\b[^\n.]*:\s*$/u', $head, $hm, PREG_OFFSET_CAPTURE)) {
+        if (rh_ai_claim_pm('/\b(?:only|just)\s+(\d+|one|two|three|four|five|six|seven|eight|nine|ten)\b/iu', $head, $hm, PREG_OFFSET_CAPTURE)
+            || rh_ai_claim_pm('/^\s*\*\*[^*\n]*?:\s*(\d+)\*\*/u', $head, $hm, PREG_OFFSET_CAPTURE)
+            || rh_ai_claim_pm('/(?<![\w.,])(\d+)\s+(?:[a-z\-]+\s+){0,2}(?:' . $nouns . ')\b[^\n.]*:\s*$/u', $head, $hm, PREG_OFFSET_CAPTURE)) {
             $count = is_numeric($hm[1][0]) ? (int)$hm[1][0] : (int)rh_ai_claim_word_value($hm[1][0]);
             if ($items + $more > $count) {
                 $out[] = [$hm[1][0], $offs[$i] + (int)$hm[1][1], 'the list beside it is longer', (string)($items + $more)];
@@ -821,17 +917,17 @@ function rh_ai_claim_consistency(string $text): array
     // Parts that do not add up to the total they name ("3 pending and 9 confirmed, 12 in total")
     foreach (rh_ai_claim_sentences($text) as [$a, $b]) {
         $s = substr($text, $a, $b - $a);
-        if (!preg_match('/(?<![\w.,])(\d+)\s*(?:in total|in all|altogether)\b|\b(?:a )?total of\s+(\d+)\b/iu', $s, $tm, PREG_OFFSET_CAPTURE | PREG_UNMATCHED_AS_NULL)) {
+        if (!rh_ai_claim_pm('/(?<![\w.,])(\d+)\s*(?:in total|in all|altogether)\b|\b(?:a )?total of\s+(\d+)\b/iu', $s, $tm, PREG_OFFSET_CAPTURE | PREG_UNMATCHED_AS_NULL)) {
             continue;
         }
         $tg = $tm[1][0] !== null ? $tm[1] : $tm[2];
         $total = (int)$tg[0];
-        if (!preg_match_all('/(?<![\w.,])(\d+)\s+(' . rh_ai_claim_status_words() . '|[a-z]+)\b/iu', $s, $pm, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+        if (!rh_ai_claim_pma('/(?<![\w.,])(\d+)\s+(' . rh_ai_claim_status_words() . '|[a-z]+)\b/iu', $s, $pm, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
             continue;
         }
         $parts = [];
         foreach ($pm as $g) {
-            if ((int)$g[1][1] !== (int)$tg[1] && !preg_match('/^(in|of|out|total|more|days?|nights?|hours?|minutes?)$/iu', $g[2][0])) {
+            if ((int)$g[1][1] !== (int)$tg[1] && !rh_ai_claim_pm('/^(in|of|out|total|more|days?|nights?|hours?|minutes?)$/iu', $g[2][0])) {
                 $parts[] = (int)$g[1][0];
             }
         }
@@ -840,13 +936,13 @@ function rh_ai_claim_consistency(string $text): array
         }
     }
     // A status breakdown in brackets after its total: "Rooms: 12 (3 dirty, 9 available)"
-    if (preg_match_all('/(?<![\w.,])(\d+)(?:\*\*)?\s*\(((?:\d+\s+[a-z _\-]+(?:,\s*|\)))+)/iu', $text, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
+    if (rh_ai_claim_pma('/(?<![\w.,])(\d+)(?:\*\*)?\s*\(((?:\d+\s+[a-z _\-]+(?:,\s*|\)))+)/iu', $text, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
         foreach ($m as $g) {
             $inside = rtrim($g[2][0], ')');
             $sum = 0;
             $all = true;
-            foreach (preg_split('/,\s*/', $inside) as $part) {
-                if (!preg_match('/^(\d+)\s+(' . rh_ai_claim_status_words() . ')$/iu', trim($part), $pp)) {
+            foreach (rh_ai_claim_ps('/,\s*/', $inside) as $part) {
+                if (!rh_ai_claim_pm('/^(\d+)\s+(' . rh_ai_claim_status_words() . ')$/iu', trim($part), $pp)) {
                     $all = false;
                     break;
                 }
@@ -858,9 +954,9 @@ function rh_ai_claim_consistency(string $text): array
         }
     }
     // Counted as active with nothing that made them active ("· 0 logged actions" and no sign-in or visit named)
-    if (preg_match('/\bactive\b/iu', $text)) {
+    if (rh_ai_claim_pm('/\bactive\b/iu', $text)) {
         foreach ($lines as $i => $l) {
-            if (preg_match('/(?<![\w.,])0\s+(?:logged\s+)?actions?\b/iu', $l, $am, PREG_OFFSET_CAPTURE) && !preg_match('/\b(signed in|logged in|seen in the portal|visited|sign-in|online now)\b/iu', $l)) { // "last seen" alone is not a reason
+            if (rh_ai_claim_pm('/(?<![\w.,])0\s+(?:logged\s+)?actions?\b/iu', $l, $am, PREG_OFFSET_CAPTURE) && !rh_ai_claim_pm('/\b(signed in|logged in|seen in the portal|visited|sign-in|online now)\b/iu', $l)) { // "last seen" alone is not a reason
                 $out[] = ['0', $offs[$i] + (int)$am[0][1], 'counted as active with nothing that made them active', null];
             }
         }
@@ -877,6 +973,7 @@ function rh_ai_claim_consistency(string $text): array
 function rh_ai_claim_check(string $reply, string $evidence, array $opt = []): array
 {
     $t0 = microtime(true);
+    $markBefore = rh_ai_claim_preg_error(false); // this check's own mark; an outer guard's mark is put back below
     $today = (string)($opt['today'] ?? rh_ai_today());
     $claims = rh_ai_claim_checkable(rh_ai_claim_extract($reply, $today));
     $bad = [];
@@ -914,8 +1011,8 @@ function rh_ai_claim_check(string $reply, string $evidence, array $opt = []): ar
             }
             // A figure whose own label names lookup fields ("3 arrivals", "balance due MWK ...", "Staff active: 1") must
             // be one of THOSE fields (or a sum / difference of two of them), not just any number found somewhere.
-            if ($c['kind'] === 'count' && preg_match('/^[\s*]*(\p{L}[\p{L}\-]*)/u', substr($reply, $c['end'], 40), $nw2)
-                && preg_match('/(?<![\d.,])' . preg_quote(mb_strtolower($c['raw']), '/') . '\s+' . preg_quote(mb_strtolower($nw2[1]), '/') . '\b/u', $ix['text'])) {
+            if ($c['kind'] === 'count' && rh_ai_claim_pm('/^[\s*]*(\p{L}[\p{L}\-]*)/u', substr($reply, $c['end'], 40), $nw2)
+                && rh_ai_claim_pm('/(?<![\d.,])' . preg_quote(mb_strtolower($c['raw']), '/') . '\s+' . preg_quote(mb_strtolower($nw2[1]), '/') . '\b/u', $ix['text'])) {
                 continue; // the very phrase is in the data ("15 slots" written by the lookup itself)
             }
             $lv = rh_ai_claim_labelled($reply, $c, $ix);
@@ -927,11 +1024,11 @@ function rh_ai_claim_check(string $reply, string $evidence, array $opt = []): ar
                 // Backed only by a sum / difference / ratio: a field plainly named beside it ("5 arrivals" next to
                 // arrivals.total = 3) wins over an accidental derivation. A sentence that says it adds, compares or
                 // leaves something over keeps its derivation.
-                if (preg_match('/\b(together|combined|altogether|in all|in total|total of|plus|sum|between them|overall|more than|fewer than|less than|difference|left|remaining|still|up from|down from|rest|other|besides|apart from|including|of which|out of|share|per cent|percent|rate)\b/iu', substr($reply, $sa, $sb - $sa))) {
+                if (rh_ai_claim_pm('/\b(together|combined|altogether|in all|in total|total of|plus|sum|between them|overall|more than|fewer than|less than|difference|left|remaining|still|up from|down from|rest|other|besides|apart from|including|of which|out of|share|per cent|percent|rate)\b/iu', substr($reply, $sa, $sb - $sa))) {
                     continue;
                 }
                 $cand = rh_ai_claim_candidate($reply, $c, $ix);
-                if ($cand !== null && abs((float)preg_replace('/[^\d.]/', '', $cand) - (float)$c['value']) > (float)($c['tol'] ?? 1e-9)) {
+                if ($cand !== null && abs((float)rh_ai_claim_pr('/[^\d.]/', '', $cand) - (float)$c['value']) > (float)($c['tol'] ?? 1e-9)) {
                     $bad[] = $c;
                 }
             }
@@ -939,7 +1036,9 @@ function rh_ai_claim_check(string $reply, string $evidence, array $opt = []): ar
     }
     $inc = rh_ai_claim_consistency($reply);
     $core = $claims ? (int)$claims[0]['sent'] : 0; // the core answer: the first sentence that states data
-    return ['claims' => count($claims), 'bad' => $bad, 'inconsistent' => $inc, 'core' => $core, 'ms' => round((microtime(true) - $t0) * 1000, 2)];
+    $err = rh_ai_claim_preg_error(); // error = a pattern could not run: this reply was NOT verified
+    rh_ai_claim_preg_error($markBefore || $err); // an outer guard still sees it
+    return ['claims' => count($claims), 'bad' => $bad, 'inconsistent' => $inc, 'core' => $core, 'error' => $err, 'ms' => round((microtime(true) - $t0) * 1000, 2)];
 }
 
 /** Field names that can hold money, or a percentage (a money claim is never matched to a count field). */
@@ -965,10 +1064,10 @@ function rh_ai_claim_labelled(string $text, array $c, array $ix): array
             continue; // dates and tokens
         }
         $p = mb_strtolower((string)$path);
-        if (in_array($c['kind'], ['money', 'pct'], true) && !preg_match(rh_ai_claim_kind_field_re($c['kind']), $p)) {
+        if (in_array($c['kind'], ['money', 'pct'], true) && !rh_ai_claim_pm(rh_ai_claim_kind_field_re($c['kind']), $p)) {
             continue;
         }
-        $keys = preg_split('/[._]+/', $p);
+        $keys = rh_ai_claim_ps('/[._]+/', $p);
         $score = 0;
         foreach ($label as $w => $wt) {
             $w = (string)$w;
@@ -1028,19 +1127,19 @@ function rh_ai_claim_label_words(string $text, array $c, int $from = -1, int $to
     $before = mb_strtolower(substr($text, $bStart, max(0, $c['start'] - $bStart)));
     $aEnd = $to >= 0 ? min($to, $c['end'] + 40) : $c['end'] + 40;
     $after = mb_strtolower(substr($text, $c['end'], max(0, $aEnd - $c['end'])));
-    if ($aEnd < strlen($text) && preg_match('/^\p{L}/u', substr($text, $aEnd, 4))) {
-        $after = (string)preg_replace('/\p{L}+$/u', '', $after); // never half a word at the window's end
+    if ($aEnd < strlen($text) && rh_ai_claim_pm('/^\p{L}/u', substr($text, $aEnd, 4))) {
+        $after = (string)rh_ai_claim_pr('/\p{L}+$/u', '', $after); // never half a word at the window's end
     }
     // What follows a figure labels it only up to the next mark ("2** (1 pending" -> nothing)
-    $after = (string)preg_split('/[(),;.:\n]|\x{00B7}/u', (string)preg_replace('/^[\s*]+/u', '', $after))[0];
-    preg_match_all('/\p{L}+/u', $before, $b);
-    preg_match_all('/\p{L}+/u', $after, $a);
+    $after = (string)rh_ai_claim_ps('/[(),;.:\n]|\x{00B7}/u', (string)rh_ai_claim_pr('/^[\s*]+/u', '', $after))[0];
+    rh_ai_claim_pma('/\p{L}+/u', $before, $b);
+    rh_ai_claim_pma('/\p{L}+/u', $after, $a);
     // Words before the figure weigh more; words after it only when they are not the "of 11 ..." of a part-of-whole
     $wts = [];
     foreach (array_slice($b[0], -4) as $w) {
         $wts[] = [$w, 2];
     }
-    if (!preg_match('/^\s*(?:\*\*)?\s*(?:of|out of)\s+\d/u', $after)) {
+    if (!rh_ai_claim_pm('/^\s*(?:\*\*)?\s*(?:of|out of)\s+\d/u', $after)) {
         foreach (array_slice($a[0], 0, 3) as $w) {
             $wts[] = [$w, ($c['kind'] ?? '') === 'count' ? 2 : 1];
         }
@@ -1057,7 +1156,7 @@ function rh_ai_claim_label_words(string $text, array $c, int $from = -1, int $to
         'check' => 'check_in check_out', 'checkin' => 'check_in', 'checkout' => 'check_out', 'in' => 'check_in', 'out' => 'check_out', 'deposit' => 'deposit paid', 'members' => 'members active', 'orders' => 'open_count orders'];
     $out = [];
     foreach ($wts as [$w, $wt]) {
-        foreach (preg_split('/\s+/', $syn[$w] ?? '') as $s) {
+        foreach (rh_ai_claim_ps('/\s+/', $syn[$w] ?? '') as $s) {
             if ($s !== '') {
                 $out[$s] = max($out[$s] ?? 0, $wt);
             }
@@ -1082,7 +1181,7 @@ function rh_ai_claim_candidate(string $text, array $c, array $ix): ?string
         return $real !== (int)$c['value'] ? (ctype_upper(mb_substr($c['raw'], 0, 1)) ? $name : mb_strtolower($name)) : null;
     }
     if ($c['kind'] === 'token' || $c['kind'] === 'name') {
-        $type = $c['kind'] === 'token' ? (string)$c['type'] : (preg_match('/\b(staff|receptionist|manager|colleague|by)\b/iu', substr($text, max(0, $c['start'] - 40), 40)) ? 'STAFF' : 'GUEST');
+        $type = $c['kind'] === 'token' ? (string)$c['type'] : (rh_ai_claim_pm('/\b(staff|receptionist|manager|colleague|by)\b/iu', substr($text, max(0, $c['start'] - 40), 40)) ? 'STAFF' : 'GUEST');
         $same = [];
         foreach (array_keys($ix['tokens']) as $t) {
             if (strpos($t, '[' . $type . '_') === 0) {
@@ -1101,14 +1200,14 @@ function rh_ai_claim_candidate(string $text, array $c, array $ix): ?string
     $best = 1; // a field must be named by a strong label word (before the figure, or a count's own noun)
     $vals = [];
     foreach ($ix['leaves'] as [$path, $v]) {
-        $isDate = is_string($v) && preg_match('/^\d{4}-\d{2}-\d{2}/', $v);
+        $isDate = is_string($v) && rh_ai_claim_pm('/^\d{4}-\d{2}-\d{2}/', $v);
         if ($c['kind'] === 'date' ? !$isDate : (!is_numeric($v) || $isDate)) {
             continue;
         }
-        if (in_array($c['kind'], ['money', 'pct'], true) && !preg_match(rh_ai_claim_kind_field_re($c['kind']), mb_strtolower((string)$path))) {
+        if (in_array($c['kind'], ['money', 'pct'], true) && !rh_ai_claim_pm(rh_ai_claim_kind_field_re($c['kind']), mb_strtolower((string)$path))) {
             continue;
         }
-        $keys = preg_split('/[._]+/', mb_strtolower((string)$path));
+        $keys = rh_ai_claim_ps('/[._]+/', mb_strtolower((string)$path));
         $keys[] = mb_strtolower((string)$path);
         $last = (string)end($keys);
         $score = 0;
@@ -1136,11 +1235,11 @@ function rh_ai_claim_candidate(string $text, array $c, array $ix): ?string
     }
     $v = (string)array_key_first($vals);
     if ($c['kind'] === 'date') {
-        return preg_match('/^\d{4}-\d{2}-\d{2}$/', trim($c['raw'])) ? $v : date(preg_match('/\d{4}/', $c['raw']) ? 'j M Y' : 'j M', (int)strtotime($v));
+        return rh_ai_claim_pm('/^\d{4}-\d{2}-\d{2}$/', trim($c['raw'])) ? $v : date(rh_ai_claim_pm('/\d{4}/', $c['raw']) ? 'j M Y' : 'j M', (int)strtotime($v));
     }
     if ($c['kind'] === 'money') {
         $prefix = '';
-        if (preg_match('/^([^\d\-]*)/u', $c['raw'], $pm)) {
+        if (rh_ai_claim_pm('/^([^\d\-]*)/u', $c['raw'], $pm)) {
             $prefix = $pm[1];
         }
         return $prefix . number_format((float)$v, strpos($c['raw'], '.') !== false ? 2 : (floor((float)$v) == (float)$v ? 0 : 2));
@@ -1166,7 +1265,7 @@ function rh_ai_claim_rebuild(array $results): string
             continue;
         }
         if (isset($res['not_found']) && is_string($res['not_found'])) {
-            $first = trim((string)preg_split('/(?<=[.!?])\s+/u', $res['not_found'])[0]);
+            $first = trim((string)rh_ai_claim_ps('/(?<=[.!?])\s+/u', $res['not_found'])[0]);
             $total = isset($res['total_in_system']) ? (int)$res['total_in_system'] : null;
             return rtrim($first, '.') . '.' . ($total !== null && $total > 0 ? ' The system holds ' . $total . ' booking' . ($total === 1 ? '' : 's') . ' in all.' : '');
         }
@@ -1279,7 +1378,7 @@ function rh_ai_claim_correct(string $reply, array $check, array $ix, array $resu
             }
         }
     }
-    $text = trim((string)preg_replace("/\n{3,}/", "\n\n", (string)preg_replace('/^[ \t]*(?:[-*•]|\d+[.)])[ \t]*$/mu', '', $text)));
+    $text = trim((string)rh_ai_claim_pr("/\n{3,}/", "\n\n", (string)rh_ai_claim_pr('/^[ \t]*(?:[-*•]|\d+[.)])[ \t]*$/mu', '', $text)));
     return ['text' => $text, 'steps' => $steps, 'fixes' => $fixes, 'need_recheck' => $text === ''];
 }
 
@@ -1289,6 +1388,29 @@ function rh_ai_claim_correct(string $reply, array $check, array $ix, array $resu
  * fixes:list, claims:int, ms:float}
  */
 function rh_ai_claim_guard(string $reply, string $evidence, array $opt = []): array
+{
+    $t0 = microtime(true);
+    $markBefore = rh_ai_claim_preg_error(false);
+    $res = rh_ai_claim_guard_run($reply, $evidence, $opt);
+    $err = rh_ai_claim_preg_error($markBefore);
+    if ($err) {
+        // A pattern could not run, so the reply was not verified: it is never shown unchecked. Same safe path as an
+        // unbacked core claim: rebuilt from the lookups' own wording (c), else the caller asks the Primary model (d).
+        // rh_ai_claim_incident logs it as claim_check_error.
+        rh_ai_claim_preg_error(false);
+        $built = rh_ai_claim_rebuild((array)($opt['results'] ?? []));
+        rh_ai_claim_preg_error($markBefore);
+        $step = $built !== '' ? 'c' : 'd';
+        $res = ['text' => $built, 'changed' => true, 'need_recheck' => $built === '', 'error' => true, 'steps' => ['a' => 0, 'b' => 0, 'c' => 0, 'd' => 0, $step => 1],
+            'fixes' => [['step' => $step, 'claim' => 'the figures, names and dates in that reply', 'kind' => 'claim_check_error', 'field' => '']], 'claims' => (int)($res['claims'] ?? 0)];
+    }
+    $res['error'] = $err;
+    $res['ms'] = round((microtime(true) - $t0) * 1000, 2);
+    return $res;
+}
+
+/** The guard's own work (rh_ai_claim_guard adds the "a pattern could not run" safe path around it). */
+function rh_ai_claim_guard_run(string $reply, string $evidence, array $opt = []): array
 {
     $t0 = microtime(true);
     $today = (string)($opt['today'] ?? rh_ai_today());
@@ -1344,7 +1466,7 @@ function rh_ai_claim_strip(string $reply, array $chk, array $ix): string
         $text .= substr($reply, $a, $b - $a);
         $prevEnd = $b;
     }
-    return trim((string)preg_replace("/\n{3,}/", "\n\n", (string)preg_replace('/^[ \t]*(?:[-*•]|\d+[.)])[ \t]*$/mu', '', $text)));
+    return trim((string)rh_ai_claim_pr("/\n{3,}/", "\n\n", (string)rh_ai_claim_pr('/^[ \t]*(?:[-*•]|\d+[.)])[ \t]*$/mu', '', $text)));
 }
 
 // ── 4. Learn ────────────────────────────────────────────────────────────────
@@ -1357,6 +1479,11 @@ function rh_ai_claim_incident(PDO $db, array $guard, array $ctx, array $refs = [
 {
     if (empty($guard['fixes']) || !function_exists('rh_ai_incident_add')) {
         return 0;
+    }
+    if (!empty($guard['error'])) { // the checker itself could not run: the reply was replaced, not corrected claim by claim
+        return rh_ai_incident_add($db, 'claim_check_error', 'A reply could not be checked (a pattern failed to run), so it was not shown; ' . ((int)($guard['steps']['c'] ?? 0) > 0 ? 'rebuilt from the lookups' : 'the Primary model was asked again'),
+            ['question' => mb_substr((string)($ctx['question'] ?? ''), 0, 300), 'route' => (string)($ctx['route'] ?? ''), 'model' => (string)($ctx['model'] ?? ''), 'pcre_limit' => (string)ini_get('pcre.backtrack_limit')],
+            $refs + ['severity' => 'warning']);
     }
     $fixes = [];
     $reply = (string)($ctx['reply'] ?? '');
@@ -1432,7 +1559,7 @@ function rh_ai_claim_stats(PDO $db, string $from): array
 /** The reply is (or holds) the permission refusal line. */
 function rh_ai_claim_is_refusal(string $reply): bool
 {
-    return (bool)preg_match("/outside what (?:your|this) account can see|(?:you|your account) (?:do(?:es)?n't|do(?:es)? not) have (?:access|permission)|not (?:allowed|permitted) to (?:see|view)/iu", str_replace('’', "'", $reply));
+    return (bool)rh_ai_claim_pm("/outside what (?:your|this) account can see|(?:you|your account) (?:do(?:es)?n't|do(?:es)? not) have (?:access|permission)|not (?:allowed|permitted) to (?:see|view)/iu", str_replace('’', "'", $reply));
 }
 
 /**

@@ -467,6 +467,15 @@ html.rh-ai-is-open .rh-ai-launch {
     min-height: 44px;
 }
 
+/* Big screens: sit between the fixed header and the footer instead of covering them.
+   --rh-ai-bottom is the footer height currently on screen (set by ai-panel.js). */
+@media (min-width: 1025px) {
+    .rh-ai-panel {
+        top: var(--admin-header-height, 74px);
+        bottom: var(--rh-ai-bottom, 0px);
+    }
+}
+
 @media (max-width: 1024px) {
     .rh-ai-panel {
         width: 100%;

@@ -22,6 +22,7 @@
  */
 
 require_once __DIR__ . '/ai-core.php';
+require_once __DIR__ . '/ai-memory.php'; // rh_ai_memory_redact: route examples are redacted before they are stored
 
 /** Words that carry no meaning for routing. */
 function rh_ai_route_stop(): array
@@ -39,7 +40,9 @@ function rh_ai_route_stop(): array
  */
 function rh_ai_route_terms(string $tok): array
 {
-    $t = mb_strtolower(rh_ai_memory_strip_tokens_kind($tok));
+    // Emails and phone / card numbers out first (rh_ai_memory_redact): a learned route's stored examples are these terms,
+    // so nothing personal the vault missed is ever stored; questions are matched the same way, so matching is unchanged
+    $t = mb_strtolower(rh_ai_memory_strip_tokens_kind(rh_ai_memory_redact($tok)));
     $t = (string)preg_replace('/\d{4}-\d{2}-\d{2}/u', ' #date ', $t);
     $t = (string)preg_replace('/\d+(?:[.,]\d+)*/u', ' #n ', $t);
     $words = [];
@@ -177,7 +180,7 @@ function rh_ai_route_renderable(): array
  * Training samples from the chat log (privacy tokens only), newest first, at most ai_route_train_rows answers read.
  * @return array<int,array{q:string,target:string,pattern:array,conv:int,msg:int}>
  */
-function rh_ai_route_samples(PDO $db): array
+function rh_ai_route_samples(PDO $db, ?float $deadline = null): array
 {
     $limit = rh_ai_num('ai_route_train_rows');
     $days = rh_ai_num('ai_route_train_days');
@@ -197,6 +200,9 @@ function rh_ai_route_samples(PDO $db): array
         return [];
     }
     foreach ($rows as $r) {
+        if ($deadline !== null && microtime(true) > $deadline) {
+            break; // bounded in time (ai_route_train_seconds): the two queries per row are the training's real cost
+        }
         $uq->execute([(int)$r['conversation_id'], (int)$r['id']]);
         $u = $uq->fetch(PDO::FETCH_ASSOC);
         if (!$u || mb_strlen((string)$u['content']) > 200 || trim((string)$u['content']) === '') {
@@ -250,16 +256,17 @@ function rh_ai_route_train(PDO $db): array
         $res['note'] = 'Local router learning is off.';
         return $res;
     }
-    $started = microtime(true);
+    // One time budget for the whole run: reading the samples, grouping them and storing the routes (each loop checks it)
+    $deadline = microtime(true) + rh_ai_num('ai_route_train_seconds');
     $need = rh_ai_num('ai_route_promote_n');
     $groups = [];
-    foreach (rh_ai_route_samples($db) as $s) {
+    foreach (rh_ai_route_samples($db, $deadline) as $s) {
         $sig = $s['target'] . '|' . json_encode($s['pattern']);
         $groups[$sig] = $groups[$sig] ?? ['target' => $s['target'], 'pattern' => $s['pattern'], 'qs' => [], 'convs' => [], 'msgs' => []];
         $groups[$sig]['qs'][] = $s['q'];
         $groups[$sig]['convs'][$s['conv']] = true;
         $groups[$sig]['msgs'][] = $s['msg'];
-        if (microtime(true) - $started > 20) {
+        if (microtime(true) > $deadline) {
             break; // bounded in time
         }
     }
@@ -270,6 +277,10 @@ function rh_ai_route_train(PDO $db): array
     }
     $active = (int)$db->query("SELECT COUNT(*) FROM ai_memory WHERE kind = 'route' AND status = 'active'")->fetchColumn();
     foreach ($groups as $sig => $g) {
+        if (microtime(true) > $deadline) {
+            $res['note'] = 'Stopped at the time limit; the rest is learned on the next daily run. ';
+            break;
+        }
         $examples = [];
         foreach (array_unique($g['qs']) as $q) {
             $examples[] = implode(' ', rh_ai_route_terms($q));
@@ -298,7 +309,7 @@ function rh_ai_route_train(PDO $db): array
         $active++;
         $res['promoted']++;
     }
-    $res['note'] = $res['promoted'] . ' route(s) learned, ' . $res['updated'] . ' updated (' . count($groups) . ' question shape(s) seen).';
+    $res['note'] .= $res['promoted'] . ' route(s) learned, ' . $res['updated'] . ' updated (' . count($groups) . ' question shape(s) seen).';
     return $res;
 }
 

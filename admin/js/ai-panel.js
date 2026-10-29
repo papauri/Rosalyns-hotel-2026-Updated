@@ -692,9 +692,22 @@
         input.style.height = Math.min(input.scrollHeight, 140) + 'px';
     }
 
+    // Keep the drawer clear of the footer: lift its bottom edge by however much footer is on screen.
+    function fitFooter() {
+        var f = document.getElementById('rhAdminFooter');
+        var lift = 0;
+        if (f && !panel.hidden) {
+            lift = Math.max(0, Math.round(window.innerHeight - f.getBoundingClientRect().top));
+        }
+        panel.style.setProperty('--rh-ai-bottom', lift + 'px');
+    }
+    window.addEventListener('scroll', fitFooter, { passive: true });
+    window.addEventListener('resize', fitFooter);
+
     // ── Open / close ─────────────────────────────────────────────────────────
     function open() {
         panel.hidden = false;
+        fitFooter();
         launch.setAttribute('aria-expanded', 'true');
         document.documentElement.classList.add('rh-ai-is-open');
         store(KEY_OPEN, '1');

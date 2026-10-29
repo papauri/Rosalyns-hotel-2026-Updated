@@ -627,7 +627,7 @@ function rh_ai_period_parse(string $l, ?string $today = null): ?array
     $num = '(\d{1,3}|' . rh_ai_claim_word_re() . ')';
     if (preg_match('/\b(?:in |over |during |for |from )?(?:the )?(last|past|previous|next|coming)\s+' . $num . '\s+(days?|weeks?|months?)\b/u', $l, $m)) {
         $n = is_numeric($m[2]) ? (int)$m[2] : (int)rh_ai_claim_word_value($m[2]);
-        if ($n >= 1 && $n <= 366) {
+        if ($n >= 1 && $n <= rh_ai_num('ai_period_max_days')) {
             $u = $m[3][0];
             $past = in_array($m[1], ['last', 'past', 'previous'], true);
             $len = $u === 'd' ? $n : ($u === 'w' ? $n * 7 : 0);
