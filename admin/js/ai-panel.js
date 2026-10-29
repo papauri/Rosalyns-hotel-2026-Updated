@@ -692,22 +692,41 @@
         input.style.height = Math.min(input.scrollHeight, 140) + 'px';
     }
 
+    // Footer height currently on screen, in the drawer's own CSS px (the page may be scaled by Display size = html zoom).
+    function footerLift(f) {
+        var z = parseFloat(window.getComputedStyle(document.documentElement).zoom) || 1;
+        return Math.max(0, Math.round((window.innerHeight - f.getBoundingClientRect().top) / z));
+    }
+
     // Keep the drawer clear of the footer: lift its bottom edge by however much footer is on screen.
     function fitFooter() {
         var f = document.getElementById('rhAdminFooter');
         var lift = 0;
         if (f && !panel.hidden) {
-            lift = Math.max(0, Math.round(window.innerHeight - f.getBoundingClientRect().top));
+            lift = footerLift(f);
         }
         panel.style.setProperty('--rh-ai-bottom', lift + 'px');
     }
-    window.addEventListener('scroll', fitFooter, { passive: true });
+    // The footer also moves without a window scroll (inner scroll areas, content loading, zoom, the
+    // install bar), so re-measure every frame while the drawer is open; it only writes when the value changed.
+    var fitRaf = 0;
+    function fitLoop() {
+        fitRaf = 0;
+        if (panel.hidden) { return; }
+        var f = document.getElementById('rhAdminFooter');
+        var lift = f ? footerLift(f) : 0;
+        if (panel.style.getPropertyValue('--rh-ai-bottom') !== lift + 'px') { fitFooter(); }
+        fitRaf = window.requestAnimationFrame(fitLoop);
+    }
+    function startFit() { if (!fitRaf) { fitRaf = window.requestAnimationFrame(fitLoop); } }
+    window.addEventListener('scroll', fitFooter, { passive: true, capture: true });
     window.addEventListener('resize', fitFooter);
 
     // ── Open / close ─────────────────────────────────────────────────────────
     function open() {
         panel.hidden = false;
         fitFooter();
+        startFit();
         launch.setAttribute('aria-expanded', 'true');
         document.documentElement.classList.add('rh-ai-is-open');
         store(KEY_OPEN, '1');

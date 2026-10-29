@@ -183,6 +183,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $limitPairs['ai_idle_lock_minutes'] = (string)(int)$idle;
             }
+            if (isset($_POST['ai_period_max_days'])) {
+                $pm = trim((string)$_POST['ai_period_max_days']);
+                if (!ctype_digit($pm) || (int)$pm < 1 || (int)$pm > 999) {
+                    throw new RuntimeException('Longest period a question can cover: 1 to 999 days.');
+                }
+                $limitPairs['ai_period_max_days'] = (string)(int)$pm;
+            }
+            if (isset($_POST['ai_route_train_seconds'])) {
+                $rt = trim((string)$_POST['ai_route_train_seconds']);
+                if (!ctype_digit($rt) || (int)$rt < 5 || (int)$rt > 120) {
+                    throw new RuntimeException('Nightly learning time limit: 5 to 120 seconds.');
+                }
+                $limitPairs['ai_route_train_seconds'] = (string)(int)$rt;
+            }
             if (isset($_POST['ai_digest_enabled'])) {
                 $limitPairs['ai_digest_enabled'] = (string)$_POST['ai_digest_enabled'] === '0' ? '0' : '1';
             }
@@ -777,6 +791,16 @@ $fmtPrice = static function ($v): string {
                         <label for="ai_idle"><strong>Lock the Assistant after (minutes without use)</strong></label>
                         <input type="number" min="0" max="240" step="1" id="ai_idle" name="ai_idle_lock_minutes" class="form-control" value="<?php echo $h((int)($settings['ai_idle_lock_minutes'] ?? 15)); ?>">
                         <p class="help-text">After this long with no use of the portal the chat hides and asks for the person's own password. 0 never locks. Cancelling, checking out, correcting a check-out date, taking a room off sale and sending to a guest (booking email, invoice, enquiry reply, or a review reply that is also emailed) always ask for the password. WhatsApp cards only open the booking screen.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="ai_period_max"><strong>Longest period a question can cover</strong></label>
+                        <input type="number" min="1" max="999" step="1" id="ai_period_max" name="ai_period_max_days" class="form-control" value="<?php echo $h((int)($settings['ai_period_max_days'] ?? 366)); ?>">
+                        <p class="help-text">For questions like "last 400 days": it is read only if 400 is within this number. The same number applies to days, weeks and months: at 366, "last 24 months" works but "last 400 days" does not.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="ai_route_train"><strong>Nightly learning time limit (seconds)</strong></label>
+                        <input type="number" min="5" max="120" step="1" id="ai_route_train" name="ai_route_train_seconds" class="form-control" value="<?php echo $h((int)($settings['ai_route_train_seconds'] ?? 20)); ?>">
+                        <p class="help-text">How long the nightly step that learns quicker answers may run before it stops.</p>
                     </div>
                     <div class="form-group">
                         <label for="ai_digest"><strong>Weekly digest email</strong></label>

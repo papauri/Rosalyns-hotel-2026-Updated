@@ -152,6 +152,13 @@ The feature freeze in BUILD_PLAN.md ("PRODUCTION READINESS GATE") still stands. 
 5. **Guides and KB**: once a change that staff will notice has shipped, `guides-kb-lead` updates the
    matching pages in `docs/guides/` in plain, easy-to-follow English and checks the KB search finds
    them; that update goes through the same review and is committed to both hotels.
+6. **AI lead sync** (owner 2026-10-30): after ANY other lead's change ships, `dept-ai-lead` is told
+   in the same run (short brief: commit hash, files, what changed for staff). It checks whether the
+   Assistant's lookups, actions/confirm cards, guided flows, local answers, evals or its own guide
+   depend on what changed (renamed columns/tables/settings, new statuses, moved screens, new rules,
+   permission changes) and patches + tests the Assistant if so; "no impact" is a valid answer. Its
+   fix goes through the same review and ships to both hotels. Skip only for changes made by the AI
+   lead itself.
 
 ## Cost rules (owner, 2026-10-19: build fast and cheap)
 

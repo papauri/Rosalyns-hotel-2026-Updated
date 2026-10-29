@@ -60,7 +60,7 @@
 
   <h3>How to use the Assistant</h3>
   <ol class="steps">
-    <li>Click the <strong>Assistant</strong> button (speech bubbles) at the bottom right of any admin screen. The chat opens on the right; on a phone or tablet it fills the screen.</li>
+    <li>Click the <strong>Assistant</strong> button (speech bubbles) at the bottom right of any admin screen. The chat opens on the right. On a wide screen (more than 1024 pixels) it sits between the top bar and the footer, so they stay visible. On a tablet or phone it fills the screen.</li>
     <li>Type your question in plain words in the box at the bottom, for example <em>"Arrivals today"</em> or <em>"Is the Deluxe Room free next Friday for 2 adults?"</em>, and press <strong>Enter</strong> or <strong>Send</strong>. <strong>Shift + Enter</strong> starts a new line.</li>
     <li>Or tap one of the suggestion buttons above the box. They change with the screen you are on (Bookings, Housekeeping and so on).</li>
     <li>The answer appears in the chat. When it mentions a screen or a guide, a button under the answer opens it (guides open in a new tab).</li>
@@ -97,7 +97,7 @@
     <li>For people with money permissions: who still owes money, and where money is being lost (see <a href="#briefing">the daily briefing</a>).</li>
     <li>For the departments your account can see: occupancy, ADR and RevPAR, pace and pickup, till sales and slow tickets, stock alerts, conference and gym, reviews and enquiries, housekeeping and maintenance jobs (see <a href="#team">the team of leads</a>).</li>
     <li><strong>Follow up one order.</strong> Ask <em>"Status of table 5"</em>, by tab name, by order or receipt number, by room number (room service) or by guest name. It shows each item's progress at the kitchen, bar or coffee bar (waiting, being made, ready, served), whether it is paid or voided, minutes waiting and the balance left. If several orders match, it lists them so you can pick one. If none match, it shows what is open now. It looks back 24 hours. It never changes an order: voids, payments and changes stay on the POS screen, and it links you there. Till-only staff see only orders they opened; managers and station staff see all.</li>
-    <li><strong>Follow up one gym member</strong> (only where Gym is switched on). Ask by name, phone or member number. It shows the package, whether it is active, its end date, days left, last visits and booked classes. The balance owed shows only for staff with gym finance, reports, accounting or payments access.</li>
+    <li><strong>Follow up one gym member</strong> (only where Gym is switched on). Ask by name, phone or member number. It shows the package, whether it is active, its end date, days left, last visits and booked classes. The balance owed shows only for staff with gym finance, reports, accounting or payments access. If the balance cannot be read, it says <em>could not be read</em> and points you to <strong>Gym Inquiries</strong> or <strong>Gym Reports</strong>.</li>
     <li><strong>Follow up one gym class.</strong> Ask <em>"Who's on tomorrow's 6am class?"</em> It shows who is booked and the spaces left, using the capacity in the gym slot calendar.</li>
     <li><strong>Follow up one record:</strong> one conference or event booking, one room's cleaning or repair jobs, one stock item, or one purchase order or delivery.</li>
     <li>Common questions such as <em>"Status of table 5"</em> are answered instantly.</li>
@@ -373,6 +373,8 @@
     <li><strong>Messages per person in 10 minutes</strong>: 1 to 500. Default 30.</li>
     <li><strong>Keep chats for (days)</strong>: 0 keeps chats; otherwise 7 to 3,650 days, and older chats are removed each night.</li>
     <li><strong>Most tokens for one question</strong>: all the work for one question together (the Assistant, up to three leads and the merged answer). 5,000 to 1,000,000. Default 60,000. When it is reached the Assistant stops and says so.</li>
+    <li><strong>Longest period a question can cover</strong>: 1 to 999. Default 366. This is the biggest number the Assistant accepts in questions such as "last 24 months" or "next 30 days". With 366, "last 24 months" works but "last 400 days" does not. Days, weeks and months are all compared against this same number.</li>
+    <li><strong>Nightly learning time limit (seconds)</strong>: 5 to 120. Default 20. How long the night-time step that learns quicker answers may run. When the time is up it stops and carries on the next night. Nothing else is changed.</li>
     <li><strong>Action cards</strong>: On (it can prepare changes for people to confirm) or Off (answers only, no cards). Default On.</li>
     <li><strong>Lock the Assistant after (minutes without use)</strong>: 0 never locks; otherwise 5 to 240. Default 15. See <a href="#security">Password, lock and the card record</a>.</li>
     <li><strong>Weekly digest email</strong>: On or Off for everyone. Default On. See <a href="#digest">The weekly digest email</a>.</li>
@@ -448,6 +450,7 @@
       <tr><td><em>Could not reach the Assistant. Check the connection and try again.</em></td><td>The device lost its connection.</td><td>Check Wi-Fi or data and send again.</td></tr>
       <tr><td><strong>No order found</strong></td><td>The order is older than 24 hours, the table or number is wrong, or your account is till-only and the order was opened by someone else.</td><td>Check the table or number. Look for older orders on the POS screen. Till-only staff see only their own orders.</td></tr>
       <tr><td><strong>No balance shown</strong> for a gym member</td><td>Your account does not have gym finance, accounting, reports or payments access.</td><td>Ask a manager or someone with those permissions, or check the member on the gym screen.</td></tr>
+      <tr><td><em>could not be read</em> as a gym member's balance</td><td>The balance could not be worked out just now.</td><td>Check <strong>Gym Inquiries</strong> or <strong>Gym Reports</strong> for the amount owed.</td></tr>
       <tr><td>It picked the wrong guest</td><td>Only a first name or a short name was given, and more than one guest matched.</td><td>Say the full name or the booking reference.</td></tr>
       <tr><td>My old chats are gone</td><td>You used <strong>Clear this chat</strong> or <strong>Clear all my chats</strong>.</td><td>Nothing was deleted. The chats are archived, not deleted.</td></tr>
       <tr><td>Breakfast says not included but the guest paid for it</td><td>The breakfast is not on the booking's packages or rate plan.</td><td>Add the package or rate plan to the booking, then ask again.</td></tr>
