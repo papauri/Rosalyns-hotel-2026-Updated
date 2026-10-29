@@ -120,4 +120,4 @@ Owner lead = the department lead whose files it is; the patch lead plans, briefs
 - TODO · KDS-by-user report counts rush/note rows as extra "fired". · restaurant lead
 
 ## Proposed (needs owner approval)
-(none yet)
+- FEATURE UPDATE (owner 2026-10-30, parked: "keep this as a feature update") · AI Assistant, dept-ai-lead only, both hotels. (1) Remaining plain reads answered locally (rooms free this weekend / next N days, menu + dietary filter, who booked X, staff active last N weeks, slow kitchen tickets, enquiries / reviews, booking pace, how-to from the KB) - real-question no-model share 65.9% -> >=85%, est. 1.5-2 h on the live DB. (2) Trim Fast prompts (lane-only tool list, compact results) - p95 8.2k -> <=5k tokens, <= $0.001 per model answer, est. 1-1.5 h. Both: ~2-2.5 h on the live DB, ~1.25 h if a local test copy of the DB is allowed on the laptop (unverified: mysqld --version first). Spec: AI_ASSISTANT_PLAN.md "Round: Top of market" LATER items 5 and 7.
