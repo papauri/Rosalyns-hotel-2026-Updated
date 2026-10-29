@@ -26,6 +26,7 @@ require_once __DIR__ . '/ai-desk.php';     // the front desk without clicking: w
 require_once __DIR__ . '/ai-money.php';    // money read and shown, never moved (owner 2026-10-29)
 require_once __DIR__ . '/ai-guided.php';   // guided cards: one question at a time from the database, no model call
 require_once __DIR__ . '/ai-router.php';   // the learned local router: repeat questions answered with no model call
+require_once __DIR__ . '/ai-claims.php';   // every figure, name and date in a model reply checked against this question's data
 
 if (!defined('RH_AI_TOOL_ROWS')) {
     define('RH_AI_TOOL_ROWS', 20);      // row cap per list (plan: default 20 rows)

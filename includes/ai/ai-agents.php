@@ -1797,6 +1797,9 @@ function rh_ai_evidence_numbers(string $evidence): array
 /** The claims in $reply that the evidence does not back (unique raw strings). Empty = the reply is grounded. */
 function rh_ai_reply_unsupported(string $reply, string $evidence): array
 {
+    if (function_exists('rh_ai_claim_bad_raws') && rh_ai_claim_on()) {
+        return rh_ai_claim_bad_raws($reply, $evidence); // one claim checker (owner 2026-10-29: "Check every claim before replying")
+    }
     $nums = null;
     $bad = [];
     foreach (rh_ai_claims($reply) as $c) {
@@ -2915,6 +2918,9 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
         if (!empty($extra['learned_route'])) {
             $meta['learned_route'] = (int)$extra['learned_route'];
         }
+        if (!empty($extra['claim_fixed'])) {
+            $meta['claim_fixed'] = 1; // a corrected answer never trains a learned route
+        }
         $meta['local_answer'] = in_array($route, ['local', 'guided', 'declined', 'cache', 'briefing', 'learned'], true) && (int)($extra['tokens_in'] ?? 0) === 0 ? 1 : 0;
         $out['message_id'] = rh_ai_message_add($db, $conv, 'assistant', $tokReply, [
             'agent' => $route, 'args' => $meta,
@@ -2985,6 +2991,13 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
         rh_ai_signal_from_last($db, 'contradiction', $conv, $userMsgId, $tok, $uid);
     } elseif (!$new && $gt === null) {
         rh_ai_reask_check($db, $conv, $userMsgId, $tok, $uid); // the same thing asked again in other words right after an answer
+    }
+    // 1b+0. A follow-up that only names a new period, subject or "top N" ("in the last 2 weeks", "what about yesterday",
+    // "same for room 5", "and for him"): the last lookup of this chat again with it, locally (owner fault 2026-10-29: an
+    // administrator got the permission line for "In the last 2 weeks").
+    $followup = !$new && !$contradict ? rh_ai_followup_parse($tokQ, $message) : null;
+    if ($followup !== null && ($fg = rh_ai_followup_generic($db, $user, $conv, $tokQ, $message, $focusState)) !== null) {
+        return $finish(rh_ai_scrub_outbound($db, $conv, (string)$fg['text']), 'local', ['links' => $fg['links'], 'chips' => $fg['chips'], 'local' => $fg['local']]);
     }
     // 1c. Small talk (greeting, thanks, a hard shift): a short friendly reply, no tokens
     // 1b++. One booking (owner fault 2026-10-29): a person search, "yes" to "Do you mean ...?", and money / what's included /
@@ -3090,6 +3103,9 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
     }
     $team = rh_ai_specialists_for_user($user);
     $lanes = rh_ai_lanes_for($team, $tokQ);
+    if (!$lanes && $followup !== null) { // "this month" after a lookup with no local wording: the earlier question's departments
+        $lanes = rh_ai_lanes_for($team, rh_ai_claim_prev_question($db, $conv, $userMsgId));
+    }
     $kind = rh_ai_needs_reasoning($tokQ) ? 'advice' : ($lanes ? 'lookup' : 'short');
     if ($kind === 'advice' && !$lanes) {
         $lanes = rh_ai_advice_default_lanes($team);
@@ -3158,6 +3174,14 @@ RECHECK: the person says the last answer was wrong. A search that found nothing 
 " . $data : 'Look again without filters before answering.');
     }
     $messages[] = ['role' => 'user', 'content' => $question];
+    // What the claim checker may also draw on: earlier lookups of this chat still in context, and the question before
+    // this one (a follow-up's topic). Both are this person's own, already permission-checked results.
+    $prevTok = rh_ai_claim_prev_question($db, $conv, $userMsgId);
+    $priorEvidence = rh_ai_claim_prior_evidence($db, $conv, $userMsgId);
+    $budget['claim_ms'] = 0.0;
+    $budget['claims'] = 0;
+    $refusalAsked = false;
+    $claimFixed = false;
     $notice = '';
     $usedModel = '';
     $absAsked = false;
@@ -3310,6 +3334,8 @@ RECHECK: the person says the last answer was wrong. A search that found nothing 
                     $budget['tools_used'][] = $name;
                     if ($tr['ok']) {
                         $budget['results'][] = [$name, (array)$tr['result'], $runArgs]; // an answer can be built from these if the model gives none
+                    } elseif (strpos((string)$tr['error'], "outside what this account can see") !== false) {
+                        $budget['perm_denied'] = true; // a real server-side permission check failed: a refusal may stand
                     }
                     $budget['links'] = rh_ai_links_merge($budget['links'], $tr['links'], 3);
                     $budget['link_src'][] = [(array)$tr['links'], (string)$json]; // links kept only for the lookups the answer used (owner fault 2026-10-29)
@@ -3409,18 +3435,79 @@ RECHECK: the person says the last answer was wrong. A search that found nothing 
                 . ($budget['links'] ? ', or open the screen below.' : '.');
             break;
         }
-        // Never guesses: every figure, reference, date or name token must come from this turn's data.
-        $bad = $text !== '' ? rh_ai_reply_unsupported($text, $budget['evidence'] . "\n" . $volatile) : [];
-        if ($bad && !$regenerated && ($budget['in'] + $budget['out']) < $budget['tokens_cap']) {
-            $regenerated = true;
-            $messages[] = ['role' => 'assistant', 'content' => $text];
-            $messages[] = ['role' => 'user', 'content' => 'CHECK BEFORE ANSWERING: these are not in the tool results of this question or in what I asked: ' . implode(', ', array_slice($bad, 0, 8))
-                . '. Look them up with a tool, or answer without them. If the data has nothing, say so plainly and offer the next step. Never estimate.'];
-            $final = rh_ai_strip_unsupported($text, $bad); // used if asking again does not come back
-            continue;
+        // A permission refusal is a claim too (owner fault 2026-10-29: "In the last 2 weeks" got "That's outside what your
+        // account can see" for an administrator). It stands only when a real permission check failed; otherwise the
+        // earlier lookup is run again with this question's period locally, or the right department is asked.
+        if ($text !== '' && !$budget['cards'] && rh_ai_claim_is_refusal($text)) {
+            $verdict = rh_ai_claim_refusal_verdict($user, $tokQ, $prevTok, !empty($budget['perm_denied']));
+            if ($verdict['false']) {
+                rh_ai_mistake_signal($db, 'false_refusal', $conv, $tok, ['route' => $route, 'head' => rh_ai_wrong_head($text), 'tools' => array_values(array_unique($budget['tools_used']))], ['user_id' => $uid]);
+                // A follow-up with no subject of its own ("in the last 2 weeks", "what did last week look like") re-runs the earlier
+                // lookup locally; a question naming a subject ("revenue last month") goes back to the model with the right departments.
+                $fg = rh_ai_followup_generic($db, $user, $conv, $tokQ, $message, $focusState);
+                if ($fg === null && ($pp = rh_ai_period_parse($tokQ)) !== null && rh_ai_names_no_subject(str_replace(mb_strtolower($pp['match']), ' ', mb_strtolower($tokQ)))) {
+                    $fg = rh_ai_followup_generic($db, $user, $conv, $pp['match'], '', $focusState); // a longer follow-up with no subject of its own
+                }
+                if ($fg !== null) {
+                    $text = (string)$fg['text'];
+                    $budget['links'] = rh_ai_links_merge($budget['links'], (array)$fg['links'], 3);
+                    $budget['claim_local'] = $fg['local'];
+                } elseif ($verdict['lanes'] && !$refusalAsked && ($budget['in'] + $budget['out']) < $budget['tokens_cap']) {
+                    $refusalAsked = true;
+                    $lanes = $verdict['lanes'];
+                    $kind = $kind === 'short' ? 'lookup' : $kind;
+                    $specs = rh_ai_lane_specs($user, $team, $lanes, $cardsAsked, $factTools);
+                    $route = $primary ? 'primary' : 'fast';
+                    $messages[] = ['role' => 'assistant', 'content' => $text];
+                    $messages[] = ['role' => 'user', 'content' => 'CHECK BEFORE ANSWERING: this person CAN see this (their access was checked). Never use the permission line here. Look it up with the tools and answer, carrying on from the earlier question if this one only names a new period or subject.'];
+                    continue;
+                } else {
+                    $gl = rh_ai_guide_links($db, $user, $tok, 1);
+                    $text = "I can't look that up from the chat yet." . ($gl ? ' The guide below shows where it is on screen.' : ' Open the screen for it from the menu.');
+                    $budget['links'] = rh_ai_links_merge($budget['links'], $gl, 2);
+                }
+            }
         }
-        if ($bad) {
-            $text = rh_ai_strip_unsupported($text, $bad);
+        // Never guesses (owner 2026-10-29: "Check every claim before replying"): every number, name and date must be in
+        // this question's data or follow from it. Corrected locally, cheapest first (drop a side sentence / put the
+        // data's own value in / rebuild from the lookups); only when none of these can answer is the Primary model asked
+        // again. A corrected reply is logged (claim_corrected) and never trains a learned route.
+        if (!empty($budget['claim_local'])) {
+            // a local re-run is built from the data itself: nothing to check
+        } elseif ($text !== '' && rh_ai_claim_on()) {
+            $cg = rh_ai_claim_guard($text, $budget['evidence'] . "\n" . $volatile . "\n" . $priorEvidence, ['vault' => rh_ai_vault_load($db, $conv)['tok'], 'results' => $budget['results']]);
+            $budget['claim_ms'] += $cg['ms'];
+            $budget['claims'] += $cg['claims'];
+            if (!empty($GLOBALS['__rh_ai_claim_trace_on'])) { // test seam: every model reply checked, and what changed
+                $GLOBALS['__rh_ai_claim_trace'][] = ['reply' => mb_substr($text, 0, 160), 'changed' => $cg['changed'], 'fixes' => $cg['fixes'], 'ms' => $cg['ms']];
+            }
+            if ($cg['changed']) {
+                $claimFixed = true;
+                rh_ai_claim_incident($db, $cg, ['question' => $tok, 'route' => $route, 'model' => $usedModel, 'reply' => $text], ['user_id' => $uid, 'conversation_id' => $conv]);
+                if ($cg['need_recheck'] && !$regenerated && ($budget['in'] + $budget['out']) < $budget['tokens_cap']) {
+                    $regenerated = true;
+                    $route = $primary ? 'primary' : 'fast'; // d. as for a contradiction: the Primary model, with the lookups
+                    $messages[] = ['role' => 'assistant', 'content' => $text];
+                    $messages[] = ['role' => 'user', 'content' => 'CHECK BEFORE ANSWERING: these are not in the tool results of this question or in what I asked: ' . implode(', ', array_slice(array_values(array_unique(array_column($cg['fixes'], 'claim'))), 0, 8))
+                        . '. Look them up with a tool, or answer without them. If the data has nothing, say so plainly and offer the next step. Never estimate.'];
+                    $final = $cg['text'] !== '' ? $cg['text'] : "I couldn't confirm that from the hotel's data. Ask me to look it up another way, or check the screen.";
+                    continue;
+                }
+                $text = $cg['text'] !== '' ? $cg['text'] : "I couldn't confirm that from the hotel's data. Ask me to look it up another way, or check the screen.";
+            }
+        } else {
+            $bad = $text !== '' ? rh_ai_reply_unsupported($text, $budget['evidence'] . "\n" . $volatile) : [];
+            if ($bad && !$regenerated && ($budget['in'] + $budget['out']) < $budget['tokens_cap']) {
+                $regenerated = true;
+                $messages[] = ['role' => 'assistant', 'content' => $text];
+                $messages[] = ['role' => 'user', 'content' => 'CHECK BEFORE ANSWERING: these are not in the tool results of this question or in what I asked: ' . implode(', ', array_slice($bad, 0, 8))
+                    . '. Look them up with a tool, or answer without them. If the data has nothing, say so plainly and offer the next step. Never estimate.'];
+                $final = rh_ai_strip_unsupported($text, $bad); // used if asking again does not come back
+                continue;
+            }
+            if ($bad) {
+                $text = rh_ai_strip_unsupported($text, $bad);
+            }
         }
         // "None exist" needs a total behind it: checked against the unfiltered count (local, no model call unless wrong)
         if (!$budget['cards'] && $text !== '') {
@@ -3474,8 +3561,11 @@ RECHECK: the person says the last answer was wrong. A search that found nothing 
     $res = $finish($final, $consulted ? 'swarm' : $route, ['focus' => $focusNow['focus'] ?? null, 'focus_offer' => $focusNow['focus_offer'] ?? 0,
         'links' => $budget['links'], 'chips' => $chips, 'cards' => $budget['cards'], 'provider' => $models['provider'], 'model' => $usedModel,
         'tokens_in' => $budget['in'], 'tokens_out' => $budget['out'], 'cost' => round($budget['cost'], 6), 'ms' => $budget['ms'], 'notice' => $notice,
-        'memory' => array_column($mem, 'id'), 'playbook' => $playbook ? (int)$playbook['id'] : 0]);
+        'memory' => array_column($mem, 'id'), 'playbook' => $playbook ? (int)$playbook['id'] : 0, 'claim_fixed' => $claimFixed, 'local' => $budget['claim_local'] ?? null]);
     $res['answer_kind'] = $kind;
+    $res['claim_ms'] = round((float)$budget['claim_ms'], 2);
+    $res['claims_checked'] = (int)$budget['claims'];
+    $res['claim_fixed'] = $claimFixed;
     if (strpos($final, 'Sorry - the Assistant could not answer') !== 0 && !$budget['cards']) { // a reply with cards is never replayed from the cache
         rh_ai_cache_put($db, $answerKey, $uid, ['reply_tok' => $final, 'links' => $budget['links'], 'chips' => $chips], RH_AI_ANSWER_CACHE_SECONDS);
     }

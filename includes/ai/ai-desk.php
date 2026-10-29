@@ -80,18 +80,22 @@ function rh_ai_t_staff_activity(PDO $db, array $user, array $a): array
         $st = $db->prepare("SELECT user_id, COUNT(*) AS n, MIN(created_at) AS first_at, MAX(created_at) AS last_at FROM admin_activity_log WHERE created_at >= ? AND created_at < ? AND user_id > 0 GROUP BY user_id");
         $st->execute([$from, $toEx]);
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
-            $people[(int)$r['user_id']] = ['actions' => (int)$r['n'], 'first' => (string)$r['first_at'], 'last' => (string)$r['last_at'], 'seen' => ''];
+            $people[(int)$r['user_id']] = ['actions' => (int)$r['n'], 'first' => (string)$r['first_at'], 'last' => (string)$r['last_at'], 'seen' => '', 'signed_in' => ''];
         }
     } catch (Throwable $e) {
         // no activity log: sign-ins below still count
     }
     try {
-        $st = $db->prepare("SELECT user_id, last_seen_at FROM admin_presence WHERE last_seen_at >= ? AND last_seen_at < ?");
+        // Owner fault 2026-10-29: a person counted as active with "0 logged actions" and no reason. The sign-in that made
+        // them active is kept (the portal session's start, when it falls in the period), so the answer can say so.
+        $st = $db->prepare("SELECT user_id, last_seen_at, session_started_at FROM admin_presence WHERE last_seen_at >= ? AND last_seen_at < ?");
         $st->execute([$from, $toEx]);
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $id = (int)$r['user_id'];
-            $people[$id] = $people[$id] ?? ['actions' => 0, 'first' => '', 'last' => '', 'seen' => ''];
+            $people[$id] = $people[$id] ?? ['actions' => 0, 'first' => '', 'last' => '', 'seen' => '', 'signed_in' => ''];
             $people[$id]['seen'] = (string)$r['last_seen_at'];
+            $si = (string)($r['session_started_at'] ?? '');
+            $people[$id]['signed_in'] = $si !== '' && $si >= $from && $si < $toEx ? $si : '';
         }
     } catch (Throwable $e) {
         // no presence table on this install
@@ -142,17 +146,22 @@ function rh_ai_t_staff_activity(PDO $db, array $user, array $a): array
         }
         $p = $people[$hit];
         return ['from' => $from, 'to' => $to, 'staff_name' => $names[$hit]['name'], 'role' => $roleLabel($names[$hit]['role']), 'active' => 'yes',
-            'actions' => $p['actions'], 'last_seen' => substr(max($p['seen'], $p['last']), 0, 16), 'latest_actions' => $acts ?: 'none logged (seen in the portal only)'];
+            'actions' => $p['actions'], 'signed_in' => $p['signed_in'] !== '' ? substr($p['signed_in'], 0, 16) : null, 'last_seen' => substr(max($p['seen'], $p['last']), 0, 16),
+            'latest_actions' => $acts ?: 'none logged (seen in the portal only)'];
     }
     $list = [];
     foreach ($people as $id => $p) {
         $list[] = ['staff_name' => $names[$id]['name'] ?? ('user #' . $id), 'role' => $roleLabel((string)($names[$id]['role'] ?? '')),
-            'actions' => $p['actions'], 'first' => $p['first'] !== '' ? substr($p['first'], 0, 16) : null, 'last_seen' => substr(max($p['last'], $p['seen']), 0, 16)];
+            'actions' => $p['actions'], 'active_because' => $p['actions'] > 0 ? 'logged actions' : 'signed in to the portal, nothing logged',
+            'signed_in' => $p['signed_in'] !== '' ? substr($p['signed_in'], 0, 16) : null,
+            'first' => $p['first'] !== '' ? substr($p['first'], 0, 16) : null, 'last_seen' => substr(max($p['last'], $p['seen']), 0, 16)];
     }
     usort($list, static fn($x, $y) => strcmp((string)$y['last_seen'], (string)$x['last_seen']));
+    $withActions = count(array_filter($list, static fn($x) => $x['actions'] > 0));
     $link = function_exists('rhCanOpenPage') && rhCanOpenPage((int)$user['id'], 'system-logs.php') ? ['system-logs.php', 'Open System Logs'] : ['user-management.php', 'Open User Management'];
-    return ['from' => $from, 'to' => $to, 'active_staff' => count($list), 'staff_accounts' => $accounts, 'staff' => $list ? array_slice($list, 0, RH_AI_TOOL_ROWS) : 'none',
-        'counted_from' => 'the activity log (sign-ins, changes, Assistant cards) and portal sign-ins', 'link' => $link[0], 'link_label' => $link[1]];
+    return ['from' => $from, 'to' => $to, 'active_staff' => count($list), 'staff_accounts' => $accounts, 'with_logged_actions' => $withActions, 'signed_in_only' => count($list) - $withActions,
+        'staff' => $list ? array_slice($list, 0, RH_AI_TOOL_ROWS) : 'none',
+        'counted_from' => 'people with logged actions in the activity log, plus people who signed in to the portal with nothing logged', 'link' => $link[0], 'link_label' => $link[1]];
 }
 
 /**
@@ -162,45 +171,87 @@ function rh_ai_t_staff_activity(PDO $db, array $user, array $a): array
 function rh_ai_desk_staff_intent(string $l): ?array
 {
     $l = trim($l, " ?.!");
-    $period = '(?:\s+(today|yesterday|this week|last week|this month))?';
+    // The period comes off the end first (any period the shared reader knows: "in the last 2 weeks", "yesterday" ...)
+    $p = rh_ai_period_parse($l);
+    $bare = $p !== null ? trim((string)preg_replace('/^(?:(?:in|over|during|for|from|on)\s+)?(?:the\s+)?/u', '', trim($p['match']))) : '';
+    if ($p !== null && $bare !== '' && preg_match('/\s+' . preg_quote($bare, '/') . '$/u', $l)) {
+        $l = trim((string)preg_replace('/\s+' . preg_quote($bare, '/') . '$/u', '', $l));
+        if (!preg_match('/\b(?:logged|signed|log|sign|checked)\s+in$/u', $l)) {
+            $l = trim((string)preg_replace('/(?:\s+(?:in|over|during|for|from|on|the))+$/u', '', $l)); // "active in the" -> "active"
+        }
+    } else {
+        $p = null;
+    }
     $staff = '(?:staff|staff members?|employees?|workers?|colleagues?|people|team members?|users?)';
     $who = null;
-    if (preg_match('/^what (?:did|has) (?<who>\p{L}[\p{L}\'\- ]{1,40}?) (?:done|do)' . $period . '$/u', $l, $g)) {
+    $top = null;
+    if (preg_match('/^what (?:did|has) (?<who>\p{L}[\p{L}\'\- ]{1,40}?) (?:done|do)$/u', $l, $g)) {
         $who = trim($g['who']);
         if (preg_match('/^(they|he|she|we|you|i|it|the guest|the guests|the system|the hotel)$/u', $who)) {
             return null;
         }
-        $when = $g[1] ?? '';
-    } elseif (preg_match('/^(?:how many|which|what|any)\s+' . $staff . '\s+(?:were|was|are|is|have been|has been)?\s*(?:active|on duty|working|logged (?:in|on)|signed (?:in|on)|online|in the (?:system|portal))' . $period . '$/u', $l, $g)
-        || preg_match('/^who (?:was|were|has been|have been)?\s*(?:active|working|on duty|logged (?:in|on)|signed (?:in|on))' . $period . '$/u', $l, $g)
-        || preg_match('/^(?:staff|team|user) (?:activity|logins?|sign.?ins?)' . $period . '$/u', $l, $g)
-        || preg_match('/^(?:active|logged.in) ' . $staff . $period . '$/u', $l, $g)) {
-        $when = $g[1] ?? '';
-    } else {
+    } elseif (preg_match('/^(?:who (?:are|were|is|was) )?(?:the )?(?:top|most active|busiest)(?:\s+(\d{1,2}|one|two|three|four|five|six|seven|eight|nine|ten))?(?:\s+most)?(?:\s+active)?\s+(' . $staff . ')$/u', $l, $g)) {
+        // "Who are the top 3 active staff" (owner chat 2026-10-29): ranked by logged actions, the period said plainly
+        $n = (string)($g[1] ?? '');
+        $top = $n === '' ? (preg_match('/^(?:who (?:is|was) )?(?:the )?(?:most active|busiest) (?:staff member|employee|worker|user)$/u', $l) ? 1 : 0)
+            : (is_numeric($n) ? (int)$n : (int)rh_ai_claim_word_value($n));
+    } elseif (!preg_match('/^(?:how many|which|what|any)\s+' . $staff . '\s+(?:were|was|are|is|have been|has been)?\s*(?:active|on duty|working|logged (?:in|on)|signed (?:in|on)|online|in the (?:system|portal))$/u', $l)
+        && !preg_match('/^who (?:was|were|has been|have been)?\s*(?:active|working|on duty|logged (?:in|on)|signed (?:in|on))$/u', $l)
+        && !preg_match('/^(?:staff|team|user) (?:activity|logins?|sign.?ins?)$/u', $l)
+        && !preg_match('/^(?:active|logged.in) ' . $staff . '$/u', $l)) {
         return null;
     }
     $today = rh_ai_today();
-    switch ($when) {
-        case 'yesterday':
-            $from = $to = date('Y-m-d', strtotime($today . ' -1 day'));
-            break;
-        case 'this week':
-            $from = date('Y-m-d', strtotime('monday this week', strtotime($today)));
-            $to = $today;
-            break;
-        case 'last week':
-            $from = date('Y-m-d', strtotime('monday last week', strtotime($today)));
-            $to = date('Y-m-d', strtotime($from . ' +6 days'));
-            break;
-        case 'this month':
-            $from = date('Y-m-01', strtotime($today));
-            $to = $today;
-            break;
-        default:
-            $from = $to = $today;
-            $when = 'today';
+    $from = $p !== null ? $p['from'] : $today;
+    $to = $p !== null ? min($p['to'], $today) : $today; // staff activity is never in the future
+    if ($to < $from) {
+        $to = $from;
     }
-    return ['from' => $from, 'to' => $to, 'when' => $when, 'staff' => $who ?? ''];
+    return ['from' => $from, 'to' => $to, 'when' => $p !== null ? $p['label'] : 'today', 'staff' => $who ?? '', 'top' => $top];
+}
+
+/** One staff line: what made them active (logged actions, or a sign-in with nothing logged) and when last seen. */
+function rh_ai_desk_staff_line(array $x, bool $days): string
+{
+    $at = static fn($v) => date($days ? 'D j M, H:i' : 'H:i', (int)strtotime((string)$v));
+    $n = (int)$x['actions'];
+    $why = $n > 0 ? $n . ' logged action' . ($n === 1 ? '' : 's') . (!empty($x['signed_in']) ? ' · signed in ' . $at($x['signed_in']) : '')
+        : (!empty($x['signed_in']) ? 'signed in ' . $at($x['signed_in']) . ', nothing logged' : 'seen in the portal, nothing logged');
+    return '**' . $x['staff_name'] . '**' . (($x['role'] ?? '') !== '' ? ' (' . $x['role'] . ')' : '') . ' · ' . $why . ' · last seen ' . date('D j M, H:i', (int)strtotime((string)$x['last_seen']));
+}
+
+/** How the people were counted, with the real numbers (so the explanation always agrees with the figures). */
+function rh_ai_desk_staff_counted(array $r): string
+{
+    $rows = is_array($r['staff'] ?? null) ? $r['staff'] : [];
+    $wa = (int)($r['with_logged_actions'] ?? count(array_filter($rows, static fn($x) => (int)$x['actions'] > 0)));
+    $so = (int)($r['signed_in_only'] ?? max(0, (int)($r['active_staff'] ?? 0) - $wa));
+    return "\n\nHow they were counted: " . $wa . ' with logged actions in the activity log, ' . $so . ' signed in to the portal with nothing logged.';
+}
+
+/** "Top N staff" for a period: ranked by logged actions, then the latest seen; fewer than N said plainly. */
+function rh_ai_desk_staff_top_text(array $r, string $when, int $n): string
+{
+    $total = (int)($r['active_staff'] ?? 0);
+    if (!isset($r['active_staff']) || $total === 0) {
+        return rh_ai_desk_staff_text($r, $when);
+    }
+    $d = static fn($x) => date('D j M', (int)strtotime((string)$x));
+    $span = $r['from'] === $r['to'] ? $when . ' (' . $d($r['from']) . ')' : $when . ' (' . $d($r['from']) . ' to ' . $d($r['to']) . ')';
+    $rows = is_array($r['staff'] ?? null) ? $r['staff'] : [];
+    usort($rows, static fn($x, $y) => [(int)$y['actions'], (string)$y['last_seen']] <=> [(int)$x['actions'], (string)$x['last_seen']]);
+    $by = 'ranked by logged actions, then the latest seen';
+    if ($n <= 0) {
+        $head = '**Staff active ' . $span . '**, ' . $by . ':';
+    } elseif ($total <= $n) {
+        $head = $total === 1 ? 'Only 1 staff member was active ' . $span . ', so there is no top ' . $n . ' - here is that one (' . $by . '):'
+            : 'Only ' . $total . ' staff were active ' . $span . ', so here are all ' . $total . ', ' . $by . ':';
+    } else {
+        $head = '**Top ' . $n . ' staff active ' . $span . '**, ' . $by . ':';
+        $rows = array_slice($rows, 0, $n);
+    }
+    $days = $r['from'] !== $r['to'];
+    return $head . rh_ai_local_lines(array_map(static fn($x) => rh_ai_desk_staff_line($x, $days), $rows)) . rh_ai_desk_staff_counted($r);
 }
 
 /** The staff-activity answer in plain words (de-identified result: names are tokens). */
@@ -220,19 +271,19 @@ function rh_ai_desk_staff_text(array $r, string $when): string
         foreach (is_array($r['latest_actions'] ?? null) ? $r['latest_actions'] : [] as $x) {
             $lines[] = date('D j M, H:i', strtotime((string)$x['at'])) . ' · ' . $x['what'];
         }
-        return '**' . $r['staff_name'] . '** (' . ($r['role'] ?? '') . ') ' . $span . ': ' . (int)$r['actions'] . ' logged action' . ((int)$r['actions'] === 1 ? '' : 's') . ', last seen ' . date('D j M, H:i', strtotime((string)$r['last_seen'])) . '.'
-            . ($lines ? rh_ai_local_lines($lines) : ' Seen in the portal only (nothing logged).');
+        $na = (int)$r['actions'];
+        $why = $na > 0 ? $na . ' logged action' . ($na === 1 ? '' : 's') : (!empty($r['signed_in']) ? 'signed in ' . date('D j M, H:i', strtotime((string)$r['signed_in'])) . ', nothing logged' : 'seen in the portal, nothing logged');
+        return '**' . $r['staff_name'] . '** (' . ($r['role'] ?? '') . ') ' . $span . ': ' . $why . ', last seen ' . date('D j M, H:i', strtotime((string)$r['last_seen'])) . '.'
+            . ($lines ? rh_ai_local_lines($lines) : '');
     }
     $n = (int)($r['active_staff'] ?? 0);
     $acc = (int)($r['staff_accounts'] ?? 0);
     if ($n === 0) {
         return 'No staff activity is recorded ' . $span . ': nobody signed in or changed anything (checked against the activity log and sign-ins; ' . $acc . ' staff account' . ($acc === 1 ? '' : 's') . ' in the system).';
     }
-    $lines = [];
-    foreach (is_array($r['staff'] ?? null) ? $r['staff'] : [] as $x) {
-        $lines[] = '**' . $x['staff_name'] . '**' . ($x['role'] !== '' ? ' (' . $x['role'] . ')' : '') . ' · ' . (int)$x['actions'] . ' logged action' . ((int)$x['actions'] === 1 ? '' : 's') . ' · last seen ' . date('D j M, H:i', strtotime((string)$x['last_seen']));
-    }
-    return '**Staff active ' . $span . ': ' . $n . '** of ' . $acc . ' staff account' . ($acc === 1 ? '' : 's') . '.' . rh_ai_local_lines($lines) . "\n\nCounted from the activity log (sign-ins, changes) and portal sign-ins.";
+    $days = $r['from'] !== $r['to'];
+    $lines = array_map(static fn($x) => rh_ai_desk_staff_line($x, $days), is_array($r['staff'] ?? null) ? $r['staff'] : []);
+    return '**Staff active ' . $span . ': ' . $n . '** of ' . $acc . ' staff account' . ($acc === 1 ? '' : 's') . '.' . rh_ai_local_lines($lines) . rh_ai_desk_staff_counted($r);
 }
 
 /** One booking row (live) by id or reference, with its room type and room. */
@@ -959,8 +1010,9 @@ function rh_ai_desk_local(PDO $db, array $user, int $conv, string $message, arra
         if ($r === null) {
             return null;
         }
-        return ['text' => rh_ai_desk_staff_text((array)$r['result'], $sa['when']), 'links' => $r['links'], 'chips' => $sa['staff'] === '' ? ['Who is online now?'] : [],
-            'local' => ['tool' => 'staff_activity', 'view' => $args]];
+        $text = $sa['top'] !== null ? rh_ai_desk_staff_top_text((array)$r['result'], $sa['when'], (int)$sa['top']) : rh_ai_desk_staff_text((array)$r['result'], $sa['when']);
+        return ['text' => $text, 'links' => $r['links'], 'chips' => $sa['staff'] === '' ? ['Who is online now?'] : [],
+            'local' => ['tool' => 'staff_activity', 'view' => $args + ['_when' => $sa['when']] + ($sa['top'] !== null ? ['_top' => (int)$sa['top']] : [])]];
     }
     return null;
 }

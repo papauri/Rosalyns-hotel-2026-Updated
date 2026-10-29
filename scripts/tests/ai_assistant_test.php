@@ -30,6 +30,8 @@ function skip(string $l): void { global $skip; $skip++; echo "SKIP $l\n"; }
 require_once $root . '/config/database.php';
 require_once $root . '/admin/includes/permissions.php';
 require_once $root . '/includes/ai/ai-catalog.php';
+$GLOBALS['__rh_ai_claim_trace_on'] = true; // every model reply the claim checker sees is listed (the false-positive count)
+$GLOBALS['__rh_ai_claim_trace'] = [];
 
 /** A second connection that can rename tables in every statement (to make one look missing). */
 class RhAiRewritePdo extends PDO
@@ -1019,11 +1021,11 @@ check(!array_diff(array_unique($leadTools), array_keys($reg3)), 'every lead\'s t
 check(count(rh_ai_specialists()) === 10 && isset(rh_ai_specialists()['money'], rh_ai_specialists()['guest_voice'], rh_ai_specialists()['system_guide'], rh_ai_specialists()['people']), 'ten department leads, following the owner\'s list (Staff & Access added 2026-10-29)');
 // Never guesses: the reply-check itself
 $ev = '{"count":0,"bookings":[]} {"refunds":{"total":6059.57,"count":1}} occupancy_pct 0.4 [GUEST_1]';
-check(rh_ai_reply_unsupported('Found it: booking LSH2026999999 for MWK 150,000.00.', $ev) === ['LSH2026999999', '150,000.00'], 'reply-check: an invented reference and amount are caught', json_encode(rh_ai_reply_unsupported('Found it: booking LSH2026999999 for MWK 150,000.00.', $ev)));
+check(rh_ai_reply_unsupported('Found it: booking LSH2026999999 for MWK 150,000.00.', $ev) === ['LSH2026999999', 'MWK 150,000.00'], 'reply-check: an invented reference and amount are caught', json_encode(rh_ai_reply_unsupported('Found it: booking LSH2026999999 for MWK 150,000.00.', $ev)));
 check(rh_ai_reply_unsupported('MWK 6,059.57 was refunded on 1 payment; occupancy is 0.4%. [GUEST_1] asked.', $ev) === [], 'reply-check: figures and tokens that are in the data pass');
 check(rh_ai_reply_unsupported('About MWK 6,060 was refunded.', $ev) === [], 'reply-check: a figure rounded from the data passes');
 check(rh_ai_reply_unsupported('Reply within 24 hours and apologise first.', $ev) === [], 'reply-check: advice numbers ("within 24 hours") are not data claims');
-check(rh_ai_reply_unsupported('[GUEST_9] owes 12 nights.', $ev) === ['[GUEST_9]', '12'], 'reply-check: an unknown guest token and an invented count are caught');
+check(rh_ai_reply_unsupported('[GUEST_9] owes 12 nights.', $ev) === ['[GUEST_9]', '12 nights'], 'reply-check: an unknown guest token and an invented count are caught');
 $st3 = rh_ai_strip_unsupported("Arrivals are fine. The balance is MWK 150,000.00 for them.\nCheck the screen.", ['150,000.00']);
 check(strpos($st3, '150,000') === false && strpos($st3, 'Arrivals are fine.') !== false && strpos($st3, "couldn't confirm") !== false, 'reply-check: the unconfirmed sentence is removed and the reply says so', $st3);
 // Conversation helpers
@@ -1149,9 +1151,17 @@ if (!$chatReady) {
             ['text' => 'Found it: booking LSH2026999999 for MWK 150,000.00.'],
             ['text' => 'It is LSH2026999999.'],
         ]);
-        check($r['ok'] && count($GLOBALS['ai2_calls']) === 3 && strpos($r['reply'], 'LSH2026999999') === false && strpos($r['reply'], '150,000') === false && stripos($r['reply'], "couldn't confirm") !== false, 'empty booking lookup: an invented reference and amount are caught, regenerated once, then removed', $r['reply']);
-        $regen = json_encode(json_decode($GLOBALS['ai2_calls'][2]['body'] ?? '{}', true)['messages'] ?? []);
-        check(strpos($regen, 'CHECK BEFORE ANSWERING') !== false && strpos($regen, 'LSH2026999999') !== false, 'the regenerate request names the figures that were not in the data');
+        // Owner 2026-10-29 ("Check every claim before replying"): corrected locally first - rebuilt from the lookup's own
+        // not-found line (no extra model call); only when nothing local can answer is the model asked once more.
+        $ncCalls = count($GLOBALS['ai2_calls']);
+        check($r['ok'] && strpos($r['reply'], 'LSH2026999999') === false && strpos($r['reply'], '150,000') === false
+            && (($ncCalls === 2 && stripos($r['reply'], 'No booking matches') !== false) || $ncCalls === 3), 'empty booking lookup: an invented reference and amount are caught and never shown (rebuilt from the lookup, or asked once more)', json_encode([$ncCalls, $r['reply']]));
+        if ($ncCalls === 3) {
+            $regen = json_encode(json_decode($GLOBALS['ai2_calls'][2]['body'] ?? '{}', true)['messages'] ?? []);
+            check(strpos($regen, 'CHECK BEFORE ANSWERING') !== false && strpos($regen, 'LSH2026999999') !== false, 'the ask-again request names the figures that were not in the data');
+        } else {
+            check(stripos($r['reply'], "couldn't confirm") === false, 'a reply rebuilt from the lookup carries no hedging note');
+        }
         $r = $turn3($adm3, 'How much does booking NOPE-ZZ still have to pay?', 0, [
             ['tool_calls' => [['id' => 'toolu_e2', 'name' => 'get_booking', 'args' => ['reference' => 'NOPE-ZZ']]]],
             ['text' => 'They still owe MWK 45,000.'],
@@ -1945,6 +1955,7 @@ if (!$chatReady || !$adm) {
             rh_ai_save_settings(['ai_complete_days' => '3', 'ai_complete_eval_pct' => '95'], $pdo);
             $pdo->exec("UPDATE ai_faults SET status = 'fixed' WHERE status IN ('open', 'forwarded')");
             $pdo->exec("UPDATE ai_incidents SET created_at = DATE_SUB(created_at, INTERVAL 5 DAY)");
+            $pdo->exec("UPDATE ai_eval_runs SET is_daily = 0 WHERE is_daily = 1"); // the hotel's own nightly runs would add to the streak
             $health = ['date' => date('Y-m-d'), 'tools' => ['ok' => 10, 'failed' => [], 'skipped' => []]];
             $insRun = $pdo->prepare("INSERT INTO ai_eval_runs (kind, run_date, is_daily, total, run, passed, failed, pass_pct, passed_ids, failed_ids, clean_day, started_at) VALUES ('full', DATE_SUB(CURDATE(), INTERVAL ? DAY), 1, 10, 10, ?, ?, ?, ?, ?, ?, NOW())");
             $mkToday = static function (array $failed) use ($pdo, $insRun): array {
@@ -4307,6 +4318,16 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
     skip('owner round database checks (Assistant migrations not run here)');
 } else {
     $admR = $pdo->query("SELECT id, role, username, full_name FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    // Lazy table creation (CREATE TABLE IF NOT EXISTS commits implicitly) runs here, BEFORE the transaction, never inside it:
+    // the lookups below (gym slots and classes) would otherwise end the transaction and leave test rows behind.
+    foreach (['gym-schedule-lib.php' => 'gymScheduleEnsureTables', 'gym-classes-lib.php' => 'gymClassesEnsureTables'] as $lib => $fn) {
+        if (is_file($root . '/admin/includes/' . $lib)) {
+            require_once $root . '/admin/includes/' . $lib;
+        }
+        if (function_exists($fn)) {
+            $fn($pdo);
+        }
+    }
     $pdo->beginTransaction();
     try {
         rh_ai_save_settings(['ai_enabled' => '1', 'ai_paused_reason' => '', 'ai_paused_kind' => '', 'ai_provider' => 'google', 'ai_cloud_enabled' => '1', 'ai_user_daily_token_cap' => '50000000', 'ai_monthly_budget_usd' => '1000',
@@ -4657,6 +4678,347 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
             'learning signals (Not right, the false refusal) become regression questions that fail if the wrong answer comes back (privacy tokens left out)', json_encode([$sg, $autoQ]));
         $ls = rh_ai_local_share($pdo, date('Y-m-01'));
         check($ls['answers'] > 0 && $ls['share_pct'] !== null && isset($ls['tokens_saved']), 'the usage page figures: local share and tokens saved this month', json_encode(array_diff_key($ls, ['routes' => 1])));
+
+        // ══ Every claim checked (owner 2026-10-29: "Check every claim before replying"; "flawless with every answer it faces") ══
+        $ccT = rh_ai_today();
+        // A second connection sees a row only once it is committed: the test room must stay invisible to it (no implicit commit)
+        $ccPeer = new PDO('mysql:host=' . DB_HOST . ';port=' . DB_PORT . ';dbname=' . DB_NAME . ';charset=' . DB_CHARSET, DB_USER, DB_PASS, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
+        $inTrx = static fn(): bool => (int)$ccPeer->query("SELECT COUNT(*) FROM rooms WHERE slug = 'aitest-gd-lakeview'")->fetchColumn() === 0;
+        $ccTraceStart = count((array)($GLOBALS['__rh_ai_claim_trace'] ?? [])); // model replies checked by the earlier tests
+        $ccEv = static function (int $conv, int $beforeId) use ($pdo, $admR): string { // what a reply in that chat may draw on, as the turn builds it
+            $ev = rh_ai_context_frozen($pdo) . "\n" . rh_ai_context_user($pdo, $conv, $admR, rh_ai_prefs_get($pdo, (int)$admR['id'])) . "\n" . rh_ai_context_volatile($pdo, $conv, $admR, 'dashboard.php', 0, '', '');
+            $st = $pdo->prepare("SELECT role, content, tool_name, tool_args_json, tool_result_json FROM ai_messages WHERE conversation_id = ? AND id < ? ORDER BY id");
+            $st->execute([$conv, $beforeId]);
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $x) {
+                if ($x['role'] !== 'tool') {
+                    $ev .= "\n" . (string)$x['content'];
+                    continue;
+                }
+                $j = (string)$x['tool_result_json'];
+                if (isset(rh_ai_tool_registry()[(string)$x['tool_name']])) { // stored copies are bounded and cut at 8 KB: the full result too, as the turn had it
+                    $ev .= "\n" . str_replace(["\r", "\n"], ' ', $j);
+                    $j = (string)json_encode(rh_ai_run_tool($pdo, $admR, $conv, (string)$x['tool_name'], rh_ai_vault_resolve_args($pdo, $conv, (array)(json_decode((string)$x['tool_args_json'], true) ?: [])))['result'], JSON_UNESCAPED_UNICODE);
+                }
+                $ev .= "\n" . str_replace(["\r", "\n"], ' ', $j);
+            }
+            return $ev;
+        };
+        $ccFp = 0;
+        $ccFpList = [];
+        $ccLocalN = 0;
+        $ccSelf = static function (array $r, string $label) use ($pdo, $ccEv, &$ccFp, &$ccFpList, &$ccLocalN): void { // a local answer run through the checker (self-test)
+            $mid = (int)($r['message_id'] ?? 0);
+            if ($mid <= 0) {
+                return;
+            }
+            $row = $pdo->query("SELECT content, conversation_id, tool_args_json FROM ai_messages WHERE id = " . $mid)->fetch(PDO::FETCH_ASSOC);
+            // a local answer's own source rows (the briefing keeps its items with the message, not as a lookup row)
+            $ck = rh_ai_claim_check((string)$row['content'], $ccEv((int)$row['conversation_id'], $mid) . "\n" . str_replace(["\r", "\n"], ' ', (string)$row['tool_args_json']), ['vault' => rh_ai_vault_load($pdo, (int)$row['conversation_id'])['tok']]);
+            $ccLocalN++;
+            if ($ck['bad'] || $ck['inconsistent']) {
+                $ccFp++;
+                $ccFpList[] = [$label, mb_substr((string)$row['content'], 0, 200), array_column($ck['bad'], 'raw'), $ck['inconsistent']];
+            }
+        };
+        // 1. Unit: every kind of claim, each wrong one corrected by the right step, derivations and roundings accepted
+        $ccRes = ['arrivals' => ['total' => 3, 'still_to_arrive' => 2, 'arrived' => 1, 'no_room_assigned' => 1, 'list' => [['guest_name' => '[GUEST_1]', 'room_type' => 'Deluxe', 'room_number' => '12', 'status' => 'confirmed', 'leaves' => date('Y-m-d', strtotime($ccT . ' +2 days'))]]],
+            'departures' => ['total' => 2, 'due_out' => 1, 'checked_out' => 1, 'list' => []], 'currency' => 'MWK'];
+        $ccBk = ['booking_id' => 77, 'reference' => '[BK_1]', 'guest_name' => '[GUEST_1]', 'check_in' => $ccT, 'check_out' => date('Y-m-d', strtotime($ccT . ' +2 days')), 'nights' => 2, 'total' => 712345.5, 'paid' => 200000, 'balance_due' => 512345.5, 'occupancy_pct' => 62.5, 'rooms_sold' => 5, 'rooms_available' => 8];
+        $ccHist = ['booking_id' => 77, 'made_by' => '[STAFF_1]', 'guest_name' => '[GUEST_1]'];
+        $ccE = json_encode($ccRes) . "\n" . json_encode($ccBk) . "\n" . json_encode($ccHist) . "\nNOW\n- " . date('l j F Y, H:i') . "\nhow are arrivals and the booking looking today?";
+        $ccResults = [['arrivals_departures', $ccRes, []], ['get_booking', $ccBk, ['booking_id' => 77]], ['booking_history', $ccHist, ['booking_id' => 77]]];
+        $ccG = static fn(string $reply, array $o = []) => rh_ai_claim_guard($reply, $ccE . (string)($o['ev'] ?? ''), ['results' => $o['results'] ?? $ccResults, 'vault' => $o['vault'] ?? ['[GUEST_1]' => 'Charles Nthani', '[STAFF_1]' => 'Mphatso Banda'], 'today' => $ccT]);
+        $ccStep = ['a' => 0, 'b' => 0, 'c' => 0, 'd' => 0];
+        $ccAdd = static function (array $g) use (&$ccStep): void {
+            foreach ($g['steps'] as $k => $n) {
+                $ccStep[$k] += $n;
+            }
+        };
+        $leaves = date('D j M', strtotime($ccT . ' +2 days'));
+        $goodReplies = ['There are 3 arrivals today; 2 are still to arrive.', '[GUEST_1] arrives today, leaves ' . $leaves . ' (2 nights), room 12.', 'The booking total is MWK 712,345.50; MWK 200,000.00 is paid and MWK 512,345.50 is due.',
+            'About MWK 712k in all, and occupancy is 62.5% (5 of 8 rooms).', 'Arrivals and departures together: 5 guests.', 'There are three arrivals today.', 'MWK 712,346 is the total (rounded).', 'Occupancy works out at 63%.',
+            'It was made by [STAFF_1] for Mr Nthani.', 'Reply within 24 hours and apologise first.', 'Check again tomorrow.', 'Of the 3 arrivals, 1 has already arrived.'];
+        $ccGoodBad = [];
+        foreach ($goodReplies as $gr) {
+            $g = $ccG($gr);
+            if ($g['changed']) {
+                $ccGoodBad[] = [$gr, $g['text']];
+            }
+        }
+        check(!$ccGoodBad, 'claim check: correct replies pass untouched - figures, a sum (3+2), a difference, nights between two dates, a percentage of two figures (5 of 8), "712k" and rounding, number words, tokens, a name behind a token ("Mr Nthani" is [GUEST_1]), advice numbers', json_encode($ccGoodBad));
+        $ccCases = [
+            'wrong amount' => ['The balance due is MWK 99,000.00.', 'b', '512,345.50'],
+            'wrong count' => ['There are 47 arrivals today.', 'b', '3 arrivals'],
+            'wrong date' => ['[GUEST_1] leaves on ' . date('j M', strtotime($ccT . ' +9 days')) . '.', 'b', date('j M', strtotime($ccT . ' +2 days'))],
+            'wrong weekday' => ['[GUEST_1] leaves ' . date('D', strtotime($ccT . ' +3 days')) . ' ' . date('j M', strtotime($ccT . ' +2 days')) . '.', 'b', $leaves],
+            'wrong nights' => ['There are 3 arrivals today. [GUEST_1] stays 6 nights.', 'a', 'There are 3 arrivals today.'],
+            'wrong reference' => ['Found it: booking LSH2026999999.', 'c', 'Arrivals', [['arrivals_departures', $ccRes, []]]],
+            'invented guest name' => ['Mr Zogwe arrives today.', 'b', '[GUEST_1] arrives today.'],
+            'invented staff name' => ['There are 3 arrivals today. It was made by Mary Phiri.', 'a', 'There are 3 arrivals today.'],
+            'wrong percent' => ['Occupancy is 71.5%.', 'b', '62.5%'],
+        ];
+        $ccWrong = [];
+        foreach ($ccCases as $what => $cs0) {
+            [$reply, $step, $want] = $cs0;
+            $g = $ccG($reply, isset($cs0[3]) ? ["results" => $cs0[3]] : []);
+            $ccAdd($g);
+            if (!$g['changed'] || ($g['steps'][$step] ?? 0) < 1 || strpos($g['text'], $want) === false || $g['need_recheck'] || rh_ai_claim_check($g['text'], $ccE, ['vault' => ['[GUEST_1]' => 'Charles Nthani', '[STAFF_1]' => 'Mphatso Banda']])['bad']) {
+                $ccWrong[$what] = $g;
+            }
+        }
+        check(!$ccWrong, 'claim check: a wrong amount, count, date, weekday, nights, reference, invented guest name, invented staff name and wrong percent are each corrected by the right step (a drop a side sentence / b put the data\'s value in / c rebuild from the lookups)', json_encode($ccWrong));
+        $gd = rh_ai_claim_guard('They still owe MWK 45,000.', 'how much do they owe?', ['results' => [], 'today' => $ccT]);
+        check($gd['need_recheck'] && $gd['steps']['d'] === 1 && strpos($gd['text'], '45,000') === false, 'claim check: when nothing local can answer (no lookup to rebuild from), the caller is told to ask the Primary model again (step d, counted) and the figure is never kept');
+        $ccAdd($gd);
+        $ck2 = rh_ai_claim_check('[GUEST_1] owes MWK 512,345.51.', $ccE, []);
+        $ck3 = rh_ai_claim_check('[GUEST_1] owes MWK 512,345.52.', $ccE, []);
+        check(!$ck2['bad'] && $ck3['bad'], 'claim check: money rounded within BALANCE_TOLERANCE is accepted; beyond it is not', json_encode([$ck2['bad'], $ck3['bad']]));
+        $rel = rh_ai_claim_extract('3 arrivals tomorrow and 2 yesterday', $ccT);
+        $relD = array_column(array_filter($rel, static fn($c) => $c['kind'] === 'reldate'), 'value');
+        check($relD === [date('Y-m-d', strtotime($ccT . ' +1 day')), date('Y-m-d', strtotime($ccT . ' -1 day'))] && date_default_timezone_get() !== '' && $ccT === date('Y-m-d'),
+            'claim check: today / tomorrow / yesterday are read from the hotel\'s own today (' . date_default_timezone_get() . ')', json_encode($relD));
+        $ckW = rh_ai_claim_check('There are twenty-one arrivals today.', $ccE, []);
+        check($ckW['bad'] && rh_ai_claim_word_value('twenty-one') === 21.0 && rh_ai_claim_word_value('a dozen') === 12.0, 'claim check: number words are read as numbers (a wrong "twenty-one" is caught)');
+        $ccIn = rh_ai_claim_consistency("There is only 1 active staff member today:\n- [STAFF_1]\n- [STAFF_2]") && rh_ai_claim_consistency("**Rooms: 12** (3 dirty, 8 available)") && rh_ai_claim_consistency("3 pending and 9 confirmed, 13 in total.")
+            && rh_ai_claim_consistency('7 of 5 rooms are sold.') && rh_ai_claim_consistency("- **[STAFF_1]** (Administrator) · 0 logged actions · last seen Thu 29 Oct, 00:50\nStaff active today: 1")
+            && !rh_ai_claim_consistency("**Rooms: 12** (3 dirty, 9 available)") && !rh_ai_claim_consistency("**Arrivals today: 3** (2 still to arrive, 1 with no room assigned)\n- a\n- b\n- c");
+        check($ccIn, 'claim check: the reply must agree with itself - a count beside a longer list, status parts that do not add up, a wrong total, "7 of 5", and "active" with 0 actions and nothing that made them active are caught; consistent ones pass');
+        // Permissions: the checker draws only on this chat's own lookups (another person's chat is never evidence)
+        $insC2 = $pdo->prepare("INSERT INTO ai_conversations (user_id, title, page_path) VALUES (?, 'AITest claims', 'dashboard.php')");
+        $insC2->execute([(int)$admR['id']]);
+        $ccAdmConv = (int)$pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO ai_messages (conversation_id, role, agent, content, tool_name, tool_args_json, tool_result_json) VALUES (?, 'tool', 'local', '', 'staff_activity', '{}', ?)")->execute([$ccAdmConv, '{"active_staff":987654,"staff_accounts":4321}']);
+        $insC2->execute([(int)$nbU['id']]);
+        $ccNbConv = (int)$pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO ai_messages (conversation_id, role, agent, content) VALUES (?, 'user', NULL, 'how many staff accounts are there')")->execute([$ccNbConv]);
+        $ccNbMsg = (int)$pdo->lastInsertId();
+        $prior = rh_ai_claim_prior_evidence($pdo, $ccNbConv, $ccNbMsg + 1);
+        $gNb = rh_ai_claim_guard('There are 4321 staff accounts.', 'how many staff accounts are there' . "\n" . $prior, ['results' => []]);
+        check(strpos($prior, '987654') === false && strpos(rh_ai_claim_prior_evidence($pdo, $ccAdmConv, PHP_INT_MAX), '987654') !== false && $gNb['changed'] && strpos($gNb['text'], '4321') === false,
+            'claim check permissions: only this chat\'s own (permission-checked) lookups are evidence; a figure from another person\'s chat is never accepted', json_encode([$gNb['text']]));
+        // Owner screenshot chats as claim-check regressions: "Mr Nthani" (a staff member and a guest share the name), "staff active today", "no bookings"
+        $gN = $ccG('[GUEST_1] (Mr Nthani) was booked in by [STAFF_1].', ['vault' => ['[GUEST_1]' => 'Charles Nthani', '[STAFF_1]' => 'Nthani']]);
+        $gN2 = $ccG('Mr Nthani was booked in by Mary Phiri.', ['vault' => ['[GUEST_1]' => 'Charles Nthani', '[STAFF_1]' => 'Nthani']]);
+        check(!$gN['changed'] && $gN2['changed'] && strpos($gN2['text'], 'Phiri') === false && strpos($gN2['text'], '[STAFF_1]') !== false,
+            'screenshot regression (Nthani): the name behind the booking\'s tokens passes; a staff name from outside the data is replaced by the one staff member in the lookup', json_encode([$gN2['text']]));
+        $gS = $ccG("**Staff active today (" . date('D j M') . "): 2** of 11 staff accounts.\n- **[STAFF_1]** (Administrator) · signed in 00:33, nothing logged · last seen " . date('D j M') . ", 00:56", ['ev' => "\n" . '{"active_staff":1,"staff_accounts":11,"with_logged_actions":0,"signed_in_only":1,"staff":[{"staff_name":"[STAFF_1]","actions":0,"signed_in":"' . $ccT . ' 00:33","last_seen":"' . $ccT . ' 00:56"}]}']);
+        check($gS['changed'] && strpos($gS['text'], ': 1**') !== false, 'screenshot regression (staff active today): a count that disagrees with the lookup and its own list is corrected to the lookup\'s figure', json_encode([$gS['text']]));
+        // Timing: a typical reply, and a long one (bounded by ai_claim_max_claims)
+        $evBig = rh_ai_context_frozen($pdo) . "\n" . $ccE;
+        $t0 = microtime(true);
+        for ($i = 0; $i < 50; $i++) {
+            rh_ai_claim_guard('There are 3 arrivals today; 2 are still to arrive. [GUEST_1] arrives today, leaves ' . $leaves . ' (2 nights), room 12. The booking total is MWK 712,345.50 and MWK 512,345.50 is due; occupancy is 62.5% (5 of 8).', $evBig, ['results' => $ccResults]);
+        }
+        $ccTypical = (microtime(true) - $t0) * 1000 / 50;
+        $long = str_repeat('There are 3 arrivals today and MWK 512,345.50 is due on ' . date('j M') . ' at 14:00 for [GUEST_1], room 12, 2 nights. ', 120);
+        $t0 = microtime(true);
+        rh_ai_claim_guard($long, $evBig, ['results' => $ccResults]);
+        $ccLong = (microtime(true) - $t0) * 1000;
+        check($ccTypical < 20 && $ccLong < 250 && count(rh_ai_claim_extract($long, $ccT)) <= rh_ai_num('ai_claim_max_claims'),
+            'claim check speed: ' . round($ccTypical, 2) . ' ms for a typical reply (under 20 ms), ' . round($ccLong, 1) . ' ms for a ' . strlen($long) . '-character reply (bounded: ' . rh_ai_num('ai_claim_max_claims') . ' claims at most)');
+        echo "INFO claim-check timing: typical " . round($ccTypical, 2) . " ms, long " . round($ccLong, 1) . " ms\n";
+
+        // 2. The model path (fake provider, the model reply injected)
+        if (!$inTrx()) {
+            throw new RuntimeException('the owner round transaction is no longer open (an implicit commit): stopping before more test rows are written');
+        }
+        $ad = rh_ai_run_tool($pdo, $admR, 0, 'arrivals_departures', []);
+        $arrN = (int)($ad['result']['arrivals']['total'] ?? 0);
+        $q1 = 'give me a rundown of the arrivals situation for today with the numbers';
+        $callAd = ['tool_calls' => [['id' => 'toolu_cc1', 'name' => 'arrivals_departures', 'args' => []]]];
+        $incN = static fn(): int => (int)$pdo->query("SELECT COUNT(*) FROM ai_incidents WHERE kind = 'claim_corrected'")->fetchColumn();
+        $i0 = $incN();
+        $m1 = $chatR($q1, 0, [$callAd, ['text' => 'There are ' . $arrN . ' arrivals today.']]);
+        check($m1['ok'] && $m1['reply'] === 'There are ' . $arrN . ' arrivals today.' && empty($m1['claim_fixed']) && count($GLOBALS['ai2_calls']) === 2 && $incN() === $i0,
+            'model path: a correct reply is shown untouched (no extra call, no incident)', json_encode([$m1['reply'], $m1['route']]));
+        $ccMs = [(float)($m1['claim_ms'] ?? 0)];
+        $m2 = $chatR($q1, 0, [$callAd, ['text' => 'There are ' . ($arrN + 9137) . ' arrivals today.']]);
+        $ccMs[] = (float)($m2['claim_ms'] ?? 0);
+        $incRow = (string)$pdo->query("SELECT context_json FROM ai_incidents WHERE kind = 'claim_corrected' ORDER BY id DESC LIMIT 1")->fetchColumn();
+        check($m2['ok'] && strpos($m2['reply'], (string)($arrN + 9137)) === false && strpos($m2['reply'], (string)$arrN) !== false && !empty($m2['claim_fixed']) && count($GLOBALS['ai2_calls']) === 2
+            && $incN() === $i0 + 1 && strpos($incRow, '"step":"b"') !== false,
+            'model path: a wrong count is replaced with the lookup\'s own figure locally (step b, no extra model call) and logged as claim_corrected', json_encode([$m2['reply'], $incRow]));
+        $m3 = $chatR($q1, 0, [$callAd, ['text' => 'There are ' . $arrN . ' arrivals today. Most were booked by Mary Zogwe-Phiri.']]);
+        $ccMs[] = (float)($m3['claim_ms'] ?? 0);
+        $incRow3 = (string)$pdo->query("SELECT CONCAT(summary, ' ', context_json) FROM ai_incidents WHERE kind = 'claim_corrected' ORDER BY id DESC LIMIT 1")->fetchColumn();
+        check($m3['ok'] && strpos($m3['reply'], 'Zogwe') === false && strpos($m3['reply'], 'There are ' . $arrN . ' arrivals today.') === 0 && count($GLOBALS['ai2_calls']) === 2 && strpos($incRow3, 'Zogwe') === false && strpos($incRow3, '"step":"a"') !== false,
+            'model path: an invented staff name in a side sentence is dropped (step a); the incident holds no name (privacy: tokens and "[name]" only)', json_encode([$m3['reply'], $incRow3]));
+        $m4 = $chatR('can you look up booking NOPE-ZZ for me', 0, [['tool_calls' => [['id' => 'toolu_cc4', 'name' => 'get_booking', 'args' => ['reference' => 'NOPE-ZZ']]]],
+            ['text' => 'They still owe MWK 45,000.'], ['text' => 'I can\'t find a booking with that reference - check it and try again?']]);
+        $incRow4 = (string)$pdo->query("SELECT context_json FROM ai_incidents WHERE kind = 'claim_corrected' ORDER BY id DESC LIMIT 1")->fetchColumn();
+        check($m4['ok'] && strpos($m4['reply'], '45') === false && count($GLOBALS['ai2_calls']) === 3 && strpos($incRow4, '"step":"d"') !== false,
+            'model path: with nothing local to answer from, the Primary model is asked once more (step d, counted) and the figure never shows', json_encode([$m4['reply'], count($GLOBALS['ai2_calls'])]));
+        $cs = rh_ai_claim_stats($pdo, date('Y-m-01'));
+        check($cs['total'] >= 3 && $cs['b'] >= 1 && $cs['a'] >= 1 && $cs['d'] >= 1, 'the usage page figure: claims corrected this month, by step', json_encode($cs));
+        $rt = rh_ai_route_samples($pdo);
+        check(!array_filter($rt, static fn($s) => in_array((int)$s['msg'], [(int)$m2['message_id'], (int)$m3['message_id']], true)), 'a corrected answer never trains a learned route');
+        // A permission refusal the model writes for a person who has access is a false claim: answered locally instead
+        $rf1 = $chatR('How many staff were active today', 0);
+        $rf2 = $chatR('what did the last 2 weeks look like then', (int)$rf1['conversation_id'], [['text' => rh_ai_out_of_scope_line()]]);
+        check($rf2['ok'] && stripos($rf2['reply'], 'outside what your account') === false && strpos($rf2['reply'], 'in the last 2 weeks') !== false
+            && (int)$pdo->query("SELECT COUNT(*) FROM ai_incidents WHERE kind = 'false_refusal' AND conversation_id = " . (int)$rf1['conversation_id'])->fetchColumn() === 1,
+            'a refusal is a claim: the model\'s "outside what your account can see" for an administrator is replaced by the lookup for that period (local), and logged as false_refusal', json_encode([$rf2['reply']]));
+        check(rh_ai_names_no_subject('what did the  look like then') && rh_ai_names_no_subject('and ') && !rh_ai_names_no_subject('revenue ') && !rh_ai_names_no_subject('how many arrivals '),
+            'after a false refusal only a follow-up with no subject of its own reuses the earlier lookup; "revenue last month" never answers the last topic');
+        $rfNo = rh_ai_claim_refusal_verdict($nbU, 'how many staff were active today', '', false);
+        check(!$rfNo['false'] || in_array('staff_activity', array_keys(rh_ai_tools_for_user($nbU)), true), 'a refusal stands only when the person really lacks every lookup for the topic', json_encode($rfNo));
+
+        // 3. The owner's 3-turn chat (Rosalyn's 2026-10-29), with database-truth figures
+        $dt = static function (string $from, string $to) use ($pdo): array {
+            $toEx = date('Y-m-d', strtotime($to . ' +1 day'));
+            $st = $pdo->prepare("SELECT COUNT(DISTINCT u) FROM (SELECT user_id AS u FROM admin_activity_log WHERE created_at >= ? AND created_at < ? AND user_id > 0 UNION SELECT user_id FROM admin_presence WHERE last_seen_at >= ? AND last_seen_at < ?) x");
+            $st->execute([$from, $toEx, $from, $toEx]);
+            $act = (int)$st->fetchColumn();
+            $st = $pdo->prepare("SELECT COUNT(DISTINCT user_id) FROM admin_activity_log WHERE created_at >= ? AND created_at < ? AND user_id > 0");
+            $st->execute([$from, $toEx]);
+            return [$act, (int)$st->fetchColumn()];
+        };
+        $acc = (int)$pdo->query("SELECT COUNT(*) FROM admin_users WHERE is_active = 1")->fetchColumn();
+        [$actT, $logT] = $dt($ccT, $ccT);
+        $c1 = $chatR('How many staff were active today', 0);
+        $calls1 = count($GLOBALS['ai2_calls']);
+        $c2 = $chatR('Who are the top 3 active staff', (int)$c1['conversation_id']);
+        $calls2 = count($GLOBALS['ai2_calls']);
+        $c3 = $chatR('In the last 2 weeks', (int)$c1['conversation_id']);
+        $calls3 = count($GLOBALS['ai2_calls']);
+        $f2w = date('Y-m-d', strtotime($ccT . ' -13 days'));
+        [$act2w, $log2w] = $dt($f2w, $ccT);
+        $ok1 = $c1['route'] === 'local' && strpos($c1['reply'], 'Staff active today (' . date('D j M') . '): ' . $actT . '**') !== false && strpos($c1['reply'], 'of ' . $acc . ' staff account') !== false
+            && strpos($c1['reply'], 'How they were counted: ' . $logT . ' with logged actions in the activity log, ' . ($actT - $logT) . ' signed in to the portal with nothing logged.') !== false
+            && !preg_match('/\b0 logged actions?\b/', $c1['reply']) && !rh_ai_claim_consistency($c1['reply']);
+        $ok2 = $c2['route'] === 'local' && strpos($c2['reply'], 'ranked by logged actions') !== false && strpos($c2['reply'], 'today (' . date('D j M') . ')') !== false
+            && ($actT >= 3 ? strpos($c2['reply'], 'Top 3 staff active today') !== false : stripos($c2['reply'], 'only') !== false || $actT === 0);
+        $ok3 = $c3['route'] === 'local' && stripos($c3['reply'], 'outside what your account') === false && strpos($c3['reply'], 'in the last 2 weeks (' . date('D j M', strtotime($f2w)) . ' to ' . date('D j M') . ')') !== false
+            && strpos($c3['reply'], 'How they were counted: ' . $log2w . ' with logged actions') !== false
+            && ($act2w >= 3 ? strpos($c3['reply'], 'Top 3 staff active in the last 2 weeks') !== false : ($act2w === 0 || stripos($c3['reply'], 'only ' . $act2w) !== false || stripos($c3['reply'], 'Only 1 staff member') !== false));
+        check($ok1 && $ok2 && $ok3 && $calls1 + $calls2 + $calls3 === 0,
+            'the owner\'s chat: "How many staff were active today" (' . $actT . ' of ' . $acc . ', ' . $logT . ' with logged actions - what made each one active is shown), "Who are the top 3 active staff" (ranked by logged actions, today said plainly), "In the last 2 weeks" (' . $act2w . ', the top 3 carried over, never the permission line) - all local, figures from the database',
+            json_encode([$c1['reply'], $c2['reply'], $c3['reply']]));
+        $ccSelf($c1, 'staff today');
+        $ccSelf($c2, 'staff top 3');
+        $ccSelf($c3, 'staff 2 weeks');
+        $nb0 = $chatR('There are no bookings in the system yet, right? give me the booking count overall', 0, [['tool_calls' => [['id' => 'toolu_cc9', 'name' => 'search_bookings', 'args' => []]]], ['text' => 'There are no bookings in the system yet.'], ['text' => 'There are no bookings in the system yet.']]);
+        $totB = rh_ai_booking_totals($pdo)['total_in_system'];
+        check($totB === 0 || (stripos($nb0['reply'], 'no bookings in the system') === false && strpos($nb0['reply'], (string)$totB) !== false), 'screenshot regression ("no bookings"): a "none" the totals disprove never shows; the real total does', json_encode([$nb0['reply'], $totB]));
+
+        if (!$inTrx()) {
+            throw new RuntimeException('the owner round transaction is no longer open (an implicit commit): stopping before more test rows are written');
+        }
+        // 4. Robustness sweep: every local lookup, auto-generated variants (typo, follow-ups with a new period, "top N"
+        // with fewer than N, an empty period, a person without the permission, a person with it). Target: 0 failures.
+        foreach (array_keys(getAllPermissions()) as $k) {
+            $gpR->execute([$nbU['id'], $k, in_array($k, ['ai_assistant_use', 'dashboard'], true) ? 1 : 0]);
+        }
+        $sweepBase = [['arrivals today', 'arrivals_departures'], ['who is due out today?', 'arrivals_departures'], ['who is in house?', 'in_house'], ['room status', 'room_board'], ['who is online?', 'who_is_online'],
+            ['what can I do here?', 'my_access'], ['how many bookings do we have', 'search_bookings'], ['what time is check-out?', 'hotel_info'], ['occupancy this month', 'room_performance'],
+            ['which orders are open?', 'order_status'], ["today's gym bookings", 'gym_watch'], ['memberships ending soon', 'gym_watch'], ['how many staff were active today', 'staff_activity'],
+            ['when is the next arrival', 'upcoming_arrivals'], ['tentative bookings', 'booking_holds'], ['blocked dates', 'blocked_dates'], ['show the room price list', 'room_rates']];
+        $periods = ['in the last 2 weeks' => 'in the last 2 weeks', 'what about yesterday?' => 'yesterday', 'this month' => 'this month', 'and last week' => 'last week', 'what about 1 Jan 2031' => 'on ' . date('D j M', strtotime('2031-01-01'))];
+        $typo = static function (string $q): string { // two neighbouring letters swapped in the longest word (one slip)
+            $w = preg_split('/\s+/', $q);
+            $best = -1;
+            $bl = 0;
+            foreach ($w as $i => $x) {
+                if (preg_match('/^[a-z]{6,}$/', $x) && strlen($x) > $bl) {
+                    $bl = strlen($x);
+                    $best = $i;
+                }
+            }
+            if ($best < 0) {
+                return $q;
+            }
+            $x = $w[$best];
+            $k = intdiv(strlen($x), 2);
+            $w[$best] = substr($x, 0, $k - 1) . $x[$k] . $x[$k - 1] . substr($x, $k + 1);
+            return implode(' ', $w);
+        };
+        $refusal = static fn(string $t): bool => rh_ai_claim_is_refusal($t);
+        $sweepN = 0;
+        $sweepFail = [];
+        $live = ['in_house', 'room_board', 'booking_holds', 'order_status', 'my_access', 'hotel_info', 'room_rates', 'search_bookings'];
+        foreach ($sweepBase as [$q, $tool]) {
+            if (!$inTrx()) {
+                throw new RuntimeException('the owner round transaction is no longer open (an implicit commit): stopping before more test rows are written');
+            }
+            // A person with the permission: never a refusal, answered locally
+            $b = $chatR($q, 0);
+            $sweepN++;
+            if (!$b['ok'] || $refusal($b['reply']) || $b['route'] !== 'local' || $GLOBALS['ai2_calls']) {
+                $sweepFail[] = ['base', $q, $b['route'], mb_substr($b['reply'], 0, 140)];
+            }
+            $ccSelf($b, $q);
+            $tq = $typo($q);
+            if ($tq !== $q) {
+                $t = $chatR($tq, 0);
+                $sweepN++;
+                if (!$t['ok'] || $refusal($t['reply']) || $t['route'] !== 'local' || $GLOBALS['ai2_calls']) {
+                    $sweepFail[] = ['typo', $tq, $t['route'], mb_substr($t['reply'], 0, 140)];
+                }
+                $ccSelf($t, $tq);
+            }
+            // Follow-ups in the same chat: a new period each time, then "top 50" (fewer than asked), then an empty period
+            $conv = (int)$b['conversation_id'];
+            foreach ($periods as $fq => $label) {
+                $f = $chatR($fq, $conv);
+                $sweepN++;
+                $isLive = in_array($tool, $live, true);
+                $okF = $f['ok'] && !$refusal($f['reply']) && $f['route'] === 'local' && !$GLOBALS['ai2_calls']
+                    && ($isLive ? strpos($f['reply'], 'right now') !== false : stripos($f['reply'], $label) !== false);
+                if (!$okF) {
+                    $sweepFail[] = ['follow-up', $q . ' -> ' . $fq, $f['route'], mb_substr($f['reply'], 0, 160)];
+                }
+                $ccSelf($f, $q . ' -> ' . $fq);
+            }
+            $tp = $chatR('top 50', $conv);
+            $sweepN++;
+            if (!$tp['ok'] || $refusal($tp['reply']) || ($tp['route'] === 'local' && !preg_match('/\b(only|first 50|none|no staff|nothing|right now)\b/i', $tp['reply']) && !preg_match('/\*\*/', $tp['reply']))) {
+                $sweepFail[] = ['top N', $q . ' -> top 50', $tp['route'], mb_substr($tp['reply'], 0, 160)];
+            }
+            if ($tp['route'] === 'local') {
+                $ccSelf($tp, $q . ' -> top 50');
+            }
+            // A person without the permission: a refusal only where a real check fails, never data
+            $n = $chatR($q, 0, [], $nbU);
+            $sweepN++;
+            $may = rh_ai_tool_allowed($nbU, $tool);
+            if (!$n['ok'] || ($may ? $refusal($n['reply']) : ($n['route'] !== 'declined' || preg_match('/\*\*[^*]*\d[^*]*\*\*/', $n['reply'])))) {
+                $sweepFail[] = ['no permission', $q, $n['route'], mb_substr($n['reply'], 0, 140)];
+            }
+        }
+        // Entity follow-ups
+        $e1 = $chatR('room status', 0);
+        $e1b = $chatR('same for room ' . $rnA, (int)$e1['conversation_id']);
+        $e2 = $chatR('which orders are open?', 0);
+        $e2b = $chatR('same for table 4', (int)$e2['conversation_id']);
+        $sweepN += 2;
+        if ($e1b['route'] !== 'local' || strpos($e1b['reply'], (string)$rnA) === false || $refusal($e1b['reply'])) {
+            $sweepFail[] = ['entity', 'room status -> same for room ' . $rnA, $e1b['route'], mb_substr($e1b['reply'], 0, 140)];
+        }
+        if ($e2b['route'] !== 'local' || $refusal($e2b['reply'])) {
+            $sweepFail[] = ['entity', 'open orders -> same for table 4', $e2b['route'], mb_substr($e2b['reply'], 0, 140)];
+        }
+        $ccSelf($e1b, 'room entity');
+        $ccSelf($e2b, 'table entity');
+        echo 'INFO robustness sweep: ' . $sweepN . ' variants, ' . count($sweepFail) . " failures\n";
+        check(!$sweepFail, 'robustness sweep: ' . $sweepN . ' variants of every local lookup (typos, follow-ups with a new period, top N with fewer than N, an empty period, a subject, with and without the permission) - no false refusal, no wrong refusal, all answered locally', json_encode($sweepFail));
+        check($inTrx(), 'the claim checks and the sweep ran inside the rolled-back transaction (no implicit commit: lazy table creation was done before it)');
+        // 5. Zero false positives: every local answer above and every question-set (evals.json) answer run through the checker
+        foreach (json_decode((string)file_get_contents($root . '/includes/ai/evals.json'), true)['cases'] as $case) {
+            if (!empty($case['model'])) {
+                continue;
+            }
+            $ev1 = $chatR((string)$case['q'], 0);
+            $ccSelf($ev1, 'eval ' . $case['id']);
+        }
+        echo 'INFO claim-check false positives on local answers: ' . $ccFp . ' of ' . $ccLocalN . "; steps a/b/c/d in tests: " . json_encode($ccStep) . "\n";
+        check($ccFp === 0 && $ccLocalN >= 100, 'claim check self-test: ' . $ccLocalN . ' local answers (every question-set answer, the sweep, the owner chat) pass the checker unchanged - 0 false positives', json_encode(array_slice($ccFpList, 0, 40)));
+        $tr0 = array_slice((array)($GLOBALS['__rh_ai_claim_trace'] ?? []), 0, $ccTraceStart);
+        $trAll = (array)($GLOBALS['__rh_ai_claim_trace'] ?? []);
+        $trCh = array_values(array_filter($tr0, static fn($t) => $t['changed']));
+        echo 'INFO model replies checked in the earlier tests: ' . count($tr0) . ', changed: ' . count($trCh) . '; average check time over all ' . count($trAll) . ' model replies: ' . ($trAll ? round(array_sum(array_column($trAll, 'ms')) / count($trAll), 2) : 0) . " ms\n";
+        foreach ($trCh as $t) {
+            echo 'INFO changed: ' . str_replace("\n", ' ', $t['reply']) . ' | ' . json_encode(array_column($t['fixes'], 'claim')) . "\n";
+        }
     } catch (Throwable $e) {
         bad('owner round checks threw', get_class($e) . ': ' . $e->getMessage() . ' @' . $e->getFile() . ':' . $e->getLine());
     } finally {

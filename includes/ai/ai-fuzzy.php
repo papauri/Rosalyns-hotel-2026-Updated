@@ -345,6 +345,23 @@ function rh_ai_text_is_write(string $t): bool
 }
 
 /** The one vocabulary word a typo is meant to be, or null (none close, or more than one). */
+/** $a is $b with exactly two neighbouring letters swapped ("sttaus" / "status"). */
+function rh_ai_is_swap(string $a, string $b): bool
+{
+    $x = preg_split('//u', $a, -1, PREG_SPLIT_NO_EMPTY);
+    $y = preg_split('//u', $b, -1, PREG_SPLIT_NO_EMPTY);
+    if (count($x) !== count($y)) {
+        return false;
+    }
+    $diff = [];
+    foreach ($x as $i => $c) {
+        if ($c !== $y[$i]) {
+            $diff[] = $i;
+        }
+    }
+    return count($diff) === 2 && $diff[1] === $diff[0] + 1 && $x[$diff[0]] === $y[$diff[1]] && $x[$diff[1]] === $y[$diff[0]];
+}
+
 function rh_ai_typo_candidate(string $w, array $vocab): ?string
 {
     $len = mb_strlen($w);
@@ -361,8 +378,9 @@ function rh_ai_typo_candidate(string $w, array $vocab): ?string
         if ($d < 1 || $d > $allowed) {
             continue;
         }
-        // A slip keeps the sound of the word ("arivals" / "arrivals"); a different word does not ("towels" / "totals")
-        if (metaphone($v) !== metaphone($w) && soundex($v) !== soundex($w)) {
+        // A slip keeps the sound of the word ("arivals" / "arrivals"); a different word does not ("towels" / "totals").
+        // Two neighbouring letters swapped ("sttaus", "blcoked") is a slip whatever it sounds like (owner 2026-10-29).
+        if (!($d === 1 && rh_ai_is_swap($w, $v)) && metaphone($v) !== metaphone($w) && soundex($v) !== soundex($w)) {
             continue;
         }
         if ($d < $bestD) {

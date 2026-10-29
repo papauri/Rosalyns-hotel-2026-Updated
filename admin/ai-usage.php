@@ -16,6 +16,7 @@ require_once __DIR__ . '/../includes/ai/ai-core.php';
 require_once __DIR__ . '/../includes/ai/ai-memory.php';
 require_once __DIR__ . '/../includes/ai/ai-extras.php';
 require_once __DIR__ . '/../includes/ai/ai-router.php';
+require_once __DIR__ . '/../includes/ai/ai-claims.php'; // claims corrected this month
 
 $h = static function ($v): string {
     return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
@@ -43,6 +44,7 @@ $u = $ready ? rh_ai_usage_summary($pdo, $from, $to) : null;
 $money = static fn($v) => $v === null ? '-' : '$' . number_format((float)$v, (float)$v > 0 && (float)$v < 0.01 ? 4 : 2);
 $canSettings = hasPermission((int)$user['id'], 'ai_settings');
 $ls = ($ready && $isAdmin) ? rh_ai_local_share($pdo, date('Y-m-01')) : null;
+$cs = ($ls !== null && function_exists('rh_ai_claim_stats')) ? rh_ai_claim_stats($pdo, date('Y-m-01')) : null;
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -133,6 +135,13 @@ $ls = ($ready && $isAdmin) ? rh_ai_local_share($pdo, date('Y-m-01')) : null;
                         <span class="ai-stat__value"><?php echo $h(number_format($ls['tokens_saved'])); ?></span>
                         <span class="ai-stat__sub"><?php echo $ls['avg_model_tokens'] > 0 ? $h('about ' . number_format($ls['avg_model_tokens']) . ' tokens a model answer') : 'No model answers yet this month'; ?></span>
                     </div>
+                    <?php if ($cs !== null): ?>
+                    <div class="ai-stat">
+                        <span class="ai-stat__label">Claims corrected this month <i class="help" data-tip="Figures, names and dates in a model's reply that were not in the hotel's data, since the 1st of this month. Each was fixed before the reply showed: a side sentence dropped, the data's own value put in, or the answer rebuilt from the lookups. Asked again counts the few that needed the main model once more.">?</i></span>
+                        <span class="ai-stat__value"><?php echo $h(number_format($cs['total'])); ?></span>
+                        <span class="ai-stat__sub"><?php echo $cs['total'] > 0 ? $h($cs['a'] . ' dropped, ' . $cs['b'] . ' replaced, ' . $cs['c'] . ' rebuilt, ' . $cs['d'] . ' asked again') : 'None needed this month'; ?></span>
+                    </div>
+                    <?php endif; ?>
                 </div>
                 <h3 class="ai-subhead">Learned local answers <i class="help" data-tip="Question shapes the model answered the same way several times, now answered from the same lookup with no model call. A learned answer marked Not right, or failing a check, stops being used. Forget removes one for good.">?</i></h3>
                 <?php if (!$ls['routes']): ?>

@@ -219,6 +219,12 @@ function rh_ai_setting_defaults(): array
         'ai_route_train_rows'       => '2000', // model answers read by the daily training at most (bounded work)
         'ai_route_train_days'       => '30', // ... from this many days back
         'ai_reask_seconds'          => '180', // the same question asked again in other words within this time counts as a sign the answer missed
+        // Owner 2026-10-29 ("Check every claim before replying"): the claim checker (includes/ai/ai-claims.php)
+        'ai_claim_check_enabled'    => '1',   // '0' = model replies are no longer checked figure by figure (the older checks still run)
+        'ai_claim_pct_tolerance'    => '0.5', // percentage points a shown percentage may differ from the worked one (rounding)
+        'ai_claim_max_claims'       => '60',  // claims checked in one reply at most (bounded work on a very long reply)
+        'ai_claim_evidence_cap'     => '4000', // figures read from one question's evidence at most (bounded work)
+        'ai_followup_max_days'      => '31',  // a period asked of a one-day lookup ("arrivals in the last 2 weeks") is looked up day by day, this many days at most
     ];
 }
 

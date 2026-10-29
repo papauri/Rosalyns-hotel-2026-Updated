@@ -605,3 +605,434 @@ function rh_ai_focus_local(PDO $db, array $user, int $conv, string $message, str
     }
     return ['text' => $text, 'links' => $r['links'], 'chips' => $chips, 'focus' => $target, 'focus_offer' => 0, 'tools' => ['get_booking']];
 }
+
+// ── Follow-ups with a new period or a new subject, for every local lookup (owner fault 2026-10-29) ──────────────
+// A live chat at Rosalyn's: "Who are the top 3 active staff" then "In the last 2 weeks" got the permission line, for an
+// administrator. Any follow-up that only names a new period ("in the last 2 weeks", "what about yesterday", "this
+// month", "and last week"), a new subject ("same for room 5", "table 4", "and for him") or "top N" carries the last
+// lookup of this chat with the new period / subject, locally, zero tokens. Built once here for every read lookup.
+
+/**
+ * A period in the words: ['from', 'to', 'label', 'single', 'match'] or null. Today is the hotel's own today.
+ * today / tonight / yesterday / tomorrow, this / last / next week, month and weekend, the last (past) N days / weeks /
+ * months / fortnight, the next N days / weeks, "on 30 Oct" / "on 2026-10-30" and a weekday ("on Friday", "last Friday").
+ */
+function rh_ai_period_parse(string $l, ?string $today = null): ?array
+{
+    $today = $today ?? rh_ai_today();
+    $l = mb_strtolower($l);
+    $t = (int)strtotime($today . ' 12:00:00');
+    $d = static fn(string $rel): string => date('Y-m-d', (int)strtotime($rel, $t));
+    $span = static fn(string $a, string $b, string $label, string $m): array => ['from' => $a, 'to' => $b, 'label' => $label, 'single' => $a === $b, 'match' => $m];
+    $num = '(\d{1,3}|' . rh_ai_claim_word_re() . ')';
+    if (preg_match('/\b(?:in |over |during |for |from )?(?:the )?(last|past|previous|next|coming)\s+' . $num . '\s+(days?|weeks?|months?)\b/u', $l, $m)) {
+        $n = is_numeric($m[2]) ? (int)$m[2] : (int)rh_ai_claim_word_value($m[2]);
+        if ($n >= 1 && $n <= 366) {
+            $u = $m[3][0];
+            $past = in_array($m[1], ['last', 'past', 'previous'], true);
+            $len = $u === 'd' ? $n : ($u === 'w' ? $n * 7 : 0);
+            if ($u === 'm') {
+                $from = $past ? $d('-' . $n . ' months +1 day') : $today;
+                $to = $past ? $today : $d('+' . $n . ' months -1 day');
+            } else {
+                $from = $past ? $d('-' . ($len - 1) . ' days') : $today;
+                $to = $past ? $today : $d('+' . ($len - 1) . ' days');
+            }
+            return $span($from, $to, ($past ? 'in the last ' : 'in the next ') . $n . ' ' . rtrim($m[3], 's') . ($n === 1 ? '' : 's'), $m[0]);
+        }
+    }
+    if (preg_match('/\b(?:in |over |during |for )?(?:the )?(last|past|previous) fortnight\b/u', $l, $m)) {
+        return $span($d('-13 days'), $today, 'in the last 2 weeks', $m[0]);
+    }
+    if (preg_match('/\b(?:for |on |in )?(today|tonight)\b/u', $l, $m)) {
+        return $span($today, $today, $m[1], $m[0]);
+    }
+    if (preg_match('/\b(?:for |on )?(yesterday|tomorrow)\b/u', $l, $m)) {
+        $x = $d($m[1] === 'yesterday' ? '-1 day' : '+1 day');
+        return $span($x, $x, $m[1], $m[0]);
+    }
+    if (preg_match('/\b(?:for |in |during |over )?(this|last|next|the previous|the coming) (week|month|weekend)\b/u', $l, $m)) {
+        $w = $m[1] === 'the previous' ? 'last' : ($m[1] === 'the coming' ? 'next' : $m[1]);
+        if ($m[2] === 'week') {
+            $mon = $d('monday this week');
+            $from = $w === 'this' ? $mon : date('Y-m-d', (int)strtotime($mon . ($w === 'last' ? ' -7 days' : ' +7 days')));
+            return $span($from, date('Y-m-d', (int)strtotime($from . ' +6 days')), $w . ' week', $m[0]);
+        }
+        if ($m[2] === 'month') {
+            $first = $w === 'this' ? date('Y-m-01', $t) : date('Y-m-01', (int)strtotime(date('Y-m-01', $t) . ($w === 'last' ? ' -1 month' : ' +1 month')));
+            return $span($first, date('Y-m-t', (int)strtotime($first)), $w . ' month', $m[0]);
+        }
+        $sat = (int)date('N', $t) === 7 ? $d('-1 day') : $d('saturday this week');
+        $from = $w === 'this' ? $sat : date('Y-m-d', (int)strtotime($sat . ($w === 'last' ? ' -7 days' : ' +7 days')));
+        return $span($from, date('Y-m-d', (int)strtotime($from . ' +1 day')), $w . ' weekend', $m[0]);
+    }
+    if (preg_match('/\b(?:on |for )?(\d{4}-\d{2}-\d{2})\b/u', $l, $m) && strtotime($m[1])) {
+        return $span($m[1], $m[1], 'on ' . date(substr($m[1], 0, 4) === substr($today, 0, 4) ? 'D j M' : 'D j M Y', (int)strtotime($m[1])), $m[0]);
+    }
+    $dates = rh_ai_claim_extract_dates_only(preg_replace('/\b(today|tonight|tomorrow|yesterday)\b/u', '', $l), $today);
+    $mo = '(?:january|february|march|april|may|june|july|august|september|october|november|december|sept|jan|feb|mar|apr|jun|jul|aug|sep|oct|nov|dec)';
+    if ($dates && preg_match('/\b(?:on |for )?(?:the )?(\d{1,2}(?:st|nd|rd|th)?\s+(?:of\s+)?' . $mo . '\b\.?(?:\s+\d{4})?|' . $mo . '\.?\s+\d{1,2}(?:st|nd|rd|th)?(?:,?\s+\d{4})?)\b/u', $l, $m)) {
+        return $span($dates[0], $dates[0], 'on ' . date(substr($dates[0], 0, 4) === substr($today, 0, 4) ? 'D j M' : 'D j M Y', (int)strtotime($dates[0])), $m[0]);
+    }
+    if (preg_match('/\b(?:on |for )?(last |next |this )?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/u', $l, $m)) {
+        $which = trim((string)$m[1]);
+        $x = $which === 'last' ? $d('last ' . $m[2]) : ($which === 'next' ? $d('next ' . $m[2]) : ((string)date('l', $t) === ucfirst($m[2]) ? $today : $d('next ' . $m[2])));
+        return $span($x, $x, 'on ' . date(substr($x, 0, 4) === substr($today, 0, 4) ? 'D j M' : 'D j M Y', (int)strtotime($x)), $m[0]);
+    }
+    return null;
+}
+
+/**
+ * A message that is ONLY a follow-up: a period, a subject (room, table, a person or token, him / her / them) and / or
+ * "top N", with nothing else but lead-in words ("and", "what about", "same for", "in", "please"). $raw keeps the case
+ * (a capitalised name). @return array{period:?array, entity:?array, top:?int}|null
+ */
+function rh_ai_followup_parse(string $tok, string $raw = ''): ?array
+{
+    $l = trim(mb_strtolower($tok));
+    if ($l === '' || mb_strlen($l) > 80 || preg_match('/\b(cancel|change|move|book|check (?:him|her|them|in|out)|assign|send|email|block|unblock|confirm|extend|add|delete|remove|pay|refund|charge|why|how (?:do|can|to))\b/u', $l)) {
+        return null;
+    }
+    $out = ['period' => null, 'entity' => null, 'top' => null];
+    $rest = ' ' . $l . ' ';
+    if (preg_match('/\b(?:the )?(?:top|first|best|busiest|biggest|most active)\s+(\d{1,2}|' . rh_ai_claim_word_re() . ')\b/u', $rest, $m)) {
+        $n = is_numeric($m[1]) ? (int)$m[1] : (int)rh_ai_claim_word_value($m[1]);
+        if ($n >= 1) {
+            $out['top'] = $n;
+            $rest = str_replace($m[0], ' ', $rest);
+        }
+    }
+    if (($p = rh_ai_period_parse($rest)) !== null) {
+        $out['period'] = $p;
+        $rest = str_replace($p['match'], ' ', $rest);
+    }
+    if (preg_match('/\b(?:room|rm)\.?\s*(?:no\.?\s*|number\s*|#)?([a-z]{0,3}\d{1,4}[a-z]?)\b/u', $rest, $m)) {
+        $out['entity'] = ['type' => 'room', 'value' => strtoupper($m[1])];
+        $rest = str_replace($m[0], ' ', $rest);
+    } elseif (preg_match('/\btable\s*(?:no\.?\s*|number\s*|#)?([a-z0-9]{1,6})\b/u', $rest, $m)) {
+        $out['entity'] = ['type' => 'table', 'value' => $m[1]];
+        $rest = str_replace($m[0], ' ', $rest);
+    } elseif (preg_match('/\[(guest|staff)_\d+\]/u', $rest, $m)) {
+        $out['entity'] = ['type' => 'name', 'value' => strtoupper($m[0])];
+        $rest = str_replace($m[0], ' ', $rest);
+    } elseif (preg_match('/\b(him|her|them|that guest|this guest|that person|that staff member|that booking|this booking|that one|this one|the same guest)\b/u', $rest, $m)) {
+        $out['entity'] = ['type' => 'pronoun', 'value' => $m[1]];
+        $rest = str_replace($m[0], ' ', $rest);
+    } elseif ($raw !== '' && preg_match('/^\s*(?:and |what about |how about |same for |and for |for |now )+(?:mr\.? |mrs\.? |ms\.? |miss |dr\.? )?(\p{Lu}[\p{L}\'’\-]+(?:\s+\p{Lu}[\p{L}\'’\-]+)?)\s*[?.!]*\s*$/iu', $raw, $m)
+        && !preg_match('/^(today|tonight|tomorrow|yesterday|this|last|next|monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b/iu', $m[1])) {
+        $out['entity'] = ['type' => 'name', 'value' => $m[1]];
+        $rest = str_ireplace($m[1], ' ', $rest);
+    }
+    if ($out['period'] === null && $out['entity'] === null && $out['top'] === null) {
+        return null;
+    }
+    $rest = (string)preg_replace('/\b(and|what|about|how|same|for|in|over|during|the|show|me|please|pls|then|now|also|again|ok|okay|so|of|from|on|it|that|this|those|these|period|time|just|only|list|see|check|do|thing|things|with|what\'s|whats|is|are|was|were|it\'s|one|ones|instead|too|as well|well|mr|mrs|ms|miss|dr|by|staff|people|members?|time frame|range|dates?|days?|figures?|numbers?)\b|[?.!,;:\-]/u', ' ', $rest);
+    return trim($rest) === '' ? $out : null;
+}
+
+/** The last read lookup of this chat (the last answer's local lookup, else the last read the model ran for it). */
+function rh_ai_last_lookup(PDO $db, int $conv): ?array
+{
+    if ($conv <= 0) {
+        return null;
+    }
+    try {
+        $st = $db->prepare("SELECT id, tool_args_json FROM ai_messages WHERE conversation_id = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1");
+        $st->execute([$conv]);
+        $a = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$a) {
+            return null;
+        }
+        $meta = json_decode((string)$a['tool_args_json'], true) ?: [];
+        if (!empty($meta['local']['tool'])) {
+            $view = (array)($meta['local']['view'] ?? []);
+            $args = isset($view['args']) ? (array)$view['args'] : array_filter($view, static fn($k) => strpos((string)$k, '_') !== 0, ARRAY_FILTER_USE_KEY);
+            return ['tool' => (string)$meta['local']['tool'], 'args' => rh_ai_vault_resolve_args($db, $conv, $args), 'view' => $view];
+        }
+        $st = $db->prepare("SELECT tool_name, tool_args_json FROM ai_messages WHERE conversation_id = ? AND role = 'tool' AND id < ?
+                            AND id > (SELECT COALESCE(MAX(u.id), 0) FROM ai_messages u WHERE u.conversation_id = ? AND u.role = 'user' AND u.id < ?) ORDER BY id DESC LIMIT 8");
+        $st->execute([$conv, (int)$a['id'], $conv, (int)$a['id']]);
+        $reg = rh_ai_tool_registry();
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $t) {
+            $n = (string)$t['tool_name'];
+            if (isset($reg[$n]) && rh_ai_action_key_for_tool($n) === '' && !in_array($n, ['consult_team', 'how_to', 'summarise_guide', 'page_help', 'open_page'], true)) {
+                return ['tool' => $n, 'args' => rh_ai_vault_resolve_args($db, $conv, (array)(json_decode((string)$t['tool_args_json'], true) ?: [])), 'view' => []];
+            }
+        }
+    } catch (Throwable $e) {
+    }
+    return null;
+}
+
+/** How a lookup takes a period: from/to, from + days, one date, or not at all (a live list). */
+function rh_ai_followup_period_kind(string $tool): string
+{
+    $reg = rh_ai_tool_registry()[$tool] ?? null;
+    $props = $reg ? array_keys((array)($reg['schema']['properties'] ?? [])) : [];
+    if (in_array('from', $props, true) && in_array('to', $props, true)) {
+        return 'range';
+    }
+    if (in_array('from', $props, true) && in_array('days', $props, true)) {
+        return 'from_days';
+    }
+    if (in_array('date', $props, true) && $tool !== 'open_page') {
+        return 'day';
+    }
+    return 'live';
+}
+
+/** The headline figure of a one-day lookup (for a period answered day by day). */
+function rh_ai_followup_day_total(string $tool, array $view, array $r): ?int
+{
+    if ($tool === 'arrivals_departures') {
+        $k = ($view['_view'] ?? 'arrivals') === 'departures' ? 'departures' : 'arrivals';
+        return isset($r[$k]['total']) ? (int)$r[$k]['total'] : null;
+    }
+    if ($tool === 'gym_watch') {
+        return isset($r['booked_today_total']) ? (int)$r['booked_today_total'] : null;
+    }
+    return null;
+}
+
+/** The first list of rows in a lookup result (depth 2 at most): [path keys, rows] or null. */
+function rh_ai_followup_list(array $r): ?array
+{
+    foreach ($r as $k => $v) {
+        if (is_array($v) && $v && array_keys($v) === range(0, count($v) - 1) && is_array($v[0])) {
+            return [[$k], $v];
+        }
+    }
+    foreach ($r as $k => $v) {
+        if (is_array($v)) {
+            foreach ($v as $k2 => $v2) {
+                if (is_array($v2) && $v2 && array_keys($v2) === range(0, count($v2) - 1) && is_array($v2[0])) {
+                    return [[$k, $k2], $v2];
+                }
+            }
+        }
+    }
+    return null;
+}
+
+/** A lookup's answer in its own local wording, with the period named. '' = it has no local wording. */
+function rh_ai_followup_render(string $tool, array $args, array $view, array $r, string $label): string
+{
+    if ($tool === 'staff_activity') {
+        return !empty($view['_top']) ? rh_ai_desk_staff_top_text($r, $label, (int)$view['_top']) : rh_ai_desk_staff_text($r, $label);
+    }
+    if ($tool === 'upcoming_arrivals') {
+        return trim(rh_ai_desk_upcoming_text($r, $label));
+    }
+    if ($tool === 'blocked_dates') {
+        return trim(rh_ai_desk_blocked_text($r, $label));
+    }
+    if (in_array($tool, ['arrivals_departures', 'room_performance', 'gym_watch'], true)) {
+        $v = ['_view' => (string)($view['_view'] ?? 'arrivals'), '_when' => $label, 'args' => $args] + (isset($args['date']) ? ['date' => (string)$args['date']] : []);
+        return trim(rh_ai_local_format($tool, $v, $r));
+    }
+    return rh_ai_template_render($tool, $args, $r);
+}
+
+/**
+ * Does this text (with its period already taken out) name no subject of its own? "what did the last 2 weeks look like
+ * then" -> true (carry the earlier lookup); "revenue last month" -> false (a new subject: never reuse the last lookup).
+ */
+function rh_ai_names_no_subject(string $rest): bool
+{
+    static $filler = null;
+    if ($filler === null) {
+        $filler = array_fill_keys(explode(' ', 'a an the and or so then now same again also too just please ok okay what how which did do does '
+            . 'was were is are be been it its that this those these there them they look looked looks like see show tell give me us about over '
+            . 'during for in on at of from to by with period time those figures numbers things same one ones'), true);
+    }
+    foreach (preg_split('/[^\p{L}\[\]_0-9]+/u', mb_strtolower($rest), -1, PREG_SPLIT_NO_EMPTY) as $w) {
+        if (!isset($filler[$w]) && !ctype_digit($w)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
+ * The follow-up answered locally from the last lookup with the new period / subject / top N.
+ * @return array|null ['text','links','chips','local','tool'] (null = not a follow-up of a lookup this can carry)
+ */
+function rh_ai_followup_generic(PDO $db, array $user, int $conv, string $tokQ, string $raw, array $state = []): ?array
+{
+    $f = rh_ai_followup_parse($tokQ, $raw);
+    if ($f === null) {
+        return null;
+    }
+    $last = rh_ai_last_lookup($db, $conv);
+    if ($last === null) {
+        return null;
+    }
+    $tool = $last['tool'];
+    $args = $last['args'];
+    $view = $last['view'];
+    $p = $f['period'];
+    // Who is online is now only; a period means staff activity for it
+    if ($tool === 'who_is_online' && $p !== null) {
+        $tool = 'staff_activity';
+        $args = [];
+    }
+    // The next arrivals asked for a period: the arrivals of those days (past days included), day by day
+    if ($tool === 'upcoming_arrivals' && $p !== null && rh_ai_tool_allowed($user, 'arrivals_departures')) {
+        $tool = 'arrivals_departures';
+        $args = [];
+        $view = ['_view' => 'arrivals'];
+    }
+    if (!rh_ai_tool_allowed($user, $tool)) {
+        return null; // the person may not run it now: the usual path decides (a real permission check)
+    }
+    $label = $p !== null ? $p['label'] : (string)($view['_when'] ?? '');
+    $kind = rh_ai_followup_period_kind($tool);
+    $e = $f['entity'];
+    if ($e !== null) {
+        $who = $e['type'] === 'name' ? rh_ai_vault_resolve_args($db, $conv, ['q' => $e['value']])['q'] : '';
+        if ($tool === 'staff_activity' && in_array($e['type'], ['name', 'pronoun'], true)) {
+            if ($e['type'] === 'pronoun') {
+                $prev = rh_ai_run_tool($db, $user, $conv, $tool, $args);
+                $rows = is_array($prev['result']['staff'] ?? null) ? $prev['result']['staff'] : [];
+                if (count($rows) !== 1 && empty($args['staff'])) {
+                    return null;
+                }
+                $who = !empty($args['staff']) ? (string)$args['staff'] : rh_ai_vault_resolve_args($db, $conv, ['q' => (string)$rows[0]['staff_name']])['q'];
+            }
+            $args['staff'] = $who;
+        } elseif ($tool === 'gym_watch' && $e['type'] === 'name') {
+            $args = ['member' => $who];
+        } elseif ($e['type'] === 'table' && $tool === 'order_status') {
+            $args = ['table' => $e['value']];
+        } elseif ($e['type'] === 'room' && in_array($tool, ['order_status', 'work_queues'], true)) {
+            $args = ['room' => $e['value']];
+        } elseif (in_array($tool, ['get_booking', 'booking_history'], true) && in_array($e['type'], ['name', 'pronoun'], true) && function_exists('rh_ai_desk_pick')) {
+            $pick = rh_ai_desk_pick($db, $user, $conv, $e['type'] === 'pronoun' ? '' : $who, $state + ['focus' => 0, 'offer' => 0], 0);
+            if (empty($pick['id'])) {
+                return null;
+            }
+            $args = ['booking_id' => (int)$pick['id']];
+        } elseif ($e['type'] === 'room' && $tool === 'room_board') {
+            $r = rh_ai_run_tool($db, $user, $conv, 'room_board', []);
+            if (!$r['ok']) {
+                return null;
+            }
+            $all = (array)($r['result']['list'] ?? []);
+            $hit = array_values(array_filter($all, static fn($x) => strcasecmp((string)($x['room'] ?? ''), $e['value']) === 0));
+            if (!$hit && count($all) < (int)($r['result']['rooms'] ?? 0)) {
+                return null; // the board's list is cut short: never say a room is not there
+            }
+            rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => 'room_board', 'args' => [], 'result' => $r['json'], 'agent' => 'local']);
+            $text = $hit ? 'Room ' . $hit[0]['room'] . ' · ' . str_replace('_', ' ', (string)$hit[0]['status']) . (!empty($hit[0]['guest_name']) ? ' · ' . $hit[0]['guest_name'] . ' leaves ' . $hit[0]['leaves'] : '') . (!empty($hit[0]['arrival_today']) ? ' · arrival today' : '')
+                : 'There is no room ' . $e['value'] . ' on the room board (' . (int)($r['result']['rooms'] ?? 0) . ' rooms in all).';
+            return ['text' => $text, 'links' => $r['links'], 'chips' => [], 'local' => ['tool' => 'room_board', 'view' => []], 'tool' => 'room_board'];
+        } else {
+            return null; // a subject this lookup cannot take: the usual path
+        }
+    }
+    $perDay = null;
+    if ($p !== null) {
+        if ($kind === 'range') {
+            $args['from'] = $p['from'];
+            $args['to'] = $p['to'];
+        } elseif ($kind === 'from_days') {
+            $args['from'] = $p['from'];
+            $args['days'] = (int)round((strtotime($p['to']) - strtotime($p['from'])) / 86400) + 1;
+        } elseif ($kind === 'day' && $p['single']) {
+            $args['date'] = $p['from'];
+        } elseif ($kind === 'day') {
+            $perDay = $p; // a period for a one-day lookup: each day looked up and added (bounded by the period length)
+        } else {
+            $live = ['in_house' => 1, 'room_board' => 1, 'booking_holds' => 1, 'order_status' => 1, 'my_access' => 1, 'hotel_info' => 1, 'room_rates' => 1, 'search_bookings' => 1, 'kitchen_tickets' => 1];
+            if (!isset($live[$tool])) {
+                return null; // one booking or record: the usual path reads the words
+            }
+            $what = ['in_house' => 'Who is in house', 'room_board' => 'The room board', 'booking_holds' => 'Bookings waiting to be confirmed', 'order_status' => 'Open orders', 'my_access' => 'Your access',
+                'hotel_info' => 'That', 'room_rates' => 'The price list', 'search_bookings' => 'The bookings total', 'kitchen_tickets' => 'Kitchen tickets'][$tool] ?? 'That list';
+            return ['text' => $what . ' shows how things are right now; it is not kept by date, so it cannot be shown ' . $p['label'] . '. Ask for arrivals, departures or occupancy ' . $p['label'] . ' instead.',
+                'links' => [], 'chips' => [], 'local' => ['tool' => $tool, 'view' => $view], 'tool' => $tool];
+        }
+    }
+    if ($perDay !== null) {
+        $days = (int)round((strtotime($perDay['to']) - strtotime($perDay['from'])) / 86400) + 1;
+        if ($days > rh_ai_num('ai_followup_max_days')) {
+            return null;
+        }
+        $sum = 0;
+        $lines = [];
+        $links = [];
+        for ($i = 0; $i < $days; $i++) {
+            $day = date('Y-m-d', (int)strtotime($perDay['from'] . ' +' . $i . ' days'));
+            $r = rh_ai_run_tool($db, $user, $conv, $tool, ['date' => $day] + array_diff_key($args, ['date' => 1]));
+            if (!$r['ok']) {
+                return null;
+            }
+            $links = $r['links'];
+            $n = rh_ai_followup_day_total($tool, $view, (array)$r['result']);
+            if ($n === null) {
+                // The lookup has no day total to add up (a gym without bookable slots): one day at a time, said plainly
+                return ['text' => 'That is shown one day at a time, so it cannot be added up ' . $perDay['label'] . '. Ask for one day, for example "' . ($tool === 'gym_watch' ? 'gym bookings' : 'arrivals') . ' yesterday".',
+                    'links' => $links, 'chips' => [], 'local' => ['tool' => $tool, 'view' => $view], 'tool' => $tool];
+            }
+            rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => $tool, 'args' => ['date' => $day], 'result' => rh_ai_compact_json(['date' => $day, 'total' => $n]), 'agent' => 'local']);
+            $sum += $n;
+            if ($n > 0) {
+                $lines[] = date('D j M', (int)strtotime($day)) . ': ' . $n;
+            }
+        }
+        // The period's own figures, kept with the lookups (what the answer below says, and what a follow-up may quote)
+        rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => $tool, 'args' => ['from' => $perDay['from'], 'to' => $perDay['to']],
+            'result' => rh_ai_compact_json(['from' => $perDay['from'], 'to' => $perDay['to'], 'days' => $days, 'total' => $sum, 'days_with_any' => count($lines)]), 'agent' => 'local']);
+        $noun = $tool === 'gym_watch' ? 'Gym bookings' : (($view['_view'] ?? 'arrivals') === 'departures' ? 'Departures' : 'Arrivals');
+        $text = '**' . $noun . ' ' . $perDay['label'] . ' (' . date('D j M', (int)strtotime($perDay['from'])) . ' to ' . date('D j M', (int)strtotime($perDay['to'])) . '): ' . $sum . '**'
+            . ($lines ? rh_ai_local_lines($lines) : ' (none on any of those ' . $days . ' days)');
+        return ['text' => $text, 'links' => $links, 'chips' => [], 'local' => ['tool' => $tool, 'view' => ['_view' => $view['_view'] ?? 'arrivals', '_when' => $perDay['label']]], 'tool' => $tool];
+    }
+    $r = rh_ai_run_tool($db, $user, $conv, $tool, $args);
+    if (!$r['ok']) {
+        return null;
+    }
+    rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => $tool, 'args' => rh_ai_vault_protect($db, $conv, $args), 'result' => $r['json'], 'agent' => 'local']);
+    $res = (array)$r['result'];
+    $vw = $view;
+    if ($p !== null) {
+        $vw['_when'] = $p['label'];
+        unset($vw['date']);
+        if (isset($args['date'])) {
+            $vw['date'] = $args['date'];
+        }
+    }
+    if ($f['top'] !== null) {
+        if ($tool === 'staff_activity') {
+            $text = rh_ai_desk_staff_top_text($res, $label !== '' ? $label : (($args['from'] ?? '') === rh_ai_today() ? 'today' : 'in that time'), (int)$f['top']);
+            $vw['_top'] = (int)$f['top']; // a later "in the last 2 weeks" keeps the top N
+        } else {
+            $lst = rh_ai_followup_list($res);
+            if ($lst === null) {
+                return null;
+            }
+            [$path, $rows] = $lst;
+            $k = count($rows);
+            $cut = array_slice($rows, 0, (int)$f['top']);
+            if (count($path) === 1) {
+                $res[$path[0]] = $cut;
+            } else {
+                $res[$path[0]][$path[1]] = $cut;
+            }
+            $body = rh_ai_followup_render($tool, $args, $vw, $res, $label);
+            if ($body === '') {
+                return null;
+            }
+            $text = ($k < (int)$f['top'] && $k < RH_AI_TOOL_ROWS ? 'There' . ($k === 1 ? 'is only 1' : 'are only ' . $k) . ', so here ' . ($k === 1 ? 'it is' : 'are all ' . $k) . ', in the order the screen lists them.'
+                : 'The first ' . (int)$f['top'] . ', in the order the screen lists them.') . "\n\n" . $body;
+        }
+    } else {
+        $text = rh_ai_followup_render($tool, $args, $vw, $res, $label !== '' ? $label : (($args['from'] ?? '') === rh_ai_today() ? 'today' : 'in that time'));
+    }
+    if (trim($text) === '') {
+        return null;
+    }
+    unset($vw['args']);
+    return ['text' => trim($text), 'links' => $r['links'], 'chips' => function_exists('rh_ai_followup_chips') ? rh_ai_followup_chips($user, [$tool]) : [],
+        'local' => ['tool' => $tool, 'view' => ['args' => rh_ai_vault_protect($db, $conv, $args)] + $vw], 'tool' => $tool]; // stored with privacy tokens
+}

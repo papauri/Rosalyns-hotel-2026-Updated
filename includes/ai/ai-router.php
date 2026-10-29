@@ -186,6 +186,7 @@ function rh_ai_route_samples(PDO $db): array
         $st = $db->prepare("SELECT a.id, a.conversation_id, a.created_at FROM ai_messages a JOIN ai_conversations c ON c.id = a.conversation_id
                             LEFT JOIN ai_feedback f ON f.message_id = a.id AND f.rating < 0
                             WHERE a.role = 'assistant' AND a.agent IN ('fast', 'primary') AND a.tokens_in > 0 AND f.id IS NULL
+                              AND COALESCE(a.tool_args_json, '') NOT LIKE '%\"claim_fixed\":1%'
                               AND a.created_at >= DATE_SUB(NOW(), INTERVAL ? DAY) AND COALESCE(c.page_path, '') <> ?
                             ORDER BY a.id DESC LIMIT " . (int)$limit);
         $st->execute([$days, defined('RH_AI_CHECK_PAGE') ? RH_AI_CHECK_PAGE : ':assistant-check']);
@@ -504,7 +505,7 @@ function rh_ai_learn_from_signals(PDO $db): array
     $out = ['signals' => 0, 'evals' => 0];
     try {
         $rows = $db->query("SELECT id, kind, conversation_id, context_json, created_at FROM ai_incidents WHERE status = 'open'
-                            AND kind IN ('reply_not_right', 'absence_fixed', 'contradiction', 'false_refusal', 'reask') ORDER BY id DESC LIMIT 50")->fetchAll(PDO::FETCH_ASSOC);
+                            AND kind IN ('reply_not_right', 'absence_fixed', 'contradiction', 'false_refusal', 'reask', 'claim_corrected') ORDER BY id DESC LIMIT 50")->fetchAll(PDO::FETCH_ASSOC);
     } catch (Throwable $e) {
         return $out;
     }
