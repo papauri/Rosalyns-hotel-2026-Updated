@@ -497,7 +497,7 @@ New: `admin/migrations/070_ai_assistant.php`, `admin/ai-settings.php`, `admin/ap
 `admin/api/ai-action.php`, `admin/includes/ai-panel.php`, `admin/js/ai-panel.js`, `admin/css/ai-panel.css`,
 `includes/ai/{ai-core,ai-providers,ai-catalog,ai-context,ai-vault,ai-memory,ai-tools,ai-agents,ai-actions}.php`,
 `includes/ai/model-catalog.json`, `includes/ai/evals.json`, `admin/migrations/071_ai_memory.php`,
-`scripts/{ai-model-refresh,ai-retention,ai-reflect,ai-health,ai-eval,ai-kill}.php`,
+`scripts/{ai-model-refresh,ai-reflect,ai-health,ai-eval,ai-kill}.php`,
 `scripts/tests/ai_assistant_test.php`, `scripts/tests/fixtures/ai/*.json`, guide pages.
 Edited (additive only): `admin/includes/permissions.php`, `admin/includes/admin-header.php` (one require),
 `admin/logout.php` (one vault-purge line), `admin/create-booking.php` (JSON response branch only; no
