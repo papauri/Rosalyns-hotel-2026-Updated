@@ -41,7 +41,14 @@ if (!$run['ran']) {
     exit(0);
 }
 foreach ($run['details'] as $id => $d) {
+    if ($id === '_modules') {
+        continue;
+    }
     echo str_pad(strtoupper($d['status']), 5) . ' ' . $id . ($d['why'] !== '' ? ' - ' . $d['why'] : '') . "\n";
+}
+foreach ($run['by_module'] as $m => $v) {
+    echo '  ' . str_pad($m, 12) . $v['passed'] . '/' . $v['run'] . ' (' . $v['pct'] . "%)
+";
 }
 echo $run['passed'] . ' of ' . $run['run'] . ' passed, ' . $run['skipped'] . ' skipped, ' . $run['tokens_per_answer'] . " tokens per answer.\n";
 exit($run['failed'] ? 1 : 0);

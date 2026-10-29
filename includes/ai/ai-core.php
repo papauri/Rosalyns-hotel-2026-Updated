@@ -175,6 +175,7 @@ function rh_ai_setting_defaults(): array
         'ai_models_refreshed_at'  => '',
         'ai_daily_ran_on'         => '',
         'ai_jobs_json'            => '',
+        'ai_cache_savings_json'   => '',
         'ai_health_json'          => '',
         'ai_notices_json'         => '',
         'ai_model_upgrade_json'   => '',
@@ -214,6 +215,7 @@ function rh_ai_setting_defaults(): array
         // Owner 2026-10-29 ("learns ... faster, cheaper or free answering"): the learned local router (includes/ai/ai-router.php)
         'ai_router_enabled'         => '1',  // '0' = learned routes are neither learned nor used
         'ai_route_promote_n'        => '3',  // a question shape answered by the model this many times (2+ chats, same lookup, no Not right) is learned
+        'ai_route_promote_fast'     => '2',  // a read lookup (never a card) is learned after this many answers from 2+ chats when the questions are rephrasings of each other
         'ai_route_min_pct'          => '80', // a question this close (0-100, word overlap) to a learned shape is answered locally
         'ai_route_max'              => '200', // learned routes kept in use at most
         'ai_route_train_rows'       => '2000', // model answers read by the daily training at most (bounded work)

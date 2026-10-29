@@ -83,3 +83,4 @@ storage/
 
 # Image proxy on/off flag (runtime file written by Cache Management)
 data/image-cache-off.flag
+.claude/progress/

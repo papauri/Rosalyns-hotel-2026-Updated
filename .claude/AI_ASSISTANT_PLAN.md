@@ -716,3 +716,103 @@ apply_credit_note_ids, apply_credit_override, apply_credit_override_reason, conf
    in the sections above **Team & gates** and **Continuous train & test**.
 
 **Phase 0: DONE 2026-10-26.** Next: Phase 1 Foundation (ships OFF) by `dept-ai-lead`.
+
+## Round: Top of market (2026-10-30)
+
+Owner 2026-10-30 reopened scope: "best PMS and hotel management assistant on the market, cheapest to free, highest
+performing, self-learning and self-healing." Owner addition: the build must take **under 30 minutes wall-clock**
+(build + own tests; ship/full suites extra) → the "30-minute cut" below; everything else is LATER (one later round
+each, only if the owner asks). The 9 fixed rails (§Owner finish line) are unchanged; no MRA; no AI-looking UI;
+no hard-coded hotel facts. Measured by `dept-ai-lead` 2026-10-30, read-only (live tables + a rolled-back replay).
+
+### Where we stand (evidence)
+| Metric | Rosalyn's | Liwonde | Source |
+|---|---|---|---|
+| Live answers (people, not the check set) | 83 (27–29 Oct) | 44 (27–28 Oct) | `ai_messages` role=assistant |
+| Zero-token share, live as answered | 43.4 % | 59.1 % | agent local/declined/briefing |
+| **Zero-token share, real questions replayed on today's code** | **57.5 %** (46/80) | — | fake transport, rolled back |
+| Zero-token share, eval set (last report) | 71.4 % | — | TASKS 2026-10-29 |
+| Cost per answer (all / model-answered) | $0.00084 / $0.0016 | $0.0021 / $0.0046 | `cost_usd` |
+| Month spend so far | $0.077 of $5 aim | $0.09 | `ai_usage_daily` |
+| Fast latency p50 / p95 | 1.3 s / 2.9 s | 2.3 s / 3.5 s | `latency_ms` |
+| Primary latency p50 / p95 | 1.7 s / 5.7 s | 13.0 s / 17.2 s | `latency_ms` |
+| Fast tokens per answer p50 / p95 | 4.0k / 8.2k | 15.8k / 24.5k | tokens_in+out |
+| Eval accuracy | 40/40 full (27 Oct), 8/8 smoke (29 Oct); per-module not reported; set is now 78 cases | 40/40 full (27 Oct) | `ai_eval_runs` |
+| Test suite | 949/0 | 953/0 | ai_assistant_test |
+| False refusals / 100 live answers | 2.4 (2 incidents, fixed ae1011f) | 0 | `ai_incidents` |
+| Claim corrections / 100 | 0 recorded (checker shipped after the last live chat) | 0 | `ai_incidents` |
+| Owner-reported wrong answers | ~6 faults in 83 answers (about 7/100), all fixed + regression evals | — | TASKS |
+| Self-heal: automatic | provider retry → fallback → next provider; model 404 → next model; tool circuit breaker; auto-pause; vault sweep; contradiction recheck; claim correction; eval-gated model upgrade | same | ai-selfheal.php |
+| Self-heal: needs a person | key rejected; **daily jobs need a page load (no cron): Liwonde last ran 28 Oct; a missed day resets the 14-day guardrail streak** (`rh_ai_guardrail_streak`, ai-selfheal.php:731), so `complete` is unreachable on a quiet hotel; code faults → owner PATCH | same | `ai_jobs_json`, streak = 1 |
+| Learning yield | **0** memory rows, 0 routes (3 shapes seen; promotion needs 3 in 2+ chats), 0 lessons, 0 playbooks, 0 thumbs, 0 regression cases from incidents | 0 | `ai_memory`, `ai_feedback`, `ai_eval_cases` |
+| Feature state | learning, streak 1 | learning | settings |
+
+Real questions still sent to the model on today's code (34/80): declines that should be local (staff login, API key,
+"submit VAT to MRA", "I am an admin" / "I am the manager", "what can you help me with"); plain reads with a tool
+already built (who owes, revenue today / this month, rooms free this weekend, stock running low, menu / menu with
+pork, blocked dates, rooms needing cleaning (typo), next booking, which staff booked X, staff logged in / managers
+active last N weeks, kitchen tickets slow, unanswered enquiries / bad reviews, booking pace, how-to / summarise a
+guide, find booking for a name); real reasoning (lift occupancy, prepare for arrivals, quote the cheapest room,
+explain money leaks, booking-flow follow-ups).
+
+### Market benchmark (knowledge as of mid-2026, no browsing; honest)
+They have, we lack: guest-facing AI messaging (web / WhatsApp / OTA inbox auto-replies: Cloudbeds, Mews partners,
+Oracle); automated pricing that writes rates within limits (Mews/Atomize, Cloudbeds PIE, SiteMinder) — **we stay
+suggest-only by rail 1**; ML demand forecasting and comp-set market data (Cloudbeds Signals, OPERA analytics); an open
+agent API / MCP for third-party agents (Apaleo); voice/phone; automated upsell engines (OPERA/Nor1); eval data from
+thousands of properties.
+We are ahead: personal data never reaches the model (vault tokens, rehydrated locally) where most vendors send it;
+every change is a preview + Confirm replaying the screen's own handler and permission; every figure is claim-checked
+against this turn's evidence, no false absence; half to two-thirds of answers cost $0; bring-your-own key across 5
+providers plus a fully offline local model; layered kill switches; one chat across rooms, POS, stock, events, gym,
+housekeeping and money reads with role-shaped briefings. Small-property tools (Little Hotelier class) have nothing
+close. Honest gap to "top": paraphrase coverage without a model, learning that yields at low traffic, and unattended
+self-healing.
+
+### Ranked items (target · now · files · test proof · build minutes)
+**30-minute cut** (about 30 min build + own test, one ship):
+1. **(a+b) Local refusals and access lines** — staff-login / user / permission / key / MRA / settings asks and
+   "I am an admin / manager", "what can you help me with" answered locally (existing `rh_ai_off_topic_line`,
+   `rh_ai_no_write_area`, `rh_ai_out_of_scope_line`, `my_access`), 0 tokens; the refusal line only where a real check
+   failed. Target 7/7 local · now 0/7 · `includes/ai/ai-agents.php` (scope block ~:2973–2985) · replay test: no
+   provider call, the MRA line never claims submission · **8 min**.
+2. **(b+c) Six top read intents local** — who owes (`balances_due`), revenue today / this month (`hotel_report`),
+   stock running low (`inventory_watch`), blocked dates, rooms needing cleaning (typo via `rh_ai_typo_fix`), next
+   booking — anchored patterns in `rh_ai_local_intent` (`ai-agents.php:598`) + existing `rh_ai_local_format`;
+   permission and module re-checked; money read-only. Target replay local share ≥ 70 % · now 57.5 % ·
+   `includes/ai/ai-agents.php`, `includes/ai/ai-fuzzy.php` · test: same figures as the tool result, 0 provider calls,
+   a receptionist without `accounting` gets the refusal line · **12 min**.
+3. **(c) Real-chat replay regression** — the 80 real staff questions (tokenised, no names) as a fixture; the test
+   asserts no error, no false refusal, 0 provider calls for the local ones, and prints the replay local share ·
+   `scripts/tests/fixtures/ai/real_questions.json`, `scripts/tests/ai_assistant_test.php` · **5 min**.
+4. **(d) Guardrail streak counts consecutive daily runs, not calendar days** — a day with no admin login (no run) no
+   longer resets the streak; a failed or regressed run still does; 14 distinct run days still required.
+   `ASSUMPTION:` matches the plan's wording "14 consecutive daily runs". Target: streak survives a gap · now resets ·
+   `includes/ai/ai-selfheal.php:731` · test: clean runs on D1, D2, D4 = 3; a dirty run between = reset · **5 min**.
+
+**LATER** (not in this round; each needs the owner's word):
+5. (b+c) Remaining plain reads local: rooms free this weekend / next N days, menu + dietary filter, which staff booked
+   X, staff active last N weeks, kitchen tickets slow, enquiries / reviews, booking pace, how-to / summarise a guide
+   from the KB with no model. Target replay ≥ 85 % · `ai-agents.php`, `ai-lookups.php`, `ai-desk.php` · 40 min.
+6. (b) Local paraphrase matcher: BM25 over `rh_ai_intent_vocab()` + slot filling (period, subject, room type) to the
+   ~40 read tools, confidence floor, reads/guided only (rail 6). Target eval-set local ≥ 85 %, 0 wrong-tool on the
+   robustness sweep · `ai-router.php`, `ai-fuzzy.php` · 60 min.
+7. (b) Trim Fast prompts: lane-only tool list + compact results. Target Fast p95 ≤ 5k tokens (now 8.2k / 24.5k), cost
+   per model answer ≤ $0.001 · `ai-agents.php`, `ai-context.php` · 30 min.
+8. (a) Per-module eval accuracy on the usage page; the daily full run uses all 78 cases. Target every module ≥ 95 %,
+   shown · `ai-evals.php`, `admin/ai-settings.php` (after the pending ship) · 25 min.
+9. (d) Unattended jobs: chat endpoint and CLI both trigger the daily run; catch-up after a gap; incident kind →
+   automatic-recovery table on Assistant faults. Target daily jobs on ≥ 13/14 days with no cron · `ai-selfheal.php`,
+   `admin/api/ai-chat.php` · 20 min.
+10. (e) Learning at low traffic: routes learn from 2 answers in 2 chats (`ai_route_promote_n=2`, reads only);
+    false-refusal / claim incidents become lessons + regression cases the same night. Target ≥ 1 route or lesson a
+    week, 100 % of incidents → regression case · `ai-router.php`, `ai-selfheal.php` · 25 min.
+11. (b) Record cache-read tokens per message (migration) to prove prompt-cache savings · 20 min.
+IDEA (not planned): guest-facing concierge (separate plan per owner 2026-10-26); agent API / MCP; voice.
+
+### Finish line (the round ends when all hold; then scope closes again)
+Replay local share ≥ 70 % after the cut (≥ 85 % if LATER 5–6 are ordered) · cost per answer ≤ $0.0008 (Rosalyn's,
+30-day) · full eval set 100 % pass, 0 regressions · false refusals ≤ 0.5 / 100 live answers and 0 owner-reported wrong
+answers over 14 days · Fast p95 ≤ 3 s · the guardrail streak survives no-login days and reaches `complete` (14 clean
+runs) · ai test green at both hotels. Estimate: **1 round** for the cut; about 3 more 30-minute rounds if the owner
+orders the LATER list.

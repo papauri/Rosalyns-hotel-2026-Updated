@@ -139,6 +139,26 @@ function rh_ai_eval_args(array $args): array
     return $args;
 }
 
+/**
+ * The part of the business a question belongs to (for the per-module accuracy): its listed module, else the module of the
+ * lookup its figure comes from, else 'general'.
+ */
+function rh_ai_eval_module(array $case): string
+{
+    $e = (array)($case['expect'] ?? []);
+    if (!empty($e['modules'][0])) {
+        return (string)$e['modules'][0];
+    }
+    $tool = (string)($e['figure_from']['tool'] ?? ($e['tool_ok'] ?? ''));
+    if ($tool !== '') {
+        $def = rh_ai_tool_registry()[$tool] ?? null;
+        if ($def && !empty($def['module'][0])) {
+            return (string)$def['module'][0];
+        }
+    }
+    return 'general';
+}
+
 /** '' when a question can be asked here; otherwise why it is skipped (its figure's lookup or a module it needs is off). */
 function rh_ai_eval_unavailable(array $user, array $case): string
 {
@@ -266,7 +286,7 @@ function rh_ai_eval_check(PDO $db, array $user, array $case, array $res): array
 function rh_ai_eval_run(PDO $db, string $kind = 'full', array $opt = []): array
 {
     $out = ['ran' => false, 'why' => '', 'id' => 0, 'kind' => $kind, 'total' => 0, 'run' => 0, 'passed' => 0, 'failed' => 0, 'skipped' => 0, 'pass_pct' => null,
-        'passed_ids' => [], 'failed_ids' => [], 'smoke_run' => 0, 'smoke_passed' => 0, 'smoke_pct' => null, 'tokens_total' => 0, 'tokens_per_answer' => 0, 'cost_usd' => 0.0, 'details' => [], 'model' => ''];
+        'passed_ids' => [], 'failed_ids' => [], 'smoke_run' => 0, 'smoke_passed' => 0, 'smoke_pct' => null, 'tokens_total' => 0, 'tokens_per_answer' => 0, 'cost_usd' => 0.0, 'details' => [], 'model' => '', 'by_module' => []];
     if (!rh_ai_memory_ready($db)) {
         $out['why'] = 'The database update for the Assistant\'s learning (072) has not been run.';
         return $out;
@@ -375,6 +395,12 @@ function rh_ai_eval_run(PDO $db, string $kind = 'full', array $opt = []): array
                     $out['smoke_passed'] += $st[0] === 'pass' ? 1 : 0;
                 }
             }
+            if ($st[0] !== 'skip') {
+                $mod = rh_ai_eval_module($c);
+                $out['by_module'][$mod] = $out['by_module'][$mod] ?? ['run' => 0, 'passed' => 0, 'pct' => null];
+                $out['by_module'][$mod]['run']++;
+                $out['by_module'][$mod]['passed'] += $st[0] === 'pass' ? 1 : 0;
+            }
             $out['details'][$id] = ['status' => $st[0], 'why' => $st[1], 'route' => (string)($res['route'] ?? ''), 'tokens' => $tokens];
         }
     } finally {
@@ -399,6 +425,11 @@ function rh_ai_eval_run(PDO $db, string $kind = 'full', array $opt = []): array
     $out['smoke_pct'] = $out['smoke_run'] > 0 ? round($out['smoke_passed'] * 100 / $out['smoke_run'], 2) : null;
     $out['tokens_per_answer'] = $out['run'] > 0 ? (int)round($out['tokens_total'] / $out['run']) : 0;
     $out['cost_usd'] = round($out['cost_usd'], 6);
+    foreach ($out['by_module'] as $m => $v) {
+        $out['by_module'][$m]['pct'] = $v['run'] > 0 ? round($v['passed'] * 100 / $v['run'], 1) : null;
+    }
+    ksort($out['by_module']);
+    $out['details']['_modules'] = $out['by_module']; // per-module accuracy, kept with the run
     try {
         $db->prepare("INSERT INTO ai_eval_runs (kind, run_date, is_daily, provider, model_id, total, run, passed, failed, skipped, pass_pct, tokens_total, tokens_per_answer, cost_usd, passed_ids, failed_ids, details_json, started_at, finished_at)
                       VALUES (?, CURDATE(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())")

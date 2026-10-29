@@ -44,6 +44,7 @@ $u = $ready ? rh_ai_usage_summary($pdo, $from, $to) : null;
 $money = static fn($v) => $v === null ? '-' : '$' . number_format((float)$v, (float)$v > 0 && (float)$v < 0.01 ? 4 : 2);
 $canSettings = hasPermission((int)$user['id'], 'ai_settings');
 $ls = ($ready && $isAdmin) ? rh_ai_local_share($pdo, date('Y-m-01')) : null;
+$pcs = ($ls !== null && function_exists('rh_ai_cache_saving_since')) ? rh_ai_cache_saving_since(date('Y-m-01')) : null;
 $cs = ($ls !== null && function_exists('rh_ai_claim_stats')) ? rh_ai_claim_stats($pdo, date('Y-m-01')) : null;
 ?>
 <!DOCTYPE html>
@@ -135,6 +136,13 @@ $cs = ($ls !== null && function_exists('rh_ai_claim_stats')) ? rh_ai_claim_stats
                         <span class="ai-stat__value"><?php echo $h(number_format($ls['tokens_saved'])); ?></span>
                         <span class="ai-stat__sub"><?php echo $ls['avg_model_tokens'] > 0 ? $h('about ' . number_format($ls['avg_model_tokens']) . ' tokens a model answer') : 'No model answers yet this month'; ?></span>
                     </div>
+                    <?php if ($pcs !== null): ?>
+                    <div class="ai-stat">
+                        <span class="ai-stat__label">Saved by repeated instructions <i class="help" data-tip="Part of every request (the Assistant's standing instructions) is read back by the provider at a tenth of the price. This is what that saved this month, from the provider's own usage figures.">?</i></span>
+                        <span class="ai-stat__value"><?php echo $h('$' . number_format($pcs['usd'], 4)); ?></span>
+                        <span class="ai-stat__sub"><?php echo $h(number_format($pcs['read'])); ?> tokens read back at the lower price</span>
+                    </div>
+                    <?php endif; ?>
                     <?php if ($cs !== null): ?>
                     <div class="ai-stat">
                         <span class="ai-stat__label">Claims corrected this month <i class="help" data-tip="Figures, names and dates in a model's reply that were not in the hotel's data, since the 1st of this month. Each was fixed before the reply showed: a side sentence dropped, the data's own value put in, or the answer rebuilt from the lookups. Asked again counts the few that needed the main model once more.">?</i></span>

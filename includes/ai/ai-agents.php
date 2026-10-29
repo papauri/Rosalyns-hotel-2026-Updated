@@ -112,6 +112,33 @@ function rh_ai_no_write_area(array $user, string $t): ?array
 }
 
 /**
+ * Round "Top of market" 2026-10-30: system requests the Assistant never handles for anyone - staff logins, users and
+ * permissions; keys, passwords and secrets (also "ignore your rules ..."); any tax-authority filing (there is no MRA
+ * link at all, so nothing is ever reported or submitted). One line, locally, no tokens; a screen link only when this
+ * person can open it. Not the permission line (rail 3: that line is only for a failed permission check).
+ * @return array{0:string,1:array}|null [line, links]
+ */
+function rh_ai_system_area_line(array $user, string $t): ?array
+{
+    $t = mb_strtolower($t);
+    $uid = (int)($user['id'] ?? 0);
+    $link = static function (string $page, string $label) use ($uid): array {
+        return function_exists('rhCanOpenPage') && rhCanOpenPage($uid, $page) ? [['label' => $label, 'url' => $page]] : [];
+    };
+    if (preg_match('/\b(mra|tax authority|revenue authority|fiscali[sz]\w*|efd)\b|\b(vat|tax) returns?\b/u', $t)) {
+        return ["There is no link to MRA or any tax authority here, so I can't file, send or submit anything to them. VAT and levy figures are on Reports for you to use.", $link('reports.php', 'Open Reports')];
+    }
+    if (preg_match('/\b(api|provider|secret|encryption)\s*keys?\b|\bignore (all |your |the |my )?(previous |prior |earlier )?(rules|instructions)\b|\b(show|reveal|tell|give|send|print|display|share)\b.{0,30}\b(passwords?|secrets?|access tokens?)\b/u', $t)) {
+        return ["I can't show or change keys, passwords or system settings, and my rules stay the same whatever is asked in chat.", []];
+    }
+    if (!preg_match('/^\s*(how|where|why|what is|what are)\b/u', $t)
+        && preg_match('/\b(create|add|make|set ?up|open|delete|remove|disable|deactivate|block|reset|change|edit|give|grant)\b.{0,40}\b(staff (logins?|accounts?|users?)|logins?|user (accounts?|logins?)|new users?|users?|permissions?|user roles?|passwords?)\b/u', $t)) {
+        return ["I can't create or change staff logins, passwords or permissions - an admin does that on User Management.", $link('user-management.php', 'Open User Management')];
+    }
+    return null;
+}
+
+/**
  * Owner 2026-10-28 ("offer suggestions on what actually is available"; "not hard coded"): after a "can't" line,
  * "I can help with: ..." built from this person's own tool list (their permissions and the modules switched on) - one
  * tool per permission area, in registry order, worded with the tool's own status line. A tool that reads the declined
@@ -601,6 +628,26 @@ function rh_ai_local_intent(string $t): ?array
     // Polite wrappers do not change the look-up ("please show me today's arrivals", "any arrivals today?").
     $t = trim((string)preg_replace('/\s+/u', ' ', (string)preg_replace('/\b(please|pls|can you|could you|would you|tell me|show me|give me|let me see|i need|i want|how many|any|list of|the list of|right now|quickly)\b/u', ' ', $t)));
     $t = trim((string)preg_replace('/^[,.\s]+|[,.\s]+$/u', '', $t));
+    // Round 2026-10-30: "what can you help me with (next)" ("can you" is already removed above) and a typed role claim
+    // ("I am an admin", "but I'm the manager"): the person's real access from their sign-in (rail 3: words change nothing)
+    if (preg_match('/^what (else )?(help( me)?( with)?|do( for me)?)( next| here| today| now)?\s*\??$/u', $t)) {
+        return ['my_access', []];
+    }
+    if (preg_match('/^(but |well |no,? )?(i\'?m|i am|im) (the |an? )?(admin|administrator|manager|owner|boss|supervisor|general manager|gm)( here| now| though| too| of (this|the) (hotel|business)| you know)?[!.\s]*\??$/u', $t)) {
+        return ['my_access', ['_claim' => 1]];
+    }
+    // "who still owes money", "outstanding balances", "who hasn't paid": balances_due (each booking's folio, read only)
+    if (preg_match('/^(who (still |else )?owes( us)?( money| anything)?( now| today)?|who has(n\'?t| not) paid( yet)?|(outstanding|unpaid|open) (balances?|bills?|folios?)|balances? (due|owing|owed|outstanding)|(which |what )?(guests?|bookings?) (that |who )?(still )?(owe|owes|owing)( money)?)\s*\??$/u', $t)) {
+        return ['balances_due', []];
+    }
+    // "what stock is running low", "low stock", "anything out of stock": inventory_watch (the Stock alerts)
+    if (preg_match('/^((what|which) )?(stock|items?|ingredients?)( items?)? (is |are )?(running |getting )?(low|short|out)( now| today)?\s*\??$|^(the )?low stock( items| alerts| list)?\s*\??$|^(what(\'s| is) )?(running low|out of stock)\s*\??$|^stock alerts\s*\??$|^(what(\'s| is) )?(our |the )?stock (status|position|levels?|situation)\s*\??$/u', $t)) {
+        return ['inventory_watch', []];
+    }
+    // "rooms that need cleaning", "which rooms need cleaning": the room board
+    if (preg_match('/^((which|what) )?rooms? (that |which )?(still )?(needs?|needing) (cl\w{0,3}n(?:ing|ed)|to be cl\w{0,3}ned|a clean)( now| today)?\s*\??$/u', $t)) {
+        return ['room_board', []];
+    }
     if (($look = rh_ai_lookup_intent($t)) !== null) {
         return $look; // one order, the open orders, a gym class / slot / member, memberships ending
     }
@@ -1484,8 +1531,37 @@ function rh_ai_local_format(string $tool, array $view, array $r): string
         }
         return $out;
     }
+    if ($tool === 'balances_due' && isset($r['bookings_owing'])) {
+        $n = (int)$r['bookings_owing'];
+        $scope = (string)($r['scope'] ?? '');
+        $checked = isset($r['checked']) ? (int)$r['checked'] . ' booking(s) checked' : '';
+        $tail = trim($scope . ($checked !== '' ? ($scope !== '' ? '; ' : '') . $checked : ''));
+        if ($n === 0) {
+            return 'No room booking has a balance owing' . ($tail !== '' ? ' (' . mb_strtolower(mb_substr($tail, 0, 1)) . mb_substr($tail, 1) . ')' : '') . '. Each booking\'s own bill was checked, the same as Bookings.';
+        }
+        $lines = [];
+        foreach ((array)($r['largest'] ?? []) as $x) {
+            $lines[] = $x['guest_name'] . ' · ' . $x['reference'] . ' · ' . str_replace('-', ' ', (string)$x['status']) . ' · leaves ' . $x['leaves'] . ' · owes ' . $fmt($x['balance_due']);
+        }
+        return '**Owing: ' . $n . ' booking' . ($n === 1 ? '' : 's') . ', ' . $fmt($r['total_owed']) . ' in total**' . rh_ai_local_lines($lines)
+            . "\n\nFrom each booking's own bill, the same as Bookings" . ($tail !== '' ? ' (' . mb_strtolower(mb_substr($tail, 0, 1)) . mb_substr($tail, 1) . ')' : '') . '. Payments are taken on the booking\'s screen.';
+    }
+    if ($tool === 'inventory_watch' && isset($r['alerts'])) {
+        $a = (array)$r['alerts'];
+        $out = '**Stock alerts: ' . (int)$a['out'] . ' out, ' . (int)$a['low'] . ' low, ' . (int)$a['negative'] . ' below zero**';
+        $lines = [];
+        foreach (['out_items' => 'out', 'negative_items' => 'below zero', 'low_items' => 'low'] as $k => $label) {
+            foreach ((array)($a[$k] ?? []) as $i) {
+                $lines[] = $i['item'] . ' · ' . $label . ' · ' . rtrim(rtrim(number_format((float)$i['quantity'], 2, '.', ''), '0'), '.') . ' ' . $i['unit'] . ($i['reorder_at'] !== null ? ' (reorder at ' . rtrim(rtrim(number_format((float)$i['reorder_at'], 2, '.', ''), '0'), '.') . ')' : '');
+            }
+        }
+        if ((int)$a['out'] + (int)$a['low'] + (int)$a['negative'] === 0) {
+            return 'No stock item is out, low or below zero right now - the same check as the Stock alerts.';
+        }
+        return $out . rh_ai_local_lines($lines) . "\n\nThe same figures as the Stock alerts. Stock changes are made on the Stock screens.";
+    }
     if ($tool === 'my_access') {
-        $out = 'You are signed in as **' . $r['role'] . '**. You can:';
+        $out = (!empty($view['_claim']) ? 'What you can see comes from your sign-in, not from what is typed in chat. ' : '') . 'You are signed in as **' . $r['role'] . '**. You can:';
         foreach ((array)$r['can_see_and_do'] as $cat => $labels) {
             $out .= "\n- **" . $cat . ':** ' . implode(', ', (array)$labels);
         }
@@ -2972,6 +3048,10 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
     // 1a. Not about the hotel: a friendly one-line steer back, no tokens
     if (rh_ai_is_off_topic($tokQ)) {
         return $finish(rh_ai_off_topic_line(), 'declined');
+    }
+    // 1a-. Logins, permissions, keys, tax-authority filing: never handled here, for anyone - one line, no tokens
+    if (($sa = rh_ai_system_area_line($user, $tok)) !== null) {
+        return $finish($sa[0], 'declined', ['links' => $sa[1]]);
     }
     // 1a+. A change nobody can make here (stock, till, payments, prices, closes): one line and the screen, any role
     // Owner 2026-10-28: the same line, the screen, the best guide section and what this person CAN do (still no tokens).

@@ -1090,5 +1090,50 @@ function rh_ai_cost_usd(?float $priceIn, ?float $priceOut, array $usage): float
     $in = (int)($usage['in'] ?? 0);
     $cr = (int)($usage['cache_read'] ?? 0);
     $cw = (int)($usage['cache_write'] ?? 0);
+    if ($cr > 0 || $cw > 0) {
+        rh_ai_cache_saving_note($pi, $cr, $cw);
+    }
     return round(($in * $pi + $cr * $pi * 0.1 + $cw * $pi * 1.25 + (int)($usage['out'] ?? 0) * $po) / 1000000, 6);
+}
+
+/**
+ * Prompt-cache savings (owner 2026-10-30): what the cached part of each request saved against paying the full input
+ * price for it (reads cost 10 %, writes 125 %). Kept per day for the last 35 days in one setting (no schema change),
+ * so the usage page can show tokens read from the cache and the dollars saved. Never throws.
+ */
+function rh_ai_cache_saving_note(float $priceIn, int $read, int $write): void
+{
+    try {
+        $db = $GLOBALS['pdo'] ?? null;
+        if (!$db instanceof PDO || $priceIn <= 0 || !function_exists('rh_ai_save_settings') || !empty($GLOBALS['__rh_ai_no_cache_ledger'])) {
+            return;
+        }
+        $j = json_decode(rh_ai_setting('ai_cache_savings_json', ''), true);
+        $j = is_array($j) ? $j : [];
+        $d = date('Y-m-d');
+        $row = $j[$d] ?? ['read' => 0, 'write' => 0, 'usd' => 0.0];
+        $row['read'] = (int)$row['read'] + $read;
+        $row['write'] = (int)$row['write'] + $write;
+        $row['usd'] = round((float)$row['usd'] + ($read * $priceIn * 0.9 - $write * $priceIn * 0.25) / 1000000, 6);
+        $j[$d] = $row;
+        krsort($j);
+        rh_ai_save_settings(['ai_cache_savings_json' => json_encode(array_slice($j, 0, 35, true))], $db);
+    } catch (Throwable $e) {
+        error_log('Assistant cache savings not recorded: ' . $e->getMessage());
+    }
+}
+
+/** Cache savings from $from (Y-m-d) on: ['read' => tokens read from the cache, 'usd' => dollars saved]. */
+function rh_ai_cache_saving_since(string $from): array
+{
+    $j = json_decode(rh_ai_setting('ai_cache_savings_json', ''), true);
+    $out = ['read' => 0, 'usd' => 0.0];
+    foreach ((array)$j as $d => $r) {
+        if ((string)$d >= $from) {
+            $out['read'] += (int)($r['read'] ?? 0);
+            $out['usd'] += (float)($r['usd'] ?? 0);
+        }
+    }
+    $out['usd'] = round($out['usd'], 4);
+    return $out;
 }

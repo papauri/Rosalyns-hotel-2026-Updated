@@ -1586,7 +1586,7 @@ function rh_ai_t_balances_due(PDO $db, array $user, array $a): array
         }
     }
     usort($owing, static fn($x, $y) => $y['balance_due'] <=> $x['balance_due']);
-    return ['bookings_owing' => count($owing), 'total_owed' => rh_ai_money($total), 'currency' => rh_ai_currency(), 'scope' => 'Room bookings leaving from 90 days ago onwards',
+    return ['bookings_owing' => count($owing), 'checked' => count($cands), 'total_owed' => rh_ai_money($total), 'currency' => rh_ai_currency(), 'scope' => 'Room bookings leaving from 90 days ago onwards',
         'largest' => array_slice($owing, 0, RH_AI_TOOL_ROWS), 'link' => 'bookings.php', 'link_label' => 'Open Bookings'];
 }
 

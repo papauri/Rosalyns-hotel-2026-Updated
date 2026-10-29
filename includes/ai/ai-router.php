@@ -35,6 +35,22 @@ function rh_ai_route_stop(): array
 }
 
 /**
+ * Plain-language variants folded to one word before matching, so a rephrasing lands on the same learned shape
+ * (word meaning only; no hotel fact). Applied to the question and to every stored example alike.
+ */
+function rh_ai_route_synonyms(): array
+{
+    return ['show' => 'list', 'display' => 'list', 'give' => 'list', 'tell' => 'list', 'see' => 'list', 'view' => 'list', 'get' => 'list', 'find' => 'list',
+        'vacant' => 'free', 'available' => 'free', 'availability' => 'free', 'empty' => 'free',
+        'owing' => 'owe', 'owes' => 'owe', 'unpaid' => 'owe', 'outstanding' => 'owe', 'debt' => 'owe',
+        'checkin' => 'arriv', 'checkins' => 'arriv', 'arrival' => 'arriv', 'arrivals' => 'arriv', 'arriving' => 'arriv', 'coming' => 'arriv',
+        'checkout' => 'depart', 'checkouts' => 'depart', 'departure' => 'depart', 'departures' => 'depart', 'leaving' => 'depart',
+        'guests' => 'guest', 'customers' => 'guest', 'customer' => 'guest', 'visitors' => 'guest',
+        'reservation' => 'booking', 'reservations' => 'booking', 'bookings' => 'booking',
+        'tonight' => 'today', 'now' => 'today', 'current' => 'today', 'currently' => 'today'];
+}
+
+/**
  * Normalised features of a (tokenised) question: lower-case words, privacy tokens as their kind (#guest, #bk ...),
  * numbers as #n, plus each pair of neighbouring words. No personal value survives this.
  */
@@ -50,6 +66,7 @@ function rh_ai_route_terms(string $tok): array
         if (mb_strlen($w) < 2 || isset(rh_ai_route_stop()[$w])) {
             continue;
         }
+        $w = rh_ai_route_synonyms()[$w] ?? $w;
         $words[] = function_exists('rh_kb_stem') && $w[0] !== '#' ? rh_kb_stem($w) : $w;
     }
     $out = $words;
@@ -73,7 +90,15 @@ function rh_ai_route_similarity(array $a, array $b): float
     }
     $i = count(array_intersect($a, $b));
     $u = count(array_unique(array_merge($a, $b)));
-    return $u > 0 ? $i / $u : 0.0;
+    $full = $u > 0 ? $i / $u : 0.0;
+    // A rephrasing shares the meaning words but not the word pairs: the words alone count too, a little discounted,
+    // and only when at least two meaning words are shared
+    $ua = array_values(array_filter($a, static fn($w) => strpos($w, '_') === false));
+    $ub = array_values(array_filter($b, static fn($w) => strpos($w, '_') === false));
+    $ui = count(array_intersect($ua, $ub));
+    $uu = count(array_unique(array_merge($ua, $ub)));
+    $words = $ui >= 2 && $uu > 0 ? 0.95 * $ui / $uu : 0.0;
+    return max($full, $words);
 }
 
 /**
@@ -298,7 +323,10 @@ function rh_ai_route_train(PDO $db): array
             $res['updated']++;
             continue;
         }
-        if (count($g['qs']) < $need || count($g['convs']) < 2 || $active >= rh_ai_num('ai_route_max')) {
+        // Learning from fewer repeats: a READ lookup (never a card) whose answers came from 2+ chats is learned at
+        // ai_route_promote_fast answers (default 2); cards keep the full ai_route_promote_n. Rail 6 is unchanged.
+        $needHere = strpos($g['target'], 'card:') === 0 ? $need : min($need, max(2, (int)rh_ai_num('ai_route_promote_fast')));
+        if (count($g['qs']) < $needHere || count($g['convs']) < 2 || $active >= rh_ai_num('ai_route_max')) {
             continue;
         }
         $label = strpos($g['target'], 'card:') === 0 ? 'opens the ' . mb_strtolower((string)(rh_ai_action_registry()[substr($g['target'], 5)]['label'] ?? 'card')) . ' steps' : 'answered from ' . rh_ai_tool_step($g['target']);

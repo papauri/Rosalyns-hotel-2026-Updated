@@ -606,7 +606,7 @@ function rh_ai_desk_upcoming_intent(string $l): ?array
 {
     $l = trim($l);
     if (preg_match('/^(?:when(?:\'s| is| are)|what(?:\'s| is)|who(?:\'s| is)) (?:the |our )?next (?:arrivals?|check.?ins?|guests?(?: arriving| coming(?: in)?)?|booking)(?: due| coming)?$/u', $l)
-        || preg_match('/^(?:the |our )?(?:next|upcoming|future|coming) (?:arrivals?|check.?ins?|guests? (?:arriving|coming))$/u', $l)
+        || preg_match('/^(?:the |our )?(?:next|upcoming|future|coming) (?:arrivals?|check.?ins?|guests? (?:arriving|coming)|bookings?|reservations?)$/u', $l)
         || preg_match('/^who(?:\'s| is) (?:arriving|coming(?: in)?|checking in) next$/u', $l)) {
         return ['from' => rh_ai_today(), 'days' => rh_ai_num('ai_upcoming_days'), 'when' => ''];
     }
@@ -677,7 +677,7 @@ function rh_ai_desk_holds_intent(string $l): bool
 function rh_ai_desk_blocked_intent(string $l): ?array
 {
     $l = trim($l);
-    if (!preg_match('/^(?:show |list |which |what |any |are there (?:any )?)?(?:the )?(?:blocked|closed) (?:dates?|days?|nights?)(?: (this|next) (week|month))?$/u', $l, $g)
+    if (!preg_match('/^(?:show |list |which |what |any |(?:are|is) there (?:any )?)?(?:the )?(?:blocked|closed) (?:dates?|days?|nights?)(?: (this|next) (week|month))?$/u', $l, $g)
         && !preg_match('/^(?:which|what) (?:dates?|days?) (?:are|is) (?:blocked|closed)(?: (this|next) (week|month))?$/u', $l, $g)
         && !preg_match('/^(?:is|are) (?:anything|any (?:dates?|days?|rooms?)) blocked(?: (this|next) (week|month))?$/u', $l, $g)) {
         return null;

@@ -741,17 +741,14 @@ function rh_ai_guardrail_streak(PDO $db): int
             $byDay[$r['run_date']] = (int)$r['clean_day'];
         }
     }
+    // Consecutive daily RUNS (round 2026-10-30, ASSUMPTION in BUILD_PLAN): a day with no run (nobody signed in, so the
+    // daily check never started) neither counts nor resets; a run that was not clean resets. One run per distinct day.
     $n = 0;
-    $expect = null;
-    foreach ($byDay as $day => $clean) {
-        if ($expect !== null && $day !== $expect) {
-            break; // a missed day breaks the run
-        }
+    foreach ($byDay as $clean) {
         if ($clean !== 1) {
             break;
         }
         $n++;
-        $expect = date('Y-m-d', strtotime($day . ' -1 day'));
     }
     return $n;
 }
