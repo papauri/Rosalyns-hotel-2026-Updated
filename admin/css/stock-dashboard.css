@@ -155,6 +155,12 @@
 }
 .sdash-section__title i { color: var(--color-primary, #766550); }
 .sdash-section__hint { font-size: 11px; color: #9ca3af; }
+/* Body of a section: keeps text/rows on the same 18px inset as the header */
+.sdash-section__body { padding: 4px 18px 12px; }
+.sdash-section__body--table { padding: 0 10px 8px; } /* cells carry 8px, so text lands on 18px */
+@media (max-width: 640px) { .sdash-section__body--table { padding: 0 18px 12px; } } /* card mode: no cell padding to add */
+.sdash-section__note { font-size: 12px; color: #9ca3af; margin: 8px 0; }
+.sdash-section__body > .sdash-section__note:first-child { margin-top: 8px; }
 .sdash-section__action {
     font-size: 12px;
     font-weight: 600;

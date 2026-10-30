@@ -350,7 +350,8 @@ $csrf_token = generateCsrfToken();
                     <button type="submit" class="sdash-btn sdash-btn--sm sdash-btn--ghost">Dismiss all</button>
                 </form>
             </div>
-            <p style="color:#888;font-size:12px;margin:0 0 8px;">Big count shortages and manual stock changes from the last 7 days. Dismissing only hides an item for you.</p>
+            <div class="sdash-section__body">
+            <p class="sdash-section__note">Big count shortages and manual stock changes from the last 7 days. Dismissing only hides an item for you.</p>
             <?php foreach (array_slice($reviewItems, 0, 20) as $ri): ?>
             <div class="sdash-alert-item">
                 <div class="sdash-alert-item__info">
@@ -369,8 +370,9 @@ $csrf_token = generateCsrfToken();
             </div>
             <?php endforeach; ?>
             <?php if (count($reviewItems) > 20): ?>
-                <p style="color:#888;font-size:12px;margin:8px 0 0;">Showing the newest 20 of <?php echo count($reviewItems); ?>.</p>
+                <p class="sdash-section__note">Showing the newest 20 of <?php echo count($reviewItems); ?>.</p>
             <?php endif; ?>
+            </div>
         </div>
         <?php endif; ?>
 
@@ -678,9 +680,9 @@ $csrf_token = generateCsrfToken();
                 <a href="stock-orders.php?date=today&status=settled" class="sdash-section__action">All orders →</a>
             </div>
             <?php if (empty($topItemsToday)): ?>
-                <p style="color:#888;font-size:13px;padding:10px 0;">No settled orders today yet.</p>
+                <div class="sdash-section__body"><p class="sdash-section__note">No settled orders today yet.</p></div>
             <?php else: ?>
-            <div style="overflow-x:auto;">
+            <div class="sdash-section__body sdash-section__body--table" style="overflow-x:auto;">
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead>
                         <tr style="border-bottom:2px solid #e5ddd0;text-align:left;">
@@ -720,7 +722,7 @@ $csrf_token = generateCsrfToken();
                 <h3 class="sdash-section__title"><i class="fas fa-trash-alt" style="color:#e65100;"></i> Most Wasted Ingredients (30 days)</h3>
                 <a href="stock-wastage.php" class="sdash-section__action">All wastage →</a>
             </div>
-            <div style="overflow-x:auto;">
+            <div class="sdash-section__body sdash-section__body--table" style="overflow-x:auto;">
                 <table style="width:100%;border-collapse:collapse;font-size:13px;">
                     <thead>
                         <tr style="border-bottom:2px solid #e5ddd0;text-align:left;">
