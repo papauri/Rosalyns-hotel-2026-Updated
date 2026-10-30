@@ -139,6 +139,8 @@ The feature freeze in BUILD_PLAN.md ("PRODUCTION READINESS GATE") still stands. 
 ## Ship gate (every change, no exceptions)
 
 1. The lead's own checks: the DONE CHECKLIST above, `php -l`, `node --check`, the area's tests.
+   **UI-only changes** (CSS, client JS, markup; no PHP logic/SQL/money/permissions) run NO database tests
+   (owner 2026-10-30): lint + one review + a 3-size browser check (1920/1280/390), then push.
 2. **One independent review before every commit** (see "Right first time" 3–5): `qa-auditor`
    (sonnet for logic/stock/security, haiku for small markup/docs), or `dept-accounting-lead` as the
    gate for money changes. BLOCKERs fail; everything else is `LATER:`.
