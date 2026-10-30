@@ -27,6 +27,7 @@ require_once __DIR__ . '/ai-money.php';    // money read and shown, never moved 
 require_once __DIR__ . '/ai-guided.php';   // guided cards: one question at a time from the database, no model call
 require_once __DIR__ . '/ai-router.php';   // the learned local router: repeat questions answered with no model call
 require_once __DIR__ . '/ai-claims.php';   // every figure, name and date in a model reply checked against this question's data
+require_once __DIR__ . '/ai-menu.php';     // menu & recipe advice from the stock on hand: portions, cost, price, wastage (read only)
 
 if (!defined('RH_AI_TOOL_ROWS')) {
     define('RH_AI_TOOL_ROWS', 20);      // row cap per list (plan: default 20 rows)
@@ -241,7 +242,7 @@ function rh_ai_tool_registry(): array
             'perm' => [], 'module' => [], 'cache' => 60, 'handler' => 'rh_ai_t_daily_briefing', 'step' => 'Going through today',
         ],
     ];
-    return array_merge($reg, rh_ai_extra_tools(), rh_ai_lookup_tools(), rh_ai_desk_tools()); // Phases 4c + 5 extras + one-record lookups + the desk reads (all read only)
+    return array_merge($reg, rh_ai_extra_tools(), rh_ai_lookup_tools(), rh_ai_desk_tools(), rh_ai_menu_tools()); // Phases 4c + 5 extras + one-record lookups + the desk reads + the menu advisor (all read only)
 }
 
 /** The plain status line shown while a tool runs ("Checking today's departures..."). */
@@ -445,7 +446,7 @@ function rh_ai_paged_tools(): array
 {
     return ['search_bookings', 'arrivals_departures', 'in_house', 'room_board', 'balances_due', 'guest_history', 'money_leaks', 'inventory_watch',
         'work_queues', 'events_pipeline', 'guest_voice', 'reply_queue', 'kitchen_tickets', 'restaurant_sales', 'upsell_finder', 'who_is_online', 'check_availability', 'hotel_info',
-        'order_status', 'gym_watch', 'room_rates', 'upcoming_arrivals', 'booking_history', 'blocked_dates'];
+        'order_status', 'gym_watch', 'room_rates', 'upcoming_arrivals', 'booking_history', 'blocked_dates', 'menu_advisor'];
 }
 
 /** Provider-ready tool list [{name, description, schema}] for this person. */

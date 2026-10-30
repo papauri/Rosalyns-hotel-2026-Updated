@@ -229,6 +229,18 @@ function rh_ai_setting_defaults(): array
         'ai_followup_max_days'      => '31',  // a period asked of a one-day lookup ("arrivals in the last 2 weeks") is looked up day by day, this many days at most
         'ai_period_max_days'        => '366', // "the last / next N days, weeks or months" is read as a period up to this many units (a bigger N is not a period)
         'ai_route_train_seconds'    => '20',  // the daily learned-route training stops after this many seconds (bounded work)
+        // Owner 2026-10-30 ("help with the menu and recipes based on the stock we have"): the menu & recipe advisor (includes/ai/ai-menu.php)
+        'ai_menu_food_cost_target_pct'  => '28', // suggested till price: food cost at this % of the till price (the Recipes screen: food 28-35%, healthy under 30%)
+        'ai_menu_drink_cost_target_pct' => '22', // ... for drinks (bar and coffee bar items; the Recipes screen's drinks target is 18-25%)
+        'ai_menu_cost_ok_pct'           => '30', // food cost under this % is healthy (the Recipes screen's green band)
+        'ai_menu_cost_high_pct'         => '40', // over this % the item should be re-priced or reworked (the Recipes screen's red band)
+        'ai_menu_price_round'           => '0',  // suggested prices round UP to this step (e.g. 500); 0 = a step that fits the price (about 1-5%)
+        'ai_menu_expiry_days'           => '7',  // batches expiring within this many days are "use first" / "what to cook from it"
+        'ai_menu_waste_days_short'      => '30', // usage rate and recent wastage: the last this-many days
+        'ai_menu_waste_days_long'       => '90', // wastage, expiry and count shortfall history: the last this-many days
+        'ai_menu_waste_high_pct'        => '10', // thrown away or expired at least this % of what went out: "buy smaller amounts more often"
+        'ai_menu_short_life_days'       => '7',  // a stock item that keeps this many days or fewer has a short shelf life
+        'ai_menu_recipe_cache_days'     => '30', // a typical one-portion recipe proposed for a dish idea is kept this many days (asked again: no model call)
     ];
 }
 

@@ -680,6 +680,7 @@ putenv('RH_AI_FAKE_CAPTURE');
 rh_ai_set_transport($queueTransport);
 
 if (getenv('AI_TEST_OWNER_ROUND')) { goto rh_ai_test_owner_round; }
+if (getenv('AI_TEST_MENU_ONLY')) { goto rh_ai_test_menu; } // only the menu & recipe advisor checks (2026-10-30)
 
 // ════ Tools: read only, no forbidden tool ════
 $reg = rh_ai_tool_registry();
@@ -5145,6 +5146,327 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
     check((int)$pdo->query("SELECT COUNT(*) FROM bookings WHERE booking_reference LIKE 'AITGD%'")->fetchColumn() === 0 && (int)$pdo->query("SELECT COUNT(*) FROM rooms WHERE slug LIKE 'aitest-gd-%'")->fetchColumn() === 0
         && (int)$pdo->query("SELECT COUNT(*) FROM admin_users WHERE username LIKE 'aitestgd%'")->fetchColumn() === 0 && (int)$pdo->query("SELECT COUNT(*) FROM ai_memory WHERE kind = 'route' AND text LIKE '%gdzz%'")->fetchColumn() === 0,
         'owner round checks rolled back (no test rows left)');
+}
+
+rh_ai_test_menu:
+// ══════════════════════════════════════════════════════════════════════════════
+// Menu & recipe advisor (owner 2026-10-30: "help with the menu and recipes based on the stock we have ... portions, best
+// pricing, wastage ... at the cheapest price"). Read only; figures from this question's lookup; the menu permission plus
+// stock visibility; the Fast model only for a dish idea with no recipe on file (cached hotel-wide).
+// ══════════════════════════════════════════════════════════════════════════════
+$mnSrc = (string)file_get_contents($root . '/includes/ai/ai-menu.php');
+preg_match_all('/\b(?:INSERT\s+INTO|(?<!KEY\s)UPDATE|DELETE\s+FROM|REPLACE\s+INTO|ALTER\s+TABLE|CREATE\s+TABLE|DROP\s+TABLE|TRUNCATE)\s+`?(\w+)/i', $mnSrc, $mnW);
+$mnReg = rh_ai_tool_registry()['menu_advisor'] ?? null;
+check($mnReg !== null && $mnReg['perm'] === ['menu'] && $mnReg['module'] === ['stock'] && ($mnReg['gate'] ?? '') === 'rh_ai_gate_menu_advisor' && $mnReg['handler'] === 'rh_ai_t_menu_advisor'
+    && array_values(array_unique($mnW[1])) === ['ai_tool_cache'] && in_array('menu_advisor', rh_ai_specialists()['restaurant']['tools'], true) && in_array('menu_advisor', rh_ai_specialists()['stock']['tools'], true)
+    && in_array('menu_advisor', rh_ai_specialists()['restaurant']['core'], true),
+    'menu advisor: one READ tool behind the Menu permission + stock visibility (gate), Stock and POS modules; it writes nowhere but its recipe cache; the Restaurant and Stock leads carry it', json_encode($mnW[1]));
+$mnKeys = ['ai_menu_food_cost_target_pct', 'ai_menu_drink_cost_target_pct', 'ai_menu_cost_ok_pct', 'ai_menu_cost_high_pct', 'ai_menu_price_round', 'ai_menu_expiry_days', 'ai_menu_waste_days_short', 'ai_menu_waste_days_long', 'ai_menu_waste_high_pct', 'ai_menu_short_life_days', 'ai_menu_recipe_cache_days'];
+$mnMissing = array_values(array_filter($mnKeys, static fn($k) => !isset(rh_ai_setting_defaults()[$k]) || strpos($mnSrc, "'" . $k . "'") === false));
+check(!$mnMissing && rh_ai_setting_defaults()['ai_menu_food_cost_target_pct'] === '28' && rh_ai_setting_defaults()['ai_menu_cost_ok_pct'] === '30' && rh_ai_setting_defaults()['ai_menu_cost_high_pct'] === '40',
+    'menu advisor: targets, the Recipes screen\'s bands (30 / 40), windows and rounding are settings read by the advisor (no number written in the code)', json_encode($mnMissing));
+// Recognised from the person's words; changes and other subjects never are
+$mnI = [
+    'can we make chicken curry?' => ['dish', 'chicken curry'], 'I want to add chicken curry to the menu, do we have the ingredients?' => ['dish', 'chicken curry'],
+    'do we have the ingredients for beef stew' => ['dish', 'beef stew'], 'add chambo to the menu' => ['dish', 'chambo'], 'what do we need to make nsima' => ['dish', 'nsima'],
+    'what should we charge for chicken curry' => ['dish', 'chicken curry'], 'suggest a price for fish and chips' => ['dish', 'fish and chips'], 'how much should a mojito sell for?' => ['dish', 'mojito'],
+    'food cost of beef stew' => ['item', 'beef stew'], "what's the food cost on the club sandwich?" => ['item', 'club sandwich'], 'how many portions of beef stew can we make' => ['item', 'beef stew'],
+    'which menu items are under-priced?' => ['view', 'under_priced'], 'which items have no recipe' => ['view', 'no_recipe'], "what can we make from what's expiring this week?" => ['view', 'use_up'],
+    'update the recipe for beef stew' => ['change', ''], 'change the menu price of beef stew to 9000' => ['change', ''],
+];
+$mnBad = [];
+foreach ($mnI as $q => [$mode, $what]) {
+    $x = rh_ai_menu_intent($q);
+    if (($x['mode'] ?? '') !== $mode || ($mode !== 'change' && (string)($x['dish'] ?? $x['view'] ?? '') !== $what)) { $mnBad[] = $q . ' => ' . json_encode($x); }
+}
+foreach (['how should we price the weekend?', 'Can we make a booking?', 'can we make it to the airport by 5', 'can we do a late checkout', 'can we offer airport transfer', 'can we make an exception for this guest', 'can we add an extra bed', 'could we make the room ready by noon', 'can you make a reservation', 'can I make a payment', 'add 5 kg chicken to stock', 'change the price of the deluxe room', 'what is on the menu?', 'arrivals today', 'set room 4 to clean'] as $q) {
+    if (rh_ai_menu_intent($q) !== null) { $mnBad[] = 'not a menu question: ' . $q . ' => ' . json_encode(rh_ai_menu_intent($q)); }
+}
+check(!$mnBad && (rh_ai_menu_intent('can we make chicken curry for 40 people?')['portions'] ?? 0) === 40, 'menu questions are recognised from the words (dish ideas, a price, food cost, portions, the three menu views, "for 40 people"); bookings, payments, stock and room changes are not', json_encode($mnBad));
+// Units, recipe text, rounding and the proposal reader
+check(abs((float)rh_ai_menu_unit_factor('g', ['unit' => 'kg']) - 0.001) < 1e-9 && abs((float)rh_ai_menu_unit_factor('pcs', ['unit' => 'tray', 'pieces_per_unit' => 30]) - 1 / 30) < 1e-9
+    && rh_ai_menu_unit_factor('g', ['unit' => 'packet']) === null && rh_ai_menu_unit_factor('pcs', ['unit' => 'kg']) === null && abs((float)rh_ai_menu_unit_factor('ml', ['unit' => 'L']) - 0.001) < 1e-9
+    && rh_ai_menu_unit_factor('bottle', ['unit' => 'bottles']) === 1.0,
+    'units: grams to kg and ml to litres by size, pieces into a tray of 30, the same unit word; grams of something counted in packets is "not comparable" (never a guessed weight)');
+$mnP = rh_ai_menu_parse_recipe('chicken 180 g; onion: 60g; 2 eggs; 1/2 tsp curry powder; salt to taste');
+check($mnP === [['chicken', 180.0, 'g'], ['onion', 60.0, 'g'], ['eggs', 2.0, 'pcs'], ['curry powder', 0.5, 'tsp']], 'a recipe written as text is read ("chicken 180 g; onion: 60g; 2 eggs; 1/2 tsp curry powder"; "salt to taste" has no quantity and is left out)', json_encode($mnP));
+check(rh_ai_menu_round_price(11333) === 11500.0 && rh_ai_menu_round_price(4320) === 4400.0 && rh_ai_menu_round_price(950) === 950.0 && rh_ai_menu_round_price(8094.44) === 8100.0 && rh_ai_menu_round_price(0) === 0.0,
+    'suggested prices round UP to a step that fits the price (11,333 -> 11,500; 4,320 -> 4,400), so the food cost never ends above the target');
+$mnRows = [['id' => 1, 'name' => 'Essence Banana flavour', 'is_archived' => 0], ['id' => 2, 'name' => 'Cooking oil', 'is_archived' => 0], ['id' => 3, 'name' => 'Engine oil', 'is_archived' => 0],
+    ['id' => 4, 'name' => 'Tomatoes', 'is_archived' => 0], ['id' => 5, 'name' => 'Red onion', 'is_archived' => 0]];
+$mnM1 = rh_ai_menu_match_ingredient('banana', $mnRows);
+$mnM2 = rh_ai_menu_match_ingredient('cooking oil', $mnRows);
+$mnM3 = rh_ai_menu_match_ingredient('fresh chopped tomato', $mnRows);
+$mnM4 = rh_ai_menu_match_ingredient('onion', $mnRows);
+check($mnM1['status'] === 'not_stocked' && in_array('Essence Banana flavour', $mnM1['close'], true) && $mnM2['status'] === 'matched' && $mnM2['row']['name'] === 'Cooking oil' && !$mnM2['others']
+    && $mnM3['status'] === 'matched' && $mnM3['row']['name'] === 'Tomatoes' && $mnM4['status'] === 'matched' && $mnM4['row']['name'] === 'Red onion',
+    'ingredient matching: "banana" is never Essence Banana flavour (only offered as close); "cooking oil" is Cooking oil, not every oil; describing words and plurals are ignored ("fresh chopped tomato" = Tomatoes)', json_encode([$mnM1, $mnM2['status']]));
+$mnR1 = rh_ai_menu_read_proposal("```json\n" . '{"dish":"X","kind":"drink","portion":"1 glass","ingredients":[["rum",50,"ml"],["lime",1,"pcs"],["sugar",15,"grams"],["mint",5,"leaves"],["ice",9000,"g"]]}' . "\n```");
+check(($mnR1['recipe'] ?? '') === 'rum 50 ml; lime 1 pcs; sugar 15 g' && ($mnR1['kind'] ?? '') === 'drink' && rh_ai_menu_read_proposal('{"error":"not a dish"}') === ['error' => 'not a dish']
+    && rh_ai_menu_read_proposal('Sure! Here is a recipe for you...') === [] && rh_ai_menu_read_proposal('{"ingredients":[["x; DROP TABLE",5,"kg"]]}') === [],
+    'the proposal is read strictly (JSON only, units g / ml / pcs, quantities bounded, names cleaned); "not a dish" and prose are refused', json_encode($mnR1));
+
+if (!$chatReady || !rh_ai_memory_ready($pdo)) {
+    skip('menu advisor database checks (Assistant migrations not run here)');
+} else {
+    require_once $root . '/includes/ai/ai-selfheal.php'; // brings ai-evals.php (the question-set check)
+    $admM = $pdo->query("SELECT id, role, username, full_name FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    $mnCount = static function () use ($pdo): string {
+        $o = [];
+        foreach (['menu_items', 'menu_categories', 'stock_recipes', 'stock_recipe_ingredients', 'stock_adjustments', 'stock_batches', 'stock_ingredients', 'ai_actions'] as $t) {
+            $o[] = $t . '=' . (int)$pdo->query("SELECT COUNT(*) FROM `$t`")->fetchColumn();
+        }
+        return implode(',', $o) . ',qty=' . (string)$pdo->query("SELECT ROUND(COALESCE(SUM(current_quantity), 0), 6) FROM stock_ingredients")->fetchColumn();
+    };
+    $pdo->beginTransaction();
+    try {
+        rh_ai_save_settings(['ai_enabled' => '1', 'ai_paused_reason' => '', 'ai_paused_kind' => '', 'ai_provider' => 'google', 'ai_cloud_enabled' => '1', 'ai_user_daily_token_cap' => '50000000', 'ai_monthly_budget_usd' => '1000',
+            'ai_rate_limit_per_10min' => '5000', 'ai_turn_token_cap' => '60000', 'ai_swarm_models' => '0', 'ai_actions_enabled' => '1', 'ai_learning_enabled' => '1', 'ai_router_enabled' => '1'], $pdo);
+        $pdo->exec("INSERT INTO enabled_modules (module_key, module_name, description, is_enabled, sort_order) VALUES ('ai_assistant', 'Assistant', '', 1, 90) ON DUPLICATE KEY UPDATE is_enabled = 1");
+        rh_ai_store_key('google', 'AIzaFAKEKEYFORTESTSONLY0123456789abcd', (int)$admM['id'], $pdo);
+        $pdo->exec("UPDATE ai_models SET is_selected = 0, role = NULL WHERE is_selected = 1");
+        $miM = $pdo->prepare("INSERT INTO ai_models (provider, model_id, label, capability_rank, source, is_selected, role, price_in_per_mtok, price_out_per_mtok) VALUES ('google', ?, ?, ?, 'catalog', 1, ?, ?, ?)
+                              ON DUPLICATE KEY UPDATE is_selected = 1, role = VALUES(role), price_in_per_mtok = VALUES(price_in_per_mtok), price_out_per_mtok = VALUES(price_out_per_mtok)");
+        $miM->execute(['gemini-3.8-flash', 'Gemini 3.8 Flash', 92, 'primary', 0.75, 3.75]);
+        $miM->execute(['gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite', 86, 'fast', 0.30, 2.50]);
+        rh_ai_set_transport(static function ($method, $url, $headers, $body, $timeout) {
+            $GLOBALS['mn_calls'][] = ['url' => $url, 'body' => (string)$body];
+            $text = array_shift($GLOBALS['mn_q']) ?? 'OK';
+            return ['http' => 200, 'body' => json_encode(rh_ai_fake_body(ai2_prov($url), ['text' => $text, 'usage' => ['in' => 180, 'out' => 140]], ''))];
+        });
+        $GLOBALS['__rh_ai_module_override'] = ['pos' => true, 'stock' => true, 'bookings' => true, 'finance' => true, 'restaurant_page' => true];
+        // Test data: distinctive names (no clash with the hotel's own stock), one menu category, four dishes
+        $pdo->prepare("INSERT INTO menu_categories (name, slug, is_active, sort_order, default_station) VALUES ('AITest Mn Mains', 'aitest-mn-mains', 1, 999, 'kitchen')")->execute();
+        $mnCat = (int)$pdo->lastInsertId();
+        $insI = $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, min_quantity, cost_per_unit, yield_percent, is_archived, pieces_per_unit) VALUES (?, 'AITest', ?, ?, 0, ?, ?, ?, ?)");
+        $mnIng = static function (string $n, string $u, float $q, float $c, float $y, int $arch = 0, ?float $pcs = null) use ($insI, $pdo): int {
+            $insI->execute([$n, $u, $q, $c, $y, $arch, $pcs]);
+            return (int)$pdo->lastInsertId();
+        };
+        $iCh = $mnIng('Zqmn Chicken', 'kg', 5, 6000, 80);
+        $iOn = $mnIng('Zqmn Onion', 'kg', 0.5, 2000, 90);
+        $iRi = $mnIng('Zqmn Rice', 'kg', 10, 1500, 100);
+        $iEg = $mnIng('Zqmn Eggs', 'tray', 2, 9000, 100, 0, 30);
+        $mnIng('Zqmn Saffron', 'g', 50, 100, 100, 1);
+        $mnIng('Zqmn Pepper Red', 'kg', 1, 3000, 100);
+        $mnIng('Zqmn Pepper Green', 'kg', 1, 3000, 100);
+        $mnT = rh_ai_today();
+        $insB = $pdo->prepare("INSERT INTO stock_batches (ingredient_id, batch_number, quantity_received, quantity_remaining, cost_per_unit, received_date, expiry_date, status) VALUES (?, ?, ?, ?, ?, ?, ?, 'active')");
+        $insB->execute([$iOn, 'AITMN-ON1', 0.4, 0.4, 2000, date('Y-m-d', strtotime($mnT . ' -3 days')), date('Y-m-d', strtotime($mnT . ' +2 days'))]);
+        $insB->execute([$iRi, 'AITMN-RI1', 1, 1, 1500, date('Y-m-d', strtotime($mnT . ' -10 days')), date('Y-m-d', strtotime($mnT . ' -1 day'))]);
+        $insA = $pdo->prepare("INSERT INTO stock_adjustments (ingredient_id, quantity_change, reason, source_type, source_id, cost_at_time, adjusted_by, created_at) VALUES (?, ?, 'AITest', ?, NULL, ?, ?, ?)");
+        $insA->execute([$iOn, -0.3, 'wastage', 2000, (int)$admM['id'], date('Y-m-d H:i:s', strtotime('-20 days'))]);
+        $insA->execute([$iOn, -1.0, 'pos_order', 2000, (int)$admM['id'], date('Y-m-d H:i:s', strtotime('-10 days'))]);
+        $insM = $pdo->prepare("INSERT INTO menu_items (category_id, item_name, price, station, is_available) VALUES (?, ?, ?, 'kitchen', 1)");
+        $insR = $pdo->prepare("INSERT INTO stock_recipes (menu_item_id, menu_type, portions_per_recipe) VALUES (?, 'aitest-mn-mains', 1)");
+        $insRI = $pdo->prepare("INSERT INTO stock_recipe_ingredients (recipe_id, ingredient_id, quantity_per_portion, yield_percent) VALUES (?, ?, ?, ?)");
+        $mnDish = static function (string $n, float $price, array $lines) use ($insM, $insR, $insRI, $pdo, $mnCat): int {
+            $insM->execute([$mnCat, $n, $price]);
+            $id = (int)$pdo->lastInsertId();
+            if ($lines) {
+                $insR->execute([$id]);
+                $rid = (int)$pdo->lastInsertId();
+                foreach ($lines as [$ing, $q, $y]) {
+                    $insRI->execute([$rid, $ing, $q, $y]);
+                }
+            }
+            return $id;
+        };
+        $mBeef = $mnDish('Zqmn Beef Plate', 10000, [[$iCh, 0.3, 75]]);
+        $mPricey = $mnDish('Zqmn Pricey Plate', 3000, [[$iRi, 1, 100]]);
+        $mnDish('Zqmn Bare Plate', 5000, []);
+        $mnDish('Zqmn Onion Soup', 4000, [[$iOn, 0.2, 100]]);
+        $mnBefore = $mnCount();
+        $gpM = $pdo->prepare("INSERT INTO user_permissions (user_id, permission_key, is_granted) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE is_granted = VALUES(is_granted)");
+        $mnUser = static function (string $tag, array $grant) use ($pdo, $gpM): array {
+            $pdo->prepare("INSERT INTO admin_users (username, email, password_hash, full_name, role, is_active) VALUES (?, ?, ?, ?, 'receptionist', 1)")
+                ->execute(['aitestmn_' . $tag . bin2hex(random_bytes(2)), 'aitestmn.' . $tag . '@example.com', password_hash(bin2hex(random_bytes(8)), PASSWORD_DEFAULT), 'Aitestmnq Xq' . substr(md5($tag), 0, 3)]); // never a menu word: the scrubber reads staff names in replies
+            $u = ['id' => (int)$pdo->lastInsertId(), 'role' => 'receptionist', 'username' => 'aitestmn_' . $tag, 'full_name' => 'Aitestmnq Xq' . substr(md5($tag), 0, 3)];
+            foreach (array_keys(getAllPermissions()) as $k) {
+                $gpM->execute([$u['id'], $k, in_array($k, $grant, true) ? 1 : 0]);
+            }
+            return $u;
+        };
+        $uMenu = $mnUser('menu', ['ai_assistant_use', 'dashboard', 'menu']);
+        $uStock = $mnUser('stock', ['ai_assistant_use', 'dashboard', 'stock_management']);
+        $uChef = $mnUser('chef', ['ai_assistant_use', 'dashboard', 'menu', 'stock_management']);
+        $uDash = $mnUser('dash', ['ai_assistant_use', 'dashboard', 'menu', 'stock_dashboard']);
+        $mnChat = static function (string $msg, array $q = [], ?array $who = null, bool $fresh = true) use ($pdo, $admM): array {
+            if ($fresh) {
+                $pdo->exec('DELETE FROM ai_tool_cache');
+            }
+            $GLOBALS['mn_q'] = $q;
+            $GLOBALS['mn_calls'] = [];
+            return rh_ai_turn($pdo, $who ?? $admM, ['conversation_id' => 0, 'message' => $msg, 'page' => 'dashboard.php']);
+        };
+        // What a local reply may draw on: its own lookups (re-run in full) and the question; the claim checker finds nothing to fix
+        $mnClaim = static function (array $res) use ($pdo, $admM): array {
+            $mid = (int)($res['message_id'] ?? 0);
+            $row = $pdo->query("SELECT content, conversation_id FROM ai_messages WHERE id = " . $mid)->fetch(PDO::FETCH_ASSOC);
+            if (!$row) {
+                return ['no message'];
+            }
+            $conv = (int)$row['conversation_id'];
+            $ev = '';
+            foreach ($pdo->query("SELECT role, content, tool_name, tool_args_json FROM ai_messages WHERE conversation_id = $conv AND id < $mid ORDER BY id")->fetchAll(PDO::FETCH_ASSOC) as $x) {
+                $ev .= "\n" . ($x['role'] === 'tool' ? json_encode(rh_ai_run_tool($pdo, $admM, $conv, (string)$x['tool_name'], rh_ai_vault_resolve_args($pdo, $conv, (array)(json_decode((string)$x['tool_args_json'], true) ?: [])))['result'], JSON_UNESCAPED_UNICODE) : (string)$x['content']);
+            }
+            $ck = rh_ai_claim_check((string)$row['content'], $ev, ['vault' => rh_ai_vault_load($pdo, $conv)['tok']]);
+            return array_merge(array_column($ck['bad'], 'raw'), (array)$ck['inconsistent']);
+        };
+        $prop = json_encode(['dish' => 'Zqmn curry', 'kind' => 'food', 'portion' => '1 plate', 'ingredients' => [['zqmn chicken', 200, 'g'], ['zqmn onion', 60, 'g'], ['zqmn rice', 90, 'g'], ['zqmn eggs', 2, 'pcs'],
+            ['zqmn saffron', 1, 'g'], ['zqmn unicornroot', 10, 'g'], ['zqmn pepper', 20, 'g']]]);
+
+        // 1. Who may ask: the menu permission AND stock visibility; module off = not offered; never a figure in a decline
+        rh_ai_memo_begin();
+        check(!rh_ai_tool_allowed($uMenu, 'menu_advisor') && !rh_ai_tool_allowed($uStock, 'menu_advisor') && rh_ai_tool_allowed($uChef, 'menu_advisor') && rh_ai_tool_allowed($uDash, 'menu_advisor') && rh_ai_tool_allowed($admM, 'menu_advisor'),
+            'menu advisor gate: Menu alone or stock alone is not enough; Menu + Ingredients & Recipes or Menu + Stock Dashboard (and admins) may use it');
+        rh_ai_memo_end();
+        $d1 = $mnChat('can we make zqmn curry?', [$prop], $uMenu);
+        $d2 = $mnChat('food cost of zqmn pricey plate', [], $uStock);
+        check($d1['route'] === 'declined' && strpos($d1['reply'], rh_ai_out_of_scope_line()) !== false && $d2['route'] === 'declined' && strpos($d2['reply'], rh_ai_out_of_scope_line()) !== false
+            && !$GLOBALS['mn_calls'] && !preg_match('/Zqmn|MWK|\d+(\.\d)?%/', $d1['reply'] . $d2['reply']),
+            'menu advisor: a menu-only or a stock-only account gets the one permission line (no model call, no stock figure, no price)', json_encode([$d1['reply'], $d2['reply']]));
+        $GLOBALS['__rh_ai_module_override']['pos'] = false;
+        $d3 = $mnChat('can we make zqmn curry?', [$prop], $uChef);
+        $GLOBALS['__rh_ai_module_override']['pos'] = true;
+        check($d3['route'] === 'declined' && strpos($d3['reply'], "There's no restaurant menu") !== false && strpos($d3['reply'], rh_ai_out_of_scope_line()) === false && !$GLOBALS['mn_calls'],
+            'menu advisor: with the menu (POS) switched off it is "not offered here", never the permission line (rail 3)', $d3['reply']);
+        rh_ai_memo_begin();
+        $teamC = rh_ai_specialists_for_user($uChef);
+        $specC = array_column(rh_ai_lane_specs($uChef, $teamC, rh_ai_lanes_for($teamC, 'which new dish should we put on the menu for winter?'), []), 'name');
+        rh_ai_memo_end();
+        check(isset($teamC['restaurant']) && in_array('menu_advisor', $teamC['restaurant']['tools'], true) && in_array('menu_advisor', $specC, true),
+            'menu advisor on the model path: a chef with only Menu + Ingredients & Recipes has the Restaurant lead, and a menu question sends the advisor tool', json_encode($specC));
+
+        // 2. A dish idea: one Fast call for a typical portion, every figure worked out here
+        $mnBefore = $mnCount();
+        $c1 = $mnChat('can we make zqmn curry for 10 people?', [$prop], $uChef);
+        $c1calls = $GLOBALS['mn_calls'];
+        $c1body = (string)($c1calls[0]['body'] ?? '');
+        $res1 = rh_ai_t_menu_advisor($pdo, $uChef, ['dish' => 'zqmn curry', 'recipe' => (string)rh_ai_menu_read_proposal($prop)['recipe'], 'recipe_by' => 'assistant', 'serving' => '1 plate', 'portions' => 10]);
+        $ingBy = [];
+        foreach ($res1['ingredients'] as $l) { $ingBy[$l['asked']] = $l; }
+        $activeN = (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE is_archived = 0")->fetchColumn();
+        $vatRate = rh_vat_enabled() ? (float)getSetting('vat_rate', 0) : 0.0;
+        echo 'INFO menu advisor "can we make zqmn curry?": route ' . $c1['route'] . ', ' . count($c1calls) . ' model call, ' . ((int)$c1['tokens_in'] + (int)$c1['tokens_out']) . ' tokens (fake usage), US$' . $c1['cost_usd'] . "\n";
+        check($c1['route'] === 'fast' && count($c1calls) === 1 && strpos($c1calls[0]['url'], 'gemini-3.5-flash-lite') !== false && (int)$c1['tokens_in'] === 180 && (int)$c1['tokens_out'] === 140 && $c1['cost_usd'] > 0
+            && strpos($c1body, 'Dish: zqmn curry') !== false && strpos($c1body, 'compact JSON only') !== false && strpos($c1body, (string)$admM['username']) === false && strpos($c1body, 'Zqmn Onion') === false,
+            'dish idea: ONE call to the Fast model with the frozen recipe prompt and the dish name only (no stock, no names), tokens and cost recorded on the answer', mb_substr($c1body, 0, 300));
+        check(($ingBy['zqmn chicken']['stock_item'] ?? '') === 'Zqmn Chicken' && ($ingBy['zqmn chicken']['uses_from_stock'] ?? '') === '0.25 kg' && ($ingBy['zqmn chicken']['cost'] ?? 0) == 1500
+            && ($ingBy['zqmn onion']['uses_from_stock'] ?? '') === '0.067 kg' && ($ingBy['zqmn onion']['portions_it_allows'] ?? -1) === 7 && ($ingBy['zqmn eggs']['uses_from_stock'] ?? '') === '0.067 tray' && ($ingBy['zqmn eggs']['cost'] ?? 0) == 600
+            && $res1['portions_possible'] === 7 && $res1['first_to_run_out'] === 'Zqmn Onion' && abs($res1['cost_per_portion'] - 2428.33) < 0.005,
+            'dish idea: need = quantity per portion / yield (200 g chicken at 80% = 0.25 kg; 60 g onion at 90% = 0.067 kg; 2 eggs of a tray of 30), cost per portion MWK 2,428.33, 7 portions (onion runs out first)', json_encode([$res1['portions_possible'], $res1['cost_per_portion'], $ingBy['zqmn onion'] ?? null]));
+        check(in_array('zqmn unicornroot', $res1['not_stocked'], true) && in_array('zqmn saffron', $res1['not_stocked'], true) && strpos((string)($ingBy['zqmn saffron']['match'] ?? ''), 'archived') !== false
+            && $res1['stock_items_checked'] === $activeN && strpos($res1['not_stocked_checked'], 'all ' . $activeN . ' stock items') !== false && strpos($c1['reply'], 'checked against all ' . $activeN . ' stock items') !== false,
+            'no false absence: "not stocked" only after checking every stock item (archived ones named as such), and the reply says how many were checked', json_encode([$res1['not_stocked'], $res1['stock_items_checked']]));
+        check(strpos((string)($res1['ask'] ?? ''), 'Zqmn Pepper Red') !== false && strpos((string)$res1['ask'], 'Zqmn Pepper Green') !== false && strpos($c1['reply'], 'Which one do you use?') !== false,
+            'several plausible stock items (red or green pepper): one short question listing them, never a silent pick', (string)($res1['ask'] ?? ''));
+        $pr = (array)$res1['price'];
+        $vatOk = $vatRate > 0 ? (!empty($pr['vat_included']) && abs($pr['vat_inside'] - round(8700 - round(8700 / (1 + $vatRate / 100), 2), 2)) < 0.005 && strpos($c1['reply'], 'VAT included') !== false) : (empty($pr['vat_included']) && strpos($c1['reply'], 'VAT is off') !== false);
+        check($pr['suggested_till_price'] == 8700 && $pr['target_food_cost_pct'] == 28 && $pr['food_cost_pct_at_that_price'] == 27.9 && !empty($pr['at_least']) && $vatOk
+            && strpos($c1['reply'], 'at least MWK 8,700.00') !== false,
+            'price: cost / target (28% of the till price, as the Recipes screen works food cost) rounded up to MWK 8,700 (27.9%); VAT inside it by the till rule; "at least" while ingredients are left out of the cost', json_encode($pr));
+        $fp = (array)$res1['for_portions'];
+        check($fp['portions'] === 10 && !$fp['enough'] && ($fp['short'][0]['stock_item'] ?? '') === 'Zqmn Onion' && ($fp['short'][0]['short_by'] ?? '') === '0.167 kg' && ($fp['short'][0]['needed'] ?? '') === '0.667 kg',
+            'for 10 portions: onion needs 0.667 kg and is short by 0.167 kg', json_encode($fp));
+        $adv = implode(' | ', (array)$res1['advice']);
+        check(($res1['use_first'][0]['batch'] ?? '') === 'AITMN-ON1' && ($res1['past_expiry'][0]['batch'] ?? '') === 'AITMN-RI1' && strpos($adv, 'Zqmn Onion: 0.3 kg thrown away') !== false && strpos($adv, '23.1%') !== false
+            && strpos($adv, 'buy smaller amounts') !== false && strpos($adv, 'keeps about 5 days') !== false && strpos($adv, 'share it with Zqmn Onion Soup') !== false && strpos($adv, 'Zqmn Eggs') !== false
+            && strpos($c1['reply'], 'never cook it') !== false,
+            'wastage and risk: the onion batch to use first, the rice batch past its date (check it, never cook it), 23.1% of onion thrown away in 90 days, short shelf life with slow use (share with Onion Soup), stock no dish uses', $adv);
+        $sim = array_column((array)$res1['similar_on_menu'], 'food_cost_pct', 'item');
+        check(array_key_exists('Zqmn Beef Plate', $sim) && $sim['Zqmn Beef Plate'] == 24.0 && array_key_exists('Zqmn Pricey Plate', $sim) && $sim['Zqmn Pricey Plate'] == 50.0,
+            'similar items on the menu with their till price and food cost % (the Recipes screen figures: Beef Plate 24.0%, Pricey Plate 50.0%)', json_encode($sim));
+        check($mnCount() === $mnBefore && !$c1['cards'] && strpos($c1['reply'], 'Nothing is changed from the chat') !== false && in_array('menu-management.php', array_column($c1['links'], 'url'), true),
+            'read only: no menu, recipe, stock, batch or card row and no stock quantity changes; the reply points to Menu Management and Recipes to add it', json_encode([$mnBefore, $mnCount()]));
+        $cl1 = $mnClaim($c1);
+        check(!$cl1, 'the dish answer passes the claim checker unchanged (every figure is from this question\'s lookup)', json_encode($cl1));
+        $mnKeyRow = $pdo->prepare("SELECT user_id FROM ai_tool_cache WHERE cache_key = ?");
+        $mnKeyRow->execute([rh_ai_menu_recipe_cache_key('zqmn curry')]);
+        $c2 = $mnChat('do we have the ingredients for zqmn curry?', [], $uDash, false);
+        check($mnKeyRow->fetchColumn() !== false && $c2['route'] === 'local' && !$GLOBALS['mn_calls'] && (int)$c2['tokens_in'] === 0 && strpos($c2['reply'], 'Zqmn Chicken') !== false,
+            'the typical portion is kept hotel-wide: the same dish asked again (another person, other words) is answered with no model call', mb_substr($c2['reply'], 0, 160));
+        // Fast model unreadable -> the Primary model once; "not a dish"; no model chosen -> asks for the recipe
+        $c3 = $mnChat('can we make zqmn stew?', ['Here is a lovely stew recipe for you!', $prop], $uChef);
+        check($c3['route'] === 'primary' && count($GLOBALS['mn_calls']) === 2 && strpos($GLOBALS['mn_calls'][1]['url'], 'gemini-3.8-flash') !== false && strpos($c3['reply'], 'Zqmn Chicken') !== false,
+            'a proposal the Fast model gets wrong is asked once of the Primary model', json_encode(array_column($GLOBALS['mn_calls'], 'url')));
+        $c4 = $mnChat('can we make zqmn happiness?', ['{"error":"not a dish"}'], $uChef);
+        check(strpos($c4['reply'], 'only check dishes and drinks') !== false && !$c4['cards'], '"not a dish" gets one plain line', $c4['reply']);
+        $pn = rh_ai_t_menu_advisor($pdo, $uChef, ['dish' => 'zqmn shake', 'recipe' => 'zqmn rice 10 g; zqmn eggs 50 g; zqmn chicken 30 ml; zqmn unicornroot 5 g', 'kind' => 'drink']);
+        check(!isset($pn['price']) && strpos((string)($pn['price_needs'] ?? ''), 'zqmn eggs') !== false && strpos(rh_ai_menu_local_text($pn, ['mode' => 'dish']), 'No price yet') !== false,
+            'no price from a recipe that is mostly not costed (eggs by weight, chicken by volume, an unstocked root): it says which costs are missing instead', json_encode([$pn['price_needs'] ?? null, $pn['cost_leaves_out'] ?? null]));
+
+        // 3. On the menu: food cost from the recipe on file = the Recipes screen; portions; no model call
+        $y = rh_stock_yield_sql('sri.yield_percent');
+        $scr = (float)$pdo->query("SELECT COALESCE(SUM(sri.quantity_per_portion / $y * i.cost_per_unit), 0) FROM stock_recipes sr JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id JOIN stock_ingredients i ON i.id = sri.ingredient_id WHERE sr.menu_item_id = " . $mBeef)->fetchColumn();
+        $e1 = $mnChat('what is the food cost of zqmn beef plate?', [], $uChef);
+        $e1r = rh_ai_t_menu_advisor($pdo, $uChef, ['item' => 'zqmn beef plate']);
+        check($e1['route'] === 'local' && !$GLOBALS['mn_calls'] && abs($e1r['cost_per_portion'] - round($scr, 2)) < 0.005 && $e1r['now']['food_cost_pct'] == 24.0 && strpos($e1['reply'], '24.0%') !== false
+            && strpos($e1['reply'], 'healthy') !== false && $e1r['portions_possible'] === 12 && strpos($e1['reply'], '12 portions') !== false,
+            'food cost of a menu item: the Recipes screen\'s own sum (0.3 kg at 75% yield = 0.4 kg chicken, MWK 2,400.00, 24.0% of MWK 10,000), healthy band, 12 portions on hand; no model call', mb_substr($e1['reply'], 0, 200));
+        $e2 = $mnChat('can we make zqmn pricey plate?', [], $uChef);
+        check($e2['route'] === 'local' && !$GLOBALS['mn_calls'] && strpos($e2['reply'], 'Recipe on file') !== false && strpos($e2['reply'], '50.0%') !== false && strpos($e2['reply'], 're-price') !== false,
+            'a dish already on the menu with a recipe uses that recipe (no model call) and flags 50.0% food cost for re-pricing', mb_substr($e2['reply'], 0, 200));
+        $e3 = $mnChat('how many portions of zqmn bare plate can we make?', [], $uChef);
+        check($e3['route'] === 'local' && !$GLOBALS['mn_calls'] && strpos($e3['reply'], 'no recipe yet') !== false, 'a menu item with no recipe says so (its food cost cannot be worked out) instead of a figure', $e3['reply']);
+        $e4 = $mnChat('how many portions of zzqx mystery stew can we make?', [], $uChef);
+        $itemsN = count(rh_ai_menu_items($pdo));
+        check($e4['route'] === 'local' && strpos($e4['reply'], "isn't on the menu (checked " . $itemsN . ' menu items)') !== false, 'a dish not on the menu: said with the checked total, never a bare "none"', $e4['reply']);
+
+        // 4. The three menu views
+        $v1 = $mnChat('which menu items are under-priced?', [], $uChef);
+        $v2 = $mnChat('which menu items have no recipe?', [], $uChef);
+        $v3 = $mnChat("what can we make from what's expiring this week?", [], $uChef);
+        $v3r = rh_ai_t_menu_advisor($pdo, $uChef, ['view' => 'use_up']);
+        check($v1['route'] === 'local' && strpos($v1['reply'], 'Zqmn Pricey Plate') !== false && strpos(explode('Tight:', $v1['reply'])[0], 'Zqmn Beef Plate') === false && strpos($v1['reply'], 'at the target: MWK 5,400.00') !== false
+            && strpos($v2['reply'], 'Zqmn Bare Plate') !== false && strpos($v2['reply'], 'Zqmn Beef Plate') === false
+            && strpos($v3['reply'], 'Zqmn Onion') !== false && strpos($v3['reply'], 'Zqmn Onion Soup (this batch covers about 2 portions)') !== false && strpos($v3['reply'], 'AITMN-RI1') !== false && $v3r['expiring']['total'] >= 1
+            && !$GLOBALS['mn_calls'],
+            'menu views with no model call: items to re-price (Pricey Plate 50.0%, MWK 5,400.00 at the target), items with no recipe, and what to cook from stock expiring this week (Onion Soup, 2 portions from the batch; the expired rice batch to check)', json_encode([mb_substr($v1['reply'], 0, 200), mb_substr($v3['reply'], 0, 300)]));
+        $clV = array_merge($mnClaim($e1), $mnClaim($v1), $mnClaim($v2), $mnClaim($v3));
+        check(!$clV, 'the food cost and menu view answers pass the claim checker unchanged', json_encode($clV));
+
+        // 5. Changes are never made here (rail 1); a typo in a recipe is read, never written
+        $actN0 = (int)$pdo->query("SELECT COUNT(*) FROM ai_actions")->fetchColumn();
+        $x1 = $mnChat('update the recipe for zqmn beef plate', [], $uChef);
+        $x2 = $mnChat('change the price of zqmn beef plate to 9000', [], $uChef);
+        $x3 = $mnChat('change the menu price of zqmn beef plate to 9000', [], $uChef);
+        check($x1['route'] === 'declined' && $x2['route'] === 'declined' && $x3['route'] === 'declined' && strpos($x1['reply'], "can't change menu prices") !== false && strpos($x2['reply'], "can't change") !== false
+            && !$GLOBALS['mn_calls'] && (int)$pdo->query("SELECT COUNT(*) FROM ai_actions")->fetchColumn() === $actN0 && (float)$pdo->query("SELECT price FROM menu_items WHERE id = " . $mBeef)->fetchColumn() == 10000,
+            'a price or recipe change gets one plain line and the screens - no card, no model call, the price stays MWK 10,000', json_encode([$x1['reply'], $x2['reply']]));
+        $tq = rh_ai_t_menu_advisor($pdo, $uChef, ['dish' => 'zqmn test', 'recipe' => 'zqmn chiken 100 g']);
+        check(($tq['ingredients'][0]['stock_item'] ?? '') === 'Zqmn Chicken' && ($tq['ingredients'][0]['match'] ?? '') === 'read as' && $mnCount() === $mnBefore,
+            'a misspelt ingredient ("zqmn chiken") is read as the clearly closest stock item and shown by its real name - a read, never a write', json_encode($tq['ingredients'][0] ?? null));
+        // 6. The question set's menu cases pass on this data (the model ones with a scripted proposal)
+        $evBad = [];
+        foreach (json_decode((string)file_get_contents($root . '/includes/ai/evals.json'), true)['cases'] as $case) {
+            if (strpos((string)$case['id'], 'menu_') !== 0) { continue; }
+            $case += ['smoke' => false, 'model' => false, 'page' => 'dashboard.php'];
+            $er = $mnChat((string)$case['q'], !empty($case['model']) ? [$prop] : [], $admM);
+            $st = rh_ai_eval_check($pdo, $admM, $case, $er);
+            if ($st[0] !== 'pass') { $evBad[] = $case['id'] . ': ' . $st[1] . ' | ' . mb_substr((string)$er['reply'], 0, 120); }
+            if (empty($case['model'])) { $evBad = array_merge($evBad, array_map(static fn($b) => $case['id'] . ' claim: ' . (is_string($b) ? $b : json_encode($b)), $mnClaim($er))); }
+        }
+        check(!$evBad, 'question set: every menu case passes (dish check, price, food cost, portions, under-priced, no recipe, use up, a checked absence, price and recipe changes declined)', json_encode($evBad));
+        // No model chosen: a dish idea asks for the recipe instead (no call)
+        $pdo->exec("UPDATE ai_models SET is_selected = 0, role = NULL WHERE is_selected = 1");
+        $n1 = $mnChat('can we make zqmn goulash?', [$prop], $uChef);
+        check($n1['route'] === 'local' && !$GLOBALS['mn_calls'] && strpos($n1['reply'], 'send one portion') !== false && strpos($n1['reply'], 'no model is chosen') !== false,
+            'with no model chosen a dish idea asks for one portion\'s recipe (no call, no invented figure)', $n1['reply']);
+    } catch (Throwable $e) {
+        bad('menu advisor checks threw', get_class($e) . ': ' . $e->getMessage() . ' @' . $e->getFile() . ':' . $e->getLine());
+    } finally {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        unset($GLOBALS['__rh_ai_module_override']);
+        rh_ai_settings($pdo, true);
+        rh_ai_vault_forget();
+        rh_ai_vault_people_reset();
+    }
+    check((int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE name LIKE 'Zqmn %'")->fetchColumn() === 0 && (int)$pdo->query("SELECT COUNT(*) FROM menu_items WHERE item_name LIKE 'Zqmn %'")->fetchColumn() === 0
+        && (int)$pdo->query("SELECT COUNT(*) FROM admin_users WHERE username LIKE 'aitestmn%'")->fetchColumn() === 0, 'menu advisor checks rolled back (no test rows left)');
 }
 
 rh_ai_set_transport(null);

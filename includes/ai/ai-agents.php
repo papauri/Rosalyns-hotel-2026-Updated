@@ -1963,11 +1963,11 @@ function rh_ai_specialists(): array
         'housekeeping' => ['label' => 'Housekeeping & Maintenance', 'brief' => 'room status, cleaning jobs, maintenance tasks, rooms off sale and rooms not ready for arrivals',
             'core' => ['work_queues', 'room_board'], 'tools' => ['work_queues', 'room_board']],
         'restaurant' => ['label' => 'Restaurant & Bar', 'brief' => 'till sales, top sellers, voids, refunds, slow tickets at the kitchen, bar and coffee stations, and where one order is',
-            'core' => ['restaurant_sales', 'kitchen_tickets', 'order_status'], 'tools' => ['restaurant_sales', 'kitchen_tickets', 'order_status', 'hotel_info']],
+            'core' => ['restaurant_sales', 'kitchen_tickets', 'order_status', 'menu_advisor'], 'tools' => ['restaurant_sales', 'kitchen_tickets', 'order_status', 'hotel_info', 'menu_advisor']],
         'money' => ['label' => 'Money', 'brief' => 'money owed, refunds (always in full), voids, discounts, till shortages, no-shows and cancellations; you read and explain, staff do refunds and payments on screen',
             'core' => ['money_leaks', 'balances_due'], 'tools' => ['money_leaks', 'balances_due', 'room_performance', 'hotel_report']],
         'stock' => ['label' => 'Stock', 'brief' => 'stock out or low, expiring batches, wastage, count variance and the stock budget; read only',
-            'core' => ['inventory_watch'], 'tools' => ['inventory_watch']],
+            'core' => ['inventory_watch'], 'tools' => ['inventory_watch', 'menu_advisor']],
         'events_gym' => ['label' => 'Events, Conference & Gym', 'brief' => 'conference bookings coming up or one booking, event enquiries, gym memberships ending, one gym member, gym classes and slots, and gym enquiries',
             'core' => ['events_pipeline', 'gym_watch'], 'tools' => ['events_pipeline', 'gym_watch']],
         'revenue' => ['label' => 'Revenue & Sales', 'brief' => 'occupancy, ADR, RevPAR, pace against last year, pickup, lead time, unsold nights and where bookings come from; you recommend, you never change prices or deals',
@@ -2603,7 +2603,7 @@ function rh_ai_lane_words(): array
     return [
         'front_desk'   => '/\b(book(ing|ings|ed)?|reserv\w*|arriv\w*|depart\w*|check.?(in|out|ins|outs)|in.?house|guests?|stay\w*|nights?|free|availab\w*|vacan\w*|quote|room types?|assign\w*|due out|leav\w*|walk.?in|extend|cancel\w*|child(ren)?|kids?|infants?|single|double|triple|occupancy (rates?|prices?)|price list|tariffs?|tentative|holds?|pending|confirm\w*|blocked|history|timeline)\b/u',
         'housekeeping' => '/\b(housekeep\w*|clean\w*|dirty|maintenance|repair\w*|broken|fix\w*|room status|status of room|not ready|off sale|out of order|inspect\w*|jobs?|tasks?)\b/u',
-        'restaurant'   => '/\b(restaurant|bar|kitchen|till|food|drinks?|meals?|orders?|top sell\w*|voids?|tickets?|coffee|breakfast|lunch|dinner|dishes|tabs?|tables?|room service|receipts?)\b/u',
+        'restaurant'   => '/\b(restaurant|bar|kitchen|till|food|drinks?|meals?|orders?|top sell\w*|voids?|tickets?|coffee|breakfast|lunch|dinner|dish(es)?|tabs?|tables?|room service|receipts?|menu|recipes?|portions?|ingredients?|food cost|chef|cook\w*)\b/u',
         'money'        => '/\b(owe[sd]?|owing|balances?|unpaid|paid|payments?|refunds?|discounts?|money|cash|debts?|invoices?|losing|leaks?|revenue|takings|spend\w*)\b/u',
         'stock'        => '/\b(stock|inventory|wastage|waste|expir\w*|batch\w*|suppliers?|low on|run(ning)? out|purchase orders?|deliver(y|ies|ed))\b/u',
         'events_gym'   => '/\b(events?|conference\w*|meeting rooms?|weddings?|gym|members?|membership\w*|fitness|class(es)?|slots?|sessions?)\b/u',
@@ -2718,7 +2718,7 @@ function rh_ai_lane_prefetch(): array
     return [
         'front_desk'   => ['arrivals_departures', 'in_house'],
         'housekeeping' => ['work_queues', 'room_board'],
-        'restaurant'   => ['restaurant_sales', 'kitchen_tickets'],
+        'restaurant'   => ['restaurant_sales', 'kitchen_tickets', 'menu_advisor'],
         'money'        => ['money_leaks', 'balances_due'],
         'stock'        => ['inventory_watch'],
         'events_gym'   => ['events_pipeline', 'gym_watch'],
@@ -3052,6 +3052,14 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
     // 1a-. Logins, permissions, keys, tax-authority filing: never handled here, for anyone - one line, no tokens
     if (($sa = rh_ai_system_area_line($user, $tok)) !== null) {
         return $finish($sa[0], 'declined', ['links' => $sa[1]]);
+    }
+    // 1a++. Menu and recipe advice from the stock on hand (owner 2026-10-30): "can we make chicken curry?", "food cost of X",
+    // "which items are under-priced?", "what can we make from what's expiring?" - looked up and written here; only a dish idea
+    // with no recipe on file asks the Fast model for one typical portion (cached). Read only: a price or recipe change still
+    // gets the line below. The person's own words (never typo-read); permission and module checked server side.
+    if (($mn = rh_ai_menu_local($db, $user, $conv, $tok)) !== null) {
+        return $finish(rh_ai_scrub_outbound($db, $conv, (string)$mn['text']), (string)$mn['route'], ['links' => $mn['links'], 'chips' => $mn['chips'], 'local' => $mn['local'] ?? null,
+            'tokens_in' => $mn['tokens_in'] ?? 0, 'tokens_out' => $mn['tokens_out'] ?? 0, 'cost' => $mn['cost'] ?? 0, 'model' => $mn['model'] ?? '', 'provider' => ($mn['provider'] ?? '') !== '' ? $mn['provider'] : null, 'ms' => $mn['ms'] ?? null]);
     }
     // 1a+. A change nobody can make here (stock, till, payments, prices, closes): one line and the screen, any role
     // Owner 2026-10-28: the same line, the screen, the best guide section and what this person CAN do (still no tokens).
