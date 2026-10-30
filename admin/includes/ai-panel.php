@@ -126,10 +126,16 @@ define('RH_AI_PANEL_RENDERED', true);
         </div>
         <div class="rh-ai-head__btns">
             <?php if ($alertsOn): ?><button type="button" class="rh-ai-icon rh-ai-icon--alerts" data-ai="alerts" aria-label="Alerts" title="Alerts"><i class="fas fa-bell" aria-hidden="true"></i><span class="rh-ai-icon__count" id="rhAiAlertCount" hidden></span></button><?php endif; ?>
-            <button type="button" class="rh-ai-icon" data-ai="chats" aria-label="Your chats" title="Your chats"><i class="fas fa-list" aria-hidden="true"></i></button>
             <button type="button" class="rh-ai-icon" data-ai="new" aria-label="New chat" title="New chat"><i class="fas fa-plus" aria-hidden="true"></i></button>
-            <button type="button" class="rh-ai-icon" data-ai="clear" aria-label="Clear chats" title="Clear chats"><i class="fas fa-eraser" aria-hidden="true"></i></button>
-            <button type="button" class="rh-ai-icon" data-ai="prefs" aria-label="Reply settings" title="Reply settings"><i class="fas fa-sliders" aria-hidden="true"></i></button>
+            <?php /* Secondary actions sit in one "More" menu (owner 2026-10-30: minimalist on any screen); nothing removed. */ ?>
+            <div class="rh-ai-more">
+                <button type="button" class="rh-ai-icon" data-ai="more" id="rhAiMoreBtn" aria-label="More: your chats, clear chats, reply settings" title="More" aria-haspopup="true" aria-expanded="false" aria-controls="rhAiMoreMenu"><i class="fas fa-ellipsis-vertical" aria-hidden="true"></i></button>
+                <div class="rh-ai-more__menu" id="rhAiMoreMenu" hidden>
+                    <button type="button" class="rh-ai-more__item" data-ai="chats"><i class="fas fa-list" aria-hidden="true"></i><span>Your chats</span></button>
+                    <button type="button" class="rh-ai-more__item" data-ai="clear"><i class="fas fa-eraser" aria-hidden="true"></i><span>Clear chats</span></button>
+                    <button type="button" class="rh-ai-more__item" data-ai="prefs"><i class="fas fa-sliders" aria-hidden="true"></i><span>Reply settings</span></button>
+                </div>
+            </div>
             <button type="button" class="rh-ai-icon" data-ai="close" aria-label="Close the Assistant" title="Close"><i class="fas fa-xmark" aria-hidden="true"></i></button>
         </div>
     </header>
@@ -216,7 +222,7 @@ define('RH_AI_PANEL_RENDERED', true);
 
     <section class="rh-ai-view" data-view="chat" aria-label="Chat">
         <div class="rh-ai-stream" id="rhAiStream" aria-live="polite"></div>
-        <div class="rh-ai-chips" id="rhAiChips" aria-label="Suggested questions"></div>
+        <div class="rh-ai-chips" id="rhAiChips" aria-label="Suggested questions" aria-live="off"></div>
         <form class="rh-ai-compose" id="rhAiForm">
             <label class="rh-ai-sr" for="rhAiInput">Your question</label>
             <textarea id="rhAiInput" rows="1" maxlength="2000" placeholder="Ask a question" autocomplete="off"></textarea>

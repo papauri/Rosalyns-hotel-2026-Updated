@@ -27,6 +27,14 @@ check(rh_doc_link_secret() !== '', 'a signing secret is available');
 
 $roomId = (int)$pdo->query("SELECT id FROM rooms ORDER BY id LIMIT 1")->fetchColumn();
 $pdfs = glob($root . '/invoices/*.pdf') ?: [];
+if (!$pdfs && is_dir($root . '/invoices')) {
+    // No stored invoice on this machine: use a throwaway PDF, removed when the test ends.
+    $tmpPdf = $root . '/invoices/zz-doclink-test-' . bin2hex(random_bytes(4)) . '.pdf';
+    if (file_put_contents($tmpPdf, "%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\ntrailer << /Root 1 0 R >>\n%%EOF\n") !== false) {
+        register_shutdown_function(static function () use ($tmpPdf) { @unlink($tmpPdf); });
+        $pdfs = [$tmpPdf];
+    }
+}
 if ($roomId <= 0 || !$pdfs) { bad('Fixture: a room and one invoice PDF exist'); echo "\n$pass passed, $fail failed\n"; exit(1); }
 $pdfRel = 'invoices/' . basename($pdfs[0]);
 $pdfReal = realpath($pdfs[0]);

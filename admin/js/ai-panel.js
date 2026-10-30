@@ -30,7 +30,7 @@
     var stopBtn = form.querySelector('.rh-ai-stop');
     var KEY_OPEN = 'rh_ai_open';
     var KEY_CONV = 'rh_ai_conv';
-    var state = { conv: 0, busy: false, ctrl: null, loaded: false, poll: null };
+    var state = { conv: 0, busy: false, ctrl: null, loaded: false, poll: null, open: false };
     var feedbackOn = panel.getAttribute('data-feedback') === '1';
     var tolerance = parseFloat(panel.getAttribute('data-tolerance'));
     if (!(tolerance >= 0)) { tolerance = 0.01; }
@@ -234,6 +234,9 @@
             c.addEventListener('click', function () { send(String(t)); });
             chipsBox.appendChild(c);
         });
+        // Suggestions sit at the end of the conversation and scroll with it, so on a small screen they never
+        // squeeze the messages or push the question box away.
+        if (chipsBox.childNodes.length) { stream.appendChild(chipsBox); scrollDown(); }
     }
     function welcome() {
         stream.textContent = '';
@@ -689,7 +692,10 @@
     }
     function autosize() {
         input.style.height = 'auto';
-        input.style.height = Math.min(input.scrollHeight, 140) + 'px';
+        var edge = input.offsetHeight - input.clientHeight; // the border (the box is border-box)
+        var cap = parseFloat(window.getComputedStyle(input).maxHeight) || 140; // lower on short screens (ai-panel.css)
+        input.style.height = Math.min(input.scrollHeight + edge, cap) + 'px';
+        input.style.overflowY = input.scrollHeight + edge > cap ? 'auto' : 'hidden';
     }
 
     // Footer height currently on screen, in the drawer's own CSS px (the page may be scaled by Display size = html zoom).
@@ -722,13 +728,110 @@
     window.addEventListener('scroll', fitFooter, { passive: true, capture: true });
     window.addEventListener('resize', fitFooter);
 
+    // ── Side by side on big screens (owner 2026-10-30) ───────────────────────
+    // When the drawer is open and the page still keeps a usable width beside it, html gets rh-ai-docked and the
+    // page (#rh-admin-page) gives up room on its right (ai-panel.css), so nothing sits under the drawer. The page
+    // and the drawer slide together; once they settle, one resize event lets charts and tables re-fit.
+    var root = document.documentElement;
+    // CSS px the page must keep beside the sidebar and the drawer, or the drawer overlays as before. 720 is about the
+    // narrowest page the laptop layout already handles (a 1025px screen less the 292px sidebar); narrower pages keep
+    // laptop-sized rows that would poke out of their cards.
+    var DOCK_MIN_PAGE = 720;
+    var reduceMotion = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
+    function pageZoom() { return parseFloat(window.getComputedStyle(root).zoom) || 1; }
+    function slides() { return window.innerWidth >= 1025 && !reduceMotion.matches; } // the phone/tablet sheet does not slide
+    function dockable() {
+        if (window.innerWidth < 1025) { return false; }
+        var z = pageZoom();
+        var nav = document.querySelector('.admin-nav');
+        var side = nav ? Math.max(0, nav.getBoundingClientRect().right) / z : 0;
+        var w = parseFloat(window.getComputedStyle(panel).width) || 420;
+        return window.innerWidth / z - side - w >= DOCK_MIN_PAGE;
+    }
+    var refitTimer = 0;
+    function refitPage() { // one resize event after the page has settled (never during the slide)
+        clearTimeout(refitTimer);
+        refitTimer = setTimeout(function () { window.dispatchEvent(new Event('resize')); }, slides() ? 320 : 0);
+    }
+    document.addEventListener('transitionend', function (e) {
+        if (e.target && e.target.id === 'rh-admin-page' && e.propertyName === 'padding-right') {
+            clearTimeout(refitTimer);
+            window.dispatchEvent(new Event('resize'));
+        }
+    });
+    function syncDock() { // idempotent: safe to call from the resize event it fires itself
+        var want = state.open && dockable();
+        if (want !== root.classList.contains('rh-ai-docked')) {
+            root.classList.toggle('rh-ai-docked', want);
+            refitPage();
+        }
+    }
+    window.addEventListener('resize', syncDock);
+    // The sidebar collapses or is dragged wider. In-app navigation can swap the sidebar element, so the
+    // current one is watched again after every page change.
+    var navRo = window.ResizeObserver ? new ResizeObserver(function () { syncDock(); }) : null;
+    var navWatched = null;
+    function watchNav() {
+        var n = document.querySelector('.admin-nav');
+        if (!navRo || !n || n === navWatched) { return; }
+        if (navWatched) { navRo.unobserve(navWatched); }
+        navRo.observe(n);
+        navWatched = n;
+    }
+    watchNav();
+    document.addEventListener('rh:content-updated', function () { watchNav(); syncDock(); });
+
+    // Keep the closed launcher clear of the bulk-action bar, the install bar and the help button at the bottom right.
+    var liftRaf = 0;
+    var LAUNCH_BOTTOM = 64; // admin/css/ai-panel.css .rh-ai-launch bottom
+    function placeLauncher() {
+        liftRaf = 0;
+        var z = pageZoom();
+        var vh = window.innerHeight / z; // everything below in the page's own CSS px
+        var b = LAUNCH_BOTTOM;
+        var lh = launch.offsetHeight || 44;
+        function top(el) { var r = el.getBoundingClientRect(); return r.height > 0 ? r.top / z : null; }
+        ['.admin-bulk-bar:not([hidden])', '#admin-pwa-banner:not([hidden])'].forEach(function (sel) {
+            var el = document.querySelector(sel);
+            var t = el ? top(el) : null;
+            if (t !== null && t < vh) { b = Math.max(b, Math.round(vh - t + 10)); }
+        });
+        var fab = document.querySelector('.rh-help-toggle:not([data-inline="1"])');
+        if (fab && window.getComputedStyle(fab).position === 'fixed' && window.getComputedStyle(fab).display !== 'none') {
+            var fr = fab.getBoundingClientRect();
+            var ft = fr.top / z, fb = fr.bottom / z;
+            if (fr.height > 0 && ft < vh - b && fb > vh - b - lh) { b = Math.round(vh - ft + 8); } // sit just above it
+        }
+        var lift = b === LAUNCH_BOTTOM ? '' : b + 'px';
+        if (launch.style.bottom !== lift) { launch.style.bottom = lift; }
+    }
+    function liftLater() { if (!liftRaf) { liftRaf = window.requestAnimationFrame(placeLauncher); } }
+    ['change', 'click', 'pointerup'].forEach(function (t) { document.addEventListener(t, liftLater, { passive: true, capture: true }); });
+    window.addEventListener('resize', liftLater);
+    document.addEventListener('rh:content-updated', liftLater);
+    if (window.MutationObserver) { // install bar on/off, sidebar collapsed/expanded
+        new MutationObserver(function () { liftLater(); syncDock(); }).observe(document.body, { attributes: true, attributeFilter: ['class'] });
+    }
+    liftLater();
+    setTimeout(liftLater, 1500);
+
     // ── Open / close ─────────────────────────────────────────────────────────
+    var hideTimer = 0;
+    function hidePanelNow() { clearTimeout(hideTimer); hideTimer = 0; if (!state.open) { panel.hidden = true; } }
+    panel.addEventListener('transitionend', function (e) {
+        if (e.target === panel && e.propertyName === 'transform' && !state.open) { hidePanelNow(); }
+    });
     function open() {
+        clearTimeout(hideTimer); hideTimer = 0;
+        state.open = true;
         panel.hidden = false;
+        void panel.offsetWidth; // start the slide from the closed position
+        root.classList.add('rh-ai-in');
+        syncDock();
         fitFooter();
         startFit();
         launch.setAttribute('aria-expanded', 'true');
-        document.documentElement.classList.add('rh-ai-is-open');
+        root.classList.add('rh-ai-is-open');
         store(KEY_OPEN, '1');
         if (panel.getAttribute('data-locked') === '1') { lockPanel(); return; }
         if (!state.loaded) {
@@ -740,18 +843,37 @@
         show('chat');
     }
     function close() {
-        panel.hidden = true;
+        if (!state.open) { return; }
+        state.open = false;
+        moreMenu(false);
+        root.classList.remove('rh-ai-in', 'rh-ai-is-open');
+        syncDock();
         launch.setAttribute('aria-expanded', 'false');
-        document.documentElement.classList.remove('rh-ai-is-open');
         store(KEY_OPEN, null);
         launch.focus();
+        if (slides()) { hideTimer = setTimeout(hidePanelNow, 320); } else { hidePanelNow(); } // after the slide out
     }
 
-    launch.addEventListener('click', function () { if (panel.hidden) { open(); } else { close(); } });
+    // "More": your chats, clear chats, reply settings (one small menu instead of three more icons)
+    var moreBtn = document.getElementById('rhAiMoreBtn');
+    var moreBox = document.getElementById('rhAiMoreMenu');
+    function moreMenu(on) {
+        if (!moreBox) { return; }
+        moreBox.hidden = !on;
+        moreBtn.setAttribute('aria-expanded', on ? 'true' : 'false');
+        if (on) { var first = moreBox.querySelector('button'); if (first) { first.focus(); } }
+    }
+    document.addEventListener('click', function (e) {
+        if (moreBox && !moreBox.hidden && !e.target.closest('.rh-ai-more')) { moreMenu(false); }
+    });
+
+    launch.addEventListener('click', function () { if (!state.open) { open(); } else { close(); } });
     panel.addEventListener('click', function (e) {
         var b = e.target.closest('[data-ai]');
         if (!b) { return; }
         var what = b.getAttribute('data-ai');
+        if (what === 'more') { moreMenu(moreBox.hidden); return; }
+        moreMenu(false);
         if (what === 'close') { close(); }
         else if (what === 'new') { newChat(); }
         else if (what === 'clear') { document.getElementById('rhAiClearMsg').hidden = true; show('clear'); }
@@ -781,7 +903,9 @@
         post(pdata).then(function () { show('chat'); });
     });
     document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape' && !panel.hidden) { close(); }
+        if (e.key !== 'Escape' || !state.open) { return; }
+        if (moreBox && !moreBox.hidden) { moreMenu(false); moreBtn.focus(); return; } // the menu first, then the panel
+        close();
     });
     // In-app navigation: the panel stays; starter chips follow the new screen when the chat is empty.
     document.addEventListener('rh:content-updated', function () {
@@ -899,5 +1023,9 @@
         input.addEventListener('focus', function () { setTimeout(fitToKeyboard, 300); });
     }
 
-    if (read(KEY_OPEN) === '1') { open(); }
+    if (read(KEY_OPEN) === '1') { // it was open on the last screen: show it in place, no slide
+        root.classList.add('rh-ai-noanim');
+        open();
+        window.requestAnimationFrame(function () { window.requestAnimationFrame(function () { root.classList.remove('rh-ai-noanim'); }); });
+    }
 })();
