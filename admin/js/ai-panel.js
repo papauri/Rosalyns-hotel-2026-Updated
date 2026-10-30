@@ -698,30 +698,43 @@
         input.style.overflowY = input.scrollHeight + edge > cap ? 'auto' : 'hidden';
     }
 
-    // Footer height currently on screen, in the drawer's own CSS px (the page may be scaled by Display size = html zoom).
+    // How much of an element at the bottom edge is on screen, in the drawer's own CSS px (the page may be scaled by
+    // Display size = html zoom).
     function footerLift(f) {
         var z = parseFloat(window.getComputedStyle(document.documentElement).zoom) || 1;
         return Math.max(0, Math.round((window.innerHeight - f.getBoundingClientRect().top) / z));
     }
-
-    // Keep the drawer clear of the footer: lift its bottom edge by however much footer is on screen.
-    function fitFooter() {
+    // The "Install Admin App" bar (admin/js/pwa-install.js) while it shows; 0 when it is missing or hidden.
+    function barLift() {
+        var b = document.getElementById('admin-pwa-banner');
+        if (!b || b.hidden) { return 0; }
+        var cs = window.getComputedStyle(b);
+        if (cs.display === 'none' || cs.visibility === 'hidden' || b.getBoundingClientRect().height <= 0) { return 0; }
+        return footerLift(b);
+    }
+    // The drawer stops above the footer and above the install bar: the larger of the two on screen. The phone/tablet
+    // sheet keeps its full height down to the install bar only (--rh-ai-bar, ai-panel.css).
+    function bottomLift() {
         var f = document.getElementById('rhAdminFooter');
-        var lift = 0;
-        if (f && !panel.hidden) {
-            lift = footerLift(f);
+        return Math.max(f ? footerLift(f) : 0, barLift());
+    }
+    function fitFooter() {
+        var lift = 0, bar = 0;
+        if (!panel.hidden) {
+            bar = barLift();
+            lift = bottomLift();
         }
         panel.style.setProperty('--rh-ai-bottom', lift + 'px');
+        panel.style.setProperty('--rh-ai-bar', bar + 'px');
     }
-    // The footer also moves without a window scroll (inner scroll areas, content loading, zoom, the
-    // install bar), so re-measure every frame while the drawer is open; it only writes when the value changed.
+    // The footer and the bar also move without a window scroll (inner scroll areas, content loading, zoom, the
+    // install bar coming and going), so re-measure every frame while the drawer is open; it only writes when a value changed.
     var fitRaf = 0;
     function fitLoop() {
         fitRaf = 0;
         if (panel.hidden) { return; }
-        var f = document.getElementById('rhAdminFooter');
-        var lift = f ? footerLift(f) : 0;
-        if (panel.style.getPropertyValue('--rh-ai-bottom') !== lift + 'px') { fitFooter(); }
+        if (panel.style.getPropertyValue('--rh-ai-bottom') !== bottomLift() + 'px' ||
+            panel.style.getPropertyValue('--rh-ai-bar') !== barLift() + 'px') { fitFooter(); }
         fitRaf = window.requestAnimationFrame(fitLoop);
     }
     function startFit() { if (!fitRaf) { fitRaf = window.requestAnimationFrame(fitLoop); } }
@@ -737,17 +750,120 @@
     // narrowest page the laptop layout already handles (a 1025px screen less the 292px sidebar); narrower pages keep
     // laptop-sized rows that would poke out of their cards.
     var DOCK_MIN_PAGE = 720;
+    var MAX_W = 720; // the widest drawer (CSS px), and never more than half the screen
     var reduceMotion = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : { matches: false };
     function pageZoom() { return parseFloat(window.getComputedStyle(root).zoom) || 1; }
     function slides() { return window.innerWidth >= 1025 && !reduceMotion.matches; } // the phone/tablet sheet does not slide
+    function viewW() { return window.innerWidth / pageZoom(); }
+    function sideW() {
+        var nav = document.querySelector('.admin-nav');
+        return nav ? Math.max(0, nav.getBoundingClientRect().right) / pageZoom() : 0;
+    }
+    // The usual drawer width (420px, 380px under 1440) from the stylesheet; a dragged width never changes it.
+    function baseW() { return parseFloat(window.getComputedStyle(root).getPropertyValue('--rh-ai-w-base')) || 420; }
+    // Decided at the usual width, so widening the drawer never flips the page from side by side to covered.
     function dockable() {
         if (window.innerWidth < 1025) { return false; }
-        var z = pageZoom();
-        var nav = document.querySelector('.admin-nav');
-        var side = nav ? Math.max(0, nav.getBoundingClientRect().right) / z : 0;
-        var w = parseFloat(window.getComputedStyle(panel).width) || 420;
-        return window.innerWidth / z - side - w >= DOCK_MIN_PAGE;
+        return viewW() - sideW() - baseW() >= DOCK_MIN_PAGE;
     }
+
+    // ── Drawer width (drag its left edge, like the sidebar's right edge) ─────
+    // The chosen width is kept per person in this browser. It is used whenever it fits: at most MAX_W and half the
+    // screen, and when side by side the page still keeps DOCK_MIN_PAGE; otherwise the widest width that does fit.
+    var navEl = document.querySelector('.admin-nav');
+    var widthKey = 'rhAiPanelWidth:v1:' + ((navEl && navEl.getAttribute('data-admin-user-id')) || 'guest');
+    var wanted = 0; // 0 = the usual width
+    try { wanted = parseInt(localStorage.getItem(widthKey) || '0', 10) || 0; } catch (e) { wanted = 0; }
+    function widthRange() {
+        var min = baseW();
+        var max = Math.min(MAX_W, Math.floor(viewW() / 2));
+        if (dockable()) { max = Math.min(max, Math.floor(viewW() - sideW() - DOCK_MIN_PAGE)); }
+        return { min: min, max: Math.max(min, max) };
+    }
+    function clampW(w, r) { return Math.max(r.min, Math.min(r.max, Math.round(w))); }
+    var grip = document.createElement('div');
+    grip.className = 'rh-ai-resize';
+    grip.id = 'rhAiResize';
+    grip.tabIndex = 0;
+    grip.setAttribute('role', 'separator');
+    grip.setAttribute('aria-orientation', 'vertical');
+    grip.setAttribute('aria-label', 'Resize the Assistant');
+    grip.setAttribute('aria-controls', 'rhAiPanel');
+    grip.title = 'Drag to make the Assistant wider or narrower. Double-click to go back to the usual width.';
+    panel.parentNode.insertBefore(grip, panel.nextSibling);
+    var shownW = 0; // the width on screen now
+    var styledW = -1; // what is written on html (0 = nothing, the stylesheet's usual width)
+    function fitWidth() {
+        var r = widthRange();
+        var w = window.innerWidth < 1025 ? r.min : (wanted > 0 ? clampW(wanted, r) : r.min);
+        var css = w === r.min ? 0 : w;
+        if (css !== styledW) {
+            styledW = css;
+            if (css > 0) { root.style.setProperty('--rh-ai-w', css + 'px'); } else { root.style.removeProperty('--rh-ai-w'); }
+        }
+        if (w !== shownW) {
+            shownW = w;
+            grip.setAttribute('aria-valuenow', String(w));
+            grip.setAttribute('aria-valuetext', w + ' pixels wide');
+        }
+        grip.setAttribute('aria-valuemin', String(r.min));
+        grip.setAttribute('aria-valuemax', String(r.max));
+        return w;
+    }
+    function keepWidth() {
+        try {
+            if (wanted > 0) { localStorage.setItem(widthKey, String(wanted)); } else { localStorage.removeItem(widthKey); }
+        } catch (e) { /* private mode */ }
+    }
+    function chooseWidth(w) { // from a drag, a key or a reset; 0 = the usual width
+        var r = widthRange();
+        wanted = w > 0 ? clampW(w, r) : 0;
+        if (wanted <= r.min) { wanted = 0; }
+        return fitWidth();
+    }
+    fitWidth();
+    var drag = null;
+    function onDragMove(e) {
+        if (!drag) { return; }
+        chooseWidth(drag.w + (drag.x - e.clientX) / pageZoom()); // only the width moves while dragging
+    }
+    function endDrag() {
+        if (!drag) { return; }
+        var from = drag.w;
+        try { grip.releasePointerCapture(drag.id); } catch (e) { /* already released */ }
+        drag = null;
+        root.classList.remove('rh-ai-resizing');
+        document.removeEventListener('pointermove', onDragMove);
+        document.removeEventListener('pointerup', endDrag);
+        document.removeEventListener('pointercancel', endDrag);
+        keepWidth();
+        if (shownW !== from && root.classList.contains('rh-ai-docked')) { // one resize so charts and tables re-fit
+            clearTimeout(refitTimer);
+            window.dispatchEvent(new Event('resize'));
+        }
+    }
+    grip.addEventListener('pointerdown', function (e) {
+        if (e.button !== 0 || !state.open || window.innerWidth < 1025) { return; }
+        e.preventDefault();
+        drag = { x: e.clientX, w: shownW || fitWidth(), id: e.pointerId };
+        root.classList.add('rh-ai-resizing'); // transitions off: the page edge follows the pointer
+        try { grip.setPointerCapture(e.pointerId); } catch (err) { /* not a real pointer */ }
+        document.addEventListener('pointermove', onDragMove);
+        document.addEventListener('pointerup', endDrag);
+        document.addEventListener('pointercancel', endDrag);
+    });
+    grip.addEventListener('lostpointercapture', endDrag);
+    grip.addEventListener('dblclick', function () { chooseWidth(0); keepWidth(); });
+    grip.addEventListener('keydown', function (e) {
+        var step = e.shiftKey ? 24 : 8;
+        var cur = shownW || fitWidth();
+        if (e.key === 'ArrowLeft') { chooseWidth(cur + step); } // the edge is on the left: left is wider
+        else if (e.key === 'ArrowRight') { chooseWidth(cur - step); }
+        else if (e.key === 'Home') { chooseWidth(0); }
+        else { return; }
+        e.preventDefault();
+        keepWidth();
+    });
     var refitTimer = 0;
     function refitPage() { // one resize event after the page has settled (never during the slide)
         clearTimeout(refitTimer);
@@ -760,6 +876,7 @@
         }
     });
     function syncDock() { // idempotent: safe to call from the resize event it fires itself
+        fitWidth(); // the window or the sidebar changed: the widest width that still fits
         var want = state.open && dockable();
         if (want !== root.classList.contains('rh-ai-docked')) {
             root.classList.toggle('rh-ai-docked', want);
@@ -845,6 +962,7 @@
     function close() {
         if (!state.open) { return; }
         state.open = false;
+        endDrag();
         moreMenu(false);
         root.classList.remove('rh-ai-in', 'rh-ai-is-open');
         syncDock();

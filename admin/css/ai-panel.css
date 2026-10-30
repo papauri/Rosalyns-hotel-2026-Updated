@@ -40,13 +40,15 @@ html.rh-ai-is-open .rh-ai-launch {
     display: none;
 }
 
-/* Drawer width on a laptop: one value shared by the drawer and the room the page gives up for it. */
+/* Drawer width on a laptop: one value shared by the drawer and the room the page gives up for it.
+   --rh-ai-w-base is the usual width; ai-panel.js writes a dragged width as --rh-ai-w on html. */
 :root {
-    --rh-ai-w: 420px;
+    --rh-ai-w-base: 420px;
+    --rh-ai-w: var(--rh-ai-w-base);
 }
 
 @media (max-width: 1439px) {
-    :root { --rh-ai-w: 380px; }
+    :root { --rh-ai-w-base: 380px; }
 }
 
 .rh-ai-panel {
@@ -563,7 +565,8 @@ html.rh-ai-is-open .rh-ai-launch {
 }
 
 /* Big screens: sit between the fixed header and the footer instead of covering them.
-   --rh-ai-bottom is the footer height currently on screen (set by ai-panel.js). */
+   --rh-ai-bottom is the larger of the footer and the "Install Admin App" bar currently on screen (set by ai-panel.js);
+   the install bar runs full width underneath, like the footer. */
 @media (min-width: 1025px) {
     .rh-ai-panel {
         top: var(--admin-header-height, 74px);
@@ -578,7 +581,7 @@ html.rh-ai-is-open .rh-ai-launch {
 @media screen and (min-width: 1025px) {
     .rh-ai-panel {
         transform: translateX(100%);
-        transition: transform 0.22s ease-in;
+        transition: transform 0.22s ease-in, width 0.22s ease;
     }
     html.rh-ai-in .rh-ai-panel {
         transform: none;
@@ -604,18 +607,86 @@ html.rh-ai-is-open .rh-ai-launch {
     html.rh-ai-docked :is(.alert-container-top, .alert-container-top-right, .alert-container-bottom, .alert-container-bottom-right) {
         right: calc(24px + var(--rh-ai-w));
     }
-    html.rh-ai-docked :is(#admin-pwa-banner, .admin-page-loader, .guide-viewer) {
+    html.rh-ai-docked :is(.admin-page-loader, .guide-viewer) {
         right: var(--rh-ai-w);
     }
     html.rh-ai-docked .rh-ai-notice-card {
         right: calc(14px + var(--rh-ai-w));
     }
+
+    /* Resize handle on the drawer's left edge (ai-panel.js), the same look as the sidebar's: a 44px-wide grab area
+       (34px over the page, 10px over the drawer's own margin), a thin band and line that show on hover and focus. */
+    html.rh-ai-in .rh-ai-resize {
+        display: block;
+        position: fixed;
+        top: var(--admin-header-height, 74px);
+        bottom: var(--rh-ai-bottom, 0px);
+        right: calc(var(--rh-ai-w) - 10px);
+        width: 44px;
+        z-index: 9999;
+        cursor: col-resize;
+        touch-action: none;
+        background: transparent;
+        transition: right 0.22s ease;
+    }
+    .rh-ai-resize::before,
+    .rh-ai-resize::after {
+        content: "";
+        position: absolute;
+        border-radius: 999px;
+        background: transparent;
+        transition: background 0.15s ease;
+    }
+    .rh-ai-resize::before { /* the band, centred on the drawer's edge */
+        top: 0;
+        bottom: 0;
+        right: 7px;
+        width: 6px;
+        border-radius: 0;
+    }
+    .rh-ai-resize::after { /* the grip line */
+        top: 50%;
+        right: 9px;
+        width: 2px;
+        height: 38px;
+        transform: translateY(-50%);
+    }
+    .rh-ai-resize:hover::before,
+    .rh-ai-resize:focus-visible::before,
+    html.rh-ai-resizing .rh-ai-resize::before {
+        background: rgba(212, 168, 67, 0.18);
+    }
+    .rh-ai-resize:hover::after,
+    .rh-ai-resize:focus-visible::after,
+    html.rh-ai-resizing .rh-ai-resize::after {
+        background: rgba(212, 168, 67, 0.85);
+    }
+    .rh-ai-resize:focus-visible {
+        outline: none; /* the band and line above are the focus mark */
+    }
 }
 
-/* Reopened by a page load (it was open before): appear in place, no slide. */
+/* Never on the phone/tablet sheet. */
+.rh-ai-resize {
+    display: none;
+}
+
+/* While the edge is dragged, everything follows the pointer with no animation. */
+html.rh-ai-resizing,
+html.rh-ai-resizing * {
+    cursor: col-resize !important;
+    user-select: none !important;
+}
+
+/* Reopened by a page load (it was open before): appear in place, no slide. Same while the edge is dragged. */
 html.rh-ai-noanim .rh-ai-panel,
 html.rh-ai-noanim body > #rh-admin-page,
-html.rh-ai-noanim .rh-help-toggle {
+html.rh-ai-noanim .rh-help-toggle,
+html.rh-ai-noanim .rh-ai-resize,
+html.rh-ai-resizing .rh-ai-panel,
+html.rh-ai-resizing body > #rh-admin-page,
+html.rh-ai-resizing .rh-help-toggle,
+html.rh-ai-resizing .rh-ai-resize {
     transition: none !important;
 }
 
@@ -623,7 +694,8 @@ html.rh-ai-noanim .rh-help-toggle {
     .rh-ai-panel,
     html.rh-ai-in .rh-ai-panel,
     body > #rh-admin-page,
-    html.rh-ai-docked body > #rh-admin-page {
+    html.rh-ai-docked body > #rh-admin-page,
+    html.rh-ai-in .rh-ai-resize {
         transition: none;
     }
 }
@@ -632,6 +704,7 @@ html.rh-ai-noanim .rh-help-toggle {
     .rh-ai-panel {
         width: 100%;
         border-left: 0;
+        bottom: var(--rh-ai-bar, 0px); /* stops above the "Install Admin App" bar (ai-panel.js) */
     }
 }
 
