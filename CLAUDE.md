@@ -67,7 +67,7 @@ do not re-derive plans or re-scan the repo ad hoc.
 2. Do it inline when it is under ~10 tool calls (one-file fix, lookup, port, test). An agent only for
    real multi-file build work: ONE builder + ONE review, never parallel audits "to be safe".
 3. Builders run only their own test file (`php scripts/tests/<x>.php`), never the full
-   `run_tests.php` (10+ min, agents loop on it). The orchestrator runs the full suite once at ship.
+   `run_tests.php` (10+ min, agents loop on it). At ship the orchestrator runs only what the change needs (tiers in DEPARTMENTS.md ship gate step 1): no DB tests for UI/docs, the area's suites for one area, the full suite only for core/money/migrations/auth.
 4. Never read big files whole: `.claude/CODE_INDEX.md` + Grep + offset reads. `config/database.php`
    (~9.5k lines), BUILD_PLAN/SYSTEM_MAP/CODE_INDEX are lookup-only. Shipped history is in
    `.claude/archive/`, never read unless asked.

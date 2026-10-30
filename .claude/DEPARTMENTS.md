@@ -139,8 +139,15 @@ The feature freeze in BUILD_PLAN.md ("PRODUCTION READINESS GATE") still stands. 
 ## Ship gate (every change, no exceptions)
 
 1. The lead's own checks: the DONE CHECKLIST above, `php -l`, `node --check`, the area's tests.
-   **UI-only changes** (CSS, client JS, markup; no PHP logic/SQL/money/permissions) run NO database tests
-   (owner 2026-10-30): lint + one review + a 3-size browser check (1920/1280/390), then push.
+   **Tests by change type (owner 2026-10-30)** — the highest tier the diff touches wins:
+   - UI-only (CSS, client JS, markup) or wording: NO database tests; lint + review + browser 1920/1280/390.
+     Guides/help text: `help_map.php` only. Test/doc-only: that test or none.
+   - One area: that area's own suites only (stock_*, POS/KDS smoke + shop_returns + stock_loss, linked_gym,
+     conference_full_total, cms_content, ai_assistant_test, booking smoke + linked_rooms + concurrent_booking).
+   - Full `run_tests.php` at both hotels before push ONLY for: config/database.php or shared includes/ helpers,
+     money (payments, documents, refunds, VAT/levy, pricing, shift/EOD), migrations, login/permissions/security.
+   - Safety net: the full set once a day in the background (first ship of the day or when the owner deploys);
+     it never blocks a push.
 2. **One independent review before every commit** (see "Right first time" 3–5): `qa-auditor`
    (sonnet for logic/stock/security, haiku for small markup/docs), or `dept-accounting-lead` as the
    gate for money changes. BLOCKERs fail; everything else is `LATER:`.
