@@ -531,7 +531,7 @@ function rh_ai_menu_movement(PDO $db, array $ids): array
 /**
  * Batches of these stock items (or all, $ids = null) expiring from today up to ai_menu_expiry_days ahead, soonest first;
  * and those already past their date but still marked active (to check, never to cook).
- * @return array{soon:array,past:array}
+ * @return array{soon:array,past:array,days:int}
  */
 function rh_ai_menu_expiring(PDO $db, ?array $ids = null): array
 {
@@ -543,7 +543,7 @@ function rh_ai_menu_expiring(PDO $db, ?array $ids = null): array
     if ($ids !== null) {
         $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
         if (!$ids) {
-            return ['soon' => [], 'past' => []];
+            return ['soon' => [], 'past' => [], 'days' => $days];
         }
         $where = ' AND b.ingredient_id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')';
         $params = array_merge($params, $ids);
@@ -556,7 +556,7 @@ function rh_ai_menu_expiring(PDO $db, ?array $ids = null): array
         $st->execute($params);
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
     } catch (Throwable $e) {
-        return ['soon' => [], 'past' => []];
+        return ['soon' => [], 'past' => [], 'days' => $days];
     }
     $soon = [];
     $past = [];
@@ -1256,14 +1256,14 @@ function rh_ai_menu_local(PDO $db, array $user, int $conv, string $tok): ?array
     if ($mi === null) {
         return null;
     }
-    if ($mi['mode'] === 'change') { // the same line for every role: nothing on the menu or in a recipe is changed from the chat
-        return ['text' => "I can't change menu prices, dishes or recipes - change the price on Menu Management and what a dish uses on Stock > Recipes. I can work out food cost, portions and a suggested price first if that helps.",
-            'route' => 'declined', 'links' => rh_ai_menu_links($user), 'chips' => []];
-    }
     if (!rh_ai_tool_allowed($user, 'menu_advisor')) {
         $help = function_exists('rh_ai_can_help_line') ? rh_ai_can_help_line($user) : '';
         $line = (!rh_ai_module_on('pos') || !rh_ai_module_on('stock')) ? "There's no restaurant menu with stock kept here." : rh_ai_out_of_scope_line();
         return ['text' => $line . ($help !== '' ? "\n\n" . $help : ''), 'route' => 'declined', 'links' => [], 'chips' => ['What can I do here?']];
+    }
+    if ($mi['mode'] === 'change') { // the same line for everyone the advisor is open to (others get the decline above): nothing on the menu or in a recipe is changed from the chat
+        return ['text' => "I can't change menu prices, dishes or recipes - change the price on Menu Management and what a dish uses on Stock > Recipes. I can work out food cost, portions and a suggested price first if that helps.",
+            'route' => 'declined', 'links' => rh_ai_menu_links($user), 'chips' => []];
     }
     $uid = (int)$user['id'];
     $links = rh_ai_menu_links($user);

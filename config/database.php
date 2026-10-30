@@ -230,18 +230,25 @@ function _expireStaleTentativeBookings(PDO $pdo): void
                                 AND tentative_expires_at IS NOT NULL AND tentative_expires_at < NOW()");
         $sel->execute();
         $lapsing = $sel->fetchAll(PDO::FETCH_COLUMN);
+        if (!$lapsing) {
+            return; // nothing lapsed: no locking UPDATE, so a page never waits behind another open transaction
+        }
 
+        // Only the rows found above (by id), with the same conditions re-checked: a range UPDATE over every
+        // 'tentative' row waited up to innodb_lock_wait_timeout on any uncommitted hold (2026-10-31).
+        $ph = implode(',', array_fill(0, count($lapsing), '?'));
         $stmt = $pdo->prepare("
             UPDATE bookings
             SET    status = 'expired',
                    is_tentative = 0,
                    expired_at   = NOW()
-            WHERE  is_tentative          = 1
+            WHERE  id IN ($ph)
+              AND  is_tentative          = 1
               AND  status                = 'tentative'
               AND  tentative_expires_at IS NOT NULL
               AND  tentative_expires_at  < NOW()
         ");
-        $stmt->execute();
+        $stmt->execute(array_map('intval', $lapsing));
         $count = $stmt->rowCount();
         if ($count > 0) {
             error_log("[tentative] Auto-expired {$count} tentative booking(s) on page load.");

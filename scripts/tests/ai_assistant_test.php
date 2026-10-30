@@ -4423,6 +4423,15 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
         $pdo->prepare("INSERT INTO booking_audit_log (booking_id, booking_reference, action, note, performed_by, performed_by_name, performed_at) VALUES (?, ?, 'created', 'Imported', NULL, NULL, NOW()), (?, ?, 'created', 'Booking made online by Quinn', NULL, 'Quinn Gdquote', NOW())")
             ->execute([$tId, $tRef, $qId, $qRef]);
         rh_ai_vault_people_reset();
+        // 2026-10-31: every page load runs the tentative auto-expire sweep. With this transaction's open hold it used to wait
+        // innodb_lock_wait_timeout (50 s, then 1205) on every live page for the whole run; it now updates only lapsed rows by id.
+        $swT = microtime(true);
+        $swOut = (string)shell_exec('php -r ' . escapeshellarg('require ' . var_export($root . '/config/database.php', true) . '; echo \'sweep-ok\';') . ' 2>&1');
+        $swT = round(microtime(true) - $swT, 1);
+        check(strpos($swOut, 'sweep-ok') !== false && $swT < 15 && strpos($swOut, '1205') === false,
+            'a page load while this test holds an uncommitted tentative booking: the auto-expire sweep never waits on it (' . $swT . ' s, no lock wait timeout)', mb_substr($swOut, 0, 300));
+        // This connection never waits long on someone else's lock either: a wait fails within 10 s instead of stalling the run
+        $pdo->exec('SET SESSION innodb_lock_wait_timeout = 10');
 
         // A2: an audit row with no staff id is "the guest" only when the record shows an online source
         $hT = rh_ai_t_booking_history($pdo, $admR, ['booking_id' => $tId]);
@@ -5138,6 +5147,7 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
+        $pdo->exec('SET SESSION innodb_lock_wait_timeout = DEFAULT');
         unset($GLOBALS['__rh_ai_module_override']);
         rh_ai_settings($pdo, true);
         rh_ai_vault_forget();
@@ -5435,6 +5445,12 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
         check($x1['route'] === 'declined' && $x2['route'] === 'declined' && $x3['route'] === 'declined' && strpos($x1['reply'], "can't change menu prices") !== false && strpos($x2['reply'], "can't change") !== false
             && !$GLOBALS['mn_calls'] && (int)$pdo->query("SELECT COUNT(*) FROM ai_actions")->fetchColumn() === $actN0 && (float)$pdo->query("SELECT price FROM menu_items WHERE id = " . $mBeef)->fetchColumn() == 10000,
             'a price or recipe change gets one plain line and the screens - no card, no model call, the price stays MWK 10,000', json_encode([$x1['reply'], $x2['reply']]));
+        $x4 = $mnChat('change the menu price of zqmn beef plate to 9000', [], $uMenu); // 2026-10-31: the gate comes before the change line
+        check($x4['route'] === 'declined' && strpos($x4['reply'], rh_ai_out_of_scope_line()) !== false && !preg_match('/change menu|Menu Management|Recipes|suggested price/i', $x4['reply']) && !$x4['links'] && !$GLOBALS['mn_calls'],
+            'a change request from an account the menu advisor is not open to gets the standard decline - no menu wording, no screen links', $x4['reply']);
+        $exE = rh_ai_menu_expiring($pdo, [0]);
+        check(($exE['days'] ?? null) === rh_ai_num('ai_menu_expiry_days') && $exE['soon'] === [] && $exE['past'] === [],
+            'expiring stock: the early returns carry the "days" window too (no undefined index in the use-up view)', json_encode($exE));
         $tq = rh_ai_t_menu_advisor($pdo, $uChef, ['dish' => 'zqmn test', 'recipe' => 'zqmn chiken 100 g']);
         check(($tq['ingredients'][0]['stock_item'] ?? '') === 'Zqmn Chicken' && ($tq['ingredients'][0]['match'] ?? '') === 'read as' && $mnCount() === $mnBefore,
             'a misspelt ingredient ("zqmn chiken") is read as the clearly closest stock item and shown by its real name - a read, never a write', json_encode($tq['ingredients'][0] ?? null));
