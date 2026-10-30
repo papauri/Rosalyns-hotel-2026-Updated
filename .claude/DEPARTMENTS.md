@@ -144,7 +144,7 @@ The feature freeze in BUILD_PLAN.md ("PRODUCTION READINESS GATE") still stands. 
      Guides/help text: `help_map.php` only. Test/doc-only: that test or none.
    - One area: that area's own suites only (stock_*, POS/KDS smoke + shop_returns + stock_loss, linked_gym,
      conference_full_total, cms_content, ai_assistant_test, booking smoke + linked_rooms + concurrent_booking).
-   - Full `run_tests.php` at both hotels before push ONLY for: config/database.php or shared includes/ helpers,
+   - Full `run_tests.php` at Rosalyn's before push ONLY for: config/database.php or shared includes/ helpers,
      money (payments, documents, refunds, VAT/levy, pricing, shift/EOD), migrations, login/permissions/security.
    - Safety net: the full set once a day in the background (first ship of the day or when the owner deploys);
      it never blocks a push.
@@ -157,7 +157,7 @@ The feature freeze in BUILD_PLAN.md ("PRODUCTION READINESS GATE") still stands. 
    `{base}/__devlogin?to=page.php` signs in as admin). Check desktop and 390px phone width.
    If port 8000 is already taken by a plain `php -S` (no router), use another port and set
    `BASE=http://localhost:<port>`.
-4. Then port to Liwonde, re-run its tests, commit and push both.
+4. Then port to Liwonde (`php -l` the copied files; owner 2026-10-30: tests run at Rosalyn's only, never re-run at Liwonde), commit and push both.
 5. **Guides and KB**: once a change that staff will notice has shipped, `guides-kb-lead` updates the
    matching pages in `docs/guides/` in plain, easy-to-follow English and checks the KB search finds
    them; that update goes through the same review and is committed to both hotels.
