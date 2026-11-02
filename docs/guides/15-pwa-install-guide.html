@@ -31,6 +31,7 @@
     <ol>
       <li><a href="#what">What installing does</a></li>
       <li><a href="#banner">The Install Admin App banner</a></li>
+      <li><a href="#manual">If the browser never shows the install box</a></li>
       <li><a href="#android">How to install on Android (Chrome)</a></li>
       <li><a href="#ios">How to install on iPhone or iPad (Safari)</a></li>
       <li><a href="#desktop">How to install on Windows or Mac (Chrome or Edge)</a></li>
@@ -63,10 +64,26 @@
   </table>
   <ul>
     <li>The box is a slim bar along the bottom of the screen. It hides itself while the menu or a pop-up window is open, so it never covers them. Tap the cross to hide it.</li>
-    <li>The box is never shown on the <strong>POS Till</strong> or the kitchen, bar, coffee and room service station screens, because it would cover their buttons. It appears on the Dashboard and the other admin pages. Install from there.</li>
+    <li>The box can appear on any admin page, including the <strong>POS Till</strong> and the kitchen, bar, coffee and room service station screens. If you would rather install from a page with no buttons at the bottom, use the Dashboard.</li>
     <li>If you click <strong>Install</strong> and then cancel your browser's own question, the box goes away but the waiting period does not start, so it comes back on the next page you open.</li>
     <li>The waiting period is remembered separately in each browser on each device. Dismissing it on the till does not hide it on the manager's laptop.</li>
     <li>If you do not see the banner, you can still install with the steps below.</li>
+  </ul>
+
+  <h2 id="manual">If the browser never shows the install box</h2>
+  <p>Some tablets, Samsung and older Android browsers, Firefox and Safari on iPhone or iPad never show the <strong>Install Admin App</strong> box. After about 4 seconds, the admin shows a slim dark bar at the bottom of the screen with the manual steps:</p>
+  <ul>
+    <li>On Android: <em>"Install this app: open the browser menu (three dots), then tap Install app or Add to Home screen."</em></li>
+    <li>On iPhone or iPad: <em>"Install this app: tap Share, then Add to Home Screen."</em></li>
+  </ul>
+  <ol class="steps">
+    <li>Read the bar and follow the steps on it. The steps are in the section for your device below.</li>
+    <li>To hide the bar, tap the cross (<strong>×</strong>) on the right. It stays hidden for the same waiting period as the install box (14 days unless your administrator changed it).</li>
+    <li>To show the bar again, add <strong>?install=1</strong> to the end of any admin page address, for example <strong>/admin/pos.php?install=1</strong>, then press Enter.</li>
+  </ol>
+  <ul>
+    <li>The bar also appears on the <strong>POS Till</strong> and the station screens. The page moves up to make room for it, so it does not cover the buttons.</li>
+    <li>The bar does not appear when the app is already installed and open.</li>
   </ul>
 
   <h2 id="android">How to install on Android (Chrome)</h2>
@@ -120,7 +137,7 @@
 
   <h2 id="rules">Rules the system enforces</h2>
   <ul>
-    <li>The install banner never covers the POS Till or the station screens.</li>
+    <li>The manual install bar never covers the buttons on the POS Till or the station screens. The page moves up to make room for it.</li>
     <li>The banner is hidden for the number of days set in <strong>Re-show banner after dismissal (days)</strong>. That number must be between 1 and 365.</li>
     <li>Sign-in and permissions work exactly as in a browser. Installing never gives extra access.</li>
   </ul>
@@ -129,7 +146,7 @@
   <table>
     <thead><tr><th>What you see</th><th>Why</th><th>What to do</th></tr></thead>
     <tbody>
-      <tr><td>No Install Admin App banner</td><td>You dismissed it recently, you are on the POS or a station screen, the app is already installed, or the browser does not offer installing (for example Safari).</td><td>Open the Dashboard. Use the browser's own menu to install (see the steps above). On iPhone or iPad use Add to Home Screen.</td></tr>
+      <tr><td>No Install Admin App banner</td><td>You dismissed it recently, the app is already installed, or the browser does not offer installing (for example Safari).</td><td>Use the browser's own menu to install (see the steps above). On iPhone or iPad use Add to Home Screen. If you see no box and no bar, add <strong>?install=1</strong> to the admin address to show the manual bar again.</td></tr>
       <tr><td>The banner keeps coming back</td><td>The waiting period is short.</td><td>Raise <strong>Re-show banner after dismissal (days)</strong> in Hotel Settings.</td></tr>
       <tr><td><em>"Dismiss period must be at least 1 day."</em> (shown as <em>"Error: Dismiss period must be at least 1 day."</em>)</td><td>You typed 0 or a negative number.</td><td>Type a number from 1 to 365.</td></tr>
       <tr><td><em>"Dismiss period cannot exceed 365 days."</em> (shown with <em>"Error: "</em> in front)</td><td>You typed more than 365.</td><td>Type a number from 1 to 365.</td></tr>
