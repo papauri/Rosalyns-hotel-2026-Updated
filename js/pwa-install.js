@@ -44,17 +44,69 @@
     let bannerEl = null;
     let isMinimisedState = false;
 
+    var promptSeen = false;
     window.addEventListener('beforeinstallprompt', function (e) {
+        promptSeen = true;
+        removeManualHelp();
         e.preventDefault();
         deferredPrompt = e;
         if (isDismissed()) return;
         showBanner();
     });
 
+    function removeManualHelp() {
+        var m = document.getElementById('pwa-manual-help');
+        if (m && m.parentNode) m.parentNode.removeChild(m);
+    }
+
     window.addEventListener('appinstalled', function () {
+        removeManualHelp();
         hideBanner();
         deferredPrompt = null;
     });
+
+    // ── Manual fallback ───────────────────────────────────────────────────────
+    // Browsers that never fire beforeinstallprompt (Samsung/older Android browsers, WebViews
+    // without Play services, Firefox, iOS Safari) get a short how-to after ~4s. Reopen with ?install=1.
+    function isInstalledApp() {
+        try {
+            if (window.navigator.standalone === true) return true;
+            return !!(window.matchMedia && (matchMedia('(display-mode: standalone)').matches ||
+                matchMedia('(display-mode: fullscreen)').matches || matchMedia('(display-mode: minimal-ui)').matches));
+        } catch (e) { return false; }
+    }
+    function showManualHelp(force) {
+        if (document.getElementById('pwa-manual-help') || bannerEl || deferredPrompt || isInstalledApp()) return;
+        if (!force && (promptSeen || isDismissed())) return;
+        var ua = navigator.userAgent || '';
+        var ios = /iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+        var el = document.createElement('div');
+        el.id = 'pwa-manual-help';
+        el.setAttribute('role', 'region');
+        el.setAttribute('aria-label', 'Install app');
+        el.style.cssText = 'position:fixed;left:0;right:0;bottom:0;z-index:9001;display:flex;align-items:center;gap:12px;box-sizing:border-box;' +
+            'background:#1f1f24;color:#F7F3EE;border-top:1px solid rgba(138,119,95,0.4);padding:8px 12px calc(8px + env(safe-area-inset-bottom,0px)) 16px;' +
+            'font:14px/1.4 Inter,system-ui,sans-serif;';
+        var msg = document.createElement('span');
+        msg.style.flex = '1';
+        msg.textContent = 'Install this app: ' + (ios ? 'tap Share, then Add to Home Screen.'
+            : 'open the browser menu (three dots), then tap Install app or Add to Home screen.');
+        var x = document.createElement('button');
+        x.type = 'button';
+        x.setAttribute('aria-label', 'Dismiss');
+        x.textContent = '×';
+        x.style.cssText = 'flex-shrink:0;min-width:44px;min-height:44px;background:transparent;border:0;border-radius:8px;color:rgba(247,243,238,0.7);font-size:22px;cursor:pointer;';
+        x.addEventListener('click', function () { markDismissed(); el.remove(); });
+        el.appendChild(msg);
+        el.appendChild(x);
+        document.body.appendChild(el);
+    }
+    function scheduleManualFallback() {
+        var forced = /[?&]install=1/.test(location.search);
+        setTimeout(function () { showManualHelp(forced); }, forced ? 500 : 4000);
+    }
+    if (document.readyState === 'complete') scheduleManualFallback();
+    else window.addEventListener('load', scheduleManualFallback);
 
     // ── Banner HTML ───────────────────────────────────────────────────────────
     function showBanner() {

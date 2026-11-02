@@ -3999,3 +3999,17 @@ body.kds-sidebar-collapsed .drawer-zoom {
         font-size: 13px;
     }
 }
+
+/* Install bar (admin/js/pwa-install.js) docks along the bottom: shrink the station by its height so it never covers the board. */
+body.rh-pwa-bar-on .toast {
+    bottom: calc(var(--station-bottom-height) + var(--rh-pwa-bar-h, 64px) + 24px);
+}
+body.station-screen.rh-pwa-bar-on .station-bottom {
+    bottom: var(--rh-pwa-bar-h, 64px);
+}
+body.station-screen.rh-pwa-bar-on {
+    height: calc(100dvh - var(--rh-pwa-bar-h, 64px));
+}
+html.page-zoomed body.station-screen.rh-pwa-bar-on {
+    height: calc(100dvh / var(--page-zoom) - var(--rh-pwa-bar-h, 64px));
+}

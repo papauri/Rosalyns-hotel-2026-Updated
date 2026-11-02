@@ -7849,3 +7849,13 @@ html.page-zoomed .pos-ready-card {
         display: none;
     }
 }
+
+/* Install bar (admin/js/pwa-install.js) docks along the bottom: shrink the till by its height so it never covers the action row. */
+body.pos-screen.rh-pwa-bar-on { padding-bottom: 0; }
+body.pos-screen.rh-pwa-bar-on .till-wrap {
+    height: calc(100dvh - var(--rh-pwa-bar-h, 64px));
+    min-height: 0;
+}
+html.page-zoomed body.pos-screen.rh-pwa-bar-on .till-wrap {
+    height: calc(100dvh / var(--page-zoom) - var(--rh-pwa-bar-h, 64px));
+}

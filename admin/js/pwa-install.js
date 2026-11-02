@@ -1,7 +1,7 @@
 /**
  * admin-pwa-install.js — PWA install prompt for admin staff.
  *
- * Triggers after `beforeinstallprompt`; shows a slim bar docked to the bottom edge of the
+ * Triggers after `beforeinstallprompt` (or, after ~4s without it, shows manual how-to steps); shows a slim bar docked to the bottom edge of the
  * screen (beside the sidebar on desktop). It sits below the navigation and every modal, is
  * hidden while the navigation drawer or any modal is open, and a dismiss is remembered
  * (localStorage, with an in-memory fallback when storage is blocked) for the window set in
@@ -35,25 +35,31 @@
     let deferredPrompt = null;
     let bannerEl = null;
 
-    /* The banner is fixed at top-right, which on the POS till and the station displays lands
-     * directly on top of the toolbar's right-hand controls — 86, Help, More and Sign out became
-     * physically unclickable, because the banner won the hit test. Those screens are worked all
-     * shift by staff who are not the person deciding to install an app, and the 14-day dismiss
-     * window meant it came back and re-blocked the same buttons periodically. Suppress it there;
-     * the dashboard and every other admin page still offer it, which is where a manager would
-     * install from anyway. */
-    function isFrontOfHouseScreen() {
-        const b = document.body;
-        return !!b && (b.classList.contains('pos-screen') || b.classList.contains('station-screen'));
+    /* The bar is docked along the bottom edge, so it no longer covers the toolbar; it is offered
+     * on the till and station screens too (a tablet that lives on POS/KDS would otherwise never
+     * see it). A dismiss still hides it for the configured window. */
+    function isInstalledApp() {
+        try {
+            if (window.navigator.standalone === true) return true;
+            return !!(window.matchMedia && (matchMedia('(display-mode: standalone)').matches ||
+                matchMedia('(display-mode: fullscreen)').matches || matchMedia('(display-mode: minimal-ui)').matches));
+        } catch (e) { return false; }
     }
 
+    var manualMode = false;
+    var promptSeen = false;
+
     window.addEventListener('beforeinstallprompt', function (e) {
-        if (isDismissed() || isFrontOfHouseScreen()) {
+        promptSeen = true;
+        if (isDismissed()) {
             // If the banner is in dismiss cooldown, do not intercept the native prompt lifecycle.
             return;
         }
         e.preventDefault();
         deferredPrompt = e;
+        // A manual-instructions bar may already be showing; swap it for the real Install button.
+        if (bannerEl && manualMode) hideBanner();
+        manualMode = false;
         // Show quickly to avoid losing the prompt event on short-lived page visits.
         requestAnimationFrame(showBanner);
     });
@@ -63,8 +69,35 @@
         deferredPrompt = null;
     });
 
-    function showBanner() {
-        if (bannerEl || !deferredPrompt) return;
+    /* Browsers that never fire beforeinstallprompt (Samsung/older Android browsers, WebViews
+     * without Play services, Firefox, iOS Safari) get a short how-to instead. It can be
+     * reopened at any time with ?install=1 on any admin page or window.rhShowInstallHelp(). */
+    function manualSteps() {
+        var ua = navigator.userAgent || '';
+        if (/iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) {
+            return 'Tap Share, then Add to Home Screen.';
+        }
+        return 'Open the browser menu (three dots), then tap Install app or Add to Home screen.';
+    }
+
+    function showManualHelp(force) {
+        if (bannerEl || deferredPrompt || isInstalledApp()) return;
+        if (!force && (promptSeen || isDismissed())) return;
+        manualMode = true;
+        showBanner(true);
+    }
+    window.rhShowInstallHelp = function () { showManualHelp(true); };
+
+    function scheduleManualFallback() {
+        var forced = /[?&]install=1/.test(location.search);
+        setTimeout(function () { showManualHelp(forced); }, forced ? 500 : 4000);
+    }
+    if (document.readyState === 'complete') scheduleManualFallback();
+    else window.addEventListener('load', scheduleManualFallback);
+
+    function showBanner(manual) {
+        if (bannerEl || (!deferredPrompt && manual !== true)) return;
+        manual = manual === true;
 
         injectStyles();
 
@@ -76,19 +109,20 @@
             '<i class="fas fa-hotel admin-pwa-banner__icon" aria-hidden="true"></i>',
             '<div class="admin-pwa-banner__text" id="admin-pwa-body">',
             '  <strong>Install Admin App</strong>',
-            '  <span>Run POS &amp; KDS without a browser tab.</span>',
+            '  <span>' + (manual ? manualSteps() : 'Run POS &amp; KDS without a browser tab.') + '</span>',
             '</div>',
-            '<button class="admin-pwa-banner__install" id="admin-pwa-install" type="button">Install</button>',
+            (manual ? '' : '<button class="admin-pwa-banner__install" id="admin-pwa-install" type="button">Install</button>'),
             '<button class="admin-pwa-banner__dismiss" id="admin-pwa-dismiss" type="button" aria-label="Dismiss">',
             '  <i class="fas fa-times" aria-hidden="true"></i>',
             '</button>',
         ].join('');
 
+        if (manual) bannerEl.classList.add('is-manual');
         document.body.appendChild(bannerEl);
         syncVisibility();
         requestAnimationFrame(function () { if (bannerEl) bannerEl.classList.add('is-visible'); });
 
-        document.getElementById('admin-pwa-install').addEventListener('click', doInstall);
+        if (!manual) document.getElementById('admin-pwa-install').addEventListener('click', doInstall);
         document.getElementById('admin-pwa-dismiss').addEventListener('click', dismiss);
         watchOverlays();
     }
@@ -115,6 +149,9 @@
         var open = overlayOpen();
         if (bannerEl.hidden !== open) bannerEl.hidden = open; // no self-triggered mutation loop
         document.body.classList.toggle('rh-pwa-bar-on', !open);
+        // Real bar height lets the till/station layouts shrink by exactly that much.
+        if (open) document.documentElement.style.removeProperty('--rh-pwa-bar-h');
+        else document.documentElement.style.setProperty('--rh-pwa-bar-h', (bannerEl.offsetHeight || 64) + 'px');
     }
 
     var overlayObserver = null, syncQueued = false;
@@ -133,6 +170,7 @@
         if (!bannerEl) return;
         if (overlayObserver) { overlayObserver.disconnect(); overlayObserver = null; }
         document.body.classList.remove('rh-pwa-bar-on');
+        document.documentElement.style.removeProperty('--rh-pwa-bar-h');
         if (bannerEl.parentNode) bannerEl.parentNode.removeChild(bannerEl);
         bannerEl = null;
     }
@@ -206,7 +244,7 @@
             '.admin-pwa-banner__dismiss:hover { color: #fff; background: rgba(255,255,255,0.08); }',
             '@media (max-width: 480px) {',
             '  #admin-pwa-banner { padding-left: 12px; padding-right: 68px; gap: 8px; }',
-            '  .admin-pwa-banner__text span { display: none; }',
+            '  #admin-pwa-banner:not(.is-manual) .admin-pwa-banner__text span { display: none; }',
             '}',
         ].join('\n');
         document.head.appendChild(s);
