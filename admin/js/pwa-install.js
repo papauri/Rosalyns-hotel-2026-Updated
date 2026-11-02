@@ -73,6 +73,9 @@
      * without Play services, Firefox, iOS Safari) get a short how-to instead. It can be
      * reopened at any time with ?install=1 on any admin page or window.rhShowInstallHelp(). */
     function manualSteps() {
+        if (window.isSecureContext === false) {
+            return "This address isn't secure (https), so the browser can't install the app. Open the site from its https:// address.";
+        }
         var ua = navigator.userAgent || '';
         if (/iPad|iPhone|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1)) {
             return 'Tap Share, then Add to Home Screen.';

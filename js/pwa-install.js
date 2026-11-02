@@ -95,7 +95,9 @@
             'font:14px/1.4 Inter,system-ui,sans-serif;';
         var msg = document.createElement('span');
         msg.style.flex = '1';
-        msg.textContent = 'Install this app: ' + (ios ? 'tap Share, then Add to Home Screen.'
+        msg.textContent = window.isSecureContext === false
+            ? "This address isn't secure (https), so the browser can't install the app. Open the site from its https:// address."
+            : 'Install this app: ' + (ios ? 'tap Share, then Add to Home Screen.'
             : 'open the browser menu (three dots), then tap Install app or Add to Home screen.');
         var x = document.createElement('button');
         x.type = 'button';
