@@ -383,7 +383,7 @@
     align-items: center;
     gap: 10px;
     margin: 0 0 14px;
-    padding: 0 0 10px;
+    padding-bottom: 10px; /* keep shared left padding (accent-bar clearance) */
     border-bottom: 1px solid var(--admin-surface-border, #eef0f3);
     font-size: 17px;
 }

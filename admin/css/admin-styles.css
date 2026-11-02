@@ -1756,6 +1756,10 @@ table.fit-or-card:not(.mobile-enhanced) td {
 .section-title i {
     color: var(--gold);
     font-size: 16px;
+    /* fixed-width icon box so text aligns across pages */
+    flex: 0 0 1.25em;
+    width: 1.25em;
+    text-align: center;
 }
 
 /* Stats Grid - Tablet/Mobile Responsive */
@@ -2963,8 +2967,9 @@ body {
        absolutely positioned, so it is unaffected by flex layout. */
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 0 0 0 14px;
+    gap: 10px;
+    /* 4px bar + 14px clear space before the icon/text, at every breakpoint */
+    padding: 0 0 0 18px;
     margin: 4px 0 18px;
     font-family: 'Jost', sans-serif;
     font-size: clamp(15px, 1.4vw, 17px);
@@ -4091,7 +4096,7 @@ button:focus-visible {
     display: inline-flex;
     align-items: center;
     gap: 8px;
-    padding: 0 0 0 12px;
+    padding: 0 0 0 16px;
     position: relative;
 }
 
@@ -4112,6 +4117,9 @@ button:focus-visible {
 .section-card>h3 i,
 .dashboard-section>h3 i {
     color: var(--au-accent-deep);
+    flex: 0 0 1.25em;
+    width: 1.25em;
+    text-align: center;
 }
 
 /* Embedded table inside section: remove duplicate border */
