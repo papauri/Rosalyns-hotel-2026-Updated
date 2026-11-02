@@ -393,6 +393,7 @@ $bootstrap['fingerprint'] = md5(
     <div class="board" id="board"></div>
 
     <div class="station-bottom" aria-label="Station tools">
+        <div class="station-tabs" role="tablist" aria-label="Station panels"><button type="button" role="tab" aria-selected="true" data-tab="0">FOH Notes</button><button type="button" role="tab" aria-selected="false" data-tab="1">All Day</button><button type="button" role="tab" aria-selected="false" data-tab="2">Online Flow</button></div>
         <section class="station-panel" aria-labelledby="stationMessagesTitle">
             <div class="station-panel__head" id="stationMessagesTitle"><button type="button" class="station-panel__open" data-loader-manual onclick="openKdsNotes()" title="Open all FOH notes"><i class="fas fa-comments"></i> FOH Notes <i class="fas fa-up-right-and-down-left-from-center" aria-hidden="true"></i></button><span id="stationMessageCount">0</span></div>
             <div class="station-message-list" id="stationMessages">
@@ -3030,6 +3031,20 @@ $bootstrap['fingerprint'] = md5(
 
         syncStationViewportMetrics();
         window.addEventListener('resize', syncStationViewportMetrics);
+
+        /* Phone dock: the tab strip shows one panel at a time (CSS hides the strip on wider screens). */
+        (function() {
+            const dock = document.querySelector('.station-bottom');
+            const tabs = document.querySelectorAll('.station-tabs button');
+            if (!dock || !tabs.length) return;
+            dock.setAttribute('data-tab', '0');
+            tabs.forEach(function(b) {
+                b.addEventListener('click', function() {
+                    dock.setAttribute('data-tab', b.getAttribute('data-tab'));
+                    tabs.forEach(function(o) { o.setAttribute('aria-selected', o === b ? 'true' : 'false'); });
+                });
+            });
+        })();
 
         /* Display size is shared (includes/page-zoom.php); a change fires resize,
            which re-measures the bars and the docked menu above. */
