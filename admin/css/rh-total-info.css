@@ -134,3 +134,13 @@
     font-size: 11px;
     color: var(--rh-muted, #5E554D);
 }
+
+/* Never squash: the circle keeps its size whatever the cell or a touch-size button rule does. */
+.rh-info-btn {
+    flex: 0 0 auto;
+    box-sizing: border-box;
+    min-height: 20px;
+    max-width: 20px;
+    max-height: 20px;
+    aspect-ratio: 1 / 1;
+}

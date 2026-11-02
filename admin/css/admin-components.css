@@ -4021,3 +4021,23 @@ select.rh-input-invalid.rh-input-invalid {
     }
 
 }
+
+/* Phone list tables (shared): the fit-or-card rule (admin-mobile.js) decides table vs cards, so these only keep cells tidy
+   when the table fits: header text stays on one line, the last (Actions) column clears the card edge, status pill has air. */
+@media (max-width: 640px) {
+    table.rh-phone-actions:not(.mobile-enhanced) thead th {
+        white-space: nowrap;
+    }
+
+    table.rh-phone-actions:not(.mobile-enhanced) thead th.bk-th-total .bk-th-total__sub {
+        white-space: normal;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.rh-phone-actions:not(.mobile-enhanced) :is(th, td):last-child {
+        padding-right: 10px !important;
+    }
+
+    table.rh-phone-actions:not(.mobile-enhanced) .rh-phone-sub--pill {
+        margin-top: 6px;
+    }
+}
