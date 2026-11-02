@@ -4013,3 +4013,49 @@ body.station-screen.rh-pwa-bar-on {
 html.page-zoomed body.station-screen.rh-pwa-bar-on {
     height: calc(100dvh / var(--page-zoom) - var(--rh-pwa-bar-h, 64px));
 }
+
+/* ── Safe areas (installed app, viewport-fit=cover) ───────────────────────────
+   In the installed app there is no browser chrome, so rounded corners, camera
+   cutouts and the gesture bar sit on top of the page. Bars and panels keep their
+   content inside the safe area, with their normal padding as the floor. */
+.topbar {
+    height: calc(clamp(52px, 3.6vh, 104px) + env(safe-area-inset-top, 0px));
+    padding: env(safe-area-inset-top, 0px) max(14px, env(safe-area-inset-right, 0px)) 0 max(14px, env(safe-area-inset-left, 0px));
+}
+.station-bottom {
+    padding: 0 env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+.kds-drawer {
+    padding-left: calc(12px + env(safe-area-inset-left, 0px));
+}
+.kds-chat {
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) 0;
+}
+.kds-chathead-wrap {
+    right: max(28px, env(safe-area-inset-right, 0px));
+}
+.board {
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
+}
+@container (max-width: 900px) {
+    .topbar {
+        padding: env(safe-area-inset-top, 0px) max(10px, env(safe-area-inset-right, 0px)) 0 max(10px, env(safe-area-inset-left, 0px));
+    }
+    /* Tablet portrait: all three dock panels fit the width instead of sliding
+       sideways (the FOH Notes panel was half off-screen until swiped). */
+    .station-bottom {
+        grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) minmax(0, 1fr);
+        overflow-x: hidden;
+        scroll-snap-type: none;
+    }
+}
+/* Phones: one panel at a time, swiped sideways. */
+@container (max-width: 560px) {
+    .station-bottom {
+        grid-template-columns: repeat(3, calc(100cqw - 24px));
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        scroll-padding-left: env(safe-area-inset-left, 0px);
+    }
+}

@@ -206,7 +206,7 @@
             '  background: #1f1f24;',
             '  border-top: 1px solid rgba(138,119,95,0.4);',
             '  color: #F7F3EE;',
-            '  padding: 8px 72px calc(8px + env(safe-area-inset-bottom, 0px)) 16px;', // right gap keeps the draggable help button from covering Dismiss
+            '  padding: 8px calc(72px + env(safe-area-inset-right, 0px)) calc(8px + env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px));', // right gap keeps the draggable help button from covering Dismiss
             '  font-family: "Inter", system-ui, sans-serif;',
             '  font-size: 13px;',
             '  opacity: 0;',

@@ -200,7 +200,7 @@ button {
     gap: 5px;
     padding: 0 12px;
     flex: 1;
-    justify-content: flex-end;
+    justify-content: flex-end; justify-content: safe flex-end;
     flex-wrap: nowrap;
     min-width: 0;
     /* The buttons are flex-shrink:0 and the row is justified to the end, so an
@@ -4966,7 +4966,7 @@ a.recent-toggle span {
 @media (min-width: 1701px) {
     .till-bar .tb-actions {
         margin-left: auto;
-        justify-content: flex-end;
+        justify-content: flex-end; justify-content: safe flex-end;
         flex-wrap: nowrap;
         gap: clamp(0.35rem, 0.4vw, 0.55rem);
         padding: 0 clamp(0.75rem, 0.8vw, 1.2rem);
@@ -5878,7 +5878,7 @@ button.svc-card:focus-visible { outline: 3px solid #766550; outline-offset: 2px;
     .till-bar .tb-actions {
         display: flex !important;
         flex: 1 1 auto;
-        justify-content: flex-end;
+        justify-content: flex-end; justify-content: safe flex-end;
         align-items: center;
         gap: 6px;
         height: auto;
@@ -7858,4 +7858,24 @@ body.pos-screen.rh-pwa-bar-on .till-wrap {
 }
 html.page-zoomed body.pos-screen.rh-pwa-bar-on .till-wrap {
     height: calc(100dvh / var(--page-zoom) - var(--rh-pwa-bar-h, 64px));
+}
+
+/* ── Safe areas (installed app, viewport-fit=cover) ───────────────────────────
+   Rounded corners / camera cutouts / gesture bar overlap the page in the
+   installed app: the till stays inside them, the top bar adds the status-bar
+   inset to its own height. */
+.till-wrap {
+    padding-left: env(safe-area-inset-left, 0px);
+    padding-right: env(safe-area-inset-right, 0px);
+}
+.till-wrap > .till-bar {
+    padding-top: env(safe-area-inset-top, 0px);
+}
+.till-bar .tb-row2 {
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+#barcodeScanStrip {
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
 }
