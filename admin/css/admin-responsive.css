@@ -346,21 +346,20 @@ body>footer {
         white-space: nowrap;
     }
 
+    /* Sort arrow sits in-flow right after the label (never absolute), at any column width */
     :is(#rh-admin-page, .admin-content, .content) th.admin-auto-sortable {
-        position: relative;
         vertical-align: middle !important;
-        padding-right: 1.45rem !important;
+        white-space: nowrap;
     }
 
     :is(#rh-admin-page, .admin-content, .content) th.admin-auto-sortable .admin-sort-icon {
         display: inline-flex !important;
         align-items: center;
         justify-content: center;
-        position: absolute;
-        right: 0.5rem;
-        top: 50%;
-        transform: translateY(-50%);
-        margin-left: 0 !important;
+        position: static;
+        transform: none;
+        flex: none;
+        margin-left: 6px !important;
         vertical-align: middle;
         font-size: 0.78em;
         line-height: 1;

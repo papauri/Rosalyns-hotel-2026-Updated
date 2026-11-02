@@ -157,10 +157,10 @@ foreach (['exclusive', 'inclusive'] as $mode) {
          VALUES ({$baseId}, '{$a}', {$roomId}, 'BTB Guest', 'btb@example.invalid', '000', '{$far}', '{$far2}', 3, 2, 2, 0, 'pending', 'unpaid',
                 303000, 52500, 3000, 1, 17.5, 355500, 0, 355500, '2000-01-01 00:00:00')",
     ];
-    $r = btb_run('admin/bookings.php', ['method' => 'GET', 'get' => ['search' => $tg], 'setup' => $setup, 'grep' => ['class="rh-info-btn"', 'data-rh-breakdown=', 'How this total is worked out', 'Total <span class="bk-th-total__sub">(incl. VAT &amp; levy)</span>', '355,500.00']]);
+    $r = btb_run('admin/bookings.php', ['method' => 'GET', 'get' => ['search' => $tg], 'setup' => $setup, 'grep' => ['class="rh-info-btn"', 'data-rh-breakdown=', 'How this total is worked out', '>Total <i class="fas ', '355,500.00']]);
     $f = $r['found'] ?? [];
     ok("[$mode] bookings list: info button, data and aria-label present", !empty($f['class="rh-info-btn"']) && !empty($f['data-rh-breakdown=']) && !empty($f['How this total is worked out']), $r['raw'] ?? '');
-    ok("[$mode] bookings list: header reads Total (incl. VAT & levy)", !empty($f['Total <span class="bk-th-total__sub">(incl. VAT &amp; levy)</span>']));
+    ok("[$mode] bookings list: header reads Total (caption drawn by CSS ::after)", !empty($f['>Total <i class="fas ']));
     $r = btb_run('admin/dashboard.php', ['method' => 'GET', 'get' => ['ajax' => 'card_insight', 'card' => 'pending_bookings'], 'setup' => $setup]);
     $cell = null;
     foreach (($r['json']['rows'] ?? []) as $row) { if (($row['reference']['label'] ?? '') === $a) { $cell = $row['total'] ?? null; } }

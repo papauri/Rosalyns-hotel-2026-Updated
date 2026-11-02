@@ -3562,7 +3562,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                     <?php rh_server_sort_th('Check Out', 'check_out', $bk_sort_key, $bk_sort_dir, 'col-optional'); ?>
                                     <?php rh_server_sort_th('Nights', 'nights', $bk_sort_key, $bk_sort_dir, 'col-optional-lg'); ?>
                                     <?php rh_server_sort_th('Guests', 'guests', $bk_sort_key, $bk_sort_dir, 'col-optional-lg'); ?>
-                                    <?php rh_server_sort_th('Total <span class="bk-th-total__sub">(incl. VAT &amp; levy)</span>', 'total', $bk_sort_key, $bk_sort_dir, 'bk-th-total'); ?>
+                                    <?php rh_server_sort_th('Total', 'total', $bk_sort_key, $bk_sort_dir, 'bk-th-total'); ?>
                                     <?php rh_server_sort_th('Status', 'status', $bk_sort_key, $bk_sort_dir, 'col-optional'); ?>
                                     <?php rh_server_sort_th('Payment', 'payment', $bk_sort_key, $bk_sort_dir, 'col-optional-md'); ?>
                                     <?php rh_server_sort_th('Created', 'created', $bk_sort_key, $bk_sort_dir, 'col-optional-lg'); ?>

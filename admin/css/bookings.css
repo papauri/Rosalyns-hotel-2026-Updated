@@ -2121,7 +2121,7 @@ hr.menu-divider {
 
 /* Bookings list: "Total (incl. VAT & levy)" header keeps the bracket under the word so the column stays narrow */
 .booking-table th.bk-th-total { white-space: normal; }
-.booking-table th.bk-th-total .bk-th-total__sub { display: block; font-weight: 400; font-size: .85em; text-transform: none; letter-spacing: 0; }
+.booking-table th.bk-th-total::after { content: "(incl. VAT & levy)"; display: block; font-weight: 400; font-size: .85em; text-transform: none; letter-spacing: 0; white-space: normal; max-width: 7.5em; }
 
 /* Tablet/phone kept tables: normal padding, no mid-word breaks, row actions on ONE line. */
 @media (max-width: 1024px) {
