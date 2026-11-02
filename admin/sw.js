@@ -21,10 +21,11 @@
  *
  *   Sign-out: a request for login.php / logout.php empties the admin page cache.
  *
- *   IMPORTANT: bumping SW_VERSION deletes all old caches on activate.
- *   Bump it whenever cached assets must be force-refreshed on all clients.
+ *   Redeploy: every strategy revalidates with the server (fetch cache:'no-cache'), so a plain
+ *   git pull reaches installed apps on the next navigation; no SW_VERSION bump is needed.
+ *   Bumping SW_VERSION only deletes old cache buckets on activate (optional housekeeping).
  */
-const SW_VERSION = 'rh-admin-v9-2026-10-21';
+const SW_VERSION = 'rh-admin-v10-2026-11-02';
 const ASSET_CACHE = `${SW_VERSION}-assets`;  // fonts, images, icons only
 const PAGE_CACHE  = `${SW_VERSION}-pages`;
 const DATA_CACHE  = `${SW_VERSION}-data`;
@@ -86,19 +87,24 @@ self.addEventListener('fetch', event => {
     if (req.method !== 'GET') return;
     if (url.origin !== self.location.origin) return;
 
-    // --- Immutable assets: cache-first ---
+    // --- Images / fonts: instant from cache, refreshed in the background so a replaced logo or
+    // icon reaches the device on its next view without anyone bumping SW_VERSION ---
     if (isImmutableAsset(url)) {
         event.respondWith(
-            caches.match(req).then(hit => hit || fetch(req).then(resp => {
-                if (resp && resp.ok) {
-                    const c = resp.clone();
-                    caches.open(ASSET_CACHE).then(cs => {
-                        cs.put(req, c).catch(() => { });
-                        trimCache(ASSET_CACHE, MAX_ASSET_ENTRIES);
-                    }).catch(() => { });
-                }
-                return resp;
-            }).catch(() => caches.match(req).then(hit => hit || Response.error())))
+            caches.match(req).then(hit => {
+                const net = fetch(req, { cache: 'no-cache' }).then(resp => {
+                    if (resp && resp.ok) {
+                        const c = resp.clone();
+                        caches.open(ASSET_CACHE).then(cs => {
+                            cs.put(req, c).catch(() => { });
+                            trimCache(ASSET_CACHE, MAX_ASSET_ENTRIES);
+                        }).catch(() => { });
+                    }
+                    return resp;
+                }).catch(() => hit || Response.error());
+                if (hit) { event.waitUntil(net.catch(() => { })); return hit; }
+                return net;
+            })
         );
         return;
     }
@@ -106,7 +112,7 @@ self.addEventListener('fetch', event => {
     // --- CSS / JS: network-first so code changes are always live ---
     if (isStyleOrScript(url)) {
         event.respondWith(
-            fetch(req)
+            fetch(req, { cache: 'no-cache' })
                 .then(resp => {
                     if (resp && resp.ok) {
                         const c = resp.clone();
@@ -125,7 +131,7 @@ self.addEventListener('fetch', event => {
     // --- API data: stale-while-revalidate ---
     if (isData(url)) {
         event.respondWith(caches.match(req).then(hit => {
-            const network = fetch(req).then(resp => {
+            const network = fetch(req, { cache: 'no-cache' }).then(resp => {
                 if (resp && resp.ok) {
                     const c = resp.clone();
                     caches.open(DATA_CACHE).then(cs => {
@@ -148,7 +154,7 @@ self.addEventListener('fetch', event => {
             event.waitUntil(caches.delete(PAGE_CACHE));
         }
         event.respondWith(
-            fetch(req)
+            fetch(req, { cache: 'no-cache' })
                 .then(resp => {
                     // A redirected answer (session expired -> sign-in page) is not the page that was
                     // asked for; storing it would replace the real page with the login form.

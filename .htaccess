@@ -94,6 +94,14 @@
     </Files>
 </IfModule>
 
+# Service workers: always revalidated so a redeploy reaches installed apps (never a 1 year Expires).
+<IfModule mod_headers.c>
+    <FilesMatch "^(sw|public-sw)\.js$">
+        Header set Cache-Control "no-cache, max-age=0, must-revalidate"
+        Header unset Expires
+    </FilesMatch>
+</IfModule>
+
 # ====================
 # PERFORMANCE
 # ====================

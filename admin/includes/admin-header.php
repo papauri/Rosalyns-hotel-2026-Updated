@@ -307,7 +307,8 @@ if ($_admin_back_target !== null) {
     if ('serviceWorker' in navigator) {
         window.addEventListener('load', function() {
             navigator.serviceWorker.register('sw.js', {
-                    scope: './'
+                    scope: './',
+                    updateViaCache: 'none'
                 })
                 .catch(function() {
                     /* SW unavailable — non-fatal */

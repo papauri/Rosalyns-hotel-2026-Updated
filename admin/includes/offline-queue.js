@@ -300,7 +300,26 @@
                 swUrl = new URL('../sw.js', scripts[scripts.length - 1].src).href;
             } catch (e) { }
         }
-        navigator.serviceWorker.register(swUrl).then(() => refreshBanner()).catch(() => { });
+        navigator.serviceWorker.register(swUrl, { updateViaCache: 'none' }).then(reg => {
+            refreshBanner();
+            // A till or station can stay open for days without navigating, so ask for a new deploy
+            // when it returns to the foreground and every hour. The new worker takes over by itself
+            // (skipWaiting + claim); it never touches the queue in IndexedDB.
+            const check = () => { if (navigator.onLine) reg.update().catch(() => { }); };
+            document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check(); });
+            setInterval(check, 60 * 60 * 1000);
+            // Kitchen/bar/coffee boards hold no unsent work: when the screen is switched away from
+            // or goes to sleep after a new version took over, reload so the board runs the new code.
+            // The till and admin pages are never reloaded for the staff member; they pick the new
+            // code up on their next page load.
+            if (/\/kds\.php$/.test(location.pathname) && navigator.serviceWorker.controller) {
+                let updated = false;
+                navigator.serviceWorker.addEventListener('controllerchange', () => { updated = true; });
+                document.addEventListener('visibilitychange', () => {
+                    if (updated && document.visibilityState === 'hidden') location.reload();
+                });
+            }
+        }).catch(() => { });
     }());
 
     // Listen for Background Sync wake-up message from the SW ('rh-pos-queue' sync event).

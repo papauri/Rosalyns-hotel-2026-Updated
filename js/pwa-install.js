@@ -11,7 +11,13 @@
     // ── Service Worker registration ───────────────────────────────────────────
     // Use a relative path so it resolves correctly in any subdirectory install.
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('public-sw.js', { scope: './' })
+        navigator.serviceWorker.register('public-sw.js', { scope: './', updateViaCache: 'none' })
+            .then(function (reg) {
+                // Long-open installed app: look for a new deploy when it comes back to the foreground.
+                document.addEventListener('visibilitychange', function () {
+                    if (document.visibilityState === 'visible') reg.update().catch(function () {});
+                });
+            })
             .catch(function () { /* silent */ });
     }
 

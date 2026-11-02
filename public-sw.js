@@ -7,9 +7,10 @@
  *  - HTML pages: network-first, offline fallback → /offline.php
  *  - POST/non-GET: NEVER intercepted — pass straight to network
  *
- * BUMP SW_VERSION whenever cached assets must be force-refreshed on all clients.
+ * Redeploy: all strategies revalidate with the server (cache:'no-cache'), so a plain git pull
+ * reaches installed apps; SW_VERSION bump is optional housekeeping (deletes old cache buckets).
  */
-const SW_VERSION = 'rh-public-v6-2026-10-28';
+const SW_VERSION = 'rh-public-v7-2026-11-02';
 const ASSET_CACHE = `${SW_VERSION}-assets`;
 const PAGE_CACHE  = `${SW_VERSION}-pages`;
 
@@ -84,15 +85,19 @@ self.addEventListener('fetch', event => {
     if (url.pathname.startsWith(SW_BASE + 'admin/')) return;
     if (url.pathname.startsWith(SW_BASE + 'api/')) return;
 
-    // Immutable assets — cache-first
+    // Images / fonts — instant from cache, refreshed in the background (replaced images arrive without a bump)
     if (isImmutableAsset(url)) {
         event.respondWith(
-            caches.match(req).then(hit => hit || fetch(req).then(resp => {
-                if (resp && resp.ok) {
-                    caches.open(ASSET_CACHE).then(c => c.put(req, resp.clone())).catch(() => { });
-                }
-                return resp;
-            }))
+            caches.match(req).then(hit => {
+                const net = fetch(req, { cache: 'no-cache' }).then(resp => {
+                    if (resp && resp.ok) {
+                        caches.open(ASSET_CACHE).then(c => c.put(req, resp.clone())).catch(() => { });
+                    }
+                    return resp;
+                }).catch(() => hit || Response.error());
+                if (hit) { event.waitUntil(net.catch(() => { })); return hit; }
+                return net;
+            })
         );
         return;
     }
@@ -100,7 +105,7 @@ self.addEventListener('fetch', event => {
     // CSS / JS — network-first
     if (isStyleOrScript(url)) {
         event.respondWith(
-            fetch(req)
+            fetch(req, { cache: 'no-cache' })
                 .then(resp => {
                     if (resp && resp.ok) {
                         caches.open(ASSET_CACHE).then(c => c.put(req, resp.clone())).catch(() => { });
@@ -123,7 +128,7 @@ self.addEventListener('fetch', event => {
     // Public HTML pages — network-first with offline fallback
     if (isPage(url)) {
         event.respondWith(
-            fetch(req)
+            fetch(req, { cache: 'no-cache' })
                 .then(resp => {
                     const cc = (resp && resp.headers && resp.headers.get('Cache-Control')) || '';
                     if (resp && resp.ok && !/no-store|private/i.test(cc)) {
