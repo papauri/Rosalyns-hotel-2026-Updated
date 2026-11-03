@@ -676,6 +676,7 @@
                 var fmt = function (v) { return typeof v === 'number' ? num(v) : (v === null || v === undefined || v === '' ? 'blank' : String(v)); };
                 add(lab, cb, h('span', 'di-opt-t', (DIFF_LABEL[k] || k) + ': keep ' + fmt(d[0]) + ' (now) → change to ' + fmt(d[1]) + ' (your file)'));
                 box.appendChild(lab);
+                if (k === 'cost' && it.cost_stock_warning) { box.appendChild(h('p', 'di-warn', it.cost_stock_warning)); }
                 cb.addEventListener('change', function () {
                     boxes.forEach(function (b) { b.disabled = true; });
                     var picked = boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; });
@@ -723,6 +724,10 @@
                 'The copy of your file on the server is deleted afterwards.'
             ].forEach(function (t) { ul.appendChild(h('li', null, t)); });
             what.appendChild(ul);
+            var costWithStock = ready.filter(function (i) { return i.match && i.cost_stock_warning; });
+            if (costWithStock.length) {
+                what.appendChild(h('p', 'di-warn', num(costWithStock.length, 0) + ' cost change' + (costWithStock.length === 1 ? ' affects an item that already has' : 's affect items that already have') + ' stock. Their recipe costs and stock value change as soon as you confirm, before the opening count is approved: ' + costWithStock.map(function (i) { return i.match.name; }).join(', ') + '.'));
+            }
             if (noPrice.length) { what.appendChild(h('p', 'di-warn', num(noPrice.length, 0) + ' item' + (noPrice.length === 1 ? ' has' : 's have') + ' stock but no price in the file. They are created without a cost and their stock is left out of the opening count. Add the cost later.')); }
             p.appendChild(what);
             var why = h('p', 'di-why');

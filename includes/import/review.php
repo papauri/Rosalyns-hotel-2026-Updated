@@ -300,6 +300,58 @@ if (!function_exists('import_job_analyse')) {
         return $state !== null && !empty($state['res']['can_confirm']) && in_array($state['job']['status'], ['analysed', 'reviewing', 'confirmed'], true);
     }
 
+    /** Active batch quantity per ingredient id for a set of ids, in ONE prepared query (no per-row lookups). */
+    function import_batch_totals(PDO $pdo, array $ids): array
+    {
+        $ids = array_values(array_unique(array_map('intval', $ids)));
+        $out = [];
+        if (!$ids) {
+            return $out;
+        }
+        try {
+            foreach (array_chunk($ids, 500) as $chunk) {
+                $in = implode(',', array_fill(0, count($chunk), '?'));
+                $st = $pdo->prepare("SELECT ingredient_id, COALESCE(SUM(quantity_remaining), 0) FROM stock_batches WHERE ingredient_id IN ($in) AND status = 'active' AND quantity_remaining > 0 GROUP BY ingredient_id");
+                $st->execute($chunk);
+                foreach ($st->fetchAll(PDO::FETCH_NUM) as $r) {
+                    $out[(int)$r[0]] = (float)$r[1];
+                }
+            }
+        } catch (Throwable $ex) {
+            return [];                      // batches table not available: judge by the quantity alone
+        }
+        return $out;
+    }
+
+    /**
+     * Stock already on hand for an existing ingredient: its current quantity plus active batches (batch totals come pre-fetched).
+     * Returns ['qty'=>float,'unit'=>string,'batch_qty'=>float,'has_stock'=>bool,'recipes'=>int] or null when the ingredient is not found.
+     */
+    function import_item_on_hand(array $existingById, array $batchTotals, int $ingredientId): ?array
+    {
+        $e = $existingById[$ingredientId] ?? null;
+        if ($e === null) {
+            return null;
+        }
+        $batchQty = (float)($batchTotals[$ingredientId] ?? 0.0);
+        $qty = (float)$e['current_quantity'];
+        return ['qty' => $qty, 'unit' => (string)$e['unit'], 'batch_qty' => $batchQty, 'has_stock' => $qty > 0.00005 || $batchQty > 0.00005, 'recipes' => (int)($e['recipes'] ?? 0)];
+    }
+
+    /** The plain warning shown next to a ticked "cost per unit" on an item that already has stock. Warning only: it never blocks. */
+    function import_cost_stock_warning(string $name, array $onHand, $old, $new): string
+    {
+        $q = $onHand['qty'] > 0.00005 ? $onHand['qty'] : $onHand['batch_qty'];
+        $unit = trim((string)$onHand['unit']);
+        $oldTxt = ($old === null || $old === '') ? 'blank' : import_fmt_money($old);
+        $s = $name . ' already has ' . import_fmt_qty($q) . ($unit !== '' ? ' ' . $unit : '') . ' in stock. Changing its cost from ' . $oldTxt . ' to ' . import_fmt_money($new)
+            . ' (as written, VAT not added or removed) changes recipe costs and the value of that stock straight away — before the opening count is approved.';
+        if ($onHand['recipes'] > 0) {
+            $s .= ' It is used in ' . $onHand['recipes'] . ' recipe' . ($onHand['recipes'] === 1 ? '' : 's') . '.';
+        }
+        return $s;
+    }
+
     /** Everything the review screen needs. Statuses here are computed now from the stored answers. */
     function import_job_review_summary(PDO $pdo, int $jobId): array
     {
@@ -329,6 +381,17 @@ if (!function_exists('import_job_analyse')) {
             $conflictByUids[implode('|', $u) . '#' . $c['field']] = $c;
             $conflictByQ[$c['question_id']] = $c;
         }
+        $existingById = [];
+        foreach ($state['ctx']['existing'] as $e) {
+            $existingById[(int)$e['id']] = $e;
+        }
+        $costIds = [];
+        foreach ($res['items'] as $it) {
+            if ($it['match'] && isset($it['diff']['cost'])) {
+                $costIds[] = (int)$it['match']['id'];
+            }
+        }
+        $batchTotals = import_batch_totals($pdo, $costIds);
         $items = [];
         foreach ($res['items'] as $it) {
             $bal = [];
@@ -345,6 +408,14 @@ if (!function_exists('import_job_analyse')) {
             $it['max_source'] = $max;
             $it['min_source'] = $min;
             $it['update_key'] = $it['match'] ? rh_ssi_key((string)$it['match']['name']) : null;    // the key import_job_set_update_fields wants
+            $it['on_hand'] = null;
+            $it['cost_stock_warning'] = null;
+            if ($it['match'] && isset($it['diff']['cost'])) {
+                $it['on_hand'] = import_item_on_hand($existingById, $batchTotals, (int)$it['match']['id']);
+                if (in_array('cost', (array)$it['ticked'], true) && $it['on_hand'] && $it['on_hand']['has_stock']) {
+                    $it['cost_stock_warning'] = import_cost_stock_warning((string)$it['match']['name'], $it['on_hand'], $it['diff']['cost'][0], $it['diff']['cost'][1]);
+                }
+            }
             $items[] = $it;
         }
         $qs = [];

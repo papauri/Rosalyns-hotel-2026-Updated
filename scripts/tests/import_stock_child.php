@@ -311,6 +311,29 @@ try {
     foreach ($s3['questions'] as $q) { if ($q['type'] === 'possible-typo' && $q['auto_filled'] && $q['answer'] === 'use:' . $n('Heineken')) { $auto = true; } }
     $ck('training: next time the learned correction is pre-filled and visible (not silent)', $auto);
 
+    // ---- cost change warning: ticked cost on an item that already has stock -------------------------------
+    $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit, par_level, reorder_point) VALUES (?, 'Pantry', 'bottle', 12, 500, 5, 2)")->execute([$n('Stocky')]);
+    $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit, par_level, reorder_point) VALUES (?, 'Pantry', 'bottle', 0, 500, 5, 2)")->execute([$n('Emptyy')]);
+    $u4 = $upload($put($csv([[$n('Stocky'), '', '5', 'bottle', '800.5', '', ''], [$n('Emptyy'), '', '5', 'bottle', '600', '', '']]), 'costwarn.csv'), 'zzt-costwarn-' . $run . '.csv', $admin);
+    $j4 = (int)$u4['job_id'];
+    import_job_analyse($pdo, $j4);
+    $w0 = import_job_review_summary($pdo, $j4);
+    $find = function (array $sum, string $name) { foreach ($sum['items'] as $x) { if ($x['match'] && $x['match']['name'] === $name) { return $x; } } return null; };
+    $ck('cost warning: nothing ticked => no warning, but the on-hand figures are there', array_key_exists('cost_stock_warning', $find($w0, $n('Stocky')) ?? []) && $find($w0, $n('Stocky'))['cost_stock_warning'] === null && abs(($find($w0, $n('Stocky'))['on_hand']['qty'] ?? 0) - 12) < 0.0001);
+    import_job_set_update_fields($pdo, $j4, rh_ssi_key($n('Stocky')), ['cost'], $admin);
+    import_job_set_update_fields($pdo, $j4, rh_ssi_key($n('Emptyy')), ['cost'], $admin);
+    $w1 = import_job_review_summary($pdo, $j4);
+    $ws = $find($w1, $n('Stocky'))['cost_stock_warning'] ?? null;
+    $ck('cost warning: ticked cost on an item with stock names the item, quantity, unit, old and new cost', is_string($ws) && strpos($ws, $n('Stocky') . ' already has 12 bottle in stock') !== false && strpos($ws, 'from 500 to 800.5') !== false && strpos($ws, 'before the opening count is approved') !== false, (string)$ws);
+    $ck('cost warning: an item with no stock gets none', array_key_exists('cost_stock_warning', $find($w1, $n('Emptyy')) ?? []) && $find($w1, $n('Emptyy'))['cost_stock_warning'] === null && ($find($w1, $n('Emptyy'))['on_hand']['has_stock'] ?? true) === false);
+    $ck('cost warning: it is a warning only, the import can still be confirmed', !empty($w1['can_confirm']) && import_job_can_confirm($pdo, $j4));
+    $c4 = import_commit_stock($pdo, $j4, $admin);
+    $costLogs->execute(['Import #' . $j4 . ': cost of "' . $n('Stocky') . '"%']);
+    $sk = $pdo->prepare('SELECT cost_per_unit, current_quantity FROM stock_ingredients WHERE name = ?');
+    $sk->execute([$n('Stocky')]);
+    $s0 = $sk->fetch(PDO::FETCH_ASSOC);
+    $ck('cost warning: commit behaviour is unchanged (cost changed, stock untouched, cost change logged)', $c4['ok'] && abs($s0['cost_per_unit'] - 800.5) < 0.001 && abs($s0['current_quantity'] - 12) < 0.0001 && count($costLogs->fetchAll(PDO::FETCH_COLUMN)) === 1, json_encode($c4['error'] ?? $c4['result'] ?? ''));
+
     // ---- cleanup of staged files, purge ---------------------------------------------------------------
     $pg = import_purge_staged($pdo, true);
     $ck('purge: runs and reports counts', is_array($pg) && isset($pg['files_deleted']));
