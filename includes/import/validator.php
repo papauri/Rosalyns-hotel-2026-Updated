@@ -221,6 +221,10 @@ if (!function_exists('import_validate_sheet')) {
                     continue;
                 }
                 $row['fields'][$f] = ['value' => $p['value'], 'source' => $src, 'how' => $cell['formula'] ? 'formula-result' : 'as-written'];
+                if ($f === 'unit_price') {
+                    // the price as typed (for the price check: "2.875" vs "2,875"); never imported, only compared
+                    $row['fields'][$f]['raw'] = import_norm_ws((string)(($cell['raw'] !== null && $cell['raw'] !== '') ? $cell['raw'] : $cell['v']));
+                }
                 if ($cell['formula']) {
                     $row['warnings'][] = ['code' => 'formula-result', 'text' => ($labels[$f] ?? $f) . ' in ' . $cell['ref'] . ' is the stored result of a formula.'];
                 }

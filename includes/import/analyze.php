@@ -8,7 +8,7 @@
  *                                                           its source cell (used by tests and the commit step)
  *
  * opts: max_bytes (25 MB), force_sheets [names to import although skipped], crosscheck (true),
- *       case_price_ratio, known_names, limits (zip/csv limits)
+ *       case_price_min_peers, known_names, limits (zip/csv limits)
  */
 
 require_once __DIR__ . '/csv-reader.php';

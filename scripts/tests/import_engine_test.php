@@ -361,8 +361,8 @@ $tamper = $a; $tamper['sheets'][1]['rows'][0]['fields']['expiry']['value'] = '20
 $t(count(import_assert_no_invented_values($tamper, $readerCells)) === 1, 'invariant catches a changed date');
 
 // options: threshold parameter, forced sheets, known names, hidden
-$a2 = import_analyze_file($fixturePath, 'synthetic_stock.xlsx', $al, ['case_price_ratio' => 100]);
-$t(!in_array('case-price', array_map(function ($q) { return $q['type']; }, $a2['questions']), true) && $a2['totals']['rows_needs_answer'] === 4, 'case-price threshold is a parameter (ratio 100 -> no question)');
+$a2 = import_analyze_file($fixturePath, 'synthetic_stock.xlsx', $al, ['case_price_min_peers' => 1000]);
+$t(!in_array('case-price', array_map(function ($q) { return $q['type']; }, $a2['questions']), true) && $a2['totals']['rows_needs_answer'] === 4, 'case-price needs enough peers as evidence (a parameter; too few -> no question)');
 $a3 = import_analyze_file($fixturePath, 'synthetic_stock.xlsx', $al, ['force_sheets' => ["\u{1F576} HIDDEN LIST"]]);
 $t($a3['sheets'][4]['triage']['action'] === 'import' && count($a3['sheets'][4]['rows']) === $expected['hidden_forced_items'] && $a3['totals']['items_read'] === 22, 'a person can overrule the hidden-sheet skip');
 $a4 = import_analyze_file($fixturePath, 'synthetic_stock.xlsx', $al, ['known_names' => ['Lakeview Larger', 'Palm Lager']]);
@@ -574,6 +574,163 @@ $t(isset($fm['items'][0]) && $fm['items'][0]['name'] === 'Spaced Out Name' && $f
 $t(import_limit_problems(['match' => null, 'name' => 'x', 'unit' => str_repeat('u', 21), 'category' => 'c', 'ticked' => []]) === ['the unit is longer than 20 characters']
     && import_limit_problems(['match' => null, 'name' => 'x', 'unit' => 'kg', 'category' => str_repeat('c', 51), 'ticked' => []]) === ['the category is longer than 50 characters']
     && import_limit_problems(['match' => ['id' => 1], 'name' => str_repeat('x', 300), 'unit' => 'kg', 'category' => str_repeat('c', 90), 'ticked' => []]) === [], 'F4: unit 20 and category 50 limits; an existing item\'s own name/unit are not re-checked');
+
+// ---- price plausibility (data-driven, no fixed ratio) + the physical storage limit ----
+$pcRow = function ($id, $name, $cost, array $o = []) use ($exRow) { return array_merge($exRow($id, $name), ['cost_per_unit' => $cost, 'category' => 'Cat'], $o); };
+$pcRun = function (array $rows, array $existing, array $ev = [], array $answers = [], array $more = [], bool $tickCost = true) use ($fmRun) {
+    // the file's cost is only judged when it will be applied, so these scenarios tick "cost" on the existing items unless told not to
+    if ($tickCost && !isset($answers['_updates'])) {
+        $answers['_updates'] = [rh_ssi_key('Zeta') => ['cost'], rh_ssi_key('Qwerty') => ['cost'], rh_ssi_key('Hugeone') => ['cost']];
+    }
+    return $fmRun($rows, $answers, ['existing' => $existing] + ($ev ? ['price_evidence' => $ev] : []) + $more);
+};
+$pcQ = function (array $res) { foreach ($res['extra_questions'] as $q) { if ($q['type'] === 'price-check') { return $q; } } return null; };
+$tight = ['history' => [7 => [1000, 1020, 980, 1010]]];
+$wide = ['history' => [7 => [500, 1500, 800, 2000]]];
+$r1 = $pcRun([['Zeta', '', '5', 'bottle', '1500', '', '']], [$pcRow(7, 'Zeta', 1000)], $tight);
+$q1 = $pcQ($r1);
+$t($q1 !== null && $q1['evidence']['basis'] === 'own-history' && $q1['evidence']['history_n'] === 4 && !$r1['can_confirm'], 'price check: an item with 4 tight history points flags a 1.5x jump (own spread is the yardstick)');
+$r2 = $pcRun([['Zeta', '', '5', 'bottle', '1500', '', '']], [$pcRow(7, 'Zeta', 1000)], $wide);
+$t($pcQ($r2) === null && $r2['can_confirm'], 'price check: an item whose own prices vary widely does NOT flag the same 1.5x jump');
+$r3 = $pcRun([['Zeta', '', '5', 'bottle', '1500', '', '']], [$pcRow(7, 'Zeta', 1000)]);
+$t($pcQ($r3) === null && $r3['can_confirm'], 'price check: no history and no hotel evidence = no question (1.5x, and the same with 7x)');
+$r3b = $pcRun([['Zeta', '', '5', 'bottle', '7000', '', '']], [$pcRow(7, 'Zeta', 1000)]);
+$t($pcQ($r3b) === null, 'price check: a 7x move with no evidence at all and no structural pattern is not asked about');
+$stable = ['hotel_move' => ['v' => 0.02, 'n' => 12]];
+$inflated = ['hotel_move' => ['v' => 0.30, 'n' => 12]];
+$r4 = $pcRun([['Zeta', '', '5', 'bottle', '1600', '', '']], [$pcRow(7, 'Zeta', 1000)], $stable);
+$r5 = $pcRun([['Zeta', '', '5', 'bottle', '1600', '', '']], [$pcRow(7, 'Zeta', 1000)], $inflated);
+$t($pcQ($r4) !== null && $pcQ($r4)['evidence']['basis'] === 'hotel-moves' && $pcQ($r5) === null, 'price check: a hotel whose prices usually move a lot tolerates a 1.6x move that a stable hotel is asked about');
+$r6 = $pcRun([['Zeta', '', '5', 'bottle', '1600', '', '']], [$pcRow(7, 'Zeta', 1000)], $inflated + ['category_move' => ['cat' => ['v' => 0.02, 'n' => 9]]]);
+$t($pcQ($r6) !== null && $pcQ($r6)['evidence']['basis'] === 'category-moves', 'price check: similar items (same category) come before the whole hotel as the yardstick');
+$mv = import_pc_typical_moves([1 => [100, 110, 121], 2 => [50, 50, 55], 3 => [10]], [1 => 'A', 2 => 'A', 3 => 'B'], import_pc_params());
+$t(count($mv['category']) === 1 && $mv['category']['a']['n'] === 3 && $mv['category']['a']['v'] === null && $mv['hotel']['n'] === 3, 'price check: successive moves are counted per category; fewer than 5 moves is not enough evidence (v = null)');
+// structural reasons
+$r7 = $pcRun([['Zeta', '', '5', 'bottle', '28,750', '', '']], [$pcRow(7, 'Zeta', 2875)]);
+$q7 = $pcQ($r7);
+$t($q7 !== null && $q7['evidence']['reason'] === 'extra-zero' && strpos($q7['text'], '"Zeta" costs 2,875 now; the file says 28,750') !== false && strpos($q7['text'], '10 times higher, which often means an extra zero') !== false
+    && strpos($q7['text'], 'Is 28,750 right?') !== false && strpos($q7['text'], 'VAT not added or removed') !== false, 'price check: x10 with no history is still asked, in plain words ("an extra zero")', (string)($q7['text'] ?? ''));
+$t($q7 && array_column($q7['options'], 'key') === ['file', 'current', 'skip'] && !$q7['bad'] && $q7['blocking'], 'price check: an existing item is offered keep the file price / keep the current price / skip, and it blocks Confirm');
+$r8 = $pcRun([['Zeta', '', '5', 'bottle', '287.5', '', '']], [$pcRow(7, 'Zeta', 2875)]);
+$t(($pcQ($r8)['evidence']['reason'] ?? '') === 'missing-zero', 'price check: x0.1 is read as a missing zero');
+$r9 = $pcRun([['Zeta', '', '5', 'bottle', '12,000', '', '']], [$pcRow(7, 'Zeta', 500, ['pack_name' => 'crate', 'pack_size' => 24])]);
+$q9 = $pcQ($r9);
+$t($q9 && $q9['evidence']['reason'] === 'pack-size-up' && (int)$q9['evidence']['pack_size'] === 24 && strpos($q9['text'], 'case price typed as a unit price') !== false, 'price check: x24 on an item with a 24 pack is flagged as a case price typed as a unit price');
+$r10 = $pcRun([['Zeta', '', '5', 'bottle', '6,000', '', '']], [$pcRow(7, 'Zeta', 500), $pcRow(8, 'Other', 900, ['pack_name' => 'crate', 'pack_size' => 12])]);
+$t(($pcQ($r10)['evidence']['reason'] ?? '') === 'pack-size-up', 'price check: a whole pack count that this hotel uses (12) is recognised even when the item has no pack size');
+$r11 = $pcRun([['Zeta', '', '12', 'bottle', '12', '', '']], [$pcRow(7, 'Zeta', 100)], ['history' => [7 => [100, 101, 99, 100]]]);
+$t(($pcQ($r11)['evidence']['reason'] ?? '') === 'swapped-columns' && strpos($pcQ($r11)['text'], 'columns may be swapped') !== false, 'price check: a price equal to the quantity on the row (and off from its usual price) says the columns may be swapped');
+$r12 = $pcRun([['Zeta', '', '5', 'bottle', '5', '', '']], [$pcRow(7, 'Zeta', 100)]);
+$t($pcQ($r12) === null, 'price check: price = quantity alone, with nothing else off, asks nothing');
+$r13 = $pcRun([['Zeta', '', '5', 'bottle', '2.875', '', '']], [$pcRow(7, 'Zeta', 2875)]);
+$t(($pcQ($r13)['evidence']['reason'] ?? '') === 'thousands-separator', 'price check: "2.875" against a cost of 2,875 is read as a thousands separator taken for a decimal point');
+$r14 = $pcRun([['Zeta', '', '5', 'g', '5', '', '']], [$pcRow(7, 'Zeta', 5000, ['unit' => 'kg'])]);
+$uc = null; foreach ($r14['extra_questions'] as $q) { if ($q['type'] === 'unit-clash') { $uc = $q; } }
+$t($uc !== null && $uc['evidence']['reason'] === 'unit-differs' && strpos($uc['text'], 'about 1,000 times') !== false && strpos($uc['text'], 'g and kg') !== false && $pcQ($r14) === null, 'price check: kg vs g is explained in the unit question (and no second price question)', (string)($uc['text'] ?? ''));
+// new items: only category peers are evidence
+$peerRows = [];
+$peerEx = [];
+foreach ([1000, 1100, 900, 1050, 950] as $i => $c) { $peerEx[] = $pcRow(20 + $i, 'Peer ' . $i, $c, ['category' => 'fix']); }
+$r15 = $pcRun([['Newbie', '', '5', 'bottle', '100000', '', '']], $peerEx);
+$cat15 = $r15['items'][0]['category'] ?? '?';
+$peerEx = [];
+foreach ([1000, 1100, 900, 1050, 950] as $i => $c) { $peerEx[] = $pcRow(20 + $i, 'Peer ' . $i, $c, ['category' => $cat15]); }
+$r16 = $pcRun([['Newbie', '', '5', 'bottle', '100000', '', '']], $peerEx);
+$q16 = $pcQ($r16);
+$t($q16 !== null && $q16['evidence']['basis'] === 'category-peers' && $q16['evidence']['peer_n'] === 5 && array_column($q16['options'], 'key') === ['file', 'skip'] && strpos($q16['text'], 'is new in stock') !== false, 'price check: a NEW item far from its category peers is asked (file / skip only)', json_encode($q16));
+$r17 = $pcRun([['Newbie', '', '5', 'bottle', '1,200', '', '']], $peerEx);
+$t($pcQ($r17) === null, 'price check: a new item near its peers is not asked');
+$r18 = $pcRun([['Newbie', '', '5', 'bottle', '100000', '', '']], array_slice($peerEx, 0, 4));
+$t($pcQ($r18) === null, 'price check: fewer than 5 peers = no evidence = no question for a new item');
+// zero / blank old cost
+$r19 = $pcRun([['Zeta', '', '5', 'bottle', '28,750', '', '']], [$pcRow(7, 'Zeta', 0)]);
+$t($pcQ($r19) === null, 'price check: an existing item with a zero cost has nothing to compare');
+// answers
+$qk = $q7['qkey'];
+$updCost = ['_updates' => [rh_ssi_key('Zeta') => ['cost', 'quantity']]];
+$rA = $pcRun([['Zeta', '', '5', 'bottle', '28,750', '', '']], [$pcRow(7, 'Zeta', 2875)], [], [$qk => ['key' => 'file']] + $updCost);
+$itA = $fmItem($rA, 'Zeta');
+$t($rA['can_confirm'] && $itA['ticked'] === ['cost', 'quantity'] && abs($itA['cost'] - 28750) < 0.00005, 'price check: "the file\'s price is right" confirms it (the cost is still only applied when ticked)');
+$rB = $pcRun([['Zeta', '', '5', 'bottle', '28,750', '', '']], [$pcRow(7, 'Zeta', 2875)], [], [$qk => ['key' => 'current']] + $updCost);
+$itB = $fmItem($rB, 'Zeta');
+$t($rB['can_confirm'] && !isset($itB['diff']['cost']) && $itB['ticked'] === ['quantity'] && $itB['in_count'] === true && abs($itB['line_cost'] - 2875) < 0.00005 && count(array_filter($itB['warnings'], function ($w) { return strpos($w, 'keep the current cost 2,875') !== false; })) === 1,
+    'price check: "keep the current price" leaves the cost field out even if it was ticked, while the opening count line still imports (at the current cost)', json_encode([$itB['ticked'] ?? null, $itB['in_count'] ?? null]));
+$rC = $pcRun([['Zeta', '', '5', 'bottle', '28,750', '', '']], [$pcRow(7, 'Zeta', 2875)], [], [$qk => ['key' => 'skip']]);
+$t($rC['counts']['skipped'] === 1 && $rC['committable_items'] === 0, 'price check: skip drops the row');
+$rD = $pcRun([['Zeta', '', '5', 'bottle', '28,750', '', '']], [$pcRow(7, 'Zeta', 2875)], [], ['abcdef' => ['key' => 'file']]);
+$t(!$rD['can_confirm'] && $rD['counts']['needs-answer'] === 1, 'price check: unanswered = needs-answer and Confirm is blocked');
+$kA = $pcQ($rD)['qkey'];
+$rE = $pcRun([['Zeta', '', '5', 'bottle', '28,750', '', '']], [$pcRow(7, 'Zeta', 2876)], [], [$kA => ['key' => 'file']]);
+$t(!$rE['can_confirm'], 'price check: an answer belongs to the exact prices compared (the stock cost changed = asked again)');
+// F1/F2 kept: the converted per-unit price is compared, not the raw case price
+$rowsCase = array_merge($peers, [['Qwerty', '', '2', 'bottle', '60,000', '', '']]);
+$exQ = [$pcRow(7, 'Qwerty', 5000, ['pack_name' => 'crate', 'pack_size' => 12])];
+$rP = $pcRun($rowsCase, $exQ);
+$cpq2 = $fmQ($rP, 'case-price');
+$t($cpq2 !== null && $pcQ($rP) === null, 'price check: while the per-case question is unanswered the raw case price is not compared');
+$rP1 = $pcRun($rowsCase, $exQ, [], [$cpq2['qkey'] => ['key' => 'per-case', 'pack_size' => 12]]);
+$itP = $fmItem($rP1, 'Qwerty');
+$t($pcQ($rP1) === null && $itP && abs($itP['cost'] - 5000) < 0.00005, 'price check: per case of 12, 60,000 becomes 5,000 each and is compared as 5,000 (same as now: no question)');
+$rP2 = $pcRun($rowsCase, $exQ, [], [$cpq2['qkey'] => ['key' => 'per-unit']]);
+$t(($pcQ($rP2)['evidence']['reason'] ?? '') === 'pack-size-up' && abs($pcQ($rP2)['evidence']['new'] - 60000) < 0.00005, 'price check: answered "per unit", the 60,000 is compared as typed and is 12x = the pack size');
+// the physical limit
+$limOk = ['cost_limits' => ['cost' => 99999999.9999, 'line_value' => 9999999999.9999, 'from_database' => true]];
+$rL = $fmRun([['Hugeone', '', '5', 'bottle', '123,456,789', '', ''], ['Fineone', '', '5', 'bottle', '99,999,999.9999', '', '']], [], $limOk + ['existing' => []]);
+$ql = $fmQ($rL, 'cost-too-large');
+$t($ql !== null && !empty($ql['bad']) && array_column($ql['options'], 'key') === ['skip'] && strpos($ql['text'], 'Hugeone') !== false && strpos($ql['text'], 'price 123,456,789 is too large for a stock cost') !== false
+    && strpos($ql['text'], 'Fix the cell in your file and upload again, or skip this row') !== false && !$rL['can_confirm'] && $rL['counts']['blocked'] === 1 && $fmItem($rL, 'Fineone')['status'] === 'ready', 'storage limit: a cost that cannot be stored is a blocking question with only "skip"; the largest storable cost is fine', (string)($ql['text'] ?? ''));
+$rL2 = $fmRun([['Hugeone', '', '5', 'bottle', '123,456,789', '', ''], ['Fineone', '', '5', 'bottle', '500', '', '']], [$ql['qkey'] => ['key' => 'skip']], $limOk + ['existing' => []]);
+$t($rL2['can_confirm'] && $rL2['committable_items'] === 1, 'storage limit: skipping the row clears the block');
+$rL3 = $fmRun([['Mid', '', '5', 'bottle', '2,000,000', '', '']], [], ['cost_limits' => ['cost' => 1000000.0]] + ['existing' => []]);
+$t($fmQ($rL3, 'cost-too-large') !== null, 'storage limit: the limit comes from the column definition passed in (here 1,000,000), not from a number in the engine');
+$rL4 = $fmRun([['Mid', '', '5', 'bottle', '99,999,999', '', '']], [], ['existing' => []]);
+$rL5 = $fmRun([['Mid', '', '5', 'bottle', '100,000,000', '', '']], [], ['existing' => []]);
+$t($fmQ($rL4, 'cost-too-large') === null && $fmQ($rL5, 'cost-too-large') !== null, 'storage limit: with no readable column the stock-count rule (99,999,999) is the fallback');
+$rL6 = $fmRun([['Heavy', '', '10', 'bottle', '200,000', '', '']], [], ['cost_limits' => ['cost' => 99999999.9999, 'line_value' => 1000000.0]] + ['existing' => []]);
+$ql6 = $fmQ($rL6, 'cost-too-large');
+$t($ql6 !== null && strpos($ql6['text'], 'opening stock value') !== false, 'storage limit: balance x cost too large for the opening-count line column is blocked too');
+$lim = import_cost_limits_from_ctx($limOk);
+$t(import_cost_storage_problems(['cost' => 123456789, 'pack' => null], $lim) !== [] && import_cost_storage_problems(['cost' => 99999999.9999], $lim) === [] && import_cost_storage_problems(['cost' => null], $lim) === [], 'storage limit: the helper commit re-runs flags only what cannot be stored');
+$t(abs(import_decimal_max(12, 4) - 99999999.9999) < 0.00001 && abs(import_decimal_max(14, 4) - 9999999999.9999) < 0.0001, 'storage limit: DECIMAL(12,4) holds 99,999,999.9999; DECIMAL(14,4) holds 9,999,999,999.9999');
+
+// ---- accounting gate round: unchanged price, blank cost, only-when-applied, neutral pack wording, no fixed ratio in the file-peer check ----
+$ev0 = import_pc_assess(['new' => 1000.00002, 'old' => 1000, 'history' => [1000, 1020, 980, 1010]], import_pc_params());
+$t($ev0 === null && import_pc_assess(['new' => 1000, 'old' => 1000, 'raw' => '1000'], import_pc_params()) === null, 'gate F1: a price the same as the current cost never raises a question');
+$rU = $pcRun([['Zeta', '', '5', 'bottle', '28,750', '', '']], [$pcRow(7, 'Zeta', 2875)], [], [], [], false);
+$t($pcQ($rU) === null && $rU['can_confirm'], 'gate F2: with the cost NOT ticked (nothing will be written) no price question is asked');
+$rU2 = $pcRun([['Zeta', '', '5', 'bottle', '28,750', '', '']], [$pcRow(7, 'Zeta', 2875)], [], ['_updates' => [rh_ssi_key('Zeta') => ['cost']]]);
+$t($pcQ($rU2) !== null && !$rU2['can_confirm'], 'gate F2: ticking the cost makes the question appear (recomputed)');
+$rU3 = $pcRun([['Zeta', '', '5', 'bottle', '28,750', '', '']], [$pcRow(7, 'Zeta', 2875)], [], ['_updates' => [rh_ssi_key('Zeta') => ['quantity']]]);
+$t($pcQ($rU3) === null && $rU3['can_confirm'], 'gate F2: ticking only the quantity asks nothing about the price');
+$limSmall = ['cost_limits' => ['cost' => 1000000.0]];
+$rS1 = $pcRun([['Hugeone', '', '5', 'bottle', '2,000,000', '', '']], [$pcRow(9, 'Hugeone', 500)], [], [], $limSmall, false);
+$rS2 = $pcRun([['Hugeone', '', '5', 'bottle', '2,000,000', '', '']], [$pcRow(9, 'Hugeone', 500)], [], [], $limSmall, true);
+$t($fmQ($rS1, 'cost-too-large') === null && $fmItem($rS1, 'Hugeone')['cost_applied'] === false && $fmQ($rS2, 'cost-too-large') !== null && $fmItem($rS2, 'Hugeone')['cost_applied'] === true,
+    'gate F6: a too-large cost is only blocked when it will be written (new item, or existing with the cost ticked)');
+$rS3 = $fmRun([['Hugeone', '', '5', 'bottle', '2,000,000', '', '']], [], ['existing' => [$pcRow(9, 'Hugeone', 500)]] + $limSmall);
+$t(import_cost_storage_problems(['cost' => 2000000, 'cost_applied' => false], import_cost_limits_from_ctx($limSmall)) === [] && import_cost_storage_problems(['cost' => 2000000, 'cost_applied' => true], import_cost_limits_from_ctx($limSmall)) !== [] && $fmQ($rS3, 'cost-too-large') === null,
+    'gate F6: the commit-time helper ignores a cost that will not be written');
+// F3: an existing item with a blank cost is judged like a new one (against similar items in stock)
+$peerEx2 = [];
+foreach ([1000, 1100, 900, 1050, 950] as $i => $c) { $peerEx2[] = $pcRow(30 + $i, 'Peer ' . $i, $c, ['category' => $cat15]); }
+$rZ = $pcRun([['Blankie', '', '5', 'bottle', '100000', '', '']], array_merge($peerEx2, [$pcRow(41, 'Blankie', 0, ['category' => $cat15])]), [], ['_updates' => [rh_ssi_key('Blankie') => ['cost']]], [], false);
+$qZ = $pcQ($rZ);
+$t($qZ !== null && $qZ['evidence']['basis'] === 'category-peers' && array_column($qZ['options'], 'key') === ['file', 'skip'] && strpos($qZ['text'], 'has no cost in stock yet') !== false, 'gate F3: an existing item with a blank cost uses similar items as evidence (file / skip only)', (string)($qZ['text'] ?? ''));
+// F5: a pack size is named only when the item has its own
+$t(strpos($q9['text'], '24 units in its pack') !== false, 'gate F5: the item\'s own pack size is named');
+$q10 = $pcQ($r10);
+$t($q10 && $q10['evidence']['pack_is_own'] === false && strpos($q10['text'], 'units in its pack') === false && strpos($q10['text'], 'may be a case price or a typing slip') !== false, 'gate F5: another item\'s pack count is not named; neutral wording', (string)($q10['text'] ?? ''));
+// F4: the file-peer ("case price?") check has no fixed ratio either: it follows the peers' own spread
+$wideRows = [['A1', '', '1', 'bottle', '100', '', ''], ['A2', '', '1', 'bottle', '200', '', ''], ['A3', '', '1', 'bottle', '400', '', ''], ['A4', '', '1', 'bottle', '800', '', ''], ['A5', '', '1', 'bottle', '1600', '', ''], ['A6', '', '1', 'bottle', '3200', '', '']];
+$fw = $fmRun($wideRows);
+$t($fmQ($fw, 'case-price') === null, 'gate F4: in a sheet whose prices vary widely (8x the median) a high price is not called a case price');
+$tightRows = [];
+foreach (['B1', 'B2', 'B3', 'B4', 'B5'] as $i => $nm) { $tightRows[] = [$nm, '', '1', 'bottle', (string)(5000 + $i * 20), '', '']; }
+$tightRows[] = ['Bcase', '', '1', 'bottle', '60,000', '', ''];
+$ft = $fmRun($tightRows);
+$cq = $fmQ($ft, 'case-price');
+$t($cq !== null && array_column($cq['options'], 'key') === ['per-unit', 'per-case'] && strpos($cq['text'], 'Is that the price of one unit, or of a whole case/pack?') !== false, 'gate F4: among tightly priced peers the 60,000 is still asked, with the same wording and options');
+$t(strpos((string)file_get_contents($root . '/includes/import/crosscheck.php'), 'case_price_ratio') === false, 'gate F4: no fixed case-price ratio is left in the cross-checker');
 
 // cleanup
 foreach ($tmpFiles as $f) { @unlink($f); }

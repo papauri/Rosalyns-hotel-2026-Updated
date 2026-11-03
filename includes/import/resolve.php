@@ -15,12 +15,16 @@
  * Status is always computed here from the stored answers; a status sent by a browser is never read.
  *
  * $answers = ['<qkey>' => ['key'=>'use:Name', 'pack_size'=>12, ...], '_overrides'=>[...], '_updates'=>['<existing key>'=>['cost','par']]]
- * $ctx     = ['existing' => [stock_ingredients rows + 'recipes'], 'unit_options' => [unit names], 'corrections' => [norm => name]]
+ * $ctx     = ['existing' => [stock_ingredients rows + 'recipes'], 'unit_options' => [unit names], 'corrections' => [norm => name],
+ *             optional: 'price_evidence' => ['history' => [ingredient id => [unit costs, oldest first]], 'hotel_move' => ['v','n'], 'category_move' => [catKey => ['v','n']]],
+ *                       'cost_limits' => ['cost' => max storable unit cost, 'line_value' => max opening-count line value] (see price-check.php)]
+ *             Without evidence the price check asks nothing (except structural signals); without limits the stock-count cap is the fallback.
  */
 
 require_once __DIR__ . '/analyze.php';
 require_once dirname(__DIR__, 2) . '/admin/includes/stock-sheet-import-lib.php';   // rh_ssi_key / rh_ssi_norm_unit / rh_ssi_units_compatible
 require_once dirname(__DIR__) . '/form-validation.php';                           // rh_clean_text (same cleaning as the manual Add form)
+require_once __DIR__ . '/price-check.php';                                         // plausibility of a price (evidence from this hotel's own data) + storage limits
 
 if (!function_exists('import_resolve')) {
 
@@ -235,6 +239,23 @@ if (!function_exists('import_resolve')) {
             return $xq;
         };
 
+        // evidence for the price check (all optional; none = no question from it): the hotel's own prices, see price-check.php
+        $pcp = import_pc_params($ctx);
+        $pcEv = (array)($ctx['price_evidence'] ?? []);
+        $costLimits = import_cost_limits_from_ctx($ctx);
+        $pcPackSizes = [];
+        $pcPeers = [];          // category key => [['unit' => normalised unit, 'cost' => float], ...] of items in stock
+        $pcCatById = [];
+        foreach ((array)($ctx['existing'] ?? []) as $e) {
+            $pcCatById[(int)$e['id']] = (string)$e['category'];
+            if (isset($e['pack_size']) && is_numeric($e['pack_size']) && (float)$e['pack_size'] >= 2) {
+                $pcPackSizes[(string)(float)$e['pack_size']] = (float)$e['pack_size'];
+            }
+            if ((int)($e['is_archived'] ?? 0) === 0 && (float)$e['cost_per_unit'] > 0) {
+                $pcPeers[import_pc_cat_key($e['category'])][] = ['unit' => mb_strtolower(rh_ssi_norm_unit((string)$e['unit'])), 'cost' => (float)$e['cost_per_unit'], 'id' => (int)$e['id']];
+            }
+        }
+
         $packLabels = [];       // question id => [option key => "60,000 per case of 12 = 5,000 each"]
         $rowsOut = [];          // uid => record
         $cands = [];            // surviving rows with their final values
@@ -262,6 +283,7 @@ if (!function_exists('import_resolve')) {
                 $fin = [
                     'name' => $f['item_name']['value'], 'name_source' => $f['item_name']['source'], 'match_name' => null, 'price' => isset($f['unit_price']) ? $f['unit_price']['value'] : null,
                     'price_source' => isset($f['unit_price']) ? $f['unit_price']['source'] : null, 'price_how' => isset($f['unit_price']) ? $f['unit_price']['how'] : null,
+                    'price_raw' => isset($f['unit_price']['raw']) ? $f['unit_price']['raw'] : null,
                     'unit_raw' => isset($f['unit']) ? $f['unit']['value'] : null, 'unit_source' => isset($f['unit']) ? $f['unit']['source'] : null,
                     'pack' => null, 'pack_source' => null, 'expiry' => isset($f['expiry']) ? $f['expiry']['value'] : null, 'expiry_source' => isset($f['expiry']) ? $f['expiry']['source'] : null,
                     'batch' => isset($f['batch']) ? $f['batch']['value'] : null, 'max' => isset($f['max_level']) ? $f['max_level']['value'] : null,
@@ -309,6 +331,7 @@ if (!function_exists('import_resolve')) {
                                             $fin['price'] = $v['value'];
                                             $fin['price_source'] = $v['source'];
                                             $fin['price_how'] = 'chosen-from-conflict';
+                                            $fin['price_raw'] = null;
                                         } else {
                                             $fin['unit_raw'] = (string)$v['value'];
                                             $fin['unit_source'] = $v['source'];
@@ -605,6 +628,8 @@ if (!function_exists('import_resolve')) {
             $unitHow = $unit !== null ? 'from the sheet' : null;
             $action = $ex ? 'update' : 'create';
             $diff = [];
+            $priceCheckOk = true;           // false when the match itself is in doubt (the price of a different thing means nothing)
+            $unitHint = '';
             $itemOpen = $open;
             $uidList = array_map(function ($x) {
                 return $x['rec']['uid'];
@@ -614,12 +639,14 @@ if (!function_exists('import_resolve')) {
             }, $ms);
             if ($ex) {
                 if ($m['ambiguous']) {
+                    $priceCheckOk = false;
                     $xq = $ans(import_xq('ambiguous-match', $it['nk'], '"' . $first['name'] . '" could be several existing ingredients that differ only in punctuation or accents. Rename it in the sheet to the exact stock name, or skip it.',
                         [['key' => 'skip', 'label' => 'Skip this item']], ['bad' => true, 'sheet' => $ms[0]['sheet'], 'cells' => $rowRefs, 'row_uids' => $uidList]));
                     $extra[$xq['qkey']] = $xq;
                     $itemOpen[] = $xq['id'];
                 }
                 if ((int)$ex['is_archived'] === 1) {
+                    $priceCheckOk = false;
                     $xq = $ans(import_xq('archived-match', $it['nk'], '"' . $first['name'] . '" matches an ARCHIVED ingredient ("' . $ex['name'] . '"). It is left alone: restore or rename that ingredient, then upload again, or skip this row.',
                         [['key' => 'skip', 'label' => 'Skip this item']], ['bad' => true, 'sheet' => $ms[0]['sheet'], 'cells' => $rowRefs, 'row_uids' => $uidList]));
                     $extra[$xq['qkey']] = $xq;
@@ -627,8 +654,11 @@ if (!function_exists('import_resolve')) {
                         $itemOpen[] = $xq['id'];
                     }
                 } elseif ($unit !== null && !rh_ssi_units_compatible((string)$rawUnit, (string)$ex['unit'])) {
-                    $xq = $ans(import_xq('unit-clash', $it['nk'], '"' . $first['name'] . '" is in stock in "' . $ex['unit'] . '" but the sheet says "' . $rawUnit . '". Nothing is changed for it. Fix the sheet, or skip this row.',
-                        [['key' => 'skip', 'label' => 'Skip this item']], ['bad' => true, 'sheet' => $ms[0]['sheet'], 'cells' => $rowRefs, 'row_uids' => $uidList]));
+                    $priceCheckOk = false;
+                    $unitHint = ($cost !== null) ? import_pc_unit_hint((string)$unit, (string)$ex['unit'], $cost, $ex['cost_per_unit']) : '';
+                    $xq = $ans(import_xq('unit-clash', $it['nk'], '"' . $first['name'] . '" is in stock in "' . $ex['unit'] . '" but the sheet says "' . $rawUnit . '". Nothing is changed for it. Fix the sheet, or skip this row.' . $unitHint,
+                        [['key' => 'skip', 'label' => 'Skip this item']], ['bad' => true, 'sheet' => $ms[0]['sheet'], 'cells' => $rowRefs, 'row_uids' => $uidList,
+                            'evidence' => $unitHint !== '' ? ['reason' => 'unit-differs', 'old' => (float)$ex['cost_per_unit'], 'new' => (float)$cost, 'unit_sheet' => (string)$unit, 'unit_existing' => (string)$ex['unit']] : null]));
                     $extra[$xq['qkey']] = $xq;
                     if ($xq['answer'] === null) {
                         $itemOpen[] = $xq['id'];
@@ -654,6 +684,72 @@ if (!function_exists('import_resolve')) {
                 }
             } elseif ($unit === null) {
                 $noUnitByItem[] = count($outItems);
+            }
+            // ---- is this price plausible for THIS hotel? Asks, never rejects (price-check.php) -------------------------------
+            // Only once the row itself is settled (a pending per-case answer or price disagreement would make the number provisional).
+            $rowRank = max(array_map(function ($x) {
+                return import_status_rank($x['rec']['status']);
+            }, $ms));
+            $priceRaw = null;
+            foreach ($ms as $mm) {
+                if ($mm['fin']['price_source'] === $first['price_source'] && $mm['fin']['price_raw'] !== null) {
+                    $priceRaw = (string)$mm['fin']['price_raw'];
+                }
+            }
+            // The file's cost is only judged (and size-checked) when it will actually be applied: a new item, or an existing item whose
+            // cost the person ticked. An unticked cost changes nothing; if it is ticked later, the question appears then (recomputed).
+            $ukey = rh_ssi_key((string)($ex['name'] ?? ''));
+            $costApplied = !$ex || ($cost !== null && isset($diff['cost']) && in_array('cost', array_map('strval', (array)($updates[$ukey] ?? [])), true));
+            $storeProblems = ($cost !== null && $costApplied) ? import_cost_storage_problems(['cost' => $cost, 'pack' => $pack], $costLimits) : [];
+            if ($cost !== null && $costApplied && $priceCheckOk && !$storeProblems && $rowRank === 0 && !$open) {
+                $exCost = $ex ? (float)$ex['cost_per_unit'] : 0.0;
+                $exId = $ex ? (int)$ex['id'] : 0;
+                $catKey = import_pc_cat_key($ex ? $ex['category'] : $first['category']);
+                $peers = [];
+                if (!$ex || $exCost <= 0) {       // no price of its own to compare with: similar items in stock are the evidence
+                    foreach ($pcPeers[$catKey] ?? [] as $pe) {
+                        if ($unit === null || $pe['unit'] === mb_strtolower((string)$unit)) {
+                            $peers[] = $pe['cost'];
+                        }
+                    }
+                }
+                $firstQty = null;
+                foreach ($ms as $mm) {
+                    if ($mm['fin']['price_source'] === $first['price_source'] && $mm['fin']['qty'] !== null) {
+                        $firstQty = (float)$mm['fin']['qty'];
+                    }
+                }
+                $ev = import_pc_assess([
+                    'new' => $cost, 'old' => $exCost > 0 ? $exCost : null, 'history' => $exId ? ($pcEv['history'][$exId] ?? []) : [], 'peers' => $peers,
+                    'cat_move' => $pcEv['category_move'][$catKey] ?? null, 'hotel_move' => $pcEv['hotel_move'] ?? null,
+                    'own_pack' => $ex && isset($ex['pack_size']) ? $ex['pack_size'] : null, 'pack_sizes' => array_values($pcPackSizes),
+                    'raw' => $priceRaw, 'qty' => $firstQty,
+                ], $pcp);
+                if ($ev !== null) {
+                    $srcCell = (string)($first['price_source'] ?? '');
+                    $ev['source'] = $srcCell;
+                    $ev['pack'] = $pack;
+                    $ev['no_cost_yet'] = $ex && $exCost <= 0;
+                    $newLabel = $pack ? import_pack_label($first['price'], $pack) : import_fmt_money($cost);
+                    $text = import_pc_question_text($ev, $ex ? (string)$ex['name'] : $first['name'], $srcCell, (string)$first['category']);
+                    if ($pack) {
+                        $text .= ' (The file price is ' . $newLabel . '.)';
+                    }
+                    $opts = [['key' => 'file', 'label' => 'The file\'s price (' . import_fmt_money($cost) . ') is right']];
+                    if ($ex && $exCost > 0) {
+                        $opts[] = ['key' => 'current', 'label' => 'Keep the current price (' . import_fmt_money($exCost) . ') - the quantity is still imported'];
+                    }
+                    $opts[] = ['key' => 'skip', 'label' => 'Skip this row'];
+                    $xq = $ans(import_xq('price-check', $it['nk'] . '|' . $exId . '|' . number_format($cost, 4, '.', '') . '|' . number_format($exCost, 4, '.', ''), $text, $opts,
+                        ['sheet' => $ms[0]['sheet'], 'cells' => $rowRefs, 'row_uids' => $uidList, 'evidence' => $ev]));
+                    $extra[$xq['qkey']] = $xq;
+                    $itemOpen[] = $xq['id'];
+                    if ($ex && $exCost > 0 && $xq['answer'] === 'current') {
+                        // the cost field is left alone for this item; the opening balance (if any) still imports at the current cost
+                        unset($diff['cost']);
+                        $warn[] = 'You chose to keep the current cost ' . import_fmt_money($exCost) . '; the file\'s ' . import_fmt_money($cost) . ' is not used.';
+                    }
+                }
             }
             $ticked = array_values(array_intersect(import_update_fields(), array_map('strval', (array)($updates[rh_ssi_key((string)($ex['name'] ?? ''))] ?? []))));
             $ticked = $ex ? array_values(array_filter($ticked, function ($f) use ($diff) {
@@ -686,7 +782,21 @@ if (!function_exists('import_resolve')) {
                     $warn[] = 'Ticked to change the cost from ' . import_fmt_money($ex['cost_per_unit']) . ' to ' . import_fmt_money($cost) . ' and ' . (int)$ex['recipes'] . ' recipe(s) use it. Check the unit is the same.';
                 }
             }
+            // the PHYSICAL limit: a cost (or an opening-count value) that cannot be stored in its column. Re-checked at commit.
+            $costFinal = !$ex || in_array('cost', $ticked, true);          // is the file's cost really going to be written?
+            $storeProblems = import_cost_storage_problems(['cost' => $cost, 'cost_applied' => $costFinal, 'pack' => $pack, 'in_count' => $inCount, 'balance' => $balance, 'line_cost' => $effCost], $costLimits);
+            if ($storeProblems) {
+                $xq = $ans(import_xq('cost-too-large', (string)$it['nk'],
+                    'Row ' . $ms[0]['rec']['row'] . ' "' . ($ex ? (string)$ex['name'] : $first['name']) . '" ' . implode(' and ', $storeProblems)
+                    . '. Fix the cell in your file and upload again, or skip this row. (This is a storage limit, not a price rule.)',
+                    [['key' => 'skip', 'label' => 'Skip this row']],
+                    ['bad' => true, 'sheet' => $ms[0]['sheet'], 'row' => null, 'cells' => $rowRefs, 'row_uids' => $uidList,
+                        'evidence' => ['reason' => 'too-large-to-store', 'new' => $cost, 'max_cost' => $costLimits['cost'], 'max_line_value' => $costLimits['line_value'], 'from_database' => $costLimits['from_database']]]));
+                $extra[$xq['qkey']] = $xq;
+                $itemOpen[] = $xq['id'];
+            }
             $outItems[] = [
+                'line_cost' => $effCost, 'cost_applied' => $costFinal,
                 'key' => $it['nk'], 'name' => $ex ? (string)$ex['name'] : $first['name'], 'typed_name' => $first['name'], 'name_source' => $first['name_source'],
                 'category' => $first['category'], 'category_how' => $first['category_how'], 'category_source' => $first['category_source'],
                 'unit' => $unit, 'unit_raw' => $rawUnit, 'unit_how' => $unitHow, 'unit_source' => $first['unit_source'],

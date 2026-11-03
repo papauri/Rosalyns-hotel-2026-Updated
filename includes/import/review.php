@@ -72,7 +72,84 @@ if (!function_exists('import_job_analyse')) {
         }
         $u = array_keys($units);
         sort($u, SORT_NATURAL | SORT_FLAG_CASE);
-        return ['existing' => $existing, 'unit_options' => $u, 'corrections' => import_load_name_corrections($pdo)];
+        return ['existing' => $existing, 'unit_options' => $u, 'corrections' => import_load_name_corrections($pdo),
+            'price_evidence' => import_job_price_evidence($pdo, $existing), 'cost_limits' => import_cost_limits($pdo)];
+    }
+
+    /**
+     * The largest unit cost / opening-count line value the database columns can hold, read from the real column definitions
+     * (a storage fact, not a policy). Cached for the request. Unreadable -> {} (price-check.php then falls back to the stock-count rule).
+     */
+    function import_cost_limits(PDO $pdo): array
+    {
+        static $cache = null;
+        if ($cache !== null) {
+            return $cache;
+        }
+        $out = [];
+        try {
+            $st = $pdo->query("SELECT TABLE_NAME, COLUMN_NAME, NUMERIC_PRECISION, NUMERIC_SCALE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE()
+                               AND ((TABLE_NAME = 'stock_ingredients' AND COLUMN_NAME = 'cost_per_unit') OR (TABLE_NAME = 'stock_count_lines' AND COLUMN_NAME IN ('cost_per_unit', 'variance_cost')))");
+            $costMax = [];
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                if ((int)$r['NUMERIC_PRECISION'] <= 0) {
+                    continue;
+                }
+                $max = import_decimal_max((int)$r['NUMERIC_PRECISION'], (int)$r['NUMERIC_SCALE']);
+                if ($r['COLUMN_NAME'] === 'cost_per_unit') {
+                    $costMax[] = $max;
+                } else {
+                    $out['line_value'] = $max;
+                }
+            }
+            if ($costMax) {
+                $out['cost'] = min($costMax);
+                $out['from_database'] = true;
+            }
+        } catch (Throwable $e) {
+            $out = [];
+        }
+        return $cache = $out;
+    }
+
+    /**
+     * What this hotel's own data says about prices (price-check.php judges with it): each ingredient's unit costs oldest first (batch unit
+     * costs = one row per delivery, plus the costs typed on APPROVED opening counts), and how big a price move usually is for the
+     * category / the whole hotel. Bounded queries, no per-row lookups. Not cached (the numbers must follow the data).
+     */
+    function import_job_price_evidence(PDO $pdo, array $existing): array
+    {
+        $pts = [];          // id => [[date, seq, cost], ...]
+        try {
+            foreach ($pdo->query('SELECT ingredient_id, cost_per_unit, received_date, id FROM stock_batches WHERE cost_per_unit > 0 ORDER BY id DESC LIMIT 60000')->fetchAll(PDO::FETCH_NUM) as $r) {
+                $pts[(int)$r[0]][] = [(string)$r[2], (int)$r[3], (float)$r[1]];
+            }
+        } catch (Throwable $e) {
+            // no batches table: judged by what exists
+        }
+        try {
+            foreach ($pdo->query("SELECT l.ingredient_id, l.cost_per_unit, c.count_date, l.id FROM stock_count_lines l INNER JOIN stock_counts c ON c.id = l.count_id
+                                  WHERE c.is_opening = 1 AND c.status = 'approved' AND l.cost_per_unit > 0 AND l.actual_quantity > 0 ORDER BY l.id DESC LIMIT 60000")->fetchAll(PDO::FETCH_NUM) as $r) {
+                $pts[(int)$r[0]][] = [(string)$r[2], 1000000000 + (int)$r[3], (float)$r[1]];
+            }
+        } catch (Throwable $e) {
+            // no opening counts yet
+        }
+        $hist = [];
+        foreach ($pts as $id => $list) {
+            usort($list, function ($a, $b) {
+                return [$a[0], $a[1]] <=> [$b[0], $b[1]];
+            });
+            $hist[$id] = array_map(function ($x) {
+                return $x[2];
+            }, $list);
+        }
+        $cat = [];
+        foreach ($existing as $e) {
+            $cat[(int)$e['id']] = (string)$e['category'];
+        }
+        $mv = import_pc_typical_moves($hist, $cat, import_pc_params());
+        return ['history' => $hist, 'hotel_move' => $mv['hotel'], 'category_move' => $mv['category']];
     }
 
     function import_job_answers(array $job): array
@@ -435,6 +512,7 @@ if (!function_exists('import_job_analyse')) {
                 'bad' => !empty($q['bad']), 'sheet' => $q['sheet'], 'row' => $q['row'], 'cells' => $q['cells'], 'options' => $q['options'],
                 'default' => $q['default'], 'answer' => $q['answer'], 'auto_filled' => !empty($q['auto']), 'row_uids' => $q['row_uids'] ?? [],
                 'suggestion' => $q['suggestion'] ?? null, 'synthetic' => !empty($q['synthetic']),
+                'evidence' => $q['evidence'] ?? null,     // the numbers a price question was judged on (nothing invented), for the screen / read-only helper
             ];
         }
         return [
@@ -531,6 +609,9 @@ if (!function_exists('import_job_analyse')) {
             }
             if (!$it['match'] && ($it['unit'] === null || trim((string)$it['unit']) === '')) {
                 $viol[] = $label . ': no usable unit';
+            }
+            foreach (import_cost_storage_problems($it, import_cost_limits_from_ctx($ctx)) as $sp) {     // the physical limit, checked again here (decimal overflow rolls the whole commit back)
+                $viol[] = $label . ': ' . $sp;
             }
             foreach (['cost', 'balance', 'max'] as $n) {
                 if ($it[$n] !== null && (!is_numeric($it[$n]) || $it[$n] < 0)) {

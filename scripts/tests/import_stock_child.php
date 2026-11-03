@@ -286,6 +286,7 @@ try {
     $bad = import_job_set_update_fields($pdo, $j2, rh_ssi_key($n('Tickme')), ['unit'], $admin);
     $ok = import_job_set_update_fields($pdo, $j2, rh_ssi_key($n('Tickme')), ['cost'], $admin);
     $ck('ticks: only the allowed fields can be ticked', $ra['ok'] && !$bad['ok'] && $ok['ok']);
+    $answerAll($j2, $admin);    // the price check judges against this hotel's real data, so answer whatever it asks ("the file's price is right" changes nothing by itself)
     $cacheKey = defined('RH_STOCK_DASH_CACHE_KEY') ? RH_STOCK_DASH_CACHE_KEY : 'stock_dashboard_metrics_v5';
     $cacheWorks = function_exists('setCache') && function_exists('getCache') && setCache($cacheKey, ['zzt' => 1], 600) && getCache($cacheKey, null) !== null;
     $c3 = import_commit_stock($pdo, $j2, $admin);
@@ -322,6 +323,7 @@ try {
     $ck('cost warning: nothing ticked => no warning, but the on-hand figures are there', array_key_exists('cost_stock_warning', $find($w0, $n('Stocky')) ?? []) && $find($w0, $n('Stocky'))['cost_stock_warning'] === null && abs(($find($w0, $n('Stocky'))['on_hand']['qty'] ?? 0) - 12) < 0.0001);
     import_job_set_update_fields($pdo, $j4, rh_ssi_key($n('Stocky')), ['cost'], $admin);
     import_job_set_update_fields($pdo, $j4, rh_ssi_key($n('Emptyy')), ['cost'], $admin);
+    $answerAll($j4, $admin);
     $w1 = import_job_review_summary($pdo, $j4);
     $ws = $find($w1, $n('Stocky'))['cost_stock_warning'] ?? null;
     $ck('cost warning: ticked cost on an item with stock names the item, quantity, unit, old and new cost', is_string($ws) && strpos($ws, $n('Stocky') . ' already has 12 bottle in stock') !== false && strpos($ws, 'from 500 to 800.5') !== false && strpos($ws, 'before the opening count is approved') !== false, (string)$ws);
@@ -333,6 +335,90 @@ try {
     $sk->execute([$n('Stocky')]);
     $s0 = $sk->fetch(PDO::FETCH_ASSOC);
     $ck('cost warning: commit behaviour is unchanged (cost changed, stock untouched, cost change logged)', $c4['ok'] && abs($s0['cost_per_unit'] - 800.5) < 0.001 && abs($s0['current_quantity'] - 12) < 0.0001 && count($costLogs->fetchAll(PDO::FETCH_COLUMN)) === 1, json_encode($c4['error'] ?? $c4['result'] ?? ''));
+
+    // ---- price plausibility from this hotel's own data + the physical storage limit ------------------------
+    $mkIng = function (string $name, string $cat, float $cost, string $unit = 'bottle', array $hist = []) use ($pdo) {
+        $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit, par_level, reorder_point) VALUES (?, ?, ?, 0, ?, 5, 2)")->execute([$name, $cat, $unit, $cost]);
+        $id = (int)$pdo->lastInsertId();
+        $insB = $pdo->prepare("INSERT INTO stock_batches (ingredient_id, batch_number, quantity_received, quantity_remaining, cost_per_unit, received_date, status) VALUES (?, ?, 1, 0, ?, ?, 'depleted')");
+        foreach (array_values($hist) as $i => $c) { $insB->execute([$id, 'ZZT' . $run . '-' . $id . '-' . $i, $c, sprintf('2026-%02d-01', $i + 1)]); }
+        return $id;
+    };
+    $pcQ = function (array $sum, string $type = 'price-check') { foreach ($sum['questions'] as $q) { if ($q['type'] === $type) { return $q; } } return null; };
+    $catHi = $n('CatHi'); $catLo = $n('CatLo');
+    $idTight = $mkIng($n('Tight'), $n('CatOne'), 1000, 'bottle', [1000, 1020, 980, 1010]);
+    $idWide = $mkIng($n('Wide'), $n('CatTwo'), 1000, 'bottle', [500, 1500, 800, 2000]);
+    $idPlain = $mkIng($n('Plain'), $n('CatThree'), 1000);
+    foreach ([[1000, 1800, 3200], [500, 900, 1600], [200, 360, 650]] as $i => $h) { $mkIng($n('Hi' . $i), $catHi, $h[2], 'bottle', $h); }
+    foreach ([[1000, 1010, 1020], [500, 505, 510], [200, 201, 202]] as $i => $h) { $mkIng($n('Lo' . $i), $catLo, $h[2], 'bottle', $h); }
+    $idHiT = $mkIng($n('HiTarget'), $catHi, 1000);
+    $idLoT = $mkIng($n('LoTarget'), $catLo, 1000);
+    $exAll = $pdo->query("SELECT id, category FROM stock_ingredients WHERE name LIKE 'ZZT $run %'")->fetchAll(PDO::FETCH_ASSOC);
+    $evd = import_job_price_evidence($pdo, $exAll);
+    $ck('price evidence: an ingredient\'s own history is read from its batch unit costs, oldest first', ($evd['history'][$idTight] ?? null) === [1000.0, 1020.0, 980.0, 1010.0], json_encode($evd['history'][$idTight] ?? null));
+    $ck('price evidence: how far prices usually move is worked out per category from this hotel\'s history', ($evd['category_move'][mb_strtolower($catHi)]['v'] ?? 0) > ($evd['category_move'][mb_strtolower($catLo)]['v'] ?? 9) && ($evd['category_move'][mb_strtolower($catHi)]['n'] ?? 0) === 6);
+    $uP = $upload($put($csv([[$n('Tight'), '', '5', 'bottle', '1,500', '', ''], [$n('Wide'), '', '5', 'bottle', '1,500', '', ''], [$n('Plain'), '', '5', 'bottle', '1,600', '', ''],
+        [$n('HiTarget'), '', '5', 'bottle', '1,600', '', ''], [$n('LoTarget'), '', '5', 'bottle', '1,600', '', '']]), 'pc.csv'), 'zzt-pc-' . $run . '.csv', $admin);
+    $jP = (int)$uP['job_id'];
+    import_job_analyse($pdo, $jP);
+    $s0P = import_job_review_summary($pdo, $jP);
+    $ck('price check (database): with no cost ticked, nothing will be written, so no price question is asked', $pcQ($s0P) === null);
+    foreach (['Tight', 'Wide', 'Plain', 'HiTarget', 'LoTarget'] as $nmT) { import_job_set_update_fields($pdo, $jP, rh_ssi_key($n($nmT)), ['cost'], $admin); }
+    $sP = import_job_review_summary($pdo, $jP);
+    $byName = [];
+    foreach ($sP['questions'] as $q) { if ($q['type'] === 'price-check') { $byName[$q['evidence']['basis'] . '|' . round($q['evidence']['new'])][] = $q; } }
+    $flaggedNames = [];
+    foreach ($sP['questions'] as $q) { if ($q['type'] === 'price-check') { foreach ($sP['items'] as $it) { if (array_intersect($it['uids'], $q['row_uids'])) { $flaggedNames[$it['typed_name']] = $q['evidence']['basis']; } } } }
+    $ck('price check (database): 4 tight history points flag a 1.5x jump on their own spread', ($flaggedNames[$n('Tight')] ?? '') === 'own-history', json_encode($flaggedNames));
+    $ck('price check (database): a wide own history does not flag the same jump', !isset($flaggedNames[$n('Wide')]), json_encode($flaggedNames));
+    $ck('price check (database): a category whose prices usually move a lot tolerates 1.6x; a stable category is asked', !isset($flaggedNames[$n('HiTarget')]) && ($flaggedNames[$n('LoTarget')] ?? '') === 'category-moves', json_encode($flaggedNames));
+    $ck('price check (database): a question carries its evidence numbers and blocks Confirm', !$sP['can_confirm'] && ($pcQ($sP)['evidence']['tolerance_factor'] ?? 0) > 1 && ($pcQ($sP)['blocking'] ?? false) === true);
+    $ck('price check (database): the evidence is part of the review summary', array_key_exists('evidence', $sP['questions'][0]));
+    // keep the current price: cost untouched, the opening count line still imports
+    $idZ = $mkIng($n('Zero'), $n('CatZ'), 2875);
+    $uZ = $upload($put($csv([[$n('Zero'), '', '5', 'bottle', '28,750', '', '']]), 'zero.csv'), 'zzt-zero-' . $run . '.csv', $admin);
+    $jZ = (int)$uZ['job_id'];
+    import_job_analyse($pdo, $jZ);
+    $sZ0 = import_job_review_summary($pdo, $jZ);
+    $tk = import_job_set_update_fields($pdo, $jZ, rh_ssi_key($n('Zero')), ['cost', 'quantity'], $admin);
+    $sZ = import_job_review_summary($pdo, $jZ);
+    $qZ = $pcQ($sZ);
+    $ck('price check (database): an extra zero is asked in plain words, with the real stock cost', $qZ !== null && $qZ['evidence']['reason'] === 'extra-zero' && strpos($qZ['text'], 'costs 2,875 now; the file says 28,750') !== false && !$sZ['can_confirm'], (string)($qZ['text'] ?? ''));
+    $ck('price check (database): the question appears only once the cost is ticked', $pcQ($sZ0) === null && $qZ !== null);
+    $ra = import_job_answer($pdo, $jZ, $qZ['id'], 'current', $admin);
+    $sZ2 = import_job_review_summary($pdo, $jZ);
+    $itZ = null; foreach ($sZ2['items'] as $x) { if ($x['typed_name'] === $n('Zero')) { $itZ = $x; } }
+    $ck('price check (database): "keep the current price" unticks the cost and keeps the quantity line', $tk['ok'] && $ra['ok'] && $sZ2['can_confirm'] && $itZ && $itZ['ticked'] === ['quantity'] && $itZ['in_count'] === true, json_encode($itZ['ticked'] ?? null));
+    $cZ = import_commit_stock($pdo, $jZ, $admin);
+    $zc = $pdo->prepare('SELECT cost_per_unit FROM stock_ingredients WHERE id = ?');
+    $zc->execute([$idZ]);
+    $lineZ = $pdo->prepare('SELECT cost_per_unit, actual_quantity FROM stock_count_lines WHERE count_id = ? AND ingredient_id = ?');
+    $lineZ->execute([(int)($cZ['result']['opening_count_id'] ?? 0), $idZ]);
+    $lz = $lineZ->fetch(PDO::FETCH_ASSOC) ?: [];
+    $ck('price check (database): commit leaves the cost at 2,875 and files the opening count line at that cost', $cZ['ok'] && abs((float)$zc->fetchColumn() - 2875) < 0.0001 && abs(($lz['cost_per_unit'] ?? 0) - 2875) < 0.0001 && abs(($lz['actual_quantity'] ?? 0) - 5) < 0.0001, json_encode([$cZ['error'] ?? '', $lz]));
+    // the physical limit, read from the real column definitions
+    $colMax = [];
+    foreach ($pdo->query("SELECT TABLE_NAME, COLUMN_NAME, NUMERIC_PRECISION, NUMERIC_SCALE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND ((TABLE_NAME = 'stock_ingredients' AND COLUMN_NAME = 'cost_per_unit') OR (TABLE_NAME = 'stock_count_lines' AND COLUMN_NAME = 'cost_per_unit'))")->fetchAll(PDO::FETCH_ASSOC) as $c) {
+        $colMax[] = pow(10, (int)$c['NUMERIC_PRECISION'] - (int)$c['NUMERIC_SCALE']) - pow(10, -(int)$c['NUMERIC_SCALE']);
+    }
+    $lm = import_cost_limits($pdo);
+    $ck('storage limit: the maximum cost is read from the real column precision (not a number in the code)', $colMax && !empty($lm['from_database']) && abs($lm['cost'] - min($colMax)) < 0.0001 && !empty($lm['line_value']), json_encode($lm));
+    $uH = $upload($put($csv([[$n('Hugeone'), '', '5', 'bottle', '123456789012', '', ''], [$n('Fineone'), '', '5', 'bottle', '500', '', '']]), 'huge.csv'), 'zzt-huge-' . $run . '.csv', $admin);
+    $jH = (int)$uH['job_id'];
+    import_job_analyse($pdo, $jH);
+    $sH = import_job_review_summary($pdo, $jH);
+    $qH = $pcQ($sH, 'cost-too-large');
+    $ck('storage limit (database): a cost that cannot be stored is a blocking question with only "skip"', $qH !== null && $qH['bad'] && array_column($qH['options'], 'key') === ['skip'] && !$sH['can_confirm'] && strpos($qH['text'], 'too large for a stock cost') !== false, (string)($qH['text'] ?? ''));
+    $cH0 = import_commit_stock($pdo, $jH, $admin);
+    $ck('storage limit (database): commit is refused while it is open, nothing is written', !$cH0['ok'] && (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE name LIKE 'ZZT $run Hugeone%' OR name LIKE 'ZZT $run Fineone%'")->fetchColumn() === 0);
+    import_job_answer($pdo, $jH, $qH['id'], 'skip', $admin);
+    $answerAll($jH, $admin);
+    $cH = import_commit_stock($pdo, $jH, $admin);
+    $ck('storage limit (database): skipped, the rest imports and the oversized row never reaches the table', $cH['ok'] && (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE name = " . $pdo->quote($n('Fineone')))->fetchColumn() === 1 && (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE name = " . $pdo->quote($n('Hugeone')))->fetchColumn() === 0, (string)($cH['error'] ?? ''));
+    $ck('storage limit: commit re-checks it on the server (import_cost_storage_problems runs in import_job_revalidate; the helper flags the oversized item)',
+        strpos((string)file_get_contents($root . '/includes/import/review.php'), 'import_cost_storage_problems($it, import_cost_limits_from_ctx($ctx))') !== false
+        && import_cost_storage_problems(['cost' => 123456789012.0, 'in_count' => false], import_cost_limits_from_ctx(['cost_limits' => $lm])) !== []
+        && import_cost_storage_problems(['cost' => 500.0, 'in_count' => false], import_cost_limits_from_ctx(['cost_limits' => $lm])) === []);
 
     // ---- cleanup of staged files, purge ---------------------------------------------------------------
     $pg = import_purge_staged($pdo, true);

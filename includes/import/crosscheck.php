@@ -7,11 +7,12 @@
  *   import_crosscheck_files(&$analyses, $opts)   several files of one upload batch: same item in two
  *                                                 files disagreeing on price/unit, typos across files
  * Conflicts list BOTH values with their sheet!cell. There is never a winner: a person picks.
- * opts: case_price_ratio (default 5.0), case_price_min_peers (4), typo_min_score (0.85),
+ * opts: case_price_min_peers (4: the smallest number of peers that counts as evidence), typo_min_score (0.85),
  *       known_names (existing names to suggest from; suggestions only).
  */
 
 require_once __DIR__ . '/validator.php';
+require_once __DIR__ . '/price-check.php';      // the same evidence rule as the price check (no fixed ratio)
 
 if (!function_exists('import_crosscheck')) {
 
@@ -220,10 +221,14 @@ if (!function_exists('import_crosscheck')) {
         }
     }
 
-    /** "Price looks like a case price" questions: a price far above the others in its category/sheet. */
+    /**
+     * "Price looks like a case price" questions: a price far ABOVE the others in its category (or the sheet), judged on a log scale from
+     * the peers' own spread - the same rule as the price check (price-check.php): ask when ln(price / median) is more than
+     * k x max(robust spread of the peers' logs, floor). No fixed ratio: a sheet of widely different prices tolerates more.
+     */
     function import_cc_case_prices(array &$analysis, array $opts): void
     {
-        $ratio = (float)($opts['case_price_ratio'] ?? 5.0);
+        $pcp = import_pc_params($opts);
         $minPeers = (int)($opts['case_price_min_peers'] ?? 4);
         foreach ($analysis['sheets'] as $s => $sh) {
             if ($sh['triage']['action'] !== 'import') {
@@ -263,7 +268,12 @@ if (!function_exists('import_crosscheck')) {
                     }
                 }
                 $med = import_median($peers);
-                if ($med === null || $med <= 0 || $price < $ratio * $med) {
+                if ($med === null || $med <= 0) {
+                    continue;
+                }
+                $sp = import_pc_spread(array_map('log', import_pc_positive($peers)));
+                // A case holds at least two units (structural fact, not a hotel setting): a price under twice the usual one cannot be a case price.
+                if ($price < 2 * $med || log($price / $med) <= $pcp['k'] * max($sp, $pcp['spread_floor'])) {
                     continue;
                 }
                 $src = $row['fields']['unit_price']['source'];
