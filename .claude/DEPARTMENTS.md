@@ -17,6 +17,7 @@ Every `dept-*-lead` and `ui-lead` reads this file after
 | `dept-patch-lead` | Feature + security patches (all) | `.claude/PATCH_QUEUE.md` (owner-approved backlog), standing security sweep, briefs the owning lead, gates and hands to ship; small cross-cutting/security fixes itself |
 | `dept-backup-lead` | Backups & data safety (part of 11) | nightly backup, Run Backup Now, rotation, download/delete/restore, backup log, health checks, backup failure/stale/off-site alerts |
 | `dept-ai-lead` | In-portal AI Assistant (owner 2026-10-26: handled **only** by this lead) | everything in `.claude/AI_ASSISTANT_PLAN.md`: panel, providers/keys/models, vault, tools, swarm, confirm actions, learning, self-healing, kill switches, evals, completion guardrail, its guide pages. Opus 5.5. Other leads never edit AI files |
+| `dept-import-lead` | Data Import (owner 2026-11-03) | the Import button: reads Excel/CSV/Word/PDF lists (stock, bookings, suppliers; NO staff-list import; `data_import` permission default admin+manager), maps to tables, review-then-confirm, never invents data; works with or without the Assistant. Spec `.claude/IMPORT_PLAN.md`. Sonnet. Assistant-side hook = `dept-ai-lead` |
 | `ui-lead` | Cross-system UI | one visual language across every department; reviews UI requests from the leads |
 
 Each lead is responsible for its department end to end: it audits, fixes, tests, and is the
