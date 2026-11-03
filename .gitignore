@@ -84,3 +84,8 @@ storage/
 # Image proxy on/off flag (runtime file written by Cache Management)
 data/image-cache-off.flag
 .claude/progress/
+
+# Import: real hotel spreadsheets (public repo - never commit stock/price data)
+/Rosalyns_*.xlsx
+scripts/tests/fixtures/import/real/
+storage/imports/

@@ -1,0 +1,89 @@
+{
+  "_note": "FROZEN BY HAND from the row list in build_fixture.php (fx_main_spec). Never regenerate this file by running the parser. Sheet keys are the sheet index (0 = first sheet).",
+  "sheets_total": 6,
+  "sheets_imported": 3,
+  "sheets_skipped": 3,
+  "items_read": 20,
+  "categories": 4,
+  "skipped_totals_rows": 4,
+  "ignored_derived_columns": 5,
+  "rows_ready": 14,
+  "rows_needs_answer": 5,
+  "rows_blocked": 1,
+  "questions_total": 5,
+  "questions_blocking": 4,
+  "conflicts": 1,
+  "question_types": {
+    "duplicate-batch-clash": 1,
+    "bad-value": 1,
+    "conflict": 1,
+    "case-price": 1,
+    "possible-typo": 1
+  },
+  "sheets": {
+    "0": {"action": "skip", "why": "dashboard by name"},
+    "1": {"action": "import", "header_row": 3, "items": 11, "sections": 2, "totals": 2, "derived_columns": 3,
+          "categories": ["LOCAL BEERS", "CORDIALS"],
+          "status": {"4": "ready", "5": "ready", "7": "ready", "8": "ready", "9": "ready", "10": "ready", "11": "needs-answer", "13": "needs-answer", "14": "needs-answer", "17": "blocked", "18": "needs-answer"}},
+    "2": {"action": "import", "header_row": 2, "items": 5, "sections": 2, "totals": 2, "derived_columns": 1,
+          "categories": ["PROTEIN", "DAIRY"],
+          "status": {"4": "ready", "5": "ready", "6": "needs-answer", "8": "ready", "9": "ready"}},
+    "3": {"action": "import", "header_row": 1, "items": 4, "sections": 0, "totals": 0, "derived_columns": 1,
+          "categories": [],
+          "status": {"2": "ready", "3": "ready", "4": "ready", "5": "ready"}},
+    "4": {"action": "skip", "why": "hidden sheet"},
+    "5": {"action": "skip", "why": "summary by name"}
+  },
+  "skipped_row_numbers": {
+    "1": {"section": [6, 12], "total": [15, 19]},
+    "2": {"section": [3, 7], "total": [10, 11]},
+    "3": {"section": [], "total": []}
+  },
+  "values": [
+    {"sheet": 1, "row": 4, "field": "item_name", "value": "Lakeview Lager", "how": "as-written", "source": "BAR!A4"},
+    {"sheet": 1, "row": 4, "field": "qty_primary", "value": 10, "how": "as-written", "source": "BAR!C4"},
+    {"sheet": 1, "row": 4, "field": "qty_secondary", "value": 20, "how": "as-written", "source": "BAR!D4"},
+    {"sheet": 1, "row": 4, "field": "expiry", "value": "2027-03-27", "how": "converted-date", "source": "BAR!F4"},
+    {"sheet": 1, "row": 4, "field": "unit_price", "value": 2500, "how": "as-written", "source": "BAR!I4"},
+    {"sheet": 1, "row": 5, "field": "expiry", "value": "2026-03-19", "how": "converted-date", "source": "BAR!F5"},
+    {"sheet": 1, "row": 7, "field": "batch", "value": "B1", "how": "as-written", "source": "BAR!B7"},
+    {"sheet": 1, "row": 8, "field": "batch", "value": "B2", "how": "as-written", "source": "BAR!B8"},
+    {"sheet": 1, "row": 8, "field": "expiry", "value": "2026-03-19", "how": "converted-date", "source": "BAR!F8"},
+    {"sheet": 1, "row": 10, "field": "item_name", "value": "Hill Stoot", "how": "as-written", "source": "BAR!A10"},
+    {"sheet": 1, "row": 11, "field": "item_name", "value": "Crown Premium", "how": "as-written", "source": "BAR!A11"},
+    {"sheet": 1, "row": 11, "field": "unit_price", "value": 118000, "how": "as-written", "source": "BAR!I11"},
+    {"sheet": 1, "row": 18, "field": "unit_price", "value": 1800, "how": "as-written", "source": "BAR!I18"},
+    {"sheet": 2, "row": 4, "field": "qty_primary", "value": 2, "how": "as-written", "source": "KITCHEN!C4"},
+    {"sheet": 2, "row": 4, "field": "qty_secondary", "value": 5, "how": "as-written", "source": "KITCHEN!B4"},
+    {"sheet": 2, "row": 4, "field": "unit", "value": "Packets", "how": "as-written", "source": "KITCHEN!D4"},
+    {"sheet": 2, "row": 4, "field": "remarks", "value": "frozen", "how": "as-written", "source": "KITCHEN!H4"},
+    {"sheet": 2, "row": 5, "field": "qty_secondary", "value": 2.5, "how": "as-written", "source": "KITCHEN!B5"},
+    {"sheet": 3, "row": 2, "field": "unit", "value": "litres", "how": "unit-from-remarks", "source": "CHEMICAL!C2"},
+    {"sheet": 3, "row": 5, "field": "remarks", "value": "see supplier", "how": "as-written", "source": "CHEMICAL!C5"}
+  ],
+  "category_of": [
+    {"sheet": 1, "row": 4, "category": null},
+    {"sheet": 1, "row": 7, "category": "LOCAL BEERS"},
+    {"sheet": 1, "row": 14, "category": "CORDIALS"},
+    {"sheet": 2, "row": 4, "category": "PROTEIN"},
+    {"sheet": 2, "row": 9, "category": "DAIRY"}
+  ],
+  "absent": [
+    {"sheet": 1, "row": 13, "field": "unit_price", "why": "em-dash price is empty"},
+    {"sheet": 1, "row": 5, "field": "qty_secondary", "why": "formula never calculated"},
+    {"sheet": 2, "row": 9, "field": "unit_price", "why": "formula never calculated (no <v> element)"},
+    {"sheet": 3, "row": 3, "field": "unit_price", "why": "em-dash price is empty"},
+    {"sheet": 3, "row": 5, "field": "unit", "why": "remark is not a unit word"},
+    {"sheet": 1, "row": 17, "field": "qty_primary", "why": "negative quantity is rejected, not imported"}
+  ],
+  "unknown": [
+    {"sheet": 1, "row": 5, "field": "qty_secondary"},
+    {"sheet": 2, "row": 9, "field": "unit_price"}
+  ],
+  "conflict": {"item": "Ginger Beer", "field": "unit_price", "values": [1800, 2200], "sources": ["BAR!I18", "KITCHEN!F6"]},
+  "case_price": {"sheet": 1, "row": 11},
+  "typo_pair": {"sheet": 1, "rows": [9, 10]},
+  "duplicate": {"sheet": 1, "rows": [13, 14]},
+  "batch_group": {"sheet": 1, "rows": [7, 8]},
+  "hidden_forced_items": 2
+}

@@ -618,6 +618,7 @@ function rh_kb_guide_requirements(): array
         '10-conference-events.html'       => ['label' => 'Conference & Events',           'any' => ['conference', 'flag:events'], 'main' => 'conference'],
         '11-social-facebook-sharing.html' => ['label' => 'Website & CMS',                'all' => ['website_cms'], 'main' => 'website_cms'],
         '17-gym-management.html'          => ['label' => 'Gym & Fitness',                 'all' => ['gym'], 'main' => 'gym'],
+        '23-import.html'                  => ['label' => 'Data Import',                   'all' => ['stock', 'flag:data_import']],
     ];
 }
 
@@ -649,7 +650,7 @@ function rh_kb_module_state(): ?array
             $modules[(string)$k] = (int)$v === 1;
         }
         $flags = [];
-        $stmt = $pdo->prepare("SELECT setting_key, setting_value FROM site_settings WHERE setting_key IN ('events_system_enabled', 'restaurant_system_enabled')");
+        $stmt = $pdo->prepare("SELECT setting_key, setting_value FROM site_settings WHERE setting_key IN ('events_system_enabled', 'restaurant_system_enabled', 'data_import_enabled')");
         $stmt->execute();
         foreach ($stmt->fetchAll(PDO::FETCH_KEY_PAIR) as $k => $v) {
             $flags[(string)$k] = (string)$v === '1';
@@ -658,6 +659,7 @@ function rh_kb_module_state(): ?array
             'modules' => $modules,
             'events' => $flags['events_system_enabled'] ?? true,
             'restaurant' => $flags['restaurant_system_enabled'] ?? true,
+            'data_import' => $flags['data_import_enabled'] ?? false, // ships OFF: a missing row means off
         ];
     } catch (Throwable $e) {
         error_log('guide kb: module state unavailable: ' . $e->getMessage());
@@ -716,6 +718,9 @@ function rh_kb_key_on(string $key, ?array $state): bool
     }
     if ($key === 'flag:events' || $key === 'events') {
         return !empty($state['events']);
+    }
+    if ($key === 'flag:data_import') {
+        return !empty($state['data_import']); // the Data Import switch (site setting data_import_enabled); fails closed
     }
     if ($key === 'flag:restaurant' || $key === 'restaurant' || $key === 'restaurant_page') {
         return !empty($state['restaurant']);
@@ -792,9 +797,39 @@ function rh_kb_spec_on(string $spec, ?array $state): bool
     return false;
 }
 
+/**
+ * May the signed-in person see the Import menu answer? Only when the Data Import switch is on AND rh_import_can_use()
+ * says this person may use it. Per request (the index is shared by everyone, so this is never cached in it).
+ * Fails closed: no admin session, no database or any error = not shown.
+ */
+function rh_kb_import_page_visible(): bool
+{
+    static $memo = null;
+    if ($memo !== null) {
+        return $memo;
+    }
+    $memo = false;
+    if (session_status() !== PHP_SESSION_ACTIVE || (int)($_SESSION['admin_user_id'] ?? 0) <= 0) {
+        return $memo;
+    }
+    try {
+        if (!function_exists('rh_import_can_use')) {
+            require_once dirname(__DIR__) . '/admin/includes/import-schema.php';
+        }
+        $memo = function_exists('rh_import_can_use')
+            && rh_import_can_use((int)$_SESSION['admin_user_id'], $GLOBALS['pdo'] ?? null);
+    } catch (Throwable $e) {
+        $memo = false;
+    }
+    return $memo;
+}
+
 /** Should a knowledge-base entry be shown? Guide entries follow their guide; menu-page answers follow their module. */
 function rh_kb_entry_allowed(array $e, ?array $state): bool
 {
+    if (($e['type'] ?? '') === 'page' && ($e['page'] ?? '') === 'data-import.php' && !rh_kb_import_page_visible()) {
+        return false; // Import: switched off, or this person may not use it (checked before the module state, so it also holds when that is unknown)
+    }
     if ($state === null) {
         return true;
     }

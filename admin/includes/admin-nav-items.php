@@ -52,6 +52,7 @@ function rh_admin_nav_groups(): array
             ['stock-budget.php',          'fas fa-scale-balanced',  'Budget',          'stock_budget',     '', 'stock'],
             ['stock-suppliers.php',       'fas fa-truck-field',     'Suppliers',       'stock_management', '', 'stock'],
             ['stock-count.php',           'fas fa-clipboard-check', 'Stock Count',     'stock_count',      '', 'stock'],
+            ['data-import.php',           'fas fa-file-import',     'Import',          'data_import',      '', 'stock'],   // shown only when Import is switched on and the person also has Ingredients & Recipes (see _navItemVisible)
             ['stock-wastage.php',         'fas fa-trash-alt',       'Wastage',         'stock_wastage',    '', 'stock'],
             ['stock-batches.php',         'fas fa-layer-group',     'Batch Tracker',   'stock_batches',    '', 'stock'],
             ['stock-reports.php',         'fas fa-chart-area',      'Stock Reports',   'stock_reports',    '', 'stock'],

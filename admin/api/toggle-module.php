@@ -36,6 +36,34 @@ $front_end_flags = [
 $module_key = trim((string)($_POST['module_key'] ?? ''));
 $is_enabled = (int)!empty($_POST['is_enabled']);
 
+// Data Import kill switch: a site setting (not an enabled_modules row), administrators only. Ships OFF; read fail-closed by rh_import_enabled().
+if ($module_key === 'data_import') {
+    if (($user['role'] ?? '') !== 'admin') {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'error' => 'Only an administrator can switch Data Import on or off.']);
+        exit;
+    }
+    try {
+        $up = $pdo->prepare("INSERT INTO site_settings (setting_key, setting_value, setting_group) VALUES ('data_import_enabled', ?, 'import')
+                             ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
+        $up->execute([$is_enabled ? '1' : '0']);
+        if (function_exists('deleteCache')) {
+            deleteCache('setting_data_import_enabled');
+        }
+        if (function_exists('rh_log_event')) {
+            rh_log_event('admin/module-settings', $is_enabled ? 'info' : 'warning',
+                'Data Import ' . ($is_enabled ? 'enabled' : 'disabled'),
+                ['user' => $user['username'] ?? '', 'user_id' => $user['id'] ?? null, 'module' => $module_key]
+            );
+        }
+        echo json_encode(['success' => true, 'module_key' => $module_key, 'is_enabled' => (bool)$is_enabled]);
+    } catch (Throwable $e) {
+        error_log('toggle-module (data_import): ' . $e->getMessage());
+        echo json_encode(['success' => false, 'error' => 'Database error — please try again.']);
+    }
+    exit;
+}
+
 if (isset($front_end_flags[$module_key])) {
     try {
         updateSetting($front_end_flags[$module_key], $is_enabled ? '1' : '0');

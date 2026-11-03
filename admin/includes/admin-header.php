@@ -70,6 +70,13 @@ if (!function_exists('_navItemVisible')) {
                 : in_array($_hrefBase, rhStationSidePages(), true);
             if (!$_allowed) return false;
         }
+        if ($_hrefBase === 'data-import.php') {
+            // Import: kill switch (fail-closed) AND the stock permission, same rule the page itself enforces.
+            if (!function_exists('rh_import_can_use')) {
+                require_once __DIR__ . '/import-schema.php';
+            }
+            if (!rh_import_can_use((int)($GLOBALS['user']['id'] ?? 0), $GLOBALS['pdo'] ?? null)) return false;
+        }
         if (!str_starts_with($href, '../') && str_ends_with($_hrefBase, '.php')) {
             $_pagePerm = getPermissionForPage($_hrefBase);
             if ($_pagePerm !== null && $_pagePerm !== $permission_key && !_canShowNavItem($_pagePerm)) return false;

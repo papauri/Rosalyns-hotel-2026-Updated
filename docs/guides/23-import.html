@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Import a stock list — Rosalyns Beach Hotel</title>
+  <link rel="stylesheet" href="assets/guide-theme.css">
+  <script src="assets/guide-init.js" defer></script>
+</head>
+<body>
+<div class="wrap">
+
+  <nav class="top">
+    <a href="index.html" class="brand">Rosalyns Beach Hotel</a>
+    <a href="index.html">All guides</a>
+    <a href="99-admin-dashboard-full-guide.html">Admin reference</a>
+  </nav>
+
+  <h1>Import a stock list</h1>
+  <p>Import brings a stock list in from a spreadsheet, so you do not have to type every item by hand. It is a bulk way to add stock items, and it can file your opening stock from the spreadsheet. You upload the file, check how each column and row was read, answer anything that is unclear, and then press <strong>Confirm</strong>. Nothing is saved to your stock until you do, and the opening stock count then waits for a second manager to approve it.</p>
+  <div class="note"><p>Import ships <strong>switched off</strong>. An administrator has to switch it on first (see <a href="#who">Who can use it</a>). Until then the Import page is not shown in the menu.</p></div>
+
+  <div class="facts">
+    <dl>
+      <dt>Who uses it</dt><dd>Administrators and managers, and anyone who has been given the <strong>Import</strong> permission. They also need <strong>Ingredients &amp; Recipes</strong>.</dd>
+      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Stock</strong> &rarr; <strong>Import</strong>. The button is also called <strong>Import</strong> on the page.</dd>
+      <dt>Permission needed</dt><dd><strong>Import</strong> and <strong>Ingredients &amp; Recipes</strong>. Both are needed. Administrators have everything.</dd>
+      <dt>Only shown when</dt><dd><strong>Data Import: on/off</strong> is switched on in Settings &rarr; Modules (administrators only), and the <strong>Stock &amp; Inventory</strong> module is on.</dd>
+    </dl>
+  </div>
+
+  <div class="toc">
+    <ol>
+      <li><a href="#what">What Import is</a></li>
+      <li><a href="#who">Who can use it, and how to switch it on</a></li>
+      <li><a href="#steps">How to import a stock list, in four steps</a></li>
+      <li><a href="#questions">What the questions mean</a></li>
+      <li><a href="#sources">The grey source tag, and what is left out on purpose</a></li>
+      <li><a href="#confirm">What Confirm does</a></li>
+      <li><a href="#again">Importing the same file twice, cancelling, and clean-up</a></li>
+      <li><a href="#wrong">If something looks wrong</a></li>
+    </ol>
+  </div>
+
+  <h2 id="what">What Import is: bulk add stock and opening stock from a spreadsheet</h2>
+  <p>Import reads a stock list from an Excel or CSV file and brings the items into <strong>Ingredients</strong>. It works out which columns hold the item name, the balance, the unit, the price and the expiry date. Where it is not sure, it asks you. It never invents a value and never guesses one.</p>
+  <ul>
+    <li><strong>Accepted:</strong> Excel files (<em>.xlsx</em> and <em>.xlsm</em>), and CSV or TSV text files (<em>.csv</em> and <em>.tsv</em>).</li>
+    <li><strong>Not supported yet:</strong> Word files, PDF files and old Excel files (<em>.xls</em>). Open the file in Excel, use <strong>Save As</strong> &rarr; <strong>Excel Workbook (.xlsx)</strong>, then upload that copy.</li>
+    <li><strong>Largest file:</strong> the upload screen shows the biggest size the hotel accepts.</li>
+    <li><strong>Macros never run.</strong> A formula is read only as the value it last showed.</li>
+    <li><strong>Stock lists only</strong> for now. Import does not bring in anything else.</li>
+  </ul>
+
+  <h2 id="who">Who can use it, and how to switch it on</h2>
+  <p>Only an administrator can switch Import on or off.</p>
+  <ol class="steps">
+    <li>Open Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Modules</strong>.</li>
+    <li>Find the card <strong>Data Import: on/off</strong>. Only administrators see this card.</li>
+    <li>Switch it on. Switching it off hides Import at once. Nothing half-imported is kept.</li>
+  </ol>
+  <p>Once it is on, administrators and managers can use it by default. To give it to someone else, or take it away, open Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Staff &amp; Access</strong>, open the person's permissions, and tick or untick <strong>Import</strong>. The person also needs <strong>Ingredients &amp; Recipes</strong>. Without it the Import menu item does not show for them.</p>
+  <p><strong>If something goes wrong:</strong> <em>"Import is switched off for this hotel."</em> means an administrator has not switched it on. <em>"Your account cannot use Import. It needs the Import and the Ingredients &amp; Recipes permissions."</em> means your account is missing one of them. Ask an administrator.</p>
+
+  <h2 id="steps">How to import a stock list, in four steps</h2>
+  <p>Open Admin menu &rarr; <strong>Stock</strong> &rarr; <strong>Import</strong>. The page has four steps, shown across the top: <strong>Upload</strong>, <strong>What we found</strong>, <strong>Review &amp; answer</strong> and <strong>Confirm</strong>.</p>
+
+  <h3>Step 1: Upload your stock list</h3>
+  <ol class="steps">
+    <li>Drop your file on the box, or click <strong>Choose file</strong> and pick it.</li>
+    <li>Click <strong>Upload and read the file</strong>. The file is only read. It is never changed.</li>
+  </ol>
+
+  <h3>Step 2: What we found</h3>
+  <p>This shows how the file was read. Nothing has been saved yet. For each sheet you see:</p>
+  <ul>
+    <li><strong>Sheets read</strong>, <strong>Sheets to import</strong> and <strong>Items found</strong>, with the total number of stock rows.</li>
+    <li><strong>Total lines left out</strong>: summary lines such as totals.</li>
+    <li><strong>Columns not imported</strong>: calculated columns such as totals, days to expiry and status.</li>
+    <li>A card for each sheet, with the columns that were understood and the ones left out, and why. A sheet that does not look like a stock list says so under <strong>Why</strong>.</li>
+  </ul>
+  <p>Check this list, then click <strong>Continue to review</strong>. If a sheet or column needs an answer first, the page shows the question inside that sheet's card.</p>
+
+  <h3>Step 3: Review and answer</h3>
+  <p>Each line is one stock item as it would be imported. The grey tag under each value shows the cell it was read from. Use the filter buttons to show only the rows that <strong>Need answer</strong>. Pick one answer for each question. The page updates after every answer. Your answers are kept if you leave the page and come back.</p>
+  <ul>
+    <li>Click <strong>Download what will be imported (CSV)</strong> to check the ready items in Excel before you confirm.</li>
+    <li>Use <strong>Go to step 2</strong> if a question is about how a sheet was read.</li>
+  </ul>
+
+  <h3>Step 4: Confirm</h3>
+  <p>This is the last check. It shows the numbers for the whole file:</p>
+  <ul>
+    <li><strong>New ingredients</strong>: items not in your stock yet. They will be created.</li>
+    <li><strong>Existing items updated</strong>: existing items where you ticked a field to change.</li>
+    <li><strong>Existing items left as they are</strong>: matched to an item already in stock, with nothing ticked.</li>
+    <li><strong>Lines in the opening count</strong>: items with stock and a price.</li>
+    <li><strong>Rows skipped</strong>: rows you skipped, or rows that are not items.</li>
+    <li><strong>Still need an answer</strong>: questions to sort out first.</li>
+  </ul>
+  <p>Press <strong>Confirm and import</strong>. The result page shows <strong>Ingredients created</strong>, <strong>Ingredients updated</strong>, <strong>Rows skipped</strong>, <strong>Opening count lines</strong> and <strong>Expiry batches</strong>. Use <strong>Open the opening count</strong> to see the count that is waiting for approval.</p>
+
+  <p><strong>My imports.</strong> At the bottom of the page is a list of the imports you started in the last 30 days. An administrator sees everyone's. Open one to carry on where you stopped, or cancel one you no longer need.</p>
+
+  <h2 id="questions">What the questions mean</h2>
+  <p>Import asks a question only when something is unclear. Every question has a few answers to pick from. The page does not pick one for you. Confirm stays off until every question is answered.</p>
+  <table>
+    <thead><tr><th>The question</th><th>What it means</th><th>Your options</th></tr></thead>
+    <tbody>
+      <tr><td><em>"Did you mean …?"</em></td><td>The name in your file is not in stock yet, but a very similar name is. For example Budwiser for Budweiser.</td><td><strong>Yes, use the existing "…"</strong> adds the row to that item. <strong>No, … is a new/different item</strong> creates a new ingredient.</td></tr>
+      <tr><td>Batches or duplicate?</td><td>The same item name is on two or more rows.</td><td><strong>Separate batches of the same item (import all)</strong>: one item with two batches, for example B1 and B2. <strong>A duplicate: import it once (skip the later rows)</strong>: the second row is left out.</td></tr>
+      <tr><td>Which price?</td><td>The same item has two different prices, from two sheets or two rows.</td><td>Pick one price. Each option shows the value and the cell it came from. Nothing is averaged, and the other price is not used.</td></tr>
+      <tr><td>Per case or per unit?</td><td>The price looks like the price of a whole case, not of one bottle or one kilo.</td><td><strong>Price of one unit (import as written)</strong>, or <strong>Price of a whole case/pack (I will enter the pack size)</strong>. If you choose the case, type how many units are in it. The price is then shown as "per case of 12 = 5,000 each".</td></tr>
+      <tr><td>Which unit?</td><td>A sheet has no unit column, so Import does not know if its items are bottles, kilos or something else.</td><td>Pick the unit from the list. Import never picks one for you.</td></tr>
+      <tr><td><em>"Is it a category heading, or an item that is out of stock?"</em></td><td>A row has zero in every column. It could be a heading for the rows below, or an item with nothing left.</td><td><strong>An item (out of stock)</strong>, or <strong>A category heading for the rows below</strong>.</td></tr>
+      <tr><td><em>"… Should it be imported?"</em></td><td>A sheet has item columns, but its name sounds like a summary or dashboard sheet.</td><td><strong>Yes, import it</strong>, or <strong>No, skip it</strong>.</td></tr>
+      <tr><td><em>"Which column … holds the item names?"</em></td><td>Import cannot find the item-name column on a sheet.</td><td>Pick the column from the list.</td></tr>
+      <tr><td>A column question</td><td>Import is not sure what a column holds.</td><td><strong>Yes, use it as …</strong>, or <strong>No, ignore this column</strong>.</td></tr>
+      <tr><td>Which date?</td><td>An expiry date could be read two ways, for example 03/04 or 04/03.</td><td>Pick the date that is right.</td></tr>
+      <tr><td>Already in stock</td><td>The item matches one already in stock, and your file has different values for some fields.</td><td>The default keeps what is there now. Tick a field (category, cost, par level, pack or quantity) only if you want it changed.</td></tr>
+    </tbody>
+  </table>
+  <p>When you fix a name, Import remembers the fix for next time. It shows it as a pre-filled answer with the note <em>"Remembered from an earlier import. Change it if it is wrong."</em> It is never applied without showing you first.</p>
+
+  <h2 id="sources">The grey source tag, and what is left out on purpose</h2>
+  <p>Every value on the review screen has a small grey tag such as <em>Bar!D12</em>. That is the sheet name, then the cell the value was read from. If a value does not match your file, check that cell first.</p>
+  <p>Import leaves these out on purpose:</p>
+  <ul>
+    <li><strong>Dashboards and summary sheets.</strong> They are skipped, and Step 2 says why.</li>
+    <li><strong>Category heading rows</strong>, such as a row that only says the name of a group. Import uses them to file the items below. A heading is never an item.</li>
+    <li><strong>Total lines</strong>, such as <em>TOTAL</em> or <em>GRAND TOTAL</em>. They are never imported.</li>
+    <li><strong>Calculated columns</strong>: totals, days to expiry, status, purchase quantity and total cost. They are shown greyed out and never imported. The real numbers are taken from the columns you typed.</li>
+  </ul>
+  <p>Nothing is invented or guessed. A value that is not in your file cannot reach stock. A formula with no stored result is left blank, never read as 0.</p>
+
+  <h2 id="confirm">What Confirm does to your opening stock</h2>
+  <p>Confirm is one step, and it is all or nothing. If anything fails, nothing is saved, and the page says <em>"Nothing was imported."</em></p>
+  <ol class="steps">
+    <li><strong>New ingredients are created.</strong> Each one takes its category from the heading above it (or the sheet name), its unit from the sheet, and its price as the cost.</li>
+    <li><strong>Existing items</strong> keep their values. Only the fields you ticked are changed. Their unit is never changed.</li>
+    <li><strong>The stock quantities are filed as one opening stock count.</strong> They are <strong>not</strong> added to your stock yet. A different manager must approve that count in <strong>Stock Count</strong> first. Only then does the stock appear.</li>
+    <li><strong>Nothing is deleted</strong>, and recipes are not touched.</li>
+    <li>The copy of your file on the server is deleted afterwards.</li>
+  </ol>
+  <ul>
+    <li><strong>Prices are taken as written.</strong> VAT is not added or removed.</li>
+    <li><strong>An item with stock but no price</strong> is created without a cost, and its stock is left out of the opening count. The page says <em>"Add the cost later."</em></li>
+    <li><strong>Who approves the count.</strong> A different manager must approve it while the rule <strong>Stock count: a second person must approve</strong> is on, which is the default. If an administrator has switched that rule off, the person who imported can approve the count. See <a href="20-stock-loss-prevention.html">Stopping stock going missing</a>.</li>
+  </ul>
+  <div class="note"><p>Confirm is turned off while any question still needs an answer. The page says <em>"Some questions still need an answer."</em> Answer them on Step 3, or skip the row, and Confirm turns on.</p></div>
+
+  <h2 id="again">Importing the same file twice, cancelling, and clean-up</h2>
+  <ul>
+    <li><strong>The same file again is blocked.</strong> The page says <em>"This file was already imported on &hellip; by &hellip;"</em>. Only an administrator can import it again, by ticking <strong>Import again</strong> on the upload step.</li>
+    <li><strong>Cancel.</strong> Click <strong>Cancel this import</strong> on Steps 2 to 4. The page says <em>"Nothing has been saved to your stock, and the uploaded copy will be deleted."</em> Confirm the cancel, and the page says <em>"The import was cancelled and the uploaded copy deleted."</em></li>
+    <li><strong>Clean-up.</strong> The uploaded copy is kept on the server only while you work on it. It is deleted when you finish, when you cancel, or after 7 days.</li>
+  </ul>
+
+  <h2 id="wrong">If something looks wrong</h2>
+  <ul>
+    <li><strong>"Word and PDF files are not supported yet."</strong> Open the file in Excel, use Save As &rarr; Excel Workbook (.xlsx), and upload that.</li>
+    <li><strong>"This is an old Excel file (.xls)."</strong> Save it again as an Excel Workbook (.xlsx), then upload that copy.</li>
+    <li><strong>"That file is bigger than this server accepts."</strong> Save a smaller copy. You can remove old sheets you do not need.</li>
+    <li><strong>"The file could not be read."</strong> Open the file in Excel to check it, save it again as .xlsx, and upload again.</li>
+    <li><strong>"Your session has expired. Reload the page and try again."</strong> Reload the page and sign in again if asked.</li>
+    <li><strong>"Row 12: Unit price in D12 is "abc", which is not a number. Fix it in the sheet and upload again, or skip this row."</strong> Fix the cell in your file and upload the file again, or skip that row on Step 3.</li>
+    <li><strong>"… is negative. Negative amounts are not imported."</strong> Fix the cell in your file and upload again, or skip that row.</li>
+    <li><strong>"Sheet … has no column headings I recognise."</strong> Skip that sheet, or make sure its column headings say what they hold (for example Item, Balance, Unit Price).</li>
+    <li><strong>A sheet or column is missing from Step 2.</strong> Look at <strong>Columns not imported</strong> and the reason on the sheet's card.</li>
+    <li><strong>A row says Need answer and Confirm stays off.</strong> Answer the question on Step 3, or skip that row.</li>
+    <li><strong>Stock did not change after Confirm.</strong> That is expected. The quantities wait in the opening count. Ask a different manager to approve it in <strong>Stock Count</strong>.</li>
+    <li><strong>"This file was already imported on &hellip;"</strong> Ask an administrator, if the file really must come in again.</li>
+  </ul>
+
+  <h2 id="related">Related guides</h2>
+  <ul>
+    <li><a href="08-stock-orders.html">Stock, recipes and orders</a></li>
+    <li><a href="20-stock-loss-prevention.html">Stopping stock going missing (anti-theft)</a></li>
+    <li><a href="18-staff-access.html">Staff &amp; access</a></li>
+  </ul>
+
+  <footer>Updated November 2026. Describes the system as it is set up today.</footer>
+</div>
+</body>
+</html>

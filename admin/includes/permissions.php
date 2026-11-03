@@ -119,7 +119,8 @@ function getAllRoles()
                 'pos_shift_override',
                 'ai_assistant_use',     // Assistant: chat (ASSUMPTION 2026-10-26, owner can change per person)
                 'ai_assistant_actions', // Assistant: may confirm its action cards
-                'ai_usage_view'         // Assistant: see usage and estimated cost
+                'ai_usage_view',        // Assistant: see usage and estimated cost
+                'data_import'           // Import: bring stock lists in from Excel/CSV (owner 2026-11-03: admin + manager only; reaches existing managers through this default, no backfill rows needed)
             ]
         ],
         'receptionist' => [
@@ -803,6 +804,15 @@ function getAllPermissions()
             'icon' => 'fa-clipboard-check',
             'category' => 'Restaurant & Stock',
             'page' => 'stock-count.php',
+            'group' => 'stock_write'
+        ],
+        // Import (stock lists from Excel/CSV). Needs this AND Ingredients & Recipes; ships OFF behind the data_import_enabled setting.
+        'data_import' => [
+            'label' => 'Import',
+            'description' => 'Use Import to bring stock lists in from Excel/CSV files',
+            'icon' => 'fa-file-import',
+            'category' => 'Restaurant & Stock',
+            'page' => 'data-import.php',
             'group' => 'stock_write'
         ],
         'stock_wastage' => [
@@ -1608,6 +1618,7 @@ function getPermissionForPage(string $page)
         'ai-usage.php' => 'ai_usage_view',          // Assistant usage dashboard (Phase 5)
         'ai-chat.php' => 'ai_assistant_use',       // admin/api/ai-chat.php (Assistant, Phase 2)
         'ai-action.php' => 'ai_assistant_actions', // admin/api/ai-action.php (Assistant, Phase 2)
+        'data-import.php' => 'data_import',        // Import page (Phase 1b-UI); also needs stock_management for the stock target
         'user-management.php' => 'user_management',
         'process-checkin.php' => 'bookings',
         // Unmapped before: reachable by any signed-in user by URL. Keys match the nav entries in admin-header.php.
@@ -1715,6 +1726,7 @@ function getModuleForPage(string $page)
         'purchase-orders.php' => 'stock',
         'stock-reorder.php' => 'stock',
         'stock-suppliers.php' => 'stock',
+        'data-import.php' => 'stock', // Import (stock lists); it also checks rh_import_enabled(), which is fail-closed
         // enabled_modules describes website_cms as "Gallery, pages, deals,
         // reviews, social settings" — the social integrations and site
         // analytics belong to it on the module's own definition.

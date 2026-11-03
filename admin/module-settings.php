@@ -11,6 +11,7 @@ $user = [
 ];
 
 require_once __DIR__ . '/includes/permissions.php';
+require_once __DIR__ . '/includes/import-schema.php';      // rh_import_enabled(): the Data Import kill switch (fail-closed)
 if (!hasPermission((int)$user['id'], 'module_settings')) {
     rhDenyAndRedirectHome((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF']));
     exit;
@@ -646,6 +647,38 @@ if ($active_preset_key !== null && !$active_preset_exact) {
                     </label>
                 </div>
             </div>
+            <?php if (($user['role'] ?? '') === 'admin'):
+                // Data Import: its own switch (site setting data_import_enabled, ships OFF, fail-closed). Only an administrator sees or changes it.
+                $import_on = rh_import_enabled($pdo);
+            ?>
+            <div class="ms-card <?php echo $import_on ? '' : 'is-disabled'; ?>" id="ms-card-data_import">
+                <div class="ms-card-header">
+                    <div class="ms-card-icon" style="background:#f5f2eb;color:#7E684B;">
+                        <i class="fas fa-file-import"></i>
+                    </div>
+                    <div class="ms-card-title-block">
+                        <div class="ms-card-title">Data Import: on/off</div>
+                        <p class="ms-card-desc">Lets staff upload a stock list (Excel or CSV), check it and import it. Administrators and managers get it by default; you can give or take it away per person in Staff Access. Switching off hides Import at once and keeps nothing half-imported.</p>
+                    </div>
+                </div>
+                <div class="ms-card-footer">
+                    <span class="ms-status-label <?php echo $import_on ? 'enabled' : 'disabled'; ?>" id="ms-label-data_import">
+                        <i class="fas fa-<?php echo $import_on ? 'check-circle' : 'times-circle'; ?>"></i>
+                        <?php echo $import_on ? 'Enabled' : 'Disabled'; ?>
+                    </span>
+                    <label class="ms-toggle" aria-label="Toggle Data Import">
+                        <input type="checkbox"
+                               id="ms-toggle-data_import"
+                               data-module="data_import"
+                               data-has-warn="0"
+                               data-warn-text=""
+                               data-label="Data Import"
+                               <?php echo $import_on ? 'checked' : ''; ?>>
+                        <span class="ms-toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+            <?php endif; ?>
         </div>
     </div>
 

@@ -372,6 +372,7 @@ function rh_kb_sys_page_guides(): array
         'packages.php' => ['09-packages-rates.html', 'pkg-add'],
         'stock-receipt.php' => ['08-stock-orders.html', 'stockin'],
         'stock-recipes.php' => ['08-stock-orders.html', 'recipes'],
+        'data-import.php' => ['23-import.html', 'steps'],
         'kds-report.php' => ['02-kds-kitchen.html', 'report'],
         'process-checkin.php' => ['07-reception-bookings.html', 'checkin'],
         'gym-members.php' => ['17-gym-management.html', 'enrol'],
