@@ -58,6 +58,14 @@ if ($uid <= 0 || !hasPermission($uid, 'ai_assistant_use')) {
     rh_ai_api_out(403, ['success' => false, 'error' => 'You do not have access to the Assistant.']);
 }
 $me = ['id' => $uid, 'role' => (string)($user['role'] ?? ''), 'username' => (string)($user['username'] ?? ''), 'full_name' => (string)($user['full_name'] ?? '')];
+// The guides' Import page entry is shown only to someone who may use Import, read from the open session; the session is
+// closed before the Assistant thinks, so that answer is read once here (it is kept for the rest of this request).
+if (!function_exists('rh_kb_import_page_visible')) {
+    require_once __DIR__ . '/../../includes/guide-knowledge-base.php';
+}
+if (function_exists('rh_kb_import_page_visible')) {
+    rh_kb_import_page_visible();
+}
 $action = (string)($in['action'] ?? '');
 // Phase 4c: idle lock - after a quiet spell the panel asks for the person's own password. Background checks
 // (alerts, the status line) do not count as use and do not unlock it.

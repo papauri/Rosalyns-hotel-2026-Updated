@@ -28,6 +28,7 @@ require_once __DIR__ . '/ai-guided.php';   // guided cards: one question at a ti
 require_once __DIR__ . '/ai-router.php';   // the learned local router: repeat questions answered with no model call
 require_once __DIR__ . '/ai-claims.php';   // every figure, name and date in a model reply checked against this question's data
 require_once __DIR__ . '/ai-menu.php';     // menu & recipe advice from the stock on hand: portions, cost, price, wastage (read only)
+require_once __DIR__ . '/ai-import.php';   // the Import review explained (read only, advice only; offered only while Import is on for this person)
 
 if (!defined('RH_AI_TOOL_ROWS')) {
     define('RH_AI_TOOL_ROWS', 20);      // row cap per list (plan: default 20 rows)
@@ -242,7 +243,7 @@ function rh_ai_tool_registry(): array
             'perm' => [], 'module' => [], 'cache' => 60, 'handler' => 'rh_ai_t_daily_briefing', 'step' => 'Going through today',
         ],
     ];
-    return array_merge($reg, rh_ai_extra_tools(), rh_ai_lookup_tools(), rh_ai_desk_tools(), rh_ai_menu_tools()); // Phases 4c + 5 extras + one-record lookups + the desk reads + the menu advisor (all read only)
+    return array_merge($reg, rh_ai_extra_tools(), rh_ai_lookup_tools(), rh_ai_desk_tools(), rh_ai_menu_tools(), rh_ai_import_tools()); // + the Import review (read only); Phases 4c + 5 extras + one-record lookups + the desk reads + the menu advisor (all read only)
 }
 
 /** The plain status line shown while a tool runs ("Checking today's departures..."). */
@@ -446,7 +447,7 @@ function rh_ai_paged_tools(): array
 {
     return ['search_bookings', 'arrivals_departures', 'in_house', 'room_board', 'balances_due', 'guest_history', 'money_leaks', 'inventory_watch',
         'work_queues', 'events_pipeline', 'guest_voice', 'reply_queue', 'kitchen_tickets', 'restaurant_sales', 'upsell_finder', 'who_is_online', 'check_availability', 'hotel_info',
-        'order_status', 'gym_watch', 'room_rates', 'upcoming_arrivals', 'booking_history', 'blocked_dates', 'menu_advisor'];
+        'order_status', 'gym_watch', 'room_rates', 'upcoming_arrivals', 'booking_history', 'blocked_dates', 'menu_advisor', 'import_job'];
 }
 
 /** Provider-ready tool list [{name, description, schema}] for this person. */
@@ -1782,7 +1783,7 @@ function rh_ai_t_my_access(PDO $db, array $user, array $a): array
     $uid = (int)$user['id'];
     $groups = [];
     foreach (getAllPermissions() as $key => $p) {
-        if (hasPermission($uid, $key)) {
+        if (hasPermission($uid, $key) && ($key !== 'data_import' || rh_ai_gate_import($user))) { // Import only while it is on for this person
             $groups[(string)($p['category'] ?? 'Other')][] = (string)$p['label'];
         }
     }
@@ -1809,6 +1810,10 @@ function rh_ai_t_open_page(PDO $db, array $user, array $a): array
     }
     if (!rhCanOpenPage((int)$user['id'], $page)) {
         return ['error' => "That screen is outside what this account can open."];
+    }
+    if ($page === 'data-import.php' && !rh_ai_gate_import($user)) {
+        // Import has its own fail-closed switch (and needs Ingredients & Recipes too), which the page map does not know
+        return ['error' => rh_ai_import_lib() && !rh_import_enabled($db) ? 'Import is switched off for this hotel.' : "That screen is outside what this account can open."];
     }
     $q = [];
     foreach (['search', 'status', 'date'] as $k) {

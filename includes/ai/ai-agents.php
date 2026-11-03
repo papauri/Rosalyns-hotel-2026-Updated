@@ -73,6 +73,9 @@ function rh_ai_no_write_area(array $user, string $t): ?array
     if (preg_match('/^\s*(add|put|leave|write|make) (a )?(booking )?note\b|^\s*note (on|for|to)\b/u', $t)) {
         return null; // a staff note on a booking (its words may mention money: it is a note, not a payment)
     }
+    if (($imp = rh_ai_import_write_line($user, $t)) !== null) {
+        return $imp[0] === '' ? null : $imp; // an Import question (its stock/price words are about the file): the Import review
+    }
     $v = '(adjust|change|set|update|edit|add|remove|deduct|subtract|reduce|increase|decrease|top up|write off|record|log|enter|transfer|delete|void|refund|reverse|post|take|receive|close|apply|raise|lower|put|mark|cut|bump|correct|fix)';
     $stockLine = "I can't change stock - record it on Stock > Wastage (waste or spoilage) or Stock > Stock count (a correction).";
     $stockPages = [['stock-wastage.php', 'Open Wastage'], ['stock-count.php', 'Open Stock count']];
@@ -203,6 +206,9 @@ function rh_ai_not_offered_line(string $tool): string
     $modsOn = !$mods;
     foreach ($mods as $m) {
         $modsOn = $modsOn || rh_ai_module_on($m);
+    }
+    if (($def['gate'] ?? '') === 'rh_ai_gate_import' && rh_ai_import_lib() && !rh_import_enabled($GLOBALS['pdo'] ?? null)) {
+        return "Import isn't switched on here.";
     }
     $roomsOnly = ($def['gate'] ?? '') === 'rh_ai_gate_rooms';
     if ($modsOn && (!$roomsOnly || rh_ai_module_on('bookings'))) {
@@ -647,6 +653,9 @@ function rh_ai_local_intent(string $t): ?array
     // "rooms that need cleaning", "which rooms need cleaning": the room board
     if (preg_match('/^((which|what) )?rooms? (that |which )?(still )?(needs?|needing) (cl\w{0,3}n(?:ing|ed)|to be cl\w{0,3}ned|a clean)( now| today)?\s*\??$/u', $t)) {
         return ['room_board', []];
+    }
+    if (($imp = rh_ai_import_intent($t)) !== null) {
+        return $imp; // "what's left on my import", "why can't I confirm the import": the Import review counts
     }
     if (($look = rh_ai_lookup_intent($t)) !== null) {
         return $look; // one order, the open orders, a gym class / slot / member, memberships ending
@@ -1452,6 +1461,9 @@ function rh_ai_hotel_local_text(array $view, array $r): string
 /** Format a local lookup (from the de-identified result, so the stored text holds tokens only). */
 function rh_ai_local_format(string $tool, array $view, array $r): string
 {
+    if ($tool === 'import_job') {
+        return rh_ai_import_local_text($r);
+    }
     if ($tool === 'hotel_info') {
         return rh_ai_hotel_local_text($view, $r);
     }
@@ -1967,7 +1979,7 @@ function rh_ai_specialists(): array
         'money' => ['label' => 'Money', 'brief' => 'money owed, refunds (always in full), voids, discounts, till shortages, no-shows and cancellations; you read and explain, staff do refunds and payments on screen',
             'core' => ['money_leaks', 'balances_due'], 'tools' => ['money_leaks', 'balances_due', 'room_performance', 'hotel_report']],
         'stock' => ['label' => 'Stock', 'brief' => 'stock out or low, expiring batches, wastage, count variance and the stock budget; read only',
-            'core' => ['inventory_watch'], 'tools' => ['inventory_watch', 'menu_advisor']],
+            'core' => ['inventory_watch'], 'tools' => ['inventory_watch', 'menu_advisor', 'import_job']],
         'events_gym' => ['label' => 'Events, Conference & Gym', 'brief' => 'conference bookings coming up or one booking, event enquiries, gym memberships ending, one gym member, gym classes and slots, and gym enquiries',
             'core' => ['events_pipeline', 'gym_watch'], 'tools' => ['events_pipeline', 'gym_watch']],
         'revenue' => ['label' => 'Revenue & Sales', 'brief' => 'occupancy, ADR, RevPAR, pace against last year, pickup, lead time, unsold nights and where bookings come from; you recommend, you never change prices or deals',
@@ -2605,7 +2617,7 @@ function rh_ai_lane_words(): array
         'housekeeping' => '/\b(housekeep\w*|clean\w*|dirty|maintenance|repair\w*|broken|fix\w*|room status|status of room|not ready|off sale|out of order|inspect\w*|jobs?|tasks?)\b/u',
         'restaurant'   => '/\b(restaurant|bar|kitchen|till|food|drinks?|meals?|orders?|top sell\w*|voids?|tickets?|coffee|breakfast|lunch|dinner|dish(es)?|tabs?|tables?|room service|receipts?|menu|recipes?|portions?|ingredients?|food cost|chef|cook\w*)\b/u',
         'money'        => '/\b(owe[sd]?|owing|balances?|unpaid|paid|payments?|refunds?|discounts?|money|cash|debts?|invoices?|losing|leaks?|revenue|takings|spend\w*)\b/u',
-        'stock'        => '/\b(stock|inventory|wastage|waste|expir\w*|batch\w*|suppliers?|low on|run(ning)? out|purchase orders?|deliver(y|ies|ed))\b/u',
+        'stock'        => '/\b(stock|inventory|wastage|waste|expir\w*|batch\w*|suppliers?|low on|run(ning)? out|purchase orders?|deliver(y|ies|ed)|import(s|ed|ing)?|spreadsheets?)\b/u',
         'events_gym'   => '/\b(events?|conference\w*|meeting rooms?|weddings?|gym|members?|membership\w*|fitness|class(es)?|slots?|sessions?)\b/u',
         'revenue'      => '/\b(occupancy|adr|revpar|pace|pick.?up|rates?|pricing|prices?|unsold|demand|sales|sell\w*|sources?|channels?|forecast\w*|lift|boost|fill|quiet|season\w*|upsell\w*)\b/u',
         'guest_voice'  => '/\b(reviews?|feedback|complain\w*|enquir\w*|inquir\w*|messages?|repl(y|ies)|whatsapp|emails?|concierge|ratings?)\b/u',
@@ -3159,7 +3171,9 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
             if ($text !== '') {
                 rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => $tool, 'args' => $args, 'result' => $r['json'], 'agent' => 'local']);
                 $chips = rh_ai_followup_chips($user, [$tool]);
-                rh_ai_cache_put($db, $answerKey, $uid, ['reply_tok' => $text, 'links' => $r['links'], 'chips' => $chips], RH_AI_ANSWER_CACHE_SECONDS);
+                if ($tool !== 'import_job') { // an Import review changes as the person answers on the screen: never replayed
+                    rh_ai_cache_put($db, $answerKey, $uid, ['reply_tok' => $text, 'links' => $r['links'], 'chips' => $chips], RH_AI_ANSWER_CACHE_SECONDS);
+                }
                 return $finish($text, 'local', ['links' => $r['links'], 'chips' => $chips, 'local' => ['tool' => $tool, 'view' => $view]]);
             }
         }
@@ -3654,7 +3668,7 @@ RECHECK: the person says the last answer was wrong. A search that found nothing 
     $res['claim_ms'] = round((float)$budget['claim_ms'], 2);
     $res['claims_checked'] = (int)$budget['claims'];
     $res['claim_fixed'] = $claimFixed;
-    if (strpos($final, 'Sorry - the Assistant could not answer') !== 0 && !$budget['cards']) { // a reply with cards is never replayed from the cache
+    if (strpos($final, 'Sorry - the Assistant could not answer') !== 0 && !$budget['cards'] && !in_array('import_job', (array)$budget['tools_used'], true)) { // a reply with cards is never replayed from the cache
         rh_ai_cache_put($db, $answerKey, $uid, ['reply_tok' => $final, 'links' => $budget['links'], 'chips' => $chips], RH_AI_ANSWER_CACHE_SECONDS);
     }
     try {

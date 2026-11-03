@@ -212,6 +212,9 @@ function rh_ai_money_read_intent(string $raw): ?array
     if ($l === '' || mb_strlen($l) > 160 || (function_exists('rh_ai_focus_is_change') && preg_match('/^(take|record|refund|charge|mark|add|post|collect)\b/u', $l))) {
         return null;
     }
+    if (preg_match('/\bimport(s|ed|ing)?\b/u', $l)) {
+        return null; // "what's left on my import" is about an Import review, not money owed
+    }
     $ask = null;
     if (preg_match('/\b(fully|completely|all) paid\b|\bpaid (in full|up|everything|it all|off)\b|\b(settled|paid off)\b|\bpaid for\b.*\?$/u', $l)) {
         $ask = 'full';
