@@ -55,6 +55,12 @@ $me = ['id' => $uid, 'role' => (string)($user['role'] ?? ''), 'username' => (str
 try {
     switch ((string)($in['action'] ?? '')) {
         case 'refresh':
+            // The wording call may take a few seconds: never hold this person's session meanwhile (other pages and
+            // in-app navigation would wait on it). The session is only read from here on.
+            if (session_status() === PHP_SESSION_ACTIVE) {
+                @session_write_close();
+            }
+            @ignore_user_abort(true);
             $r = rh_dec_refresh($pdo, $area, true, $uid);
             $html = rh_review_panel($area);
             rh_dec_api_out(200, ['success' => true, 'status' => $r['status'], 'html' => $html]);

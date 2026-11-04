@@ -9,8 +9,9 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); } // nev
  * rendered after one fake wording call (names never leave), plain wording, a helper line on every column and figure.
  *
  * Usage (from the repo root): php scripts/tests/ai_review_accounting_test.php
- * No network (fake transport). Live DB (Liwonde, the test hotel): every fixture is written inside a transaction that is
- * rolled back; settings are overridden in memory only.
+ * No network (fake transport). Live DB: every fixture is written inside a transaction that is rolled back; settings are
+ * overridden in memory only. The exact figures are checked on a fixed past period with no real rows, so they run on any
+ * database whatever its recent takings.
  */
 $root = dirname(__DIR__, 2);
 chdir($root);
@@ -153,12 +154,26 @@ rh_ai_set_transport(static function ($method, $url, $headers, $body, $timeout) {
 });
 $GLOBALS['__rh_dec_models'] = ['provider' => 'google', 'fast' => ['model_id' => 'test-fast-model', 'price_in_per_mtok' => null, 'price_out_per_mtok' => null]];
 
-$winFrom = date('Y-m-d', strtotime('-' . (2 * rh_dec_num('ai_review_base_days', 7, 92) + 5) . ' days'));
-$stLive = $pdo->prepare("SELECT (SELECT COUNT(*) FROM payments WHERE deleted_at IS NULL AND payment_date >= ?) + (SELECT COUNT(*) FROM stock_shift_closes WHERE shift_date >= ?)");
-$stLive->execute([$winFrom, $winFrom]);
-$live = (int)$stLive->fetchColumn();
-if ($live > 0) {
-    skip('fixture figures: this database has ' . $live . ' real payment / till-close rows in the last ' . (2 * rh_dec_num('ai_review_base_days', 7, 92) + 5) . ' days, so the exact-figure checks run only on the test hotel (nothing is changed or locked here)');
+// The exact-figure checks run on a fixed period far in the past that holds no real rows, so they run on every
+// database (real takings never mix in) and nothing real is read, changed or locked. Only figures that are not tied to
+// a period (open purchase orders, refunds waiting, money owed) include real rows, and are checked against those reads.
+$days = rh_dec_num('ai_review_base_days', 7, 92);
+$wTo = '';
+foreach (['2001-06-30', '1991-06-30', '1981-06-30'] as $cand) {
+    $wf = date('Y-m-d', strtotime($cand . ' -' . (2 * $days + 5) . ' days'));
+    $st = $pdo->prepare("SELECT (SELECT COUNT(*) FROM payments WHERE payment_date BETWEEN ? AND ?)
+        + (SELECT COUNT(*) FROM stock_shift_closes WHERE shift_date BETWEEN ? AND ?)
+        + (SELECT COUNT(*) FROM stock_orders WHERE COALESCE(voided_at, paid_at, created_at) BETWEEN ? AND ?)
+        + (SELECT COUNT(*) FROM booking_charges WHERE voided_at BETWEEN ? AND ?)
+        + (SELECT COUNT(*) FROM bookings WHERE DATE(created_at) BETWEEN ? AND ?)");
+    $st->execute([$wf, $cand, $wf, $cand, $wf . ' 00:00:00', $cand . ' 23:59:59', $wf . ' 00:00:00', $cand . ' 23:59:59', $wf, $cand]);
+    if ((int)$st->fetchColumn() === 0) {
+        $wTo = $cand;
+        break;
+    }
+}
+if ($wTo === '') {
+    skip('fixture figures: no empty past period found to run them on');
 } else {
 $pdo->beginTransaction();
 try {
@@ -168,10 +183,12 @@ try {
     rh_ai_settings($pdo, true);
     // VAT on at 17.5%, prices include VAT (in memory only)
     foreach (['vat_enabled' => '1', 'vat_rate' => '17.5', 'vat_pricing_mode' => 'inclusive'] as $k => $v) { $GLOBALS['_SITE_SETTINGS'][$k] = $v; }
-    $today = date('Y-m-d');
-    $days = rh_dec_num('ai_review_base_days', 7, 92);
-    $old = date('Y-m-d', strtotime('-' . (2 * $days - 1) . ' days')); // inside the period before the base period
+    $today = $wTo; // the base period ends on the fixed day
+    $old = date('Y-m-d', strtotime($wTo . ' -' . (2 * $days - 1) . ' days')); // inside the period before the base period
+    $newCtx = static function () use ($pdo, $wTo): array { return $GLOBALS['__rh_dec_ctx'] = rh_dec_context_new($pdo, $wTo); };
     $pdo->exec("DELETE FROM ai_review_cache WHERE cache_day = CURDATE() AND area = 'accounting'");
+    $realDue = (float)$pdo->query("SELECT (SELECT COALESCE(SUM(total_cost), 0) FROM stock_purchase_orders WHERE status IN ('sent', 'partial'))
+        + (SELECT COALESCE(SUM(refund_amount), 0) FROM payments WHERE deleted_at IS NULL AND payment_type = 'refund' AND refund_status = 'pending')")->fetchColumn();
     $pdo->prepare("INSERT INTO gym_inquiries (reference_number, name, email, phone, total_amount, vat_amount, total_with_vat) VALUES ('DECTEST-G', 'Dectest Member', 'dectest.member@example.com', '000', 1000, 175, 1175)")->execute();
     $gymId = (int)$pdo->lastInsertId();
     $pay = $pdo->prepare("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount, payment_method, payment_type, payment_status, refund_status, refund_amount, refund_reason, recorded_by)
@@ -191,14 +208,19 @@ try {
     $pdo->prepare("INSERT INTO stock_purchase_orders (reference, status, order_date, subtotal, total_cost) VALUES ('DECTEST-PO1', 'sent', ?, 4000, 4000), ('DECTEST-PO2', 'partial', ?, 1000, 1000)")->execute([$today, $today]);
     $sc = $pdo->prepare("INSERT INTO stock_shift_closes (user_id, user_name, shift_date, closed_at, variance_cash, override_applied) VALUES (?, 'Dectest Tillstaff', ?, NOW(), -50, ?)");
     $sc->execute([$adm['id'], $today, 0]);
-    $sc->execute([$adm['id'], date('Y-m-d', strtotime('-1 day')), 1]);
+    $sc->execute([$adm['id'], date('Y-m-d', strtotime($wTo . ' -1 day')), 1]);
 
-    // Cash covered (takings after refunds 6190.00 over the period against 5300.00 due out): no card
-    $covered = rh_dec_f_cash($pdo, rh_dec_context($pdo, true));
-    check($covered['ok'] && !$covered['cards'] && $covered['total'] > 0, 'cash: the recent takings cover what is due out: no card (the check still counts as run, with a checked total)', json_encode($covered));
+    // Cash: takings after refunds in the period are 6190.00; due out is 5300.00 of fixtures plus any real open orders
+    // and refunds waiting. With full history the card shows only while the expected position is below zero.
+    $ctx = $newCtx();
+    $covered = rh_dec_f_cash($pdo, $ctx);
+    check(near((float)$ctx['base']['amount'], 6690.00), 'the fixed period holds only the fixture takings (6690.00 collected)', json_encode($ctx['base']));
+    $short0 = 6190.00 - (5300.00 + $realDue) < -BALANCE_TOLERANCE;
+    check($covered['ok'] && $covered['total'] > 0 && ($covered['cards'] === []) === !$short0,
+        $short0 ? 'cash: real open orders make what is due out more than the takings: a card (the check counts as run, with a checked total)' : 'cash: the recent takings cover what is due out: no card (the check still counts as run, with a checked total)', json_encode([$realDue, count($covered['cards'])]));
     $pdo->prepare("INSERT INTO stock_purchase_orders (reference, status, order_date, subtotal, total_cost) VALUES ('DECTEST-PO3', 'sent', ?, 2000, 2000)")->execute([$today]);
 
-    $ctx = rh_dec_context($pdo, true);
+    $ctx = $newCtx();
     $ml = $ctx['run']('money_leaks', ['from' => $ctx['from'], 'to' => $ctx['to']]);
     $b = rh_dec_build($pdo, 'accounting', $ctx);
     $cards = [];
@@ -223,6 +245,8 @@ try {
     check(strpos($labels, 'other than today') !== false && strpos($labels, 'DECTEST') === false && (int)$t['tier'] === 3 && strpos((string)$t['link'][0], 'tab=vat&start_date=' . $ctx['from'] . '&end_date=' . $ctx['to']) !== false,
         'VAT check: older-rate rows listed only, tier 3 (never automatic), the link opens the VAT register for the same days', $labels);
     check(count(array_filter((array)$t['evidence']['rows'], static fn($r) => in_array($r['reference'] ?? '', ['DECTEST-OK', 'DECTEST-OLDRATE', 'DECTEST-NOVAT'], true))) === 0, 'VAT check: right rows, and a no-VAT row on a zero-rated account, are not questioned');
+    check(!array_filter((array)$t['options'], static fn($o) => empty($o['not_valued']) || $o['best'] !== null || $o['expected'] !== null || $o['worst'] !== null),
+        'VAT check: no option claims money brought in or saved (a correction can raise or lower what is owed): every option "Not valued"');
     $GLOBALS['_SITE_SETTINGS']['vat_enabled'] = '0';
     $off = rh_dec_f_tax($pdo, $ctx);
     check($off['ok'] && !$off['cards'], 'VAT switched off: no VAT row is questioned (and no levy flag without bookings)');
@@ -237,24 +261,41 @@ try {
     check($shortRow !== null && strpos((string)$shortRow['label'], '2 time(s), repeated, 1 with override') !== false && near((float)$shortRow['amount'], 100.0), 'control: day-close shortages grouped by person, repeats and overrides shown', json_encode($shortRow));
     $refRow = array_values(array_filter($rows, static fn($r) => strpos((string)$r['label'], 'Refunds paid out in full') === 0))[0] ?? null;
     check($refRow !== null && near((float)$refRow['amount'], 500.0) && near((float)$ml['refunds']['total'], 500.0) && strpos((string)$l['why_now'], 'in full') !== false, 'control: refunds shown at the full amount paid back (500.00), listed, not counted');
+    check(!array_filter((array)$l['options'], static fn($o) => empty($o['not_valued']) || $o['best'] !== null), 'control: a void or a removed charge is not money that comes back: the options are "Not valued"');
 
     // Cash outlook
     $c = $cards['acc_cash'] ?? null;
     $poSum = (float)$pdo->query("SELECT COALESCE(SUM(total_cost), 0) FROM stock_purchase_orders WHERE status IN ('sent', 'partial')")->fetchColumn();
     $pendSum = (float)$pdo->query("SELECT COALESCE(SUM(refund_amount), 0) FROM payments WHERE deleted_at IS NULL AND payment_type = 'refund' AND refund_status = 'pending'")->fetchColumn();
-    check($c !== null && near((float)$c['at_stake'], $poSum + $pendSum) && $poSum >= 5000 - BALANCE_TOLERANCE, 'cash: due out = open purchase orders at order cost + refunds waiting, in full', json_encode([$c['at_stake'] ?? null, $poSum, $pendSum]));
+    check($c !== null && near((float)$c['at_stake'], $poSum + $pendSum) && $poSum >= 7000 - BALANCE_TOLERANCE, 'cash: due out = open purchase orders at order cost + refunds waiting, in full', json_encode([$c['at_stake'] ?? null, $poSum, $pendSum]));
     $pace = round(((float)$ctx['base']['amount'] - (float)$ml['refunds']['total']) / $days, 2);
     $exp = round($pace * $days - ($poSum + $pendSum), 2);
     $hist = rh_dec_payment_history_days($pdo);
+    $overdue = (float)$ml['still_owed']['left_or_overdue_total'];
     $o0 = $c['options'][0] ?? [];
-    if ($hist >= (int)$ctx['history_min']) {
-        check(near((float)$o0['expected'], $exp) && near((float)$o0['worst'], -($poSum + $pendSum)) && near((float)$o0['best'], $exp + (float)$ml['still_owed']['left_or_overdue_total']),
-            'cash: expected = recent takings pace x days - due out; worst = nothing comes in; best adds the overdue money', json_encode([$o0, $exp]));
-        check(($exp < 0) === ((int)$c['recommend'] === 1) && (int)$c['tier'] === (int)$c['options'][(int)$c['recommend']]['tier'], 'cash: holding orders is recommended only when the expected position is below zero; the card\'s tier is the recommended option\'s');
-    } else {
-        check($o0['expected'] === null, 'cash: without enough history no expected figure is invented');
-    }
+    $o1 = $c['options'][1] ?? [];
+    check($hist >= (int)$ctx['history_min'] && near($pace, round(6190.00 / $days, 2)),'cash: the takings pace after refunds in full (6190.00 over ' . $days . ' days)', json_encode([$pace, $hist]));
+    check(near((float)$o0['expected'], $exp) && near((float)$o0['worst'], -($poSum + $pendSum)) && near((float)$o0['best'], $exp + $overdue),
+        'cash: expected = recent takings pace x days - due out; worst = nothing comes in; best adds the overdue money', json_encode([$o0, $exp]));
+    check(($exp < 0) === ((int)$c['recommend'] === 1) && (int)$c['tier'] === (int)$c['options'][(int)$c['recommend']]['tier'], 'cash: holding orders is recommended only when the expected position is below zero; the card\'s tier is the recommended option\'s');
+    check(near((float)$o1['expected'], $exp + $poSum) && near((float)$o1['best'], $exp + $overdue + $poSum) && near((float)$o1['worst'], -$pendSum) && stripos((string)$o1['effect'], 'not saved') !== false,
+        'cash: holding orders is shown on the same figure (the position after the period: due out less the held orders), never as money saved', json_encode($o1));
+    check(stripos((string)$c['measure'], 'position after the next ' . $days . ' days') !== false, 'cash: the card says what Best / Expected / Worst measure');
     check(stripos((string)$c['at_stake_note'], 'not a runway') !== false && !preg_match('/\brunway of\b/i', (string)$c['why_now']), 'cash: no runway is claimed (no cash or bank balance on record)');
+    // The wording follows the figures: "chase the overdue money" only while something is overdue (same reads, owed set)
+    $owedCtx = static function (array $ctx, array $ml, float $over) {
+        $m2 = $ml;
+        $m2['still_owed'] = ['total' => $over, 'accounts' => $over > 0 ? 1 : 0, 'left_or_overdue_total' => $over, 'left_or_overdue_accounts' => $over > 0 ? 1 : 0, 'largest_left_or_overdue' => [], 'complete' => true];
+        $ctx['run'] = static fn(string $tool, array $args = []) => $tool === 'money_leaks' ? $m2 : null;
+        return $ctx;
+    };
+    $cNone = rh_dec_f_cash($pdo, $owedCtx($ctx, $ml, 0.0))['cards'][0] ?? null;
+    $cSome = rh_dec_f_cash($pdo, $owedCtx($ctx, $ml, 1234.0))['cards'][0] ?? null;
+    $txt = static fn(?array $x): string => $x ? $x['recommendation'] . ' | ' . implode(' | ', array_column($x['options'], 'label')) : '';
+    check($cNone !== null && stripos($txt($cNone), 'overdue') === false && !preg_match('/\bchase\b/i', $txt($cNone)) && strpos((string)$cNone['why_now'], 'none of it overdue') !== false,
+        'cash: nothing overdue: no "chase the overdue money" in the options or the recommendation', $txt($cNone));
+    check($cSome !== null && stripos((string)$cSome['recommendation'], 'chase the overdue money') !== false && stripos((string)$cSome['options'][1]['label'], 'overdue money is in') !== false && near((float)$cSome['options'][0]['best'], $exp + 1234.0),
+        'cash: money overdue: chasing it is in the recommendation and the best case adds it', $txt($cSome));
 
     // Profit by department
     $pr = $cards['acc_profit'] ?? null;
@@ -268,50 +309,67 @@ try {
     $pFrom = date('Y-m-d', strtotime($ctx['from'] . ' -' . $days . ' days'));
     $pTo = date('Y-m-d', strtotime($ctx['from'] . ' -1 day'));
     $drop = round($net($pdo, 'room', $pFrom, $pTo) - $net($pdo, 'room', $ctx['from'], $ctx['to']), 2);
-    if ($hist >= 2 * $days) {
-        check($pr !== null && near((float)$pr['at_stake'], $drop) && near($drop, 6510.64) && strpos((string)$pr['decision'], 'Rooms') !== false,
-            'profit: the biggest fall (Rooms, takings excluding VAT and refunds, against the period before) = 6510.64', json_encode([$pr['at_stake'] ?? null, $drop]));
-    } else {
-        skip('profit: not enough payment history on this database to compare two periods');
-    }
+    check($hist >= 2 * $days && $pr !== null && near((float)$pr['at_stake'], $drop) && near($drop, 6510.64) && strpos((string)$pr['decision'], 'Rooms') !== false,
+        'profit: the biggest fall (Rooms, takings excluding VAT and refunds, against the period before) = 6510.64', json_encode([$pr['at_stake'] ?? null, $drop]));
     $prLabels = implode(' | ', array_column((array)($pr['evidence']['rows'] ?? []), 'label'));
     check($pr !== null && !preg_match('/(Rooms|Conference|Gym|Events)[^|]*margin/i', $prLabels) && (int)$pr['tier'] === 1 && (int)$pr['options'][1]['tier'] === 3,
         'profit: no margin shown for departments without costs on record; looking into it is tier 1, prices tier 3', $prLabels);
+    check($pr !== null && !array_filter((array)$pr['options'], static fn($o) => empty($o['not_valued'])), 'profit: looking into a fall or changing prices brings nothing in by itself: the options are "Not valued"');
 
-    // Every card: shape, plain wording, figures traceable, links carry the base period where they are period screens
+    // Every card: shape, plain wording, figures traceable, an option never surer than the card
     foreach ($cards as $k => $cd) {
         check($cd['decision'] !== '' && count($cd['options']) >= 1 && in_array((int)$cd['tier'], [1, 2, 3], true) && $cd['evidence']['total'] > 0 && $cd['at_stake_note'] !== '',
             "card $k: decision, options, tier, a checked total and a note on what the money figure uses");
         check(!preg_match('/\b(AI|smart|insights?|assistant|generated|powered|model|MRA)\b/i', $cd['decision'] . ' ' . $cd['why_now'] . ' ' . $cd['recommendation'] . ' ' . implode(' ', array_column($cd['options'], 'label'))), "card $k: plain wording");
+        check(!array_filter($cd['options'], static fn($o) => (float)$o['confidence'] > (float)$cd['confidence'] + 0.0001), "card $k: no option's likelihood is above the card's confidence");
     }
     check(rh_dec_proof_log($pdo, $t, 'ran', $adm['id']) === 0, 'a tier 3 card (VAT corrections) can never be logged as run by itself');
 
-    // The panel, after one wording call
-    $r = rh_dec_refresh($pdo, 'accounting', true, $adm['id'], true);
+    // The module switches are loaded by the engine itself, so a script that builds cards never reads "off" for "unknown"
+    $probe = tempnam(sys_get_temp_dir(), 'rhdec');
+    file_put_contents($probe, '<?php chdir(' . var_export($root, true) . '); require "config/database.php"; require "includes/ai/ai-decisions.php"; echo (function_exists("rh_module_key_enabled") && rh_dec_mod("finance") !== null) ? "loaded" : "missing";');
+    $pr2 = trim((string)shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($probe) . ' 2>&1'));
+    @unlink($probe);
+    check(substr($pr2, -6) === 'loaded', 'a script that loads only the database and the engine still reads the module switches', $pr2);
+
+    // First page load: cards worked out by SQL but not worded yet. A hidden hook only (no text, no tab), and that build
+    // does not use up the refresh limit, so the page's one ask words them straight away on any server.
+    $pdo->exec("DELETE FROM ai_review_cache WHERE cache_day = CURDATE() AND area = 'accounting'");
+    $GLOBALS['dec_calls'] = [];
+    [$hp, $pp] = $render();
+    check($pp === '' && strpos($hp, 'data-dec-pending') !== false && strpos($hp, ' hidden></div>') !== false && trim(strip_tags($hp)) === '' && strpos($hp, 'rh-dec-tab') === false && !$GLOBALS['dec_calls'],
+        'first page load: only a hidden, empty hook is returned (nothing visible, no model call while the page loads)', $hp);
+    $c0 = rh_dec_cache_get($pdo, 'accounting');
+    check($c0 !== null && !rh_dec_is_worded($c0) && $c0['tried_at'] === '' && rh_dec_pending($pdo, $adm, 'accounting'), 'the page-load build is stored unworded and is not counted as a refresh');
+    $r = rh_dec_refresh($pdo, 'accounting', true, $adm['id'], false); // what the hook asks for (the Refresh button's path)
     $body = (string)($GLOBALS['dec_calls'][0]['body'] ?? '');
-    check($r['model_called'] && count($GLOBALS['dec_calls']) === 1, 'one wording call for the accounting area');
+    check($r['status'] === 'built' && $r['model_called'] && count($GLOBALS['dec_calls']) === 1, 'the first ask after the page load words the cards (one call), not held back as "recent"', json_encode([$r['status'], $r['model_called'], count($GLOBALS['dec_calls'])]));
+    check(!rh_dec_pending($pdo, $adm, 'accounting') && rh_dec_refresh($pdo, 'accounting', true, $adm['id'], false)['status'] === 'recent' && count($GLOBALS['dec_calls']) === 1,
+        'once asked, no second hook and no second call within ai_review_refresh_minutes');
     check($body !== '' && stripos($body, 'Dectest Tillstaff') === false && strpos($body, 'DECTEST-') === false, 'nothing personal leaves: no staff name, no payment or order reference in the call');
     [$html, $printed] = $render();
     if ((string)getenv('RH_DEC_DUMP') !== '') {
         file_put_contents((string)getenv('RH_DEC_DUMP'), $html); // for the headless look check only (fixture figures)
     }
-    check($html !== '' && $printed === '' && strpos($html, '>Decisions</h2>') !== false, 'a good review: the accounting panel is returned (printed only by the dashboard\'s echo)');
+    check($html !== '' && $printed === '' && strpos($html, '>Decisions</h2>') !== false && strpos($html, 'data-dec-pending') === false, 'a good review: the accounting panel is returned (printed only by the dashboard\'s echo)');
     foreach (array_keys(array_filter($cards, static fn($x) => $x['share_pct'] !== null)) as $k) {
         check(strpos($html, 'data-key="' . $k . '"') !== false, "panel shows card $k");
     }
     $ths = substr_count($html, '<th scope="col" class="no-sort">');
     check($ths > 0 && $ths === preg_match_all('/<th scope="col" class="no-sort">[^<]+<span class="rh-dec__help">/', $html), 'every column header in the panel has a plain helper line');
     check(preg_match_all('/<dt>[^<]+<\/dt><dd[^>]*>[^<]*<\/dd><dd class="rh-dec__help">/', $html) === substr_count($html, '<dt>'), 'every figure on every card has a plain helper line');
+    check(strpos($html, 'Best, Expected and Worst all show the money position after the next ' . $days . ' days') !== false && strpos($html, '>Not valued<') !== false && strpos($html, '>Likelihood<') !== false,
+        'the panel says what each card\'s Best / Expected / Worst measure, "Not valued" where an option is not money, and Likelihood for options');
     check(!preg_match('/\b(AI|smart|insights?|assistant|generated|powered by|thinking)\b/i', strip_tags($html)) && !preg_match('/fa-(magic|wand|robot|brain|star|microchip|hat-wizard)|sparkle|gradient|\bMRA\b/i', $html), 'the panel has no AI-looking words or icons and no MRA wording');
     check(strpos($html, 'Dectest Tillstaff') !== false, 'evidence names are shown on the hotel\'s own screen (they never left it)');
     $GLOBALS['__rh_dec_models'] = ['provider' => ''];
     [$h2, $p2] = $render();
-    check($h2 === '' && $p2 === '', 'no model set up: the accounting panel disappears (empty string, no templated cards)');
+    check($h2 === '' && $p2 === '', 'no model set up: the accounting panel disappears (empty string, no templated cards, no hook)');
 } finally {
     $pdo->rollBack();
     $GLOBALS['_SITE_SETTINGS'] = $settingsKeep;
     rh_ai_settings($pdo, true);
-    unset($GLOBALS['__rh_dec_models']);
+    unset($GLOBALS['__rh_dec_models'], $GLOBALS['__rh_dec_ctx']);
     rh_ai_set_transport(null);
     putenv('RH_AI_FAKE_PROVIDER');
 }

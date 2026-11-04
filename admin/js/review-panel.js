@@ -1,12 +1,16 @@
 /*
  * The Decisions panel (admin/includes/review-panel.php): the "Decisions" tab and side drawer, Refresh, and Noted / Not now.
- * Loaded only when a panel is printed. Document-level listeners, bound once, so they keep working after in-app navigation
- * (the drawer's open state lives only on its own element, so a new page always starts closed). Posts to the panel's own
- * endpoint with the page's security token; nothing else is sent.
+ * Loaded only when a panel (or its hidden first-wording hook) is printed. Document-level listeners, bound once, so they keep
+ * working after in-app navigation (the drawer's open state lives only on its own element, so a new page always starts closed).
+ * Posts to the panel's own endpoint with the page's security token; nothing else is sent.
+ *
+ * The tab and drawer are position: fixed. A page box with containment (e.g. the cockpit's .ck, a container query box)
+ * would pin them to that box instead of the window, so each panel is moved up to be a direct child of #rh-admin-page
+ * (still inside the in-app content, so it goes with the page on navigation). Until then the tab stays hidden (CSS).
  */
 (function () {
     'use strict';
-    if (window.rhDecBound) { return; }
+    if (window.rhDecBound) { if (window.rhDecInit) { window.rhDecInit(); } return; }
     window.rhDecBound = true;
 
     var FOCUSABLE = 'a[href], button:not([disabled]), summary, input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
@@ -19,6 +23,48 @@
         return fetch(sec.getAttribute('data-endpoint') || 'api/decisions.php', { method: 'POST', body: fd, credentials: 'same-origin' })
             .then(function (r) { return r.json().catch(function () { return { success: false, error: 'Something went wrong. Try again.' }; }); });
     }
+
+    // Move a panel out of any contained box: a direct child of #rh-admin-page (or <main> / <body> when there is none).
+    // Any older copy of the same area's panel already there (e.g. after a part of the page was reloaded) is removed.
+    function place(wrap) {
+        var host = document.getElementById('rh-admin-page') || document.querySelector('main') || document.body;
+        if (wrap.parentNode !== host) {
+            Array.prototype.forEach.call(host.children, function (el) {
+                if (el !== wrap && el.id && el.id === wrap.id) { el.remove(); }
+            });
+            host.appendChild(wrap);
+        }
+        wrap.classList.add('is-placed');
+    }
+
+    // First wording: the page printed a hidden hook because today's cards are not worded yet. Ask once; show the panel
+    // only if a good review comes back, otherwise remove the hook (nothing is ever shown in its place).
+    function wordPending(hook, retries) {
+        hook.setAttribute('data-dec-sent', '1');
+        post(hook, { action: 'refresh' }).then(function (j) {
+            if (!hook.isConnected) { return; }
+            var wrap = null;
+            if (j && j.success && typeof j.html === 'string' && j.html !== '') {
+                var tmp = document.createElement('div');
+                tmp.innerHTML = j.html;
+                wrap = tmp.querySelector('.rh-dec-wrap');
+            }
+            if (wrap) {
+                hook.replaceWith(wrap);
+                place(wrap);
+            } else if (j && j.success && j.status === 'busy' && retries > 0) { // being worded by another request: ask again shortly
+                setTimeout(function () { if (hook.isConnected) { wordPending(hook, retries - 1); } }, 5000);
+            } else {
+                hook.remove();
+            }
+        }).catch(function () { if (hook.isConnected) { hook.remove(); } });
+    }
+
+    function init() {
+        Array.prototype.forEach.call(document.querySelectorAll('.rh-dec-wrap'), place);
+        Array.prototype.forEach.call(document.querySelectorAll('[data-dec-pending]:not([data-dec-sent])'), function (hook) { wordPending(hook, 2); });
+    }
+    window.rhDecInit = init;
 
     function openWrap() { return document.querySelector('.rh-dec-wrap.is-open'); }
 
@@ -46,11 +92,12 @@
         if (ev.key === 'Escape' || ev.key === 'Esc') { ev.preventDefault(); closeDrawer(wrap); return; }
         if (ev.key === 'Tab') { // keep Tab inside the open drawer
             var drawer = wrap.querySelector('.rh-dec-drawer');
-            var items = drawer ? Array.prototype.filter.call(drawer.querySelectorAll(FOCUSABLE), function (e) { return e.offsetParent !== null; }) : [];
+            var items = drawer ? Array.prototype.filter.call(drawer.querySelectorAll(FOCUSABLE), function (e) { return e.getClientRects().length > 0; }) : [];
             if (!items.length) { ev.preventDefault(); return; }
-            var first = items[0], last = items[items.length - 1];
-            if (!drawer.contains(document.activeElement) || (ev.shiftKey && (document.activeElement === first || document.activeElement === drawer))) { ev.preventDefault(); last.focus(); }
-            else if (!ev.shiftKey && document.activeElement === last) { ev.preventDefault(); first.focus(); }
+            var first = items[0], last = items[items.length - 1], act = document.activeElement;
+            if (!drawer.contains(act)) { ev.preventDefault(); (ev.shiftKey ? last : first).focus(); }
+            else if (ev.shiftKey && (act === first || act === drawer)) { ev.preventDefault(); last.focus(); }
+            else if (!ev.shiftKey && act === last) { ev.preventDefault(); first.focus(); }
         }
     });
 
@@ -116,4 +163,8 @@
             }).catch(function () { btn.disabled = false; if (state) { state.textContent = 'Could not be saved.'; } });
         }
     });
+
+    // In-app navigation brings the page in without reloading this file: place the new panel and ask for its wording.
+    document.addEventListener('rh:content-updated', init);
+    init();
 })();

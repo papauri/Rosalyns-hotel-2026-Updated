@@ -75,3 +75,10 @@
 @media (prefers-reduced-motion: reduce) {
     .rh-dec-backdrop, .rh-dec-drawer { transition: none; }
 }
+/* Fixed parts are pinned to the window only once the script has moved the panel out of any contained page box
+   (admin/js/review-panel.js); until then the tab is not shown, so it never appears in the wrong place. */
+.rh-dec-wrap:not(.is-placed) .rh-dec-tab { visibility: hidden; }
+/* With the Assistant docked on the right (laptop widths), the tab sits at the docked panel's edge, like the help button. */
+@media screen and (min-width: 1025px) {
+    html.rh-ai-docked .rh-dec-tab { right: var(--rh-ai-w); }
+}

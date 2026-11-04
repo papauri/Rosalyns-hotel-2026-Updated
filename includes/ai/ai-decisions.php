@@ -31,6 +31,11 @@
 
 require_once __DIR__ . '/ai-agents.php'; // the read tools, the briefing, role models, usage and the vault
 require_once dirname(__DIR__, 2) . '/admin/includes/review-panel.php'; // the area gate (shared with the panel helper)
+if (!function_exists('rh_module_key_enabled')) {
+    // The module switches (pure functions). Every entry point that builds cards (page, endpoint, daily run, a script)
+    // must read them: without them the shared reads skip whole sections and a check would look complete but empty.
+    require_once dirname(__DIR__, 2) . '/admin/includes/permissions.php';
+}
 
 // ── Readiness, settings, gate ────────────────────────────────────────────────
 
@@ -108,6 +113,25 @@ function rh_dec_requires_ok(array $user, array $req): bool
     return true;
 }
 
+/**
+ * A module switch for the fixed checks: true / false, or null when the switch cannot be read here. null is never
+ * "off": a check that depends on it reads anyway and is marked partial ("could not check in full").
+ */
+function rh_dec_mod(string $m): ?bool
+{
+    if (isset($GLOBALS['__rh_ai_module_override'][$m])) {
+        return (bool)$GLOBALS['__rh_ai_module_override'][$m]; // tests only
+    }
+    if (!function_exists('rh_module_key_enabled') || !function_exists('moduleEnabled')) {
+        return null;
+    }
+    try {
+        return (bool)rh_module_key_enabled($m);
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
 /** The account the fixed checks run under when nobody is signed in (the daily checks): the first active admin. */
 function rh_dec_system_user(PDO $db): ?array
 {
@@ -130,10 +154,10 @@ function rh_dec_fmt(string $cur, float $v): string
  * Money collected in the last N days: the Accounting dashboard's own "total collected" rule (payments completed,
  * paid, refunded or partly refunded, not refund rows; gross). ok=false when it could not be read.
  */
-function rh_dec_base(PDO $db, int $days): array
+function rh_dec_base(PDO $db, int $days, ?string $to = null): array
 {
-    $from = date('Y-m-d', strtotime('-' . ($days - 1) . ' days'));
-    $to = date('Y-m-d');
+    $to = $to ?? date('Y-m-d');
+    $from = date('Y-m-d', strtotime($to . ' -' . ($days - 1) . ' days'));
     try {
         $st = $db->prepare("SELECT COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0)
                             FROM payments WHERE payment_date BETWEEN ? AND ? AND deleted_at IS NULL");
@@ -188,14 +212,19 @@ function rh_dec_finders(): array
 function rh_dec_context(PDO $db, bool $fresh = false): array
 {
     static $memo = null;
+    if (is_array($GLOBALS['__rh_dec_ctx'] ?? null)) {
+        return $GLOBALS['__rh_dec_ctx']; // tests only: the checks run on a fixed period (rh_dec_context_new with $to)
+    }
     if (!$fresh && $memo !== null && $memo['to'] === date('Y-m-d')) {
         return $memo;
     }
     return $memo = rh_dec_context_new($db);
 }
 
-function rh_dec_context_new(PDO $db): array
+/** A fresh context; $to (tests only) ends the base period on another day than today. */
+function rh_dec_context_new(PDO $db, ?string $to = null): array
 {
+    $to = $to ?? date('Y-m-d');
     $days = rh_dec_num('ai_review_base_days', 7, 92); // the money reads allow 92 days at most
     $sys = rh_dec_system_user($db);
     $memo = [];
@@ -216,7 +245,7 @@ function rh_dec_context_new(PDO $db): array
             return $memo[$k] = null;
         }
     };
-    return ['base' => rh_dec_base($db, $days), 'days' => $days, 'from' => date('Y-m-d', strtotime('-' . ($days - 1) . ' days')), 'to' => date('Y-m-d'),
+    return ['base' => rh_dec_base($db, $days, $to), 'days' => $days, 'from' => date('Y-m-d', strtotime($to . ' -' . ($days - 1) . ' days')), 'to' => $to,
         'cur' => rh_ai_currency(), 'run' => $run, 'history_min' => rh_dec_num('ai_review_history_min_days', 1, 3650), 'sys' => $sys];
 }
 
@@ -233,6 +262,15 @@ function rh_dec_option(string $label, string $effect, ?float $best, ?float $expe
 {
     return ['label' => $label, 'effect' => $effect, 'best' => $best !== null ? round($best, 2) : null, 'expected' => $expected !== null ? round($expected, 2) : null,
         'worst' => $worst !== null ? round($worst, 2) : null, 'confidence' => round(max(0, min(1, $confidence)), 2), 'history_days' => $historyDays, 'tier' => max(1, min(3, $tier))];
+}
+
+/**
+ * An option whose result is not money brought in or saved (a review, a rule or price change, a correction): no
+ * best / expected / worst figure is claimed and the panel says "Not valued" (never "Not enough history").
+ */
+function rh_dec_option_unvalued(string $label, string $effect, float $confidence, int $tier): array
+{
+    return rh_dec_option($label, $effect, null, null, null, $confidence, 0, $tier) + ['not_valued' => true];
 }
 
 // ── Finders: bookings ────────────────────────────────────────────────────────
@@ -395,7 +433,11 @@ function rh_dec_f_leakage(PDO $db, array $ctx): array
     if ($m === null) {
         return ['ok' => false, 'total' => 0, 'cards' => []];
     }
-    $partial = !empty($m['till_voids']['error']) || !empty($m['till_shortages']['error']) || (rh_ai_mod('bookings') && !isset($m['folio_charges_voided']));
+    // A section the shared read skipped while its module is on (or cannot be read) is "could not check", never zero
+    $posOn = rh_dec_mod('pos');
+    $bkOn = rh_dec_mod('bookings');
+    $partial = !empty($m['till_voids']['error']) || !empty($m['till_shortages']['error']) || $posOn === null || $bkOn === null
+        || ($posOn && (!isset($m['till_voids']) || !isset($m['till_shortages']))) || ($bkOn && !isset($m['folio_charges_voided']));
     $voids = (float)($m['till_voids']['total'] ?? 0);
     $short = (float)($m['till_shortages']['total'] ?? 0);
     $folio = (float)($m['folio_charges_voided']['total'] ?? 0);
@@ -447,8 +489,9 @@ function rh_dec_f_leakage(PDO $db, array $ctx): array
         'urgency' => 0.6, 'confidence' => $partial ? 0.6 : 0.85, 'history_days' => $ctx['days'],
         'evidence' => ['total' => $count + $refCount, 'total_label' => 'voids, shortages, removed charges and refunds', 'rows' => $rows],
         'options' => [
-            rh_dec_option('Go through the voids and shortages with the staff named', 'A conversation, using the list under Evidence.', $amt, null, 0.0, 0.5, 0, 1),
-            rh_dec_option('Ask for a manager\'s approval on every void', 'A rule change made by a manager in the till settings.', $amt, null, 0.0, 0.4, 0, 3),
+            // A void or a removed charge is not money that comes back, so neither option is valued
+            rh_dec_option_unvalued('Go through the voids and shortages with the staff named', 'A conversation, using the list under Evidence.', 0.5, 1),
+            rh_dec_option_unvalued('Ask for a manager\'s approval on every void', 'A rule change made by a manager in the till settings.', 0.4, 3),
         ],
         'recommend' => 0, 'recommendation' => 'Go through the voids and shortages with the staff named first.',
         'tier' => 1, 'link' => ['shift-close-report.php', 'Open shift closes'],
@@ -461,7 +504,7 @@ function rh_dec_f_leakage(PDO $db, array $ctx): array
  */
 function rh_dec_shortages_by_staff(PDO $db, array $ctx): ?array
 {
-    if (!rh_ai_mod('pos')) {
+    if (rh_dec_mod('pos') === false) {
         return [];
     }
     try {
@@ -514,7 +557,8 @@ function rh_dec_f_cash(PDO $db, array $ctx): array
     if ($m === null || !isset($m['still_owed'], $m['refunds']) || !empty($m['still_owed']['error']) || !empty($m['refunds']['error']) || empty($ctx['base']['ok'])) {
         return ['ok' => false, 'total' => 0, 'cards' => []];
     }
-    $poOn = rh_ai_mod('stock');
+    $stockOn = rh_dec_mod('stock');
+    $poOn = $stockOn !== false; // the switch cannot be read: the orders are still read (and the check is partial)
     try {
         $po = ['n' => 0, 'v' => 0.0];
         $poRows = [];
@@ -531,7 +575,7 @@ function rh_dec_f_cash(PDO $db, array $ctx): array
     $pendN = (int)$pend['n'];
     $pendV = round((float)$pend['v'], 2);
     $owed = $m['still_owed'];
-    $partial = empty($owed['complete']);
+    $partial = empty($owed['complete']) || $stockOn === null;
     $total = $poN + $pendN + (int)$owed['accounts'];
     $dueOut = round($poV + $pendV, 2);
     if ($dueOut <= BALANCE_TOLERANCE) {
@@ -552,12 +596,17 @@ function rh_dec_f_cash(PDO $db, array $ctx): array
     if (!$short) {
         return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => []];
     }
+    $hasOverdue = $overdue > BALANCE_TOLERANCE;
+    $conf = $enough ? 0.65 : 0.4;
     $rec = 1; // hold non-urgent orders (falls back to paying as planned when there is no open order to hold)
+    // Both options are the same figure: the money position after the next N days (takings in less what is paid out;
+    // below zero = a shortfall). Holding an order moves its payment past those days; it is not a saving.
     $opts = [rh_dec_option('Pay what is due out as planned', 'Orders and waiting refunds are paid as usual; the position after the next ' . $days . ' days is shown.',
-        $expected !== null ? $expected + $overdue : null, $expected, -$dueOut, $enough ? 0.65 : 0.4, $enough ? $hist : 0, 1)];
+        $expected !== null ? $expected + $overdue : null, $expected, -$dueOut, $conf, $enough ? $hist : 0, 1)];
     if ($poOn && $poV > BALANCE_TOLERANCE) {
-        $opts[] = rh_dec_option('Hold non-urgent purchase orders until the overdue money is in', 'Orders wait on the Purchase Orders screen; each is still approved as usual. Refunds are never held here.',
-            $poV, null, 0.0, 0.5, 0, 2);
+        $opts[] = rh_dec_option('Hold non-urgent purchase orders until ' . ($hasOverdue ? 'the overdue money is in' : 'the takings cover them'),
+            'Orders wait on the Purchase Orders screen and are still owed afterwards (paid later, not saved); each is still approved as usual. Refunds are never held here.',
+            $expected !== null ? $expected + $overdue + $poV : null, $expected !== null ? $expected + $poV : null, round($poV - $dueOut, 2) + 0.0, $conf, $enough ? $hist : 0, 2);
     } else {
         $rec = 0;
     }
@@ -579,7 +628,7 @@ function rh_dec_f_cash(PDO $db, array $ctx): array
         $rows[] = ['label' => 'Days of those takings that what is due out equals', 'value' => number_format($cover, 1)];
     }
     $why = rh_dec_fmt($cur, $dueOut) . ' is due out (' . rh_dec_fmt($cur, $poV) . ' on ' . $poN . ' open purchase order(s)' . ($pendN > 0 ? ', ' . rh_dec_fmt($cur, $pendV) . ' in ' . $pendN . ' refund(s) waiting, in full' : '') . '). '
-        . 'Owed to the hotel: ' . rh_dec_fmt($cur, $owedAll) . ', of which ' . rh_dec_fmt($cur, $overdue) . ' is overdue. '
+        . 'Owed to the hotel: ' . rh_dec_fmt($cur, $owedAll) . ($hasOverdue ? ', of which ' . rh_dec_fmt($cur, $overdue) . ' is overdue. ' : ', none of it overdue. ')
         . ($cover !== null ? 'At the takings pace of the last ' . $days . ' days that is about ' . number_format($cover, 1) . ' day(s) of takings.' : 'There were no takings after refunds in the last ' . $days . ' days to set it against.')
         . ($partial ? ' Some accounts could not be read, so the money owed may be higher.' : '');
     return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => [rh_dec_card([
@@ -587,11 +636,16 @@ function rh_dec_f_cash(PDO $db, array $ctx): array
         'decision' => $rec === 1 ? 'Whether to hold non-urgent orders while ' . rh_dec_fmt($cur, $dueOut) . ' is due out' : 'Whether the coming takings cover ' . rh_dec_fmt($cur, $dueOut) . ' due out',
         'why_now' => $why,
         'at_stake' => $dueOut, 'at_stake_note' => 'Open purchase orders at order cost + refunds waiting to be paid in full. There is no cash or bank balance on record, so this is not a runway.',
-        'urgency' => $rec === 1 ? 0.85 : ($cover !== null && $cover > $days / 2 ? 0.6 : 0.4), 'confidence' => $enough ? 0.65 : 0.4, 'history_days' => $enough ? $hist : 0,
+        'urgency' => $rec === 1 ? 0.85 : ($cover !== null && $cover > $days / 2 ? 0.6 : 0.4), 'confidence' => $conf, 'history_days' => $enough ? $hist : 0,
         'evidence' => ['total' => $total, 'total_label' => 'open orders, waiting refunds and accounts owing checked', 'rows' => $rows],
         'options' => $opts, 'recommend' => $rec,
-        'recommendation' => $rec === 1 ? 'Hold non-urgent purchase orders and chase the overdue money first; the recent takings do not cover what is due out.'
-            : 'Pay the waiting refunds as planned and chase the overdue money; the recent takings do not cover what is due out.',
+        'measure' => 'the money position after the next ' . $days . ' days (takings in, less what is paid out)',
+        // Follows the figures: "chase the overdue money" only while something is overdue
+        'recommendation' => $rec === 1
+            ? ($hasOverdue ? 'Hold non-urgent purchase orders and chase the overdue money first; the recent takings do not cover what is due out.'
+                : 'Hold non-urgent purchase orders until the takings cover them; the recent takings do not cover what is due out.')
+            : ($hasOverdue ? 'Pay the waiting refunds as planned and chase the overdue money; the recent takings do not cover what is due out.'
+                : 'Pay the waiting refunds as planned; the recent takings do not cover what is due out.'),
         'tier' => $opts[$rec]['tier'], 'link' => $poOn && $poN > 0 ? ['purchase-orders.php', 'Open Purchase Orders'] : ['payments.php?balance=outstanding', 'Open money owed'],
     ])]];
 }
@@ -638,7 +692,7 @@ function rh_dec_dept_takings(PDO $db, string $from, string $to): ?array
  */
 function rh_dec_till_margin(PDO $db, string $from, string $to): ?array
 {
-    if (!rh_ai_mod('pos') || !rh_ai_admin_lib('pos-shift-totals.php') || !function_exists('rh_pos_margin_basis')) {
+    if (rh_dec_mod('pos') === false || !rh_ai_admin_lib('pos-shift-totals.php') || !function_exists('rh_pos_margin_basis')) {
         return null;
     }
     try {
@@ -685,6 +739,7 @@ function rh_dec_f_profit(PDO $db, array $ctx): array
         $partial = abs(array_sum(array_column($now, 'collected')) - (float)$ctx['base']['amount']) > BALANCE_TOLERANCE;
     }
     $till = rh_dec_till_margin($db, $from, $to);
+    $tillUnread = rh_dec_mod('pos') === null; // the till switch cannot be read: the margin is read anyway, the check is partial
     $tillPrev = $compare ? rh_dec_till_margin($db, $pFrom, $pTo) : null;
     $types = array_values(array_unique(array_merge(array_keys($now), array_keys((array)$prev))));
     $total = count($types);
@@ -710,7 +765,7 @@ function rh_dec_f_profit(PDO $db, array $ctx): array
         $rows[] = ['label' => 'Stock cost of those till sales', 'amount' => $till['cogs']];
     }
     if ($worst === null && $tillLoss <= BALANCE_TOLERANCE) {
-        return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => []];
+        return ['ok' => true, 'partial' => $partial || $tillUnread, 'total' => $total, 'cards' => []];
     }
     $range = '&start_date=' . $from . '&end_date=' . $to;
     if ($worst === null || $tillLoss > $worst['drop']) {
@@ -720,7 +775,7 @@ function rh_dec_f_profit(PDO $db, array $ctx): array
             'at_stake' => $tillLoss, 'at_stake_note' => 'Stock cost of till sales minus what they took excluding VAT (the Accounting dashboard\'s till margin).',
             'options' => [
                 rh_dec_option('Check recipe costs and stock use for the items sold most', 'Recipes, wastage and counts are checked on the stock screens; nothing changes by itself.', $tillLoss, null, 0.0, 0.5, 0, 1),
-                rh_dec_option('Change menu prices', 'A price change made by a manager on the menu screens.', null, null, null, 0.4, 0, 3),
+                rh_dec_option_unvalued('Change menu prices', 'A price change made by a manager on the menu screens.', 0.4, 3),
             ],
             'recommendation' => 'Check recipe costs and stock use first, then decide on prices.',
             'link' => ['reports.php?tab=fnb' . $range, 'Open the till report'],
@@ -733,14 +788,15 @@ function rh_dec_f_profit(PDO $db, array $ctx): array
                 . ($partial ? ' Part of the takings could not be matched to a department.' : ''),
             'at_stake' => $worst['drop'], 'at_stake_note' => 'The fall in takings excluding VAT and refunds (the Reports profit rule); costs are only on record for the till.',
             'options' => [
-                rh_dec_option('Look into the fall on the Reports screen', 'Compare the two periods by source and payment; nothing changes by itself.', $worst['drop'], null, 0.0, 0.5, $hist, 1),
-                rh_dec_option('Change prices or run an offer for ' . $label, 'A price, rate or offer change made by a manager on its own screen.', null, null, null, 0.4, 0, 3),
+                // Looking into a fall brings nothing in by itself, so neither option is valued
+                rh_dec_option_unvalued('Look into the fall on the Reports screen', 'Compare the two periods by source and payment; nothing changes by itself.', 0.5, 1),
+                rh_dec_option_unvalued('Change prices or run an offer for ' . $label, 'A price, rate or offer change made by a manager on its own screen.', 0.4, 3),
             ],
             'recommendation' => 'Look into the fall on the Reports screen before changing prices.',
             'link' => ['reports.php?tab=revenue' . $range, 'Open Reports'],
         ];
     }
-    return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => [rh_dec_card($card + [
+    return ['ok' => true, 'partial' => $partial || $tillUnread, 'total' => $total, 'cards' => [rh_dec_card($card + [
         'key' => 'acc_profit', 'covers' => ['department_takings', 'till_margin'],
         'urgency' => 0.5, 'confidence' => $partial ? 0.5 : 0.7, 'history_days' => $compare ? 2 * $days : $days,
         'evidence' => ['total' => $total, 'total_label' => 'departments checked', 'rows' => $rows],
@@ -761,7 +817,8 @@ function rh_dec_f_tax(PDO $db, array $ctx): array
     $to = (string)$ctx['to'];
     $vatOn = function_exists('rh_vat_enabled') ? rh_vat_enabled() : in_array(strtolower(trim((string)getSetting('vat_enabled'))), ['1', 'true', 'on', 'yes'], true);
     $rate = (float)getSetting('vat_rate');
-    $levyOn = in_array(getSetting('tourism_levy_enabled'), ['1', 1, true, 'true', 'on'], true) && rh_ai_mod('bookings');
+    $bkOn = rh_dec_mod('bookings');
+    $levyOn = in_array(getSetting('tourism_levy_enabled'), ['1', 1, true, 'true', 'on'], true) && $bkOn !== false; // unreadable switch: checked anyway, partial
     try {
         // Mirrors admin/accounting-dashboard.php total_vat_collected word for word
         $st = $db->prepare("SELECT COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END), 0)
@@ -802,6 +859,7 @@ function rh_dec_f_tax(PDO $db, array $ctx): array
     $splitOk = rh_ai_admin_lib('finance-account-sync.php') && function_exists('rh_account_vat_split');
     $found = [];
     $nZero = $nOff = $nRate = 0;
+    $unchecked = 0; // rows with no VAT that could not be set against their account's VAT (the split helper is missing)
     $gap = 0.0;
     foreach ($rowsIn as $r) {
         $vat = (float)$r['vat_amount'];
@@ -819,6 +877,7 @@ function rh_dec_f_tax(PDO $db, array $ctx): array
             // Questioned only when the account it was paid against carries VAT itself (zero-rated and levy-only
             // accounts carry none): valued at that account's own VAT share, the split every payment screen uses
             $miss = $splitOk ? round((float)rh_account_vat_split($db, (string)$r['booking_type'], (int)$r['booking_id'], $tot, 0.0)['vat'], 2) : 0.0;
+            $unchecked += $splitOk ? 0 : 1;
             if ($miss > BALANCE_TOLERANCE) {
                 $nZero++;
                 $gap += $miss;
@@ -839,8 +898,9 @@ function rh_dec_f_tax(PDO $db, array $ctx): array
     }
     $gap = round($gap, 2);
     $total = $checked + $levyBookings;
+    $partial = $unchecked > 0 || ($bkOn === null && in_array(getSetting('tourism_levy_enabled'), ['1', 1, true, 'true', 'on'], true));
     if ($gap <= BALANCE_TOLERANCE && !$levyMissing) {
-        return ['ok' => true, 'total' => $total, 'cards' => []];
+        return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => []];
     }
     usort($found, static fn($a, $b) => $b['amount'] <=> $a['amount']);
     $cur = $ctx['cur'];
@@ -858,7 +918,7 @@ function rh_dec_f_tax(PDO $db, array $ctx): array
         . ($levyMissing ? 'The tourism levy is switched on, yet none of the ' . $levyBookings . ' booking(s) taken in the last ' . $days . ' days carries any. ' : '')
         . 'VAT owed for these days: ' . rh_dec_fmt($cur, $vatOwed) . ($levyOn ? '; tourism levy: ' . rh_dec_fmt($cur, $levy) : '') . '.';
     $range = '&start_date=' . $from . '&end_date=' . $to;
-    return ['ok' => true, 'total' => $total, 'cards' => [rh_dec_card([
+    return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => [rh_dec_card([
         'key' => 'acc_tax', 'covers' => ['vat', 'levy'],
         'decision' => $n > 0 ? 'Whether to correct ' . $n . ' payment(s) whose VAT does not add up before the VAT owed is set aside' : 'Whether the tourism levy setting is right for room takings',
         'why_now' => trim($why),
@@ -867,12 +927,14 @@ function rh_dec_f_tax(PDO $db, array $ctx): array
             : 'Not valued: the levy a booking should carry depends on the booking. The VAT owed and the levy are under Evidence.',
         'urgency' => 0.65, 'confidence' => 0.6, 'history_days' => $days,
         'evidence' => ['total' => $total, 'total_label' => 'payments and bookings checked', 'rows' => $rows],
+        // A VAT correction is not money brought in or saved (missing VAT raises what is owed, over-stated VAT lowers it),
+        // so no option is valued; the VAT in question is the figure at stake above
         'options' => $n > 0 ? [
-            rh_dec_option('Check and correct them on the VAT register', 'Each payment is checked and corrected by a manager; nothing is changed automatically.', $gap, null, 0.0, 0.6, 0, 3),
-            rh_dec_option('Leave them as recorded', 'The VAT owed stays as worked out from the payments.', 0.0, null, -$gap, 0.6, 0, 1),
+            rh_dec_option_unvalued('Check and correct them on the VAT register', 'Each payment is checked and corrected by a manager; nothing is changed automatically.', 0.6, 3),
+            rh_dec_option_unvalued('Leave them as recorded', 'The VAT owed stays as worked out from the payments, with the VAT in question left as it is.', 0.6, 1),
         ] : [
-            rh_dec_option('Check the levy setting and the bookings it should apply to', 'A manager checks the levy setting; nothing is changed automatically.', null, null, null, 0.5, 0, 3),
-            rh_dec_option('Leave it as it is', 'Bookings keep the levy they were taken with.', null, null, null, 0.5, 0, 1),
+            rh_dec_option_unvalued('Check the levy setting and the bookings it should apply to', 'A manager checks the levy setting; nothing is changed automatically.', 0.5, 3),
+            rh_dec_option_unvalued('Leave it as it is', 'Bookings keep the levy they were taken with.', 0.5, 1),
         ],
         'recommend' => 0, 'recommendation' => $n > 0 ? 'Check those payments on the VAT register and correct any that are wrong.' : 'Check the tourism levy setting against the room bookings.',
         'tier' => 3, 'link' => [$n > 0 ? 'reports.php?tab=vat' . $range : 'reports.php?tab=overview' . $range, $n > 0 ? 'Open the VAT register' : 'Open Reports'],
@@ -1010,6 +1072,10 @@ function rh_dec_build(PDO $db, string $area, ?array $ctx = null): array
             $c['area'] = $area;
             $c['check'] = $id;
             $c['requires'] = (array)($def['requires'] ?? []);
+            // An outcome is never surer than the figures it rests on: each option's likelihood is capped at the card's confidence
+            foreach ((array)$c['options'] as $i => $op) {
+                $c['options'][$i]['confidence'] = round(min((float)($op['confidence'] ?? 0), (float)$c['confidence']), 2);
+            }
             $cards[] = rh_dec_score($c, $ctx['base']);
         }
     }
@@ -1036,13 +1102,18 @@ function rh_dec_cache_get(PDO $db, string $area, ?string $day = null): ?array
     return ['area' => $area, 'day' => (string)$r['cache_day'], 'hash' => (string)$r['data_hash'], 'main' => (array)($cards['main'] ?? []), 'more' => (array)($cards['more'] ?? []),
         'base' => (array)($cards['base'] ?? []), 'cur' => (string)($cards['cur'] ?? ''), 'checks' => (array)(json_decode((string)($r['checks_json'] ?? ''), true) ?: []),
         'wording' => is_array($wording) ? $wording : null, 'wording_hash' => (string)($r['wording_hash'] ?? ''), 'model' => (string)($r['worded_model'] ?? ''),
-        'built_at' => (string)$r['built_at'], 'worded_at' => (string)($r['worded_at'] ?? '')];
+        'built_at' => (string)$r['built_at'], 'worded_at' => (string)($r['worded_at'] ?? ''), 'tried_at' => (string)($cards['tried_at'] ?? '')];
 }
 
-/** Store today's build; wording is kept only while the figures' hash still matches the one it was written for. */
-function rh_dec_cache_put(PDO $db, string $area, array $built, ?array $wording, string $model): void
+/**
+ * Store today's build; wording is kept only while the figures' hash still matches the one it was written for.
+ * $tried = this build came from a refresh (button, after the page, daily checks): its time is what the refresh limit
+ * counts. A page-load build is not a refresh, so it never holds back the first wording.
+ */
+function rh_dec_cache_put(PDO $db, string $area, array $built, ?array $wording, string $model, bool $tried = false): void
 {
-    $cards = json_encode(['main' => $built['main'], 'more' => $built['more'], 'base' => $built['base'], 'cur' => $built['cur']], JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
+    $cards = json_encode(['main' => $built['main'], 'more' => $built['more'], 'base' => $built['base'], 'cur' => $built['cur'], 'tried_at' => $tried ? date('Y-m-d H:i:s') : null],
+        JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
     $checks = json_encode($built['checks'], JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
     $wj = $wording !== null ? json_encode($wording, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR) : null;
     $db->prepare("INSERT INTO ai_review_cache (area, cache_day, data_hash, cards_json, checks_json, wording_json, wording_hash, worded_model, built_at, worded_at)
@@ -1055,8 +1126,9 @@ function rh_dec_cache_put(PDO $db, string $area, array $built, ?array $wording, 
 /**
  * The page-load path: today's cached cards, or (none yet) the cards worked out now by SQL and stored unworded. Never
  * calls a model. When today's cards are not worded yet, one wording refresh is scheduled to run AFTER the page has been
- * sent (only where the server can finish a response early; elsewhere the daily checks word them), at most once in
- * ai_review_refresh_minutes per area.
+ * sent (only where the server can finish a response early); on every server the page itself also asks once after it
+ * has loaded (rh_dec_pending). Both go through rh_dec_refresh, so the area is worded at most once in
+ * ai_review_refresh_minutes. This build is not a refresh and does not count towards that limit.
  */
 function rh_dec_get(PDO $db, string $area, int $uid = 0): ?array
 {
@@ -1163,7 +1235,8 @@ function rh_dec_refresh(PDO $db, string $area, bool $allowWriter, int $uid, bool
     }
     try {
         $old = rh_dec_cache_get($db, $area);
-        if (!$daily && $old !== null && strtotime($old['built_at']) > time() - 60 * rh_dec_num('ai_review_refresh_minutes', 1, 1440)) {
+        // Limited by the last refresh, not the last build: the page-load build (no call) must not block the first wording
+        if (!$daily && $old !== null && $old['tried_at'] !== '' && strtotime($old['tried_at']) > time() - 60 * rh_dec_num('ai_review_refresh_minutes', 1, 1440)) {
             return ['status' => 'recent', 'cache' => $old, 'model_called' => false];
         }
         $built = rh_dec_build($db, $area);
@@ -1183,7 +1256,7 @@ function rh_dec_refresh(PDO $db, string $area, bool $allowWriter, int $uid, bool
                 $model = $w['model'];
             }
         }
-        rh_dec_cache_put($db, $area, $built, $wording, $model);
+        rh_dec_cache_put($db, $area, $built, $wording, $model, true);
         return ['status' => 'built', 'cache' => rh_dec_cache_get($db, $area), 'model_called' => $called];
     } finally {
         try {
@@ -1456,6 +1529,25 @@ function rh_dec_for_viewer(PDO $db, array $user, string $area): ?array
     $failed = count(array_filter($checks, static fn($k) => empty($k['ok']) || !empty($k['partial'])));
     return ['area' => $area, 'main' => array_values($main), 'more' => $more, 'checks' => $checks, 'checks_failed' => $failed,
         'base' => $c['base'], 'cur' => $c['cur'], 'built_at' => $c['built_at'], 'threshold_pct' => rh_dec_threshold_pct()];
+}
+
+/**
+ * True when this person may see the area, a model is set up, today's cards are worked out but not worded yet, and no
+ * refresh was tried within ai_review_refresh_minutes. The page then asks once, after it has loaded, for the first
+ * wording (admin/js/review-panel.js, the panel's own endpoint), so it never waits and it works on any server. Nothing
+ * is shown unless that call works.
+ */
+function rh_dec_pending(PDO $db, array $user, string $area): bool
+{
+    if (!rh_dec_area_allowed($user, $area) || !rh_dec_model_ready($db)) {
+        return false;
+    }
+    $c = rh_dec_cache_get($db, $area);
+    if ($c === null || !$c['main'] || rh_dec_is_worded($c)) {
+        return false;
+    }
+    $mine = array_filter($c['main'], static fn($card) => rh_dec_requires_ok($user, (array)($card['requires'] ?? [])));
+    return $mine !== [] && ($c['tried_at'] === '' || strtotime($c['tried_at']) <= time() - 60 * rh_dec_num('ai_review_refresh_minutes', 1, 1440));
 }
 
 // ── Proof log ────────────────────────────────────────────────────────────────

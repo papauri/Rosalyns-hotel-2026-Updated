@@ -94,10 +94,12 @@ function rh_review_panel(string $area): string
         }
         $user = ['id' => $uid, 'role' => (string)($_SESSION['admin_role'] ?? ''), 'username' => (string)($_SESSION['admin_username'] ?? ''), 'full_name' => ''];
         $v = rh_dec_for_viewer($db, $user, $area);
-        if ($v === null || empty($v['main'])) { // no worded decision = nothing printed
-            return '';
-        }
         $csrf = function_exists('generateCsrfToken') ? (string)generateCsrfToken() : (string)($_SESSION['csrf_token'] ?? '');
+        if ($v === null || empty($v['main'])) { // no worded decision = nothing shown
+            // Today's cards not worded yet (model set up, no refresh tried lately): an empty, hidden hook asks for the
+            // first wording once the page has loaded; the panel appears only if that call works. Otherwise ''.
+            return rh_dec_pending($db, $user, $area) ? rh_review_pending_html($area, $csrf) : '';
+        }
         return rh_review_panel_html($v, $csrf);
     } catch (Throwable $e) {
         error_log('Decisions panel skipped: ' . $e->getMessage());
@@ -115,10 +117,29 @@ function rh_review_tier_text(int $tier): string
     return [1 => 'You can do this straight away.', 2 => 'Needs one approval, with an exact preview first.', 3 => 'A manager decides on the screen; never done automatically.'][$tier] ?? '';
 }
 
+/** The panel's CSS and JS links, once per page. */
+function rh_review_assets(): string
+{
+    static $done = false;
+    if ($done) {
+        return '';
+    }
+    $done = true;
+    $cssV = (int)@filemtime(__DIR__ . '/../css/review-panel.css');
+    $jsV = (int)@filemtime(__DIR__ . '/../js/review-panel.js');
+    return '<link rel="stylesheet" href="css/review-panel.css?v=' . $cssV . '"><script src="js/review-panel.js?v=' . $jsV . '" defer></script>';
+}
+
+/** The hidden hook that asks for the first wording after the page has loaded (no text, no box, nothing visible). */
+function rh_review_pending_html(string $area, string $csrf): string
+{
+    $h = static fn($s): string => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
+    return rh_review_assets() . '<div class="rh-dec-pending" data-dec-pending data-area="' . $h($area) . '" data-endpoint="api/decisions.php" data-csrf="' . $h($csrf) . '" hidden></div>';
+}
+
 /** The markup for one area as this person sees it ($v from rh_dec_for_viewer). */
 function rh_review_panel_html(array $v, string $csrf): string
 {
-    static $assets = false;
     $h = static fn($s): string => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
     $cur = (string)$v['cur'];
     $money = static fn($x): string => $x === null ? '' : rh_dec_fmt($cur, (float)$x);
@@ -128,14 +149,7 @@ function rh_review_panel_html(array $v, string $csrf): string
     $hist = rh_dec_num('ai_review_history_min_days', 1, 3650);
     $checks = (array)$v['checks'];
     $nChecks = count($checks);
-    $out = '';
-    if (!$assets) {
-        $assets = true;
-        $cssV = (int)@filemtime(__DIR__ . '/../css/review-panel.css');
-        $jsV = (int)@filemtime(__DIR__ . '/../js/review-panel.js');
-        $out .= '<link rel="stylesheet" href="css/review-panel.css?v=' . $cssV . '">';
-        $out .= '<script src="js/review-panel.js?v=' . $jsV . '" defer></script>';
-    }
+    $out = rh_review_assets();
     $id = 'rhDec-' . $h($area);
     // Closed by default (owner 2026-11-05): only a small "Decisions" tab shows; the panel opens in a side drawer on click.
     // Every part is position: fixed, so the page itself looks and lays out exactly as without it.
@@ -191,22 +205,35 @@ function rh_review_card_html(array $c, callable $money, callable $h, int $days, 
     $o .= '<div><dt>Share of takings</dt><dd>' . ($c['share_pct'] !== null ? $h(number_format((float)$c['share_pct'], 1)) . '%' : 'Not worked out') . '</dd><dd class="rh-dec__help">'
         . ($c['share_pct'] !== null ? 'At stake as a share of the money collected in the last ' . $days . ' days.' : 'There is no money collected in the last ' . $days . ' days to compare with.') . '</dd></div>';
     $o .= '<div><dt>Confidence</dt><dd>' . rh_review_conf_label((float)$c['confidence']) . '</dd><dd class="rh-dec__help">How sure the figures are, from how complete the data is'
-        . ((int)$c['history_days'] > 0 ? ' and ' . (int)$c['history_days'] . ' days of history' : '') . '.</dd></div>';
+        . ((int)$c['history_days'] > 0 ? ' and ' . (int)$c['history_days'] . ' days of history' : '') . '. No option below is rated higher.</dd></div>';
     $o .= '</dl>';
     if (!empty($c['options'])) {
-        $o .= '<div class="rh-dec-card__opts"><table class="rh-dec__table no-card-mobile"><thead><tr>';
+        // What Best / Expected / Worst measure: the card's own figure (e.g. the money position after N days), or by
+        // default the money an option could bring in or save. Options that are not money show "Not valued".
+        $measure = trim((string)($c['measure'] ?? ''));
+        $o .= '<div class="rh-dec-card__opts">';
+        if ($measure !== '') {
+            $o .= '<p class="rh-dec__help">Best, Expected and Worst all show ' . $h($measure) . '.</p>';
+        }
+        $o .= '<table class="rh-dec__table no-card-mobile"><thead><tr>';
         $o .= '<th scope="col" class="no-sort">Option<span class="rh-dec__help">What you could do.</span></th>';
-        $o .= '<th scope="col" class="no-sort">Best<span class="rh-dec__help">The most it could bring in or save.</span></th>';
-        $o .= '<th scope="col" class="no-sort">Expected<span class="rh-dec__help">The likely result from the hotel\'s own history; blank until there are ' . $hist . ' days of it.</span></th>';
-        $o .= '<th scope="col" class="no-sort">Worst<span class="rh-dec__help">The least it could bring (below zero is a loss).</span></th>';
-        $o .= '<th scope="col" class="no-sort">Confidence<span class="rh-dec__help">How sure, from the history used.</span></th>';
+        if ($measure !== '') {
+            $o .= '<th scope="col" class="no-sort">Best<span class="rh-dec__help">The best case.</span></th>';
+            $o .= '<th scope="col" class="no-sort">Expected<span class="rh-dec__help">The likely result from the hotel\'s own history; blank until there are ' . $hist . ' days of it.</span></th>';
+            $o .= '<th scope="col" class="no-sort">Worst<span class="rh-dec__help">The worst case (below zero is a shortfall).</span></th>';
+        } else {
+            $o .= '<th scope="col" class="no-sort">Best<span class="rh-dec__help">The most it could bring in or save.</span></th>';
+            $o .= '<th scope="col" class="no-sort">Expected<span class="rh-dec__help">The likely result from the hotel\'s own history; blank until there are ' . $hist . ' days of it.</span></th>';
+            $o .= '<th scope="col" class="no-sort">Worst<span class="rh-dec__help">The least it could bring (below zero is a loss).</span></th>';
+        }
+        $o .= '<th scope="col" class="no-sort">Likelihood<span class="rh-dec__help">How likely that result is, from the history used; never above the card\'s confidence.</span></th>';
         $o .= '</tr></thead><tbody>';
         foreach ($c['options'] as $i => $op) {
             $rec = (int)$c['recommend'] === (int)$i;
             $o .= '<tr' . ($rec ? ' class="is-recommended"' : '') . '><th scope="row">' . $h($op['label']) . ($rec ? ' <span class="rh-dec__tag">Recommended</span>' : '')
                 . '<span class="rh-dec__help">' . $h($op['effect']) . '</span></th>';
             foreach (['best', 'expected', 'worst'] as $k) {
-                $o .= '<td>' . ($op[$k] !== null ? $h($money($op[$k])) : '<span class="rh-dec__none">Not enough history</span>') . '</td>';
+                $o .= '<td>' . ($op[$k] !== null ? $h($money($op[$k])) : '<span class="rh-dec__none">' . (!empty($op['not_valued']) ? 'Not valued' : 'Not enough history') . '</span>') . '</td>';
             }
             $o .= '<td>' . rh_review_conf_label((float)$op['confidence']) . '</td></tr>';
         }
