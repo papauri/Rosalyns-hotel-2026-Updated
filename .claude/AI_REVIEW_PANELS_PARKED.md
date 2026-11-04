@@ -43,3 +43,11 @@ Within the existing monthly AI budget and kill switches.
 ## Open decisions for the owner
 1. First set only (bold items) or all checks?  2. Panel on the dashboard only, or a small badge on the other stock/accounting/
 booking pages?  3. Refresh: daily + button, or button only?
+
+## Owner decisions 2026-11-04
+- Tiers confirmed: T1 runs itself (draft/remind/queue/flag, logged, undoable); T2 one-tap approve with exact preview; T3 never
+  autonomous (payments, refunds, voids, price/rate changes, deletes, accounting edits).
+- Scope: build EVERYTHING, "the future of PMS/HMS"; goal is a stakeholder-demo wow effect. Plan expanded beyond the first set:
+  Ask-why drill-down, what-if simulator, forecasts with ranges, cross-department findings, owner morning brief, board pack
+  export, watch rules in plain words, finding history + proof. Honest limit: forecasts and patterns need real history; demo on
+  Liwonde (test hotel) data, never invented figures.
