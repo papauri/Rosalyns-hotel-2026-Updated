@@ -272,8 +272,8 @@ try {
     check(!preg_match('/\b(AI|smart|insights?|assistant|generated|powered by|thinking)\b/i', strip_tags($html0)) && !preg_match('/fa-(magic|wand|robot|brain|star|microchip|hat-wizard)|sparkle/i', $html0),
         'the rendered panel has no AI-looking words or icons');
     check(strpos($html0, '<h2 class="rh-dec__title"') !== false && strpos($html0, '>Decisions</h2>') !== false, 'the panel is titled plainly "Decisions"');
-    $ths = substr_count($html0, '<th scope="col">');
-    $thHelp = preg_match_all('/<th scope="col">[^<]+<span class="rh-dec__help">/', $html0);
+    $ths = substr_count($html0, '<th scope="col" class="no-sort">');
+    $thHelp = preg_match_all('/<th scope="col" class="no-sort">[^<]+<span class="rh-dec__help">/', $html0);
     check($ths > 0 && $ths === $thHelp, 'every column header has a plain helper line', $ths . ' vs ' . $thHelp);
     check(preg_match_all('/<dt>[^<]+<\/dt><dd[^>]*>[^<]*<\/dd><dd class="rh-dec__help">/', $html0) >= 3, 'every figure on a card has a plain helper line');
     check(substr_count($html0, 'css/review-panel.css') === 1 && substr_count($html0, 'js/review-panel.js') === 1, 'the CSS and JS are linked once, only when the panel is printed');

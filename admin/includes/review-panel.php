@@ -184,12 +184,12 @@ function rh_review_card_html(array $c, callable $money, callable $h, int $days, 
         . ((int)$c['history_days'] > 0 ? ' and ' . (int)$c['history_days'] . ' days of history' : '') . '.</dd></div>';
     $o .= '</dl>';
     if (!empty($c['options'])) {
-        $o .= '<div class="rh-dec-card__opts"><table class="rh-dec__table"><thead><tr>';
-        $o .= '<th scope="col">Option<span class="rh-dec__help">What you could do.</span></th>';
-        $o .= '<th scope="col">Best<span class="rh-dec__help">The most it could bring in or save.</span></th>';
-        $o .= '<th scope="col">Expected<span class="rh-dec__help">The likely result from the hotel\'s own history; blank until there are ' . $hist . ' days of it.</span></th>';
-        $o .= '<th scope="col">Worst<span class="rh-dec__help">The least it could bring (below zero is a loss).</span></th>';
-        $o .= '<th scope="col">Confidence<span class="rh-dec__help">How sure, from the history used.</span></th>';
+        $o .= '<div class="rh-dec-card__opts"><table class="rh-dec__table no-card-mobile"><thead><tr>';
+        $o .= '<th scope="col" class="no-sort">Option<span class="rh-dec__help">What you could do.</span></th>';
+        $o .= '<th scope="col" class="no-sort">Best<span class="rh-dec__help">The most it could bring in or save.</span></th>';
+        $o .= '<th scope="col" class="no-sort">Expected<span class="rh-dec__help">The likely result from the hotel\'s own history; blank until there are ' . $hist . ' days of it.</span></th>';
+        $o .= '<th scope="col" class="no-sort">Worst<span class="rh-dec__help">The least it could bring (below zero is a loss).</span></th>';
+        $o .= '<th scope="col" class="no-sort">Confidence<span class="rh-dec__help">How sure, from the history used.</span></th>';
         $o .= '</tr></thead><tbody>';
         foreach ($c['options'] as $i => $op) {
             $rec = (int)$c['recommend'] === (int)$i;
@@ -208,8 +208,8 @@ function rh_review_card_html(array $c, callable $money, callable $h, int $days, 
     $rows = (array)($ev['rows'] ?? []);
     if ($rows) {
         $o .= '<details class="rh-dec-card__ev"><summary>Evidence (' . count($rows) . ' row' . (count($rows) === 1 ? '' : 's') . '; ' . (int)($ev['total'] ?? 0) . ' ' . $h($ev['total_label'] ?? 'checked') . ')</summary>';
-        $o .= '<table class="rh-dec__table"><thead><tr><th scope="col">Item<span class="rh-dec__help">What was found.</span></th><th scope="col">Reference<span class="rh-dec__help">The record to open.</span></th>'
-            . '<th scope="col">Who<span class="rh-dec__help">Guest or staff on the record.</span></th><th scope="col">Figure<span class="rh-dec__help">Count or amount, as on the screen.</span></th></tr></thead><tbody>';
+        $o .= '<table class="rh-dec__table no-card-mobile"><thead><tr><th scope="col" class="no-sort">Item<span class="rh-dec__help">What was found.</span></th><th scope="col" class="no-sort">Reference<span class="rh-dec__help">The record to open.</span></th>'
+            . '<th scope="col" class="no-sort">Who<span class="rh-dec__help">Guest or staff on the record.</span></th><th scope="col" class="no-sort">Figure<span class="rh-dec__help">Count or amount, as on the screen.</span></th></tr></thead><tbody>';
         foreach ($rows as $r) {
             $who = trim((string)($r['guest_name'] ?? '') . ' ' . (string)($r['staff_name'] ?? ''));
             $fig = isset($r['amount']) && $r['amount'] !== null ? $money($r['amount']) : (string)($r['value'] ?? '');

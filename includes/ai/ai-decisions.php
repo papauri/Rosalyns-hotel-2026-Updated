@@ -160,7 +160,10 @@ function rh_dec_finders(): array
         ],
         'accounting' => [
             'acc_collections' => ['label' => 'Money owed after departure or overdue', 'fn' => 'rh_dec_f_collections', 'requires' => []],
-            'acc_leakage'     => ['label' => 'Voids, shortages and removed charges', 'fn' => 'rh_dec_f_leakage', 'requires' => []],
+            'acc_leakage'     => ['label' => 'Voids, shortages, removed charges and refunds', 'fn' => 'rh_dec_f_leakage', 'requires' => []],
+            'acc_cash'        => ['label' => 'Money due in against money due out', 'fn' => 'rh_dec_f_cash', 'requires' => []],
+            'acc_profit'      => ['label' => 'Takings and profit by department', 'fn' => 'rh_dec_f_profit', 'requires' => []],
+            'acc_tax'         => ['label' => 'VAT and tourism levy checks', 'fn' => 'rh_dec_f_tax', 'requires' => []],
         ],
         'stock' => [
             'stk_loss'   => ['label' => 'Stock wasted or missing at count', 'fn' => 'rh_dec_f_stock_loss', 'requires' => []],
@@ -392,7 +395,7 @@ function rh_dec_f_leakage(PDO $db, array $ctx): array
     if ($m === null) {
         return ['ok' => false, 'total' => 0, 'cards' => []];
     }
-    $partial = !empty($m['till_voids']['error']) || !empty($m['till_shortages']['error']);
+    $partial = !empty($m['till_voids']['error']) || !empty($m['till_shortages']['error']) || (rh_ai_mod('bookings') && !isset($m['folio_charges_voided']));
     $voids = (float)($m['till_voids']['total'] ?? 0);
     $short = (float)($m['till_shortages']['total'] ?? 0);
     $folio = (float)($m['folio_charges_voided']['total'] ?? 0);
@@ -407,8 +410,17 @@ function rh_dec_f_leakage(PDO $db, array $ctx): array
     foreach ((array)($m['till_voids']['by_staff'] ?? []) as $s) {
         $rows[] = ['label' => 'Till orders voided', 'staff_name' => (string)$s['staff_name'], 'value' => (string)(int)$s['voids']];
     }
-    foreach ((array)($m['till_shortages']['rows'] ?? []) as $s) {
-        $rows[] = ['label' => 'Till closed short, ' . (string)$s['shift_date'] . (!empty($s['closed_with_override']) ? ', with override' : ''), 'staff_name' => (string)$s['staff_name'], 'amount' => (float)$s['short_by']];
+    // Day-close variances by person: repeat shortages and closes with an override (money_leaks' own basis)
+    $byStaff = $short > BALANCE_TOLERANCE ? rh_dec_shortages_by_staff($db, $ctx) : [];
+    if ($byStaff === null) {
+        foreach ((array)($m['till_shortages']['rows'] ?? []) as $s) {
+            $rows[] = ['label' => 'Till closed short, ' . (string)$s['shift_date'] . (!empty($s['closed_with_override']) ? ', with override' : ''), 'staff_name' => (string)$s['staff_name'], 'amount' => (float)$s['short_by']];
+        }
+    } else {
+        foreach ($byStaff as $s) {
+            $rows[] = ['label' => 'Till closed short ' . $s['times'] . ' time(s)' . ($s['times'] >= 2 ? ', repeated' : '') . ($s['overrides'] > 0 ? ', ' . $s['overrides'] . ' with override' : ''),
+                'staff_name' => $s['staff_name'], 'value' => (string)$s['times'], 'amount' => $s['short']];
+        }
     }
     if ($folio > BALANCE_TOLERANCE) {
         $rows[] = ['label' => 'Charges removed from guest bills', 'value' => (string)(int)($m['folio_charges_voided']['count'] ?? 0), 'amount' => $folio];
@@ -416,20 +428,454 @@ function rh_dec_f_leakage(PDO $db, array $ctx): array
     if ($disc > BALANCE_TOLERANCE) {
         $rows[] = ['label' => 'Discounts at the till (not counted above)', 'value' => (string)(int)($m['till_discounts']['count'] ?? 0), 'amount' => $disc];
     }
-    return ['ok' => true, 'partial' => $partial, 'total' => $count, 'cards' => [rh_dec_card([
+    // Refunds paid out, by who recorded them: the full amount paid back (accounting rule), listed, never netted or counted above
+    $refTotal = empty($m['refunds']['error']) ? (float)($m['refunds']['total'] ?? 0) : 0.0;
+    $refCount = empty($m['refunds']['error']) ? (int)($m['refunds']['count'] ?? 0) : 0;
+    if ($refTotal > BALANCE_TOLERANCE) {
+        foreach ((array)rh_dec_refunds_by_staff($db, $ctx) as $s) {
+            $rows[] = ['label' => 'Refunds paid out in full (not counted above)' . ($s['times'] >= 2 ? ', repeated' : ''), 'staff_name' => $s['staff_name'], 'value' => (string)$s['times'], 'amount' => $s['amount']];
+        }
+    }
+    return ['ok' => true, 'partial' => $partial, 'total' => $count + $refCount, 'cards' => [rh_dec_card([
         'key' => 'acc_leakage', 'covers' => ['till_voids', 'till_shortages', 'folio_voids'],
         'decision' => 'Whether to tighten voids and till checks after ' . rh_dec_fmt($cur, $amt) . ' lost or removed',
         'why_now' => 'In the last ' . $ctx['days'] . ' days: ' . rh_dec_fmt($cur, $voids) . ' voided at the till, ' . rh_dec_fmt($cur, $short) . ' short at shift close, '
-            . rh_dec_fmt($cur, $folio) . ' removed from guest bills.' . ($partial ? ' Part of this could not be read.' : ''),
-        'at_stake' => $amt, 'at_stake_note' => 'Till voids + till shortages + charges removed from guest bills (discounts listed, not counted).',
+            . rh_dec_fmt($cur, $folio) . ' removed from guest bills.'
+            . ($refTotal > BALANCE_TOLERANCE ? ' Refunds paid out in the same days: ' . rh_dec_fmt($cur, $refTotal) . ' in full (listed, not counted in the total).' : '')
+            . ($partial ? ' Part of this could not be read.' : ''),
+        'at_stake' => $amt, 'at_stake_note' => 'Till voids + till shortages + charges removed from guest bills (discounts and refunds listed, not counted).',
         'urgency' => 0.6, 'confidence' => $partial ? 0.6 : 0.85, 'history_days' => $ctx['days'],
-        'evidence' => ['total' => $count, 'total_label' => 'voids, shortages and removed charges', 'rows' => $rows],
+        'evidence' => ['total' => $count + $refCount, 'total_label' => 'voids, shortages, removed charges and refunds', 'rows' => $rows],
         'options' => [
             rh_dec_option('Go through the voids and shortages with the staff named', 'A conversation, using the list under Evidence.', $amt, null, 0.0, 0.5, 0, 1),
             rh_dec_option('Ask for a manager\'s approval on every void', 'A rule change made by a manager in the till settings.', $amt, null, 0.0, 0.4, 0, 3),
         ],
         'recommend' => 0, 'recommendation' => 'Go through the voids and shortages with the staff named first.',
         'tier' => 1, 'link' => ['shift-close-report.php', 'Open shift closes'],
+    ])]];
+}
+
+/**
+ * Till shortages at shift close by person in the base period, on money_leaks' basis (stock_shift_closes, the three
+ * variances summed below minus the tolerance): how often, how much, how many closed with an override. null = unreadable.
+ */
+function rh_dec_shortages_by_staff(PDO $db, array $ctx): ?array
+{
+    if (!rh_ai_mod('pos')) {
+        return [];
+    }
+    try {
+        $st = $db->prepare("SELECT user_name, COUNT(*) AS times, COALESCE(SUM(-(variance_cash + variance_mobile + variance_card)), 0) AS short, COALESCE(SUM(override_applied <> 0), 0) AS overrides
+                            FROM stock_shift_closes WHERE shift_date BETWEEN ? AND ? AND (variance_cash + variance_mobile + variance_card) < ?
+                            GROUP BY user_name ORDER BY times DESC, short DESC LIMIT 6");
+        $st->execute([$ctx['from'], $ctx['to'], -BALANCE_TOLERANCE]);
+        return array_map(static fn($r) => ['staff_name' => (string)$r['user_name'], 'times' => (int)$r['times'], 'short' => round((float)$r['short'], 2), 'overrides' => (int)$r['overrides']],
+            $st->fetchAll(PDO::FETCH_ASSOC));
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+/** Refunds paid out in the base period by who recorded them, at the full amount paid back (money_leaks' basis). null = unreadable. */
+function rh_dec_refunds_by_staff(PDO $db, array $ctx): ?array
+{
+    try {
+        $st = $db->prepare("SELECT recorded_by, COUNT(*) AS times, COALESCE(SUM(refund_amount), 0) AS amount FROM payments
+                            WHERE deleted_at IS NULL AND payment_type = 'refund' AND refund_status IN ('completed', 'processing') AND payment_date BETWEEN ? AND ?
+                            GROUP BY recorded_by ORDER BY amount DESC LIMIT 6");
+        $st->execute([$ctx['from'], $ctx['to']]);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return null;
+    }
+    $names = rh_ai_staff_names($db, array_column($rows, 'recorded_by'));
+    return array_map(static fn($r) => ['staff_name' => (string)($names[(int)$r['recorded_by']] ?? 'Not recorded'), 'times' => (int)$r['times'], 'amount' => round((float)$r['amount'], 2)], $rows);
+}
+
+/** Days of payment history on record (0 when none or unreadable): how much history a projection may lean on. */
+function rh_dec_payment_history_days(PDO $db): int
+{
+    try {
+        $first = $db->query("SELECT MIN(payment_date) FROM payments WHERE deleted_at IS NULL")->fetchColumn();
+        return $first ? max(0, (int)floor((strtotime(date('Y-m-d')) - strtotime((string)$first)) / 86400) + 1) : 0;
+    } catch (Throwable $e) {
+        return 0;
+    }
+}
+
+/**
+ * Cash outlook: money due out (purchase orders sent or part-received, at order cost, plus refunds waiting to be paid, in
+ * full) against money due in (the receivables rule) and the recent pace of takings after refunds. The system holds no
+ * cash or bank balance, so no runway is claimed: what is due out is shown as days of recent takings instead.
+ */
+function rh_dec_f_cash(PDO $db, array $ctx): array
+{
+    $m = $ctx['run']('money_leaks', ['from' => $ctx['from'], 'to' => $ctx['to']]);
+    if ($m === null || !isset($m['still_owed'], $m['refunds']) || !empty($m['still_owed']['error']) || !empty($m['refunds']['error']) || empty($ctx['base']['ok'])) {
+        return ['ok' => false, 'total' => 0, 'cards' => []];
+    }
+    $poOn = rh_ai_mod('stock');
+    try {
+        $po = ['n' => 0, 'v' => 0.0];
+        $poRows = [];
+        if ($poOn) {
+            $po = $db->query("SELECT COUNT(*) AS n, COALESCE(SUM(total_cost), 0) AS v FROM stock_purchase_orders WHERE status IN ('sent', 'partial')")->fetch(PDO::FETCH_ASSOC) ?: $po;
+            $poRows = $db->query("SELECT reference, status, expected_date, total_cost FROM stock_purchase_orders WHERE status IN ('sent', 'partial') ORDER BY total_cost DESC, id LIMIT 5")->fetchAll(PDO::FETCH_ASSOC);
+        }
+        $pend = $db->query("SELECT COUNT(*) AS n, COALESCE(SUM(refund_amount), 0) AS v FROM payments WHERE deleted_at IS NULL AND payment_type = 'refund' AND refund_status = 'pending'")->fetch(PDO::FETCH_ASSOC) ?: ['n' => 0, 'v' => 0];
+    } catch (Throwable $e) {
+        return ['ok' => false, 'total' => 0, 'cards' => []];
+    }
+    $poN = (int)$po['n'];
+    $poV = round((float)$po['v'], 2);
+    $pendN = (int)$pend['n'];
+    $pendV = round((float)$pend['v'], 2);
+    $owed = $m['still_owed'];
+    $partial = empty($owed['complete']);
+    $total = $poN + $pendN + (int)$owed['accounts'];
+    $dueOut = round($poV + $pendV, 2);
+    if ($dueOut <= BALANCE_TOLERANCE) {
+        return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => []];
+    }
+    $cur = $ctx['cur'];
+    $days = (int)$ctx['days'];
+    $owedAll = (float)$owed['total'];
+    $overdue = (float)$owed['left_or_overdue_total'];
+    $pace = round(((float)$ctx['base']['amount'] - (float)$m['refunds']['total']) / max(1, $days), 2); // takings after refunds (in full), per day
+    $cover = $pace > BALANCE_TOLERANCE ? round($dueOut / $pace, 1) : null;
+    $hist = rh_dec_payment_history_days($db);
+    $enough = $hist >= (int)$ctx['history_min'];
+    $expected = $enough ? round($pace * $days - $dueOut, 2) : null;
+    // A decision only while the risk is live: the recent pace does not cover what is due out (with history: the
+    // expected position is below zero; without: due out is above the takings of the last N days). Covered = no card.
+    $short = $expected !== null ? $expected < -BALANCE_TOLERANCE : $pace * $days < $dueOut - BALANCE_TOLERANCE;
+    if (!$short) {
+        return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => []];
+    }
+    $rec = 1; // hold non-urgent orders (falls back to paying as planned when there is no open order to hold)
+    $opts = [rh_dec_option('Pay what is due out as planned', 'Orders and waiting refunds are paid as usual; the position after the next ' . $days . ' days is shown.',
+        $expected !== null ? $expected + $overdue : null, $expected, -$dueOut, $enough ? 0.65 : 0.4, $enough ? $hist : 0, 1)];
+    if ($poOn && $poV > BALANCE_TOLERANCE) {
+        $opts[] = rh_dec_option('Hold non-urgent purchase orders until the overdue money is in', 'Orders wait on the Purchase Orders screen; each is still approved as usual. Refunds are never held here.',
+            $poV, null, 0.0, 0.5, 0, 2);
+    } else {
+        $rec = 0;
+    }
+    $rows = [];
+    if ($poN > 0) {
+        $rows[] = ['label' => 'Purchase orders sent or part-received (order cost)', 'value' => (string)$poN, 'amount' => $poV];
+    }
+    foreach ($poRows as $r) {
+        $rows[] = ['label' => 'Purchase order, ' . ((string)$r['status'] === 'partial' ? 'part-received' : 'sent') . ($r['expected_date'] ? ', expected ' . (string)$r['expected_date'] : ''),
+            'reference' => (string)$r['reference'], 'amount' => round((float)$r['total_cost'], 2)];
+    }
+    if ($pendN > 0) {
+        $rows[] = ['label' => 'Refunds waiting to be paid (in full)', 'value' => (string)$pendN, 'amount' => $pendV];
+    }
+    $rows[] = ['label' => 'Money owed to the hotel (all accounts)', 'value' => (string)(int)$owed['accounts'], 'amount' => round($owedAll, 2)];
+    $rows[] = ['label' => 'Of which overdue or left without paying', 'value' => (string)(int)$owed['left_or_overdue_accounts'], 'amount' => round($overdue, 2)];
+    $rows[] = ['label' => 'Takings after refunds, average per day over the last ' . $days . ' days', 'amount' => $pace];
+    if ($cover !== null) {
+        $rows[] = ['label' => 'Days of those takings that what is due out equals', 'value' => number_format($cover, 1)];
+    }
+    $why = rh_dec_fmt($cur, $dueOut) . ' is due out (' . rh_dec_fmt($cur, $poV) . ' on ' . $poN . ' open purchase order(s)' . ($pendN > 0 ? ', ' . rh_dec_fmt($cur, $pendV) . ' in ' . $pendN . ' refund(s) waiting, in full' : '') . '). '
+        . 'Owed to the hotel: ' . rh_dec_fmt($cur, $owedAll) . ', of which ' . rh_dec_fmt($cur, $overdue) . ' is overdue. '
+        . ($cover !== null ? 'At the takings pace of the last ' . $days . ' days that is about ' . number_format($cover, 1) . ' day(s) of takings.' : 'There were no takings after refunds in the last ' . $days . ' days to set it against.')
+        . ($partial ? ' Some accounts could not be read, so the money owed may be higher.' : '');
+    return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => [rh_dec_card([
+        'key' => 'acc_cash', 'covers' => ['cash_outlook'],
+        'decision' => $rec === 1 ? 'Whether to hold non-urgent orders while ' . rh_dec_fmt($cur, $dueOut) . ' is due out' : 'Whether the coming takings cover ' . rh_dec_fmt($cur, $dueOut) . ' due out',
+        'why_now' => $why,
+        'at_stake' => $dueOut, 'at_stake_note' => 'Open purchase orders at order cost + refunds waiting to be paid in full. There is no cash or bank balance on record, so this is not a runway.',
+        'urgency' => $rec === 1 ? 0.85 : ($cover !== null && $cover > $days / 2 ? 0.6 : 0.4), 'confidence' => $enough ? 0.65 : 0.4, 'history_days' => $enough ? $hist : 0,
+        'evidence' => ['total' => $total, 'total_label' => 'open orders, waiting refunds and accounts owing checked', 'rows' => $rows],
+        'options' => $opts, 'recommend' => $rec,
+        'recommendation' => $rec === 1 ? 'Hold non-urgent purchase orders and chase the overdue money first; the recent takings do not cover what is due out.'
+            : 'Pay the waiting refunds as planned and chase the overdue money; the recent takings do not cover what is due out.',
+        'tier' => $opts[$rec]['tier'], 'link' => $poOn && $poN > 0 ? ['purchase-orders.php', 'Open Purchase Orders'] : ['payments.php?balance=outstanding', 'Open money owed'],
+    ])]];
+}
+
+/** The plain name of a payments.booking_type. */
+function rh_dec_dept_label(string $t): string
+{
+    $fnb = function_exists('isRestaurantEnabled') && !isRestaurantEnabled() ? 'Till sales' : 'Restaurant and bar'; // the screens' own naming (rh_pos_category_label)
+    $map = ['room' => 'Rooms', 'conference' => 'Conference', 'restaurant' => $fnb, 'gym' => 'Gym', 'event' => 'Events'];
+    return $map[$t] ?? ucfirst(str_replace('_', ' ', $t));
+}
+
+/**
+ * Takings per department for a range on the Reports profit rule (admin/reports.php "P&L / GROSS PROFIT"): money collected
+ * (the Accounting dashboard's collected rule, gross) less refunds paid back in full, less VAT net of refunds' VAT = takings
+ * excluding VAT. Unfiltered by module, so every payment is counted. null = unreadable.
+ */
+function rh_dec_dept_takings(PDO $db, string $from, string $to): ?array
+{
+    try {
+        $st = $db->prepare("SELECT booking_type,
+                COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS collected,
+                COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN refund_amount ELSE 0 END), 0) AS refunds,
+                COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END), 0)
+                    - COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END), 0) AS vat
+            FROM payments WHERE payment_date BETWEEN ? AND ? AND deleted_at IS NULL GROUP BY booking_type");
+        $st->execute([$from, $to]);
+        $out = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $c = (float)$r['collected'];
+            $f = (float)$r['refunds'];
+            $v = (float)$r['vat'];
+            $out[(string)$r['booking_type']] = ['collected' => round($c, 2), 'refunds' => round($f, 2), 'vat' => round($v, 2), 'net' => round($c - $f - $v, 2)];
+        }
+        return $out;
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+/**
+ * Till margin for a range on the Accounting dashboard's basis: standing sales (paid/completed) less partial refunds on
+ * orders still paid (in full), COGS of paid/completed/refunded orders, then rh_pos_margin_basis (ex-VAT). null = off/unreadable.
+ */
+function rh_dec_till_margin(PDO $db, string $from, string $to): ?array
+{
+    if (!rh_ai_mod('pos') || !rh_ai_admin_lib('pos-shift-totals.php') || !function_exists('rh_pos_margin_basis')) {
+        return null;
+    }
+    try {
+        $st = $db->prepare("SELECT COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount ELSE 0 END), 0) AS gross_revenue,
+                                   COALESCE(SUM(CASE WHEN status IN ('paid','completed','refunded') THEN total_cost ELSE 0 END), 0) AS cogs
+                            FROM stock_orders WHERE status IN ('paid','completed','refunded') AND COALESCE(paid_at, created_at) BETWEEN ? AND ?");
+        $st->execute([$from . ' 00:00:00', $to . ' 23:59:59']);
+        $t = $st->fetch(PDO::FETCH_ASSOC) ?: ['gross_revenue' => 0, 'cogs' => 0];
+        $gross = (float)$t['gross_revenue'];
+        if (function_exists('rh_pos_partial_refunds')) {
+            $gross -= (float)rh_pos_partial_refunds($db, $from . ' 00:00:00', date('Y-m-d H:i:s', strtotime($to . ' 23:59:59') + 1))['amount'];
+        }
+        $mb = rh_pos_margin_basis($gross, (float)$t['cogs']);
+        return ['gross' => round($gross, 2), 'cogs' => round((float)$t['cogs'], 2), 'net' => (float)$mb['net_ex_vat'], 'margin' => (float)$mb['margin'], 'pct' => round((float)$mb['pct'], 1)];
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+/**
+ * Profit by department: takings excluding VAT per department, base period against the one before it (only when that
+ * earlier period is covered by real payment history), and the till margin after stock cost (the only department with
+ * costs on record; no margin is ever shown for the others). The card is about the biggest fall, or a till selling at a loss.
+ */
+function rh_dec_f_profit(PDO $db, array $ctx): array
+{
+    $days = (int)$ctx['days'];
+    $from = (string)$ctx['from'];
+    $to = (string)$ctx['to'];
+    $pFrom = date('Y-m-d', strtotime($from . ' -' . $days . ' days'));
+    $pTo = date('Y-m-d', strtotime($from . ' -1 day'));
+    $now = rh_dec_dept_takings($db, $from, $to);
+    $hist = rh_dec_payment_history_days($db);
+    $compare = $hist >= 2 * $days; // the earlier period is fully inside the history on record
+    $prev = $compare ? rh_dec_dept_takings($db, $pFrom, $pTo) : [];
+    if ($now === null || $prev === null) {
+        return ['ok' => false, 'total' => 0, 'cards' => []];
+    }
+    // Contradiction check: the departments must add up to the base (same collected rule); if not, read once more
+    $sum = array_sum(array_column($now, 'collected'));
+    $partial = false;
+    if (!empty($ctx['base']['ok']) && abs($sum - (float)$ctx['base']['amount']) > BALANCE_TOLERANCE) {
+        $now = rh_dec_dept_takings($db, $from, $to) ?? $now;
+        $partial = abs(array_sum(array_column($now, 'collected')) - (float)$ctx['base']['amount']) > BALANCE_TOLERANCE;
+    }
+    $till = rh_dec_till_margin($db, $from, $to);
+    $tillPrev = $compare ? rh_dec_till_margin($db, $pFrom, $pTo) : null;
+    $types = array_values(array_unique(array_merge(array_keys($now), array_keys((array)$prev))));
+    $total = count($types);
+    $cur = $ctx['cur'];
+    $worst = null;
+    $rows = [];
+    foreach ($types as $t) {
+        $n = (float)($now[$t]['net'] ?? 0);
+        $p = $compare ? (float)($prev[$t]['net'] ?? 0) : null;
+        $drop = $p !== null ? round($p - $n, 2) : 0.0;
+        $rows[] = ['label' => rh_dec_dept_label($t) . ': takings excluding VAT, last ' . $days . ' days' . ($p !== null ? ' (the ' . $days . ' days before: ' . rh_dec_fmt($cur, $p) . ')' : ''), 'amount' => $n];
+        if ($drop > BALANCE_TOLERANCE && ($worst === null || $drop > $worst['drop'])) {
+            $worst = ['type' => $t, 'drop' => $drop, 'now' => $n, 'prev' => (float)$p];
+        }
+    }
+    $refundsAll = round((float)array_sum(array_column($now, 'refunds')), 2);
+    if ($refundsAll > BALANCE_TOLERANCE) {
+        $rows[] = ['label' => 'Refunds paid back in full in the last ' . $days . ' days (already taken off the takings above)', 'amount' => $refundsAll];
+    }
+    $tillLoss = ($till !== null && $till['margin'] < -BALANCE_TOLERANCE) ? round(-$till['margin'], 2) : 0.0;
+    if ($till !== null && ($till['gross'] > BALANCE_TOLERANCE || $till['cogs'] > BALANCE_TOLERANCE)) {
+        $rows[] = ['label' => 'Till margin after stock cost (excluding VAT), ' . number_format($till['pct'], 1) . '%' . ($tillPrev !== null && $tillPrev['net'] > BALANCE_TOLERANCE ? ' (the ' . $days . ' days before: ' . number_format($tillPrev['pct'], 1) . '%)' : ''), 'amount' => $till['margin']];
+        $rows[] = ['label' => 'Stock cost of those till sales', 'amount' => $till['cogs']];
+    }
+    if ($worst === null && $tillLoss <= BALANCE_TOLERANCE) {
+        return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => []];
+    }
+    $range = '&start_date=' . $from . '&end_date=' . $to;
+    if ($worst === null || $tillLoss > $worst['drop']) {
+        $card = [
+            'decision' => 'How to stop the till selling at a loss: ' . rh_dec_fmt($cur, $tillLoss) . ' below stock cost',
+            'why_now' => 'In the last ' . $days . ' days the till took ' . rh_dec_fmt($cur, (float)$till['net']) . ' excluding VAT against ' . rh_dec_fmt($cur, (float)$till['cogs']) . ' of stock cost.',
+            'at_stake' => $tillLoss, 'at_stake_note' => 'Stock cost of till sales minus what they took excluding VAT (the Accounting dashboard\'s till margin).',
+            'options' => [
+                rh_dec_option('Check recipe costs and stock use for the items sold most', 'Recipes, wastage and counts are checked on the stock screens; nothing changes by itself.', $tillLoss, null, 0.0, 0.5, 0, 1),
+                rh_dec_option('Change menu prices', 'A price change made by a manager on the menu screens.', null, null, null, 0.4, 0, 3),
+            ],
+            'recommendation' => 'Check recipe costs and stock use first, then decide on prices.',
+            'link' => ['reports.php?tab=fnb' . $range, 'Open the till report'],
+        ];
+    } else {
+        $label = rh_dec_dept_label($worst['type']);
+        $card = [
+            'decision' => 'What to do about ' . $label . ' takings, down ' . rh_dec_fmt($cur, $worst['drop']) . ' on the ' . $days . ' days before',
+            'why_now' => $label . ' took ' . rh_dec_fmt($cur, $worst['now']) . ' excluding VAT in the last ' . $days . ' days, against ' . rh_dec_fmt($cur, $worst['prev']) . ' in the ' . $days . ' days before.'
+                . ($partial ? ' Part of the takings could not be matched to a department.' : ''),
+            'at_stake' => $worst['drop'], 'at_stake_note' => 'The fall in takings excluding VAT and refunds (the Reports profit rule); costs are only on record for the till.',
+            'options' => [
+                rh_dec_option('Look into the fall on the Reports screen', 'Compare the two periods by source and payment; nothing changes by itself.', $worst['drop'], null, 0.0, 0.5, $hist, 1),
+                rh_dec_option('Change prices or run an offer for ' . $label, 'A price, rate or offer change made by a manager on its own screen.', null, null, null, 0.4, 0, 3),
+            ],
+            'recommendation' => 'Look into the fall on the Reports screen before changing prices.',
+            'link' => ['reports.php?tab=revenue' . $range, 'Open Reports'],
+        ];
+    }
+    return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => [rh_dec_card($card + [
+        'key' => 'acc_profit', 'covers' => ['department_takings', 'till_margin'],
+        'urgency' => 0.5, 'confidence' => $partial ? 0.5 : 0.7, 'history_days' => $compare ? 2 * $days : $days,
+        'evidence' => ['total' => $total, 'total_label' => 'departments checked', 'rows' => $rows],
+        'recommend' => 0, 'tier' => 1,
+    ])]];
+}
+
+/**
+ * VAT and tourism levy checks on the base period's takings. VAT owed uses the Accounting dashboard's own
+ * total_vat_collected expression (admin/accounting-dashboard.php, the "Overall financial summary" query); the levy is
+ * rh_tourism_levy_for_period (the dashboard's VAT card). Checks, row by row, payments taken while VAT is on: no VAT
+ * recorded, or VAT that does not match the row's own rate (VAT = amount excluding VAT x rate). The money at stake is the
+ * VAT those rows may be missing or over-stating at today's rate; the amount owed is context, never the figure at stake.
+ */
+function rh_dec_f_tax(PDO $db, array $ctx): array
+{
+    $from = (string)$ctx['from'];
+    $to = (string)$ctx['to'];
+    $vatOn = function_exists('rh_vat_enabled') ? rh_vat_enabled() : in_array(strtolower(trim((string)getSetting('vat_enabled'))), ['1', 'true', 'on', 'yes'], true);
+    $rate = (float)getSetting('vat_rate');
+    $levyOn = in_array(getSetting('tourism_levy_enabled'), ['1', 1, true, 'true', 'on'], true) && rh_ai_mod('bookings');
+    try {
+        // Mirrors admin/accounting-dashboard.php total_vat_collected word for word
+        $st = $db->prepare("SELECT COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END), 0)
+                - COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END), 0)
+                as total_vat_collected,
+                COUNT(*) AS n
+            FROM payments WHERE payment_date BETWEEN ? AND ? AND deleted_at IS NULL");
+        $st->execute([$from, $to]);
+        $agg = $st->fetch(PDO::FETCH_ASSOC) ?: ['total_vat_collected' => 0, 'n' => 0];
+        $levy = $levyOn && function_exists('rh_tourism_levy_for_period') ? (float)rh_tourism_levy_for_period($db, $from, $to) : 0.0;
+        $lb = ['n' => 0, 'with_levy' => 0];
+        if ($levyOn) {
+            // Bookings taken in these days (the levy figure's own basis), and how many carry any levy at all
+            $st = $db->prepare("SELECT COUNT(*) AS n, COALESCE(SUM(tourism_levy_amount > 0), 0) AS with_levy FROM bookings
+                                WHERE deleted_at IS NULL AND status <> 'expired' AND total_with_vat > ? AND DATE(created_at) BETWEEN ? AND ?");
+            $st->execute([BALANCE_TOLERANCE, $from, $to]);
+            $lb = $st->fetch(PDO::FETCH_ASSOC) ?: $lb;
+        }
+        $rowsIn = [];
+        if ($vatOn && $rate > 0) {
+            $st = $db->prepare("SELECT payment_reference, booking_type, booking_id, payment_date, payment_amount, vat_amount, vat_rate, total_amount FROM payments
+                                WHERE payment_date BETWEEN ? AND ? AND deleted_at IS NULL AND COALESCE(payment_type, '') != 'refund'
+                                AND payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND total_amount > ?");
+            $st->execute([$from, $to, BALANCE_TOLERANCE]);
+            $rowsIn = $st->fetchAll(PDO::FETCH_ASSOC);
+        }
+    } catch (Throwable $e) {
+        return ['ok' => false, 'total' => 0, 'cards' => []];
+    }
+    $checked = count($rowsIn);
+    $vatOwed = round((float)$agg['total_vat_collected'], 2);
+    $levyBookings = (int)$lb['n'];
+    $levyMissing = $levyOn && $levyBookings > 0 && (int)$lb['with_levy'] === 0; // switched on, yet not one booking taken carries any
+    // Booking payments carry VAT pro rata (levy and VAT-free lines dilute it), so a row is only questioned on rules that
+    // always hold: amount excluding VAT + VAT = total (admin/payment-add.php), VAT never above the row's own rate's share
+    // of the total, and (VAT on) a row with no VAT while its account carries VAT (rh_account_vat_split, no fallback rate).
+    $pct = static fn(float $x): string => rtrim(rtrim(number_format($x, 2), '0'), '.');
+    $splitOk = rh_ai_admin_lib('finance-account-sync.php') && function_exists('rh_account_vat_split');
+    $found = [];
+    $nZero = $nOff = $nRate = 0;
+    $gap = 0.0;
+    foreach ($rowsIn as $r) {
+        $vat = (float)$r['vat_amount'];
+        $tot = (float)$r['total_amount'];
+        $rowRate = (float)$r['vat_rate'];
+        $where = rh_dec_dept_label((string)$r['booking_type']) . ', ' . (string)$r['payment_date'];
+        $split = round(abs((float)$r['payment_amount'] + $vat - $tot), 2);
+        if ($split > BALANCE_TOLERANCE) {
+            $nOff++;
+            $gap += $split;
+            $found[] = ['label' => 'Amount excluding VAT plus VAT does not equal the total, ' . $where, 'reference' => (string)$r['payment_reference'], 'amount' => $split];
+            continue;
+        }
+        if ($vat <= BALANCE_TOLERANCE) {
+            // Questioned only when the account it was paid against carries VAT itself (zero-rated and levy-only
+            // accounts carry none): valued at that account's own VAT share, the split every payment screen uses
+            $miss = $splitOk ? round((float)rh_account_vat_split($db, (string)$r['booking_type'], (int)$r['booking_id'], $tot, 0.0)['vat'], 2) : 0.0;
+            if ($miss > BALANCE_TOLERANCE) {
+                $nZero++;
+                $gap += $miss;
+                $found[] = ['label' => 'No VAT recorded, though the account carries VAT, ' . $where, 'reference' => (string)$r['payment_reference'], 'amount' => $miss];
+            }
+            continue;
+        }
+        if ($rowRate > 0 && abs($rowRate - $rate) > 0.001) {
+            $nRate++;
+        }
+        // No rate stored on the row: its VAT cannot be checked against a rate, so it is not questioned (never the whole VAT)
+        $over = $rowRate > 0 ? round($vat - round($tot * $rowRate / (100 + $rowRate), 2), 2) : 0.0;
+        if ($over > BALANCE_TOLERANCE) {
+            $nOff++;
+            $gap += $over;
+            $found[] = ['label' => 'More VAT than its ' . $pct($rowRate) . '% rate allows, ' . $where, 'reference' => (string)$r['payment_reference'], 'amount' => $over];
+        }
+    }
+    $gap = round($gap, 2);
+    $total = $checked + $levyBookings;
+    if ($gap <= BALANCE_TOLERANCE && !$levyMissing) {
+        return ['ok' => true, 'total' => $total, 'cards' => []];
+    }
+    usort($found, static fn($a, $b) => $b['amount'] <=> $a['amount']);
+    $cur = $ctx['cur'];
+    $days = (int)$ctx['days'];
+    $rows = array_slice($found, 0, 6);
+    $rows[] = ['label' => 'VAT owed on takings in the last ' . $days . ' days (the dashboard\'s VAT collected)', 'amount' => $vatOwed];
+    if ($levyOn) {
+        $rows[] = ['label' => 'Tourism levy for the same days (the dashboard\'s levy figure)', 'amount' => round($levy, 2)];
+    }
+    if ($nRate > 0) {
+        $rows[] = ['label' => 'Payments charged at a rate other than today\'s ' . $pct($rate) . '% (listed only)', 'value' => (string)$nRate];
+    }
+    $n = $nZero + $nOff;
+    $why = ($n > 0 ? $nZero . ' payment(s) taken with no VAT and ' . $nOff . ' whose VAT does not add up, out of ' . $checked . ' checked in the last ' . $days . ' days. ' : '')
+        . ($levyMissing ? 'The tourism levy is switched on, yet none of the ' . $levyBookings . ' booking(s) taken in the last ' . $days . ' days carries any. ' : '')
+        . 'VAT owed for these days: ' . rh_dec_fmt($cur, $vatOwed) . ($levyOn ? '; tourism levy: ' . rh_dec_fmt($cur, $levy) : '') . '.';
+    $range = '&start_date=' . $from . '&end_date=' . $to;
+    return ['ok' => true, 'total' => $total, 'cards' => [rh_dec_card([
+        'key' => 'acc_tax', 'covers' => ['vat', 'levy'],
+        'decision' => $n > 0 ? 'Whether to correct ' . $n . ' payment(s) whose VAT does not add up before the VAT owed is set aside' : 'Whether the tourism levy setting is right for room takings',
+        'why_now' => trim($why),
+        'at_stake' => $gap > BALANCE_TOLERANCE ? $gap : null,
+        'at_stake_note' => $gap > BALANCE_TOLERANCE ? 'VAT those payments may be missing (at their account\'s own VAT share) or over-stating. The VAT owed is under Evidence, not counted here.'
+            : 'Not valued: the levy a booking should carry depends on the booking. The VAT owed and the levy are under Evidence.',
+        'urgency' => 0.65, 'confidence' => 0.6, 'history_days' => $days,
+        'evidence' => ['total' => $total, 'total_label' => 'payments and bookings checked', 'rows' => $rows],
+        'options' => $n > 0 ? [
+            rh_dec_option('Check and correct them on the VAT register', 'Each payment is checked and corrected by a manager; nothing is changed automatically.', $gap, null, 0.0, 0.6, 0, 3),
+            rh_dec_option('Leave them as recorded', 'The VAT owed stays as worked out from the payments.', 0.0, null, -$gap, 0.6, 0, 1),
+        ] : [
+            rh_dec_option('Check the levy setting and the bookings it should apply to', 'A manager checks the levy setting; nothing is changed automatically.', null, null, null, 0.5, 0, 3),
+            rh_dec_option('Leave it as it is', 'Bookings keep the levy they were taken with.', null, null, null, 0.5, 0, 1),
+        ],
+        'recommend' => 0, 'recommendation' => $n > 0 ? 'Check those payments on the VAT register and correct any that are wrong.' : 'Check the tourism levy setting against the room bookings.',
+        'tier' => 3, 'link' => [$n > 0 ? 'reports.php?tab=vat' . $range : 'reports.php?tab=overview' . $range, $n > 0 ? 'Open the VAT register' : 'Open Reports'],
     ])]];
 }
 

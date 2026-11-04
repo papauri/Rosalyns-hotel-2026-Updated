@@ -5,6 +5,7 @@ require_once 'admin-init.php';
 require_once 'includes/finance-schema.php';
 require_once __DIR__ . '/includes/receivables.php';
 require_once '../config/credit-notes.php';
+require_once __DIR__ . '/includes/review-panel.php'; // the Decisions panel: prints nothing unless switched on and allowed
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -1627,7 +1628,7 @@ if (!isset($folio_fnb)) {
 
         <?php if (!empty($error)): ?>
             <div class="ck-empty"><i class="fas fa-triangle-exclamation"></i><p><?php echo $ckH($error); ?></p></div>
-        <?php endif; ?>
+        <?php endif; echo rh_review_panel('accounting'); ?>
 
         <!-- ============ KPI STRIP ============ -->
         <section class="ck-kpis" aria-label="Key figures">
