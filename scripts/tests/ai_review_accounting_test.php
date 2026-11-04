@@ -70,12 +70,12 @@ $git = static fn(string $args): string => (string)shell_exec('git -C ' . escapes
 $intro = trim((string)preg_replace('/\s+/', ' ', $git('log --format=%H -S' . escapeshellarg("rh_review_panel('accounting')") . ' -- ' . $dash)));
 $intro = $intro !== '' ? (string)substr($intro, strrpos(' ' . $intro, ' ')) : '';
 $after = $intro === '' ? $src : $norm($git('show ' . $intro . ':' . $dash));
-$before = $norm($git('show ' . ($intro === '' ? 'HEAD' : $intro . '^') . ':' . $dash));
+$before = $norm($git('show ' . ($intro === '' ? 'HEAD' : $intro . '~1') . ':' . $dash));
 if ($before === '') {
     skip('dashboard source before the panel could not be read from git');
 } else {
     $stripped = str_replace([$req, $echoNew], ['', '<?php endif; ?>'], $after);
-    check($stripped === $before, 'dashboard: with the one require and the one echo taken out, the source is byte-for-byte what it was before the panel', $intro === '' ? 'vs HEAD' : 'vs ' . $intro . '^');
+    check($stripped === $before, 'dashboard: with the one require and the one echo taken out, the source is byte-for-byte what it was before the panel', $intro === '' ? 'vs HEAD' : 'vs ' . $intro . '~1');
 }
 
 // ════ 2. Gate off: nothing at all ════

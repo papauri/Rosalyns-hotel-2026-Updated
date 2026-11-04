@@ -392,7 +392,10 @@ try {
     $stale = rh_dec_brief($pdo, $adm);
     check($stale === null || !in_array('tst_fixture', array_column((array)$stale['decisions'], 'key'), true), 'Today\'s brief: after new figures and a failed call the stored decisions are not served');
     $jsSrc = (string)file_get_contents($root . '/admin/js/review-panel.js');
-    check(strpos($jsSrc, "j.html === '') { sec.remove();") !== false, 'Refresh with nothing to show removes the panel (no stale cards on screen)');
+    check(strpos($jsSrc, "j.html === '') {") !== false && strpos($jsSrc, '(wrap || sec).remove();') !== false, 'Refresh with nothing to show removes the panel and its tab (no stale cards on screen)');
+    check(strpos($html0, 'class="rh-dec-tab"') !== false && substr_count($html0, 'class="rh-dec-tab"') === 1 && strpos($html0, 'aria-expanded="false"') !== false && strpos($html0, 'role="dialog"') !== false
+        && strpos($html0, 'aria-controls="rhDecDrawer-stock"') !== false && strpos($html0, 'id="rhDecDrawer-stock"') !== false && strpos($html0, '>Close</button>') !== false
+        && strpos($html0, 'rh-dec-wrap is-open') === false, 'closed by default: one plain "Decisions" tab, the panel inside a dialog drawer with a Close button, nothing open on load');
 } finally {
     $pdo->rollBack();
     rh_ai_settings($pdo, true);

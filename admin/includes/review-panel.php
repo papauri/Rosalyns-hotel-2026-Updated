@@ -12,8 +12,9 @@
  * (worded by a call that worked): never templated cards, never a note.
  * Including this file prints nothing.
  *
- * Plain look on the existing admin tokens (admin/css/review-panel.css): a normal card titled "Decisions", every
- * figure and column with a plain helper line, links to the screen that acts. Nothing changes by itself.
+ * Plain look on the existing admin tokens (admin/css/review-panel.css): closed by default, one small "Decisions" tab
+ * (with the number waiting) opens a side drawer holding a normal card titled "Decisions", every figure and column
+ * with a plain helper line, links to the screen that acts. Nothing changes by itself.
  */
 
 /** The areas, their permissions (any one) and modules (any one). Shared with the engine (includes/ai/ai-decisions.php). */
@@ -136,6 +137,15 @@ function rh_review_panel_html(array $v, string $csrf): string
         $out .= '<script src="js/review-panel.js?v=' . $jsV . '" defer></script>';
     }
     $id = 'rhDec-' . $h($area);
+    // Closed by default (owner 2026-11-05): only a small "Decisions" tab shows; the panel opens in a side drawer on click.
+    // Every part is position: fixed, so the page itself looks and lays out exactly as without it.
+    $nMain = count((array)$v['main']);
+    $did = 'rhDecDrawer-' . $h($area);
+    $out .= '<div class="rh-dec-wrap" id="rhDecWrap-' . $h($area) . '">';
+    $out .= '<button type="button" class="rh-dec-tab" data-dec-open aria-expanded="false" aria-controls="' . $did . '" aria-label="Decisions, ' . $nMain . ' waiting">Decisions<span class="rh-dec-tab__n" data-dec-count>' . $nMain . '</span></button>';
+    $out .= '<div class="rh-dec-backdrop" data-dec-close></div>';
+    $out .= '<aside class="rh-dec-drawer" id="' . $did . '" role="dialog" aria-modal="true" aria-labelledby="' . $id . '-title" tabindex="-1">';
+    $out .= '<div class="rh-dec-drawer__bar"><button type="button" class="btn btn-secondary btn-sm" data-dec-close>Close</button></div><div class="rh-dec-drawer__body">';
     $out .= '<section class="rh-dec" id="' . $id . '" data-area="' . $h($area) . '" data-endpoint="api/decisions.php" data-csrf="' . $h($csrf) . '" aria-labelledby="' . $id . '-title">';
     $out .= '<header class="rh-dec__head"><div><h2 class="rh-dec__title" id="' . $id . '-title">Decisions</h2>';
     $out .= '<p class="rh-dec__help">The few choices with the most money at stake right now, worked out from today\'s figures. Each one links to the screen where you act; nothing changes by itself.</p></div>';
@@ -166,7 +176,7 @@ function rh_review_panel_html(array $v, string $csrf): string
         }
         $out .= '</ul></details>';
     }
-    $out .= '</section>';
+    $out .= '</section></div></aside></div>';
     return $out;
 }
 
