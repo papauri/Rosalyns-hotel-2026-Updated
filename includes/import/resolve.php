@@ -207,9 +207,19 @@ if (!function_exists('import_resolve')) {
     }
 
     /**
-     * The whole picture after the person's answers. See the file header for the shapes.
+     * The whole picture after the person's answers. See the file header for the shapes. Works on its own copy of $analysis.
      */
     function import_resolve(array $analysis, array $answers, array $ctx = []): array
+    {
+        return import_resolve_inplace($analysis, $answers, $ctx);
+    }
+
+    /**
+     * Same as import_resolve(), but the answers are written into the caller's $analysis itself instead of into a private copy. On a 20,000-row
+     * file that copy (every row separated by the status recompute) was a third of the memory of a review request; callers that do not need the
+     * untouched analysis afterwards use this one.
+     */
+    function import_resolve_inplace(array &$analysis, array $answers, array $ctx = [], bool $freeRows = false): array
     {
         $ctx['_ex_index'] = import_index_existing((array)($ctx['existing'] ?? []));
         $unitOptions = array_values(array_unique(array_map('strval', (array)($ctx['unit_options'] ?? []))));
@@ -260,7 +270,8 @@ if (!function_exists('import_resolve')) {
         $rowsOut = [];          // uid => record
         $cands = [];            // surviving rows with their final values
         $openSheetQs = [];
-        foreach ($analysis['sheets'] as $sh) {
+        foreach (array_keys($analysis['sheets']) as $shIdx) {
+            $sh = $analysis['sheets'][$shIdx];
             $act = $sh['triage']['action'] ?? 'skip';
             foreach ($analysis['questions'] as $q) {
                 if ($q['sheet'] === $sh['name'] && $q['row'] === null && empty($q['row_uids']) && $q['blocking'] && $q['answer'] === null && in_array($act, ['import', 'ask'], true)) {
@@ -272,7 +283,21 @@ if (!function_exists('import_resolve')) {
             }
             $cleanSheet = trim((string)preg_replace('/^[^\p{L}\p{N}]+/u', '', (string)$sh['name']));
             $cleanSheet = mb_substr($cleanSheet !== '' ? $cleanSheet : (string)$sh['name'], 0, 100);
-            foreach ($sh['rows'] as $row) {
+            // freeRows: each row is released as soon as it has been read (the rows of a 20,000-row file are most of the memory of the analysis), so
+            // the rows and the candidates built from them never both exist in full.
+            $rowsHolder = [];
+            if ($freeRows) {
+                unset($sh['rows']);
+                $rowsHolder = &$analysis['sheets'][$shIdx]['rows'];
+            } else {
+                $rowsHolder = $sh['rows'];
+            }
+            $prevKey = null;
+            foreach ($rowsHolder as $rowKey => &$row) {
+                if ($freeRows && $prevKey !== null) {
+                    unset($rowsHolder[$prevKey]);
+                }
+                $prevKey = $rowKey;
                 $f = $row['fields'];
                 $rec = [
                     'uid' => $row['uid'], 'sheet' => $sh['name'], 'sheet_index' => $row['sheet_index'], 'row' => $row['row'], 'ref' => $row['ref'],
@@ -405,6 +430,18 @@ if (!function_exists('import_resolve')) {
                 $cands[] = ['rec' => $rec, 'fin' => $fin, 'sheet' => $sh['name'], 'cleanSheet' => $cleanSheet, 'dup' => $dupQ, 'group' => $row['group'] ?? null];
                 $rowsOut[$row['uid']] = $rec;
             }
+            unset($row);
+            if ($freeRows && $prevKey !== null) {
+                unset($rowsHolder[$prevKey]);
+            }
+            unset($rowsHolder);
+        }
+        unset($sh, $f, $rec, $fin);
+        if ($freeRows) {
+            // the rows of the file are not read again below: let go of them (the caller asked for this and keeps its own slim copy of what it needs)
+            foreach (array_keys($analysis['sheets']) as $si) {
+                $analysis['sheets'][$si]['rows'] = [];
+            }
         }
 
         // ---- group rows into items --------------------------------------------------------------------
@@ -506,6 +543,11 @@ if (!function_exists('import_resolve')) {
             $ms = array_map(function ($i) use ($cands) {
                 return $cands[$i];
             }, $it['members']);
+            if ($freeRows) {
+                foreach ($it['members'] as $mi) {          // each candidate belongs to exactly one item: let go of it now ({$ms} holds what this item needs)
+                    unset($cands[$mi]);
+                }
+            }
             $first = $ms[0]['fin'];
             $open = $it['open'];
             $warn = [];
@@ -531,7 +573,7 @@ if (!function_exists('import_resolve')) {
                         array_merge(array_map(function ($v) {
                             return ['key' => 'use:' . $v['label'], 'label' => 'Use ' . $v['label']];
                         }, array_values($vals)), [['key' => 'skip', 'label' => 'Skip this item']]),
-                        ['sheet' => $ms[0]['sheet'], 'cells' => array_column($vals, 'source'), 'row_uids' => array_map(function ($m) {
+                        ['sheet' => $ms[0]['sheet'], 'conflict_field' => $fld === 'price' ? 'unit_price' : 'unit', 'cells' => array_column($vals, 'source'), 'row_uids' => array_map(function ($m) {
                             return $m['rec']['uid'];
                         }, $ms)]));
                     $extra[$xq['qkey']] = $xq;
@@ -837,7 +879,8 @@ if (!function_exists('import_resolve')) {
         }
 
         // the same cleaning and length limits as the manual Add form; over-long = blocked with a plain reason (skip is the way out)
-        foreach ($outItems as $oi => $it) {
+        foreach (array_keys($outItems) as $oi) {          // by key: a foreach over the array itself would keep a second copy of every item while they are rewritten
+            $it = $outItems[$oi];
             if (empty($it['match'])) {
                 $outItems[$oi]['name'] = rh_clean_text($it['name']);
                 if ($it['unit'] !== null) {

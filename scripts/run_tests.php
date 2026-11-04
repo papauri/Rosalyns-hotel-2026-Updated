@@ -34,6 +34,7 @@ $suites = [
     'Stock packs'           => 'scripts/tests/stock_packs.php',
     'Data import engine'    => 'scripts/tests/import_engine_test.php',
     'Data import stock'     => 'scripts/tests/import_stock_test.php',
+    'Data import export'    => 'scripts/tests/import_export_test.php',
     'Menu portions + search' => 'scripts/tests/menu_portions.php',
     'Stock receiving'       => 'scripts/tests/stock_receiving.php',
     'Stock count approval'  => 'scripts/tests/stock_count_approval.php',

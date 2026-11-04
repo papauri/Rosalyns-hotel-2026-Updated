@@ -10,12 +10,14 @@
  * Access: admin-init.php (session, data_import permission, stock module) + this file (kill switch data_import_enabled, fail-closed,
  * and stock_management). A job can only be opened by the person who uploaded it, or an admin.
  *
- * AJAX (POST, CSRF, JSON): upload | summary | answer | fields | cancel | confirm | list.  GET ?action=csv&job=ID downloads the preview CSV.
+ * AJAX (POST, CSRF, JSON): upload | summary | review_page | bulk | answer | fields | cancel | confirm | list.  GET ?action=csv&job=ID downloads the preview CSV.
  * All page text built from the file (names, sheets, cells) is set with textContent in the browser - it is never parsed as HTML.
  */
 require_once 'admin-init.php';
 require_once __DIR__ . '/includes/import-schema.php';
 require_once __DIR__ . '/../includes/import/commit-stock.php';
+require_once __DIR__ . '/../includes/import/memory.php';          // will this file / job fit in this server's memory and time (plain message, never a fatal error)
+require_once __DIR__ . '/../includes/import/review-view.php';     // Step 3 paging / filters / bulk answers (server side)
 
 $user = [
     'id'        => $_SESSION['admin_user_id'],
@@ -85,14 +87,19 @@ function di_mb_text(int $bytes): string
 /** A job the signed-in person may open: their own, or any job for an admin. */
 function di_job(PDO $pdo, int $jobId, int $uid, bool $isAdmin): ?array
 {
-    $job = $jobId > 0 ? import_job_get($pdo, $jobId) : null;
-    if (!$job || ($job['target'] ?? '') !== 'stock') {
-        return null;
+    return import_job_for_user($pdo, $jobId, $uid, $isAdmin);
+}
+
+/** The filter values a request carries (validated again in import_rv_params; nothing here is trusted). */
+function di_filter_post(): array
+{
+    $out = [];
+    foreach (['q', 'sheet', 'cat', 'status', 'type', 'kind', 'warn', 'cost', 'stock', 'answered', 'sort', 'size', 'page', 'view'] as $k) {
+        if (isset($_POST[$k]) && is_scalar($_POST[$k])) {
+            $out[$k] = $_POST[$k];
+        }
     }
-    if (!$isAdmin && (int)($job['created_by'] ?? 0) !== $uid) {
-        return null;
-    }
-    return $job;
+    return $out;
 }
 
 // ---- gate: kill switch + stock permission -----------------------------------------------------------------------------
@@ -133,6 +140,49 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET' && $action === 'csv') {
     exit;
 }
 
+// ---- EXPORT (Part B): the current stock as a tabbed Excel workbook -------------------------------------------------------
+// POST + CSRF, same gates as the rest of the page (kill switch, data_import AND stock_management were checked above). Read-only:
+// nothing is written to stock. Content comes from the live stock tables; see includes/import/export-stock.php.
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'POST' && $action === 'export') {
+    $exportFail = function (string $msg, int $code = 422): void {
+        while (ob_get_level() > 0) {
+            @ob_end_clean();
+        }
+        http_response_code($code);
+        header('Content-Type: text/html; charset=utf-8');
+        header('Cache-Control: no-store');
+        echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><title>Export current stock</title></head><body style="font-family:sans-serif;max-width:560px;margin:60px auto;">'
+            . '<p>' . htmlspecialchars($msg, ENT_QUOTES) . '</p><p><a href="data-import.php">Back to Import</a></p></body></html>';
+        exit;
+    };
+    if (!validateCsrfToken((string)($_POST['csrf_token'] ?? ''))) {
+        $exportFail('Your session has expired. Go back to Import, reload the page and try again.', 403);
+    }
+    require_once __DIR__ . '/../includes/import/export-stock.php';
+    @set_time_limit(180);
+    $pick = (($_POST['scope'] ?? 'all') === 'pick');
+    $tabsWanted = $pick ? array_values(array_filter(array_map('strval', (array)($_POST['tabs'] ?? [])), 'is_string')) : [];
+    if ($pick && !$tabsWanted) {
+        $exportFail('Tick at least one tab to export, or choose "All tabs".');
+    }
+    try {
+        $built = import_export_stock_workbook($pdo, ['tabs' => $tabsWanted, 'hotel' => (string)getSetting('site_name', ''), 'currency' => (string)getSetting('currency_symbol', '')]);
+    } catch (Throwable $e) {
+        error_log('stock export: ' . $e->getMessage());
+        $built = ['ok' => false, 'error' => 'The stock workbook could not be built. Please try again.'];
+    }
+    if (empty($built['ok'])) {
+        $exportFail((string)$built['error']);
+    }
+    if (function_exists('logActivity')) {
+        logActivity($uid, 'stock_export', 'Stock workbook downloaded: ' . (int)$built['summary']['items'] . ' items on ' . (int)$built['summary']['tabs'] . ' tab(s).');
+    }
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
+    import_export_send($built);
+}
+
 // ---- AJAX actions -------------------------------------------------------------------------------------------------------
 if ($isAjax) {
     if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
@@ -145,6 +195,7 @@ if ($isAjax) {
         di_json(['ok' => false, 'error' => 'Your session has expired. Reload the page and try again.'], 403);
     }
     @set_time_limit(180);
+    import_job_state_memo(true);          // one answer request resolves the job twice, not three times
     $jobId = (int)($_POST['job'] ?? 0);
 
     if ($action === 'upload') {
@@ -202,6 +253,14 @@ if ($isAjax) {
         di_json(['ok' => false, 'error' => 'That import was not found.'], 404);
     }
 
+    // Opening an analysed job decodes and resolves its stored analysis: where this server's memory_limit cannot hold that (and cannot be raised), say so plainly.
+    if (in_array($action, ['summary', 'review_page', 'bulk', 'answer', 'fields'], true) && (int)($job['analysis_bytes'] ?? 0) > 0) {
+        $mem = import_mem_check_review((int)$job['analysis_bytes'], import_default_aliases());
+        if (!$mem['ok']) {
+            di_json(['ok' => false, 'error' => $mem['message'], 'state' => 'toobig']);
+        }
+    }
+
     if ($action === 'summary') {
         if ($job['status'] === 'committed') {
             di_json(['ok' => true, 'state' => 'committed', 'file' => $job['original_name'], 'result' => json_decode((string)$job['result_json'], true)]);
@@ -218,9 +277,29 @@ if ($isAjax) {
                 di_json(['ok' => false, 'error' => (string)$a['error']]);
             }
         }
-        $s = import_job_review_summary($pdo, $jobId);
+        // Lean overview (no item list: that is paged below). With paged=1 the first page comes back in the same reply.
+        $s = import_job_review_view($pdo, $jobId, !empty($_POST['paged']) ? di_filter_post() : null, ['facets' => true]);
         $s['state'] = 'review';
         di_json($s);
+    }
+
+    if ($action === 'review_page') {
+        if (!in_array($job['status'], ['analysed', 'reviewing', 'confirmed'], true)) {
+            di_json(['ok' => false, 'error' => 'This import cannot be reviewed any more.']);
+        }
+        $r = import_job_review_view($pdo, $jobId, di_filter_post(), ['overview' => false, 'facets' => !empty($_POST['facets']), 'entries' => ($_POST['entries'] ?? '1') !== '0']);
+        di_json($r);
+    }
+
+    if ($action === 'bulk') {
+        // Apply one answer to exactly the questions the filters select. The server recomputes that set; dry=1 only describes it.
+        $r = import_job_bulk($pdo, $jobId, di_filter_post(), (string)($_POST['btype'] ?? ''), (string)($_POST['sig'] ?? ''), (string)($_POST['role'] ?? ''),
+            !empty($_POST['dry']), (string)($_POST['fingerprint'] ?? ''), $uid);
+        if (!empty($r['ok']) && empty($r['dry'])) {
+            $v = import_job_review_view($pdo, $jobId, di_filter_post(), ['facets' => true]);
+            $r['summary'] = $v;
+        }
+        di_json($r);
     }
 
     if ($action === 'answer') {
@@ -232,7 +311,7 @@ if ($isAjax) {
         }
         $r = import_job_answer($pdo, $jobId, $qid, $answer, $uid);
         if (!empty($r['ok'])) {          // the fresh picture comes back with the answer (one round trip, not two)
-            $r['summary'] = import_job_review_summary($pdo, $jobId);
+            $r['summary'] = import_job_review_view($pdo, $jobId, !empty($_POST['paged']) ? di_filter_post() : null, ['facets' => true]);
             $r['summary']['state'] = 'review';
         }
         di_json($r);
@@ -243,7 +322,7 @@ if ($isAjax) {
         $fields = is_array($fields) ? array_values(array_map('strval', $fields)) : [];
         $r = import_job_set_update_fields($pdo, $jobId, (string)($_POST['key'] ?? ''), $fields, $uid);
         if (!empty($r['ok'])) {
-            $r['summary'] = import_job_review_summary($pdo, $jobId);
+            $r['summary'] = import_job_review_view($pdo, $jobId, !empty($_POST['paged']) ? di_filter_post() : null, ['facets' => true]);
             $r['summary']['state'] = 'review';
         }
         di_json($r);
@@ -290,7 +369,31 @@ $jsV = @filemtime(__DIR__ . '/js/data-import.js');
 
     <div class="content">
         <div class="page-header">
-            <h2 class="page-title"><i class="fas fa-file-import" style="color:var(--color-primary,#766550);"></i> Import</h2>
+            <h2 class="page-title"><i class="fas fa-file-import di-title-icon" aria-hidden="true"></i> Import</h2>
+            <?php /* EXPORT BUTTON (Part B): plain form POST, no script needed. Tabs = stock categories (includes/import/export-stock.php). */
+            require_once __DIR__ . '/../includes/import/export-stock.php';
+            try { $exportTabs = import_export_stock_tabs($pdo); } catch (Throwable $e) { $exportTabs = []; }
+            ?>
+            <details class="di-export">
+                <summary class="btn-secondary di-btn"><i class="fas fa-file-excel" aria-hidden="true"></i> Export current stock</summary>
+                <form method="post" action="data-import.php" class="di-export-form">
+                    <input type="hidden" name="action" value="export">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
+                    <p class="di-help">An Excel workbook of your stock as it is right now (anything you imported and approved is in it), one tab per category. Nothing is changed.</p>
+                    <?php if (!$exportTabs): ?>
+                        <p class="di-muted">There is no stock to export yet.</p>
+                    <?php else: ?>
+                        <label class="di-check"><input type="radio" name="scope" value="all" checked> <span>All tabs (<?php echo count($exportTabs); ?>)</span></label>
+                        <label class="di-check"><input type="radio" name="scope" value="pick"> <span>Only the tabs I tick below</span></label>
+                        <div class="di-export-tabs" role="group" aria-label="Tabs to export">
+                            <?php foreach ($exportTabs as $et): ?>
+                                <label class="di-check"><input type="checkbox" name="tabs[]" value="<?php echo htmlspecialchars($et['key'], ENT_QUOTES); ?>"> <span><?php echo htmlspecialchars($et['label']); ?> <small>(<?php echo (int)$et['items']; ?> item<?php echo $et['items'] === 1 ? '' : 's'; ?>)</small></span></label>
+                            <?php endforeach; ?>
+                        </div>
+                        <button type="submit" class="btn-primary di-btn"><i class="fas fa-download" aria-hidden="true"></i> Download the stock workbook</button>
+                    <?php endif; ?>
+                </form>
+            </details>
         </div>
 
         <div id="di-root" class="di no-auto-pagination" data-disable-auto-pagination="1"

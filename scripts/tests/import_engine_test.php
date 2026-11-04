@@ -732,6 +732,105 @@ $cq = $fmQ($ft, 'case-price');
 $t($cq !== null && array_column($cq['options'], 'key') === ['per-unit', 'per-case'] && strpos($cq['text'], 'Is that the price of one unit, or of a whole case/pack?') !== false, 'gate F4: among tightly priced peers the 60,000 is still asked, with the same wording and options');
 $t(strpos((string)file_get_contents($root . '/includes/import/crosscheck.php'), 'case_price_ratio') === false, 'gate F4: no fixed case-price ratio is left in the cross-checker');
 
+// Step 3 on the server (review-view.php): pure helpers, no database
+require_once $root . '/includes/import/review-view.php';
+$rp = import_rv_params(['status' => 'ready,bogus', 'sort' => 'x;DROP', 'size' => '999', 'type' => 'nope', 'kind' => 'matched', 'warn' => 'yes', 'q' => "  a\x00b  ", 'page' => '0', 'view' => 'cat']);
+$t($rp['status'] === ['ready'] && $rp['sort'] === 'order' && $rp['size'] === 50 && $rp['type'] === '' && $rp['kind'] === 'matched' && $rp['warn'] === 1 && $rp['q'] === 'a b' && $rp['page'] === 1 && $rp['view'] === 'cat', 'review-view: request values are validated against allow-lists');
+$t(import_rv_params([])['status'] === null && import_rv_params(['status' => 'all'])['status'] === [] && import_rv_resolve_status(import_rv_params([]), ['needs-answer' => 3])['status'] === ['needs-answer', 'blocked'] && import_rv_resolve_status(import_rv_params([]), ['needs-answer' => 0, 'blocked' => 0])['status'] === [], 'review-view: no status = "needs answer" while anything remains, else everything');
+$e1 = ['hay' => mb_strtolower("zzt lager 00012\nbeers\n🍺 bar stock"), 'refs' => ['🍺 bar stock!c12', '🍺 bar stock!a5']];
+$t(import_rv_search_match($e1, import_rv_compile_search('BAR!C12')) && !import_rv_search_match($e1, import_rv_compile_search('BAR!C13')) && import_rv_search_match($e1, import_rv_compile_search('c12')) && !import_rv_search_match($e1, import_rv_compile_search('c1')) && import_rv_search_match($e1, import_rv_compile_search('lager 12')) && import_rv_search_match($e1, import_rv_compile_search('lager 0001')), 'review-view: search matches words, and a cell like BAR!C12 (emoji sheet name ignored, cell exact)');
+$rq = ['options' => [['key' => 'keep'], ['key' => 'use:Heineken'], ['key' => 'use:Other'], ['key' => 'per-case'], ['key' => 'skip']], 'suggestion' => ['name' => 'Heineken']];
+$t(import_rv_roles($rq) === ['keep' => 'keep', 'use-suggestion' => 'use:Heineken', 'skip' => 'skip'], 'review-view: bulk roles - the suggestion becomes a role, other names and "per case" never do');
+$t(!in_array('same-existing-match', import_rv_bulk_types(), true) && !in_array('no-unit', import_rv_bulk_types(), true) && !in_array('mapping-unsure', import_rv_bulk_types(), true) && !in_array('sheet-unknown', import_rv_bulk_types(), true), 'review-view: sheet, column and "same existing match" questions are never bulk-answerable');
+$t(import_rv_scope(['row_uids' => [], 'row' => null, 'type' => 'sheet-unknown']) === 'structural' && import_rv_scope(['row_uids' => ['a'], 'row' => null, 'type' => 'no-unit']) === 'sheet' && import_rv_scope(['row_uids' => ['a'], 'row' => 4, 'type' => 'possible-typo']) === 'entry', 'review-view: questions are sorted into structural / whole-sheet / per-item');
+// Speed without changing a single answer: the analysis of a big sheet used to be quadratic (the "case price" peers were rebuilt and sorted for every
+// row; every cell re-encoded the whole alias vocabulary and ran an edit distance against every alias). The output is frozen from the code before the change.
+mt_srand(5);
+$looOk = true;
+for ($rep = 0; $rep < 300 && $looOk; $rep++) {
+    $n = mt_rand(2, 40);
+    $prices = [];
+    for ($z = 0; $z < $n; $z++) { $prices[] = mt_rand(0, 3) ? (float)mt_rand(1, 12) * 100 : round(mt_rand(1, 99999) / 7, 4); }     // plenty of ties
+    $g = import_cc_group($prices);
+    foreach ($prices as $ix => $pr) {
+        $peers = $prices; unset($peers[$ix]);
+        $direct = [import_median($peers), import_pc_spread(array_map('log', import_pc_positive($peers)))];
+        $fast = import_cc_loo_stats($g, (float)$pr);
+        if ($direct[0] !== $fast[0] || $direct[1] !== $fast[1]) { $looOk = false; break; }
+    }
+}
+$t($looOk, 'speed: median / spread of a row\'s peers read from one sorted group equal the direct computation exactly (300 random groups with ties)');
+$simOk = true;
+for ($z = 0; $z < 2000 && $simOk; $z++) {
+    $a = substr(md5((string)mt_rand()), 0, mt_rand(4, 24)); $b = substr(md5((string)mt_rand()), 0, mt_rand(4, 24));
+    if (abs(strlen($a) - strlen($b)) * 5 > max(strlen($a), strlen($b)) && import_similarity($a, $b) >= 0.8) { $simOk = false; }
+}
+$t($simOk, 'speed: a length difference of more than a fifth always means a similarity under 0.8 (the header matcher skips those)');
+$tmpAnal = $put('', 'frozen.csv');
+$fhz = fopen($tmpAnal, 'w'); fputcsv($fhz, ['Item Name', 'Batch', 'Balance', 'Unit', 'Unit Price', 'Max Level', 'Expiry Date']);
+$wordsZ = ['Lager', 'Stout', 'Cider', 'Vodka', 'Rum', 'Flour', 'Sugar', 'Rice', 'Beans', 'Salt', 'Oil', 'Soap', 'Bleach', 'Mop', 'Paper', 'Pen'];
+$catsZ = 100; $perZ = 50; $iz = 0; mt_srand(7);
+for ($cz = 1; $cz <= $catsZ; $cz++) {
+    fputcsv($fhz, ['ZZT CATEGORY ' . sprintf('%04d', $cz), '', '', '', '', '', '']);
+    for ($kz = 0; $kz < $perZ && $iz < 5000; $kz++, $iz++) {
+        $nm = 'ZZT ' . $wordsZ[$iz % 16] . ' ' . sprintf('%05d', $iz);
+        if ($iz % 40 == 39) { $nm = 'ZZT ' . $wordsZ[($iz - 1) % 16] . ' ' . sprintf('%05d', $iz - 1) . 'x'; }
+        $pz = 1000 + ($iz % 50) * 10; if ($iz % 23 == 0) { $pz *= 40; }
+        if ($iz % 211 == 0 && $iz > 0) { $nm = 'ZZT ' . $wordsZ[($iz - 1) % 16] . ' ' . sprintf('%05d', $iz - 1); }
+        fputcsv($fhz, [$nm, '', mt_rand(0, 50), ['bottle', 'kg', 'each', 'L'][$iz % 4], $pz, mt_rand(10, 100), '']);
+    }
+}
+fclose($fhz);
+$tz = microtime(true);
+$anz = import_analyze_file($tmpAnal, 'g5k.csv', $al, ['max_bytes' => 50 << 20]);
+$secz = microtime(true) - $tz;
+$t(md5(json_encode($anz)) === 'eec1072db2624a61ef1cbd9067550585', 'speed: a generated 5,000-item sheet analyses to byte-identical output (json md5 frozen from the code before the speed-up)');
+$t($secz < 15, 'speed: 5,000 items analyse in well under 15 s (' . round($secz, 1) . ' s; it was 4-6 s before, 20,000 items 73 s, now about 11 s)');
+$anx = import_analyze_file($root . '/scripts/tests/fixtures/import/synthetic_stock.xlsx', 'synthetic_stock.xlsx', $al, ['max_bytes' => 50 << 20]);
+$t(md5(json_encode($anx)) === 'aac36d4c9fd13190f06ba65555c00866', 'speed: the synthetic workbook analyses to byte-identical output (json md5 frozen from the code before the speed-up)');
+// Memory: a file that cannot fit ends with a plain message, never a fatal error; a normal file works under a small limit. Each case is a child
+// process with its own memory_limit (a fatal error would leave no result line at all).
+require_once $root . '/includes/import/memory.php';
+$runMem = function (string $limit, string $mode, string $csvPath, bool $noIniSet = false) use ($root) {
+    $cmd = escapeshellarg(PHP_BINARY) . ' -d memory_limit=' . $limit . ($noIniSet ? ' -d disable_functions=ini_set' : '') . ' ' . escapeshellarg($root . '/scripts/tests/import_memory_child.php') . ' ' . $mode . ' ' . escapeshellarg($csvPath) . ' 2>&1';
+    $out = (string)shell_exec($cmd);
+    foreach (preg_split('/\R/', $out) as $line) {
+        if ($line !== '' && $line[0] === '{') { $j = json_decode($line, true); if (is_array($j)) { return $j + ['fatal' => false]; } }
+    }
+    return ['fatal' => true, 'raw' => substr($out, -300)];
+};
+$memCsv = function (int $rows) use ($put, $wordsZ) {
+    $fh = fopen($put('', 'mem' . $rows . '.csv'), 'w');
+    $path = stream_get_meta_data($fh)['uri'];
+    fwrite($fh, import_mem_sample_csv($rows));
+    fclose($fh);
+    return $path;
+};
+$big = $memCsv(20000);
+$r64 = $runMem('64M', 'run', $big, true);
+$t(empty($r64['fatal']) && $r64['ok'] === false && preg_match('/^This file has 20,\d{3} rows/', $r64['message']) && strpos($r64['message'], 'too many to read in one go on this server') !== false && preg_match('/files of about [\d,]+ rows \(by sheet or category\)/', $r64['message']) && !isset($r64['items']), 'memory: 20,000 rows under a 64 MB limit (ini_set not allowed) = the plain "split it into files of about N rows" message, no fatal error: ' . json_encode($r64['message'] ?? $r64['raw'] ?? ''));
+$r64b = $runMem('64M', 'run', $big, false);
+$t(empty($r64b['fatal']) && $r64b['ok'] === true && ($r64b['items'] ?? 0) > 19000 && $r64b['limit_after'] !== '64M', 'memory: where the host allows ini_set the limit is raised to what the file needs and the whole upload + review work runs (' . ($r64b['limit_after'] ?? '?') . ', peak ' . ($r64b['peak_real_mb'] ?? '?') . ' MB real)');
+$r128 = $runMem('128M', 'run', $memCsv(3000), true);
+$t(empty($r128['fatal']) && $r128['ok'] === true && ($r128['items'] ?? 0) >= 2900 && ($r128['entries'] ?? 0) >= 2900, 'memory: a normal 3,000-row file still analyses, resolves and builds the review list under a 128 MB limit (peak ' . ($r128['peak_real_mb'] ?? '?') . ' MB real)');
+$r128b = $runMem('128M', 'run', $memCsv(5000), true);
+$t(empty($r128b['fatal']) && $r128b['ok'] === true && ($r128b['items'] ?? 0) >= 4900, 'memory: 5,000 rows also fit under 128 MB (peak ' . ($r128b['peak_real_mb'] ?? '?') . ' MB real)');
+$cal = import_mem_calibration($al);
+$t(!empty($cal['measured']) && $cal['cell_up'] > 100 && $cal['cell_review'] > 100 && $cal['sec_cell'] > 0 && $cal['real_factor'] >= 1.3, 'memory: the per-cell cost comes from a measured run of the real engine on a generated sample (' . round($cal['cell_up']) . ' / ' . round($cal['cell_review']) . ' bytes per cell)');
+$chkOk = import_mem_check($memCsv(20000), 'x.csv', $al, ['limit' => 4 * 1073741824]);
+$chkSmall = import_mem_check($memCsv(200), 'x.csv', $al, ['limit' => 1048576]);
+$chkTime = import_mem_check($memCsv(20000), 'x.csv', $al, ['limit' => 4 * 1073741824, 'time_limit' => 5]);
+$t($chkOk['ok'] && $chkSmall['ok'] && !$chkTime['ok'] && strpos($chkTime['message'], 'too many to read in one go') !== false, 'memory: plenty of memory = fine, a tiny file always fits, and a time limit that is too short is refused the same plain way');
+$rv = import_mem_check_review(strlen(json_encode(['x' => str_repeat('a', 3000000)])), $al, ['limit' => 8 * 1048576]);
+$t(!$rv['ok'] && strpos($rv['message'], 'too big for this server to open') !== false, 'memory: opening a stored job that cannot fit gives a plain message too');
+$jsonSame = true;
+foreach ([$anz, $anx] as $anCheck) { $jsonSame = $jsonSame && import_json_pieces($anCheck) === json_encode($anCheck, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE); }
+$t($jsonSame, 'memory: the analysis is stored with the piece-by-piece writer and the text is identical to one json_encode');
+// the slimmer resolve (rows released as they are read) gives the same answers as the plain one
+$stIn = $anz;
+$resA = import_resolve($anz, [], ['existing' => [], 'unit_options' => ['each'], 'corrections' => []]);
+$resB = import_resolve_inplace($stIn, [], ['existing' => [], 'unit_options' => ['each'], 'corrections' => []], true);
+$t(json_encode($resA) === json_encode($resB), 'memory: resolving with the rows released as they are read gives byte-identical results');
 // cleanup
 foreach ($tmpFiles as $f) { @unlink($f); }
 @rmdir($tmpDir);

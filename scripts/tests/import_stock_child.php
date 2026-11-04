@@ -420,6 +420,264 @@ try {
         && import_cost_storage_problems(['cost' => 123456789012.0, 'in_count' => false], import_cost_limits_from_ctx(['cost_limits' => $lm])) !== []
         && import_cost_storage_problems(['cost' => 500.0, 'in_count' => false], import_cost_limits_from_ctx(['cost_limits' => $lm])) === []);
 
+    // ---- Step 3 at scale: server-side paging, filters, facets, category counts, bulk answers (review-view.php) --------------------
+    require_once $root . '/includes/import/review-view.php';
+    $N = 2000;
+    $words = ['Lager', 'Stout', 'Cider', 'Vodka', 'Rum', 'Flour', 'Sugar', 'Rice', 'Beans', 'Salt', 'Oil', 'Soap', 'Bleach', 'Mop', 'Paper', 'Pen'];
+    $fh = fopen('php://memory', 'w+');
+    fputcsv($fh, ['Item Name', 'Batch', 'Balance', 'Unit', 'Unit Price', 'Max Level', 'Expiry Date']);
+    $cats = 40; $per = (int)ceil($N / $cats); $ii = 0; mt_srand(11);
+    for ($c = 1; $c <= $cats; $c++) {
+        fputcsv($fh, [$n('CATEGORY ' . sprintf('%03d', $c)), '', '', '', '', '', '']);
+        for ($k = 0; $k < $per && $ii < $N; $k++, $ii++) {
+            $nm = $n($words[$ii % 16] . ' ' . sprintf('%05d', $ii));
+            if ($ii % 40 == 39) { $nm = $n($words[($ii - 1) % 16] . ' ' . sprintf('%05d', $ii - 1) . 'x'); }           // looks like a typo of the previous item
+            $price = 1000 + ($ii % 50) * 10; if ($ii % 23 == 0) { $price *= 40; }                                       // a case-sized price now and then
+            if ($ii % 211 == 0 && $ii > 0) { $nm = $n($words[($ii - 1) % 16] . ' ' . sprintf('%05d', $ii - 1)); }       // the same name twice
+            fputcsv($fh, [$nm, '', mt_rand(0, 50), ['bottle', 'kg', 'each', 'L'][$ii % 4], $price, mt_rand(10, 100), '']);
+        }
+    }
+    rewind($fh);
+    $uBig = $upload($put(stream_get_contents($fh), 'big.csv'), 'zzt-big-' . $run . '.csv', $admin, ['max_bytes' => 50 * 1048576]);
+    $jBig = (int)$uBig['job_id'];
+    $tA = microtime(true);
+    $aBig = import_job_analyse($pdo, $jBig);
+    $analyseSec = microtime(true) - $tA;
+    $ck('scale: a generated file of ' . $N . ' items is analysed', !empty($aBig['ok']), (string)($aBig['error'] ?? '') . ' ' . round($analyseSec, 1) . 's');
+    $full = import_job_review_summary($pdo, $jBig);                       // independent oracle: the old full summary, filtered here with plain PHP
+    $inItem = [];
+    foreach ($full['items'] as $it) { foreach ($it['uids'] as $u) { $inItem[$u] = true; } }
+    $extraRows = array_values(array_filter($full['rows'], function ($r) use ($inItem) { return !isset($inItem[$r['uid']]); }));
+    $oracleAll = count($full['items']) + count($extraRows);
+    $oSt = ['needs-answer' => 0, 'blocked' => 0, 'ready' => 0, 'skipped' => 0];
+    foreach ($full['items'] as $it) { $oSt[$it['status']]++; }
+    foreach ($extraRows as $r) { $oSt[$r['status']]++; }
+    $V = function (array $p, array $o = []) use ($pdo, $jBig) { return import_job_review_view($pdo, $jBig, $p, $o + ['overview' => false, 'facets' => true]); };
+    $tP = microtime(true);
+    $pAll = $V(['status' => 'all', 'size' => 200]);
+    $pageSec = microtime(true) - $tP;
+    $ck('scale: ' . $N . ' generated items give a few thousand entries, and the page total equals the independent count', $pAll['ok'] && $oracleAll >= 1900 && $pAll['page']['total'] === $oracleAll && count($pAll['page']['entries']) === 200, json_encode([$oracleAll, $pAll['page']['total'] ?? null]));
+    $ck('paging: the status counts match the independent count (needs answer / blocked / ready / skipped)', $pAll['page']['facets']['status'] === $oSt, json_encode([$pAll['page']['facets']['status'], $oSt]));
+    $seen = [];
+    $pg = 1; $pages = $pAll['page']['pages'];
+    for ($pg = 1; $pg <= $pages; $pg++) {
+        $r = $V(['status' => 'all', 'size' => 200, 'page' => $pg], ['facets' => false]);
+        foreach ($r['page']['entries'] as $e) { $seen[$e['i']] = true; }
+    }
+    $ck('paging: walking every page shows each item once and only once', count($seen) === $oracleAll && $pages === (int)ceil($oracleAll / 200), count($seen) . ' of ' . $oracleAll);
+    $ck('paging: a page past the end is clamped to the last page, size 25 gives 25 entries', $V(['status' => 'all', 'size' => 25, 'page' => 99999], ['facets' => false])['page']['page'] === (int)ceil($oracleAll / 25) && count($V(['status' => 'all', 'size' => 25])['page']['entries']) === 25);
+    $ck('filters: junk values are dropped (bad sort, bad size, bad status, long text) and the page still loads', (function () use ($V) {
+        $r = $V(['status' => 'bogus,ready', 'sort' => 'DROP TABLE', 'size' => '7', 'kind' => 'x', 'type' => '<b>', 'q' => str_repeat('a', 500), 'page' => '-4']);
+        $f = $r['page']['filters'] ?? [];
+        return $r['ok'] && $f['status'] === ['ready'] && $f['sort'] === 'order' && $f['size'] === 50 && $f['kind'] === '' && $f['type'] === '' && mb_strlen($f['q']) === 100 && $f['page'] === 1;
+    })());
+    // default status: needs answer (+ blocked) while any remain
+    $pDef = $V([]);
+    $ck('filters: with no status given the default is "needs answer" (+ blocked) because questions remain', $pDef['page']['filters']['status_default'] === true && $pDef['page']['total'] === $oSt['needs-answer'] + $oSt['blocked'] && $oSt['needs-answer'] > 0);
+    // status filter + facet independence
+    $pReady = $V(['status' => 'ready', 'size' => 25]);
+    $ck('filters: status=ready narrows to the ready items and its count matches', $pReady['page']['total'] === $oSt['ready'] && $pReady['page']['facets']['status']['needs-answer'] === $oSt['needs-answer']);
+    // category
+    $catCount = [];
+    foreach ($full['items'] as $it) { $catCount[$it['category']] = ($catCount[$it['category']] ?? 0) + 1; }
+    $someCat = array_key_first(array_filter($catCount, function ($c) { return $c > 10; }));
+    $pCat = $V(['status' => 'all', 'cat' => $someCat, 'size' => 200]);
+    $ck('filters: category narrows to exactly that heading\'s items', $pCat['page']['total'] === $catCount[$someCat], $someCat . ' ' . ($pCat['page']['total'] ?? '?') . ' vs ' . $catCount[$someCat]);
+    $catRow = null;
+    foreach ($pAll['page']['facets']['cat'] as $c) { if ($c['name'] === $someCat) { $catRow = $c; } }
+    $oCatNeeds = 0;
+    foreach ($full['items'] as $it) { if ($it['category'] === $someCat && $it['status'] === 'needs-answer') { $oCatNeeds++; } }
+    $ck('category counts: items / needs answer per category match the independent count', $catRow && $catRow['items'] === $catCount[$someCat] && $catRow['needs'] === $oCatNeeds, json_encode($catRow));
+    $ck('category view: the category list is in file order and covers every heading', count($pAll['page']['facets']['cat']) === count($catCount) && array_keys($catCount) === array_column($pAll['page']['facets']['cat'], 'name'), count($pAll['page']['facets']['cat']) . ' vs ' . count($catCount));
+    // sheet
+    $sheetName = $full['items'][0]['sheet'];
+    $ck('filters: sheet = the sheet gives everything, an unknown sheet gives nothing', $V(['status' => 'all', 'sheet' => $sheetName])['page']['total'] === $oracleAll && $V(['status' => 'all', 'sheet' => 'No such sheet'])['page']['total'] === 0);
+    // search: name word, category, source cell
+    $pick = $full['items'][37];
+    $pNm = $V(['status' => 'all', 'q' => $pick['name']]);
+    $ck('search: the full item name finds that item', $pNm['page']['total'] >= 1 && in_array($pick['name'], array_map(function ($e) { return $e['it']['name']; }, array_filter($pNm['page']['entries'], function ($e) { return $e['kind'] === 'item'; })), true));
+    $pCell = $V(['status' => 'all', 'q' => $pick['name_source']]);
+    $ck('search: a source cell like "' . $pick['name_source'] . '" finds exactly the item read from it', $pCell['page']['total'] === 1 && $pCell['page']['entries'][0]['it']['name'] === $pick['name'], (string)$pCell['page']['total']);
+    $cellOnly = substr($pick['name_source'], strrpos($pick['name_source'], '!') + 1);
+    $pCell2 = $V(['status' => 'all', 'q' => strtolower($cellOnly)]);
+    $ck('search: a bare cell (lower case) finds it too, and the sheet part is matched loosely (first 3 letters of the sheet name)', $pCell2['page']['total'] >= 1 && $V(['status' => 'all', 'q' => substr($pick['sheet'], 0, 3) . '!' . $cellOnly])['page']['total'] === 1);
+    $ck('search: a word that is nowhere finds nothing, a category word finds that category', $V(['status' => 'all', 'q' => 'qqqnotthere'])['page']['total'] === 0 && $V(['status' => 'all', 'q' => 'CATEGORY ' . sprintf('%03d', 7)])['page']['total'] >= $catCount[$n('CATEGORY 007')]);
+    // flags and kinds
+    $oWarn = count(array_filter($full['items'], function ($it) { return !empty($it['warnings']); }));
+    $ck('filters: "has a warning" counts and narrows correctly', $V(['status' => 'all', 'warn' => '1'])['page']['total'] === $oWarn, (string)$oWarn);
+    $ck('filters: new vs existing (nothing here matches stock) and the cost / stock / answered flags are empty', $V(['status' => 'all', 'kind' => 'new'])['page']['total'] === count($full['items']) && $V(['status' => 'all', 'kind' => 'matched'])['page']['total'] === 0
+        && $V(['status' => 'all', 'cost' => '1'])['page']['total'] === 0 && $V(['status' => 'all', 'stock' => '1'])['page']['total'] === 0 && $V(['status' => 'all', 'answered' => '1'])['page']['total'] === 0);
+    // question type
+    $uidItem = [];
+    foreach ($full['items'] as $k => $it) { foreach ($it['uids'] as $u) { $uidItem[$u] = $k; } }
+    $oType = function (string $type) use ($full, $uidItem) {
+        $hit = [];
+        foreach ($full['questions'] as $q) {
+            if ($q['type'] === $type && ($q['answer'] === null || $q['answer'] === '')) { foreach ($q['row_uids'] as $u) { if (isset($uidItem[$u])) { $hit[$uidItem[$u]] = true; } } }
+        }
+        return count($hit);
+    };
+    $ck('filters: question type "did you mean" counts items with an open question of that kind', $V(['status' => 'all', 'type' => 'did-you-mean'])['page']['total'] === $oType('possible-typo') && $oType('possible-typo') > 0, (string)$oType('possible-typo'));
+    $ck('filters: question type "case price or per unit" matches', $V(['status' => 'all', 'type' => 'case-or-unit'])['page']['total'] === $oType('case-price') && $oType('case-price') > 5);
+    $ck('facets: each count ignores its own filter but keeps the others (sheet count under a category filter)', $V(['status' => 'all', 'cat' => $someCat])['page']['facets']['sheet_list'][0]['n'] === $catCount[$someCat]
+        && $V(['status' => 'all', 'cat' => $someCat])['page']['facets']['status']['ready'] + $V(['status' => 'all', 'cat' => $someCat])['page']['facets']['status']['needs-answer'] === $catCount[$someCat]);
+    // sorting
+    $byName = $V(['status' => 'all', 'sort' => 'name', 'size' => 200])['page']['entries'];
+    $names = array_map(function ($e) { return mb_strtolower($e['it']['name']); }, $byName);
+    $sortedNames = $names; usort($sortedNames, 'strnatcasecmp');
+    $byPrice = array_map(function ($e) { return $e['it']['cost']; }, $V(['status' => 'all', 'sort' => 'price', 'size' => 200])['page']['entries']);
+    $nn = array_values(array_filter($byPrice, function ($x) { return $x !== null; }));
+    $okPrice = $nn === (function ($x) { sort($x); return $x; })($nn) && $byPrice === array_merge($nn, array_fill(0, count($byPrice) - count($nn), null));
+    $stRank = ['blocked' => 0, 'needs-answer' => 1, 'ready' => 2, 'skipped' => 3];
+    $stOrder = array_map(function ($e) use ($stRank) { return $stRank[$e['status']]; }, $V(['status' => 'all', 'sort' => 'status', 'size' => 200])['page']['entries']);
+    $ck('sorting: name A-Z, price (low to high) and needs-answer-first are in order', $names === $sortedNames && $okPrice && $stOrder === (function ($x) { sort($x); return $x; })($stOrder));
+    // reachability: every open blocking non-structural question can be answered from some entry (or the sheet box)
+    $reach = [];
+    for ($pg = 1; $pg <= $pages; $pg++) {
+        $r = $V(['status' => 'all', 'size' => 200, 'page' => $pg], ['facets' => false]);
+        foreach ($r['page']['entries'] as $e) { foreach ($e['qs'] as $q) { $reach[$q['id']] = true; } }
+        foreach ($r['page']['sheet_questions'] as $q) { $reach[$q['id']] = true; }
+    }
+    $unreached = [];
+    foreach ($full['questions'] as $q) {
+        $struct = empty($q['row_uids']) && ($q['row'] === null || $q['row'] === '');
+        if ($q['blocking'] && !$struct && ($q['answer'] === null || $q['answer'] === '') && empty($reach[$q['id']])) { $unreached[] = $q['type']; }
+    }
+    $ck('questions: every open question that stops a confirm can be reached from the list (nothing is stuck out of sight)', !$unreached, json_encode(array_slice($unreached, 0, 5)));
+    $ck('questions: a page only carries the questions of the items on it (far fewer than the whole job)', (function () use ($V, $full) {
+        $r = $V(['status' => 'all', 'size' => 25], ['facets' => false]);
+        $n = 0; foreach ($r['page']['entries'] as $e) { $n += count($e['qs']); }
+        return $n < count($full['questions']) / 10 + 3;
+    })());
+
+    // ---- bulk answers --------------------------------------------------------------------------------------------------------
+    $oOpenCase = array_values(array_filter($full['questions'], function ($q) { return $q['type'] === 'case-price' && ($q['answer'] === null || $q['answer'] === ''); }));
+    $bd = import_job_bulk($pdo, $jBig, ['status' => 'all', 'type' => 'case-or-unit'], 'case-price', 'per-unit', 'per-unit', true, '', $admin);
+    $ck('bulk: the preview counts exactly the open questions of that kind in the filtered list, with 5 sample names and no change made', $bd['ok'] && $bd['n'] === count($oOpenCase) && $bd['would_apply'] === $bd['n'] && count($bd['samples']) === 5 && $bd['fingerprint'] !== ''
+        && count(array_filter(import_job_review_summary($pdo, $jBig)['questions'], function ($q) { return $q['type'] === 'case-price' && $q['answer'] !== null; })) === 0, json_encode([$bd['n'] ?? $bd, count($oOpenCase)]));
+    $bGroups = $V(['status' => 'all'])['page']['bulk'];
+    $caseGroup = array_values(array_filter($bGroups, function ($g) { return $g['type'] === 'case-price'; }))[0] ?? null;
+    $ck('bulk: the offered answers are only roles every question accepts - "price for one unit" yes, "per case" (needs a number) never', $caseGroup && array_column($caseGroup['answers'], 'role') === ['per-unit'] && $caseGroup['n'] === count($oOpenCase));
+    $ck('bulk: "per case" is refused outright (it needs a pack size typed per question)', !import_job_bulk($pdo, $jBig, ['status' => 'all'], 'case-price', 'per-unit', 'per-case', false, 'x', $admin)['ok']);
+    $ck('bulk: structural / sheet-level / "same existing match" questions cannot be bulk answered', !import_job_bulk($pdo, $jBig, ['status' => 'all'], 'no-unit', 'x', 'skip', true, '', $admin)['ok'] && !import_job_bulk($pdo, $jBig, ['status' => 'all'], 'sheet-unknown', 'skip', 'skip', true, '', $admin)['ok']
+        && !import_job_bulk($pdo, $jBig, ['status' => 'all'], 'same-existing-match', 'skip', 'skip', true, '', $admin)['ok']);
+    $bad = import_job_bulk($pdo, $jBig, ['status' => 'all'], 'case-price', 'per-unit', 'skip', true, '', $admin);
+    $ck('bulk: an answer that is not one of the choices is refused question by question (would apply 0, would refuse all)', $bad['ok'] && $bad['would_apply'] === 0 && $bad['would_refuse'] === $bad['n'] && $bad['reasons'] !== []);
+    $badApply = import_job_bulk($pdo, $jBig, ['status' => 'all'], 'case-price', 'per-unit', 'skip', false, $bad['fingerprint'], $admin);
+    $ck('bulk: applying an invalid answer writes nothing (applied 0, refused all)', $badApply['ok'] && $badApply['applied'] === 0 && $badApply['refused'] === $bd['n']
+        && count(array_filter(import_job_review_summary($pdo, $jBig)['questions'], function ($q) { return $q['type'] === 'case-price' && $q['answer'] !== null; })) === 0);
+    $ck('bulk: a stale or wrong fingerprint is refused ("the list changed")', !import_job_bulk($pdo, $jBig, ['status' => 'all'], 'case-price', 'per-unit', 'per-unit', false, 'deadbeef', $admin)['ok']);
+    // exactly the filtered set: only the questions of ONE category
+    $inCat = function (?string $category) use ($full, $uidItem) {
+        $ids = [];
+        foreach ($full['questions'] as $q) {
+            if ($q['type'] !== 'case-price' || ($q['answer'] !== null && $q['answer'] !== '')) { continue; }
+            foreach ($q['row_uids'] as $u) { if (isset($uidItem[$u]) && $full['items'][$uidItem[$u]]['category'] === $category) { $ids[$q['id']] = true; } }
+        }
+        return array_keys($ids);
+    };
+    $catWith = null;
+    foreach (array_keys($catCount) as $cname) { if (count($inCat($cname)) >= 2) { $catWith = $cname; break; } }
+    $params = ['status' => 'all', 'cat' => $catWith];
+    $d2 = import_job_bulk($pdo, $jBig, $params, 'case-price', 'per-unit', 'per-unit', true, '', $admin);
+    $ck('bulk: the set is recomputed from the filter (a category) - here only that category\'s questions', $catWith !== null && $d2['ok'] && $d2['n'] === count($inCat($catWith)) && $d2['n'] < $bd['n'], json_encode([$catWith, $d2['n'] ?? $d2]));
+    $a2 = import_job_bulk($pdo, $jBig, $params, 'case-price', 'per-unit', 'per-unit', false, $d2['fingerprint'], $admin);
+    $after = import_job_review_summary($pdo, $jBig);
+    $answeredCase = array_values(array_filter($after['questions'], function ($q) { return $q['type'] === 'case-price' && $q['answer'] === 'per-unit'; }));
+    $okIds = $inCat($catWith);
+    $ck('bulk: it applied exactly that set (applied N, refused 0) and no other case-price question changed', $a2['ok'] && $a2['applied'] === $d2['n'] && $a2['refused'] === 0 && count($answeredCase) === $d2['n']
+        && !array_diff(array_column($answeredCase, 'id'), $okIds), json_encode([$a2['applied'] ?? $a2, count($answeredCase)]));
+    $ck('bulk: other kinds of question were not touched (the open count of the others is unchanged)', count(array_filter($after['questions'], function ($q) { return $q['type'] !== 'case-price' && $q['answer'] !== null; })) === count(array_filter($full['questions'], function ($q) { return $q['type'] !== 'case-price' && $q['answer'] !== null; })));
+    $rest = import_job_bulk($pdo, $jBig, ['status' => 'all'], 'case-price', 'per-unit', 'per-unit', true, '', $admin);
+    $ck('bulk: after that, the full list offers only the questions still open', $rest['ok'] && $rest['n'] === count($oOpenCase) - $d2['n']);
+    $ck('bulk: the stored answer has the same shape as a single answer (key, by, at) and the progress counter moved', (function () use ($pdo, $jBig, $admin) {
+        $a = import_job_answers(import_job_get($pdo, $jBig));
+        foreach ($a as $k => $v) { if (is_array($v) && ($v['key'] ?? '') === 'per-unit') { return array_keys($v) === ['key', 'by', 'at'] && (int)$v['by'] === $admin; } }
+        return false;
+    })() && $V(['status' => 'all'])['progress']['answered'] === 0 + count($answeredCase) + count(array_filter($full['questions'], function ($q) { return $q['blocking'] && $q['answer'] !== null && $q['type'] !== 'case-price'; })));
+    $dupG = array_values(array_filter($V(['status' => 'all'])['page']['bulk'], function ($g) { return $g['type'] === 'possible-typo'; }))[0] ?? null;
+    $ck('bulk: "use the suggested match" is offered for did-you-mean questions and maps to each question\'s own suggestion', $dupG && in_array('use-suggestion', array_column($dupG['answers'], 'role'), true));
+    if ($dupG) {
+        $pt = import_job_bulk($pdo, $jBig, ['status' => 'all', 'type' => 'did-you-mean'], 'possible-typo', $dupG['sig'], 'use-suggestion', true, '', $admin);
+        $ptA = import_job_bulk($pdo, $jBig, ['status' => 'all', 'type' => 'did-you-mean'], 'possible-typo', $dupG['sig'], 'use-suggestion', false, $pt['fingerprint'], $admin);
+        $sugOk = true;
+        foreach (import_job_review_summary($pdo, $jBig)['questions'] as $q) {
+            if ($q['type'] === 'possible-typo' && $q['answer'] !== null && $q['answer'] !== 'keep') { $sugOk = $sugOk && $q['answer'] === 'use:' . ($q['suggestion']['name'] ?? '?'); }
+        }
+        $ck('bulk: the suggested match is applied per question and every question took its own suggestion', $ptA['ok'] && $ptA['applied'] === $pt['n'] && $ptA['refused'] === 0 && $sugOk, json_encode($ptA));
+    }
+    // a concurrent single answer between the preview and the apply is never overwritten (the target set is decided under the row lock)
+    $openCase = array_values(array_filter(import_job_review_summary($pdo, $jBig)['questions'], function ($q) { return $q['type'] === 'case-price' && ($q['answer'] === null || $q['answer'] === ''); }));
+    $dRace = import_job_bulk($pdo, $jBig, ['status' => 'all'], 'case-price', 'per-unit', 'per-unit', true, '', $admin);
+    $raceQ = $openCase[0] ?? null;
+    $aRace = $raceQ ? import_job_bulk($pdo, $jBig, ['status' => 'all'], 'case-price', 'per-unit', 'per-unit', false, (string)$dRace['fingerprint'], $admin, function () use ($pdo, $jBig, $raceQ, $mgr) {
+        import_job_answer($pdo, $jBig, $raceQ['id'], ['key' => 'per-case', 'pack_size' => 12], $mgr);       // another person answers it first
+    }) : ['ok' => false];
+    $kept = null;
+    foreach (import_job_review_summary($pdo, $jBig)['questions'] as $q) { if ($raceQ && $q['id'] === $raceQ['id']) { $kept = $q; } }
+    $ck('bulk race: a question another person answered meanwhile keeps THEIR answer (per case, 12) and is reported as refused', $raceQ && $aRace['ok'] && $kept && $kept['answer'] === 'per-case' && (int)$kept['pack_size'] === 12 && $aRace['refused'] === 1 && $aRace['applied'] === $dRace['n'] - 1
+        && count(array_filter(array_keys($aRace['reasons']), function ($k) { return stripos($k, 'someone else') !== false; })) === 1, json_encode($aRace));
+    // finish the whole job: bulk for every group that is offered, one by one for the few left, then it must be confirmable
+    $bulkRounds = 0; $bulkApplied = 0;
+    for ($round = 0; $round < 12; $round++) {
+        $groups = $V(['status' => 'all'], ['facets' => false])['page']['bulk'];
+        if (!$groups) { break; }
+        $g = $groups[0];
+        $roles = array_column($g['answers'], 'role');
+        $role = in_array('per-unit', $roles, true) ? 'per-unit' : (in_array('two-batches', $roles, true) ? 'two-batches' : (in_array('skip', $roles, true) ? 'skip' : $roles[0]));
+        $d = import_job_bulk($pdo, $jBig, ['status' => 'all'], $g['type'], $g['sig'], $role, true, '', $admin);
+        $x = import_job_bulk($pdo, $jBig, ['status' => 'all'], $g['type'], $g['sig'], $role, false, (string)$d['fingerprint'], $admin);
+        if (empty($x['ok']) || $x['applied'] === 0) { break; }
+        $bulkRounds++; $bulkApplied += $x['applied'];
+    }
+    $left = array_values(array_filter(import_job_review_summary($pdo, $jBig)['questions'], function ($q) { return $q['blocking'] && ($q['answer'] === null || $q['answer'] === '') && $q['options']; }));
+    $ck('bulk: group after group the job is brought down to a handful of single questions', $bulkRounds >= 2 && $bulkApplied > 100 && count($left) < 40, $bulkRounds . ' rounds, ' . $bulkApplied . ' answers, ' . count($left) . ' left');
+    foreach ($left as $q) {
+        $keys = array_column($q['options'], 'key');
+        $pick = in_array('skip', $keys, true) ? 'skip' : (in_array('two-batches', $keys, true) ? 'two-batches' : (in_array('per-unit', $keys, true) ? 'per-unit' : $keys[0]));
+        if ($q['type'] === 'no-unit') { $pick = in_array('unit:each', $keys, true) ? 'unit:each' : $keys[0]; }
+        import_job_answer($pdo, $jBig, $q['id'], $pick, $admin);
+    }
+    $fin = $V([]);
+    $ck('progress: after everything is answered the default list is empty, nothing is open and the job is confirmable', $fin['page']['filters']['status_default'] && $fin['page']['filters']['status'] === [] && $fin['progress']['open'] === 0 && $fin['can_confirm'] === true, json_encode([$fin['progress'], $fin['can_confirm'], $fin['why_not'] ?? '']));
+    // ---- a file that cannot fit, a read that died: plain message, no half-made job (memory.php) -----------------------------------------
+    $storedFile = function (int $id) use ($pdo) { $j = import_job_get($pdo, $id); return $j && $j['stored_path'] ? dirname(__DIR__, 2) . '/storage/imports/' . $j['stored_path'] : ''; };
+    $uM = $upload($put($csv([[$n('Memitem'), '', '5', 'bottle', '500', '', '']]), 'mem.csv'), 'zzt-mem-' . $run . '.csv', $admin);
+    $jM = (int)$uM['job_id'];
+    $fileM = $storedFile($jM);
+    $rM = import_job_analyse($pdo, $jM, ['mem' => ['limit' => 12 * 1048576, 'count' => ['rows' => 20000, 'cells' => 140000]]]);
+    $jobM = import_job_get($pdo, $jM);
+    $ck('too big: the job ends as FAILED with the plain "split it into files of about N rows" text and the staged file is deleted', !$rM['ok'] && $jobM['status'] === 'failed' && strpos((string)$jobM['error_text'], 'too many to read in one go on this server') !== false
+        && $jobM['error_text'] === $rM['error'] && $jobM['stored_path'] === null && $fileM !== '' && !is_file($fileM) && $jobM['analysis_json'] === null, json_encode([$rM['error'] ?? '', $jobM['status'], is_file($fileM)]));
+    $ck('too big: nothing is left to open (summary says the import cannot be reviewed, no second attempt runs)', import_job_state($pdo, $jM) === null && !import_job_analyse($pdo, $jM)['ok']);
+    // a read that died (killed / timed out) is recognised later instead of leaving a stuck job
+    $uS = $upload($put($csv([[$n('Staleitem'), '', '5', 'bottle', '500', '', '']]), 'stale.csv'), 'zzt-stale-' . $run . '.csv', $admin);
+    $jS = (int)$uS['job_id'];
+    $fileS = $storedFile($jS);
+    $pdo->prepare('UPDATE import_jobs SET error_text = ? WHERE id = ?')->execute(['Reading... since ' . date('Y-m-d H:i:s', time() - 60), $jS]);
+    $rS1 = import_job_analyse($pdo, $jS);
+    $ck('stale read: a read that started a minute ago is "still being read" (no second run, job untouched)', !$rS1['ok'] && stripos($rS1['error'], 'still being read') !== false && import_job_get($pdo, $jS)['status'] === 'uploaded' && is_file($fileS));
+    $pdo->prepare('UPDATE import_jobs SET error_text = ? WHERE id = ?')->execute(['Reading... since ' . date('Y-m-d H:i:s', time() - 1800), $jS]);
+    $rS2 = import_job_analyse($pdo, $jS);
+    $jobS = import_job_get($pdo, $jS);
+    $ck('stale read: one that started half an hour ago is closed as FAILED with a plain text and its file deleted', !$rS2['ok'] && $jobS['status'] === 'failed' && strpos((string)$jobS['error_text'], 'did not finish') !== false && !is_file($fileS) && $jobS['stored_path'] === null, (string)($jobS['error_text'] ?? ''));
+    $uO = $upload($put($csv([[$n('Okitem'), '', '5', 'bottle', '500', '', '']]), 'okmem.csv'), 'zzt-okmem-' . $run . '.csv', $admin);
+    $rO = import_job_analyse($pdo, (int)$uO['job_id']);
+    $jobO = import_job_get($pdo, (int)$uO['job_id']);
+    $ck('normal file: analyses as before, the "Reading..." marker is cleared', $rO['ok'] && $jobO['status'] === 'analysed' && $jobO['error_text'] === null && $jobO['analysis_json'] !== null);
+    $light = import_job_get_light($pdo, (int)$uO['job_id']);
+    $ck('memory: the job row used by the page carries no analysis text, only its size', $light['analysis_json'] === 'stored' && (int)$light['analysis_bytes'] === strlen($jobO['analysis_json']) && $light['answers_json'] === $jobO['answers_json']);
+    // ---- ownership and speed ---------------------------------------------------------------------------------------------------
+    $ck('ownership: another user cannot open the job, the uploader and an administrator can', import_job_for_user($pdo, $jBig, $mgr, false) === null && import_job_for_user($pdo, $jBig, $admin, false) !== null && import_job_for_user($pdo, $jBig, $mgr, true) !== null && import_job_for_user($pdo, 0, $admin, true) === null);
+    $ck('speed: one page of a ' . $oracleAll . '-item job with every facet is well under 20 s (' . round($pageSec, 2) . ' s; analysis ' . round($analyseSec, 1) . ' s)', $pageSec < 20, (string)round($pageSec, 2));
+    $tM = microtime(true);
+    import_job_state_memo(true);
+    $vv = import_job_review_view($pdo, $jBig, ['size' => 50], ['facets' => true]);
+    $vv2 = import_job_review_view($pdo, $jBig, ['size' => 50, 'page' => 2], ['overview' => false]);
+    import_job_state_memo(false);
+    $ck('speed: the lean overview carries no item list (a fraction of the old full summary) and a second call reuses the resolved job', $vv['ok'] && !isset($vv['items']) && strlen(json_encode($vv)) < strlen(json_encode($full)) / 5 && $vv2['ok'], round(microtime(true) - $tM, 2) . ' s');
+    $ck('confirm numbers: the lean overview gives the Step 4 counts (creates + updates + kept = ready items)', $vv['confirm']['creates'] + $vv['confirm']['updates'] + $vv['confirm']['kept'] === (int)$vv['entry_counts']['ready']);
+
     // ---- cleanup of staged files, purge ---------------------------------------------------------------
     $pg = import_purge_staged($pdo, true);
     $ck('purge: runs and reports counts', is_array($pg) && isset($pg['files_deleted']));

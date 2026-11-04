@@ -181,7 +181,7 @@ if (!function_exists('import_csv_read')) {
                 $c = $ci + 1;
                 $cells[$r][$c] = [
                     'ref' => import_cell_ref($r, $c), 'v' => $val, 'raw' => $val, 'formula' => false, 'cached' => true,
-                    'date' => false, 'error' => false, 'text' => true,
+                    'date' => false, 'error' => false,
                     'formula_like' => (bool)preg_match('/^[=+\-@\t\r]/', $val),
                 ];
                 $maxRow = max($maxRow, $r);

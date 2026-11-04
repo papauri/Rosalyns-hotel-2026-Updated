@@ -35,9 +35,12 @@
       <li><a href="#who">Who can use it, and how to switch it on</a></li>
       <li><a href="#steps">How to import a stock list, in four steps</a></li>
       <li><a href="#questions">What the questions mean</a></li>
+      <li><a href="#bulk">Answering many questions at once</a></li>
       <li><a href="#sources">The grey source tag, and what is left out on purpose</a></li>
       <li><a href="#confirm">What Confirm does</a></li>
       <li><a href="#again">Importing the same file twice, cancelling, and clean-up</a></li>
+      <li><a href="#export">Export your stock to Excel</a></li>
+      <li><a href="#big">Very large lists and files that are too big</a></li>
       <li><a href="#wrong">If something looks wrong</a></li>
     </ol>
   </div>
@@ -82,7 +85,29 @@
   <p>Check this list, then click <strong>Continue to review</strong>. If a sheet or column needs an answer first, the page shows the question inside that sheet's card.</p>
 
   <h3>Step 3: Review and answer</h3>
-  <p>Each line is one stock item as it would be imported. The grey tag under each value shows the cell it was read from. Use the filter buttons to show only the rows that <strong>Need answer</strong>. Pick one answer for each question. The page updates after every answer. Your answers are kept if you leave the page and come back.</p>
+  <p>Each line is one stock item as it would be imported. The grey tag under each value shows the cell it was read from. Answer the questions that sit under an item. The page updates after every answer, and your answers are kept if you leave the page and come back.</p>
+  <p>At the top of the step you will see:</p>
+  <ul>
+    <li><strong>A progress bar</strong> with a line such as "12 of 40 questions answered".</li>
+    <li><strong>Jump to the next one that needs an answer.</strong> The button goes to the next item that still needs you, and shows how many items are left. If nothing is left, it says <em>Nothing is waiting for an answer</em>. When you are not typing, the <strong>N</strong> key does the same as the button.</li>
+    <li><strong>Search items.</strong> Type part of an item name, a category, or a cell from your file. <em>C12</em> finds that cell. <em>BAR!C12</em> finds cell C12 on the sheet called BAR. Every word you type must match.</li>
+    <li><strong>Status buttons.</strong> <strong>All</strong>, <strong>Needs answer</strong>, <strong>Blocked</strong>, <strong>Ready</strong> and <strong>Skipped</strong>, each with a count. While anything still needs an answer, the list starts on <strong>Needs answer</strong> and <strong>Blocked</strong>.</li>
+    <li><strong>Show as.</strong> <strong>List</strong> shows one list. <strong>By category</strong> groups the items under their category headings.</li>
+    <li><strong>More ways to narrow it.</strong> This opens the filter panel. On a phone it opens as a drawer.</li>
+  </ul>
+  <p>The filter panel has these choices:</p>
+  <ul>
+    <li><strong>Sheet</strong> and <strong>Category</strong>: only items from one sheet (tab) of your file, or under one heading.</li>
+    <li><strong>Kind of question</strong>: only items that still have an unanswered question of that kind.</li>
+    <li><strong>New or existing</strong>: new items, which are created when you confirm, or existing items, which match something already in stock.</li>
+    <li><strong>Sort by</strong>: file order, name A to Z, needs answer first, category, or price (lowest first or highest first). Items that tie stay in the order of your file.</li>
+    <li><strong>Items per page</strong>: 25, 50, 100 or 200.</li>
+    <li>Four tick boxes: <strong>Has a warning</strong>, <strong>Cost change ticked</strong>, <strong>Already has stock</strong> and <strong>I answered a question</strong>.</li>
+  </ul>
+  <p>Each number next to a choice shows how many items match it with your other filters. Press <strong>Show items</strong> or <strong>Done</strong> to close the panel and keep your filters. Press <strong>Clear filters</strong> to remove them all.</p>
+  <p><strong>Your place is kept.</strong> Your filters are kept in the web address. If you reload the page, or come back to it, you stay where you were. Changing a filter does not add a step to the Back button.</p>
+  <p><strong>By category.</strong> Each category heading shows its item count, how many items need an answer, and how many are skipped. Press a heading to open it. Its items load when you open it. Up to eight categories can be open at once. Opening a ninth closes the one you opened first.</p>
+  <p>Use the page buttons at the bottom of the list to move between pages.</p>
   <ul>
     <li>Click <strong>Download what will be imported (CSV)</strong> to check the ready items in Excel before you confirm.</li>
     <li>Use <strong>Go to step 2</strong> if a question is about how a sheet was read.</li>
@@ -98,7 +123,7 @@
     <li><strong>Rows skipped</strong>: rows you skipped, or rows that are not items.</li>
     <li><strong>Still need an answer</strong>: questions to sort out first.</li>
   </ul>
-  <p>Press <strong>Confirm and import</strong>. The result page shows <strong>Ingredients created</strong>, <strong>Ingredients updated</strong>, <strong>Rows skipped</strong>, <strong>Opening count lines</strong> and <strong>Expiry batches</strong>. Use <strong>Open the opening count</strong> to see the count that is waiting for approval.</p>
+  <p>Press <strong>Confirm and import</strong>. The result page shows <strong>Ingredients created</strong>, <strong>Ingredients updated</strong>, <strong>Rows skipped</strong>, <strong>Opening count lines</strong> and <strong>Expiry batches</strong>. Use <strong>Open the opening count</strong> to see the count that is waiting for approval. Press <strong>Download the updated stock workbook</strong> for an Excel copy of your stock (see <a href="#export">Export your stock to Excel</a>).</p>
 
   <p><strong>My imports.</strong> At the bottom of the page is a list of the imports you started in the last 30 days. An administrator sees everyone's. Open one to carry on where you stopped, or cancel one you no longer need.</p>
 
@@ -123,6 +148,27 @@
   </table>
   <p>When you fix a name, Import remembers the fix for next time. It shows it as a pre-filled answer with the note <em>"Remembered from an earlier import. Change it if it is wrong."</em> It is never applied without showing you first.</p>
   <p>If the Assistant is switched on you can ask it what a question means or why Confirm is blocked; it only explains &mdash; you answer on the Import screen. It also needs <strong>Use the Assistant</strong>. See <a href="22-assistant.html">The Assistant</a>.</p>
+
+  <h2 id="bulk">Answering many questions at once</h2>
+  <p>When a list has many questions of the same kind, you can give one answer to all the matching ones, instead of answering each one. You can still change any single answer afterwards.</p>
+  <ol class="steps">
+    <li>Use the filters to show the questions you want. For example, pick a <strong>Kind of question</strong> and a <strong>Category</strong>. A bulk answer covers every page of the filtered list, not just the page you can see.</li>
+    <li>Look for the box <strong>Answer many at once</strong> above the list. It shows only when two or more questions of the same kind are waiting.</li>
+    <li>Under <strong>Which questions</strong>, pick the kind. The box shows how many questions are waiting.</li>
+    <li>Under <strong>Answer for all of them</strong>, pick the answer.</li>
+    <li>Press <strong>Check and apply&hellip;</strong>. Nothing is saved yet.</li>
+    <li>Read the box that opens. It shows how many questions there are, the first five item names, and <em>"&hellip; and N more"</em> if there are more. If some questions cannot take that answer, it says so and gives the reasons. Those questions stay as they are.</li>
+    <li>Press the button at the bottom of the box. It names the answer and the number of rows, for example <em>"Skip 4 rows"</em>. Press <strong>Cancel</strong> to save nothing.</li>
+  </ol>
+  <p>When it has run, the page says how many were applied and how many were refused, with the reason for each refusal. A refused question keeps its own answer. A bulk answer does not change your stock. That only happens when you press <strong>Confirm</strong> on Step 4.</p>
+  <div class="note"><p><strong>There is no single undo.</strong> To change your mind, change the answers one at a time. The box says this before you press the button.</p></div>
+  <p><strong>Questions you answer one at a time.</strong> These are not offered for a bulk answer:</p>
+  <ul>
+    <li>Questions about a whole sheet or column, such as <em>"Which unit?"</em> for a sheet.</li>
+    <li>Questions that need a typed value, such as the number of units in a case.</li>
+    <li>Questions where you pick one particular name or date from a list, such as which date is right.</li>
+    <li><em>"Two names for one stock item"</em> questions. Skipping all of them would drop every one of them.</li>
+  </ul>
 
   <h2 id="sources">The grey source tag, and what is left out on purpose</h2>
   <p>Every value on the review screen has a small grey tag such as <em>Bar!D12</em>. That is the sheet name, then the cell the value was read from. If a value does not match your file, check that cell first.</p>
@@ -158,11 +204,57 @@
     <li><strong>Clean-up.</strong> The uploaded copy is kept on the server only while you work on it. It is deleted when you finish, when you cancel, or after 7 days.</li>
   </ul>
 
+  <h2 id="export">Export your stock to Excel</h2>
+  <p>You can download your current stock as an Excel file. It shows the stock as it is right now, including anything you imported and had approved. The download changes nothing.</p>
+  <p><strong>Who can do it:</strong> anyone with the <strong>Import</strong> and <strong>Ingredients &amp; Recipes</strong> permissions, the same two Import needs. Import must be switched on.</p>
+  <p><strong>To download the whole stock:</strong></p>
+  <ol class="steps">
+    <li>Open Admin menu &rarr; <strong>Stock</strong> &rarr; <strong>Import</strong>.</li>
+    <li>Press <strong>Export current stock</strong>. A panel opens.</li>
+    <li>Leave <strong>All tabs</strong> chosen (it is the default). To download some categories only, choose <strong>Only the tabs I tick below</strong> and tick them. Each one shows how many items it has.</li>
+    <li>Press <strong>Download the stock workbook</strong>. The file downloads. Its name starts with <em>Stock</em>, then your hotel name and the date.</li>
+  </ol>
+  <p>After a confirmed import, the result screen has <strong>Download the updated stock workbook</strong>. It downloads every tab.</p>
+  <p><strong>What is in the file:</strong></p>
+  <ul>
+    <li><strong>Dashboard</strong> (the first tab): the number of items out of stock, the reorder alerts, the expired batches and the stock value. It has links to each tab, and says how each figure is worked out.</li>
+    <li><strong>One tab per category</strong>, in alphabetical order. Each tab starts with its category name.</li>
+    <li><strong>Purchase Summary</strong> (the last tab): the estimated purchase cost for each tab, with a grand total.</li>
+  </ul>
+  <p>Each category tab has these columns: <em>Item Name, Batch, Balance, Unit, Expiry Date, Days to Expiry, Status, Action Required, Comments, Max Level, Purchase Qty (Max - Balance), Unit Price</em> and <em>Total Cost</em>.</p>
+  <ul>
+    <li>An item with batches gets one row for each batch, when its batches add up to its balance. Otherwise it gets one row with its total balance and the earliest expiry date.</li>
+    <li><strong>Status</strong> uses the same tiers as the Batch Tracker: <em>EXPIRED</em> (past the expiry date), <em>AT RISK</em> (0 to 7 days left), <em>CHECK SOON</em> (8 to 30 days) or <em>ACTIVE</em> (more than 30 days).</li>
+    <li><strong>Purchase Qty</strong> is Max Level minus Balance, never below zero. It is blank when the item has no Max Level. <strong>Total Cost</strong> is Purchase Qty times Unit Price, rounded to 2 decimals.</li>
+    <li>Purchase Qty and Total Cost show once for each item, on its first row, so nothing is counted twice.</li>
+    <li><strong>Unit Price</strong> is the price as stored. VAT is not added or removed. A blank price means no price is set.</li>
+    <li>Total Cost is not the same as the <strong>Reorder / Buying</strong> page. That page also takes off stock already on order, and rounds up to whole packs.</li>
+    <li>Archived items are not listed.</li>
+  </ul>
+  <p><strong>Upload it back:</strong> you can upload the file in Import like any other list. It proposes no changes to your stock. Negative stock shows as a minus number, and Import will not accept a negative balance, so fix that stock first.</p>
+  <p><strong>If something goes wrong:</strong> <em>"Tick at least one tab to export, or choose "All tabs"."</em> Tick a tab, or choose All tabs. <em>"There is no stock to export yet."</em> means no category has any items. <em>"The stock workbook could not be built. Please try again."</em> Try again, and tell an administrator if it keeps happening.</p>
+
+  <h2 id="big">Very large lists and files that are too big</h2>
+  <p>Import can read thousands of stock items. But the hotel's server sets how much memory and time one import may use, so a very large file can be too big to read in one go.</p>
+  <ul>
+    <li><strong>Size of the file.</strong> Step 1 shows <strong>Largest file</strong>. If your file is bigger, the page says <em>"That file is bigger than this server accepts (&hellip;). Save a smaller copy and try again."</em></li>
+    <li><strong>Too many rows.</strong> Import checks the rows before it reads them all. If the file will not fit, the import stops and the page says <em>"This file has N rows - too many to read in one go on this server. Split it into files of about M rows (by sheet or category) and import them one after another."</em> N and M are filled in for your file. The copy on the server is deleted, so upload each smaller file again.</li>
+    <li><strong>A saved import that is too big to open.</strong> If an import you started earlier is now too big for the server to open, the page says <em>"This import is too big for this server to open (&hellip;)."</em> Cancel it, split the file, and import the parts.</li>
+  </ul>
+  <p><strong>How to split a big list.</strong></p>
+  <ol class="steps">
+    <li>Split by sheet first. Save each sheet as its own Excel (.xlsx) file.</li>
+    <li>If one sheet is still too big, split it by category. Copy a few categories into a new file. Keep the column headings at the top, and copy each category heading row with the items under it.</li>
+    <li>Import each file on its own, one after another. Each file needs its own <strong>Confirm</strong>.</li>
+  </ol>
+
   <h2 id="wrong">If something looks wrong</h2>
   <ul>
     <li><strong>"Word and PDF files are not supported yet."</strong> Open the file in Excel, use Save As &rarr; Excel Workbook (.xlsx), and upload that.</li>
     <li><strong>"This is an old Excel file (.xls)."</strong> Save it again as an Excel Workbook (.xlsx), then upload that copy.</li>
     <li><strong>"That file is bigger than this server accepts."</strong> Save a smaller copy. You can remove old sheets you do not need.</li>
+    <li><strong>"This file has N rows - too many to read in one go on this server."</strong> Split the file into the smaller files the message gives, by sheet or category. See <a href="#big">Very large lists and files that are too big</a>.</li>
+    <li><strong>"This import is too big for this server to open (&hellip;)."</strong> Cancel it, split the file, and import the parts. See <a href="#big">Very large lists and files that are too big</a>.</li>
     <li><strong>"The file could not be read."</strong> Open the file in Excel to check it, save it again as .xlsx, and upload again.</li>
     <li><strong>"Your session has expired. Reload the page and try again."</strong> Reload the page and sign in again if asked.</li>
     <li><strong>"Row 12: Unit price in D12 is "abc", which is not a number. Fix it in the sheet and upload again, or skip this row."</strong> Fix the cell in your file and upload the file again, or skip that row on Step 3.</li>

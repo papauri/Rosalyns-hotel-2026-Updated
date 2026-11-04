@@ -21,9 +21,18 @@ if (!function_exists('import_match_header')) {
     function import_alias_index(array $aliases): array
     {
         static $cache = [];
-        $key = md5(json_encode([$aliases['fields'] ?? [], $aliases['noise_tokens'] ?? []]));
+        static $lastIn = null;
+        static $lastOut = null;
+        // The same alias array is passed on every call of a run (once per cell): recognising it is a pointer / value comparison,
+        // not a json_encode + md5 of the whole vocabulary per cell (that was most of the time of reading a big sheet).
+        $sub = [$aliases['fields'] ?? [], $aliases['noise_tokens'] ?? []];
+        if ($lastIn !== null && $sub === $lastIn) {
+            return $lastOut;
+        }
+        $key = md5(json_encode($sub));
         if (isset($cache[$key])) {
-            return $cache[$key];
+            $lastIn = $sub;
+            return $lastOut = $cache[$key];
         }
         $noise = [];
         foreach (($aliases['noise_tokens'] ?? []) as $n) {
@@ -48,7 +57,8 @@ if (!function_exists('import_match_header')) {
         usort($list, function ($a, $b) {
             return $b['n'] <=> $a['n'];
         });
-        return $cache[$key] = ['noise' => $noise, 'exact' => $exact, 'list' => $list];
+        $lastIn = $sub;
+        return $lastOut = $cache[$key] = ['noise' => $noise, 'exact' => $exact, 'list' => $list];
     }
 
     function import_header_tokens(string $text, array $idx): array
@@ -107,6 +117,13 @@ if (!function_exists('import_match_header')) {
         if (!$cands) {
             foreach ($idx['list'] as $a) {
                 if (isset($seen[$a['field']]) || strlen($a['norm']) < 4) {
+                    continue;
+                }
+                // similarity = 1 - levenshtein / longest, and levenshtein >= the length difference: when that alone puts it under 0.8
+                // the answer is already known (saves the edit-distance run against every alias for every cell of a big sheet)
+                $la = strlen($key);
+                $lb = strlen($a['norm']);
+                if (abs($la - $lb) * 5 > max($la, $lb)) {
                     continue;
                 }
                 $sim = import_similarity($key, $a['norm']);

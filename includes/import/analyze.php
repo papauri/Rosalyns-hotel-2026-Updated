@@ -102,7 +102,12 @@ if (!function_exists('import_analyze_file')) {
         $force = array_flip((array)($opts['force_sheets'] ?? []));
         $pending = [];     // [sheetIdx => descriptors]
 
-        foreach ($read['sheets'] as $sheet) {
+        // Memory: each sheet's cell grid is dropped as soon as that sheet has been read into rows (the grid is the biggest temporary), so
+        // only ONE grid is alive at a time and none while the cross-checks run.
+        $sheetList = $read['sheets'];
+        unset($read['sheets']);
+        while ($sheetList) {
+            $sheet = array_shift($sheetList);
             $struct = import_structure_sheet($sheet, $aliases, ['force' => isset($force[$sheet['name']])] + $opts);
             $entry = [
                 'index' => $sheet['index'], 'name' => $sheet['name'], 'hidden' => $sheet['hidden'],
@@ -124,7 +129,9 @@ if (!function_exists('import_analyze_file')) {
             }
             $analysis['sheets'][] = $entry;
             $pending[] = $qs;
+            unset($sheet, $struct, $val, $entry, $qs);
         }
+        unset($sheetList, $read);
         foreach ($pending as $qs) {
             foreach ($qs as $q) {
                 import_register_question($analysis, $q);

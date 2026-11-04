@@ -109,6 +109,25 @@ if (!function_exists('import_default_aliases')) {
     }
 
     /**
+     * Tab icons for the stock workbook export: a plain WORD in a category name -> one emoji in front of the tab name. Generic
+     * stock words only; a hotel can add or change rows in import_aliases (kind 'tab_icon', term = word, maps_to = emoji) and
+     * those win. A category with none of these words simply gets no icon (nothing is invented).
+     */
+    function import_default_tab_icons(): array
+    {
+        return [
+            'bar' => "\u{1F37A}", 'beer' => "\u{1F37A}", 'beers' => "\u{1F37A}", 'beverage' => "\u{1F37A}", 'beverages' => "\u{1F37A}",
+            'drinks' => "\u{1F37A}", 'wine' => "\u{1F377}", 'wines' => "\u{1F377}", 'spirits' => "\u{1F943}",
+            'kitchen' => "\u{1F373}", 'food' => "\u{1F373}", 'dry' => "\u{1F373}",
+            'chemical' => "\u{1F9F4}", 'chemicals' => "\u{1F9F4}", 'cleaning' => "\u{1F9F4}", 'housekeeping' => "\u{1F9F9}",
+            'mug' => "\u{2615}", 'coffee' => "\u{2615}", 'tea' => "\u{2615}",
+            'stationery' => "\u{1F4CE}", 'stationary' => "\u{1F4CE}", 'office' => "\u{1F4CE}",
+            'laundry' => "\u{1F9FA}", 'linen' => "\u{1F6CF}", 'maintenance' => "\u{1F527}", 'spa' => "\u{1F9D6}", 'gym' => "\u{1F3CB}",
+            'retail' => "\u{1F6D2}", 'shop' => "\u{1F6D2}",
+        ];
+    }
+
+    /**
      * Layer hotel-specific aliases ("training") over the seed.
      * $extra = ['fields'=>['item_name'=>['stock item x']], 'units'=>[...], ...] — lists are appended.
      */

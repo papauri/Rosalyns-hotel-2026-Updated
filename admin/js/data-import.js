@@ -8,7 +8,6 @@
     'use strict';
     if (window.rhDataImport) { return; }
 
-    var PER_PAGE = 100;
     var FIELD_LABEL = {
         item_name: 'Item name', batch: 'Batch', qty_primary: 'Balance (bar / kitchen)', qty_secondary: 'Balance (stores)', qty_single: 'Balance',
         unit: 'Unit', expiry: 'Expiry date', max_level: 'Par / maximum level', min_level: 'Reorder level', unit_price: 'Unit price',
@@ -16,7 +15,6 @@
     };
     var DIFF_LABEL = { category: 'Category', cost: 'Cost per unit', par: 'Par level', pack: 'Pack size', quantity: 'Opening stock quantity' };
     var STATUS_LABEL = { 'ready': 'Ready', 'needs-answer': 'Needs answer', 'skipped': 'Skipped', 'blocked': 'Blocked' };
-    var STATUS_RANK = { 'blocked': 0, 'needs-answer': 1, 'ready': 2, 'skipped': 3 };
     var JOB_STATUS = { uploaded: 'In progress', analysed: 'In progress', reviewing: 'In progress', confirmed: 'In progress', committed: 'Imported', failed: 'Could not be read' };
 
     function h(tag, cls, text) {
@@ -73,7 +71,8 @@
         var dropEl = root.querySelector('#diDrop');
         var nameEl = root.querySelector('#diFileName');
         var mineList = root.querySelector('#diMineList');
-        var S = { job: 0, sum: null, result: null, step: 1, reach: 1, filter: 'all', pages: {}, busy: false, file: null, chain: Promise.resolve() };
+        var S = { job: 0, sum: null, result: null, step: 1, reach: 1, busy: false, file: null, chain: Promise.resolve(), f: null, R: null, page: null, facets: null, statusEff: [], seq: 0, openCats: {}, bulkSel: null };
+        S.f = { q: '', sheet: '', cat: '', status: null, type: '', kind: '', warn: 0, cost: 0, stock: 0, answered: 0, sort: 'order', size: 50, page: 1, view: 'list' };
 
         // ---------- plumbing ----------
         function post(action, data, extra) {
@@ -99,7 +98,7 @@
         function setUrl(job) {
             try {
                 var u = new URL(window.location.href);
-                if (job) { u.searchParams.set('job', job); } else { u.searchParams.delete('job'); }
+                if (job) { u.searchParams.set('job', job); } else { u.searchParams.delete('job'); ['q', 'sheet', 'cat', 'status', 'type', 'kind', 'warn', 'cost', 'stock', 'answered', 'sort', 'size', 'page', 'view'].forEach(function (k) { u.searchParams.delete(k); }); }
                 window.history.replaceState(window.history.state, '', u.pathname + u.search);
             } catch (e) { /* ignore */ }
         }
@@ -191,9 +190,11 @@
         });
 
         // ---------- jobs ----------
-        function loadJob(id, goStep) {
+        function loadJob(id, goStep, fromUrl) {
             S.job = id;
             S.result = null;
+            S.f = fromUrl ? urlFilters() : copyDef();      // a reload keeps the filters in the address; opening a job starts clean
+            S.openCats = {}; S.page = null; S.facets = null; S.statusEff = []; S.bulkSel = null;
             return post('summary', { job: id }).then(function (r) {
                 if (r.state === 'committed') {
                     S.sum = null; S.result = r.result || {}; S.file = null; setUrl(id); S.resultFile = r.file; showStep(4); loadMine(); return;
@@ -203,7 +204,7 @@
                 }
                 S.sum = r;
                 setUrl(id);
-                if (!goStep) { goStep = r.job && r.job.status === 'reviewing' ? 3 : 2; }
+                if (!goStep) { goStep = (r.job && r.job.status === 'reviewing') || (fromUrl && urlHasFilters()) ? 3 : 2; }
                 showStep(goStep);
                 loadMine();
             });
@@ -212,10 +213,13 @@
             // answers change statuses, counts and even question ids: always take the whole picture from the server again
             // (the answer reply carries it; a separate fetch is only the fallback)
             var y = window.pageYOffset;
-            return (fresh && fresh.ok ? Promise.resolve(fresh) : post('summary', { job: S.job })).then(function (r) {
+            return (fresh && fresh.ok ? Promise.resolve(fresh) : post('summary', Object.assign({ job: S.job }, pagedExtra()))).then(function (r) {
                 if (!r.ok) { msg(r.error || 'Could not refresh.'); return; }
                 S.sum = r;
-                if (S.step === 3) { renderReview(); } else if (S.step === 2) { renderFound(); } else if (S.step === 4) { renderConfirm(); }
+                if (S.step === 3) {
+                    if (r.page && S.R && S.R.results && S.f.view === 'list') { absorb(r); delete S.sum.page; paintAll({}); } else if (S.R && S.R.results) { delete S.sum.page; paintProgress(); reload({}); }
+                    else { renderReview(); }
+                } else if (S.step === 2) { renderFound(); } else if (S.step === 4) { renderConfirm(); }
                 window.scrollTo({ top: y });
             });
         }
@@ -339,7 +343,7 @@
             }
             cardEl.classList.add('is-saving');
             Array.prototype.forEach.call(cardEl.querySelectorAll('input,button'), function (x) { x.disabled = true; });
-            var d = { job: S.job, question: q.id, answer: key };
+            var d = Object.assign({ job: S.job, question: q.id, answer: key }, pagedExtra());
             if (pack !== null && pack !== undefined) { d.pack_size = String(pack).trim(); }
             S.chain = S.chain.then(function () { return post('answer', d); }).then(function (r) {
                 if (!r.ok) {
@@ -453,113 +457,213 @@
             return wrap;
         }
 
-        // ---------- step 3: review ----------
-        function reviewList() {
-            // one entry per item (an item may be built from several rows), plus rows that were skipped and so are no item
-            var s = S.sum, inItem = {}, list = [], order = 0;
-            var qByUid = {};
-            s.questions.forEach(function (q) { (q.row_uids || []).forEach(function (u) { (qByUid[u] = qByUid[u] || []).push(q); }); });
-            s.items.forEach(function (it) {
-                it.uids.forEach(function (u) { inItem[u] = true; });
-                var qs = {};
-                it.uids.forEach(function (u) { (qByUid[u] || []).forEach(function (q) { qs[q.id] = q; }); });
-                (it.open || []).forEach(function (id) { s.questions.forEach(function (q) { if (q.id === id) { qs[id] = q; } }); });
-                list.push({ kind: 'item', it: it, status: it.status, sheet: it.sheet, order: order++, qs: Object.keys(qs).map(function (k) { return qs[k]; }) });
-            });
-            (s.rows || []).forEach(function (r) {
-                if (inItem[r.uid]) { return; }
-                list.push({ kind: 'row', r: r, status: r.status === 'skipped' ? 'skipped' : r.status, sheet: r.sheet, order: order++, qs: (qByUid[r.uid] || []) });
-            });
-            return list;
+        // ---------- step 3: review (the server pages, filters and counts; the browser only ever holds one page) ----------
+        var FKEYS = ['q', 'sheet', 'cat', 'status', 'type', 'kind', 'warn', 'cost', 'stock', 'answered', 'sort', 'size', 'page', 'view'];
+        var DEF = { q: '', sheet: '', cat: '', status: null, type: '', kind: '', warn: 0, cost: 0, stock: 0, answered: 0, sort: 'order', size: 50, page: 1, view: 'list' };
+        var STATUS_ORDER = ['needs-answer', 'blocked', 'ready', 'skipped'];
+        var TYPE_LABEL = {
+            'possible-typo': 'Did you mean (possible typo)', 'duplicate-no-batch': 'Same name twice, no batch', 'duplicate-batch-clash': 'Same name twice, same batch',
+            'conflict': 'Two values for one item', 'merge-conflict': 'Rows of one item disagree', 'case-price': 'Case price or price per unit',
+            'price-check': 'Price looks unusual', 'same-item-two-sheets': 'Same item on two sheets', 'unit-clash': 'Unit differs from stock',
+            'archived-match': 'Matches an archived item', 'ambiguous-match': 'Several possible matches', 'cost-too-large': 'Price too large to store',
+            'value-too-long': 'Text too long to store', 'bad-value': 'Value is not a number', 'formula-name': 'Name looks like a formula', 'section-or-item': 'Heading or item?'
+        };
+        var SORTS = [['order', 'Order in your file'], ['name', 'Name A to Z'], ['status', 'Needs answer first'], ['category', 'Category'], ['price', 'Price, lowest first'], ['price_desc', 'Price, highest first']];
+        var SIZES = [25, 50, 100, 200];
+        function copyDef() { var o = {}; Object.keys(DEF).forEach(function (k) { o[k] = DEF[k]; }); return o; }
+        function urlFilters() {
+            var f = copyDef();
+            try {
+                var sp = new URL(window.location.href).searchParams;
+                FKEYS.forEach(function (k) {
+                    if (!sp.has(k)) { return; }
+                    var v = String(sp.get(k)).slice(0, 120);
+                    if (k === 'status') { f.status = v === '' ? null : v; }
+                    else if (k === 'warn' || k === 'cost' || k === 'stock' || k === 'answered') { f[k] = v === '1' ? 1 : 0; }
+                    else if (k === 'size' || k === 'page') { f[k] = Math.max(1, parseInt(v, 10) || DEF[k]); }
+                    else { f[k] = v; }
+                });
+            } catch (e) { /* keep defaults */ }
+            return f;
         }
-        function counts(list) {
-            var c = { all: list.length, 'needs-answer': 0, ready: 0, skipped: 0, blocked: 0 };
-            list.forEach(function (e) { c[e.status] = (c[e.status] || 0) + 1; });
-            return c;
+        function urlHasFilters() {
+            try { var sp = new URL(window.location.href).searchParams; return FKEYS.some(function (k) { return sp.has(k); }); } catch (e) { return false; }
         }
+        function fpayload(extra) {
+            var f = S.f, d = {};
+            ['q', 'sheet', 'cat', 'type', 'kind', 'sort', 'view'].forEach(function (k) { if (f[k] !== '' && f[k] !== DEF[k]) { d[k] = f[k]; } });
+            if (f.status !== null) { d.status = f.status; }
+            ['warn', 'cost', 'stock', 'answered'].forEach(function (k) { if (f[k]) { d[k] = '1'; } });
+            d.size = f.size; d.page = f.page;
+            Object.keys(extra || {}).forEach(function (k) { d[k] = extra[k]; });
+            return d;
+        }
+        function syncUrl() {
+            try {
+                var u = new URL(window.location.href);
+                FKEYS.forEach(function (k) { u.searchParams.delete(k); });
+                if (S.job && S.step === 3) {
+                    var d = fpayload();
+                    FKEYS.forEach(function (k) { if (d[k] !== undefined && String(d[k]) !== String(DEF[k] === null ? '' : DEF[k])) { u.searchParams.set(k, d[k]); } });
+                }
+                window.history.replaceState(window.history.state, '', u.pathname + u.search);
+            } catch (e) { /* ignore */ }
+        }
+        function statusList() {
+            if (S.f.status === null) { return S.statusEff || []; }
+            if (S.f.status === 'all') { return []; }
+            return String(S.f.status).split(',').filter(function (x) { return STATUS_ORDER.indexOf(x) >= 0; });
+        }
+        function isOpenQ(q) { return q.answer === null || q.answer === undefined || q.answer === ''; }
+        function debounce(fn, ms) { var t = null; return function () { var a = arguments; window.clearTimeout(t); t = window.setTimeout(function () { fn.apply(null, a); }, ms); }; }
+        function headerBottom() { var hd = document.querySelector('header.admin-header'); return hd ? Math.max(0, hd.getBoundingClientRect().bottom) : 0; }
+        // #rh-admin-page is an overflow container that never scrolls (the window does), so position:sticky cannot pin the bar: it is pinned with
+        // position:fixed under the admin header while it would scroll out of view, and a spacer keeps the page from jumping.
+        function stickyOffset() {
+            var b = S.R && S.R.bar;
+            if (!b) { return headerBottom(); }
+            // while pinned the real height; before that the height it had the last time it was pinned (the bar is shorter pinned: no helper lines)
+            return headerBottom() + (b.classList.contains('is-stuck') ? b.offsetHeight : (S.R.stuckH || Math.min(b.offsetHeight, 140)));
+        }
+        function scrollToEl(el, focusInside) {
+            if (!el) { return; }
+            var y = el.getBoundingClientRect().top + window.pageYOffset - stickyOffset() - 10;
+            window.scrollTo({ top: Math.max(0, y), behavior: 'smooth' });
+            if (focusInside) {
+                var f = el.nextElementSibling && el.nextElementSibling.querySelector ? el.nextElementSibling.querySelector('input:not([disabled]),select,button') : null;
+                if (f) { try { f.focus({ preventScroll: true }); } catch (e) { f.focus(); } }
+            }
+        }
+        function ctl(label, node, help) {
+            var w = h('div', 'di-f');
+            var l = h('label', 'di-f-l', label);
+            if (node.id) { l.setAttribute('for', node.id); }
+            add(w, l, node, h('small', 'di-fhelp', help));
+            return w;
+        }
+        function mkSelect(id, aria) {
+            var s = h('select', 'di-select di-fsel'); s.id = id; s.setAttribute('aria-label', aria); return s;
+        }
+        function fillSelect(sel, opts, current) {
+            clear(sel);
+            opts.forEach(function (o) { var op = h('option', null, o[1]); op.value = o[0]; if (String(o[0]) === String(current)) { op.selected = true; } sel.appendChild(op); });
+        }
+        function sumN(o) { return Object.keys(o || {}).reduce(function (a, k) { return a + (Number(o[k]) || 0); }, 0); }
+
         function renderReview() {
             var p = clear(panels[3]);
             var s = S.sum;
-            var list = reviewList();
-            var c = counts(list);
+            S.R = {};
             add(p, h('h3', 'di-h', 'Step 3 · Review and answer'));
-            add(p, helpLine('Each line below is one stock item as it would be imported. The small grey tag under every value (like "BAR!C12") is the cell it was read from. Answer the questions; nothing is saved to stock until step 4.'));
-            // structural question still open in step 2?
-            var structOpen = s.questions.filter(function (q) { return isStructural(q) && (q.answer === null || q.answer === undefined || q.answer === '') && q.blocking; });
+            add(p, helpLine('Each line below is one stock item as it would be imported. The small grey tag under every value (like "BAR!C12") is the cell it was read from. Answer the questions that sit under an item; nothing is saved to stock until step 4.'));
+            var structOpen = s.questions.filter(function (q) { return isStructural(q) && isOpenQ(q) && q.blocking; });
             if (structOpen.length) {
                 var b = h('p', 'di-warn');
                 add(b, structOpen.length + ' question' + (structOpen.length === 1 ? '' : 's') + ' about how a sheet is read ' + (structOpen.length === 1 ? 'is' : 'are') + ' still open in step 2. ');
                 var go = h('button', 'btn-secondary di-btn', 'Go to step 2'); go.type = 'button'; go.addEventListener('click', function () { showStep(2); });
                 b.appendChild(go); p.appendChild(b);
             }
-            // chips
-            var chips = h('div', 'di-chips'); chips.setAttribute('role', 'group'); chips.setAttribute('aria-label', 'Show rows');
-            [['all', 'All'], ['needs-answer', 'Needs answer'], ['ready', 'Ready'], ['skipped', 'Skipped']].concat(c.blocked ? [['blocked', 'Blocked']] : []).forEach(function (f) {
-                var b = h('button', 'di-chip' + (S.filter === f[0] ? ' is-on' : ''));
-                b.type = 'button'; b.setAttribute('data-di-filter', f[0]); b.setAttribute('aria-pressed', S.filter === f[0] ? 'true' : 'false');
-                add(b, f[1], ' ', h('span', 'di-chip-n', c[f[0]] || 0));
-                b.addEventListener('click', function () {
-                    S.filter = f[0]; S.pages = {};
-                    renderTables(); markChips();
-                    var first = tablesBox.querySelector('.di-row');
-                    scrollTo(first ? first : tablesBox);
-                });
-                chips.appendChild(b);
+            // progress + jump
+            var prog = h('div', 'di-progress');
+            S.R.progText = h('strong', 'di-progress-t'); S.R.progText.setAttribute('role', 'status'); S.R.progText.setAttribute('aria-live', 'polite');
+            var track = h('div', 'di-progress-track'); track.setAttribute('role', 'progressbar'); track.setAttribute('aria-valuemin', '0');
+            S.R.progBar = h('span', 'di-progress-bar'); track.appendChild(S.R.progBar); S.R.progTrack = track;
+            S.R.jump = h('button', 'btn-primary di-btn di-jump', 'Jump to the next one that needs an answer');
+            S.R.jump.type = 'button'; S.R.jump.setAttribute('aria-keyshortcuts', 'n');
+            S.R.jump.addEventListener('click', jumpNext);
+            add(prog, S.R.progText, track, S.R.jump,
+                h('small', 'di-fhelp', 'The bar counts questions you must answer before you can confirm; the button counts the items they belong to. The N key does the same as the button when you are not typing.'));
+            p.appendChild(prog);
+            // questions that belong to a whole sheet (one answer for all its items)
+            S.R.sheetQs = h('div', 'di-qs di-sheetqs'); S.R.sheetQs.hidden = true; p.appendChild(S.R.sheetQs);
+            // the filter bar
+            var bar = h('div', 'di-fbar'); S.R.bar = bar; S.R.barWrap = h('div', 'di-fwrap'); S.R.barWrap.appendChild(bar);
+            var top = h('div', 'di-fbar-top');
+            var si = document.createElement('input');
+            si.type = 'search'; si.id = 'diQ'; si.className = 'di-fin'; si.maxLength = 100; si.value = S.f.q; si.setAttribute('autocomplete', 'off'); si.setAttribute('aria-label', 'Search items'); si.placeholder = 'Search items';
+            var go1 = debounce(function () { var v = si.value.trim(); if (v !== S.f.q) { S.f.q = v; S.f.page = 1; reload(); } }, 300);
+            si.addEventListener('input', go1);
+            si.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); var v = si.value.trim(); if (v !== S.f.q) { S.f.q = v; S.f.page = 1; reload(); } } });
+            S.R.q = si;
+            var searchBox = ctl('Search', si, 'Finds an item name, a category, or a cell from your file such as C12.');
+            searchBox.classList.add('di-f--grow');
+            S.R.chips = h('div', 'di-chips di-chips--status'); S.R.chips.setAttribute('role', 'group'); S.R.chips.setAttribute('aria-label', 'Show items with this status');
+            var chipBox = h('div', 'di-f di-f--chips');
+            add(chipBox, h('span', 'di-f-l', 'Status'), S.R.chips, h('small', 'di-fhelp', 'Needs answer and Blocked must be answered or skipped before you can confirm. Each number follows your other filters.'));
+            S.R.viewBox = h('div', 'di-seg'); S.R.viewBox.setAttribute('role', 'group'); S.R.viewBox.setAttribute('aria-label', 'How to show the items');
+            [['list', 'List'], ['cat', 'By category']].forEach(function (v) {
+                var bt = h('button', 'di-segbtn', v[1]); bt.type = 'button'; bt.setAttribute('data-view', v[0]);
+                bt.addEventListener('click', function () { if (S.f.view !== v[0]) { S.f.view = v[0]; S.f.page = 1; reload(); } });
+                S.R.viewBox.appendChild(bt);
             });
-            p.appendChild(chips);
-            p.appendChild(helpLine('Tap a filter to show only those rows. "Needs answer" and "Blocked" rows stop you from confirming until they are answered or skipped.'));
-            // questions
-            var qs = s.questions.filter(function (q) { return !isStructural(q); });
-            qs.sort(function (a, b) {
-                var ao = (a.answer === null || a.answer === undefined || a.answer === '') && a.blocking ? 0 : 1, bo = (b.answer === null || b.answer === undefined || b.answer === '') && b.blocking ? 0 : 1;
-                return ao - bo;
+            var viewCtl = h('div', 'di-f di-f--view');
+            add(viewCtl, h('span', 'di-f-l', 'Show as'), S.R.viewBox, h('small', 'di-fhelp', 'One list, or grouped by category.'));
+            S.R.more = h('button', 'btn-secondary di-btn di-more'); S.R.more.type = 'button'; S.R.more.setAttribute('aria-expanded', 'false'); S.R.more.setAttribute('aria-controls', 'diDrawer');
+            S.R.moreN = h('span', 'di-chip-n', '0');
+            add(S.R.more, h('i', 'fas fa-sliders-h'), ' Filters ', S.R.moreN);
+            var moreCtl = h('div', 'di-f di-f--more');
+            S.R.more.setAttribute('aria-label', 'Filters: more ways to narrow the list'); add(moreCtl, S.R.more, h('small', 'di-fhelp', 'More ways to narrow it.'));
+            add(top, searchBox, chipBox, viewCtl, moreCtl);
+            bar.appendChild(top);
+            var drawer = h('div', 'di-fdrawer'); drawer.id = 'diDrawer'; drawer.hidden = true; S.R.drawer = drawer;
+            drawer.setAttribute('role', 'group'); drawer.setAttribute('aria-labelledby', 'diDrawerT');
+            var dTitle = h('strong', null, 'Filters'); dTitle.id = 'diDrawerT';
+            var dClose = h('button', 'btn-secondary di-btn', 'Done'); dClose.type = 'button';
+            add(drawer, add(h('div', 'di-fdrawer-head'), dTitle, dClose));
+            S.R.selSheet = mkSelect('diSheet', 'Sheet'); S.R.selCat = mkSelect('diCat', 'Category'); S.R.selType = mkSelect('diType', 'Kind of question');
+            S.R.selKind = mkSelect('diKind', 'New or existing'); S.R.selSort = mkSelect('diSort', 'Sort'); S.R.selSize = mkSelect('diSize', 'Items per page');
+            fillSelect(S.R.selSort, SORTS, S.f.sort);
+            fillSelect(S.R.selSize, SIZES.map(function (n) { return [n, n + ' items']; }), S.f.size);
+            fillSelect(S.R.selKind, [['', 'New and existing'], ['new', 'New items'], ['matched', 'Existing items']], S.f.kind);
+            [['selSheet', 'sheet'], ['selCat', 'cat'], ['selType', 'type'], ['selKind', 'kind'], ['selSort', 'sort']].forEach(function (pr) {
+                S.R[pr[0]].addEventListener('change', function () { S.f[pr[1]] = S.R[pr[0]].value; S.f.page = 1; reload(); });
             });
-            var openN = qs.filter(function (q) { return q.blocking && (q.answer === null || q.answer === undefined || q.answer === ''); }).length;
-            var qh = h('div', 'di-qs');
-            add(qh, h('h4', 'di-h4', qs.length ? 'Questions (' + openN + ' still need an answer)' : 'No questions'),
-                helpLine(qs.length ? 'Pick one answer for each. The page updates as you go, and your answers are kept if you leave and come back.' : 'Everything in the file was clear. You can check the rows below and continue.'));
-            qs.forEach(function (q) { qh.appendChild(questionCard(q)); });
-            p.appendChild(qh);
-            // tables
-            var tablesBox = h('div', 'di-tables'); tablesBox.id = 'diResults'; tablesBox.setAttribute('data-rh-results', '1');
-            p.appendChild(tablesBox);
-            function markChips() {
-                Array.prototype.forEach.call(chips.querySelectorAll('.di-chip'), function (b) {
-                    var on = b.getAttribute('data-di-filter') === S.filter;
-                    b.classList.toggle('is-on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false');
-                });
+            S.R.selSize.addEventListener('change', function () { S.f.size = Number(S.R.selSize.value) || 50; S.f.page = 1; reload(); });
+            var grid = h('div', 'di-fgrid');
+            add(grid,
+                ctl('Sheet', S.R.selSheet, 'Only items from one sheet (tab) of your file.'),
+                ctl('Category', S.R.selCat, 'Only items under one heading of your file.'),
+                ctl('Kind of question', S.R.selType, 'Only items that still have an unanswered question of this kind.'),
+                ctl('New or existing', S.R.selKind, 'New items will be created. Existing items match something already in your stock.'),
+                ctl('Sort by', S.R.selSort, 'The order of the list. Items that tie stay in the order of your file.'),
+                ctl('Items per page', S.R.selSize, 'How many items to load at a time.'));
+            drawer.appendChild(grid);
+            S.R.flags = {};
+            var fl = h('div', 'di-fflags');
+            [['warn', 'Has a warning', 'Items with a note under them, such as a missing price or stock that is not counted.'],
+                ['cost', 'Cost change ticked', 'Existing items where you ticked the box to change their cost.'],
+                ['stock', 'Already has stock', 'Existing items that have stock on hand right now.'],
+                ['answered', 'I answered a question', 'Items where you have already given an answer.']].forEach(function (f) {
+                var lab = h('label', 'di-check di-fflag'); var cb = document.createElement('input'); cb.type = 'checkbox'; cb.id = 'diFlag_' + f[0];
+                S.R.flags[f[0]] = cb;
+                cb.addEventListener('change', function () { S.f[f[0]] = cb.checked ? 1 : 0; S.f.page = 1; reload(); });
+                var tx = h('span'); add(tx, h('strong', null, f[1] + ' '), h('span', 'di-fnum'), h('small', 'di-fhelp', f[2]));
+                S.R.flags[f[0] + '_n'] = tx.querySelector('.di-fnum');
+                add(lab, cb, tx); fl.appendChild(lab);
+            });
+            drawer.appendChild(fl);
+            var clr = h('button', 'btn-secondary di-btn di-clear', 'Clear filters'); clr.type = 'button';
+            clr.addEventListener('click', clearFilters);
+            S.R.done = h('button', 'btn-primary di-btn', 'Show items'); S.R.done.type = 'button';
+            add(drawer, add(h('div', 'di-fdrawer-foot'), clr, S.R.done, h('small', 'di-fhelp', 'Clear removes every filter. Done closes this panel and keeps your filters.')));
+            bar.appendChild(drawer);
+            S.R.active = h('div', 'di-active'); S.R.active.hidden = true; bar.appendChild(S.R.active);
+            function setDrawer(open, refocus) {
+                drawer.hidden = !open; S.R.more.setAttribute('aria-expanded', open ? 'true' : 'false'); bar.classList.toggle('has-drawer', open);
+                if (!open && refocus) { S.R.more.focus(); }
             }
-            function renderTables() {
-                clear(tablesBox);
-                var sheets = [];
-                list.forEach(function (e) { if (sheets.indexOf(e.sheet) < 0) { sheets.push(e.sheet); } });
-                if (!sheets.length) { tablesBox.appendChild(h('p', 'di-muted', 'No rows to show.')); }
-                sheets.forEach(function (name) {
-                    var all = list.filter(function (e) { return e.sheet === name; });
-                    var rows = all.filter(function (e) { return S.filter === 'all' || e.status === S.filter; });
-                    rows.sort(function (a, b) { return (STATUS_RANK[a.status] - STATUS_RANK[b.status]) || (a.order - b.order); });
-                    var pages = Math.max(1, Math.ceil(rows.length / PER_PAGE));
-                    var pg = Math.min(S.pages[name] || 0, pages - 1);
-                    var box = h('div', 'di-sheetbox');
-                    var sc = counts(all);
-                    var hd = h('div', 'di-sheet-head');
-                    add(hd, h('h4', 'di-sheet-name', name), h('span', 'di-sheet-sub', all.length + ' item' + (all.length === 1 ? '' : 's') + ' · ' + (sc['needs-answer'] + (sc.blocked || 0)) + ' to answer · ' + sc.ready + ' ready · ' + sc.skipped + ' skipped'));
-                    box.appendChild(hd);
-                    if (!rows.length) { box.appendChild(h('p', 'di-muted', 'No rows match this filter on this sheet.')); tablesBox.appendChild(box); return; }
-                    box.appendChild(itemsTable(rows.slice(pg * PER_PAGE, (pg + 1) * PER_PAGE)));
-                    if (pages > 1) {
-                        var bar = h('div', 'di-pager');
-                        var prev = h('button', 'btn-secondary di-btn', 'Previous 100'), nxt = h('button', 'btn-secondary di-btn', 'Next 100');
-                        prev.type = 'button'; nxt.type = 'button'; prev.disabled = pg === 0; nxt.disabled = pg >= pages - 1;
-                        prev.addEventListener('click', function () { S.pages[name] = pg - 1; renderTables(); scrollTo(box); });
-                        nxt.addEventListener('click', function () { S.pages[name] = pg + 1; renderTables(); scrollTo(box); });
-                        add(bar, prev, h('span', null, 'Showing ' + (pg * PER_PAGE + 1) + '–' + Math.min((pg + 1) * PER_PAGE, rows.length) + ' of ' + rows.length), nxt);
-                        box.appendChild(bar);
-                    }
-                    tablesBox.appendChild(box);
-                });
-            }
-            renderTables();
+            S.R.more.addEventListener('click', function () { setDrawer(drawer.hidden, false); });
+            dClose.addEventListener('click', function () { setDrawer(false, true); });
+            S.R.done.addEventListener('click', function () { setDrawer(false, true); });
+            bar.addEventListener('keydown', function (e) { if (e.key === 'Escape' && !drawer.hidden) { e.stopPropagation(); setDrawer(false, true); } });
+            p.appendChild(S.R.barWrap);
+            watchBar();
+            S.R.bulk = h('div', 'di-bulk'); S.R.bulk.hidden = true; p.appendChild(S.R.bulk);
+            // only this one line is announced when the list changes (a screen reader would otherwise re-read every row)
+            S.R.info = h('p', 'di-help di-resinfo'); S.R.info.setAttribute('role', 'status'); S.R.info.setAttribute('aria-live', 'polite'); p.appendChild(S.R.info);
+            S.R.results = h('div', 'di-tables'); S.R.results.id = 'diResults'; S.R.results.setAttribute('data-rh-results', '1');
+            S.R.results.appendChild(h('p', 'di-muted di-loading', 'Loading the items…'));
+            p.appendChild(S.R.results);
             var nav = h('div', 'di-actions');
             var back = h('button', 'btn-secondary di-btn'); back.type = 'button'; add(back, h('i', 'fas fa-arrow-left'), ' Back'); back.addEventListener('click', function () { showStep(2); });
             var dl = h('a', 'btn-secondary di-btn', ' Download what will be imported (CSV)');
@@ -569,7 +673,358 @@
             add(nav, back, dl, next);
             p.appendChild(nav);
             p.appendChild(helpLine('The download lists every item that is ready, with where it came from, so you can check it in Excel before you confirm.'));
+            S.page = null;
+            paintProgress();
+            reload();
         }
+        function clearFilters() {
+            var keep = { sort: S.f.sort, size: S.f.size, view: S.f.view };
+            S.f = copyDef(); S.f.status = 'all'; S.f.sort = keep.sort; S.f.size = keep.size; S.f.view = keep.view;
+            S.R.q.value = '';
+            reload();
+        }
+        function reload(o) { return loadView(o || {}); }
+
+        function loadView(o) {
+            var seq = ++S.seq;
+            var res = S.R.results;
+            res.classList.add('is-loading'); res.setAttribute('aria-busy', 'true');
+            if (S.R.info && !S.R.info.textContent) { S.R.info.textContent = 'Loading…'; }
+            var d = fpayload({ job: S.job, facets: o.facets === false ? '' : '1' });
+            if (S.f.view === 'cat') { d.entries = '0'; }
+            return post('review_page', d).then(function (r) {
+                if (seq !== S.seq) { return; }
+                if (!r.ok) { res.classList.remove('is-loading'); res.removeAttribute('aria-busy'); if (S.R.info.textContent === 'Loading…') { S.R.info.textContent = ''; } msg(r.error || 'The list could not be loaded.'); return; }
+                absorb(r);
+                return paintAll(o);
+            });
+        }
+        function absorb(r) {
+            // r = a page reply (lite) or an answer/bulk/fields reply's summary (overview + page)
+            ['can_confirm', 'why_not', 'entry_counts', 'progress', 'confirm', 'counts', 'questions', 'sheets', 'totals', 'warnings', 'file', 'job'].forEach(function (k) { if (r[k] !== undefined) { S.sum[k] = r[k]; } });
+            var pg = r.page;
+            if (!pg) { return; }
+            if (pg.facets) { S.facets = pg.facets; } else if (S.page && S.page.facets) { pg.facets = S.page.facets; }
+            S.page = pg;
+            var fl = pg.filters || {};
+            S.statusEff = fl.status || [];
+            S.f.page = fl.page || 1; S.f.sort = fl.sort || S.f.sort; S.f.size = fl.size || S.f.size; S.f.type = fl.type !== undefined ? fl.type : S.f.type; S.f.kind = fl.kind !== undefined ? fl.kind : S.f.kind;
+        }
+        function paintAll(o) {
+            var res = S.R.results;
+            res.classList.remove('is-loading'); res.removeAttribute('aria-busy');
+            paintProgress();
+            paintFilters();
+            paintSheetQs();
+            paintBulk();
+            if (S.f.view === 'cat') { paintCats(o); } else { paintList(o); }
+            syncUrl();
+            if (o && typeof o.then === 'function') { o.then(); }
+        }
+
+        function paintProgress() {
+            var pr = S.sum.progress || { answered: 0, total: 0, open: 0 }, ec = S.sum.entry_counts || {};
+            var pct = pr.total > 0 ? Math.round(pr.answered / pr.total * 100) : 100;
+            S.R.progText.textContent = num(pr.answered, 0) + ' of ' + num(pr.total, 0) + ' questions answered';
+            S.R.progBar.style.width = pct + '%';
+            S.R.progTrack.setAttribute('aria-valuenow', String(pct)); S.R.progTrack.setAttribute('aria-valuetext', pr.answered + ' of ' + pr.total + ' questions answered');
+            var todo = (ec['needs-answer'] || 0) + (ec.blocked || 0);
+            S.R.jump.disabled = todo === 0;
+            S.R.jump.textContent = todo === 0 ? 'Nothing is waiting for an answer' : 'Jump to the next one that needs an answer (' + num(todo, 0) + ' item' + (todo === 1 ? '' : 's') + ' left)';
+        }
+        function paintFilters() {
+            var fc = (S.page && S.page.facets) || S.facets;
+            var st = statusList();
+            if (S.page) { S.R.done.textContent = 'Done · ' + num(S.page.total, 0) + ' item' + (S.page.total === 1 ? '' : 's'); }
+            clear(S.R.chips);
+            var all = h('button', 'di-chip' + (st.length === 0 ? ' is-on' : '')); all.type = 'button'; all.setAttribute('aria-pressed', st.length === 0 ? 'true' : 'false');
+            add(all, 'All ', h('span', 'di-chip-n', fc ? num(sumN(fc.status), 0) : '…'));
+            all.addEventListener('click', function () { S.f.status = 'all'; S.f.page = 1; reload(); });
+            S.R.chips.appendChild(all);
+            [['needs-answer', 'Needs answer'], ['blocked', 'Blocked'], ['ready', 'Ready'], ['skipped', 'Skipped']].forEach(function (c) {
+                var on = st.indexOf(c[0]) >= 0;
+                var b = h('button', 'di-chip' + (on ? ' is-on' : '')); b.type = 'button'; b.setAttribute('data-di-filter', c[0]); b.setAttribute('aria-pressed', on ? 'true' : 'false');
+                add(b, c[1] + ' ', h('span', 'di-chip-n', fc ? num(fc.status[c[0]] || 0, 0) : '…'));
+                b.addEventListener('click', function () {
+                    var cur = statusList().slice(), ix = cur.indexOf(c[0]);
+                    if (ix >= 0) { cur.splice(ix, 1); } else { cur.push(c[0]); }
+                    S.f.status = (cur.length === 0 || cur.length === STATUS_ORDER.length) ? 'all' : STATUS_ORDER.filter(function (x) { return cur.indexOf(x) >= 0; }).join(',');
+                    S.f.page = 1; reload();
+                });
+                S.R.chips.appendChild(b);
+            });
+            if (!fc) { return; }
+            var sheetOpts = [['', 'All sheets']].concat((fc.sheet_list || []).map(function (x) { return [x.name, x.name + ' (' + num(x.n, 0) + ')']; }));
+            fillSelect(S.R.selSheet, sheetOpts, S.f.sheet);
+            var catOpts = [['', 'All categories' + (fc.cat_total ? ' (' + num(fc.cat_total, 0) + ')' : '')]].concat((fc.cat || []).map(function (x) { return [x.name, (x.name || '(none)') + ' (' + num(x.match, 0) + ')']; }));
+            if (S.f.cat && !(fc.cat || []).some(function (x) { return x.name === S.f.cat; })) { catOpts.push([S.f.cat, S.f.cat + ' (0)']); }
+            fillSelect(S.R.selCat, catOpts, S.f.cat);
+            fillSelect(S.R.selType, [['', 'Any kind']].concat((fc.type_list || []).map(function (x) { return [x.code, x.label + ' (' + num(x.n, 0) + ')']; })), S.f.type);
+            fillSelect(S.R.selKind, [['', 'New and existing'], ['new', 'New items (' + num(fc.kind.new, 0) + ')'], ['matched', 'Existing items (' + num(fc.kind.matched, 0) + ')']], S.f.kind);
+            fillSelect(S.R.selSort, SORTS, S.f.sort);
+            fillSelect(S.R.selSize, SIZES.map(function (n) { return [n, n + ' items']; }), S.f.size);
+            ['warn', 'cost', 'stock', 'answered'].forEach(function (k) { S.R.flags[k].checked = !!S.f[k]; S.R.flags[k + '_n'].textContent = '(' + num(fc[k] || 0, 0) + ')'; });
+            Array.prototype.forEach.call(S.R.viewBox.children, function (b) { var on = b.getAttribute('data-view') === S.f.view; b.classList.toggle('is-on', on); b.setAttribute('aria-pressed', on ? 'true' : 'false'); });
+            // active filters, each with the number of items it leaves
+            clear(S.R.active);
+            var act = [];
+            var total = S.page ? S.page.total : 0;
+            if (S.f.q) { act.push(['Search', '"' + S.f.q + '"', total, function () { S.f.q = ''; S.R.q.value = ''; }]); }
+            if (S.f.sheet) { var sx = (fc.sheet_list || []).filter(function (x) { return x.name === S.f.sheet; })[0]; act.push(['Sheet', S.f.sheet, sx ? sx.n : 0, function () { S.f.sheet = ''; }]); }
+            if (S.f.cat) { var cx = (fc.cat || []).filter(function (x) { return x.name === S.f.cat; })[0]; act.push(['Category', S.f.cat, cx ? cx.match : 0, function () { S.f.cat = ''; }]); }
+            if (S.f.type) { var tx = (fc.type_list || []).filter(function (x) { return x.code === S.f.type; })[0]; act.push(['Question', tx ? tx.label : S.f.type, tx ? tx.n : 0, function () { S.f.type = ''; }]); }
+            if (S.f.kind) { act.push(['Items', S.f.kind === 'new' ? 'new' : 'existing', fc.kind[S.f.kind], function () { S.f.kind = ''; }]); }
+            [['warn', 'Has a warning'], ['cost', 'Cost change ticked'], ['stock', 'Already has stock'], ['answered', 'I answered a question']].forEach(function (f) {
+                if (S.f[f[0]]) { act.push([f[1], '', fc[f[0]], function () { S.f[f[0]] = 0; }]); }
+            });
+            if (!S.page || !S.page.filters || !S.page.filters.status_default) {
+                if (st.length) { act.push(['Status', st.map(function (x) { return STATUS_LABEL[x]; }).join(' + '), st.reduce(function (a, x) { return a + (fc.status[x] || 0); }, 0), function () { S.f.status = 'all'; }]); }
+            }
+            act.forEach(function (a) {
+                var b = h('button', 'di-fchip'); b.type = 'button';
+                b.setAttribute('aria-label', 'Remove filter ' + a[0] + (a[1] ? ' ' + a[1] : ''));
+                add(b, a[0] + (a[1] ? ': ' + a[1] : ''), ' ', h('span', 'di-chip-n', num(a[2], 0)), ' ', h('span', 'di-x', '×'));
+                b.addEventListener('click', function () { a[3](); S.f.page = 1; reload(); });
+                S.R.active.appendChild(b);
+            });
+            S.R.active.hidden = act.length === 0;
+            var n = act.filter(function (a) { return a[0] !== 'Search' && a[0] !== 'Status'; }).length;
+            S.R.moreN.textContent = String(n);
+            S.R.more.classList.toggle('has-filters', n > 0);
+        }
+        function paintSheetQs() {
+            var box = clear(S.R.sheetQs);
+            var qs = (S.page && S.page.sheet_questions) || [];
+            box.hidden = !qs.length;
+            if (!qs.length) { return; }
+            add(box, h('h4', 'di-h4', 'Questions for a whole sheet'), helpLine('One answer here applies to every item on that sheet (for example the unit its new items are counted in).'));
+            var shown = {};
+            qs.forEach(function (q) { if (!shown[q.id]) { shown[q.id] = true; box.appendChild(questionCard(q)); } });
+        }
+
+        // ---------- the list ----------
+        function pagerEl(pg, goTo) {
+            var bar = h('div', 'di-pager');
+            var from = pg.total === 0 ? 0 : (pg.page - 1) * pg.size + 1, to = Math.min(pg.page * pg.size, pg.total);
+            var prev = h('button', 'btn-secondary di-btn', 'Previous'), nxt = h('button', 'btn-secondary di-btn', 'Next');
+            prev.type = 'button'; nxt.type = 'button'; prev.disabled = pg.page <= 1; nxt.disabled = pg.page >= pg.pages;
+            prev.addEventListener('click', function () { goTo(pg.page - 1); });
+            nxt.addEventListener('click', function () { goTo(pg.page + 1); });
+            var mid = h('span', 'di-pager-mid');
+            var inp = document.createElement('input'); inp.type = 'number'; inp.min = '1'; inp.max = String(pg.pages); inp.value = String(pg.page); inp.className = 'di-pack-in di-pager-in'; inp.setAttribute('aria-label', 'Go to page');
+            inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); var v = Math.max(1, Math.min(pg.pages, parseInt(inp.value, 10) || 1)); if (v !== pg.page) { goTo(v); } } });
+            add(mid, 'Showing ' + num(from, 0) + '–' + num(to, 0) + ' of ' + num(pg.total, 0) + ' · page ', inp, ' of ' + num(pg.pages, 0));
+            add(bar, prev, mid, nxt);
+            return bar;
+        }
+        function emptyState() {
+            var box = h('div', 'di-empty');
+            var ec = S.sum.entry_counts || {};
+            var todo = (ec['needs-answer'] || 0) + (ec.blocked || 0);
+            if (S.f.status === null && todo === 0 && !S.f.q && !S.f.sheet) {
+                box.appendChild(h('p', null, 'Nothing is left to answer here.'));
+            } else if (todo === 0 && statusList().length && ['needs-answer', 'blocked'].some(function (x) { return statusList().indexOf(x) >= 0; })) {
+                box.appendChild(h('p', null, 'Nothing is waiting for an answer any more. You can check the other items, or continue to confirm.'));
+                var sb = h('button', 'btn-secondary di-btn', 'Show all items'); sb.type = 'button';
+                sb.addEventListener('click', function () { S.f.status = 'all'; S.f.page = 1; reload(); });
+                box.appendChild(sb);
+                return box;
+            } else {
+                box.appendChild(h('p', null, 'No rows match these filters.'));
+            }
+            var cb = h('button', 'btn-secondary di-btn', 'Clear filters'); cb.type = 'button'; cb.addEventListener('click', clearFilters);
+            box.appendChild(cb);
+            return box;
+        }
+        function paintList(o) {
+            var box = clear(S.R.results), pg = S.page;
+            clear(S.R.info);
+            S.R.info.textContent = pg.total === 0 ? '' : 'Showing ' + num(Math.min(pg.size, pg.entries.length), 0) + ' of ' + num(pg.total, 0) + ' items. They load one page at a time, so big files stay fast.';
+            if (!pg.entries.length) { box.appendChild(emptyState()); return; }
+            box.appendChild(entriesTable(pg.entries, {}));
+            box.appendChild(pagerEl(pg, function (n) { S.f.page = n; reload({ facets: false, then: function () { scrollToEl(S.R.results); } }); }));
+            if (o && o.scrollTo !== undefined) { var t = box.querySelector('tr.di-row[data-i="' + o.scrollTo + '"]'); if (t) { scrollToEl(t, true); } }
+        }
+
+        // ---------- by category ----------
+        function paintCats(o) {
+            var box = clear(S.R.results), fc = (S.page && S.page.facets) || S.facets;
+            clear(S.R.info);
+            if (!fc) { return; }
+            var cats = (fc.cat || []).filter(function (c) { return c.match > 0 && (!S.f.cat || c.name === S.f.cat); });
+            S.R.info.textContent = cats.length ? num(cats.length, 0) + ' categor' + (cats.length === 1 ? 'y' : 'ies') + ' with items that match. Open one to see its items.' + (fc.cat_total > (fc.cat || []).length ? ' Only the first ' + (fc.cat || []).length + ' categories are listed: use Search or the Category filter for the others.' : '') : '';
+            if (!cats.length) { box.appendChild(emptyState()); return; }
+            if (!S.openCats) { S.openCats = {}; }
+            if (!Object.keys(S.openCats).length) {
+                var first = cats.filter(function (c) { return c.needs + c.blocked > 0; })[0] || cats[0];
+                S.openCats[first.name] = { page: 1 };
+            }
+            var pending = [];
+            cats.forEach(function (c) {
+                var cb = h('div', 'di-catbox');
+                var isOpen = !!S.openCats[c.name];
+                var hd = h('button', 'di-cathead'); hd.type = 'button'; hd.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+                var done = c.items ? Math.round((c.ready + c.skipped) / c.items * 100) : 100;
+                var bits = [num(c.items, 0) + ' item' + (c.items === 1 ? '' : 's'), num(c.needs + c.blocked, 0) + ' need an answer', num(c.skipped, 0) + ' skipped'];
+                add(hd, h('i', 'fas ' + (isOpen ? 'fa-chevron-down' : 'fa-chevron-right')), ' ', (function () { var cn = h('strong', 'di-catname', c.name || '(no category)'); cn.title = c.name || '(no category)'; return cn; })(), ' ',h('span', 'di-small', bits.join(' · ')));
+                var mini = h('span', 'di-mini'); var mb = h('span', 'di-mini-bar'); mb.style.width = done + '%'; mini.appendChild(mb); hd.appendChild(mini);
+                var body = h('div', 'di-catbody'); body.hidden = !isOpen; body.setAttribute('data-cat', c.name);
+                hd.addEventListener('click', function () {
+                    if (S.openCats[c.name]) { delete S.openCats[c.name]; body.hidden = true; hd.setAttribute('aria-expanded', 'false'); clear(body); hd.firstChild.className = 'fas fa-chevron-right'; }
+                    else {
+                        var keys = Object.keys(S.openCats); if (keys.length >= 8) { delete S.openCats[keys[0]]; }
+                        S.openCats[c.name] = { page: 1 }; paintCats();
+                    }
+                });
+                add(cb, hd, body);
+                box.appendChild(cb);
+                if (isOpen) { pending.push([c, body]); }
+            });
+            pending.forEach(function (x, ix) { loadCat(x[0], x[1], ix === 0 && o ? o.scrollTo : undefined); });
+        }
+        function loadCat(c, body, scrollTo) {
+            var st = S.openCats[c.name] || { page: 1 };
+            body.appendChild(h('p', 'di-muted', 'Loading…'));
+            var d = fpayload({ job: S.job, cat: c.name, page: st.page, facets: '' });
+            post('review_page', d).then(function (r) {
+                if (!r.ok || !r.page) { clear(body); body.appendChild(h('p', 'di-warn', r.error || 'Could not load this category.')); return; }
+                if (!S.openCats[c.name]) { return; }
+                st.page = r.page.page;
+                clear(body);
+                if (!r.page.entries.length) { body.appendChild(h('p', 'di-muted', 'No items in this category match the filters.')); return; }
+                body.appendChild(entriesTable(r.page.entries, {}));
+                if (r.page.pages > 1) { body.appendChild(pagerEl(r.page, function (n) { S.openCats[c.name].page = n; clear(body); loadCat(c, body); })); }
+                if (scrollTo !== undefined) { var t = body.querySelector('tr.di-row[data-i="' + scrollTo + '"]'); if (t) { scrollToEl(t, true); } }
+            });
+        }
+
+        // ---------- jump to the next question ----------
+        function jumpNext() {
+            if (!S.R || !S.R.results) { return; }
+            var rows = Array.prototype.slice.call(S.R.results.querySelectorAll('tr.di-row[data-open="1"]'));
+            var off = stickyOffset() + 40;
+            var nxt = null;
+            for (var i = 0; i < rows.length; i++) { if (rows[i].getBoundingClientRect().top > off) { nxt = rows[i]; break; } }
+            if (nxt) { scrollToEl(nxt, true); return; }
+            var st = statusList(), ec = S.sum.entry_counts || {};
+            var todo = (ec['needs-answer'] || 0) + (ec.blocked || 0);
+            if (!todo) { msg('Nothing is waiting for an answer.', 'ok'); return; }
+            var wantsTodo = st.length === 0 || st.indexOf('needs-answer') >= 0 || st.indexOf('blocked') >= 0;
+            if (!wantsTodo) { S.f.status = null; S.f.page = 1; msg('Showing only the items that need an answer.', 'ok'); reload({ then: function () { jumpNext(); } }); return; }
+            if (S.f.view === 'cat') {
+                var fc = (S.page && S.page.facets) || S.facets, cats = (fc && fc.cat) || [];
+                var cand = cats.filter(function (c) { return c.needs + c.blocked > 0 && !S.openCats[c.name]; })[0];
+                if (cand) { S.openCats[cand.name] = { page: 1 }; paintCats({ scrollTo: undefined }); window.setTimeout(function () { jumpNext(); }, 700); return; }
+                msg('There are no more items that need an answer in the categories shown.', 'ok');
+                return;
+            }
+            var no = S.page && S.page.next_open;
+            if (no) { S.f.page = no.page; reload({ facets: false, scrollTo: no.i }); return; }
+            if (S.page && S.page.page > 1) { S.f.page = 1; msg('That was the last one on the list. Starting again from the top.', 'ok'); reload({ facets: false, then: function () { var f = S.R.results.querySelector('tr.di-row[data-open="1"]'); if (f) { scrollToEl(f, true); } } }); return; }
+            msg('There are no more items that need an answer below this point.', 'ok');
+        }
+        if (window.__diKeys) { document.removeEventListener('keydown', window.__diKeys); }
+        window.__diKeys = function (e) {
+            if (e.defaultPrevented || e.ctrlKey || e.metaKey || e.altKey || (e.key !== 'n' && e.key !== 'N')) { return; }
+            var t = e.target, tag = t && t.tagName ? t.tagName.toUpperCase() : '';
+            if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || (t && t.isContentEditable)) { return; }
+            if (S.step !== 3 || !panels[3] || panels[3].hidden || !document.body.contains(panels[3])) { return; }
+            if (document.body.classList.contains('modal-open')) { return; }       // a confirm box is open: the key is not for the list
+            e.preventDefault(); jumpNext();
+        };
+        document.addEventListener('keydown', window.__diKeys);
+        // while the bar is pinned to the top it drops its helper lines, so it does not cover the list (they show again at rest)
+        if (window.__diScroll) { window.removeEventListener('scroll', window.__diScroll); }
+        window.__diScroll = function () {
+            var b = S.R && S.R.bar, w = S.R && S.R.barWrap;
+            if (!b || !w || !document.body.contains(w) || panels[3].hidden) { return; }
+            var off = headerBottom(), wr = w.getBoundingClientRect();
+            var stick = wr.top <= off + 2 && S.R.results.getBoundingClientRect().bottom > off + 220;
+            if (stick && !b.classList.contains('is-stuck')) { w.style.height = b.offsetHeight + 'px'; b.classList.add('is-stuck'); w.style.height = b.offsetHeight + 'px'; }
+            if (!stick && b.classList.contains('is-stuck')) { b.classList.remove('is-stuck'); w.style.height = ''; b.style.top = ''; b.style.left = ''; b.style.width = ''; b.style.maxHeight = ''; }
+            if (stick) { b.style.top = off + 'px'; b.style.left = wr.left + 'px'; b.style.width = wr.width + 'px'; b.style.maxHeight = Math.max(160, window.innerHeight - off - 16) + 'px'; S.R.stuckH = b.offsetHeight; }
+        };
+        window.addEventListener('scroll', window.__diScroll, { passive: true });
+        window.addEventListener('resize', window.__diScroll);
+        // the admin sidebar collapsing / opening moves the page sideways without a scroll or resize event: follow the bar's own place holder
+        function watchBar() {
+            if (window.__diRO) { window.__diRO.disconnect(); window.__diRO = null; }
+            if (window.ResizeObserver && S.R && S.R.barWrap) {
+                window.__diRO = new window.ResizeObserver(function () { if (window.__diScroll) { window.__diScroll(); } });
+                window.__diRO.observe(S.R.barWrap);
+            }
+        }
+
+        // ---------- bulk answers ----------
+        function paintBulk() {
+            var box = clear(S.R.bulk), groups = (S.page && S.page.bulk) || [];
+            box.hidden = !groups.length;
+            if (!groups.length) { S.bulkSel = null; return; }
+            var sel = S.bulkSel && groups.filter(function (g) { return g.type + '|' + g.sig === S.bulkSel.gk; })[0] ? S.bulkSel : { gk: groups[0].type + '|' + groups[0].sig, role: '' };
+            S.bulkSel = sel;
+            var g = groups.filter(function (x) { return x.type + '|' + x.sig === sel.gk; })[0];
+            add(box, h('h4', 'di-h4', 'Answer many at once'),
+                helpLine('Give one answer to every question of the same kind in the list you are looking at (all pages). You see how many, and some names, before anything is saved.'));
+            var row = h('div', 'di-bulk-row');
+            var gs = mkSelect('diBulkG', 'Which questions');
+            fillSelect(gs, groups.map(function (x) { return [x.type + '|' + x.sig, (TYPE_LABEL[x.type] || x.type) + ' (' + num(x.n, 0) + ' questions)']; }), sel.gk);
+            gs.addEventListener('change', function () { S.bulkSel = { gk: gs.value, role: '' }; paintBulk(); });
+            var as = mkSelect('diBulkA', 'Answer for all of them');
+            fillSelect(as, [['', 'Choose an answer…']].concat(g.answers.map(function (a) { return [a.role, a.label]; })), sel.role);
+            as.addEventListener('change', function () { S.bulkSel.role = as.value; go.disabled = !as.value; });
+            var go = h('button', 'btn-primary di-btn', 'Check and apply…'); go.type = 'button'; go.disabled = !sel.role;
+            go.addEventListener('click', function () { bulkPreview(g, S.bulkSel.role, box, go); });
+            add(row, ctl('Which questions', gs, 'The kind of question to answer. ' + num(g.n, 0) + ' are waiting in this list.'), ctl('Answer for all of them', as, 'Only answers that every one of these questions accepts are offered.'), go);
+            box.appendChild(row);
+        }
+        // What the confirm button says it will do (client wording only; the answer itself is still the server's role key).
+        var BULK_VERB = { 'skip': 'Skip', 'use-suggestion': 'Use the suggested match for', 'file': 'Keep the file price for', 'current': 'Keep the current price for', 'keep': 'Keep as written for' };
+        function bulkVerb(role, n) { return (BULK_VERB[role] || 'Apply to') + ' ' + num(n, 0) + ' row' + (n === 1 ? '' : 's'); }
+        function shortName(t) { t = String(t); return t.length > 60 ? t.slice(0, 59) + '…' : t; }
+        function bulkReasons(o) { return Object.keys(o || {}).map(function (k) { return k + ' (' + o[k] + ')'; }).join('; '); }
+        function bulkPreview(g, role, box, trigger) {
+            trigger.disabled = true;
+            post('bulk', Object.assign(fpayload({ job: S.job }), { btype: g.type, sig: g.sig, role: role, dry: '1' })).then(function (r) {
+                trigger.disabled = !S.bulkSel || !S.bulkSel.role;
+                if (!r.ok) { msg(r.error || 'Could not check the list.'); return; }
+                if (!(r.would_apply > 0)) {
+                    msg('None of the ' + num(r.n, 0) + ' questions can take “' + r.label + '”' + (r.would_refuse > 0 ? ': ' + bulkReasons(r.reasons) : '') + '. Nothing was changed.');
+                    return;
+                }
+                var samples = (r.samples || []).slice(0, 5).map(shortName);
+                var details = samples.slice();
+                if (r.n > samples.length) { details.push('… and ' + num(r.n - samples.length, 0) + ' more'); }
+                if (r.would_refuse > 0) { details.push(num(r.would_refuse, 0) + ' of them cannot take this answer and stay as they are: ' + bulkReasons(r.reasons)); }
+                var count = num(r.would_apply, 0) + ' question' + (r.would_apply === 1 ? '' : 's');
+                var text = 'Apply “' + r.label + '” to ' + count + ' in the list you are looking at, on every page. It cannot be undone in one step: to change your mind, change the answers one at a time.';
+                var confirmText = bulkVerb(role, r.would_apply);
+                var ask;
+                if (window.AdminConfirm && typeof window.AdminConfirm.request === 'function') {
+                    ask = window.AdminConfirm.request({ title: 'Answer ' + count + ' at once?', message: text, details: details, confirmText: confirmText, tone: 'warning', icon: 'fa-clipboard-check' });
+                    // this cannot be undone in one step, so the safe button gets the focus (the box itself starts on the confirm button)
+                    window.setTimeout(function () { var c = document.querySelector('#adminConfirmModal .admin-confirm-actions [data-admin-confirm-cancel]'); if (c) { c.focus(); } }, 120);
+                } else {
+                    ask = Promise.resolve(window.confirm(confirmText + '?\n\n' + text + '\n\n' + (r.samples || []).slice(0, 5).join('\n')));
+                }
+                ask.then(function (yes) {
+                    if (!yes) { if (document.body.contains(trigger)) { trigger.focus(); } return; }
+                    trigger.disabled = true; trigger.textContent = 'Applying…';
+                    var y = window.pageYOffset;
+                    post('bulk', Object.assign(fpayload({ job: S.job }), { btype: g.type, sig: g.sig, role: role, fingerprint: r.fingerprint })).then(function (a) {
+                        if (!a.ok) { trigger.disabled = false; trigger.textContent = 'Check and apply…'; msg(a.error || 'Nothing was applied.'); if (document.body.contains(trigger)) { trigger.focus(); } return; }
+                        S.bulkSel = null;
+                        msg('Applied ' + num(a.applied, 0) + ', refused ' + num(a.refused, 0) + (a.refused ? ': ' + bulkReasons(a.reasons) : '') + '.', a.refused ? 'error' : 'ok');
+                        if (a.summary && a.summary.ok) { S.sum = Object.assign(S.sum, a.summary); delete S.sum.page; absorb(a.summary); paintAll({}); window.scrollTo({ top: y }); }
+                        else { reload(); }
+                        if (S.f.view === 'cat') { reload(); }
+                        var nx = document.getElementById('diBulkG') || S.R.jump;
+                        if (nx && !nx.disabled) { try { nx.focus({ preventScroll: true }); } catch (e) { /* ignore */ } }
+                    });
+                });
+            });
+        }
+
+        // ---------- rows ----------
         var HEADS = [
             ['Item', 'The stock item name, exactly as written in your file.'],
             ['Category', 'The heading the item sits under, or the sheet name if there was none.'],
@@ -580,24 +1035,53 @@
             ['What happens', 'Whether a new ingredient is created or an existing one is matched.'],
             ['Status', 'Ready, needs an answer, skipped or blocked. The grey tag under a value is the cell it came from.']
         ];
-        function itemsTable(rows) {
+        function entriesTable(entries, shown) {
             var wrap = h('div', 'di-tablewrap');
             var tb = h('table', 'di-table di-items');
             var thead = h('thead'), tr = h('tr');
             HEADS.forEach(function (c) { var th = h('th'); add(th, h('span', null, c[0]), h('small', 'di-th-help', c[1])); tr.appendChild(th); });
             thead.appendChild(tr); tb.appendChild(thead);
             var body = h('tbody');
-            rows.forEach(function (e) {
+            entries.forEach(function (e) {
                 var rows2 = e.kind === 'item' ? itemRows(e) : plainRow(e);
                 rows2.forEach(function (r) { body.appendChild(r); });
+                var q = qRow(e, shown);
+                if (q) { body.appendChild(q); }
             });
             tb.appendChild(body); wrap.appendChild(tb);
             return wrap;
         }
+        /** An item name: two lines at most, the whole name in the tooltip. */
+        function itemNameEl(text) { var s = h('strong', 'di-name', text); s.title = text; return s; }
         function cell(label, cls) { var td = h('td', cls || ''); td.setAttribute('data-label', label); return td; }
+        function rowAttrs(r, e) {
+            r.setAttribute('data-i', e.i);
+            if (e.status === 'needs-answer' || e.status === 'blocked') { r.setAttribute('data-open', '1'); }
+        }
+        function qRow(e, shown) {
+            var qs = e.qs || [];
+            if (!qs.length && !e.wait_sheet) { return null; }
+            var tr = h('tr', 'di-row di-row--detail di-row--q');
+            var td = h('td'); td.colSpan = 8;
+            var open = qs.filter(isOpenQ), done = qs.filter(function (q) { return !isOpenQ(q); });
+            open.forEach(function (q) {
+                if (shown[q.id]) { td.appendChild(h('p', 'di-q-note', 'The question "' + q.text.slice(0, 90) + (q.text.length > 90 ? '…' : '') + '" covers this item too: it is answered once, above.')); return; }
+                shown[q.id] = true; td.appendChild(questionCard(q));
+            });
+            if (e.wait_sheet && !open.length) { td.appendChild(h('p', 'di-q-note', 'This item is waiting for the question about the whole sheet (see "Questions for a whole sheet" above the list).')); }
+            if (done.length) {
+                var d = h('details', 'di-details');
+                d.appendChild(h('summary', null, 'Your answers on this item (' + done.length + ')'));
+                done.forEach(function (q) { if (!shown[q.id]) { shown[q.id] = true; d.appendChild(questionCard(q)); } });
+                td.appendChild(d);
+            }
+            tr.appendChild(td);
+            return tr;
+        }
         function plainRow(e) {
             var r = h('tr', 'di-row di-row--' + e.status);
-            var t1 = cell('Item'); add(t1, h('strong', null, e.r.name || '(no name)'), h('br'), src(e.r.ref));
+            rowAttrs(r, e);
+            var t1 = cell('Item'); add(t1, itemNameEl(e.r.name || '(no name)'), src(e.r.ref));
             var t2 = cell('Category', 'di-mute'); t2.textContent = '—';
             var t3 = cell('Unit', 'di-mute'); t3.textContent = '—';
             var t4 = cell('Opening stock', 'di-mute'); t4.textContent = '—';
@@ -612,8 +1096,9 @@
         function itemRows(e) {
             var it = e.it, out = [];
             var r = h('tr', 'di-row di-row--' + e.status);
+            rowAttrs(r, e);
             var t1 = cell('Item');
-            add(t1, h('strong', null, it.name));
+            add(t1, itemNameEl(it.name));
             if (it.match && it.typed_name && it.typed_name !== it.name) { add(t1, h('div', 'di-small', 'Written in file as: ' + it.typed_name)); }
             add(t1, h('div', 'di-capline'), src(it.name_source));
             if ((it.rows || []).length > 1) { t1.appendChild(h('div', 'di-small', 'Built from ' + it.rows.length + ' rows (' + it.rows.join(', ') + ')')); }
@@ -636,7 +1121,7 @@
             add(t6, h('span', null, it.max === null || it.max === undefined ? '—' : num(it.max)), h('div', 'di-capline'), it.max_source ? src(it.max_source) : null);
             var t7 = cell('What happens');
             if (it.match) {
-                add(t7, h('span', null, 'Matches existing: '), h('strong', null, it.match.name),
+                add(t7, h('span', null, 'Matches existing: '), itemNameEl(it.match.name),
                     h('div', 'di-small', it.match.how === 'chosen' ? 'You chose this match.' : (it.match.how === 'learned' ? 'Remembered from an earlier import.' : 'Same name as an ingredient already in stock.')));
                 if (it.match.archived) { t7.appendChild(h('div', 'di-small', 'That ingredient is archived.')); }
             } else {
@@ -646,16 +1131,6 @@
             var t8 = cell('Status');
             t8.appendChild(pill(e.status));
             (it.warnings || []).forEach(function (w) { t8.appendChild(h('div', 'di-warnline', w)); });
-            var linked = false;
-            (e.qs || []).forEach(function (q) {
-                var unanswered = q.answer === null || q.answer === undefined || q.answer === '';
-                if (!unanswered || !q.blocking || linked) { return; }
-                linked = true;
-                var a = h('button', 'di-qlink', 'Answer the question');
-                a.type = 'button';
-                a.addEventListener('click', function () { var t = document.getElementById('diq-' + q.id); if (t) { scrollTo(t); t.classList.add('is-flash'); window.setTimeout(function () { t.classList.remove('is-flash'); }, 1600); } });
-                t8.appendChild(a);
-            });
             add(r, t1, t2, t3, t4, t5, t6, t7, t8);
             out.push(r);
             var dk = it.diff && !Array.isArray(it.diff) ? Object.keys(it.diff) : [];
@@ -680,7 +1155,7 @@
                 cb.addEventListener('change', function () {
                     boxes.forEach(function (b) { b.disabled = true; });
                     var picked = boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; });
-                    S.chain = S.chain.then(function () { return post('fields', { job: S.job, key: it.update_key, fields: picked }); }).then(function (r) {
+                    S.chain = S.chain.then(function () { return post('fields', Object.assign({ job: S.job, key: it.update_key, fields: picked }, pagedExtra())); }).then(function (r) {
                         if (!r.ok) { msg(r.error || 'That choice could not be saved.'); boxes.forEach(function (b) { b.disabled = false; }); return; }
                         refresh(r.summary);
                     });
@@ -689,28 +1164,26 @@
             td.appendChild(box); tr.appendChild(td);
             return tr;
         }
+        /** A change on the list (an answer, a ticked field) comes back with the refreshed page of a list view; the category view reloads itself. */
+        function pagedExtra() {
+            return (S.step === 3 && S.f.view === 'list' && S.R && S.R.results) ? fpayload({ paged: '1', facets: '1' }) : {};
+        }
 
         // ---------- step 4: confirm ----------
         function renderConfirm() {
             var p = clear(panels[4]);
             var s = S.sum;
-            var items = s.items;
-            var ready = items.filter(function (i) { return i.status === 'ready'; });
-            var creates = ready.filter(function (i) { return !i.match; });
-            var updates = ready.filter(function (i) { return i.match && (i.ticked || []).length; });
-            var kept = ready.filter(function (i) { return i.match && !(i.ticked || []).length; });
-            var inCount = ready.filter(function (i) { return i.in_count; });
-            var noPrice = ready.filter(function (i) { return !i.in_count && i.balance; });
-            var list = reviewList(), c = counts(list);
-            var toAnswer = (c['needs-answer'] || 0) + (c.blocked || 0);
+            var cf = s.confirm || {};          // worked out on the server over the whole file (the browser never holds every item)
+            var c = { skipped: cf.skipped || 0 };
+            var toAnswer = cf.to_answer || 0;
             add(p, h('h3', 'di-h', 'Step 4 · Confirm'));
             add(p, helpLine('Last check. These are the numbers for the whole file. Importing is one all-or-nothing step: if anything goes wrong, nothing is saved.'));
             var cards = h('div', 'di-cards');
             add(cards,
-                card('New ingredients', num(creates.length, 0), 'Items not in your stock yet. They will be created.', 'good'),
-                card('Existing items updated', num(updates.length, 0), 'Existing items where you ticked a field to change.'),
-                card('Existing items left as they are', num(kept.length, 0), 'Matched to an ingredient already in stock, with nothing ticked.'),
-                card('Lines in the opening count', num(inCount.length, 0), 'Items with stock and a price. They go into one opening count that another manager must approve.'),
+                card('New ingredients', num(cf.creates || 0, 0), 'Items not in your stock yet. They will be created.', 'good'),
+                card('Existing items updated', num(cf.updates || 0, 0), 'Existing items where you ticked a field to change.'),
+                card('Existing items left as they are', num(cf.kept || 0, 0), 'Matched to an ingredient already in stock, with nothing ticked.'),
+                card('Lines in the opening count', num(cf.in_count || 0, 0), 'Items with stock and a price. They go into one opening count that another manager must approve.'),
                 card('Rows skipped', num(c.skipped || 0, 0), 'Rows you chose to skip, or that are not items. They are not imported.'),
                 card('Still need an answer', num(toAnswer, 0), 'Questions or blocked rows to sort out before you can confirm.', toAnswer ? 'bad' : 'good'));
             p.appendChild(cards);
@@ -724,11 +1197,12 @@
                 'The copy of your file on the server is deleted afterwards.'
             ].forEach(function (t) { ul.appendChild(h('li', null, t)); });
             what.appendChild(ul);
-            var costWithStock = ready.filter(function (i) { return i.match && i.cost_stock_warning; });
-            if (costWithStock.length) {
-                what.appendChild(h('p', 'di-warn', num(costWithStock.length, 0) + ' cost change' + (costWithStock.length === 1 ? ' affects an item that already has' : 's affect items that already have') + ' stock. Their recipe costs and stock value change as soon as you confirm, before the opening count is approved: ' + costWithStock.map(function (i) { return i.match.name; }).join(', ') + '.'));
+            var cws = cf.cost_with_stock || 0, cwsNames = cf.cost_with_stock_names || [];
+            if (cws) {
+                what.appendChild(h('p', 'di-warn', num(cws, 0) + ' cost change' + (cws === 1 ? ' affects an item that already has' : 's affect items that already have') + ' stock. Their recipe costs and stock value change as soon as you confirm, before the opening count is approved: ' + cwsNames.join(', ') + (cws > cwsNames.length ? ' and ' + num(cws - cwsNames.length, 0) + ' more' : '') + '.'));
             }
-            if (noPrice.length) { what.appendChild(h('p', 'di-warn', num(noPrice.length, 0) + ' item' + (noPrice.length === 1 ? ' has' : 's have') + ' stock but no price in the file. They are created without a cost and their stock is left out of the opening count. Add the cost later.')); }
+            var noPriceN = cf.no_price || 0;
+            if (noPriceN) { what.appendChild(h('p', 'di-warn', num(noPriceN, 0) + ' item' + (noPriceN === 1 ? ' has' : 's have') + ' stock but no price in the file. They are created without a cost and their stock is left out of the opening count. Add the cost later.')); }
             p.appendChild(what);
             var why = h('p', 'di-why');
             var btn = h('button', 'btn-primary di-btn di-confirm');
@@ -782,7 +1256,16 @@
                 d.appendChild(ul); p.appendChild(d);
             }
             if (r.left_out_overlap) { p.appendChild(h('p', 'di-small', num(r.left_out_overlap, 0) + ' stock line(s) were left out of the count because those ingredients are already in another opening count that is waiting for approval.')); }
-            var nav = h('div', 'di-actions');
+            var nav = h('div', 'di-actions di-actions--grid');
+            /* EXPORT-BUTTON-SPOT: Part B adds its one export button to this row (Result step). Part A (Step 3 review) leaves this row alone. */
+            var xb = h('button', 'btn-secondary di-btn', 'Download the updated stock workbook'); xb.type = 'button';
+            xb.title = 'An Excel workbook of the stock as it is right now, one tab per category. Stock from this import appears once its opening count is approved.';
+            xb.addEventListener('click', function () {
+                var f = document.createElement('form'); f.method = 'post'; f.action = page;
+                [['action', 'export'], ['scope', 'all'], ['csrf_token', csrf]].forEach(function (kv) { var i = document.createElement('input'); i.type = 'hidden'; i.name = kv[0]; i.value = kv[1]; f.appendChild(i); });
+                document.body.appendChild(f); f.submit(); document.body.removeChild(f);
+            });
+            nav.appendChild(xb);
             if (r.opening_count_id) {
                 var a = h('a', 'btn-primary di-btn', 'Open the opening count' + (r.opening_count_ref ? ' (' + r.opening_count_ref + ')' : ''));
                 a.href = 'stock-count.php?id=' + encodeURIComponent(r.opening_count_id);
@@ -793,13 +1276,14 @@
             again.addEventListener('click', function () { S.job = 0; S.sum = null; S.result = null; S.reach = 1; setUrl(0); showStep(1); });
             add(nav, b, again);
             p.appendChild(nav);
+            p.appendChild(helpLine('The workbook button gives you an Excel file of your stock as it is right now, one tab per category. Stock from this import shows in it once its opening count is approved.'));
         }
 
         // ---------- start ----------
         showStep(1);
         loadMine();
         var start = Number(root.getAttribute('data-job')) || 0;
-        if (start > 0) { loadJob(start); }
+        if (start > 0) { loadJob(start, 0, true); }
     }
 
     window.rhDataImport = { init: init };

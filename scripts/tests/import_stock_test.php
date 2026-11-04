@@ -95,5 +95,29 @@ ok('F8: a wrong CSRF token is refused', empty($r['json']['success']));
 $r = $runPage('admin/module-settings.php', ['method' => 'GET', 'grep' => ['id="ms-toggle-data_import"', 'Data Import: on/off', 'Administrators and managers get it by default']]);
 ok('F8: Module Settings shows the "Data Import: on/off" switch with its plain helper line', !empty($r['found']['id="ms-toggle-data_import"']) && !empty($r['found']['Data Import: on/off']) && !empty($r['found']['Administrators and managers get it by default']), json_encode($r['found'] ?? $r));
 
+
+// Step 3 paging / bulk endpoints: the same gates as every other action (job ownership, switch, CSRF). Each call rolls back.
+$mgrName = (string)$pdo->query("SELECT username FROM admin_users WHERE is_active = 1 AND role = 'manager' ORDER BY id LIMIT 1")->fetchColumn();
+$jobSetup = ["INSERT INTO site_settings (setting_key, setting_value, setting_group) VALUES ('data_import_enabled', '1', 'import') ON DUPLICATE KEY UPDATE setting_value = '1'",
+    "INSERT INTO import_jobs (target, original_name, stored_path, sha256, size_bytes, status, created_by) SELECT 'stock', 'zzt-perm-$run.csv', NULL, REPEAT('0', 64), 1, 'analysed', id FROM admin_users WHERE role = 'admin' AND is_active = 1 ORDER BY id LIMIT 1"];
+// di_json() clears every output buffer before it prints, so the harness cannot capture the reply: read the JSON line the page wrote to stdout
+$runRaw = function (array $cfg) use ($root, $clean) {
+    $out = (string)shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($root . '/scripts/tests/page_harness.php') . ' admin/data-import.php ' . escapeshellarg(base64_encode(json_encode($cfg))) . ' 2>&1');
+    $res = preg_match('/@@RESULT@@(.*)$/m', $out, $m) ? (json_decode($m[1], true) ?: []) : [];
+    $json = preg_match('/^\{"ok".*\}\s*$/m', preg_replace('/@@RESULT@@.*$/m', '', $out), $j) ? json_decode(trim($j[0]), true) : null;
+    return ['json' => $json, 'clean' => $clean($res), 'raw' => substr($out, 0, 300)];
+};
+if ($mgrName !== '') {
+    foreach (['review_page' => ['facets' => '1'], 'bulk' => ['btype' => 'case-price', 'sig' => 'per-unit', 'role' => 'per-unit', 'dry' => '1'], 'answer' => ['question' => 'x', 'answer' => 'skip']] as $act => $extra) {
+        $r = $runRaw(['post' => ['action' => $act, 'job' => '{jid}'] + $extra, 'as_username' => $mgrName, 'setup' => $jobSetup, 'vars' => ['jid' => 'SELECT MAX(id) FROM import_jobs']]);
+        ok("ownership: a manager cannot use '$act' on a job an administrator uploaded (not found, nothing read)", isset($r['json']['ok']) && $r['json']['ok'] === false && stripos((string)($r['json']['error'] ?? ''), 'not found') !== false && $r['clean'], json_encode($r['json'] ?? $r['raw']));
+    }
+    $r = $runRaw(['post' => ['action' => 'review_page', 'job' => '{jid}'], 'setup' => $jobSetup, 'vars' => ['jid' => 'SELECT MAX(id) FROM import_jobs']]);
+    ok('ownership: the administrator gets past the gate on that job (it only says the import cannot be reviewed: no analysis stored)', isset($r['json']['ok']) && $r['json']['ok'] === false && stripos((string)($r['json']['error'] ?? ''), 'not found') === false, json_encode($r['json'] ?? $r['raw']));
+    $r = $runRaw(['post' => ['action' => 'review_page', 'job' => '{jid}', 'csrf_token' => 'wrong'], 'setup' => $jobSetup, 'vars' => ['jid' => 'SELECT MAX(id) FROM import_jobs']]);
+    ok('security: review_page with a wrong CSRF token is refused', isset($r['json']['ok']) && $r['json']['ok'] === false && stripos((string)($r['json']['error'] ?? ''), 'expired') !== false, json_encode($r['json'] ?? $r['raw']));
+} else {
+    echo "SKIP Step 3 endpoint ownership checks (no active manager user in this database)\n";
+}
 echo "\n$pass passed, $fail failed\n";
 exit($fail ? 1 : 0);

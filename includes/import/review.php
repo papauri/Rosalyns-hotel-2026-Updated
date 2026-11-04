@@ -37,6 +37,50 @@ if (!function_exists('import_job_analyse')) {
         return json_encode($v, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
     }
 
+    /**
+     * The same text as import_json(), written piece by piece (the analysis, each sheet, each row) to a temporary stream and read back once:
+     * json_encode of one huge array grows its buffer by doubling, which on a 20,000-row analysis is a 28 MB spike on top of everything else,
+     * and collecting the pieces in an array is worse (thousands of small strings). $depth > 3 = encode the rest in one go (a row).
+     */
+    function import_json_pieces($v): string
+    {
+        $fh = fopen('php://temp/maxmemory:1048576', 'w+b');
+        import_json_write($fh, $v, 0);
+        rewind($fh);
+        $out = (string)stream_get_contents($fh);
+        fclose($fh);
+        return $out;
+    }
+
+    function import_json_write($fh, $v, int $depth): void
+    {
+        $flags = JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE;
+        if (!is_array($v) || $depth > 3 || !$v) {
+            fwrite($fh, json_encode($v, $flags));
+            return;
+        }
+        $isList = true;
+        $n = 0;
+        foreach ($v as $k => $_) {
+            if ($k !== $n++) {
+                $isList = false;
+                break;
+            }
+        }
+        $first = true;
+        fwrite($fh, $isList ? '[' : '{');
+        foreach ($v as $k => $x) {
+            if (!$first) {
+                fwrite($fh, ',');
+            }
+            $first = false;
+            if (!$isList) {
+                fwrite($fh, json_encode((string)$k, $flags) . ':');
+            }
+            import_json_write($fh, $x, $depth + 1);
+        }
+        fwrite($fh, $isList ? ']' : '}');
+    }
     function import_job_get(PDO $pdo, int $jobId): ?array
     {
         $st = $pdo->prepare('SELECT * FROM import_jobs WHERE id = ?');
@@ -184,12 +228,28 @@ if (!function_exists('import_job_analyse')) {
         return in_array($ext, ['xlsx', 'xlsm'], true) ? import_xlsx_read($path, false, []) : import_csv_read($path, basename($origName), []);
     }
 
+    /** End a job that cannot be read: status failed with the plain reason, the staged file deleted (nothing half-made is left behind). */
+    function import_job_fail(PDO $pdo, array $job, string $message): array
+    {
+        $pdo->prepare("UPDATE import_jobs SET status = 'failed', error_text = ?, stored_path = NULL WHERE id = ?")->execute([mb_substr($message, 0, 500), (int)$job['id']]);
+        if (!empty($job['stored_path'])) {
+            import_delete_stored((string)$job['stored_path']);
+        }
+        return ['ok' => false, 'error' => $message];
+    }
+
     /**
      * Run the engine on the stored file and keep the result on the job. Safe to call again (re-analysis keeps the answers).
      * Returns ['ok'=>bool,'error'=>string].
+     *
+     * Before any work the file is measured against this server's memory_limit / max_execution_time (memory.php): a file that cannot fit ends as a
+     * failed job with a plain "split it into files of about N rows" text, never as a fatal error. A "Reading..." marker is kept in error_text while
+     * the engine runs, so a request that died (killed, timed out) is recognised later instead of leaving a job stuck: a fatal error is caught by the
+     * shutdown handler; a hard kill is cleaned up by the staleness check below. $o['mem'] = test overrides for import_mem_check().
      */
-    function import_job_analyse(PDO $pdo, int $jobId): array
+    function import_job_analyse(PDO $pdo, int $jobId, array $o = []): array
     {
+        require_once __DIR__ . '/memory.php';
         $job = import_job_get($pdo, $jobId);
         if (!$job) {
             return ['ok' => false, 'error' => 'That import was not found.'];
@@ -201,32 +261,99 @@ if (!function_exists('import_job_analyse')) {
         if ($path === '') {
             return ['ok' => false, 'error' => 'The uploaded file is no longer on the server. Please upload it again.'];
         }
+        $marker = (string)($job['error_text'] ?? '');
+        if (strpos($marker, 'Reading') === 0) {
+            $since = strtotime((string)substr($marker, strpos($marker, 'since ') !== false ? strpos($marker, 'since ') + 6 : 0));
+            if ($since && time() - $since < 600) {
+                return ['ok' => false, 'error' => 'This file is still being read. Wait a minute and reload the page.'];
+            }
+            return import_job_fail($pdo, $job, 'Reading this file did not finish the last time (the server ran out of memory or time). Split it into smaller files (by sheet or category) and import them one after another.');
+        }
         $ctx = import_job_ctx($pdo);
         $eng = import_job_engine_opts($pdo, import_job_answers($job), $ctx);
+        unset($job['analysis_json']);          // the old analysis text (large) is not needed to analyse again
+        $chk = import_mem_check($path, (string)$job['original_name'], $eng['aliases'], (array)($o['mem'] ?? []));
+        if (!$chk['ok']) {
+            return import_job_fail($pdo, $job, $chk['message']);
+        }
+        $pdo->prepare('UPDATE import_jobs SET error_text = ? WHERE id = ?')->execute(['Reading... since ' . date('Y-m-d H:i:s'), $jobId]);
+        $finished = false;
+        $reserve = str_repeat('x', 262144);     // freed in the handler so there is room to write the failure down after "out of memory"
+        register_shutdown_function(function () use (&$finished, &$reserve, $pdo, $job, $chk) {
+            if ($finished) {
+                return;
+            }
+            $reserve = null;
+            $e = error_get_last();
+            if (!$e || !in_array($e['type'], [E_ERROR, E_CORE_ERROR, E_COMPILE_ERROR], true)) {
+                return;
+            }
+            try {
+                $rows = (int)($chk['rows'] ?? 0);
+                $fit = $rows > 0 ? import_mem_rows_that_fit($rows, 2, 1) : 0;
+                $why = stripos($e['message'], 'memory') !== false ? 'ran out of memory' : (stripos($e['message'], 'execution time') !== false ? 'ran out of time' : 'stopped');
+                import_job_fail($pdo, $job, 'The server ' . $why . ' while reading this file.' . ($fit > 0 ? ' ' . import_mem_message($rows, $fit) : ' Split it into smaller files (by sheet or category) and import them one after another.'));
+            } catch (Throwable $x) {
+                // nothing more can be done at shutdown; the staleness check handles it on the next visit
+            }
+        });
         $analysis = import_analyze_file($path, (string)$job['original_name'], $eng['aliases'], $eng['opts']);
         if (empty($analysis['ok'])) {
+            $finished = true;
             $pdo->prepare("UPDATE import_jobs SET status = 'failed', error_text = ? WHERE id = ?")->execute([mb_substr((string)$analysis['error'], 0, 500), $jobId]);
             return ['ok' => false, 'error' => (string)$analysis['error']];
         }
+        $json = import_json_pieces($analysis);
+        unset($analysis);
         $pdo->prepare("UPDATE import_jobs SET analysis_json = ?, status = IF(status = 'uploaded', 'analysed', status), error_text = NULL WHERE id = ?")
-            ->execute([import_json($analysis), $jobId]);
+            ->execute([$json, $jobId]);
+        $finished = true;
         return ['ok' => true, 'error' => ''];
     }
-
     /** [job, analysis, answers, ctx, resolved] for a job that has been analysed; null when it cannot be reviewed. */
     function import_job_state(PDO $pdo, int $jobId): ?array
     {
+        static $memo = [];
         $job = import_job_get($pdo, $jobId);
         if (!$job || $job['analysis_json'] === null || $job['analysis_json'] === '') {
             return null;
+        }
+        $mkey = import_job_state_memo() ? $jobId . '|' . md5((string)$job['analysis_json']) . '|' . md5((string)$job['answers_json']) . '|' . $job['status'] : '';
+        if ($mkey !== '' && isset($memo[$mkey])) {
+            return $memo[$mkey];
         }
         $analysis = json_decode((string)$job['analysis_json'], true);
         if (!is_array($analysis)) {
             return null;
         }
+        // Memory: the stored text (3.5 MB per 5,000 rows) is dropped once decoded, and the decoded analysis has ONE owner (the state) so the
+        // answers are written into it directly instead of into a second copy.
+        $job['analysis_json'] = null;
         $answers = import_job_answers($job);
         $ctx = import_job_ctx($pdo);
-        return ['job' => $job, 'analysis' => $analysis, 'answers' => $answers, 'ctx' => $ctx, 'res' => import_resolve($analysis, $answers, $ctx)];
+        $state = ['job' => $job, 'analysis' => $analysis, 'answers' => $answers, 'ctx' => $ctx, 'res' => null];
+        unset($analysis);
+        $state['row_src'] = import_review_row_sources($state['analysis']);      // slim copies of the little the screens need from the rows ...
+        $state['uid_cat'] = import_review_uid_categories($state['analysis']);
+        $state['res'] = import_resolve_inplace($state['analysis'], $answers, $ctx, true);     // ... because resolving lets go of the rows themselves
+        if ($mkey !== '') {
+            $memo = [$mkey => $state];          // one picture at a time (a 20,000-row state is large)
+        }
+        return $state;
+    }
+
+    /**
+     * Opt-in per-request memo for import_job_state(): the page (admin/data-import.php) switches it on so one "answer" request resolves the
+     * job twice instead of three times. The key is the job's own stored text (analysis + answers), so a changed answer never hits an old
+     * picture. Off by default: tests and commit change stock data between calls and must always see it.
+     */
+    function import_job_state_memo(?bool $on = null): bool
+    {
+        static $enabled = false;
+        if ($on !== null) {
+            $enabled = $on;
+        }
+        return $enabled;
     }
 
     function import_job_find_question(array $state, string $questionId): ?array
@@ -429,27 +556,39 @@ if (!function_exists('import_job_analyse')) {
         return $s;
     }
 
-    /** Everything the review screen needs. Statuses here are computed now from the stored answers. */
-    function import_job_review_summary(PDO $pdo, int $jobId): array
+    /** uid => where each shown value of that row came from (the proposed value of a row/item always names its source cell). */
+    function import_review_row_sources(array $an): array
     {
-        $state = import_job_state($pdo, $jobId);
-        if (!$state) {
-            $j = import_job_get($pdo, $jobId);
-            return ['ok' => false, 'error' => $j && $j['error_text'] ? (string)$j['error_text'] : 'That import cannot be reviewed.'];
-        }
-        $res = $state['res'];
-        $an = $state['analysis'];
-        // Where each shown value came from (Phase 1b-UI): the proposed value of a row/item always names its source cell.
+        // Slim on purpose (a 20,000-row file keeps one of these per row): only what the screens read - the quantity cells and the par / reorder cells.
         $rowSrc = [];
         foreach ($an['sheets'] as $sh) {
             foreach ($sh['rows'] as $r) {
-                $f = [];
-                foreach ($r['fields'] as $k => $v) {
-                    $f[$k] = ['source' => $v['source'] ?? '', 'how' => $v['how'] ?? ''];
-                }
-                $rowSrc[$r['uid']] = ['fields' => $f, 'qty_sources' => $r['computed']['qty_total']['sources'] ?? [], 'unknown' => array_keys($r['unknown'] ?? [])];
+                // one flat array per row (nested arrays cost about 400 bytes each): [quantity cells, par cell, reorder cell]
+                $rowSrc[$r['uid']] = ['qty_sources' => $r['computed']['qty_total']['sources'] ?? [], 'max' => $r['fields']['max_level']['source'] ?? null, 'min' => $r['fields']['min_level']['source'] ?? null];
             }
         }
+        return $rowSrc;
+    }
+
+    /** uid => the category of that row (its heading, else the sheet name without leading symbols). */
+    function import_review_uid_categories(array $an): array
+    {
+        $uidCat = [];
+        foreach ($an['sheets'] as $sh) {
+            $clean = trim((string)preg_replace('/^[^\p{L}\p{N}]+/u', '', (string)$sh['name']));
+            $clean = mb_substr($clean !== '' ? $clean : (string)$sh['name'], 0, 100);
+            foreach ($sh['rows'] as $r) {
+                $uidCat[$r['uid']] = ($r['category'] !== null && $r['category'] !== '') ? (string)$r['category'] : $clean;
+            }
+        }
+        return $uidCat;
+    }
+
+    /** Every question (file + synthetic) in the shape the screen uses, with the values of a price/unit conflict next to their source cells. */
+    function import_review_question_payloads(array $state): array
+    {
+        $res = $state['res'];
+        $an = $state['analysis'];
         $conflictByUids = [];
         $conflictByQ = [];
         foreach ($an['conflicts'] ?? [] as $c) {
@@ -457,43 +596,6 @@ if (!function_exists('import_job_analyse')) {
             sort($u);
             $conflictByUids[implode('|', $u) . '#' . $c['field']] = $c;
             $conflictByQ[$c['question_id']] = $c;
-        }
-        $existingById = [];
-        foreach ($state['ctx']['existing'] as $e) {
-            $existingById[(int)$e['id']] = $e;
-        }
-        $costIds = [];
-        foreach ($res['items'] as $it) {
-            if ($it['match'] && isset($it['diff']['cost'])) {
-                $costIds[] = (int)$it['match']['id'];
-            }
-        }
-        $batchTotals = import_batch_totals($pdo, $costIds);
-        $items = [];
-        foreach ($res['items'] as $it) {
-            $bal = [];
-            $max = null;
-            $min = null;
-            foreach ($it['uids'] as $uid) {
-                foreach ($rowSrc[$uid]['qty_sources'] ?? [] as $s) {
-                    $bal[] = $s;
-                }
-                $max = $max ?? ($rowSrc[$uid]['fields']['max_level']['source'] ?? null);
-                $min = $min ?? ($rowSrc[$uid]['fields']['min_level']['source'] ?? null);
-            }
-            $it['balance_sources'] = array_values(array_unique($bal));
-            $it['max_source'] = $max;
-            $it['min_source'] = $min;
-            $it['update_key'] = $it['match'] ? rh_ssi_key((string)$it['match']['name']) : null;    // the key import_job_set_update_fields wants
-            $it['on_hand'] = null;
-            $it['cost_stock_warning'] = null;
-            if ($it['match'] && isset($it['diff']['cost'])) {
-                $it['on_hand'] = import_item_on_hand($existingById, $batchTotals, (int)$it['match']['id']);
-                if (in_array('cost', (array)$it['ticked'], true) && $it['on_hand'] && $it['on_hand']['has_stock']) {
-                    $it['cost_stock_warning'] = import_cost_stock_warning((string)$it['match']['name'], $it['on_hand'], $it['diff']['cost'][0], $it['diff']['cost'][1]);
-                }
-            }
-            $items[] = $it;
         }
         $qs = [];
         foreach (array_merge($res['questions'], $res['extra_questions']) as $q) {
@@ -513,8 +615,84 @@ if (!function_exists('import_job_analyse')) {
                 'default' => $q['default'], 'answer' => $q['answer'], 'auto_filled' => !empty($q['auto']), 'row_uids' => $q['row_uids'] ?? [],
                 'suggestion' => $q['suggestion'] ?? null, 'synthetic' => !empty($q['synthetic']),
                 'evidence' => $q['evidence'] ?? null,     // the numbers a price question was judged on (nothing invented), for the screen / read-only helper
+                'conflict_field' => $conflictByQ[$q['id']]['field'] ?? ($q['conflict_field'] ?? null),
             ];
         }
+        return $qs;
+    }
+
+    /** One item with the extras the screen shows (source cells, update key, stock on hand and the cost-on-stock warning). */
+    function import_review_enrich_item(array $it, array $rowSrc, array $existingById, array $batchTotals): array
+    {
+        $bal = [];
+        $max = null;
+        $min = null;
+        foreach ($it['uids'] as $uid) {
+            foreach ($rowSrc[$uid]['qty_sources'] ?? [] as $s) {
+                $bal[] = $s;
+            }
+            $max = $max ?? ($rowSrc[$uid]['max'] ?? null);
+            $min = $min ?? ($rowSrc[$uid]['min'] ?? null);
+        }
+        $it['balance_sources'] = array_values(array_unique($bal));
+        $it['max_source'] = $max;
+        $it['min_source'] = $min;
+        $it['update_key'] = $it['match'] ? rh_ssi_key((string)$it['match']['name']) : null;    // the key import_job_set_update_fields wants
+        $it['on_hand'] = null;
+        $it['cost_stock_warning'] = null;
+        if ($it['match'] && isset($it['diff']['cost'])) {
+            $it['on_hand'] = import_item_on_hand($existingById, $batchTotals, (int)$it['match']['id']);
+            if (in_array('cost', (array)$it['ticked'], true) && $it['on_hand'] && $it['on_hand']['has_stock']) {
+                $it['cost_stock_warning'] = import_cost_stock_warning((string)$it['match']['name'], $it['on_hand'], $it['diff']['cost'][0], $it['diff']['cost'][1]);
+            }
+        }
+        return $it;
+    }
+
+    /** Per-sheet block of the summary (columns, categories, headings and totals that are not items). */
+    function import_review_sheets_payload(array $an): array
+    {
+        return array_map(function ($sh) {
+            return ['name' => $sh['name'], 'action' => $sh['triage']['action'], 'reason' => $sh['triage']['reason'], 'counts' => $sh['counts'],
+                'ignored_columns' => $sh['ignored_columns'], 'unmapped_columns' => $sh['unmapped_columns'],
+                'header_row' => $sh['header_row'] ?? null, 'hidden' => !empty($sh['hidden']), 'categories' => $sh['categories'] ?? [],
+                'columns' => array_map(function ($c) {
+                    return ['letter' => $c['letter'], 'header' => $c['header'], 'ref' => $c['header_ref'], 'field' => $c['field'], 'derived' => !empty($c['derived']),
+                        'state' => $c['state'] ?? '', 'filled' => $c['shape']['filled'] ?? null];
+                }, $sh['columns'] ?? []),
+                'non_item_rows' => array_slice(array_map(function ($r) {
+                    return ['row' => $r['row'], 'kind' => $r['kind'], 'label' => $r['label'], 'source' => $r['source'], 'reason' => $r['reason']];
+                }, $sh['skipped_rows'] ?? []), 0, 300)];
+        }, $an['sheets']);
+    }
+
+    /** Everything the review screen needs. Statuses here are computed now from the stored answers. */
+    function import_job_review_summary(PDO $pdo, int $jobId): array
+    {
+        $state = import_job_state($pdo, $jobId);
+        if (!$state) {
+            $j = import_job_get($pdo, $jobId);
+            return ['ok' => false, 'error' => $j && $j['error_text'] ? (string)$j['error_text'] : 'That import cannot be reviewed.'];
+        }
+        $res = $state['res'];
+        $an = $state['analysis'];
+        $rowSrc = $state['row_src'] ?? import_review_row_sources($an);
+        $existingById = [];
+        foreach ($state['ctx']['existing'] as $e) {
+            $existingById[(int)$e['id']] = $e;
+        }
+        $costIds = [];
+        foreach ($res['items'] as $it) {
+            if ($it['match'] && isset($it['diff']['cost'])) {
+                $costIds[] = (int)$it['match']['id'];
+            }
+        }
+        $batchTotals = import_batch_totals($pdo, $costIds);
+        $items = [];
+        foreach ($res['items'] as $it) {
+            $items[] = import_review_enrich_item($it, $rowSrc, $existingById, $batchTotals);
+        }
+        $qs = import_review_question_payloads($state);
         return [
             'ok' => true, 'job' => [
                 'id' => (int)$state['job']['id'], 'file' => $state['job']['original_name'], 'status' => $state['job']['status'], 'target' => $state['job']['target'],
@@ -522,18 +700,7 @@ if (!function_exists('import_job_analyse')) {
             ],
             'file' => $an['file'], 'warnings' => $an['warnings'] ?? [], 'totals' => $an['totals'] ?? [],
             'counts' => $res['counts'], 'by_sheet' => $res['by_sheet'], 'can_confirm' => $res['can_confirm'], 'why_not' => $res['why_not'],
-            'open_sheet_questions' => $res['open_sheet_questions'], 'sheets' => array_map(function ($sh) {
-                return ['name' => $sh['name'], 'action' => $sh['triage']['action'], 'reason' => $sh['triage']['reason'], 'counts' => $sh['counts'],
-                    'ignored_columns' => $sh['ignored_columns'], 'unmapped_columns' => $sh['unmapped_columns'],
-                    'header_row' => $sh['header_row'] ?? null, 'hidden' => !empty($sh['hidden']), 'categories' => $sh['categories'] ?? [],
-                    'columns' => array_map(function ($c) {
-                        return ['letter' => $c['letter'], 'header' => $c['header'], 'ref' => $c['header_ref'], 'field' => $c['field'], 'derived' => !empty($c['derived']),
-                            'state' => $c['state'] ?? '', 'filled' => $c['shape']['filled'] ?? null];
-                    }, $sh['columns'] ?? []),
-                    'non_item_rows' => array_slice(array_map(function ($r) {
-                        return ['row' => $r['row'], 'kind' => $r['kind'], 'label' => $r['label'], 'source' => $r['source'], 'reason' => $r['reason']];
-                    }, $sh['skipped_rows'] ?? []), 0, 300)];
-            }, $an['sheets']),
+            'open_sheet_questions' => $res['open_sheet_questions'], 'sheets' => import_review_sheets_payload($an),
             'items' => $items, 'rows' => array_values($res['rows']), 'questions' => $qs, 'unit_options' => $state['ctx']['unit_options'],
         ];
     }
@@ -581,6 +748,11 @@ if (!function_exists('import_job_analyse')) {
         $answers = import_job_answers($job);
         $ctx = import_job_ctx($pdo);
         $eng = import_job_engine_opts($pdo, $answers, $ctx);
+        require_once __DIR__ . '/memory.php';
+        $chk = import_mem_check($path, (string)$job['original_name'], $eng['aliases']);      // a plain message, not a fatal error, when the file cannot fit here
+        if (!$chk['ok']) {
+            return $bad($chk['message']);
+        }
         $analysis = import_analyze_file($path, (string)$job['original_name'], $eng['aliases'], $eng['opts']);
         if (empty($analysis['ok'])) {
             return $bad((string)$analysis['error']);
@@ -590,10 +762,11 @@ if (!function_exists('import_job_analyse')) {
             return $bad((string)($read['error'] ?? 'The file could not be read again.'));
         }
         $violations = import_assert_no_invented_values($analysis, $read);
+        unset($read);                     // the second cell grid is not needed any more
         if ($violations) {
             return $bad('A value in the preview does not match the file, so nothing was imported.', array_slice($violations, 0, 20));
         }
-        $res = import_resolve($analysis, $answers, $ctx);
+        $res = import_resolve_inplace($analysis, $answers, $ctx, true);      // rows are released as they are read; the commit only uses the resolved items
         if (!$res['can_confirm']) {
             return $bad($res['why_not'] !== '' ? $res['why_not'] : 'Some questions still need an answer.') + ['analysis' => $analysis, 'res' => $res, 'ctx' => $ctx];
         }

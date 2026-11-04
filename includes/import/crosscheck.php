@@ -221,6 +221,78 @@ if (!function_exists('import_crosscheck')) {
         }
     }
 
+    /** A group of prices for leave-one-out statistics: sorted prices, their logs, and the sorted deviations per centre (filled on demand). */
+    function import_cc_group(array $prices): array
+    {
+        $p = array_map('floatval', $prices);
+        sort($p);
+        return ['p' => $p, 'l' => array_map('log', $p), 'dev' => []];
+    }
+
+    /** First index of $v in the sorted list $a (exact float match), or -1. */
+    function import_cc_find(array $a, float $v): int
+    {
+        $lo = 0;
+        $hi = count($a);
+        while ($lo < $hi) {
+            $mid = ($lo + $hi) >> 1;
+            if ($a[$mid] < $v) {
+                $lo = $mid + 1;
+            } else {
+                $hi = $mid;
+            }
+        }
+        return ($lo < count($a) && $a[$lo] === $v) ? $lo : -1;
+    }
+
+    /** Median of the sorted list $a without the element at index $skip: the same arithmetic as import_median() on the shorter list. */
+    function import_cc_loo_median(array $a, int $skip): ?float
+    {
+        $n = count($a) - 1;
+        if ($n <= 0) {
+            return null;
+        }
+        $mid = intdiv($n, 2);
+        $at = function (int $k) use ($a, $skip): float {
+            return (float)$a[$k < $skip ? $k : $k + 1];
+        };
+        return $n % 2 ? $at($mid) : ($at($mid - 1) + $at($mid)) / 2;
+    }
+
+    /**
+     * [median, robust spread] of a group's prices WITHOUT one member that has price $price - exactly what import_median($peers) and
+     * import_pc_spread(logs of $peers) give for the peer list, without building it. Falls back to that direct computation if the price is not found.
+     */
+    function import_cc_loo_stats(array &$g, float $price): array
+    {
+        $r = import_cc_find($g['p'], $price);
+        if ($r >= 0) {
+            $med = import_cc_loo_median($g['p'], $r);
+            $mp = import_cc_loo_median($g['l'], $r);
+            if ($med !== null && $mp !== null) {
+                $key = sprintf('%.17g', $mp);
+                if (!isset($g['dev'][$key])) {
+                    $d = array_map(function ($x) use ($mp) {
+                        return abs($x - $mp);
+                    }, $g['l']);
+                    sort($d);
+                    $g['dev'][$key] = $d;
+                }
+                $dr = abs($g['l'][$r] - $mp);
+                $q = import_cc_find($g['dev'][$key], $dr);
+                if ($q >= 0) {
+                    return [$med, 1.4826 * (float)import_cc_loo_median($g['dev'][$key], $q)];
+                }
+            }
+        }
+        $peers = $g['p'];
+        $ix = $r >= 0 ? $r : array_search($price, $peers, true);
+        if ($ix !== false && $ix !== null) {
+            unset($peers[$ix]);
+        }
+        return [import_median($peers), import_pc_spread(array_map('log', import_pc_positive($peers)))];
+    }
+
     /**
      * "Price looks like a case price" questions: a price far ABOVE the others in its category (or the sheet), judged on a log scale from
      * the peers' own spread - the same rule as the price check (price-check.php): ask when ln(price / median) is more than
@@ -243,35 +315,35 @@ if (!function_exists('import_crosscheck')) {
             if (count($priced) < $minPeers + 1) {
                 continue;
             }
+            // The peers of a row are its category (or the whole sheet) WITHOUT the row itself. Each group is sorted once and the median / spread
+            // without one member are read from it (import_cc_loo_*), instead of rebuilding and sorting the peer list for every row (that was O(n^2 log n)).
+            $sheetGroup = import_cc_group(array_values($priced));
+            $catGroups = [];
+            foreach ($priced as $i => $price) {
+                $c = $sh['rows'][$i]['category'];
+                if ($c !== null) {
+                    $catGroups['c:' . $c][] = $price;
+                }
+            }
+            foreach ($catGroups as $ck => $list) {
+                $catGroups[$ck] = count($list) - 1 >= $minPeers ? import_cc_group($list) : null;
+            }
             foreach ($priced as $i => $price) {
                 $row = $sh['rows'][$i];
                 $cat = $row['category'];
-                $peers = [];
                 $scope = 'sheet';
-                if ($cat !== null) {
-                    foreach ($priced as $j => $p) {
-                        if ($j !== $i && $sh['rows'][$j]['category'] === $cat) {
-                            $peers[] = $p;
-                        }
-                    }
-                    if (count($peers) >= $minPeers) {
-                        $scope = 'category';
-                    } else {
-                        $peers = [];
-                    }
+                $grp = &$sheetGroup;
+                if ($cat !== null && $catGroups['c:' . $cat] !== null) {
+                    $scope = 'category';
+                    $grp = &$catGroups['c:' . $cat];
                 }
-                if (!$peers) {
-                    foreach ($priced as $j => $p) {
-                        if ($j !== $i) {
-                            $peers[] = $p;
-                        }
-                    }
-                }
-                $med = import_median($peers);
+                $st = import_cc_loo_stats($grp, $price);
+                unset($grp);
+                $med = $st[0];
                 if ($med === null || $med <= 0) {
                     continue;
                 }
-                $sp = import_pc_spread(array_map('log', import_pc_positive($peers)));
+                $sp = $st[1];
                 // A case holds at least two units (structural fact, not a hotel setting): a price under twice the usual one cannot be a case price.
                 if ($price < 2 * $med || log($price / $med) <= $pcp['k'] * max($sp, $pcp['spread_floor'])) {
                     continue;
