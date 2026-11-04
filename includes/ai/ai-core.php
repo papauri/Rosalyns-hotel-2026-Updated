@@ -250,6 +250,11 @@ function rh_ai_setting_defaults(): array
         'ai_review_writer_tokens'    => '900', // most words (tokens) the wording call may send back
         'ai_review_refresh_minutes'  => '10',  // the Refresh button rebuilds an area at most once in this many minutes
         'ai_review_keep_days'        => '35',  // cached days and briefs older than this are removed
+        // Owner 2026-11-05 (Stock Decisions panel): code defaults only, read through rh_ai_settings() until someone sets them
+        'ai_review_runout_days'        => '7',  // a stock item is flagged when it will not last this many days at the till's recent use (or its delivery time, when longer)
+        'ai_review_price_rise_pct'     => '10', // a stock item bought at least this % above its earlier unit cost is a price rise
+        'ai_review_supplier_days'      => '90', // supplier prices and spend are compared over the last this-many days
+        'ai_review_supplier_share_pct' => '70', // one supplier with at least this % of stock buying in that time is a dependence
     ];
 }
 

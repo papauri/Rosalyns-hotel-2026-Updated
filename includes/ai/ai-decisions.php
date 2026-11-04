@@ -190,8 +190,13 @@ function rh_dec_finders(): array
             'acc_tax'         => ['label' => 'VAT and tourism levy checks', 'fn' => 'rh_dec_f_tax', 'requires' => []],
         ],
         'stock' => [
-            'stk_loss'   => ['label' => 'Stock wasted or missing at count', 'fn' => 'rh_dec_f_stock_loss', 'requires' => []],
-            'stk_budget' => ['label' => 'Stock buying against the budget', 'fn' => 'rh_dec_f_stock_budget', 'requires' => []],
+            // Each card asks for the permission of the screen it is read from (the area gate already needs a stock permission)
+            'stk_runout'   => ['label' => 'Stock running out before the next delivery', 'fn' => 'rh_dec_f_stock_runout', 'requires' => ['perm' => ['stock_management'], 'module' => []]],
+            'stk_menu'     => ['label' => 'Menu items with a thin or negative margin', 'fn' => 'rh_dec_f_stock_menu', 'requires' => ['perm' => ['stock_management'], 'module' => []]],
+            'stk_loss'     => ['label' => 'Stock wasted or missing at count', 'fn' => 'rh_dec_f_stock_loss', 'requires' => ['perm' => ['stock_wastage', 'stock_count', 'stock_reports', 'stock_management'], 'module' => []]],
+            'stk_tied'     => ['label' => 'Money tied up in stock that is not moving', 'fn' => 'rh_dec_f_stock_tied', 'requires' => ['perm' => ['stock_reports', 'stock_management'], 'module' => []]],
+            'stk_supplier' => ['label' => 'Supplier price rises and dependence', 'fn' => 'rh_dec_f_stock_supplier', 'requires' => ['perm' => ['stock_management', 'stock_reports'], 'module' => []]],
+            'stk_budget'   => ['label' => 'Stock buying against the budget', 'fn' => 'rh_dec_f_stock_budget', 'requires' => ['perm' => ['stock_budget'], 'module' => []]],
         ],
     ];
     // Tests (and later phases) may add checks; never replaces the ones above.
@@ -942,78 +947,652 @@ function rh_dec_f_tax(PDO $db, array $ctx): array
 }
 
 // ── Finders: stock ───────────────────────────────────────────────────────────
+//
+// Every stock check reads its period from the context (the base period ending today, or a fixed day in the tests) and
+// the stock module through rh_dec_mod(): off = no card, cannot be read = read anyway and marked partial. Spending on
+// stock (orders, holding orders) is never shown as money saved: it is paid now or later, so those options are "Not valued".
 
-/** Stock wasted plus stock missing at approved counts in the base period (money_leaks: the Wastage and Count screens' cost). */
+/** The empty result of a stock check that did not run because the stock module is off. */
+function rh_dec_stock_off(): array
+{
+    return ['ok' => true, 'total' => 0, 'cards' => []];
+}
+
+/** The period's bounds as datetimes: [from 00:00:00, the day after to 00:00:00) for created_at / paid_at columns. */
+function rh_dec_span(array $ctx): array
+{
+    return [(string)$ctx['from'] . ' 00:00:00', date('Y-m-d', strtotime((string)$ctx['to'] . ' +1 day')) . ' 00:00:00'];
+}
+
+function rh_dec_qty(float $n): string
+{
+    return function_exists('rh_ai_menu_qty') ? rh_ai_menu_qty($n) : rtrim(rtrim(number_format($n, 3), '0'), '.');
+}
+
+/**
+ * The Stock Reports Wastage tab's rate for a range: wastage cost against usage cost (till and room service, less void
+ * restores, voided-to-wastage lines left out), archived stock items left out of both sides. null = unreadable.
+ */
+function rh_dec_wastage_rate(PDO $db, string $from, string $to): ?array
+{
+    try {
+        $vw = rh_voided_wastage_sql('sa');
+        $mc = rh_stock_movement_cost_sql('sa', 'i');
+        $st = $db->prepare("SELECT COALESCE(SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') AND NOT $vw THEN ABS(sa.quantity_change) * $mc WHEN sa.source_type = 'void_restore' THEN -ABS(sa.quantity_change) * $mc ELSE 0 END), 0)
+                            FROM stock_adjustments sa INNER JOIN stock_ingredients i ON i.id = sa.ingredient_id AND i.is_archived = 0 WHERE DATE(sa.created_at) BETWEEN ? AND ?");
+        $st->execute([$from, $to]);
+        $usage = (float)$st->fetchColumn();
+        $st = $db->prepare("SELECT COALESCE(SUM(w.wastage_cost), 0) FROM stock_wastage w INNER JOIN stock_ingredients i ON i.id = w.ingredient_id AND i.is_archived = 0 WHERE w.recorded_date BETWEEN ? AND ?");
+        $st->execute([$from, $to]);
+        $waste = (float)$st->fetchColumn();
+    } catch (Throwable $e) {
+        return null;
+    }
+    return ['usage_cost' => round($usage, 2), 'wastage_cost' => round($waste, 2), 'pct' => $usage > BALANCE_TOLERANCE ? round($waste / $usage * 100, 1) : null];
+}
+
+/**
+ * Stock items short at two or more approved counts in the $days up to $to, with the shift and weekday they were short
+ * on most (from the count lines; the Stock Count screen's own shortage lines). null = unreadable.
+ */
+function rh_dec_repeat_short(PDO $db, string $to, int $days): ?array
+{
+    $from = date('Y-m-d', strtotime($to . ' -' . ($days - 1) . ' days'));
+    try {
+        $st = $db->prepare("SELECT l.ingredient_id, i.name, i.unit, c.id AS count_id, c.reference, NULLIF(TRIM(c.shift), '') AS shift, c.count_date, l.variance, l.variance_cost
+                            FROM stock_count_lines l INNER JOIN stock_counts c ON c.id = l.count_id INNER JOIN stock_ingredients i ON i.id = l.ingredient_id
+                            WHERE c.status = 'approved' AND l.variance < 0 AND COALESCE(c.approved_at, c.count_date) >= ? AND COALESCE(c.approved_at, c.count_date) < DATE_ADD(?, INTERVAL 1 DAY)
+                            ORDER BY l.ingredient_id, c.id LIMIT 5000");
+        $st->execute([$from, $to]);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return null;
+    }
+    $by = [];
+    foreach ($rows as $r) {
+        $id = (int)$r['ingredient_id'];
+        $by[$id] = $by[$id] ?? ['name' => (string)$r['name'], 'unit' => (string)$r['unit'], 'counts' => [], 'qty' => 0.0, 'cost' => 0.0, 'shift' => [], 'day' => []];
+        $cid = (int)$r['count_id'];
+        if (!isset($by[$id]['counts'][$cid])) {
+            $by[$id]['counts'][$cid] = (string)$r['reference'];
+            if ($r['shift'] !== null) {
+                $by[$id]['shift'][(string)$r['shift']] = ($by[$id]['shift'][(string)$r['shift']] ?? 0) + 1;
+            }
+            $dn = date('l', strtotime((string)$r['count_date']));
+            $by[$id]['day'][$dn] = ($by[$id]['day'][$dn] ?? 0) + 1;
+        }
+        $by[$id]['qty'] += abs((float)$r['variance']);
+        $by[$id]['cost'] += abs((float)$r['variance_cost']);
+    }
+    $out = [];
+    foreach ($by as $id => $x) {
+        $n = count($x['counts']);
+        if ($n < 2) {
+            continue;
+        }
+        // A pattern only when most of the short counts share it
+        $pat = [];
+        foreach (['shift' => ' shift', 'day' => ''] as $k => $suffix) {
+            arsort($x[$k]);
+            $top = (string)array_key_first($x[$k] ?? []);
+            if ($top !== '' && $x[$k][$top] >= 2 && $x[$k][$top] * 2 > $n) {
+                $pat[] = $x[$k][$top] . ' on ' . ($k === 'day' ? $top . 's' : 'the ' . $top . $suffix);
+            }
+        }
+        $out[] = ['ingredient_id' => $id, 'name' => $x['name'], 'unit' => $x['unit'], 'counts' => $n, 'qty' => round($x['qty'], 3), 'cost' => round($x['cost'], 2),
+            'pattern' => implode(', ', $pat), 'last_ref' => (string)end($x['counts'])];
+    }
+    usort($out, static fn($a, $b) => [$b['cost'], $b['counts']] <=> [$a['cost'], $a['counts']]);
+    return $out;
+}
+
+/**
+ * Waste and loss: stock wasted plus stock missing at approved counts in the base period (money_leaks: the Wastage and
+ * Count screens' cost), the Wastage tab's waste rate against stock used, and items that come up short again and again.
+ */
 function rh_dec_f_stock_loss(PDO $db, array $ctx): array
 {
-    if (!rh_ai_mod('stock')) {
-        return ['ok' => true, 'total' => 0, 'cards' => []];
+    $on = rh_dec_mod('stock');
+    if ($on === false) {
+        return rh_dec_stock_off();
     }
     $m = $ctx['run']('money_leaks', ['from' => $ctx['from'], 'to' => $ctx['to']]);
     if ($m === null || !isset($m['wastage'], $m['stock_count_shortages'])) {
         return ['ok' => false, 'total' => 0, 'cards' => []];
     }
-    $w = (float)$m['wastage']['total_cost'];
-    $s = (float)$m['stock_count_shortages']['total_cost'];
+    $w = round((float)$m['wastage']['total_cost'], 2);
+    $s = round(abs((float)$m['stock_count_shortages']['total_cost']), 2); // the cost missing, above zero
     $total = (int)$m['wastage']['entries'] + (int)$m['stock_count_shortages']['counts'];
+    $rate = rh_dec_wastage_rate($db, (string)$ctx['from'], (string)$ctx['to']);
+    $long = max((int)$ctx['days'], rh_dec_num('ai_menu_waste_days_long', 7, 730));
+    $rep = rh_dec_repeat_short($db, (string)$ctx['to'], $long);
+    $partial = $on === null || $rate === null || $rep === null;
     $amt = round($w + $s, 2);
     if ($amt <= BALANCE_TOLERANCE) {
-        return ['ok' => true, 'total' => $total, 'cards' => []];
+        return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => []];
     }
     $cur = $ctx['cur'];
+    $highPct = (float)rh_dec_num('ai_menu_waste_high_pct', 1, 100);
     $rows = [];
     foreach ((array)$m['wastage']['by_reason'] as $r) {
-        $rows[] = ['label' => 'Wasted: ' . (string)$r['reason'], 'amount' => (float)$r['v']];
+        $rows[] = ['label' => 'Wasted: ' . (string)$r['reason'], 'amount' => round((float)$r['v'], 2)];
     }
     if ($s > BALANCE_TOLERANCE) {
         $rows[] = ['label' => 'Missing at ' . (int)$m['stock_count_shortages']['counts'] . ' approved count(s)', 'amount' => $s];
     }
-    return ['ok' => true, 'total' => $total, 'cards' => [rh_dec_card([
+    $ratePct = $rate['pct'] ?? null;
+    if ($rate !== null && $rate['pct'] !== null) {
+        $rows[] = ['label' => 'Wastage as a share of stock used by the till and room service (the Stock Reports Wastage tab)', 'value' => number_format((float)$rate['pct'], 1) . '%', 'amount' => $rate['usage_cost']];
+    }
+    $rep = (array)$rep;
+    foreach (array_slice($rep, 0, 5) as $x) {
+        $rows[] = ['label' => 'Short at ' . $x['counts'] . ' approved counts in the last ' . $long . ' days: ' . $x['name'] . ($x['pattern'] !== '' ? ' (' . $x['pattern'] . ')' : ''),
+            'reference' => $x['last_ref'], 'value' => rh_dec_qty((float)$x['qty']) . ' ' . $x['unit'], 'amount' => $x['cost']];
+    }
+    $nRep = count($rep);
+    $highWaste = $ratePct !== null && (float)$ratePct >= $highPct;
+    $opts = [];
+    if ($w > BALANCE_TOLERANCE) {
+        // Waste that stops is money not spent again: the most it could save is what was wasted in the same number of days
+        $opts[] = rh_dec_option('Buy smaller amounts more often of the items wasted most', 'Changes the next purchase orders; each order is still approved as usual.', $w, null, 0.0, 0.5, 0, 2);
+    }
+    // Counting more often finds a loss sooner; it does not bring missing stock back, so it is not valued
+    $opts[] = rh_dec_option_unvalued('Count the items that come up short more often' . ($nRep > 0 ? ' (' . $nRep . ' item(s) short at 2 or more counts)' : ''),
+        'More frequent counts of those items, on the Stock Count screen; nothing else changes.', 0.5, 1);
+    $recBuy = $w > BALANCE_TOLERANCE && $w >= $s; // the buying option exists (index 0) only when something was wasted
+    $rec = $recBuy ? 0 : count($opts) - 1;
+    $why = 'In the last ' . $ctx['days'] . ' days: ' . rh_dec_fmt($cur, $w) . ' written off as waste and ' . rh_dec_fmt($cur, $s) . ' less stock than expected at counts.'
+        . ($ratePct !== null ? ' Waste was ' . number_format((float)$ratePct, 1) . '% of the stock used' . ($highWaste ? ', at or over the ' . rtrim(rtrim(number_format($highPct, 1), '0'), '.') . '% mark.' : '.') : '')
+        . ($nRep > 0 ? ' ' . $nRep . ' item(s) came up short at 2 or more counts in the last ' . $long . ' days.' : '');
+    return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => [rh_dec_card([
         'key' => 'stk_loss', 'covers' => ['wastage', 'count_shortage'],
         'decision' => 'How to cut ' . rh_dec_fmt($cur, $amt) . ' of stock wasted or missing',
-        'why_now' => 'In the last ' . $ctx['days'] . ' days: ' . rh_dec_fmt($cur, $w) . ' written off as waste and ' . rh_dec_fmt($cur, $s) . ' less stock than expected at counts.',
-        'at_stake' => $amt, 'at_stake_note' => 'Wastage cost + count shortage cost (the Wastage and Stock Count screens).',
-        'urgency' => 0.55, 'confidence' => 0.85, 'history_days' => $ctx['days'],
+        'why_now' => $why,
+        'at_stake' => $amt, 'at_stake_note' => 'Wastage cost + count shortage cost in the last ' . $ctx['days'] . ' days (the Wastage and Stock Count screens).',
+        'urgency' => ($highWaste || $nRep > 0) ? 0.7 : 0.55, 'confidence' => $partial ? 0.6 : 0.85, 'history_days' => $ctx['days'],
         'evidence' => ['total' => $total, 'total_label' => 'wastage entries and approved counts', 'rows' => $rows],
-        'options' => [
-            rh_dec_option('Buy smaller amounts more often of the items wasted most', 'Changes the next purchase orders; each order is still approved as usual.', $w, null, 0.0, 0.5, 0, 2),
-            rh_dec_option('Count the items that come up short more often', 'More frequent counts of those items; nothing else changes.', $s, null, 0.0, 0.5, 0, 1),
-        ],
-        'recommend' => $w >= $s ? 0 : 1, 'recommendation' => $w >= $s ? 'Buy smaller amounts more often of the items wasted most.' : 'Count the items that come up short more often.',
-        'tier' => $w >= $s ? 2 : 1, 'link' => [$w >= $s ? 'stock-wastage.php' : 'stock-count.php', $w >= $s ? 'Open Wastage' : 'Open Stock Count'],
+        'options' => $opts, 'recommend' => $rec,
+        'recommendation' => $recBuy ? 'Buy smaller amounts more often of the items wasted most.' : ($nRep > 0 ? 'Count the items that keep coming up short more often, starting with the largest.' : 'Count the items that come up short more often.'),
+        'tier' => $opts[$rec]['tier'], 'link' => $recBuy ? ['stock-wastage.php', 'Open Wastage'] : ['stock-count.php', 'Open Stock Count'],
     ])]];
 }
 
-/** Stock buying ahead of this month's budget (the Stock Budget screen's own calculation). */
+/**
+ * Stock buying ahead of this month's budget (the Stock Budget screen's own calculation, read through money_leaks).
+ * Holding orders moves the spending into a later month: it is paid later, not saved, so neither option is valued.
+ */
 function rh_dec_f_stock_budget(PDO $db, array $ctx): array
 {
-    if (!rh_ai_mod('stock')) {
-        return ['ok' => true, 'total' => 0, 'cards' => []];
+    $on = rh_dec_mod('stock');
+    if ($on === false) {
+        return rh_dec_stock_off();
     }
-    $b = rh_ai_stock_budget($db);
+    $m = $ctx['run']('money_leaks', ['from' => $ctx['from'], 'to' => $ctx['to']]);
+    $b = $m !== null ? ($m['stock_budget_this_month'] ?? null) : rh_ai_stock_budget($db);
+    $partial = $on === null;
     if ($b === null) {
-        return ['ok' => true, 'total' => 0, 'cards' => []]; // no budget set: nothing to compare
+        return ['ok' => true, 'partial' => $partial, 'total' => 0, 'cards' => []]; // no budget set: nothing to compare
     }
     $pace = round((float)$b['used'] - (float)$b['budget'] * (float)$b['month_gone_pct'] / 100, 2);
-    if (!in_array((string)$b['status'], ['over', 'at_risk', 'warn', 'overspent'], true) || $pace <= BALANCE_TOLERANCE) {
-        return ['ok' => true, 'total' => 1, 'cards' => []];
+    if (!in_array((string)$b['status'], ['over', 'near', 'ahead', 'at_risk', 'warn', 'overspent'], true) || $pace <= BALANCE_TOLERANCE) {
+        return ['ok' => true, 'partial' => $partial, 'total' => 1, 'cards' => []];
     }
     $cur = $ctx['cur'];
-    return ['ok' => true, 'total' => 1, 'cards' => [rh_dec_card([
+    $fc = isset($b['forecast']) && $b['forecast'] !== null ? (float)$b['forecast'] : null;
+    $rows = [['label' => 'Budget this month', 'amount' => (float)$b['budget']], ['label' => 'Used (received + on order)', 'amount' => (float)$b['used']], ['label' => 'Left', 'amount' => (float)$b['left']]];
+    if ($fc !== null) {
+        $rows[] = ['label' => 'Forecast for the month at the current pace (the Stock Budget screen)', 'amount' => $fc];
+    }
+    return ['ok' => true, 'partial' => $partial, 'total' => 1, 'cards' => [rh_dec_card([
         'key' => 'stk_budget', 'covers' => ['budget'],
         'decision' => 'Whether to hold non-urgent stock buying for the rest of the month',
         'why_now' => $b['pct_used'] . '% of this month\'s stock budget is used with ' . $b['month_gone_pct'] . '% of the month gone (' . rh_dec_fmt($cur, (float)$b['used']) . ' of ' . rh_dec_fmt($cur, (float)$b['budget']) . ').',
-        'at_stake' => $pace, 'at_stake_note' => 'Spent ahead of an even pace through the month.',
-        'urgency' => 0.7, 'confidence' => 0.8, 'history_days' => 0,
-        'evidence' => ['total' => 1, 'total_label' => 'budget checked', 'rows' => [
-            ['label' => 'Budget', 'amount' => (float)$b['budget']], ['label' => 'Used', 'amount' => (float)$b['used']], ['label' => 'Left', 'amount' => (float)$b['left']],
-        ]],
+        'at_stake' => $pace, 'at_stake_note' => 'Spent and ordered ahead of an even pace through the month (the Stock Budget screen). Holding orders moves this spending to later; it is not a saving.',
+        'urgency' => 0.7, 'confidence' => $partial ? 0.6 : 0.8, 'history_days' => 0,
+        'evidence' => ['total' => 1, 'total_label' => 'budget checked', 'rows' => $rows],
         'options' => [
-            rh_dec_option('Hold non-urgent purchase orders until next month', 'Orders wait; each is still approved as usual.', $pace, null, 0.0, 0.6, 0, 2),
-            rh_dec_option('Keep buying as planned', 'Nothing changes; the budget is overspent at month end.', 0.0, null, -$pace, 0.6, 0, 1),
+            rh_dec_option_unvalued('Hold non-urgent new orders until next month', 'The buying moves into next month and is still paid then (paid later, not saved); urgent items are still ordered, and each order is still approved as usual.', 0.6, 2),
+            rh_dec_option_unvalued('Keep buying as planned', 'Nothing changes; this month\'s budget is likely to be overspent' . ($fc !== null ? ' (see the forecast under Evidence)' : '') . '.', 0.6, 1),
         ],
-        'recommend' => 0, 'recommendation' => 'Hold non-urgent purchase orders until next month.',
+        'recommend' => 0, 'recommendation' => 'Hold non-urgent new orders until next month; they are paid later, not saved.',
         'tier' => 2, 'link' => ['stock-budget.php', 'Open Stock Budget'],
+    ])]];
+}
+
+/** Quantity on order per stock item (purchase orders sent or part-received): the Reorder screen's own query. */
+function rh_dec_on_order(PDO $db): ?array
+{
+    try {
+        $out = [];
+        foreach ($db->query("SELECT poi.ingredient_id, SUM(GREATEST(0, poi.ordered_qty - poi.received_qty)) AS qty
+                             FROM stock_purchase_order_items poi INNER JOIN stock_purchase_orders po ON po.id = poi.purchase_order_id
+                             WHERE po.status IN ('sent','partial') AND poi.ingredient_id IS NOT NULL GROUP BY poi.ingredient_id")->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(int)$r['ingredient_id']] = (float)$r['qty'];
+        }
+        return $out;
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+/**
+ * Stock used by the till and room service per stock item for a range, on the Stock Reports Usage tab's rule (less void
+ * restores, voided-to-wastage lines left out, archived items left out, items with no use left out). null = unreadable.
+ */
+function rh_dec_stock_usage(PDO $db, string $from, string $to): ?array
+{
+    try {
+        $vw = rh_voided_wastage_sql('sa');
+        $st = $db->prepare("SELECT i.id, i.name, i.unit, i.current_quantity, i.cost_per_unit, i.pack_size, i.lead_time_days, s.lead_time_days AS supplier_lead, u.total_used, u.total_cost
+                            FROM (SELECT sa.ingredient_id,
+                                         SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') AND NOT $vw THEN ABS(sa.quantity_change) WHEN sa.source_type = 'void_restore' THEN -ABS(sa.quantity_change) ELSE 0 END) AS total_used,
+                                         SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') AND NOT $vw THEN ABS(sa.quantity_change) * sa.cost_at_time WHEN sa.source_type = 'void_restore' THEN -ABS(sa.quantity_change) * sa.cost_at_time ELSE 0 END) AS total_cost
+                                  FROM stock_adjustments sa WHERE DATE(sa.created_at) BETWEEN ? AND ? GROUP BY sa.ingredient_id) u
+                            INNER JOIN stock_ingredients i ON i.id = u.ingredient_id AND i.is_archived = 0
+                            LEFT JOIN stock_suppliers s ON s.id = i.preferred_supplier_id
+                            WHERE u.total_used > 0 ORDER BY i.name");
+        $st->execute([$from, $to]);
+        return $st->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+/**
+ * Run-out forecast from real till use: each stock item's daily use over the days of till history in the base period,
+ * the days its stock lasts, and what has to be ordered so it lasts ai_review_runout_days (or its delivery time, when
+ * longer) after counting what is already on order. The money is the cost of that order: money out, never a saving.
+ */
+function rh_dec_f_stock_runout(PDO $db, array $ctx): array
+{
+    $on = rh_dec_mod('stock');
+    if ($on === false) {
+        return rh_dec_stock_off();
+    }
+    $from = (string)$ctx['from'];
+    $to = (string)$ctx['to'];
+    $use = rh_dec_stock_usage($db, $from, $to);
+    $ord = rh_dec_on_order($db);
+    if ($use === null || $ord === null) {
+        return ['ok' => false, 'total' => 0, 'cards' => []];
+    }
+    $partial = $on === null;
+    // Days of till history inside the period: daily use is never spread over days before the first sale on record
+    $days = (int)$ctx['days'];
+    try {
+        $st = $db->prepare("SELECT MIN(DATE(created_at)) FROM stock_adjustments WHERE source_type IN ('pos_order','room_service') AND DATE(created_at) <= ?");
+        $st->execute([$to]);
+        $first = (string)($st->fetchColumn() ?: '');
+    } catch (Throwable $e) {
+        $first = '';
+    }
+    $start = $first !== '' && $first > $from ? $first : $from;
+    $useDays = max(1, min($days, (int)round((strtotime($to) - strtotime($start)) / 86400) + 1));
+    $horizon = rh_dec_num('ai_review_runout_days', 1, 90);
+    rh_ai_admin_lib('procurement-schema.php'); // the Reorder screen's whole-pack rounding (functions only)
+    $flag = [];
+    foreach ($use as $r) {
+        $daily = (float)$r['total_used'] / $useDays;
+        if ($daily <= 0.000001) {
+            continue;
+        }
+        $lead = (int)$r['lead_time_days'] > 0 ? (int)$r['lead_time_days'] : ((int)($r['supplier_lead'] ?? 0) > 0 ? (int)$r['supplier_lead'] : 0);
+        $cover = max($horizon, $lead);
+        $onHand = max(0.0, (float)$r['current_quantity']);
+        $onOrder = (float)($ord[(int)$r['id']] ?? 0.0);
+        $left = $onHand / $daily;
+        $need = $daily * $cover - $onHand - $onOrder;
+        if ($left >= $cover - 0.000001 || $need <= 0.0001) {
+            continue; // lasts the cover, or what is on order already covers it
+        }
+        $pack = $r['pack_size'] !== null && (float)$r['pack_size'] > 0 ? (float)$r['pack_size'] : null;
+        $qty = function_exists('rh_pack_suggest') ? (float)rh_pack_suggest($need, $pack)['units'] : $need;
+        $flag[] = ['id' => (int)$r['id'], 'name' => (string)$r['name'], 'unit' => (string)$r['unit'], 'daily' => $daily, 'left' => $left, 'cover' => $cover, 'lead' => $lead,
+            'on_order' => $onOrder, 'qty' => round($qty, 3), 'cost' => round($qty * (float)$r['cost_per_unit'], 2)];
+    }
+    $total = count($use);
+    if (!$flag) {
+        return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => []];
+    }
+    usort($flag, static fn($a, $b) => [$a['left'], $a['name']] <=> [$b['left'], $b['name']]);
+    $cost = round(array_sum(array_column($flag, 'cost')), 2);
+    $n = count($flag);
+    $cur = $ctx['cur'];
+    $h = (int)$ctx['history_min'];
+    $enough = $useDays >= $h;
+    $conf = $partial ? 0.45 : ($enough ? 0.75 : 0.45);
+    $rows = [];
+    foreach (array_slice($flag, 0, 8) as $f) {
+        $rows[] = ['label' => $f['name'] . ': about ' . number_format($f['left'], 1) . ' day(s) of stock left at ' . rh_dec_qty($f['daily']) . ' ' . $f['unit'] . ' a day'
+            . ($f['on_order'] > 0.0001 ? ', ' . rh_dec_qty($f['on_order']) . ' ' . $f['unit'] . ' on order' : '') . ($f['lead'] > 0 ? ', delivery ' . $f['lead'] . ' day(s)' : ''),
+            'value' => 'Order ' . rh_dec_qty($f['qty']) . ' ' . $f['unit'], 'amount' => $f['cost']];
+    }
+    $soon = $flag[0];
+    $why = 'At the till\'s use over the last ' . $useDays . ' day(s), ' . $n . ' stock item(s) will not last the next ' . $horizon . ' days (or their delivery time, when longer), counting what is already on order; '
+        . $soon['name'] . ' has about ' . number_format($soon['left'], 1) . ' day(s) left.' . ($enough ? '' : ' There are only ' . $useDays . ' day(s) of till use on record, so the daily use is a rough guide.');
+    return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => [rh_dec_card([
+        'key' => 'stk_runout', 'covers' => ['runout'],
+        'decision' => 'Whether to order ' . $n . ' stock item(s) now, before they run out',
+        'why_now' => $why,
+        'at_stake' => $cost, 'at_stake_note' => 'What the order costs at today\'s cost: enough to last ' . $horizon . ' days (or the delivery time) at the till\'s daily use, less stock on hand and on order, in whole packs. Money spent on stock, not a saving.',
+        'urgency' => min(1.0, $soon['left'] < 2 ? 0.95 : 0.75), 'confidence' => $conf, 'history_days' => $useDays,
+        'evidence' => ['total' => $total, 'total_label' => 'stock items used by the till checked', 'rows' => $rows],
+        'options' => [
+            rh_dec_option_unvalued('Order them now', 'Put them on a purchase order from the Reorder screen; each order is still approved as usual. Money spent on stock, not a saving.', $conf, 2),
+            rh_dec_option_unvalued('Wait for the usual order day', 'Nothing is ordered now; the dishes that use them cannot be sold once they run out.', $conf, 1),
+        ],
+        'recommend' => 0, 'recommendation' => 'Order the items that run out first now, from the Reorder screen.',
+        'tier' => 2, 'link' => ['stock-reorder.php', 'Open Reorder'],
+    ])]];
+}
+
+/**
+ * Batches expiring from today up to ai_menu_expiry_days ahead, valued the way the Stock Reports Expiry tab values them:
+ * quantity left at the batch's own cost (the ingredient's cost when the batch has none), not at the average cost.
+ * @return array{soon:array,days:int}
+ */
+function rh_dec_expiring_batches(PDO $db): array
+{
+    $days = (int)rh_ai_num('ai_menu_expiry_days');
+    $today = rh_ai_today();
+    $until = date('Y-m-d', strtotime($today . ' +' . $days . ' days'));
+    $soon = [];
+    try {
+        $st = $db->prepare("SELECT b.ingredient_id, b.batch_number, b.quantity_remaining, b.expiry_date, i.name, i.unit, COALESCE(NULLIF(b.cost_per_unit, 0), i.cost_per_unit) AS unit_cost
+                            FROM stock_batches b JOIN stock_ingredients i ON i.id = b.ingredient_id
+                            WHERE b.status = 'active' AND b.quantity_remaining > 0 AND b.expiry_date IS NOT NULL AND b.expiry_date >= ? AND b.expiry_date <= ? AND i.is_archived = 0
+                            ORDER BY b.expiry_date, i.name LIMIT 300");
+        $st->execute([$today, $until]);
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $soon[] = ['ingredient_id' => (int)$r['ingredient_id'], 'stock_item' => (string)$r['name'], 'batch' => (string)$r['batch_number'],
+                'left' => rh_dec_qty((float)$r['quantity_remaining']) . ' ' . (string)$r['unit'], 'expires' => (string)$r['expiry_date'],
+                'value' => round((float)$r['quantity_remaining'] * (float)$r['unit_cost'], 2)];
+        }
+    } catch (Throwable $e) {
+    }
+    return ['soon' => $soon, 'days' => $days];
+}
+
+/**
+ * Money tied up in stock that is not moving: stock items on hand at cost (the Stock Reports inventory value) that were
+ * not used, sold or written off in the base period, plus batches expiring soon (the menu advisor's expiry read, the
+ * Expiry tab's batches). Money already spent: tied up, not lost.
+ */
+function rh_dec_f_stock_tied(PDO $db, array $ctx): array
+{
+    $on = rh_dec_mod('stock');
+    if ($on === false) {
+        return rh_dec_stock_off();
+    }
+    [$a, $b] = rh_dec_span($ctx);
+    try {
+        $st = $db->prepare("SELECT i.id, i.name, i.unit, i.current_quantity, GREATEST(0, i.current_quantity) * i.cost_per_unit AS stock_value
+                            FROM stock_ingredients i
+                            WHERE i.is_archived = 0 AND i.current_quantity > 0.0001 AND i.created_at < ?
+                              AND NOT EXISTS (SELECT 1 FROM stock_adjustments sa WHERE sa.ingredient_id = i.id AND sa.quantity_change < 0 AND sa.created_at >= ? AND sa.created_at < ?)
+                            ORDER BY stock_value DESC, i.name");
+        $st->execute([$a, $a, $b]);
+        $still = $st->fetchAll(PDO::FETCH_ASSOC);
+        $onHandN = (int)$db->query("SELECT COUNT(*) FROM stock_ingredients WHERE is_archived = 0 AND current_quantity > 0.0001")->fetchColumn();
+    } catch (Throwable $e) {
+        return ['ok' => false, 'total' => 0, 'cards' => []];
+    }
+    $valuation = round(rh_stock_valuation($db), 2);
+    $exp = rh_dec_expiring_batches($db);
+    $ord = rh_dec_on_order($db);
+    $partial = $on === null || $ord === null;
+    $stillIds = array_flip(array_map(static fn($r) => (int)$r['id'], $still));
+    $stillV = round(array_sum(array_map(static fn($r) => (float)$r['stock_value'], $still)), 2);
+    $expRows = array_values(array_filter((array)$exp['soon'], static fn($x) => !isset($stillIds[(int)$x['ingredient_id']]) && (float)$x['value'] > BALANCE_TOLERANCE));
+    $expV = round(array_sum(array_column($expRows, 'value')), 2);
+    $at = round($stillV + $expV, 2);
+    if ($at <= BALANCE_TOLERANCE) {
+        return ['ok' => true, 'partial' => $partial, 'total' => $onHandN, 'cards' => []];
+    }
+    $cur = $ctx['cur'];
+    $days = (int)$ctx['days'];
+    $expDays = (int)($exp['days'] ?? 0);
+    $onOrderStill = $ord ? count(array_filter(array_keys($stillIds), static fn($id) => ($ord[$id] ?? 0) > 0.0001)) : 0;
+    $rows = [];
+    foreach (array_slice($still, 0, 6) as $r) {
+        $rows[] = ['label' => 'Not used in ' . $days . ' days: ' . (string)$r['name'] . (($ord[(int)$r['id']] ?? 0) > 0.0001 ? ' (more on order)' : ''),
+            'value' => rh_dec_qty((float)$r['current_quantity']) . ' ' . (string)$r['unit'], 'amount' => round((float)$r['stock_value'], 2)];
+    }
+    foreach (array_slice($expRows, 0, 4) as $x) {
+        $rows[] = ['label' => 'Expires ' . $x['expires'] . ': ' . $x['stock_item'], 'reference' => (string)$x['batch'], 'value' => (string)$x['left'], 'amount' => (float)$x['value']];
+    }
+    $rows[] = ['label' => 'All stock on hand at cost (the Stock Reports inventory value)', 'amount' => $valuation];
+    $nStill = count($still);
+    $opts = [rh_dec_option_unvalued('Stop reordering these items until they move', 'No new orders for them' . ($onOrderStill > 0 ? ' (' . $onOrderStill . ' are on an open purchase order now)' : '') . '; the money already spent stays on the shelf until the stock is used.', 0.7, 1)];
+    $rec = 0;
+    if ($expV > BALANCE_TOLERANCE) {
+        // Using a batch before its date keeps it from being thrown away: the most it could save is its value at cost
+        $opts[] = rh_dec_option('Use the batches that expire soon first', 'Plan dishes around them before their date (Stock Reports, Expiry tab).', $expV, null, 0.0, 0.6, 0, 1);
+        $rec = 1;
+    }
+    $opts[] = rh_dec_option_unvalued('Sell them off or use them in specials', 'A menu or price change made by a manager on the menu screens.', 0.4, 3);
+    return ['ok' => true, 'partial' => $partial, 'total' => $onHandN, 'cards' => [rh_dec_card([
+        'key' => 'stk_tied', 'covers' => ['batches_expiring'],
+        'decision' => 'What to do with ' . rh_dec_fmt($cur, $at) . ' of stock that is not moving' . ($expV > BALANCE_TOLERANCE ? ' or expires soon' : ''),
+        'why_now' => ($nStill > 0 ? $nStill . ' stock item(s) worth ' . rh_dec_fmt($cur, $stillV) . ' at cost were not used, sold or written off in the last ' . $days . ' days. ' : '')
+            . ($expV > BALANCE_TOLERANCE ? count($expRows) . ' batch(es) worth ' . rh_dec_fmt($cur, $expV) . ' expire within ' . $expDays . ' days. ' : '')
+            . 'All stock on hand: ' . rh_dec_fmt($cur, $valuation) . '.',
+        'at_stake' => $at, 'at_stake_note' => 'Stock on hand at cost with no use in the last ' . $days . ' days, plus batches expiring within ' . $expDays . ' days (the Stock Reports inventory and expiry figures). Money already spent: tied up, not lost.',
+        'urgency' => $expV > BALANCE_TOLERANCE ? 0.7 : 0.35, 'confidence' => $partial ? 0.6 : 0.8, 'history_days' => $days,
+        'evidence' => ['total' => $onHandN, 'total_label' => 'stock items on hand checked', 'rows' => $rows],
+        'options' => $opts, 'recommend' => $rec,
+        'recommendation' => $rec === 1 ? 'Use the batches that expire soon first, and stop reordering the items that are not moving.' : 'Stop reordering the items that are not moving until they are used.',
+        'tier' => $opts[$rec]['tier'], 'link' => $rec === 1 ? ['stock-reports.php?tab=expiry', 'Open the Expiry report'] : ['stock-reports.php?tab=inventory', 'Open the Inventory report'],
+    ])]];
+}
+
+/**
+ * Menu profitability: recipe cost against the menu price (the Recipes screen's own sum, read through the menu advisor),
+ * items over the Recipes screen's red band (ai_menu_cost_high_pct; items bought in and sold as they are only when they
+ * sell below cost), weighted by the portions the till sold in the base period. No sales = no card. Price and recipe
+ * changes are a manager's (tier 3) and are not valued.
+ */
+function rh_dec_f_stock_menu(PDO $db, array $ctx): array
+{
+    $on = rh_dec_mod('stock');
+    if ($on === false || !function_exists('rh_ai_menu_items')) {
+        return rh_dec_stock_off();
+    }
+    $pos = rh_dec_mod('pos');
+    $items = rh_ai_menu_items($db);
+    $high = rh_ai_menu_pct('ai_menu_cost_high_pct');
+    $checked = 0;
+    $flag = [];
+    foreach ($items as $mi) {
+        $price = round((float)$mi['price'], 2);
+        $cost = round((float)$mi['recipe_cost'], 2);
+        if (empty($mi['recipe_id']) || $price <= BALANCE_TOLERANCE || $cost <= BALANCE_TOLERANCE) {
+            continue;
+        }
+        $checked++;
+        $pct = round($cost / $price * 100, 1);
+        $below = $cost > $price + BALANCE_TOLERANCE;
+        $resale = rh_ai_menu_is_resale($mi);
+        if ($below || ($pct > $high && !$resale)) {
+            $flag[(int)$mi['id'] . '|' . (string)$mi['menu_type']] = ['name' => (string)$mi['name'], 'category' => (string)$mi['category'], 'price' => $price, 'cost' => $cost, 'pct' => $pct, 'below' => $below, 'resale' => $resale, 'kind' => rh_ai_menu_kind_of($mi)];
+        }
+    }
+    $partial = $on === null || $pos === null;
+    if (!$flag || $pos === false) {
+        return ['ok' => true, 'partial' => $partial, 'total' => $checked, 'cards' => []]; // nothing over the band, or no till sales to weigh them
+    }
+    [$a, $b] = rh_dec_span($ctx);
+    try {
+        $st = $db->prepare("SELECT soi.menu_item_id, soi.menu_type, SUM(soi.quantity) AS qty, SUM(soi.line_total) AS revenue
+                            FROM stock_order_items soi INNER JOIN stock_orders o ON o.id = soi.order_id
+                            WHERE o.status IN ('paid','completed') AND COALESCE(o.paid_at, o.created_at) >= ? AND COALESCE(o.paid_at, o.created_at) < ?
+                              AND COALESCE(soi.kds_status,'') NOT IN ('void','voided','cancelled','86','86d','86ed')
+                            GROUP BY soi.menu_item_id, soi.menu_type");
+        $st->execute([$a, $b]);
+        $sold = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $sold[(int)$r['menu_item_id'] . '|' . (string)$r['menu_type']] = (float)$r['qty'];
+        }
+    } catch (Throwable $e) {
+        return ['ok' => false, 'total' => $checked, 'cards' => []];
+    }
+    $lines = [];
+    foreach ($flag as $k => $f) {
+        $q = (float)($sold[$k] ?? 0);
+        if ($q <= 0.0001) {
+            continue;
+        }
+        // A dish: margin short of the band's limit per portion (recipe cost less the cost the price allows at that limit).
+        // Bought in and sold as is: the dish band does not apply, so only what it sells below cost is counted.
+        $gap = round($f['cost'] - $f['price'] * $high / 100, 4);
+        $loss = $f['below'] ? round($q * ($f['cost'] - $f['price']), 2) : 0.0;
+        $lines[] = $f + ['qty' => $q, 'short' => $f['resale'] ? $loss : round($q * $gap, 2), 'loss' => $loss];
+    }
+    if (!$lines) {
+        return ['ok' => true, 'partial' => $partial, 'total' => $checked, 'cards' => []];
+    }
+    usort($lines, static fn($x, $y) => [$y['short'], $x['name']] <=> [$x['short'], $y['name']]);
+    $cur = $ctx['cur'];
+    $days = (int)$ctx['days'];
+    $at = round(array_sum(array_column($lines, 'short')), 2);
+    $loss = round(array_sum(array_column($lines, 'loss')), 2);
+    $nBelow = count(array_filter($lines, static fn($x) => $x['below']));
+    $n = count($lines);
+    $portions = array_sum(array_column($lines, 'qty'));
+    $hTxt = rtrim(rtrim(number_format($high, 1), '0'), '.');
+    $rows = [];
+    foreach (array_slice($lines, 0, 8) as $x) {
+        $p = function_exists('rh_ai_menu_price') ? rh_ai_menu_price($x['cost'], $x['kind']) : [];
+        $rows[] = ['label' => $x['name'] . ' (' . $x['category'] . '): food cost ' . number_format($x['pct'], 1) . '%, recipe cost ' . rh_dec_fmt($cur, $x['cost']) . ' on a price of ' . rh_dec_fmt($cur, $x['price'])
+            . ($x['below'] ? ', sold below cost' : '') . (!empty($p['suggested_till_price']) ? '; price at the target food cost ' . rh_dec_fmt($cur, (float)$p['suggested_till_price']) : ''),
+            'value' => rh_dec_qty($x['qty']) . ' sold', 'amount' => $x['short']];
+    }
+    return ['ok' => true, 'partial' => $partial, 'total' => $checked, 'cards' => [rh_dec_card([
+        'key' => 'stk_menu', 'covers' => ['menu_margin'],
+        'decision' => 'Whether to re-price or rework ' . $n . ' menu item(s) with a recipe cost over ' . $hTxt . '% of the price' . ($nBelow > 0 ? ' (' . $nBelow . ' selling below cost)' : ''),
+        'why_now' => 'In the last ' . $days . ' days the till sold ' . rh_dec_qty($portions) . ' portion(s) of them, ' . rh_dec_fmt($cur, $at) . ' less margin than at a ' . $hTxt . '% food cost (or than at cost, for items bought in)'
+            . ($nBelow > 0 ? '; ' . $nBelow . ' item(s) sell for less than their recipe cost, a loss of ' . rh_dec_fmt($cur, $loss) . ' on what was sold.' : '.'),
+        'at_stake' => $at, 'at_stake_note' => 'On the portions sold in the last ' . $days . ' days: dishes, the margin short of a ' . $hTxt . '% food cost; items bought in and sold as they are, what they sell below cost (recipe cost against the menu price, as on the Recipes screen).',
+        'urgency' => $nBelow > 0 ? 0.7 : 0.5, 'confidence' => $partial ? 0.5 : 0.7, 'history_days' => $days,
+        'evidence' => ['total' => $checked, 'total_label' => 'menu items with a recipe and a price checked', 'rows' => $rows],
+        'options' => [
+            rh_dec_option_unvalued('Check the recipe quantities and stock costs first', 'A wrong quantity or cost on file looks like a thin margin; checked on the Recipes and Ingredients screens.', 0.6, 1),
+            rh_dec_option_unvalued('Raise the price of these items', 'A price change made by a manager on the menu screens; how many still sell at the new price is not known.', 0.4, 3),
+            rh_dec_option_unvalued('Rework the recipe or find cheaper supply', 'A recipe or supplier change made by a manager on the stock screens.', 0.4, 3),
+        ],
+        'recommend' => 0, 'recommendation' => 'Check the recipe quantities and stock costs first, then decide on prices on the menu screens.',
+        'tier' => 3, 'link' => ['stock-recipes.php', 'Open Recipes'],
+    ])]];
+}
+
+/**
+ * Supplier price rises and dependence, from deliveries (stock_in_log, the Stock Reports Stock In tab): a stock item whose
+ * latest unit cost is ai_review_price_rise_pct or more above its earlier price (the average before the base period, or
+ * its first delivery in the window), valued as what was paid above that price in the base period; and the share of
+ * stock buying that went to one supplier. Asking for a quote or switching is not valued (the outcome is not known).
+ */
+function rh_dec_f_stock_supplier(PDO $db, array $ctx): array
+{
+    $on = rh_dec_mod('stock');
+    if ($on === false) {
+        return rh_dec_stock_off();
+    }
+    $look = max((int)$ctx['days'], rh_dec_num('ai_review_supplier_days', 7, 730));
+    $to = (string)$ctx['to'];
+    $from = (string)$ctx['from'];
+    $lFrom = date('Y-m-d', strtotime($to . ' -' . ($look - 1) . ' days'));
+    try {
+        $st = $db->prepare("SELECT s.id, s.ingredient_id, i.name, i.unit, s.supplier_id, COALESCE(NULLIF(TRIM(sp.name), ''), NULLIF(TRIM(s.supplier_name), '')) AS supplier, s.quantity, s.cost_per_unit, s.cost_total, DATE(s.created_at) AS d
+                            FROM stock_in_log s INNER JOIN stock_ingredients i ON i.id = s.ingredient_id LEFT JOIN stock_suppliers sp ON sp.id = s.supplier_id
+                            WHERE DATE(s.created_at) BETWEEN ? AND ? ORDER BY s.ingredient_id, s.created_at, s.id LIMIT 20000");
+        $st->execute([$lFrom, $to]);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return ['ok' => false, 'total' => 0, 'cards' => []];
+    }
+    $partial = $on === null;
+    $total = count($rows);
+    $risePct = (float)rh_dec_num('ai_review_price_rise_pct', 1, 1000);
+    $sharePct = (float)rh_dec_num('ai_review_supplier_share_pct', 1, 100);
+    $by = [];
+    $spend = [];
+    $named = 0; // deliveries with a supplier on record
+    foreach ($rows as $r) {
+        $by[(int)$r['ingredient_id']][] = $r;
+        $who = $r['supplier'] !== null ? (string)$r['supplier'] : '';
+        if ($who !== '') {
+            $spend[$who] = ($spend[$who] ?? 0.0) + (float)$r['cost_total'];
+            $named++;
+        }
+    }
+    $rises = [];
+    foreach ($by as $list) {
+        $priced = array_values(array_filter($list, static fn($r) => (float)$r['cost_per_unit'] > 0.00001));
+        if (count($priced) < 2) {
+            continue;
+        }
+        $before = array_values(array_filter($priced, static fn($r) => (string)$r['d'] < $from));
+        $baseRows = $before ?: [$priced[0]];
+        $baseline = array_sum(array_map(static fn($r) => (float)$r['cost_per_unit'], $baseRows)) / count($baseRows);
+        $latest = end($priced);
+        $rise = $baseline > 0.00001 ? ((float)$latest['cost_per_unit'] - $baseline) / $baseline * 100 : 0.0;
+        if ($rise + 0.0001 < $risePct) {
+            continue;
+        }
+        $extra = 0.0;
+        foreach ($priced as $i => $r) {
+            if ((string)$r['d'] >= $from && !(!$before && $i === 0)) {
+                $extra += max(0.0, (float)$r['cost_per_unit'] - $baseline) * (float)$r['quantity'];
+            }
+        }
+        if ($extra <= BALANCE_TOLERANCE) {
+            continue;
+        }
+        $rises[] = ['name' => (string)$latest['name'], 'unit' => (string)$latest['unit'], 'from' => round($baseline, 4), 'to' => round((float)$latest['cost_per_unit'], 4), 'pct' => round($rise, 1),
+            'extra' => round($extra, 2), 'supplier' => (string)($latest['supplier'] ?? '')];
+    }
+    $all = array_sum($spend);
+    arsort($spend);
+    $topName = (string)array_key_first($spend);
+    $topShare = $all > BALANCE_TOLERANCE && $topName !== '' ? round($spend[$topName] / $all * 100, 1) : 0.0;
+    $depend = $named >= 2 && $topShare + 0.0001 >= $sharePct; // one delivery is not a pattern
+    if (!$rises && !$depend) {
+        return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => []];
+    }
+    usort($rises, static fn($x, $y) => [$y['extra'], $x['name']] <=> [$x['extra'], $y['name']]);
+    $cur = $ctx['cur'];
+    $days = (int)$ctx['days'];
+    $extraAll = round(array_sum(array_column($rises, 'extra')), 2);
+    $n = count($rises);
+    $rTxt = rtrim(rtrim(number_format($risePct, 1), '0'), '.');
+    $ev = [];
+    foreach (array_slice($rises, 0, 8) as $x) {
+        $ev[] = ['label' => $x['name'] . ($x['supplier'] !== '' ? ', from ' . $x['supplier'] : '') . ': unit cost ' . rh_dec_fmt($cur, $x['from']) . ' to ' . rh_dec_fmt($cur, $x['to']) . ' a ' . $x['unit'] . ' (+' . number_format($x['pct'], 1) . '%)',
+            'amount' => $x['extra']];
+    }
+    if ($all > BALANCE_TOLERANCE) {
+        $ev[] = ['label' => 'Bought from the largest supplier, ' . $topName . ', in the last ' . $look . ' days', 'value' => number_format($topShare, 1) . '% of ' . rh_dec_fmt($cur, $all), 'amount' => round($spend[$topName], 2)];
+    }
+    $depTxt = $depend ? number_format($topShare, 1) . '% of the stock bought in the last ' . $look . ' days came from one supplier' . (count($spend) === 1 ? ' (the only one on record)' : '') . '.' : '';
+    $opts = [
+        rh_dec_option_unvalued($rises ? 'Ask the supplier about the rises and get a second quote' : 'Get a quote from a second supplier', 'A phone call or email; nothing changes on the system.', 0.6, 1),
+        rh_dec_option_unvalued('Move some items to another supplier', 'A supplier change made by a manager on the Suppliers and Ingredients screens.', 0.4, 3),
+    ];
+    if ($rises) {
+        $opts[] = rh_dec_option_unvalued('Accept the new prices', 'Keep buying as now, and check the recipe costs and menu prices that use these items.', 0.5, 1);
+    }
+    return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => [rh_dec_card([
+        'key' => 'stk_supplier', 'covers' => ['supplier_prices'],
+        'decision' => $rises ? 'Whether to question price rises on ' . $n . ' stock item(s): ' . rh_dec_fmt($cur, $extraAll) . ' paid above earlier prices'
+            : 'Whether to add a second supplier: ' . number_format($topShare, 1) . '% of stock buying goes to one',
+        'why_now' => ($rises ? 'In the last ' . $days . ' days ' . $n . ' item(s) were bought at least ' . $rTxt . '% above their earlier price; the largest rise is ' . number_format($rises[0]['pct'], 1) . '% on ' . $rises[0]['name'] . '. ' : '') . $depTxt,
+        'at_stake' => $rises ? $extraAll : null,
+        'at_stake_note' => $rises ? 'What the deliveries of the last ' . $days . ' days cost above each item\'s earlier unit cost (the Stock In report).' : 'Not valued: buying from one supplier costs nothing extra by itself.',
+        'urgency' => $rises ? 0.5 : 0.3, 'confidence' => $partial ? 0.5 : 0.7, 'history_days' => $look,
+        'evidence' => ['total' => $total, 'total_label' => 'deliveries checked', 'rows' => $ev],
+        'options' => $opts, 'recommend' => 0,
+        'recommendation' => $rises ? 'Ask the supplier about the rises and get a second quote before the next order.' : 'Get a quote from a second supplier for the items bought most.',
+        'tier' => 1, 'link' => ['stock-reports.php?tab=stock_in&from=' . $lFrom . '&to=' . $to, 'Open the Stock In report'],
     ])]];
 }
 

@@ -369,7 +369,8 @@ function rh_ai_t_money_leaks(PDO $db, array $user, array $a): array
         } catch (Throwable $e) {
         }
         try {
-            $st = $db->prepare("SELECT COUNT(*) AS n, COALESCE(SUM(shortage_cost), 0) AS v FROM stock_counts WHERE status = 'approved' AND COALESCE(approved_at, count_date) >= ? AND COALESCE(approved_at, count_date) < DATE_ADD(?, INTERVAL 1 DAY)");
+            // shortage_cost is stored below zero (the sum of the short lines' variance cost): shown as the cost missing, above zero
+            $st = $db->prepare("SELECT COUNT(*) AS n, ABS(COALESCE(SUM(shortage_cost), 0)) AS v FROM stock_counts WHERE status = 'approved' AND COALESCE(approved_at, count_date) >= ? AND COALESCE(approved_at, count_date) < DATE_ADD(?, INTERVAL 1 DAY)");
             $st->execute([$from, $to]);
             $d = $st->fetch(PDO::FETCH_ASSOC) ?: ['n' => 0, 'v' => 0];
             $out['stock_count_shortages'] = ['total_cost' => rh_ai_money((float)$d['v']), 'counts' => (int)$d['n']];
@@ -413,7 +414,8 @@ function rh_ai_stock_budget(PDO $db): ?array
         }
         $s = $c['summary'];
         return ['budget' => rh_ai_money((float)$s['budget']), 'used' => rh_ai_money((float)$s['used']), 'left' => rh_ai_money((float)$s['left']),
-            'pct_used' => round((float)$s['pct_used'], 1), 'month_gone_pct' => round((float)$s['month_pct'], 1), 'status' => (string)$s['status']];
+            'pct_used' => round((float)$s['pct_used'], 1), 'month_gone_pct' => round((float)$s['month_pct'], 1), 'status' => (string)$s['status'],
+            'forecast' => isset($s['forecast']) && $s['forecast'] !== null ? rh_ai_money((float)$s['forecast']) : null]; // the screen's month-end forecast (null = no basis yet)
     } catch (Throwable $e) {
         return null;
     }
@@ -531,7 +533,7 @@ function rh_ai_t_inventory_watch(PDO $db, array $user, array $a): array
     try {
         $c = $db->query("SELECT reference, count_date, shortage_cost, surplus_cost, total_variance_cost FROM stock_counts WHERE status = 'approved' ORDER BY COALESCE(approved_at, count_date) DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
         if ($c) {
-            $out['last_approved_count'] = ['count_ref' => $c['reference'], 'date' => $c['count_date'], 'shortage_cost' => rh_ai_money((float)$c['shortage_cost']), 'surplus_cost' => rh_ai_money((float)$c['surplus_cost'])];
+            $out['last_approved_count'] = ['count_ref' => $c['reference'], 'date' => $c['count_date'], 'shortage_cost' => rh_ai_money(abs((float)$c['shortage_cost'])), 'surplus_cost' => rh_ai_money((float)$c['surplus_cost'])];
         }
         $out['counts_waiting_for_approval'] = (int)$db->query("SELECT COUNT(*) FROM stock_counts WHERE status = 'submitted'")->fetchColumn();
     } catch (Throwable $e) {

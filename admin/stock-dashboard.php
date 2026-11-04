@@ -12,6 +12,7 @@ require_once 'includes/procurement-schema.php';
 require_once 'includes/stock-budget-lib.php';
 require_once dirname(__DIR__) . '/includes/stock-loss.php';
 require_once dirname(__DIR__) . '/includes/station-hours.php';
+require_once __DIR__ . '/includes/review-panel.php'; // the Decisions panel: prints nothing unless switched on and allowed
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -287,7 +288,7 @@ $csrf_token = generateCsrfToken();
             <a href="stock-orders.php" class="btn-add"><i class="fas fa-plus"></i> New Order</a>
         </div>
 
-        <?php if ($error): showAlert($error, 'error'); endif; ?>
+        <?php if ($error): showAlert($error, 'error'); endif; echo rh_review_panel('stock'); ?>
 
         <?php if ($metrics): ?>
 
