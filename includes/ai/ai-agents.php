@@ -2222,6 +2222,11 @@ function rh_ai_briefing_build(PDO $db, array $user, int $conv, bool $useModel = 
     $uid = (int)$user['id'];
     rh_ai_step_set($db, $uid, 'Going through today...');
     $b = rh_ai_briefing_findings($db, $user);
+    // Today's brief (owner 2026-11-05): the decision cards this person may see replace the findings they cover (one source of truth)
+    if (is_file(__DIR__ . '/ai-decisions.php')) {
+        require_once __DIR__ . '/ai-decisions.php';
+        $b = rh_dec_brief_merge($db, $user, $b);
+    }
     $cur = (string)$b['currency'];
     $items = [];
     $forModel = [];

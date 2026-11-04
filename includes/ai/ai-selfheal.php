@@ -238,6 +238,11 @@ function rh_ai_daily_run(PDO $db, bool $force = false): array
             'audit'     => static fn() => rh_ai_audit_report($db),
             'digest'    => static fn() => rh_ai_digest_run($db, false),
             'retention' => static fn() => rh_ai_retention_run($db),
+            // Owner 2026-11-05: the Decisions panels are worked out (and worded once per area) with today's figures
+            'decisions' => static function () use ($db): array {
+                require_once __DIR__ . '/ai-decisions.php';
+                return rh_dec_daily($db);
+            },
         ];
         foreach ($steps as $job => $fn) {
             if (!$force && in_array($job, ['reflect', 'health', 'eval'], true) && !rh_ai_job_due($job)) {
@@ -716,7 +721,7 @@ function rh_ai_hard_limit_problems(): array
         $p[] = 'the card list changed';
     }
     $root = dirname(__DIR__, 2);
-    foreach (['admin/api/ai-chat.php', 'admin/api/ai-action.php', 'admin/includes/ai-panel.php'] as $f) {
+    foreach (['admin/api/ai-chat.php', 'admin/api/ai-action.php', 'admin/includes/ai-panel.php', 'admin/api/decisions.php', 'admin/includes/review-panel.php'] as $f) {
         if (strpos((string)@file_get_contents($root . '/' . $f), 'rh_ai_enabled(') === false) {
             $p[] = $f . ' does not check the master switch';
         }

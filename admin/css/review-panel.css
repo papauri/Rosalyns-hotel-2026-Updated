@@ -1,0 +1,36 @@
+/* The Decisions panel (admin/includes/review-panel.php). Existing admin tokens only; a normal card, no effects. */
+.rh-dec { background: var(--admin-surface); border: 1px solid var(--admin-surface-border); border-radius: var(--admin-radius); padding: 16px; margin: 0 0 16px; color: var(--admin-text); }
+.rh-dec__head { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: flex-start; }
+.rh-dec__title { margin: 0 0 4px; font-size: 1.15rem; }
+.rh-dec__tools { text-align: right; max-width: 260px; }
+.rh-dec__help { display: block; margin: 2px 0 0; font-size: 0.8rem; font-weight: normal; color: var(--admin-muted); }
+.rh-dec__meta { margin: 8px 0; font-size: 0.85rem; color: var(--admin-muted); }
+.rh-dec__warn { margin: 8px 0; padding: 8px 10px; border: 1px solid var(--admin-warning-border); background: var(--admin-warning-bg); color: var(--admin-warning-text); border-radius: var(--admin-radius); }
+.rh-dec__empty { margin: 8px 0; }
+.rh-dec__list { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.rh-dec-card { border: 1px solid var(--admin-surface-border); border-radius: var(--admin-radius); padding: 12px; background: var(--admin-bg); }
+.rh-dec-card__title { margin: 0 0 4px; font-size: 1rem; }
+.rh-dec-card__why { margin: 0 0 8px; }
+.rh-dec-card__figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin: 0 0 8px; }
+.rh-dec-card__figs > div { border: 1px solid var(--admin-surface-border); border-radius: var(--admin-radius); padding: 8px; background: var(--admin-surface); }
+.rh-dec-card__figs dt { font-size: 0.8rem; color: var(--admin-muted); }
+.rh-dec-card__figs dd { margin: 2px 0 0; }
+.rh-dec__money { font-weight: 600; }
+.rh-dec-card__opts { overflow-x: auto; }
+.rh-dec__table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+.rh-dec__table th, .rh-dec__table td { text-align: left; vertical-align: top; padding: 6px 8px; border-bottom: 1px solid var(--admin-surface-border); }
+.rh-dec__table thead th { font-weight: 600; }
+.rh-dec__table tr.is-recommended th, .rh-dec__table tr.is-recommended td { background: var(--admin-hover-bg); }
+.rh-dec__tag { display: inline-block; margin-left: 4px; padding: 0 6px; border: 1px solid var(--admin-accent); border-radius: var(--admin-radius); font-size: 0.75rem; color: var(--admin-accent); }
+.rh-dec__none { color: var(--admin-muted); font-size: 0.85rem; }
+.rh-dec-card__rec { margin: 8px 0 0; }
+.rh-dec-card__ev { margin: 8px 0 0; }
+.rh-dec-card__ev summary, .rh-dec__more summary { cursor: pointer; }
+.rh-dec-card__btns { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 10px; }
+.rh-dec-card__state { font-size: 0.85rem; color: var(--admin-muted); }
+.rh-dec__more { margin-top: 12px; }
+.rh-dec__morelist { margin: 6px 0 0; padding-left: 18px; }
+.rh-dec__morelist li { margin: 4px 0; }
+@media (max-width: 640px) {
+    .rh-dec__tools { text-align: left; max-width: none; }
+}

@@ -241,6 +241,15 @@ function rh_ai_setting_defaults(): array
         'ai_menu_waste_high_pct'        => '10', // thrown away or expired at least this % of what went out: "buy smaller amounts more often"
         'ai_menu_short_life_days'       => '7',  // a stock item that keeps this many days or fewer has a short shelf life
         'ai_menu_recipe_cache_days'     => '30', // a typical one-portion recipe proposed for a dish idea is kept this many days (asked again: no model call)
+        // Owner 2026-11-05 (in-page Decisions panels, Phase 1 engine: includes/ai/ai-decisions.php; migration 075 seeds the same values)
+        'ai_review_impact_min_pct'   => '1',   // a card shows when its money at stake is at least this % of the money collected in the base period
+        'ai_review_base_days'        => '30',  // the base period (days back) for "share of takings" and for the money checks
+        'ai_review_cards_max'        => '8',   // cards shown at most per panel (the rest under "More")
+        'ai_review_history_min_days' => '28',  // a projected range needs at least this many days of history, else it is not shown
+        'ai_review_writer_enabled'   => '1',   // '0' = cards keep their plain fixed wording (no model call)
+        'ai_review_writer_tokens'    => '900', // most words (tokens) the wording call may send back
+        'ai_review_refresh_minutes'  => '10',  // the Refresh button rebuilds an area at most once in this many minutes
+        'ai_review_keep_days'        => '35',  // cached days and briefs older than this are removed
     ];
 }
 
