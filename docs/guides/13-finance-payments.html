@@ -46,6 +46,7 @@
       <li><a href="#quotes">Quotations</a></li>
       <li><a href="#receipts">Receipts register</a></li>
       <li><a href="#accounting">Accounting dashboard and VAT</a></li>
+      <li><a href="#decisions">Decisions panel</a></li>
       <li><a href="#rules">Rules the system enforces</a></li>
       <li><a href="#problems">Problems and fixes</a></li>
     </ol>
@@ -299,6 +300,31 @@
     </tbody>
   </table>
   <p><strong>Needs attention</strong> lists things to chase: balances owed, pending payments, refunds waiting to be settled, quotations awaiting a reply, voided till orders, stock lost. The links on this page open the Payments list already filtered: <strong>Open today's payments</strong> and <strong>Today's payments</strong> show today's date range, and the completed and pending links show that status for the chosen period. The tabs below show <strong>Recent payments</strong>, <strong>Receivables</strong>, <strong>Daily detail</strong>, <strong>Refunds</strong>, <strong>POS by type</strong> and <strong>Compliance</strong>.</p>
+  <h3 id="decisions">Decisions panel</h3>
+  <p>At the top of <strong>Accounting</strong> you may see a <strong>Decisions</strong> panel. It lists the few choices with the most money at stake right now, such as cash outlook, money owed and credit, profit by department, control and leakage, and tax liability. It shows nothing when no choice has enough money at stake.</p>
+  <p>The panel only appears when all of these are true. If one is missing, the panel is not shown at all.</p>
+  <ul>
+    <li>The Assistant is switched on by the owner, and a model is set up and reachable.</li>
+    <li>You have <strong>Use the Assistant</strong>, and <strong>Accounting</strong> or <strong>Reports</strong>.</li>
+    <li>The figures for today could be worked out. If none of the choices has a sound basis, the panel shows nothing.</li>
+  </ul>
+  <p>Each card shows:</p>
+  <ul>
+    <li><strong>Why now</strong>: the reason this choice is shown today.</li>
+    <li><strong>At stake</strong>: the money involved, and its share of the money collected in the last 30 days.</li>
+    <li><strong>Confidence</strong>: High, Medium or Low, from how complete the data is.</li>
+    <li><strong>Evidence</strong>: click it to see the records behind the card.</li>
+    <li><strong>Options</strong>: a table with <strong>Best</strong>, <strong>Expected</strong> and <strong>Worst</strong> for each choice. Expected stays blank until there is enough history. The option marked <strong>Recommended</strong> is the suggestion.</li>
+    <li>Who must approve: a short line saying whether you can act straight away, need one approval, or a manager must decide on the screen.</li>
+  </ul>
+  <ol class="steps">
+    <li>To check the figures again, click <strong>Refresh</strong>. You can use it only every few minutes.</li>
+    <li>To act, click the link on the card. That link opens the screen where you make the change.</li>
+    <li>Click <strong>Noted</strong> when you have read the card, or <strong>Not now</strong> to leave it for later. Neither button changes any money or stock.</li>
+  </ol>
+  <p>Nothing in the panel changes by itself. The panel does not show a bank or cash balance. Any payment, refund or stock change happens only when you do it on the linked screen.</p>
+  <div class="note"><p><strong>If something goes wrong:</strong> a line reading <em>"checks could not be read in full just now, so this list may be incomplete"</em> means some figures were missing. Click <strong>Refresh</strong> later, or check the Accounting figures above the panel.</p></div>
+
   <div class="note"><p><strong>The system does not send anything to MRA.</strong> It does not report, submit or fiscalise your sales or VAT. It keeps the VAT figures (the VAT Register and the quarterly totals under <strong>Reports</strong>) that you or your accountant use to file the VAT return with MRA yourselves. If MRA requires fiscal receipts from your till, that is done outside this system.</p></div>
   <h3>VAT settings</h3>
   <ol class="steps">
