@@ -25,6 +25,7 @@ require_once __DIR__ . '/analyze.php';
 require_once dirname(__DIR__, 2) . '/admin/includes/stock-sheet-import-lib.php';   // rh_ssi_key / rh_ssi_norm_unit / rh_ssi_units_compatible
 require_once dirname(__DIR__) . '/form-validation.php';                           // rh_clean_text (same cleaning as the manual Add form)
 require_once __DIR__ . '/price-check.php';                                         // plausibility of a price (evidence from this hotel's own data) + storage limits
+require_once __DIR__ . '/infer.php';                                               // evidence-based unit / category suggestions + unit spelling
 
 if (!function_exists('import_resolve')) {
 
@@ -61,6 +62,12 @@ if (!function_exists('import_resolve')) {
     function import_answer_allowed(array $q, $answer): string
     {
         $a = import_answer_shape($answer);
+        // "Skip this row/item" is a valid answer to ANY question that belongs to rows (blocked ones included), whatever options it lists.
+        // It is stored as skipped rows (import_job_answer), not as an answer to the question. Questions about how a sheet is read
+        // (no rows) have their own skip / ignore options and are answered in step 2.
+        if ($a['key'] === '_skip') {
+            return empty($q['row_uids']) ? 'This question is about how a sheet is read, not about rows. Use one of its own choices.' : '';
+        }
         $keys = array_map(function ($o) {
             return (string)$o['key'];
         }, (array)($q['options'] ?? []));
@@ -224,6 +231,12 @@ if (!function_exists('import_resolve')) {
         $ctx['_ex_index'] = import_index_existing((array)($ctx['existing'] ?? []));
         $unitOptions = array_values(array_unique(array_map('strval', (array)($ctx['unit_options'] ?? []))));
         $updates = (array)($answers['_updates'] ?? []);
+        $skipRows = (array)($answers['_skip_rows'] ?? []);         // uid => ['why','code','by','at']: rows a person chose to leave out (blocked or unanswered)
+        $unitFor = (array)($answers['_unit_for'] ?? []);           // item key => ['unit','src','by','at']: a unit chosen for ONE new item
+        $healUndo = (array)($answers['_heal_undo'] ?? []);         // heal id => meta: a self-healed value the person took back
+        $synonyms = (array)($ctx['unit_synonyms'] ?? import_default_aliases()['unit_synonyms']);
+        $resolveHeals = [];
+        $resolveHealN = 0;
         import_apply_answers($analysis, $answers, $ctx);
 
         $qById = [];
@@ -262,7 +275,7 @@ if (!function_exists('import_resolve')) {
                 $pcPackSizes[(string)(float)$e['pack_size']] = (float)$e['pack_size'];
             }
             if ((int)($e['is_archived'] ?? 0) === 0 && (float)$e['cost_per_unit'] > 0) {
-                $pcPeers[import_pc_cat_key($e['category'])][] = ['unit' => mb_strtolower(rh_ssi_norm_unit((string)$e['unit'])), 'cost' => (float)$e['cost_per_unit'], 'id' => (int)$e['id']];
+                $pcPeers[import_pc_cat_key($e['category'])][] = ['unit' => mb_strtolower(import_unit_canon((string)$e['unit'], $synonyms)), 'cost' => (float)$e['cost_per_unit'], 'id' => (int)$e['id']];
             }
         }
 
@@ -412,6 +425,15 @@ if (!function_exists('import_resolve')) {
                         }
                     }
                 }
+                if (isset($skipRows[$row['uid']])) {
+                    // a person chose to leave this row out (even though it was blocked / unanswered): never reaches the database
+                    $sr = (array)$skipRows[$row['uid']];
+                    $skip = 'Skipped by you.';
+                    $rec['skipped_why'] = (string)($sr['why'] ?? '');
+                    $rec['skip_code'] = (string)($sr['code'] ?? 'chosen');
+                } elseif ($skip !== '') {
+                    $rec['skip_code'] = 'answered-skip';
+                }
                 if ($skip !== '') {
                     $rec['status'] = 'skipped';
                     $rec['reason'] = $skip;
@@ -475,6 +497,7 @@ if (!function_exists('import_resolve')) {
                         $uid = $cands[$j]['rec']['uid'];
                         $rowsOut[$uid]['status'] = 'blocked';
                         $rowsOut[$uid]['reason'] = 'Two different items cannot share one name in stock. Rename one in the sheet and upload again, or skip it.';
+                        $rowsOut[$uid]['blocked_code'] = 'separate-items';
                         $cands[$j]['dropped'] = true;
                     }
                 } else {
@@ -666,8 +689,26 @@ if (!function_exists('import_resolve')) {
             $matchHow = $m['how'];
             $ex = $m['row'];
             $rawUnit = $first['unit_raw'];
-            $unit = ($rawUnit !== null && $rawUnit !== '') ? rh_ssi_norm_unit((string)$rawUnit) : null;
-            $unitHow = $unit !== null ? 'from the sheet' : null;
+            $unit = null;
+            $unitHow = null;
+            if ($rawUnit !== null && $rawUnit !== '') {
+                // self-healing "unit-spelling": btl / Bottles -> bottle, LTR -> L (the same unit, spelled the way stock spells it; never a conversion)
+                $unit = import_unit_canon((string)$rawUnit, $synonyms);
+                $unitHow = 'from the sheet';
+                if (trim((string)$rawUnit) !== $unit) {
+                    $hid = substr(sha1('unit-spelling|' . ($first['unit_source'] ?? $it['nk'])), 0, 12);
+                    if (isset($healUndo[$hid])) {
+                        $unit = mb_substr(trim((string)$rawUnit), 0, 50);          // undone: the unit exactly as written
+                    } elseif (!$ex) {
+                        $resolveHealN++;
+                        if ($resolveHealN <= 2000) {
+                        $resolveHeals[] = ['id' => $hid, 'rule' => 'unit-spelling', 'field' => 'unit', 'sheet' => $ms[0]['sheet'], 'row' => $ms[0]['rec']['row'], 'uid' => $ms[0]['rec']['uid'],
+                            'source' => (string)($first['unit_source'] ?? ''), 'before' => trim((string)$rawUnit), 'after' => $unit, 'undoable' => true, 'item' => $first['name'],
+                            'text' => 'Read the unit "' . trim((string)$rawUnit) . '" as "' . $unit . '" (the same unit, spelled the way your stock spells it).'];
+                        }
+                    }
+                }
+            }
             $action = $ex ? 'update' : 'create';
             $diff = [];
             $priceCheckOk = true;           // false when the match itself is in doubt (the price of a different thing means nothing)
@@ -692,19 +733,15 @@ if (!function_exists('import_resolve')) {
                     $xq = $ans(import_xq('archived-match', $it['nk'], '"' . $first['name'] . '" matches an ARCHIVED ingredient ("' . $ex['name'] . '"). It is left alone: restore or rename that ingredient, then upload again, or skip this row.',
                         [['key' => 'skip', 'label' => 'Skip this item']], ['bad' => true, 'sheet' => $ms[0]['sheet'], 'cells' => $rowRefs, 'row_uids' => $uidList]));
                     $extra[$xq['qkey']] = $xq;
-                    if ($xq['answer'] === null) {
-                        $itemOpen[] = $xq['id'];
-                    }
-                } elseif ($unit !== null && !rh_ssi_units_compatible((string)$rawUnit, (string)$ex['unit'])) {
+                    $itemOpen[] = $xq['id'];          // always: an answered "skip" is what takes the item out (the final loop looks for it)
+                } elseif ($unit !== null && !import_units_compatible((string)$unit, (string)$ex['unit'], $synonyms)) {
                     $priceCheckOk = false;
                     $unitHint = ($cost !== null) ? import_pc_unit_hint((string)$unit, (string)$ex['unit'], $cost, $ex['cost_per_unit']) : '';
                     $xq = $ans(import_xq('unit-clash', $it['nk'], '"' . $first['name'] . '" is in stock in "' . $ex['unit'] . '" but the sheet says "' . $rawUnit . '". Nothing is changed for it. Fix the sheet, or skip this row.' . $unitHint,
                         [['key' => 'skip', 'label' => 'Skip this item']], ['bad' => true, 'sheet' => $ms[0]['sheet'], 'cells' => $rowRefs, 'row_uids' => $uidList,
                             'evidence' => $unitHint !== '' ? ['reason' => 'unit-differs', 'old' => (float)$ex['cost_per_unit'], 'new' => (float)$cost, 'unit_sheet' => (string)$unit, 'unit_existing' => (string)$ex['unit']] : null]));
                     $extra[$xq['qkey']] = $xq;
-                    if ($xq['answer'] === null) {
-                        $itemOpen[] = $xq['id'];
-                    }
+                    $itemOpen[] = $xq['id'];          // always: an answered "skip" is what takes the item out (the final loop looks for it)
                 }
                 $unit = (string)$ex['unit'];     // an existing ingredient keeps its unit
                 $unitHow = 'existing ingredient';
@@ -854,10 +891,26 @@ if (!function_exists('import_resolve')) {
             ];
         }
         // one "which unit?" question per sheet for NEW items with no unit anywhere in the file
+        // Each of those items also gets a SUGGESTED unit (infer.php: evidence only, never applied until the person clicks) and can be answered on its own
+        // (answers['_unit_for'][item key]); an item answered on its own does not wait for the sheet-wide answer.
         $bySheetNoUnit = [];
         foreach ($noUnitByItem as $oi) {
             $bySheetNoUnit[$outItems[$oi]['sheet']][] = $oi;
         }
+        $noUnitIndex = [];
+        $learned = (array)($ctx['learned'] ?? []);
+        $ix = null;
+        $needCatIx = false;
+        foreach ($outItems as $it0) {
+            if (empty($it0['match']) && ($it0['category_how'] ?? '') === 'sheet-name') {
+                $needCatIx = true;
+                break;
+            }
+        }
+        if ($bySheetNoUnit || ($needCatIx && ($learned || !empty($ctx['existing'])))) {
+            $ix = import_infer_index((array)($ctx['existing'] ?? []), $learned, $outItems, $synonyms);
+        }
+        $inferBudget = 5000;            // suggestions are worked out for at most this many items per request (a huge sheet is just asked)
         foreach ($bySheetNoUnit as $sheetName => $ois) {
             $xq = $ans(import_xq('no-unit', $sheetName,
                 'Sheet "' . $sheetName . '" has no unit for ' . count($ois) . ' new item' . (count($ois) === 1 ? '' : 's') . '. Which unit are they counted in?',
@@ -867,16 +920,68 @@ if (!function_exists('import_resolve')) {
                 ['sheet' => $sheetName, 'row_uids' => array_merge(...array_map(function ($oi) use ($outItems) {
                     return $outItems[$oi]['uids'];
                 }, $ois))]));
-            $extra[$xq['qkey']] = $xq;
+            $noUnitIndex[$sheetName] = $ois;
+            $pending = 0;
             foreach ($ois as $oi) {
-                if ($xq['answer'] !== null && strpos($xq['answer'], 'unit:') === 0) {
+                $nkItem = (string)$outItems[$oi]['key'];
+                $uf = $unitFor[$nkItem] ?? null;
+                $own = null;
+                if (is_array($uf) && isset($uf['unit'])) {
+                    foreach ($unitOptions as $uo) {
+                        if (mb_strtolower((string)$uo) === mb_strtolower((string)$uf['unit'])) {
+                            $own = (string)$uo;
+                            break;
+                        }
+                    }
+                }
+                if ($ix !== null && $inferBudget-- > 0) {
+                    $sg = import_infer_unit($ix, $outItems[$oi], $unitOptions);
+                    $outItems[$oi]['unit_suggestion'] = ['value' => $sg['value'], 'reason' => $sg['reason'], 'confidence' => $sg['confidence'], 'mixed' => $sg['mixed'],
+                        'evidence' => $sg['evidence'], 'candidates' => $sg['candidates']];
+                }
+                if ($own !== null) {
+                    $outItems[$oi]['unit'] = $own;
+                    $outItems[$oi]['unit_how'] = ($uf['src'] ?? '') === 'suggestion' ? 'suggestion you accepted' : 'chosen by you for this item';
+                    $outItems[$oi]['unit_confirmed'] = true;
+                } elseif ($xq['answer'] !== null && strpos($xq['answer'], 'unit:') === 0) {
                     $outItems[$oi]['unit'] = substr($xq['answer'], 5);
                     $outItems[$oi]['unit_how'] = 'chosen by you for the whole sheet';
+                    $outItems[$oi]['unit_confirmed'] = true;
                 } else {
+                    $pending++;
                     $outItems[$oi]['open'][] = $xq['id'];
                 }
             }
+            if ($pending === 0 && $xq['answer'] === null) {
+                $xq['answer'] = 'per-item';        // every item was answered on its own: the sheet-wide question has nothing left to ask
+            }
+            $xq['pending'] = $pending;
+            $extra[$xq['qkey']] = $xq;
         }
+        // a heading is missing and the sheet's name stands in for the category: say so when this hotel has evidence for a better one (optional)
+        if ($ix !== null) {
+            foreach (array_keys($outItems) as $oi) {
+                $it0 = $outItems[$oi];
+                if (!empty($it0['match']) || ($it0['category_how'] ?? '') !== 'sheet-name') {
+                    continue;
+                }
+                $cs = import_infer_category($ix, $it0);
+                if ($cs === null) {
+                    continue;
+                }
+                $xq = $ans(import_xq('category-suggest', $it0['key'] . '|' . $cs['value'], '"' . $it0['name'] . '" has no category heading in the file, so the sheet name "' . $it0['category'] . '" would be used. ' . $cs['reason']
+                    . ' Use "' . $cs['value'] . '" instead?',
+                    [['key' => 'use:' . $cs['value'], 'label' => 'Use "' . $cs['value'] . '"'], ['key' => 'keep', 'label' => 'Keep "' . $it0['category'] . '"']],
+                    ['blocking' => false, 'sheet' => $it0['sheet'], 'cells' => $it0['rows'], 'row_uids' => $it0['uids'], 'evidence' => ['reason' => 'category', 'confidence' => $cs['confidence'], 'items' => $cs['evidence']]]));
+                $extra[$xq['qkey']] = $xq;
+                if ($xq['answer'] === 'use:' . $cs['value']) {
+                    $outItems[$oi]['category'] = $cs['value'];
+                    $outItems[$oi]['category_how'] = 'suggestion you accepted';
+                    $outItems[$oi]['category_confirmed'] = true;
+                }
+            }
+        }
+        unset($ix);
 
         // the same cleaning and length limits as the manual Add form; over-long = blocked with a plain reason (skip is the way out)
         foreach (array_keys($outItems) as $oi) {          // by key: a foreach over the array itself would keep a second copy of every item while they are rewritten
@@ -1014,13 +1119,33 @@ if (!function_exists('import_resolve')) {
         $canConfirm = $counts['needs-answer'] === 0 && $counts['blocked'] === 0 && !$openSheetQs && $committable > 0;
         $why = '';
         if (!$canConfirm) {
-            $why = $counts['blocked'] > 0 ? 'Some rows are blocked: fix the sheet and upload again, or skip them.'
-                : ($counts['needs-answer'] > 0 || $openSheetQs ? 'Some questions still need an answer.' : 'There is nothing ready to import.');
+            $why = $counts['blocked'] > 0 ? 'Some rows are blocked: fix the cell in your sheet and upload again, or skip them (use "Skip this row" on a row, or "Continue without them" in this step).'
+                : ($counts['needs-answer'] > 0 || $openSheetQs ? 'Some questions still need an answer. You can answer them, or leave those rows out with "Continue without them".' : 'There is nothing ready to import.');
+        }
+        // Fixed for you: format-only repairs, each with the cell it came from. Taken back ones (the person's undo) stay listed so they can be redone.
+        $heals = array_merge(array_values((array)($analysis['heals'] ?? [])), $resolveHeals);
+        $healCounts = (array)($analysis['heal_totals'] ?? []);
+        if (!$healCounts) {
+            foreach ($heals as $h0) {
+                if ($h0['rule'] !== 'unit-spelling') {
+                    $healCounts[$h0['rule']] = ($healCounts[$h0['rule']] ?? 0) + 1;
+                }
+            }
+        }
+        if ($resolveHealN > 0) {
+            $healCounts['unit-spelling'] = $resolveHealN;
+        }
+        $healsUndone = [];
+        foreach ($healUndo as $hid => $meta) {
+            if (is_array($meta)) {
+                $healsUndone[] = ['id' => (string)$hid, 'undone' => true] + $meta;
+            }
         }
         return [
             'items' => $outItems, 'rows' => $rowsOut, 'extra_questions' => array_values($extra), 'counts' => $counts, 'by_sheet' => $bySheet,
             'open_sheet_questions' => $openSheetQs, 'can_confirm' => $canConfirm, 'why_not' => $why, 'committable_items' => $committable,
-            'questions' => $analysis['questions'],
+            'questions' => $analysis['questions'], 'no_unit_index' => $noUnitIndex ?? [],
+            'heals' => array_slice($heals, 0, 3000), 'heal_counts' => $healCounts, 'heals_undone' => $healsUndone,
         ];
     }
 

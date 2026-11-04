@@ -151,6 +151,10 @@ if (!function_exists('import_commit_stock')) {
                     import_save_name_correction($pdo, import_norm_text($it['typed_name']), $it['match']['name'], $userId > 0 ? $userId : null);
                 }
             }
+            // what the person CONFIRMED (a unit or category they picked or accepted) is remembered for next time; written here, in the same transaction,
+            // so a rolled-back import teaches nothing
+            $learnRows = import_learned_rows($v['res']['items']);
+            $learned = $learnRows ? import_save_learned($pdo, $learnRows, $userId > 0 ? $userId : null) : 0;
             $notCounted = [];
             foreach ($v['res']['items'] as $it) {
                 if ($it['status'] === 'ready' && empty($it['in_count']) && ($it['balance'] ?? 0) > 0.00005) {
@@ -161,7 +165,8 @@ if (!function_exists('import_commit_stock')) {
                 'created' => (int)$ap['created'], 'updated' => (int)$ap['updated'], 'skipped_rows' => (int)$v['res']['counts']['skipped'],
                 'items' => count($plan['items']), 'opening_count_id' => $ap['count_id'], 'opening_count_ref' => $ap['count_ref'],
                 'count_lines' => (int)$ap['count_lines'], 'expiry_batches' => (int)$ap['batches'], 'left_out_overlap' => (int)($ap['left_out_overlap'] ?? 0),
-                'stock_not_counted_no_cost' => $notCounted, 'committed_at' => date('Y-m-d H:i:s'),
+                'stock_not_counted_no_cost' => $notCounted, 'committed_at' => date('Y-m-d H:i:s'), 'learned' => $learned,
+                'skipped_by_you' => (int)import_cont_overview($v['res'])['skipped_by_you'], 'fixed_for_you' => (int)array_sum($v['res']['heal_counts']),
                 'next_step' => 'A different manager must approve the opening count on Stock Count before any stock appears.',
             ];
             $pdo->prepare("UPDATE import_jobs SET status = 'committed', committed_by = ?, committed_at = NOW(), result_json = ?, error_text = NULL WHERE id = ?")

@@ -71,7 +71,7 @@
         var dropEl = root.querySelector('#diDrop');
         var nameEl = root.querySelector('#diFileName');
         var mineList = root.querySelector('#diMineList');
-        var S = { job: 0, sum: null, result: null, step: 1, reach: 1, busy: false, file: null, chain: Promise.resolve(), f: null, R: null, page: null, facets: null, statusEff: [], seq: 0, openCats: {}, bulkSel: null };
+        var S = { job: 0, sum: null, result: null, step: 1, reach: 1, busy: false, file: null, chain: Promise.resolve(), f: null, R: null, page: null, facets: null, statusEff: [], seq: 0, openCats: {}, bulkSel: null, uiUnits: {} };
         S.f = { q: '', sheet: '', cat: '', status: null, type: '', kind: '', warn: 0, cost: 0, stock: 0, answered: 0, sort: 'order', size: 50, page: 1, view: 'list' };
 
         // ---------- plumbing ----------
@@ -194,7 +194,7 @@
             S.job = id;
             S.result = null;
             S.f = fromUrl ? urlFilters() : copyDef();      // a reload keeps the filters in the address; opening a job starts clean
-            S.openCats = {}; S.page = null; S.facets = null; S.statusEff = []; S.bulkSel = null;
+            S.openCats = {}; S.page = null; S.facets = null; S.statusEff = []; S.bulkSel = null; S.uiUnits = {};
             return post('summary', { job: id }).then(function (r) {
                 if (r.state === 'committed') {
                     S.sum = null; S.result = r.result || {}; S.file = null; setUrl(id); S.resultFile = r.file; showStep(4); loadMine(); return;
@@ -278,14 +278,23 @@
             var c = h('div', 'di-q' + (answered ? ' is-answered' : (q.blocking ? ' is-open' : '')) + (q.bad ? ' is-bad' : ''));
             c.id = 'diq-' + q.id;
             var head = h('div', 'di-q-head');
-            add(head, h('span', 'di-q-state', answered ? 'Answered' : (q.blocking ? 'Needs your answer' : 'Optional')), qWhere(q) ? h('span', 'di-q-where', qWhere(q)) : null);
+            var wasSkipped = q.answer === '_skipped';
+            add(head, h('span', 'di-q-state', wasSkipped ? 'Skipped by you' : (answered ? 'Answered' : (q.blocking ? 'Needs your answer' : 'Optional'))), qWhere(q) ? h('span', 'di-q-where', qWhere(q)) : null);
             add(c, head, h('p', 'di-q-text', q.text));
             if (q.cells && q.cells.length) {
-                var cl = h('p', 'di-q-cells', 'Cells: ');
+                var cl = h('p', 'di-q-cells', (q.bad && !answered ? 'Cell to fix in your file: ' : 'Cells: '));
                 q.cells.forEach(function (ref, i) { cl.appendChild(h('span', 'di-src', ref)); if (i < q.cells.length - 1) { cl.appendChild(document.createTextNode(' ')); } });
                 c.appendChild(cl);
             }
             if (q.auto_filled && answered) { c.appendChild(h('p', 'di-q-note', 'Remembered from an earlier import. Change it if it is wrong.')); }
+            if (wasSkipped) {
+                c.appendChild(h('p', 'di-q-note', 'The rows of this question are left out of the import. You can bring them back from the Skipped list in step 4.'));
+                return c;
+            }
+            if (q.bad && !answered) {
+                c.appendChild(h('p', 'di-q-note', 'This cannot be imported as it is. Correct the cell in your file and upload the file again, or leave the row out and carry on.'));
+            }
+            if (q.type === 'no-unit' && q.unit_items) { c.appendChild(unitItemsBlock(q)); }
             var cv = {};
             (q.conflict_values || []).forEach(function (v) { cv[v.key] = v; });
             var checked = answered ? q.answer : (q.default || null);
@@ -332,8 +341,23 @@
                     q._saveTimer = window.setTimeout(function () { save(q, o.key, null, c); }, 450);
                 });
             });
+            if (q.type === 'no-unit' && q.options.length) {
+                c.appendChild(h('p', 'di-help', q.unit_items ? 'Or give one unit to every item above that has no choice yet. A unit you chose for a single item is kept.' : 'One unit for every item that has no choice yet.'));
+            }
             c.appendChild(opts);
             if (packBox) { c.appendChild(packBox); }
+            if (q.can_skip) {
+                // a row that cannot be fixed here can always be left out; the rest of the file carries on
+                var sk = h('button', 'btn-secondary di-btn di-btn--quiet di-q-skip', q.type === 'no-unit' ? 'Skip these items' : 'Skip this row');
+                sk.type = 'button';
+                sk.addEventListener('click', function () {
+                    if (q.type !== 'no-unit') { save(q, '_skip', null, c); return; }
+                    // a whole sheet's unit-less items at once: ask first (it can be taken back from step 4)
+                    var n = q.unit_stats ? Math.max(0, (q.unit_stats.total || 0) - (q.unit_stats.chosen || 0)) : 0;
+                    ask({ title: 'Leave out these items?', message: 'Every new item on this sheet that still has no unit (' + num(n, 0) + ') will be left out of the import. Items you already gave a unit stay. You can bring the others back from step 4. To keep them, choose units instead.', confirmText: 'Leave them out' }).then(function (yes) { if (yes) { save(q, '_skip', null, c); } });
+                });
+                c.appendChild(sk);
+            }
             c.appendChild(h('span', 'di-q-saved', ''));
             return c;
         }
@@ -355,6 +379,173 @@
                 msg('');
                 refresh(r.summary);
             });
+        }
+
+        // ---------- leaving rows out ("Skip") ----------
+        function ask(o) {
+            if (window.AdminConfirm && typeof window.AdminConfirm.request === 'function') {
+                var pr = window.AdminConfirm.request({ title: o.title, message: o.message, details: o.details || [], confirmText: o.confirmText, tone: o.tone || 'warning', icon: 'fa-clipboard-check' });
+                // these steps can be taken back, but the safe button still gets the focus
+                window.setTimeout(function () { var c = document.querySelector('#adminConfirmModal .admin-confirm-actions [data-admin-confirm-cancel]'); if (c) { c.focus(); } }, 120);
+                return pr;
+            }
+            return Promise.resolve(window.confirm(o.confirmText + '?\n\n' + o.message + '\n\n' + (o.details || []).join('\n')));
+        }
+        function rowsWord(n) { return num(n, 0) + ' row' + (n === 1 ? '' : 's'); }
+        /** mode: uids (one list entry, no dialog) | blocked | open. o.thenStep4: carry on to the confirm step afterwards. */
+        function skipRows(mode, uids, o) {
+            o = o || {};
+            if (S.busy) { return Promise.resolve(); }
+            var base = { job: S.job, mode: mode };
+            if (uids && uids.length) { base.uids = uids; }
+            var apply = function (fingerprint) {
+                var d = Object.assign({}, base, pagedExtra());
+                if (fingerprint) { d.fingerprint = fingerprint; }
+                return post('skip', d).then(function (a) {
+                    if (!a.ok) { msg(a.error || 'Nothing was skipped.'); return; }
+                    msg('Left out ' + rowsWord(a.skipped_now || 0) + '. They are listed in step 4 with the reason, and can be brought back.', 'ok');
+                    return refresh(a.summary).then(function () { if (o.thenStep4) { showStep(4); } });
+                });
+            };
+            if (mode === 'uids') { return apply(''); }
+            return post('skip', Object.assign({ dry: '1' }, base)).then(function (r) {
+                if (!r.ok) { msg(r.error || 'Could not check the rows.'); return; }
+                if (!r.entries) { msg('Nothing to skip: no row is waiting for an answer.', 'ok'); return; }
+                if (mode === 'open' && r.structural_open > 0) {
+                    return ask({ title: 'Some questions about your sheets are still open', message: num(r.structural_open, 0) + ' question' + (r.structural_open === 1 ? '' : 's') + ' about how a sheet or column is read ' + (r.structural_open === 1 ? 'is' : 'are') + ' still open in step 2. Answer ' + (r.structural_open === 1 ? 'it' : 'them') + ' first (each has a skip choice), then continue.', confirmText: 'Go to step 2', tone: 'warning' })
+                        .then(function (yes) { if (yes) { showStep(2); } });
+                }
+                var details = (r.groups || []).map(function (g) { return g.label + ': ' + num(g.n, 0); });
+                (r.samples || []).slice(0, 15).forEach(function (x) { details.push(shortName(x.name) + (x.ref ? ' (' + x.ref + ')' : '') + (x.why ? ' - ' + shortName(x.why) : '')); });
+                if (r.entries > 15) { details.push('… and ' + num(r.entries - 15, 0) + ' more'); }
+                return ask({
+                    title: o.title || ('Leave out ' + rowsWord(r.rows) + '?'),
+                    message: 'These ' + rowsWord(r.rows) + ' will NOT be imported and nothing about them is saved. The rest of the file carries on. In step 4 you can see why each was left out, bring any back, and download them to fix and import later.',
+                    details: details, confirmText: 'Leave out ' + rowsWord(r.rows), tone: 'warning'
+                }).then(function (yes) { if (yes) { return apply(r.fingerprint); } });
+            });
+        }
+        function unskip(uids) {
+            return post('unskip', Object.assign({ job: S.job, uids: uids }, pagedExtra())).then(function (r) {
+                if (!r.ok) { msg(r.error || 'Could not bring the row back.'); return; }
+                msg('Brought back ' + rowsWord(r.restored || 0) + '. It is asked again in step 3.', 'ok');
+                return refresh(r.summary);
+            });
+        }
+        function skipEntryBtn(e) {
+            var uids = e.kind === 'item' ? (e.it && e.it.uids) : (e.r && e.r.uid ? [e.r.uid] : []);
+            if (!uids || !uids.length) { return null; }
+            var b = h('button', 'btn-secondary di-btn di-btn--quiet di-q-skip', e.kind === 'item' ? 'Skip this item' : 'Skip this row');
+            b.type = 'button';
+            b.addEventListener('click', function () { b.disabled = true; skipRows('uids', uids).then(function () { if (document.body.contains(b)) { b.disabled = false; } }); });
+            return b;
+        }
+
+        // ---------- units for the items of a sheet, one by one ----------
+        function unitRow(it, sheet, units) {
+            var r = h('div', 'di-unitrow di-opt di-unitrow--' + (it.state || 'ask'));
+            var top = h('div', 'di-unitname');
+            add(top, itemNameEl(it.name), ' ', src(it.source), h('span', 'di-small', ' · row ' + it.row + (it.category ? ' · ' + it.category : '')));
+            r.appendChild(top);
+            var pick = function (unit) {
+                S.chain = S.chain.then(function () {
+                    var d = Object.assign({ job: S.job, sheet: sheet, mode: 'pick' }, pagedExtra());
+                    d['choices[' + it.nk + ']'] = unit;
+                    return post('unit_choice', d);
+                }).then(function (a) { if (!a.ok) { msg(a.error || 'That unit could not be saved.'); return; } msg(''); refresh(a.summary); });
+            };
+            var sg = it.suggestion;
+            if (it.state === 'chosen') {
+                add(r, h('p', 'di-q-note', 'Unit: ' + it.unit + ' (' + (it.unit_how || 'chosen by you') + ')'));
+            } else if (it.state === 'suggested') {
+                add(r, h('p', 'di-q-note', sg.reason + ' (' + sg.confidence + ' confidence, not used until you choose it)'));
+                var useB = h('button', 'btn-secondary di-btn', 'Use ' + sg.value); useB.type = 'button';
+                useB.addEventListener('click', function () { useB.disabled = true; pick(sg.value); });
+                r.appendChild(useB);
+            } else if (it.state === 'mixed') {
+                add(r, h('p', 'di-warn', 'Needs your choice: ' + (sg && sg.reason ? sg.reason : 'the evidence disagrees.')));
+            } else {
+                add(r, h('p', 'di-q-note', 'Needs your choice: nothing in your file or your stock says how this is counted.'));
+            }
+            var sel = h('select', 'di-select');
+            sel.setAttribute('aria-label', 'Unit for ' + it.name);
+            var ph = h('option', null, it.state === 'chosen' ? 'Change the unit…' : 'Choose a unit…'); ph.value = ''; sel.appendChild(ph);
+            (units || []).forEach(function (u) { var op = h('option', null, u); op.value = u; sel.appendChild(op); });
+            sel.addEventListener('change', function () { if (sel.value !== '') { sel.disabled = true; pick(sel.value); } });
+            r.appendChild(sel);
+            return r;
+        }
+        function unitItemsBlock(q) {
+            var sheet = q.sheet, st = q.unit_stats || {};
+            var ui = S.uiUnits[sheet] || (S.uiUnits[sheet] = { all: false, q: '', which: 'all', page: 1 });
+            var box = h('div', 'di-unitbox');
+            add(box, h('p', 'di-help', 'These are the new items on this sheet that have no unit. Each shows where it is in your file. Where your own records give a clear answer there is a suggested unit with the reason; nothing is used until you press its button.'));
+            var statN = h('p', 'di-q-note'); statN.setAttribute('role', 'status'); statN.setAttribute('aria-live', 'polite');
+            add(box, statN);
+            statN.textContent = (num(st.total, 0) + ' item' + (st.total === 1 ? '' : 's') + ': ' + num(st.chosen, 0) + ' chosen, ' + num(st.suggested, 0) + ' with a suggestion, ' + num(st.mixed, 0) + ' where the evidence disagrees, ' + num(st.ask, 0) + ' with no evidence (you choose those).');
+            var acts = h('div', 'di-actions');
+            if (st.suggested > 0) {
+                var us = h('button', 'btn-primary di-btn', 'Use the suggestions (' + num(st.suggested, 0) + ')'); us.type = 'button';
+                us.addEventListener('click', function () {
+                    us.disabled = true;
+                    post('unit_choice', { job: S.job, sheet: sheet, mode: 'suggested', dry: '1' }).then(function (r) {
+                        us.disabled = false;
+                        if (!r.ok) { msg(r.error || 'Could not check the suggestions.'); return; }
+                        if (!r.n) { msg('No item has a clear suggestion right now.'); return; }
+                        ask({ title: 'Use the suggested unit for ' + num(r.n, 0) + ' item' + (r.n === 1 ? '' : 's') + '?', message: 'Each of these items has a suggestion that comes from your own records (shown with its reason on the item). Items where the evidence disagrees are not included. You can change any item afterwards.',
+                            details: (r.samples || []).map(shortName).concat(r.n > 5 ? ['… and ' + num(r.n - 5, 0) + ' more'] : []), confirmText: 'Use ' + num(r.n, 0) + ' suggestion' + (r.n === 1 ? '' : 's') })
+                            .then(function (yes) {
+                                if (!yes) { return; }
+                                post('unit_choice', Object.assign({ job: S.job, sheet: sheet, mode: 'suggested', fingerprint: r.fingerprint }, pagedExtra())).then(function (a) {
+                                    if (!a.ok) { msg(a.error || 'Nothing was applied.'); return; }
+                                    msg('Used ' + num(a.applied, 0) + ' suggested unit' + (a.applied === 1 ? '' : 's') + '.', 'ok'); refresh(a.summary);
+                                });
+                            });
+                    });
+                });
+                acts.appendChild(us);
+            }
+            var list = h('div', 'di-unitlist');
+            var units = (S.sum && S.sum.unit_options) || [];
+            var drawList = function (items, extra) {
+                clear(list);
+                items.forEach(function (it) { list.appendChild(unitRow(it, sheet, units)); });
+                if (extra) { list.appendChild(extra); }
+            };
+            if (!ui.all) {
+                drawList(q.unit_items || [], (st.total - (st.chosen || 0)) > (q.unit_items || []).length ? h('p', 'di-help', 'Showing the first ' + (q.unit_items || []).length + '. Use "Show all" to search and see the rest.') : null);
+            }
+            var tog = h('button', 'btn-secondary di-btn', ui.all ? 'Show fewer' : 'Show all ' + num(st.total, 0) + ' items (searchable)'); tog.type = 'button';
+            tog.addEventListener('click', function () { ui.all = !ui.all; ui.page = 1; refresh(); });
+            acts.appendChild(tog);
+            box.appendChild(acts);
+            if (ui.all) {
+                var ctrl = h('div', 'di-bulk-row');
+                var si = document.createElement('input'); si.type = 'search'; si.className = 'di-fin'; si.value = ui.q; si.placeholder = 'Search these items'; si.setAttribute('aria-label', 'Search these items'); si.maxLength = 100;
+                var wh = h('select', 'di-select'); wh.setAttribute('aria-label', 'Show');
+                [['all', 'All'], ['ask', 'No evidence'], ['mixed', 'Evidence disagrees'], ['suggested', 'Has a suggestion'], ['chosen', 'Already chosen']].forEach(function (o) { var op = h('option', null, o[1]); op.value = o[0]; if (ui.which === o[0]) { op.selected = true; } wh.appendChild(op); });
+                var pg = h('div', 'di-pager');
+                var load = function () {
+                    post('unit_items', { job: S.job, sheet: sheet, q: ui.q, which: ui.which, page: ui.page }).then(function (r) {
+                        if (!r.ok) { msg(r.error || 'The list could not be loaded.'); return; }
+                        units = r.unit_options || units;
+                        drawList(r.items, r.items.length ? null : h('p', 'di-muted', 'No item matches.'));
+                        clear(pg);
+                        var pv = h('button', 'btn-secondary di-btn', 'Previous'), nx = h('button', 'btn-secondary di-btn', 'Next'); pv.type = 'button'; nx.type = 'button';
+                        pv.disabled = r.page <= 1; nx.disabled = r.page >= r.pages;
+                        pv.addEventListener('click', function () { ui.page = r.page - 1; load(); }); nx.addEventListener('click', function () { ui.page = r.page + 1; load(); });
+                        add(pg, pv, h('span', 'di-pager-in', ' Page ' + r.page + ' of ' + r.pages + ' · ' + num(r.total, 0) + ' item' + (r.total === 1 ? '' : 's') + ' '), nx);
+                    });
+                };
+                si.addEventListener('input', debounce(function () { ui.q = si.value.trim(); ui.page = 1; load(); }, 300));
+                wh.addEventListener('change', function () { ui.which = wh.value; ui.page = 1; load(); });
+                add(ctrl, si, wh); box.appendChild(ctrl);
+                box.appendChild(list); box.appendChild(pg);
+                load();
+            } else {
+                box.appendChild(list);
+            }
+            return box;
         }
 
         // ---------- step 2: what we found ----------
@@ -574,6 +765,8 @@
             add(prog, S.R.progText, track, S.R.jump,
                 h('small', 'di-fhelp', 'The bar counts questions you must answer before you can confirm; the button counts the items they belong to. The N key does the same as the button when you are not typing.'));
             p.appendChild(prog);
+            // can't fix some rows now? leave the blocked / unanswered ones out and carry on (their own box, shown only while any are left)
+            S.R.cont = h('div', 'di-continue'); S.R.cont.hidden = true; S.R.cont.setAttribute('role', 'status'); S.R.cont.setAttribute('aria-live', 'polite'); p.appendChild(S.R.cont);
             // questions that belong to a whole sheet (one answer for all its items)
             S.R.sheetQs = h('div', 'di-qs di-sheetqs'); S.R.sheetQs.hidden = true; p.appendChild(S.R.sheetQs);
             // the filter bar
@@ -661,6 +854,7 @@
             S.R.bulk = h('div', 'di-bulk'); S.R.bulk.hidden = true; p.appendChild(S.R.bulk);
             // only this one line is announced when the list changes (a screen reader would otherwise re-read every row)
             S.R.info = h('p', 'di-help di-resinfo'); S.R.info.setAttribute('role', 'status'); S.R.info.setAttribute('aria-live', 'polite'); p.appendChild(S.R.info);
+            p.appendChild(columnKey());
             S.R.results = h('div', 'di-tables'); S.R.results.id = 'diResults'; S.R.results.setAttribute('data-rh-results', '1');
             S.R.results.appendChild(h('p', 'di-muted di-loading', 'Loading the items…'));
             p.appendChild(S.R.results);
@@ -701,7 +895,7 @@
         }
         function absorb(r) {
             // r = a page reply (lite) or an answer/bulk/fields reply's summary (overview + page)
-            ['can_confirm', 'why_not', 'entry_counts', 'progress', 'confirm', 'counts', 'questions', 'sheets', 'totals', 'warnings', 'file', 'job'].forEach(function (k) { if (r[k] !== undefined) { S.sum[k] = r[k]; } });
+            ['can_confirm', 'why_not', 'entry_counts', 'progress', 'confirm', 'counts', 'questions', 'sheets', 'totals', 'warnings', 'file', 'job', 'skipped_by_code', 'skipped_by_you', 'heal_counts', 'heal_total', 'heals_undone', 'handled'].forEach(function (k) { if (r[k] !== undefined) { S.sum[k] = r[k]; } });
             var pg = r.page;
             if (!pg) { return; }
             if (pg.facets) { S.facets = pg.facets; } else if (S.page && S.page.facets) { pg.facets = S.page.facets; }
@@ -731,6 +925,24 @@
             var todo = (ec['needs-answer'] || 0) + (ec.blocked || 0);
             S.R.jump.disabled = todo === 0;
             S.R.jump.textContent = todo === 0 ? 'Nothing is waiting for an answer' : 'Jump to the next one that needs an answer (' + num(todo, 0) + ' item' + (todo === 1 ? '' : 's') + ' left)';
+            paintContinue(ec);
+        }
+        function paintContinue(ec) {
+            var box = clear(S.R.cont), blocked = ec.blocked || 0, open = (ec['needs-answer'] || 0) + blocked;
+            box.hidden = open === 0;
+            if (!open) { return; }
+            add(box, h('p', 'di-warn', 'Some rows are not ready' + (blocked ? ' (' + num(blocked, 0) + ' blocked: they cannot be imported as written)' : '') + '. Answer them, or fix the cell in your file and upload it again. If you cannot fix them now, you can leave them out and import everything else.'));
+            var acts = h('div', 'di-actions');
+            if (blocked) {
+                var sb = h('button', 'btn-secondary di-btn', 'Skip all ' + num(blocked, 0) + ' blocked item' + (blocked === 1 ? '' : 's') + '…'); sb.type = 'button';
+                sb.addEventListener('click', function () { sb.disabled = true; skipRows('blocked', [], {}).then(function () { if (document.body.contains(sb)) { sb.disabled = false; } }); });
+                acts.appendChild(sb);
+            }
+            var cb = h('button', 'btn-primary di-btn', 'Continue without the ' + (blocked ? 'blocked and unanswered' : 'unanswered') + ' rows…'); cb.type = 'button';
+            cb.addEventListener('click', function () { cb.disabled = true; skipRows('open', [], { thenStep4: true, title: 'Continue without ' + num(open, 0) + ' item' + (open === 1 ? '' : 's') + '?' }).then(function () { if (document.body.contains(cb)) { cb.disabled = false; } }); });
+            acts.appendChild(cb);
+            box.appendChild(acts);
+            box.appendChild(h('p', 'di-help', 'You see the list (with the reason for each) before anything is left out. Nothing is deleted: step 4 lists them, lets you bring any back, and gives you a file of them to fix and import later.'));
         }
         function paintFilters() {
             var fc = (S.page && S.page.facets) || S.facets;
@@ -1035,11 +1247,20 @@
             ['What happens', 'Whether a new ingredient is created or an existing one is matched.'],
             ['Status', 'Ready, needs an answer, skipped or blocked. The grey tag under a value is the cell it came from.']
         ];
+        /** One "What the columns mean" key above the list (not a helper line under every heading, which forced the table wider than its card). */
+        function columnKey() {
+            var d = h('details', 'di-details di-colkey');
+            d.appendChild(h('summary', null, 'What the columns mean'));
+            var dl = h('dl', 'di-colkey-list');
+            HEADS.forEach(function (c) { add(dl, h('dt', null, c[0]), h('dd', null, c[1])); });
+            d.appendChild(dl);
+            return d;
+        }
         function entriesTable(entries, shown) {
             var wrap = h('div', 'di-tablewrap');
             var tb = h('table', 'di-table di-items');
             var thead = h('thead'), tr = h('tr');
-            HEADS.forEach(function (c) { var th = h('th'); add(th, h('span', null, c[0]), h('small', 'di-th-help', c[1])); tr.appendChild(th); });
+            HEADS.forEach(function (c) { var th = h('th'); th.title = c[1]; add(th, h('span', null, c[0])); tr.appendChild(th); });
             thead.appendChild(tr); tb.appendChild(thead);
             var body = h('tbody');
             entries.forEach(function (e) {
@@ -1060,10 +1281,13 @@
         }
         function qRow(e, shown) {
             var qs = e.qs || [];
-            if (!qs.length && !e.wait_sheet) { return null; }
+            var stillOpen = e.status === 'needs-answer' || e.status === 'blocked';
+            if (!qs.length && !e.wait_sheet && !stillOpen) { return null; }
             var tr = h('tr', 'di-row di-row--detail di-row--q');
             var td = h('td'); td.colSpan = 8;
             var open = qs.filter(isOpenQ), done = qs.filter(function (q) { return !isOpenQ(q); });
+            // a blocked row can have no question card at all (two different items with one name): say why, and always offer to leave it out
+            if (!open.length && e.kind === 'row' && stillOpen && e.r && e.r.reason) { td.appendChild(h('p', 'di-warn', e.r.reason)); }
             open.forEach(function (q) {
                 if (shown[q.id]) { td.appendChild(h('p', 'di-q-note', 'The question "' + q.text.slice(0, 90) + (q.text.length > 90 ? '…' : '') + '" covers this item too: it is answered once, above.')); return; }
                 shown[q.id] = true; td.appendChild(questionCard(q));
@@ -1074,6 +1298,11 @@
                 d.appendChild(h('summary', null, 'Your answers on this item (' + done.length + ')'));
                 done.forEach(function (q) { if (!shown[q.id]) { shown[q.id] = true; d.appendChild(questionCard(q)); } });
                 td.appendChild(d);
+            }
+            if (stillOpen) {
+                // one Skip only: when an open question card above already offers it, don't repeat it under the row
+                var sb = open.some(function (q) { return q.can_skip; }) ? null : skipEntryBtn(e);
+                if (sb) { td.appendChild(sb); td.appendChild(h('p', 'di-help', 'Leaving it out does not delete anything: the row is just not imported. It is listed in step 4 with the reason, you can bring it back, and you can download it to fix and import later.')); }
             }
             tr.appendChild(td);
             return tr;
@@ -1088,6 +1317,13 @@
             var t5 = cell('Cost per unit', 'di-mute'); t5.textContent = '—';
             var t6 = cell('Par level', 'di-mute'); t6.textContent = '—';
             var t7 = cell('What happens'); t7.textContent = e.r.reason || 'Not imported.';
+            if (e.r.skipped_why !== undefined && e.r.uid) {
+                // left out by the person: say what was wrong with it, and let them bring it back
+                if (e.r.skipped_why) { t7.appendChild(h('div', 'di-small', 'It was: ' + e.r.skipped_why)); }
+                var bb = h('button', 'btn-secondary di-btn di-btn--quiet', 'Bring it back'); bb.type = 'button';
+                bb.addEventListener('click', function () { bb.disabled = true; unskip([e.r.uid]); });
+                t7.appendChild(bb);
+            }
             var t8 = cell('Status'); add(t8, pill(e.status));
             (e.r.warnings || []).forEach(function (w) { t8.appendChild(h('div', 'di-warnline', w)); });
             add(r, t1, t2, t3, t4, t5, t6, t7, t8);
@@ -1184,7 +1420,8 @@
                 card('Existing items updated', num(cf.updates || 0, 0), 'Existing items where you ticked a field to change.'),
                 card('Existing items left as they are', num(cf.kept || 0, 0), 'Matched to an ingredient already in stock, with nothing ticked.'),
                 card('Lines in the opening count', num(cf.in_count || 0, 0), 'Items with stock and a price. They go into one opening count that another manager must approve.'),
-                card('Rows skipped', num(c.skipped || 0, 0), 'Rows you chose to skip, or that are not items. They are not imported.'),
+                card('Rows left out', num(c.skipped || 0, 0), 'Rows you skipped, or left out because of an answer. They are not imported; the list is below.'),
+                card('Fixed for you', num(s.heal_total || 0, 0), 'Small spelling or format fixes made while reading the file, each with the cell it came from (list below, with Undo).'),
                 card('Still need an answer', num(toAnswer, 0), 'Questions or blocked rows to sort out before you can confirm.', toAnswer ? 'bad' : 'good'));
             p.appendChild(cards);
             var what = h('div', 'di-what');
@@ -1204,6 +1441,7 @@
             var noPriceN = cf.no_price || 0;
             if (noPriceN) { what.appendChild(h('p', 'di-warn', num(noPriceN, 0) + ' item' + (noPriceN === 1 ? ' has' : 's have') + ' stock but no price in the file. They are created without a cost and their stock is left out of the opening count. Add the cost later.')); }
             p.appendChild(what);
+            fixedSections(p);
             var why = h('p', 'di-why');
             var btn = h('button', 'btn-primary di-btn di-confirm');
             btn.type = 'button';
@@ -1211,6 +1449,7 @@
             if (!s.can_confirm) {
                 btn.disabled = true;
                 why.textContent = (s.why_not || 'Some questions still need an answer.') + ' (' + toAnswer + ' row' + (toAnswer === 1 ? '' : 's') + ' still to sort out.)';
+                if (toAnswer > 0) { why.textContent += ' Use "Continue without them" to leave those rows out and import the rest.'; }
             } else { why.textContent = 'Everything is answered. You can confirm.'; why.classList.add('is-ok'); }
             btn.addEventListener('click', function () {
                 if (btn.disabled || S.busy) { return; }
@@ -1230,9 +1469,110 @@
             var nav = h('div', 'di-actions');
             var back = h('button', 'btn-secondary di-btn'); back.type = 'button'; add(back, h('i', 'fas fa-arrow-left'), ' Back to review'); back.addEventListener('click', function () { showStep(3); });
             var cancel = h('button', 'btn-secondary di-btn di-btn--quiet', 'Cancel this import'); cancel.type = 'button'; cancel.addEventListener('click', function () { cancelJob(S.job, true); });
-            add(nav, back, cancel, btn);
+            add(nav, back, cancel);
+            if (!s.can_confirm && toAnswer > 0) {
+                var cont = h('button', 'btn-primary di-btn', 'Continue without them…'); cont.type = 'button';
+                cont.addEventListener('click', function () { cont.disabled = true; skipRows('open', [], { thenStep4: true, title: 'Continue without ' + num(toAnswer, 0) + ' item' + (toAnswer === 1 ? '' : 's') + '?' }).then(function () { if (document.body.contains(cont)) { cont.disabled = false; } }); });
+                nav.appendChild(cont);
+            }
+            nav.appendChild(btn);
             add(p, why, nav);
         }
+        /** Step 4 lists, worked out on the server: the rows left out (with the reason, a way back and a download) and the "Fixed for you" repairs (with Undo). */
+        function fixedSections(p) {
+            var s = S.sum || {};
+            var skippedN = (s.confirm && s.confirm.skipped) || 0;
+            if (skippedN > 0) {
+                var sec = h('div', 'di-what di-skipped');
+                add(sec, h('h4', 'di-h4', 'Rows left out (' + num(skippedN, 0) + ')'),
+                    helpLine('These rows will not be imported. Each shows what was wrong with it. Bring one back to answer it again, or download them all to fix in Excel and import later. After you confirm, the uploaded copy of your file is deleted, so download them first if you want them.'));
+                var dl = h('div', 'di-actions');
+                [['csv', 'Download skipped rows (CSV)'], ['xlsx', 'Download skipped rows (Excel)']].forEach(function (f) {
+                    var a = h('a', 'btn-secondary di-btn', ' ' + f[1]); a.href = page + '?action=skipped&job=' + S.job + '&format=' + f[0]; a.setAttribute('download', '');
+                    a.insertBefore(h('i', 'fas fa-download'), a.firstChild); dl.appendChild(a);
+                });
+                sec.appendChild(dl);
+                sec.appendChild(listBox('skipped', ['Item', 'Where', 'Why it was left out', ''], function (r, tr) {
+                    var t1 = cell('Item'); add(t1, itemNameEl(r.name || '(no name)'));
+                    var t2 = cell('Where'); add(t2, h('span', null, r.sheet), h('div', 'di-capline'), src(r.ref));
+                    var t3 = cell('Why it was left out'); add(t3, h('strong', null, r.label), h('div', 'di-small', r.why));
+                    var t4 = cell('');
+                    if (r.by_you) {
+                        var bb = h('button', 'btn-secondary di-btn di-btn--quiet', 'Bring it back'); bb.type = 'button';
+                        bb.addEventListener('click', function () { bb.disabled = true; unskip([r.uid]).then(function () { renderConfirm(); }); });
+                        t4.appendChild(bb);
+                    }
+                    add(tr, t1, t2, t3, t4);
+                }));
+                p.appendChild(sec);
+            }
+            var hd = s.handled || {};
+            if ((hd.sections || 0) + (hd.totals || 0) + (hd.notes || 0) > 0) {
+                p.appendChild(h('p', 'di-small', 'Also handled automatically while reading: ' + num(hd.sections || 0, 0) + ' heading row' + (hd.sections === 1 ? '' : 's') + ' used as categories, ' + num(hd.totals || 0, 0) + ' total line' + (hd.totals === 1 ? '' : 's') + ' left out, ' + num(hd.notes || 0, 0) + ' note, repeated-heading or stray row' + (hd.notes === 1 ? '' : 's') + ' left out. Step 2 lists them.'));
+            }
+            var healN = (s.heal_total || 0) + (s.heals_undone || 0);
+            if (healN > 0) {
+                var hs = h('div', 'di-what di-healed');
+                add(hs, h('h4', 'di-h4', 'Fixed for you (' + num(s.heal_total || 0, 0) + ')'),
+                    helpLine('Small format fixes made while reading your file: a unit spelled another way ("btl" for bottle) or a quantity typed together with its unit ("12 pcs"). Only spelling and format change, never a number or a name. Undo puts the value back as written and asks again.'));
+                hs.appendChild(listBox('heals', ['What was fixed', 'Cell', 'Before', 'After', ''], function (r, tr) {
+                    var t1 = cell('What was fixed'); add(t1, h('strong', null, r.label), r.item ? h('div', 'di-small', r.item) : null, h('div', 'di-small', r.text));
+                    var t2 = cell('Cell'); add(t2, src(r.source));
+                    var t3 = cell('Before'); t3.textContent = r.before;
+                    var t4 = cell('After'); t4.textContent = r.undone ? '(taken back)' : r.after;
+                    var t5 = cell('');
+                    if (r.undone || r.undoable) {
+                        var ub = h('button', 'btn-secondary di-btn di-btn--quiet', r.undone ? 'Fix it again' : 'Undo'); ub.type = 'button';
+                        ub.addEventListener('click', function () {
+                            ub.disabled = true;
+                            post('heal_undo', { job: S.job, heal: r.id, undo: r.undone ? '0' : '1' }).then(function (a) {
+                                if (!a.ok) { msg(a.error || 'That could not be changed.'); ub.disabled = false; return; }
+                                msg(r.undone ? 'The fix is back.' : 'Put back as written. Anything that now needs an answer is asked in step 3.', 'ok');
+                                refresh(a.summary).then(function () { renderConfirm(); });
+                            });
+                        });
+                        t5.appendChild(ub);
+                    }
+                    add(tr, t1, t2, t3, t4, t5);
+                }));
+                p.appendChild(hs);
+            }
+        }
+        /** A server-side list (search, reason filter, paging) of Step 4. kind: skipped | heals. */
+        function listBox(kind, heads, fillRow) {
+            var box = h('div', 'di-listbox'), st = { q: '', code: '', page: 1 };
+            var ctrl = h('div', 'di-bulk-row');
+            var si = document.createElement('input'); si.type = 'search'; si.className = 'di-fin'; si.placeholder = 'Search'; si.maxLength = 100; si.setAttribute('aria-label', 'Search this list');
+            var gs = h('select', 'di-select'); gs.setAttribute('aria-label', 'Show one kind');
+            var wrap = h('div', 'di-tablewrap'), tb = h('table', 'di-table di-lt'), thead = h('thead'), htr = h('tr');
+            heads.forEach(function (x) { htr.appendChild(h('th', null, x)); });
+            thead.appendChild(htr); tb.appendChild(thead);
+            var body = h('tbody'); tb.appendChild(body); wrap.appendChild(tb);
+            var pg = h('div', 'di-pager'), info = h('p', 'di-help'); info.setAttribute('role', 'status');
+            add(ctrl, ctlWrap('Search', si, 'Finds an item name, a cell such as C12, or a word in the reason.'), ctlWrap('Kind', gs, 'Only one kind of ' + (kind === 'heals' ? 'fix' : 'reason') + '.'));
+            add(box, ctrl, info, wrap, pg);
+            var load = function () {
+                post('fixed_list', { job: S.job, kind: kind, q: st.q, code: st.code, page: st.page }).then(function (r) {
+                    if (!r.ok) { msg(r.error || 'The list could not be loaded.'); return; }
+                    clear(gs);
+                    var all = h('option', null, 'All kinds'); all.value = ''; gs.appendChild(all);
+                    (r.groups || []).forEach(function (g) { var op = h('option', null, g.label + ' (' + num(g.n, 0) + ')'); op.value = g.code; if (st.code === g.code) { op.selected = true; } gs.appendChild(op); });
+                    clear(body);
+                    r.rows.forEach(function (row) { var tr = h('tr', 'di-row'); fillRow(row, tr); body.appendChild(tr); });
+                    info.textContent = r.total ? num(r.total, 0) + ' in this list.' : 'Nothing matches.';
+                    clear(pg);
+                    var pv = h('button', 'btn-secondary di-btn', 'Previous'), nx = h('button', 'btn-secondary di-btn', 'Next'); pv.type = 'button'; nx.type = 'button';
+                    pv.disabled = r.page <= 1; nx.disabled = r.page >= r.pages;
+                    pv.addEventListener('click', function () { st.page = r.page - 1; load(); }); nx.addEventListener('click', function () { st.page = r.page + 1; load(); });
+                    if (r.pages > 1) { add(pg, pv, h('span', 'di-pager-in', ' Page ' + r.page + ' of ' + r.pages + ' '), nx); }
+                });
+            };
+            si.addEventListener('input', debounce(function () { st.q = si.value.trim(); st.page = 1; load(); }, 300));
+            gs.addEventListener('change', function () { st.code = gs.value; st.page = 1; load(); });
+            load();
+            return box;
+        }
+        function ctlWrap(label, node, help) { var d = h('div', 'di-f'); add(d, h('span', 'di-f-l', label), node, h('small', 'di-fhelp', help)); return d; }
         function renderResult() {
             var p = clear(panels[4]);
             var r = S.result || {};
@@ -1244,10 +1584,13 @@
                 card('Ingredients created', num(r.created, 0), 'New ingredients added to your stock list.', 'good'),
                 card('Ingredients updated', num(r.updated, 0), 'Existing ingredients where you ticked a change.'),
                 card('Rows skipped', num(r.skipped_rows, 0), 'Rows that were skipped or are not items.'),
+                card('Left out by you', num(r.skipped_by_you || 0, 0), 'Blocked or unanswered rows you chose to leave out. The uploaded file is deleted now, so only the copy you downloaded can be fixed and imported later.'),
+                card('Fixed for you', num(r.fixed_for_you || 0, 0), 'Small spelling or format fixes made while reading the file.'),
                 card('Opening count lines', num(r.count_lines, 0), 'Stock quantities filed for approval. They are not in stock yet.'),
                 card('Expiry batches', num(r.expiry_batches, 0), 'Dated batches filed with the count, so expiry is tracked once approved.'));
             p.appendChild(cards);
             if (r.next_step) { p.appendChild(h('p', 'di-note', r.next_step)); }
+            if (r.learned) { p.appendChild(h('p', 'di-small', num(r.learned, 0) + ' unit or category choice' + (r.learned === 1 ? '' : 's') + ' you confirmed will be remembered and suggested next time (with "Remembered from your earlier import" as the reason).')); }
             if (r.stock_not_counted_no_cost && r.stock_not_counted_no_cost.length) {
                 var d = h('details', 'di-details');
                 d.appendChild(h('summary', null, r.stock_not_counted_no_cost.length + ' item(s) have stock but no price, so their stock was left out of the count'));

@@ -10,7 +10,8 @@
  * Access: admin-init.php (session, data_import permission, stock module) + this file (kill switch data_import_enabled, fail-closed,
  * and stock_management). A job can only be opened by the person who uploaded it, or an admin.
  *
- * AJAX (POST, CSRF, JSON): upload | summary | review_page | bulk | answer | fields | cancel | confirm | list.  GET ?action=csv&job=ID downloads the preview CSV.
+ * AJAX (POST, CSRF, JSON): upload | summary | review_page | bulk | answer | fields | skip | unskip | unit_items | unit_choice | heal_undo | fixed_list | cancel | confirm | list.
+ * GET ?action=csv&job=ID downloads the preview CSV; GET ?action=skipped&job=ID&format=csv|xlsx downloads the rows that were left out.
  * All page text built from the file (names, sheets, cells) is set with textContent in the browser - it is never parsed as HTML.
  */
 require_once 'admin-init.php';
@@ -140,6 +141,36 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET' && $action === 'csv') {
     exit;
 }
 
+// ---- download: the rows that were skipped, so they can be fixed and imported later --------------------------------------------
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET' && $action === 'skipped') {
+    $jobId = (int)($_GET['job'] ?? 0);
+    $job = di_job($pdo, $jobId, $uid, $isAdmin);
+    if (!$job || !in_array($job['status'], ['analysed', 'reviewing', 'confirmed', 'committed'], true)) {
+        http_response_code(404);
+        exit('That import is not available.');
+    }
+    if ($job['status'] === 'committed') {
+        http_response_code(410);
+        exit('This import is finished, and the copy of the file was deleted, so the skipped rows can no longer be copied from it. Download them before you press Confirm.');
+    }
+    @set_time_limit(180);
+    $fmt = (($_GET['format'] ?? 'csv') === 'xlsx') ? 'xlsx' : 'csv';
+    $f = import_job_skipped_export($pdo, $jobId, $fmt);
+    while (ob_get_level() > 0) {
+        @ob_end_clean();
+    }
+    if (empty($f['ok'])) {
+        http_response_code(422);
+        exit((string)$f['error']);
+    }
+    header('Content-Type: ' . $f['mime']);
+    header('X-Content-Type-Options: nosniff');
+    header('Content-Disposition: attachment; filename="' . $f['name'] . '"');
+    header('Cache-Control: no-store');
+    echo $f['body'];
+    exit;
+}
+
 // ---- EXPORT (Part B): the current stock as a tabbed Excel workbook -------------------------------------------------------
 // POST + CSRF, same gates as the rest of the page (kill switch, data_import AND stock_management were checked above). Read-only:
 // nothing is written to stock. Content comes from the live stock tables; see includes/import/export-stock.php.
@@ -254,7 +285,7 @@ if ($isAjax) {
     }
 
     // Opening an analysed job decodes and resolves its stored analysis: where this server's memory_limit cannot hold that (and cannot be raised), say so plainly.
-    if (in_array($action, ['summary', 'review_page', 'bulk', 'answer', 'fields'], true) && (int)($job['analysis_bytes'] ?? 0) > 0) {
+    if (in_array($action, ['summary', 'review_page', 'bulk', 'answer', 'fields', 'skip', 'unskip', 'unit_items', 'unit_choice', 'heal_undo', 'fixed_list'], true) && (int)($job['analysis_bytes'] ?? 0) > 0) {
         $mem = import_mem_check_review((int)$job['analysis_bytes'], import_default_aliases());
         if (!$mem['ok']) {
             di_json(['ok' => false, 'error' => $mem['message'], 'state' => 'toobig']);
@@ -326,6 +357,58 @@ if ($isAjax) {
             $r['summary']['state'] = 'review';
         }
         di_json($r);
+    }
+
+    // Leave rows out (blocked / unanswered). mode: uids (one list entry) | blocked | open.  dry=1 only describes; apply needs the dry run fingerprint.
+    if ($action === 'skip') {
+        $uids = $_POST['uids'] ?? [];
+        $r = import_job_skip($pdo, $jobId, ['mode' => (string)($_POST['mode'] ?? ''), 'uids' => is_array($uids) ? array_values(array_map('strval', $uids)) : [],
+            'dry' => !empty($_POST['dry']), 'fingerprint' => (string)($_POST['fingerprint'] ?? '')], $uid);
+        if (!empty($r['ok']) && empty($r['dry'])) {
+            $r['summary'] = import_job_review_view($pdo, $jobId, !empty($_POST['paged']) ? di_filter_post() : null, ['facets' => true]);
+            $r['summary']['state'] = 'review';
+        }
+        di_json($r);
+    }
+
+    if ($action === 'unskip') {
+        $uids = $_POST['uids'] ?? [];
+        $r = import_job_unskip($pdo, $jobId, is_array($uids) ? array_values(array_map('strval', $uids)) : [], $uid);
+        if (!empty($r['ok'])) {
+            $r['summary'] = import_job_review_view($pdo, $jobId, !empty($_POST['paged']) ? di_filter_post() : null, ['facets' => true]);
+            $r['summary']['state'] = 'review';
+        }
+        di_json($r);
+    }
+
+    if ($action === 'unit_items') {
+        di_json(import_job_unit_items($pdo, $jobId, (string)($_POST['sheet'] ?? ''), ['q' => (string)($_POST['q'] ?? ''), 'which' => (string)($_POST['which'] ?? 'all'),
+            'page' => (int)($_POST['page'] ?? 1), 'size' => (int)($_POST['size'] ?? 50)]));
+    }
+
+    if ($action === 'unit_choice') {
+        $ch = $_POST['choices'] ?? [];
+        $r = import_job_unit_choice($pdo, $jobId, ['sheet' => (string)($_POST['sheet'] ?? ''), 'mode' => (string)($_POST['mode'] ?? 'pick'), 'dry' => !empty($_POST['dry']),
+            'fingerprint' => (string)($_POST['fingerprint'] ?? ''), 'choices' => is_array($ch) ? $ch : []], $uid);
+        if (!empty($r['ok']) && empty($r['dry'])) {
+            $r['summary'] = import_job_review_view($pdo, $jobId, !empty($_POST['paged']) ? di_filter_post() : null, ['facets' => true]);
+            $r['summary']['state'] = 'review';
+        }
+        di_json($r);
+    }
+
+    if ($action === 'heal_undo') {
+        $r = import_job_heal_undo($pdo, $jobId, (string)($_POST['heal'] ?? ''), ($_POST['undo'] ?? '1') !== '0', $uid);
+        if (!empty($r['ok'])) {
+            $r['summary'] = import_job_review_view($pdo, $jobId, !empty($_POST['paged']) ? di_filter_post() : null, ['facets' => true]);
+            $r['summary']['state'] = 'review';
+        }
+        di_json($r);
+    }
+
+    if ($action === 'fixed_list') {       // Step 4 lists: rows left out (kind=skipped) and repairs (kind=heals), grouped / searched / paged on the server
+        di_json(import_job_list_view($pdo, $jobId, (($_POST['kind'] ?? '') === 'heals') ? 'heals' : 'skipped', ['q' => (string)($_POST['q'] ?? ''), 'code' => (string)($_POST['code'] ?? ''),
+            'page' => (int)($_POST['page'] ?? 1), 'size' => (int)($_POST['size'] ?? 50)]));
     }
 
     if ($action === 'cancel') {

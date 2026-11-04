@@ -87,6 +87,18 @@ if (!function_exists('import_default_aliases')) {
                 'tubs', 'unit', 'units', 'bunch', 'bunches', 'head', 'heads', 'loaf', 'loaves', 'ream', 'reams',
                 'keg', 'kegs', 'sheet', 'sheets', 'tube', 'tubes',
             ],
+            // different spellings of the SAME unit -> the spelling stock uses (format only, never a conversion: kg stays kg, a dozen is not 12).
+            // A hotel can add rows (import_aliases kind unit_synonym, term = the spelling, maps_to = the unit).
+            'unit_synonyms' => [
+                'btl' => 'bottle', 'btls' => 'bottle', 'bottles' => 'bottle', 'bottle' => 'bottle',
+                'pc' => 'pcs', 'pcs' => 'pcs', 'piece' => 'pcs', 'pieces' => 'pcs',
+                'ltr' => 'L', 'ltrs' => 'L', 'lt' => 'L', 'litre' => 'L', 'litres' => 'L', 'liter' => 'L', 'liters' => 'L', 'l' => 'L',
+                'kgs' => 'kg', 'kilo' => 'kg', 'kilos' => 'kg', 'kilogram' => 'kg', 'kilograms' => 'kg', 'kg' => 'kg',
+                'gm' => 'g', 'gms' => 'g', 'gram' => 'g', 'grams' => 'g', 'mls' => 'ml',
+                'pkt' => 'packet', 'pkts' => 'packet', 'packet' => 'packet', 'packets' => 'packet',
+                'ctn' => 'carton', 'ctns' => 'carton', 'cartons' => 'carton',
+                'doz' => 'dozen', 'dz' => 'dozen', 'cans' => 'can', 'boxes' => 'box', 'bx' => 'box', 'sachets' => 'sachet',
+            ],
             'section_words' => [
                 'beers', 'beer', 'spirits', 'wines', 'wine', 'soft drinks', 'juices', 'liqueurs', 'protein',
                 'vegetables', 'vegitables', 'fruits', 'fruit', 'dairy', 'dry goods', 'condiments', 'spices',

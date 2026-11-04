@@ -103,6 +103,43 @@ if (!function_exists('import_validate_sheet')) {
         return ['status' => 'ok', 'iso' => $iso, 'how' => $how];
     }
 
+    /**
+     * Self-healing rule "number-unit": a quantity written WITH its unit in one cell ("12 pcs", "2.5kg") is read as the number plus the unit word, both
+     * taken from that same cell. Nothing is converted and no digit changes ("2.5kg" is 2.5 and "kg", never 2500 g). Returns ['value'=>int|float,'unit'=>text]
+     * or null. $unitWords = the hotel's unit words (import_unit_words); null = do not check the word (the commit re-check uses that: it only has to
+     * prove the number and the word are really in the cell).
+     */
+    function import_heal_number_unit($v, ?array $unitWords): ?array
+    {
+        if (!is_string($v)) {
+            return null;
+        }
+        $s = trim(str_replace(["\xC2\xA0", "\xE2\x80\xAF"], ' ', $v));
+        if (!preg_match('/^(\d[\d.,]*)\s*([\p{L}]{1,12})\.?$/u', $s, $m)) {
+            return null;
+        }
+        $p = import_parse_number($m[1]);
+        if ($p['status'] !== 'ok' || $p['neg']) {
+            return null;
+        }
+        if ($unitWords !== null && !isset($unitWords[import_norm_text($m[2])])) {
+            return null;
+        }
+        return ['value' => $p['value'], 'unit' => $m[2]];
+    }
+
+    /** A unit word in a comparable form (synonyms from the hotel's alias table: "btl" and "bottles" are the same unit). */
+    function import_unit_canon_word(string $w, array $synonyms): string
+    {
+        $k = mb_strtolower(trim($w, " .\t"));
+        return isset($synonyms[$k]) ? mb_strtolower((string)$synonyms[$k]) : $k;
+    }
+
+    function import_fmt_heal_num($n): string
+    {
+        return is_float($n) ? rtrim(rtrim(number_format($n, 4, '.', ''), '0'), '.') : (string)$n;
+    }
+
     function import_unit_words(array $aliases): array
     {
         $set = [];
@@ -144,6 +181,18 @@ if (!function_exists('import_validate_sheet')) {
 
         $numberFields = ['qty_primary', 'qty_secondary', 'qty_single', 'max_level', 'min_level', 'unit_price'];
         $hasUnitCol = isset($by['unit']);
+        $undoHeals = array_flip(array_map('strval', (array)($opts['undo_heals'] ?? [])));
+        $synonyms = (array)($aliases['unit_synonyms'] ?? []);
+        $heals = [];
+        $healTotals = [];
+        // every repair is counted; the first 1000 of each rule per sheet are kept as records (a CSV where every number has a thousands separator would otherwise
+        // make a record per cell)
+        $addHeal = function (array $rec) use (&$heals, &$healTotals) {
+            $healTotals[$rec['rule']] = ($healTotals[$rec['rule']] ?? 0) + 1;
+            if ($healTotals[$rec['rule']] <= 1000) {
+                $heals[] = $rec;
+            }
+        };
 
         foreach ($struct['item_rows'] as $r) {
             $info = $struct['rows'][$r];
@@ -188,6 +237,7 @@ if (!function_exists('import_validate_sheet')) {
             }
 
             // ---- numbers ----
+            $healUnits = [];
             foreach ($numberFields as $f) {
                 if (!isset($by[$f])) {
                     continue;
@@ -206,6 +256,16 @@ if (!function_exists('import_validate_sheet')) {
                 if ($p['status'] === 'empty') {
                     continue;
                 }
+                if ($p['status'] === 'invalid' && $f !== 'unit_price') {
+                    // self-healing "number-unit" ("12 pcs"): reversible (the person can undo it, which brings the question back)
+                    $hid = substr(sha1('number-unit|' . $src), 0, 12);
+                    $hv = isset($undoHeals[$hid]) ? null : import_heal_number_unit($cell['v'], $unitWords);
+                    if ($hv !== null) {
+                        $row['fields'][$f] = ['value' => $hv['value'], 'source' => $src, 'how' => 'healed:number-unit'];
+                        $healUnits[] = ['field' => $f, 'cell' => $cell, 'src' => $src, 'unit' => $hv['unit'], 'id' => $hid, 'before' => import_norm_ws((string)$cell['v'])];
+                        continue;
+                    }
+                }
                 if ($p['status'] === 'invalid') {
                     $rowQs[] = import_q('bad-value', 'Row ' . $r . ': ' . ($labels[$f] ?? $f) . ' in ' . $cell['ref'] . ' is "' . import_norm_ws((string)$cell['v']) . '", which is not a number. Fix it in the sheet and upload again, or skip this row.', [
                         'sheet' => $name, 'row' => $r, 'cells' => [$src], 'bad' => true,
@@ -219,6 +279,23 @@ if (!function_exists('import_validate_sheet')) {
                         'options' => [['key' => 'skip', 'label' => 'Skip this row']],
                     ]);
                     continue;
+                }
+                if (is_string($cell['v']) && !preg_match('/^\d+(?:\.\d+)?$/', trim((string)$cell['v']))) {
+                    // self-healing "number-format": "1,250" / "12,5" / "MK 500" / "1 250" is read as the number it spells (the digits are the cell's own; no conversion).
+                    // Listed with before / after and undoable; undone = the cell is not read as a number (the question comes back).
+                    $fid = substr(sha1('number-format|' . $src), 0, 12);
+                    $before = import_norm_ws((string)$cell['v']);
+                    if (isset($undoHeals[$fid])) {
+                        $rowQs[] = import_q('bad-value', 'Row ' . $r . ': ' . ($labels[$f] ?? $f) . ' in ' . $cell['ref'] . ' is "' . $before . '". You took back the fix that reads it as the number ' . import_fmt_heal_num($p['value'])
+                            . ', so it is not used. Fix it in the sheet and upload again, or skip this row.', [
+                            'sheet' => $name, 'row' => $r, 'cells' => [$src], 'bad' => true,
+                            'options' => [['key' => 'skip', 'label' => 'Skip this row']],
+                        ]);
+                        continue;
+                    }
+                    $addHeal(['id' => $fid, 'rule' => 'number-format', 'sheet' => $name, 'row' => $r, 'uid' => $uid, 'field' => $f, 'source' => $src, 'before' => $before,
+                        'after' => import_fmt_heal_num($p['value']), 'undoable' => true,
+                        'text' => 'Read "' . $before . '" as the number ' . import_fmt_heal_num($p['value']) . ' (separators, a decimal comma or a currency word removed; the digits are the cell\'s own).']);
                 }
                 $row['fields'][$f] = ['value' => $p['value'], 'source' => $src, 'how' => $cell['formula'] ? 'formula-result' : 'as-written'];
                 if ($f === 'unit_price') {
@@ -269,6 +346,43 @@ if (!function_exists('import_validate_sheet')) {
                     continue;
                 }
                 $row['fields'][$f] = ['value' => $t, 'source' => import_cell_source($name, $cell), 'how' => 'as-written'];
+            }
+
+            // ---- healed "12 pcs" cells: the unit word must agree with the unit column and with the other healed cells of this row ----
+            if ($healUnits) {
+                $firstU = null;
+                $conflict = null;
+                foreach ($healUnits as $hu) {
+                    $canon = import_unit_canon_word($hu['unit'], $synonyms);
+                    $firstU = $firstU ?? $canon;
+                    if ($canon !== $firstU) {
+                        $conflict = 'the quantity cells give different units (' . $firstU . ' and ' . $canon . ')';
+                    }
+                }
+                if (isset($row['fields']['unit']) && $conflict === null && import_unit_canon_word($row['fields']['unit']['value'], $synonyms) !== $firstU) {
+                    $conflict = 'the unit column says "' . $row['fields']['unit']['value'] . '" but the quantity says "' . $healUnits[0]['before'] . '"';
+                }
+                if ($conflict !== null) {
+                    foreach ($healUnits as $hu) {
+                        unset($row['fields'][$hu['field']]);
+                    }
+                    $hu = $healUnits[0];
+                    $rowQs[] = import_q('bad-value', 'Row ' . $r . ': ' . ($labels[$hu['field']] ?? $hu['field']) . ' in ' . $hu['cell']['ref'] . ' is "' . $hu['before'] . '", which is not a plain number, and ' . $conflict
+                        . '. Fix it in the sheet and upload again, or skip this row.', [
+                        'sheet' => $name, 'row' => $r, 'cells' => [$hu['src']], 'bad' => true,
+                        'options' => [['key' => 'skip', 'label' => 'Skip this row']],
+                    ]);
+                } else {
+                    if (!isset($row['fields']['unit'])) {
+                        $row['fields']['unit'] = ['value' => $healUnits[0]['unit'], 'source' => $healUnits[0]['src'], 'how' => 'healed:number-unit'];
+                    }
+                    foreach ($healUnits as $hu) {
+                        $nv = import_fmt_heal_num($row['fields'][$hu['field']]['value']);
+                        $addHeal(['id' => $hu['id'], 'rule' => 'number-unit', 'sheet' => $name, 'row' => $r, 'uid' => $uid, 'field' => $hu['field'], 'source' => $hu['src'],
+                            'before' => $hu['before'], 'after' => $nv . ' ' . $hu['unit'], 'undoable' => true,
+                            'text' => 'Read "' . $hu['before'] . '" as the quantity ' . $nv . ' with the unit "' . $hu['unit'] . '" (both from the same cell).']);
+                    }
+                }
             }
 
             // ---- derived columns: shown, never imported ----
@@ -370,7 +484,7 @@ if (!function_exists('import_validate_sheet')) {
             unset($row['_qs']);
         }
         unset($row);
-        return ['rows' => $rows, 'questions' => $questions, 'skipped_rows' => $skipped];
+        return ['rows' => $rows, 'questions' => $questions, 'skipped_rows' => $skipped] + ($heals ? ['heals' => $heals, 'heal_totals' => $healTotals] : []);
     }
 
     /** Register a question descriptor on an analysis; returns its id and links it to the rows it names. */

@@ -695,9 +695,9 @@ if (!function_exists('import_rv_build')) {
                     return $V['qs'][$id];
                 }, $V['struct_qids']),
                 'entry_counts' => $V['entry_counts'], 'progress' => $V['progress'], 'confirm' => $V['confirm'],
-            ];
+            ] + import_cont_overview($res) + ['handled' => import_cont_handled_rows($an)];
         } else {
-            $out += ['can_confirm' => $res['can_confirm'], 'why_not' => $res['why_not'], 'entry_counts' => $V['entry_counts'], 'progress' => $V['progress']];
+            $out += ['can_confirm' => $res['can_confirm'], 'why_not' => $res['why_not'], 'entry_counts' => $V['entry_counts'], 'progress' => $V['progress']] + import_cont_overview($res);
         }
         if ($params !== null) {
             $p = import_rv_resolve_status(import_rv_params($params), $V['entry_counts']);

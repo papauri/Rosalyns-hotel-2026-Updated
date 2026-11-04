@@ -103,7 +103,8 @@ if (!function_exists('import_job_analyse')) {
                                         (SELECT COUNT(*) FROM stock_recipe_ingredients x WHERE x.ingredient_id = i.id) AS recipes
                                  FROM stock_ingredients i ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
         $units = [];
-        foreach (import_load_aliases($pdo)['units'] as $u) {
+        $aliasSet = import_load_aliases($pdo);
+        foreach ($aliasSet['units'] as $u) {
             $n = rh_ssi_norm_unit((string)$u);
             if ($n !== '') {
                 $units[$n] = true;
@@ -117,7 +118,8 @@ if (!function_exists('import_job_analyse')) {
         $u = array_keys($units);
         sort($u, SORT_NATURAL | SORT_FLAG_CASE);
         return ['existing' => $existing, 'unit_options' => $u, 'corrections' => import_load_name_corrections($pdo),
-            'price_evidence' => import_job_price_evidence($pdo, $existing), 'cost_limits' => import_cost_limits($pdo)];
+            'price_evidence' => import_job_price_evidence($pdo, $existing), 'cost_limits' => import_cost_limits($pdo),
+            'learned' => import_load_learned($pdo), 'unit_synonyms' => (array)$aliasSet['unit_synonyms']];
     }
 
     /**
@@ -217,6 +219,7 @@ if (!function_exists('import_job_analyse')) {
                     return (string)$e['name'];
                 }, $ctx['existing']),
                 'force_sheets' => array_values(array_map('strval', (array)($ov['force_sheets'] ?? []))),
+                'undo_heals' => array_values(array_map('strval', array_keys((array)($answers['_heal_undo'] ?? [])))),     // self-healing fixes the person took back
                 'max_bytes' => max(1, (int)rh_import_setting('data_import_max_mb', $pdo)) * 1048576,
             ],
         ];
@@ -413,6 +416,11 @@ if (!function_exists('import_job_analyse')) {
             return $fail($why);
         }
         $a = import_answer_shape($answer);
+        if ($a['key'] === '_skip') {
+            // "Skip this row/item": stored as skipped rows (the resolver leaves them out), not as an answer to the question
+            $r = import_job_skip_question($pdo, $jobId, $state, $q, $userId);
+            return $r['ok'] ? ['ok' => true, 'error' => '', 'can_confirm' => import_job_can_confirm($pdo, $jobId), 'reanalysed' => false] : $fail((string)$r['error']);
+        }
         $keep = ['key' => $a['key']];
         if (($q['type'] ?? '') === 'case-price' && $a['key'] === 'per-case') {
             $keep['pack_size'] = (int)$a['pack_size'];
@@ -600,6 +608,17 @@ if (!function_exists('import_job_analyse')) {
         $qs = [];
         foreach (array_merge($res['questions'], $res['extra_questions']) as $q) {
             $cv = [];
+            // a question whose rows were all left out ("Skip this row") is finished: it must not stay open in the counts
+            $allOut = false;
+            if (!empty($q['row_uids'])) {
+                $allOut = true;
+                foreach ($q['row_uids'] as $u0) {
+                    if (($res['rows'][$u0]['status'] ?? '') !== 'skipped') {
+                        $allOut = false;
+                        break;
+                    }
+                }
+            }
             if (in_array($q['type'], ['conflict', 'merge-conflict'], true)) {
                 $u = array_map('strval', (array)($q['row_uids'] ?? []));
                 sort($u);
@@ -608,11 +627,16 @@ if (!function_exists('import_job_analyse')) {
                     $cv[] = ['key' => 'use:' . $v['label'], 'label' => $q['pack_labels']['use:' . $v['label']] ?? $v['label'], 'source' => $v['source'], 'field' => $c['field']];
                 }
             }
-            $qs[] = [
+            $extraQ = [];
+            if ($q['type'] === 'no-unit') {
+                $extraQ = ['unit_stats' => import_cont_unit_stats($res, (string)$q['sheet']), 'unit_items' => import_cont_unit_preview($res, (string)$q['sheet'])];
+            }
+            $qs[] = $extraQ + [
                 'conflict_values' => $cv, 'pack_size' => $q['answer_detail']['pack_size'] ?? null,
                 'id' => $q['id'], 'key' => $q['qkey'], 'type' => $q['type'], 'text' => $q['text'], 'blocking' => (bool)$q['blocking'],
                 'bad' => !empty($q['bad']), 'sheet' => $q['sheet'], 'row' => $q['row'], 'cells' => $q['cells'], 'options' => $q['options'],
-                'default' => $q['default'], 'answer' => $q['answer'], 'auto_filled' => !empty($q['auto']), 'row_uids' => $q['row_uids'] ?? [],
+                'default' => $q['default'], 'answer' => ($allOut && ($q['answer'] ?? null) === null) ? '_skipped' : $q['answer'], 'auto_filled' => !empty($q['auto']), 'row_uids' => $q['row_uids'] ?? [],
+                'can_skip' => !empty($q['blocking']) && !empty($q['row_uids']) && ($q['answer'] ?? null) === null && !$allOut,
                 'suggestion' => $q['suggestion'] ?? null, 'synthetic' => !empty($q['synthetic']),
                 'evidence' => $q['evidence'] ?? null,     // the numbers a price question was judged on (nothing invented), for the screen / read-only helper
                 'conflict_field' => $conflictByQ[$q['id']]['field'] ?? ($q['conflict_field'] ?? null),
@@ -801,3 +825,5 @@ if (!function_exists('import_job_analyse')) {
         return ['ok' => true, 'error' => '', 'analysis' => $analysis, 'res' => $res, 'ctx' => $ctx, 'violations' => []];
     }
 }
+
+require_once __DIR__ . '/continue.php';

@@ -631,7 +631,7 @@ try {
         $bulkRounds++; $bulkApplied += $x['applied'];
     }
     $left = array_values(array_filter(import_job_review_summary($pdo, $jBig)['questions'], function ($q) { return $q['blocking'] && ($q['answer'] === null || $q['answer'] === '') && $q['options']; }));
-    $ck('bulk: group after group the job is brought down to a handful of single questions', $bulkRounds >= 2 && $bulkApplied > 100 && count($left) < 40, $bulkRounds . ' rounds, ' . $bulkApplied . ' answers, ' . count($left) . ' left');
+    $ck('bulk: group after group the job is brought down to a handful of single questions (a question whose rows were all skipped by another answer is finished, so one round can settle several groups)', $bulkRounds >= 1 && $bulkApplied > 100 && count($left) < 40, $bulkRounds . ' rounds, ' . $bulkApplied . ' answers, ' . count($left) . ' left');
     foreach ($left as $q) {
         $keys = array_column($q['options'], 'key');
         $pick = in_array('skip', $keys, true) ? 'skip' : (in_array('two-batches', $keys, true) ? 'two-batches' : (in_array('per-unit', $keys, true) ? 'per-unit' : $keys[0]));
@@ -677,6 +677,164 @@ try {
     import_job_state_memo(false);
     $ck('speed: the lean overview carries no item list (a fraction of the old full summary) and a second call reuses the resolved job', $vv['ok'] && !isset($vv['items']) && strlen(json_encode($vv)) < strlen(json_encode($full)) / 5 && $vv2['ok'], round(microtime(true) - $tM, 2) . ' s');
     $ck('confirm numbers: the lean overview gives the Step 4 counts (creates + updates + kept = ready items)', $vv['confirm']['creates'] + $vv['confirm']['updates'] + $vv['confirm']['kept'] === (int)$vv['entry_counts']['ready']);
+
+
+    // ---- smarter: leaving rows out, units item by item, repairs, learning ---------------------------------------------------------
+    $answersOf = function (int $j) use ($pdo) { return (string)import_job_get($pdo, $j)['answers_json']; };
+    $uidOf = function (array $sum, string $name) { foreach ($sum['rows'] as $r0) { if ($r0['name'] === $name) { return $r0['uid']; } } return null; };
+    $rowsSk = [
+        [$n('Sk Good'), '', '5', 'kg', '100', '', ''],
+        [$n('Sk Bad'), '', 'lots', 'kg', '100', '', ''],
+        [$n('Sk Neg'), '', '-3', 'kg', '100', '', ''],
+        [$n('Sk Twin'), '', '2', 'kg', '50', '', ''],
+        [$n('Sk Twin'), '', '3', 'kg', '60', '', ''],
+    ];
+    $upS = $upload($put($csv($rowsSk), 'skip.csv'), 'zzt-skip-' . $run . '.csv', $admin);
+    $jS = (int)$upS['job_id'];
+    import_job_analyse($pdo, $jS);
+    $sS = import_job_review_summary($pdo, $jS);
+    $ck('skip: two blocked rows (not a number, negative) and an unanswered duplicate stop the confirm', $sS['counts']['blocked'] === 2 && $sS['counts']['needs-answer'] === 2 && !$sS['can_confirm'] && strpos($sS['why_not'], 'skip them') !== false, json_encode($sS['counts']));
+    $a0 = $answersOf($jS);
+    $dS = import_job_skip($pdo, $jS, ['mode' => 'blocked', 'dry' => true], $admin);
+    $ck('skip (dry run): says how many rows, names them with the plain reason and the cell, and changes nothing', $dS['ok'] && $dS['entries'] === 2 && $dS['rows'] === 2 && $dS['groups'][0]['code'] === 'bad-value' && strpos($dS['samples'][0]['why'], 'not a number') !== false && $dS['samples'][0]['ref'] !== '' && $answersOf($jS) === $a0, json_encode($dS));
+    $wrongFp = import_job_skip($pdo, $jS, ['mode' => 'blocked', 'fingerprint' => 'nope'], $admin);
+    $ck('skip: a fingerprint that does not match what was previewed is refused, nothing skipped', !$wrongFp['ok'] && $answersOf($jS) === $a0);
+    $aS1 = import_job_skip($pdo, $jS, ['mode' => 'blocked', 'fingerprint' => $dS['fingerprint']], $admin);
+    $sS1 = import_job_review_summary($pdo, $jS);
+    $ck('skip (bulk blocked): both blocked rows are skipped, the rest is untouched', $aS1['ok'] && $aS1['skipped_now'] === 2 && $sS1['counts']['blocked'] === 0 && $sS1['counts']['skipped'] === 2 && $sS1['counts']['needs-answer'] === 2, json_encode($sS1['counts']));
+    $ck('skip: the skipped rows are recorded with who, when, the original reason and its code', (function () use ($pdo, $jS, $admin) { $a = json_decode((string)import_job_get($pdo, $jS)['answers_json'], true)['_skip_rows'] ?? []; $x = reset($a); return count($a) === 2 && (int)$x['by'] === $admin && $x['code'] === 'bad-value' && strpos($x['why'], 'not a number') !== false && $x['at'] !== ''; })());
+    $uidBad = $uidOf($sS1, $n('Sk Bad'));
+    $un = import_job_unskip($pdo, $jS, [$uidBad], $admin);
+    $ck('skip (undo): bringing a row back asks about it again', $un['ok'] && $un['restored'] === 1 && import_job_review_summary($pdo, $jS)['counts']['blocked'] === 1);
+    $qBad = null; foreach (import_job_review_summary($pdo, $jS)['questions'] as $q0) { if ($q0['type'] === 'bad-value' && in_array($uidBad, $q0['row_uids'], true)) { $qBad = $q0; } }
+    $ck('skip: a blocked question card offers skipping ("can_skip") and the exact cell to fix', $qBad && $qBad['can_skip'] === true && count($qBad['cells']) === 1 && strpos($qBad['text'], 'not a number') !== false);
+    $rSk = import_job_answer($pdo, $jS, $qBad['id'], '_skip', $admin);
+    $sS2 = import_job_review_summary($pdo, $jS);
+    $qBad2 = null; foreach ($sS2['questions'] as $q0) { if ($q0['id'] === $qBad['id']) { $qBad2 = $q0; } }
+    $ck('skip (answer): "Skip this row" is accepted as the answer to a blocked question; its rows are skipped and the question counts as done', $rSk['ok'] && $sS2['counts']['blocked'] === 0 && $qBad2['answer'] === '_skipped');
+    $ck('skip: a made-up answer is still refused', !import_job_answer($pdo, $jS, $qBad['id'], 'nonsense', $admin)['ok']);
+    $dO = import_job_skip($pdo, $jS, ['mode' => 'open', 'dry' => true], $admin);
+    $ck('continue (dry run): the unanswered duplicate is the one thing left, with its reason', $dO['ok'] && $dO['entries'] === 1 && $dO['rows'] === 2 && strpos($dO['groups'][0]['code'], 'duplicate') === 0 && $dO['structural_open'] === 0, json_encode($dO));
+    $aO = import_job_skip($pdo, $jS, ['mode' => 'open', 'fingerprint' => $dO['fingerprint']], $admin);
+    $sS3 = import_job_review_summary($pdo, $jS);
+    $ck('continue: after leaving the unanswered rows out the import can be confirmed', $aO['ok'] && $sS3['can_confirm'] && $sS3['counts']['skipped'] === 4 && $sS3['counts']['ready'] === 1, json_encode($sS3['counts']));
+    $ov = import_job_review_view($pdo, $jS, null, []);
+    $ck('continue: the overview carries the skipped count by reason and the repair counts', $ov['ok'] && $ov['skipped_by_you'] === 4 && ($ov['skipped_by_code']['bad-value'] ?? 0) >= 1 && isset($ov['heal_counts']));
+    $lS = import_job_list_view($pdo, $jS, 'skipped', []);
+    $lS2 = import_job_list_view($pdo, $jS, 'skipped', ['q' => 'twin']);
+    $ck('Step 4 list: the skipped rows are grouped by reason, searchable, and say what was wrong', $lS['total'] === 4 && count($lS['groups']) >= 2 && $lS2['total'] === 2 && $lS2['rows'][0]['by_you'] === true && $lS2['rows'][0]['why'] !== '', json_encode([$lS['groups'], $lS2['total']]));
+    $csvS = import_job_skipped_export($pdo, $jS, 'csv');
+    $ck('skipped export (csv): lists the skipped rows with their row numbers, the reason and what the row said; none of the good row', $csvS['ok'] && strpos($csvS['body'], $n('Sk Bad')) !== false && strpos($csvS['body'], 'lots') !== false && strpos($csvS['body'], 'not a number') !== false && strpos($csvS['body'], $n('Sk Good')) === false && substr_count($csvS['body'], $n('Sk Twin')) >= 2);
+    $xlsS = import_job_skipped_export($pdo, $jS, 'xlsx');
+    $ck('skipped export (xlsx): a real workbook', $xlsS['ok'] && substr($xlsS['body'], 0, 2) === 'PK' && strlen($xlsS['body']) > 500 && substr($xlsS['name'], -5) === '.xlsx');
+    $cS = import_commit_stock($pdo, $jS, $admin);
+    $nameIn = function (string $nm) use ($pdo) { $st = $pdo->prepare('SELECT COUNT(*) FROM stock_ingredients WHERE name = ?'); $st->execute([$nm]); return (int)$st->fetchColumn(); };
+    $ck('commit: only the good row reaches the database; the four skipped rows (bad, negative, the duplicate pair) are absent', $cS['ok'] && $nameIn($n('Sk Good')) === 1 && $nameIn($n('Sk Bad')) === 0 && $nameIn($n('Sk Neg')) === 0 && $nameIn($n('Sk Twin')) === 0 && ($cS['result']['created'] ?? -1) === 1, json_encode($cS['result'] ?? $cS['error']));
+    $ck('commit: the result says how many rows the person left out', ($cS['result']['skipped_by_you'] ?? -1) === 4);
+
+    // ---- skipping "different items" rows (blocked with no question) and unit-clash / archived -------------------------------------
+    $upD = $upload($put($csv([[$n('Dup Item'), '', '2', 'kg', '10', '', ''], [$n('Dup Item'), '', '3', 'kg', '10', '', ''], [$n('Dup Fine'), '', '1', 'kg', '10', '', '']]), 'dup.csv'), 'zzt-dup-' . $run . '.csv', $admin);
+    $jD = (int)$upD['job_id'];
+    import_job_analyse($pdo, $jD);
+    $qD = null; foreach (import_job_review_summary($pdo, $jD)['questions'] as $q0) { if (strpos($q0['type'], 'duplicate') === 0) { $qD = $q0; } }
+    import_job_answer($pdo, $jD, $qD['id'], 'separate-items', $admin);
+    $sD = import_job_review_summary($pdo, $jD);
+    $ck('skip: "different items, same name" blocks both rows with no question card ...', $sD['counts']['blocked'] === 2 && !$sD['can_confirm']);
+    $dD = import_job_skip($pdo, $jD, ['mode' => 'blocked', 'dry' => true], $admin);
+    $aD = import_job_skip($pdo, $jD, ['mode' => 'blocked', 'fingerprint' => $dD['fingerprint']], $admin);
+    $ck('skip: ... and they can still be skipped, which unblocks the import', $dD['groups'][0]['code'] === 'separate-items' && $aD['ok'] && import_job_review_summary($pdo, $jD)['can_confirm']);
+    $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit, par_level, reorder_point) VALUES (?, 'Pantry', 'crate', 0, 10, 0, 0)")->execute([$n('Clash Item')]);
+    $upC = $upload($put($csv([[$n('Clash Item'), '', '2', 'kg', '10', '', ''], [$n('Clash Fine'), '', '1', 'kg', '10', '', '']]), 'clash.csv'), 'zzt-clash-' . $run . '.csv', $admin);
+    $jC = (int)$upC['job_id'];
+    import_job_analyse($pdo, $jC);
+    $sC = import_job_review_summary($pdo, $jC);
+    $qC = null; foreach ($sC['questions'] as $q0) { if ($q0['type'] === 'unit-clash') { $qC = $q0; } }
+    $ck('blocked: a unit that differs from stock is a blocked "unit clash" with a skip choice', $qC && $qC['bad'] && in_array('skip', array_column($qC['options'], 'key'), true) && $sC['counts']['blocked'] === 1);
+    import_job_answer($pdo, $jC, $qC['id'], 'skip', $admin);
+    $sC2 = import_job_review_summary($pdo, $jC);
+    $itC = null; foreach ($sC2['items'] as $it0) { if ($it0['typed_name'] === $n('Clash Item')) { $itC = $it0; } }
+    $ck('skip: answering skip to a unit clash really takes the item out of the import (it used to stay ready)', $sC2['counts']['blocked'] === 0 && ($itC === null || $itC['status'] === 'skipped') && $sC2['can_confirm']);
+
+    // ---- units item by item, suggestions, learning --------------------------------------------------------------------------------
+    $peerCat = $n('Peer Beers');
+    for ($z = 0; $z < 8; $z++) {
+        $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit, par_level, reorder_point) VALUES (?, ?, 'bottle', 0, 100, 0, 0)")->execute([$n('PeerBeer ' . $z), $peerCat]);
+    }
+    $rowsU = [
+        [$peerCat, '', '', '', '', '', ''],
+        [$n('NewLager'), '', '4', '', '100', '', ''],
+        [$n('NewStout'), '', '6', '', '100', '', ''],
+        [$n('Odd Spices'), '', '', '', '', '', ''],
+        [$n('OddThing'), '', '2', '', '100', '', ''],
+    ];
+    $upU = $upload($put($csv($rowsU), 'units.csv'), 'zzt-units-' . $run . '.csv', $admin);
+    $jU = (int)$upU['job_id'];
+    import_job_analyse($pdo, $jU);
+    $sU = import_job_review_summary($pdo, $jU);
+    $qU = null; foreach ($sU['questions'] as $q0) { if ($q0['type'] === 'no-unit') { $qU = $q0; } }
+    $ck('units: the sheet question lists its items, with a count of what is chosen / suggested / needs a choice', $qU && $qU['unit_stats']['total'] === 3 && $qU['unit_stats']['suggested'] === 2 && $qU['unit_stats']['ask'] === 1 && count($qU['unit_items']) === 3, json_encode($qU['unit_stats'] ?? $sU['questions']));
+    $byN = []; foreach ($qU['unit_items'] as $x) { $byN[$x['name']] = $x; }
+    $ck('units: every item carries its name, row, source cell and category; a suggestion cites its evidence (8 of 8 peers) and is NOT applied', ($byN[$n('NewLager')]['suggestion']['value'] ?? '') === 'bottle' && $byN[$n('NewLager')]['suggestion']['confidence'] === 'high' && $byN[$n('NewLager')]['suggestion']['evidence'][0]['n'] === 8 && $byN[$n('NewLager')]['source'] !== '' && $byN[$n('NewLager')]['category'] === $peerCat && $byN[$n('NewLager')]['unit'] === null && $byN[$n('OddThing')]['state'] === 'ask' && !$sU['can_confirm'], json_encode($byN[$n('NewLager')] ?? []));
+    $uiAll = import_job_unit_items($pdo, $jU, $qU['sheet'], ['q' => 'stout']);
+    $ck('units: "show all" is searchable and filterable on the server', $uiAll['ok'] && $uiAll['total'] === 1 && $uiAll['items'][0]['name'] === $n('NewStout') && import_job_unit_items($pdo, $jU, $qU['sheet'], ['which' => 'ask'])['total'] === 1);
+    $uc0 = $answersOf($jU);
+    $dU = import_job_unit_choice($pdo, $jU, ['sheet' => $qU['sheet'], 'mode' => 'suggested', 'dry' => true], $admin);
+    $ck('units (dry run): "Use suggestions" says how many and who, changes nothing', $dU['ok'] && $dU['n'] === 2 && $answersOf($jU) === $uc0);
+    $bad = import_job_unit_choice($pdo, $jU, ['sheet' => $qU['sheet'], 'mode' => 'suggested', 'fingerprint' => 'nope'], $admin);
+    $ck('units: a stale fingerprint is refused', !$bad['ok'] && $answersOf($jU) === $uc0);
+    $aU = import_job_unit_choice($pdo, $jU, ['sheet' => $qU['sheet'], 'mode' => 'suggested', 'fingerprint' => $dU['fingerprint']], $admin);
+    $sU2 = import_job_review_summary($pdo, $jU);
+    $stU = []; foreach ($sU2['items'] as $it0) { $stU[$it0['typed_name']] = $it0; }
+    $ck('units (click): the two suggested items now have the unit and are ready; the item with no evidence still waits', $aU['ok'] && $aU['applied'] === 2 && $stU[$n('NewLager')]['unit'] === 'bottle' && $stU[$n('NewLager')]['status'] === 'ready' && $stU[$n('OddThing')]['status'] === 'needs-answer' && !$sU2['can_confirm']);
+    $ck('units: a unit that is not in the hotel list is refused; an item that is not waiting is refused', !import_job_unit_choice($pdo, $jU, ['sheet' => $qU['sheet'], 'mode' => 'pick', 'choices' => [import_norm_text($n('OddThing')) => 'furlong']], $admin)['ok'] && !import_job_unit_choice($pdo, $jU, ['sheet' => $qU['sheet'], 'mode' => 'pick', 'choices' => ['not an item' => 'kg']], $admin)['ok']);
+    $nkOdd = import_norm_text($n('OddThing'));
+    $pU = import_job_unit_choice($pdo, $jU, ['sheet' => $qU['sheet'], 'mode' => 'pick', 'choices' => [$nkOdd => 'kg']], $admin);
+    $sU3 = import_job_review_summary($pdo, $jU);
+    $qU3 = null; foreach ($sU3['questions'] as $q0) { if ($q0['type'] === 'no-unit') { $qU3 = $q0; } }
+    $ck('units (one item): choosing the unit for the one remaining item finishes the sheet question and the import can be confirmed', $pU['ok'] && $qU3['answer'] === 'per-item' && $sU3['can_confirm'], json_encode($sU3['counts']));
+    $learnN = function () use ($pdo, $run) { return (int)$pdo->query("SELECT COUNT(*) FROM import_aliases WHERE kind LIKE 'learned\\_%' AND term LIKE 'zzt " . strtolower($run) . " %'")->fetchColumn(); };
+    $ck('learning: nothing is remembered before the import is committed', $learnN() === 0);
+    $cfU = import_commit_stock($pdo, $jU, $admin, ['fail_after_apply' => true]);
+    $ck('learning: a rolled-back commit teaches nothing', !$cfU['ok'] && $learnN() === 0);
+    $cU = import_commit_stock($pdo, $jU, $admin);
+    $ingU = []; foreach ($pdo->query("SELECT name, unit, category FROM stock_ingredients WHERE name LIKE 'ZZT $run New%' OR name LIKE 'ZZT $run Odd%'")->fetchAll(PDO::FETCH_ASSOC) as $x) { $ingU[$x['name']] = $x; }
+    $ck('commit: the chosen units are what was created (bottle, bottle, kg)', $cU['ok'] && ($ingU[$n('NewLager')]['unit'] ?? '') === 'bottle' && ($ingU[$n('NewStout')]['unit'] ?? '') === 'bottle' && ($ingU[$n('OddThing')]['unit'] ?? '') === 'kg', json_encode($ingU));
+    $lrn = import_load_learned($pdo);
+    $ck('learning: after the commit each confirmed unit is remembered as a hotel-learned row (who and when kept)', $learnN() >= 3 && ($lrn['unit_item'][import_norm_text($n('OddThing'))]['v'] ?? '') === 'kg' && (int)($lrn['unit_item'][import_norm_text($n('OddThing'))]['by'] ?? 0) === $admin && !empty($lrn['unit_item'][import_norm_text($n('OddThing'))]['at']) && ($cU['result']['learned'] ?? 0) >= 3, json_encode($cU['result'] ?? []));
+    $isLearned = (int)$pdo->query("SELECT COUNT(*) FROM import_aliases WHERE kind LIKE 'learned\\_%' AND is_hotel_learned = 1 AND term LIKE 'zzt " . strtolower($run) . " %'")->fetchColumn();
+    $ck('learning: learned rows are marked as the hotel\'s own and never leak into the engine\'s header / unit vocabulary', $isLearned === $learnN() && !array_intersect($pdo->query("SELECT DISTINCT kind FROM import_aliases WHERE kind LIKE 'learned\_%'")->fetchAll(PDO::FETCH_COLUMN), ['unit', 'field']) && !in_array('zzt', array_map('strtolower', import_load_aliases($pdo)['units']), true));
+    $sgNext = import_infer_unit(import_infer_index([], $lrn, [], import_load_aliases($pdo)['unit_synonyms']), ['name' => $n('OddThing'), 'name_source' => 'S!A1', 'category' => 'Whatever', 'sheet' => 'S', 'category_how' => 'section-row'], ['kg', 'bottle']);
+    $ck('learning: the next import suggests it with high confidence and says "Remembered from your earlier import"', $sgNext['value'] === 'kg' && $sgNext['confidence'] === 'high' && strpos($sgNext['reason'], 'Remembered from your earlier import') !== false);
+    $ck('seed: the unit-spelling table is seeded for hotels that were seeded before it existed (per kind)', (int)$pdo->query("SELECT COUNT(*) FROM import_aliases WHERE kind = 'unit_synonym' AND is_hotel_learned = 0")->fetchColumn() > 20 && import_load_aliases($pdo)['unit_synonyms']['btl'] === 'bottle');
+
+    // ---- "skip these items" on the unit question leaves out only the items still waiting for a unit ------------------------------------
+    $upK = $upload($put($csv([[$n('Keep A'), '', '2', '', '100', '', ''], [$n('Keep B'), '', '2', '', '100', '', ''], [$n('Keep C'), '', '2', '', '100', '', '']]), 'keep.csv'), 'zzt-keep-' . $run . '.csv', $admin);
+    $jK = (int)$upK['job_id'];
+    import_job_analyse($pdo, $jK);
+    $qK = null; foreach (import_job_review_summary($pdo, $jK)['questions'] as $q0) { if ($q0['type'] === 'no-unit') { $qK = $q0; } }
+    import_job_unit_choice($pdo, $jK, ['sheet' => $qK['sheet'], 'mode' => 'pick', 'choices' => [import_norm_text($n('Keep A')) => 'kg']], $admin);
+    $qK = null; foreach (import_job_review_summary($pdo, $jK)['questions'] as $q0) { if ($q0['type'] === 'no-unit') { $qK = $q0; } }
+    $rK = import_job_answer($pdo, $jK, $qK['id'], '_skip', $admin);
+    $sK = import_job_review_summary($pdo, $jK);
+    $stK = []; foreach ($sK['items'] as $it0) { $stK[$it0['typed_name']] = $it0['status']; }
+    $ck('skip (unit question): the item that already has a unit survives; only the two still waiting are left out', $rK['ok'] && ($stK[$n('Keep A')] ?? '') === 'ready' && count($stK) === 1 && $sK['counts']['skipped'] === 2 && $sK['can_confirm'], json_encode([$stK, $sK['counts']]));
+
+    // ---- self-healing through the database (repair listed, undone, put back) --------------------------------------------------------
+    $upH = $upload($put($csv([[$n('Heal Lager'), '', '12 pcs', '', '100', '', ''], [$n('Heal Plain'), '', '5', 'pcs', '100', '', '']]), 'heal.csv'), 'zzt-heal-' . $run . '.csv', $admin);
+    $jH2 = (int)$upH['job_id'];
+    import_job_analyse($pdo, $jH2);
+    $sH2 = import_job_review_summary($pdo, $jH2);
+    $hl = import_job_list_view($pdo, $jH2, 'heals', []);
+    $itH = null; foreach ($sH2['items'] as $it0) { if ($it0['typed_name'] === $n('Heal Lager')) { $itH = $it0; } }
+    $ck('heal: "12 pcs" is read as 12 and pcs, ready, and listed as Fixed for you with before, after and the cell', $itH && $itH['status'] === 'ready' && abs($itH['balance'] - 12) < 0.0001 && $itH['unit'] === 'pcs' && $hl['total'] === 1 && $hl['rows'][0]['before'] === '12 pcs' && $hl['rows'][0]['source'] !== '' && $hl['rows'][0]['undoable'], json_encode($hl));
+    $hu = import_job_heal_undo($pdo, $jH2, $hl['rows'][0]['id'], true, $admin);
+    $sH3 = import_job_review_summary($pdo, $jH2);
+    $hl3 = import_job_list_view($pdo, $jH2, 'heals', []);
+    $ck('heal (undo): the original value is back, the row is blocked and asked again, the fix stays listed as taken back', $hu['ok'] && $hu['reanalysed'] && $sH3['counts']['blocked'] === 1 && $hl3['total'] === 1 && $hl3['rows'][0]['undone'] === true);
+    $hr = import_job_heal_undo($pdo, $jH2, $hl['rows'][0]['id'], false, $admin);
+    $ck('heal (redo): "Fix it again" puts the repair back', $hr['ok'] && import_job_review_summary($pdo, $jH2)['counts']['blocked'] === 0 && !import_job_heal_undo($pdo, $jH2, 'nonexistent00', true, $admin)['ok']);
+    $cH2 = import_commit_stock($pdo, $jH2, $admin);
+    $ck('heal: committing re-checks the repaired values against the file (the invariant) and imports the repaired quantity', $cH2['ok'] && $nameIn($n('Heal Lager')) === 1 && ($cH2['result']['fixed_for_you'] ?? 0) === 1, json_encode($cH2['error'] ?? $cH2['result'] ?? ''));
 
     // ---- cleanup of staged files, purge ---------------------------------------------------------------
     $pg = import_purge_staged($pdo, true);

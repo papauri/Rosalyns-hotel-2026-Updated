@@ -787,7 +787,9 @@ $secz = microtime(true) - $tz;
 $t(md5(json_encode($anz)) === 'eec1072db2624a61ef1cbd9067550585', 'speed: a generated 5,000-item sheet analyses to byte-identical output (json md5 frozen from the code before the speed-up)');
 $t($secz < 15, 'speed: 5,000 items analyse in well under 15 s (' . round($secz, 1) . ' s; it was 4-6 s before, 20,000 items 73 s, now about 11 s)');
 $anx = import_analyze_file($root . '/scripts/tests/fixtures/import/synthetic_stock.xlsx', 'synthetic_stock.xlsx', $al, ['max_bytes' => 50 << 20]);
-$t(md5(json_encode($anx)) === 'aac36d4c9fd13190f06ba65555c00866', 'speed: the synthetic workbook analyses to byte-identical output (json md5 frozen from the code before the speed-up)');
+$anxNoHeal = $anx; unset($anxNoHeal['heals'], $anxNoHeal['heal_totals']);
+$t(md5(json_encode($anxNoHeal)) === 'aac36d4c9fd13190f06ba65555c00866', 'speed: the synthetic workbook analyses to byte-identical output apart from the new "Fixed for you" list (json md5 frozen from the code before the speed-up; the repair key is the only difference, see the next check)');
+$t(count($anx['heals'] ?? []) === 1 && $anx['heals'][0]['rule'] === 'number-format' && $anx['heals'][0]['before'] === '1,800' && $anx['heals'][0]['after'] === '1800' && strpos($anx['heals'][0]['source'], 'I18') !== false && $anx['heal_totals'] === ['number-format' => 1], 'repairs: the one text number with a thousands separator in the synthetic workbook (BAR!I18 "1,800") is now listed as a repair; no other repair fires and nothing else in the output moved');
 // Memory: a file that cannot fit ends with a plain message, never a fatal error; a normal file works under a small limit. Each case is a child
 // process with its own memory_limit (a fatal error would leave no result line at all).
 require_once $root . '/includes/import/memory.php';
@@ -831,6 +833,202 @@ $stIn = $anz;
 $resA = import_resolve($anz, [], ['existing' => [], 'unit_options' => ['each'], 'corrections' => []]);
 $resB = import_resolve_inplace($stIn, [], ['existing' => [], 'unit_options' => ['each'], 'corrections' => []], true);
 $t(json_encode($resA) === json_encode($resB), 'memory: resolving with the rows released as they are read gives byte-identical results');
+
+// =====================================================================================================
+echo "-- Import smarter: inference, self-healing, leaving rows out --\n";
+require_once $root . '/includes/import/infer.php';
+$csvRows = function (array $rows, string $name = 'x.csv') use ($put) {
+    $p = $put('', $name);
+    $fh = fopen($p, 'w');
+    foreach ($rows as $r) { fputcsv($fh, $r); }
+    fclose($fh);
+    return $p;
+};
+$ctxBase = ['existing' => [], 'unit_options' => ['bottle', 'box', 'crate', 'kg', 'L', 'pcs', 'g', 'dozen'], 'corrections' => []];
+$syn = $al['unit_synonyms'];
+
+// ---- unit spelling (pure) ----
+$t(import_unit_canon('btl', $syn) === 'bottle' && import_unit_canon('Bottles', $syn) === 'bottle' && import_unit_canon('LTR', $syn) === 'L' && import_unit_canon('kgs', $syn) === 'kg' && import_unit_canon('pc', $syn) === 'pcs' && import_unit_canon('widgets', $syn) === 'widgets', 'unit spelling: btl / Bottles / LTR / kgs / pc become the unit stock uses; an unknown word is left exactly as written');
+$t(import_unit_canon('kg', $syn) === 'kg' && import_unit_canon('g', $syn) === 'g' && import_unit_canon('ml', $syn) === 'ml', 'unit spelling: a spelling fix is never a conversion (kg stays kg, g stays g, ml stays ml)');
+$t(import_units_compatible('btl', 'bottle', $syn) && import_units_compatible('ltr', 'L', $syn) && import_units_compatible('each', 'pcs', $syn) && !import_units_compatible('kg', 'g', $syn) && !import_units_compatible('bottle', 'crate', $syn), 'unit spelling: btl = bottle, ltr = L, each = pcs, but kg is not g and a bottle is not a crate');
+
+// ---- self-healing: a quantity typed with its unit ----
+$pH = $csvRows([['Item Name', 'Balance', 'Unit Price'], ['ZZ Lager', '12 pcs', '500'], ['ZZ Rice', '2.5kg', '800'], ['ZZ Salt', 'abc', '10'], ['ZZ Beans', '1,250 g', '5'], ['ZZ Sugar', '7', '9']], 'heal.csv');
+$aH = import_analyze_file($pH, 'heal.csv', $al, []);
+$rowsH = []; foreach ($aH['sheets'][0]['rows'] as $r0) { $rowsH[$r0['fields']['item_name']['value']] = $r0; }
+$t(($rowsH['ZZ Lager']['fields']['qty_single']['value'] ?? null) === 12 && ($rowsH['ZZ Lager']['fields']['unit']['value'] ?? '') === 'pcs' && ($rowsH['ZZ Lager']['fields']['qty_single']['how'] ?? '') === 'healed:number-unit', 'heal number-unit: "12 pcs" is read as quantity 12 and unit pcs, tagged as a repair, both from that cell');
+$t(($rowsH['ZZ Rice']['fields']['qty_single']['value'] ?? null) === 2.5 && ($rowsH['ZZ Rice']['fields']['unit']['value'] ?? '') === 'kg', 'heal number-unit: "2.5kg" is 2.5 and kg - never converted to 2500 g');
+$t(($rowsH['ZZ Beans']['fields']['qty_single']['value'] ?? null) === 1250 && ($rowsH['ZZ Beans']['fields']['unit']['value'] ?? '') === 'g', 'heal number-unit: "1,250 g" keeps its digits (1250, g)');
+$t($rowsH['ZZ Salt']['status'] === 'blocked' && !isset($rowsH['ZZ Salt']['fields']['qty_single']), 'never heal: "abc" is not guessed - the row is blocked with its question');
+$t(!isset($rowsH['ZZ Sugar']['fields']['qty_single']['how']) || $rowsH['ZZ Sugar']['fields']['qty_single']['how'] === 'as-written', 'never heal: a plain 7 is untouched');
+$hl = $aH['heals'] ?? [];
+$t(count($hl) === 3 && $hl[0]['rule'] === 'number-unit' && $hl[0]['before'] === '12 pcs' && $hl[0]['after'] === '12 pcs' && preg_match('/^heal\.csv!|!/', $hl[0]['source']) && $hl[1]['before'] === '2.5kg' && $hl[1]['after'] === '2.5 kg' && !empty($hl[0]['undoable']) && strlen($hl[0]['id']) === 12, 'heal log: each repair records before, after, the source cell, the rule and an id: ' . json_encode(array_slice($hl, 0, 2)));
+$t(import_assert_no_invented_values($aH, import_csv_read($pH, 'heal.csv', [])) === [], 'INVARIANT still holds with the repairs: every repaired number and unit word is really in its cell');
+$tm = $aH; $tm['sheets'][0]['rows'][1]['fields']['qty_single']['value'] = 2500;
+$t(count(import_assert_no_invented_values($tm, import_csv_read($pH, 'heal.csv', []))) >= 1, 'INVARIANT catches a repaired number whose digits were changed (2.5kg -> 2500)');
+$aU = import_analyze_file($pH, 'heal.csv', $al, ['undo_heals' => [$hl[0]['id']]]);
+$rowU = null; foreach ($aU['sheets'][0]['rows'] as $r0) { if ($r0['fields']['item_name']['value'] === 'ZZ Lager') { $rowU = $r0; } }
+$t($rowU && $rowU['status'] === 'blocked' && !isset($rowU['fields']['qty_single']) && count($aU['heals'] ?? []) === 2, 'undo: taking the repair back returns the original cell value and asks again (the row is blocked with its question; the other repairs stay)');
+$pC = $csvRows([['Item Name', 'Balance', 'Unit'], ['ZZ Cola', '12 pcs', 'bottle'], ['ZZ Fanta', '6 btl', 'bottle']], 'healc.csv');
+$aC = import_analyze_file($pC, 'healc.csv', $al, []);
+$rc = []; foreach ($aC['sheets'][0]['rows'] as $r0) { $rc[$r0['fields']['item_name']['value']] = $r0; }
+$t($rc['ZZ Cola']['status'] === 'blocked' && ($rc['ZZ Fanta']['fields']['qty_single']['value'] ?? null) === 6 && ($rc['ZZ Fanta']['fields']['unit']['value'] ?? '') === 'bottle', 'heal number-unit: a unit that disagrees with the unit column blocks the row (never overrides it); "6 btl" under unit "bottle" agrees and is read');
+
+
+// ---- self-healing: numbers written with separators, a decimal comma or a currency word (listed, undoable, never a different number) ----
+$pF = $csvRows([['Item Name', 'Balance', 'Unit Price'], ['ZZ Thou', '1,250', '2,500'], ['ZZ Comma', '12,5', '10'], ['ZZ Cur', '3', 'MK 900'], ['ZZ Plain', '7', '9.5'], ['ZZ Weird', '1.2.3', '4']], 'fmt.csv');
+$aF = import_analyze_file($pF, 'fmt.csv', $al, []);
+$fr = []; foreach ($aF['sheets'][0]['rows'] as $r0) { $fr[$r0['fields']['item_name']['value']] = $r0; }
+$t(($fr['ZZ Thou']['fields']['qty_single']['value'] ?? null) === 1250 && ($fr['ZZ Thou']['fields']['unit_price']['value'] ?? null) === 2500 && ($fr['ZZ Comma']['fields']['qty_single']['value'] ?? null) === 12.5 && ($fr['ZZ Cur']['fields']['unit_price']['value'] ?? null) === 900, 'heal number-format: "1,250" is 1250, "2,500" is 2500, "12,5" is 12.5 and "MK 900" is 900 - the digits are the cell own');
+$t(($fr['ZZ Weird']['status'] ?? '') === 'blocked' && !isset($fr['ZZ Weird']['fields']['qty_single']), 'never heal: "1.2.3" is not guessed (blocked with its question)');
+$fh2 = $aF['heals'] ?? [];
+$t(count($fh2) === 4 && array_unique(array_column($fh2, 'rule')) === ['number-format'] && $fh2[0]['before'] === '1,250' && $fh2[0]['after'] === '1250' && $aF['heal_totals'] === ['number-format' => 4] && !in_array('7', array_column($fh2, 'before'), true) && !in_array('9.5', array_column($fh2, 'before'), true), 'heal log: the 4 repairs are listed with before and after; plain numbers (7, 9.5) are not repairs');
+$t(import_assert_no_invented_values($aF, import_csv_read($pF, 'fmt.csv', [])) === [], 'INVARIANT holds with number-format repairs (the value still equals the number the cell spells)');
+$aF2 = import_analyze_file($pF, 'fmt.csv', $al, ['undo_heals' => [$fh2[0]['id']]]);
+$fr2 = []; foreach ($aF2['sheets'][0]['rows'] as $r0) { $fr2[$r0['fields']['item_name']['value']] = $r0; }
+$t(($fr2['ZZ Thou']['status'] ?? '') === 'blocked' && !isset($fr2['ZZ Thou']['fields']['qty_single']) && count($aF2['heals'] ?? []) === 3, 'undo: taking the "1,250" repair back means the cell is not read as a number (the question comes back); the other repairs stay');
+$pCap = $csvRows(array_merge([['Item Name', 'Balance']], array_map(function ($i) { return ['ZZ Cap ' . $i, '1,' . str_pad((string)($i % 1000), 3, '0', STR_PAD_LEFT)]; }, range(1, 1500))), 'cap.csv');
+$aCap = import_analyze_file($pCap, 'cap.csv', $al, []);
+$t(count($aCap['heals']) === 1000 && $aCap['heal_totals']['number-format'] === 1500, 'heal log: every repair is counted (1500) but only the first 1000 are kept as records');
+$rCap = import_resolve($aCap, [], $ctxBase);
+$t($rCap['heal_counts']['number-format'] === 1500 && count($rCap['heals']) === 1000, 'resolve reports the true repair count, not the capped list');
+
+
+// ---- the price check still compares like with like when stock spells the unit another way (btl = bottle) ----
+$pPc = $csvRows([['Item Name', 'Balance', 'Unit', 'Unit Price'], ['ZZ NewOne', '5', 'bottle', '5000']], 'ZZ Cat.csv');
+$aPc = import_analyze_file($pPc, 'ZZ Cat.csv', $al, []);
+$exPc = []; for ($z = 0; $z < 8; $z++) { $exPc[] = ['id' => 500 + $z, 'name' => 'ZZ Peer ' . $z, 'category' => 'ZZ Cat', 'unit' => 'btl', 'current_quantity' => 0, 'cost_per_unit' => 100 + $z, 'par_level' => 0, 'reorder_point' => 0, 'notes' => '', 'pack_name' => null, 'pack_size' => null, 'is_archived' => 0, 'recipes' => 0]; }
+$rPc = import_resolve($aPc, [], ['existing' => $exPc, 'unit_synonyms' => $syn] + $ctxBase);
+$t(count(array_filter($rPc['extra_questions'], function ($q0) { return $q0['type'] === 'price-check'; })) === 1, 'price check: a new item in "bottle" is judged against stock counted in "btl" (same unit, spelled differently) - the unit spelling table does not silence the money check');
+
+// ---- unit spelling inside the resolver: shown as a repair, undoable ----
+$pS = $csvRows([['Item Name', 'Balance', 'Unit', 'Unit Price'], ['ZZ Water', '10', 'btl', '300'], ['ZZ Milk', '4', 'LTR', '900'], ['ZZ Rum', '3', 'bottle', '5000']], 'spell.csv');
+$aS = import_analyze_file($pS, 'spell.csv', $al, []);
+$rS = import_resolve($aS, [], $ctxBase);
+$byName = []; foreach ($rS['items'] as $it0) { $byName[$it0['name']] = $it0; }
+$t($byName['ZZ Water']['unit'] === 'bottle' && $byName['ZZ Milk']['unit'] === 'L' && $byName['ZZ Rum']['unit'] === 'bottle', 'resolve: "btl" imports as bottle and "LTR" as L');
+$t(count($rS['heals']) === 2 && $rS['heals'][0]['rule'] === 'unit-spelling' && $rS['heals'][0]['before'] === 'btl' && $rS['heals'][0]['after'] === 'bottle' && $rS['heal_counts'] === ['unit-spelling' => 2] && !empty($rS['heals'][0]['source']), 'resolve: the spelling fixes are listed with before, after, cell and rule (the already-correct "bottle" is not listed)');
+$hid0 = $rS['heals'][0]['id'];
+$rS2 = import_resolve($aS, ['_heal_undo' => [$hid0 => ['rule' => 'unit-spelling', 'before' => 'btl', 'after' => 'bottle']]], $ctxBase);
+$byName2 = []; foreach ($rS2['items'] as $it0) { $byName2[$it0['name']] = $it0; }
+$t($byName2['ZZ Water']['unit'] === 'btl' && count($rS2['heals']) === 1 && count($rS2['heals_undone']) === 1, 'undo: the unit comes back exactly as written ("btl"), the fix stays listed as taken back');
+$t(json_encode(array_map(function ($i) { return $i['unit']; }, import_resolve($aS, [], $ctxBase)['items'])) === json_encode(array_map(function ($i) { return $i['unit']; }, $rS['items'])), 'resolve is deterministic (same answers, same picture)');
+
+// ---- suggestions: evidence only ----
+$mkIt = function (string $name, string $cat, ?string $unit = null, array $o = []) {
+    return $o + ['name' => $name, 'name_source' => 'S!A1', 'category' => $cat, 'category_how' => 'section-row', 'sheet' => 'S', 'unit' => $unit, 'match' => null, 'rows' => ['S!A1'], 'key' => import_norm_text($name)];
+};
+$peerItems = [];
+for ($z = 0; $z < 13; $z++) { $peerItems[] = $mkIt('ZZ Beer ' . $z, 'Beers', $z < 11 ? 'bottle' : 'can'); }
+$units = $ctxBase['unit_options'];
+$ixP = import_infer_index([], ['unit_item' => [], 'unit_cat' => [], 'category' => []], $peerItems, $syn);
+$sg = import_infer_unit($ixP, $mkIt('ZZ New Lager', 'Beers'), $units);
+$t($sg['value'] === 'bottle' && $sg['confidence'] === 'high' && strpos($sg['reason'], '11 of the 13 other items under "Beers" are counted in bottle') !== false && $sg['evidence'][0]['kind'] === 'peers' && $sg['evidence'][0]['n'] === 11 && !$sg['mixed'], 'suggest (peers): "11 of the 13 other items under Beers are counted in bottle", high confidence, with the evidence: ' . $sg['reason']);
+$mixPeers = [];
+for ($z = 0; $z < 6; $z++) { $mixPeers[] = $mkIt('ZZ Spice ' . $z, 'Spices', ['kg', 'bottle', 'box'][$z % 3]); }
+$sgm = import_infer_unit(import_infer_index([], ['unit_item' => [], 'unit_cat' => [], 'category' => []], $mixPeers, $syn), $mkIt('ZZ Paprika', 'Spices'), $units);
+$t($sgm['value'] === null && $sgm['mixed'] === true && $sgm['confidence'] === 'low' && $sgm['candidates'], 'suggest (mixed): peers counted in three different units = no suggestion, marked "needs your choice" for that item');
+$t(import_infer_unit($ixP, $mkIt('ZZ Odd', 'Unknown category'), $units)['value'] === null && import_infer_unit($ixP, $mkIt('ZZ Odd', 'Unknown category'), $units)['confidence'] === 'low', 'suggest: no peers and no other evidence = low confidence, no suggestion (just ask)');
+$exDb = [['id' => 7, 'name' => 'Fanta Orange 500ml', 'category' => 'Soft drinks', 'unit' => 'bottle', 'is_archived' => 0]];
+$sgd = import_infer_unit(import_infer_index($exDb, ['unit_item' => [], 'unit_cat' => [], 'category' => []], [], $syn), $mkIt('Fanta Orange', 'Misc'), $units);
+$t($sgd['value'] === 'bottle' && $sgd['confidence'] === 'medium' && $sgd['evidence'][0]['kind'] === 'existing-item' && $sgd['evidence'][0]['id'] === 7, 'suggest (stock): an existing ingredient with the same name once the size is removed ("Fanta Orange" / "Fanta Orange 500ml") gives its unit, citing that ingredient');
+$exArch = [['id' => 8, 'name' => 'Fanta Orange', 'category' => 'Soft drinks', 'unit' => 'crate', 'is_archived' => 1]];
+$t(import_infer_unit(import_infer_index($exArch, ['unit_item' => [], 'unit_cat' => [], 'category' => []], [], $syn), $mkIt('Fanta Orange', 'Misc'), $units)['value'] === null, 'suggest (stock): an archived ingredient is not evidence');
+$sgw = import_infer_unit(import_infer_index([], ['unit_item' => [], 'unit_cat' => [], 'category' => []], [], $syn), $mkIt('Soda water crate', 'Misc'), $units);
+$t($sgw['value'] === 'crate' && $sgw['evidence'][0]['kind'] === 'name-word' && $sgw['evidence'][0]['word'] === 'crate', 'suggest (name): the unit word "crate" in the item name is evidence, citing the word');
+$sgs = import_infer_unit(import_infer_index([], ['unit_item' => [], 'unit_cat' => [], 'category' => []], [], $syn), $mkIt('Cola 500ml x24', 'Misc'), $units);
+$t($sgs['value'] === null, 'suggest (size tokens): "500ml" and "x24" describe the size of one, they are never proposed as the unit');
+$t(import_infer_size_tokens('Fanta 500ml x24 pack of 12')[0]['kind'] === 'volume' && count(import_infer_size_tokens('Fanta 500ml x24 pack of 12')) === 3 && import_infer_strip_size('Fanta Orange 500ml x24') === 'fanta orange', 'suggest (size tokens): volume, count and pack words are found and stripped for name matching');
+$lrn = ['unit_item' => ['zz pepper' => ['v' => 'g', 'by' => 3, 'at' => '2026-11-01 10:00:00']], 'unit_cat' => [], 'category' => []];
+$sgl = import_infer_unit(import_infer_index([], $lrn, $mixPeers, $syn), $mkIt('ZZ Pepper', 'Spices'), $units);
+$t($sgl['value'] === 'g' && $sgl['confidence'] === 'high' && strpos($sgl['reason'], 'Remembered from your earlier import') !== false && $sgl['evidence'][0]['by'] === 3, 'suggest (learned): a unit this hotel confirmed before wins over mixed peers, says "Remembered from your earlier import", and keeps who/when');
+$t(import_infer_unit(import_infer_index([], ['unit_item' => ['zz pepper' => ['v' => 'furlong', 'by' => 1, 'at' => '']], 'unit_cat' => [], 'category' => []], [], $syn), $mkIt('ZZ Pepper', 'Spices'), $units)['value'] === null, 'suggest: a unit that is not in the hotel\'s unit list is never suggested, even if it was learned');
+$cs = import_infer_category(import_infer_index($exDb, ['unit_item' => [], 'unit_cat' => [], 'category' => []], [], $syn), $mkIt('Fanta Orange', 'KITCHEN STOCK', null, ['category_how' => 'sheet-name']));
+$t($cs && $cs['value'] === 'Soft drinks' && $cs['evidence'][0]['id'] === 7 && import_infer_category(import_infer_index($exDb, ['unit_item' => [], 'unit_cat' => [], 'category' => []], [], $syn), $mkIt('Fanta Orange', 'Beers')) === null, 'suggest (category): a missing heading gets the category of the same-named stock item, citing it; an item that has its own heading is never re-filed');
+
+// ---- resolve: per-item units, suggestions, skip ----
+$pN = [['Item Name', 'Balance', 'Unit Price']];
+for ($z = 0; $z < 12; $z++) { $pN[] = ['ZZ Cola ' . $z, '5', '300']; }
+$pN[] = ['ZZ Brandnew', '2', '400'];
+$fN = $csvRows($pN, 'nounit.csv');
+$aN = import_analyze_file($fN, 'nounit.csv', $al, []);
+$exN = []; for ($z = 0; $z < 12; $z++) { $exN[] = ['id' => 100 + $z, 'name' => 'ZZ Cola ' . $z, 'category' => 'Some other category', 'unit' => 'bottle', 'current_quantity' => 0, 'cost_per_unit' => 300, 'par_level' => 0, 'reorder_point' => 0, 'notes' => '', 'pack_name' => null, 'pack_size' => null, 'is_archived' => 0, 'recipes' => 0]; }
+$ctxN = ['existing' => $exN, 'unit_options' => $units, 'corrections' => [], 'unit_synonyms' => $syn, 'learned' => []];
+$rN = import_resolve($aN, [], $ctxN);
+$nu = null; foreach ($rN['items'] as $it0) { if ($it0['name'] === 'ZZ Brandnew') { $nu = $it0; } }
+$nuq = null; foreach ($rN['extra_questions'] as $q0) { if ($q0['type'] === 'no-unit') { $nuq = $q0; } }
+$t($nu && $nu['status'] === 'needs-answer' && $nu['unit'] === null && $nu['unit_suggestion']['value'] === null && $nuq && $nuq['answer'] === null && $nuq['pending'] === 1, 'no-unit: the new item with no unit stays unanswered; a suggestion is only data on the item, never applied');
+$ctxN2 = $ctxN; $ctxN2['existing'][] = ['id' => 200, 'name' => 'ZZ Brandnew 330ml', 'category' => 'x', 'unit' => 'bottle', 'current_quantity' => 0, 'cost_per_unit' => 400, 'par_level' => 0, 'reorder_point' => 0, 'notes' => '', 'pack_name' => null, 'pack_size' => null, 'is_archived' => 0, 'recipes' => 0];
+$rN2 = import_resolve($aN, [], $ctxN2);
+$nu2 = null; foreach ($rN2['items'] as $it0) { if ($it0['name'] === 'ZZ Brandnew') { $nu2 = $it0; } }
+$t($nu2['unit_suggestion']['value'] === 'bottle' && $nu2['status'] === 'needs-answer' && empty($nu2['unit_confirmed']), 'no-unit: a clear suggestion ("bottle", from stock) is shown but the item still needs the person: pre-selected is not answered');
+$rN3 = import_resolve($aN, ['_unit_for' => [$nu2['key'] => ['unit' => 'bottle', 'src' => 'suggestion', 'by' => 1, 'at' => 'x']]], $ctxN2);
+$nu3 = null; foreach ($rN3['items'] as $it0) { if ($it0['name'] === 'ZZ Brandnew') { $nu3 = $it0; } }
+$nuq3 = null; foreach ($rN3['extra_questions'] as $q0) { if ($q0['type'] === 'no-unit') { $nuq3 = $q0; } }
+$t($nu3['unit'] === 'bottle' && $nu3['status'] === 'ready' && !empty($nu3['unit_confirmed']) && $nuq3['answer'] === 'per-item' && $rN3['can_confirm'] === true, 'no-unit: the person\'s click (the unit chosen for that item) makes it ready; the sheet-wide question has nothing left to ask');
+$rN4 = import_resolve($aN, ['_unit_for' => [$nu2['key'] => ['unit' => 'furlong', 'src' => 'pick']]], $ctxN2);
+$nu4 = null; foreach ($rN4['items'] as $it0) { if ($it0['name'] === 'ZZ Brandnew') { $nu4 = $it0; } }
+$t($nu4['status'] === 'needs-answer' && $nu4['unit'] === null, 'no-unit: a stored unit that is not in the unit list is ignored');
+
+// ---- skipping blocked rows ----
+$pB = $csvRows([['Item Name', 'Balance', 'Unit', 'Unit Price'], ['ZZ Good', '5', 'kg', '100'], ['ZZ Bad', 'lots', 'kg', '100'], ['ZZ Neg', '-3', 'kg', '100'], ['ZZ Twin', '2', 'kg', '50'], ['ZZ Twin', '3', 'kg', '60']], 'blocked.csv');
+$aB = import_analyze_file($pB, 'blocked.csv', $al, []);
+$rB = import_resolve($aB, [], $ctxBase);
+$t($rB['counts']['blocked'] === 2 && $rB['counts']['needs-answer'] === 2 && $rB['can_confirm'] === false && strpos($rB['why_not'], 'skip them') !== false, 'blocked rows: two bad values are blocked and the message offers skipping');
+$uidBad = null; $uidNeg = null; $uidTwin = [];
+foreach ($rB['rows'] as $u0 => $r0) { if ($r0['name'] === 'ZZ Bad') { $uidBad = $u0; } if ($r0['name'] === 'ZZ Neg') { $uidNeg = $u0; } if ($r0['name'] === 'ZZ Twin') { $uidTwin[] = $u0; } }
+$rB1 = import_resolve($aB, ['_skip_rows' => [$uidBad => ['why' => 'Balance is not a number', 'code' => 'bad-value', 'grp' => $uidBad]]], $ctxBase);
+$t($rB1['rows'][$uidBad]['status'] === 'skipped' && $rB1['rows'][$uidBad]['skipped_why'] === 'Balance is not a number' && $rB1['rows'][$uidBad]['skip_code'] === 'bad-value' && $rB1['counts']['blocked'] === 1, 'skip (single): one blocked row answered "skip" is skipped with the reason it was skipped for');
+$skipAll = [];
+foreach (import_cont_entries(['res' => $rB], ['needs-answer', 'blocked']) as $e0) { foreach ($e0['uids'] as $u0) { $skipAll[$u0] = ['why' => $e0['why'], 'code' => $e0['code'], 'grp' => $e0['uids'][0]]; } }
+$rB2 = import_resolve($aB, ['_skip_rows' => $skipAll], $ctxBase);
+$t(count($skipAll) === 4 && $rB2['counts']['skipped'] === 4 && $rB2['counts']['blocked'] === 0 && $rB2['counts']['needs-answer'] === 0 && $rB2['can_confirm'] === true && $rB2['committable_items'] === 1, 'skip (bulk / continue): all blocked + unanswered rows skipped -> nothing open, confirm possible with the one good row');
+$names2 = array_map(function ($i) { return $i['name']; }, $rB2['items']);
+$t($names2 === ['ZZ Good'], 'skip: skipped rows are not items at all - they cannot reach the commit plan: ' . json_encode($names2));
+$ent = import_cont_entries(['res' => $rB], ['blocked']);
+$t(count($ent) === 2 && $ent[0]['code'] === 'bad-value' && $ent[1]['code'] === 'bad-value' && strpos($ent[0]['why'], 'not a number') !== false, 'blocked rows: each blocked entry has a plain reason and a reason code (bad-value) naming the cell');
+$pBd = $csvRows([['Item Name', 'Balance', 'Unit'], ['ZZ Dup', '2', 'kg'], ['ZZ Dup', '3', 'kg'], ['ZZ Fine', '1', 'kg']], 'blockedd.csv');
+$aBd = import_analyze_file($pBd, 'blockedd.csv', $al, []);
+$dupQ = null; foreach ($aBd['questions'] as $q0) { if (strpos($q0['type'], 'duplicate') === 0) { $dupQ = $q0; } }
+$rBd = import_resolve($aBd, [$dupQ['id'] => []], $ctxBase);
+$qk = import_q_key($dupQ);
+$rBd = import_resolve($aBd, [$qk => ['key' => 'separate-items']], $ctxBase);
+$t($rBd['counts']['blocked'] === 2 && !empty(array_filter($rBd['rows'], function ($r0) { return ($r0['blocked_code'] ?? '') === 'separate-items'; })), 'blocked rows: "different items with one name" blocks both rows directly (no question card) and says so with a code');
+$entD = import_cont_entries(['res' => $rBd], ['blocked']);
+$skD = []; foreach ($entD as $e0) { foreach ($e0['uids'] as $u0) { $skD[$u0] = ['why' => $e0['why'], 'code' => $e0['code'], 'grp' => $e0['uids'][0]]; } }
+$rBd2 = import_resolve($aBd, [$qk => ['key' => 'separate-items'], '_skip_rows' => $skD], $ctxBase);
+$t($rBd2['counts']['blocked'] === 0 && $rBd2['counts']['skipped'] === 2 && $entD[0]['code'] === 'separate-items', 'skip: rows blocked with no question at all can be skipped too');
+$t(import_answer_allowed(['row_uids' => ['a'], 'options' => [['key' => 'keep']]], '_skip') === '' && import_answer_allowed(['row_uids' => [], 'options' => []], '_skip') !== '' && import_answer_allowed(['row_uids' => ['a'], 'options' => [['key' => 'keep']]], 'nonsense') !== '', 'skip is a valid answer to any question that belongs to rows (blocked ones included), but not to a question about how a sheet is read');
+// unit-clash / archived skip really takes the item out (it used to stay "ready")
+$exC = [['id' => 300, 'name' => 'ZZ Good', 'category' => 'x', 'unit' => 'crate', 'current_quantity' => 0, 'cost_per_unit' => 100, 'par_level' => 0, 'reorder_point' => 0, 'notes' => '', 'pack_name' => null, 'pack_size' => null, 'is_archived' => 0, 'recipes' => 0]];
+$rC = import_resolve($aB, [], ['existing' => $exC] + $ctxBase);
+$clashQ = null; foreach ($rC['extra_questions'] as $q0) { if ($q0['type'] === 'unit-clash') { $clashQ = $q0; } }
+$t($clashQ && $clashQ['bad'] === true && $rC['counts']['blocked'] >= 3, 'blocked rows: a unit that differs from stock is a blocked "unit clash" question');
+$rC2 = import_resolve($aB, [$clashQ['qkey'] => ['key' => 'skip']], ['existing' => $exC] + $ctxBase);
+$good2 = null; foreach ($rC2['rows'] as $r0) { if ($r0['name'] === 'ZZ Good') { $good2 = $r0; } }
+$t($good2['status'] === 'skipped', 'skip: answering "skip" to a unit clash takes the item out (it used to stay ready)');
+$exA = [['id' => 301, 'name' => 'ZZ Good', 'category' => 'x', 'unit' => 'kg', 'current_quantity' => 0, 'cost_per_unit' => 100, 'par_level' => 0, 'reorder_point' => 0, 'notes' => '', 'pack_name' => null, 'pack_size' => null, 'is_archived' => 1, 'recipes' => 0]];
+$rA = import_resolve($aB, [], ['existing' => $exA] + $ctxBase);
+$archQ = null; foreach ($rA['extra_questions'] as $q0) { if ($q0['type'] === 'archived-match') { $archQ = $q0; } }
+$rA2 = import_resolve($aB, [$archQ['qkey'] => ['key' => 'skip']], ['existing' => $exA] + $ctxBase);
+$goodA = null; foreach ($rA2['rows'] as $r0) { if ($r0['name'] === 'ZZ Good') { $goodA = $r0; } }
+$t($archQ && $goodA['status'] === 'skipped', 'skip: answering "skip" to an archived-ingredient match takes the item out');
+
+// ---- learned rows (what a commit may teach) ----
+$lr = import_learned_rows([
+    ['status' => 'ready', 'match' => null, 'name' => 'ZZ Alpha', 'unit' => 'bottle', 'unit_confirmed' => true, 'category' => 'Beers'],
+    ['status' => 'ready', 'match' => null, 'name' => 'ZZ Beta', 'unit' => 'bottle', 'unit_confirmed' => true, 'category' => 'Beers'],
+    ['status' => 'ready', 'match' => null, 'name' => 'ZZ Gamma', 'unit' => 'bottle', 'unit_confirmed' => true, 'category' => 'Beers', 'category_confirmed' => true],
+    ['status' => 'ready', 'match' => null, 'name' => 'ZZ Delta', 'unit' => 'kg', 'category' => 'Beers'],
+    ['status' => 'needs-answer', 'match' => null, 'name' => 'ZZ Eps', 'unit' => 'kg', 'unit_confirmed' => true, 'category' => 'Beers'],
+    ['status' => 'ready', 'match' => ['id' => 1], 'name' => 'ZZ Zeta', 'unit' => 'kg', 'unit_confirmed' => true, 'category' => 'Beers'],
+]);
+$kinds = array_count_values(array_column($lr, 0));
+$t(($kinds['learned_unit_item'] ?? 0) === 3 && ($kinds['learned_category'] ?? 0) === 1 && ($kinds['learned_unit_cat'] ?? 0) === 1 && !in_array('zz delta', array_column($lr, 1), true) && !in_array('zz eps', array_column($lr, 1), true) && !in_array('zz zeta', array_column($lr, 1), true), 'learning: only NEW, READY items whose unit/category a person confirmed teach anything (not defaults, not unanswered, not matched ones); 3 agreeing items teach the category habit');
+
+// ---- nothing changes where no rule fires ----
+$t(!array_key_exists('heals', $anz) && md5(json_encode($anz)) === 'eec1072db2624a61ef1cbd9067550585', 'engine output is byte-identical where no rule fires: the generated 5,000-item sheet has no repair key and keeps its frozen md5');
+
 // cleanup
 foreach ($tmpFiles as $f) { @unlink($f); }
 @rmdir($tmpDir);

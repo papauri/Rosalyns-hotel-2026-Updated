@@ -101,6 +101,8 @@ if (!function_exists('import_analyze_file')) {
         }
         $force = array_flip((array)($opts['force_sheets'] ?? []));
         $pending = [];     // [sheetIdx => descriptors]
+        $healsAll = [];    // self-healing fixes (format only, each with its source cell); the key exists only when something was fixed
+        $healTotals = [];
 
         // Memory: each sheet's cell grid is dropped as soon as that sheet has been read into rows (the grid is the biggest temporary), so
         // only ONE grid is alive at a time and none while the cross-checks run.
@@ -124,6 +126,12 @@ if (!function_exists('import_analyze_file')) {
                 $entry['rows'] = $val['rows'];
                 $entry['skipped_rows'] = $val['skipped_rows'];
                 $qs = array_merge($qs, $val['questions']);
+                if (!empty($val['heals'])) {
+                    $healsAll = array_merge($healsAll, $val['heals']);
+                    foreach ((array)($val['heal_totals'] ?? []) as $hr => $hn) {
+                        $healTotals[$hr] = ($healTotals[$hr] ?? 0) + $hn;
+                    }
+                }
             } elseif ($struct['triage']['action'] === 'ask') {
                 $entry['skipped_rows'] = [];
             }
@@ -132,6 +140,11 @@ if (!function_exists('import_analyze_file')) {
             unset($sheet, $struct, $val, $entry, $qs);
         }
         unset($sheetList, $read);
+        if ($healsAll) {
+            $analysis['heals'] = $healsAll;
+            $analysis['heal_totals'] = $healTotals;
+        }
+        unset($healsAll, $healTotals);
         foreach ($pending as $qs) {
             foreach ($qs as $q) {
                 import_register_question($analysis, $q);
@@ -293,6 +306,17 @@ if (!function_exists('import_analyze_file')) {
                         }
                         if ($iso !== $fd['value']) {
                             $bad[] = $where . ': expiry ' . $fd['value'] . ' does not match ' . $fd['source'];
+                        }
+                    } elseif (in_array($f, $numeric, true) && ($fd['how'] ?? '') === 'healed:number-unit') {
+                        // self-healed "12 pcs": the number must be exactly the digits of that cell (no conversion, no guess)
+                        $hv = import_heal_number_unit($cell['v'], null);
+                        if ($hv === null || abs((float)$hv['value'] - (float)$fd['value']) > 1e-9) {
+                            $bad[] = $where . ': ' . $f . ' ' . json_encode($fd['value']) . ' is not the number written in ' . $fd['source'];
+                        }
+                    } elseif ($f === 'unit' && ($fd['how'] ?? '') === 'healed:number-unit') {
+                        $hv = import_heal_number_unit($cell['v'], null);
+                        if ($hv === null || $hv['unit'] !== $fd['value']) {
+                            $bad[] = $where . ': unit "' . $fd['value'] . '" is not the unit word written in ' . $fd['source'];
                         }
                     } elseif (in_array($f, $numeric, true)) {
                         $p = import_parse_number($cell['v']);

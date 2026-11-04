@@ -1462,7 +1462,7 @@ function rh_ai_hotel_local_text(array $view, array $r): string
 function rh_ai_local_format(string $tool, array $view, array $r): string
 {
     if ($tool === 'import_job') {
-        return rh_ai_import_local_text($r);
+        return rh_ai_import_local_text($r, $view);
     }
     if ($tool === 'hotel_info') {
         return rh_ai_hotel_local_text($view, $r);
@@ -1791,6 +1791,14 @@ function rh_ai_small_talk(string $t, ?array $user = null): ?array
 /** "and tomorrow?" / "what about yesterday?" after a local lookup: the same lookup for that day. */
 function rh_ai_followup_local(string $t, ?array $last): ?array
 {
+    if ($last && ($last['tool'] ?? '') === 'import_job') {
+        // right after an Import answer: "what was skipped?", "why is row 12 blocked?" mean that same import
+        $hit = rh_ai_import_intent($t, true);
+        if ($hit !== null && !isset($hit[1]['args']['job']) && !empty($last['view']['args']['job'])) {
+            $hit[1]['args']['job'] = (int)$last['view']['args']['job'];
+        }
+        return $hit;
+    }
     if (!$last || ($last['tool'] ?? '') !== 'arrivals_departures') {
         return null;
     }

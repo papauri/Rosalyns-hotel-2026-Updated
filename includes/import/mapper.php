@@ -298,6 +298,8 @@ if (!function_exists('import_match_header')) {
                         if ($p['value'] > 0) {
                             $pos++;
                         }
+                    } elseif ($info['field'] !== 'unit_price' && is_string($v) && import_heal_number_unit($v, $unitWordsShape ?? ($unitWordsShape = import_unit_words($aliases))) !== null) {
+                        $good++;            // "12 pcs": the validator reads it as 12 and pcs (a repair the person can undo), so the column does hold quantities
                     }
                 } elseif ($kind === 'date') {
                     if (!empty($cell['date'])) {

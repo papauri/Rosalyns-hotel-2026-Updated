@@ -35,7 +35,12 @@
       <li><a href="#who">Who can use it, and how to switch it on</a></li>
       <li><a href="#steps">How to import a stock list, in four steps</a></li>
       <li><a href="#questions">What the questions mean</a></li>
+      <li><a href="#units">Choosing units for new items, and the suggestions</a></li>
       <li><a href="#bulk">Answering many questions at once</a></li>
+      <li><a href="#fixed">Fixed for you: small fixes, and Undo</a></li>
+      <li><a href="#blocked">Blocked rows, and skipping rows: why, and what to do</a></li>
+      <li><a href="#continue">Continuing without the blocked and unanswered rows</a></li>
+      <li><a href="#remember">What Import remembers for next time</a></li>
       <li><a href="#sources">The grey source tag, and what is left out on purpose</a></li>
       <li><a href="#confirm">What Confirm does</a></li>
       <li><a href="#again">Importing the same file twice, cancelling, and clean-up</a></li>
@@ -91,7 +96,7 @@
     <li><strong>A progress bar</strong> with a line such as "12 of 40 questions answered".</li>
     <li><strong>Jump to the next one that needs an answer.</strong> The button goes to the next item that still needs you, and shows how many items are left. If nothing is left, it says <em>Nothing is waiting for an answer</em>. When you are not typing, the <strong>N</strong> key does the same as the button.</li>
     <li><strong>Search items.</strong> Type part of an item name, a category, or a cell from your file. <em>C12</em> finds that cell. <em>BAR!C12</em> finds cell C12 on the sheet called BAR. Every word you type must match.</li>
-    <li><strong>Status buttons.</strong> <strong>All</strong>, <strong>Needs answer</strong>, <strong>Blocked</strong>, <strong>Ready</strong> and <strong>Skipped</strong>, each with a count. While anything still needs an answer, the list starts on <strong>Needs answer</strong> and <strong>Blocked</strong>.</li>
+    <li><strong>Status buttons.</strong> <strong>All</strong>, <strong>Needs answer</strong>, <strong>Blocked</strong>, <strong>Ready</strong> and <strong>Skipped</strong>, each with a count. While anything still needs an answer, the list starts on <strong>Needs answer</strong> and <strong>Blocked</strong>. <strong>Blocked</strong> rows cannot be imported as written; see <a href="#blocked">Blocked rows</a>. <strong>Skipped</strong> rows have been left out on purpose.</li>
     <li><strong>Show as.</strong> <strong>List</strong> shows one list. <strong>By category</strong> groups the items under their category headings.</li>
     <li><strong>More ways to narrow it.</strong> This opens the filter panel. On a phone it opens as a drawer.</li>
   </ul>
@@ -112,6 +117,7 @@
     <li>Click <strong>Download what will be imported (CSV)</strong> to check the ready items in Excel before you confirm.</li>
     <li>Use <strong>Go to step 2</strong> if a question is about how a sheet was read.</li>
   </ul>
+  <p><strong>On a phone</strong> (a narrow screen), each item is shown as a stacked block: the item name at the top, then each value with its label above it, then the questions and buttons for that item. Scroll down the block to answer.</p>
 
   <h3>Step 4: Confirm</h3>
   <p>This is the last check. It shows the numbers for the whole file:</p>
@@ -120,10 +126,12 @@
     <li><strong>Existing items updated</strong>: existing items where you ticked a field to change.</li>
     <li><strong>Existing items left as they are</strong>: matched to an item already in stock, with nothing ticked.</li>
     <li><strong>Lines in the opening count</strong>: items with stock and a price.</li>
-    <li><strong>Rows skipped</strong>: rows you skipped, or rows that are not items.</li>
-    <li><strong>Still need an answer</strong>: questions to sort out first.</li>
+    <li><strong>Rows left out</strong>: rows you left out, or left out because of an answer. They are listed below.</li>
+    <li><strong>Fixed for you</strong>: small format fixes made while reading the file. Each one is listed below, with Undo.</li>
+    <li><strong>Still need an answer</strong>: questions and blocked rows to sort out first.</li>
   </ul>
-  <p>Press <strong>Confirm and import</strong>. The result page shows <strong>Ingredients created</strong>, <strong>Ingredients updated</strong>, <strong>Rows skipped</strong>, <strong>Opening count lines</strong> and <strong>Expiry batches</strong>. Use <strong>Open the opening count</strong> to see the count that is waiting for approval. Press <strong>Download the updated stock workbook</strong> for an Excel copy of your stock (see <a href="#export">Export your stock to Excel</a>).</p>
+  <p>Below the numbers, Step 4 lists the rows left out, then the fixes. See <a href="#blocked">Rows left out</a> and <a href="#fixed">Fixed for you</a>.</p>
+  <p>Press <strong>Confirm and import</strong>. The result page shows <strong>Ingredients created</strong>, <strong>Ingredients updated</strong>, <strong>Rows skipped</strong> (rows that are not items, or were left out), <strong>Left out by you</strong>, <strong>Fixed for you</strong>, <strong>Opening count lines</strong> and <strong>Expiry batches</strong>. Use <strong>Open the opening count</strong> to see the count that is waiting for approval. Press <strong>Download the updated stock workbook</strong> for an Excel copy of your stock (see <a href="#export">Export your stock to Excel</a>).</p>
 
   <p><strong>My imports.</strong> At the bottom of the page is a list of the imports you started in the last 30 days. An administrator sees everyone's. Open one to carry on where you stopped, or cancel one you no longer need.</p>
 
@@ -137,7 +145,7 @@
       <tr><td>Which price?</td><td>The same item has two different prices, from two sheets or two rows.</td><td>Pick one price. Each option shows the value and the cell it came from. Nothing is averaged, and the other price is not used.</td></tr>
       <tr><td>Per case or per unit?</td><td>The price looks like the price of a whole case, not of one bottle or one kilo.</td><td><strong>Price of one unit (import as written)</strong>, or <strong>Price of a whole case/pack (I will enter the pack size)</strong>. If you choose the case, type how many units are in it. The price is then shown as "per case of 12 = 5,000 each".</td></tr>
       <tr><td><em>"Is 28,750 right?"</em></td><td>Import compares each price with what this hotel has paid for that item before, and with similar items. If the price in the file looks off, it asks, and says the likely reason (for example an extra zero, or a case price typed as a unit price). There is no fixed limit: what counts as unusual follows your own prices. An item with no history is not asked, and a price is only checked when it would actually be applied (a new item, or an existing item whose cost you ticked). Prices are shown as written; VAT is not added or removed.</td><td><strong>The file's price is right</strong>, <strong>Keep the current price</strong> (the cost is left alone, the quantity still imports) or <strong>Skip this row</strong>. A price too large for the database to store is blocked: fix the cell and upload again, or skip the row.</td></tr>
-      <tr><td>Which unit?</td><td>A sheet has no unit column, so Import does not know if its items are bottles, kilos or something else.</td><td>Pick the unit from the list. Import never picks one for you.</td></tr>
+      <tr><td>Which unit?</td><td>The sheet has no unit for some new items, so Import does not know if they are bottles, kilos or something else. The question reads <em>"Sheet … has no unit for N new items. Which unit are they counted in?"</em></td><td>Pick one unit for every item on the sheet that has no choice yet, or pick a unit for each item in the list under the question. Import never picks one for you. See <a href="#units">Choosing units for new items</a>.</td></tr>
       <tr><td><em>"Is it a category heading, or an item that is out of stock?"</em></td><td>A row has zero in every column. It could be a heading for the rows below, or an item with nothing left.</td><td><strong>An item (out of stock)</strong>, or <strong>A category heading for the rows below</strong>.</td></tr>
       <tr><td><em>"… Should it be imported?"</em></td><td>A sheet has item columns, but its name sounds like a summary or dashboard sheet.</td><td><strong>Yes, import it</strong>, or <strong>No, skip it</strong>.</td></tr>
       <tr><td><em>"Which column … holds the item names?"</em></td><td>Import cannot find the item-name column on a sheet.</td><td>Pick the column from the list.</td></tr>
@@ -146,8 +154,34 @@
       <tr><td>Already in stock</td><td>The item matches one already in stock, and your file has different values for some fields.</td><td>The default keeps what is there now. Tick a field (category, cost, par level, pack or quantity) only if you want it changed.</td></tr>
     </tbody>
   </table>
+  <p>The <em>"Which unit?"</em> question for a sheet lists the items it covers, each with its name, row, cell and category.</p>
   <p>When you fix a name, Import remembers the fix for next time. It shows it as a pre-filled answer with the note <em>"Remembered from an earlier import. Change it if it is wrong."</em> It is never applied without showing you first.</p>
   <p>If the Assistant is switched on you can ask it what a question means or why Confirm is blocked; it only explains &mdash; you answer on the Import screen. It also needs <strong>Use the Assistant</strong>. See <a href="22-assistant.html">The Assistant</a>.</p>
+
+  <h2 id="units">Choosing units for new items, and the suggestions</h2>
+  <p>A sheet often has no unit column, so Import does not know how its new items are counted. You choose the unit. Import may suggest one, but it never uses a suggestion until you click it.</p>
+  <ol class="steps">
+    <li>Open the question <em>"Which unit?"</em> in Step 3. It lists the new items on that sheet that have no unit yet. Each item shows its name, its row, its cell and its category.</li>
+    <li>For one item, open its drop-down <strong>Choose a unit…</strong> and pick the unit. The choice is saved at once. You can change it later: the drop-down then says <strong>Change the unit…</strong>.</li>
+    <li>To give one unit to every item that has no choice yet, pick a unit under the list, where it says <em>"Or give one unit to every item above that has no choice yet."</em> A unit you chose for a single item is kept.</li>
+    <li>To find an item, press <strong>Show all N items (searchable)</strong>. Search by name, or use <strong>Show</strong> to see <strong>All</strong>, <strong>No evidence</strong>, <strong>Evidence disagrees</strong>, <strong>Has a suggestion</strong> or <strong>Already chosen</strong>. Press <strong>Show fewer</strong> to go back to the short list.</li>
+  </ol>
+  <p><strong>What a suggestion looks like.</strong> When your own records give a clear answer, the item shows the unit, the reason and a confidence of <em>high</em> or <em>medium</em>. For example: <em>"Suggested: bottle - 9 of the 10 other items under "Beer" are counted in bottle (high confidence, not used until you choose it)."</em> Press the button that says <strong>Use bottle</strong> (with that item's unit) to take it for that one item.</p>
+  <ul>
+    <li><strong>Use the suggestions (N)</strong> takes every suggestion on the sheet at once. A box opens first, with the first five item names and how many there are. Only high and medium suggestions are used. Items where the evidence disagrees are not included. You can change any item afterwards.</li>
+    <li><strong>Needs your choice: the evidence disagrees.</strong> Two sources say different units, or the other items in the category are split. Import makes no suggestion, and you choose.</li>
+    <li><strong>Needs your choice: nothing in your file or your stock says how this is counted.</strong> You choose the unit.</li>
+  </ul>
+  <p><strong>Where a suggestion comes from</strong>, in this order:</p>
+  <ol class="steps">
+    <li><strong>Your own earlier choice</strong> for that item, from a past import (high). See <a href="#remember">What Import remembers</a>.</li>
+    <li><strong>An item already in stock with the same name</strong>, ignoring size or pack words such as 500ml or x24 (medium).</li>
+    <li><strong>A unit word in the item name</strong>, such as <em>crate</em> or <em>dozen</em>. The word must be a unit your hotel uses.</li>
+    <li><strong>The other items in the same category.</strong> The unit most of them are counted in. High when at least 8 in 10 agree (and there are at least 6 others); medium when at least 7 in 10 agree (and there are at least 3 others).</li>
+  </ol>
+  <p><strong>A size in the name</strong> (for example 500ml, 2kg, x24 or pack of 12) never becomes the unit and never sets a pack size. It only backs up a suggestion from the category: it can lift a medium suggestion to high when the item is a container, such as a bottle.</p>
+  <p>Import only suggests units from your hotel's own unit list. Nothing is used until you click, and nothing changes your stock until you press <strong>Confirm</strong>.</p>
+  <div class="note"><p><strong>There is no single undo for the sheet-wide answer.</strong> To change one item, pick a new unit from its drop-down. To change many, change them one at a time.</p></div>
 
   <h2 id="bulk">Answering many questions at once</h2>
   <p>When a list has many questions of the same kind, you can give one answer to all the matching ones, instead of answering each one. You can still change any single answer afterwards.</p>
@@ -164,11 +198,93 @@
   <div class="note"><p><strong>There is no single undo.</strong> To change your mind, change the answers one at a time. The box says this before you press the button.</p></div>
   <p><strong>Questions you answer one at a time.</strong> These are not offered for a bulk answer:</p>
   <ul>
-    <li>Questions about a whole sheet or column, such as <em>"Which unit?"</em> for a sheet.</li>
+    <li>Questions about a whole sheet or column, such as <em>"Which unit?"</em> for a sheet. Choose the units item by item, or use the sheet-wide choice, as described in <a href="#units">Choosing units for new items</a>.</li>
     <li>Questions that need a typed value, such as the number of units in a case.</li>
     <li>Questions where you pick one particular name or date from a list, such as which date is right.</li>
     <li><em>"Two names for one stock item"</em> questions. Skipping all of them would drop every one of them.</li>
   </ul>
+
+  <h2 id="fixed">Fixed for you: small fixes, and Undo</h2>
+  <p>Import fixes some small slips for you while it reads the file. A fix only changes how a value is <em>written</em>. It never changes what a number means, and it never guesses a price or a quantity. Each fix is listed in Step 4 under <strong>Fixed for you</strong>, with:</p>
+  <ul>
+    <li>what was fixed, and the item it was for,</li>
+    <li>the cell it came from (for example <em>Bar!D12</em>),</li>
+    <li>the value <strong>before</strong> and the value <strong>after</strong>,</li>
+    <li>an <strong>Undo</strong> button.</li>
+  </ul>
+  <p>The fixes Import makes are:</p>
+  <ul>
+    <li><strong>A unit spelled another way.</strong> For example <em>btl</em> becomes <em>bottle</em>, <em>LTR</em> becomes <em>L</em>, <em>kgs</em> becomes <em>kg</em>, and <em>pc</em> becomes <em>pcs</em>. This is only done for new items.</li>
+    <li><strong>A quantity typed together with its unit.</strong> For example <em>12 pcs</em> in one cell is read as the number 12 with the unit pcs. A quantity is never converted: <em>2.5kg</em> is read as 2.5 kg, not as grams.</li>
+    <li><strong>A number with a thousands comma.</strong> For example <em>1,800</em> is read as the number 1800, as it always was.</li>
+  </ul>
+  <p><strong>Undo</strong> puts the value back as written. If it now needs an answer, Import asks you in Step 3. For a number, the cell is no longer read as a number, so its question comes back. Press <strong>Fix it again</strong> to bring the fix back.</p>
+  <p>If nothing was fixed, the list is not shown. The result page has a <strong>Fixed for you</strong> card with the count.</p>
+
+  <h2 id="blocked">Blocked rows, and skipping rows: why, and what to do</h2>
+  <p>A <strong>Blocked</strong> row is a row that Import cannot import as written. Blocked rows are not created or changed. They stop <strong>Confirm</strong> until you deal with them.</p>
+  <p>Each blocked row shows its plain reason and the exact cell to fix. The reasons are:</p>
+  <table>
+    <thead><tr><th>The reason you see</th><th>What to do</th></tr></thead>
+    <tbody>
+      <tr><td>A value in the row cannot be used: not a number, negative, a bad date, or a name that is too long.</td><td>Fix that cell in your file and upload again, or skip the row.</td></tr>
+      <tr><td>The unit in the file is not the unit this ingredient has in stock.</td><td>Fix the unit in your file so it matches, or skip the row. Nothing is changed for it.</td></tr>
+      <tr><td>The name matches an archived ingredient.</td><td>Restore or rename that ingredient, then upload again, or skip the row. It is left alone.</td></tr>
+      <tr><td>The name could be several ingredients in stock.</td><td>Rename it in your file to the exact stock name, or skip it.</td></tr>
+      <tr><td>The price is too large to be stored.</td><td>Fix the price cell and upload again, or skip the row.</td></tr>
+      <tr><td>A name, category or unit is too long.</td><td>Shorten it in your file and upload again, or skip the row.</td></tr>
+      <tr><td>Two rows in the file match the same ingredient in stock.</td><td>Skip all but one of them, or rename them in your file and upload again.</td></tr>
+      <tr><td>Two different items have the same name.</td><td>Rename one of them in your file and upload again, or skip it.</td></tr>
+    </tbody>
+  </table>
+  <p>For a row with a question, the question card says <strong>Cell to fix in your file:</strong> and the cell. A row with no question shows its reason in the <strong>What happens</strong> column.</p>
+  <p><strong>Skipping a row.</strong> Every blocked or unanswered row has a button. It says <strong>Skip this item</strong> for an item, or <strong>Skip this row</strong> for a row.</p>
+  <ol class="steps">
+    <li>Press <strong>Skip this row</strong> (or <strong>Skip this item</strong>). A box opens and lists the rows it will leave out, with the reason and the cell for each.</li>
+    <li>Press the button at the bottom of the box, for example <strong>Leave out 1 row</strong>. Press <strong>Cancel</strong> to keep it.</li>
+    <li>The page says <em>"Left out 1 row. They are listed in step 4 with the reason, and can be brought back."</em></li>
+  </ol>
+  <p><strong>Skip all N blocked items…</strong> is in the box at the top of Step 3 that says <em>"Some rows are not ready"</em>. It shows only when there are blocked rows. It opens the same kind of box: the rows are counted by reason, the first 15 are named with their cell, and you press <strong>Leave out N rows</strong> to confirm.</p>
+  <p><strong>Leaving rows out deletes nothing.</strong> The row is just not imported. It is listed in Step 4 with the reason. You can bring it back, and you can download it to fix and import later.</p>
+  <p><strong>Bring it back.</strong> Rows you left out yourself have a <strong>Bring it back</strong> button, in Step 3 and in the list in Step 4. The page says <em>"Brought back 1 row. It is asked again in step 3."</em></p>
+  <p><strong>Rows left out (Step 4).</strong> Step 4 has a section <strong>Rows left out (N)</strong>. For each row it shows the item, where it is (sheet and cell), and why it was left out. You can:</p>
+  <ul>
+    <li><strong>Search</strong> it: type an item name, a cell such as C12, or a word from the reason.</li>
+    <li>Filter by <strong>Kind</strong>, which is one kind of reason.</li>
+    <li><strong>Bring it back</strong> for any row you left out yourself.</li>
+    <li><strong>Download skipped rows (CSV)</strong> or <strong>Download skipped rows (Excel)</strong>. The Excel file has one tab for each sheet, with the sheet's heading row, then the skipped rows, and <strong>Why it was skipped</strong> as the first column. Fix the rows in the file, then import it as a new list.</li>
+  </ul>
+  <div class="note"><p><strong>Download the skipped rows before you press Confirm.</strong> After Confirm, the uploaded copy of your file is deleted, and the download is refused. The page then says <em>"This import is finished, and the copy of the file was deleted, so the skipped rows can no longer be copied from it."</em></p></div>
+
+  <h2 id="continue">Continuing without the blocked and unanswered rows</h2>
+  <p>If you cannot fix some rows now, you can leave them out and import the rest. You can do this in two places:</p>
+  <ul>
+    <li>In Step 3, in the box <em>"Some rows are not ready"</em>: press <strong>Continue without the blocked and unanswered rows…</strong></li>
+    <li>In Step 4, where Confirm is turned off: press <strong>Continue without them…</strong></li>
+  </ul>
+  <ol class="steps">
+    <li>Press the button. A box opens and asks first. Its title says how many items will be left out, for example <em>"Continue without 3 items?"</em></li>
+    <li>The box lists what will be left out: the counts by reason, the first 15 names, and each one's reason and cell.</li>
+    <li>Press <strong>Leave out N rows</strong> to carry on. The page opens Step 4, with the rows listed under <strong>Rows left out</strong>. Press <strong>Cancel</strong> to stay where you are.</li>
+    <li>Confirm still checks everything on the server before anything is saved.</li>
+  </ol>
+  <p><strong>Answer the questions about your sheets first.</strong> A question about how a sheet or a column is read (on Step 2) has to be answered first. If one is still open, the page says <em>"Some questions about your sheets are still open"</em> and offers <strong>Go to step 2</strong>. Each of those questions has its own skip choice on Step 2.</p>
+  <div class="note"><p><strong>Nothing is deleted.</strong> The rows stay in your file. They are listed in Step 4, and you can bring any of them back.</p></div>
+
+  <h2 id="remember">What Import remembers for next time</h2>
+  <p>After you press <strong>Confirm</strong> and the import is saved, Import remembers what you chose for the new items. It remembers:</p>
+  <ul>
+    <li><strong>The unit</strong> you confirmed for each new item, whether you picked it, used a suggestion, or chose it for the whole sheet.</li>
+    <li><strong>The category</strong> you confirmed for a new item, when you used a category suggestion.</li>
+    <li><strong>A unit for a whole category</strong>, when at least three confirmed items in that category agree on one unit.</li>
+  </ul>
+  <p>Next time, the same item name or the same category gets that unit as a suggestion, with the reason <em>"Remembered from your earlier import"</em>. It is still not used until you click it or press <strong>Use the suggestions</strong>.</p>
+  <ul>
+    <li><strong>Only what was imported is remembered.</strong> Rows you left out teach Import nothing.</li>
+    <li><strong>A cancelled import teaches Import nothing.</strong> Nothing is remembered until the import is saved.</li>
+    <li><strong>Spellings such as btl are not remembered.</strong> They are fixed from Import's own list.</li>
+  </ul>
+  <p>After a confirmed import, the result page says how many choices were remembered, for example <em>"3 unit or category choices you confirmed will be remembered and suggested next time"</em>. There is no screen yet to see or delete a remembered choice.</p>
 
   <h2 id="sources">The grey source tag, and what is left out on purpose</h2>
   <p>Every value on the review screen has a small grey tag such as <em>Bar!D12</em>. That is the sheet name, then the cell the value was read from. If a value does not match your file, check that cell first.</p>
@@ -184,10 +300,10 @@
   <h2 id="confirm">What Confirm does to your opening stock</h2>
   <p>Confirm is one step, and it is all or nothing. If anything fails, nothing is saved, and the page says <em>"Nothing was imported."</em></p>
   <ol class="steps">
-    <li><strong>New ingredients are created.</strong> Each one takes its category from the heading above it (or the sheet name), its unit from the sheet, and its price as the cost.</li>
+    <li><strong>New ingredients are created.</strong> Each one takes its category from the heading above it (or the sheet name), its unit from the sheet (or the unit you chose for it), and its price as the cost.</li>
     <li><strong>Existing items</strong> keep their values. Only the fields you ticked are changed. Their unit is never changed.</li>
     <li><strong>The stock quantities are filed as one opening stock count.</strong> They are <strong>not</strong> added to your stock yet. A different manager must approve that count in <strong>Stock Count</strong> first. Only then does the stock appear.</li>
-    <li><strong>Nothing is deleted</strong>, and recipes are not touched.</li>
+    <li><strong>Nothing is deleted</strong>, and recipes are not touched. Rows you left out are not created.</li>
     <li>The copy of your file on the server is deleted afterwards.</li>
   </ol>
   <ul>
@@ -195,12 +311,12 @@
     <li><strong>An item with stock but no price</strong> is created without a cost, and its stock is left out of the opening count. The page says <em>"Add the cost later."</em></li>
     <li><strong>Who approves the count.</strong> A different manager must approve it while the rule <strong>Stock count: a second person must approve</strong> is on, which is the default. If an administrator has switched that rule off, the person who imported can approve the count. See <a href="20-stock-loss-prevention.html">Stopping stock going missing</a>.</li>
   </ul>
-  <div class="note"><p>Confirm is turned off while any question still needs an answer. The page says <em>"Some questions still need an answer."</em> Answer them on Step 3, or skip the row, and Confirm turns on.</p></div>
+  <div class="note"><p>Confirm is turned off while any question still needs an answer. The page says <em>"Some questions still need an answer."</em> Answer them on Step 3, skip the row, or use <strong>Continue without them…</strong> on Step 4 (see <a href="#continue">Continuing without the blocked and unanswered rows</a>). Confirm turns on when nothing is left to answer.</p></div>
 
   <h2 id="again">Importing the same file twice, cancelling, and clean-up</h2>
   <ul>
     <li><strong>The same file again is blocked.</strong> The page says <em>"This file was already imported on &hellip; by &hellip;"</em>. Only an administrator can import it again, by ticking <strong>Import again</strong> on the upload step.</li>
-    <li><strong>Cancel.</strong> Click <strong>Cancel this import</strong> on Steps 2 to 4. The page says <em>"Nothing has been saved to your stock, and the uploaded copy will be deleted."</em> Confirm the cancel, and the page says <em>"The import was cancelled and the uploaded copy deleted."</em></li>
+    <li><strong>Cancel.</strong> Click <strong>Cancel this import</strong> on Steps 2 to 4. The page says <em>"Nothing has been saved to your stock, and the uploaded copy will be deleted."</em> Confirm the cancel, and the page says <em>"The import was cancelled and the uploaded copy deleted."</em> A cancelled import teaches Import nothing.</li>
     <li><strong>Clean-up.</strong> The uploaded copy is kept on the server only while you work on it. It is deleted when you finish, when you cancel, or after 7 days.</li>
   </ul>
 
@@ -259,9 +375,14 @@
     <li><strong>"Your session has expired. Reload the page and try again."</strong> Reload the page and sign in again if asked.</li>
     <li><strong>"Row 12: Unit price in D12 is "abc", which is not a number. Fix it in the sheet and upload again, or skip this row."</strong> Fix the cell in your file and upload the file again, or skip that row on Step 3.</li>
     <li><strong>"… is negative. Negative amounts are not imported."</strong> Fix the cell in your file and upload again, or skip that row.</li>
-    <li><strong>"Sheet … has no column headings I recognise."</strong> Skip that sheet, or make sure its column headings say what they hold (for example Item, Balance, Unit Price).</li>
+    <li><strong>A row is Blocked and shows a reason with a cell, such as "Cell to fix in your file: C12".</strong> Fix that cell in your file and upload the file again. If you cannot fix it now, press <strong>Skip this row</strong>, or <strong>Continue without the blocked and unanswered rows…</strong> in Step 3. The row is listed in Step 4, and you can bring it back. See <a href="#blocked">Blocked rows</a>.</li>
+    <li><strong>"Some questions about your sheets are still open"</strong> when you try to continue without rows. Press <strong>Go to step 2</strong>, answer the question about the sheet or column, then continue.</li>
+    <li><strong>"The list changed since you looked at it, so nothing was skipped."</strong> Check the new count and try again.</li>
+    <li><strong>A suggested unit is wrong.</strong> Do not press its <strong>Use</strong> button. Choose the right unit from the item's drop-down. Once you choose one, the drop-down says <strong>Change the unit…</strong>, and your choice is kept.</li>
+    <li><strong>A value under Fixed for you is not what you want.</strong> Press <strong>Undo</strong> on that line in Step 4. The value goes back as written, and the page says <em>"Put back as written. Anything that now needs an answer is asked in step 3."</em> To bring the fix back, press <strong>Fix it again</strong>.</li>
+    <li><strong>"This import is finished, and the copy of the file was deleted"</strong> when you try to download the skipped rows. The file was deleted when you confirmed. Ask an administrator, or import the rows again from the original file.</li>
     <li><strong>A sheet or column is missing from Step 2.</strong> Look at <strong>Columns not imported</strong> and the reason on the sheet's card.</li>
-    <li><strong>A row says Need answer and Confirm stays off.</strong> Answer the question on Step 3, or skip that row.</li>
+    <li><strong>A row says Needs answer and Confirm stays off.</strong> Answer the question on Step 3, or skip that row.</li>
     <li><strong>Stock did not change after Confirm.</strong> That is expected. The quantities wait in the opening count. Ask a different manager to approve it in <strong>Stock Count</strong>.</li>
     <li><strong>"This file was already imported on &hellip;"</strong> Ask an administrator, if the file really must come in again.</li>
   </ul>

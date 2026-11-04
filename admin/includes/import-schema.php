@@ -121,6 +121,9 @@ if (!function_exists('rh_import_setting_defaults')) {
                 $rows[] = [$kind, (string)$w, ''];
             }
         }
+        foreach ((array)($d['unit_synonyms'] ?? []) as $spelling => $unit) {
+            $rows[] = ['unit_synonym', (string)$spelling, (string)$unit];
+        }
         return $rows;
     }
 
@@ -129,16 +132,19 @@ if (!function_exists('rh_import_setting_defaults')) {
         return sha1($kind . "\x1f" . $term . "\x1f" . $mapsTo);
     }
 
-    /** Seed import_aliases once (when it holds no seeded row). Safe to call again. Returns the number of rows added. */
+    /**
+     * Seed import_aliases KIND BY KIND: a kind that has no seeded row yet gets its seed rows (so a new kind, like unit_synonym, reaches hotels that
+     * were seeded before it existed, and a kind a hotel has edited is never refilled). Safe to call again. Returns the number of rows added.
+     */
     function import_seed_aliases(PDO $pdo): int
     {
-        $has = (int)$pdo->query('SELECT COUNT(*) FROM import_aliases WHERE is_hotel_learned = 0')->fetchColumn();
-        if ($has > 0) {
-            return 0;
-        }
+        $have = array_flip($pdo->query('SELECT DISTINCT kind FROM import_aliases WHERE is_hotel_learned = 0')->fetchAll(PDO::FETCH_COLUMN));
         $ins = $pdo->prepare('INSERT IGNORE INTO import_aliases (kind, term, maps_to, alias_hash, is_hotel_learned, created_by) VALUES (?, ?, ?, ?, 0, NULL)');
         $n = 0;
         foreach (import_alias_seed_rows() as [$kind, $term, $maps]) {
+            if (isset($have[$kind])) {
+                continue;
+            }
             $ins->execute([$kind, $term, $maps, import_alias_hash($kind, $term, $maps)]);
             $n += $ins->rowCount();
         }
@@ -158,7 +164,7 @@ if (!function_exists('rh_import_setting_defaults')) {
             return $out;
         }
         try {
-            $rows = $pdo->query("SELECT kind, term, maps_to FROM import_aliases WHERE kind <> 'name_correction' ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
+            $rows = $pdo->query("SELECT kind, term, maps_to FROM import_aliases WHERE kind <> 'name_correction' AND kind NOT LIKE 'learned\_%' ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
         } catch (Throwable $e) {
             return $out;
         }
@@ -168,16 +174,21 @@ if (!function_exists('rh_import_setting_defaults')) {
         $listKey = ['unit' => 'units', 'section_word' => 'section_words', 'total_word' => 'total_words',
             'summary_phrase' => 'summary_phrases', 'skip_sheet_word' => 'skip_sheet_words', 'noise_token' => 'noise_tokens'];
         $res = ['version' => $out['version'], 'fields' => [], 'derived' => [], 'units' => [], 'section_words' => [],
-            'total_words' => [], 'summary_phrases' => [], 'skip_sheet_words' => [], 'noise_tokens' => []];
+            'total_words' => [], 'summary_phrases' => [], 'skip_sheet_words' => [], 'noise_tokens' => [], 'unit_synonyms' => []];
         foreach ($rows as $r) {
             $k = $r['kind'];
-            if ($k === 'field') {
+            if ($k === 'unit_synonym') {
+                $res['unit_synonyms'][mb_strtolower((string)$r['term'])] = (string)$r['maps_to'];
+            } elseif ($k === 'field') {
                 $res['fields'][$r['maps_to']][] = $r['term'];
             } elseif ($k === 'derived') {
                 $res['derived'][] = $r['term'];
             } elseif (isset($listKey[$k])) {
                 $res[$listKey[$k]][] = $r['term'];
             }
+        }
+        if (!$res['unit_synonyms']) {
+            $res['unit_synonyms'] = $out['unit_synonyms'];
         }
         return $res;
     }
@@ -194,6 +205,43 @@ if (!function_exists('rh_import_setting_defaults')) {
             return [];
         }
         return $out;
+    }
+
+    /**
+     * What this hotel decided in earlier imports (written only when an import was committed): kind learned_unit_item (term = normalised item name,
+     * maps_to = the unit), learned_unit_cat (term = normalised category), learned_category (term = normalised item name, maps_to = category).
+     * Later rows win. Each row keeps who (created_by) and when (created_at). Returns ['unit_item'=>[term=>['v','by','at']], 'unit_cat'=>[...], 'category'=>[...]].
+     */
+    function import_load_learned(PDO $pdo): array
+    {
+        $out = ['unit_item' => [], 'unit_cat' => [], 'category' => []];
+        $map = ['learned_unit_item' => 'unit_item', 'learned_unit_cat' => 'unit_cat', 'learned_category' => 'category'];
+        try {
+            $st = $pdo->query("SELECT kind, term, maps_to, created_by, created_at FROM import_aliases WHERE is_hotel_learned = 1 AND kind IN ('learned_unit_item','learned_unit_cat','learned_category') ORDER BY id LIMIT 20000");
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $out[$map[$r['kind']]][$r['term']] = ['v' => $r['maps_to'], 'by' => $r['created_by'] !== null ? (int)$r['created_by'] : null, 'at' => $r['created_at']];
+            }
+        } catch (Throwable $e) {
+            return $out;
+        }
+        return $out;
+    }
+
+    /** Save learned rows [[kind, term, maps_to], ...] (idempotent). Called inside the commit transaction only. Returns the number written. */
+    function import_save_learned(PDO $pdo, array $rows, ?int $userId): int
+    {
+        $ins = $pdo->prepare('INSERT IGNORE INTO import_aliases (kind, term, maps_to, alias_hash, is_hotel_learned, created_by) VALUES (?, ?, ?, ?, 1, ?)');
+        $n = 0;
+        foreach ($rows as [$kind, $term, $maps]) {
+            $term = mb_substr((string)$term, 0, 191);
+            $maps = mb_substr((string)$maps, 0, 191);
+            if ($term === '' || $maps === '' || !in_array($kind, ['learned_unit_item', 'learned_unit_cat', 'learned_category'], true)) {
+                continue;
+            }
+            $ins->execute([$kind, $term, $maps, import_alias_hash($kind, $term, $maps), $userId]);
+            $n += $ins->rowCount();
+        }
+        return $n;
     }
 
     /** Save (or refresh) one learned correction. $typedNorm is import_norm_text($typed). */
