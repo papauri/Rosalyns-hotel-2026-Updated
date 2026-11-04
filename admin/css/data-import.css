@@ -1,7 +1,7 @@
 /* Import (stock lists) - admin/data-import.php. Existing admin colour tokens only; status pills are the shared .badge.
    Focus ring: same 2px primary outline as the rest of the admin, on every control that is not a plain button/link. */
 
-.di { max-width: 1280px; }
+.di { width: 100%; max-width: none; }
 .di [hidden] { display: none !important; }
 .di-intro { margin: 0 0 14px; color: var(--admin-muted, #5f6b7c); line-height: 1.5; max-width: 80ch; }
 .di-help { margin: 4px 0 12px; font-size: 13px; line-height: 1.45; color: var(--admin-muted, #5f6b7c); }
@@ -316,7 +316,7 @@
 .di :is(.di-segbtn, .di-cathead):focus-visible { outline-offset: -3px; }
 
 /* the Export button in the page header (its panel opens under it) */
-#rh-admin-page .rh-admin-page-header:has(.di-export) { max-width: 1280px; }
+/* header spans the full content width like every other page */
 .di-export { position: relative; }
 .di-export > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; gap: 8px; min-height: 44px; }
 .di-export > summary::-webkit-details-marker { display: none; }
