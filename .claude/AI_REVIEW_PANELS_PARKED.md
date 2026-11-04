@@ -51,3 +51,20 @@ booking pages?  3. Refresh: daily + button, or button only?
   Ask-why drill-down, what-if simulator, forecasts with ranges, cross-department findings, owner morning brief, board pack
   export, watch rules in plain words, finding history + proof. Honest limit: forecasts and patterns need real history; demo on
   Liwonde (test hotel) data, never invented figures.
+
+## Owner decisions 2026-11-04 (later)
+- PARKED further: reviews for restaurant, events, gym and guest reviews (wait); the stakeholder presentation (soon, not now).
+- DESIGN DIRECTION: decision-first, not detail-first. Reviews exist to change what a decision maker does next, so they surface
+  the few high-impact decisions that are live NOW, not small facts. Dynamic, not a fixed question-and-answer list: what is
+  shown, asked and followed up depends on the data and on the answers given. See "Decision cards" below.
+
+## Decision cards (replaces the check list as the primary view)
+Each card: the decision, why it is live now, money/risk at stake, evidence (traceable rows), 2-3 options with projected
+outcome ranges (best/expected/worst + confidence + history used), a recommendation, and the action tier it unlocks.
+Selection: score = impact (money at stake as a share of monthly revenue or cash) x time-sensitivity x confidence; anything
+under the impact threshold is hidden (still reachable under "More"). The set changes every refresh; resolved or stale cards
+drop out. Follow-ups are generated from the answer ("What if we hold rates?" -> re-forecast), never from a fixed script.
+Decisions per area (starting set): BOOKINGS - rate and inventory strategy next 90 days, demand/channel mix, cancellation and
+deposit exposure, which room types earn vs drag. ACCOUNTING - cash outlook and runway, collections and credit exposure, profit
+by department, control/leakage risk, tax liability. STOCK - what to commit to buying and cash tied up, menu/price profitability,
+waste/loss exposure, supplier dependence and switch options. Small details live in the drill-down, not on the card.
