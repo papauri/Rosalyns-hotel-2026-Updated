@@ -68,3 +68,18 @@ Decisions per area (starting set): BOOKINGS - rate and inventory strategy next 9
 deposit exposure, which room types earn vs drag. ACCOUNTING - cash outlook and runway, collections and credit exposure, profit
 by department, control/leakage risk, tax liability. STOCK - what to commit to buying and cash tied up, menu/price profitability,
 waste/loss exposure, supplier dependence and switch options. Small details live in the drill-down, not on the card.
+
+## HARD RULES (owner 2026-11-05) - apply to everything in this feature
+1. INVISIBLE AI. No AI-looking colours, icons or wording anywhere around it - no sparkle/wand/robot/brain/chip icons, no
+   purple/neon/gradient "AI" styling, no "AI", "smart", "insight", "assistant", "generated", "powered by" labels, no "thinking..."
+   states. It uses the normal admin tokens, normal cards and plain words ("Decisions", "Today's brief"). Staff should feel the
+   system simply knows what matters, as if someone in the background is delivering it. Same rule for emails, PDFs and the board pack.
+2. DAILY BRIEF ACROSS DEPARTMENTS. One brief per person per day, shaped by role and permissions, joining rooms, restaurant/stock,
+   accounting (and later events/gym/guest voice): what changed, which decisions are live, what ran itself (tier 1), what waits
+   for approval (tier 2). Built from the same decision cards, so there is one source of truth. Extends rh_ai_briefing_findings().
+3. TIMELESS AND CHEAPEST. Model-agnostic: all model access goes through the provider/router layer (includes/ai/ai-providers.php,
+   ai-router.php); no model name, price, token limit or vendor feature hard-coded in the feature; the model catalog stays data.
+   Works as long as there is a key and any capable model: swap or upgrade with a settings change, no code change. Deterministic
+   SQL does the finding (zero tokens); the model only ranks/words the top few; cache everything; skip the call when nothing
+   changed; cheapest model that passes the evals; hard monthly cap and kill switch. If no model is reachable, the cards still
+   show with plain templated wording (degrades, never breaks). No dependency on a specific vendor SDK, no build step.
