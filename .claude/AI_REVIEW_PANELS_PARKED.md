@@ -83,3 +83,8 @@ waste/loss exposure, supplier dependence and switch options. Small details live 
    SQL does the finding (zero tokens); the model only ranks/words the top few; cache everything; skip the call when nothing
    changed; cheapest model that passes the evals; hard monthly cap and kill switch. If no model is reachable, the cards still
    show with plain templated wording (degrades, never breaks). No dependency on a specific vendor SDK, no build step.
+
+## OWNER DECISION 2026-11-05 (overrides the templated fallback above)
+If AI is off, the model is unavailable, or the connection fails: show NOTHING - no cards, no panel, no note, no templated
+wording. The page looks exactly as it does today. Same for the daily brief. Rule 3 "degrades, never breaks" now means
+"disappears cleanly, never errors". Building has started in the Liwonde repo first (Phase 1 engine), then ports to Rosalyn's.
