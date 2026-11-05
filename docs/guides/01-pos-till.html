@@ -24,7 +24,7 @@
       <dt>Who uses it</dt><dd>Waiters, cashiers and bar staff (till). Managers (refunds, voids, 86, shift reports). Anyone who maintains the menu or tables.</dd>
       <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>POS Till</strong> (<code>/admin/pos.php</code>). It opens in a new browser tab. The same group also has <strong>Menu</strong> (<code>/admin/menu-management.php</code>), <strong>Orders &amp; Tabs</strong> and <strong>Tables</strong> (<code>/admin/restaurant-tables.php</code>).</dd>
       <dt>Permission needed</dt><dd><strong>POS Till (Touch)</strong> for the till. <strong>Menu</strong> for the Menu page. <strong>Ingredients &amp; Recipes</strong> for the Tables page. Extra till powers are listed in the table "Who can do what" below.</dd>
-      <dt>Only shown when</dt><dd>The <strong>POS &amp; Stations</strong> module is switched on in Settings &rarr; Modules. The Tables page also needs the <strong>Stock Management</strong> and <strong>Restaurant Page</strong> modules.</dd>
+      <dt>Only shown when</dt><dd>The <strong>POS Till</strong> switch is on in Settings &rarr; Modules. The Tables page also needs the <strong>Stock Management</strong> module and the <strong>Restaurant &amp; Food Service</strong> switch.</dd>
     </dl>
   </div>
 
@@ -192,7 +192,7 @@
 
   <h2 id="deals">How to set up deals and promotions (Deals &amp; Promos)</h2>
   <p>Deals are discounts the till applies by itself. Nobody has to remember them: every time the cart changes, the till checks the active deals and takes the discount off. Staff need no permission for a deal discount.</p>
-  <p>Open Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Deals &amp; Promos</strong> (<code>/admin/deals.php</code>, page title <strong>Deals &amp; Promotions</strong>). It needs the <strong>Ingredients &amp; Recipes</strong> permission (managers and administrators by default) and the POS &amp; Stations module.</p>
+  <p>Open Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Deals &amp; Promos</strong> (<code>/admin/deals.php</code>, page title <strong>Deals &amp; Promotions</strong>). It needs the <strong>Ingredients &amp; Recipes</strong> permission (managers and administrators by default) and the POS Till switch is on.</p>
   <table>
     <thead><tr><th>Deal type</th><th>What it does</th><th>You fill in</th></tr></thead>
     <tbody>
@@ -462,7 +462,7 @@
   </ul>
 
   <h2 id="menu">How to add or change a menu item</h2>
-  <p>Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Menu</strong> (<code>/admin/menu-management.php</code>, page title <strong>Menu Management</strong>). Permission: <strong>Menu</strong>. Only shown when the <strong>POS &amp; Stations</strong> module is on.</p>
+  <p>Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Menu</strong> (<code>/admin/menu-management.php</code>, page title <strong>Menu Management</strong>). Permission: <strong>Menu</strong>. Only shown when the <strong>POS Till</strong> switch is on.</p>
   <p>One list feeds the website menu, the till, room service and the Kitchen, Bar and Coffee Bar screens. An item you save here appears on each of them, depending on the boxes you tick. Stock comes off for every item that has a stock link.</p>
   <p>The page has two tabs, <strong>Food</strong> and <strong>Drinks</strong>, each showing how many items it holds. Items are grouped by category. Each row shows the item, its price (or <strong>Free</strong>), where it shows (the station, <strong>Till</strong>, <strong>Room service</strong> or <strong>Website only</strong>), <strong>Uses from stock</strong> (or <strong>Not linked to stock</strong>) and its status.</p>
   <h3>Find an item</h3>

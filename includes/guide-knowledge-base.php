@@ -118,6 +118,9 @@ function rh_kb_synonym_groups(): array
         ['favorite', 'favorites', 'pin', 'star', 'starred', 'bookmark'],
         ['overpay', 'overpaid', 'overpayment', 'overpaying'], ['lifecycle', 'timeline'], ['expire', 'expires', 'expiry', 'expiring', 'expiration'],
         ['chat', 'chats', 'message', 'messages', 'messaging', 'conversation', 'inbox', 'reply', 'replies', 'note', 'notes'],
+        ['overview', 'desk', 'frontdesk'], // sidebar group "Overview" = the Front Desk group when bookings and housekeeping are off
+        ['settings', 'setting', 'configure', 'configuration', 'setup', 'business'], // "Business Settings" = Hotel Settings when bookings are off
+        ['station', 'stations'], // "Till Stations" section of Module Settings (KDS, BDS, CDS, Room Service)
     ];
 }
 
@@ -618,7 +621,7 @@ function rh_kb_guide_requirements(): array
         '20-stock-loss-prevention.html'   => ['label' => 'Stock & Inventory',             'all' => ['stock'], 'main' => 'stock'],
         '09-packages-rates.html'          => ['label' => 'Bookings & Reservations',       'all' => ['bookings'], 'main' => 'bookings'],
         '10-conference-events.html'       => ['label' => 'Conference & Events',           'any' => ['conference', 'flag:events'], 'main' => 'conference'],
-        '11-social-facebook-sharing.html' => ['label' => 'Website & CMS',                'all' => ['website_cms'], 'main' => 'website_cms'],
+        '11-social-facebook-sharing.html' => ['label' => 'Website',                      'all' => ['website_cms'], 'main' => 'website_cms'],
         '17-gym-management.html'          => ['label' => 'Gym & Fitness',                 'all' => ['gym'], 'main' => 'gym'],
         '23-import.html'                  => ['label' => 'Data Import',                   'all' => ['stock', 'flag:data_import']],
     ];

@@ -46,29 +46,31 @@
   <p>From top to bottom:</p>
   <ul>
     <li>A short note: <em>"Disabled modules are hidden from the sidebar and dashboard — no data is deleted. Finance &amp; Accounting is always on and cannot be disabled."</em></li>
-    <li><strong>Quick Setup — Business Presets</strong>: one button per business type. The button that matches the current settings shows a green <strong>Active</strong> badge. If your settings do not match any preset exactly, no button has the badge.</li>
+    <li><strong>Business type</strong>: one button per business type, in an even grid. The button that matches the current settings shows a green <strong>Active</strong> badge. If your settings do not match any preset exactly, no button has the badge.</li>
     <li>A yellow note: <em>"Changes take effect immediately. The navigation sidebar updates on your next page load."</em></li>
-    <li><strong>Individual Modules</strong>: one card per module, each with an on/off switch and a status line (<strong>Enabled</strong> or <strong>Disabled</strong>).</li>
-    <li><strong>Guest Website Pages</strong>: two cards, <strong>Events Page</strong> and <strong>Restaurant Page</strong>.</li>
+    <li><strong>Modules</strong>: one card per module, each with an on/off switch and a status line (<strong>Enabled</strong> or <strong>Disabled</strong>).</li>
+    <li><strong>Till Stations</strong>: four cards, <strong>Kitchen Display (KDS)</strong>, <strong>Bar Display (BDS)</strong>, <strong>Coffee Bar Display (CDS)</strong> and <strong>Room Service</strong>, each with an On/Off switch. When <strong>POS Till</strong> is off, these are greyed out with the note <em>"Turn on POS Till above to use these."</em></li>
+    <li><strong>Restaurant and Events</strong>: two cards, <strong>Restaurant &amp; Food Service</strong> and <strong>Events</strong>.</li>
+    <li><strong>Staff Tools</strong>: the <strong>Assistant</strong> card.</li>
   </ul>
 
-  <h3>The individual modules</h3>
+  <h3>The modules</h3>
   <table>
     <thead><tr><th>Switch</th><th>What it covers (as written on the card)</th></tr></thead>
     <tbody>
       <tr><td><strong>Bookings &amp; Reservations</strong></td><td>Room bookings, calendar, blocked dates, tentative holds, check-in and check-out flows. Card warning: <em>"Disabling hides all booking pages and the Bookings nav section."</em></td></tr>
       <tr><td><strong>Housekeeping</strong></td><td>Room cleaning schedules, task assignment, and housekeeping reconciliation.</td></tr>
-      <tr><td><strong>POS &amp; Stations</strong></td><td>Point-of-sale till, deals, offline log and station displays. This card has a <strong>Configure Stations</strong> button that opens the four station switches.</td></tr>
+      <tr><td><strong>POS Till</strong></td><td>Point-of-sale till, deals, offline log and POS accounting. The kitchen, bar, coffee and room service screens have their own switches under <strong>Till Stations</strong>.</td></tr>
       <tr><td><strong>Stock Management</strong></td><td>Ingredients, recipes, batch tracking, stock orders, barcode receiving, stock counts and wastage.</td></tr>
       <tr><td><strong>Conference Rooms</strong></td><td>Conference room management, bookings and inquiry handling.</td></tr>
       <tr><td><strong>Gym &amp; Fitness</strong></td><td>Gym packages, membership management and gym inquiry tracking.</td></tr>
       <tr><td><strong>Finance &amp; Accounting</strong></td><td>Payments, invoices, receipts, credit notes, quotations, accounting dashboard, reports and end-of-day. Marked <strong>Core</strong> and <strong>Always On</strong>. The switch is greyed out.</td></tr>
-      <tr><td><strong>Website &amp; CMS</strong></td><td>Gallery, media portal, pages, events, reviews, contact inquiries, footer and section headers.</td></tr>
+      <tr><td><strong>Website</strong></td><td>Gallery, media portal, pages, events, reviews, contact inquiries, footer and section headers.</td></tr>
     </tbody>
   </table>
 
-  <h3>The station switches</h3>
-  <p>Click <strong>Configure Stations</strong> on the POS card to show them. They only work while <strong>POS &amp; Stations</strong> is on; when POS is off the station list is greyed out and cannot be clicked.</p>
+  <h3>The Till Stations switches</h3>
+  <p>These four cards sit in the <strong>Till Stations</strong> section, under the modules. They only work while <strong>POS Till</strong> is on; when POS Till is off the cards are greyed out and cannot be clicked.</p>
   <table>
     <thead><tr><th>Switch</th><th>Description on screen</th></tr></thead>
     <tbody>
@@ -79,12 +81,12 @@
     </tbody>
   </table>
 
-  <h3>The guest website page switches</h3>
+  <h3>The Restaurant and Events switches</h3>
   <table>
     <thead><tr><th>Switch</th><th>Description on screen</th></tr></thead>
     <tbody>
-      <tr><td><strong>Events Page</strong></td><td>Guest events page, event bookings and the admin events inbox.</td></tr>
-      <tr><td><strong>Restaurant Page</strong></td><td>Guest restaurant page, dine-in tables, recipes and station reports.</td></tr>
+      <tr><td><strong>Events</strong></td><td>Guest events page, event bookings and the admin events inbox.</td></tr>
+      <tr><td><strong>Restaurant &amp; Food Service</strong></td><td>Guest restaurant page, dine-in tables, recipes and station reports.</td></tr>
     </tbody>
   </table>
 
@@ -94,19 +96,19 @@
     <thead>
       <tr>
         <th>Preset</th><th>Short description on the button</th>
-        <th>Bookings</th><th>Housekeeping</th><th>POS</th><th>Stock</th><th>Conference</th><th>Gym</th><th>Website &amp; CMS</th>
+        <th>Bookings</th><th>Housekeeping</th><th>POS</th><th>Stock</th><th>Conference</th><th>Gym</th><th>Website</th>
         <th>KDS</th><th>BDS</th><th>CDS</th><th>Room Service</th>
         <th>Restaurant page</th><th>Events page</th>
       </tr>
     </thead>
     <tbody>
-      <tr><td><strong>Full Hotel</strong></td><td>All modules + all stations active</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td></tr>
-      <tr><td><strong>Hotel (No Restaurant)</strong></td><td>Rooms + conference + gym, no POS or stock</td><td>&#10003;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td></tr>
-      <tr><td><strong>Bar / Restaurant</strong></td><td>POS + KDS + BDS + stock</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&ndash;</td></tr>
-      <tr><td><strong>Conference Venue</strong></td><td>Bookings + conference + website</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&ndash;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td></tr>
-      <tr><td><strong>Gym / Fitness</strong></td><td>Gym + POS till + website</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td></tr>
-      <tr><td><strong>Retail / Shop</strong></td><td>POS + stock + finance only</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td></tr>
-      <tr><td><strong>Supermarket</strong></td><td>POS + stock + finance + website</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td></tr>
+      <tr><td><strong>Full Hotel</strong></td><td>Everything on: rooms, restaurant and bar, conference, gym</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td></tr>
+      <tr><td><strong>Hotel (No Restaurant)</strong></td><td>Rooms, conference and gym; no till or stock</td><td>&#10003;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&#10003;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td></tr>
+      <tr><td><strong>Bar / Restaurant</strong></td><td>Till, kitchen and bar screens, stock</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&ndash;</td></tr>
+      <tr><td><strong>Conference Venue</strong></td><td>Room bookings, conference, website</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&ndash;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td></tr>
+      <tr><td><strong>Gym / Fitness</strong></td><td>Gym, till, website</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td></tr>
+      <tr><td><strong>Retail / Shop</strong></td><td>Till, stock, finance</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td></tr>
+      <tr><td><strong>Supermarket</strong></td><td>Till, stock, finance, website</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&#10003;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td><td>&ndash;</td></tr>
     </tbody>
   </table>
   <div class="note"><p><span class="g-site-name">Rosalyns Beach Hotel</span> is a full hotel, so <strong>Full Hotel</strong> is the preset that matches it. The other presets exist because the same system is used for other kinds of business.</p></div>
@@ -146,17 +148,17 @@
 
   <h2 id="stations">How to switch a station on or off</h2>
   <ol class="steps">
-    <li>On the <strong>POS &amp; Stations</strong> card, make sure the main switch is on.</li>
-    <li>Click <strong>Configure Stations</strong>. The four station rows appear.</li>
-    <li>Click the switch next to the station. The label changes between <strong>On</strong> and <strong>Off</strong>.</li>
+    <li>Open <strong>Settings</strong> &rarr; <strong>Modules</strong>. Make sure the <strong>POS Till</strong> card is switched on.</li>
+    <li>Scroll to <strong>Till Stations</strong>. The four station cards are there.</li>
+    <li>Click the switch on the station card. The label changes between <strong>On</strong> and <strong>Off</strong>.</li>
     <li>The page reloads after a second.</li>
   </ol>
-  <p>A station screen needs two things to be on: <strong>POS &amp; Stations</strong> and its own station switch. Turning a station off removes its screen and its menu entry.</p>
+  <p>A station screen needs two things to be on: <strong>POS Till</strong> and its own station switch. Turning a station off removes its screen and its menu entry.</p>
 
   <h2 id="pages">How to switch the Restaurant or Events page on or off</h2>
   <ol class="steps">
-    <li>Scroll to <strong>Guest Website Pages</strong>.</li>
-    <li>Click the switch on <strong>Events Page</strong> or <strong>Restaurant Page</strong>.</li>
+    <li>Open <strong>Settings</strong> &rarr; <strong>Modules</strong>, then scroll to <strong>Restaurant and Events</strong>.</li>
+    <li>Click the switch on <strong>Events</strong> or <strong>Restaurant &amp; Food Service</strong>.</li>
     <li>The page reloads after a second.</li>
   </ol>
   <p>These two switches control the guest-facing page and the staff pages that go with it (see the next section). They are separate from the module switches. For example, a gym may use the POS for a snack till and still not want a restaurant page.</p>
@@ -175,15 +177,15 @@
     <tbody>
       <tr><td><strong>Bookings &amp; Reservations</strong></td><td>Front Desk: Bookings, Calendar, Individual Rooms, Blocked Dates, Room Maintenance. Settings: Rooms, Rate Plans, Room Packages. Also the booking pages themselves (create, edit, details, check-in, tentative bookings, room dashboard) and the guest booking pages.</td></tr>
       <tr><td><strong>Housekeeping</strong></td><td>Front Desk: Housekeeping.</td></tr>
-      <tr><td><strong>POS &amp; Stations</strong></td><td>Restaurant &amp; Bar: POS Till, Kitchen (KDS), Bar Display (BDS), Coffee Bar (CDS), Room Service, Menu (called Products when the restaurant page is off). Deals &amp; Promos, Offline Log. Also needed for Station Reports, Station Hours and Money: POS Accounting.</td></tr>
+      <tr><td><strong>POS Till</strong></td><td>Restaurant &amp; Bar: POS Till, Kitchen (KDS), Bar Display (BDS), Coffee Bar (CDS), Room Service, Menu (called Products when the restaurant page is off). Deals &amp; Promos, Offline Log. Also needed for Station Reports, Station Hours and Money: POS Accounting.</td></tr>
       <tr><td><strong>Stock Management</strong></td><td>Restaurant &amp; Bar: Orders &amp; Tabs (called Orders when the restaurant page is off), Tables. The whole <strong>Stock</strong> group (Stock Overview, Ingredients, Recipes, Receive Stock, Buying, Purchase Orders, Suppliers, Stock Count, Wastage, Batch Tracker, Stock Reports).</td></tr>
       <tr><td><strong>Conference Rooms</strong></td><td>Conference &amp; Events: Conference.</td></tr>
       <tr><td><strong>Gym &amp; Fitness</strong></td><td>The whole <strong>Gym</strong> group (Members, Check-In, Inquiries, Schedule, Classes, Packages, Gym Reports).</td></tr>
       <tr><td><strong>Finance &amp; Accounting</strong></td><td>Always on. The whole <strong>Money</strong> group: Accounting, Payments, Add Payment, Receipts, Invoices, Quotations, Credit Notes, POS Accounting, End of Day, Reports.</td></tr>
-      <tr><td><strong>Website &amp; CMS</strong></td><td>Website: Reviews, Contact Inquiries, Gallery, Media Portal, Pages, Section Headers, Footer. Conference &amp; Events: Event Bookings, Events.</td></tr>
+      <tr><td><strong>Website</strong></td><td>Website: Reviews, Contact Inquiries, Gallery, Media Portal, Pages, Section Headers, Footer. Conference &amp; Events: Event Bookings, Events.</td></tr>
       <tr><td><strong>Kitchen / Bar / Coffee / Room Service station switches</strong></td><td>Only the matching screen: Kitchen (KDS), Bar Display (BDS), Coffee Bar (CDS), Room Service. The POS switch must also be on.</td></tr>
-      <tr><td><strong>Restaurant Page</strong></td><td>Restaurant &amp; Bar: Tables, Station Reports, Station Hours. Stock: Recipes. Menu and Orders change their names (Menu &harr; Products, Orders &amp; Tabs &harr; Orders) and the guest restaurant page is hidden.</td></tr>
-      <tr><td><strong>Events Page</strong></td><td>Conference &amp; Events: Event Bookings, Events. The guest events page is hidden. (Both also need Website &amp; CMS to be on.)</td></tr>
+      <tr><td><strong>Restaurant &amp; Food Service</strong></td><td>Restaurant &amp; Bar: Tables, Station Reports, Station Hours. Stock: Recipes. Menu and Orders change their names (Menu &harr; Products, Orders &amp; Tabs &harr; Orders) and the guest restaurant page is hidden.</td></tr>
+      <tr><td><strong>Events</strong></td><td>Conference &amp; Events: Event Bookings, Events. The guest events page is hidden. (Both also need Website to be on.)</td></tr>
     </tbody>
   </table>
   <p>Three menu items depend on a combination, not a single switch:</p>
@@ -194,6 +196,15 @@
   </ul>
   <p>These pages are never switched off by a module: the Dashboard, Hotel Settings, Email Templates, Staff &amp; Access, Backups, Modules, Visitor Analytics, Automated Emails, WhatsApp Settings, Facebook Settings, API Keys, System Logs, Cache and the Help links (Staff Guides, Admin Reference, Email Template Tags). Hotel Settings is deliberately kept available, because it is the only place email sending is set up.</p>
   <p>The Hotel Settings page also adapts: with <strong>Bookings &amp; Reservations</strong> off, the page is called <strong>Business Settings</strong> and the booking-only cards are hidden (see <a href="19-hotel-settings.html">Hotel Settings</a>).</p>
+
+  <h3>Menu headings follow your business type</h3>
+  <p>The sidebar group names change with the switches that are on. Four examples:</p>
+  <ul>
+    <li><strong>Restaurant &amp; Bar</strong> shows as <strong>Till &amp; Sales</strong> when Restaurant &amp; Food Service is off.</li>
+    <li><strong>Front Desk</strong> shows as <strong>Overview</strong> when both Bookings &amp; Reservations and Housekeeping are off.</li>
+    <li><strong>Conference &amp; Events</strong> shows as <strong>Conference</strong> or <strong>Events</strong> when only one of the two is on.</li>
+    <li><strong>Hotel Settings</strong> shows as <strong>Business Settings</strong> when Bookings &amp; Reservations is off.</li>
+  </ul>
 
   <h2 id="rules">Rules the system enforces</h2>
   <ul>
