@@ -379,6 +379,9 @@ $current_page = 'backup-management.php';
                 </button>
                 <span style="font-size:.8rem;color:#6b7280;margin-left:12px">Takes 5–30 seconds depending on database size. Keep this page open until it finishes.</span>
             </form>
+            <?php if (($user['role'] ?? '') === 'admin'): ?>
+                <p style="font-size:.8rem;color:#6b7280;margin:12px 0 0"><i class="fas fa-eraser"></i> Need to empty the stock data before a fresh import? Use <a href="stock-clear.php">Clear Stock Data</a>: it saves a backup first and can be undone.</p>
+            <?php endif; ?>
         </div>
 
         <div class="bm-grid">

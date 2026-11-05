@@ -59,6 +59,7 @@ function rh_admin_nav_groups(): array
             ['stock-wastage.php',         'fas fa-trash-alt',       'Wastage',         'stock_wastage',    '', 'stock'],
             ['stock-batches.php',         'fas fa-layer-group',     'Batch Tracker',   'stock_batches',    '', 'stock'],
             ['stock-reports.php',         'fas fa-chart-area',      'Stock Reports',   'stock_reports',    '', 'stock'],
+            ['stock-clear.php',           'fas fa-eraser',          'Clear Stock Data', 'data_reset',      '', 'stock'],   // administrator role only (permission data_reset is not in the manager defaults)
         ],
         'Money' => [
             ['accounting-dashboard.php', 'fas fa-calculator',          'Accounting',     'accounting',     '',               'finance'],

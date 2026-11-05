@@ -1043,6 +1043,15 @@ function getAllPermissions()
             'page' => 'cache-management.php',
             'group' => 'settings_advanced'
         ],
+        // Clear Stock Data (owner 2026-11-06): administrator role only. It is NOT in the manager default list; the page also hard-checks role === 'admin'.
+        'data_reset' => [
+            'label' => 'Clear Stock Data',
+            'description' => 'Remove stock data (items, batches, recipes, suppliers, purchase orders, budgets) after a backup, with an undo. Administrator accounts only',
+            'icon' => 'fa-eraser',
+            'category' => 'Settings',
+            'page' => 'stock-clear.php',
+            'group' => 'settings_advanced'
+        ],
         'backup_management' => [
             'label' => 'Backup Management',
             'description' => 'Run, download and restore database backups',
@@ -1619,6 +1628,7 @@ function getPermissionForPage(string $page)
         'ai-chat.php' => 'ai_assistant_use',       // admin/api/ai-chat.php (Assistant, Phase 2)
         'ai-action.php' => 'ai_assistant_actions', // admin/api/ai-action.php (Assistant, Phase 2)
         'data-import.php' => 'data_import',        // Import page (Phase 1b-UI); also needs stock_management for the stock target
+        'stock-clear.php' => 'data_reset',         // Clear Stock Data (administrator role only)
         'user-management.php' => 'user_management',
         'process-checkin.php' => 'bookings',
         // Unmapped before: reachable by any signed-in user by URL. Keys match the nav entries in admin-header.php.
@@ -1727,6 +1737,7 @@ function getModuleForPage(string $page)
         'stock-reorder.php' => 'stock',
         'stock-suppliers.php' => 'stock',
         'data-import.php' => 'stock', // Import (stock lists); it also checks rh_import_enabled(), which is fail-closed
+        'stock-clear.php' => 'stock', // Clear Stock Data
         // enabled_modules describes website_cms as "Gallery, pages, deals,
         // reviews, social settings" — the social integrations and site
         // analytics belong to it on the module's own definition.
