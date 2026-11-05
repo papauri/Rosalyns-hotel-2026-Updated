@@ -130,6 +130,7 @@ function rh_kb_expand_phrases(string $q): string
     $map = [
         '/\b(sold out|out of stock|run out|ran out|finished)\b/i' => ' unavailable 86 ',
         '/\bmoney back\b/i' => ' refund ',
+        '/^\s*overview\s*\??$/i' => ' menu headings business type front desk sidebar ', // a bare "Overview" is the sidebar name (Module Settings note), not the Stock Overview
         '/\b(stock|ingredients?|inventory)\s+(is |are |has |have )?(going )?(missing|gone|disappear\w*)\b|\b(missing|disappearing)\s+(stock|ingredients?|inventory)\b/i' => ' theft shrinkage ',
         '/\b(no internet|internet (is )?(down|off|gone|dropped|not working)|connection (lost|down|dropped)|wi-?fi (is )?down)\b/i' => ' offline ',
         '/\bwalk[\s-]?ins?\b/i' => ' walkin create booking ',
