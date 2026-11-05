@@ -149,7 +149,7 @@ check(is_file($tmp . '/.htaccess') && !file_exists($tmp . '/a.cache') && !is_dir
 // ---- Web exposure ----
 $ht = (string)file_get_contents($root . '/.htaccess');
 check(preg_match('/FilesMatch "\(\?i\)\\\\\.\([^"]*\|cache\|/', $ht) === 1, 'root .htaccess denies *.cache files');
-check(preg_match('/RewriteRule \^\(invoices\|quotations\|cache\)\(\/\|\$\) - \[F,L\]/', $ht) === 1, 'root .htaccess denies the /cache/ folder');
+check(preg_match('/RewriteRule \^\((?:[A-Za-z]+\|)*cache(?:\|[A-Za-z]+)*\)\(\/\|\$\) - \[F,L\]/', $ht) === 1, 'root .htaccess denies the /cache/ folder');
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail ? 1 : 0);

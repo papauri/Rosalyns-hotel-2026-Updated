@@ -46,6 +46,7 @@ $suites = [
     'Stock sheet import'    => 'scripts/tests/stock_sheet_import.php',
     'Documents flow'        => 'scripts/tests/documents_flow.php',
     'Private document link' => 'scripts/tests/doc_link.php',
+    'Security follow-ups (salt, invoice download, void gate)' => 'scripts/tests/security_followups.php',
     'Cache logic'           => 'scripts/tests/cache_logic.php',
     'Error log clear'       => 'scripts/tests/error_log_clear.php',
     'Staff presence'        => 'scripts/tests/admin_presence.php',

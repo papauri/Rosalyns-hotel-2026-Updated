@@ -15,7 +15,7 @@ $id   = (int)($_GET['id'] ?? 0);
 
 // type => [table SQL, path column, any-of permissions, page used for the module gate, folder]
 $map = [
-    'invoice'         => ['SELECT invoice_path AS p FROM payments WHERE id = ?', ['invoices', 'bookings'], 'invoices.php', 'invoices'],
+    'invoice'         => ['SELECT invoice_path AS p, booking_type AS t FROM payments WHERE id = ?', ['invoices', 'bookings'], 'invoices.php', 'invoices'],
     'receipt'         => ['SELECT receipt_path AS p FROM payments WHERE id = ?', ['receipts'], 'receipts.php', 'invoices'],
     'credit_note'     => ['SELECT pdf_path AS p FROM credit_notes WHERE id = ?', ['invoices'], 'credit-notes.php', 'invoices'],
     'quotation'       => ['SELECT pdf_path AS p FROM quotations WHERE id = ?', ['create_booking'], 'quotations.php', 'quotations'],
@@ -29,6 +29,12 @@ function rh_doc_deny(int $code, string $msg): void
     header('Cache-Control: no-store');
     echo $msg;
     exit;
+}
+
+/** invoices permission: every account type. Anyone else who got past the gate (bookings): room payments only. */
+function rh_doc_account_allows(bool $hasInvoices, string $accountType): bool
+{
+    return $hasInvoices || $accountType === 'room';
 }
 
 if (!isset($map[$type]) || $id <= 0) {
@@ -51,13 +57,20 @@ if ($module !== null && ($user['role'] ?? '') !== 'admin') {
 try {
     $st = $pdo->prepare($sql);
     $st->execute([$id]);
-    $rel = (string)($st->fetchColumn() ?: '');
+    $row = $st->fetch(PDO::FETCH_NUM);
+    $rel = (string)($row[0] ?? '');
+    $accountType = (string)($row[1] ?? '');
 } catch (Throwable $e) {
     error_log('[document-download] ' . $e->getMessage());
     rh_doc_deny(500, 'Could not look up the document.');
 }
 if ($rel === '') {
     rh_doc_deny(404, 'Document not found.');
+}
+// A payment row belongs to one account type. The 'bookings' permission only opens room-booking
+// invoices; conference / gym / event / other invoices need the 'invoices' permission.
+if ($type === 'invoice' && !rh_doc_account_allows(hasAnyPermission((int)$user['id'], ['invoices']), $accountType)) {
+    rh_doc_deny(403, 'You do not have permission to open this document.');
 }
 
 $root = realpath(dirname(__DIR__) . '/' . $folder);

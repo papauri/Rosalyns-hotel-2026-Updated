@@ -34,6 +34,14 @@ function isFacebookPostingEnabled(): bool
 
 // ── Secret storage (independent of the host name) ─────────────────────────────
 
+require_once __DIR__ . '/secret-salt.php';
+
+/** AES key for a Facebook secret under the given salt. */
+function facebookSecretKey(string $salt): string
+{
+    return hash('sha256', $salt . '|facebook', true);
+}
+
 /**
  * Encrypt a Facebook secret (app secret / page token). The key does not
  * depend on SERVER_NAME, so a token saved on one host alias (www / non-www / CLI) still decrypts
@@ -44,8 +52,7 @@ function facebookEncryptSecret(string $plain): string
     if ($plain === '') {
         return '';
     }
-    $salt = $_ENV['APP_ENCRYPTION_SALT'] ?? getenv('APP_ENCRYPTION_SALT') ?: 'DEFAULT_SALT_CHANGE_IN_ENV';
-    $key  = hash('sha256', $salt . '|facebook', true);
+    $key  = facebookSecretKey(rhSecretSalt());
     $iv   = random_bytes(16);
     $enc  = openssl_encrypt($plain, 'AES-256-CBC', $key, OPENSSL_RAW_DATA, $iv);
     if ($enc === false) {
@@ -69,10 +76,8 @@ function facebookDecryptSecret(string $stored): string
         if ($data === false || strlen($data) < 17) {
             return '';
         }
-        $salt = $_ENV['APP_ENCRYPTION_SALT'] ?? getenv('APP_ENCRYPTION_SALT') ?: 'DEFAULT_SALT_CHANGE_IN_ENV';
-        $key  = hash('sha256', $salt . '|facebook', true);
-        $dec  = openssl_decrypt(substr($data, 16), 'AES-256-CBC', $key, OPENSSL_RAW_DATA, substr($data, 0, 16));
-        return $dec === false ? '' : $dec;
+        // Tries APP_ENCRYPTION_SALT first, then the old built-in salt (rows saved before it was set).
+        return rhDecryptWithSalts(substr($data, 16), substr($data, 0, 16), 'facebookSecretKey');
     }
     // Older rows may be plaintext (Facebook tokens start with "EA"; app secrets are 32 hex chars).
     if (preg_match('/^(EA[A-Za-z0-9_\-]{20,}|[0-9a-f]{32})$/', $stored)) {

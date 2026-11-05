@@ -12,6 +12,8 @@
  * Requires config/database.php (getSetting/updateSetting).
  */
 
+require_once __DIR__ . '/secret-salt.php';
+
 /** Google's monthly free allowance for the Place Details SKU that returns reviews (check the Google Maps Platform pricing page for changes). */
 if (!defined('RH_GOOGLE_FREE_LOOKUPS_PER_MONTH')) {
     define('RH_GOOGLE_FREE_LOOKUPS_PER_MONTH', 1000);
@@ -19,10 +21,9 @@ if (!defined('RH_GOOGLE_FREE_LOOKUPS_PER_MONTH')) {
 
 if (!function_exists('review_sources_key')) {
 
-    function review_sources_key(): string
+    function review_sources_key(?string $salt = null): string
     {
-        $salt = $_ENV['APP_ENCRYPTION_SALT'] ?? getenv('APP_ENCRYPTION_SALT') ?: 'DEFAULT_SALT_CHANGE_IN_ENV';
-        return hash('sha256', 'review-sources|' . $salt, true);
+        return hash('sha256', 'review-sources|' . ($salt ?? rhSecretSalt()), true);
     }
 
     function review_source_encrypt(string $plain): string
@@ -43,8 +44,8 @@ if (!function_exists('review_sources_key')) {
         if ($raw === false || strlen($raw) <= 16) {
             return '';
         }
-        $plain = openssl_decrypt(substr($raw, 16), 'AES-256-CBC', review_sources_key(), OPENSSL_RAW_DATA, substr($raw, 0, 16));
-        return is_string($plain) ? $plain : '';
+        // APP_ENCRYPTION_SALT first, then the old built-in salt (keys saved before it was set).
+        return rhDecryptWithSalts(substr($raw, 16), substr($raw, 0, 16), 'review_sources_key');
     }
 
     /** @return array{google:bool,brave:bool,place_id:string} */

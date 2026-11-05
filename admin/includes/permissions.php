@@ -1836,6 +1836,35 @@ function rhApiModuleGate(string $page): void
 }
 
 /**
+ * True when at least one of the given pages has all of its modules switched on (admins are never blocked; a page
+ * with no module counts as on). For JSON endpoints that a second surface also calls, e.g. api/cancel-order.php.
+ * The caller still has to hold the endpoint's own permissions.
+ */
+function rhModuleAllowsAnyPage(array $pages, string $role): bool
+{
+    if ($role === 'admin') {
+        return true;
+    }
+    foreach ($pages as $page) {
+        $module = getModuleForPage((string)$page);
+        if ($module === null) {
+            return true;
+        }
+        $allOn = true;
+        foreach ((is_array($module) ? $module : [$module]) as $moduleKey) {
+            if (!rh_module_key_enabled((string)$moduleKey)) {
+                $allOn = false;
+                break;
+            }
+        }
+        if ($allOn) {
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
  * Get all permission keys whose pages belong to the given module.
  * Inverse of getModuleForPage() — used to work out which permissions
  * (and therefore which users) are affected when a module is disabled.

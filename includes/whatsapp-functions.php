@@ -12,6 +12,8 @@
  * Feature can be toggled on/off by admin.
  */
 
+require_once __DIR__ . '/secret-salt.php';
+
 if (!defined('WHATSAPP_FUNCTIONS_LOADED')) {
     define('WHATSAPP_FUNCTIONS_LOADED', true);
 }
@@ -190,10 +192,9 @@ function sendWhatsAppViaTwilio(string $to, string $body): array
  * so scheduled CLI jobs can decrypt what the admin page saved.
  * Stored as "wa1:" + base64(iv . ciphertext).
  */
-function whatsAppTokenKey(): string
+function whatsAppTokenKey(?string $salt = null): string
 {
-    $salt = $_ENV['APP_ENCRYPTION_SALT'] ?? getenv('APP_ENCRYPTION_SALT') ?: 'DEFAULT_SALT_CHANGE_IN_ENV';
-    return hash('sha256', 'whatsapp-token|' . $salt, true);
+    return hash('sha256', 'whatsapp-token|' . ($salt ?? rhSecretSalt()), true);
 }
 
 function encryptWhatsAppToken(string $plain): string
@@ -215,10 +216,11 @@ function getWhatsAppAccessToken(): string
     }
     if (strpos($stored, 'wa1:') === 0) {
         $raw = base64_decode(substr($stored, 4), true);
+        // APP_ENCRYPTION_SALT first, then the old built-in salt (tokens saved before it was set).
         $plain = ($raw !== false && strlen($raw) > 16)
-            ? openssl_decrypt(substr($raw, 16), 'AES-256-CBC', whatsAppTokenKey(), OPENSSL_RAW_DATA, substr($raw, 0, 16))
-            : false;
-        if (!is_string($plain) || $plain === '') {
+            ? rhDecryptWithSalts(substr($raw, 16), substr($raw, 0, 16), 'whatsAppTokenKey')
+            : '';
+        if ($plain === '') {
             error_log('[whatsapp] saved access token cannot be decrypted (APP_ENCRYPTION_SALT changed?) - re-enter it in WhatsApp settings');
             return '';
         }

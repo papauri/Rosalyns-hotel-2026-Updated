@@ -68,7 +68,14 @@ $canOperate = $isPrivileged
 if (!$canOperate) {
     cjerr('Forbidden', 403);
 }
-rhApiModuleGate('pos.php'); // blocked when the till/POS module is switched off, as the page is
+// Blocked when the till/POS module is switched off, as the page is. The one exception: the stock module's order
+// timeline (order-lifecycle.php) offers Cancel to people holding pos_void, so with stock on and the till off exactly
+// those people (pos_void AND stock_orders) still get through. Anyone else stays blocked.
+if (!rhModuleAllowsAnyPage(['pos.php'], $userRole)
+    && !(rhModuleAllowsAnyPage(['order-lifecycle.php'], $userRole)
+        && hasPermission($userId, 'pos_void') && hasPermission($userId, 'stock_orders'))) {
+    cjerr('This feature is switched off in Modules.', 403);
+}
 
 $orderId = (int)($_POST['order_id'] ?? 0);
 $reason = trim((string)($_POST['cancel_reason'] ?? ''));
