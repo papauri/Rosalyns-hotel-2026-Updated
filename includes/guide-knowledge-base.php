@@ -144,6 +144,7 @@ function rh_kb_expand_phrases(string $q): string
         '/\bjoin(ing)?\s+(the\s+)?gym\b|\bgym\s+sign[\s-]?up\b/i' => ' enrol member gym ',
         '/\b(home screen|install (the )?app|add to home)\b/i' => ' install admin app ',
         '/\bblock\w*\s+(a\s+)?(room|dates?)\b|\b(close dates|stop selling|stop sales)\b/i' => ' blocked dates individual rooms ',
+        '/\b(clear|wipe|empty|erase|reset|delete all|remove all)\b.{0,20}\bstock\b|\bstock\b.{0,20}\b(clear|wipe|empty|erase|reset|start again|start over)\b|\bundo (a |the )?clear\b/i' => ' clear stock data start again undo backup ', // Clear Stock Data page (08 Stock guide, 99 Backups)
         '/\bwrong time|time is wrong|time ?zone\b/i' => ' time zone ',
         '/\b(ai|chat ?gpt|chat ?bot)\b/i' => ' assistant ',
         '/\b(lost|turned away|missed) (demand|bookings?|guests?)\b/i' => ' assistant searches found no room demand rate suggestions ',
