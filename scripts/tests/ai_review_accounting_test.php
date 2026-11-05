@@ -258,7 +258,7 @@ try {
     check($l !== null && near((float)$l['at_stake'], $expL) && near((float)$ml['till_shortages']['total'], 100.0), 'control: at stake = voids + till shortages + removed charges (the shared read), refunds not in it', json_encode([$l['at_stake'] ?? null, $expL]));
     $rows = (array)($l['evidence']['rows'] ?? []);
     $shortRow = array_values(array_filter($rows, static fn($r) => ($r['staff_name'] ?? '') === 'Dectest Tillstaff'))[0] ?? null;
-    check($shortRow !== null && strpos((string)$shortRow['label'], '2 time(s), repeated, 1 with override') !== false && near((float)$shortRow['amount'], 100.0), 'control: day-close shortages grouped by person, repeats and overrides shown', json_encode($shortRow));
+    check($shortRow !== null && strpos((string)$shortRow['label'], '2 times, 1 closed anyway by a manager') !== false && near((float)$shortRow['amount'], 100.0), 'control: day-close shortages grouped by person, repeats and overrides shown', json_encode($shortRow));
     $refRow = array_values(array_filter($rows, static fn($r) => strpos((string)$r['label'], 'Refunds paid out in full') === 0))[0] ?? null;
     check($refRow !== null && near((float)$refRow['amount'], 500.0) && near((float)$ml['refunds']['total'], 500.0) && strpos((string)$l['why_now'], 'in full') !== false, 'control: refunds shown at the full amount paid back (500.00), listed, not counted');
     check(!array_filter((array)$l['options'], static fn($o) => empty($o['not_valued']) || $o['best'] !== null), 'control: a void or a removed charge is not money that comes back: the options are "Not valued"');
@@ -280,8 +280,8 @@ try {
     check(($exp < 0) === ((int)$c['recommend'] === 1) && (int)$c['tier'] === (int)$c['options'][(int)$c['recommend']]['tier'], 'cash: holding orders is recommended only when the expected position is below zero; the card\'s tier is the recommended option\'s');
     check(near((float)$o1['expected'], $exp + $poSum) && near((float)$o1['best'], $exp + $overdue + $poSum) && near((float)$o1['worst'], -$pendSum) && stripos((string)$o1['effect'], 'not saved') !== false,
         'cash: holding orders is shown on the same figure (the position after the period: due out less the held orders), never as money saved', json_encode($o1));
-    check(stripos((string)$c['measure'], 'position after the next ' . $days . ' days') !== false, 'cash: the card says what Best / Expected / Worst measure');
-    check(stripos((string)$c['at_stake_note'], 'not a runway') !== false && !preg_match('/\brunway of\b/i', (string)$c['why_now']), 'cash: no runway is claimed (no cash or bank balance on record)');
+    check(stripos((string)$c['measure'], 'money you would have after the next ' . $days . ' days') !== false, 'cash: the card says what Best / Expected / Worst measure');
+    check(stripos((string)$c['at_stake_note'], 'cash and bank balance is not on record') !== false && !preg_match('/\brunway of\b/i', (string)$c['why_now']), 'cash: no runway is claimed (no cash or bank balance on record)');
     // The wording follows the figures: "chase the overdue money" only while something is overdue (same reads, owed set)
     $owedCtx = static function (array $ctx, array $ml, float $over) {
         $m2 = $ml;
@@ -312,7 +312,7 @@ try {
     check($hist >= 2 * $days && $pr !== null && near((float)$pr['at_stake'], $drop) && near($drop, 6510.64) && strpos((string)$pr['decision'], 'Rooms') !== false,
         'profit: the biggest fall (Rooms, takings excluding VAT and refunds, against the period before) = 6510.64', json_encode([$pr['at_stake'] ?? null, $drop]));
     $prLabels = implode(' | ', array_column((array)($pr['evidence']['rows'] ?? []), 'label'));
-    check($pr !== null && !preg_match('/(Rooms|Conference|Gym|Events)[^|]*margin/i', $prLabels) && (int)$pr['tier'] === 1 && (int)$pr['options'][1]['tier'] === 3,
+    check($pr !== null && !preg_match('/(Rooms|Conference|Gym|Events)[^|]*(margin|profit)/i', $prLabels) && (int)$pr['tier'] === 1 && (int)$pr['options'][1]['tier'] === 3,
         'profit: no margin shown for departments without costs on record; looking into it is tier 1, prices tier 3', $prLabels);
     check($pr !== null && !array_filter((array)$pr['options'], static fn($o) => empty($o['not_valued'])), 'profit: looking into a fall or changing prices brings nothing in by itself: the options are "Not valued"');
 
@@ -320,6 +320,11 @@ try {
     foreach ($cards as $k => $cd) {
         check($cd['decision'] !== '' && count($cd['options']) >= 1 && in_array((int)$cd['tier'], [1, 2, 3], true) && $cd['evidence']['total'] > 0 && $cd['at_stake_note'] !== '',
             "card $k: decision, options, tier, a checked total and a note on what the money figure uses");
+        // Owner 2026-11-05, very plain English: the fixed texts fit the wording caps (an unchanged card is never dropped) and use no trade words, no minus sign on money and no "(s)"
+        $plain = $cd['decision'] . ' | ' . $cd['why_now'] . ' | ' . $cd['recommendation'] . ' | ' . $cd['at_stake_note'] . ' | ' . implode(' | ', array_column($cd['options'], 'label')) . ' | ' . implode(' | ', array_column($cd['options'], 'effect'));
+        $fits = !array_filter(rh_dec_caps(), static fn($cap, $f) => mb_strlen((string)$cd[$f]) > $cap, ARRAY_FILTER_USE_BOTH);
+        check($fits && !preg_match('/\b(folio|pace|pickup|variance|accrual|ADR|RevPAR|lead time|orphan|runway|exposure|dependency|dependence|tier|room-nights?|Evidence|Not valued)\b/i', $plain) && !preg_match('/[A-Z]{3} -\d|\(s\)|\(es\)/', $plain),
+            "card $k: very plain wording (fits the wording caps; no trade words, minus money or (s))", $plain);
         check(!preg_match('/\b(AI|smart|insights?|assistant|generated|powered|model|MRA)\b/i', $cd['decision'] . ' ' . $cd['why_now'] . ' ' . $cd['recommendation'] . ' ' . implode(' ', array_column($cd['options'], 'label'))), "card $k: plain wording");
         check(!array_filter($cd['options'], static fn($o) => (float)$o['confidence'] > (float)$cd['confidence'] + 0.0001), "card $k: no option's likelihood is above the card's confidence");
     }
@@ -355,11 +360,14 @@ try {
     foreach (array_keys(array_filter($cards, static fn($x) => $x['share_pct'] !== null)) as $k) {
         check(strpos($html, 'data-key="' . $k . '"') !== false, "panel shows card $k");
     }
-    $ths = substr_count($html, '<th scope="col" class="no-sort">');
-    check($ths > 0 && $ths === preg_match_all('/<th scope="col" class="no-sort">[^<]+<span class="rh-dec__help">/', $html), 'every column header in the panel has a plain helper line');
-    check(preg_match_all('/<dt>[^<]+<\/dt><dd[^>]*>[^<]*<\/dd><dd class="rh-dec__help">/', $html) === substr_count($html, '<dt>'), 'every figure on every card has a plain helper line');
-    check(strpos($html, 'Best, Expected and Worst all show the money position after the next ' . $days . ' days') !== false && strpos($html, '>Not valued<') !== false && strpos($html, '>Likelihood<') !== false,
-        'the panel says what each card\'s Best / Expected / Worst measure, "Not valued" where an option is not money, and Likelihood for options');
+    $ths = substr_count($html, '<th scope="col"');
+    check($ths > 0 && $ths === preg_match_all('/<th scope="col" class="no-sort[^"]*" title="[^"]+">[^<]+<\/th>/', $html) && substr_count($html, '<table') === substr_count($html, 'class="rh-dec__legend"'),
+        'every column header has a plain hover title, and every table one short key line under it');
+    check(substr_count($html, 'class="rh-dec-card"') === substr_count($html, 'class="rh-dec-card__stake"') && (strpos($html, '>money involved<') !== false || strpos($html, '>No money figure<') !== false),
+        'every card shows the money involved (or "No money figure") beside the decision');
+    check(strpos($html, 'data-dec="refresh"') === false && strpos($html, 'Works the figures out') === false && strpos($html, 'Updated at ') !== false, 'no Refresh button or its help text; one "Updated at" line instead');
+    check(strpos($html, 'The figures show the money you would have after the next ' . $days . ' days') !== false && strpos($html, '>No money figure<') !== false && strpos($html, '>How sure<') !== false,
+        'the panel says what each card\'s figures measure, "No money figure" where a choice is not money, and How sure for choices');
     check(!preg_match('/\b(AI|smart|insights?|assistant|generated|powered by|thinking)\b/i', strip_tags($html)) && !preg_match('/fa-(magic|wand|robot|brain|star|microchip|hat-wizard)|sparkle|gradient|\bMRA\b/i', $html), 'the panel has no AI-looking words or icons and no MRA wording');
     check(strpos($html, 'Dectest Tillstaff') !== false, 'evidence names are shown on the hotel\'s own screen (they never left it)');
     $GLOBALS['__rh_dec_models'] = ['provider' => ''];

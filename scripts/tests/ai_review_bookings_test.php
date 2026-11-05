@@ -323,11 +323,11 @@ try {
     // Pace and pickup
     $pc = $cards['bk_pace'] ?? null;
     $ev = static fn(?array $c, string $label) => array_values(array_filter((array)($c['evidence']['rows'] ?? []), static fn($r) => strpos((string)$r['label'], $label) === 0))[0] ?? null;
-    check($pc !== null && near((float)$pc['at_stake'], round((int)$bp['unsold_room_nights'] * $adr, 2)) && (string)($ev($pc, 'On the books')['value'] ?? '') === (int)$bp['room_nights_on_the_books'] . ' room-nights'
-        && (string)($ev($pc, 'Same nights last year')['value'] ?? '') === '3 room-nights', 'pace: unsold nights x the average rate, on-the-books and last year (3 room-nights) are booking_pace\'s own figures', json_encode([$pc['at_stake'] ?? null, $bp['unsold_room_nights'], $adr]));
+    check($pc !== null && near((float)$pc['at_stake'], round((int)$bp['unsold_room_nights'] * $adr, 2)) && (string)($ev($pc, 'Booked so far')['value'] ?? '') === (int)$bp['room_nights_on_the_books'] . ' room nights'
+        && (string)($ev($pc, 'Same dates last year')['value'] ?? '') === '3 room nights', 'pace: unsold nights x the average rate, on-the-books and last year (3 room-nights) are booking_pace\'s own figures', json_encode([$pc['at_stake'] ?? null, $bp['unsold_room_nights'], $adr]));
     $blocks = array_values(array_filter((array)($pc['evidence']['rows'] ?? []), static fn($r) => strpos((string)$r['label'], 'Nights ') === 0));
     $sumBlocks = 0;
-    foreach ($blocks as $r) { preg_match('/: (\d+) room-nights on the books/', (string)$r['label'], $mm); $sumBlocks += (int)($mm[1] ?? -9999); }
+    foreach ($blocks as $r) { preg_match('/: (\d+) room nights booked/', (string)$r['label'], $mm); $sumBlocks += (int)($mm[1] ?? -9999); }
     check(count($blocks) === (int)ceil($ahead / 30) && $sumBlocks === (int)$bp['room_nights_on_the_books'], 'pace: the 30-night blocks (where pickup lags last year) add up to the whole period', json_encode([count($blocks), $sumBlocks]));
     check($pc !== null && !empty($pc['options'][1]['not_valued']) && (int)$pc['options'][1]['tier'] === 3 && stripos((string)$pc['options'][1]['label'], 'rates') !== false, 'pace: a rate or offer change is "Not valued" and a manager\'s (tier 3)');
 
@@ -337,11 +337,11 @@ try {
     $n1Row = $ev($dm, $N1 . ':');
     $t1Name = (string)$pdo->query("SELECT name FROM rooms WHERE id = " . (int)$t1)->fetchColumn();
     check($dm !== null && near((float)$dm['at_stake'], round($free * $adr, 2)) && $n1Row !== null && strpos((string)$n1Row['label'], ($u1 + $k) . ' of ' . $sell . ' rooms booked') !== false
-        && strpos((string)$n1Row['label'], 'sold out: ' . $t1Name) !== false && (string)$n1Row['value'] === $free . ' room(s) left',
+        && strpos((string)$n1Row['label'], 'sold out: ' . $t1Name) !== false && (string)$n1Row['value'] === rh_dec_n($free, 'room') . ' left',
         'demand: the busy night (' . ($u1 + $k) . ' of ' . $sell . ' booked, ' . $t1Name . ' sold out) and the ' . $free . ' rooms left on it at the average rate', json_encode([$dm['at_stake'] ?? null, $n1Row]));
     check($dm !== null && !array_filter((array)$dm['options'], static fn($o) => empty($o['not_valued'])) && (int)$dm['options'][0]['tier'] === 3 && stripos((string)$dm['at_stake_note'], 'not a gain') !== false,
         'demand: raising rates and keeping them are both "Not valued"; a rate change is tier 3; the money is what a rate change applies to, not a gain');
-    $typeRows = array_values(array_filter((array)($dm['evidence']['rows'] ?? []), static fn($r) => strpos((string)$r['label'], ': share of its rooms booked') !== false));
+    $typeRows = array_values(array_filter((array)($dm['evidence']['rows'] ?? []), static fn($r) => strpos((string)$r['label'], '): share booked over the next') !== false));
     check(count($typeRows) === count(array_filter($byType)), 'demand: every room type with rooms shows its share booked ahead');
 
     // Room types that earn and lag
@@ -398,17 +398,17 @@ try {
     check($d1Row !== null && near((float)$d1Row['amount'], 130000.0) && strpos((string)$d1Row['label'], 'deposit asked for and not paid') !== false, 'deposits: a deposit asked for and only partly paid is listed with what is still owed (130,000.00)');
     check($dp !== null && !array_filter((array)$dp['options'], static fn($o) => empty($o['not_valued']) || $o['best'] !== null || $o['expected'] !== null || $o['worst'] !== null)
         && stripos((string)$dp['at_stake_note'], 'not a saving') !== false, 'deposits: asking for a deposit brings money in sooner, it is not a saving: every option "Not valued" (no best, expected or worst)', json_encode($dp['options'] ?? null));
-    $nsRow = $ev($dp, 'Stays due in over the last');
+    $nsRow = $ev($dp, 'Stays due in the last');
     $dpRows = array_column((array)($dp['evidence']['rows'] ?? []), 'value', 'label');
     $cxLabel = array_values(array_filter(array_keys($dpRows), static fn($l) => strpos($l, 'that were cancelled (refunded in full)') !== false))[0] ?? '';
-    check($nsRow !== null && strpos((string)$nsRow['label'], 'did not show') !== false && strpos((string)$nsRow['value'], '1 of 4 ') === 0 && $cxLabel !== '' && strpos((string)$dpRows[$cxLabel], '1 of 4 ') === 0 && strpos((string)$dp['why_now'], '25.0% of the hotel') !== false,
+    check($nsRow !== null && strpos((string)$nsRow['label'], 'did not show') !== false && strpos((string)$nsRow['value'], '1 of 4 ') === 0 && $cxLabel !== '' && strpos((string)$dpRows[$cxLabel], '1 of 4 ') === 0 && strpos((string)$dp['why_now'], '25.0% of guests did not show') !== false,
         'deposits: no-shows (1 of 4, the only ones that keep money) and cancellations (1 of 4, refunded in full) are shown apart', json_encode($dpRows));
     // Below the history needed: forecasts are blank ("Not enough history"), never invented
     $short = $ctx;
     $short['history_min'] = 1000000;
     $dpS = rh_dec_f_bk_deposits($pdo, $short)['cards'][0] ?? null;
     $pcS = rh_dec_f_pace($pdo, $short)['cards'][0] ?? null;
-    check($dpS !== null && $ev($dpS, 'Stays due in over the last') === null && strpos((string)$dpS['why_now'], 'did not show') === false && $pcS !== null && $pcS['options'][0]['expected'] === null && empty($pcS['options'][0]['not_valued']),
+    check($dpS !== null && $ev($dpS, 'Stays due in the last') === null && strpos((string)$dpS['why_now'], 'did not show') === false && $pcS !== null && $pcS['options'][0]['expected'] === null && empty($pcS['options'][0]['not_valued']),
         'not enough history: no no-show share is shown and the expected pickup figure is blank ("Not enough history")');
 
     // Arrivals needing action
@@ -429,7 +429,7 @@ try {
     $jbNo = (string)$pdo->query("SELECT room_number FROM individual_rooms WHERE id = " . (int)$Jb)->fetchColumn();
     $g1No = (string)$pdo->query("SELECT room_number FROM individual_rooms WHERE id = " . (int)$G1['id'])->fetchColumn();
     check($gp !== null && count($gRows) === 2 && near((float)$gp['at_stake'], $price($G1['type']) + $price($t1))
-        && strpos($gRows[0], 'Room ' . $g1No . ' ') === 0 && strpos($gRows[0], '1 night(s) free from ' . $D(32)) !== false && strpos($gRows[1], 'Room ' . $jbNo . ' ') === 0 && strpos($gRows[1], 'free from ' . $D(52)) !== false,
+        && strpos($gRows[0], 'Room ' . $g1No . ' ') === 0 && strpos($gRows[0], '1 night free from ' . $D(32)) !== false && strpos($gRows[1], 'Room ' . $jbNo . ' ') === 0 && strpos($gRows[1], 'free from ' . $D(52)) !== false,
         'gaps: the 1-night gaps are listed (one after the joined stay, because the pair\'s second room is held), the 3-night gap is not; valued at the listed nightly rate', json_encode([$gp['at_stake'] ?? null, $gRows]));
     check($gp !== null && !empty($gp['options'][1]['not_valued']) && (int)$gp['options'][1]['tier'] === 3 && $gp['options'][0]['expected'] === null, 'gaps: a short-stay rate is "Not valued" (tier 3); the extra-night offer has no expected figure without history');
 
@@ -443,6 +443,11 @@ try {
     foreach ($cards as $kk => $cd) {
         check($cd['decision'] !== '' && count($cd['options']) >= 2 && in_array((int)$cd['tier'], [1, 2, 3], true) && $cd['evidence']['total'] > 0 && $cd['at_stake_note'] !== '',
             "card $kk: decision, options, tier, a checked total and a note on what the money figure uses");
+        // Owner 2026-11-05, very plain English: the fixed texts fit the wording caps (an unchanged card is never dropped) and use no trade words, no minus sign on money and no "(s)"
+        $plain = $cd['decision'] . ' | ' . $cd['why_now'] . ' | ' . $cd['recommendation'] . ' | ' . $cd['at_stake_note'] . ' | ' . implode(' | ', array_column($cd['options'], 'label')) . ' | ' . implode(' | ', array_column($cd['options'], 'effect'));
+        $fits = !array_filter(rh_dec_caps(), static fn($cap, $f) => mb_strlen((string)$cd[$f]) > $cap, ARRAY_FILTER_USE_BOTH);
+        check($fits && !preg_match('/\b(folio|pace|pickup|variance|accrual|ADR|RevPAR|lead time|orphan|runway|exposure|dependency|dependence|tier|room-nights?|Evidence|Not valued)\b/i', $plain) && !preg_match('/[A-Z]{3} -\d|\(s\)|\(es\)/', $plain),
+            "card $kk: very plain wording (fits the wording caps; no trade words, minus money or (s))", $plain);
         $txt = $cd['decision'] . ' ' . $cd['why_now'] . ' ' . $cd['recommendation'] . ' ' . implode(' ', array_column($cd['options'], 'label'));
         check(!preg_match('/\b(AI|smart|insights?|assistant|generated|powered|model|MRA)\b/i', $txt) && stripos($txt, 'dectest') === false, "card $kk: plain wording, no guest name or booking reference in the worded text");
         check(!array_filter($cd['options'], static fn($o) => (float)$o['confidence'] > (float)$cd['confidence'] + 0.0001), "card $kk: no option's likelihood is above the card's confidence");
@@ -477,10 +482,13 @@ try {
     foreach ($ids as $kk) {
         check(strpos($html, 'data-key="' . $kk . '"') !== false || strpos($html, $cards[$kk]['decision'] ?? "\0") !== false, "panel shows $kk (as a card, or under More)");
     }
-    $ths = substr_count($html, '<th scope="col" class="no-sort">');
-    check($ths > 0 && $ths === preg_match_all('/<th scope="col" class="no-sort">[^<]+<span class="rh-dec__help">/', $html), 'every column header in the panel has a plain helper line');
-    check(preg_match_all('/<dt>[^<]+<\/dt><dd[^>]*>[^<]*<\/dd><dd class="rh-dec__help">/', $html) === substr_count($html, '<dt>'), 'every figure on every card has a plain helper line');
-    check(strpos($html, '>Not valued<') !== false && strpos($html, '>Likelihood<') !== false, 'the panel shows "Not valued" where an option is not money, and Likelihood for options');
+    $ths = substr_count($html, '<th scope="col"');
+    check($ths > 0 && $ths === preg_match_all('/<th scope="col" class="no-sort[^"]*" title="[^"]+">[^<]+<\/th>/', $html) && substr_count($html, '<table') === substr_count($html, 'class="rh-dec__legend"'),
+        'every column header has a plain hover title, and every table one short key line under it');
+    check(substr_count($html, 'class="rh-dec-card"') === substr_count($html, 'class="rh-dec-card__stake"') && (strpos($html, '>money involved<') !== false || strpos($html, '>No money figure<') !== false),
+        'every card shows the money involved (or "No money figure") beside the decision');
+    check(strpos($html, 'data-dec="refresh"') === false && strpos($html, 'Works the figures out') === false && strpos($html, 'Updated at ') !== false, 'no Refresh button or its help text; one "Updated at" line instead');
+    check(strpos($html, '>No money figure<') !== false && strpos($html, '>How sure<') !== false, 'the panel shows "No money figure" where a choice is not money, and How sure for choices');
     check(!preg_match('/\b(AI|smart|insights?|assistant|generated|powered by|thinking)\b/i', strip_tags($html)) && !preg_match('/fa-(magic|wand|robot|brain|star|microchip|hat-wizard)|sparkle|gradient|\bMRA\b/i', $html), 'the panel has no AI-looking words or icons and no MRA wording');
     check(strpos($html, 'Dectest Guest A1') !== false && stripos($html, 'quiet room') === false, 'guest names are shown on the hotel\'s own screen (they never left it); the request text is not shown');
     $dv = rh_dec_for_viewer($pdo, $du, 'bookings');

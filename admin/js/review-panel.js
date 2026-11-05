@@ -1,5 +1,7 @@
 /*
- * The Decisions panel (admin/includes/review-panel.php): the "Decisions" tab and side drawer, Refresh, and Noted / Not now.
+ * The Decisions panel (admin/includes/review-panel.php): the "Decisions" tab and side drawer, the first wording after the
+ * page loads, and Noted / Not now. The panel has no Refresh button any more (owner 2026-11-05: updating is automatic); the
+ * [data-dec="refresh"] handler below stays so any refresh control swaps the panel in place the same way.
  * Loaded only when a panel (or its hidden first-wording hook) is printed. Document-level listeners, bound once, so they keep
  * working after in-app navigation (the drawer's open state lives only on its own element, so a new page always starts closed).
  * Posts to the panel's own endpoint with the page's security token; nothing else is sent.

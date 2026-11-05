@@ -299,7 +299,7 @@ try {
     $needCost = round(($cover * 1.0 - 4.0) * 1000, 2);
     $ruRows = (array)($ru['evidence']['rows'] ?? []);
     $flourRow = array_values(array_filter($ruRows, static fn($r) => strpos((string)$r['label'], 'TESTREVIEW Flour') === 0))[0] ?? null;
-    check($ru !== null && near((float)$ru['at_stake'], $needCost) && $flourRow !== null && near((float)$flourRow['amount'], $needCost) && strpos((string)$flourRow['label'], 'about 4.0 day(s)') !== false,
+    check($ru !== null && near((float)$ru['at_stake'], $needCost) && $flourRow !== null && near((float)$flourRow['amount'], $needCost) && strpos((string)$flourRow['label'], 'about 4.0 days') !== false,
         'run-out: Flour at 1 kg a day lasts 4 days; the order to last ' . $cover . ' days costs ' . number_format($needCost, 2) . ' (the at-stake figure)', json_encode([$ru['at_stake'] ?? null, $flourRow]));
     check($ru !== null && count($ruRows) === 1 && (int)$ru['evidence']['total'] === 3, 'run-out: Sugar (enough on order) and Soda (plenty left) are not flagged; 3 stock items with till use checked', json_encode(array_column($ruRows, 'label')));
     $st = $pdo->query($onOrderSql);
@@ -320,7 +320,7 @@ try {
     $sodaShort = 5 * (50 - 40); // bought in and sold as is: only what it sells below cost (the dish band does not apply)
     $up = rh_ai_menu_view_under_priced(rh_ai_menu_items($pdo));
     check($high < 90 && $mn !== null && near((float)$mn['at_stake'], round($pieShort + $sodaShort, 2)), 'menu: at stake = the Pie margin short of the ' . $high . '% band + what the bought-in Soda sells below cost (50.00), on what the till sold (10 Pie, 5 Soda; the voided line and the voided order left out)', json_encode([$mn['at_stake'] ?? null, $pieShort + $sodaShort]));
-    check(in_array('TESTREVIEW Pie', array_column($up['re_price'], 'item'), true) && in_array('TESTREVIEW Soda', array_column($up['bought_in'], 'item'), true) && $mn !== null && strpos((string)$mn['decision'], '1 selling below cost') !== false,
+    check(in_array('TESTREVIEW Pie', array_column($up['re_price'], 'item'), true) && in_array('TESTREVIEW Soda', array_column($up['bought_in'], 'item'), true) && $mn !== null && strpos((string)$mn['decision'], '1 sells below cost') !== false,
         'menu: the flagged items are the menu advisor\'s own "re-price" (Pie) and "bought in" (Soda, selling below cost) lists');
     check($mn !== null && (int)$mn['tier'] === 3 && !array_filter((array)$mn['options'], static fn($o) => empty($o['not_valued'])) && $mn['link'][0] === 'stock-recipes.php'
         && stripos((string)$mn['at_stake_note'], 'Recipes screen') !== false, 'menu: a price or recipe change is a manager\'s (tier 3, never automatic), every option "Not valued", the link opens Recipes');
@@ -377,7 +377,7 @@ try {
     check($bd !== null && near((float)$bd['at_stake'], 3000.0) && !array_filter((array)$bd['options'], static fn($o) => empty($o['not_valued']) || $o['best'] !== null || $o['expected'] !== null || $o['worst'] !== null),
         'budget: 3,000.00 ahead of an even pace; neither holding nor buying claims money saved: both "Not valued"', json_encode($bd['options'] ?? null));
     check($bd !== null && stripos((string)$bd['options'][0]['effect'], 'paid later, not saved') !== false && stripos((string)$bd['at_stake_note'], 'not a saving') !== false
-        && in_array('Forecast for the month at the current pace (the Stock Budget screen)', array_column((array)$bd['evidence']['rows'], 'label'), true), 'budget: holding orders is shown as paid later, not saved; the screen\'s month-end forecast is in the evidence');
+        && in_array('Likely spend for the month if buying goes on like this (the Stock Budget screen)', array_column((array)$bd['evidence']['rows'], 'label'), true), 'budget: holding orders is shown as paid later, not saved; the screen\'s month-end forecast is in the evidence');
     $bctx['run'] = static fn(string $tool, array $args = []) => $tool === 'money_leaks' ? ['wastage' => []] : null;
     check(rh_dec_f_stock_budget($pdo, $bctx)['cards'] === [], 'budget: no budget set: no card (nothing to compare)');
 
@@ -385,6 +385,11 @@ try {
     foreach ($cards as $k => $cd) {
         check($cd['decision'] !== '' && count($cd['options']) >= 1 && in_array((int)$cd['tier'], [1, 2, 3], true) && $cd['evidence']['total'] > 0 && $cd['at_stake_note'] !== '',
             "card $k: decision, options, tier, a checked total and a note on what the money figure uses");
+        // Owner 2026-11-05, very plain English: the fixed texts fit the wording caps (an unchanged card is never dropped) and use no trade words, no minus sign on money and no "(s)"
+        $plain = $cd['decision'] . ' | ' . $cd['why_now'] . ' | ' . $cd['recommendation'] . ' | ' . $cd['at_stake_note'] . ' | ' . implode(' | ', array_column($cd['options'], 'label')) . ' | ' . implode(' | ', array_column($cd['options'], 'effect'));
+        $fits = !array_filter(rh_dec_caps(), static fn($cap, $f) => mb_strlen((string)$cd[$f]) > $cap, ARRAY_FILTER_USE_BOTH);
+        check($fits && !preg_match('/\b(folio|pace|pickup|variance|accrual|ADR|RevPAR|lead time|orphan|runway|exposure|dependency|dependence|tier|room-nights?|Evidence|Not valued)\b/i', $plain) && !preg_match('/[A-Z]{3} -\d|\(s\)|\(es\)/', $plain),
+            "card $k: very plain wording (fits the wording caps; no trade words, minus money or (s))", $plain);
         check(!preg_match('/\b(AI|smart|insights?|assistant|generated|powered|model|MRA)\b/i', $cd['decision'] . ' ' . $cd['why_now'] . ' ' . $cd['recommendation'] . ' ' . implode(' ', array_column($cd['options'], 'label'))), "card $k: plain wording");
         check(!array_filter($cd['options'], static fn($o) => (float)$o['confidence'] > (float)$cd['confidence'] + 0.0001), "card $k: no option's likelihood is above the card's confidence");
         check(!array_filter($cd['options'], static fn($o) => preg_match('/\b(order|buy|hold)/i', (string)$o['label']) && !preg_match('/smaller amounts/i', (string)$o['label']) && empty($o['not_valued'])),
@@ -415,10 +420,13 @@ try {
     foreach (['stk_runout', 'stk_menu', 'stk_loss', 'stk_tied', 'stk_supplier'] as $k) {
         check(strpos($html, 'data-key="' . $k . '"') !== false, "panel shows card $k");
     }
-    $ths = substr_count($html, '<th scope="col" class="no-sort">');
-    check($ths > 0 && $ths === preg_match_all('/<th scope="col" class="no-sort">[^<]+<span class="rh-dec__help">/', $html), 'every column header in the panel has a plain helper line');
-    check(preg_match_all('/<dt>[^<]+<\/dt><dd[^>]*>[^<]*<\/dd><dd class="rh-dec__help">/', $html) === substr_count($html, '<dt>'), 'every figure on every card has a plain helper line');
-    check(strpos($html, '>Not valued<') !== false && strpos($html, '>Likelihood<') !== false, 'the panel shows "Not valued" where an option is not money, and Likelihood for options');
+    $ths = substr_count($html, '<th scope="col"');
+    check($ths > 0 && $ths === preg_match_all('/<th scope="col" class="no-sort[^"]*" title="[^"]+">[^<]+<\/th>/', $html) && substr_count($html, '<table') === substr_count($html, 'class="rh-dec__legend"'),
+        'every column header has a plain hover title, and every table one short key line under it');
+    check(substr_count($html, 'class="rh-dec-card"') === substr_count($html, 'class="rh-dec-card__stake"') && (strpos($html, '>money involved<') !== false || strpos($html, '>No money figure<') !== false),
+        'every card shows the money involved (or "No money figure") beside the decision');
+    check(strpos($html, 'data-dec="refresh"') === false && strpos($html, 'Works the figures out') === false && strpos($html, 'Updated at ') !== false, 'no Refresh button or its help text; one "Updated at" line instead');
+    check(strpos($html, '>No money figure<') !== false && strpos($html, '>How sure<') !== false, 'the panel shows "No money figure" where a choice is not money, and How sure for choices');
     check(!preg_match('/\b(AI|smart|insights?|assistant|generated|powered by|thinking)\b/i', strip_tags($html)) && !preg_match('/fa-(magic|wand|robot|brain|star|microchip|hat-wizard)|sparkle|gradient|\bMRA\b/i', $html), 'the panel has no AI-looking words or icons and no MRA wording');
     check(strpos($html, 'TESTREVIEW Supplier Alpha') !== false, 'supplier names are shown on the hotel\'s own screen (they never left it)');
     $GLOBALS['__rh_dec_models'] = ['provider' => ''];

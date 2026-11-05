@@ -13,8 +13,10 @@
  * Including this file prints nothing.
  *
  * Plain look on the existing admin tokens (admin/css/review-panel.css): closed by default, one small "Decisions" tab
- * (with the number waiting) opens a side drawer holding a normal card titled "Decisions", every figure and column
- * with a plain helper line, links to the screen that acts. Nothing changes by itself.
+ * (with the number waiting) opens a side drawer titled "Decisions". Each card reads top to bottom: the decision and the
+ * money involved, one quiet line of facts, why now, what we suggest with the link to the screen that acts, then the
+ * other choices and where it comes from (closed; one plain key line per table, a hover title on every column).
+ * Updating is automatic (after the page loads, and the daily job); there is no button for it. Nothing changes by itself.
  */
 
 /** The areas, their permissions (any one) and modules (any one). Shared with the engine (includes/ai/ai-decisions.php). */
@@ -114,7 +116,14 @@ function rh_review_conf_label(float $c): string
 
 function rh_review_tier_text(int $tier): string
 {
-    return [1 => 'You can do this straight away.', 2 => 'Needs one approval, with an exact preview first.', 3 => 'A manager decides on the screen; never done automatically.'][$tier] ?? '';
+    return [1 => 'You can do this now', 2 => 'Needs a manager\'s OK first', 3 => 'A manager decides this on the screen'][$tier] ?? '';
+}
+
+/** A column header: the plain name, with what it shows as its hover title. */
+function rh_review_th(string $label, string $title, string $cls = ''): string
+{
+    $h = static fn($s): string => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
+    return '<th scope="col" class="no-sort' . ($cls !== '' ? ' ' . $h($cls) : '') . '" title="' . $h($title) . '">' . $h($label) . '</th>';
 }
 
 /** The panel's CSS and JS links, once per page. */
@@ -147,8 +156,6 @@ function rh_review_panel_html(array $v, string $csrf): string
     $base = (array)$v['base'];
     $days = (int)($base['days'] ?? 30);
     $hist = rh_dec_num('ai_review_history_min_days', 1, 3650);
-    $checks = (array)$v['checks'];
-    $nChecks = count($checks);
     $out = rh_review_assets();
     $id = 'rhDec-' . $h($area);
     // Closed by default (owner 2026-11-05): only a small "Decisions" tab shows; the panel opens in a side drawer on click.
@@ -161,110 +168,171 @@ function rh_review_panel_html(array $v, string $csrf): string
     $out .= '<aside class="rh-dec-drawer" id="' . $did . '" role="dialog" aria-modal="true" aria-labelledby="' . $id . '-title" tabindex="-1">';
     $out .= '<div class="rh-dec-drawer__bar"><button type="button" class="btn btn-secondary btn-sm" data-dec-close>Close</button></div><div class="rh-dec-drawer__body">';
     $out .= '<section class="rh-dec" id="' . $id . '" data-area="' . $h($area) . '" data-endpoint="api/decisions.php" data-csrf="' . $h($csrf) . '" aria-labelledby="' . $id . '-title">';
-    $out .= '<header class="rh-dec__head"><div><h2 class="rh-dec__title" id="' . $id . '-title">Decisions</h2>';
-    $out .= '<p class="rh-dec__help">The few choices with the most money at stake right now, worked out from today\'s figures. Each one links to the screen where you act; nothing changes by itself.</p></div>';
-    $out .= '<div class="rh-dec__tools"><button type="button" class="btn btn-secondary btn-sm" data-dec="refresh">Refresh</button>';
-    $out .= '<p class="rh-dec__help">Works the figures out again now (at most once every ' . (int)rh_dec_num('ai_review_refresh_minutes', 1, 1440) . ' minutes).</p></div></header>';
+    // Header (owner 2026-11-05): the title, when it was last updated and how many, one short line. Updating is automatic
+    // (after the page loads and the daily job), so there is no button for it; the threshold is explained in the guide.
     $built = strtotime((string)$v['built_at']);
-    $baseTxt = !empty($base['ok']) && (float)($base['amount'] ?? 0) > BALANCE_TOLERANCE
-        ? $money($base['amount']) . ' collected in the last ' . $days . ' days'
-        : 'no money collected in the last ' . $days . ' days to compare with';
-    $out .= '<p class="rh-dec__meta">Worked out ' . ($built ? 'at ' . $h(date('H:i', $built)) . ' ' : '') . 'from ' . $nChecks . ' check' . ($nChecks === 1 ? '' : 's')
-        . '. A decision shows here when its money at stake is at least ' . $h(rtrim(rtrim(number_format((float)$v['threshold_pct'], 2), '0'), '.')) . '% of the money collected (' . $h($baseTxt) . ').</p>';
+    $metaTxt = ($built ? 'Updated at ' . date('H:i', $built) . ' · ' : '') . $nMain . ' decision' . ($nMain === 1 ? '' : 's');
+    $out .= '<header class="rh-dec__head"><div class="rh-dec__headrow"><h2 class="rh-dec__title" id="' . $id . '-title">Decisions</h2>';
+    $out .= '<p class="rh-dec__meta">' . $h($metaTxt) . '</p></div>';
+    $out .= '<p class="rh-dec__sub">What needs deciding now, the most money first.</p></header>';
     if ((int)$v['checks_failed'] > 0) {
-        $out .= '<p class="rh-dec__warn" role="status">' . (int)$v['checks_failed'] . ' of ' . $nChecks . ' checks could not be read in full just now, so this list may be incomplete.</p>';
+        $out .= '<p class="rh-dec__warn" role="status">Some figures could not be read just now, so this list may be missing something.</p>';
     }
+    // The top cards open; any further cards and the smaller items sit under one closed "More decisions (n)".
+    $top = array_slice((array)$v['main'], 0, 3);
+    $rest = array_slice((array)$v['main'], 3);
     $out .= '<ol class="rh-dec__list">';
-    foreach ($v['main'] as $c) {
+    foreach ($top as $c) {
         $out .= rh_review_card_html($c, $money, $h, $days, $hist);
     }
     $out .= '</ol>';
-    if ($v['more']) {
-        $out .= '<details class="rh-dec__more"><summary>More (' . count($v['more']) . ' below the threshold)</summary>';
-        $out .= '<p class="rh-dec__help">Smaller items found by the same checks, largest first.</p><ul class="rh-dec__morelist">';
-        foreach ($v['more'] as $c) {
-            $out .= '<li><span class="rh-dec__moretitle">' . $h($c['decision']) . '</span>';
-            $out .= $c['at_stake'] !== null ? ' <span class="rh-dec__money">' . $h($money($c['at_stake'])) . '</span>' : '';
-            $out .= !empty($c['link']) ? ' <a href="' . $h($c['link']['url']) . '">' . $h($c['link']['label']) . '</a>' : '';
-            $out .= '</li>';
+    $nMore = count($rest) + count((array)$v['more']);
+    if ($nMore > 0) {
+        $out .= '<details class="rh-dec__more"><summary>More decisions (' . $nMore . ')</summary>';
+        if ($rest) {
+            $out .= '<ol class="rh-dec__list">';
+            foreach ($rest as $c) {
+                $out .= rh_review_card_html($c, $money, $h, $days, $hist);
+            }
+            $out .= '</ol>';
         }
-        $out .= '</ul></details>';
+        if ($v['more']) {
+            $out .= '<ul class="rh-dec__morelist">';
+            foreach ($v['more'] as $c) {
+                $out .= '<li><span class="rh-dec__moretitle">' . $h($c['decision']) . '</span>';
+                $out .= $c['at_stake'] !== null ? '<span class="rh-dec__money">' . $h($money($c['at_stake'])) . '</span>' : '<span class="rh-dec__none">No money figure</span>';
+                $out .= !empty($c['link']) ? '<a href="' . $h($c['link']['url']) . '">' . $h($c['link']['label']) . '</a>' : '';
+                $out .= '</li>';
+            }
+            $out .= '</ul>';
+        }
+        $out .= '</details>';
     }
     $out .= '</section></div></aside></div>';
     return $out;
 }
 
-/** One decision card. */
+/**
+ * One decision card, in a fixed order (owner 2026-11-05): the decision and the money involved; one quiet line of facts;
+ * why now; what we suggest with the button to the screen that acts; the other choices and where it comes from (both
+ * closed); Noted / Not now.
+ */
 function rh_review_card_html(array $c, callable $money, callable $h, int $days, int $hist): string
 {
+    // No minus signs on the card face (owner 2026-11-05): a money figure below zero reads "MWK 150,000.00 short" (or "loss").
+    $signed = static fn($x, string $word = 'short'): string => (float)$x <= -BALANCE_TOLERANCE ? $money(abs((float)$x)) . ' ' . $word : $money(max(0.0, (float)$x));
+    $measure = trim((string)($c['measure'] ?? ''));
+    // A card with its own measure (e.g. the money position) runs short; by default a choice below zero loses money.
+    $below = $measure !== '' ? 'short' : 'loss';
     $o = '<li class="rh-dec-card" data-key="' . $h($c['key']) . '">';
-    $o .= '<h3 class="rh-dec-card__title">' . $h($c['decision']) . '</h3>';
-    $o .= '<p class="rh-dec-card__why">' . $h($c['why_now']) . '</p>';
-    $o .= '<dl class="rh-dec-card__figs">';
-    $o .= '<div><dt>At stake</dt><dd class="rh-dec__money">' . ($c['at_stake'] !== null ? $h($money($c['at_stake'])) : 'Not valued') . '</dd><dd class="rh-dec__help">' . $h($c['at_stake_note']) . '</dd></div>';
-    $o .= '<div><dt>Share of takings</dt><dd>' . ($c['share_pct'] !== null ? $h(number_format((float)$c['share_pct'], 1)) . '%' : 'Not worked out') . '</dd><dd class="rh-dec__help">'
-        . ($c['share_pct'] !== null ? 'At stake as a share of the money collected in the last ' . $days . ' days.' : 'There is no money collected in the last ' . $days . ' days to compare with.') . '</dd></div>';
-    $o .= '<div><dt>Confidence</dt><dd>' . rh_review_conf_label((float)$c['confidence']) . '</dd><dd class="rh-dec__help">How sure the figures are, from how complete the data is'
-        . ((int)$c['history_days'] > 0 ? ' and ' . (int)$c['history_days'] . ' days of history' : '') . '. No option below is rated higher.</dd></div>';
-    $o .= '</dl>';
-    if (!empty($c['options'])) {
-        // What Best / Expected / Worst measure: the card's own figure (e.g. the money position after N days), or by
-        // default the money an option could bring in or save. Options that are not money show "Not valued".
-        $measure = trim((string)($c['measure'] ?? ''));
-        $o .= '<div class="rh-dec-card__opts">';
-        if ($measure !== '') {
-            $o .= '<p class="rh-dec__help">Best, Expected and Worst all show ' . $h($measure) . '.</p>';
-        }
-        $o .= '<table class="rh-dec__table no-card-mobile"><thead><tr>';
-        $o .= '<th scope="col" class="no-sort">Option<span class="rh-dec__help">What you could do.</span></th>';
-        if ($measure !== '') {
-            $o .= '<th scope="col" class="no-sort">Best<span class="rh-dec__help">The best case.</span></th>';
-            $o .= '<th scope="col" class="no-sort">Expected<span class="rh-dec__help">The likely result from the hotel\'s own history; blank until there are ' . $hist . ' days of it.</span></th>';
-            $o .= '<th scope="col" class="no-sort">Worst<span class="rh-dec__help">The worst case (below zero is a shortfall).</span></th>';
-        } else {
-            $o .= '<th scope="col" class="no-sort">Best<span class="rh-dec__help">The most it could bring in or save.</span></th>';
-            $o .= '<th scope="col" class="no-sort">Expected<span class="rh-dec__help">The likely result from the hotel\'s own history; blank until there are ' . $hist . ' days of it.</span></th>';
-            $o .= '<th scope="col" class="no-sort">Worst<span class="rh-dec__help">The least it could bring (below zero is a loss).</span></th>';
-        }
-        $o .= '<th scope="col" class="no-sort">Likelihood<span class="rh-dec__help">How likely that result is, from the history used; never above the card\'s confidence.</span></th>';
-        $o .= '</tr></thead><tbody>';
-        foreach ($c['options'] as $i => $op) {
-            $rec = (int)$c['recommend'] === (int)$i;
-            $o .= '<tr' . ($rec ? ' class="is-recommended"' : '') . '><th scope="row">' . $h($op['label']) . ($rec ? ' <span class="rh-dec__tag">Recommended</span>' : '')
-                . '<span class="rh-dec__help">' . $h($op['effect']) . '</span></th>';
-            foreach (['best', 'expected', 'worst'] as $k) {
-                $o .= '<td>' . ($op[$k] !== null ? $h($money($op[$k])) : '<span class="rh-dec__none">' . (!empty($op['not_valued']) ? 'Not valued' : 'Not enough history') . '</span>') . '</td>';
-            }
-            $o .= '<td>' . rh_review_conf_label((float)$op['confidence']) . '</td></tr>';
-        }
-        $o .= '</tbody></table></div>';
+    // a. The decision and the money involved
+    $o .= '<div class="rh-dec-card__head"><h3 class="rh-dec-card__title">' . $h($c['decision']) . '</h3><p class="rh-dec-card__stake">';
+    $o .= $c['at_stake'] !== null
+        ? '<span class="rh-dec-card__amt">' . $h($signed($c['at_stake'])) . '</span><span class="rh-dec-card__amtlbl">money involved</span>'
+        : '<span class="rh-dec-card__amt rh-dec__none">No money figure</span>';
+    $o .= '</p></div>';
+    // b. One quiet line of facts
+    $o .= '<ul class="rh-dec-card__facts">';
+    if ($c['share_pct'] !== null) {
+        $o .= '<li title="' . $h('The money involved compared with all the money taken in the last ' . $days . ' days.') . '">'
+            . $h(number_format((float)$c['share_pct'], 1) . '% of the last ' . $days . ' days\' takings') . '</li>';
     }
-    $o .= '<p class="rh-dec-card__rec"><strong>Recommended:</strong> ' . $h($c['recommendation']) . '</p>';
-    $o .= '<p class="rh-dec__help">' . $h(rh_review_tier_text((int)$c['tier'])) . '</p>';
-    $ev = (array)($c['evidence'] ?? []);
-    $rows = (array)($ev['rows'] ?? []);
-    if ($rows) {
-        $o .= '<details class="rh-dec-card__ev"><summary>Evidence (' . count($rows) . ' row' . (count($rows) === 1 ? '' : 's') . '; ' . (int)($ev['total'] ?? 0) . ' ' . $h($ev['total_label'] ?? 'checked') . ')</summary>';
-        $o .= '<table class="rh-dec__table no-card-mobile"><thead><tr><th scope="col" class="no-sort">Item<span class="rh-dec__help">What was found.</span></th><th scope="col" class="no-sort">Reference<span class="rh-dec__help">The record to open.</span></th>'
-            . '<th scope="col" class="no-sort">Who<span class="rh-dec__help">Guest or staff on the record.</span></th><th scope="col" class="no-sort">Figure<span class="rh-dec__help">Count or amount, as on the screen.</span></th></tr></thead><tbody>';
-        foreach ($rows as $r) {
-            $who = trim((string)($r['guest_name'] ?? '') . ' ' . (string)($r['staff_name'] ?? ''));
-            $fig = isset($r['amount']) && $r['amount'] !== null ? $money($r['amount']) : (string)($r['value'] ?? '');
-            if (isset($r['amount'], $r['value']) && $r['amount'] !== null && (string)$r['value'] !== '') {
-                $fig = (string)$r['value'] . ' · ' . $money($r['amount']);
-            }
-            $o .= '<tr><td>' . $h($r['label'] ?? '') . '</td><td>' . $h($r['reference'] ?? '') . '</td><td>' . $h($who) . '</td><td>' . $h($fig) . '</td></tr>';
-        }
-        $o .= '</tbody></table></details>';
+    $o .= '<li title="' . $h('How complete the hotel\'s records behind these figures are.') . '">How sure: ' . $h(rh_review_conf_label((float)$c['confidence'])) . '</li>';
+    $tier = rh_review_tier_text((int)$c['tier']);
+    if ($tier !== '') {
+        $o .= '<li>' . $h($tier) . '</li>';
     }
-    $o .= '<div class="rh-dec-card__btns">';
+    $o .= '</ul>';
+    // c. Why now
+    if (trim((string)$c['why_now']) !== '') {
+        $o .= '<p class="rh-dec-card__why">' . $h($c['why_now']) . '</p>';
+    }
+    // d. What we suggest: the suggested step, its likely result in one line, and the button to the screen that acts
+    $opts = (array)($c['options'] ?? []);
+    $recI = (int)$c['recommend'];
+    $rec = $opts[$recI] ?? null;
+    $recText = trim((string)$c['recommendation']) !== '' ? (string)$c['recommendation'] : (string)($rec['label'] ?? '');
+    $result = '';
+    if ($rec !== null) {
+        // The option's own plain result line when it has one; otherwise the likely figure or what the option does
+        $result = trim((string)($rec['result'] ?? '')) !== '' ? (string)$rec['result'] : ($rec['expected'] !== null
+            ? 'Most likely: ' . $signed($rec['expected'], $below) . ($measure !== '' ? ' (' . $measure . ')' : '')
+            : (string)($rec['effect'] ?? ''));
+    }
+    $o .= '<div class="rh-dec-card__rec"><div class="rh-dec-card__recbody"><p class="rh-dec-card__reclbl">What we suggest</p>';
+    $o .= '<p class="rh-dec-card__rectext">' . $h($recText) . '</p>';
+    $o .= trim($result) !== '' ? '<p class="rh-dec-card__recres">' . $h($result) . '</p>' : '';
+    $o .= '</div>';
     if (!empty($c['link'])) {
         $o .= '<a class="btn btn-primary btn-sm" href="' . $h($c['link']['url']) . '">' . $h($c['link']['label']) . '</a>';
     }
-    $o .= '<button type="button" class="btn btn-secondary btn-sm" data-dec="note" data-key="' . $h($c['key']) . '" data-what="noted">Noted</button>';
-    $o .= '<button type="button" class="btn btn-secondary btn-sm" data-dec="note" data-key="' . $h($c['key']) . '" data-what="dismissed">Not now</button>';
-    $o .= '<span class="rh-dec-card__state" role="status"></span></div>';
-    $o .= '<p class="rh-dec__help">Noted and Not now are kept on record with your name, so the follow-up can be checked later.</p>';
+    $o .= '</div>';
+    // e. Other choices (closed): one row per choice, the suggested one marked; one short key under the table
+    if ($opts) {
+        $others = count($opts) - ($rec !== null ? 1 : 0);
+        $early = false;
+        $o .= '<details class="rh-dec-card__opts"><summary>' . ($others > 0 ? 'Other choices (' . $others . ')' : 'About this choice') . '</summary>';
+        $o .= '<div class="rh-dec__scroll"><table class="rh-dec__table no-card-mobile"><thead><tr>';
+        $o .= rh_review_th('Choice', 'What you could do.');
+        $o .= rh_review_th('If it goes well', 'The best result this choice could give.', 'is-num');
+        $o .= rh_review_th('Most likely', 'What usually happens, from the hotel\'s own records.', 'is-num');
+        $o .= rh_review_th('If it goes badly', 'The worst result this choice could give. "' . ucfirst($below) . '" means ' . ($below === 'short' ? 'money would run short by that much.' : 'money lost.'), 'is-num');
+        $o .= rh_review_th('How sure', 'How far the hotel\'s records back up this result.');
+        $o .= '</tr></thead><tbody>';
+        foreach ($opts as $i => $op) {
+            $isRec = $recI === (int)$i;
+            $o .= '<tr' . ($isRec ? ' class="is-recommended"' : '') . '><th scope="row">' . $h($op['label']) . ($isRec ? ' <span class="rh-dec__tag">Suggested</span>' : '')
+                . (trim((string)($op['effect'] ?? '')) !== '' ? '<span class="rh-dec__sub">' . $h($op['effect']) . '</span>' : '') . '</th>';
+            foreach (['best', 'expected', 'worst'] as $k) {
+                if ($op[$k] !== null) {
+                    // The amount never breaks; the word may go on the next line so the table fits the drawer
+                    $neg = (float)$op[$k] <= -BALANCE_TOLERANCE;
+                    $o .= '<td class="is-num"><span class="rh-dec__amt">' . $h($money($neg ? abs((float)$op[$k]) : max(0.0, (float)$op[$k]))) . '</span>' . ($neg ? ' ' . $h($below) : '') . '</td>';
+                } else {
+                    $early = $early || empty($op['not_valued']);
+                    $o .= '<td class="is-num"><span class="rh-dec__none">' . (!empty($op['not_valued']) ? 'No money figure' : 'Too early to tell') . '</span></td>';
+                }
+            }
+            $o .= '<td>' . $h(rh_review_conf_label((float)$op['confidence'])) . '</td></tr>';
+        }
+        $o .= '</tbody></table></div>';
+        $o .= '<p class="rh-dec__legend">' . $h('The figures show ' . ($measure !== '' ? $measure : 'the money each choice could bring in or save')
+            . ($early ? '; "Too early to tell" means fewer than ' . $hist . ' days of records so far.' : '.')) . '</p>';
+        $o .= '</details>';
+    }
+    // f. Where this comes from (closed): how the money figure was worked out, then the records behind it
+    $ev = (array)($c['evidence'] ?? []);
+    $rows = (array)($ev['rows'] ?? []);
+    $note = trim((string)($c['at_stake_note'] ?? ''));
+    if ($rows || $note !== '') {
+        $o .= '<details class="rh-dec-card__ev"><summary>Where this comes from' . ($rows ? ' (' . count($rows) . ')' : '') . '</summary>';
+        $o .= $note !== '' ? '<p class="rh-dec__note">' . $h($note) . '</p>' : '';
+        if ($rows) {
+            $o .= '<div class="rh-dec__scroll"><table class="rh-dec__table no-card-mobile"><thead><tr>';
+            $o .= rh_review_th('Item', 'What was found.') . rh_review_th('Reference', 'The record to open.')
+                . rh_review_th('Who', 'The guest or staff member on the record.') . rh_review_th('Figure', 'The count or amount, as on its own screen.', 'is-num');
+            $o .= '</tr></thead><tbody>';
+            foreach ($rows as $r) {
+                $who = trim((string)($r['guest_name'] ?? '') . ' ' . (string)($r['staff_name'] ?? ''));
+                $fig = isset($r['amount']) && $r['amount'] !== null ? $signed($r['amount']) : (string)($r['value'] ?? '');
+                if (isset($r['amount'], $r['value']) && $r['amount'] !== null && (string)$r['value'] !== '') {
+                    $fig = (string)$r['value'] . ' · ' . $signed($r['amount']);
+                }
+                $o .= '<tr><td>' . $h($r['label'] ?? '') . '</td><td>' . $h($r['reference'] ?? '') . '</td><td>' . $h($who) . '</td><td class="is-num">' . $h($fig) . '</td></tr>';
+            }
+            $o .= '</tbody></table></div>';
+            $total = (int)($ev['total'] ?? 0);
+            $tl = trim((string)($ev['total_label'] ?? ''));
+            $o .= '<p class="rh-dec__legend">' . $h('Showing ' . count($rows) . ($total > count($rows) ? ' of ' . $total . ($tl !== '' ? ' ' . $tl : '') : '') . '.') . '</p>';
+        }
+        $o .= '</details>';
+    }
+    // g. Noted / Not now, kept on record with the person's name (said in the buttons' hover title)
+    $keep = 'Kept on record with your name, so the follow-up can be checked later.';
+    $o .= '<div class="rh-dec-card__btns">';
+    $o .= '<button type="button" class="btn btn-secondary btn-sm" data-dec="note" data-key="' . $h($c['key']) . '" data-what="noted" title="' . $h($keep) . '">Noted</button>';
+    $o .= '<button type="button" class="btn btn-secondary btn-sm" data-dec="note" data-key="' . $h($c['key']) . '" data-what="dismissed" title="' . $h($keep) . '">Not now</button>';
+    $o .= '</div><p class="rh-dec-card__state" role="status"></p>';
     $o .= '</li>';
     return $o;
 }
