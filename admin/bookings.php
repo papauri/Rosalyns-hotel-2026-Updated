@@ -2,6 +2,7 @@
 // Include admin initialization (PHP-only, no HTML output)
 require_once 'admin-init.php';
 require_once '../config/base-url.php';
+require_once __DIR__ . '/includes/review-panel.php'; // the Decisions panel: prints nothing unless switched on and allowed
 
 /** @var array $user Admin user array injected by admin-init.php */
 /** @var string $csrf_token */
@@ -3372,7 +3373,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
     </script>
 
     <div class="content">
-        <?php if ($message): ?>
+        <?php echo rh_review_panel('bookings'); if ($message): ?>
             <?php showAlert($message, 'success'); ?>
         <?php endif; ?>
 

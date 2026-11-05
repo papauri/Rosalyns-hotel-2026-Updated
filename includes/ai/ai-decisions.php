@@ -122,6 +122,9 @@ function rh_dec_mod(string $m): ?bool
     if (isset($GLOBALS['__rh_ai_module_override'][$m])) {
         return (bool)$GLOBALS['__rh_ai_module_override'][$m]; // tests only
     }
+    if (is_array($GLOBALS['__rh_dec_module_unreadable'] ?? null) && in_array($m, $GLOBALS['__rh_dec_module_unreadable'], true)) {
+        return null; // tests only: the switch cannot be read
+    }
     if (!function_exists('rh_module_key_enabled') || !function_exists('moduleEnabled')) {
         return null;
     }
@@ -178,9 +181,17 @@ function rh_dec_finders(): array
 {
     $money = ['perm' => ['accounting', 'reports'], 'module' => []];
     $f = [
+        // Revenue figures (rates, room revenue) need Reports or Accounting; folio balances on upcoming stays need
+        // Payments or Accounting; the arrival, gap and clash cards need only the bookings screens (the area gate).
         'bookings' => [
-            'bk_pace'          => ['label' => 'Unsold room-nights ahead and pickup', 'fn' => 'rh_dec_f_pace', 'requires' => $money],
-            'bk_cancellations' => ['label' => 'No-shows and cancellations', 'fn' => 'rh_dec_f_cancellations', 'requires' => $money],
+            'bk_pace'          => ['label' => 'Unsold room-nights ahead, pickup and where bookings come from', 'fn' => 'rh_dec_f_pace', 'requires' => $money],
+            'bk_demand'        => ['label' => 'High-demand and sold-out nights ahead', 'fn' => 'rh_dec_f_bk_demand', 'requires' => $money],
+            'bk_room_types'    => ['label' => 'Room types that earn and room types that lag', 'fn' => 'rh_dec_f_bk_room_types', 'requires' => $money],
+            'bk_cancellations' => ['label' => 'No-shows, cancellations and their patterns', 'fn' => 'rh_dec_f_cancellations', 'requires' => $money],
+            'bk_deposits'      => ['label' => 'Upcoming stays with nothing paid', 'fn' => 'rh_dec_f_bk_deposits', 'requires' => ['perm' => ['payments', 'accounting'], 'module' => []]],
+            'bk_arrivals'      => ['label' => 'Arrivals needing action', 'fn' => 'rh_dec_f_bk_arrivals', 'requires' => ['perm' => ['bookings'], 'module' => []]],
+            'bk_gaps'          => ['label' => 'Short gaps between stays', 'fn' => 'rh_dec_f_bk_gaps', 'requires' => ['perm' => ['bookings'], 'module' => []]],
+            'bk_conflicts'     => ['label' => 'Rooms held by two stays at once', 'fn' => 'rh_dec_f_bk_conflicts', 'requires' => ['perm' => ['bookings'], 'module' => []]],
         ],
         'accounting' => [
             'acc_collections' => ['label' => 'Money owed after departure or overdue', 'fn' => 'rh_dec_f_collections', 'requires' => []],
@@ -279,25 +290,204 @@ function rh_dec_option_unvalued(string $label, string $effect, float $confidence
 }
 
 // ── Finders: bookings ────────────────────────────────────────────────────────
+//
+// Every bookings check reads "today" from the context (ctx['to']: today, or a fixed day in the tests) and the bookings
+// module through rh_dec_mod(): off = no card, cannot be read = read anyway and marked partial. Room-nights use the
+// Reports basis (rh_booking_rooms_factor_sql: a joined-only pair is one room, any other joined pair its two rooms);
+// rooms held use the room availability check's own rules (a joined booking holds both its rooms and is ONE stay, so a
+// valid combination is never a clash). Rate, price and rule changes are a manager's (tier 3) and never valued. Guest
+// names stay in the evidence rows (shown on the hotel's own screen, never sent); special requests are only counted.
 
-/** Unsold room-nights ahead (booking_pace) valued at the recent average rate (room_performance), with pickup. */
+/** The result of a bookings check that did not run because the bookings module is off. */
+function rh_dec_bk_off(): array
+{
+    return ['ok' => true, 'total' => 0, 'cards' => []];
+}
+
+/** [today, last night looked at, nights ahead]: the next ai_upcoming_days nights from the context's day. */
+function rh_dec_bk_window(array $ctx): array
+{
+    $today = (string)$ctx['to'];
+    $ahead = rh_dec_num('ai_upcoming_days', 7, 366);
+    return [$today, date('Y-m-d', strtotime($today . ' +' . ($ahead - 1) . ' days')), $ahead];
+}
+
+/** The nights from $from up to (not including) $toExcl. */
+function rh_dec_bk_days(string $from, string $toExcl): array
+{
+    $out = [];
+    for ($d = $from; $d < $toExcl && count($out) < 800; $d = date('Y-m-d', strtotime($d . ' +1 day'))) {
+        $out[] = $d;
+    }
+    return $out;
+}
+
+/** Room types: id => ['name', 'price'] (the listed nightly rate). null = unreadable. */
+function rh_dec_bk_types(PDO $db): ?array
+{
+    try {
+        $out = [];
+        foreach ($db->query("SELECT id, name, price_per_night FROM rooms")->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(int)$r['id']] = ['name' => (string)$r['name'], 'price' => (float)$r['price_per_night']];
+        }
+        return $out;
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+/**
+ * The room units one night of a joined booking takes, per room type (combination id => [type id => units]), on the
+ * same count as rh_booking_rooms_factor_sql: an active joined-only pair (both rooms of the "Book As" type) is one unit
+ * of that type; any other pair is its two rooms, each under its own type.
+ */
+function rh_dec_bk_combo_units(PDO $db): array
+{
+    $out = [];
+    try {
+        $rows = $db->query("SELECT rc.id, rc.is_active, rc.combined_room_type_id AS t, a.room_type_id AS ta, b.room_type_id AS tb
+                            FROM room_combinations rc LEFT JOIN individual_rooms a ON a.id = rc.room_a_id LEFT JOIN individual_rooms b ON b.id = rc.room_b_id")->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return []; // no joined rooms here
+    }
+    foreach ($rows as $r) {
+        $t = (int)$r['t'];
+        $ta = $r['ta'] !== null ? (int)$r['ta'] : $t;
+        $tb = $r['tb'] !== null ? (int)$r['tb'] : $t;
+        if ((int)$r['is_active'] === 1 && $r['ta'] !== null && $r['tb'] !== null && $ta === $t && $tb === $t) {
+            $out[(int)$r['id']] = [$t => 1];
+        } else {
+            $u = [$ta => 1];
+            $u[$tb] = ($u[$tb] ?? 0) + 1;
+            $out[(int)$r['id']] = $u;
+        }
+    }
+    return $out;
+}
+
+/**
+ * Room-nights booked per night and per room type for the nights $from..$to (confirmed, checked in or checked out: the
+ * Reports basis), and the room revenue clipped to those nights (room_performance's rule, VAT included; a joined
+ * booking's revenue shared evenly over the rooms it takes). The totals equal room_performance / booking_pace for the
+ * same nights. null = unreadable.
+ */
+function rh_dec_bk_nights(PDO $db, string $from, string $to): ?array
+{
+    try {
+        $st = $db->prepare("SELECT b.room_id, b.room_combination_id, b.check_in_date, b.check_out_date, b.number_of_nights, " . rh_booking_gross_sql('b') . " AS gross
+                            FROM bookings b WHERE b.deleted_at IS NULL AND b.status IN ('confirmed', 'checked-in', 'checked-out') AND b.check_in_date <= ? AND b.check_out_date > ? LIMIT 20000");
+        $st->execute([$to, $from]);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return null;
+    }
+    $combo = rh_dec_bk_combo_units($db);
+    $endX = date('Y-m-d', strtotime($to . ' +1 day'));
+    $night = [];
+    $typeN = [];
+    $typeR = [];
+    foreach ($rows as $r) {
+        $units = $r['room_combination_id'] !== null ? ($combo[(int)$r['room_combination_id']] ?? [(int)$r['room_id'] => 2]) : [(int)$r['room_id'] => 1];
+        $days = rh_dec_bk_days(max((string)$r['check_in_date'], $from), min((string)$r['check_out_date'], $endX));
+        $n = count($days);
+        if ($n === 0) {
+            continue;
+        }
+        $all = array_sum($units);
+        $rev = (int)$r['number_of_nights'] > 0 ? (float)$r['gross'] * $n / (int)$r['number_of_nights'] : 0.0;
+        foreach ($units as $t => $k) {
+            $typeN[$t] = ($typeN[$t] ?? 0) + $k * $n;
+            $typeR[$t] = ($typeR[$t] ?? 0.0) + $rev * $k / $all;
+            foreach ($days as $d) {
+                $night[$d][$t] = ($night[$d][$t] ?? 0) + $k;
+            }
+        }
+    }
+    return ['nights' => $night, 'type_nights' => $typeN, 'type_rev' => $typeR, 'total_nights' => array_sum($typeN), 'total_rev' => round(array_sum($typeR), 2)];
+}
+
+/**
+ * Who holds which physical room for stays touching the nights $from..$to: a booking's own room plus every room it holds
+ * through booking_rooms that is not released (both rooms of a joined booking), with the statuses, the expired-hold rule
+ * and the effective check-out that checkIndividualRoomAvailability uses. One row per room and booking. null = unreadable.
+ */
+function rh_dec_bk_room_stays(PDO $db, string $from, string $to): ?array
+{
+    try {
+        $sts = getBookingStatusesThatBlockAvailability(true);
+        $ph = implode(',', array_fill(0, count($sts), '?'));
+        $co = rh_effective_checkout_sql('b');
+        $live = "b.deleted_at IS NULL AND b.status IN ($ph) AND NOT (b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL AND b.tentative_expires_at < NOW())
+                 AND b.check_in_date <= ? AND $co > ?";
+        $gross = rh_booking_gross_sql('b');
+        $st = $db->prepare("SELECT x.room, x.booking_id, b.booking_reference, b.check_in_date, x.co, b.created_at, $gross AS gross FROM (
+                                SELECT b.individual_room_id AS room, b.id AS booking_id, $co AS co FROM bookings b WHERE b.individual_room_id IS NOT NULL AND $live
+                                UNION
+                                SELECT br.individual_room_id, b.id, $co FROM booking_rooms br INNER JOIN bookings b ON b.id = br.booking_id WHERE br.released_at IS NULL AND $live
+                            ) x INNER JOIN bookings b ON b.id = x.booking_id ORDER BY x.room, b.check_in_date, b.id LIMIT 20000");
+        $st->execute(array_merge($sts, [$to, $from], $sts, [$to, $from]));
+        $out = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(int)$r['room'] . ':' . (int)$r['booking_id']] = ['room' => (int)$r['room'], 'booking_id' => (int)$r['booking_id'], 'reference' => (string)$r['booking_reference'],
+                'in' => (string)$r['check_in_date'], 'out' => substr((string)$r['co'], 0, 10), 'created' => (string)$r['created_at'], 'gross' => (float)$r['gross']];
+        }
+        return array_values($out);
+    } catch (Throwable $e) {
+        error_log('Decisions rooms held: ' . $e->getMessage());
+        return null;
+    }
+}
+
+/** Active physical rooms: id => ['number', 'type', 'status']. null = unreadable. */
+function rh_dec_bk_rooms(PDO $db): ?array
+{
+    try {
+        $out = [];
+        foreach ($db->query("SELECT id, room_number, room_type_id, status FROM individual_rooms WHERE is_active = 1")->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(int)$r['id']] = ['number' => (string)$r['room_number'], 'type' => (int)$r['room_type_id'], 'status' => (string)$r['status']];
+        }
+        return $out;
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+/** Days between two dates (b - a). */
+function rh_dec_bk_diff(string $a, string $b): int
+{
+    return (int)round((strtotime($b) - strtotime($a)) / 86400);
+}
+
+/** The booking history's "created by" as the sources are named on booking_pace. */
+function rh_dec_bk_source_label(?string $src): string
+{
+    $labels = ['guest' => 'Website', 'admin' => 'Front desk', 'api' => 'Partners (API)', 'system' => 'System'];
+    return $src === null || $src === '' ? 'Not recorded' : ($labels[$src] ?? ucfirst($src));
+}
+
+/**
+ * Unsold room-nights in the next ai_upcoming_days nights (booking_pace) valued at the recent average rate
+ * (room_performance), with pace against the same nights last year in 30-night blocks (where pickup lags), the recent
+ * pickup, where bookings come from and how far ahead they are made (booking_pace's own figures).
+ */
 function rh_dec_f_pace(PDO $db, array $ctx): array
 {
-    if (!rh_ai_mod('bookings')) {
-        return ['ok' => true, 'total' => 0, 'cards' => []];
+    $on = rh_dec_mod('bookings');
+    if ($on === false) {
+        return rh_dec_bk_off();
     }
-    $ahead = rh_dec_num('ai_upcoming_days', 7, 366);
-    $from = date('Y-m-d');
-    $to = date('Y-m-d', strtotime('+' . ($ahead - 1) . ' days'));
+    [$from, $to, $ahead] = rh_dec_bk_window($ctx);
     $p = $ctx['run']('booking_pace', ['from' => $from, 'to' => $to]);
     $rp = $ctx['run']('room_performance', ['from' => $ctx['from'], 'to' => $ctx['to']]);
     if ($p === null || $rp === null) {
         return ['ok' => false, 'total' => 0, 'cards' => []];
     }
+    $partial = $on === null;
+    $total = (int)$p['nights_in_period'] * (int)$p['sellable_rooms'];
     $unsold = (int)$p['unsold_room_nights'];
     $adr = (float)$rp['adr_incl_vat'];
     if ((int)$p['sellable_rooms'] <= 0 || $unsold <= 0 || $adr <= BALANCE_TOLERANCE) {
-        return ['ok' => true, 'total' => (int)$p['nights_in_period'] * (int)$p['sellable_rooms'], 'cards' => []];
+        return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => []];
     }
     $cur = $ctx['cur'];
     $h = (int)$ctx['history_min'];
@@ -315,6 +505,7 @@ function rh_dec_f_pace(PDO $db, array $ctx): array
         $histDays = $first ? max(0, (int)floor((time() - strtotime((string)$first)) / 86400)) : 0;
     } catch (Throwable $e) {
         $histDays = 0;
+        $partial = true;
     }
     $diff = (int)$p['difference_vs_last_year'];
     $ly = (int)$p['same_nights_last_year_booked_by_this_date'];
@@ -322,67 +513,686 @@ function rh_dec_f_pace(PDO $db, array $ctx): array
     $atStake = round($unsold * $adr, 2);
     $enough = $histDays >= $h;
     $expNights = $enough ? min($unsold, (int)round($pickupH / max(1, $h) * ($ahead / 2))) : null;
-    $conf = $enough ? ($ly > 0 ? 0.75 : 0.6) : 0.4;
-    // Best = every unsold night sold, worst = none: recorded bounds. Expected = the real pickup projection (blank without history).
+    $conf = $partial ? 0.5 : ($enough ? ($ly > 0 ? 0.75 : 0.6) : 0.4);
+    // Pace in 30-night blocks against the same nights last year: where the pickup lags (booking_pace on each block)
+    $rows = [
+        ['label' => 'On the books', 'value' => (string)(int)$p['room_nights_on_the_books'] . ' room-nights'],
+        ['label' => 'Unsold', 'value' => $unsold . ' room-nights'],
+        ['label' => 'Same nights last year (booked by this date)', 'value' => $ly . ' room-nights'],
+        ['label' => 'Picked up in the last ' . $h . ' days', 'value' => (string)(int)round($pickupH) . ' room-nights'],
+        ['label' => 'Average rate, last ' . $ctx['days'] . ' days', 'amount' => $adr],
+    ];
+    $lag = null;
+    for ($s = $from; $s <= $to; $s = date('Y-m-d', strtotime($s . ' +30 days'))) {
+        $e = min($to, date('Y-m-d', strtotime($s . ' +29 days')));
+        $bp = $ctx['run']('booking_pace', ['from' => $s, 'to' => $e]);
+        if ($bp === null) {
+            $partial = true;
+            continue;
+        }
+        $bd = (int)$bp['difference_vs_last_year'];
+        $rows[] = ['label' => 'Nights ' . $s . ' to ' . $e . ': ' . (int)$bp['room_nights_on_the_books'] . ' room-nights on the books, ' . (int)$bp['same_nights_last_year_booked_by_this_date'] . ' last year by this date',
+            'value' => ($bd >= 0 ? '+' : '') . $bd . ' room-nights'];
+        if ((int)$bp['same_nights_last_year_booked_by_this_date'] > 0 && $bd < 0 && ($lag === null || $bd < $lag['diff'])) {
+            $lag = ['from' => $s, 'to' => $e, 'diff' => $bd];
+        }
+    }
+    $mix = (array)($p['booking_sources_last_90_days'] ?? []);
+    $mixN = array_sum(array_map(static fn($m) => (int)$m['bookings'], $mix));
+    foreach ($mix as $m) {
+        $rows[] = ['label' => 'Bookings made through ' . (string)$m['source'] . ' in the last 90 days', 'value' => (int)$m['bookings'] . ' (' . number_format($mixN > 0 ? (int)$m['bookings'] / $mixN * 100 : 0, 1) . '%)'];
+    }
+    $lead = $p['average_lead_time_days_last_90'] ?? null;
+    if ($lead !== null) {
+        $rows[] = ['label' => 'Average days booked ahead (bookings made in the last 90 days)', 'value' => number_format((float)$lead, 1) . ' days'];
+    }
     $hold = rh_dec_option('Keep rates as they are', 'Let bookings come in at the current pace.',
         $atStake, $expNights !== null ? $expNights * $adr : null, 0.0, $conf, $enough ? $h : $histDays, 1);
-    $push = rh_dec_option('Review rates or run an offer for the unsold nights', 'A rate or offer change, made by a manager on the rates screens.', null, null, null, 0.4, 0, 3);
-    $rec = ($behind || ($expNights !== null && $expNights * 2 < $unsold)) ? 1 : 0;
+    $push = rh_dec_option_unvalued('Review rates or run an offer for the unsold nights', 'A rate or offer change, made by a manager on the rates screens; nothing changes by itself.', 0.4, 3);
+    $rec = ($behind || $lag !== null || ($expNights !== null && $expNights * 2 < $unsold)) ? 1 : 0;
     $why = $p['occupancy_on_the_books_pct'] . '% of the next ' . $ahead . ' nights are on the books'
         . ($ly > 0 ? ', ' . ($diff >= 0 ? $diff . ' room-nights ahead of' : abs($diff) . ' room-nights behind') . ' the same nights last year' : '')
-        . '; ' . (int)$p['picked_up_last_7_days'] . ' room-nights picked up in the last 7 days.';
-    return ['ok' => true, 'total' => (int)$p['nights_in_period'] * (int)$p['sellable_rooms'], 'cards' => [rh_dec_card([
+        . '; ' . (int)$p['picked_up_last_7_days'] . ' room-nights picked up in the last 7 days.'
+        . ($lag !== null ? ' The nights from ' . $lag['from'] . ' to ' . $lag['to'] . ' lag most (' . abs($lag['diff']) . ' room-nights behind last year).' : '');
+    return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => [rh_dec_card([
         'key' => 'bk_pace', 'covers' => ['unsold_nights'],
         'decision' => 'How to fill ' . $unsold . ' unsold room-nights in the next ' . $ahead . ' nights',
         'why_now' => $why,
-        'at_stake' => $atStake, 'at_stake_note' => $unsold . ' unsold room-nights at the average rate of the last ' . $ctx['days'] . ' days (' . rh_dec_fmt($cur, $adr) . ').',
-        'urgency' => $behind ? 0.9 : 0.6, 'confidence' => $conf, 'history_days' => $enough ? $h : $histDays,
-        'evidence' => ['total' => (int)$p['nights_in_period'] * (int)$p['sellable_rooms'], 'total_label' => 'room-nights checked', 'rows' => [
-            ['label' => 'On the books', 'value' => (string)(int)$p['room_nights_on_the_books'] . ' room-nights'],
-            ['label' => 'Unsold', 'value' => $unsold . ' room-nights'],
-            ['label' => 'Same nights last year (booked by this date)', 'value' => $ly . ' room-nights'],
-            ['label' => 'Picked up in the last ' . $h . ' days', 'value' => (string)(int)round($pickupH) . ' room-nights'],
-            ['label' => 'Average rate, last ' . $ctx['days'] . ' days', 'amount' => $adr],
-        ]],
+        'at_stake' => $atStake, 'at_stake_note' => $unsold . ' unsold room-nights at the average rate of the last ' . $ctx['days'] . ' days (' . rh_dec_fmt($cur, $adr) . '): what they would bring if sold, not money lost.',
+        'urgency' => $behind || $lag !== null ? 0.9 : 0.6, 'confidence' => $conf, 'history_days' => $enough ? $h : $histDays,
+        'evidence' => ['total' => $total, 'total_label' => 'room-nights checked', 'rows' => $rows],
         'options' => [$hold, $push], 'recommend' => $rec,
-        'recommendation' => $rec === 1 ? 'Review rates or an offer for the unsold nights; pickup alone is unlikely to fill them.' : 'Keep rates as they are; the current pace is on track.',
+        'recommendation' => $rec === 1 ? 'Review rates or an offer for the unsold nights' . ($lag !== null ? ', starting with the nights that lag last year most' : '') . '; pickup alone is unlikely to fill them.' : 'Keep rates as they are; the current pace is on track.',
         'tier' => $rec === 1 ? 3 : 1, 'link' => ['reports.php?tab=occupancy&start_date=' . $from . '&end_date=' . $to, 'Open Reports'],
     ])]];
 }
 
-/** No-shows (value of the stays that did not happen) and cancellations in the base period (money_leaks). */
+/**
+ * Rate and inventory strategy: nights ahead where the hotel is at least ai_review_high_occ_pct booked, or a room type is
+ * sold out, with how far ahead that happened against the usual booking lead time (booked up earlier than usual = the
+ * rate is likely low), and each room type's share booked. The money is the rooms still unsold on the high-demand
+ * nights at the recent average rate: what a rate change there applies to, never a gain.
+ */
+function rh_dec_f_bk_demand(PDO $db, array $ctx): array
+{
+    $on = rh_dec_mod('bookings');
+    if ($on === false) {
+        return rh_dec_bk_off();
+    }
+    [$today, $end, $ahead] = rh_dec_bk_window($ctx);
+    $p = $ctx['run']('booking_pace', ['from' => $today, 'to' => $end]);
+    $rp = $ctx['run']('room_performance', ['from' => $ctx['from'], 'to' => $ctx['to']]);
+    $nt = rh_dec_bk_nights($db, $today, $end);
+    $types = rh_dec_bk_types($db);
+    if ($p === null || $rp === null || $nt === null || $types === null) {
+        return ['ok' => false, 'total' => 0, 'cards' => []];
+    }
+    $partial = $on === null;
+    $sell = (int)$p['sellable_rooms'];
+    $total = $ahead * $sell;
+    if ($sell <= 0) {
+        return ['ok' => true, 'partial' => $partial, 'total' => 0, 'cards' => []];
+    }
+    $byType = function_exists('rh_sellable_room_units_by_type') ? rh_sellable_room_units_by_type() : [];
+    $high = (float)rh_dec_num('ai_review_high_occ_pct', 50, 100);
+    $lead = $p['average_lead_time_days_last_90'] ?? null;
+    $adr = (float)$rp['adr_incl_vat'];
+    $tname = static fn(int $t): string => $types[$t]['name'] ?? ('Room type ' . $t);
+    $flag = [];
+    $left = 0;
+    foreach (rh_dec_bk_days($today, date('Y-m-d', strtotime($end . ' +1 day'))) as $d) {
+        $bk = (int)array_sum($nt['nights'][$d] ?? []);
+        $pct = rh_occupancy_pct((float)$bk, (float)$sell);
+        $full = [];
+        foreach ($byType as $t => $u) {
+            if ((int)$u > 0 && (int)($nt['nights'][$d][$t] ?? 0) >= (int)$u) {
+                $full[] = $tname((int)$t);
+            }
+        }
+        $hot = $pct >= $high;
+        if (!$hot && !$full) {
+            continue;
+        }
+        $free = $hot ? max(0, $sell - $bk) : 0;
+        $left += $free;
+        $flag[] = ['day' => $d, 'booked' => $bk, 'pct' => $pct, 'full' => $full, 'free' => $free, 'out' => rh_dec_bk_diff($today, $d), 'hot' => $hot];
+    }
+    if (!$flag) {
+        return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => []];
+    }
+    $cur = $ctx['cur'];
+    $early = $lead !== null ? count(array_filter($flag, static fn($f) => $f['out'] > (float)$lead)) : 0;
+    $nHot = count(array_filter($flag, static fn($f) => $f['hot']));
+    $at = $left > 0 && $adr > BALANCE_TOLERANCE ? round($left * $adr, 2) : null;
+    $rows = [];
+    foreach (array_slice($flag, 0, 8) as $f) {
+        $rows[] = ['label' => $f['day'] . ': ' . $f['booked'] . ' of ' . $sell . ' rooms booked (' . number_format($f['pct'], 1) . '%)'
+            . ($f['full'] ? '; sold out: ' . implode(', ', $f['full']) : '') . ($lead !== null && $f['out'] > (float)$lead ? '; ' . $f['out'] . ' days away, more than the usual ' . number_format((float)$lead, 1) . ' days booked ahead' : ''),
+            'value' => $f['free'] . ' room(s) left'];
+    }
+    foreach ($byType as $t => $u) {
+        if ((int)$u <= 0) {
+            continue;
+        }
+        $n = (int)($nt['type_nights'][$t] ?? 0);
+        $rows[] = ['label' => $tname((int)$t) . ': share of its rooms booked over the next ' . $ahead . ' nights (' . (int)$u . ' room(s))', 'value' => number_format(rh_occupancy_pct((float)$n, (float)$u * $ahead), 1) . '%'];
+    }
+    $conf = $partial ? 0.5 : 0.75;
+    $rec = ($early > 0 || $left > 0) ? 0 : 1;
+    $why = count($flag) . ' night(s) in the next ' . $ahead . ' are ' . ($nHot > 0 ? 'at least ' . rtrim(rtrim(number_format($high, 1), '0'), '.') . '% booked or have a room type sold out' : 'sold out in at least one room type')
+        . ($early > 0 ? '; ' . $early . ' of them filled more than the usual ' . number_format((float)$lead, 1) . ' days ahead, so the rate there is likely low.' : '.')
+        . ($left > 0 ? ' ' . $left . ' room-night(s) are still unsold on the busiest nights.' : '');
+    return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => [rh_dec_card([
+        'key' => 'bk_demand', 'covers' => ['high_demand'],
+        'decision' => 'Whether to raise rates on ' . count($flag) . ' high-demand night(s) ahead',
+        'why_now' => $why,
+        'at_stake' => $at, 'at_stake_note' => $at !== null
+            ? 'The rooms still unsold on those nights at the average rate of the last ' . $ctx['days'] . ' days (' . rh_dec_fmt($cur, $adr) . '): what a rate change applies to (also part of the unsold nights above), not a gain.'
+            : 'Nothing left to sell on those nights, so no money figure is given.',
+        'urgency' => $flag[0]['out'] <= 14 ? 0.8 : 0.6, 'confidence' => $conf, 'history_days' => 0,
+        'evidence' => ['total' => $total, 'total_label' => 'room-nights checked', 'rows' => $rows],
+        'options' => [
+            rh_dec_option_unvalued('Raise rates or set a minimum stay on those nights', 'A rate change made by a manager on the rates screens; nothing changes by itself.', $conf, 3),
+            rh_dec_option_unvalued('Keep rates as they are', 'The remaining rooms sell at today\'s rates.', $conf, 1),
+        ],
+        'recommend' => $rec, 'recommendation' => $rec === 0 ? 'Look at a higher rate or a minimum stay on those nights before the last rooms go.' : 'Keep rates; note these nights for next year\'s rates.',
+        'tier' => $rec === 0 ? 3 : 1, 'link' => ['reports.php?tab=occupancy&start_date=' . $today . '&end_date=' . $end, 'Open Reports'],
+    ])]];
+}
+
+/**
+ * Which room types earn and which lag over the base period: each type's share of its rooms sold, average rate and room
+ * revenue per available room (RevPAR), against the hotel's own (room_performance for the same dates; per type on the
+ * same basis, so the types add up to the screen's totals). The money is what the lagging types would have earned at
+ * the hotel's average per available room: a gap, not money lost.
+ */
+function rh_dec_f_bk_room_types(PDO $db, array $ctx): array
+{
+    $on = rh_dec_mod('bookings');
+    if ($on === false) {
+        return rh_dec_bk_off();
+    }
+    $from = (string)$ctx['from'];
+    $to = (string)$ctx['to'];
+    $rp = $ctx['run']('room_performance', ['from' => $from, 'to' => $to]);
+    $nt = rh_dec_bk_nights($db, $from, $to);
+    $types = rh_dec_bk_types($db);
+    if ($rp === null || $nt === null || $types === null) {
+        return ['ok' => false, 'total' => 0, 'cards' => []];
+    }
+    $partial = $on === null;
+    $days = (int)$rp['days'];
+    $avail = (int)$rp['room_nights_available'];
+    $byType = function_exists('rh_sellable_room_units_by_type') ? rh_sellable_room_units_by_type() : [];
+    $list = [];
+    foreach ($byType as $t => $u) {
+        if ((int)$u <= 0) {
+            continue;
+        }
+        $n = (int)($nt['type_nights'][$t] ?? 0);
+        $rev = round((float)($nt['type_rev'][$t] ?? 0), 2);
+        $a = (int)$u * $days;
+        $list[] = ['type' => (int)$t, 'name' => $types[(int)$t]['name'] ?? ('Room type ' . $t), 'units' => (int)$u, 'nights' => $n, 'rev' => $rev,
+            'occ' => rh_occupancy_pct((float)$n, (float)$a), 'adr' => round(rh_adr($rev, (float)$n), 2), 'revpar' => $a > 0 ? $rev / $a : 0.0, 'avail' => $a];
+    }
+    $total = count($list);
+    $hotelRev = (float)$rp['room_revenue_incl_vat'];
+    if ($total < 2 || $avail <= 0 || $hotelRev <= BALANCE_TOLERANCE) {
+        return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => []];
+    }
+    $hotelRevpar = $hotelRev / $avail;
+    $dragPct = (float)rh_dec_num('ai_review_drag_pct', 1, 100);
+    $drag = array_values(array_filter($list, static fn($x) => $x['revpar'] < $hotelRevpar * (1 - $dragPct / 100)));
+    if (!$drag) {
+        return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => []];
+    }
+    usort($list, static fn($a, $b) => [$b['revpar'], $a['name']] <=> [$a['revpar'], $b['name']]);
+    usort($drag, static fn($a, $b) => [$a['revpar'], $a['name']] <=> [$b['revpar'], $b['name']]);
+    $gap = round(array_sum(array_map(static fn($x) => ($hotelRevpar - $x['revpar']) * $x['avail'], $drag)), 2);
+    $cur = $ctx['cur'];
+    $rows = [];
+    foreach ($list as $x) {
+        $rows[] = ['label' => $x['name'] . ': ' . number_format($x['occ'], 1) . '% of ' . $x['units'] . ' room(s) sold, average rate ' . rh_dec_fmt($cur, $x['adr'])
+            . ', ' . rh_dec_fmt($cur, $x['revpar']) . ' per available room-night', 'value' => $x['nights'] . ' room-nights', 'amount' => $x['rev']];
+    }
+    $rows[] = ['label' => 'The whole hotel: ' . number_format((float)$rp['occupancy_pct'], 1) . '% sold, ' . rh_dec_fmt($cur, $hotelRevpar) . ' per available room-night (Reports, same dates)', 'value' => (int)$rp['room_nights_sold'] . ' room-nights', 'amount' => $hotelRev];
+    $weak = $drag[0];
+    $lowOcc = $weak['occ'] * 2 < (float)$rp['occupancy_pct'];
+    $rec = $lowOcc ? 1 : 0;
+    $names = implode(', ', array_column($drag, 'name'));
+    return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => [rh_dec_card([
+        'key' => 'bk_room_types', 'covers' => ['room_type_mix'],
+        'decision' => 'What to do about ' . count($drag) . ' room type(s) earning well below the hotel average',
+        'why_now' => 'In the last ' . $days . ' days ' . $names . ' earned at least ' . rtrim(rtrim(number_format($dragPct, 1), '0'), '.') . '% less per available room-night than the hotel average of '
+            . rh_dec_fmt($cur, $hotelRevpar) . '; ' . $list[0]['name'] . ' earned the most.',
+        'at_stake' => $gap, 'at_stake_note' => 'What the lagging room types would have earned in the last ' . $days . ' days at the hotel\'s average per available room-night: a gap, not money lost.',
+        'urgency' => 0.5, 'confidence' => $partial ? 0.5 : 0.7, 'history_days' => $days,
+        'evidence' => ['total' => $total, 'total_label' => 'room types checked', 'rows' => $rows],
+        'options' => [
+            rh_dec_option_unvalued('Offer them first at the front desk and on the website', 'Staff suggest these rooms first when a guest has a choice; no rate changes.', 0.6, 1),
+            rh_dec_option_unvalued('Review their rate or package', 'A rate change made by a manager on the rates screens; never automatic.', 0.5, 3),
+        ],
+        'recommend' => $rec, 'recommendation' => $rec === 1 ? 'Review the rate or package of ' . $weak['name'] . '; it sells less than half as often as the hotel.' : 'Offer ' . $weak['name'] . ' first when guests have a choice, then check again.',
+        'tier' => $rec === 1 ? 3 : 1, 'link' => ['reports.php?tab=occupancy&start_date=' . $from . '&end_date=' . $to, 'Open Reports'],
+    ])]];
+}
+
+/**
+ * Cancellation and no-show patterns over ai_review_pattern_days: bookings made in that time by where they came from,
+ * room type and how far ahead they were made, with the share that was cancelled or did not show (status now).
+ * null = unreadable.
+ */
+function rh_dec_bk_patterns(PDO $db, string $to, int $days): ?array
+{
+    $from = date('Y-m-d', strtotime($to . ' -' . ($days - 1) . ' days'));
+    try {
+        $st = $db->prepare("SELECT b.status, r.name AS type_name, GREATEST(0, DATEDIFF(b.check_in_date, DATE(b.created_at))) AS lead_days,
+                                   (SELECT t.performed_by_type FROM booking_timeline_logs t WHERE t.booking_id = b.id AND t.action_type = 'create' ORDER BY t.id LIMIT 1) AS src
+                            FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id
+                            WHERE b.deleted_at IS NULL AND b.status IN ('confirmed', 'checked-in', 'checked-out', 'cancelled', 'no-show')
+                              AND b.created_at >= ? AND b.created_at < DATE_ADD(?, INTERVAL 1 DAY) LIMIT 20000");
+        $st->execute([$from, $to]);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return null;
+    }
+    $g = [];
+    $all = ['n' => 0, 'fell' => 0];
+    foreach ($rows as $r) {
+        $fell = in_array((string)$r['status'], ['cancelled', 'no-show'], true) ? 1 : 0;
+        $ld = (int)$r['lead_days'];
+        $bucket = $ld <= 2 ? 'Booked 0-2 days ahead' : ($ld <= 13 ? 'Booked 3-13 days ahead' : ($ld <= 59 ? 'Booked 14-59 days ahead' : 'Booked 60 or more days ahead'));
+        foreach (['Booked through ' . rh_dec_bk_source_label($r['src'] !== null ? (string)$r['src'] : null), (string)($r['type_name'] ?? 'Room type not found'), $bucket] as $k) {
+            $g[$k] = $g[$k] ?? ['n' => 0, 'fell' => 0];
+            $g[$k]['n']++;
+            $g[$k]['fell'] += $fell;
+        }
+        $all['n']++;
+        $all['fell'] += $fell;
+    }
+    $out = [];
+    foreach ($g as $k => $x) {
+        if ($x['n'] >= 3 && $x['fell'] > 0) {
+            $out[] = ['label' => $k, 'n' => $x['n'], 'fell' => $x['fell'], 'pct' => round($x['fell'] / $x['n'] * 100, 1)];
+        }
+    }
+    usort($out, static fn($a, $b) => [$b['pct'], $b['n'], $a['label']] <=> [$a['pct'], $a['n'], $b['label']]);
+    return ['days' => $days, 'n' => $all['n'], 'fell' => $all['fell'], 'pct' => $all['n'] > 0 ? round($all['fell'] / $all['n'] * 100, 1) : null, 'groups' => $out];
+}
+
+/** No-shows (value of the stays that did not happen) and cancellations in the base period (money_leaks), with their patterns. */
 function rh_dec_f_cancellations(PDO $db, array $ctx): array
 {
-    if (!rh_ai_mod('bookings')) {
-        return ['ok' => true, 'total' => 0, 'cards' => []];
+    $on = rh_dec_mod('bookings');
+    if ($on === false) {
+        return rh_dec_bk_off();
     }
     $m = $ctx['run']('money_leaks', ['from' => $ctx['from'], 'to' => $ctx['to']]);
     if ($m === null || !isset($m['no_shows'], $m['cancellations'])) {
         return ['ok' => false, 'total' => 0, 'cards' => []];
     }
+    $partial = $on === null;
     $ns = (int)$m['no_shows']['count'];
     $nsv = (float)$m['no_shows']['booked_value'];
     $cx = (int)$m['cancellations']['count'];
     if ($ns + $cx === 0) {
-        return ['ok' => true, 'total' => 0, 'cards' => []];
+        return ['ok' => true, 'partial' => $partial, 'total' => 0, 'cards' => []];
     }
     $cur = $ctx['cur'];
-    return ['ok' => true, 'total' => $ns + $cx, 'cards' => [rh_dec_card([
+    $pd = rh_dec_num('ai_review_pattern_days', 30, 730);
+    $pt = rh_dec_bk_patterns($db, (string)$ctx['to'], $pd);
+    $partial = $partial || $pt === null;
+    $rows = [
+        ['label' => 'No-shows', 'value' => (string)$ns, 'amount' => $nsv],
+        ['label' => 'Cancellations', 'value' => (string)$cx],
+    ];
+    if ($pt !== null && $pt['pct'] !== null) {
+        $rows[] = ['label' => 'All bookings made in the last ' . $pd . ' days: cancelled or did not show (status now)', 'value' => $pt['fell'] . ' of ' . $pt['n'] . ' (' . number_format((float)$pt['pct'], 1) . '%)'];
+        foreach (array_slice($pt['groups'], 0, 6) as $g) {
+            $rows[] = ['label' => $g['label'] . ': cancelled or did not show', 'value' => $g['fell'] . ' of ' . $g['n'] . ' (' . number_format((float)$g['pct'], 1) . '%)'];
+        }
+    }
+    $top = $pt !== null && $pt['pct'] !== null ? ($pt['groups'][0] ?? null) : null;
+    $topHigh = $top !== null && $top['pct'] > (float)$pt['pct'];
+    return ['ok' => true, 'partial' => $partial, 'total' => $ns + $cx, 'cards' => [rh_dec_card([
         'key' => 'bk_cancellations', 'covers' => ['no_shows', 'cancellations'],
         'decision' => 'Whether to change the deposit or confirmation rule after ' . $ns . ' no-show(s) and ' . $cx . ' cancellation(s)',
-        'why_now' => 'In the last ' . $ctx['days'] . ' days: ' . $ns . ' no-show(s) worth ' . rh_dec_fmt($cur, $nsv) . ' booked, and ' . $cx . ' cancellation(s).',
+        'why_now' => 'In the last ' . $ctx['days'] . ' days: ' . $ns . ' no-show(s) worth ' . rh_dec_fmt($cur, $nsv) . ' booked, and ' . $cx . ' cancellation(s).'
+            . ($topHigh ? ' ' . $top['label'] . ' fall through most often (' . number_format((float)$top['pct'], 1) . '% against ' . number_format((float)$pt['pct'], 1) . '% overall).' : ''),
         'at_stake' => round($nsv, 2), 'at_stake_note' => 'The booked value of the no-shows (cancellations are counted, not valued).',
-        'urgency' => 0.5, 'confidence' => 0.8, 'history_days' => $ctx['days'],
-        'evidence' => ['total' => $ns + $cx, 'total_label' => 'no-shows and cancellations', 'rows' => [
-            ['label' => 'No-shows', 'value' => (string)$ns, 'amount' => $nsv],
-            ['label' => 'Cancellations', 'value' => (string)$cx],
-        ]],
+        'urgency' => 0.5, 'confidence' => $partial ? 0.6 : 0.8, 'history_days' => $ctx['days'],
+        'evidence' => ['total' => $ns + $cx, 'total_label' => 'no-shows and cancellations', 'rows' => $rows],
         'options' => [
-            rh_dec_option('Confirm upcoming arrivals by phone the day before', 'The front desk calls; nothing changes in the rules.', null, null, null, 0.5, 0, 1),
-            rh_dec_option('Ask for a deposit on new bookings', 'A rule change made by a manager in the booking settings.', null, null, null, 0.4, 0, 3),
+            rh_dec_option_unvalued('Confirm upcoming arrivals by phone the day before', 'The front desk calls; nothing changes in the rules.', 0.5, 1),
+            rh_dec_option_unvalued('Ask for a deposit on new bookings' . ($topHigh ? ' (' . mb_strtolower($top['label']) . ' first)' : ''), 'A rule change made by a manager in the booking settings; never automatic.', 0.4, 3),
         ],
         'recommend' => 0, 'recommendation' => 'Confirm upcoming arrivals by phone the day before, and look at a deposit rule if no-shows keep coming.',
         'tier' => 1, 'link' => ['bookings.php?status=no-show', 'Open no-shows'],
+    ])]];
+}
+
+/**
+ * Deposit exposure: stays arriving after the arrivals window and within ai_upcoming_days with nothing paid yet, or with
+ * a deposit asked for and not paid (each booking's own folio: the Payments screen's and balances_due's rule). Asking for
+ * a deposit brings money in sooner; it is not a saving (cancellations are refunded in full; only a no-show keeps money),
+ * so no option is valued. The hotel's own no-show and cancellation shares are evidence, shown with enough history only.
+ */
+function rh_dec_f_bk_deposits(PDO $db, array $ctx): array
+{
+    $on = rh_dec_mod('bookings');
+    if ($on === false) {
+        return rh_dec_bk_off();
+    }
+    [$today, $end] = rh_dec_bk_window($ctx);
+    $arr = rh_dec_num('ai_review_arrival_days', 1, 14);
+    $start = date('Y-m-d', strtotime($today . ' +' . $arr . ' days'));
+    if ($start > $end) {
+        return ['ok' => true, 'partial' => $on === null, 'total' => 0, 'cards' => []];
+    }
+    try {
+        $st = $db->prepare("SELECT b.id, b.booking_reference, b.guest_name, b.check_in_date, b.created_at, b.deposit_required, b.deposit_paid, b.deposit_amount, r.name AS type_name
+                            FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id
+                            WHERE b.deleted_at IS NULL AND b.status IN ('pending', 'confirmed') AND b.check_in_date BETWEEN ? AND ? ORDER BY b.check_in_date, b.id LIMIT 500");
+        $st->execute([$start, $end]);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        // The hotel's own shares: stays due in over the pattern window that did not show, and that were cancelled
+        $pd = rh_dec_num('ai_review_pattern_days', 30, 730);
+        $st = $db->prepare("SELECT COUNT(*) AS n, COALESCE(SUM(status = 'no-show'), 0) AS ns, COALESCE(SUM(status = 'cancelled'), 0) AS cx FROM bookings
+                            WHERE deleted_at IS NULL AND status IN ('confirmed', 'checked-in', 'checked-out', 'cancelled', 'no-show') AND check_in_date BETWEEN ? AND ?");
+        $st->execute([date('Y-m-d', strtotime($today . ' -' . $pd . ' days')), date('Y-m-d', strtotime($today . ' -1 day'))]);
+        $fr = $st->fetch(PDO::FETCH_ASSOC) ?: ['n' => 0, 'ns' => 0, 'cx' => 0];
+        $first = $db->query("SELECT MIN(created_at) FROM bookings WHERE deleted_at IS NULL")->fetchColumn();
+    } catch (Throwable $e) {
+        return ['ok' => false, 'total' => 0, 'cards' => []];
+    }
+    $partial = $on === null;
+    $flag = [];
+    foreach ($rows as $r) {
+        $f = rh_ai_folio((int)$r['id']);
+        if (!$f) {
+            $partial = true;
+            continue;
+        }
+        $paid = (float)$f['paid'];
+        $bal = (float)$f['balance_due'];
+        $depAsked = (int)$r['deposit_required'] === 1 && (int)$r['deposit_paid'] !== 1 && (float)$r['deposit_amount'] > BALANCE_TOLERANCE && $paid + BALANCE_TOLERANCE < (float)$r['deposit_amount'];
+        if ($bal > BALANCE_TOLERANCE && ($paid <= BALANCE_TOLERANCE || $depAsked)) {
+            $flag[] = ['id' => (int)$r['id'], 'reference' => (string)$r['booking_reference'], 'guest' => (string)$r['guest_name'], 'in' => (string)$r['check_in_date'],
+                'type' => (string)($r['type_name'] ?? ''), 'bal' => $bal, 'dep' => $depAsked, 'lead' => rh_dec_bk_diff(substr((string)$r['created_at'], 0, 10), (string)$r['check_in_date'])];
+        }
+    }
+    $total = count($rows);
+    if (!$flag) {
+        return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => []];
+    }
+    usort($flag, static fn($a, $b) => [$b['bal'], $a['in']] <=> [$a['bal'], $b['in']]);
+    $amt = round(array_sum(array_column($flag, 'bal')), 2);
+    $n = count($flag);
+    $cur = $ctx['cur'];
+    $h = (int)$ctx['history_min'];
+    $histDays = $first ? max(0, rh_dec_bk_diff(substr((string)$first, 0, 10), $today)) : 0;
+    $nsRate = (int)$fr['n'] > 0 ? (int)$fr['ns'] / (int)$fr['n'] : null;
+    $enough = $histDays >= $h && $nsRate !== null;
+    $conf = $partial ? 0.5 : ($enough ? 0.7 : 0.45);
+    $rows = [];
+    foreach (array_slice($flag, 0, 8) as $f) {
+        $rows[] = ['label' => 'Arrives ' . $f['in'] . ($f['type'] !== '' ? ', ' . $f['type'] : '') . ($f['dep'] ? ', deposit asked for and not paid' : ', nothing paid') . ', booked ' . $f['lead'] . ' day(s) ahead',
+            'reference' => $f['reference'], 'guest_name' => $f['guest'], 'amount' => round($f['bal'], 2)];
+    }
+    if ($enough) {
+        $rows[] = ['label' => 'Stays due in over the last ' . $pd . ' days that did not show', 'value' => (int)$fr['ns'] . ' of ' . (int)$fr['n'] . ' (' . number_format($nsRate * 100, 1) . '%)'];
+        $rows[] = ['label' => 'Stays due in over the last ' . $pd . ' days that were cancelled (refunded in full)', 'value' => (int)$fr['cx'] . ' of ' . (int)$fr['n'] . ' (' . number_format((int)$fr['cx'] / (int)$fr['n'] * 100, 1) . '%)'];
+    }
+    return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => [rh_dec_card([
+        'key' => 'bk_deposits', 'covers' => ['deposit_exposure'],
+        'decision' => 'Whether to ask ' . $n . ' upcoming stay(s) for a deposit before they arrive',
+        'why_now' => $n . ' stay(s) arriving between ' . $start . ' and ' . $end . ' have nothing paid or an unpaid deposit, ' . rh_dec_fmt($cur, $amt) . ' in all.'
+            . ($enough ? ' About ' . number_format($nsRate * 100, 1) . '% of the hotel\'s stays did not show in the last ' . $pd . ' days.' : ''),
+        'at_stake' => $amt, 'at_stake_note' => 'Still unpaid on those stays (each booking\'s own folio, as on the Payments screen): not collected yet, and left unpaid if a guest does not show. Collecting earlier is not a saving.',
+        'urgency' => 0.6, 'confidence' => $conf, 'history_days' => $enough ? $histDays : 0,
+        'evidence' => ['total' => $total, 'total_label' => 'upcoming stays checked', 'rows' => $rows],
+        'options' => [
+            rh_dec_option_unvalued('Ask them for a deposit or payment now', 'A payment request from each booking; nothing is charged by itself. The money comes in sooner, not extra.', $conf, 1),
+            rh_dec_option_unvalued('Collect at check-in as usual', 'Nothing changes; a guest who does not show leaves this unpaid.', $conf, 1),
+        ],
+        'recommend' => 0, 'recommendation' => 'Ask the largest unpaid stays for a deposit now, in the order listed under Evidence.',
+        'tier' => 1, 'link' => ['bookings.php?filter=unpaid', 'Open unpaid bookings'],
+    ])]];
+}
+
+/**
+ * Arrivals in the next ai_review_arrival_days days (today first) that need action: no room assigned (neither the
+ * booking's room nor a held room), money still owed on the folio, or a special request to read (counted only). The
+ * money is what is still owed on them (each booking's folio balance); a paid booking adds nothing.
+ */
+function rh_dec_f_bk_arrivals(PDO $db, array $ctx): array
+{
+    $on = rh_dec_mod('bookings');
+    if ($on === false) {
+        return rh_dec_bk_off();
+    }
+    $today = (string)$ctx['to'];
+    $arr = rh_dec_num('ai_review_arrival_days', 1, 14);
+    $last = date('Y-m-d', strtotime($today . ' +' . ($arr - 1) . ' days'));
+    try {
+        $st = $db->prepare("SELECT b.id, b.booking_reference, b.guest_name, b.check_in_date, b.individual_room_id, (TRIM(COALESCE(b.special_requests, '')) != '') AS has_req,
+                                   EXISTS (SELECT 1 FROM booking_rooms br WHERE br.booking_id = b.id AND br.released_at IS NULL) AS held
+                            FROM bookings b WHERE b.deleted_at IS NULL AND b.status IN ('pending', 'confirmed') AND b.check_in_date BETWEEN ? AND ?
+                            ORDER BY b.check_in_date, b.id LIMIT 200");
+        $st->execute([$today, $last]);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return ['ok' => false, 'total' => 0, 'cards' => []];
+    }
+    $partial = $on === null;
+    $flag = [];
+    $c = ['room' => 0, 'owed' => 0, 'req' => 0];
+    foreach ($rows as $r) {
+        $f = rh_ai_folio((int)$r['id']);
+        if (!$f) {
+            $partial = true;
+        }
+        $noRoom = empty($r['individual_room_id']) && empty($r['held']);
+        $bal = (float)($f['balance_due'] ?? 0);
+        $owed = $bal > BALANCE_TOLERANCE;
+        $req = !empty($r['has_req']);
+        if (!$noRoom && !$owed && !$req) {
+            continue;
+        }
+        $c['room'] += $noRoom ? 1 : 0;
+        $c['owed'] += $owed ? 1 : 0;
+        $c['req'] += $req ? 1 : 0;
+        $what = array_filter([$noRoom ? 'no room yet' : '', $owed ? 'money owed' : '', $req ? 'special request to read' : '']);
+        $flag[] = ['id' => (int)$r['id'], 'reference' => (string)$r['booking_reference'], 'guest' => (string)$r['guest_name'], 'in' => (string)$r['check_in_date'],
+            'what' => implode(', ', $what), 'value' => $owed ? $bal : 0.0, 'bal' => $bal];
+    }
+    $total = count($rows);
+    if (!$flag) {
+        return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => []];
+    }
+    $amt = round(array_sum(array_column($flag, 'value')), 2);
+    $n = count($flag);
+    $cur = $ctx['cur'];
+    $rows = [];
+    foreach (array_slice($flag, 0, 8) as $f) {
+        $rows[] = ['label' => 'Arrives ' . $f['in'] . ': ' . $f['what'], 'reference' => $f['reference'], 'guest_name' => $f['guest'], 'amount' => $f['bal'] > BALANCE_TOLERANCE ? round($f['bal'], 2) : null,
+            'value' => $f['bal'] > BALANCE_TOLERANCE ? 'Owed' : ''];
+    }
+    $todayN = count(array_filter($flag, static fn($f) => $f['in'] === $today));
+    $parts = array_filter([$c['room'] > 0 ? $c['room'] . ' with no room yet' : '', $c['owed'] > 0 ? $c['owed'] . ' with money owed' : '', $c['req'] > 0 ? $c['req'] . ' with a special request' : '']);
+    $link = $n === 1 ? ['booking-details.php?id=' . $flag[0]['id'], 'Open the booking'] : ($todayN > 0 ? ['bookings.php?filter=checkin_today', 'Open today\'s arrivals'] : ['bookings.php', 'Open Bookings']);
+    return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => [rh_dec_card([
+        'key' => 'bk_arrivals', 'covers' => ['arrival_no_room', 'collect_before_arrival'],
+        'decision' => 'Get ' . $n . ' arrival(s) in the next ' . $arr . ' day(s) ready',
+        'why_now' => $n . ' of ' . $total . ' arrival(s) from ' . $today . ' to ' . $last . ' need action: ' . implode(', ', $parts) . '.' . ($todayN > 0 ? ' ' . $todayN . ($todayN === 1 ? ' of them arrives' : ' of them arrive') . ' today.' : ''),
+        'at_stake' => $amt > BALANCE_TOLERANCE ? $amt : null,
+        'at_stake_note' => 'Still owed on these arrivals (each booking\'s own folio). Arrivals with no room yet and special requests are counted, not valued.',
+        'urgency' => $todayN > 0 ? 0.95 : 0.8, 'confidence' => $partial ? 0.6 : 0.9, 'history_days' => 0,
+        'evidence' => ['total' => $total, 'total_label' => 'arrivals checked', 'rows' => $rows],
+        'options' => [
+            rh_dec_option_unvalued('Work through the list before they arrive', 'Assign a room, ask for payment and read the request on each booking.', 0.9, 1),
+            rh_dec_option_unvalued('Leave it to check-in', 'Nothing is done now; each is sorted out at the desk when the guest arrives.', 0.5, 1),
+        ],
+        'recommend' => 0, 'recommendation' => 'Work through the list before they arrive, today\'s arrivals first.',
+        'tier' => 1, 'link' => $link,
+    ])]];
+}
+
+/**
+ * Orphan nights: free gaps of 1 to ai_review_gap_nights nights between two stays in one room in the nights ahead
+ * (rooms held as the availability check holds them; a joined-only pair is one unit, so its two rooms are one gap).
+ * A gap is listed only when the room availability check (checkIndividualRoomAvailability) says it can be sold. The
+ * money is those nights at the room type's listed nightly rate, if sold: not a gain until they are.
+ */
+function rh_dec_f_bk_gaps(PDO $db, array $ctx): array
+{
+    $on = rh_dec_mod('bookings');
+    if ($on === false) {
+        return rh_dec_bk_off();
+    }
+    [$today, $end, $ahead] = rh_dec_bk_window($ctx);
+    $stays = rh_dec_bk_room_stays($db, $today, $end);
+    $rooms = rh_dec_bk_rooms($db);
+    $types = rh_dec_bk_types($db);
+    if ($stays === null || $rooms === null || $types === null) {
+        return ['ok' => false, 'total' => 0, 'cards' => []];
+    }
+    $partial = $on === null;
+    $maxGap = rh_dec_num('ai_review_gap_nights', 1, 7);
+    $endX = date('Y-m-d', strtotime($end . ' +1 day'));
+    // Units: each room, a joined-only pair counted once (its two rooms, one unit)
+    $unitOf = [];
+    $units = [];
+    foreach ($rooms as $id => $r) {
+        $unitOf[$id] = 'r' . $id;
+        $units['r' . $id] = ['rooms' => [$id], 'label' => 'Room ' . $r['number'], 'type' => $r['type'], 'price' => (float)($types[$r['type']]['price'] ?? 0)];
+    }
+    foreach (function_exists('rh_joined_only_pairs') ? rh_joined_only_pairs(true) : [] as $pair) {
+        if (!isset($rooms[$pair['room_a_id']], $rooms[$pair['room_b_id']])) {
+            continue;
+        }
+        unset($units['r' . $pair['room_a_id']], $units['r' . $pair['room_b_id']]);
+        $unitOf[$pair['room_a_id']] = $unitOf[$pair['room_b_id']] = 'p' . $pair['id'];
+        $units['p' . $pair['id']] = ['rooms' => [$pair['room_a_id'], $pair['room_b_id']], 'label' => 'Joined rooms ' . $pair['label'], 'type' => (int)$pair['combined_room_type_id'],
+            'price' => $pair['price_override'] !== null && (float)$pair['price_override'] > BALANCE_TOLERANCE ? (float)$pair['price_override'] : (float)($types[(int)$pair['combined_room_type_id']]['price'] ?? 0)];
+    }
+    $by = [];
+    foreach ($stays as $s) {
+        if (!isset($unitOf[$s['room']])) {
+            continue;
+        }
+        $by[$unitOf[$s['room']]][$s['booking_id']] = $s; // one stay per booking in a unit (a joined booking holds both rooms)
+    }
+    $gaps = [];
+    foreach ($by as $u => $list) {
+        if (!isset($units[$u])) {
+            continue;
+        }
+        $bad = false;
+        foreach ($units[$u]['rooms'] as $rid) {
+            $bad = $bad || in_array($rooms[$rid]['status'], function_exists('rh_room_out_of_service_statuses') ? rh_room_out_of_service_statuses() : ['maintenance', 'out_of_order'], true);
+        }
+        if ($bad) {
+            continue;
+        }
+        usort($list, static fn($a, $b) => [$a['in'], $a['booking_id']] <=> [$b['in'], $b['booking_id']]);
+        $edge = null;
+        foreach ($list as $s) {
+            if ($edge !== null && $s['in'] > $edge) {
+                $n = rh_dec_bk_diff($edge, $s['in']);
+                if ($n >= 1 && $n <= $maxGap && $edge >= $today && $s['in'] <= $endX) {
+                    $ok = true;
+                    foreach ($units[$u]['rooms'] as $rid) {
+                        $chk = function_exists('checkIndividualRoomAvailability') ? checkIndividualRoomAvailability($rid, $edge, $s['in']) : ['available' => true];
+                        $ok = $ok && !empty($chk['available']);
+                        // Room-type and all-rooms blocked dates stop the night too (a member room's own type stops a pair)
+                        if ($ok && function_exists('getRoomTypeBlockedDatesOnly')) {
+                            try {
+                                $ok = empty(getRoomTypeBlockedDatesOnly((int)$rooms[$rid]['type'], $edge, $s['in']));
+                            } catch (Throwable $e) {
+                                $ok = false;
+                            }
+                        }
+                    }
+                    if ($ok) {
+                        $gaps[] = ['unit' => $u, 'label' => $units[$u]['label'], 'from' => $edge, 'nights' => $n, 'value' => round($n * $units[$u]['price'], 2),
+                            'type' => $types[$units[$u]['type']]['name'] ?? ''];
+                    }
+                }
+            }
+            $edge = $edge === null || $s['out'] > $edge ? $s['out'] : $edge;
+        }
+    }
+    $total = count($units);
+    if (!$gaps) {
+        return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => []];
+    }
+    usort($gaps, static fn($a, $b) => [$a['from'], $a['label']] <=> [$b['from'], $b['label']]);
+    $nights = array_sum(array_column($gaps, 'nights'));
+    $amt = round(array_sum(array_column($gaps, 'value')), 2);
+    $rows = [];
+    foreach (array_slice($gaps, 0, 8) as $g) {
+        $rows[] = ['label' => $g['label'] . ($g['type'] !== '' ? ' (' . $g['type'] . ')' : '') . ': ' . $g['nights'] . ' night(s) free from ' . $g['from'] . ', between two stays',
+            'value' => $g['nights'] . ' night(s)', 'amount' => $g['value']];
+    }
+    $soon = rh_dec_bk_diff($today, $gaps[0]['from']);
+    return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => [rh_dec_card([
+        'key' => 'bk_gaps', 'covers' => ['orphan_nights'],
+        'decision' => 'How to sell ' . $nights . ' night(s) left in short gaps between stays',
+        'why_now' => count($gaps) . ' gap(s) of ' . $maxGap . ' night(s) or fewer sit between two stays in the next ' . $ahead . ' nights; the first is ' . ($soon === 0 ? 'tonight' : $soon . ' day(s) away') . '. Gaps this short rarely sell on their own.',
+        'at_stake' => $amt > BALANCE_TOLERANCE ? $amt : null, 'at_stake_note' => 'Those nights at each room type\'s listed nightly rate, if sold: not money until they are (also part of the unsold nights on the pace card).',
+        'urgency' => $soon <= 7 ? 0.7 : 0.5, 'confidence' => $partial ? 0.55 : 0.8, 'history_days' => 0,
+        'evidence' => ['total' => $total, 'total_label' => 'rooms checked', 'rows' => $rows],
+        'options' => [
+            rh_dec_option('Offer the free nights to the guests either side as an extra night', 'The front desk asks the guest before and the guest after; nothing changes in the rates.', $amt, null, 0.0, 0.5, 0, 1),
+            rh_dec_option_unvalued('Allow shorter stays or a short-stay rate on those nights', 'A rate or rule change made by a manager; never automatic.', 0.4, 3),
+        ],
+        'recommend' => 0, 'recommendation' => 'Offer the free nights to the guests either side as an extra night, the earliest gap first.',
+        'tier' => 1, 'link' => ['calendar.php', 'Open the room calendar'],
+    ])]];
+}
+
+/**
+ * Rooms held by two different stays on the same night in the nights ahead (rooms held as the availability check holds
+ * them). A joined booking holding both rooms of its combination is ONE stay, so a valid combination is never a clash;
+ * a clash is only a second booking on one of those rooms. The money is the booked value of the stay made later in
+ * each clash (the one that would have to move).
+ */
+function rh_dec_f_bk_conflicts(PDO $db, array $ctx): array
+{
+    $on = rh_dec_mod('bookings');
+    if ($on === false) {
+        return rh_dec_bk_off();
+    }
+    [$today, $end, $ahead] = rh_dec_bk_window($ctx);
+    $stays = rh_dec_bk_room_stays($db, $today, $end);
+    $rooms = rh_dec_bk_rooms($db);
+    if ($stays === null || $rooms === null) {
+        return ['ok' => false, 'total' => 0, 'cards' => []];
+    }
+    $partial = $on === null;
+    $endX = date('Y-m-d', strtotime($end . ' +1 day'));
+    $by = [];
+    foreach ($stays as $s) {
+        $by[$s['room']][] = $s;
+    }
+    $clash = [];
+    foreach ($by as $room => $list) {
+        $k = count($list);
+        for ($i = 0; $i < $k; $i++) {
+            for ($j = $i + 1; $j < $k; $j++) {
+                $a = $list[$i];
+                $b = $list[$j];
+                if ($a['booking_id'] === $b['booking_id']) {
+                    continue; // the same stay (both rooms of a joined booking, or its room listed twice)
+                }
+                $s = max($a['in'], $b['in'], $today);
+                $e = min($a['out'], $b['out'], $endX);
+                if ($s >= $e) {
+                    continue;
+                }
+                $later = [$a['created'], $a['booking_id']] > [$b['created'], $b['booking_id']] ? $a : $b;
+                $first = $later === $a ? $b : $a;
+                $key = min($a['booking_id'], $b['booking_id']) . '-' . max($a['booking_id'], $b['booking_id']);
+                if (!isset($clash[$key])) {
+                    $clash[$key] = ['rooms' => [], 'from' => $s, 'nights' => rh_dec_bk_diff($s, $e), 'later' => $later, 'first' => $first];
+                }
+                $clash[$key]['rooms'][] = (string)($rooms[$room]['number'] ?? $room);
+            }
+        }
+    }
+    $total = count($stays);
+    if (!$clash) {
+        return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => []];
+    }
+    $clash = array_values($clash);
+    usort($clash, static fn($x, $y) => [$x['from'], $x['later']['booking_id']] <=> [$y['from'], $y['later']['booking_id']]);
+    $moved = [];
+    foreach ($clash as $c) {
+        $moved[$c['later']['booking_id']] = $c['later']['gross'];
+    }
+    $amt = round(array_sum($moved), 2);
+    $rows = [];
+    foreach (array_slice($clash, 0, 8) as $c) {
+        $rows[] = ['label' => 'Room ' . implode(' and ', array_unique($c['rooms'])) . ': two stays share ' . $c['nights'] . ' night(s) from ' . $c['from'] . ' (the later booking is listed)',
+            'reference' => $c['later']['reference'] . ' / ' . $c['first']['reference'], 'amount' => round($c['later']['gross'], 2)];
+    }
+    $soon = rh_dec_bk_diff($today, $clash[0]['from']);
+    $arr = rh_dec_num('ai_review_arrival_days', 1, 14);
+    $n = count($clash);
+    return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => [rh_dec_card([
+        'key' => 'bk_conflicts', 'covers' => ['room_clash'],
+        'decision' => 'Move ' . count($moved) . ' stay(s) booked into a room another stay already holds',
+        'why_now' => $n . ' room clash(es) in the next ' . $ahead . ' nights: two different bookings hold the same room on the same night; the first is ' . ($soon === 0 ? 'tonight' : $soon . ' day(s) away') . '. Joined rooms booked together are one stay and are not counted.',
+        'at_stake' => $amt > BALANCE_TOLERANCE ? $amt : null, 'at_stake_note' => 'The booked value of the stay made later in each clash: the one that would have to move.',
+        'urgency' => $soon < $arr ? 0.95 : 0.75, 'confidence' => $partial ? 0.6 : 0.9, 'history_days' => 0,
+        'evidence' => ['total' => $total, 'total_label' => 'room holds checked', 'rows' => $rows],
+        'options' => [
+            rh_dec_option_unvalued('Move the later stay to a free room of the same type', 'Done on the booking; the room availability check runs as usual and joined rooms stay together.', 0.8, 1),
+            rh_dec_option_unvalued('Leave both and sort it out on the day', 'Nothing is done now; one guest may have no room on arrival.', 0.4, 1),
+        ],
+        'recommend' => 0, 'recommendation' => 'Move the later stay to a free room of the same type, the earliest clash first.',
+        'tier' => 1, 'link' => $n === 1 ? ['booking-details.php?id=' . $clash[0]['later']['booking_id'], 'Open the booking'] : ['calendar.php', 'Open the room calendar'],
     ])]];
 }
 

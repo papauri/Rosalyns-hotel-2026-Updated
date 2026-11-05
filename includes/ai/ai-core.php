@@ -255,6 +255,12 @@ function rh_ai_setting_defaults(): array
         'ai_review_price_rise_pct'     => '10', // a stock item bought at least this % above its earlier unit cost is a price rise
         'ai_review_supplier_days'      => '90', // supplier prices and spend are compared over the last this-many days
         'ai_review_supplier_share_pct' => '70', // one supplier with at least this % of stock buying in that time is a dependence
+        // Owner 2026-11-05 (Bookings Decisions panel): code defaults only, read through rh_ai_settings() until someone sets them
+        'ai_review_high_occ_pct'       => '90',  // a night ahead is high demand when at least this % of the rooms are booked
+        'ai_review_drag_pct'           => '25',  // a room type earning at least this % less per available room-night than the hotel lags
+        'ai_review_arrival_days'       => '3',   // arrivals needing action: from today, this many days (later stays are checked for deposits)
+        'ai_review_gap_nights'         => '2',   // a free gap of this many nights or fewer between two stays in one room is a short gap
+        'ai_review_pattern_days'       => '180', // cancellation, no-show and fall-through patterns look back this many days
     ];
 }
 
