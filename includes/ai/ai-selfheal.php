@@ -486,7 +486,8 @@ function rh_ai_reflect_run(PDO $db): array
             continue;
         }
         $c = json_decode((string)$i['context_json'], true) ?: [];
-        $bits = array_filter([(string)$i['summary'], isset($c['question']) ? 'question: ' . $c['question'] : '', isset($c['correction']) && $c['correction'] !== '' ? 'staff said: ' . $c['correction'] : '', isset($c['screen_message']) ? 'screen said: ' . $c['screen_message'] : '']);
+        // a correction feeds the hotel-wide lessons only when its writer may make hotel-wide notes (sweep S4)
+        $bits = array_filter([(string)$i['summary'], isset($c['question']) ? 'question: ' . $c['question'] : '', isset($c['correction']) && $c['correction'] !== '' && !empty($c['correction_hotel_wide']) ? 'staff said: ' . $c['correction'] : '',isset($c['screen_message']) ? 'screen said: ' . $c['screen_message'] : '']);
         $lines[] = '- ' . mb_substr(rh_ai_memory_redact(implode('; ', $bits)), 0, 240);
         if (count($lines) >= 15) {
             break;

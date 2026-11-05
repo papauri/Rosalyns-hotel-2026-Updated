@@ -33,10 +33,16 @@ function rh_ai_vault_drop_fields(): array
     return ['guest_address', 'address', 'id_number', 'passport', 'passport_number', 'national_id', 'card_number', 'card', 'ip', 'password', 'password_hash', 'api_key', 'api_key_enc'];
 }
 
-/** Free-text fields written by guests or staff: scrubbed, and marked as untrusted data. */
+/**
+ * Free-text fields written by guests or staff: scrubbed, and marked as untrusted data. Guest-typed review titles and
+ * enquiry subjects travel under their own names (review_title, enquiry_subject): a bare 'title' / 'subject' is also
+ * used for the hotel's own words (brief points, guide pages), which must stay readable. No read tool returns a
+ * guest-written 'reply' (hotel replies are only counted); the 'reply' a draft card takes is the model's own argument.
+ */
 function rh_ai_vault_free_text_fields(): array
 {
-    return ['special_requests', 'notes', 'note', 'admin_notes', 'message', 'comment', 'housekeeping_notes', 'description', 'tentative_notes'];
+    return ['special_requests', 'notes', 'note', 'admin_notes', 'message', 'comment', 'housekeeping_notes', 'description', 'tentative_notes',
+        'review_title', 'enquiry_subject'];
 }
 
 /** Per-request memory of each conversation's vault: [conv => ['tok' => [token => value], 'hash' => [hash => token]]]. */

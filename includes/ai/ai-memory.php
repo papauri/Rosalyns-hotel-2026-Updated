@@ -483,6 +483,12 @@ function rh_ai_style_from_text(string $t): array
     return $p;
 }
 
+/** A correction by this person may become a hotel-wide note on trial: managers and administrators only (no role = no). */
+function rh_ai_correction_hotel_wide(array $user): bool
+{
+    return in_array((string)($user['role'] ?? ''), ['admin', 'manager'], true);
+}
+
 /** The fact in a chat correction ("no, breakfast starts at 6:30" -> "breakfast starts at 6:30"); '' if none. */
 function rh_ai_chat_correction(string $tok): string
 {
@@ -531,9 +537,13 @@ function rh_ai_learn_correction(PDO $db, array $user, string $tok, string $sourc
     if (preg_match('/\[(?:GUEST|EMAIL|PHONE|BK|STAFF|ADDR)(?:_[A-Z0-9]+)?\]/', $tok)) {
         return 'Thanks - noted on this reply. Notes about one particular guest or staff member are not kept as general knowledge.';
     }
-    $r = rh_ai_memory_add($db, ['kind' => 'fact', 'scope' => 'hotel', 'text' => $tok, 'source' => $source, 'source_ref' => $sourceRef, 'created_by' => $uid]);
+    // Security sweep S4 (2026-11-06): only a manager's or administrator's correction may become a hotel-wide note on
+    // trial; anyone else's stays in their own chats (same filters, probation and freeze either way).
+    $wide = rh_ai_correction_hotel_wide($user);
+    $r = rh_ai_memory_add($db, ['kind' => 'fact', 'scope' => $wide ? 'hotel' : 'user', 'scope_ref' => $wide ? null : (string)$uid, 'text' => $tok, 'source' => $source, 'source_ref' => $sourceRef, 'created_by' => $uid]);
     if ($r['ok']) {
-        return 'Thanks - I will use that from now on (it is checked against later replies before it counts fully).';
+        return $wide ? 'Thanks - I will use that from now on (it is checked against later replies before it counts fully).'
+            : 'Thanks - I will use that in your own chats from now on (it is checked against later replies first). For it to apply to everyone, ask a manager to correct it or add it on Assistant Settings.';
     }
     return 'Thanks - noted on this reply. ' . $r['error'];
 }
@@ -575,7 +585,7 @@ function rh_ai_feedback_save(PDO $db, array $user, int $messageId, int $rating, 
         $q->execute([$conv, $messageId]);
         rh_ai_incident_add($db, 'reply_not_right', 'A reply was marked Not right', [
             'question' => mb_substr((string)$q->fetchColumn(), 0, 400), 'reply' => mb_substr((string)$msg['content'], 0, 400),
-            'route' => (string)($meta['route'] ?? $msg['agent'] ?? ''), 'correction' => mb_substr($tok, 0, 300), 'message_id' => $messageId,
+            'route' => (string)($meta['route'] ?? $msg['agent'] ?? ''), 'correction' => mb_substr($tok, 0, 300), 'correction_hotel_wide' => rh_ai_correction_hotel_wide($user), 'message_id' => $messageId,
             'wrong' => ['route' => (string)($meta['route'] ?? $msg['agent'] ?? ''), 'head' => function_exists('rh_ai_wrong_head') ? rh_ai_wrong_head((string)$msg['content']) : ''],
         ], ['user_id' => $uid, 'conversation_id' => $conv]);
         if (!empty($meta['learned_route']) && function_exists('rh_ai_route_demote')) {

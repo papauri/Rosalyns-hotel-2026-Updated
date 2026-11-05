@@ -654,7 +654,7 @@ function rh_ai_t_guest_voice(PDO $db, array $user, array $a): array
             $latest = $db->query("SELECT r.guest_name, r.rating, r.title, r.comment, DATE(r.created_at) AS d FROM reviews r WHERE r.status = 'approved' AND NOT EXISTS (SELECT 1 FROM review_responses rr0 WHERE rr0.review_id = r.id) ORDER BY r.rating ASC, r.created_at DESC LIMIT 4")->fetchAll(PDO::FETCH_ASSOC);
             $out['reviews'] = ['waiting_for_approval' => $pending, 'published_needing_a_reply' => $needs,
                 'last_30_days' => ['published' => (int)($avg['n'] ?? 0), 'average_rating' => isset($avg['a']) && $avg['a'] !== null ? round((float)$avg['a'], 1) : null, 'rated_2_or_less' => (int)($avg['low'] ?? 0)],
-                'needing_a_reply' => array_map(static fn($r) => ['guest_name' => $r['guest_name'], 'rating' => (int)$r['rating'], 'title' => (string)$r['title'], 'comment' => mb_substr((string)$r['comment'], 0, 200), 'date' => $r['d']], $latest)];
+                'needing_a_reply' => array_map(static fn($r) => ['guest_name' => $r['guest_name'], 'rating' => (int)$r['rating'], 'review_title' => (string)$r['title'], 'comment' => mb_substr((string)$r['comment'], 0, 200), 'date' => $r['d']], $latest)]; // guest-typed: quoted by the vault
             $link = $link ?? ['reviews.php?status=approved&reply=needs', 'Open reviews needing a reply'];
         } catch (Throwable $e) {
             $out['reviews'] = ['error' => 'Could not be read.'];
@@ -665,7 +665,7 @@ function rh_ai_t_guest_voice(PDO $db, array $user, array $a): array
             $by = $db->query("SELECT status, COUNT(*) FROM contact_inquiries GROUP BY status")->fetchAll(PDO::FETCH_KEY_PAIR) ?: [];
             $new = $db->query("SELECT reference_number, name, subject, created_at, TIMESTAMPDIFF(HOUR, created_at, NOW()) AS age_h FROM contact_inquiries WHERE status = 'new' ORDER BY created_at LIMIT 5")->fetchAll(PDO::FETCH_ASSOC);
             $out['website_messages'] = ['unread' => (int)($by['new'] ?? 0), 'read_not_replied' => (int)($by['read'] ?? 0),
-                'oldest_unread' => array_map(static fn($r) => ['reference' => $r['reference_number'], 'guest_name' => $r['name'], 'subject' => (string)$r['subject'], 'waiting_hours' => (int)$r['age_h']], $new)];
+                'oldest_unread' => array_map(static fn($r) => ['reference' => $r['reference_number'], 'guest_name' => $r['name'], 'enquiry_subject' => (string)$r['subject'], 'waiting_hours' => (int)$r['age_h']], $new)]; // guest-typed: quoted by the vault
             $link = $link ?? ['contact-inquiries.php?status=new', 'Open new messages'];
         } catch (Throwable $e) {
         }
@@ -927,7 +927,8 @@ function rh_ai_briefing_findings(PDO $db, array $user): array
         if (!empty($g['reviews']['published_needing_a_reply'])) {
             $add(['id' => 'reviews_reply', 'kind' => 'queue', 'severity' => 15 + min(25, $g['reviews']['published_needing_a_reply'] * 3), 'title' => 'Published reviews with no reply', 'count' => $g['reviews']['published_needing_a_reply'],
                 'detail' => $g['reviews']['published_needing_a_reply'] . ' review(s) have no reply from the hotel.',
-                'items' => array_slice(array_map(static fn($r) => ['guest_name' => $r['guest_name'], 'text' => $r['rating'] . ' stars: ' . $r['title']], $g['reviews']['needing_a_reply']), 0, 3),
+                // the guest's own words stay out of a brief line (it is shown as-is and sent unquoted); the link opens them
+                'items' => array_slice(array_map(static fn($r) => ['guest_name' => $r['guest_name'], 'text' => $r['rating'] . ' stars (' . $r['date'] . ')'], $g['reviews']['needing_a_reply']), 0, 3),
                 'link' => ['reviews.php?status=approved&reply=needs', 'Open reviews needing a reply']]);
         }
         $enq = (int)($g['website_messages']['unread'] ?? 0) + (int)($g['event_enquiries_new'] ?? 0) + (int)($g['gym_enquiries_new'] ?? 0) + (int)($g['conference_enquiries_not_confirmed'] ?? 0);
@@ -942,7 +943,7 @@ function rh_ai_briefing_findings(PDO $db, array $user): array
             $oldest = (int)($g['website_messages']['oldest_unread'][0]['waiting_hours'] ?? 0);
             $add(['id' => 'enquiries', 'kind' => 'time', 'severity' => min(55, 15 + $enq * 4 + ($oldest >= 24 ? 15 : 0)), 'title' => 'Enquiries waiting for an answer', 'count' => $enq,
                 'detail' => implode(', ', $parts) . '.' . ($oldest > 0 ? ' Oldest unread website message: ' . $oldest . ' hour(s).' : ''),
-                'items' => array_slice(array_map(static fn($m) => ['guest_name' => $m['guest_name'], 'text' => $m['subject'] . ' (' . $m['waiting_hours'] . ' h)'], (array)($g['website_messages']['oldest_unread'] ?? [])), 0, 3),
+                'items' => array_slice(array_map(static fn($m) => ['guest_name' => $m['guest_name'], 'text' => 'website message, waiting ' . $m['waiting_hours'] . ' h'],(array)($g['website_messages']['oldest_unread'] ?? [])), 0, 3),
                 'link' => [!empty($g['website_messages']['unread']) ? 'contact-inquiries.php?status=new' : ((string)($g['link'] ?? 'dashboard.php')), 'Open enquiries']]);
         }
     }

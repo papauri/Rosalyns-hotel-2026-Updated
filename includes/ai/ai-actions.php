@@ -67,7 +67,7 @@ function rh_ai_action_registry(): array
             'schema' => ['properties' => $bk + ['guest_name' => ['type' => 'string', 'maxLength' => 120], 'guest_email' => ['type' => 'string', 'maxLength' => 160], 'guest_phone' => ['type' => 'string', 'maxLength' => 40],
                 'guest_country' => ['type' => 'string', 'maxLength' => 60], 'check_in' => $date, 'check_out' => $date, 'adults' => ['type' => 'integer', 'minimum' => 1, 'maximum' => 40],
                 'special_requests' => ['type' => 'string', 'maxLength' => 500], 'note' => ['type' => 'string', 'maxLength' => 200]]],
-            'preview' => 'rh_ai_pv_edit_booking', 'verify' => 'rh_ai_vf_json',
+            'preview' => 'rh_ai_pv_edit_booking', 'verify' => 'rh_ai_vf_edit_booking',
         ],
         'extend_stay' => [
             'tool' => 'propose_extend_stay', 'label' => 'Extend stay', 'page' => 'bookings.php', 'perm' => [],
@@ -164,13 +164,13 @@ function rh_ai_action_registry(): array
             'tool' => 'propose_send_email', 'label' => 'Send guest email', 'page' => 'bookings.php', 'perm' => [],
             'description' => 'Prepare sending one of the booking emails again (received, confirmed, tentative, converted, cancelled, reminder, invoice).',
             'schema' => ['properties' => $bk + ['email_type' => ['type' => 'string', 'enum' => ['booking_received', 'booking_confirmed', 'tentative_confirmed', 'tentative_converted', 'booking_cancelled', 'booking_reminder', 'invoice']]], 'required' => ['email_type']],
-            'preview' => 'rh_ai_pv_send_email', 'verify' => 'rh_ai_vf_json',
+            'preview' => 'rh_ai_pv_send_email', 'verify' => 'rh_ai_vf_send_email',
         ],
         'send_invoice' => [
             'tool' => 'propose_send_invoice', 'label' => 'Send invoice', 'page' => 'bookings.php', 'perm' => [],
             'description' => 'Prepare emailing the booking\'s invoice to the guest.',
             'schema' => ['properties' => $bk],
-            'preview' => 'rh_ai_pv_send_invoice', 'verify' => 'rh_ai_vf_json',
+            'preview' => 'rh_ai_pv_send_invoice', 'verify' => 'rh_ai_vf_send_invoice',
         ],
         'whatsapp' => [
             'tool' => 'propose_whatsapp', 'label' => 'WhatsApp the guest', 'page' => 'booking-details.php', 'perm' => ['bookings'],
@@ -1932,9 +1932,50 @@ function rh_ai_confirm(PDO $db, array $user, int $id, array $edits = [], string 
 // Verify (after the browser reports): the database decides; the screen's own message is shown.
 // Each returns true (done), false (not done) or null (no database trace: the screen's answer decides).
 
+/** No record to check (WhatsApp hand-off): the screen's word only, recorded as "reported by the screen". */
 function rh_ai_vf_json(PDO $db, array $row, array $pv): ?bool
 {
     return null;
+}
+
+/**
+ * The screen's own record that it did it: a Booking History row ($action) by this person on this booking since the
+ * card was made. true = seen; null = no such record (the screen's word only - the record write can fail quietly,
+ * so its absence never counts as "not done").
+ */
+function rh_ai_vf_booking_audit(PDO $db, array $row, string $action): ?bool
+{
+    $args = (array)(json_decode((string)$row['params_json'], true)['args'] ?? []);
+    $b = rh_ai_act_booking($db, $args);
+    if (!empty($b['error']) || empty($b['id'])) {
+        return null;
+    }
+    try {
+        $st = $db->prepare("SELECT COUNT(*) FROM booking_audit_log WHERE booking_id = ? AND action = ? AND performed_by = ? AND performed_at >= DATE_SUB(?, INTERVAL 5 SECOND)");
+        $st->execute([(int)$b['id'], $action, (int)$row['user_id'], (string)$row['created_at']]);
+        return (int)$st->fetchColumn() > 0 ? true : null;
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+/** Change booking: Bookings writes "modified" to Booking History once the change is saved. */
+function rh_ai_vf_edit_booking(PDO $db, array $row, array $pv): ?bool
+{
+    return rh_ai_vf_booking_audit($db, $row, 'modified');
+}
+
+/** Send invoice: Bookings writes "email_sent" to Booking History only when the email went out. */
+function rh_ai_vf_send_invoice(PDO $db, array $row, array $pv): ?bool
+{
+    return rh_ai_vf_booking_audit($db, $row, 'email_sent');
+}
+
+/** Send guest email: only the invoice email leaves a record; the other emails are the screen's word only. */
+function rh_ai_vf_send_email(PDO $db, array $row, array $pv): ?bool
+{
+    $args = (array)(json_decode((string)$row['params_json'], true)['args'] ?? []);
+    return (string)($args['email_type'] ?? '') === 'invoice' ? rh_ai_vf_booking_audit($db, $row, 'email_sent') : null;
 }
 
 function rh_ai_vf_status(PDO $db, array $row, array $pv): ?bool
@@ -2111,7 +2152,8 @@ function rh_ai_vf_gym_checkin(PDO $db, array $row, array $pv): ?bool
 }
 
 /**
- * The browser reports what the screen answered. The database decides executed / failed; the activity log
+ * The browser reports what the screen answered. The database decides executed / failed (where an action leaves
+ * no record, the screen's answer is kept as "reported by the screen, not checked" - never "Done"); the activity log
  * gets "... via Assistant"; an AI-made booking's saved total is compared with the card (an incident is
  * recorded when they differ by more than BALANCE_TOLERANCE). Check-in into a room not marked clean gives a
  * NEW card for a second, explicit confirm (never sent on its own).
@@ -2153,10 +2195,21 @@ function rh_ai_report(PDO $db, array $user, int $id, ?array $result, array $info
         $screenOk = is_array($result) && !empty($result['success']) && empty($info['guard_failed']);
         $db_ok = call_user_func($def['verify'], $db, $row, $pv);
         $ok = $db_ok === null ? $screenOk : $db_ok;
-        $res = ['message' => '', 'screen' => is_array($result) ? array_intersect_key($result, array_flip(['success', 'message', 'error', 'booking_id', 'reference', 'duplicate', 'needs_confirm_room'])) : ['non_json' => true]];
+        // Security sweep S3 (2026-11-06): with no record to check, the browser's report is only the screen's word.
+        // It is kept as "reported by the screen" and never shown or told to the model as done / verified.
+        $checked = $db_ok !== null;
+        $res = ['message' => '', 'verified' => $ok && $checked, 'checked_by' => $checked ? 'database' : 'screen_report',
+            'screen' => is_array($result) ? array_intersect_key($result, array_flip(['success', 'message', 'error', 'booking_id', 'reference', 'duplicate', 'needs_confirm_room'])) : ['non_json' => true]];
         $next = null;
-        if ($ok) {
+        if ($ok && !$checked) {
+            $res['message'] = 'Reported by the screen, not checked: ' . ($msg !== '' ? $msg : $def['label'] . ' sent.') . ' This leaves no record the Assistant can check - open the screen if you need to be sure.';
+        } elseif ($ok) {
             $res['message'] = 'Done. ' . ($msg !== '' ? $msg : $def['label'] . ' saved.');
+            $ra = (array)(json_decode((string)$row['params_json'], true)['args'] ?? []);
+            $ev = $ra['email_guest'] ?? false;
+            if ($key === 'reply_review' && ($ev === true || $ev === 1 || $ev === '1' || $ev === 'true')) {
+                $res['message'] .= ' The email to the guest is as the screen reported (not checked).';
+            }
         } else {
             $res['message'] = 'Not done. ' . ($msg !== '' ? $msg : 'The screen did not confirm it - open it to check.');
             if (!empty($info['guard_failed'])) {
@@ -2208,7 +2261,7 @@ function rh_ai_report(PDO $db, array $user, int $id, ?array $result, array $info
         error_log('Assistant report failed: ' . $e->getMessage());
         return ['success' => false, 'error' => 'The result could not be recorded.'];
     }
-    $summary = $def['label'] . ' via Assistant (card ' . $id . ')' . (!empty($res['reference']) ? ': ' . $res['reference'] : '') . ($ok ? '' : ' - not done');
+    $summary = $def['label'] . ' via Assistant (card ' . $id . ')' . (!empty($res['reference']) ? ': ' . $res['reference'] : '') . ($ok ? ($checked ? '' : ' - reported by the screen, not checked') : ' - not done');
     if (function_exists('logActivity')) {
         logActivity($uid, 'ai_action', mb_substr($summary . '. ' . $res['message'], 0, 480));
     }
@@ -2228,7 +2281,7 @@ function rh_ai_report(PDO $db, array $user, int $id, ?array $result, array $info
         rh_ai_message_store_outcome($db, (int)$row['conversation_id'], $def['label'] . ': ' . $res['message']);
     } catch (Throwable $e) {
     }
-    return ['success' => true, 'status' => $ok ? 'executed' : 'failed', 'message' => $res['message'], 'card' => rh_ai_card_public($db, $id), 'next_card' => $next ? rh_ai_card_public($db, $next) : null];
+    return ['success' => true, 'status' => $ok ? 'executed' : 'failed', 'verified' => $ok && $checked, 'message' => $res['message'], 'card' => rh_ai_card_public($db, $id), 'next_card' => $next ? rh_ai_card_public($db, $next) : null];
 }
 
 /** The outcome line, tokenised, as an assistant message of that conversation. */
