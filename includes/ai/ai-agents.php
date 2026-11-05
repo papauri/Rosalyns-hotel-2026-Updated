@@ -1436,7 +1436,7 @@ function rh_ai_hotel_local_text(array $view, array $r): string
                     $lines[] = '**' . $label . ' phone:** ' . $num;
                 }
             } else {
-                $lines[] = '**Phone:** not set in Hotel Settings';
+                $lines[] = '**Phone:** not set in ' . rh_ai_settings_screen();
             }
         }
         if (in_array('email', $want, true)) {
@@ -1445,11 +1445,11 @@ function rh_ai_hotel_local_text(array $view, array $r): string
                     $lines[] = '**' . $label . ' email:** ' . $em;
                 }
             } else {
-                $lines[] = '**Email:** not set in Hotel Settings';
+                $lines[] = '**Email:** not set in ' . rh_ai_settings_screen();
             }
         }
         if (in_array('address', $want, true)) {
-            $lines[] = '**Address:** ' . (string)($r['hotel_address'] ?? 'not set in Hotel Settings');
+            $lines[] = '**Address:** ' . (string)($r['hotel_address'] ?? 'not set in ' . rh_ai_settings_screen());
         }
     }
     if (!$lines) {
@@ -2065,7 +2065,8 @@ function rh_ai_swarm_consult(PDO $db, array $user, int $conv, array $models, arr
     $uid = (int)$user['id'];
     $model = $models['fast'] ?? ($models['primary'] ?? null);
     $fallback = $models['fallback']['model_id'] ?? null;
-    $labels = array_map(static fn($k) => $team[$k]['label'], $pick);
+    // On screen the till lead goes by the menu's own heading ("Till & Sales" with the restaurant off); its brief stays frozen.
+    $labels = array_map(static fn($k) => $k === 'restaurant' ? (rh_ai_menu_heading_map()['Restaurant & Bar'] ?? $team[$k]['label']) : $team[$k]['label'], $pick);
     rh_ai_step_set($db, $uid, 'Asking the ' . implode(', ', $labels) . ' lead' . (count($pick) > 1 ? 's' : '') . '...');
     $state = [];
     foreach ($pick as $k) {
@@ -2200,6 +2201,9 @@ function rh_ai_link_source(?array $link): string
         return '';
     }
     $page = (string)strtok((string)$link['url'], '?');
+    if ($page === 'booking-settings.php') {
+        return 'From ' . rh_ai_settings_screen(); // the menu's name for it (Business Settings with Bookings off)
+    }
     $all = getAllPermissions();
     foreach ($all as $p) {
         if (($p['page'] ?? '') === $page) {

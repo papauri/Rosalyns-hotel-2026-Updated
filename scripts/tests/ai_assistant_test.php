@@ -2674,11 +2674,40 @@ check(rh_ai_hours_line('10:00', '10:00') === 'open and close times are the same 
     && rh_ai_hours_line('11:00', '03:00') === '11:00 AM – 3:00 AM (next day)' && strpos(rh_ai_hours_line('11:00', ''), 'closing time not set in Hotel Settings') !== false, 'hours: same open/close time and an unset time give the plain "check Hotel Settings" line, never a guess');
 require_once $root . '/includes/station-hours.php';
 $bDef = rh_station_definitions()['bar'];
-check(rh_ai_station_hours_line('bar', '', '') === 'not set in Settings → Station Hours' && strpos(rh_ai_station_hours_line('bar', '', ''), rh_ai_clock($bDef['default_open'])) === false
-    && rh_ai_station_hours_line('bar', '10:00', '10:00') === 'open and close times are the same (10:00 AM) — check Settings → Station Hours'
-    && rh_ai_station_hours_line('bar', '12:00', '') === 'opens 12:00 PM; closing time not set in Settings → Station Hours'
+check(rh_ai_station_hours_line('bar', '', '') === 'not set in ' . rh_ai_station_hours_where() && strpos(rh_ai_station_hours_line('bar', '', ''), rh_ai_clock($bDef['default_open'])) === false
+    && rh_ai_station_hours_line('bar', '10:00', '10:00') === 'open and close times are the same (10:00 AM) — check ' . rh_ai_station_hours_where()
+    && rh_ai_station_hours_line('bar', '12:00', '') === 'opens 12:00 PM; closing time not set in ' . rh_ai_station_hours_where()
     && rh_ai_station_hours_line('kitchen', '07:00', '22:00') === '7:00 AM – 10:00 PM' && rh_ai_station_state('bar', '', '') === null,
-    'station hours: only the saved times; a time not saved says "not set in Settings → Station Hours" and never quotes a default written in code', rh_ai_station_hours_line('bar', '', ''));
+    'station hours: only the saved times; a time not saved says "not set in <its menu heading> → Station Hours" and never quotes a default written in code', rh_ai_station_hours_line('bar', '', ''));
+// Change notice 2026-11-06 (421bbaa): sidebar headings follow the business type; the Assistant names them as the menu shows them
+$hmap = rh_ai_menu_heading_map();
+$hpar = true;
+foreach ($hmap as $hk => $hl) {
+    $hpar = $hpar && array_key_exists($hk, rh_admin_nav_groups()) && rh_admin_nav_group_display($hk)[0] === $hl;
+}
+check($hpar && (rh_module_key_enabled('restaurant_page') xor isset($hmap['Restaurant & Bar'])), 'menu headings: the Assistant\'s heading map is exactly what the sidebar shows (rh_admin_nav_group_display)', json_encode($hmap));
+check(isset($hmap['Restaurant & Bar']) === (getSetting('restaurant_system_enabled', '1') !== '1'), 'menu headings follow the saved Restaurant switch, also in a command-line run (nightly eval)', json_encode($hmap));
+check(rh_ai_station_hours_where() === rh_ai_live_menu_words('Restaurant & Bar → Station Hours'), 'station hours point to the menu heading Station Hours really sits under (not "Settings")', rh_ai_station_hours_where());
+$GLOBALS['__rh_ai_heading_override'] = ['Restaurant & Bar' => 'Till & Sales', 'Front Desk' => 'Overview'];
+$hModSaved = $GLOBALS['__rh_ai_module_override'] ?? null;
+$GLOBALS['__rh_ai_module_override'] = array_merge((array)$hModSaved, ['bookings' => false]);
+$lw = rh_ai_live_menu_words('Admin menu → Restaurant & Bar → POS Till. It opens Front Desk → Dashboard. Settings → Hotel Settings. Ask the Front Desk & Rooms lead; Restaurant & Bar menu');
+check($lw === 'Admin menu → Till & Sales → POS Till. It opens Overview → Dashboard. Settings → Business Settings. Ask the Front Desk & Rooms lead; Till & Sales menu'
+    && rh_ai_hours_line('', '') === 'not set in Business Settings' && rh_ai_settings_screen() === 'Business Settings',
+    'a shop: menu paths read "Till & Sales" / "Overview" / "Business Settings" as its sidebar does; other words are left alone', $lw);
+if (isset($adminU) && $adminU) {
+    $hw = rh_ai_run_tool($pdo, $adminU, 0, 'how_to', ['question' => 'where is the POS Till']);
+    $hwText = implode(' ', array_map(static fn($m) => (string)$m['text'], (array)($hw['raw']['matches'] ?? [])));
+    check($hw['ok'] && strpos($hwText, 'Till & Sales → POS Till') !== false && strpos($hwText, 'Restaurant & Bar →') === false,
+        'how_to at a shop: "where is the POS Till" answers Till & Sales → POS Till, never the Restaurant & Bar heading', mb_substr($hwText, 0, 300));
+    $sg = rh_ai_run_tool($pdo, $adminU, 0, 'summarise_guide', ['guide' => 'pos till']);
+    check($sg['ok'] && strpos((string)($sg['raw']['guide_text'] ?? ''), 'Restaurant & Bar →') === false, 'summarise_guide at a shop: the guide\'s menu paths use the shop\'s heading');
+} else {
+    skip('how_to heading check: no administrator on this install');
+}
+unset($GLOBALS['__rh_ai_heading_override'], $GLOBALS['__rh_ai_module_override']);
+if ($hModSaved !== null) { $GLOBALS['__rh_ai_module_override'] = $hModSaved; }
+check(rh_ai_settings_screen() === (rh_module_key_enabled('bookings') ? 'Hotel Settings' : 'Business Settings'), 'the settings screen is named as the menu names it');
 // Owner 2026-10-28 ("not hard coded"): no clock time written as text in the Assistant's code (times come from settings)
 $hhmm = [];
 foreach (['ai-tools.php', 'ai-agents.php', 'ai-context.php', 'ai-core.php'] as $f) {
@@ -2744,14 +2773,14 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
             return rh_ai_turn($pdo, $admH, ['conversation_id' => 0, 'message' => $msg, 'page' => 'dashboard.php']);
         };
         $r = $turnH('what time does the bar open?');
-        check($r['ok'] && $r['route'] === 'local' && !$GLOBALS['ai2_calls'] && $r['tokens_in'] === 0 && strpos($r['reply'], 'open and close times are the same (10:00 AM) — check Settings → Station Hours') !== false,
+        check($r['ok'] && $r['route'] === 'local' && !$GLOBALS['ai2_calls'] && $r['tokens_in'] === 0 && strpos($r['reply'], 'open and close times are the same (10:00 AM) — check ' . rh_ai_station_hours_where()) !== false,
             'bar hours: answered locally (0 tokens); open = close gives the plain "check Hotel Settings" line', $r['reply'] . ' ' . $r['error']);
         $r = $turnH("what's check-out time?");
         check($r['ok'] && $r['route'] === 'local' && !$GLOBALS['ai2_calls'] && strpos($r['reply'], 'Check-out:** by 10:30 AM') !== false && strpos($r['reply'], 'from 2:00 PM') !== false, 'check-out time: the stored value, locally, in 12-hour form (check-in shown too)', $r['reply']);
         $r = $turnH('what time does the kitchen close?');
         $kDef = rh_station_definitions()['kitchen'];
-        check($r['route'] === 'local' && strpos($r['reply'], 'not set in Settings → Station Hours') !== false && strpos($r['reply'], rh_ai_clock($kDef['default_close'])) === false,
-            'kitchen hours not saved: "not set in Settings → Station Hours", never a default written in code', $r['reply']);
+        check($r['route'] === 'local' && strpos($r['reply'], 'not set in ' . rh_ai_station_hours_where()) !== false && strpos($r['reply'], rh_ai_clock($kDef['default_close'])) === false,
+            'kitchen hours not saved: "not set in <its menu heading> → Station Hours", never a default written in code', $r['reply']);
         // A changed setting changes the answer (nothing hard coded)
         $setS->execute(['station_bar_opens_at', '12:15']);
         $setS->execute(['station_bar_closes_at', '21:45']);
@@ -2968,7 +2997,7 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
         check(($hx['now']['kitchen'] ?? '') === 'open now, until 10:00 PM' && $hx['open_now'] === ['Kitchen', 'Bar', 'Coffee bar'], 'at noon every station is open, with its closing time', json_encode($hx['now'] ?? null));
         $pdo->prepare("DELETE FROM site_settings WHERE setting_key IN ('station_bar_opens_at', 'station_bar_closes_at')")->execute();
         $r = $turnX('when does the bar open?');
-        check(strpos($r['reply'], 'not set in Settings → Station Hours') !== false && !preg_match('/\b(11:00 AM|3:00 AM)\b/', $r['reply']), 'bar hours not saved: "not set", never a time from code', $r['reply']);
+        check(strpos($r['reply'], 'not set in ' . rh_ai_station_hours_where()) !== false && !preg_match('/\b(11:00 AM|3:00 AM)\b/', $r['reply']), 'bar hours not saved: "not set", never a time from code', $r['reply']);
         unset($GLOBALS['__rh_ai_now']);
 
         // Not offered here: one plain line and the facilities the hotel does have

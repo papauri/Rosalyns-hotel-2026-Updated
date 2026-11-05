@@ -1600,6 +1600,69 @@ function rh_ai_kb_load(): void
     require_once dirname(__DIR__) . '/guide-system-knowledge.php';
 }
 
+/** The settings screen's name as the menu shows it: "Hotel Settings", or "Business Settings" with Bookings off (admin-nav-items.php). */
+function rh_ai_settings_screen(): string
+{
+    return rh_ai_module_on('bookings') ? 'Hotel Settings' : 'Business Settings';
+}
+
+/**
+ * Sidebar headings that read differently in this business: fixed group key => heading on screen
+ * (rh_admin_nav_group_display, e.g. "Restaurant & Bar" => "Till & Sales" with the restaurant off).
+ * The knowledge-base index is cached for everyone, so its menu paths carry the key; answers are reworded here.
+ */
+function rh_ai_menu_heading_map(): array
+{
+    if (isset($GLOBALS['__rh_ai_heading_override'])) {
+        return (array)$GLOBALS['__rh_ai_heading_override']; // tests only: headings as a shop would see them
+    }
+    if (!function_exists('rh_admin_nav_groups')) {
+        require_once dirname(__DIR__, 2) . '/admin/includes/admin-nav-items.php';
+    }
+    if (!function_exists('isRestaurantEnabled') && function_exists('getSetting')) {
+        // The nightly runs (scripts/ai-eval.php, ai_daily.php) skip admin-init.php: without this the restaurant and
+        // events switches read as off there and a full hotel would be told "Till & Sales".
+        require_once dirname(__DIR__) . '/booking-functions.php';
+    }
+    $map = [];
+    if (function_exists('rh_admin_nav_groups') && function_exists('rh_admin_nav_group_display')) {
+        foreach (array_keys(rh_admin_nav_groups()) as $key) {
+            $label = (string)(rh_admin_nav_group_display((string)$key)[0] ?? $key);
+            if ($label !== '' && $label !== (string)$key) {
+                $map[(string)$key] = $label;
+            }
+        }
+    }
+    return $map;
+}
+
+/** Menu paths in guide/knowledge text, worded as this business's menu shows them ("Restaurant & Bar → POS Till" -> "Till & Sales → POS Till"). */
+function rh_ai_live_menu_words(string $s): string
+{
+    foreach (rh_ai_menu_heading_map() as $key => $label) {
+        $s = str_replace([$key . ' → ', $key . ' menu'], [$label . ' → ', $label . ' menu'], $s);
+    }
+    $settings = rh_ai_settings_screen(); // the cached index may hold either name, depending on what built it
+    return str_replace(['→ Hotel Settings', '→ Business Settings', '> Hotel Settings', '> Business Settings'],
+        ['→ ' . $settings, '→ ' . $settings, '> ' . $settings, '> ' . $settings], $s);
+}
+
+/** "Heading → Item" for an admin page, worded as this business's menu shows it; '' when the page is not in the menu. */
+function rh_ai_menu_path(string $page): string
+{
+    if (!function_exists('rh_admin_nav_groups')) {
+        require_once dirname(__DIR__, 2) . '/admin/includes/admin-nav-items.php';
+    }
+    foreach (function_exists('rh_admin_nav_groups') ? rh_admin_nav_groups() : [] as $key => $items) {
+        foreach ($items as $it) {
+            if ((string)($it[0] ?? '') === $page) {
+                return rh_ai_live_menu_words((string)$key . ' → ' . (string)$it[2]);
+            }
+        }
+    }
+    return '';
+}
+
 /**
  * Which permission(s) open the screen a guide is about (any-of; [] = every signed-in person).
  * A person sees a guide only when its module is on (rh_kb_allowed_guides) AND they hold one of these.
@@ -1649,7 +1712,11 @@ function rh_ai_t_how_to(PDO $db, array $user, array $a): array
         if (!rh_ai_guide_visible($user, (string)$e['file'])) {
             continue;
         }
-        $out[] = ['title' => $e['title'], 'guide' => $e['guide'], 'type' => $e['type'], 'text' => mb_substr((string)($e['snippet'] ?? $e['text']), 0, 400), 'link' => '../docs/guides/' . $e['file'] . ((string)($e['anchor'] ?? '') !== '' ? '#' . $e['anchor'] : '')]; // no ?kb= (it would carry the question)
+        $title = (string)$e['title'];
+        if (($e['page'] ?? '') === 'booking-settings.php' && in_array($title, ['Hotel Settings', 'Business Settings'], true)) {
+            $title = rh_ai_settings_screen();
+        }
+        $out[] = ['title' => $title, 'guide' => $e['guide'], 'type' => $e['type'], 'text' => rh_ai_live_menu_words(mb_substr((string)($e['snippet'] ?? $e['text']), 0, 400)), 'link' => '../docs/guides/' . $e['file'] . ((string)($e['anchor'] ?? '') !== '' ? '#' . $e['anchor'] : '')]; // no ?kb= (it would carry the question)
         if (count($out) >= 5) {
             break;
         }
@@ -1726,7 +1793,7 @@ function rh_ai_t_summarise_guide(PDO $db, array $user, array $a): array
     if (!$parts) {
         return ['error' => 'That guide has no section matching "' . ($a['section'] ?? '') . '".'];
     }
-    $text = implode("\n\n", $parts);
+    $text = rh_ai_live_menu_words(implode("\n\n", $parts));
     $cut = mb_strlen($text) > 6000;
     return ['guide' => $g['title'], 'file' => $file, 'section' => $section !== '' ? $section : null, 'guide_text' => mb_substr($text, 0, 6000), 'shortened' => $cut,
         'link' => '../docs/guides/' . $file . ($anchor !== '' ? '#' . $anchor : ''), 'link_label' => 'Open the guide'];
@@ -1744,7 +1811,7 @@ function rh_ai_t_page_help(PDO $db, array $user, array $a): array
         if (!rh_ai_guide_visible($user, (string)$e['file'])) {
             continue;
         }
-        $out[] = ['title' => $e['title'], 'guide' => $e['guide'], 'text' => mb_substr((string)$e['text'], 0, 400), 'link' => '../docs/guides/' . $e['file'] . ($e['anchor'] !== '' ? '#' . $e['anchor'] : '')];
+        $out[] = ['title' => $e['title'], 'guide' => $e['guide'], 'text' => rh_ai_live_menu_words(mb_substr((string)$e['text'], 0, 400)), 'link' => '../docs/guides/' . $e['file'] . ($e['anchor'] !== '' ? '#' . $e['anchor'] : '')];
         if (count($out) >= 4) {
             break;
         }
@@ -1868,8 +1935,9 @@ function rh_ai_clock(string $raw): string
 }
 
 /** One opening window from two stored times. Never fills in a time that is not set ($where: the screen it is set on). */
-function rh_ai_hours_line(string $open, string $close, string $where = 'Hotel Settings'): string
+function rh_ai_hours_line(string $open, string $close, ?string $where = null): string
 {
+    $where = $where ?? rh_ai_settings_screen();
     $o = trim($open);
     $c = trim($close);
     if ($o === '' && $c === '') {
@@ -1892,10 +1960,10 @@ function rh_ai_hours_line(string $open, string $close, string $where = 'Hotel Se
     return rh_ai_clock($o) . ' – ' . rh_ai_clock($c) . $next;
 }
 
-/** Where station hours are set (the Station Hours screen, admin/station-settings.php). */
+/** Where station hours are set: the Station Hours screen (admin/station-settings.php) under its menu heading, as the menu shows it. */
 function rh_ai_station_hours_where(): string
 {
-    return 'Settings → Station Hours';
+    return rh_ai_menu_path('station-settings.php') ?: 'the Station Hours screen';
 }
 
 /**
@@ -1939,11 +2007,11 @@ function rh_ai_gym_hours(PDO $db): string
         }
     }
     if (!$per) {
-        return 'not set in Hotel Settings';
+        return 'not set in ' . rh_ai_settings_screen();
     }
     $groups = [];
     foreach ([1, 2, 3, 4, 5, 6, 0] as $d) {
-        $v = $per[$d] ?? 'not set in Hotel Settings';
+        $v = $per[$d] ?? 'not set in ' . rh_ai_settings_screen();
         $last = count($groups) - 1;
         if ($last >= 0 && $groups[$last]['v'] === $v) {
             $groups[$last]['to'] = $d;
@@ -1966,8 +2034,8 @@ function rh_ai_hotel_hours(PDO $db, array $s): array
 {
     $h = [];
     if (rh_ai_module_on('bookings')) {
-        $h['check_in'] = $s['check_in_time'] !== '' ? 'from ' . rh_ai_clock($s['check_in_time']) : 'not set in Hotel Settings';
-        $h['check_out'] = $s['check_out_time'] !== '' ? 'by ' . rh_ai_clock($s['check_out_time']) : 'not set in Hotel Settings';
+        $h['check_in'] = $s['check_in_time'] !== '' ? 'from ' . rh_ai_clock($s['check_in_time']) : 'not set in ' . rh_ai_settings_screen();
+        $h['check_out'] = $s['check_out_time'] !== '' ? 'by ' . rh_ai_clock($s['check_out_time']) : 'not set in ' . rh_ai_settings_screen();
     }
     foreach (['kitchen', 'bar', 'coffee_bar'] as $st) {
         if (rh_ai_station_on($st)) {
@@ -2053,9 +2121,9 @@ function rh_ai_hotel_contact(array $s): array
     if ($addr === '') {
         $addr = implode(', ', array_filter([$s['address_line1'], $s['address_line2'], $s['address_city'], $s['address_region'], $s['address_country']], static fn($x) => $x !== ''));
     }
-    $out['hotel_address'] = $addr !== '' ? rh_ai_plain($addr, 200) : 'not set in Hotel Settings';
+    $out['hotel_address'] = $addr !== '' ? rh_ai_plain($addr, 200) : 'not set in ' . rh_ai_settings_screen();
     if (!$out['phones']) {
-        $out['phones'] = 'not set in Hotel Settings';
+        $out['phones'] = 'not set in ' . rh_ai_settings_screen();
     }
     return $out;
 }
@@ -2289,7 +2357,7 @@ function rh_ai_t_hotel_info(PDO $db, array $user, array $a): array
         'station_kitchen_opens_at', 'station_kitchen_closes_at', 'station_bar_opens_at', 'station_bar_closes_at', 'station_coffee_bar_opens_at', 'station_coffee_bar_closes_at',
         'phone_main', 'phone_reception', 'phone_reservations', 'whatsapp_number', 'email_main', 'email_reservations', 'email_info',
         'hotel_address', 'address', 'address_line1', 'address_line2', 'address_city', 'address_region', 'address_country']);
-    $out = ['hotel' => $s['site_name'] !== '' ? $s['site_name'] : 'not set in Hotel Settings', 'topic' => $topic];
+    $out = ['hotel' => $s['site_name'] !== '' ? $s['site_name'] : 'not set in ' . rh_ai_settings_screen(), 'topic' => $topic];
     // A part the hotel does not offer: one plain line and what it does offer (the module system is never mentioned).
     $off = static function (string $line) use ($db, &$out): string {
         $out['we_offer'] = $out['we_offer'] ?? (rh_ai_facility_names($db) ?: 'no facilities set up');
