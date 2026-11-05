@@ -1,6 +1,7 @@
 /*
  * The Decisions panel (admin/includes/review-panel.php): the "Decisions" tab and side drawer, the first wording after the
- * page loads, and Noted / Not now. The panel has no Refresh button any more (owner 2026-11-05: updating is automatic); the
+ * page loads, the update after the page loads when today's figures are due to be worked out again (the drawer's content,
+ * "Updated at" and the tab's number are swapped in place), and Noted / Not now. The panel has no Refresh button any more (owner 2026-11-05: updating is automatic); the
  * [data-dec="refresh"] handler below stays so any refresh control swaps the panel in place the same way.
  * Loaded only when a panel (or its hidden first-wording hook) is printed. Document-level listeners, bound once, so they keep
  * working after in-app navigation (the drawer's open state lives only on its own element, so a new page always starts closed).
@@ -39,12 +40,38 @@
         wrap.classList.add('is-placed');
     }
 
-    // First wording: the page printed a hidden hook because today's cards are not worded yet. Ask once; show the panel
-    // only if a good review comes back, otherwise remove the hook (nothing is ever shown in its place).
+    // Put a fresh answer into the panel on the page: the cards, "Updated at" and the tab's number. An empty answer
+    // (nothing to show now) removes the panel and its tab, so no stale card stays on screen. True when it changed.
+    function swapIn(wrap, html) {
+        if (html === '') { wrap.remove(); return true; }
+        var tmp = document.createElement('div');
+        tmp.innerHTML = html;
+        var fresh = tmp.querySelector('.rh-dec');
+        var sec = wrap.querySelector('.rh-dec');
+        if (!fresh || !sec) { return false; }
+        sec.replaceWith(fresh);
+        var oldN = wrap.querySelector('[data-dec-count]');
+        var newN = tmp.querySelector('[data-dec-count]');
+        var tab = wrap.querySelector('[data-dec-open]');
+        var newTab = tmp.querySelector('[data-dec-open]');
+        if (oldN && newN) { oldN.textContent = newN.textContent; }
+        if (tab && newTab) { tab.setAttribute('aria-label', newTab.getAttribute('aria-label') || ''); }
+        var drawer = wrap.querySelector('.rh-dec-drawer');
+        if (drawer && wrap.classList.contains('is-open') && !drawer.contains(document.activeElement)) { drawer.focus({ preventScroll: true }); }
+        return true;
+    }
+
+    // First wording: the page printed a hidden hook because today's cards are not worded yet (or their figures are due to
+    // be worked out again). Ask once; show the panel only if a good review comes back, otherwise remove the hook
+    // (nothing is ever shown in its place).
     function wordPending(hook, retries) {
         hook.setAttribute('data-dec-sent', '1');
         post(hook, { action: 'refresh' }).then(function (j) {
             if (!hook.isConnected) { return; }
+            if (j && j.success && j.status === 'busy' && retries > 0) { // being worked out by another request: ask again shortly
+                setTimeout(function () { if (hook.isConnected) { wordPending(hook, retries - 1); } }, 5000);
+                return;
+            }
             var wrap = null;
             if (j && j.success && typeof j.html === 'string' && j.html !== '') {
                 var tmp = document.createElement('div');
@@ -52,19 +79,35 @@
                 wrap = tmp.querySelector('.rh-dec-wrap');
             }
             if (wrap) {
+                wrap.setAttribute('data-dec-sent', '1');
                 hook.replaceWith(wrap);
                 place(wrap);
-            } else if (j && j.success && j.status === 'busy' && retries > 0) { // being worded by another request: ask again shortly
-                setTimeout(function () { if (hook.isConnected) { wordPending(hook, retries - 1); } }, 5000);
             } else {
                 hook.remove();
             }
         }).catch(function () { if (hook.isConnected) { hook.remove(); } });
     }
 
+    // A panel already shown whose figures are due to be worked out again (owner 2026-11-06: work someone has already done
+    // must not stay on the list): ask once after the page has loaded and swap the drawer's content in place.
+    function update(wrap, retries) {
+        wrap.setAttribute('data-dec-sent', '1');
+        var sec = wrap.querySelector('.rh-dec');
+        if (!sec) { return; }
+        post(sec, { action: 'refresh' }).then(function (j) {
+            if (!wrap.isConnected || !(j && j.success)) { return; }
+            if (j.status === 'busy' && retries > 0) {
+                setTimeout(function () { if (wrap.isConnected) { update(wrap, retries - 1); } }, 5000);
+                return;
+            }
+            if (typeof j.html === 'string') { swapIn(wrap, j.html); }
+        }).catch(function () { /* the panel stays as it was */ });
+    }
+
     function init() {
         Array.prototype.forEach.call(document.querySelectorAll('.rh-dec-wrap'), place);
         Array.prototype.forEach.call(document.querySelectorAll('[data-dec-pending]:not([data-dec-sent])'), function (hook) { wordPending(hook, 2); });
+        Array.prototype.forEach.call(document.querySelectorAll('.rh-dec-wrap[data-dec-update]:not([data-dec-sent])'), function (wrap) { update(wrap, 2); });
     }
     window.rhDecInit = init;
 
@@ -133,24 +176,8 @@
                     (wrap || sec).remove();
                     return;
                 }
-                if (j && j.success && typeof j.html === 'string' && j.html !== '') {
-                    var tmp = document.createElement('div');
-                    tmp.innerHTML = j.html;
-                    var fresh = tmp.querySelector('.rh-dec');
-                    if (fresh) {
-                        sec.replaceWith(fresh);
-                        if (wrap) { // keep the tab's count in step with the new list
-                            var oldN = wrap.querySelector('[data-dec-count]');
-                            var newN = tmp.querySelector('[data-dec-count]');
-                            var tab = wrap.querySelector('[data-dec-open]');
-                            var newTab = tmp.querySelector('[data-dec-open]');
-                            if (oldN && newN) { oldN.textContent = newN.textContent; }
-                            if (tab && newTab) { tab.setAttribute('aria-label', newTab.getAttribute('aria-label') || ''); }
-                            var drawer = wrap.querySelector('.rh-dec-drawer');
-                            if (drawer && wrap.classList.contains('is-open')) { drawer.focus({ preventScroll: true }); }
-                        }
-                        return;
-                    }
+                if (j && j.success && typeof j.html === 'string' && wrap && swapIn(wrap, j.html)) { // the tab's count follows the new list
+                    return;
                 }
                 btn.disabled = false;
                 btn.textContent = label;

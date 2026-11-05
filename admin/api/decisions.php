@@ -5,7 +5,8 @@
  * POST only, JSON {success, ...}. Checks in order: signed in (api-init: 401) -> master switch on (rh_ai_enabled(),
  * fail-closed: 404) -> security token (403) -> the panel's own gate for the area: ai_assistant_use + the area's
  * permission + its module (admin/includes/review-panel.php, 403) -> action.
- *   refresh  works the area out again (at most once in ai_review_refresh_minutes) and returns the panel's markup
+ *   refresh  works the area's figures out again when they are older than ai_review_stale_minutes (SQL only), words
+ *            the cards that need it (one call, at most once in ai_review_refresh_minutes) and returns the panel's markup
  *   note     records "Noted" / "Not now" on one of today's cards in the proof log
  * Nothing here writes to bookings, money, stock, prices or settings: only the ai_review_* tables.
  */

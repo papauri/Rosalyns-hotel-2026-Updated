@@ -17,6 +17,9 @@
  * money involved, one quiet line of facts, why now, what we suggest with the link to the screen that acts, then the
  * other choices and where it comes from (closed; one plain key line per table, a hover title on every column).
  * Updating is automatic (after the page loads, and the daily job); there is no button for it. Nothing changes by itself.
+ * Owner 2026-11-06 (no repeated work): when today's figures are older than ai_review_stale_minutes the page asks, after
+ * it has loaded, for them to be worked out again (SQL only); a card someone has already dealt with goes from the drawer
+ * then, and "Updated at" and the tab's number follow the new figures.
  */
 
 /** The areas, their permissions (any one) and modules (any one). Shared with the engine (includes/ai/ai-decisions.php). */
@@ -98,11 +101,14 @@ function rh_review_panel(string $area): string
         $v = rh_dec_for_viewer($db, $user, $area);
         $csrf = function_exists('generateCsrfToken') ? (string)generateCsrfToken() : (string)($_SESSION['csrf_token'] ?? '');
         if ($v === null || empty($v['main'])) { // no worded decision = nothing shown
-            // Today's cards not worded yet (model set up, no refresh tried lately): an empty, hidden hook asks for the
-            // first wording once the page has loaded; the panel appears only if that call works. Otherwise ''.
+            // Figures older than ai_review_stale_minutes, or cards not worded yet (model set up, no call tried lately):
+            // an empty, hidden hook asks for the update once the page has loaded; the panel appears only if a card
+            // comes back worded by a call that worked. Otherwise ''.
             return rh_dec_pending($db, $user, $area) ? rh_review_pending_html($area, $csrf) : '';
         }
-        return rh_review_panel_html($v, $csrf);
+        // The same update for a panel already shown: its content is swapped in after the page has loaded (resolved
+        // cards go, reworded cards come back), never holding up the page
+        return rh_review_panel_html($v, $csrf, rh_dec_pending($db, $user, $area));
     } catch (Throwable $e) {
         error_log('Decisions panel skipped: ' . $e->getMessage());
         return '';
@@ -146,8 +152,8 @@ function rh_review_pending_html(string $area, string $csrf): string
     return rh_review_assets() . '<div class="rh-dec-pending" data-dec-pending data-area="' . $h($area) . '" data-endpoint="api/decisions.php" data-csrf="' . $h($csrf) . '" hidden></div>';
 }
 
-/** The markup for one area as this person sees it ($v from rh_dec_for_viewer). */
-function rh_review_panel_html(array $v, string $csrf): string
+/** The markup for one area as this person sees it ($v from rh_dec_for_viewer). $update = ask for an update after load. */
+function rh_review_panel_html(array $v, string $csrf, bool $update = false): string
 {
     $h = static fn($s): string => htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
     $cur = (string)$v['cur'];
@@ -162,7 +168,7 @@ function rh_review_panel_html(array $v, string $csrf): string
     // Every part is position: fixed, so the page itself looks and lays out exactly as without it.
     $nMain = count((array)$v['main']);
     $did = 'rhDecDrawer-' . $h($area);
-    $out .= '<div class="rh-dec-wrap" id="rhDecWrap-' . $h($area) . '">';
+    $out .= '<div class="rh-dec-wrap" id="rhDecWrap-' . $h($area) . '"' . ($update ? ' data-dec-update' : '') . '>';
     $out .= '<button type="button" class="rh-dec-tab" data-dec-open aria-expanded="false" aria-controls="' . $did . '" aria-label="Decisions, ' . $nMain . ' waiting">Decisions<span class="rh-dec-tab__n" data-dec-count>' . $nMain . '</span></button>';
     $out .= '<div class="rh-dec-backdrop" data-dec-close></div>';
     $out .= '<aside class="rh-dec-drawer" id="' . $did . '" role="dialog" aria-modal="true" aria-labelledby="' . $id . '-title" tabindex="-1">';

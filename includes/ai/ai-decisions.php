@@ -2535,7 +2535,8 @@ function rh_dec_build(PDO $db, string $area, ?array $ctx = null): array
 function rh_dec_cache_get(PDO $db, string $area, ?string $day = null): ?array
 {
     try {
-        $st = $db->prepare("SELECT * FROM ai_review_cache WHERE area = ? AND cache_day = ?");
+        // age_s: how old the figures are, by the database's own clock (built_at is written with its NOW())
+        $st = $db->prepare("SELECT *, TIMESTAMPDIFF(SECOND, built_at, NOW()) AS age_s FROM ai_review_cache WHERE area = ? AND cache_day = ?");
         $st->execute([$area, $day ?? date('Y-m-d')]);
         $r = $st->fetch(PDO::FETCH_ASSOC);
     } catch (Throwable $e) {
@@ -2549,17 +2550,134 @@ function rh_dec_cache_get(PDO $db, string $area, ?string $day = null): ?array
     return ['area' => $area, 'day' => (string)$r['cache_day'], 'hash' => (string)$r['data_hash'], 'main' => (array)($cards['main'] ?? []), 'more' => (array)($cards['more'] ?? []),
         'base' => (array)($cards['base'] ?? []), 'cur' => (string)($cards['cur'] ?? ''), 'checks' => (array)(json_decode((string)($r['checks_json'] ?? ''), true) ?: []),
         'wording' => is_array($wording) ? $wording : null, 'wording_hash' => (string)($r['wording_hash'] ?? ''), 'model' => (string)($r['worded_model'] ?? ''),
-        'built_at' => (string)$r['built_at'], 'worded_at' => (string)($r['worded_at'] ?? ''), 'tried_at' => (string)($cards['tried_at'] ?? '')];
+        'built_at' => (string)$r['built_at'], 'age_s' => $r['age_s'] !== null ? (int)$r['age_s'] : PHP_INT_MAX, 'worded_at' => (string)($r['worded_at'] ?? ''),
+        'tried_at' => (string)($cards['tried_at'] ?? '')];
 }
 
 /**
- * Store today's build; wording is kept only while the figures' hash still matches the one it was written for.
- * $tried = this build came from a refresh (button, after the page, daily checks): its time is what the refresh limit
- * counts. A page-load build is not a refresh, so it never holds back the first wording.
+ * What a card's wording may quote, hashed: the fixed texts and every money figure (as shown). The share of takings,
+ * urgency and confidence are left out: they move with every payment and only rank the cards; a sentence that quotes
+ * the share is still checked against the new figures by rh_dec_wording_ok (rh_dec_word_valid).
  */
-function rh_dec_cache_put(PDO $db, string $area, array $built, ?array $wording, string $model, bool $tried = false): void
+function rh_dec_card_hash(array $card, string $cur): string
 {
-    $cards = json_encode(['main' => $built['main'], 'more' => $built['more'], 'base' => $built['base'], 'cur' => $built['cur'], 'tried_at' => $tried ? date('Y-m-d H:i:s') : null],
+    // Through JSON first, so a card hashes the same before it is stored and after it is read back
+    $card = (array)json_decode((string)json_encode($card, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR), true);
+    $p = rh_dec_writer_payload([rh_dec_card($card)], $cur)[0];
+    unset($p['share_of_takings_pct'], $p['urgency'], $p['confidence']);
+    return hash('sha256', (string)json_encode($p, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR));
+}
+
+/**
+ * key => card hash each stored wording was settled for (asked of the model for those figures, worded or not).
+ * Rows stored before per-card hashes: every card of a cache whose whole-figures hash still matches.
+ */
+function rh_dec_word_hashes(array $c): array
+{
+    if (!is_array($c['wording'] ?? null)) {
+        return [];
+    }
+    if (is_array($c['wording']['hashes'] ?? null)) {
+        return array_map('strval', $c['wording']['hashes']);
+    }
+    $out = [];
+    if ($c['wording_hash'] !== '' && $c['wording_hash'] === $c['hash']) {
+        foreach ((array)$c['main'] as $card) {
+            $out[(string)$card['key']] = rh_dec_card_hash((array)$card, (string)$c['cur']);
+        }
+    }
+    return $out;
+}
+
+/** True when this card was settled for exactly its current figures (no new wording is needed for it). */
+function rh_dec_card_settled(array $card, array $hashes, string $cur): bool
+{
+    $k = (string)($card['key'] ?? '');
+    return $k !== '' && isset($hashes[$k]) && hash_equals($hashes[$k], rh_dec_card_hash($card, $cur));
+}
+
+/**
+ * A card's state against the stored wording: 'shown' (worded for its current figures and the sentences still pass
+ * every check), 'asked' (the call for these figures left it out: not shown, not asked again) or 'stale' (new, changed,
+ * or its sentences no longer match a figure: hidden until it is worded again).
+ */
+function rh_dec_card_state(array $card, array $words, array $hashes, string $cur): string
+{
+    if (!rh_dec_card_settled($card, $hashes, $cur)) {
+        return 'stale';
+    }
+    $w = $words[(string)$card['key']] ?? null;
+    if (!is_array($w)) {
+        return 'asked';
+    }
+    return rh_dec_wording_ok($card, $w, $cur) !== null ? 'shown' : 'stale';
+}
+
+/** key => state for the cache's shown cards (rh_dec_card_state); every card 'stale' when there is no wording. */
+function rh_dec_states(array $c): array
+{
+    $hashes = rh_dec_word_hashes($c);
+    $words = (array)($c['wording']['cards'] ?? []);
+    $out = [];
+    foreach ((array)$c['main'] as $card) {
+        $out[(string)$card['key']] = is_array($c['wording'] ?? null) ? rh_dec_card_state((array)$card, $words, $hashes, (string)$c['cur']) : 'stale';
+    }
+    return $out;
+}
+
+/**
+ * The wording kept for a new build: every card whose figures did not change keeps its wording (and its "asked"
+ * mark); a card that is gone drops out; a changed or new card has none until it is worded again. null when there was
+ * no wording at all (nothing was ever worded, or the last call failed).
+ */
+function rh_dec_carry(?array $old, array $built): ?array
+{
+    if ($old === null || !is_array($old['wording'] ?? null)) {
+        return null;
+    }
+    $prev = rh_dec_word_hashes($old);
+    $words = (array)($old['wording']['cards'] ?? []);
+    $hashes = [];
+    $cards = [];
+    foreach ($built['main'] as $card) {
+        $state = rh_dec_card_state($card, $words, $prev, (string)$built['cur']);
+        if ($state === 'stale') {
+            continue;
+        }
+        $k = (string)$card['key'];
+        $hashes[$k] = $prev[$k];
+        if ($state === 'shown') {
+            $cards[$k] = $words[$k];
+        }
+    }
+    $order = array_values(array_filter(array_map('strval', (array)($old['wording']['order'] ?? [])), static fn($k) => isset($hashes[$k])));
+    return ['order' => $order, 'cards' => $cards, 'hashes' => $hashes];
+}
+
+/** Mark every shown card of this build as asked for its current figures (the wording was written for them). */
+function rh_dec_stamp(array $wording, array $built): array
+{
+    $wording['hashes'] = [];
+    foreach ($built['main'] as $card) {
+        $wording['hashes'][(string)$card['key']] = rh_dec_card_hash($card, (string)$built['cur']);
+    }
+    return $wording;
+}
+
+/**
+ * Store today's build. Wording without per-card marks is taken as written for exactly these figures (stamped here);
+ * wording carried from an earlier build keeps its own marks. $tried = a wording call was attempted now: its time is what
+ * the refresh limit counts. $keep carries 'tried_at' / 'worded_at' over from the row being replaced otherwise.
+ */
+function rh_dec_cache_put(PDO $db, string $area, array $built, ?array $wording, string $model, bool $tried = false, array $keep = []): void
+{
+    if ($wording !== null && !is_array($wording['hashes'] ?? null)) {
+        $wording = rh_dec_stamp($wording, $built);
+    }
+    $complete = $wording !== null && !in_array('stale', array_map(static fn($card) => rh_dec_card_state($card, (array)($wording['cards'] ?? []), (array)$wording['hashes'], (string)$built['cur']), $built['main']), true);
+    $triedAt = $tried ? date('Y-m-d H:i:s') : (($keep['tried_at'] ?? '') !== '' ? (string)$keep['tried_at'] : null);
+    $wordedAt = $wording === null ? null : (($keep['worded_at'] ?? '') !== '' ? (string)$keep['worded_at'] : date('Y-m-d H:i:s'));
+    $cards = json_encode(['main' => $built['main'], 'more' => $built['more'], 'base' => $built['base'], 'cur' => $built['cur'], 'tried_at' => $triedAt],
         JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
     $checks = json_encode($built['checks'], JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR);
     $wj = $wording !== null ? json_encode($wording, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR) : null;
@@ -2567,15 +2685,35 @@ function rh_dec_cache_put(PDO $db, string $area, array $built, ?array $wording, 
                   VALUES (?, CURDATE(), ?, ?, ?, ?, ?, ?, NOW(), ?)
                   ON DUPLICATE KEY UPDATE data_hash = VALUES(data_hash), cards_json = VALUES(cards_json), checks_json = VALUES(checks_json),
                       wording_json = VALUES(wording_json), wording_hash = VALUES(wording_hash), worded_model = VALUES(worded_model), built_at = NOW(), worded_at = VALUES(worded_at)")
-        ->execute([$area, $built['hash'], $cards, $checks, $wj, $wording !== null ? $built['hash'] : null, $wording !== null ? $model : null, $wording !== null ? date('Y-m-d H:i:s') : null]);
+        ->execute([$area, $built['hash'], $cards, $checks, $wj, $complete ? $built['hash'] : null, $wording !== null ? $model : null, $wordedAt]);
+}
+
+/** True when today's figures are older than ai_review_stale_minutes (worked out again after the page has loaded). */
+function rh_dec_is_stale(array $c): bool
+{
+    return (int)($c['age_s'] ?? PHP_INT_MAX) >= 60 * rh_dec_num('ai_review_stale_minutes', 1, 1440);
+}
+
+/** True when a wording call for this area is allowed now (none tried within ai_review_refresh_minutes). */
+function rh_dec_may_word(array $c): bool
+{
+    return $c['tried_at'] === '' || strtotime($c['tried_at']) <= time() - 60 * rh_dec_num('ai_review_refresh_minutes', 1, 1440);
+}
+
+/** The per-area lock name (named for this database too: GET_LOCK names are shared by the whole database server). */
+function rh_dec_lock_name(string $area): string
+{
+    return 'rh_dec_' . substr(md5(defined('DB_NAME') ? (string)DB_NAME : ''), 0, 8) . '_' . preg_replace('/[^a-z]/', '', $area);
 }
 
 /**
  * The page-load path: today's cached cards, or (none yet) the cards worked out now by SQL and stored unworded. Never
- * calls a model. When today's cards are not worded yet, one wording refresh is scheduled to run AFTER the page has been
- * sent (only where the server can finish a response early); on every server the page itself also asks once after it
- * has loaded (rh_dec_pending). Both go through rh_dec_refresh, so the area is worded at most once in
- * ai_review_refresh_minutes. This build is not a refresh and does not count towards that limit.
+ * calls a model and never works an existing day out again while the page waits (a build takes several hundred ms).
+ * When today's figures are older than ai_review_stale_minutes, or some cards are not worded for their figures, one
+ * refresh is scheduled to run AFTER the page has been sent (only where the server can finish a response early); on
+ * every server the page itself also asks once after it has loaded (rh_dec_pending). Both go through rh_dec_refresh:
+ * the figures are worked out again by SQL (zero tokens) and the area is worded at most once in
+ * ai_review_refresh_minutes. This first build of the day is not a refresh and does not count towards that limit.
  */
 function rh_dec_get(PDO $db, string $area, int $uid = 0): ?array
 {
@@ -2590,7 +2728,7 @@ function rh_dec_get(PDO $db, string $area, int $uid = 0): ?array
         }
         $c = rh_dec_cache_get($db, $area);
     }
-    if ($c !== null && !rh_dec_is_worded($c)) {
+    if ($c !== null && (rh_dec_is_stale($c) || !rh_dec_is_worded($c))) {
         rh_dec_schedule($db, $area, $uid);
     }
     return $c;
@@ -2602,10 +2740,13 @@ function rh_dec_nothing_to_word(): array
     return ['order' => [], 'cards' => []];
 }
 
-/** True when today's cache holds a good review: wording written for exactly these figures. */
+/**
+ * True when today's cache needs no wording call: there is wording (no failed last call) and every shown card was
+ * asked for its current figures (rh_dec_card_state is never 'stale').
+ */
 function rh_dec_is_worded(array $c): bool
 {
-    return $c['wording'] !== null && $c['wording_hash'] !== '' && $c['wording_hash'] === $c['hash'];
+    return is_array($c['wording'] ?? null) && !in_array('stale', rh_dec_states($c), true);
 }
 
 /**
@@ -2647,6 +2788,10 @@ function rh_dec_schedule(PDO $db, string $area, int $uid): void
     }
     $done[$area] = true;
     register_shutdown_function(static function () use ($db, $area, $uid): void {
+        // Free this person's session first: the work below must never hold up their next page or the panel's own ask
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            @session_write_close();
+        }
         if (function_exists('fastcgi_finish_request')) {
             @fastcgi_finish_request();
         } elseif (function_exists('litespeed_finish_request')) {
@@ -2662,18 +2807,27 @@ function rh_dec_schedule(PDO $db, string $area, int $uid): void
 }
 
 /**
- * Rebuild an area (Refresh button or the daily checks) and word the shown cards with ONE model call when the figures
- * changed since they were last worded. $uid is who pressed Refresh (0 = the daily checks). The button (and the
- * after-the-page refresh) may rebuild an area at most once in ai_review_refresh_minutes, whatever the last call's
- * outcome, so a failing model is never called on every click; the daily checks always rebuild.
+ * Work an area out again (after the page has loaded, the panel's endpoint, or the daily checks) and word the cards
+ * that need it with ONE model call. $uid is who viewed the page (0 = the daily checks).
+ *  - The figures are worked out again (SQL only, zero tokens) when they are older than ai_review_stale_minutes, or
+ *    when a wording call is due. Otherwise nothing is done ('recent').
+ *  - Cards whose key is gone drop out at once; unchanged cards keep their wording (no call); a new or changed card is
+ *    hidden until it is worded again. The new figures are stored before any call, so resolved work disappears even
+ *    while the call runs.
+ *  - The wording call is made at most once in ai_review_refresh_minutes per area, whatever the last call's outcome,
+ *    so a failing model is never called on every view; the daily checks always rebuild and may always call. A call
+ *    that was made and failed leaves no wording at all (nothing shown).
+ * One request at a time per area (a lock): a second one gets 'busy' and the cards as they are.
  * @return array{status:string, cache:?array, model_called:bool}
  */
 function rh_dec_refresh(PDO $db, string $area, bool $allowWriter, int $uid, bool $daily = false): array
 {
-    $lock = 'rh_dec_' . preg_replace('/[^a-z]/', '', $area);
+    $lock = rh_dec_lock_name($area);
     $got = false;
     try {
-        $got = (int)$db->query("SELECT GET_LOCK('" . $lock . "', 0)")->fetchColumn() === 1;
+        $st = $db->prepare("SELECT GET_LOCK(?, 0)");
+        $st->execute([$lock]);
+        $got = (int)$st->fetchColumn() === 1;
     } catch (Throwable $e) {
         $got = false;
     }
@@ -2681,33 +2835,48 @@ function rh_dec_refresh(PDO $db, string $area, bool $allowWriter, int $uid, bool
         return ['status' => 'busy', 'cache' => rh_dec_cache_get($db, $area), 'model_called' => false];
     }
     try {
-        $old = rh_dec_cache_get($db, $area);
-        // Limited by the last refresh, not the last build: the page-load build (no call) must not block the first wording
-        if (!$daily && $old !== null && $old['tried_at'] !== '' && strtotime($old['tried_at']) > time() - 60 * rh_dec_num('ai_review_refresh_minutes', 1, 1440)) {
+        $old = rh_dec_cache_get($db, $area); // read inside the lock: a request that just finished is seen here
+        $mayWord = $daily || $old === null || rh_dec_may_word($old);
+        if (!$daily && $old !== null && !rh_dec_is_stale($old) && !($mayWord && !rh_dec_is_worded($old))) {
             return ['status' => 'recent', 'cache' => $old, 'model_called' => false];
         }
         $built = rh_dec_build($db, $area);
-        $wording = null;
-        $model = '';
+        $keep = $old !== null ? ['tried_at' => $old['tried_at'], 'worded_at' => $old['worded_at']] : [];
+        $model = $old !== null ? $old['model'] : '';
         $called = false;
-        if ($old !== null && $old['wording'] !== null && $old['wording_hash'] === $built['hash']) {
-            $wording = $old['wording']; // the same figures: keep the wording, no model call
-            $model = $old['model'];
-        } elseif (!$built['main']) {
+        $tried = false;
+        if (!$built['main']) {
             $wording = rh_dec_nothing_to_word(); // nothing over the threshold: nothing to word, no call
-        } elseif ($allowWriter) {
-            $w = rh_dec_writer($db, $built['main'], $built['cur'], $uid);
-            $called = $w['called'];
-            if ($w['wording'] !== null) {
-                $wording = $w['wording'];
-                $model = $w['model'];
+            $keep['worded_at'] = '';
+        } else {
+            $wording = rh_dec_carry($old, $built); // unchanged cards keep their wording; gone cards drop out
+            $due = $wording === null || in_array('stale', array_map(static fn($card) => rh_dec_card_state($card, (array)$wording['cards'], (array)$wording['hashes'], (string)$built['cur']), $built['main']), true);
+            if ($due && $allowWriter && $mayWord) {
+                $tried = true;
+                // The current figures first (stale cards hidden), so other views never wait on the call for them
+                rh_dec_cache_put($db, $area, $built, $wording, $model, true, $keep);
+                $w = rh_dec_writer($db, $built['main'], $built['cur'], $uid);
+                $called = $w['called'];
+                if ($w['wording'] !== null) {
+                    // New wording for every shown card; a card the reply left out keeps its still-valid older wording
+                    $new = rh_dec_stamp($w['wording'], $built);
+                    foreach ((array)($wording['cards'] ?? []) as $k => $v) {
+                        $new['cards'][$k] = $new['cards'][$k] ?? $v;
+                    }
+                    $wording = $new;
+                    $model = $w['model'];
+                    $keep['worded_at'] = '';
+                } elseif ($called) {
+                    $wording = null; // a call that failed: nothing is shown (never older or fixed wording)
+                }
             }
         }
-        rh_dec_cache_put($db, $area, $built, $wording, $model, true);
+        rh_dec_cache_put($db, $area, $built, $wording, $model, $tried, $keep);
         return ['status' => 'built', 'cache' => rh_dec_cache_get($db, $area), 'model_called' => $called];
     } finally {
         try {
-            $db->query("SELECT RELEASE_LOCK('" . $lock . "')");
+            $st = $db->prepare("SELECT RELEASE_LOCK(?)");
+            $st->execute([$lock]);
         } catch (Throwable $e) {
         }
     }
@@ -2948,14 +3117,16 @@ function rh_dec_for_viewer(PDO $db, array $user, string $area): ?array
         return null;
     }
     $c = rh_dec_get($db, $area, (int)($user['id'] ?? 0));
-    if ($c === null || !rh_dec_is_worded($c)) {
-        return null;
+    if ($c === null || !is_array($c['wording'])) {
+        return null; // never worded, or the last call failed: nothing
     }
     $checks = array_values(array_filter($c['checks'], static fn($k) => rh_dec_requires_ok($user, (array)($k['requires'] ?? []))));
     if (!$checks) {
         return null;
     }
-    $words = (array)($c['wording']['cards'] ?? []);
+    // Only cards worded for their current figures (a changed card is hidden until it is worded again)
+    $states = rh_dec_states($c);
+    $words = array_filter((array)($c['wording']['cards'] ?? []), static fn($k) => ($states[(string)$k] ?? '') === 'shown', ARRAY_FILTER_USE_KEY);
     $view = static function (array $card) use ($user, $words): array {
         if (isset($words[$card['key']])) {
             $card = array_merge($card, $words[$card['key']]);
@@ -2992,10 +3163,11 @@ function rh_dec_for_viewer(PDO $db, array $user, string $area): ?array
 }
 
 /**
- * True when this person may see the area, a model is set up, today's cards are worked out but not worded yet, and no
- * refresh was tried within ai_review_refresh_minutes. The page then asks once, after it has loaded, for the first
- * wording (admin/js/review-panel.js, the panel's own endpoint), so it never waits and it works on any server. Nothing
- * is shown unless that call works.
+ * True when this person may see the area, a model is set up, and either today's figures are older than
+ * ai_review_stale_minutes or a card they may see needs wording for its figures and no wording call was tried within
+ * ai_review_refresh_minutes. The page then asks once, after it has loaded (admin/js/review-panel.js, the panel's own
+ * endpoint), so it never waits and it works on any server; the drawer's content is swapped in when the answer comes.
+ * Nothing new is shown unless it was worded by a call that worked.
  */
 function rh_dec_pending(PDO $db, array $user, string $area): bool
 {
@@ -3003,11 +3175,18 @@ function rh_dec_pending(PDO $db, array $user, string $area): bool
         return false;
     }
     $c = rh_dec_cache_get($db, $area);
-    if ($c === null || !$c['main'] || rh_dec_is_worded($c)) {
+    if ($c === null) {
         return false;
     }
-    $mine = array_filter($c['main'], static fn($card) => rh_dec_requires_ok($user, (array)($card['requires'] ?? [])));
-    return $mine !== [] && ($c['tried_at'] === '' || strtotime($c['tried_at']) <= time() - 60 * rh_dec_num('ai_review_refresh_minutes', 1, 1440));
+    if (rh_dec_is_stale($c)) {
+        return true;
+    }
+    if (!$c['main'] || !rh_dec_may_word($c)) {
+        return false;
+    }
+    $states = rh_dec_states($c);
+    $mine = array_filter($c['main'], static fn($card) => ($states[(string)$card['key']] ?? 'stale') === 'stale' && rh_dec_requires_ok($user, (array)($card['requires'] ?? [])));
+    return $mine !== [];
 }
 
 // ── Proof log ────────────────────────────────────────────────────────────────
@@ -3088,10 +3267,12 @@ function rh_dec_brief(PDO $db, array $user, bool $fresh = false): ?array
             $st = $db->prepare("SELECT brief_json FROM ai_review_brief WHERE user_id = ? AND brief_day = CURDATE()");
             $st->execute([$uid]);
             $j = json_decode((string)$st->fetchColumn(), true);
-            $good = is_array($j);
-            foreach ($good ? (array)($j['areas'] ?? []) : [] as $a) { // every area it draws on must still hold a good review
+            // Served only while every area this person may see still holds the very figures and wording it was made
+            // from (a card resolved or reworded during the day makes a new brief)
+            $good = is_array($j) && is_array($j['sigs'] ?? null) && $j['sigs'] === rh_dec_brief_sigs($db, $user);
+            foreach ($good ? (array)($j['areas'] ?? []) : [] as $a) {
                 $c = rh_dec_cache_get($db, (string)$a);
-                $good = $good && $c !== null && rh_dec_is_worded($c);
+                $good = $good && $c !== null && is_array($c['wording']);
             }
             if ($good) {
                 return $j;
@@ -3150,7 +3331,8 @@ function rh_dec_brief(PDO $db, array $user, bool $fresh = false): ?array
     $waiting = array_values(array_map(static fn($d) => ['key' => $d['key'], 'decision' => $d['decision']],
         array_filter($decisions, static fn($d) => $d['tier'] === 2 && empty($done[$d['key']]))));
     $brief = ['date' => date('Y-m-d'), 'areas' => $areas, 'decisions' => $decisions, 'changed' => $changed, 'ran_itself' => $ran, 'waiting_approval' => $waiting,
-        'checks_failed' => $failed, 'covers' => array_values(array_unique(array_merge(...array_map(static fn($d) => $d['covers'], $decisions ?: [['covers' => []]]))))];
+        'checks_failed' => $failed, 'covers' => array_values(array_unique(array_merge(...array_map(static fn($d) => $d['covers'], $decisions ?: [['covers' => []]])))),
+        'sigs' => rh_dec_brief_sigs($db, $user)];
     try {
         $db->prepare("INSERT INTO ai_review_brief (user_id, brief_day, brief_json) VALUES (?, CURDATE(), ?) ON DUPLICATE KEY UPDATE brief_json = VALUES(brief_json), created_at = NOW()")
             ->execute([$uid, json_encode($brief, JSON_UNESCAPED_UNICODE | JSON_PARTIAL_OUTPUT_ON_ERROR)]);
@@ -3158,6 +3340,20 @@ function rh_dec_brief(PDO $db, array $user, bool $fresh = false): ?array
         error_log('Today\'s brief not stored: ' . $e->getMessage());
     }
     return $brief;
+}
+
+/** area => a mark of today's figures and wording, for every area this person may see ('' = none yet). */
+function rh_dec_brief_sigs(PDO $db, array $user): array
+{
+    $out = [];
+    foreach (array_keys(rh_review_areas()) as $area) {
+        if (!rh_dec_area_allowed($user, $area)) {
+            continue;
+        }
+        $c = rh_dec_cache_get($db, $area);
+        $out[$area] = $c === null ? '' : hash('sha256', $c['hash'] . '|' . json_encode($c['wording']));
+    }
+    return $out;
 }
 
 /**

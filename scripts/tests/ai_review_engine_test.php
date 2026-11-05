@@ -214,13 +214,19 @@ $staffName = 'Dectest Mvulastaff';
 $GLOBALS['dec_fx_amt'] = 0.0;
 $GLOBALS['__rh_dec_extra_finders'] = ['stock' => ['tst_fixture' => ['label' => 'Fixture check', 'requires' => [], 'fn' => static function (PDO $db, array $ctx) use ($guestName, $staffName): array {
     $amt = (float)$GLOBALS['dec_fx_amt'];
-    return ['ok' => true, 'total' => 3, 'cards' => [rh_dec_card([
+    $extra = [];
+    if ((float)($GLOBALS['dec_fx_b'] ?? 0) > 0) { // a second card, for "dealt with during the day" (section 6)
+        $extra[] = rh_dec_card(['key' => 'tst_fixture_b', 'covers' => [], 'decision' => 'Second fixture decision', 'why_now' => 'Raised on 2 counts.', 'at_stake' => (float)$GLOBALS['dec_fx_b'],
+            'urgency' => 1.0, 'confidence' => 0.9, 'options' => [rh_dec_option('Second option', 'Second effect.', (float)$GLOBALS['dec_fx_b'], null, 0.0, 0.9, 0, 2)], 'recommend' => 0,
+            'recommendation' => 'Take the second option.', 'tier' => 2, 'link' => ['stock-dashboard.php', 'Open Stock']]);
+    }
+    return ['ok' => true, 'total' => 3, 'cards' => array_merge($extra, [rh_dec_card([
         'key' => 'tst_fixture', 'covers' => ['wastage'], 'decision' => 'Fixture decision worth ' . rh_dec_fmt($ctx['cur'], $amt),
         'why_now' => 'Raised by ' . $staffName . ' on 3 counts.', 'at_stake' => $amt, 'at_stake_note' => 'Fixture amount.', 'urgency' => 1.0, 'confidence' => 0.9,
         'evidence' => ['total' => 3, 'total_label' => 'fixture rows', 'rows' => [['label' => 'Fixture row', 'guest_name' => $guestName, 'staff_name' => $staffName, 'amount' => $amt]]],
         'options' => [rh_dec_option('Fixture option', 'Fixture effect.', $amt, null, 0.0, 0.9, 0, 2)], 'recommend' => 0, 'recommendation' => 'Take the fixture option.',
         'tier' => 2, 'link' => ['stock-dashboard.php', 'Open Stock'],
-    ])]];
+    ])])];
 }]]];
 $pdo->beginTransaction();
 try {
@@ -240,6 +246,8 @@ try {
             'not_a_card' => ['decision' => 'x', 'why_now' => 'y', 'recommendation' => 'z']]]);
     };
     $narrowBrief = static fn(): array => rh_dec_brief_merge($pdo, $adm, ['findings' => [['id' => 'wastage', 'kind' => 'money', 'title' => 'Stock wasted']]]);
+    // No stock decision in the brief (another area may hold today's real, good review on this database)
+    $noStockBrief = static fn(?array $b): bool => $b === null || !array_filter((array)($b['decisions'] ?? []), static fn($d) => ($d['area'] ?? '') === 'stock');
 
     // Owner 2026-11-05: no model => NOTHING (no cards, no panel, no fixed wording, no note), and no call
     $GLOBALS['__rh_dec_models'] = ['provider' => ''];
@@ -252,8 +260,8 @@ try {
     $GLOBALS['__rh_dec_models'] = $models;
     $GLOBALS['dec_mode'] = 'down';
     $rd = rh_dec_refresh($pdo, 'stock', true, $adm['id'], true);
-    check($rd['model_called'] && count($GLOBALS['dec_calls']) >= 1 && rh_review_panel('stock') === '' && rh_dec_brief($pdo, $adm, true) === null,
-        'model unreachable: the panel helper returns an empty string and the brief has no decisions', json_encode([$rd['status'], $rd['model_called'], count($GLOBALS['dec_calls']), strlen(rh_review_panel('stock')), rh_dec_brief($pdo, $adm, true) === null]));
+    check($rd['model_called'] && count($GLOBALS['dec_calls']) >= 1 && rh_review_panel('stock') === '' && $noStockBrief(rh_dec_brief($pdo, $adm, true)),
+        'model unreachable: the panel helper returns an empty string and the brief has no stock decisions', json_encode([$rd['status'], $rd['model_called'], count($GLOBALS['dec_calls']), strlen(rh_review_panel('stock')), $noStockBrief(rh_dec_brief($pdo, $adm, true))]));
     $nDown = count($GLOBALS['dec_calls']);
     rh_dec_refresh($pdo, 'stock', true, $adm['id'], false);
     check(count($GLOBALS['dec_calls']) === $nDown, 'model unreachable: pressing Refresh again within ai_review_refresh_minutes makes no new call');
@@ -331,7 +339,7 @@ try {
     check($ce !== null && rh_dec_is_worded($ce) && $ce['main'] === [] && rh_review_panel('stock') === '' && rh_dec_for_viewer($pdo, $adm, 'stock') === null,
         'no card over the threshold: the state is cached but the panel helper returns an empty string (no "all checks ran" panel, no More list)');
     $GLOBALS['dec_mode'] = 'down';
-    check(rh_review_panel('stock') === '' && rh_dec_brief($pdo, $adm, true) === null, 'no card over the threshold and a dead connection: empty string, no brief');
+    check(rh_review_panel('stock') === '' && $noStockBrief(rh_dec_brief($pdo, $adm, true)), 'no card over the threshold and a dead connection: empty string, no stock decision in the brief');
     $GLOBALS['dec_mode'] = '';
     $GLOBALS['dec_fx_amt'] += 1000.0;
     rh_dec_refresh($pdo, 'stock', true, $adm['id'], true);
@@ -413,10 +421,129 @@ try {
     check(strpos($html0, 'class="rh-dec-tab"') !== false && substr_count($html0, 'class="rh-dec-tab"') === 1 && strpos($html0, 'aria-expanded="false"') !== false && strpos($html0, 'role="dialog"') !== false
         && strpos($html0, 'aria-controls="rhDecDrawer-stock"') !== false && strpos($html0, 'id="rhDecDrawer-stock"') !== false && strpos($html0, '>Close</button>') !== false
         && strpos($html0, 'rh-dec-wrap is-open') === false, 'closed by default: one plain "Decisions" tab, the panel inside a dialog drawer with a Close button, nothing open on load');
+
+    // ════ 6. Staying current through the day (owner 2026-11-06: no repeated work on a card already dealt with) ════
+    check((rh_ai_setting_defaults()['ai_review_stale_minutes'] ?? '') === '10', 'the stale window is a setting (ai_review_stale_minutes, code default 10)');
+    $staleMin = rh_dec_num('ai_review_stale_minutes', 1, 1440);
+    $limitMin = rh_dec_num('ai_review_refresh_minutes', 1, 1440);
+    // Age today's stock row: figures worked out $builtMin minutes ago; the last wording call $triedMin minutes ago (null = as stored)
+    $age = static function (int $builtMin, ?int $triedMin = null) use ($pdo): void {
+        $j = json_decode((string)$pdo->query("SELECT cards_json FROM ai_review_cache WHERE area = 'stock' AND cache_day = CURDATE()")->fetchColumn(), true);
+        if ($triedMin !== null) {
+            $j['tried_at'] = date('Y-m-d H:i:s', time() - 60 * $triedMin);
+        }
+        $pdo->prepare("UPDATE ai_review_cache SET built_at = DATE_SUB(NOW(), INTERVAL ? MINUTE), cards_json = ? WHERE area = 'stock' AND cache_day = CURDATE()")
+            ->execute([$builtMin, json_encode($j, JSON_UNESCAPED_UNICODE)]);
+    };
+    $calls = static fn(): int => count($GLOBALS['dec_calls']);
+    $shown = static fn(): array => array_column((array)(rh_dec_for_viewer($pdo, $adm, 'stock')['main'] ?? []), 'key');
+    $tabN = static fn(string $h): int => preg_match('/data-dec-count>(\d+)</', $h, $m) ? (int)$m[1] : -1;
+    $GLOBALS['dec_reply'] = static function (string $body): string {
+        $w = static fn(string $d): array => ['decision' => $d, 'why_now' => 'It was raised today.', 'recommendation' => 'Act on it today.'];
+        return json_encode(['order' => ['tst_fixture', 'tst_fixture_b'], 'cards' => ['tst_fixture' => $w('Decide on the fixture now'), 'tst_fixture_b' => $w('Decide on the second fixture now')]]);
+    };
+    $GLOBALS['dec_fx_b'] = $GLOBALS['dec_fx_amt'];
+    rh_dec_refresh($pdo, 'stock', true, $adm['id'], true);
+    $kAll = $shown();
+    sort($kAll);
+    check($kAll === ['tst_fixture', 'tst_fixture_b'], 'set-up: two worded cards are shown', json_encode($kAll));
+    $briefB = rh_dec_brief($pdo, $adm, true);
+    $n0 = $calls();
+
+    // The per-card mark: only what a sentence may quote; a quoted share is re-checked against the new figures
+    $hc = array_merge($fx('h', 5000.0), ['share_pct' => 5.0]);
+    $hh = ['h' => rh_dec_card_hash($hc, 'MWK')];
+    $quote = ['h' => ['decision' => 'Decide on h', 'why_now' => 'It is 5% of takings.', 'recommendation' => 'Act.']];
+    check(rh_dec_card_hash($hc, 'MWK') === rh_dec_card_hash(array_merge($hc, ['share_pct' => 9.0, 'urgency' => 0.2, 'confidence' => 0.4]), 'MWK')
+        && rh_dec_card_hash($hc, 'MWK') !== rh_dec_card_hash(array_merge($hc, ['at_stake' => 5001.0]), 'MWK'),
+        'a card\'s mark changes with its money figures, not with the share of takings, urgency or confidence (they move with every payment)');
+    check(rh_dec_card_state($hc, $quote, $hh, 'MWK') === 'shown' && rh_dec_card_state(array_merge($hc, ['share_pct' => 6.0]), $quote, $hh, 'MWK') === 'stale'
+        && rh_dec_card_state(array_merge($hc, ['at_stake' => 5001.0]), ['h' => ['decision' => 'Decide on h', 'why_now' => 'Act soon.', 'recommendation' => 'Act.']], $hh, 'MWK') === 'stale',
+        'a sentence that quotes a figure which has since moved is never shown (hidden until worded again)');
+
+    // Within the window: nothing new is asked, the endpoint does nothing
+    $hFresh = rh_review_panel('stock');
+    $rF = rh_dec_refresh($pdo, 'stock', true, $adm['id'], false);
+    check(strpos($hFresh, 'data-dec-update') === false && $rF['status'] === 'recent' && $calls() === $n0, 'figures fresh and worded: no after-load update is asked, the endpoint does nothing, no call');
+
+    // Lock: a second request while one is working the area out does not rebuild in parallel
+    $other = $conn();
+    $lk = $other->prepare("SELECT GET_LOCK(?, 0)");
+    $lk->execute([rh_dec_lock_name('stock')]);
+    $age($staleMin + 1);
+    $builtBefore = (string)rh_dec_cache_get($pdo, 'stock')['built_at'];
+    $rB = rh_dec_refresh($pdo, 'stock', true, $adm['id'], false);
+    check($rB['status'] === 'busy' && (string)rh_dec_cache_get($pdo, 'stock')['built_at'] === $builtBefore && $calls() === $n0, 'while another request holds the area\'s lock: "busy", nothing worked out in parallel, no call');
+    $other->prepare("SELECT RELEASE_LOCK(?)")->execute([rh_dec_lock_name('stock')]);
+    $other = null;
+
+    // Card b is dealt with on its own screen; the window has passed. The page is served from the cache at once (no
+    // build while it waits) and asks after it has loaded; that answer drops the card, with no model call
+    $GLOBALS['dec_fx_b'] = 0.0;
+    $hOld = rh_review_panel('stock');
+    check(strpos($hOld, 'data-dec-update') !== false && strpos($hOld, 'data-key="tst_fixture_b"') !== false && (string)rh_dec_cache_get($pdo, 'stock')['built_at'] === $builtBefore,
+        'figures past the window: the page is served from today\'s cards without waiting on a build, and asks for an update after it loads');
+    $rU = rh_dec_refresh($pdo, 'stock', true, $adm['id'], false); // the after-load ask (the panel's endpoint)
+    $hNew = rh_review_panel('stock');
+    $cU = rh_dec_cache_get($pdo, 'stock');
+    check($rU['status'] === 'built' && !$rU['model_called'] && $calls() === $n0 && $shown() === ['tst_fixture'] && strpos($hNew, 'tst_fixture_b') === false && $tabN($hNew) === 1,
+        'a card dealt with disappears on the next view after the window, with no model call; the tab\'s number follows (1)', json_encode([$rU['status'], $rU['model_called'], $shown(), $tabN($hNew)]));
+    check($cU['age_s'] < 60 && strpos($hNew, 'Updated at ' . date('H:i', strtotime($cU['built_at']))) !== false && strpos($hNew, 'data-dec-update') === false,
+        '"Updated at" is the time the figures were worked out again, and no further update is asked');
+    $briefNow = rh_dec_brief($pdo, $adm);
+    check(in_array('tst_fixture_b', array_column((array)($briefB['decisions'] ?? []), 'key'), true) && !in_array('tst_fixture_b', array_column((array)($briefNow['decisions'] ?? []), 'key'), true)
+        && in_array('tst_fixture', array_column((array)($briefNow['decisions'] ?? []), 'key'), true), 'Today\'s brief drops the card dealt with too (the stored brief is not served for older figures)');
+    $stillThere = rh_dec_card_for($pdo, $adm, 'stock', 'tst_fixture');
+    $pidA = $stillThere ? rh_dec_proof_log($pdo, $stillThere, 'noted', $adm['id']) : 0;
+    check($pidA > 0 && rh_dec_card_for($pdo, $adm, 'stock', 'tst_fixture_b') === null, 'Noted / Not now still work for a card that is still there; a card that is gone can no longer be noted');
+
+    // Unchanged figures after the window: worked out again, the wording kept, no call
+    $age($staleMin + 1, $limitMin + 1);
+    $rS = rh_dec_refresh($pdo, 'stock', true, $adm['id'], false);
+    check($rS['status'] === 'built' && !$rS['model_called'] && $calls() === $n0 && $shown() === ['tst_fixture'], 'unchanged figures after the window: worked out again, the wording is kept, no model call');
+
+    // Changed figures with a wording call tried just now: the card is hidden (never its old sentence), no call
+    $GLOBALS['dec_fx_amt'] += 1000.0;
+    $age($staleMin + 1, 0);
+    $rC = rh_dec_refresh($pdo, 'stock', true, $adm['id'], false);
+    $cC = rh_dec_cache_get($pdo, 'stock');
+    $fxNow = array_values(array_filter($cC['main'], static fn($x) => $x['key'] === 'tst_fixture'))[0] ?? null;
+    check(!$rC['model_called'] && $calls() === $n0 && rh_dec_for_viewer($pdo, $adm, 'stock') === null && rh_review_panel('stock') === ''
+        && $fxNow !== null && abs((float)$fxNow['at_stake'] - (float)$GLOBALS['dec_fx_amt']) < BALANCE_TOLERANCE,
+        'changed figures within ai_review_refresh_minutes: the figures are current, the card with its old sentence is hidden, nothing is shown and no call is made');
+    $age($staleMin + 1);
+    check(strpos(rh_review_panel('stock'), 'data-dec-pending') !== false, 'nothing shown and the figures past the window: a hidden hook asks after the page loads (no text, no box)');
+
+    // The limit passes: ONE call words the changed card; figures moving again within the limit make no second call
+    $age(0, $limitMin + 1);
+    check(rh_dec_pending($pdo, $adm, 'stock'), 'once the limit has passed, the changed card asks for its wording after the page loads');
+    $rW = rh_dec_refresh($pdo, 'stock', true, $adm['id'], false);
+    check($rW['model_called'] && $calls() === $n0 + 1 && $shown() === ['tst_fixture'], 'ONE call words the changed card again and it shows', json_encode([$calls() - $n0, $shown()]));
+    $GLOBALS['dec_fx_amt'] += 1000.0;
+    $age($staleMin + 1);
+    $rW2 = rh_dec_refresh($pdo, 'stock', true, $adm['id'], false);
+    check($rW2['status'] === 'built' && !$rW2['model_called'] && $calls() === $n0 + 1 && rh_review_panel('stock') === '',
+        'figures change again within the limit: worked out again, no second call (at most one rewording per ai_review_refresh_minutes), the changed card hidden meanwhile');
+
+    // Gate off stays silent with figures past the window: nothing worked out, nothing read for the page
+    $age($staleMin + 1);
+    $pdo->exec("UPDATE site_settings SET setting_value = '0' WHERE setting_key = 'ai_enabled'");
+    $bOff = (string)rh_dec_cache_get($pdo, 'stock')['built_at'];
+    ob_start();
+    $hOff = rh_review_panel('stock');
+    $pOff = (string)ob_get_clean();
+    check($hOff === '' && $pOff === '' && (string)rh_dec_cache_get($pdo, 'stock')['built_at'] === $bOff, 'Assistant off with figures past the window: still an empty string, nothing printed, nothing worked out again');
+    foreach ($onSql as $q) { $pdo->exec($q); }
+    $schedSrc = substr($engSrc, (int)strpos($engSrc, 'function rh_dec_schedule('), 1600);
+    check(strpos($schedSrc, 'session_write_close()') !== false && strpos($schedSrc, 'session_write_close()') < strpos($schedSrc, 'fastcgi_finish_request()'),
+        'the after-the-page refresh frees the person\'s session first (their next page and the panel\'s own ask never wait on it)');
+    $jsSrc = (string)file_get_contents($root . '/admin/js/review-panel.js');
+    check(strpos($jsSrc, '.rh-dec-wrap[data-dec-update]:not([data-dec-sent])') !== false && strpos($jsSrc, 'function swapIn(wrap, html)') !== false && strpos($jsSrc, "if (html === '') { wrap.remove(); return true; }") !== false,
+        'the page asks once after it loads and swaps the drawer\'s content, "Updated at" and the tab\'s number in place (an empty answer removes the panel)');
 } finally {
     $pdo->rollBack();
     rh_ai_settings($pdo, true);
-    unset($GLOBALS['__rh_dec_models'], $GLOBALS['__rh_dec_extra_finders']);
+    unset($GLOBALS['__rh_dec_models'], $GLOBALS['__rh_dec_extra_finders'], $GLOBALS['dec_fx_b']);
     rh_ai_set_transport(null);
     putenv('RH_AI_FAKE_PROVIDER');
 }
