@@ -301,7 +301,7 @@
   </table>
   <p><strong>Needs attention</strong> lists things to chase: balances owed, pending payments, refunds waiting to be settled, quotations awaiting a reply, voided till orders, stock lost. The links on this page open the Payments list already filtered: <strong>Open today's payments</strong> and <strong>Today's payments</strong> show today's date range, and the completed and pending links show that status for the chosen period. The tabs below show <strong>Recent payments</strong>, <strong>Receivables</strong>, <strong>Daily detail</strong>, <strong>Refunds</strong>, <strong>POS by type</strong> and <strong>Compliance</strong>.</p>
   <h3 id="decisions">Decisions</h3>
-  <p>The <strong>Accounting</strong> dashboard may show a <strong>Decisions</strong> tab on the right edge of the screen. The tab shows a number: how many choices are waiting. The tab lists the few choices with the most money at stake right now, such as cash outlook, money owed and credit, profit by department, control and leakage, and tax liability. The panel is closed by default, so it does not take up the page.</p>
+  <p>The <strong>Accounting</strong> dashboard may show a <strong>Decisions</strong> tab on the right edge of the screen. The tab shows a number: how many choices are waiting. The tab lists the few choices with the most money at stake right now, such as cash outlook, money owed and credit, profit by department, control and leakage, and tax liability. The panel is closed by default, so it does not take up the page. A choice appears only when the money involved is at least a small share of the last 30 days' takings.</p>
   <ol class="steps">
     <li>To open it, click the <strong>Decisions</strong> tab. A drawer slides in from the right. On a phone it fills the full width.</li>
     <li>To close it, click <strong>Close</strong>, press the Esc key, or click outside the drawer.</li>
@@ -314,25 +314,25 @@
     <li>You have <strong>Use the Assistant</strong>, and <strong>Accounting</strong> or <strong>Reports</strong>.</li>
     <li>The figures for today could be worked out. If none of the choices has a sound basis, the panel shows nothing.</li>
   </ul>
+  <p>The header shows <strong>Updated at HH:MM</strong> and how many decisions there are. The panel updates by itself. You do not need to do anything to refresh it.</p>
   <p>Each card shows:</p>
   <ul>
+    <li>The decision at the top, with the <strong>money involved</strong> on the right. If there is no money figure, the card says <strong>No money figure</strong>.</li>
+    <li>One line with the share of the last 30 days' takings, <strong>How sure</strong> (High, Medium or Low), and who decides: <strong>You can do this now</strong>, <strong>Needs a manager's OK first</strong> or <strong>A manager decides this on the screen</strong>.</li>
     <li><strong>Why now</strong>: the reason this choice is shown today.</li>
-    <li><strong>At stake</strong>: the money involved, and its share of the money collected in the last 30 days.</li>
-    <li><strong>Confidence</strong>: High, Medium or Low, from how complete the data is.</li>
-    <li><strong>Evidence</strong>: click it to see the records behind the card.</li>
-    <li><strong>Options</strong>: a table with <strong>Best</strong>, <strong>Expected</strong> and <strong>Worst</strong> for each choice, and a <strong>Likelihood</strong> column. Likelihood is how likely that option's result is. It is never higher than the card's own confidence. Expected stays blank until there is enough history. The option marked <strong>Recommended</strong> is the suggestion.</li>
-    <li>Options that do not bring money in or save it, such as leakage, profit, and VAT or levy checks, show <strong>Not valued</strong> instead of figures.</li>
+    <li><strong>What we suggest</strong>: the suggested step, with a button to the screen where you act.</li>
+    <li><strong>Other choices</strong> (closed): a table with <strong>If it goes well</strong>, <strong>Most likely</strong>, <strong>If it goes badly</strong> and <strong>How sure</strong> for each choice. The suggested choice is marked. Choices that do not bring money in or save it show <strong>No money figure</strong>. Choices without enough history show <strong>Too early to tell</strong>.</li>
+    <li><strong>Where this comes from</strong> (closed): how the figure was worked out, and the records behind it.</li>
+    <li>A money figure below zero reads as, for example, <strong>MWK 150,000.00 short</strong>, or <strong>loss</strong>. It never has a minus sign.</li>
     <li>On the cash card, both options show where the money stands at the end of the period. Holding purchase orders means they are paid later, not saved.</li>
-    <li>Who must approve: a short line saying whether you can act straight away, need one approval, or a manager must decide on the screen.</li>
   </ul>
+  <p>The top 3 choices show. Any others are under <strong>More decisions</strong>, which stays closed until you open it.</p>
   <ol class="steps">
-    <li>To check the figures again, click <strong>Refresh</strong>. You can use it only every few minutes.</li>
-    <li>To act, click the link on the card. That link opens the screen where you make the change.</li>
+    <li>To act, click the button under <strong>What we suggest</strong>. It opens the screen where you make the change.</li>
     <li>Click <strong>Noted</strong> when you have read the card, or <strong>Not now</strong> to leave it for later. Neither button changes any money or stock.</li>
   </ol>
-  <p><strong>Refresh</strong>, <strong>Noted</strong>, <strong>Not now</strong> and the action link work inside the drawer as before.</p>
   <p>Nothing in the panel changes by itself. The panel does not show a bank or cash balance. Any payment, refund or stock change happens only when you do it on the linked screen.</p>
-  <div class="note"><p><strong>If something goes wrong:</strong> a line reading <em>"checks could not be read in full just now, so this list may be incomplete"</em> means some figures were missing. Click <strong>Refresh</strong> later, or check the Accounting figures on the page.</p></div>
+  <div class="note"><p><strong>If something goes wrong:</strong> a line reading <em>"Some figures could not be read just now, so this list may be missing something."</em> means some figures were missing. Check the Accounting figures on the page, or come back later.</p></div>
 
   <div class="note"><p><strong>The system does not send anything to MRA.</strong> It does not report, submit or fiscalise your sales or VAT. It keeps the VAT figures (the VAT Register and the quarterly totals under <strong>Reports</strong>) that you or your accountant use to file the VAT return with MRA yourselves. If MRA requires fiscal receipts from your till, that is done outside this system.</p></div>
   <h3>VAT settings</h3>
