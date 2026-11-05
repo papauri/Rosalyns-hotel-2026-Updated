@@ -64,19 +64,19 @@ if (!$preset_events && $current_events) {
 // Human-readable admin-menu / guest-site areas per module key, so the dialog
 // can say exactly which menus appear or disappear. Mirrors admin-header.php.
 $menu_area_map = [
-    'bookings'             => 'Bookings, Calendar, Blocked Dates, Rooms & Room Maintenance, Rate Plans/Packages + guest Rooms & Booking pages',
+    'bookings'             => 'Bookings, Calendar, Individual Rooms, Blocked Dates, Room Maintenance, Rooms, Rate Plans, Room Packages + guest booking pages',
     'housekeeping'         => 'Housekeeping',
-    'pos'                  => 'POS Till, Stations group, Menu/Products, Deals, Offline Log, POS Accounting',
-    'stock'                => 'Stock group (Dashboard, Ingredients, Batches, Orders, Counts, Wastage, Reports)',
-    'conference'           => 'Conference Rooms + guest Conference page',
-    'gym'                  => 'Gym Packages & Gym Inquiries + guest Gym page',
-    'website_cms'          => 'Gallery, Media Portal, Events, Reviews, Contact Inquiries, Footer & Page Management',
-    'station_kds'          => 'Kitchen Display (KDS)',
+    'pos'                  => 'POS Till, Menu/Products, Deals & Promos, Offline Log, POS Accounting',
+    'stock'                => 'Stock group (Stock Overview, Ingredients/Stock Items, Receive Stock, Buying, Purchase Orders, Budget, Suppliers, Stock Count, Wastage, Batch Tracker, Stock Reports) + Orders',
+    'conference'           => 'Conference + guest Conference page',
+    'gym'                  => 'Gym group (Members, Check-In, Inquiries, Schedule, Classes, Packages, Gym Reports) + guest Gym page',
+    'website_cms'          => 'Website group (Reviews, Contact Inquiries, Gallery, Media Portal, Pages, Section Headers, Footer, Facebook Settings, Visitor Analytics), WhatsApp Settings, Events',
+    'station_kds'          => 'Kitchen (KDS)',
     'station_bds'          => 'Bar Display (BDS)',
-    'station_cds'          => 'Coffee Bar Display (CDS)',
-    'station_room_service' => 'Room Service station',
-    'restaurant_page'      => 'Restaurant Tables, Recipes, Station Hours/Reports + guest Restaurant page',
-    'events_page'          => 'Events Management & Event Inquiries + guest Events page',
+    'station_cds'          => 'Coffee Bar (CDS)',
+    'station_room_service' => 'Room Service',
+    'restaurant_page'      => 'Tables, Recipes, Station Hours, Station Reports + guest Restaurant page; restaurant menu wording (Restaurant & Bar, Menu, Ingredients) instead of shop wording (Till & Sales, Products, Stock Items)',
+    'events_page'          => 'Events, Event Bookings + guest Events page',
 ];
 $menus_removed = array_values(array_filter(array_map(fn($k) => $menu_area_map[$k] ?? null, $modules_disabled)));
 $menus_added   = array_values(array_filter(array_map(fn($k) => $menu_area_map[$k] ?? null, $modules_enabled)));

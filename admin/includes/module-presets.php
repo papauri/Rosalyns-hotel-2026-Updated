@@ -12,7 +12,7 @@ if (!function_exists('getBusinessPresets')) {
             'full_hotel' => [
                 'label' => 'Full Hotel',
                 'icon'  => 'fas fa-hotel',
-                'desc'  => 'All modules + all stations active',
+                'desc'  => 'Everything on: rooms, restaurant and bar, conference, gym',
                 'modules' => [
                     'bookings' => 1, 'housekeeping' => 1, 'pos' => 1, 'stock' => 1,
                     'conference' => 1, 'gym' => 1, 'finance' => 1, 'website_cms' => 1,
@@ -26,7 +26,7 @@ if (!function_exists('getBusinessPresets')) {
             'hotel_no_restaurant' => [
                 'label' => 'Hotel (No Restaurant)',
                 'icon'  => 'fas fa-bed',
-                'desc'  => 'Rooms + conference + gym, no POS or stock',
+                'desc'  => 'Rooms, conference and gym; no till or stock',
                 'modules' => [
                     'bookings' => 1, 'housekeeping' => 1, 'pos' => 0, 'stock' => 0,
                     'conference' => 1, 'gym' => 1, 'finance' => 1, 'website_cms' => 1,
@@ -37,7 +37,7 @@ if (!function_exists('getBusinessPresets')) {
             'bar_restaurant' => [
                 'label' => 'Bar / Restaurant',
                 'icon'  => 'fas fa-martini-glass',
-                'desc'  => 'POS + KDS + BDS + stock',
+                'desc'  => 'Till, kitchen and bar screens, stock',
                 'modules' => [
                     'bookings' => 0, 'housekeeping' => 0, 'pos' => 1, 'stock' => 1,
                     'conference' => 0, 'gym' => 0, 'finance' => 1, 'website_cms' => 0,
@@ -48,7 +48,7 @@ if (!function_exists('getBusinessPresets')) {
             'conference_venue' => [
                 'label' => 'Conference Venue',
                 'icon'  => 'fas fa-briefcase',
-                'desc'  => 'Bookings + conference + website',
+                'desc'  => 'Room bookings, conference, website',
                 'modules' => [
                     'bookings' => 1, 'housekeeping' => 0, 'pos' => 0, 'stock' => 0,
                     'conference' => 1, 'gym' => 0, 'finance' => 1, 'website_cms' => 1,
@@ -59,7 +59,7 @@ if (!function_exists('getBusinessPresets')) {
             'gym_fitness' => [
                 'label' => 'Gym / Fitness',
                 'icon'  => 'fas fa-dumbbell',
-                'desc'  => 'Gym + POS till + website',
+                'desc'  => 'Gym, till, website',
                 'modules' => [
                     'bookings' => 0, 'housekeeping' => 0, 'pos' => 1, 'stock' => 0,
                     'conference' => 0, 'gym' => 1, 'finance' => 1, 'website_cms' => 1,
@@ -79,7 +79,7 @@ if (!function_exists('getBusinessPresets')) {
             'retail_shop' => [
                 'label' => 'Retail / Shop',
                 'icon'  => 'fas fa-store',
-                'desc'  => 'POS + stock + finance only',
+                'desc'  => 'Till, stock, finance',
                 'modules' => [
                     'bookings' => 0, 'housekeeping' => 0, 'pos' => 1, 'stock' => 1,
                     'conference' => 0, 'gym' => 0, 'finance' => 1, 'website_cms' => 0,
@@ -94,7 +94,7 @@ if (!function_exists('getBusinessPresets')) {
             'supermarket' => [
                 'label' => 'Supermarket',
                 'icon'  => 'fas fa-cart-shopping',
-                'desc'  => 'POS + stock + finance + website',
+                'desc'  => 'Till, stock, finance, website',
                 'modules' => [
                     'bookings' => 0, 'housekeeping' => 0, 'pos' => 1, 'stock' => 1,
                     'conference' => 0, 'gym' => 0, 'finance' => 1, 'website_cms' => 1,

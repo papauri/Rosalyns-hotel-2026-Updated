@@ -13,6 +13,9 @@
 
 function rh_admin_nav_groups(): array
 {
+    // Matches booking-settings.php's own title. Kept off the item line on purpose: the knowledge base
+    // (includes/guide-system-knowledge.php) reads an inline ternary there as a restaurant on/off name.
+    $settingsLabel = (!function_exists('moduleEnabled') || moduleEnabled('bookings')) ? 'Hotel Settings' : 'Business Settings';
     return [
         'Front Desk' => [
             ['dashboard.php',             'fas fa-tachometer-alt', 'Dashboard',        'dashboard',        '', null],
@@ -90,7 +93,7 @@ function rh_admin_nav_groups(): array
             ['visitor-analytics.php',          'fas fa-chart-line',  'Visitor Analytics', 'visitor_analytics', '', 'website_cms'],
         ],
         'Settings' => [
-            ['booking-settings.php',  'fas fa-cog',                'Hotel Settings',    'booking_settings',  '', null],
+            ['booking-settings.php',  'fas fa-cog',                $settingsLabel,      'booking_settings',  '', null], // same name as the page title
             ['room-management.php',   'fas fa-bed',                'Rooms',             'rooms',             '', 'bookings'],
             ['rate-plans.php',        'fas fa-tags',               'Rate Plans',        'booking_settings',  '', 'bookings'],
             ['packages.php',          'fas fa-gift',               'Room Packages',         'booking_settings',  '', 'bookings'],
@@ -112,6 +115,35 @@ function rh_admin_nav_groups(): array
             ['../docs/guides/12-email-templates.php',             'fas fa-envelope-open-text', 'Email Template Tags', null, '', null],
         ],
     ];
+}
+
+/**
+ * The heading shown for a sidebar group, worded for the business the modules describe.
+ * The group KEY (from rh_admin_nav_groups) never changes: it keeps saved folded/open state,
+ * icons and anything else keyed on it. Only the words on screen follow the modules:
+ *   Front Desk          → "Overview" when neither Bookings nor Housekeeping is on (shop, bar, gym)
+ *   Conference & Events → "Conference" or "Events" when only one of them is on
+ *   Restaurant & Bar    → "Till & Sales" when the Restaurant switch is off (retail, supermarket, gym)
+ * Returns [label, icon or null to keep the default icon].
+ */
+function rh_admin_nav_group_display(string $groupKey): array
+{
+    $on = static function (string $k): bool {
+        return !function_exists('rh_module_key_enabled') || rh_module_key_enabled($k);
+    };
+    switch ($groupKey) {
+        case 'Front Desk':
+            return ($on('bookings') || $on('housekeeping')) ? [$groupKey, null] : ['Overview', 'fas fa-gauge-high'];
+        case 'Conference & Events':
+            $conf = $on('conference');
+            $events = $on('website_cms') && $on('events');
+            if ($conf && !$events) return ['Conference', null];
+            if ($events && !$conf) return ['Events', 'fas fa-calendar-alt'];
+            return [$groupKey, null];
+        case 'Restaurant & Bar':
+            return $on('restaurant_page') ? [$groupKey, null] : ['Till & Sales', 'fas fa-cash-register'];
+    }
+    return [$groupKey, null];
 }
 
 /**

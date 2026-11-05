@@ -92,8 +92,8 @@ if ($nonAdmin !== '') {
 }
 $r = $runPage('admin/api/toggle-module.php', ['post' => ['module_key' => 'data_import', 'is_enabled' => '1', 'csrf_token' => 'wrong'], 'verify' => [$q]]);
 ok('F8: a wrong CSRF token is refused', empty($r['json']['success']));
-$r = $runPage('admin/module-settings.php', ['method' => 'GET', 'grep' => ['id="ms-toggle-data_import"', 'Data Import: on/off', 'Administrators and managers get it by default']]);
-ok('F8: Module Settings shows the "Data Import: on/off" switch with its plain helper line', !empty($r['found']['id="ms-toggle-data_import"']) && !empty($r['found']['Data Import: on/off']) && !empty($r['found']['Administrators and managers get it by default']), json_encode($r['found'] ?? $r));
+$r = $runPage('admin/module-settings.php', ['method' => 'GET', 'grep' => ['id="ms-toggle-data_import"', '>Data Import</div>', 'Administrators and managers get it by default']]);
+ok('F8: Module Settings shows the "Data Import" switch with its plain helper line', !empty($r['found']['id="ms-toggle-data_import"']) && !empty($r['found']['>Data Import</div>']) && !empty($r['found']['Administrators and managers get it by default']), json_encode($r['found'] ?? $r));
 
 
 // Step 3 paging / bulk endpoints: the same gates as every other action (job ownership, switch, CSRF). Each call rolls back.

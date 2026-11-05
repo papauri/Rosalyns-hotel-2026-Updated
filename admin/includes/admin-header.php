@@ -426,11 +426,14 @@ if ($_admin_back_target !== null) {
             if ($visibleCount === 0) continue;
             $group_id = trim((string)preg_replace('/[^a-z0-9]+/', '-', strtolower($group_label)), '-');
             $group_icon = $_nav_group_icons[$group_label] ?? 'fas fa-folder';
+            // Words on screen follow the modules (a shop never sees "Restaurant & Bar"); the key and id stay fixed.
+            [$group_title, $_group_icon_override] = rh_admin_nav_group_display((string)$group_label);
+            if ($_group_icon_override !== null) { $group_icon = $_group_icon_override; }
         ?>
             <?php $_group_default_collapsed = in_array($group_label, $_nav_default_collapsed, true); $_group_start_folded = $_group_default_collapsed && !$isActiveGroup; ?>
             <section class="nav-group <?php echo $isActiveGroup ? 'is-active-group' : ''; ?><?php echo $_group_start_folded ? ' collapsed' : ''; ?>" data-nav-group="<?php echo htmlspecialchars($group_id); ?>"<?php echo $_group_default_collapsed ? ' data-nav-default-collapsed="1"' : ''; ?>>
                 <button type="button" class="nav-group-toggle" aria-expanded="<?php echo $_group_start_folded ? 'false' : 'true'; ?>" aria-controls="nav-group-<?php echo htmlspecialchars($group_id); ?>">
-                    <span class="nav-group-label"><i class="<?php echo htmlspecialchars($group_icon); ?>"></i><span class="nav-group-title"><?php echo htmlspecialchars($group_label); ?></span></span>
+                    <span class="nav-group-label"><i class="<?php echo htmlspecialchars($group_icon); ?>"></i><span class="nav-group-title"><?php echo htmlspecialchars($group_title); ?></span></span>
                     <span class="nav-group-count"><?php echo (int)$visibleCount; ?></span>
                     <i class="fas fa-chevron-down nav-group-chevron"></i>
                 </button>

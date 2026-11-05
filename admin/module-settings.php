@@ -29,20 +29,21 @@ $locked_modules = ['finance'];
 
 // Station sub-modules (only active when pos is enabled)
 $station_meta = [
-    'station_kds'          => ['icon' => 'fas fa-utensils',       'color' => '#c82333', 'label' => 'Kitchen Display (KDS)',     'desc' => 'Kitchen order tickets and prep display.'],
-    'station_bds'          => ['icon' => 'fas fa-cocktail',        'color' => '#5e35b1', 'label' => 'Bar Display (BDS)',         'desc' => 'Bar drink orders and display screen.'],
-    'station_cds'          => ['icon' => 'fas fa-mug-hot',         'color' => '#6f4e37', 'label' => 'Coffee Bar Display (CDS)', 'desc' => 'Coffee bar orders and display screen.'],
-    'station_room_service' => ['icon' => 'fas fa-bell-concierge',  'color' => '#0c8d6c', 'label' => 'Room Service Station',     'desc' => 'In-room dining orders and dashboard.'],
+    'station_kds'          => ['icon' => 'fas fa-utensils',       'color' => '#c82333', 'label' => 'Kitchen Display (KDS)',     'desc' => 'Screen in the kitchen showing the food orders to prepare.'],
+    'station_bds'          => ['icon' => 'fas fa-cocktail',        'color' => '#5e35b1', 'label' => 'Bar Display (BDS)',         'desc' => 'Screen at the bar showing the drink orders to make.'],
+    'station_cds'          => ['icon' => 'fas fa-mug-hot',         'color' => '#6f4e37', 'label' => 'Coffee Bar Display (CDS)', 'desc' => 'Screen at the coffee bar showing the coffee orders to make.'],
+    'station_room_service' => ['icon' => 'fas fa-bell-concierge',  'color' => '#0c8d6c', 'label' => 'Room Service Station',     'desc' => 'Orders for guests in their rooms, with their own screen. Hotels only.'],
 ];
 
+// Words only (labels, descriptions, warnings). Keys, switches and what each switch does are unchanged.
 $modules_meta = [
     'bookings' => [
         'icon'   => 'fas fa-calendar-check',
         'color'  => '#2e7d32',
         'bg'     => '#e8f5e9',
         'label'  => 'Bookings & Reservations',
-        'desc'   => 'Room bookings, calendar, blocked dates, tentative holds, check-in and check-out flows.',
-        'warn'   => 'Disabling hides all booking pages and the Bookings nav section.',
+        'desc'   => 'Rooms and room bookings: Bookings, Calendar, Individual Rooms, Blocked Dates, Room Maintenance, Rooms, Rate Plans and Room Packages, plus the guest booking pages.',
+        'warn'   => 'Turning this off hides every booking page from the menu and the guest booking pages. Bookings already taken are kept.',
         'locked' => false,
     ],
     'housekeeping' => [
@@ -50,7 +51,7 @@ $modules_meta = [
         'color'  => '#7E684B',
         'bg'     => '#f5f2eb',
         'label'  => 'Housekeeping',
-        'desc'   => 'Room cleaning schedules, task assignment, and housekeeping reconciliation.',
+        'desc'   => 'Room cleaning tasks, who does them and room status. Use it with Bookings & Reservations.',
         'warn'   => null,
         'locked' => false,
     ],
@@ -58,8 +59,8 @@ $modules_meta = [
         'icon'   => 'fas fa-cash-register',
         'color'  => '#7E684B',
         'bg'     => '#fdf8f0',
-        'label'  => 'POS & Stations',
-        'desc'   => 'Point-of-sale till, deals, offline log and station displays. Configure individual stations below.',
+        'label'  => 'POS Till',
+        'desc'   => 'Selling at the till: POS Till, Menu (called Products when Restaurant is off), Deals & Promos, Offline Log and POS Accounting. Kitchen, bar and coffee screens are under Till Stations below.',
         'warn'   => null,
         'locked' => false,
     ],
@@ -68,7 +69,7 @@ $modules_meta = [
         'color'  => '#1565c0',
         'bg'     => '#e3f2fd',
         'label'  => 'Stock Management',
-        'desc'   => 'Ingredients, recipes, batch tracking, stock orders, barcode receiving, stock counts and wastage.',
+        'desc'   => 'Stock items (called Ingredients when Restaurant is on), buying, purchase orders, receiving, suppliers, budget, stock counts, wastage, batches and stock reports.',
         'warn'   => null,
         'locked' => false,
     ],
@@ -77,7 +78,7 @@ $modules_meta = [
         'color'  => '#5e35b1',
         'bg'     => '#ede7f6',
         'label'  => 'Conference Rooms',
-        'desc'   => 'Conference room management, bookings and inquiry handling.',
+        'desc'   => 'Conference rooms, conference bookings and enquiries, plus the guest Conference page.',
         'warn'   => null,
         'locked' => false,
     ],
@@ -86,7 +87,7 @@ $modules_meta = [
         'color'  => '#c62828',
         'bg'     => '#ffebee',
         'label'  => 'Gym & Fitness',
-        'desc'   => 'Gym packages, membership management and gym inquiry tracking.',
+        'desc'   => 'Members, check-in, classes, schedule, packages, enquiries and gym reports, plus the guest Gym page.',
         'warn'   => null,
         'locked' => false,
     ],
@@ -95,7 +96,7 @@ $modules_meta = [
         'color'  => '#8F6A35',
         'bg'     => '#fdf3e3',
         'label'  => 'Finance & Accounting',
-        'desc'   => 'Payments, invoices, receipts, credit notes, quotations, accounting dashboard, reports and end-of-day.',
+        'desc'   => 'Payments, receipts, accounting, reports and end of day. Invoices, quotations and credit notes show for businesses that bill ahead (rooms, conferences, gym).',
         'warn'   => null,
         'locked' => true,
     ],
@@ -103,8 +104,8 @@ $modules_meta = [
         'icon'   => 'fas fa-globe',
         'color'  => '#0c8d6c',
         'bg'     => '#e8f5f1',
-        'label'  => 'Website & CMS',
-        'desc'   => 'Gallery, media portal, pages, events, reviews, contact inquiries, footer and section headers.',
+        'label'  => 'Website',
+        'desc'   => 'Your public website: pages, gallery, media, reviews, contact enquiries, footer, section headers, Facebook, WhatsApp and visitor analytics.',
         'warn'   => null,
         'locked' => false,
     ],
@@ -123,17 +124,17 @@ $front_end_state = [
 ];
 
 $front_end_meta = [
-    'events_page' => [
-        'icon'  => 'fas fa-calendar-day',
-        'color' => '#8F6A35',
-        'label' => 'Events Page',
-        'desc'  => 'Guest events page, event bookings and the admin events inbox.',
-    ],
     'restaurant_page' => [
         'icon'  => 'fas fa-utensils',
         'color' => '#c82333',
-        'label' => 'Restaurant Page',
-        'desc'  => 'Guest restaurant page, dine-in tables, recipes and station reports.',
+        'label' => 'Restaurant & Food Service',
+        'desc'  => 'On: the menu uses restaurant words (Restaurant & Bar, Menu, Ingredients, Orders & Tabs) and shows Tables, Recipes, Station Hours and Station Reports, plus the guest Restaurant page. Off: the till is worded for a shop (Till & Sales, Products, Stock Items, Orders).',
+    ],
+    'events_page' => [
+        'icon'  => 'fas fa-calendar-day',
+        'color' => '#8F6A35',
+        'label' => 'Events',
+        'desc'  => 'Events and Event Bookings in the menu, plus the guest Events page. Needs Website on.',
     ],
 ];
 
@@ -202,15 +203,17 @@ if ($active_preset_key !== null && !$active_preset_exact) {
             margin: 0 0 18px;
         }
         .ms-presets-row {
-            display: flex;
-            flex-wrap: wrap;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
             gap: 10px;
         }
         .ms-preset-btn {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 9px 16px;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+            width: 100%;
+            text-align: left;
+            padding: 11px 14px;
             border: 1.5px solid #d5cfc4;
             border-radius: 4px;
             background: #faf8f4;
@@ -240,16 +243,18 @@ if ($active_preset_key !== null && !$active_preset_exact) {
         .ms-preset-note { margin: 12px 0 0; font-size: .8rem; color: #7a5a2a; }
         .ms-preset-note[hidden] { display: none; }
         .ms-preset-btn:active { background: #ede5d6; }
-        .ms-preset-btn i { color: #7E684B; font-size: .9rem; }
+        .ms-preset-btn > i { color: #7E684B; font-size: .95rem; width: 18px; text-align: center; margin-top: 2px; flex-shrink: 0; }
+        .ms-preset-btn-inner > span:first-child { font-weight: 600; display: flex; flex-wrap: wrap; align-items: center; row-gap: 4px; }
+        .ms-preset-active-badge { margin-left: 6px; }
         .ms-preset-btn .ms-preset-desc {
             font-size: .74rem;
             color: #9a8f82;
             display: block;
             font-weight: 400;
-            line-height: 1.2;
-            margin-top: 1px;
+            line-height: 1.35;
+            margin-top: 3px;
         }
-        .ms-preset-btn-inner { display: flex; flex-direction: column; }
+        .ms-preset-btn-inner { display: flex; flex-direction: column; min-width: 0; }
 
         /* ── Intro / reload banner ───────────────────────── */
         .ms-intro {
@@ -327,10 +332,22 @@ if ($active_preset_key !== null && !$active_preset_exact) {
         }
         .ms-card-desc { font-size: .8rem; color: #7a6f63; line-height: 1.55; margin: 0; }
 
+        /* Footer sits on the card's bottom edge, so every switch in a row lines up. */
         .ms-card-footer {
             display: flex; align-items: center; justify-content: space-between;
-            margin-top: 14px; padding-top: 12px; border-top: 1px solid #ede8e0;
+            margin-top: auto; padding-top: 12px; border-top: 1px solid #ede8e0;
         }
+        .ms-card-warn { margin-bottom: 14px; }
+        .ms-section-sub { font-size: .82rem; color: #7a6f63; margin: -8px 0 14px; line-height: 1.5; }
+
+        /* Till stations: small cards of their own, dimmed while POS Till is off */
+        .ms-grid--stations { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+        .ms-card--compact { padding: 16px 16px 14px; }
+        .ms-card--compact .ms-card-icon { width: 36px; height: 36px; font-size: 1rem; border-radius: 8px; }
+        .ms-card--compact .ms-card-title { font-size: .9rem; }
+        .ms-stations-off-note { display: none; font-size: .8rem; color: #9e4040; margin: -6px 0 12px; }
+        .ms-stations-wrap.is-pos-off .ms-stations-off-note { display: block; }
+        .ms-stations-wrap.is-pos-off .ms-grid--stations { opacity: .45; pointer-events: none; }
         .ms-status-label { font-size: .79rem; font-weight: 500; color: #8a7f73; }
         .ms-status-label.enabled  { color: #2e7d32; }
         .ms-status-label.disabled { color: #9e4040; }
@@ -392,42 +409,8 @@ if ($active_preset_key !== null && !$active_preset_exact) {
             text-transform: uppercase; color: #7E684B; margin: 0 0 14px;
         }
 
-        /* ── Station sub-panel ───────────────────────────── */
-        .ms-stations-panel {
-            margin-top: 14px;
-            border-top: 1px solid #ede8e0;
-            padding-top: 10px;
-        }
-        .ms-stations-toggle {
-            display: flex; align-items: center; gap: 7px;
-            background: none; border: none; padding: 4px 0; cursor: pointer;
-            font-size: .8rem; font-weight: 600; color: #7E684B;
-            width: 100%;
-        }
-        .ms-stations-toggle:hover { color: #6e5a3e; }
-        .ms-stations-chevron { margin-left: auto; font-size: .7rem; transition: transform .2s; }
-        .ms-stations-toggle[aria-expanded="true"] .ms-stations-chevron { transform: rotate(180deg); }
-
-        .ms-stations-body {
-            margin-top: 10px;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        .ms-station-row {
-            display: flex; align-items: center; justify-content: space-between; gap: 10px;
-            padding: 8px 10px;
-            background: #faf8f4; border: 1px solid #ede8e0; border-radius: 4px;
-        }
-        .ms-station-left { display: flex; align-items: flex-start; gap: 10px; flex: 1; min-width: 0; }
-        .ms-station-name { font-size: .8rem; font-weight: 600; color: #3e3930; line-height: 1.2; }
-        .ms-station-desc { font-size: .74rem; color: #9a8f82; margin-top: 1px; }
-        .ms-station-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
-
         @media (max-width: 640px) {
-            .ms-grid { grid-template-columns: 1fr; }
-            .ms-presets-row { flex-direction: column; }
-            .ms-preset-btn { width: 100%; }
+            .ms-grid, .ms-presets-row { grid-template-columns: 1fr; }
         }
     </style>
 </head>
@@ -445,13 +428,13 @@ if ($active_preset_key !== null && !$active_preset_exact) {
 
         <div class="ms-intro">
             <i class="fas fa-info-circle"></i>
-            <p>Configure which modules are active for this installation. <strong>Disabled modules are hidden from the sidebar and dashboard</strong> — no data is deleted. Finance &amp; Accounting is always on and cannot be disabled.</p>
+            <p>Choose the parts of the system this business uses. <strong>Anything switched off is hidden from the menu and the dashboard</strong>, and nothing is deleted. The menu headings follow these switches too: a shop sees <em>Till &amp; Sales</em>, not <em>Restaurant &amp; Bar</em>. Finance &amp; Accounting is always on.</p>
         </div>
 
         <!-- Business type presets -->
         <div class="ms-presets-card">
-            <div class="ms-presets-heading"><i class="fas fa-bolt" style="margin-right:6px;"></i>Quick Setup — Business Presets</div>
-            <p class="ms-presets-sub">Select a business type to automatically enable the right modules in one click.</p>
+            <div class="ms-presets-heading"><i class="fas fa-store" style="margin-right:6px;"></i>Business type</div>
+            <p class="ms-presets-sub">Pick the type closest to this business to set every switch below in one click. You can still change single switches afterwards.</p>
             <div class="ms-presets-row">
                 <?php foreach ($presets as $preset_key => $preset):
                     $is_active_preset = ($preset_key === $active_preset_key);
@@ -475,16 +458,15 @@ if ($active_preset_key !== null && !$active_preset_exact) {
 
         <div class="ms-reload-banner">
             <i class="fas fa-rotate-right"></i>
-            Changes take effect immediately. The navigation sidebar updates on your next page load.
+            Each change saves at once, then the page reloads so the menu matches.
         </div>
 
-        <div class="ms-section-title">Individual Modules</div>
+        <div class="ms-section-title">Modules</div>
 
         <div class="ms-grid">
             <?php foreach ($modules_meta as $key => $meta):
                 $enabled = $module_state[$key] ?? true;
                 $locked  = $meta['locked'];
-                $pos_on  = ($module_state['pos'] ?? true);
             ?>
             <div class="ms-card <?php echo $locked ? 'is-locked' : ($enabled ? '' : 'is-disabled'); ?>" id="ms-card-<?php echo htmlspecialchars($key); ?>">
                 <div class="ms-card-header">
@@ -531,52 +513,53 @@ if ($active_preset_key !== null && !$active_preset_exact) {
                     </label>
                 </div>
 
-                <?php if ($key === 'pos'): ?>
-                <!-- Station sub-modules — only relevant when POS is on -->
-                <div class="ms-stations-panel" id="ms-stations-panel" style="<?php echo $enabled ? '' : 'opacity:.45;pointer-events:none;'; ?>">
-                    <button type="button" class="ms-stations-toggle" id="msStationsToggle" aria-expanded="false">
-                        <i class="fas fa-display" style="color:#7E684B;"></i>
-                        <span>Configure Stations</span>
-                        <i class="fas fa-chevron-down ms-stations-chevron"></i>
-                    </button>
-                    <div class="ms-stations-body" id="msStationsBody" hidden>
-                        <?php foreach ($station_meta as $skey => $smeta):
-                            $senabled = $module_state[$skey] ?? true;
-                        ?>
-                        <div class="ms-station-row" id="ms-card-<?php echo htmlspecialchars($skey); ?>">
-                            <div class="ms-station-left">
-                                <i class="<?php echo htmlspecialchars($smeta['icon']); ?>" style="color:<?php echo htmlspecialchars($smeta['color']); ?>;width:18px;text-align:center;"></i>
-                                <div>
-                                    <div class="ms-station-name"><?php echo htmlspecialchars($smeta['label']); ?></div>
-                                    <div class="ms-station-desc"><?php echo htmlspecialchars($smeta['desc']); ?></div>
-                                </div>
-                            </div>
-                            <div class="ms-station-right">
-                                <span class="ms-status-label <?php echo $senabled ? 'enabled' : 'disabled'; ?>" id="ms-label-<?php echo htmlspecialchars($skey); ?>" style="font-size:.74rem;">
-                                    <i class="fas fa-<?php echo $senabled ? 'check-circle' : 'times-circle'; ?>"></i>
-                                    <?php echo $senabled ? 'On' : 'Off'; ?>
-                                </span>
-                                <label class="ms-toggle" style="width:40px;height:22px;" aria-label="Toggle <?php echo htmlspecialchars($smeta['label']); ?>">
-                                    <input type="checkbox"
-                                           id="ms-toggle-<?php echo htmlspecialchars($skey); ?>"
-                                           data-module="<?php echo htmlspecialchars($skey); ?>"
-                                           data-has-warn="0"
-                                           data-warn-text=""
-                                           data-label="<?php echo htmlspecialchars($smeta['label']); ?>"
-                                           <?php echo $senabled ? 'checked' : ''; ?>>
-                                    <span class="ms-toggle-slider" style="border-radius:22px;"></span>
-                                </label>
-                            </div>
-                        </div>
-                        <?php endforeach; ?>
-                    </div>
-                </div>
-                <?php endif; ?>
             </div>
             <?php endforeach; ?>
         </div>
 
-        <div class="ms-section-title">Guest Website Pages</div>
+        <?php $pos_on = (bool)($module_state['pos'] ?? true); ?>
+        <!-- Till stations: separate switches that only work while POS Till is on -->
+        <div class="ms-stations-wrap<?php echo $pos_on ? '' : ' is-pos-off'; ?>" id="ms-stations-panel">
+            <div class="ms-section-title">Till Stations</div>
+            <p class="ms-section-sub">Screens that show till orders where they are made. Turn on only the ones this business has.</p>
+            <p class="ms-stations-off-note"><i class="fas fa-circle-info"></i> Turn on POS Till above to use these.</p>
+            <div class="ms-grid ms-grid--stations">
+                <?php foreach ($station_meta as $skey => $smeta):
+                    $senabled = $module_state[$skey] ?? true;
+                ?>
+                <div class="ms-card ms-card--compact <?php echo $senabled ? '' : 'is-disabled'; ?>" id="ms-card-<?php echo htmlspecialchars($skey); ?>">
+                    <div class="ms-card-header">
+                        <div class="ms-card-icon" style="background:#fdf8f0;color:<?php echo htmlspecialchars($smeta['color']); ?>;">
+                            <i class="<?php echo htmlspecialchars($smeta['icon']); ?>"></i>
+                        </div>
+                        <div class="ms-card-title-block">
+                            <div class="ms-card-title"><?php echo htmlspecialchars($smeta['label']); ?></div>
+                            <p class="ms-card-desc"><?php echo htmlspecialchars($smeta['desc']); ?></p>
+                        </div>
+                    </div>
+                    <div class="ms-card-footer">
+                        <span class="ms-status-label <?php echo $senabled ? 'enabled' : 'disabled'; ?>" id="ms-label-<?php echo htmlspecialchars($skey); ?>">
+                            <i class="fas fa-<?php echo $senabled ? 'check-circle' : 'times-circle'; ?>"></i>
+                            <?php echo $senabled ? 'On' : 'Off'; ?>
+                        </span>
+                        <label class="ms-toggle" aria-label="Toggle <?php echo htmlspecialchars($smeta['label']); ?>">
+                            <input type="checkbox"
+                                   id="ms-toggle-<?php echo htmlspecialchars($skey); ?>"
+                                   data-module="<?php echo htmlspecialchars($skey); ?>"
+                                   data-has-warn="0"
+                                   data-warn-text=""
+                                   data-label="<?php echo htmlspecialchars($smeta['label']); ?>"
+                                   <?php echo $senabled ? 'checked' : ''; ?>>
+                            <span class="ms-toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+
+        <div class="ms-section-title">Restaurant and Events</div>
+        <p class="ms-section-sub">These decide the wording and extra pages for food service and events, in the staff menu and on the guest website.</p>
 
         <div class="ms-grid">
             <?php foreach ($front_end_meta as $fe_key => $fe_meta):
@@ -657,8 +640,8 @@ if ($active_preset_key !== null && !$active_preset_exact) {
                         <i class="fas fa-file-import"></i>
                     </div>
                     <div class="ms-card-title-block">
-                        <div class="ms-card-title">Data Import: on/off</div>
-                        <p class="ms-card-desc">Lets staff upload a stock list (Excel or CSV), check it and import it. Administrators and managers get it by default; you can give or take it away per person in Staff Access. Switching off hides Import at once and keeps nothing half-imported.</p>
+                        <div class="ms-card-title">Data Import</div>
+                        <p class="ms-card-desc">Lets staff upload a stock list (Excel or CSV), check it and import it. Needs Stock Management on. Administrators and managers get it by default; you can give or take it away per person in Staff &amp; Access. Switching off hides Import at once and keeps nothing half-imported.</p>
                     </div>
                 </div>
                 <div class="ms-card-footer">
@@ -854,13 +837,10 @@ if ($active_preset_key !== null && !$active_preset_exact) {
             var enable  = cb.checked;
             var hasWarn = cb.getAttribute('data-has-warn') === '1';
 
-            // POS toggle also dims/undims the station sub-panel
+            // POS toggle also dims/undims the Till Stations section
             if (key === 'pos') {
                 var stationsPanel = document.getElementById('ms-stations-panel');
-                if (stationsPanel) {
-                    stationsPanel.style.opacity = enable ? '' : '.45';
-                    stationsPanel.style.pointerEvents = enable ? '' : 'none';
-                }
+                if (stationsPanel) { stationsPanel.classList.toggle('is-pos-off', !enable); }
             }
 
             if (!enable && hasWarn) {
@@ -921,13 +901,8 @@ if ($active_preset_key !== null && !$active_preset_exact) {
             return div.innerHTML;
         }
 
-        var extraModuleLabels = {
-            station_kds: 'Kitchen Display (KDS)', station_bds: 'Bar Display (BDS)',
-            station_cds: 'Coffee Bar Display (CDS)', station_room_service: 'Room Service Station',
-            restaurant_page: 'Restaurant / food-service pages',
-            events_page: 'Events page & event bookings'
-        };
-        function moduleLabel(key) { return S.moduleLabels[key] || extraModuleLabels[key] || key; }
+        // Same names as the cards on this page (modules, till stations, restaurant and events)
+        function moduleLabel(key) { return S.switchLabels[key] || S.moduleLabels[key] || key; }
 
         function renderPresetImpact(presetKey, presetLabel, data) {
             var nameEl    = document.getElementById('msPresetImpactName');
@@ -1015,17 +990,6 @@ if ($active_preset_key !== null && !$active_preset_exact) {
 
             var presetBtn = t.closest('.ms-preset-btn');
             if (presetBtn && !presetBtn.classList.contains('applying')) { handlePresetClick(presetBtn); return; }
-
-            if (t.closest('#msStationsToggle')) {
-                var stationsBody = document.getElementById('msStationsBody');
-                var stationsToggle = document.getElementById('msStationsToggle');
-                if (stationsBody && stationsToggle) {
-                    var open = stationsBody.hidden;
-                    stationsBody.hidden = !open;
-                    stationsToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
-                }
-                return;
-            }
 
             var confirmOverlay = document.getElementById('msConfirmOverlay');
             if (t.closest('#msConfirmCancel')) {
