@@ -158,3 +158,7 @@ if (function_exists('rh_admin_request_is_activity') && rh_admin_request_is_activ
 // Web-triggered scheduler: replaces cron (runs after the response is sent; see includes/auto-scheduler.php).
 require_once __DIR__ . '/../includes/auto-scheduler.php';
 rh_scheduler_maybe_run();
+
+// Staff activity: one log row for a successful POST (page + action name only, never values). Registered last, after every gate.
+require_once __DIR__ . '/includes/activity-hook.php';
+rh_sa_hook_register();

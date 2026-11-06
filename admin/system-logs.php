@@ -16,6 +16,23 @@ if (!hasPermission((int)$user['id'], 'system_logs')) {
 
 $site_name = getSetting('site_name');
 require_once __DIR__ . '/includes/system-log-attention.php';
+require_once __DIR__ . '/includes/staff-activity-lib.php';
+
+// Staff activity filters (person, days, type). They also steer the older panels below once the person has used them.
+$saF = rh_sa_parse_filters($_GET);
+
+// CSV of the filtered timeline: same filters, sent before any page output.
+if ((string)($_GET['export'] ?? '') === 'csv') {
+    try {
+        logActivity((int)$user['id'], 'logs_export', 'Staff activity CSV ' . $saF['from'] . ' to ' . $saF['to']);
+    } catch (Throwable $e) {
+    }
+    header('Content-Type: text/csv; charset=utf-8');
+    header('Content-Disposition: attachment; filename="staff-activity-' . $saF['from'] . ($saF['to'] !== $saF['from'] ? '_to_' . $saF['to'] : '') . '.csv"');
+    header('X-Content-Type-Options: nosniff');
+    rh_sa_write_csv($pdo, $saF, fopen('php://output', 'w'));
+    exit;
+}
 
 // Level 'problems' (warnings, errors and critical) is the default so real faults show first.
 $levelLabels = [
@@ -148,6 +165,16 @@ try {
             $where[] = 'level = ?';
             $args[] = $levelFilter;
         }
+        if ($saF['filtered']) {
+            [$saFrom, $saTo] = rh_sa_bounds($saF);
+            $where[] = 'created_at >= ? AND created_at < ?';
+            $args[] = $saFrom;
+            $args[] = $saTo;
+            if ($saF['user'] > 0) {
+                $where[] = 'user_id = ?';
+                $args[] = $saF['user'];
+            }
+        }
         $whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
         if ($groupRepeats) {
             // Read a wider slice without the (large) context, group repeats, then fetch the
@@ -206,8 +233,9 @@ try {
 $adminActivity = [];
 if (rh_logs_table_exists($pdo, 'admin_activity_log')) {
     try {
-        $stmt = $pdo->prepare("SELECT user_id, username, action, details, ip_address, created_at FROM admin_activity_log ORDER BY created_at DESC LIMIT {$limit}");
-        $stmt->execute();
+        [$saW, $saA] = rh_sa_panel_clause($saF, 'created_at', 'user_id', 'WHERE');
+        $stmt = $pdo->prepare("SELECT user_id, username, action, details, ip_address, created_at FROM admin_activity_log{$saW} ORDER BY created_at DESC LIMIT {$limit}");
+        $stmt->execute($saA);
         $adminActivity = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     } catch (Throwable $e) {
     }
@@ -216,8 +244,9 @@ if (rh_logs_table_exists($pdo, 'admin_activity_log')) {
 $bookingAuditEvents = [];
 if (rh_logs_table_exists($pdo, 'booking_audit_log')) {
     try {
-        $stmt = $pdo->prepare("SELECT bal.*, au.username AS performed_by_username FROM booking_audit_log bal LEFT JOIN admin_users au ON au.id = bal.performed_by ORDER BY bal.performed_at DESC LIMIT {$limit}");
-        $stmt->execute();
+        [$saW, $saA] = rh_sa_panel_clause($saF, 'bal.performed_at', 'bal.performed_by', 'WHERE');
+        $stmt = $pdo->prepare("SELECT bal.*, au.username AS performed_by_username FROM booking_audit_log bal LEFT JOIN admin_users au ON au.id = bal.performed_by{$saW} ORDER BY bal.performed_at DESC LIMIT {$limit}");
+        $stmt->execute($saA);
         $bookingAuditEvents = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         $stats['booking_changes'] = (int)$pdo->query("SELECT COUNT(*) FROM booking_audit_log WHERE performed_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)")->fetchColumn();
     } catch (Throwable $e) {
@@ -230,14 +259,15 @@ if (rh_logs_table_exists($pdo, 'booking_audit_log')) {
 $apiActivity = [];
 if (rh_logs_table_exists($pdo, 'api_usage_logs')) {
     try {
+        [$saW, $saA] = rh_sa_panel_clause($saF, 'l.created_at', null, 'WHERE');
         $stmt = $pdo->prepare("
             SELECT l.endpoint, l.method, l.ip_address, l.response_code, l.response_time, l.created_at, k.client_name
             FROM api_usage_logs l
-            LEFT JOIN api_keys k ON k.id = l.api_key_id
+            LEFT JOIN api_keys k ON k.id = l.api_key_id{$saW}
             ORDER BY l.created_at DESC
             LIMIT {$limit}
         ");
-        $stmt->execute();
+        $stmt->execute($saA);
         $apiActivity = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     } catch (Throwable $e) {
     }
@@ -246,13 +276,14 @@ if (rh_logs_table_exists($pdo, 'api_usage_logs')) {
 $offlineActivity = [];
 if (rh_logs_table_exists($pdo, 'offline_replay_log')) {
     try {
+        [$saW, $saA] = rh_sa_panel_clause($saF, 'replayed_at', 'user_id', 'WHERE');
         $stmt = $pdo->prepare("
             SELECT username, endpoint, action, entity_reference, response_status, response_summary, replayed_at
-            FROM offline_replay_log
+            FROM offline_replay_log{$saW}
             ORDER BY replayed_at DESC
             LIMIT {$limit}
         ");
-        $stmt->execute();
+        $stmt->execute($saA);
         $offlineActivity = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     } catch (Throwable $e) {
     }
@@ -262,14 +293,15 @@ $recentLogins = [];
 $recentLoginBundles = [];
 if (rh_logs_table_exists($pdo, 'admin_activity_log')) {
     try {
+        [$saW, $saA] = rh_sa_panel_clause($saF, 'created_at', 'user_id', 'AND');
         $stmt = $pdo->prepare("
             SELECT user_id, username, action, details, ip_address, user_agent, created_at
             FROM admin_activity_log
-            WHERE action LIKE 'login%'
+            WHERE action LIKE 'login%'{$saW}
             ORDER BY created_at DESC
             LIMIT {$loginScanLimit}
         ");
-        $stmt->execute();
+        $stmt->execute($saA);
         $recentLogins = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
 
         $userIds = [];
@@ -522,6 +554,39 @@ $attentionLinkOk = function (?array $link) use ($user) {
     }
     return true;
 };
+
+// Staff activity section data (read-only; see admin/includes/staff-activity-lib.php).
+$saStaff = rh_sa_staff($pdo);
+$saTypes = rh_sa_types();
+$saCounters = rh_sa_counters();
+$saSummary = rh_sa_summary($pdo, $saF);
+$saTimeline = rh_sa_timeline($pdo, $saF, ($saF['page'] - 1) * RH_SA_PER_PAGE, RH_SA_PER_PAGE);
+$saRetention = rh_sa_retention($pdo);
+$saLinkOk = function (?array $l) use ($user) {
+    if (!$l || empty($l['page'])) {
+        return false;
+    }
+    $perm = function_exists('getPermissionForPage') ? getPermissionForPage($l['page']) : null;
+    if ($perm !== null && !hasPermission((int)$user['id'], $perm)) {
+        return false;
+    }
+    $mod = function_exists('getModuleForPage') ? getModuleForPage($l['page']) : null;
+    if ($mod !== null && ($user['role'] ?? '') !== 'admin' && function_exists('rh_module_key_enabled')) {
+        foreach ((array)$mod as $mk) {
+            if (!rh_module_key_enabled((string)$mk)) {
+                return false;
+            }
+        }
+    }
+    return true;
+};
+$saUrl = function (array $over = []) use ($saF) {
+    return 'system-logs.php?' . rh_sa_query($saF, $over);
+};
+$saDayLabel = function (string $ymd) {
+    return date('D j M Y', strtotime($ymd));
+};
+$saSingleDay = $saF['from'] === $saF['to'];
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -545,6 +610,140 @@ $attentionLinkOk = function (?array $link) use ($user) {
             <h1 class="page-title"><i class="fas fa-clipboard-list" style="color:var(--gold)"></i> System Logs</h1>
             <p class="text-muted">Start with &ldquo;Needs attention&rdquo;. Everything below it is the full record of what the system, staff, devices and API clients did.</p>
         </div>
+
+        <section class="log-section sa" id="staff-activity" aria-labelledby="staff-activity-title">
+            <div class="sa__head">
+                <h3 id="staff-activity-title"><i class="fas fa-user-clock"></i> Staff activity</h3>
+                <p>Pick a staff member and a day to see what they did. The figures and the list are read from the hotel's own records: Booking History, payments, orders, shifts, the kitchen and bar screens, stock records and the sign-in log.</p>
+            </div>
+
+            <form method="get" class="log-toolbar sa__filters" action="system-logs.php#staff-activity-results">
+                <input type="hidden" name="sa" value="1">
+                <?php foreach (['source', 'level', 'limit', 'group', 'auto'] as $keepKey): if (isset($_GET[$keepKey]) && is_string($_GET[$keepKey])): ?>
+                    <input type="hidden" name="<?php echo $keepKey; ?>" value="<?php echo htmlspecialchars($_GET[$keepKey]); ?>">
+                <?php endif; endforeach; ?>
+                <label>Staff member
+                    <select name="user">
+                        <option value="0">Everyone</option>
+                        <?php foreach ($saStaff as $saId => $saPerson): ?>
+                            <option value="<?php echo (int)$saId; ?>" <?php echo $saF['user'] === (int)$saId ? 'selected' : ''; ?>><?php echo htmlspecialchars($saPerson['name']); ?> (<?php echo htmlspecialchars($saPerson['username']); ?>)</option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label>From
+                    <input type="date" name="from" value="<?php echo htmlspecialchars($saF['from']); ?>">
+                </label>
+                <label>To
+                    <input type="date" name="to" value="<?php echo htmlspecialchars($saF['to']); ?>">
+                </label>
+                <label>What they did
+                    <select name="type">
+                        <option value="all">Everything</option>
+                        <?php foreach ($saTypes as $saKey => $saLabel): ?>
+                            <option value="<?php echo htmlspecialchars($saKey); ?>" <?php echo $saF['type'] === $saKey ? 'selected' : ''; ?>><?php echo htmlspecialchars($saLabel); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <button type="submit"><i class="fas fa-filter"></i> Show</button>
+            </form>
+            <div class="sa__quick" role="group" aria-label="Quick dates">
+                <a class="<?php echo $saF['range'] === 'today' ? 'is-on' : ''; ?>" href="<?php echo htmlspecialchars($saUrl(['range' => 'today'])); ?>#staff-activity-results">Today</a>
+                <a class="<?php echo $saF['range'] === 'yesterday' ? 'is-on' : ''; ?>" href="<?php echo htmlspecialchars($saUrl(['range' => 'yesterday'])); ?>#staff-activity-results">Yesterday</a>
+                <a class="<?php echo $saF['range'] === '7d' ? 'is-on' : ''; ?>" href="<?php echo htmlspecialchars($saUrl(['range' => '7d'])); ?>#staff-activity-results">Last 7 days</a>
+                <a href="<?php echo htmlspecialchars($saUrl(['export' => 'csv'])); ?>"><i class="fas fa-file-csv"></i> Download this list (CSV)</a>
+            </div>
+            <p class="sa__note">Showing <?php echo $saSingleDay ? htmlspecialchars($saDayLabel($saF['from'])) : htmlspecialchars($saDayLabel($saF['from'])) . ' to ' . htmlspecialchars($saDayLabel($saF['to'])); ?>,
+                <?php echo $saF['user'] > 0 ? htmlspecialchars($saStaff[$saF['user']]['name'] ?? ('user #' . $saF['user'])) : 'everyone'; ?>.
+                A range can be at most <?php echo (int)RH_SA_MAX_DAYS; ?> days.<?php echo $saF['clamped'] ? ' The range you asked for was longer, so the last ' . (int)RH_SA_MAX_DAYS . ' days are shown.' : ''; ?>
+                The &ldquo;What they did&rdquo; choice narrows the list below; the day cards always show everything.
+                <?php echo $saF['filtered'] ? 'The older panels further down follow the same person and days.' : 'The older panels further down show everything until you press Show.'; ?>
+            </p>
+
+            <div id="staff-activity-results" class="sa__results">
+                <h4 class="sa__sub">Each person, each day</h4>
+                <?php if (!$saSummary['rows']): ?>
+                    <p class="log-empty">No recorded activity for that person and those days.</p>
+                <?php else: ?>
+                    <div class="sa__cards">
+                        <?php foreach ($saSummary['rows'] as $saRow): ?>
+                            <article class="sa-card">
+                                <header>
+                                    <strong><?php echo htmlspecialchars($saRow['who']); ?></strong>
+                                    <span><?php echo htmlspecialchars($saDayLabel($saRow['day'])); ?></span>
+                                </header>
+                                <dl class="sa-card__times">
+                                    <div title="The first time this person signed in that day."><dt>First sign-in</dt><dd><?php echo $saRow['first_in'] ? htmlspecialchars(substr($saRow['first_in'], 11, 5)) : '&mdash;'; ?></dd></div>
+                                    <div title="The latest recorded action by this person that day."><dt>Last activity</dt><dd><?php echo htmlspecialchars(substr($saRow['last_seen'], 11, 5)); ?></dd></div>
+                                    <div title="The last time this person pressed Sign out that day. Blank when they never did (the session timed out or the browser was closed)."><dt>Signed out</dt><dd><?php echo $saRow['last_out'] ? htmlspecialchars(substr($saRow['last_out'], 11, 5)) : '&mdash;'; ?></dd></div>
+                                </dl>
+                                <ul class="sa-card__counts">
+                                    <?php $saAny = false; foreach ($saCounters as $saCk => [$saCl, $saCh]):
+                                        if ((int)$saRow['counts'][$saCk] <= 0) { continue; }
+                                        $saAny = true; ?>
+                                        <li title="<?php echo htmlspecialchars($saCh); ?>">
+                                            <span><?php echo htmlspecialchars($saCl); ?></span>
+                                            <strong><?php echo number_format((int)$saRow['counts'][$saCk]); ?><?php
+                                                if ($saCk === 'payments' && $saRow['payments_total'] > 0) { echo ' &middot; ' . htmlspecialchars(rh_sa_money((float)$saRow['payments_total'])); }
+                                                if ($saCk === 'refunds' && $saRow['refunds_total'] > 0) { echo ' &middot; ' . htmlspecialchars(rh_sa_money((float)$saRow['refunds_total'])); }
+                                            ?></strong>
+                                        </li>
+                                    <?php endforeach; ?>
+                                    <?php if (!$saAny): ?><li class="sa-card__none">Nothing recorded besides activity times.</li><?php endif; ?>
+                                </ul>
+                            </article>
+                        <?php endforeach; ?>
+                    </div>
+                    <?php if ($saSummary['limited']): ?><p class="sa__note">More people and days matched than fit here. Pick one person or a shorter range.</p><?php endif; ?>
+                <?php endif; ?>
+
+                <details class="sa__legend" open>
+                    <summary>What each figure counts</summary>
+                    <dl>
+                        <?php foreach ($saCounters as $saCl): ?>
+                            <div><dt><?php echo htmlspecialchars($saCl[0]); ?></dt><dd><?php echo htmlspecialchars($saCl[1]); ?></dd></div>
+                        <?php endforeach; ?>
+                    </dl>
+                    <p>Amounts are the full amount paid or refunded, shown in full; refunds are never netted off payments.</p>
+                </details>
+
+                <h4 class="sa__sub">What happened, newest first<?php echo $saF['type'] !== 'all' ? ' &mdash; ' . htmlspecialchars($saTypes[$saF['type']]) : ''; ?></h4>
+                <?php if (!$saTimeline['rows']): ?>
+                    <p class="log-empty">Nothing recorded for this choice. Try another day or &ldquo;Everything&rdquo;.</p>
+                <?php else: ?>
+                    <ol class="sa-timeline">
+                        <?php foreach ($saTimeline['rows'] as $saItem): ?>
+                            <li class="sa-item">
+                                <time class="sa-item__time" datetime="<?php echo htmlspecialchars(str_replace(' ', 'T', $saItem['ts'])); ?>" title="Recorded at this time."><?php echo $saSingleDay ? htmlspecialchars(substr($saItem['ts'], 11, 8)) : htmlspecialchars(date('D j M, H:i', strtotime($saItem['ts']))); ?></time>
+                                <div class="sa-item__body">
+                                    <div class="sa-item__what"><strong><?php echo htmlspecialchars($saItem['who']); ?></strong> &mdash; <?php echo htmlspecialchars($saItem['what']); ?></div>
+                                    <div class="sa-item__meta">
+                                        <span class="log-pill muted" title="The kind of work this line is."><?php echo htmlspecialchars($saTypes[$saItem['type']] ?? 'Other'); ?></span>
+                                        <span title="The screen or area it was done in."><?php echo htmlspecialchars($saItem['where']); ?></span>
+                                        <?php if (!empty($saItem['screen_save'])): ?><span class="sa-item__tag" title="Recorded automatically when a screen saved. It only says which screen and action, never what was typed.">screen save</span><?php endif; ?>
+                                        <?php if ($saLinkOk($saItem['link'])): ?>
+                                            <a href="<?php echo htmlspecialchars($saItem['link']['page'] . ($saItem['link']['query'] !== '' ? '?' . $saItem['link']['query'] : '')); ?>">Open</a>
+                                        <?php endif; ?>
+                                    </div>
+                                </div>
+                            </li>
+                        <?php endforeach; ?>
+                    </ol>
+                    <nav class="sa__pager" aria-label="Pages of the list">
+                        <?php if ($saF['page'] > 1): ?><a href="<?php echo htmlspecialchars($saUrl(['p' => $saF['page'] - 1])); ?>#staff-activity-results">&larr; Newer</a><?php endif; ?>
+                        <span>Page <?php echo (int)$saF['page']; ?></span>
+                        <?php if ($saTimeline['has_more'] && $saF['page'] * RH_SA_PER_PAGE < RH_SA_MAX_DEPTH): ?><a href="<?php echo htmlspecialchars($saUrl(['p' => $saF['page'] + 1])); ?>#staff-activity-results">Older &rarr;</a><?php endif; ?>
+                    </nav>
+                    <?php if ($saTimeline['has_more'] && $saF['page'] * RH_SA_PER_PAGE >= RH_SA_MAX_DEPTH): ?><p class="sa__note">Only the newest <?php echo (int)RH_SA_MAX_DEPTH; ?> lines can be paged through. Pick one person or a shorter range, or download the CSV.</p><?php endif; ?>
+                <?php endif; ?>
+
+                <p class="sa__note sa__retention">
+                    How far back the records go:
+                    <?php $saBits = []; foreach ($saRetention as $saLab => $saFirst) { $saBits[] = htmlspecialchars($saLab) . ' ' . ($saFirst ? 'from ' . htmlspecialchars(date('j M Y', strtotime((string)$saFirst))) : 'none yet'); } echo implode(' &middot; ', $saBits); ?>.
+                    This page never deletes anything. &ldquo;Screen saves&rdquo; are recorded from the day this feature was switched on; earlier work only shows where it has its own record.
+                    A screen save means the screen accepted the request; it is not proof the entry passed every check.
+                </p>
+            </div>
+        </section>
 
         <section class="log-attention" id="log-attention" aria-labelledby="log-attention-title">
             <div class="log-attention__head">
@@ -594,6 +793,13 @@ $attentionLinkOk = function (?array $link) use ($user) {
         <?php rh_presence_render_panel($pdo, (string)($user['role'] ?? ''), (int)$user['id']); /* Who's online: admin + manager only */ ?>
 
         <form method="get" class="log-toolbar" action="system-logs.php#log-events">
+            <?php if ($saF['filtered']): ?>
+                <input type="hidden" name="sa" value="1">
+                <input type="hidden" name="user" value="<?php echo (int)$saF['user']; ?>">
+                <input type="hidden" name="from" value="<?php echo htmlspecialchars($saF['from']); ?>">
+                <input type="hidden" name="to" value="<?php echo htmlspecialchars($saF['to']); ?>">
+                <input type="hidden" name="type" value="<?php echo htmlspecialchars($saF['type']); ?>">
+            <?php endif; ?>
             <label>Source
                 <select name="source">
                     <?php foreach ($sources as $source): ?>

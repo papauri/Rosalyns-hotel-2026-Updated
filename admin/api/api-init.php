@@ -77,9 +77,14 @@ if (isset($_rh_api_module_pages[$current_page])) {
     rhApiModuleGate($_rh_api_module_pages[$current_page]);
 }
 
+// Staff activity: one log row for a successful POST (page + action name only, never values). See admin/includes/activity-hook.php.
+require_once __DIR__ . '/../includes/activity-hook.php';
+rh_sa_hook_register();
+
 if (!function_exists('api_json_forbidden')) {
     function api_json_forbidden(string $message = 'Permission denied'): void
     {
+        $GLOBALS['rh_sa_refused'] = true;
         http_response_code(403);
         header('Content-Type: application/json');
         echo json_encode(['success' => false, 'error' => $message]);

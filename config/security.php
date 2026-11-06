@@ -189,7 +189,11 @@ function generateCsrfToken() {
  * @return bool True if valid, false otherwise
  */
 function validateCsrfToken($token) {
-    return isset($_SESSION['csrf_token']) && hash_equals($_SESSION['csrf_token'], $token);
+    $ok = isset($_SESSION['csrf_token']) && is_string($token) && hash_equals($_SESSION['csrf_token'], $token);
+    if (!$ok) {
+        $GLOBALS['rh_sa_refused'] = true; // staff activity hook: a refused request is not work (admin/includes/activity-hook.php)
+    }
+    return $ok;
 }
 
 /**

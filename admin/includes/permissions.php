@@ -2230,6 +2230,7 @@ function rhUserHomePage(int $user_id, string $role = ''): ?string
  */
 function rhDenyAndRedirectHome(int $user_id, string $role, string $current_page, string $error = 'access_denied'): void
 {
+    $GLOBALS['rh_sa_refused'] = true; // staff activity hook: a refused request is not work (admin/includes/activity-hook.php)
     $home = rhUserHomePage($user_id, $role);
     if ($home !== null && $home !== $current_page) {
         // Their main page opens with a friendly card naming the page they tried

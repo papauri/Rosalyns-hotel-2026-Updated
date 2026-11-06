@@ -53,6 +53,7 @@ $suites = [
     'Login by email'        => 'scripts/tests/login_email.php',
     'Licence client (switch-off for non-payment)' => 'scripts/tests/licence_client.php',
     'System logs summary'   => 'scripts/tests/system_logs.php',
+    'System logs staff activity (timeline, summary, hook)' => 'scripts/tests/system_logs_activity.php',
     'Payment limits'        => 'scripts/tests/payment_limits.php',
     'Rehearsal fixes'       => 'scripts/tests/rehearsal_fixes.php',
     'Shop returns + wording' => 'scripts/tests/shop_returns.php',
