@@ -139,6 +139,7 @@ check(!rh_licence_check_due(['last_check_at' => $NOW - 600, 'last_error' => 'x']
 
 // ================= 3. checking against a stub panel =================
 $keys = rh_licence_keys('licence_');
+$keys[] = rh_licence_key_setting(); // the portal-saved key row is restored / removed too
 $saved = [];
 foreach ($keys as $k) {
     $s = $pdo->prepare('SELECT setting_value FROM site_settings WHERE setting_key = ?'); $s->execute([$k]);
@@ -313,6 +314,92 @@ if ($up) {
     check($st['status'] === 'active' && $html === '', 'active: no banner');
     check(strpos(rh_licence_refusal_message(['status' => 'read_only']), 'Not saved') === 0, 'read-only refusal says it was not saved');
 check(rh_licence_refusal_message(['status' => 'suspended', 'contact' => 'ProManaged']) === 'Your system is paused because the subscription payment is overdue. Your data is safe. Please contact ProManaged to switch it back on.', 'suspended refusal is the short friendly message');
+
+    // 3k. licence key changed from the portal (owner 2026-11-07)
+    $ENVKEY = 'secret-test-key-123'; $NEWKEY = 'portal-key-ABCD-9999'; $OVR = rh_licence_key_setting();
+    $ovrRow = static function () use ($pdo, $OVR) { $q = $pdo->prepare('SELECT setting_value FROM site_settings WHERE setting_key = ?'); $q->execute([$OVR]); $v = $q->fetchColumn(); return $v === false ? null : (string)$v; };
+    $sentKey = static function () use ($stubDir) { $l = json_decode((string)@file_get_contents($stubDir . '/last.json'), true); return (json_decode((string)($l['body'] ?? ''), true)['key'] ?? null); };
+    rh_licence_store_write($pdo, 'last_issued_at', '0');
+    eq(null, $ovrRow(), 'key: no saved key to start with');
+    $ki = rh_licence_key_info();
+    check($ki['source'] === 'server' && $ki['key'] === $ENVKEY && $ki['hint'] === '…' . substr($ENVKEY, -4), 'key: with nothing saved the .env key is used; hint is only its last 4');
+    eq($ENVKEY, rh_licence_config()['key'], 'key: config key = .env key');
+    eq('', rh_licence_config(false)['key'], 'key: status path does not load the key');
+    // format refused before anything is sent
+    $serve(mk_token(['issued_at' => $NOW - 40], $KP['private']));
+    foreach (['', 'short', 'has space in it 123', str_repeat('a', 201)] as $badKey) {
+        $r = rh_licence_set_key($badKey);
+        check(!$r['ok'] && $ovrRow() === null && !file_exists($stubDir . '/last.json'), 'key: malformed key refused, panel not contacted, nothing saved');
+    }
+    // refused by the panel: nothing changes
+    $before = $store();
+    $beforeStatus = rh_licence_status(true)['status'];
+    foreach ([
+        'panel denies the key (403)' => [null, 403, '{"error":"bad_key"}'],
+        'another business key (answer for another tenant)' => [mk_token(['tenant' => 'someone-else', 'issued_at' => $NOW - 39], $KP['private']), 200, null],
+        'answer signed by another authority' => [mk_token(['issued_at' => $NOW - 39], $OTHER['private']), 200, null],
+        'answer for another domain' => [mk_token(['domain' => 'elsewhere.example', 'issued_at' => $NOW - 39], $KP['private']), 200, null],
+        'older answer (replay)' => [mk_token(['issued_at' => $NOW - 5000], $KP['private']), 200, null],
+        'garbage answer' => [null, 200, 'not json'],
+    ] as $why => $a) {
+        if ($why === 'older answer (replay)') { rh_licence_store_write($pdo, 'last_issued_at', (string)($NOW - 100)); $before = $store(); }
+        $serve($a[0], $a[1], $a[2]);
+        $r = rh_licence_set_key($NEWKEY);
+        $afterS = $store();
+        check(!$r['ok'] && $r['error'] !== '' && strpos($r['error'], $NEWKEY) === false && $sentKey() === $NEWKEY, "key test refused ($why): reason shown, key not in it, new key was the one tried");
+        check($ovrRow() === null && $afterS === $before && rh_licence_status(true)['status'] === $beforeStatus, "key test refused ($why): key not saved, stored token / errors / status untouched");
+    }
+    rh_licence_store_write($pdo, 'last_issued_at', '0');
+    // accepted: saved encrypted
+    $serve(mk_token(['paid_until' => $day(30), 'issued_at' => $NOW - 38], $KP['private']));
+    $r = rh_licence_set_key("  $NEWKEY  ");
+    check($r['ok'] && $r['status'] === 'active' && $sentKey() === $NEWKEY, 'key test accepted: saved, status from the verified answer', json_encode($r));
+    $raw = $ovrRow();
+    check($raw !== null && strpos($raw, 'lk1:') === 0 && strpos($raw, $NEWKEY) === false && strpos($raw, base64_encode($NEWKEY)) === false, 'key stored encrypted, not plain');
+    eq($NEWKEY, rh_licence_key_decrypt($raw), 'stored key decrypts back');
+    check(rh_licence_key_decrypt('lk1:' . base64_encode(str_repeat('x', 40))) === '' && rh_licence_key_decrypt('plain') === '', 'junk or plain values never decrypt to a key');
+    $ki = rh_licence_key_info();
+    check($ki['source'] === 'saved' && $ki['key'] === $NEWKEY && $ki['hint'] === '…9999' && strpos($ki['hint'], 'ABCD') === false, 'saved key wins over .env; hint shows only the last 4');
+    eq($NEWKEY, rh_licence_config()['key'], 'check-ins use the saved key');
+    $serve(mk_token(['issued_at' => $NOW - 37], $KP['private']));
+    $r = rh_licence_check_now();
+    check($r['ok'] && $sentKey() === $NEWKEY, 'a normal check sends the saved key, not the .env one');
+    check($store()['last_error'] === '' && strpos(json_encode($store()), $NEWKEY) === false, 'nothing stored in the licence rows contains the key');
+    // a later failed test leaves the saved key alone
+    $serve(null, 403, '{"error":"bad_key"}');
+    $r = rh_licence_set_key('another-wrong-key-0000');
+    check(!$r['ok'] && rh_licence_key_info()['key'] === $NEWKEY && $ovrRow() === $raw, 'failed test-and-save leaves the saved key exactly as it was');
+    // wrong key on a normal check never changes status
+    $stBefore = rh_licence_status(true)['status'];
+    $r = rh_licence_check_now();
+    check(!$r['ok'] && rh_licence_status(true)['status'] === $stBefore, 'a refused check (wrong key) never changes the status');
+    // clear: back to the .env key
+    eq(true, rh_licence_clear_key_override(), 'clear: saved key removed');
+    $ki = rh_licence_key_info();
+    check($ovrRow() === null && $ki['source'] === 'server' && $ki['key'] === $ENVKEY, 'clear: the .env key is used again');
+    $serve(mk_token(['issued_at' => $NOW - 36], $KP['private']));
+    $r = rh_licence_check_now();
+    check($r['ok'] && $sentKey() === $ENVKEY, 'after clear, checks send the .env key');
+    // an empty key anywhere: no unlock, no lock
+    $_ENV['LICENCE_KEY'] = ''; putenv('LICENCE_KEY=');
+    $stBefore = rh_licence_status(true)['status'];
+    $r = rh_licence_check_now();
+    check(!$r['ok'] && rh_licence_key_info()['source'] === 'none' && rh_licence_status(true)['status'] === $stBefore, 'no key at all: check fails with a reason, status unchanged');
+    $_ENV['LICENCE_KEY'] = $ENVKEY; putenv('LICENCE_KEY=' . $ENVKEY);
+    // licensing off: the portal key cannot be set or cleared
+    $_ENV['LICENCE_TENANT'] = ''; putenv('LICENCE_TENANT=');
+    @unlink($stubDir . '/last.json');
+    $serve(mk_token(['issued_at' => $NOW - 35], $KP['private']));
+    $r = rh_licence_set_key($NEWKEY);
+    check(!$r['ok'] && $ovrRow() === null && !rh_licence_clear_key_override() && !file_exists($stubDir . '/last.json'), 'licensing off: set / clear refused, panel not contacted, nothing saved');
+    $_ENV['LICENCE_TENANT'] = $TENANT; putenv('LICENCE_TENANT=' . $TENANT);
+    // the page: admin only, CSRF, hidden field, never echoes or logs the key, URL / tenant never settable
+    $pg = (string)file_get_contents($root . '/admin/licence.php');
+    $pAdmin = strpos($pg, "!== 'admin'"); $pAct = strpos($pg, "'change_key'"); $pCsrf = strpos($pg, 'validateCsrfToken');
+    check($pAdmin !== false && $pCsrf !== false && $pAct !== false && $pAdmin < $pCsrf && $pCsrf < $pAct, 'Licence page: admin check, then CSRF, then the key actions');
+    check(strpos($pg, 'type="password" id="licence_key"') !== false && strpos($pg, 'autocomplete="off"') !== false && strpos($pg, 'Test and save') !== false && strpos($pg, 'Use the server file key again') !== false, 'Licence page: password field, autocomplete off, Test and save, use-server-key button');
+    check(strpos($pg, "value=\"<?php echo \$h(\$_POST") === false && substr_count($pg, "\$_POST['licence_key']") === 1 && !preg_match('/LICENCE_(URL|TENANT)/', $pg) && strpos($pg, 'if ($st[\'configured\'])') !== false, 'Licence page: key never echoed back or logged, URL / tenant not settable, form only when licensing is on');
+    check(strpos($pg, 'The key your provider gave you (also called the API key)') !== false, 'Licence page: helper wording');
 $ping = is_file($root . '/api/licence-ping.php') ? (string)file_get_contents($root . '/api/licence-ping.php') : '';
 check(strpos($ping, 'rh_licence_nudge();') !== false && strpos($ping, "echo '{\"ok\":true}';") !== false && strpos($ping, 'rh_licence_status') === false, 'ping endpoint only nudges and always answers the same (reveals nothing)');
     check(strpos(rh_licence_refusal_message(['status' => 'suspended']), 'data is safe') !== false, 'locked message says the data is safe');

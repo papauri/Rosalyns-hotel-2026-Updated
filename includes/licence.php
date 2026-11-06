@@ -9,6 +9,9 @@
  *
  * Config (env only, never a setting): LICENCE_URL (the panel's api/licence.php), LICENCE_TENANT, LICENCE_KEY,
  * optional LICENCE_CONTACT (the name/phone shown to staff in the banner).
+ * The one exception is the licence key: an administrator can save a replacement on the Licence page (setting
+ * licence_key_override, encrypted). It wins over LICENCE_KEY and is saved only after the panel accepts it
+ * (rh_licence_set_key); URL and tenant can never be changed from the portal.
  *
  * Storage (site_settings, read fresh from the database, never through the file cache):
  *   licence_token            JSON {payload, sig} - the last answer that VERIFIED (signature, tenant, domain, not older)
@@ -26,6 +29,7 @@
 
 require_once __DIR__ . '/licence-verify.php';
 require_once __DIR__ . '/licence-public-key.php';
+require_once __DIR__ . '/secret-salt.php';
 
 if (!function_exists('rh_licence_env')) {
 
@@ -54,15 +58,115 @@ if (!function_exists('rh_licence_env')) {
         return $key !== '' && rh_licence_is_enabled($key, rh_licence_env('LICENCE_TENANT'));
     }
 
-    /** @return array{url:string,tenant:string,key:string,contact:string} */
-    function rh_licence_config(): array
+    /**
+     * @param bool $withKey false skips reading the key (the per-request status never needs it, so no extra query)
+     * @return array{url:string,tenant:string,key:string,contact:string}
+     */
+    function rh_licence_config(bool $withKey = true): array
     {
         return [
             'url'     => rh_licence_env('LICENCE_URL'),
             'tenant'  => rh_licence_env('LICENCE_TENANT'),
-            'key'     => rh_licence_env('LICENCE_KEY'),
+            'key'     => $withKey ? rh_licence_key_info()['key'] : '',
             'contact' => rh_licence_env('LICENCE_CONTACT'),
         ];
+    }
+
+    // ------------------------------------------------------------------ the licence key (portal override)
+
+    /** Setting that holds a licence key saved from the Licence page (encrypted). LICENCE_URL and LICENCE_TENANT can never be set this way. */
+    function rh_licence_key_setting(): string
+    {
+        return 'licence_key_override';
+    }
+
+    function rh_licence_key_crypto_key(?string $salt = null): string
+    {
+        return hash('sha256', 'licence-key|' . ($salt ?? rhSecretSalt()), true);
+    }
+
+    /** Stored as "lk1:" + base64(iv . ciphertext), same scheme as the WhatsApp token (APP_ENCRYPTION_SALT, old default readable). */
+    function rh_licence_key_encrypt(string $plain): string
+    {
+        $iv = random_bytes(16);
+        $cipher = openssl_encrypt($plain, 'AES-256-CBC', rh_licence_key_crypto_key(), OPENSSL_RAW_DATA, $iv);
+        return 'lk1:' . base64_encode($iv . (string)$cipher);
+    }
+
+    /** @return string the plain key, or '' when it cannot be read */
+    function rh_licence_key_decrypt(string $stored): string
+    {
+        if (strpos($stored, 'lk1:') !== 0) {
+            return '';
+        }
+        $raw = base64_decode(substr($stored, 4), true);
+        if ($raw === false || strlen($raw) <= 16) {
+            return '';
+        }
+        return rhDecryptWithSalts(substr($raw, 16), substr($raw, 0, 16), 'rh_licence_key_crypto_key');
+    }
+
+    /** The saved override read fresh from the database (never cached). '' when none or unreadable. */
+    function rh_licence_key_override(): string
+    {
+        $pdo = $GLOBALS['pdo'] ?? null;
+        if (!($pdo instanceof PDO)) {
+            return '';
+        }
+        try {
+            $st = $pdo->prepare('SELECT setting_value FROM site_settings WHERE setting_key = ?');
+            $st->execute([rh_licence_key_setting()]);
+            $v = $st->fetchColumn();
+            return is_string($v) && $v !== '' ? rh_licence_key_decrypt($v) : '';
+        } catch (Throwable $e) {
+            error_log('licence key read: ' . $e->getMessage());
+            return '';
+        }
+    }
+
+    /** Last four characters only, for the Licence page. Short keys show nothing. */
+    function rh_licence_key_hint(string $key): string
+    {
+        return strlen($key) >= 8 ? '…' . substr($key, -4) : '';
+    }
+
+    /**
+     * The key check-ins use: the one saved on the Licence page if present, else LICENCE_KEY from .env.
+     * @return array{key:string,source:string,hint:string} source is saved|server|none
+     */
+    function rh_licence_key_info(): array
+    {
+        $saved = rh_licence_key_override();
+        if ($saved !== '') {
+            return ['key' => $saved, 'source' => 'saved', 'hint' => rh_licence_key_hint($saved)];
+        }
+        $env = rh_licence_env('LICENCE_KEY');
+        return ['key' => $env, 'source' => $env !== '' ? 'server' : 'none', 'hint' => rh_licence_key_hint($env)];
+    }
+
+    /** Write or (with null) delete the saved key. Clears any cached copy. */
+    function rh_licence_key_override_write(PDO $pdo, ?string $plain): bool
+    {
+        $key = rh_licence_key_setting();
+        try {
+            if ($plain === null) {
+                $pdo->prepare('DELETE FROM site_settings WHERE setting_key = ?')->execute([$key]);
+            } else {
+                $pdo->prepare('INSERT INTO site_settings (setting_key, setting_value) VALUES (?, ?)
+                               ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = CURRENT_TIMESTAMP')
+                    ->execute([$key, rh_licence_key_encrypt($plain)]);
+            }
+            if (isset($GLOBALS['_SITE_SETTINGS'][$key])) {
+                unset($GLOBALS['_SITE_SETTINGS'][$key]);
+            }
+            if (function_exists('deleteCache')) {
+                deleteCache("setting_{$key}");
+            }
+            return true;
+        } catch (Throwable $e) {
+            error_log('licence key write: ' . $e->getMessage());
+            return false;
+        }
     }
 
     /** This site's domain: the host of the site_url setting, normalised exactly as the panel does. */
@@ -223,7 +327,7 @@ if (!function_exists('rh_licence_env')) {
                 'payload' => null, 'business_type' => null, 'modules' => null, 'dates' => [], 'configured' => false,
                 'last_check_at' => 0, 'last_error' => '', 'last_issued_at' => 0, 'contact' => ''];
         }
-        $cfg = rh_licence_config();
+        $cfg = rh_licence_config(false);
         $res = ['status' => 'active', 'reason' => 'error', 'message' => '', 'source' => 'fallback', 'issued_at' => null,
             'payload' => null, 'business_type' => null, 'modules' => null];
         $stored = ['token' => '', 'last_issued_at' => 0, 'last_check_at' => 0, 'last_error' => ''];
@@ -367,35 +471,13 @@ if (!function_exists('rh_licence_env')) {
                 $res['status'] = rh_licence_status(true)['status'];
                 return $res;
             };
-            if ($cfg['url'] === '' || $cfg['key'] === '') {
-                return $fail('LICENCE_URL or LICENCE_KEY is not set in this site\'s .env.');
+            $a = rh_licence_ask_panel($cfg, $domain, $stored['last_issued_at'], $now, $timeout);
+            if (!$a['ok']) {
+                return $fail($a['error']);
             }
-            if ($domain === '') {
-                return $fail('The site address (site_url setting) is empty, so the licence cannot be matched to this site.');
-            }
-            $body = json_encode(['tenant' => $cfg['tenant'], 'domain' => $domain, 'key' => $cfg['key'],
-                'version' => 'pms-' . date('Ymd', (int)@filemtime(__FILE__))], JSON_UNESCAPED_SLASHES);
-            $http = rh_licence_http_post($cfg['url'], (string)$body, $timeout);
-            if ($http['error'] !== '') {
-                return $fail('Could not reach the licence service: ' . $http['error'] . '.');
-            }
-            $answer = json_decode($http['body'], true);
-            if ($http['code'] !== 200 || !is_array($answer)) {
-                $code = (is_array($answer) && isset($answer['error']) && is_string($answer['error']) && preg_match('/^[a-z_]{1,30}$/', $answer['error']))
-                    ? ' (' . $answer['error'] . ')' : '';
-                return $fail('The licence service answered HTTP ' . $http['code'] . $code . '.');
-            }
-            $v = rh_licence_accept($answer, rh_licence_public_key(), $cfg['tenant'], $domain, $stored['last_issued_at'], $now);
-            if (!$v['ok']) {
-                return $fail('The licence service answer was not accepted (' . rh_licence_reason_words((string)$v['reason']) . ').');
-            }
-            // Token first, then the anti-replay number: a crash between them leaves a token that still verifies.
-            $tokenJson = json_encode(['payload' => $answer['payload'], 'sig' => $answer['sig']], JSON_UNESCAPED_SLASHES);
-            if (!rh_licence_store_write($pdo, 'token', (string)$tokenJson)) {
+            if (!rh_licence_store_accepted($pdo, $a['answer'], $a['payload'], $stored['last_issued_at'])) {
                 return $fail('The licence answer could not be saved.');
             }
-            rh_licence_store_write($pdo, 'last_issued_at', (string)max($stored['last_issued_at'], (int)$v['payload']['issued_at']));
-            rh_licence_store_write($pdo, 'last_error', '');
             $res['ok'] = true;
             $res['status'] = rh_licence_status(true)['status'];
             return $res;
@@ -408,6 +490,134 @@ if (!function_exists('rh_licence_env')) {
                 try { $pdo->query("SELECT RELEASE_LOCK('rh_licence_check')")->fetchColumn(); } catch (Throwable $e) { /* released at disconnect */ }
             }
         }
+    }
+
+    /**
+     * One real check-in with the key in $cfg['key']: send it, verify the signed answer (signature, tenant, domain, anti-replay).
+     * Stores nothing. Error texts never contain the key.
+     *
+     * @return array{ok:bool,error:string,answer:?array,payload:?array}
+     */
+    function rh_licence_ask_panel(array $cfg, string $domain, int $lastIssuedAt, int $now, int $timeout = 6): array
+    {
+        $out = ['ok' => false, 'error' => '', 'answer' => null, 'payload' => null];
+        if ($cfg['url'] === '' || $cfg['key'] === '') {
+            $out['error'] = $cfg['url'] === '' ? 'LICENCE_URL is not set in this site\'s .env.' : 'There is no licence key yet. Save one on the Licence page or set LICENCE_KEY in this site\'s .env.';
+            return $out;
+        }
+        if ($domain === '') {
+            $out['error'] = 'The site address (site_url setting) is empty, so the licence cannot be matched to this site.';
+            return $out;
+        }
+        $body = json_encode(['tenant' => $cfg['tenant'], 'domain' => $domain, 'key' => $cfg['key'],
+            'version' => 'pms-' . date('Ymd', (int)@filemtime(__FILE__))], JSON_UNESCAPED_SLASHES);
+        $http = rh_licence_http_post($cfg['url'], (string)$body, $timeout);
+        if ($http['error'] !== '') {
+            $out['error'] = 'Could not reach the licence service: ' . $http['error'] . '.';
+            return $out;
+        }
+        $answer = json_decode($http['body'], true);
+        if ($http['code'] !== 200 || !is_array($answer)) {
+            $code = (is_array($answer) && isset($answer['error']) && is_string($answer['error']) && preg_match('/^[a-z_]{1,30}$/', $answer['error']))
+                ? ' (' . $answer['error'] . ')' : '';
+            $out['error'] = 'The licence service answered HTTP ' . $http['code'] . $code . '.';
+            return $out;
+        }
+        $v = rh_licence_accept($answer, rh_licence_public_key(), $cfg['tenant'], $domain, $lastIssuedAt, $now);
+        if (!$v['ok']) {
+            $out['error'] = 'The licence service answer was not accepted (' . rh_licence_reason_words((string)$v['reason']) . ').';
+            return $out;
+        }
+        return ['ok' => true, 'error' => '', 'answer' => $answer, 'payload' => (array)$v['payload']];
+    }
+
+    /** Store a VERIFIED answer: token first, then the anti-replay number (a crash between them leaves a token that still verifies), then clear the error. */
+    function rh_licence_store_accepted(PDO $pdo, array $answer, array $payload, int $lastIssuedAt): bool
+    {
+        $tokenJson = json_encode(['payload' => $answer['payload'], 'sig' => $answer['sig']], JSON_UNESCAPED_SLASHES);
+        if (!rh_licence_store_write($pdo, 'token', (string)$tokenJson)) {
+            return false;
+        }
+        rh_licence_store_write($pdo, 'last_issued_at', (string)max($lastIssuedAt, (int)$payload['issued_at']));
+        rh_licence_store_write($pdo, 'last_error', '');
+        return true;
+    }
+
+    /** Characters allowed in a licence key (also what the stored copy can round-trip). */
+    function rh_licence_key_valid(string $key): bool
+    {
+        return strlen($key) >= 8 && strlen($key) <= 200 && preg_match('/^[\x21-\x7E]+$/', $key) === 1;
+    }
+
+    /**
+     * Test a new licence key with a real check-in and save it ONLY if the panel accepts it (verified signed answer for THIS
+     * tenant and domain). On any failure nothing is written: not the key, not the stored status, not the error record.
+     * Needs licensing switched on; LICENCE_URL and LICENCE_TENANT are always the .env ones.
+     *
+     * @return array{ok:bool,error:string,status:string}
+     */
+    function rh_licence_set_key(string $newKey, int $timeout = 6): array
+    {
+        $res = ['ok' => false, 'error' => '', 'status' => ''];
+        $pdo = $GLOBALS['pdo'] ?? null;
+        $locked = false;
+        try {
+            if (!rh_licence_enabled()) {
+                $res['error'] = 'Licensing is not switched on for this site.';
+                return $res;
+            }
+            $newKey = trim($newKey);
+            if (!rh_licence_key_valid($newKey)) {
+                $res['error'] = 'That does not look like a licence key (8 to 200 letters, numbers or symbols, no spaces).';
+                return $res;
+            }
+            if (!($pdo instanceof PDO)) {
+                $res['error'] = 'No database connection.';
+                return $res;
+            }
+            try {
+                $locked = (int)$pdo->query("SELECT GET_LOCK('rh_licence_check', 0)")->fetchColumn() === 1;
+            } catch (Throwable $e) {
+                $locked = false;
+            }
+            if (!$locked) {
+                $res['error'] = 'Another check is already running. Try again in a moment.';
+                return $res;
+            }
+            $now = time();
+            $stored = rh_licence_store_read($pdo);
+            $cfg = rh_licence_config(false);
+            $cfg['key'] = $newKey;
+            $a = rh_licence_ask_panel($cfg, rh_licence_site_domain(), $stored['last_issued_at'], $now, $timeout);
+            if (!$a['ok']) {
+                $res['error'] = $a['error'];
+                return $res;
+            }
+            if (!rh_licence_key_override_write($pdo, $newKey)) {
+                $res['error'] = 'The key was accepted but could not be saved. The old key is still in use.';
+                return $res;
+            }
+            rh_licence_store_accepted($pdo, $a['answer'], $a['payload'], $stored['last_issued_at']);
+            rh_licence_store_write($pdo, 'last_check_at', (string)$now);
+            $res['ok'] = true;
+            $res['status'] = rh_licence_status(true)['status'];
+            return $res;
+        } catch (Throwable $e) {
+            error_log('licence set key: ' . $e->getMessage());
+            $res['error'] = 'The key could not be tested. Nothing was changed.';
+            return $res;
+        } finally {
+            if ($locked && $pdo instanceof PDO) {
+                try { $pdo->query("SELECT RELEASE_LOCK('rh_licence_check')")->fetchColumn(); } catch (Throwable $e) { /* released at disconnect */ }
+            }
+        }
+    }
+
+    /** Drop the key saved on the Licence page so check-ins use LICENCE_KEY from .env again. Changes no status. */
+    function rh_licence_clear_key_override(): bool
+    {
+        $pdo = $GLOBALS['pdo'] ?? null;
+        return rh_licence_enabled() && $pdo instanceof PDO && rh_licence_key_override_write($pdo, null);
     }
 
     /** Minutes between automatic checks: LICENCE_CHECK_MINUTES in .env, default 60 (an hourly safety net; the panel also nudges the site straight after any change). 5 to 1440. */

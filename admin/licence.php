@@ -43,6 +43,34 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 logActivity($user['id'], 'licence_check', 'Licence checked from the Licence page: ' . ($r['ok'] ? 'accepted' : 'not accepted'));
             }
         } catch (Throwable $e) { /* logging never blocks */ }
+    } elseif (($_POST['action'] ?? '') === 'change_key' || ($_POST['action'] ?? '') === 'clear_key') {
+        // Administrators only (checked above) and only on a licensed site. The key itself is never logged or shown back.
+        $act = (string)$_POST['action'];
+        if (!rh_licence_enabled()) {
+            $_SESSION['licence_flash_err'] = 'Licensing is not switched on for this site, so there is no key to change.';
+        } elseif ($act === 'change_key') {
+            $r = rh_licence_set_key((string)($_POST['licence_key'] ?? ''));
+            if ($r['ok']) {
+                $_SESSION['licence_flash_ok'] = 'The new licence key was accepted by the licence service and saved.';
+            } else {
+                $_SESSION['licence_flash_err'] = ($r['error'] !== '' ? $r['error'] : 'The key could not be tested.') . ' The old key is still in use.';
+            }
+            $logLine = 'Licence key change from the Licence page: ' . ($r['ok'] ? 'tested and saved' : 'refused, old key kept');
+        } else {
+            if (rh_licence_clear_key_override()) {
+                $r = rh_licence_check_now();
+                $_SESSION['licence_flash_ok'] = 'The key saved here was removed. The key from the server settings file is used again'
+                    . ($r['ok'] ? ' and the licence service accepted it.' : '. Checking it just now did not succeed: ' . $r['error']);
+            } else {
+                $_SESSION['licence_flash_err'] = 'The saved key could not be removed. Nothing was changed.';
+            }
+            $logLine = 'Licence key saved here removed; server file key in use again';
+        }
+        try {
+            if (function_exists('logActivity') && !empty($logLine)) {
+                logActivity($user['id'], 'licence_key', $logLine);
+            }
+        } catch (Throwable $e) { /* logging never blocks */ }
     }
     header('Location: licence.php', true, 303);
     exit;
@@ -64,6 +92,8 @@ $statusLabels = [
 $d = (array)$st['dates'];
 $payload = is_array($st['payload']) ? $st['payload'] : [];
 $modules = (isset($st['modules']) && is_array($st['modules'])) ? $st['modules'] : null;
+$keyInfo = $st['configured'] ? rh_licence_key_info() : ['key' => '', 'source' => 'none', 'hint' => ''];
+$keySourceWords = ['saved' => 'saved here', 'server' => 'from the server settings file', 'none' => 'not set'];
 $sourceWords = ['server' => 'the licence service', 'server_override' => 'set by hand at the licence service', 'schedule' => 'the payment dates (the last answer is old)', 'fallback' => 'no licence answer yet', 'none' => '—'];
 ?>
 <!DOCTYPE html>
@@ -142,6 +172,37 @@ $sourceWords = ['server' => 'the licence service', 'server_override' => 'set by 
                 <?php endif; ?>
             </div>
         </section>
+
+        <?php if ($st['configured']): ?>
+        <section class="rh-panel">
+            <div class="rh-panel__head">
+                <h2 class="rh-panel__title">Licence key</h2>
+            </div>
+            <div class="rh-panel__body">
+                <p style="margin:0 0 .75rem">The key your provider gave you (also called the API key). The system uses it every time it asks the licence service for your licence.</p>
+                <table class="rh-kv">
+                    <tr><th scope="row">Current key</th><td><?php echo $keyInfo['hint'] !== '' ? 'ends in ' . $h($keyInfo['hint']) : ($keyInfo['source'] === 'none' ? 'none' : 'hidden'); ?> (<?php echo $h($keySourceWords[$keyInfo['source']] ?? ''); ?>)<br><small>Only the last four characters are ever shown.</small></td></tr>
+                </table>
+                <form method="POST" action="licence.php" autocomplete="off" style="margin-top:1rem">
+                    <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
+                    <input type="hidden" name="action" value="change_key">
+                    <div class="form-group">
+                        <label for="licence_key">Change licence key</label>
+                        <input type="password" id="licence_key" name="licence_key" class="form-control" autocomplete="off" maxlength="200" required>
+                        <small>The new key is tried with the licence service first. It is saved only if the service accepts it; otherwise the old key stays.</small>
+                    </div>
+                    <button type="submit" class="btn btn-primary">Test and save</button>
+                </form>
+                <?php if ($keyInfo['source'] === 'saved'): ?>
+                    <form method="POST" action="licence.php" style="margin-top:.75rem" onsubmit="return confirm('Go back to the key in the server settings file?');">
+                        <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
+                        <input type="hidden" name="action" value="clear_key">
+                        <button type="submit" class="btn btn-secondary" data-help="Use the server file key again|Removes the key saved here. Checks go back to using the key in this site's server settings file.">Use the server file key again</button>
+                    </form>
+                <?php endif; ?>
+            </div>
+        </section>
+        <?php endif; ?>
     </div>
 
     <?php require_once 'includes/admin-footer.php'; ?>

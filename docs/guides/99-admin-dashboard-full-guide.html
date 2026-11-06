@@ -411,6 +411,15 @@
     <li><strong>Check now</strong> asks the licence service for the latest answer straight away. Use it after a payment has been recorded.</li>
   </ul>
 
+  <h3>Changing the licence key</h3>
+  <p>The licence key (also called the API key) is the key your provider gave you. If you are given a new one, you can change it yourself on the Licence page without anyone touching the server. Only administrators see this.</p>
+  <ol>
+    <li>Open <strong>Licence</strong> and find the <strong>Licence key</strong> box. It shows only the last four characters of the key in use and where it comes from (<em>saved here</em> or <em>from the server settings file</em>).</li>
+    <li>Type or paste the new key in <strong>Change licence key</strong> and press <strong>Test and save</strong>.</li>
+    <li>The system tries the new key with the licence service first. It is saved only if the service accepts it. If not, you see the reason and the old key stays in use, so a wrong key cannot lock or unlock anything.</li>
+    <li>To go back to the key in the server settings file, press <strong>Use the server file key again</strong>.</li>
+  </ol>
+
   <h3>The overdue warning</h3>
   <p>When the payment is overdue, a banner shows at the top of every admin page: <em>"Payment overdue &mdash; the system will become read-only on [date] (N days left)."</em> The banner also says who to contact. Everything still works until the read-only date. Click <strong>Licence details</strong> in the banner to see the dates.</p>
 
