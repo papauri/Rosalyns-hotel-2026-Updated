@@ -27,6 +27,7 @@ header('Content-Type: application/json');
 require_once __DIR__ . '/../../config/database.php';
 require_once __DIR__ . '/../../config/security.php'; // validateCsrfToken()
 require_once __DIR__ . '/../includes/permissions.php';
+require_once __DIR__ . '/../../includes/licence-guard.php'; rh_licence_guard_request(); // licence: read-only / locked; does nothing unless this build is licensed
 
 // Include cache configuration - FIXED PATH
 require_once __DIR__ . '/../../config/cache.php';

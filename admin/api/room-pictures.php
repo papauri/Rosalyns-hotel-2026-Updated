@@ -27,6 +27,7 @@ require_once __DIR__ . '/../includes/permissions.php';
 // Start session and enforce admin auth/permission
 require_once __DIR__ . '/../../includes/admin-session.php';
 rh_admin_session_start(); // 8h idle sign-out
+require_once __DIR__ . '/../../includes/licence-guard.php'; rh_licence_guard_request(); // licence: read-only / locked; does nothing unless this build is licensed
 
 if (!isset($_SESSION['admin_user_id'])) {
     sendError('Authentication required', 401);

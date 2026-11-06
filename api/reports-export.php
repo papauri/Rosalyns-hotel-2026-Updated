@@ -31,6 +31,7 @@ if (!in_array($_exportRole, ['admin', 'manager', 'accountant'], true)) {
 }
 
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../includes/licence-guard.php'; rh_licence_guard_request(); // licence: read-only / locked; does nothing unless this build is licensed
 require_once __DIR__ . '/../admin/includes/finance-schema.php';
 require_once __DIR__ . '/../includes/conference-pricing.php';
 require_once __DIR__ . '/../admin/includes/permissions.php';

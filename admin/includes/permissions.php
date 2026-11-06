@@ -1052,6 +1052,15 @@ function getAllPermissions()
             'page' => 'stock-clear.php',
             'group' => 'settings_advanced'
         ],
+        // Licence status (2026-11-07): administrator role only. Not in any role default; the page also hard-checks role === 'admin'.
+        'licence' => [
+            'label' => 'Licence',
+            'description' => 'See the licence status, payment dates and check the licence now. Administrator accounts only',
+            'icon' => 'fa-id-card',
+            'category' => 'Settings',
+            'page' => 'licence.php',
+            'group' => 'settings_advanced'
+        ],
         'backup_management' => [
             'label' => 'Backup Management',
             'description' => 'Run, download and restore database backups',
@@ -1629,6 +1638,7 @@ function getPermissionForPage(string $page)
         'ai-action.php' => 'ai_assistant_actions', // admin/api/ai-action.php (Assistant, Phase 2)
         'data-import.php' => 'data_import',        // Import page (Phase 1b-UI); also needs stock_management for the stock target
         'stock-clear.php' => 'data_reset',         // Clear Stock Data (administrator role only)
+        'licence.php' => 'licence',                // Licence status (administrator role only)
         'user-management.php' => 'user_management',
         'process-checkin.php' => 'bookings',
         // Unmapped before: reachable by any signed-in user by URL. Keys match the nav entries in admin-header.php.

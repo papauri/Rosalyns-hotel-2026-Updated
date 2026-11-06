@@ -48,6 +48,10 @@ $user = [
 $current_page = basename($_SERVER['PHP_SELF']);
 $csrf_token = generateCsrfToken();
 
+// Licence (does nothing unless this build is licensed; see includes/licence-guard.php)
+require_once __DIR__ . '/../../includes/licence-guard.php';
+rh_licence_guard_request();
+
 // Load permissions system
 require_once __DIR__ . '/../includes/permissions.php';
 

@@ -22,6 +22,7 @@ require_once __DIR__ . '/../includes/station-hours.php';
 require_once __DIR__ . '/../admin/includes/permissions.php';
 require_once __DIR__ . '/../includes/admin-session.php';
 rh_admin_session_start(); // 8h idle sign-out
+require_once __DIR__ . '/../includes/licence-guard.php'; rh_licence_guard_request(); // licence: read-only / locked; does nothing unless this build is licensed
 
 function pn_err(string $m, int $code = 400): void
 {

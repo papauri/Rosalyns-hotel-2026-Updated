@@ -119,6 +119,10 @@ if (!function_exists('_renderNavLink')) {
 // Nav structure: see admin-nav-items.php (shared with the staff guides knowledge base).
 require_once __DIR__ . '/admin-nav-items.php';
 $_nav_groups = rh_admin_nav_groups();
+// Licence page: shown to the administrator role only, and only where this build is licensed (nothing changes elsewhere).
+if (function_exists('rh_licence_enabled') && rh_licence_enabled() && (string)($user['role'] ?? '') === 'admin' && isset($_nav_groups['Settings'])) {
+    $_nav_groups['Settings'][] = ['licence.php', 'fas fa-id-card', 'Licence', 'licence', '', null];
+}
 
 // Groups that start folded until the user opens them.
 $_nav_default_collapsed = ['Help'];
@@ -493,6 +497,7 @@ if ($_admin_back_target !== null) {
 <?php /** @var string $csrf_token */ ?>
 <div id="rh-admin-page">
     <?php require __DIR__ . '/access-notice.php'; /* friendly card after a "no access" redirect */ ?>
+    <?php if (function_exists('rh_licence_render_banner')) { rh_licence_render_banner(); /* overdue-payment notice; prints nothing unless this build is licensed and overdue */ } ?>
     <?php if ($_admin_back_target !== null && $_admin_back_label !== ''): ?>
         <div class="content admin-back-row">
             <a href="<?php echo htmlspecialchars((string)$_admin_back_target['href']); ?>" class="btn btn-secondary btn-sm" aria-label="<?php echo htmlspecialchars($_admin_back_label); ?>">

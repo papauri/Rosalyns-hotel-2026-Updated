@@ -23,6 +23,7 @@ require_once __DIR__ . '/../../config/database.php';
 require_once __DIR__ . '/../../config/security.php';
 require_once __DIR__ . '/../../config/cache.php';
 require_once __DIR__ . '/../includes/permissions.php';
+require_once __DIR__ . '/../../includes/licence-guard.php'; rh_licence_guard_request(); // licence: read-only / locked; does nothing unless this build is licensed
 require_once __DIR__ . '/../../includes/reviews-display.php'; // rh_review_source_meta(), rh_clear_review_caches(), rh_review_platform_key()
 require_once __DIR__ . '/../../includes/review-sources.php';   // key storage, http_json(), Google place lookup
 

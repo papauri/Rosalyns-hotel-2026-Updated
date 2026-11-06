@@ -23,6 +23,7 @@ require_once __DIR__ . '/../includes/permissions.php';
 // Start session for admin authentication
 require_once __DIR__ . '/../../includes/admin-session.php';
 rh_admin_session_start(); // 8h idle sign-out
+require_once __DIR__ . '/../../includes/licence-guard.php'; rh_licence_guard_request(); // licence: read-only / locked; does nothing unless this build is licensed
 
 // Helper function to send JSON response
 function sendResponse($data, $statusCode = 200)

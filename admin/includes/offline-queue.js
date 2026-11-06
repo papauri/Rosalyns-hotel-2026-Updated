@@ -176,6 +176,10 @@
     }
 
     let flushing = null;
+    /* Entries the licence refused (system read-only or locked for an unpaid licence, HTTP 423 or 403 with X-RH-Licence).
+     * A refusal is final until the licence is paid: the entry stays on this device (it is a sale or payment that was NOT
+     * recorded) but is not sent again on every reconnect - only after the page is reloaded. */
+    const licenceRefused = new Set();
 
     function flush() {
         if (!navigator.onLine) return Promise.resolve();
@@ -190,6 +194,8 @@
 
     async function doFlush() {
         let rejected = 0;
+        let licenceHeld = 0;   // refused by the licence, kept on this device, not re-sent
+        let licenceNew = 0;    // refused by the licence just now
         try {
             // Only this person's entries; another person's wait for them to sign in (see isMine).
             const items = (await stats()).mine;
@@ -199,6 +205,7 @@
             // token of the session that is replaying it now (printed on every admin page).
             const freshCsrf = window.RH_OFFLINE_CSRF || window._rhCsrf || '';
             for (const it of items) {
+                if (licenceRefused.has(it.id)) { licenceHeld++; continue; }
                 try {
                     const fd = new FormData();
                     for (const [k, v] of (it.fields || [])) fd.append(k, (k === 'csrf_token' && freshCsrf) ? freshCsrf : v);
@@ -220,7 +227,12 @@
                         notify('Session expired — log in again to sync ' + items.length + ' queued action(s).', 'error');
                         break;
                     }
-                    if (resp.status === 409) {
+                    if (resp.status === 423 || (resp.status === 403 && resp.headers.get('X-RH-Licence'))) {
+                        // Licence refusal (read-only / locked): nothing was recorded. Keep it, do not retry it every time.
+                        licenceRefused.add(it.id);
+                        licenceNew++;
+                        licenceHeld++;
+                    } else if (resp.status === 409) {
                         // 409 Conflict means server already processed this UUID (duplicate) — safe to drop.
                         await deleteEntry(it.id);
                     } else if (resp.status >= 500) {
@@ -245,6 +257,9 @@
             }
         } catch (e) {
             // IndexedDB unreadable: nothing to send this time.
+        }
+        if (licenceNew > 0 || (licenceHeld > 0 && rejected === 0)) {
+            notify(licenceHeld + ' saved sale(s) or payment(s) were NOT recorded: the system is read-only or locked because the licence payment is overdue. They stay saved on this device. Ask the manager or the system owner before taking the money again.', 'error');
         }
         if (rejected > 0) {
             notify(rejected + ' queued action(s) were refused by the server and are still saved on this device - nothing was recorded for them. Ask a manager before taking the money again.', 'error');
