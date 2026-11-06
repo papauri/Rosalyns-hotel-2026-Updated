@@ -37,6 +37,7 @@
       <li><a href="#dashboard">The Dashboard</a></li>
       <li><a href="#menu-table">Every menu item</a></li>
       <li><a href="#backups">Backups</a></li>
+      <li><a href="#licence">Licence and payment status</a></li>
       <li><a href="#modules">Modules</a></li>
       <li><a href="#cache">Cache</a></li>
       <li><a href="#logs">System Logs</a></li>
@@ -352,6 +353,7 @@
       <tr><td>WhatsApp Settings</td><td>WhatsApp connection.</td><td>WhatsApp Settings</td><td><a href="11-social-facebook-sharing.html">Facebook and WhatsApp</a></td></tr>
       <tr><td>Staff &amp; Access</td><td>Staff accounts and what each person may do.</td><td>User Management</td><td><a href="18-staff-access.html">Staff &amp; Access</a></td></tr>
       <tr><td>Modules</td><td>Switch whole areas on or off; business presets.</td><td>Module Settings</td><td><a href="16-business-presets.html">Modules and business presets</a></td></tr>
+      <tr><td>Licence</td><td>Licence status, payment dates and a Check now button. Only on a licensed business.</td><td>Administrator accounts only</td><td><a href="#licence">Licence and payment status, below</a></td></tr>
       <tr><td>Backups</td><td>Database backups.</td><td>Backup Management</td><td><a href="#backups">Backups, below</a></td></tr>
       <tr><td>API Keys</td><td>Keys that let outside websites use the hotel's booking system.</td><td>API Keys</td><td><a href="#apikeys">API Keys, below</a></td></tr>
       <tr><td>System Logs</td><td>A record of what happened in the system.</td><td>System Logs</td><td><a href="#logs">System Logs, below</a></td></tr>
@@ -396,6 +398,49 @@
     <li><strong>Emails</strong> go to the <strong>Admin email</strong> set in <strong>Email Settings</strong>. If no admin email is set, no emails go out, so set one there. The system sends an email when a backup fails (at most once a day), when no backup has been made for 36 hours (at most once a day), and a weekly reminder to download a copy and keep it off the server, if no copy has been downloaded for 7 days. The backup file itself is never emailed, because it holds guest data.</li>
   </ul>
   <div class="warn"><p>A restore replaces everything in the live system with the older copy. Anything done since that backup is lost. Download a copy of a backup every week and keep it away from the server. A backup that is only on the server is lost if the server fails.</p></div>
+
+  <h2 id="licence">Licence and payment status</h2>
+  <p>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Licence</strong> (<code>/admin/licence.php</code>). Who can open it: <strong>administrator accounts only</strong>.</p>
+  <p>This section only applies to a business that is on a licence. If this hotel is not on a licence, nothing on this page or below shows, and nothing is checked or restricted.</p>
+
+  <h3>What the Licence page shows</h3>
+  <ul>
+    <li><strong>Status</strong>: <em>Active</em>, <em>Payment overdue</em>, <em>Read-only</em>, <em>Locked</em> or <em>Not licensed</em>, with one line saying what it means.</li>
+    <li><strong>Paid until</strong>, <strong>Read-only from</strong> and <strong>Locked from</strong>: the dates that matter.</li>
+    <li><strong>Last checked</strong> and <strong>Last problem</strong>: when the system last asked the licence service, and why a check failed if it did. A failed check never locks the system by itself.</li>
+    <li><strong>Check now</strong> asks the licence service for the latest answer straight away. Use it after a payment has been recorded.</li>
+  </ul>
+
+  <h3>The overdue warning</h3>
+  <p>When the payment is overdue, a banner shows at the top of every admin page: <em>"Payment overdue &mdash; the system will become read-only on [date] (N days left)."</em> The banner also says who to contact. Everything still works until the read-only date. Click <strong>Licence details</strong> in the banner to see the dates.</p>
+
+  <h3>Read-only</h3>
+  <p>Staff can still:</p>
+  <ul>
+    <li>look at everything, sign in, sign out and change their own password;</li>
+    <li>check a guest out, and record or settle payments on existing bookings, tabs, tables and conference, event and gym accounts;</li>
+    <li>print and email receipts, and close an open till shift;</li>
+    <li>export or download files, and run a backup.</li>
+  </ul>
+  <p>Staff cannot make new bookings or sales, edit records, give refunds, open a float, bump a kitchen order, change settings, run imports or let the Assistant make changes. Each of these is refused with a message such as <em>"Nothing was saved: this system is read-only because the licence payment is overdue."</em></p>
+
+  <h3>Locked</h3>
+  <p>The staff area is locked. Only the Licence page, sign-in and sign-out, backups and exports still work. The guest website keeps working. No data is deleted.</p>
+
+  <h3>How to get it working again</h3>
+  <ol>
+    <li>Pay the licence to the system provider.</li>
+    <li>The provider records the payment on their side.</li>
+    <li>Open <strong>Licence</strong> and click <strong>Check now</strong>. The system also checks by itself about once a day.</li>
+    <li>Look at the <strong>Status</strong>. It should show <em>Active</em> again.</li>
+  </ol>
+
+  <h3>If something goes wrong</h3>
+  <ul>
+    <li><em>"Nothing was saved: this system is read-only because the licence payment is overdue."</em> The change was not made. Check the Licence page, and contact the provider if the status is still overdue.</li>
+    <li><em>"This system is locked because the licence payment is overdue. Your data is safe."</em> Open the Licence page for the contact details. Nothing has been deleted.</li>
+    <li>On the installed app, a change that the licence refuses stays on that device and the staff member is told about it.</li>
+  </ul>
 
   <h2 id="modules">Modules</h2>
   <p>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Modules</strong>. It switches areas such as Bookings, POS Till, Stock Management, Gym and Website on or off, and has one-click business presets. The page has the sections <strong>Business type</strong>, <strong>Modules</strong>, <strong>Till Stations</strong> (KDS, BDS, CDS and Room Service), <strong>Restaurant and Events</strong> and <strong>Staff Tools</strong>. Menu headings follow the switches that are on (for example <strong>Till &amp; Sales</strong> or <strong>Overview</strong>). Read <a href="16-business-presets.html">Modules and business presets</a> before changing anything.</p>

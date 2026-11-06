@@ -92,6 +92,9 @@ function rh_kb_synonym_groups(): array
         ['approve', 'approver', 'approvers', 'approval', 'approved', 'authorise', 'authorize', 'signoff'],
         ['theft', 'steal', 'stealing', 'stole', 'stolen', 'thief', 'pilferage', 'pilfer', 'shrinkage', 'shortage', 'shortages', 'variance', 'loss', 'losses'],
         ['wastage', 'waste', 'spoil', 'spoilage', 'spoiled', 'expired'],
+        ['licence', 'license', 'licences', 'licenses', 'licensing', 'subscription', 'subscriptions'],
+        ['overdue', 'arrears', 'late payment'], ['read only', 'readonly', 'read-only'],
+        ['locked', 'suspended', 'suspend', 'suspension'],
         ['orphan', 'orphans', 'gap', 'gaps'], // "orphan nights" = short gaps between stays (Bookings Decisions)
         ['sure', 'confidence', 'likelihood', 'likely'], // Decisions cards: "How sure" (old name: Likelihood)
         ['takings', 'revenue', 'sales', 'income', 'earnings'],
