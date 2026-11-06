@@ -432,5 +432,23 @@ $real = (string)file_get_contents($root . '/includes/licence-public-key.php');
 check(strpos($real, "define('RH_LICENCE_PUBLIC_KEY'") !== false
     && $child("require '" . $root . "/includes/licence-public-key.php'; \$k = openssl_pkey_get_public(RH_LICENCE_PUBLIC_KEY); \$d = \$k ? openssl_pkey_get_details(\$k) : []; echo (\$d['ec']['curve_name'] ?? 'none');") === 'prime256v1',
     'public key file defines the panel key as a valid P-256 public key');
+
+// Page load vs script fetch (the installed app's service worker re-fetches page loads as mode "same-origin").
+$hdr = static function (array $set): void {
+    foreach (['HTTP_SEC_FETCH_MODE', 'HTTP_SEC_FETCH_DEST', 'HTTP_X_REQUESTED_WITH', 'HTTP_X_RH_ACTIVITY', 'HTTP_ACCEPT'] as $k) { unset($_SERVER[$k]); }
+    foreach ($set as $k => $v) { $_SERVER[$k] = $v; }
+};
+$hdr(['HTTP_SEC_FETCH_MODE' => 'navigate', 'HTTP_SEC_FETCH_DEST' => 'document']);
+check(rh_licence_is_page_load() && rh_licence_wants_html(), 'plain browser page load = page');
+$hdr(['HTTP_SEC_FETCH_MODE' => 'same-origin', 'HTTP_SEC_FETCH_DEST' => 'document']);
+check(rh_licence_is_page_load() && rh_licence_wants_html(), 'page load through the installed app (service worker) = page, not JSON');
+$hdr(['HTTP_SEC_FETCH_MODE' => 'cors', 'HTTP_SEC_FETCH_DEST' => 'empty', 'HTTP_X_REQUESTED_WITH' => 'XMLHttpRequest']);
+check(!rh_licence_is_page_load() && !rh_licence_wants_html(), 'a script fetch = JSON');
+$hdr(['HTTP_SEC_FETCH_MODE' => 'same-origin', 'HTTP_SEC_FETCH_DEST' => 'document']);
+$_POST['client_queued_at'] = '1';
+check(!rh_licence_is_page_load() && !rh_licence_wants_html(), 'offline queue replay = JSON even from a document');
+unset($_POST['client_queued_at']);
+$hdr([]);
+
 echo "Licence client: $pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

@@ -338,15 +338,29 @@ if (!function_exists('rh_licence_guard_request')) {
     // ------------------------------------------------------------------ refusing
 
     /**
+     * A person opening a page in the browser. Sec-Fetch-Mode is "navigate" for a plain page load, but the installed app's
+     * service worker re-fetches page loads with fetch(request, {cache}) and the browser then sends mode "same-origin":
+     * Sec-Fetch-Dest stays "document" in both cases, so that is checked too (the owner saw raw JSON through the app).
+     */
+    function rh_licence_is_page_load(): bool
+    {
+        if (isset($_POST['client_queued_at'])) {
+            return false; // the offline queue replaying a saved sale always needs a status code
+        }
+        return ((string)($_SERVER['HTTP_SEC_FETCH_MODE'] ?? '')) === 'navigate'
+            || ((string)($_SERVER['HTTP_SEC_FETCH_DEST'] ?? '')) === 'document';
+    }
+
+    /**
      * A browser page load or form post (answer with a page / redirect) rather than a script's own fetch (answer with JSON).
-     * A real navigation always wins. A POST carrying client_queued_at is the offline queue replaying a saved sale (that
+     * A real page load always wins. A POST carrying client_queued_at is the offline queue replaying a saved sale (that
      * stamp is added only when the sale was queued offline; client_uuid is NOT a marker, the till adds it to every form):
      * it needs a status code, never a redirect, or the queue would take the redirect as success and drop the sale.
      */
     function rh_licence_wants_html(): bool
     {
         $mode = (string)($_SERVER['HTTP_SEC_FETCH_MODE'] ?? '');
-        if ($mode === 'navigate') {
+        if (rh_licence_is_page_load()) {
             return true;
         }
         if (isset($_POST['client_queued_at'])) {
@@ -418,7 +432,7 @@ if (!function_exists('rh_licence_guard_request')) {
     function rh_licence_refuse(array $st, string $area, string $method): void
     {
         $locked = ($st['status'] ?? '') === 'suspended';
-        $navigate = ((string)($_SERVER['HTTP_SEC_FETCH_MODE'] ?? '')) === 'navigate';
+        $navigate = rh_licence_is_page_load();
         if ($locked && $navigate) {
             rh_licence_render_locked_page($st); // a person opened it in the browser: a friendly page, never raw JSON
         }
