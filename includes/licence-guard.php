@@ -263,7 +263,7 @@ if (!function_exists('rh_licence_guard_request')) {
     function rh_licence_contact_words(array $st): string
     {
         $c = trim((string)($st['contact'] ?? ''));
-        return $c !== '' ? 'Contact ' . $c . '.' : 'Please contact the system provider.';
+        return $c !== '' ? 'Please contact ' . $c . '.' : 'Please contact your system provider.';
     }
 
     function rh_licence_date_words(string $ymd): string
@@ -288,9 +288,9 @@ if (!function_exists('rh_licence_guard_request')) {
     {
         $who = rh_licence_contact_words($st);
         if (($st['status'] ?? '') === 'suspended') {
-            return 'This system is locked because the licence payment is overdue. Your data is safe. ' . $who;
+            return 'Your system is paused because the subscription payment is overdue. Your data is safe. ' . rtrim($who, '.') . ' to switch it back on.';
         }
-        return 'Nothing was saved: this system is read-only because the licence payment is overdue. You can still view records, check guests out, record payments and export data. ' . $who;
+        return 'Not saved: the system is in view-only mode because the subscription payment is overdue. You can still look things up, check guests out and take payments. ' . $who;
     }
 
     /** Plain banner text for grace / read_only, or '' when none is needed. */
@@ -392,24 +392,24 @@ if (!function_exists('rh_licence_guard_request')) {
         $isAdmin = ($_SESSION['admin_role'] ?? '') === 'admin';
         $paid = !empty($d['paid_until']) ? rh_licence_date_words($d['paid_until']) : '';
         $site = function_exists('getSetting') ? (string)getSetting('site_name') : '';
-        $title = $site !== '' ? $site : 'This system';
+        $title = $site !== '' ? $site : 'Your system';
+        $btn = 'min-height:44px;display:inline-flex;align-items:center;padding:0 18px;border-radius:8px;text-decoration:none;font-weight:600;';
+        $prefix = ['admin' => '', 'admin_api' => '../'][rh_licence_request_target()[0]] ?? '../admin/'; // links work from admin/, admin/api/ and api/
         echo '<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">'
-            . '<title>System locked</title></head>'
+            . '<title>' . $h($title) . ' is paused</title></head>'
             . '<body style="margin:0;font-family:system-ui,Segoe UI,Arial,sans-serif;background:#f6f2ea;color:#3e3930;">'
-            . '<main style="max-width:560px;margin:8vh auto;padding:0 16px;">'
-            . '<div style="background:#fff;border-radius:14px;padding:28px 26px;box-shadow:0 8px 28px rgba(0,0,0,.12);">'
-            . '<h1 style="font-size:1.35rem;margin:0 0 10px;color:#2b2722;">' . $h($title) . ' is locked</h1>'
-            . '<p style="line-height:1.6;margin:0 0 10px;">The licence payment is overdue, so the staff system is locked until it is paid.'
-            . ($paid !== '' ? ' It was paid up to ' . $h($paid) . '.' : '') . '</p>'
-            . '<p style="line-height:1.6;margin:0 0 10px;"><strong>To restore access:</strong> pay the system owner. ' . $h(rh_licence_contact_words($st)) . ' '
-            . 'Access returns by itself within a day of the payment being recorded' . ($isAdmin ? ', or straight away when an administrator presses "Check now" on the Licence page' : '') . '.</p>'
-            . '<p style="line-height:1.6;margin:0 0 18px;">Your data is safe and nothing has been deleted. The guest website is still running and guests can still book and send enquiries.</p>'
-            . '<p style="margin:0;display:flex;gap:10px;flex-wrap:wrap;">';
+            . '<main style="max-width:520px;margin:10vh auto;padding:0 16px;">'
+            . '<div style="background:#fff;border-radius:14px;padding:30px 26px;box-shadow:0 8px 28px rgba(0,0,0,.10);text-align:center;">'
+            . '<h1 style="font-size:1.4rem;margin:0 0 12px;color:#2b2722;">' . $h($title) . ' is paused</h1>'
+            . '<p style="line-height:1.6;margin:0 0 12px;">The subscription payment is overdue, so the staff system is paused for now.</p>'
+            . '<p style="line-height:1.6;margin:0 0 12px;"><strong>Your data is safe</strong> and your website is still open for guests.</p>'
+            . '<p style="line-height:1.6;margin:0 0 20px;">' . $h(rtrim(rh_licence_contact_words($st), '.')) . ' to switch it back on. It comes back on by itself once the payment is recorded.</p>'
+            . '<p style="margin:0;display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">';
         if ($isAdmin) {
-            echo '<a href="licence.php" style="min-height:44px;display:inline-flex;align-items:center;padding:0 18px;border-radius:8px;background:#7E684B;color:#fff;text-decoration:none;font-weight:600;">Licence status</a>'
-                . '<a href="backup-management.php" style="min-height:44px;display:inline-flex;align-items:center;padding:0 18px;border-radius:8px;border:1px solid #7E684B;color:#7E684B;text-decoration:none;font-weight:600;">Download a backup</a>';
+            echo '<a href="' . $prefix . 'licence.php" style="' . $btn . 'background:#7E684B;color:#fff;">Licence details</a>'
+                . '<a href="' . $prefix . 'backup-management.php" style="' . $btn . 'border:1px solid #7E684B;color:#7E684B;">Download a backup</a>';
         }
-        echo '<a href="logout.php" style="min-height:44px;display:inline-flex;align-items:center;padding:0 18px;border-radius:8px;border:1px solid #cfc6b8;color:#3e3930;text-decoration:none;">Sign out</a>'
+        echo '<a href="' . $prefix . 'logout.php" style="' . $btn . 'border:1px solid #cfc6b8;color:#3e3930;font-weight:400;">Sign out</a>'
             . '</p></div></main></body></html>';
         exit;
     }
@@ -418,6 +418,10 @@ if (!function_exists('rh_licence_guard_request')) {
     function rh_licence_refuse(array $st, string $area, string $method): void
     {
         $locked = ($st['status'] ?? '') === 'suspended';
+        $navigate = ((string)($_SERVER['HTTP_SEC_FETCH_MODE'] ?? '')) === 'navigate';
+        if ($locked && $navigate) {
+            rh_licence_render_locked_page($st); // a person opened it in the browser: a friendly page, never raw JSON
+        }
         if ($area !== 'admin' || !rh_licence_wants_html()) {
             rh_licence_send_json_refusal($st);
         }

@@ -410,11 +410,19 @@ if (!function_exists('rh_licence_env')) {
         }
     }
 
-    /** Daily, and again after 30 minutes when the last attempt failed. Pure. */
+    /** Minutes between automatic checks: LICENCE_CHECK_MINUTES in .env, default 60 (an hourly safety net; the panel also nudges the site straight after any change). 5 to 1440. */
+    function rh_licence_check_interval_seconds(): int
+    {
+        $m = rh_licence_env('LICENCE_CHECK_MINUTES');
+        $m = ctype_digit($m) ? (int)$m : 60;
+        return max(5, min(1440, $m)) * 60;
+    }
+
+    /** Due every interval (default hourly), and again after 30 minutes when the last attempt failed. Pure apart from the interval setting. */
     function rh_licence_check_due(array $stored, int $now): bool
     {
         $last = (int)($stored['last_check_at'] ?? 0);
-        if ($last <= 0 || $now - $last >= 86400) {
+        if ($last <= 0 || $now - $last >= rh_licence_check_interval_seconds()) {
             return true;
         }
         return ((string)($stored['last_error'] ?? '')) !== '' && $now - $last >= 1800;
@@ -463,6 +471,51 @@ if (!function_exists('rh_licence_env')) {
             });
         } catch (Throwable $e) {
             error_log('licence lazy check setup: ' . $e->getMessage());
+        }
+    }
+
+    /**
+     * The panel's nudge (api/licence-ping.php): "something changed, check now". It carries no data and no authority —
+     * the site still fetches and verifies the signed answer itself — so the worst a stranger can do is cause an extra
+     * check, and that is limited to one a minute. The check runs after the reply is sent.
+     * @return bool true when a check was scheduled
+     */
+    function rh_licence_nudge(int $now = 0): bool
+    {
+        static $registered = false;
+        if ($registered || !rh_licence_enabled()) {
+            return false;
+        }
+        try {
+            $now = $now > 0 ? $now : time();
+            $pdo = $GLOBALS['pdo'] ?? null;
+            $stored = rh_licence_store_read($pdo instanceof PDO ? $pdo : null);
+            if ($now - (int)($stored['last_check_at'] ?? 0) < 60) {
+                return false;
+            }
+            $registered = true;
+            register_shutdown_function(static function (): void {
+                try {
+                    @ignore_user_abort(true);
+                    if (function_exists('fastcgi_finish_request')) {
+                        @fastcgi_finish_request();
+                    } elseif (function_exists('litespeed_finish_request')) {
+                        @litespeed_finish_request();
+                    } else {
+                        while (ob_get_level() > 0) {
+                            @ob_end_flush();
+                        }
+                        @flush();
+                    }
+                    rh_licence_check_now(false, 6);
+                } catch (Throwable $e) {
+                    error_log('licence nudge: ' . $e->getMessage());
+                }
+            });
+            return true;
+        } catch (Throwable $e) {
+            error_log('licence nudge setup: ' . $e->getMessage());
+            return false;
         }
     }
 }

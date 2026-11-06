@@ -130,7 +130,9 @@ $dts = rh_licence_dates(json_decode(base64_decode(strtr(mk_token(['paid_until' =
 eq(['paid_until' => '2026-06-30', 'grace_end' => '2026-07-14', 'read_only_from' => '2026-07-15', 'read_only_end' => '2026-07-28', 'suspended_from' => '2026-07-29'], $dts, 'dates worked out from paid_until + grace + read-only days');
 // lazy-check schedule
 check(rh_licence_check_due(['last_check_at' => 0, 'last_error' => ''], $NOW), 'check due: never checked');
-check(!rh_licence_check_due(['last_check_at' => $NOW - 3600, 'last_error' => ''], $NOW), 'check not due: an hour ago');
+check(!rh_licence_check_due(['last_check_at' => $NOW - 1800, 'last_error' => ''], $NOW), 'check not due: half an hour ago (hourly by default)');
+check(rh_licence_check_due(['last_check_at' => $NOW - 3700, 'last_error' => ''], $NOW), 'check due: over an hour ago (hourly by default)');
+check(rh_licence_check_interval_seconds() === 3600, 'default check interval is one hour');
 check(rh_licence_check_due(['last_check_at' => $NOW - 90000, 'last_error' => ''], $NOW), 'check due: over a day ago');
 check(rh_licence_check_due(['last_check_at' => $NOW - 2000, 'last_error' => 'x'], $NOW), 'check due: failed, retry after 30 minutes');
 check(!rh_licence_check_due(['last_check_at' => $NOW - 600, 'last_error' => 'x'], $NOW), 'check not due: failed 10 minutes ago');
@@ -303,7 +305,10 @@ if ($up) {
     check($st['status'] === 'suspended' && $html === '', 'suspended: no banner (the page is locked instead)');
     [$st, $html] = $words(['paid_until' => $day(30)]);
     check($st['status'] === 'active' && $html === '', 'active: no banner');
-    check(strpos(rh_licence_refusal_message(['status' => 'read_only']), 'Nothing was saved') !== false, 'read-only refusal says nothing was saved');
+    check(strpos(rh_licence_refusal_message(['status' => 'read_only']), 'Not saved') === 0, 'read-only refusal says it was not saved');
+check(rh_licence_refusal_message(['status' => 'suspended', 'contact' => 'ProManaged']) === 'Your system is paused because the subscription payment is overdue. Your data is safe. Please contact ProManaged to switch it back on.', 'suspended refusal is the short friendly message');
+$ping = is_file($root . '/api/licence-ping.php') ? (string)file_get_contents($root . '/api/licence-ping.php') : '';
+check(strpos($ping, 'rh_licence_nudge();') !== false && strpos($ping, "echo '{\"ok\":true}';") !== false && strpos($ping, 'rh_licence_status') === false, 'ping endpoint only nudges and always answers the same (reveals nothing)');
     check(strpos(rh_licence_refusal_message(['status' => 'suspended']), 'data is safe') !== false, 'locked message says the data is safe');
 }
 

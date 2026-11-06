@@ -259,7 +259,7 @@
             // IndexedDB unreadable: nothing to send this time.
         }
         if (licenceNew > 0 || (licenceHeld > 0 && rejected === 0)) {
-            notify(licenceHeld + ' saved sale(s) or payment(s) were NOT recorded: the system is read-only or locked because the licence payment is overdue. They stay saved on this device. Ask the manager or the system owner before taking the money again.', 'error');
+            notify(licenceHeld + ' saved sale(s) or payment(s) were NOT recorded: the system is in view-only mode or paused because the subscription payment is overdue. They stay saved on this device. Ask the manager or the system owner before taking the money again.', 'error');
         }
         if (rejected > 0) {
             notify(rejected + ' queued action(s) were refused by the server and are still saved on this device - nothing was recorded for them. Ask a manager before taking the money again.', 'error');
