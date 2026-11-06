@@ -143,6 +143,7 @@ function rh_kb_expand_phrases(string $q): string
         '/\b(expir\w+|best before|use by)\b/i' => ' batch batches tracker ',
         '/\b(totals?|figures?|numbers?)\b.{0,25}\b(match|agree|add up|differ\w*|wrong)\b|\bmismatch\b/i' => ' drift report ',
         '/\bwho (did|changed|deleted|edited|made|created|approved)\b|\baudit\b|\bactivity (log|history)\b/i' => ' system logs ',
+        '/\bstaff activity\b|\buser activity\b|\bwho did what\b|\baudit trail\b|\bactivity log\b|\bwhat did\b.{1,30}\bdo\b/i' => ' system logs staff activity who did what ',
         '/\bhow many (people|visitors)\b|\b(website|site) (traffic|visits|visitors)\b|\bvisited the (website|site)\b/i' => ' visitor analytics ',
         '/\bjoin(ing)?\s+(the\s+)?gym\b|\bgym\s+sign[\s-]?up\b/i' => ' enrol member gym ',
         '/\b(home screen|install (the )?app|add to home)\b/i' => ' install admin app ',

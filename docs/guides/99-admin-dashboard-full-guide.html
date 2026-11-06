@@ -482,6 +482,20 @@
 
   <h2 id="logs">System Logs (who did what)</h2>
   <p>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>System Logs</strong> (<code>/admin/system-logs.php</code>). Permission: <strong>System Logs</strong>. It is a read-only record for troubleshooting, and the place to see who did what and when: sign-ins, setting changes, booking changes, orders and errors, each with the person's name. (For one booking, its own <strong>Activity timeline</strong> is quicker; for one order, use <strong>Order log</strong>.) Administrators and managers also see a <strong>Who's online</strong> panel at the top: who is signed in now, what they have open and how long they have been quiet. See <a href="18-staff-access.html#online">Who's online</a>.</p>
+  <h3 id="logs-staff-activity">See what a staff member did on a day</h3>
+  <p>Use this when you need to know what a staff member did on a day: the staff activity audit trail and user activity log for one person. Permission: <strong>System Logs</strong>. This section only reads the records. It changes nothing.</p>
+  <ol>
+    <li>Open <strong>Settings</strong> &rarr; <strong>System Logs</strong>.</li>
+    <li>Go to the <strong>Staff activity</strong> section.</li>
+    <li>In <strong>Staff member</strong>, pick a name, or leave <strong>Everyone</strong>.</li>
+    <li>Pick the day: <strong>Today</strong>, <strong>Yesterday</strong> or <strong>Last 7 days</strong>. For another day, set <strong>From</strong> and <strong>To</strong>. A range can be up to 31 days.</li>
+    <li>Optional: in <strong>What they did</strong>, pick one kind of work, such as <strong>Payments</strong> or <strong>Stock</strong>.</li>
+    <li>Press <strong>Show</strong>.</li>
+  </ol>
+  <p>The day cards show each person's first sign-in, last activity and a count for each kind of work, with payment and refund totals. The totals are counted the same way as on the Payments page and the End of Day report. Hover over a figure (or its heading) to see what it counts. A payment or refund shows on the day the staff member entered it. The timeline lists each action in a sentence, with a link to the record it is about.</p>
+  <p>Press <strong>Download this list (CSV)</strong> to save the filtered list. The filters stay in the page address, so you can bookmark a view.</p>
+  <p>What is recorded: every saved change by staff is recorded with the page and the action name only. The values typed are never recorded. Viewing, searching and background refreshes are not recorded. Nothing is deleted. The note under the filters shows how far back each kind of record goes.</p>
+  <p><strong>If something goes wrong:</strong> if the range is longer than 31 days, the page says <em>The range you asked for was longer, so the last 31 days are shown.</em> Pick a shorter range to see the days you need.</p>
   <h3 id="logs-attention">Needs attention in System Logs</h3>
   <p>Start here. The panel at the top covers the last 7 days and says <strong>All clear.</strong> when there is nothing to do. Otherwise it shows one box for each kind of problem, with a count, what it means, examples, <em>Last seen</em> and a link to the right page. The boxes are:</p>
   <table>
