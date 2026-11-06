@@ -347,8 +347,16 @@ if (!function_exists('rh_licence_guard_request')) {
         if (isset($_POST['client_queued_at'])) {
             return false; // the offline queue replaying a saved sale always needs a status code
         }
-        return ((string)($_SERVER['HTTP_SEC_FETCH_MODE'] ?? '')) === 'navigate'
-            || ((string)($_SERVER['HTTP_SEC_FETCH_DEST'] ?? '')) === 'document';
+        if (((string)($_SERVER['HTTP_SEC_FETCH_MODE'] ?? '')) === 'navigate'
+            || ((string)($_SERVER['HTTP_SEC_FETCH_DEST'] ?? '')) === 'document') {
+            return true;
+        }
+        // Some browsers mark the service worker's re-fetch as a script request (mode same-origin, dest empty), but it
+        // keeps the page load's own Accept header ("text/html,..."); the pages' own scripts send X-Requested-With or
+        // ask for JSON / anything (*/*), never text/html first.
+        $accept = strtolower(ltrim((string)($_SERVER['HTTP_ACCEPT'] ?? '')));
+        return strpos($accept, 'text/html') === 0
+            && strtolower((string)($_SERVER['HTTP_X_REQUESTED_WITH'] ?? '')) !== 'xmlhttprequest';
     }
 
     /**

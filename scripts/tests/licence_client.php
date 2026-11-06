@@ -442,6 +442,14 @@ $hdr(['HTTP_SEC_FETCH_MODE' => 'navigate', 'HTTP_SEC_FETCH_DEST' => 'document'])
 check(rh_licence_is_page_load() && rh_licence_wants_html(), 'plain browser page load = page');
 $hdr(['HTTP_SEC_FETCH_MODE' => 'same-origin', 'HTTP_SEC_FETCH_DEST' => 'document']);
 check(rh_licence_is_page_load() && rh_licence_wants_html(), 'page load through the installed app (service worker) = page, not JSON');
+$hdr(['HTTP_SEC_FETCH_MODE' => 'same-origin', 'HTTP_SEC_FETCH_DEST' => 'empty', 'HTTP_ACCEPT' => 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8']);
+check(rh_licence_is_page_load() && rh_licence_wants_html(), 'service-worker re-fetch marked as a script but carrying the page Accept = page');
+$hdr(['HTTP_SEC_FETCH_MODE' => 'same-origin', 'HTTP_SEC_FETCH_DEST' => 'empty', 'HTTP_ACCEPT' => '*/*']);
+check(!rh_licence_is_page_load() && !rh_licence_wants_html(), 'a plain fetch (Accept */*) = JSON');
+$hdr(['HTTP_SEC_FETCH_MODE' => 'same-origin', 'HTTP_SEC_FETCH_DEST' => 'empty', 'HTTP_ACCEPT' => 'application/json']);
+check(!rh_licence_is_page_load() && !rh_licence_wants_html(), 'a JSON fetch = JSON');
+$hdr(['HTTP_SEC_FETCH_MODE' => 'cors', 'HTTP_SEC_FETCH_DEST' => 'empty', 'HTTP_X_REQUESTED_WITH' => 'XMLHttpRequest', 'HTTP_ACCEPT' => 'text/html, */*']);
+check(!rh_licence_is_page_load(), 'an XHR asking for HTML is still not a page load');
 $hdr(['HTTP_SEC_FETCH_MODE' => 'cors', 'HTTP_SEC_FETCH_DEST' => 'empty', 'HTTP_X_REQUESTED_WITH' => 'XMLHttpRequest']);
 check(!rh_licence_is_page_load() && !rh_licence_wants_html(), 'a script fetch = JSON');
 $hdr(['HTTP_SEC_FETCH_MODE' => 'same-origin', 'HTTP_SEC_FETCH_DEST' => 'document']);
