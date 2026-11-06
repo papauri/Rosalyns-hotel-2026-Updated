@@ -144,6 +144,12 @@ foreach ($keys as $k) {
     $s = $pdo->prepare('SELECT setting_value FROM site_settings WHERE setting_key = ?'); $s->execute([$k]);
     $v = $s->fetchColumn(); $saved[$k] = ($v === false) ? null : (string)$v;
 }
+// Start clean even on a site that already holds a real licence answer (Liwonde): the rows saved above are put back
+// exactly as they were by $cleanup below, so the real token survives the test.
+foreach ($keys as $k) {
+    $pdo->prepare('DELETE FROM site_settings WHERE setting_key = ?')->execute([$k]);
+    if (function_exists('deleteCache')) { deleteCache('setting_' . $k); }
+}
 $stubDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'rh_licence_stub_' . bin2hex(random_bytes(4));
 mkdir($stubDir);
 file_put_contents($stubDir . '/router.php', '<?php $d=getenv("STUB_DIR"); file_put_contents($d."/last.json", json_encode(["body"=>file_get_contents("php://input"),"ctype"=>$_SERVER["CONTENT_TYPE"]??"","method"=>$_SERVER["REQUEST_METHOD"]])); $c=(int)@file_get_contents($d."/code.txt"); http_response_code($c?:200); header("Content-Type: application/json"); echo (string)@file_get_contents($d."/answer.json");');
