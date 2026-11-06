@@ -283,6 +283,15 @@ if (!function_exists('rh_licence_env')) {
                     return strlen($buf) > 65536 ? 0 : strlen($data); // an answer is ~600 bytes: refuse anything big
                 },
             ]);
+            // Hosts (and Windows PHP) without curl.cainfo cannot verify any certificate: fall back to the bundled
+            // CA list, as the Facebook helpers do. Verification stays ON either way.
+            $ca = (string)ini_get('curl.cainfo');
+            if ($ca === '' || !is_file($ca)) {
+                $localCa = dirname(__DIR__) . '/config/cacert.pem';
+                if (is_file($localCa)) {
+                    curl_setopt($ch, CURLOPT_CAINFO, $localCa);
+                }
+            }
             $ok = curl_exec($ch);
             $out['code'] = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
             if ($ok === false) {
