@@ -55,7 +55,10 @@
             // If the banner is in dismiss cooldown, do not intercept the native prompt lifecycle.
             return;
         }
-        e.preventDefault();
+        // Only phones/tablets have Chrome's own mini-infobar to suppress. On desktop, preventDefault() made
+        // Chrome log "Banner not shown: beforeinstallpromptevent.preventDefault() called"; keep the event
+        // for our Install button without it (prompt() still works on a saved event).
+        try { if (window.matchMedia && matchMedia('(pointer: coarse)').matches) e.preventDefault(); } catch (err) { /* ignore */ }
         deferredPrompt = e;
         // A manual-instructions bar may already be showing; swap it for the real Install button.
         if (bannerEl && manualMode) hideBanner();

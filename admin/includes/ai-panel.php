@@ -144,6 +144,7 @@ define('RH_AI_PANEL_RENDERED', true);
         <p class="rh-ai-lock__title"><i class="fas fa-lock" aria-hidden="true"></i> Locked</p>
         <p class="rh-ai-help">The Assistant locked after a quiet spell, so nobody else can read your chat on this screen. Type your own account password to carry on.</p>
         <form class="rh-ai-lock" id="rhAiUnlock">
+            <input type="text" name="username" value="<?= htmlspecialchars((string)($_SESSION['admin_username'] ?? ''), ENT_QUOTES, 'UTF-8') ?>" autocomplete="username" readonly hidden tabindex="-1" aria-hidden="true">
             <label for="rhAiUnlockPw">Your password</label>
             <input type="password" id="rhAiUnlockPw" class="rh-ai-card__input" autocomplete="current-password" required>
             <button type="submit" class="btn btn-primary">Unlock</button>

@@ -54,7 +54,9 @@
     window.addEventListener('beforeinstallprompt', function (e) {
         promptSeen = true;
         removeManualHelp();
-        e.preventDefault();
+        // Only phones/tablets have Chrome's own mini-infobar to suppress; on desktop preventDefault() made
+        // Chrome log "Banner not shown". The saved event can still be prompt()ed from our Install button.
+        try { if (window.matchMedia && matchMedia('(pointer: coarse)').matches) e.preventDefault(); } catch (err) { /* ignore */ }
         deferredPrompt = e;
         if (isDismissed()) return;
         showBanner();

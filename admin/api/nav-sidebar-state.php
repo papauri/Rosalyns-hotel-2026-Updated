@@ -34,10 +34,24 @@ const NSBS_KEY_COLLAPSED = 'admin_sidebar_collapsed_v1';
 const NSBS_KEY_WIDTH     = 'admin_sidebar_width_v1';
 const NSBS_KEY_GROUPS    = 'admin_nav_collapsed_groups_v1';
 
+// GET reads nothing from the session beyond what api-init already loaded: release the session lock now so
+// a slow database never holds up the user's next page request.
+if ($method === 'GET') {
+    session_write_close();
+}
+
 try {
-    // Ensure the shared preferences table exists (created by nav-favorites.php on first use,
-    // but we create it here too so this endpoint works independently).
+    // Cosmetic preferences: never wait long on a locked row (a stuck row must not hold a staff request).
+    try { $pdo->exec('SET SESSION innodb_lock_wait_timeout = 3'); } catch (Throwable $ignore) { /* keep default */ }
+
+    // The shared preferences table is created once (only when missing, no DDL on normal requests).
+    // nav-favorites.php does the same; there is no migration for it.
+    $prefTableExists = false;
     try {
+        $prefTableExists = (bool)$pdo->query("SHOW TABLES LIKE 'admin_user_preferences'")->fetchColumn();
+    } catch (Throwable $ignore) { /* fall through to create attempt */ }
+    if (!$prefTableExists) {
+      try {
         $pdo->exec("CREATE TABLE IF NOT EXISTS admin_user_preferences (
             id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             user_id INT UNSIGNED NOT NULL,
@@ -51,6 +65,7 @@ try {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
     } catch (Throwable $createEx) {
         // Table already exists with existing constraint name — ignore.
+      }
     }
 
     if ($method === 'GET') {
@@ -117,6 +132,7 @@ try {
     if (!validateCsrfToken((string)($payload['csrf_token'] ?? ''))) {
         nsbs_error('Invalid CSRF token', 403);
     }
+    session_write_close(); // token checked; the rest only touches the database
 
     $upsert = $pdo->prepare(
         'INSERT INTO admin_user_preferences (user_id, preference_key, preference_value)
@@ -153,6 +169,9 @@ try {
     nsbs_success(['saved' => $saved]);
 } catch (Throwable $e) {
     error_log('nav-sidebar-state.php: ' . $e->getMessage());
-    nsbs_error('Unable to save sidebar preferences', 500);
+    // Cosmetic setting: answer quietly (202, not saved) rather than a 500 in the staff member's console.
+    http_response_code(202);
+    echo json_encode(['success' => false, 'error' => 'Sidebar preferences were not saved this time']);
+    exit;
 }
 

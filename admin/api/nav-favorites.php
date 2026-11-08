@@ -21,6 +21,14 @@ function nav_favorites_success(array $favorites): void
 
 function nav_favorites_ensure_table(PDO $pdo): void
 {
+    // Created once, only when missing (no DDL on normal requests: it takes metadata/FK locks). No migration owns this table.
+    try {
+        if ($pdo->query("SHOW TABLES LIKE 'admin_user_preferences'")->fetchColumn()) {
+            return;
+        }
+    } catch (Throwable $e) {
+        // fall through to the create attempt
+    }
     $pdo->exec("CREATE TABLE IF NOT EXISTS admin_user_preferences (
         id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
         user_id INT UNSIGNED NOT NULL,
@@ -82,7 +90,14 @@ if ($userId <= 0) {
 
 $preferenceKey = 'admin_nav_favorites_v1';
 
+// A read needs nothing more from the session: release its lock so the next page request is never queued behind this one.
+if ($method === 'GET') {
+    session_write_close();
+}
+
 try {
+    // Cosmetic setting: never wait long on a locked row.
+    try { $pdo->exec('SET SESSION innodb_lock_wait_timeout = 3'); } catch (Throwable $ignore) { /* keep default */ }
     nav_favorites_ensure_table($pdo);
 
     if ($method === 'GET') {
@@ -114,6 +129,7 @@ try {
     if (!validateCsrfToken((string)($payload['csrf_token'] ?? ''))) {
         nav_favorites_error('Invalid CSRF token', 403);
     }
+    session_write_close(); // token checked; the rest only touches the database
 
     $favorites = nav_favorites_sanitize_keys($payload['favorites'] ?? []);
     $encoded = json_encode($favorites, JSON_UNESCAPED_SLASHES);
@@ -131,6 +147,9 @@ try {
     nav_favorites_success($favorites);
 } catch (Throwable $e) {
     error_log('nav-favorites.php: ' . $e->getMessage());
-    nav_favorites_error('Unable to save favorites right now', 500);
+    // Cosmetic setting: answer quietly (202, not saved) instead of a 500 in the console.
+    http_response_code(202);
+    echo json_encode(['success' => false, 'error' => 'Unable to save favorites right now']);
+    exit;
 }
 

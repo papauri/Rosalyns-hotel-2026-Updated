@@ -4017,6 +4017,21 @@ button:focus-visible {
         transition: none !important;
         animation: none !important;
     }
+
+    /* Loading indicators are essential motion, not decoration: with the rule above (and admin-responsive.css)
+       the loader ring looked dead. These selectors are more specific than "*", so they win even against
+       !important. A steady, slower linear spin only; every other animation stays off. */
+    .admin-page-loader .admin-page-loader-spinner span:nth-child(1),
+    .admin-inline-spinner,
+    .admin-pagination-loader__spinner,
+    .btn-loading .fa-spinner,
+    .fa-spin {
+        animation: adminLoaderSpin 1.2s linear infinite !important;
+    }
+
+    .admin-page-loader .admin-page-loader-bar span {
+        animation: adminLoaderShimmer 1.8s linear infinite !important;
+    }
 }
 
 /* ---------- Print ---------- */

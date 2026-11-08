@@ -1232,6 +1232,18 @@
         };
         if (signal) fetchOptions.signal = signal;
 
+        // A page that has not arrived after 15 s is not going to: stop waiting and load it normally
+        // (a stuck server request must never leave the user on a frozen screen).
+        var timedOut = false;
+        var stallTimer = null;
+        if (controller) {
+            stallTimer = setTimeout(function () {
+                if (_abortController !== controller) return; // superseded or finished
+                timedOut = true;
+                controller.abort();
+            }, 15000);
+        }
+
         fetch(fullHref, fetchOptions)
             .then(function (res) {
                 // Detect redirect to login (session expired)
@@ -1264,6 +1276,7 @@
                 return res.text();
             })
             .then(function (html) {
+                if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; }
                 if (html === null || html === undefined) return;
 
                 var doc = new DOMParser().parseFromString(html, 'text/html');
@@ -1339,7 +1352,8 @@
                     });
             })
             .catch(function (err) {
-                if (err && err.name === 'AbortError') {
+                if (stallTimer) { clearTimeout(stallTimer); stallTimer = null; }
+                if (err && err.name === 'AbortError' && !timedOut) {
                     // Superseded by a newer navigation — ignore
                     _navigating = false;
                     return;
