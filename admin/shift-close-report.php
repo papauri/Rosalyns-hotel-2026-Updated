@@ -461,7 +461,6 @@ $printTitle = match ($mode) {
             color: #92400e;
             padding: 10px 32px;
             font-size: 12px;
-            border-left: 4px solid #f59e0b;
             display: flex;
             align-items: flex-start;
             gap: 8px;

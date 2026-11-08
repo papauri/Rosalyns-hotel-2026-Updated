@@ -103,7 +103,6 @@
 .bs-notice {
     margin-top: 16px;
     padding: 12px 14px;
-    border-left: 4px solid #ffc107;
     border-radius: 6px;
     background: #fff8e1;
     color: #856404;
@@ -218,7 +217,6 @@
 /* ---- Info / tip boxes ---- */
 .info-box {
     background: #f8fafc;
-    border-left: 3px solid var(--color-primary, #766550);
     border-radius: 8px;
     padding: 10px 12px;
 }
@@ -478,7 +476,6 @@ details.template-block[open]>summary::after {
 .tpl-editor--locked {
     padding: 12px 14px;
     border: 1px solid var(--admin-surface-border, #d7dde6);
-    border-left: 3px solid var(--gold, #8F6A35);
     border-radius: 8px;
     background: var(--gold-light, #F3ECE4);
 }

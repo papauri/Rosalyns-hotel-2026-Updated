@@ -440,7 +440,7 @@ try {
         <?php endif; ?>
 
         <!-- Preset awareness note -->
-        <div class="security-note" style="border-left-color:#7E684B;background:#fdf8f0;">
+        <div class="security-note" style="background:#fdf8f0;">
             <i class="fas fa-puzzle-piece" style="color:#7E684B;"></i>
             <div>
                 <strong>Modules &amp; presets:</strong>

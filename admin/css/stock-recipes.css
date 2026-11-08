@@ -142,7 +142,6 @@
 /* Info banner explaining food-cost % */
 .food-cost-help {
     background: #eef5fb;
-    border-left: 4px solid #2c7bb2;
     padding: 12px 14px;
     border-radius: 6px;
     margin-bottom: 16px;

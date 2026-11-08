@@ -2854,7 +2854,6 @@ body {
     padding: 0.85rem 1.25rem;
     font-size: 0.9rem;
     line-height: 1.5;
-    border-left: 4px solid currentColor;
 }
 
 .vat-result-banner i {
@@ -4402,7 +4401,6 @@ body {
 .rh-help-panel {
     background: #f8f4ef;
     border: 1px solid var(--color-lux-clay-50, #F3ECE4);
-    border-left: 4px solid var(--color-lux-gold, #8F6A35);
     border-radius: 8px;
     margin-bottom: 20px;
     overflow: hidden;

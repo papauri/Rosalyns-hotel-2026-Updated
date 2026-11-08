@@ -148,13 +148,6 @@
     margin-bottom: 1rem;
 }
 
-.rm-alert--success {
-    border-inline-start: 0.25rem solid var(--color-primary, #766550);
-}
-
-.rm-alert--error {
-    border-inline-start: 0.25rem solid var(--danger, #b91c1c);
-}
 
 /* Dashboard Statistics Cards: standard .ck-kpi (admin-kpi.css) */
 #rmStatsDashboard {
@@ -609,6 +602,5 @@
     font-size: 13px;
     color: var(--admin-muted);
     background: #f8fafc;
-    border-left: 3px solid var(--color-primary, #766550);
     border-radius: 8px;
 }

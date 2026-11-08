@@ -225,7 +225,6 @@
 .info-banner {
     background: linear-gradient(135deg, #fffbf2 0%, #fff8e6 100%);
     border: 1px solid #ffe082;
-    border-left: 4px solid #f0ad4e;
     padding: 14px 18px;
     border-radius: 8px;
     margin-bottom: 16px;
@@ -421,6 +420,5 @@
     font-size: 13px;
     color: var(--admin-text);
     background: #f8fafc;
-    border-left: 3px solid var(--color-primary, #766550);
     border-radius: 8px;
 }

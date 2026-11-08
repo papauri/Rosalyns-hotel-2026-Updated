@@ -330,7 +330,6 @@ input:checked+.slider:before {
 .schedule-note {
     margin-top: 14px;
     padding: 10px 12px;
-    border-left: 4px solid #c58a00;
     border-radius: 6px;
     background: #fff8e8;
     color: #6b4f00;

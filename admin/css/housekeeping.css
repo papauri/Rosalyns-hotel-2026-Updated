@@ -132,13 +132,6 @@
     margin-bottom: 1rem;
 }
 
-.hk-alert--success {
-    border-inline-start: 0.25rem solid var(--color-primary, #766550);
-}
-
-.hk-alert--error {
-    border-inline-start: 0.25rem solid var(--danger, #b91c1c);
-}
 
 /* Dashboard Statistics Cards: standard .ck-kpi (admin-kpi.css) */
 #hkStatsDashboard {

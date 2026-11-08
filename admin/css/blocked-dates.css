@@ -332,7 +332,6 @@
 .blocked-dates-page .info-box {
     background: var(--admin-surface);
     border: 1px solid var(--admin-surface-border);
-    border-left: 4px solid var(--admin-accent);
     border-radius: var(--admin-radius);
     padding: clamp(0.9rem, 0.7rem + 1vw, 1.4rem);
     color: var(--admin-text);

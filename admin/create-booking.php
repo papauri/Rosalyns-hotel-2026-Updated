@@ -1854,7 +1854,7 @@ try {
         .line-warn { font-size: 12px; color: #c0392b; font-weight: 600; margin-top: 4px; line-height: 1.4; }
         .line-warn:empty, .line-detail:empty { display: none; }
         .room-line.has-issue { border-color: #f5b7b1; background: #fdf3f2; }
-        .alloc-summary { border-left: 3px solid #8f6a35; background: #faf6f0; border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px; color: #2a2723; line-height: 1.55; }
+        .alloc-summary { background: #faf6f0; border-radius: 6px; padding: 10px 14px; margin-bottom: 14px; font-size: 13px; color: #2a2723; line-height: 1.55; }
         .alloc-summary:empty { display: none; }
         .alloc-summary .as-err { color: #c0392b; font-weight: 600; }
         .alloc-summary .as-ok { color: #2a7d4f; font-weight: 600; }
@@ -1864,7 +1864,6 @@ try {
             align-items: center;
             gap: 8px;
             background: #e8f4fd;
-            border-left: 3px solid #3498db;
             border-radius: 6px;
             padding: 10px 14px;
             margin-bottom: 14px;
@@ -3523,7 +3522,7 @@ try {
             if (panel) { panel.innerHTML = ''; panel.classList.remove('visible'); }
             if (notice) {
                 notice.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking availability…';
-                notice.style.cssText = 'display:flex;align-items:center;gap:8px;background:#fff8e1;border-left:3px solid #f0c36d;color:#7a5c00;padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:13px;';
+                notice.style.cssText = 'display:flex;align-items:center;gap:8px;background:#fff8e1;color:#7a5c00;padding:10px 14px;border-radius:6px;margin-bottom:14px;font-size:13px;';
             }
             const csrf = document.querySelector('[name=csrf_token]').value;
             const fd = new URLSearchParams({
@@ -3603,7 +3602,6 @@ try {
                     });
                     if (notice) {
                         notice.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Could not check availability — all rooms shown.';
-                        notice.style.color = '#856404';
                     }
                 });
         }

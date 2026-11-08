@@ -56,8 +56,8 @@
 .di-card--good { border-left: 4px solid var(--admin-success-border, #3f8f5a); }
 .di-card--bad { border-left: 4px solid var(--admin-danger-border, #956a5b); }
 .di-file-line { margin: 4px 0 8px; font-size: 14px; word-break: break-all; }
-.di-warn { margin: 8px 0; padding: 8px 12px; background: var(--gold-light, #F3ECE4); border-left: 4px solid var(--admin-warning-border, #9a7c53); color: var(--admin-warning-text, #4f3f2a); font-size: 13px; line-height: 1.45; border-radius: 4px; }
-.di-note { margin: 10px 0; padding: 10px 12px; background: #eef4fb; border-left: 4px solid var(--admin-info-border, #2f6fad); font-size: 13px; line-height: 1.5; border-radius: 4px; }
+.di-warn { margin: 8px 0; padding: 8px 12px; background: var(--gold-light, #F3ECE4); color: var(--admin-warning-text, #4f3f2a); font-size: 13px; line-height: 1.45; border-radius: 4px; }
+.di-note { margin: 10px 0; padding: 10px 12px; background: #eef4fb; font-size: 13px; line-height: 1.5; border-radius: 4px; }
 
 /* sheet cards */
 .di-sheet, .di-sheetbox { border: 1px solid var(--tbl-border, #E8E0D6); border-radius: 10px; background: #fff; padding: 14px; margin: 12px 0; }
