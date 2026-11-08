@@ -20,6 +20,7 @@
  *     room_service_manage — write (create orders, mark delivered, etc.)
  */
 require_once 'admin-init.php';
+require_once __DIR__ . '/../includes/printing.php';
 require_once __DIR__ . '/includes/permissions.php';
 require_once __DIR__ . '/../includes/restaurant-location-locks.php';
 
@@ -280,6 +281,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $ip = $_SERVER['REMOTE_ADDR'] ?? null;
                 $pdo->prepare("INSERT INTO stock_kds_events (order_id, event, to_status, user_id, user_name, ip_address) VALUES (?, 'fired', 'new', ?, ?, ?)")
                     ->execute([$orderId, $user['id'], $user['full_name'], $ip]);
+                rh_print_enqueue_kitchen($pdo, $orderId); // receipt printers: station tickets (no-op until a printer is set up)
 
                 if (function_exists('recalculateBookingFinancials')) {
                     recalculateBookingFinancials($bookingId);

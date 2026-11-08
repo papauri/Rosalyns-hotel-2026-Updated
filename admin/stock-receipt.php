@@ -11,6 +11,7 @@
 require_once 'admin-init.php';
 require_once '../config/email.php';
 require_once '../includes/alert.php';
+require_once __DIR__ . '/../includes/printing.php';
 
 $user = [
     'id'        => $_SESSION['admin_user_id'],
@@ -458,6 +459,28 @@ if (!empty($_GET['print'])) {
         echo '<div class="kot-cut">Kitchen copy</div>';
         echo '<script>window.onload=function(){window.print();};</script>';
         echo '</body></html>';
+        exit;
+    }
+    /* Receipt printer paper (owner 2026-11-09): when a printer is set to print receipts, or ?w=58|80|a6|a5|a4 is given,
+     * the browser receipt is the thermal layout at that paper size and character width (any printer the device can
+     * use). With no receipt printer set up the classic full-page receipt is printed exactly as before. */
+    $thermalPrinter = null;
+    $wantW = strtolower((string)($_GET['w'] ?? ''));
+    if (rh_print_ready($pdo)) {
+        $rp = $pdo->query("SELECT * FROM print_printers WHERE is_active = 1 AND mode <> 'off' AND prints IN ('receipts','both') ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+        if ($rp) {
+            $thermalPrinter = $rp;
+        }
+    }
+    if ($wantW !== '' && isset(rh_print_paper_specs()[$wantW])) {
+        $thermalPrinter = ($thermalPrinter ?: ['name' => 'Receipt', 'cols' => null, 'copies' => 1]);
+        $thermalPrinter['paper'] = $wantW;
+        $thermalPrinter['cols'] = null;
+    }
+    if ($thermalPrinter) {
+        $tCtx = rh_print_receipt_context($pdo, $order);
+        $tRows = rh_print_rows_for(rh_print_model_receipt($order, $items, $tCtx), rh_print_cols($thermalPrinter), 1, false);
+        echo rh_print_encode_html($tRows, $thermalPrinter, 'Receipt ' . ($receiptNoLabel !== '' ? $receiptNoLabel : $order['reference']), true);
         exit;
     }
     echo $receiptHtml;

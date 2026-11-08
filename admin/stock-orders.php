@@ -12,6 +12,7 @@ require_once __DIR__ . '/../includes/finance-sequences.php';
 require_once __DIR__ . '/../includes/restaurant-location-locks.php';
 require_once __DIR__ . '/includes/restaurant-payment-sync.php';
 require_once __DIR__ . '/includes/pos-order-close.php';
+require_once __DIR__ . '/../includes/printing.php';
 require_once __DIR__ . '/includes/bulk-actions.php';
 require_once __DIR__ . '/../includes/station-hours.php';
 
@@ -545,6 +546,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     } catch (Throwable $e) {
                         error_log('room service kds log: ' . $e->getMessage());
                     }
+                    rh_print_enqueue_kitchen($pdo, $orderId); // receipt printers: station tickets (no-op until a printer is set up)
 
                     recalculateBookingFinancials($bookingId);
                     logOrderAudit($pdo, $orderId, $user['id'], $user['full_name'], 'room_service_charged', json_encode([
@@ -626,6 +628,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Sync to accounting ledger
                     $orderRow = ['id' => $orderId, 'reference' => $reference, 'total_amount' => $totalAmount, 'customer_name' => $customerName, 'status' => 'paid'];
                     syncRestaurantOrderPayment($pdo, $orderRow, $user['id'], $paymentMethod);
+                    rh_print_enqueue_receipt($pdo, $orderId); // customer receipt on a cloud printer
 
                     logOrderAudit(
                         $pdo,
@@ -823,6 +826,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 rh_stamp_order_paid_by($pdo, $orderId, (int)$user['id']);
 
                 syncRestaurantOrderPayment($pdo, array_merge($order, ['status' => 'paid', 'payment_method' => $paymentMethod]), (int)$user['id'], $paymentMethod);
+                rh_print_enqueue_receipt($pdo, $orderId); // customer receipt on a cloud printer
                 logOrderAudit($pdo, $orderId, (int)$user['id'], (string)$user['full_name'], 'settled', json_encode([
                     'method'   => $paymentMethod,
                     'total'    => $totalAmount,

@@ -3363,6 +3363,8 @@ $bootstrap['fingerprint'] = md5(
     <?php $rh_help_hide_fab = true;
     require __DIR__ . '/includes/help-tooltips.php'; ?>
     <?php require __DIR__ . '/includes/offline-banner.php'; ?>
+    <script>window.RH_PRINT_STATION = <?php echo json_encode(['station' => $STATION, 'csrf' => $csrf_token]); ?>;</script>
+    <script src="js/print-station.js?v=<?php echo @filemtime(__DIR__ . '/js/print-station.js'); ?>" defer></script>
     <script src="js/pwa-install.js" defer></script>
 </body>
 

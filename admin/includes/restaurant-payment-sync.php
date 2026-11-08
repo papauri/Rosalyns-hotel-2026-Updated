@@ -1,6 +1,7 @@
 <?php
 
 require_once __DIR__ . '/../../includes/station-hours.php';
+require_once __DIR__ . '/../../includes/printing.php';
 
 if (!function_exists('rh_pos_shop_mode')) {
     /**
@@ -717,6 +718,9 @@ function rh_close_refunded_order_lines(PDO $pdo, int $orderId, int $userId, stri
     $oh = $pdo->prepare("SELECT reference, order_type, kitchen_status FROM stock_orders WHERE id = ? FOR UPDATE");
     $oh->execute([$orderId]);
     $order = $oh->fetch(PDO::FETCH_ASSOC);
+    if ($order) {
+        rh_print_cancel_order_jobs($pdo, $orderId); // linked data: nothing for this refunded order may still be waiting to print (room service included)
+    }
     if (!$order || (string)$order['order_type'] === 'room_service') {
         return $out;
     }

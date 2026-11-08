@@ -50,6 +50,8 @@ $checks = [
             AND NOT EXISTS (SELECT 1 FROM stock_orders so WHERE so.id = c.stock_order_id AND so.status = 'completed')"],
     ['FAIL', 'Ready notifications for cancelled/voided/missing orders',
         "SELECT n.id FROM pos_ready_notifications n LEFT JOIN stock_orders o ON o.id = n.order_id WHERE o.id IS NULL OR o.status IN ('cancelled','voided')"],
+    ['FAIL', 'Tickets/receipts still waiting to print for a cancelled/voided/missing order',
+        "SELECT j.id FROM print_jobs j LEFT JOIN stock_orders o ON o.id = j.order_id WHERE j.order_id IS NOT NULL AND j.status IN ('queued','sent') AND (o.id IS NULL OR o.status IN ('cancelled','voided'))"],
     ['FAIL', 'Quotations still "sent" for a cancelled/deleted booking',
         "SELECT q.id FROM quotations q JOIN bookings b ON b.id = q.booking_id WHERE q.booking_type = 'room' AND q.status = 'sent' AND $gone"],
     ['FAIL', 'Gym class bookings / slot reservations for cancelled members',

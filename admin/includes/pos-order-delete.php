@@ -1,5 +1,7 @@
 <?php
 
+require_once __DIR__ . '/../../includes/printing.php';
+
 /**
  * Permanent deletion of a POS / restaurant order.
  *
@@ -729,6 +731,7 @@ function rh_delete_pos_order(PDO $pdo, int $orderId, int $userId, string $reason
             ]);
         $recordId = (int)$pdo->lastInsertId();
 
+        rh_print_purge_order_jobs($pdo, $orderId); // queued tickets / receipts of this order go with it
         $pdo->prepare("DELETE FROM stock_orders WHERE id = ?")->execute([$orderId]);
 
         if (function_exists('logActivity')) {

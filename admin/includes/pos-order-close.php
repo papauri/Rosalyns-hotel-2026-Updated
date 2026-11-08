@@ -12,6 +12,7 @@
 
 require_once __DIR__ . '/restaurant-payment-sync.php';
 require_once __DIR__ . '/pos-notices.php';
+require_once __DIR__ . '/../../includes/printing.php';
 
 if (!function_exists('rh_pos_close_has_charge_order_col')) {
     /** booking_charges.stock_order_id exists (legacy schemas may lack it). Cached per request. */
@@ -230,6 +231,9 @@ if (!function_exists('rh_close_pos_order')) {
                 'notice_type'  => $type,
             ];
         }
+
+        // Linked data: tickets / receipts for this order that have not printed must not print now.
+        rh_print_cancel_order_jobs($pdo, $orderId);
 
         return [
             'mode'                  => $mode,

@@ -178,6 +178,17 @@
   </ol>
   <p>If hours have never been saved the system uses these: Kitchen 06:00 to 23:00, Bar 11:00 to 03:00 (the next morning), Coffee Bar 06:00 to 22:00. A time that is not valid gives <em>"Use 24-hour HH:MM format for every station."</em></p>
 
+  <h2 id="printers">How to print tickets and receipts on a receipt printer</h2>
+  <p>Open Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Printers</strong>. Add one printer for each place you want paper to come out (kitchen, bar, coffee bar, cash desk). Tickets show the table or room and the order number in big letters, the items and any notes, and never show prices. Each ticket prints once; if an order is cancelled or voided before it prints, it never prints.</p>
+  <ol class="steps">
+    <li>Click <strong>Add printer</strong>, give it a name, and choose <strong>How it prints</strong>.</li>
+    <li><strong>Cloud printer (no computer)</strong> needs a Star CloudPRNT or Epson Server Direct Print model on a 58 mm or 80 mm roll. Save, then copy the <strong>address to paste into the printer</strong> into the printer's own settings page. Keep that address private. If it leaks, click <strong>New address</strong> and paste the new one.</li>
+    <li><strong>Kitchen screen device</strong> works with any printer the screen can print to, on a roll or on A6, A5 or A4 paper. On the Kitchen, Bar or Coffee screen that has the printer, tap <strong>Printer</strong> at the top and tick <em>This screen prints for...</em>. To print without a pop-up window, start Chrome on that computer with <code>--kiosk-printing</code>.</li>
+    <li>Choose the <strong>Station it serves</strong>, the <strong>Paper</strong>, what it prints (tickets, customer receipts or both) and the number of copies, then click <strong>Add printer</strong>.</li>
+    <li>Click <strong>Test print</strong>. A sample ticket and receipt print with a ruler line. If the whole ruler fits on the paper, the width is right. If it runs off the edge or leaves a gap, change <strong>Characters per line</strong> (80 mm rolls: 48, or 42 on some models; 58 mm rolls: 32).</li>
+  </ol>
+  <p>A ticket that failed or needs printing again stays in the <strong>Print queue</strong> list on the same page with a <strong>Reprint</strong> button. The till prints its own customer receipt in the browser at the paper size of the receipt printer.</p>
+
   <h2 id="report">How to read and send the daily station report (how long tickets take)</h2>
   <ol class="steps">
     <li>Click <strong>Daily Report</strong> on the screen, or open Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Station Reports</strong>.</li>

@@ -1,0 +1,58 @@
+/* Printers (Restaurant & Bar) settings page.
+   Uses the shared page header, .rh-panel cards, .badge pills, .btn buttons and the More menu;
+   this file only lays out the printer form, the address row and the print queue. */
+.printers-page { width: 100%; min-width: 0; }
+.printers-page .page-header { margin-bottom: 16px; }
+.printers-page .page-title i { color: var(--color-primary, #766550); margin-right: 8px; }
+.printers-page .page-subtitle { margin: 4px 0 0; color: var(--admin-muted, #5f6b7c); font-size: 14px; }
+.printers-page .rh-panel { margin-bottom: 16px; }
+.printers-page .rh-panel__title { overflow-wrap: anywhere; }
+.printers-page .badge { text-transform: none; }
+
+/* Notice box: soft surface and a full border, no coloured edge */
+.pr-notice { background: var(--gold-light, #F3ECE4); border: 1px solid var(--admin-surface-border, #d7dde6); border-radius: var(--admin-radius, 10px); padding: 12px 14px; margin-bottom: 16px; color: var(--admin-text, #1f2a37); font-size: 14px; line-height: 1.5; }
+
+.pr-help ul { margin: 0; padding-left: 20px; display: grid; gap: 8px; font-size: 14px; line-height: 1.5; color: var(--admin-text, #1f2a37); }
+.pr-help code { background: var(--admin-bg, #f4f2ef); padding: 1px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+
+.pr-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr)); gap: 14px 18px; margin-bottom: 14px; }
+.pr-field { min-width: 0; }
+.pr-field label { display: block; font-weight: 600; font-size: 12.5px; margin-bottom: 4px; color: var(--admin-text, #1f2a37); }
+.pr-field input[type=text], .pr-field input[type=number], .pr-field select,
+.pr-url-row input { width: 100%; min-height: 44px; padding: 8px 10px; border: 1px solid var(--admin-surface-border, #d7dde6); border-radius: 8px; font-size: 14px; background: var(--color-white, #fff); color: var(--admin-text, #1f2a37); box-sizing: border-box; }
+.pr-field input:focus, .pr-field select:focus, .pr-url-row input:focus { outline: none; border-color: var(--color-primary, #766550); box-shadow: 0 0 0 3px rgba(138, 119, 95, .12); }
+.pr-field small, .pr-url small, .pr-note { display: block; margin-top: 4px; color: var(--admin-muted, #5f6b7c); font-size: 12px; line-height: 1.4; }
+.pr-note { margin: 0 0 12px; font-size: 13px; }
+.pr-check label { display: flex; align-items: center; gap: 8px; min-height: 44px; margin-bottom: 0; }
+.pr-check input { width: 20px; height: 20px; }
+.pr-form[data-mode="screen"] .pr-only-cloud, .pr-form[data-mode="off"] .pr-only-cloud { display: none; }
+
+.pr-url { margin-bottom: 14px; }
+.pr-url label { display: block; font-weight: 600; font-size: 12.5px; margin-bottom: 4px; color: var(--admin-text, #1f2a37); }
+.pr-url-row { display: flex; gap: 8px; align-items: stretch; }
+.pr-url-row input { flex: 1; min-width: 0; font-family: monospace; font-size: 12px; }
+.pr-contact { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 8px 0 0; font-size: 12px; color: var(--admin-muted, #5f6b7c); }
+
+/* Buttons: one row, one height, one gap. Save and Test print are visible; the rest are in More. */
+.pr-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pr-actions .btn, .pr-url-row .btn { min-height: 44px; }
+.pr-actions .actions-more { display: inline-flex; }
+.pr-actions form { margin: 0; }
+
+.pr-table-wrap { overflow-x: auto; }
+.pr-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.pr-table th, .pr-table td { text-align: left; padding: 8px 10px; border-bottom: 1px solid var(--rh-line-soft, #eceff3); vertical-align: top; }
+.pr-table th { background: var(--admin-table-head, #f2f5fa); color: var(--admin-text, #1f2a37); font-weight: 600; }
+.pr-table td small { display: block; margin-top: 4px; color: var(--admin-muted, #5f6b7c); overflow-wrap: anywhere; }
+.pr-table form { margin: 0; }
+.pr-th-help { display: block; margin-top: 2px; max-width: 24ch; font-size: 11px; font-weight: 400; line-height: 1.3; color: var(--admin-muted, #5f6b7c); white-space: normal; }
+
+@media (max-width: 640px) {
+    .pr-url-row { flex-direction: column; }
+    .pr-table-wrap { overflow-x: visible; }
+    .pr-table thead { display: none; }
+    .pr-table, .pr-table tbody, .pr-table tr, .pr-table td { display: block; width: 100%; box-sizing: border-box; }
+    .pr-table tr { border: 1px solid var(--admin-surface-border, #d7dde6); border-radius: 8px; margin-bottom: 10px; padding: 4px 10px; }
+    .pr-table td { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; border: 0; padding: 6px 0; overflow-wrap: anywhere; }
+    .pr-table td::before { content: attr(data-label); flex: 0 0 72px; font-weight: 600; color: var(--admin-muted, #5f6b7c); }
+}

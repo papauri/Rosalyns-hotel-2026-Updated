@@ -27,6 +27,7 @@ require_once __DIR__ . '/includes/restaurant-order-serve.php';
 require_once __DIR__ . '/includes/finance-account-sync.php';
 require_once __DIR__ . '/includes/pos-order-delete.php';
 require_once __DIR__ . '/../includes/idempotency.php';
+require_once __DIR__ . '/../includes/printing.php';
 
 /* Granular till permissions. These used to be hard-wired to role names
    (admin/manager, or "restaurant_staff = own tabs only"), so a custom role or a
@@ -289,6 +290,8 @@ function pos_fireKitchen(PDO $pdo, int $orderId, int $userId, string $userName):
     $ip = $_SERVER['REMOTE_ADDR'] ?? null;
     $pdo->prepare("INSERT INTO stock_kds_events (order_id, event, to_status, user_id, user_name, ip_address) VALUES (?, 'fired', 'new', ?, ?, ?)")
         ->execute([$orderId, $userId, $userName, $ip]);
+    // Receipt printers: a ticket for the lines not yet printed (does nothing until a printer is set up; never fails the sale).
+    rh_print_enqueue_kitchen($pdo, $orderId);
 }
 
 /**
@@ -912,6 +915,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $extras = pos_applyPaymentToOrder($pdo, $user, $orderId, $row['reference'], (float)$row['total_amount'], $paymentMethod, $_POST, $splitCount, $splitNumber);
+                rh_print_enqueue_receipt($pdo, $orderId); // customer receipt on a cloud printer (only once the order is fully paid)
                 $isLastSplit = ($splitCount <= 1 || $splitNumber >= $splitCount);
                 $methodLabel = str_replace('_', ' ', $paymentMethod);
                 $amtLabel    = $currency_symbol . ' ' . number_format($extras['amount_due'], 2);
@@ -1325,6 +1329,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     logActivity($user['id'], 'pos_discount', 'Discount ' . $currency_symbol . ' ' . number_format($discountAmount, 2) . ' on order ' . $reference . ($discountReason ? ' — ' . $discountReason : ''));
                 }
                 $extras = pos_applyPaymentToOrder($pdo, $user, $orderId, $reference, $totalAmount, $paymentMethod, $_POST);
+                rh_print_enqueue_receipt($pdo, $orderId); // customer receipt on a cloud printer
                 // Bar/coffee-bar drinks are handed to the customer at payment — auto-serve
                 // them now so stock is deducted immediately (mirrors the pay_existing tab flow).
                 pos_autoServeBarItems($pdo, $orderId, $user);
@@ -3943,6 +3948,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         <?php endif; ?>
         console.log('[POS Deals] Loaded', posDeals.length, 'deal(s):', posDeals);
         const currencySymbol = <?php echo json_encode($currency_symbol); ?>;
+        // A cloud receipt printer prints the customer receipt by itself, so the till must not also auto-print it in the browser.
+        const cloudReceiptPrinterOn = <?php echo rh_print_cloud_receipt_active($pdo) ? 'true' : 'false'; ?>;
         const posKitchenOpen = <?php echo $kitchenWindow['is_open_now'] ? 'true' : 'false'; ?>;
         const posKitchenHours = <?php echo json_encode($kitchenWindow['opens_at'] . ' – ' . $kitchenWindow['closes_at']); ?>;
         const posBarOpen = <?php echo $barWindow['is_open_now'] ? 'true' : 'false'; ?>;
@@ -10344,7 +10351,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             // Auto-print: open receipt page which triggers window.print() on load.
             // Works with any printer set as default — thermal (ESC/POS), inkjet, PDF, network.
             // Toggle stored in localStorage so each terminal remembers its own preference.
-            if (localStorage.getItem('pos_auto_print_receipt') === '1' && _receiptOrderId) {
+            if (localStorage.getItem('pos_auto_print_receipt') === '1' && _receiptOrderId && !cloudReceiptPrinterOn) {
                 setTimeout(function () {
                     window.open('stock-receipt.php?id=' + _receiptOrderId + '&print=1', '_blank', 'noopener');
                 }, 350);
