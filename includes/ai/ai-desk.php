@@ -77,10 +77,10 @@ function rh_ai_t_staff_activity(PDO $db, array $user, array $a): array
     $accounts = (int)$db->query("SELECT COUNT(*) FROM admin_users WHERE is_active = 1")->fetchColumn();
     $people = [];
     try {
-        $st = $db->prepare("SELECT user_id, COUNT(*) AS n, MIN(created_at) AS first_at, MAX(created_at) AS last_at FROM admin_activity_log WHERE created_at >= ? AND created_at < ? AND user_id > 0 GROUP BY user_id");
+        $st = $db->prepare("SELECT user_id, COUNT(*) AS n, SUM(action = 'page_action') AS saves, MIN(created_at) AS first_at, MAX(created_at) AS last_at FROM admin_activity_log WHERE created_at >= ? AND created_at < ? AND user_id > 0 GROUP BY user_id");
         $st->execute([$from, $toEx]);
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
-            $people[(int)$r['user_id']] = ['actions' => (int)$r['n'], 'first' => (string)$r['first_at'], 'last' => (string)$r['last_at'], 'seen' => '', 'signed_in' => ''];
+            $people[(int)$r['user_id']] = ['actions' => (int)$r['n'], 'saves' => (int)$r['saves'], 'first' => (string)$r['first_at'], 'last' => (string)$r['last_at'], 'seen' => '', 'signed_in' => ''];
         }
     } catch (Throwable $e) {
         // no activity log: sign-ins below still count
@@ -136,23 +136,47 @@ function rh_ai_t_staff_activity(PDO $db, array $user, array $a): array
             return ['from' => $from, 'to' => $to, 'staff_name' => (string)$row['full_name'], 'active' => 'no', 'actions' => 0];
         }
         $acts = [];
+        $keep = rh_ai_num('ai_history_rows');
+        $screens = rh_ai_has_perm((int)($user['id'] ?? 0), 'system_logs'); // screen names stay with System Logs, as on that screen
         try {
-            $st = $db->prepare("SELECT action, created_at FROM admin_activity_log WHERE user_id = ? AND created_at >= ? AND created_at < ? ORDER BY created_at DESC, id DESC LIMIT " . rh_ai_num('ai_history_rows'));
+            // 2026-11-07: every staff save now also writes a 'page_action' row (page + action code words only). They read
+            // through the System Logs wording ("Checked a guest in (Bookings)"), and repeats in a row fold into one
+            // entry with a count, so a busy run of saves does not push the named events out of the list.
+            $st = $db->prepare("SELECT action, details, created_at FROM admin_activity_log WHERE user_id = ? AND created_at >= ? AND created_at < ? ORDER BY created_at DESC, id DESC LIMIT " . ($keep * 4));
             $st->execute([$hit, $from, $toEx]);
-            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
-                $acts[] = ['at' => substr((string)$r['created_at'], 0, 16), 'what' => rh_ai_desk_event_text((string)$r['action'])];
+            $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+            $full = true;
+            foreach ($rows as $r) {
+                $what = rh_ai_staff_event_text((string)$r['action'], $screens ? (string)($r['details'] ?? '') : '');
+                $last = count($acts) - 1;
+                if ($last >= 0 && $acts[$last]['what'] === $what) {
+                    $acts[$last]['times'] = ($acts[$last]['times'] ?? 1) + 1;
+                    $acts[$last]['first_at'] = substr((string)$r['created_at'], 0, 16);
+                    continue;
+                }
+                if (count($acts) >= $keep) {
+                    $full = false;
+                    break;
+                }
+                $acts[] = ['at' => substr((string)$r['created_at'], 0, 16), 'what' => $what];
+            }
+            // The read window ended inside a run of repeats: its count is a lower bound and its start is not known
+            if ($full && count($rows) >= $keep * 4 && $acts && isset($acts[count($acts) - 1]['times'])) {
+                $acts[count($acts) - 1]['times_at_least'] = true;
+                unset($acts[count($acts) - 1]['first_at']);
             }
         } catch (Throwable $e) {
         }
         $p = $people[$hit];
         return ['from' => $from, 'to' => $to, 'staff_name' => $names[$hit]['name'], 'role' => $roleLabel($names[$hit]['role']), 'active' => 'yes',
-            'actions' => $p['actions'], 'signed_in' => $p['signed_in'] !== '' ? substr($p['signed_in'], 0, 16) : null, 'last_seen' => substr(max($p['seen'], $p['last']), 0, 16),
-            'latest_actions' => $acts ?: 'none logged (seen in the portal only)'];
+            'actions' => $p['actions'], 'screen_saves' => $p['saves'] ?? 0, 'signed_in' => $p['signed_in'] !== '' ? substr($p['signed_in'], 0, 16) : null, 'last_seen' => substr(max($p['seen'], $p['last']), 0, 16),
+            'latest_actions' => $acts ?: 'none logged (seen in the portal only)',
+            'actions_mean' => 'every logged entry: sign-ins, each save on a screen (screen_saves) and named changes, so one save can appear twice'];
     }
     $list = [];
     foreach ($people as $id => $p) {
         $list[] = ['staff_name' => $names[$id]['name'] ?? ('user #' . $id), 'role' => $roleLabel((string)($names[$id]['role'] ?? '')),
-            'actions' => $p['actions'], 'active_because' => $p['actions'] > 0 ? 'logged actions' : 'signed in to the portal, nothing logged',
+            'actions' => $p['actions'], 'screen_saves' => $p['saves'] ?? 0, 'active_because' => $p['actions'] > 0 ? 'logged actions' : 'signed in to the portal, nothing logged',
             'signed_in' => $p['signed_in'] !== '' ? substr($p['signed_in'], 0, 16) : null,
             'first' => $p['first'] !== '' ? substr($p['first'], 0, 16) : null, 'last_seen' => substr(max($p['last'], $p['seen']), 0, 16)];
     }
@@ -161,7 +185,8 @@ function rh_ai_t_staff_activity(PDO $db, array $user, array $a): array
     $link = function_exists('rhCanOpenPage') && rhCanOpenPage((int)$user['id'], 'system-logs.php') ? ['system-logs.php', 'Open System Logs'] : ['user-management.php', 'Open User Management'];
     return ['from' => $from, 'to' => $to, 'active_staff' => count($list), 'staff_accounts' => $accounts, 'with_logged_actions' => $withActions, 'signed_in_only' => count($list) - $withActions,
         'staff' => $list ? array_slice($list, 0, RH_AI_TOOL_ROWS) : 'none',
-        'counted_from' => 'people with logged actions in the activity log, plus people who signed in to the portal with nothing logged', 'link' => $link[0], 'link_label' => $link[1]];
+        'counted_from' => 'people with logged actions in the activity log, plus people who signed in to the portal with nothing logged',
+        'actions_mean' => 'every logged entry: sign-ins, each save on a screen (screen_saves) and named changes, so one save can appear twice', 'link' => $link[0], 'link_label' => $link[1]];
 }
 
 /**
@@ -215,7 +240,8 @@ function rh_ai_desk_staff_line(array $x, bool $days): string
 {
     $at = static fn($v) => date($days ? 'D j M, H:i' : 'H:i', (int)strtotime((string)$v));
     $n = (int)$x['actions'];
-    $why = $n > 0 ? $n . ' logged action' . ($n === 1 ? '' : 's') . (!empty($x['signed_in']) ? ' · signed in ' . $at($x['signed_in']) : '')
+    $sv = (int)($x['screen_saves'] ?? 0);
+    $why = $n > 0 ? $n . ' logged action' . ($n === 1 ? '' : 's') . ($sv > 0 ? ' (' . $sv . ' of them saves on a screen)' : '') . (!empty($x['signed_in']) ? ' · signed in ' . $at($x['signed_in']) : '')
         : (!empty($x['signed_in']) ? 'signed in ' . $at($x['signed_in']) . ', nothing logged' : 'seen in the portal, nothing logged');
     return '**' . $x['staff_name'] . '**' . (($x['role'] ?? '') !== '' ? ' (' . $x['role'] . ')' : '') . ' · ' . $why . ' · last seen ' . date('D j M, H:i', (int)strtotime((string)$x['last_seen']));
 }
@@ -269,10 +295,13 @@ function rh_ai_desk_staff_text(array $r, string $when): string
         }
         $lines = [];
         foreach (is_array($r['latest_actions'] ?? null) ? $r['latest_actions'] : [] as $x) {
-            $lines[] = date('D j M, H:i', strtotime((string)$x['at'])) . ' · ' . $x['what'];
+            $rep = (int)($x['times'] ?? 1) <= 1 ? '' : (!empty($x['times_at_least']) || empty($x['first_at']) ? ' (x' . (int)$x['times'] . ' or more)'
+                : ' (x' . (int)$x['times'] . ', from ' . date($r['from'] !== $r['to'] ? 'D j M, H:i' : 'H:i', strtotime((string)$x['first_at'])) . ')');
+            $lines[] = date('D j M, H:i', strtotime((string)$x['at'])) . ' · ' . $x['what'] . $rep;
         }
         $na = (int)$r['actions'];
-        $why = $na > 0 ? $na . ' logged action' . ($na === 1 ? '' : 's') : (!empty($r['signed_in']) ? 'signed in ' . date('D j M, H:i', strtotime((string)$r['signed_in'])) . ', nothing logged' : 'seen in the portal, nothing logged');
+        $sv = (int)($r['screen_saves'] ?? 0);
+        $why = $na > 0 ? $na . ' logged action' . ($na === 1 ? '' : 's') . ($sv > 0 ? ' (' . $sv . ' of them saves on a screen)' : '') : (!empty($r['signed_in']) ? 'signed in ' . date('D j M, H:i', strtotime((string)$r['signed_in'])) . ', nothing logged' : 'seen in the portal, nothing logged');
         return '**' . $r['staff_name'] . '** (' . ($r['role'] ?? '') . ') ' . $span . ': ' . $why . ', last seen ' . date('D j M, H:i', strtotime((string)$r['last_seen'])) . '.'
             . ($lines ? rh_ai_local_lines($lines) : '');
     }
@@ -297,6 +326,26 @@ function rh_ai_desk_booking_row(PDO $db, array $a): ?array
                         WHERE b.deleted_at IS NULL AND " . (!empty($a['booking_id']) ? 'b.id = ?' : 'b.booking_reference = ?') . " LIMIT 1");
     $st->execute([!empty($a['booking_id']) ? (int)$a['booking_id'] : (string)$a['reference']]);
     return $st->fetch(PDO::FETCH_ASSOC) ?: null;
+}
+
+/**
+ * One staff activity-log row in plain words, with the System Logs wording (admin/includes/staff-activity-lib.php, one
+ * source): a 'page_action' row reads "Checked a guest in (Bookings)" / "Saved on Stock"; a named row reads "Signed in",
+ * "Changed a staff member's permissions". Details of named rows are never passed on (they can hold free text); the
+ * page_action details hold only a page file name and action code words.
+ */
+function rh_ai_staff_event_text(string $action, string $details): string
+{
+    if (!function_exists('rh_sa_page_action_text')) {
+        $lib = dirname(__DIR__, 2) . '/admin/includes/staff-activity-lib.php';
+        if (is_file($lib)) {
+            require_once $lib;
+        }
+    }
+    if (!function_exists('rh_sa_page_action_text')) {
+        return $action === 'page_action' ? 'Saved on a screen' : rh_ai_desk_event_text($action);
+    }
+    return $action === 'page_action' ? rh_sa_page_action_text($details) : rh_sa_named_action_text($action, '');
 }
 
 /** "Status changed: pending -> confirmed" / "credit_note_issued" -> plain words. */

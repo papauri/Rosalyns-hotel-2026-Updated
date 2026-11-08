@@ -4194,8 +4194,26 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
         $m2 = $chatD('Who is staying in the Qdpending reservation', 0, [['tool_calls' => [['id' => 'n2', 'name' => 'booking_history', 'args' => ['booking_id' => $bId]]]], ['text' => 'I could not open it.']]);
         $trM2 = (string)$pdo->query("SELECT tool_result_json FROM ai_messages WHERE conversation_id = " . (int)$m2['conversation_id'] . " AND tool_name = 'booking_history' ORDER BY id DESC LIMIT 1")->fetchColumn();
         check(strpos($trM2, 'did not come from this chat') !== false && strpos($trM2, $bRef) === false, 'a booking id the model made up for booking_history is refused, as for get_booking', $trM2);
-        $bxD = [];
-        check(rh_ai_named_absence_fix($pdo, $admD, $cvM, 'No booking was found for Mr Zzqxvbk.', $bxD) ==='No booking was found for Mr Zzqxvbk.', 'a "no booking" that the search backs (nothing close either) is left as it is');
+        // A made-up name the live search really finds nothing for, not even a close one (a real booking added 2026-11-07
+        // has a name word that sounds like "Zzqxvbk", so the made-up name is picked by the search itself, never assumed)
+        $absName = '';
+        foreach (['Zzqxvbk', 'Qjxwvzq', 'Xqjzvwq', 'Wqxzjvq', 'Jqxzvwq'] as $cand) {
+            $cc = rh_ai_close_name_search($pdo, $cand);
+            $cl = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE deleted_at IS NULL AND (guest_name LIKE ? OR room_guest_name LIKE ? OR booking_reference LIKE ?)");
+            $cl->execute(['%' . $cand . '%', '%' . $cand . '%', '%' . $cand . '%']);
+            if ($cc['clear'] === null && !$cc['options'] && (int)$cl->fetchColumn() === 0) {
+                $absName = $cand;
+                break;
+            }
+        }
+        if ($absName === '') {
+            skip('a "no booking" the search backs: every made-up name has a close match in this hotel\'s bookings');
+        } else {
+            $bxD = [];
+            $absTxt = 'No booking was found for Mr ' . $absName . '.';
+            check(rh_ai_named_absence_fix($pdo, $admD, $cvM, $absTxt, $bxD) === $absTxt && strpos((string)($bxD['evidence'] ?? ''), '"not_found"') !== false && strpos((string)($bxD['evidence'] ?? ''), '"total_in_system"') !== false,
+                'a "no booking" that the search backs (nothing close either) is left as it is, after the search ran and gave the totals', json_encode([$absName, mb_substr((string)($bxD['evidence'] ?? ''), 0, 200)]));
+        }
 
         // Next arrival, holds, blocked dates: local, the same figures as the data
         $truth0 = rh_ai_t_upcoming_arrivals($pdo, $admD, []);
@@ -5933,6 +5951,57 @@ if (!$chatReady || !rh_ai_memory_ready($pdo) || !rh_table_exists($pdo, 'import_j
     }
     check((int)$pdo->query("SELECT COUNT(*) FROM import_jobs WHERE original_name LIKE 'ZZT %'")->fetchColumn() === $zztJobsBefore && (int)$pdo->query("SELECT COUNT(*) FROM admin_users WHERE username LIKE 'aitestim%'")->fetchColumn() === 0,
         'Import review checks rolled back (no ZZT job, no test user left)');
+}
+
+// Staff activity hook (2026-11-07): 'page_action' rows read in plain words, repeats fold, counts stay meaningful
+if (function_exists('rh_ai_t_staff_activity') && function_exists('rh_ai_local_lines') && (bool)$pdo->query("SHOW TABLES LIKE 'admin_activity_log'")->fetchColumn()) {
+    $pdo->beginTransaction();
+    try {
+        $saUn = 'aitestsa_' . bin2hex(random_bytes(2));
+        $pdo->prepare("INSERT INTO admin_users (username, email, password_hash, full_name, role, is_active) VALUES (?, ?, ?, 'Aitestsa Qzv', 'receptionist', 1)")
+            ->execute([$saUn, $saUn . '@example.com', password_hash(bin2hex(random_bytes(8)), PASSWORD_DEFAULT)]);
+        $saId = (int)$pdo->lastInsertId();
+        $saIns = $pdo->prepare("INSERT INTO admin_activity_log (user_id, username, action, details, ip_address, created_at) VALUES (?, ?, ?, ?, '127.0.0.1', ?)");
+        $saDay = date('Y-m-d');
+        $saIns->execute([$saId, $saUn, 'login_success', 'ZZSECRET guest text', $saDay . ' 08:00:00']);
+        for ($i = 0; $i < 20; $i++) {
+            $saIns->execute([$saId, $saUn, 'page_action', 'page=bookings.php; booking_action=checkin', $saDay . ' 09:' . sprintf('%02d', $i) . ':00']);
+        }
+        $saIns->execute([$saId, $saUn, 'page_action', 'page=stock-receipt.php; action=save_receipt', $saDay . ' 10:00:00']);
+        $saAdm = (int)$pdo->query("SELECT id FROM admin_users WHERE role = 'admin' AND is_active = 1 ORDER BY id LIMIT 1")->fetchColumn();
+        $saR = rh_ai_t_staff_activity($pdo, ['id' => $saAdm, 'role' => 'admin'], ['staff' => 'Aitestsa Qzv', 'from' => $saDay, 'to' => $saDay]);
+        $saJ = json_encode($saR);
+        $saActs = is_array($saR['latest_actions'] ?? null) ? $saR['latest_actions'] : [];
+        $saWhat = array_column($saActs, 'what');
+        $saTxt = rh_ai_desk_staff_text($saR, 'today');
+        $saJ .= ' | ' . $saTxt;
+        check(strpos($saTxt, '(x20, from 09:00)') !== false && strpos($saTxt, '22 logged actions (21 of them saves on a screen)') !== false &&
+($saR['actions'] ?? 0) === 22 && ($saR['screen_saves'] ?? 0) === 21 && count($saActs) === 3
+            && ($saWhat[0] ?? '') === 'Saved on Stock Receipt (save receipt)' && strpos((string)($saWhat[1] ?? ''), 'Checked a guest in') === 0 && (int)($saActs[1]['times'] ?? 0) === 20
+            && ($saWhat[2] ?? '') === 'Signed in' && strpos($saJ, 'page_action') === false && strpos($saJ, 'ZZSECRET') === false && strpos($saJ, 'page=') === false,
+            'staff activity: screen saves read in System Logs words, 20 repeats fold into one entry with a count (the sign-in is not pushed out), screen_saves counted apart, no raw code or row details reach the model', $saJ);
+        // Without System Logs (User Management only) the screen names stay hidden, as on the System Logs screen
+        $saR2 = rh_ai_t_staff_activity($pdo, ['id' => $saId, 'role' => 'receptionist'], ['staff' => 'Aitestsa Qzv', 'from' => $saDay, 'to' => $saDay]);
+        $saJ2 = json_encode($saR2);
+        check(rh_ai_has_perm($saId, 'system_logs') || (strpos($saJ2, 'Stock Receipt') === false && strpos($saJ2, 'Checked a guest in') === false && strpos($saJ2, 'Saved on a screen') !== false),
+            'staff activity: a caller without System Logs sees "Saved on a screen", never the screen or action', $saJ2);
+        // A run longer than the read window: the count is a lower bound and no start time is claimed
+        for ($i = 0; $i < 60; $i++) {
+            $saIns->execute([$saId, $saUn, 'page_action', 'page=pos.php; action=settle', $saDay . ' 12:' . sprintf('%02d', $i) . ':00']);
+        }
+        $saR3 = rh_ai_t_staff_activity($pdo, ['id' => $saAdm, 'role' => 'admin'], ['staff' => 'Aitestsa Qzv', 'from' => $saDay, 'to' => $saDay]);
+        $saT3 = rh_ai_desk_staff_text($saR3, 'today');
+        check(($saR3['actions'] ?? 0) === 82 && count((array)$saR3['latest_actions']) === 1 && !empty($saR3['latest_actions'][0]['times_at_least']) && strpos($saT3, ' or more)') !== false && strpos($saT3, ', from ') === false,
+            'staff activity: 60 saves in a row (more than are read) say "or more" with no invented start time; the headline count stays exact (82)', json_encode([$saR3['latest_actions'] ?? null, $saT3]));
+    } catch (Throwable $e) {
+        bad('staff activity hook checks threw', get_class($e) . ': ' . $e->getMessage());
+    } finally {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+    }
+    check((int)$pdo->query("SELECT COUNT(*) FROM admin_users WHERE username LIKE 'aitestsa\\_%'")->fetchColumn() === 0 && (int)$pdo->query("SELECT COUNT(*) FROM admin_activity_log WHERE username LIKE 'aitestsa\\_%'")->fetchColumn() === 0,
+        'staff activity hook checks rolled back (no test user, no test log rows left)');
 }
 
 rh_ai_set_transport(null);

@@ -124,6 +124,7 @@ function rh_kb_synonym_groups(): array
         ['overview', 'desk', 'frontdesk'], // sidebar group "Overview" = the Front Desk group when bookings and housekeeping are off
         ['settings', 'setting', 'configure', 'configuration', 'setup', 'business'], // "Business Settings" = Hotel Settings when bookings are off
         ['station', 'stations'], // "Till Stations" section of Module Settings (KDS, BDS, CDS, Room Service)
+        ['ask', 'asks'], // 4-letter words are not stemmed: "asks" must also find the guides' "they ask for your password"
     ];
 }
 
