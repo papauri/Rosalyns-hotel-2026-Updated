@@ -18,6 +18,12 @@
  *   licence_last_issued_at   highest issued_at ever accepted (anti-replay)
  *   licence_last_check_at    unix time of the last attempt (success or failure)
  *   licence_last_error       plain reason of the last failure, '' after a success (never the key, never the body)
+ *   licence_backup_requested_at / licence_backup_seen_at   the panel's latest backup request (signed) / the one acted on
+ *
+ * Backups (owner 2026-11-09): the panel may ask for a backup (signed backup_requested_at in its answer). The site runs
+ * its OWN backup engine (includes/db-backup.php) after the reply has been sent, at most once per 6 hours, and reports
+ * when its last backup finished / failed and when a copy was last downloaded, in its next check-in. No hotel data is
+ * ever sent to the panel: only those dates, the file size and an error code.
  *
  * Status rules (rh_licence_evaluate):
  *   - no token has ever been stored  -> 'active' (a panel outage never locks a new install)
@@ -212,7 +218,7 @@ if (!function_exists('rh_licence_env')) {
     /** One setting write ($name is token|last_issued_at|last_check_at|last_error). Clears any cached copy. */
     function rh_licence_store_write(PDO $pdo, string $name, string $value, string $prefix = 'licence_'): bool
     {
-        if (!in_array($name, ['token', 'last_issued_at', 'last_check_at', 'last_error'], true)) {
+        if (!in_array($name, ['token', 'last_issued_at', 'last_check_at', 'last_error', 'backup_requested_at', 'backup_seen_at'], true)) {
             return false;
         }
         $key = $prefix . $name;
@@ -509,8 +515,13 @@ if (!function_exists('rh_licence_env')) {
             $out['error'] = 'The site address (site_url setting) is empty, so the licence cannot be matched to this site.';
             return $out;
         }
-        $body = json_encode(['tenant' => $cfg['tenant'], 'domain' => $domain, 'key' => $cfg['key'],
-            'version' => 'pms-' . date('Ymd', (int)@filemtime(__FILE__))], JSON_UNESCAPED_SLASHES);
+        $req = ['tenant' => $cfg['tenant'], 'domain' => $domain, 'key' => $cfg['key'],
+            'version' => 'pms-' . date('Ymd', (int)@filemtime(__FILE__))];
+        $backup = rh_licence_backup_report($GLOBALS['pdo'] ?? null);
+        if ($backup) {
+            $req['backup'] = $backup;
+        }
+        $body = json_encode($req, JSON_UNESCAPED_SLASHES);
         $http = rh_licence_http_post($cfg['url'], (string)$body, $timeout);
         if ($http['error'] !== '') {
             $out['error'] = 'Could not reach the licence service: ' . $http['error'] . '.';
@@ -540,7 +551,102 @@ if (!function_exists('rh_licence_env')) {
         }
         rh_licence_store_write($pdo, 'last_issued_at', (string)max($lastIssuedAt, (int)$payload['issued_at']));
         rh_licence_store_write($pdo, 'last_error', '');
+        $ask = $payload['backup_requested_at'] ?? 0;
+        if (is_int($ask) && $ask > 0) {
+            rh_licence_store_write($pdo, 'backup_requested_at', (string)$ask); // acted on after the reply (rh_licence_backup_if_requested)
+        }
         return true;
+    }
+
+    // ------------------------------------------------------------------ backups the panel asks for
+
+    /** Fresh read of site settings (no cache). @return array<string,string> */
+    function rh_licence_settings_fresh(PDO $pdo, array $keys): array
+    {
+        $out = array_fill_keys($keys, '');
+        if (!$keys) {
+            return $out;
+        }
+        $st = $pdo->prepare('SELECT setting_key, setting_value FROM site_settings WHERE setting_key IN (' . implode(',', array_fill(0, count($keys), '?')) . ')');
+        $st->execute(array_values($keys));
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $out[(string)$r['setting_key']] = (string)$r['setting_value'];
+        }
+        return $out;
+    }
+
+    /**
+     * What this site tells the panel about its own backups: dates (unix), compressed size, an error code. Never a
+     * path, a file name, an error text or any hotel data. [] when nothing can be read.
+     */
+    function rh_licence_backup_report(?PDO $pdo): array
+    {
+        if (!($pdo instanceof PDO)) {
+            return [];
+        }
+        try {
+            $s = rh_licence_settings_fresh($pdo, ['last_backup_at', 'last_backup_size', 'last_backup_error', 'last_backup_error_at',
+                'last_backup_downloaded_at', 'licence_backup_seen_at']);
+            $t = static function (string $v): int {
+                $u = $v !== '' ? strtotime($v) : false;
+                return $u === false ? 0 : (int)$u;
+            };
+            $code = '';
+            if (trim($s['last_backup_error']) !== '') {
+                if (!function_exists('rh_db_backup_code_from_error')) {
+                    require_once __DIR__ . '/db-backup.php';
+                }
+                $code = rh_db_backup_code_from_error($s['last_backup_error']);
+            }
+            return ['last_at' => $t($s['last_backup_at']), 'size' => max(0, (int)$s['last_backup_size']), 'error_at' => $t($s['last_backup_error_at']),
+                'error_code' => $code, 'offsite_at' => $t($s['last_backup_downloaded_at']), 'requested_seen' => max(0, (int)$s['licence_backup_seen_at'])];
+        } catch (Throwable $e) {
+            error_log('licence backup report: ' . $e->getMessage());
+            return [];
+        }
+    }
+
+    /** Pure: should a new panel request run a backup now? Not when already acted on, or the last good backup is under 6 hours old. */
+    function rh_licence_backup_decide(int $requestedAt, int $seenAt, int $lastBackupAt, int $now): string
+    {
+        if ($requestedAt <= 0 || $requestedAt <= $seenAt) {
+            return 'none';
+        }
+        return ($lastBackupAt > 0 && $now - $lastBackupAt < 21600) ? 'fresh' : 'run';
+    }
+
+    /**
+     * After a check-in, in the after-reply hook only: acts on a new backup request from the panel, then checks in again
+     * so the panel sees the result straight away. The request is marked as seen first, so a failing backup is not
+     * retried until the panel asks again; the backup engine's own lock stops two at once.
+     */
+    function rh_licence_backup_if_requested(): void
+    {
+        $pdo = $GLOBALS['pdo'] ?? null;
+        if (!($pdo instanceof PDO) || !rh_licence_enabled()) {
+            return;
+        }
+        try {
+            $s = rh_licence_settings_fresh($pdo, ['licence_backup_requested_at', 'licence_backup_seen_at', 'last_backup_at']);
+            $req = max(0, (int)$s['licence_backup_requested_at']);
+            $last = $s['last_backup_at'] !== '' ? (int)strtotime($s['last_backup_at']) : 0;
+            $what = rh_licence_backup_decide($req, max(0, (int)$s['licence_backup_seen_at']), $last, time());
+            if ($what === 'none') {
+                return;
+            }
+            rh_licence_store_write($pdo, 'backup_seen_at', (string)$req);
+            if ($what === 'run') {
+                if (!function_exists('rh_db_backup_run')) {
+                    require_once __DIR__ . '/db-backup.php';
+                }
+                @set_time_limit(900);
+                // a laptop copy of the code never stamps the live database as backed up (same rule as the Backups page)
+                rh_db_backup_run($pdo, dirname(__DIR__), ['stamp' => PHP_OS_FAMILY !== 'Windows']);
+            }
+            rh_licence_check_now(false, 6); // reports the result now (the panel shows it at once)
+        } catch (Throwable $e) {
+            error_log('licence backup request: ' . $e->getMessage());
+        }
     }
 
     /** Characters allowed in a licence key (also what the stored copy can round-trip). */
@@ -675,6 +781,9 @@ if (!function_exists('rh_licence_env')) {
                     }
                     // Not truly detached (some hosts): keep the wait short so the visitor is not held for long.
                     rh_licence_check_now(true, $detached ? 6 : 3);
+                    if ($detached) {
+                        rh_licence_backup_if_requested(); // a backup only where the visitor is truly not waiting
+                    }
                 } catch (Throwable $e) {
                     error_log('licence lazy check: ' . $e->getMessage());
                 }
@@ -718,6 +827,7 @@ if (!function_exists('rh_licence_env')) {
                         @flush();
                     }
                     rh_licence_check_now(false, 6);
+                    rh_licence_backup_if_requested();
                 } catch (Throwable $e) {
                     error_log('licence nudge: ' . $e->getMessage());
                 }

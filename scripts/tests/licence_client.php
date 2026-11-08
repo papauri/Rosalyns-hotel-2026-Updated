@@ -140,6 +140,8 @@ check(!rh_licence_check_due(['last_check_at' => $NOW - 600, 'last_error' => 'x']
 // ================= 3. checking against a stub panel =================
 $keys = rh_licence_keys('licence_');
 $keys[] = rh_licence_key_setting(); // the portal-saved key row is restored / removed too
+$keys[] = 'licence_backup_requested_at'; // backup request rows (2026-11-09): restored / removed too
+$keys[] = 'licence_backup_seen_at';
 $saved = [];
 foreach ($keys as $k) {
     $s = $pdo->prepare('SELECT setting_value FROM site_settings WHERE setting_key = ?'); $s->execute([$k]);
@@ -205,7 +207,14 @@ if ($up) {
     $req = json_decode((string)($last['body'] ?? ''), true);
     eq('POST', $last['method'] ?? '', 'request is a POST');
     check(stripos((string)($last['ctype'] ?? ''), 'application/json') === 0, 'request sent as application/json');
-    eq(['tenant', 'domain', 'key', 'version'], array_keys((array)$req), 'request fields');
+    eq(['tenant', 'domain', 'key', 'version'], array_slice(array_keys((array)$req), 0, 4), 'request fields');
+    // backup report (2026-11-09): only dates, size and an error code - never a path, a file name, an error text or hotel data
+    $bk = $req['backup'] ?? null;
+    check(array_diff(array_keys((array)$req), ['tenant', 'domain', 'key', 'version', 'backup']) === []
+        && ($bk === null || (array_keys($bk) === ['last_at', 'size', 'error_at', 'error_code', 'offsite_at', 'requested_seen']
+            && is_int($bk['last_at']) && is_int($bk['size']) && is_int($bk['error_at']) && is_int($bk['offsite_at']) && is_int($bk['requested_seen'])
+            && preg_match('/^[a-z_]{0,30}$/', $bk['error_code']) === 1)),
+        'request carries at most the backup report, as numbers and an error code only', json_encode($bk));
     eq([$TENANT, $DOMAIN], [$req['tenant'] ?? '', $req['domain'] ?? ''], 'request tenant and domain');
 
     // 3b. answers that must NOT be stored
@@ -232,6 +241,13 @@ if ($up) {
     check($s['token'] !== '' && $s['last_issued_at'] === $NOW - 30 && $s['last_error'] === '', 'good answer stored, issued_at recorded, error cleared');
     eq('grace', rh_licence_status(true)['status'], 'status now comes from the stored token');
     eq(json_decode($s['token'], true)['payload'], $good['payload'], 'stored token is exactly the verified answer');
+    $bkRow = static function () use ($pdo): ?string {
+        $q = $pdo->prepare("SELECT setting_value FROM site_settings WHERE setting_key = 'licence_backup_requested_at'");
+        $q->execute();
+        $v = $q->fetchColumn();
+        return $v === false ? null : (string)$v;
+    };
+    eq(null, $bkRow(), 'an answer without a backup request stores none');
 
     // 3d. an older answer afterwards (a replay of an older state) is refused; the stored one stays
     $older = mk_token(['paid_until' => $day(30), 'issued_at' => $NOW - 5000], $KP['private']);
@@ -242,9 +258,10 @@ if ($up) {
     eq('grace', rh_licence_status(true)['status'], 'status unchanged after a replay attempt');
 
     // 3e. a newer answer replaces it
-    $serve(mk_token(['paid_until' => $day(25), 'issued_at' => $NOW - 10], $KP['private']));
+    $serve(mk_token(['paid_until' => $day(25), 'issued_at' => $NOW - 10, 'backup_requested_at' => $NOW - 100], $KP['private']));
     $r = rh_licence_check_now();
     check($r['ok'] && $r['status'] === 'active' && $store()['last_issued_at'] === $NOW - 10, 'newer answer accepted (paid again): active');
+    eq((string)($NOW - 100), $bkRow(), 'the panel\'s signed backup request is remembered (acted on after the reply)');
 
     // 3f. the owner switches the hotel off at the panel: read_only then suspended answers
     $serve(mk_token(['paid_until' => $day(-20), 'issued_at' => $NOW - 5], $KP['private']));
@@ -544,6 +561,14 @@ $_POST['client_queued_at'] = '1';
 check(!rh_licence_is_page_load() && !rh_licence_wants_html(), 'offline queue replay = JSON even from a document');
 unset($_POST['client_queued_at']);
 $hdr([]);
+
+// Backups the panel asks for (2026-11-09): when a request runs a backup
+$T = 1800000000;
+eq('none', rh_licence_backup_decide(0, 0, 0, $T), 'backup: no request - nothing');
+eq('none', rh_licence_backup_decide($T - 50, $T - 50, 0, $T), 'backup: a request already acted on is not run again');
+eq('run', rh_licence_backup_decide($T - 50, $T - 900, 0, $T), 'backup: a new request with no backup yet runs one');
+eq('run', rh_licence_backup_decide($T - 50, 0, $T - 7 * 3600, $T), 'backup: last backup 7 hours old - runs');
+eq('fresh', rh_licence_backup_decide($T - 50, 0, $T - 3600, $T), 'backup: last backup 1 hour old - not run again (at most one per 6 hours)');
 
 echo "Licence client: $pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);
