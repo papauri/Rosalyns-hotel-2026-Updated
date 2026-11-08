@@ -89,6 +89,7 @@
 /**
  * Hide the parts of a guide written for a module that is switched off. An element carries
  * data-module="pos" (or "a|b" = any of; "events" and "restaurant" are the front-end flags).
+ * data-module="!restaurant" shows only while that module is OFF (shop wording).
  * A heading hides its whole section; a row, FAQ item or list item hides itself. The contents
  * link to a hidden section is hidden too. Unknown state (no modules) hides nothing.
  */
@@ -101,7 +102,11 @@ function hideModuleSections(modules, flags) {
         return modules[k] !== false;
     }
     function on(spec) {
-        return spec.split('|').some(function (k) { return k && keyOn(k.trim()); });
+        return spec.split('|').some(function (k) {
+            k = k.trim();
+            if (k.charAt(0) === '!') return k.length > 1 && !keyOn(k.slice(1).trim());
+            return k && keyOn(k);
+        });
     }
     function hide(el) { el.hidden = true; el.style.display = 'none'; }
     document.querySelectorAll('[data-module]').forEach(function (el) {

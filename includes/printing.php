@@ -36,8 +36,139 @@ if (!function_exists('rh_print_stations')) {
             'bar'        => 'Bar',
             'coffee_bar' => 'Coffee bar',
             'all'        => 'All stations',
-            'receipt'    => 'Cash desk (receipts only)',
+            'receipt'    => 'Receipt / cash desk (receipts only)',
         ];
+    }
+}
+
+/* ============================== business type (words and options only) ==============================
+ * Printers follow the Modules page: a station's tickets exist only while its station module is on, and a shop (Restaurant
+ * switch off, or no station on) prints receipts only. Saved printers are never changed or deleted by this - they show a
+ * warning and enqueue skips them until the module is back on. */
+
+if (!function_exists('rh_print_device_label')) {
+    /** The "any printer the device can print to" mode, worded for the business: at a shop it is the till's own browser receipt. */
+    function rh_print_device_label(?array $biz = null, bool $short = false): string
+    {
+        $biz = $biz ?? rh_print_biz();
+        return ($biz['shop'] ? 'Till device' : 'Kitchen screen device') . ($short ? '' : ' (any printer)');
+    }
+}
+
+if (!function_exists('rh_print_station_modules')) {
+    /** Order-line station => the Modules switch that turns its screen on. Room service has no station value of its own. */
+    function rh_print_station_modules(): array
+    {
+        return ['kitchen' => 'station_kds', 'bar' => 'station_bds', 'coffee_bar' => 'station_cds'];
+    }
+}
+
+if (!function_exists('rh_print_station_screen_names')) {
+    function rh_print_station_screen_names(): array
+    {
+        return ['kitchen' => 'Kitchen screen', 'bar' => 'Bar screen', 'coffee_bar' => 'Coffee bar screen'];
+    }
+}
+
+if (!function_exists('rh_print_live_state')) {
+    /**
+     * The module state the business follows: ['kitchen' => bool, 'bar' => bool, 'coffee_bar' => bool, 'restaurant' => bool].
+     * Fails open (everything on) when the module system is not loaded. $GLOBALS['rh_print_state_override'] is for tests only
+     * (moduleEnabled() caches for the request, so a test cannot flip a module mid-run).
+     */
+    function rh_print_live_state(): array
+    {
+        if (isset($GLOBALS['rh_print_state_override']) && is_array($GLOBALS['rh_print_state_override'])) {
+            return $GLOBALS['rh_print_state_override'];
+        }
+        $have = function_exists('moduleEnabled');
+        $pos = !$have || moduleEnabled('pos');
+        $state = [];
+        foreach (rh_print_station_modules() as $station => $module) {
+            $state[$station] = $pos && (!$have || moduleEnabled($module));
+        }
+        $state['restaurant'] = function_exists('isRestaurantEnabled') ? isRestaurantEnabled() : true;
+        return $state;
+    }
+}
+
+if (!function_exists('rh_print_biz')) {
+    /**
+     * Business profile from a module state (live when null): ['stations' => [k => bool], 'any' => at least one station on,
+     * 'restaurant' => bool, 'shop' => Restaurant switch off OR no station on].
+     */
+    function rh_print_biz(?array $state = null): array
+    {
+        $state = $state ?? rh_print_live_state();
+        $stations = [];
+        foreach (array_keys(rh_print_station_modules()) as $s) {
+            $stations[$s] = !empty($state[$s]);
+        }
+        $any = in_array(true, $stations, true);
+        $restaurant = !array_key_exists('restaurant', $state) || !empty($state['restaurant']);
+        return ['stations' => $stations, 'any' => $any, 'restaurant' => $restaurant, 'shop' => (!$restaurant || !$any)];
+    }
+}
+
+if (!function_exists('rh_print_station_on')) {
+    /** Is this printer station live? kitchen/bar/coffee_bar follow their module; "all" needs at least one; the receipt desk is always on. */
+    function rh_print_station_on(string $station, ?array $biz = null): bool
+    {
+        $biz = $biz ?? rh_print_biz();
+        if ($station === 'all') {
+            return $biz['any'];
+        }
+        return $biz['stations'][$station] ?? true;
+    }
+}
+
+if (!function_exists('rh_print_station_choices')) {
+    /** The "Station it serves" choices (value => label): stations that are on, All stations when at least one is, and the receipt desk always. */
+    function rh_print_station_choices(?array $biz = null): array
+    {
+        $biz = $biz ?? rh_print_biz();
+        $out = [];
+        foreach (rh_print_stations() as $v => $l) {
+            if (rh_print_station_on($v, $biz)) {
+                $out[$v] = $l;
+            }
+        }
+        return $out;
+    }
+}
+
+if (!function_exists('rh_print_printer_warning')) {
+    /** Plain warning for a saved, switched-on printer whose station is switched off in Modules; '' when all is well. */
+    function rh_print_printer_warning(array $p, ?array $biz = null): string
+    {
+        $biz = $biz ?? rh_print_biz();
+        $station = (string)($p['station'] ?? '');
+        $prints = (string)($p['prints'] ?? 'tickets');
+        if (($p['mode'] ?? 'off') === 'off' || empty($p['is_active']) || $station === 'receipt' || $prints === 'receipts' || rh_print_station_on($station, $biz)) {
+            return '';
+        }
+        $what = $station === 'all'
+            ? 'No station screen is switched on in Modules'
+            : (rh_print_station_screen_names()[$station] ?? 'This station') . ' is switched off in Modules';
+        return $prints === 'both'
+            ? $what . ' - this printer gets no tickets until it is back on. Receipts still print.'
+            : $what . ' - this printer gets nothing until it is back on.';
+    }
+}
+
+if (!function_exists('rh_print_business_error')) {
+    /**
+     * Business-type rule for a save: a printer cannot be pointed at a station that is switched off, unless that is the station
+     * it already has (an old setting stays editable). $saved = the stored row, or null for a new printer. '' = fine.
+     */
+    function rh_print_business_error(array $fields, ?array $saved, ?array $biz = null): string
+    {
+        $biz = $biz ?? rh_print_biz();
+        $station = (string)($fields['station'] ?? '');
+        if (!rh_print_station_on($station, $biz) && (!$saved || (string)$saved['station'] !== $station)) {
+            return 'That station is switched off in Modules. Pick one that is on, or switch it on first.';
+        }
+        return '';
     }
 }
 
@@ -107,8 +238,9 @@ if (!function_exists('rh_print_validate_printer')) {
      * Clean one printer form. Returns [fields, error]; error is '' when fine.
      * Cloud printers are 58/80 mm rolls only (Star / Epson); sheets are for the kitchen-screen device.
      */
-    function rh_print_validate_printer(array $in): array
+    function rh_print_validate_printer(array $in, ?array $biz = null): array
     {
+        $dev = rh_print_device_label($biz, true);
         $name = trim((string)($in['name'] ?? ''));
         $mode = (string)($in['mode'] ?? 'off');
         $protocol = (string)($in['protocol'] ?? 'star');
@@ -124,7 +256,7 @@ if (!function_exists('rh_print_validate_printer')) {
             return [[], 'Give the printer a name (up to 80 characters).'];
         }
         if (!in_array($mode, ['off', 'cloud', 'screen'], true)) {
-            return [[], 'Choose how this printer is fed: Off, Cloud printer or Kitchen screen device.'];
+            return [[], 'Choose how this printer is fed: Off, Cloud printer or ' . $dev . '.'];
         }
         if (!in_array($protocol, ['star', 'epson'], true)) {
             $protocol = 'star';
@@ -139,7 +271,7 @@ if (!function_exists('rh_print_validate_printer')) {
             return [[], 'Choose the paper size.'];
         }
         if ($mode === 'cloud' && rh_print_paper_spec($paper)['kind'] !== 'roll') {
-            return [[], 'A cloud printer prints on a 58 mm or 80 mm roll. Use Kitchen screen device for A6, A5 or A4 paper.'];
+            return [[], 'A cloud printer prints on a 58 mm or 80 mm roll. Use ' . $dev . ' for A6, A5 or A4 paper.'];
         }
         if (!in_array($prints, ['tickets', 'receipts', 'both'], true)) {
             return [[], 'Choose what this printer prints.'];
@@ -837,8 +969,12 @@ if (!function_exists('rh_print_active_printers')) {
     {
         $rows = $pdo->query("SELECT * FROM print_printers WHERE is_active = 1 AND mode <> 'off' ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
         $out = [];
+        $biz = rh_print_biz();
         foreach ($rows as $p) {
             if ($kind === 'ticket' && in_array($p['prints'], ['tickets', 'both'], true) && $p['station'] !== 'receipt') {
+                if (!rh_print_station_on((string)$p['station'], $biz)) {
+                    continue; // its station is switched off in Modules: no tickets until it is back on
+                }
                 $out[] = $p;
             } elseif ($kind === 'receipt' && $p['mode'] === 'cloud' && in_array($p['prints'], ['receipts', 'both'], true)) {
                 $out[] = $p;
@@ -899,10 +1035,14 @@ if (!function_exists('rh_print_enqueue_kitchen')) {
                 return 0;
             }
             $labels = rh_print_stations();
+            $biz = rh_print_biz();
             $made = 0;
             foreach ($printers as $p) {
                 $mine = [];
                 foreach ($items as $row) {
+                    if (!rh_print_station_on((string)($row['station'] ?: 'kitchen'), $biz)) {
+                        continue; // that station is switched off in Modules: no ticket for its lines
+                    }
                     if ($p['station'] === 'all' || $p['station'] === ($row['station'] ?: 'kitchen')) {
                         $mine[] = $row;
                     }
@@ -1060,18 +1200,54 @@ if (!function_exists('rh_print_enqueue_receipt')) {
 }
 
 if (!function_exists('rh_print_enqueue_test')) {
-    /** A sample ticket and a sample receipt on one printer, so staff can see the width fits. Returns job ids. */
-    function rh_print_enqueue_test(PDO $pdo, array $printer): array
+    /** A sample ticket and a sample receipt on one printer, so staff can see the width fits (a shop gets the receipt only). Returns job ids. */
+    function rh_print_enqueue_test(PDO $pdo, array $printer, ?array $biz = null): array
     {
+        $biz = $biz ?? rh_print_biz();
         $site = (string)(getSetting('site_name') ?: 'Hotel');
         $spec = rh_print_paper_spec($printer['paper'] ?? '80');
         $cols = rh_print_cols($printer);
         $ids = [];
-        foreach (['ticket', 'receipt'] as $which) {
+        foreach ($biz['shop'] ? ['receipt'] : ['ticket', 'receipt'] as $which) {
             $model = rh_print_model_test($which, $site, (string)$printer['name'], $spec['label'], $cols);
             $ids[] = rh_print_insert_job($pdo, (int)$printer['id'], 'test', null, null, 'Test ' . $which . ' - ' . $printer['name'], $model);
         }
         return $ids;
+    }
+}
+
+if (!function_exists('rh_print_test_html')) {
+    /**
+     * The test pages for a screen-device / till-device printer, printed straight from the Printers page (no queued job, so
+     * no station screen can print it a second time). One document at the printer's paper size, built by the same renderer
+     * as real jobs: the sample ticket (not at a shop) then the sample receipt, a page break between them.
+     */
+    function rh_print_test_html(array $printer, ?array $biz = null, bool $autoprint = true): string
+    {
+        $biz = $biz ?? rh_print_biz();
+        $site = (string)(getSetting('site_name') ?: 'Hotel');
+        $spec = rh_print_paper_spec($printer['paper'] ?? '80');
+        $cols = rh_print_cols($printer);
+        $rows = [];
+        foreach ($biz['shop'] ? ['receipt'] : ['ticket', 'receipt'] as $which) {
+            $rows = array_merge($rows, rh_print_rows_for(rh_print_model_test($which, $site, (string)($printer['name'] ?? 'Printer'), $spec['label'], $cols), $cols, 1, false));
+        }
+        return rh_print_encode_html($rows, $printer, 'Test print - ' . (string)($printer['name'] ?? 'Printer'), $autoprint);
+    }
+}
+
+if (!function_exists('rh_print_test_job_status')) {
+    /** Live status of queued test jobs (and only test jobs): [{id, title, status, last_error}]. Backs the Test print status on Printers. */
+    function rh_print_test_job_status(PDO $pdo, array $ids): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static function ($i) { return $i > 0; })));
+        if (!$ids) {
+            return [];
+        }
+        $ids = array_slice($ids, 0, 10);
+        $st = $pdo->prepare("SELECT id, title, status, last_error FROM print_jobs WHERE kind = 'test' AND id IN (" . implode(',', array_fill(0, count($ids), '?')) . ') ORDER BY id');
+        $st->execute($ids);
+        return $st->fetchAll(PDO::FETCH_ASSOC);
     }
 }
 

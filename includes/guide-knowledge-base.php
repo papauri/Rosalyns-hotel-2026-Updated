@@ -81,6 +81,7 @@ function rh_kb_synonym_groups(): array
         ['housekeeping', 'cleaning', 'clean', 'dirty', 'housekeeper', 'cleaner', 'turnover'],
         ['maintenance', 'repair', 'broken', 'fault', 'faulty'],
         ['printer', 'printers', 'printing', 'print', 'thermal', 'docket', 'dockets', 'reprint', 'reprints'],
+        ['add printer', 'set up printer', 'setup printer', 'choose printer', 'default printer', 'print dialog', 'print window', 'silent print', 'silent printing', 'kiosk printing', 'cloud printer'], // Printers section (01 POS till): #printers
         ['kds', 'kitchen', 'chef', 'cook'],['bds', 'bar', 'drinks', 'bartender'], ['cds', 'coffee', 'barista'],
         ['staff', 'user', 'users', 'employee', 'employees', 'worker'],
         ['permission', 'permissions', 'access', 'rights', 'allow', 'privilege'],

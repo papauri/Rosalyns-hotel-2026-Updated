@@ -68,10 +68,14 @@ try {
     if ($action === 'poll') {
         $station = (string)($_POST['station'] ?? 'kitchen');
         if (!in_array($station, ['kitchen', 'bar', 'coffee_bar'], true)) ps_err('Invalid station');
-        // 'All stations' printers are served from the kitchen screen.
+        // 'All stations' printers are served from the first station screen that is switched on (kitchen, else bar, else coffee).
+        $allHome = 'kitchen';
+        foreach (rh_print_biz()['stations'] as $sn => $on) {
+            if ($on) { $allHome = $sn; break; }
+        }
         $st = $pdo->prepare("SELECT id, name, paper, station, prints FROM print_printers
-            WHERE mode = 'screen' AND is_active = 1 AND prints IN ('tickets','both') AND (station = ? OR (station = 'all' AND ? = 'kitchen')) ORDER BY id");
-        $st->execute([$station, $station]);
+            WHERE mode = 'screen' AND is_active = 1 AND prints IN ('tickets','both') AND (station = ? OR (station = 'all' AND ? = ?)) ORDER BY id");
+        $st->execute([$station, $station, $allHome]);
         $printers = array_values(array_filter($st->fetchAll(PDO::FETCH_ASSOC), $canUse));
         $jobs = [];
         if ($printers) {

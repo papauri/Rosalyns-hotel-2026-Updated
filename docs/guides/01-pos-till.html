@@ -397,6 +397,87 @@
   <div class="note"><p>WhatsApp receipts work in one of two ways. If a WhatsApp provider is switched on in WhatsApp Settings, the receipt is sent automatically from the hotel's account and you see <em>"Receipt sent by WhatsApp to ..."</em>. If not, you see <em>"Opening WhatsApp with the receipt for ... &mdash; press Send in WhatsApp."</em>: WhatsApp opens on your device with the receipt already typed in, and you must press Send in WhatsApp. If it does not open, click the <strong>Open WhatsApp</strong> link next to the message. If an automatic send fails you see <em>"WhatsApp receipt could not be sent: ..."</em>.</p></div>
   <p>On the receipt page, a manager or admin can apply a discount or service charge before an order is paid (<strong>Manual consolidation</strong>). After payment the totals can no longer be changed: <em>"This order has been paid - its totals can no longer be changed. Use the refund flow and take a new sale instead."</em></p>
 
+  <h2 id="printers">Printers: kitchen, bar and receipt printing</h2>
+  <p>Kitchen and bar tickets, and customer receipts, come out on paper. Tickets show the table or room, the order number, the items and any notes. They never show prices. Each ticket prints once. An order that is cancelled or voided before it prints never prints.</p>
+  <p>Who can use it: anyone with the <strong>Printers</strong> permission. Managers and admins have it; give it to others under Staff &amp; Access.</p>
+
+  <h3>Add a printer (first time)</h3>
+  <ol class="steps">
+    <li>On the computer that the printer is connected to, open <strong>Settings</strong> &rarr; <strong>Bluetooth &amp; devices</strong> &rarr; <strong>Printers &amp; scanners</strong> &rarr; <strong>Add device</strong>. Pick the printer and finish. Then print a Windows test page to check it works.</li>
+    <li>Open Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Printers</strong>. You need the <strong>Printers</strong> permission.</li>
+    <li>In the empty <strong>Add printer</strong> form, fill in:
+      <ul>
+        <li><strong>Name</strong>: anything you will recognise, for example <em>Laptop &ndash; HP office</em>. Only you see it.</li>
+        <li><strong>How it prints</strong>: <strong>Kitchen screen device (any printer)</strong>, or <strong>Cloud printer (no computer)</strong>. Cloud is for Star CloudPRNT or Epson Server Direct Print models only.</li>
+        <li><strong>Station it serves</strong>: Kitchen, Bar, Coffee bar, All stations, or Cash desk (receipts only).</li>
+        <li><strong>Paper</strong>: A4, A5 or A6 sheets for an office printer on a kitchen screen device. 58 mm or 80 mm for a receipt printer.</li>
+        <li><strong>What it prints</strong>: Kitchen / bar tickets, Customer receipts, or Both. Customer receipts go to cloud printers. The till prints its own receipts in the browser.</li>
+        <li><strong>Copies</strong>: 1 to 5. Leave <strong>Characters per line</strong> empty.</li>
+      </ul>
+    </li>
+    <li>Click <strong>Add printer</strong>. You will see <em>"Printer added."</em></li>
+    <li>On the computer with the printer, open the station screen (for example Kitchen KDS). Tap <strong>Printer</strong> at the top. Tick <strong>This screen prints for...</strong> next to the new printer. Tick it on that one screen only. Leave the screen open.</li>
+    <li>Back on Printers, click <strong>Test print</strong>. In Chrome's print window, pick the printer and click <strong>Print</strong>. If the whole ruler line fits across the paper, the size is right. If not, see <a href="#test-print">Test print and Reprint</a>.</li>
+  </ol>
+  <p>If something goes wrong: <em>"Printing needs an update first."</em> means someone must apply the print queue update before the page works.</p>
+
+  <h3>Cloud printer: connect it</h3>
+  <ol class="steps">
+    <li>Save the printer. Under <strong>Address to paste into the printer</strong>, click <strong>Copy</strong>.</li>
+    <li>Open the printer's own settings page (its web page or setup utility) and paste the address into its server address field. Save there.</li>
+    <li>Back on Printers, the badge shows <strong>Connected</strong> once the printer has contacted us. Until then it shows <strong>Not contacted yet</strong>. Wait a few minutes, then refresh the page.</li>
+  </ol>
+  <p>Treat the address like a password. If it was shared by mistake, open <strong>More</strong> &rarr; <strong>New address</strong>, then paste the new address into the printer. The old address stops working.</p>
+
+  <h3 id="choose-printer">Choose which printer (several printers on one computer)</h3>
+  <ol class="steps">
+    <li>Press Print on any ticket or page. Chrome opens its print window.</li>
+    <li>Under <strong>Destination</strong>, open the list. It shows every printer installed on that computer. Click <strong>See more...</strong> for the full list. <strong>Save as PDF</strong> is there too.</li>
+    <li>Pick the printer, then click <strong>Print</strong>.</li>
+  </ol>
+  <p>Chrome usually selects the printer you used last time, so check the name before you click Print. To open the full Windows print window instead, press <strong>Ctrl + Shift + P</strong> or choose <strong>Print using system dialog</strong>.</p>
+  <p>Windows always has a default printer. It is often <em>Microsoft Print to PDF</em>, or the last printer used if <em>Let Windows manage my default printer</em> is on. The default only decides what Chrome pre-selects. With the print window on, each new kitchen ticket waits for someone to press <strong>Print</strong>. That is fine for testing, but not for a busy kitchen. Use silent printing or a cloud printer instead.</p>
+
+  <h3>Print without the window (silent printing)</h3>
+  <ol class="steps">
+    <li>On the computer, right-click the Chrome shortcut and choose <strong>Properties</strong>.</li>
+    <li>In the <strong>Target</strong> box, go to the very end. Add a space, then <code>--kiosk-printing</code>.</li>
+    <li>Click <strong>OK</strong>.</li>
+    <li>Close all Chrome windows. Open Chrome from that shortcut.</li>
+  </ol>
+  <p>From now on, tickets print straight to one printer: the Windows default or the one used last. There is no printer choice and no pop-up. Use this for a busy kitchen, or use a cloud printer.</p>
+
+  <h3>Different jobs to different printers from one computer</h3>
+  <p>Not yet. Today you have two options:</p>
+  <ul>
+    <li><strong>One printer per device</strong>: each station screen or till has its own printer.</li>
+    <li><strong>Cloud printers</strong>: each cloud printer gets only the tickets for its own station.</li>
+  </ul>
+
+  <h3 id="test-print">Test print and Reprint</h3>
+  <ol class="steps">
+    <li>Click <strong>Test print</strong> on a saved printer. A sample ticket and receipt print with a ruler line.</li>
+    <li>If the whole ruler fits on the paper, the width is right. If it runs off the edge or leaves a gap, change <strong>Characters per line</strong> (80 mm: 48, or 42 on some models; 58 mm: 32), save, and test again.</li>
+  </ol>
+  <p>Under <strong>More</strong>, <strong>Preview ticket</strong> and <strong>Preview receipt</strong> open a preview in a new tab. The <strong>Print queue</strong> at the bottom lists the latest tickets and receipts. Click <strong>Reprint</strong> on any row to send it again. Cancelled rows have no Reprint button.</p>
+  <ul>
+    <li><strong>Waiting</strong>: not yet collected by the printer.</li>
+    <li><strong>Sent</strong>: handed to the printer, not yet confirmed.</li>
+    <li><strong>Printed</strong>: done.</li>
+    <li><strong>Failed</strong>: the reason is shown under the status. Fix it, then click <strong>Reprint</strong>.</li>
+    <li><strong>Cancelled</strong>: the order was cancelled or voided before it printed.</li>
+  </ul>
+
+  <h3>If it doesn't print</h3>
+  <ul>
+    <li>The printer is on and has paper.</li>
+    <li>The Windows test page prints from that computer.</li>
+    <li>On the station screen, <strong>This screen prints for...</strong> is ticked, and the screen stays open.</li>
+    <li>The print queue shows <strong>Waiting</strong> or <strong>Failed</strong>. Fix the cause, then click <strong>Reprint</strong>.</li>
+    <li>Cloud printer: Printers shows a recent check-in (<strong>Connected</strong>), and the address was pasted exactly.</li>
+  </ul>
+  <p>If something goes wrong: <em>"This printer is switched off. Turn it on (and save) before a test print."</em> Tick <strong>Active</strong> and save. A cloud printer that still shows <em>Not contacted yet</em> after a few minutes needs its power, network and pasted address checked.</p>
+
   <h2 id="close">How to close your shift (Z-report)</h2>
   <p>Close your shift at the end of your session. The count is blind: the till does not show you the expected amounts until you submit.</p>
   <ol class="steps">

@@ -197,7 +197,47 @@ ok('unknown station refused', $e !== '');
 ok('endpoint url carries id and token, star vs epson file', strpos(rh_print_endpoint_url(['id' => 7, 'token' => 'abc', 'protocol' => 'star'], 'https://x.test/'), 'https://x.test/api/print-cloudprnt.php?p=7&t=abc') === 0
     && strpos(rh_print_endpoint_url(['id' => 7, 'token' => 'abc', 'protocol' => 'epson'], 'https://x.test'), '/api/print-epson.php?p=7') !== false);
 
-/* ---------------------------------------------------------------- Parts 2-4: database, one transaction */
+echo "== Business type: station choices, warnings, shop words ==\n";
+$bFull = rh_print_biz(['kitchen' => true, 'bar' => true, 'coffee_bar' => true, 'restaurant' => true]);
+$bBar = rh_print_biz(['kitchen' => true, 'bar' => true, 'coffee_bar' => false, 'restaurant' => true]); // Bar / Restaurant preset
+$bKdsOff = rh_print_biz(['kitchen' => false, 'bar' => true, 'coffee_bar' => false, 'restaurant' => true]);
+$bShop = rh_print_biz(['kitchen' => false, 'bar' => false, 'coffee_bar' => false, 'restaurant' => false]); // Retail / Supermarket
+$bNoRest = rh_print_biz(['kitchen' => true, 'bar' => true, 'coffee_bar' => true, 'restaurant' => false]);
+ok('every station on: all five choices, not a shop', array_keys(rh_print_station_choices($bFull)) === ['kitchen', 'bar', 'coffee_bar', 'all', 'receipt'] && !$bFull['shop']);
+ok('coffee screen off: no Coffee bar choice, All stations and the receipt desk stay', array_keys(rh_print_station_choices($bBar)) === ['kitchen', 'bar', 'all', 'receipt']);
+ok('kitchen screen off: no Kitchen choice', !isset(rh_print_station_choices($bKdsOff)['kitchen']) && isset(rh_print_station_choices($bKdsOff)['bar']) && isset(rh_print_station_choices($bKdsOff)['all']));
+ok('shop (no station on): only the receipt desk, no All stations, worded as a shop', array_keys(rh_print_station_choices($bShop)) === ['receipt'] && $bShop['shop'] && !$bShop['any']);
+ok('Restaurant switch off counts as a shop even with stations on', $bNoRest['shop'] && $bNoRest['any']);
+ok('the receipt desk is always offered', isset(rh_print_station_choices($bShop)['receipt']) && isset(rh_print_station_choices($bFull)['receipt']));
+ok('the full list used to validate and to read saved printers is unchanged', array_keys(rh_print_stations()) === ['kitchen', 'bar', 'coffee_bar', 'all', 'receipt']);
+ok('the device mode is Kitchen screen device for a restaurant, Till device for a shop', rh_print_device_label($bFull) === 'Kitchen screen device (any printer)' && rh_print_device_label($bShop) === 'Till device (any printer)' && rh_print_device_label($bShop, true) === 'Till device');
+$wp = ['mode' => 'cloud', 'is_active' => 1, 'station' => 'kitchen', 'prints' => 'tickets'];
+ok('a ticket printer on a station that is on: no warning', rh_print_printer_warning($wp, $bFull) === '');
+ok('kitchen switched off: plain warning that it gets nothing', strpos(rh_print_printer_warning($wp, $bKdsOff), 'Kitchen screen is switched off in Modules') === 0 && strpos(rh_print_printer_warning($wp, $bKdsOff), 'gets nothing') !== false);
+ok('a "both" printer is told it still prints receipts', strpos(rh_print_printer_warning(['prints' => 'both'] + $wp, $bKdsOff), 'Receipts still print') !== false);
+ok('a receipts-only printer, a paused one and one switched off get no warning', rh_print_printer_warning(['prints' => 'receipts'] + $wp, $bKdsOff) === '' && rh_print_printer_warning(['is_active' => 0] + $wp, $bKdsOff) === '' && rh_print_printer_warning(['mode' => 'off'] + $wp, $bKdsOff) === '');
+ok('an All stations printer with no station on is warned', strpos(rh_print_printer_warning(['station' => 'all'] + $wp, $bShop), 'No station screen is switched on') === 0);
+ok('a new printer cannot be pointed at a station that is off', rh_print_business_error(['station' => 'kitchen'], null, $bKdsOff) !== '' && rh_print_business_error(['station' => 'all'], null, $bShop) !== '');
+ok('a saved printer keeps its old station when edited, and can move to one that is on', rh_print_business_error(['station' => 'kitchen'], ['station' => 'kitchen'], $bKdsOff) === '' && rh_print_business_error(['station' => 'bar'], ['station' => 'kitchen'], $bKdsOff) === '' && rh_print_business_error(['station' => 'receipt'], null, $bShop) === '');
+$ps = static function (string $f) use ($root): string { return (string)file_get_contents($root . '/' . $f); };
+$pageSrc = $ps('admin/printers.php');
+ok('Printers page is worded for a shop (title, intro, till device, receipt-only options)', strpos($pageSrc, "'Receipt printers'") !== false && strpos($pageSrc, 'Print customer receipts on receipt printers at the till') !== false
+    && strpos($pageSrc, 'rh_print_device_label($biz)') !== false && strpos($pageSrc, '!$biz[\'any\']') !== false);
+ok('Printers page lists a saved value that is no longer offered, so saving never changes it silently', strpos($pageSrc, '(switched off in Modules)') !== false && strpos($pageSrc, '$stationOpts[$curStation]') !== false);
+
+echo "== Test print: straight to this computer for screen / till devices ==\n";
+$tp80 = rh_print_test_html(['name' => 'Desk', 'paper' => '80', 'mode' => 'screen'], $bFull, true);
+ok('test pages carry the sample ticket then the sample receipt, one page break, at the 80 mm roll size', strpos($tp80, '@page{size:80mm auto') !== false && substr_count($tp80, 'class="pb"') === 1
+    && strpos($tp80, 'TEST TICKET') !== false && strpos($tp80, 'TEST RECEIPT') !== false && strpos($tp80, 'TEST TICKET') < strpos($tp80, 'TEST RECEIPT'));
+ok('test pages open the print window on load', strpos($tp80, 'window.print()') !== false && strpos(rh_print_test_html(['name' => 'Desk', 'paper' => '80'], $bFull, false), 'window.print()') === false);
+$tpA5 = rh_print_test_html(['name' => 'Desk', 'paper' => 'a5', 'mode' => 'screen'], $bFull, true);
+ok('an A5 printer gets an A5 page, not a roll', strpos($tpA5, 'size:A5') !== false && strpos($tpA5, '80mm auto') === false);
+$tpShop = rh_print_test_html(['name' => 'Till', 'paper' => '58', 'mode' => 'screen'], $bShop, true);
+ok('a shop test is the receipt only (no ticket, no page break), at 58 mm', strpos($tpShop, 'TEST TICKET') === false && strpos($tpShop, 'TEST RECEIPT') !== false && substr_count($tpShop, 'class="pb"') === 0 && strpos($tpShop, 'size:58mm auto') !== false);
+ok('nothing is queued for a screen / till device test (it prints from the browser)', preg_match('/elseif \(\$pp\[\'mode\'\] === \'screen\'\) \{[^}]*\}\s*else \{\s*\$testJobIds = [^;]*rh_print_enqueue_test/s', $pageSrc) === 1);
+ok('screen / till device Test print is a browser print from a hidden frame; cloud Test print posts and shows live status for a minute', strpos($pageSrc, 'onclick="prTestPrint(') !== false && strpos($pageSrc, 'createElement(\'iframe\')') !== false && strpos($pageSrc, 'teststatus=') !== false && strpos($pageSrc, '60000') !== false && strpos($pageSrc, 'Waiting for the printer') !== false);
+ok('help text says Test print opens the print window on this computer', substr_count($pageSrc, 'opens the print window on this computer - choose your printer and print') >= 2);
+
 echo "== Wiring (static) ==\n";
 $src = static function (string $f) use ($root): string { return (string)file_get_contents($root . '/' . $f); };
 ok('pos_fireKitchen enqueues the ticket', strpos($src('admin/pos.php'), 'rh_print_enqueue_kitchen($pdo, $orderId);') !== false);
@@ -214,6 +254,8 @@ if (!rh_print_ready($pdo)) {
 }
 
 $pdo->beginTransaction();
+// The queue checks below assume every station is on whatever this database's Modules say; the business-type block at the end flips it.
+$GLOBALS['rh_print_state_override'] = ['kitchen' => true, 'bar' => true, 'coffee_bar' => true, 'restaurant' => true];
 try {
     $tag = 'ZZP' . substr(bin2hex(random_bytes(4)), 0, 6);
     $mkPrinter = static function (string $name, string $mode, string $protocol, string $station, string $paper, string $prints, int $active = 1) use ($pdo, $tag): array {
@@ -467,12 +509,61 @@ try {
         && rh_print_handle_epson($pdo, $ereq([], ['method' => 'GET']))['status'] === 405
         && rh_print_handle_epson($pdo, $ereq([], ['get' => ['p' => $pk['id'], 't' => $pk['token']]]))['status'] === 404);
     ok('Epson endpoint refuses plain HTTP', rh_print_handle_epson($pdo, $ereq(['ConnectionType' => 'GetRequest'], ['https' => false]))['status'] === 403);
+
+    echo "== Business type: no ticket for a station that is switched off ==\n";
+    $pdo->exec("UPDATE print_printers SET is_active = 0 WHERE name NOT LIKE 'ZZP%'");
+    $pdo->prepare("UPDATE print_printers SET is_active = 0 WHERE name LIKE ?")->execute([$tag . '%']);
+    $bk = $mkPrinter('b-kitchen', 'cloud', 'star', 'kitchen', '80', 'tickets');
+    $bb = $mkPrinter('b-bar', 'cloud', 'star', 'bar', '80', 'tickets');
+    $ba = $mkPrinter('b-all', 'cloud', 'star', 'all', '80', 'tickets');
+    $bs = $mkPrinter('b-all-screen', 'screen', 'star', 'all', 'a5', 'tickets');
+    $bboth = $mkPrinter('b-kitchen-both', 'cloud', 'star', 'kitchen', '80', 'both');
+    $kinds = static function (int $pid, int $oid) use ($jobsOf): array { return array_column($jobsOf($pid, $oid), 'kind'); };
+    $GLOBALS['rh_print_state_override'] = ['kitchen' => false, 'bar' => true, 'coffee_bar' => true, 'restaurant' => true]; // kitchen screen switched off
+    $oB = $mkOrder('placed', [['station' => 'kitchen', 'name' => 'ZZ Off chicken', 'qty' => 1], ['station' => 'bar', 'name' => 'ZZ On lager', 'qty' => 1]]);
+    $madeB = rh_print_enqueue_kitchen($pdo, $oB);
+    ok('kitchen off, bar on: the kitchen printer gets nothing; bar, all-stations cloud AND all-stations screen device get the bar ticket', $madeB === 3
+        && !$jobsOf((int)$bk['id'], $oB) && count($jobsOf((int)$bs['id'], $oB)) === 1 && count($jobsOf((int)$bb['id'], $oB)) === 1 && count($jobsOf((int)$ba['id'], $oB)) === 1, "made $madeB");
+    $txtS = rh_print_render_job($jobsOf((int)$bs['id'], $oB)[0], $bs, 'html');
+    ok('kitchen off: the all-stations screen device ticket is the bar line only', stripos($txtS, 'LAGER') !== false && stripos($txtS, 'Off chicken') === false);
+    ok('the all-stations screen is served from the first station that is on', strpos(file_get_contents($root . '/api/print-station.php'), "rh_print_biz()['stations']") !== false);
+    $txtA = $textOf($jobsOf((int)$ba['id'], $oB)[0], $ba);
+    ok('kitchen off: the all-stations ticket carries only the bar line', strpos($txtA, 'LAGER') !== false && stripos($txtA, 'Off chicken') === false);
+    ok('kitchen off: a "both" printer on the kitchen gets no ticket', !$jobsOf((int)$bboth['id'], $oB));
+    $GLOBALS['rh_print_state_override'] = ['kitchen' => true, 'bar' => true, 'coffee_bar' => true, 'restaurant' => true];
+    ok('kitchen back on: the held-back kitchen line prints on the next fire (nothing was lost)', rh_print_enqueue_kitchen($pdo, $oB) >= 2 && count($jobsOf((int)$bk['id'], $oB)) === 1 && stripos($textOf($jobsOf((int)$bk['id'], $oB)[0], $bk), 'Off chicken') !== false);
+    $GLOBALS['rh_print_state_override'] = ['kitchen' => false, 'bar' => false, 'coffee_bar' => false, 'restaurant' => false]; // a shop
+    $oS = $mkOrder('placed', [['station' => 'kitchen', 'name' => 'ZZ Shop item', 'qty' => 1]]);
+    ok('shop: no ticket job for any printer', rh_print_enqueue_kitchen($pdo, $oS) === 0);
+    $tj = rh_print_enqueue_test($pdo, $ba);
+    ok('shop: Test print queues one receipt and no ticket', count($tj) === 1 && count(array_filter($jobsOf((int)$ba['id']), static function ($j) { return $j['kind'] === 'test'; })) === 1 && strpos($jobsOf((int)$ba['id'])[count($jobsOf((int)$ba['id'])) - 1]['title'], 'receipt') !== false);
+    $GLOBALS['rh_print_state_override'] = ['kitchen' => true, 'bar' => true, 'coffee_bar' => true, 'restaurant' => true];
+    $tpr = $mkPrinter('t-cloud', 'cloud', 'star', 'receipt', '80', 'receipts');
+    $tIds = rh_print_enqueue_test($pdo, $tpr);
+    ok('restaurant: Test print queues a ticket and a receipt', count($tIds) === 2 && count($jobsOf((int)$tpr['id'])) === 2);
+    $ts = rh_print_test_job_status($pdo, array_merge($tIds, [(int)$jobsOf((int)$ba['id'], $oB)[0]['id']]));
+    ok('live test status returns the test jobs only (never an order ticket), Waiting at first', count($ts) === 2 && $ts[0]['status'] === 'queued' && $ts[1]['status'] === 'queued');
+    $cj = rh_print_next_job($pdo, (int)$tpr['id']);
+    rh_print_claim_job($pdo, (int)$cj['id'], (int)$tpr['id']);
+    $sSent = rh_print_test_job_status($pdo, [(int)$cj['id']])[0]['status'];
+    rh_print_finish_job($pdo, (int)$cj['id'], (int)$tpr['id'], false, 'ErrorPaperOut');
+    $sFault = rh_print_test_job_status($pdo, [(int)$cj['id']])[0];
+    rh_print_claim_job($pdo, (int)$cj['id'], (int)$tpr['id']);
+    rh_print_finish_job($pdo, (int)$cj['id'], (int)$tpr['id'], true);
+    $sDone = rh_print_test_job_status($pdo, [(int)$cj['id']])[0]['status'];
+    ok('live test status follows the job: Sent, back to Waiting with the printer fault, then Printed', $sSent === 'sent' && $sFault['status'] === 'queued' && $sFault['last_error'] === 'ErrorPaperOut' && $sDone === 'printed');
+    ok('no ids, bad ids and more than ten ids are handled', rh_print_test_job_status($pdo, []) === [] && rh_print_test_job_status($pdo, ['x', 0, -3]) === [] && count(rh_print_test_job_status($pdo, range(1, 50))) <= 10);
+    $oP = $mkOrder('paid', [['station' => 'kitchen', 'name' => 'ZZ Shop sale', 'qty' => 1, 'kds' => 'served']]);
+    $pdo->prepare("UPDATE stock_orders SET paid_at = NOW(), payment_method = 'cash', subtotal = 500, total_amount = 500 WHERE id = ?")->execute([$oP]);
+    $GLOBALS['rh_print_state_override'] = ['kitchen' => false, 'bar' => false, 'coffee_bar' => false, 'restaurant' => false];
+    ok('shop: a paid sale still prints its receipt on a cloud receipt printer (receipts are not tied to a station)', rh_print_enqueue_receipt($pdo, $oP) >= 1 && count(array_filter($kinds((int)$bboth['id'], $oP), static function ($k) { return $k === 'receipt'; })) === 1);
 } catch (Throwable $e) {
     $fail++;
     echo '  FAIL  exception: ' . $e->getMessage() . ' @' . $e->getFile() . ':' . $e->getLine() . "\n";
 }
+unset($GLOBALS['rh_print_state_override']);
 $pdo->rollBack();
-$left = (int)$pdo->query("SELECT COUNT(*) FROM print_printers WHERE name LIKE 'ZZP%'")->fetchColumn()
+$left =(int)$pdo->query("SELECT COUNT(*) FROM print_printers WHERE name LIKE 'ZZP%'")->fetchColumn()
     + (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE reference LIKE 'ZZP%'")->fetchColumn();
 ok('everything rolled back, nothing left behind', $left === 0, "left $left");
 foreach (glob(sys_get_temp_dir() . '/rh_pr_*.txt') ?: [] as $f) { if (filemtime($f) > time() - 120) { @unlink($f); } }

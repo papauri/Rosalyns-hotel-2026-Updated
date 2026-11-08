@@ -2,9 +2,11 @@
 /**
  * Printers (Restaurant & Bar) - receipt printers for kitchen / bar tickets and customer receipts.
  *
- * Per printer: name, how it is fed (Off / Cloud printer / Kitchen screen device), the station it serves, paper
- * (58 / 80 mm roll, A6 / A5 / A4 sheet), what it prints, copies. Cloud printers show the exact address to paste into
- * the printer. Shows the print queue with Reprint, and a Test print per printer. Logic: includes/printing.php.
+ * Per printer: name, how it is fed (Off / Cloud printer / Kitchen screen device - "Till device" at a shop), the station it
+ * serves, paper (58 / 80 mm roll, A6 / A5 / A4 sheet), what it prints, copies. Cloud printers show the exact address to paste
+ * into the printer. Shows the print queue with Reprint, and a Test print per printer. Logic: includes/printing.php.
+ * Follows the business type (Modules page): only stations that are switched on are offered; a shop (Restaurant switch off,
+ * or no station on) gets receipt words and options. Words and options only: saved printers are never changed by it.
  */
 require_once 'admin-init.php';
 require_once __DIR__ . '/../includes/alert.php';
@@ -21,7 +23,9 @@ if (!hasPermission((int)$user['id'], 'printers_manage')) {
 $message = '';
 $error = '';
 $ready = rh_print_ready($pdo);
-$stations = rh_print_stations();
+$biz = rh_print_biz();
+$shop = $biz['shop'];
+$stations = rh_print_station_choices($biz);
 $papers = rh_print_paper_specs();
 $site_name = getSetting('site_name', 'Hotel');
 
@@ -49,6 +53,31 @@ if ($ready && isset($_GET['preview'])) {
     }
 }
 
+/* ---- Test print for a screen / till device: the print window opens on THIS computer (loaded in a hidden frame by the button,
+ *      so a pop-up blocker never sees it). Nothing is queued, so no station screen prints it a second time. ---- */
+if ($ready && isset($_GET['testprint'])) {
+    $st = $pdo->prepare('SELECT * FROM print_printers WHERE id = ?');
+    $st->execute([(int)$_GET['testprint']]);
+    $pp = $st->fetch(PDO::FETCH_ASSOC);
+    header('Content-Type: text/html; charset=utf-8');
+    header('Cache-Control: no-store');
+    if ($pp && $pp['mode'] === 'screen' && (int)$pp['is_active']) {
+        echo rh_print_test_html($pp, $biz, true);
+    } else {
+        echo '<!DOCTYPE html><meta charset="UTF-8"><p>This printer is not set up to print from this computer.</p>';
+    }
+    exit;
+}
+
+/* ---- Live status of the test job(s) just sent to a cloud printer (test jobs only) ---- */
+if ($ready && isset($_GET['teststatus'])) {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode(['jobs' => rh_print_test_job_status($pdo, explode(',', (string)$_GET['teststatus']))]);
+    exit;
+}
+
+$testJobIds = [];
 if ($ready && $_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
         $error = 'Security token invalid. Refresh and try again.';
@@ -57,7 +86,16 @@ if ($ready && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $id = (int)($_POST['printer_id'] ?? 0);
         try {
             if ($action === 'save') {
-                [$f, $err] = rh_print_validate_printer($_POST);
+                [$f, $err] = rh_print_validate_printer($_POST, $biz);
+                if ($err === '') {
+                    $saved = null;
+                    if ($id > 0) {
+                        $sv = $pdo->prepare('SELECT * FROM print_printers WHERE id = ?');
+                        $sv->execute([$id]);
+                        $saved = $sv->fetch(PDO::FETCH_ASSOC) ?: null;
+                    }
+                    $err = rh_print_business_error($f, $saved, $biz);
+                }
                 if ($err !== '') {
                     $error = $err;
                 } elseif ($id > 0) {
@@ -91,11 +129,14 @@ if ($ready && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error = 'Printer not found.';
                 } elseif ($pp['mode'] === 'off' || !(int)$pp['is_active']) {
                     $error = 'This printer is switched off. Turn it on (and save) before a test print.';
+                } elseif ($pp['mode'] === 'screen') {
+                    // Normally the button prints from the browser and never posts; nothing is queued here either way.
+                    $error = 'Press Test print again: it opens the print window on this computer. Choose your printer and print.';
                 } else {
-                    rh_print_enqueue_test($pdo, $pp);
-                    $message = $pp['mode'] === 'cloud'
-                        ? 'Test ticket and test receipt sent. The printer collects them within a few seconds.'
-                        : 'Test ticket and test receipt queued. They print on the station screen that is set to print for this printer.';
+                    $testJobIds = array_values(array_filter(rh_print_enqueue_test($pdo, $pp, $biz)));
+                    $message = $shop
+                        ? 'Test receipt sent. The printer collects it within a few seconds.'
+                        : 'Test ticket and test receipt sent. The printer collects them within a few seconds.';
                 }
             } elseif ($action === 'reprint') {
                 $jobId = (int)($_POST['job_id'] ?? 0);
@@ -134,11 +175,28 @@ $h = static function ($v): string {
 };
 
 /** One printer form (id 0 = the add form). */
-$renderForm = static function (array $p) use ($stations, $papers, $csrf_token, $h, $baseUrl): void {
+$renderForm = static function (array $p) use ($stations, $papers, $csrf_token, $h, $baseUrl, $biz, $shop): void {
     $id = (int)($p['id'] ?? 0);
     $mode = (string)($p['mode'] ?? 'cloud');
+    $devLabel = rh_print_device_label($biz);
+    /* A saved value that is no longer on offer (its station switched off, or a shop) is still listed, so saving never changes it silently. */
+    $curStation = (string)($p['station'] ?? (string)array_key_first($stations));
+    $stationOpts = $stations;
+    if (!isset($stationOpts[$curStation]) && isset(rh_print_stations()[$curStation])) {
+        $stationOpts[$curStation] = rh_print_stations()[$curStation] . ' (switched off in Modules)';
+    }
+    $curPrints = (string)($p['prints'] ?? ($biz['any'] ? 'tickets' : 'receipts'));
+    $printOpts = ['tickets' => 'Kitchen / bar tickets', 'receipts' => 'Customer receipts', 'both' => 'Both'];
+    if (!$biz['any']) {
+        $printOpts = array_filter($printOpts, static function ($k) use ($curPrints) { return $k === 'receipts' || $k === $curPrints; }, ARRAY_FILTER_USE_KEY);
+        if ($curPrints !== 'receipts' && isset($printOpts[$curPrints])) {
+            $printOpts[$curPrints] .= ' (no stations switched on)';
+        }
+    }
+    $warn = $id > 0 ? rh_print_printer_warning($p, $biz) : '';
     $uid = 'pf' . $id;
     ?>
+    <?php if ($warn !== ''): ?><?php showAlert($warn, 'warning'); ?><?php endif; ?>
     <form method="post" action="printers.php" class="pr-form" data-mode="<?php echo $h($mode); ?>">
         <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
         <input type="hidden" name="action" value="save">
@@ -146,7 +204,7 @@ $renderForm = static function (array $p) use ($stations, $papers, $csrf_token, $
         <div class="pr-grid">
             <div class="pr-field">
                 <label for="<?php echo $uid; ?>n">Name</label>
-                <input type="text" id="<?php echo $uid; ?>n" name="name" maxlength="80" required value="<?php echo $h($p['name'] ?? ''); ?>" placeholder="Kitchen printer">
+                <input type="text" id="<?php echo $uid; ?>n" name="name" maxlength="80" required value="<?php echo $h($p['name'] ?? ''); ?>" placeholder="<?php echo $shop ? 'Receipt printer' : 'Kitchen printer'; ?>">
                 <small>Only for you, so you can tell the printers apart.</small>
             </div>
             <div class="pr-field">
@@ -154,9 +212,11 @@ $renderForm = static function (array $p) use ($stations, $papers, $csrf_token, $
                 <select id="<?php echo $uid; ?>m" name="mode" onchange="this.form.setAttribute('data-mode',this.value)">
                     <option value="off" <?php echo $mode === 'off' ? 'selected' : ''; ?>>Off</option>
                     <option value="cloud" <?php echo $mode === 'cloud' ? 'selected' : ''; ?>>Cloud printer (no computer)</option>
-                    <option value="screen" <?php echo $mode === 'screen' ? 'selected' : ''; ?>>Kitchen screen device (any printer)</option>
+                    <option value="screen" <?php echo $mode === 'screen' ? 'selected' : ''; ?>><?php echo $h($devLabel); ?></option>
                 </select>
-                <small>Cloud printer needs a Star CloudPRNT or Epson Server Direct Print model. Kitchen screen device works with any printer the device can print to.</small>
+                <small><?php echo $shop
+                    ? 'Cloud printer needs a Star CloudPRNT or Epson Server Direct Print model. Till device uses any printer the till computer can print to: the till prints its receipt in the browser at the paper size set here.'
+                    : 'Cloud printer needs a Star CloudPRNT or Epson Server Direct Print model. Kitchen screen device works with any printer the device can print to.'; ?></small>
             </div>
             <div class="pr-field pr-only-cloud">
                 <label for="<?php echo $uid; ?>pr">Printer type</label>
@@ -177,11 +237,13 @@ $renderForm = static function (array $p) use ($stations, $papers, $csrf_token, $
             <div class="pr-field">
                 <label for="<?php echo $uid; ?>s">Station it serves</label>
                 <select id="<?php echo $uid; ?>s" name="station">
-                    <?php foreach ($stations as $v => $l): ?>
-                        <option value="<?php echo $h($v); ?>" <?php echo ($p['station'] ?? 'kitchen') === $v ? 'selected' : ''; ?>><?php echo $h($l); ?></option>
+                    <?php foreach ($stationOpts as $v => $l): ?>
+                        <option value="<?php echo $h($v); ?>" <?php echo $curStation === $v ? 'selected' : ''; ?>><?php echo $h($l); ?></option>
                     <?php endforeach; ?>
                 </select>
-                <small>Which order lines come out here. All stations prints every line. Cash desk prints receipts only.</small>
+                <small><?php echo $biz['any']
+                    ? 'Which order lines come out here. Only stations switched on in Modules are listed. All stations prints every line. Receipt / cash desk prints receipts only.'
+                    : 'No kitchen or bar screens are switched on, so printers here print customer receipts.'; ?></small>
             </div>
             <div class="pr-field">
                 <label for="<?php echo $uid; ?>w">Paper</label>
@@ -195,16 +257,16 @@ $renderForm = static function (array $p) use ($stations, $papers, $csrf_token, $
             <div class="pr-field">
                 <label for="<?php echo $uid; ?>pt">What it prints</label>
                 <select id="<?php echo $uid; ?>pt" name="prints">
-                    <option value="tickets" <?php echo ($p['prints'] ?? 'tickets') === 'tickets' ? 'selected' : ''; ?>>Kitchen / bar tickets</option>
-                    <option value="receipts" <?php echo ($p['prints'] ?? '') === 'receipts' ? 'selected' : ''; ?>>Customer receipts</option>
-                    <option value="both" <?php echo ($p['prints'] ?? '') === 'both' ? 'selected' : ''; ?>>Both</option>
+                    <?php foreach ($printOpts as $v => $l): ?>
+                        <option value="<?php echo $h($v); ?>" <?php echo $curPrints === $v ? 'selected' : ''; ?>><?php echo $h($l); ?></option>
+                    <?php endforeach; ?>
                 </select>
                 <small>Customer receipts go to cloud printers. The till prints its own receipts in the browser, at the paper size of a receipt printer.</small>
             </div>
             <div class="pr-field">
                 <label for="<?php echo $uid; ?>c">Copies</label>
                 <input type="number" id="<?php echo $uid; ?>c" name="copies" min="1" max="5" value="<?php echo (int)($p['copies'] ?? 1); ?>">
-                <small>How many of each ticket or receipt.</small>
+                <small>How many of each <?php echo $biz['any'] ? 'ticket or receipt' : 'receipt'; ?>.</small>
             </div>
             <div class="pr-field">
                 <label for="<?php echo $uid; ?>l">Characters per line</label>
@@ -239,11 +301,15 @@ $renderForm = static function (array $p) use ($stations, $papers, $csrf_token, $
         <div class="pr-actions">
             <button type="submit" class="btn btn-primary"><?php echo $id > 0 ? 'Save printer' : 'Add printer'; ?></button>
             <?php if ($id > 0): ?>
-                <button type="submit" class="btn btn-secondary" name="action" value="test" formnovalidate>Test print</button>
+                <?php if (($p['mode'] ?? '') === 'screen' && !empty($p['is_active'])): ?>
+                    <button type="button" class="btn btn-secondary" onclick="prTestPrint(<?php echo $id; ?>)" title="Opens the print window on this computer">Test print</button>
+                <?php else: ?>
+                    <button type="submit" class="btn btn-secondary" name="action" value="test" formnovalidate>Test print</button>
+                <?php endif; ?>
                 <div class="actions-more">
                     <button type="button" class="btn btn-secondary actions-more-toggle" title="More actions" aria-label="More actions" aria-haspopup="true" onclick="prToggleMore(this, event)"><i class="fas fa-ellipsis-vertical"></i> More</button>
                     <div class="actions-more-menu">
-                        <a target="_blank" rel="noopener" href="printers.php?preview=<?php echo $id; ?>&kind=ticket"><i class="fas fa-eye"></i> Preview ticket</a>
+                        <?php if ($biz['any'] && !$shop): ?><a target="_blank" rel="noopener" href="printers.php?preview=<?php echo $id; ?>&kind=ticket"><i class="fas fa-eye"></i> Preview ticket</a><?php endif; ?>
                         <a target="_blank" rel="noopener" href="printers.php?preview=<?php echo $id; ?>&kind=receipt"><i class="fas fa-eye"></i> Preview receipt</a>
                         <?php if (($p['mode'] ?? '') === 'cloud'): ?>
                             <button type="submit" name="action" value="regen_token" formnovalidate onclick="return confirm('Create a new address? The printer must be given the new one.');"><i class="fas fa-key"></i> New address</button>
@@ -276,13 +342,20 @@ $renderForm = static function (array $p) use ($stations, $papers, $csrf_token, $
     <div class="content printers-page">
         <div class="page-header">
             <div>
-                <h1 class="page-title"><i class="fas fa-print"></i> Printers</h1>
-                <p class="page-subtitle">Print kitchen and bar tickets and customer receipts on receipt printers, even where there is no till.</p>
+                <h1 class="page-title"><i class="fas fa-print"></i> <?php echo $shop ? 'Receipt printers' : 'Printers'; ?></h1>
+                <p class="page-subtitle"><?php echo $biz['any']
+                    ? 'Print kitchen and bar tickets and customer receipts on receipt printers, even where there is no till.'
+                    : 'Print customer receipts on receipt printers at the till or the counter.'; ?></p>
             </div>
         </div>
 
         <?php if ($message !== ''): ?><?php showAlert($message, 'success'); ?><?php endif; ?>
         <?php if ($error !== ''): ?><?php showAlert($error, 'error'); ?><?php endif; ?>
+        <?php if ($testJobIds): ?>
+            <div class="pr-notice" id="prTestStatus" role="status" aria-live="polite" data-ids="<?php echo $h(implode(',', $testJobIds)); ?>">
+                <strong>Test print:</strong> <span id="prTestStatusText">Waiting for the printer to collect it...</span>
+            </div>
+        <?php endif; ?>
 
         <?php if (!$ready): ?>
             <div class="pr-notice"><strong>Printing needs an update first.</strong> Ask whoever looks after the system to apply update 076 (print queue), then come back to this page.</div>
@@ -292,10 +365,17 @@ $renderForm = static function (array $p) use ($stations, $papers, $csrf_token, $
                 <div class="rh-panel__body">
                     <ul>
                         <li><strong>Cloud printer (no computer):</strong> needs a Star CloudPRNT or Epson Server Direct Print model on 58 mm or 80 mm rolls. The printer asks our server for tickets every few seconds over the internet. Paste the address shown below into the printer's own settings page.</li>
+<?php if ($shop): ?>
+                        <li><strong>Till device:</strong> works with any printer the till computer can print to (an office printer or a small thermal printer), on a roll or on A6, A5 or A4 paper. The till prints its receipt in the browser at the paper size set here. On the till's receipt screen, tick <em>Auto-print</em> to print every sale without asking.</li>
+                        <li><strong>Silent printing</strong> (no pop-up window) needs Chrome started with <code>--kiosk-printing</code>. On Windows, add it to the end of the Chrome shortcut's Target.</li>
+                        <li>Every receipt is printed once. A failed or old receipt stays in the print queue with <em>Reprint</em>.</li>
+                        <li><em>Test print</em> opens the print window on this computer - choose your printer and print. (A cloud printer is sent the sample instead, and the result shows here.) The sample receipt has a ruler line: if the whole ruler fits on the paper, the width is right.</li>
+<?php else: ?>
                         <li><strong>Kitchen screen device:</strong> works with any printer the device can print to (an office printer or a small thermal printer), on a roll or on A6, A5 or A4 paper. On the station screen that has the printer, tap <em>Printer</em> at the top and tick <em>This screen prints for...</em></li>
                         <li><strong>Silent printing</strong> (no pop-up window) needs Chrome started with <code>--kiosk-printing</code>. On Windows, add it to the end of the Chrome shortcut's Target.</li>
                         <li>Every ticket is printed once. A failed or old ticket stays in the print queue with <em>Reprint</em>. An order that is cancelled or voided before it prints never prints.</li>
-                        <li><em>Test print</em> prints a sample ticket and receipt with a ruler line: if the whole ruler fits on the paper, the width is right.</li>
+                        <li><em>Test print</em> opens the print window on this computer - choose your printer and print. (A cloud printer is sent the sample instead, and the result shows here.) The sample ticket and receipt have a ruler line: if the whole ruler fits on the paper, the width is right.</li>
+<?php endif; ?>
                     </ul>
                 </div>
             </section>
@@ -305,7 +385,7 @@ $renderForm = static function (array $p) use ($stations, $papers, $csrf_token, $
                     <div class="rh-panel__head">
                         <h2 class="rh-panel__title"><?php echo $h($p['name']); ?></h2>
                         <div class="rh-panel__actions">
-                            <span class="badge <?php echo $p['mode'] === 'off' ? 'badge-disabled' : 'badge-active'; ?>"><?php echo $p['mode'] === 'cloud' ? 'Cloud printer' : ($p['mode'] === 'screen' ? 'Kitchen screen device' : 'Off'); ?></span>
+                            <span class="badge <?php echo $p['mode'] === 'off' ? 'badge-disabled' : 'badge-active'; ?>"><?php echo $p['mode'] === 'cloud' ? 'Cloud printer' : ($p['mode'] === 'screen' ? rh_print_device_label($biz, true) : 'Off'); ?></span>
                             <?php if (!(int)$p['is_active']): ?><span class="badge badge-pending">Paused</span><?php endif; ?>
                         </div>
                     </div>
@@ -314,14 +394,14 @@ $renderForm = static function (array $p) use ($stations, $papers, $csrf_token, $
             <?php endforeach; ?>
 
             <section class="rh-panel settings-card">
-                <div class="rh-panel__head"><h2 class="rh-panel__title">Add a printer</h2></div>
+                <div class="rh-panel__head"><h2 class="rh-panel__title"><?php echo $shop ? 'Add a receipt printer' : 'Add a printer'; ?></h2></div>
                 <div class="rh-panel__body"><?php $renderForm(['id' => 0, 'mode' => 'cloud']); ?></div>
             </section>
 
             <section class="rh-panel settings-card">
                 <div class="rh-panel__head"><h2 class="rh-panel__title">Print queue</h2></div>
                 <div class="rh-panel__body">
-                    <p class="pr-note">The latest tickets and receipts. Waiting = not yet collected by the printer; Sent = handed to the printer, not yet confirmed.</p>
+                    <p class="pr-note">The latest <?php echo $biz['any'] ? 'tickets and receipts' : 'receipts'; ?>. Waiting = not yet collected by the printer; Sent = handed to the printer, not yet confirmed.</p>
                     <?php if (!$jobs): ?>
                         <p class="pr-note">Nothing has been queued yet.</p>
                     <?php else: ?>
@@ -331,7 +411,7 @@ $renderForm = static function (array $p) use ($stations, $papers, $csrf_token, $
                                 <thead><tr>
                                     <th>When<span class="pr-th-help">When it was added to the queue</span></th>
                                     <th>Printer<span class="pr-th-help">Which printer it goes to</span></th>
-                                    <th>What<span class="pr-th-help">The ticket or receipt it prints</span></th>
+                                    <th>What<span class="pr-th-help"><?php echo $biz['any'] ? 'The ticket or receipt it prints' : 'The receipt it prints'; ?></span></th>
                                     <th>Status<span class="pr-th-help">Where it is now, and why if it failed</span></th>
                                     <th>Reprint<span class="pr-th-help">Send it to the printer again</span></th>
                                 </tr></thead>
@@ -365,6 +445,52 @@ $renderForm = static function (array $p) use ($stations, $papers, $csrf_token, $
             </section>
         <?php endif; ?>
         <script>
+        /* Test print on a screen / till device: load the test pages in a hidden frame; the frame prints itself, so the
+           print window opens at once on this computer (no pop-up for a blocker to stop). */
+        window.prTestPrint = function (id) {
+            var f = document.createElement('iframe');
+            f.setAttribute('aria-hidden', 'true');
+            f.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden';
+            f.src = 'printers.php?testprint=' + encodeURIComponent(id) + '&_=' + Date.now();
+            document.body.appendChild(f);
+            setTimeout(function () { if (f.parentNode) { f.parentNode.removeChild(f); } }, 120000);
+        };
+        /* Test print on a cloud printer: show Waiting -> Sent -> Printed / Failed for about a minute, without a reload. */
+        (function () {
+            var box = document.getElementById('prTestStatus');
+            if (!box) { return; }
+            var txt = document.getElementById('prTestStatusText');
+            var ids = box.getAttribute('data-ids');
+            var words = { queued: 'Waiting for the printer to collect it...', sent: 'Sent to the printer, waiting for it to confirm...', printed: 'Printed.', failed: 'Failed', cancelled: 'Cancelled' };
+            var started = Date.now();
+            function show(jobs) {
+                if (!jobs.length) { return true; }
+                var done = true;
+                var parts = jobs.map(function (j) {
+                    var s = words[j.status] || j.status;
+                    if (j.status === 'failed' && j.last_error) { s += ': ' + j.last_error; }
+                    if (j.status === 'queued' || j.status === 'sent') { done = false; }
+                    return (jobs.length > 1 ? (/receipt/i.test(j.title) ? 'Receipt: ' : 'Ticket: ') : '') + s;
+                });
+                txt.textContent = parts.join('  |  ');
+                return done;
+            }
+            function poll() {
+                fetch('printers.php?teststatus=' + encodeURIComponent(ids), { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+                    .then(function (r) { return r.json(); })
+                    .then(function (d) {
+                        var done = show((d && d.jobs) || []);
+                        if (done) { return; }
+                        if (Date.now() - started > 60000) {
+                            txt.textContent += '  (still not printed after a minute: check the printer is on, has paper and is connected)';
+                            return;
+                        }
+                        setTimeout(poll, 2000);
+                    })
+                    .catch(function () { if (Date.now() - started < 60000) { setTimeout(poll, 4000); } });
+            }
+            setTimeout(poll, 1500);
+        })();
         /* Shared "More" menu open/close (same pattern as Stock orders); placement by rhPlaceActionMenu. */
         (function () {
             function closeAll() {
