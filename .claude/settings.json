@@ -1,0 +1,29 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "php \"$CLAUDE_PROJECT_DIR/scripts/claude-hooks/php-lint.php\"",
+            "timeout": 30,
+            "statusMessage": "php -l"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "php \"$CLAUDE_PROJECT_DIR/scripts/claude-hooks/read-guard.php\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ]
+  }
+}
