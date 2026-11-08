@@ -113,6 +113,7 @@ function getAllRoles()
                 'room_service_view',
                 'room_service_manage',
                 'kds_reports',
+                'printers_manage',   // Printers settings (owner 2026-11-09: managers and admin)
                 'pos_all_tabs',
                 'pos_void',
                 'pos_stations_overview',
@@ -620,6 +621,14 @@ function getAllPermissions()
             'icon' => 'fa-carrot',
             'category' => 'Restaurant & Stock',
             'page' => 'stock-ingredients.php',
+            'group' => 'stock_write'
+        ],
+        'printers_manage' => [
+            'label' => 'Printers',
+            'description' => 'Set up receipt and kitchen printers, test print and reprint tickets',
+            'icon' => 'fa-print',
+            'category' => 'Restaurant & Stock',
+            'page' => 'printers.php',
             'group' => 'stock_write'
         ],
         'stock_batches' => [
@@ -1579,7 +1588,7 @@ function getPermissionForPage(string $page)
         'stock-receipt.php' => 'stock_orders',
         'order-lifecycle.php' => 'stock_orders',
         'station-settings.php' => 'stock_management',
-        'printers.php' => 'stock_management',
+        'printers.php' => 'printers_manage',
         'restaurant-tables.php' => 'stock_management',
         'deals.php' => 'stock_management',
         'pos.php' => 'pos_till',

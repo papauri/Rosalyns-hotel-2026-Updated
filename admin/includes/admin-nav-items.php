@@ -43,7 +43,7 @@ function rh_admin_nav_groups(): array
             ['deals.php',                  'fas fa-tags',           'Deals & Promos',    'stock_management',  '', 'pos'],
             ['kds-report.php',             'fas fa-file-invoice',   'Station Reports',   'kds_reports',       '', ['pos', 'restaurant_page']],
             ['station-settings.php',       'fas fa-clock',          'Station Hours',     'stock_management',  '', ['pos', 'restaurant_page']],
-            ['printers.php',               'fas fa-print',          'Printers',          'stock_management',  '', 'pos'],
+            ['printers.php',               'fas fa-print',          'Printers',          'printers_manage',   '', 'pos'],
             ['offline-log.php',            'fas fa-cloud-arrow-up', 'Offline Log',       'offline_log_view',  '', 'pos'],
         ],
         'Stock' => [
