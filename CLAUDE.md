@@ -43,7 +43,7 @@ do not re-derive plans or re-scan the repo ad hoc.
   max 2 concurrent specialists; /cost checkpoint after every loop cycle; every
   subagent brief carries exact file paths — no open-ended "explore".
 - **Safety**: commit and push completed work to `main` (see Git below); never destructive
-  SQL; never edit `.env`; park owner decisions as `blocked:` in BUILD_PLAN.md and continue
+  SQL; `.env` may be edited when needed (owner 2026-11-09) — back it up first, never print secrets, never stage or commit it; park owner decisions as `blocked:` in BUILD_PLAN.md and continue
   with the next task.
 - **Git**: commit and push to `origin/main` directly — no feature branches, no waiting for
   the owner to trigger it. Commit only work that has passed the ship gate in `.claude/DEPARTMENTS.md`:
