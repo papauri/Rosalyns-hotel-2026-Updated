@@ -1594,7 +1594,7 @@ try {
                     </select>
                 </div>
             </div>
-            <p id="rmStatusHelp" style="margin:0 0 12px; padding:10px 14px; font-size:13px; color:#6b7280; background:#f8f9fa; border-left:3px solid #d4a843; border-radius:4px;">
+            <p id="rmStatusHelp" class="rm-status-help">
                 <strong>Completed does not release the room.</strong> The room stays in Maintenance until the task is <strong>Verified</strong> (the inspection check, use the double-tick button) or Cancelled/deleted. Only then does the room go back to Available.
             </p>
             <table>

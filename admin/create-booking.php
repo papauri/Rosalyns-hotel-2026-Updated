@@ -2216,7 +2216,7 @@ try {
                 <div class="form-card" id="cbSection2">
                     <h3><i class="fas fa-bed"></i> Room Allocation</h3>
 
-                    <div id="roomAvailabilityNotice" style="margin-bottom:14px;padding:10px 14px;border-radius:6px;background:#fff8e1;border-left:3px solid #f0c36d;color:#7a5c00;font-size:13px;display:<?php echo (!empty($_POST['check_in_date']) && !empty($_POST['check_out_date'])) ? 'none' : 'flex'; ?>;align-items:center;gap:8px;">
+                    <div id="roomAvailabilityNotice" class="alert alert-warning" style="margin-bottom:14px;display:<?php echo (!empty($_POST['check_in_date']) && !empty($_POST['check_out_date'])) ? 'none' : 'flex'; ?>;">
                         <i class="fas fa-calendar-alt"></i> Select check-in and check-out dates above to see available rooms.
                     </div>
 
@@ -2407,7 +2407,7 @@ try {
                             <input type="checkbox" id="paymentReceivedCheck" onchange="togglePaymentSection()">
                             Payment Received Now
                         </label>
-                        <div id="tentativePaymentNotice" style="display:none;background:#FFF8DC;border-left:3px solid #F0A500;padding:10px 14px;margin-top:10px;border-radius:4px;font-size:13px;color:#856404;">
+                        <div id="tentativePaymentNotice" class="alert alert-warning" style="display:none;margin-top:10px;">
                             <i class="fas fa-info-circle"></i> Payment collection is disabled for tentative bookings. You can send the guest a quotation below.
                         </div>
                         <div class="payment-details-section" id="paymentDetailsSection">

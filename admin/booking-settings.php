@@ -2522,8 +2522,8 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 })();
             </script>
 
-            <div class="info-box" style="background:#fff8ed;border-left:3px solid #f59e0b;">
-                <p style="color:#92400e;margin:0;font-size:12.5px;"><i class="fas fa-lock"></i> <strong>SMTP passwords are encrypted in the database.</strong> No credentials are stored in config files.</p>
+            <div class="info-box">
+                <p style="margin:0;font-size:12.5px;"><i class="fas fa-lock"></i> <strong>SMTP passwords are encrypted in the database.</strong> No credentials are stored in config files.</p>
             </div>
 
             <script>

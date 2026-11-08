@@ -1118,7 +1118,7 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('batchesModal')">&times;</button>
             </div>
             <div class="modal-body">
-            <p style="font-size:13px; color:#5b4a1f; background:#fffbf2; border-left:3px solid #f0ad4e; padding:8px 12px; border-radius:4px; margin:0 0 12px;">
+            <p class="si-batch-note">
                 Each batch tracks its own <strong>expiry date</strong>, <strong>supplier</strong>, and <strong>quantity remaining</strong>.
                 Edit a batch to fix a wrong expiry date or notes. Use <strong>Discard</strong> to write off expired/recalled stock — that automatically subtracts the remaining quantity from total stock.
             </p>

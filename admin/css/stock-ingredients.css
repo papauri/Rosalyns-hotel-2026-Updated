@@ -413,3 +413,14 @@
 @media (max-width: 1024px) {
     #stock-table:not(.mobile-enhanced) td:first-child > div { display: none; }
 }
+
+/* Batches modal help note: same look as the shared .info-box */
+.si-batch-note {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    font-size: 13px;
+    color: var(--admin-text);
+    background: #f8fafc;
+    border-left: 3px solid var(--color-primary, #766550);
+    border-radius: 8px;
+}

@@ -601,3 +601,14 @@
 .filters-bar form select {
     min-width: 200px;
 }
+
+/* Status help note: same look as the shared .info-box */
+.rm-status-help {
+    margin: 0 0 12px;
+    padding: 10px 12px;
+    font-size: 13px;
+    color: var(--admin-muted);
+    background: #f8fafc;
+    border-left: 3px solid var(--color-primary, #766550);
+    border-radius: 8px;
+}

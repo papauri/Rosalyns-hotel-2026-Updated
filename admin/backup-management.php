@@ -300,12 +300,12 @@ $current_page = 'backup-management.php';
         </div>
 
         <?php if ($message): ?>
-            <div class="alert alert-success" style="background:#d1fae5;border-left:4px solid #059669;padding:12px 16px;border-radius:6px;margin-bottom:20px;color:#065f46;">
+            <div class="alert alert-success">
                 <i class="fas fa-check-circle"></i> <?php echo $message; ?>
             </div>
         <?php endif; ?>
         <?php if ($error): ?>
-            <div class="alert alert-error" style="background:#fee2e2;border-left:4px solid #dc2626;padding:12px 16px;border-radius:6px;margin-bottom:20px;color:#991b1b;">
+            <div class="alert alert-error">
                 <i class="fas fa-exclamation-triangle"></i> <?php echo $error; ?>
             </div>
         <?php endif; ?>

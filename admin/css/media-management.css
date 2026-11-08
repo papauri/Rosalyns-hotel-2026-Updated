@@ -449,3 +449,8 @@
         grid-template-columns: 1fr;
     }
 }
+
+/* How this works card: plain shared card, spacing only */
+.mm-howto {
+    margin-bottom: 20px;
+}

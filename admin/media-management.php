@@ -625,7 +625,7 @@ if ($media_css_version === '' || $media_css_version === '0') {
         </div>
 
         <!-- How this works -->
-        <div class="card" style="margin-bottom:20px;border-left:4px solid var(--gold);background:#fffdf8;">
+        <div class="card mm-howto">
             <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px 24px;padding:4px 0;">
                 <div style="display:flex;gap:12px;align-items:flex-start;">
                     <i class="fas fa-upload" style="color:var(--gold);font-size:20px;margin-top:2px;flex-shrink:0;"></i>
