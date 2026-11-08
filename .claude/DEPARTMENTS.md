@@ -181,7 +181,7 @@ The feature freeze in BUILD_PLAN.md ("PRODUCTION READINESS GATE") still stands. 
    surely do (one-line fix, copy/port, mechanical edit). Never Fable unless told.
 3. **Never read whole big files.** Grep `.claude/CODE_INDEX.md` for the file or function you need
    (it is ~100 KB — never read it whole; regenerate with
-   `php scripts/code-index.php`) + Grep, then Read with offset/limit around the lines you need.
+   `php scripts/code-index.php` — the orchestrator regenerates and commits it after every feature ship, so briefs point at current line numbers) + Grep, then Read with offset/limit around the lines you need.
    Briefs name exact files and functions/line ranges; no open-ended "explore".
 4. **Fresh small agent over a big resume.** For a fix round, start a new agent with just the
    finding list unless the original agent's context is small; resuming re-sends its whole history.
