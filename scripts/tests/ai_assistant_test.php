@@ -4950,6 +4950,12 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
         $ckCutBad = rh_ai_claim_check("There are 47 arrivals today \xE2\x80", $ccE, []);
         check(empty($gOk['error']) && !$gOk['changed'] && empty($ckCut['error']) && !$ckCut['bad'] && empty($ckCutBad['error']) && $ckCutBad['bad'],
             'claim check: normal replies carry no error; a text cut mid-character is still read (broken bytes blanked, same offsets): right figures pass, wrong ones are caught', json_encode([$ckCut, $ckCutBad]));
+        // 2026-11-09 (Liwonde gym answer): "7:00 PM:" at the end of a bold heading keeps its PM (was read as 07:00); a wrong end time is still caught
+        $ckSlotEv = '{"slot":"6:00 PM – 7:00 PM","capacity":20,"booked":0,"spaces_left":20,"booked_people":"nobody yet"}';
+        $ckSlot = rh_ai_claim_check("**Today (Sunday), 6:00 PM – 7:00 PM:** 0 booked of 20 (20 spaces left)\n- nobody yet", $ckSlotEv, []);
+        $ckSlotBad = rh_ai_claim_check("**Today (Sunday), 6:00 PM – 8:00 PM:** 0 booked of 20 (20 spaces left)\n- nobody yet", $ckSlotEv, []);
+        check(!$ckSlot['bad'] && !$ckSlot['inconsistent'] && array_column($ckSlotBad['bad'], 'raw') === ['8:00 PM'],
+            'claim check: a slot heading "6:00 PM – 7:00 PM:" passes against the slot it came from; "– 8:00 PM:" is caught (times read with their AM/PM before a colon)', json_encode([$ckSlot['bad'], $ckSlotBad['bad']]));
         $bigSib = [];
         for ($i = 1; $i <= 30; $i++) {
             $bigSib['f' . $i] = $i * 7.5;
@@ -5328,6 +5334,7 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
         }
         return implode(',', $o) . ',qty=' . (string)$pdo->query("SELECT ROUND(COALESCE(SUM(current_quantity), 0), 6) FROM stock_ingredients")->fetchColumn();
     };
+    $mnHidden = [];
     $pdo->beginTransaction();
     try {
         rh_ai_save_settings(['ai_enabled' => '1', 'ai_paused_reason' => '', 'ai_paused_kind' => '', 'ai_provider' => 'google', 'ai_cloud_enabled' => '1', 'ai_user_daily_token_cap' => '50000000', 'ai_monthly_budget_usd' => '1000',
@@ -5348,7 +5355,14 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
         // Test data: distinctive names (no clash with the hotel's own stock), one menu category, four dishes
         $pdo->prepare("INSERT INTO menu_categories (name, slug, is_active, sort_order, default_station) VALUES ('AITest Mn Mains', 'aitest-mn-mains', 1, 999, 'kitchen')")->execute();
         $mnCat = (int)$pdo->lastInsertId();
-        $insI = $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, min_quantity, cost_per_unit, yield_percent, is_archived, pieces_per_unit) VALUES (?, 'AITest', ?, ?, 0, ?, ?, ?, ?)");
+        // 2026-11-09: the hotel's own menu categories are hidden inside this transaction (rolled back, restored below if not), so
+        // every check reads the four test dishes only - a live menu (other curries, 180+ items with no recipe since the 2026-11-06
+        // stock wipe) never crowds them out of a capped list
+        $mnHidden = array_map('intval', $pdo->query("SELECT id FROM menu_categories WHERE is_active = 1 AND id <> " . $mnCat)->fetchAll(PDO::FETCH_COLUMN));
+        if ($mnHidden) {
+            $pdo->exec("UPDATE menu_categories SET is_active = 0 WHERE id IN (" . implode(',', $mnHidden) . ")");
+        }
+        $insI =$pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, min_quantity, cost_per_unit, yield_percent, is_archived, pieces_per_unit) VALUES (?, 'AITest', ?, ?, 0, ?, ?, ?, ?)");
         $mnIng = static function (string $n, string $u, float $q, float $c, float $y, int $arch = 0, ?float $pcs = null) use ($insI, $pdo): int {
             $insI->execute([$n, $u, $q, $c, $y, $arch, $pcs]);
             return (int)$pdo->lastInsertId();
@@ -5581,8 +5595,12 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
         rh_ai_vault_forget();
         rh_ai_vault_people_reset();
     }
+    $mnStill = $mnHidden ? (int)$pdo->query("SELECT COUNT(*) FROM menu_categories WHERE is_active = 0 AND id IN (" . implode(',', $mnHidden) . ")")->fetchColumn() : 0;
+    if ($mnStill > 0) { // belt and braces: never leave the hotel's menu hidden
+        $pdo->exec("UPDATE menu_categories SET is_active = 1 WHERE id IN (" . implode(',', $mnHidden) . ")");
+    }
     check((int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE name LIKE 'Zqmn %'")->fetchColumn() === 0 && (int)$pdo->query("SELECT COUNT(*) FROM menu_items WHERE item_name LIKE 'Zqmn %'")->fetchColumn() === 0
-        && (int)$pdo->query("SELECT COUNT(*) FROM admin_users WHERE username LIKE 'aitestmn%'")->fetchColumn() === 0, 'menu advisor checks rolled back (no test rows left)');
+        && (int)$pdo->query("SELECT COUNT(*) FROM admin_users WHERE username LIKE 'aitestmn%'")->fetchColumn() === 0 && $mnStill === 0, 'menu advisor checks rolled back (no test rows left; the hotel\'s menu categories that were hidden for the checks are active again)');
 }
 
 // ── Import review, explained (owner 2026-11-03): one READ tool, advice only, offered only while Import is on ─────────
@@ -5669,6 +5687,16 @@ if (!$chatReady || !rh_ai_memory_ready($pdo) || !rh_table_exists($pdo, 'import_j
         check($mOn === '00011' && $mOff === '00000' && $mGone === '00000' && $mOdd === '00000',
             'import_job permission matrix: Assistant only / Import only / Ingredients only = no; Import + Ingredients and admins = yes; switch off, setting missing or not "1" = absent for everyone (admins too)', json_encode([$mOn, $mOff, $mGone, $mOdd]));
 
+        // 2026-11-09: the stock the fixture is read against, made here (rolled back) - the summary checks used to lean on the hotel's own
+        // stock, gone since the 2026-11-06 wipe: three bottled LOCAL BEERS (so the beers get a unit suggestion with evidence) and a Ginger
+        // Beer counted in cans (the sheet says bottles: the second blocked row). Added only when the hotel has no Ginger Beer of its own.
+        $impStk = $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, min_quantity, cost_per_unit, is_archived) VALUES (?, ?, ?, 0, 0, ?, 0)");
+        foreach (['ZZT Zqbeer One', 'ZZT Zqbeer Two', 'ZZT Zqbeer Three'] as $impSn) {
+            $impStk->execute([$impSn, 'LOCAL BEERS', 'bottle', 2500]);
+        }
+        if (!(int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE name = 'Ginger Beer' AND is_archived = 0")->fetchColumn()) {
+            $impStk->execute(['Ginger Beer', 'ZZT Test', 'can', 1800]);
+        }
         // 2. A staged job from the frozen fixture, uploaded by uBoth (ZZT file name), read the way the Import screen reads it
         $up = import_job_create($pdo, $root . '/scripts/tests/fixtures/import/synthetic_stock.xlsx', 'ZZT synthetic_stock.xlsx', (int)$uBoth['id'], ['from_upload' => false]);
         if (!empty($up['job_id'])) {
@@ -5949,8 +5977,9 @@ if (!$chatReady || !rh_ai_memory_ready($pdo) || !rh_table_exists($pdo, 'import_j
         rh_ai_vault_forget();
         rh_ai_vault_people_reset();
     }
-    check((int)$pdo->query("SELECT COUNT(*) FROM import_jobs WHERE original_name LIKE 'ZZT %'")->fetchColumn() === $zztJobsBefore && (int)$pdo->query("SELECT COUNT(*) FROM admin_users WHERE username LIKE 'aitestim%'")->fetchColumn() === 0,
-        'Import review checks rolled back (no ZZT job, no test user left)');
+    check((int)$pdo->query("SELECT COUNT(*) FROM import_jobs WHERE original_name LIKE 'ZZT %'")->fetchColumn() === $zztJobsBefore && (int)$pdo->query("SELECT COUNT(*) FROM admin_users WHERE username LIKE 'aitestim%'")->fetchColumn() === 0
+        && (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE name LIKE 'ZZT %' OR category = 'ZZT Test'")->fetchColumn() === 0,
+        'Import review checks rolled back (no ZZT job, no test user, no test stock row left)');
 }
 
 // Staff activity hook (2026-11-07): 'page_action' rows read in plain words, repeats fold, counts stay meaningful

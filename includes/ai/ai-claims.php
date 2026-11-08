@@ -330,8 +330,8 @@ function rh_ai_claim_extract(string $text, ?string $today = null): array
             $add(['kind' => 'reldate', 'raw' => $s, 'value' => $d, 'start' => $o, 'end' => $o + strlen($s)]);
         }
     }
-    // Times: "18:00", "6:30 pm", "6pm"
-    if (rh_ai_claim_pma('/(?<![\d:.])([01]?\d|2[0-3]):([0-5]\d)(?::\d{2})?(?:\s?([ap]\.?m\.?))?(?![\d:])/iu', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE | PREG_UNMATCHED_AS_NULL)) {
+    // Times: "18:00", "6:30 pm", "6pm" ("7:00 PM:" in a bold heading keeps its PM: the digit/colon guard sits after the minutes)
+    if (rh_ai_claim_pma('/(?<![\d:.])([01]?\d|2[0-3]):([0-5]\d)(?::\d{2})?(?![\d:])(?:\s?([ap]\.?m\.?)(?![a-z]))?/iu', $mask, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE | PREG_UNMATCHED_AS_NULL)) {
         foreach ($m as $g) {
             $v = rh_ai_claim_hhmm((int)$g[1][0], (int)$g[2][0], (string)($g[3][0] ?? ''));
             if ($v !== '') {
