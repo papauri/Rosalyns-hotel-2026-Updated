@@ -323,10 +323,18 @@ function logBookingPayment(int $booking_id, string $booking_reference, float $am
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         ");
 
+        // booking_payments.payment_type is enum('deposit','full','partial','refund'); callers pass
+        // 'full_payment' / 'partial_payment'. Under strict SQL the raw value threw, so the payment
+        // never reached the timeline. The timeline text below keeps the caller's own wording.
+        $ledger_payment_type = str_replace('_payment', '', $payment_type);
+        if (!in_array($ledger_payment_type, ['deposit', 'full', 'partial', 'refund'], true)) {
+            $ledger_payment_type = 'partial';
+        }
+
         $stmt->execute([
             $booking_id,
             $booking_reference,
-            $payment_type,
+            $ledger_payment_type,
             $amount,
             $payment_method,
             $reference,
