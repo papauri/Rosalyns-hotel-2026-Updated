@@ -256,8 +256,8 @@ if (isset($_POST['test_whatsapp']) && !empty($_POST['test_number'])) {
         <form method="POST" action="">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
             <!-- API Configuration -->
-            <div class="settings-card whatsapp-card">
-                <h2><i class="fas fa-cog" style="color: #7E684B;"></i> API Configuration</h2>
+            <div class="settings-card">
+                <h2><i class="fas fa-cog" style="color: var(--color-primary, #766550);"></i> API Configuration</h2>
                 
                 <div class="form-group">
                     <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
@@ -266,7 +266,7 @@ if (isset($_POST['test_whatsapp']) && !empty($_POST['test_number'])) {
                                name="whatsapp_enabled" 
                                value="1" 
                                <?php echo $whatsapp_enabled === '1' ? 'checked' : ''; ?>>
-                        <span style="font-weight: 600; color: #1A1A1A;">Enable WhatsApp Notifications</span>
+                        <span style="font-weight: 600;">Enable WhatsApp Notifications</span>
                     </label>
                     <p class="help-text">
                         <i class="fas fa-info-circle"></i>
@@ -274,7 +274,7 @@ if (isset($_POST['test_whatsapp']) && !empty($_POST['test_number'])) {
                     </p>
                 </div>
 
-                <hr style="margin: 25px 0; border-top: 2px solid #eee;">
+                <hr style="margin: 25px 0; border-top: 1px solid var(--border-color);">
 
                 <div class="form-group">
                     <label for="whatsapp_number"><strong>Hotel WhatsApp Number</strong></label>
@@ -332,7 +332,7 @@ if (isset($_POST['test_whatsapp']) && !empty($_POST['test_number'])) {
                     </p>
                 </div>
 
-                <div class="info-box" style="background: #e7f3ff; border-left-color: #0d6efd;">
+                <div class="info-box wa-info">
                     <h4><i class="fas fa-info-circle"></i> Setup Guide</h4>
                     <ol style="margin: 10px 0 0 20px; padding: 0;">
                         <li>Go to <a href="https://business.facebook.com" target="_blank">Meta Business Suite</a></li>
@@ -341,7 +341,7 @@ if (isset($_POST['test_whatsapp']) && !empty($_POST['test_number'])) {
                         <li>Create a System User and generate a Permanent Access Token</li>
                         <li>Create message templates in WhatsApp Manager (must be approved)</li>
                     </ol>
-                    <p style="margin: 12px 0 0; color:#0c5460;">
+                    <p style="margin: 12px 0 0;">
                         This page saves both the admin display fields and the sender fields used by the notification code, so once the WhatsApp number, Phone Number ID and token are entered, booking notifications read them from the database automatically.
                     </p>
                 </div>
@@ -349,7 +349,7 @@ if (isset($_POST['test_whatsapp']) && !empty($_POST['test_number'])) {
 
             <!-- Notification Triggers -->
             <div class="settings-card">
-                <h2><i class="fas fa-bell" style="color: #7E684B;"></i> Notification Triggers</h2>
+                <h2><i class="fas fa-bell" style="color: var(--color-primary, #766550);"></i> Notification Triggers</h2>
                 <p class="help-text" style="margin-bottom: 20px;">
                     <i class="fas fa-info-circle"></i>
                     Select which events should trigger WhatsApp notifications.
@@ -395,7 +395,7 @@ if (isset($_POST['test_whatsapp']) && !empty($_POST['test_number'])) {
 
             <!-- Recipients -->
             <div class="settings-card">
-                <h2><i class="fas fa-users" style="color: #7E684B;"></i> Notification Recipients</h2>
+                <h2><i class="fas fa-users" style="color: var(--color-primary, #766550);"></i> Notification Recipients</h2>
 
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-bottom: 20px;">
                     <div class="form-group">
@@ -431,18 +431,18 @@ if (isset($_POST['test_whatsapp']) && !empty($_POST['test_number'])) {
 
             <!-- Message Templates -->
             <div class="settings-card">
-                <h2><i class="fas fa-file-alt" style="color: #7E684B;"></i> Message Template Names</h2>
+                <h2><i class="fas fa-file-alt" style="color: var(--color-primary, #766550);"></i> Message Template Names</h2>
 
-                <div class="info-box" style="background: #fff3cd; border-left-color: #ffc107;">
+                <div class="info-box wa-info">
                     <h4><i class="fas fa-exclamation-triangle"></i> Important</h4>
-                    <p style="color: #856404; margin: 0;">
+                    <p style="margin: 0;">
                         Template names must match <strong>exactly</strong> what you created in WhatsApp Manager. 
                         Templates must be approved by WhatsApp before they can be used.
                     </p>
                 </div>
 
                 <div class="template-box">
-                    <h4><i class="fas fa-check-circle" style="color: #28a745;"></i> Booking Confirmed Template</h4>
+                    <h4><i class="fas fa-check-circle" style="color: var(--admin-success-border);"></i> Booking Confirmed Template</h4>
                     <div class="form-group" style="margin-bottom: 0;">
                         <input type="text" 
                                name="whatsapp_confirmed_template" 
@@ -454,7 +454,7 @@ if (isset($_POST['test_whatsapp']) && !empty($_POST['test_number'])) {
                 </div>
 
                 <div class="template-box">
-                    <h4><i class="fas fa-times-circle" style="color: #dc3545;"></i> Booking Cancelled Template</h4>
+                    <h4><i class="fas fa-times-circle" style="color: var(--admin-danger-border);"></i> Booking Cancelled Template</h4>
                     <div class="form-group" style="margin-bottom: 0;">
                         <input type="text" 
                                name="whatsapp_cancelled_template" 
@@ -468,7 +468,7 @@ if (isset($_POST['test_whatsapp']) && !empty($_POST['test_number'])) {
 
             <!-- Test WhatsApp -->
             <div class="settings-card">
-                <h2><i class="fas fa-vial" style="color: #7E684B;"></i> Test WhatsApp Integration</h2>
+                <h2><i class="fas fa-vial" style="color: var(--color-primary, #766550);"></i> Test WhatsApp Integration</h2>
 
                 <div class="form-group">
                     <label for="test_number"><strong>Test Phone Number</strong></label>
@@ -484,17 +484,17 @@ if (isset($_POST['test_whatsapp']) && !empty($_POST['test_number'])) {
                     </p>
                 </div>
 
-                <button type="submit" name="test_whatsapp" class="btn-submit" style="background: #15803d;" onclick="return confirm('This sends a live WhatsApp message through the configured provider and may incur Meta/WhatsApp charges. Continue?');">
+                <button type="submit" name="test_whatsapp" class="btn btn-secondary" onclick="return confirm('This sends a live WhatsApp message through the configured provider and may incur Meta/WhatsApp charges. Continue?');">
                     <i class="fab fa-whatsapp"></i> Send Test Message
                 </button>
             </div>
 
             <!-- Save Button -->
             <div style="display: flex; justify-content: flex-end; gap: 15px; margin-top: 20px;">
-                <a href="booking-settings.php" class="btn-submit" style="background: #6c757d; text-decoration: none;">
+                <a href="booking-settings.php" class="btn btn-secondary">
                     <i class="fas fa-arrow-left"></i> Back to Settings
                 </a>
-                <button type="submit" class="btn-submit">
+                <button type="submit" class="btn btn-primary">
                     <i class="fas fa-save"></i> Save Settings
                 </button>
             </div>
