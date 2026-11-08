@@ -1206,7 +1206,7 @@ document.addEventListener('keydown', e => {
         if (_kwBuf.length >= 3 && now - _kwLast < 300) processBarcode(_kwBuf);
         _kwBuf = ''; return;
     }
-    if (e.key.length === 1) {
+    if (typeof e.key === 'string' && e.key.length === 1) { // autofill fires keydown with no key
         if (now - _kwLast > 600) _kwBuf = '';
         _kwBuf += e.key; _kwLast = now;
     }

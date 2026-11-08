@@ -329,7 +329,7 @@ document.addEventListener('keydown', e=>{
     if(['INPUT','TEXTAREA','SELECT'].includes(tag)) return;
     const now=Date.now();
     if(e.key==='Enter'){ if(_kwBuf.length>=3 && now-_kwLast<300) processScan(_kwBuf,'barcode'); _kwBuf=''; return; }
-    if(e.key.length===1){ if(now-_kwLast>600) _kwBuf=''; _kwBuf+=e.key; _kwLast=now; }
+    if(typeof e.key==='string' && e.key.length===1){ /* autofill fires keydown with no key */ if(now-_kwLast>600) _kwBuf=''; _kwBuf+=e.key; _kwLast=now; }
 });
 document.getElementById('manualInput').addEventListener('keydown', e=>{
     if(e.key==='Enter'){ e.preventDefault(); handleManualInput(); }

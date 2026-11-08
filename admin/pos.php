@@ -6775,7 +6775,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 _bcBuffer = '';
                 return;
             }
-            if (e.key.length === 1) {
+            if (typeof e.key === 'string' && e.key.length === 1) { // autofill fires keydown with no key
                 // A gap longer than a wedge ever leaves between characters means a
                 // human was typing: start the buffer over rather than splicing the
                 // tail of their keystrokes onto the next scan.
