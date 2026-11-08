@@ -178,16 +178,57 @@
   </ol>
   <p>If hours have never been saved the system uses these: Kitchen 06:00 to 23:00, Bar 11:00 to 03:00 (the next morning), Coffee Bar 06:00 to 22:00. A time that is not valid gives <em>"Use 24-hour HH:MM format for every station."</em></p>
 
-  <h2 id="printers">How to print tickets and receipts on a receipt printer</h2>
-  <p>Open Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Printers</strong>. Add one printer for each place you want paper to come out (kitchen, bar, coffee bar, cash desk). Tickets show the table or room and the order number in big letters, the items and any notes, and never show prices. Each ticket prints once; if an order is cancelled or voided before it prints, it never prints.</p>
+  <h2 id="printers">Printers: kitchen, bar and receipt printing</h2>
+  <p>Kitchen and bar tickets, and customer receipts, come out on paper. Tickets show the table or room, the order number, the items and any notes. They never show prices. Each ticket prints once. An order that is cancelled or voided before it prints never prints.</p>
+  <p>Who can use it: anyone with the <strong>Ingredients &amp; Recipes</strong> permission.</p>
+
+  <h3>Add a printer</h3>
   <ol class="steps">
-    <li>Click <strong>Add printer</strong>, give it a name, and choose <strong>How it prints</strong>.</li>
-    <li><strong>Cloud printer (no computer)</strong> needs a Star CloudPRNT or Epson Server Direct Print model on a 58 mm or 80 mm roll. Save, then copy the <strong>address to paste into the printer</strong> into the printer's own settings page. Keep that address private. If it leaks, click <strong>New address</strong> and paste the new one.</li>
-    <li><strong>Kitchen screen device</strong> works with any printer the screen can print to, on a roll or on A6, A5 or A4 paper. On the Kitchen, Bar or Coffee screen that has the printer, tap <strong>Printer</strong> at the top and tick <em>This screen prints for...</em>. To print without a pop-up window, start Chrome on that computer with <code>--kiosk-printing</code>.</li>
-    <li>Choose the <strong>Station it serves</strong>, the <strong>Paper</strong>, what it prints (tickets, customer receipts or both) and the number of copies, then click <strong>Add printer</strong>.</li>
-    <li>Click <strong>Test print</strong>. A sample ticket and receipt print with a ruler line. If the whole ruler fits on the paper, the width is right. If it runs off the edge or leaves a gap, change <strong>Characters per line</strong> (80 mm rolls: 48, or 42 on some models; 58 mm rolls: 32).</li>
+    <li>Open Admin menu &rarr; <strong>Restaurant &amp; Bar</strong> &rarr; <strong>Printers</strong>.</li>
+    <li>In <strong>Add a printer</strong>, type a <strong>Name</strong> (for example Kitchen printer). Only you see it.</li>
+    <li>Choose <strong>How it prints</strong>:
+      <ul>
+        <li><strong>Cloud printer (no computer)</strong>: needs a Star CloudPRNT or Epson Server Direct Print model. Pick the matching <strong>Printer type</strong>. For Star, pick <em>Bold and large (recommended)</em>, or <em>Plain text</em> for older models.</li>
+        <li><strong>Kitchen screen device (any printer)</strong>: any printer the screen's computer can print to, including an office printer.</li>
+      </ul>
+    </li>
+    <li>Choose the <strong>Station it serves</strong>: Kitchen, Bar, Coffee bar, All stations, or Cash desk (receipts only).</li>
+    <li>Choose the <strong>Paper</strong>: 58 mm roll or 80 mm roll. A6, A5 and A4 sheets are for a kitchen screen device only.</li>
+    <li>Choose <strong>What it prints</strong>: Kitchen / bar tickets, Customer receipts, or Both. Customer receipts go to cloud printers. The till prints its own receipts in the browser.</li>
+    <li>Set <strong>Copies</strong> (1 to 5). Leave <strong>Characters per line</strong> empty.</li>
+    <li>Click <strong>Add printer</strong>. You will see <em>"Printer added."</em></li>
   </ol>
-  <p>A ticket that failed or needs printing again stays in the <strong>Print queue</strong> list on the same page with a <strong>Reprint</strong> button. The till prints its own customer receipt in the browser at the paper size of the receipt printer.</p>
+  <p>If something goes wrong: <em>"Printing needs an update first."</em> means someone must apply the print queue update before the page works.</p>
+
+  <h3>Connect a cloud printer</h3>
+  <ol class="steps">
+    <li>Save the printer. Under <strong>Address to paste into the printer</strong>, click <strong>Copy</strong>.</li>
+    <li>Open the printer's own settings page and paste the address into its server address field.</li>
+    <li>Back on Printers, the badge shows <strong>Connected</strong> once the printer has contacted us. Until then it shows <strong>Not contacted yet</strong>.</li>
+  </ol>
+  <p>Treat the address like a password. If it leaks, open <strong>More</strong> &rarr; <strong>New address</strong>, then paste the new address into the printer. The old address stops working.</p>
+
+  <h3>Use a kitchen screen device</h3>
+  <ol class="steps">
+    <li>On the Kitchen, Bar or Coffee screen of the computer that is attached to the printer, tap <strong>Printer</strong> at the top.</li>
+    <li>Tick <em>This screen prints for...</em> next to the printer. Tick it only on that screen.</li>
+  </ol>
+  <p>The panel then shows each ticket as <strong>Waiting</strong>, <strong>Printed</strong> or <strong>Failed</strong>. To print without a pop-up window, start Chrome with <code>--kiosk-printing</code>. On Windows, right-click the Chrome shortcut, choose <strong>Properties</strong>, add <code>--kiosk-printing</code> to the end of the <strong>Target</strong> box after a space, click <strong>OK</strong>, then restart Chrome.</p>
+
+  <h3>Test print and Reprint</h3>
+  <ol class="steps">
+    <li>Click <strong>Test print</strong> on a saved printer. A sample ticket and receipt print with a ruler line.</li>
+    <li>If the whole ruler fits on the paper, the width is right. If it runs off the edge or leaves a gap, change <strong>Characters per line</strong> (80 mm: 48, or 42 on some models; 58 mm: 32), save, and test again.</li>
+  </ol>
+  <p>Under <strong>More</strong>, <strong>Preview ticket</strong> and <strong>Preview receipt</strong> open a preview in a new tab. The <strong>Print queue</strong> at the bottom lists the latest tickets and receipts. Click <strong>Reprint</strong> on any row to send it again. Cancelled rows have no Reprint button.</p>
+  <ul>
+    <li><strong>Waiting</strong>: not yet collected by the printer.</li>
+    <li><strong>Sent</strong>: handed to the printer, not yet confirmed.</li>
+    <li><strong>Printed</strong>: done.</li>
+    <li><strong>Failed</strong>: the reason is shown under the status. Fix it, then click <strong>Reprint</strong>.</li>
+    <li><strong>Cancelled</strong>: the order was cancelled or voided before it printed.</li>
+  </ul>
+  <p>If something goes wrong: <em>"This printer is switched off. Turn it on (and save) before a test print."</em> Tick <strong>Active</strong> and save. A cloud printer that still shows <em>Not contacted yet</em> after a few minutes needs its power, network and pasted address checked.</p>
 
   <h2 id="report">How to read and send the daily station report (how long tickets take)</h2>
   <ol class="steps">
