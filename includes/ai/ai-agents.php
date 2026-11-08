@@ -76,6 +76,29 @@ function rh_ai_no_write_area(array $user, string $t): ?array
     if (($imp = rh_ai_import_write_line($user, $t)) !== null) {
         return $imp[0] === '' ? null : $imp; // an Import question (its stock/price words are about the file): the Import review
     }
+    // Printers (2026-11-09): reprinting a ticket or receipt is the screen's Reprint button; the Assistant never does it
+    if (preg_match('/\b(re-?print\w*|print (it|that|this|them|the \w+) again)\b/u', $t) && preg_match('/\b(tickets?|receipts?|dockets?|orders?|table|room|kitchen|bar|it|that|this|them)\b/u', $t)
+        && !preg_match('/\b(invoices?|quotations?|quotes?|confirmations?|statements?|folios?|reports?|pdfs?|registration|cards?)\b/u', $t)) {
+        $links = [];
+        foreach ([['printers.php', 'Open Printers'], ['kds.php', 'Open the kitchen screen']] as [$page, $label]) {
+            if (!$links && function_exists('rhCanOpenPage') && rhCanOpenPage((int)($user['id'] ?? 0), $page)) {
+                $links[] = ['label' => $label, 'url' => $page];
+            }
+        }
+        // a shop (restaurant page off, or no station on - rh_print_biz, the Printers page rule): receipts only, shop words
+        if (!function_exists('rh_print_biz')) {
+            require_once dirname(__DIR__) . '/printing.php';
+        }
+        $pState = ['restaurant' => !function_exists('rh_ai_module_on') || rh_ai_module_on('restaurant_page')];
+        foreach (rh_print_station_modules() as $pSt => $pMod) {
+            $pState[$pSt] = !function_exists('rh_ai_module_on') || (rh_ai_module_on('pos') && rh_ai_module_on($pMod));
+        }
+        $pBiz = rh_print_biz($pState);
+        $shop = $pBiz['shop'];
+        // only the kitchen screen has the print queue panel: named only when it is on and this person can open it
+        $kds = !$shop && $pBiz['stations']['kitchen'] && function_exists('rhCanOpenPage') && rhCanOpenPage((int)($user['id'] ?? 0), 'kds.php');
+        return ["I can't reprint " . ($shop ? 'receipts' : 'tickets or receipts') . " - press Reprint on its row in the print queue on Printers" . ($kds ? ' (the kitchen screen has the same button).' : '.'), $links, ['printers.php', 'kds.php']];
+    }
     $v = '(adjust|change|set|update|edit|add|remove|deduct|subtract|reduce|increase|decrease|top up|write off|record|log|enter|transfer|delete|void|refund|reverse|post|take|receive|close|apply|raise|lower|put|mark|cut|bump|correct|fix)';
     $stockLine = "I can't change stock - record it on Stock > Wastage (waste or spoilage) or Stock > Stock count (a correction).";
     $stockPages = [['stock-wastage.php', 'Open Wastage'], ['stock-count.php', 'Open Stock count']];
@@ -1983,7 +2006,7 @@ function rh_ai_specialists(): array
         'housekeeping' => ['label' => 'Housekeeping & Maintenance', 'brief' => 'room status, cleaning jobs, maintenance tasks, rooms off sale and rooms not ready for arrivals',
             'core' => ['work_queues', 'room_board'], 'tools' => ['work_queues', 'room_board']],
         'restaurant' => ['label' => 'Restaurant & Bar', 'brief' => 'till sales, top sellers, voids, refunds, slow tickets at the kitchen, bar and coffee stations, and where one order is',
-            'core' => ['restaurant_sales', 'kitchen_tickets', 'order_status', 'menu_advisor'], 'tools' => ['restaurant_sales', 'kitchen_tickets', 'order_status', 'hotel_info', 'menu_advisor']],
+            'core' => ['restaurant_sales', 'kitchen_tickets', 'order_status', 'menu_advisor'], 'tools' => ['restaurant_sales', 'kitchen_tickets', 'order_status', 'hotel_info', 'menu_advisor', 'print_queue']],
         'money' => ['label' => 'Money', 'brief' => 'money owed, refunds (always in full), voids, discounts, till shortages, no-shows and cancellations; you read and explain, staff do refunds and payments on screen',
             'core' => ['money_leaks', 'balances_due'], 'tools' => ['money_leaks', 'balances_due', 'room_performance', 'hotel_report']],
         'stock' => ['label' => 'Stock', 'brief' => 'stock out or low, expiring batches, wastage, count variance and the stock budget; read only',

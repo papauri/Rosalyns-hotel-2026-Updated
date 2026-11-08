@@ -495,6 +495,150 @@ function rh_ai_t_kitchen_tickets(PDO $db, array $user, array $a): array
         'link' => $link, 'link_label' => $link === 'kds.php' ? 'Open the kitchen screen' : 'Open Orders'];
 }
 
+/**
+ * The print queue (Printers, 2026-11-09): did a ticket or receipt print, what is waiting / sent / failed, which printers
+ * are set up. Same window as the Printers page queue (not printed yet, or added in the last 2 days); every answer
+ * carries the number of tickets checked, so "not found" is never said without a checked total. Printers page holders
+ * (printers_manage) see every printer; a station user sees the printers of the stations they may use (the
+ * api/print-station.php rule). Never returns a printer's token, address or ticket contents. Reprint stays on the screen.
+ */
+function rh_ai_t_print_queue(PDO $db, array $user, array $a): array
+{
+    if (!function_exists('rh_print_ready')) {
+        require_once dirname(__DIR__) . '/printing.php';
+    }
+    $uid = (int)$user['id'];
+    $all = rh_ai_perm_any($user, ['printers_manage']);
+    // Business type, as the Printers page follows it (rh_print_biz / rh_print_station_on): a station's tickets only while its
+    // station module is on ("all stations" while at least one is); a shop (restaurant page off, or no station on) is receipts only
+    $stationMod = rh_print_station_modules();
+    $posOn = rh_ai_module_on('pos');
+    $state = ['restaurant' => rh_ai_module_on('restaurant_page')];
+    foreach ($stationMod as $s => $mod) {
+        $state[$s] = $posOn && rh_ai_module_on($mod);
+    }
+    $biz = rh_print_biz($state);
+    $shop = $biz['shop'];
+    $thing = $shop ? 'receipt' : 'ticket';
+    $priv = in_array((string)($user['role'] ?? ''), ['admin', 'manager'], true);
+    $permFor = static fn(string $s): string => ['bar' => 'bds_view', 'coffee_bar' => 'cds_view'][$s] ?? 'kds_view';
+    // The screen this person can open: Printers for its holders, else the first station screen they may use that is on
+    $link = ['printers.php', 'Open Printers'];
+    if (!$all) {
+        foreach (['kitchen' => ['kds.php', 'Open the kitchen screen'], 'bar' => ['bds.php', 'Open the bar screen'], 'coffee_bar' => ['cds.php', 'Open the coffee bar screen']] as $s => $pg) {
+            if (!$shop && $biz['stations'][$s] && hasPermission($uid, $permFor($s))) {
+                $link = $pg;
+                break;
+            }
+        }
+    }
+    $out = ['link' => $link[0], 'link_label' => $link[1],
+        'reprint' => 'Reprint is a button on the ' . $thing . ' row in the print queue on ' . (in_array($link[0], ['printers.php', 'kds.php'], true) ? 'that screen' : 'Printers or the kitchen screen (ask someone who can open them)') . '; the Assistant does not reprint.'];
+    if (!rh_print_ready($db)) {
+        return $out + ['ready' => false, 'note' => 'Printing is not set up yet: update 076 (print queue) has not been applied.'];
+    }
+    $fed = ['off' => 'Off', 'cloud' => 'Cloud printer', 'screen' => $shop ? 'Till device (any printer)' : 'Kitchen screen device (any printer)'];
+    $printers = [];
+    $ticketOn = 0;
+    $saved = 0;          // every printer on the Printers page (the checked total behind "none")
+    $savedOn = 0;        // of them switched on
+    $mine = [];          // the printers this account may see, before the business-type filter
+    $offHere = [];       // of those, ticket printers whose station is switched off here (or a shop)
+    foreach ($db->query('SELECT id, name, mode, station, prints, is_active, last_seen_at, last_status FROM print_printers ORDER BY id')->fetchAll(PDO::FETCH_ASSOC) as $p) {
+        $saved++;
+        $on = (int)$p['is_active'] === 1 && $p['mode'] !== 'off';
+        $savedOn += $on ? 1 : 0;
+        if (!$all && !hasPermission($uid, $permFor((string)$p['station'])) && !($priv && hasPermission($uid, 'kds_view'))) {
+            continue;
+        }
+        $mine[] = (int)$p['id'];
+        $st = (string)$p['station'];
+        $tickets = !$shop && $p['prints'] !== 'receipts' && rh_print_station_on($st, $biz);
+        if (!$tickets && $p['prints'] === 'tickets') {
+            $offHere[(int)$p['id']] = $p['name']; // a ticket printer for a station that is switched off here (or a shop): kept, never printed to
+            continue;
+        }
+        $ticketOn += ($on && $tickets) ? 1 : 0;
+        $printers[(int)$p['id']] = ['printer' => $p['name'], 'fed_by' => $fed[$p['mode']] ?? $p['mode'], 'station' => $tickets ? str_replace('_', ' ', $st) : 'receipts',
+            'prints' => $tickets ? $p['prints'] : 'receipts', 'switched_on' => $on, 'last_seen' => $p['last_seen_at'], 'last_status' => $p['last_status']];
+    }
+    $out += ['ready' => true, 'window' => $thing . 's not printed yet, and everything added in the last 2 days (the Printers page queue)', 'printers' => array_values($printers)];
+    if (!$shop) {
+        $out['printers_switched_on_for_tickets'] = $ticketOn;
+    }
+    if ($offHere) {
+        $out['printers_with_station_off'] = array_values($offHere);
+    }
+    if (!$printers) {
+        // never "none" or "nothing queued" without the counts: printers saved / on / this account's, and the queue rows checked
+        $ids = $mine ?: ($all ? [] : [0]);
+        $winAll = "(j.status <> 'printed' OR j.created_at >= DATE_SUB(NOW(), INTERVAL 2 DAY))";
+        $qn = (int)$db->query('SELECT COUNT(*) FROM print_jobs j WHERE ' . $winAll . ($ids ? ' AND j.printer_id IN (' . implode(',', array_map('intval', $ids)) . ')' : ''))->fetchColumn();
+        $counts = ['printers_saved' => $saved, 'printers_switched_on' => $savedOn, 'checked' => $qn];
+        if ($offHere) {
+            $n = count($offHere);
+            $why = $shop ? ($biz['restaurant'] ? 'no station is switched on in Modules, so this is a receipts-only setup' : 'this is set up as a shop (receipts only) in Modules')
+                : 'their station is switched off in Modules';
+            return $out + $counts + ['note' => $n . ' printer' . ($n === 1 ? ' is' : 's are') . ' set to print station tickets, but ' . $why . ', so nothing is sent to ' . ($n === 1 ? 'it' : 'them')
+                . ' here. ' . $qn . ' ' . ($shop ? 'item' : 'ticket') . ($qn === 1 ? '' : 's') . ' in the print queue for ' . ($n === 1 ? 'it' : 'them') . ' (' . $out['window'] . ').'
+                . ($all ? ' Switch the station on in Modules, or change the printer on Printers.' : ' Ask a manager to switch the station on in Modules.')];
+        }
+        if ($all) {
+            return $out + $counts + ['note' => $saved === 0 ? 'No printer is saved on the Printers page (0 checked). ' . $qn . ' ' . $thing . ($qn === 1 ? '' : 's') . ' in the print queue (' . $out['window'] . ').'
+                : $saved . ' printer' . ($saved === 1 ? ' is' : 's are') . ' saved, but none prints ' . $thing . 's here. ' . $qn . ' ' . $thing . ($qn === 1 ? '' : 's') . ' in the print queue (' . $out['window'] . ').'];
+        }
+        return $out + $counts + ['note' => 'No printer serves a station this account works on (' . $saved . ' printer' . ($saved === 1 ? '' : 's') . ' checked).'];
+    }
+    // a printer whose station is switched off here is not searched: said with the answer, never a silent gap behind "not found"
+    $notSearched = $offHere ? ' (not searched: ' . count($offHere) . ' ticket printer' . (count($offHere) === 1 ? '' : 's') . ($shop ? ' (a receipts-only setup in Modules)' : ' whose station is switched off in Modules') . ')' : '';
+    $in = implode(',', array_map('intval', array_keys($printers)));
+    $win = "j.printer_id IN ($in) AND (j.status <> 'printed' OR j.created_at >= DATE_SUB(NOW(), INTERVAL 2 DAY))";
+    $byStatus = array_fill_keys(['queued', 'sent', 'printed', 'failed', 'cancelled'], 0);
+    foreach ($db->query("SELECT j.status, COUNT(*) AS n FROM print_jobs j WHERE $win GROUP BY j.status")->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $byStatus[(string)$r['status']] = (int)$r['n'];
+    }
+    $word = ['queued' => 'Waiting (not yet collected by the printer)', 'sent' => 'Sent (handed to the printer, not yet confirmed printed)', 'printed' => 'Printed',
+        'failed' => 'Failed', 'cancelled' => 'Cancelled (the order was cancelled or voided before it printed)'];
+    $out['checked'] = array_sum($byStatus);
+    $out['by_status'] = ['waiting' => $byStatus['queued'], 'sent' => $byStatus['sent'], 'printed' => $byStatus['printed'], 'failed' => $byStatus['failed'], 'cancelled' => $byStatus['cancelled']];
+    $q = trim(preg_replace('/\s+/', ' ', (string)($a['query'] ?? '')));
+    $params = [];
+    if ($q !== '') {
+        $esc = static fn(string $s): string => addcslashes($s, '\\%_');
+        if (preg_match('/^(table|tbl|t)\s*#?\s*(\S+)$/i', $q, $m) || preg_match('/^(room|rm)\s*#?\s*(\S+)$/i', $q, $m)) {
+            $loc = (stripos($m[1], 'r') === 0 ? 'ROOM ' : 'TABLE ') . mb_strtoupper($m[2]);
+            $where = 'j.title LIKE ?';
+            $params = [$esc($loc) . ' - %'];
+        } else {
+            $u = mb_strtoupper($q);
+            $where = '(j.title LIKE ? OR j.title LIKE ? OR j.order_ref = ?)';
+            $params = ['TABLE ' . $esc($u) . ' - %', 'ROOM ' . $esc($u) . ' - %', $q];
+        }
+        $sql = "SELECT j.printer_id, j.kind, j.order_ref, j.title, j.status, j.attempts, j.last_error, j.created_at, j.printed_at FROM print_jobs j WHERE $win AND $where ORDER BY j.id DESC LIMIT 10";
+    } else {
+        $sql = "SELECT j.printer_id, j.kind, j.order_ref, j.title, j.status, j.attempts, j.last_error, j.created_at, j.printed_at FROM print_jobs j WHERE $win AND j.status IN ('queued', 'sent', 'failed') ORDER BY j.id ASC LIMIT 10";
+    }
+    $st = $db->prepare($sql);
+    $st->execute($params);
+    $jobs = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $j) {
+        $jobs[] = ['what' => $j['title'], 'kind' => $j['kind'], 'printer' => $printers[(int)$j['printer_id']]['printer'] ?? '', 'status' => $word[$j['status']] ?? $j['status'],
+            'why_failed' => $j['last_error'] ?: null, 'tries' => (int)$j['attempts'], 'added' => $j['created_at'], 'printed_at' => $j['printed_at']];
+    }
+    if ($q !== '') {
+        $out += ['query' => $q, 'matched' => count($jobs), 'tickets' => $jobs];
+        if (!$jobs) {
+            $out['note'] = 'No ' . ($shop ? 'receipt' : 'ticket or receipt') . ' for "' . $q . '" among the ' . $out['checked'] . ' checked (' . $out['window'] . ')' . $notSearched . '.';
+        }
+    } else {
+        $out += ['not_printed_yet' => $byStatus['queued'] + $byStatus['sent'] + $byStatus['failed'], 'oldest_not_printed' => $jobs];
+    }
+    if ($offHere) {
+        $out['not_searched'] = trim($notSearched, ' ()');
+    }
+    return $out;
+}
+
 // ── Stock (reads) ────────────────────────────────────────────────────────────
 
 /** Out / low / negative stock (the stock dashboard rule), batches expiring, wastage, count variance, counts waiting. */

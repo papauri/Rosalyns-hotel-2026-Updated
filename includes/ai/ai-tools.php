@@ -210,6 +210,11 @@ function rh_ai_tool_registry(): array
             'schema' => ['properties' => (object)[]],
             'perm' => ['kds_view', 'bds_view', 'cds_view', 'kds_reports', 'pos_till', 'room_service_view'], 'module' => ['pos'], 'cache' => 30, 'handler' => 'rh_ai_t_kitchen_tickets', 'step' => 'Checking tickets at the stations',
         ],
+        'print_queue' => [
+            'description' => 'The print queue on the Printers page: did the printed ticket or receipt for a table, room or order print (query), or with no query what is waiting, sent or failed, and which printers are set up. Read only: reprinting is done on the Printers page (or the kitchen screen).',
+            'schema' => ['properties' => ['query' => ['type' => 'string', 'maxLength' => 60, 'description' => 'Table number, room number or order reference']]],
+            'perm' => ['printers_manage', 'kds_view', 'bds_view', 'cds_view'], 'module' => ['pos'], 'cache' => 15, 'handler' => 'rh_ai_t_print_queue', 'step' => 'Checking the print queue',
+        ],
         'inventory_watch' => [
             'description' => 'Stock: one item\'s level (item), one purchase order and what has arrived (purchase_order), or the stock dashboard alerts. Alerts: stock out, low or negative (the stock dashboard rule), batches expiring this week, wastage in a date range (default last 7 days), the last count\'s variance and counts waiting for approval. Read only.',
             'schema' => ['properties' => ['from' => $date, 'to' => $date, 'item' => ['type' => 'string', 'maxLength' => 80, 'description' => 'One stock item: its level, batches and what is on order'],

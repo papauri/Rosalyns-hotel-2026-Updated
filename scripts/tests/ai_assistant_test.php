@@ -27,9 +27,32 @@ function bad(string $l, string $d = ''): void { global $fail; $fail++; echo "FAI
 function check(bool $c, string $l, string $d = ''): bool { $c ? ok($l) : bad($l, $d); return $c; }
 function skip(string $l): void { global $skip; $skip++; echo "SKIP $l\n"; }
 
+/* 2026-11-09: this suite never writes the hotel's shared system log. Its long rolled-back transactions used to hold
+ * locks a staff save then waited on (Lock wait timeout in system-logger.php on a Printers save at Liwonde). Defined
+ * before config/database.php so system-logger.php (function_exists guard) keeps this one; events are kept in memory. */
+if (!function_exists('rh_log_event')) {
+    function rh_log_event(string $source, string $level, string $message, array $context = []): void
+    {
+        $GLOBALS['__ai_test_log_events'][] = [$source, $level, $message];
+    }
+}
+
+/** A throwaway staff account inside the caller's open transaction (rolled back with it): password-step checks never
+ *  lock a real person's admin_users / user_permissions rows for the length of a test block (that blocked their sign-in). */
+function ait_temp_user(PDO $pdo, string $role, string $password): array
+{
+    $u = 'aitesttmp_' . bin2hex(random_bytes(4));
+    $pdo->prepare("INSERT INTO admin_users (username, email, password_hash, full_name, role, is_active) VALUES (?, ?, ?, 'Aitest Temp', ?, 1)")
+        ->execute([$u, $u . '@example.com', password_hash($password, PASSWORD_DEFAULT), $role]);
+    return ['id' => (int)$pdo->lastInsertId(), 'role' => $role, 'username' => $u, 'full_name' => 'Aitest Temp'];
+}
+
 require_once $root . '/config/database.php';
 require_once $root . '/admin/includes/permissions.php';
 require_once $root . '/includes/ai/ai-catalog.php';
+// 2026-11-09: READ COMMITTED for this connection - the rolled-back blocks' deletes (e.g. clearing ai_tool_cache before a
+// check) then lock only the rows they touch, never the gaps, so a live chat at the hotel can still save while the suite runs
+$pdo->exec('SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED');
 $GLOBALS['__rh_ai_claim_trace_on'] = true; // every model reply the claim checker sees is listed (the false-positive count)
 $GLOBALS['__rh_ai_claim_trace'] = [];
 $GLOBALS['__rh_ai_no_cache_ledger'] = true; // test runs never add to the hotel's prompt-cache savings figure
@@ -1402,6 +1425,8 @@ if (!$chatReady) {
     try {
         // Phase 4c: risky cards need the person's own password (rolled back with the rest of this block)
         $pw4 = 'Aitest-Pass-4c!';
+        $adm4u = ait_temp_user($pdo, 'admin', $pw4); // never a real person's row (locks held to the end of this block)
+        $rec4 = $rec4 ? ait_temp_user($pdo, 'receptionist', $pw4) : $rec4;
         $pdo->prepare("UPDATE admin_users SET password_hash = ? WHERE id IN (?, ?)")->execute([password_hash($pw4, PASSWORD_DEFAULT), (int)$adm4u['id'], (int)($rec4['id'] ?? 0)]);
         rh_ai_save_settings(['ai_enabled' => '1', 'ai_paused_reason' => '', 'ai_provider' => 'anthropic', 'ai_user_daily_token_cap' => '50000000', 'ai_monthly_budget_usd' => '1000', 'ai_rate_limit_per_10min' => '500', 'ai_actions_enabled' => '1'], $pdo);
         $pdo->exec("INSERT INTO enabled_modules (module_key, module_name, description, is_enabled, sort_order) VALUES ('ai_assistant', 'Assistant', '', 1, 90) ON DUPLICATE KEY UPDATE is_enabled = 1");
@@ -2161,6 +2186,7 @@ if (!$xReady) {
         rh_ai_save_settings(['ai_enabled' => '1', 'ai_paused_reason' => '', 'ai_paused_kind' => '', 'ai_actions_enabled' => '1', 'ai_monthly_budget_usd' => '1000', 'ai_rate_limit_per_10min' => '500', 'ai_retention_days' => '0', 'ai_digest_enabled' => '1', 'ai_digest_sent_week' => '', 'ai_budget_warned' => '', 'ai_idle_lock_minutes' => '15'], $pdo);
         $pdo->exec("INSERT INTO enabled_modules (module_key, module_name, description, is_enabled, sort_order) VALUES ('ai_assistant', 'Assistant', '', 1, 90) ON DUPLICATE KEY UPDATE is_enabled = 1");
         $pwX = 'Aitest-Pass-4c!';
+        $adm = ait_temp_user($pdo, 'admin', $pwX); // never a real person's row
         $pdo->prepare("UPDATE admin_users SET password_hash = ? WHERE id = ?")->execute([password_hash($pwX, PASSWORD_DEFAULT), (int)$adm['id']]);
         $pdo->prepare("DELETE FROM ai_user_prefs WHERE user_id = ?")->execute([(int)$adm['id']]);
         // A narrow test account: Assistant + reviews only (no bookings, no money)
@@ -4088,6 +4114,7 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
     $admD = $pdo->query("SELECT id, role, username, full_name FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
     $pdo->beginTransaction();
     try {
+        $admD = ait_temp_user($pdo, 'admin', 'Aitest-Qd-tmp'); // never a real person's row (the password is set below)
         rh_ai_save_settings(['ai_enabled' => '1', 'ai_paused_reason' => '', 'ai_paused_kind' => '', 'ai_provider' => 'google', 'ai_cloud_enabled' => '1', 'ai_user_daily_token_cap' => '50000000', 'ai_monthly_budget_usd' => '1000',
             'ai_rate_limit_per_10min' => '500', 'ai_turn_token_cap' => '60000', 'ai_swarm_models' => '0', 'ai_actions_enabled' => '1'], $pdo);
         $pdo->exec("INSERT INTO enabled_modules (module_key, module_name, description, is_enabled, sort_order) VALUES ('ai_assistant', 'Assistant', '', 1, 90) ON DUPLICATE KEY UPDATE is_enabled = 1");
@@ -4466,6 +4493,7 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
     }
     $pdo->beginTransaction();
     try {
+        $admR = ait_temp_user($pdo, 'admin', 'Aitest-Gd-tmp'); // never a real person's row (the password is set below)
         rh_ai_save_settings(['ai_enabled' => '1', 'ai_paused_reason' => '', 'ai_paused_kind' => '', 'ai_provider' => 'google', 'ai_cloud_enabled' => '1', 'ai_user_daily_token_cap' => '50000000', 'ai_monthly_budget_usd' => '1000',
             'ai_rate_limit_per_10min' => '5000', 'ai_turn_token_cap' => '60000', 'ai_swarm_models' => '0', 'ai_actions_enabled' => '1', 'ai_learning_enabled' => '1', 'ai_feature_state' => 'learning', 'ai_router_enabled' => '1'], $pdo);
         $pdo->exec("INSERT INTO enabled_modules (module_key, module_name, description, is_enabled, sort_order) VALUES ('ai_assistant', 'Assistant', '', 1, 90) ON DUPLICATE KEY UPDATE is_enabled = 1");
@@ -6033,8 +6061,132 @@ if (function_exists('rh_ai_t_staff_activity') && function_exists('rh_ai_local_li
         'staff activity hook checks rolled back (no test user, no test log rows left)');
 }
 
+// ── Printers (2026-11-09): the print queue is read before any "printed / not printed" claim; reprint is the screen's
+//    button; a printer's token or address never appears. Own short transaction, rolled back. ──
+require_once $root . '/includes/printing.php';
+if (!function_exists('rh_ai_t_print_queue') || !rh_print_ready($pdo)) {
+    skip('print queue checks (update 076 not applied here)');
+} else {
+    $pdo->beginTransaction();
+    try {
+        $pqModsWas = $GLOBALS['__rh_ai_module_override'] ?? null;
+        $pqOwn = [];
+        $GLOBALS['__rh_ai_module_override'] = ['pos' => 1, 'restaurant_page' => 1, 'station_kds' => 1, 'station_bds' => 1, 'station_cds' => 1];
+        $pqAdm = ait_temp_user($pdo, 'admin', 'Aitest-Pq-tmp');
+        $pqKit = ait_temp_user($pdo, 'receptionist', 'Aitest-Pq-tmp');
+        $pqRec = ait_temp_user($pdo, 'receptionist', 'Aitest-Pq-tmp');
+        $pqGp = $pdo->prepare("INSERT INTO user_permissions (user_id, permission_key, is_granted) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE is_granted = VALUES(is_granted)");
+        foreach (['kds_view' => 1, 'bds_view' => 0, 'cds_view' => 0] as $k => $v) {
+            $pqGp->execute([$pqKit['id'], $k, $v]);
+            $pqGp->execute([$pqRec['id'], $k, 0]);
+        }
+        $pqTokA = str_repeat('a', 20) . bin2hex(random_bytes(14));
+        $pqTokB = str_repeat('b', 20) . bin2hex(random_bytes(14));
+        $pqP = $pdo->prepare("INSERT INTO print_printers (name, mode, station, paper, prints, is_active, token) VALUES (?, 'cloud', ?, '80', 'tickets', 1, ?)");
+        $pqP->execute(['AITest Kitchen Pq', 'kitchen', $pqTokA]);
+        $pqA = (int)$pdo->lastInsertId();
+        $pqP->execute(['AITest Bar Pq', 'bar', $pqTokB]);
+        $pqB = (int)$pdo->lastInsertId();
+        $pqJ = $pdo->prepare("INSERT INTO print_jobs (printer_id, kind, order_ref, title, payload, status, last_error) VALUES (?, 'kitchen_ticket', ?, ?, '{}', ?, ?)");
+        $pqJ->execute([$pqA, 'AITPQ1', 'TABLE 4 - AITPQ1', 'failed', 'Paper out']);
+        $pqJ->execute([$pqA, 'AITPQ2', 'TABLE 14 - AITPQ2', 'printed', null]);
+        $pqJ->execute([$pqB, 'AITPQ3', 'TABLE 4 - AITPQ3', 'queued', null]);
+        $pqNoLeak = static function ($v) use ($pqTokA, $pqTokB): bool {
+            $s = json_encode($v);
+            return strpos($s, $pqTokA) === false && strpos($s, $pqTokB) === false && stripos($s, 'cloudprnt') === false && strpos($s, '?p=') === false && strpos($s, 'payload') === false;
+        };
+        $r1 = rh_ai_t_print_queue($pdo, $pqAdm, ['query' => 'table 4']);
+        $t1 = array_column((array)($r1['tickets'] ?? []), 'status', 'what');
+        check(($t1['TABLE 4 - AITPQ1'] ?? '') === 'Failed' && strpos((string)($t1['TABLE 4 - AITPQ3'] ?? ''), 'Waiting') === 0 && !isset($t1['TABLE 14 - AITPQ2'])
+            && in_array('Paper out', array_column((array)$r1['tickets'], 'why_failed'), true) && (int)($r1['checked'] ?? 0) >= 3 && $pqNoLeak($r1),
+            'print queue: "did table 4\'s ticket print?" reads print_jobs - Failed (with the reason) and Waiting, not table 14; no printer token, address or ticket contents', json_encode($r1));
+        $r2 = rh_ai_t_print_queue($pdo, $pqAdm, ['query' => 'AITPQNONE']);
+        check(($r2['matched'] ?? -1) === 0 && strpos((string)($r2['note'] ?? ''), 'among the ' . (int)$r2['checked'] . ' checked') !== false && (int)$r2['checked'] > 0,
+            'print queue: "not found" only with the number of tickets checked and the window (no false absence)', json_encode([$r2['note'] ?? null, $r2['checked'] ?? null]));
+        $r3 = rh_ai_t_print_queue($pdo, $pqAdm, []);
+        $t3 = array_column((array)($r3['oldest_not_printed'] ?? []), 'what');
+        check(count($t3) <= 10 && (int)($r3['not_printed_yet'] ?? 0) >= 2 && !in_array('TABLE 14 - AITPQ2', $t3, true) && $pqNoLeak($r3),
+            'print queue: "what is stuck?" lists waiting / sent / failed only (printed ones are not stuck)', json_encode($r3['oldest_not_printed'] ?? null));
+        $r4 = rh_ai_t_print_queue($pdo, $pqKit, ['query' => 'table 4']);
+        $t4 = array_column((array)($r4['tickets'] ?? []), 'what');
+        check(in_array('TABLE 4 - AITPQ1', $t4, true) && !in_array('TABLE 4 - AITPQ3', $t4, true) && !in_array('AITest Bar Pq', array_column((array)$r4['printers'], 'printer'), true)
+            && ($r4['link'] ?? '') === 'kds.php',
+            'print queue: a kitchen-screen user sees the kitchen printer\'s tickets only (the station rule), linked to the kitchen screen', json_encode($r4));
+        check(!array_key_exists('print_queue', rh_ai_tools_for_user($pqRec)), 'print queue: a receptionist with no printer or station permission does not get the lookup');
+        $nw = rh_ai_no_write_area($pqAdm, "reprint table 4's ticket");
+        check($nw !== null && strpos($nw[0], "can't reprint") !== false && strpos($nw[0], 'Reprint') !== false && rh_ai_no_write_area($pqAdm, 'how do I reprint a ticket') === null
+            && (rh_ai_no_write_area($pqAdm, 'reprint the invoice for room 12')[0] ?? '') !== $nw[0] && rh_ai_no_write_area($pqAdm, "did table 4's ticket print?") === null,
+            'reprint is the screen\'s button: one local line and the Printers link; "how do I reprint" goes to the guide; an invoice reprint is not this line', json_encode($nw));
+        // Business type: a station switched off drops its ticket printer; a shop (restaurant page off) is receipts only, in shop words
+        $GLOBALS['__rh_ai_module_override']['station_bds'] = 0;
+        $r5 = rh_ai_t_print_queue($pdo, $pqAdm, ['query' => 'table 4']);
+        $GLOBALS['__rh_ai_module_override']['restaurant_page'] = 0;
+        $r6 = rh_ai_t_print_queue($pdo, $pqAdm, []);
+        $nw6 = rh_ai_no_write_area($pqAdm, 'reprint that receipt');
+        check(!in_array('AITest Bar Pq', array_column((array)$r5['printers'], 'printer'), true) && !in_array('TABLE 4 - AITPQ3', array_column((array)$r5['tickets'], 'what'), true)
+            && !in_array('AITest Kitchen Pq', array_column((array)$r6['printers'], 'printer'), true) && strpos((string)$r6['window'], 'receipts') === 0 && !isset($r6['printers_switched_on_for_tickets'])
+            && strpos((string)($nw6[0] ?? ''), "can't reprint receipts") !== false && stripos((string)$nw6[0], 'kitchen') === false,
+            'print queue follows the business type: bar station off - no bar printer; a shop - receipts only, no ticket or kitchen words', json_encode([$r5['printers'] ?? null, $r6['window'] ?? null, $nw6]));
+        // QA blocker 2026-11-09 (absence rail): printers saved but their stations switched off is never "none set up" / "nothing queued"
+        // the hotel's own printers are made kitchen ticket printers inside this transaction (rolled back, checked below) so the case is exact
+        $pqOwn = $pdo->query("SELECT id, station, prints FROM print_printers WHERE id NOT IN ($pqA, $pqB) ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
+        $pdo->exec("UPDATE print_printers SET station = 'kitchen', prints = 'tickets' WHERE id NOT IN ($pqA, $pqB)");
+        $pqJobsN = (int)$pdo->query("SELECT COUNT(*) FROM print_jobs WHERE status <> 'printed' OR created_at >= DATE_SUB(NOW(), INTERVAL 2 DAY)")->fetchColumn();
+        $GLOBALS['__rh_ai_module_override'] = ['pos' => 1, 'restaurant_page' => 1, 'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 1];
+        $r7 = rh_ai_t_print_queue($pdo, $pqAdm, []);
+        $n7 = (string)($r7['note'] ?? '');
+        check(($r7['printers'] ?? null) === [] && stripos($n7, 'No printer is saved') === false && stripos($n7, 'nothing is queued') === false && strpos($n7, 'switched off in Modules') !== false
+            && (int)($r7['printers_saved'] ?? 0) >= 2 && ($r7['checked'] ?? -1) === $pqJobsN && strpos($n7, $pqJobsN . ' tickets in the print queue') !== false
+            && in_array('AITest Kitchen Pq', (array)($r7['printers_with_station_off'] ?? []), true) && ($r7['link'] ?? '') === 'printers.php',
+            'print queue: printers saved but their stations switched off - says they exist and their station is off in Modules, with the printers saved and the queue rows checked (never "none set up" or "nothing queued")', json_encode([$n7, $r7['printers_saved'] ?? null, $r7['checked'] ?? null, $pqJobsN]));
+        // "All stations" follows rh_print_station_on: with no station on it is a receipts-only setup (rh_print_biz shop), never a ticket printer
+        $pqP->execute(['AITest All Pq', 'all', str_repeat('c', 20) . bin2hex(random_bytes(14))]);
+        $GLOBALS['__rh_ai_module_override'] = ['pos' => 1, 'restaurant_page' => 1, 'station_kds' => 0, 'station_bds' => 0, 'station_cds' => 0];
+        $r8 = rh_ai_t_print_queue($pdo, $pqAdm, []);
+        $nw8 = rh_ai_no_write_area($pqAdm, "reprint table 4's ticket");
+        check(!in_array('AITest All Pq', array_column((array)$r8['printers'], 'printer'), true) && strpos((string)$r8['window'], 'receipts') === 0 && strpos((string)($r8['note'] ?? ''), 'receipts-only') !== false
+            && in_array('AITest All Pq', (array)($r8['printers_with_station_off'] ?? []), true) && strpos((string)($r8['note'] ?? ''), 'saved for receipts') === false && strpos((string)($r8['note'] ?? ''), 'set to print station tickets') !== false
+            && strpos((string)($nw8[0] ?? ''), "can't reprint receipts") !== false,
+            'print queue: an "All stations" printer with no station on is not a ticket printer (the Printers page rule); no station on = a receipts-only setup', json_encode([$r8['printers'] ?? null, $r8['note'] ?? null]));
+        // A bar-only user is linked to the bar screen, never the kitchen screen they cannot open
+        $pqBar = ait_temp_user($pdo, 'receptionist', 'Aitest-Pq-tmp');
+        foreach (['kds_view' => 0, 'bds_view' => 1, 'cds_view' => 0] as $k => $v) {
+            $pqGp->execute([$pqBar['id'], $k, $v]);
+        }
+        $GLOBALS['__rh_ai_module_override'] = ['pos' => 1, 'restaurant_page' => 1, 'station_kds' => 1, 'station_bds' => 1, 'station_cds' => 1];
+        $r9 = rh_ai_t_print_queue($pdo, $pqBar, ['query' => 'table 4']);
+        check(($r9['link'] ?? '') === 'bds.php' && in_array('TABLE 4 - AITPQ3', array_column((array)($r9['tickets'] ?? []), 'what'), true) && !in_array('TABLE 4 - AITPQ1', array_column((array)($r9['tickets'] ?? []), 'what'), true),
+            'print queue: a bar-only user sees the bar printer\'s tickets and is linked to the bar screen (not kds.php)', json_encode([$r9['link'] ?? null, $r9['tickets'] ?? null]));
+        // Mixed: some printers shown, one with its station off - a "not found" says which printers were not searched (no silent gap)
+        $GLOBALS['__rh_ai_module_override']['station_bds'] = 0;
+        $r10 = rh_ai_t_print_queue($pdo, $pqAdm, ['query' => 'AITPQ3']);
+        $r11 = rh_ai_t_print_queue($pdo, $pqAdm, []);
+        check(($r10['matched'] ?? -1) === 0 && strpos((string)($r10['note'] ?? ''), 'not searched: 1 ticket printer whose station is switched off in Modules') !== false && strpos((string)($r11['not_searched'] ?? ''), '1 ticket printer whose station') !== false,
+            'print queue: with the bar station off, a ticket on the bar printer is "not found among N checked" plus the 1 printer not searched; the stuck list says the same', json_encode([$r10['note'] ?? null, $r11['not_searched'] ?? null]));
+    } catch (Throwable $e) {
+        bad('print queue checks threw', get_class($e) . ': ' . $e->getMessage());
+    } finally {
+        $GLOBALS['__rh_ai_module_override'] = $pqModsWas;
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+    }
+    $pqBack = true; // the hotel's own printers have their station and prints again (restored if the rollback did not)
+    $pqFix = $pdo->prepare("UPDATE print_printers SET station = ?, prints = ? WHERE id = ?");
+    foreach ($pqOwn as $o) {
+        $now = $pdo->query("SELECT station, prints FROM print_printers WHERE id = " . (int)$o['id'])->fetch(PDO::FETCH_ASSOC);
+        if ($now && ($now['station'] !== $o['station'] || $now['prints'] !== $o['prints'])) {
+            $pqFix->execute([$o['station'], $o['prints'], (int)$o['id']]);
+            $pqBack = false;
+        }
+    }
+    check((int)$pdo->query("SELECT COUNT(*) FROM print_printers WHERE name LIKE 'AITest % Pq'")->fetchColumn() === 0 && (int)$pdo->query("SELECT COUNT(*) FROM admin_users WHERE username LIKE 'aitesttmp\_%'")->fetchColumn() === 0 && $pqBack,
+        'print queue checks rolled back (no test printer, no temporary account left; the hotel\'s own printers unchanged)');
+}
+
 rh_ai_set_transport(null);
 if ($origEnv === null) { unset($_ENV['APP_ENCRYPTION_SALT']); } else { $_ENV['APP_ENCRYPTION_SALT'] = $origEnv; }
+$pdo->exec('SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ'); // the READ COMMITTED set at the top is for this test connection only
 
 echo "$pass passed, $fail failed" . ($skip ? ", $skip skipped" : '') . "\n";
 exit($fail ? 1 : 0);
