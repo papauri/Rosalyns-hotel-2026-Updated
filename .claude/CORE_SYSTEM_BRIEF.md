@@ -68,6 +68,14 @@ direct booking). Not a rewrite of any of them — "best small-hotel direct booki
 
 ## Hard safety rails (all agents, no exceptions)
 
+**ROSALYN'S IS LIVE (since 2026-11-09) — real guests, real money, real staff.** Work with extreme
+caution: never run DB tests, scripts that write, or test emails against Rosalyn's database
+(this folder's `.env` points at it). All testing, rehearsals and test sends happen at Liwonde
+(`../Liwonde_Sun_Hotel_2026`), the test hotel. Never change Rosalyn's settings/data unless the
+owner asked for that exact change. Never send email to a real guest. Prefer the smallest change;
+anything that could alter live bookings, money, stock or guest communication needs a test at
+Liwonde first and an independent review before it ships.
+
 Specialists never run git; the build loop commits each QA-passed task itself (see Git in
 CLAUDE.md). Never force-push or rewrite pushed history. Never `DROP`/`TRUNCATE`/
 `DELETE`-without-`WHERE`. Never edit `.env` or `config/*local*`. Never print credentials.

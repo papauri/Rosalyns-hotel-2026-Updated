@@ -36,6 +36,10 @@ do not re-derive plans or re-scan the repo ad hoc.
 
 ## Standing rails (apply to ALL sessions and agents)
 
+- **ROSALYN'S IS LIVE (owner 2026-11-09)**: real guests and money. Extreme caution. No DB tests,
+  writing scripts or test emails against Rosalyn's DB — test at Liwonde only. Change Rosalyn's
+  settings/data only when the owner asked for that exact change. Every dispatch brief must say this.
+
 - **Cost**: follow the Cost rules in `.claude/DEPARTMENTS.md` (no agent for small work, haiku
   for docs/lint/small QA, CODE_INDEX + offset reads instead of whole files, one QA per ship,
   `scripts/ship.php` to ship). Also: /compact every 3 completed tasks; /clear on phase switch; haiku for read-only/
