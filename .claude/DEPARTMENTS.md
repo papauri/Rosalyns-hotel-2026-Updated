@@ -150,7 +150,7 @@ The feature freeze in BUILD_PLAN.md ("PRODUCTION READINESS GATE") still stands. 
    - Safety net: the full set once a day in the background (first ship of the day or when the owner deploys);
      it never blocks a push.
 2. **One independent review before every commit** (see "Right first time" 3–5): `qa-auditor`
-   (sonnet for logic/stock/security, haiku for small markup/docs), or `dept-accounting-lead` as the
+   (opus for logic/money/stock/auth/security, haiku for small markup/docs), or `dept-accounting-lead` as the
    gate for money changes. BLOCKERs fail; everything else is `LATER:`.
 3. **Browser check before anything ships** that touches a screen — no MCP browser tools
    (too many tokens). Serve the repo with `php -S 0.0.0.0:8000 -t . scripts/tests/dev-router.php`
@@ -176,8 +176,9 @@ The feature freeze in BUILD_PLAN.md ("PRODUCTION READINESS GATE") still stands. 
    finding, a data check: the orchestrator does it directly.
 2. **Model by task, not by habit.** haiku: guides/KB, index/mapping, lint-only or small QA
    (diff < ~150 lines, no money/stock/auth), read-only audits that only list facts.
-   sonnet: logic changes, and QA/review of money, stock, auth or security. Opus: planning
-   only when the owner asks. Never Fable unless told.
+   Opus (owner 2026-11-09, "I cannot afford to break anything"): every real build/fix/feature and
+   QA/review of logic, money, stock, auth or security. Sonnet: ONLY very small low-risk tasks it can
+   surely do (one-line fix, copy/port, mechanical edit). Never Fable unless told.
 3. **Never read whole big files.** Grep `.claude/CODE_INDEX.md` for the file or function you need
    (it is ~100 KB — never read it whole; regenerate with
    `php scripts/code-index.php`) + Grep, then Read with offset/limit around the lines you need.

@@ -1,7 +1,7 @@
 ---
 name: backend-specialist
 description: Server/API/DB implementation for Rosalyn's Hotel — PHP pages, includes/ functions, api/ endpoints, migrations, email, PDFs. Plans then executes within the file paths named in the dispatch brief, without pausing for confirmation. Use for any task touching PHP logic, SQL, email, or PDFs.
-model: sonnet
+model: opus
 tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: frontend-specialist
 description: Pages, components, and client-side JS for Rosalyn's Hotel — HTML structure in PHP pages, css/ and js/ assets, booking widget wiring, PWA files. Plans then executes within the paths named in the dispatch brief, without pausing. Functional wiring only (ui-designer handles visual polish).
-model: sonnet
+model: opus
 tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 

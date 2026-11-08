@@ -1,7 +1,7 @@
 ---
 name: dept-backup-lead
 description: Lead for Backups & Data Safety of Rosalyn's / Liwonde — nightly database backup, manual "Run Backup Now", rotation/retention, download, delete, restore, backup log, freshness/health checks and the staff notifications when a backup fails or goes stale. Audits (read-only) or fixes backup logic end to end and raises UI_REQUESTs for the ui-lead. Use for any backup or restore work.
-model: sonnet
+model: opus
 tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 

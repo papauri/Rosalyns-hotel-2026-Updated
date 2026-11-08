@@ -22,11 +22,12 @@ do not re-derive plans or re-scan the repo ad hoc.
 - `.claude/SYSTEM_MAP.md` — feature→file→endpoint→table map, built by codebase-scout.
   Briefs reference this instead of re-scanning.
 - `.claude/agents/` — codebase-scout (haiku, read-only mapper) · build-planner (opus,
-  plans only, never edits code) · backend-specialist (sonnet) · frontend-specialist
-  (sonnet) · ui-designer (sonnet, polish pass on just-touched files) · qa-auditor
-  (read-only gate; haiku for lint, sonnet for logic/security).
+  plans only, never edits code) · backend-specialist (opus) · frontend-specialist
+  (opus) · ui-designer (opus, polish pass on just-touched files) · qa-auditor
+  (read-only gate; haiku for lint, opus for logic/security). Model rule (owner 2026-11-09):
+  Opus for any real build/fix/review; Sonnet only for very small tasks it can surely do.
 - Department leads (`.claude/DEPARTMENTS.md`): `dept-rooms-lead`, `dept-restaurant-lead`,
-  `dept-accounting-lead`, `dept-stock-lead`, `dept-guest-site-lead`, `dept-events-gym-lead`, `dept-pwa-lead` (patch-only: installed app, offline, POS/KDS stations), `dept-import-lead` (sonnet; Import button: Excel/CSV/Word/PDF → review → import, `data_import` permission default admin+manager, no staff-list import, spec `.claude/IMPORT_PLAN.md`), `dept-patch-lead` (owner-approved feature patches in `.claude/PATCH_QUEUE.md` + all security patches) (sonnet; each audits/fixes its department end to end and
+  `dept-accounting-lead`, `dept-stock-lead`, `dept-guest-site-lead`, `dept-events-gym-lead`, `dept-pwa-lead` (patch-only: installed app, offline, POS/KDS stations), `dept-import-lead` (opus; Import button: Excel/CSV/Word/PDF → review → import, `data_import` permission default admin+manager, no staff-list import, spec `.claude/IMPORT_PLAN.md`), `dept-patch-lead` (owner-approved feature patches in `.claude/PATCH_QUEUE.md` + all security patches) (opus; each audits/fixes its department end to end and
   is the one to ask when it breaks) and `ui-lead` (one visual language; turns the leads'
   `UI_REQUEST`s into shared `UI_DECISION`s). Money changes from any department are reviewed by the
   accounting lead.
@@ -38,8 +39,8 @@ do not re-derive plans or re-scan the repo ad hoc.
 - **Cost**: follow the Cost rules in `.claude/DEPARTMENTS.md` (no agent for small work, haiku
   for docs/lint/small QA, CODE_INDEX + offset reads instead of whole files, one QA per ship,
   `scripts/ship.php` to ship). Also: /compact every 3 completed tasks; /clear on phase switch; haiku for read-only/
-  lint, sonnet for build execution; Fable 5/Opus only for setup and planning, never routine
-  execution; max 2 concurrent specialists; /cost checkpoint after every loop cycle; every
+  lint/docs, Opus for build execution and logic QA (Sonnet only for very small sure tasks); never Fable unless told;
+  max 2 concurrent specialists; /cost checkpoint after every loop cycle; every
   subagent brief carries exact file paths — no open-ended "explore".
 - **Safety**: commit and push completed work to `main` (see Git below); never destructive
   SQL; never edit `.env`; park owner decisions as `blocked:` in BUILD_PLAN.md and continue
@@ -72,7 +73,7 @@ do not re-derive plans or re-scan the repo ad hoc.
    (~9.5k lines), BUILD_PLAN/SYSTEM_MAP/CODE_INDEX are lookup-only. Shipped history is in
    `.claude/archive/`, never read unless asked.
 5. Briefs carry the facts (paths, lines, rule, test cases) so agents don't re-discover them; reports
-   under 150 words. Haiku for lint/docs/guides, Sonnet for build, Opus only for the orchestrator.
+   under 150 words. Haiku for lint/docs/guides, Opus for build and logic QA, Sonnet only for very small sure tasks (owner 2026-11-09).
 
 ## Code conventions (enforced by qa-auditor)
 

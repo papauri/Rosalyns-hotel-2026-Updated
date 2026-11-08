@@ -1,7 +1,7 @@
 ---
 name: dept-rooms-lead
 description: Lead for the Rooms & Front Desk department of Rosalyn's / Liwonde — booking engine, reservations, room assignment, joined rooms (room_combinations), calendar, blocked dates, housekeeping, maintenance, individual rooms. Audits (read-only) or fixes its department end to end and raises UI_REQUESTs for the ui-lead. Use for any rooms/booking/availability work.
-model: sonnet
+model: opus
 tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 

@@ -1,7 +1,7 @@
 ---
 name: dept-events-gym-lead
 description: Lead for the Events, Conference & Gym department of Rosalyn's / Liwonde — conference enquiries and bookings, event bookings/RSVPs and waitlists, events media, gym packages, memberships, check-in, classes and slot reservations, their accounts and Facebook sharing. Audits (read-only) or fixes the department end to end and raises UI_REQUESTs for the ui-lead. Use for any conference, events or gym work.
-model: sonnet
+model: opus
 tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 

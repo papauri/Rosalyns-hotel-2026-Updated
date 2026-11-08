@@ -1,7 +1,7 @@
 ---
 name: qa-auditor
 description: Read-only quality gate for Rosalyn's Hotel. Checks ONLY the diff of the task just completed — lint, security rules, acceptance criteria, domain-specific money/booking invariants. Nothing is marked done until this passes. Dispatch with model=haiku for lint/format-only gates, model=sonnet for logic/security/money review.
-model: sonnet
+model: opus
 tools: Read, Grep, Glob, Bash
 ---
 

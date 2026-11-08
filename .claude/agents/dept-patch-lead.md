@@ -1,7 +1,7 @@
 ---
 name: dept-patch-lead
 description: Lead for feature patches and security patches across Rosalyn's / Liwonde. Owns .claude/PATCH_QUEUE.md (the owner-approved patch backlog), runs the standing security sweep, turns each approved item into an exact brief for the owning department lead, gates it (review, tests, browser check) and hands it to the orchestrator to ship to both hotels. Builds small cross-department or security fixes itself. Use for "patch this", "security", the monthly roll-out, or anything on the patch queue.
-model: sonnet
+model: opus
 tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 

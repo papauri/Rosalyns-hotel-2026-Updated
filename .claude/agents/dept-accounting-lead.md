@@ -1,7 +1,7 @@
 ---
 name: dept-accounting-lead
 description: Lead for the Finance & Accounting department of Rosalyn's / Liwonde — payments, folios, invoices, receipts, credit notes, refunds, VAT and tourism levy, shift close/Z-report, end of day, POS accounting, financial reports. Audits (read-only) or fixes money logic end to end and reviews money changes made by other departments. Use for any accounting work.
-model: sonnet
+model: opus
 tools: Read, Grep, Glob, Edit, Write, Bash
 ---
 
