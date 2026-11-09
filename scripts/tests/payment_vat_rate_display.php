@@ -129,5 +129,34 @@ $ok2 = rh_payment_vat_lines($pdoL, ['booking_id' => 503] + $payRow);
 check(near($ok2['levy'], 11400) && near($ok2['rate'], 17.50), 'pro-rata row still shows levy 11,400 at 17.50% with the guard on');
 // issueCreditNote's vat_amount path is not tested here: config/credit-notes.php loads config/database.php (DB).
 
+// ---- rh_refund_leg_rate: the rate STORED on a refund leg (refunds against older 17.33 payments) ----
+// Only the rate changes; the leg's VAT amount / payment_amount still come from rh_refund_vat_split()
+// (config/database.php, needs the DB to load), and this helper returns just a float.
+// Allocation-shaped row (allocateBookingRefunds / rh_allocate_account_refunds now select booking_id + payment_amount)
+$allocRow = ['id' => 77, 'payment_method' => 'cash', 'booking_type' => 'room', 'booking_id' => 2100008830, 'booking_reference' => 'RBH1',
+    'payment_amount' => 1151400, 'vat_rate' => 17.33, 'vat_amount' => 199500, 'total_amount' => 1350900, 'already_refunded' => 0];
+$lr = rh_refund_leg_rate($pdoL, $allocRow, 17.33);
+check(is_float($lr) && near($lr, 17.50), 'refund leg of a levy-room payment stores the true 17.50 (not 17.33)', (string)$lr);
+// payment-refund.php locked row: same answer
+$lrL = rh_refund_leg_rate($pdoL, ['id' => 77, 'booking_type' => 'room', 'booking_id' => 2100008830, 'payment_amount' => 1151400,
+    'total_amount' => 1350900, 'vat_amount' => 199500, 'vat_rate' => 17.33, 'payment_status' => 'completed'], 17.33);
+check(near($lrL, 17.50), 'manual refund (locked payment row) stores 17.50', (string)$lrL);
+// Row without payment_amount: worked out as total - VAT (levy stays in it), same rate
+$noPa = $allocRow; unset($noPa['payment_amount']);
+check(near(rh_refund_leg_rate($pdoL, $noPa, 17.33), 17.50), 'row without payment_amount: net = total - VAT, still 17.50');
+// Fallbacks keep the stored rate
+check(near(rh_refund_leg_rate($pdoC, ['booking_id' => 501] + $allocRow, 17.33), 17.33), 'cancelled booking: refund keeps the stored rate');
+$flatRow = ['booking_id' => 502, 'payment_amount' => round(100000 - $flatVat, 2), 'vat_amount' => $flatVat, 'total_amount' => 100000, 'vat_rate' => 17.5] + $allocRow;
+check(near(rh_refund_leg_rate($pdoL, $flatRow, 17.5), 17.5), 'flat-rate (pre-2026-10-01) payment: refund keeps the stored 17.5');
+$pdoX->queries = 0;
+check(near(rh_refund_leg_rate($pdoX, ['booking_type' => 'restaurant', 'booking_id' => 5, 'payment_amount' => 850.0, 'vat_amount' => 150.0, 'total_amount' => 1000.0, 'vat_rate' => 17.5], 17.5), 17.5)
+    && $pdoX->queries === 0, 'non-room payment: stored rate, no query');
+check(near(rh_refund_leg_rate($pdoL, ['booking_id' => 0] + $allocRow, 17.33), 17.33), 'row with no booking id: stored rate');
+check(near(rh_refund_leg_rate($pdoN, ['booking_id' => 7, 'payment_amount' => 100000, 'vat_amount' => 17500, 'total_amount' => 117500] + $allocRow, 17.5), 17.5), 'levy-free room: stored rate');
+// The refund VAT pro rata stays the same as before: 282,900 x 199,500 / 1,350,900 = 41,778.48, now stored at 17.50%
+$legVat = round(282900 * (199500 / 1350900), 2);
+check(near($legVat, 41778.48) && near(rh_payment_row_vat_display(round(282900 - $legVat, 2), $legVat, 282900, $lr, $G, $L)['rate'], 17.50),
+    'refund leg 282,900: VAT 41,778.48 unchanged, row reads 17.50% with the new stored rate');
+
 echo "\n$pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

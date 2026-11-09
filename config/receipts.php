@@ -175,8 +175,8 @@ if (!function_exists('receipt_hydrate_context')) {
             if (!function_exists('rh_booked_rate_for_booking')) {
                 require_once __DIR__ . '/../includes/booked-rate.php';
             }
-            $br = rh_booked_rate_for_booking($pdo, (int)$payment['booking_id'], false);
-            $bookedRate = $br['ok'] ? 'Room: ' . $br['guest_text'] : '';
+            // Group / multi-room booking: one line per room, "N rooms: ..." past 4 (lines joined with "\n").
+            $bookedRate = implode("\n", rh_booked_rate_group_lines(rh_booked_rate_group_texts($pdo, (int)$payment['booking_id'])));
         } elseif (($payment['booking_type'] ?? '') === 'conference' && !empty($payment['booking_id'])) {
             try {
                 // Column names differ between installs: pick what exists (a missing column used to fail the
@@ -1050,7 +1050,11 @@ if (!function_exists('receipt_render_payment_pdf_html')) {
         $desc = rh_pdf_e((string)($context['description'] ?? 'Payment'));
         if (!empty($context['booked_rate'])) {
             // Plain "x" / "-" in the PDF: the core font (helvetica) has no multiplication sign or middle dot.
-            $desc .= '<br/><span style="color:' . $t['muted_dark'] . ';font-size:7.5pt;">' . rh_pdf_e(str_replace(['×', '·'], ['x', '-'], (string)$context['booked_rate'])) . '</span>';
+            // One line per room (group bookings), each escaped.
+            $brLines = array_map(static function (string $l): string {
+                return rh_pdf_e(str_replace(['×', '·'], ['x', '-'], $l));
+            }, explode("\n", (string)$context['booked_rate']));
+            $desc .= '<br/><span style="color:' . $t['muted_dark'] . ';font-size:7.5pt;">' . implode('<br/>', $brLines) . '</span>';
         }
         $typeLabel = ucwords(str_replace('_', ' ', (string)($payment['payment_type'] ?? '')));
         if ($typeLabel !== '') {

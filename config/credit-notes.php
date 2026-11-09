@@ -548,7 +548,8 @@ if (!function_exists('recordCreditNoteRefundLegs')) {
             $orig = $alloc['payment'];
             $leg  = (float)$alloc['amount'];
             $sp   = rh_refund_vat_split($orig, $leg);
-            $vr   = $sp['rate'];
+            // Store the original payment's TRUE VAT rate (levy outside the base); VAT amount / net unchanged
+            $vr   = function_exists('rh_refund_leg_rate') ? rh_refund_leg_rate($pdo, $orig, (float)$sp['rate']) : $sp['rate'];
             $va   = $sp['vat'];
             $ref  = finance_next_refund_reference($pdo, date('Y-m-d'));
             $ins->execute([
@@ -697,7 +698,8 @@ if (!function_exists('rh_refund_credit_note_payments')) {
                 continue;
             }
             $sp = rh_refund_vat_split($orig, $leg);
-            $vr = $sp['rate'];
+            // Store the original payment's TRUE VAT rate (levy outside the base); VAT amount / net unchanged
+            $vr = function_exists('rh_refund_leg_rate') ? rh_refund_leg_rate($pdo, $orig, (float)$sp['rate']) : $sp['rate'];
             $va = $sp['vat'];
             $ref = finance_next_refund_reference($pdo, date('Y-m-d'));
             $ins->execute([
@@ -1215,6 +1217,8 @@ if (!function_exists('generateCreditNotePDF')) {
                     'amount' => htmlspecialchars($currencySymbol . ' ' . number_format((float)$cn['original_amount'], 2), ENT_QUOTES, 'UTF-8'),
                     'amount_used' => htmlspecialchars($currencySymbol . ' ' . number_format((float)$cn['amount_used'], 2), ENT_QUOTES, 'UTF-8'),
                     'balance' => htmlspecialchars($currencySymbol . ' ' . number_format((float)$cn['balance'], 2), ENT_QUOTES, 'UTF-8'),
+                    // Room booking only (empty otherwise): plain "x" / "-" for the PDF core font
+                    'booked_rate' => htmlspecialchars(str_replace(['×', '·'], ['x', '-'], (string)($cn['booked_rate'] ?? '')), ENT_QUOTES, 'UTF-8'),
                 ], hotel_default_credit_note_document_html());
             }
             if ($html === null) {
@@ -1300,6 +1304,15 @@ if (!function_exists('sendCreditNoteEmail')) {
             if (function_exists('getBookingEmailTemplateConfig')) {
                 $dbTpl = getBookingEmailTemplateConfig('credit_note', []);
                 if (!empty($dbTpl['html_body'])) {
+                    // {{booked_rate}}: room bookings only, the price booked at x nights (never today's price)
+                    $cnBookedRate = '';
+                    if ((string)($cn['booking_type'] ?? '') === 'room' && (int)($cn['booking_id'] ?? 0) > 0) {
+                        if (!function_exists('rh_booked_rate_for_booking')) {
+                            require_once __DIR__ . '/../includes/booked-rate.php';
+                        }
+                        $cnBr = rh_booked_rate_for_booking($pdo, (int)$cn['booking_id'], false);
+                        $cnBookedRate = $cnBr['ok'] ? (string)$cnBr['guest_text'] : '';
+                    }
                     $cnLogoUrl  = function_exists('hotel_email_logo_url') ? hotel_email_logo_url() : '';
                     $cnLogoHtml = $cnLogoUrl !== ''
                         ? '<img src="' . htmlspecialchars($cnLogoUrl, ENT_QUOTES, 'UTF-8') . '" alt="' . htmlspecialchars($site_name, ENT_QUOTES, 'UTF-8') . '" style="max-width:110px;height:auto;display:block;margin:0 auto;">'
@@ -1323,6 +1336,7 @@ if (!function_exists('sendCreditNoteEmail')) {
                         '{{address}}'            => htmlspecialchars($hotel_address),
                         '{{contact_phone}}'      => htmlspecialchars($hotel_phone !== '' ? $hotel_phone : (string)getSetting('phone_main', '')),
                         '{{guest_email}}'        => htmlspecialchars((string)($cn['guest_email'] ?? '')),
+                        '{{booked_rate}}'        => htmlspecialchars($cnBookedRate),
                     ];
                     $htmlBody = str_replace(array_keys($cnPlaceholders), array_values($cnPlaceholders), $dbTpl['html_body']);
                     if (!empty($dbTpl['subject'])) {

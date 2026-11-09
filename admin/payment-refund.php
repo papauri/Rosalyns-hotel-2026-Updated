@@ -164,7 +164,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
 
             // Re-fetch original payment with row lock and recompute refundable balance
             // inside the transaction to prevent concurrent double-refunds.
-            $lockedPayStmt = $pdo->prepare("SELECT id, total_amount, vat_amount, vat_rate, payment_status FROM payments WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
+            $lockedPayStmt = $pdo->prepare("SELECT id, booking_type, booking_id, payment_amount, total_amount, vat_amount, vat_rate, payment_status FROM payments WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
             $lockedPayStmt->execute([$payment_id]);
             $lockedPayment = $lockedPayStmt->fetch(PDO::FETCH_ASSOC);
             if (!$lockedPayment) {
@@ -191,6 +191,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
             // the ORIGINAL payment's own VAT / gross ratio (the refund mirrors the sale).
             $vat_rate        = $lockedPayment['vat_rate'] ?? ($payment['vat_rate'] ?? 0);
             $refundSplit     = rh_refund_vat_split($lockedPayment, $refund_amount);
+            // Store the original payment's TRUE VAT rate (levy outside the base); VAT amount / net unchanged
+            $cn_vat_rate     = $vat_rate; // store-credit note keeps the stored rate (its fallback VAT maths uses it)
+            $vat_rate        = rh_refund_leg_rate($pdo, $lockedPayment, (float)$vat_rate);
             $vat_amount      = $refundSplit['vat'];
             $payment_amount  = $refundSplit['net'];
 
@@ -287,7 +290,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                     'booking_type'        => $cnBookingType,
                     'reason'              => $cnReasonMap[$refund_reason] ?? 'other',
                     'reason_notes'        => 'Store-credit refund ' . $refundRef . ($refund_notes !== '' ? ' — ' . $refund_notes : ''),
-                    'vat_rate'            => $vat_rate,
+                    'vat_rate'            => $cn_vat_rate,
                     'vat_amount'          => $vat_amount, // the refund row's own VAT, so note VAT == refund VAT (levy is not VAT)
                     'original_payment_id' => $payment_id,
                     'issued_by'           => (int)($_SESSION['admin_user_id'] ?? 0),

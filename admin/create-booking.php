@@ -348,6 +348,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         // Price override is a privileged action — only admin and manager roles may set it
         $hasNonEmptyOverride = !empty(array_filter(array_map('trim', $rl_overrides), static fn($v) => $v !== ''));
         if ($hasNonEmptyOverride && !in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
+            // Logged with the form's client_uuid so the booking saved on the retry (same uuid) shows the blocked
+            // attempt in its History (includes/booking-history.php). No booking_id key: there is no booking yet.
+            $__blockedLines = [];
+            foreach ($rl_overrides as $__li => $__ov) {
+                if (trim((string)$__ov) !== '') {
+                    $__blockedLines[] = ['room_type_id' => (int)($rl_room_ids[$__li] ?? 0), 'amount' => round((float)$__ov, 2)];
+                }
+            }
+            rh_log_event('create-booking', 'warning', 'Manual room price blocked: role may not override pricing', [
+                'event'       => 'price_override_blocked',
+                'client_uuid' => idem_normalize_uuid($__incomingClientUuid),
+                'user_id'     => (int)($user['id'] ?? 0),
+                'by'          => $user['username'] ?? null,
+                'role'        => (string)($user['role'] ?? ''),
+                'check_in'    => substr(trim((string)($_POST['check_in_date'] ?? '')), 0, 10),
+                'check_out'   => substr(trim((string)($_POST['check_out_date'] ?? '')), 0, 10),
+                'overrides'   => $__blockedLines,
+            ]);
             throw new Exception('Your role does not have permission to override room pricing.');
         }
         $individual_room_id = !empty($_POST['individual_room_id']) ? (int)$_POST['individual_room_id'] : null;

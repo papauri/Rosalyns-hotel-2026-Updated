@@ -10,6 +10,8 @@
  *   rh_room_today_price_lookup(PDO $pdo, array $b): array{price:?float,combo_name:?string}   reads rooms/room_combinations
  *
  *   rh_booked_rate_for_booking(PDO $pdo, int $bookingId, bool $withToday = true): array   reads one booking -> line
+ *   rh_booked_rate_group_texts(PDO $pdo, int $bookingId): string[]   guest_text of every room in the booking's group
+ *   rh_booked_rate_group_lines(array $guestTexts): string[]   PURE: "Room: ..." / "Room 1: ..." / "6 rooms: ..."
  *
  * Line keys: ok, per_night, nights, room_total, child, package, total, text, compact, guest_text, today_text, cancelled,
  *            currency.
@@ -241,5 +243,80 @@ if (!function_exists('rh_booked_rate_for_booking')) {
         }
         $today = $withToday ? rh_room_today_price_lookup($pdo, $b)['price'] : null;
         return rh_booked_rate_line($b, $today);
+    }
+}
+
+if (!function_exists('rh_booked_rate_group_lines')) {
+    /**
+     * PURE. Guest lines for the room(s) a document covers, from each room's guest_text (blank ones skipped).
+     *   1 room      ["Room: Superior Suite - K356,000 × 3 nights ..."]           (same as a single booking)
+     *   2-4 rooms   ["Room 1: ...", "Room 2: ...", ...]                          one line per room
+     *   5+ rooms    ["6 rooms: Superior Suite - ...; Deluxe Room - ...; ..."]    one line
+     */
+    function rh_booked_rate_group_lines(array $guestTexts): array
+    {
+        $texts = array_values(array_filter(array_map(static function ($t): string {
+            return trim((string)$t);
+        }, $guestTexts), static function (string $t): bool {
+            return $t !== '';
+        }));
+        $n = count($texts);
+        if ($n === 0) {
+            return [];
+        }
+        if ($n === 1) {
+            return ['Room: ' . $texts[0]];
+        }
+        if ($n > 4) {
+            return [$n . ' rooms: ' . implode('; ', $texts)];
+        }
+        $out = [];
+        foreach ($texts as $i => $t) {
+            $out[] = 'Room ' . ($i + 1) . ': ' . $t;
+        }
+        return $out;
+    }
+}
+
+if (!function_exists('rh_booked_rate_group_texts')) {
+    /**
+     * guest_text of every room in a booking's group (bookings.primary_booking_id: the lead, then its secondaries
+     * in id order; the same rooms the group invoice lists), never today's price. A booking outside a group gives
+     * just its own line. Deleted rooms are left out, and so is another room of the group that was cancelled,
+     * expired or a no-show. Read-only; a read error falls back to the booking's own line.
+     *
+     * @return string[]
+     */
+    function rh_booked_rate_group_texts(PDO $pdo, int $bookingId): array
+    {
+        if ($bookingId <= 0) {
+            return [];
+        }
+        $ids = [$bookingId];
+        try {
+            $st = $pdo->prepare('SELECT primary_booking_id FROM bookings WHERE id = ?');
+            $st->execute([$bookingId]);
+            $lead = (int)($st->fetchColumn() ?: 0);
+            $lead = $lead > 0 ? $lead : $bookingId;
+            $q = $pdo->prepare("SELECT id FROM bookings
+                WHERE (id = ? OR primary_booking_id = ?) AND deleted_at IS NULL
+                  AND (id = ? OR status NOT IN ('cancelled', 'expired', 'no-show'))
+                ORDER BY (id = ?) DESC, id ASC");
+            $q->execute([$lead, $lead, $bookingId, $lead]);
+            $found = array_map('intval', $q->fetchAll(PDO::FETCH_COLUMN));
+            if ($found) {
+                $ids = $found;
+            }
+        } catch (Throwable $e) {
+            error_log('booked-rate group read: ' . $e->getMessage());
+        }
+        $out = [];
+        foreach ($ids as $id) {
+            $br = rh_booked_rate_for_booking($pdo, $id, false);
+            if ($br['ok']) {
+                $out[] = $br['guest_text'];
+            }
+        }
+        return $out;
     }
 }

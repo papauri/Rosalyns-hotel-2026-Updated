@@ -27,7 +27,7 @@ if (!function_exists('guest_lifecycle_log_ensure')) {
         $pdo->exec("
             CREATE TABLE IF NOT EXISTS guest_communication_log (
                 id INT AUTO_INCREMENT PRIMARY KEY,
-                booking_id INT NOT NULL,
+                booking_id INT UNSIGNED NOT NULL,
                 booking_reference VARCHAR(64) NULL,
                 stage VARCHAR(20) NOT NULL,
                 sent_to VARCHAR(255) NULL,

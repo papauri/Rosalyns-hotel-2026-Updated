@@ -23,6 +23,7 @@ require_once __DIR__ . '/../includes/pricing.php';
 require_once __DIR__ . '/../includes/guest-allocation.php';
 require_once __DIR__ . '/../includes/alert.php';
 require_once __DIR__ . '/../includes/booking-room-change.php';
+require_once __DIR__ . '/../includes/booked-rate.php'; // booked rate × nights line (owner 2026-11-09)
 
 /** @var PDO $pdo */
 /** @var array $user */
@@ -587,6 +588,16 @@ $preview_data = [
     'children' => (int)($booking['child_guests'] ?? 0),
     'rack' => $preview_rack,
 ];
+// Booked rate × nights (includes/booked-rate.php): the rate the booking was made at, never today's price.
+// Display only; the save still prices with edit_booking_reprice().
+$eb_rate = rh_booked_rate_line($booking, rh_room_today_price_lookup($pdo, $booking)['price'], ['currency' => (string)$currency_symbol]);
+$preview_data['rate'] = $eb_rate['ok'] ? [
+    'text' => $eb_rate['text'],
+    'nights' => (int)$eb_rate['nights'],
+    'child' => round((float)$eb_rate['child'], 2),
+    'package' => round((float)$eb_rate['package'], 2),
+    'cur' => (string)$eb_rate['currency'],
+] : null;
 $back_url = 'booking-details.php?id=' . $booking_id;
 ?>
 <!DOCTYPE html>
@@ -863,8 +874,21 @@ $back_url = 'booking-details.php?id=' . $booking_id;
                         <div><span>After this change</span><strong id="ebNewTotal"><?php echo htmlspecialchars($currency_symbol . ' ' . number_format($preview_data['currentTotal'], 2)); ?></strong></div>
                         <div><span>Difference</span><strong id="ebDelta">&ndash;</strong></div>
                     </div>
+                    <?php if ($eb_rate['ok']): ?>
+                        <div style="margin-top:10px; font-size:14px; color:#222;">
+                            <span style="color:#666;">Booked at</span> <strong><?php echo htmlspecialchars($eb_rate['text'], ENT_QUOTES); ?></strong>
+                            <?php if ($eb_rate['today_text'] !== ''): ?>
+                                <small style="display:block; color:#666; margin-top:2px;"><?php echo htmlspecialchars($eb_rate['today_text'], ENT_QUOTES); ?></small>
+                            <?php endif; ?>
+                            <small id="ebRateNew" style="display:block; color:#444; margin-top:2px;" hidden></small>
+                        </div>
+                    <?php endif; ?>
                     <small id="ebPriceNote" style="color:#777; display:block; margin-top:8px;">
-                        Booked rate <?php echo htmlspecialchars($currency_symbol . ' ' . number_format($preview_data['bookedNight'], 2)); ?>/night incl. taxes.
+                        <?php if ($eb_rate['ok']): ?>
+                            Booked at = the room rate a night (incl. taxes) &times; nights, at the price the booking was made at. Date changes are charged at this rate; today's room price does not change it.
+                        <?php else: ?>
+                            Booked rate <?php echo htmlspecialchars($currency_symbol . ' ' . number_format($preview_data['bookedNight'], 2)); ?>/night incl. taxes.
+                        <?php endif; ?>
                         The price is not typed in: to give a discount or correct a price, issue a credit note from the booking.
                     </small>
                 </div>
@@ -910,12 +934,57 @@ $back_url = 'booking-details.php?id=' . $booking_id;
             };
             const $ = id => document.getElementById(id);
 
+            // "K356,000" / "MWK 356,000.50": the same format as rh_hist_money() (includes/booking-history-format.php).
+            const histMoney = (v, cur) => {
+                let a = Math.round(Number(v || 0) * 100) / 100;
+                const neg = a < 0;
+                a = Math.abs(a);
+                const dec = Math.abs(a - Math.round(a)) > 0.004 ? 2 : 0;
+                const sep = cur.length > 1 && /^[A-Za-z]+$/.test(cur) ? ' ' : '';
+                return (neg ? '-' : '') + cur + sep + a.toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+            };
+
+            // The booked-rate line for the edited stay, built like rh_booked_rate_change_for_booking(): booked rate
+            // × new nights, the children charge scaled by nights, the package kept as it is; it adds up to "After this change".
+            function rateLine(nights, total, night, occ, children) {
+                const el = $('ebRateNew');
+                const R = P.rate;
+                if (!el || !R) return;
+                const sameRate = occ === P.occupancy && children === P.children;
+                if (sameRate && nights === R.nights) {
+                    el.hidden = true;
+                    return;
+                }
+                const m = v => histMoney(v, R.cur);
+                const nightWord = nights === 1 ? '1 night' : nights + ' nights';
+                const pkg = R.package;
+                let text;
+                if (sameRate) {
+                    const roomGross = Math.round((total - pkg) * 100) / 100;
+                    let child = R.child > 0.01 ? Math.round(R.child * nights / R.nights * 100) / 100 : 0;
+                    if (child >= roomGross - 0.01) child = 0;
+                    const room = Math.round((roomGross - child) * 100) / 100;
+                    text = 'After this change: ' + m(Math.round(room / nights * 100) / 100) + ' × ' + nightWord + ' = ' + m(room);
+                    if (child > 0.01) text += ' + children ' + m(child);
+                    if (pkg > 0.01) text += ' + package ' + m(pkg);
+                    if (child > 0.01 || pkg > 0.01) text += ' = ' + m(total);
+                } else {
+                    // A new occupancy or children count moves the nightly price by the rack difference: no longer the booked rate alone.
+                    const roomAll = Math.round(night * nights * 100) / 100;
+                    text = 'After this change (new occupancy or children): ' + m(night) + ' a night × ' + nightWord + ' = ' + m(roomAll)
+                        + (pkg > 0.01 ? ' + package ' + m(pkg) + ' = ' + m(total) : '');
+                }
+                el.textContent = text;
+                el.hidden = false;
+            }
+
             // Same rule as the server: booked nightly rate + (rack for new occupancy/children - rack for old).
             function preview() {
                 const ci = $('check_in_date') ? $('check_in_date').value : '';
                 const co = $('check_out_date') ? $('check_out_date').value : '';
                 const nights = ci && co ? Math.round((new Date(co) - new Date(ci)) / 86400000) : 0;
                 if (nights <= 0) {
+                    if ($('ebRateNew')) $('ebRateNew').hidden = true;
                     $('ebNewTotal').textContent = '-';
                     $('ebDelta').textContent = 'Check-out must be after check-in';
                     return;
@@ -926,6 +995,7 @@ $back_url = 'booking-details.php?id=' . $booking_id;
                 const total = Math.round((night * nights + P.packageGross) * 100) / 100;
                 const delta = total - P.currentTotal;
                 $('ebNewTotal').textContent = money(total);
+                rateLine(nights, total, night, occ, children);
                 const d = $('ebDelta');
                 d.textContent = Math.abs(delta) < 0.01 ? 'No change' : (delta > 0 ? '+' : '') + money(delta);
                 d.style.color = delta > 0.01 ? '#b42318' : (delta < -0.01 ? '#1b5e20' : '#222');

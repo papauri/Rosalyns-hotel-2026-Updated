@@ -9593,7 +9593,7 @@ function allocateBookingRefunds(PDO $pdo, int $bookingId, float $amount, bool $l
         ? "AND p.payment_method = 'credit_note'"
         : ($scope === 'any' ? '' : "AND COALESCE(p.payment_method, '') <> 'credit_note'");
     $stmt = $pdo->prepare("
-        SELECT p.id, p.payment_method, p.booking_type, p.booking_reference, p.vat_rate, p.vat_amount, p.total_amount, p.credit_note_id,
+        SELECT p.id, p.payment_method, p.booking_type, p.booking_id, p.booking_reference, p.payment_amount, p.vat_rate, p.vat_amount, p.total_amount, p.credit_note_id,
                COALESCE((
                    SELECT SUM(COALESCE(r.refund_amount, r.total_amount))
                    FROM payments r
@@ -9821,7 +9821,11 @@ function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, st
                 $orig = $alloc['payment'];
                 $leg = (float)$alloc['amount'];
                 $sp = rh_refund_vat_split($orig, $leg);
-                $vr = $sp['rate'];
+                if (!function_exists('rh_refund_leg_rate') && is_file(__DIR__ . '/../admin/includes/finance-account-sync.php')) {
+                    require_once __DIR__ . '/../admin/includes/finance-account-sync.php';
+                }
+                // Store the original payment's TRUE VAT rate (levy outside the base); VAT amount / net unchanged
+                $vr = function_exists('rh_refund_leg_rate') ? rh_refund_leg_rate($pdo, $orig, (float)$sp['rate']) : $sp['rate'];
                 $va = $sp['vat'];
                 $legRef = finance_next_refund_reference($pdo, date('Y-m-d'));
                 $ins->execute([

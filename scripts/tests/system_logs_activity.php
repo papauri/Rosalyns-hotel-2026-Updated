@@ -56,8 +56,15 @@ try {
     $act->execute([B, 'zz_b', 'login_success', 'Role: manager', '10.0.0.2', D1 . ' 10:00:00']);
     $act->execute([A, 'zz_a', 'login_success', 'Role: admin', '10.0.0.1', D2 . ' 08:30:00']);
 
-    $pdo->prepare("INSERT INTO booking_audit_log (booking_id,booking_reference,action,old_values,new_values,changed_fields,performed_by,performed_by_name,performed_at) VALUES (1,'ZZ-1','updated',?,?,?,?,?,?)")
-        ->execute(['{"secret":"SECRET-OLD-VALUE"}', '{"secret":"SECRET-NEW-VALUE"}', '["check_in_date","password_hash","guest_name"]', A, 'Zed A', D1 . ' 09:30:00']);
+    // booking_audit_log.booking_id is a foreign key to bookings (migration 078): give the audit row a real (rolled back) booking.
+    $pdo->prepare("INSERT INTO bookings (booking_reference, room_id, guest_name, guest_email, guest_phone, guest_country, number_of_guests, adult_guests, child_guests,
+            child_price_multiplier, check_in_date, check_out_date, number_of_nights, total_amount, child_supplement_total, tourism_levy_amount, tourism_levy_percent,
+            vat_rate, vat_amount, total_with_vat, special_requests, status, payment_status, is_tentative, occupancy_type, client_uuid, created_at)
+        VALUES ('ZZ-1', (SELECT id FROM rooms ORDER BY id LIMIT 1), 'ZZ Activity Test', 'zz@example.invalid', '+265000000000', 'Malawi', 1, 1, 0, 50, '2020-03-05', '2020-03-06', 1, 100, 0, 0, 0, 0, 0, 100,
+            'system logs test', 'pending', 'unpaid', 0, 'single', ?, NOW())")->execute([bin2hex(random_bytes(16))]);
+    $zzBid = (int)$pdo->lastInsertId();
+    $pdo->prepare("INSERT INTO booking_audit_log (booking_id,booking_reference,action,old_values,new_values,changed_fields,performed_by,performed_by_name,performed_at) VALUES (?,'ZZ-1','updated',?,?,?,?,?,?)")
+        ->execute([$zzBid, '{"secret":"SECRET-OLD-VALUE"}', '{"secret":"SECRET-NEW-VALUE"}', '["check_in_date","password_hash","guest_name"]', A, 'Zed A', D1 . ' 09:30:00']);
     $pay = $pdo->prepare("INSERT INTO payments (payment_reference,booking_type,booking_id,booking_reference,payment_date,payment_amount,payment_method,payment_status,payment_type,recorded_by,created_at,total_amount) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)");
     $pay->execute(['ZZP1', 'room', 1, 'ZZ-1', D1, 100000, 'cash', 'completed', 'full_payment', A, D1 . ' 10:00:00', 120000]);
     $pay->execute(['ZZP2', 'room', 1, 'ZZ-1', D1, 50000, 'cash', 'pending', 'full_payment', A, D1 . ' 10:01:00', 50000]);
@@ -106,7 +113,7 @@ try {
     check(!$pend, 'a pending payment is not shown as recorded');
     $link = null;
     foreach ($t['rows'] as $r) { if ($r['src'] === 'booking') { $link = $r['link']; } }
-    check($link && $link['page'] === 'booking-details.php' && $link['query'] === 'id=1', 'booking line links to the booking');
+    check($link && $link['page'] === 'booking-details.php' && $link['query'] === 'id=' . $zzBid, 'booking line links to the booking');
 
     // ---- Secrets never shown ----
     $dump = json_encode($t['rows']) . json_encode($tAll['rows']);

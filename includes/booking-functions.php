@@ -688,7 +688,8 @@ function createNoShowRefund(array $booking, int $adminUserId, PDO $pdo): array
             $orig      = $alloc['payment'];
             $legAmount = (float)$alloc['amount'];
             $split     = rh_refund_vat_split($orig, $legAmount);
-            $vatRate   = $split['rate'];
+            // Store the original payment's TRUE VAT rate (levy outside the base); VAT amount / net unchanged
+            $vatRate   = function_exists('rh_refund_leg_rate') ? rh_refund_leg_rate($pdo, $orig, (float)$split['rate']) : $split['rate'];
             $vatAmount = $split['vat'];
             $payAmount = $split['net'];
             $legRef    = finance_next_refund_reference($pdo, date('Y-m-d'));

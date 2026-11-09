@@ -73,10 +73,14 @@ register_shutdown_function(function () use ($pdo, &$fx) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         } elseif ($fx['committed']) {
-            // Remove exactly what this case made (booking children cascade with the booking).
+            // Remove exactly what this case made: the payment, then every row linked to the booking, then the booking
+            // (explicit, so nothing is left behind even where no ON DELETE CASCADE foreign key exists).
             $pdo->prepare("DELETE FROM payment_audit_log WHERE payment_id = ?")->execute([$fx['payment']]);
             $pdo->prepare("DELETE FROM payments WHERE id = ?")->execute([$fx['payment']]);
-            $pdo->prepare("DELETE FROM booking_timeline_logs WHERE booking_id = ?")->execute([$fx['booking']]);
+            foreach (['booking_timeline_logs', 'booking_audit_log', 'booking_notes', 'booking_rooms', 'booking_status_log',
+                      'tentative_booking_log', 'booking_financial_audit'] as $t) {
+                try { $pdo->prepare("DELETE FROM `$t` WHERE booking_id = ?")->execute([$fx['booking']]); } catch (Throwable $e) { /* table optional */ }
+            }
             $pdo->prepare("DELETE FROM bookings WHERE id = ?")->execute([$fx['booking']]);
         }
         $s = $pdo->prepare("SELECT (SELECT COUNT(*) FROM bookings WHERE id = ?) + (SELECT COUNT(*) FROM payments WHERE id = ?)");

@@ -189,6 +189,16 @@ if (!function_exists('rh_hist_tables')) {
                 // string form. A bare prefix match would also pick up ids 120, 1234 ... for booking 12.
                 [$b['created_at'], $b['created_at'], '%"booking_id":' . (int)$bookingId . ',%', '%"booking_id":' . (int)$bookingId . '}%',
                     '%"booking_id":"' . (int)$bookingId . '"%']);
+            // A manual price blocked before this booking existed (create-booking.php logs it with the form's client_uuid,
+            // which the saved booking carries). LIKE is only a pre-filter (its _ and % escaped); rh_hist_from_blocked_prices()
+            // keeps a row only when the logged client_uuid is exactly this booking's.
+            $cu = trim((string)($b['client_uuid'] ?? ''));
+            if ($cu !== '' && preg_match('/^[A-Za-z0-9_\-:]{8,64}$/', $cu)) {
+                $src['blocked_prices'] = rh_hist_rows($pdo, 'system_event_log', "SELECT id, user_id, username, context_json, created_at FROM system_event_log
+                    WHERE source = 'create-booking' AND created_at >= DATE_SUB(?, INTERVAL 1 DAY) AND created_at <= DATE_ADD(?, INTERVAL 1 MINUTE)
+                      AND context_json LIKE ? AND context_json LIKE ? ORDER BY id LIMIT 20",
+                    [$b['created_at'], $b['created_at'], '%"event":"price_override_blocked"%', '%"client_uuid":"' . addcslashes($cu, '\\%_') . '"%']);
+            }
         }
 
         // Price changes for this room since it was booked (room_price_history, migration 077).

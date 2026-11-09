@@ -604,6 +604,29 @@ if (!function_exists('rh_payment_vat_lines')) {
     }
 }
 
+if (!function_exists('rh_refund_leg_rate')) {
+    /**
+     * The VAT rate to STORE on a refund leg of $origPayment: the original payment's TRUE rate from
+     * rh_payment_vat_lines() (VAT / net without the tourism levy, e.g. 17.50 not 17.33). Only the rate value;
+     * the refund's VAT amount and payment_amount come from rh_refund_vat_split() unchanged. A cancelled
+     * booking, a flat-rate row or a row missing booking_type / booking_id keeps the stored rate.
+     * $origPayment: payments row (booking_type, booking_id, payment_amount, vat_amount, total_amount, vat_rate).
+     */
+    function rh_refund_leg_rate(PDO $pdo, array $origPayment, float $storedRate): float
+    {
+        if (!isset($origPayment['payment_amount']) && isset($origPayment['total_amount'])) {
+            // payment_amount = everything that is not VAT (levy stays in it)
+            $origPayment['payment_amount'] = round((float)$origPayment['total_amount'] - (float)($origPayment['vat_amount'] ?? 0), 2);
+        }
+        $origPayment['vat_rate'] = $storedRate;
+        try {
+            return (float)rh_payment_vat_lines($pdo, $origPayment)['rate'];
+        } catch (Throwable $e) {
+            return $storedRate;
+        }
+    }
+}
+
 if (!function_exists('rh_account_vat_split')) {
     /**
      * Split a GROSS payment into net + VAT pro rata to the account's own VAT / gross
@@ -1025,7 +1048,7 @@ if (!function_exists('rh_cancel_auto_refund_account')) {
             $orig = $alloc['payment'];
             $leg = (float)$alloc['amount'];
             $sp = rh_refund_vat_split($orig, $leg);
-            $vr = $sp['rate'];
+            $vr = rh_refund_leg_rate($pdo, $orig, (float)$sp['rate']); // true rate; VAT amount / net unchanged
             $va = $sp['vat'];
             $legRef = finance_next_refund_reference($pdo, date('Y-m-d'));
             $ins->execute([
@@ -1060,7 +1083,7 @@ if (!function_exists('rh_allocate_account_refunds')) {
             return [];
         }
         $stmt = $pdo->prepare("
-            SELECT p.id, p.payment_method, p.booking_type, p.booking_reference, p.vat_rate, p.vat_amount, p.total_amount,
+            SELECT p.id, p.payment_method, p.booking_type, p.booking_id, p.booking_reference, p.payment_amount, p.vat_rate, p.vat_amount, p.total_amount,
                    COALESCE((
                        SELECT SUM(COALESCE(r.refund_amount, r.total_amount))
                        FROM payments r

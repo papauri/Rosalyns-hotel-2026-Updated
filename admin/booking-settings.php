@@ -477,6 +477,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             '{{contact_person}}'           => 'Jane Doe',
             '{{company_name}}'             => 'Mwai Consulting Ltd',
             '{{room_name}}'                => 'QA Joined Room Test - QA-JOIN-101A + QA-JOIN-101B',
+            '{{booked_rate}}'              => 'Superior Suite - ' . (string)getSetting('currency_symbol', 'MWK') . '356,000 x 3 nights (a night, incl. VAT and tourism levy)',
             '{{conference_room}}'          => 'Baobab Conference Suite',
             '{{event_title}}'              => 'Sunset Jazz Night',
             '{{event_location}}'           => 'Beachfront Pavilion',
@@ -1044,6 +1045,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 '{{contact_person}}'           => 'Jane Doe',
                 '{{company_name}}'             => 'Mwai Consulting Ltd',
                 '{{room_name}}'                => 'Deluxe Ocean Suite',
+                '{{booked_rate}}'              => 'Deluxe Ocean Suite - ' . $currencySymbol . '356,000 x 3 nights (a night, incl. VAT and tourism levy)',
                 '{{conference_room}}'          => 'Baobab Conference Suite',
                 '{{event_title}}'              => 'Sunset Jazz Night',
                 '{{event_location}}'           => 'Beachfront Pavilion',
@@ -2436,6 +2438,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 '{{guest_email}}',
                 '{{guest_phone}}',
                 '{{room_name}}',
+                '{{booked_rate}}', // room invoices / credit notes: the price booked at x nights (empty otherwise)
                 '{{check_in_date_formatted}}',
                 '{{check_out_date_formatted}}',
                 '{{number_of_nights}}',

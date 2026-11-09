@@ -251,5 +251,36 @@ check(rh_hist_price_explanation($noNights, null, 1.0, [], ['cur' => 'K', 'staff'
 $bad = rh_hist_build(['cur' => 'K', 'payments' => [['id' => 1, 'payment_reference' => 'P1', 'payment_type' => 'payment', 'total_amount' => 5, 'created_at' => '0000-00-00 00:00:00']]]);
 check($bad === [], 'a row with no real time is left out, not shown at 1970');
 
+// ---- 8. a blocked manual price, linked by the form's client_uuid ----
+$uuidB = $booking; $uuidB['client_uuid'] = 'a1b2c3d4e5f60718293a4b5c6d7e8f90';
+$blkCtx = json_encode(['event' => 'price_override_blocked', 'client_uuid' => 'a1b2c3d4e5f60718293a4b5c6d7e8f90', 'user_id' => 5, 'by' => 'reservations',
+    'role' => 'receptionist', 'check_in' => '2026-11-09', 'check_out' => '2026-11-12', 'overrides' => [['room_type_id' => 2, 'amount' => 900000]]], JSON_UNESCAPED_SLASHES);
+$blkRow = ['id' => 501, 'user_id' => 5, 'username' => 'reservations', 'context_json' => $blkCtx, 'created_at' => '2026-11-07 09:30:02'];
+$blkSrc = ['booking' => $uuidB, 'staff' => $staff, 'cur' => 'K', 'room_types' => [2 => 'Superior Suite'], 'blocked_prices' => [$blkRow]];
+$blkOnly = static function (array $src): array {
+    return array_values(array_filter(rh_hist_build($src), function ($e) { return strpos($e['what'], 'Tried to set the price by hand') === 0; }));
+};
+$blkEv = $blkOnly($blkSrc);
+check(count($blkEv) === 1 && $blkEv[0]['what'] === "Tried to set the price by hand to K900,000 — blocked (receptionists can't change prices)", 'blocked manual price: shown on the booking with the same client_uuid', json_encode($blkEv));
+check(($blkEv[0]['who'] ?? '') === 'Rosalyns Reservations (receptionist)' && ($blkEv[0]['kind'] ?? '') === 'price', 'blocked manual price: who = the user, kind price', json_encode($blkEv));
+check(strpos($blkEv[0]['detail'] ?? '', 'Room: Superior Suite. Stay 9 Nov 2026 to 12 Nov 2026.') === 0, 'blocked manual price: room type and dates in the detail', $blkEv[0]['detail'] ?? '');
+$other = $blkSrc; $other['booking']['client_uuid'] = 'ffffffffffffffffffffffffffffffff';
+check($blkOnly($other) === [], 'blocked manual price: a different client_uuid shows nothing');
+$prefix = $blkSrc; $prefix['booking']['client_uuid'] = 'a1b2c3d4e5f60718';
+check($blkOnly($prefix) === [], 'blocked manual price: a prefix of the uuid shows nothing');
+$sec = $blkSrc; $sec['booking']['client_uuid'] = 'a1b2c3d4e5f60718293a4b5c6d7e8f90:b1';
+check($blkOnly($sec) === [], 'blocked manual price: the second room of the booking (uuid:b1) shows nothing (exact match only)');
+$wild = $blkSrc; $wild['booking']['client_uuid'] = 'a1b2c3d4_5f60718293a4b5c6d7e8f90';
+check($blkOnly($wild) === [], 'blocked manual price: "_" is not a wildcard');
+$none = $blkSrc; unset($none['booking']['client_uuid']);
+check($blkOnly($none) === [], 'blocked manual price: a booking with no client_uuid shows nothing');
+$noRows = $blkSrc; $noRows['blocked_prices'] = [];
+check($blkOnly($noRows) === [], 'blocked manual price: no rows -> nothing');
+$otherEv = $blkSrc; $otherEv['blocked_prices'][0]['context_json'] = str_replace('price_override_blocked', 'something_else', $blkCtx);
+check($blkOnly($otherEv) === [], 'blocked manual price: another event with the same uuid shows nothing');
+$acc = $blkSrc; $acc['blocked_prices'][0]['context_json'] = str_replace('"receptionist"', '"accountant"', $blkCtx);
+$accEv = $blkOnly($acc);
+check(($accEv[0]['what'] ?? '') === 'Tried to set the price by hand to K900,000 — blocked (only admins and managers can change prices)', 'blocked manual price: other roles get the general reason', $accEv[0]['what'] ?? '');
+
 echo "\n$pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

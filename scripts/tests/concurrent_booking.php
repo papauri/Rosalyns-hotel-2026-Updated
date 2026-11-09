@@ -33,9 +33,16 @@ function cb_table_exists(PDO $pdo, string $t): bool {
     $st->execute([$t]);
     return (int)$st->fetchColumn() > 0;
 }
-function cb_cleanup_bookings(PDO $pdo): void {
+/** Delete CONCTEST bookings and every row linked to them (all of them, or only the given guest names). */
+function cb_cleanup_bookings(PDO $pdo, array $names = []): void {
     global $dependents;
-    $ids = $pdo->query("SELECT id FROM bookings WHERE guest_name LIKE 'CONCTEST%'")->fetchAll(PDO::FETCH_COLUMN);
+    if ($names) {
+        $st = $pdo->prepare("SELECT id FROM bookings WHERE guest_name IN (" . implode(',', array_fill(0, count($names), '?')) . ")");
+        $st->execute(array_values($names));
+        $ids = $st->fetchAll(PDO::FETCH_COLUMN);
+    } else {
+        $ids = $pdo->query("SELECT id FROM bookings WHERE guest_name LIKE 'CONCTEST%'")->fetchAll(PDO::FETCH_COLUMN);
+    }
     if ($ids) {
         $in = implode(',', array_map('intval', $ids));
         foreach ($dependents as $t) {
@@ -142,7 +149,7 @@ function cb_rounds(PDO $pdo, string $run, string $tag, string $ci, string $co, a
                 (SELECT id FROM bookings WHERE guest_name LIKE " . $pdo->quote("CONCTEST $run $tag$round%") . " AND status IN ('pending','tentative','confirmed','checked-in')) GROUP BY individual_room_id HAVING n > 1");
             ok("$tag round $round: no physical room is held by two bookings", $held->fetchAll() === []);
         }
-        $pdo->exec("DELETE FROM bookings WHERE guest_name IN (" . $pdo->quote($a) . "," . $pdo->quote($b) . ")");
+        cb_cleanup_bookings($pdo, [$a, $b]); // the bookings AND their rooms/notes/audit rows (a bare DELETE left those behind)
     }
 }
 

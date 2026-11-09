@@ -778,6 +778,47 @@ if (!function_exists('rh_hist_tol')) {
         return $out;
     }
 
+    /**
+     * Blocked manual-price attempts (create-booking.php logs them before any booking exists, with the form's
+     * client_uuid). Shown only on the booking whose client_uuid is EXACTLY the logged one: the SQL LIKE is a pre-filter,
+     * this strict compare is the match (a LIKE "_" would also match any character).
+     */
+    function rh_hist_from_blocked_prices(array $rows, array $ctx): array
+    {
+        $uuid = trim((string)($ctx['booking']['client_uuid'] ?? ''));
+        if ($uuid === '') return [];
+        $out = [];
+        foreach ($rows as $r) {
+            $c = rh_hist_json($r['context_json'] ?? null);
+            if ((string)($c['event'] ?? '') !== 'price_override_blocked' || !is_string($c['client_uuid'] ?? null) || $c['client_uuid'] !== $uuid) {
+                continue;
+            }
+            $amounts = [];
+            $types = [];
+            foreach ((array)($c['overrides'] ?? []) as $o) {
+                if (!is_array($o) || !is_numeric($o['amount'] ?? null)) continue;
+                $amounts[] = rh_hist_money((float)$o['amount'], $ctx['cur']);
+                $tn = (string)($ctx['room_types'][(int)($o['room_type_id'] ?? 0)] ?? '');
+                if ($tn !== '') $types[] = $tn;
+            }
+            if (!$amounts) continue;
+            $role = strtolower(trim((string)($c['role'] ?? '')));
+            $why = $role === 'receptionist' ? "receptionists can't change prices" : 'only admins and managers can change prices';
+            $detail = [];
+            if ($types) $detail[] = 'Room: ' . implode(', ', array_unique($types)) . '.';
+            $ci = strtotime((string)($c['check_in'] ?? ''));
+            $co = strtotime((string)($c['check_out'] ?? ''));
+            if ($ci && $co) $detail[] = 'Stay ' . date('j M Y', $ci) . ' to ' . date('j M Y', $co) . '.';
+            $detail[] = 'A price set by hand is the full amount for the whole stay. Nothing was saved by this attempt.';
+            $uid = (int)($r['user_id'] ?? 0) ?: (int)($c['user_id'] ?? 0);
+            $ev = rh_hist_ev((string)($r['created_at'] ?? ''), rh_hist_who($ctx['staff'], $uid, $r['username'] ?? ($c['by'] ?? null)),
+                'Tried to set the price by hand to ' . implode(' and ', $amounts) . ' — blocked (' . $why . ')', implode(' ', $detail),
+                'price', ['blkprice:' . (int)($r['id'] ?? 0)], 0);
+            if ($ev) $out[] = $ev;
+        }
+        return $out;
+    }
+
     // ------------------------------------------------------------------ prices
 
     function rh_hist_price_field_label(string $field): string
@@ -996,7 +1037,7 @@ if (!function_exists('rh_hist_tol')) {
      * cur, room_type_name, room_numbers, room_types, combo_names, combo_name, entity_names, snapshot, today_price,
      * price_changes (for the explanation), price_history (timeline rows), cn_numbers (id => number for notes issued elsewhere), audit, timeline, status_log, notes, payments,
      * payment_audit, credit_notes, cn_apps, cancellations, comms, auto_emails, tentative, booking_rooms,
-     * financial_audit, system_events.
+     * financial_audit, system_events, blocked_prices.
      */
     function rh_hist_build(array $src): array
     {
@@ -1060,6 +1101,7 @@ if (!function_exists('rh_hist_tol')) {
             rh_hist_from_tentative($src['tentative'] ?? [], $ctx),
             rh_hist_from_financial_audit($src['financial_audit'] ?? [], $ctx),
             rh_hist_from_system_events($src['system_events'] ?? [], $ctx),
+            rh_hist_from_blocked_prices($src['blocked_prices'] ?? [], $ctx),
             rh_hist_from_price_history($src['price_history'] ?? [], $ctx)
         );
         // Rooms last: their person comes from the creation / releasing step built above.

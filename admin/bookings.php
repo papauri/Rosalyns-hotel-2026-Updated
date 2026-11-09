@@ -54,7 +54,7 @@ function ensureBookingStatusLogTable(PDO $pdo): void
         $pdo->exec(
             "CREATE TABLE IF NOT EXISTS booking_status_log (
                 id INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
-                booking_id INT NOT NULL,
+                booking_id INT UNSIGNED NOT NULL,
                 old_status VARCHAR(32) DEFAULT NULL,
                 new_status VARCHAR(32) DEFAULT NULL,
                 changed_by INT DEFAULT NULL,
@@ -1862,7 +1862,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $orig = $alloc['payment'];
                             $leg  = (float)$alloc['amount'];
                             $spE  = rh_refund_vat_split($orig, $leg);
-                            $vr   = $spE['rate'];
+                            $vr   = rh_refund_leg_rate($pdo, $orig, (float)$spE['rate']); // true rate; VAT amount / net unchanged
                             $va   = $spE['vat'];
                             $earlyLegRef = finance_next_refund_reference($pdo, $todayStr_s);
                             $insRef->execute([

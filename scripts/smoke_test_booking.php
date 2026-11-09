@@ -18,6 +18,27 @@ $pass = 0;
 $fail = 0;
 $createdIds = [];
 
+/**
+ * Hard-delete test bookings together with every row linked to them (the bookings table has
+ * no soft-delete here: these are throwaway fixtures). Child tables first so nothing is left
+ * behind even where no ON DELETE CASCADE foreign key exists yet (migration 078 adds them).
+ */
+function smoke_delete_bookings(PDO $pdo, array $ids): int {
+    $ids = array_values(array_unique(array_map('intval', $ids)));
+    if (!$ids) {
+        return 0;
+    }
+    $ph = implode(',', array_fill(0, count($ids), '?'));
+    foreach (['booking_rooms', 'booking_notes', 'booking_audit_log', 'tentative_booking_log', 'booking_status_log',
+              'guest_communication_log', 'booking_timeline_logs', 'booking_charges', 'booking_date_adjustments',
+              'booking_packages', 'booking_financial_audit'] as $t) {
+        try { $pdo->prepare("DELETE FROM `$t` WHERE booking_id IN ($ph)")->execute($ids); } catch (Throwable $e) { /* table is optional */ }
+    }
+    $st = $pdo->prepare("DELETE FROM bookings WHERE id IN ($ph)");
+    $st->execute($ids);
+    return $st->rowCount();
+}
+
 // Ensure fixtures created during this run are removed even if a later section
 // throws before the section-17 cleanup block executes. Reads $createdIds by
 // reference so it sees IDs pushed after registration.
@@ -26,10 +47,8 @@ register_shutdown_function(function () use (&$createdIds, $pdo) {
         return;
     }
     try {
-        $placeholders = implode(',', array_fill(0, count($createdIds), '?'));
-        // markTentativeBookingExpired() writes a tentative_booking_log row: remove it with the booking.
-        try { $pdo->prepare("DELETE FROM tentative_booking_log WHERE booking_id IN ($placeholders)")->execute($createdIds); } catch (Throwable $e) { /* table is optional */ }
-        $pdo->prepare("DELETE FROM bookings WHERE id IN ($placeholders)")->execute($createdIds);
+        // markTentativeBookingExpired() writes a tentative_booking_log row: it goes with the booking.
+        smoke_delete_bookings($pdo, $createdIds);
     } catch (Throwable $e) {
         // Best-effort cleanup; do not mask the original failure.
     }
@@ -64,13 +83,14 @@ try {
 // ── 1.5 Pre-test purge — remove leftover fixtures from prior aborted runs ─────
 echo "\n=== 1.5 Pre-test purge ===\n";
 try {
-    $purged = $pdo->prepare("
-        DELETE FROM bookings
+    $leftover = $pdo->prepare("
+        SELECT id FROM bookings
         WHERE booking_reference LIKE 'SMOKETEST-%'
            OR guest_email IN (?, ?)
     ");
-    $purged->execute(['smoketest@rosalyns.test', 'tenttest@rosalyns.test']);
-    ok('Leftover SMOKETEST fixtures purged (' . $purged->rowCount() . ' row(s))');
+    $leftover->execute(['smoketest@rosalyns.test', 'tenttest@rosalyns.test']);
+    $purgedCount = smoke_delete_bookings($pdo, $leftover->fetchAll(PDO::FETCH_COLUMN));
+    ok('Leftover SMOKETEST fixtures purged (' . $purgedCount . ' row(s))');
 } catch (Throwable $e) {
     fail('Pre-test purge', $e->getMessage());
 }
@@ -353,9 +373,7 @@ assert_true(
 // ── 17. Cleanup ───────────────────────────────────────────────────────────────
 echo "\n=== 17. Cleanup ===\n";
 if (!empty($createdIds)) {
-    $placeholders = implode(',', array_fill(0, count($createdIds), '?'));
-    try { $pdo->prepare("DELETE FROM tentative_booking_log WHERE booking_id IN ($placeholders)")->execute($createdIds); } catch (Throwable $e) { /* table is optional */ }
-    $pdo->prepare("DELETE FROM bookings WHERE id IN ($placeholders)")->execute($createdIds);
+    smoke_delete_bookings($pdo, $createdIds);
     ok('Test bookings cleaned up (ids: ' . implode(', ', $createdIds) . ')');
 }
 

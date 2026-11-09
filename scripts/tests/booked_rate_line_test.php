@@ -200,5 +200,23 @@ check($c['adds_up'] && !isset($v['VAT']) && ($v['Net room price (excl. VAT and l
 // nothing stored: no card
 check(!rh_booking_money_card(['total_with_vat' => 0, 'total_amount' => 0], $rate)['ok'], 'card: empty booking shows nothing');
 
+// Group / multi-room receipt and {{booked_rate}}: rh_booked_rate_group_lines (PURE)
+$gt = rh_booked_rate_text($split(1068000, 3), ['currency' => 'K', 'room_name' => 'Superior Suite'])['guest_text'];
+$dt = rh_booked_rate_text($split(900000, 3), ['currency' => 'K', 'room_name' => 'Deluxe Room'])['guest_text'];
+check(rh_booked_rate_group_lines([]) === [] && rh_booked_rate_group_lines(['', '  ']) === [], 'group lines: nothing to show -> no line');
+check(rh_booked_rate_group_lines([$gt]) === ['Room: Superior Suite - K356,000 × 3 nights'], 'group lines: one room keeps the single "Room: ..." line',
+    json_encode(rh_booked_rate_group_lines([$gt]), JSON_UNESCAPED_UNICODE));
+$g2 = rh_booked_rate_group_lines([$gt, '', $dt]);
+check($g2 === ['Room 1: Superior Suite - K356,000 × 3 nights', 'Room 2: Deluxe Room - K300,000 × 3 nights'], 'group lines: two rooms, one line each (blank skipped)',
+    json_encode($g2, JSON_UNESCAPED_UNICODE));
+$g4 = rh_booked_rate_group_lines([$gt, $dt, $gt, $dt]);
+check(count($g4) === 4 && strpos($g4[3], 'Room 4: Deluxe Room') === 0, 'group lines: four rooms still one line each');
+$g5 = rh_booked_rate_group_lines([$gt, $dt, $gt, $dt, $gt]);
+check(count($g5) === 1 && strpos($g5[0], '5 rooms: Superior Suite - K356,000 × 3 nights; Deluxe Room') === 0 && substr_count($g5[0], '; ') === 4,
+    'group lines: more than four rooms -> one "5 rooms: ..." line', $g5[0]);
+$plain = str_replace(['×', '·'], ['x', '-'], $g2[0]);
+check($plain === 'Room 1: Superior Suite - K356,000 x 3 nights' && strpos($plain, '×') === false, 'PDF copy uses a plain x', $plain);
+check(strpos(implode(' ', $g5), "Today's price") === false, 'guest lines never carry today\'s price');
+
 echo "\n{$pass} passed, {$fail} failed\n";
 exit($fail > 0 ? 1 : 0);

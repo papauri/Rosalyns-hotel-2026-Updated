@@ -1190,7 +1190,23 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
                 . '</div>'
                 : '';
 
+            // {{booked_rate}}: "Superior Suite - K356,000 x 3 nights", the nightly price the booking was made at
+            // (one line per room for a group), never today's price. Plain "x" / "-": PDF core font.
+            $bookedRateHtml = '';
+            $brPdo = (isset($pdo) && $pdo instanceof PDO) ? $pdo : (($GLOBALS['pdo'] ?? null) instanceof PDO ? $GLOBALS['pdo'] : null);
+            if ($brPdo !== null && (int)($booking['id'] ?? 0) > 0) {
+                if (!function_exists('rh_booked_rate_group_texts')) {
+                    require_once __DIR__ . '/../includes/booked-rate.php';
+                }
+                $brTexts = rh_booked_rate_group_texts($brPdo, (int)$booking['id']);
+                $brLines = count($brTexts) > 1 ? rh_booked_rate_group_lines($brTexts) : $brTexts;
+                $bookedRateHtml = implode('<br>', array_map(static function (string $l): string {
+                    return htmlspecialchars(str_replace(['×', '·'], ['x', '-'], $l), ENT_QUOTES, 'UTF-8');
+                }, $brLines));
+            }
+
             $replacements = [
+                '{{booked_rate}}'             => $bookedRateHtml,
                 '{{invoice_number}}'          => htmlspecialchars($invoice_number),
                 '{{issued_date}}'             => $issued,
                 '{{guest_name}}'              => htmlspecialchars($booking['guest_name']),
@@ -2326,6 +2342,7 @@ function buildConferenceInvoiceHTML(array $enquiry, string $invoice_number, stri
             'total_amount' => htmlspecialchars($currency_symbol . ' ' . number_format($totalWithVat, 2), ENT_QUOTES, 'UTF-8'),
             'amount_paid' => htmlspecialchars($currency_symbol . ' ' . number_format($amountPaid, 2), ENT_QUOTES, 'UTF-8'),
             'balance_due' => htmlspecialchars($currency_symbol . ' ' . number_format($balanceDue, 2), ENT_QUOTES, 'UTF-8'),
+            'booked_rate' => '', // room documents only
         ], $customTemplate);
     }
 
