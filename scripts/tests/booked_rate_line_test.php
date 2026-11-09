@@ -129,5 +129,76 @@ check(!$l['ok'] && $l['text'] === '', 'no figures: nothing to show');
 $l = rh_booked_rate_change_line(['new_gross' => 526000, 'new_child_supplement' => 17000], 150000, 1, ['currency' => 'K', 'child' => 20000]);
 check(abs($l['child'] - 20000) < 0.001 && abs($l['per_night'] - 356000) < 0.001, 'an all-in children figure passed in opts wins over the stored one');
 
+// 10. "How the total is made up" card (rh_booking_money_card): stored figures only. RBH2026796618 as stored:
+// total_amount = net 901,265.82 + levy 9,012.66; VAT 157,721.52 at 17.5%; levy 1%; total 1,068,000.
+$cardRow = ['total_with_vat' => 1068000, 'total_amount' => 910278.48, 'vat_amount' => 157721.52, 'vat_rate' => 17.5,
+    'tourism_levy_amount' => 9012.66, 'tourism_levy_percent' => 1, 'number_of_nights' => 3, 'status' => 'confirmed',
+    'amount_paid' => 0, 'amount_due' => 1068000, 'credit_balance' => 0, 'folio_charges_total' => 0];
+$cardVals = static function (array $c): array {
+    $o = [];
+    foreach ($c['lines'] as $ln) {
+        $o[$ln['label']] = $ln['value'];
+    }
+    return $o;
+};
+$rate = rh_booked_rate_text($split(1068000, 3), ['currency' => 'MWK']);
+$c = rh_booking_money_card($cardRow, $rate, ['currency' => 'MWK']);
+$v = $cardVals($c);
+check($c['ok'] && $c['adds_up'], 'card: RBH2026796618 adds up');
+check(($v['Room'] ?? '') === 'MWK 356,000 × 3 nights = MWK 1,068,000 (all-in)', 'card: room line', $v['Room'] ?? '');
+check(($v['Net room price (excl. VAT and levy)'] ?? '') === 'MWK 901,265.82', 'card: net = total_amount - levy', $v['Net room price (excl. VAT and levy)'] ?? '');
+check(($v['VAT 17.5%'] ?? '') === 'MWK 157,721.52' && ($v['Tourism levy 1%'] ?? '') === 'MWK 9,012.66', 'card: VAT and levy with their rates');
+check(($v['= Total'] ?? '') === 'MWK 1,068,000' && ($v['Balance due'] ?? '') === 'MWK 1,068,000' && !isset($v['Paid so far']), 'card: total, balance due, no paid line when nothing paid');
+
+// children, package, rate plan, folio extras, part paid
+$row2 = ['total_with_vat' => 1278000, 'total_amount' => 1089238.64, 'vat_amount' => 188761.36, 'vat_rate' => 17.5,
+    'tourism_levy_amount' => 0, 'number_of_nights' => 3, 'status' => 'checked-in', 'rate_plan_label' => 'Early bird',
+    'rate_plan_discount' => 20000, 'amount_paid' => 500000, 'amount_due' => 853000, 'credit_balance' => 0, 'folio_charges_total' => 75000];
+$c = rh_booking_money_card($row2, rh_booked_rate_text($split(1128000, 3, 150000), ['currency' => 'K', 'child' => 60000]), ['currency' => 'K']);
+$v = $cardVals($c);
+check($c['adds_up'] && ($v['Child charge'] ?? '') === 'K60,000' && ($v['Package'] ?? '') === 'K150,000', 'card: child charge and package lines');
+check(($v['Early bird (already taken off the room rate)'] ?? '') === '-K60,000', 'card: rate plan named, discount x nights, not added');
+check(isset($v['Net price (excl. VAT and levy)']) && !isset($v['Tourism levy']), 'card: net label covers extras; no levy line when none');
+check(($v['Folio extras (meals, services and other charges)'] ?? '') === 'K75,000' && ($v['Paid so far'] ?? '') === 'K500,000' && ($v['Balance due'] ?? '') === 'K853,000', 'card: extras, paid, stored balance');
+
+// old row that does not add up: stored figures, no "=" line
+$c = rh_booking_money_card(['total_with_vat' => 1068000, 'total_amount' => 900000, 'vat_amount' => 150000, 'tourism_levy_amount' => 0,
+    'number_of_nights' => 3, 'status' => 'confirmed'], $rate, ['currency' => 'K']);
+check($c['ok'] && !$c['adds_up'] && !isset($cardVals($c)['= Total']) && strpos($c['note'], 'do not add up') !== false, 'card: old row shows no wrong sum');
+
+// cancelled: said so, credit shown, never a balance due
+$c = rh_booking_money_card(['status' => 'cancelled', 'credit_balance' => 200000, 'amount_due' => 868000] + $cardRow, $rate, ['currency' => 'K']);
+$v = $cardVals($c);
+check($c['closed'] && !isset($v['Balance due']) && ($v['Credit owed to guest'] ?? '') === 'K200,000' && strpos($c['note'], 'cancelled') !== false, 'card: cancelled says so, no balance due');
+$c = rh_booking_money_card(['status' => 'no-show'] + $cardRow, $rate, ['currency' => 'K']);
+check(!isset($cardVals($c)['Balance due']) && strpos($c['note'], 'no-show') !== false, 'card: no-show, no balance due');
+
+// 11. closed bookings still show what is owed (QA 2026-11-09): kept first night + unvoided extras are chased by
+// Payments outstanding and receivables, so the card must not say "no balance is due" then.
+$c = rh_booking_money_card(['status' => 'cancelled', 'cancellation_retained_amount' => 356000, 'folio_charges_total' => 25000,
+    'amount_paid' => 0, 'amount_due' => 381000, 'credit_balance' => 0] + $cardRow, $rate, ['currency' => 'K']);
+$v = $cardVals($c);
+check(($v['Still owed (cancelled booking)'] ?? '') === 'K381,000' && ($v['Kept on cancellation (still billed)'] ?? '') === 'K356,000'
+    && !isset($v['Balance due']) && strpos($c['note'], 'no balance is due') === false && strpos($c['note'], 'K381,000 is still owed') !== false,
+    'closed: cancelled with something owed shows it', $c['note']);
+$c = rh_booking_money_card(['status' => 'cancelled', 'cancellation_retained_amount' => 0, 'amount_due' => 0.004, 'credit_balance' => 0] + $cardRow, $rate, ['currency' => 'K']);
+$v = $cardVals($c);
+check(!isset($v['Still owed (cancelled booking)']) && !isset($v['Kept on cancellation (still billed)']) && strpos($c['note'], 'no balance is due') !== false,
+    'closed: cancelled with nothing owed (within tolerance) says no balance is due', $c['note']);
+$c = rh_booking_money_card(['status' => 'expired', 'amount_due' => 0, 'credit_balance' => 0] + $cardRow, $rate, ['currency' => 'K']);
+check($c['closed'] && strpos($c['note'], 'expired') !== false && strpos($c['note'], 'no balance is due') !== false && !isset($cardVals($c)['Balance due']), 'closed: expired, nothing owed');
+$c = rh_booking_money_card(['status' => 'expired', 'amount_due' => 50000, 'credit_balance' => 0] + $cardRow, $rate, ['currency' => 'K']);
+check(($cardVals($c)['Still owed (expired booking)'] ?? '') === 'K50,000', 'closed: expired with something owed');
+// VAT switched off: no VAT line, net + levy = total still adds up
+$c = rh_booking_money_card(['total_with_vat' => 1068000, 'total_amount' => 1068000, 'vat_amount' => 0, 'vat_rate' => 0,
+    'tourism_levy_amount' => 10574.26, 'tourism_levy_percent' => 1, 'number_of_nights' => 3, 'status' => 'confirmed',
+    'amount_due' => 1068000], $rate, ['currency' => 'K']);
+$v = $cardVals($c);
+check($c['adds_up'] && !isset($v['VAT']) && ($v['Net room price (excl. VAT and levy)'] ?? '') === 'K1,057,425.74' && ($v['= Total'] ?? '') === 'K1,068,000',
+    'VAT off: no VAT line, net + levy = total');
+
+// nothing stored: no card
+check(!rh_booking_money_card(['total_with_vat' => 0, 'total_amount' => 0], $rate)['ok'], 'card: empty booking shows nothing');
+
 echo "\n{$pass} passed, {$fail} failed\n";
 exit($fail > 0 ? 1 : 0);

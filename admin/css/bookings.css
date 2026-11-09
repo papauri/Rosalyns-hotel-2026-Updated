@@ -553,6 +553,69 @@ body .modal-overlay.active {
     border-radius: 0.74rem;
 }
 
+/* "How the total is made up": its own grid row so its height does not stretch the cards above (they share
+   grid-auto-rows: 1fr). Spans two columns; at phone width (2 columns) that is the full width. */
+#viewBookingModal .bk-money-grid {
+    margin-top: 0.62rem;
+    grid-auto-rows: auto;
+}
+
+#viewBookingModal .bk-money-grid[hidden] {
+    display: none !important;
+}
+
+#viewBookingModal .bk-money-card {
+    grid-column: span 2;
+    height: auto;
+}
+
+#viewBookingModal .bk-money-help {
+    display: block;
+    margin: 0 0 0.36rem;
+    font-size: 0.72rem;
+    line-height: 1.35;
+    color: var(--color-text-secondary, #5E554D);
+}
+
+#viewBookingModal .bk-money-help[hidden] {
+    display: none;
+}
+
+#viewBookingModal .bk-money-line {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    gap: 0.1rem 0.6rem;
+    padding: 0.16rem 0;
+    font-size: clamp(0.76rem, 0.74rem + 0.1vw, 0.85rem);
+    line-height: 1.35;
+    color: var(--color-text-primary, #2A2723);
+}
+
+#viewBookingModal .bk-money-line strong {
+    font-weight: 600;
+    text-align: right;
+    margin-left: auto;
+}
+
+#viewBookingModal .bk-money-line--note {
+    color: var(--color-text-secondary, #5E554D);
+}
+
+#viewBookingModal .bk-money-line--part + .bk-money-line--tax,
+#viewBookingModal .bk-money-line--note + .bk-money-line--tax,
+#viewBookingModal .bk-money-line--total,
+#viewBookingModal .bk-money-line--tax + .bk-money-line--money,
+#viewBookingModal .bk-money-line--total + .bk-money-line--money {
+    border-top: 1px solid var(--admin-surface-border, #d7dde6);
+    margin-top: 0.2rem;
+    padding-top: 0.32rem;
+}
+
+#viewBookingModal .bk-money-line--total strong {
+    font-weight: 700;
+}
+
 @media (min-width: 48rem) {
     #viewBookingModal .details-grid {
         grid-template-columns: repeat(3, minmax(0, 1fr)) !important;

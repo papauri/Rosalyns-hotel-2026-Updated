@@ -2353,8 +2353,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $gbdRate = rh_booked_rate_line($booking, rh_room_today_price_lookup($pdo, $booking)['price'], ['currency' => $currency_symbol]);
             $booking['booked_rate_text'] = $gbdRate['ok'] ? $gbdRate['text'] : '';
             $booking['booked_rate_today'] = $gbdRate['ok'] ? $gbdRate['today_text'] : '';
-            $booking['status_label'] = ucfirst($booking['status']);
-            $booking['payment_status_label'] = ucfirst($booking['actual_payment_status'] ?? $booking['payment_status']);
+            // "How the total is made up": the stored figures only (includes/booked-rate-change.php).
+            $booking['money_card'] = rh_booking_money_card($booking, $gbdRate, ['currency' => $currency_symbol]);
+            // Plain words: "partially_refunded" -> "Partially refunded", "checked-in" -> "Checked in".
+            $booking['status_label'] = rh_hist_words((string)$booking['status']);
+            $booking['payment_status_label'] = rh_hist_words((string)($booking['actual_payment_status'] ?? $booking['payment_status']));
 
             header('Content-Type: application/json');
             echo json_encode([
@@ -3854,7 +3857,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                             $can_delete = $_perm_delete && !$bk_inhouse && $bk_paid <= BALANCE_TOLERANCE && $bk_folio <= BALANCE_TOLERANCE;
                                             ?>
                                             <div class="actions-row">
-                                                <button type="button" class="quick-action view" title="View booking summary" aria-label="View booking summary" data-booking-id="<?php echo $bk_id; ?>" data-booking-ref="<?php echo $bk_ref; ?>" data-guest-name="<?php echo htmlspecialchars((string)($booking['guest_name'] ?? ''), ENT_QUOTES); ?>" data-guest-email="<?php echo htmlspecialchars((string)($booking['guest_email'] ?? ''), ENT_QUOTES); ?>" data-guest-phone="<?php echo htmlspecialchars((string)($booking['guest_phone'] ?? ''), ENT_QUOTES); ?>" data-room-name="<?php echo htmlspecialchars((string)($booking['room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-name="<?php echo htmlspecialchars((string)($booking['individual_room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-number="<?php echo htmlspecialchars((string)($booking['individual_room_number'] ?? ''), ENT_QUOTES); ?>" data-check-in-date="<?php echo htmlspecialchars((string)($booking['check_in_date'] ?? ''), ENT_QUOTES); ?>" data-check-out-date="<?php echo htmlspecialchars((string)($booking['check_out_date'] ?? ''), ENT_QUOTES); ?>" data-number-of-nights="<?php echo htmlspecialchars((string)($booking['number_of_nights'] ?? ''), ENT_QUOTES); ?>" data-number-of-guests="<?php echo htmlspecialchars((string)($booking['number_of_guests'] ?? ''), ENT_QUOTES); ?>" data-total-display="<?php echo htmlspecialchars($currency_symbol . ' ' . number_format(rh_booking_full_total($booking), 2), ENT_QUOTES); ?>" data-booked-rate="<?php echo htmlspecialchars(!empty($bk_rate['ok']) ? $bk_rate['text'] : '', ENT_QUOTES); ?>" data-status-label="<?php echo htmlspecialchars($bk_deleted ? 'Deleted' : ucwords(str_replace('-', ' ', $bk_status)), ENT_QUOTES); ?>" data-payment-status-label="<?php echo htmlspecialchars(ucwords(str_replace('-', ' ', (string)$bk_payment_st)), ENT_QUOTES); ?>" data-created-at-label="<?php echo htmlspecialchars(!empty($booking['created_at']) ? date('M j, Y H:i', strtotime((string)$booking['created_at'])) : '', ENT_QUOTES); ?>" data-special-requests="<?php echo htmlspecialchars((string)($booking['special_requests'] ?? ''), ENT_QUOTES); ?>" onclick="openViewBookingModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, this, typeof event !== 'undefined' ? event : null)">
+                                                <button type="button" class="quick-action view" title="View booking summary" aria-label="View booking summary" data-booking-id="<?php echo $bk_id; ?>" data-booking-ref="<?php echo $bk_ref; ?>" data-guest-name="<?php echo htmlspecialchars((string)($booking['guest_name'] ?? ''), ENT_QUOTES); ?>" data-guest-email="<?php echo htmlspecialchars((string)($booking['guest_email'] ?? ''), ENT_QUOTES); ?>" data-guest-phone="<?php echo htmlspecialchars((string)($booking['guest_phone'] ?? ''), ENT_QUOTES); ?>" data-room-name="<?php echo htmlspecialchars((string)($booking['room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-name="<?php echo htmlspecialchars((string)($booking['individual_room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-number="<?php echo htmlspecialchars((string)($booking['individual_room_number'] ?? ''), ENT_QUOTES); ?>" data-check-in-date="<?php echo htmlspecialchars((string)($booking['check_in_date'] ?? ''), ENT_QUOTES); ?>" data-check-out-date="<?php echo htmlspecialchars((string)($booking['check_out_date'] ?? ''), ENT_QUOTES); ?>" data-number-of-nights="<?php echo htmlspecialchars((string)($booking['number_of_nights'] ?? ''), ENT_QUOTES); ?>" data-number-of-guests="<?php echo htmlspecialchars((string)($booking['number_of_guests'] ?? ''), ENT_QUOTES); ?>" data-total-display="<?php echo htmlspecialchars($currency_symbol . ' ' . number_format(rh_booking_full_total($booking), 2), ENT_QUOTES); ?>" data-booked-rate="<?php echo htmlspecialchars(!empty($bk_rate['ok']) ? $bk_rate['text'] : '', ENT_QUOTES); ?>" data-status-label="<?php echo htmlspecialchars($bk_deleted ? 'Deleted' : rh_hist_words($bk_status), ENT_QUOTES); ?>" data-payment-status-label="<?php echo htmlspecialchars(rh_hist_words((string)$bk_payment_st), ENT_QUOTES); ?>" data-created-at-label="<?php echo htmlspecialchars(!empty($booking['created_at']) ? date('M j, Y H:i', strtotime((string)$booking['created_at'])) : '', ENT_QUOTES); ?>" data-special-requests="<?php echo htmlspecialchars((string)($booking['special_requests'] ?? ''), ENT_QUOTES); ?>" onclick="openViewBookingModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, this, typeof event !== 'undefined' ? event : null)">
                                                     <i class="fas fa-circle-info"></i>
                                                     <span class="label">View details</span>
                                                 </button>
@@ -6309,6 +6312,14 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         <div id="view_created" class="detail-value"></div>
                     </div>
                 </div>
+                <div id="view_money_wrap" class="details-grid bk-money-grid" hidden>
+                    <div class="detail-item bk-money-card">
+                        <label>How the total is made up</label>
+                        <small id="view_money_help" class="bk-money-help"></small>
+                        <div id="view_money_lines" class="bk-money-lines"></div>
+                        <small id="view_money_note" class="bk-money-help" hidden></small>
+                    </div>
+                </div>
                 <div class="detail-item" style="grid-column: span 2;">
                     <label>Special Requests:</label>
                     <div id="view_special_requests" class="detail-value" style="background: #f5f5f5; padding: 8px; border-radius: 6px;"></div>
@@ -6494,6 +6505,37 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             };
         }
 
+        // "How the total is made up" card: server-built lines (stored figures), drawn with textContent only.
+        function renderViewMoneyCard(card) {
+            const wrap = document.getElementById('view_money_wrap');
+            const list = document.getElementById('view_money_lines');
+            if (!wrap || !list) return;
+            list.textContent = '';
+            if (!card || !card.ok || !Array.isArray(card.lines) || !card.lines.length) {
+                wrap.hidden = true;
+                return;
+            }
+            const help = document.getElementById('view_money_help');
+            if (help) help.textContent = String(card.help || '');
+            card.lines.forEach(function(ln) {
+                const row = document.createElement('div');
+                row.className = 'bk-money-line bk-money-line--' + String(ln.kind || 'part').replace(/[^a-z]/g, '');
+                const label = document.createElement('span');
+                label.textContent = String(ln.label || '');
+                const value = document.createElement('strong');
+                value.textContent = String(ln.value || '');
+                row.appendChild(label);
+                row.appendChild(value);
+                list.appendChild(row);
+            });
+            const note = document.getElementById('view_money_note');
+            if (note) {
+                note.textContent = String(card.note || '');
+                note.hidden = !card.note;
+            }
+            wrap.hidden = false;
+        }
+
         function populateViewBookingModalFields(booking) {
             const setText = function(id, value, emptyValue = '—') {
                 const element = document.getElementById(id);
@@ -6523,6 +6565,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 if (infoEl) infoEl.innerHTML = (window.rhTotalInfoHtml && booking.total_breakdown) ? window.rhTotalInfoHtml(booking.total_breakdown) : '';
             })();
             setText('view_booked_rate', booking.booked_rate_text, '—');
+            renderViewMoneyCard(booking.money_card);
             (function () {
                 var todayEl = document.getElementById('view_booked_rate_today');
                 if (!todayEl) return;
