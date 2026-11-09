@@ -11,6 +11,10 @@
  *   hidden copies (BCC), never a visible CC the guest can read.
  * - The staff copy email (email_admin_email) gets one hidden copy of every email while the
  *   "hidden copy" switch is on, unless it already receives that message.
+ * - Backups (owner 2026-11-09, up to 5 each, comma lists): email_reply_to_backup = extra Reply-To
+ *   addresses after the main one (only when there is a main one); email_admin_backup = extra hidden
+ *   copies under exactly the same conditions as the staff copy. Neither is used anywhere else (not in
+ *   the alert fallback chains, not as a printed contact email).
  *
  * The settings screen (admin/booking-settings.php) calls the same recipient resolvers as the
  * sending code, so "Currently goes to" always matches what is really sent.
@@ -36,6 +40,24 @@ if (!function_exists('rh_ei_email_setting')) {
     }
 }
 
+if (!function_exists('rh_ei_email_list')) {
+    /** A saved comma list of addresses: valid ones only, each once (case-insensitive), at most $max. */
+    function rh_ei_email_list(string $raw, int $max = 5): array
+    {
+        $list = [];
+        foreach (preg_split('/[,;\s]+/', $raw) ?: [] as $part) {
+            $part = rh_ei_valid_email($part);
+            if ($part !== '' && !isset($list[strtolower($part)])) {
+                $list[strtolower($part)] = $part;
+            }
+            if (count($list) >= $max) {
+                break;
+            }
+        }
+        return array_values($list);
+    }
+}
+
 if (!function_exists('rh_guest_contact_email')) {
     /**
      * The address guests may write to: Reply-To header and the contact email printed on emails
@@ -58,10 +80,55 @@ if (!function_exists('rh_guest_contact_email')) {
     }
 }
 
+if (!function_exists('rh_mail_reply_to_addresses')) {
+    /**
+     * Every Reply-To address, in order: rh_guest_contact_email(), then the saved backup reply-to
+     * emails (email_reply_to_backup) that differ from it. [] when there is no main address.
+     */
+    function rh_mail_reply_to_addresses(): array
+    {
+        $main = rh_guest_contact_email();
+        if ($main === '') {
+            return [];
+        }
+        $out = [$main];
+        foreach (rh_ei_email_list(rh_ei_email_setting('email_reply_to_backup')) as $backup) {
+            if (strcasecmp($backup, $main) !== 0) {
+                $out[] = $backup;
+            }
+        }
+        return $out;
+    }
+}
+
+if (!function_exists('rh_mail_staff_backup_addresses')) {
+    /** Saved backup staff copy emails (email_admin_backup), without the staff copy email itself. */
+    function rh_mail_staff_backup_addresses(): array
+    {
+        $staff = rh_ei_valid_email(rh_ei_email_setting('email_admin_email'));
+        return array_values(array_filter(
+            rh_ei_email_list(rh_ei_email_setting('email_admin_backup')),
+            static function (string $a) use ($staff): bool { return $staff === '' || strcasecmp($a, $staff) !== 0; }
+        ));
+    }
+}
+
+if (!function_exists('rh_mail_staff_copy_addresses')) {
+    /**
+     * Who gets a hidden copy of every email while the switch (email_bcc_admin) is on: the staff copy
+     * email, then the backups. The switch itself is not checked here; rh_mail_add_staff_bcc() does.
+     */
+    function rh_mail_staff_copy_addresses(): array
+    {
+        $staff = rh_ei_valid_email(rh_ei_email_setting('email_admin_email'));
+        return array_merge($staff !== '' ? [$staff] : [], rh_mail_staff_backup_addresses());
+    }
+}
+
 if (!function_exists('rh_mail_apply_identity')) {
     /**
      * From = the SMTP mailbox with the hotel's sender name, envelope sender = the mailbox,
-     * Reply-To = rh_guest_contact_email() when there is one.
+     * Reply-To = rh_mail_reply_to_addresses(): rh_guest_contact_email() when there is one, then its backups.
      */
     function rh_mail_apply_identity(\PHPMailer\PHPMailer\PHPMailer $mail, string $smtpUser, string $fromName = ''): void
     {
@@ -77,8 +144,7 @@ if (!function_exists('rh_mail_apply_identity')) {
         if (filter_var($smtpUser, FILTER_VALIDATE_EMAIL)) {
             $mail->Sender = $smtpUser;
         }
-        $replyTo = rh_guest_contact_email();
-        if ($replyTo !== '') {
+        foreach (rh_mail_reply_to_addresses() as $replyTo) {
             $mail->addReplyTo($replyTo, $fromName);
         }
     }
@@ -113,22 +179,36 @@ if (!function_exists('rh_mail_add_staff_bcc')) {
      * One hidden copy to the staff copy email (email_admin_email) when the switch is on, unless
      * that address already receives this message (it is the To, already on the message, or the
      * caller set $GLOBALS['rh_email_staff_bcc_off'] because it receives a separate copy).
+     * Under the same two conditions (switch on, not switched off by the caller) each backup staff copy
+     * email also gets one hidden copy unless it is already on the message, even when the staff copy
+     * email itself was skipped. Addresses in $GLOBALS['rh_email_staff_bcc_skip'] (set by a caller that
+     * sends them their own copy) are treated as already on the message. Returns true only when the
+     * staff copy email itself was added.
      */
     function rh_mail_add_staff_bcc(\PHPMailer\PHPMailer\PHPMailer $mail, string $to, bool $enabled): bool
     {
         if (!$enabled || !empty($GLOBALS['rh_email_staff_bcc_off'])) {
             return false;
         }
-        $staff = rh_ei_valid_email(rh_ei_email_setting('email_admin_email'));
-        if ($staff === '' || strcasecmp($staff, trim($to)) === 0) {
-            return false;
-        }
+        $onMessage = [strtolower(trim($to)) => true];
         foreach (array_merge($mail->getToAddresses(), $mail->getCcAddresses(), $mail->getBccAddresses()) as $existing) {
-            if (strcasecmp((string)($existing[0] ?? ''), $staff) === 0) {
-                return false;
-            }
+            $onMessage[strtolower(trim((string)($existing[0] ?? '')))] = true;
         }
-        return (bool)$mail->addBCC($staff);
+        foreach ((array)($GLOBALS['rh_email_staff_bcc_skip'] ?? []) as $skip) {
+            $onMessage[strtolower(trim((string)$skip))] = true;
+        }
+        $added = false;
+        $staff = rh_ei_valid_email(rh_ei_email_setting('email_admin_email'));
+        if ($staff !== '' && !isset($onMessage[strtolower($staff)])) {
+            $added = (bool)$mail->addBCC($staff);
+        }
+        $backups = array_filter(rh_mail_staff_backup_addresses(), static function (string $a) use ($onMessage): bool {
+            return !isset($onMessage[strtolower($a)]);
+        });
+        if ($backups) {
+            rh_mail_add_hidden_copies($mail, $backups, $to);
+        }
+        return $added;
     }
 }
 
@@ -206,5 +286,45 @@ if (!function_exists('rh_staff_copy_recipient')) {
             [rh_ei_email_setting('email_admin_email'), 'Staff copy email (Email Settings)'],
             [rh_ei_email_setting('smtp_username'), 'Sending mailbox (Email Settings)'],
         ]);
+    }
+}
+
+if (!function_exists('rh_mail_settings_summary')) {
+    /**
+     * Plain-text summary of the SAVED email settings, as [label, value] pairs, for the Email Settings
+     * test button (screen and test email share it). Never includes the SMTP password; the SMTP
+     * username appears only as the sending mailbox (it is the From address anyway).
+     * $testTo: the test recipient, so a hidden copy that would be skipped for it is explained.
+     */
+    function rh_mail_settings_summary(string $testTo = ''): array
+    {
+        $name = rh_ei_email_setting('email_from_name');
+        if ($name === '' && function_exists('getSetting')) {
+            $name = trim((string)getSetting('site_name', ''));
+        }
+        $mailbox = rh_ei_email_setting('smtp_username');
+        $replyTo = rh_mail_reply_to_addresses();
+        $switchOn = (bool)rh_ei_email_setting('email_bcc_admin'); // same reading as sendEmail()
+        $copies = rh_mail_staff_copy_addresses();
+        if (!$switchOn) {
+            $copiesText = 'none: the hidden-copy switch is off';
+        } elseif (!$copies) {
+            $copiesText = 'none: no staff copy email is set';
+        } else {
+            $copiesText = implode(', ', $copies);
+            foreach ($copies as $copy) {
+                if ($testTo !== '' && strcasecmp($copy, trim($testTo)) === 0) {
+                    $copiesText .= ' (' . $copy . ' is the test address, so it gets this email itself instead of a copy)';
+                }
+            }
+        }
+        $port = rh_ei_email_setting('smtp_port');
+        return [
+            ['Sender name', $name !== '' ? $name : 'not set'],
+            ['Sending mailbox (From)', $mailbox !== '' ? $mailbox : 'not set'],
+            ['Replies go to', $replyTo ? implode(', ', $replyTo) : 'no reply-to address (set one, or the main contact email in Hotel Details)'],
+            ['Hidden copies', $copiesText],
+            ['Mail server', (rh_ei_email_setting('smtp_host') !== '' ? rh_ei_email_setting('smtp_host') : 'not set') . ($port !== '' ? ', port ' . $port : '')],
+        ];
     }
 }

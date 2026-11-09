@@ -68,6 +68,24 @@ if (isset($GLOBALS['__h_cfg'])) {
                 VALUES (?, 'goodwill', 'EI GUEST', ?, 10, 5, 5, 'goodwill', 'partially_applied', ?, NOW(), DATE_ADD(CURDATE(), INTERVAL 1 YEAR))")
                 ->execute(['CNEI' . strtoupper(bin2hex(random_bytes(3))), $g, $adminId]);
             $out['results']['credit_note'] = sendCreditNoteEmail($pdo, (int)$pdo->lastInsertId());
+        } elseif ($sc === 'backup_send') {
+            // One plain sendEmail() to params.to (default the guest) through the real identity + staff-copy path.
+            $out['results']['send'] = sendEmail((string)($prm['to'] ?? $g), 'EI Guest', 'EI backup', '<p>Backup</p>');
+            $out['reply_to'] = rh_mail_reply_to_addresses();
+            $out['copies'] = rh_mail_staff_copy_addresses();
+        } elseif ($sc === 'direct') {
+            // The PHPMailer object itself, nothing sent: which Reply-To / BCC entries the helpers add.
+            $m = new \PHPMailer\PHPMailer\PHPMailer(true);
+            rh_mail_apply_identity($m, 'fake@example.invalid', 'EI Test Hotel');
+            $m->addAddress((string)($prm['to'] ?? $g));
+            foreach ((array)($prm['cc'] ?? []) as $cc) { $m->addCC((string)$cc); }
+            if (!empty($prm['bcc_off'])) { $GLOBALS['rh_email_staff_bcc_off'] = true; }
+            $out['main_added'] = rh_mail_add_staff_bcc($m, (string)($prm['to'] ?? $g), !empty($prm['enabled']));
+            unset($GLOBALS['rh_email_staff_bcc_off']);
+            $out['reply_to'] = array_map(fn($a) => strtolower((string)$a[0]), array_values($m->getReplyToAddresses()));
+            $out['bcc'] = array_map(fn($a) => strtolower((string)$a[0]), $m->getBccAddresses());
+        } elseif ($sc === 'summary') {
+            $out['summary'] = rh_mail_settings_summary((string)($prm['to'] ?? ''));
         } elseif ($sc === 'resolvers') {
             $r = [];
             $ei_apply(['email_admin_email' => 'staff@hotel.test'], ['booking_notification_email' => 'res@hotel.test', 'admin_notification_email' => 'hd@hotel.test',
@@ -164,7 +182,7 @@ function ei_show(array $m): string { return json_encode(['to' => $m['to'] ?? nul
 
 $MAILBOX = 'fake@example.invalid'; // what page_harness points smtp_username at
 $base = ['email_from_email' => 'contact@hotel.test', 'email_from_name' => 'EI Test Hotel', 'email_admin_email' => 'staff@hotel.test', 'email_bcc_admin' => '1',
-         'invoice_recipients' => 'accounts@hotel.test'];
+         'invoice_recipients' => 'accounts@hotel.test', 'email_reply_to_backup' => '', 'email_admin_backup' => ''];
 
 echo "== guest emails: From, Reply-To, hidden copies ==\n";
 $r = ei_run('guest', ['email' => $base, 'site' => ['email_main' => 'main@hotel.test', 'phone_main' => '']]);
@@ -268,6 +286,120 @@ ok('blank/invalid box: Hotel Details staff notification / main email', $em((arra
 ok('blank box says where it falls back to', strpos((string)($R['level2'][0]['source'] ?? ''), 'Hotel Details') !== false, json_encode($R['level2'][0] ?? null));
 ok('last fallback: staff copy email', $em((array)($R['level3'] ?? [])) === ['staff@hotel.test', 'staff@hotel.test', 'staff@hotel.test'], json_encode($R['level3'] ?? null));
 ok('nothing set: no alert recipient; staff copies fall back to the mailbox', $em((array)($R['none'] ?? [])) === ['', $MAILBOX], json_encode($R['none'] ?? null));
+
+echo "== backup reply-to and backup staff copy emails (owner 2026-11-09) ==\n";
+$bk = ['email_reply_to_backup' => 'rb1@hotel.test, CONTACT@hotel.test, rb2@hotel.test', 'email_admin_backup' => 'sb1@hotel.test, STAFF@hotel.test, sb2@hotel.test'] + $base;
+$site = ['site' => ['email_main' => 'main@hotel.test']];
+$r = ei_run('backup_send', ['email' => $bk] + $site);
+$b = ei_by_subject($r['emails'], 'EI backup')[0] ?? [];
+$rt = strtolower((string)($b['reply_to'] ?? ''));
+ok('backups: sent and rolled back', ei_clean($r) && !empty($r['json']['results']['send']['success']), json_encode($r['json'] ?? $r['raw'] ?? ''));
+ok('backups: Reply-To = main then rb1, rb2; main not repeated', strpos($rt, 'contact@hotel.test') !== false && strpos($rt, 'rb1@hotel.test') !== false && strpos($rt, 'rb2@hotel.test') !== false
+    && substr_count($rt, 'contact@hotel.test') === 1 && strpos($rt, 'contact@') < strpos($rt, 'rb1@'), ei_show($b));
+ok('backups: helper lists the same Reply-To addresses', array_map('strtolower', (array)($r['json']['reply_to'] ?? [])) === ['contact@hotel.test', 'rb1@hotel.test', 'rb2@hotel.test'], json_encode($r['json']['reply_to'] ?? null));
+ok('backups: staff copy + sb1 + sb2 each get exactly one hidden copy', ei_count_rcpt([$b], 'staff@hotel.test') === 1 && ei_count_rcpt([$b], 'sb1@hotel.test') === 1 && ei_count_rcpt([$b], 'sb2@hotel.test') === 1, ei_show($b));
+ok('backups: hidden copies appear in no header', stripos((string)($b['headers'] ?? ''), 'sb1@hotel.test') === false && stripos((string)($b['headers'] ?? ''), 'sb2@hotel.test') === false && ($b['cc'] ?? 'x') === '', ei_show($b));
+ok('backups: helper lists staff copy then backups, staff not repeated', array_map('strtolower', (array)($r['json']['copies'] ?? [])) === ['staff@hotel.test', 'sb1@hotel.test', 'sb2@hotel.test'], json_encode($r['json']['copies'] ?? null));
+
+$r = ei_run('backup_send', ['email' => $bk, 'to' => 'sb1@hotel.test'] + $site);
+$b = ei_by_subject($r['emails'], 'EI backup')[0] ?? [];
+ok('backup that is the To gets the email once, others still copied', ei_clean($r) && ei_count_rcpt([$b], 'sb1@hotel.test') === 1 && ei_count_rcpt([$b], 'sb2@hotel.test') === 1 && ei_count_rcpt([$b], 'staff@hotel.test') === 1, ei_show($b));
+$r = ei_run('backup_send', ['email' => $bk, 'to' => 'staff@hotel.test'] + $site);
+$b = ei_by_subject($r['emails'], 'EI backup')[0] ?? [];
+ok('staff copy email is the To: no extra staff copy, backups still copied', ei_clean($r) && ei_count_rcpt([$b], 'staff@hotel.test') === 1 && ei_count_rcpt([$b], 'sb1@hotel.test') === 1 && ei_count_rcpt([$b], 'sb2@hotel.test') === 1, ei_show($b));
+
+$r = ei_run('direct', ['email' => $bk, 'enabled' => true, 'cc' => ['sb2@hotel.test']] + $site);
+ok('backup already on the message (CC) is not added again; main staff copy added', ei_clean($r) && ($r['json']['bcc'] ?? null) === ['staff@hotel.test', 'sb1@hotel.test'] && ($r['json']['main_added'] ?? null) === true, json_encode($r['json'] ?? null));
+$r = ei_run('direct', ['email' => $bk, 'enabled' => false] + $site);
+ok('switch off: no staff copy, no backups (Reply-To backups unaffected)', ei_clean($r) && ($r['json']['bcc'] ?? null) === [] && count($r['json']['reply_to'] ?? []) === 3, json_encode($r['json'] ?? null));
+$r = ei_run('direct', ['email' => $bk, 'enabled' => true, 'bcc_off' => true] + $site);
+ok('rh_email_staff_bcc_off: no staff copy, no backups', ei_clean($r) && ($r['json']['bcc'] ?? null) === [] && ($r['json']['main_added'] ?? null) === false, json_encode($r['json'] ?? null));
+$r = ei_run('backup_send', ['email' => ['email_bcc_admin' => '0'] + $bk] + $site);
+$b = ei_by_subject($r['emails'], 'EI backup')[0] ?? [];
+ok('switch off (real send): only the guest receives it', ei_clean($r) && ei_rcpt($b) === ['guest@guest.test'], ei_show($b));
+
+$r = ei_run('backup_send', ['email' => ['email_from_email' => ''] + $bk, 'site' => ['email_main' => '']]);
+$b = ei_by_subject($r['emails'], 'EI backup')[0] ?? [];
+ok('no main reply-to: no Reply-To header, backups not used', ei_clean($r) && $b !== [] && ($b['reply_to'] ?? 'x') === '' && ($r['json']['reply_to'] ?? null) === [], ei_show($b));
+
+$r = ei_run('direct', ['email' => ['email_reply_to_backup' => 'not-an-email, rb1@hotel.test; bad@@x', 'email_admin_backup' => 'nope'] + $base, 'enabled' => true] + $site);
+ok('invalid saved backups ignored, valid ones kept', ei_clean($r) && ($r['json']['reply_to'] ?? null) === ['contact@hotel.test', 'rb1@hotel.test'] && ($r['json']['bcc'] ?? null) === ['staff@hotel.test'], json_encode($r['json'] ?? null));
+$seven = implode(', ', array_map(fn($i) => "r$i@hotel.test", range(1, 7)));
+$r = ei_run('direct', ['email' => ['email_reply_to_backup' => $seven, 'email_admin_backup' => $seven] + $base, 'enabled' => true] + $site);
+ok('at most 5 backups of each kind are used', ei_clean($r) && count($r['json']['reply_to'] ?? []) === 6 && count($r['json']['bcc'] ?? []) === 6, json_encode($r['json'] ?? null));
+
+echo "== REGRESSION: backups empty = exactly as before ==\n";
+$r = ei_run('direct', ['email' => $base, 'enabled' => true] + $site);
+ok('empty backups: one Reply-To, one hidden staff copy', ei_clean($r) && ($r['json']['reply_to'] ?? null) === ['contact@hotel.test'] && ($r['json']['bcc'] ?? null) === ['staff@hotel.test'] && ($r['json']['main_added'] ?? null) === true, json_encode($r['json'] ?? null));
+$r = ei_run('direct', ['email' => $base, 'enabled' => true, 'to' => 'staff@hotel.test'] + $site);
+ok('empty backups: staff copy email as the To gets no BCC (returns false)', ei_clean($r) && ($r['json']['bcc'] ?? null) === [] && ($r['json']['main_added'] ?? null) === false, json_encode($r['json'] ?? null));
+$r = ei_run('backup_send', ['email' => $base] + $site);
+$b = ei_by_subject($r['emails'], 'EI backup')[0] ?? [];
+ok('empty backups (real send): recipients = guest + staff copy only, Reply-To = contact only', ei_clean($r) && ei_rcpt($b) === ['guest@guest.test', 'staff@hotel.test']
+    && strtolower(trim(preg_replace('/^.*<|>.*$/', '', (string)($b['reply_to'] ?? '')))) === 'contact@hotel.test' && substr_count((string)($b['reply_to'] ?? ''), '@') === 1, ei_show($b));
+
+echo "== staff alerts with backups: one copy each ==\n";
+$r = ei_run('alert', ['email' => ['email_admin_backup' => 'sb1@hotel.test'] + $base, 'site' => $alertSite]);
+$A = ei_by_subject($r['emails'], 'EIALERT1');
+ok('alert: backup staff copy gets exactly one copy across the alert emails', ei_clean($r) && count($A) === 2 && ei_count_rcpt($A, 'sb1@hotel.test') === 1 && ei_count_rcpt($A, 'staff@hotel.test') === 1, json_encode(array_map('ei_show', $A)));
+$r = ei_run('alert', ['email' => ['email_admin_backup' => 'sb1@hotel.test'] + $base, 'site' => ['booking_notification_cc_emails' => 'mgr@hotel.test, staff@hotel.test'] + $alertSite]);
+$A = ei_by_subject($r['emails'], 'EIALERT1');
+// Staff copy on the CC list gets its own copy only; the backup still gets one hidden copy on the primary send
+// (Rosalyn's has the staff copy email on its CC list, and backups must still see new bookings).
+ok('alert: staff copy on the CC list gets its own copy, backup still gets exactly one hidden copy', ei_clean($r) && ei_count_rcpt($A, 'sb1@hotel.test') === 1 && ei_count_rcpt($A, 'staff@hotel.test') === 1, json_encode(array_map('ei_show', $A)));
+$r = ei_run('alert', ['email' => ['email_admin_backup' => 'mgr@hotel.test'] + $base, 'site' => $alertSite]);
+$A = ei_by_subject($r['emails'], 'EIALERT1');
+ok('alert: backup that is also on the CC list gets exactly one copy (its own)', ei_clean($r) && ei_count_rcpt($A, 'mgr@hotel.test') === 1 && ei_count_rcpt($A, 'staff@hotel.test') === 1, json_encode(array_map('ei_show', $A)));
+
+$r = ei_run('alert', ['email' => ['email_admin_backup' => 'sb1@hotel.test'] + $base, 'site' => ['booking_notification_email' => 'staff@hotel.test', 'booking_notification_cc_emails' => '']]);
+$A = ei_by_subject($r['emails'], 'EIALERT1');
+ok('alert: staff copy email is the alert recipient, backup still gets one hidden copy', ei_clean($r) && count($A) === 1 && ei_count_rcpt($A, 'staff@hotel.test') === 1 && ei_count_rcpt($A, 'sb1@hotel.test') === 1, json_encode(array_map('ei_show', $A)));
+
+echo "== settings summary (shared by the test button) ==\n";
+$r = ei_run('summary', ['email' => ['smtp_password' => 'EiSecretPw123'] + $bk, 'to' => 'sb2@hotel.test'] + $site);
+$S = []; foreach ((array)($r['json']['summary'] ?? []) as $row) { $S[(string)$row[0]] = (string)$row[1]; }
+ok('summary: sender name, mailbox, replies, copies, server', ei_clean($r) && ($S['Sender name'] ?? '') === 'EI Test Hotel' && ($S['Sending mailbox (From)'] ?? '') === $MAILBOX
+    && ($S['Replies go to'] ?? '') === 'contact@hotel.test, rb1@hotel.test, rb2@hotel.test' && strpos($S['Hidden copies'] ?? '', 'staff@hotel.test, sb1@hotel.test, sb2@hotel.test') === 0
+    && strpos($S['Hidden copies'] ?? '', 'sb2@hotel.test is the test address') !== false && strpos($S['Mail server'] ?? '', '127.0.0.1, port ') === 0, json_encode($S));
+ok('summary: never the password', stripos(json_encode($r['json'] ?? ''), 'EiSecretPw123') === false);
+$r = ei_run('summary', ['email' => ['email_bcc_admin' => '0'] + $bk] + $site);
+$S = []; foreach ((array)($r['json']['summary'] ?? []) as $row) { $S[(string)$row[0]] = (string)$row[1]; }
+ok('summary: switch off says so', ($S['Hidden copies'] ?? '') === 'none: the hidden-copy switch is off', json_encode($S));
+
+echo "== Email Settings test button (admin/booking-settings.php) ==\n";
+function ei_page(string $page, array $post, array $extra = []): array {
+    global $harness, $port;
+    $setup = ["INSERT INTO email_settings (setting_key, setting_value, is_encrypted) VALUES ('email_from_email','contact@hotel.test',0),('email_reply_to_backup','rb1@hotel.test',0),('email_admin_email','staff@hotel.test',0),('email_admin_backup','sb1@hotel.test',0),('email_from_name','EI Test Hotel',0) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), is_encrypted = 0"];
+    $cfg = base64_encode(json_encode(['post' => $post, 'fake_smtp' => $port, 'setup' => $setup] + $extra));
+    $cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($harness) . ' ' . escapeshellarg($page) . ' ' . escapeshellarg($cfg) . ' 2>&1';
+    $out = shell_exec($cmd);
+    if (trim((string)$out) === '') { usleep(500000); $out = shell_exec($cmd); }
+    $res = ['error' => 'no result', 'raw' => substr((string)$out, -800), 'rolled_back' => false];
+    if (preg_match('/@@RESULT@@(.*)$/m', (string)$out, $m)) { $x = json_decode($m[1], true); if (is_array($x)) { $res = $x; } }
+    $res['emails'] = ei_new_emails();
+    return $res;
+}
+$tp = ['email_settings_test' => '1', 'email_test_to' => 'tester@guest.test'];
+$r = ei_page('admin/booking-settings.php', $tp, ['ajax' => true]);
+$T = ei_by_subject($r['emails'], '[TEST] Email settings check');
+$J = (array)($r['json'] ?? []);
+ok('test button (AJAX): success JSON with the summary, rolled back', ei_clean($r) && ($J['success'] ?? false) === true && count((array)($J['summary'] ?? [])) === 5, json_encode($J ?: ($r['raw'] ?? '')));
+ok('test button: exactly one email, to the typed address, through the real identity', count($r['emails']) === 1 && count($T) === 1 && ei_rcpt($T[0]) === ['tester@guest.test']
+    && stripos((string)$T[0]['from'], $MAILBOX) !== false && stripos((string)$T[0]['reply_to'], 'rb1@hotel.test') !== false, json_encode(array_map('ei_show', $r['emails'])));
+ok('test email body lists the settings', stripos((string)($T[0]['text'] ?? ''), 'Replies go to') !== false && stripos((string)($T[0]['text'] ?? ''), 'contact@hotel.test, rb1@hotel.test') !== false
+    && stripos((string)($T[0]['text'] ?? ''), 'none: the hidden-copy switch is off') !== false, substr((string)($T[0]['text'] ?? ''), 0, 400));
+$r = ei_page('admin/booking-settings.php', $tp);
+ok('test button (plain POST): page message, one email', ei_clean($r) && strpos(strtolower(implode(' ', $r['output_flash'] ?? [])), 'test email sent to tester@guest.test') !== false && count($r['emails']) === 1, json_encode([$r['output_flash'] ?? null, count($r['emails'])]));
+$r = ei_page('admin/booking-settings.php', ['email_test_to' => 'not an email'] + $tp, ['ajax' => true]);
+ok('test button: invalid address refused, nothing sent', ($r['json']['success'] ?? true) === false && stripos((string)($r['json']['error'] ?? ''), 'valid email') !== false && count($r['emails']) === 0, json_encode($r['json'] ?? $r['raw'] ?? ''));
+$r = ei_page('admin/booking-settings.php', ['email_test_to' => ''] + $tp, ['ajax' => true]);
+ok('test button: empty address refused, nothing sent', ($r['json']['success'] ?? true) === false && count($r['emails']) === 0, json_encode($r['json'] ?? $r['raw'] ?? ''));
+$r = ei_page('admin/booking-settings.php', ['csrf_token' => 'wrong'] + $tp, ['ajax' => true]);
+ok('test button: bad CSRF token refused, nothing sent', ($r['json']['success'] ?? true) === false && stripos((string)($r['json']['error'] ?? ''), 'security token') !== false && count($r['emails']) === 0, json_encode($r['json'] ?? $r['raw'] ?? ''));
+$r = ei_page('admin/booking-settings.php', $tp, ['ajax' => true, 'as_username' => 'receptionist']);
+ok('test button: user without Hotel Settings access refused, nothing sent', ($r['json']['success'] ?? false) !== true && !isset($r['json']['summary']) && count($r['emails']) === 0, json_encode([$r['json'] ?? null, $r['error'] ?? null]));
+$r = ei_page('admin/email-templates.php', $tp, ['ajax' => true]);
+ok('test button: refused on the templates-only page, nothing sent', ($r['json']['success'] ?? false) !== true && !isset($r['json']['summary']) && count($r['emails']) === 0, json_encode([$r['json'] ?? null, $r['error'] ?? null]));
 
 echo "\nemail_identity: $pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

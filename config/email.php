@@ -2917,13 +2917,14 @@ function sendAdminNotificationEmail(array $booking)
             return str_replace('{{alert_recipient}}', htmlspecialchars($recipient, ENT_QUOTES, 'UTF-8'), $htmlBody);
         };
 
-        // The staff copy email gets exactly one copy of this alert: a hidden copy on the primary send
-        // only (when the switch is on), and none at all when it is the primary or on the CC list.
-        $staffCopy = trim((string)$email_admin_email);
-        $staffOnCcList = $staffCopy !== '' && in_array(strtolower($staffCopy), array_map('strtolower', $ccList), true);
+        // The staff copy email and its backups get exactly one copy of this alert: a hidden copy on the
+        // primary send only (when the switch is on), skipped for any address that is the primary or on
+        // the CC list, because those get their own copy.
         $prevBccOff = $GLOBALS['rh_email_staff_bcc_off'] ?? null;
+        $prevBccSkip = $GLOBALS['rh_email_staff_bcc_skip'] ?? null;
         try {
-            $GLOBALS['rh_email_staff_bcc_off'] = $staffOnCcList;
+            $GLOBALS['rh_email_staff_bcc_off'] = false;
+            $GLOBALS['rh_email_staff_bcc_skip'] = $ccList;
             $primaryResult = sendEmail(
                 $notificationEmail,
                 'Reservations Team',
@@ -2945,6 +2946,11 @@ function sendAdminNotificationEmail(array $booking)
                 unset($GLOBALS['rh_email_staff_bcc_off']);
             } else {
                 $GLOBALS['rh_email_staff_bcc_off'] = $prevBccOff;
+            }
+            if ($prevBccSkip === null) {
+                unset($GLOBALS['rh_email_staff_bcc_skip']);
+            } else {
+                $GLOBALS['rh_email_staff_bcc_skip'] = $prevBccSkip;
             }
         }
 

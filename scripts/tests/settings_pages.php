@@ -174,6 +174,23 @@ $r = run_page('admin/booking-settings.php', array_merge($es, ['smtp_host' => 'ba
 ok('bad SMTP host rejected', strpos(flash($r), 'smtp host') !== false, flash($r));
 $r = run_page('admin/booking-settings.php', array_merge($es, ['email_from_name' => "A\r\nBcc: x@y.com"]), $ev);
 ok('header-injection from name rejected', strpos(flash($r), 'sender name') !== false, flash($r));
+// Backup reply-to / staff copy emails (owner 2026-11-09): same normalising as invoice recipients, at most 5 each.
+$bkv = ["SELECT setting_key, setting_value FROM email_settings WHERE setting_key IN ('email_reply_to_backup','email_admin_backup')"];
+$bkMap = static function (array $r): array { $o = []; foreach (($r['verify'][0] ?? []) as $row) { $o[$row['setting_key']] = $row['setting_value']; } return $o; };
+$r = run_page('admin/booking-settings.php', array_merge($es, ['email_reply_to_backup' => 'r1@x.com; R1@x.com , r2@y.com', 'email_admin_backup' => ' s1@x.com,s2@y.com ']), $bkv);
+$bm = $bkMap($r);
+ok('backup emails normalised to de-duplicated comma lists', ($bm['email_reply_to_backup'] ?? '') === 'r1@x.com, r2@y.com' && ($bm['email_admin_backup'] ?? '') === 's1@x.com, s2@y.com', flash($r) . json_encode($bm));
+$r = run_page('admin/booking-settings.php', array_merge($es, ['email_reply_to_backup' => 'r1@x.com, nope']), $bkv);
+ok('invalid backup reply-to email rejected', strpos(flash($r), 'backup reply-to emails must be valid') !== false && ($bkMap($r)['email_reply_to_backup'] ?? '') !== 'r1@x.com, nope', flash($r));
+$r = run_page('admin/booking-settings.php', array_merge($es, ['email_admin_backup' => 'bad@@x']), $bkv);
+ok('invalid backup staff copy email rejected', strpos(flash($r), 'backup staff copy emails must be valid') !== false, flash($r));
+$r = run_page('admin/booking-settings.php', array_merge($es, ['email_admin_backup' => implode(',', array_map(fn($i) => "s$i@x.com", range(1, 6)))]), $bkv);
+ok('six backup staff copy emails rejected (max 5)', strpos(flash($r), 'at most 5') !== false && strpos((string)($bkMap($r)['email_admin_backup'] ?? ''), 's6@x.com') === false, flash($r));
+$r = run_page('admin/booking-settings.php', array_merge($es, ['email_reply_to_backup' => '', 'email_admin_backup' => '']), $bkv);
+$bm = $bkMap($r);
+ok('blank backup fields saved as empty', ($bm['email_reply_to_backup'] ?? 'x') === '' && ($bm['email_admin_backup'] ?? 'x') === '', flash($r) . json_encode($bm));
+// The test button's CSRF / permission / templates-page refusals are covered in email_identity_test.php,
+// which runs them against the capture-only SMTP server (this suite never posts a send action).
 
 echo "== Station hours, automated emails, cache management ==\n";
 $r = run_page('admin/station-settings.php', ['stations' => ['kitchen' => ['opens_at' => '25:99', 'closes_at' => '10:00']]], ["SELECT COUNT(*) c FROM site_settings WHERE setting_value='25:99'"], false, ['Use 24-hour HH:MM format']);

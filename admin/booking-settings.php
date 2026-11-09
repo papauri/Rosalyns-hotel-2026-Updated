@@ -777,6 +777,72 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_test_email'], $_
     exit;
 }
 
+// -----------------------------------------------------------------------
+// Email Settings test button: sends ONE email through sendEmail() with the SAVED settings so the
+// real From / Reply-To / hidden-copy path runs. Same gate as saving email settings (this page's
+// permission + the CSRF guard above); never on the templates-only page (not in $rh_template_posts).
+// AJAX (X-Requested-With) answers JSON; a plain POST shows the result on the page.
+// -----------------------------------------------------------------------
+$rh_email_test_result = null;
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['email_settings_test']) && !$rh_templates_only) {
+    $rhEtAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower((string)$_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+    $rhEtTo = trim((string)($_POST['email_test_to'] ?? ''));
+    if ($rhEtTo === '' || strlen($rhEtTo) > 254 || !filter_var($rhEtTo, FILTER_VALIDATE_EMAIL)) {
+        $rhEtTo = '';
+    }
+    $rhEtSummary = rh_mail_settings_summary($rhEtTo);
+    $rh_email_test_result = ['success' => false, 'preview' => false, 'message' => '', 'summary' => $rhEtSummary];
+    if ($rhEtTo === '') {
+        $rh_email_test_result['message'] = 'Enter a valid email address to send the test to.';
+    } elseif (!function_exists('sendEmail')) {
+        $rh_email_test_result['message'] = 'Email sending is not available.';
+    } else {
+        $rhEtRows = '';
+        $rhEtText = '';
+        foreach ($rhEtSummary as [$rhEtLabel, $rhEtValue]) {
+            $rhEtRows .= '<tr><td style="padding:6px 12px 6px 0;vertical-align:top;font-weight:bold;">' . htmlspecialchars((string)$rhEtLabel, ENT_QUOTES, 'UTF-8')
+                . '</td><td style="padding:6px 0;vertical-align:top;">' . htmlspecialchars((string)$rhEtValue, ENT_QUOTES, 'UTF-8') . '</td></tr>';
+            $rhEtText .= $rhEtLabel . ': ' . $rhEtValue . "\n";
+        }
+        $rhEtHtml = '<p>This is a test of the saved Email Settings. If it arrived, the hotel can send email.</p>'
+            . '<table role="presentation" style="border-collapse:collapse;">' . $rhEtRows . '</table>'
+            . '<p>Reply to this email to check that replies reach the addresses above.</p>';
+        // One try only (a dead server must not hold the page for 3 x the timeout); no SMTP debug output.
+        $GLOBALS['rh_email_fast_fail'] = true;
+        $GLOBALS['smtp_debug'] = 0;
+        $rhEtResult = sendEmail($rhEtTo, '', '[TEST] Email settings check', $rhEtHtml,
+            "This is a test of the saved Email Settings. If it arrived, the hotel can send email.\n\n" . $rhEtText);
+        unset($GLOBALS['rh_email_fast_fail']);
+        if (!empty($rhEtResult['preview_url'])) {
+            $rh_email_test_result['success'] = true;
+            $rh_email_test_result['preview'] = true;
+            $rh_email_test_result['message'] = 'Preview only is on and this computer is local, so the test was saved as a preview, not sent.';
+        } elseif (!empty($rhEtResult['success'])) {
+            $rh_email_test_result['success'] = true;
+            $rh_email_test_result['message'] = 'Test email sent to ' . $rhEtTo . '. Check that inbox (and its spam folder).';
+        } else {
+            $rhEtErr = (string)($rhEtResult['message'] ?? 'Unknown error');
+            $rhEtPass = (string)getEmailSetting('smtp_password', '');
+            if ($rhEtPass !== '') {
+                $rhEtErr = str_replace($rhEtPass, '***', $rhEtErr);
+            }
+            $rh_email_test_result['message'] = 'The test email was not sent. ' . $rhEtErr;
+        }
+    }
+    if ($rhEtAjax) {
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode($rh_email_test_result['success']
+            ? ['success' => true, 'preview' => $rh_email_test_result['preview'], 'message' => $rh_email_test_result['message'], 'summary' => $rhEtSummary]
+            : ['success' => false, 'error' => $rh_email_test_result['message'], 'summary' => $rhEtSummary]);
+        exit;
+    }
+    if ($rh_email_test_result['success']) {
+        $message = htmlspecialchars($rh_email_test_result['message'], ENT_QUOTES, 'UTF-8');
+    } else {
+        $error = htmlspecialchars($rh_email_test_result['message'], ENT_QUOTES, 'UTF-8');
+    }
+}
+
 // Handle setting updates
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
@@ -1194,6 +1260,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'email_log_enabled' => isset($_POST['email_log_enabled']) ? '1' : '0',
                 'email_preview_enabled' => isset($_POST['email_preview_enabled']) ? '1' : '0',
                 'invoice_recipients' => trim((string)($_POST['invoice_recipients'] ?? '')),
+                'email_reply_to_backup' => trim((string)($_POST['email_reply_to_backup'] ?? '')),
+                'email_admin_backup' => trim((string)($_POST['email_admin_backup'] ?? '')),
             ];
 
             if (!in_array($email_settings['smtp_secure'], ['ssl', 'tls', ''], true)) {
@@ -1244,6 +1312,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (mb_strlen($email_settings['invoice_recipients']) > 1000) {
                     throw new Exception('Too many invoice recipients (1000 characters maximum)');
                 }
+            }
+            // Backup addresses (owner 2026-11-09): optional comma lists, at most 5 each, stored as "a, b".
+            foreach (['email_reply_to_backup' => 'Backup reply-to emails', 'email_admin_backup' => 'Backup staff copy emails'] as $bkKey => $bkLabel) {
+                if ($email_settings[$bkKey] === '') {
+                    continue;
+                }
+                $bkList = [];
+                foreach (array_filter(array_map('trim', preg_split('/[,;\s]+/', $email_settings[$bkKey]))) as $bkRcpt) {
+                    if (!filter_var($bkRcpt, FILTER_VALIDATE_EMAIL)) {
+                        throw new Exception($bkLabel . ' must be valid email addresses separated by commas');
+                    }
+                    if (!isset($bkList[strtolower($bkRcpt)])) {
+                        $bkList[strtolower($bkRcpt)] = $bkRcpt;
+                    }
+                }
+                if (count($bkList) > 5) {
+                    throw new Exception($bkLabel . ': at most 5 addresses');
+                }
+                $email_settings[$bkKey] = implode(', ', array_values($bkList));
             }
 
             // Update email settings in database
@@ -2012,10 +2099,35 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     </div>
 
                     <div class="form-group">
+                        <label for="email_reply_to_backup">Backup reply-to emails (optional)</label>
+                        <input type="text" id="email_reply_to_backup" name="email_reply_to_backup" class="form-control"
+                            value="<?php echo htmlspecialchars($current_settings['email_reply_to_backup'] ?? ''); ?>"
+                            placeholder="frontdesk@example.com, manager@example.com">
+                        <p class="help-text"><i class="fas fa-info-circle"></i> Up to 5, comma-separated. When guests reply to an email, their reply also goes to these addresses. Guests can see them in the reply line, so don't use an address guests shouldn't see. For a hidden monitoring copy, use Backup staff copy emails instead. Only used when there is a reply-to and contact email (or a main contact email in Hotel Details).</p>
+                        <?php $rhReplyBackups = array_slice(rh_mail_reply_to_addresses(), 1); ?>
+                        <p class="help-text"><i class="fas fa-envelope"></i> Replies currently also go to:
+                            <?php if ($rhReplyBackups): ?><strong><?php echo htmlspecialchars(implode(', ', $rhReplyBackups)); ?></strong><?php elseif ($rhGuestContact === '' && trim((string)($current_settings['email_reply_to_backup'] ?? '')) !== ''): ?>no backup addresses (there is no reply-to and contact email for them to back up)<?php else: ?>no backup addresses<?php endif; ?></p>
+                    </div>
+
+                    <div class="form-group">
                         <label for="email_admin_email">Staff copy email</label>
                         <input type="email" id="email_admin_email" name="email_admin_email" class="form-control"
                             value="<?php echo htmlspecialchars($current_settings['email_admin_email'] ?? ''); ?>">
                         <p class="help-text"><i class="fas fa-info-circle"></i> Gets: a hidden copy of every email while the switch below is on; a copy of bookings created in the admin panel and of conference confirmations; new gym membership enquiries; booking, conference, gym and expired-hold alerts when their own boxes and fallbacks are blank; the end-of-day report when no report recipient is set. Guests never see it.</p>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="email_admin_backup">Backup staff copy emails (optional)</label>
+                        <input type="text" id="email_admin_backup" name="email_admin_backup" class="form-control"
+                            value="<?php echo htmlspecialchars($current_settings['email_admin_backup'] ?? ''); ?>"
+                            placeholder="owner@example.com, accounts@example.com">
+                        <p class="help-text"><i class="fas fa-info-circle"></i> Up to 5, comma-separated. Each gets the same hidden copy as the staff copy email, while the switch below is on. Guests never see them. They do not receive the alerts or reports that fall back to the staff copy email.</p>
+                        <?php
+                        $rhStaffBackups = rh_mail_staff_backup_addresses();
+                        $rhBccOn = ($current_settings['email_bcc_admin'] ?? '1') === '1';
+                        ?>
+                        <p class="help-text"><i class="fas fa-envelope"></i> Hidden copies currently also go to:
+                            <?php if ($rhStaffBackups): ?><strong><?php echo htmlspecialchars(implode(', ', $rhStaffBackups)); ?></strong><?php if (!$rhBccOn): ?> (only while the hidden-copy switch below is on; it is off)<?php endif; ?><?php else: ?>no backup addresses<?php endif; ?></p>
                     </div>
 
                     <h3 style="color: #1A1A1A; margin-top: 30px; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #e0e0e0;">
@@ -2070,6 +2182,84 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         <i class="fas fa-save"></i> Save Email Settings
                     </button>
                 </form>
+
+                <form method="POST" action="booking-settings.php" id="email-settings-test-form" style="margin-top:24px;padding-top:16px;border-top:1px solid #e0e0e0;">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
+                    <input type="hidden" name="email_settings_test" value="1">
+                    <h3 style="color: #1A1A1A; margin-top: 0; margin-bottom: 10px;">
+                        <i class="fas fa-paper-plane"></i> Test these settings
+                    </h3>
+                    <p class="help-text"><i class="fas fa-info-circle"></i> Sends one test email using the saved settings, with the same sender, reply-to and hidden copies as a real email. Save your changes first.</p>
+                    <div class="form-group">
+                        <label for="email_test_to">Send a test to</label>
+                        <input type="email" id="email_test_to" name="email_test_to" class="form-control" value="" autocomplete="off"
+                            placeholder="you@example.com" required maxlength="254" style="min-height:44px;">
+                    </div>
+                    <button type="submit" class="btn-submit" id="email-settings-test-btn" style="min-height:44px;">
+                        <i class="fas fa-paper-plane"></i> Send test email
+                    </button>
+                    <div id="email-settings-test-result" role="status" aria-live="polite" style="margin-top:12px;<?php echo $rh_email_test_result === null ? 'display:none;' : ''; ?>">
+                        <?php if ($rh_email_test_result !== null): ?>
+                        <p class="help-text"><strong><?php echo htmlspecialchars((string)$rh_email_test_result['message'], ENT_QUOTES, 'UTF-8'); ?></strong></p>
+                        <ul class="help-text" style="margin:6px 0 0 18px;">
+                            <?php foreach ($rh_email_test_result['summary'] as [$rhEtL, $rhEtV]): ?>
+                            <li><?php echo htmlspecialchars((string)$rhEtL, ENT_QUOTES, 'UTF-8'); ?>: <?php echo htmlspecialchars((string)$rhEtV, ENT_QUOTES, 'UTF-8'); ?></li>
+                            <?php endforeach; ?>
+                        </ul>
+                        <?php endif; ?>
+                    </div>
+                </form>
+                <script>
+                (function () {
+                    var form = document.getElementById('email-settings-test-form');
+                    if (!form || form.dataset.bound === '1') { return; }
+                    form.dataset.bound = '1';
+                    var btn = document.getElementById('email-settings-test-btn');
+                    var box = document.getElementById('email-settings-test-result');
+                    function show(message, summary, ok) {
+                        box.textContent = '';
+                        var p = document.createElement('p');
+                        p.className = 'help-text';
+                        var strong = document.createElement('strong');
+                        strong.textContent = message;
+                        strong.style.color = ok ? '' : '#b42318';
+                        p.appendChild(strong);
+                        box.appendChild(p);
+                        if (summary && summary.length) {
+                            var ul = document.createElement('ul');
+                            ul.className = 'help-text';
+                            ul.style.margin = '6px 0 0 18px';
+                            summary.forEach(function (row) {
+                                var li = document.createElement('li');
+                                li.textContent = String(row[0]) + ': ' + String(row[1]);
+                                ul.appendChild(li);
+                            });
+                            box.appendChild(ul);
+                        }
+                        box.style.display = 'block';
+                    }
+                    form.addEventListener('submit', function (e) {
+                        if (!window.fetch || !window.FormData) { return; }
+                        e.preventDefault();
+                        if (!form.reportValidity()) { return; }
+                        var fd = new FormData(form);
+                        btn.disabled = true;
+                        show('Sending the test email...', [], true);
+                        fetch(form.getAttribute('action'), {
+                            method: 'POST',
+                            body: fd,
+                            credentials: 'same-origin',
+                            headers: { 'X-Requested-With': 'XMLHttpRequest' }
+                        }).then(function (r) { return r.json(); }).then(function (data) {
+                            show(data.success ? data.message : (data.error || 'The test email was not sent.'), data.summary || [], !!data.success);
+                        }).catch(function () {
+                            show('The test could not be run. Refresh the page and try again.', [], false);
+                        }).then(function () {
+                            btn.disabled = false;
+                        });
+                    });
+                })();
+                </script>
 
                 <details class="tips-box" style="margin-top:10px;">
                     <summary><i class="fas fa-circle-info"></i> Email Configuration Tips</summary>
