@@ -1362,7 +1362,7 @@
                 const adjustment = Number(pricing.discount_amount_per_night_total ?? pricing.discount_amount ?? 0);
                 const sign = adjustment > 0 ? '-' : '+';
                 const abs = Math.abs(adjustment);
-                badge.innerHTML = `<i class="fas fa-tag"></i> <strong>${pricing.rate_plan_label}</strong>
+                badge.innerHTML = `<i class="fas fa-tag"></i> <strong>${escapeHtml(pricing.rate_plan_label)}</strong>
                     <span class="rate-plan-badge__amount">${sign}${currencySymbol}${abs.toLocaleString()}/night</span>`;
                 badge.className = adjustment > 0 ?
                     'rate-plan-badge rate-plan-badge--discount' :
@@ -1404,20 +1404,26 @@
                     `<span class="package-option__price package-option__price--free"><i class="fas fa-gift"></i> Complimentary</span>` :
                     `<span class="package-option__price">${currencySymbol}${cost.toLocaleString()}</span>`;
 
-                const inclusions = Array.isArray(pkg.inclusions_list) && pkg.inclusions_list.length ?
-                    `<ul class="package-option__inclusions">${pkg.inclusions_list.map(i => `<li>${i}</li>`).join('')}</ul>` :
+                // Server sends the list as `inclusions` (pricing.php); `inclusions_list` kept as a fallback.
+                const inclusionItems = Array.isArray(pkg.inclusions) ? pkg.inclusions :
+                    (Array.isArray(pkg.inclusions_list) ? pkg.inclusions_list : []);
+                const inclusions = inclusionItems.length ?
+                    `<ul class="package-option__inclusions">${inclusionItems.map(i => `<li>${escapeHtml(i)}</li>`).join('')}</ul>` :
                     '';
+                // Icon lands in class="..."; allow only plain class characters, else the gift icon.
+                const iconRaw = String(pkg.icon || '').trim();
+                const iconClass = /^[A-Za-z0-9 -]+$/.test(iconRaw) ? iconRaw : 'fas fa-gift';
 
                 const checked = selectedPackageIds.has(Number(pkg.id));
                 return `<label class="package-option${checked ? ' selected' : ''}" data-pkg-id="${pkg.id}" data-pkg-cost="${cost}">
                     <input type="checkbox" name="package_ids[]" value="${pkg.id}" form="bookingForm"${checked ? ' checked' : ''}>
                     <div class="package-option__body">
                         <div class="package-option__header">
-                            <span class="package-option__icon"><i class="${pkg.icon || 'fas fa-gift'}"></i></span>
-                            <span class="package-option__name">${pkg.name}</span>
+                            <span class="package-option__icon"><i class="${iconClass}"></i></span>
+                            <span class="package-option__name">${escapeHtml(pkg.name)}</span>
                             ${priceHtml}
                         </div>
-                        ${pkg.short_description ? `<p class="package-option__desc">${pkg.short_description}</p>` : ''}
+                        ${pkg.short_description ? `<p class="package-option__desc">${escapeHtml(pkg.short_description)}</p>` : ''}
                         ${inclusions}
                     </div>
                 </label>`;
@@ -1713,7 +1719,9 @@
                         selectedPkgs.forEach(pkg => {
                             const isComp = parseFloat(pkg.price_amount) === 0;
                             const li = document.createElement('li');
-                            li.innerHTML = `<i class="${pkg.icon || 'fas fa-check-circle'}" aria-hidden="true"></i>${pkg.name}${isComp ? ' <span class="bsum-pkg-comp"><i class="fas fa-gift" aria-hidden="true"></i> Complimentary</span>' : ''}`;
+                            const pkgIcon = String(pkg.icon || '').trim();
+                            const pkgIconClass = /^[A-Za-z0-9 -]+$/.test(pkgIcon) ? pkgIcon : 'fas fa-check-circle';
+                            li.innerHTML = `<i class="${pkgIconClass}" aria-hidden="true"></i>${escapeHtml(pkg.name)}${isComp ? ' <span class="bsum-pkg-comp"><i class="fas fa-gift" aria-hidden="true"></i> Complimentary</span>' : ''}`;
                             pkgNamesList.appendChild(li);
                         });
                     }
