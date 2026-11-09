@@ -344,8 +344,9 @@ function rh_ai_claim_extract(string $text, ?string $today = null): array
             $add(['kind' => 'time', 'raw' => $g[0][0], 'value' => rh_ai_claim_hhmm((int)$g[1][0], 0, $g[2][0]), 'start' => (int)$g[0][1], 'end' => (int)$g[0][1] + strlen($g[0][0])]);
         }
     }
-    // References: booking / order / member numbers written as they are ("ORD-20261028-003", "GYM-0012", "LSH2026999999")
-    if (rh_ai_claim_pma('/\b[A-Z]{2,8}-?\d[\dA-Z]*(?:-[\dA-Z]+)*\b/', $mask, $m, PREG_OFFSET_CAPTURE)) {
+    // References: booking / order / member / document numbers written as they are ("ORD-20261028-003", "GYM-0012",
+    // "LSH2026999999"), document numbers whole with the hotel letters in front ("LSH-INV-2026-000001", "LSH-CONF-INV-...")
+    if (rh_ai_claim_pma('/\b(?:[A-Z0-9]{1,6}-)?(?:[A-Z]{2,8}-)?[A-Z]{2,8}-?\d[\dA-Z]*(?:-[\dA-Z]+)*\b/', $mask, $m, PREG_OFFSET_CAPTURE)) {
         foreach ($m[0] as [$s, $o]) {
             if (rh_ai_claim_pm('/\d{3,}/', $s) || strpos($s, '-') !== false) {
                 $add(['kind' => 'ref', 'raw' => $s, 'value' => $s, 'start' => $o, 'end' => $o + strlen($s)]);

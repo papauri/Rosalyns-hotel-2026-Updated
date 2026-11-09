@@ -239,7 +239,9 @@ function rh_ai_money_read_intent(string $raw): ?array
         $subject = 'tab';
     }
     $out = ['ask' => $ask, 'subject' => $subject, 'who' => ''];
-    if (preg_match('/\b([A-Z]{2,6}20\d{6,10}|[a-z]{2,6}-\d[\d\-]{3,30})\b/iu', $raw, $m)) {
+    // A booking reference, or a document number with its hotel letters when the hotel sets them
+    // ("LSH-INV-2026-000001", "LSH-CONF-INV-...", "LSH-RFD-REF-...", "RCP2026000001"), captured whole.
+    if (preg_match('/\b([A-Z]{2,6}20\d{6,10}|(?:[a-z0-9]{1,6}-)?(?:[a-z]{2,6}-)?[a-z]{2,6}-\d[\d\-]{3,30})\b/iu', $raw, $m)) {
         $out['who'] = strtoupper($m[1]);
     } elseif (preg_match('/\btable\s+([a-z0-9\-]{1,10})\b/u', $l, $m)) {
         $out['table'] = $m[1];

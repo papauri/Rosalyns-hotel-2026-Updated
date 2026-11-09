@@ -1872,12 +1872,14 @@ function rh_ai_claims(string $text): array
             $out[] = ['raw' => $x, 'type' => 'str', 'value' => null];
         }
     }
-    if (preg_match_all('/\b[A-Z]{2,8}-?\d{5,}\b/', $text, $m)) {
+    // References and document numbers: "LSH2026000001", "RCP2026000001", "INV-2026-000001", "LSH-CONF-INV-2026-000001"
+    $refRe = '/\b(?:(?:[A-Z0-9]{1,6}-)?(?:[A-Z]{2,6}-){1,2}20\d{2}-\d{4,8}|[A-Z]{2,8}-?\d{5,})\b/';
+    if (preg_match_all($refRe, $text, $m)) {
         foreach ($m[0] as $x) {
             $out[] = ['raw' => $x, 'type' => 'str', 'value' => null];
         }
     }
-    $clean = preg_replace(['/\[(?:GUEST|EMAIL|PHONE|BK|STAFF)_\d+\]/', '/\b\d{4}-\d{2}-\d{2}\b/', '/\b[A-Z]{2,8}-?\d{5,}\b/', '/\b\d{1,2}:\d{2}\b/'], ' ', $text);
+    $clean = preg_replace(['/\[(?:GUEST|EMAIL|PHONE|BK|STAFF)_\d+\]/', '/\b\d{4}-\d{2}-\d{2}\b/', $refRe, '/\b\d{1,2}:\d{2}\b/'], ' ', $text);
     if (preg_match_all('/(?<![\w.\-])(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)(\s*%)?/u', (string)$clean, $m, PREG_SET_ORDER | PREG_OFFSET_CAPTURE)) {
         $nouns = 'guests?|bookings?|rooms?|nights?|room-nights|arrivals?|departures?|people|orders?|items?|reviews?|members?|enquir\w*|tickets?|jobs?|tasks?|accounts?|payments?|refunds?|voids?|stays?|adults?|children|kids|covers|tables|batches|counts?|no-shows?|cancellations?|messages?|staff';
         foreach ($m as $hit) {

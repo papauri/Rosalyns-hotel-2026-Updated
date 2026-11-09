@@ -29,6 +29,7 @@ $suites = [
     'Refund VAT + POS refunds' => 'scripts/tests/refund_vat_pos.php',
     'Levy after refunds'    => 'scripts/tests/levy_after_refunds.php',
     'Document number prefix' => 'scripts/tests/document_number_prefix_test.php',
+    'Assistant document numbers' => 'scripts/tests/ai_doc_numbers_test.php',
     'Gym linked data'       => 'scripts/tests/linked_gym.php',
     'Block Rooms permission' => 'scripts/tests/block_rooms.php',
     'API payment delete'    => 'scripts/tests/api_payment_delete.php',
