@@ -95,6 +95,7 @@
     <li>The table: Ref, Guest Name, Room, Check In, Check Out, Nights, Guests, Total, Status, Payment, Created, Actions. The list shows 10 bookings per page, with Prev and Next buttons.</li>
     <li>Click a column heading (for example <strong>Guest Name</strong> or <strong>Total</strong>) to sort the whole bookings list, not just the rows on the page. Click it again to reverse. The sort stays when you change page or use the filters.</li>
     <li><strong>Total is the full amount of the booking:</strong> the room price with VAT and the tourism levy counted in (the ones that are switched on). The same full amount shows in the booking summary window, on the cards, on the Dashboard <strong>Pending Bookings</strong> list (column <strong>Total (incl. VAT &amp; levy)</strong>) and in the <strong>Export CSV</strong> file (column <strong>Total (incl. VAT &amp; levy)</strong>). It is the figure the guest pays, not the room price alone. See the <a href="faq.html">FAQ</a> if the total looks higher than the room rate. Next to each total is a small <strong>i</strong> button. Click or tap it (or hover over it) to open <strong>How this total is worked out</strong>: see <a href="#total-info">How a booking total is worked out</a>.</li>
+    <li><strong>Booked at.</strong> Under the Total, a small line shows the booked rate a night &times; nights, for example <em>Booked at MWK 356,000 &times; 3 nights = MWK 1,068,000</em>. It stays the same if the room price changes later. Charge from this figure, not from today's price.</li>
     <li><strong>Room guest.</strong> When a room has its own guest name (see <a href="#create">How to create a booking</a>), the Room column and the guest cell show a small line <em>Room guest: [name]</em> under the lead booker. The booking is still in the lead booker's name.</li>
     <li><strong>Conference enquiries &amp; bookings</strong> block on the Bookings page. It shows the latest 10 conference enquiries and bookings. Click <strong>Open Conference page</strong> for the full list. The block is hidden when the Conference module is switched off in Modules.</li>
   </ul>
@@ -112,7 +113,7 @@
       <tr><td>Refund payment</td><td>Shown when money is owed back to the guest (overpaid / credit), or a cancelled, expired or no-show booking still holds a payment.</td></tr>
       <tr><td>Cancel booking</td><td>Pending, tentative and confirmed bookings (needs Cancel Bookings).</td></tr>
       <tr><td>Restore booking</td><td>Deleted bookings only (needs Delete &amp; Restore Bookings).</td></tr>
-      <tr><td><strong>More</strong> menu</td><td>Full details; Full edit page (or <em>Correct guest details</em> on a closed booking); Quick modify (before departure only); Assign room / Change room (confirmed bookings, including late arrivals whose arrival date has passed); Upgrade / change room type (pending, tentative, confirmed or in-house); Make tentative (unpaid pending); Undo check-in; Change checkout date (administrators, overdue guests); Payments &amp; balance (open stays, or a checked-out booking with a balance or credit); Resend email; then only the document that fits the booking: <strong>Send quotation</strong>, <strong>Send invoice (balance due)</strong> or <strong>Send receipt</strong> (see <a href="#invoice">How to send an invoice or quotation</a>); Audit log; Delete booking (when allowed, see below).</td></tr>
+      <tr><td><strong>More</strong> menu</td><td>Full details; Full edit page (or <em>Correct guest details</em> on a closed booking); Quick modify (before departure only); Assign room / Change room (confirmed bookings, including late arrivals whose arrival date has passed); Upgrade / change room type (pending, tentative, confirmed or in-house); Make tentative (unpaid pending); Undo check-in; Change checkout date (administrators, overdue guests); Payments &amp; balance (open stays, or a checked-out booking with a balance or credit); Resend email; then only the document that fits the booking: <strong>Send quotation</strong>, <strong>Send invoice (balance due)</strong> or <strong>Send receipt</strong> (see <a href="#invoice">How to send an invoice or quotation</a>); History (the step-by-step list, see <a href="#history">How to see the history of a booking</a>); Audit log; Delete booking (when allowed, see below).</td></tr>
     </tbody>
   </table>
 
@@ -155,6 +156,7 @@
   <ul>
     <li>Across the top: the reference, the guest, the dates and nights, the status, and <strong>Outstanding balance</strong> when money is owed. The buttons shown depend on the status: <strong>Confirm Booking</strong> or <strong>Convert to Confirmed</strong>, <strong>Mark No-Show</strong>, <strong>Upgrade / Change Type</strong>, <strong>Cancel Booking</strong> (for rooms booked together as a group: <strong>Cancel Whole Group (N rooms)</strong> and <strong>Cancel This Room Only</strong>) and <strong>Restore Booking</strong> (deleted bookings).</li>
     <li><strong>Stay details</strong>: guest, room, dates, guests, special requests. When the room has its own guest, the header and the stay details show <strong>Room guest: [name]</strong> and a <strong>Guest name for this room</strong> row. <strong>Adjust Stay Dates</strong> changes the dates (see <a href="#dates">How to change the stay dates</a>).</li>
+    <li><strong>Room booked at</strong> card: the nightly price this booking was made at, VAT and levy included, times the nights. <strong>Rate / night</strong> shows the same booked rate, not today's room price. On staff screens a note <em>Today's price is MWK ... a night &mdash; this booking keeps the price it was booked at</em> shows when today's price is different.</li>
     <li><strong>Folio / Charges</strong>: the guest's bill. <strong>Add Custom Charge</strong>, <strong>Add Menu Item to Folio</strong> and <strong>Void Charge</strong> are explained in <a href="#folio">How to add or void folio charges</a>. Food and drinks charged to the room from the till or room service also appear here.</li>
     <li><strong>Payment breakdown</strong>: every payment, refund and credit, and what is still owed. See <a href="#payment">How to take a payment</a>.</li>
     <li><strong>Totals on this page include VAT and levy.</strong> For rooms booked together as a group, a line at the top reads <strong>Group total (incl. VAT &amp; levy)</strong>: every room in the group that is still live, at its full amount. A cancelled room is left out. On <strong>Payment Details</strong> for a room payment the row is called <strong>Total (incl. VAT &amp; levy)</strong> and shows the whole bill (room, VAT, levy and any folio extras), so <strong>Paid</strong> plus <strong>Due</strong> adds up to it. The small <strong>i</strong> next to the folio total, the payment breakdown and the group total explains how the figure is made up (see <a href="#total-info">How a booking total is worked out</a>).</li>
@@ -162,12 +164,34 @@
   </ul>
   <p>Times on this page (Created, Updated, the timeline) are shown in your own device's time zone. If they look wrong, check the clock and time zone on your phone or computer.</p>
 
+  <h2 id="booked-rate">The booked rate: what a stay is charged at</h2>
+  <p>Every booking keeps the nightly price it was made at. This is the <strong>booked rate</strong>, VAT and levy included. Money screens show it as <em>Booked at MWK 356,000 &times; 3 nights = MWK 1,068,000</em>.</p>
+  <ul>
+    <li>Charges, payments, invoices, receipts and credit notes use the booked rate, never today's room price.</li>
+    <li>When today's room price is different, staff screens add the note <em>Today's price is MWK ... a night &mdash; this booking keeps the price it was booked at.</em></li>
+    <li>Extra nights from <strong>Extend stay</strong> or a date change are priced at the booked rate.</li>
+    <li>Changes to a room's price made from 9 November 2026 are recorded in the History window, so you can see who changed a price and when.</li>
+  </ul>
+
+  <h2 id="history">How to see the history of a booking</h2>
+  <p>The History window lists every step for the booking in order: when it happened, who did it (name and role), what happened, and the amounts before and after where money or a price changed. It changes nothing.</p>
+  <ol class="steps">
+    <li>On the Bookings list, open <strong>More</strong> &rarr; <strong>History</strong>. You can also click <strong>History</strong> on a Payment Details page, or open a booking's history from its payment row.</li>
+    <li>Read down the steps. Each one shows the time, the person and their role, and what they did.</li>
+    <li>Where an amount changed, read <em>old &rarr; new</em>.</li>
+    <li>Look at <strong>How the price was worked out</strong>. It shows the booked rate &times; nights. If today's price is different, it is shown too. The booking keeps the price it was booked at.</li>
+    <li>Click <strong>Print</strong> to print the list. Press <strong>Esc</strong> or click the cross to close.</li>
+  </ol>
+  <div class="note"><p>Changes made before 9 November 2026 were not recorded, so the history starts from that date. Room and seasonal rate changes are recorded from that date, so History shows who changed a price and when.</p></div>
+  <p>When the AI Assistant is on, the History window starts with a short plain <strong>Summary</strong> copied from the steps below. Staff can also ask the Assistant <em>"What happened to booking [reference]?"</em></p>
+
   <h2 id="calendar">How to use the Calendar</h2>
   <p>Go to <strong>Front Desk</strong> &rarr; <strong>Calendar</strong>. It shows one month at a time, with one block per room and the bookings and blocks on each day. Use it to see which rooms are free (available or vacant) on any day: a room with no booking bar and no colour is free to sell.</p>
   <ol class="steps">
     <li>Click <strong>Previous</strong> or <strong>Next</strong> to change month.</li>
     <li>Use the filters: <strong>Room number or name…</strong> search, <strong>All types</strong>, <strong>All rooms</strong>, <strong>All statuses</strong> (Available, Occupied, Reserved, Cleaning, Maintenance, Out of order, Inspection) and <strong>All floors</strong>. A clear button appears once a filter is set.</li>
     <li>Click a booking bar to open that booking. Click a blocked day to open Blocked Dates.</li>
+    <li>Hover over a booking bar to see its <strong>Booked at</strong> line (booked rate a night &times; nights), when the booking has one.</li>
   </ol>
   <p>The legend shows the room colours: Available (no booking), Reserved (future stay), Occupied (checked-in / active stay), Cleaning, Maintenance, Out of order, Blocked date (room-type or individual).</p>
   <ul>
@@ -256,6 +280,7 @@
 
   <h2 id="payment">How to take a payment</h2>
   <ul>
+    <li><strong>Before taking a payment, check the Booked at line and the Balance due.</strong> The Record Payment box shows <em>Booked at MWK 356,000 &times; 3 nights = MWK 1,068,000</em> next to the amount, with <strong>Paid so far</strong> and <strong>Balance due</strong>. Charge what is still owed on that booked price, never on today's room price.</li>
     <li><strong>At booking time:</strong> use <strong>Payment Received Now</strong> and <strong>Amount Collected</strong> on the Payment step.</li>
     <li><strong>Pay everything in one click (cash):</strong> on the booking page click <strong>Mark as Paid</strong> in the <strong>Payment breakdown</strong> box. You are asked <em>"Mark this booking payment as paid and email the guest a receipt?"</em> It records the outstanding balance as a completed cash payment and emails the guest a receipt with a PDF. The button is not shown once the booking is Paid.</li>
     <li><strong>Part payments or other methods:</strong> use <strong>Money</strong> &rarr; <strong>Payments</strong> &rarr; <strong>Record Payment</strong> (or <strong>Money</strong> &rarr; <strong>Add Payment</strong>), or <strong>More</strong> &rarr; <strong>Payments &amp; balance</strong> on the list (needs Add Payments). The one-click <strong>Record payment as paid</strong> button on the list is hidden once any payment exists, so use these for a booking that already has a deposit.</li>
@@ -292,7 +317,7 @@
   <h2 id="dates">How to change the stay dates (extend a stay by a night)</h2>
   <ol class="steps">
     <li>On the booking page click <strong>Adjust Stay Dates</strong>. The button is not shown for cancelled, checked-out or no-show bookings.</li>
-    <li>Set <strong>New Check-in Date</strong> and <strong>New Check-out Date</strong>. The <strong>Adjustment Preview</strong> shows the new nights, new total and the amount difference.</li>
+    <li>Set <strong>New Check-in Date</strong> and <strong>New Check-out Date</strong>. The <strong>Adjustment Preview</strong> shows the new nights, new total and the amount difference. It also shows the <strong>Booked rate</strong> times the new nights: the charge is worked out from that booked rate, not today's price.</li>
     <li>Type the <strong>Reason for Adjustment</strong> (required).</li>
     <li>Click <strong>Confirm Adjustment</strong>. You will see <em>"Stay dates adjusted successfully."</em> with the extra amount due or the refund or credit. The guest is emailed about the change when an email address is on file.</li>
   </ol>
@@ -344,6 +369,7 @@
     <li>Click <strong>Generate Invoice</strong> to make the PDF without sending it (<em>"Invoice generated successfully: [number]"</em>), or <strong>Send Invoice</strong> to email it (<em>"Invoice sent successfully to guest."</em>). <strong>Send via WhatsApp</strong> appears only when WhatsApp is switched on, and needs a guest phone number.</li>
     <li>For a quotation click <strong>Send Quotation</strong> at the top of the page. Choose <strong>Quotation valid for</strong> (1, 2, 3, 5, 7, 14, 21 or 30 days), add an optional <strong>Note to guest</strong> and send. The page then shows <em>Quotation last sent</em> with the date.</li>
   </ol>
+  <p>Invoices, receipts and credit notes show <strong>Booked at</strong> (booked rate &times; nights) under the room line, so the guest sees the price they booked. Check it before you send.</p>
   <p>On the booking page, <strong>Send Invoice</strong> is labelled <strong>Send Invoice (balance due)</strong>. <strong>Send Quotation</strong> is shown only while nothing has been paid. Once a payment has been received, <strong>Send Receipt</strong> is shown at the top of the page and in the Invoices box.</p>
   <div class="note"><p><strong>Send via WhatsApp</strong> sends the guest a private link to the invoice, valid for 30 days. The link is not a public file address. If the booking is cancelled or deleted, its links stop working at once. A guest who opens an expired link sees <em>"This link has expired"</em> and is asked to contact the hotel.</p></div>
   <p>From the list, the <strong>More</strong> menu shows only the document that fits the booking:</p>

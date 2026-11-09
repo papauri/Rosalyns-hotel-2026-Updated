@@ -63,6 +63,7 @@
       <tr><td>Failed, Cancelled</td><td>Does not count as money received.</td></tr>
     </tbody>
   </table>
+  <p>On the Payments list, a room payment shows a small <strong>Booked at</strong> line under the booking name (booked rate a night &times; nights). Each row has a <strong>History</strong> button (see <a href="#history">How to see the history of a payment</a>).</p>
   <p>A refund line counts against the guest only once it is <strong>Processing</strong> or <strong>Completed</strong>. A <strong>Pending</strong> or <strong>Failed</strong> refund does not change the balance yet.</p>
   <p>The Payments page shows these buttons at the top: <strong>Record Payment</strong>, <strong>Export CSV</strong>, <strong>Dashboard</strong>, and <strong>Invoices</strong> (Invoices only appears when invoicing is switched on for your hotel). Below them are four figures: <strong>Collected (filtered)</strong>, <strong>Pending / Partial</strong>, <strong>Today</strong> (with the last 7 days) and <strong>Refunds (filtered)</strong>. A fold-out called <strong>Breakdown by source, method and status</strong> splits the same figures three ways. The figures follow whatever filters you have set.</p>
 
@@ -94,12 +95,23 @@
     <li>Check the <strong>Payment Preview</strong> on the right: <strong>Subtotal</strong>, <strong>VAT</strong> (only when VAT is on), <strong>Total to record</strong>, and <strong>Outstanding after this payment</strong>.</li>
     <li>Click <strong>Record Payment</strong>, then confirm. You will see <em>"Payment recorded successfully."</em> and the payment details page opens.</li>
   </ol>
+  <p><strong>Before you save, check the Booked at line and the Balance due.</strong> For a room booking, the box next to the amount shows <em>Booked at MWK 356,000 &times; 3 nights = MWK 1,068,000</em>, then <strong>Paid so far</strong> and <strong>Balance due</strong>. Type the amount still owed on the booked price, never on today's room price.</p>
   <p>Amount rules: it must be more than zero and not above 99,999,999. Example: a guest owes MWK 150,000 and hands over MWK 100,000 cash. Enter 100000, method Cash, status Completed. The balance becomes MWK 50,000.</p>
   <p>When you pick a booking, the card shows <em>"Balance due MWK ..."</em>, and the same figure appears under the amount box. Type less for a part payment.</p>
   <p>If nothing is owed, there is no way to take a payment. The page shows <em>"Nothing is owed on this booking."</em> with <em>"No payment can be recorded here. Use a credit note or refund instead."</em>, the amount box stays locked and <strong>Record Payment</strong> is switched off. In the list of matching bookings, a settled one reads <em>"Nothing owed"</em> instead of a balance. The same rule applies to a payment saved through the API, and to <strong>Record payment</strong> on conference, gym and event enquiries.</p>
   <p>If the guest paid more than the balance, see the next section. Without the tick the payment is refused.</p>
   <p>What goes out automatically when you save as <strong>Paid</strong> or <strong>Completed</strong>: a <strong>receipt</strong> with a PDF goes to the guest's email, once, for every type (Room, Conference, Gym and Event). Your <strong>Additional CC Emails</strong> get it too. No invoice is sent, because an invoice asks for money and this guest has just paid. The success line tells you what happened, for example <em>"Receipt emailed to the guest."</em> See <a href="#sent">What the guest is sent, and when</a>. If the receipt cannot go, the same line says why (see Problems and fixes).</p>
   <div class="note"><p>Clicking <strong>Record Payment</strong> twice by accident does not record it twice. You will see <em>"Payment already recorded (reference). Duplicate submission ignored."</em></p></div>
+
+  <h2 id="history">How to see the history of a payment</h2>
+  <p>The History window lists every step for the payment in order: when it happened, who did it (name and role), what happened, and the amounts before and after where money changed. It changes nothing.</p>
+  <ol class="steps">
+    <li>On the Payments list, click the <strong>History</strong> button on the row. You can also click <strong>History</strong> at the top of <strong>Payment Details</strong>.</li>
+    <li>Read down the steps. Each one shows the time, the person and their role, and what happened.</li>
+    <li>Where an amount changed, read <em>old &rarr; new</em>.</li>
+    <li>Click <strong>Print</strong> to print the list. Press <strong>Esc</strong> or click the cross to close.</li>
+  </ol>
+  <p>Payments recorded before 9 November 2026 have no earlier steps, so their history starts from that date. The Summary at the top appears only when the AI Assistant is on.</p>
 
   <h2 id="overpay">What happens when a guest pays too much</h2>
   <p>Enter what the guest actually handed over. If it is more than they owe, you must confirm it on purpose. Then the system keeps the booking at zero balance and moves the extra into a credit note.</p>
@@ -243,6 +255,7 @@
   </table>
   <p>A fully paid account is never asked for money again, so its rows do not offer an invoice email, a reminder or WhatsApp. They offer <strong>Send receipt</strong> instead.</p>
   <p>Invoice emails are supported for Room, Conference, Gym and Event payments only.</p>
+  <p>Invoices, receipts and credit notes for a room show <strong>Booked at</strong> (the booked rate &times; nights), so the figure matches what the guest booked. Today's room price is never used for them.</p>
 
   <h2 id="credit">Credit notes</h2>
   <p><strong>Money</strong> &rarr; <strong>Credit Notes</strong>. A credit note is a stored amount owed to a guest that can be used against a later bill. Figures at the top: <strong>Total Issued</strong>, <strong>Total Redeemed</strong>, <strong>Outstanding Balance</strong>, <strong>Status Breakdown</strong>. Statuses: Active, Partial (partially applied), Used (fully applied), Voided, Expired.</p>
