@@ -81,6 +81,57 @@ if (!function_exists('finance_sequence_setting')) {
     }
 }
 
+if (!function_exists('finance_document_number_prefix')) {
+    /**
+     * Optional hotel letters put in front of every invoice, receipt, credit note and refund
+     * number (setting `document_number_prefix`, e.g. 'LSH' gives LSH-INV-2026-000001).
+     * Upper-cased, letters and digits only, at most 6. '' (the default) = numbers exactly as before.
+     * The prefix only changes the printed number: sequence keys never include it, so turning it
+     * on or off neither restarts nor reuses a number.
+     */
+    function finance_document_number_prefix(): string
+    {
+        $raw = strtoupper(trim(finance_sequence_setting('document_number_prefix', '')));
+        $clean = (string)preg_replace('/[^A-Z0-9]/', '', $raw);
+        return substr($clean, 0, 6);
+    }
+}
+
+if (!function_exists('finance_apply_document_prefix')) {
+    /** '<PREFIX>-' . $number when a prefix is set and the number does not already start with it. */
+    function finance_apply_document_prefix(string $number, ?string $docPrefix = null): string
+    {
+        $docPrefix = $docPrefix ?? finance_document_number_prefix();
+        if ($docPrefix === '' || strpos($number, $docPrefix . '-') === 0) {
+            return $number;
+        }
+        return $docPrefix . '-' . $number;
+    }
+}
+
+if (!function_exists('finance_format_document_number')) {
+    /**
+     * Pure formatter used by every generator below (no DB).
+     *   $kind 'receipt' with no hotel prefix keeps the old undashed shape: RCP2026000001.
+     *   Everything else, and receipts once a hotel prefix is set: [<HOTEL>-]<PREFIX>-<YEAR>-<6 digits>.
+     */
+    function finance_format_document_number(string $kind, string $prefix, string $scope, int $number, ?string $docPrefix = null): string
+    {
+        $docPrefix = $docPrefix ?? finance_document_number_prefix();
+        $digits = str_pad((string)$number, 6, '0', STR_PAD_LEFT);
+        if ($docPrefix === '') {
+            return $kind === 'receipt'
+                ? $prefix . $scope . $digits
+                : $prefix . '-' . $scope . '-' . $digits;
+        }
+        $base = rtrim($prefix, '-');
+        if ($base === '') {
+            $base = $prefix;
+        }
+        return finance_apply_document_prefix($base . '-' . $scope . '-' . $digits, $docPrefix);
+    }
+}
+
 if (!function_exists('finance_sequence_scope_from_date')) {
     function finance_sequence_scope_from_date(?string $dateValue): string
     {
@@ -186,10 +237,11 @@ if (!function_exists('finance_next_receipt_number')) {
         $scope = finance_sequence_scope_from_date($paymentDate);
         $startNumber = (int)finance_sequence_setting('receipt_start_number', '1');
         $sequenceName = 'receipt:' . finance_sequence_key_fragment($prefix);
+        $docPrefix = finance_document_number_prefix();
 
         for ($attempt = 0; $attempt < 1000; $attempt++) {
             $nextNumber = finance_next_sequence_number($pdo, $sequenceName, $scope, $startNumber);
-            $receiptNumber = $prefix . $scope . str_pad((string)$nextNumber, 6, '0', STR_PAD_LEFT);
+            $receiptNumber = finance_format_document_number('receipt', $prefix, $scope, $nextNumber, $docPrefix);
 
             if (!finance_payment_value_exists($pdo, 'receipt_number', $receiptNumber)) {
                 return $receiptNumber;
@@ -207,10 +259,11 @@ if (!function_exists('finance_next_invoice_number')) {
         $scope = finance_sequence_scope_from_date($invoiceDate);
         $startNumber = max(1, $invoiceStart);
         $sequenceName = 'invoice:' . finance_sequence_key_fragment($channel . ':' . $prefix);
+        $docPrefix = finance_document_number_prefix();
 
         for ($attempt = 0; $attempt < 1000; $attempt++) {
             $nextNumber = finance_next_sequence_number($pdo, $sequenceName, $scope, $startNumber);
-            $invoiceNumber = $prefix . '-' . $scope . '-' . str_pad((string)$nextNumber, 6, '0', STR_PAD_LEFT);
+            $invoiceNumber = finance_format_document_number('invoice', $prefix, $scope, $nextNumber, $docPrefix);
 
             if (!finance_invoice_number_exists($pdo, $invoiceNumber)) {
                 return $invoiceNumber;
@@ -232,10 +285,11 @@ if (!function_exists('finance_next_credit_note_number')) {
         $scope        = finance_sequence_scope_from_date($issueDate);
         $startNumber  = max(1, (int)finance_sequence_setting('credit_note_start_number', '1'));
         $sequenceName = 'credit_note:' . finance_sequence_key_fragment($prefix);
+        $docPrefix    = finance_document_number_prefix();
 
         for ($attempt = 0; $attempt < 1000; $attempt++) {
             $nextNumber = finance_next_sequence_number($pdo, $sequenceName, $scope, $startNumber);
-            $cnNumber   = $prefix . '-' . $scope . '-' . str_pad((string)$nextNumber, 6, '0', STR_PAD_LEFT);
+            $cnNumber   = finance_format_document_number('credit_note', $prefix, $scope, $nextNumber, $docPrefix);
 
             try {
                 $stmt = $pdo->prepare("SELECT COUNT(*) FROM credit_notes WHERE credit_note_number = ?");
@@ -255,7 +309,7 @@ if (!function_exists('finance_next_credit_note_number')) {
 
 if (!function_exists('finance_next_refund_reference')) {
     /**
-     * Allocate a unique refund reference (REF-YYYY-NNNNNN).
+     * Allocate a unique refund reference (REF-YYYY-NNNNNN; LSH-REF-YYYY-NNNNNN with a hotel prefix).
      *
      * Refund rows live in the payments table alongside receipts and invoices, so they
      * get the same atomic allocation rather than a random number nobody checks.
@@ -270,10 +324,11 @@ if (!function_exists('finance_next_refund_reference')) {
         $scope        = finance_sequence_scope_from_date($refundDate);
         $startNumber  = max(1, (int)finance_sequence_setting('refund_start_number', '1'));
         $sequenceName = 'refund:' . finance_sequence_key_fragment($prefix);
+        $docPrefix    = finance_document_number_prefix();
 
         for ($attempt = 0; $attempt < 1000; $attempt++) {
             $nextNumber = finance_next_sequence_number($pdo, $sequenceName, $scope, $startNumber);
-            $refundRef  = $prefix . '-' . $scope . '-' . str_pad((string)$nextNumber, 6, '0', STR_PAD_LEFT);
+            $refundRef  = finance_format_document_number('refund', $prefix, $scope, $nextNumber, $docPrefix);
 
             $stmt = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE payment_reference = ?");
             $stmt->execute([$refundRef]);

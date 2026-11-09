@@ -1238,7 +1238,16 @@ if (!function_exists('receipt_generate_pdf')) {
             $receiptNumber = $lockedNumber;
             $payment['receipt_number'] = $receiptNumber;
         } elseif ($receiptNumber === '') {
-            $receiptNumber = 'RFD-' . (string)($payment['payment_reference'] ?? $paymentId);
+            $refundBase = (string)($payment['payment_reference'] ?? $paymentId);
+            if (function_exists('finance_document_number_prefix') && ($docPrefix = finance_document_number_prefix()) !== '') {
+                // Hotel letters lead the number (LSH-RFD-REF-2026-000001), never twice.
+                if (strpos($refundBase, $docPrefix . '-') === 0) {
+                    $refundBase = substr($refundBase, strlen($docPrefix) + 1);
+                }
+                $receiptNumber = $docPrefix . '-RFD-' . $refundBase;
+            } else {
+                $receiptNumber = 'RFD-' . $refundBase;
+            }
             $payment['receipt_number'] = $receiptNumber;
         }
 
