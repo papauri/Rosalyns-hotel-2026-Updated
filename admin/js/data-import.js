@@ -708,13 +708,16 @@
         function isOpenQ(q) { return q.answer === null || q.answer === undefined || q.answer === ''; }
         function debounce(fn, ms) { var t = null; return function () { var a = arguments; window.clearTimeout(t); t = window.setTimeout(function () { fn.apply(null, a); }, ms); }; }
         function headerBottom() { var hd = document.querySelector('header.admin-header'); return hd ? Math.max(0, hd.getBoundingClientRect().bottom) : 0; }
+        // Display size (includes/page-zoom.php): the page is scaled with CSS zoom, so screen pixels (getBoundingClientRect, innerHeight)
+        // are divided by it before they are used as CSS lengths, and CSS lengths (offsetHeight) are multiplied by it to compare with the screen.
+        function pageZ() { var z = window.__rhPageZoom; return (document.documentElement.classList.contains('page-zoomed') && z > 0) ? z : 1; }
         // #rh-admin-page is an overflow container that never scrolls (the window does), so position:sticky cannot pin the bar: it is pinned with
         // position:fixed under the admin header while it would scroll out of view, and a spacer keeps the page from jumping.
         function stickyOffset() {
             var b = S.R && S.R.bar;
             if (!b) { return headerBottom(); }
             // while pinned the real height; before that the height it had the last time it was pinned (the bar is shorter pinned: no helper lines)
-            return headerBottom() + (b.classList.contains('is-stuck') ? b.offsetHeight : (S.R.stuckH || Math.min(b.offsetHeight, 140)));
+            return headerBottom() + pageZ() * (b.classList.contains('is-stuck') ? b.offsetHeight : (S.R.stuckH || Math.min(b.offsetHeight, 140)));
         }
         function scrollToEl(el, focusInside) {
             if (!el) { return; }
@@ -1146,17 +1149,26 @@
         };
         document.addEventListener('keydown', window.__diKeys);
         // while the bar is pinned to the top it drops its helper lines, so it does not cover the list (they show again at rest)
-        if (window.__diScroll) { window.removeEventListener('scroll', window.__diScroll); }
+        if (window.__diScroll) { window.removeEventListener('scroll', window.__diScroll, true); }
         window.__diScroll = function () {
             var b = S.R && S.R.bar, w = S.R && S.R.barWrap;
             if (!b || !w || !document.body.contains(w) || panels[3].hidden) { return; }
-            var off = headerBottom(), wr = w.getBoundingClientRect();
+            var z = pageZ(), off = headerBottom(), wr = w.getBoundingClientRect();
             var stick = wr.top <= off + 2 && S.R.results.getBoundingClientRect().bottom > off + 220;
             if (stick && !b.classList.contains('is-stuck')) { w.style.height = b.offsetHeight + 'px'; b.classList.add('is-stuck'); w.style.height = b.offsetHeight + 'px'; }
             if (!stick && b.classList.contains('is-stuck')) { b.classList.remove('is-stuck'); w.style.height = ''; b.style.top = ''; b.style.left = ''; b.style.width = ''; b.style.maxHeight = ''; }
-            if (stick) { b.style.top = off + 'px'; b.style.left = wr.left + 'px'; b.style.width = wr.width + 'px'; b.style.maxHeight = Math.max(160, window.innerHeight - off - 16) + 'px'; S.R.stuckH = b.offsetHeight; }
+            if (stick) {
+                // never wider than the visible content area: from the page frame's left edge (the sidebar) to its right edge less the docked Assistant, inside the screen
+                var pg = w.closest('#rh-admin-page') || document.body, pr = pg.getBoundingClientRect(), cs = window.getComputedStyle(pg);
+                var lo = Math.max(0, pr.left + (parseFloat(cs.paddingLeft) || 0) * z), hi = Math.min(window.innerWidth, pr.right - (parseFloat(cs.paddingRight) || 0) * z);
+                var l = Math.max(wr.left, lo), r = Math.min(wr.right, hi);
+                if (r - l < 120) { l = lo; r = hi; }
+                b.style.top = (off / z) + 'px'; b.style.left = (l / z) + 'px'; b.style.width = ((r - l) / z) + 'px';
+                b.style.maxHeight = Math.max(160, (window.innerHeight - off - 16) / z) + 'px'; S.R.stuckH = b.offsetHeight;
+            }
         };
-        window.addEventListener('scroll', window.__diScroll, { passive: true });
+        // capture: a scroll inside the page (not only the window's) moves the bar's place holder too
+        window.addEventListener('scroll', window.__diScroll, { passive: true, capture: true });
         window.addEventListener('resize', window.__diScroll);
         // the admin sidebar collapsing / opening moves the page sideways without a scroll or resize event: follow the bar's own place holder
         function watchBar() {
