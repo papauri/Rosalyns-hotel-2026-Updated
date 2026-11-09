@@ -558,6 +558,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $excess = round(min($ovCredit, $paymentAmount), 2);
                         if ($excess > BALANCE_TOLERANCE) {
                             $ovRef = (string)($ovRow['ref'] ?? '');
+                            // Note VAT = the account's pro-rata share (levy outside the VAT base), as the refund legs reverse it
+                            $ovSplit = rh_account_vat_split($pdo, $bookingType, (int)$bookingId, $excess, (float)$vatRate);
                             $cnResult = issueCreditNote($pdo, [
                                 'booking_type'      => $bookingType, // gym/event are stored as 'goodwill' (enum); real type+id kept in the notes
                                 'booking_id'        => $bookingId,
@@ -565,6 +567,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 'guest_name'        => trim((string)($ovRow['contact_name'] ?? '')) !== '' ? (string)$ovRow['contact_name'] : 'Customer',
                                 'guest_email'       => (string)($ovRow['contact_email'] ?? ''),
                                 'amount'            => $excess,
+                                'vat_rate'          => (float)$ovSplit['rate'],
+                                'vat_amount'        => (float)$ovSplit['vat'],
                                 'reason'            => 'overpayment',
                                 'reason_notes'      => 'Overpaid by ' . number_format($excess, 2) . ' on payment ' . $paymentRef . ' [account: ' . $bookingType . ' #' . $bookingId . ']',
                                 'issued_by'         => (int)$user['id'],

@@ -494,8 +494,12 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     header('Content-Type: text/csv; charset=utf-8');
     header('Content-Disposition: attachment; filename="payments-' . date('Y-m-d-His') . '.csv"');
     $out = fopen('php://output', 'w');
-    fputcsv($out, ['Reference', 'Type', 'BookingID', 'BookingRef', 'Customer', 'Date', 'Subtotal', 'VAT %', 'VAT', 'Total', 'Method', 'PaymentType', 'Status', 'ReceiptNo', 'InvoiceNo', 'TransactionRef', 'Created', 'ProcessedBy']);
+    require_once __DIR__ . '/includes/finance-account-sync.php';
+    // Room rows hold net + tourism levy in payment_amount; the levy is outside the VAT base, so it gets its
+    // own column and VAT % is VAT / net without levy (Net + Tourism levy + VAT = Total).
+    fputcsv($out, ['Reference', 'Type', 'BookingID', 'BookingRef', 'Customer', 'Date', 'Net (excl. VAT and levy)', 'Tourism levy', 'VAT %', 'VAT', 'Total', 'Method', 'PaymentType', 'Status', 'ReceiptNo', 'InvoiceNo', 'TransactionRef', 'Created', 'ProcessedBy']);
     while ($row = $exportStmt->fetch(PDO::FETCH_ASSOC)) {
+        $csvVat = rh_payment_vat_lines($pdo, $row, true);
         fputcsv($out, array_map('payments_csv_cell', [
             $row['payment_reference'],
             $row['booking_type'],
@@ -503,8 +507,9 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             $row['booking_reference'],
             $row['customer'],
             $row['payment_date'],
-            $row['payment_amount'],
-            $row['vat_rate'],
+            number_format((float)$csvVat['net'], 2, '.', ''),
+            number_format((float)$csvVat['levy'], 2, '.', ''),
+            number_format((float)$csvVat['rate'], 2, '.', ''),
             $row['vat_amount'],
             $row['total_amount'],
             $row['payment_method'],

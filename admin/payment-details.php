@@ -443,10 +443,16 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
             <div class="rh-strip__cell">
                 <span class="rh-strip__label">This payment</span>
                 <strong class="rh-strip__value"><?php echo $currency_symbol . number_format((float)$payment['total_amount'], 0); ?></strong>
+                <?php $pdStripSplit = rh_payment_vat_lines($pdo, $payment); $pdStripLevy = (float)$pdStripSplit['levy'] > BALANCE_TOLERANCE; $pdStripCur = htmlspecialchars((string)$currency_symbol, ENT_QUOTES, 'UTF-8'); ?>
                 <span class="rh-strip__sub">
-                    Subtotal <?php echo $currency_symbol . number_format((float)$payment['payment_amount'], 0); ?>
+                    <?php if ($pdStripLevy): ?>
+                        Net <?php echo $pdStripCur . number_format((float)$pdStripSplit['net'], 0); ?>
+                        &middot; Levy <?php echo $pdStripCur . number_format((float)$pdStripSplit['levy'], 0); ?>
+                    <?php else: ?>
+                        Subtotal <?php echo $pdStripCur . number_format((float)$payment['payment_amount'], 0); ?>
+                    <?php endif; ?>
                     <?php if ((float)$payment['vat_amount'] > 0): ?>
-                        &middot; VAT <?php echo $currency_symbol . number_format((float)$payment['vat_amount'], 0); ?>
+                        &middot; VAT <?php echo $pdStripCur . number_format((float)$payment['vat_amount'], 0); ?>
                     <?php endif; ?>
                 </span>
             </div>
@@ -573,14 +579,32 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
                     <div class="rh-panel__head">
                         <h2 class="rh-panel__title">Amount breakdown</h2>
                     </div>
+                    <?php
+                    // Room rows carry the tourism levy inside payment_amount (outside the VAT base). Show it on
+                    // its own line, pro rata to the booking (levy / account gross x this row's total), and the
+                    // true VAT rate on the net without levy. Stored figures are never changed.
+                    $pdCur  = htmlspecialchars((string)$currency_symbol, ENT_QUOTES, 'UTF-8');
+                    $pdVat  = (float)($payment['vat_amount'] ?? 0);
+                    $pdNetStored = (float)($payment['payment_amount'] ?? 0);
+                    $pdSplit = rh_payment_vat_lines($pdo, $payment);
+                    $pdHasLevy = $pdSplit['levy'] > BALANCE_TOLERANCE;
+                    $pdRateTxt = number_format((float)$pdSplit['rate'], 2) . '%';
+                    ?>
                     <table class="rh-kv no-auto-pagination">
                         <tbody>
-                            <tr><th scope="row">Subtotal (excl. VAT)</th><td><?php echo $currency_symbol; ?><?php echo number_format($payment['payment_amount'], 2); ?></td></tr>
-                            <?php if ($payment['vat_amount'] > 0): ?>
-                                <tr><th scope="row">VAT rate</th><td><?php echo number_format($payment['vat_rate'], 2); ?>%</td></tr>
-                                <tr><th scope="row">VAT</th><td><?php echo $currency_symbol; ?><?php echo number_format($payment['vat_amount'], 2); ?></td></tr>
+                            <?php if ($pdHasLevy): ?>
+                                <tr><th scope="row">Net (excl. VAT and levy)</th><td><?php echo $pdCur . number_format((float)$pdSplit['net'], 2); ?><div class="rh-page-head__meta">The value VAT is charged on.</div></td></tr>
+                                <?php if ($pdVat > BALANCE_TOLERANCE): ?>
+                                    <tr><th scope="row">VAT (<?php echo htmlspecialchars($pdRateTxt, ENT_QUOTES, 'UTF-8'); ?>)</th><td><?php echo $pdCur . number_format($pdVat, 2); ?><div class="rh-page-head__meta">VAT on the net above.</div></td></tr>
+                                <?php endif; ?>
+                                <tr><th scope="row">Tourism levy</th><td><?php echo $pdCur . number_format((float)$pdSplit['levy'], 2); ?><div class="rh-page-head__meta">This amount's share of the booking's levy. Levy is charged on the net, not on VAT.</div></td></tr>
+                            <?php else: ?>
+                                <tr><th scope="row">Subtotal (excl. VAT)</th><td><?php echo $pdCur . number_format($pdNetStored, 2); ?><div class="rh-page-head__meta">The amount before VAT.</div></td></tr>
+                                <?php if ($pdVat > BALANCE_TOLERANCE): ?>
+                                    <tr><th scope="row">VAT (<?php echo htmlspecialchars($pdRateTxt, ENT_QUOTES, 'UTF-8'); ?>)</th><td><?php echo $pdCur . number_format($pdVat, 2); ?><div class="rh-page-head__meta">VAT on the subtotal above.</div></td></tr>
+                                <?php endif; ?>
                             <?php endif; ?>
-                            <tr><th scope="row">Total</th><td><strong><?php echo $currency_symbol; ?><?php echo number_format($payment['total_amount'], 2); ?></strong></td></tr>
+                            <tr><th scope="row">Total</th><td><strong><?php echo $pdCur . number_format((float)$payment['total_amount'], 2); ?></strong><div class="rh-page-head__meta"><?php echo ($payment['payment_type'] ?? '') === 'refund' ? 'The full amount refunded.' : 'The full amount received.'; ?></div></td></tr>
                         </tbody>
                     </table>
                 </section>

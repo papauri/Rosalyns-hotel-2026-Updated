@@ -36,6 +36,7 @@ if (!function_exists('issueCreditNote')) {
      *   guest_email?        string
      *   amount              float  — face value (incl. VAT)
      *   vat_rate?           float  — if omitted, reads vat_rate site_setting
+     *   vat_amount?         float  — precomputed VAT (account pro-rata split); if omitted, extracted from vat_rate
      *   reason              string — cancellation|service_issue|early_checkout|overpayment|goodwill|pricing_error|other
      *   reason_notes?       string
      *   expires_at?         string — Y-m-d; if omitted, calculated from credit_note_expiry_months setting
@@ -74,6 +75,11 @@ if (!function_exists('issueCreditNote')) {
             $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
             $vatRate    = isset($data['vat_rate']) ? (float)$data['vat_rate'] : ($vatEnabled ? (float)getSetting('vat_rate') : 0.0);
             $vatAmount  = $vatRate > 0 ? round($amount * ($vatRate / (100 + $vatRate)), 2) : 0.0;
+            // A caller that already split the money pro rata to its account (overpayment, store
+            // credit) passes that VAT so the note matches the refund legs (levy is not VAT).
+            if (isset($data['vat_amount']) && is_numeric($data['vat_amount'])) {
+                $vatAmount = max(0.0, min(round((float)$data['vat_amount'], 2), $amount));
+            }
 
             // Expiry
             $expiresAt = null;
@@ -756,6 +762,12 @@ if (!function_exists('rh_auto_credit_overpayment')) {
         $ref   = $pick($row, ['booking_reference', 'reference_number', 'enquiry_reference', 'inquiry_reference']);
         $name  = $pick($row, ['guest_name', 'name', 'organization_name', 'company_name', 'contact_name', 'contact_person']);
         $email = $pick($row, ['guest_email', 'email', 'contact_email']);
+        // VAT on the note = the account's pro-rata share (levy is outside the VAT base), as the refund legs reverse it
+        $cnVatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+        $cnFallbackRate = $cnVatEnabled ? (float)getSetting('vat_rate') : 0.0;
+        $cnSplit = function_exists('rh_account_vat_split')
+            ? rh_account_vat_split($pdo, $bookingType, $bookingId, $excess, $cnFallbackRate)
+            : ['rate' => $cnFallbackRate, 'vat' => ($cnFallbackRate > 0 ? round($excess * ($cnFallbackRate / (100 + $cnFallbackRate)), 2) : 0.0)];
         $cn = issueCreditNote($pdo, [
             'booking_type'      => $bookingType,
             'booking_id'        => $bookingId,
@@ -763,6 +775,8 @@ if (!function_exists('rh_auto_credit_overpayment')) {
             'guest_name'        => $name !== '' ? $name : 'Customer',
             'guest_email'       => $email,
             'amount'            => $excess,
+            'vat_rate'          => (float)$cnSplit['rate'],
+            'vat_amount'        => (float)$cnSplit['vat'],
             'reason'            => 'overpayment',
             'reason_notes'      => 'Overpaid by ' . number_format($excess, 2) . ' on payment ' . $paymentRef . ' [account: ' . $bookingType . ' #' . $bookingId . ']',
             'issued_by'         => $userId,

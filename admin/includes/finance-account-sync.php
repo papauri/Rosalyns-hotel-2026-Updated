@@ -472,14 +472,133 @@ if (!function_exists('rh_sync_account_payments')) {
     }
 }
 
+if (!function_exists('rh_vat_split_from_totals')) {
+    /**
+     * Pure maths (no DB): split a GROSS amount pro rata to an account's gross / VAT / levy totals.
+     * VAT = gross x accountVat / accountGross (unchanged rule). Levy share = gross x accountLevy /
+     * accountGross (the tourism levy sits outside the VAT base, on net). 'net' = gross - VAT
+     * (levy stays in it, as payments.payment_amount stores it); 'net_ex_levy' = net - levy share.
+     * 'rate' is the TRUE VAT rate = accountVat / (accountGross - accountVat - accountLevy), so a
+     * levy never lowers the rate shown. Returns null when the account carries no VAT.
+     *
+     * @return array{rate:float,vat:float,levy:float,net:float,net_ex_levy:float}|null
+     */
+    function rh_vat_split_from_totals(float $gross, float $accountGross, float $accountVat, float $accountLevy = 0.0): ?array
+    {
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        $gross = round($gross, 2);
+        if ($accountGross <= 0.001 || $accountVat <= 0.001) {
+            return null;
+        }
+        $ratio = min(0.99, $accountVat / $accountGross);
+        $vat   = round($gross * $ratio, 2);
+        $net   = round($gross - $vat, 2);
+        $accountLevy = max(0.0, $accountLevy);
+        $levy  = $accountLevy > 0 ? round($gross * ($accountLevy / $accountGross), 2) : 0.0;
+        $levy  = max(0.0, min($levy, max(0.0, $net)));
+        $vatBase = $accountGross - $accountVat - $accountLevy;
+        if ($accountLevy > 0 && $vatBase > $tol) {
+            $rate = round($accountVat / $vatBase * 100, 2);
+        } else {
+            $rate = round($ratio / (1 - $ratio) * 100, 2);
+        }
+        return ['rate' => $rate, 'vat' => $vat, 'levy' => $levy, 'net' => $net, 'net_ex_levy' => round($net - $levy, 2)];
+    }
+}
+
+if (!function_exists('rh_payment_row_vat_display')) {
+    /**
+     * Pure maths (no DB) for showing a STORED payment / refund row: its levy share pro rata to the
+     * account (levy / accountGross x row total), the net without VAT and levy, and the true VAT rate
+     * (stored VAT / that net). With no levy it is the stored figures as they are.
+     *
+     * @return array{levy:float,net:float,rate:float}
+     */
+    function rh_payment_row_vat_display(float $paymentAmount, float $vatAmount, float $totalAmount, float $storedRate, float $accountGross, float $accountLevy): array
+    {
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        $levy = 0.0;
+        if ($accountLevy > $tol && $accountGross > $tol && abs($totalAmount) > $tol) {
+            $levy = round($totalAmount * min(1.0, $accountLevy / $accountGross), 2);
+            $levy = max(0.0, min($levy, max(0.0, $paymentAmount)));
+        }
+        $net  = round($paymentAmount - $levy, 2);
+        $rate = $storedRate;
+        if ($levy > $tol && $vatAmount > $tol && $net > $tol) {
+            $rate = round($vatAmount / $net * 100, 2);
+        }
+        return ['levy' => $levy, 'net' => $net, 'rate' => $rate];
+    }
+}
+
+if (!function_exists('rh_payment_vat_lines')) {
+    /**
+     * What to SHOW for a stored payment / refund row: net without VAT and levy, levy share and the true
+     * VAT rate. Room rows read the booking's levy and gross (total_with_vat + folio extras, the same base
+     * the VAT was split on); every other row, or a room with no levy, is shown as stored. Read-only.
+     * Also shown as stored: a CANCELLED booking (its folio bills no levy) and any row whose worked-out rate
+     * would exceed the booking's own vat_rate + 0.05 (its VAT was taken at the flat rate, levy included,
+     * e.g. rows from before 2026-10-01), so no levy line is invented for them.
+     * $cache = true reuses one booking's totals across rows (CSV export).
+     *
+     * @return array{levy:float,net:float,rate:float}
+     */
+    function rh_payment_vat_lines(PDO $pdo, array $payment, bool $cache = false): array
+    {
+        static $acct = [];
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        $out = ['levy' => 0.0, 'net' => round((float)($payment['payment_amount'] ?? 0), 2), 'rate' => (float)($payment['vat_rate'] ?? 0)];
+        $bid = (int)($payment['booking_id'] ?? 0);
+        if ((string)($payment['booking_type'] ?? '') !== 'room' || $bid <= 0) {
+            return $out;
+        }
+        if (!$cache || !isset($acct[$bid])) {
+            $a = ['gross' => 0.0, 'levy' => 0.0, 'vat_rate' => 0.0];
+            try {
+                $st = $pdo->prepare("SELECT tourism_levy_amount, total_with_vat, total_amount, vat_amount, vat_rate, status FROM bookings WHERE id = ? LIMIT 1");
+                $st->execute([$bid]);
+                if ($b = $st->fetch(PDO::FETCH_ASSOC)) {
+                    $a['levy'] = (string)($b['status'] ?? '') === 'cancelled' ? 0.0 : max(0.0, (float)($b['tourism_levy_amount'] ?? 0));
+                    $a['vat_rate'] = (float)($b['vat_rate'] ?? 0);
+                    if ($a['levy'] > $tol) {
+                        $g = (float)($b['total_with_vat'] ?? 0);
+                        if ($g <= $tol) {
+                            $g = (float)($b['total_amount'] ?? 0) + (float)($b['vat_amount'] ?? 0);
+                        }
+                        if (function_exists('getBookingFolioSummary')) {
+                            $g += (float)(getBookingFolioSummary($bid)['extras_total'] ?? 0);
+                        }
+                        $a['gross'] = $g;
+                    }
+                }
+            } catch (Throwable $e) {
+                $a = ['gross' => 0.0, 'levy' => 0.0, 'vat_rate' => 0.0];
+            }
+            $acct[$bid] = $a;
+        }
+        $a = $acct[$bid];
+        if ($a['levy'] <= $tol || $a['gross'] <= $tol) {
+            return $out;
+        }
+        $shown = rh_payment_row_vat_display((float)($payment['payment_amount'] ?? 0), (float)($payment['vat_amount'] ?? 0),
+            (float)($payment['total_amount'] ?? 0), (float)($payment['vat_rate'] ?? 0), $a['gross'], $a['levy']);
+        // VAT already taken at the flat rate (levy inside it): splitting a levy out would overstate the rate
+        if ($a['vat_rate'] > 0 && (float)$shown['rate'] > $a['vat_rate'] + 0.05) {
+            return $out;
+        }
+        return $shown;
+    }
+}
+
 if (!function_exists('rh_account_vat_split')) {
     /**
      * Split a GROSS payment into net + VAT pro rata to the account's own VAT / gross
      * ratio (levy and zero-rated lines carry no VAT, so they dilute the ratio exactly as
-     * they did on the invoice). Falls back to the global rate extraction when the account
-     * has no VAT data.
+     * they did on the invoice). The rate returned is the true VAT rate on the VAT-able net
+     * (a room's tourism levy is taken out of the base, see rh_vat_split_from_totals).
+     * Falls back to the global rate extraction when the account has no VAT data.
      *
-     * @return array{rate:float,vat:float,net:float}
+     * @return array{rate:float,vat:float,net:float,levy?:float} levy = this amount's share of a room's tourism levy (room accounts only)
      */
     function rh_account_vat_split(PDO $pdo, string $bookingType, int $bookingId, float $gross, float $fallbackRate = 0.0): array
     {
@@ -490,8 +609,21 @@ if (!function_exists('rh_account_vat_split')) {
                 $s = getBookingFolioSummary($bookingId);
                 $g = (float)($s['grand_total'] ?? 0);
                 $v = (float)($s['total_vat'] ?? 0);
-                if ($g > 0.001 && $v > 0.001) {
-                    $ratio = min(0.99, $v / $g);
+                // Levy is part of the folio base gross; a cancelled booking's folio bills only the
+                // retained amount with no VAT, so no levy is taken out there.
+                $levy = 0.0;
+                try {
+                    $lv = $pdo->prepare("SELECT tourism_levy_amount, status FROM bookings WHERE id = ? LIMIT 1");
+                    $lv->execute([$bookingId]);
+                    if (($lr = $lv->fetch(PDO::FETCH_ASSOC)) && (string)($lr['status'] ?? '') !== 'cancelled') {
+                        $levy = max(0.0, (float)($lr['tourism_levy_amount'] ?? 0));
+                    }
+                } catch (Throwable $e) {
+                    $levy = 0.0; // levy unknown: the VAT amount is unaffected, only the rate stays diluted
+                }
+                $sp = rh_vat_split_from_totals($gross, $g, $v, $levy);
+                if ($sp !== null) {
+                    return ['rate' => $sp['rate'], 'vat' => $sp['vat'], 'net' => $sp['net'], 'levy' => $sp['levy']];
                 }
             } else {
                 $tables = ['gym' => 'gym_inquiries', 'event' => 'event_inquiries', 'conference' => 'conference_inquiries'];

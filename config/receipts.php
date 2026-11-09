@@ -239,7 +239,15 @@ if (!function_exists('receipt_hydrate_context')) {
             $guestName = 'Guest';
         }
 
+        // Net without VAT and levy, levy share and true VAT rate for this row (room levy sits outside the VAT base)
+        $syncLib = __DIR__ . '/../admin/includes/finance-account-sync.php';
+        if (!function_exists('rh_payment_vat_lines') && is_file($syncLib)) {
+            require_once $syncLib;
+        }
+        $vatSplit = function_exists('rh_payment_vat_lines') ? rh_payment_vat_lines($pdo, $payment) : null;
+
         return [
+            'vat_split' => $vatSplit,
             'guest_name' => $guestName,
             'guest_email' => $guestEmail,
             'guest_phone' => $guestPhone,
@@ -264,6 +272,11 @@ if (!function_exists('receipt_placeholders')) {
         $vatRateNum  = (float)($payment['vat_rate'] ?? 0) > 0
             ? (float)$payment['vat_rate']
             : ($vatEnabled ? (float)getSetting('vat_rate') : 0.0);
+        // Room rows: true VAT rate on the net without the tourism levy (the stored rate may be levy-diluted)
+        $vatSplit    = is_array($context['vat_split'] ?? null) ? $context['vat_split'] : null;
+        if ($vatSplit && (float)$vatSplit['levy'] > BALANCE_TOLERANCE && (float)$vatSplit['rate'] > 0) {
+            $vatRateNum = (float)$vatSplit['rate'];
+        }
         $vatNumStr   = (string)getSetting('vat_number', '');
         $vatNumHtml  = $vatNumStr !== ''
             ? '<p style="margin:8px 0 0;font-size:11px;color:#9b8f7e;text-align:center;">VAT Reg. No.: ' . htmlspecialchars($vatNumStr, ENT_QUOTES, 'UTF-8') . '</p>'
@@ -363,6 +376,17 @@ if (!function_exists('receipt_build_pos_style_html_raw')) {
         }
         $tipAmount     = (float)($payment['tip_amount'] ?? 0);
         $isRefund      = (string)($payment['payment_type'] ?? '') === 'refund';
+        // Room rows: payment_amount = net + tourism levy (levy is outside the VAT base). Show the levy on its
+        // own line and the true VAT rate on the net without levy.
+        $vatSplit      = is_array($context['vat_split'] ?? null) ? $context['vat_split'] : null;
+        $levyShare     = $vatSplit ? (float)$vatSplit['levy'] : 0.0;
+        $hasLevy       = $levyShare > BALANCE_TOLERANCE;
+        if ($hasLevy) {
+            $netAmount = (float)$vatSplit['net'];
+            if ((float)$vatSplit['rate'] > 0) {
+                $vatRate = (float)$vatSplit['rate'];
+            }
+        }
 
         // Logo: use public HTTPS URL only — CID/data-URI embedding causes PNG attachment artefact
         $logoUrl  = function_exists('hotel_email_logo_url') ? hotel_email_logo_url() : '';
@@ -403,14 +427,19 @@ if (!function_exists('receipt_build_pos_style_html_raw')) {
         $vatDocMode  = function_exists('vat_mode') ? vat_mode() : 'off';
         $totalsHtml  = '';
         if ($vatDocMode === 'exclusive') {
-            $totalsHtml .= '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Sub-total (net)</td>';
+            $totalsHtml .= '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">' . ($hasLevy ? 'Net (excl. VAT and levy)' : 'Sub-total (net)') . '</td>';
             $totalsHtml .= '<td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $currency . ' ' . number_format($netAmount, 2) . '</td></tr>';
         }
         if ($vatDocMode === 'exclusive' && $vatAmount > 0) {
             $vatLabel = 'VAT' . ($vatRate > 0 ? ' (' . number_format($vatRate, 1) . '%)' : '');
             $totalsHtml .= '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">' . htmlspecialchars($vatLabel, ENT_QUOTES, 'UTF-8') . '</td>';
             $totalsHtml .= '<td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $currency . ' ' . number_format($vatAmount, 2) . '</td></tr>';
-        } elseif ($vatDocMode === 'inclusive') {
+        }
+        if ($vatDocMode === 'exclusive' && $hasLevy) {
+            $totalsHtml .= '<tr><td style="padding:6px 10px;border-bottom:1px solid #e8e0d5;border-right:1px solid #d9cec1;">Tourism levy</td>';
+            $totalsHtml .= '<td align="right" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;white-space:nowrap;">' . $currency . ' ' . number_format($levyShare, 2) . '</td></tr>';
+        }
+        if ($vatDocMode === 'inclusive') {
             $noteRate = $vatRate > 0 ? $vatRate : (float)getSetting('vat_rate', 0);
             if ($noteRate > 0) {
                 $totalsHtml .= '<tr><td colspan="2" style="padding:6px 10px;border-bottom:1px solid #e8e0d5;font-size:11px;color:#7C6E5B;text-align:right;">All prices include VAT at ' . htmlspecialchars(rtrim(rtrim(number_format($noteRate, 2), '0'), '.'), ENT_QUOTES, 'UTF-8') . '%</td></tr>';
@@ -981,6 +1010,15 @@ if (!function_exists('receipt_render_payment_pdf_html')) {
         $rate = (float)($payment['vat_rate'] ?? 0);
         $mode = function_exists('vat_mode') ? vat_mode() : 'off';
         $showVatAmount = function_exists('vat_shows_amount') ? vat_shows_amount() : ($vat > 0);
+        // Room rows: payment_amount = net + tourism levy (levy is outside the VAT base). Show the levy on its
+        // own line and the true VAT rate on the net without levy.
+        $vatSplit = is_array($context['vat_split'] ?? null) ? $context['vat_split'] : null;
+        $levyShare = $vatSplit ? (float)$vatSplit['levy'] : 0.0;
+        $hasLevy = $levyShare > BALANCE_TOLERANCE;
+        $netShown = $hasLevy ? (float)$vatSplit['net'] : $net;
+        if ($hasLevy && (float)$vatSplit['rate'] > 0) {
+            $rate = (float)$vatSplit['rate'];
+        }
 
         $bookingRef = (string)($payment['booking_reference'] ?? '');
         $payRef = (string)($payment['payment_reference'] ?? '');
@@ -999,7 +1037,7 @@ if (!function_exists('receipt_render_payment_pdf_html')) {
         ];
 
         // Exclusive: the line is net and VAT is added below. Inclusive/off: the line is the amount paid.
-        $lineAmount = ($mode === 'exclusive' && $showVatAmount) ? $net : $gross;
+        $lineAmount = ($mode === 'exclusive' && $showVatAmount) ? $netShown : $gross;
         $desc = rh_pdf_e((string)($context['description'] ?? 'Payment'));
         $typeLabel = ucwords(str_replace('_', ' ', (string)($payment['payment_type'] ?? '')));
         if ($typeLabel !== '') {
@@ -1079,10 +1117,13 @@ if (!function_exists('receipt_render_payment_pdf_html')) {
 
         // Itemised net lines (no discount/service) already add up to the net, so the subtotal row would repeat it.
         if ($mode === 'exclusive' && $showVatAmount && !($itemisedNet && !$totals)) {
-            $totals[] = ['label' => 'Subtotal (net)', 'value' => $money($net)];
+            $totals[] = ['label' => $hasLevy ? 'Net (excl. VAT and levy)' : 'Subtotal (net)', 'value' => $money($netShown)];
         }
         foreach (rh_pdf_vat_rows($vat, $rate, $cur) as $row) {
             $totals[] = $row;
+        }
+        if ($hasLevy && $mode === 'exclusive' && $showVatAmount) {
+            $totals[] = ['label' => 'Tourism levy', 'value' => $money($levyShare)];
         }
         if ($tip > 0) {
             $totals[] = ['label' => 'Tip', 'value' => '+' . $money($tip), 'type' => 'success'];

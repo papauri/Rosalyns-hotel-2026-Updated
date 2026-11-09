@@ -288,6 +288,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                     'reason'              => $cnReasonMap[$refund_reason] ?? 'other',
                     'reason_notes'        => 'Store-credit refund ' . $refundRef . ($refund_notes !== '' ? ' — ' . $refund_notes : ''),
                     'vat_rate'            => $vat_rate,
+                    'vat_amount'          => $vat_amount, // the refund row's own VAT, so note VAT == refund VAT (levy is not VAT)
                     'original_payment_id' => $payment_id,
                     'issued_by'           => (int)($_SESSION['admin_user_id'] ?? 0),
                     'generate_pdf'        => false,
