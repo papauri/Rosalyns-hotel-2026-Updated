@@ -10530,18 +10530,22 @@ function rh_write_booking_stay_totals(PDO $pdo, int $bookingId, array $tt, ?int 
 /**
  * Price a booking for a different number of nights at its BOOKED nightly rate
  * (see rh_booked_stay_split) and return the new split; pure calculation, no writes.
+ * $addBackNight: a removed rate-plan discount added back per night (rh_rate_plan_dropped(), staff date changes
+ * only; early / late check-out pass nothing and keep the booked rate). The tourism levy is taken from the room part
+ * only, never from packages (rh_stay_totals_with_package()).
  *
  * @return array{old_gross:float,new_gross:float,delta:float,totals:array,per_night:float,new_child_supplement:float}
  */
-function rh_reprice_at_booked_rate(array $b, int $newNights): array
+function rh_reprice_at_booked_rate(array $b, int $newNights, float $addBackNight = 0.0): array
 {
-    if (!function_exists('rh_stay_totals')) {
+    if (!function_exists('rh_stay_totals_with_package')) {
         require_once __DIR__ . '/../includes/pricing.php';
     }
     $split = rh_booked_stay_split($b);
     $newNights = max(1, $newNights);
-    $newGross = round($split['per_night'] * $newNights + $split['package_gross'], 2);
-    $tt = rh_stay_totals($newGross, 'final', rh_booking_has_levy($b));
+    $addBackNight = max(0.0, $addBackNight);
+    $newGross = round(($split['per_night'] + $addBackNight) * $newNights + $split['package_gross'], 2);
+    $tt = rh_stay_totals_with_package($newGross, $split['package_gross'], rh_booking_has_levy($b));
     $oldChild = (float)($b['child_supplement_total'] ?? 0);
     $newChild = $oldChild > 0 ? round($oldChild * ($newNights / $split['nights']), 2) : 0.0;
     return [
@@ -10549,7 +10553,7 @@ function rh_reprice_at_booked_rate(array $b, int $newNights): array
         'new_gross' => $tt['total_with_vat'],
         'delta' => round($tt['total_with_vat'] - $split['total_with_vat'], 2),
         'totals' => $tt,
-        'per_night' => $split['per_night'],
+        'per_night' => $split['per_night'] + $addBackNight,
         'new_child_supplement' => $newChild,
     ];
 }
@@ -10563,7 +10567,7 @@ function rh_reprice_at_booked_rate(array $b, int $newNights): array
  * @param string $newCheckOut New check-out date (Y-m-d)
  * @return array Calculation result with new amount, nights, and error if any
  */
-function calculateDateAdjustmentAmount(array $booking, string $newCheckIn, string $newCheckOut): array
+function calculateDateAdjustmentAmount(array $booking, string $newCheckIn, string $newCheckOut, float $addBackNight = 0.0): array
 {
     try {
         $checkIn = DateTime::createFromFormat('Y-m-d', $newCheckIn);
@@ -10582,7 +10586,8 @@ function calculateDateAdjustmentAmount(array $booking, string $newCheckIn, strin
 
         $oldNights = (int)($booking['number_of_nights'] ?? 0);
         $oldChildSupplement = (float)($booking['child_supplement_total'] ?? 0);
-        $rp = rh_reprice_at_booked_rate($booking, $newNights);
+        // $addBackNight: a removed rate-plan discount (rh_rate_plan_dropped(), RP-3); 0 keeps the booked rate as it is.
+        $rp = rh_reprice_at_booked_rate($booking, $newNights, $addBackNight);
         $tt = $rp['totals'];
 
         return [
@@ -10649,8 +10654,21 @@ function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string
             return ['success' => false, 'message' => $validation['message']];
         }
 
+        // RP-3: a length-of-stay / weekend / seasonal discount the new dates no longer qualify for is removed
+        // (only when the dates change; early / late check-out never come through here).
+        $dateDrop = ['removed' => false, 'per_night' => 0.0];
+        $adjIn = DateTime::createFromFormat('!Y-m-d', $newCheckIn);
+        $adjOut = DateTime::createFromFormat('!Y-m-d', $newCheckOut);
+        if ($adjIn && $adjOut && $adjOut > $adjIn
+            && ($newCheckIn !== substr((string)$booking['check_in_date'], 0, 10) || $newCheckOut !== substr((string)$booking['check_out_date'], 0, 10))) {
+            if (!function_exists('rh_rate_plan_dropped')) {
+                require_once __DIR__ . '/../includes/pricing.php';
+            }
+            $dateDrop = rh_rate_plan_dropped($pdo, $booking, $newCheckIn, $newCheckOut, (int)$adjIn->diff($adjOut)->days, (int)$booking['room_id']);
+        }
+
         // Calculate new amount
-        $calculation = calculateDateAdjustmentAmount($booking, $newCheckIn, $newCheckOut);
+        $calculation = calculateDateAdjustmentAmount($booking, $newCheckIn, $newCheckOut, (float)$dateDrop['per_night']);
         if (isset($calculation['error'])) {
             $pdo->rollBack();
             return ['success' => false, 'message' => $calculation['error']];
@@ -10687,6 +10705,9 @@ function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string
             $pdo, $bookingId, $calculation['totals'], (int)$calculation['new_nights'],
             $newCheckIn, $newCheckOut, (float)$calculation['new_child_supplement']
         );
+        if (!empty($dateDrop['removed'])) {
+            rh_rate_plan_drop_clear($pdo, $bookingId);
+        }
         if (!recalculateBookingFinancials($bookingId)) {
             $pdo->rollBack();
             return ['success' => false, 'message' => 'Could not recalculate the booking balance.'];
@@ -10791,11 +10812,17 @@ function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string
 
         $pdo->commit();
 
+        if (!empty($dateDrop['removed'])) {
+            rh_rate_plan_drop_log($bookingId, $booking['booking_reference'] ?? null, $dateDrop, (float)rh_booked_stay_split($booking)['per_night'],
+                (float)$calculation['price_per_night'], (float)$oldTotalAmount, (float)$newRoomTotal, $adjustedByName);
+        }
+
         return [
             'success' => true,
             'adjustment_id' => $adjustmentId,
             'calculation' => $calculation,
             'credit_balance' => $creditBalance > 0 ? $creditBalance : null,
+            'rate_plan_removed' => $dateDrop,
             'message' => 'Booking dates adjusted successfully.' . ($creditBalance > 0 ? " Guest has a credit balance of " . $adjCs . ' ' . number_format($creditBalance, 2) . "." : '')
         ];
     } catch (Throwable $e) {

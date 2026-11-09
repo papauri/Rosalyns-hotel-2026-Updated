@@ -109,7 +109,7 @@ function rh_room_change_nights(array $b, ?string $today = null): array
  * Price a move of booking $b to room type $newRoom. Pure calculation.
  *
  * @return array{direction:string,stayed:int,affected:int,old_rack:float,new_rack:float,booked_night:float,
- *               current_total:float,charge_total:float,charge_delta:float,rack_value_delta:float,new_child_supplement:float}
+ *               current_total:float,charge_total:float,charge_delta:float,rack_value_delta:float,new_child_supplement:float,package_gross:float}
  */
 function rh_room_change_quote(array $b, array $oldRoom, array $newRoom): array
 {
@@ -144,6 +144,7 @@ function rh_room_change_quote(array $b, array $oldRoom, array $newRoom): array
         'charge_delta' => round($chargeTotal - $split['total_with_vat'], 2),
         'rack_value_delta' => round($diff * $affected, 2),
         'new_child_supplement' => $newChild,
+        'package_gross' => $split['package_gross'],
     ];
 }
 
@@ -335,7 +336,8 @@ function rh_apply_room_type_change(PDO $pdo, int $bookingId, int $newRoomId, str
             $pdo->prepare("UPDATE bookings SET room_id = ?, updated_at = NOW() WHERE id = ?")->execute([$newRoomId, $bookingId]);
         }
         if ($pricing === 'charge') {
-            $tt = rh_stay_totals($q['charge_total'], 'final', rh_booking_has_levy($b));
+            // Levy on the room part only, never on packages (as booking.php saves it).
+            $tt = rh_stay_totals_with_package($q['charge_total'], (float)($q['package_gross'] ?? 0), rh_booking_has_levy($b));
             rh_write_booking_stay_totals($pdo, $bookingId, $tt, null, null, null, $q['new_child_supplement']);
         }
         if (!recalculateBookingFinancials($bookingId)) {

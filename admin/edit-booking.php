@@ -245,19 +245,21 @@ $vatRate = (float)getSetting('vat_rate', 0);
 /**
  * Price the stay for edited dates / occupancy / children, keeping the guest's BOOKED rate:
  * new nightly = booked nightly + (rack for the new occupancy & children - rack for the old ones).
- * Packages are carried unchanged.
+ * Packages are carried unchanged. $addBackNight: a rate-plan discount the new dates no longer qualify for
+ * (rh_rate_plan_dropped(), only when the dates change), added back per night.
  */
-function edit_booking_reprice(array $booking, array $roomType, int $nights, string $occupancy, int $children): array
+function edit_booking_reprice(array $booking, array $roomType, int $nights, string $occupancy, int $children, float $addBackNight = 0.0): array
 {
     $split = rh_booked_stay_split($booking);
     $oldRack = rh_room_type_rack_night($roomType, $booking);
     $newRack = rh_room_type_rack_night($roomType, array_merge($booking, ['occupancy_type' => $occupancy, 'child_guests' => $children]));
-    $newNight = max(0.0, $split['per_night'] + ($newRack - $oldRack));
+    $newNight = max(0.0, $split['per_night'] + ($newRack - $oldRack) + max(0.0, $addBackNight));
     $gross = round($newNight * max(1, $nights) + $split['package_gross'], 2);
     // Stored on the price basis (VAT and levy are not inside it), like create-booking and the documents expect.
     $childNight = rh_room_type_child_night($roomType, array_merge($booking, ['occupancy_type' => $occupancy, 'child_guests' => $children]));
     return [
-        'totals' => rh_stay_totals($gross, 'final', rh_booking_has_levy($booking)),
+        // Levy on the room part only, never on the package (as booking.php saves it).
+        'totals' => rh_stay_totals_with_package($gross, $split['package_gross'], rh_booking_has_levy($booking)),
         'gross' => $gross,
         'per_night' => round($newNight, 2),
         'rack_delta_night' => round($newRack - $oldRack, 2),
@@ -460,10 +462,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
 
                 // Price follows the stay (never typed in): booked rate kept; occupancy / children add or remove the rack difference.
                 $newGross = $storedGross;
+                $ebDrop = ['removed' => false, 'per_night' => 0.0];
                 if ($can_edit_stay && ($datesChanged || $occChanged)) {
+                    // RP-3: a length-of-stay / weekend / seasonal discount the new dates no longer qualify for is removed (dates only).
+                    if ($datesChanged) {
+                        $ebDrop = rh_rate_plan_dropped($pdo, $locked, $check_in, $check_out, $number_of_nights, $room_id);
+                    }
                     // Children are priced with the rule the booking was saved with (its snapshot), so editing never reprices on today's rule.
-                    $rp = edit_booking_reprice($locked, array_merge($roomTypeRow, rh_child_rule_snapshot(rh_child_rule_from_booking($locked))), $number_of_nights, $occupancy_type, $child_guests);
+                    $rp = edit_booking_reprice($locked, array_merge($roomTypeRow, rh_child_rule_snapshot(rh_child_rule_from_booking($locked))), $number_of_nights, $occupancy_type, $child_guests, (float)$ebDrop['per_night']);
                     rh_write_booking_stay_totals($pdo, (int)$booking_id, $rp['totals'], null, null, null, $rp['child_supplement']);
+                    if (!empty($ebDrop['removed'])) {
+                        rh_rate_plan_drop_clear($pdo, (int)$booking_id);
+                    }
                     $newGross = $rp['gross'];
                     if (abs($newGross - $storedGross) > BALANCE_TOLERANCE) {
                         $changes['total_amount'] = ['old' => $currency_sym . ' ' . number_format($storedGross, 2), 'new' => $currency_sym . ' ' . number_format($newGross, 2)];
@@ -503,6 +513,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
 
             if (empty($error)) {
                 $actor = $user['full_name'] ?? ($user['username'] ?? 'Admin');
+                if (!empty($ebDrop['removed'])) {
+                    rh_rate_plan_drop_log((int)$booking_id, $booking['booking_reference'] ?? null, $ebDrop,
+                        rh_booked_stay_split($locked)['per_night'], (float)$rp['per_night'], (float)$storedGross, (float)$newGross, (string)$actor);
+                }
                 // In-house room move: old room to housekeeping, new room occupied.
                 if ($edit_mode === 'inhouse' && $roomPointerChanged) {
                     foreach ($oldRoomIds as $rid) {
@@ -532,7 +546,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                 }
                 if (!empty($auditNew)) {
                     logBookingAudit($booking_id, 'modified', $auditOld, $auditNew,
-                        'Edited on full booking page by ' . $actor . (isset($changes['total_amount']) ? ' (stay repriced at the booked rate)' : '') . ($underTierNote ?? ''),
+                        'Edited on full booking page by ' . $actor . (!empty($ebDrop['removed']) ? ' (stay repriced; ' . $ebDrop['plan_name'] . ' discount removed)' : (isset($changes['total_amount']) ? ' (stay repriced at the booked rate)' : '')) . ($underTierNote ?? ''),
                         $booking['booking_reference'] ?? null);
                     rh_log_event('edit-booking', 'info', 'Booking edited by admin', [
                         'booking_id' => $booking_id, 'ref' => $booking['booking_reference'] ?? null,
@@ -541,6 +555,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                 }
 
                 $flash = empty($auditNew) ? 'No changes to save.' : 'Booking updated.';
+                if (!empty($ebDrop['removed'])) {
+                    $flash .= ' ' . rh_rate_plan_drop_sentence($ebDrop);
+                }
                 if (!empty($changes) && ($_POST['notify_guest'] ?? '1') === '1') {
                     $refresh = $pdo->prepare($booking_select_sql);
                     $refresh->execute([$booking_id]);
@@ -587,6 +604,10 @@ $preview_data = [
     'occupancy' => (string)($booking['occupancy_type'] ?? 'single'),
     'children' => (int)($booking['child_guests'] ?? 0),
     'rack' => $preview_rack,
+    'checkIn' => substr((string)$booking['check_in_date'], 0, 10),
+    'checkOut' => substr((string)$booking['check_out_date'], 0, 10),
+    // RP-3: the discount a date change would remove (same rule as rh_rate_plan_dropped() on save), or null.
+    'planDrop' => $can_edit_stay ? rh_rate_plan_drop_js($pdo, $booking, (int)$booking['room_id']) : null,
 ];
 // Booked rate × nights (includes/booked-rate.php): the rate the booking was made at, never today's price.
 // Display only; the save still prices with edit_booking_reprice().
@@ -883,6 +904,7 @@ $back_url = 'booking-details.php?id=' . $booking_id;
                             <small id="ebRateNew" style="display:block; color:#444; margin-top:2px;" hidden></small>
                         </div>
                     <?php endif; ?>
+                    <small id="ebPlanDrop" style="display:block; color:#b42318; margin-top:8px;" role="status" hidden></small>
                     <small id="ebPriceNote" style="color:#777; display:block; margin-top:8px;">
                         <?php if ($eb_rate['ok']): ?>
                             Booked at = the room rate a night (incl. taxes) &times; nights, at the price the booking was made at. Date changes are charged at this rate; today's room price does not change it.
@@ -946,12 +968,12 @@ $back_url = 'booking-details.php?id=' . $booking_id;
 
             // The booked-rate line for the edited stay, built like rh_booked_rate_change_for_booking(): booked rate
             // × new nights, the children charge scaled by nights, the package kept as it is; it adds up to "After this change".
-            function rateLine(nights, total, night, occ, children) {
+            function rateLine(nights, total, night, occ, children, addBack) {
                 const el = $('ebRateNew');
                 const R = P.rate;
                 if (!el || !R) return;
                 const sameRate = occ === P.occupancy && children === P.children;
-                if (sameRate && nights === R.nights) {
+                if (sameRate && nights === R.nights && !addBack) {
                     el.hidden = true;
                     return;
                 }
@@ -978,24 +1000,71 @@ $back_url = 'booking-details.php?id=' . $booking_id;
                 el.hidden = false;
             }
 
+            // RP-3, same rule as rh_rate_plan_drop_reason() on save: '' while the booking's length-of-stay / weekend /
+            // seasonal discount still fits the new dates, else the plain reason it no longer does.
+            const ymdUtc = s => {
+                const p = String(s || '').split('-').map(Number);
+                return p.length === 3 ? Date.UTC(p[0], p[1] - 1, p[2]) : NaN;
+            };
+            const dayMonYear = s => {
+                const d = new Date(ymdUtc(s));
+                return d.getUTCDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()] + ' ' + d.getUTCFullYear();
+            };
+            function planDropReason(ci, co, nights) {
+                const D = P.planDrop;
+                if (!D) return '';
+                if (!D.appliesToRoom) return 'the plan no longer covers this room type';
+                const nWord = nights + ' night' + (nights === 1 ? '' : 's');
+                if (D.rule === 'los_discount') {
+                    const max = D.maxNights > 0 ? D.maxNights : Infinity;
+                    if (nights >= D.minNights && nights <= max) return '';
+                    return nights < D.minNights
+                        ? 'the stay is now ' + nWord + ' and the plan needs at least ' + D.minNights + ' night' + (D.minNights === 1 ? '' : 's')
+                        : 'the stay is now ' + nWord + ' and the plan allows at most ' + D.maxNights + ' night' + (D.maxNights === 1 ? '' : 's');
+                }
+                if (D.rule === 'weekend') {
+                    const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                    for (let t = ymdUtc(ci), end = ymdUtc(co); t < end; t += 86400000) {
+                        if (D.days.indexOf(new Date(t).getUTCDay()) !== -1) return '';
+                    }
+                    const list = D.days.filter(d => names[d]).map(d => names[d]);
+                    return 'no night of the new stay falls on ' + (list.length ? list.join(', ') : 'the plan\'s days');
+                }
+                // seasonal: matched on the check-in date only
+                if (D.start && D.end && ci >= D.start && ci <= D.end) return '';
+                return 'the new check-in date (' + dayMonYear(ci) + ') is outside the plan\'s dates'
+                    + (D.start && D.end ? ' (' + dayMonYear(D.start) + ' to ' + dayMonYear(D.end) + ')' : '');
+            }
+
             // Same rule as the server: booked nightly rate + (rack for new occupancy/children - rack for old).
             function preview() {
                 const ci = $('check_in_date') ? $('check_in_date').value : '';
                 const co = $('check_out_date') ? $('check_out_date').value : '';
                 const nights = ci && co ? Math.round((new Date(co) - new Date(ci)) / 86400000) : 0;
+                const dropEl = $('ebPlanDrop');
                 if (nights <= 0) {
                     if ($('ebRateNew')) $('ebRateNew').hidden = true;
+                    if (dropEl) dropEl.hidden = true;
                     $('ebNewTotal').textContent = '-';
                     $('ebDelta').textContent = 'Check-out must be after check-in';
                     return;
                 }
                 const occ = $('occupancy_type') ? $('occupancy_type').value : P.occupancy;
                 const children = $('child_guests') && !$('child_guests').disabled ? parseInt($('child_guests').value || '0', 10) : P.children;
-                const night = Math.max(0, P.bookedNight + rack(occ, children) - rack(P.occupancy, P.children));
+                // Only a change of dates can remove the discount (an occupancy-only edit keeps it).
+                const dropReason = (P.planDrop && (ci !== P.checkIn || co !== P.checkOut)) ? planDropReason(ci, co, nights) : '';
+                const addBack = dropReason ? Number(P.planDrop.perNight || 0) : 0;
+                if (dropEl) {
+                    dropEl.textContent = dropReason
+                        ? 'The ' + P.planDrop.name + ' discount will be removed: ' + dropReason + '. ' + money(addBack) + ' a night is added back to the rate.'
+                        : '';
+                    dropEl.hidden = !dropReason;
+                }
+                const night = Math.max(0, P.bookedNight + rack(occ, children) - rack(P.occupancy, P.children) + addBack);
                 const total = Math.round((night * nights + P.packageGross) * 100) / 100;
                 const delta = total - P.currentTotal;
                 $('ebNewTotal').textContent = money(total);
-                rateLine(nights, total, night, occ, children);
+                rateLine(nights, total, night, occ, children, addBack);
                 const d = $('ebDelta');
                 d.textContent = Math.abs(delta) < 0.01 ? 'No change' : (delta > 0 ? '+' : '') + money(delta);
                 d.style.color = delta > 0.01 ? '#b42318' : (delta < -0.01 ? '#1b5e20' : '#222');

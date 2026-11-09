@@ -212,14 +212,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $message = 'Rate plan created successfully.';
                     }
                     $messageType = 'success';
-                    // Non-blocking: warn about overlapping active plans (pricing applies the single best
-                    // discount if any is non-stacking, otherwise combines stacking plans).
-                    if ($isActive) {
-                        $ovl = $pdo->prepare("SELECT name, start_date, end_date, applies_to, room_type_ids FROM rate_plans WHERE is_active = 1 AND rule_type = ? AND id <> ?");
-                        $ovl->execute([$ruleType, (int)$savedId]);
+                    // Non-blocking: warn about overlapping active plans of the SAME direction (discount vs discount,
+                    // surcharge vs surcharge) on shared room types. Pricing (rh_apply_rate_plans) chooses surcharges and
+                    // discounts apart: in each group a non-stacking plan means only the single best one applies.
+                    if ($isActive && $adjValue != 0) {
+                        $isSurcharge = $adjValue > 0;
+                        $ovl = $pdo->prepare("SELECT name, rule_type, start_date, end_date, applies_to, room_type_ids FROM rate_plans WHERE is_active = 1 AND id <> ? AND "
+                            . ($isSurcharge ? 'adjustment_value > 0' : 'adjustment_value < 0'));
+                        $ovl->execute([(int)$savedId]);
                         $clashes = [];
                         foreach ($ovl->fetchAll(PDO::FETCH_ASSOC) as $o) {
-                            if ($ruleType === 'seasonal' && $startDate && $endDate && $o['start_date'] && $o['end_date'] && ($o['end_date'] < $startDate || $o['start_date'] > $endDate)) {
+                            // Two seasonal plans whose dates do not overlap never meet.
+                            if ($ruleType === 'seasonal' && (string)$o['rule_type'] === 'seasonal' && $startDate && $endDate && $o['start_date'] && $o['end_date']
+                                && ($o['end_date'] < $startDate || $o['start_date'] > $endDate)) {
                                 continue;
                             }
                             if ($appliesTo === 'room_types' && $o['applies_to'] === 'room_types') {
@@ -231,7 +236,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $clashes[] = $o['name'];
                         }
                         if ($clashes) {
-                            $message .= ' Note: it overlaps active plan(s) of the same type: ' . implode(', ', array_slice($clashes, 0, 5)) . '. Guests get the single best price if any overlapping plan is non-stacking.';
+                            $message .= ' Note: it can meet other active ' . ($isSurcharge ? 'surcharge' : 'discount') . ' plan(s) on the same room types: '
+                                . implode(', ', array_slice($clashes, 0, 5)) . '. When a stay matches several ' . ($isSurcharge ? 'surcharges' : 'discounts')
+                                . ' and any of them is non-stacking, only one applies: the ' . ($isSurcharge ? 'highest price' : 'lowest price')
+                                . ' (on a tie, the higher priority plan). If they all stack, they all apply. Surcharges and discounts are worked out separately.';
                         }
                     }
                 } catch (RuntimeException $e) {
@@ -590,8 +598,11 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
             <!-- Explainer -->
             <div style="background:#f8f9fa; border:1px solid #e9ecef; border-radius:8px; padding:16px; margin-bottom:24px; font-size:14px; color:#343a40;">
                 <strong><i class="fas fa-info-circle" style="color:#7E684B;"></i> How it works:</strong>
-                Rate plans are automatically applied to bookings when the stay conditions match.
-                Higher priority plans are evaluated first. Use <em>stacking</em> to apply multiple plans to the same stay.
+                Rate plans are automatically applied to new bookings when the stay conditions match.
+                Surcharges and discounts are worked out separately: surcharges are added to the room price first, then discounts are taken off.
+                If several discounts match and any of them is not set to <em>stack</em>, only the one giving the lowest price applies; if several surcharges match and any is not set to stack, only the one giving the highest price applies.
+                When every matching plan of a kind stacks, they all apply, in priority order. Priority breaks a tie.
+                Changing a booking's dates later removes a length-of-stay, weekend or seasonal discount the new stay no longer qualifies for.
                 <strong>Negative adjustment</strong> = discount &nbsp;|&nbsp; <strong>Positive adjustment</strong> = surcharge.
             </div>
 
@@ -845,7 +856,7 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
                         <div class="form-group">
                             <label for="fieldPriority">Priority (0–255)</label>
                             <input type="number" id="fieldPriority" name="priority" min="0" max="255" value="0">
-                            <p class="form-hint">Higher priority = evaluated first.</p>
+                            <p class="form-hint">Higher priority wins a tie and comes first when stacking plans are applied.</p>
                         </div>
                         <div class="form-group">
                             <label style="margin-bottom:10px;">Options</label>
@@ -956,7 +967,9 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
                     saveBtn.disabled = false;
                     saveBtn.innerHTML = '<i class="fas fa-save"></i> Save Rate Plan';
                     fb.className = 'admin-modal-feedback ' + (res.success ? 'admin-modal-feedback--success' : 'admin-modal-feedback--error') + ' visible';
-                    fb.innerHTML = '<i class="fas fa-' + (res.success ? 'check-circle' : 'exclamation-circle') + '"></i> ' + res.message;
+                    // The message carries admin-typed plan names (overlap note): plain text, never HTML.
+                    const rpMsg = String(res.message || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+                    fb.innerHTML = '<i class="fas fa-' + (res.success ? 'check-circle' : 'exclamation-circle') + '"></i> ' + rpMsg;
                     if (res.success) {
                         if (res.saved_id) {
                             document.getElementById('fieldPlanId').value = res.saved_id;

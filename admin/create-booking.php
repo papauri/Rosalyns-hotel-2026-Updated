@@ -3240,22 +3240,30 @@ try {
             const matching = ratePlans.filter(plan => planAppliesToRoom(plan, roomId) &&
                 planMatchesStay(plan, checkInDate, checkOutDate, nights, daysUntilArrival));
             if (!matching.length) return empty;
-            let applied;
-            if (matching.some(plan => !Number(plan.is_stacking || 0))) {
-                // Any non-stacking plan in play: only the single best (lowest price) plan applies
+            // Same rule as rh_apply_rate_plans() (includes/pricing.php): surcharges and discounts are chosen apart. In each
+            // group a non-stacking plan means only its single best plan applies (discount: lowest price, surcharge:
+            // highest; a tie keeps the earlier plan), else all stack. Surcharges first, then discounts.
+            const pickGroup = (group, price, isDiscount) => {
+                if (!group.length) return [];
+                if (!group.some(plan => !Number(plan.is_stacking || 0))) return group;
                 let best = null, bestPrice = null;
-                matching.forEach(plan => {
-                    const cand = applyRatePlanToPrice(plan, baseRate);
-                    if (bestPrice === null || cand < bestPrice - 0.00001) { bestPrice = cand; best = plan; }
+                group.forEach(plan => {
+                    const cand = applyRatePlanToPrice(plan, price);
+                    if (bestPrice === null || (isDiscount ? cand < bestPrice - 0.00001 : cand > bestPrice + 0.00001)) { bestPrice = cand; best = plan; }
                 });
-                applied = [best];
-            } else {
-                applied = matching;
-            }
+                return [best];
+            };
+            const surcharges = matching.filter(plan => Number(plan.adjustment_value || 0) > 0);
+            const discounts = matching.filter(plan => Number(plan.adjustment_value || 0) < 0);
             let currentRate = baseRate;
-            applied.forEach(plan => { currentRate = applyRatePlanToPrice(plan, currentRate); });
+            const picked = [];
+            pickGroup(surcharges, currentRate, false).forEach(plan => { currentRate = applyRatePlanToPrice(plan, currentRate); picked.push(plan); });
+            pickGroup(discounts, currentRate, true).forEach(plan => { currentRate = applyRatePlanToPrice(plan, currentRate); picked.push(plan); });
+            const applied = matching.filter(plan => picked.indexOf(plan) !== -1); // priority order
+            if (!applied.length) return empty;
             const totalDiscount = baseRate - currentRate;
-            const appliedLabel = applied.map(plan => plan.name || 'Rate plan').join(', ');
+            const fullLabel = applied.map(plan => plan.name || 'Rate plan').join(', ');
+            const appliedLabel = fullLabel.length > 120 ? fullLabel.slice(0, 120).replace(/\s+$/, '') : fullLabel; // bookings.rate_plan_label is 120 long
 
             if (!appliedLabel) return empty;
             return {

@@ -22,6 +22,7 @@ $suites = [
     'Booking full total'    => 'scripts/tests/booking_full_total.php',
     'Booking total breakdown' => 'scripts/tests/booking_total_breakdown.php',
     'Rate plan surcharge display' => 'scripts/tests/rate_plan_surcharge_display.php',
+    'Rate plan rules (RP-3)' => 'scripts/tests/rate_plan_rules_rp3.php',
     'Conference full total' => 'scripts/tests/conference_full_total.php',
     'Concurrent bookings'   => 'scripts/tests/concurrent_booking.php',
     'In-house moves + splits' => 'scripts/tests/inhouse_move.php',

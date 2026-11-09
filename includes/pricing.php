@@ -11,15 +11,18 @@
  *   getActivePackages($pdo, $room_id) : array
  *   calculatePackageCost(array $pkg, int $nights, int $adult_guests) : float
  *   getDynamicPricingPreview($pdo, $room_id, $check_in, $check_out, $nights, $base_price) : array
+ *   rh_apply_rate_plans(array $plans, ...) : array                 PURE plan selection (applyDynamicPricing's rule)
+ *   rh_stay_totals_with_package(float $gross, float $pkgGross, bool $levy) : array   levy on the room part only
+ *   rh_rate_plan_dropped($pdo, array $b, $in, $out, $nights, ?$roomTypeId) : array   staff date change: discount lost?
  */
 
 if (!function_exists('applyDynamicPricing')) {
 
     /**
-     * Find and apply the best applicable rate plan to a base room price.
+     * Find and apply the applicable rate plans to a base room price.
      *
-     * Rules evaluated in priority order (highest first). First non-stacking match wins.
-     * Stacking plans are cumulative.
+     * Surcharges and discounts are chosen separately (see rh_apply_rate_plans()): in each group a non-stacking
+     * plan means only that group's single best plan applies, otherwise all stack; surcharges first, then discounts.
      *
      * @param PDO    $pdo
      * @param int    $room_id       The rooms.id (room type)
@@ -74,66 +77,92 @@ if (!function_exists('applyDynamicPricing')) {
             return $empty;
         }
 
-        if (empty($plans)) {
+        return rh_apply_rate_plans($plans, $room_id, $check_in, $check_out, $nights, $base_price);
+    }
+
+    /**
+     * PURE: apply a priority-ordered list of rate plan rows (priority DESC, id ASC, as _fetchActiveRatePlans()
+     * returns them) to a base nightly price. Same return keys as applyDynamicPricing().
+     *
+     * Rule (owner 2026-11-10, RP-3):
+     *  - matching plans are split into surcharges (adjustment_value > 0) and discounts (< 0);
+     *  - inside each group: if any plan is non-stacking, only that group's single best plan applies (discounts: the
+     *    lowest resulting price, surcharges: the highest; a tie goes to the earlier plan in priority order); if every
+     *    plan in the group stacks, they all apply in priority order;
+     *  - surcharges are applied first, from the base price, then discounts (judged on the price after surcharges,
+     *    the price the guest actually pays); never below 0.
+     * rate_plan_id / rate_plan_row = the first applied plan in priority order; rate_plan_ids / rate_plan_label = every
+     * applied plan in priority order (the label is cut to 120 characters, the bookings.rate_plan_label column).
+     *
+     * @param DateTime|null $today for tests; defaults to today
+     */
+    function rh_apply_rate_plans(array $plans, int $room_id, string $check_in, string $check_out, int $nights, float $base_price, ?DateTime $today = null): array
+    {
+        $empty = [
+            'final_price'     => $base_price,
+            'original_price'  => $base_price,
+            'discount_amount' => 0.0,
+            'rate_plan_id'    => null,
+            'rate_plan_label' => '',
+            'rate_plan_row'   => null,
+        ];
+        if ($nights < 1 || $base_price <= 0 || empty($plans)) {
             return $empty;
         }
 
         $checkInDate  = new DateTime($check_in);
         $checkOutDate = new DateTime($check_out);
-        $today        = new DateTime('today');
+        $today        = $today ? clone $today : new DateTime('today');
         $daysUntilArrival = (int)$today->diff($checkInDate)->days;
         if ($checkInDate < $today) {
             $daysUntilArrival = 0;
         }
 
-        // Collect every plan matching this room + stay (already priority-ordered).
-        $matching = [];
-        foreach ($plans as $plan) {
+        // Every plan matching this room + stay, split by direction (list order = priority order).
+        $surcharges = [];
+        $discounts  = [];
+        $order      = [];
+        foreach (array_values($plans) as $pos => $plan) {
             if (!_planAppliesToRoom($plan, $room_id)) {
                 continue;
             }
             if (!_planMatchesStay($plan, $checkInDate, $checkOutDate, $nights, $daysUntilArrival)) {
                 continue;
             }
-            $matching[] = $plan;
+            $value = (float)($plan['adjustment_value'] ?? 0);
+            if ($value > 0) {
+                $surcharges[] = $plan;
+            } elseif ($value < 0) {
+                $discounts[] = $plan;
+            } else {
+                continue; // a 0 adjustment changes nothing (the form refuses 0)
+            }
+            $order[] = ['pos' => $pos, 'plan' => $plan];
         }
-
-        if (empty($matching)) {
+        if (!$surcharges && !$discounts) {
             return $empty;
         }
 
-        $hasNonStacking = false;
-        foreach ($matching as $plan) {
-            if (empty($plan['is_stacking'])) {
-                $hasNonStacking = true;
-                break;
-            }
-        }
-
-        $applied = [];
-        if ($hasNonStacking) {
-            // Any non-stacking plan in play: only the single best (lowest resulting
-            // price) plan among ALL matching plans applies.
-            $bestPlan  = null;
-            $bestPrice = null;
-            foreach ($matching as $plan) {
-                $candidate = applyRatePlanToPrice($plan, $base_price);
-                if ($bestPrice === null || $candidate < $bestPrice - 0.00001) {
-                    $bestPrice = $candidate;
-                    $bestPlan  = $plan;
-                }
-            }
-            $applied = [$bestPlan];
-        } else {
-            $applied = $matching; // all stacking: combine cumulatively
-        }
-
         $currentPrice = $base_price;
-        foreach ($applied as $plan) {
-            $currentPrice = applyRatePlanToPrice($plan, $currentPrice);
+        $appliedPos   = [];
+        foreach ([[$surcharges, false], [$discounts, true]] as [$group, $isDiscount]) {
+            foreach (_rhRatePlanGroupPick($group, $currentPrice, $isDiscount) as $plan) {
+                $currentPrice = applyRatePlanToPrice($plan, $currentPrice);
+                $appliedPos[] = $plan;
+            }
         }
         $totalDiscount = $base_price - $currentPrice; // positive = discount, negative = surcharge
 
+        // Applied plans back in priority order.
+        $applied = [];
+        foreach ($order as $o) {
+            foreach ($appliedPos as $p) {
+                if ($p === $o['plan']) {
+                    $applied[] = $o['plan'];
+                    break;
+                }
+            }
+        }
         $appliedPlan = $applied[0];
         $labels = [];
         $ids    = [];
@@ -141,16 +170,53 @@ if (!function_exists('applyDynamicPricing')) {
             $labels[] = (string)$plan['name'];
             $ids[]    = (int)$plan['id'];
         }
+        $label = implode(', ', $labels);
+        if (function_exists('mb_substr') && mb_strlen($label) > 120) {
+            $label = rtrim(mb_substr($label, 0, 120));
+        }
 
         return [
             'final_price'     => round($currentPrice, 2),
             'original_price'  => $base_price,
             'discount_amount' => round($totalDiscount, 2),
             'rate_plan_id'    => (int)$appliedPlan['id'],       // primary plan
-            'rate_plan_label' => implode(', ', $labels),        // every applied plan
+            'rate_plan_label' => $label,                        // every applied plan
             'rate_plan_ids'   => $ids,
             'rate_plan_row'   => $appliedPlan,
         ];
+    }
+
+    /**
+     * The plans of ONE direction that apply, starting from $price: all of them (in order) when every plan stacks,
+     * else the single best one (discount: lowest result; surcharge: highest result; ties keep the earlier plan).
+     */
+    function _rhRatePlanGroupPick(array $group, float $price, bool $isDiscount): array
+    {
+        if (!$group) {
+            return [];
+        }
+        $hasNonStacking = false;
+        foreach ($group as $plan) {
+            if (empty($plan['is_stacking'])) {
+                $hasNonStacking = true;
+                break;
+            }
+        }
+        if (!$hasNonStacking) {
+            return $group;
+        }
+        $bestPlan  = null;
+        $bestPrice = null;
+        foreach ($group as $plan) {
+            $candidate = applyRatePlanToPrice($plan, $price);
+            if ($bestPrice === null
+                || ($isDiscount && $candidate < $bestPrice - 0.00001)
+                || (!$isDiscount && $candidate > $bestPrice + 0.00001)) {
+                $bestPrice = $candidate;
+                $bestPlan  = $plan;
+            }
+        }
+        return [$bestPlan];
     }
 
     /**
@@ -429,6 +495,226 @@ if (!function_exists('applyDynamicPricing')) {
             ],
             'packages' => $pkgOut,
         ];
+    }
+}
+
+if (!function_exists('rh_stay_totals_with_package')) {
+    /**
+     * Split an all-in stay amount the way booking.php saves it: the room part (room + children) carries the tourism
+     * levy, the package part does not (rh_stay_totals($pkg, 'price', false)); the two are then added up.
+     * total_with_vat is the same as one rh_stay_totals($gross) call; only net / VAT / levy move.
+     * With no package this IS rh_stay_totals($gross, 'final', $applyLevy) (byte-identical).
+     *
+     * @param float $gross        the whole stay, all-in (room + children + packages)
+     * @param float $packageGross the package part inside $gross (rh_booked_stay_split()['package_gross'])
+     */
+    function rh_stay_totals_with_package(float $gross, float $packageGross, bool $applyLevy): array
+    {
+        if ($packageGross <= 0.004) {
+            return rh_stay_totals($gross, 'final', $applyLevy);
+        }
+        $gross = max(0.0, $gross);
+        $pkg   = round(min($packageGross, $gross), 2);
+        $room  = rh_stay_totals(max(0.0, round($gross - $pkg, 2)), 'final', $applyLevy);
+        $pack  = rh_stay_totals($pkg, 'price', false);
+        return [
+            'net'            => round($room['net'] + $pack['net'], 2),
+            'vat'            => round($room['vat'] + $pack['vat'], 2),
+            'levy'           => $room['levy'],
+            'total_with_vat' => round($room['total_with_vat'] + $pack['total_with_vat'], 2),
+            'vat_rate'       => $room['vat_rate'],
+            'levy_rate'      => $room['levy_rate'],
+        ];
+    }
+}
+
+if (!function_exists('rh_rate_plan_dropped')) {
+    /**
+     * PURE. Owner 2026-11-10 (RP-3 b): when STAFF change a booking's dates or nights, a length-of-stay, weekend or
+     * seasonal DISCOUNT is removed if the new stay no longer qualifies. Returns the per-night amount to add back to
+     * the booked rate (0 = keep the discount), the plan and a plain reason.
+     *
+     * Added back only when ALL hold: rate_plan_discount > BALANCE_TOLERANCE; the plan row still exists; the stored
+     * label is that plan's name alone (a stacked label is kept); rule_type is los_discount / weekend / seasonal; and the
+     * plan no longer matches the new stay (_planMatchesStay) or no longer covers the room type (_planAppliesToRoom).
+     * Early bird, last minute and promotion discounts are kept (they depend on when the guest booked), as is a
+     * discount whose plan was deleted. Never adds a discount, never adds a surcharge.
+     * Not for early / late check-out (owner 2026-10-01: those keep the booked rate).
+     *
+     * @param array      $b    bookings row (rate_plan_id, rate_plan_label, rate_plan_discount, room_id)
+     * @param array|null $plan rate_plans row for $b['rate_plan_id'] (null = deleted)
+     * @return array{per_night:float,removed:bool,plan_id:?int,plan_name:string,reason:string}
+     */
+    function rh_rate_plan_drop_check(array $b, ?array $plan, string $newIn, string $newOut, int $nights, int $roomTypeId): array
+    {
+        $keep = ['per_night' => 0.0, 'removed' => false, 'plan_id' => null, 'plan_name' => '', 'reason' => ''];
+        if (!rh_rate_plan_drop_eligible($b, $plan)) {
+            return $keep;
+        }
+        $reason = rh_rate_plan_drop_reason($plan, $newIn, $newOut, $nights, $roomTypeId);
+        if ($reason === '') {
+            return $keep;
+        }
+        return [
+            'per_night' => round((float)$b['rate_plan_discount'], 2),
+            'removed'   => true,
+            'plan_id'   => (int)$plan['id'],
+            'plan_name' => (string)$plan['name'],
+            'reason'    => $reason,
+        ];
+    }
+
+    /** PURE. The parts of the rule that do not depend on the new stay (see rh_rate_plan_drop_check()). */
+    function rh_rate_plan_drop_eligible(array $b, ?array $plan): bool
+    {
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        if ((float)($b['rate_plan_discount'] ?? 0) <= $tol || (int)($b['rate_plan_id'] ?? 0) <= 0 || !$plan) {
+            return false;
+        }
+        if ((int)($plan['id'] ?? 0) !== (int)$b['rate_plan_id']) {
+            return false;
+        }
+        // A single plan only: "Long stay, Weekend" (stacked) is kept (ASSUMPTION RP-3).
+        if (trim((string)($b['rate_plan_label'] ?? '')) !== trim((string)($plan['name'] ?? ''))) {
+            return false;
+        }
+        return in_array((string)($plan['rule_type'] ?? ''), ['los_discount', 'weekend', 'seasonal'], true);
+    }
+
+    /** PURE. '' when the plan still matches the stay and the room type, else a plain reason why it does not. */
+    function rh_rate_plan_drop_reason(array $plan, string $newIn, string $newOut, int $nights, int $roomTypeId): string
+    {
+        if (!_planAppliesToRoom($plan, $roomTypeId)) {
+            return 'the plan no longer covers this room type';
+        }
+        $in = new DateTime(substr($newIn, 0, 10));
+        $out = new DateTime(substr($newOut, 0, 10));
+        if (_planMatchesStay($plan, $in, $out, $nights, 0)) {
+            return '';
+        }
+        $nWord = $nights . ' night' . ($nights === 1 ? '' : 's');
+        switch ((string)$plan['rule_type']) {
+            case 'los_discount':
+                $min = isset($plan['min_nights']) ? (int)$plan['min_nights'] : 1;
+                $max = isset($plan['max_nights']) && $plan['max_nights'] > 0 ? (int)$plan['max_nights'] : 0;
+                if ($nights < $min) {
+                    return 'the stay is now ' . $nWord . ' and the plan needs at least ' . $min . ' night' . ($min === 1 ? '' : 's');
+                }
+                return 'the stay is now ' . $nWord . ' and the plan allows at most ' . $max . ' night' . ($max === 1 ? '' : 's');
+            case 'weekend':
+                $names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                $days = [];
+                foreach (array_map('intval', explode(',', (string)($plan['days_of_week'] ?? ''))) as $d) {
+                    if (isset($names[$d])) {
+                        $days[] = $names[$d];
+                    }
+                }
+                return 'no night of the new stay falls on ' . ($days ? implode(', ', $days) : 'the plan\'s days');
+            case 'seasonal':
+            default:
+                $s = !empty($plan['start_date']) ? date('j M Y', strtotime((string)$plan['start_date'])) : '';
+                $e = !empty($plan['end_date']) ? date('j M Y', strtotime((string)$plan['end_date'])) : '';
+                return 'the new check-in date (' . date('j M Y', strtotime(substr($newIn, 0, 10))) . ') is outside the plan\'s dates'
+                    . ($s !== '' && $e !== '' ? ' (' . $s . ' to ' . $e . ')' : '');
+        }
+    }
+
+    /** The plan row by id (any status: a switched-off plan still exists), or null when it was deleted. */
+    function rh_rate_plan_row(PDO $pdo, int $planId): ?array
+    {
+        if ($planId <= 0) {
+            return null;
+        }
+        $st = $pdo->prepare('SELECT * FROM rate_plans WHERE id = ?');
+        $st->execute([$planId]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        return $row ?: null;
+    }
+
+    /** rh_rate_plan_drop_check() with the plan read from the database (no query when the booking has no discount). */
+    function rh_rate_plan_dropped(PDO $pdo, array $b, string $newIn, string $newOut, int $nights, ?int $roomTypeId = null): array
+    {
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        $plan = ((float)($b['rate_plan_discount'] ?? 0) > $tol) ? rh_rate_plan_row($pdo, (int)($b['rate_plan_id'] ?? 0)) : null;
+        return rh_rate_plan_drop_check($b, $plan, $newIn, $newOut, max(1, $nights), $roomTypeId ?? (int)($b['room_id'] ?? 0));
+    }
+
+    /**
+     * What the Edit Booking preview needs to apply the same rule in the browser before saving, or null when the
+     * booking's discount can never be removed by a date change (not eligible).
+     */
+    function rh_rate_plan_drop_js(PDO $pdo, array $b, ?int $roomTypeId = null): ?array
+    {
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        if ((float)($b['rate_plan_discount'] ?? 0) <= $tol) {
+            return null;
+        }
+        $plan = rh_rate_plan_row($pdo, (int)($b['rate_plan_id'] ?? 0));
+        if (!rh_rate_plan_drop_eligible($b, $plan)) {
+            return null;
+        }
+        $rt = $roomTypeId ?? (int)($b['room_id'] ?? 0);
+        return [
+            'perNight'      => round((float)$b['rate_plan_discount'], 2),
+            'name'          => (string)$plan['name'],
+            'rule'          => (string)$plan['rule_type'],
+            'minNights'     => isset($plan['min_nights']) ? (int)$plan['min_nights'] : 1,
+            'maxNights'     => isset($plan['max_nights']) && $plan['max_nights'] > 0 ? (int)$plan['max_nights'] : 0,
+            'start'         => !empty($plan['start_date']) ? substr((string)$plan['start_date'], 0, 10) : '',
+            'end'           => !empty($plan['end_date']) ? substr((string)$plan['end_date'], 0, 10) : '',
+            'days'          => !empty($plan['days_of_week']) ? array_map('intval', explode(',', (string)$plan['days_of_week'])) : [],
+            'appliesToRoom' => _planAppliesToRoom($plan, $rt),
+        ];
+    }
+
+    /** Clear the removed plan from the booking row (inside the caller's transaction). */
+    function rh_rate_plan_drop_clear(PDO $pdo, int $bookingId): void
+    {
+        $pdo->prepare('UPDATE bookings SET rate_plan_id = NULL, rate_plan_label = NULL, rate_plan_discount = NULL, updated_at = NOW() WHERE id = ?')
+            ->execute([$bookingId]);
+    }
+
+    /**
+     * One sentence for staff messages: "The Long stay discount was removed: the stay is now 3 nights ...".
+     * HTML-escaped: every caller puts it in a flash / JSON message that Alert.show() inserts as HTML, and the plan name
+     * is typed by staff. History (rh_rate_plan_drop_log) keeps its own plain-text note.
+     */
+    function rh_rate_plan_drop_sentence(array $drop): string
+    {
+        if (empty($drop['removed'])) {
+            return '';
+        }
+        $e = static function ($v): string {
+            return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+        };
+        return 'The ' . $e($drop['plan_name']) . ' discount was removed: ' . $e($drop['reason']) . '.';
+    }
+
+    /**
+     * History (booking_audit_log via logBookingAudit, written after the caller commits): who, the plan, old -> new
+     * nightly rate and total. Never fatal.
+     */
+    function rh_rate_plan_drop_log(int $bookingId, ?string $ref, array $drop, float $oldNight, float $newNight, float $oldTotal, float $newTotal, string $who): void
+    {
+        if (empty($drop['removed']) || !function_exists('logBookingAudit')) {
+            return;
+        }
+        $cur = function_exists('getSetting') ? (string)getSetting('currency_symbol', 'MWK') : 'MWK';
+        $m = static function (float $v) use ($cur): string {
+            return function_exists('rh_hist_money') ? rh_hist_money($v, $cur) : $cur . ' ' . number_format($v, 2);
+        };
+        $note = 'Discount ' . $drop['plan_name'] . ' removed by ' . ($who !== '' ? $who : 'staff') . ' after a date change: ' . $drop['reason'] . '.'
+            . ' Nightly rate ' . $m(round($oldNight, 2)) . ' → ' . $m(round($newNight, 2))
+            . ' (discount of ' . $m((float)$drop['per_night']) . ' a night added back);'
+            . ' total ' . $m(round($oldTotal, 2)) . ' → ' . $m(round($newTotal, 2)) . '.';
+        try {
+            logBookingAudit($bookingId, 'discount_removed',
+                ['rate_plan_label' => $drop['plan_name'], 'total_with_vat' => round($oldTotal, 2)],
+                ['rate_plan_label' => 'None', 'total_with_vat' => round($newTotal, 2)],
+                $note, $ref);
+        } catch (Throwable $e) {
+            error_log('rh_rate_plan_drop_log (booking ' . $bookingId . '): ' . $e->getMessage());
+        }
     }
 }
 

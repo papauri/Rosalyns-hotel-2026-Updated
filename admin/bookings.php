@@ -123,10 +123,16 @@ function getSignedDateDiffDays(DateTimeInterface $fromDate, DateTimeInterface $t
  * current_text "K356,000 × 3 nights = K1,068,000", new_text "K356,000 × 4 nights = K1,424,000" (the same
  * rh_reprice_at_booked_rate() figure the save writes), delta and a plain delta_text. Read-only.
  */
-function bookings_stay_rate_preview(array $bk, int $newNights, string $cur): array
+function bookings_stay_rate_preview(array $bk, int $newNights, string $cur, ?string $newIn = null, ?string $newOut = null): array
 {
     $newNights = max(1, $newNights);
-    $rp = rh_reprice_at_booked_rate($bk, $newNights);
+    // RP-3: the same discount check the save makes (only when the dates actually change).
+    $drop = ['removed' => false, 'per_night' => 0.0];
+    $newIn = $newIn ?? substr((string)$bk['check_in_date'], 0, 10);
+    if ($newOut !== null && ($newIn !== substr((string)$bk['check_in_date'], 0, 10) || $newOut !== substr((string)$bk['check_out_date'], 0, 10))) {
+        $drop = rh_rate_plan_dropped($GLOBALS['pdo'], $bk, $newIn, $newOut, $newNights, (int)$bk['room_id']);
+    }
+    $rp = rh_reprice_at_booked_rate($bk, $newNights, (float)$drop['per_night']);
     $now = rh_booked_rate_line($bk, null, ['currency' => $cur]);
     $new = rh_booked_rate_change_for_booking($bk, $rp, $newNights, ['currency' => $cur]);
     $delta = round((float)$rp['delta'], 2);
@@ -145,6 +151,9 @@ function bookings_stay_rate_preview(array $bk, int $newNights, string $cur): arr
         'new_total' => round((float)$rp['new_gross'], 2),
         'delta' => $delta,
         'delta_text' => $deltaText,
+        'plan_note' => !empty($drop['removed'])
+            ? 'The ' . $drop['plan_name'] . ' discount will be removed: ' . $drop['reason'] . '. ' . rh_hist_money((float)$drop['per_night'], $cur) . ' a night is added back to the rate.'
+            : '',
     ];
 }
 
@@ -1174,10 +1183,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->prepare("UPDATE bookings SET room_combination_id = NULL WHERE id = ?")->execute([$booking_id]);
             }
 
-            // Date change: reprice at the BOOKED nightly rate.
+            // Date change: reprice at the BOOKED nightly rate (RP-3: minus a length-of-stay / weekend / seasonal
+            // discount the new dates no longer qualify for).
+            $mbDrop = ['removed' => false, 'per_night' => 0.0];
             if ($mbDatesChanged && isset($updates['number_of_nights'])) {
-                $mbRp = rh_reprice_at_booked_rate($current, (int)$updates['number_of_nights']);
+                $mbDrop = rh_rate_plan_dropped($pdo, $current, (string)($updates['check_in_date'] ?? $current['check_in_date']),
+                    (string)($updates['check_out_date'] ?? $current['check_out_date']), (int)$updates['number_of_nights'], (int)$current['room_id']);
+                $mbRp = rh_reprice_at_booked_rate($current, (int)$updates['number_of_nights'], (float)$mbDrop['per_night']);
                 rh_write_booking_stay_totals($pdo, $booking_id, $mbRp['totals'], null, null, null, $mbRp['new_child_supplement']);
+                if (!empty($mbDrop['removed'])) {
+                    rh_rate_plan_drop_clear($pdo, $booking_id);
+                }
             }
 
             // Recompute financials from the payments ledger to keep amount_paid / amount_due accurate
@@ -1188,12 +1204,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $oldSubset = array_intersect_key($current, $newValues);
             logBookingAudit($booking_id, 'modified', $oldSubset, $newValues, $_POST['note'] ?? null, $current['booking_reference'] ?? null);
             rh_log_event('bookings', 'info', 'Booking modified', ['booking_id' => $booking_id, 'fields' => array_keys($newValues), 'by' => $user['username'] ?? null]);
+            if (!empty($mbDrop['removed'])) {
+                rh_rate_plan_drop_log($booking_id, $current['booking_reference'] ?? null, $mbDrop, (float)rh_booked_stay_split($current)['per_night'],
+                    (float)$mbRp['per_night'], (float)$mbRp['old_gross'], (float)$mbRp['new_gross'], (string)($user['full_name'] ?? ($user['username'] ?? '')));
+            }
 
             $message = 'Booking updated successfully.';
             if (isset($mbRp)) {
                 $mbLine = rh_booked_rate_change_for_booking($current, $mbRp, (int)$updates['number_of_nights'], ['currency' => $currency_symbol]);
                 if ($mbLine['ok']) {
-                    $message .= ' Room at the booked rate: ' . $mbLine['text'] . '.';
+                    $message .= (!empty($mbDrop['removed']) ? ' Room: ' : ' Room at the booked rate: ') . $mbLine['text'] . '.';
+                }
+                if (!empty($mbDrop['removed'])) {
+                    $message .= ' ' . rh_rate_plan_drop_sentence($mbDrop);
                 }
             }
 
@@ -2411,7 +2434,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 echo json_encode(['success' => false, 'message' => 'Check-out must be after check-in']);
                 exit;
             }
-            echo json_encode(['success' => true] + bookings_stay_rate_preview($spBk, $spNights, $currency_symbol));
+            echo json_encode(['success' => true] + bookings_stay_rate_preview($spBk, $spNights, $currency_symbol, $spIn->format('Y-m-d'), $spOut->format('Y-m-d')));
             exit;
         } elseif ($action === 'extend_stay') {
             // Extend the checkout date for a checked-in booking
@@ -2505,8 +2528,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 echo json_encode(['success' => false, 'message' => 'Booking not found or not checked-in']);
                 exit;
             }
-            $rpExt = rh_reprice_at_booked_rate($bk, $newNights);
+            // RP-3: a length-of-stay / weekend / seasonal discount the longer stay no longer qualifies for is removed.
+            $extDrop = rh_rate_plan_dropped($pdo, $bk, (string)$bk['check_in_date'], $new_checkout, $newNights, (int)$bk['room_id']);
+            $rpExt = rh_reprice_at_booked_rate($bk, $newNights, (float)$extDrop['per_night']);
             rh_write_booking_stay_totals($pdo, $booking_id, $rpExt['totals'], $newNights, (string)$bk['check_in_date'], $new_checkout, $rpExt['new_child_supplement']);
+            if (!empty($extDrop['removed'])) {
+                rh_rate_plan_drop_clear($pdo, $booking_id);
+            }
             $newTotal = $rpExt['new_gross'];
 
             // Recalculate amount_due so it reflects the new total correctly
@@ -2523,12 +2551,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 "Stay extended from {$oldCheckout} to {$new_checkout}. New total: K " . number_format($newTotal, 2)
             );
 
+            rh_rate_plan_drop_log($booking_id, $bk['booking_reference'] ?? null, $extDrop, (float)rh_booked_stay_split($bk)['per_night'],
+                (float)$rpExt['per_night'], (float)$rpExt['old_gross'], (float)$rpExt['new_gross'], (string)($user['full_name'] ?? ($user['username'] ?? '')));
+
             $extLine = rh_booked_rate_change_for_booking($bk, $rpExt, $newNights, ['currency' => $currency_symbol]);
             header('Content-Type: application/json');
             echo json_encode([
                 'success'      => true,
                 'message'      => 'Stay extended successfully to ' . date('M j, Y', strtotime($new_checkout))
-                    . ($extLine['ok'] ? '. Room at the booked rate: ' . $extLine['text'] . '.' : ''),
+                    . ($extLine['ok'] ? (!empty($extDrop['removed']) ? '. Room: ' : '. Room at the booked rate: ') . $extLine['text'] . '.' : '')
+                    . (!empty($extDrop['removed']) ? ' ' . rh_rate_plan_drop_sentence($extDrop) : ''),
                 'new_checkout' => $new_checkout,
                 'new_nights'   => $newNights,
                 'new_total'    => number_format($newTotal, 2)
@@ -2595,8 +2627,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!$acdGate['ok']) {
                     throw new Exception($acdGate['error']);
                 }
-                $rpAcd = rh_reprice_at_booked_rate($acd_locked, $newNights_acd);
+                // RP-3: a length-of-stay / weekend / seasonal discount the new stay no longer qualifies for is removed.
+                $acdDrop = rh_rate_plan_dropped($pdo, $acd_locked, (string)$acd_locked['check_in_date'], $new_checkout, $newNights_acd, (int)$acd_locked['room_id']);
+                $rpAcd = rh_reprice_at_booked_rate($acd_locked, $newNights_acd, (float)$acdDrop['per_night']);
                 rh_write_booking_stay_totals($pdo, $booking_id, $rpAcd['totals'], $newNights_acd, (string)$acd_locked['check_in_date'], $new_checkout, $rpAcd['new_child_supplement']);
+                if (!empty($acdDrop['removed'])) {
+                    rh_rate_plan_drop_clear($pdo, $booking_id);
+                }
                 recalculateBookingFinancials($booking_id);
                 $pdo->commit();
             } catch (Throwable $acdEx) {
@@ -2625,12 +2662,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'by'           => $user['username'] ?? null,
             ]);
 
+            rh_rate_plan_drop_log($booking_id, $acd_bk['booking_reference'] ?? null, $acdDrop, (float)rh_booked_stay_split($acd_locked)['per_night'],
+                (float)$rpAcd['per_night'], (float)$rpAcd['old_gross'], (float)$rpAcd['new_gross'], (string)($user['full_name'] ?? ($user['username'] ?? '')));
+
             $acdLine = rh_booked_rate_change_for_booking($acd_locked, $rpAcd, $newNights_acd, ['currency' => $currency_symbol]);
             header('Content-Type: application/json');
             echo json_encode([
                 'success'      => true,
                 'message'      => 'Checkout date updated to ' . date('M j, Y', strtotime($new_checkout)) . ". ({$newNights_acd} nights, total recalculated"
-                    . ($acdLine['ok'] ? ' at the booked rate: ' . $acdLine['text'] : '') . '.)',
+                    . ($acdLine['ok'] ? (!empty($acdDrop['removed']) ? ': ' : ' at the booked rate: ') . $acdLine['text'] : '') . '.)'
+                    . (!empty($acdDrop['removed']) ? ' ' . rh_rate_plan_drop_sentence($acdDrop) : ''),
                 'new_checkout' => $new_checkout,
                 'new_nights'   => $newNights_acd,
                 'new_total'    => number_format($totalWithVat_acd, 2),
@@ -7556,6 +7597,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 ['After the change: ', q.new_text],
                 ['Difference: ', q.delta_text]
             ];
+            if (q.plan_note) rows.push(['Discount: ', q.plan_note]); // RP-3: a discount the new dates no longer qualify for
             rows.forEach(r => {
                 const line = document.createElement('div');
                 const b = document.createElement('strong');
@@ -7572,7 +7614,10 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
         }
 
         function bkStayRateDetails(q) {
-            return q ? ['Room at the booked rate: ' + q.new_text, 'Difference: ' + q.delta_text] : [];
+            if (!q) return [];
+            return q.plan_note
+                ? ['Room: ' + q.new_text, 'Difference: ' + q.delta_text, q.plan_note]
+                : ['Room at the booked rate: ' + q.new_text, 'Difference: ' + q.delta_text];
         }
 
         function bkRefreshStayRate(previewId, bookingId, checkIn, checkOut) {

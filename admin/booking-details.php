@@ -1009,6 +1009,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['adjust_dates'])) {
                 : "-{$currency_symbol}" . number_format(abs($delta), 2) . " refund/credit";
 
             $message = "Stay dates adjusted successfully. {$delta_text}";
+            if (!empty($result['rate_plan_removed']['removed'])) {
+                $message .= ' ' . rh_rate_plan_drop_sentence($result['rate_plan_removed']);
+            }
 
             // Any extra amount is carried by the recalculated booking balance (amount_due);
             // no placeholder payment row is created.
@@ -2422,6 +2425,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                         <span style="font-size: 12px; color: #666;">At the booked rate:<br><small>room rate a night &times; new nights</small></span>
                         <span id="previewRateLine" style="font-size: 13px; font-weight: 600; text-align: right;">-</span>
                     </div>
+                    <div id="previewPlanDrop" role="status" style="font-size: 12px; color: #b42318; margin-bottom: 8px;" hidden></div>
                     <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                         <span style="font-size: 12px; color: #666;">New Total:</span>
                         <span id="previewNewTotal" style="font-size: 13px; font-weight: 600;">-</span>
@@ -2708,6 +2712,41 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         const bookedPackageGross = Number(_bookedSplit.package_gross) || 0;
         const currentTotal = Number(_bookedSplit.total_with_vat) || 0;
         const currentChildSupplement = <?php echo (float)($booking['child_supplement_total'] ?? 0); ?>;
+        // RP-3: the discount a date change would remove (same rule as rh_rate_plan_dropped() on save), or null.
+        const _planDrop = <?php echo json_encode(($bd_closed ?? false) ? null : rh_rate_plan_drop_js($pdo, $booking, (int)$booking['room_id']), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        const _ymdUtc = s => {
+            const p = String(s || '').split('-').map(Number);
+            return p.length === 3 ? Date.UTC(p[0], p[1] - 1, p[2]) : NaN;
+        };
+        const _dayMonYear = s => {
+            const d = new Date(_ymdUtc(s));
+            return d.getUTCDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()] + ' ' + d.getUTCFullYear();
+        };
+        // '' while the booking's length-of-stay / weekend / seasonal discount still fits the new dates, else the reason.
+        function bdPlanDropReason(ci, co, nights) {
+            const D = _planDrop;
+            if (!D || (ci === currentCheckIn && co === currentCheckOut)) return '';
+            if (!D.appliesToRoom) return 'the plan no longer covers this room type';
+            const nWord = nights + ' night' + (nights === 1 ? '' : 's');
+            if (D.rule === 'los_discount') {
+                const max = D.maxNights > 0 ? D.maxNights : Infinity;
+                if (nights >= D.minNights && nights <= max) return '';
+                return nights < D.minNights
+                    ? 'the stay is now ' + nWord + ' and the plan needs at least ' + D.minNights + ' night' + (D.minNights === 1 ? '' : 's')
+                    : 'the stay is now ' + nWord + ' and the plan allows at most ' + D.maxNights + ' night' + (D.maxNights === 1 ? '' : 's');
+            }
+            if (D.rule === 'weekend') {
+                const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+                for (let t = _ymdUtc(ci), end = _ymdUtc(co); t < end; t += 86400000) {
+                    if (D.days.indexOf(new Date(t).getUTCDay()) !== -1) return '';
+                }
+                const list = D.days.filter(d => names[d]).map(d => names[d]);
+                return 'no night of the new stay falls on ' + (list.length ? list.join(', ') : "the plan's days");
+            }
+            if (D.start && D.end && ci >= D.start && ci <= D.end) return ''; // seasonal: check-in date only
+            return "the new check-in date (" + _dayMonYear(ci) + ") is outside the plan's dates"
+                + (D.start && D.end ? ' (' + _dayMonYear(D.start) + ' to ' + _dayMonYear(D.end) + ')' : '');
+        }
         // The booked room rate a night WITHOUT the children charge, and the children charge it shows separately
         // (includes/booked-rate.php), so "rate x nights + children + package = total" adds up.
         const _bookedRate = <?php echo json_encode(['ok' => (bool)$bd_rate['ok'], 'per_night' => (float)$bd_rate['per_night'], 'child' => (float)$bd_rate['child'], 'currency' => (string)$bd_rate['currency']], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
@@ -2722,13 +2761,13 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         }
 
         // "K356,000 x 4 nights = K1,424,000 (+ children / + package = total)" for the new nights.
-        function bdRateLine(newNights, newTotal) {
+        function bdRateLine(newNights, newTotal, addBack) {
             if (!_bookedRate.ok || !(newNights > 0)) return '';
             const nightWord = newNights === 1 ? '1 night' : newNights + ' nights';
             const pkg = bookedPackageGross > 0.005 ? bookedPackageGross : 0;
             const child = _bookedRate.child > 0.005 && currentNights > 0 ? Math.round(_bookedRate.child * newNights / currentNights * 100) / 100 : 0;
             const roomOnly = Math.round((newTotal - pkg - child) * 100) / 100;
-            let text = bdRateMoney(_bookedRate.per_night) + ' \u00d7 ' + nightWord + ' = ' + bdRateMoney(roomOnly);
+            let text = bdRateMoney(_bookedRate.per_night + (addBack || 0)) + ' \u00d7 ' + nightWord + ' = ' + bdRateMoney(roomOnly);
             let extras = '';
             if (child > 0) extras += ' + children ' + bdRateMoney(child);
             if (pkg > 0) extras += ' + package ' + bdRateMoney(pkg);
@@ -2824,7 +2863,14 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
 
             // Repriced at the guest's BOOKED nightly rate (server-computed gross per night:
             // VAT, levy and child supplement already inside; packages kept as-is).
-            const newTotal = bookedRoomGrossPerNight * newNights + bookedPackageGross;
+            const dropReason = bdPlanDropReason(newCheckIn, newCheckOut, newNights);
+            const addBack = dropReason ? Number(_planDrop.perNight || 0) : 0;
+            const dropEl = document.getElementById('previewPlanDrop');
+            if (dropEl) {
+                dropEl.textContent = dropReason ? 'The ' + _planDrop.name + ' discount will be removed: ' + dropReason + '. ' + bdRateMoney(addBack) + ' a night is added back to the rate.' : '';
+                dropEl.hidden = !dropReason;
+            }
+            const newTotal = (bookedRoomGrossPerNight + addBack) * newNights + bookedPackageGross;
             const amountDelta = newTotal - currentTotal;
             const nightsDelta = newNights - currentNights;
 
@@ -2843,7 +2889,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 nightsDeltaEl.style.color = '#666';
             }
 
-            document.getElementById('previewRateLine').textContent = bdRateLine(newNights, newTotal) || '-';
+            document.getElementById('previewRateLine').textContent = bdRateLine(newNights, newTotal, addBack) || '-';
 
             document.getElementById('previewNewTotal').textContent = currencySymbol + Number(newTotal).toLocaleString('en-US', {
                 minimumFractionDigits: 2,
