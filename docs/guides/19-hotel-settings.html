@@ -323,7 +323,9 @@
     <tbody>
       <tr><td><strong>Sender name *</strong></td><td>One line, up to 100 characters. The name guests see next to the sending mailbox.</td></tr>
       <tr><td><strong>Reply-to and contact email (optional)</strong></td><td>A valid email address. Guests' replies go here, and it is printed as the contact email on emails and documents. Blank uses the main email in Hotel Details. <strong>It is not the sending address.</strong></td></tr>
+      <tr><td><strong>Backup reply-to emails (optional)</strong></td><td>Up to 5 valid addresses separated by commas. Guests' replies also go to these addresses. <strong>Guests can see them</strong> in the reply line, so only use addresses guests may see. Only used when there is a reply-to and contact email (or a main email in Hotel Details). The line <em>Replies currently also go to:</em> shows the saved ones.</td></tr>
       <tr><td><strong>Staff copy email</strong></td><td>A valid email address, optional. Gets a hidden copy of every email while the switch below is on (never twice). It also gets copies of bookings created in the admin panel and of conference confirmations, and it is the last fallback for booking, conference and gym alerts, backup alerts and the End of Day report when no report recipient is set. Guests never see it.</td></tr>
+      <tr><td><strong>Backup staff copy emails (optional)</strong></td><td>Up to 5 valid addresses separated by commas. Each gets the same hidden copy of every email as the Staff copy email, while the switch below is on. Guests never see them. They do not get the alerts or reports that fall back to the Staff copy email. Use this for a hidden monitoring address. The line <em>Hidden copies currently also go to:</em> shows the saved ones.</td></tr>
     </tbody>
   </table>
   <h3>Email Settings</h3>
@@ -343,7 +345,13 @@
     <li>Errors start with <em>"Error: "</em>, for example <em>"Error: Smtp host is required"</em>, <em>"Error: Smtp port is required"</em>, <em>"Error: Smtp username is required"</em>, <em>"Error: Email from name is required"</em>, <em>"Error: Email from email is required"</em>, <em>"Error: SMTP port must be a valid port number (1-65535)"</em>, <em>"Error: SMTP host must be a host name such as mail.example.com"</em>, <em>"Error: From email address is invalid"</em>, <em>"Error: Admin email address is invalid"</em>, <em>"Error: Invoice recipients must be valid email addresses separated by commas"</em>.</li>
   </ul>
   <h3>How to send a test email</h3>
-  <p>There is no test button on this card. Test emails are sent from the Email Templates page:</p>
+  <p>Under <strong>Save Email Settings</strong> there is a <strong>Test these settings</strong> box. It uses the <strong>saved</strong> settings, so save your changes first.</p>
+  <ol class="steps">
+    <li>Type a valid email address in <strong>Send a test to</strong>.</li>
+    <li>Click <strong>Send test email</strong>. One email with the subject <em>[TEST] Email settings check</em> is sent, with the same sender, reply-to and hidden copies as a real email.</li>
+    <li>The box shows <em>"Test email sent to &lt;address&gt;. Check that inbox (and its spam folder)."</em> and lists the sender name, sending mailbox, where replies go, the hidden copies and the mail server. If it fails, it shows <em>"The test email was not sent."</em> with the reason.</li>
+  </ol>
+  <p>To test the wording of one template, use the Email Templates page:</p>
   <ol class="steps">
     <li>Open Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Email Templates</strong> (needs <strong>Edit message templates</strong>).</li>
     <li>Choose a template and make a preview.</li>
