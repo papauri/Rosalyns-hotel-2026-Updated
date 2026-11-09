@@ -179,13 +179,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['contact_form'])) {
                     $reservationsEmail = trim((string)getSetting('email_reservations', ''));
                     $adminEmail = $reservationsEmail !== '' ? $reservationsEmail : trim((string)$email_main);
                     if ($adminEmail === '') {
-                        $adminEmail = trim((string)getSetting('email_admin_email', ''));
+                        $adminEmail = trim((string)getEmailSetting('email_admin_email', ''));
                     }
+                    // Contact line for the guest: reservations, else main, else the reply-to/contact email.
+                    // Never the staff copy email (it can be the sending mailbox).
                     $contactEmailForGuest = '';
-                    if (filter_var($adminEmail, FILTER_VALIDATE_EMAIL)) {
-                        $contactEmailForGuest = $adminEmail;
+                    if (filter_var($reservationsEmail, FILTER_VALIDATE_EMAIL)) {
+                        $contactEmailForGuest = $reservationsEmail;
                     } elseif (filter_var((string)$email_main, FILTER_VALIDATE_EMAIL)) {
                         $contactEmailForGuest = (string)$email_main;
+                    } else {
+                        $contactEmailForGuest = rh_guest_contact_email();
                     }
 
                     $guestBody = '<h2>Inquiry Received</h2>';

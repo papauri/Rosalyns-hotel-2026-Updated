@@ -1305,10 +1305,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
 
             // ── Admin CC: send a copy to the hotel admin for admin-created bookings ──
             try {
-                $adminCcEmail = trim((string)getEmailSetting('email_admin_email', ''));
-                if (empty($adminCcEmail)) {
-                    $adminCcEmail = trim((string)getEmailSetting('smtp_username', ''));
-                }
+                // Staff copy email, else the sending mailbox (includes/email-identity.php)
+                $adminCcEmail = rh_staff_copy_recipient()['email'];
                 if (!empty($adminCcEmail) && filter_var($adminCcEmail, FILTER_VALIDATE_EMAIL)) {
                     $adminCcName      = getSetting('site_name', 'Hotel');
                     $adminBookingUrl  = rtrim((string)getSetting('site_url', ''), '/') . '/admin/booking-details.php?id=' . $primary_id;

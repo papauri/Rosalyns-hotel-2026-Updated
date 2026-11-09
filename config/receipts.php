@@ -255,7 +255,7 @@ if (!function_exists('receipt_placeholders')) {
     {
         $currency = getSetting('currency_symbol', 'MWK');
         $siteName = getSetting('site_name', 'Hotel');
-        $contactEmail = getEmailSetting('email_from_email', '') ?: getEmailSetting('smtp_username', '');
+        $contactEmail = rh_guest_contact_email(); // never the sending mailbox
         $receiptNumber = (string)($payment['receipt_number'] ?? '');
 
         $vatEnabled  = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
@@ -337,7 +337,7 @@ if (!function_exists('receipt_build_pos_style_html_raw')) {
         $siteName    = getSetting('site_name', 'Hotel');
         $address     = trim((string)getSetting('hotel_address', getSetting('address', '')));
         $phone       = trim((string)getSetting('hotel_phone', getSetting('phone_main', '')));
-        $email       = trim((string)(getEmailSetting('email_from_email', '') ?: getEmailSetting('smtp_username', '')));
+        $email       = rh_guest_contact_email(); // never the sending mailbox
         $footer      = trim((string)getSetting('receipt_footer', getSetting('payment_terms', 'Thank you for your payment.')));
         $vatEnabled  = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
         $vatRate     = $vatEnabled ? (float)getSetting('vat_rate') : 0.0;

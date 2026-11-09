@@ -4,7 +4,11 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); }
  * Minimal capture-only SMTP server for tests (never relays anything).
  * Usage: php scripts/tests/fake-smtp.php <port> <spool-file>
  * Accepts every message, appends one JSON line per message to the spool file:
- *   {"to":[...],"subject":"...","attachments":["x.pdf"],"bytes":123}
+ *   {"to":[...],"subject":"...","attachments":["x.pdf"],"bytes":123,
+ *    "from":"...","reply_to":"...","cc":"...","to_header":"...","headers":"...","text":"..."}
+ *   (to = SMTP RCPT list, i.e. everyone who gets it incl. hidden copies; from/reply_to/cc/to_header =
+ *   the unfolded header values the reader sees; headers = the whole unfolded header block;
+ *   text = the decoded text/html + text/plain parts, attachments excluded, capped at 200 KB)
  * scripts/tests/documents_flow.php starts it, points the (rolled-back) SMTP settings at it through
  * the page harness, and reads the spool to see exactly which emails a payment path sends.
  */
@@ -55,7 +59,23 @@ while (true) {
             }
             $atts = [];
             if (preg_match_all('/filename="?([^"\r\n;]+)"?/i', $data, $mm)) { $atts = array_values(array_unique(array_map('trim', $mm[1]))); }
-            file_put_contents($spool, json_encode(['to' => $rcpt, 'subject' => $subject, 'attachments' => $atts, 'bytes' => strlen($data)]) . "\n", FILE_APPEND | LOCK_EX);
+            $hdr = static function (string $name) use ($head): string {
+                return preg_match('/^' . preg_quote($name, '/') . ':\s*(.*)$/mi', $head, $hm) ? trim($hm[1]) : '';
+            };
+            // Decoded readable text: every text/* MIME part that is not an attachment.
+            $text = '';
+            foreach (preg_split('/\r\n--[^\r\n]+\r\n/', "\r\n" . $data) as $part) {
+                [$ph, $pb] = explode("\r\n\r\n", $part, 2) + ['', ''];
+                $ph = preg_replace("/\r\n[ \t]+/", ' ', $ph);
+                if (!preg_match('/Content-Type:\s*text\//i', $ph) || preg_match('/Content-Disposition:\s*attachment/i', $ph)) { continue; }
+                if (preg_match('/Content-Transfer-Encoding:\s*base64/i', $ph)) { $pb = (string)base64_decode(preg_replace('/\s+/', '', $pb)); }
+                elseif (preg_match('/Content-Transfer-Encoding:\s*quoted-printable/i', $ph)) { $pb = quoted_printable_decode($pb); }
+                $text .= $pb . "\n";
+            }
+            $text = substr($text, 0, 200000);
+            file_put_contents($spool, json_encode(['to' => $rcpt, 'subject' => $subject, 'attachments' => $atts, 'bytes' => strlen($data),
+                'from' => $hdr('From'), 'reply_to' => $hdr('Reply-To'), 'cc' => $hdr('Cc'), 'to_header' => $hdr('To'), 'headers' => $head,
+                'text' => $text], JSON_INVALID_UTF8_SUBSTITUTE) . "\n", FILE_APPEND | LOCK_EX);
             fwrite($conn, "250 queued\r\n");
         } elseif ($cmd === 'QUIT') {
             fwrite($conn, "221 bye\r\n");

@@ -164,7 +164,7 @@ function generateInvoicePDF(int $booking_id, ?string $invoice_number_override = 
 
         // Get hotel contact details
         $site_name = getSetting('site_name');
-        $email_address = getSetting('email_from_email');
+        $email_address = rh_guest_contact_email();
         $phone_number = getSetting('phone_main');
         $address = getSetting('address_line1') . ', ' .
             getSetting('address_line2') . ', ' .
@@ -1566,7 +1566,7 @@ function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, arr
                     $booking,
                     $invoice_number,
                     getSetting('site_name'),
-                    getSetting('email_from_email'),
+                    rh_guest_contact_email(),
                     getSetting('phone_main'),
                     implode(', ', array_filter([getSetting('address_line1'), getSetting('address_line2'), getSetting('address_country')])),
                     getSetting('currency_symbol')
@@ -1726,24 +1726,15 @@ function sendEmailWithAttachmentAndCC(string $to, ?string $toName, string $subje
             $mail->SMTPDebug = $smtp_debug;
         }
 
-        // Recipients
-        $mail->setFrom($fromAddress, $email_from_name ?: $email_site_name);
+        // Recipients: From = SMTP mailbox, Reply-To = hotel contact (includes/email-identity.php)
+        rh_mail_apply_identity($mail, (string)$fromAddress, (string)($email_from_name ?: $email_site_name));
         $mail->addAddress($to, $toName ?? '');
-        if (!empty($email_from_email) && filter_var($email_from_email, FILTER_VALIDATE_EMAIL)) {
-            $mail->addReplyTo($email_from_email, $email_from_name ?: $email_site_name);
-        }
 
-        // Add CC recipients from invoice_recipients setting
-        foreach ($ccRecipients as $cc) {
-            if (!empty($cc) && filter_var($cc, FILTER_VALIDATE_EMAIL)) {
-                $mail->addCC($cc);
-            }
-        }
+        // Hotel copies (invoice_recipients + the sending mailbox) are hidden copies: the guest
+        // never sees the hotel's internal addresses.
+        rh_mail_add_hidden_copies($mail, array_map('strval', $ccRecipients), $to);
 
-        // Add BCC for admin if enabled
-        if ($email_bcc_admin && !empty($email_admin_email)) {
-            $mail->addBCC($email_admin_email);
-        }
+        rh_mail_add_staff_bcc($mail, $to, (bool)$email_bcc_admin);
 
         // Add attachment
         if (file_exists($attachmentPath)) {
@@ -2112,7 +2103,7 @@ function generateConferenceInvoicePDF(int $enquiry_id, ?string $invoice_number_o
 
         // Get hotel contact details
         $site_name = getSetting('site_name');
-        $email_address = getSetting('email_from_email');
+        $email_address = rh_guest_contact_email();
         $phone_number = getSetting('phone_main');
         $address = getSetting('address_line1') . ', ' .
             getSetting('address_line2') . ', ' .
@@ -2731,7 +2722,7 @@ function generateGymInvoicePDF(int $inquiry_id, ?string $invoice_number_override
         }
 
         $site_name = getSetting('site_name');
-        $email_address = getSetting('email_from_email');
+        $email_address = rh_guest_contact_email();
         $phone_number = getSetting('phone_main');
         $address = getSetting('address_line1') . ', ' .
             getSetting('address_line2') . ', ' .
@@ -3060,7 +3051,7 @@ function generateEventInvoicePDF(int $inquiry_id, ?string $invoice_number_overri
         }
 
         $site_name = getSetting('site_name');
-        $email_address = getSetting('email_from_email');
+        $email_address = rh_guest_contact_email();
         $phone_number = getSetting('phone_main');
         $address = getSetting('address_line1') . ', ' .
             getSetting('address_line2') . ', ' .
@@ -3307,7 +3298,7 @@ function generateGymQuotationPDF(array $inquiry, array $options = []): string
 
     $siteName = (string)getSetting('site_name', 'Hotel');
     $sitePhone = (string)getSetting('phone_main', '');
-    $siteEmail = (string)getSetting('email_main', getSetting('email_from_email', ''));
+    $siteEmail = (string)getSetting('email_main', rh_guest_contact_email());
     $siteAddress = trim((string)getSetting('address_line1', ''));
     $currency = (string)getSetting('currency_symbol', 'MWK');
     $paymentPolicy = (string)getSetting('payment_policy', 'Payment terms apply as agreed with our reception team.');
@@ -3373,7 +3364,7 @@ function generateEventInquiryQuotationPDF(array $inquiry, array $options = []): 
 
     $siteName = (string)getSetting('site_name', 'Hotel');
     $sitePhone = (string)getSetting('phone_main', '');
-    $siteEmail = (string)getSetting('email_main', getSetting('email_from_email', ''));
+    $siteEmail = (string)getSetting('email_main', rh_guest_contact_email());
     $siteAddress = trim((string)getSetting('address_line1', ''));
     $currency = (string)getSetting('currency_symbol', 'MWK');
     $paymentPolicy = (string)getSetting('payment_policy', 'Payment terms apply as agreed with our reception team.');

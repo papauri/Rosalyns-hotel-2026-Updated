@@ -70,7 +70,9 @@ if (!function_exists('hotel_brand_tokens')) {
         $address = (string)preg_replace('/,(?=\S)/', ', ', $address);
         $email = trim((string)getSetting('hotel_email', ''));
         if ($email === '' && function_exists('getEmailSetting')) {
-            $email = trim((string)(getEmailSetting('email_from_email', '') ?: getEmailSetting('smtp_username', '')));
+            // Reply-to/contact email, else the main contact email; never the sending mailbox.
+            require_once __DIR__ . '/../includes/email-identity.php';
+            $email = rh_guest_contact_email();
         }
         $name = trim((string)getSetting('site_name', 'Hotel')) ?: 'Hotel';
 

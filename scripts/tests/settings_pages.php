@@ -173,7 +173,7 @@ ok('invoice recipients normalised to a de-duplicated comma list', ($r['verify'][
 $r = run_page('admin/booking-settings.php', array_merge($es, ['smtp_host' => 'bad host!']), $ev);
 ok('bad SMTP host rejected', strpos(flash($r), 'smtp host') !== false, flash($r));
 $r = run_page('admin/booking-settings.php', array_merge($es, ['email_from_name' => "A\r\nBcc: x@y.com"]), $ev);
-ok('header-injection from name rejected', strpos(flash($r), 'from name') !== false, flash($r));
+ok('header-injection from name rejected', strpos(flash($r), 'sender name') !== false, flash($r));
 
 echo "== Station hours, automated emails, cache management ==\n";
 $r = run_page('admin/station-settings.php', ['stations' => ['kitchen' => ['opens_at' => '25:99', 'closes_at' => '10:00']]], ["SELECT COUNT(*) c FROM site_settings WHERE setting_value='25:99'"], false, ['Use 24-hour HH:MM format']);

@@ -14,6 +14,8 @@ require_once __DIR__ . '/database.php';
 // Shared document theme + PDF kit (brand tokens, rh_pdf_* helpers)
 require_once __DIR__ . '/document-theme.php';
 require_once __DIR__ . '/../includes/conference-pricing.php';
+// Email identity: From = SMTP mailbox, Reply-To/contact = hotel address, hidden copies, alert recipients
+require_once __DIR__ . '/../includes/email-identity.php';
 
 // WhatsApp notification functions
 if (file_exists(__DIR__ . '/../includes/whatsapp-functions.php')) {
@@ -45,7 +47,9 @@ global $email_from_name, $email_from_email, $email_admin_email, $email_site_name
 
 // Get email settings from database - NO HARCODED DEFAULTS
 $email_from_name = getEmailSetting('email_from_name', '');
-$email_from_email = getEmailSetting('email_from_email', '');
+// The address guests see as Reply-To and as the printed contact email: Email Settings
+// "Reply-to and contact email", else the Hotel Details main email, never the sending mailbox.
+$email_from_email = rh_guest_contact_email();
 $email_admin_email = getEmailSetting('email_admin_email', '');
 $email_site_name = getSetting('site_name', '');
 $email_site_url = getSetting('site_url', '');
@@ -174,17 +178,12 @@ function sendEmail(string $to, ?string $toName, string $subject, string $htmlBod
                 $mail->SMTPDebug = $smtp_debug;
             }
 
-            // Recipients
-            $mail->setFrom($fromAddress, $email_from_name ?: $email_site_name);
+            // Recipients: From = SMTP mailbox, Reply-To = hotel contact (includes/email-identity.php)
+            rh_mail_apply_identity($mail, (string)$fromAddress, (string)($email_from_name ?: $email_site_name));
             $mail->addAddress($to, $toName ?? '');
-            if (!empty($email_from_email) && filter_var($email_from_email, FILTER_VALIDATE_EMAIL)) {
-                $mail->addReplyTo($email_from_email, $email_from_name ?: $email_site_name);
-            }
 
-            // Add BCC for admin if enabled
-            if ($bccAdmin && !empty($email_admin_email)) {
-                $mail->addBCC($email_admin_email);
-            }
+            // One hidden copy to the staff copy email when the switch is on (never when it is the To)
+            rh_mail_add_staff_bcc($mail, $to, $bccAdmin);
 
             // Content — force UTF-8 so em-dashes (—), currency, and accented chars render correctly
             $mail->CharSet  = PHPMailer::CHARSET_UTF8;
@@ -299,20 +298,12 @@ function sendEmailWithAttachments(string $to, ?string $toName, string $subject, 
                 $mail->SMTPDebug = $smtp_debug;
             }
 
-            $mail->setFrom($fromAddress, $email_from_name ?: $email_site_name);
+            rh_mail_apply_identity($mail, (string)$fromAddress, (string)($email_from_name ?: $email_site_name));
             $mail->addAddress($to, $toName ?? '');
-            if (!empty($email_from_email) && filter_var($email_from_email, FILTER_VALIDATE_EMAIL)) {
-                $mail->addReplyTo($email_from_email, $email_from_name ?: $email_site_name);
-            }
-            if ($bccAdmin && !empty($email_admin_email)) {
-                $mail->addBCC($email_admin_email);
-            }
-            foreach ((array)($options['cc'] ?? []) as $ccAddress) {
-                $ccAddress = trim((string)$ccAddress);
-                if (filter_var($ccAddress, FILTER_VALIDATE_EMAIL) && strcasecmp($ccAddress, $to) !== 0) {
-                    $mail->addCC($ccAddress);
-                }
-            }
+            // Copy addresses (receipts: invoice copies + "CC emails" from the payment form) are hidden
+            // copies: the guest never sees the hotel's internal addresses.
+            rh_mail_add_hidden_copies($mail, array_map('strval', (array)($options['cc'] ?? [])), $to);
+            rh_mail_add_staff_bcc($mail, $to, $bccAdmin);
 
             foreach ($attachments as $attachment) {
                 $attachmentName = trim((string)($attachment['name'] ?? 'attachment.bin'));
@@ -493,7 +484,7 @@ function createEmailPreview(string $to, ?string $toName, string $subject, string
         <div class="email-preview">
             <div class="email-info">
                 <h3>📧 Email Preview (Development Mode)</h3>
-                <p><strong>From:</strong> ' . htmlspecialchars($email_from_name) . ' <' . htmlspecialchars($email_from_email) . '></p>
+                <p><strong>From:</strong> ' . htmlspecialchars((string)$email_from_name) . ' <' . htmlspecialchars((string)($GLOBALS['smtp_username'] ?? '')) . '></p>
                 <p><strong>To:</strong> ' . htmlspecialchars($toName) . ' <' . htmlspecialchars($to) . '></p>
                 <p><strong>Subject:</strong> ' . htmlspecialchars($subject) . '</p>
                 <p><strong>Time:</strong> ' . date('Y-m-d H:i:s') . '</p>
@@ -2801,13 +2792,8 @@ function sendAdminNotificationEmail(array $booking)
     global $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url, $pdo;
 
     try {
-        $notificationEmail = trim((string)getSetting('booking_notification_email', ''));
-        if (empty($notificationEmail) || !filter_var($notificationEmail, FILTER_VALIDATE_EMAIL)) {
-            $notificationEmail = trim((string)getSetting('admin_notification_email', ''));
-        }
-        if (empty($notificationEmail) || !filter_var($notificationEmail, FILTER_VALIDATE_EMAIL)) {
-            $notificationEmail = trim((string)$email_admin_email);
-        }
+        // New website booking alerts go to -> Staff notification email (Hotel Details) -> Staff copy email
+        $notificationEmail = rh_booking_alert_recipient()['email'];
 
         if (empty($notificationEmail) || !filter_var($notificationEmail, FILTER_VALIDATE_EMAIL)) {
             return [
@@ -2898,7 +2884,7 @@ function sendAdminNotificationEmail(array $booking)
         $htmlBody = hotel_premium_email_html(
             $preheader,
             $innerHtml,
-            'reservations@' . ($_SERVER['HTTP_HOST'] ?? 'hotel')
+            '{{alert_recipient}}'
         );
 
         // Substitute header/footer tokens that hotel_premium_email_html() leaves as placeholders
@@ -2919,34 +2905,46 @@ function sendAdminNotificationEmail(array $booking)
         $adminSubject = ($isTentative ? 'Tentative Hold' : 'New Booking')
             . ' - ' . htmlspecialchars($email_site_name) . ' [' . $booking['booking_reference'] . ']';
 
-        // Send email
-        $primaryResult = sendEmail(
-            $notificationEmail,
-            'Reservations Team',
-            $adminSubject,
-            $htmlBody
-        );
+        // "Also send booking alerts to" (booking_notification_cc_emails): each address gets its own copy.
+        $ccList = [];
+        foreach (array_map('trim', explode(',', (string)getSetting('booking_notification_cc_emails', ''))) as $ccEmail) {
+            if ($ccEmail !== '' && filter_var($ccEmail, FILTER_VALIDATE_EMAIL)
+                && strcasecmp($ccEmail, $notificationEmail) !== 0 && !in_array(strtolower($ccEmail), array_map('strtolower', $ccList), true)) {
+                $ccList[] = $ccEmail;
+            }
+        }
+        $alertBody = static function (string $recipient) use ($htmlBody): string {
+            return str_replace('{{alert_recipient}}', htmlspecialchars($recipient, ENT_QUOTES, 'UTF-8'), $htmlBody);
+        };
 
-        // Optional CC notifications configured from booking settings
-        $ccRaw = trim((string)getSetting('booking_notification_cc_emails', ''));
-        if (!empty($ccRaw)) {
-            $ccList = array_filter(array_map('trim', explode(',', $ccRaw)));
+        // The staff copy email gets exactly one copy of this alert: a hidden copy on the primary send
+        // only (when the switch is on), and none at all when it is the primary or on the CC list.
+        $staffCopy = trim((string)$email_admin_email);
+        $staffOnCcList = $staffCopy !== '' && in_array(strtolower($staffCopy), array_map('strtolower', $ccList), true);
+        $prevBccOff = $GLOBALS['rh_email_staff_bcc_off'] ?? null;
+        try {
+            $GLOBALS['rh_email_staff_bcc_off'] = $staffOnCcList;
+            $primaryResult = sendEmail(
+                $notificationEmail,
+                'Reservations Team',
+                $adminSubject,
+                $alertBody($notificationEmail)
+            );
+
+            $GLOBALS['rh_email_staff_bcc_off'] = true;
             foreach ($ccList as $ccEmail) {
-                if (!filter_var($ccEmail, FILTER_VALIDATE_EMAIL)) {
-                    continue;
-                }
-
-                // avoid duplicate send to primary recipient
-                if (strcasecmp($ccEmail, $notificationEmail) === 0) {
-                    continue;
-                }
-
                 sendEmail(
                     $ccEmail,
                     'Reservations Team',
                     $adminSubject,
-                    $htmlBody
+                    $alertBody($ccEmail)
                 );
+            }
+        } finally {
+            if ($prevBccOff === null) {
+                unset($GLOBALS['rh_email_staff_bcc_off']);
+            } else {
+                $GLOBALS['rh_email_staff_bcc_off'] = $prevBccOff;
             }
         }
 
@@ -3110,14 +3108,8 @@ function sendConferenceAdminNotificationEmail(array $data)
         $currency_symbol = getSetting('currency_symbol');
         $total_amount = rh_conf_gross($data) > 0 ? number_format(rh_conf_gross($data), 0) : 'To be determined';
 
-        // Get conference email with fallback to main contact email
-        $conference_email = getSetting('conference_email');
-        if (empty($conference_email) || !filter_var($conference_email, FILTER_VALIDATE_EMAIL)) {
-            $conference_email = getSetting('email_main');
-        }
-        if (empty($conference_email) || !filter_var($conference_email, FILTER_VALIDATE_EMAIL)) {
-            $conference_email = $email_admin_email;
-        }
+        // Conference alerts go to -> main contact email -> Staff copy email (shared resolver)
+        $conference_email = rh_conference_alert_recipient()['email'];
 
         // Prepare template data
         $template_data = [
@@ -4214,23 +4206,13 @@ function sendEmailWithCC(string $to, ?string $toName, string $subject, string $h
             $smtpSecureNormCC = 'ssl';
             $mail->SMTPSecure = $smtpSecureNormCC;
         }
-        $mail->setFrom($smtp_username, $email_from_name ?: getSetting('site_name', ''));
+        rh_mail_apply_identity($mail, (string)$smtp_username, (string)($email_from_name ?: getSetting('site_name', '')));
         $mail->addAddress($to, $toName ?? '');
-        if (!empty($email_from_email) && filter_var($email_from_email, FILTER_VALIDATE_EMAIL)) {
-            $mail->addReplyTo($email_from_email, $email_from_name ?: getSetting('site_name', ''));
-        }
 
-        // Add CC recipients
-        if (!empty($ccEmails)) {
-            foreach ($ccEmails as $ccEmail) {
-                $mail->addCC($ccEmail);
-            }
-        }
+        // Hotel copy addresses (getCCEmails) go as hidden copies: guests never see internal addresses
+        rh_mail_add_hidden_copies($mail, array_map('strval', $ccEmails), $to);
 
-        // Add BCC for admin if enabled
-        if ($email_bcc_admin && !empty($email_admin_email)) {
-            $mail->addBCC($email_admin_email);
-        }
+        rh_mail_add_staff_bcc($mail, $to, (bool)$email_bcc_admin);
 
         // Content — force UTF-8
         $mail->CharSet  = PHPMailer::CHARSET_UTF8;
@@ -5225,14 +5207,8 @@ function sendGymAdminNotificationEmail(array $data)
     try {
         $site_name = getSetting('site_name');
 
-        // Get gym email with fallback to main contact email
-        $gym_email = getSetting('gym_email');
-        if (empty($gym_email) || !filter_var($gym_email, FILTER_VALIDATE_EMAIL)) {
-            $gym_email = getSetting('email_main');
-        }
-        if (empty($gym_email) || !filter_var($gym_email, FILTER_VALIDATE_EMAIL)) {
-            $gym_email = $email_admin_email;
-        }
+        // Gym alerts go to -> main contact email -> Staff copy email (shared resolver)
+        $gym_email = rh_gym_alert_recipient()['email'];
 
         // Try template-first rendering for customization support
         $template_data = [
@@ -5952,7 +5928,7 @@ function sendNewGymInquiryAdminEmail(array $inquiry): array
 
     try {
         $site_name = getSetting('site_name', $email_site_name);
-        $admin_email = $email_admin_email ?: getSetting('email_admin_email', '');
+        $admin_email = trim((string)$email_admin_email);
         if (empty($admin_email) || !filter_var($admin_email, FILTER_VALIDATE_EMAIL)) {
             return ['success' => false, 'message' => 'No admin email configured'];
         }
@@ -6003,14 +5979,9 @@ function sendContactInquiryReplyEmail(array $inquiry, string $replySubject, stri
     global $smtp_host, $smtp_port, $smtp_username, $smtp_password, $smtp_secure, $smtp_timeout, $smtp_debug;
     global $email_bcc_admin, $development_mode, $email_log_enabled, $email_preview_enabled;
 
-    $hotelFromEmail = trim((string)$email_from_email);
-    if (!filter_var($hotelFromEmail, FILTER_VALIDATE_EMAIL)) {
-        $hotelFromEmail = trim((string)getSetting('email_main', ''));
-    }
-
-    if (!filter_var($hotelFromEmail, FILTER_VALIDATE_EMAIL)) {
-        return ['success' => false, 'message' => 'Hotel sender email is not configured.'];
-    }
+    // The hotel's contact address (Reply-To and the signature line). The email itself is always
+    // sent from the SMTP mailbox (the only address the mail server lets us send as).
+    $hotelFromEmail = rh_guest_contact_email();
 
     $recipientEmail = trim((string)($inquiry['email'] ?? ''));
     if (!filter_var($recipientEmail, FILTER_VALIDATE_EMAIL)) {
@@ -6045,11 +6016,11 @@ function sendContactInquiryReplyEmail(array $inquiry, string $replySubject, stri
         </div>
         <p style="margin:24px 0 0;color:#555;">Kind regards,<br><strong>' . $escape($adminName) . '</strong><br>' . $escape($siteName) . '</p>
         <p style="margin-top:18px;color:#777;font-size:13px;">
-            Email: <a href="mailto:' . $escape($hotelFromEmail) . '">' . $escape($hotelFromEmail) . '</a>' .
-        ($phone !== '' ? '<br>Phone: ' . $escape($phone) : '') . '
+            ' . ($hotelFromEmail !== '' ? 'Email: <a href="mailto:' . $escape($hotelFromEmail) . '">' . $escape($hotelFromEmail) . '</a>' : '') .
+        ($phone !== '' ? ($hotelFromEmail !== '' ? '<br>' : '') . 'Phone: ' . $escape($phone) : '') . '
         </p>';
 
-    $textBody = $replyMessage . "\n\n---\nOriginal inquiry reference: " . ($reference ?: 'N/A') . "\nOriginal subject: " . (string)($inquiry['subject'] ?? '') . "\n\n" . $siteName . "\n" . $hotelFromEmail;
+    $textBody = $replyMessage . "\n\n---\nOriginal inquiry reference: " . ($reference ?: 'N/A') . "\nOriginal subject: " . (string)($inquiry['subject'] ?? '') . "\n\n" . $siteName . ($hotelFromEmail !== '' ? "\n" . $hotelFromEmail : '');
 
     if ($development_mode && (empty($smtp_password) || $email_preview_enabled)) {
         return createEmailPreview($recipientEmail, $guestName, $emailSubject, $htmlBody, $textBody);
@@ -6079,17 +6050,9 @@ function sendContactInquiryReplyEmail(array $inquiry, string $replySubject, stri
             $mail->SMTPDebug = $smtp_debug;
         }
 
-        if (filter_var($smtp_username, FILTER_VALIDATE_EMAIL)) {
-            $mail->Sender = $smtp_username;
-        }
-
-        $mail->setFrom($hotelFromEmail, $fromName);
+        rh_mail_apply_identity($mail, (string)$smtp_username, (string)$fromName);
         $mail->addAddress($recipientEmail, $guestName);
-        $mail->addReplyTo($hotelFromEmail, $fromName);
-
-        if ($email_bcc_admin && filter_var($email_admin_email, FILTER_VALIDATE_EMAIL)) {
-            $mail->addBCC($email_admin_email);
-        }
+        rh_mail_add_staff_bcc($mail, $recipientEmail, (bool)$email_bcc_admin);
 
         $mail->CharSet = PHPMailer::CHARSET_UTF8;
         $mail->Encoding = PHPMailer::ENCODING_BASE64;
@@ -6412,14 +6375,9 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
             if ($smtp_debug > 0) {
                 $mail->SMTPDebug = $smtp_debug;
             }
-            $mail->setFrom($smtp_username, $email_from_name ?: $site_name);
+            rh_mail_apply_identity($mail, (string)$smtp_username, (string)($email_from_name ?: $site_name));
             $mail->addAddress($booking['guest_email'], $booking['guest_name']);
-            if (!empty($email_from_email) && filter_var($email_from_email, FILTER_VALIDATE_EMAIL)) {
-                $mail->addReplyTo($email_from_email, $email_from_name ?: $site_name);
-            }
-            if ($email_bcc_admin && !empty($email_admin_email)) {
-                $mail->addBCC($email_admin_email);
-            }
+            rh_mail_add_staff_bcc($mail, (string)$booking['guest_email'], (bool)$email_bcc_admin);
             $mail->CharSet  = PHPMailer::CHARSET_UTF8;
             $mail->Encoding = PHPMailer::ENCODING_BASE64;
             $mail->isHTML(true);
@@ -6505,15 +6463,9 @@ function sendEmailWithBinaryAttachment(
         }
 
         $fromName = $email_from_name ?: ($email_site_name ?: getSetting('site_name', 'Hotel'));
-        $mail->setFrom($smtp_username, $fromName);
+        rh_mail_apply_identity($mail, (string)$smtp_username, (string)$fromName);
         $mail->addAddress($toEmail, $toName);
-
-        if (!empty($email_from_email) && filter_var($email_from_email, FILTER_VALIDATE_EMAIL)) {
-            $mail->addReplyTo($email_from_email, $fromName);
-        }
-        if ($email_bcc_admin && !empty($email_admin_email)) {
-            $mail->addBCC($email_admin_email);
-        }
+        rh_mail_add_staff_bcc($mail, (string)$toEmail, (bool)$email_bcc_admin);
 
         $mail->CharSet = PHPMailer::CHARSET_UTF8;
         $mail->Encoding = PHPMailer::ENCODING_BASE64;
@@ -7482,14 +7434,9 @@ function sendGymMemberCardEmail(array $member): array
         }
 
         $fromName = $email_from_name ?: $siteName;
-        $mail->setFrom($smtp_username, $fromName);
+        rh_mail_apply_identity($mail, (string)$smtp_username, (string)$fromName);
         $mail->addAddress($toEmail, $name);
-        if (!empty($email_from_email) && filter_var($email_from_email, FILTER_VALIDATE_EMAIL)) {
-            $mail->addReplyTo($email_from_email, $fromName);
-        }
-        if ($email_bcc_admin && !empty($email_admin_email)) {
-            $mail->addBCC($email_admin_email);
-        }
+        rh_mail_add_staff_bcc($mail, (string)$toEmail, (bool)$email_bcc_admin);
 
         $mail->CharSet = PHPMailer::CHARSET_UTF8;
         $mail->Encoding = PHPMailer::ENCODING_BASE64;

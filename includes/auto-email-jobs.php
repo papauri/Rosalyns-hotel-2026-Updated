@@ -228,7 +228,7 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
         global $pdo;
         rh_auto_require_invoice();
         $site = (string)getSetting('site_name');
-        $mail = (string)getSetting('email_from_email');
+        $mail = rh_guest_contact_email();
         $phone = (string)getSetting('phone_main');
         $addr = getSetting('address_line1') . ', ' . getSetting('address_line2') . ', ' . getSetting('address_country');
         $cur = (string)getSetting('currency_symbol');
@@ -1131,7 +1131,7 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
         $pay = [['payment_date' => date('Y-m-d', strtotime('-8 days')), 'payment_method' => 'mobile_money', 'payment_type' => 'deposit', 'total_amount' => 200000, 'payment_reference' => 'PAY-SAMPLE-1']];
         $preload = ['packages' => [], 'folio_charges' => [], 'payments' => $pay,
             'summary' => ['grand_total' => $grand, 'amount_paid' => 200000.0, 'balance_due' => $grand - 200000]];
-        $html = buildInvoiceHTML($booking, 'STMT-SAMPLE-1001', $site, (string)getSetting('email_from_email'), (string)getSetting('phone_main'), $addr, (string)getSetting('currency_symbol'), [], $preload);
+        $html = buildInvoiceHTML($booking, 'STMT-SAMPLE-1001', $site, rh_guest_contact_email(), (string)getSetting('phone_main'), $addr, (string)getSetting('currency_symbol'), [], $preload);
         return ['STMT-SAMPLE-1001.pdf', bookingRenderPdfFromHtml($html, 'Invoice STMT-SAMPLE-1001', ['watermark' => 'SAMPLE'])];
     }
 

@@ -79,6 +79,9 @@ function sendReportEmail(array $recipients, string $subject, string $htmlBody, a
                 $mail->addCC($ccEmail);
             }
         }
+        // Staff-only report: one hidden copy to the staff copy email while the switch is on, unless it is
+        // already a recipient (includes/email-identity.php).
+        rh_mail_add_staff_bcc($mail, (string)($valid[0]['email'] ?? ''), (bool)getEmailSetting('email_bcc_admin', 0));
 
         $mail->CharSet  = PHPMailer::CHARSET_UTF8;
         $mail->Encoding = PHPMailer::ENCODING_BASE64;

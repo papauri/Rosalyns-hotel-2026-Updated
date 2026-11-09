@@ -30,7 +30,7 @@ if (!function_exists('rh_hotel_details_fields')) {
                 'hotel_address'            => ['label' => 'Full postal address (documents)', 'type' => 'textarea', 'max' => 255, 'default' => ''],
                 'address_region'           => ['label' => 'Region / district (contact page)', 'type' => 'text', 'max' => 100, 'default' => ''],
                 'phone_secondary'          => ['label' => 'Second phone number', 'type' => 'phone', 'max' => 30, 'default' => ''],
-                'admin_notification_email' => ['label' => 'Staff notification email', 'type' => 'email', 'default' => ''],
+                'admin_notification_email' => ['label' => 'Staff notification email', 'type' => 'email', 'default' => '', 'help' => 'Gets new website booking alerts only when "New website booking alerts go to" (Booking Settings, Booking Notification Email) is blank. Also gets alerts when an unconfirmed or unpaid booking expires.'],
                 'google_maps_embed'        => ['label' => 'Google Maps embed (link or iframe code from Google Maps > Share > Embed)', 'type' => 'maps', 'default' => ''],
             ],
             'Stay policies' => [

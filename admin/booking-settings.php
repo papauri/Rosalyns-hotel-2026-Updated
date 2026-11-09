@@ -499,7 +499,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             '{{total_amount_formatted}}'   => number_format(4500, 2),
             '{{total_amount}}'             => (string)getSetting('currency_symbol', 'MWK') . number_format(4500, 2),
             '{{currency_symbol}}'          => (string)getSetting('currency_symbol', 'MWK'),
-            '{{contact_email}}'            => (string)(getSetting('email_from_email') ?: getEmailSetting('email_from_email') ?: getSetting('contact_email', 'reservations@example.com')),
+            '{{contact_email}}'            => (string)(getEmailSetting('email_from_email') ?: getSetting('contact_email', 'reservations@example.com')),
             '{{contact_phone}}'            => (string)getSetting('phone_main', ''),
             '{{phone_main}}'               => (string)getSetting('phone_main', ''),
             '{{payment_policy}}'           => 'Full payment is due 48 hours before check-in.',
@@ -660,7 +660,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             $invoiceTermsText = trim((string)getSetting('invoice_terms', getSetting('payment_terms', '')));
             if ($invoiceTermsText !== '') {
                 $invoiceTermsText = strtr($invoiceTermsText, [
-                    '{{contact_email}}' => (string)(getSetting('email_from_email') ?: getEmailSetting('email_from_email') ?: getSetting('contact_email', 'reservations@example.com')),
+                    '{{contact_email}}' => (string)(getEmailSetting('email_from_email') ?: getSetting('contact_email', 'reservations@example.com')),
                     '{{contact_phone}}' => (string)getSetting('phone_main', ''),
                     '{{site_name}}' => (string)getSetting('site_name', 'Hotel'),
                 ]);
@@ -913,7 +913,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             updateSetting('conference_email', $conference_email);
             updateSetting('gym_email', $gym_email);
-            updateSetting('email_restaurant', $email_restaurant);
+            // Restaurant page shows the reservations email while this was never saved; a blank box
+            // must not replace that with nothing.
+            if ($email_restaurant !== '' || getSetting('email_restaurant', '__rh_unset__') !== '__rh_unset__') {
+                updateSetting('email_restaurant', $email_restaurant);
+            }
 
             $message = 'Service channels and notification emails updated successfully!';
         } elseif (isset($_POST['save_pwa_settings'])) {
@@ -994,7 +998,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 '{{total_amount_formatted}}'   => number_format(4500, 2),
                 '{{total_amount}}'             => $currencySymbol . number_format(4500, 2),
                 '{{currency_symbol}}'          => $currencySymbol,
-                '{{contact_email}}'            => (string)(getSetting('email_from_email') ?: getEmailSetting('email_from_email') ?: getSetting('contact_email', 'reservations@example.com')),
+                '{{contact_email}}'            => (string)(getEmailSetting('email_from_email') ?: getSetting('contact_email', 'reservations@example.com')),
                 '{{contact_phone}}'            => (string)getSetting('phone_main', ''),
                 '{{phone_main}}'               => (string)getSetting('phone_main', ''),
                 '{{payment_policy}}'           => 'Full payment is due 48 hours before check-in.',
@@ -1197,7 +1201,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             // Validate required fields
-            $required_fields = ['smtp_host', 'smtp_port', 'smtp_username', 'email_from_name', 'email_from_email'];
+            $required_fields = ['smtp_host', 'smtp_port', 'smtp_username', 'email_from_name'];
             foreach ($required_fields as $field) {
                 if (empty($email_settings[$field])) {
                     throw new Exception(ucfirst(str_replace('_', ' ', $field)) . ' is required');
@@ -1211,19 +1215,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             if (preg_match('/[
 ]/', $email_settings['email_from_name']) || mb_strlen($email_settings['email_from_name']) > 100) {
-                throw new Exception('From name must be a single line of at most 100 characters');
+                throw new Exception('Sender name must be a single line of at most 100 characters');
             }
             if (!preg_match('/^[A-Za-z0-9.\-]{1,253}$/', $email_settings['smtp_host'])) {
                 throw new Exception('SMTP host must be a host name such as mail.example.com');
             }
 
             // Validate emails
-            if (!filter_var($email_settings['email_from_email'], FILTER_VALIDATE_EMAIL)) {
-                throw new Exception('From email address is invalid');
+            if ($email_settings['email_from_email'] !== '' && !filter_var($email_settings['email_from_email'], FILTER_VALIDATE_EMAIL)) {
+                throw new Exception('Reply-to and contact email address is invalid');
             }
 
             if (!empty($email_settings['email_admin_email']) && !filter_var($email_settings['email_admin_email'], FILTER_VALIDATE_EMAIL)) {
-                throw new Exception('Admin email address is invalid');
+                throw new Exception('Staff copy email address is invalid');
             }
             if ($email_settings['invoice_recipients'] !== '') {
                 $invList = [];
@@ -1268,7 +1272,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // Get current setting
 $current_max_days = (int)getSetting('max_advance_booking_days', 30);
-$current_booking_notification_email = getSetting('booking_notification_email', getSetting('admin_notification_email', ''));
+$current_booking_notification_email = getSetting('booking_notification_email', '');
 $current_booking_notification_cc_emails = getSetting('booking_notification_cc_emails', '');
 $current_prearrival_reminder_enabled = getSetting('booking_prearrival_reminder_enabled', '0') === '1';
 $current_prearrival_reminder_days = (int)getSetting('booking_prearrival_reminder_days', '1');
@@ -1279,9 +1283,24 @@ $current_conference_system_enabled = getSetting('conference_system_enabled', '1'
 $current_gym_system_enabled = getSetting('gym_system_enabled', '1') === '1';
 $current_restaurant_system_enabled = getSetting('restaurant_system_enabled', '1') === '1';
 
-$current_conference_email = getSetting('conference_email', getSetting('email_reservations', ''));
-$current_gym_email = getSetting('gym_email', getSetting('email_reservations', ''));
-$current_restaurant_email = getSetting('email_restaurant', getSetting('email_reservations', ''));
+// Boxes show the saved value only; where emails really go comes from the same resolvers the
+// sending code uses (includes/email-identity.php), shown under each box.
+$current_conference_email = getSetting('conference_email', '');
+$current_gym_email = getSetting('gym_email', '');
+$current_restaurant_email = getSetting('email_restaurant', '');
+
+/** "Currently goes to" line under an email box (escaped HTML). */
+$rh_route_line = static function (array $route, string $saved, string $verb = 'Currently goes to', string $none = 'nobody'): string {
+    $email = (string)($route['email'] ?? '');
+    if ($email === '') {
+        return '<p class="help-text"><i class="fas fa-triangle-exclamation"></i> ' . htmlspecialchars($verb) . ': ' . htmlspecialchars($none) . '. No address is set here or in the fallbacks.</p>';
+    }
+    $note = '';
+    if (rh_ei_valid_email($saved) === '') {
+        $note = ' (box blank, using ' . htmlspecialchars((string)($route['source'] ?? '')) . ')';
+    }
+    return '<p class="help-text"><i class="fas fa-envelope"></i> ' . htmlspecialchars($verb) . ': <strong>' . htmlspecialchars($email) . '</strong>' . $note . '</p>';
+};
 
 $booking_template_defs = $booking_template_defs_master;
 
@@ -1944,7 +1963,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         <label for="smtp_username">SMTP Username *</label>
                         <input type="text" id="smtp_username" name="smtp_username" class="form-control"
                             value="<?php echo htmlspecialchars($current_settings['smtp_username'] ?? ''); ?>" required>
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Usually your full email address</p>
+                        <p class="help-text"><i class="fas fa-info-circle"></i> The mailbox that sends every email (usually its full email address). Mail servers only allow sending as this address, so guests see it in the From line next to the sender name. It is not shown anywhere else.</p>
                     </div>
 
                     <div class="form-group">
@@ -1969,24 +1988,34 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     </h3>
 
                     <div class="form-group">
-                        <label for="email_from_name">From Name *</label>
+                        <label for="email_from_name">Sender name *</label>
                         <input type="text" id="email_from_name" name="email_from_name" class="form-control"
                             value="<?php echo htmlspecialchars($current_settings['email_from_name'] ?? ''); ?>" required>
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Name that appears as the sender of emails</p>
+                        <p class="help-text"><i class="fas fa-info-circle"></i> The name guests see on every email, for example the hotel's name.</p>
                     </div>
 
                     <div class="form-group">
-                        <label for="email_from_email">From Email *</label>
+                        <label for="email_from_email">Reply-to and contact email (optional)</label>
                         <input type="email" id="email_from_email" name="email_from_email" class="form-control"
-                            value="<?php echo htmlspecialchars($current_settings['email_from_email'] ?? ''); ?>" required>
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Email address that appears as the sender</p>
+                            value="<?php echo htmlspecialchars($current_settings['email_from_email'] ?? ''); ?>">
+                        <p class="help-text"><i class="fas fa-info-circle"></i> When guests reply to an email, their reply goes here, and it is printed as the contact email on emails and documents. Use the hotel's own address. Leave blank if the hotel has no email domain yet: the main contact email from Hotel Details is used instead.</p>
+                        <?php
+                        $rhGuestContact = rh_guest_contact_email();
+                        $rhSavedContact = trim((string)($current_settings['email_from_email'] ?? ''));
+                        $rhMailbox = trim((string)($current_settings['smtp_username'] ?? ''));
+                        ?>
+                        <p class="help-text"><i class="fas fa-envelope"></i> Guests currently see:
+                            <?php if ($rhGuestContact !== ''): ?><strong><?php echo htmlspecialchars($rhGuestContact); ?></strong><?php else: ?>no contact email (set one here or the main contact email in Hotel Details)<?php endif; ?></p>
+                        <?php if ($rhSavedContact !== '' && $rhMailbox !== '' && strcasecmp($rhSavedContact, $rhMailbox) === 0): ?>
+                        <p class="help-text"><i class="fas fa-triangle-exclamation"></i> This is the sending mailbox, so guests see it here too. Change it to the hotel's own address once the hotel has its own mailbox.</p>
+                        <?php endif; ?>
                     </div>
 
                     <div class="form-group">
-                        <label for="email_admin_email">Admin Notification Email</label>
+                        <label for="email_admin_email">Staff copy email</label>
                         <input type="email" id="email_admin_email" name="email_admin_email" class="form-control"
                             value="<?php echo htmlspecialchars($current_settings['email_admin_email'] ?? ''); ?>">
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Email address to receive booking notifications (optional)</p>
+                        <p class="help-text"><i class="fas fa-info-circle"></i> Gets: a hidden copy of every email while the switch below is on; a copy of bookings created in the admin panel and of conference confirmations; new gym membership enquiries; booking, conference, gym and expired-hold alerts when their own boxes and fallbacks are blank; the end-of-day report when no report recipient is set. Guests never see it.</p>
                     </div>
 
                     <h3 style="color: #1A1A1A; margin-top: 30px; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #e0e0e0;">
@@ -1997,44 +2026,44 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         <label style="display: flex; align-items: center; gap: 10px;">
                             <input type="checkbox" id="email_bcc_admin" name="email_bcc_admin" value="1"
                                 <?php echo ($current_settings['email_bcc_admin'] ?? '1') === '1' ? 'checked' : ''; ?>>
-                            <span>BCC Admin on all emails</span>
+                            <span>Send the staff copy email a hidden copy of every email</span>
                         </label>
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Send a blind carbon copy of all emails to the admin email address</p>
+                        <p class="help-text"><i class="fas fa-info-circle"></i> Guests can't see this copy. It covers guest emails and staff alerts (new bookings, conference and gym alerts, expired holds, contact-form messages), once each: an email that already goes to the staff copy email is not copied again. Automated reminders use their own switch on the Automated Emails page.</p>
                     </div>
 
                     <div class="form-group">
                         <label style="display: flex; align-items: center; gap: 10px;">
                             <input type="checkbox" id="email_development_mode" name="email_development_mode" value="1"
                                 <?php echo ($current_settings['email_development_mode'] ?? '1') === '1' ? 'checked' : ''; ?>>
-                            <span>Development Mode (Preview Only)</span>
+                            <span>Preview only (testing on this computer)</span>
                         </label>
-                        <p class="help-text"><i class="fas fa-info-circle"></i> When checked, emails will be saved as preview files instead of being sent.</p>
+                        <p class="help-text"><i class="fas fa-info-circle"></i> Only works when the system runs on a local computer: emails are saved as previews instead of being sent. It has no effect on the live website.</p>
                     </div>
 
                     <div class="form-group">
                         <label style="display: flex; align-items: center; gap: 10px;">
                             <input type="checkbox" id="email_log_enabled" name="email_log_enabled" value="1"
                                 <?php echo ($current_settings['email_log_enabled'] ?? '1') === '1' ? 'checked' : ''; ?>>
-                            <span>Enable Email Logging</span>
+                            <span>Keep a log of sent emails</span>
                         </label>
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Log all email activity to logs/email-log.txt</p>
+                        <p class="help-text"><i class="fas fa-info-circle"></i> Records each email sent or failed (time, recipient, subject) so delivery problems can be traced.</p>
                     </div>
 
                     <div class="form-group">
                         <label style="display: flex; align-items: center; gap: 10px;">
                             <input type="checkbox" id="email_preview_enabled" name="email_preview_enabled" value="1"
                                 <?php echo ($current_settings['email_preview_enabled'] ?? '1') === '1' ? 'checked' : ''; ?>>
-                            <span>Enable Email Previews</span>
+                            <span>Save a preview copy of each email</span>
                         </label>
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Save HTML previews of emails in logs/email-previews/ folder</p>
+                        <p class="help-text"><i class="fas fa-info-circle"></i> Keeps a viewable copy of each email for checking how it looks. Only used together with Preview only on a local computer.</p>
                     </div>
 
                     <div class="form-group">
-                        <label for="invoice_recipients">Invoice Email CC Recipients</label>
+                        <label for="invoice_recipients">Hotel copies of invoices, statements and credit notes</label>
                         <input type="text" id="invoice_recipients" name="invoice_recipients" class="form-control"
                             value="<?php echo htmlspecialchars($current_settings['invoice_recipients'] ?? ''); ?>"
                             placeholder="accounts@example.com, manager@example.com">
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Comma-separated list of addresses CCed on every invoice and reminder email. The SMTP username is always included automatically.</p>
+                        <p class="help-text"><i class="fas fa-info-circle"></i> Comma-separated. Each address gets a hidden copy of every invoice, statement, credit note and receipt emailed to a guest; the guest doesn't see these copies. The sending mailbox also gets a hidden copy of invoices and statements automatically.</p>
                     </div>
 
                     <button type="submit" class="btn-submit">
@@ -2046,10 +2075,8 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <summary><i class="fas fa-circle-info"></i> Email Configuration Tips</summary>
                     <div class="tips-body">
                         <ul>
-                            <li><strong>Testing:</strong> Use Development Mode to test without actually sending</li>
+                            <li><strong>Testing:</strong> Use Preview only on a local computer to test without actually sending</li>
                             <li><strong>Security:</strong> Passwords are encrypted in the database</li>
-                            <li><strong>Logs:</strong> Check <code>logs/email-log.txt</code> for activity history</li>
-                            <li><strong>Previews:</strong> Saved to <code>logs/email-previews/</code></li>
                         </ul>
                     </div>
                 </details>
@@ -2062,19 +2089,20 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <input type="hidden" name="booking_notification_settings" value="1">
 
                     <div class="form-group">
-                        <label for="booking_notification_email">Notification Recipient Email</label>
+                        <label for="booking_notification_email">New website booking alerts go to</label>
                         <input type="email" id="booking_notification_email" name="booking_notification_email"
                             class="form-control" value="<?php echo htmlspecialchars($current_booking_notification_email ?? ''); ?>"
                             placeholder="reservations@example.com">
-                        <p class="help-text"><i class="fas fa-info-circle"></i> New booking notifications are sent to this email first, with fallback to Admin Notification Email.</p>
+                        <p class="help-text"><i class="fas fa-info-circle"></i> Alerts about new bookings made on the website. Leave blank to use the Staff notification email from Hotel Details, then the Staff copy email.</p>
+                        <?php echo $rh_route_line(rh_booking_alert_recipient(), (string)$current_booking_notification_email); ?>
                     </div>
 
                     <div class="form-group">
-                        <label for="booking_notification_cc_emails">Booking Notification CC Emails</label>
+                        <label for="booking_notification_cc_emails">Also send booking alerts to</label>
                         <input type="text" id="booking_notification_cc_emails" name="booking_notification_cc_emails"
                             class="form-control" value="<?php echo htmlspecialchars($current_booking_notification_cc_emails ?? ''); ?>"
                             placeholder="accounts@example.com, manager@example.com">
-                        <p class="help-text"><i class="fas fa-info-circle"></i> Optional comma-separated CC recipients for all new booking admin notifications.</p>
+                        <p class="help-text"><i class="fas fa-info-circle"></i> Optional, comma-separated. Each address gets its own copy of the alert. Only for bookings made on the website; bookings created in the admin panel send a copy to the Staff copy email instead.</p>
                     </div>
 
                     <h3 style="margin-top:24px;">Guest communication emails</h3>
@@ -2133,8 +2161,10 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         </label>
                     </div>
                     <div class="form-group">
-                        <label for="conference_email">Conference Notification Email</label>
+                        <label for="conference_email">Conference enquiry alerts go to</label>
                         <input type="email" id="conference_email" name="conference_email" class="form-control" value="<?php echo htmlspecialchars($current_conference_email ?? ''); ?>" placeholder="conference@example.com">
+                        <p class="help-text"><i class="fas fa-info-circle"></i> New conference enquiries from the website. Leave blank to use the main contact email from Hotel Details, then the Staff copy email. When staff confirm an enquiry, a copy goes to the Staff copy email.</p>
+                        <?php echo $rh_route_line(rh_conference_alert_recipient(), (string)$current_conference_email); ?>
                     </div>
                     <?php else: ?>
                     <?php if ($current_conference_system_enabled): ?><input type="hidden" name="conference_system_enabled" value="1"><?php endif; ?>
@@ -2149,8 +2179,10 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         </label>
                     </div>
                     <div class="form-group">
-                        <label for="gym_email">Gym Notification Email</label>
+                        <label for="gym_email">Gym booking alerts go to</label>
                         <input type="email" id="gym_email" name="gym_email" class="form-control" value="<?php echo htmlspecialchars($current_gym_email ?? ''); ?>" placeholder="gym@example.com">
+                        <p class="help-text"><i class="fas fa-info-circle"></i> New gym booking requests from the website. Leave blank to use the main contact email from Hotel Details, then the Staff copy email. New membership enquiries go to the Staff copy email.</p>
+                        <?php echo $rh_route_line(rh_gym_alert_recipient(), (string)$current_gym_email); ?>
                     </div>
                     <?php else: ?>
                     <?php if ($current_gym_system_enabled): ?><input type="hidden" name="gym_system_enabled" value="1"><?php endif; ?>
@@ -2165,8 +2197,10 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         </label>
                     </div>
                     <div class="form-group">
-                        <label for="email_restaurant">Restaurant Notification Email</label>
+                        <label for="email_restaurant">Restaurant contact email</label>
                         <input type="email" id="email_restaurant" name="email_restaurant" class="form-control" value="<?php echo htmlspecialchars($current_restaurant_email ?? ''); ?>" placeholder="restaurant@example.com">
+                        <p class="help-text"><i class="fas fa-info-circle"></i> Shown to guests as the restaurant's contact email on the restaurant page and the printed menu. No alerts are sent to it. While it has never been saved, the reservations email is shown.</p>
+                        <?php echo $rh_route_line(rh_restaurant_contact_recipient(), (string)$current_restaurant_email, 'Restaurant page currently shows', 'no email'); ?>
                     </div>
                     <?php else: ?>
                     <?php if ($current_restaurant_system_enabled): ?><input type="hidden" name="restaurant_system_enabled" value="1"><?php endif; ?>
@@ -2427,7 +2461,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                                                 id="test-email-addr-<?php echo $tkey; ?>"
                                                 class="form-control tpl-test-email-input"
                                                 placeholder="recipient@example.com"
-                                                value="<?php echo htmlspecialchars((string)getSetting('email_admin_email', '')); ?>">
+                                                value="<?php echo htmlspecialchars((string)getEmailSetting('email_admin_email', '')); ?>">
                                             <button type="button"
                                                 class="btn-submit btn-send-test"
                                                 data-tpl="<?php echo $tkey; ?>"

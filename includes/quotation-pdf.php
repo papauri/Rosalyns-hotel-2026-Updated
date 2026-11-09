@@ -75,7 +75,7 @@ function generateQuotationPDF(array $booking, array $room, array $options = []):
     $site_name      = getSetting('site_name', 'Hotel');
     $site_address   = getSetting('address_line1', '') . (getSetting('address_line2', '') ? ', ' . getSetting('address_line2', '') : '');
     $site_phone     = getSetting('phone_main', '');
-    $site_email     = getSetting('email_main', getSetting('email_from_email', ''));
+    $site_email     = getSetting('email_main', rh_guest_contact_email());
     $currency       = getSetting('currency_symbol', 'MWK');
     $vat_enabled    = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
     $check_in_time  = getSetting('check_in_time', '2:00 PM');
@@ -246,7 +246,7 @@ function generateConferenceQuotationPDF(array $enquiry, array $room, array $opti
 
     $siteName = (string)getSetting('site_name', 'Hotel');
     $sitePhone = (string)getSetting('phone_main', '');
-    $siteEmail = (string)getSetting('email_main', getSetting('email_from_email', ''));
+    $siteEmail = (string)getSetting('email_main', rh_guest_contact_email());
     $siteAddress = trim((string)getSetting('address_line1', ''));
     $currency = (string)getSetting('currency_symbol', 'MWK');
     // Conference bookings are not paid at check-in: the room payment policy does not apply here.
@@ -389,7 +389,7 @@ function generateEventQuotationPDF(array $event, array $recipient, array $option
 
     $siteName = (string)getSetting('site_name', 'Hotel');
     $sitePhone = (string)getSetting('phone_main', '');
-    $siteEmail = (string)getSetting('email_main', getSetting('email_from_email', ''));
+    $siteEmail = (string)getSetting('email_main', rh_guest_contact_email());
     $currency = (string)getSetting('currency_symbol', 'MWK');
 
     $attendeeCount = max(1, (int)($options['attendee_count'] ?? 1));

@@ -587,9 +587,7 @@ if ($channel === 'whatsapp') {
 // getEmailSetting() for the two keys that belong to email_settings.
 $recipientsCsv = getSetting('eod_report_recipients');
 if (!$recipientsCsv) {
-    $recipientsCsv = getSetting('email_admin_email')
-        ?: getEmailSetting('email_admin_email')
-        ?: getSetting('email_from_email')
+    $recipientsCsv = getEmailSetting('email_admin_email')
         ?: getEmailSetting('email_from_email');
 }
 $recipients = [];

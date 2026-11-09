@@ -1098,7 +1098,7 @@ if (!function_exists('generateCreditNotePDF')) {
             $siteName    = getSetting('site_name')    ?: 'The Hotel';
             $siteAddress = getSetting('site_address') ?: '';
             $sitePhone   = getSetting('site_phone')   ?: '';
-            $siteEmail   = getSetting('contact_email') ?: getSetting('smtp_username') ?: '';
+            $siteEmail   = getSetting('contact_email') ?: rh_guest_contact_email();
             $siteWebsite = getSetting('site_url')     ?: '';
             $currencySymbol = getSetting('currency_symbol') ?: 'MWK';
             $vatNumber   = getSetting('vat_number')   ?: '';
@@ -1224,7 +1224,6 @@ if (!function_exists('sendCreditNoteEmail')) {
             $currency_symbol = getSetting('currency_symbol')           ?: 'MWK';
             $hotel_phone     = getSetting('hotel_phone')               ?: '';
             $hotel_address   = getSetting('hotel_address')             ?: '';
-            $fromEmail       = getEmailSetting('email_from_email', '') ?: getEmailSetting('smtp_username', '');
             $fromName        = getEmailSetting('email_from_name', '')  ?: $site_name;
             $smtpHost        = getEmailSetting('smtp_host',     '');
             $smtpPort        = (int)getEmailSetting('smtp_port',  587);
@@ -1236,16 +1235,9 @@ if (!function_exists('sendCreditNoteEmail')) {
                 throw new RuntimeException('SMTP host is not configured. Please set up email settings in admin.');
             }
 
-            // If the From address domain differs from the SMTP user domain, fall back to
-            // the SMTP-authenticated address to prevent relay rejection ("data not accepted").
-            if ($smtpUser && $fromEmail) {
-                $fromDomain = strtolower(substr($fromEmail, strrpos($fromEmail, '@') + 1));
-                $smtpDomain = strtolower(substr($smtpUser,  strrpos($smtpUser,  '@') + 1));
-                if ($fromDomain !== $smtpDomain) {
-                    $fromEmail = $smtpUser;
-                }
-            }
-            if (empty($fromEmail)) {
+            // From is always the SMTP mailbox (the only address the mail server lets us send as);
+            // replies go to the hotel's contact email (includes/email-identity.php).
+            if (!filter_var($smtpUser, FILTER_VALIDATE_EMAIL)) {
                 throw new RuntimeException('Email from address is not configured.');
             }
 
@@ -1277,7 +1269,7 @@ if (!function_exists('sendCreditNoteEmail')) {
                         '{{hotel_address}}'      => htmlspecialchars($hotel_address),
                         '{{booking_reference}}'  => htmlspecialchars((string)($cn['booking_reference'] ?? '')),
                         '{{currency_symbol}}'    => htmlspecialchars($currency_symbol),
-                        '{{contact_email}}'      => htmlspecialchars($fromEmail),
+                        '{{contact_email}}'      => htmlspecialchars(rh_guest_contact_email()),
                         '{{logo_html}}'          => $cnLogoHtml,
                         '{{address}}'            => htmlspecialchars($hotel_address),
                         '{{contact_phone}}'      => htmlspecialchars($hotel_phone !== '' ? $hotel_phone : (string)getSetting('phone_main', '')),
@@ -1299,17 +1291,15 @@ if (!function_exists('sendCreditNoteEmail')) {
             $mail->SMTPAuth    = true;
             $mail->SMTPSecure  = $smtpSecure;
             $mail->CharSet     = 'UTF-8';
-            $mail->SMTPOptions = ['ssl' => ['verify_peer' => false, 'verify_peer_name' => false]];
+            // TLS certificates are verified (PHPMailer default), like every other sender.
 
-            $mail->setFrom($fromEmail, $fromName);
+            rh_mail_apply_identity($mail, (string)$smtpUser, (string)$fromName);
             $mail->addAddress((string)$cn['guest_email'], (string)$cn['guest_name']);
 
-            $invoiceRecipients = getEmailSetting('invoice_recipients', '');
-            foreach (array_filter(array_map('trim', explode(',', $invoiceRecipients))) as $cc) {
-                if (filter_var($cc, FILTER_VALIDATE_EMAIL) && $cc !== $cn['guest_email']) {
-                    $mail->addCC($cc);
-                }
-            }
+            // Hotel copies (invoice_recipients) are hidden copies: the guest never sees internal addresses.
+            $cnCopies = array_map('trim', explode(',', (string)getEmailSetting('invoice_recipients', '')));
+            rh_mail_add_hidden_copies($mail, $cnCopies, (string)$cn['guest_email']);
+            rh_mail_add_staff_bcc($mail, (string)$cn['guest_email'], (bool)getEmailSetting('email_bcc_admin', 0));
 
             $mail->isHTML(true);
             $mail->Subject = $cnEmailSubject;

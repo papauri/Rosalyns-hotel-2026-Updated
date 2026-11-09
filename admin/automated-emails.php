@@ -235,6 +235,7 @@ $editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_remin
             </div>
             <label class="ae-check"><input type="checkbox" name="automated_email_bcc_hotel" value="1" <?php echo $cfg['automated_email_bcc_hotel'] === '1' ? 'checked' : ''; ?>>
                 <span>BCC the hotel (admin notification address) on payment and quotation reminders</span></label>
+            <p class="help-text">The hidden copy goes to the Staff copy email in Email Settings. For reminders sent from this page, this switch replaces the main hidden-copy switch.</p>
 
             <button type="submit" class="btn-submit" style="margin-top:12px;"><i class="fas fa-save"></i> Save settings</button>
         </form>

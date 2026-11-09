@@ -556,10 +556,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
 
             // Admin CC notification for conference confirmation
             try {
-                $adminCcAddr = trim((string)getEmailSetting('email_admin_email', ''));
-                if (empty($adminCcAddr)) {
-                    $adminCcAddr = trim((string)getEmailSetting('smtp_username', ''));
-                }
+                // Staff copy email, else the sending mailbox (includes/email-identity.php)
+                $adminCcAddr = rh_staff_copy_recipient()['email'];
                 if (!empty($adminCcAddr) && filter_var($adminCcAddr, FILTER_VALIDATE_EMAIL)) {
                     $confSiteName  = getSetting('site_name', 'Hotel');
                     $confAdminUrl  = rtrim((string)getSetting('site_url', ''), '/') . '/admin/conference-management.php?id=' . $enquiry_id;
