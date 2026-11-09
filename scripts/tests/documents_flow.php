@@ -318,6 +318,13 @@ foreach ([['inclusive', 0, 0], ['inclusive', 1, 0], ['exclusive', 0, 0], ['exclu
     ok($tag . ': the printed Subtotal (+ VAT row in exclusive) (+ levy) adds up to the Total charges exactly', !empty($j['foots']) && !empty($j['has_stmt']), $d);
     ok('  ' . $tag . ' rolled back', dx_clean($r), json_encode($r));
 }
+// RP-2: a surcharge plan prints its own information row (amount in the words, Amount column blank); figures unchanged.
+$r = dx_child('invoice_money', ['mode' => 'inclusive', 'extras' => 0, 'levy' => 0, 'surcharge' => 1]);
+$j = $r['json'] ?? [];
+$d = json_encode($j['printed'] ?? $j ?: $r) . ' ' . ($j['txt'] ?? '');
+ok('F2 statement (inclusive + surcharge): "Festival Season surcharge (already in the room rate) +MWK 20,000.00" row and "including the ... surcharge" on the room line', !empty($j['surcharge_row']) && !empty($j['surcharge_sub']), $d);
+ok('F2 statement (inclusive + surcharge): room line, subtotal and total still 270,000 (nothing added or taken off), no minus row, lines foot', (int)($j['n_270,000.00'] ?? 0) >= 3 && (int)($j['n_neg_20000'] ?? 1) === 0 && !empty($j['foots']), $d);
+ok('  F2 statement (surcharge) rolled back', dx_clean($r), json_encode($r));
 
 $r = dx_child('late_statement');
 $j = $r['json'] ?? [];

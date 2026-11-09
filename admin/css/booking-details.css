@@ -492,6 +492,12 @@
     font-weight: 500;
 }
 
+/* Amounts beside a label with a helper line: never squeezed or clipped by the wrapping label. */
+.payment-tax-row .bd-amt {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
 .payment-tax-row .is-credit {
     color: var(--bd-ok);
 }

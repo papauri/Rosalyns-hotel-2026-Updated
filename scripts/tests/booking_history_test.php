@@ -239,6 +239,9 @@ check(strpos($ovEv['detail'], 'Price set by hand: K900,000 for the whole stay (3
 $rpB = $booking; $rpB['rate_plan_label'] = 'Long stay'; $rpB['rate_plan_discount'] = 35600;
 $rpEv = rh_hist_price_explanation($rpB, null, 450300.0, [], ['cur' => 'K', 'staff' => $staff, 'room_type_name' => 'Superior Suite', 'entity_names' => []]);
 check(strpos($rpEv['detail'], 'Rate plan applied: Long stay (discount K35,600).') !== false && strpos($rpEv['detail'], 'part of the difference may be the rate plan') !== false, 'old booking with a rate plan: says so, no false claim', $rpEv['detail']);
+$rpS = $booking; $rpS['rate_plan_label'] = 'Festival Season'; $rpS['rate_plan_discount'] = -82855.20;
+$rpSEv = rh_hist_price_explanation($rpS, null, 450300.0, [], ['cur' => 'K', 'staff' => $staff, 'room_type_name' => 'Superior Suite', 'entity_names' => []]);
+check(strpos($rpSEv['detail'], 'Rate plan applied: Festival Season (surcharge +K82,855.20 a night, already in the room rate).') !== false && strpos($rpSEv['detail'], 'discount') === false, 'old booking with a surcharge plan: surcharge named as already in the rate, never called a discount', $rpSEv['detail']);
 
 // ---- 6. the note written when a payment is saved ----
 $note = rh_hist_payment_saved_note(1350900, 'cash', 1068000, -282900, true, 'CN-2026-000003', 282900, 'K');

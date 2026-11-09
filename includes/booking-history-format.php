@@ -917,7 +917,8 @@ if (!function_exists('rh_hist_tol')) {
         if ($child > rh_hist_tol()) $lines[] = 'Children: + ' . rh_hist_money($child, $cur) . '.';
         if ($ratePlan !== '' && !($snap && isset($snap['list_rate']))) {
             $disc = (float)($b['rate_plan_discount'] ?? 0);
-            $lines[] = 'Rate plan applied: ' . $ratePlan . ($disc > rh_hist_tol() ? ' (discount ' . rh_hist_money($disc, $cur) . ')' : '') . '.';
+            $lines[] = 'Rate plan applied: ' . $ratePlan . ($disc > rh_hist_tol() ? ' (discount ' . rh_hist_money($disc, $cur) . ')' : '')
+                . ($disc < -rh_hist_tol() ? ' (surcharge +' . rh_hist_money(-$disc, $cur) . ' a night, already in the room rate)' : '') . '.';
         }
         if (!empty($ctx['combo_name'])) $lines[] = 'Joined rooms: ' . $ctx['combo_name'] . '.';
         $vat = (float)($b['vat_amount'] ?? 0);

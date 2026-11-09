@@ -115,6 +115,12 @@ if (!function_exists('rh_booking_money_card')) {
             $dn = max(1, (int)($b['number_of_nights'] ?? 1));
             $lines[] = ['label' => ($plan !== '' ? $plan : 'Rate plan discount') . ' (already taken off the room rate)', 'kind' => 'note',
                 'value' => '-' . $m(round($disc * $dn, 2))];
+        } elseif ($disc < -$tol) {
+            // Negative = a surcharge (e.g. festive season), already inside the room rate: a note, never added.
+            $plan = trim((string)($b['rate_plan_label'] ?? ''));
+            $dn = max(1, (int)($b['number_of_nights'] ?? 1));
+            $lines[] = ['label' => ($plan !== '' ? $plan . ' surcharge' : 'Rate plan surcharge') . ' (already in the room rate)', 'kind' => 'note',
+                'value' => '+' . $m(round(-$disc * $dn, 2))];
         }
 
         $lines[] = ['label' => ($child > $tol || $pkg > $tol) ? 'Net price (excl. VAT and levy)' : 'Net room price (excl. VAT and levy)',

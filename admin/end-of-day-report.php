@@ -353,6 +353,7 @@ try {
 $dynamic_pricing = [
     'bookings_with_rate_plan' => 0,
     'total_discount_given'    => 0.0,
+    'total_surcharge_added'   => 0.0,
     'package_revenue'         => 0.0,
     'packages_booked'         => 0,
     'top_rate_plan'           => '',
@@ -360,10 +361,13 @@ $dynamic_pricing = [
 ];
 if ($mod_bookings) {
     try {
+        // rate_plan_discount is per room per night; > 0 = a discount, < 0 = a surcharge (already inside the room
+        // rate). They are separate figures and are never netted against each other.
         $dpStmt = $pdo->prepare("
             SELECT
                 SUM(CASE WHEN rate_plan_id IS NOT NULL THEN 1 ELSE 0 END) AS bookings_with_rate_plan,
-                COALESCE(SUM(CASE WHEN rate_plan_id IS NOT NULL THEN COALESCE(rate_plan_discount,0) * GREATEST(1, COALESCE(NULLIF(DATEDIFF(check_out_date, check_in_date), 0), 1)) ELSE 0 END),0) AS total_discount_given,
+                COALESCE(SUM(CASE WHEN rate_plan_id IS NOT NULL AND rate_plan_discount > 0 THEN rate_plan_discount * GREATEST(1, COALESCE(NULLIF(DATEDIFF(check_out_date, check_in_date), 0), 1)) ELSE 0 END),0) AS total_discount_given,
+                COALESCE(SUM(CASE WHEN rate_plan_id IS NOT NULL AND rate_plan_discount < 0 THEN -rate_plan_discount * GREATEST(1, COALESCE(NULLIF(DATEDIFF(check_out_date, check_in_date), 0), 1)) ELSE 0 END),0) AS total_surcharge_added,
                 COALESCE(SUM(COALESCE(package_total,0)),0) AS package_revenue
             FROM bookings
             WHERE deleted_at IS NULL AND DATE(created_at) = :d
@@ -373,12 +377,13 @@ if ($mod_bookings) {
         $dpRow = $dpStmt->fetch(PDO::FETCH_ASSOC) ?: [];
         $dynamic_pricing['bookings_with_rate_plan'] = (int)($dpRow['bookings_with_rate_plan'] ?? 0);
         $dynamic_pricing['total_discount_given']    = (float)($dpRow['total_discount_given'] ?? 0);
+        $dynamic_pricing['total_surcharge_added']   = (float)($dpRow['total_surcharge_added'] ?? 0);
         $dynamic_pricing['package_revenue']         = (float)($dpRow['package_revenue'] ?? 0);
 
         $bpStmt = $pdo->prepare("
             SELECT COUNT(*) FROM booking_packages bp
             INNER JOIN bookings b ON b.id = bp.booking_id
-            WHERE DATE(b.created_at) = :d AND b.status NOT IN ('cancelled','no-show')
+            WHERE b.deleted_at IS NULL AND DATE(b.created_at) = :d AND b.status NOT IN ('cancelled','no-show')
         ");
         $bpStmt->execute([':d' => $report_date]);
         $dynamic_pricing['packages_booked'] = (int)$bpStmt->fetchColumn();
@@ -395,7 +400,7 @@ if ($mod_bookings) {
         $tpStmt = $pdo->prepare("
             SELECT bp.package_name, COUNT(*) AS cnt FROM booking_packages bp
             INNER JOIN bookings b ON b.id = bp.booking_id
-            WHERE DATE(b.created_at) = :d AND b.status NOT IN ('cancelled','no-show')
+            WHERE b.deleted_at IS NULL AND DATE(b.created_at) = :d AND b.status NOT IN ('cancelled','no-show')
             GROUP BY bp.package_name ORDER BY cnt DESC LIMIT 1
         ");
         $tpStmt->execute([':d' => $report_date]);
@@ -1806,10 +1811,11 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                             <?php else: ?>
                             <ul class="ck-kv eod-kv">
                                 <?php
-                                echo $kv('Rate-plan bookings', (int)$dynamic_pricing['bookings_with_rate_plan'] . ($dynamic_pricing['top_rate_plan'] ? $sub(htmlspecialchars($dynamic_pricing['top_rate_plan'])) : ''));
-                                echo $kv('Total discounts given', $money($dynamic_pricing['total_discount_given']), 'eod-warn');
-                                echo $kv('Package add-on revenue', $money($dynamic_pricing['package_revenue']) . $sub((int)$dynamic_pricing['packages_booked'] . ' package' . ((int)$dynamic_pricing['packages_booked'] === 1 ? '' : 's')), 'eod-good');
-                                if ($dynamic_pricing['top_package']) { echo $kv('Top package', htmlspecialchars($dynamic_pricing['top_package'])); }
+                                echo $kv('Rate-plan bookings', (int)$dynamic_pricing['bookings_with_rate_plan'] . $sub('bookings made today with a rate plan' . ($dynamic_pricing['top_rate_plan'] ? '; most used: ' . htmlspecialchars($dynamic_pricing['top_rate_plan']) : '')));
+                                echo $kv('Total discounts given', $money($dynamic_pricing['total_discount_given']) . $sub('rate-plan price cuts &times; nights, bookings made today'), $dynamic_pricing['total_discount_given'] > BALANCE_TOLERANCE ? 'eod-warn' : '');
+                                echo $kv('Surcharges added', $money($dynamic_pricing['total_surcharge_added']) . $sub('rate-plan surcharges &times; nights, already in the room rates'));
+                                echo $kv('Package add-on revenue', $money($dynamic_pricing['package_revenue']) . $sub((int)$dynamic_pricing['packages_booked'] . ' package' . ((int)$dynamic_pricing['packages_booked'] === 1 ? '' : 's') . ' on bookings made today, VAT included'), 'eod-good');
+                                if ($dynamic_pricing['top_package']) { echo $kv('Top package', htmlspecialchars($dynamic_pricing['top_package']) . $sub('most booked package today')); }
                                 ?>
                             </ul>
                             <?php endif; ?>

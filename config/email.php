@@ -2241,6 +2241,9 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
         'rate_plan_label' => $booking['rate_plan_label'] ?? '',
         'rate_plan_discount_formatted' => isset($booking['rate_plan_discount']) && (float)$booking['rate_plan_discount'] > 0
             ? number_format((float)$booking['rate_plan_discount'] * max(1, (int)($booking['number_of_nights'] ?? 1)), 0) : '',
+        // A negative rate_plan_discount is a surcharge, already inside the room rate (shown for information only).
+        'rate_plan_surcharge_formatted' => isset($booking['rate_plan_discount']) && (float)$booking['rate_plan_discount'] < -BALANCE_TOLERANCE
+            ? number_format(-(float)$booking['rate_plan_discount'] * max(1, (int)($booking['number_of_nights'] ?? 1)), 0) : '',
         'package_total_formatted' => isset($booking['package_total']) && (float)$booking['package_total'] > 0
             ? number_format((float)$booking['package_total'], 0) : '',
     ];

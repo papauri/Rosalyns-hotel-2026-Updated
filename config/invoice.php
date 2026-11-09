@@ -678,6 +678,9 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     };
     $ratePlanDiscount   = (float)($booking['rate_plan_discount']     ?? 0) * $ratePlanNightsOf($booking);
     $ratePlanLabel      = (string)($booking['rate_plan_label']       ?? '');
+    // A negative rate_plan_discount is a surcharge (e.g. festive season). It is already inside the room line, so it
+    // prints as an information row only (amount in the description, Amount column blank) and is never added again.
+    $ratePlanSurcharge  = $ratePlanDiscount < -BALANCE_TOLERANCE && trim($ratePlanLabel) !== '' ? round(-$ratePlanDiscount, 2) : 0.0;
 
     // When group_bookings is provided, use combined figures from all rooms.
     // Otherwise fall back to single-booking columns.
@@ -872,9 +875,11 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         }
         $planLabel = trim((string)($row['rate_plan_label'] ?? ''));
         $disc = $planLabel !== '' && (float)($row['rate_plan_discount'] ?? 0) > 0;
+        $surch = $planLabel !== '' && (float)($row['rate_plan_discount'] ?? 0) < -BALANCE_TOLERANCE;
         $n = (int)$br['nights'];
         return 'Accommodation - booked at ' . rh_hist_money($br['per_night'], $cur) . ' a night'
             . ($disc ? ' after the ' . $planLabel . ' discount' : '')
+            . ($surch ? ' including the ' . $planLabel . ' surcharge' : '')
             . ($incl ? ', ' . implode(' and ', $incl) . ' included' : '')
             . ' x ' . $n . ($n === 1 ? ' night' : ' nights')
             . ($br['child'] > 0 ? ' + children ' . rh_hist_money($br['child'], $cur) : '')
@@ -929,6 +934,15 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
             rh_pdf_e((string)(int)$booking['number_of_nights']),
             '',
             '<span style="color:' . $tc['success'] . ';">' . rh_pdf_e($money(-$ratePlanDiscount)) . '</span>',
+        ];
+    }
+    if ($ratePlanSurcharge > 0) {
+        // Information only: the surcharge is already in the room line above, so the Amount column stays blank.
+        $itemRows[] = [
+            rh_pdf_e($ratePlanLabel . ' surcharge (already in the room rate) +' . $money($ratePlanSurcharge)),
+            rh_pdf_e((string)(int)$booking['number_of_nights']),
+            '',
+            '',
         ];
     }
     foreach ($pkgRows as $pkg) {
@@ -1067,6 +1081,15 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
             <td width="10%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . (int)$booking['number_of_nights'] . '</td>
             <td width="15%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">—</td>
             <td width="25%" style="padding:6px 8px; font-size:12px; color:#1a3c2a; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">-' . $currency_symbol . ' ' . number_format($ratePlanDiscount, 2) . '</td>
+        </tr>';
+    }
+    // Rate plan surcharge row: information only, already inside the accommodation line, so no amount is printed.
+    if (!empty($ratePlanSurcharge) && $ratePlanSurcharge > 0) {
+        $chargeRows .= '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
+            <td width="50%" style="padding:6px 8px; font-size:12px; color:#5E554D; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0; line-height:1.35;">' . htmlspecialchars($ratePlanLabel) . ' surcharge (already in the room rate) +' . $currency_symbol . ' ' . number_format($ratePlanSurcharge, 2) . '</td>
+            <td width="10%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . (int)$booking['number_of_nights'] . '</td>
+            <td width="15%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">—</td>
+            <td width="25%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">—</td>
         </tr>';
     }
 

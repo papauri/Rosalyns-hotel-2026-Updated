@@ -3973,7 +3973,8 @@ function rh_booking_total_breakdown(array $rows, array $opts = []): array
     };
     $out = ['ok' => false, 'title' => 'How this total is worked out', 'note' => 'Breakdown not available for this older booking.', 'lines' => []];
 
-    $room = $child = $pkg = $levy = $vat = $gross = $disc = 0.0;
+    $room = $child = $pkg = $levy = $vat = $gross = $disc = $surch = 0.0;
+    $surchLabels = [];
     $mode = 'off';
     $rebuilt = false;
     $nightsSet = [];
@@ -4005,6 +4006,10 @@ function rh_booking_total_breakdown(array $rows, array $opts = []): array
         if ($pd > 0 && trim((string)($r['rate_plan_label'] ?? '')) !== '') {
             $disc += $pd * max(1, $n);
             $planLabels[trim((string)$r['rate_plan_label'])] = true;
+        } elseif ($pd < -BALANCE_TOLERANCE && trim((string)($r['rate_plan_label'] ?? '')) !== '') {
+            // Negative = a surcharge (e.g. festive season); it is already inside the room rate.
+            $surch += -$pd * max(1, $n);
+            $surchLabels[trim((string)$r['rate_plan_label'])] = true;
         }
     }
     $gross = round($gross, 2);
@@ -4033,6 +4038,9 @@ function rh_booking_total_breakdown(array $rows, array $opts = []): array
     $lines[] = ['label' => $rooms > 1 ? 'Room rate x nights (' . $rooms . ' rooms)' : 'Room rate x nights', 'hint' => $hint, 'value' => $fmt($room), 'kind' => 'add'];
     if ($disc > BALANCE_TOLERANCE) {
         $lines[] = ['label' => 'Discount already taken off', 'hint' => implode(', ', array_keys($planLabels)), 'value' => $fmt(-$disc), 'kind' => 'note'];
+    }
+    if ($surch > BALANCE_TOLERANCE) {
+        $lines[] = ['label' => 'Surcharge already in the room rate', 'hint' => implode(', ', array_keys($surchLabels)), 'value' => '+' . $fmt($surch), 'kind' => 'note'];
     }
     if ($child > BALANCE_TOLERANCE) {
         $cl = $rooms > 1 ? rh_child_doc_label($list, trim($cur)) : rh_child_charge_label($list[0], trim($cur));

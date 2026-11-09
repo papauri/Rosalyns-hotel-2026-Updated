@@ -57,6 +57,10 @@ $l = rh_booked_rate_text($split(1068000, 3), ['currency' => 'K', 'today' => 4000
 check($l['today_text'] === '', 'rate plan: no note when today = booked rate + discount');
 $l = rh_booked_rate_text($split(1068000, 3), ['currency' => 'K', 'today' => 450300, 'discount_per_night' => 44000]);
 check($l['today_text'] !== '', 'rate plan: note when today matches neither');
+$l = rh_booked_rate_text($split(1068000, 3), ['currency' => 'K', 'today' => 300000, 'discount_per_night' => -56000]);
+check($l['today_text'] === '', 'rate plan surcharge: no note when today = booked rate - surcharge (the list price)', $l['today_text']);
+$l = rh_booked_rate_text($split(1068000, 3), ['currency' => 'K', 'today' => 450300, 'discount_per_night' => -56000]);
+check($l['today_text'] !== '', 'rate plan surcharge: note when today matches neither');
 
 // 5. rounding: the total is the stored figure, never per_night x nights
 $l = rh_booked_rate_text($split(1000000, 3), ['currency' => 'K']);
@@ -158,6 +162,10 @@ $c = rh_booking_money_card($row2, rh_booked_rate_text($split(1128000, 3, 150000)
 $v = $cardVals($c);
 check($c['adds_up'] && ($v['Child charge'] ?? '') === 'K60,000' && ($v['Package'] ?? '') === 'K150,000', 'card: child charge and package lines');
 check(($v['Early bird (already taken off the room rate)'] ?? '') === '-K60,000', 'card: rate plan named, discount x nights, not added');
+$c3 = rh_booking_money_card(['rate_plan_label' => 'Festival Season', 'rate_plan_discount' => -20000] + $row2, rh_booked_rate_text($split(1128000, 3, 150000), ['currency' => 'K', 'child' => 60000]), ['currency' => 'K']);
+$v3 = $cardVals($c3);
+$k3 = array_values(array_filter($c3['lines'], fn($ln) => strpos($ln['label'], 'surcharge') !== false))[0] ?? [];
+check($c3['adds_up'] && ($v3['Festival Season surcharge (already in the room rate)'] ?? '') === '+K60,000' && ($k3['kind'] ?? '') === 'note' && !isset($v3['Festival Season (already taken off the room rate)']), 'card: surcharge named, + x nights, a note (not added), total unchanged');
 check(isset($v['Net price (excl. VAT and levy)']) && !isset($v['Tourism levy']), 'card: net label covers extras; no levy line when none');
 check(($v['Folio extras (meals, services and other charges)'] ?? '') === 'K75,000' && ($v['Paid so far'] ?? '') === 'K500,000' && ($v['Balance due'] ?? '') === 'K853,000', 'card: extras, paid, stored balance');
 

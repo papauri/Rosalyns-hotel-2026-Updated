@@ -1216,6 +1216,32 @@ $vat_is_inclusive = function_exists('vat_mode') && vat_mode() === 'inclusive';
 $folio_total_amount = (float)($folio_summary['grand_total'] ?? 0);
 $folio_total_vat = (float)($folio_summary['total_vat'] ?? 0);
 $folio_subtotal_before_vat = max(0.0, $folio_total_amount - $folio_total_vat);
+// Payment breakdown rows, all excl. VAT and levy: Room base + packages + Extras = Subtotal, and
+// Subtotal + Tourism levy + VAT = Total (folio grand total, unchanged). Package costs are stored all-in (VAT inside,
+// no levy), so each package shows its net; extras show net of their VAT; the room base is what remains (room net).
+// A cancelled stay bills only the kept amount (no levy, no VAT on it), so no levy row then. Display only.
+if (!function_exists('rh_stay_totals')) {
+    require_once __DIR__ . '/../includes/pricing.php';
+}
+$bd_is_cancelled = (($booking['status'] ?? '') === 'cancelled');
+$bd_pkg_rows = [];
+$bd_pkg_net_sum = 0.0;
+if (!$bd_is_cancelled) {
+    foreach (($booking_packages ?? []) as $bp) {
+        $bd_pn = round((float) rh_stay_totals((float)($bp['total_cost'] ?? 0), 'price', false)['net'], 2);
+        $bd_pkg_rows[] = ['name' => (string)($bp['package_name'] ?? ''), 'net' => $bd_pn];
+        $bd_pkg_net_sum += $bd_pn;
+    }
+}
+$bd_levy_row = $bd_is_cancelled ? 0.0 : round(max(0.0, (float)($booking['tourism_levy_amount'] ?? 0)), 2);
+$bd_subtotal = round($folio_subtotal_before_vat - $bd_levy_row, 2);
+$bd_extras_net = round((float)($folio_summary['extras_total'] ?? 0) - (float)($folio_summary['extras_vat'] ?? 0), 2);
+$bd_room_base = isset($folio_summary['grand_total'])
+    ? round($bd_subtotal - $bd_extras_net - $bd_pkg_net_sum, 2)
+    : round((float)($booking['total_amount'] ?? 0) - $bd_levy_row - $bd_pkg_net_sum, 2);
+$bd_plan_pd = (float)($booking['rate_plan_discount'] ?? 0);
+$bd_plan_label = trim((string)($booking['rate_plan_label'] ?? ''));
+$bd_plan_total = round(abs($bd_plan_pd) * max(1, (int)($booking['number_of_nights'] ?? 1)), 2);
 $folio_amount_paid = (float)($folio_summary['amount_paid'] ?? $booking['amount_paid'] ?? 0);
 $folio_balance_due = (float)($folio_summary['balance_due'] ?? max(0.0, $folio_total_amount - $folio_amount_paid));
 // Money owed BACK to the guest (overpayment, or a stay shortened after payment).
@@ -1781,7 +1807,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                             <?php if (!empty($booking['rate_plan_label'])): ?>
                             <tr>
                                 <th scope="row">Rate plan</th>
-                                <td><?php echo htmlspecialchars($booking['rate_plan_label']); ?><?php if ((float)($booking['rate_plan_discount'] ?? 0) > 0): ?> &mdash; -<?php echo $currency_symbol; ?><?php echo number_format((float) $booking['rate_plan_discount'], 2); ?>/night<?php endif; ?></td>
+                                <td><?php echo htmlspecialchars($booking['rate_plan_label']); ?><?php if ((float)($booking['rate_plan_discount'] ?? 0) > 0): ?> &mdash; -<?php echo $currency_symbol; ?><?php echo number_format((float) $booking['rate_plan_discount'], 2); ?>/night<?php elseif ((float)($booking['rate_plan_discount'] ?? 0) < -BALANCE_TOLERANCE): ?> &mdash; surcharge +<?php echo $currency_symbol; ?><?php echo number_format(-(float) $booking['rate_plan_discount'], 2); ?>/night (already in the room rate)<?php endif; ?></td>
                             </tr>
                             <?php endif; ?>
                             <tr>
@@ -1922,37 +1948,46 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
 
                         <div class="payment-tax-breakdown">
                             <div class="payment-tax-row payment-tax-row--sub">
-                                <span>Room base</span>
-                                <strong><?php echo $currency_symbol; ?><?php echo number_format((float) $booking['total_amount'] - (float)($booking['package_total'] ?? 0), 2); ?></strong>
+                                <?php if ($bd_is_cancelled): ?>
+                                <span>Room (amount kept on cancellation)<br><small class="bd-muted">only this part of the stay is billed</small></span>
+                                <?php else: ?>
+                                <span>Room base (excl. VAT and levy)<br><small class="bd-muted">the stay (and any child charge) without VAT or levy<?php echo $bd_pkg_rows ? '; packages listed below' : ''; ?></small></span>
+                                <?php endif; ?>
+                                <strong class="bd-amt"><?php echo $currency_symbol; ?><?php echo number_format($bd_room_base, 2); ?></strong>
                             </div>
-                            <?php if (!empty($booking['rate_plan_label']) && (float)($booking['rate_plan_discount'] ?? 0) > 0): ?>
+                            <?php if (!$bd_is_cancelled && $bd_plan_label !== '' && $bd_plan_pd > 0): ?>
                                 <div class="payment-tax-row payment-tax-row--sub">
-                                    <span><?php echo htmlspecialchars($booking['rate_plan_label']); ?></span>
-                                    <strong class="is-credit">-<?php echo $currency_symbol; ?><?php echo number_format((float) $booking['rate_plan_discount'] * max(1, (int) $booking['number_of_nights']), 2); ?></strong>
+                                    <span><?php echo htmlspecialchars($bd_plan_label); ?> discount<br><small class="bd-muted">already taken off the room base above, not subtracted again</small></span>
+                                    <strong class="bd-muted bd-amt">-<?php echo $currency_symbol; ?><?php echo number_format($bd_plan_total, 2); ?></strong>
+                                </div>
+                            <?php elseif (!$bd_is_cancelled && $bd_plan_label !== '' && $bd_plan_pd < -BALANCE_TOLERANCE): ?>
+                                <div class="payment-tax-row payment-tax-row--sub">
+                                    <span><?php echo htmlspecialchars($bd_plan_label); ?> surcharge<br><small class="bd-muted">already in the room base above, not added again</small></span>
+                                    <strong class="bd-muted bd-amt">+<?php echo $currency_symbol; ?><?php echo number_format($bd_plan_total, 2); ?></strong>
                                 </div>
                             <?php endif; ?>
-                            <?php foreach ($booking_packages as $bp): ?>
+                            <?php foreach ($bd_pkg_rows as $bp_row): ?>
                                 <div class="payment-tax-row payment-tax-row--sub">
-                                    <span><?php echo htmlspecialchars($bp['package_name']); ?></span>
-                                    <strong><?php echo $currency_symbol; ?><?php echo number_format((float) $bp['total_cost'], 2); ?></strong>
+                                    <span><?php echo htmlspecialchars($bp_row['name']); ?> (excl. VAT)</span>
+                                    <strong class="bd-amt"><?php echo $currency_symbol; ?><?php echo number_format($bp_row['net'], 2); ?></strong>
                                 </div>
                             <?php endforeach; ?>
                             <div class="payment-tax-row payment-tax-row--sub">
-                                <span>Extras</span>
-                                <strong><?php echo $currency_symbol; ?><?php echo number_format($folio_summary['extras_total'] ?? 0, 2); ?></strong>
+                                <span>Extras (excl. VAT)<br><small class="bd-muted">folio charges; their VAT is in the VAT row</small></span>
+                                <strong class="bd-amt"><?php echo $currency_symbol; ?><?php echo number_format($bd_extras_net, 2); ?></strong>
                             </div>
                             <div class="payment-tax-row">
-                                <span>Subtotal</span>
-                                <strong><?php echo $currency_symbol; ?><?php echo number_format($folio_subtotal_before_vat, 2); ?></strong>
+                                <span>Subtotal (excl. VAT and levy)<br><small class="bd-muted">the rows above added up</small></span>
+                                <strong class="bd-amt"><?php echo $currency_symbol; ?><?php echo number_format($bd_subtotal, 2); ?></strong>
                             </div>
-                            <?php if ($booking_levy_amount > 0): ?>
+                            <?php if ($bd_levy_row > 0): ?>
                                 <div class="payment-tax-row">
-                                    <span>Tourism Levy<?php echo $booking_levy_percent > 0 ? ' (' . number_format($booking_levy_percent, 2) . '%)' : ''; ?></span>
-                                    <strong><?php echo $currency_symbol; ?><?php echo number_format($booking_levy_amount, 2); ?></strong>
+                                    <span>+ Tourism Levy<?php echo $booking_levy_percent > 0 ? ' (' . number_format($booking_levy_percent, 2) . '%)' : ''; ?><br><small class="bd-muted">on the room, not on packages or extras</small></span>
+                                    <strong class="bd-amt"><?php echo $currency_symbol; ?><?php echo number_format($bd_levy_row, 2); ?></strong>
                                 </div>
                             <?php endif; ?>
                             <div class="payment-tax-row">
-                                <span>VAT</span>
+                                <span>+ VAT<br><small class="bd-muted">room, packages and extras</small></span>
                                 <strong><?php echo $currency_symbol; ?><?php echo number_format($folio_total_vat, 2); ?></strong>
                             </div>
                             <div class="payment-tax-row payment-tax-row--total">

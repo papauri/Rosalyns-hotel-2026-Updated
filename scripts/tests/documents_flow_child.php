@@ -284,6 +284,9 @@ switch ($sc) {
         require_once $root . '/config/invoice.php';
         [$bid, $bref] = dx_priced_booking($pdo, $run, (string)$prm['mode'], !empty($prm['levy']), 'checked-out');
         $gross = (float)$pdo->query("SELECT total_with_vat FROM bookings WHERE id = $bid")->fetchColumn();
+        if (!empty($prm['surcharge'])) { // RP-2: a surcharge plan (negative rate_plan_discount) -10,000/night x 2 nights, already in the price
+            $pdo->prepare("UPDATE bookings SET rate_plan_label = 'Festival Season', rate_plan_discount = -10000 WHERE id = ?")->execute([$bid]);
+        }
         $extras = !empty($prm['extras']) ? 27000.0 : 0.0;
         if ($extras > 0) {
             $pdo->prepare("INSERT INTO booking_charges (booking_id, charge_type, description, quantity, unit_price, line_subtotal, vat_rate, vat_amount, line_total, posted_at, added_by)
@@ -302,6 +305,9 @@ switch ($sc) {
             $out['n_' . $needle] = substr_count($txt, 'MWK ' . $needle);
         }
         $out['has_subtotal_incl'] = strpos($txt, 'Subtotal (incl. VAT)') !== false;
+        $out['surcharge_row'] = strpos($txt, 'Festival Season surcharge (already in the room rate) +MWK 20,000.00') !== false;
+        $out['surcharge_sub'] = strpos($txt, 'including the Festival Season surcharge') !== false;
+        $out['n_neg_20000'] = substr_count($txt, '-MWK 20,000.00');
         $out['has_subtotal_excl'] = strpos($txt, 'Subtotal (excl. VAT)') !== false;
         // Foot check straight from the printed totals block: Subtotal (+ VAT row in exclusive) (+ levy) = Total charges.
         $num = static function (string $label) use ($txt): ?float {

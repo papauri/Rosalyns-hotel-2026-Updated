@@ -85,13 +85,14 @@ if (!function_exists('rh_booked_rate_text')) {
             . ($child > $tol ? ' + children ' . $m($child) : '')
             . ($pkg > $tol ? ' + package ' . $m($pkg) : '');
 
-        // Today's list price vs the booked rate. A rate plan lowers the booked rate below the list price of the
-        // time, so with a discount the note shows only when today's price matches neither figure.
+        // Today's list price vs the booked rate. A rate plan moves the booked rate away from the list price of the
+        // time (a discount lowers it; a surcharge, stored as a negative discount, raises it), so with a rate plan the
+        // note shows only when today's price matches neither figure.
         $todayText = '';
         $today = isset($opts['today']) && $opts['today'] !== null ? (float)$opts['today'] : null;
         if ($today !== null && $today > $tol) {
-            $disc = max(0.0, (float)($opts['discount_per_night'] ?? 0));
-            $differs = abs($today - $perNight) > $tol && ($disc <= $tol || abs($today - ($perNight + $disc)) > $tol);
+            $disc = (float)($opts['discount_per_night'] ?? 0);
+            $differs = abs($today - $perNight) > $tol && (abs($disc) <= $tol || abs($today - ($perNight + $disc)) > $tol);
             if ($differs) {
                 $todayText = "Today's price is " . $m($today) . ' a night — this booking keeps the price it was booked at.';
             }

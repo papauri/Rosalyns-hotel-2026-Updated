@@ -97,6 +97,13 @@ foreach (['exclusive', 'inclusive'] as $mode) {
     $dl = array_values(array_filter($bd['lines'], fn($l) => stripos($l['label'], 'Discount') === 0))[0] ?? [];
     ok("[$mode] discount: shown as a note with the plan name, total still adds up", ($dl['kind'] ?? '') === 'note' && strpos($dl['hint'], 'Early bird') !== false && $dl['value'] === '-K 30,000.00' && abs($sum - $tot) <= BALANCE_TOLERANCE, json_encode($dl));
 
+    // rate plan SURCHARGE (negative rate_plan_discount): its own note "+K", never added, no discount line (RP-2)
+    $sur = $mk($night * $nights, 'price', 0.0, ['rate_plan_label' => 'Festival Season', 'rate_plan_discount' => -10000]);
+    $bd = rh_booking_total_breakdown($sur);
+    [$sum, $tot] = btb_sum($bd);
+    $sl = array_values(array_filter($bd['lines'], fn($l) => stripos($l['label'], 'Surcharge') === 0))[0] ?? [];
+    ok("[$mode] surcharge: a note '+K 30,000.00' naming the plan, no discount line, total unchanged and adds up", ($sl['kind'] ?? '') === 'note' && strpos($sl['hint'] ?? '', 'Festival Season') !== false && ($sl['value'] ?? '') === '+K 30,000.00' && !btb_has($bd, 'Discount') && abs($sum - $tot) <= BALANCE_TOLERANCE && abs($tot - rh_booking_full_total($sur)) <= BALANCE_TOLERANCE, json_encode($bd));
+
     // group of two rooms (plain + child)
     $bd = rh_booking_total_breakdown([$plain, $kid]);
     [$sum, $tot] = btb_sum($bd);
