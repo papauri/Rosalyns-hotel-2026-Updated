@@ -3,6 +3,7 @@
 require_once 'admin-init.php';
 require_once 'includes/finance-schema.php';
 require_once __DIR__ . '/includes/finance-account-sync.php';
+require_once __DIR__ . '/../includes/booked-rate.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -155,7 +156,9 @@ if ($payment['booking_type'] === 'room') {
                 'vat_amount' => (float)$booking['vat_amount'],
                 'total_with_vat' => (float)$booking['total_with_vat']
             ],
-            'status' => $booking['status']
+            'status' => $booking['status'],
+            // The nightly price this booking was MADE at x nights (owner 2026-11-09), never today's price.
+            'booked_rate' => rh_booked_rate_for_booking($pdo, (int)$booking['id'])
         ];
     }
 } elseif ($payment['booking_type'] === 'conference') {
@@ -463,6 +466,9 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
                 <span class="rh-strip__label">Booking total</span>
                 <strong class="rh-strip__value"><?php echo $currency_symbol . number_format((float)$bookingTotalAmount, 0); ?></strong><?php echo $pd_total_info; ?>
                 <span class="rh-strip__sub">Paid <?php echo $currency_symbol . number_format((float)$paymentSummary['total_paid'], 0); ?> of total</span>
+                <?php if (!empty($bookingDetails['booked_rate']['ok'])): ?>
+                    <span class="rh-strip__sub" style="display:block;" title="The nightly price this guest booked at (VAT and levy included) times the nights. It never changes when the room price changes later.">Booked at <?php echo htmlspecialchars($bookingDetails['booked_rate']['compact']) . ((int)$bookingDetails['booked_rate']['nights'] === 1 ? ' night' : ' nights'); ?></span>
+                <?php endif; ?>
             </div>
             <div class="rh-strip__cell">
                 <span class="rh-strip__label">Outstanding</span>
@@ -703,6 +709,11 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
                                     <tr><th scope="row">Guest</th><td><?php echo htmlspecialchars((string)$bookingDetails['guest']['name']); ?></td></tr>
                                     <tr><th scope="row">Email</th><td><?php echo htmlspecialchars((string)$bookingDetails['guest']['email']); ?></td></tr>
                                     <tr><th scope="row">Dates</th><td><?php echo date('M j, Y', strtotime($bookingDetails['dates']['check_in'])); ?> &ndash; <?php echo date('M j, Y', strtotime($bookingDetails['dates']['check_out'])); ?> (<?php echo (int)$bookingDetails['dates']['nights']; ?> nights)</td></tr>
+                                    <?php if (!empty($bookingDetails['booked_rate']['ok'])): $pd_br = $bookingDetails['booked_rate']; ?>
+                                        <tr><th scope="row">Booked at <button type="button" class="wm-help" data-tooltip="The nightly price this guest booked at (VAT and levy included) times the nights. It never changes when the room price changes later; charge from this, not today's price." aria-label="Help">?</button></th>
+                                            <td><?php echo htmlspecialchars($pd_br['text']); ?><?php echo !empty($pd_br['cancelled']) ? ' <span class="rh-strip__sub">(booking cancelled)</span>' : ''; ?>
+                                                <?php if ($pd_br['today_text'] !== ''): ?><br><small style="color:var(--rh-muted);"><?php echo htmlspecialchars($pd_br['today_text']); ?></small><?php endif; ?></td></tr>
+                                    <?php endif; ?>
                                 <?php elseif ($bookingDetails['type'] === 'conference'): ?>
                                     <tr><th scope="row">Organization</th><td><?php echo htmlspecialchars((string)$bookingDetails['organization']['name']); ?></td></tr>
                                     <tr><th scope="row">Contact</th><td><?php echo htmlspecialchars((string)$bookingDetails['organization']['contact_person']); ?></td></tr>

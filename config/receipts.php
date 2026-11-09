@@ -157,6 +157,7 @@ if (!function_exists('receipt_hydrate_context')) {
         $description = ucfirst(str_replace('_', ' ', (string)($payment['booking_type'] ?? 'payment')));
         $orderItems = [];
         $orderTotals = [];
+        $bookedRate = '';
 
         if (($payment['booking_type'] ?? '') === 'room' && !empty($payment['booking_id'])) {
             $stmt = $pdo->prepare("SELECT b.guest_name, b.guest_email, b.guest_phone, b.booking_reference, r.name AS room_name
@@ -169,6 +170,13 @@ if (!function_exists('receipt_hydrate_context')) {
             $guestEmail = (string)($booking['guest_email'] ?? '');
             $guestPhone = (string)($booking['guest_phone'] ?? '');
             $description = trim('Room booking ' . (string)($booking['booking_reference'] ?? $payment['booking_reference'] ?? '') . ' ' . (string)($booking['room_name'] ?? ''));
+            // "Room: Superior Suite — K356,000 × 3 nights": the nightly price the booking was made at (owner 2026-11-09).
+            // Guest document: no today's-price note.
+            if (!function_exists('rh_booked_rate_for_booking')) {
+                require_once __DIR__ . '/../includes/booked-rate.php';
+            }
+            $br = rh_booked_rate_for_booking($pdo, (int)$payment['booking_id'], false);
+            $bookedRate = $br['ok'] ? 'Room: ' . $br['guest_text'] : '';
         } elseif (($payment['booking_type'] ?? '') === 'conference' && !empty($payment['booking_id'])) {
             try {
                 // Column names differ between installs: pick what exists (a missing column used to fail the
@@ -252,6 +260,7 @@ if (!function_exists('receipt_hydrate_context')) {
             'guest_email' => $guestEmail,
             'guest_phone' => $guestPhone,
             'description' => trim($description),
+            'booked_rate' => $bookedRate,
             'order_items' => $orderItems,
             'order_totals' => $orderTotals,
         ];
@@ -1039,6 +1048,10 @@ if (!function_exists('receipt_render_payment_pdf_html')) {
         // Exclusive: the line is net and VAT is added below. Inclusive/off: the line is the amount paid.
         $lineAmount = ($mode === 'exclusive' && $showVatAmount) ? $netShown : $gross;
         $desc = rh_pdf_e((string)($context['description'] ?? 'Payment'));
+        if (!empty($context['booked_rate'])) {
+            // Plain "x" / "-" in the PDF: the core font (helvetica) has no multiplication sign or middle dot.
+            $desc .= '<br/><span style="color:' . $t['muted_dark'] . ';font-size:7.5pt;">' . rh_pdf_e(str_replace(['×', '·'], ['x', '-'], (string)$context['booked_rate'])) . '</span>';
+        }
         $typeLabel = ucwords(str_replace('_', ' ', (string)($payment['payment_type'] ?? '')));
         if ($typeLabel !== '') {
             $desc .= '<br/><span style="color:' . $t['muted_dark'] . ';font-size:7.5pt;">' . rh_pdf_e($typeLabel) . '</span>';

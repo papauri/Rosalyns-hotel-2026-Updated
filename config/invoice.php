@@ -851,14 +851,54 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
 
     $guestCountStr = $adultGuests . ' Adult' . ($adultGuests > 1 ? 's' : '') . ($childGuests > 0 ? ', ' . $childGuests . ' Child' . ($childGuests > 1 ? 'ren' : '') : '');
 
+    // "Accommodation - booked at K356,000 a night, VAT and levy included x 3 nights": the nightly price the booking
+    // was made at, all-in, so the guest sees the booked rate and nights (owner 2026-11-09). Never today's price.
+    // With a rate plan it says the price is AFTER the discount (the Unit column holds the price before it).
+    // Plain "x" and "-": the PDF core font (helvetica) has no multiplication sign or middle dot.
+    if (!function_exists('rh_booked_rate_line')) {
+        require_once __DIR__ . '/../includes/booked-rate.php';
+    }
+    $accomSub = static function (array $row) use ($cur): string {
+        $br = rh_booked_rate_line($row, null, ['currency' => $cur, 'room_name' => '']);
+        if (!$br['ok']) {
+            return 'Accommodation';
+        }
+        $incl = [];
+        if ((float)($row['vat_amount'] ?? 0) > 0) {
+            $incl[] = 'VAT';
+        }
+        if ((float)($row['tourism_levy_amount'] ?? 0) > 0) {
+            $incl[] = 'levy';
+        }
+        $planLabel = trim((string)($row['rate_plan_label'] ?? ''));
+        $disc = $planLabel !== '' && (float)($row['rate_plan_discount'] ?? 0) > 0;
+        $n = (int)$br['nights'];
+        return 'Accommodation - booked at ' . rh_hist_money($br['per_night'], $cur) . ' a night'
+            . ($disc ? ' after the ' . $planLabel . ' discount' : '')
+            . ($incl ? ', ' . implode(' and ', $incl) . ' included' : '')
+            . ' x ' . $n . ($n === 1 ? ' night' : ' nights')
+            . ($br['child'] > 0 ? ' + children ' . rh_hist_money($br['child'], $cur) : '')
+            . ($br['package'] > 0 ? ' + package ' . rh_hist_money($br['package'], $cur) : '');
+    };
+    // The Unit column holds the line basis (rh_doc_stay_lines): exclusive = net, inclusive/off = without levy.
+    $unitLevy = $tourismLevyAmt > 0;
+    if ($vMode === 'exclusive') {
+        $unitHead = $unitLevy ? 'Unit (excl. VAT and levy)' : 'Unit (excl. VAT)';
+    } elseif ($vMode === 'inclusive') {
+        $unitHead = $unitLevy ? 'Unit (incl. VAT, excl. levy)' : 'Unit (incl. VAT)';
+    } else {
+        $unitHead = $unitLevy ? 'Unit (excl. levy)' : 'Unit';
+    }
+
     // Item rows: [description, qty, unit, amount]
     $itemRows = [];
     if (!empty($group_bookings)) {
         foreach (array_values($group_bookings) as $gi => $grm) {
             $grmSubtotal = (float)$docLines[$gi]['room'];
             $nightRate   = $grmSubtotal / max(1, (int)$grm['number_of_nights']);
+            // The primary row carries the package and rate-plan columns; siblings have none.
             $itemRows[] = [
-                rh_pdf_e($grm['room_name']) . rh_inv_sub('Accommodation'),
+                rh_pdf_e($grm['room_name']) . rh_inv_sub($accomSub($gi === $pkgRowIdx ? $booking : $grm)),
                 rh_pdf_e((string)(int)$grm['number_of_nights']),
                 rh_pdf_e($money($nightRate)),
                 rh_pdf_e($money($grmSubtotal)),
@@ -867,7 +907,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     } else {
         $nightRate = $roomSubtotal / max(1, (int)$booking['number_of_nights']);
         $itemRows[] = [
-            rh_pdf_e($booking['room_name']) . rh_inv_sub('Accommodation'),
+            rh_pdf_e($booking['room_name']) . rh_inv_sub($accomSub($booking)),
             rh_pdf_e((string)(int)$booking['number_of_nights']),
             rh_pdf_e($money($nightRate)),
             rh_pdf_e($money($roomSubtotal)),
@@ -919,7 +959,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     $itemsHtml = rh_pdf_items_table([
         ['label' => 'Description', 'width' => 46, 'align' => 'left'],
         ['label' => 'Qty', 'width' => 10, 'align' => 'right'],
-        ['label' => 'Unit', 'width' => 21, 'align' => 'right'],
+        ['label' => $unitHead, 'width' => 21, 'align' => 'right'],
         ['label' => 'Amount', 'width' => 23, 'align' => 'right'],
     ], $itemRows);
 

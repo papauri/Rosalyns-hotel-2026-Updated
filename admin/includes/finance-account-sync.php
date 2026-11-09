@@ -365,9 +365,21 @@ if (!function_exists('rh_account_balance_due')) {
 }
 
 if (!function_exists('rh_payment_overpay_message')) {
-    function rh_payment_overpay_message(): string
+    /**
+     * $rate (optional): the booking's booked-rate line (includes/booked-rate.php) so staff see the price the room was
+     * booked at, the balance and what they typed, never today's room price (owner 2026-11-09).
+     */
+    function rh_payment_overpay_message(?array $rate = null, ?float $amount = null, ?float $balanceDue = null): string
     {
-        return "That is more than the balance due. Tick 'The guest paid more than owed' to record it \u{2014} the extra becomes a credit note.";
+        $base = "Tick 'The guest paid more than owed' to record it \u{2014} the extra becomes a credit note.";
+        if ($rate === null || empty($rate['ok']) || $amount === null || $balanceDue === null || !function_exists('rh_hist_money')) {
+            return 'That is more than the balance due. ' . $base;
+        }
+        $cur = (string)($rate['currency'] ?? 'MWK');
+        return 'That is more than the balance due. This booking was booked at ' . $rate['text'] . '; balance due ' . rh_hist_money(max(0.0, $balanceDue), $cur)
+            . '. You are entering ' . rh_hist_money($amount, $cur) . '.'
+            . (!empty($rate['today_text']) ? ' ' . $rate['today_text'] : '')
+            . ' Only if the guest really paid more: ' . $base;
     }
 }
 
@@ -376,16 +388,18 @@ if (!function_exists('rh_payment_limit_error')) {
      * The single rule for taking money against an account (owner, 2026-10-20): nothing owed = no
      * payment; more than the balance only with the explicit "guest paid more than owed" tick (the
      * extra then becomes a credit note). Returns the staff-readable refusal, or null when allowed.
-     * Compare with BALANCE_TOLERANCE, never raw equality.
+     * Compare with BALANCE_TOLERANCE, never raw equality. $rate (room bookings, optional): the booked-rate line
+     * (includes/booked-rate.php), so the refusal says what the room was booked at.
      */
-    function rh_payment_limit_error(float $amount, float $balanceDue, bool $confirmOverpay): ?string
+    function rh_payment_limit_error(float $amount, float $balanceDue, bool $confirmOverpay, ?array $rate = null): ?string
     {
         $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
         if ($balanceDue <= $tol) {
-            return 'Nothing is owed on this booking. Use a credit note or refund instead.';
+            return 'Nothing is owed on this booking. Use a credit note or refund instead.'
+                . ($rate !== null && !empty($rate['ok']) ? ' It was booked at ' . $rate['text'] . '.' : '');
         }
         if ($amount > $balanceDue + $tol && !$confirmOverpay) {
-            return rh_payment_overpay_message();
+            return rh_payment_overpay_message($rate, $amount, $balanceDue);
         }
         return null;
     }

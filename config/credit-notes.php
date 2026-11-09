@@ -1027,6 +1027,11 @@ if (!function_exists('rh_credit_note_pdf_html')) {
             ['Reason', $reasonLabel],
             ['Status', ucwords(str_replace('_', ' ', $status))],
         ];
+        if (!empty($cn['booked_rate'])) {
+            // Room booking: the room and the nightly price it was booked at x nights (set by generateCreditNotePDF).
+            // Plain "x" / "-" in the PDF: the core font (helvetica) has no multiplication sign or middle dot.
+            $meta[] = ['Room', str_replace(['×', '·'], ['x', '-'], (string)$cn['booked_rate'])];
+        }
 
         $body = rh_pdf_section_title('Credit summary') . rh_pdf_spacer(2)
             . rh_pdf_items_table(
@@ -1126,6 +1131,16 @@ if (!function_exists('generateCreditNotePDF')) {
             $cn = $cn->fetch(PDO::FETCH_ASSOC);
             if (!$cn) {
                 throw new RuntimeException('Credit note not found.');
+            }
+            // Room bookings: "Superior Suite — K356,000 × 3 nights", the nightly price the booking was made at
+            // (owner 2026-11-09). Guest document: no today's-price note.
+            $cn['booked_rate'] = '';
+            if ((string)($cn['booking_type'] ?? '') === 'room' && (int)($cn['booking_id'] ?? 0) > 0) {
+                if (!function_exists('rh_booked_rate_for_booking')) {
+                    require_once __DIR__ . '/../includes/booked-rate.php';
+                }
+                $cnBr = rh_booked_rate_for_booking($pdo, (int)$cn['booking_id'], false);
+                $cn['booked_rate'] = $cnBr['ok'] ? $cnBr['guest_text'] : '';
             }
 
             // Site info

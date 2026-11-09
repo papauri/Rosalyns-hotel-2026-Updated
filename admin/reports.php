@@ -11,6 +11,7 @@ require_once __DIR__ . '/admin-init.php';
 require_once __DIR__ . '/includes/finance-schema.php';
 require_once __DIR__ . '/includes/receivables.php';
 require_once __DIR__ . '/../includes/conference-pricing.php';
+require_once __DIR__ . '/../includes/booked-rate.php';
 
 // Get date range from query parameters or default to current month
 $start_date = $_GET['start_date'] ?? date('Y-m-01');
@@ -2480,7 +2481,7 @@ try {
                                     <th>Check-in</th>
                                     <th>Nights</th>
                                     <th>Guests</th>
-                                    <th>Amount</th>
+                                    <th title="Full booking amount (room, VAT and tourism levy). Below it: the nightly price the booking was made at × nights — it never changes when the room price changes later.">Amount</th>
                                     <th>Status</th>
                                 </tr>
                             </thead>
@@ -2499,7 +2500,9 @@ try {
                                         <td>
                                             <?php echo $bkAdult; ?>A<?php if ($bkChild > 0): ?> + <?php echo $bkChild; ?>C<?php endif; ?>
                                         </td>
-                                        <td><?php echo $currency_symbol . ' ' . number_format($bk['total_amount'], 2); ?></td>
+                                        <?php $bkRate = rh_booked_rate_line($bk, null, ['currency' => trim((string)$currency_symbol)]); ?>
+                                        <td><?php echo $currency_symbol . ' ' . number_format(rh_booking_full_total($bk), 2); ?>
+                                            <?php if ($bkRate['ok']): ?><br><small style="color:var(--rh-muted, #666);">Booked at <?php echo htmlspecialchars($bkRate['compact']); ?></small><?php endif; ?></td>
                                         <td><span class="badge-sm badge-<?php echo htmlspecialchars($bk['status']); ?>"><?php echo ucfirst(str_replace('-', ' ', htmlspecialchars($bk['status']))); ?></span></td>
                                     </tr>
                                 <?php endforeach; ?>

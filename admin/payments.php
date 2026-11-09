@@ -98,7 +98,10 @@ $sql = "
             WHEN p.booking_type = 'gym' THEN gi.amount_due
             WHEN p.booking_type = 'event' THEN ei.amount_due
             ELSE NULL
-        END as account_amount_due
+        END as account_amount_due,
+        -- Room bookings: stored figures for the booked rate x nights line (includes/booked-rate.php).
+        b.total_with_vat AS bk_total_with_vat, b.total_amount AS bk_total_amount, b.vat_amount AS bk_vat_amount,
+        b.number_of_nights AS bk_nights, b.package_total AS bk_package_total, b.child_supplement_total AS bk_child
     FROM payments p
     LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
     LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
@@ -218,6 +221,22 @@ $params[] = $offset;
 $stmt = $pdo->prepare($sql);
 $stmt->execute($params);
 $payments = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Room payments: "K356,000 × 3" = the nightly price the booking was MADE at x nights (owner 2026-11-09).
+require_once __DIR__ . '/../includes/booked-rate.php';
+$payCur = trim((string)getSetting('currency_symbol', 'MWK'));
+foreach ($payments as &$payRow) {
+    $payRow['booked_rate_compact'] = '';
+    if ((string)$payRow['booking_type'] === 'room' && $payRow['bk_nights'] !== null) {
+        $payBr = rh_booked_rate_line([
+            'total_with_vat' => $payRow['bk_total_with_vat'], 'total_amount' => $payRow['bk_total_amount'],
+            'vat_amount' => $payRow['bk_vat_amount'], 'number_of_nights' => $payRow['bk_nights'],
+            'package_total' => $payRow['bk_package_total'], 'child_supplement_total' => $payRow['bk_child'],
+        ], null, ['currency' => $payCur]);
+        $payRow['booked_rate_compact'] = $payBr['ok'] ? $payBr['compact'] : '';
+    }
+}
+unset($payRow);
 
 // ── Outstanding balances (accounts still owing) ────────────────────────────
 // Built from the source tables, scoped to the enabled modules — mirrors the
@@ -956,10 +975,13 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                         <?php foreach ($payments as $payment): ?>
                             <tr id="payment-<?php echo (int)$payment['id']; ?>" data-focus="payment-<?php echo (int)$payment['id']; ?>">
                                 <td><strong><?php echo htmlspecialchars($payment['payment_reference']); ?></strong>
-                                    <span class="rh-phone-sub rh-phone-sub--dark"><?php echo htmlspecialchars($payment['booking_description']); ?></span>
+                                    <span class="rh-phone-sub rh-phone-sub--dark"><?php echo htmlspecialchars($payment['booking_description'] . ($payment['booked_rate_compact'] !== '' ? ' · booked at ' . $payment['booked_rate_compact'] : '')); ?></span>
                                     <span class="rh-phone-sub rh-phone-sub--md"><?php echo date('M j, Y', strtotime($payment['payment_date'])); ?></span></td>
                                 <td class="col-optional">
                                     <div><?php echo htmlspecialchars($payment['booking_description']); ?></div>
+                                    <?php if ($payment['booked_rate_compact'] !== ''): ?>
+                                        <small style="color: #666;" title="Booked at: the nightly price this booking was made at (VAT and levy included) × nights">Booked at <?php echo htmlspecialchars($payment['booked_rate_compact']); ?></small><br>
+                                    <?php endif; ?>
                                     <?php if ($payment['contact_email']): ?>
                                         <small style="color: #666;"><?php echo htmlspecialchars($payment['contact_email']); ?></small>
                                     <?php endif; ?>

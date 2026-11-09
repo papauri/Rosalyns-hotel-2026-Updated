@@ -13,6 +13,7 @@ ini_set('log_errors', 1);
 require_once __DIR__ . '/api-init.php';
 require_once __DIR__ . '/../includes/finance-schema.php';
 require_once __DIR__ . '/../../includes/conference-pricing.php';
+require_once __DIR__ . '/../../includes/booked-rate.php';
 
 /** @var PDO $pdo */
 
@@ -68,6 +69,10 @@ try {
                     b.amount_paid,
                     b.amount_due,
                     b.guest_phone,
+                    b.number_of_nights, b.package_total, b.rate_plan_discount, b.tourism_levy_amount, b.status,
+                    b.occupancy_type, b.room_combination_id,
+                    r.price_per_night AS rh_pp_night, r.price_single_occupancy AS rh_pp_single,
+                    r.price_double_occupancy AS rh_pp_double, r.price_triple_occupancy AS rh_pp_triple,
                     r.name as room_name
                 FROM bookings b
                 LEFT JOIN rooms r ON b.room_id = r.id
@@ -95,6 +100,10 @@ try {
                     b.amount_paid,
                     b.amount_due,
                     b.guest_phone,
+                    b.number_of_nights, b.package_total, b.rate_plan_discount, b.tourism_levy_amount, b.status,
+                    b.occupancy_type, b.room_combination_id,
+                    r.price_per_night AS rh_pp_night, r.price_single_occupancy AS rh_pp_single,
+                    r.price_double_occupancy AS rh_pp_double, r.price_triple_occupancy AS rh_pp_triple,
                     r.name as room_name
                 FROM bookings b
                 LEFT JOIN rooms r ON b.room_id = r.id
@@ -210,6 +219,13 @@ try {
 
     // Format dates for display
     foreach ($bookings as &$booking) {
+        if ($type === 'room') {
+            // The nightly price this booking was MADE at x nights (owner 2026-11-09), with today's price note for staff.
+            $br = rh_booked_rate_line($booking, rh_room_today_price_lookup($pdo, $booking)['price']);
+            $booking['booked_rate'] = $br['ok'] ? ['text' => $br['text'], 'compact' => $br['compact'], 'today_text' => $br['today_text']] : null;
+            unset($booking['rh_pp_night'], $booking['rh_pp_single'], $booking['rh_pp_double'], $booking['rh_pp_triple'],
+                $booking['package_total'], $booking['rate_plan_discount'], $booking['room_combination_id'], $booking['occupancy_type']);
+        }
         if (isset($booking['check_in_date'])) {
             $booking['check_in_date'] = date('M j, Y', strtotime($booking['check_in_date']));
         }

@@ -11,6 +11,7 @@ require_once 'includes/finance-account-sync.php';
 require_once '../includes/idempotency.php';
 require_once '../includes/finance-sequences.php';
 require_once '../config/credit-notes.php';
+require_once '../includes/booked-rate.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -179,6 +180,8 @@ if ($bookingType && $bookingId) {
 // never read lower than the amount due. total_amount alone is the net base.
 $paidDisplay = (float)($bookingDetails['amount_paid'] ?? 0);
 $grandTotalDisplay = $paidDisplay + (float)$outstandingAmount;
+// Room bookings: the nightly price the guest BOOKED at and the nights (owner 2026-11-09), so nobody charges today's price.
+$paBookedRate = ($bookingType === 'room' && $bookingDetails) ? rh_booked_rate_for_booking($pdo, (int)$bookingId) : null;
 
 // Process form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -480,6 +483,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pdo->prepare("SELECT id FROM {$lockTables[$bookingType]} WHERE id = ? FOR UPDATE")->execute([$bookingId]);
                     $histOwedBefore = rh_account_balance_due($pdo, $bookingType, (int)$bookingId);
                     $limitErr = rh_payment_limit_error($paymentAmount, $histOwedBefore, !empty($_POST['confirm_overpay']));
+                    if ($limitErr !== null && $bookingType === 'room') {
+                        // Say what the room was booked at (x nights) next to the balance and the amount typed.
+                        $limitErr = rh_payment_limit_error($paymentAmount, $histOwedBefore, !empty($_POST['confirm_overpay']),
+                            rh_booked_rate_for_booking($pdo, (int)$bookingId)) ?? $limitErr;
+                    }
                     if ($limitErr !== null) {
                         throw new Exception($limitErr);
                     }
@@ -816,6 +824,9 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                                     <?php endif; ?>
                                     <div><dt>Total (incl. VAT<?php echo $bookingType === 'room' ? ' &amp; extras' : ''; ?>)</dt><dd><?php echo $currency_symbol . number_format($grandTotalDisplay, 0); ?></dd></div>
                                     <div><dt>Paid</dt><dd><?php echo $currency_symbol . number_format($paidDisplay, 0); ?></dd></div>
+                                    <?php if (!empty($paBookedRate['ok'])): ?>
+                                        <div><dt>Booked at <button type="button" class="wm-help" data-tooltip="The nightly price this guest booked at, VAT and levy included, times the nights. It never changes when the room price changes later." aria-label="Help">?</button></dt><dd><?php echo htmlspecialchars($paBookedRate['text']); ?></dd></div>
+                                    <?php endif; ?>
                                 </dl>
                             </div>
                             <?php if (!$editId && (float)$outstandingAmount <= BALANCE_TOLERANCE): ?>
@@ -982,6 +993,18 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                                         placeholder="0.00"
                                         required>
                                 </div>
+                                <?php $paRateOk = !empty($paBookedRate['ok']); ?>
+                                <div id="pa-booked-rate" class="pa-booked-rate" style="<?php echo $paRateOk ? '' : 'display:none;'; ?>margin-top:0.5rem;padding:0.6rem 0.75rem;border:1px solid var(--finance-border);border-radius:8px;background:var(--finance-surface-alt, transparent);">
+                                    <p id="pa-booked-rate-line" style="margin:0;font-weight:600;font-size:0.9rem;"><?php
+                                        if ($paRateOk) {
+                                            // Editing a payment: this payment is already inside Paid / Balance, so show only the booked rate
+                                            // (the hint below the box shows the balance this edit may use).
+                                            echo htmlspecialchars('Booked at ' . $paBookedRate['text'] . ($editId ? '' : ' · Paid so far ' . rh_hist_money($paidDisplay, $paBookedRate['currency']) . ' · Balance due ' . rh_hist_money(max(0, (float)$outstandingAmount), $paBookedRate['currency'])));
+                                        }
+                                    ?></p>
+                                    <small style="display:block;margin-top:0.25rem;color:var(--finance-muted);">The nightly price this guest booked at (VAT and levy included) times the nights. Charge from this, not today's room price. The balance also counts any extras on the bill.</small>
+                                    <p id="pa-booked-rate-today" style="<?php echo ($paRateOk && $paBookedRate['today_text'] !== '') ? '' : 'display:none;'; ?>margin:0.35rem 0 0;color:var(--finance-warning);font-size:0.85rem;"><?php echo $paRateOk ? htmlspecialchars($paBookedRate['today_text']) : ''; ?></p>
+                                </div>
                                 <small id="pa-due-hint" style="display:none;color:var(--finance-muted);margin-top:0.35rem;"></small>
                                 <div id="pa-over-wrap" style="display:none;margin-top:0.5rem;">
                                     <p id="pa-over-warn" style="margin:0 0 0.35rem;color:var(--finance-warning);font-size:0.85rem;"></p>
@@ -1146,6 +1169,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
         const IS_EDIT       = <?php echo $editId ? 'true' : 'false'; ?>;
         const PRE_BOOKING   = <?php echo $bookingDetails ? 'true' : 'false'; ?>;
         const PRE_DUE       = <?php echo (float)$outstandingAmount; ?>;
+        const PRE_RATE      = <?php echo json_encode(!empty($paBookedRate['ok']) ? ['text' => $paBookedRate['text'], 'today_text' => $paBookedRate['today_text']] : null, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
         const EDIT_CREDITED = <?php echo ($editId && $payment && in_array((string)$payment['payment_status'], ['completed', 'paid'], true)) ? (float)$payment['total_amount'] : 0; ?>;
 
         /* ── Element refs ─────────────────────────────────────── */
@@ -1160,6 +1184,25 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
             return CURRENCY + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         }
         function el(id) { return document.getElementById(id); }
+        /* Same money format as the booked-rate line (rh_hist_money): "K356,000" / "MWK 356,000.50". */
+        function money(n) {
+            let v = Math.round((Number(n) || 0) * 100) / 100;
+            const neg = v < 0; v = Math.abs(v);
+            const dec = Math.abs(v - Math.round(v)) > 0.004 ? 2 : 0;
+            const sep = (CURRENCY.length > 1 && /^[A-Za-z]+$/.test(CURRENCY)) ? ' ' : '';
+            return (neg ? '-' : '') + CURRENCY + sep + v.toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+        }
+        /* "Booked at K356,000 × 3 nights = K1,068,000 · Paid so far · Balance due" by the amount box (room bookings). */
+        function renderBookedRate(paid, due) {
+            const box = el('pa-booked-rate');
+            if (!box) return;
+            if (!_linkedRate || !_linkedRate.text) { box.style.display = 'none'; return; }
+            el('pa-booked-rate-line').textContent = 'Booked at ' + _linkedRate.text + ' · Paid so far ' + money(paid) + ' · Balance due ' + money(Math.max(0, due));
+            const t = el('pa-booked-rate-today');
+            t.textContent = _linkedRate.today_text || '';
+            t.style.display = _linkedRate.today_text ? '' : 'none';
+            box.style.display = '';
+        }
 
         /* ── Live calculation preview ─────────────────────────────
            The amount entered is the GROSS received (what the payer actually
@@ -1217,7 +1260,13 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
             const extra = gross - limit;
             const over = limit > 0.01 && extra > 0.01;
             wrap.style.display = over ? '' : 'none';
-            warn.textContent = over ? 'That is ' + fmt(extra) + ' more than owed. The extra will be issued to the guest as a credit note.' : '';
+            let overText = 'That is ' + fmt(extra) + ' more than owed. The extra will be issued to the guest as a credit note.';
+            if (over && _linkedRate && _linkedRate.text) {
+                overText = 'This booking was booked at ' + _linkedRate.text + '; balance due ' + money(limit) + '. You are entering ' + money(gross) + ' (' + money(extra) + ' more than owed).'
+                    + (_linkedRate.today_text ? ' ' + _linkedRate.today_text : '')
+                    + ' Tick the box only if the guest really paid more: the extra becomes a credit note.';
+            }
+            warn.textContent = over ? overText : '';
             cb.required = over;
             if (!over) cb.checked = false;
         }
@@ -1256,6 +1305,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
         /* ── Booking type toggle ──────────────────────────────── */
         let _activeType = hdType.value || 'room';
         let _linkedDue  = PRE_BOOKING ? PRE_DUE : null;
+        let _linkedRate = PRE_RATE;   // room booking: { text, today_text } from includes/booked-rate.php, else null
 
         function setActiveType(type) {
             _activeType = type;
@@ -1370,6 +1420,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
             hdId.value    = b.id;
             hdType.value  = _activeType;
             _linkedDue    = parseFloat(b.amount_due) || 0;
+            _linkedRate   = (_activeType === 'room' && b.booked_rate && b.booked_rate.text) ? b.booked_rate : null;
 
             // Populate selected card
             const typeLabels = { room: 'Room Booking', conference: 'Conference Booking', gym: 'Gym Membership', event: 'Event Booking' };
@@ -1389,7 +1440,8 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                     _metaItem('Check-in',  b.check_in_date) +
                     _metaItem('Check-out', b.check_out_date) +
                     _metaItem('Total (incl. VAT & extras)', fmt(_grand)) +
-                    _metaItem('Paid',      fmt(_paid));
+                    _metaItem('Paid',      fmt(_paid)) +
+                    (_linkedRate ? _metaItem('Booked at', _linkedRate.text) : '');
             } else {
                 el('psc-name').textContent = b.organization_name || b.contact_name || '';
                 el('psc-ref').textContent  = b.enquiry_reference || '';
@@ -1399,6 +1451,8 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                     _metaItem('Total (incl. VAT)', fmt(_grand)) +
                     _metaItem('Paid',  fmt(_paid));
             }
+
+            renderBookedRate(_paid, _due);
 
             const dueEl = el('psc-due');
             dueEl.textContent = fmt(_linkedDue);
@@ -1445,6 +1499,8 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
         function _clearSelection() {
             hdId.value   = '';
             _linkedDue   = null;
+            _linkedRate  = null;
+            renderBookedRate(0, 0);
             if (selectedCard) selectedCard.hidden = true;
             if (pickerEl)     pickerEl.style.display = '';
             if (searchInput)  searchInput.value = '';

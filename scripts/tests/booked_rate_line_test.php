@@ -1,0 +1,112 @@
+<?php
+if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); } // never runnable over the web
+/**
+ * Booked rate line (includes/booked-rate.php). NO DATABASE: only the pure helpers are loaded and fed
+ * rh_booked_stay_split()-shaped arrays. Story: RBH2026796618 booked at K356,000 x 3 = K1,068,000; the Superior Suite
+ * price later went to K450,300. Usage (repo root): php scripts/tests/booked_rate_line_test.php
+ */
+$root = dirname(__DIR__, 2);
+$pass = 0; $fail = 0;
+function ok(string $l): void { global $pass; $pass++; echo "PASS $l\n"; }
+function bad(string $l, string $d = ''): void { global $fail; $fail++; echo "FAIL $l" . ($d !== '' ? ": $d" : '') . "\n"; }
+function check(bool $c, string $l, string $d = ''): bool { $c ? ok($l) : bad($l, $d); return $c; }
+
+define('BALANCE_TOLERANCE', 0.01);
+require_once $root . '/includes/booked-rate.php';
+check(!function_exists('getSetting') && !isset($GLOBALS['pdo']), 'the pure helpers load without the database or settings');
+
+$split = static function (float $room, int $nights, float $pkg = 0.0): array {
+    return ['room_gross' => $room, 'package_gross' => $pkg, 'nights' => $nights];
+};
+
+// 1. 1,068,000 over 3 nights -> K356,000 x 3
+$l = rh_booked_rate_text($split(1068000, 3), ['currency' => 'K', 'room_name' => 'Superior Suite', 'has_vat' => true, 'has_levy' => true]);
+check($l['ok'] && abs($l['per_night'] - 356000) < 0.001 && $l['nights'] === 3, '356,000 a night x 3');
+check($l['text'] === 'K356,000 × 3 nights = K1,068,000', 'text', $l['text']);
+check($l['compact'] === 'K356,000 × 3', 'compact', $l['compact']);
+check($l['guest_text'] === 'Superior Suite - K356,000 × 3 nights (a night, incl. VAT and tourism levy)', 'guest text', $l['guest_text']);
+check(abs($l['room_total'] - 1068000) < 0.001 && abs($l['total'] - 1068000) < 0.001, 'room total is the stored total');
+
+// 2. one night, singular
+$l = rh_booked_rate_text($split(356000, 1), ['currency' => 'MWK']);
+check($l['text'] === 'MWK 356,000 × 1 night = MWK 356,000', '1 night (singular, word currency spaced)', $l['text']);
+check($l['guest_text'] === 'MWK 356,000 × 1 night', 'guest text without tax words or room', $l['guest_text']);
+
+// 3. package shown separately, not folded into the nightly rate
+$l = rh_booked_rate_text($split(1068000, 3, 150000), ['currency' => 'K']);
+check(abs($l['per_night'] - 356000) < 0.001, 'package not in the nightly rate');
+check($l['text'] === 'K356,000 × 3 nights = K1,068,000 + package K150,000 = K1,218,000', 'package text', $l['text']);
+check(abs($l['total'] - 1218000) < 0.001, 'total includes the package');
+
+// 3b. children shown separately too
+$l = rh_booked_rate_text($split(1128000, 3), ['currency' => 'K', 'child' => 60000]);
+check($l['text'] === 'K356,000 × 3 nights = K1,068,000 + children K60,000 = K1,128,000', 'children text', $l['text']);
+$l = rh_booked_rate_text($split(100000, 2), ['currency' => 'K', 'child' => 100000]);
+check(abs($l['per_night'] - 50000) < 0.001 && $l['child'] == 0.0, 'legacy child figure as big as the room folds back');
+
+// 4. today's price note
+$l = rh_booked_rate_text($split(1068000, 3), ['currency' => 'K', 'today' => 450300]);
+check($l['today_text'] === "Today's price is K450,300 a night — this booking keeps the price it was booked at.", 'today note shown when the price changed', $l['today_text']);
+$l = rh_booked_rate_text($split(1068000, 3), ['currency' => 'K', 'today' => 356000]);
+check($l['today_text'] === '', 'no note when today = booked rate');
+$l = rh_booked_rate_text($split(1068000, 3), ['currency' => 'K', 'today' => 356000.005]);
+check($l['today_text'] === '', 'no note inside BALANCE_TOLERANCE');
+$l = rh_booked_rate_text($split(1068000, 3), ['currency' => 'K', 'today' => null]);
+check($l['today_text'] === '', 'no note when today is unknown');
+$l = rh_booked_rate_text($split(1068000, 3), ['currency' => 'K', 'today' => 400000, 'discount_per_night' => 44000]);
+check($l['today_text'] === '', 'rate plan: no note when today = booked rate + discount');
+$l = rh_booked_rate_text($split(1068000, 3), ['currency' => 'K', 'today' => 450300, 'discount_per_night' => 44000]);
+check($l['today_text'] !== '', 'rate plan: note when today matches neither');
+
+// 5. rounding: the total is the stored figure, never per_night x nights
+$l = rh_booked_rate_text($split(1000000, 3), ['currency' => 'K']);
+check(abs($l['per_night'] - 333333.33) < 0.001, 'per night rounded to 2 dp');
+check($l['text'] === 'K333,333.33 × 3 nights = K1,000,000', 'total stays the stored K1,000,000', $l['text']);
+check(abs($l['room_total'] - 1000000) < 0.001, 'room_total not 999,999.99');
+$l = rh_booked_rate_text($split(1068000.004, 3), ['currency' => 'K']);
+check($l['text'] === 'K356,000 × 3 nights = K1,068,000', 'sub-tambala noise rounds away', $l['text']);
+
+// 6. empty / zero / cancelled
+$l = rh_booked_rate_text($split(0, 3), ['currency' => 'K']);
+check(!$l['ok'] && $l['text'] === '' && $l['compact'] === '', 'zero total: nothing to show');
+$l = rh_booked_rate_text(['room_gross' => 500, 'nights' => 0], ['currency' => 'K']);
+check($l['nights'] === 1 && $l['text'] === 'K500 × 1 night = K500', 'zero nights treated as one', $l['text']);
+$l = rh_booked_rate_text($split(1068000, 3), ['currency' => 'K', 'status' => 'cancelled']);
+check($l['cancelled'] === true, 'cancelled flag');
+
+// 7. today's price for the room / occupancy / joined room
+$b = ['occupancy_type' => 'double', 'rh_pp_night' => '450300', 'rh_pp_double' => '480000', 'rh_pp_single' => null];
+check(rh_room_today_price($b) === 480000.0, 'occupancy price when set');
+check(rh_room_today_price(['occupancy_type' => 'single'] + $b) === 450300.0, 'falls back to price_per_night');
+check(rh_room_today_price($b, ['price_override' => '600000']) === 600000.0, 'joined-room override');
+check(rh_room_today_price($b, ['price_override' => null]) === 450300.0, 'joined room without override');
+check(rh_room_today_price(['occupancy_type' => '']) === null, 'unknown price is null');
+
+// 8. children with VAT and levy, inclusive and exclusive mode (QA 2026-11-09). Settings are stubbed in memory (no DB):
+// the stay is priced exactly as create-booking.php does it, rh_stay_totals($room + $child, 'price'), and the child
+// figure is put on the same basis by rh_booked_rate_child_gross(). The nightly rate must come out exact, with no
+// false "Today's price" note.
+$GLOBALS['__stub'] = ['vat_rate' => 16.5, 'tourism_levy_enabled' => '1', 'tourism_levy_percent' => 1, 'mode' => 'inclusive'];
+if (!function_exists('getSetting')) { // conditional, so it is declared only here (not hoisted before check 0)
+    function getSetting($k, $d = null) { return $GLOBALS['__stub'][$k] ?? $d; }
+    function vat_mode(): string { return $GLOBALS['__stub']['mode']; }
+}
+require_once $root . '/includes/pricing.php';
+foreach (['inclusive', 'exclusive'] as $mode) {
+    foreach ([true, false] as $levy) {
+        $GLOBALS['__stub']['mode'] = $mode;
+        $GLOBALS['__stub']['tourism_levy_enabled'] = $levy ? '1' : '0';
+        $childStored = 3 * 178000.0;                       // 50% child at K356,000 x 3 nights
+        $tt = rh_stay_totals(1068000 + $childStored, 'price', $levy);
+        $childGross = rh_booked_rate_child_gross($childStored, $levy);
+        $l = rh_booked_rate_text($split($tt['total_with_vat'], 3), ['currency' => 'K', 'child' => $childGross, 'today' => 356000]);
+        $tag = $mode . ($levy ? ' + levy' : ' no levy');
+        check(abs($l['per_night'] - 356000) < 0.001, "children ($tag): nightly rate stays K356,000", (string)$l['per_night']);
+        check($l['today_text'] === '', "children ($tag): no false today note");
+        check(abs($l['room_total'] + $l['child'] - $tt['total_with_vat']) < 0.011, "children ($tag): room + children = stored total");
+    }
+}
+check(rh_booked_rate_child_gross(0.0, true) === 0.0, 'no children: 0');
+
+echo "\n{$pass} passed, {$fail} failed\n";
+exit($fail > 0 ? 1 : 0);

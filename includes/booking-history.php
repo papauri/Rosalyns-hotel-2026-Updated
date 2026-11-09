@@ -14,6 +14,7 @@
  */
 
 require_once __DIR__ . '/booking-history-format.php';
+require_once __DIR__ . '/booked-rate.php';
 
 if (!function_exists('rh_hist_tables')) {
     /** Tables this database has (one lookup per request). */
@@ -129,21 +130,18 @@ if (!function_exists('rh_hist_tables')) {
         $names = rh_hist_names($pdo);
         $src = $names + ['booking' => $b, 'staff' => rh_hist_staff($pdo), 'cur' => rh_hist_currency(), 'room_type_name' => (string)($b['rh_room_type_name'] ?? '')];
 
-        // Today's price for this room and occupancy (same choice as create-booking.php), or the joined-rooms price.
-        $occ = strtolower((string)($b['occupancy_type'] ?? ''));
-        $occCol = ['single' => 'price_single_occupancy', 'double' => 'price_double_occupancy', 'triple' => 'price_triple_occupancy'][$occ] ?? '';
-        $occVal = ['single' => 'rh_pp_single', 'double' => 'rh_pp_double', 'triple' => 'rh_pp_triple'][$occ] ?? '';
-        $field = ($occVal !== '' && !empty($b[$occVal])) ? $occCol : 'price_per_night';
-        $today = $field === 'price_per_night' ? $b['rh_pp_night'] : $b[$occVal];
+        // Today's price for this room and occupancy (same choice as create-booking.php), or the joined-rooms price:
+        // one shared lookup (includes/booked-rate.php) so the payment screens show the same figure.
+        $combo = null;
         $comboId = (int)($b['room_combination_id'] ?? 0);
         if ($comboId > 0) {
             $c = rh_hist_rows($pdo, 'room_combinations', 'SELECT combined_name, price_override FROM room_combinations WHERE id = ?', [$comboId]);
             if ($c) {
+                $combo = $c[0];
                 $src['combo_name'] = (string)$c[0]['combined_name'];
-                $today = ($c[0]['price_override'] !== null && $c[0]['price_override'] !== '') ? $c[0]['price_override'] : $b['rh_pp_night'];
             }
         }
-        $src['today_price'] = $today !== null && $today !== '' ? (float)$today : null;
+        $src['today_price'] = rh_room_today_price($b, $combo);
 
         $src['audit'] = rh_hist_rows($pdo, 'booking_audit_log', 'SELECT * FROM booking_audit_log WHERE booking_id = ? ORDER BY id LIMIT 500', [$bookingId]);
         $src['timeline'] = rh_hist_rows($pdo, 'booking_timeline_logs', 'SELECT * FROM booking_timeline_logs WHERE booking_id = ? ORDER BY id LIMIT 500', [$bookingId]);
