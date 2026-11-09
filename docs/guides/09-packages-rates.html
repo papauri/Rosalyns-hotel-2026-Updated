@@ -51,7 +51,7 @@
   <p>The same steps are used on the website booking form and in the admin when staff create a booking.</p>
   <ol class="steps">
     <li>The system picks the nightly room price from the number of guests sharing the room: the <strong>Single Occupancy Price</strong> for 1 guest, the <strong>Double Occupancy Price</strong> for 2, the <strong>Triple Occupancy Price</strong> for 3 or more. If that price is left empty, the <strong>Price Per Night</strong> is used instead. On a booking these tiers read <em>Single (1 guest)</em>, <em>Double (2 guests)</em> and <em>Triple (3+ guests)</em>. For a room that holds more than 3 the third one reads <em>Triple / family (3&ndash;4 guests)</em>, and a room for 4 uses the Triple price. See <a href="#price-tiers">Price tiers and what they are called</a>.</li>
-    <li>Any matching, active <strong>rate plan</strong> then raises or lowers that nightly price.</li>
+    <li>Any matching, active <strong>rate plan</strong> then raises or lowers that nightly price. A surcharge is already inside the room rate and a discount is already taken off it, so nothing is counted twice. See <a href="#plan-rules">When more than one plan matches a booking</a>.</li>
     <li>The nightly price is multiplied by the number of nights.</li>
     <li>If children are staying, a child charge is added. The first children in each room can be free (<strong>Free children (first N in each room)</strong>). Each child after that pays either a percentage of the nightly price after the rate plan, or a fixed amount, for every night. The rule is set per room type, and a single room can have its own. See <a href="#child-charges">Child charges</a>.</li>
     <li>The room rate is all-in: it already includes VAT and the tourism levy (if they are switched on in Hotel Settings). The system takes them out of the rate to show the base price, VAT and levy. Nothing is added on top. The tourism levy is not charged on packages.</li>
@@ -104,7 +104,7 @@
   <h3>Packages page (<em>Room Packages</em>)</h3>
   <ul>
     <li><strong>New Package</strong> button.</li>
-    <li>A short box called <em>How it works</em>: packages appear as optional add-ons on the booking form, guests tick them before submitting, and the cost is added to the booking total.</li>
+    <li>A short box called <em>How it works</em>: packages appear as optional add-ons on the booking form, guests tick them before submitting, and the cost is added to the booking total. On the website booking form each package card lists what the package includes.</li>
     <li>One card per package, shown in <strong>Sort Order</strong>. Each card shows the name, a <strong>Featured</strong> badge if set, and the price (for example <em>MWK 15,000 per night</em>). A package priced at 0 shows <strong>Complimentary</strong> and <em>FREE</em>. The card also shows <em>All rooms</em> or <em>2 room type(s)</em>, the short description, and up to 6 inclusions (then <em>+3 more</em>).</li>
     <li>Three buttons on each card: edit, activate or deactivate, delete.</li>
     <li>If there are no packages you see <em>"No packages yet. Create your first package to offer guests extras like breakfast or spa access."</em></li>
@@ -216,15 +216,18 @@
     <li>Under <strong>Options</strong>, switch <strong>Stack with other plans</strong> on if this plan may combine with others, and leave <strong>Active</strong> on for the plan to start working.</li>
     <li>Click <strong>Save Rate Plan</strong>. You will see <em>"Rate plan created successfully."</em> inside the window, and the card appears on the page behind it. Click <strong>Close</strong> when finished.</li>
   </ol>
-  <div class="note"><p>If the new plan overlaps another active plan of the same type, the message adds <em>Note: it overlaps active plan(s) of the same type: [names]. Guests get the single best price if any overlapping plan is non-stacking.</em> The plan is still saved.</p></div>
+  <div class="note"><p>If the new plan is a surcharge or a discount and another active plan in the same direction can meet it on the same room types, the message adds <em>Note: it can meet other active surcharge plan(s) on the same room types: [names].</em> (or <em>discount</em>). It explains that when a stay matches several, and any is non-stacking, only one applies: the highest price for surcharges, the lowest price for discounts. The plan is still saved.</p></div>
 
-  <h3>When more than one plan matches a booking</h3>
+  <h3 id="plan-rules">When more than one plan matches a booking</h3>
   <ul>
-    <li>If at least one matching plan does <strong>not</strong> stack, only the single plan that gives the lowest price is used. The others are ignored.</li>
-    <li>If every matching plan stacks, all of them are applied one after the other, highest priority first.</li>
-    <li>The price never goes below 0.</li>
+    <li>Surcharges and discounts are worked out separately.</li>
+    <li>Inside each group, if any matching plan does <strong>not</strong> stack, only the single best one applies: the biggest surcharge, or the lowest price for discounts. The others are ignored.</li>
+    <li>If every matching plan in the group stacks, all of them apply, highest priority first.</li>
+    <li>Surcharges go on first, then discounts. The price never goes below 0.</li>
+    <li><strong>Priority</strong> only breaks ties and sets the order of plans that stack.</li>
     <li>Example: a stay matches a Weekend plan of +10% (stacking) and a Promotion plan of -5% (stacking). MWK 100,000 becomes 110,000 and then 104,500.</li>
   </ul>
+  <p>When a booking's dates change, a length-of-stay, weekend or seasonal discount that no longer fits the new stay is taken off, and the nightly rate goes back up by that discount. Surcharges are never removed. See <a href="07-reception-bookings.html#dates">How to change the stay dates</a>.</p>
 
   <h2 id="plan-edit">How to edit, switch off or delete a rate plan</h2>
   <ol class="steps">

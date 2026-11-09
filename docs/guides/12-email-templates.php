@@ -58,6 +58,7 @@ $d = [
     'cancellation_reason' => 'The reason given for a cancellation.',
     'rate_plan_label' => 'Name of the rate plan, if any.',
     'rate_plan_discount_formatted' => 'Rate plan discount for the stay, as a number.',
+    'rate_plan_surcharge_formatted' => 'Rate plan surcharge for the stay, as a number. It is already in the room rate, so it is shown for information and never added on top.',
     'package_total_formatted' => 'Extras and packages total, as a number.',
     'packages_html' => 'A ready-made list of the packages and extras on the booking.',
     'vat_number' => 'The hotel VAT registration number.',
@@ -153,7 +154,7 @@ $d = [
 ];
 
 /* The set every email built from a booking can use. */
-$base = ['site_name','site_url','contact_email','contact_phone','phone_main','currency_symbol','payment_policy','check_in_time','check_out_time','booking_reference','guest_name','guest_email','guest_phone','room_name','room_assignment','room_numbers','occupancy_type','check_in_date_formatted','check_out_date_formatted','number_of_nights','number_of_guests','adult_guests','child_guests','tentative_expires_at_formatted','tentative_status','child_price_multiplier','child_charge_rule','child_supplement_total_formatted','total_amount_formatted','special_requests','cancellation_reason','rate_plan_label','rate_plan_discount_formatted','package_total_formatted','packages_html','vat_number','vat_rate','vat_amount','levy_rate','levy_amount','subtotal_amount','total_amount','vat_number_html','logo_html','address'];
+$base = ['site_name','site_url','contact_email','contact_phone','phone_main','currency_symbol','payment_policy','check_in_time','check_out_time','booking_reference','guest_name','guest_email','guest_phone','room_name','room_assignment','room_numbers','occupancy_type','check_in_date_formatted','check_out_date_formatted','number_of_nights','number_of_guests','adult_guests','child_guests','tentative_expires_at_formatted','tentative_status','child_price_multiplier','child_charge_rule','child_supplement_total_formatted','total_amount_formatted','special_requests','cancellation_reason','rate_plan_label','rate_plan_discount_formatted','rate_plan_surcharge_formatted','package_total_formatted','packages_html','vat_number','vat_rate','vat_amount','levy_rate','levy_amount','subtotal_amount','total_amount','vat_number_html','logo_html','address'];
 
 $groups = [
     [
