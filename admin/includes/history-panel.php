@@ -8,6 +8,21 @@
 if (!defined('ADMIN_ACCESS')) {
     return;
 }
+// The Summary at the top (includes/ai/ai-history.php) is offered only while the Assistant is on (fail-closed kill switch)
+// and this person may use it; otherwise the panel makes no extra request and looks exactly as before.
+$rhHistSummaryOn = (static function (): bool {
+    try {
+        $db = $GLOBALS['pdo'] ?? null;
+        $uid = (int)($_SESSION['admin_user_id'] ?? 0);
+        if (!$db instanceof PDO || $uid <= 0 || !function_exists('hasPermission')) {
+            return false;
+        }
+        require_once __DIR__ . '/../../includes/ai/ai-core.php';
+        return rh_ai_enabled($db) && rh_ai_chat_ready($db) && hasPermission($uid, 'ai_assistant_use');
+    } catch (Throwable $e) {
+        return false;
+    }
+})();
 ?>
 <style>
     .rh-hist-dialog, #rhHistoryModal .modal-content.rh-hist-dialog { width: min(920px, calc(100vw - 1.5rem)); max-width: min(920px, calc(100vw - 1.5rem)); max-height: calc(100dvh - 2rem); display: flex; flex-direction: column; }
@@ -31,6 +46,10 @@ if (!defined('ADMIN_ACCESS')) {
     .rh-hist-kind--cancel { background: #faf0ee; border-color: #e2c2ba; }
     .rh-hist-what-text { font-weight: 600; display: block; }
     .rh-hist-detail { white-space: pre-line; color: var(--color-text-secondary, #4f4a43); margin-top: 3px; font-size: 0.85rem; }
+    .rh-hist-summary { margin: 0 0 14px; padding: 10px 12px; border: 1px solid var(--rh-modal-border, #e2dbd2); border-radius: 10px; background: var(--color-surface-soft, #F4EFE9); }
+    .rh-hist-summary[hidden] { display: none; }
+    .rh-hist-summary-title { margin: 0; font-size: 0.85rem; font-weight: 700; color: var(--color-text-primary, #2A2723); }
+    .rh-hist-summary-text { margin: 6px 0 0; font-size: 0.9rem; line-height: 1.45; }
     .rh-hist-state { padding: 18px 0; color: var(--color-text-secondary, #5f5a53); }
     .rh-hist-state--error { color: #9b3b2b; }
     .rh-hist-dialog .modal-footer .btn { min-height: 44px; }
@@ -64,6 +83,10 @@ if (!defined('ADMIN_ACCESS')) {
             <button type="button" class="modal-close" aria-label="Close" data-rh-history-close>&times;</button>
         </div>
         <div class="modal-body" id="rhHistoryBody">
+            <section class="rh-hist-summary" id="rhHistorySummary" aria-labelledby="rhHistorySummaryTitle" hidden>
+                <h4 class="rh-hist-summary-title" id="rhHistorySummaryTitle">Summary<span class="rh-hist-help">The main steps in a few lines, copied from the list below: amounts, dates and who did it. The list has the full detail.</span></h4>
+                <p class="rh-hist-summary-text" id="rhHistorySummaryText"></p>
+            </section>
             <p class="rh-hist-intro">Every step recorded, oldest first. Times are hotel time.</p>
             <dl class="rh-hist-facts" id="rhHistoryFacts"></dl>
             <div class="rh-hist-head" aria-hidden="true">
@@ -86,6 +109,7 @@ if (!defined('ADMIN_ACCESS')) {
 (function () {
     var apiUrl = <?php echo json_encode(rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? '/admin/x.php'), '/\\') . '/api/history.php', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
     window.rhHistoryApiUrl = apiUrl;
+    window.rhHistorySummaryUrl = <?php echo $rhHistSummaryOn ? json_encode(rtrim(dirname($_SERVER['SCRIPT_NAME'] ?? '/admin/x.php'), '/\\') . '/api/ai-history-summary.php', JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) : 'null'; ?>;
     if (window.rhHistoryInstalled) { return; }
     window.rhHistoryInstalled = true;
 
@@ -142,6 +166,28 @@ if (!defined('ADMIN_ACCESS')) {
         setState(events.length ? '' : 'Nothing has been recorded for this yet.', false);
         document.getElementById('rhHistoryPrintBtn').disabled = !events.length;
     }
+    function hideSummary() {
+        var box = document.getElementById('rhHistorySummary');
+        var txt = document.getElementById('rhHistorySummaryText');
+        if (txt) txt.textContent = '';
+        if (box) box.hidden = true;
+    }
+    // The Summary: only when the Assistant is available; any answer but a good one leaves the panel as it was.
+    function loadSummary(type, id, mine) {
+        var url = window.rhHistorySummaryUrl;
+        if (!url) return;
+        fetch(url + '?type=' + encodeURIComponent(type) + '&id=' + encodeURIComponent(id), { credentials: 'same-origin', headers: { 'Accept': 'application/json' } })
+            .then(function (r) { return r.ok ? r.json() : null; })
+            .then(function (j) {
+                if (mine !== seq || !j || !j.success || !Array.isArray(j.sentences) || !j.sentences.length) return;
+                var box = document.getElementById('rhHistorySummary');
+                var txt = document.getElementById('rhHistorySummaryText');
+                if (!box || !txt) return;
+                txt.textContent = j.sentences.map(String).join(' ');
+                box.hidden = false;
+            })
+            .catch(function () {});
+    }
     window.rhHistoryOpen = function (type, id) {
         var m = modal();
         if (!m || !id) return;
@@ -150,6 +196,7 @@ if (!defined('ADMIN_ACCESS')) {
         document.getElementById('rhHistoryFacts').textContent = '';
         document.getElementById('rhHistoryList').textContent = '';
         document.getElementById('rhHistoryPrintBtn').disabled = true;
+        hideSummary();
         setState('Loading…', false);
         m.style.display = 'flex';
         m.classList.add('active');
@@ -163,6 +210,7 @@ if (!defined('ADMIN_ACCESS')) {
                 render(j);
             })
             .catch(function () { if (mine === seq) setState('The history could not be loaded. Check the connection and try again.', true); });
+        loadSummary(type, id, mine);
     };
     function printHistory() {
         var body = document.getElementById('rhHistoryBody');

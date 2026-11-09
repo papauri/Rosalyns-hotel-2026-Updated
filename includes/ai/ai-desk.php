@@ -30,7 +30,7 @@ function rh_ai_desk_tools(): array
     $days = ['type' => 'integer', 'minimum' => 1, 'maximum' => 366, 'description' => 'How many days ahead (default ' . rh_ai_num('ai_upcoming_days') . ')'];
     return [
         'booking_history' => [
-            'description' => 'Who made one booking and how (online on the website by the guest, by a staff member in the portal, through another system) and what has happened to it since (status changes, check-in and out, emails, date changes, money entries), each with who did it and when. The answer to "who booked X". Give a booking_id or reference from this chat\'s results.',
+            'description' => 'Who made one booking and how (online on the website by the guest, by a staff member in the portal, through another system) and what has happened to it since (status changes, check-in and out, emails, date changes, money entries), each with who did it and when, plus a short summary as the History panel shows it (price booked at, price since, latest payment, refund or credit note, latest status). The answer to "who booked X". Give a booking_id or reference from this chat\'s results.',
             'schema' => ['properties' => ['booking_id' => ['type' => 'integer', 'minimum' => 1], 'reference' => ['type' => 'string', 'maxLength' => 40]]],
             'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 30, 'handler' => 'rh_ai_t_booking_history', 'step' => 'Reading the booking\'s history',
         ],
@@ -485,11 +485,31 @@ function rh_ai_t_booking_history(PDO $db, array $user, array $a): array
         }
         $events[] = $e;
     }
-    return ['booking_id' => $id, 'reference' => $b['booking_reference'], 'guest_name' => $b['guest_name'], 'room_type' => $b['room_name'],
+    $out = ['booking_id' => $id, 'reference' => $b['booking_reference'], 'guest_name' => $b['guest_name'], 'room_type' => $b['room_name'],
         'room_number' => $b['room_number'] !== null ? (string)$b['room_number'] : null, 'check_in' => $b['check_in_date'], 'check_out' => $b['check_out_date'],
         'nights' => (int)$b['number_of_nights'], 'status' => $b['status'], 'made' => rh_ai_booking_made($db, $b),
         'history' => $events ?: 'none recorded', 'history_total' => $total,
         'link' => 'booking-details.php?id=' . $id, 'link_label' => 'Open booking'];
+    // The History panel's Summary (owner 2026-11-09), from the panel's own step-by-step builder (money steps included).
+    // Roles only, no names: the summary is free text, so no name is left for the privacy pass to miss.
+    $sum = rh_ai_booking_history_summary($db, $id);
+    if ($sum) {
+        $out['summary'] = implode(' ', $sum);
+    }
+    return $out;
+}
+
+/** The History panel's Summary sentences for one booking (roles only), or [] when the history cannot be read. */
+function rh_ai_booking_history_summary(PDO $db, int $bookingId): array
+{
+    try {
+        require_once dirname(__DIR__) . '/booking-history.php';
+        require_once __DIR__ . '/ai-history.php';
+        return rh_ai_history_summary(rh_booking_history($db, $bookingId), false);
+    } catch (Throwable $e) {
+        error_log('Assistant booking history summary: ' . $e->getMessage());
+        return [];
+    }
 }
 
 /** A from/days window (from defaults to today; days to ai_upcoming_days). @return array{0:string,1:string,2:int} */
@@ -633,6 +653,7 @@ function rh_ai_desk_booking_intent(string $m): ?array
         '/^' . $who . '(?:\'s|s\'|’s) (?:booking )?(?:history|timeline|audit(?: log| trail)?)$/iu',
         '/^(?:show |what(?:\'s| is) )?(?:the |its |their |his |her )?(?:booking )?(?:history|timeline)$/iu',
         '/^(?:who|what) (?:has )?(?:changed|happened (?:to|with|on)|edited|touched) (?:the |this |that |their |his |her )?booking(?: (?:for|of) ' . $who . ')?$/iu',
+        '/^(?:who|what) (?:has )?(?:changed|happened (?:to|with|on)|edited|touched) (?:the )?(?:booking |reservation )?(?<who>[A-Z]{2,6}20\d{6,10})$/iu', // "what happened to booking RBH2026227892"
     ];
     foreach (['made' => $made, 'history' => $hist] as $kind => $res) {
         foreach ($res as $re) {
@@ -883,7 +904,8 @@ function rh_ai_desk_history_text(array $h): string
 {
     $ev = is_array($h['history'] ?? null) ? $h['history'] : [];
     if (!$ev) {
-        return rh_ai_desk_made_text($h) . "\n\nNothing else is recorded on its history yet.";
+        $sum = trim((string)($h['summary'] ?? ''));
+        return ($sum !== '' ? '**Summary:** ' . $sum . "\n\n" : '') . rh_ai_desk_made_text($h) . "\n\nNothing else is recorded on its history yet.";
     }
     $lines = [];
     foreach ($ev as $e) {
@@ -895,7 +917,8 @@ function rh_ai_desk_history_text(array $h): string
             . ' · ' . ($by === 'staff' && !empty($e['staff_name']) ? $e['staff_name'] . ' (staff)' : $by);
     }
     $total = (int)($h['history_total'] ?? count($lines));
-    return '**History of ' . ($h['guest_name'] ?? '') . '** (' . ($h['reference'] ?? '') . ')' . ($total > count($lines) ? ' - the latest ' . count($lines) . ' of ' . $total : '') . ', newest first:'
+    $sum = trim((string)($h['summary'] ?? ''));
+    return ($sum !== '' ? '**Summary:** ' . $sum . "\n\n" : '') . '**History of ' . ($h['guest_name'] ?? '') . '** (' . ($h['reference'] ?? '') . ')' . ($total > count($lines) ? ' - the latest ' . count($lines) . ' of ' . $total : '') . ', newest first:'
         . rh_ai_local_lines($lines) . "\n\n" . strtok(rh_ai_desk_made_text($h), "\n");
 }
 
