@@ -437,6 +437,40 @@ function rh_ai_booked_rate_row(array $b, array $rp, int $nights): ?array
     return ['label' => 'Booked rate × nights', 'old' => (string)$old['text'], 'new' => (string)$new['text']];
 }
 
+/**
+ * A staff change of dates priced exactly as the save prices it (admin/bookings.php modify_booking, extend_stay and
+ * admin_update_checkout_date, RP-3 2026-11-10): a single length-of-stay, weekend or seasonal discount the new stay no
+ * longer qualifies for is added back (rh_rate_plan_dropped), then rh_reprice_at_booked_rate. Not for early / late
+ * check-out (those keep the booked rate). Returns [rh_reprice_at_booked_rate result, rh_rate_plan_dropped result].
+ */
+function rh_ai_stay_reprice(PDO $db, array $b, string $newIn, string $newOut, int $nights): array
+{
+    if (!function_exists('rh_rate_plan_dropped')) {
+        require_once dirname(__DIR__) . '/pricing.php';
+    }
+    $drop = rh_rate_plan_dropped($db, $b, $newIn, $newOut, $nights, (int)($b['room_id'] ?? 0));
+    return [rh_reprice_at_booked_rate($b, $nights, (float)$drop['per_night']), $drop];
+}
+
+/**
+ * Card row, note and fact when the date change removes the booking's discount (the Bookings screen's own wording,
+ * bookings_stay_rate_preview plan_note). Plain text: the panel sets textContent. row null / note '' / facts [] when the
+ * discount stays.
+ * @return array{row:?array,note:string,facts:array}
+ */
+function rh_ai_drop_card(array $drop): array
+{
+    if (empty($drop['removed'])) {
+        return ['row' => null, 'note' => '', 'facts' => []];
+    }
+    $name = (string)$drop['plan_name'];
+    return [
+        'row'   => ['label' => 'Rate plan discount', 'old' => $name, 'new' => 'Removed'],
+        'note'  => 'The ' . $name . ' discount will be removed: ' . (string)$drop['reason'] . '. ' . rh_ai_fmt_money((float)$drop['per_night']) . ' a night is added back to the rate.',
+        'facts' => ['discount_removed' => $name, 'discount_removed_reason' => (string)$drop['reason'], 'discount_added_back_per_night' => round((float)$drop['per_night'], 2)],
+    ];
+}
+
 function rh_ai_bk_facts(array $b): array
 {
     return ['booking_id' => (int)$b['id'], 'reference' => (string)$b['booking_reference'], 'guest_name' => (string)$b['guest_name'], 'status' => (string)$b['status'],
@@ -495,6 +529,10 @@ function rh_ai_pv_create_booking(PDO $db, array $user, array $a): array
         ['label' => 'Guests', 'new' => $adults . ' adult' . ($adults === 1 ? '' : 's') . ($children > 0 ? ', ' . $children . ' child' . ($children === 1 ? '' : 'ren') : '') . ', ' . $q['occupancy'] . ' occupancy'],
         ['label' => 'Price per night', 'new' => rh_ai_fmt_money((float)$q['price_per_night']) . ($q['rate_plan'] ? ' (' . $q['rate_plan'] . ')' : '')],
     ];
+    $planLines = rh_ai_rate_plan_lines($q, 'rh_ai_fmt_money');
+    if ($planLines) {
+        $rows[] = ['label' => 'Rate plan', 'new' => implode('; ', $planLines)];
+    }
     if ((float)$q['child_charge'] > BALANCE_TOLERANCE) {
         $rows[] = ['label' => 'Child charge', 'new' => rh_ai_fmt_money((float)$q['child_charge'])];
     }
@@ -621,19 +659,24 @@ function rh_ai_pv_edit_booking(PDO $db, array $user, array $a): array
     }
     $fp = [];
     $total = null;
+    $dropBits = rh_ai_drop_card([]);
     if ($datesChanged) {
         $av = checkRoomAvailability((int)$b['room_id'], $ci, $co, (int)$b['id'], (int)$b['child_guests']);
         if (empty($av['available'])) {
             return ['error' => 'Not available for the new dates: ' . (string)($av['error'] ?? 'no room of this type is free.')];
         }
         $nights = max(1, (int)round((strtotime($co) - strtotime($ci)) / 86400));
-        $rp = rh_reprice_at_booked_rate($b, $nights);
+        [$rp, $drop] = rh_ai_stay_reprice($db, $b, $ci, $co, $nights); // the same figure modify_booking writes
+        $dropBits = rh_ai_drop_card($drop);
         $total = round((float)$rp['new_gross'], 2);
         $rows[] = ['label' => 'Nights', 'old' => (string)(int)$b['number_of_nights'], 'new' => (string)$nights];
         $rows[] = ['label' => 'Total', 'old' => rh_ai_fmt_money((float)$rp['old_gross']), 'new' => rh_ai_fmt_money($total), 'tone' => 'money'];
         $rateRow = rh_ai_booked_rate_row($b, $rp, $nights);
         if ($rateRow) {
             $rows[] = $rateRow;
+        }
+        if ($dropBits['row']) {
+            $rows[] = $dropBits['row'];
         }
         $fp = [$total, true];
     }
@@ -643,8 +686,11 @@ function rh_ai_pv_edit_booking(PDO $db, array $user, array $a): array
     }
     $fields[] = ['note', trim('Changed via the Assistant. ' . (string)($a['note'] ?? ''))];
     $card = rh_ai_card_base('Change booking', 'Old value on the left, new on the right. Dates are repriced at the guest\'s booked nightly rate, the same as the Bookings screen.', $rows, 'Save changes');
+    if ($dropBits['note'] !== '') {
+        $card['notes'][] = $dropBits['note'];
+    }
     $card['notes'][] = 'The guest gets the usual "booking changed" email when dates, guests or contact details change.';
-    return ['card' => $card, 'steps' => [rh_ai_step('bookings.php', $fields)], 'fp' => $fp, 'facts' => rh_ai_bk_facts($b) + ['changes' => array_keys($changes), 'new_total' => $total]];
+    return ['card' => $card, 'steps' => [rh_ai_step('bookings.php', $fields)], 'fp' => $fp, 'facts' => rh_ai_bk_facts($b) + ['changes' => array_keys($changes), 'new_total' => $total] + $dropBits['facts']];
 }
 
 /** Shared by extend stay and the check-out date correction. */
@@ -679,7 +725,8 @@ function rh_ai_pv_new_checkout(PDO $db, array $user, array $a, bool $correction)
         }
     }
     $nights = max(1, (int)(new DateTime((string)$b['check_in_date']))->diff(new DateTime($new))->days);
-    $rp = rh_reprice_at_booked_rate($b, $nights);
+    [$rp, $drop] = rh_ai_stay_reprice($db, $b, (string)$b['check_in_date'], $new, $nights); // the same figure extend_stay / admin_update_checkout_date write
+    $dropBits = rh_ai_drop_card($drop);
     $total = round((float)$rp['new_gross'], 2);
     $rows = rh_ai_bk_rows($b);
     $rows[] = ['label' => 'Check-out', 'old' => rh_ai_fmt_date($old), 'new' => rh_ai_fmt_date($new)];
@@ -688,6 +735,9 @@ function rh_ai_pv_new_checkout(PDO $db, array $user, array $a, bool $correction)
     $rateRow = rh_ai_booked_rate_row($b, $rp, $nights);
     if ($rateRow) {
         $rows[] = $rateRow;
+    }
+    if ($dropBits['row']) {
+        $rows[] = $dropBits['row'];
     }
     if ($correction) {
         $reason = trim((string)($a['reason'] ?? ''));
@@ -702,7 +752,10 @@ function rh_ai_pv_new_checkout(PDO $db, array $user, array $a, bool $correction)
         $card = rh_ai_card_base('Extend stay', 'Adds nights at the guest\'s booked nightly rate, the same as Extend stay on Bookings.', $rows, 'Extend stay');
         $steps = [rh_ai_step('bookings.php', [['action', 'extend_stay'], ['booking_id', (string)(int)$b['id']], ['new_checkout', $new]])];
     }
-    return ['card' => $card, 'steps' => $steps, 'fp' => [$total], 'facts' => rh_ai_bk_facts($b) + ['new_checkout' => $new, 'new_total' => $total], 'incomplete' => !$steps];
+    if ($dropBits['note'] !== '') {
+        array_unshift($card['notes'], $dropBits['note']);
+    }
+    return ['card' => $card, 'steps' => $steps, 'fp' => [$total], 'facts' => rh_ai_bk_facts($b) + ['new_checkout' => $new, 'new_total' => $total] + $dropBits['facts'], 'incomplete' => !$steps];
 }
 
 function rh_ai_pv_extend_stay(PDO $db, array $user, array $a): array

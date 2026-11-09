@@ -1244,6 +1244,88 @@ function rh_ai_t_room_rates(PDO $db, array $user, array $a): array
     ];
 }
 
+/** The active rate plans (the list applyDynamicPricing() used), read only when a plan applied; [] on a read error. */
+function rh_ai_rate_plans_for_quote(PDO $db, array $dyn): array
+{
+    if (trim((string)($dyn['rate_plan_label'] ?? '')) === '' || !function_exists('_fetchActiveRatePlans')) {
+        return [];
+    }
+    try {
+        return _fetchActiveRatePlans($db);
+    } catch (Throwable $e) {
+        return [];
+    }
+}
+
+/**
+ * PURE. The surcharge and the discount inside one applyDynamicPricing() result, per night, each with its plan names
+ * (RP-3 2026-11-10: surcharges apply first from the base, then discounts). The surcharge stage comes from the shared
+ * rule itself (rh_apply_rate_plans on the surcharge plans only); the discount is the rest. When the parts do not foot
+ * to the result (plans changed in between, or none given) the net figure alone is reported: a negative
+ * discount_amount is a surcharge, as on the documents.
+ * @return array{surcharge:float,surcharge_plans:string,discount:float,discount_plans:string}
+ */
+function rh_ai_rate_plan_parts(array $plans, int $roomId, string $ci, string $co, int $nights, float $base, array $dyn): array
+{
+    $out = ['surcharge' => 0.0, 'surcharge_plans' => '', 'discount' => 0.0, 'discount_plans' => ''];
+    $label = trim((string)($dyn['rate_plan_label'] ?? ''));
+    if ($label === '') {
+        return $out;
+    }
+    $tol = (float)BALANCE_TOLERANCE;
+    $final = (float)($dyn['final_price'] ?? $base);
+    $net = round((float)($dyn['discount_amount'] ?? 0), 2); // positive = cheaper, negative = dearer
+    if ($plans && function_exists('rh_apply_rate_plans')) {
+        $up = array_values(array_filter($plans, static fn($p) => (float)($p['adjustment_value'] ?? 0) > 0));
+        $afterUp = $up ? (float)rh_apply_rate_plans($up, $roomId, $ci, $co, $nights, $base)['final_price'] : $base;
+        $s = round($afterUp - $base, 2);
+        $d = round($afterUp - $final, 2);
+        if ($s >= -$tol && $d >= -$tol && abs(($d - $s) - $net) <= $tol) {
+            $ids = array_map('intval', (array)($dyn['rate_plan_ids'] ?? (isset($dyn['rate_plan_id']) ? [$dyn['rate_plan_id']] : [])));
+            $sn = [];
+            $dn = [];
+            foreach ($plans as $p) {
+                if (in_array((int)($p['id'] ?? 0), $ids, true)) {
+                    if ((float)($p['adjustment_value'] ?? 0) > 0) {
+                        $sn[] = (string)$p['name'];
+                    } else {
+                        $dn[] = (string)$p['name'];
+                    }
+                }
+            }
+            return ['surcharge' => max(0.0, $s), 'surcharge_plans' => $sn ? implode(', ', $sn) : $label,
+                'discount' => max(0.0, $d), 'discount_plans' => $dn ? implode(', ', $dn) : $label];
+        }
+    }
+    if ($net > $tol) {
+        return ['discount' => $net, 'discount_plans' => $label] + $out;
+    }
+    if ($net < -$tol) {
+        return ['surcharge' => -$net, 'surcharge_plans' => $label] + $out;
+    }
+    return $out;
+}
+
+/**
+ * The rate plan lines of a quote_stay result in the documents' words: "Festival Season surcharge (already in the room
+ * rate) +K10,000 a night" and "Long stay (already taken off the room rate) -K5,000 a night". $fmt formats money.
+ * @return string[]
+ */
+function rh_ai_rate_plan_lines(array $q, callable $fmt): array
+{
+    $tol = (float)BALANCE_TOLERANCE;
+    $lines = [];
+    if ((float)($q['rate_plan_surcharge_per_night'] ?? 0) > $tol) {
+        $n = trim((string)($q['rate_plan_surcharge_plans'] ?? ''));
+        $lines[] = ($n !== '' ? $n . ' surcharge' : 'Rate plan surcharge') . ' (already in the room rate) +' . $fmt((float)$q['rate_plan_surcharge_per_night']) . ' a night';
+    }
+    if ((float)($q['rate_plan_discount_per_night'] ?? 0) > $tol) {
+        $n = trim((string)($q['rate_plan_discount_plans'] ?? ''));
+        $lines[] = ($n !== '' ? $n : 'Rate plan discount') . ' (already taken off the room rate) -' . $fmt((float)$q['rate_plan_discount_per_night']) . ' a night';
+    }
+    return $lines;
+}
+
 /**
  * Price a stay with the same helpers, in the same order, as admin/create-booking.php (one room line):
  * occupancy price (joined-room combination rate when the type is a joined pair) -> applyDynamicPricing
@@ -1385,7 +1467,7 @@ function rh_ai_quote_stay_run(PDO $db, array $user, array $a): array
     $childSup = 0.0;
     $first = null;
     $plan = '';
-    $discount = 0.0;
+    $parts = rh_ai_rate_plan_parts([], 0, $ci, $co, $nights, 0.0, []);
     for ($i = 0; $i < $qty; $i++) {
         $row = $r;
         if (!empty($queue[$i])) {
@@ -1394,6 +1476,9 @@ function rh_ai_quote_stay_run(PDO $db, array $user, array $a): array
         }
         $price = rh_ai_tier_price($row, $occ);
         $dyn = applyDynamicPricing($db, $rid, $ci, $co, $nights, $price);
+        if ($first === null) {
+            $parts = rh_ai_rate_plan_parts(rh_ai_rate_plans_for_quote($db, $dyn), $rid, $ci, $co, $nights, (float)$price, $dyn);
+        }
         $price = $dyn['final_price'];
         $seated = (int)($split['rows'][$i]['children'] ?? 0);
         $sup = rh_child_supplement($rule, $seated, $nights, (float)$price);
@@ -1405,7 +1490,6 @@ function rh_ai_quote_stay_run(PDO $db, array $user, array $a): array
         if ($first === null) {
             $first = (float)$price;
             $plan = (string)($dyn['rate_plan_label'] ?? '');
-            $discount = (float)($dyn['discount_amount'] ?? 0);
         }
     }
     if (!$available) {
@@ -1414,7 +1498,9 @@ function rh_ai_quote_stay_run(PDO $db, array $user, array $a): array
     return [
         'room_type_id' => $rid, 'room_type' => $r['name'], 'check_in' => $ci, 'check_out' => $co, 'nights' => $nights, 'rooms' => $qty,
         'adults' => $adults, 'children' => $children, 'occupancy' => $occ,
-        'price_per_night' => rh_ai_money((float)$first), 'rate_plan' => $plan !== '' ? $plan : null, 'rate_plan_discount_per_night' => $discount > 0 ? rh_ai_money($discount) : null,
+        'price_per_night' => rh_ai_money((float)$first), 'rate_plan' => $plan !== '' ? $plan : null,
+        'rate_plan_surcharge_per_night' => $parts['surcharge'] > BALANCE_TOLERANCE ? rh_ai_money($parts['surcharge']) : null, 'rate_plan_surcharge_plans' => $parts['surcharge'] > BALANCE_TOLERANCE ? $parts['surcharge_plans'] : null,
+        'rate_plan_discount_per_night' => $parts['discount'] > BALANCE_TOLERANCE ? rh_ai_money($parts['discount']) : null, 'rate_plan_discount_plans' => $parts['discount'] > BALANCE_TOLERANCE ? $parts['discount_plans'] : null,
         'child_charge' => rh_ai_money($childSup), 'vat' => rh_ai_money($vat), 'levy' => rh_ai_money($levy),
         'total' => round($grand, 2), 'currency' => rh_ai_currency(), 'vat_mode' => function_exists('vat_mode') ? vat_mode() : '',
         'available' => $available, 'notes' => $notes,

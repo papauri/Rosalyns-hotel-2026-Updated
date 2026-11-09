@@ -1275,6 +1275,9 @@ function rh_ai_quote_local_text(array $q, array $args): string
         return $head . "\n\n" . $why . ($alt !== '' ? "\n\n" . $alt : '');
     }
     $bits = [rh_ai_fmt_cur($cur, $q['price_per_night']) . ' a night (' . $q['occupancy'] . ' occupancy' . (!empty($q['rate_plan']) ? ', rate plan ' . $q['rate_plan'] : '') . ')'];
+    foreach (rh_ai_rate_plan_lines($q, static fn(float $v): string => rh_ai_fmt_cur($cur, $v)) as $planLine) {
+        $bits[] = $planLine; // surcharge / discount in the documents' words (RP-3)
+    }
     if ((float)($q['child_charge'] ?? 0) > BALANCE_TOLERANCE) {
         $bits[] = 'child charge ' . rh_ai_fmt_cur($cur, $q['child_charge']);
     } elseif ((int)($args['children'] ?? 0) > 0) {

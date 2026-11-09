@@ -704,6 +704,7 @@ rh_ai_set_transport($queueTransport);
 
 if (getenv('AI_TEST_OWNER_ROUND')) { goto rh_ai_test_owner_round; }
 if (getenv('AI_TEST_MENU_ONLY')) { goto rh_ai_test_menu; } // only the menu & recipe advisor checks (2026-10-30)
+if (getenv('AI_TEST_BOOKED_RATE_ONLY')) { goto rh_ai_test_booked_rate; } // only the pure booked rate / rate plan checks (2026-11-10)
 
 // ════ Tools: read only, no forbidden tool ════
 $reg = rh_ai_tool_registry();
@@ -6237,6 +6238,7 @@ try {
 
 // ── Booked rate × nights (owner 2026-11-09): pure, no database. A booking's price is the rate it was booked at × nights,
 //    never today's price; local text, no model call. Fixture: K356,000 × 3 = K1,068,000 booked, today K450,300. ──
+rh_ai_test_booked_rate:
 echo "\n-- Booked rate --\n";
 try {
     require_once __DIR__ . '/../../includes/pricing.php'; // rh_doc_stay_lines (the quotation total)
@@ -6278,6 +6280,74 @@ try {
     $brQ = ['number_of_nights' => 3, 'total_with_vat' => 1300000, 'total_amount' => 1300000, 'vat_amount' => 0, 'package_total' => 100000, 'child_supplement_total' => 132000, 'tourism_levy_amount' => 15000];
     $brQL = rh_booked_rate_line($brQ);
     check($brQL['ok'] && abs((float)$brQL['total'] - (float)rh_doc_stay_lines($brQ)['total']) <= BALANCE_TOLERANCE, 'quotation card: booked rate line total equals the quoted total', json_encode($brQL, JSON_UNESCAPED_UNICODE));
+
+    // RP-3 (2026-11-10): a change-of-stay card prices the stay as the save does. A single length-of-stay discount the new
+    // stay no longer qualifies for is added back (rh_rate_plan_dropped), so the card total = the figure the save writes.
+    $rpPlan = ['id' => '91', 'name' => 'Stay & Save', 'rule_type' => 'los_discount', 'start_date' => null, 'end_date' => null, 'days_of_week' => null,
+        'min_nights' => '3', 'max_nights' => null, 'days_before_min' => null, 'days_before_max' => null, 'adjustment_type' => 'percentage',
+        'adjustment_value' => '-10.00', 'applies_to' => 'all', 'room_type_ids' => null, 'priority' => '0', 'is_stacking' => '0', 'is_active' => '1'];
+    $rpPdo = new class($rpPlan) extends PDO {
+        public int $q = 0;
+        private array $row;
+        public function __construct(array $row) { $this->row = $row; }
+        #[\ReturnTypeWillChange]
+        public function prepare($s, $o = []) {
+            $this->q++;
+            if (stripos((string)$s, 'FROM rate_plans') === false) { throw new RuntimeException('only the rate plan read is expected'); }
+            $row = $this->row;
+            return new class($row) {
+                private array $row;
+                public function __construct(array $row) { $this->row = $row; }
+                public function execute($p = null) { return true; }
+                public function fetch($m = null) { return $this->row; }
+            };
+        }
+    };
+    $rpB = ['rate_plan_id' => 91, 'rate_plan_label' => 'Stay & Save', 'rate_plan_discount' => 35600] + $brB;
+    $rpIn = date('Y-m-d', strtotime('+30 days'));
+    [$rpShort, $rpDrop] = rh_ai_stay_reprice($rpPdo, $rpB, $rpIn, date('Y-m-d', strtotime($rpIn . ' +2 days')), 2);
+    $rpSave = rh_reprice_at_booked_rate($rpB, 2, 35600.0); // what modify_booking / extend_stay / admin_update_checkout_date write
+    $rpBits = rh_ai_drop_card($rpDrop);
+    check(!empty($rpDrop['removed']) && abs((float)$rpShort['new_gross'] - (float)$rpSave['new_gross']) <= BALANCE_TOLERANCE
+        && abs((float)$rpShort['new_gross'] - (float)rh_reprice_at_booked_rate($rpB, 2)['new_gross']) > BALANCE_TOLERANCE,
+        'change-of-stay card: a length-of-stay discount the shorter stay loses is added back, the same total the save writes', json_encode([$rpShort['new_gross'], $rpSave['new_gross'], $rpDrop]));
+    check(($rpBits['row']['new'] ?? '') === 'Removed' && strpos($rpBits['note'], 'The Stay & Save discount will be removed: the stay is now 2 nights') === 0
+        && strpos($rpBits['note'], '&amp;') === false && strpos($rpBits['note'], rh_ai_fmt_money(35600)) !== false && ($rpBits['facts']['discount_removed'] ?? '') === 'Stay & Save',
+        'change-of-stay card: a "Rate plan discount -> Removed" row and the Bookings screen\'s note, in plain text (the panel escapes)', json_encode($rpBits, JSON_UNESCAPED_UNICODE));
+    [$rpLong, $rpKeep] = rh_ai_stay_reprice($rpPdo, $rpB, $rpIn, date('Y-m-d', strtotime($rpIn . ' +4 days')), 4);
+    check(empty($rpKeep['removed']) && abs((float)$rpLong['new_gross'] - (float)rh_reprice_at_booked_rate($rpB, 4)['new_gross']) <= BALANCE_TOLERANCE
+        && rh_ai_drop_card($rpKeep) === ['row' => null, 'note' => '', 'facts' => []],
+        'change-of-stay card: the discount stays when the new stay still qualifies (booked rate × nights only, no extra row or note)');
+    [$rpPlain] = rh_ai_stay_reprice($brPdo, $brB, $rpIn, date('Y-m-d', strtotime($rpIn . ' +4 days')), 4);
+    check($brPdo->q === 0 && abs((float)$rpPlain['new_gross'] - (float)rh_reprice_at_booked_rate($brB, 4)['new_gross']) <= BALANCE_TOLERANCE,
+        'change-of-stay card: a booking with no discount reads no rate plan and is repriced at the booked rate');
+
+    // RP-3: quote_stay states a surcharge plainly, apart from a discount, in the documents' words (shared rule, no new maths)
+    $rpS = ['id' => '81', 'name' => 'Festival Season', 'rule_type' => 'seasonal', 'start_date' => '2027-12-15', 'end_date' => '2028-01-05', 'adjustment_value' => '20.00', 'min_nights' => null] + $rpPlan;
+    $rpL = ['id' => '82', 'name' => 'Long stay', 'min_nights' => '2'] + $rpPlan;
+    $rpPlans = [$rpS, $rpL];
+    $rpDyn = rh_apply_rate_plans($rpPlans, 4, '2027-12-20', '2027-12-23', 3, 100000.0);
+    $rpParts = rh_ai_rate_plan_parts($rpPlans, 4, '2027-12-20', '2027-12-23', 3, 100000.0, $rpDyn);
+    check(abs((float)$rpDyn['final_price'] - 108000) <= BALANCE_TOLERANCE && abs($rpParts['surcharge'] - 20000) <= BALANCE_TOLERANCE && $rpParts['surcharge_plans'] === 'Festival Season'
+        && abs($rpParts['discount'] - 12000) <= BALANCE_TOLERANCE && $rpParts['discount_plans'] === 'Long stay',
+        'quote_stay: surcharge and discount reported apart (+20,000 Festival Season, then -12,000 Long stay = 108,000), not a net -8,000', json_encode([$rpDyn['final_price'], $rpParts]));
+    $rpQ = ['rate_plan_surcharge_per_night' => $rpParts['surcharge'], 'rate_plan_surcharge_plans' => $rpParts['surcharge_plans'],
+        'rate_plan_discount_per_night' => $rpParts['discount'], 'rate_plan_discount_plans' => $rpParts['discount_plans']];
+    $rpLines = rh_ai_rate_plan_lines($rpQ, 'rh_ai_fmt_money');
+    check($rpLines === ['Festival Season surcharge (already in the room rate) +' . rh_ai_fmt_money(20000) . ' a night', 'Long stay (already taken off the room rate) -' . rh_ai_fmt_money(12000) . ' a night'],
+        'quote_stay lines use the documents\' words: "<plan> surcharge (already in the room rate) +..." and "(already taken off the room rate)"', json_encode($rpLines, JSON_UNESCAPED_UNICODE));
+    $rpOnlyS = rh_apply_rate_plans([$rpS], 4, '2027-12-20', '2027-12-23', 3, 100000.0);
+    $rpPS = rh_ai_rate_plan_parts([$rpS], 4, '2027-12-20', '2027-12-23', 3, 100000.0, $rpOnlyS);
+    $rpNet = rh_ai_rate_plan_parts([], 4, '2027-12-20', '2027-12-23', 3, 100000.0, $rpDyn);
+    check(abs($rpPS['surcharge'] - 20000) <= BALANCE_TOLERANCE && $rpPS['discount'] === 0.0
+        && abs($rpNet['surcharge'] - 8000) <= BALANCE_TOLERANCE && $rpNet['discount'] === 0.0 && $rpNet['surcharge_plans'] === 'Festival Season, Long stay'
+        && rh_ai_rate_plan_parts($rpPlans, 4, '2027-03-01', '2027-03-02', 1, 100000.0, rh_apply_rate_plans($rpPlans, 4, '2027-03-01', '2027-03-02', 1, 100000.0)) === ['surcharge' => 0.0, 'surcharge_plans' => '', 'discount' => 0.0, 'discount_plans' => ''],
+        'quote_stay: a surcharge alone is stated as a surcharge; without the plan list a net negative is still a surcharge; no plan, no line', json_encode([$rpPS, $rpNet]));
+    $rpText = rh_ai_quote_local_text(['room_type' => 'AITest Suite', 'check_in' => '2027-12-20', 'check_out' => '2027-12-23', 'price_per_night' => 108000, 'occupancy' => 'double',
+        'rate_plan' => 'Festival Season, Long stay', 'child_charge' => 0, 'vat' => 0, 'levy' => 0, 'total' => 324000, 'available' => true, 'notes' => [], 'currency' => $brCur] + $rpQ,
+        ['check_in' => '2027-12-20', 'check_out' => '2027-12-23', 'adults' => 2]);
+    check(strpos($rpText, 'Festival Season surcharge (already in the room rate) +') !== false && strpos($rpText, 'Long stay (already taken off the room rate) -') !== false,
+        'quote reply (local text) states the surcharge and the discount plainly', $rpText);
 } catch (Throwable $e) {
     bad('Booked rate checks threw', get_class($e) . ': ' . $e->getMessage());
 }
