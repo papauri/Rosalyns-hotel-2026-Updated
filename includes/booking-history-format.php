@@ -437,7 +437,7 @@ if (!function_exists('rh_hist_tol')) {
         foreach ($rows as $r) {
             $id = (int)($r['id'] ?? 0);
             $pref = (string)($r['payment_reference'] ?? '');
-            $who = rh_hist_who($ctx['staff'], (int)($r['recorded_by'] ?? 0) ?: (int)($r['processed_by'] ?? 0));
+            $who = rh_hist_payment_actor($r, $ctx['staff']);
             $method = rh_hist_words((string)($r['payment_method'] ?? ''));
             $at = (string)rh_hist_col($r, ['created_at', 'payment_date'], '');
             if ($who === 'Not recorded' && (string)($r['payment_type'] ?? '') !== 'refund' && empty($ctx['pay_created_audit'][$id])) {
@@ -495,6 +495,27 @@ if (!function_exists('rh_hist_tol')) {
     }
 
     /**
+     * Who a payment row names: recorded_by (a staff id), then processed_by, which holds a staff id on some rows and a
+     * NAME (VARCHAR) on others: a name is matched to a staff member by full name or username for the role, otherwise
+     * shown as written. 'Not recorded' when both are empty.
+     */
+    function rh_hist_payment_actor(array $r, array $staff): string
+    {
+        $rec = trim((string)($r['recorded_by'] ?? ''));
+        if ($rec !== '' && ctype_digit($rec) && (int)$rec > 0) {
+            return rh_hist_who($staff, (int)$rec);
+        }
+        $proc = trim((string)($r['processed_by'] ?? ''));
+        if ($proc === '' || $proc === '0') {
+            return 'Not recorded';
+        }
+        if (ctype_digit($proc)) {
+            return rh_hist_who($staff, (int)$proc);
+        }
+        return rh_hist_who($staff, 0, $proc);
+    }
+
+    /**
      * Who saved an older payment that recorded nobody: the person who issued the overpayment credit note naming this
      * exact payment reference, else the person on a refund leg of this payment written within 5 seconds of it.
      * Labelled with where the name comes from. 'Not recorded' when neither exists.
@@ -511,9 +532,8 @@ if (!function_exists('rh_hist_tol')) {
         foreach ($rows as $leg) {
             if ((string)($leg['payment_type'] ?? '') !== 'refund' || (int)($leg['original_payment_id'] ?? 0) !== (int)($pay['id'] ?? 0)) continue;
             $lts = strtotime((string)($leg['created_at'] ?? ''));
-            $uid = (int)($leg['recorded_by'] ?? 0) ?: (int)($leg['processed_by'] ?? 0);
-            if ($pts && $lts && abs($lts - $pts) <= 5 && $uid > 0) {
-                $w = rh_hist_who($ctx['staff'], $uid);
+            if ($pts && $lts && abs($lts - $pts) <= 5) {
+                $w = rh_hist_payment_actor($leg, $ctx['staff']);
                 if ($w !== 'Not recorded') return $w . ' — from the refund leg recorded with it';
             }
         }
@@ -682,19 +702,45 @@ if (!function_exists('rh_hist_tol')) {
     }
 
     /** booking_rooms rows: room assigned / released. */
-    function rh_hist_from_booking_rooms(array $rows, array $ctx): array
+    /**
+     * $others: the booking's other events (already built). A room assigned within 10 s of the booking's creation was
+     * assigned by whoever created it; a room released within 10 s of another step (cancel, check-out, move ...) was
+     * released by that step's person. Otherwise the person is not recorded.
+     */
+    function rh_hist_from_booking_rooms(array $rows, array $ctx, array $others = []): array
     {
         $out = [];
+        $creator = 'Not recorded';
+        $createdTs = !empty($ctx['booking']['created_at']) ? strtotime((string)$ctx['booking']['created_at']) : 0;
+        $bestRank = -1;
+        foreach ($others as $o) {
+            if (in_array('created', $o['keys'], true) && !rh_hist_unknown_who($o['who']) && $o['rank'] > $bestRank) {
+                $creator = $o['who'];
+                $bestRank = $o['rank'];
+            }
+        }
+        $nearWho = function (int $ts) use ($others): string {
+            $best = null;
+            foreach ($others as $o) {
+                if (rh_hist_unknown_who($o['who']) || $o['who'] === 'System' || !in_array($o['kind'], ['cancel', 'check_out', 'room', 'status', 'edit'], true)) continue;
+                $d = abs($o['ts'] - $ts);
+                if ($d <= 10 && ($best === null || $d < $best[0])) $best = [$d, $o['who']];
+            }
+            return $best ? $best[1] : 'Not recorded';
+        };
         foreach ($rows as $r) {
             $rid = (int)($r['individual_room_id'] ?? 0);
             if ($rid <= 0) continue;
             $rn = (string)($ctx['room_numbers'][$rid] ?? ('#' . $rid));
             $combo = (int)($r['room_combination_id'] ?? 0);
             $detail = $combo > 0 ? 'Part of joined rooms' . (isset($ctx['combo_names'][$combo]) ? ' ' . $ctx['combo_names'][$combo] : '') . '.' : '';
-            $ev = rh_hist_ev((string)($r['assigned_at'] ?? ''), 'Not recorded', 'Room ' . $rn . ' assigned', $detail, 'room', ['room:' . $rn], 0);
+            $ats = strtotime((string)($r['assigned_at'] ?? ''));
+            $who = ($ats && $createdTs && abs($ats - $createdTs) <= 10) ? $creator : 'Not recorded';
+            $ev = rh_hist_ev((string)($r['assigned_at'] ?? ''), $who, 'Room ' . $rn . ' assigned', $detail, 'room', ['room:' . $rn], 0);
             if ($ev) $out[] = $ev;
             if (!empty($r['released_at'])) {
-                $ev = rh_hist_ev((string)$r['released_at'], 'Not recorded', 'Room ' . $rn . ' released', '', 'room', ['roomrel:' . $rn], 0);
+                $rts = strtotime((string)$r['released_at']);
+                $ev = rh_hist_ev((string)$r['released_at'], $rts ? $nearWho($rts) : 'Not recorded', 'Room ' . $rn . ' released', '', 'room', ['roomrel:' . $rn], 0);
                 if ($ev) $out[] = $ev;
             }
         }
@@ -1012,11 +1058,12 @@ if (!function_exists('rh_hist_tol')) {
             rh_hist_from_cancellations($src['cancellations'] ?? [], $ctx),
             rh_hist_from_emails($src['comms'] ?? [], $src['auto_emails'] ?? [], $ctx),
             rh_hist_from_tentative($src['tentative'] ?? [], $ctx),
-            rh_hist_from_booking_rooms($src['booking_rooms'] ?? [], $ctx),
             rh_hist_from_financial_audit($src['financial_audit'] ?? [], $ctx),
             rh_hist_from_system_events($src['system_events'] ?? [], $ctx),
             rh_hist_from_price_history($src['price_history'] ?? [], $ctx)
         );
+        // Rooms last: their person comes from the creation / releasing step built above.
+        $events = array_merge($events, rh_hist_from_booking_rooms($src['booking_rooms'] ?? [], $ctx, array_values(array_filter($events))));
         return rh_hist_merge($events);
     }
 

@@ -190,6 +190,40 @@ $anon4['payment_audit'] = [['payment_id' => 2099976256, 'payment_reference' => '
 $pD = array_values(array_filter(rh_hist_build($anon4), function ($e) { return $e['kind'] === 'payment'; }));
 check(($pD[0]['who'] ?? '') === 'Rosalyns Reservations (receptionist)', 'a "created" audit line names the person: no fallback', $pD[0]['who'] ?? '');
 
+// payments.processed_by is a VARCHAR: a staff NAME on some rows, an id on others, NULL on most
+$pw = function ($procBy, $recBy = null) use ($staff) {
+    return rh_hist_payment_actor(['recorded_by' => $recBy, 'processed_by' => $procBy], $staff);
+};
+check($pw('Pat Ledger') === 'Pat Ledger (accountant)', 'processed_by as a name: matched to the staff member with role');
+check($pw('p.ledger') === 'Pat Ledger (accountant)', 'processed_by as a username: matched to the staff member');
+check($pw('Front Desk Temp') === 'Front Desk Temp', 'processed_by as an unknown name: shown as written');
+check($pw('7') === 'Pat Ledger (accountant)' && $pw(7) === 'Pat Ledger (accountant)', 'processed_by as a numeric id');
+check($pw(null) === 'Not recorded' && $pw('') === 'Not recorded', 'processed_by NULL / empty: not recorded');
+check($pw('Front Desk Temp', 5) === 'Rosalyns Reservations (receptionist)', 'recorded_by (id) comes first');
+$named = $base;
+$named['payments'][0]['processed_by'] = 'Pat Ledger';
+$pN = array_values(array_filter(rh_hist_build($named), function ($e) { return $e['kind'] === 'payment'; }));
+check(($pN[0]['who'] ?? '') === 'Pat Ledger (accountant)', 'payment step with processed_by as a name: no credit-note fallback', $pN[0]['who'] ?? '');
+
+// rooms: assigned at creation = the creator; released only with a step within 10 s
+$rooms = $base;
+$rooms['room_numbers'] = [41 => '204'];
+$rooms['booking_rooms'] = [['individual_room_id' => 41, 'assigned_at' => '2026-11-07 09:36:14', 'released_at' => '2026-11-12 10:00:03']];
+$rooms['audit'][] = ['action' => 'checked-out', 'old_values' => '{"status":"checked-in"}', 'new_values' => '{"status":"checked-out"}', 'note' => null,
+    'performed_by' => 7, 'performed_by_name' => 'Pat Ledger', 'performed_at' => '2026-11-12 10:00:00'];
+$evR = rh_hist_build($rooms);
+$asg = array_values(array_filter($evR, function ($e) { return $e['what'] === 'Room 204 assigned'; }));
+check(count($asg) === 1 && $asg[0]['who'] === 'Rosalyns Reservations (receptionist)', 'room assigned at creation: the person who created the booking', json_encode($asg));
+$rel = array_values(array_filter($evR, function ($e) { return $e['what'] === 'Room 204 released'; }));
+check(count($rel) === 1 && $rel[0]['who'] === 'Pat Ledger (accountant)', 'room released 3 s after check-out: that person', json_encode($rel));
+$rooms2 = $rooms;
+$rooms2['booking_rooms'][0]['assigned_at'] = '2026-11-08 12:00:00';
+$rooms2['booking_rooms'][0]['released_at'] = '2026-11-12 11:00:00';
+$evR2 = rh_hist_build($rooms2);
+$a2 = array_values(array_filter($evR2, function ($e) { return $e['what'] === 'Room 204 assigned'; }));
+$r2 = array_values(array_filter($evR2, function ($e) { return $e['what'] === 'Room 204 released'; }));
+check(($a2[0]['who'] ?? '') === 'Not recorded' && ($r2[0]['who'] ?? '') === 'Not recorded', 'room assigned later / released with no step near it: not recorded');
+
 // ---- 4. payment history ----
 $pf = rh_hist_payment_filter($ev, [2099976256, 2099976257]);
 check(implode(',', array_column($pf, 'kind')) === 'created,price,payment,credit_note,refund,email', 'payment history: booking money steps + this payment, no status steps', implode(',', array_column($pf, 'kind')));
