@@ -48,6 +48,7 @@ maintenance_audit_log (CASCADE). Everything else is an id column with NO FK — 
   individual_room_photos, individual_room_pictures_archive, room_maintenance_blocks,
   room_maintenance_log, room_maintenance_schedules, stock_orders
 - `room_id` (room type): blocked_dates, bookings, gallery, reviews, room_blocked_dates
+- `entity_type` + `entity_id` (room type, room, joined rooms, rate plan): **room_price_history** (migration 077) — KEEP, price history stays when its room or plan is deleted
 
 Live snapshot 2026-10-19: both hotels clean (1 booking each). One orphan `gallery` row in
 Rosalyn's (room type deleted, gallery row left) — proof the room-type delete path leaks.

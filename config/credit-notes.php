@@ -16,6 +16,11 @@
 require_once __DIR__ . '/database.php';
 require_once __DIR__ . '/email.php';
 require_once __DIR__ . '/../includes/finance-sequences.php';
+// Booking timeline helpers: issue / apply / void below write a timeline step only when logBookingEvent() exists, and
+// the payment and booking screens did not load it, so those steps were silently skipped (History panel, 2026-11-09).
+if (!function_exists('logBookingEvent') && is_file(__DIR__ . '/../includes/booking-timeline.php')) {
+    require_once __DIR__ . '/../includes/booking-timeline.php';
+}
 
 use PHPMailer\PHPMailer\PHPMailer;
 use PHPMailer\PHPMailer\Exception as PHPMailerException;
@@ -153,23 +158,28 @@ if (!function_exists('issueCreditNote')) {
             // Booking timeline log (room bookings only)
             $tlBookingId = (int)($data['booking_id'] ?? 0);
             $tlBookingRef = trim((string)($data['booking_reference'] ?? ''));
-            if ($tlBookingId > 0 && $bookingType === 'room' && function_exists('logBookingEvent')) {
-                if ($tlBookingRef === '') {
-                    $r = $pdo->prepare("SELECT booking_reference FROM bookings WHERE id = ?");
-                    $r->execute([$tlBookingId]);
-                    $tlBookingRef = (string)($r->fetchColumn() ?: '');
+            // Timeline step only: any failure here must never stop the credit note (History panel, 2026-11-09).
+            try {
+                if ($tlBookingId > 0 && $bookingType === 'room' && function_exists('logBookingEvent')) {
+                    if ($tlBookingRef === '') {
+                        $r = $pdo->prepare("SELECT booking_reference FROM bookings WHERE id = ?");
+                        $r->execute([$tlBookingId]);
+                        $tlBookingRef = (string)($r->fetchColumn() ?: '');
+                    }
+                    logBookingEvent(
+                        $tlBookingId,
+                        $tlBookingRef,
+                        'credit_note_issued',
+                        'financial',
+                        "Credit note {$cnNumber} issued for " . getSetting('currency_symbol', 'MWK') . ' ' . number_format($amount, 2) . " (reason: {$reason})",
+                        null,
+                        $cnNumber,
+                        'admin',
+                        $issuedBy
+                    );
                 }
-                logBookingEvent(
-                    $tlBookingId,
-                    $tlBookingRef,
-                    'credit_note_issued',
-                    'financial',
-                    "Credit note {$cnNumber} issued for " . getSetting('currency_symbol', 'MWK') . ' ' . number_format($amount, 2) . " (reason: {$reason})",
-                    null,
-                    $cnNumber,
-                    'admin',
-                    $issuedBy
-                );
+            } catch (\Throwable $tlEx) {
+                error_log('credit-notes timeline log: ' . $tlEx->getMessage());
             }
 
             // Generate PDF
@@ -456,18 +466,23 @@ if (!function_exists('applyCreditNote')) {
             ]);
 
             // Booking timeline log (room bookings)
-            if ($bookingId > 0 && $bookingType === 'room' && function_exists('logBookingEvent')) {
-                logBookingEvent(
-                    $bookingId,
-                    $bookingReference,
-                    'credit_note_applied',
-                    'payment',
-                    "Credit note {$cn['credit_note_number']} applied: " . getSetting('currency_symbol', 'MWK') . ' ' . number_format($amountToApply, 2) . " (remaining balance: " . number_format(max(0, $newBalance), 2) . ")",
-                    null,
-                    $cn['credit_note_number'],
-                    'admin',
-                    $adminUserId
-                );
+            // Timeline step only: any failure here must never stop the credit note (History panel, 2026-11-09).
+            try {
+                if ($bookingId > 0 && $bookingType === 'room' && function_exists('logBookingEvent')) {
+                    logBookingEvent(
+                        $bookingId,
+                        $bookingReference,
+                        'credit_note_applied',
+                        'payment',
+                        "Credit note {$cn['credit_note_number']} applied: " . getSetting('currency_symbol', 'MWK') . ' ' . number_format($amountToApply, 2) . " (remaining balance: " . number_format(max(0, $newBalance), 2) . ")",
+                        null,
+                        $cn['credit_note_number'],
+                        'admin',
+                        $adminUserId
+                    );
+                }
+            } catch (\Throwable $tlEx) {
+                error_log('credit-notes timeline log: ' . $tlEx->getMessage());
             }
 
             return [
@@ -879,24 +894,29 @@ if (!function_exists('voidCreditNote')) {
 
             // Booking timeline log if CN was linked to a room booking
             $voidBookingId = (int)($cn['booking_id'] ?? 0);
-            if ($voidBookingId > 0 && (string)$cn['booking_type'] === 'room' && function_exists('logBookingEvent')) {
-                $voidRef = trim((string)($cn['booking_reference'] ?? ''));
-                if ($voidRef === '') {
-                    $r = $pdo->prepare("SELECT booking_reference FROM bookings WHERE id = ?");
-                    $r->execute([$voidBookingId]);
-                    $voidRef = (string)($r->fetchColumn() ?: '');
+            // Timeline step only: any failure here must never stop the credit note (History panel, 2026-11-09).
+            try {
+                if ($voidBookingId > 0 && (string)$cn['booking_type'] === 'room' && function_exists('logBookingEvent')) {
+                    $voidRef = trim((string)($cn['booking_reference'] ?? ''));
+                    if ($voidRef === '') {
+                        $r = $pdo->prepare("SELECT booking_reference FROM bookings WHERE id = ?");
+                        $r->execute([$voidBookingId]);
+                        $voidRef = (string)($r->fetchColumn() ?: '');
+                    }
+                    logBookingEvent(
+                        $voidBookingId,
+                        $voidRef,
+                        'credit_note_voided',
+                        'financial',
+                        "Credit note {$cn['credit_note_number']} voided. Reason: {$reason}",
+                        'active',
+                        'voided',
+                        'admin',
+                        $adminUserId
+                    );
                 }
-                logBookingEvent(
-                    $voidBookingId,
-                    $voidRef,
-                    'credit_note_voided',
-                    'financial',
-                    "Credit note {$cn['credit_note_number']} voided. Reason: {$reason}",
-                    'active',
-                    'voided',
-                    'admin',
-                    $adminUserId
-                );
+            } catch (\Throwable $tlEx) {
+                error_log('credit-notes timeline log: ' . $tlEx->getMessage());
             }
 
             if ($ownTx) {

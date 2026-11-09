@@ -3906,6 +3906,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                                         <?php endif; /* not deleted */ ?>
 
                                                         <hr class="menu-divider">
+                                                        <button type="button" data-rh-history="booking:<?php echo (int)$bk_id; ?>" onclick="_closeAllActionMenus(null)" title="Every step for this booking, oldest first, with who did it"><i class="fas fa-list-ol"></i> History</button>
                                                         <button type="button" onclick="viewBookingAuditLog(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>)"><i class="fas fa-clock-rotate-left"></i> Audit log</button>
                                                         <?php if ($bk_deleted && $_perm_delete): ?>
                                                             <button type="button" onclick="restoreDeletedBooking(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>)"><i class="fas fa-trash-arrow-up"></i> Restore booking</button>
@@ -9031,5 +9032,6 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
     </div>
 
     <?php rh_render_send_receipt_script($csrf_token ?? ''); ?>
+    <?php require_once __DIR__ . '/includes/history-panel.php'; ?>
     <?php require_once 'includes/admin-footer.php'; ?>
 

@@ -282,6 +282,15 @@ function createRoomType() {
     ]);
     
     $roomTypeId = $pdo->lastInsertId();
+
+    // Price history (room_price_history): the starting prices, recorded as the API client.
+    require_once __DIR__ . '/../includes/price-history.php';
+    rh_price_history_log($pdo, 'room_type', (int)$roomTypeId, [
+        'price_per_night' => [null, $input['price_per_night'] ?? null],
+        'price_single_occupancy' => [null, $input['price_single_occupancy'] ?? null],
+        'price_double_occupancy' => [null, $input['price_double_occupancy'] ?? null],
+        'price_triple_occupancy' => [null, $input['price_triple_occupancy'] ?? null],
+    ], ['id' => 0, 'full_name' => 'API: ' . (string)($client['client_name'] ?? ('client #' . (int)($client['id'] ?? 0)))]);
     
     // Clear cache
     require_once __DIR__ . '/../config/cache.php';
@@ -348,9 +357,24 @@ function updateRoomType($id) {
     
     $params[] = $id;
     
+    // Price history (room_price_history): prices before and after, recorded as the API client.
+    require_once __DIR__ . '/../includes/price-history.php';
+    $rtPriceFields = ['price_per_night', 'price_single_occupancy', 'price_double_occupancy', 'price_triple_occupancy'];
+    $rtPriceBefore = rh_price_history_snapshot($pdo, 'rooms', (int)$id, $rtPriceFields);
+
     $sql = "UPDATE rooms SET " . implode(', ', $fields) . " WHERE id = ?";
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
+
+    if ($rtPriceBefore) {
+        $rtPriceAfter = rh_price_history_snapshot($pdo, 'rooms', (int)$id, $rtPriceFields);
+        $rtChanges = [];
+        foreach ($rtPriceFields as $f) {
+            $rtChanges[$f] = [$rtPriceBefore[$f] ?? null, $rtPriceAfter[$f] ?? null];
+        }
+        rh_price_history_log($pdo, 'room_type', (int)$id, $rtChanges,
+            ['id' => 0, 'full_name' => 'API: ' . (string)($client['client_name'] ?? ('client #' . (int)($client['id'] ?? 0)))]);
+    }
     
     // Clear cache
     require_once __DIR__ . '/../config/cache.php';

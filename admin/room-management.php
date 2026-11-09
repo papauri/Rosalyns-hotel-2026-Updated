@@ -14,6 +14,7 @@ if (!$is_ajax) {
 require_once 'video-upload-handler.php';
 require_once __DIR__ . '/../includes/form-validation.php';
 require_once __DIR__ . '/../includes/pricing.php';
+require_once __DIR__ . '/../includes/price-history.php';
 require_once __DIR__ . '/includes/child-charge-fields.php';
 
 function syncRoomManagedMedia(array $room): void
@@ -223,6 +224,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             } else {
                 $description = !empty($_POST['description']) ? $_POST['description'] : ($_POST['short_description'] ?? '');
+                // Price history (room_price_history): the prices before this save.
+                $rmPriceFields = ['price_per_night', 'price_single_occupancy', 'price_double_occupancy', 'price_triple_occupancy'];
+                $rmPriceBefore = rh_price_history_snapshot($pdo, 'rooms', (int)$_POST['id'], $rmPriceFields);
 
                 $stmt = $pdo->prepare("
                     UPDATE rooms
@@ -269,6 +273,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     (int)($_POST['display_order'] ?? 0),
                     (int)$_POST['id']
                 ]);
+
+                if ($rmPriceBefore) {
+                    $rmPriceAfter = rh_price_history_snapshot($pdo, 'rooms', (int)$_POST['id'], $rmPriceFields);
+                    $rmPriceChanges = [];
+                    foreach ($rmPriceFields as $f) {
+                        $rmPriceChanges[$f] = [$rmPriceBefore[$f] ?? null, $rmPriceAfter[$f] ?? null];
+                    }
+                    rh_price_history_log($pdo, 'room_type', (int)$_POST['id'], $rmPriceChanges, $user);
+                }
 
                 $mediaSyncStmt = $pdo->prepare("SELECT id, name, description, short_description, display_order, image_url, video_path, video_type FROM rooms WHERE id = ? LIMIT 1");
                 $mediaSyncStmt->execute([$_POST['id']]);
@@ -539,6 +552,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $newRoomId = (int)$pdo->lastInsertId();
             });
             if ($newRoomId > 0) {
+                // Price history: the starting prices of the new room type.
+                rh_price_history_log($pdo, 'room_type', $newRoomId, [
+                    'price_per_night' => [null, rm_num($_POST['price_per_night'] ?? 0)],
+                    'price_single_occupancy' => [null, rm_num($_POST['price_single_occupancy'] ?? null, null)],
+                    'price_double_occupancy' => [null, rm_num($_POST['price_double_occupancy'] ?? null, null)],
+                    'price_triple_occupancy' => [null, rm_num($_POST['price_triple_occupancy'] ?? null, null)],
+                ], $user);
                 $mediaSyncStmt = $pdo->prepare("SELECT id, name, description, short_description, display_order, image_url, video_path, video_type FROM rooms WHERE id = ? LIMIT 1");
                 $mediaSyncStmt->execute([$newRoomId]);
                 $roomForMedia = $mediaSyncStmt->fetch(PDO::FETCH_ASSOC);

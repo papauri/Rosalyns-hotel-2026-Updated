@@ -633,6 +633,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                 $applied_rate_plan_id    = null;
                 $applied_rate_plan_label = '';
                 $applied_rate_discount   = 0.0;
+                $list_rate               = (float)$r_price;   // History: the room's price for this occupancy before any plan
+                $price_source            = !empty($line['combination_queue'][$ri]) ? 'joined_room' : 'room_type';
 
                 if ($ovr !== null) {
                     // Override: the line's final gross is authoritative; extract VAT + levy from it.
@@ -645,6 +647,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     $applied_rate_plan_id    = $dyn['rate_plan_id'];
                     $applied_rate_plan_label = $dyn['rate_plan_label'];
                     $applied_rate_discount   = $dyn['discount_amount'];
+                    if (!empty($applied_rate_plan_id) && $price_source === 'room_type') {
+                        $price_source = 'rate_plan';
+                    }
 
                     $base_row  = $r_price * $number_of_nights;
                     // Each room is charged for the children seated in THAT room (same as the public
@@ -669,6 +674,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     'rate_plan_id'       => $applied_rate_plan_id,
                     'rate_plan_label'    => $applied_rate_plan_label,
                     'rate_plan_discount' => $applied_rate_discount,
+                    'list_rate'          => $ovr !== null ? null : round($list_rate, 2),
+                    'price_source'       => $ovr !== null ? 'override' : $price_source,
                 ];
                 $line['rows'][] = $saved;
 
@@ -889,6 +896,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     'ref'            => $booking_reference,
                     'room_name'      => $r['name'],
                     'total_with_vat' => $row_twv,
+                    // History: how this row's price was worked out, as saved (booking_audit_log new_values.price / timeline metadata.price).
+                    'price'          => [
+                        'source' => $row_fin['price_source'], 'rate' => round((float)$row_fin['room_price'], 2), 'list_rate' => $row_fin['list_rate'],
+                        'nights' => (int)$number_of_nights, 'occupancy' => $occ, 'room_type_id' => (int)$line['room_id'], 'room_type' => (string)$r['name'],
+                        'rate_plan_id' => $row_fin['rate_plan_id'], 'rate_plan_label' => $row_fin['rate_plan_label'] ?: null,
+                        'rate_plan_discount' => $row_fin['rate_plan_discount'] ?: null, 'child_supplement' => $row_child_sup,
+                        'vat_rate' => $c['vat_rate'], 'vat_amount' => $row_vat, 'levy_rate' => $c['levy_pct'], 'levy_amount' => $row_levy,
+                        'total_with_vat' => $row_twv, 'joined_rooms_id' => !empty($line['combination_queue'][$room_idx]) ? (int)$line['combination_queue'][$room_idx]['id'] : null,
+                    ],
                     'manual_room_id' => $this_individual_room_id,
                     'room_combination_id' => $assigned_combination_id,
                 ];
@@ -1163,11 +1179,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                 $cb['id'],
                 'created',
                 null,
-                ['status' => $booking_status, 'payment_status' => $payment_status_val, 'total_rooms' => $total_rooms_booked],
+                ['status' => $booking_status, 'payment_status' => $payment_status_val, 'total_rooms' => $total_rooms_booked, 'price' => $cb['price'] ?? null],
                 'Created manually by admin (' . ($user['full_name'] ?? ($user['username'] ?? '')) . ')'
                     . (isset($under_tier_notes[$cbi]) ? '. ' . $under_tier_notes[$cbi] : ''),
                 $cb['ref']
             );
+        }
+
+        // Booking timeline (History panel): creation with the price snapshot. Logging never stops the booking.
+        try {
+            if (!function_exists('logBookingEvent')) {
+                require_once __DIR__ . '/../includes/booking-timeline.php';
+            }
+            foreach ($created_bookings as $cb) {
+                $cbp = $cb['price'] ?? [];
+                logBookingEvent((int)$cb['id'], (string)$cb['ref'], 'Booking created', 'create',
+                    'Created on the New Booking screen: ' . (int)$number_of_nights . ' night(s) of ' . $cb['room_name'] . ', total ' . number_format((float)$cb['total_with_vat'], 2, '.', ''),
+                    null, (string)$booking_status, 'admin', (int)($user['id'] ?? 0) ?: null, (string)($user['full_name'] ?? ($user['username'] ?? '')),
+                    ['price' => $cbp, 'check_in' => $check_in_date, 'check_out' => $check_out_date, 'total' => (float)$cb['total_with_vat']]);
+            }
+        } catch (\Throwable $tlEx) {
+            error_log('create-booking timeline log: ' . $tlEx->getMessage());
         }
 
         // ── Email ────────────────────────────────────────────────────────────
@@ -1358,6 +1390,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                 } else {
                     $email_msg .= ' (Quotation failed: ' . htmlspecialchars($qt_result['message'] ?? 'unknown error') . ')';
                 }
+            }
+        }
+
+        // History: the emails sent at creation (plain text of what the screen reported). Never blocks.
+        if ($send_email && trim($email_msg) !== '' && function_exists('logBookingEvent')) {
+            try {
+                logBookingEvent((int)$primary_id, (string)$primary_ref, 'Emails at booking', 'email', trim(strip_tags(html_entity_decode($email_msg, ENT_QUOTES, 'UTF-8'))),
+                    null, !empty($email_result['success']) ? 'sent' : 'failed', 'admin', (int)($user['id'] ?? 0) ?: null,
+                    (string)($user['full_name'] ?? ($user['username'] ?? '')), ['email_type' => 'booking_created', 'recipient' => $guest_email]);
+            } catch (\Throwable $tlEx) {
+                error_log('create-booking email timeline log: ' . $tlEx->getMessage());
             }
         }
 

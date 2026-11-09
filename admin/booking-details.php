@@ -899,8 +899,9 @@ try {
     $notes_stmt->execute([$booking_id]);
     $notes = $notes_stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    // Fetch booking timeline
-    $timeline = getBookingTimeline($booking_id);
+    // Activity timeline: the same step-by-step history as the History panel (includes/booking-history.php), newest first.
+    require_once __DIR__ . '/../includes/booking-history.php';
+    $timeline = array_reverse(rh_booking_history($pdo, (int)$booking_id, ['light' => true]));
 
     // Fetch existing invoices for this booking
     $invoices_stmt = $pdo->prepare("
@@ -1392,6 +1393,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             </div>
 
             <div class="rh-page-head__actions booking-actions-flow">
+                <button type="button" class="action-btn history" data-rh-history="booking:<?php echo (int)$booking_id; ?>" data-help="History|Every step for this booking, oldest first: who made it and at what price, every status change, payment, refund, credit note and email. Print it from the panel."><i class="fas fa-list-ol"></i> History</button>
                 <?php if ($bd_deleted): ?>
                     <?php if ($bd_perm_delete): ?>
                         <button type="button" class="action-btn confirm" onclick="bdRestoreBooking()"><i class="fas fa-trash-arrow-up"></i> Restore Booking</button>
@@ -2101,60 +2103,32 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 <section class="rh-panel timeline-card">
                     <div class="rh-panel__head">
                         <h2 class="rh-panel__title">Activity timeline</h2>
+                        <button type="button" class="btn btn-secondary btn-sm" data-rh-history="booking:<?php echo (int)$booking_id; ?>" title="Open every step, oldest first, with a Print button">Full history</button>
                     </div>
+                    <p class="rh-empty" style="margin:0 0 6px;font-size:0.8rem;">The latest 10 steps, newest first: what happened, who did it and when (hotel time).</p>
                     <div class="timeline-list">
                         <?php if (empty($timeline)): ?>
                             <p class="rh-empty">No activity recorded yet.</p>
                         <?php else: ?>
-                            <?php foreach (array_slice($timeline, 0, 10) as $event):
-                                $type_info = formatActionType($event['action_type']);
-                                $event_metadata = !empty($event['metadata']) ? json_decode($event['metadata'], true) : [];
-                                // The old / new nights are stored in old_value / new_value (JSON), not in metadata.
-                                $adj_old_nights = null;
-                                $adj_new_nights = null;
-                                if ($event['action_type'] === 'date_adjustment') {
-                                    $adjOld = json_decode((string)($event['old_value'] ?? ''), true);
-                                    $adjNew = json_decode((string)($event['new_value'] ?? ''), true);
-                                    $adj_old_nights = $adjOld['old']['nights'] ?? ($event_metadata['old']['nights'] ?? null);
-                                    $adj_new_nights = $adjNew['new']['nights'] ?? ($event_metadata['new']['nights'] ?? null);
-                                }
+                            <?php
+                            $bd_tl_types = ['created' => 'create', 'payment' => 'payment', 'refund' => 'payment', 'credit_note' => 'payment', 'status' => 'status_change',
+                                'cancel' => 'cancellation', 'email' => 'email', 'check_in' => 'check_in', 'check_out' => 'check_out', 'note' => 'note',
+                                'price' => 'update', 'room' => 'update', 'edit' => 'update'];
+                            foreach (array_slice($timeline, 0, 10) as $event):
+                                $bd_tl_type = $bd_tl_types[$event['kind']] ?? 'update';
+                                $type_info = formatActionType($bd_tl_type);
                             ?>
                                 <div class="timeline-item">
-                                    <div class="timeline-icon <?php echo $event['action_type']; ?>">
-                                        <i class="fas <?php echo $type_info['icon']; ?>"></i>
+                                    <div class="timeline-icon <?php echo htmlspecialchars($bd_tl_type); ?>">
+                                        <i class="fas <?php echo htmlspecialchars($type_info['icon']); ?>"></i>
                                     </div>
                                     <div class="timeline-content">
-                                        <div class="timeline-title"><?php echo htmlspecialchars($event['action']); ?></div>
+                                        <div class="timeline-title"><?php echo htmlspecialchars($event['what']); ?></div>
                                         <div class="timeline-meta">
-                                            <?php if ($event['performed_by_name']): ?>
-                                                by <?php echo htmlspecialchars($event['performed_by_name']); ?>
-                                            <?php else: ?>
-                                                System
-                                            <?php endif; ?>
-                                            &middot; <?php echo htmlspecialchars(rhToUserTime($event['created_at'], 'M j, H:i')); ?>
+                                            <?php echo htmlspecialchars($event['who']); ?> &middot; <?php echo htmlspecialchars(date('M j, H:i', strtotime($event['at']))); ?>
                                         </div>
-                                        <?php if ($event['action_type'] === 'date_adjustment' && !empty($event_metadata)): ?>
-                                            <div class="timeline-adjustment-details">
-                                                <div class="timeline-adjustment-row">
-                                                    <span class="timeline-adjustment-label">Nights</span>
-                                                    <span class="timeline-adjustment-value">
-                                                        <?php echo htmlspecialchars((string)($adj_old_nights ?? '?')); ?> ->
-                                                        <?php echo htmlspecialchars((string)($adj_new_nights ?? '?')); ?>
-                                                    </span>
-                                                </div>
-                                                <div class="timeline-adjustment-row">
-                                                    <span class="timeline-adjustment-label">Room charge change</span>
-                                                    <span class="timeline-adjustment-value <?php echo ($event_metadata['amount_delta'] ?? 0) >= 0 ? 'is-increase' : 'is-decrease'; ?>">
-                                                        <?php echo ($event_metadata['amount_delta'] ?? 0) >= 0 ? '+' : '-'; ?>
-                                                        <?php echo $currency_symbol . number_format(abs($event_metadata['amount_delta'] ?? 0), 2); ?>
-                                                    </span>
-                                                </div>
-                                                <?php if (!empty($event_metadata['reason'])): ?>
-                                                    <div class="timeline-adjustment-reason">
-                                                        "<?php echo htmlspecialchars($event_metadata['reason']); ?>"
-                                                    </div>
-                                                <?php endif; ?>
-                                            </div>
+                                        <?php if ($event['detail'] !== ''): ?>
+                                            <div class="timeline-adjustment-reason" style="white-space:pre-line;"><?php echo htmlspecialchars($event['detail']); ?></div>
                                         <?php endif; ?>
                                     </div>
                                 </div>
@@ -2996,6 +2970,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
     </script>
 
     <?php rh_render_send_receipt_script($csrf_token ?? ''); ?>
+    <?php require_once __DIR__ . '/includes/history-panel.php'; ?>
     <?php require_once 'includes/admin-footer.php'; ?>
 </body>
 

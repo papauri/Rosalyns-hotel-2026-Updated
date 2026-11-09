@@ -425,6 +425,9 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
                         </button>
                     <?php endif; ?>
                 <?php endif; ?>
+                <button type="button" class="btn btn--secondary btn--sm" data-rh-history="payment:<?php echo (int)$paymentId; ?>" title="Every step for this payment: who recorded it, refunds, credit notes and the booking's money steps">
+                    <i class="fas fa-clock-rotate-left"></i> History
+                </button>
                 <a href="invoices.php?search=<?php echo urlencode($payment['payment_reference']); ?>" class="btn btn--secondary btn--sm">
                     <i class="fas fa-file-invoice"></i> Invoice
                 </a>
@@ -893,5 +896,6 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
     }());
     </script>
 
+    <?php require_once __DIR__ . '/includes/history-panel.php'; ?>
     <?php require_once 'includes/admin-footer.php'; ?>
 

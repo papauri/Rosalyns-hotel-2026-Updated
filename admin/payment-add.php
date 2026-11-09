@@ -394,6 +394,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $pdo->commit();
 
+                if ($editOverpayCn) {
+                    // History, after the commit: the edit moved the extra into a credit note. Never blocks the saved edit.
+                    try {
+                        rh_log_payment_audit($pdo, $editId, (string)($payment['payment_reference'] ?? ''), 'overpay_credit_note', [], (int)($user['id'] ?? 0),
+                            (string)($user['full_name'] ?? ($user['username'] ?? '')), 'Credit note ' . $editOverpayCn['credit_note_number'] . ' for '
+                            . number_format((float)$editOverpayCn['excess'], 2) . ' issued for the amount over what was owed'
+                            . (!empty($_POST['confirm_overpay']) ? ' (overpay box ticked).' : '.'));
+                    } catch (Throwable $histEx) {
+                        error_log('payment-add edit history log: ' . $histEx->getMessage());
+                    }
+                }
+
                 // Audit trail: log every payment edit with before/after details
                 rh_log_event('payment-add', 'info', 'Payment record updated', [
                     'payment_id'   => $editId,
@@ -463,9 +475,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Nothing owed = no payment; more than owed only with the explicit tick. The balance is
                 // re-read under the account row lock so two staff can never both collect the same balance.
                 $lockTables = ['room' => 'bookings', 'conference' => 'conference_inquiries', 'gym' => 'gym_inquiries', 'event' => 'event_inquiries'];
+                $histOwedBefore = null;   // History: what was owed when this payment was saved
                 if (isset($lockTables[$bookingType])) {
                     $pdo->prepare("SELECT id FROM {$lockTables[$bookingType]} WHERE id = ? FOR UPDATE")->execute([$bookingId]);
-                    $limitErr = rh_payment_limit_error($paymentAmount, rh_account_balance_due($pdo, $bookingType, (int)$bookingId), !empty($_POST['confirm_overpay']));
+                    $histOwedBefore = rh_account_balance_due($pdo, $bookingType, (int)$bookingId);
+                    $limitErr = rh_payment_limit_error($paymentAmount, $histOwedBefore, !empty($_POST['confirm_overpay']));
                     if ($limitErr !== null) {
                         throw new Exception($limitErr);
                     }
@@ -595,6 +609,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->commit();
                 // Burn the per-render idempotency token so a fresh one is issued next render.
                 unset($_SESSION['admin_payment_add_uuid']);
+
+                // History (after the commit, so a failed or deadlocked log write can never undo a saved payment): who saved
+                // it, how much, owed before and after, the overpay tick and the credit note.
+                $histNote = '';
+                $histOwedAfter = null;
+                try {
+                    require_once __DIR__ . '/../includes/booking-history-format.php';
+                    $histOwedAfter = isset($lockTables[$bookingType]) ? rh_account_balance_due($pdo, $bookingType, (int)$bookingId) : null;
+                    $histNote = rh_hist_payment_saved_note((float)$totalAmount, (string)$paymentMethod, $histOwedBefore, $histOwedAfter,
+                        !empty($_POST['confirm_overpay']), $overpayCnId > 0 ? (string)$cnResult['credit_note_number'] : null,
+                        $overpayCnId > 0 ? (float)$excess : null, (string)getSetting('currency_symbol', 'MWK'));
+                    rh_log_payment_audit($pdo, (int)$newPaymentId, (string)$paymentRef, 'created', [], (int)($user['id'] ?? 0),
+                        (string)($user['full_name'] ?? ($user['username'] ?? '')), $histNote);
+                } catch (Throwable $histEx) {
+                    error_log('payment-add history log: ' . $histEx->getMessage());
+                }
+
+                if ($bookingType === 'room' && $histNote !== '') {
+                    try {
+                        if (!function_exists('logBookingEvent')) {
+                            require_once __DIR__ . '/../includes/booking-timeline.php';
+                        }
+                        logBookingEvent((int)$bookingId, (string)$bookingReference, 'Payment ' . $paymentRef . ' recorded', 'payment', $histNote,
+                            null, (string)$paymentStatus, 'admin', (int)($user['id'] ?? 0) ?: null, (string)($user['full_name'] ?? ($user['username'] ?? '')),
+                            ['payment_id' => (int)$newPaymentId, 'payment_ref' => (string)$paymentRef, 'amount' => (float)$totalAmount,
+                                'method' => (string)$paymentMethod, 'balance_before' => $histOwedBefore, 'balance_after' => $histOwedAfter ?? null,
+                                'overpay_confirmed' => !empty($_POST['confirm_overpay']), 'credit_note_id' => $overpayCnId ?: null]);
+                    } catch (Throwable $histEx) {
+                        error_log('payment-add timeline log: ' . $histEx->getMessage());
+                    }
+                }
 
                 if ($overpayCnId > 0 && $overpayEmail !== '') {
                     try {

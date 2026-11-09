@@ -1033,11 +1033,14 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                         $payCanEdit = !in_array($payment['payment_status'], ['completed', 'paid'], true);
                                         $payHasMore = $payCanRefund || $payCanEdit || $payWaPhone !== '';
                                     ?>
-                                    <?php /* View + Invoice stay on the row; refund, edit and WhatsApp sit in the shared More menu. */ ?>
+                                    <?php /* View, History + Invoice stay on the row; refund, edit and WhatsApp sit in the shared More menu. */ ?>
                                     <div class="quick-actions actions-row">
                                         <a href="payment-details.php?id=<?php echo $payment['id']; ?>" class="btn btn-primary btn-sm" title="View Details">
                                             <i class="fas fa-eye"></i>
                                         </a>
+                                        <button type="button" class="btn btn-secondary btn-sm" data-rh-history="payment:<?php echo (int)$payment['id']; ?>" title="History: every step for this payment" aria-label="History of payment <?php echo htmlspecialchars((string)$payment['payment_reference'], ENT_QUOTES); ?>">
+                                            <i class="fas fa-clock-rotate-left"></i>
+                                        </button>
                                         <?php if (function_exists('rh_module_key_enabled') && rh_module_key_enabled('billing')): ?>
                                         <a href="invoices.php?search=<?php echo urlencode($payment['payment_reference']); ?>" class="btn btn-secondary btn-sm" title="Invoice">
                                             <i class="fas fa-file-invoice"></i>
@@ -1227,5 +1230,6 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
 
     <script src="js/admin-components.js"></script>
 
+    <?php require_once __DIR__ . '/includes/history-panel.php'; ?>
     <?php require_once 'includes/admin-footer.php'; ?>
 

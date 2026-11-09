@@ -6,6 +6,7 @@
  */
 require_once 'admin-init.php';
 require_once __DIR__ . '/../includes/form-validation.php';
+require_once __DIR__ . '/../includes/price-history.php';
 /** @var array $user */
 /** @var string $csrf_token */
 
@@ -120,8 +121,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $message = $validationError;
                 $messageType = 'error';
             } else {
+                // Price history (room_price_history): the plan's price rules before and after the save.
+                $rpHistFields = ['name', 'rule_type', 'start_date', 'end_date', 'days_of_week', 'min_nights', 'max_nights', 'days_before_min',
+                    'days_before_max', 'adjustment_type', 'adjustment_value', 'applies_to', 'room_type_ids', 'priority', 'is_stacking', 'is_active'];
                 try {
                     if ($id) {
+                        $rpHistBefore = rh_price_history_snapshot($pdo, 'rate_plans', (int)$id, $rpHistFields);
                         $stmt = $pdo->prepare("UPDATE rate_plans SET
                             name=?, description=?, rule_type=?,
                             start_date=?, end_date=?, days_of_week=?,
@@ -151,6 +156,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $isActive,
                             $id
                         ]);
+                        if ($rpHistBefore) {
+                            $rpHistAfter = rh_price_history_snapshot($pdo, 'rate_plans', (int)$id, $rpHistFields);
+                            $rpHistChanges = [];
+                            foreach ($rpHistFields as $f) {
+                                $rpHistChanges[$f] = [$rpHistBefore[$f] ?? null, $rpHistAfter[$f] ?? null];
+                            }
+                            rh_price_history_log($pdo, 'rate_plan', (int)$id, $rpHistChanges, $user);
+                        }
                         rh_log_event('rate_plans', 'info', "Rate plan updated: {$name}", ['id' => $id, 'user' => $user['username']]);
                         $message = 'Rate plan updated successfully.';
                         $savedId  = $id;
@@ -193,6 +206,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $savedId = (int)$pdo->lastInsertId();
                         });
                         rh_log_event('rate_plans', 'info', "Rate plan created: {$name}", ['user' => $user['username']]);
+                        if ($savedId) {
+                            rh_price_history_log($pdo, 'rate_plan', (int)$savedId, ['created' => [null, $name . ': ' . $adjType . ' ' . $adjValue]], $user);
+                        }
                         $message = 'Rate plan created successfully.';
                     }
                     $messageType = 'success';
@@ -236,14 +252,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $id  = (int)($_POST['plan_id'] ?? 0);
             $val = empty($_POST['is_active']) ? 0 : 1;
             if ($id > 0) {
+                $rpHistBefore = rh_price_history_snapshot($pdo, 'rate_plans', $id, ['is_active']);
                 $pdo->prepare("UPDATE rate_plans SET is_active=? WHERE id=?")->execute([$val, $id]);
+                if ($rpHistBefore) {
+                    rh_price_history_log($pdo, 'rate_plan', $id, ['is_active' => [$rpHistBefore['is_active'] ?? null, $val]], $user);
+                }
                 $message = $val ? 'Rate plan activated.' : 'Rate plan deactivated.';
                 $messageType = 'success';
             }
         } elseif ($action === 'delete') {
             $id = (int)($_POST['plan_id'] ?? 0);
             if ($id > 0) {
+                $rpHistBefore = rh_price_history_snapshot($pdo, 'rate_plans', $id, ['name', 'adjustment_type', 'adjustment_value']);
                 $pdo->prepare("DELETE FROM rate_plans WHERE id=?")->execute([$id]);
+                if ($rpHistBefore) {
+                    rh_price_history_log($pdo, 'rate_plan', $id, ['deleted' => [($rpHistBefore['name'] ?? '') . ': ' . ($rpHistBefore['adjustment_type'] ?? '') . ' ' . ($rpHistBefore['adjustment_value'] ?? ''), null]], $user);
+                }
                 rh_log_event('rate_plans', 'info', "Rate plan deleted", ['id' => $id, 'user' => $user['username']]);
                 $message = 'Rate plan deleted.';
                 $messageType = 'success';

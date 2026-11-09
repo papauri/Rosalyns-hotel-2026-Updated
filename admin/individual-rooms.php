@@ -8,6 +8,7 @@ require_once 'admin-init.php';
 require_once __DIR__ . '/../includes/form-validation.php';
 require_once __DIR__ . '/includes/bulk-actions.php';
 require_once __DIR__ . '/../includes/pricing.php';
+require_once __DIR__ . '/../includes/price-history.php';
 require_once __DIR__ . '/includes/child-charge-fields.php';
 /** @var string $csrf_token */
 
@@ -368,7 +369,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             max_guests_combined = ?, is_active = ?, notes = ?
                         WHERE id = ?
                     ");
+                    $comboPriceBefore = rh_price_history_snapshot($pdo, 'room_combinations', (int)$id, ['price_override']);
                     $stmt->execute([$combined_name, $combined_room_type_id, $room_a_id, $room_b_id, $price_override, $max_guests_combined, $is_active, $notes, $id]);
+                    if ($comboPriceBefore) {
+                        rh_price_history_log($pdo, 'room_combination', (int)$id, ['price_override' => [$comboPriceBefore['price_override'] ?? null, $price_override]], $user);
+                    }
                     $message = 'Joined-room combination updated successfully!';
                     $autoOpenCombinations = true;
                 } else {
@@ -382,6 +387,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ");
                         $stmt->execute([$combined_name, $combined_room_type_id, $room_a_id, $room_b_id, $price_override, $max_guests_combined, $is_active, $notes, $user['id'] ?? null]);
+                        if ($price_override !== null) {
+                            rh_price_history_log($pdo, 'room_combination', (int)$pdo->lastInsertId(), ['price_override' => [null, $price_override]], $user);
+                        }
                         $message = 'Joined-room combination added successfully!';
                         $autoOpenCombinations = true;
                     });
