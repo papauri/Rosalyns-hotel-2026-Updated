@@ -30,6 +30,11 @@
  *   - a token was stored but is now missing or fails re-verification (edited, wrong domain/tenant) -> 'grace'
  *   - otherwise lv_evaluate() from includes/licence-verify.php (server status, stricter date schedule, override)
  *
+ * Free trial (panel BILLING.md Part 3, 2026-11-09): a verified answer may carry trial (bool) and trial_until (Y-m-d). They are
+ * kept only from a verified payload, and only trial === true with a valid trial_until counts (older answers without them =
+ * not a trial). The status itself never changes for a trial (the panel sets paid_until = trial_until and the after-trial
+ * grace / read-only days); only the staff wording does (includes/licence-guard.php).
+ *
  * Enforcement lives in includes/licence-guard.php. Nothing here throws to the caller.
  */
 
@@ -251,7 +256,8 @@ if (!function_exists('rh_licence_env')) {
     {
         $token = (string)($stored['token'] ?? '');
         $last = max(0, (int)($stored['last_issued_at'] ?? 0));
-        $base = ['source' => 'fallback', 'issued_at' => null, 'payload' => null, 'business_type' => null, 'modules' => null];
+        $base = ['source' => 'fallback', 'issued_at' => null, 'payload' => null, 'business_type' => null, 'modules' => null,
+            'trial' => false, 'trial_until' => null];
 
         if ($token === '') {
             if ($last > 0) {
@@ -272,7 +278,20 @@ if (!function_exists('rh_licence_env')) {
             'status' => (string)$r['status'], 'reason' => 'ok', 'message' => '', 'source' => (string)$r['source'],
             'issued_at' => $r['issued_at'], 'payload' => $r['payload'],
             'business_type' => $r['business_type'], 'modules' => $r['modules'],
-        ];
+        ] + rh_licence_trial(is_array($r['payload']) ? $r['payload'] : null);
+    }
+
+    /**
+     * The free-trial fields of a VERIFIED payload. Pure. Only trial === true with a valid trial_until is a trial; an older
+     * answer without the fields (or anything malformed) is not.
+     *
+     * @return array{trial:bool,trial_until:?string}
+     */
+    function rh_licence_trial(?array $payload): array
+    {
+        $until = is_array($payload) && isset($payload['trial_until']) && is_string($payload['trial_until']) && lv_valid_date($payload['trial_until'])
+            ? $payload['trial_until'] : null;
+        return ['trial' => is_array($payload) && ($payload['trial'] ?? null) === true && $until !== null, 'trial_until' => $until];
     }
 
     function rh_licence_reason_words(string $reason): string
@@ -318,7 +337,7 @@ if (!function_exists('rh_licence_env')) {
 
     /**
      * The licence status for THIS request (cached for the request). Keys: status, reason, message, source, issued_at,
-     * payload, business_type, modules, dates, configured, last_check_at, last_error, last_issued_at, contact.
+     * payload, business_type, modules, trial, trial_until, dates, configured, last_check_at, last_error, last_issued_at, contact.
      * 'unconfigured' means licensing is off. A failure of our own (no database, exception) answers 'active':
      * a fault here must never lock a hotel.
      */
@@ -330,12 +349,12 @@ if (!function_exists('rh_licence_env')) {
         }
         if (!rh_licence_enabled()) {
             return $cache = ['status' => 'unconfigured', 'reason' => 'unconfigured', 'message' => '', 'source' => 'none', 'issued_at' => null,
-                'payload' => null, 'business_type' => null, 'modules' => null, 'dates' => [], 'configured' => false,
+                'payload' => null, 'business_type' => null, 'modules' => null, 'trial' => false, 'trial_until' => null, 'dates' => [], 'configured' => false,
                 'last_check_at' => 0, 'last_error' => '', 'last_issued_at' => 0, 'contact' => ''];
         }
         $cfg = rh_licence_config(false);
         $res = ['status' => 'active', 'reason' => 'error', 'message' => '', 'source' => 'fallback', 'issued_at' => null,
-            'payload' => null, 'business_type' => null, 'modules' => null];
+            'payload' => null, 'business_type' => null, 'modules' => null, 'trial' => false, 'trial_until' => null];
         $stored = ['token' => '', 'last_issued_at' => 0, 'last_check_at' => 0, 'last_error' => ''];
         try {
             $pdo = $GLOBALS['pdo'] ?? null;

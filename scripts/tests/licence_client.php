@@ -128,6 +128,40 @@ eq('grace', $ev($old)['status'], 'expired token, 3 days overdue by the schedule:
 // dates
 $dts = rh_licence_dates(json_decode(base64_decode(strtr(mk_token(['paid_until' => '2026-06-30'], $KP['private'])['payload'], '-_', '+/')), true));
 eq(['paid_until' => '2026-06-30', 'grace_end' => '2026-07-14', 'read_only_from' => '2026-07-15', 'read_only_end' => '2026-07-28', 'suspended_from' => '2026-07-29'], $dts, 'dates worked out from paid_until + grace + read-only days');
+// free trial (panel BILLING.md Part 3): kept only from a verified payload; old answers without the fields = not a trial
+eq(['trial' => false, 'trial_until' => null], rh_licence_trial(null), 'trial: no payload = not a trial');
+$r = $ev(mk_token([], $KP['private']));
+check($r['trial'] === false && $r['trial_until'] === null, 'trial: an older answer without trial fields is not a trial');
+$r = $ev(mk_token(['trial' => true, 'trial_until' => $day(5), 'paid_until' => $day(5)], $KP['private']));
+check($r['status'] === 'active' && $r['trial'] === true && $r['trial_until'] === $day(5), 'trial: kept from a verified answer');
+eq(false, $ev(mk_token(['trial' => 'true', 'trial_until' => $day(5)], $KP['private']))['trial'], 'trial: only boolean true counts');
+eq(false, $ev(mk_token(['trial' => true, 'trial_until' => '2026-02-30'], $KP['private']))['trial'], 'trial: an invalid end date is not a trial');
+eq(false, $ev(mk_token(['trial' => false, 'trial_until' => $day(5)], $KP['private']))['trial'], 'trial: false (converted) is not a trial');
+$tt = mk_token(['trial' => true, 'trial_until' => $day(5)], $KP['private']);
+$pl = json_decode(base64_decode(strtr($tt['payload'], '-_', '+/')), true); $pl['trial_until'] = $day(500);
+$tt['payload'] = b64u(json_encode($pl, JSON_UNESCAPED_SLASHES));
+check($ev($tt)['trial'] === false && $ev($tt)['status'] === 'grace', 'trial: an edited trial date fails the signature (not a trial, grace)');
+// trial wording (pure): the banner in the last 7 days, "Your free trial has ended" instead of "Payment overdue" after it
+$tw = static function (array $st): string { return rh_licence_banner_text($st + ['reason' => 'ok', 'source' => 'server', 'dates' => [], 'contact' => '']); };
+eq('Free trial: 5 days left — contact ProManaged IT to continue.', $tw(['status' => 'active', 'trial' => true, 'trial_until' => $day(5), 'contact' => 'ProManaged IT']), 'trial banner: days left and who to contact');
+eq('Free trial: 1 day left — contact your system provider to continue.', $tw(['status' => 'active', 'trial' => true, 'trial_until' => $day(1)]), 'trial banner: 1 day, no contact set');
+eq('Free trial: 7 days left — contact your system provider to continue.', $tw(['status' => 'active', 'trial' => true, 'trial_until' => $day(7)]), 'trial banner: shown from 7 days before the end');
+eq('Free trial: last day — contact your system provider to continue.', $tw(['status' => 'active', 'trial' => true, 'trial_until' => $day(0)]), 'trial banner: the last day');
+eq('', $tw(['status' => 'active', 'trial' => true, 'trial_until' => $day(8)]), 'trial banner: nothing 8 days before the end');
+eq('', $tw(['status' => 'active', 'trial' => false, 'trial_until' => $day(3)]), 'no trial: active has no banner');
+$ro = $tw(['status' => 'read_only', 'trial' => true, 'trial_until' => $day(-1), 'dates' => ['suspended_from' => $day(3)]]);
+check(strpos($ro, 'Your free trial has ended — the system is read-only.') === 0 && strpos($ro, 'Payment overdue') === false && strpos($ro, 'check guests out') !== false, 'trial ended, read-only: trial wording', $ro);
+$gr = $tw(['status' => 'grace', 'trial' => true, 'trial_until' => $day(-1), 'dates' => ['read_only_from' => $day(2)]]);
+check(strpos($gr, 'Your free trial has ended — the system will become read-only on') === 0, 'trial ended, grace: trial wording', $gr);
+check(strpos($tw(['status' => 'read_only', 'trial' => false]), 'Payment overdue — the system is read-only.') === 0, 'not a trial: the payment-overdue wording is unchanged');
+eq('Your system is paused because your free trial has ended. Your data is safe. Please contact ProManaged to switch it back on.',
+    rh_licence_refusal_message(['status' => 'suspended', 'contact' => 'ProManaged', 'trial' => true, 'trial_until' => $day(-5)]), 'trial ended, suspended: refusal says the trial ended');
+check(strpos(rh_licence_refusal_message(['status' => 'read_only', 'trial' => true, 'trial_until' => $day(-1)]), 'Not saved: the system is in view-only mode because your free trial has ended.') === 0, 'trial ended, read-only: refusal says the trial ended');
+$lockedTrial = $child("require '" . $root . "/includes/licence-guard.php'; rh_licence_render_locked_page(['status' => 'suspended', 'trial' => true, 'trial_until' => '2026-01-01', 'contact' => 'ProManaged']);");
+check(strpos($lockedTrial, 'Your free trial has ended, so the staff system is paused for now.') !== false && strpos($lockedTrial, 'overdue') === false
+    && strpos($lockedTrial, 'once your subscription is set up and paid') !== false, 'trial ended: the paused page says the trial ended', substr($lockedTrial, 0, 300));
+$lockedPaid = $child("require '" . $root . "/includes/licence-guard.php'; rh_licence_render_locked_page(['status' => 'suspended', 'contact' => 'ProManaged']);");
+check(strpos($lockedPaid, 'The subscription payment is overdue, so the staff system is paused for now.') !== false && strpos($lockedPaid, 'once the payment is recorded') !== false, 'not a trial: the paused page wording is unchanged');
 // lazy-check schedule
 check(rh_licence_check_due(['last_check_at' => 0, 'last_error' => ''], $NOW), 'check due: never checked');
 check(!rh_licence_check_due(['last_check_at' => $NOW - 1800, 'last_error' => ''], $NOW), 'check not due: half an hour ago (hourly by default)');
@@ -329,6 +363,24 @@ if ($up) {
     check($st['status'] === 'suspended' && $html === '', 'suspended: no banner (the page is locked instead)');
     [$st, $html] = $words(['paid_until' => $day(30)]);
     check($st['status'] === 'active' && $html === '', 'active: no banner');
+    // free trial through the stored token (panel BILLING.md Part 3)
+    [$st, $html] = $words(['paid_until' => $day(4), 'trial' => true, 'trial_until' => $day(4), 'grace_days' => 0, 'readonly_days' => 3]);
+    check($st['status'] === 'active' && $st['trial'] === true && strpos($html, 'Free trial: 4 days left') !== false && strpos($html, 'to continue') !== false
+        && strpos($html, 'alert-warning') !== false, 'trial, 4 days left: calm trial banner', $html);
+    [$st, $html] = $words(['paid_until' => $day(20), 'trial' => true, 'trial_until' => $day(20), 'grace_days' => 0, 'readonly_days' => 3]);
+    check($st['status'] === 'active' && $html === '', 'trial, 20 days left: no banner yet');
+    [$st, $html] = $words(['paid_until' => $day(-1), 'trial' => true, 'trial_until' => $day(-1), 'grace_days' => 0, 'readonly_days' => 3]);
+    check($st['status'] === 'read_only' && strpos($html, 'Your free trial has ended') !== false && strpos($html, 'Payment overdue') === false, 'trial ended: read-only, trial wording', $html);
+    [$st, $html] = $words(['paid_until' => $day(-5), 'trial' => true, 'trial_until' => $day(-5), 'grace_days' => 0, 'readonly_days' => 3]);
+    check($st['status'] === 'suspended' && $html === '' && strpos(rh_licence_refusal_message($st), 'your free trial has ended') !== false, 'trial ended long ago: suspended, refusal says so');
+    [$st, $html] = $words(['paid_until' => $day(-3), 'trial' => false, 'trial_until' => $day(-3)]);
+    check($st['status'] === 'grace' && $st['trial'] === false && strpos($html, 'Payment overdue') !== false, 'converted trial (trial false): normal overdue wording', $html);
+    // the stub panel answers with a trial: stored and read back with its fields
+    rh_licence_store_write($pdo, 'last_issued_at', '0');
+    $serve(mk_token(['paid_until' => $day(6), 'trial' => true, 'trial_until' => $day(6), 'grace_days' => 0, 'readonly_days' => 3, 'issued_at' => $NOW - 3], $KP['private']));
+    $r = rh_licence_check_now();
+    $st = rh_licence_status(true);
+    check($r['ok'] && $st['trial'] === true && $st['trial_until'] === $day(6) && $st['status'] === 'active', 'stub panel trial answer: stored, trial fields kept', json_encode([$r, $st['trial'] ?? null]));
     check(strpos(rh_licence_refusal_message(['status' => 'read_only']), 'Not saved') === 0, 'read-only refusal says it was not saved');
 check(rh_licence_refusal_message(['status' => 'suspended', 'contact' => 'ProManaged']) === 'Your system is paused because the subscription payment is overdue. Your data is safe. Please contact ProManaged to switch it back on.', 'suspended refusal is the short friendly message');
 

@@ -284,13 +284,42 @@ if (!function_exists('rh_licence_guard_request')) {
         }
     }
 
+    /** A free trial (verified answer from the panel, BILLING.md Part 3): the wording says "free trial" instead of "payment overdue". */
+    function rh_licence_is_trial(array $st): bool
+    {
+        return !empty($st['trial']) && is_string($st['trial_until'] ?? null) && ($st['trial_until'] ?? '') !== '';
+    }
+
+    /** Days from today (hotel time) to the trial's last day: 0 = the last day, negative = ended. Null when unknown. */
+    function rh_licence_trial_days_left(array $st): ?int
+    {
+        if (!rh_licence_is_trial($st)) {
+            return null;
+        }
+        try {
+            $a = new DateTimeImmutable(date('Y-m-d'));
+            $b = new DateTimeImmutable((string)$st['trial_until']);
+            return (int)$a->diff($b)->format('%r%a');
+        } catch (Throwable $e) {
+            return null;
+        }
+    }
+
+    /** "contact ProManaged to continue" / "contact your system provider to continue". */
+    function rh_licence_trial_contact_words(array $st): string
+    {
+        $c = trim((string)($st['contact'] ?? ''));
+        return 'contact ' . ($c !== '' ? $c : 'your system provider') . ' to continue';
+    }
+
     function rh_licence_refusal_message(array $st): string
     {
         $who = rh_licence_contact_words($st);
+        $why = rh_licence_is_trial($st) ? 'your free trial has ended' : 'the subscription payment is overdue';
         if (($st['status'] ?? '') === 'suspended') {
-            return 'Your system is paused because the subscription payment is overdue. Your data is safe. ' . rtrim($who, '.') . ' to switch it back on.';
+            return 'Your system is paused because ' . $why . '. Your data is safe. ' . rtrim($who, '.') . ' to switch it back on.';
         }
-        return 'Not saved: the system is in view-only mode because the subscription payment is overdue. You can still look things up, check guests out and take payments. ' . $who;
+        return 'Not saved: the system is in view-only mode because ' . $why . '. You can still look things up, check guests out and take payments. ' . $who;
     }
 
     /** Plain banner text for grace / read_only, or '' when none is needed. */
@@ -300,20 +329,30 @@ if (!function_exists('rh_licence_guard_request')) {
         $who = rh_licence_contact_words($st);
         $d = (array)($st['dates'] ?? []);
         $dated = ($st['source'] ?? '') === 'server' || ($st['source'] ?? '') === 'schedule';
+        // A free trial: "Free trial ..." in its last 7 days, "Your free trial has ended" instead of "Payment overdue" after it.
+        $trial = rh_licence_is_trial($st) && ($st['reason'] ?? 'ok') === 'ok';
+        $lead = $trial ? 'Your free trial has ended' : 'Payment overdue';
+        if ($status === 'active') {
+            $n = $trial ? rh_licence_trial_days_left($st) : null;
+            if ($n === null || $n < 0 || $n > 7) {
+                return '';
+            }
+            return 'Free trial: ' . ($n === 0 ? 'last day' : $n . ' day' . ($n === 1 ? '' : 's') . ' left') . ' — ' . rh_licence_trial_contact_words($st) . '.';
+        }
         if ($status === 'grace') {
             if (($st['reason'] ?? 'ok') !== 'ok') {
                 return (string)($st['message'] ?? '');
             }
             if ($dated && !empty($d['read_only_from'])) {
                 $n = rh_licence_days_until($d['read_only_from']);
-                return 'Payment overdue — the system will become read-only on ' . rh_licence_date_words($d['read_only_from'])
+                return $lead . ' — the system will become read-only on ' . rh_licence_date_words($d['read_only_from'])
                     . ' (' . $n . ' day' . ($n === 1 ? '' : 's') . ' left). ' . $who;
             }
-            return 'Payment overdue — the system will become read-only soon. ' . $who;
+            return $lead . ' — the system will become read-only soon. ' . $who;
         }
         if ($status === 'read_only') {
             $tail = ($dated && !empty($d['suspended_from'])) ? ' It will lock completely on ' . rh_licence_date_words($d['suspended_from']) . '.' : '';
-            return 'Payment overdue — the system is read-only. You can view records, check guests out, record payments and export data.' . $tail . ' ' . $who;
+            return $lead . ' — the system is read-only. You can view records, check guests out, record payments and export data.' . $tail . ' ' . $who;
         }
         return '';
     }
@@ -423,9 +462,10 @@ if (!function_exists('rh_licence_guard_request')) {
             . '<main style="max-width:520px;margin:10vh auto;padding:0 16px;">'
             . '<div style="background:#fff;border-radius:14px;padding:30px 26px;box-shadow:0 8px 28px rgba(0,0,0,.10);text-align:center;">'
             . '<h1 style="font-size:1.4rem;margin:0 0 12px;color:#2b2722;">' . $h($title) . ' is paused</h1>'
-            . '<p style="line-height:1.6;margin:0 0 12px;">The subscription payment is overdue, so the staff system is paused for now.</p>'
+            . '<p style="line-height:1.6;margin:0 0 12px;">' . (rh_licence_is_trial($st) ? 'Your free trial has ended' : 'The subscription payment is overdue') . ', so the staff system is paused for now.</p>'
             . '<p style="line-height:1.6;margin:0 0 12px;"><strong>Your data is safe</strong> and your website is still open for guests.</p>'
-            . '<p style="line-height:1.6;margin:0 0 20px;">' . $h(rtrim(rh_licence_contact_words($st), '.')) . ' to switch it back on. It comes back on by itself once the payment is recorded.</p>'
+            . '<p style="line-height:1.6;margin:0 0 20px;">' . $h(rtrim(rh_licence_contact_words($st), '.')) . ' to switch it back on. It comes back on by itself once '
+            . (rh_licence_is_trial($st) ? 'your subscription is set up and paid' : 'the payment is recorded') . '.</p>'
             . '<p style="margin:0;display:flex;gap:10px;flex-wrap:wrap;justify-content:center;">';
         if ($isAdmin) {
             echo '<a href="' . $prefix . 'licence.php" style="' . $btn . 'background:#7E684B;color:#fff;">Licence details</a>'

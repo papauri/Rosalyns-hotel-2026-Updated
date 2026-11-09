@@ -88,6 +88,13 @@ $statusLabels = [
     'read_only'    => ['Read-only', 'alert', 'Staff can view records, check guests out, record payments and export data. Nothing else can be changed.'],
     'suspended'    => ['Locked', 'alert', 'The staff system is locked. Only this page, sign-in and sign-out, backups and data exports work.'],
 ];
+if (!empty($st['trial'])) {
+    // a free trial (owner 2026-11-09): trial words instead of payment words
+    $statusLabels['active'] = ['Free trial', 'ok', 'Everything works during the free trial, until ' . rh_licence_date_words((string)$st['trial_until']) . '.'];
+    $statusLabels['grace'] = ['Free trial ended', 'warn', 'The free trial has ended. Everything still works for now; contact us to continue.'];
+    $statusLabels['read_only'][0] = 'Free trial ended (read-only)';
+    $statusLabels['suspended'][0] = 'Free trial ended (locked)';
+}
 [$label, $pill, $meaning] = $statusLabels[$st['status']] ?? ['Unknown', 'muted', ''];
 $d = (array)$st['dates'];
 $payload = is_array($st['payload']) ? $st['payload'] : [];
