@@ -1757,7 +1757,10 @@ function rh_dec_f_tax(PDO $db, array $ctx): array
             }
             continue;
         }
-        if ($rowRate > 0 && abs($rowRate - $rate) > 0.001) {
+        // Rate as the payment screens show it (rh_payment_vat_lines: levy taken out of the base, 2026-11-09), so a room
+        // row stored at the levy-diluted rate is not listed as off-rate while Payments shows it at today's rate
+        $shownRate = $splitOk && function_exists('rh_payment_vat_lines') ? (float)rh_payment_vat_lines($db, $r, true)['rate'] : $rowRate;
+        if ($shownRate > 0 && abs($shownRate - $rate) > 0.001) {
             $nRate++;
         }
         // No rate stored on the row: its VAT cannot be checked against a rate, so it is not questioned (never the whole VAT)
