@@ -11469,6 +11469,8 @@ function deductStockForMenuItem(int $menuItemId, string $menuType, float $portio
  * Ensure the batch ledger has enough active quantity to cover a deduction.
  *
  * Legacy/manual flows can leave ingredient totals ahead of active batches.
+ * Counts every active batch with stock, including one past its expiry date that the expiry
+ * sweep has not written off yet (it is still on the shelf and FIFO takes it first).
  * This helper mints a reconciliation batch for the uncovered gap WITHOUT
  * changing ingredient.current_quantity, so FIFO deductions stay batch-consistent.
  *
@@ -11488,7 +11490,7 @@ function ensureStockBatchCoverageForDeduction(int $ingredientId, float $required
             $pdo->beginTransaction();
         }
 
-        $batchSel = $pdo->prepare("\n            SELECT quantity_remaining\n            FROM stock_batches\n            WHERE ingredient_id = ?\n              AND status = 'active'\n              AND quantity_remaining > 0.0001\n              AND (expiry_date IS NULL OR expiry_date >= CURDATE())\n            FOR UPDATE\n        ");
+        $batchSel = $pdo->prepare("\n            SELECT quantity_remaining\n            FROM stock_batches\n            WHERE ingredient_id = ?\n              AND status = 'active'\n              AND quantity_remaining > 0.0001\n            FOR UPDATE\n        ");
         $batchSel->execute([$ingredientId]);
 
         $available = 0.0;
@@ -11533,8 +11535,8 @@ function ensureStockBatchCoverageForDeduction(int $ingredientId, float $required
 /**
  * Deduct a quantity from a single ingredient's batches using FIFO.
  *
- * - Locks active, non-expired batches with SELECT ... FOR UPDATE to prevent
- *   races between concurrent orders.
+ * - Locks active batches (including expired-but-not-yet-swept ones) with
+ *   SELECT ... FOR UPDATE to prevent races between concurrent orders.
  * - Walks oldest expiry first (NULL expiry = treated as last).
  * - If all batches exhausted, allows current_quantity to go negative (kitchen
  *   reality) but flags via stock_adjustments. UI surfaces this as a warning.
@@ -11568,14 +11570,16 @@ function deductStockBatchFIFO(int $ingredientId, float $qty, string $sourceType,
         }
         $costAtTime = (float)$costRow['cost_per_unit'];
 
-        // Lock active batches with stock remaining, oldest expiry first
+        // Lock active batches with stock remaining, oldest expiry first. A batch past its expiry date
+        // stays 'active' until runStockExpiryCheck() sweeps it, so it is used first here: units sold
+        // before the sweep leave that batch, and the sweep writes off only what is really left.
+        // (Skipping it made those units leave stock twice: once by the sale, again by the sweep.)
         $batchStmt = $pdo->prepare("
             SELECT id, quantity_remaining, cost_per_unit
             FROM stock_batches
             WHERE ingredient_id = ?
               AND status = 'active'
               AND quantity_remaining > 0.0001
-              AND (expiry_date IS NULL OR expiry_date >= CURDATE())
             ORDER BY (expiry_date IS NULL) ASC, expiry_date ASC, id ASC
             FOR UPDATE
         ");

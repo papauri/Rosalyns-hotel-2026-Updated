@@ -47,6 +47,7 @@ if (!function_exists('rh_auto_defaults')) {
             'automated_email_job_unpaid_release' => '1',
             'automated_backup_enabled'          => '1',
             'automated_job_recurring_maintenance' => '1',
+            'automated_job_stock_expiry'        => '1',
             'scheduler_last_run'                => '0',
             'scheduler_last_result'             => '',
         ];
@@ -126,6 +127,12 @@ if (!function_exists('rh_auto_defaults')) {
             'recurring_maintenance' => [
                 'label' => 'Recurring maintenance generation', 'fn' => 'rh_job_recurring_maintenance',
                 'toggle' => 'automated_job_recurring_maintenance', 'toggle_default' => '1', 'interval' => 360, 'legacy' => false, 'bcc' => 'global',
+            ],
+            // Not an email: writes off batches past their expiry date soon after midnight instead of
+            // waiting for someone to open Stock Overview / Batches. Wastage keeps the run date (owner 2026-11-10).
+            'stock_expiry_sweep' => [
+                'label' => 'Expired stock write-off', 'fn' => 'rh_job_stock_expiry_sweep',
+                'toggle' => 'automated_job_stock_expiry', 'toggle_default' => '1', 'interval' => 30, 'legacy' => false, 'bcc' => 'global',
             ],
             // Last on purpose: a backup can take a while, so every email job runs first.
             'nightly_backup' => [

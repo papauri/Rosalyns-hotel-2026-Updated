@@ -1093,6 +1093,23 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
         return $res;
     }
 
+    /** Write off batches past their expiry date (runStockExpiryCheck). No email; 'sent' = batches written off. */
+    function rh_job_stock_expiry_sweep(PDO $pdo, array $o = []): array
+    {
+        $res = ['checked' => 1, 'sent' => 0, 'skipped' => 0, 'errors' => []];
+        if (!rh_auto_module_on('stock') || !function_exists('ensureStockTablesExist') || !ensureStockTablesExist()) {
+            $res['skipped'] = 1;
+            return $res;
+        }
+        try {
+            $res['sent'] = (int)runStockExpiryCheck();
+        } catch (Throwable $e) {
+            $res['errors'][] = $e->getMessage();
+            error_log('auto-scheduler stock expiry: ' . $e->getMessage());
+        }
+        return $res;
+    }
+
     /* ── sample sends ("Send test to me" on Automated Emails) ─ */
 
     /** @return array<string,string> template/job key => label */
