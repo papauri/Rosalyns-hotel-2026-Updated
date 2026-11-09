@@ -1220,7 +1220,7 @@ function rh_ai_pv_send_invoice(PDO $db, array $user, array $a): array
         return ['error' => 'This booking has no valid guest email.'];
     }
     $rows = [['label' => 'Booking', 'new' => (string)$b['booking_reference']], ['label' => 'Email', 'new' => 'Invoice'], ['label' => 'To', 'new' => rh_ai_mask_email((string)$b['guest_email'])]];
-    $card = rh_ai_card_base('Send invoice', 'Emails the booking\'s invoice, the same as Send invoice on Bookings. Copies go to the invoice recipients set in Email Settings.', $rows, 'Send invoice');
+    $card = rh_ai_card_base('Send invoice', 'Emails the booking\'s invoice, the same as Send invoice on Bookings. The hotel gets hidden copies at the addresses under "Hotel copies of invoices, statements and credit notes" in ' . rh_ai_settings_screen() . ' > Email Configuration; the guest does not see them.', $rows, 'Send invoice');
     return ['card' => $card, 'steps' => [rh_ai_step('bookings.php', [['action', 'send_invoice_email'], ['booking_id', (string)(int)$b['id']]])], 'fp' => [], 'facts' => rh_ai_bk_facts($b)];
 }
 
