@@ -411,8 +411,9 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         throw new RuntimeException('Manual subtraction failed for this ingredient.');
                     }
 
-                    $pdo->prepare('UPDATE stock_adjustments SET reason = ?, cost_at_time = ? WHERE id = ?')
-                        ->execute([$reasonShort, $costAtTime, $adjId]);
+                    // Keep the FIFO batch cost deductStockBatchFIFO recorded; only label the row.
+                    $pdo->prepare('UPDATE stock_adjustments SET reason = ? WHERE id = ?')
+                        ->execute([$reasonShort, $adjId]);
                 }
 
                 $pdo->commit();
@@ -432,6 +433,21 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
                 if ($alert > 3650) throw new RuntimeException('Expiry alert days is too large.');
+                $pdo->beginTransaction();
+                $bSel = $pdo->prepare("SELECT id, status, expiry_date FROM stock_batches WHERE id = ? FOR UPDATE");
+                $bSel->execute([$batchId]);
+                $bRow = $bSel->fetch(PDO::FETCH_ASSOC);
+                if (!$bRow) throw new RuntimeException('Batch not found.');
+                $storedExpiry = substr((string)($bRow['expiry_date'] ?? ''), 0, 10);
+                if ($expiry !== $storedExpiry) {
+                    // Changing the expiry can trigger an automatic expiry write-off: same gate as Discard Batch.
+                    if (!in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
+                        throw new RuntimeException('Changing a batch expiry date is restricted to managers and admins.');
+                    }
+                    if ($expiry !== '' && ($bRow['status'] ?? '') === 'active' && $expiry < date('Y-m-d')) {
+                        throw new RuntimeException('Expiry date cannot be set in the past. To write this stock off, use Discard Batch instead.');
+                    }
+                }
                 $upd = $pdo->prepare("
                     UPDATE stock_batches
                     SET expiry_date = ?, expiry_alert_days = ?, notes = ?, updated_at = NOW()
@@ -443,6 +459,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     $bnotes ?: null,
                     $batchId
                 ]);
+                $pdo->commit();
                 $message = 'Batch updated.';
             } elseif ($action === 'discard_batch') {
                 // Mark a batch as wasted/expired/recalled and remove its remaining qty from stock.

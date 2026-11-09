@@ -480,7 +480,10 @@ function rh_record_item_wastage(PDO $pdo, int $menuItemId, string $menuType, flo
                     }
                     continue;
                 }
-                $wIns->execute([$iid, $q, $cost, round($q * $cost, 4), $reasonShort, $today, $userId]);
+                // Record what actually left as usage ($uq at its own cost), not today's recipe qty,
+                // so every tagged usage row is matched by wastage of the same quantity.
+                $wq = round($uq, 6);
+                $wIns->execute([$iid, $wq, $cost, round($wq * $cost, 4), $reasonShort, $today, $userId]);
                 $wastageId = (int)$pdo->lastInsertId();
                 $markReason = mb_substr('Voided to wastage #' . $wastageId . ' - ' . $reasonText, 0, 255);
                 foreach ($usageIds as $uid) {

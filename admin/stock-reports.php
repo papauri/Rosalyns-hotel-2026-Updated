@@ -299,9 +299,9 @@ try {
         $st = $pdo->prepare("
             SELECT i.id, i.name, i.unit, i.cost_per_unit,
                    COALESCE(SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') AND NOT {$vwSa} THEN ABS(sa.quantity_change) WHEN sa.source_type = 'void_restore' THEN -ABS(sa.quantity_change) ELSE 0 END), 0) AS used,
-                   COALESCE(SUM(CASE WHEN sa.source_type = 'wastage' OR (sa.source_type IN ('pos_order','room_service') AND {$vwSa}) THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS wasted,
+                   COALESCE(SUM(CASE WHEN sa.source_type IN ('wastage','recall') OR (sa.source_type IN ('pos_order','room_service') AND {$vwSa}) THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS wasted,
                    COALESCE(SUM(CASE WHEN sa.source_type = 'expiry' THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS expired,
-                   COALESCE(SUM(CASE WHEN sa.source_type IN ('wastage','expiry') OR (sa.source_type IN ('pos_order','room_service') AND {$vwSa}) THEN ABS(sa.quantity_change) * " . rh_stock_movement_cost_sql('sa', 'i') . " ELSE 0 END), 0) AS loss_value,
+                   COALESCE(SUM(CASE WHEN sa.source_type IN ('wastage','expiry','recall') OR (sa.source_type IN ('pos_order','room_service') AND {$vwSa}) THEN ABS(sa.quantity_change) * " . rh_stock_movement_cost_sql('sa', 'i') . " ELSE 0 END), 0) AS loss_value,
                    COALESCE(SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') AND NOT {$vwSa} THEN ABS(sa.quantity_change) * " . rh_stock_movement_cost_sql('sa', 'i') . " WHEN sa.source_type = 'void_restore' THEN -ABS(sa.quantity_change) * " . rh_stock_movement_cost_sql('sa', 'i') . " ELSE 0 END), 0) AS used_value
             FROM stock_ingredients i
             LEFT JOIN stock_adjustments sa ON sa.ingredient_id = i.id AND DATE(sa.created_at) BETWEEN ? AND ?
@@ -573,7 +573,7 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
             'Ingredients in yield analysis' => 'Ingredients that were used, wasted or expired between the From and To dates.',
             'Overall yield' => 'Value used as a percent of the value of everything that left stock (used plus wasted plus expired), each valued at the cost recorded when it happened, in the date range. Worked out by value so kilograms, litres and pieces are never added together. Higher is better. Shows a dash (–) when nothing was used or lost.',
             'At-risk ingredients' => 'Ingredients whose own yield is below 85 percent in the date range.',
-            'Loss cost' => 'Cost of stock wasted or expired in the date range, at the cost recorded when it happened.',
+            'Loss cost' => 'Cost of stock wasted, recalled or expired in the date range, at the cost recorded when it happened.',
             'Adjustment entries' => 'Every stock movement logged between the From and To dates: sales, deliveries, wastage, counts and hand changes.',
             'Increase events' => 'Movements in the date range that added stock.',
             'Decrease events' => 'Movements in the date range that took stock away.',
@@ -696,10 +696,10 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                         <tr>
                             <th>Ingredient</th>
                             <th class="stock-table__num-head">Used <i class="help" aria-label="About used" data-tip="Quantity used by orders in the date range, in the ingredient&#x27;s own unit.">?</i></th>
-                            <th class="stock-table__num-head">Wasted <i class="help" aria-label="About wasted" data-tip="Quantity recorded as wasted in the date range, including orders cancelled as wasted.">?</i></th>
+                            <th class="stock-table__num-head">Wasted <i class="help" aria-label="About wasted" data-tip="Quantity recorded as wasted in the date range, including orders cancelled as wasted and recalled batches.">?</i></th>
                             <th class="stock-table__num-head">Expired <i class="help" aria-label="About expired" data-tip="Quantity written off because it passed its expiry date in the date range.">?</i></th>
                             <th class="stock-table__num-head">Yield % <i class="help" aria-label="About yield percent" data-tip="Used divided by used plus wasted plus expired. The badge changes at 95 percent and at 85 percent: below 85 needs attention.">?</i></th>
-                            <th class="stock-table__num-head">Loss cost <i class="help" aria-label="About loss cost" data-tip="What the wasted and expired quantity cost, at the cost recorded when it happened. The list is ranked by this.">?</i></th>
+                            <th class="stock-table__num-head">Loss cost <i class="help" aria-label="About loss cost" data-tip="What the wasted (including recalled) and expired quantity cost, at the cost recorded when it happened. The list is ranked by this.">?</i></th>
                         </tr>
                     </thead>
                     <tbody>
