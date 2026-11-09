@@ -295,7 +295,8 @@ function rh_ai_money_booking_text(PDO $db, array $res, string $ask, int $id): st
         default:
             $head = '**Paid so far: ' . $f($paid) . '** of ' . $f($total) . '. ' . ($owed <= BALANCE_TOLERANCE ? 'Nothing is owed.' : 'Still to pay: ' . $f($owed) . '.');
     }
-    return $head . "\n\n" . rh_ai_booking_line($res) . ($lastLine !== '' ? "\n" . $lastLine : '') . "\n\nThe booking's own bill, the same figures as the booking screen.";
+    $rate = rh_ai_booked_rate_text($res); // the rate it was booked at × nights, never today's price (owner 2026-11-09)
+    return $head . "\n\n" . rh_ai_booking_line($res) . ($rate !== '' ? "\n" . $rate : '') . ($lastLine !== '' ? "\n" . $lastLine : '') . "\n\nThe booking's own bill, the same figures as the booking screen.";
 }
 
 /**

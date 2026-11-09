@@ -29,6 +29,7 @@ require_once __DIR__ . '/ai-router.php';   // the learned local router: repeat q
 require_once __DIR__ . '/ai-claims.php';   // every figure, name and date in a model reply checked against this question's data
 require_once __DIR__ . '/ai-menu.php';     // menu & recipe advice from the stock on hand: portions, cost, price, wastage (read only)
 require_once __DIR__ . '/ai-import.php';   // the Import review explained (read only, advice only; offered only while Import is on for this person)
+require_once dirname(__DIR__) . '/booked-rate-change.php'; // booked rate × nights, the same line as the booking screens (owner 2026-11-09)
 
 if (!defined('RH_AI_TOOL_ROWS')) {
     define('RH_AI_TOOL_ROWS', 20);      // row cap per list (plan: default 20 rows)
@@ -694,6 +695,27 @@ function rh_ai_folio(int $bookingId): array
     return ['total' => rh_ai_money((float)($f['grand_total'] ?? 0)), 'paid' => rh_ai_money((float)($f['amount_paid'] ?? 0)), 'balance_due' => rh_ai_money((float)($f['balance_due'] ?? 0))];
 }
 
+/**
+ * The booked-rate line for one bookings row (rh_booked_rate_line(), includes/booked-rate.php), with today's price for
+ * the "keeps the price it was booked at" note. $b may carry rh_pp_* (read with it); otherwise rooms is read. Local
+ * reads only, no model call. 'today' = today's price when the note is set, else null. ok = false when unknown.
+ */
+function rh_ai_booked_rate_line(PDO $db, array $b): array
+{
+    if (!function_exists('rh_booked_rate_line') || !function_exists('rh_booked_stay_split')) {
+        return ['ok' => false];
+    }
+    try {
+        $today = rh_room_today_price_lookup($db, $b)['price'];
+        $line = rh_booked_rate_line($b, $today);
+    } catch (Throwable $e) {
+        error_log('AI booked rate: ' . $e->getMessage());
+        return ['ok' => false];
+    }
+    $line['today'] = (string)($line['today_text'] ?? '') !== '' ? $today : null;
+    return $line;
+}
+
 /** Room type by id or (part of) its name. */
 function rh_ai_find_room_type(PDO $db, string $q): ?array
 {
@@ -823,7 +845,8 @@ function rh_ai_t_get_booking(PDO $db, array $user, array $a): array
     if (empty($a['booking_id']) && empty($a['reference'])) {
         return ['error' => 'Give a booking id or reference.'];
     }
-    $st = $db->prepare("SELECT b.*, r.name AS room_name, r.amenities AS room_amenities, ir.room_number, ir.room_name AS individual_room_name
+    $st = $db->prepare("SELECT b.*, r.name AS room_name, r.amenities AS room_amenities, ir.room_number, ir.room_name AS individual_room_name,
+                               r.price_per_night AS rh_pp_night, r.price_single_occupancy AS rh_pp_single, r.price_double_occupancy AS rh_pp_double, r.price_triple_occupancy AS rh_pp_triple
                         FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
                         WHERE b.deleted_at IS NULL AND " . (!empty($a['booking_id']) ? "b.id = ?" : "b.booking_reference = ?") . " LIMIT 1");
     $st->execute([!empty($a['booking_id']) ? (int)$a['booking_id'] : (string)$a['reference']]);
@@ -841,12 +864,17 @@ function rh_ai_t_get_booking(PDO $db, array $user, array $a): array
         'special_requests' => (string)($b['special_requests'] ?? ''),
         'currency' => rh_ai_currency(),
         'money' => rh_ai_folio((int)$b['id']),
+        // The rate it was booked at × nights, never today's price (owner 2026-11-09); local text, no model call
+        'booked_rate' => rh_ai_booked_rate_fields(rh_ai_booked_rate_line($db, $b)),
         // What the stay includes (packages, rate plan, room extras) and whether any of it is breakfast (owner fault 2026-10-29)
         'included' => rh_ai_booking_inclusions($db, $b),
         'link' => 'booking-details.php?id=' . (int)$b['id'], 'link_label' => 'Open booking',
     ];
     if ($out['special_requests'] === '') {
         unset($out['special_requests']);
+    }
+    if ($out['booked_rate'] === null) {
+        unset($out['booked_rate']);
     }
     return $out;
 }

@@ -6235,6 +6235,53 @@ try {
     bad('History Summary checks threw', get_class($e) . ': ' . $e->getMessage());
 }
 
+// ── Booked rate × nights (owner 2026-11-09): pure, no database. A booking's price is the rate it was booked at × nights,
+//    never today's price; local text, no model call. Fixture: K356,000 × 3 = K1,068,000 booked, today K450,300. ──
+echo "\n-- Booked rate --\n";
+try {
+    require_once __DIR__ . '/../../includes/pricing.php'; // rh_doc_stay_lines (the quotation total)
+    $brPdo = new class extends PDO {
+        public int $q = 0;
+        public function __construct() {}
+        #[\ReturnTypeWillChange]
+        public function prepare($s, $o = []) { $this->q++; throw new RuntimeException('no database in this check'); }
+    };
+    $brB = ['id' => 1, 'status' => 'confirmed', 'number_of_nights' => 3, 'total_amount' => 1068000, 'vat_amount' => 0, 'total_with_vat' => 1068000, 'package_total' => 0,
+        'child_supplement_total' => 0, 'occupancy_type' => 'double', 'room_id' => 4, 'room_combination_id' => null,
+        'rh_pp_night' => 450300, 'rh_pp_single' => null, 'rh_pp_double' => null, 'rh_pp_triple' => null];
+    $brL = rh_ai_booked_rate_line($brPdo, $brB);
+    $brCur = (string)$brL['currency'];
+    $brM = static fn(float $v): string => rh_hist_money($v, $brCur);
+    $brF = rh_ai_booked_rate_fields($brL);
+    check($brPdo->q === 0 && $brL['ok'] && $brL['text'] === $brM(356000) . ' × 3 nights = ' . $brM(1068000) && $brF['per_night'] === 356000.0 && $brF['room_total'] === 1068000.0
+        && $brF['today_price'] === 450300.0 && strpos($brF['today_note'], 'keeps the price it was booked at') !== false,
+        'get_booking booked_rate: the booked rate × nights as text and numbers (the reply check reads numbers), today\'s price only as the "keeps its price" note', json_encode($brF, JSON_UNESCAPED_UNICODE));
+    $brSame = rh_ai_booked_rate_fields(rh_ai_booked_rate_line($brPdo, ['rh_pp_night' => 356000] + $brB));
+    check(!isset($brSame['today_note']) && rh_ai_booked_rate_fields(['ok' => false]) === null, 'booked_rate: no today note when the price is unchanged; nothing when there is no room line');
+    $brRes = ['currency' => $brCur, 'money' => ['total' => 1068000, 'paid' => 500000, 'balance_due' => 568000], 'booked_rate' => $brF];
+    $brT = rh_ai_booking_money_text($brRes);
+    check(strpos($brT, '**Stay booked at:** ' . $brL['text']) !== false && strpos($brT, $brF['today_note']) !== false && strpos($brT, 'Balance due') !== false
+        && strpos(rh_ai_booking_money_text(['booked_rate' => null] + $brRes), 'Stay booked at') === false, 'bill answer: the booked rate × nights line and the today\'s-price note, under Total / Paid / Balance due', $brT);
+    $brRow = rh_ai_booked_rate_row($brB, rh_reprice_at_booked_rate($brB, 4), 4);
+    check($brRow !== null && $brRow['old'] === $brL['text'] && $brRow['new'] === $brM(356000) . ' × 4 nights = ' . $brM(1424000),
+        'extend / change dates card: booked rate × old nights -> booked rate × new nights, never today\'s price', json_encode($brRow, JSON_UNESCAPED_UNICODE));
+    $brClaim = rh_ai_claim_check('Booked at ' . $brL['text'] . '. Today\'s price is ' . $brM(450300) . ' a night; this booking keeps the price it was booked at.',
+        json_encode(['nights' => 3, 'currency' => $brCur, 'booked_rate' => $brF], JSON_UNESCAPED_UNICODE), ['today' => '2026-11-09']);
+    check(!$brClaim['bad'] && !$brClaim['error'], 'reply check accepts a model reply that quotes the booked rate line', json_encode($brClaim['bad']));
+    // Room-service charges on the bill: Total K1,200,000 beside "= K1,068,000" says which is which, and passes the reply check
+    $brX = ['money' => ['total' => 1200000, 'paid' => 500000, 'balance_due' => 700000]] + $brRes;
+    $brXT = rh_ai_booking_money_text($brX);
+    $brXC = rh_ai_claim_check($brXT, json_encode(['nights' => 3] + $brX, JSON_UNESCAPED_UNICODE), ['today' => '2026-11-09']);
+    check(strpos($brXT, 'the room stay only') !== false && strpos($brT, 'the room stay only') === false && !$brXC['bad'] && !rh_ai_claim_consistency($brXT),
+        'bill with other charges: the booked line says it is the room stay only; no contradiction flagged', $brXT . ' ' . json_encode($brXC['bad']));
+    // Quotation card: the stored stay total and the booked line's total are the same figure (children, package, levy)
+    $brQ = ['number_of_nights' => 3, 'total_with_vat' => 1300000, 'total_amount' => 1300000, 'vat_amount' => 0, 'package_total' => 100000, 'child_supplement_total' => 132000, 'tourism_levy_amount' => 15000];
+    $brQL = rh_booked_rate_line($brQ);
+    check($brQL['ok'] && abs((float)$brQL['total'] - (float)rh_doc_stay_lines($brQ)['total']) <= BALANCE_TOLERANCE, 'quotation card: booked rate line total equals the quoted total', json_encode($brQL, JSON_UNESCAPED_UNICODE));
+} catch (Throwable $e) {
+    bad('Booked rate checks threw', get_class($e) . ': ' . $e->getMessage());
+}
+
 rh_ai_set_transport(null);
 if ($origEnv === null) { unset($_ENV['APP_ENCRYPTION_SALT']); } else { $_ENV['APP_ENCRYPTION_SALT'] = $origEnv; }
 $pdo->exec('SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ'); // the READ COMMITTED set at the top is for this test connection only

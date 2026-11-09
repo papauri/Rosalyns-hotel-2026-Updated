@@ -458,8 +458,53 @@ function rh_ai_booking_money_text(array $r): string
     }
     $cur = (string)($r['currency'] ?? '');
     $owed = (float)$m['balance_due'];
+    $rate = rh_ai_booked_rate_text($r);
     return '**Total:** ' . rh_ai_fmt_cur($cur, $m['total']) . ' · **Paid:** ' . rh_ai_fmt_cur($cur, $m['paid']) . ' · **Balance due:** ' . rh_ai_fmt_cur($cur, $owed)
-        . ($owed <= BALANCE_TOLERANCE ? ' (nothing is owed)' : '') . "\n\nThis is the booking's own bill, the same figures as the booking screen.";
+        . ($owed <= BALANCE_TOLERANCE ? ' (nothing is owed)' : '') . ($rate !== '' ? "\n" . $rate : '') . "\n\nThis is the booking's own bill, the same figures as the booking screen.";
+}
+
+/**
+ * PURE. get_booking's booked_rate block from an rh_booked_rate_line() result (+ 'today'): the rate the booking was made
+ * at × nights, never today's price (owner 2026-11-09). Figures are numbers too, because the reply check reads numbers,
+ * not text. Today's price only when it differs from the booked rate. null when there is no room line.
+ */
+function rh_ai_booked_rate_fields(array $line): ?array
+{
+    if (empty($line['ok']) || (string)($line['text'] ?? '') === '') {
+        return null;
+    }
+    $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+    $out = ['text' => (string)$line['text'], 'per_night' => round((float)$line['per_night'], 2), 'nights' => (int)$line['nights'], 'room_total' => round((float)$line['room_total'], 2)];
+    $extra = false;
+    foreach (['child' => 'children', 'package' => 'package'] as $k => $name) {
+        if ((float)($line[$k] ?? 0) > $tol) {
+            $out[$name] = round((float)$line[$k], 2);
+            $extra = true;
+        }
+    }
+    if ($extra) {
+        $out['stay_total'] = round((float)$line['total'], 2);
+    }
+    if ((string)($line['today_text'] ?? '') !== '' && isset($line['today']) && $line['today'] !== null) {
+        $out['today_price'] = round((float)$line['today'], 2);
+        $out['today_note'] = (string)$line['today_text'];
+    }
+    return $out;
+}
+
+/** PURE. "**Stay booked at:** K356,000 × 3 nights = K1,068,000" (+ today's price note) from a get_booking result; '' when none. */
+function rh_ai_booked_rate_text(array $r): string
+{
+    $br = is_array($r['booked_rate'] ?? null) ? $r['booked_rate'] : [];
+    if ((string)($br['text'] ?? '') === '') {
+        return '';
+    }
+    // The bill total can also hold folio charges: say so, so the two figures never read as a contradiction
+    $stay = (float)($br['stay_total'] ?? ($br['room_total'] ?? 0));
+    $bill = isset($r['money']['total']) ? (float)$r['money']['total'] : null;
+    $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+    $part = $bill !== null && abs($bill - $stay) > $tol ? ' (the room stay only; the bill total also counts the other charges on the bill)' : '';
+    return '**Stay booked at:** ' . $br['text'] . $part . ((string)($br['today_note'] ?? '') !== '' ? "\n" . $br['today_note'] : '');
 }
 
 /** What's included / is breakfast included, from the get_booking result. $kitchen: the kitchen hours line ('' = not set). */

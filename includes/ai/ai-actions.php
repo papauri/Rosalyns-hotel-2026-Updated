@@ -415,6 +415,28 @@ function rh_ai_bk_rows(array $b): array
     ];
 }
 
+/**
+ * Card row for a change of nights: the booked rate × nights before and after ("K356,000 × 3 nights = K1,068,000" ->
+ * "K356,000 × 4 nights = K1,424,000"), the same lines as the Bookings screen (owner 2026-11-09). $rp:
+ * rh_reprice_at_booked_rate($b, $nights). Local text only; null when either line is unknown.
+ */
+function rh_ai_booked_rate_row(array $b, array $rp, int $nights): ?array
+{
+    if (!function_exists('rh_booked_rate_change_for_booking') || !function_exists('rh_booked_stay_split')) {
+        return null;
+    }
+    try {
+        $old = rh_booked_rate_line($b);
+        $new = rh_booked_rate_change_for_booking($b, $rp, $nights, ['currency' => (string)$old['currency']]); // same currency as the screen
+    } catch (Throwable $e) {
+        return null;
+    }
+    if (empty($old['ok']) || empty($new['ok'])) {
+        return null;
+    }
+    return ['label' => 'Booked rate × nights', 'old' => (string)$old['text'], 'new' => (string)$new['text']];
+}
+
 function rh_ai_bk_facts(array $b): array
 {
     return ['booking_id' => (int)$b['id'], 'reference' => (string)$b['booking_reference'], 'guest_name' => (string)$b['guest_name'], 'status' => (string)$b['status'],
@@ -609,6 +631,10 @@ function rh_ai_pv_edit_booking(PDO $db, array $user, array $a): array
         $total = round((float)$rp['new_gross'], 2);
         $rows[] = ['label' => 'Nights', 'old' => (string)(int)$b['number_of_nights'], 'new' => (string)$nights];
         $rows[] = ['label' => 'Total', 'old' => rh_ai_fmt_money((float)$rp['old_gross']), 'new' => rh_ai_fmt_money($total), 'tone' => 'money'];
+        $rateRow = rh_ai_booked_rate_row($b, $rp, $nights);
+        if ($rateRow) {
+            $rows[] = $rateRow;
+        }
         $fp = [$total, true];
     }
     $fields = [['action', 'modify_booking'], ['id', (string)(int)$b['id']]];
@@ -659,6 +685,10 @@ function rh_ai_pv_new_checkout(PDO $db, array $user, array $a, bool $correction)
     $rows[] = ['label' => 'Check-out', 'old' => rh_ai_fmt_date($old), 'new' => rh_ai_fmt_date($new)];
     $rows[] = ['label' => 'Nights', 'old' => (string)(int)$b['number_of_nights'], 'new' => (string)$nights];
     $rows[] = ['label' => 'Total', 'old' => rh_ai_fmt_money((float)$rp['old_gross']), 'new' => rh_ai_fmt_money($total), 'tone' => 'money'];
+    $rateRow = rh_ai_booked_rate_row($b, $rp, $nights);
+    if ($rateRow) {
+        $rows[] = $rateRow;
+    }
     if ($correction) {
         $reason = trim((string)($a['reason'] ?? ''));
         $card = rh_ai_card_base('Correct check-out date', 'Administrators and managers: fixes a wrong check-out date. The stay is repriced at the booked nightly rate.', $rows, 'Correct the date',
@@ -1562,6 +1592,10 @@ function rh_ai_pv_send_quotation(PDO $db, array $user, array $a): array
     $total = function_exists('rh_doc_stay_lines') ? round((float)rh_doc_stay_lines($b)['total'], 2) : round((float)($f['total'] ?? 0), 2);
     $rows = rh_ai_bk_rows($b);
     $rows[] = ['label' => 'Quoted total', 'new' => rh_ai_fmt_money($total), 'tone' => 'money'];
+    $quoteRate = function_exists('rh_booked_stay_split') ? rh_booked_rate_line($b) : ['ok' => false]; // owner 2026-11-09: booked rate × nights
+    if (!empty($quoteRate['ok']) && abs((float)$quoteRate['total'] - $total) <= BALANCE_TOLERANCE) {
+        $rows[] = ['label' => 'Booked rate × nights', 'new' => (string)$quoteRate['text']];
+    }
     $rows[] = ['label' => 'Valid for', 'new' => $days . ' day' . ($days === 1 ? '' : 's') . ' (until ' . rh_ai_fmt_date(date('Y-m-d', strtotime('+' . $days . ' days'))) . ')'];
     $rows[] = ['label' => 'To', 'new' => rh_ai_mask_email((string)$b['guest_email'])];
     $opts = array_values(array_unique([3, 7, 14, 30, $days]));
