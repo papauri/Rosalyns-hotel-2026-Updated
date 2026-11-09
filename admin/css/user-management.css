@@ -749,17 +749,18 @@
     padding: 16px 18px;
     border-radius: 14px;
     border: 1px solid rgba(177, 129, 71, 0.18);
-    background: linear-gradient(135deg, rgba(138, 119, 95, 0.08) 0%, rgba(177, 129, 71, 0.14) 100%);
+    background: rgba(177, 129, 71, 0.1);
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 14px;
+    gap: 12px 14px;
 }
 
 .permissions-modal__avatar {
     width: 48px;
     height: 48px;
     border-radius: 50%;
-    background: linear-gradient(135deg, #766550 0%, #6B5F4F 100%);
+    background: #766550;
     color: white;
     display: flex;
     align-items: center;
@@ -784,18 +785,25 @@
 }
 
 .permissions-modal__quick-actions {
-    margin-bottom: 18px;
+    margin-bottom: 8px;
 }
 
 .permissions-modal__quick-actions .btn-select-all,
 .permissions-modal__quick-actions .btn-select-none,
 .permissions-modal__quick-actions .btn-select-defaults {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 36px;
     background: rgba(247, 243, 238, 0.64);
     border-color: rgba(138, 119, 95, 0.22);
     color: #231F1C;
+    font-family: inherit;
 }
 
-.permissions-modal__quick-actions .btn-select-all:hover {
+.permissions-modal__quick-actions .btn-select-all:hover,
+.permissions-modal__quick-actions .btn-select-none:hover,
+.permissions-modal__quick-actions .btn-select-defaults:hover {
     background: rgba(177, 129, 71, 0.14);
     border-color: rgba(177, 129, 71, 0.32);
 }
@@ -825,7 +833,7 @@
     min-height: 220px;
     border-radius: 14px;
     border: 1px dashed rgba(138, 119, 95, 0.24);
-    background: linear-gradient(135deg, rgba(243, 236, 228, 0.64) 0%, rgba(239, 231, 220, 0.56) 100%);
+    background: rgba(243, 236, 228, 0.64);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -846,15 +854,16 @@
     padding: 16px 18px 18px;
     border-radius: 14px;
     border: 1px solid rgba(138, 119, 95, 0.18);
-    background: linear-gradient(135deg, #FDFAF5 0%, #F7F0E8 100%);
-    box-shadow: inset 0 1px 0 rgba(177, 129, 71, 0.12);
+    background: #FDFAF5;
 }
 
 #permissionsModal .perm-category-title {
-    margin-bottom: 14px;
-    padding-bottom: 10px;
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    border-bottom: 0;
     color: #231F1C;
-    border-bottom-color: rgba(138, 119, 95, 0.12);
 }
 
 #permissionsModal .perm-category-title i {
@@ -870,15 +879,17 @@
 }
 
 #permissionsModal .perm-grid {
-    grid-template-columns: repeat(auto-fill, minmax(min(220px, 100%), 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(min(300px, 100%), 1fr));
     gap: 12px;
 }
 
 #permissionsModal .perm-item {
+    position: relative;
     min-height: 78px;
     padding: 14px;
     align-items: flex-start;
     background: rgba(247, 243, 238, 0.56);
+    border-color: rgba(138, 119, 95, 0.16);
 }
 
 #permissionsModal .perm-item:hover {
@@ -888,15 +899,259 @@
 
 #permissionsModal .perm-item.checked {
     background: rgba(177, 129, 71, 0.14);
-    border-color: rgba(177, 129, 71, 0.4);
+    border-color: #8F6A35;
 }
 
 #permissionsModal .perm-icon {
     flex-shrink: 0;
 }
 
+#permissionsModal .perm-info {
+    min-width: 0;
+}
+
 #permissionsModal .perm-desc {
     line-height: 1.45;
+}
+
+/* Summary: live count + plain-English help */
+#permissionsModal .permissions-modal__count {
+    margin-left: auto;
+    padding: 6px 12px;
+    border-radius: 999px;
+    border: 1px solid rgba(138, 119, 95, 0.22);
+    background: #fff;
+    color: #231F1C;
+    font-size: 13px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+#permissionsModal .permissions-modal__count:empty {
+    display: none;
+}
+
+#permissionsModal .permissions-modal__help {
+    margin: 0 0 16px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: #5E554D;
+}
+
+#permissionsModal .permissions-modal__help strong {
+    color: #231F1C;
+}
+
+#permissionsModal .permissions-modal__shortcuts {
+    margin-bottom: 18px;
+}
+
+#permissionsModal .permissions-modal__shortcut-help {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.5;
+    color: #5E554D;
+}
+
+/* Category header: title, n of m on, All on / All off */
+#permissionsModal .perm-category-head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 12px;
+    margin-bottom: 14px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid rgba(138, 119, 95, 0.12);
+}
+
+#permissionsModal .perm-category-count {
+    font-size: 12px;
+    font-weight: 600;
+    color: #5E554D;
+    white-space: nowrap;
+}
+
+#permissionsModal .perm-category-actions {
+    display: flex;
+    gap: 6px;
+}
+
+#permissionsModal .perm-cat-btn {
+    min-height: 32px;
+    padding: 4px 12px;
+    border-radius: 8px;
+    border: 1px solid rgba(138, 119, 95, 0.28);
+    background: #fff;
+    color: #231F1C;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background-color 0.15s, border-color 0.15s;
+}
+
+#permissionsModal .perm-cat-btn:hover {
+    background: rgba(177, 129, 71, 0.14);
+    border-color: rgba(177, 129, 71, 0.4);
+}
+
+#permissionsModal .perm-cat-btn:focus-visible,
+#permissionsModal .permissions-modal__quick-actions button:focus-visible {
+    outline: 2px solid #8F6A35;
+    outline-offset: 2px;
+}
+
+/* Tags on a permission card */
+#permissionsModal .perm-tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-top: 6px;
+}
+
+#permissionsModal .perm-tag {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+#permissionsModal .perm-tag--default {
+    background: rgba(138, 119, 95, 0.12);
+    color: #5E554D;
+}
+
+#permissionsModal .perm-tag--off {
+    background: #fff3cd;
+    color: #856404;
+    border: 1px solid rgba(133, 100, 4, 0.25);
+    cursor: help;
+}
+
+/* The real checkbox stays the control: hidden visually, still focusable */
+#permissionsModal .perm-item input[type="checkbox"] {
+    display: block;
+    position: absolute;
+    top: 50%;
+    right: 24px;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    clip-path: inset(50%);
+    white-space: nowrap;
+    border: 0;
+}
+
+#permissionsModal .perm-item:has(input[type="checkbox"]:focus-visible) {
+    outline: 2px solid #8F6A35;
+    outline-offset: 2px;
+}
+
+/* On/off switch */
+#permissionsModal .perm-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    align-self: center;
+}
+
+#permissionsModal .perm-switch__track {
+    position: relative;
+    box-sizing: border-box;
+    width: 40px;
+    height: 24px;
+    border-radius: 999px;
+    border: 2px solid #8A775F;
+    background: #fff;
+    transition: background-color 0.15s, border-color 0.15s;
+}
+
+#permissionsModal .perm-switch__knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #8A775F;
+    transition: transform 0.15s linear, background-color 0.15s;
+}
+
+#permissionsModal .perm-switch__state {
+    min-width: 24px;
+    font-size: 12px;
+    font-weight: 600;
+    color: #5E554D;
+}
+
+#permissionsModal .perm-item input[type="checkbox"]:checked + .perm-switch .perm-switch__track {
+    background: #8F6A35;
+    border-color: #8F6A35;
+}
+
+#permissionsModal .perm-item input[type="checkbox"]:checked + .perm-switch .perm-switch__knob {
+    transform: translateX(16px);
+    background: #fff;
+}
+
+#permissionsModal .perm-item input[type="checkbox"]:checked + .perm-switch .perm-switch__state {
+    color: #231F1C;
+}
+
+#permissionsModal .perm-item input[type="checkbox"]:focus-visible + .perm-switch .perm-switch__track {
+    outline: 2px solid #8F6A35;
+    outline-offset: 2px;
+}
+
+/* Save button: flat brand colour (no gradient) */
+#permissionsModal .btn-save-perms {
+    background: #8F6A35;
+}
+
+#permissionsModal .btn-save-perms:hover {
+    background: #7a5a2b;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #permissionsModal .perm-switch__track,
+    #permissionsModal .perm-switch__knob,
+    #permissionsModal .perm-cat-btn {
+        transition: none;
+    }
+}
+
+/* Tablets and phones: 44px touch targets */
+@media (max-width: 1024px) {
+    #permissionsModal .perm-cat-btn,
+    #permissionsModal .permissions-modal__quick-actions button {
+        min-height: 44px;
+    }
+}
+
+@media (max-width: 480px) {
+    #permissionsModal .perm-category-title {
+        flex-basis: 100%;
+    }
+
+    #permissionsModal .perm-category-actions {
+        margin-left: auto;
+    }
+
+    #permissionsModal .permissions-modal__quick-actions button {
+        flex: 1 1 auto;
+        justify-content: center;
+    }
+
+    #permissionsModal .permissions-modal__count {
+        margin-left: 0;
+    }
 }
 
 @media (min-width: 1024px) {

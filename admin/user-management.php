@@ -690,18 +690,30 @@ $nav_categories = getNavCategories();
                             <div class="permissions-modal__summary-name" id="perm-user-name"></div>
                             <div id="perm-user-role-badge" class="permissions-modal__role-badge"></div>
                         </div>
+                        <div class="permissions-modal__count" id="perm-count" aria-live="polite"></div>
                     </div>
 
-                    <div class="quick-actions permissions-modal__quick-actions">
-                        <button type="button" class="btn-select-all" onclick="selectAllPerms(true)">
-                            <i class="fas fa-check-double"></i> Select All
-                        </button>
-                        <button type="button" class="btn-select-none" onclick="selectAllPerms(false)">
-                            <i class="fas fa-times"></i> Deselect All
-                        </button>
-                        <button type="button" class="btn-select-defaults" onclick="selectDefaults()">
-                            <i class="fas fa-undo"></i> Role Defaults
-                        </button>
+                    <p class="permissions-modal__help">
+                        Switch on what this person can open and do. Nothing changes until you click <strong id="perm-help-save">Save Permissions</strong>.
+                        They see the change the next time they open or refresh a page.
+                    </p>
+
+                    <div class="permissions-modal__shortcuts">
+                        <div class="quick-actions permissions-modal__quick-actions">
+                            <button type="button" class="btn-select-all" onclick="selectAllPerms(true)">
+                                <i class="fas fa-check-double" aria-hidden="true"></i> Select All
+                            </button>
+                            <button type="button" class="btn-select-none" onclick="selectAllPerms(false)">
+                                <i class="fas fa-times" aria-hidden="true"></i> Deselect All
+                            </button>
+                            <button type="button" class="btn-select-defaults" onclick="selectDefaults()">
+                                <i class="fas fa-undo" aria-hidden="true"></i> Role Defaults
+                            </button>
+                        </div>
+                        <p class="permissions-modal__shortcut-help">
+                            Select All and Deselect All change every permission below.
+                            <span id="perm-defaults-hint">Role Defaults switches on exactly what this role gets by default.</span>
+                        </p>
                     </div>
 
                     <div class="permissions-modal__feedback" id="permissions-modal-feedback" hidden></div>
@@ -1124,20 +1136,27 @@ const permissionData = <?php echo json_encode([
 function openPermissionsModal(userData, sendInviteAfter) {
     const container = document.getElementById('perm-categories-container');
 
+    const saveLabel = sendInviteAfter ? 'Save & send invitation' : 'Save Permissions';
     document.getElementById('perm-send-invite').value = sendInviteAfter ? '1' : '0';
-    document.getElementById('perm-save-label').textContent = sendInviteAfter ? 'Save & send invitation' : 'Save Permissions';
+    document.getElementById('perm-save-label').textContent = saveLabel;
+    document.getElementById('perm-help-save').textContent = saveLabel;
 
     document.getElementById('perm-user-id').value = userData.id;
     document.getElementById('perm-user-name').textContent = userData.full_name;
-    document.getElementById('perm-user-avatar').textContent = userData.full_name.charAt(0).toUpperCase();
+    document.getElementById('perm-user-avatar').textContent = String(userData.full_name || '').charAt(0).toUpperCase();
+    document.getElementById('perm-count').textContent = '';
     setPermissionsModalFeedback('');
-    container.innerHTML = '<div class="permissions-modal__loading"><i class="fas fa-spinner fa-spin"></i><span>Loading permissions...</span></div>';
+    container.innerHTML = '<div class="permissions-modal__loading"><i class="fas fa-spinner fa-spin" aria-hidden="true"></i><span>Loading permissions...</span></div>';
 
     // Create role badge
     const role = userData.role;
     const roleData = permissionData.roles[role] || {};
-    const roleBadge = `<span class="role-badge ${role}"><i class="fas ${roleData.icon || 'fa-user'}"></i> ${roleData.label || role}</span>`;
+    const roleLabel = roleData.label || role || '';
+    const roleBadge = `<span class="role-badge ${permEsc(role)}"><i class="fas ${permEsc(roleData.icon || 'fa-user')}" aria-hidden="true"></i> ${permEsc(roleLabel)}</span>`;
     document.getElementById('perm-user-role-badge').innerHTML = roleBadge;
+    document.getElementById('perm-defaults-hint').textContent = getDefaultPermissionsForRole(role).length
+        ? 'Role Defaults switches on exactly what the ' + roleLabel + ' role gets by default.'
+        : 'The ' + roleLabel + ' role has no defaults, so Role Defaults switches everything off.';
     openModal('permissionsModal');
 
     // Fetch permissions for this user
@@ -1159,6 +1178,16 @@ function openPermissionsModal(userData, sendInviteAfter) {
     });
 }
 
+// Escape any text placed into the permissions modal via innerHTML or an attribute.
+function permEsc(value) {
+    return String(value == null ? '' : value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+
 function setPermissionsModalFeedback(message) {
     const feedback = document.getElementById('permissions-modal-feedback');
 
@@ -1171,7 +1200,7 @@ function setPermissionsModalFeedback(message) {
 
     feedback.hidden = false;
     feedback.className = 'permissions-modal__feedback permissions-modal__feedback--error';
-    feedback.innerHTML = `<i class="fas fa-circle-exclamation"></i><span>${message}</span>`;
+    feedback.innerHTML = `<i class="fas fa-circle-exclamation" aria-hidden="true"></i><span>${permEsc(message)}</span>`;
 }
 
 // Populate permissions form from data
@@ -1186,11 +1215,19 @@ function populatePermissionsForm(permissions, role) {
 
         const categoryHtml = document.createElement('div');
         categoryHtml.className = 'perm-category';
+        const catLabel = permEsc(catName);
 
         let categoryContent = `
-            <h4 class="perm-category-title">
-                <i class="fas ${catInfo.icon}"></i> ${catName}
-            </h4>
+            <div class="perm-category-head">
+                <h4 class="perm-category-title">
+                    <i class="fas ${permEsc(catInfo.icon)}" aria-hidden="true"></i> <span>${catLabel}</span>
+                </h4>
+                <span class="perm-category-count" data-perm-cat-count></span>
+                <div class="perm-category-actions">
+                    <button type="button" class="perm-cat-btn" onclick="setCategoryPerms(this, true)" aria-label="All on: ${catLabel}">All on</button>
+                    <button type="button" class="perm-cat-btn" onclick="setCategoryPerms(this, false)" aria-label="All off: ${catLabel}">All off</button>
+                </div>
+            </div>
             <div class="perm-grid">
         `;
 
@@ -1204,22 +1241,36 @@ function populatePermissionsForm(permissions, role) {
             if (permInfo.module_off && !isChecked) continue;
             renderedInCategory++;
             const isDefault = defaultPerms.includes(permKey);
+            const key = permEsc(permKey);
+
+            let tags = '';
+            if (isDefault) {
+                tags += '<span class="perm-tag perm-tag--default">Role default</span>';
+            }
+            if (permInfo.module_off) {
+                tags += '<span class="perm-tag perm-tag--off" title="This area is switched off for the hotel; untick to remove it">Module off</span>';
+            }
 
             categoryContent += `
-                <label class="perm-item ${isChecked ? 'checked' : ''}" id="perm-label-${permKey}">
-                    <div class="perm-icon">
-                        <i class="fas ${permInfo.icon}"></i>
+                <label class="perm-item ${isChecked ? 'checked' : ''}" id="perm-label-${key}">
+                    <div class="perm-icon" aria-hidden="true">
+                        <i class="fas ${permEsc(permInfo.icon)}"></i>
+                    </div>
+                    <div class="perm-info">
+                        <div class="perm-label">${permEsc(permInfo.label)}</div>
+                        <div class="perm-desc">${permEsc(permInfo.description)}</div>
+                        ${tags ? `<div class="perm-tags">${tags}</div>` : ''}
                     </div>
                     <input type="checkbox"
                            name="permissions[]"
-                           value="${permKey}"
+                           value="${key}"
                            ${isChecked ? 'checked' : ''}
                            onchange="togglePermItem(this)"
                            data-default="${isDefault ? '1' : '0'}">
-                    <div class="perm-info">
-                        <div class="perm-label">${permInfo.label}</div>
-                        <div class="perm-desc">${permInfo.description}</div>
-                    </div>
+                    <span class="perm-switch" aria-hidden="true">
+                        <span class="perm-switch__track"><span class="perm-switch__knob"></span></span>
+                        <span class="perm-switch__state">${isChecked ? 'On' : 'Off'}</span>
+                    </span>
                 </label>
             `;
         }
@@ -1229,6 +1280,8 @@ function populatePermissionsForm(permissions, role) {
         categoryHtml.innerHTML = categoryContent;
         container.appendChild(categoryHtml);
     }
+
+    updatePermCounts();
 }
 
 // Get default permissions for a role
@@ -1236,28 +1289,72 @@ function getDefaultPermissionsForRole(role) {
     return (permissionData.roleDefaults && permissionData.roleDefaults[role]) || [];
 }
 
-// Permission toggle
-function togglePermItem(checkbox) {
+// Only the permission switches, never any other checkbox on the page.
+function getPermCheckboxes(scope) {
+    return (scope || document.getElementById('permissionsForm'))
+        .querySelectorAll('input[type="checkbox"][name="permissions[]"]');
+}
+
+// Refresh one card's look (highlight + On/Off wording) from its checkbox.
+function syncPermItem(checkbox) {
     const label = checkbox.closest('.perm-item');
-    if (checkbox.checked) {
-        label.classList.add('checked');
-    } else {
-        label.classList.remove('checked');
-    }
+    if (!label) return;
+    label.classList.toggle('checked', checkbox.checked);
+    const state = label.querySelector('.perm-switch__state');
+    if (state) state.textContent = checkbox.checked ? 'On' : 'Off';
+}
+
+// "N of M permissions on" in the summary and "n of m on" per category.
+function updatePermCounts() {
+    const form = document.getElementById('permissionsForm');
+    const totalEl = document.getElementById('perm-count');
+    if (!form || !totalEl) return;
+
+    const all = getPermCheckboxes(form);
+    let on = 0;
+    all.forEach(cb => { if (cb.checked) on++; });
+    totalEl.textContent = all.length ? `${on} of ${all.length} permissions on` : '';
+
+    form.querySelectorAll('.perm-category').forEach(cat => {
+        const boxes = getPermCheckboxes(cat);
+        let catOn = 0;
+        boxes.forEach(cb => { if (cb.checked) catOn++; });
+        const countEl = cat.querySelector('[data-perm-cat-count]');
+        if (countEl) countEl.textContent = `${catOn} of ${boxes.length} on`;
+    });
+}
+
+// Permission toggle (single switch)
+function togglePermItem(checkbox) {
+    syncPermItem(checkbox);
+    updatePermCounts();
 }
 
 function selectAllPerms(checked) {
-    document.querySelectorAll('#permissionsForm input[type="checkbox"]').forEach(cb => {
+    getPermCheckboxes().forEach(cb => {
         cb.checked = checked;
-        togglePermItem(cb);
+        syncPermItem(cb);
     });
+    updatePermCounts();
 }
 
 function selectDefaults() {
-    document.querySelectorAll('#permissionsForm input[type="checkbox"]').forEach(cb => {
+    getPermCheckboxes().forEach(cb => {
         cb.checked = cb.dataset.default === '1';
-        togglePermItem(cb);
+        syncPermItem(cb);
     });
+    updatePermCounts();
+}
+
+// "All on" / "All off" for one category
+function setCategoryPerms(button, checked) {
+    const cat = button.closest('.perm-category');
+    if (!cat) return;
+    getPermCheckboxes(cat).forEach(cb => {
+        cb.checked = checked;
+        syncPermItem(cb);
+    });
+    updatePermCounts();
 }
 
 // User filter
