@@ -7,6 +7,7 @@
 
 // Include admin initialization (PHP-only, no HTML output)
 require_once 'admin-init.php';
+require_once __DIR__ . '/../includes/booked-rate.php'; // booked rate × nights in the booking popup
 
 // Get date parameters
 $currentYear  = isset($_GET['year'])  ? intval($_GET['year'])  : date('Y');
@@ -685,6 +686,9 @@ $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
                                                     : 'Pending';
                                                 $totalAmount = number_format(rh_booking_full_total($booking), 2); // full amount incl. VAT & levy
                                                 $currencySymbol = getSetting('currency_symbol');
+                                                // The room rate a night it was BOOKED at × nights (the row's own columns, no query).
+                                                $calRate = rh_booked_rate_line($booking, null, ['currency' => (string)$currencySymbol]);
+                                                $calRateCompact = $calRate['ok'] ? $calRate['compact'] : '';
 
                                                 // Build tooltip data attributes (all properly escaped)
                                                 // Use actual newlines (%0A encoded) for white-space: pre-line to work
@@ -692,7 +696,8 @@ $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
                                                 $roomGuestEsc = htmlspecialchars($roomGuestRaw, ENT_QUOTES, 'UTF-8');
                                                 $tooltipText = $ref . ' - ' . $guestName . ($roomGuestEsc !== '' ? ' (room guest: ' . $roomGuestEsc . ')' : '') . "\n" .
                                                     $individualRoomNumber . ' | ' . $checkIn . ' to ' . $checkOut . ' (' . $nights . ' nights)' . "\n" .
-                                                    'Status: ' . $status . ' | Payment: ' . $paymentStatus;
+                                                    'Status: ' . $status . ' | Payment: ' . $paymentStatus
+                                                    . ($calRateCompact !== '' ? "\n" . 'Booked at: ' . $calRateCompact . ' (rate a night × nights)' : '');
 
                                                 $dataAttrs = [
                                                     'data-booking-ref' => $ref,
@@ -707,6 +712,7 @@ $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
                                                     'data-nights' => $nights,
                                                     'data-payment-status' => $paymentStatus,
                                                     'data-amount' => $currencySymbol . ' ' . $totalAmount,
+                                                    'data-booked-rate' => htmlspecialchars($calRateCompact, ENT_QUOTES, 'UTF-8'),
                                                     'data-booking-id' => intval($booking['id']),
                                                     // CSS-only fallback tooltip (simple text for when JS fails)
                                                     'data-tooltip' => htmlspecialchars($tooltipText, ENT_QUOTES, 'UTF-8')

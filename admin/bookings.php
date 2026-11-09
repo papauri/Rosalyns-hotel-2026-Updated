@@ -22,6 +22,7 @@ require_once '../includes/booking-room-change.php';
 require_once '../includes/finance-sequences.php';
 require_once 'includes/finance-account-sync.php';
 require_once 'includes/account-receipt-send.php';
+require_once __DIR__ . '/../includes/booked-rate-change.php'; // booked rate × nights lines (also loads includes/booked-rate.php)
 $message = '';
 $error = '';
 $currency_symbol = (string)getSetting('currency_symbol', 'MWK');
@@ -115,6 +116,36 @@ function getSignedDateDiffDays(DateTimeInterface $fromDate, DateTimeInterface $t
     $diff = $fromDate->diff($toDate);
     $days = (int)($diff->days ?? 0);
     return ((int)$diff->invert === 1) ? -$days : $days;
+}
+
+/**
+ * Booked-rate lines for a stay changing to $newNights (extend, shorten, change dates, early / late checkout):
+ * current_text "K356,000 × 3 nights = K1,068,000", new_text "K356,000 × 4 nights = K1,424,000" (the same
+ * rh_reprice_at_booked_rate() figure the save writes), delta and a plain delta_text. Read-only.
+ */
+function bookings_stay_rate_preview(array $bk, int $newNights, string $cur): array
+{
+    $newNights = max(1, $newNights);
+    $rp = rh_reprice_at_booked_rate($bk, $newNights);
+    $now = rh_booked_rate_line($bk, null, ['currency' => $cur]);
+    $new = rh_booked_rate_change_for_booking($bk, $rp, $newNights, ['currency' => $cur]);
+    $delta = round((float)$rp['delta'], 2);
+    if ($delta > BALANCE_TOLERANCE) {
+        $deltaText = rh_hist_money($delta, $cur) . ' more than now';
+    } elseif ($delta < -BALANCE_TOLERANCE) {
+        $deltaText = rh_hist_money(abs($delta), $cur) . ' less than now';
+    } else {
+        $deltaText = 'No change to the room total';
+    }
+    return [
+        'ok' => $now['ok'] && $new['ok'],
+        'nights' => $newNights,
+        'current_text' => $now['text'],
+        'new_text' => $new['text'],
+        'new_total' => round((float)$rp['new_gross'], 2),
+        'delta' => $delta,
+        'delta_text' => $deltaText,
+    ];
 }
 
 // Handle booking actions
@@ -1159,6 +1190,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             rh_log_event('bookings', 'info', 'Booking modified', ['booking_id' => $booking_id, 'fields' => array_keys($newValues), 'by' => $user['username'] ?? null]);
 
             $message = 'Booking updated successfully.';
+            if (isset($mbRp)) {
+                $mbLine = rh_booked_rate_change_for_booking($current, $mbRp, (int)$updates['number_of_nights'], ['currency' => $currency_symbol]);
+                if ($mbLine['ok']) {
+                    $message .= ' Room at the booked rate: ' . $mbLine['text'] . '.';
+                }
+            }
 
             // Send guest modification email when meaningful fields changed
             $notifyFields = ['check_in_date', 'check_out_date', 'number_of_guests', 'adult_guests', 'child_guests',
@@ -1552,6 +1589,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // server re-checks in checkout / checkout_settle).
             $assessBal = evaluateCheckoutBalance($pdo, (int)$booking_id, (int)($user['id'] ?? 0), false);
             $assessBalFields = ['balance_due' => $assessBal['balance'], 'can_override' => (bool)$assessBal['can_override']];
+            // The rate this stay was booked at × its booked nights (shown in the checkout confirm / settlement).
+            $assessRate = rh_booked_rate_line($abk, null, ['currency' => $currency_symbol]);
+            $assessBalFields['booked_rate_text'] = $assessRate['ok'] ? $assessRate['text'] : '';
 
             $today_a            = new DateTime('today');
             $checkIn_a          = new DateTime((string)$abk['check_in_date']);
@@ -1605,8 +1645,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $amountPaid_a = (float)($abk['amount_paid'] ?? 0);
             $amountDue_a  = (float)($abk['amount_due'] ?? 0);
+            // Booked rate × the nights actually stayed = the room total after this checkout.
+            $quoteLine = rh_booked_rate_change_for_booking($abk, $quoteRp, $actualNights, ['currency' => $currency_symbol]);
 
             $baseFields = [
+                'new_rate_text'   => $quoteLine['ok'] ? $quoteLine['text'] : '',
                 'actual_nights'   => $actualNights,
                 'sched_nights'    => $schedNights,
                 'price_per_night' => $ppn_a,
@@ -2306,6 +2349,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $booking['total_full'] = rh_booking_full_total($booking); // room + VAT + levy (owner 2026-10-23)
             $booking['total_formatted'] = number_format($booking['total_full'], 2);
             $booking['total_breakdown'] = rh_booking_total_breakdown($booking);
+            // Booked rate × nights, plus today's price note (staff only) when the room price has changed since.
+            $gbdRate = rh_booked_rate_line($booking, rh_room_today_price_lookup($pdo, $booking)['price'], ['currency' => $currency_symbol]);
+            $booking['booked_rate_text'] = $gbdRate['ok'] ? $gbdRate['text'] : '';
+            $booking['booked_rate_today'] = $gbdRate['ok'] ? $gbdRate['today_text'] : '';
             $booking['status_label'] = ucfirst($booking['status']);
             $booking['payment_status_label'] = ucfirst($booking['actual_payment_status'] ?? $booking['payment_status']);
 
@@ -2332,6 +2379,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $opts['currency'] = $currency_symbol;
             header('Content-Type: application/json');
             echo json_encode(['success' => true, 'data' => $opts]);
+            exit;
+        } elseif ($action === 'stay_price_preview') {
+            // Read-only: the booked rate × the new nights for a date change (extend / change checkout / quick
+            // modify), from the same rh_reprice_at_booked_rate() the save uses. Writes nothing.
+            if (!isAjaxRequest()) {
+                throw new Exception('Invalid request');
+            }
+            header('Content-Type: application/json');
+            $spId = (int)($_POST['booking_id'] ?? 0);
+            $spSt = $pdo->prepare("SELECT * FROM bookings WHERE id = ?");
+            $spSt->execute([$spId]);
+            $spBk = $spSt->fetch(PDO::FETCH_ASSOC);
+            if (!$spBk) {
+                echo json_encode(['success' => false, 'message' => 'Booking not found']);
+                exit;
+            }
+            $spInRaw = trim((string)($_POST['new_check_in'] ?? ''));
+            $spOutRaw = trim((string)($_POST['new_check_out'] ?? ''));
+            $spIn = DateTime::createFromFormat('!Y-m-d', $spInRaw !== '' ? $spInRaw : (string)$spBk['check_in_date']);
+            $spOut = DateTime::createFromFormat('!Y-m-d', $spOutRaw);
+            if (!$spIn || !$spOut || $spOut->format('Y-m-d') !== $spOutRaw) {
+                echo json_encode(['success' => false, 'message' => 'Pick a valid check-out date']);
+                exit;
+            }
+            $spNights = (int)$spIn->diff($spOut)->days;
+            if ($spOut <= $spIn || $spNights < 1) {
+                echo json_encode(['success' => false, 'message' => 'Check-out must be after check-in']);
+                exit;
+            }
+            echo json_encode(['success' => true] + bookings_stay_rate_preview($spBk, $spNights, $currency_symbol));
             exit;
         } elseif ($action === 'extend_stay') {
             // Extend the checkout date for a checked-in booking
@@ -2443,10 +2520,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 "Stay extended from {$oldCheckout} to {$new_checkout}. New total: K " . number_format($newTotal, 2)
             );
 
+            $extLine = rh_booked_rate_change_for_booking($bk, $rpExt, $newNights, ['currency' => $currency_symbol]);
             header('Content-Type: application/json');
             echo json_encode([
                 'success'      => true,
-                'message'      => 'Stay extended successfully to ' . date('M j, Y', strtotime($new_checkout)),
+                'message'      => 'Stay extended successfully to ' . date('M j, Y', strtotime($new_checkout))
+                    . ($extLine['ok'] ? '. Room at the booked rate: ' . $extLine['text'] . '.' : ''),
                 'new_checkout' => $new_checkout,
                 'new_nights'   => $newNights,
                 'new_total'    => number_format($newTotal, 2)
@@ -2543,10 +2622,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'by'           => $user['username'] ?? null,
             ]);
 
+            $acdLine = rh_booked_rate_change_for_booking($acd_locked, $rpAcd, $newNights_acd, ['currency' => $currency_symbol]);
             header('Content-Type: application/json');
             echo json_encode([
                 'success'      => true,
-                'message'      => 'Checkout date updated to ' . date('M j, Y', strtotime($new_checkout)) . ". ({$newNights_acd} nights, total recalculated.)",
+                'message'      => 'Checkout date updated to ' . date('M j, Y', strtotime($new_checkout)) . ". ({$newNights_acd} nights, total recalculated"
+                    . ($acdLine['ok'] ? ' at the booked rate: ' . $acdLine['text'] : '') . '.)',
                 'new_checkout' => $new_checkout,
                 'new_nights'   => $newNights_acd,
                 'new_total'    => number_format($totalWithVat_acd, 2),
@@ -3651,6 +3732,10 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                         <td class="col-optional-lg" data-label="Guests"><?php echo $booking['number_of_guests']; ?></td>
                                         <td data-label="Total">
                                             <strong><?php echo htmlspecialchars($currency_symbol); ?> <?php echo number_format(rh_booking_full_total($booking), 2); ?></strong><?php echo rh_booking_total_info_btn($booking); ?>
+                                            <?php $bk_rate = rh_booked_rate_line($booking, null, ['currency' => $currency_symbol]); // the row's own columns, no query ?>
+                                            <?php if ($bk_rate['ok']): ?>
+                                                <br><small class="bk-booked-rate" style="color:#666;white-space:nowrap;" title="<?php echo htmlspecialchars('Booked at ' . $bk_rate['text'] . '. Room rate a night × nights, at the price the booking was made at; today\'s room price does not change it.', ENT_QUOTES); ?>"><?php echo htmlspecialchars($bk_rate['compact'], ENT_QUOTES); ?></small>
+                                            <?php endif; ?>
                                             <span class="rh-phone-sub rh-phone-sub--pill"><span class="badge badge-<?php echo htmlspecialchars($is_deleted_row ? 'cancelled' : $booking['status'], ENT_QUOTES); ?>"><?php echo $is_deleted_row ? 'Deleted' : htmlspecialchars(ucfirst((string)$booking['status'])); ?></span></span>
                                             <?php if ($is_tentative && $booking['tentative_expires_at']): ?>
                                                 <?php if ($expires_soon): ?>
@@ -3769,7 +3854,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                             $can_delete = $_perm_delete && !$bk_inhouse && $bk_paid <= BALANCE_TOLERANCE && $bk_folio <= BALANCE_TOLERANCE;
                                             ?>
                                             <div class="actions-row">
-                                                <button type="button" class="quick-action view" title="View booking summary" aria-label="View booking summary" data-booking-id="<?php echo $bk_id; ?>" data-booking-ref="<?php echo $bk_ref; ?>" data-guest-name="<?php echo htmlspecialchars((string)($booking['guest_name'] ?? ''), ENT_QUOTES); ?>" data-guest-email="<?php echo htmlspecialchars((string)($booking['guest_email'] ?? ''), ENT_QUOTES); ?>" data-guest-phone="<?php echo htmlspecialchars((string)($booking['guest_phone'] ?? ''), ENT_QUOTES); ?>" data-room-name="<?php echo htmlspecialchars((string)($booking['room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-name="<?php echo htmlspecialchars((string)($booking['individual_room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-number="<?php echo htmlspecialchars((string)($booking['individual_room_number'] ?? ''), ENT_QUOTES); ?>" data-check-in-date="<?php echo htmlspecialchars((string)($booking['check_in_date'] ?? ''), ENT_QUOTES); ?>" data-check-out-date="<?php echo htmlspecialchars((string)($booking['check_out_date'] ?? ''), ENT_QUOTES); ?>" data-number-of-nights="<?php echo htmlspecialchars((string)($booking['number_of_nights'] ?? ''), ENT_QUOTES); ?>" data-number-of-guests="<?php echo htmlspecialchars((string)($booking['number_of_guests'] ?? ''), ENT_QUOTES); ?>" data-total-display="<?php echo htmlspecialchars($currency_symbol . ' ' . number_format(rh_booking_full_total($booking), 2), ENT_QUOTES); ?>" data-status-label="<?php echo htmlspecialchars($bk_deleted ? 'Deleted' : ucwords(str_replace('-', ' ', $bk_status)), ENT_QUOTES); ?>" data-payment-status-label="<?php echo htmlspecialchars(ucwords(str_replace('-', ' ', (string)$bk_payment_st)), ENT_QUOTES); ?>" data-created-at-label="<?php echo htmlspecialchars(!empty($booking['created_at']) ? date('M j, Y H:i', strtotime((string)$booking['created_at'])) : '', ENT_QUOTES); ?>" data-special-requests="<?php echo htmlspecialchars((string)($booking['special_requests'] ?? ''), ENT_QUOTES); ?>" onclick="openViewBookingModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, this, typeof event !== 'undefined' ? event : null)">
+                                                <button type="button" class="quick-action view" title="View booking summary" aria-label="View booking summary" data-booking-id="<?php echo $bk_id; ?>" data-booking-ref="<?php echo $bk_ref; ?>" data-guest-name="<?php echo htmlspecialchars((string)($booking['guest_name'] ?? ''), ENT_QUOTES); ?>" data-guest-email="<?php echo htmlspecialchars((string)($booking['guest_email'] ?? ''), ENT_QUOTES); ?>" data-guest-phone="<?php echo htmlspecialchars((string)($booking['guest_phone'] ?? ''), ENT_QUOTES); ?>" data-room-name="<?php echo htmlspecialchars((string)($booking['room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-name="<?php echo htmlspecialchars((string)($booking['individual_room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-number="<?php echo htmlspecialchars((string)($booking['individual_room_number'] ?? ''), ENT_QUOTES); ?>" data-check-in-date="<?php echo htmlspecialchars((string)($booking['check_in_date'] ?? ''), ENT_QUOTES); ?>" data-check-out-date="<?php echo htmlspecialchars((string)($booking['check_out_date'] ?? ''), ENT_QUOTES); ?>" data-number-of-nights="<?php echo htmlspecialchars((string)($booking['number_of_nights'] ?? ''), ENT_QUOTES); ?>" data-number-of-guests="<?php echo htmlspecialchars((string)($booking['number_of_guests'] ?? ''), ENT_QUOTES); ?>" data-total-display="<?php echo htmlspecialchars($currency_symbol . ' ' . number_format(rh_booking_full_total($booking), 2), ENT_QUOTES); ?>" data-booked-rate="<?php echo htmlspecialchars(!empty($bk_rate['ok']) ? $bk_rate['text'] : '', ENT_QUOTES); ?>" data-status-label="<?php echo htmlspecialchars($bk_deleted ? 'Deleted' : ucwords(str_replace('-', ' ', $bk_status)), ENT_QUOTES); ?>" data-payment-status-label="<?php echo htmlspecialchars(ucwords(str_replace('-', ' ', (string)$bk_payment_st)), ENT_QUOTES); ?>" data-created-at-label="<?php echo htmlspecialchars(!empty($booking['created_at']) ? date('M j, Y H:i', strtotime((string)$booking['created_at'])) : '', ENT_QUOTES); ?>" data-special-requests="<?php echo htmlspecialchars((string)($booking['special_requests'] ?? ''), ENT_QUOTES); ?>" onclick="openViewBookingModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, this, typeof event !== 'undefined' ? event : null)">
                                                     <i class="fas fa-circle-info"></i>
                                                     <span class="label">View details</span>
                                                 </button>
@@ -5089,6 +5174,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 };
                 settlement.balance_due = parseFloat(assessResp.balance_due || 0);
                 settlement.can_override = !!assessResp.can_override;
+                settlement.booked_rate_text = String(assessResp.booked_rate_text || '');
             } catch (err) {
                 hideLoadingOverlay();
                 Alert.show(err.message || 'Could not assess checkout', 'error');
@@ -5104,6 +5190,10 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     return;
                 }
                 const coDetails = ['The booking will be marked as checked out.', 'Room status and audit history will be updated.'];
+                if (settlement.booked_rate_text) {
+                    // The rate this stay was booked at x its nights (today's room price does not change it).
+                    coDetails.unshift('Room at the booked rate: ' + settlement.booked_rate_text);
+                }
                 if (owes) {
                     coDetails.unshift('OUTSTANDING BALANCE: ' + fmt(settlement.balance_due) + ' - checking out with this balance will be recorded in the booking timeline.');
                 }
@@ -5132,7 +5222,8 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 // Open the settlement modal
                 window._csBalance = {
                     due: settlement.balance_due || 0,
-                    can: !!settlement.can_override
+                    can: !!settlement.can_override,
+                    newRate: String(settlement.new_rate_text || '')
                 };
                 openCheckoutSettlementModal(id, reference, settlement);
             }
@@ -5170,6 +5261,14 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     '</div>';
             }
 
+            // The rate the stay was BOOKED at (never today's room price) x nights, and the room total after this checkout.
+            const csRateRows = (s.booked_rate_text
+                    ? '<tr><td>Booked at<br><small style="color:#666;">rate a night &times; booked nights</small></td><td>' + escHtml(s.booked_rate_text) + '</td></tr>'
+                    : '<tr><td>Rate per night</td><td>' + fmt(s.price_per_night) + '</td></tr>') +
+                (s.new_rate_text
+                    ? '<tr><td>Room for the nights stayed<br><small style="color:#666;">same booked rate &times; nights stayed</small></td><td>' + escHtml(s.new_rate_text) + '</td></tr>'
+                    : '');
+
             if (s.type === 'charge') {
                 titleEl.innerHTML = '<i class="fas fa-exclamation-triangle" style="color:#ffc107;"></i> Overdue Checkout — Extra Charges';
                 bodyEl.innerHTML =
@@ -5179,7 +5278,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     'Scheduled checkout was <strong>' + escHtml(s.sched_checkout) + '</strong>.</p>' +
                     '<table class="cs-table">' +
                     '<tr><td>Extra nights</td><td><strong>' + s.extra_nights + '</strong></td></tr>' +
-                    '<tr><td>Rate per night</td><td>' + fmt(s.price_per_night) + '</td></tr>' +
+                    csRateRows +
                     '<tr><td>Amount paid so far</td><td>' + fmt(s.amount_paid) + '</td></tr>' +
                     '<tr class="cs-total"><td>Amount to charge</td><td><strong>' + fmt(s.charge_amount) + '</strong></td></tr>' +
                     '</table>';
@@ -5198,7 +5297,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         : '<p style="margin:0 0 10px;">Guest is checking out on or after the booked check-out date (<strong>' + escHtml(s.sched_checkout) + '</strong>), so there are no unused nights.</p>') +
                     '<table class="cs-table">' +
                     '<tr><td>Unused nights</td><td><strong>' + s.unused_nights + '</strong></td></tr>' +
-                    '<tr><td>Rate per night</td><td>' + fmt(s.price_per_night) + '</td></tr>' +
+                    csRateRows +
                     '<tr><td>Amount paid</td><td>' + fmt(s.amount_paid) + '</td></tr>' +
                     '<tr><td>Full refund value</td><td>' + fmt(s.refund_amount) + '</td></tr>' +
                     '<tr class="cs-total"><td>Refundable (capped at paid)</td><td><strong>' + fmt(s.refundable) + '</strong></td></tr>' +
@@ -5387,6 +5486,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             };
             const csDetails = [
                 'Settlement option: ' + (settlementAction === 'skip' ? 'No financial adjustment' : settlementAction),
+                ...(csBal.newRate && settlementAction !== 'skip' ? ['Room for the nights stayed, at the booked rate: ' + csBal.newRate] : []),
                 'This will mark the booking as checked out and update room status.'
             ];
             if (csBal.due > 0.01 && csBal.can) {
@@ -5929,6 +6029,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         <label for="new_checkout" style="font-weight: 600; color: var(--au-success, #10b981);">New Check-out Date:</label>
                         <input type="date" id="new_checkout" name="new_checkout" class="form-control" required style="border-color: var(--au-success, #10b981);">
                         <small style="color: var(--au-muted, #6b7280); margin-top: 4px; display: block;">The booking total will be recalculated based on the new dates.</small>
+                        <div id="extend_rate_preview" class="bk-rate-preview" hidden aria-live="polite" style="background:#f7f3ee;border-radius:6px;padding:10px 12px;margin-top:10px;font-size:13px;line-height:1.6;"></div>
                     </div>
                 </div>
 
@@ -5972,6 +6073,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         <label for="acd_new_checkout" style="font-weight:600; color: var(--au-purple, #8b5cf6);">New checkout date: <span style="color: var(--au-danger, #ef4444);">*</span></label>
                         <input type="date" id="acd_new_checkout" name="new_checkout" class="form-control" required style="border-color: var(--au-purple, #8b5cf6);">
                         <small style="color: var(--au-muted, #6b7280); display:block; margin-top:4px;">Can be in the past (e.g. to correct an overdue record). Total &amp; amount due will be recalculated.</small>
+                        <div id="acd_rate_preview" class="bk-rate-preview" hidden aria-live="polite" style="background:#f7f3ee;border-radius:6px;padding:10px 12px;margin-top:10px;font-size:13px;line-height:1.6;"></div>
                     </div>
                     <div class="form-group">
                         <label for="acd_reason">Reason (required):</label>
@@ -6190,6 +6292,11 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         <div id="view_total" class="detail-value"></div>
                     </div>
                     <div class="detail-item">
+                        <label>Booked at (room rate a night &times; nights):</label>
+                        <div id="view_booked_rate" class="detail-value"></div>
+                        <div id="view_booked_rate_today" style="color:#666;font-size:12px;" hidden></div>
+                    </div>
+                    <div class="detail-item">
                         <label>Status:</label>
                         <div id="view_status" class="detail-value"></div>
                     </div>
@@ -6378,6 +6485,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 number_of_nights: String(dataset.numberOfNights || '').trim(),
                 number_of_guests: String(dataset.numberOfGuests || '').trim(),
                 total_formatted: String(dataset.totalDisplay || '').trim(),
+                booked_rate_text: String(dataset.bookedRate || '').trim(),
                 status_label: String(dataset.statusLabel || '').trim(),
                 payment_status_label: String(dataset.paymentStatusLabel || '').trim(),
                 created_at_formatted: String(dataset.createdAtLabel || '').trim(),
@@ -6413,6 +6521,14 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             (function () {
                 var infoEl = document.getElementById('view_total_info');
                 if (infoEl) infoEl.innerHTML = (window.rhTotalInfoHtml && booking.total_breakdown) ? window.rhTotalInfoHtml(booking.total_breakdown) : '';
+            })();
+            setText('view_booked_rate', booking.booked_rate_text, '—');
+            (function () {
+                var todayEl = document.getElementById('view_booked_rate_today');
+                if (!todayEl) return;
+                var t = String(booking.booked_rate_today || '').trim();
+                todayEl.textContent = t;
+                todayEl.hidden = t === '';
             })();
             setText('view_status', booking.status_label || booking.status, '—');
             setText('view_payment', booking.payment_status_label || booking.payment_status, '—');
@@ -7371,6 +7487,75 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             }
         });
 
+        // ── Booked rate x new nights (read-only quote from the server: the same reprice the save uses) ──
+        // Resolves to the preview object, or null when there is nothing to show; never blocks the action.
+        function bkStayRateQuote(bookingId, checkIn, checkOut) {
+            if (!bookingId || !checkOut) return Promise.resolve(null);
+            const fd = new FormData();
+            fd.append('action', 'stay_price_preview');
+            fd.append('booking_id', bookingId);
+            if (checkIn) fd.append('new_check_in', checkIn);
+            fd.append('new_check_out', checkOut);
+            return postBookingAction(fd, 'Could not work out the new total.', 15000)
+                .then(d => (d && d.ok ? d : null))
+                .catch(() => null);
+        }
+
+        function bkRenderStayRate(el, q) {
+            if (!el) return;
+            el.textContent = '';
+            if (!q) {
+                el.hidden = true;
+                return;
+            }
+            const rows = [
+                ['Booked now: ', q.current_text],
+                ['After the change: ', q.new_text],
+                ['Difference: ', q.delta_text]
+            ];
+            rows.forEach(r => {
+                const line = document.createElement('div');
+                const b = document.createElement('strong');
+                b.textContent = r[0];
+                line.appendChild(b);
+                line.appendChild(document.createTextNode(String(r[1] || '')));
+                el.appendChild(line);
+            });
+            const help = document.createElement('small');
+            help.style.color = '#666';
+            help.textContent = 'Rate a night \u00d7 nights, at the price this booking was made at. Today\'s room price does not change it.';
+            el.appendChild(help);
+            el.hidden = false;
+        }
+
+        function bkStayRateDetails(q) {
+            return q ? ['Room at the booked rate: ' + q.new_text, 'Difference: ' + q.delta_text] : [];
+        }
+
+        function bkRefreshStayRate(previewId, bookingId, checkIn, checkOut) {
+            const el = document.getElementById(previewId);
+            if (!el) return Promise.resolve(null);
+            const key = [bookingId, checkIn || '', checkOut || ''].join('|');
+            el.dataset.quoteKey = key;
+            return bkStayRateQuote(bookingId, checkIn, checkOut).then(q => {
+                if (el.dataset.quoteKey === key) bkRenderStayRate(el, q); // ignore an older answer that arrives late
+                return q;
+            });
+        }
+
+        // Used by the Quick modify modal in a later <script> block (the SPA wraps each block on its own).
+        window.bkStayRateQuote = bkStayRateQuote;
+        window.bkRenderStayRate = bkRenderStayRate;
+        window.bkStayRateDetails = bkStayRateDetails;
+        window.bkRefreshStayRate = bkRefreshStayRate;
+
+        document.getElementById('new_checkout')?.addEventListener('change', function() {
+            bkRefreshStayRate('extend_rate_preview', document.getElementById('extend_booking_id')?.value, '', this.value);
+        });
+        document.getElementById('acd_new_checkout')?.addEventListener('change', function() {
+            bkRefreshStayRate('acd_rate_preview', document.getElementById('acd_booking_id')?.value, '', this.value);
+        });
+
         function openExtendStayModal(bookingId, bookingRef, currentCheckout, guestName) {
             const modal = document.getElementById('extendStayModal');
             setBookingPageModalOpen(modal, true);
@@ -7418,6 +7603,8 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             const newCheckoutInput = document.getElementById('new_checkout');
             newCheckoutInput.min = minDateStr;
             newCheckoutInput.value = defaultStr;
+            bkRenderStayRate(document.getElementById('extend_rate_preview'), null);
+            bkRefreshStayRate('extend_rate_preview', bookingId, '', defaultStr);
         }
 
         function closeExtendStayModal() {
@@ -7436,6 +7623,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             document.getElementById('acd_new_checkout').value = currentCheckout;
             document.getElementById('acd_new_checkout').max = '';
             document.getElementById('acd_reason').value = '';
+            bkRenderStayRate(document.getElementById('acd_rate_preview'), null);
             setBookingPageModalOpen(modal, true);
         }
 
@@ -7464,17 +7652,17 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             const newCheckout = document.getElementById('acd_new_checkout')?.value || '';
             const submitBtn = this.querySelector('button[type="submit"]');
             const form = this;
-            confirmAdminAction({
+            bkStayRateQuote(formData.get('booking_id'), '', newCheckout).then(rateQ => confirmAdminAction({
                     title: 'Confirm checkout date change',
                     message: 'Update checkout date for booking ' + (bookingRef || 'this booking') + '?',
                     details: [
                         'Current: ' + (currentCheckout || '—'),
                         'New: ' + (newCheckout || '—')
-                    ],
+                    ].concat(bkStayRateDetails(rateQ)),
                     confirmText: 'Save Change',
                     icon: 'fa-calendar-pen',
                     tone: 'warning'
-                })
+                }))
                 .then(confirmed => {
                     if (!confirmed) {
                         return;
@@ -7505,17 +7693,17 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             const submitBtn = this.querySelector('button[type="submit"]');
             const form = this;
 
-            confirmAdminAction({
+            bkStayRateQuote(formData.get('booking_id'), '', newCheckout).then(rateQ => confirmAdminAction({
                     title: 'Confirm stay extension',
                     message: 'Extend stay for booking ' + (bookingRef || 'this booking') + '?',
                     details: [
                         'Current checkout: ' + (oldCheckout || '—'),
                         'New checkout: ' + (newCheckout || '—')
-                    ],
+                    ].concat(bkStayRateDetails(rateQ)),
                     confirmText: 'Extend Stay',
                     icon: 'fa-calendar-plus',
                     tone: 'success'
-                })
+                }))
                 .then(confirmed => {
                     if (!confirmed) return;
 
@@ -8188,6 +8376,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                             <input type="date" name="check_out_date" id="mb_check_out" class="form-control" required>
                         </div>
                     </div>
+                    <div id="mb_rate_preview" class="bk-rate-preview" hidden aria-live="polite" style="background:#f7f3ee;border-radius:6px;padding:10px 12px;margin-top:10px;font-size:13px;line-height:1.6;"></div>
                     <div class="grid-3">
                         <div class="form-group">
                             <label>Adults</label>
@@ -8298,6 +8487,9 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     set('mb_guest_country', b.guest_country);
                     set('mb_check_in', b.check_in_date);
                     set('mb_check_out', b.check_out_date);
+                    modal.dataset.loadedIn = b.check_in_date || '';
+                    modal.dataset.loadedOut = b.check_out_date || '';
+                    bkRenderStayRate(document.getElementById('mb_rate_preview'), null);
                     set('mb_adults', b.adult_guests);
                     set('mb_children', b.child_guests);
                     set('mb_guests', b.number_of_guests);
@@ -8311,6 +8503,24 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 })
                 .catch(() => Alert.show('Error loading booking', 'error'));
         }
+
+        // Dates changed in Quick modify: show the booked rate x the new nights (nothing when the dates are unchanged).
+        function mbDatesChanged() {
+            const m = document.getElementById('modifyBookingModal');
+            const ci = document.getElementById('mb_check_in')?.value || '';
+            const co = document.getElementById('mb_check_out')?.value || '';
+            return !!(m && ci && co && (ci !== (m.dataset.loadedIn || '') || co !== (m.dataset.loadedOut || '')));
+        }
+        ['mb_check_in', 'mb_check_out'].forEach(id => {
+            document.getElementById(id)?.addEventListener('change', function() {
+                if (!mbDatesChanged()) {
+                    bkRenderStayRate(document.getElementById('mb_rate_preview'), null);
+                    return;
+                }
+                bkRefreshStayRate('mb_rate_preview', document.getElementById('mb_booking_id')?.value,
+                    document.getElementById('mb_check_in')?.value, document.getElementById('mb_check_out')?.value);
+            });
+        });
 
         function closeModifyBookingModal() {
             const m = document.getElementById('modifyBookingModal');
@@ -8334,6 +8544,9 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 return fallback;
             };
             const ref = document.getElementById('mb_ref').value || ('Booking #' + (fd.get('id') || ''));
+            const mbRateQ = mbDatesChanged()
+                ? await bkStayRateQuote(fd.get('id'), fd.get('check_in_date'), fd.get('check_out_date'))
+                : null;
             const confirmed = await confirmAdminAction({
                 title: 'Confirm booking changes',
                 message: 'Review the main booking values before saving ' + ref + '.',
@@ -8341,7 +8554,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     'Stay: ' + (fd.get('check_in_date') || '-') + ' to ' + (fd.get('check_out_date') || '-'),
                     'Guests: ' + (fd.get('number_of_guests') || '-') + ' total, ' + (fd.get('adult_guests') || '-') + ' adult(s), ' + (fd.get('child_guests') || '0') + ' child guest(s)',
                     'Date changes reprice the stay at the booked rate.'
-                ],
+                ].concat(bkStayRateDetails(mbRateQ)),
                 confirmText: 'Save Changes',
                 icon: 'fa-pen-to-square'
             });

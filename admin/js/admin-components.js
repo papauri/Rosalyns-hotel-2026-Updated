@@ -591,7 +591,8 @@
                 checkOut: trigger.dataset.checkOut || '',
                 nights: trigger.dataset.nights || '0',
                 paymentStatus: trigger.dataset.paymentStatus || 'Pending',
-                amount: trigger.dataset.amount || ''
+                amount: trigger.dataset.amount || '',
+                bookedRate: trigger.dataset.bookedRate || ''
             };
 
             // Create tooltip content element
@@ -629,6 +630,10 @@
                     <span class="tooltip-label">Nights:</span>
                     <span class="tooltip-value highlight">${this.escapeHtml(data.nights)}</span>
                 </div>
+                ${data.bookedRate ? `<div class="tooltip-row" title="The room rate a night when booked × nights; today's room price does not change it">
+                    <span class="tooltip-label">Booked at:</span>
+                    <span class="tooltip-value">${this.escapeHtml(data.bookedRate)}</span>
+                </div>` : ''}
                 <div class="tooltip-footer">
                     <span class="tooltip-payment ${this.slugify(data.paymentStatus)}">${this.escapeHtml(data.paymentStatus)}</span>
                     <span class="tooltip-amount">${this.escapeHtml(data.amount)}</span>

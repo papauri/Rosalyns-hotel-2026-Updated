@@ -108,5 +108,26 @@ foreach (['inclusive', 'exclusive'] as $mode) {
 }
 check(rh_booked_rate_child_gross(0.0, true) === 0.0, 'no children: 0');
 
+// 9. stay changes (includes/booked-rate-change.php): booked rate × NEW nights = the repriced total.
+// $rp is shaped like rh_reprice_at_booked_rate(): its per night INCLUDES the children charge.
+require_once $root . '/includes/booked-rate-change.php';
+$l = rh_booked_rate_change_line(['new_gross' => 1424000, 'new_child_supplement' => 0], 0, 4, ['currency' => 'K']);
+check($l['ok'] && $l['text'] === 'K356,000 × 4 nights = K1,424,000', 'extend 3 -> 4 nights at the booked rate', $l['text']);
+$l = rh_booked_rate_change_line(['new_gross' => 712000, 'new_child_supplement' => 0], 0, 2, ['currency' => 'MWK']);
+check($l['text'] === 'MWK 356,000 × 2 nights = MWK 712,000' && $l['compact'] === 'MWK 356,000 × 2', 'shorten 3 -> 2 nights', $l['text']);
+// Booked: K1,128,000 room (incl. children K60,000) over 3 nights + package K150,000 -> 1 night:
+// 376,000 (room + children a night) × 1 + 150,000 = 526,000; children 60,000 × 1/3 = 20,000.
+$orig = rh_booked_rate_text($split(1128000, 3, 150000), ['currency' => 'K', 'child' => 60000]);
+$l = rh_booked_rate_change_line(['new_gross' => 526000, 'new_child_supplement' => 20000], 150000, 1, ['currency' => 'K']);
+check(abs($l['per_night'] - $orig['per_night']) < 0.001 && abs($l['per_night'] - 356000) < 0.001, 'children + package: the rate stays the booked K356,000');
+check($l['text'] === 'K356,000 × 1 night = K356,000 + children K20,000 + package K150,000 = K526,000', 'children + package + 1 night text', $l['text']);
+check(abs($l['total'] - 526000) < 0.001, 'the line total equals the repriced total');
+$l = rh_booked_rate_change_line(['new_gross' => 1800000, 'new_child_supplement' => 0], 0, 3, ['currency' => 'K', 'status' => 'cancelled']);
+check($l['text'] === 'K600,000 × 3 nights = K1,800,000' && $l['cancelled'], 'joined rooms priced as one pair; cancelled flag carried', $l['text']);
+$l = rh_booked_rate_change_line([], 0, 2, ['currency' => 'K']);
+check(!$l['ok'] && $l['text'] === '', 'no figures: nothing to show');
+$l = rh_booked_rate_change_line(['new_gross' => 526000, 'new_child_supplement' => 17000], 150000, 1, ['currency' => 'K', 'child' => 20000]);
+check(abs($l['child'] - 20000) < 0.001 && abs($l['per_night'] - 356000) < 0.001, 'an all-in children figure passed in opts wins over the stored one');
+
 echo "\n{$pass} passed, {$fail} failed\n";
 exit($fail > 0 ? 1 : 0);

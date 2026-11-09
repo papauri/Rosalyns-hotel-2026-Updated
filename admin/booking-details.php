@@ -35,6 +35,7 @@ require_once '../includes/finance-sequences.php';
 require_once __DIR__ . '/includes/booking-lifecycle.php';
 require_once __DIR__ . '/includes/finance-account-sync.php';
 require_once __DIR__ . '/includes/account-receipt-send.php';
+require_once __DIR__ . '/../includes/booked-rate.php'; // booked rate × nights line (owner 2026-11-09)
 finance_ensure_sequence_tables($pdo);
 
 // Get folio charges for this booking
@@ -1474,6 +1475,11 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     $co_confirm_text = $co_can_override
                         ? 'This guest still owes ' . $currency_symbol . ' ' . number_format($co_balance, 2) . '. Check out anyway with the outstanding balance? This will be recorded in the booking timeline.'
                         : 'Check out this guest and generate the final invoice where applicable?';
+                    // The rate the stay was booked at × its nights, so the checkout confirm never reads as today's price.
+                    $co_rate = rh_booked_rate_for_booking($pdo, (int)$booking_id, false);
+                    if ($co_rate['ok']) {
+                        $co_confirm_text .= ' Room at the booked rate: ' . $co_rate['text'] . '.';
+                    }
                 ?>
                     <?php if ($bd_perm_checkout): ?><form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars($co_confirm_text, ENT_QUOTES); ?>" data-admin-confirm-title="Check out guest" data-admin-confirm-ok="<?php echo $co_can_override ? 'Check out with balance' : 'Check out'; ?>" data-admin-confirm-icon="fa-right-from-bracket" data-admin-submit-text="Checking out...">
                         <input type="hidden" name="booking_action" value="checkout">
@@ -1613,6 +1619,16 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         } catch (Throwable $e) {
             $bd_row_fresh = $booking;
         }
+        // The rate this room was BOOKED at × its nights (never today's room price), from the clean row above.
+        // today_text (staff only) is set when today's price for this room differs from the booked rate.
+        $bd_rate = rh_booked_rate_line(
+            $bd_row_fresh,
+            rh_room_today_price_lookup($pdo, $bd_row_fresh)['price'],
+            ['currency' => $currency_symbol, 'room_name' => (string)($booking['room_name'] ?? '')]
+        );
+        // A cancelled / no-show / expired booking: the rate is shown for reference only, never as money owed.
+        $bd_rate_closed = in_array((string)($booking['status'] ?? ''), ['cancelled', 'no-show', 'expired'], true);
+        $bd_rate_label = $bd_rate_closed ? 'Was booked at' : 'Room booked at';
         ?>
         <!-- Group booking notice -->
         <?php if (!empty($group_bookings)): ?>
@@ -1668,6 +1684,13 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 <span class="rh-strip__label">Folio total</span>
                 <strong class="rh-strip__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_total_amount, 2); ?></strong><?php echo $bd_info_btn; ?>
             </div>
+            <?php if ($bd_rate['ok']): ?>
+            <div class="rh-strip__cell" title="<?php echo htmlspecialchars($bd_rate_label . ' ' . $bd_rate['text'] . ($bd_rate['today_text'] !== '' && !$bd_rate_closed ? '. ' . $bd_rate['today_text'] : ''), ENT_QUOTES); ?>">
+                <span class="rh-strip__label"><?php echo htmlspecialchars($bd_rate_label); ?></span>
+                <strong class="rh-strip__value"><?php echo htmlspecialchars($bd_rate['compact']); ?></strong>
+                <small class="bd-muted">room rate a night &times; nights<?php echo $bd_rate_closed ? ', for reference' : ''; ?></small>
+            </div>
+            <?php endif; ?>
             <div class="rh-strip__cell">
                 <span class="rh-strip__label">Paid</span>
                 <strong class="rh-strip__value"><?php echo $currency_symbol; ?><?php echo number_format($folio_amount_paid, 2); ?></strong>
@@ -1762,8 +1785,18 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                             </tr>
                             <?php endif; ?>
                             <tr>
-                                <th scope="row">Rate / night</th>
-                                <td><?php echo $currency_symbol; ?><?php echo number_format((float) $booking['price_per_night'], 0); ?></td>
+                                <th scope="row"><?php echo $bd_rate['ok'] ? 'Booked rate' : 'Rate / night'; ?></th>
+                                <td>
+                                    <?php if ($bd_rate['ok']): ?>
+                                        <?php echo htmlspecialchars($bd_rate['text']); ?>
+                                        <br><small class="bd-muted">The room rate a night when this booking was made &times; its nights<?php echo $bd_rate_closed ? ' (booking ' . htmlspecialchars(str_replace('-', ' ', (string)$booking['status'])) . ': for reference, not an amount owed)' : ''; ?>.</small>
+                                        <?php if ($bd_rate['today_text'] !== '' && !$bd_rate_closed): ?>
+                                            <br><small class="bd-muted"><?php echo htmlspecialchars($bd_rate['today_text']); ?></small>
+                                        <?php endif; ?>
+                                    <?php else: ?>
+                                        <?php echo $currency_symbol; ?><?php echo number_format((float) $booking['price_per_night'], 0); ?>
+                                    <?php endif; ?>
+                                </td>
                             </tr>
                             <tr>
                                 <th scope="row">Assigned room</th>
@@ -1926,6 +1959,15 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                 <span>Total</span>
                                 <strong><?php echo $currency_symbol; ?><?php echo number_format($folio_total_amount, 2); ?><?php echo $bd_info_btn; ?></strong>
                             </div>
+                            <?php if ($bd_rate['ok']): ?>
+                                <div class="payment-tax-row payment-tax-row--sub">
+                                    <span><?php echo htmlspecialchars($bd_rate_label); ?><br><small class="bd-muted">room rate a night &times; nights<?php echo $bd_rate_closed ? ', for reference only' : '; folio extras are added on top'; ?></small></span>
+                                    <strong><?php echo htmlspecialchars($bd_rate['text']); ?></strong>
+                                </div>
+                                <?php if ($bd_rate['today_text'] !== '' && !$bd_rate_closed): ?>
+                                    <p class="bd-muted" style="margin:0 0 6px;font-size:12px;"><?php echo htmlspecialchars($bd_rate['today_text']); ?></p>
+                                <?php endif; ?>
+                            <?php endif; ?>
                             <div class="payment-tax-row">
                                 <span>Paid</span>
                                 <strong><?php echo $currency_symbol; ?><?php echo number_format($folio_amount_paid, 2); ?></strong>
@@ -2341,6 +2383,10 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                         <span style="font-size: 12px; color: #666;">Nights Change:</span>
                         <span id="previewNightsDelta" style="font-size: 13px; font-weight: 600;">-</span>
                     </div>
+                    <div style="display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px;">
+                        <span style="font-size: 12px; color: #666;">At the booked rate:<br><small>room rate a night &times; new nights</small></span>
+                        <span id="previewRateLine" style="font-size: 13px; font-weight: 600; text-align: right;">-</span>
+                    </div>
                     <div style="display: flex; justify-content: space-between; margin-bottom: 8px;">
                         <span style="font-size: 12px; color: #666;">New Total:</span>
                         <span id="previewNewTotal" style="font-size: 13px; font-weight: 600;">-</span>
@@ -2627,6 +2673,33 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         const bookedPackageGross = Number(_bookedSplit.package_gross) || 0;
         const currentTotal = Number(_bookedSplit.total_with_vat) || 0;
         const currentChildSupplement = <?php echo (float)($booking['child_supplement_total'] ?? 0); ?>;
+        // The booked room rate a night WITHOUT the children charge, and the children charge it shows separately
+        // (includes/booked-rate.php), so "rate x nights + children + package = total" adds up.
+        const _bookedRate = <?php echo json_encode(['ok' => (bool)$bd_rate['ok'], 'per_night' => (float)$bd_rate['per_night'], 'child' => (float)$bd_rate['child'], 'currency' => (string)$bd_rate['currency']], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+
+        // "K356,000" / "MWK 356,000.50": decimals only when there are tambala (same as rh_hist_money()).
+        function bdRateMoney(v) {
+            const a = Math.round(Math.abs(Number(v) || 0) * 100) / 100;
+            const cur = String(_bookedRate.currency || currencySymbol || '');
+            const hasCents = Math.abs(a - Math.round(a)) > 0.004;
+            const num = a.toLocaleString('en-US', { minimumFractionDigits: hasCents ? 2 : 0, maximumFractionDigits: hasCents ? 2 : 0 });
+            return ((Number(v) || 0) < 0 ? '-' : '') + cur + (cur.length > 1 && /^[A-Za-z]+$/.test(cur) ? ' ' : '') + num;
+        }
+
+        // "K356,000 x 4 nights = K1,424,000 (+ children / + package = total)" for the new nights.
+        function bdRateLine(newNights, newTotal) {
+            if (!_bookedRate.ok || !(newNights > 0)) return '';
+            const nightWord = newNights === 1 ? '1 night' : newNights + ' nights';
+            const pkg = bookedPackageGross > 0.005 ? bookedPackageGross : 0;
+            const child = _bookedRate.child > 0.005 && currentNights > 0 ? Math.round(_bookedRate.child * newNights / currentNights * 100) / 100 : 0;
+            const roomOnly = Math.round((newTotal - pkg - child) * 100) / 100;
+            let text = bdRateMoney(_bookedRate.per_night) + ' \u00d7 ' + nightWord + ' = ' + bdRateMoney(roomOnly);
+            let extras = '';
+            if (child > 0) extras += ' + children ' + bdRateMoney(child);
+            if (pkg > 0) extras += ' + package ' + bdRateMoney(pkg);
+            if (extras !== '') text += extras + ' = ' + bdRateMoney(newTotal);
+            return text;
+        }
         const pricePerNight = <?php echo (float)($booking['price_per_night'] ?? 0); ?>;
         const vatRate = <?php echo $vat_enabled ? (float) getSetting('vat_rate') : 0; ?>;
         const vatMode = <?php echo json_encode(vat_mode()); ?>; // 'off' | 'inclusive' | 'exclusive'
@@ -2734,6 +2807,8 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 nightsDeltaEl.textContent = 'No change';
                 nightsDeltaEl.style.color = '#666';
             }
+
+            document.getElementById('previewRateLine').textContent = bdRateLine(newNights, newTotal) || '-';
 
             document.getElementById('previewNewTotal').textContent = currencySymbol + Number(newTotal).toLocaleString('en-US', {
                 minimumFractionDigits: 2,
