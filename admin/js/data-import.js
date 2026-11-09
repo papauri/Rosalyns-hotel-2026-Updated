@@ -236,6 +236,12 @@
                     if (j.status === 'committed') { det = (j.created || 0) + ' created, ' + (j.updated || 0) + ' updated'; }
                     if (j.status === 'failed' && j.error) { det = j.error; }
                     var acts = h('div', 'di-job-acts');
+                    if (j.has_file) {
+                        var orig = h('a', 'btn-secondary di-btn', ' Download');
+                        orig.href = page + '?action=original&job=' + encodeURIComponent(j.id); orig.setAttribute('download', '');
+                        orig.title = 'Download the file exactly as it was uploaded. The copy is kept only until the import is finished or cancelled.';
+                        orig.insertBefore(h('i', 'fas fa-download'), orig.firstChild); acts.appendChild(orig);
+                    }
                     var open = h('button', 'btn-secondary di-btn', j.status === 'committed' ? 'View result' : 'Open');
                     open.type = 'button';
                     if (j.status !== 'failed') { open.addEventListener('click', function () { loadJob(j.id); }); acts.appendChild(open); }

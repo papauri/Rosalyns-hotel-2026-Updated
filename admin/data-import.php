@@ -11,7 +11,8 @@
  * and stock_management). A job can only be opened by the person who uploaded it, or an admin.
  *
  * AJAX (POST, CSRF, JSON): upload | summary | review_page | bulk | answer | fields | skip | unskip | unit_items | unit_choice | heal_undo | fixed_list | cancel | confirm | list.
- * GET ?action=csv&job=ID downloads the preview CSV; GET ?action=skipped&job=ID&format=csv|xlsx downloads the rows that were left out.
+ * GET ?action=csv&job=ID downloads the preview CSV; GET ?action=skipped&job=ID&format=csv|xlsx downloads the rows that were left out;
+ * GET ?action=original&job=ID downloads the uploaded file as it was uploaded (while the stored copy still exists).
  * All page text built from the file (names, sheets, cells) is set with textContent in the browser - it is never parsed as HTML.
  */
 require_once 'admin-init.php';
@@ -171,6 +172,59 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET' && $action === 'skipped') {
     exit;
 }
 
+// ---- download: the original uploaded file, exactly as it was uploaded, with its own name ---------------------------------------
+// Same gates as above (kill switch, data_import AND stock_management). Only the uploader or an admin. Read-only, streamed from the
+// private folder; the copy exists only until the import is finished / cancelled / expired (import_purge_staged), then 410.
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET' && $action === 'original') {
+    $jobId = (int)($_GET['job'] ?? 0);
+    $job = di_job($pdo, $jobId, $uid, $isAdmin);
+    if (!$job) {
+        http_response_code(404);
+        exit('That import is not available.');
+    }
+    $path = import_job_file_path($job);
+    if ($path === '') {
+        http_response_code(410);
+        exit('The uploaded copy of this file has been deleted. It is kept only until the import is finished, cancelled or expires.');
+    }
+    $name = import_clean_name((string)$job['original_name']);
+    $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+    $mimes = [
+        'xlsx' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        'xlsm' => 'application/vnd.ms-excel.sheet.macroEnabled.12',
+        'xls'  => 'application/vnd.ms-excel',
+        'csv'  => 'text/csv',
+        'tsv'  => 'text/tab-separated-values',
+        'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        'pdf'  => 'application/pdf',
+    ];
+    $mime = $mimes[$ext] ?? 'application/octet-stream';
+    $ascii = trim((string)preg_replace('/[^A-Za-z0-9._ ()-]+/', '_', $name));
+    if ($ascii === '' || trim($ascii, '._ ') === '') {
+        $ascii = 'import-' . $jobId . ($ext !== '' && preg_match('/^[a-z0-9]{1,8}$/', $ext) ? '.' . $ext : '');
+    }
+    if (function_exists('logActivity')) {
+        logActivity($uid, 'import_download', 'Original import file downloaded: import #' . $jobId . ' (' . $name . ').');
+    }
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();
+    }
+    @set_time_limit(300);
+    while (ob_get_level() > 0) {
+        @ob_end_clean();
+    }
+    $size = @filesize($path);
+    header('Content-Type: ' . $mime);
+    header('X-Content-Type-Options: nosniff');
+    header('Content-Disposition: attachment; filename="' . $ascii . '"; filename*=UTF-8\'\'' . rawurlencode($name));
+    header('Cache-Control: no-store');
+    if ($size !== false) {
+        header('Content-Length: ' . $size);
+    }
+    readfile($path);
+    exit;
+}
+
 // ---- EXPORT (Part B): the current stock as a tabbed Excel workbook -------------------------------------------------------
 // POST + CSRF, same gates as the rest of the page (kill switch, data_import AND stock_management were checked above). Read-only:
 // nothing is written to stock. Content comes from the live stock tables; see includes/import/export-stock.php.
@@ -260,7 +314,7 @@ if ($isAjax) {
 
     if ($action === 'list') {
         import_purge_staged($pdo);
-        $sql = "SELECT j.id, j.original_name, j.status, j.created_at, j.committed_at, j.error_text, j.result_json, j.created_by,
+        $sql = "SELECT j.id, j.original_name, j.stored_path, j.status, j.created_at, j.committed_at, j.error_text, j.result_json, j.created_by,
                        COALESCE(NULLIF(u.full_name, ''), u.username, '') AS by_name
                 FROM import_jobs j LEFT JOIN admin_users u ON u.id = j.created_by
                 WHERE j.target = 'stock' AND j.status <> 'cancelled' AND j.created_at > DATE_SUB(NOW(), INTERVAL 30 DAY)"
@@ -274,6 +328,7 @@ if ($isAjax) {
                 'id' => (int)$j['id'], 'file' => (string)$j['original_name'], 'status' => (string)$j['status'], 'created_at' => (string)$j['created_at'],
                 'by' => (string)$j['by_name'], 'mine' => (int)$j['created_by'] === $uid, 'error' => (string)$j['error_text'],
                 'created' => is_array($res) ? (int)($res['created'] ?? 0) : null, 'updated' => is_array($res) ? (int)($res['updated'] ?? 0) : null,
+                'has_file' => import_job_file_path($j) !== '',   // the uploaded copy is still stored, so the Download button can show
             ];
         }
         di_json(['ok' => true, 'jobs' => $out]);
