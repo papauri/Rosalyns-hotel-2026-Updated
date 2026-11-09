@@ -956,7 +956,7 @@ function rh_ai_menu_view_use_up(PDO $db, array $items): array
     return ['view' => 'use_up', 'expiring' => ['total' => count($exp['soon']), 'within_days' => (int)$exp['days'], 'value' => round($value, 2), 'batches' => $lines],
         'past_expiry' => array_map(static fn($b) => ['stock_item' => $b['stock_item'], 'batch' => $b['batch'], 'left' => $b['left'], 'expired' => $b['expires']], $exp['past']),
         'past_expiry_total' => count($exp['past']), 'menu_items_checked' => count($items), 'currency' => $cur,
-        'safety' => 'Food past its expiry date is checked, and recorded on Stock > Wastage if spoiled - never cooked.'];
+        'safety' => 'Food past its expiry date is never cooked. The system writes expired batches off as wastage on its own about every 30 minutes, so do not record them again on Stock > Wastage.'];
 }
 
 // ── The tool ────────────────────────────────────────────────────────────────

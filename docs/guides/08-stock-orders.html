@@ -83,7 +83,7 @@
     <li><strong>Drinks paid for at the till, or on a tab that is settled:</strong> the till marks Bar and Coffee Bar drinks as handed over, and stock comes off then.</li>
     <li><strong>Room service:</strong> stock comes off when the charge is posted to the guest's bill, at the moment the order is placed.</li>
     <li><strong>How much comes off:</strong> the recipe quantity for one portion, times the number sold, divided by the yield %. For example 150 g of chicken at 75% yield takes off 200 g.</li>
-    <li><strong>Which batch:</strong> the batch that expires first is used first (batches with no expiry date go last, oldest first). The ingredient's total and its average cost update.</li>
+    <li><strong>Which batch:</strong> the batch that expires first is used first (batches with no expiry date go last, oldest first). A batch past its expiry date that has not been written off yet is used first, so only stock that is truly left gets written off. The ingredient's total and its average cost update.</li>
     <li><strong>Sales made before a cost was known:</strong> if an ingredient had no cost when it was sold, that sale was recorded at zero cost. When a delivery, a Stock In or a stock count later gives that ingredient a unit cost, the zero-cost sales are costed at that price automatically. If no cost ever arrives, they stay at zero.</li>
     <li><strong>If there is not enough:</strong> the sale is never stopped. The tile on the till stays tappable and shows <strong>Low / none on record</strong>. The Kitchen, Bar and Coffee Bar can still mark the line Ready or Served. The ingredient's stock goes below zero, and the system records it as an oversell so a manager can reconcile it. The next delivery fills the shortfall first, or fix it at the next stock count.</li>
     <li><strong>Put back:</strong> cancelling before work starts, voiding an order, and 86 of an item that was not started all put the stock back. A refund does <em>not</em> put stock back.</li>
@@ -92,7 +92,7 @@
   </ul>
 
   <h2 id="overview">What the Stock Overview shows</h2>
-  <p>Open Admin menu &rarr; Stock &rarr; <strong>Stock Overview</strong>. It checks for expired batches each time you open it and removes them from stock.</p>
+  <p>Open Admin menu &rarr; Stock &rarr; <strong>Stock Overview</strong>. Expired batches are removed from stock automatically about every 30 minutes. Opening this page also removes them straight away.</p>
   <ul>
     <li>A banner: either <em>"All good! Inventory is healthy &mdash; no urgent alerts right now."</em>, or <strong>Heads up</strong> / <strong>Action needed</strong> with what needs attention.</li>
     <li>Cards: <strong>Net Sales Today</strong>, <strong>Open Tabs</strong>, <strong>Inventory Value</strong>, <strong>Wastage</strong> (30-day total, with today's figure). <strong>Net Sales Today</strong> is today's paid orders (by the day they were paid) after refunds and voids. When any paid orders were refunded or voided today, the card shows how many and their total. Room service charged to a room is not included. It opens Orders &amp; Tabs filtered to today's settled orders. The other cards open the related page.</li>
@@ -356,7 +356,7 @@
   <p>The stock comes off at once at the real cost of the batches used. <strong>Recent entries</strong> lists date, ingredient, quantity, cost, reason and who recorded it. The cards at the top (<strong>This month wastage</strong>, <strong>Last month</strong>, <strong>Days since last entry</strong>) open a detail window. A banner reminds you if no wastage has been logged for some days.</p>
 
   <h2 id="batches">How to deal with expiring and recalled batches (see which stock expires soon)</h2>
-  <p>Open Admin menu &rarr; Stock &rarr; <strong>Batch Tracker</strong>. Each time the page opens, active batches past their expiry date are removed from stock automatically: <em>"3 batch(es) automatically marked as expired."</em></p>
+  <p>Open Admin menu &rarr; Stock &rarr; <strong>Batch Tracker</strong>. Active batches past their expiry date are removed from stock automatically about every 30 minutes, and each time this page opens: <em>"3 batch(es) automatically marked as expired."</em> The wastage is dated the day the write-off runs, normally the morning after the expiry date. To turn the automatic write-off off, open <strong>Automated Emails</strong> and switch off <strong>Expired stock write-off</strong>.</p>
   <ol class="steps">
     <li>Use the cards <strong>Expiring &le; 3 days</strong> (with <strong>Value at risk</strong>), <strong>Expiring 4&ndash;7 days</strong>, <strong>Expiring 8&ndash;30 days</strong> and <strong>Total active batches</strong>, or the filters (ingredient, status <strong>Active</strong>, <strong>Depleted</strong>, <strong>Expired</strong>, <strong>Wasted</strong>, <strong>Recalled</strong>, <strong>All</strong>, and expiry range).</li>
     <li>For spoiled or damaged stock click <strong>Mark Wasted</strong>, give a <strong>Reason</strong>, and click <strong>Confirm Wastage</strong>. <em>"Batch marked as wasted."</em> It is logged as wastage at the batch's own cost.</li>
