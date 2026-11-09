@@ -130,7 +130,8 @@ $notify = $s('booking_notification_email') ?: ($s('admin_notification_email') ?:
   <table>
     <thead><tr><th>Item</th><th>Current value</th><th>Change it in</th></tr></thead>
     <tbody>
-      <tr><td>Emails are sent from</td><td><?php echo $show($em('email_from_email')); ?> (name: <?php echo $show($em('email_from_name', $s('email_from_name'))); ?>)</td><td>Settings &rarr; Hotel Settings &rarr; Email Configuration</td></tr>
+      <tr><td>Emails are sent from</td><td><?php echo $show($em('smtp_username')); ?> (sender name: <?php echo $show($em('email_from_name', $s('email_from_name'))); ?>)</td><td>Settings &rarr; Hotel Settings &rarr; Email Configuration</td></tr>
+      <tr><td>Reply-to and contact email</td><td><?php echo $show($em('email_from_email'), 'Blank (uses the main hotel email)'); ?></td><td>Settings &rarr; Hotel Settings &rarr; Email Configuration</td></tr>
       <tr><td>Mail server</td><td><?php echo $show($em('smtp_host')); ?></td><td>Settings &rarr; Hotel Settings &rarr; Email Configuration</td></tr>
       <tr><td>New-booking alerts go to</td><td><?php echo $show((string)$notify); ?></td><td>Settings &rarr; Hotel Settings &rarr; Booking Notification Email</td></tr>
       <tr><td>Wording of guest emails and PDFs</td><td>Editable templates</td><td>Settings &rarr; Email Templates</td></tr>

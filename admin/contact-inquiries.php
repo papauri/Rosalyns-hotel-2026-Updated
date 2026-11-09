@@ -13,11 +13,13 @@ $user = [
 $message = '';
 $error   = '';
 
-$hotel_reply_email = trim((string)getEmailSetting('email_from_email', ''));
+require_once __DIR__ . '/../includes/email-identity.php';
+// Where the guest's reply to our email lands (Reply-To). The email itself is sent from the SMTP mailbox.
+$hotel_reply_email = rh_guest_contact_email();
 if ($hotel_reply_email === '') {
     $hotel_reply_email = trim((string)getSetting('email_main', ''));
 }
-$hotel_reply_email_valid = filter_var($hotel_reply_email, FILTER_VALIDATE_EMAIL) !== false;
+$hotel_reply_email_valid = true; // replies send from the SMTP mailbox even with no reply-to address set
 
 // Ensure the contact_inquiries table exists (it's also created by contact-us.php)
 try {
@@ -88,12 +90,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['inquiry_action'])) {
                     if ($email_result['success']) {
                         $stmt = $pdo->prepare("UPDATE contact_inquiries SET status = 'replied', updated_at = NOW() WHERE id = ?");
                         $stmt->execute([$inquiry_id]);
-                        $message = 'Reply sent to ' . htmlspecialchars((string)$inquiry['email']) . ' from ' . htmlspecialchars($hotel_reply_email) . '.';
+                        $message = 'Reply sent to ' . htmlspecialchars((string)$inquiry['email']) . ($hotel_reply_email !== '' ? '; the guest\'s answer will go to ' . htmlspecialchars($hotel_reply_email) : '') . '.';
                         rh_log_event('contact_inquiries', 'info', 'Reply email sent', [
                             'inquiry_id' => $inquiry_id,
                             'reference'  => $inquiry['reference_number'] ?? null,
                             'to'         => $inquiry['email'] ?? null,
-                            'from'       => $hotel_reply_email,
+                            'reply_to'   => $hotel_reply_email,
                             'by'         => $user['username'],
                         ]);
                     } else {
@@ -396,8 +398,8 @@ ob_start();
     <input type="hidden" name="inquiry_id" id="replyInquiryId" value="">
 
     <div class="contact-reply-modal__from <?php echo $hotel_reply_email_valid ? '' : 'contact-reply-modal__from--invalid'; ?>">
-        <span class="contact-reply-modal__label">Sending from</span>
-        <strong><?php echo htmlspecialchars($hotel_reply_email ?: 'Hotel email not configured'); ?></strong>
+        <span class="contact-reply-modal__label">Guest's answer goes to</span>
+        <strong><?php echo htmlspecialchars($hotel_reply_email ?: 'the sending mailbox (no reply-to address set in Email Settings)'); ?></strong>
     </div>
 
     <div class="contact-reply-modal__recipient">

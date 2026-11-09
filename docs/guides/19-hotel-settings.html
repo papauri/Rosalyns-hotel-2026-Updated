@@ -162,7 +162,7 @@
       <tr><td><strong>Full postal address (documents)</strong></td><td>Text, up to 255 characters.</td><td>The address printed on invoices and other documents.</td></tr>
       <tr><td><strong>Region / district (contact page)</strong></td><td>Text, up to 100 characters.</td><td>The guest Contact page.</td></tr>
       <tr><td><strong>Second phone number</strong></td><td>Digits, spaces, ( ), - and an optional leading +. At least 6 characters, up to 30. May be left empty.</td><td>Shown under the main phone number on the guest Contact page.</td></tr>
-      <tr><td><strong>Staff notification email</strong></td><td>One valid email address. May be left empty.</td><td>A staff notification address. It also appears as the starting value of <strong>Notification Recipient Email</strong> if that has never been saved (see <a href="#notify">Booking Notification Email</a>).</td></tr>
+      <tr><td><strong>Staff notification email</strong></td><td>One valid email address. May be left empty.</td><td>A staff notification address. It is the fallback for <strong>New website booking alerts go to</strong> when that box is blank (see <a href="#notify">Booking Notification Email</a>).</td></tr>
       <tr><td><strong>Google Maps embed (link or iframe code from Google Maps &gt; Share &gt; Embed)</strong></td><td>Paste either the embed link or the whole iframe code. It must be a Google Maps embed address. May be left empty.</td><td>The map on the guest Contact page.</td></tr>
     </tbody>
   </table>
@@ -312,7 +312,7 @@
     <tbody>
       <tr><td><strong>SMTP Host *</strong></td><td>The mail server name, for example <code>mail.yourdomain.com</code>. Letters, digits, dots and dashes only, up to 253 characters.</td></tr>
       <tr><td><strong>SMTP Port *</strong></td><td>A number from 1 to 65535. The card suggests 465 (SSL), 587 (TLS), 25 (standard).</td></tr>
-      <tr><td><strong>SMTP Username *</strong></td><td>Usually the full email address.</td></tr>
+      <tr><td><strong>SMTP Username *</strong></td><td>Usually the full email address. This is the mailbox that sends every email. Guests see it in the From line, next to the sender name.</td></tr>
       <tr><td><strong>SMTP Password</strong></td><td>The mail account password. The box is always empty (<em>"Leave blank to keep current password"</em>). Type a password only when you want to change it. It is stored scrambled.</td></tr>
       <tr><td><strong>SMTP Security</strong></td><td>List: <strong>SSL</strong>, <strong>TLS</strong> or <strong>None</strong>.</td></tr>
     </tbody>
@@ -321,20 +321,20 @@
   <table>
     <thead><tr><th>Field</th><th>Allowed values</th></tr></thead>
     <tbody>
-      <tr><td><strong>From Name *</strong></td><td>One line, up to 100 characters. The sender name guests see.</td></tr>
-      <tr><td><strong>From Email *</strong></td><td>A valid email address. The sender address guests see.</td></tr>
-      <tr><td><strong>Admin Notification Email</strong></td><td>A valid email address, optional. Receives booking notifications and is the address that is copied when <strong>BCC Admin on all emails</strong> is on.</td></tr>
+      <tr><td><strong>Sender name *</strong></td><td>One line, up to 100 characters. The name guests see next to the sending mailbox.</td></tr>
+      <tr><td><strong>Reply-to and contact email (optional)</strong></td><td>A valid email address. Guests' replies go here, and it is printed as the contact email on emails and documents. Blank uses the main email in Hotel Details. <strong>It is not the sending address.</strong></td></tr>
+      <tr><td><strong>Staff copy email</strong></td><td>A valid email address, optional. Gets a hidden copy of every email while the switch below is on (never twice). It also gets copies of bookings created in the admin panel and of conference confirmations, and it is the last fallback for booking, conference and gym alerts, backup alerts and the End of Day report when no report recipient is set. Guests never see it.</td></tr>
     </tbody>
   </table>
   <h3>Email Settings</h3>
   <table>
     <thead><tr><th>Field</th><th>What it does</th></tr></thead>
     <tbody>
-      <tr><td><strong>BCC Admin on all emails</strong> (tick box)</td><td>Sends a hidden copy of every email to the admin email address.</td></tr>
-      <tr><td><strong>Development Mode (Preview Only)</strong> (tick box)</td><td><strong>When ticked, emails are saved as preview files and are NOT sent.</strong> If it has never been saved, it starts ticked.</td></tr>
-      <tr><td><strong>Enable Email Logging</strong> (tick box)</td><td>Keeps a log of email activity.</td></tr>
-      <tr><td><strong>Enable Email Previews</strong> (tick box)</td><td>Saves an HTML preview of each email.</td></tr>
-      <tr><td><strong>Invoice Email CC Recipients</strong></td><td>One or more valid addresses separated by commas, up to 1,000 characters in all. They are copied on every invoice and reminder email. The SMTP username is always copied as well.</td></tr>
+      <tr><td><strong>Send the staff copy email a hidden copy of every guest email</strong> (tick box)</td><td>Sends a hidden copy of every email to the Staff copy email. Automated reminders use their own switch on Automated Emails.</td></tr>
+      <tr><td><strong>Preview only (testing on this computer)</strong> (tick box)</td><td>Only for testing on a local computer: there, ticked emails are saved as previews instead of being sent. It has no effect on the live website, where email is always sent.</td></tr>
+      <tr><td><strong>Keep a log of sent emails</strong> (tick box)</td><td>Records each email sent or failed, for troubleshooting.</td></tr>
+      <tr><td><strong>Save a preview copy of each email</strong> (tick box)</td><td>Keeps a copy of what each email looked like, for troubleshooting.</td></tr>
+      <tr><td><strong>Hotel copies of invoices, statements and credit notes</strong></td><td>One or more valid addresses separated by commas, up to 1,000 characters in all. Each gets a hidden copy of every invoice, statement and credit note; the guest does not see these copies. The sending mailbox (SMTP username) also gets a hidden copy of invoices and statements.</td></tr>
     </tbody>
   </table>
   <h3>Messages</h3>
@@ -350,14 +350,14 @@
     <li>Type a valid email address in the test box and click <strong>Send</strong>. You will see <em>"Sent to &lt;address&gt;!"</em>. The subject starts with <em>[TEST]</em>.</li>
   </ol>
   <p>The Automated Emails page also has a <strong>Send test to me</strong> button that sends sample emails to your own admin email address (see <a href="#elsewhere">below</a>).</p>
-  <div class="warn"><p>If <strong>Development Mode (Preview Only)</strong> is ticked, no guest gets any email, and the test email will not arrive. Untick it when the hotel is ready to send real email, and save.</p></div>
+  <div class="warn"><p>If the test email does not arrive, check the spam folder, then the sending mailbox details (host, port, username, password) above.</p></div>
 
   <h2 id="notify" data-module="bookings">Booking Notification Email</h2>
   <p>Only shown when the Bookings &amp; Reservations module is on. It says who inside the hotel is told about new bookings, and sets the reminder and review emails to guests. Save with <strong>Save Notification Email</strong>.</p>
   <h3>Fields</h3>
   <ul>
-    <li><strong>Notification Recipient Email</strong>: a valid email address. New booking notifications go here first; if it is empty the <strong>Admin Notification Email</strong> from Email Configuration is used.</li>
-    <li><strong>Booking Notification CC Emails</strong>: optional list of addresses separated by commas, up to 1,000 characters. Copied on all new booking notifications.</li>
+    <li><strong>New website booking alerts go to</strong>: a valid email address. Website bookings send their alert here. If it is empty, the Staff notification email in Hotel details is used, then the Staff copy email. The line <em>Currently goes to:</em> under the box shows the address in use now.</li>
+    <li><strong>Also send booking alerts to</strong>: optional list of addresses separated by commas, up to 1,000 characters. Each address gets its own copy of the alert. Website bookings only; bookings created in the admin panel send their copy to the Staff copy email.</li>
     <li><strong>Send pre-arrival reminder email to guests</strong> (tick box) and <strong>Days before check-in</strong> (whole number 1 to 14; sent once per booking). A number outside the range is changed to the nearest allowed number.</li>
     <li><strong>Send post-stay review request email to guests</strong> (tick box) and <strong>Days after check-out</strong> (whole number 0 to 14; 0 means the day of check-out; sent once per booking).</li>
   </ul>
@@ -373,9 +373,9 @@
   <table>
     <thead><tr><th>Row (needs this module)</th><th>Fields</th></tr></thead>
     <tbody>
-      <tr data-module="conference"><td>Conference</td><td><strong>Enable Conference page &amp; conference enquiry functionality</strong> (tick box); <strong>Conference Notification Email</strong> (valid address or empty).</td></tr>
-      <tr data-module="gym"><td>Gym</td><td><strong>Enable Gym page &amp; gym booking/enquiry functionality</strong> (tick box); <strong>Gym Notification Email</strong>.</td></tr>
-      <tr data-module="pos"><td>POS Till</td><td><strong>Enable Restaurant page and related restaurant functionality</strong> (tick box); <strong>Restaurant Notification Email</strong>.</td></tr>
+      <tr data-module="conference"><td>Conference</td><td><strong>Enable Conference page &amp; conference enquiry functionality</strong> (tick box); <strong>Conference alerts go to</strong> (valid address or empty). Blank uses the main contact email in Hotel Details, then the Staff copy email. Each box shows <em>Currently goes to:</em> with the address in use.</td></tr>
+      <tr data-module="gym"><td>Gym</td><td><strong>Enable Gym page &amp; gym booking/enquiry functionality</strong> (tick box); <strong>Gym booking alerts go to</strong>. Blank uses the main contact email in Hotel Details, then the Staff copy email.</td></tr>
+      <tr data-module="pos"><td>POS Till</td><td><strong>Enable Restaurant page and related restaurant functionality</strong> (tick box); <strong>Restaurant contact email</strong>.</td></tr>
     </tbody>
   </table>
   <p>The notification email is where enquiries for that service are sent. A row for a module that is off is hidden, and its stored values are kept as they are.</p>
@@ -486,7 +486,7 @@
       <tr><td><em>"... Nothing was saved."</em> under Hotel details</td><td>One or more fields break their rule.</td><td>Read the rule text, fix the field, click <strong>Save Hotel Details</strong> again.</td></tr>
       <tr><td>Fields are greyed out</td><td>You do not have <strong>Change VAT &amp; refund settings</strong>.</td><td>Ask the owner to give you the permission in Staff &amp; Access, or ask someone who has it.</td></tr>
       <tr><td><em>"You do not have permission to change the tourism levy."</em></td><td>Same reason.</td><td>Same fix.</td></tr>
-      <tr><td>Guests do not receive any email</td><td><strong>Development Mode (Preview Only)</strong> is ticked, or the SMTP details are wrong, or the Automated Emails <strong>Test recipient</strong> box is filled in.</td><td>Untick Development Mode and save, check the SMTP fields, and clear the Test recipient box.</td></tr>
+      <tr><td>Guests do not receive any email</td><td><strong>Preview only (testing on this computer)</strong> is ticked, or the SMTP details are wrong, or the Automated Emails <strong>Test recipient</strong> box is filled in.</td><td>Untick Preview only and save, check the SMTP fields, and clear the Test recipient box.</td></tr>
       <tr><td>Links in emails or password-reset links open the wrong website</td><td>The <strong>Website address</strong> is empty or wrong.</td><td>Enter the full hotel address, for example <code>https://www.yourhotel.com</code>, and save Hotel details.</td></tr>
       <tr><td>The guest website shows a maintenance page</td><td><strong>Enable Full Frontend Maintenance Mode</strong> is ticked.</td><td>Untick it.</td></tr>
       <tr><td>Guests cannot book online</td><td>The <strong>Enable Online Booking System</strong> box is unticked.</td><td>Tick it.</td></tr>
