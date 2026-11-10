@@ -6352,6 +6352,33 @@ try {
     bad('Booked rate checks threw', get_class($e) . ': ' . $e->getMessage());
 }
 
+// ── Till "today" = the trading day (owner 2026-11-10 "count with the day that ended"): pure, no database. The till pages
+//    default to rh_station_trading_business_date (opening to the next opening); the Assistant's till sales default to the
+//    same day, so "today's sales" at 01:00 are last night's (never a false zero). The sums are rh_pos_eod_summary's. ──
+echo "\n-- Till trading day --\n";
+try {
+    require_once __DIR__ . '/../../includes/ai/ai-insights.php';
+    require_once __DIR__ . '/../../includes/station-hours.php';
+    $tdTz = function_exists('rh_site_timezone') ? rh_site_timezone() : new DateTimeZone(date_default_timezone_get());
+    $tdDay = (new DateTimeImmutable('now', $tdTz))->format('Y-m-d');
+    $tdOpen = rh_station_union_window_for_date($tdDay)['start'];
+    $tdBefore = $tdOpen->modify('-1 minute');
+    $tdAfter = $tdOpen->modify('+1 minute');
+    check(rh_ai_trading_today($tdAfter) === rh_station_trading_business_date($tdAfter) && rh_ai_trading_today($tdBefore) === rh_station_trading_business_date($tdBefore)
+        && rh_ai_trading_today() === rh_station_trading_business_date(),
+        'till "today" is the same trading day the Till / Shift close / POS accounting pages default to');
+    check(rh_ai_trading_today($tdBefore) === (new DateTimeImmutable($tdDay))->modify('-1 day')->format('Y-m-d') || $tdBefore->format('Y-m-d') !== $tdDay,
+        'a minute before the first opening, "today" for the till is still the trading day that began yesterday', rh_ai_trading_today($tdBefore) . ' at ' . $tdBefore->format('Y-m-d H:i'));
+    $tdSrc = (string)file_get_contents($root . '/includes/ai/ai-insights.php');
+    $tdFn = substr($tdSrc, (int)strpos($tdSrc, 'function rh_ai_t_restaurant_sales('), 1600);
+    check(strpos($tdFn, 'rh_ai_trading_today()') !== false && strpos($tdFn, "date('Y-m-d'), date('Y-m-d')") === false && strpos($tdFn, 'rh_pos_eod_summary(') !== false,
+        'till sales default to the trading day and add up End of Day\'s own per-day figures (trading window inside rh_pos_eod_summary)');
+    $tdDesc = rh_ai_spec_compact(['name' => 'restaurant_sales'] + rh_ai_tool_registry()['restaurant_sales'])['description'];
+    check(strpos($tdDesc, 'trading day') !== false && strpos($tdDesc, 'leave from/to out') !== false, 'the model is told to leave the dates out for "today" (the trading day)', $tdDesc);
+} catch (Throwable $e) {
+    bad('Till trading day checks threw', get_class($e) . ': ' . $e->getMessage());
+}
+
 rh_ai_set_transport(null);
 if ($origEnv === null) { unset($_ENV['APP_ENCRYPTION_SALT']); } else { $_ENV['APP_ENCRYPTION_SALT'] = $origEnv; }
 $pdo->exec('SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ'); // the READ COMMITTED set at the top is for this test connection only

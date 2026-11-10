@@ -202,7 +202,7 @@ function rh_ai_tool_registry(): array
             'perm' => ['accounting', 'reports'], 'module' => ['finance'], 'cache' => 120, 'handler' => 'rh_ai_t_money_leaks', 'step' => 'Checking money owed, refunds and voids',
         ],
         'restaurant_sales' => [
-            'description' => 'Till sales for a date range (default today, at most 31 days): orders, sales, voids, refunds, top sellers and void reasons - the End of Day till figures.',
+            'description' => 'Till sales for a date range (default the current trading day - leave from/to out for "today"; at most 31 days): orders, sales, voids, refunds, top sellers and void reasons - the End of Day till figures. A trading day runs from opening to the next opening.',
             'schema' => ['properties' => ['from' => $date, 'to' => $date]],
             'perm' => ['pos_accounting', 'reports', 'accounting'], 'module' => ['pos'], 'cache' => 120, 'handler' => 'rh_ai_t_restaurant_sales', 'step' => 'Adding up till sales and voids',
         ],

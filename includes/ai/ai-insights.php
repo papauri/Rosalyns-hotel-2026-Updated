@@ -423,10 +423,33 @@ function rh_ai_stock_budget(PDO $db): ?array
 
 // ── Restaurant & Bar ─────────────────────────────────────────────────────────
 
+/**
+ * The till's "today": the trading day now belongs to (includes/station-hours.php, owner 2026-11-10 "count with the day
+ * that ended"), the same default date as the Till, Shift close and POS accounting pages. Between midnight and the first
+ * opening this is yesterday, so "today's sales" at 01:00 are last night's, never a false zero. Calendar date if unknown.
+ */
+function rh_ai_trading_today(?DateTimeImmutable $now = null): string
+{
+    if (!function_exists('rh_station_trading_business_date')) {
+        $f = dirname(__DIR__) . '/station-hours.php';
+        if (is_file($f)) {
+            require_once $f;
+        }
+    }
+    if (function_exists('rh_station_trading_business_date')) {
+        try {
+            return rh_station_trading_business_date($now);
+        } catch (Throwable $e) {
+        }
+    }
+    return ($now ?: new DateTimeImmutable('now'))->format('Y-m-d');
+}
+
 /** Till sales, voids, refunds, top sellers and void reasons - End of Day's POS block, summed day by day. */
 function rh_ai_t_restaurant_sales(PDO $db, array $user, array $a): array
 {
-    [$from, $to] = rh_ai_range($a, date('Y-m-d'), date('Y-m-d'), 31);
+    $today = rh_ai_trading_today(); // the trading day (opening to the next opening), as the till pages default to
+    [$from, $to] = rh_ai_range($a, $today, $today, 31);
     if ($from === null) {
         return ['error' => $to];
     }
@@ -458,6 +481,7 @@ function rh_ai_t_restaurant_sales(PDO $db, array $user, array $a): array
     return ['from' => $from, 'to' => $to, 'currency' => rh_ai_currency(), 'totals' => $t,
         'top_sellers' => array_map(static fn($i) => ['item' => $i['item'], 'qty' => round($i['qty'], 2), 'revenue' => rh_ai_money($i['revenue'])], array_slice($items, 0, 8)),
         'void_reasons' => array_slice($reasons, 0, 5), 'basis' => 'Same as the End of Day till block (sales by the time they were paid, voids by the time they were voided).',
+        'day_basis' => 'Each day is a trading day: from opening until the next opening, so a sale after midnight before opening counts with the night before. The current trading day is ' . $today . '.',
         'link' => 'end-of-day-report.php?date=' . $to, 'link_label' => 'Open End of Day'];
 }
 
