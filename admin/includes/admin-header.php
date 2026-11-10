@@ -498,6 +498,7 @@ if ($_admin_back_target !== null) {
 <div id="rh-admin-page">
     <?php require __DIR__ . '/access-notice.php'; /* friendly card after a "no access" redirect */ ?>
     <?php if (function_exists('rh_licence_render_banner')) { rh_licence_render_banner(); /* overdue-payment notice; prints nothing unless this build is licensed and overdue */ } ?>
+    <?php if (function_exists('rh_view_only_render')) { rh_view_only_render(); /* view-only banner + greyed-out change buttons; prints nothing unless this person is view only */ } ?>
     <?php if ($_admin_back_target !== null && $_admin_back_label !== ''): ?>
         <div class="content admin-back-row">
             <a href="<?php echo htmlspecialchars((string)$_admin_back_target['href']); ?>" class="btn btn-secondary btn-sm" aria-label="<?php echo htmlspecialchars($_admin_back_label); ?>">

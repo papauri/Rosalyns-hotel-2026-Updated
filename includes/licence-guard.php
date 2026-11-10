@@ -34,6 +34,7 @@
  */
 
 require_once __DIR__ . '/licence.php';
+require_once __DIR__ . '/view-only.php'; // view-only people and view-only free trials (owner 2026-11-10)
 
 if (!function_exists('rh_licence_guard_request')) {
 
@@ -163,12 +164,13 @@ if (!function_exists('rh_licence_guard_request')) {
 
     /**
      * May this request pass while the status is read_only? Pure.
-     * $get / $post are the request arrays ($_GET / $_POST).
+     * $get / $post are the request arrays ($_GET / $_POST). $ruleSet: another allowlist of the same shape (view only uses a
+     * stricter one, includes/view-only.php); null = the read-only allowlist.
      */
-    function rh_licence_write_allowed(string $area, string $script, string $method, array $get, array $post): bool
+    function rh_licence_write_allowed(string $area, string $script, string $method, array $get, array $post, ?array $ruleSet = null): bool
     {
         $method = strtoupper($method);
-        $rules = rh_licence_rules()[$area] ?? null;
+        $rules = ($ruleSet ?? rh_licence_rules())[$area] ?? null;
         if ($rules === null) {
             return true;
         }
@@ -571,6 +573,7 @@ if (!function_exists('rh_licence_guard_request')) {
     function rh_licence_guard_request(): void
     {
         rh_staff_session_guard(); // first, and whether or not licensing is on
+        rh_view_only_guard();     // then view only (a person, or everyone on a view-only free trial)
         if (PHP_SAPI === 'cli' || !rh_licence_enabled()) {
             return;
         }

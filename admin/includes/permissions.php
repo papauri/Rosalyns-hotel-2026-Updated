@@ -1177,6 +1177,17 @@ function getAllPermissions()
             'category' => 'Administration',
             'page' => 'user-management.php',
             'group' => 'users_management'
+        ],
+
+        // Restriction (owner 2026-11-10): ticking it TAKES AWAY every change. No role has it by default; see
+        // includes/view-only.php. Everyone is also view only while a free trial is set to view only on the licence panel.
+        'view_only' => [
+            'label' => 'View only (cannot change anything)',
+            'description' => 'Can open and read everything they are allowed to see, but cannot add, change or delete anything. Buttons that would change something are greyed out.',
+            'icon' => 'fa-eye',
+            'category' => 'Core',
+            'page' => '', // not a page: a restriction
+            'group' => 'core'
         ]
     ];
 }
