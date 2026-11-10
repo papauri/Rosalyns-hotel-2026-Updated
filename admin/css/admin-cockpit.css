@@ -620,21 +620,17 @@
 /* Phone */
 @media (max-width: 680px) {
     .ck-hero { align-items: stretch; }
-    .ck-hero__actions {
-        flex-wrap: nowrap;
-        overflow-x: auto;
-        margin: 0 -16px;
-        padding: 2px 16px 6px;
-        scroll-snap-type: x proximity;
-        scrollbar-width: none;
-    }
-    .ck-hero__actions::-webkit-scrollbar { display: none; }
-    .ck-hero__actions > * { scroll-snap-align: start; flex: 0 0 auto; }
+    /* Quick actions and tabs wrap onto a second line instead of scrolling
+       sideways with a hidden scrollbar (the last buttons were cut off). */
+    .ck-hero__actions { flex-wrap: wrap; gap: 6px; }
+    .ck-hero__actions > * { flex: 0 0 auto; }
     .ck-menu { position: static; }
     .ck-menu__list { position: fixed; left: 16px; right: 16px; top: auto; bottom: 16px; max-height: 70vh; overflow: auto; }
-    .ck-panel { padding: 16px 14px; border-radius: 16px; }
+    .ck-panel { padding: 14px 12px; border-radius: 14px; }
     .ck-panel__head { flex-direction: column; }
     .ck-panel__head .ck-tabs { width: 100%; }
+    .ck-tabs { flex-wrap: wrap; overflow: visible; border-radius: 14px; }
+    .ck-tab { flex: 1 1 auto; justify-content: center; }
     .ck-row { grid-template-columns: auto minmax(0, 1fr); gap: 10px 12px; padding: 12px 4px; }
     .ck-row__act { grid-column: 1 / -1; justify-content: stretch; }
     .ck-row__act .ck-btn { width: 100%; min-height: 42px; }
@@ -815,12 +811,13 @@
     .ck-table--stack tfoot th,
     .ck-table--stack tfoot td { display: block; width: auto; border: 0; }
     .ck-filter { padding: 12px; }
-    .ck-filter__presets { flex-wrap: nowrap; overflow-x: auto; margin: 0 -2px; padding: 2px; scrollbar-width: none; }
-    .ck-filter__presets::-webkit-scrollbar { display: none; }
-    .ck-filter__presets > * { flex: 0 0 auto; }
+    /* Range presets wrap (they scrolled sideways with no scrollbar, the last ones cut off);
+       Apply and Reset share one row. */
+    .ck-filter__presets { flex-wrap: wrap; }
+    .ck-filter__presets > * { flex: 1 1 auto; justify-content: center; }
     .ck-filter__form { width: 100%; }
     .ck-filter__form .ck-field { flex: 1 1 130px; }
-    .ck-filter__form .ck-btn { flex: 1 1 100%; min-height: 44px; }
+    .ck-filter__form .ck-btn { flex: 1 1 40%; min-height: 44px; }
 }
 
 /* Touch screens (front-desk tablets, phones): every control is a 44px target */

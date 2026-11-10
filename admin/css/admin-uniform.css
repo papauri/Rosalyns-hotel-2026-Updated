@@ -257,7 +257,7 @@ body .content .sdash-section table tbody td {
     }
 }
 
-@media (max-width: 380px) {
+@media (max-width: 340px) {
     body .stats-grid,
     body .ops-grid,
     body .acct-kpis,
@@ -642,5 +642,137 @@ body .content .sdash-section table tbody td {
 
     html .admin-nav.nav-open .admin-nav-account a:active {
         background: rgba(255, 255, 255, 0.08);
+    }
+}
+
+/* ==========================================================================
+   Compact phones, nothing hidden (owner 2026-11-11)
+   Fewer screens of padding, two tiles per row, rows that wrap instead of
+   sliding off the edge, and dialog buttons side by side.
+   ========================================================================== */
+
+/* The licence notice is printed in its own .content wrapper, and admin-page-intro.js
+   gives every .content a page title, so the title showed twice (above and below the
+   notice) at every width. Hide that copy; a "Back to …" link moved into it stays. */
+#rh-admin-page > .content:has(> #rhLicenceBanner) > .rh-admin-page-header:not(:has(.rh-admin-back)) {
+    display: none !important;
+}
+#rh-admin-page > .content:has(> #rhLicenceBanner) > .rh-admin-page-header:has(.rh-admin-back) {
+    margin-bottom: 8px !important;
+    padding-bottom: 0 !important;
+    border-bottom: 0 !important;
+}
+#rh-admin-page > .content:has(> #rhLicenceBanner) > .rh-admin-page-header :is(.rh-admin-page-title, .rh-admin-page-subtitle) {
+    display: none !important;
+}
+
+/* Bare tables inside cards get min-width:600px (admin-responsive.css) so they scroll;
+   tables already turned into cards must not keep it, or the card is cut off. */
+@media (max-width: 1024px) {
+    .card table.mobile-enhanced,
+    .panel table.mobile-enhanced,
+    .admin-card table.mobile-enhanced {
+        min-width: 0;
+    }
+    .mobile-enhanced-wrapper {
+        overflow-x: auto;
+    }
+}
+
+@media (max-width: 640px) {
+    /* Page title block: smaller title, tighter spacing, actions wrap under it */
+    #rh-admin-page .rh-admin-page-header {
+        gap: 8px;
+        margin-bottom: 12px;
+        padding-bottom: 10px;
+    }
+    #rh-admin-page .rh-admin-page-header .rh-admin-page-title,
+    #rh-admin-page .rh-page-head__title h1,
+    #rh-admin-page .rh-page-head__title h2 {
+        font-size: 22px !important;
+    }
+    #rh-admin-page .rh-admin-page-header .rh-admin-page-subtitle,
+    #rh-admin-page .rh-page-head__meta {
+        font-size: 13px !important;
+        line-height: 1.4 !important;
+    }
+    #rh-admin-page .rh-admin-page-header > * {
+        min-width: 0;
+        max-width: 100%;
+    }
+    #rh-admin-page .rh-admin-page-header > div:not(.rh-admin-page-intro) {
+        flex-wrap: wrap;
+        justify-content: flex-start;
+    }
+    /* "Drag the grip…" hint beside the header buttons: its own line, not a 1-word column */
+    #rh-admin-page .rh-admin-page-header > div > span:first-child:not(:only-child) {
+        flex: 1 0 100%;
+    }
+
+    /* Tab rows wrap so every tab is on screen (they scrolled sideways, the last ones cut off) */
+    .tabs-header,
+    .filter-tabs,
+    .report-tabs,
+    .menu-type-tabs,
+    .tab-nav {
+        flex-wrap: wrap !important;
+        overflow: visible !important;
+        gap: 6px !important;
+    }
+    :is(.tabs-header, .filter-tabs, .report-tabs, .menu-type-tabs, .tab-nav) > :is(button, a) {
+        flex: 1 1 auto;
+        justify-content: center;
+        white-space: nowrap;
+        padding-left: 10px !important;
+        padding-right: 10px !important;
+    }
+
+    /* Filter forms: two fields per row; the free-text search keeps a full row */
+    .filter-form,
+    .filters-row {
+        grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+        gap: 8px 10px !important;
+    }
+    :is(.filter-form, .filters-row) > .filter-group:has(input[type="text"], input[type="search"]) {
+        grid-column: 1 / -1;
+    }
+
+    /* Dialog footers: Cancel and the main button side by side (they were stacked full
+       width, a 126px footer on every dialog). A long label takes its own row instead of
+       wrapping. display is left alone: scripts hide footer buttons inline. */
+    :is(#rh-admin-page, body) :is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-footer, .modal__footer, .admin-modal__footer, .mm-modal-foot, .rt-modal-foot, .rp-modal__footer, .modal-foot) {
+        flex-direction: row !important;
+        flex-wrap: wrap !important;
+        gap: 8px !important;
+        padding: 10px 12px !important;
+    }
+    :is(#rh-admin-page, body) :is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg) :is(.modal-footer, .modal__footer, .admin-modal__footer, .mm-modal-foot, .rt-modal-foot, .rp-modal__footer, .modal-foot, .modal-actions, .form-actions, .mm-modal-actions) :is(button, a.btn, a[class*="btn"], input[type="submit"], input[type="button"]):not(.modal-close, .close, .close-modal, [role="switch"], [hidden]) {
+        flex: 1 1 auto !important;
+        width: auto !important;
+        max-width: 100%;
+        min-height: 44px !important;
+        margin: 0 !important;
+        white-space: nowrap;
+    }
+}
+
+/* Finance tables in card mode (reports P&L, accounting lists): label on the left,
+   value on the right of one line, instead of the label above it (~150px per line item). */
+@media (max-width: 600px) {
+    body table.acct-table tbody td,
+    body .content table.acct-table tbody td {
+        padding: 6px 12px !important;
+    }
+    body .acct-table tbody td::before {
+        display: inline-block;
+        float: left;
+        max-width: 55%;
+        margin: 0 12px 0 0;
+        line-height: 1.6;
+    }
+    body .acct-table tbody td::after {
+        content: "";
+        display: table;
+        clear: both;
     }
 }

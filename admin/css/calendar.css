@@ -733,9 +733,16 @@
         font-size: 16px;
     }
 
+    /* All seven days fit the card (Saturday was cut off behind a sideways scroll) */
+    .calendar-grid {
+        grid-template-columns: repeat(7, minmax(0, 1fr));
+        min-width: 0;
+    }
+
     .calendar-day {
         min-height: 40px;
-        padding: 3px 4px;
+        padding: 3px 3px;
+        min-width: 0;
     }
 
     .day-number {

@@ -56,12 +56,15 @@
 
 .payment-console {
     display: grid;
-    grid-template-columns: 1fr;
+    /* minmax(0, …): the booking-type row must not widen the column past the screen
+       (on phones it pushed the page to ~440px and the right edge was cut off) */
+    grid-template-columns: minmax(0, 1fr);
     gap: clamp(1rem, 2vw, 1.35rem);
 }
 
 .payment-console__main,
 .payment-console__side {
+    min-width: 0;
     display: grid;
     gap: clamp(1rem, 2vw, 1.35rem);
     align-content: start;
@@ -476,12 +479,25 @@
     margin-bottom: 1rem;
 }
 
+/* Phones: four type buttons don't fit one row; two per row, labels on one line */
+@media (max-width: 600px) {
+    .pa-picker__type-row {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .pa-type-btn {
+        padding: 0.6rem 0.5rem;
+    }
+}
+
 .pa-type-btn {
     flex: 1;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 0.4rem;
+    white-space: nowrap; /* "Room Booking" broke onto two lines */
     padding: 0.65rem 0.85rem;
     background: var(--finance-bg);
     border: 1.5px solid var(--finance-border);

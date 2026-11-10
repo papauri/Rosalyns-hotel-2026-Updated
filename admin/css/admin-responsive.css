@@ -1088,8 +1088,9 @@ body>footer {
 
 }
 
-/* @media (max-width: 360px) — Very narrow phones: single-column card grid    */
-@media (max-width: 360px) {
+/* @media (max-width: 340px) — Very narrow phones: single-column card grid
+   (360px phones keep two fields per row, like 390px ones) */
+@media (max-width: 340px) {
     table.mobile-enhanced tbody tr {
         grid-template-columns: 1fr !important;
     }

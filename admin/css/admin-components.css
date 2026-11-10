@@ -3452,7 +3452,7 @@ body:not(:has(> .admin-header)) .admin-page-loader {
    Header and footer are pinned; only the body scrolls. The dialog never grows past the
    screen (minus a gutter), so Save / Cancel are always reachable without scrolling the
    whole modal. A <form> wrapping header/body/footer is part of the same column.
-   Footer: right-aligned, Cancel then the primary action; stacked full width on phones.
+   Footer: right-aligned, Cancel then the primary action; on phones they share the row.
    Markup needed: .modal-header, .modal-body, .modal-footer as direct children of
    .modal-content (or of a <form> that is its direct child). Pages that scale the screen
    (html.page-zoomed) divide the height by --page-zoom, as page-zoom.css does.
@@ -3501,22 +3501,27 @@ body:not(.pos-screen) .modal-content:has(> .modal-header, > form > .modal-header
     --rh-modal-btn-height: 2.75rem;
 }
 
-/* Phones: footer buttons stacked, full width (Cancel above the primary action). */
+/* Phones: footer buttons side by side, sharing the row (Cancel then the primary action).
+   Stacking them full width (until 2026-11-11) made every footer ~126px tall and left
+   little room for the form. A label too long for half the row moves to its own row
+   rather than wrapping inside the button. */
 @media (max-width: 480px) {
     :is(#rh-admin-page, body) :is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay) .modal-content:has(> .modal-header, > form > .modal-header):has(.modal-body) :is(.modal-footer, .modal-actions.modal-footer),
     :is(#rh-admin-page, body) .mm-modal-card :is(.mm-modal-foot),
     :is(#rh-admin-page, body) .modal__container :is(.modal__footer) {
-        flex-direction: column !important;
-        flex-wrap: nowrap !important;
+        flex-direction: row !important;
+        flex-wrap: wrap !important;
         align-items: stretch !important;
-        justify-content: flex-start !important;
+        justify-content: flex-end !important;
     }
 
     :is(#rh-admin-page, body) :is(.modal-overlay, .modal, .mm-modal, .admin-modal-overlay) .modal-content:has(> .modal-header, > form > .modal-header):has(.modal-body) :is(.modal-footer, .modal-actions.modal-footer) > :is(button, a, input[type="submit"], input[type="button"]):not([hidden]),
     :is(#rh-admin-page, body) .mm-modal-card .mm-modal-foot > :is(button, a),
     :is(#rh-admin-page, body) .modal__container .modal__footer > :is(button, a) {
-        width: 100%;
+        flex: 1 1 auto;
+        width: auto;
         margin: 0;
+        white-space: nowrap;
     }
 }
 

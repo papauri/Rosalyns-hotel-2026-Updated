@@ -221,15 +221,20 @@ button.ck-kpi { font: inherit; text-align: left; width: 100%; }
 .ck-spark > span { flex: 1; min-height: 2px; border-radius: 3px 3px 1px 1px; background: var(--ck-line-strong); }
 .ck-spark > span.is-today { background: var(--ck-gold); }
 
-/* Phone */
+/* Phone: two compact cards per row (one card per row left a screen holding
+   only two or three figures). Money values are shrunk to fit by admin-main.js. */
 @media (max-width: 680px) {
-    .ck-kpis { gap: 10px; }
-    .ck-kpi { padding: 14px; border-radius: 16px; }
-    .ck-kpi__icon { width: 28px; height: 28px; top: 12px; right: 12px; font-size: 12px; }
-    .ck-kpi__label { font-size: 11px; padding-right: 32px; }
-    .ck-kpi__sub { font-size: 12px; }
+    .ck-kpis,
+    .ck-kpis[class] { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+    .ck-kpi { padding: 12px; gap: 4px; border-radius: 14px; }
+    .ck-kpi__icon { width: 26px; height: 26px; top: 10px; right: 10px; font-size: 11px; border-radius: 8px; }
+    .ck-kpi__label { font-size: 10.5px; letter-spacing: .06em; padding-right: 28px; }
+    .ck-kpi__value:not(.ck-kpi__value--money) { font-size: clamp(20px, 14cqi, 26px); }
+    .ck-kpi__sub { font-size: 11.5px; }
+    .ck-kpi:is(a[href], button, [role="button"], [data-href], [onclick])::after { right: 12px; bottom: 12px; }
+    .ck-kpi:is(a[href], button, [role="button"], [data-href], [onclick]) .ck-kpi__sub { padding-right: 14px; }
 }
-@media (max-width: 380px) {
+@media (max-width: 340px) {
     .ck-kpis,
     .ck-kpis[class] { grid-template-columns: minmax(0, 1fr); }
 }
