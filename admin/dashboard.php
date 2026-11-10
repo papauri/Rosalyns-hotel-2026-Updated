@@ -146,16 +146,20 @@ $mod_events      = $raw_events && $dash_perm('events', 'events_bookings');
 // Room service lives in the POS module but needs bookings (rooms) to exist.
 $mod_roomsvc     = $raw_pos && $raw_bookings && $dash_perm('room_service_view');
 // Till sales are money: shown to the people who audit the till, and to finance.
-$pos_sales       = $mod_pos && $dash_perm('pos_accounting', 'accounting', 'reports'); // not till staff (owner 2026-11-11)
+// Owner 2026-11-11: the business's money standing is for the finance team and administrators only, one permission
+// per card (admin/includes/permissions.php 'Dashboard figures'; role defaults: administrator + accountant).
+$pos_sales       = $mod_pos && $dash_perm('dashboard_pos_sales');                     // till / restaurant sales card + till line
+$show_takings    = moduleEnabled('finance') && $dash_perm('dashboard_takings');       // Takings today, 7-day chart, rooms & services line
+$show_owed       = moduleEnabled('finance') && $dash_perm('dashboard_owed');          // Owed to us card + its details
 // Presets that invoice a named client in advance and can therefore carry an
 // outstanding balance. Pure-POS presets (bar, retail, supermarket) settle at
 // the till, so an "Outstanding Balances" tile would always read zero for them.
 // Computed from the plain module switches so the total is the same for every
 // finance viewer whatever else they may open.
 $mod_receivables = $raw_bookings || $raw_conference || $raw_gym || $raw_events;
-// Till revenue must still reach the finance totals when the viewer has finance
-// but no till permission.
-$pos_rev_needed  = $raw_pos && ($pos_sales || $mod_finance);
+// Till revenue must still reach the takings total when the viewer sees takings
+// but not the till sales card.
+$pos_rev_needed  = $raw_pos && ($pos_sales || $show_takings);
 // A room-service order charged to a guest folio is not a till sale: it is already part of the guest's
 // bill and is paid through a booking payment (End of Day excludes it the same way, eod-revenue.php).
 // Without this it was counted once here and again when the folio was paid.
@@ -342,8 +346,10 @@ if (!$is_card_insight_ajax) {
         } catch (Throwable $e) { /* fine */ }
     }
 
-    if ($mod_finance) {
+    if ($mod_finance || $show_takings || $show_owed) {
         try {
+            // Each figure is read only for a viewer who may see it (owner 2026-11-11, 'Dashboard figures' permissions).
+            if ($show_takings) {
             // Takings today = money collected today less refunds paid out today (the End of Day
             // "cash collected" rule). One helper feeds this KPI and the 7-day chart so they agree.
             // POS sales sync into payments as booking_type='restaurant', so the ledger sum leaves those
@@ -352,6 +358,8 @@ if (!$is_card_insight_ajax) {
             $finance['payments_today'] = (int)$r['c'];
             $finance['revenue_today']  = (float)($takingsByDay($today, $today, true, $pos_rev_needed)[$today] ?? 0);
             $finance['ledger_today']   = (float)($takingsByDay($today, $today, true, false)[$today] ?? 0); // everything except the till
+            }
+            if ($show_owed && $mod_receivables) {
             // Outstanding receivables from every module this preset actually runs —
             // a gym must not be shown "bookings with amount due" it can never have.
             // One rule on every screen (admin/includes/receivables.php): rooms, confirmed conference / event / gym
@@ -360,7 +368,10 @@ if (!$is_card_insight_ajax) {
             $finance['outstanding_count'] = $rcvDash['count'];
             $finance['outstanding']       = $rcvDash['total'];
             $finance['outstanding_failed'] = !empty($rcvDash['failed']);
+            }
+            if ($mod_finance) { // refunds to approve: a work queue for the finance pages' users, not the money standing
             $finance['refunds_pending']   = (int)$pdo->query("SELECT COUNT(*) FROM payments WHERE payment_type='refund' AND refund_status IN ('pending','processing') AND deleted_at IS NULL")->fetchColumn();
+            }
         } catch (Throwable $e) { $finance['failed'] = true; /* shown as "unavailable", never as a false 0 */ }
     }
 
@@ -456,9 +467,9 @@ if (!$is_card_insight_ajax) {
         $revenueTrend[date('Y-m-d', strtotime($today . " -{$i} day"))] = 0.0;
     }
     $trendStart = array_key_first($revenueTrend);
-    if ($mod_finance || $pos_rev_needed) {
+    if ($show_takings) { // the 7-day chart is takings: shown only with dashboard_takings (till included, as in the KPI)
         try {
-            foreach ($takingsByDay($trendStart, $today, $mod_finance, $pos_rev_needed) as $d => $v) {
+            foreach ($takingsByDay($trendStart, $today, true, $pos_rev_needed) as $d => $v) {
                 if (isset($revenueTrend[$d])) { $revenueTrend[$d] += (float)$v; }
             }
         } catch (Throwable $e) { $finance['failed'] = true; }
@@ -481,7 +492,7 @@ if ($is_card_insight_ajax) {
         'expired_bookings'          => $mod_bookings,
         'pending_conference'        => $mod_conference,
         'today_conferences'         => $mod_conference,
-        'outstanding_balances'      => $mod_finance && $mod_receivables,
+        'outstanding_balances'      => $show_owed && $mod_receivables,
         'open_tabs'                 => $mod_orders,
         'room_service_reminders_due'=> $mod_roomsvc,
         'room_service_pending'      => $mod_roomsvc,
@@ -489,11 +500,11 @@ if ($is_card_insight_ajax) {
         'bar_tickets'               => $mod_pos && $mod_station_bds,
         'coffee_tickets'            => $mod_pos && $mod_station_cds,
         'restaurant_revenue_today'  => $pos_sales,
-        'total_revenue_today'       => $mod_finance,
-        'refunds_pending'           => $mod_finance,
+        'total_revenue_today'       => $show_takings,
+        'refunds_pending'           => $mod_finance && $dash_perm('payments', 'refund_payment'), // same gate as its dashboard line
         'stock_health'              => $mod_stock,
         'guest_services_queue'      => $mod_website_cms || $mod_gym || $mod_bookings,
-        'operations_facilities'     => $mod_bookings || $mod_housekeeping || $mod_pos || $mod_finance,
+        'operations_facilities'     => $mod_bookings || $mod_housekeeping || $mod_pos || $mod_finance || ($show_owed && $mod_receivables),
         'room_status_overview'      => $mod_roomboard,
     ];
     $gateKey = str_starts_with($card, 'room_status_') ? 'room_status_overview' : $card;
@@ -1723,7 +1734,7 @@ if ($is_card_insight_ajax) {
                         'action' => ['href' => 'stock-orders.php?status=placed', 'label' => isRestaurantEnabled() ? 'Open Tabs' : 'Orders', 'target' => '_blank'],
                     ];
                 }
-                if ($mod_finance && $mod_receivables) {
+                if ($show_owed && $mod_receivables) { // owner 2026-11-11: the owed total follows dashboard_owed
                     // Same multi-module receivables union as the Outstanding
                     // Balances tile — not just bookings.
                     $rcvOf = rh_receivable_summary($pdo, rh_receivable_mods());
@@ -2066,7 +2077,10 @@ $currency_symbol = getSetting('currency_symbol');
         $weekMax = max(1, ...array_values($weekAhead ?: [0]));
         $confByDay = [];
         foreach ($upcoming_conferences as $c) { $confByDay[$c['event_date']] = ($confByDay[$c['event_date']] ?? 0) + 1; }
-        $hasMoney = $mod_finance || $pos_sales;
+        // The Money panel: the takings chart only with dashboard_takings, the till line only with dashboard_pos_sales;
+        // refunds to approve (and open tabs with it) are work queues and keep their own gates (Owed to us has no line here).
+        $moneyRefundLine = $mod_finance && $dash_perm('payments', 'refund_payment');
+        $hasMoney = $show_takings || $pos_sales || $moneyRefundLine;
         $roomColors = [
             'occupied' => '#231F1C', 'available' => '#3f8f5a', 'cleaning' => '#c9a227',
             'inspection' => '#2f6fad', 'maintenance' => '#b4632f', 'out_of_order' => '#9aa1ab',
@@ -2209,7 +2223,7 @@ $currency_symbol = getSetting('currency_symbol');
                     <span class="ck-kpi__sub"><?php echo (int)$gymDash['expiring_members']; ?> renewing in 30 days</span>
                 </a>
             <?php endif; ?>
-            <?php if ($mod_finance): ?>
+            <?php if ($show_takings): ?>
                 <a class="ck-kpi js-dashboard-insight" data-insight-card="total_revenue_today" data-insight-label="Total revenue today" href="payments.php?start_date=<?php echo $today; ?>&end_date=<?php echo $today; ?>">
                     <span class="ck-kpi__icon"><i class="fas fa-coins"></i></span>
                     <span class="ck-kpi__label">Takings today</span>
@@ -2219,6 +2233,8 @@ $currency_symbol = getSetting('currency_symbol');
                     </span>
                     <span class="ck-kpi__sub"><?php echo (int)$finance['payments_today']; ?> payment(s)<?php echo $mod_pos ? ' + till' : ''; ?></span>
                 </a>
+            <?php endif; ?>
+            <?php if ($show_owed): ?>
                 <?php if ($mod_receivables): ?>
                 <a class="ck-kpi<?php echo $finance['outstanding'] > BALANCE_TOLERANCE ? ' ck-kpi--alert' : ''; ?> js-dashboard-insight" data-insight-card="outstanding_balances" data-insight-label="Outstanding balances" href="payments.php?balance=outstanding">
                     <span class="ck-kpi__icon"><i class="fas fa-file-invoice-dollar"></i></span>
@@ -2230,7 +2246,7 @@ $currency_symbol = getSetting('currency_symbol');
             <?php endif; ?>
         </section>
 
-        <?php if (!($mod_bookings || $mod_pos || $mod_stock || $mod_orders || $mod_conference || $mod_gym || $mod_finance || $mod_website_cms || $mod_housekeeping || $mod_roomboard)): ?>
+        <?php if (!($mod_bookings || $mod_pos || $mod_stock || $mod_orders || $mod_conference || $mod_gym || $mod_finance || $show_takings || $show_owed || $mod_website_cms || $mod_housekeeping || $mod_roomboard)): ?>
         <section class="ck-panel"><div class="ck-empty"><i class="fas fa-circle-info"></i><p>Your account has no dashboard widgets. Use the menu on the left to open the pages you have access to.</p></div></section>
         <?php endif; ?>
 
@@ -2411,7 +2427,7 @@ $currency_symbol = getSetting('currency_symbol');
                         <?php if ($mod_website_cms || $mod_gym || $mod_bookings): ?>
                             <button type="button" class="ck-icon-btn js-dashboard-insight" data-insight-card="guest_services_queue" data-insight-label="Guest services queue" title="Guest services overview"><i class="fas fa-headset"></i></button>
                         <?php endif; ?>
-                        <?php if ($mod_bookings || $mod_housekeeping || $mod_pos || $mod_finance): ?>
+                        <?php if ($mod_bookings || $mod_housekeeping || $mod_pos || $mod_finance || ($show_owed && $mod_receivables)): ?>
                             <button type="button" class="ck-icon-btn js-dashboard-insight" data-insight-card="operations_facilities" data-insight-label="Operations &amp; facilities" title="Operations overview"><i class="fas fa-screwdriver-wrench"></i></button>
                         <?php endif; ?>
                     </div>
@@ -2455,12 +2471,13 @@ $currency_symbol = getSetting('currency_symbol');
                 <header class="ck-panel__head">
                     <div>
                         <h2 class="ck-panel__title">Money</h2>
-                        <p class="ck-panel__sub">Last 7 days · <?php echo $moneyShort($trendTotal); ?> taken</p>
+                        <p class="ck-panel__sub"><?php echo $show_takings ? 'Last 7 days · ' . $moneyShort($trendTotal) . ' taken' : 'Today'; ?></p>
                     </div>
                     <div class="ck-panel__tools">
                         <?php if ($can('end-of-day-report.php')): ?><a class="ck-link" href="end-of-day-report.php">Day report <i class="fas fa-arrow-right"></i></a><?php endif; ?>
                     </div>
                 </header>
+                <?php if ($show_takings): ?>
                 <div class="ck-money__headline">
                     <span class="ck-money__label" data-ck-trend-label>Today</span>
                     <span class="ck-money__value" data-ck-trend-value><?php echo $money($revenueTrend[$today] ?? 0); ?></span>
@@ -2476,8 +2493,9 @@ $currency_symbol = getSetting('currency_symbol');
                         </button>
                     <?php endforeach; ?>
                 </div>
+                <?php endif; ?>
                 <ul class="ck-kv">
-                    <?php if ($mod_finance && $pos_rev_needed): ?>
+                    <?php if ($show_takings && $pos_rev_needed): ?>
                         <li><span><i class="fas fa-bed"></i> <?php echo $mod_bookings ? 'Rooms &amp; services' : 'Invoiced sales'; ?> today</span><strong><?php echo !empty($finance['failed']) ? 'Unavailable' : $money($finance['ledger_today']); ?></strong></li>
                     <?php endif; ?>
                     <?php if ($pos_sales): ?>
@@ -2486,7 +2504,7 @@ $currency_symbol = getSetting('currency_symbol');
                     <?php if ($mod_orders && $mod_bookings): ?>
                         <li><a class="js-dashboard-insight" data-insight-card="open_tabs" data-insight-label="Open tabs" href="stock-orders.php?status=placed"><span><i class="fas fa-receipt"></i> <?php echo (int)$ops['open_tabs']; ?> open tab(s)</span><strong><?php echo $money($ops['open_tabs_value']); ?></strong></a></li>
                     <?php endif; ?>
-                    <?php if ($mod_finance && $dash_perm('payments', 'refund_payment')): ?>
+                    <?php if ($moneyRefundLine): ?>
                         <li><a class="js-dashboard-insight" data-insight-card="refunds_pending" data-insight-label="Refunds pending" href="payments.php?refund_status=pending"><span><i class="fas fa-rotate-left"></i> Refunds pending</span><strong><?php echo (int)$finance['refunds_pending']; ?></strong></a></li>
                     <?php endif; ?>
                 </ul>

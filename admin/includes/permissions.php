@@ -186,7 +186,12 @@ function getAllRoles()
                 'payment_add',
                 'refund_payment',
                 'reports',
-                'bookings'
+                'bookings',
+                // Dashboard money figures (owner 2026-11-11): finance team + administrators only. New keys reach existing
+                // accountants through this default; nobody has a saved row for them yet, so no backfill rows are needed.
+                'dashboard_takings',
+                'dashboard_owed',
+                'dashboard_pos_sales'
             ]
         ],
         'viewer' => [
@@ -945,6 +950,32 @@ function getAllPermissions()
             'category' => 'Finance',
             'page' => 'payment-refund.php',
             'group' => 'payments_write'
+        ],
+        // Dashboard figures (owner 2026-11-11): the business's money standing on the Dashboard. Not pages; by default
+        // administrators and accountants only. Each card follows its own key so the owner can grant one at a time.
+        'dashboard_takings' => [
+            'label' => 'See takings on the Dashboard',
+            'description' => 'Shows the business\'s money standing: the Takings today card, the 7-day takings chart and the rooms & services takings line on the Dashboard',
+            'icon' => 'fa-coins',
+            'category' => 'Dashboard figures',
+            'page' => '', // not a page: cards on the Dashboard
+            'group' => 'reports'
+        ],
+        'dashboard_owed' => [
+            'label' => 'See Owed to us on the Dashboard',
+            'description' => 'Shows the business\'s money standing: the Owed to us card (everything guests and clients still owe) and its details on the Dashboard',
+            'icon' => 'fa-file-invoice-dollar',
+            'category' => 'Dashboard figures',
+            'page' => '', // not a page: cards on the Dashboard
+            'group' => 'reports'
+        ],
+        'dashboard_pos_sales' => [
+            'label' => 'See restaurant / till sales on the Dashboard',
+            'description' => 'Shows the business\'s money standing: the restaurant / till sales card and the till sales line on the Dashboard',
+            'icon' => 'fa-cash-register',
+            'category' => 'Dashboard figures',
+            'page' => '', // not a page: cards on the Dashboard
+            'group' => 'reports'
         ],
         'edit_templates' => [
             'label' => 'Edit message templates',
@@ -2395,6 +2426,7 @@ function getNavCategories()
         'Restaurant & Stock' => ['order' => 6, 'icon' => 'fa-boxes'],
         'Stations' => ['order' => 7, 'icon' => 'fa-display'],
         'Finance' => ['order' => 8, 'icon' => 'fa-dollar-sign'],
+        'Dashboard figures' => ['order' => 8, 'icon' => 'fa-chart-pie'], // owner 2026-11-11: money cards on the Dashboard
         'System' => ['order' => 9, 'icon' => 'fa-server'],
         'Settings' => ['order' => 10, 'icon' => 'fa-cog'],
         'Assistant' => ['order' => 10, 'icon' => 'fa-comments'],
