@@ -352,7 +352,8 @@ if (!function_exists('rh_licence_staff_run')) {
             }
             $staff[] = ['id' => $id, 'username' => (string)$u['username'], 'email' => (string)$u['email'], 'full_name' => (string)$u['full_name'],
                 'role' => $role, 'is_active' => (int)$u['is_active'], 'last_login' => $u['last_login'] !== null ? (string)$u['last_login'] : null,
-                'grants' => $ch['grants'], 'denies' => $ch['denies']];
+                'grants' => $ch['grants'], 'denies' => $ch['denies'],
+                'super_admin' => (function_exists('rh_is_super_admin_account') && rh_is_super_admin_account($id)) ? 1 : 0]; // the panel cannot change them
         }
         $roles = [];
         foreach (getAllRoles() as $k => $r) {

@@ -101,6 +101,8 @@ check(strpos($staffSrc, "\$GLOBALS['rh_staff_invite_base_url'] = \$base;") !== f
 check(substr_count($staffSrc, 'rh_staff_invite_send(') === 1, 'every provider invitation goes through that one helper');
 check(strpos($staffSrc, '$username = rh_clean_text(') !== false, 'new staff details are cleaned as on the Users page');
 check(strpos($src('includes/licence.php'), "'staff_done_id'") !== false, 'the check-in tells the panel the last change run');
+check(strpos($staffSrc, "'super_admin' => (function_exists('rh_is_super_admin_account') && rh_is_super_admin_account(\$id)) ? 1 : 0]") !== false,
+    'the staff report flags each super admin (0 before migration 080), so the panel shows them and refuses changes to them');
 
 echo "licence_staff: $pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);
