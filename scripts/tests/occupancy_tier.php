@@ -200,10 +200,18 @@ if ($t2 && $recep2) {
 if ($type) {
     echo "== edit-booking.php ==\n";
     {
-        $bid = 2098000001;
         $rate = (float)(!empty($type['price_single_occupancy']) ? $type['price_single_occupancy'] : $type['price_per_night']);
-        $seed = ["INSERT INTO bookings (id, booking_reference, room_id, guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights, number_of_guests, adult_guests, child_guests, total_amount, status, occupancy_type)
-                  VALUES ($bid, 'TIERTEST$bid', " . (int)$type['id'] . ", 'TIERTEST edit', 'tiertest@example.invalid', '+265000000003', '$ci', '$co', 2, 1, 1, 0, " . ($rate * 2) . ", 'confirmed', 'single')"];
+        $seedSql = static function (string $idCol, string $idVal, string $ref) use ($type, $ci, $co, $rate): string {
+            return "INSERT INTO bookings ({$idCol}booking_reference, room_id, guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights, number_of_guests, adult_guests, child_guests, total_amount, status, occupancy_type)
+                  VALUES ({$idVal}'{$ref}', " . (int)$type['id'] . ", 'TIERTEST edit', 'tiertest@example.invalid', '+265000000003', '$ci', '$co', 2, 1, 1, 0, " . ($rate * 2) . ", 'confirmed', 'single')";
+        };
+        // edit-booking reads the id from GET (no harness placeholder there): reserve a real id by inserting the row with
+        // no id and rolling back. The counter is already past it, so naming it in the harness seed cannot move
+        // AUTO_INCREMENT (a fixed huge id used to push the live counter to ~2.1 billion) and no real booking can get it.
+        $pdo->beginTransaction();
+        try { $pdo->exec($seedSql('', '', 'TIERTESTR' . random_int(100000, 999999))); $bid = (int)$pdo->lastInsertId(); } finally { $pdo->rollBack(); }
+        ok('reserved a booking id below the counter', $bid > 0);
+        $seed = [$seedSql('id, ', "$bid, ", "TIERTEST$bid")];
         $post = ['guest_name' => 'TIERTEST edit', 'guest_email' => 'tiertest@example.invalid', 'check_in_date' => $ci, 'check_out_date' => $co,
             'number_of_guests' => '2', 'child_guests' => '0', 'occupancy_type' => 'single', 'individual_room_id' => '', 'notify_guest' => '0'];
         $verifyE = ["SELECT number_of_guests, occupancy_type FROM bookings WHERE id = $bid", "SELECT note FROM booking_audit_log WHERE booking_id = $bid ORDER BY id DESC LIMIT 1"];

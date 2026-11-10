@@ -24,16 +24,17 @@ require_once $root . '/includes/pricing.php';
 
 $out = [];
 $run = strtoupper(bin2hex(random_bytes(3)));
-$pid = random_int(2000000000, 2100000000);
-$sid = $pid + 1;
 $in = date('Y-m-d', strtotime('+400 day'));
 $outd = date('Y-m-d', strtotime('+402 day'));
-$ins = $pdo->prepare("INSERT INTO bookings (id, booking_reference, room_id, primary_booking_id, guest_name, guest_email, guest_phone, guest_country, number_of_guests, adult_guests, child_guests,
+// No explicit ids (a fixed/random huge id moves the live AUTO_INCREMENT even when rolled back).
+$ins = $pdo->prepare("INSERT INTO bookings (booking_reference, room_id, primary_booking_id, guest_name, guest_email, guest_phone, guest_country, number_of_guests, adult_guests, child_guests,
         child_price_multiplier, check_in_date, check_out_date, number_of_nights, total_amount, child_supplement_total, tourism_levy_amount, tourism_levy_percent,
         vat_rate, vat_amount, total_with_vat, status, payment_status, is_tentative, occupancy_type, client_uuid, created_at)
-    VALUES (?,?,?,?,?,?,?,?,2,2,0,50,?,?,2,100000,0,0,0,0,0,100000,'confirmed','unpaid',0,'double',?,NOW())");
-$ins->execute([$pid, 'RGN' . $run . 'A', $rid, null, 'RGN LEAD', 'rgn@example.invalid', '+265000000004', 'Malawi', $in, $outd, bin2hex(random_bytes(16))]);
-$ins->execute([$sid, 'RGN' . $run . 'B', $rid, $pid, 'RGN LEAD', 'rgn@example.invalid', '+265000000004', 'Malawi', $in, $outd, bin2hex(random_bytes(16))]);
+    VALUES (?,?,?,?,?,?,?,2,2,0,50,?,?,2,100000,0,0,0,0,0,100000,'confirmed','unpaid',0,'double',?,NOW())");
+$ins->execute(['RGN' . $run . 'A', $rid, null, 'RGN LEAD', 'rgn@example.invalid', '+265000000004', 'Malawi', $in, $outd, bin2hex(random_bytes(16))]);
+$pid = (int)$pdo->lastInsertId();
+$ins->execute(['RGN' . $run . 'B', $rid, $pid, 'RGN LEAD', 'rgn@example.invalid', '+265000000004', 'Malawi', $in, $outd, bin2hex(random_bytes(16))]);
+$sid = (int)$pdo->lastInsertId();
 $setNames = $pdo->prepare("UPDATE bookings SET room_guest_name = ? WHERE id = ?");
 $evil = '<script>alert(1)</script>';
 

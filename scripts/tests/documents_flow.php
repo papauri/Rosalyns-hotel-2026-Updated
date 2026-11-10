@@ -22,6 +22,7 @@ chdir($root);
 // 02:00 Malawi time and checkout was refused as a late departure.
 $tzTest = trim((string)(getenv('HOTEL_TIMEZONE') ?: 'Africa/Blantyre'));
 date_default_timezone_set(in_array($tzTest, timezone_identifiers_list(), true) ? $tzTest : 'Africa/Blantyre');
+require_once $root . '/config/database.php'; // dx_next_id() reserves ids on this connection
 $harness = $root . '/scripts/tests/page_harness.php';
 $pass = 0; $fail = 0;
 function ok(string $name, bool $cond, string $detail = ''): void {
@@ -44,10 +45,15 @@ for ($i = 0; $i < 50 && !is_file($spool . '.ready'); $i++) { usleep(100000); }
 if (!is_resource($smtp) || !is_file($spool . '.ready')) { echo "[FAIL] capture SMTP server did not start\n"; exit(1); }
 
 // ---- PDF clean-up bookkeeping --------------------------------------------------------------------------------
+// Every PDF under invoices/ (receipts/, credit-notes/ too) and quotations/: the ones that appear during the run are
+// removed at the end; a file that existed before the run is never touched.
 function dx_files(string $root): array {
     $set = [];
-    foreach (['invoices', 'invoices/receipts'] as $d) {
-        foreach (glob($root . '/' . $d . '/*') ?: [] as $f) { if (is_file($f)) { $set[$f] = true; } }
+    foreach (['invoices', 'quotations'] as $d) {
+        if (!is_dir($root . '/' . $d)) { continue; }
+        foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root . '/' . $d, FilesystemIterator::SKIP_DOTS)) as $f) {
+            if ($f->isFile() && strtolower($f->getExtension()) === 'pdf') { $set[$f->getPathname()] = true; }
+        }
     }
     return $set;
 }
@@ -55,7 +61,10 @@ $filesBefore = dx_files($root);
 register_shutdown_function(function () use (&$smtp, $spool, $root, $filesBefore) {
     if (is_resource($smtp)) { proc_terminate($smtp); proc_close($smtp); }
     @unlink($spool); @unlink($spool . '.ready');
-    foreach (array_diff_key(dx_files($root), $filesBefore) as $f => $_) { @unlink($f); }
+    // Retried briefly: a synced folder can hold a just-written file open (the old single try left PDFs behind).
+    foreach (array_diff_key(dx_files($root), $filesBefore) as $f => $_) {
+        for ($i = 0; $i < 10 && is_file($f) && !@unlink($f); $i++) { usleep(300000); clearstatcache(true, $f); }
+    }
 });
 
 // ---- helpers --------------------------------------------------------------------------------------------------
@@ -110,23 +119,51 @@ function dx_child(string $scenario, array $params = [], array $opts = []): array
 function dx_clean(array $r): bool { return !empty($r['rolled_back']) && empty($r['leak']) && empty($r['marker_lost']); }
 function dx_q(string $v): string { return "'" . str_replace("'", "''", $v) . "'"; }
 
-$rid = 0;
-function dx_next_id(): int { global $rid; return random_int(2000000000, 2100000000) + (++$rid); }
-function dx_booking_sql(int $id, string $ref, string $email, string $status = 'confirmed', ?string $in = null, ?string $out = null, int $nights = 1): string {
+/**
+ * An id for $table that the pages can be given in GET/POST: the row is inserted with no id and rolled back, so the
+ * counter is already past it and naming it in the harness setup cannot move AUTO_INCREMENT (a random huge id used to
+ * push the live counters to ~2.1 billion even inside a rolled-back run) and no real record can ever get it.
+ */
+function dx_next_id(string $table = 'bookings'): int {
+    global $pdo;
+    $tag = 'DXRSV' . random_int(10000, 99999);
+    $pdo->beginTransaction();
+    try {
+        if ($table === 'conference_inquiries') {
+            $pdo->exec(dx_conf_sql(null, $tag, ''));
+            return (int)$pdo->lastInsertId();
+        }
+        $pdo->exec(dx_booking_sql(null, $tag, ''));
+        $b = (int)$pdo->lastInsertId();
+        if ($table === 'payments') {
+            $pdo->exec(dx_payment_sql(null, $b, $tag, 'pending', 1.0));
+            return (int)$pdo->lastInsertId();
+        }
+        if ($table === 'quotations') {
+            $pdo->exec("INSERT INTO quotations (booking_id, booking_type, quote_reference, total_amount, valid_days, valid_until, status) VALUES ($b, 'room', " . dx_q('QT-' . $tag) . ", 1, 7, CURDATE(), 'sent')");
+            return (int)$pdo->lastInsertId();
+        }
+        return $b;
+    } finally {
+        $pdo->rollBack();
+    }
+}
+/** $id null = no id column (dx_next_id). */
+function dx_booking_sql(?int $id, string $ref, string $email, string $status = 'confirmed', ?string $in = null, ?string $out = null, int $nights = 1): string {
     $in = $in ?? date('Y-m-d', strtotime('+400 day')); $out = $out ?? date('Y-m-d', strtotime('+401 day'));
-    return "INSERT INTO bookings (id, booking_reference, room_id, guest_name, guest_email, guest_phone, guest_country, number_of_guests, adult_guests, child_guests,
+    return "INSERT INTO bookings (" . ($id === null ? '' : 'id, ') . "booking_reference, room_id, guest_name, guest_email, guest_phone, guest_country, number_of_guests, adult_guests, child_guests,
             child_price_multiplier, check_in_date, check_out_date, number_of_nights, total_amount, child_supplement_total, tourism_levy_amount, tourism_levy_percent,
             vat_rate, vat_amount, total_with_vat, special_requests, status, payment_status, is_tentative, occupancy_type, client_uuid, created_at)
-        VALUES ($id, " . dx_q($ref) . ", (SELECT id FROM rooms ORDER BY id LIMIT 1), 'DOCS TEST', " . dx_q($email) . ", '+265000000009', 'Malawi', 2, 2, 0, 50, " . dx_q($in) . ", " . dx_q($out) . ", " . $nights . ", 100, 0, 0, 0, 0, 0, 100, 'documents test', " . dx_q($status) . ", 'unpaid', 0, 'double', " . dx_q(bin2hex(random_bytes(16))) . ", NOW())";
+        VALUES (" . ($id === null ? '' : "$id, ") . dx_q($ref) . ", (SELECT id FROM rooms ORDER BY id LIMIT 1), 'DOCS TEST', " . dx_q($email) . ", '+265000000009', 'Malawi', 2, 2, 0, 50, " . dx_q($in) . ", " . dx_q($out) . ", " . $nights . ", 100, 0, 0, 0, 0, 0, 100, 'documents test', " . dx_q($status) . ", 'unpaid', 0, 'double', " . dx_q(bin2hex(random_bytes(16))) . ", NOW())";
 }
-function dx_payment_sql(int $id, int $bookingId, string $ref, string $status, float $amount, ?string $receipt = null): string {
-    return "INSERT INTO payments (id, payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+function dx_payment_sql(?int $id, int $bookingId, string $ref, string $status, float $amount, ?string $receipt = null): string {
+    return "INSERT INTO payments (" . ($id === null ? '' : 'id, ') . "payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount,
             payment_method, payment_type, payment_status, status, receipt_number, created_at)
-        VALUES ($id, " . dx_q('PDXT' . $id) . ", 'room', $bookingId, " . dx_q($ref) . ", CURDATE(), $amount, 0, 0, $amount, 'cash', 'partial_payment', " . dx_q($status) . ", " . dx_q($status === 'completed' ? 'completed' : 'pending') . ", " . ($receipt === null ? 'NULL' : dx_q($receipt)) . ", NOW())";
+        VALUES (" . ($id === null ? '' : "$id, ") . dx_q('PDXT' . ($id ?? $ref)) . ", 'room', $bookingId, " . dx_q($ref) . ", CURDATE(), $amount, 0, 0, $amount, 'cash', 'partial_payment', " . dx_q($status) . ", " . dx_q($status === 'completed' ? 'completed' : 'pending') . ", " . ($receipt === null ? 'NULL' : dx_q($receipt)) . ", NOW())";
 }
-function dx_conf_sql(int $id, string $ref, string $email): string {
-    return "INSERT INTO conference_inquiries (id, inquiry_reference, conference_room_id, company_name, contact_person, email, phone, event_date, start_time, end_time, number_of_attendees, status, total_amount, total_with_vat, amount_due, created_at)
-        VALUES ($id, " . dx_q($ref) . ", 0, 'DOCS CO', 'DOCS PERSON', " . dx_q($email) . ", '+265000000009', " . dx_q(date('Y-m-d', strtotime('+400 day'))) . ", '09:00:00', '17:00:00', 10, 'confirmed', 100, 100, 100, NOW())";
+function dx_conf_sql(?int $id, string $ref, string $email): string {
+    return "INSERT INTO conference_inquiries (" . ($id === null ? '' : 'id, ') . "inquiry_reference, conference_room_id, company_name, contact_person, email, phone, event_date, start_time, end_time, number_of_attendees, status, total_amount, total_with_vat, amount_due, created_at)
+        VALUES (" . ($id === null ? '' : "$id, ") . dx_q($ref) . ", 0, 'DOCS CO', 'DOCS PERSON', " . dx_q($email) . ", '+265000000009', " . dx_q(date('Y-m-d', strtotime('+400 day'))) . ", '09:00:00', '17:00:00', 10, 'confirmed', 100, 100, 100, NOW())";
 }
 $verifyPay = ["SELECT payment_status, receipt_number IS NOT NULL AS has_receipt_no, receipt_emailed_at IS NOT NULL AS emailed, receipt_email_count AS cnt FROM payments WHERE booking_reference LIKE 'DX%' ORDER BY id"];
 $mail = 'docs-test@example.invalid';
@@ -149,14 +186,14 @@ $bid = dx_next_id(); $ref = 'DXRM' . $bid % 100000;
 $r = dx_run('admin/payment-add.php', array_merge($post, ['booking_id' => $bid, 'payment_status' => 'pending']), ['setup' => [dx_booking_sql($bid, $ref, $mail)], 'verify' => ["SELECT payment_status, receipt_emailed_at IS NOT NULL AS emailed FROM payments WHERE booking_id = $bid"]]);
 ok('pending room payment: saved, but NO email (nothing received yet)', count($r['emails']) === 0 && ($r['verify'][0][0]['payment_status'] ?? '') === 'pending', json_encode([dx_kinds($r['emails']), $r['verify'][0] ?? $r]));
 
-$bid = dx_next_id(); $ref = 'DXRM' . $bid % 100000; $pid = dx_next_id();
+$bid = dx_next_id(); $ref = 'DXRM' . $bid % 100000; $pid = dx_next_id('payments');
 $post3 = array_merge($post, ['booking_id' => $bid, 'payment_status' => 'completed']);
 $v3 = ["SELECT payment_status, receipt_number IS NOT NULL AS has_receipt_no, receipt_emailed_at IS NOT NULL AS emailed, receipt_email_count AS cnt FROM payments WHERE id = $pid"];
 $r = dx_run('admin/payment-add.php', $post3, ['get' => ['edit' => $pid], 'setup' => [dx_booking_sql($bid, $ref, $mail), dx_payment_sql($pid, $bid, $ref, 'pending', 40.0)], 'verify' => $v3]);
 ok('pending -> completed (admin edit): exactly ONE receipt emailed on that transition', dx_count($r['emails'], 'receipt') === 1 && count($r['emails']) === 1, json_encode([dx_kinds($r['emails']), $r['verify'][0] ?? $r]));
 ok('pending -> completed (admin edit): receipt number issued and marked emailed', ($r['verify'][0][0]['has_receipt_no'] ?? 0) == 1 && ($r['verify'][0][0]['emailed'] ?? 0) == 1);
 
-$bid = dx_next_id(); $ref = 'DXRM' . $bid % 100000; $pid = dx_next_id();
+$bid = dx_next_id(); $ref = 'DXRM' . $bid % 100000; $pid = dx_next_id('payments');
 $r = dx_run('admin/payment-add.php', array_merge($post3, ['booking_id' => $bid]), ['get' => ['edit' => $pid], 'setup' => [dx_booking_sql($bid, $ref, $mail), dx_payment_sql($pid, $bid, $ref, 'completed', 40.0, 'RDXOLD' . $pid)], 'verify' => ["SELECT receipt_email_count AS cnt FROM payments WHERE id = $pid"]]);
 $r2 = $r;
 ok('editing an already-completed payment that was never receipted sends its receipt once, not twice', dx_count($r['emails'], 'receipt') <= 1, json_encode(dx_kinds($r['emails'])));
@@ -166,7 +203,7 @@ $r = dx_run('admin/payment-add.php', array_merge($post, ['booking_id' => $bid]),
 ok('room payment, guest has no email: payment still saved, nothing emailed, not marked emailed', count($r['emails']) === 0 && ($r['verify'][0][0]['payment_status'] ?? '') === 'completed' && ($r['verify'][0][0]['emailed'] ?? 1) == 0, json_encode([dx_kinds($r['emails']), $r['verify'][0] ?? $r]));
 
 echo "== CONFERENCE: admin/payment-add.php ==\n";
-$cid = dx_next_id(); $cref = 'DXCF' . $cid % 100000;
+$cid = dx_next_id('conference_inquiries'); $cref = 'DXCF' . $cid % 100000;
 $r = dx_run('admin/payment-add.php', ['booking_type' => 'conference', 'booking_id' => $cid, 'payment_amount' => '40', 'payment_date' => $today, 'payment_method' => 'cash', 'payment_status' => 'completed', 'transaction_reference' => '', 'notes' => '', 'cc_emails' => ''],
     ['setup' => [dx_conf_sql($cid, $cref, $mail)], 'verify' => ["SELECT payment_status, receipt_emailed_at IS NOT NULL AS emailed FROM payments WHERE booking_type = 'conference' AND booking_id = $cid"]]);
 ok('conference payment: exactly ONE receipt emailed (was an invoice before)', dx_count($r['emails'], 'receipt') === 1 && count($r['emails']) === 1, json_encode([dx_kinds($r['emails']), $r['verify'][0] ?? $r]));
@@ -193,12 +230,12 @@ $r = dx_run('admin/bookings.php', ['action' => 'checkout', 'id' => $bid, 'confir
 ok('checkout WITH a balance owed: a Final Invoice is emailed (a request for the balance)', dx_count($r['emails'], 'final_invoice') === 1 && dx_count($r['emails'], 'statement') === 0, json_encode([dx_kinds($r['emails']), $r['verify'][0] ?? $r, $r['raw'] ?? '']));
 ok('checkout WITH a balance owed: the invoice carries a PDF', dx_has_pdf($r['emails'], 'final_invoice'));
 
-$bid = dx_next_id(); $ref = 'DXRM' . $bid % 100000; $pid = dx_next_id();
+$bid = dx_next_id(); $ref = 'DXRM' . $bid % 100000; $pid = dx_next_id('payments');
 $r = dx_run('admin/bookings.php', ['action' => 'checkout', 'id' => $bid], ['setup' => [dx_booking_sql($bid, $ref, $mail, 'checked-in', $yest, $today), dx_payment_sql($pid, $bid, $ref, 'completed', 100.0, 'RDXPAID' . $pid)], 'verify' => ["SELECT status, amount_due, final_invoice_generated FROM bookings WHERE id = $bid"]]);
 ok('checkout PAID IN FULL: NO final invoice (the guest already holds the receipts)', dx_count($r['emails'], 'final_invoice') === 0 && dx_count($r['emails'], 'invoice') === 0, json_encode([dx_kinds($r['emails']), $r['verify'][0] ?? $r, $r['raw'] ?? '']));
 ok('checkout PAID IN FULL: a paid-in-full stay STATEMENT is sent instead, with the PDF', dx_count($r['emails'], 'statement') === 1 && dx_has_pdf($r['emails'], 'statement'), json_encode(dx_kinds($r['emails'])));
 
-$bid = dx_next_id(); $ref = 'DXRM' . $bid % 100000; $pid = dx_next_id();
+$bid = dx_next_id(); $ref = 'DXRM' . $bid % 100000; $pid = dx_next_id('payments');
 $r = dx_run('admin/bookings.php', ['action' => 'checkout_settle', 'id' => $bid, 'settlement_action' => 'refund', 'payment_method' => 'cash', 'notes' => 'documents test'], ['ajax' => true,
     'setup' => [dx_booking_sql($bid, $ref, $mail, 'checked-in', date('Y-m-d', strtotime('-2 day')), date('Y-m-d', strtotime('+2 day')), 4), dx_payment_sql($pid, $bid, $ref, 'completed', 100.0, 'RDXPAID' . $pid)],
     'verify' => ["SELECT COUNT(*) AS refunds, COALESCE(SUM(total_amount),0) AS refunded FROM payments WHERE booking_id = $bid AND payment_type = 'refund'"]]);
@@ -266,7 +303,7 @@ $j = $r['json'] ?? [];
 ok('quotation sent twice: one register row (refreshed total and validity), PDF saved, long title accepted', !empty($j['inserted_ok']) && ($j['row_count'] ?? 0) === 1 && abs(($j['total'] ?? 0) - 250) < 0.01 && ($j['valid_days'] ?? 0) === 14 && !empty($j['pdf_saved']) && !empty($j['long_title_ok']), json_encode($j ?: $r));
 ok('quotation PDF cleanup removes the file but never a path outside quotations/', !empty($j['unlinked']) && !empty($j['outside_kept']), json_encode($j ?: $r));
 ok('  quotation register rolled back', dx_clean($r), json_encode($r));
-$qid = dx_next_id(); $qref = 'DQ' . ($qid % 100000); $qfile = 'quotations/DX-TEST-' . $qid . '.pdf';
+$qid = dx_next_id('conference_inquiries'); $qref = 'DQ' . ($qid % 100000); $qfile = 'quotations/DX-TEST-' . $qid . '.pdf';
 if (!is_dir($root . '/quotations')) { @mkdir($root . '/quotations', 0755, true); }
 file_put_contents($root . '/' . $qfile, '%PDF-1.4 delete test');
 $r = dx_run('admin/conference-management.php', ['enquiry_action' => 'delete_enquiry', 'enquiry_id' => $qid], [
@@ -338,7 +375,7 @@ ok('  late statement rolled back', dx_clean($r), json_encode($r));
 
 // A payment created PENDING before checkout, marked collected (admin edit) AFTER the checkout invoice was emailed:
 // it still earns exactly one paid-in-full statement; saving it again sends nothing more.
-$bid = dx_next_id(); $ref = 'DXPE' . $bid % 100000; $pid = dx_next_id(); $finPe = 'INV-DXPE-' . $bid % 100000;
+$bid = dx_next_id(); $ref = 'DXPE' . $bid % 100000; $pid = dx_next_id('payments'); $finPe = 'INV-DXPE-' . $bid % 100000;
 $peSetup = [dx_booking_sql($bid, $ref, $mail, 'checked-out'), dx_payment_sql($pid, $bid, $ref, 'pending', 100.0),
     "UPDATE payments SET created_at = DATE_SUB(NOW(), INTERVAL 2 HOUR), updated_at = DATE_SUB(NOW(), INTERVAL 2 HOUR) WHERE id = $pid",
     "UPDATE bookings SET final_invoice_generated = 1, final_invoice_number = " . dx_q($finPe) . ", final_invoice_path = " . dx_q('invoices/' . $finPe . '.pdf') . ", final_invoice_sent_at = DATE_SUB(NOW(), INTERVAL 1 HOUR) WHERE id = $bid"];
@@ -347,7 +384,7 @@ $r = dx_run('admin/payment-add.php', $pePost, ['get' => ['edit' => $pid], 'setup
 ok('F3 pending-before-checkout payment marked collected after the checkout invoice: ONE receipt and ONE statement, same invoice number', dx_count($r['emails'], 'receipt') === 1 && dx_count($r['emails'], 'statement') === 1 && ($r['verify'][0][0]['fin'] ?? '') === $finPe, json_encode([dx_kinds($r['emails']), $r['verify'][0] ?? $r, $r['output_flash'] ?? '']));
 @unlink($root . '/invoices/' . $finPe . '.pdf');
 ok('  pending->collected statement rolled back', dx_clean($r), json_encode($r));
-$bid = dx_next_id(); $ref = 'DXPF' . $bid % 100000; $pid = dx_next_id(); $finPe = 'INV-DXPF-' . $bid % 100000;
+$bid = dx_next_id(); $ref = 'DXPF' . $bid % 100000; $pid = dx_next_id('payments'); $finPe = 'INV-DXPF-' . $bid % 100000;
 $resave = [dx_booking_sql($bid, $ref, $mail, 'checked-out'), dx_payment_sql($pid, $bid, $ref, 'completed', 100.0, 'RDXPF' . $pid),
     "UPDATE payments SET receipt_emailed_at = NOW(), receipt_email_count = 1, created_at = DATE_SUB(NOW(), INTERVAL 2 HOUR) WHERE id = $pid",
     "UPDATE bookings SET final_invoice_generated = 1, final_invoice_number = " . dx_q($finPe) . ", final_invoice_path = " . dx_q('invoices/' . $finPe . '.pdf') . ", final_invoice_sent_at = NOW() WHERE id = $bid"];
@@ -356,7 +393,7 @@ ok('F3 re-saving that collected payment again sends nothing more (no second stat
 @unlink($root . '/invoices/' . $finPe . '.pdf');
 ok('  re-save rolled back', dx_clean($r), json_encode($r));
 
-$bid = dx_next_id(); $ref = 'DXRG' . $bid % 100000; $pid = dx_next_id(); $fin = 'INV-DXREG-' . $bid % 100000;
+$bid = dx_next_id(); $ref = 'DXRG' . $bid % 100000; $pid = dx_next_id('payments'); $fin = 'INV-DXREG-' . $bid % 100000;
 $r = dx_run('admin/booking-details.php', ['invoice_action' => 'regenerate_invoice'], ['get' => ['id' => $bid],
     'setup' => [dx_booking_sql($bid, $ref, $mail, 'checked-out'), dx_payment_sql($pid, $bid, $ref, 'completed', 100.0, 'RDXG' . $bid % 100000),
         "UPDATE bookings SET amount_paid = 100, amount_due = 0, payment_status = 'paid', final_invoice_generated = 1, final_invoice_number = " . dx_q($fin) . ", final_invoice_path = " . dx_q('invoices/' . $fin . '.pdf') . " WHERE id = $bid"],
@@ -365,7 +402,7 @@ ok('F3 Regenerate on a fully paid booking keeps its invoice number and writes th
 @unlink($root . '/invoices/' . $fin . '.pdf');
 ok('  regenerate rolled back', dx_clean($r), json_encode($r));
 
-$bid = dx_next_id(); $ref = 'DXQR' . $bid % 100000; $qid2 = dx_next_id();
+$bid = dx_next_id(); $ref = 'DXQR' . $bid % 100000; $qid2 = dx_next_id('quotations');
 $r = dx_run('admin/quotations.php', ['action' => 'resend', 'quotation_id' => $qid2], [
     'setup' => [dx_booking_sql($bid, $ref, $mail),
         "UPDATE bookings SET number_of_nights = 2, check_out_date = DATE_ADD(check_in_date, INTERVAL 2 DAY), total_amount = 229787.23, vat_amount = 40212.77, vat_rate = 17.5, total_with_vat = 270000 WHERE id = $bid",

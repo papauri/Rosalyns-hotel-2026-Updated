@@ -11,33 +11,33 @@ require_once $root . '/includes/finance-sequences.php';
 require_once $root . '/admin/includes/finance-account-sync.php';
 require_once $root . '/admin/includes/account-record-payment.php';
 
-function pl_id(): int { return random_int(2000000000, 2100000000); }
+// No explicit ids: a random huge id moves the live AUTO_INCREMENT even when the run is rolled back.
 function pl_booking(PDO $pdo, string $status = 'confirmed'): array {
-    $id = pl_id(); $ref = 'PLA' . random_int(10000, 99999);
+    $ref = 'PLA' . random_int(10000, 99999);
     $in = date('Y-m-d', strtotime('+400 day')); $outd = date('Y-m-d', strtotime('+401 day'));
-    $pdo->prepare("INSERT INTO bookings (id, booking_reference, room_id, guest_name, guest_email, guest_phone, guest_country, number_of_guests, adult_guests, child_guests,
+    $pdo->prepare("INSERT INTO bookings (booking_reference, room_id, guest_name, guest_email, guest_phone, guest_country, number_of_guests, adult_guests, child_guests,
             child_price_multiplier, check_in_date, check_out_date, number_of_nights, total_amount, child_supplement_total, tourism_levy_amount, tourism_levy_percent,
             vat_rate, vat_amount, total_with_vat, special_requests, status, payment_status, is_tentative, occupancy_type, client_uuid, created_at)
-        VALUES (?,?,(SELECT id FROM rooms ORDER BY id LIMIT 1),'LIMITS TEST','','+265000000009','Malawi',2,2,0,50,?,?,1,100,0,0,0,0,0,100,'limits test',?,'unpaid',0,'double',?,NOW())")
-        ->execute([$id, $ref, $in, $outd, $status, bin2hex(random_bytes(16))]);
-    return [$id, $ref];
+        VALUES (?,(SELECT id FROM rooms ORDER BY id LIMIT 1),'LIMITS TEST','','+265000000009','Malawi',2,2,0,50,?,?,1,100,0,0,0,0,0,100,'limits test',?,'unpaid',0,'double',?,NOW())")
+        ->execute([$ref, $in, $outd, $status, bin2hex(random_bytes(16))]);
+    return [(int)$pdo->lastInsertId(), $ref];
 }
 function pl_pay(PDO $pdo, string $type, int $bid, string $ref, float $amt): void {
-    $pdo->prepare("INSERT INTO payments (id, payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+    $pdo->prepare("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount,
             payment_method, payment_type, payment_status, status, receipt_number, created_at)
-        VALUES (?,?,?,?,?,CURDATE(),?,0,0,?,'cash','partial_payment','completed','completed',?,NOW())")
-        ->execute([pl_id(), 'PLP' . random_int(100000, 999999), $type, $bid, $ref, $amt, $amt, 'RPL' . random_int(100000, 999999)]);
+        VALUES (?,?,?,?,CURDATE(),?,0,0,?,'cash','partial_payment','completed','completed',?,NOW())")
+        ->execute(['PLP' . random_int(100000, 999999), $type, $bid, $ref, $amt, $amt, 'RPL' . random_int(100000, 999999)]);
 }
 function pl_account(PDO $pdo, string $type): array {
-    $id = pl_id(); $ref = 'PLA' . random_int(10000, 99999);
+    $ref = 'PLA' . random_int(10000, 99999);
     if ($type === 'gym') {
-        $pdo->prepare("INSERT INTO gym_inquiries (id, reference_number, name, email, phone, membership_type, status, total_amount, total_with_vat, amount_due, created_at) VALUES (?,?,?,?,?,?,'confirmed',100,100,100,NOW())")->execute([$id, $ref, 'LIMITS GYM', '', '+265000000009', 'Monthly']);
+        $pdo->prepare("INSERT INTO gym_inquiries (reference_number, name, email, phone, membership_type, status, total_amount, total_with_vat, amount_due, created_at) VALUES (?,?,?,?,?,'confirmed',100,100,100,NOW())")->execute([$ref, 'LIMITS GYM', '', '+265000000009', 'Monthly']);
     } elseif ($type === 'event') {
-        $pdo->prepare("INSERT INTO event_inquiries (id, reference_number, event_id, name, email, phone, status, total_amount, total_with_vat, amount_due, created_at) VALUES (?,?,0,?,?,?,'confirmed',100,100,100,NOW())")->execute([$id, $ref, 'LIMITS EVENT', '', '+265000000009']);
+        $pdo->prepare("INSERT INTO event_inquiries (reference_number, event_id, name, email, phone, status, total_amount, total_with_vat, amount_due, created_at) VALUES (?,0,?,?,?,'confirmed',100,100,100,NOW())")->execute([$ref, 'LIMITS EVENT', '', '+265000000009']);
     } else {
-        $pdo->prepare("INSERT INTO conference_inquiries (id, inquiry_reference, conference_room_id, company_name, contact_person, email, phone, event_date, start_time, end_time, number_of_attendees, status, total_amount, total_with_vat, amount_due, created_at) VALUES (?,?,0,?,?,?,?,?, '09:00:00','17:00:00',10,'confirmed',100,100,100,NOW())")->execute([$id, $ref, 'LIMITS CO', 'LIMITS PERSON', '', '+265000000009', date('Y-m-d', strtotime('+400 day'))]);
+        $pdo->prepare("INSERT INTO conference_inquiries (inquiry_reference, conference_room_id, company_name, contact_person, email, phone, event_date, start_time, end_time, number_of_attendees, status, total_amount, total_with_vat, amount_due, created_at) VALUES (?,0,?,?,?,?,?, '09:00:00','17:00:00',10,'confirmed',100,100,100,NOW())")->execute([$ref, 'LIMITS CO', 'LIMITS PERSON', '', '+265000000009', date('Y-m-d', strtotime('+400 day'))]);
     }
-    return [$id, $ref];
+    return [(int)$pdo->lastInsertId(), $ref];
 }
 $admin = $pdo->query("SELECT id, full_name FROM admin_users WHERE is_active = 1 ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
 $out = ['scenario' => $sc];

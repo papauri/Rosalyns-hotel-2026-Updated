@@ -20,41 +20,38 @@ require_once $root . '/admin/includes/restaurant-payment-sync.php';
 $run = strtoupper(bin2hex(random_bytes(3)));
 $out = ['scenario' => $sc];
 
-function dx_id(): int { return random_int(2000000000, 2100000000); }
+// No explicit ids: a random huge id moves the live AUTO_INCREMENT even when the run is rolled back.
 function dx_room_type(PDO $pdo): int { return (int)$pdo->query("SELECT id FROM rooms ORDER BY id LIMIT 1")->fetchColumn(); }
 function dx_booking(PDO $pdo, string $run, string $email, string $status = 'confirmed'): array {
-    $id = dx_id();
     $ref = 'DX' . $run . random_int(10, 99);
     $in = date('Y-m-d', strtotime('+400 day')); $outd = date('Y-m-d', strtotime('+401 day'));
-    $pdo->prepare("INSERT INTO bookings (id, booking_reference, room_id, guest_name, guest_email, guest_phone, guest_country, number_of_guests, adult_guests, child_guests,
+    $pdo->prepare("INSERT INTO bookings (booking_reference, room_id, guest_name, guest_email, guest_phone, guest_country, number_of_guests, adult_guests, child_guests,
             child_price_multiplier, check_in_date, check_out_date, number_of_nights, total_amount, child_supplement_total, tourism_levy_amount, tourism_levy_percent,
             vat_rate, vat_amount, total_with_vat, special_requests, status, payment_status, is_tentative, occupancy_type, client_uuid, created_at)
-        VALUES (?,?,?,?,?,?,?,2,2,0,50,?,?,1,100,0,0,0,0,0,100,'documents test',?,'unpaid',0,'double',?,NOW())")
-        ->execute([$id, $ref, dx_room_type($pdo), 'DOCS TEST', $email, '+265000000009', 'Malawi', $in, $outd, $status, bin2hex(random_bytes(16))]);
-    return [$id, $ref];
+        VALUES (?,?,?,?,?,?,2,2,0,50,?,?,1,100,0,0,0,0,0,100,'documents test',?,'unpaid',0,'double',?,NOW())")
+        ->execute([$ref, dx_room_type($pdo), 'DOCS TEST', $email, '+265000000009', 'Malawi', $in, $outd, $status, bin2hex(random_bytes(16))]);
+    return [(int)$pdo->lastInsertId(), $ref];
 }
 function dx_payment(PDO $pdo, string $run, string $type, int $bookingId, string $ref, string $status, float $amount = 40.0, ?string $receipt = null): int {
-    $id = dx_id();
-    $pdo->prepare("INSERT INTO payments (id, payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+    $pdo->prepare("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount,
             payment_method, payment_type, payment_status, status, receipt_number, created_at)
-        VALUES (?,?,?,?,?,CURDATE(),?,0,0,?, 'cash','partial_payment',?,?,?,NOW())")
-        ->execute([$id, 'PDX' . $run . random_int(100, 999), $type, $bookingId, $ref, $amount, $amount, $status, $status === 'completed' ? 'completed' : 'pending', $receipt]);
-    return $id;
+        VALUES (?,?,?,?,CURDATE(),?,0,0,?, 'cash','partial_payment',?,?,?,NOW())")
+        ->execute(['PDX' . $run . random_int(100, 999), $type, $bookingId, $ref, $amount, $amount, $status, $status === 'completed' ? 'completed' : 'pending', $receipt]);
+    return (int)$pdo->lastInsertId();
 }
 function dx_account(PDO $pdo, string $run, string $type, string $email): array {
-    $id = dx_id();
     $ref = strtoupper(substr($type, 0, 1)) . 'X' . $run . random_int(10, 99);
     if ($type === 'gym') {
-        $pdo->prepare("INSERT INTO gym_inquiries (id, reference_number, name, email, phone, membership_type, status, total_amount, total_with_vat, amount_due, created_at)
-            VALUES (?,?,?,?,?,?,'confirmed',100,100,100,NOW())")->execute([$id, $ref, 'DOCS GYM', $email, '+265000000009', 'Monthly']);
+        $pdo->prepare("INSERT INTO gym_inquiries (reference_number, name, email, phone, membership_type, status, total_amount, total_with_vat, amount_due, created_at)
+            VALUES (?,?,?,?,?,'confirmed',100,100,100,NOW())")->execute([$ref, 'DOCS GYM', $email, '+265000000009', 'Monthly']);
     } elseif ($type === 'event') {
-        $pdo->prepare("INSERT INTO event_inquiries (id, reference_number, event_id, name, email, phone, status, total_amount, total_with_vat, amount_due, created_at)
-            VALUES (?,?,0,?,?,?,'confirmed',100,100,100,NOW())")->execute([$id, $ref, 'DOCS EVENT', $email, '+265000000009']);
+        $pdo->prepare("INSERT INTO event_inquiries (reference_number, event_id, name, email, phone, status, total_amount, total_with_vat, amount_due, created_at)
+            VALUES (?,0,?,?,?,'confirmed',100,100,100,NOW())")->execute([$ref, 'DOCS EVENT', $email, '+265000000009']);
     } else {
-        $pdo->prepare("INSERT INTO conference_inquiries (id, inquiry_reference, conference_room_id, company_name, contact_person, email, phone, event_date, start_time, end_time, number_of_attendees, status, total_amount, total_with_vat, amount_due, created_at)
-            VALUES (?,?,0,?,?,?,?,?, '09:00:00','17:00:00',10,'confirmed',100,100,100,NOW())")->execute([$id, $ref, 'DOCS CO', 'DOCS PERSON', $email, '+265000000009', date('Y-m-d', strtotime('+400 day'))]);
+        $pdo->prepare("INSERT INTO conference_inquiries (inquiry_reference, conference_room_id, company_name, contact_person, email, phone, event_date, start_time, end_time, number_of_attendees, status, total_amount, total_with_vat, amount_due, created_at)
+            VALUES (?,0,?,?,?,?,?, '09:00:00','17:00:00',10,'confirmed',100,100,100,NOW())")->execute([$ref, 'DOCS CO', 'DOCS PERSON', $email, '+265000000009', date('Y-m-d', strtotime('+400 day'))]);
     }
-    return [$id, $ref];
+    return [(int)$pdo->lastInsertId(), $ref];
 }
 function dx_user(PDO $pdo): array {
     $a = $pdo->query("SELECT id, username, full_name FROM admin_users WHERE is_active = 1 ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
@@ -146,11 +143,11 @@ switch ($sc) {
         break;
 
     case 'restaurant': // till sale with / without a customer email
-        $id = dx_id();
         $withMail = !empty($prm['email']);
-        $pdo->prepare("INSERT INTO stock_orders (id, reference, client_uuid, order_type, customer_name, customer_email, status, total_amount, subtotal, created_by, created_at)
-            VALUES (?,?,?,'dine_in','DOCS DINER',?, 'paid', 50, 50, ?, NOW())")
-            ->execute([$id, 'DXR' . $run, bin2hex(random_bytes(16)), $withMail ? 'docs-test@example.invalid' : null, $user['id']]);
+        $pdo->prepare("INSERT INTO stock_orders (reference, client_uuid, order_type, customer_name, customer_email, status, total_amount, subtotal, created_by, created_at)
+            VALUES (?,?,'dine_in','DOCS DINER',?, 'paid', 50, 50, ?, NOW())")
+            ->execute(['DXR' . $run, bin2hex(random_bytes(16)), $withMail ? 'docs-test@example.invalid' : null, $user['id']]);
+        $id = (int)$pdo->lastInsertId();
         $GLOBALS['rh_receipt_queue'] = [];
         $payId = rh_sync_restaurant_payment($pdo, $id, 'DXR' . $run, 'DOCS DINER', ['net' => 50, 'vat_rate' => 0, 'vat' => 0, 'gross' => 50], $user['id'], 'cash');
         $out['queued'] = isset($GLOBALS['rh_receipt_queue'][$payId]);
@@ -178,11 +175,11 @@ switch ($sc) {
         break;
 
     case 'restaurant_split': // split bill, two legs, order with / without a customer email: one receipt per leg
-        $id = dx_id();
         $withMail = !empty($prm['email']);
-        $pdo->prepare("INSERT INTO stock_orders (id, reference, client_uuid, order_type, customer_name, customer_email, status, total_amount, subtotal, created_by, created_at)
-            VALUES (?,?,?,'dine_in','DOCS DINER',?, 'paid', 80, 80, ?, NOW())")
-            ->execute([$id, 'DXS' . $run, bin2hex(random_bytes(16)), $withMail ? 'docs-test@example.invalid' : null, $user['id']]);
+        $pdo->prepare("INSERT INTO stock_orders (reference, client_uuid, order_type, customer_name, customer_email, status, total_amount, subtotal, created_by, created_at)
+            VALUES (?,?,'dine_in','DOCS DINER',?, 'paid', 80, 80, ?, NOW())")
+            ->execute(['DXS' . $run, bin2hex(random_bytes(16)), $withMail ? 'docs-test@example.invalid' : null, $user['id']]);
+        $id = (int)$pdo->lastInsertId();
         $GLOBALS['rh_receipt_queue'] = [];
         $legIds = [];
         foreach ([1, 2] as $leg) {
@@ -213,7 +210,8 @@ switch ($sc) {
         break;
 
     case 'quote_register': // conference/event quotation register: a resend refreshes the one row; saved PDFs are removed safely
-        $cid = dx_id();
+        // An enquiry id no row has (never inserted, so no counter moves): only the register rows use it.
+        $cid = (int)$pdo->query("SELECT COALESCE(MAX(id), 0) + 1000000 FROM conference_inquiries")->fetchColumn();
         $qr = 'CQ-DX' . $run;
         $r1 = rh_register_sent_quotation('conference', $cid, $qr, 'CONF-DX', 'DOCS', 'docs-test@example.invalid', 'Board Room', 100, 7, '', '%PDF-1.4 one');
         $r2 = rh_register_sent_quotation('conference', $cid, $qr, 'CONF-DX', 'DOCS', 'docs-test@example.invalid', 'Board Room', 250, 14, 'again', '%PDF-1.4 two');

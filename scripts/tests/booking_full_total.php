@@ -76,15 +76,20 @@ try {
 ok('rolled back: no test bookings left', (int)$pdo->query("SELECT COUNT(*) FROM bookings WHERE booking_reference LIKE '{$tag}%'")->fetchColumn() === 0);
 
 // ---- 3. pages, in both VAT modes (settings forced inside the rolled-back harness run) ----
+// Booking details reads the id from GET (no harness placeholder there): reserve a real id by inserting the same
+// row with no id and rolling back. The counter is already past it, so naming it in the harness setup cannot move
+// AUTO_INCREMENT (a fixed huge id used to push the live counter to ~2.1 billion) and no real booking can get it.
+$pdo->beginTransaction();
+try { $pdo->exec($insert($tag . 'R', 1.0, 0.0, 1.0, 0.0, 1.0)); $baseId = (int)$pdo->lastInsertId(); } finally { $pdo->rollBack(); }
+ok('reserved a booking id below the counter', $baseId > 0);
 foreach (['exclusive', 'inclusive'] as $mode) {
     $tg = $tag . strtoupper(substr($mode, 0, 1));
     $a = $tg . 'A'; $b = $tg . 'B'; $c = $tg . 'C';
-    $baseId = 2099000000 + ($mode === 'exclusive' ? 10 : 20);
     $setup = [
         "INSERT INTO site_settings (setting_key, setting_value) VALUES ('vat_enabled','1'),('vat_rate','16.5'),('vat_pricing_mode','{$mode}') ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)",
         $insert($a, 100000.0, 16500.0, 116500.0, 20000.0, 96500.0, ", id", ", {$baseId}"),
-        $insert($b, 87000.0, 13000.0, 100000.0, 0.0, 100000.0, ", id", ", " . ($baseId + 1)),
-        $insert($c, 50000.0, 8250.0, null, 0.0, 58250.0, ", id", ", " . ($baseId + 2)),
+        $insert($b, 87000.0, 13000.0, 100000.0, 0.0, 100000.0),
+        $insert($c, 50000.0, 8250.0, null, 0.0, 58250.0),
         "UPDATE bookings SET primary_booking_id = (SELECT x.id FROM (SELECT id FROM bookings WHERE booking_reference = '{$a}') x) WHERE booking_reference = '{$b}'",
     ];
     $vars = ['a' => "SELECT id FROM bookings WHERE booking_reference = '{$a}'", 'c' => "SELECT id FROM bookings WHERE booking_reference = '{$c}'"];

@@ -67,6 +67,18 @@ $levyAmt = $room['levy'];
 $twv = round($totalAmount + $vatAmt, 2);
 $far = date('Y-m-d', strtotime('+710 day'));
 $far3 = date('Y-m-d', strtotime('+713 day'));
+// Booking details reads the id from GET (no harness placeholder there): reserve a real id by inserting a row with no
+// id and rolling back. The counter is already past it, so naming it in the harness setup cannot move AUTO_INCREMENT
+// (a fixed huge id used to push the live counter to ~2.1 billion) and no real booking can get it. Each run rolls back,
+// so all four runs reuse it.
+$pdo->beginTransaction();
+try {
+    $pdo->exec("INSERT INTO bookings (booking_reference, room_id, guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights,
+            number_of_guests, adult_guests, child_guests, status, payment_status, total_amount, vat_amount, total_with_vat, amount_paid, amount_due, created_at)
+        VALUES ('RPSR" . random_int(100000, 999999) . "', {$roomId}, 'RPS Guest', 'rps@example.invalid', '000', '{$far}', '{$far3}', 3, 2, 2, 0, 'confirmed', 'unpaid', 1, 0, 1, 0, 1, '2000-01-01 00:00:00')");
+    $rpsBid = (int)$pdo->lastInsertId();
+} finally { $pdo->rollBack(); }
+ok('reserved a booking id below the counter', $rpsBid > 0);
 foreach (['inclusive', 'exclusive'] as $vmode) {
 $_SITE_SETTINGS['vat_pricing_mode'] = $vmode;
 $room = rh_stay_totals(300000.0, 'price', true);
@@ -78,7 +90,7 @@ $twv = round($totalAmount + $vatAmt, 2);
 $modeSql = str_replace("'inclusive'", "'{$vmode}'", $settingsSql);
 foreach ([['surcharge', -8000.0], ['discount', 5000.0]] as [$kind0, $pd]) {
     $kind = $kind0 . ' ' . $vmode;
-    $bid = 2099000000 + ($kind0 === 'surcharge' ? 61 : 62) + ($vmode === 'exclusive' ? 10 : 0);
+    $bid = $rpsBid;
     $ref = 'RPS' . random_int(100000, 999999);
     $setup = [
         $modeSql,
@@ -121,25 +133,26 @@ $_SITE_SETTINGS['vat_pricing_mode'] = 'inclusive';
 
 // ---- 2. end-of-day pricing card on a date with only these bookings ----
 $day = '2001-03-15';
-$mkB = function (int $id, string $ref, ?float $pd, int $nights, float $pkgTotal, string $deleted = 'NULL') use ($roomId, $day): string {
+$mkB = function (string $ref, ?float $pd, int $nights, float $pkgTotal, string $deleted = 'NULL') use ($roomId, $day): string {
     $out = date('Y-m-d', strtotime($day . ' +' . $nights . ' day'));
     $pdSql = $pd === null ? 'NULL' : (string)$pd;
     $rp = $pd === null ? 'NULL' : '1';
     $lbl = $pd === null ? 'NULL' : "'Festival Season'";
-    return "INSERT INTO bookings (id, booking_reference, room_id, guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights,
+    return "INSERT INTO bookings (booking_reference, room_id, guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights,
             number_of_guests, adult_guests, child_guests, status, payment_status, total_amount, vat_amount, tourism_levy_amount, tourism_levy_percent, vat_rate,
             total_with_vat, amount_paid, amount_due, package_total, rate_plan_id, rate_plan_label, rate_plan_discount, created_at, deleted_at)
-        VALUES ({$id}, '{$ref}', {$roomId}, 'RPS EOD', 'rps@example.invalid', '000', '{$day}', '{$out}', {$nights}, 2, 2, 0, 'confirmed', 'unpaid',
+        VALUES ('{$ref}', {$roomId}, 'RPS EOD', 'rps@example.invalid', '000', '{$day}', '{$out}', {$nights}, 2, 2, 0, 'confirmed', 'unpaid',
             100000, 0, 0, 0, 0, 100000, 0, 100000, {$pkgTotal}, {$rp}, {$lbl}, {$pdSql}, '{$day} 10:00:00', {$deleted})";
 };
-$e = 2099000070;
+// No explicit ids (a fixed huge id moved the live AUTO_INCREMENT): the packages find their booking by reference.
+$eBk = "(SELECT id FROM bookings WHERE booking_reference = '%s' AND guest_name = 'RPS EOD')";
 $setup = [
-    $mkB($e + 1, 'RPSE1', 5000.0, 2, 0.0),                 // discount 5,000 x 2 = 10,000
-    $mkB($e + 2, 'RPSE2', -8000.0, 3, 0.0),                // surcharge 8,000 x 3 = 24,000 (never netted against the discount)
-    $mkB($e + 3, 'RPSE3', null, 1, 30000.0),               // one package, live
-    $mkB($e + 4, 'RPSE4', null, 1, 0.0, "'{$day} 12:00:00'"), // deleted booking: its packages must not count
-    "INSERT INTO booking_packages (booking_id, package_id, package_name, price_type, price_amount, quantity, total_cost) VALUES ({$e}+3, 0, 'Bed and Breakfast', 'per_stay', 30000, 1, 30000)",
-    "INSERT INTO booking_packages (booking_id, package_id, package_name, price_type, price_amount, quantity, total_cost) VALUES ({$e}+4, 0, 'Ghost Package', 'per_stay', 1000, 1, 1000), ({$e}+4, 0, 'Ghost Package', 'per_stay', 1000, 1, 1000)",
+    $mkB('RPSE1', 5000.0, 2, 0.0),                 // discount 5,000 x 2 = 10,000
+    $mkB('RPSE2', -8000.0, 3, 0.0),                // surcharge 8,000 x 3 = 24,000 (never netted against the discount)
+    $mkB('RPSE3', null, 1, 30000.0),               // one package, live
+    $mkB('RPSE4', null, 1, 0.0, "'{$day} 12:00:00'"), // deleted booking: its packages must not count
+    "INSERT INTO booking_packages (booking_id, package_id, package_name, price_type, price_amount, quantity, total_cost) VALUES (" . sprintf($eBk, 'RPSE3') . ", 0, 'Bed and Breakfast', 'per_stay', 30000, 1, 30000)",
+    "INSERT INTO booking_packages (booking_id, package_id, package_name, price_type, price_amount, quantity, total_cost) VALUES (" . sprintf($eBk, 'RPSE4') . ", 0, 'Ghost Package', 'per_stay', 1000, 1, 1000), (" . sprintf($eBk, 'RPSE4') . ", 0, 'Ghost Package', 'per_stay', 1000, 1, 1000)",
 ];
 $r = rps_page('admin/end-of-day-report.php', ['date' => $day], $setup);
 $h = $r['html'];

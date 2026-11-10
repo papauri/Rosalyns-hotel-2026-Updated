@@ -153,10 +153,19 @@ if ($roomId <= 0) { ok('skipped page checks: no active room type', true); echo "
 $tag = 'BTB' . random_int(100000, 999999);
 $far = date('Y-m-d', strtotime('+700 day'));
 $far2 = date('Y-m-d', strtotime('+703 day'));
+// Booking details reads the id from GET (no harness placeholder there): reserve a real id by inserting a row with no
+// id and rolling back. The counter is already past it, so naming it in the harness setup cannot move AUTO_INCREMENT
+// (a fixed huge id used to push the live counter to ~2.1 billion) and no real booking can get it.
+$pdo->beginTransaction();
+try {
+    $pdo->exec("INSERT INTO bookings (booking_reference, room_id, guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights, number_of_guests, adult_guests, child_guests, status, payment_status, total_amount, vat_amount, total_with_vat, amount_paid, amount_due, created_at)
+        VALUES ('{$tag}R', {$roomId}, 'BTB Guest', 'btb@example.invalid', '000', '{$far}', '{$far2}', 3, 2, 2, 0, 'pending', 'unpaid', 1, 0, 1, 0, 1, '2000-01-01 00:00:00')");
+    $baseId = (int)$pdo->lastInsertId();
+} finally { $pdo->rollBack(); }
+ok('reserved a booking id below the counter', $baseId > 0);
 foreach (['exclusive', 'inclusive'] as $mode) {
     $tg = $tag . strtoupper(substr($mode, 0, 1));
     $a = $tg . 'A';
-    $baseId = 2099000000 + ($mode === 'exclusive' ? 30 : 40);
     $setup = [
         "INSERT INTO site_settings (setting_key, setting_value) VALUES ('vat_enabled','1'),('vat_rate','17.5'),('vat_pricing_mode','{$mode}'),('tourism_levy_enabled','1'),('tourism_levy_percent','1') ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)",
         "INSERT INTO bookings (id, booking_reference, room_id, guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights,

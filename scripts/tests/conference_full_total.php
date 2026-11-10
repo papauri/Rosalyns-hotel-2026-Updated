@@ -34,23 +34,27 @@ ok('gross = total_with_vat when locked', abs(rh_conf_gross(['total_amount' => 10
 
 $tag = 'CFT' . random_int(100000, 999999);
 $far = date('Y-m-d', strtotime('+720 day'));
-$insert = static function (string $ref, int $id, float $base, float $vat, float $gross, float $paid, float $due) use ($far): string {
-    return "INSERT INTO conference_inquiries (id, inquiry_reference, conference_room_id, company_name, contact_person, email, phone, event_date, start_time, end_time, number_of_attendees, status, total_amount, vat_amount, total_with_vat, amount_paid, amount_due, created_at)
-        VALUES ({$id}, '{$ref}', 0, 'CFT Co {$ref}', 'CFT Person', 'cft@example.invalid', '+265000000000', '{$far}', '09:00:00', '17:00:00', 10, 'confirmed', {$base}, {$vat}, {$gross}, {$paid}, {$due}, NOW())";
+$insert = static function (string $ref, float $base, float $vat, float $gross, float $paid, float $due) use ($far): string {
+    return "INSERT INTO conference_inquiries (inquiry_reference, conference_room_id, company_name, contact_person, email, phone, event_date, start_time, end_time, number_of_attendees, status, total_amount, vat_amount, total_with_vat, amount_paid, amount_due, created_at)
+        VALUES ('{$ref}', 0, 'CFT Co {$ref}', 'CFT Person', 'cft@example.invalid', '+265000000000', '{$far}', '09:00:00', '17:00:00', 10, 'confirmed', {$base}, {$vat}, {$gross}, {$paid}, {$due}, NOW())";
 };
 
 // ---- 2. SQL twin matches the helper on seeded rows (in-process, rolled back) ----
 $pdo->beginTransaction();
 try {
-    $pdo->exec($insert($tag . 'P', 2098000001, 123456.00, 20370.24, 143826.24, 0, 143826.24));
-    $pdo->exec($insert($tag . 'Q', 2098000002, 77777.00, 12833.21, 0, 0, 0));
-    $sum = (float)$pdo->query("SELECT SUM(" . rh_conf_gross_sql('c') . ") FROM conference_inquiries c WHERE c.id IN (2098000001, 2098000002)")->fetchColumn();
+    // No explicit ids: a fixed huge id moves the live AUTO_INCREMENT even when the insert is rolled back.
+    $pdo->exec($insert($tag . 'P', 123456.00, 20370.24, 143826.24, 0, 143826.24));
+    $pId = (int)$pdo->lastInsertId();
+    $pdo->exec($insert($tag . 'Q', 77777.00, 12833.21, 0, 0, 0));
+    $qId = (int)$pdo->lastInsertId();
+    ok('two test enquiries seeded', $pId > 0 && $qId > 0 && $pId !== $qId);
+    $sum = (float)$pdo->query("SELECT SUM(" . rh_conf_gross_sql('c') . ") FROM conference_inquiries c WHERE c.id IN ({$pId}, {$qId})")->fetchColumn();
     $want = 0.0;
-    foreach ([2098000001, 2098000002] as $cid) {
+    foreach ([$pId, $qId] as $cid) {
         $want += rh_conf_gross($pdo->query("SELECT * FROM conference_inquiries WHERE id = {$cid}")->fetch(PDO::FETCH_ASSOC));
     }
     ok('SUM of the SQL gross (reports status/room tables, CSV export) equals the helper total', abs($sum - $want) <= BALANCE_TOLERANCE, "$sum vs $want");
-    foreach ([2098000001, 2098000002] as $cid) {
+    foreach ([$pId, $qId] as $cid) {
         $row = $pdo->query("SELECT * FROM conference_inquiries WHERE id = {$cid}")->fetch(PDO::FETCH_ASSOC);
         $sql = (float)$pdo->query("SELECT " . rh_conf_gross_sql('c') . " FROM conference_inquiries c WHERE c.id = {$cid}")->fetchColumn();
         ok("row {$cid}: rh_conf_gross_sql equals rh_conf_gross", abs($sql - rh_conf_gross($row)) <= BALANCE_TOLERANCE, "$sql vs " . rh_conf_gross($row));
@@ -65,11 +69,10 @@ $cs = (string)getSetting('currency_symbol');
 foreach (['exclusive', 'inclusive'] as $mode) {
     $tg = $tag . strtoupper(substr($mode, 0, 1));
     $a = $tg . 'A'; $c = $tg . 'C';
-    $baseId = 2098100000 + ($mode === 'exclusive' ? 10 : 20);
     $setup = [
         "INSERT INTO site_settings (setting_key, setting_value) VALUES ('vat_enabled','1'),('vat_rate','16.5'),('vat_pricing_mode','{$mode}') ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)",
-        $insert($a, $baseId, 123456.00, 20370.24, 143826.24, 10000.00, 133826.24),
-        $insert($c, $baseId + 1, 77777.00, 12833.21, 0, 0, 0),
+        $insert($a, 123456.00, 20370.24, 143826.24, 10000.00, 133826.24),
+        $insert($c, 77777.00, 12833.21, 0, 0, 0),
     ];
     $cGross = $mode === 'exclusive' ? 90610.21 : 77777.00;
     $cGrossTxt = number_format($cGross, 2);

@@ -15,12 +15,13 @@ $ref = (string)($_POST['ref'] ?? '');
 $room = 'ZZ' . substr($ref, -6);
 $admin = $pdo->query("SELECT id, username, full_name, role FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
 
-$bid = random_int(2000000000, 2100000000);
-$pdo->prepare("INSERT INTO bookings (id, booking_reference, room_id, guest_name, guest_email, guest_phone, guest_country, number_of_guests, adult_guests, child_guests,
+// No explicit id (a random huge id moves the live AUTO_INCREMENT even when rolled back).
+$pdo->prepare("INSERT INTO bookings (booking_reference, room_id, guest_name, guest_email, guest_phone, guest_country, number_of_guests, adult_guests, child_guests,
         child_price_multiplier, check_in_date, check_out_date, number_of_nights, total_amount, child_supplement_total, tourism_levy_amount, tourism_levy_percent,
         vat_rate, vat_amount, total_with_vat, special_requests, status, payment_status, is_tentative, occupancy_type, client_uuid, created_at)
-    VALUES (?,?,(SELECT id FROM rooms ORDER BY id LIMIT 1),'RS CLOSE TEST','','+265000000009','Malawi',2,2,0,50,CURDATE(),DATE_ADD(CURDATE(), INTERVAL 1 DAY),1,100,0,0,0,0,0,100,'rs close test','checked-in','unpaid',0,'double',?,NOW())")
-    ->execute([$bid, 'RB' . substr($ref, -8), bin2hex(random_bytes(16))]);
+    VALUES (?,(SELECT id FROM rooms ORDER BY id LIMIT 1),'RS CLOSE TEST','','+265000000009','Malawi',2,2,0,50,CURDATE(),DATE_ADD(CURDATE(), INTERVAL 1 DAY),1,100,0,0,0,0,0,100,'rs close test','checked-in','unpaid',0,'double',?,NOW())")
+    ->execute(['RB' . substr($ref, -8), bin2hex(random_bytes(16))]);
+$bid = (int)$pdo->lastInsertId();
 
 $orderStatus = $sc === 'recall' ? 'completed' : 'placed';
 $kitchen = ($sc === 'deliver') ? 'served' : ($sc === 'recall' ? 'served' : 'ready');

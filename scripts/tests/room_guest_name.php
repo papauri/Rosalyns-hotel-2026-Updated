@@ -15,6 +15,24 @@ $root = dirname(__DIR__, 2);
 chdir($root);
 require_once $root . '/config/database.php';
 $harness = $root . '/scripts/tests/page_harness.php';
+// Document PDFs this run writes under invoices/ (receipts/, credit-notes/ too) and quotations/ are removed at the end;
+// a file that existed before the run is never touched. Retried briefly: a synced folder can hold a new file open.
+function rg_pdf_set(string $root): array {
+    $set = [];
+    foreach (['invoices', 'quotations'] as $d) {
+        if (!is_dir($root . '/' . $d)) { continue; }
+        foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root . '/' . $d, FilesystemIterator::SKIP_DOTS)) as $f) {
+            if ($f->isFile() && strtolower($f->getExtension()) === 'pdf') { $set[$f->getPathname()] = true; }
+        }
+    }
+    return $set;
+}
+$rgPdfBefore = rg_pdf_set($root);
+register_shutdown_function(function () use ($root, $rgPdfBefore) {
+    foreach (array_diff_key(rg_pdf_set($root), $rgPdfBefore) as $f => $_) {
+        for ($i = 0; $i < 10 && is_file($f) && !@unlink($f); $i++) { usleep(300000); clearstatcache(true, $f); }
+    }
+});
 $pass = 0; $fail = 0;
 function ok(string $name, bool $cond, string $detail = ''): void {
     global $pass, $fail;
@@ -81,14 +99,26 @@ ok('create: a 300-character name is cut to 150', (int)($tooLong['verify'][0][0][
 ok('  run rolled back', rg_clean($tooLong));
 
 // ── 3. seeded group (primary + second room), for edit / details / list / calendar ─────────────────────────────
-$pid = 2098100001; $sid = 2098100002;
 $irSql = "(SELECT id FROM individual_rooms WHERE room_type_id = $rid AND is_active = 1 ORDER BY id LIMIT 1)";
-$seedRow = function (int $id, string $ref, ?int $primary, ?string $roomGuest, bool $assigned) use ($rid, $ci, $co): string {
-    return "INSERT INTO bookings (id, booking_reference, room_id, individual_room_id, primary_booking_id, guest_name, room_guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights,
+// $id null = no id column (used only to reserve the ids below).
+$seedRow = function (?int $id, string $ref, ?int $primary, ?string $roomGuest, bool $assigned) use ($rid, $ci, $co): string {
+    return "INSERT INTO bookings (" . ($id === null ? '' : 'id, ') . "booking_reference, room_id, individual_room_id, primary_booking_id, guest_name, room_guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights,
             number_of_guests, adult_guests, child_guests, total_amount, total_with_vat, status, payment_status, occupancy_type)
-            VALUES ($id, " . rg_q($ref) . ", $rid, " . ($assigned ? "(SELECT id FROM individual_rooms WHERE room_type_id = $rid AND is_active = 1 ORDER BY id LIMIT 1)" : 'NULL') . ", " . ($primary === null ? 'NULL' : $primary) . ",
+            VALUES (" . ($id === null ? '' : "$id, ") . rg_q($ref) . ", $rid, " . ($assigned ? "(SELECT id FROM individual_rooms WHERE room_type_id = $rid AND is_active = 1 ORDER BY id LIMIT 1)" : 'NULL') . ", " . ($primary === null ? 'NULL' : $primary) . ",
             'RGNTEST lead', " . ($roomGuest === null ? 'NULL' : rg_q($roomGuest)) . ", 'rgntest@example.invalid', '+265000000004', " . rg_q($ci) . ", " . rg_q($co) . ", 2, 2, 2, 0, 200, 200, 'confirmed', 'unpaid', 'double')";
 };
+// The pages read the booking id from GET (no harness placeholder there): reserve two real ids by inserting the pair
+// with no id and rolling back. The counter is already past them, so naming them in the harness seed cannot move
+// AUTO_INCREMENT (fixed huge ids used to push the live counter to ~2.1 billion) and no real booking can get them.
+$pdo->beginTransaction();
+try {
+    $rtag = 'RGNR' . random_int(100000, 999999);
+    $pdo->exec($seedRow(null, $rtag . 'P', null, null, false));
+    $pid = (int)$pdo->lastInsertId();
+    $pdo->exec($seedRow(null, $rtag . 'S', $pid, null, false));
+    $sid = (int)$pdo->lastInsertId();
+} finally { $pdo->rollBack(); }
+ok('reserved two booking ids below the counter', $pid > 0 && $sid > $pid);
 $seed = [$seedRow($pid, 'RGNPRIM' . $pid, null, 'Mr & Mrs Banda', false), $seedRow($sid, 'RGNSEC' . $sid, $pid, $evil, false)];
 
 // edit-booking.php

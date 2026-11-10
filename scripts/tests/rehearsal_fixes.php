@@ -11,7 +11,26 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); }
  */
 $root = dirname(__DIR__, 2);
 chdir($root);
+require_once $root . '/config/database.php'; // rf_id() reserves booking ids on this connection
 $harness = $root . '/scripts/tests/page_harness.php';
+// Document PDFs this run writes under invoices/ (receipts/, credit-notes/ too) and quotations/ are removed at the end;
+// a file that existed before the run is never touched. Retried briefly: a synced folder can hold a new file open.
+function rf_pdf_set(string $root): array {
+    $set = [];
+    foreach (['invoices', 'quotations'] as $d) {
+        if (!is_dir($root . '/' . $d)) { continue; }
+        foreach (new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root . '/' . $d, FilesystemIterator::SKIP_DOTS)) as $f) {
+            if ($f->isFile() && strtolower($f->getExtension()) === 'pdf') { $set[$f->getPathname()] = true; }
+        }
+    }
+    return $set;
+}
+$rfPdfBefore = rf_pdf_set($root);
+register_shutdown_function(function () use ($root, $rfPdfBefore) {
+    foreach (array_diff_key(rf_pdf_set($root), $rfPdfBefore) as $f => $_) {
+        for ($i = 0; $i < 10 && is_file($f) && !@unlink($f); $i++) { usleep(300000); clearstatcache(true, $f); }
+    }
+});
 $pass = 0; $fail = 0;
 function ok(string $name, bool $cond, string $detail = ''): void {
     global $pass, $fail;
@@ -26,22 +45,31 @@ function rf_run(string $page, array $post = [], array $opts = []): array {
     return $res;
 }
 function rf_q(string $v): string { return "'" . str_replace("'", "''", $v) . "'"; }
-$rid = 0;
-function rf_id(): int { global $rid; return random_int(2000000000, 2100000000) + (++$rid); }
-/** A booking priced 100 a night for $nights nights, check-in $inDays days from today (negative = past). */
-function rf_booking_sql(int $id, string $ref, string $status, int $inDays, int $nights): string {
+/**
+ * A booking id the pages can be given in GET/POST: the row is inserted with no id and rolled back, so the counter is
+ * already past it and naming it in the harness setup cannot move AUTO_INCREMENT (a random huge id used to push the
+ * live counter to ~2.1 billion even inside a rolled-back run) and no real booking can ever get it.
+ */
+function rf_id(): int {
+    global $pdo;
+    $pdo->beginTransaction();
+    try { $pdo->exec(rf_booking_sql(null, 'RFRSV' . random_int(10000, 99999), 'confirmed', 300, 1)); return (int)$pdo->lastInsertId(); } finally { $pdo->rollBack(); }
+}
+/** A booking priced 100 a night for $nights nights, check-in $inDays days from today (negative = past). $id null = no id column. */
+function rf_booking_sql(?int $id, string $ref, string $status, int $inDays, int $nights): string {
     $in = date('Y-m-d', strtotime(($inDays >= 0 ? '+' : '') . $inDays . ' day'));
     $out = date('Y-m-d', strtotime($in . ' +' . $nights . ' day'));
     $total = 100 * $nights;
-    return "INSERT INTO bookings (id, booking_reference, room_id, guest_name, guest_email, guest_phone, guest_country, number_of_guests, adult_guests, child_guests,
+    return "INSERT INTO bookings (" . ($id === null ? '' : 'id, ') . "booking_reference, room_id, guest_name, guest_email, guest_phone, guest_country, number_of_guests, adult_guests, child_guests,
             child_price_multiplier, check_in_date, check_out_date, number_of_nights, total_amount, child_supplement_total, tourism_levy_amount, tourism_levy_percent,
             vat_rate, vat_amount, total_with_vat, special_requests, status, payment_status, is_tentative, occupancy_type, client_uuid, created_at)
-        VALUES ($id, " . rf_q($ref) . ", (SELECT id FROM rooms ORDER BY id LIMIT 1), 'REHEARSAL TEST', '', '+265000000009', 'Malawi', 2, 2, 0, 50, " . rf_q($in) . ", " . rf_q($out) . ", $nights, $total, 0, 0, 0, 0, 0, $total, 'rehearsal test', " . rf_q($status) . ", 'unpaid', 0, 'double', " . rf_q(bin2hex(random_bytes(16))) . ", NOW())";
+        VALUES (" . ($id === null ? '' : "$id, ") . rf_q($ref) . ", (SELECT id FROM rooms ORDER BY id LIMIT 1), 'REHEARSAL TEST', '', '+265000000009', 'Malawi', 2, 2, 0, 50, " . rf_q($in) . ", " . rf_q($out) . ", $nights, $total, 0, 0, 0, 0, 0, $total, 'rehearsal test', " . rf_q($status) . ", 'unpaid', 0, 'double', " . rf_q(bin2hex(random_bytes(16))) . ", NOW())";
 }
-function rf_paid_sql(int $id, int $bookingId, string $ref, float $amount): string {
-    return "INSERT INTO payments (id, payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+/** A completed payment on that booking, inserted with no id. */
+function rf_paid_sql(int $bookingId, string $ref, float $amount): string {
+    return "INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount,
             payment_method, payment_type, payment_status, status, receipt_number, created_at)
-        VALUES ($id, " . rf_q('RFP' . $id) . ", 'room', $bookingId, " . rf_q($ref) . ", CURDATE(), $amount, 0, 0, $amount, 'cash', 'partial_payment', 'completed', 'completed', " . rf_q('RRF' . $id) . ", NOW())";
+        VALUES (" . rf_q('RFP' . $bookingId) . ", 'room', $bookingId, " . rf_q($ref) . ", CURDATE(), $amount, 0, 0, $amount, 'cash', 'partial_payment', 'completed', 'completed', " . rf_q('RRF' . $bookingId) . ", NOW())";
 }
 
 echo "== F3 getCCEmails ==\n";
@@ -75,8 +103,8 @@ ok('adjust dates with a guest e-mail: still answers JSON success (no HTTP 500)',
 
 echo "== F2/F6 early checkout ==\n";
 // Same-day case: checked in today, booked 2 nights. The stay bills 1 night, so unused = 1 (not 2).
-$bid = rf_id(); $ref = 'RFC' . $bid % 100000; $pid = rf_id();
-$setup = [rf_booking_sql($bid, $ref, 'checked-in', 0, 2), rf_paid_sql($pid, $bid, $ref, 200.0), "UPDATE bookings SET amount_paid = 200, amount_due = 0, payment_status = 'paid' WHERE id = $bid"];
+$bid = rf_id(); $ref = 'RFC' . $bid % 100000;
+$setup = [rf_booking_sql($bid, $ref, 'checked-in', 0, 2), rf_paid_sql($bid, $ref, 200.0), "UPDATE bookings SET amount_paid = 200, amount_due = 0, payment_status = 'paid' WHERE id = $bid"];
 $r = rf_run('admin/bookings.php', ['action' => 'checkout_assess', 'id' => $bid], ['ajax' => true, 'setup' => $setup]);
 $s = $r['json']['settlement'] ?? [];
 ok('assess: early refund settlement offered', ($s['type'] ?? '') === 'refund', json_encode($r['json'] ?? $r['raw'] ?? ''));
@@ -84,8 +112,8 @@ ok('assess: nights add up (booked 2, billed 1, unused 1)', ($s['sched_nights'] ?
 ok('assess: paid amount is reported (for the "Paid X; no refund due" wording)', abs((float)($s['amount_paid'] ?? 0) - 200) < 0.01, json_encode($s));
 
 // Checked in yesterday, booked 3 nights, paid in full: early checkout today refunds the unused night(s)
-$bid = rf_id(); $ref = 'RFD' . $bid % 100000; $pid = rf_id();
-$setup = [rf_booking_sql($bid, $ref, 'checked-in', -1, 3), rf_paid_sql($pid, $bid, $ref, 300.0), "UPDATE bookings SET amount_paid = 300, amount_due = 0, payment_status = 'paid' WHERE id = $bid"];
+$bid = rf_id(); $ref = 'RFD' . $bid % 100000;
+$setup = [rf_booking_sql($bid, $ref, 'checked-in', -1, 3), rf_paid_sql($bid, $ref, 300.0), "UPDATE bookings SET amount_paid = 300, amount_due = 0, payment_status = 'paid' WHERE id = $bid"];
 $r = rf_run('admin/bookings.php', ['action' => 'checkout_settle', 'id' => $bid, 'settlement_action' => 'refund', 'payment_method' => 'cash', 'notes' => 'rehearsal'], [
     'ajax' => true, 'setup' => $setup,
     'verify' => ["SELECT status FROM bookings WHERE id = $bid", "SELECT COUNT(*) AS n, COALESCE(SUM(total_amount),0) AS amt FROM payments WHERE booking_type='room' AND booking_id = $bid AND payment_type = 'refund'"],
@@ -93,8 +121,8 @@ $r = rf_run('admin/bookings.php', ['action' => 'checkout_settle', 'id' => $bid, 
 ok('checkout with refund: completes and the booking is checked out', !empty($r['json']['success']) && ($r['verify'][0][0]['status'] ?? '') === 'checked-out', json_encode([$r['json'] ?? $r['raw'] ?? '', $r['verify'] ?? '']));
 ok('checkout with refund: a refund of the unused night is recorded', ($r['verify'][1][0]['n'] ?? 0) >= 1 && ($r['verify'][1][0]['amt'] ?? 0) > 0, json_encode($r['verify'] ?? $r));
 
-$bid = rf_id(); $ref = 'RFE' . $bid % 100000; $pid = rf_id();
-$setup = [rf_booking_sql($bid, $ref, 'checked-in', -1, 3), rf_paid_sql($pid, $bid, $ref, 300.0), "UPDATE bookings SET amount_paid = 300, amount_due = 0, payment_status = 'paid' WHERE id = $bid"];
+$bid = rf_id(); $ref = 'RFE' . $bid % 100000;
+$setup = [rf_booking_sql($bid, $ref, 'checked-in', -1, 3), rf_paid_sql($bid, $ref, 300.0), "UPDATE bookings SET amount_paid = 300, amount_due = 0, payment_status = 'paid' WHERE id = $bid"];
 $r = rf_run('admin/bookings.php', ['action' => 'checkout_settle', 'id' => $bid, 'settlement_action' => 'skip', 'payment_method' => 'cash', 'notes' => ''], [
     'ajax' => true, 'setup' => $setup,
     'verify' => ["SELECT status FROM bookings WHERE id = $bid", "SELECT COUNT(*) AS n FROM payments WHERE booking_type='room' AND booking_id = $bid AND payment_type = 'refund'"],
@@ -130,10 +158,10 @@ if (!$pick) {
 
     // Checkout releases the room hold (booking_rooms.released_at) on both checkout paths.
     foreach (['checkout' => ['action' => 'checkout'], 'checkout_settle' => ['action' => 'checkout_settle', 'settlement_action' => 'skip', 'payment_method' => 'cash', 'notes' => '']] as $label => $post) {
-        $bid = rf_id(); $ref = 'RFR' . $bid % 100000; $pid = rf_id();
+        $bid = rf_id(); $ref = 'RFR' . $bid % 100000;
         $r = rf_run('admin/bookings.php', $post + ['id' => $bid], [
             'ajax' => true,
-            'setup' => [rf_booking_sql($bid, $ref, 'checked-in', -1, 1), rf_paid_sql($pid, $bid, $ref, 100.0),
+            'setup' => [rf_booking_sql($bid, $ref, 'checked-in', -1, 1), rf_paid_sql($bid, $ref, 100.0),
                 "UPDATE bookings SET amount_paid = 100, amount_due = 0, payment_status = 'paid', room_id = $rtid, individual_room_id = $irid WHERE id = $bid",
                 "INSERT INTO booking_rooms (booking_id, individual_room_id, is_primary, assigned_at, status_snapshot) VALUES ($bid, $irid, 1, NOW(), 'assigned')"],
             'verify' => ["SELECT status FROM bookings WHERE id = $bid",

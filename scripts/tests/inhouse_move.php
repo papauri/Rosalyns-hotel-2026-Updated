@@ -93,14 +93,17 @@ if (!$pick) {
 }
 
 echo "== F7: last_cleaned_at moves on every clean ==\n";
-$rid = random_int(2000000000, 2100000000);
-$aid = $rid + 1;
-$cfg = base64_encode(json_encode(['post' => ['action' => 'mark_complete', 'id' => (string)$aid], 'ajax' => false,
+// No explicit ids (a random huge id moved the live AUTO_INCREMENT even when rolled back): the rows are found by a
+// unique room number and the task id reaches the POST through the harness {aid} placeholder.
+$num = 'ZF7' . random_int(1000000000, 1999999999);
+$irId = "(SELECT id FROM individual_rooms WHERE room_number = '$num')";
+$cfg = base64_encode(json_encode(['post' => ['action' => 'mark_complete', 'id' => '{aid}'], 'ajax' => false,
     'setup' => [
-        "INSERT INTO individual_rooms (id, room_type_id, room_number, room_name, floor, status, housekeeping_status, last_cleaned_at, is_active) VALUES ($rid, (SELECT id FROM rooms ORDER BY id LIMIT 1), 'ZF7$rid', 'zz test', 1, 'cleaning', 'pending', '2020-01-01 08:00:00', 1)",
-        "INSERT INTO housekeeping_assignments (id, individual_room_id, status, due_date, assignment_type, notes, created_at) VALUES ($aid, $rid, 'pending', CURDATE(), 'checkout_cleanup', 'zz test', NOW())",
+        "INSERT INTO individual_rooms (room_type_id, room_number, room_name, floor, status, housekeeping_status, last_cleaned_at, is_active) VALUES ((SELECT id FROM rooms ORDER BY id LIMIT 1), '$num', 'zz test', 1, 'cleaning', 'pending', '2020-01-01 08:00:00', 1)",
+        "INSERT INTO housekeeping_assignments (individual_room_id, status, due_date, assignment_type, notes, created_at) VALUES ($irId, 'pending', CURDATE(), 'checkout_cleanup', 'zz test', NOW())",
     ],
-    'verify' => ["SELECT status, housekeeping_status, (last_cleaned_at >= CURDATE()) AS cleaned_today FROM individual_rooms WHERE id = $rid"]]));
+    'vars' => ['aid' => "SELECT id FROM housekeeping_assignments WHERE individual_room_id = $irId"],
+    'verify' => ["SELECT status, housekeeping_status, (last_cleaned_at >= CURDATE()) AS cleaned_today FROM individual_rooms WHERE room_number = '$num'"]]));
 $out = shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($harness) . ' admin/housekeeping.php ' . escapeshellarg($cfg) . ' 2>&1');
 $r = ['error' => 'no result', 'raw' => substr((string)$out, -400)];
 if (preg_match('/@@RESULT@@(.*)$/m', (string)$out, $m)) { $x = json_decode($m[1], true); if (is_array($x)) { $r = $x; } }

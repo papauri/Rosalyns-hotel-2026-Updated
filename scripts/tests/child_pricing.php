@@ -251,7 +251,21 @@ ok('type limit of 2: 2 children are accepted', count($rows) === 1, json_encode($
 
 // Edit Booking: the booking keeps the rule it was saved with (fixed 10,000, first child free); adding a 2nd child charges 1.
 $ttOld = rh_stay_totals($nightly * $nights, 'price');
-$editBookingId = 990000011;
+/**
+ * A booking id the pages can be given in GET/POST: the row is inserted with no id and rolled back, so the counter is
+ * already past it and naming it in the harness setup cannot move AUTO_INCREMENT (fixed ids ~990,000,000 used to push
+ * the live counter there on every run) and no real booking can ever get it.
+ */
+$cpReserve = function () use ($pdo, $rid, $ci, $co): int {
+    $pdo->beginTransaction();
+    try {
+        $pdo->exec("INSERT INTO bookings (booking_reference, room_id, guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights,
+                number_of_guests, adult_guests, child_guests, status, payment_status, total_amount, vat_amount, total_with_vat, amount_paid, amount_due)
+            VALUES ('CHILDRSV" . random_int(10000, 99999) . "', $rid, 'CHILDTEST rsv', 'childtest@example.invalid', '+265000000009', '$ci', '$co', 1, 1, 1, 0, 'confirmed', 'unpaid', 1, 0, 1, 0, 1)");
+        return (int)$pdo->lastInsertId();
+    } finally { $pdo->rollBack(); }
+};
+$editBookingId = $cpReserve();
 $levyPct = (float)($ttOld['levy_rate'] ?? 0);
 $editSetup = array_merge(cp_setup($rid, 'percent', null, 50, 0, null), [
     // the room type changed its rule AFTER this booking was made: the booking must still price on its own saved rule
@@ -301,7 +315,7 @@ foreach (['inclusive', 'exclusive'] as $vm) {
         $expTotal = 533250.00;
         $expVat = 78750.00;
     }
-    $bid = 990000020 + ($vm === 'inclusive' ? 0 : 1);
+    $bid = $cpReserve();
     $setup = array_merge(cp_setup($rid, 'percent', null, 50, 0, null), $rate100, [
         "INSERT INTO site_settings (setting_key, setting_value) VALUES ('vat_pricing_mode', '$vm') ON DUPLICATE KEY UPDATE setting_value = '$vm'",
     ], $vm === 'exclusive' ? [
@@ -354,9 +368,9 @@ $rcco = date('Y-m-d', strtotime('+672 day'));
 $yest = date('Y-m-d', strtotime('-1 day'));
 $plus1 = date('Y-m-d', strtotime('+1 day'));
 foreach ([
-    ['charge, whole stay moves', 990000030, 'confirmed', $rcci, $rcco, 2, 'charge', 'fixed', true],
-    ['keep (complimentary)',      990000031, 'confirmed', $rcci, $rcco, 2, 'keep',   'percent', false],
-    ['in-house, only later nights re-rated', 990000032, 'checked-in', $yest, $plus1, 2, 'charge', 'percent', false],
+    ['charge, whole stay moves', $cpReserve(), 'confirmed', $rcci, $rcco, 2, 'charge', 'fixed', true],
+    ['keep (complimentary)',      $cpReserve(), 'confirmed', $rcci, $rcco, 2, 'keep',   'percent', false],
+    ['in-house, only later nights re-rated', $cpReserve(), 'checked-in', $yest, $plus1, 2, 'charge', 'percent', false],
 ] as [$label, $bid, $st, $in, $out, $n, $pricing, $expMode, $expMoved]) {
     $r = cp_run('admin/bookings.php', ['action' => 'upgrade_room_type', 'booking_id' => (string)$bid, 'new_room_id' => (string)$typeB, 'pricing' => $pricing, 'reason_code' => $pricing === 'keep' ? 'upgrade_loyalty' : 'upgrade_guest_request', 'note' => 'Guest asked at the desk, manager approved'],
         ['ajax' => true, 'setup' => array_merge($bSetup, [$mkB($bid, $st, $in, $out, $n)]),
@@ -370,7 +384,7 @@ foreach ([
 
 echo "== max children also checked when the room changes (edit booking) ==\n";
 foreach ([['limit 1 refuses', 1, 0], ['limit 2 accepts', 2, 1]] as [$label, $lim, $expMoved]) {
-    $bid = 990000040 + $lim;
+    $bid = $cpReserve();
     $r = cp_run('admin/edit-booking.php', [
         'guest_name' => 'CHILDTEST rm', 'guest_email' => 'childtest@example.invalid', 'guest_phone' => '+265000000009', 'guest_country' => '',
         'check_in_date' => $rcci, 'check_out_date' => $rcco, 'number_of_guests' => '3', 'child_guests' => '2', 'occupancy_type' => 'triple', 'individual_room_id' => (string)$indId, 'notify_guest' => '0',

@@ -85,9 +85,16 @@ check(($r['json']['success'] ?? true) === false && (int)($r['verify'][0][0]['c']
 $r = run_page('admin/blocked-dates.php', $multi, $grant(true), $cntType, true, $u['username']);
 check(($r['json']['success'] ?? false) === true && (int)($r['verify'][0][0]['c'] ?? 0) === 1, 'date-range block saved with Block Rooms', json_encode($r['json'] ?? $r));
 
-// Unblock: seed a block (explicit id) inside the rolled-back transaction, then try to remove it.
+// Unblock: seed a block inside the rolled-back transaction, then try to remove it. Its id is reserved first (inserted
+// with no id here and rolled back), so the counter is already past it and naming it in the seed cannot move
+// AUTO_INCREMENT (a MAX(id)+5000 id used to push the live counter up by 5000 on every run). bulk_ids is an array,
+// which the harness {placeholder} does not reach, hence a reserved id rather than a placeholder.
 foreach ([false, true] as $withPerm) {
-    $seedId = (int)$pdo->query("SELECT COALESCE(MAX(id),0) + 5000 FROM blocked_dates")->fetchColumn();
+    $pdo->beginTransaction();
+    try {
+        $pdo->exec("INSERT INTO blocked_dates (room_id, block_date, block_type, reason) VALUES (NULL, '$day', 'manual', '$tag')");
+        $seedId = (int)$pdo->lastInsertId();
+    } finally { $pdo->rollBack(); }
     $seedSql = "INSERT INTO blocked_dates (id, room_id, block_date, block_type, reason) VALUES ($seedId, NULL, '$day', 'manual', '$tag')";
     $setup = array_merge($grant($withPerm), [$seedSql]);
     $post = ['action' => 'unblock_date', 'id' => (string)$seedId, 'block_scope' => 'type'];

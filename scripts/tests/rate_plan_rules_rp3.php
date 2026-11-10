@@ -264,27 +264,42 @@ if (!$room) {
     $occ = !empty($pol['single_enabled']) ? 'single' : (!empty($pol['double_enabled']) ? 'double' : 'triple');
     $guests = $occ === 'single' ? 1 : 2;
     $setSql = "INSERT INTO site_settings (setting_key, setting_value) VALUES ('vat_enabled','1'),('vat_rate','17.5'),('vat_pricing_mode','inclusive'),('tourism_levy_enabled','1'),('tourism_levy_percent','1') ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)";
-    $planId = 2099000301;
-    $planSql = "INSERT INTO rate_plans (id, name, rule_type, min_nights, adjustment_type, adjustment_value, applies_to, priority, is_stacking, is_active)
-                VALUES ({$planId}, 'ZZ RP3 Long stay', 'los_discount', 7, 'percentage', -10, 'all', 0, 0, 0)";
+    $mkPlan = static function (?int $id): string {
+        return "INSERT INTO rate_plans (" . ($id === null ? '' : 'id, ') . "name, rule_type, min_nights, adjustment_type, adjustment_value, applies_to, priority, is_stacking, is_active)
+                VALUES (" . ($id === null ? '' : "{$id}, ") . "'ZZ RP3 Long stay', 'los_discount', 7, 'percentage', -10, 'all', 0, 0, 0)";
+    };
     $ci = date('Y-m-d', strtotime('+720 day'));
     $co7 = date('Y-m-d', strtotime($ci . ' +7 day'));
     $tt = rh_stay_totals(630000.0, 'final', true);
-    $mkBooking = function (int $id, string $status) use ($rt, $ci, $co7, $tt, $planId, $occ, $guests): string {
-        return "INSERT INTO bookings (id, booking_reference, room_id, guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights,
+    // $id null = no id column (used only to reserve an id); $planId null = a booking with no rate plan.
+    $mkBooking = function (?int $id, string $status, ?int $planId) use ($rt, $ci, $co7, $tt, $occ, $guests): string {
+        $ref = 'ZZRP3' . ($id ?? ('R' . random_int(100000, 999999)));
+        $plan = $planId === null ? 'NULL, NULL, NULL' : "{$planId}, 'ZZ RP3 Long stay', 10000";
+        return "INSERT INTO bookings (" . ($id === null ? '' : 'id, ') . "booking_reference, room_id, guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights,
                 number_of_guests, adult_guests, child_guests, occupancy_type, status, payment_status, total_amount, vat_amount, tourism_levy_amount, tourism_levy_percent, vat_rate,
                 total_with_vat, amount_paid, amount_due, package_total, child_supplement_total, rate_plan_id, rate_plan_label, rate_plan_discount, created_at)
-            VALUES ({$id}, 'ZZRP3{$id}', {$rt}, 'RP3 Guest', 'rp3@example.invalid', '000', '{$ci}', '{$co7}', 7, {$guests}, {$guests}, 0, '{$occ}', '{$status}', 'unpaid',
-                " . round($tt['net'] + $tt['levy'], 2) . ", {$tt['vat']}, {$tt['levy']}, 1, 17.5, 630000, 0, 630000, 0, 0, {$planId}, 'ZZ RP3 Long stay', 10000, NOW())";
+            VALUES (" . ($id === null ? '' : "{$id}, ") . "'{$ref}', {$rt}, 'RP3 Guest', 'rp3@example.invalid', '000', '{$ci}', '{$co7}', 7, {$guests}, {$guests}, 0, '{$occ}', '{$status}', 'unpaid',
+                " . round($tt['net'] + $tt['levy'], 2) . ", {$tt['vat']}, {$tt['levy']}, 1, 17.5, 630000, 0, 630000, 0, 0, {$plan}, NOW())";
     };
-    $bid = 2099000311;
+    // The pages read the booking id from GET (no harness placeholder there): reserve real plan and booking ids by
+    // inserting both with no id and rolling back. The counters are already past them, so naming them in the harness
+    // setup cannot move AUTO_INCREMENT (fixed huge ids used to push the live counters to ~2.1 billion).
+    $pdo->beginTransaction();
+    try {
+        $pdo->exec($mkPlan(null));
+        $planId = (int)$pdo->lastInsertId();
+        $pdo->exec($mkBooking(null, 'confirmed', $planId));
+        $bid = (int)$pdo->lastInsertId();
+    } finally { $pdo->rollBack(); }
+    ok('reserved plan and booking ids below the counters', $planId > 0 && $bid > 0);
+    $planSql = $mkPlan($planId);
     $post = ['guest_name' => 'RP3 Guest', 'guest_email' => 'rp3@example.invalid', 'guest_phone' => '000', 'guest_country' => '', 'check_in_date' => $ci,
         'number_of_guests' => (string)$guests, 'child_guests' => '0', 'occupancy_type' => $occ, 'individual_room_id' => '', 'special_requests' => '', 'booking_notes' => '', 'notify_guest' => '0'];
     $verify = ["SELECT rate_plan_id, rate_plan_label, rate_plan_discount, total_with_vat, number_of_nights, vat_amount, tourism_levy_amount FROM bookings WHERE id = {$bid}",
         "SELECT action, note, performed_by FROM booking_audit_log WHERE booking_id = {$bid} ORDER BY id"];
 
     $r = rp3_page('admin/edit-booking.php', ['get' => ['id' => (string)$bid], 'post' => $post + ['check_out_date' => date('Y-m-d', strtotime($ci . ' +3 day'))],
-        'setup' => [$setSql, $planSql, $mkBooking($bid, 'confirmed')], 'verify' => $verify]);
+        'setup' => [$setSql, $planSql, $mkBooking($bid, 'confirmed', $planId)], 'verify' => $verify]);
     $row = $r['verify'][0][0] ?? [];
     $audit = $r['verify'][1] ?? [];
     $dropLog = null;
@@ -297,7 +312,7 @@ if (!$room) {
     ok('Edit Booking: rolled back, no leak', !empty($r['rolled_back']) && empty($r['leak']), $dbg);
 
     $r = rp3_page('admin/edit-booking.php', ['get' => ['id' => (string)$bid], 'post' => $post + ['check_out_date' => date('Y-m-d', strtotime($ci . ' +8 day'))],
-        'setup' => [$setSql, $planSql, $mkBooking($bid, 'confirmed')], 'verify' => $verify]);
+        'setup' => [$setSql, $planSql, $mkBooking($bid, 'confirmed', $planId)], 'verify' => $verify]);
     $row = $r['verify'][0][0] ?? [];
     $dbg = json_encode([$row, $r['verify'][1] ?? [], $r['raw'] ?? '']);
     ok('Edit Booking: extended to 8 -> discount kept, 8 x 90,000 = 720,000', isset($row['total_with_vat']) && abs((float)$row['total_with_vat'] - 720000.0) <= BALANCE_TOLERANCE
@@ -305,20 +320,19 @@ if (!$room) {
     ok('Edit Booking (extend): no discount_removed history row', !in_array('discount_removed', array_column($r['verify'][1] ?? [], 'action'), true), $dbg);
 
     $r2 = rp3_page('admin/bookings.php', ['ajax' => true, 'post' => ['action' => 'stay_price_preview', 'booking_id' => (string)$bid, 'new_check_in' => $ci,
-        'new_check_out' => date('Y-m-d', strtotime($ci . ' +3 day'))], 'setup' => [$setSql, $planSql, $mkBooking($bid, 'confirmed')]]);
+        'new_check_out' => date('Y-m-d', strtotime($ci . ' +3 day'))], 'setup' => [$setSql, $planSql, $mkBooking($bid, 'confirmed', $planId)]]);
     $j = $r2['json'] ?? null;
     $out = json_encode($r2);
     ok('Bookings stay preview: shortened to 3 shows the same 300,000 and a "discount will be removed" note', is_array($j) && abs((float)($j['new_total'] ?? 0) - 300000.0) <= BALANCE_TOLERANCE
         && strpos((string)($j['plan_note'] ?? ''), 'ZZ RP3 Long stay discount will be removed') !== false, substr($out, 0, 1200));
     $r3 = rp3_page('admin/bookings.php', ['ajax' => true, 'post' => ['action' => 'stay_price_preview', 'booking_id' => (string)$bid, 'new_check_in' => $ci,
-        'new_check_out' => date('Y-m-d', strtotime($ci . ' +8 day'))], 'setup' => [$setSql, $planSql, $mkBooking($bid, 'confirmed')]]);
+        'new_check_out' => date('Y-m-d', strtotime($ci . ' +8 day'))], 'setup' => [$setSql, $planSql, $mkBooking($bid, 'confirmed', $planId)]]);
     $j = $r3['json'] ?? null;
     $out = json_encode($r3);
     ok('Bookings stay preview: extended to 8 keeps the discount (720,000, no note)', is_array($j) && abs((float)($j['new_total'] ?? 0) - 720000.0) <= BALANCE_TOLERANCE && ($j['plan_note'] ?? 'x') === '', substr($out, 0, 1200));
     // Booking details "Adjust stay dates" (processBookingDateAdjustment): the same rule. No guest email (empty email).
-    $mkAdj = function (int $id, bool $withPlan) use ($mkBooking): string {
-        $sql = str_replace("'rp3@example.invalid'", "''", $mkBooking($id, 'confirmed'));
-        return $withPlan ? $sql : str_replace(", 2099000301, 'ZZ RP3 Long stay', 10000, NOW())", ", NULL, NULL, NULL, NOW())", $sql);
+    $mkAdj = function (int $id, bool $withPlan) use ($mkBooking, $planId): string {
+        return str_replace("'rp3@example.invalid'", "''", $mkBooking($id, 'confirmed', $withPlan ? $planId : null));
     };
     $adjPost = ['adjust_dates' => '1', 'new_check_in' => $ci, 'new_check_out' => date('Y-m-d', strtotime($ci . ' +3 day')), 'adjustment_reason' => 'RP3 test'];
     $r = rp3_page('admin/booking-details.php', ['get' => ['id' => (string)$bid], 'post' => $adjPost, 'setup' => [$setSql, $planSql, $mkAdj($bid, true)], 'verify' => $verify]);
