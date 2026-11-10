@@ -131,7 +131,12 @@ $mod_orders      = moduleEnabled('stock') && $dash_perm('stock_orders', 'pos_til
 $mod_stock       = moduleEnabled('stock') && $dash_perm('stock_dashboard', 'stock_management', 'stock_batches', 'stock_count', 'stock_wastage', 'stock_reports', 'stock_budget');
 $mod_conference  = $raw_conference && $dash_perm('conference', 'conference_rooms', 'conference_financials');
 $mod_gym         = $raw_gym && $dash_perm('gym', 'gym_checkin', 'gym_packages', 'gym_reports', 'gym_financials');
-$mod_finance     = moduleEnabled('finance') && $dash_perm('accounting', 'payments', 'reports', 'invoices', 'receipts', 'pos_accounting', 'payment_add', 'refund_payment');
+// Money figures (takings, owed to us, refunds, revenue trend) only for people who already see them on the
+// finance pages: accounting, payments or reports (owner 2026-11-11: "too financial for the receptionist or
+// other low tier users"). Taking a payment or printing a receipt no longer shows the hotel's totals.
+$mod_finance     = moduleEnabled('finance') && $dash_perm('accounting', 'payments', 'reports');
+// Finance guide link stays for everyone who handles payments at all.
+$finance_guide   = moduleEnabled('finance') && $dash_perm('accounting', 'payments', 'reports', 'invoices', 'receipts', 'pos_accounting', 'payment_add', 'refund_payment');
 $mod_website_cms = moduleEnabled('website_cms') && $dash_perm('reviews', 'contact', 'events_bookings', 'events');
 $mod_station_kds = moduleEnabled('station_kds') && $dash_perm('kds_view', 'kds_reports');
 $mod_station_bds = moduleEnabled('station_bds') && $dash_perm('bds_view', 'kds_reports');
@@ -140,8 +145,8 @@ $mod_station_room_service = moduleEnabled('station_room_service') && $dash_perm(
 $mod_events      = $raw_events && $dash_perm('events', 'events_bookings');
 // Room service lives in the POS module but needs bookings (rooms) to exist.
 $mod_roomsvc     = $raw_pos && $raw_bookings && $dash_perm('room_service_view');
-// Till sales are money: shown to the people who run or audit the till, and to finance.
-$pos_sales       = $mod_pos && $dash_perm('pos_till', 'pos_accounting', 'pos_take_payment', 'accounting', 'reports');
+// Till sales are money: shown to the people who audit the till, and to finance.
+$pos_sales       = $mod_pos && $dash_perm('pos_accounting', 'accounting', 'reports'); // not till staff (owner 2026-11-11)
 // Presets that invoice a named client in advance and can therefore carry an
 // outstanding balance. Pure-POS presets (bar, retail, supermarket) settle at
 // the till, so an "Outstanding Balances" tile would always read zero for them.
@@ -2109,7 +2114,7 @@ $currency_symbol = getSetting('currency_symbol');
                         <?php if ($mod_station_room_service): ?><a href="../docs/guides/05-room-service.html" target="_blank" rel="noopener"><i class="fas fa-bell-concierge"></i> Room service</a><?php endif; ?>
                         <?php if ($mod_housekeeping): ?><a href="../docs/guides/06-housekeeping.html" target="_blank" rel="noopener"><i class="fas fa-broom"></i> Housekeeping</a><?php endif; ?>
                         <?php if ($mod_stock || $mod_orders): ?><a href="../docs/guides/08-stock-orders.html" target="_blank" rel="noopener"><i class="fas fa-boxes-stacked"></i> Stock</a><?php endif; ?>
-                        <?php if ($mod_finance): ?><a href="../docs/guides/13-finance-payments.html" target="_blank" rel="noopener"><i class="fas fa-money-bill-wave"></i> Finance</a><?php endif; ?>
+                        <?php if ($finance_guide): ?><a href="../docs/guides/13-finance-payments.html" target="_blank" rel="noopener"><i class="fas fa-money-bill-wave"></i> Finance</a><?php endif; ?>
                         <?php if ($mod_finance && $dash_perm('reports')): ?><a href="../docs/guides/14-reports-eod.html" target="_blank" rel="noopener"><i class="fas fa-chart-column"></i> Reports &amp; EOD</a><?php endif; ?>
                     </div>
                 </details>
