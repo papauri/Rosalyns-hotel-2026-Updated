@@ -121,6 +121,7 @@
     <li>Click <strong>Record float</strong>. You will see <em>"Float set: MWK 5,000.00"</em> (the amount is shown with your currency symbol).</li>
   </ol>
   <div class="note"><p>The float is added to the expected cash when you close your shift. When you close, count the whole drawer, float included (see <a href="#close">How to close your shift</a>). If you record the float again before closing, the latest amount replaces the earlier one. If no float was recorded, it counts as 0.</p></div>
+  <p>Recording the float is saved in the till history and the staff activity log.</p>
 
   <h2 id="pay-now">How to take an order and pay straight away</h2>
   <p>Use this for walk-in and takeaway sales where the guest pays at once.</p>
@@ -287,7 +288,7 @@
   <p>The whole order is refunded, including every leg of a split bill, in the method it was paid with. Only paid orders can be refunded, and an order that is already fully refunded is refused. In a restaurant stock is not put back, so a manager must correct stock by hand if needed. In shop mode the goods go back on the shelf, unless they are damaged.</p>
 
   <h2 id="86">How to 86 an item (mark it unavailable)</h2>
-  <p>"86" means the item is finished. This hides it from the till for everyone.</p>
+  <p>"86" means the item is finished. This hides it from the till for everyone. Each 86 and re-enable is saved in the till history and the staff activity log.</p>
   <ol class="steps">
     <li>You need <strong>POS Quick-86 Items</strong>. Click <strong>More</strong> &rarr; <strong>86 mode</strong>. You see <em>"86 Mode ON &mdash; tap an item to toggle availability"</em>. While this mode is on, tapping a tile changes its availability instead of adding it to the order.</li>
     <li>Each tile shows <strong>Tap to 86</strong> (available item) or <strong>Tap to enable</strong> (item already 86'd, shown with an 86 badge).</li>
@@ -500,14 +501,15 @@
     <li>Without <strong>POS Shift Override</strong> you see <em>"Shift does not balance (variance 250.00). Recount the drawer or ask a supervisor to close on your behalf with an override."</em> Recount and try again, or ask a supervisor.</li>
     <li>A supervisor with <strong>POS Shift Override</strong> ticks <strong>Admin override (close despite variance)</strong>, types a <strong>Reason (audit-logged)</strong> of at least 5 characters, and clicks <strong>Close shift</strong>. The reason is saved with the close and shown on the report.</li>
   </ul>
-  <p>Each time you close, the next close for you starts from this one, so a second close in the same day never counts the first one's sales again.</p>
+  <p>Each time you close, the next close for you starts from this one, so a second close in the same day never counts the first one's sales again. Your close counts every sale since your last close. If you forgot to close last night, the close you make this morning includes last night's sales. Every sale ends up in exactly one close.</p>
+  <p>Closing your shift is saved in the till history and the staff activity log.</p>
 
   <h2 id="zreport">How to read the shift close report</h2>
   <p>Management can open the full printable report. You need the <strong>POS Accounting</strong> permission.</p>
   <ol class="steps">
     <li>Admin menu &rarr; <strong>Money</strong> &rarr; <strong>POS Accounting</strong>.</li>
     <li>Pick the <strong>Business date</strong>, click <strong>Apply</strong>, then click <strong>Z-report</strong>. This opens <code>shift-close-report.php</code> for that date.</li>
-    <li>The day view is titled <strong>Shift Closes</strong> with the date. It shows <strong>Total Revenue</strong>, <strong>All Orders</strong>, <strong>Total Voids</strong> and <strong>Net Variance</strong>, and a table with <strong>Cashier</strong>, <strong>Closed</strong>, <strong>Revenue</strong>, <strong>Orders</strong>, <strong>Voids</strong>, <strong>Cash Var</strong>, <strong>Mobile Var</strong>, <strong>Card Var</strong>, <strong>Variance</strong>, <strong>Override</strong> and <strong>Report</strong>. If any cashier is short a banner reads <em>"TOTAL SHORTFALL ACROSS ALL CASHIERS ... investigate before EOD sign-off."</em> A <strong>Shift Close History</strong> table lists earlier closes.</li>
+    <li>The day view is titled <strong>Shift Closes</strong> with the date. It shows <strong>Total Revenue</strong>, <strong>All Orders</strong>, <strong>Total Voids</strong> and <strong>Net Variance</strong>, and a table with <strong>Cashier</strong>, <strong>Closed</strong>, <strong>Revenue</strong>, <strong>Orders</strong>, <strong>Voids</strong>, <strong>Cash Var</strong>, <strong>Mobile Var</strong>, <strong>Card Var</strong>, <strong>Variance</strong>, <strong>Override</strong> and <strong>Report</strong>. If any cashier is short a banner reads <em>"TOTAL SHORTFALL ACROSS ALL CASHIERS ... investigate before EOD sign-off."</em> A <strong>Shift Close History</strong> table lists earlier closes. Each close is checked against the period it actually counted, so a close made the next morning does not show false differences.</li>
     <li>Click <strong>Report</strong> on a row for one cashier's report. It shows <strong>Total Revenue</strong>, <strong>Paid Orders</strong>, <strong>Voids</strong>, <strong>Settled Tabs</strong>, then <strong>Tender Reconciliation</strong> with a <strong>Cash:</strong> line (<em>Float + Cash sales &minus; Cash refunds = Expected cash</em>; it says so if no float was recorded, and labels closes made before the float was included as not counting it) (<strong>Tender</strong>, <strong>System (Expected)</strong>, <strong>Counted (Declared)</strong>, <strong>Variance</strong>, <strong>Status</strong>, where Status is <strong>BALANCED</strong>, <strong>SHORTFALL</strong> or <strong>OVERAGE</strong>), <strong>Shift Notes</strong>, <strong>Top Items</strong>, <strong>Paid Orders</strong>, <strong>Refund / Void Payouts</strong> and <strong>Voided Orders</strong>.</li>
     <li>Use <strong>Print / Save PDF</strong> to print. A short cashier shows <em>"SHORTFALL DETECTED &mdash; cumulative variance ... Management review required."</em> An override close shows <em>"Override applied."</em> with the reason.</li>
   </ol>

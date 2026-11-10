@@ -125,6 +125,7 @@
     <li>You will see <em>"N POS shift(s) closed. Variance (counted - expected) - name: cash 0.00, mobile 0.00, card 0.00."</em> A negative number means less was counted than expected.</li>
   </ol>
   <p>Expected cash is the opening float plus cash sales minus cash refunds. Example: float MWK 20,000 plus net cash sales MWK 230,000 means the system expects MWK 250,000 cash and you count MWK 248,000. The variance is -2,000.00. Write the reason in the note.</p>
+  <p>A cashier who forgets to close counts every sale since their last close, so a close made the next morning includes the previous night's sales. The accountant's close for that night then shows that cashier as <strong>Closed</strong>.</p>
   <p>Further down are the <strong>POS sales log</strong> and the <strong>POS audit logs</strong> for the day.</p>
 
   <h2 id="z" data-module="pos">Z-report (shift close report)</h2>
@@ -132,7 +133,7 @@
   <p>The single report for one close shows the cashier, date and time, record number, then <strong>Tender Reconciliation</strong> with a <strong>Cash:</strong> line showing <em>Float + Cash sales &minus; Cash refunds = Expected cash</em> (closes made before the float was included say the float was not part of their expected cash) (System (Expected), Counted (Declared), Variance, and BALANCED, SHORTFALL or OVERAGE for each of cash, mobile and card), notes, top items, the paid orders, refund and void payouts, and voided orders. Click <strong>Print / Save PDF</strong> to keep a copy. A cashier who is not a manager can open only their own closes. With no date given, the page shows the last 30 closes.</p>
 
   <h2 id="drift" data-module="bookings">Drift report (restaurant totals that do not match)</h2>
-  <p>Click <strong>Drift report</strong> on POS Accounting. It is read-only and changes nothing. It measures how far older till figures were out because of two faults that have since been fixed: tips counted inside revenue and VAT, and split payments. It looks at the last 90 days; change <strong>Start</strong> and <strong>End</strong> and click <strong>Apply</strong>, or click <strong>All time</strong>. A cash difference that is only the opening float is not shown as drift.</p>
+  <p>Click <strong>Drift report</strong> on POS Accounting. It is read-only and changes nothing. It measures how far older till figures were out because of two faults that have since been fixed: tips counted inside revenue and VAT, and split payments. It looks at the last 90 days; change <strong>Start</strong> and <strong>End</strong> and click <strong>Apply</strong>, or click <strong>All time</strong>. A cash difference that is only the opening float is not shown as drift. Each close is checked against the period it actually counted, so next-morning closes do not show false differences.</p>
   <ul>
     <li><strong>Tip/VAT overstatement register</strong>: each affected sale with the recorded total, the correct total, and how much revenue and VAT were overstated. Refunded sales are marked.</li>
     <li><strong>Historical shift-close accuracy</strong>: closed shifts whose expected figures would be different today, and whether a manager override was used at the time.</li>
