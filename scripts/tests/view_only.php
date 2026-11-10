@@ -21,7 +21,28 @@ $A = static fn(string $area, string $script, string $method, array $get = [], ar
 
 // ---- 1. requests
 check($A('admin', 'bookings.php', 'GET'), 'pages open (GET)');
-check($A('admin', 'bookings.php', 'GET', ['export' => 'csv']), 'exports open');
+check($A('admin', 'bookings.php', 'GET', ['export' => 'csv']), 'view only by permission: exports open');
+
+// ---- 1b. a view-only free trial also refuses exports and downloads (owner 2026-11-10)
+$T = static fn(string $area, string $script, string $method, array $get = [], array $post = []): bool => rh_view_only_allowed($area, $script, $method, $get, $post, true);
+foreach ([
+    ['admin', 'bookings.php', ['export' => 'csv']], ['admin', 'payments.php', ['export' => 'csv']],
+    ['admin', 'receipts.php', ['export' => 'csv']], ['admin', 'end-of-day-report.php', ['export' => 'csv']],
+    ['admin', 'stock-reports.php', ['tab' => 'x', 'export' => 'csv']], ['admin', 'stock-ingredients.php', ['export' => 'csv']],
+    ['admin', 'kds-report.php', ['format' => 'csv']], ['admin', 'quotations.php', ['download' => '4']],
+    ['admin', 'system-logs.php', ['export' => 'csv']], ['admin', 'backup-management.php', ['download' => 'db/x.sql.gz']],
+    ['admin_api', 'end-of-day-pdf.php', ['date' => '2026-11-10']], ['station', 'reports-export.php', ['report_type' => 'vat']],
+] as [$area, $script, $get]) {
+    check(!$T($area, $script, 'GET', $get), "trial: $area/$script export refused");
+    check(rh_view_only_is_export($area, $script, $get), "it is an export: $area/$script");
+}
+check($T('admin', 'bookings.php', 'GET'), 'trial: pages still open');
+check($T('admin', 'bookings.php', 'GET', ['export' => '']), 'trial: an empty export parameter is just the page');
+check($T('admin', 'document-download.php', 'GET', ['type' => 'invoice', 'id' => '3']), 'trial: opening one invoice or receipt still works');
+check($T('admin', 'kds-report.php', 'GET', ['station' => 'kds']), 'trial: the KDS report page itself opens');
+check($T('admin_api', 'global-search.php', 'POST'), 'trial: search still works');
+check(!$T('admin', 'create-booking.php', 'POST', [], ['guest_name' => 'x']), 'trial: a new booking refused');
+check($T('other', 'index.php', 'GET', ['export' => 'csv']), 'trial: the guest website is never touched');
 check(!$A('admin', 'bookings.php', 'POST', [], ['action' => 'checkout']), 'check-out refused (read-only allows it, view only does not)');
 check(rh_licence_write_allowed('admin', 'bookings.php', 'POST', [], ['action' => 'checkout']), 'the read-only step itself is unchanged (still allows check-out)');
 check(!$A('admin', 'payment-add.php', 'POST', [], ['amount' => '10']), 'recording a payment refused');
@@ -69,6 +90,23 @@ check(strpos($fn, 'rh_view_only_guard();') !== false && strpos($fn, 'rh_view_onl
 check(strpos((string)file_get_contents($root . '/admin/includes/admin-header.php'), 'rh_view_only_render();') !== false, 'the admin header prints the banner and greying');
 $vo = (string)file_get_contents($root . '/includes/view-only.php');
 check(strpos($vo, "permission_key = 'view_only'") !== false && strpos($vo, 'is_granted') !== false, 'a person is view only only when the permission is explicitly ticked');
+check(strpos($vo, "rh_view_only_allowed(\$area, \$script, \$method, \$_GET, \$_POST, \$why === 'trial')") !== false, 'the guard refuses exports only for a view-only trial');
+// the greying: page headers hold action buttons (dashboard "New booking", end-of-day CSV), so only the site's own header and menu are skipped
+preg_match("/var SKIP = '([^']*)'/", $vo, $m);
+$skip = array_map('trim', explode(',', $m[1] ?? ''));
+check($skip !== [''] && !in_array('nav', $skip, true) && !in_array('header', $skip, true) && in_array('.admin-header', $skip, true) && in_array('.admin-nav', $skip, true),
+    'greying skips only the site header and menu, not every header / nav', implode(', ', $skip));
+check(strpos($vo, "querySelectorAll('button, a, ") !== false, 'greying looks at every link, not only a.btn');
+check(strpos($vo, 'data-rh-view-only="\' . ($why === \'trial\' ? \'trial\' : \'user\')') !== false, 'the banner tells the script whether it is a trial');
+foreach (['create-booking.php', 'edit-booking.php?id=4', 'add-room.php', '?x=1&export=csv', '?download=a.sql', 'api/end-of-day-pdf.php?date=1', '../api/reports-export.php?a=1', '?station=k&format=csv'] as $h) {
+    $re = strpos($h, 'booking') !== false || strpos($h, 'add-') !== false ? 'WRITE_HREF' : 'EXPORT_HREF';
+    preg_match('/var ' . $re . ' = (\/.*\/[a-z]*);/', $vo, $rm);
+    check(isset($rm[1]) && preg_match($rm[1], $h) === 1, "greying catches the link $h ($re)");
+}
+preg_match('/var WRITE_HREF = (\/.*\/[a-z]*);/', $vo, $rm);
+foreach (['bookings.php', 'booking-details.php?id=3', 'calendar.php', 'tentative-bookings.php', 'room-editor-guide.php'] as $h) {
+    check(isset($rm[1]) && preg_match($rm[1], $h) === 0, "greying leaves the link $h alone");
+}
 
 echo "view_only: $pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

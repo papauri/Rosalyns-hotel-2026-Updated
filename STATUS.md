@@ -35,8 +35,17 @@ Another session also works in this folder: always stage files by name. Files:
   out by a small script.
 - Everyone is view only while the licence panel has set the business's free trial to view only (`trial_view_only` in the
   signed answer). Otherwise only people with the `view_only` permission explicitly ticked are view only.
-- **Inert until switched on:** no role has it, and the panel switch is off for both live hotels.
+- **Inert until switched on:** no role has it, and Rosalyn's is not on a trial, so the panel switch does nothing here.
 - Still to do: the Assistant-lead check, and a staff-guide page in `docs/guides/` (no guide yet).
+
+## Shipped 2026-11-10: view-only trial fix, after the owner's report
+This is the same change as in Liwonde (see Liwonde's `STATUS.md`). The owner found that Export and New booking could
+still be clicked on Liwonde's view-only trial. Files: `includes/view-only.php` and `scripts/tests/view_only.php`
+(80 pure tests).
+- During a view-only trial, exports and downloads are now refused by the server.
+- The greying now reaches page headers, every link, and icon-only buttons.
+- POS and KDS still have no banner or greying, but the server refuses every change there.
+- It changes nothing at Rosalyn's until a view-only trial is switched on. Pushed with the owner's OK.
 
 ## Live now
 The site runs `origin/main` at `9998b7c`.
