@@ -391,11 +391,101 @@ function rh_ai_vault_protect(PDO $db, int $conv, $data, string $field = '')
     return rh_ai_scrub_outbound($db, $conv, $data);
 }
 
+/** The plain word shown for a token whose real value is not known here. */
+function rh_ai_vault_words(): array
+{
+    return ['GUEST' => '(guest)', 'EMAIL' => '(email)', 'PHONE' => '(phone)', 'BK' => '(booking)', 'STAFF' => '(staff)'];
+}
+
 /** For display: tokens with no stored value any more (purged at sign-out) shown as plain words. */
 function rh_ai_vault_display(string $text): string
 {
-    $words = ['GUEST' => '(guest)', 'EMAIL' => '(email)', 'PHONE' => '(phone)', 'BK' => '(booking)', 'STAFF' => '(staff)'];
+    $words = rh_ai_vault_words();
     return (string)preg_replace_callback('/\[(GUEST|EMAIL|PHONE|BK|STAFF)_\d+\]/', static fn($m) => $words[$m[1]], $text);
+}
+
+/**
+ * PURE. Tokens in the other forms a model writes them, back to the one stored form "[GUEST_1]": markdown-escaped
+ * "\[GUEST_1\]", "[guest_1]", "[GUEST 1]", "[GUEST-1]", and a bare "GUEST_1" (as for tool arguments, owner fault
+ * 2026-10-29). A separator is required inside brackets, so a bracketed booking reference like "[BK2026227892]" stays.
+ */
+function rh_ai_vault_canon(string $text): string
+{
+    if ($text === '' || !preg_match('/GUEST|EMAIL|PHONE|BK|STAFF/i', $text)) {
+        return $text;
+    }
+    $text = (string)preg_replace_callback('/\\\\?\[\s*(GUEST|EMAIL|PHONE|BK|STAFF)[ _\-](\d{1,6})\s*\\\\?\]/i', static fn($m) => '[' . strtoupper($m[1]) . '_' . $m[2] . ']', $text);
+    return (string)preg_replace('/(?<![\[\p{L}\p{N}_])(GUEST|EMAIL|PHONE|BK|STAFF)_(\d{1,6})(?![\]\p{L}\p{N}_])/u', '[$1_$2]', $text);
+}
+
+/**
+ * PURE. Text for the screen from a token map (token => real value): every token, in any form, becomes its real value;
+ * a token with no value never shows raw - it becomes its plain word ("(guest)"). Returns ['text', 'unresolved' =>
+ * [kind => count]] so the caller can log it (kinds and counts only, never a value).
+ */
+function rh_ai_vault_show_map(array $map, string $text): array
+{
+    $miss = [];
+    if ($text === '') {
+        return ['text' => '', 'unresolved' => []];
+    }
+    $words = rh_ai_vault_words();
+    $text = (string)preg_replace_callback('/\[(GUEST|EMAIL|PHONE|BK|STAFF)_\d+\]/', static function ($m) use ($map, $words, &$miss) {
+        $v = isset($map[$m[0]]) ? trim((string)$map[$m[0]]) : '';
+        if ($v !== '') {
+            return $v;
+        }
+        $miss[$m[1]] = ($miss[$m[1]] ?? 0) + 1;
+        return $words[$m[1]];
+    }, rh_ai_vault_canon($text));
+    return ['text' => $text, 'unresolved' => $miss];
+}
+
+/**
+ * PURE. Text that goes back to the model (earlier turns, their summary, earlier lookups): a token this conversation's
+ * vault no longer holds (purged at sign-out or by the ended-session sweep) becomes its plain word, so the model can never
+ * repeat a token that has no real value behind it (owner fault 2026-11-11: "Mr [GUEST_1]'s stay ..." shown raw).
+ */
+function rh_ai_vault_orphans_map(array $map, string $text): string
+{
+    if ($text === '' || strpos($text, '[') === false) {
+        return $text;
+    }
+    $words = rh_ai_vault_words();
+    return (string)preg_replace_callback('/\[(GUEST|EMAIL|PHONE|BK|STAFF)_\d+\]/', static function ($m) use ($map, $words) {
+        return isset($map[$m[0]]) && trim((string)$map[$m[0]]) !== '' ? $m[0] : $words[$m[1]];
+    }, $text);
+}
+
+/** rh_ai_vault_orphans_map() with this conversation's vault. */
+function rh_ai_vault_orphans_out(PDO $db, int $conv, string $text): string
+{
+    return rh_ai_vault_orphans_map(rh_ai_vault_load($db, $conv)['tok'], $text);
+}
+
+/**
+ * Every text the panel shows from a reply: real values back, and never a raw token. A token with no value in a fresh
+ * reply is a fault: logged (kinds and counts only) so it is visible. $log false where plain words are expected (an old
+ * chat after sign-out).
+ */
+function rh_ai_vault_show(PDO $db, int $conv, string $text, string $where = 'reply', bool $log = true): string
+{
+    if ($text === '') {
+        return '';
+    }
+    $r = rh_ai_vault_show_map(rh_ai_vault_load($db, $conv)['tok'], $text);
+    if ($log && $r['unresolved']) {
+        $kinds = [];
+        foreach ($r['unresolved'] as $k => $n) {
+            $kinds[] = $k . ' x' . $n;
+        }
+        error_log('Assistant: privacy token(s) with no stored value were shown as plain words (conversation ' . $conv . ', ' . $where . '): ' . implode(', ', $kinds));
+        if (function_exists('rh_ai_incident_add')) {
+            rh_ai_incident_add($db, 'token_unresolved', 'A reply named a privacy token with no stored value; it was shown as a plain word',
+                ['where' => mb_substr($where, 0, 40), 'kinds' => $r['unresolved']], ['severity' => 'warning', 'conversation_id' => $conv]);
+        }
+    }
+    return $r['text'];
 }
 
 /**

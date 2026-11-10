@@ -2362,21 +2362,21 @@ function rh_ai_briefing(PDO $db, array $user, bool $auto): array
         rh_ai_mark_briefed($db, $uid);
     }
     rh_ai_step_set($db, $uid, '');
-    return ['ok' => true, 'shown' => true, 'conversation_id' => $conv, 'message_id' => $msgId, 'reply' => rh_ai_vault_rehydrate($db, $conv, $b['text']),
+    return ['ok' => true, 'shown' => true, 'conversation_id' => $conv, 'message_id' => $msgId, 'reply' => rh_ai_vault_show($db, $conv, $b['text'], 'briefing'),
         'items' => rh_ai_items_rehydrate($db, $conv, $b['items']), 'chips' => $b['chips'], 'route' => 'briefing',
         'usage' => ['tokens_in' => $b['tokens_in'], 'tokens_out' => $b['tokens_out'], 'cost_usd' => $b['cost']], 'error' => ''];
 }
 
-/** Briefing cards with real names restored locally (stored tokenised). */
-function rh_ai_items_rehydrate(PDO $db, int $conv, array $items): array
+/** Briefing cards with real names restored locally (stored tokenised); never a raw token. $log: see rh_ai_vault_show(). */
+function rh_ai_items_rehydrate(PDO $db, int $conv, array $items, bool $log = true): array
 {
     $out = [];
     foreach ($items as $it) {
         $it = (array)$it;
         foreach (['title', 'detail', 'figure', 'source'] as $k) {
-            $it[$k] = rh_ai_vault_rehydrate($db, $conv, (string)($it[$k] ?? ''));
+            $it[$k] = rh_ai_vault_show($db, $conv, (string)($it[$k] ?? ''), 'item', $log);
         }
-        $it['lines'] = array_map(static fn($l) => rh_ai_vault_rehydrate($db, $conv, (string)$l), (array)($it['lines'] ?? []));
+        $it['lines'] = array_map(static fn($l) => rh_ai_vault_show($db, $conv, (string)$l, 'item', $log), (array)($it['lines'] ?? []));
         $out[] = $it;
     }
     return $out;
@@ -2462,13 +2462,14 @@ function rh_ai_history(PDO $db, int $conv, int $beforeId): array
     $msgs = [];
     foreach ($rows as $r) {
         if (trim((string)$r['content']) !== '') {
-            $msgs[] = ['role' => $r['role'], 'content' => (string)$r['content']];
+            // a token whose value was purged (sign-out, ended-session sweep) goes as its plain word: never repeated (owner fault 2026-11-11)
+            $msgs[] = ['role' => $r['role'], 'content' => rh_ai_vault_orphans_out($db, $conv, (string)$r['content'])];
         }
     }
     while ($msgs && $msgs[0]['role'] !== 'user') {
         array_shift($msgs);
     }
-    return ['summary' => $sum, 'messages' => $msgs];
+    return ['summary' => rh_ai_vault_orphans_out($db, $conv, $sum), 'messages' => $msgs];
 }
 
 /** The chosen models of the provider in use, by role. */
@@ -3011,6 +3012,7 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
 
     $guidedResume = null; // a step-by-step card still open: its question is asked again after another answer
     $finish = static function (string $tokReply, string $route, array $extra = []) use ($db, $conv, $uid, &$out, $learned, &$guidedResume): array {
+        $tokReply = rh_ai_vault_canon($tokReply); // "\[GUEST_1\]", "GUEST_1" ... stored in the one form the restore reads
         if ($guidedResume !== null && !array_key_exists('guided', $extra) && empty($extra['cards'])) {
             $tokReply = rtrim($tokReply) . "\n\n" . (string)$guidedResume['text'];
             $extra['chips'] = array_values(array_unique(array_merge((array)$guidedResume['chips'], (array)($extra['chips'] ?? []))));
@@ -3062,11 +3064,11 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
         ]);
         rh_ai_step_set($db, $uid, '');
         $out['ok'] = true;
-        $out['reply'] = rh_ai_vault_rehydrate($db, $conv, $tokReply);
+        $out['reply'] = rh_ai_vault_show($db, $conv, $tokReply, 'reply:' . $route); // never a raw token on screen (owner fault 2026-11-11)
         $out['route'] = $route;
         $out['model'] = (string)($extra['model'] ?? '');
         $out['links'] = $links;
-        $out['chips'] = array_map(static fn($c) => rh_ai_vault_rehydrate($db, $conv, (string)$c), $chips); // tap answers may name a guest (shown locally)
+        $out['chips'] = array_map(static fn($c) => rh_ai_vault_show($db, $conv, (string)$c, 'chip:' . $route), $chips); // tap answers may name a guest (shown locally)
         $out['items'] = $items ? rh_ai_items_rehydrate($db, $conv, $items) : [];
         $out['cards'] = $cards ? rh_ai_cards_for($db, $conv, $cards) : [];
         $out['tokens_in'] = (int)($extra['tokens_in'] ?? 0);
@@ -3737,9 +3739,9 @@ function rh_ai_conversation_messages(PDO $db, int $conv): array
         $meta = json_decode((string)$r['tool_args_json'], true) ?: [];
         $bot = $r['role'] === 'assistant';
         $out[] = [
-            'id' => (int)$r['id'], 'role' => $r['role'], 'text' => rh_ai_vault_display(rh_ai_vault_rehydrate($db, $conv, (string)$r['content'])),
+            'id' => (int)$r['id'], 'role' => $r['role'], 'text' => rh_ai_vault_show($db, $conv, (string)$r['content'], 'load', false), // an old chat after sign-out: plain words, expected
             'links' => $bot ? array_values((array)($meta['links'] ?? [])) : [],
-            'items' => $bot && !empty($meta['items']) ? rh_ai_items_rehydrate($db, $conv, (array)$meta['items']) : [],
+            'items' => $bot && !empty($meta['items']) ? rh_ai_items_rehydrate($db, $conv, (array)$meta['items'], false) : [],
             'cards' => $bot && !empty($meta['cards']) ? rh_ai_cards_for($db, $conv, (array)$meta['cards']) : [],
             'notice' => $bot ? (string)($meta['notice'] ?? '') : '',
             'rated' => $bot ? (int)($rated[(int)$r['id']] ?? 0) : 0,

@@ -1527,7 +1527,9 @@ function rh_ai_claim_prior_evidence(PDO $db, int $conv, int $beforeId): string
         $upto = (int)(json_decode((string)$st->fetchColumn(), true)['upto'] ?? 0);
         $st = $db->prepare("SELECT tool_result_json FROM ai_messages WHERE conversation_id = ? AND role = 'tool' AND id > ? AND id < ? ORDER BY id DESC LIMIT 12");
         $st->execute([$conv, $upto, $beforeId]);
-        return implode("\n", array_map(static fn($j) => str_replace(["\r", "\n"], ' ', (string)$j), $st->fetchAll(PDO::FETCH_COLUMN)));
+        $prior = implode("\n", array_map(static fn($j) => str_replace(["\r", "\n"], ' ', (string)$j), $st->fetchAll(PDO::FETCH_COLUMN)));
+        // a token whose value was purged never backs (or is pasted into) a reply (owner fault 2026-11-11)
+        return function_exists('rh_ai_vault_orphans_out') ? rh_ai_vault_orphans_out($db, $conv, $prior) : $prior;
     } catch (Throwable $e) {
         return '';
     }
