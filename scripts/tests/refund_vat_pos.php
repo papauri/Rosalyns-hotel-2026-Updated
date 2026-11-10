@@ -194,7 +194,8 @@ try {
     $day = '2037-06-10';
     $w = rh_station_union_window_for_date($day);
     $at = date('Y-m-d H:i:s', strtotime($w['start_sql']) + 60);
-    $outside = date('Y-m-d H:i:s', strtotime($w['end_sql']) + 3600);
+    // After the trading day (it runs to the next opening, not the closing time), so the EOD summaries leave it out.
+    $outside = date('Y-m-d H:i:s', strtotime($w['trading_end_sql'] ?? $w['end_sql']) + 3600);
     $base = rh_pos_eod_summary($pdo, $day);
     if (!check((int)$base['totals']['orders'] === 0 && money_eq($base['totals']['gross'], 0), 'Fixture: the test business date is empty', json_encode($base['totals']))) {
         throw new RuntimeException('test date not empty');
@@ -225,7 +226,7 @@ try {
 
     $pr = rh_pos_partial_refunds($pdo, $w['start_sql'], $w['end_sql']);
     check(money_eq($pr['amount'], 40.0) && $pr['orders'] === 1 && money_eq($pr['by_type']['walk_in'] ?? 0, 40.0), 'Partial-refund helper: only the completed non-86 row on a paid order, 40', json_encode($pr));
-    $none = rh_pos_partial_refunds($pdo, $w['end_sql'], date('Y-m-d H:i:s', strtotime($w['end_sql']) + 86400));
+    $none = rh_pos_partial_refunds($pdo, $w['end_sql'], date('Y-m-d H:i:s', strtotime($outside) + 86400));
     check(money_eq($none['amount'], 5.0), 'Helper: the later refund shows in its own window (5), not on this day', json_encode($none));
     $empty = rh_pos_partial_refunds($pdo, '2038-01-01 00:00:00', '2038-01-02 00:00:00');
     check(money_eq($empty['amount'], 0) && $empty['orders'] === 0 && $empty['by_type'] === [], 'Helper: empty period gives zeros, no error', json_encode($empty));

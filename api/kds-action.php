@@ -1519,6 +1519,8 @@ try {
         if ($shortages) {
             kds_record_oversell($pdo, $orderId, null, $shortages, $user, $ip); // warn-only, never blocks
         }
+        // Lock order across lines: every ingredient these lines can touch, ascending id, before any batch.
+        rh_stock_lock_ingredients_for_lines($pdo, array_map(static fn(array $r): array => ['menu_item_id' => (int)$r['menu_item_id'], 'source_type' => 'pos_order', 'source_id' => (int)$r['id']], $toDeduct));
         $deductedItemIds = [];
         foreach ($toDeduct as $tdi) {
             // Pass item ID (not order ID) to avoid false idempotency skip for items sharing an ingredient
@@ -1591,6 +1593,8 @@ try {
             $recallStmt->execute([$orderId, $STATION]);
         }
         $itemsToRestore = $recallStmt->fetchAll(PDO::FETCH_ASSOC);
+        // Lock order across lines: every ingredient these lines can touch, ascending id, before any batch.
+        rh_stock_lock_ingredients_for_lines($pdo, array_map(static fn(array $r): array => ['menu_item_id' => (int)$r['menu_item_id'], 'source_type' => 'pos_order', 'source_id' => (int)$r['id']], $itemsToRestore));
         foreach ($itemsToRestore as $ri) {
             // Use item ID as source_id (matches deduction record — per item, not per order)
             if (!restoreStockForMenuItem((int)$ri['menu_item_id'], (string)$ri['menu_type'], (float)$ri['quantity'], 'KDS recall - stock restored', (int)$user['id'], (int)$ri['id'], 'pos_order')) {

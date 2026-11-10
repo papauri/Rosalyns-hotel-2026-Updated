@@ -1103,5 +1103,199 @@ if ($cB) {
 $zzHoursOff($cHours);
 zz_stock_matches('Stock = model after S7b / S7c');
 
+/* ======================================================================================
+ * S9. A part refund in ANOTHER tender, then the order refunded / voided in full: every close's
+ *     expected payout per tender = the money that left the drawer in that tender in that window,
+ *     and all windows together = what was refunded (plus tip), once
+ *     (admin/includes/pos-shift-totals.php rh_pos_shift_reversals / rh_pos_settled_refund_payouts).
+ *     Past-dated fixture rows on empty days (2001-02-0x) so each window holds only its own scenario;
+ *     the full refund / void rows are written by the real rh_reverse_restaurant_payments, and the
+ *     last variant ends with the real refund_order endpoint.
+ * ====================================================================================== */
+zz_section('S9', 'Cross-tender part refund, then refund/void in full: payouts per tender, once');
+require_once $__zzRoot . '/admin/includes/pos-shift-totals.php';
+$s9Run = substr(md5((string)microtime(true)), 0, 6);
+$s9Vat = 1 + ($VAT / 100);
+$s9Ledger = static fn(string $m): string => $m === 'card_manual' ? 'credit_card' : $m;
+// $legs: [[split method, amount, tip], ...]; one leg = a single-tender order.
+$s9Order = static function (string $tag, string $paidAt, array $legs, bool $ledger = true) use ($pdo, $ADMIN, $s9Run, $s9Vat, $s9Ledger): array {
+    $split = count($legs) > 1;
+    $total = 0.0; $tip = 0.0;
+    foreach ($legs as $l) { $total += $l[1]; $tip += $l[2]; }
+    $ref = 'ZZS9' . $s9Run . $tag;
+    $pdo->prepare("INSERT INTO stock_orders (reference, order_type, customer_name, status, total_amount, subtotal, tip_amount, split_count, split_paid_count, kitchen_status, created_by, paid_by, paid_at, payment_method, created_at)
+        VALUES (?, 'walk_in', ?, 'paid', ?, ?, ?, ?, ?, 'served', ?, ?, ?, ?, ?)")
+        ->execute([$ref, ZZ . ' S9 ' . $tag, $total, $total, $tip, count($legs), $split ? count($legs) : 0, $ADMIN, $ADMIN, $paidAt, $legs[0][0], $paidAt]);
+    $oid = (int)$pdo->lastInsertId();
+    $pids = [];
+    foreach ($legs as $n => $l) {
+        if ($split) {
+            $pdo->prepare("INSERT INTO stock_order_splits (order_id, split_number, split_amount, tip_amount, payment_method, paid_at, paid_by_user_id) VALUES (?, ?, ?, ?, ?, ?, ?)")
+                ->execute([$oid, $n + 1, $l[1], $l[2], $l[0], $paidAt, $ADMIN]);
+        }
+        if ($ledger) {
+            $net = round($l[1] / $s9Vat, 2);
+            $pdo->prepare("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+                    payment_method, payment_type, payment_status, status, recorded_by, created_at)
+                VALUES (?, 'restaurant', ?, ?, ?, ?, ?, ?, ?, ?, 'full_payment', 'completed', 'completed', ?, ?)")
+                ->execute(['POS-' . $ref . '-' . ($n + 1), $oid, $ref, substr($paidAt, 0, 10), $net, ($s9Vat - 1) * 100, round($l[1] - $net, 2), $l[1], $s9Ledger($l[0]), $ADMIN, $paidAt]);
+            $pids[] = (int)$pdo->lastInsertId();
+        }
+    }
+    return ['id' => $oid, 'ref' => $ref, 'pids' => $pids];
+};
+// A part refund handed back in $method (e.g. cash on a card sale), settled at $at.
+$s9Part = static function (array $o, ?int $origPid, string $method, float $amt, string $at) use ($pdo, $ADMIN, $s9Vat): void {
+    $net = round($amt / $s9Vat, 2);
+    $pdo->prepare("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+            payment_method, payment_type, payment_status, status, original_payment_id, refund_reason, refund_status, refund_amount, refund_date_processed, recorded_by, created_at)
+        VALUES (?, 'restaurant', ?, ?, ?, ?, ?, ?, ?, ?, 'refund', 'completed', 'completed', ?, 'service_issue', 'completed', ?, ?, ?, ?)")
+        ->execute(['RFP-' . $o['ref'], $o['id'], $o['ref'], substr($at, 0, 10), $net, ($s9Vat - 1) * 100, round($amt - $net, 2), $amt, $method, $origPid, $amt, $at, $ADMIN, $at]);
+};
+// Refund ('REF-') or void ('VOID-') the rest in full at $at with the production contra-row routine.
+$s9Close = static function (array $o, string $prefix, string $at, bool $ledger = true) use ($pdo, $ADMIN): void {
+    if ($ledger) {
+        rh_reverse_restaurant_payments($pdo, $o['id'], $o['ref'], $prefix, $prefix === 'VOID-' ? 'cancellation' : 'other', 'ZZ POSTEST S9', $ADMIN, null, substr($at, 0, 10));
+        $pdo->prepare("UPDATE payments SET refund_date_processed = ?, created_at = ? WHERE booking_type = 'restaurant' AND booking_id = ? AND payment_type = 'refund' AND payment_reference LIKE ?")
+            ->execute([$at, $at, $o['id'], $prefix . '%']);
+    }
+    if ($prefix === 'VOID-') {
+        $pdo->prepare("UPDATE stock_orders SET status = 'voided', voided_at = ?" . (zz_has_col('stock_orders', 'voided_by') ? ', voided_by = ' . (int)$ADMIN : '') . " WHERE id = ?")->execute([$at, $o['id']]);
+    } else {
+        $pdo->prepare("UPDATE stock_orders SET status = 'refunded', refunded_at = ?, refund_reason = 'ZZ POSTEST S9' WHERE id = ?")->execute([$at, $o['id']]);
+    }
+};
+// Payout of one order in [ws,we) per tender; $pure = the window holds nothing else, so the Z (shift totals) must match too.
+$s9Expect = static function (string $label, string $ws, string $we, int $oid, array $exp, bool $pure = true) use ($pdo, $ADMIN): array {
+    $p = ['cash' => 0.0, 'mobile' => 0.0, 'card' => 0.0, 'total' => 0.0, 'n' => 0];
+    foreach (rh_pos_shift_reversals($pdo, $ws, $we) as $rv) {
+        if ((int)$rv['id'] !== $oid) { continue; }
+        foreach (['cash', 'mobile', 'card', 'total'] as $k) { $p[$k] += (float)$rv[$k]; }
+        $p['n']++;
+    }
+    $want = $exp + ['cash' => 0.0, 'mobile' => 0.0, 'card' => 0.0];
+    $ok = zz_money($p['cash'], $want['cash']) && zz_money($p['mobile'], $want['mobile']) && zz_money($p['card'], $want['card'])
+        && zz_money($p['total'], $want['cash'] + $want['mobile'] + $want['card']) && $p['n'] === (($want['cash'] + $want['mobile'] + $want['card']) > 0 ? 1 : 0);
+    zz_check($ok, "$label: payout cash {$want['cash']} / mobile {$want['mobile']} / card {$want['card']}, one payout row", $p);
+    if ($pure) {
+        $z = rh_pos_shift_totals($pdo, $ADMIN, $ws, $we, $ws);
+        zz_check(zz_money($z['refund_cash'], $want['cash']) && zz_money($z['refund_mobile'], $want['mobile']) && zz_money($z['refund_card'], $want['card']) && $z['refund_count'] === $p['n'],
+            "$label: the close (shift totals) expects the same payouts", [$z['refund_cash'], $z['refund_mobile'], $z['refund_card'], $z['refund_count']]);
+    }
+    return $p;
+};
+$s9W = static fn(string $d, string $from, string $to): array => ["$d $from:00", "$d $to:00"];
+try {
+    // A. Card sale 10000 + 500 tip; 3000 handed back in CASH (close); rest refunded in full.
+    $d = '2001-02-03'; [$w1s, $w1e] = $s9W($d, '08:00', '11:00'); [$w2s, $w2e] = $s9W($d, '11:00', '14:00');
+    $oA = $s9Order('A', "$d 09:00:00", [['card_manual', 10000.0, 500.0]]);
+    $s9Part($oA, $oA['pids'][0], 'cash', 3000.0, "$d 10:00:00");
+    $a1 = $s9Expect('A card->cash, close 1 (before the full refund)', $w1s, $w1e, $oA['id'], ['cash' => 3000.0]);
+    $s9Close($oA, 'REF-', "$d 12:00:00");
+    $rA = zz_q("SELECT payment_method, total_amount FROM payments WHERE booking_id = ? AND payment_reference LIKE 'REF-%'", [$oA['id']]);
+    zz_check(count($rA) === 1 && $rA[0]['payment_method'] === 'credit_card' && zz_money($rA[0]['total_amount'], 7000.0), 'A: full refund contra row = the 7000 left, on the card', $rA);
+    $a1b = $s9Expect('A close 1 rebuilt after the full refund (shift-close report / POS accounting)', $w1s, $w1e, $oA['id'], ['cash' => 3000.0]);
+    $a2 = $s9Expect('A close 2', $w2s, $w2e, $oA['id'], ['card' => 7500.0]);
+    zz_check(zz_money($a1b['total'] + $a2['total'], 10500.0), 'A: both closes together pay out 10000 + 500 tip once', [$a1b['total'], $a2['total']]);
+    $s9Expect('A no close in between', $w1s, $w2e, $oA['id'], ['cash' => 3000.0, 'card' => 7500.0]);
+
+    // C. Mobile sale 8000; 2000 back in CASH; rest refunded.
+    $d = '2001-02-04'; [$w1s, $w1e] = $s9W($d, '08:00', '11:00'); [$w2s, $w2e] = $s9W($d, '11:00', '14:00');
+    $oC = $s9Order('C', "$d 09:00:00", [['mobile_money', 8000.0, 0.0]]);
+    $s9Part($oC, $oC['pids'][0], 'cash', 2000.0, "$d 10:00:00");
+    $s9Close($oC, 'REF-', "$d 12:00:00");
+    $c1 = $s9Expect('C mobile->cash, close 1', $w1s, $w1e, $oC['id'], ['cash' => 2000.0]);
+    $c2 = $s9Expect('C close 2', $w2s, $w2e, $oC['id'], ['mobile' => 6000.0]);
+    zz_check(zz_money($c1['total'] + $c2['total'], 8000.0), 'C: closes together = 8000, once', [$c1['total'], $c2['total']]);
+    $s9Expect('C no close in between', $w1s, $w2e, $oC['id'], ['cash' => 2000.0, 'mobile' => 6000.0]);
+
+    // D. Split: cash 4000 + card 6000 (300 tip on the card); 5000 of the CARD leg back in cash; rest refunded.
+    $d = '2001-02-05'; [$w1s, $w1e] = $s9W($d, '08:00', '11:00'); [$w2s, $w2e] = $s9W($d, '11:00', '14:00');
+    $oD = $s9Order('D', "$d 09:00:00", [['cash', 4000.0, 0.0], ['card_manual', 6000.0, 300.0]]);
+    $s9Part($oD, $oD['pids'][1], 'cash', 5000.0, "$d 10:00:00");
+    $s9Close($oD, 'REF-', "$d 12:00:00");
+    $d1 = $s9Expect('D split, close 1', $w1s, $w1e, $oD['id'], ['cash' => 5000.0]);
+    $d2 = $s9Expect('D close 2 (cash leg 4000, card 1000 left + 300 tip)', $w2s, $w2e, $oD['id'], ['cash' => 4000.0, 'card' => 1300.0]);
+    zz_check(zz_money($d1['total'] + $d2['total'], 10300.0), 'D: closes together = 10000 + 300 tip, once', [$d1['total'], $d2['total']]);
+    $s9Expect('D no close in between', $w1s, $w2e, $oD['id'], ['cash' => 9000.0, 'card' => 1300.0]);
+
+    // E. Card sale 5000; 1000 back in cash; then VOIDED (VOID- contra rows).
+    $d = '2001-02-06'; [$w1s, $w1e] = $s9W($d, '08:00', '11:00'); [$w2s, $w2e] = $s9W($d, '11:00', '14:00');
+    $oE = $s9Order('E', "$d 09:00:00", [['card_manual', 5000.0, 0.0]]);
+    $s9Part($oE, $oE['pids'][0], 'cash', 1000.0, "$d 10:00:00");
+    $s9Close($oE, 'VOID-', "$d 12:00:00");
+    $e1 = $s9Expect('E void, close 1', $w1s, $w1e, $oE['id'], ['cash' => 1000.0]);
+    $e2 = $s9Expect('E close 2 (void pays the 4000 left on the card)', $w2s, $w2e, $oE['id'], ['card' => 4000.0]);
+    zz_check(zz_money($e1['total'] + $e2['total'], 5000.0), 'E: closes together = 5000, once', [$e1['total'], $e2['total']]);
+    $s9Expect('E no close in between', $w1s, $w2e, $oE['id'], ['cash' => 1000.0, 'card' => 4000.0]);
+
+    // F. Legacy: no ledger rows at all; 1500 back in cash; refunded with no contra rows -> the rest is
+    //    inferred from the order's tender AFTER the part refund is taken off (no phantom payout).
+    $d = '2001-02-07'; [$w1s, $w1e] = $s9W($d, '08:00', '11:00'); [$w2s, $w2e] = $s9W($d, '11:00', '14:00');
+    $oF = $s9Order('F', "$d 09:00:00", [['card_manual', 6000.0, 0.0]], false);
+    $s9Part($oF, null, 'cash', 1500.0, "$d 10:00:00");
+    $s9Close($oF, 'REF-', "$d 12:00:00", false);
+    $f1 = $s9Expect('F legacy, close 1', $w1s, $w1e, $oF['id'], ['cash' => 1500.0]);
+    $f2 = $s9Expect('F close 2 (inferred rest 4500 on the card)', $w2s, $w2e, $oF['id'], ['card' => 4500.0]);
+    zz_check(zz_money($f1['total'] + $f2['total'], 6000.0), 'F: closes together = 6000, once', [$f1['total'], $f2['total']]);
+
+    // G. Real endpoint: card sale 9000; 2500 back in cash (past); refund_order now via admin/pos.php.
+    $d = '2001-02-08'; [$w1s, $w1e] = $s9W($d, '08:00', '11:00');
+    $oG = $s9Order('G', "$d 09:00:00", [['card_manual', 9000.0, 0.0]]);
+    $s9Part($oG, $oG['pids'][0], 'cash', 2500.0, "$d 10:00:00");
+    $r = zz_pos(['action' => 'refund_order', 'order_id' => (string)$oG['id'], 'refund_reason' => 'ZZ POSTEST S9 full refund']);
+    zz_check(zz_jok($r) && (zz_order($oG['id'])['status'] ?? '') === 'refunded', 'G: refund_order (real endpoint) refunds the rest', zz_err($r));
+    $gEnd = date('Y-m-d H:i:s', strtotime((string)zz_one("SELECT NOW()")) + 120);
+    $g1 = $s9Expect('G close 1 (rebuilt)', $w1s, $w1e, $oG['id'], ['cash' => 2500.0]);
+    $g2 = $s9Expect('G close 2 (the refund now)', $w1e, $gEnd, $oG['id'], ['card' => 6500.0], false);
+    zz_check(zz_money($g1['total'] + $g2['total'], 9000.0), 'G: closes together = 9000, once', [$g1['total'], $g2['total']]);
+    $s9Expect('G no close in between', $w1s, $gEnd, $oG['id'], ['cash' => 2500.0, 'card' => 6500.0], false);
+} catch (Throwable $e) {
+    zz_bad('S9 crashed', $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine());
+}
+
+/* ======================================================================================
+ * S10 (stock lead). A started line voided after midnight: its wastage is dated on the TRADING day
+ *      (opening to the next opening), the day the sale counts on, not the calendar day of the void; the
+ *      wastage cost is exactly the usage cost it reclassifies. Hours IN MEMORY: opening in 60 min,
+ *      closing in 30 min, so the stations are open now and "now" belongs to yesterday's trading day
+ *      (the same position as a 01:00 void of a 23:00 sale).
+ * ====================================================================================== */
+zz_section('S10', 'Voided started line after midnight: wastage on the trading day, cost = usage cost');
+try {
+    $s10Tz = rh_site_timezone();
+    $s10Now = new DateTimeImmutable('now', $s10Tz);
+    $s10Open = $s10Now->modify('+60 minutes');
+    if ($s10Open->format('Y-m-d') !== $s10Now->format('Y-m-d')) {
+        $SKIPS[] = 'S10: run within an hour of midnight (opening would fall tomorrow); trading-day wastage not checked';
+    } else {
+        $s10Hours = $zzHoursFor($s10Open->format('H:i'), $s10Now->modify('+30 minutes')->format('H:i'));
+        $zzHoursOn($s10Hours);
+        $s10Day = rh_station_trading_business_date();
+        zz_check($s10Day !== $s10Now->format('Y-m-d') && rh_station_union_trading_window()['is_open_now'] === true, "Open now, trading day $s10Day (calendar " . $s10Now->format('Y-m-d') . ')');
+        $r = zz_pos(['action' => 'park', 'order_type' => 'walk_in', 'customer_name' => ZZ . ' S10'] + $cart([$fl(1)]), $s10Hours);
+        zz_check(zz_jok($r), 'park S10 food line', zz_err($r));
+        $O10 = (int)($r['json']['order_id'] ?? 0);
+        [$L10] = zz_lines($O10) + [0];
+        $r = zz_call('api/kds-action.php', ['action' => 'ready_item', 'item_id' => $L10], true, $s10Hours);
+        zz_check(zz_jok($r), 'ready_item (stock leaves as usage)', zz_err($r));
+        zz_take_recipe(REC_F, 1);
+        $r = zz_call('api/kds-action.php', ['action' => 'void_item', 'item_id' => $L10], true, $s10Hours);
+        zz_check(zz_jok($r) && ($r['json']['stock'] ?? '') === 'wastage', '86 after Ready: wastage', zz_err($r) ?: ($r['json'] ?? null));
+        $w10 = zz_q("SELECT id, ingredient_id, quantity, wastage_cost, recorded_date FROM stock_wastage WHERE reason LIKE ? ORDER BY ingredient_id", ['%' . (zz_order($O10)['reference'] ?? 'none') . '%']);
+        zz_check(count($w10) === 2 && count(array_filter($w10, static fn($w) => $w['recorded_date'] === $s10Day)) === 2, "Both wastage rows dated on the trading day $s10Day", $w10);
+        $costOk = (bool)$w10;
+        foreach ($w10 as $w) {
+            $usage = (float)zz_one("SELECT COALESCE(SUM(ABS(quantity_change) * cost_at_time), 0) FROM stock_adjustments WHERE source_type = 'pos_order' AND source_id = ? AND ingredient_id = ? AND reason LIKE ?", [$L10, (int)$w['ingredient_id'], 'Voided to wastage #' . (int)$w['id'] . ' %']);
+            $costOk = $costOk && $usage > 0 && zz_near($w['wastage_cost'], $usage, 0.0001);
+        }
+        zz_check($costOk, 'Wastage cost = the usage cost it reclassifies (no re-rounding)', $w10);
+        $zzHoursOff($s10Hours);
+        zz_stock_matches('Stock = model after S10 (already off the shelf)');
+    }
+} catch (Throwable $e) {
+    zz_bad('S10 crashed', $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine());
+}
+
 echo "\nScenarios finished.\n";
 exit;

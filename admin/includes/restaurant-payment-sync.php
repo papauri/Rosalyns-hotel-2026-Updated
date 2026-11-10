@@ -384,6 +384,7 @@ function rh_record_item_wastage(PDO $pdo, int $menuItemId, string $menuType, flo
     if (!$reqs) {
         return 0;
     }
+    ksort($reqs); // lock order: ingredients by ascending id, each ingredient row before its batches
     $ownTx = !$pdo->inTransaction();
     if ($ownTx) {
         $pdo->beginTransaction();
@@ -394,7 +395,9 @@ function rh_record_item_wastage(PDO $pdo, int $menuItemId, string $menuType, flo
             rh_log_event('stock', 'warning', 'Wastage not recorded for ingredient #' . $iid . ' (' . $why . ') - stock needs reconciliation.', ['ingredient_id' => $iid, 'menu_item_id' => $menuItemId, 'menu_type' => $menuType]);
         }
     };
-    $today = date('Y-m-d'); // hotel date (PHP default tz = RH_TIMEZONE)
+    // Dated on the TRADING day (opening to the next opening), the day the dashboard counts the sale on,
+    // so a 01:00 void of a 23:00 sale lands on the same day as the sale.
+    $today = function_exists('rh_station_trading_business_date') ? rh_station_trading_business_date() : date('Y-m-d');
     $costSel = $pdo->prepare("SELECT cost_per_unit FROM stock_ingredients WHERE id = ?");
     $adjCostSel = $pdo->prepare("SELECT cost_at_time FROM stock_adjustments WHERE id = ?");
     $wIns = $pdo->prepare("INSERT INTO stock_wastage (ingredient_id, batch_id, quantity, cost_per_unit, wastage_cost, reason, recorded_date, recorded_by) VALUES (?, NULL, ?, ?, ?, ?, ?, ?)");
@@ -483,7 +486,9 @@ function rh_record_item_wastage(PDO $pdo, int $menuItemId, string $menuType, flo
                 // Record what actually left as usage ($uq at its own cost), not today's recipe qty,
                 // so every tagged usage row is matched by wastage of the same quantity.
                 $wq = round($uq, 6);
-                $wIns->execute([$iid, $wq, $cost, round($wq * $cost, 4), $reasonShort, $today, $userId]);
+                // Cost = exactly what the reclassified usage rows carried (sum of qty x cost_at_time), stored
+                // at the column's 4 dp; not re-derived from a rounded unit cost.
+                $wIns->execute([$iid, $wq, $cost, round($uc, 4), $reasonShort, $today, $userId]);
                 $wastageId = (int)$pdo->lastInsertId();
                 $markReason = mb_substr('Voided to wastage #' . $wastageId . ' - ' . $reasonText, 0, 255);
                 foreach ($usageIds as $uid) {
@@ -639,9 +644,12 @@ function rh_restore_pos_order_stock(PDO $pdo, int $orderId, ?int $doneBy, string
                            WHERE soi.order_id = ? AND soi.kds_status <> 'void'
                         ORDER BY soi.id ASC");
     $sel->execute([$orderId]);
+    $posLines = $sel->fetchAll(PDO::FETCH_ASSOC);
+    // Lock order across lines: every ingredient these lines can touch, ascending id, before any batch.
+    rh_stock_lock_ingredients_for_lines($pdo, array_map(static fn(array $r): array => ['menu_item_id' => (int)$r['menu_item_id'], 'source_type' => 'pos_order', 'source_id' => (int)$r['id']], $posLines));
     $done = 0;
     $flag = $pdo->prepare("UPDATE stock_order_items SET stock_deducted = 0 WHERE id = ?");
-    foreach ($sel->fetchAll(PDO::FETCH_ASSOC) as $line) {
+    foreach ($posLines as $line) {
         $lineId = (int)$line['id'];
         if ($trackedChargeSel && (int)$line['has_trail'] === 0) {
             // Stock-tracked room-service charge owns this line's stock (rh_restore_room_service_charge_stock).
@@ -739,6 +747,8 @@ function rh_close_refunded_order_lines(PDO $pdo, int $orderId, int $userId, stri
     if (!$lines) {
         return $out;
     }
+    // Lock order across lines: every ingredient these lines can touch, ascending id, before any batch.
+    rh_stock_lock_ingredients_for_lines($pdo, array_map(static fn(array $r): array => ['menu_item_id' => (int)$r['menu_item_id'], 'source_type' => 'pos_order', 'source_id' => (int)$r['id']], $lines));
     $actorName = '';
     try {
         $as = $pdo->prepare("SELECT COALESCE(NULLIF(full_name, ''), username) FROM admin_users WHERE id = ?");

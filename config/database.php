@@ -11446,6 +11446,7 @@ function deductStockForMenuItem(int $menuItemId, string $menuType, float $portio
             }
         }
 
+        ksort($needByIngredient); // lock order: ingredients by ascending id (same as restore and the sweep)
         foreach ($needByIngredient as $ingredientId => $rawNeeded) {
             if ($dupDeductions) {
                 $dupDeductions->execute([$sourceType, $sourceId, $ingredientId]);
@@ -11488,6 +11489,122 @@ function deductStockForMenuItem(int $menuItemId, string $menuType, float $portio
 }
 
 /**
+ * Lock order across lines. One order / void / refund / close that deducts or restores several lines in
+ * ONE transaction must hold every ingredient row those lines can touch before any line touches a batch;
+ * otherwise line 1 (ingredient 5) then line 2 (ingredient 3) against another order's 3-then-5 can
+ * deadlock. Locks, in ascending id, the recipe ingredients of the lines' menu items plus the ingredients
+ * of every deduction already recorded against them (pos_order line ids / room_service charge ids).
+ * Recipes are matched on menu_item_id alone (a superset when a food and a drink share an id: an extra
+ * lock, never a missing one). The per-line calls then re-take locks they already hold.
+ * Does nothing outside a transaction (a lock would be released at once). A lock conflict is rethrown
+ * (the database has already rolled the caller's transaction back); any other failure is logged and the
+ * per-line locks still apply. Returns the ingredient ids locked.
+ *
+ * @param array<int, array{menu_item_id?:int, source_type?:string, source_id?:int|null}> $lines
+ */
+function rh_stock_lock_ingredients_for_lines(PDO $pdo, array $lines): array
+{
+    if (!$lines || !$pdo->inTransaction()) {
+        return [];
+    }
+    $itemIds = [];
+    $srcIds = ['pos_order' => [], 'room_service' => []];
+    foreach ($lines as $l) {
+        $mid = (int)($l['menu_item_id'] ?? 0);
+        if ($mid > 0) {
+            $itemIds[$mid] = $mid;
+        }
+        $st = (string)($l['source_type'] ?? '');
+        $sid = (int)($l['source_id'] ?? 0);
+        if ($sid > 0 && isset($srcIds[$st])) {
+            $srcIds[$st][$sid] = $sid;
+        }
+    }
+    try {
+        if (!ensureStockTablesExist()) {
+            return [];
+        }
+        $ing = [];
+        if ($itemIds) {
+            $ids = array_values($itemIds);
+            $q = $pdo->prepare("SELECT DISTINCT sri.ingredient_id FROM stock_recipes sr
+                                  INNER JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id
+                                 WHERE sr.menu_item_id IN (" . implode(',', array_fill(0, count($ids), '?')) . ")");
+            $q->execute($ids);
+            foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $iid) {
+                $ing[(int)$iid] = (int)$iid;
+            }
+        }
+        foreach ($srcIds as $st => $set) {
+            if (!$set) {
+                continue;
+            }
+            $ids = array_values($set);
+            $q = $pdo->prepare("SELECT DISTINCT ingredient_id FROM stock_adjustments
+                                 WHERE source_type = ? AND source_id IN (" . implode(',', array_fill(0, count($ids), '?')) . ")");
+            $q->execute(array_merge([$st], $ids));
+            foreach ($q->fetchAll(PDO::FETCH_COLUMN) as $iid) {
+                $ing[(int)$iid] = (int)$iid;
+            }
+        }
+        unset($ing[0]);
+        if (!$ing) {
+            return [];
+        }
+        $lockIds = array_values($ing);
+        sort($lockIds);
+        $pdo->prepare("SELECT id FROM stock_ingredients WHERE id IN (" . implode(',', array_fill(0, count($lockIds), '?')) . ") ORDER BY id FOR UPDATE")
+            ->execute($lockIds);
+        return $lockIds;
+    } catch (Throwable $e) {
+        if (function_exists('rh_is_lock_conflict') && rh_is_lock_conflict($e)) {
+            throw $e;
+        }
+        error_log('rh_stock_lock_ingredients_for_lines: ' . $e->getMessage());
+        return [];
+    }
+}
+
+/**
+ * rh_stock_lock_ingredients_for_lines() for whole orders: every line of the given orders plus their
+ * folio (room-service) charges. For paths that close / void several orders in one transaction.
+ */
+function rh_stock_lock_ingredients_for_orders(PDO $pdo, array $orderIds): array
+{
+    $orderIds = array_values(array_unique(array_filter(array_map('intval', $orderIds))));
+    if (!$orderIds || !$pdo->inTransaction()) {
+        return [];
+    }
+    $lines = [];
+    $in = implode(',', array_fill(0, count($orderIds), '?'));
+    try {
+        $q = $pdo->prepare("SELECT id, menu_item_id FROM stock_order_items WHERE order_id IN ($in)");
+        $q->execute($orderIds);
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $lines[] = ['menu_item_id' => (int)$r['menu_item_id'], 'source_type' => 'pos_order', 'source_id' => (int)$r['id']];
+        }
+    } catch (Throwable $e) {
+        if (rh_is_lock_conflict($e)) {
+            throw $e;
+        }
+        error_log('rh_stock_lock_ingredients_for_orders lines: ' . $e->getMessage());
+    }
+    try {
+        $q = $pdo->prepare("SELECT id, source_item_id FROM booking_charges WHERE stock_order_id IN ($in)");
+        $q->execute($orderIds);
+        foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $lines[] = ['menu_item_id' => (int)$r['source_item_id'], 'source_type' => 'room_service', 'source_id' => (int)$r['id']];
+        }
+    } catch (Throwable $e) {
+        if (rh_is_lock_conflict($e)) {
+            throw $e;
+        }
+        // booking_charges.stock_order_id missing on a legacy schema: no linked charges.
+    }
+    return rh_stock_lock_ingredients_for_lines($pdo, $lines);
+}
+
+/**
  * Ensure the batch ledger has enough active quantity to cover a deduction.
  *
  * Legacy/manual flows can leave ingredient totals ahead of active batches.
@@ -11511,6 +11628,9 @@ function ensureStockBatchCoverageForDeduction(int $ingredientId, float $required
         if ($ownTx) {
             $pdo->beginTransaction();
         }
+
+        // Lock order (every stock write path): the ingredient row before any of its batches.
+        $pdo->prepare("SELECT id FROM stock_ingredients WHERE id = ? FOR UPDATE")->execute([$ingredientId]);
 
         $batchSel = $pdo->prepare("\n            SELECT quantity_remaining\n            FROM stock_batches\n            WHERE ingredient_id = ?\n              AND status = 'active'\n              AND quantity_remaining > 0.0001\n            FOR UPDATE\n        ");
         $batchSel->execute([$ingredientId]);
@@ -11768,11 +11888,14 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
 
         $byBatch = []; // batch_id => qty to add back
         $byIngredient = []; // ingredient_id => qty to add back (fallback / aggregate)
+        $restCostNum = []; // ingredient_id => sum(qty x original cost_at_time) of the deductions restored
+        $restCostDen = [];
+        $closedWriteOffs = []; // restored quantity whose original batch is closed (recalled/wasted/expired): written off, not shelved
         $hadDeductionTrail = false;
 
         if ($originalChargeId !== null) {
             $sel = $pdo->prepare("
-                SELECT sa.id AS adjustment_id, sa.ingredient_id, sa.quantity_change, sbd.batch_id, sbd.quantity_deducted, COALESCE(sa.reason, '') AS adj_reason
+                SELECT sa.id AS adjustment_id, sa.ingredient_id, sa.quantity_change, sa.cost_at_time, sbd.batch_id, sbd.quantity_deducted, COALESCE(sa.reason, '') AS adj_reason
                 FROM stock_adjustments sa
                 LEFT JOIN stock_batch_deductions sbd ON sbd.adjustment_id = sa.id
                 WHERE sa.source_type = ? AND sa.source_id = ? AND sa.quantity_change < 0" . ($trailNotBefore !== null ? " AND sa.created_at >= ?" : "") . "
@@ -11829,7 +11952,12 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
                 // Add quantity_change once per adjustment to avoid over-restoring the ingredient total.
                 if (!isset($seenAdj[$adjId])) {
                     $seenAdj[$adjId] = true;
-                    $byIngredient[$ingId] = ($byIngredient[$ingId] ?? 0) + abs((float)$h['quantity_change']) * $traceScale;
+                    $restQ = abs((float)$h['quantity_change']) * $traceScale;
+                    $byIngredient[$ingId] = ($byIngredient[$ingId] ?? 0) + $restQ;
+                    // The restore is valued at the FIFO cost the stock left at (not today's average),
+                    // so usage minus restores nets to exactly what is still out.
+                    $restCostNum[$ingId] = ($restCostNum[$ingId] ?? 0.0) + $restQ * (float)$h['cost_at_time'];
+                    $restCostDen[$ingId] = ($restCostDen[$ingId] ?? 0.0) + $restQ;
                 }
                 if (!empty($h['batch_id'])) {
                     $bid = (int)$h['batch_id'];
@@ -11914,33 +12042,26 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
                 WHERE id = ?
             ");
             $bInfo = $pdo->prepare("SELECT ingredient_id, status, expiry_date, cost_per_unit FROM stock_batches WHERE id = ? FOR UPDATE");
-            $bNew = $pdo->prepare("
-                INSERT INTO stock_batches
-                    (ingredient_id, batch_number, quantity_received, quantity_remaining, cost_per_unit,
-                     received_date, expiry_date, expiry_alert_days, status, notes, created_by)
-                VALUES (?, '', ?, ?, ?, ?, ?, 7, 'active', ?, ?)
-            ");
             foreach ($byBatch as $batchId => $q) {
                 $bInfo->execute([$batchId]);
                 $info = $bInfo->fetch(PDO::FETCH_ASSOC);
-                if ($info && in_array((string)$info['status'], ['active', 'depleted'], true)) {
-                    $bUpd->execute([$q, $batchId]);
-                    continue;
-                }
-                // Original batch is expired / wasted / recalled (or gone): restoring into it would be
-                // phantom stock nobody can use. Put the quantity into a fresh active batch at the same
-                // cost (original expiry kept only if still in the future) so batch sum == ingredient total.
                 if (!$info) {
                     continue; // batch row deleted; the ingredient total below still restores
                 }
-                $expKeep = (!empty($info['expiry_date']) && (string)$info['expiry_date'] >= date('Y-m-d')) ? $info['expiry_date'] : null;
-                $bNew->execute([
-                    (int)$info['ingredient_id'], $q, $q, (float)$info['cost_per_unit'], date('Y-m-d'), $expKeep,
-                    mb_substr('Restored from voided charge (original batch #' . $batchId . ' is ' . $info['status'] . ')', 0, 500), $doneBy,
-                ]);
-                $newBid = (int)$pdo->lastInsertId();
-                $pdo->prepare("UPDATE stock_batches SET batch_number = ? WHERE id = ?")
-                    ->execute(['R' . str_pad((string)$newBid, 6, '0', STR_PAD_LEFT), $newBid]);
+                $bStatus = (string)$info['status'];
+                $batchDatePassed = !empty($info['expiry_date']) && (string)$info['expiry_date'] < date('Y-m-d');
+                // Active batch (even one past its date: the rest of it is still on the shelf and the sweep
+                // writes it all off) or a used-up batch still in date: put the stock back into it.
+                if ($bStatus === 'active' || ($bStatus === 'depleted' && !$batchDatePassed)) {
+                    $bUpd->execute([$q, $batchId]);
+                    continue;
+                }
+                // ASSUMPTION 2026-11-10: restored stock keeps its original batch. A batch that is not sellable
+                // (recalled, written off as wasted, expired by the sweep, or used up and past its date) never
+                // takes stock back and no fresh batch is minted: the quantity is written off at once at that
+                // batch's own cost (the FIFO cost it left at), labelled by why the batch is closed.
+                $kind = $bStatus === 'recalled' ? 'recall' : ($bStatus === 'wasted' ? 'wastage' : 'expiry');
+                $closedWriteOffs[] = ['ingredient_id' => (int)$info['ingredient_id'], 'batch_id' => (int)$batchId, 'qty' => (float)$q, 'cost' => (float)$info['cost_per_unit'], 'kind' => $kind];
             }
         }
 
@@ -11954,14 +12075,51 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
         $ingUpd = $pdo->prepare("UPDATE stock_ingredients SET current_quantity = current_quantity + ?, updated_at = NOW() WHERE id = ?");
 
         foreach ($byIngredient as $ingId => $q) {
-            $costSel->execute([$ingId]);
-            $costAtTime = (float)($costSel->fetchColumn() ?: 0);
+            if (!empty($restCostDen[$ingId]) && $restCostDen[$ingId] > 0.000001) {
+                $costAtTime = round($restCostNum[$ingId] / $restCostDen[$ingId], 4); // column precision
+            } else {
+                $costSel->execute([$ingId]); // recipe fallback: no trail, today's average
+                $costAtTime = (float)($costSel->fetchColumn() ?: 0);
+            }
             $adjArgs = [$ingId, $q, mb_substr($reason, 0, 250), $originalChargeId, $costAtTime, $doneBy];
             if ($hasRestoreCol) {
                 $adjArgs[] = $sourceType;
             }
             $adjStmt->execute($adjArgs);
             $ingUpd->execute([$q, $ingId]);
+        }
+
+        // Restored quantity whose original batch is closed (recalled / wasted / expired): the void_restore
+        // above still records the line as restored (idempotency), and the same quantity leaves again with
+        // the writes a batch write-off makes (adjustment + stock_wastage row at the batch's cost):
+        // recall -> 'recall' adjustment + 'Recall:' wastage row; wasted -> 'wastage' adjustment keyed on the
+        // wastage id; expired -> 'expiry' adjustment, like the sweep.
+        if ($closedWriteOffs) {
+            $woAdj = $pdo->prepare("
+                INSERT INTO stock_adjustments (ingredient_id, quantity_change, reason, source_type, source_id, cost_at_time, adjusted_by, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+            ");
+            $woIng = $pdo->prepare("UPDATE stock_ingredients SET current_quantity = current_quantity - ?, updated_at = NOW() WHERE id = ?");
+            $woBn = $pdo->prepare("SELECT batch_number FROM stock_batches WHERE id = ?");
+            foreach ($closedWriteOffs as $w) {
+                $wq = round($w['qty'], 6);
+                if ($wq <= 0.0000005) continue;
+                $woBn->execute([$w['batch_id']]);
+                $bn = (string)($woBn->fetchColumn() ?: ('#' . $w['batch_id']));
+                if ($w['kind'] === 'recall') {
+                    $wReason = 'Recall: stock restored from voided charge (batch ' . $bn . ' was recalled)';
+                    $aReason = 'Recalled batch ' . $bn . ': restored stock written off';
+                } elseif ($w['kind'] === 'wastage') {
+                    $wReason = 'Restored from voided charge: batch ' . $bn . ' was written off as wasted';
+                    $aReason = 'Wasted batch ' . $bn . ': restored stock written off';
+                } else {
+                    $wReason = 'Expired batch ' . $bn . ' (restored from voided charge)';
+                    $aReason = 'Expired batch removed (restored from voided charge)';
+                }
+                $woIng->execute([$wq, $w['ingredient_id']]);
+                $wastageId = rh_insert_batch_wastage_row($pdo, $w['ingredient_id'], $w['batch_id'], $wq, $w['cost'], $wReason, $doneBy);
+                $woAdj->execute([$w['ingredient_id'], -$wq, mb_substr($aReason, 0, 255), $w['kind'], $w['kind'] === 'wastage' ? $wastageId : $w['batch_id'], $w['cost'], $doneBy]);
+            }
         }
 
         if ($ownTx) $pdo->commit();
@@ -11983,46 +12141,104 @@ function runStockExpiryCheck(): int
 {
     global $pdo;
     if (!ensureStockTablesExist()) return 0;
+    $today = date('Y-m-d'); // hotel date (PHP default tz = RH_TIMEZONE)
+    $ownTx = !$pdo->inTransaction();
     try {
-        $ownTx = !$pdo->inTransaction();
-        if ($ownTx) $pdo->beginTransaction();
-
-        $sel = $pdo->prepare("
-            SELECT id, ingredient_id, batch_number, quantity_remaining, cost_per_unit
+        // Ingredients with an expired batch still on the shelf (plain read, no lock yet).
+        $idSel = $pdo->prepare("
+            SELECT DISTINCT ingredient_id
             FROM stock_batches
             WHERE status = 'active'
               AND expiry_date IS NOT NULL
               AND expiry_date < ?
-            FOR UPDATE
+            ORDER BY ingredient_id
         ");
-        $sel->execute([date('Y-m-d')]); // hotel date (PHP default tz = RH_TIMEZONE)
-        $batches = $sel->fetchAll(PDO::FETCH_ASSOC);
-
-        $ingUpd = $pdo->prepare("UPDATE stock_ingredients SET current_quantity = current_quantity - ?, updated_at = NOW() WHERE id = ?");
-        $adjIns = $pdo->prepare("
-            INSERT INTO stock_adjustments (ingredient_id, quantity_change, reason, source_type, source_id, cost_at_time, adjusted_by, created_at)
-            VALUES (?, ?, 'Expired batch removed', 'expiry', ?, ?, NULL, NOW())
-        ");
-        $batchUpd = $pdo->prepare("UPDATE stock_batches SET quantity_remaining = 0, status = 'expired', updated_at = NOW() WHERE id = ?");
-
-        foreach ($batches as $batch) {
-            $quantity = max(0.0, (float)$batch['quantity_remaining']);
-            if ($quantity > 0.0001) {
-                $ingUpd->execute([$quantity, (int)$batch['ingredient_id']]);
-                $adjIns->execute([(int)$batch['ingredient_id'], -$quantity, (int)$batch['id'], (float)$batch['cost_per_unit']]);
-                // Mirror the write-off into stock_wastage so wastage totals/dashboards include it.
-                rh_insert_batch_wastage_row($pdo, (int)$batch['ingredient_id'], (int)$batch['id'], $quantity, (float)$batch['cost_per_unit'], 'Expired batch ' . (string)($batch['batch_number'] ?? ('#' . $batch['id'])), null);
-            }
-            $batchUpd->execute([(int)$batch['id']]);
-        }
-
-        if ($ownTx) $pdo->commit();
-        return count($batches);
+        $idSel->execute([$today]);
+        $ingIds = array_map('intval', $idSel->fetchAll(PDO::FETCH_COLUMN));
     } catch (Throwable $e) {
-        if (isset($ownTx) && $ownTx && $pdo->inTransaction()) $pdo->rollBack();
         error_log('runStockExpiryCheck error: ' . $e->getMessage());
         return 0;
     }
+
+    $swept = 0;
+    if (!$ownTx) {
+        // Inside a caller's transaction: one pass, ingredients in ascending id order. No retry here:
+        // a deadlock has already rolled the caller's transaction back.
+        try {
+            foreach ($ingIds as $ingId) {
+                $swept += rh_stock_expiry_sweep_ingredient($pdo, $ingId, $today);
+            }
+            return $swept;
+        } catch (Throwable $e) {
+            error_log('runStockExpiryCheck error: ' . $e->getMessage());
+            return 0;
+        }
+    }
+
+    // Own transactions: one short transaction per ingredient, so the sweep never holds one
+    // ingredient while waiting for another. A deadlock (1213) or lock wait timeout (1205) is retried once
+    // after a full rollback; the retry re-reads the batches under lock (status 'active' only), so
+    // nothing is ever written off twice.
+    foreach ($ingIds as $ingId) {
+        for ($attempt = 0; $attempt < 2; $attempt++) {
+            try {
+                $pdo->beginTransaction();
+                $n = rh_stock_expiry_sweep_ingredient($pdo, $ingId, $today);
+                $pdo->commit();
+                $swept += $n;
+                break;
+            } catch (Throwable $e) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                if ($attempt === 0 && rh_is_lock_conflict($e)) {
+                    continue;
+                }
+                error_log("runStockExpiryCheck error (ingredient {$ingId}): " . $e->getMessage());
+                break;
+            }
+        }
+    }
+    return $swept;
+}
+
+/**
+ * Write off one ingredient's expired active batches (the expiry sweep's writes). Lock order, as on
+ * every stock write path: the ingredient row first, then its batches. Caller owns the transaction.
+ * Returns the number of batches moved to 'expired'.
+ */
+function rh_stock_expiry_sweep_ingredient(PDO $pdo, int $ingredientId, string $today): int
+{
+    $pdo->prepare("SELECT id FROM stock_ingredients WHERE id = ? FOR UPDATE")->execute([$ingredientId]);
+    $sel = $pdo->prepare("
+        SELECT id, ingredient_id, batch_number, quantity_remaining, cost_per_unit
+        FROM stock_batches
+        WHERE ingredient_id = ?
+          AND status = 'active'
+          AND expiry_date IS NOT NULL
+          AND expiry_date < ?
+        ORDER BY id
+        FOR UPDATE
+    ");
+    $sel->execute([$ingredientId, $today]);
+    $batches = $sel->fetchAll(PDO::FETCH_ASSOC);
+
+    $ingUpd = $pdo->prepare("UPDATE stock_ingredients SET current_quantity = current_quantity - ?, updated_at = NOW() WHERE id = ?");
+    $adjIns = $pdo->prepare("
+        INSERT INTO stock_adjustments (ingredient_id, quantity_change, reason, source_type, source_id, cost_at_time, adjusted_by, created_at)
+        VALUES (?, ?, 'Expired batch removed', 'expiry', ?, ?, NULL, NOW())
+    ");
+    $batchUpd = $pdo->prepare("UPDATE stock_batches SET quantity_remaining = 0, status = 'expired', updated_at = NOW() WHERE id = ?");
+
+    foreach ($batches as $batch) {
+        $quantity = max(0.0, (float)$batch['quantity_remaining']);
+        if ($quantity > 0.0001) {
+            $ingUpd->execute([$quantity, (int)$batch['ingredient_id']]);
+            $adjIns->execute([(int)$batch['ingredient_id'], -$quantity, (int)$batch['id'], (float)$batch['cost_per_unit']]);
+            // Mirror the write-off into stock_wastage so wastage totals/dashboards include it.
+            rh_insert_batch_wastage_row($pdo, (int)$batch['ingredient_id'], (int)$batch['id'], $quantity, (float)$batch['cost_per_unit'], 'Expired batch ' . (string)($batch['batch_number'] ?? ('#' . $batch['id'])), null);
+        }
+        $batchUpd->execute([(int)$batch['id']]);
+    }
+    return count($batches);
 }
 
 /**

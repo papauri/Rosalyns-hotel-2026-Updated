@@ -58,6 +58,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($batchId <= 0) throw new RuntimeException('Batch not found.');
 
                 $pdo->beginTransaction();
+                // Lock order (every stock write path): the ingredient row before its batch.
+                $lockIng = $pdo->prepare("SELECT ingredient_id FROM stock_batches WHERE id = ?");
+                $lockIng->execute([$batchId]);
+                $pdo->prepare("SELECT id FROM stock_ingredients WHERE id = ? FOR UPDATE")->execute([(int)$lockIng->fetchColumn()]);
                 $sel = $pdo->prepare("SELECT b.*, i.cost_per_unit AS ing_cost FROM stock_batches b INNER JOIN stock_ingredients i ON i.id = b.ingredient_id WHERE b.id = ? FOR UPDATE");
                 $sel->execute([$batchId]);
                 $batch = $sel->fetch(PDO::FETCH_ASSOC);
@@ -92,6 +96,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($batchId <= 0) throw new RuntimeException('Batch not found.');
 
                 $pdo->beginTransaction();
+                // Lock order (every stock write path): the ingredient row before its batch.
+                $lockIng = $pdo->prepare("SELECT ingredient_id FROM stock_batches WHERE id = ?");
+                $lockIng->execute([$batchId]);
+                $pdo->prepare("SELECT id FROM stock_ingredients WHERE id = ? FOR UPDATE")->execute([(int)$lockIng->fetchColumn()]);
                 $sel = $pdo->prepare("SELECT * FROM stock_batches WHERE id = ? FOR UPDATE");
                 $sel->execute([$batchId]);
                 $batch = $sel->fetch(PDO::FETCH_ASSOC);

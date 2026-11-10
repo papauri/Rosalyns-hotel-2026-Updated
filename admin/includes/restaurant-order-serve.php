@@ -27,6 +27,8 @@ function rh_auto_serve_bar_items(PDO $pdo, int $orderId, array $actor): int
     $actorId = (int)($actor['id'] ?? 0);
 
     // Deduct stock for any drink lines that never went through the KDS bump.
+    // Lock order across lines: every ingredient these lines can touch, ascending id, before any batch.
+    rh_stock_lock_ingredients_for_lines($pdo, array_map(static fn(array $r): array => ['menu_item_id' => (int)$r['menu_item_id'], 'source_type' => 'pos_order', 'source_id' => (int)$r['id']], array_values(array_filter($rows, static fn(array $r): bool => (int)$r['stock_deducted'] === 0))));
     foreach ($rows as $r) {
         if ((int)$r['stock_deducted'] === 0) {
             $ok = deductStockForMenuItem((int)$r['menu_item_id'], (string)$r['menu_type'], (float)$r['quantity'], 'pos_order', (int)$r['id'], $actorId);

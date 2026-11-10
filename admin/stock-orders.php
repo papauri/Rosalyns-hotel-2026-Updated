@@ -196,6 +196,8 @@ function voidRoomServiceFolioChargesForOrder(PDO $pdo, int $orderId, string $rea
     $stmt->execute([$orderId]);
     $charges = $stmt->fetchAll(PDO::FETCH_ASSOC);
     if (!$charges) return 0;
+    // Lock order across charges: every ingredient they can touch, ascending id, before any batch.
+    rh_stock_lock_ingredients_for_lines($pdo, array_map(static fn(array $c): array => ['menu_item_id' => (int)$c['source_item_id'], 'source_type' => 'room_service', 'source_id' => (int)$c['id']], $charges));
 
     $bookingIds = [];
     $upd = $pdo->prepare("UPDATE booking_charges SET voided = 1, voided_at = NOW(), void_reason = ?, voided_by = ?, updated_at = NOW() WHERE id = ?");

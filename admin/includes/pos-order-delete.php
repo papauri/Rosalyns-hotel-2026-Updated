@@ -284,6 +284,9 @@ function rh_delete_pos_order(PDO $pdo, int $orderId, int $userId, string $reason
                                     FROM stock_order_items WHERE order_id = ? ORDER BY id ASC FOR UPDATE");
         $itemSel->execute([$orderId]);
         $items = $itemSel->fetchAll(PDO::FETCH_ASSOC);
+        // Lock order across lines: every ingredient the lines and folio charges can touch, ascending id,
+        // before any of the restores / wastage below touches a batch.
+        rh_stock_lock_ingredients_for_orders($pdo, [$orderId]);
 
         $paySel = $pdo->prepare("SELECT * FROM payments WHERE booking_type = 'restaurant' AND booking_id = ? ORDER BY id ASC FOR UPDATE");
         $paySel->execute([$orderId]);

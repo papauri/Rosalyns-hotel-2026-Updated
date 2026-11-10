@@ -118,6 +118,9 @@ if (!function_exists('rh_close_pos_order')) {
         // Shop / supermarket mode: sold goods go back on the shelf unless the void is flagged "damaged"
         // ($opts['damaged'] or POST 'damaged'); restaurant / bar keeps the kitchen rule (started = wastage).
         $restoreSummary = ['restored' => 0, 'wasted' => 0];
+        // Lock order across lines: the order's lines AND its folio charges, every ingredient, ascending id,
+        // before any batch (the line restore and the charge restores below run in this one transaction).
+        rh_stock_lock_ingredients_for_orders($pdo, [$orderId]);
         rh_restore_pos_order_stock($pdo, $orderId, $userId, $isVoid ? 'POS order voided (admin)' : 'POS order cancelled before prep', $opts, $restoreSummary);
         $shopMode = array_key_exists('shop_mode', $opts) ? (bool)$opts['shop_mode'] : rh_pos_shop_mode();
         $damaged = $shopMode && rh_pos_damaged_flag($opts);
@@ -363,6 +366,17 @@ if (!function_exists('rh_close_order_keep_started')) {
         $costDrop = 0.0;
         $voidLine = $pdo->prepare("UPDATE stock_order_items SET kds_status = 'void', served_at = COALESCE(served_at, NOW()), bumped_by = ?, stock_deducted = 0 WHERE id = ?");
         $voidCharge = $pdo->prepare("UPDATE booking_charges SET voided = 1, voided_at = NOW(), void_reason = ?, voided_by = ?, updated_at = NOW() WHERE id = ?");
+
+        // Lock order across lines: every ingredient these lines and their folio charges can touch,
+        // ascending id, before any batch.
+        $lockLines = [];
+        foreach ($lines as $r) {
+            $lockLines[] = ['menu_item_id' => (int)$r['menu_item_id'], 'source_type' => 'pos_order', 'source_id' => (int)$r['id']];
+            if (isset($chargeOf[(int)$r['id']]['id'])) {
+                $lockLines[] = ['menu_item_id' => (int)$r['menu_item_id'], 'source_type' => 'room_service', 'source_id' => (int)$chargeOf[(int)$r['id']]['id']];
+            }
+        }
+        rh_stock_lock_ingredients_for_lines($pdo, $lockLines);
 
         foreach ($lines as $ln) {
             $k = (string)$ln['kds_status'];
@@ -653,6 +667,9 @@ if (!function_exists('rh_close_orders_for_booking')) {
             $plan[] = [$oid, $started ? 'keep' : 'cancel', (string)$o['reference']];
         }
 
+        // Lock order across orders: every ingredient all planned orders (lines + folio charges) can touch,
+        // ascending id, before any of them touches a batch (they all run in this one transaction).
+        rh_stock_lock_ingredients_for_orders($pdo, array_column($plan, 0));
         foreach ($plan as [$oid, $mode, $ref]) {
             if ($mode === 'keep') {
                 $r = rh_close_order_keep_started($pdo, $oid, $userId, $reason);

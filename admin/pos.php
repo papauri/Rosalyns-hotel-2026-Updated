@@ -396,6 +396,8 @@ function pos_forceServeKitchenItems(PDO $pdo, int $orderId, array $actor, ?int $
         }
     }
 
+    // Lock order across lines: every ingredient these lines can touch, ascending id, before any batch.
+    rh_stock_lock_ingredients_for_lines($pdo, array_map(static fn(array $r): array => ['menu_item_id' => (int)$r['menu_item_id'], 'source_type' => 'pos_order', 'source_id' => (int)$r['id']], $undeducted));
     foreach ($rows as $r) {
         if ((int)$r['stock_deducted'] === 0) {
             $ok = deductStockForMenuItem((int)$r['menu_item_id'], (string)$r['menu_type'], (float)$r['quantity'], 'pos_order', (int)$r['id'], (int)$actor['id']);
@@ -822,6 +824,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 // Bar/coffee drinks are handed over immediately — auto-serve them (with stock
                 // deduction) so settlement is never blocked by an un-bumped BDS ticket.
+                // Lock order: drinks now and a possible food force-serve below share this transaction,
+                // so every ingredient of the order is locked first, ascending id, before any batch.
+                rh_stock_lock_ingredients_for_orders($pdo, [$orderId]);
                 pos_autoServeBarItems($pdo, $orderId, $user);
                 // Only block on kitchen (food) items still in progress
                 $pendingItemsStmt = $pdo->prepare("SELECT COUNT(*) FROM stock_order_items WHERE order_id = ? AND station = 'kitchen' AND kds_status NOT IN ('served', 'void')");

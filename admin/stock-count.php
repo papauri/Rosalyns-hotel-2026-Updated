@@ -886,6 +886,13 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                 $needReason = [];
                 $totShort = 0.0;
                 $totSurplus = 0.0;
+                // Lock order (every stock write path): all counted ingredient rows first, by ascending id,
+                // before any batch is touched below.
+                $countIngIds = array_values(array_unique(array_filter(array_map(static fn($l) => (int)$l['ingredient_id'], $lines))));
+                sort($countIngIds);
+                if ($countIngIds) {
+                    $pdo->prepare("SELECT id FROM stock_ingredients WHERE id IN (" . implode(',', array_fill(0, count($countIngIds), '?')) . ") ORDER BY id FOR UPDATE")->execute($countIngIds);
+                }
                 foreach ($lines as $ln) {
                     $ingredientId = (int)$ln['ingredient_id'];
                     $liveSel->execute([$ingredientId]);

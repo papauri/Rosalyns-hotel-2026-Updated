@@ -475,6 +475,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!in_array($newStatus, $allowed, true)) $newStatus = 'wasted';
 
                 $pdo->beginTransaction();
+                // Lock order (every stock write path): the ingredient row before its batch.
+                $lockIng = $pdo->prepare("SELECT ingredient_id FROM stock_batches WHERE id = ?");
+                $lockIng->execute([$batchId]);
+                $pdo->prepare("SELECT id FROM stock_ingredients WHERE id = ? FOR UPDATE")->execute([(int)$lockIng->fetchColumn()]);
                 $sel = $pdo->prepare("SELECT ingredient_id, batch_number, quantity_remaining, cost_per_unit FROM stock_batches WHERE id = ? FOR UPDATE");
                 $sel->execute([$batchId]);
                 $b = $sel->fetch(PDO::FETCH_ASSOC);

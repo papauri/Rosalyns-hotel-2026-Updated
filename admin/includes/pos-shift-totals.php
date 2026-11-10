@@ -200,11 +200,13 @@ if (!function_exists('rh_pos_close_window')) {
 
 if (!function_exists('rh_pos_settled_refund_payouts')) {
     /**
-     * Second payout source: refund rows (payments.payment_type = 'refund', refund_status
-     * 'completed') settled in [start,end) whose order is NOT in a refunded/voided state, so the
-     * order-level payout never counts them:
-     *  - a partial refund of a still-paid order (non-86 rows), and
-     *  - 86 refunds ('REF86-' rows), on any order that was paid.
+     * The ledger payout source: every refund row (payments.payment_type = 'refund', refund_status
+     * 'completed') settled in [start,end) on an order that was paid - part refunds of a still-paid
+     * order, the REF-/VOID- contra rows of a refunded/voided order, earlier part refunds of an order
+     * refunded or voided later, and 86 refunds ('REF86-' rows). Each row is money that left the
+     * drawer ONCE, at its own time, in its own tender, so a rebuilt earlier close keeps its part
+     * refunds after the order is refunded in full. rh_pos_shift_reversals adds only what these rows
+     * do not cover (tips, legacy orders without contra rows).
      * Event time = refund_date_processed (fallback updated_at, created_at); actor = recorded_by
      * (fallback the order's creator); tender = the refund row's own method. Store-credit
      * ('credit_note') rows never touch the drawer. Rows: same shape as rh_pos_shift_reversals,
@@ -215,7 +217,7 @@ if (!function_exists('rh_pos_settled_refund_payouts')) {
         $at = "COALESCE(p.refund_date_processed, p.updated_at, p.created_at)";
         try {
             $st = $pdo->prepare("
-                SELECT p.id AS pid, o.id AS oid, p.payment_method AS method,
+                SELECT p.id AS pid, o.id AS oid, p.payment_method AS method, p.payment_reference AS pref,
                        CASE WHEN COALESCE(p.refund_amount, 0) > 0 THEN p.refund_amount ELSE p.total_amount END AS amt,
                        $at AS event_at,
                        COALESCE(p.recorded_by, o.created_by) AS actor_id
@@ -224,7 +226,7 @@ if (!function_exists('rh_pos_settled_refund_payouts')) {
                 WHERE p.booking_type = 'restaurant' AND p.payment_type = 'refund'
                   AND p.refund_status = 'completed' AND p.deleted_at IS NULL
                   AND o.paid_at IS NOT NULL
-                  AND (p.payment_reference LIKE 'REF86-%' OR o.status = 'paid')
+                  AND (p.payment_reference LIKE 'REF86-%' OR o.status IN ('paid','refunded','voided'))
                   AND $at >= ? AND $at < ?
                 ORDER BY p.id ASC");
             $st->execute([$start, $end]);
@@ -243,7 +245,7 @@ if (!function_exists('rh_pos_settled_refund_payouts')) {
             $out[] = [
                 'id' => (int)$r['oid'],
                 'payment_id' => (int)$r['pid'],
-                'kind' => 'refund',
+                'kind' => strpos((string)$r['pref'], 'VOID-') === 0 ? 'void' : 'refund',
                 'actor_id' => (int)$r['actor_id'],
                 'at' => (string)$r['event_at'],
                 'cash' => $t['cash'], 'mobile' => $t['mobile'], 'card' => $t['card'],
@@ -312,7 +314,11 @@ if (!function_exists('rh_pos_partial_refunds')) {
 
 if (!function_exists('rh_pos_shift_reversals')) {
     /**
-     * Refund / void payouts of PAID orders whose own timestamp falls in [start,end).
+     * Refund / void payouts of PAID orders in [start,end): money that actually left the drawer, per
+     * tender. Ledger refund/contra rows count at their own time in their own tender
+     * (rh_pos_settled_refund_payouts); a refunded/voided order whose event falls in the window adds
+     * only its tip and any total no ledger row covers (split by the order's tenders AFTER the
+     * covered part is taken off). Across windows the payouts add up to exactly what was refunded.
      * Each row: id, kind (refund|void), actor_id, at, cash, mobile, card, total.
      */
     function rh_pos_shift_reversals(PDO $pdo, string $start, string $end): array
@@ -361,40 +367,59 @@ if (!function_exists('rh_pos_shift_reversals')) {
             }
         }
 
+        // What the ledger already covers on each order: every non-86 refund / contra row raised on it
+        // (pending, processing or completed; store credit included - refunded, just not drawer money).
+        // rh_pos_settled_refund_payouts pays those rows out at their own time, in their own tender, so
+        // the order-level payout below carries only what they do NOT cover.
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        $orderIds = array_map(static fn($r) => (int)$r['id'], $rows);
+        $covered = [];
+        $cph = implode(',', array_fill(0, count($orderIds), '?'));
+        $cv = $pdo->prepare("SELECT p.booking_id AS oid,
+                                    COALESCE(SUM(CASE WHEN COALESCE(p.refund_amount, 0) > 0 THEN p.refund_amount ELSE p.total_amount END), 0) AS amt
+                               FROM payments p
+                              WHERE p.booking_type = 'restaurant' AND p.booking_id IN ($cph) AND p.payment_type = 'refund'
+                                AND p.deleted_at IS NULL AND p.payment_reference NOT LIKE 'REF86-%'
+                                AND COALESCE(p.refund_status, 'completed') IN ('pending','processing','completed')
+                           GROUP BY p.booking_id");
+        $cv->execute($orderIds);
+        foreach ($cv->fetchAll(PDO::FETCH_ASSOC) ?: [] as $c) {
+            $covered[(int)$c['oid']] = (float)$c['amt'];
+        }
+
         $out = [];
         foreach ($rows as $r) {
-            $t = ['cash' => 0.0, 'mobile' => 0.0, 'card' => 0.0];
             $oid = (int)$r['id'];
+            // The order's tenders (sale value and tip separately): split legs, else the order's method.
+            $base = ['cash' => 0.0, 'mobile' => 0.0, 'card' => 0.0];
+            $tips = ['cash' => 0.0, 'mobile' => 0.0, 'card' => 0.0];
+            $baseSum = 0.0;
             if ((int)$r['sc'] > 1 && !empty($legs[$oid])) {
                 foreach ($legs[$oid] as $l) {
+                    $baseSum += (float)$l['split_amount'];
                     $b = rh_pos_tender_bucket($l['payment_method']);
                     if ($b) {
-                        $t[$b] += (float)$l['split_amount'] + (float)$l['tip'];
+                        $base[$b] += (float)$l['split_amount'];
+                        $tips[$b] += (float)$l['tip'];
                     }
                 }
             } else {
+                $baseSum = (float)$r['total_amount'];
                 $b = rh_pos_tender_bucket($r['payment_method']);
                 if ($b) {
-                    $t[$b] += (float)$r['total_amount'] + (float)$r['tip'];
+                    $base[$b] += (float)$r['total_amount'];
+                    $tips[$b] += (float)$r['tip'];
                 }
             }
-            // Part refunds of this order already paid out in an EARLIER window hit their own shift (and that
-            // shift's Z is never restated): only the rest leaves the drawer now. Per tender, never below 0.
-            try {
-                $pe = $pdo->prepare("SELECT p.payment_method AS method, CASE WHEN COALESCE(p.refund_amount, 0) > 0 THEN p.refund_amount ELSE p.total_amount END AS amt
-                    FROM payments p
-                    WHERE p.booking_type = 'restaurant' AND p.booking_id = ? AND p.payment_type = 'refund'
-                      AND p.refund_status = 'completed' AND p.deleted_at IS NULL AND p.payment_reference NOT LIKE 'REF86-%'
-                      AND COALESCE(p.refund_date_processed, p.updated_at, p.created_at) < ?");
-                $pe->execute([$oid, $start]);
-                foreach ($pe->fetchAll(PDO::FETCH_ASSOC) ?: [] as $prior) {
-                    $pb = rh_pos_tender_bucket($prior['method']);
-                    if ($pb && (float)$prior['amt'] > BALANCE_TOLERANCE) {
-                        $t[$pb] = max(0.0, $t[$pb] - (float)$prior['amt']);
-                    }
-                }
-            } catch (Throwable $e) {
-                error_log('rh_pos_shift_reversals earlier part refunds: ' . $e->getMessage());
+            // Only the part of the order total no ledger row covers (orders without contra rows) is
+            // inferred from the order's tenders - the covered part is taken off the total BEFORE the
+            // split, so a part refund in another tender never leaves a phantom payout. Tips are never
+            // in the ledger, so they leave here, in the tender they were paid in.
+            $residual = round((float)$r['total_amount'] - ($covered[$oid] ?? 0.0), 2);
+            $share = ($residual > $tol && $baseSum > $tol) ? min(1.0, $residual / $baseSum) : 0.0;
+            $t = [];
+            foreach (['cash', 'mobile', 'card'] as $k) {
+                $t[$k] = round($base[$k] * $share + $tips[$k], 2);
             }
             $out[] = [
                 'id' => $oid,
@@ -402,10 +427,41 @@ if (!function_exists('rh_pos_shift_reversals')) {
                 'actor_id' => (int)$r['actor_id'],
                 'at' => (string)$r['event_at'],
                 'cash' => $t['cash'], 'mobile' => $t['mobile'], 'card' => $t['card'],
-                'total' => $t['cash'] + $t['mobile'] + $t['card'],
+                'total' => round($t['cash'] + $t['mobile'] + $t['card'], 2),
             ];
         }
-        return array_merge($out, rh_pos_settled_refund_payouts($pdo, $start, $end));
+
+        // One payout per order and person per window: the order's ledger rows paid out by the same
+        // person fold into its order-level row (so refund_count and the payout list show it once).
+        $index = [];
+        foreach ($out as $i => $o) {
+            $index[$o['id'] . ':' . $o['actor_id']] = $i;
+        }
+        $extra = [];
+        $hasLedger = [];
+        foreach (rh_pos_settled_refund_payouts($pdo, $start, $end) as $s) {
+            $key = $s['id'] . ':' . $s['actor_id'];
+            if (isset($index[$key])) {
+                $i = $index[$key];
+                foreach (['cash', 'mobile', 'card', 'total'] as $k) {
+                    $out[$i][$k] = round($out[$i][$k] + $s[$k], 2);
+                }
+                $out[$i]['merged'] = true;
+            } else {
+                $extra[] = $s;
+                $hasLedger[$s['id']] = true;
+            }
+        }
+        // An order-level row left with no money while another person's ledger rows paid that order out
+        // is not a payout of its own.
+        foreach ($out as $i => $o) {
+            if (empty($o['merged']) && abs($o['total']) <= $tol && !empty($hasLedger[$o['id']])) {
+                unset($out[$i]);
+                continue;
+            }
+            unset($out[$i]['merged']);
+        }
+        return array_merge(array_values($out), $extra);
     }
 }
 

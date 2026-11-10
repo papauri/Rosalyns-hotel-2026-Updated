@@ -377,7 +377,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
                 $undeductedStmt->execute([$orderId]);
                 $flagDeducted = $pdo->prepare("UPDATE stock_order_items SET stock_deducted = 1 WHERE id = ?");
-                foreach ($undeductedStmt->fetchAll(PDO::FETCH_ASSOC) as $ud) {
+                $undeductedRows = $undeductedStmt->fetchAll(PDO::FETCH_ASSOC);
+                // Lock order across lines: every ingredient these lines can touch, ascending id, before any batch.
+                rh_stock_lock_ingredients_for_lines($pdo, array_map(static fn(array $r): array => ['menu_item_id' => (int)$r['menu_item_id'], 'source_type' => 'pos_order', 'source_id' => (int)$r['id']], $undeductedRows));
+                foreach ($undeductedRows as $ud) {
                     $deductedOk = deductStockForMenuItem(
                         (int)$ud['menu_item_id'],
                         (string)$ud['menu_type'],
