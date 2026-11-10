@@ -21,7 +21,7 @@
 
   <div class="facts">
     <dl>
-      <dt>Who uses it</dt><dd>Administrator (a Manager only if given the staff permissions below)</dd>
+      <dt>Who uses it</dt><dd>Administrator (a Manager only if given the staff permissions below). A Super Admin is an Administrator with extra power; see <a href="#super-admin">What is a Super Admin?</a></dd>
       <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Staff &amp; Access</strong> (<code>/admin/user-management.php</code>)</dd>
       <dt>Permissions needed</dt><dd><strong>Create Users</strong> to add people, <strong>Edit Users</strong> to change them and resend invitations, <strong>Assign Permissions</strong> to change what they can open, <strong>Delete Users</strong> to remove them. An Administrator has all of these.</dd>
     </dl>
@@ -56,7 +56,7 @@
     <li>The staff table — name, email (with <strong>Username: ...</strong> written under it), role, status and last activity. Each row has buttons:
       <ul>
         <li><strong>Edit</strong> — name, email, role, active/inactive, new password.</li>
-        <li><strong>Permissions</strong> — tick exactly which pages and actions this person may use. Not shown for Administrators (they always have everything).</li>
+        <li><strong>Permissions</strong> — tick exactly which pages and actions this person may use. Not shown for Administrators (they always have everything), except that a Super Admin sees it for a plain Administrator. Never shown for a Super Admin.</li>
         <li>Envelope button — resend the invitation.</li>
         <li>Bin button — delete the person.</li>
       </ul>
@@ -69,7 +69,7 @@
   <table>
     <thead><tr><th>Role</th><th>Meant for</th></tr></thead>
     <tbody>
-      <tr><td><strong>Administrator</strong></td><td>Full access to all features and settings. Permissions cannot be narrowed.</td></tr>
+      <tr><td><strong>Administrator</strong></td><td>Full access to all features and settings. A plain Administrator cannot change these permissions. A Super Admin can limit them (see <a href="#super-admin">What is a Super Admin?</a>).</td></tr>
       <tr><td><strong>Manager</strong></td><td>Operations, bookings and staff activities.</td></tr>
       <tr data-module="bookings"><td><strong>Receptionist</strong></td><td>Front desk: bookings, check-ins and check-outs.</td></tr>
       <tr><td><strong>Accountant</strong></td><td>Payments, invoices and financial records.</td></tr>
@@ -86,6 +86,28 @@
   </table>
   <p>Only roles that match the parts of the system switched on for this hotel appear in the list.</p>
 
+  <h2 id="super-admin">What is a Super Admin?</h2>
+  <p>A Super Admin is an Administrator with power over everything in the system, including the permissions of other Administrators. Give it only to the owner or the most senior person. The first Super Admin is set up for the hotel by the system provider. After that, only a Super Admin can make another one.</p>
+  <ul>
+    <li>A Super Admin can switch off permissions for a plain Administrator, and switch them on again, in that Administrator's <strong>Permissions</strong> window.</li>
+    <li>A Super Admin can tick <strong>View only (cannot change anything)</strong> for a plain Administrator. That Administrator can look but not change anything. It is off for every Administrator unless ticked, and it never applies to a Super Admin.</li>
+    <li>A Super Admin always has every permission. Nothing can be switched off for a Super Admin.</li>
+  </ul>
+  <h3>How to make someone a Super Admin</h3>
+  <ol class="steps">
+    <li>Only a Super Admin can do this. Click <strong>Edit</strong> on the person's row.</li>
+    <li>Tick <strong>Super Admin</strong>. This box is only in the Edit window, not in <strong>Add New User</strong>. Ticking it makes the role Administrator.</li>
+    <li>Click <strong>Save Changes</strong>. The message ends with <em>"They are now a super admin."</em> To remove the status, untick the box and save. The message then ends with <em>"They are no longer a super admin."</em></li>
+  </ol>
+  <h3>Limits on plain Administrators</h3>
+  <ul>
+    <li>A plain Administrator cannot edit, demote, deactivate or delete a Super Admin.</li>
+    <li>A plain Administrator cannot undo limits a Super Admin set. Changing their role to another role and back does not clear them. Only a Super Admin can lift them.</li>
+    <li>An Administrator with limits cannot create an Administrator, make anyone an Administrator, or give a permission they no longer have.</li>
+    <li><strong>User Management</strong> can never be switched off for an Administrator.</li>
+    <li>The last Super Admin is protected: it cannot be demoted, deactivated or deleted.</li>
+    <li>Every change to a Super Admin, or to an Administrator's limits, is written to the activity log. Read it in <strong>System Logs</strong>.</li>
+  </ul>
   <h2 id="add">How to add a new staff member and invite them</h2>
   <ol class="steps">
     <li>Click <strong>Add New User</strong>.</li>
@@ -126,7 +148,7 @@
 
   <h2 id="perms">How to change what someone can open</h2>
   <ol class="steps">
-    <li>Click <strong>Permissions</strong> on the person's row. The window <strong>Edit Permissions</strong> opens showing their current settings.</li>
+    <li>Click <strong>Permissions</strong> on the person's row. The window <strong>Edit Permissions</strong> opens showing their current settings. For an Administrator, only a Super Admin sees this button, and it never appears for another Super Admin.</li>
     <li>Each permission is a card with an On/Off switch. Click the card (or press Tab to it and press Space) to switch it on or off. Permissions are grouped by area (Core, Reservations, Guest Services, Property, Content, Restaurant &amp; Stock, Stations, Finance, Settings, System, Administration).</li>
     <li>Read the labels on each card. A <strong>Role default</strong> tag marks what their role gets by default. A <strong>Module off</strong> tag marks a permission for an area that is switched off at the hotel; it only appears if they already have it, so switch it off to remove it.</li>
     <li>The top of the window shows <em>"N of M permissions on"</em>. Each group shows <em>"n of m on"</em> with <strong>All on</strong> and <strong>All off</strong> buttons for that group.</li>
@@ -358,6 +380,7 @@
   <ol class="steps">
     <li>Click <strong>Edit</strong> on their row.</li>
     <li>Change <strong>Full Name</strong>, <strong>Email</strong> or <strong>Role</strong> as needed. <strong>Username</strong> is read-only. If you change the email to one another person already uses, you see <em>"Another staff member already uses this email. Each person needs their own email to sign in."</em> and the change is not saved.</li>
+    <li>Only a Super Admin sees the <strong>Super Admin</strong> box. Tick it to make this person a Super Admin, or untick it to take the status away. See <a href="#super-admin">What is a Super Admin?</a></li>
     <li>To stop someone signing in without deleting their history, untick <strong>Active Account</strong>.</li>
     <li>To set a password for them directly, type it in <strong>New Password (leave blank to keep current)</strong> (at least 8 characters). Normally use the invitation or "Forgot password" instead.</li>
     <li>Click <strong>Save Changes</strong>.</li>
@@ -413,10 +436,10 @@
 
   <h2 id="rules">Rules the system enforces</h2>
   <ul>
-    <li>You can only manage people whose role is <strong>below</strong> yours (a Manager cannot edit another Manager or an Administrator). Administrators can manage everyone.</li>
-    <li>Someone who is not an Administrator cannot give permissions they do not have themselves.</li>
-    <li>Administrator permissions cannot be changed — an Administrator always has everything.</li>
-    <li>The <strong>last active Administrator</strong> cannot be deactivated, demoted or deleted.</li>
+    <li>You can only manage people whose role is <strong>below</strong> yours (a Manager cannot edit another Manager or an Administrator). Administrators can manage everyone, except that only a Super Admin can edit, demote, deactivate or delete a Super Admin.</li>
+    <li>Someone who is not an Administrator cannot give permissions they do not have themselves. An Administrator with limits from a Super Admin cannot give permissions they no longer have, and cannot create or promote Administrators.</li>
+    <li>Administrator permissions cannot be changed by a plain Administrator. A Super Admin always has everything, and only a Super Admin can switch off an Administrator's permissions.</li>
+    <li>The <strong>last active Administrator</strong> cannot be deactivated, demoted or deleted. The <strong>last Super Admin</strong> is protected in the same way.</li>
     <li>You cannot delete your own account.</li>
     <li>Usernames and email addresses must be unique, because both can be used to sign in. A duplicate is flagged under the box while you type (<em>"This email already belongs to another user."</em> or <em>"This username is already taken. Choose a different one."</em>), and again when you save.</li>
     <li>After <strong>5 wrong passwords</strong> an account is locked for <strong>15 minutes</strong>. Too many failures from one location also blocks sign-in from there for 15 minutes.</li>
@@ -434,6 +457,10 @@
       <tr><td>New person says the link shows <em>"This reset link is invalid or has expired."</em></td><td>Link already used, older than 72 hours, or replaced by a newer invitation.</td><td>Send a new invitation with the <strong>Resend invitation</strong> button.</td></tr>
       <tr><td><em>Invalid security token. Please try again.</em></td><td>The page was open too long, or your session ended.</td><td>Sign out, sign in again, then try the invitation again.</td></tr>
       <tr><td><em>Invalid username or password. If this keeps happening, wait 15 minutes and try again.</em> (even though the person is sure the password is right)</td><td>The page shows this same message for a wrong username, a wrong email, a wrong password, 5 wrong passwords in a row (locked for 15 minutes) and a switched-off account.</td><td>Check <strong>Active Account</strong> is ticked in <strong>Edit</strong>. If it is, wait 15 minutes or use <strong>Forgot Password?</strong>, and check the username or email is typed correctly.</td></tr>
+      <tr><td><em>Only a super admin can change a super admin.</em> or <em>Only a super admin can change an administrator's permissions.</em></td><td>You are an Administrator but not a Super Admin.</td><td>Ask a Super Admin to make the change.</td></tr>
+      <tr><td><em>A super admin has switched off some of this administrator's permissions, so only a super admin can change their role.</em></td><td>A Super Admin limited this Administrator.</td><td>Ask a Super Admin to change the role or lift the limits.</td></tr>
+      <tr><td><em>Your account has some permissions switched off by a super admin, so you cannot make anyone an Administrator. Ask a super admin.</em></td><td>You are an Administrator whose permissions a Super Admin has limited.</td><td>Ask a Super Admin.</td></tr>
+      <tr><td><em>Cannot change this: this is the last active super admin.</em> or <em>Cannot delete the last active super admin.</em></td><td>The system always keeps one active Super Admin.</td><td>Make another person a Super Admin first.</td></tr>
       <tr><td><em>Cannot change role or deactivate: this is the last active admin.</em></td><td>The system must always keep one active Administrator.</td><td>Make another person an Administrator first.</td></tr>
       <tr><td><em>You do not have permission to do that (Edit Bookings).</em> (or Check-in Guests, Check-out Guests, Cancel Bookings, Add Payments)</td><td>The person does not have the permission named in brackets.</td><td>An administrator or manager ticks it in <strong>Permissions</strong> (see "What each booking action needs").</td></tr>
       <tr><td>A button is greyed out with <em>Needs the Edit Booking permission.</em></td><td>Adding or voiding a guest-bill charge needs Edit Bookings.</td><td>Tick <strong>Edit Bookings</strong> for that person.</td></tr>
