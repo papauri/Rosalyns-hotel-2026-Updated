@@ -19,6 +19,15 @@ $template_preview = null;
    guest receives. Without this the email/PDF template editors are hidden and
    the panel is preview-only; the save and reset actions are refused below. */
 $canEditTemplates = hasPermission((int)($user['id'] ?? 0), 'edit_templates');
+/* Permission tiers (owner 2026-11-11): Hotel Settings stays open to managers, but the switches that can take the website
+   or bookings offline, change booking numbering or the service channels need site_switches (administrators only), and the
+   email server (SMTP) needs email_server_settings (super admin only). Each handler refuses on the server; the forms render
+   read-only. */
+$canSiteSwitches = hasPermission((int)($user['id'] ?? 0), 'site_switches');
+$canEmailServer = hasPermission((int)($user['id'] ?? 0), 'email_server_settings');
+$rh_site_switch_refusal = 'Only administrators can change this. Nothing was changed.';
+$rhSwDis = $canSiteSwitches ? '' : ' disabled'; // read-only render for everyone below administrator
+$rh_site_switch_note = $canSiteSwitches ? '' : '<p class="help-text"><i class="fas fa-lock"></i> Only administrators can change this.</p>';
 
 /* Email & PDF templates have their own page (email-templates.php includes this file with
    RH_TEMPLATES_PAGE), so template access can be given without the rest of Hotel Settings.
@@ -150,7 +159,7 @@ $booking_template_short_names = [
 // Handle enable/disable via GET parameter
 if (isset($_GET['enable'])) {
     // A state change must never fire from a bare link (cross-site image/link): require the CSRF token.
-    if (validateCsrfToken((string)($_GET['csrf_token'] ?? ''))) {
+    if (validateCsrfToken((string)($_GET['csrf_token'] ?? '')) && $canSiteSwitches) { // owner 2026-11-11: site_switches
         updateSetting('booking_system_enabled', '1');
     }
     header('Location: booking-settings.php');
@@ -173,11 +182,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['_ajax_preview'])) {
 
 // Handle one-switch booking system toggle
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['toggle_booking_system'])) {
+    if (!$canSiteSwitches) {
+        $error = $rh_site_switch_refusal;
+    } else {
     $enabled = isset($_POST['booking_system_enabled']) ? '1' : '0';
     updateSetting('booking_system_enabled', $enabled);
     $message = $enabled === '1'
         ? 'Booking system enabled successfully!'
         : 'Booking system disabled successfully!';
+    }
 }
 
 // Handle tentative bookings toggle
@@ -259,8 +272,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_hotel_details'])
 
 // Booking reference prefix (new references only; existing ones never change)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_booking_reference_prefix'])) {
+    if (!$canSiteSwitches) {
+        $error = $rh_site_switch_refusal;
+    }
     $newPrefix = strtoupper(trim((string)($_POST['booking_reference_prefix'] ?? '')));
-    if (!preg_match('/^[A-Z0-9]{2,6}$/', $newPrefix)) {
+    if (!$canSiteSwitches) {
+        // refused above (owner 2026-11-11)
+    } elseif (!preg_match('/^[A-Z0-9]{2,6}$/', $newPrefix)) {
         $error = 'The booking reference prefix must be 2 to 6 letters or digits (for example HTL).';
     } else {
         $oldPrefix = rh_booking_reference_prefix();
@@ -328,6 +346,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_document_brandin
 
 // Handle one-click full frontend maintenance mode toggle
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['toggle_site_maintenance'])) {
+    if (!$canSiteSwitches) {
+        $error = $rh_site_switch_refusal;
+    } else {
     $wasEnabled = in_array(strtolower(trim((string)getSetting('site_maintenance_enabled', '0'))), ['1', 'true', 'on', 'yes'], true);
     $enabled = isset($_POST['site_maintenance_enabled']) ? '1' : '0';
     updateSetting('site_maintenance_enabled', $enabled);
@@ -346,10 +367,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['toggle_site_maintenan
     $message = $enabled === '1'
         ? 'Frontend maintenance mode enabled. Public pages now show the maintenance page.'
         : 'Frontend maintenance mode disabled. Public pages are live again.';
+    }
 }
 
 // Save custom maintenance message shown during maintenance mode
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_site_maintenance_message'])) {
+    if (!$canSiteSwitches) {
+        $error = $rh_site_switch_refusal;
+    } else {
     $maintenanceMessageInput = trim((string)($_POST['site_maintenance_message'] ?? ''));
     if ($maintenanceMessageInput === '') {
         $maintenanceMessageInput = $default_site_maintenance_message;
@@ -367,16 +392,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_site_maintenance
     }
 
     $message = 'Frontend maintenance message updated successfully!';
+    }
 }
 
 // Handle disable via POST
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['disable_booking'])) {
+    if (!$canSiteSwitches) {
+        $error = $rh_site_switch_refusal;
+    } else {
     updateSetting('booking_system_enabled', '0');
     $message = "Booking system disabled successfully!";
+    }
 }
 
 // Handle disabled mode settings
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_disabled_action'])) {
+    if (!$canSiteSwitches) {
+        $error = $rh_site_switch_refusal;
+    }
     $newDisabledAction = trim((string)$_POST['booking_disabled_action']);
     $newRedirectUrl = trim((string)($_POST['booking_disabled_redirect_url'] ?? ''));
     if (!in_array($newDisabledAction, ['message', 'contact', 'redirect'], true)) {
@@ -384,7 +417,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_disabled_acti
             ? (string)getSetting('booking_disabled_action', 'message') : 'message';
     }
     // Redirect target: site-relative path or http(s) URL only (never javascript:/data:, never //host).
-    if (mb_strlen($newRedirectUrl) > 500) {
+    if (!$canSiteSwitches) {
+        // refused above (owner 2026-11-11)
+    } elseif (mb_strlen($newRedirectUrl) > 500) {
         $error = 'Redirect URL is too long (500 characters maximum).';
     } elseif ($newRedirectUrl !== '' && !preg_match('#^https?://#i', $newRedirectUrl) && !preg_match('#^/(?!/)#', $newRedirectUrl)) {
         $error = 'Redirect URL must start with http://, https:// or a single /.';
@@ -956,6 +991,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $message = "Booking notification email updated successfully!";
         } elseif (isset($_POST['service_channel_settings'])) {
+            if (!$canSiteSwitches) {
+                throw new Exception($rh_site_switch_refusal); // owner 2026-11-11: administrators only
+            }
             $conference_enabled = isset($_POST['conference_system_enabled']) ? '1' : '0';
             $gym_enabled = isset($_POST['gym_system_enabled']) ? '1' : '0';
             $restaurant_enabled = isset($_POST['restaurant_system_enabled']) ? '1' : '0';
@@ -1265,13 +1303,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'email_reply_to_backup' => trim((string)($_POST['email_reply_to_backup'] ?? '')),
                 'email_admin_backup' => trim((string)($_POST['email_admin_backup'] ?? '')),
             ];
+            // Owner 2026-11-11: the email server part needs email_server_settings (super admin only). Without it those
+            // fields render read-only (so they are not posted): they are neither checked nor saved here, and every other
+            // field (sender name, reply-to, staff copy, invoice copies) saves as before.
+            if (!$canEmailServer) {
+                foreach (['smtp_host', 'smtp_port', 'smtp_username', 'smtp_password', 'smtp_secure', 'email_bcc_admin',
+                          'email_development_mode', 'email_log_enabled', 'email_preview_enabled'] as $rhServerKey) {
+                    unset($email_settings[$rhServerKey]);
+                }
+            }
 
-            if (!in_array($email_settings['smtp_secure'], ['ssl', 'tls', ''], true)) {
+            if (isset($email_settings['smtp_secure']) && !in_array($email_settings['smtp_secure'], ['ssl', 'tls', ''], true)) {
                 $email_settings['smtp_secure'] = 'ssl';
             }
 
             // Validate required fields
-            $required_fields = ['smtp_host', 'smtp_port', 'smtp_username', 'email_from_name'];
+            $required_fields = $canEmailServer ? ['smtp_host', 'smtp_port', 'smtp_username', 'email_from_name'] : ['email_from_name'];
             foreach ($required_fields as $field) {
                 if (empty($email_settings[$field])) {
                     throw new Exception(ucfirst(str_replace('_', ' ', $field)) . ' is required');
@@ -1279,7 +1326,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             // Validate port
-            if (!is_numeric($email_settings['smtp_port']) || $email_settings['smtp_port'] < 1 || $email_settings['smtp_port'] > 65535) {
+            if ($canEmailServer && (!is_numeric($email_settings['smtp_port']) || $email_settings['smtp_port'] < 1 || $email_settings['smtp_port'] > 65535)) {
                 throw new Exception('SMTP port must be a valid port number (1-65535)');
             }
 
@@ -1287,7 +1334,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 ]/', $email_settings['email_from_name']) || mb_strlen($email_settings['email_from_name']) > 100) {
                 throw new Exception('Sender name must be a single line of at most 100 characters');
             }
-            if (!preg_match('/^[A-Za-z0-9.\-]{1,253}$/', $email_settings['smtp_host'])) {
+            if ($canEmailServer && !preg_match('/^[A-Za-z0-9.\-]{1,253}$/', $email_settings['smtp_host'])) {
                 throw new Exception('SMTP host must be a host name such as mail.example.com');
             }
 
@@ -1509,6 +1556,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 </div>
             </div>
 
+            <?php echo $rh_site_switch_note; ?>
             <form method="POST" action="booking-settings.php" id="site-maintenance-toggle-form">
                 <input type="hidden" name="toggle_site_maintenance" value="1">
                 <div class="form-group">
@@ -1517,7 +1565,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                             id="site_maintenance_enabled"
                             name="site_maintenance_enabled"
                             value="1"
-                            <?php echo $site_maintenance_enabled ? 'checked' : ''; ?>
+                            <?php echo $site_maintenance_enabled ? 'checked' : ''; ?><?php echo $rhSwDis; ?>
                             onchange="toggleSiteMaintenance()">
                         <span style="font-weight: 600; color: #1A1A1A;">Enable Full Frontend Maintenance Mode</span>
                     </label>
@@ -1535,7 +1583,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <textarea id="site_maintenance_message"
                         name="site_maintenance_message"
                         class="form-control"
-                        rows="4"
+                        rows="4"<?php echo $rhSwDis; ?>
                         placeholder="This message appears for all visitors while maintenance mode is active."><?php echo htmlspecialchars($site_maintenance_message); ?></textarea>
                     <p class="help-text">
                         <i class="fas fa-info-circle"></i>
@@ -1543,9 +1591,11 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     </p>
                 </div>
 
+                <?php if ($canSiteSwitches): ?>
                 <button type="submit" class="btn-submit">
                     <i class="fas fa-save"></i> Save Maintenance Message
                 </button>
+                <?php endif; ?>
             </form>
         </div>
 
@@ -1561,6 +1611,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 </div>
             </div>
 
+            <?php echo $rh_site_switch_note; ?>
             <form method="POST" action="booking-settings.php" id="booking-system-toggle-form">
                 <input type="hidden" name="toggle_booking_system" value="1">
                 <div class="form-group">
@@ -1569,7 +1620,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                             id="booking_system_enabled"
                             name="booking_system_enabled"
                             value="1"
-                            <?php echo $booking_enabled ? 'checked' : ''; ?>
+                            <?php echo $booking_enabled ? 'checked' : ''; ?><?php echo $rhSwDis; ?>
                             onchange="toggleBookingSettings()">
                         <span style="font-weight: 600; color: #1A1A1A;">Enable Online Booking System</span>
                     </label>
@@ -1598,7 +1649,9 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 <div id="disabled-settings" style="margin-top: 25px;">
                     <h3 style="color: #7E684B; margin-bottom: 20px;"><i class="fas fa-sliders-h"></i> Disabled Mode Settings</h3>
 
+                    <?php echo $rh_site_switch_note; ?>
                     <form method="POST" action="booking-settings.php">
+                        <fieldset<?php echo $rhSwDis; ?> style="border:0;padding:0;margin:0;min-width:0;">
                         <div class="form-group">
                             <label for="booking_disabled_action"><strong>Action When Disabled</strong></label>
                             <select id="booking_disabled_action" name="booking_disabled_action" class="form-control" onchange="toggleDisabledAction()">
@@ -1638,10 +1691,13 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                                 Use [phone], [email], or [contact info] placeholders to insert your contact info automatically
                             </p>
                         </div>
+                        </fieldset>
 
+                        <?php if ($canSiteSwitches): ?>
                         <button type="submit" class="btn-submit">
                             <i class="fas fa-save"></i> Save Settings
                         </button>
+                        <?php endif; ?>
                     </form>
                 </div>
 
@@ -1822,13 +1878,16 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 <form method="POST" action="booking-settings.php#booking-references">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
                     <input type="hidden" name="save_booking_reference_prefix" value="1">
+                    <?php echo $rh_site_switch_note; ?>
                     <div class="form-group">
                         <label for="booking_reference_prefix">Reference prefix (2-6 letters or digits)</label>
-                        <input type="text" id="booking_reference_prefix" name="booking_reference_prefix" maxlength="6" pattern="[A-Za-z0-9]{2,6}" required
+                        <input type="text" id="booking_reference_prefix" name="booking_reference_prefix" maxlength="6" pattern="[A-Za-z0-9]{2,6}" required<?php echo $rhSwDis; ?>
                                value="<?php echo htmlspecialchars($refPrefixNow, ENT_QUOTES); ?>" style="text-transform:uppercase;max-width:160px;">
                         <p class="help-text">New bookings get references like <strong><?php echo htmlspecialchars($refPrefixNow . date('Y'), ENT_QUOTES); ?>012345</strong>. Used by the website, Create Booking and the API. Existing bookings keep their reference.</p>
                     </div>
+                    <?php if ($canSiteSwitches): ?>
                     <button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save Prefix</button>
+                    <?php endif; ?>
                 </form>
             </div>
 
@@ -2033,6 +2092,10 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <h3 style="color: #1A1A1A; margin-top: 25px; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #e0e0e0;">
                         <i class="fas fa-server"></i> SMTP Server Settings
                     </h3>
+                    <?php if (!$canEmailServer): ?>
+                        <p class="help-text"><i class="fas fa-lock"></i> Only a super admin can change the email server and the switches under Email Settings. You can still change the sender name and the email addresses below.</p>
+                    <?php endif; ?>
+                    <fieldset<?php echo $canEmailServer ? '' : ' disabled'; ?> style="border:0;padding:0;margin:0;min-width:0;">
 
                     <div class="form-group">
                         <label for="smtp_host">SMTP Host *</label>
@@ -2071,6 +2134,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         </select>
                         <p class="help-text"><i class="fas fa-info-circle"></i> Security protocol for SMTP connection</p>
                     </div>
+                    </fieldset>
 
                     <h3 style="color: #1A1A1A; margin-top: 30px; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #e0e0e0;">
                         <i class="fas fa-user"></i> Email Identity
@@ -2135,6 +2199,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <h3 style="color: #1A1A1A; margin-top: 30px; margin-bottom: 15px; padding-bottom: 10px; border-bottom: 1px solid #e0e0e0;">
                         <i class="fas fa-sliders-h"></i> Email Settings
                     </h3>
+                    <fieldset<?php echo $canEmailServer ? '' : ' disabled'; ?> style="border:0;padding:0;margin:0;min-width:0;">
 
                     <div class="form-group">
                         <label style="display: flex; align-items: center; gap: 10px;">
@@ -2171,6 +2236,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         </label>
                         <p class="help-text"><i class="fas fa-info-circle"></i> Keeps a viewable copy of each email for checking how it looks. Only used together with Preview only on a local computer.</p>
                     </div>
+                    </fieldset>
 
                     <div class="form-group">
                         <label for="invoice_recipients">Hotel copies of invoices, statements and credit notes</label>
@@ -2338,8 +2404,10 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             <div class="rh-panel settings-card" id="service-modules">
                 <div class="rh-panel__head"><h2 class="rh-panel__title">Service Modules &amp; Dedicated Notification Emails</h2></div>
                 <p class="help-text">Turning a service off here also removes its page — and every page that module governs — from the guest site navigation. The Events switch lives in <a href="module-settings.php">Module Settings</a>.</p>
+                <?php echo $rh_site_switch_note; ?>
                 <form method="POST" action="booking-settings.php">
                     <input type="hidden" name="service_channel_settings" value="1">
+                    <fieldset<?php echo $rhSwDis; ?> style="border:0;padding:0;margin:0;min-width:0;">
 
                     <?php /* Each row shows only when its module is active for this preset.
                              Hidden rows keep their stored values via hidden inputs — the save
@@ -2398,10 +2466,13 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     <?php if ($current_restaurant_system_enabled): ?><input type="hidden" name="restaurant_system_enabled" value="1"><?php endif; ?>
                     <input type="hidden" name="email_restaurant" value="<?php echo htmlspecialchars($current_restaurant_email ?? ''); ?>">
                     <?php endif; ?>
+                    </fieldset>
 
+                    <?php if ($canSiteSwitches): ?>
                     <button type="submit" class="btn-submit">
                         <i class="fas fa-save"></i> Save Service Module Settings
                     </button>
+                    <?php endif; ?>
                 </form>
             </div>
 

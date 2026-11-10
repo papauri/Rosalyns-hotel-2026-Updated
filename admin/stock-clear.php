@@ -22,7 +22,8 @@ $user = [
 $csrf_token = $csrf_token ?? generateCsrfToken();
 $current_page = 'stock-clear.php';
 
-// Administrator role only (the data_reset permission is also required; admins always hold it).
+// Administrator role only, and the data_reset permission (owner 2026-11-11: super admin only; a plain administrator only
+// when a super admin switched it on for them, or while no super admin exists).
 [$authOk, $authWhy] = rh_sc_authorize($pdo, $user['id']);
 if ($user['role'] !== 'admin' || !$authOk) {
     rhDenyAndRedirectHome($user['id'], $user['role'], basename($_SERVER['PHP_SELF']));

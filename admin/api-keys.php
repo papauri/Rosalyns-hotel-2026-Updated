@@ -9,7 +9,8 @@ require_once __DIR__ . '/../includes/form-validation.php';
 
 $csrf_token = $csrf_token ?? generateCsrfToken();
 
-if (($_SESSION['admin_role'] ?? '') !== 'admin') {
+// Owner 2026-11-11: super admin only (api_keys is Tier S), read from the database, not the session role.
+if (!hasPermission((int)($_SESSION['admin_user_id'] ?? 0), 'api_keys')) {
     rhDenyAndRedirectHome((int)($_SESSION['admin_user_id'] ?? 0), (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF']));
     exit;
 }

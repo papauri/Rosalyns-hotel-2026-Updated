@@ -55,6 +55,7 @@ $suites = [
     'Error log clear'       => 'scripts/tests/error_log_clear.php',
     'Staff presence'        => 'scripts/tests/admin_presence.php',
     'Login by email'        => 'scripts/tests/login_email.php',
+    'Permission tiers (super admin / admin / staff)' => 'scripts/tests/permission_tiers.php',
     'Licence client (switch-off for non-payment)' => 'scripts/tests/licence_client.php',
     'System logs summary'   => 'scripts/tests/system_logs.php',
     'System logs staff activity (timeline, summary, hook)' => 'scripts/tests/system_logs_activity.php',

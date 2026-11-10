@@ -19,6 +19,9 @@ if (!in_array($user['role'] ?? '', ['admin', 'manager'], true)) {
     rhDenyAndRedirectHome((int)$user['id'], (string)($user['role'] ?? ''), basename($_SERVER['PHP_SELF']));
     exit;
 }
+// Owner 2026-11-11: restoring the database is super admin only (backup_restore; plain administrators only when a super admin
+// switched it on, or while no super admin exists). Running, downloading and deleting backups are unchanged.
+$canRestore = hasPermission((int)$user['id'], 'backup_restore');
 
 $ROOT         = dirname(__DIR__);
 $backupsDir   = $ROOT . '/backups';
@@ -105,7 +108,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = rh_bm_problem((string)$r['code'], (string)$r['error']);
                 logActivity((int)$user['id'], 'backup_run_failed', 'Backup run from the Backups screen failed: ' . substr((string)$r['error'], 0, 200));
             }
-        } elseif ($action === 'restore' && $user['role'] === 'admin') {
+        } elseif ($action === 'restore' && $canRestore) {
             // Restore is admin-only, needs the word RESTORE, and always takes a safety backup first.
             $relPath = rh_db_backup_norm_rel((string)($_POST['backup_file'] ?? ''));
             if (($_POST['confirm_text'] ?? '') !== 'RESTORE') {
@@ -130,8 +133,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     logActivity((int)$user['id'], 'backup_restore_failed', 'Restore from ' . $relPath . ' did not complete (' . (string)$r['code'] . ')');
                 }
             }
-        } elseif ($action === 'restore' && $user['role'] !== 'admin') {
-            $error = 'Only administrators can perform a restore.';
+        } elseif ($action === 'restore') {
+            $error = 'Only a super admin can restore the database. Nothing was changed.';
         } elseif ($action === 'delete_backups') {
             if ($user['role'] !== 'admin') {
                 $error = 'Only administrators can delete backups.';
@@ -429,10 +432,12 @@ $current_page = 'backup-management.php';
                                                 <a href="?download=<?php echo urlencode($b['rel']); ?>" class="btn-dl" title="Download backup">
                                                     <i class="fas fa-download"></i> Download
                                                 </a>
+                                                <?php if ($canRestore): ?>
                                                 <button type="button" class="btn-restore"
                                                     onclick="showRestoreConfirm(<?php echo htmlspecialchars(json_encode($b['rel'])); ?>, <?php echo htmlspecialchars(json_encode($b['date'])); ?>)">
                                                     <i class="fas fa-undo"></i> Restore
                                                 </button>
+                                                <?php endif; ?>
                                                 <?php if ($i === 0): ?>
                                                     <span class="bm-kept" title="The newest backup is always kept so you are never left without one">Always kept</span>
                                                 <?php elseif (!$canDelete): ?>
@@ -478,6 +483,7 @@ $current_page = 'backup-management.php';
 
                     <?php if ($user['role'] === 'admin'): ?>
                         <!-- Restore: the shared confirm asks for the word RESTORE, then this form is sent -->
+                        <?php if ($canRestore): ?>
                         <form method="POST" id="restoreForm" hidden>
                             <input type="hidden" name="_tok" value="<?php echo htmlspecialchars($csrf_token); ?>">
                             <input type="hidden" name="action" value="restore">
@@ -485,6 +491,7 @@ $current_page = 'backup-management.php';
                             <input type="hidden" name="confirm_text" id="restoreConfirmText">
                         </form>
                         <p class="bm-notice bm-notice--info" id="restoreNote" role="status" hidden></p>
+                        <?php endif; ?>
                     <?php endif; ?>
                 <?php endif; ?>
             </div>

@@ -205,7 +205,9 @@ if (!function_exists('rh_licence_staff_run')) {
                 $rows = [];
                 foreach ($over as $k => $v) {
                     if (is_string($k) && isset($all[$k]) && $k !== 'user_management' && ($v === 0 || $v === 1 || is_bool($v))) {
-                        $rows[$k] = $v ? 1 : 0;
+                        // Owner 2026-11-11: administrators-only keys are never stored as granted below administrator.
+                        $adminOnlyKey = function_exists('rh_admin_only_permissions') && in_array($k, rh_admin_only_permissions(), true);
+                        $rows[$k] = ($v && !$adminOnlyKey) ? 1 : 0;
                     }
                 }
                 $pdo->beginTransaction();
@@ -347,9 +349,22 @@ if (!function_exists('rh_licence_staff_run')) {
             $role = (string)$u['role'];
             $ch = ($role === 'admin' || empty($own[$id])) ? ['grants' => [], 'denies' => []]
                 : rh_licence_staff_own_changes($own[$id], array_values(getDefaultPermissionsForRole($role)));
+            if ($role !== 'admin' && function_exists('rh_admin_only_permissions')) {
+                // Owner 2026-11-11: an administrators-only key never counts below administrator, whatever row is saved.
+                $ch['grants'] = array_values(array_diff($ch['grants'], rh_admin_only_permissions()));
+            }
             if ($role === 'admin' && function_exists('rh_admin_permission_overrides')
                 && !(function_exists('rh_is_super_admin') && rh_is_super_admin($id))) {
-                $ch['denies'] = array_keys(rh_admin_permission_overrides($id)['denies']); // a super admin's limits on them
+                $ov = rh_admin_permission_overrides($id);
+                if (function_exists('rh_admin_real_limits')) {
+                    // Owner 2026-11-11: denies = a super admin's real limits (super-admin-only keys left out, they are off
+                    // by default); grants = super-admin-only keys a super admin switched on for them.
+                    $ch['denies'] = array_keys(rh_admin_real_limits($ov));
+                    $ch['grants'] = rh_super_admins_in_charge()
+                        ? array_values(array_intersect(array_keys($ov['grants'] ?? []), rh_super_only_permissions())) : [];
+                } else {
+                    $ch['denies'] = array_keys($ov['denies']); // a super admin's limits on them
+                }
             }
             $staff[] = ['id' => $id, 'username' => (string)$u['username'], 'email' => (string)$u['email'], 'full_name' => (string)$u['full_name'],
                 'role' => $role, 'is_active' => (int)$u['is_active'], 'last_login' => $u['last_login'] !== null ? (string)$u['last_login'] : null,
@@ -363,7 +378,15 @@ if (!function_exists('rh_licence_staff_run')) {
         }
         $perms = [];
         foreach (getAllPermissions() as $k => $p) {
-            $perms[] = ['key' => (string)$k, 'label' => (string)($p['label'] ?? $k), 'category' => (string)($p['category'] ?? 'Other')];
+            // tier (owner 2026-11-11): 'super' = super admins only (plain administrators only when switched on for them, or
+            // while no super admin exists), 'admin' = administrators only, '' = any role. Extra field: older panels ignore it.
+            $tier = '';
+            if (function_exists('rh_super_only_permissions') && in_array((string)$k, rh_super_only_permissions(), true)) {
+                $tier = 'super';
+            } elseif (function_exists('rh_admin_only_permissions') && in_array((string)$k, rh_admin_only_permissions(), true)) {
+                $tier = 'admin';
+            }
+            $perms[] = ['key' => (string)$k, 'label' => (string)($p['label'] ?? $k), 'category' => (string)($p['category'] ?? 'Other'), 'tier' => $tier];
         }
         return [$staff, ['roles' => $roles, 'permissions' => $perms]];
     }

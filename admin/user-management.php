@@ -54,6 +54,12 @@ $rh_editor_is_super = rh_is_super_admin((int)$user['id']);
 $rh_super_ready = rh_super_admin_column_ready();
 // An administrator a super admin has limited may not make anyone an administrator (that would undo the limits).
 $rh_editor_limited = !$rh_editor_is_super && rh_admin_is_limited((int)$user['id']);
+// Owner 2026-11-11: only a super admin makes someone an administrator or manages an administrator's account (canManageUser).
+// While no active super admin exists (fallback) an administrator with no limits still may, as before.
+$rh_editor_can_assign_admin = $rh_editor_is_super || (!$rh_editor_limited && !rh_super_admins_in_charge());
+$rh_assign_admin_refusal = $rh_editor_limited
+    ? 'Your account has some permissions switched off by a super admin, so you cannot make anyone an Administrator. Ask a super admin.'
+    : 'Only a super admin can make someone an Administrator. Ask a super admin.';
 
 // ── Preset relevance ────────────────────────────────────────────────────────
 // Staff roles only make sense when their module is on for this business
@@ -129,8 +135,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error_msg = 'Username must be at least 3 characters with no spaces.';
                 } elseif (!isset($all_roles[$role])) {
                     $error_msg = 'Choose a role for this user.';
-                } elseif ($role === 'admin' && $rh_editor_limited) {
-                    $error_msg = 'Your account has some permissions switched off by a super admin, so you cannot make anyone an Administrator. Ask a super admin.';
+                } elseif ($role === 'admin' && !$rh_editor_can_assign_admin) {
+                    $error_msg = $rh_assign_admin_refusal;
                 } else {
                     // Check for duplicate username/email
                     // (case-insensitive, under a lock so a double-click cannot create two)
@@ -235,8 +241,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $error_msg = 'Only a super admin can change a super admin.';
                         } elseif ($current_role === 'admin' && $role !== 'admin' && !$rh_editor_is_super && rh_admin_is_limited($uid)) {
                             $error_msg = 'A super admin has switched off some of this administrator\'s permissions, so only a super admin can change their role.';
-                        } elseif ($current_role !== 'admin' && $role === 'admin' && $rh_editor_limited) {
-                            $error_msg = 'Your account has some permissions switched off by a super admin, so you cannot make anyone an Administrator. Ask a super admin.';
+                        } elseif ($current_role !== 'admin' && $role === 'admin' && !$rh_editor_can_assign_admin) {
+                            $error_msg = $rh_assign_admin_refusal;
                         } elseif ($was_super && $target_was_active && (!$new_super || !$is_active) && rh_active_super_admin_count() <= 1) {
                             $error_msg = 'Cannot change this: this is the last active super admin.';
                         }
@@ -490,7 +496,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             if ($current_role === false || $current_role === $new_role) continue; // missing user or no change
                             // A limited administrator's role: super admins only. A limited editor makes no one an administrator.
                             if ($current_role === 'admin' && !$rh_editor_is_super && rh_admin_is_limited($uid)) { $bulk_skipped++; continue; }
-                            if ($new_role === 'admin' && $rh_editor_limited) { $bulk_skipped++; continue; }
+                            if ($new_role === 'admin' && !$rh_editor_can_assign_admin) { $bulk_skipped++; continue; }
 
                             if ($current_role === 'admin' && $new_role !== 'admin') {
                                 $admin_count = $pdo->query("SELECT COUNT(*) FROM admin_users WHERE role = 'admin' AND is_active = 1")->fetchColumn();
@@ -513,7 +519,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     }
                     $success_msg = "Updated role for {$count} user(s)."
-                        . ($bulk_skipped ? " {$bulk_skipped} skipped: only a super admin can change the role of an administrator a super admin has limited, and an administrator with limits cannot make anyone an Administrator." : '');
+                        . ($bulk_skipped ? " {$bulk_skipped} skipped: only a super admin can make someone an Administrator or change the role of an administrator a super admin has limited." : '');
                     logActivity($user['id'], 'bulk_role_change', "Changed {$count} users to role '{$new_role}'");
                 }
             }
@@ -792,7 +798,7 @@ $nav_categories = getNavCategories();
                         They see the change the next time they open or refresh a page.
                     </p>
                     <p class="permissions-modal__help" id="perm-admin-note" hidden>
-                        Administrators start with every permission. Anything you switch off here is taken away from this administrator.
+                        Administrators start with every permission except the ones marked "Super admin only", which stay off until you switch them on. Anything you switch off here is taken away from this administrator.
                     </p>
 
                     <div class="permissions-modal__shortcuts">
@@ -869,6 +875,7 @@ $nav_categories = getNavCategories();
                     <select id="add-role" name="role" required>
                         <option value="" selected disabled>Choose a role...</option>
                         <?php foreach ($relevant_roles as $role_key => $role_data): ?>
+                        <?php if ($role_key === 'admin' && !$rh_editor_can_assign_admin) { continue; } // owner 2026-11-11: super admin only ?>
                         <option value="<?php echo $role_key; ?>"><?php echo $role_data['label']; ?> - <?php echo $role_data['description']; ?></option>
                         <?php endforeach; ?>
                     </select>
@@ -939,6 +946,7 @@ $nav_categories = getNavCategories();
                              so admins don't newly assign them by accident. */ ?>
                     <select id="edit-role" name="role">
                         <?php foreach ($all_roles as $role_key => $role_data): ?>
+                        <?php if ($role_key === 'admin' && !$rh_editor_can_assign_admin) { continue; } // owner 2026-11-11: super admin only ?>
                         <option value="<?php echo $role_key; ?>"><?php echo $role_data['label']; ?><?php echo isset($relevant_roles[$role_key]) ? '' : ' (module disabled)'; ?></option>
                         <?php endforeach; ?>
                     </select>
@@ -1232,7 +1240,9 @@ $rh_role_defaults = [];
 foreach (array_keys($all_roles) as $rh_rk) {
     $rh_role_defaults[$rh_rk] = array_values(getDefaultPermissionsForRole((string)$rh_rk));
     if ($rh_rk === 'admin') { // "View only" is a restriction, never part of an administrator's full set
-        $rh_role_defaults[$rh_rk] = array_values(array_diff($rh_role_defaults[$rh_rk], ['view_only']));
+        // Owner 2026-11-11: nor are the super-admin-only keys while a super admin exists (the only one who sees this grid).
+        $rh_role_defaults[$rh_rk] = array_values(array_diff($rh_role_defaults[$rh_rk],
+            array_merge(['view_only'], rh_super_admins_in_charge() ? rh_super_only_permissions() : [])));
     }
 }
 ?>
@@ -1242,7 +1252,9 @@ const permissionData = <?php echo json_encode([
     'permissionsByCategory' => $permission_categories,
     'allPermissions' => getAllPermissions(),
     'roles' => $all_roles,
-    'roleDefaults' => $rh_role_defaults
+    'roleDefaults' => $rh_role_defaults,
+    'superOnly' => rh_super_admins_in_charge() ? rh_super_only_permissions() : [], // owner 2026-11-11
+    'adminOnly' => rh_admin_only_permissions()
 ]); ?>;
 
 // Open permissions modal
@@ -1349,17 +1361,27 @@ function populatePermissionsForm(permissions, role) {
         for (const [permKey, permInfo] of Object.entries(permissionData.permissionsByCategory[catName])) {
             if (permKey === 'user_management') continue; // Skip admin-only
 
-            const isChecked = permissions[permKey] || false;
+            // Tiers (owner 2026-11-11): below administrator the administrators-only keys are shown locked and off;
+            // for a plain administrator the super-admin-only keys start off and a super admin may switch them on.
+            const adminOnlyLocked = role !== 'admin' && (permissionData.adminOnly || []).includes(permKey);
+            const superOnlyKey = role === 'admin' && (permissionData.superOnly || []).includes(permKey);
+            const isChecked = adminOnlyLocked ? false : (permissions[permKey] || false);
             // Off-preset permissions aren't offered as new grants, but any the
             // user already holds stay visible (and revocable).
             if (permInfo.module_off && !isChecked) continue;
             renderedInCategory++;
-            const isDefault = defaultPerms.includes(permKey);
+            const isDefault = !adminOnlyLocked && defaultPerms.includes(permKey);
             const key = permEsc(permKey);
 
             let tags = '';
             if (isDefault) {
                 tags += '<span class="perm-tag perm-tag--default">Role default</span>';
+            }
+            if (adminOnlyLocked) {
+                tags += '<span class="perm-tag perm-tag--off" title="Only administrators can have this">Administrators only</span>';
+            }
+            if (superOnlyKey) {
+                tags += '<span class="perm-tag perm-tag--off" title="Off for administrators unless a super admin switches it on">Super admin only: tick to allow</span>';
             }
             if (permInfo.module_off) {
                 tags += '<span class="perm-tag perm-tag--off" title="This area is switched off for the hotel; untick to remove it">Module off</span>';
@@ -1379,6 +1401,7 @@ function populatePermissionsForm(permissions, role) {
                            name="permissions[]"
                            value="${key}"
                            ${isChecked ? 'checked' : ''}
+                           ${adminOnlyLocked ? 'disabled' : ''}
                            onchange="togglePermItem(this)"
                            data-default="${isDefault ? '1' : '0'}">
                     <span class="perm-switch" aria-hidden="true">
@@ -1454,6 +1477,7 @@ function selectAllPerms(checked) {
 
 function selectDefaults() {
     getPermCheckboxes().forEach(cb => {
+        if (cb.disabled) return; // locked: administrators only
         cb.checked = cb.dataset.default === '1';
         syncPermItem(cb);
     });
@@ -1465,6 +1489,7 @@ function setCategoryPerms(button, checked) {
     const cat = button.closest('.perm-category');
     if (!cat) return;
     getPermCheckboxes(cat).forEach(cb => {
+        if (cb.disabled) return; // locked: administrators only
         cb.checked = checked;
         syncPermItem(cb);
     });

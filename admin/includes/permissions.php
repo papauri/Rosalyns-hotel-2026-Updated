@@ -70,7 +70,7 @@ function getAllRoles()
                 'accounting',
                 'payments',
                 'receipts',
-                'edit_templates',
+                // edit_templates removed (owner 2026-11-11): administrators only, same tier as bank details.
                 'invoices',
                 'payment_add',
                 'refund_payment',
@@ -948,7 +948,8 @@ function getAllPermissions()
         ],
         'edit_templates' => [
             'label' => 'Edit message templates',
-            'description' => 'Open Settings > Email Templates and change the wording guests receive: booking email and PDF templates, and the receipt email and WhatsApp templates. Gives no other settings access (receipt templates on the Receipts page also need Receipts access); without it the templates are preview-only.',
+            // Administrators only (owner 2026-11-11): templates carry bank details and payment wording, same tier as bank details.
+            'description' => 'Administrators only. Open Settings > Email Templates and change the wording guests receive: booking email and PDF templates, and the receipt email and WhatsApp templates. Gives no other settings access (receipt templates on the Receipts page also need Receipts access); without it the templates are preview-only.',
             'icon' => 'fa-file-pen',
             'category' => 'Settings',
             'page' => 'email-templates.php',
@@ -956,7 +957,8 @@ function getAllPermissions()
         ],
         'finance_settings' => [
             'label' => 'Change VAT & refund settings',
-            'description' => 'Change the VAT mode, VAT rate and the refund and cancellation rules',
+            // Administrators only (owner 2026-11-11): VAT, refund rules, bank details and document footer/terms.
+            'description' => 'Administrators only. Change the VAT mode, VAT rate, the refund and cancellation rules, the bank and payment details and the document footer and terms',
             'icon' => 'fa-percent',
             'category' => 'Finance',
             'page' => 'accounting-dashboard.php',
@@ -1072,7 +1074,7 @@ function getAllPermissions()
         ],
         'backup_management' => [
             'label' => 'Backup Management',
-            'description' => 'Run, download and restore database backups',
+            'description' => 'Run and view database backups (downloading needs an administrator; restoring needs "Restore the database from a backup")',
             'icon' => 'fa-database',
             'category' => 'Settings',
             'page' => 'backup-management.php',
@@ -1101,6 +1103,32 @@ function getAllPermissions()
             'category' => 'Settings',
             'page' => 'facebook-settings.php',
             'group' => 'settings'
+        ],
+
+        // Permission tiers (owner 2026-11-11). Not pages: switches inside Hotel Settings and Backups.
+        'email_server_settings' => [
+            'label' => 'Change the email server (SMTP)',
+            'description' => 'Super admin only. Change the email server, its sign-in and password, the security type, development mode, the staff copy (BCC) switch, the email log and email preview',
+            'icon' => 'fa-server',
+            'category' => 'Settings',
+            'page' => '', // not a page: the email server part of Hotel Settings
+            'group' => 'settings_advanced'
+        ],
+        'backup_restore' => [
+            'label' => 'Restore the database from a backup',
+            'description' => 'Super admin only. Replace all current data with a backup copy (a safety backup is taken first)',
+            'icon' => 'fa-undo',
+            'category' => 'Settings',
+            'page' => '', // not a page: the Restore button on Backups
+            'group' => 'settings_advanced'
+        ],
+        'site_switches' => [
+            'label' => 'Take the website or bookings offline, change booking numbering and service channels',
+            'description' => 'Administrators only. Switch online booking or the whole website on and off, change what guests see while booking is off, the maintenance message, the booking reference prefix, and the conference, gym and restaurant channels and their notification emails',
+            'icon' => 'fa-power-off',
+            'category' => 'Settings',
+            'page' => '', // not a page: switches inside Hotel Settings
+            'group' => 'settings_advanced'
         ],
 
         // Assistant (staff chat helper). Off until switched on in Assistant Settings.
@@ -1251,6 +1279,67 @@ function getDefaultPermissionsForRole(string $role)
 }
 
 // ============================================
+// PERMISSION TIERS (owner 2026-11-11)
+// ============================================
+// "Admin can only do so much while super is everything." Two lists, one pure rule (rh_permission_resolve) used by both
+// hasPermission() and getUserPermissions() so they can never disagree. view_only is a restriction and is in neither list.
+
+/**
+ * Tier S - system plumbing and security: super admins only. A plain administrator has these only when a super admin
+ * switched them on for that administrator. While no active super admin exists, plain administrators keep them (nobody is
+ * locked out). Never available to any other role.
+ */
+function rh_super_only_permissions(): array
+{
+    return ['api_keys', 'ai_settings', 'module_settings', 'data_reset', 'whatsapp_settings', 'facebook_settings',
+            'email_server_settings', 'backup_restore'];
+}
+
+/**
+ * Tier A - administrators only (super or plain). Every other role is refused these even when an older saved permission
+ * row says granted: such a row can no longer give a manager bank details, templates or staff accounts. Includes Tier S.
+ */
+function rh_admin_only_permissions(): array
+{
+    return array_merge(['user_management', 'user_create', 'user_edit', 'user_delete', 'user_permissions',
+            'finance_settings', 'edit_templates', 'system_logs', 'cache', 'pages', 'section_headers', 'licence',
+            'site_switches'], rh_super_only_permissions());
+}
+
+/**
+ * The one permission rule (pure, no database), owner 2026-11-11.
+ * $explicitRow: the person's own saved row for this key (null = none). For an administrator's view_only pass whether
+ *   "View only" is ticked for them. $superDenies / $superGrants: key => true, rows a super-admin account wrote for this
+ *   administrator (is_granted 0 / 1). $activeSuperCount: active super admins (0 = fallback: plain administrators keep Tier S).
+ */
+function rh_permission_resolve(string $role, bool $isSuper, string $key, ?bool $explicitRow, array $roleDefaults,
+                               array $superDenies, array $superGrants, int $activeSuperCount): bool
+{
+    if ($key === 'view_only') { // a restriction: on only when ticked; never on a super admin
+        if ($role === 'admin') {
+            return !$isSuper && $explicitRow === true;
+        }
+        return $explicitRow !== null ? $explicitRow : in_array($key, $roleDefaults, true);
+    }
+    if ($role === 'admin') {
+        if ($isSuper) {
+            return true;
+        }
+        if (isset($superDenies[$key])) {
+            return false; // a super admin switched it off for this administrator
+        }
+        if ($activeSuperCount > 0 && in_array($key, rh_super_only_permissions(), true)) {
+            return isset($superGrants[$key]); // Tier S: off unless a super admin switched it on
+        }
+        return true;
+    }
+    if (in_array($key, rh_admin_only_permissions(), true)) {
+        return false; // Tier A ceiling: never below administrator, whatever row exists
+    }
+    return $explicitRow !== null ? $explicitRow : in_array($key, $roleDefaults, true);
+}
+
+// ============================================
 // SUPER ADMIN (owner 2026-11-11)
 // ============================================
 // A super admin is an admin_users row with role 'admin' AND is_super_admin = 1 (migration 080). The role stays 'admin',
@@ -1317,15 +1406,31 @@ function rh_super_admin_column_ready(): bool
     return $ready;
 }
 
-/** Active super admins, for the "last super admin" guard. 0 before migration 080. */
-function rh_active_super_admin_count(): int
+/**
+ * Active super admins, for the "last super admin" guard and the Tier S fallback. 0 before migration 080 or on error.
+ * Cached for the request (permission checks can run it once per link); $refresh re-reads it (owner 2026-11-11).
+ */
+function rh_active_super_admin_count(bool $refresh = false): int
 {
     global $pdo;
-    try {
-        return (int)$pdo->query("SELECT COUNT(*) FROM admin_users WHERE role = 'admin' AND is_active = 1 AND is_super_admin = 1")->fetchColumn();
-    } catch (Throwable $e) {
-        return 0;
+    static $count = null;
+    if ($refresh || $count === null) {
+        try {
+            $count = (int)$pdo->query("SELECT COUNT(*) FROM admin_users WHERE role = 'admin' AND is_active = 1 AND is_super_admin = 1")->fetchColumn();
+        } catch (Throwable $e) {
+            $count = 0;
+        }
     }
+    return $count;
+}
+
+/**
+ * True when administrators who are not super admins are held to Tier S and may not manage administrator accounts:
+ * at least one active super admin exists (owner 2026-11-11). False = fallback: they keep everything, as before.
+ */
+function rh_super_admins_in_charge(): bool
+{
+    return rh_active_super_admin_count() > 0;
 }
 
 /** The role name to show for a user row (with role and is_super_admin), e.g. "Super Admin" or "Administrator". */
@@ -1342,7 +1447,8 @@ function rh_role_display_label(array $row): string
 /**
  * An administrator's own permission settings, as a super admin left them. Only rows written by a super-admin account
  * count (granted_by), so old rows from before someone became an administrator never take anything away.
- * @return array{denies:array<string,bool>,view_only:bool} denies = keys switched off; view_only = "View only" ticked
+ * @return array{denies:array<string,bool>,grants:array<string,bool>,view_only:bool} denies = keys switched off;
+ *         grants = keys switched on (owner 2026-11-11: only Tier S keys use them); view_only = "View only" ticked
  *         (any row: includes/view-only.php reads that row directly whoever wrote it).
  */
 function rh_admin_permission_overrides(int $user_id, bool $refresh = false): array
@@ -1352,21 +1458,28 @@ function rh_admin_permission_overrides(int $user_id, bool $refresh = false): arr
     if (!$refresh && isset($cache[$user_id])) {
         return $cache[$user_id];
     }
-    $out = ['denies' => [], 'view_only' => false];
+    $out = ['denies' => [], 'grants' => [], 'view_only' => false];
     try {
         $st = $pdo->prepare(
-            "SELECT up.permission_key FROM user_permissions up
+            "SELECT up.permission_key, up.is_granted FROM user_permissions up
                JOIN admin_users g ON g.id = up.granted_by
-              WHERE up.user_id = ? AND up.is_granted = 0 AND g.role = 'admin' AND g.is_super_admin = 1"
+              WHERE up.user_id = ? AND g.role = 'admin' AND g.is_super_admin = 1"
         );
         $st->execute([$user_id]);
-        foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $k) {
-            if ((string)$k !== 'view_only') {
-                $out['denies'][(string)$k] = true;
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $k = (string)$r['permission_key'];
+            if ($k === 'view_only') {
+                continue;
+            }
+            if ((int)$r['is_granted'] === 1) {
+                $out['grants'][$k] = true;
+            } else {
+                $out['denies'][$k] = true;
             }
         }
     } catch (Throwable $e) {
         $out['denies'] = []; // no table / no column yet: administrators keep everything
+        $out['grants'] = [];
     }
     try {
         $st = $pdo->prepare("SELECT is_granted FROM user_permissions WHERE user_id = ? AND permission_key = 'view_only'");
@@ -1410,13 +1523,42 @@ function rh_set_super_admin_flag(int $user_id, bool $on, int $by): bool
     }
     rh_super_admin_info($user_id, true);
     rh_admin_permission_overrides($user_id, true);
+    rh_active_super_admin_count(true);
     return true;
 }
 
-/** True when a plain administrator has at least one permission switched off by a super admin. */
+/**
+ * A super admin's limits on an administrator, leaving out Tier S keys: those are off for every plain administrator by
+ * default, so having them off is not a "limit" (owner 2026-11-11). key => true.
+ */
+function rh_admin_real_limits(array $overrides): array
+{
+    return array_diff_key($overrides['denies'] ?? [], array_flip(rh_super_only_permissions()));
+}
+
+/** True when a plain administrator has at least one permission switched off by a super admin (Tier S keys do not count). */
 function rh_admin_has_limits(int $user_id): bool
 {
-    return $user_id > 0 && !rh_is_super_admin($user_id) && rh_admin_permission_overrides($user_id)['denies'] !== [];
+    return $user_id > 0 && !rh_is_super_admin($user_id) && rh_admin_real_limits(rh_admin_permission_overrides($user_id)) !== [];
+}
+
+/**
+ * Whether admin pages must remove the links this person cannot open (rhStripDeniedLinks). Everyone except a super admin
+ * and, while no super admin exists, an administrator with no limits (owner 2026-11-11: once a super admin exists, plain
+ * administrators no longer hold the Tier S pages, so their links are filtered too).
+ */
+function rh_links_need_filter(int $user_id, string $sessionRole): bool
+{
+    if ($user_id <= 0) {
+        return false;
+    }
+    if ($sessionRole !== 'admin') {
+        return true;
+    }
+    if (rh_is_super_admin($user_id)) {
+        return false;
+    }
+    return rh_super_admins_in_charge() || rh_admin_has_limits($user_id);
 }
 
 /**
@@ -1478,22 +1620,25 @@ function hasPermission(int $user_id, string $permission_key)
             return false;
         }
 
-        $role = $user['role'];
+        $role = (string)$user['role'];
 
-        // Administrators: everything, except what a super admin switched off for them. "View only" is a restriction,
-        // not a power, so it is on only when ticked (includes/view-only.php enforces it). Super admins: everything.
+        // Tiers (owner 2026-11-11): one rule in rh_permission_resolve(). Super admins: everything. Administrators:
+        // everything except a super admin's limits and, while a super admin exists, Tier S keys not switched on for them.
+        // "View only" is a restriction, on only when ticked (includes/view-only.php enforces it).
         if ($role === 'admin') {
-            if (rh_is_super_admin($user_id)) {
-                return $permission_key !== 'view_only';
-            }
-            $ov = rh_admin_permission_overrides($user_id);
-            if ($permission_key === 'view_only') {
-                return $ov['view_only'];
-            }
-            return !isset($ov['denies'][$permission_key]);
+            $isSuper = rh_is_super_admin($user_id);
+            $ov = $isSuper ? ['denies' => [], 'grants' => [], 'view_only' => false] : rh_admin_permission_overrides($user_id);
+            $superCount = (!$isSuper && in_array($permission_key, rh_super_only_permissions(), true)) ? rh_active_super_admin_count() : 0;
+            return rh_permission_resolve('admin', $isSuper, $permission_key, $ov['view_only'], [], $ov['denies'], $ov['grants'], $superCount);
+        }
+
+        // Tier A ceiling: no saved row can give a non-administrator these.
+        if (in_array($permission_key, rh_admin_only_permissions(), true)) {
+            return false;
         }
 
         // Check user_permissions table for explicit grant/deny
+        $explicit = null;
         try {
             $stmt = $pdo->prepare("
                 SELECT is_granted FROM user_permissions
@@ -1503,15 +1648,14 @@ function hasPermission(int $user_id, string $permission_key)
             $result = $stmt->fetch(PDO::FETCH_ASSOC);
 
             if ($result !== false) {
-                return (bool)$result['is_granted'];
+                $explicit = (bool)$result['is_granted'];
             }
         } catch (PDOException $e) {
             // Table doesn't exist yet - fall through to role defaults
         }
 
         // No explicit permission set - use role defaults
-        $defaults = getDefaultPermissionsForRole($role);
-        return in_array($permission_key, $defaults);
+        return rh_permission_resolve($role, false, $permission_key, $explicit, getDefaultPermissionsForRole($role), [], [], 0);
     } catch (PDOException $e) {
         error_log("Permission check error: " . $e->getMessage());
         return false;
@@ -1568,14 +1712,15 @@ function getUserPermissions(int $user_id)
             return $result;
         }
 
-        $role = $user['role'];
+        $role = (string)$user['role'];
 
-        // Administrators: everything except a super admin's limits (mirrors hasPermission); super admins: everything.
+        // Administrators: the same rule as hasPermission (rh_permission_resolve, owner 2026-11-11).
         if ($role === 'admin') {
             $isSuper = rh_is_super_admin($user_id);
-            $ov = $isSuper ? ['denies' => [], 'view_only' => false] : rh_admin_permission_overrides($user_id);
+            $ov = $isSuper ? ['denies' => [], 'grants' => [], 'view_only' => false] : rh_admin_permission_overrides($user_id);
+            $superCount = $isSuper ? 0 : rh_active_super_admin_count();
             foreach ($all_permissions as $key => $info) {
-                $result[$key] = $key === 'view_only' ? $ov['view_only'] : !isset($ov['denies'][$key]);
+                $result[$key] = rh_permission_resolve('admin', $isSuper, (string)$key, $ov['view_only'], [], $ov['denies'], $ov['grants'], $superCount);
             }
             return $result;
         }
@@ -1593,13 +1738,10 @@ function getUserPermissions(int $user_id)
         // Get role defaults
         $defaults = getDefaultPermissionsForRole($role);
 
-        // Merge: explicit overrides defaults
+        // Merge: explicit overrides defaults, under the Tier A ceiling (rh_permission_resolve, owner 2026-11-11)
         foreach ($all_permissions as $key => $info) {
-            if (isset($explicit[$key])) {
-                $result[$key] = (bool)$explicit[$key];
-            } else {
-                $result[$key] = in_array($key, $defaults);
-            }
+            $result[$key] = rh_permission_resolve($role, false, (string)$key,
+                isset($explicit[$key]) ? (bool)$explicit[$key] : null, $defaults, [], [], 0);
         }
     } catch (PDOException $e) {
         error_log("Get permissions error: " . $e->getMessage());
@@ -1644,7 +1786,13 @@ function setUserPermissions(int $user_id, array $permissions, ?int $granted_by =
             ON DUPLICATE KEY UPDATE is_granted = VALUES(is_granted), granted_by = VALUES(granted_by), updated_at = NOW()
         ");
 
+        // Tier A (owner 2026-11-11): never stored as granted for anyone below administrator (saved as off, which also
+        // clears an older grant).
+        $adminOnly = rh_admin_only_permissions();
         foreach ($permissions as $key => $granted) {
+            if (in_array((string)$key, $adminOnly, true)) {
+                $permissions[$key] = $granted = false;
+            }
             $stmt->execute([$user_id, $key, $granted ? 1 : 0, $granted_by]);
         }
 
@@ -1682,8 +1830,11 @@ function resetUserPermissionsToDefault(int $user_id, ?int $reset_by = null)
             if ($before['view_only']) {
                 $removed[] = 'view_only';
             }
-            logActivity($reset_by, 'admin_permissions_reset', "Gave administrator user ID {$user_id} full access again"
-                . ($removed ? ' (removed limits: ' . implode(', ', $removed) . ')' : ' (there were no limits)'));
+            // Owner 2026-11-11: a reset also switches off any super-admin-only permission given to them.
+            $grantsOff = array_values(array_intersect(array_keys($before['grants'] ?? []), rh_super_only_permissions()));
+            logActivity($reset_by, 'admin_permissions_reset', "Reset administrator user ID {$user_id} to the usual administrator permissions"
+                . ($removed ? ' (removed limits: ' . implode(', ', $removed) . ')' : ' (there were no limits)')
+                . ($grantsOff ? ' (super-admin-only permissions switched off: ' . implode(', ', $grantsOff) . ')' : ''));
             return true;
         }
 
@@ -1718,7 +1869,12 @@ function rh_set_admin_permissions(int $user_id, array $permissions, int $granted
         }
         $pdo->prepare("DELETE FROM user_permissions WHERE user_id = ?")->execute([$user_id]);
         $ins = $pdo->prepare("INSERT INTO user_permissions (user_id, permission_key, is_granted, granted_by) VALUES (?, ?, ?, ?)");
+        $superOnly = rh_super_only_permissions();
         foreach ($permissions as $key => $granted) {
+            // Tier S (owner 2026-11-11): off = no row (off by default), so it never counts as a limit; on = a grant row.
+            if (!$granted && in_array((string)$key, $superOnly, true)) {
+                continue;
+            }
             $ins->execute([$user_id, (string)$key, $granted ? 1 : 0, $granted_by]);
         }
         if ($own) {
@@ -1733,9 +1889,11 @@ function rh_set_admin_permissions(int $user_id, array $permissions, int $granted
     }
     $after = rh_admin_permission_overrides($user_id, true);
     $changes = [];
+    // Same rule as hasPermission, so a Tier S key reads "off" until a super admin switches it on (owner 2026-11-11).
+    $superCount = rh_active_super_admin_count();
     foreach (array_keys(getAllPermissions()) as $key) {
-        $was = $key === 'view_only' ? $before['view_only'] : !isset($before['denies'][$key]);
-        $now = $key === 'view_only' ? $after['view_only'] : !isset($after['denies'][$key]);
+        $was = rh_permission_resolve('admin', false, (string)$key, $before['view_only'], [], $before['denies'], $before['grants'], $superCount);
+        $now = rh_permission_resolve('admin', false, (string)$key, $after['view_only'], [], $after['denies'], $after['grants'], $superCount);
         if ($was !== $now) {
             $changes[] = $key . ' ' . ($was ? 'on' : 'off') . ' -> ' . ($now ? 'on' : 'off');
         }
@@ -2313,10 +2471,14 @@ function canManageUser(int $manager_id, int $target_id)
 
         $roles = getAllRoles();
 
-        // Super admins manage everyone else; plain admins manage everyone except a super-admin account (active or not)
+        // Super admins manage everyone else. Plain admins (owner 2026-11-11) manage non-administrator staff only while a
+        // super admin exists; with none (fallback) they manage everyone except a super-admin account, as before.
         if ($manager_role === 'admin') {
             if (rh_is_super_admin($manager_id)) {
                 return true;
+            }
+            if ($target_role === 'admin' && rh_super_admins_in_charge()) {
+                return false;
             }
             return !rh_is_super_admin_account($target_id);
         }
@@ -2560,12 +2722,13 @@ function rhDenyAndRedirectHome(int $user_id, string $role, string $current_page,
  * signed-in user cannot open is removed. Button-like links (shortcuts, "manage",
  * "view all", quick-nav tiles) disappear; card and row links stay but go inert,
  * so no dashboard ever offers a door that bounces the user to "no access".
- * Admins are never filtered. Only plain relative page links are touched.
+ * Super admins are never filtered; plain admins only when a super admin exists or limited them (rh_links_need_filter,
+ * owner 2026-11-11). Only plain relative page links are touched.
  */
 function rhStripDeniedLinks(string $html): string
 {
     $uid = (int)($_SESSION['admin_user_id'] ?? 0);
-    if ($uid <= 0 || (($_SESSION['admin_role'] ?? '') === 'admin' && !rh_admin_has_limits($uid))) {
+    if (!rh_links_need_filter($uid, (string)($_SESSION['admin_role'] ?? ''))) { // owner 2026-11-11: plain admins too
         return $html;
     }
     $out = preg_replace_callback(

@@ -29,7 +29,8 @@ if (!isset($user) || !is_array($user)) {
 // No admin page links a user to a page they cannot open (see rhStripDeniedLinks); this includes an administrator
 // a super admin has limited.
 $_rh_role_shown = rh_is_super_admin((int)($user['id'] ?? 0)) ? 'Super Admin' : ucfirst((string)($user['role'] ?? ''));
-if (($_SESSION['admin_role'] ?? '') !== 'admin' || rh_admin_has_limits((int)($_SESSION['admin_user_id'] ?? 0))) {
+// Owner 2026-11-11: plain administrators too once a super admin exists (they no longer hold the super-admin-only pages).
+if (rh_links_need_filter((int)($_SESSION['admin_user_id'] ?? 0), (string)($_SESSION['admin_role'] ?? ''))) {
     ob_start('rhStripDeniedLinks');
 }
 
