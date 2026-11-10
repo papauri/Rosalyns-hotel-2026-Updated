@@ -53,6 +53,15 @@
     transition: all 0.2s ease;
 }
 
+/* Tablet/phone: chips keep their own width (the shared filter-bar rule grows buttons) and a
+   44px minimum tap width. */
+@media (max-width: 1024px) {
+    .filter-btn {
+        flex: 0 0 auto;
+        min-width: 2.75rem;
+    }
+}
+
 .filter-btn:hover {
     border-color: var(--gold, #7E684B);
     color: var(--navy, #1A1A1A);

@@ -292,14 +292,20 @@
         flex-wrap: wrap;
     }
 
-    .filter-bar {
-        flex-direction: column;
-        align-items: stretch;
+    /* The shared filter-bar rules (admin-styles.css) keep the bar a wrapping row on phones;
+       each label stays on the same line as its select. */
+    .filter-bar > .va-filter-label {
+        flex: 0 0 4.25rem;
+        margin: 0;
     }
 
-    .filter-bar select,
-    .filter-bar input {
-        width: 100%;
+    .filter-bar > select {
+        flex: 1 1 calc(100% - 4.75rem);
+    }
+
+    .filter-bar > .va-custom-dates,
+    .filter-bar > .btn-filter {
+        flex: 1 1 100%;
     }
 }
 

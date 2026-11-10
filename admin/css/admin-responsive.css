@@ -1065,13 +1065,14 @@ body>footer {
         gap: 8px !important;
     }
 
+    /* Sizing (flex-basis) lives in admin-styles.css "Filter / search bar polish": it targets
+       direct children only, so a basis can never turn into a height inside a column wrapper. */
     .toolbar input[type="text"],
     .toolbar input[type="search"],
     .toolbar select,
     .filter-bar input,
     .filter-bar select {
         min-width: 0 !important;
-        flex: 1 1 140px !important;
     }
 
     .table th,
