@@ -2284,11 +2284,10 @@ function rh_ai_briefing_build(PDO $db, array $user, int $conv, bool $useModel = 
         $forModel[] = ['title' => $p['title'], 'detail' => $p['detail'], 'lines' => array_slice($lines, 0, 3)];
     }
     $n = count($items);
-    $top = $items[0] ?? null;
+    // A short header only (owner 2026-11-11): card 1 sits directly under it, so its title and figure are not repeated here.
     $local = $n === 0
         ? 'Nothing needs you right now. ' . ($b['lens'] === 'front_desk' ? 'Arrivals, departures and balances are all in order.' : 'Nothing is overdue, owed or waiting on a decision in what you can see.')
-        : '**' . $b['lens_label'] . '.** ' . $n . ' thing' . ($n === 1 ? '' : 's') . ' need' . ($n === 1 ? 's' : '') . ' you today, most important first'
-            . ($top ? ': ' . rtrim((string)$top['title'], '.') . ($top['figure'] !== '' ? ' (' . $top['figure'] . ')' : '') . '.' : '.');
+        : '**' . $b['lens_label'] . '.** ' . $n . ' thing' . ($n === 1 ? '' : 's') . ' need' . ($n === 1 ? 's' : '') . ' you today, most important first.';
     $res = ['text' => $local, 'items' => $items, 'links' => [], 'chips' => [], 'route' => 'briefing', 'model' => '', 'provider' => null, 'tokens_in' => 0, 'tokens_out' => 0, 'cost' => 0.0, 'ms' => 0, 'lens' => $b['lens']];
     $chips = [];
     foreach ($items as $it) {
@@ -2312,7 +2311,7 @@ function rh_ai_briefing_build(PDO $db, array $user, int $conv, bool $useModel = 
         return $res;
     }
     $data = rh_ai_compact_json(['for' => $b['lens_label'], 'currency' => $cur, 'findings' => $forModel]);
-    $volatile = rh_ai_context_volatile($db, $conv, $user, '', 0, '', 'BRIEFING: The data below lists what needs this person today, most important first. Explain it in 2 to 4 short sentences: the most important point first, with its figure, why it matters and the next step. Use ONLY the figures given; add nothing. No list and no greeting (cards with the details are shown under your text).');
+    $volatile = rh_ai_context_volatile($db, $conv, $user, '', 0, '', 'BRIEFING: The data below lists what needs this person today, most important first. Explain it in 2 to 4 short sentences: why the most important point matters and the next step. Cards showing each title and figure are shown directly under your text, so do not repeat the first card\'s title or figure. Use ONLY the figures given; add nothing. No list and no greeting.');
     $req = rh_ai_vault_final_pass($db, $conv, ['provider' => $models['provider'], 'model' => $m['model_id'], 'system_frozen' => rh_ai_context_frozen($db),
         'system_user' => rh_ai_context_user($db, $conv, $user, rh_ai_prefs_get($db, $uid)), 'system_volatile' => $volatile,
         'messages' => [['role' => 'user', 'content' => $data]], 'tools' => [], 'max_tokens' => 400, 'effort' => 'low']);
