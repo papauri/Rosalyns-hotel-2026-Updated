@@ -1829,6 +1829,9 @@ function rh_ai_propose(PDO $db, array $user, int $conv, string $key, array $args
     if ($fromModel) {
         $args = rh_ai_vault_resolve_args($db, $conv, $args);
     }
+    if (rh_ai_vault_unresolved_in($args)) { // a name cleared at sign-out: never act on "(guest)" or a raw token (owner 2026-11-11)
+        return $fail(rh_ai_vault_unresolved_msg());
+    }
     [$ok, $clean] = rh_ai_tool_validate($reg[$key]['schema'], $args);
     if (!$ok) {
         return $fail('Arguments not valid: ' . $clean);
@@ -1963,6 +1966,9 @@ function rh_ai_confirm(PDO $db, array $user, int $id, array $edits = [], string 
                 }
                 $args[$k] = $v;
             }
+        }
+        if (rh_ai_vault_unresolved_in($args)) { // never act on a name this chat no longer holds
+            return $done(['success' => false, 'error' => rh_ai_vault_unresolved_msg()]);
         }
         // Phase 4c: cancel, check-out, date correction, room off sale, anything sent to a guest. Checked after the
         // card's own choices are applied, so switching "Email it to the guest too" to Yes still needs the password.

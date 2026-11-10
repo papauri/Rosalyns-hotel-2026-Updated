@@ -45,7 +45,10 @@ function rh_ai_vault_free_text_fields(): array
         'review_title', 'enquiry_subject'];
 }
 
-/** Per-request memory of each conversation's vault: [conv => ['tok' => [token => value], 'hash' => [hash => token]]]. */
+/**
+ * Per-request memory of each conversation's vault: [conv => ['tok' => [token => value], 'hash' => [hash => token],
+ * 'max' => [kind => highest number held, cleared ones included], 'floor' => [kind => highest number in the stored chat]]].
+ */
 function &rh_ai_vault_memo(): array
 {
     static $memo = [];
@@ -62,13 +65,18 @@ function rh_ai_vault_load(PDO $db, int $conv): array
 {
     $memo = &rh_ai_vault_memo();
     if (!isset($memo[$conv])) {
-        $memo[$conv] = ['tok' => [], 'hash' => []];
+        $memo[$conv] = ['tok' => [], 'hash' => [], 'max' => []];
         if ($conv > 0) {
             try {
                 $st = $db->prepare("SELECT kind, num, value_text, value_hash FROM ai_vault WHERE conversation_id = ?");
                 $st->execute([$conv]);
                 foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
-                    $t = '[' . $r['kind'] . '_' . (int)$r['num'] . ']';
+                    $k = (string)$r['kind'];
+                    $memo[$conv]['max'][$k] = max((int)($memo[$conv]['max'][$k] ?? 0), (int)$r['num']);
+                    if ((string)$r['value_text'] === '') {
+                        continue; // cleared at sign-out / by the ended-session sweep: the number stays taken, the value is gone
+                    }
+                    $t = '[' . $k . '_' . (int)$r['num'] . ']';
                     $memo[$conv]['tok'][$t] = (string)$r['value_text'];
                     $memo[$conv]['hash'][(string)$r['value_hash']] = $t;
                 }
@@ -106,12 +114,8 @@ function rh_ai_vault_token(PDO $db, int $conv, string $kind, string $value): str
     if (isset($memo[$conv]['hash'][$h])) {
         return $memo[$conv]['hash'][$h];
     }
-    $num = 1;
-    foreach (array_keys($memo[$conv]['tok']) as $t) {
-        if (preg_match('/^\[' . $kind . '_(\d+)\]$/', $t, $m)) {
-            $num = max($num, (int)$m[1] + 1);
-        }
-    }
+    rh_ai_vault_floor($db, $conv);
+    $num = rh_ai_vault_next_num($memo[$conv], $kind);
     for ($try = 0; $try < 5; $try++) {
         try {
             $db->prepare("INSERT INTO ai_vault (conversation_id, kind, num, value_text, value_hash) VALUES (?, ?, ?, ?, ?)")
@@ -124,7 +128,67 @@ function rh_ai_vault_token(PDO $db, int $conv, string $kind, string $value): str
     $t = '[' . $kind . '_' . $num . ']';
     $memo[$conv]['tok'][$t] = $value;
     $memo[$conv]['hash'][$h] = $t;
+    $memo[$conv]['max'][$kind] = max((int)($memo[$conv]['max'][$kind] ?? 0), $num);
     return $t;
+}
+
+/**
+ * PURE. The number for a new token of this kind: above every number this conversation has ever used - values held now,
+ * values cleared at sign-out (their rows stay, empty) and numbers in the stored chat (chats cleared before rows were
+ * kept) - so an old message's [GUEST_1] can never later stand for a different person (owner fault 2026-11-11).
+ */
+function rh_ai_vault_next_num(array $vault, string $kind): int
+{
+    $num = max((int)($vault['max'][$kind] ?? 0), (int)($vault['floor'][$kind] ?? 0));
+    foreach (array_keys((array)($vault['tok'] ?? [])) as $t) {
+        if (preg_match('/^\[' . preg_quote($kind, '/') . '_(\d+)\]$/', (string)$t, $m)) {
+            $num = max($num, (int)$m[1]);
+        }
+    }
+    return $num + 1;
+}
+
+/**
+ * PURE. The highest token number of each kind written in these texts, in any form (JSON- or markdown-escaped, lower
+ * case, a space or dash). Loose on purpose: reading too high only skips numbers, reading too low could reuse one.
+ */
+function rh_ai_vault_max_nums(array $texts): array
+{
+    $max = [];
+    foreach ($texts as $t) {
+        $t = (string)$t;
+        if ($t !== '' && preg_match_all('/(?<![\p{L}\p{N}])(GUEST|EMAIL|PHONE|BK|STAFF)[ _\-](\d{1,6})(?!\d)/iu', $t, $mm, PREG_SET_ORDER)) {
+            foreach ($mm as $m) {
+                $k = strtoupper($m[1]);
+                $max[$k] = max((int)($max[$k] ?? 0), (int)$m[2]);
+            }
+        }
+    }
+    return $max;
+}
+
+/** The highest token numbers already written in this conversation's stored messages and lookups (read once per request). */
+function rh_ai_vault_floor(PDO $db, int $conv): array
+{
+    $memo = &rh_ai_vault_memo();
+    if (!isset($memo[$conv]['floor'])) {
+        $floor = [];
+        if ($conv > 0) {
+            try {
+                $st = $db->prepare("SELECT content, tool_args_json, tool_result_json FROM ai_messages WHERE conversation_id = ? ORDER BY id DESC LIMIT 3000");
+                $st->execute([$conv]);
+                while ($r = $st->fetch(PDO::FETCH_NUM)) {
+                    foreach (rh_ai_vault_max_nums($r) as $k => $n) {
+                        $floor[$k] = max((int)($floor[$k] ?? 0), $n);
+                    }
+                }
+            } catch (Throwable $e) {
+                // no messages table yet: the vault's own numbers decide
+            }
+        }
+        $memo[$conv]['floor'] = $floor;
+    }
+    return $memo[$conv]['floor'];
 }
 
 /** Real values back in place of tokens (for display and for tool arguments). Unknown tokens stay. */
@@ -135,8 +199,35 @@ function rh_ai_vault_rehydrate(PDO $db, int $conv, string $text): string
     }
     $v = rh_ai_vault_load($db, $conv);
     return (string)preg_replace_callback('/\[(GUEST|EMAIL|PHONE|BK|STAFF)_(\d+)\]/', static function ($m) use ($v) {
-        return $v['tok'][$m[0]] ?? $m[0];
+        $val = (string)($v['tok'][$m[0]] ?? '');
+        return $val !== '' ? $val : $m[0];
     }, $text);
+}
+
+/**
+ * PURE. Does a (resolved) value still hold a privacy token, or the plain word shown for a cleared one ("(guest)")?
+ * Then the real value is not known here, and nothing may be looked up or changed with it.
+ */
+function rh_ai_vault_unresolved_in($v): bool
+{
+    if (is_array($v)) {
+        foreach ($v as $x) {
+            if (rh_ai_vault_unresolved_in($x)) {
+                return true;
+            }
+        }
+        return false;
+    }
+    if (!is_string($v) || $v === '') {
+        return false;
+    }
+    return (bool)preg_match('/\[(GUEST|EMAIL|PHONE|BK|STAFF)_\d+\]|\((guest|email|phone|booking|staff)\)/i', rh_ai_vault_canon($v));
+}
+
+/** The plain message when a name or detail is no longer known in this chat (cleared at sign-out). */
+function rh_ai_vault_unresolved_msg(): string
+{
+    return 'I no longer have that name or detail in this chat (names are cleared after sign-out). Please name the guest again.';
 }
 
 /**
@@ -147,8 +238,7 @@ function rh_ai_vault_resolve_args(PDO $db, int $conv, array $args): array
 {
     foreach ($args as $k => $v) {
         if (is_string($v)) {
-            $v = (string)preg_replace('/(?<![\[\p{L}\p{N}_])(GUEST|EMAIL|PHONE|BK|STAFF)_(\d+)(?![\]\p{L}\p{N}_])/u', '[$1_$2]', $v);
-            $args[$k] = rh_ai_vault_rehydrate($db, $conv, $v);
+            $args[$k] = rh_ai_vault_rehydrate($db, $conv, rh_ai_vault_canon($v)); // every written form ("\[GUEST_1\]", "GUEST_1") counts
         } elseif (is_array($v)) {
             $args[$k] = rh_ai_vault_resolve_args($db, $conv, $v);
         }
@@ -270,13 +360,18 @@ function rh_ai_vault_people_reset(): void
 /**
  * Scrub free text before it leaves (the staff member's message, guest-written notes, summaries):
  * cards, ID/passport numbers dropped; emails, phones, booking references and known people tokenised;
- * any value already in this conversation's vault replaced by its token.
+ * a name after a title in any case ("mr baluwa"); any value already in this conversation's vault replaced by its token.
+ * $typed: text the staff member typed - a known guest/staff name is then tokenised in any case too ("baluwa"). Off for
+ * lookups and guide text, where ordinary words that are also someone's name ("hall", "grace") must stay readable.
  */
-function rh_ai_scrub_outbound(PDO $db, int $conv, string $text): string
+function rh_ai_scrub_outbound(PDO $db, int $conv, string $text, bool $typed = false): string
 {
     if ($text === '') {
         return '';
     }
+    // Tokens in another written form ("STAFF_2", "\[GUEST_1\]") back to "[STAFF_2]" first: stored copies stay canonical,
+    // and the title pass below never reads "Mr STAFF_2" as a person called "STAFF"
+    $text = rh_ai_vault_canon($text);
     // Card numbers (13-19 digits, spaces/dashes allowed, Luhn-valid): dropped
     $text = (string)preg_replace_callback('/(?<![\w])(?:\d[ \-]?){12,18}\d(?![\w])/', static function ($m) {
         $d = preg_replace('/\D/', '', $m[0]);
@@ -351,11 +446,80 @@ function rh_ai_scrub_outbound(PDO $db, int $conv, string $text): string
             }
         }
     }
+    // A name after a title, in any case (owner fault 2026-11-11: "mr baluwa" went out as typed); the title stays readable
+    $text = rh_ai_vault_titled($db, $conv, $text, $people);
     if ($people['part']) {
-        $text = (string)preg_replace_callback('/(?<![\p{L}\[_])(\p{Lu}[\p{Ll}\'\-]{2,})(?![\p{L}\]])/u', static function ($m) use ($db, $conv, $people) {
-            $kind = $people['part'][mb_strtolower($m[1])] ?? null;
-            return $kind === null ? $m[0] : rh_ai_vault_token($db, $conv, $kind, $m[1]);
-        }, $text);
+        $part = static function ($m) use ($db, $conv, $people) {
+            [$name, $tail] = rh_ai_vault_possessive($m[1]);
+            $kind = $people['part'][mb_strtolower($name)] ?? null;
+            return $kind === null ? $m[0] : rh_ai_vault_token($db, $conv, $kind, $name) . $tail;
+        };
+        $text = (string)preg_replace_callback('/(?<![\p{L}\[_])(\p{Lu}[\p{Ll}\'\-]{2,})(?![\p{L}\]])/u', $part, $text);
+        if ($typed) { // a known name typed in lower case
+            $text = (string)preg_replace_callback('/(?<![\p{L}\[_])(\p{Ll}[\p{Ll}\'\-]{2,})(?![\p{L}\]])/u', $part, $text);
+        }
+    }
+    return $text;
+}
+
+/** PURE. "Baluwa's" -> ["Baluwa", "'s"]; a word without a possessive comes back whole. */
+function rh_ai_vault_possessive(string $w): array
+{
+    if (preg_match('/^(.{2,}?)(\'s|\')$/u', $w, $m)) {
+        return [$m[1], $m[2]];
+    }
+    return [$w, ''];
+}
+
+/** Words after a title that are never read as a name ("did we miss the ..."): the stop words, less those that are names too. */
+function rh_ai_vault_title_skip(): array
+{
+    static $skip = null;
+    if ($skip === null) {
+        $skip = array_diff_key(rh_ai_vault_stopwords() + array_fill_keys(['about', 'again', 'also', 'any', 'anyone', 'anybody', 'anything', 'something', 'someone', 'somebody',
+            'everyone', 'everybody', 'everything', 'nothing', 'nobody', 'none', 'one', 'him', 'here', 'there', 'just', 'now', 'so', 'than', 'very', 'want', 'need', 'out', 'too'], true),
+            array_fill_keys(['may', 'june', 'april', 'august', 'king', 'queen', 'sun', 'rose', 'grace', 'hope', 'view', 'river', 'lake', 'garden'], true));
+    }
+    return $skip;
+}
+
+/**
+ * The name after a title (mr, mrs, ms, miss, mx, dr, prof, mister, madam, sir; with or without a dot), in any case, as a
+ * token: "mr baluwa" -> "mr [GUEST_1]". A second word is taken with it when it is Capitalised or a known name part
+ * ("Mr John Banda"). Privacy wins over wording: an unknown word after a title is treated as a name.
+ */
+function rh_ai_vault_titled(PDO $db, int $conv, string $text, array $people): string
+{
+    if (!preg_match_all('/(?<![\p{L}\p{N}_\[])(?:mr|mrs|ms|miss|mx|dr|prof|mister|madam|sir)\.?\s+/iu', $text, $mm, PREG_OFFSET_CAPTURE)) {
+        return $text;
+    }
+    $skip = rh_ai_vault_title_skip();
+    foreach (array_reverse($mm[0]) as [$hon, $off]) { // from the end: earlier offsets stay right
+        $at = $off + strlen($hon);
+        if (!preg_match('/\G(\p{L}[\p{L}\'\-]*)(?:(\s+)(\p{L}[\p{L}\'\-]*))?/u', $text, $w, 0, $at)) {
+            continue;
+        }
+        [$first, $tail] = rh_ai_vault_possessive($w[1]);
+        $lf = mb_strtolower($first);
+        if (mb_strlen($first) < 2 || isset($skip[$lf])) {
+            continue;
+        }
+        if (strncmp($hon, 'miss', 4) === 0 && !preg_match('/^\p{Lu}/u', $first) && !isset($people['part'][$lf])) {
+            continue; // "did we miss breakfast": lower-case "miss" is the verb unless a name follows (a known one is caught as typed text)
+        }
+        $value = $first;
+        $len = strlen($w[1]);
+        if ($tail === '' && isset($w[3]) && $w[3] !== '') {
+            [$second, $tail2] = rh_ai_vault_possessive($w[3]);
+            $ls = mb_strlen($second) >= 2 ? mb_strtolower($second) : '';
+            if ($ls !== '' && !isset($skip[$ls]) && (preg_match('/^\p{Lu}/u', $second) || isset($people['part'][$ls]))) {
+                $value .= ' ' . $second;
+                $len = strlen($w[0]);
+                $tail = $tail2;
+            }
+        }
+        $kind = $people['full'][mb_strtolower($value)] ?? ($people['part'][$lf] ?? 'GUEST');
+        $text = substr($text, 0, $at) . rh_ai_vault_token($db, $conv, $kind, $value) . $tail . substr($text, $at + $len);
     }
     return $text;
 }
@@ -465,8 +629,8 @@ function rh_ai_vault_orphans_out(PDO $db, int $conv, string $text): string
 
 /**
  * Every text the panel shows from a reply: real values back, and never a raw token. A token with no value in a fresh
- * reply is a fault: logged (kinds and counts only) so it is visible. $log false where plain words are expected (an old
- * chat after sign-out).
+ * reply is a fault: noted (kinds and counts only) and logged once per reply by rh_ai_vault_show_flush(). $log false
+ * where plain words are expected (an old chat after sign-out).
  */
 function rh_ai_vault_show(PDO $db, int $conv, string $text, string $where = 'reply', bool $log = true): string
 {
@@ -475,22 +639,57 @@ function rh_ai_vault_show(PDO $db, int $conv, string $text, string $where = 'rep
     }
     $r = rh_ai_vault_show_map(rh_ai_vault_load($db, $conv)['tok'], $text);
     if ($log && $r['unresolved']) {
-        $kinds = [];
-        foreach ($r['unresolved'] as $k => $n) {
-            $kinds[] = $k . ' x' . $n;
+        $buf = &rh_ai_vault_unresolved_buffer();
+        if (!$buf) {
+            register_shutdown_function('rh_ai_vault_show_flush'); // a reply that never calls the flush still logs once
         }
-        error_log('Assistant: privacy token(s) with no stored value were shown as plain words (conversation ' . $conv . ', ' . $where . '): ' . implode(', ', $kinds));
-        if (function_exists('rh_ai_incident_add')) {
-            rh_ai_incident_add($db, 'token_unresolved', 'A reply named a privacy token with no stored value; it was shown as a plain word',
-                ['where' => mb_substr($where, 0, 40), 'kinds' => $r['unresolved']], ['severity' => 'warning', 'conversation_id' => $conv]);
+        $buf[$conv]['db'] = $db;
+        $buf[$conv]['where'][mb_substr($where, 0, 40)] = true;
+        foreach ($r['unresolved'] as $k => $n) {
+            $buf[$conv]['kinds'][$k] = (int)($buf[$conv]['kinds'][$k] ?? 0) + (int)$n;
         }
     }
     return $r['text'];
 }
 
+/** Unresolved tokens noted while one reply is shown: [conv => ['db', 'where' => [where => true], 'kinds' => [kind => count]]]. */
+function &rh_ai_vault_unresolved_buffer(): array
+{
+    static $buf = [];
+    return $buf;
+}
+
+/** One log line and one incident per reply (reply text, chips and cards together: kinds and counts, never a value). */
+function rh_ai_vault_show_flush(): void
+{
+    $buf = &rh_ai_vault_unresolved_buffer();
+    $all = $buf;
+    $buf = [];
+    foreach ($all as $conv => $b) {
+        if (empty($b['kinds'])) {
+            continue;
+        }
+        $kinds = [];
+        foreach ($b['kinds'] as $k => $n) {
+            $kinds[] = $k . ' x' . $n;
+        }
+        $where = implode(', ', array_keys((array)($b['where'] ?? [])));
+        error_log('Assistant: privacy token(s) with no stored value were shown as plain words (conversation ' . (int)$conv . ', ' . $where . '): ' . implode(', ', $kinds));
+        if (function_exists('rh_ai_incident_add') && ($b['db'] ?? null) instanceof PDO) {
+            try {
+                rh_ai_incident_add($b['db'], 'token_unresolved', 'A reply named a privacy token with no stored value; it was shown as a plain word',
+                    ['where' => mb_substr($where, 0, 120), 'kinds' => $b['kinds']], ['severity' => 'warning', 'conversation_id' => (int)$conv]);
+            } catch (Throwable $e) {
+                // the log line above already holds it
+            }
+        }
+    }
+}
+
 /**
- * Sign-out (admin/logout.php): the privacy vault of this person's chats is removed, their unconfirmed cards
- * expire and their cached lookups go. Old chats then show "(guest)" in place of names. Never throws.
+ * Sign-out (admin/logout.php): every real value in the privacy vault of this person's chats is cleared (the empty row
+ * keeps its token number taken, so a later name in the same chat never reuses it), their unconfirmed cards expire and
+ * their cached lookups go. Old chats then show "(guest)" in place of names. Never throws.
  */
 function rh_ai_signout_purge(PDO $db, int $uid): void
 {
@@ -498,7 +697,7 @@ function rh_ai_signout_purge(PDO $db, int $uid): void
         return;
     }
     foreach ([
-        "DELETE v FROM ai_vault v JOIN ai_conversations c ON c.id = v.conversation_id WHERE c.user_id = ?",
+        "UPDATE ai_vault v JOIN ai_conversations c ON c.id = v.conversation_id SET v.value_text = '', v.value_hash = '' WHERE c.user_id = ? AND v.value_text <> ''",
         "UPDATE ai_actions SET status = 'expired' WHERE user_id = ? AND status = 'proposed'",
         "DELETE FROM ai_tool_cache WHERE user_id = ?",
     ] as $sql) {

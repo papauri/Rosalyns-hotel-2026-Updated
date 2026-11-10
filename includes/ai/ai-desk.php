@@ -1239,8 +1239,14 @@ function rh_ai_named_absence_fix(PDO $db, array $user, int $conv, string $reply,
     $parts = preg_split('/(?<=[.!?;])\s+|\n+/u', $reply); // the same split as the claims
     $swap = [];
     foreach ($claims as $i => [$subject, $name]) {
-        $q = trim((string)preg_replace('/^(?:mr|mrs|ms|miss|mx|dr|prof|mister|madam|sir)\.?\s+/iu', '', rh_ai_vault_rehydrate($db, $conv, $name)));
+        $q = trim((string)preg_replace('/^(?:mr|mrs|ms|miss|mx|dr|prof|mister|madam|sir)\.?\s+/iu', '', rh_ai_vault_rehydrate($db, $conv, rh_ai_vault_canon($name))));
         if ($q === '') {
+            continue;
+        }
+        if (rh_ai_vault_unresolved_in($q)) { // cleared at sign-out: cannot be checked, so it is not said
+            if (isset($parts[$i]) && trim((string)$parts[$i]) !== '') {
+                $swap[] = [trim((string)$parts[$i]), rh_ai_vault_unresolved_msg()];
+            }
             continue;
         }
         $tool = ['bookings' => 'search_bookings', 'gym_members' => 'gym_watch', 'conference' => 'events_pipeline'][$subject];

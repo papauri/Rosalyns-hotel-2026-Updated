@@ -619,6 +619,9 @@ function rh_ai_run_tool(PDO $db, array $user, int $conv, string $name, array $ar
     $page = max(1, min(20, (int)($args['page'] ?? 1))); // which 10 rows of a long list the model sees (not part of the lookup)
     unset($args['page']);
     $args = rh_ai_vault_resolve_args($db, $conv, $args);
+    if (rh_ai_vault_unresolved_in($args)) { // a name cleared at sign-out: ask for it again, never search for "(guest)"
+        return $fail(rh_ai_vault_unresolved_msg());
+    }
     [$ok, $clean] = rh_ai_tool_validate($def['schema'], $args);
     if (!$ok) {
         return $fail('Arguments not valid: ' . $clean);

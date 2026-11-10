@@ -569,7 +569,7 @@ function rh_ai_feedback_save(PDO $db, array $user, int $messageId, int $rating, 
     $conv = (int)$msg['conversation_id'];
     $meta = json_decode((string)$msg['tool_args_json'], true) ?: [];
     $correction = trim(mb_substr($correction, 0, 1000));
-    $tok = $correction !== '' ? rh_ai_scrub_outbound($db, $conv, $correction) : '';
+    $tok = $correction !== '' ? rh_ai_scrub_outbound($db, $conv, $correction, true) : '';
     $prev = $db->prepare("SELECT rating FROM ai_feedback WHERE message_id = ? AND user_id = ?");
     $prev->execute([$messageId, $uid]);
     $old = $prev->fetchColumn();

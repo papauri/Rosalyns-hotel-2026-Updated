@@ -111,7 +111,7 @@ function rh_ai_guided_pack(PDO $db, int $conv, array $g): array
     $kinds = ['guest_name' => 'GUEST', 'room_guest' => 'GUEST', 'guest_email' => 'EMAIL', 'guest_phone' => 'PHONE', 'who' => 'GUEST', 'member' => 'GUEST'];
     foreach ((array)$g['args'] as $k => $v) {
         if (is_string($v) && $v !== '') {
-            $g['args'][$k] = isset($kinds[$k]) ? rh_ai_vault_token($db, $conv, $kinds[$k], $v) : rh_ai_scrub_outbound($db, $conv, $v);
+            $g['args'][$k] = isset($kinds[$k]) ? rh_ai_vault_token($db, $conv, $kinds[$k], $v) : rh_ai_scrub_outbound($db, $conv, $v, true);
         }
     }
     if (!empty($g['offer']['value']) && is_string($g['offer']['value'])) {
@@ -142,8 +142,14 @@ function rh_ai_guided_load(PDO $db, int $conv): ?array
                 return ['expired' => (string)rh_ai_action_registry()[(string)$g['key']]['label'], 'key' => (string)$g['key']];
             }
             $g['args'] = rh_ai_vault_resolve_args($db, $conv, (array)($g['args'] ?? []));
+            foreach ($g['args'] as $k => $v) {
+                if (rh_ai_vault_unresolved_in($v)) {
+                    unset($g['args'][$k]); // cleared at sign-out: that step is asked again
+                }
+            }
             if (!empty($g['offer']['value']) && is_string($g['offer']['value'])) {
-                $g['offer']['value'] = rh_ai_vault_rehydrate($db, $conv, $g['offer']['value']);
+                $g['offer'] = rh_ai_vault_unresolved_in(rh_ai_vault_rehydrate($db, $conv, rh_ai_vault_canon($g['offer']['value'])))
+                    ? null : array_merge($g['offer'], ['value' => rh_ai_vault_show($db, $conv, $g['offer']['value'], 'guided', false)]);
             }
             return $g + ['skip' => [], 'hist' => [], 'step' => '', 'offer' => null];
         }

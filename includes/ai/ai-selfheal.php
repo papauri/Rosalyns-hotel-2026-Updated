@@ -279,22 +279,25 @@ function rh_ai_daily_run(PDO $db, bool $force = false): array
 // ── Vault sweep ──────────────────────────────────────────────────────────────
 
 /**
- * Privacy vault of chats whose owner's session has ended (idle sign-out is 8 hours: no portal activity and no
- * chat activity for 8 hours) is removed, like a sign-out; unconfirmed cards past their time expire; expired
+ * Privacy vault values of chats whose owner's session has ended (idle sign-out is 8 hours: no portal activity and no
+ * chat activity for 8 hours) are cleared, like a sign-out (the empty rows keep their token numbers taken, so a name
+ * later in the same chat never reuses one); unconfirmed cards past their time expire; expired
  * cache rows go. Old chats then show "(guest)" in place of names.
  */
 function rh_ai_vault_sweep(PDO $db): array
 {
     $n = 0;
     try {
-        $st = $db->prepare("DELETE v FROM ai_vault v JOIN ai_conversations c ON c.id = v.conversation_id
+        $st = $db->prepare("UPDATE ai_vault v JOIN ai_conversations c ON c.id = v.conversation_id
                             LEFT JOIN admin_presence p ON p.user_id = c.user_id
-                            WHERE c.updated_at < DATE_SUB(NOW(), INTERVAL 8 HOUR) AND (p.user_id IS NULL OR p.last_seen_at < DATE_SUB(NOW(), INTERVAL 8 HOUR))");
+                            SET v.value_text = '', v.value_hash = ''
+                            WHERE v.value_text <> '' AND c.updated_at < DATE_SUB(NOW(), INTERVAL 8 HOUR) AND (p.user_id IS NULL OR p.last_seen_at < DATE_SUB(NOW(), INTERVAL 8 HOUR))");
         $st->execute();
         $n = $st->rowCount();
     } catch (Throwable $e) {
         try { // no presence table on this install: chat activity alone decides
-            $st = $db->prepare("DELETE v FROM ai_vault v JOIN ai_conversations c ON c.id = v.conversation_id WHERE c.updated_at < DATE_SUB(NOW(), INTERVAL 8 HOUR)");
+            $st = $db->prepare("UPDATE ai_vault v JOIN ai_conversations c ON c.id = v.conversation_id SET v.value_text = '', v.value_hash = ''
+                                WHERE v.value_text <> '' AND c.updated_at < DATE_SUB(NOW(), INTERVAL 8 HOUR)");
             $st->execute();
             $n = $st->rowCount();
         } catch (Throwable $e2) {
@@ -310,7 +313,7 @@ function rh_ai_vault_sweep(PDO $db): array
     } catch (Throwable $e) {
     }
     rh_ai_vault_forget();
-    return ['ok' => true, 'note' => $n . ' privacy value(s) removed from ended sessions, ' . $exp . ' old card(s) expired'];
+    return ['ok' => true, 'note' => $n . ' privacy value(s) cleared from ended sessions, ' . $exp . ' old card(s) expired'];
 }
 
 // ── Model list refresh + upgrade (eval-gated) ────────────────────────────────

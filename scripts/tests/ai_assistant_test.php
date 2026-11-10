@@ -1418,8 +1418,8 @@ if (!$chatReady) {
     // ── Logout purges the vault (rolled back) ──
     $r = run_page('admin/logout.php', ['method' => 'GET', 'setup' => ["INSERT INTO ai_conversations (user_id, title) VALUES (" . (int)$adm4u['id'] . ", 'purge test')",
         "INSERT INTO ai_vault (conversation_id, kind, num, value_text, value_hash) SELECT MAX(id), 'GUEST', 1, 'Purge Me', SHA2('x', 256) FROM ai_conversations WHERE title = 'purge test'"],
-        'verify' => ["SELECT COUNT(*) AS n FROM ai_vault v JOIN ai_conversations c ON c.id = v.conversation_id WHERE c.title = 'purge test'", "SELECT COUNT(*) AS n FROM ai_conversations WHERE title = 'purge test'"]]);
-    check((int)($r['verify'][0][0]['n'] ?? 1) === 0 && (int)($r['verify'][1][0]['n'] ?? 0) === 1 && $clean($r), 'signing out removes the privacy vault of that person\'s chats (the chats stay)', json_encode($r['verify'] ?? $r));
+        'verify' => ["SELECT COUNT(*) AS n FROM ai_vault v JOIN ai_conversations c ON c.id = v.conversation_id WHERE c.title = 'purge test' AND (v.value_text <> '' OR v.value_hash <> '')", "SELECT COUNT(*) AS n FROM ai_conversations WHERE title = 'purge test'"]]);
+    check((int)($r['verify'][0][0]['n'] ?? 1) === 0 && (int)($r['verify'][1][0]['n'] ?? 0) === 1 && $clean($r), 'signing out clears every value in the privacy vault of that person\'s chats (numbers stay taken, the chats stay)', json_encode($r['verify'] ?? $r));
 
     // ── Library: propose / confirm / report (one transaction, rolled back) ──
     $pdo->beginTransaction();
@@ -1579,11 +1579,11 @@ if (!$chatReady) {
         rh_ai_save_settings(['ai_actions_enabled' => '1'], $pdo);
         // Sign-out purge
         rh_ai_signout_purge($pdo, (int)$adm4u['id']);
-        $vc = $pdo->prepare("SELECT COUNT(*) FROM ai_vault v JOIN ai_conversations c ON c.id = v.conversation_id WHERE c.user_id = ?");
+        $vc = $pdo->prepare("SELECT COUNT(*) FROM ai_vault v JOIN ai_conversations c ON c.id = v.conversation_id WHERE c.user_id = ? AND (v.value_text <> '' OR v.value_hash <> '')");
         $vc->execute([(int)$adm4u['id']]);
         $pc2 = $pdo->prepare("SELECT COUNT(*) FROM ai_actions WHERE user_id = ? AND status = 'proposed'");
         $pc2->execute([(int)$adm4u['id']]);
-        check((int)$vc->fetchColumn() === 0 && (int)$pc2->fetchColumn() === 0, 'sign-out purge: vault removed, unconfirmed cards expired');
+        check((int)$vc->fetchColumn() === 0 && (int)$pc2->fetchColumn() === 0, 'sign-out purge: vault values cleared, unconfirmed cards expired');
         check(rh_ai_vault_display('Card for [GUEST_3] ([BK_2])') === 'Card for (guest) ((booking))', 'after sign-out, old chats show plain words for names');
     } finally {
         $pdo->rollBack();

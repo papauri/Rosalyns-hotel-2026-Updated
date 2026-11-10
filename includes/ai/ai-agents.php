@@ -2362,8 +2362,11 @@ function rh_ai_briefing(PDO $db, array $user, bool $auto): array
         rh_ai_mark_briefed($db, $uid);
     }
     rh_ai_step_set($db, $uid, '');
-    return ['ok' => true, 'shown' => true, 'conversation_id' => $conv, 'message_id' => $msgId, 'reply' => rh_ai_vault_show($db, $conv, $b['text'], 'briefing'),
-        'items' => rh_ai_items_rehydrate($db, $conv, $b['items']), 'chips' => $b['chips'], 'route' => 'briefing',
+    $shownReply = rh_ai_vault_show($db, $conv, $b['text'], 'briefing');
+    $shownItems = rh_ai_items_rehydrate($db, $conv, $b['items']);
+    rh_ai_vault_show_flush(); // one incident for the whole briefing
+    return ['ok' => true, 'shown' => true, 'conversation_id' => $conv, 'message_id' => $msgId, 'reply' => $shownReply,
+        'items' => $shownItems, 'chips' => $b['chips'], 'route' => 'briefing',
         'usage' => ['tokens_in' => $b['tokens_in'], 'tokens_out' => $b['tokens_out'], 'cost_usd' => $b['cost']], 'error' => ''];
 }
 
@@ -2985,7 +2988,7 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
     $out['conversation_id'] = $conv;
     rh_ai_step_set($db, $uid, 'Reading your question...');
 
-    $tok = rh_ai_scrub_outbound($db, $conv, $message);
+    $tok = rh_ai_scrub_outbound($db, $conv, $message, true); // typed: a known name in lower case is tokenised too
     $userMsgId = rh_ai_message_add($db, $conv, 'user', $tok, ['args' => ['page' => $page, 'booking_id' => $bookingId]]);
     if ($new) {
         $db->prepare("UPDATE ai_conversations SET title = ? WHERE id = ?")->execute([rh_ai_title_from($tok), $conv]);
@@ -3071,6 +3074,7 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
         $out['chips'] = array_map(static fn($c) => rh_ai_vault_show($db, $conv, (string)$c, 'chip:' . $route), $chips); // tap answers may name a guest (shown locally)
         $out['items'] = $items ? rh_ai_items_rehydrate($db, $conv, $items) : [];
         $out['cards'] = $cards ? rh_ai_cards_for($db, $conv, $cards) : [];
+        rh_ai_vault_show_flush(); // any token with no value in this reply: one incident (kinds and counts together)
         $out['tokens_in'] = (int)($extra['tokens_in'] ?? 0);
         $out['tokens_out'] = (int)($extra['tokens_out'] ?? 0);
         $out['cost_usd'] = (float)($extra['cost'] ?? 0);

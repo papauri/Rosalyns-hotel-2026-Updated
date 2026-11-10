@@ -103,7 +103,7 @@ try {
             $st->execute([$uid]);
             $list = [];
             foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $c) {
-                $title = rh_ai_vault_display(rh_ai_vault_rehydrate($pdo, (int)$c['id'], (string)$c['title']));
+                $title = rh_ai_vault_show($pdo, (int)$c['id'], (string)$c['title'], 'title', false); // a cleared name: "(guest)"
                 $list[] = ['id' => (int)$c['id'], 'title' => $title !== '' ? $title : 'New chat', 'updated_at' => (string)$c['updated_at']];
             }
             rh_ai_api_out(200, ['success' => true, 'conversations' => $list]);
@@ -124,7 +124,7 @@ try {
                 rh_ai_api_out(200, ['success' => false, 'error' => 'That conversation was not found.']);
             }
             $pdo->prepare("UPDATE ai_conversations SET title = ? WHERE id = ? AND user_id = ?")
-                ->execute([rh_ai_title_from(rh_ai_scrub_outbound($pdo, $conv, mb_substr($title, 0, 80))), $conv, $uid]);
+                ->execute([rh_ai_title_from(rh_ai_scrub_outbound($pdo, $conv, mb_substr($title, 0, 80), true)), $conv, $uid]);
             rh_ai_api_out(200, ['success' => true]);
             break;
 
