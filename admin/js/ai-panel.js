@@ -260,33 +260,78 @@
         if (text !== undefined && text !== null && text !== '') { e.textContent = String(text); }
         return e;
     }
-    // The briefing as a document: one row per point (figure | title, cause, lines, source, link). Text only, no HTML.
+    // A two-line reason gets More only when it is really cut short. Measured when it is on screen and again
+    // whenever its width changes (panel dragged, phone turned, panel opened); while it cannot be measured
+    // (panel closed) a long reason gets More anyway, so nothing is ever out of reach.
+    var briefSeq = 0, briefWatch = null;
+    function fitDetail(d) {
+        var more = d.rhAiMore;
+        if (!more) { return; }
+        if (d.classList.contains('is-open')) { more.hidden = false; return; }
+        if (!d.isConnected || !d.clientHeight) { more.hidden = d.textContent.length < 80; return; }
+        more.hidden = d.scrollHeight <= d.clientHeight + 1;
+    }
+    function watchDetail(d) {
+        var raf = window.requestAnimationFrame || function (f) { return setTimeout(f, 16); };
+        raf(function () { fitDetail(d); });
+        if (!window.ResizeObserver) { return; }
+        if (!briefWatch) {
+            briefWatch = new ResizeObserver(function (entries) {
+                entries.forEach(function (en) {
+                    if (!en.target.isConnected) { briefWatch.unobserve(en.target); return; }
+                    fitDetail(en.target);
+                });
+            });
+        }
+        briefWatch.observe(d);
+    }
+    // The briefing as a document: one stacked row per point (figure, title, reason, lines, source + link). Text only, no HTML.
     function briefing(items) {
         var box = el('div', 'rh-ai-brief');
         box.setAttribute('role', 'list');
         items.forEach(function (it) {
             var row = el('div', 'rh-ai-brief__item' + (it.kind === 'money' ? ' rh-ai-brief__item--money' : ''));
             row.setAttribute('role', 'listitem');
-            row.appendChild(el('div', 'rh-ai-brief__figure', it.figure || ''));
+            if (it.figure !== undefined && it.figure !== null && String(it.figure) !== '') { row.appendChild(el('div', 'rh-ai-brief__figure', it.figure)); }
             row.appendChild(el('p', 'rh-ai-brief__title', it.title || ''));
-            row.appendChild(el('p', 'rh-ai-brief__detail', it.detail || ''));
+            if (it.detail) {
+                var d = el('p', 'rh-ai-brief__detail', it.detail);
+                d.id = 'rhAiBrief' + (++briefSeq);
+                row.appendChild(d);
+                var more = el('button', 'rh-ai-brief__more', 'More');
+                more.type = 'button';
+                more.hidden = true;
+                more.setAttribute('aria-expanded', 'false');
+                more.setAttribute('aria-controls', d.id);
+                d.rhAiMore = more;
+                (function (d, more) {
+                    more.addEventListener('click', function () {
+                        var open = d.classList.toggle('is-open');
+                        more.textContent = open ? 'Less' : 'More';
+                        more.setAttribute('aria-expanded', open ? 'true' : 'false');
+                    });
+                })(d, more);
+                row.appendChild(more); // right under its reason
+                watchDetail(d);
+            }
             if (it.lines && it.lines.length) {
                 var ul = el('ul', 'rh-ai-brief__lines');
                 it.lines.forEach(function (l, i) {
-                    var li = el('li', '', l);
+                    var li = el('li');
+                    li.appendChild(el('span', 'rh-ai-brief__line', l));
                     var act = it.acts && it.acts[i];
                     if (act && act.key && act.booking_id) {
                         var tap = el('button', 'rh-ai-brief__act', act.label || 'Prepare');
                         tap.type = 'button';
                         tap.addEventListener('click', function () { prepare(act, tap, row); });
-                        li.appendChild(document.createTextNode(' '));
                         li.appendChild(tap);
                     }
                     ul.appendChild(li);
                 });
                 row.appendChild(ul);
             }
-            if (it.source) { row.appendChild(el('p', 'rh-ai-brief__source', it.source)); }
+            var foot = el('div', 'rh-ai-brief__foot');
+            if (it.source) { foot.appendChild(el('p', 'rh-ai-brief__source', it.source)); }
             var s = it.link && safeUrl(it.link.url);
             if (s && !s.guide) {
                 var a = el('a', 'btn btn-secondary btn-sm rh-ai-brief__link');
@@ -295,8 +340,9 @@
                 i.setAttribute('aria-hidden', 'true');
                 a.appendChild(i);
                 a.appendChild(document.createTextNode(' ' + String(it.link.label || 'Open')));
-                row.appendChild(a);
+                foot.appendChild(a);
             }
+            if (foot.childNodes.length) { row.appendChild(foot); }
             box.appendChild(row);
         });
         return box;

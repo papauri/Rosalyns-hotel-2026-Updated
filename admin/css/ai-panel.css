@@ -329,31 +329,31 @@ html.rh-ai-is-open .rh-ai-launch {
     color: var(--admin-muted, #5E554D);
 }
 
-/* The briefing: set out like a short document - headline figure, what it is, why, where from, one link. */
+/* The briefing: set out like a short document - one point per row, stacked (the panel is never wide):
+   the figure, the question, a two-line reason (More opens the rest), then where from + one link on one row. */
 .rh-ai-brief {
     display: flex;
     flex-direction: column;
-    margin-top: 12px;
+    margin-top: 10px;
     border-top: 1px solid var(--admin-surface-border, #e5e7eb);
 }
 
 .rh-ai-brief__item {
-    display: grid;
-    grid-template-columns: minmax(84px, auto) minmax(0, 1fr);
-    column-gap: 14px;
-    row-gap: 4px;
-    padding: 14px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    padding: 10px 0;
     border-bottom: 1px solid var(--admin-surface-border, #e5e7eb);
 }
 
 .rh-ai-brief__figure {
-    grid-row: span 2;
-    font-size: 1.15rem;
+    font-size: 1rem;
     font-weight: 700;
-    line-height: 1.2;
+    line-height: 1.25;
     color: var(--admin-text, #1f2a37);
     font-variant-numeric: tabular-nums;
-    word-break: break-word;
+    white-space: nowrap;
 }
 
 .rh-ai-brief__item--money .rh-ai-brief__figure {
@@ -363,7 +363,8 @@ html.rh-ai-is-open .rh-ai-launch {
 .rh-ai-brief__title {
     margin: 0;
     font-size: 0.92rem;
-    font-weight: 700;
+    font-weight: 600;
+    line-height: 1.35;
     color: var(--admin-text, #1f2a37);
 }
 
@@ -371,36 +372,119 @@ html.rh-ai-is-open .rh-ai-launch {
 .rh-ai-brief__source {
     margin: 0;
     font-size: 0.85rem;
+    line-height: 1.45;
     color: var(--admin-muted, #5E554D);
 }
 
-.rh-ai-brief__lines {
-    grid-column: 2;
-    margin: 4px 0 0;
-    padding-left: 16px;
+/* Two lines of the reason; the rest stays in the page (screen readers read it all) and More shows it. */
+.rh-ai-brief__detail {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+}
+
+.rh-ai-brief__detail.is-open {
+    display: block;
+    -webkit-line-clamp: unset;
+    line-clamp: none;
+    overflow: visible;
+}
+
+/* The reply's own paragraph spacing does not apply inside a point; the gap above spaces it. */
+.rh-ai-brief__item > p,
+.rh-ai-brief__foot > p {
+    margin: 0;
+}
+
+/* One line per guest/room: its text on the left, its Prepare button on the right at natural width. */
+.rh-ai-brief__item > .rh-ai-brief__lines {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 4px 0 2px;
+    padding: 0;
+    list-style: none;
     font-size: 0.85rem;
+    line-height: 1.4;
     color: var(--admin-text, #1f2a37);
 }
 
+.rh-ai-brief__item > .rh-ai-brief__lines li {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 4px 8px;
+    padding-left: 10px;
+    border-left: 2px solid var(--admin-surface-border, #e5e7eb);
+}
+
+/* The line's text keeps at least about 12 characters' room; below that its button drops under it, on the right. */
+.rh-ai-brief__line {
+    flex: 1 1 12em;
+    min-width: 0;
+}
+
+/* Where from and the link share one row; the link drops to its own row only when there is no room. */
+.rh-ai-brief__foot {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px 10px;
+    margin-top: 3px;
+}
+
 .rh-ai-brief__source {
-    grid-column: 2;
+    flex: 1 1 auto;
+    min-width: 0;
     font-size: 0.78rem;
 }
 
+.rh-ai-brief__more {
+    flex: 0 0 auto;
+    align-self: flex-start;
+    min-height: 28px;
+    padding: 0;
+    border: 0;
+    background: none;
+    color: var(--admin-accent, #766550);
+    font: inherit;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    cursor: pointer;
+}
+
+.rh-ai-brief__more[hidden] {
+    display: none;
+}
+
 .rh-ai-brief__link {
-    grid-column: 2;
-    justify-self: start;
-    min-height: 44px;
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    margin-top: 4px;
+    white-space: nowrap;
 }
 
-@media (max-width: 480px) {
-    .rh-ai-brief__item { grid-template-columns: 1fr; }
-    .rh-ai-brief__figure { grid-row: auto; }
-    .rh-ai-brief__lines, .rh-ai-brief__source, .rh-ai-brief__link { grid-column: 1; }
+.rh-ai-brief .rh-ai-brief__link.btn {
+    min-height: 36px;
+}
+
+@media (max-width: 1024px), (pointer: coarse) {
+    .rh-ai-brief .rh-ai-brief__link.btn,
+    .rh-ai-brief__more,
+    .rh-ai-brief .rh-ai-brief__act {
+        min-height: 44px;
+    }
+    /* A full 44 x 44px to tap; the label stays on the left, in line with the reason above it. */
+    .rh-ai-brief__more {
+        min-width: 44px;
+        padding-right: 8px;
+        text-align: left;
+    }
 }
 
 /* Suggestions: placed at the end of the conversation by ai-panel.js, so they scroll with the messages. */
@@ -876,10 +960,13 @@ html.rh-ai-resizing .rh-ai-resize {
     flex: 1 1 120px;
 }
 
+/* A line's one-tap fix: sits after the line's text at its natural width (44px tall on touch screens). */
 .rh-ai-brief__act {
-    min-height: 44px;
-    margin: 4px 0 0;
-    padding: 0 12px;
+    flex: 0 0 auto;
+    min-height: 32px;
+    margin: 0 0 0 auto;
+    padding: 0 10px;
+    white-space: nowrap;
     border: 1px solid var(--admin-surface-border, #e5e7eb);
     border-radius: var(--admin-radius, 8px);
     background: var(--admin-surface, #fff);
