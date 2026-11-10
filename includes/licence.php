@@ -607,7 +607,9 @@ if (!function_exists('rh_licence_env')) {
         try {
             $pdoDone = $GLOBALS['pdo'] ?? null;
             if ($pdoDone instanceof PDO) {
-                $req['staff_done_id'] = max(0, (int)rh_licence_settings_fresh($pdoDone, ['licence_staff_done_id'])['licence_staff_done_id']);
+                $sf = rh_licence_settings_fresh($pdoDone, ['licence_staff_done_id', 'licence_staff_error']);
+                $req['staff_done_id'] = max(0, (int)$sf['licence_staff_done_id']);
+                $req['staff_error'] = mb_substr($sf['licence_staff_error'], 0, 240); // why the staff step last stopped ('' = fine)
             }
         } catch (Throwable $e) { /* the panel then sends what it has not seen confirmed */ }
         $body = json_encode($req, JSON_UNESCAPED_SLASHES);

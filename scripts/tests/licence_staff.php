@@ -73,6 +73,10 @@ for ($i = 1; $i <= 60; $i++) { $many[] = ['id' => $i, 'ok' => true, 'message' =>
 eq(50, count(rh_licence_staff_merge_results([], $many)), 'at most 50 kept');
 eq(11, rh_licence_staff_merge_results([], $many)[0]['id'], 'the newest are kept');
 
+eq(['grants' => ['reports'], 'denies' => ['bookings']], rh_licence_staff_own_changes(['dashboard' => true, 'bookings' => false, 'reports' => true], ['dashboard', 'bookings']),
+    'own changes: only what differs from the role (a row per permission from the Users page shrinks to the real changes)');
+eq(['grants' => [], 'denies' => []], rh_licence_staff_own_changes(['dashboard' => true, 'reports' => false], ['dashboard']), 'rows equal to the role set are no change');
+
 // ---- 3. the files
 $src = static fn(string $f): string => (string)file_get_contents($root . '/' . $f);
 check(strpos($src('admin/admin-init.php'), "rh_module_licence_allows((string)\$_requiredModuleKey)") !== false, 'page gate: administrators follow the licence');

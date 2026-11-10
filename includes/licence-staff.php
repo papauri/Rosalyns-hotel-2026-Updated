@@ -18,7 +18,8 @@
  * Every change is written to the activity log as "by the system provider (licence panel)".
  *
  * Settings rows used (site_settings, no new tables): licence_staff_done_id, licence_staff_results (JSON, results not yet
- * confirmed by the panel), licence_staff_sent_hash / licence_staff_sent_at (last report), licence_staff_list_seen.
+ * confirmed by the panel), licence_staff_sent_hash / licence_staff_sent_at (last report), licence_staff_list_seen,
+ * licence_staff_error (why the last run did not finish, '' when it did; sent with the next check-in so the panel can show it).
  *
  * Nothing here throws to the caller, and nothing here can affect the licence status itself.
  */
@@ -88,7 +89,8 @@ if (!function_exists('rh_licence_staff_run')) {
 
     function rh_licence_staff_setting_keys(): array
     {
-        return ['licence_staff_done_id', 'licence_staff_results', 'licence_staff_sent_hash', 'licence_staff_sent_at', 'licence_staff_list_seen'];
+        return ['licence_staff_done_id', 'licence_staff_results', 'licence_staff_sent_hash', 'licence_staff_sent_at', 'licence_staff_list_seen',
+            'licence_staff_error'];
     }
 
     function rh_licence_staff_set(PDO $pdo, string $key, string $value): void
@@ -301,21 +303,43 @@ if (!function_exists('rh_licence_staff_run')) {
 
     // ------------------------------------------------------------------ the report
 
+    /**
+     * Each person's own permission changes, reduced to what differs from their role's usual set (the Users page stores a row
+     * for every permission, which would make the report needlessly large). Pure. @return array{grants:string[],denies:string[]}
+     */
+    function rh_licence_staff_own_changes(array $explicit, array $roleDefaults): array
+    {
+        $grants = [];
+        $denies = [];
+        foreach ($explicit as $key => $on) {
+            $inRole = in_array($key, $roleDefaults, true);
+            if ($on && !$inRole) {
+                $grants[] = (string)$key;
+            } elseif (!$on && $inRole) {
+                $denies[] = (string)$key;
+            }
+        }
+        return ['grants' => $grants, 'denies' => $denies];
+    }
+
     /** @return array{0:array,1:array} [staff list, roles and permissions] */
     function rh_licence_staff_snapshot(PDO $pdo): array
     {
         $own = [];
         try {
             foreach ($pdo->query('SELECT user_id, permission_key, is_granted FROM user_permissions')->fetchAll(PDO::FETCH_ASSOC) as $r) {
-                $own[(int)$r['user_id']][(int)$r['is_granted'] === 1 ? 'grants' : 'denies'][] = (string)$r['permission_key'];
+                $own[(int)$r['user_id']][(string)$r['permission_key']] = (int)$r['is_granted'] === 1;
             }
         } catch (Throwable $e) { /* no table: nobody has their own changes */ }
         $staff = [];
         foreach ($pdo->query('SELECT id, username, email, full_name, role, is_active, last_login FROM admin_users ORDER BY id')->fetchAll(PDO::FETCH_ASSOC) as $u) {
             $id = (int)$u['id'];
+            $role = (string)$u['role'];
+            $ch = ($role === 'admin' || empty($own[$id])) ? ['grants' => [], 'denies' => []]
+                : rh_licence_staff_own_changes($own[$id], array_values(getDefaultPermissionsForRole($role)));
             $staff[] = ['id' => $id, 'username' => (string)$u['username'], 'email' => (string)$u['email'], 'full_name' => (string)$u['full_name'],
-                'role' => (string)$u['role'], 'is_active' => (int)$u['is_active'], 'last_login' => $u['last_login'] !== null ? (string)$u['last_login'] : null,
-                'grants' => $own[$id]['grants'] ?? [], 'denies' => $own[$id]['denies'] ?? []];
+                'role' => $role, 'is_active' => (int)$u['is_active'], 'last_login' => $u['last_login'] !== null ? (string)$u['last_login'] : null,
+                'grants' => $ch['grants'], 'denies' => $ch['denies']];
         }
         $roles = [];
         foreach (getAllRoles() as $k => $r) {
@@ -351,7 +375,8 @@ if (!function_exists('rh_licence_staff_run')) {
             $st = rh_licence_status(true);
             $payload = is_array($st['payload'] ?? null) && ($st['reason'] ?? '') === 'ok' ? $st['payload'] : null;
             if ($payload === null) {
-                return $out; // no verified answer: nothing to run, nothing to report
+                $out['error'] = 'No verified licence answer (' . (string)($st['reason'] ?? '?') . ').';
+                return $out; // nothing to run, nothing to report
             }
             if (!function_exists('getAllRoles')) {
                 require_once dirname(__DIR__) . '/admin/includes/permissions.php';
@@ -389,7 +414,7 @@ if (!function_exists('rh_licence_staff_run')) {
             $cfg = rh_licence_config();
             $url = rh_licence_staff_report_url($cfg['url']);
             if ($url === '' || $cfg['key'] === '') {
-                $out['error'] = 'No report address.';
+                $out['error'] = $url === '' ? 'No report address: LICENCE_URL does not end in /licence.php.' : 'No licence key.';
                 return $out;
             }
             $body = json_encode(['tenant' => $cfg['tenant'], 'domain' => rh_licence_site_domain(), 'key' => $cfg['key'],
@@ -397,7 +422,9 @@ if (!function_exists('rh_licence_staff_run')) {
             $http = rh_licence_http_post($url, (string)$body, $timeout);
             $ans = json_decode($http['body'], true);
             if ($http['error'] !== '' || $http['code'] !== 200 || !is_array($ans) || ($ans['ok'] ?? null) !== true) {
-                $out['error'] = 'The staff report was not accepted (HTTP ' . $http['code'] . ').';
+                $code = is_array($ans) && is_string($ans['error'] ?? null) && preg_match('/^[a-z_]{1,30}$/', $ans['error']) ? ' ' . $ans['error'] : '';
+                $out['error'] = 'The staff report was not accepted (HTTP ' . $http['code'] . $code . ', ' . strlen((string)$body) . ' bytes'
+                    . ($http['error'] !== '' ? ', ' . $http['error'] : '') . ').';
                 return $out; // results stay kept and go with the next report
             }
             $acked = array_values(array_filter(is_array($ans['acked'] ?? null) ? $ans['acked'] : [], 'is_int'));
@@ -409,10 +436,13 @@ if (!function_exists('rh_licence_staff_run')) {
             return $out;
         } catch (Throwable $e) {
             error_log('licence staff: ' . $e->getMessage());
-            $out['error'] = 'The staff step failed unexpectedly.';
+            $out['error'] = 'The staff step failed: ' . get_class($e) . ' ' . mb_substr($e->getMessage(), 0, 150);
             return $out;
         } finally {
             if ($locked) {
+                try {
+                    rh_licence_staff_set($pdo, 'licence_staff_error', mb_substr($out['error'], 0, 240));
+                } catch (Throwable $e) { /* best effort */ }
                 try { $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote($lockName) . ')')->fetchColumn(); } catch (Throwable $e) { /* released at disconnect */ }
             }
         }
