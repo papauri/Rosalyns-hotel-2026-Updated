@@ -42,6 +42,12 @@ if (!function_exists('rh_staff_invite_send')) {
      */
     function rh_staff_invite_url(string $token): string
     {
+        // An invitation made for the licence panel (includes/licence-staff.php) runs in an unauthenticated request
+        // (the panel's nudge), so its Host header proves nothing: it sets the site's own address here instead.
+        $forced = (string)($GLOBALS['rh_staff_invite_base_url'] ?? '');
+        if ($forced !== '') {
+            return rtrim($forced, '/') . '/admin/reset-password.php?token=' . $token;
+        }
         $base = '';
         $host = (string)($_SERVER['HTTP_HOST'] ?? '');
         if (PHP_SAPI !== 'cli' && $host !== '' && preg_match('/^[a-z0-9.-]+(:\d{1,5})?$/i', $host)

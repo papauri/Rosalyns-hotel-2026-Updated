@@ -32,4 +32,10 @@ if (!empty($st['dates']['paid_until'])) {
 if ($r['error'] !== '') {
     echo 'problem: ' . $r['error'] . "\n";
 }
+if ($r['ok']) {
+    // Staff changes sent by the panel, then the staff report (includes/licence-staff.php). Prints counts only.
+    require_once __DIR__ . '/../includes/licence-staff.php';
+    $s = rh_licence_staff_run();
+    echo 'staff changes run: ' . $s['ran'] . ($s['failed'] > 0 ? ' (' . $s['failed'] . ' refused)' : '') . ', report ' . ($s['reported'] ? 'sent' : 'not needed') . ($s['error'] !== '' ? ' - ' . $s['error'] : '') . "\n";
+}
 exit($r['ok'] ? 0 : 1);

@@ -103,12 +103,16 @@ if ($_required_permission !== null && !hasPermission($user['id'], $_required_per
 // A page may be permission-granted (e.g. via role defaults) yet still belong
 // to a module the installation has disabled (e.g. "bookings" on a Bar/Restaurant
 // preset). Block direct navigation to such pages, not just hide their nav link.
+// Administrators pass a module switched off here, never one the hotel's licence leaves out (owner 2026-11-10).
 $_required_module = getModuleForPage($current_page);
-if ($_required_module !== null && ($user['role'] ?? '') !== 'admin') {
+if ($_required_module !== null) {
     $_requiredModuleKeys = is_array($_required_module) ? $_required_module : [$_required_module];
     $_moduleAccessOk = true;
     foreach ($_requiredModuleKeys as $_requiredModuleKey) {
-        if (!rh_module_key_enabled((string)$_requiredModuleKey)) {
+        $_moduleOn = ($user['role'] ?? '') === 'admin'
+            ? rh_module_licence_allows((string)$_requiredModuleKey)
+            : rh_module_key_enabled((string)$_requiredModuleKey);
+        if (!$_moduleOn) {
             $_moduleAccessOk = false;
             break;
         }

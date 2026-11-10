@@ -1282,9 +1282,9 @@ if (!function_exists('moduleEnabled')) {
             }
         }
 
-        // Table doesn't exist — fail open so nothing breaks
+        // Table doesn't exist — fail open so nothing breaks (the licence still applies)
         if (!$tableExists) {
-            return true;
+            return rh_module_licence_allows($module);
         }
 
         // Load all modules into cache on first real call
@@ -1301,8 +1301,30 @@ if (!function_exists('moduleEnabled')) {
             }
         }
 
-        // Unknown module keys default to enabled
-        return $cache[$module] ?? true;
+        // Unknown module keys default to enabled. The licence is the ceiling (owner 2026-11-10): for a signed-in staff
+        // member a module the hotel's licence does not include is off, whatever the switch above says.
+        return ($cache[$module] ?? true) && rh_module_licence_allows($module);
+    }
+}
+
+if (!function_exists('rh_module_licence_allows')) {
+    /**
+     * May the licence use this module (includes/licence.php rh_licence_module_allowed)? Only for a signed-in staff request:
+     * the guest website and command-line jobs are never limited by the licence. Fails open.
+     */
+    function rh_module_licence_allows(string $module): bool
+    {
+        if (PHP_SAPI === 'cli' || !isset($_SESSION) || !is_array($_SESSION) || empty($_SESSION['admin_user_id'])) {
+            return true;
+        }
+        if (!function_exists('rh_licence_module_allowed')) {
+            $f = __DIR__ . '/../includes/licence.php';
+            if (!is_file($f)) {
+                return true;
+            }
+            require_once $f;
+        }
+        return rh_licence_module_allowed($module);
     }
 }
 

@@ -35,6 +35,15 @@
  * not a trial). The status itself never changes for a trial (the panel sets paid_until = trial_until and the after-trial
  * grace / read-only days); only the staff wording does (includes/licence-guard.php).
  *
+ * Modules (owner 2026-11-10): the licence is the ceiling. For a signed-in staff member a module the verified licence does
+ * not list is off, whatever the local Modules switch says, administrators included (rh_licence_module_allowed, used by
+ * moduleEnabled() in config/database.php and the admin page / API gates). No verified licence, or one that lists no
+ * modules (none stated, or an empty list) = nothing is limited. finance is always on. The guest website and command-line
+ * jobs are never limited.
+ *
+ * Staff (owner 2026-11-10): the panel can add, deactivate, reactivate, change the role or permissions of staff, and send
+ * invitations, carried in its signed answer. includes/licence-staff.php runs them after the reply and reports back.
+ *
  * Enforcement lives in includes/licence-guard.php. Nothing here throws to the caller.
  */
 
@@ -294,6 +303,60 @@ if (!function_exists('rh_licence_env')) {
         return ['trial' => is_array($payload) && ($payload['trial'] ?? null) === true && $until !== null, 'trial_until' => $until];
     }
 
+    /** Module keys the licence controls (the panel's list). Other switches (restaurant_page, events, billing...) never are. */
+    function rh_licence_module_keys(): array
+    {
+        return ['bookings', 'housekeeping', 'pos', 'stock', 'conference', 'gym', 'finance', 'website_cms',
+            'station_kds', 'station_bds', 'station_cds', 'station_room_service', 'ai_assistant'];
+    }
+
+    /** Pure: may a module be used under this licensed list? null or an empty list = nothing is limited (a slip on the panel
+     * must never switch a whole hotel off). finance always. */
+    function rh_licence_module_in(?array $licensed, string $key): bool
+    {
+        if ($licensed === null || $licensed === [] || $key === 'finance' || !in_array($key, rh_licence_module_keys(), true)) {
+            return true;
+        }
+        return in_array($key, $licensed, true);
+    }
+
+    /** The verified licence's answer for a module (fails open: no licence, no answer or any fault = allowed). */
+    function rh_licence_module_allowed(string $key): bool
+    {
+        try {
+            if (!in_array($key, rh_licence_module_keys(), true) || !rh_licence_enabled()) {
+                return true;
+            }
+            $st = rh_licence_status();
+            return rh_licence_module_in(is_array($st['modules'] ?? null) ? $st['modules'] : null, $key);
+        } catch (Throwable $e) {
+            return true;
+        }
+    }
+
+    /** A lock name for this database only (two hotels on one MySQL server must not skip each other's checks). */
+    function rh_licence_lock_name(PDO $pdo, string $base): string
+    {
+        try {
+            $db = (string)$pdo->query('SELECT DATABASE()')->fetchColumn();
+        } catch (Throwable $e) {
+            $db = '';
+        }
+        return $base . '_' . substr(sha1($db), 0, 16);
+    }
+
+    /** Staff changes from the panel and the staff report (includes/licence-staff.php). Only where nobody waits, and only
+     * straight after a check-in that succeeded (so a change the owner cancelled meanwhile never runs from an older answer). */
+    function rh_licence_staff_after_check(): void
+    {
+        try {
+            require_once __DIR__ . '/licence-staff.php';
+            rh_licence_staff_run();
+        } catch (Throwable $e) {
+            error_log('licence staff after check: ' . $e->getMessage());
+        }
+    }
+
     function rh_licence_reason_words(string $reason): string
     {
         $map = [
@@ -470,7 +533,7 @@ if (!function_exists('rh_licence_env')) {
             }
             // One check at a time (several staff tabs, an outage): the panel limits answers per hour.
             try {
-                $locked = (int)$pdo->query("SELECT GET_LOCK('rh_licence_check', 0)")->fetchColumn() === 1;
+                $locked = (int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote(rh_licence_lock_name($pdo, 'rh_licence_check')) . ', 0)')->fetchColumn() === 1;
             } catch (Throwable $e) {
                 $locked = false;
             }
@@ -512,7 +575,7 @@ if (!function_exists('rh_licence_env')) {
             return $res;
         } finally {
             if ($locked && $pdo instanceof PDO) {
-                try { $pdo->query("SELECT RELEASE_LOCK('rh_licence_check')")->fetchColumn(); } catch (Throwable $e) { /* released at disconnect */ }
+                try { $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote(rh_licence_lock_name($pdo, 'rh_licence_check')) . ')')->fetchColumn(); } catch (Throwable $e) { /* released at disconnect */ }
             }
         }
     }
@@ -540,6 +603,13 @@ if (!function_exists('rh_licence_env')) {
         if ($backup) {
             $req['backup'] = $backup;
         }
+        // The last staff change run here (includes/licence-staff.php): the panel then sends only newer ones.
+        try {
+            $pdoDone = $GLOBALS['pdo'] ?? null;
+            if ($pdoDone instanceof PDO) {
+                $req['staff_done_id'] = max(0, (int)rh_licence_settings_fresh($pdoDone, ['licence_staff_done_id'])['licence_staff_done_id']);
+            }
+        } catch (Throwable $e) { /* the panel then sends what it has not seen confirmed */ }
         $body = json_encode($req, JSON_UNESCAPED_SLASHES);
         $http = rh_licence_http_post($cfg['url'], (string)$body, $timeout);
         if ($http['error'] !== '') {
@@ -701,7 +771,7 @@ if (!function_exists('rh_licence_env')) {
                 return $res;
             }
             try {
-                $locked = (int)$pdo->query("SELECT GET_LOCK('rh_licence_check', 0)")->fetchColumn() === 1;
+                $locked = (int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote(rh_licence_lock_name($pdo, 'rh_licence_check')) . ', 0)')->fetchColumn() === 1;
             } catch (Throwable $e) {
                 $locked = false;
             }
@@ -733,7 +803,7 @@ if (!function_exists('rh_licence_env')) {
             return $res;
         } finally {
             if ($locked && $pdo instanceof PDO) {
-                try { $pdo->query("SELECT RELEASE_LOCK('rh_licence_check')")->fetchColumn(); } catch (Throwable $e) { /* released at disconnect */ }
+                try { $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote(rh_licence_lock_name($pdo, 'rh_licence_check')) . ')')->fetchColumn(); } catch (Throwable $e) { /* released at disconnect */ }
             }
         }
     }
@@ -799,7 +869,10 @@ if (!function_exists('rh_licence_env')) {
                         @flush();
                     }
                     // Not truly detached (some hosts): keep the wait short so the visitor is not held for long.
-                    rh_licence_check_now(true, $detached ? 6 : 3);
+                    $chk = rh_licence_check_now(true, $detached ? 6 : 3);
+                    if ($detached && !empty($chk['ok'])) {
+                        rh_licence_staff_after_check(); // staff changes from the panel, then the staff report
+                    }
                     if ($detached) {
                         rh_licence_backup_if_requested(); // a backup only where the visitor is truly not waiting
                     }
@@ -845,7 +918,10 @@ if (!function_exists('rh_licence_env')) {
                         }
                         @flush();
                     }
-                    rh_licence_check_now(false, 6);
+                    $chk = rh_licence_check_now(false, 6);
+                    if (!empty($chk['ok'])) {
+                        rh_licence_staff_after_check();
+                    }
                     rh_licence_backup_if_requested();
                 } catch (Throwable $e) {
                     error_log('licence nudge: ' . $e->getMessage());

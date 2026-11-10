@@ -511,6 +511,56 @@ if (!function_exists('rh_licence_guard_request')) {
         exit;
     }
 
+    // ------------------------------------------------------------------ staff accounts
+
+    /**
+     * Owner 2026-11-10: a person deactivated (on the Users page or from the licence panel) or removed is signed out on their
+     * very next request, on pages, admin APIs and station screens alike; a role change counts at once (the role kept in the
+     * session at sign-in is refreshed). Runs whether or not licensing is on. One small query; any fault lets the request on.
+     */
+    function rh_staff_session_guard(): void
+    {
+        if (PHP_SAPI === 'cli' || empty($_SESSION['admin_user_id'])) {
+            return;
+        }
+        $pdo = $GLOBALS['pdo'] ?? null;
+        if (!($pdo instanceof PDO)) {
+            return;
+        }
+        try {
+            $st = $pdo->prepare('SELECT is_active, role FROM admin_users WHERE id = ?');
+            $st->execute([(int)$_SESSION['admin_user_id']]);
+            $row = $st->fetch(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            return;
+        }
+        if ($row && (int)$row['is_active'] === 1) {
+            $role = (string)$row['role'];
+            if ($role !== (string)($_SESSION['admin_role'] ?? '')) {
+                $_SESSION['admin_role'] = $role;
+                if (isset($GLOBALS['user']) && is_array($GLOBALS['user'])) {
+                    $GLOBALS['user']['role'] = $role;
+                }
+            }
+            return;
+        }
+        $_SESSION = [];
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            @session_regenerate_id(true);
+        }
+        [$area] = rh_licence_request_target();
+        if ($area === 'admin' && rh_licence_wants_html() && !headers_sent()) {
+            header('Location: login.php?error=account_disabled');
+            exit;
+        }
+        if (!headers_sent()) {
+            http_response_code(401);
+            header('Content-Type: application/json');
+        }
+        echo json_encode(['success' => false, 'error' => 'Your account has been deactivated.']);
+        exit;
+    }
+
     // ------------------------------------------------------------------ the one call
 
     /**
@@ -520,6 +570,7 @@ if (!function_exists('rh_licence_guard_request')) {
      */
     function rh_licence_guard_request(): void
     {
+        rh_staff_session_guard(); // first, and whether or not licensing is on
         if (PHP_SAPI === 'cli' || !rh_licence_enabled()) {
             return;
         }

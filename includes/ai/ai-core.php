@@ -113,6 +113,9 @@ function rh_ai_enabled(?PDO $db = null): bool
     if ($row['module_on'] === null || (string)$row['module_on'] !== '1') {
         return false;
     }
+    if (function_exists('rh_module_licence_allows') && !rh_module_licence_allows('ai_assistant')) {
+        return false; // not in the hotel's licence (owner 2026-11-10)
+    }
     if (trim((string)($row['paused'] ?? '')) !== '') {
         // Spending never pauses the Assistant any more (owner 2026-10-28: the monthly figure is an aim). A pause left
         // by the old monthly limit lifts itself at once. Every other automatic pause waits for a person.

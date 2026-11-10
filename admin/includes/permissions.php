@@ -1843,11 +1843,14 @@ function rh_module_key_enabled(string $key): bool
 function rhApiModuleGate(string $page): void
 {
     $module = getModuleForPage($page);
-    if ($module === null || (string)($_SESSION['admin_role'] ?? '') === 'admin') {
+    if ($module === null) {
         return;
     }
+    $isAdmin = (string)($_SESSION['admin_role'] ?? '') === 'admin';
     foreach ((is_array($module) ? $module : [$module]) as $moduleKey) {
-        if (!rh_module_key_enabled((string)$moduleKey)) {
+        // Admins pass a module switched off here, never one the licence leaves out (owner 2026-11-10).
+        $on = $isAdmin ? rh_module_licence_allows((string)$moduleKey) : rh_module_key_enabled((string)$moduleKey);
+        if (!$on) {
             http_response_code(403);
             header('Content-Type: application/json');
             echo json_encode(['success' => false, 'error' => 'This feature is switched off in Modules.']);
@@ -1863,9 +1866,6 @@ function rhApiModuleGate(string $page): void
  */
 function rhModuleAllowsAnyPage(array $pages, string $role): bool
 {
-    if ($role === 'admin') {
-        return true;
-    }
     foreach ($pages as $page) {
         $module = getModuleForPage((string)$page);
         if ($module === null) {
@@ -1873,7 +1873,9 @@ function rhModuleAllowsAnyPage(array $pages, string $role): bool
         }
         $allOn = true;
         foreach ((is_array($module) ? $module : [$module]) as $moduleKey) {
-            if (!rh_module_key_enabled((string)$moduleKey)) {
+            // Admins pass a module switched off here, never one the licence leaves out (owner 2026-11-10).
+            $on = $role === 'admin' ? rh_module_licence_allows((string)$moduleKey) : rh_module_key_enabled((string)$moduleKey);
+            if (!$on) {
                 $allOn = false;
                 break;
             }

@@ -172,7 +172,7 @@ $sourceWords = ['server' => 'the licence service', 'server_override' => 'set by 
                         <tr><th scope="row">Last checked</th><td><?php echo $h($when((int)$st['last_check_at'])); ?><br><small>The last time this system asked the licence service. It checks by itself every hour, and straight away when the provider changes your licence.</small></td></tr>
                         <tr><th scope="row">Last problem</th><td><?php echo $st['last_error'] !== '' ? $h($st['last_error']) : 'None'; ?><br><small>Why the last check failed, if it did. A failed check never locks the system by itself.</small></td></tr>
                         <tr><th scope="row">Business type</th><td><?php echo $h($st['business_type'] ?? '—'); ?><br><small>What the licence says this system is used for.</small></td></tr>
-                        <tr><th scope="row">Licensed modules</th><td><?php echo $modules === null ? 'Not stated' : ($modules ? $h(implode(', ', $modules)) : 'None listed'); ?><br><small>Shown for information. Switching features on or off by licence is not applied yet.</small></td></tr>
+                        <tr><th scope="row">Licensed modules</th><td><?php echo $modules === null ? 'Not stated' : ($modules ? $h(implode(', ', $modules)) : 'None listed'); ?><br><small>Parts of the system not listed here are switched off for everyone, administrators included. To change this, contact your system provider.</small></td></tr>
                     </table>
                 <?php else: ?>
                     <p style="margin:0">To switch licensing on for this system, the licence key is added to the program and the licence details are added to this site's <code>.env</code> settings by the system provider.</p>
