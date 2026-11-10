@@ -117,6 +117,7 @@ function rh_dec_requires_ok(array $user, array $req): bool
  * Owner 2026-11-11 ("only finance team for now and admin"): checks whose cards quote a hotel-wide money standing need
  * ALL of these Dashboard figures permissions too (admin/includes/permissions.php; default admin + accountant only).
  * Owed to us total -> dashboard_owed; takings (and VAT worked out on them) -> dashboard_takings; till sales -> dashboard_pos_sales.
+ * Room revenue earned (the room types card quotes the hotel's and each type's) -> dashboard_takings (owner 2026-11-11).
  */
 function rh_dec_figure_keys(): array
 {
@@ -125,6 +126,7 @@ function rh_dec_figure_keys(): array
         'acc_cash'        => ['dashboard_takings', 'dashboard_owed'],
         'acc_profit'      => ['dashboard_takings', 'dashboard_pos_sales'],
         'acc_tax'         => ['dashboard_takings'],
+        'bk_room_types'   => ['dashboard_takings'],
     ];
 }
 

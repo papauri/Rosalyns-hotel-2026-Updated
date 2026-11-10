@@ -728,6 +728,26 @@ function rh_ai_digest_recipients(PDO $db): array
     return $out;
 }
 
+/**
+ * The digest's "Last 7 days (rooms)" figures. $takingsOk: the person holds dashboard_takings (owner 2026-11-11: room
+ * revenue is finance + admin only). Without it only occupancy is listed: room revenue and RevPAR are revenue figures,
+ * and the average rate with occupancy for a fixed 7 days would rebuild the total. Closed by default.
+ */
+function rh_ai_digest_room_bits(array $perf, bool $takingsOk = false): array
+{
+    $labels = ['occupancy_pct' => 'Occupancy %'];
+    if ($takingsOk) {
+        $labels += ['adr_incl_vat' => 'Average rate (incl. VAT)', 'revpar' => 'RevPAR', 'room_revenue_incl_vat' => 'Room revenue (incl. VAT)'];
+    }
+    $bits = [];
+    foreach ($labels as $k => $label) {
+        if (isset($perf[$k]) && is_scalar($perf[$k])) {
+            $bits[] = $label . ': ' . $perf[$k];
+        }
+    }
+    return $bits;
+}
+
 /** One person's digest: their own briefing points (no guest names) and last week's room figures. */
 function rh_ai_digest_body(PDO $db, array $user): array
 {
@@ -749,12 +769,7 @@ function rh_ai_digest_body(PDO $db, array $user): array
     $html = '<p>Hello ' . $h($name) . ',</p><p>Here is what the Assistant sees for your account this week.</p>';
     $text = "Hello $name,\n\nHere is what the Assistant sees for your account this week.\n";
     if ($perf) {
-        $bits = [];
-        foreach (['occupancy_pct' => 'Occupancy %', 'adr_incl_vat' => 'Average rate (incl. VAT)', 'revpar' => 'RevPAR', 'room_revenue_incl_vat' => 'Room revenue (incl. VAT)'] as $k => $label) {
-            if (isset($perf[$k]) && is_scalar($perf[$k])) {
-                $bits[] = $label . ': ' . $perf[$k];
-            }
-        }
+        $bits = rh_ai_digest_room_bits($perf, hasPermission((int)($user['id'] ?? 0), 'dashboard_takings'));
         if ($bits) {
             $html .= '<p><strong>Last 7 days (rooms)</strong><br>' . $h(implode(' · ', $bits)) . '</p>';
             $text .= "\nLast 7 days (rooms): " . implode(' | ', $bits) . "\n";

@@ -48,7 +48,7 @@ function ait_temp_user(PDO $pdo, string $role, string $password): array
 }
 
 /* ── Dashboard figures (owner 2026-11-11): pure, NO database (runs before config/database.php). The briefing, alerts,
- *    weekly digest (its points come from the briefing) and Decisions / Today's brief show hotel-wide takings, the Owed to us total and till sales only to
+ *    weekly digest (its points come from the briefing) and Decisions / Today's brief show hotel-wide takings, room revenue, the Owed to us total and till sales only to
  *    people holding dashboard_takings / dashboard_owed / dashboard_pos_sales (default admin + accountant). Direct
  *    questions keep the screens' own permissions. Run alone: AI_TEST_DASH_FIGURES_ONLY=1 php scripts/tests/ai_assistant_test.php ── */
 echo "\n-- Dashboard figures (pure) --\n";
@@ -64,6 +64,8 @@ try {
     check(strpos($dfMap, "'acc_collections' => ['dashboard_owed']") !== false && strpos($dfMap, "'acc_cash'        => ['dashboard_takings', 'dashboard_owed']") !== false
         && strpos($dfMap, "'acc_profit'      => ['dashboard_takings', 'dashboard_pos_sales']") !== false && strpos($dfMap, "'acc_tax'         => ['dashboard_takings']") !== false,
         'Decisions: money owed, cash outlook, takings by department and VAT on takings need their Dashboard figures permissions');
+    check(strpos($dfMap, "'bk_room_types'   => ['dashboard_takings']") !== false,
+        'Decisions: the room types card (hotel and per-type room revenue earned) needs dashboard_takings');
     check(strpos($dfFn($dfDec, 'rh_dec_figures_ok', 400), 'return false;') !== false && strpos($dfFn($dfDec, 'rh_dec_check_ok', 500), 'rh_dec_finders()[$area][$check]') !== false
         && strpos($dfFn($dfDec, 'rh_dec_check_ok', 500), 'rh_dec_figures_ok($user, $check)') !== false,
         'Decisions: a card is checked against the live rules and needs ALL its figure permissions (a card cached earlier today follows them too)');
@@ -84,6 +86,9 @@ try {
     $dfFront = $dfFn($dfIns, 'rh_ai_brief_front_desk', 6000);
     check(strpos($dfFront, "'collect_before_departure'") !== false && strpos($dfFront, 'dashboard_') === false,
         'Briefing: each departing guest\'s own balance stays for the front desk (no dashboard key on it)');
+    $dfDig = $dfFn((string)file_get_contents($root . '/includes/ai/ai-extras.php'), 'rh_ai_digest_body', 2400);
+    check(strpos($dfDig, "rh_ai_digest_room_bits(\$perf, hasPermission((int)(\$user['id'] ?? 0), 'dashboard_takings'))") !== false && strpos($dfDig, 'room_revenue_incl_vat') === false,
+        'Weekly digest: the room figures line goes through the dashboard_takings check (no revenue figure listed in the body itself)');
     if (getenv('AI_TEST_DASH_FIGURES_ONLY')) {
         // Behaviour, still no database: the real money findings from a fixture money_leaks result
         if (!defined('BALANCE_TOLERANCE')) { define('BALANCE_TOLERANCE', 0.01); }
@@ -106,6 +111,14 @@ try {
         $dfDefault = [];
         rh_ai_brief_money($dfM, static function (array $x) use (&$dfDefault): void { $dfDefault[] = $x; });
         check(!$dfDefault, 'the money findings leave the owed total out unless told the person may see it');
+        // Weekly digest room figures: occupancy only without dashboard_takings; closed by default
+        require_once $root . '/includes/ai/ai-extras.php';
+        $dfPerf = ['occupancy_pct' => 61.9, 'adr_incl_vat' => 85000, 'revpar' => 52619, 'room_revenue_incl_vat' => 3683333.33];
+        $dfBitsNo = rh_ai_digest_room_bits($dfPerf, false);
+        $dfBitsYes = rh_ai_digest_room_bits($dfPerf, true);
+        check($dfBitsNo === ['Occupancy %: 61.9'], 'digest without dashboard_takings: occupancy only (no room revenue, RevPAR or average rate)', json_encode($dfBitsNo));
+        check(rh_ai_digest_room_bits($dfPerf) === $dfBitsNo, 'digest room figures leave revenue out unless told the person may see it');
+        check(count($dfBitsYes) === 4 && strpos(implode('|', $dfBitsYes), 'Room revenue (incl. VAT): 3683333.33') !== false, 'digest with dashboard_takings: all four room figures', json_encode($dfBitsYes));
         echo "$pass passed, $fail failed\n";
         exit($fail ? 1 : 0);
     }
@@ -1290,7 +1303,7 @@ if (!$chatReady) {
             // Asked for in chat: answered locally (owner 2026-10-28: briefings stay local SQL, 0 tokens)
             $r = $turn3($rec3, 'Give me the tea', 0, [['text' => 'You lost MWK 999,999.00 today.']]);
             check($r['route'] === 'briefing' && count($GLOBALS['ai2_calls']) === 0 && (int)$r['tokens_in'] === 0, '"give me the tea": answered from the local findings, no model call');
-            check(strpos($r['reply'], '999,999') === false && strpos($r['reply'], 'What needs you at the desk') !== false && strpos($r['reply'], 'most important first:') !== false, 'the briefing headline names the most important point', $r['reply']);
+            check(strpos($r['reply'], '999,999') === false && strpos($r['reply'], 'What needs you at the desk') !== false && strpos($r['reply'], 'most important first.') !== false && strpos($r['reply'], 'most important first:') === false, 'the briefing headline is a short header that does not repeat card 1', $r['reply']);
             $itemText = json_encode($r['items']);
             check(strpos($itemText, $missed) !== false && strpos($allBodies(), 'Marchbanks') === false && strpos($allBodies(), 'Quentin') === false, 'briefing cards show the real name; the model only saw tokens');
             $GLOBALS['ai2_calls'] = [];

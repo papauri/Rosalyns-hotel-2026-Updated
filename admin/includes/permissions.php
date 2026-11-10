@@ -963,10 +963,10 @@ function getAllPermissions()
         ],
         'dashboard_owed' => [
             'label' => 'See Owed to us on the Dashboard',
-            'description' => 'Shows the business\'s money standing: the Owed to us card (everything guests and clients still owe) and its details on the Dashboard',
+            'description' => 'Shows the business\'s money standing: the Owed to us card (everything guests and clients still owe) and its details on the Dashboard, and the Owed to us card, Receivables tab and balances owed on the Accounting Dashboard',
             'icon' => 'fa-file-invoice-dollar',
             'category' => 'Dashboard figures',
-            'page' => '', // not a page: cards on the Dashboard
+            'page' => '', // not a page: cards on the Dashboard and the Accounting Dashboard
             'group' => 'reports'
         ],
         'dashboard_pos_sales' => [

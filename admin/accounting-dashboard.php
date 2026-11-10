@@ -75,6 +75,9 @@ $vatPricingMode = getSetting('vat_pricing_mode', 'exclusive') === 'inclusive' ? 
 // One three-way VAT mode: off / inclusive / exclusive (same value the whole system reads).
 $vatModeNow = !$vatEnabled ? 'off' : $vatPricingMode;
 $canChangeFinanceSettings = hasPermission((int)($user['id'] ?? 0), 'finance_settings');
+// Owner 2026-11-11: "Owed to us" is the business's money standing - it follows dashboard_owed (default
+// administrator + accountant), not the page permission. Card, receivables popup, tab and attention line all follow it.
+$canSeeOwed = hasPermission((int)($user['id'] ?? 0), 'dashboard_owed');
 $vatSettingsMessage = '';
 $vatSettingsError = '';
 
@@ -390,10 +393,14 @@ try {
     // Outstanding payments summary (filtered by enabled modules)
     // One rule on every screen (admin/includes/receivables.php): rooms, confirmed conference / event / gym accounts
     // and open unpaid tabs. A source that can not be read is flagged so the figure shows "Unavailable".
+    // Read only for a viewer holding dashboard_owed, so the figure never reaches the page source otherwise.
+    $recvFailed = false;
+    if ($canSeeOwed) {
     $rcvAcct = rh_receivable_summary($pdo, ['bookings' => $mod_bookings, 'conference' => $mod_conference, 'gym' => $mod_gym, 'events' => $mod_events, 'tabs' => $mod_pos]);
     $recvFailed = !empty($rcvAcct['failed']);
     foreach ($rcvAcct['by_type'] as $rcvType => $rcvRow) {
         $outstandingSummary[] = ['type' => $rcvType, 'count' => $rcvRow['count'], 'total_outstanding' => $rcvRow['amount']];
+    }
     }
 
     // ====================================================================
@@ -831,6 +838,7 @@ if (!isset($folio_fnb)) {
             </div>
         </template>
 
+        <?php if ($canSeeOwed): ?>
         <template id="acct-insight-template-receivables">
             <p class="acct-insight-intro">Receivables are outstanding balances still owed by <?php echo $acct_party; ?>s or clients and should guide collection priorities.</p>
             <table class="acct-insight-table">
@@ -885,6 +893,7 @@ if (!isset($folio_fnb)) {
                 <a href="payments.php?start_date=<?php echo urlencode($startDate); ?>&end_date=<?php echo urlencode($endDate); ?>" class="acct-btn <?php echo $acct_billing ? 'acct-btn--ghost' : 'acct-btn--primary'; ?>">Open payments</a>
             </div>
         </template>
+        <?php endif; ?>
 
         <template id="acct-insight-template-cash-today">
             <p class="acct-insight-intro">Cash position combines cash and mobile money entries and helps finance teams reconcile tills and settlement channels.</p>
@@ -1427,7 +1436,7 @@ if (!isset($folio_fnb)) {
                 'href' => $row['action_link'], 'link' => $row['action_label'],
             ];
         }
-        if ($cat_recv_total > BALANCE_TOLERANCE) {
+        if ($canSeeOwed && $cat_recv_total > BALANCE_TOLERANCE) {
             $attn[] = [
                 'tone' => 'red', 'icon' => 'fa-file-invoice-dollar', 'value' => $ckShort($cat_recv_total), 'money' => true,
                 'label' => 'Balances owed to us', 'hint' => number_format((int)$cat_recv_count) . ' open - chase these first',
@@ -1439,7 +1448,7 @@ if (!isset($folio_fnb)) {
             $attn[] = [
                 'tone' => 'amber', 'icon' => 'fa-hourglass-half', 'value' => $ckShort($cat_pending), 'money' => true,
                 'label' => 'Payments still pending', 'hint' => 'Recorded but not yet cleared',
-                'key' => 'receivables', 'title' => 'Receivables Follow-up',
+                'key' => $canSeeOwed ? 'receivables' : '', 'title' => 'Receivables Follow-up', // no popup without dashboard_owed
                 'href' => $periodPaymentsLink . '&status=pending', 'link' => 'Review payments',
             ];
         }
@@ -1569,7 +1578,7 @@ if (!isset($folio_fnb)) {
         // ---- Hero sentence ----
         $ledeBits = [];
         $ledeBits[] = number_format($cat_revenue_net, 2) . ' net revenue';
-        if ($cat_recv_total > BALANCE_TOLERANCE) { $ledeBits[] = number_format($cat_recv_total, 2) . ' still owed'; }
+        if ($canSeeOwed && $cat_recv_total > BALANCE_TOLERANCE) { $ledeBits[] = number_format($cat_recv_total, 2) . ' still owed'; }
         $ledeText = $currency_symbol . ' ' . implode(', ', $ledeBits) . ' - ' . ($attnCount
             ? $attnCount . ' thing' . ($attnCount === 1 ? '' : 's') . ' need' . ($attnCount === 1 ? 's' : '') . ' fixing.'
             : 'nothing needs fixing.');
@@ -1577,7 +1586,7 @@ if (!isset($folio_fnb)) {
         // ---- Tabs ----
         $ckTabs = [];
         $ckTabs['payments'] = ['Recent payments', count($recentPayments)];
-        $ckTabs['receivables'] = ['Receivables', count($recvRows)];
+        if ($canSeeOwed) { $ckTabs['receivables'] = ['Receivables', count($recvRows)]; }
         $ckTabs['daily'] = ['Daily detail', count($dailyTrend)];
         if (!empty($refundReasons)) { $ckTabs['refunds'] = ['Refunds', count($refundReasons)]; }
         if ($showPos) { $ckTabs['pos'] = ['POS by type', count($posByType)]; }
@@ -1639,12 +1648,14 @@ if (!isset($folio_fnb)) {
                 <span class="ck-meter"><span style="width:<?php echo $cat_revenue_gross > 0 ? max(0, min(100, round($cat_revenue_net / $cat_revenue_gross * 100))) : 0; ?>%"></span></span>
                 <span class="ck-kpi__sub">Gross <?php echo $ckPlain($cat_revenue_gross); ?> &minus; refunds <?php echo $ckPlain($cat_refunds); ?></span>
             </div>
+            <?php if ($canSeeOwed): ?>
             <div class="ck-kpi<?php echo $cat_recv_total > BALANCE_TOLERANCE ? ' ck-kpi--alert' : ''; ?> js-acct-insight-trigger" title="Receivables - money that <?php echo $ckH($acct_party); ?>s/clients owe but have not yet paid." <?php echo $ckTrig('receivables', 'Receivables Follow-up'); ?> aria-label="Open receivables follow-up">
                 <span class="ck-kpi__icon"><i class="fas fa-file-invoice-dollar"></i></span>
                 <span class="ck-kpi__label">Owed to us</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><?php echo $recvFailed ? 'Unavailable' : $ckMoney($cat_recv_total); ?></span>
                 <span class="ck-kpi__sub"><?php echo (int)$cat_recv_count; ?> account<?php echo (int)$cat_recv_count === 1 ? '' : 's'; ?> with a balance &middot; pending <?php echo $ckPlain($cat_pending); ?></span>
             </div>
+            <?php endif; ?>
             <div class="ck-kpi js-acct-insight-trigger" title="Cash Position (Today) - cash and mobile money received today. Does not include card, bank transfer or credit." <?php echo $ckTrig('cash-today', 'Cash Position Detail'); ?> aria-label="Open cash position detail">
                 <span class="ck-kpi__icon"><i class="fas fa-money-bill-wave"></i></span>
                 <span class="ck-kpi__label">Cash today</span>
@@ -1993,7 +2004,8 @@ if (!isset($folio_fnb)) {
                     <?php endif; ?>
                 </div>
 
-                <!-- Receivables -->
+                <!-- Receivables (dashboard_owed only) -->
+                <?php if ($canSeeOwed): ?>
                 <div class="ck-pane" role="tabpanel" data-ck-pane="receivables" hidden>
                     <div class="ck-table-wrap">
                         <table class="no-card-mobile no-scroll ck-table">
@@ -2015,6 +2027,7 @@ if (!isset($folio_fnb)) {
                         </table>
                     </div>
                 </div>
+                <?php endif; ?>
 
                 <!-- Daily detail -->
                 <div class="ck-pane" role="tabpanel" data-ck-pane="daily" hidden>
