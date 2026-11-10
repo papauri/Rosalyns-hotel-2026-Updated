@@ -347,7 +347,8 @@ if (!function_exists('rh_licence_staff_run')) {
             $role = (string)$u['role'];
             $ch = ($role === 'admin' || empty($own[$id])) ? ['grants' => [], 'denies' => []]
                 : rh_licence_staff_own_changes($own[$id], array_values(getDefaultPermissionsForRole($role)));
-            if ($role === 'admin' && function_exists('rh_admin_permission_overrides') && !rh_is_super_admin($id)) {
+            if ($role === 'admin' && function_exists('rh_admin_permission_overrides')
+                && !(function_exists('rh_is_super_admin') && rh_is_super_admin($id))) {
                 $ch['denies'] = array_keys(rh_admin_permission_overrides($id)['denies']); // a super admin's limits on them
             }
             $staff[] = ['id' => $id, 'username' => (string)$u['username'], 'email' => (string)$u['email'], 'full_name' => (string)$u['full_name'],

@@ -1798,7 +1798,7 @@ function rh_ai_guide_permissions(): array
         '15-pwa-install-guide.html' => [], '16-business-presets.html' => ['module_settings'], '17-gym-management.html' => ['gym'],
         '18-staff-access.html' => ['user_management', 'user_permissions'], '19-hotel-settings.html' => ['booking_settings', 'finance_settings', 'module_settings'],
         '20-stock-loss-prevention.html' => ['stock_dashboard', 'stock_management', 'stock_reports'], '21-guest-website.html' => ['pages', 'section_headers', 'footer_management', 'gallery'],
-        '22-assistant.html' => ['ai_assistant_use', 'ai_settings', 'ai_usage_view'], '99-admin-dashboard-full-guide.html' => ['dashboard'],
+        '22-assistant.html' => ['ai_assistant_use', 'ai_settings', 'ai_usage_view'], '23-import.html' => ['data_import'], '99-admin-dashboard-full-guide.html' => ['dashboard'],
         'faq.html' => [], 'index.html' => [], 'system-map.php' => [], 'owner-handover.html' => ['module_settings'], 'owner-handover.php' => ['module_settings'],
     ];
 }
