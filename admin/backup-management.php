@@ -562,7 +562,7 @@ $current_page = 'backup-management.php';
                     <li>Download any backup with the <strong>Download</strong> button — save off-site weekly. The administrator is reminded by email if a week passes without one.</li>
                     <li>If a backup fails, or none is saved for 36 hours, the administrator is emailed (at most once a day).</li>
                     <li>A restore always saves a fresh safety backup first, and needs the word RESTORE typed to confirm.</li>
-                    <li>Only <strong>Administrator</strong> accounts can restore or download backups.</li>
+                    <li>Only <strong>Administrator</strong> accounts can download backups. Restoring needs a <strong>Super admin</strong> (or an administrator a super admin allowed to restore).</li>
                 </ul>
             </div>
         </div>

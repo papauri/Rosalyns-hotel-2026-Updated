@@ -18,6 +18,7 @@
 
   <h1>Hotel Settings</h1>
   <p>Hotel Settings is one long page of cards. Each card controls one part of how <span class="g-site-name">Rosalyns Beach Hotel</span> takes bookings, charges money, produces documents and sends email. This guide goes through the cards in the order they appear on the page.</p>
+  <div class="note"><p><strong>Who can change what.</strong> The email server (SMTP) fields and the email switches under Email Settings can only be changed by a <strong>Super Admin</strong>. The site switches (booking on or off, the booking-off message, website maintenance, the booking reference prefix and the service channels) and the VAT, refund and bank details can only be changed by an <strong>Administrator</strong>. Anyone else with Hotel Settings sees these cards read-only with <em>"Only administrators can change this"</em> (or <em>"Only a super admin can change the email server..."</em>). See <a href="18-staff-access.html#tiers">Staff &amp; Access: Who can change what</a>.</p></div>
 
   <div class="facts">
     <dl>
@@ -307,6 +308,7 @@
   <h2 id="email-config">Email Configuration</h2>
   <p>Always shown. This is where the system is told how to send email. Fields marked * are required. Save with <strong>Save Email Settings</strong>.</p>
   <h3>SMTP Server Settings</h3>
+  <p><strong>Super Admin only.</strong> The mail server, sign-in, password, security type and the email switches can only be changed by a Super Admin. Anyone else with Hotel Settings sees this card with the line <em>"Only a super admin can change the email server and the switches under Email Settings. You can still change the sender name and the email addresses below."</em> So the sender name and the email addresses stay editable for them. If the hotel has no Super Admin, Administrators keep this right.</p>
   <table>
     <thead><tr><th>Field</th><th>Allowed values</th></tr></thead>
     <tbody>
@@ -353,7 +355,7 @@
   </ol>
   <p>To test the wording of one template, use the Email Templates page:</p>
   <ol class="steps">
-    <li>Open Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Email Templates</strong> (needs <strong>Edit message templates</strong>).</li>
+    <li>Open Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Email Templates</strong> (needs <strong>Edit message templates</strong>, which only Administrators can have).</li>
     <li>Choose a template and make a preview.</li>
     <li>Type a valid email address in the test box and click <strong>Send</strong>. You will see <em>"Sent to &lt;address&gt;!"</em>. The subject starts with <em>[TEST]</em>.</li>
   </ol>

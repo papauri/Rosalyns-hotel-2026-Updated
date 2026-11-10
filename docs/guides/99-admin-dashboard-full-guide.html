@@ -390,13 +390,21 @@
     <li><strong>Available Backups</strong> lists the files, newest first. The newest is marked <strong>Latest</strong>. Under the list, the page shows how much space the backups use.</li>
     <li><strong>Clear Stock Data</strong> is linked from this page. It empties stock items, recipes, suppliers, purchase orders or stock budgets, and not restaurant orders, payments, bookings or menu items. It is for administrators only. A full backup is taken first, and past clears can be undone from that page. See <a href="08-stock-orders.html#clear">How to clear stock data</a>.</li>
     <li><strong>Delete</strong> (admin role only). Each row has a <strong>Delete</strong> button, and it asks you to confirm first. To delete several at once, tick the rows and click <strong>Delete selected</strong> in the bar at the bottom. The newest backup always shows <em>Always kept</em>, and at least 3 backups always stay. Deleted files cannot be brought back.</li>
-    <li><strong>Download</strong> and <strong>Restore</strong> are for users with the <strong>admin</strong> role only; everyone else sees <em>Admin only</em>.</li>
-    <li><strong>Restore</strong> (admin role only). Click <strong>Restore</strong>, read the box, type <strong>RESTORE</strong> and click <strong>Restore now</strong>. The box warns that all current hotel data will be replaced and that anything entered since then will be lost. Click <strong>Cancel</strong> to stop. If you do not type RESTORE exactly, the page says <em>"Nothing was restored: the word RESTORE was not typed exactly."</em></li>
+    <li><strong>Download</strong> is for users with the <strong>Administrator</strong> role only; everyone else sees <em>Admin only</em>. <strong>Restore</strong> is <strong>Super admin only</strong>: a plain Administrator sees the button only when a Super Admin has switched it on for them, or when the hotel has no Super Admin.</li>
+    <li><strong>Restore</strong> (Super admin only). Click <strong>Restore</strong>, read the box, type <strong>RESTORE</strong> and click <strong>Restore now</strong>. The box warns that all current hotel data will be replaced and that anything entered since then will be lost. Click <strong>Cancel</strong> to stop. If you do not type RESTORE exactly, the page says <em>"Nothing was restored: the word RESTORE was not typed exactly."</em></li>
     <li>A safety backup of your current data is taken first. The success message names that safety copy, so a restore can be undone by restoring it. Success: <em>"The database was restored from ..."</em>. If the backup file is damaged, the page says so and nothing is changed. If a restore stops part-way, the message names the safety copy to restore.</li>
     <li><strong>Backups run by themselves.</strong> The system takes one backup a day, the first time anyone opens the website or admin after 01:00. No cron job or server set-up is needed. It still runs when the automated emails are switched off (the backup has its own switch under <strong>Automated Emails</strong>).</li>
     <li>Backups less than 48 hours old are never removed automatically. Older ones are kept as 14 daily, 8 weekly and 12 monthly backups. The rest are removed automatically.</li>
     <li><strong>Emails</strong> go to the <strong>Admin email</strong> set in <strong>Email Settings</strong>. If no admin email is set, no emails go out, so set one there. The system sends an email when a backup fails (at most once a day), when no backup has been made for 36 hours (at most once a day), and a weekly reminder to download a copy and keep it off the server, if no copy has been downloaded for 7 days. The backup file itself is never emailed, because it holds guest data.</li>
   </ul>
+  <h3>How to restore a backup</h3>
+  <ol class="steps">
+    <li>Only a <strong>Super Admin</strong> can do this, unless a Super Admin has switched <strong>Restore the database from a backup</strong> on for an Administrator. Open Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Backups</strong>.</li>
+    <li>Find the backup in <strong>Available Backups</strong> and click <strong>Restore</strong> on its row.</li>
+    <li>Read the box, type <strong>RESTORE</strong> and click <strong>Restore now</strong>.</li>
+    <li>Wait for <em>"The database was restored from ..."</em>. A safety copy of the data from just before is kept.</li>
+  </ol>
+  <p><strong>If something goes wrong.</strong> <em>"Only a super admin can restore the database. Nothing was changed."</em> means your account is not allowed. <em>"Nothing was restored: the word RESTORE was not typed exactly."</em> means type the word again.</p>
   <div class="warn"><p>A restore replaces everything in the live system with the older copy. Anything done since that backup is lost. Download a copy of a backup every week and keep it away from the server. A backup that is only on the server is lost if the server fails.</p></div>
 
   <h2 id="licence">Licence and payment status</h2>
@@ -635,7 +643,7 @@
     <li>You only see menu items you have permission for, and only for modules that are on.</li>
     <li>You are signed out after 8 hours without activity. 5 wrong passwords lock an account for 15 minutes.</li>
     <li>Changing your password needs a code sent to your email.</li>
-    <li>Only the <strong>admin</strong> role can download, restore or delete backups.</li>
+    <li>Only the <strong>admin</strong> role can download or delete backups. Restoring is <strong>Super admin only</strong> (see Backups above).</li>
     <li>Changes to settings, modules, refunds and sign-in attempts are written to System Logs with the person's name.</li>
   </ul>
 

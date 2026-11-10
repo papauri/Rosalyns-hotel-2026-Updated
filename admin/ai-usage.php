@@ -22,9 +22,11 @@ $h = static function ($v): string {
     return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
 };
 $isAdmin = (string)($user['role'] ?? '') === 'admin';
-// "Forget this" on a learned local answer (administrators only; the route is archived, never used again)
+$canSettings = hasPermission((int)$user['id'], 'ai_settings');
+// "Forget this" on a learned local answer: Assistant Settings holders only, like the learning controls there
+// (the route is archived, never used again)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'forget_route') {
-    if ($isAdmin && validateCsrfToken($_POST['csrf_token'] ?? '') && rh_ai_schema_ready($pdo)) {
+    if ($canSettings && validateCsrfToken($_POST['csrf_token'] ?? '') && rh_ai_schema_ready($pdo)) {
         rh_ai_route_forget($pdo, (int)($_POST['route_id'] ?? 0));
     }
     header('Location: ai-usage.php#ai-usage-routes');
@@ -42,7 +44,6 @@ if ((strtotime($to) - strtotime($from)) > 366 * 86400) {
 $ready = rh_ai_schema_ready($pdo);
 $u = $ready ? rh_ai_usage_summary($pdo, $from, $to) : null;
 $money = static fn($v) => $v === null ? '-' : '$' . number_format((float)$v, (float)$v > 0 && (float)$v < 0.01 ? 4 : 2);
-$canSettings = hasPermission((int)$user['id'], 'ai_settings');
 $ls = ($ready && $isAdmin) ? rh_ai_local_share($pdo, date('Y-m-01')) : null;
 $pcs = ($ls !== null && function_exists('rh_ai_cache_saving_since')) ? rh_ai_cache_saving_since(date('Y-m-01')) : null;
 $cs = ($ls !== null && function_exists('rh_ai_claim_stats')) ? rh_ai_claim_stats($pdo, date('Y-m-01')) : null;
@@ -172,12 +173,14 @@ $cs = ($ls !== null && function_exists('rh_ai_claim_stats')) ? rh_ai_claim_stats
                             <td><?php echo $h(number_format((int)$rt['uses'])); ?></td>
                             <td><?php echo $h(date('j M Y', strtotime((string)$rt['created_at']))); ?></td>
                             <td>
+                                <?php if ($canSettings): ?>
                                 <form method="post" action="ai-usage.php" class="ai-inline-form">
                                     <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
                                     <input type="hidden" name="action" value="forget_route">
                                     <input type="hidden" name="route_id" value="<?php echo (int)$rt['id']; ?>">
                                     <button type="submit" class="btn btn-secondary btn-sm">Forget this</button>
                                 </form>
+                                <?php endif; ?>
                             </td>
                         </tr>
                     <?php endforeach; ?>

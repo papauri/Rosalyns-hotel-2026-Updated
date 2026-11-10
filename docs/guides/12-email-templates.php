@@ -284,9 +284,9 @@ $totalShown = 0;
 
   <div class="facts">
     <dl>
-      <dt>Who uses it</dt><dd>Managers and anyone who edits guest wording</dd>
+      <dt>Who uses it</dt><dd>Administrators only. Managers and other staff can open the page to preview, but cannot change a template.</dd>
       <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Settings</strong> &rarr; <strong>Email Templates</strong> (<code>/admin/email-templates.php</code>)</dd>
-      <dt>Permission needed</dt><dd><strong>Edit message templates</strong>. Without it you can open the page and preview, but not change anything.</dd>
+      <dt>Permission needed</dt><dd><strong>Edit message templates</strong>, which is <strong>Administrators only</strong>. Managers no longer get it by default, and no other role can be given it. Without it you can open the page and preview, but not change anything.</dd>
     </dl>
   </div>
 
@@ -391,7 +391,7 @@ $totalShown = 0;
     <tbody>
       <tr><td><em>Template name: subject and HTML body are required</em></td><td>A template has an empty subject or body.</td><td>Fill it in, or click Load Default on that tab.</td></tr>
       <tr><td><em>Template name: subject is too long (max 255 characters)</em></td><td>Subject too long.</td><td>Shorten it.</td></tr>
-      <tr><td><em>You do not have permission to edit message templates.</em></td><td>Missing the permission.</td><td>Ask an administrator.</td></tr>
+      <tr><td><em>You do not have permission to edit message templates.</em></td><td>Missing the permission. Only Administrators can change templates.</td><td>Ask an Administrator to make the change.</td></tr>
       <tr><td><em>No content to preview — fill in the fields or save the template first.</em></td><td>Subject or body is empty and nothing is saved.</td><td>Type content or use Load Default.</td></tr>
       <tr><td><em>Failed to send test email: ...</em></td><td>Email settings problem.</td><td>Check the email settings in Hotel Settings.</td></tr>
       <tr><td>A <code>{{tag}}</code> shows as text in a real email</td><td>That tag is not available for that template.</td><td>Use a tag from the list for that template.</td></tr>
