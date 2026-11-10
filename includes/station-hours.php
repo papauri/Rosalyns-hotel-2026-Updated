@@ -178,6 +178,10 @@ if (!function_exists('rh_station_window_for_date')) {
             ? (new DateTimeImmutable($businessDate))->modify('+1 day')->format('Y-m-d')
             : $businessDate;
         $end = new DateTimeImmutable($endDate . ' ' . $hours['closes_at'] . ':00', $tz);
+        // Money window (owner 2026-11-10 "count with the day that ended"): the trading day runs
+        // from this opening until the NEXT opening, so a sale after closing time is never lost.
+        // 'end' stays the real closing time (open/closed state, hours labels).
+        $tradingEnd = new DateTimeImmutable((new DateTimeImmutable($businessDate))->modify('+1 day')->format('Y-m-d') . ' ' . $hours['opens_at'] . ':00', $tz);
 
         return [
             'station' => $hours['station'],
@@ -191,6 +195,8 @@ if (!function_exists('rh_station_window_for_date')) {
             'end' => $end,
             'start_sql' => $start->setTimezone($utc)->format('Y-m-d H:i:s'),
             'end_sql'   => $end->setTimezone($utc)->format('Y-m-d H:i:s'),
+            'trading_end' => $tradingEnd,
+            'trading_end_sql' => $tradingEnd->setTimezone($utc)->format('Y-m-d H:i:s'),
             'hours_label' => $hours['opens_at'] . ' - ' . $hours['closes_at'] . ($hours['crosses_midnight'] ? ' (+1)' : ''),
             'window_label' => $start->format('M j H:i') . ' - ' . $end->format('M j H:i'),
         ];
@@ -242,6 +248,10 @@ if (!function_exists('rh_station_union_window_for_date')) {
         usort($windows, fn(array $a, array $b): int => $a['start'] <=> $b['start']);
         $start = $windows[0]['start'];
         $end = array_reduce($windows, fn(DateTimeImmutable $carry, array $window): DateTimeImmutable => $window['end'] > $carry ? $window['end'] : $carry, $windows[0]['end']);
+        // Money window: until the NEXT day's first opening (earliest station opening tomorrow), so
+        // consecutive trading days touch with no gap and never overlap, even when a station closes
+        // after another one has opened. 24h stations: next opening = this window's end.
+        $tradingEnd = array_reduce($windows, fn(DateTimeImmutable $carry, array $window): DateTimeImmutable => $window['trading_end'] < $carry ? $window['trading_end'] : $carry, $windows[0]['trading_end']);
         $utc = new DateTimeZone(date_default_timezone_get()); // DB session timezone
 
         return [
@@ -256,8 +266,11 @@ if (!function_exists('rh_station_union_window_for_date')) {
             'end' => $end,
             'start_sql' => $start->setTimezone($utc)->format('Y-m-d H:i:s'),
             'end_sql'   => $end->setTimezone($utc)->format('Y-m-d H:i:s'),
+            'trading_end' => $tradingEnd,
+            'trading_end_sql' => $tradingEnd->setTimezone($utc)->format('Y-m-d H:i:s'),
             'hours_label' => $start->format('H:i') . ' - ' . $end->format('H:i') . ($end->format('Y-m-d') !== $start->format('Y-m-d') ? ' (+1)' : ''),
             'window_label' => $start->format('M j H:i') . ' - ' . $end->format('M j H:i'),
+            'trading_window_label' => $start->format('M j H:i') . ' - ' . $tradingEnd->format('M j H:i'),
             'is_open_now' => false,
         ];
     }
@@ -281,5 +294,36 @@ if (!function_exists('rh_station_union_business_window')) {
         $window['is_open_now'] = ($now >= $window['start'] && $now < $window['end']);
         $window['now_sql'] = $now->format('Y-m-d H:i:s');
         return $window;
+    }
+}
+
+if (!function_exists('rh_station_union_trading_window')) {
+    /**
+     * The trading (money) day that $now belongs to (owner 2026-11-10 "count with the day that
+     * ended"): a trading day runs from its first opening until the next day's first opening, no
+     * gaps. Before today's opening, $now belongs to yesterday's trading day, even after closing
+     * time (a 03:09 sale with hours 06:00-03:00 is last night's). Use this, with 'start_sql' and
+     * 'trading_end_sql', for every sales / till / money window and for the default business date.
+     * 'end', 'closes_at' and 'is_open_now' keep their open-hours meaning (stations closed or open).
+     */
+    function rh_station_union_trading_window(?DateTimeImmutable $now = null): array
+    {
+        $now = $now ?: new DateTimeImmutable('now', rh_site_timezone());
+        $today = $now->format('Y-m-d');
+        $window = rh_station_union_window_for_date($today);
+        if ($now < $window['start']) {
+            $window = rh_station_union_window_for_date((new DateTimeImmutable($today))->modify('-1 day')->format('Y-m-d'));
+        }
+        $window['is_open_now'] = ($now >= $window['start'] && $now < $window['end']);
+        $window['now_sql'] = $now->format('Y-m-d H:i:s');
+        return $window;
+    }
+}
+
+if (!function_exists('rh_station_trading_business_date')) {
+    /** Y-m-d of the trading day $now belongs to (see rh_station_union_trading_window). */
+    function rh_station_trading_business_date(?DateTimeImmutable $now = null): string
+    {
+        return (string)rh_station_union_trading_window($now)['business_date'];
     }
 }

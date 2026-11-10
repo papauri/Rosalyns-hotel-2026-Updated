@@ -50,8 +50,8 @@ if (!$error && $canReview && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['a
 if (!$error) runStockExpiryCheck();
 
 // "Today" on this page = the trading window (station hours), the same window Orders & Tabs and the till use.
-$dashLive = rh_station_union_business_window();
-$dashWinParams = [$dashLive['start_sql'], $dashLive['end_sql']];
+$dashLive = rh_station_union_trading_window(); // trading day: opening to next opening (owner 2026-11-10)
+$dashWinParams = [$dashLive['start_sql'], $dashLive['trading_end_sql']];
 
 $cacheKey = RH_STOCK_DASH_CACHE_KEY;
 $metrics = function_exists('getCache') ? getCache($cacheKey) : null;
@@ -67,13 +67,13 @@ if (!$metrics && !$error) {
         // "Today" = the trading window (same as Orders & Tabs and the till shift totals), not midnight-to-midnight.
         $dashWin = $dashLive;
         $st = $pdo->prepare("SELECT COUNT(*) FROM stock_orders WHERE status NOT IN ('voided','cancelled') AND created_at >= ? AND created_at < ?");
-        $st->execute([$dashWin['start_sql'], $dashWin['end_sql']]);
+        $st->execute([$dashWin['start_sql'], $dashWin['trading_end_sql']]);
         $metrics['orders_today'] = (int)$st->fetchColumn();
         $st = $pdo->prepare("SELECT COUNT(*) FROM stock_orders WHERE status = 'placed' AND created_at >= ? AND created_at < ?");
-        $st->execute([$dashWin['start_sql'], $dashWin['end_sql']]);
+        $st->execute([$dashWin['start_sql'], $dashWin['trading_end_sql']]);
         $metrics['orders_pending'] = (int)$st->fetchColumn();
         $st = $pdo->prepare("SELECT COALESCE(SUM(total_amount), 0) FROM stock_orders WHERE status = 'paid' AND created_at >= ? AND created_at < ?");
-        $st->execute([$dashWin['start_sql'], $dashWin['end_sql']]);
+        $st->execute([$dashWin['start_sql'], $dashWin['trading_end_sql']]);
         $metrics['revenue_today'] = (float)$st->fetchColumn();
         $metrics['wastage_today'] = (float)$pdo->query("SELECT COALESCE(SUM(wastage_cost), 0) FROM stock_wastage WHERE recorded_date = CURDATE()")->fetchColumn();
         $metrics['wastage_30d'] = (float)$pdo->query("SELECT COALESCE(SUM(wastage_cost), 0) FROM stock_wastage WHERE recorded_date > DATE_SUB(CURDATE(), INTERVAL 30 DAY)")->fetchColumn();

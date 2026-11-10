@@ -188,12 +188,14 @@ $shiftDrift = [];
 $shiftKpiAffectedCount = 0;
 $shiftKpiOverrideAffectedCount = 0;
 foreach ($closeRows as $c) {
-    $window = rh_station_union_window_for_date((string)$c['shift_date']);
-    $recomputed = drift_recomputeExpected($pdo, (int)$c['user_id'], $window['start_sql'], $window['end_sql']);
+    // Each close against its OWN window (from where the user's previous close stopped, to when this one
+    // was recorded), the same window the till counted - never the whole day (owner 2026-11-10).
+    $cw = rh_pos_close_window($pdo, $c);
+    $recomputed = drift_recomputeExpected($pdo, (int)$c['user_id'], $cw['from'], $cw['end']);
     // Closes recorded after the opening float was included store expected cash WITH the float;
     // older ones do not. Accept either so a float alone never shows up as "drift".
     $deltaCash = round($recomputed['cash'] - (float)$c['expected_cash'], 2);
-    $fl = rh_pos_shift_float($pdo, (int)$c['user_id'], $window['start_sql'], $window['end_sql']);
+    $fl = rh_pos_shift_float($pdo, (int)$c['user_id'], $cw['from'], $cw['end']);
     if ($fl['recorded'] && abs($deltaCash) > 0.01 && abs(round($recomputed['cash'] + $fl['amount'] - (float)$c['expected_cash'], 2)) <= 0.01) {
         $deltaCash = 0.0;
     }

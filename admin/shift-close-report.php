@@ -36,7 +36,7 @@ $paidOrders    = [];
 $voidedOrders  = [];
 $payouts       = [];
 $topItems      = [];
-$reportDate    = date('Y-m-d');
+$reportDate    = rh_station_trading_business_date(); // trading day (owner 2026-11-10)
 $agg           = [
     'total_revenue'  => 0.0,
     'orders_count' => 0,
@@ -78,26 +78,14 @@ if (isset($_GET['id']) && ctype_digit($_GET['id'])) {
     }
     $close['total_revenue'] = rh_pos_close_revenue($pdo, $close); // 0/NULL on older closes: rebuilt on read
 
-    // Reconstruct this close window exactly as the till does: the business window for the
-    // close business date (same helper as admin/pos.php), starting at this user's previous
-    // close on that date and ending when this close was recorded. Nothing is restated; this
-    // only lists the orders behind the stored figures.
+    // Reconstruct this close's OWN window exactly as the till counted it (pos-shift-totals.php
+    // rh_pos_close_window): from where this user's previous close stopped counting (looking back to
+    // the previous trading day's opening) to when this close was recorded. Every sale sits in exactly
+    // one close. Nothing is restated; this only lists the orders behind the stored figures.
     $bizWindow   = rh_station_union_window_for_date((string)$close['shift_date']);
-    $windowStart = $bizWindow['start_sql'];
-    $windowEnd   = $bizWindow['end_sql'];
-    $closedAtTs  = strtotime((string)($close['closed_at'] ?? ''));
-    if ($closedAtTs) {
-        $closedEnd = date('Y-m-d H:i:s', $closedAtTs + 1);
-        if ($closedEnd < $windowEnd) {
-            $windowEnd = $closedEnd;
-        }
-        $prevStmt = $pdo->prepare("SELECT MAX(closed_at) FROM stock_shift_closes WHERE user_id = ? AND id < ? AND closed_at >= ? AND closed_at < ?");
-        $prevStmt->execute([(int)$close['user_id'], (int)$close['id'], $windowStart, $windowEnd]);
-        $prevClose = $prevStmt->fetchColumn();
-        if ($prevClose && $prevClose > $windowStart) {
-            $windowStart = (string)$prevClose;
-        }
-    }
+    $closeWin    = rh_pos_close_window($pdo, $close);
+    $windowStart = $closeWin['from'];
+    $windowEnd   = $closeWin['end'];
 
     // Sales taken by this user in the window: by paid_at, whatever the order status is now
     // (a later refund/void is a separate payout below, not a removal of the sale).
@@ -199,7 +187,7 @@ if (isset($_GET['id']) && ctype_digit($_GET['id'])) {
     $mode = 'date';
     $reportDate = $_GET['date'];
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $reportDate) || !strtotime($reportDate)) {
-        $reportDate = date('Y-m-d');
+        $reportDate = rh_station_trading_business_date();
     }
     $stmt = $pdo->prepare("
         SELECT * FROM stock_shift_closes
@@ -248,7 +236,7 @@ if (isset($_GET['id']) && ctype_digit($_GET['id'])) {
     foreach ($closes as &$cRow) { $cRow['total_revenue'] = rh_pos_close_revenue($pdo, $cRow); }
     unset($cRow);
     $mode   = 'list';
-    $reportDate = date('Y-m-d');
+    $reportDate = rh_station_trading_business_date();
 }
 
 $vColor = function (float $v): string {
@@ -855,7 +843,7 @@ $printTitle = match ($mode) {
             <a class="btn-secondary" href="pos.php"><i class="fas fa-cash-register"></i> POS</a>
             <?php endif; ?>
             <?php if (in_array($user['role'], ['admin', 'manager'], true)): ?>
-                <a class="btn-secondary" href="shift-close-report.php?date=<?php echo urlencode(date('Y-m-d')); ?>"><i class="fas fa-layer-group"></i> Today's Closes</a>
+                <a class="btn-secondary" href="shift-close-report.php?date=<?php echo urlencode(rh_station_trading_business_date()); ?>"><i class="fas fa-layer-group"></i> Today's Closes</a>
             <?php endif; ?>
             <a class="btn-secondary" href="shift-close-report.php"><i class="fas fa-history"></i> History</a>
         </div>

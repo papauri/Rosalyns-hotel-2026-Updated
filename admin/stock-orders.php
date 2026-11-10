@@ -326,8 +326,9 @@ function reconcileRestaurantOrder(PDO $pdo, int $orderId, array $user): array
                 $changes[] = 'payment ledger left as recorded (refund rows exist)';
             } else {
                 // Reconcile corrects an existing sale; it must never re-date it. An existing ledger row
-                // keeps its own date; a missing one is booked on the order's own paid date, not today.
-                $paidDate = !empty($order['paid_at']) ? substr((string)$order['paid_at'], 0, 10) : null;
+                // keeps its own date; a missing one is booked on the trading day of the order's paid time
+                // (opening to next opening, owner 2026-11-10), not today and not the calendar date.
+                $paidDate = !empty($order['paid_at']) ? rh_station_trading_business_date(new DateTimeImmutable((string)$order['paid_at'], rh_site_timezone())) : null;
                 syncRestaurantOrderPayment($pdo, $order, (int)$user['id'], (string)($order['payment_method'] ?: 'cash'), $paidDate);
                 $changes[] = 'payment ledger synced';
             }
@@ -1069,10 +1070,10 @@ if (!$error || strpos($error, 'not yet') === false) {
         // are cash in the drawer, and a sale refunded/voided later stays in its window with the
         // payout shown separately. Window is the trading window, not DATE(created_at)=CURDATE().
         require_once __DIR__ . '/includes/pos-shift-totals.php';
-        $soShiftWindow = rh_station_union_business_window();
-        $soShiftTotals = rh_pos_shift_totals($pdo, null, $soShiftWindow['start_sql'], $soShiftWindow['end_sql'], $soShiftWindow['start_sql']);
+        $soShiftWindow = rh_station_union_trading_window(); // trading day: opening to next opening (owner 2026-11-10)
+        $soShiftTotals = rh_pos_shift_totals($pdo, null, $soShiftWindow['start_sql'], $soShiftWindow['trading_end_sql'], $soShiftWindow['start_sql']);
         $shiftStmt = $pdo->prepare("SELECT COUNT(*) AS orders_today FROM stock_orders WHERE created_at >= ? AND created_at < ?");
-        $shiftStmt->execute([$soShiftWindow['start_sql'], $soShiftWindow['end_sql']]);
+        $shiftStmt->execute([$soShiftWindow['start_sql'], $soShiftWindow['trading_end_sql']]);
         $shift = $shiftStmt->fetch(PDO::FETCH_ASSOC) ?: [];
         $shift['revenue_today']    = (float)$soShiftTotals['sales_total'];
         $shift['cash_today']       = (float)$soShiftTotals['gross_cash'];
@@ -1113,7 +1114,7 @@ if (!$error || strpos($error, 'not yet') === false) {
         // window each sale was paid - same basis as the Z-report - so the figure meant to catch drawer
         // discrepancies agrees with it. Open orders stay with whoever opened them.
         $soSaleWin   = rh_pos_sale_window_sql('o');
-        $soSaleParam = [$soShiftWindow['start_sql'], $soShiftWindow['end_sql'], $soShiftWindow['start_sql'], $soShiftWindow['end_sql']];
+        $soSaleParam = [$soShiftWindow['start_sql'], $soShiftWindow['trading_end_sql'], $soShiftWindow['start_sql'], $soShiftWindow['trading_end_sql']];
         $soPayer     = rh_pos_payer_sql($pdo, 'o');
         $soLegPayer  = rh_pos_leg_payer_sql($pdo, 's', 'o');
         $cashierMap  = [];
@@ -1137,7 +1138,7 @@ if (!$error || strpos($error, 'not yet') === false) {
         foreach ($cq->fetchAll(PDO::FETCH_ASSOC) as $r) { $cashierAdd($r['uid'], $r['n'], $r['rev'], 0); }
         $cq = $pdo->prepare("SELECT o.created_by AS uid, COUNT(*) AS n FROM stock_orders o
                              WHERE o.status = 'placed' AND o.created_at >= ? AND o.created_at < ? GROUP BY o.created_by");
-        $cq->execute([$soShiftWindow['start_sql'], $soShiftWindow['end_sql']]);
+        $cq->execute([$soShiftWindow['start_sql'], $soShiftWindow['trading_end_sql']]);
         foreach ($cq->fetchAll(PDO::FETCH_ASSOC) as $r) { $cashierAdd($r['uid'], 0, 0, $r['n']); }
         $cashierNames = [];
         if ($cashierMap) {
@@ -1274,9 +1275,9 @@ if (!$error || strpos($error, 'not yet') === false) {
         $soPrevWindow = rh_station_union_window_for_date(
             (new DateTimeImmutable($soShiftWindow['business_date']))->modify('-1 day')->format('Y-m-d')
         );
-        $soPrevTotals = rh_pos_shift_totals($pdo, null, $soPrevWindow['start_sql'], $soPrevWindow['end_sql'], $soPrevWindow['start_sql']);
+        $soPrevTotals = rh_pos_shift_totals($pdo, null, $soPrevWindow['start_sql'], $soPrevWindow['trading_end_sql'], $soPrevWindow['start_sql']);
         $ydayStmt = $pdo->prepare("SELECT COUNT(*) FROM stock_orders WHERE created_at >= ? AND created_at < ?");
-        $ydayStmt->execute([$soPrevWindow['start_sql'], $soPrevWindow['end_sql']]);
+        $ydayStmt->execute([$soPrevWindow['start_sql'], $soPrevWindow['trading_end_sql']]);
         $yesterday = [
             'orders_yesterday'          => (int)$ydayStmt->fetchColumn(),
             'revenue_yesterday'         => (float)$soPrevTotals['sales_total'],

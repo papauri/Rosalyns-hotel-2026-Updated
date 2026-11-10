@@ -14,16 +14,16 @@ if (!hasPermission((int)($user['id'] ?? 0), 'pos_accounting')) {
 
 $site_name = getSetting('site_name') ?: 'Admin';
 $currency_symbol = getSetting('currency_symbol') ?: 'MWK ';
-$businessDate = $_GET['date'] ?? date('Y-m-d');
+$businessDate = $_GET['date'] ?? rh_station_trading_business_date(); // the trading day now belongs to (owner 2026-11-10)
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $businessDate) || !strtotime($businessDate)) {
-    $businessDate = date('Y-m-d');
+    $businessDate = rh_station_trading_business_date();
 }
 // Use the actual trading window for this business date, not calendar midnight — a sale made
 // after midnight during an open trading window must land in the same day's accounting as its
 // receipt number and shift close (see .claude/POS_KDS_ACCOUNTING_PLAN.md D4).
 $dayWindow = rh_station_union_window_for_date($businessDate);
 $dayStart = $dayWindow['start_sql'];
-$dayEnd = $dayWindow['end_sql'];
+$dayEnd = $dayWindow['trading_end_sql']; // opening to next opening, no gap (owner 2026-11-10)
 $message = '';
 $error = '';
 
@@ -170,9 +170,11 @@ function rh_pos_accounting_insert_shift_close(
 
     $columnNames = array_keys($orderedValues);
     $placeholders = implode(', ', array_fill(0, count($columnNames), '?'));
-    $insertSql = "INSERT INTO stock_shift_closes (" . implode(', ', $columnNames) . ", closed_at) VALUES (" . $placeholders . ", NOW())";
+    // closed_at = the moment the window was counted up to (a running day), else now.
+    $closedAt = (string)($closeData['closed_at'] ?? '');
+    $insertSql = "INSERT INTO stock_shift_closes (" . implode(', ', $columnNames) . ", closed_at) VALUES (" . $placeholders . ", " . ($closedAt !== '' ? '?' : 'NOW()') . ")";
     $stmt = $pdo->prepare($insertSql);
-    $stmt->execute(array_values($orderedValues));
+    $stmt->execute($closedAt !== '' ? array_merge(array_values($orderedValues), [$closedAt]) : array_values($orderedValues));
 
     return (int)$pdo->lastInsertId();
 }
@@ -181,7 +183,7 @@ function rh_pos_accounting_log(PDO $pdo, int $orderId, ?int $actorId, ?string $a
 {
     try {
         $stmt = $pdo->prepare("INSERT INTO stock_order_audit (order_id, actor_id, actor_name, event, details, ip_address) VALUES (?, ?, ?, ?, ?, ?)");
-        $stmt->execute([$orderId, $actorId, $actorName, $event, $details, $_SERVER['REMOTE_ADDR'] ?? null]);
+        $stmt->execute([$orderId > 0 ? $orderId : null, $actorId, $actorName, $event, $details, $_SERVER['REMOTE_ADDR'] ?? null]); // no order = NULL (migration 079)
     } catch (Throwable $e) {
         error_log('POS accounting audit log failed: ' . $e->getMessage());
     }
@@ -191,14 +193,22 @@ function rh_pos_accounting_shift_totals(PDO $pdo, int $userId, string $dayStart,
 {
     // Same split-aware, payer-attributed, payout-netted maths as the till close
     // (admin/includes/pos-shift-totals.php), starting after this user's last close.
-    $from = rh_pos_shift_window_start($pdo, $userId, $dayStart, $dayEnd);
-    return rh_pos_shift_totals($pdo, $userId, $from, $dayEnd, $dayStart);
+    // A day still trading is counted up to now (exclusive); the close stores that moment as closed_at.
+    $now = (string)$pdo->query("SELECT NOW()")->fetchColumn();
+    $end = ($now !== '' && $now < $dayEnd) ? $now : $dayEnd;
+    $from = rh_pos_shift_window_start($pdo, $userId, $dayStart, $end);
+    $totals = rh_pos_shift_totals($pdo, $userId, $from, $end, $dayStart);
+    $totals['window_end'] = $end;
+    return $totals;
 }
 
 function rh_pos_accounting_existing_closes(PDO $pdo, string $businessDate): array
 {
-    $stmt = $pdo->prepare("SELECT user_id, COUNT(*) AS close_count FROM stock_shift_closes WHERE shift_date = ? GROUP BY user_id");
-    $stmt->execute([$businessDate]);
+    // Closed for this trading day = a close dated this day OR the next one: the next day's close looks
+    // back one trading day, so it already counted this day's unclosed sales (owner 2026-11-10: every
+    // sale in exactly one close; never offer or expect that money again here).
+    $stmt = $pdo->prepare("SELECT user_id, COUNT(*) AS close_count FROM stock_shift_closes WHERE shift_date IN (?, ?) GROUP BY user_id");
+    $stmt->execute(rh_pos_close_dates_covering($businessDate));
     $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     $map = [];
     foreach ($rows as $row) {
@@ -216,7 +226,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $businessDate = $postedDate;
             $dayWindow = rh_station_union_window_for_date($businessDate);
             $dayStart = $dayWindow['start_sql'];
-            $dayEnd = $dayWindow['end_sql'];
+            $dayEnd = $dayWindow['trading_end_sql'];
         }
 
         try {
@@ -279,6 +289,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         'user_id' => $targetUserId,
                         'user_name' => $targetName,
                         'shift_date' => $businessDate,
+                        'closed_at' => ($totals['window_end'] ?? $dayEnd) < $dayEnd ? $totals['window_end'] : '',
                         'expected_cash' => $totals['drawer_cash'],
                         'declared_cash' => $declaredCash,
                         'variance_cash' => $varianceCash,

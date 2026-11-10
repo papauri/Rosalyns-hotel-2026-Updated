@@ -50,7 +50,9 @@ $user = [
 ];
 $currency_symbol = getSetting('currency_symbol');
 $siteName = getSetting('site_name') ?: 'Hotel';
-$restaurantWindow = rh_station_union_business_window();
+// Money / till window: the trading day (opening to next opening, owner 2026-11-10), so a sale after
+// closing time counts with the day that ended. Kitchen/bar windows below stay open-hours (open/closed state).
+$restaurantWindow = rh_station_union_trading_window();
 $kitchenWindow    = rh_station_business_window('kitchen');
 $barWindow        = rh_station_business_window('bar');
 
@@ -99,7 +101,7 @@ function pos_logAudit(PDO $pdo, int $orderId, ?int $actorId, ?string $actorName,
 {
     try {
         $pdo->prepare("INSERT INTO stock_order_audit (order_id, actor_id, actor_name, event, details, ip_address) VALUES (?, ?, ?, ?, ?, ?)")
-            ->execute([$orderId, $actorId, $actorName, $event, $details, $_SERVER['REMOTE_ADDR'] ?? null]);
+            ->execute([$orderId > 0 ? $orderId : null, $actorId, $actorName, $event, $details, $_SERVER['REMOTE_ADDR'] ?? null]); // no order (shift/float/86/barcode) = NULL (migration 079)
     } catch (Throwable $e) {
         error_log('pos_logAudit: ' . $e->getMessage());
     }
@@ -1025,7 +1027,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 //    happen in; the original sale stays in its own shift and is never restated.
                 require_once __DIR__ . '/includes/pos-shift-totals.php';
                 $windowStart = $restaurantWindow['start_sql'];
-                $windowEnd = $restaurantWindow['end_sql'];
+                // The close counts sales up to the moment it is recorded (exclusive) and stores that same
+                // moment as closed_at; the next close starts there, so a same-second sale is counted once.
+                $closeAt = (string)$pdo->query("SELECT NOW()")->fetchColumn();
+                $windowEnd = ($closeAt !== '' && $closeAt < $restaurantWindow['trading_end_sql']) ? $closeAt : $restaurantWindow['trading_end_sql'];
                 $shiftFrom = rh_pos_shift_window_start($pdo, (int)$user['id'], $windowStart, $windowEnd);
                 $E = rh_pos_shift_totals($pdo, (int)$user['id'], $shiftFrom, $windowEnd, $windowStart);
                 // Expected cash in the drawer = opening float + cash sales - cash refunds/voids paid out.
@@ -1056,8 +1061,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Net sales for this window = net takings across tenders (same figure as admin/pos-accounting.php).
                 $closeRevenue = round((float)$E['cash'] + (float)$E['mobile'] + (float)$E['card'], 2);
                 $closeCols = "user_id, user_name, shift_date, closed_at, expected_cash, declared_cash, variance_cash, expected_mobile, declared_mobile, variance_mobile, expected_card, declared_card, variance_card, orders_count, voids_count, voids_amount, notes, ip_address";
-                $closePh = "?, ?, ?, NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?";
-                $closeVals = [$user['id'], $user['full_name'], $restaurantWindow['business_date'], $expCashDrawer, $declCash, $vCash, (float)$E['mobile'], $declMobile, $vMobile, (float)$E['card'], $declCard, $vCard, (int)$E['orders_count'], (int)$E['voids_count'], (float)$E['voids_amount'], $shiftNote ?: null, $_SERVER['REMOTE_ADDR'] ?? null];
+                $closePh = "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?";
+                $closeVals = [$user['id'], $user['full_name'], $restaurantWindow['business_date'], $windowEnd, $expCashDrawer, $declCash, $vCash, (float)$E['mobile'], $declMobile, $vMobile, (float)$E['card'], $declCard, $vCard, (int)$E['orders_count'], (int)$E['voids_count'], (float)$E['voids_amount'], $shiftNote ?: null, $_SERVER['REMOTE_ADDR'] ?? null];
                 if (rh_pos_col_exists($pdo, 'stock_shift_closes', 'total_revenue')) {
                     $closeCols .= ', total_revenue';
                     $closePh .= ', ?';
@@ -1745,8 +1750,8 @@ function pos_fetch_shift_summary(PDO $pdo, array $restaurantWindow, int $userId)
      * taken per tender (gross, before refund payouts). The expected drawer figure is never sent
      * to the browser: the close is a blind count and the server computes the variance. */
     require_once __DIR__ . '/includes/pos-shift-totals.php';
-    $from = rh_pos_shift_window_start($pdo, $userId, $restaurantWindow['start_sql'], $restaurantWindow['end_sql']);
-    $t = rh_pos_shift_totals($pdo, $userId, $from, $restaurantWindow['end_sql'], $restaurantWindow['start_sql']);
+    $from = rh_pos_shift_window_start($pdo, $userId, $restaurantWindow['start_sql'], $restaurantWindow['trading_end_sql']);
+    $t = rh_pos_shift_totals($pdo, $userId, $from, $restaurantWindow['trading_end_sql'], $restaurantWindow['start_sql']);
     return [
         'orders_today' => (int)$t['orders_count'],
         'revenue_today' => (float)$t['sales_total'],
@@ -2041,7 +2046,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'manager_auth') {
 }
 
 $myRecent = $pdo->prepare("SELECT id, reference, total_amount, payment_method, change_due, status, discount_amount, created_at FROM stock_orders WHERE created_by = ? AND created_at >= ? AND created_at < ? ORDER BY created_at DESC LIMIT 10");
-$myRecent->execute([$user['id'], $restaurantWindow['start_sql'], $restaurantWindow['end_sql']]);
+$myRecent->execute([$user['id'], $restaurantWindow['start_sql'], $restaurantWindow['trading_end_sql']]);
 $recent = $myRecent->fetchAll(PDO::FETCH_ASSOC);
 
 $restaurantTables = rh_restaurant_active_tables($pdo);
@@ -2173,7 +2178,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'orders_today') {
             ORDER BY o.created_at DESC, o.id DESC
             LIMIT 400
         ");
-        $todaySt->execute([$restaurantWindow['start_sql'], $restaurantWindow['end_sql']]);
+        $todaySt->execute([$restaurantWindow['start_sql'], $restaurantWindow['trading_end_sql']]);
         $todayRows = [];
         foreach ($todaySt->fetchAll(PDO::FETCH_ASSOC) as $tr) {
             $isRoom = ((string)$tr['order_type'] === 'room_service');
@@ -2239,7 +2244,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'stations') {
               AND o.status NOT IN ('voided','cancelled')
         ");
         foreach ($stations as $st) {
-            $countStmt->execute([$st, $restaurantWindow['start_sql'], $restaurantWindow['end_sql']]);
+            $countStmt->execute([$st, $restaurantWindow['start_sql'], $restaurantWindow['trading_end_sql']]);
             $r = $countStmt->fetch(PDO::FETCH_ASSOC) ?: [];
             $counts[$st] = [
                 'pending'     => (int)($r['pending']     ?? 0),
@@ -2268,7 +2273,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'stations') {
         ");
         $tickets = [];
         foreach ($stations as $st) {
-            $itemsStmt->execute([$st, $restaurantWindow['start_sql'], $restaurantWindow['end_sql']]);
+            $itemsStmt->execute([$st, $restaurantWindow['start_sql'], $restaurantWindow['trading_end_sql']]);
             $tickets[$st] = $itemsStmt->fetchAll(PDO::FETCH_ASSOC);
         }
 
@@ -2282,7 +2287,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'stations') {
                    COALESCE(SUM(CASE WHEN status='paid' THEN total_amount ELSE 0 END),0) AS revenue
             FROM stock_orders WHERE created_at >= ? AND created_at < ?
         ");
-        $todayTotalsStmt->execute([$restaurantWindow['start_sql'], $restaurantWindow['end_sql']]);
+        $todayTotalsStmt->execute([$restaurantWindow['start_sql'], $restaurantWindow['trading_end_sql']]);
         $todayTotals = $todayTotalsStmt->fetch(PDO::FETCH_ASSOC) ?: ['orders_count' => 0, 'revenue' => 0];
 
         echo json_encode([
@@ -2327,7 +2332,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'resto_orders') {
             ORDER BY o.created_at DESC
             LIMIT 150
         ");
-        $restoStmt->execute([$restaurantWindow['start_sql'], $restaurantWindow['end_sql']]);
+        $restoStmt->execute([$restaurantWindow['start_sql'], $restaurantWindow['trading_end_sql']]);
         $restoOrders = $restoStmt->fetchAll(PDO::FETCH_ASSOC);
         $restoSumStmt = $pdo->prepare("
             SELECT COUNT(*) AS total,
@@ -2339,7 +2344,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'resto_orders') {
               AND created_at < ?
               AND status NOT IN ('voided','cancelled')
         ");
-        $restoSumStmt->execute([$restaurantWindow['start_sql'], $restaurantWindow['end_sql']]);
+        $restoSumStmt->execute([$restaurantWindow['start_sql'], $restaurantWindow['trading_end_sql']]);
         $restoSum = $restoSumStmt->fetch(PDO::FETCH_ASSOC) ?: [];
         echo json_encode(['orders' => $restoOrders, 'summary' => $restoSum]);
     } catch (Throwable $e) {
@@ -2388,7 +2393,7 @@ if ($posCanStations) {
               AND o.status NOT IN ('voided','cancelled')
         ");
         foreach (['kitchen', 'bar', 'coffee_bar'] as $st) {
-            $cs->execute([$st, $restaurantWindow['start_sql'], $restaurantWindow['end_sql']]);
+            $cs->execute([$st, $restaurantWindow['start_sql'], $restaurantWindow['trading_end_sql']]);
             $r = $cs->fetch(PDO::FETCH_ASSOC) ?: [];
             $adminStationsInit['counts'][$st] = [
                 'pending'     => (int)($r['pending']     ?? 0),

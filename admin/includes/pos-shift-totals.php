@@ -85,24 +85,116 @@ if (!function_exists('rh_pos_sale_window_sql')) {
     }
 }
 
+if (!function_exists('rh_pos_shift_window_floor')) {
+    /** Earliest start of a cashier close: the PREVIOUS trading day's opening (trading start - 1 day). Pure. */
+    function rh_pos_shift_window_floor(string $windowStart): string
+    {
+        return (new DateTimeImmutable($windowStart))->modify('-1 day')->format('Y-m-d H:i:s');
+    }
+}
+
+if (!function_exists('rh_pos_shift_window_from')) {
+    /** Close window start from the user's last close (null = none since the floor). Pure. */
+    function rh_pos_shift_window_from(?string $lastClose, string $floor): string
+    {
+        return ($lastClose !== null && $lastClose !== '' && $lastClose > $floor) ? $lastClose : $floor;
+    }
+}
+
+if (!function_exists('rh_pos_close_covered_end')) {
+    /**
+     * Up to when a stored close counted sales: its closed_at, never past the end of its own trading
+     * day (an accountant close of a past day is recorded later but only covers that day). Pure.
+     */
+    function rh_pos_close_covered_end(string $closedAt, string $shiftDate): string
+    {
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $shiftDate)) {
+            return $closedAt;
+        }
+        require_once __DIR__ . '/../../includes/station-hours.php';
+        $tradingEnd = (string)rh_station_union_window_for_date($shiftDate)['trading_end_sql'];
+        return $closedAt < $tradingEnd ? $closedAt : $tradingEnd;
+    }
+}
+
+if (!function_exists('rh_pos_shift_window_from_closes')) {
+    /**
+     * Close window start from the user's other closes ([closed_at, shift_date] rows): the latest
+     * covered end before $windowEnd, never before $floor. Pure.
+     */
+    function rh_pos_shift_window_from_closes(array $closes, string $floor, string $windowEnd): string
+    {
+        $last = null;
+        foreach ($closes as $c) {
+            $covered = rh_pos_close_covered_end((string)$c['closed_at'], (string)($c['shift_date'] ?? ''));
+            if ($covered < $windowEnd && ($last === null || $covered > $last)) {
+                $last = $covered;
+            }
+        }
+        return rh_pos_shift_window_from($last, $floor);
+    }
+}
+
+if (!function_exists('rh_pos_close_dates_covering')) {
+    /**
+     * Shift dates whose closes may have counted sales of trading day $date: that day, and the next
+     * one (its close looks back one trading day). A user with a close on either is closed for $date. Pure.
+     */
+    function rh_pos_close_dates_covering(string $date): array
+    {
+        return [$date, (new DateTimeImmutable($date))->modify('+1 day')->format('Y-m-d')];
+    }
+}
+
 if (!function_exists('rh_pos_shift_window_start')) {
     /**
-     * A till close's window starts at the previous close's end (closed_at) for that user,
-     * so a second close the same business day never re-counts the first close's sales.
+     * Every till sale lands in exactly one cashier close (owner 2026-11-10). A close's window
+     * starts where that user's previous close stopped counting (so nothing is counted twice),
+     * looking back as far as the PREVIOUS trading day's opening (so a sale paid after a cashier's
+     * 03:30 close, or a night shift that only closes after the 06:00 opening, is still counted,
+     * once, in the next close). $excludeCloseId: rebuilding a stored close (leave itself out).
+     * Day reports are unaffected: they stay on the trading business date.
      */
-    function rh_pos_shift_window_start(PDO $pdo, int $userId, string $windowStart, string $windowEnd): string
+    function rh_pos_shift_window_start(PDO $pdo, int $userId, string $windowStart, string $windowEnd, ?int $excludeCloseId = null): string
     {
+        $floor = rh_pos_shift_window_floor($windowStart);
         try {
-            $st = $pdo->prepare("SELECT MAX(closed_at) FROM stock_shift_closes WHERE user_id = ? AND closed_at >= ? AND closed_at < ?");
-            $st->execute([$userId, $windowStart, $windowEnd]);
-            $last = $st->fetchColumn();
-            if ($last && $last > $windowStart) {
-                return (string)$last;
+            // No upper bound on closed_at: a close recorded LATER (e.g. an accountant catching up on an earlier day)
+            // still counts by what it covered (its counted-up-to time, filtered in rh_pos_shift_window_from_closes).
+            $sql = "SELECT closed_at, shift_date FROM stock_shift_closes WHERE user_id = ? AND closed_at >= ?";
+            $params = [$userId, $floor];
+            if ($excludeCloseId !== null) {
+                $sql .= " AND id <> ?";
+                $params[] = $excludeCloseId;
             }
+            $st = $pdo->prepare($sql);
+            $st->execute($params);
+            return rh_pos_shift_window_from_closes($st->fetchAll(PDO::FETCH_ASSOC) ?: [], $floor, $windowEnd);
         } catch (Throwable $e) {
             error_log('rh_pos_shift_window_start: ' . $e->getMessage());
         }
         return $windowStart;
+    }
+}
+
+if (!function_exists('rh_pos_close_window')) {
+    /**
+     * The window a stored close counted: [from, end). end = when it was recorded (exclusive), never past its
+     * trading day's end; from = as the till computed it. Used by every rebuild (Z report, revenue
+     * rebuild, drift report) so each close is read against its OWN window.
+     */
+    function rh_pos_close_window(PDO $pdo, array $close): array
+    {
+        require_once __DIR__ . '/../../includes/station-hours.php';
+        $biz = rh_station_union_window_for_date((string)$close['shift_date']);
+        $end = (string)$biz['trading_end_sql'];
+        // Up to the moment the close was recorded (exclusive), the same end the till counted to.
+        $closedAt = (string)($close['closed_at'] ?? '');
+        if ($closedAt !== '' && $closedAt < $end) {
+            $end = $closedAt;
+        }
+        $from = rh_pos_shift_window_start($pdo, (int)$close['user_id'], (string)$biz['start_sql'], $end, (int)($close['id'] ?? 0));
+        return ['from' => $from, 'end' => $end, 'day_start' => (string)$biz['start_sql']];
     }
 }
 
@@ -500,22 +592,9 @@ if (!function_exists('rh_pos_close_revenue')) {
             return 0.0;
         }
         try {
-            require_once __DIR__ . '/../../includes/station-hours.php';
-            $biz = rh_station_union_window_for_date((string)$close['shift_date']);
-            $start = $biz['start_sql'];
-            $end = $biz['end_sql'];
-            $closedTs = strtotime((string)$close['closed_at']);
-            if ($closedTs) {
-                $closedEnd = date('Y-m-d H:i:s', $closedTs + 1);
-                if ($closedEnd < $end) {
-                    $end = $closedEnd;
-                }
-            }
-            $pst = $pdo->prepare("SELECT MAX(closed_at) FROM stock_shift_closes WHERE user_id = ? AND id < ? AND closed_at >= ? AND closed_at < ?");
-            $pst->execute([(int)$close['user_id'], (int)($close['id'] ?? 0), $start, $end]);
-            $prev = $pst->fetchColumn();
-            $from = ($prev && $prev > $start) ? (string)$prev : $start;
-            $t = rh_pos_shift_totals($pdo, (int)$close['user_id'], $from, $end, $biz['start_sql']);
+            // The close's OWN window, exactly as the till counted it.
+            $w = rh_pos_close_window($pdo, $close);
+            $t = rh_pos_shift_totals($pdo, (int)$close['user_id'], $w['from'], $w['end'], $w['day_start']);
             return round((float)$t['cash'] + (float)$t['mobile'] + (float)$t['card'], 2);
         } catch (Throwable $e) {
             error_log('rh_pos_close_revenue: ' . $e->getMessage());
@@ -594,7 +673,7 @@ if (!function_exists('rh_pos_eod_summary')) {
         require_once __DIR__ . '/../../includes/station-hours.php';
         $w = rh_station_union_window_for_date($date);
         $a = $w['start_sql'];
-        $b = $w['end_sql'];
+        $b = $w['trading_end_sql']; // trading day: opening to next opening, no gap (owner 2026-11-10)
         $saleCond = "((o.paid_at IS NOT NULL AND o.status IN ('paid','completed','refunded','voided') AND o.paid_at >= ? AND o.paid_at < ?)"
             . " OR (o.paid_at IS NULL AND o.status IN ('paid','completed') AND o.created_at >= ? AND o.created_at < ?))";
         $saleParams = [$a, $b, $a, $b];

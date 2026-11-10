@@ -691,7 +691,7 @@ if (!function_exists('rh_sa_parse_filters')) {
             case 'order_audit':
                 $row['type'] = 'till';
                 $ev = preg_match('/^[A-Za-z0-9_ -]{1,40}$/', (string)$r['event']) ? rh_sa_prettify((string)$r['event']) : 'event';
-                $row['what'] = 'Order #' . (int)$r['order_id'] . ': ' . $ev;
+                $row['what'] = (int)($r['order_id'] ?? 0) > 0 ? 'Order #' . (int)$r['order_id'] . ': ' . $ev : $ev; // shift/float/86 rows have no order
                 $row['where'] = 'Till';
                 break;
             case 'shift_open':

@@ -67,8 +67,8 @@ function rh_queue_restaurant_receipt(PDO $pdo, int $orderId, int $paymentId): vo
  */
 function rh_sync_restaurant_payment(PDO $pdo, int $orderId, string $reference, ?string $customerName, array $vatParts, int $recordedBy, string $mappedMethod, ?string $businessDate = null): int
 {
-    if ($businessDate === null && function_exists('rh_station_union_business_window')) {
-        $businessDate = rh_station_union_business_window()['business_date'] ?? null;
+    if ($businessDate === null && function_exists('rh_station_union_trading_window')) {
+        $businessDate = rh_station_union_trading_window()['business_date'] ?? null; // trading day (owner 2026-11-10)
     }
     if ($businessDate === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $businessDate)) {
         $businessDate = date('Y-m-d');
@@ -169,8 +169,8 @@ function rh_restaurant_order_has_split_legs(PDO $pdo, int $orderId, string $refe
  */
 function rh_record_restaurant_split_leg_payment(PDO $pdo, int $orderId, string $reference, ?string $customerName, array $vatParts, int $recordedBy, string $mappedMethod, int $legNumber, bool $isFinalLeg, ?string $businessDate = null): int
 {
-    if ($businessDate === null && function_exists('rh_station_union_business_window')) {
-        $businessDate = rh_station_union_business_window()['business_date'] ?? null;
+    if ($businessDate === null && function_exists('rh_station_union_trading_window')) {
+        $businessDate = rh_station_union_trading_window()['business_date'] ?? null; // trading day (owner 2026-11-10)
     }
     if ($businessDate === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $businessDate)) {
         $businessDate = date('Y-m-d');
@@ -235,8 +235,8 @@ function rh_record_restaurant_split_leg_payment(PDO $pdo, int $orderId, string $
  */
 function rh_reverse_restaurant_payments(PDO $pdo, int $orderId, string $reference, string $refPrefix, string $refundReasonEnum, string $notes, int $userId, ?array $fallback = null, ?string $businessDate = null): array
 {
-    if ($businessDate === null && function_exists('rh_station_union_business_window')) {
-        $businessDate = rh_station_union_business_window()['business_date'] ?? null;
+    if ($businessDate === null && function_exists('rh_station_union_trading_window')) {
+        $businessDate = rh_station_union_trading_window()['business_date'] ?? null; // trading day (owner 2026-11-10)
     }
     if ($businessDate === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $businessDate)) {
         $businessDate = date('Y-m-d');
@@ -522,8 +522,8 @@ function rh_create_pending_refund_allocation(PDO $pdo, int $orderId, string $ref
     if ($amount <= $tolerance) {
         return ['allocated' => 0.0, 'rows' => 0, 'shortfall' => 0.0];
     }
-    if ($businessDate === null && function_exists('rh_station_union_business_window')) {
-        $businessDate = rh_station_union_business_window()['business_date'] ?? null;
+    if ($businessDate === null && function_exists('rh_station_union_trading_window')) {
+        $businessDate = rh_station_union_trading_window()['business_date'] ?? null; // trading day (owner 2026-11-10)
     }
     if ($businessDate === null || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $businessDate)) {
         $businessDate = date('Y-m-d');
