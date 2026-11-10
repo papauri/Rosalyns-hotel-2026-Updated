@@ -450,16 +450,19 @@ try {
     $briefB = rh_dec_brief($pdo, $adm, true);
     $n0 = $calls();
 
-    // The per-card mark: only what a sentence may quote; a quoted share is re-checked against the new figures
+    // The per-card mark: only what a sentence may quote. Owner 2026-11-11: the share of takings is never sent to the
+    // writer (it would give away the takings to people without dashboard_takings), so a sentence quoting it is never shown.
     $hc = array_merge($fx('h', 5000.0), ['share_pct' => 5.0]);
     $hh = ['h' => rh_dec_card_hash($hc, 'MWK')];
     $quote = ['h' => ['decision' => 'Decide on h', 'why_now' => 'It is 5% of takings.', 'recommendation' => 'Act.']];
+    $plain = ['h' => ['decision' => 'Decide on h', 'why_now' => 'Act soon.', 'recommendation' => 'Act.']];
     check(rh_dec_card_hash($hc, 'MWK') === rh_dec_card_hash(array_merge($hc, ['share_pct' => 9.0, 'urgency' => 0.2, 'confidence' => 0.4]), 'MWK')
         && rh_dec_card_hash($hc, 'MWK') !== rh_dec_card_hash(array_merge($hc, ['at_stake' => 5001.0]), 'MWK'),
         'a card\'s mark changes with its money figures, not with the share of takings, urgency or confidence (they move with every payment)');
-    check(rh_dec_card_state($hc, $quote, $hh, 'MWK') === 'shown' && rh_dec_card_state(array_merge($hc, ['share_pct' => 6.0]), $quote, $hh, 'MWK') === 'stale'
-        && rh_dec_card_state(array_merge($hc, ['at_stake' => 5001.0]), ['h' => ['decision' => 'Decide on h', 'why_now' => 'Act soon.', 'recommendation' => 'Act.']], $hh, 'MWK') === 'stale',
-        'a sentence that quotes a figure which has since moved is never shown (hidden until worded again)');
+    check(rh_dec_card_state($hc, $plain, $hh, 'MWK') === 'shown' && rh_dec_card_state(array_merge($hc, ['share_pct' => 6.0]), $plain, $hh, 'MWK') === 'shown'
+        && rh_dec_card_state($hc, $quote, $hh, 'MWK') === 'stale'
+        && rh_dec_card_state(array_merge($hc, ['at_stake' => 5001.0]), $plain, $hh, 'MWK') === 'stale',
+        'a sentence quoting the share of takings is never shown; a moved money figure hides the card until it is worded again');
 
     // Within the window: nothing new is asked, the endpoint does nothing
     $hFresh = rh_review_panel('stock');

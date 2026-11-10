@@ -114,6 +114,50 @@ function rh_dec_requires_ok(array $user, array $req): bool
 }
 
 /**
+ * Owner 2026-11-11 ("only finance team for now and admin"): checks whose cards quote a hotel-wide money standing need
+ * ALL of these Dashboard figures permissions too (admin/includes/permissions.php; default admin + accountant only).
+ * Owed to us total -> dashboard_owed; takings (and VAT worked out on them) -> dashboard_takings; till sales -> dashboard_pos_sales.
+ */
+function rh_dec_figure_keys(): array
+{
+    return [
+        'acc_collections' => ['dashboard_owed'],
+        'acc_cash'        => ['dashboard_takings', 'dashboard_owed'],
+        'acc_profit'      => ['dashboard_takings', 'dashboard_pos_sales'],
+        'acc_tax'         => ['dashboard_takings'],
+    ];
+}
+
+/** True when this person holds every Dashboard figures permission the check's cards need (none = true). */
+function rh_dec_figures_ok(array $user, string $check): bool
+{
+    $uid = (int)($user['id'] ?? 0);
+    foreach (rh_dec_figure_keys()[$check] ?? [] as $k) {
+        if (!rh_ai_has_perm($uid, $k)) {
+            return false;
+        }
+    }
+    return true;
+}
+
+/**
+ * May this person see a card / check of $area: its requirement read from the LIVE finder registry (a card cached
+ * earlier today keeps the rule it was built with only as a fallback) and the Dashboard figures permissions it needs.
+ */
+function rh_dec_check_ok(array $user, string $area, string $check, array $cachedReq = []): bool
+{
+    $def = rh_dec_finders()[$area][$check] ?? null;
+    $req = is_array($def) ? (array)($def['requires'] ?? []) : $cachedReq;
+    return rh_dec_requires_ok($user, $req) && rh_dec_figures_ok($user, $check);
+}
+
+/** rh_dec_check_ok for one card (its area and check are stored on it at build time). */
+function rh_dec_card_ok(array $user, array $card, string $area = ''): bool
+{
+    return rh_dec_check_ok($user, (string)($card['area'] ?? $area), (string)($card['check'] ?? ''), (array)($card['requires'] ?? []));
+}
+
+/**
  * A module switch for the fixed checks: true / false, or null when the switch cannot be read here. null is never
  * "off": a check that depends on it reads anyway and is marked partial ("could not check in full").
  */
@@ -2558,9 +2602,9 @@ function rh_dec_cache_get(PDO $db, string $area, ?string $day = null): ?array
 }
 
 /**
- * What a card's wording may quote, hashed: the fixed texts and every money figure (as shown). The share of takings,
- * urgency and confidence are left out: they move with every payment and only rank the cards; a sentence that quotes
- * the share is still checked against the new figures by rh_dec_wording_ok (rh_dec_word_valid).
+ * What a card's wording may quote, hashed: the fixed texts and every money figure (as shown). Urgency and confidence
+ * are left out: they move with every payment and only rank the cards. The share of takings is never sent to the writer
+ * (rh_dec_writer_payload), so a sentence quoting it fails rh_dec_wording_ok.
  */
 function rh_dec_card_hash(array $card, string $cur): string
 {
@@ -2887,14 +2931,18 @@ function rh_dec_refresh(PDO $db, string $area, bool $allowWriter, int $uid, bool
 
 // ── Writer: one model call per area per refresh ──────────────────────────────
 
-/** What the model sees for the shown cards: ids, fixed wording, figures. Never an evidence row. */
+/**
+ * What the model sees for the shown cards: ids, fixed wording, figures. Never an evidence row. Never the share of takings
+ * (owner 2026-11-11): one wording is shown to everyone who may see the card, and the share with the money involved
+ * would give away the takings to people without dashboard_takings; it only ranks the cards.
+ */
 function rh_dec_writer_payload(array $main, string $cur): array
 {
     $out = [];
     foreach ($main as $c) {
         $out[] = [
             'id' => (string)$c['key'], 'decision' => (string)$c['decision'], 'why_now' => (string)$c['why_now'],
-            'at_stake' => $c['at_stake'] !== null ? rh_dec_fmt($cur, (float)$c['at_stake']) : null, 'share_of_takings_pct' => $c['share_pct'],
+            'at_stake' => $c['at_stake'] !== null ? rh_dec_fmt($cur, (float)$c['at_stake']) : null,
             'urgency' => round((float)$c['urgency'], 2), 'confidence' => round((float)$c['confidence'], 2),
             'options' => array_map(static fn($o) => ['label' => $o['label'], 'best' => $o['best'] !== null ? rh_dec_fmt($cur, (float)$o['best']) : null,
                 'expected' => $o['expected'] !== null ? rh_dec_fmt($cur, (float)$o['expected']) : null, 'worst' => $o['worst'] !== null ? rh_dec_fmt($cur, (float)$o['worst']) : null], (array)$c['options']),
@@ -3123,16 +3171,20 @@ function rh_dec_for_viewer(PDO $db, array $user, string $area): ?array
     if ($c === null || !is_array($c['wording'])) {
         return null; // never worded, or the last call failed: nothing
     }
-    $checks = array_values(array_filter($c['checks'], static fn($k) => rh_dec_requires_ok($user, (array)($k['requires'] ?? []))));
+    $checks = array_values(array_filter($c['checks'], static fn($k) => rh_dec_check_ok($user, $area, (string)($k['id'] ?? ''), (array)($k['requires'] ?? []))));
     if (!$checks) {
         return null;
     }
     // Only cards worded for their current figures (a changed card is hidden until it is worded again)
     $states = rh_dec_states($c);
     $words = array_filter((array)($c['wording']['cards'] ?? []), static fn($k) => ($states[(string)$k] ?? '') === 'shown', ARRAY_FILTER_USE_KEY);
-    $view = static function (array $card) use ($user, $words): array {
+    $takingsOk = rh_ai_has_perm((int)($user['id'] ?? 0), 'dashboard_takings');
+    $view = static function (array $card) use ($user, $words, $takingsOk): array {
         if (isset($words[$card['key']])) {
             $card = array_merge($card, $words[$card['key']]);
+        }
+        if (!$takingsOk) {
+            $card['share_pct'] = null; // owner 2026-11-11: money involved / share would give away the takings (dashboard_takings)
         }
         $card['link'] = !empty($card['link']) ? rh_ai_deep_link($user, (string)$card['link'][0], (string)$card['link'][1]) : null;
         return $card;
@@ -3140,7 +3192,7 @@ function rh_dec_for_viewer(PDO $db, array $user, string $area): ?array
     // Only cards the model worded in a call that worked are shown (never a card in its fixed wording), in its order
     $main = [];
     foreach ($c['main'] as $card) {
-        if (isset($words[(string)$card['key']]) && rh_dec_requires_ok($user, (array)($card['requires'] ?? []))) {
+        if (isset($words[(string)$card['key']]) && rh_dec_card_ok($user, $card, $area)) {
             $main[(string)$card['key']] = $view($card);
         }
     }
@@ -3156,13 +3208,14 @@ function rh_dec_for_viewer(PDO $db, array $user, string $area): ?array
     }
     $more = [];
     foreach ($c['more'] as $card) {
-        if (rh_dec_requires_ok($user, (array)($card['requires'] ?? []))) {
+        if (rh_dec_card_ok($user, $card, $area)) {
             $more[] = $view($card);
         }
     }
     $failed = count(array_filter($checks, static fn($k) => empty($k['ok']) || !empty($k['partial'])));
     return ['area' => $area, 'main' => array_values($main), 'more' => $more, 'checks' => $checks, 'checks_failed' => $failed,
-        'base' => $c['base'], 'cur' => $c['cur'], 'built_at' => $c['built_at'], 'threshold_pct' => rh_dec_threshold_pct()];
+        // the takings base only for dashboard_takings holders; everyone else gets the period length the panel needs
+        'base' => $takingsOk ? $c['base'] : ['days' => (int)(((array)$c['base'])['days'] ?? 30)], 'cur' => $c['cur'], 'built_at' => $c['built_at'], 'threshold_pct' => rh_dec_threshold_pct()];
 }
 
 /**
@@ -3188,7 +3241,7 @@ function rh_dec_pending(PDO $db, array $user, string $area): bool
         return false;
     }
     $states = rh_dec_states($c);
-    $mine = array_filter($c['main'], static fn($card) => ($states[(string)$card['key']] ?? 'stale') === 'stale' && rh_dec_requires_ok($user, (array)($card['requires'] ?? [])));
+    $mine = array_filter($c['main'], static fn($card) => ($states[(string)$card['key']] ?? 'stale') === 'stale' && rh_dec_card_ok($user, $card, $area));
     return $mine !== [];
 }
 
@@ -3302,7 +3355,7 @@ function rh_dec_brief(PDO $db, array $user, bool $fresh = false): ?array
         $y = rh_dec_cache_get($db, $area, date('Y-m-d', strtotime('-1 day')));
         if ($y !== null) {
             $todayKeys = array_column($v['main'], 'key');
-            $yKeys = array_column(array_filter($y['main'], static fn($c) => rh_dec_requires_ok($user, (array)($c['requires'] ?? []))), 'key');
+            $yKeys = array_column(array_filter($y['main'], static fn($c) => rh_dec_card_ok($user, $c, $area)), 'key');
             foreach (array_diff($todayKeys, $yKeys) as $k) {
                 $changed['new'][] = $k;
             }
@@ -3356,6 +3409,9 @@ function rh_dec_brief_sigs(PDO $db, array $user): array
         $c = rh_dec_cache_get($db, $area);
         $out[$area] = $c === null ? '' : hash('sha256', $c['hash'] . '|' . json_encode($c['wording']));
     }
+    // Owner 2026-11-11: a stored brief is rebuilt when this person's Dashboard figures permissions differ from when it was made
+    $uid = (int)($user['id'] ?? 0);
+    $out['_figures'] = implode('', array_map(static fn($k) => rh_ai_has_perm($uid, $k) ? '1' : '0', ['dashboard_takings', 'dashboard_owed', 'dashboard_pos_sales']));
     return $out;
 }
 

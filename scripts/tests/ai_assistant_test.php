@@ -47,6 +47,73 @@ function ait_temp_user(PDO $pdo, string $role, string $password): array
     return ['id' => (int)$pdo->lastInsertId(), 'role' => $role, 'username' => $u, 'full_name' => 'Aitest Temp'];
 }
 
+/* ── Dashboard figures (owner 2026-11-11): pure, NO database (runs before config/database.php). The briefing, alerts,
+ *    weekly digest (its points come from the briefing) and Decisions / Today's brief show hotel-wide takings, the Owed to us total and till sales only to
+ *    people holding dashboard_takings / dashboard_owed / dashboard_pos_sales (default admin + accountant). Direct
+ *    questions keep the screens' own permissions. Run alone: AI_TEST_DASH_FIGURES_ONLY=1 php scripts/tests/ai_assistant_test.php ── */
+echo "\n-- Dashboard figures (pure) --\n";
+try {
+    $dfDec = (string)file_get_contents($root . '/includes/ai/ai-decisions.php');
+    $dfIns = (string)file_get_contents($root . '/includes/ai/ai-insights.php');
+    $dfFn = static function (string $src, string $name, int $len = 4000): string {
+        $p = strpos($src, 'function ' . $name . '(');
+        return $p === false ? '' : substr($src, $p, $len);
+    };
+    // Decisions: the checks quoting a money standing need every matching key
+    $dfMap = $dfFn($dfDec, 'rh_dec_figure_keys', 600);
+    check(strpos($dfMap, "'acc_collections' => ['dashboard_owed']") !== false && strpos($dfMap, "'acc_cash'        => ['dashboard_takings', 'dashboard_owed']") !== false
+        && strpos($dfMap, "'acc_profit'      => ['dashboard_takings', 'dashboard_pos_sales']") !== false && strpos($dfMap, "'acc_tax'         => ['dashboard_takings']") !== false,
+        'Decisions: money owed, cash outlook, takings by department and VAT on takings need their Dashboard figures permissions');
+    check(strpos($dfFn($dfDec, 'rh_dec_figures_ok', 400), 'return false;') !== false && strpos($dfFn($dfDec, 'rh_dec_check_ok', 500), 'rh_dec_finders()[$area][$check]') !== false
+        && strpos($dfFn($dfDec, 'rh_dec_check_ok', 500), 'rh_dec_figures_ok($user, $check)') !== false,
+        'Decisions: a card is checked against the live rules and needs ALL its figure permissions (a card cached earlier today follows them too)');
+    $dfView = $dfFn($dfDec, 'rh_dec_for_viewer', 3200);
+    check($dfView !== '' && strpos($dfView, 'rh_dec_requires_ok(') === false && substr_count($dfView, 'rh_dec_card_ok($user, $card, $area)') === 2 && strpos($dfView, 'rh_dec_check_ok($user, $area,') !== false,
+        'Decisions panel and brief: shown cards, "More" cards and checks all go through the figure permissions');
+    check(strpos($dfView, "\$takingsOk = rh_ai_has_perm((int)(\$user['id'] ?? 0), 'dashboard_takings');") !== false && strpos($dfView, "\$card['share_pct'] = null;") !== false,
+        'Decisions: "% of takings" is left off every card for people without dashboard_takings (it would give the takings away)');
+    check(strpos($dfFn($dfDec, 'rh_dec_writer_payload', 1400), 'share') === false, 'Decisions: the shared wording is never given the share of takings to quote');
+    check(strpos($dfFn($dfDec, 'rh_dec_pending', 1200), 'rh_dec_card_ok($user, $card, $area)') !== false && strpos($dfFn($dfDec, 'rh_dec_brief', 4200), 'rh_dec_card_ok($user, $c, $area)') !== false,
+        'Decisions: the after-load update and the brief\'s "since yesterday" follow the same permissions');
+    check(strpos($dfFn($dfDec, 'rh_dec_brief_sigs', 900), "\$out['_figures']") !== false, 'Today\'s brief: a stored brief is rebuilt when the person\'s Dashboard figures permissions change');
+    // Briefing, alerts and the weekly digest (all built from rh_ai_briefing_findings)
+    check(strpos($dfIns, "rh_ai_brief_money(\$m, \$add, rh_ai_perm_any(\$user, ['dashboard_owed']));") !== false
+        && strpos($dfFn($dfIns, 'rh_ai_brief_money', 900), "if (\$owedOk && !empty(\$m['still_owed']['left_or_overdue_total'])") !== false
+        && strpos($dfIns, 'function rh_ai_brief_money(array $m, callable $add, bool $owedOk = false): void') !== false,
+        'Briefing: the hotel-wide money owed is listed only with dashboard_owed (closed by default)');
+    $dfFront = $dfFn($dfIns, 'rh_ai_brief_front_desk', 6000);
+    check(strpos($dfFront, "'collect_before_departure'") !== false && strpos($dfFront, 'dashboard_') === false,
+        'Briefing: each departing guest\'s own balance stays for the front desk (no dashboard key on it)');
+    if (getenv('AI_TEST_DASH_FIGURES_ONLY')) {
+        // Behaviour, still no database: the real money findings from a fixture money_leaks result
+        if (!defined('BALANCE_TOLERANCE')) { define('BALANCE_TOLERANCE', 0.01); }
+        require_once $root . '/admin/includes/permissions.php';
+        require_once $root . '/includes/ai/ai-insights.php';
+        $dfAll = getAllPermissions();
+        check(!array_diff(['dashboard_takings', 'dashboard_owed', 'dashboard_pos_sales'], array_keys($dfAll)), 'the three Dashboard figures permissions exist');
+        $dfM = ['currency' => 'MWK', 'from' => '2026-11-04', 'to' => '2026-11-10',
+            'still_owed' => ['total' => 900000.0, 'left_or_overdue_total' => 250000.0, 'left_or_overdue_accounts' => 2, 'largest_left_or_overdue' => []],
+            'refunds' => ['total' => 0, 'count' => 0, 'rows' => [], 'waiting_to_be_processed' => 0]];
+        $dfRun = static function (bool $owedOk) use ($dfM): array {
+            $out = [];
+            rh_ai_brief_money($dfM, static function (array $x) use (&$out): void { $out[] = $x; }, $owedOk);
+            return $out;
+        };
+        $dfNo = $dfRun(false);
+        $dfYes = $dfRun(true);
+        check(!$dfNo && stripos(json_encode($dfNo), '900,000') === false, 'without dashboard_owed: no money-owed finding and no owed total', json_encode($dfNo));
+        check(count($dfYes) === 1 && $dfYes[0]['id'] === 'left_owing' && strpos((string)$dfYes[0]['detail'], 'MWK 900,000.00') !== false, 'with dashboard_owed: the money-owed finding with the total', json_encode($dfYes));
+        $dfDefault = [];
+        rh_ai_brief_money($dfM, static function (array $x) use (&$dfDefault): void { $dfDefault[] = $x; });
+        check(!$dfDefault, 'the money findings leave the owed total out unless told the person may see it');
+        echo "$pass passed, $fail failed\n";
+        exit($fail ? 1 : 0);
+    }
+} catch (Throwable $e) {
+    bad('Dashboard figures checks threw', get_class($e) . ': ' . $e->getMessage());
+    if (getenv('AI_TEST_DASH_FIGURES_ONLY')) { echo "$pass passed, $fail failed\n"; exit(1); }
+}
+
 require_once $root . '/config/database.php';
 require_once $root . '/admin/includes/permissions.php';
 require_once $root . '/includes/ai/ai-catalog.php';

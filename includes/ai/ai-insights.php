@@ -1023,7 +1023,7 @@ function rh_ai_briefing_findings(PDO $db, array $user): array
     }
     // Money: where it is being lost (people with a money permission only)
     if (rh_ai_perm_any($user, ['accounting', 'reports']) && ($m = $run('money_leaks')) !== null) {
-        rh_ai_brief_money($m, $add);
+        rh_ai_brief_money($m, $add, rh_ai_perm_any($user, ['dashboard_owed'])); // owner 2026-11-11: the Owed to us total is finance + admin only
     }
     if (rh_ai_perm_any($user, ['accounting', 'reports']) && ($p = $run('booking_pace', ['from' => date('Y-m-d'), 'to' => date('Y-m-d', strtotime('+6 days'))])) !== null && $p['sellable_rooms'] > 0) {
         $unsold = (int)$p['unsold_room_nights'];
@@ -1230,14 +1230,18 @@ function rh_ai_brief_front_desk(PDO $db, array $user, callable $add): void
     }
 }
 
-/** Money findings from money_leaks: each with the amount, the cause and who/what drove it. */
-function rh_ai_brief_money(array $m, callable $add): void
+/**
+ * Money findings from money_leaks: each with the amount, the cause and who/what drove it. $owedOk: the person holds
+ * dashboard_owed (owner 2026-11-11); without it the hotel-wide money owed ("left_owing") is left out of the brief -
+ * a guest's own balance before departure (front desk) is not affected.
+ */
+function rh_ai_brief_money(array $m, callable $add, bool $owedOk = false): void
 {
     $cur = (string)$m['currency'];
     $fmt = static fn($v) => ($cur !== '' ? $cur . ' ' : '') . number_format((float)$v, 2);
     $sev = static fn(float $amt) => $amt <= 0 ? 0 : (int)min(60, 10 + 10 * log10($amt + 1));
     $range = $m['from'] === $m['to'] ? $m['from'] : $m['from'] . ' to ' . $m['to'];
-    if (!empty($m['still_owed']['left_or_overdue_total']) && (float)$m['still_owed']['left_or_overdue_total'] > BALANCE_TOLERANCE) {
+    if ($owedOk && !empty($m['still_owed']['left_or_overdue_total']) && (float)$m['still_owed']['left_or_overdue_total'] > BALANCE_TOLERANCE) {
         $o = $m['still_owed'];
         $add(['id' => 'left_owing', 'kind' => 'money', 'severity' => $sev((float)$o['left_or_overdue_total']) + 10, 'title' => 'Money still owed after departure or overdue', 'count' => $o['left_or_overdue_accounts'], 'amount' => $o['left_or_overdue_total'],
             'detail' => $fmt($o['left_or_overdue_total']) . ' on ' . $o['left_or_overdue_accounts'] . ' account(s) that have left or are overdue (all money owed: ' . $fmt($o['total']) . ').',
