@@ -13,7 +13,9 @@
  *      and permissions. NEVER a password, a password hash or any guest / booking / money data.
  *
  * Changes (owner decisions 2026-11-10): deactivate, activate, role, permissions (replaces the person's own changes), create
- * (the account gets no usable password: this system emails its own invitation link), invite. The hotel's own administrator
+ * (the account gets no usable password: this system emails its own invitation link), invite. Since 2026-11-11 also ai_setup:
+ * the Assistant's provider key and models set up from the panel (includes/licence-ai.php); the report then carries the
+ * Assistant's state too (on/off, provider, the key's last 4, models, monthly aim, this month's usage; never the key). The hotel's own administrator
  * can still undo any of them on the Users page. The last active administrator can never be deactivated or demoted.
  * Every change is written to the activity log as "by the system provider (licence panel)".
  *
@@ -28,7 +30,8 @@ require_once __DIR__ . '/licence.php';
 
 if (!function_exists('rh_licence_staff_run')) {
 
-    define('RH_LICENCE_STAFF_KINDS', ['deactivate', 'activate', 'role', 'permissions', 'create', 'invite']);
+    // ai_setup (owner 2026-11-11): the Assistant set up from the panel (includes/licence-ai.php); it has no username.
+    define('RH_LICENCE_STAFF_KINDS', ['deactivate', 'activate', 'role', 'permissions', 'create', 'invite', 'ai_setup']);
     define('RH_LICENCE_STAFF_FRESH_SECONDS', 600);
     define('RH_LICENCE_STAFF_REPORT_EVERY', 86400);
 
@@ -41,7 +44,7 @@ if (!function_exists('rh_licence_staff_run')) {
         $list = is_array($payload) && isset($payload['staff_commands']) && is_array($payload['staff_commands']) ? $payload['staff_commands'] : [];
         foreach (array_slice($list, 0, 50) as $c) {
             if (!is_array($c) || !is_int($c['id'] ?? null) || $c['id'] <= 0 || !in_array($c['kind'] ?? null, RH_LICENCE_STAFF_KINDS, true)
-                || !is_string($c['username'] ?? null) || trim($c['username']) === '' || strlen($c['username']) > 100) {
+                || !is_string($c['username'] ?? null) || (trim($c['username']) === '' && $c['kind'] !== 'ai_setup') || strlen($c['username']) > 100) {
                 continue;
             }
             $out[$c['id']] = ['id' => $c['id'], 'kind' => $c['kind'], 'username' => trim($c['username']),
@@ -130,6 +133,10 @@ if (!function_exists('rh_licence_staff_run')) {
     function rh_licence_staff_apply(PDO $pdo, array $c): array
     {
         $fail = static fn(string $m): array => ['ok' => false, 'message' => $m];
+        if ($c['kind'] === 'ai_setup') {
+            require_once __DIR__ . '/licence-ai.php';
+            return rh_licence_ai_apply($pdo, $c); // the Assistant set up from the panel (owner 2026-11-11)
+        }
         $roles = getAllRoles();
         if ($c['kind'] === 'create') {
             return rh_licence_staff_create($pdo, $c);
@@ -443,7 +450,11 @@ if (!function_exists('rh_licence_staff_run')) {
             }
 
             [$staff, $catalog] = rh_licence_staff_snapshot($pdo);
-            $hash = sha1((string)json_encode([$staff, $catalog]));
+            // The Assistant's state rides along (includes/licence-ai.php): never a key. Usage is left out of the hash, so it
+            // alone never makes a report; it goes with every report (at least daily).
+            require_once __DIR__ . '/licence-ai.php';
+            $ai = rh_licence_ai_state($pdo);
+            $hash = sha1((string)json_encode([$staff, $catalog, $ai]));
             $asked = is_int($payload['staff_list_requested_at'] ?? null) ? $payload['staff_list_requested_at'] : 0;
             if (!rh_licence_staff_report_due($out['ran'] > 0, $kept !== [], $asked, (int)$s['licence_staff_list_seen'], $hash,
                 $s['licence_staff_sent_hash'], (int)$s['licence_staff_sent_at'], $now)) {
@@ -456,7 +467,8 @@ if (!function_exists('rh_licence_staff_run')) {
                 return $out;
             }
             $body = json_encode(['tenant' => $cfg['tenant'], 'domain' => rh_licence_site_domain(), 'key' => $cfg['key'],
-                'results' => $kept, 'staff' => $staff, 'catalog' => $catalog], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
+                'results' => $kept, 'staff' => $staff, 'catalog' => $catalog, 'ai' => $ai + ['usage' => rh_licence_ai_usage($pdo)]],
+                JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE);
             $http = rh_licence_http_post($url, (string)$body, $timeout);
             $ans = json_decode($http['body'], true);
             if ($http['error'] !== '' || $http['code'] !== 200 || !is_array($ans) || ($ans['ok'] ?? null) !== true) {

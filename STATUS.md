@@ -1,7 +1,7 @@
 # STATUS: Rosalyn's Beach Hotel 2026 (hotel PMS / HMS)
 
 **Read this first.** Any agent (Claude, Cline, another provider) should be able to continue from this file alone. Keep it
-current during work. Last updated: **2026-11-10**.
+current during work. Last updated: **2026-11-11**.
 
 This is the original platform; `../Liwonde_Sun_Hotel_2026` is its fork. Most fixes go into both repos with the same
 commit message.
@@ -46,6 +46,23 @@ still be clicked on Liwonde's view-only trial. Files: `includes/view-only.php` a
 - The greying now reaches page headers, every link, and icon-only buttons.
 - POS and KDS still have no banner or greying, but the server refuses every change there.
 - It changes nothing at Rosalyn's until a view-only trial is switched on. Pushed with the owner's OK.
+
+## Shipped: the Assistant set up from the licence panel (owner 2026-11-11)
+The owner sells the Assistant as a package with the HMS. The licence panel now holds each hotel's AI provider key and
+models, tests them there, and sends a tested set-up (panel `public/ai.php`, see `../msp-control-panel/STATUS.md`).
+The same change is in both hotels (identical files):
+- `includes/licence-ai.php` (new): runs a staff command of kind `ai_setup` from the signed licence answer. The AI key in
+  the answer is encrypted for this site only (key derived from its licence key). The hotel tests the key and every chosen
+  model ITSELF first and changes nothing if that fails; then saves the key the Assistant's usual way (`rh_ai_store_key`,
+  needs `APP_ENCRYPTION_SALT`), refreshes the model list, gives the chosen models their roles (`rh_ai_save_selection`),
+  sets the monthly aim and, if asked, switches the Assistant on. Activity log: "by the system provider (licence panel)".
+- `includes/licence-staff.php`: accepts `ai_setup` (it has no username); the staff report carries an `ai` block (on/off,
+  provider, key's last 4, models, monthly aim, this month's usage). Never the key.
+- `scripts/tests/licence_ai.php` (new, 30 pure tests; `licence_staff.php` still 53/53).
+- Admins here may still change the Assistant in Assistant Settings; the panel never re-applies anything until the owner
+  sends a new set-up. No schema change.
+- Pushed with the owner's OK (both hotels first, then the panel). Not yet run against a real provider: the first
+  real send from the panel is that test.
 
 ## Live now
 The site runs `origin/main` at `9998b7c`.
