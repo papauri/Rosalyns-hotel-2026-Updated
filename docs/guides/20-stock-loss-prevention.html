@@ -73,7 +73,7 @@
   <p>For any menu item that has a recipe, the system takes the ingredients off stock when the food or drink is made or handed over, and when a room-service charge is posted. Nobody types it in, so a sale cannot "forget" to use stock. If an order is cancelled or voided before work starts, the stock goes back. Who: automatic. Where: <strong>Recipes</strong> (build them) and <strong>Stock Overview</strong> &rarr; <strong>Recipe Coverage</strong> (see how many items are covered). An item with no recipe shows <strong>Untracked</strong> on the till and takes no stock, so give your selling items recipes.</p>
 
   <h3>Food thrown away after cooking started is wastage</h3>
-  <p>If a dish is voided or 86'd after the kitchen or bar has started it, the ingredients are gone. The system does not put them back. It records the dish as wastage once, with its cost, so the loss is visible and not hidden. Who: automatic. Where: <strong>Stock Reports</strong> &rarr; <strong>Wastage</strong>.</p>
+  <p>If a dish is voided or 86'd after the kitchen or bar has started it, the ingredients are gone. The system does not put them back. It records the dish as wastage once, with its cost, dated on the trading day, so the loss is visible and not hidden. Who: automatic. Where: <strong>Stock Reports</strong> &rarr; <strong>Wastage</strong>.</p>
 
   <h3>Wastage must be written down, with a reason and a name</h3>
   <p>Anything thrown away is recorded on <strong>Wastage</strong> with the ingredient, quantity and a reason (Spoiled, Breakage, Over-prepared, Customer return, Trim/peel waste, Burnt, Spilled or Other). The stock comes off at once at the real cost, and the list shows who recorded it. You cannot record more than the stock on record, and you cannot date it in the future. Who: anyone with <strong>Wastage Log</strong>. Where: <strong>Stock</strong> &rarr; <strong>Wastage</strong>, and the <strong>Wastage</strong> tab in Stock Reports.</p>
@@ -141,7 +141,7 @@
   <h3>Till and cash controls protect stock and money</h3>
   <ul>
     <li><strong>Void:</strong> a paid order can only be voided by a manager or admin, with a reason of at least 8 characters. It is saved with their name.</li>
-    <li><strong>Refund:</strong> needs <strong>POS Refunds</strong> and a reason of at least 5 characters. A refund does <em>not</em> put stock back, so a manager must check it.</li>
+    <li><strong>Refund:</strong> needs <strong>POS Refunds</strong> and a reason of at least 5 characters. A refund puts the stock back into its original batch; if that batch has expired, been recalled or been written off, the stock is written off at once.</li>
     <li><strong>86 an item:</strong> needs <strong>POS Quick-86 Items</strong>.</li>
     <li><strong>Discounts:</strong> need <strong>POS Discounts</strong>. A reason can be chosen, and one discount per tab.</li>
     <li><strong>Delete an order:</strong> needs <strong>Delete Orders</strong>, a reason, and leaves a permanent deletion record.</li>
@@ -182,7 +182,7 @@
     <li>Check the <strong>Wastage</strong> and <strong>Yield</strong> tabs for the same dates. Compare <strong>Wasted</strong> and <strong>Expired</strong> with what the kitchen reports.</li>
     <li>Check deliveries on the <strong>Stock-In</strong> tab and on the purchase order. Was the quantity received the same as the delivery note? Look for lines flagged <strong>over-delivered</strong> and for deliveries booked with no purchase order.</li>
     <li>Check manual changes. In the <strong>Adjustments</strong> tab, a <strong>manual</strong> entry that adds stock can cover up an earlier loss, and one that subtracts stock moves it out without a sale. Read the reason and the name.</li>
-    <li>Check voids and refunds. On <strong>Orders &amp; Tabs</strong> look at <strong>Voids</strong>, then <strong>Timeline</strong>. A paid order that was voided, or a refund (which does not put stock back), can leave the shelf short. Check the Z-report for the cashier and shift.</li>
+    <li>Check voids and refunds. On <strong>Orders &amp; Tabs</strong> look at <strong>Voids</strong>, then <strong>Timeline</strong>. A paid order that was voided, can leave the shelf short. A refund puts stock back, unless the batch was expired, recalled or written off, in which case it is written off at once. Check the Z-report for the cashier and shift.</li>
     <li>Check for unrecorded breaks and spoilage. Ask the store and kitchen if anything was thrown away, and record it on <strong>Wastage</strong> so the books tell the truth.</li>
     <li>Run a fresh spot count of just that ingredient, using a different person. Compare it with the earlier figure.</li>
     <li>If you still cannot explain it, approve the count with the right reason (use <strong>Theft suspected</strong> if that is your honest view). The loss is then written off at the batch's cost, appears in Missing stock and in the accounts as count variance, and the approver's name is kept. Then act on it using your normal staff procedure: the system only provides the evidence.</li>

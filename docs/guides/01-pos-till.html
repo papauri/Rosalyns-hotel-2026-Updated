@@ -271,7 +271,7 @@
     <li>You need <strong>POS Void Tabs</strong> (&ldquo;Void open tabs from the till, one at a time or in bulk&rdquo;) and <strong>Restaurant Orders (POS)</strong>. Without <strong>POS Void Tabs</strong> the button is not shown.</li>
     <li>Click <strong>Tabs</strong>, <strong>More</strong> on the tab card, then <strong>Void</strong>.</li>
     <li>Type a reason of at least 8 characters (an optional follow-up note is also offered) and click <strong>Void order</strong>.</li>
-    <li>You will see <em>"Order voided."</em> Stock is restored for items the kitchen or bar had not started; items already started are recorded as wastage (the ingredients are gone), and counted once, not also as usage. The order is removed from the station screens, any payment is reversed with a matching refund line, and any room-service charge is taken off the folio.</li>
+    <li>You will see <em>"Order voided."</em> Stock is put back for items the kitchen or bar had not started, into the batch it came from at the cost it left at. If that batch has expired, been recalled or been written off, the returned stock is written off straight away. Items already started are recorded as wastage (the ingredients are gone), and counted once, not also as usage. The order is removed from the station screens, any payment is reversed with a matching refund line, and any room-service charge is taken off the folio.</li>
     <li>In shop mode (the restaurant module is off), a voided sale is different. The screen asks <em>"Put the goods back in stock?"</em>. <strong>OK</strong> puts the goods back on the shelf. <strong>Cancel</strong> means the goods are damaged, and they are recorded as waste.</li>
   </ol>
   <p>Many tabs at once: select them and click <strong>Bulk void</strong>. You see <em>"3 tabs voided."</em> A void is permanent and is recorded with your name and reason.</p>
@@ -281,11 +281,11 @@
   <h2 id="refund">How to refund a paid order</h2>
   <ol class="steps">
     <li>Click <strong>Recent</strong>. Only people with <strong>POS Refunds</strong> see the <strong>Refund</strong> button next to paid orders. (Without that permission, ask a manager to do it.)</li>
-    <li>Click <strong>Refund</strong>. The <strong>Process refund</strong> window explains the order will be marked as refunded and a negative payment record created, and that stock is <em>not</em> automatically restored in a restaurant. In shop mode the goods go back on the shelf, unless they are damaged.</li>
+    <li>Click <strong>Refund</strong>. The <strong>Process refund</strong> window explains the order will be marked as refunded and a negative payment record created, and that the stock goes back into the batch it came from. In shop mode the goods go back on the shelf, unless they are damaged.</li>
     <li>Type the <strong>Reason for refund</strong> (at least 5 characters, for example "Guest complaint, overcharge, duplicate order").</li>
     <li>Click <strong>Confirm refund</strong>. You will see <em>"Refund processed for ORD-..."</em></li>
   </ol>
-  <p>The whole order is refunded, including every leg of a split bill, in the method it was paid with. Only paid orders can be refunded, and an order that is already fully refunded is refused. In a restaurant stock is not put back, so a manager must correct stock by hand if needed. In shop mode the goods go back on the shelf, unless they are damaged.</p>
+  <p>The whole order is refunded, including every leg of a split bill, in the method it was paid with. Only paid orders can be refunded, and an order that is already fully refunded is refused. Refunded stock goes back into the batch it came from, at the cost it left at. If that batch has expired, been recalled or been written off, the returned stock is written off straight away instead. In shop mode the goods go back on the shelf, unless they are damaged.</p>
 
   <h2 id="86">How to 86 an item (mark it unavailable)</h2>
   <p>"86" means the item is finished. This hides it from the till for everyone. Each 86 and re-enable is saved in the till history and the staff activity log.</p>
@@ -486,7 +486,7 @@
     <li>Click <strong>More</strong> &rarr; <strong>Close shift (Z-report)</strong>.</li>
     <li>Count what you took, then enter all three amounts. Enter 0 if there is none:
       <ul>
-        <li><strong>Cash counted</strong> &mdash; all the cash in the drawer, including the opening float. The close window shows <strong>Opening float</strong> and the line <em>"Cash to count in the drawer = opening float + cash sales &minus; cash refunds. Include the float in your count."</em> If no float was recorded it shows <em>"(no opening float recorded for this shift, counted as 0)"</em>.</li>
+        <li><strong>Cash counted</strong> &mdash; all the cash in the drawer, including the opening float. A refund is counted once, on the shift when it was paid out, in the way it was paid (cash, card or mobile). A card bill refunded partly in cash shows the cash part under cash and the rest under card. The close window shows <strong>Opening float</strong> and the line <em>"Cash to count in the drawer = opening float + cash sales &minus; cash refunds. Include the float in your count."</em> If no float was recorded it shows <em>"(no opening float recorded for this shift, counted as 0)"</em>.</li>
         <li><strong>Mobile money totals</strong> &mdash; the total of mobile money payments you took.</li>
         <li><strong>Card totals</strong> &mdash; the total of card payments you took.</li>
       </ul>
