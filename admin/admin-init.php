@@ -79,6 +79,10 @@ rh_licence_guard_request();
 // Load permissions system and enforce page-level access
 require_once __DIR__ . '/includes/permissions.php';
 
+// Super admin (owner 2026-11-11): for display only; every privileged decision re-reads it with rh_is_super_admin().
+$user['is_super_admin'] = rh_is_super_admin((int)$user['id']);
+$_SESSION['admin_is_super'] = $user['is_super_admin'];
+
 $_required_permission = getPermissionForPage($current_page);
 if ($_required_permission !== null && !hasPermission($user['id'], $_required_permission)) {
     // Deactivated accounts: hasPermission() returns false for inactive users on

@@ -1250,9 +1250,212 @@ function getDefaultPermissionsForRole(string $role)
     return $roleData['permissions'];
 }
 
+// ============================================
+// SUPER ADMIN (owner 2026-11-11)
+// ============================================
+// A super admin is an admin_users row with role 'admin' AND is_super_admin = 1 (migration 080). The role stays 'admin',
+// so every role === 'admin' check, seat count and last-admin guard keeps working and a super admin has everything an
+// admin has. On top: they can limit an administrator's permissions, manage other super admins and set the flag.
+// Before migration 080 runs the column is missing and nobody is a super admin (every read below fails closed to "no").
+
+/**
+ * The super-admin state of one account, cached for the request ($refresh re-reads it after a change).
+ * 'account' = role admin with the flag set (active or not: used to PROTECT the account); 'active' = it is also active.
+ * @return array{account:bool,active:bool}
+ */
+function rh_super_admin_info(int $user_id, bool $refresh = false): array
+{
+    global $pdo;
+    static $cache = [];
+    $none = ['account' => false, 'active' => false];
+    if ($user_id <= 0 || !($pdo instanceof PDO)) {
+        return $none;
+    }
+    if (!$refresh && isset($cache[$user_id])) {
+        return $cache[$user_id];
+    }
+    $info = $none;
+    try {
+        $st = $pdo->prepare("SELECT role, is_active, is_super_admin FROM admin_users WHERE id = ?");
+        $st->execute([$user_id]);
+        $r = $st->fetch(PDO::FETCH_ASSOC);
+        if ($r && (string)$r['role'] === 'admin' && (int)$r['is_super_admin'] === 1) {
+            $info = ['account' => true, 'active' => (int)$r['is_active'] === 1];
+        }
+    } catch (Throwable $e) {
+        $info = $none; // column not there yet (migration 080): nobody is a super admin
+    }
+    return $cache[$user_id] = $info;
+}
+
+/** True when the user is an ACTIVE super admin: the test for using super-admin powers. Always re-read from the DB. */
+function rh_is_super_admin(int $user_id): bool
+{
+    $i = rh_super_admin_info($user_id);
+    return $i['account'] && $i['active'];
+}
+
+/** True when the account is a super admin (active or not): the test for protecting it from plain administrators. */
+function rh_is_super_admin_account(int $user_id): bool
+{
+    return rh_super_admin_info($user_id)['account'];
+}
+
+/** Whether the is_super_admin column exists yet (migration 080). */
+function rh_super_admin_column_ready(): bool
+{
+    global $pdo;
+    static $ready = null;
+    if ($ready === null) {
+        try {
+            $pdo->query("SELECT is_super_admin FROM admin_users LIMIT 0");
+            $ready = true;
+        } catch (Throwable $e) {
+            $ready = false;
+        }
+    }
+    return $ready;
+}
+
+/** Active super admins, for the "last super admin" guard. 0 before migration 080. */
+function rh_active_super_admin_count(): int
+{
+    global $pdo;
+    try {
+        return (int)$pdo->query("SELECT COUNT(*) FROM admin_users WHERE role = 'admin' AND is_active = 1 AND is_super_admin = 1")->fetchColumn();
+    } catch (Throwable $e) {
+        return 0;
+    }
+}
+
+/** The role name to show for a user row (with role and is_super_admin), e.g. "Super Admin" or "Administrator". */
+function rh_role_display_label(array $row): string
+{
+    if ((string)($row['role'] ?? '') === 'admin' && (int)($row['is_super_admin'] ?? 0) === 1) {
+        return 'Super Admin';
+    }
+    $roles = getAllRoles();
+    $role = (string)($row['role'] ?? '');
+    return (string)($roles[$role]['label'] ?? ucfirst($role));
+}
+
+/**
+ * An administrator's own permission settings, as a super admin left them. Only rows written by a super-admin account
+ * count (granted_by), so old rows from before someone became an administrator never take anything away.
+ * @return array{denies:array<string,bool>,view_only:bool} denies = keys switched off; view_only = "View only" ticked
+ *         (any row: includes/view-only.php reads that row directly whoever wrote it).
+ */
+function rh_admin_permission_overrides(int $user_id, bool $refresh = false): array
+{
+    global $pdo;
+    static $cache = [];
+    if (!$refresh && isset($cache[$user_id])) {
+        return $cache[$user_id];
+    }
+    $out = ['denies' => [], 'view_only' => false];
+    try {
+        $st = $pdo->prepare(
+            "SELECT up.permission_key FROM user_permissions up
+               JOIN admin_users g ON g.id = up.granted_by
+              WHERE up.user_id = ? AND up.is_granted = 0 AND g.role = 'admin' AND g.is_super_admin = 1"
+        );
+        $st->execute([$user_id]);
+        foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $k) {
+            if ((string)$k !== 'view_only') {
+                $out['denies'][(string)$k] = true;
+            }
+        }
+    } catch (Throwable $e) {
+        $out['denies'] = []; // no table / no column yet: administrators keep everything
+    }
+    try {
+        $st = $pdo->prepare("SELECT is_granted FROM user_permissions WHERE user_id = ? AND permission_key = 'view_only'");
+        $st->execute([$user_id]);
+        $out['view_only'] = (int)$st->fetchColumn() === 1;
+    } catch (Throwable $e) {
+        $out['view_only'] = false;
+    }
+    return $cache[$user_id] = $out;
+}
+
+/**
+ * Set or clear the super-admin flag. Only an active super admin may do it, never on their own account; setting it needs
+ * the account to be an administrator already (callers set role 'admin' first). Logged as old -> new.
+ */
+function rh_set_super_admin_flag(int $user_id, bool $on, int $by): bool
+{
+    global $pdo;
+    if ($user_id <= 0 || $user_id === $by || !rh_is_super_admin($by) || !rh_super_admin_column_ready()) {
+        return false;
+    }
+    try {
+        $st = $pdo->prepare("SELECT role, is_super_admin, username FROM admin_users WHERE id = ?");
+        $st->execute([$user_id]);
+        $r = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$r || ($on && (string)$r['role'] !== 'admin')) {
+            return false;
+        }
+        $was = (int)$r['is_super_admin'] === 1;
+        if ($was !== $on) {
+            $pdo->prepare("UPDATE admin_users SET is_super_admin = ? WHERE id = ?")->execute([$on ? 1 : 0, $user_id]);
+            if ($on) {
+                rh_clear_user_permission_rows($user_id); // a super admin carries no limits (nor "View only")
+            }
+            logActivity($by, 'super_admin_changed', "Super admin for user ID {$user_id} ({$r['username']}): "
+                . ($was ? 'yes' : 'no') . ' -> ' . ($on ? 'yes' : 'no'));
+        }
+    } catch (Throwable $e) {
+        error_log("Super admin flag error: " . $e->getMessage());
+        return false;
+    }
+    rh_super_admin_info($user_id, true);
+    rh_admin_permission_overrides($user_id, true);
+    return true;
+}
+
+/** True when a plain administrator has at least one permission switched off by a super admin. */
+function rh_admin_has_limits(int $user_id): bool
+{
+    return $user_id > 0 && !rh_is_super_admin($user_id) && rh_admin_permission_overrides($user_id)['denies'] !== [];
+}
+
+/**
+ * True when the account is an administrator with at least one limit from a super admin. Only a super admin may change
+ * such an account's role (a role change wipes the rows), and such an administrator may not make anyone an administrator.
+ */
+function rh_admin_is_limited(int $user_id): bool
+{
+    global $pdo;
+    try {
+        $st = $pdo->prepare("SELECT role FROM admin_users WHERE id = ?");
+        $st->execute([$user_id]);
+        if ((string)$st->fetchColumn() !== 'admin') {
+            return false;
+        }
+    } catch (Throwable $e) {
+        return false;
+    }
+    return rh_admin_has_limits($user_id);
+}
+
+/**
+ * Remove a person's own permission rows. Used when someone becomes an administrator, so nothing set for their old role
+ * can later count as a super admin's limit on them.
+ */
+function rh_clear_user_permission_rows(int $user_id): void
+{
+    global $pdo;
+    try {
+        $pdo->prepare("DELETE FROM user_permissions WHERE user_id = ?")->execute([$user_id]);
+    } catch (PDOException $e) {
+        error_log("Clear permissions error: " . $e->getMessage());
+    }
+    rh_admin_permission_overrides($user_id, true);
+}
+
 /**
  * Check if a user has a specific permission
- * Admin role always has all permissions
+ * Super admins have every permission. Administrators have every permission except any a super admin switched off.
  */
 function hasPermission(int $user_id, string $permission_key)
 {
@@ -1277,9 +1480,17 @@ function hasPermission(int $user_id, string $permission_key)
 
         $role = $user['role'];
 
-        // Admin always has all permissions
+        // Administrators: everything, except what a super admin switched off for them. "View only" is a restriction,
+        // not a power, so it is on only when ticked (includes/view-only.php enforces it). Super admins: everything.
         if ($role === 'admin') {
-            return true;
+            if (rh_is_super_admin($user_id)) {
+                return $permission_key !== 'view_only';
+            }
+            $ov = rh_admin_permission_overrides($user_id);
+            if ($permission_key === 'view_only') {
+                return $ov['view_only'];
+            }
+            return !isset($ov['denies'][$permission_key]);
         }
 
         // Check user_permissions table for explicit grant/deny
@@ -1359,10 +1570,12 @@ function getUserPermissions(int $user_id)
 
         $role = $user['role'];
 
-        // Admin always has everything
+        // Administrators: everything except a super admin's limits (mirrors hasPermission); super admins: everything.
         if ($role === 'admin') {
+            $isSuper = rh_is_super_admin($user_id);
+            $ov = $isSuper ? ['denies' => [], 'view_only' => false] : rh_admin_permission_overrides($user_id);
             foreach ($all_permissions as $key => $info) {
-                $result[$key] = true;
+                $result[$key] = $key === 'view_only' ? $ov['view_only'] : !isset($ov['denies'][$key]);
             }
             return $result;
         }
@@ -1418,7 +1631,11 @@ function setUserPermissions(int $user_id, array $permissions, ?int $granted_by =
         $role = $stmt->fetchColumn();
 
         if ($role === 'admin') {
-            return false; // Admin permissions cannot be changed
+            // Only an active super admin may limit an administrator, never another super admin (owner 2026-11-11).
+            if ($granted_by === null || !rh_is_super_admin($granted_by) || rh_is_super_admin_account($user_id)) {
+                return false;
+            }
+            return rh_set_admin_permissions($user_id, $permissions, $granted_by);
         }
 
         $stmt = $pdo->prepare("
@@ -1455,7 +1672,19 @@ function resetUserPermissionsToDefault(int $user_id, ?int $reset_by = null)
         $role = $stmt->fetchColumn();
 
         if ($role === 'admin') {
-            return false;
+            // A super admin may give an administrator back full access (removes every limit), never to a super admin.
+            if ($reset_by === null || !rh_is_super_admin($reset_by) || rh_is_super_admin_account($user_id)) {
+                return false;
+            }
+            $before = rh_admin_permission_overrides($user_id, true);
+            rh_clear_user_permission_rows($user_id);
+            $removed = array_keys($before['denies']);
+            if ($before['view_only']) {
+                $removed[] = 'view_only';
+            }
+            logActivity($reset_by, 'admin_permissions_reset', "Gave administrator user ID {$user_id} full access again"
+                . ($removed ? ' (removed limits: ' . implode(', ', $removed) . ')' : ' (there were no limits)'));
+            return true;
         }
 
         // Delete all explicit permissions
@@ -1472,6 +1701,48 @@ function resetUserPermissionsToDefault(int $user_id, ?int $reset_by = null)
         error_log("Reset permissions error: " . $e->getMessage());
         return false;
     }
+}
+
+/**
+ * A super admin's permission settings for an administrator (caller has checked who may do it). Replaces every row the
+ * administrator has, so nothing older survives, and logs each change as old -> new.
+ */
+function rh_set_admin_permissions(int $user_id, array $permissions, int $granted_by): bool
+{
+    global $pdo;
+    $before = rh_admin_permission_overrides($user_id, true);
+    $own = !$pdo->inTransaction();
+    try {
+        if ($own) {
+            $pdo->beginTransaction();
+        }
+        $pdo->prepare("DELETE FROM user_permissions WHERE user_id = ?")->execute([$user_id]);
+        $ins = $pdo->prepare("INSERT INTO user_permissions (user_id, permission_key, is_granted, granted_by) VALUES (?, ?, ?, ?)");
+        foreach ($permissions as $key => $granted) {
+            $ins->execute([$user_id, (string)$key, $granted ? 1 : 0, $granted_by]);
+        }
+        if ($own) {
+            $pdo->commit();
+        }
+    } catch (Throwable $e) {
+        if ($own && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log("Set admin permissions error: " . $e->getMessage());
+        return false;
+    }
+    $after = rh_admin_permission_overrides($user_id, true);
+    $changes = [];
+    foreach (array_keys(getAllPermissions()) as $key) {
+        $was = $key === 'view_only' ? $before['view_only'] : !isset($before['denies'][$key]);
+        $now = $key === 'view_only' ? $after['view_only'] : !isset($after['denies'][$key]);
+        if ($was !== $now) {
+            $changes[] = $key . ' ' . ($was ? 'on' : 'off') . ' -> ' . ($now ? 'on' : 'off');
+        }
+    }
+    logActivity($granted_by, 'admin_permissions_changed', "Super admin changed the permissions of administrator user ID {$user_id}: "
+        . ($changes ? implode(', ', $changes) : 'no change'));
+    return true;
 }
 
 /**
@@ -2042,9 +2313,12 @@ function canManageUser(int $manager_id, int $target_id)
 
         $roles = getAllRoles();
 
-        // Admins can manage everyone
+        // Super admins manage everyone else; plain admins manage everyone except a super-admin account (active or not)
         if ($manager_role === 'admin') {
-            return true;
+            if (rh_is_super_admin($manager_id)) {
+                return true;
+            }
+            return !rh_is_super_admin_account($target_id);
         }
 
         // Check role levels
@@ -2291,7 +2565,7 @@ function rhDenyAndRedirectHome(int $user_id, string $role, string $current_page,
 function rhStripDeniedLinks(string $html): string
 {
     $uid = (int)($_SESSION['admin_user_id'] ?? 0);
-    if ($uid <= 0 || ($_SESSION['admin_role'] ?? '') === 'admin') {
+    if ($uid <= 0 || (($_SESSION['admin_role'] ?? '') === 'admin' && !rh_admin_has_limits($uid))) {
         return $html;
     }
     $out = preg_replace_callback(

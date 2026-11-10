@@ -26,8 +26,10 @@ if (!isset($user) || !is_array($user)) {
     ];
 }
 
-// No admin page links a user to a page they cannot open (see rhStripDeniedLinks).
-if (($_SESSION['admin_role'] ?? '') !== 'admin') {
+// No admin page links a user to a page they cannot open (see rhStripDeniedLinks); this includes an administrator
+// a super admin has limited.
+$_rh_role_shown = rh_is_super_admin((int)($user['id'] ?? 0)) ? 'Super Admin' : ucfirst((string)($user['role'] ?? ''));
+if (($_SESSION['admin_role'] ?? '') !== 'admin' || rh_admin_has_limits((int)($_SESSION['admin_user_id'] ?? 0))) {
     ob_start('rhStripDeniedLinks');
 }
 
@@ -375,7 +377,7 @@ if ($_admin_back_target !== null) {
         <?php rh_page_zoom_control(); ?>
         <div class="user-meta">
             <div class="user-name"><?php echo htmlspecialchars($user['full_name']); ?></div>
-            <div class="user-role"><i class="fas fa-user-shield"></i> <?php echo htmlspecialchars(ucfirst($user['role'])); ?></div>
+            <div class="user-role"><i class="fas fa-user-shield"></i> <?php echo htmlspecialchars($_rh_role_shown); ?></div>
         </div>
         <button class="admin-nav-toggle" id="adminNavToggle" aria-label="Toggle navigation" aria-expanded="false">
             <i class="fas fa-bars" id="navToggleIcon"></i>
@@ -466,7 +468,7 @@ if ($_admin_back_target !== null) {
         <div class="admin-nav-account">
             <div class="admin-nav-account-id">
                 <strong><?php echo htmlspecialchars((string)$user['full_name']); ?></strong>
-                <?php echo htmlspecialchars(ucfirst((string)$user['role'])); ?>
+                <?php echo htmlspecialchars($_rh_role_shown); ?>
             </div>
             <a href="change-password.php"><i class="fas fa-key" aria-hidden="true"></i><span>Change password</span></a>
             <a href="logout.php"><i class="fas fa-sign-out-alt" aria-hidden="true"></i><span>Logout</span></a>

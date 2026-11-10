@@ -145,6 +145,11 @@ if (!function_exists('rh_licence_staff_run')) {
             return $fail('The user "' . $c['username'] . '" is a different account now; nothing was changed.');
         }
         $isLastAdmin = $u['role'] === 'admin' && (int)$u['is_active'] === 1 && rh_licence_staff_active_admins($pdo) <= 1;
+        // A super admin (owner 2026-11-11) is changed only by another super admin on the Users page, never from the panel.
+        $isSuper = function_exists('rh_is_super_admin_account') && rh_is_super_admin_account($uid);
+        if ($isSuper) { // no change of any kind (deactivate, activate, role, permissions, invite) from the panel
+            return $fail('This is a super admin; only another super admin can change them, on the Users page.');
+        }
         switch ($c['kind']) {
             case 'deactivate':
                 if ((int)$u['is_active'] !== 1) {
@@ -174,12 +179,17 @@ if (!function_exists('rh_licence_staff_run')) {
                 if ($role === $u['role']) {
                     return ['ok' => true, 'message' => 'Already had that role.'];
                 }
+                if ($u['role'] === 'admin' && function_exists('rh_admin_is_limited') && rh_admin_is_limited($uid)) {
+                    return $fail('A super admin has switched off some permissions of this administrator, so only a super admin can change their role.');
+                }
                 if ($isLastAdmin && $role !== 'admin') {
                     return $fail('This is the last active administrator.');
                 }
                 $pdo->prepare('UPDATE admin_users SET role = ? WHERE id = ?')->execute([$role, $uid]);
                 if ($role !== 'admin') {
                     resetUserPermissionsToDefault($uid, null); // same as the Users page: a new role starts from its usual set
+                } elseif (function_exists('rh_clear_user_permission_rows')) {
+                    rh_clear_user_permission_rows($uid); // a new administrator carries nothing over from the old role
                 }
                 rh_licence_staff_log("changed {$u['username']} from {$u['role']} to {$role}");
                 return ['ok' => true, 'message' => ''];
@@ -337,6 +347,9 @@ if (!function_exists('rh_licence_staff_run')) {
             $role = (string)$u['role'];
             $ch = ($role === 'admin' || empty($own[$id])) ? ['grants' => [], 'denies' => []]
                 : rh_licence_staff_own_changes($own[$id], array_values(getDefaultPermissionsForRole($role)));
+            if ($role === 'admin' && function_exists('rh_admin_permission_overrides') && !rh_is_super_admin($id)) {
+                $ch['denies'] = array_keys(rh_admin_permission_overrides($id)['denies']); // a super admin's limits on them
+            }
             $staff[] = ['id' => $id, 'username' => (string)$u['username'], 'email' => (string)$u['email'], 'full_name' => (string)$u['full_name'],
                 'role' => $role, 'is_active' => (int)$u['is_active'], 'last_login' => $u['last_login'] !== null ? (string)$u['last_login'] : null,
                 'grants' => $ch['grants'], 'denies' => $ch['denies']];

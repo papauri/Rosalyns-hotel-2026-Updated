@@ -49,6 +49,12 @@ $action = '';
 // Get all roles for use throughout the page
 $all_roles = getAllRoles();
 
+// Super admin (owner 2026-11-11): may limit administrators' permissions, manage other super admins and set the flag.
+$rh_editor_is_super = rh_is_super_admin((int)$user['id']);
+$rh_super_ready = rh_super_admin_column_ready();
+// An administrator a super admin has limited may not make anyone an administrator (that would undo the limits).
+$rh_editor_limited = !$rh_editor_is_super && rh_admin_is_limited((int)$user['id']);
+
 // ── Preset relevance ────────────────────────────────────────────────────────
 // Staff roles only make sense when their module is on for this business
 // preset (a supermarket doesn't hire a receptionist or a chef). Role CHOICES
@@ -123,6 +129,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error_msg = 'Username must be at least 3 characters with no spaces.';
                 } elseif (!isset($all_roles[$role])) {
                     $error_msg = 'Choose a role for this user.';
+                } elseif ($role === 'admin' && $rh_editor_limited) {
+                    $error_msg = 'Your account has some permissions switched off by a super admin, so you cannot make anyone an Administrator. Ask a super admin.';
                 } else {
                     // Check for duplicate username/email
                     // (case-insensitive, under a lock so a double-click cannot create two)
@@ -204,43 +212,93 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $error_msg = RH_ADMIN_EMAIL_TAKEN_MSG;
                     } else {
                         // Check if this is the last admin
-                        $current_role_stmt = $pdo->prepare("SELECT role FROM admin_users WHERE id = ?");
-                        $current_role_stmt->execute([$uid]);
-                        $current_role = $current_role_stmt->fetchColumn();
+                        $current_stmt = $pdo->prepare("SELECT role, is_active, full_name, email FROM admin_users WHERE id = ?");
+                        $current_stmt->execute([$uid]);
+                        $current_row = $current_stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+                        $current_role = $current_row['role'] ?? false;
+                        $target_was_active = (int)($current_row['is_active'] ?? 0) === 1;
 
-                        $target_active_stmt = $pdo->prepare("SELECT is_active FROM admin_users WHERE id = ?");
-                        $target_active_stmt->execute([$uid]);
-                        $target_was_active = (int)$target_active_stmt->fetchColumn() === 1;
-                        if ($current_role === 'admin' && $target_was_active && ($role !== 'admin' || !$is_active)) {
+                        // Super admin flag (owner 2026-11-11): only a super admin sets or clears it; ticking it makes the
+                        // person an administrator; any other role clears it. Untouched when a plain admin saves.
+                        $was_super = rh_is_super_admin_account($uid);
+                        $new_super = $was_super;
+                        if ($rh_editor_is_super && rh_super_admin_column_ready()) {
+                            $new_super = !empty($_POST['is_super_admin']);
+                            if ($new_super) {
+                                $role = 'admin';
+                            }
+                        }
+                        if ($role !== 'admin') {
+                            $new_super = false;
+                        }
+                        if ($was_super && !$rh_editor_is_super) {
+                            $error_msg = 'Only a super admin can change a super admin.';
+                        } elseif ($current_role === 'admin' && $role !== 'admin' && !$rh_editor_is_super && rh_admin_is_limited($uid)) {
+                            $error_msg = 'A super admin has switched off some of this administrator\'s permissions, so only a super admin can change their role.';
+                        } elseif ($current_role !== 'admin' && $role === 'admin' && $rh_editor_limited) {
+                            $error_msg = 'Your account has some permissions switched off by a super admin, so you cannot make anyone an Administrator. Ask a super admin.';
+                        } elseif ($was_super && $target_was_active && (!$new_super || !$is_active) && rh_active_super_admin_count() <= 1) {
+                            $error_msg = 'Cannot change this: this is the last active super admin.';
+                        }
+
+                        if (!$error_msg && $current_role === 'admin' && $target_was_active && ($role !== 'admin' || !$is_active)) {
                             $admin_count = $pdo->query("SELECT COUNT(*) FROM admin_users WHERE role = 'admin' AND is_active = 1")->fetchColumn();
                             if ($admin_count <= 1) {
                                 $error_msg = 'Cannot change role or deactivate: this is the last active admin.';
                             }
                         }
+                        if (!$error_msg && !empty($new_password) && strlen($new_password) < 8) {
+                            $error_msg = 'Password must be at least 8 characters.';
+                        }
 
                         if (!$error_msg) {
                             if (!empty($new_password)) {
-                                if (strlen($new_password) < 8) {
-                                    $error_msg = 'Password must be at least 8 characters.';
-                                } else {
-                                    $hash = password_hash($new_password, PASSWORD_DEFAULT);
-                                    $stmt = $pdo->prepare("UPDATE admin_users SET full_name = ?, email = ?, role = ?, is_active = ?, password_hash = ? WHERE id = ?");
-                                    $stmt->execute([$full_name, $email, $role, $is_active, $hash, $uid]);
-                                    $success_msg = "User updated successfully (including password).";
-                                }
+                                $hash = password_hash($new_password, PASSWORD_DEFAULT);
+                                $stmt = $pdo->prepare("UPDATE admin_users SET full_name = ?, email = ?, role = ?, is_active = ?, password_hash = ? WHERE id = ?");
+                                $stmt->execute([$full_name, $email, $role, $is_active, $hash, $uid]);
+                                $success_msg = "User updated successfully (including password).";
                             } else {
                                 $stmt = $pdo->prepare("UPDATE admin_users SET full_name = ?, email = ?, role = ?, is_active = ? WHERE id = ?");
                                 $stmt->execute([$full_name, $email, $role, $is_active, $uid]);
                                 $success_msg = "User updated successfully.";
                             }
+                            if ($new_super !== $was_super) {
+                                if (rh_set_super_admin_flag($uid, $new_super, (int)$user['id'])) {
+                                    $success_msg .= $new_super ? ' They are now a super admin.' : ' They are no longer a super admin.';
+                                } else {
+                                    $error_msg = 'The super admin setting could not be changed.';
+                                }
+                            }
 
-                            // Reset permissions to role defaults if role changed
+                            // Reset permissions to role defaults if role changed; someone who becomes an
+                            // administrator loses every row from their old role.
                             if ($current_role !== $role && $role !== 'admin') {
                                 resetUserPermissionsToDefault($uid, $user['id']);
                                 $success_msg .= ' Permissions reset to role defaults.';
+                            } elseif ($current_role !== $role && $role === 'admin') {
+                                rh_clear_user_permission_rows($uid);
                             }
 
-                            logActivity($user['id'], 'user_updated', "Updated user ID {$uid}");
+                            $changes = [];
+                            if ((string)$current_role !== $role) {
+                                $changes[] = "role {$current_role} -> {$role}";
+                            }
+                            if ($target_was_active !== (bool)$is_active) {
+                                $changes[] = 'active ' . ($target_was_active ? 'yes' : 'no') . ' -> ' . ($is_active ? 'yes' : 'no');
+                            }
+                            if ($was_super !== $new_super) {
+                                $changes[] = 'super admin ' . ($was_super ? 'yes' : 'no') . ' -> ' . ($new_super ? 'yes' : 'no');
+                            }
+                            if ((string)($current_row['email'] ?? '') !== $email) {
+                                $changes[] = 'email ' . ($current_row['email'] ?? '') . " -> {$email}";
+                            }
+                            if ((string)($current_row['full_name'] ?? '') !== $full_name) {
+                                $changes[] = 'name ' . ($current_row['full_name'] ?? '') . " -> {$full_name}";
+                            }
+                            if (!empty($new_password)) {
+                                $changes[] = 'password set';
+                            }
+                            logActivity($user['id'], 'user_updated', "Updated user ID {$uid}" . ($changes ? ': ' . implode('; ', $changes) : ''));
                         }
                     }
                 }
@@ -263,17 +321,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $check_role->execute([$uid]);
                     $target_role = $check_role->fetchColumn();
 
-                    if ($target_role === 'admin') {
-                        $error_msg = 'Cannot modify admin permissions.';
+                    // Administrators' permissions: a super admin only, never a super admin's own (owner 2026-11-11).
+                    if ($target_role === 'admin' && rh_is_super_admin_account($uid)) {
+                        $error_msg = 'A super admin always has every permission.';
+                    } elseif ($target_role === 'admin' && !$rh_editor_is_super) {
+                        $error_msg = 'Only a super admin can change an administrator\'s permissions.';
                     } else {
                         $all_perms = getAllPermissions();
                         $granted = $_POST['permissions'] ?? [];
+                        $granted = is_array($granted) ? $granted : [];
                         $perms_to_set = [];
+                        // An administrator a super admin has limited cannot hand out what they no longer hold.
+                        $editor_limited = $user['role'] === 'admin' && rh_admin_has_limits((int)$user['id']);
 
                         foreach ($all_perms as $key => $info) {
                             if ($key === 'user_management') continue; // Admin-only
                             // Prevent privilege escalation: non-admins cannot grant perms they don't hold
                             if ($user['role'] !== 'admin' && !hasPermission($user['id'], $key)) {
+                                continue;
+                            }
+                            if ($editor_limited && $key !== 'view_only' && !hasPermission($user['id'], $key)) {
                                 continue;
                             }
                             $perms_to_set[$key] = in_array($key, $granted);
@@ -309,8 +376,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             } else {
                 $uid = (int)($_POST['user_id'] ?? 0);
 
+                $rs_role = $pdo->prepare("SELECT role FROM admin_users WHERE id = ?");
+                $rs_role->execute([$uid]);
+                $rs_target_role = $rs_role->fetchColumn();
                 if (!canManageUser($user['id'], $uid)) {
                     $error_msg = 'You cannot modify this user\'s permissions.';
+                } elseif ($rs_target_role === 'admin' && (!$rh_editor_is_super || rh_is_super_admin_account($uid))) {
+                    $error_msg = 'Only a super admin can change an administrator\'s permissions (a super admin always has every permission).';
                 } elseif (resetUserPermissionsToDefault($uid, $user['id'])) {
                     $success_msg = "Permissions reset to role defaults.";
                 } else {
@@ -365,12 +437,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 } else {
                     // Don't allow deleting the last admin
                     $admin_count = $pdo->query("SELECT COUNT(*) FROM admin_users WHERE role = 'admin' AND is_active = 1")->fetchColumn();
-                    $check_role = $pdo->prepare("SELECT role, full_name FROM admin_users WHERE id = ?");
+                    $check_role = $pdo->prepare("SELECT role, full_name, is_active FROM admin_users WHERE id = ?");
                     $check_role->execute([$uid]);
                     $target = $check_role->fetch(PDO::FETCH_ASSOC);
+                    $target_super = rh_is_super_admin_account($uid);
 
                     if ($target && $target['role'] === 'admin' && $admin_count <= 1) {
                         $error_msg = 'Cannot delete the last admin user.';
+                    } elseif ($target_super && !$rh_editor_is_super) {
+                        $error_msg = 'Only a super admin can delete a super admin.';
+                    } elseif ($target_super && (int)$target['is_active'] === 1 && rh_active_super_admin_count() <= 1) {
+                        $error_msg = 'Cannot delete the last active super admin.';
                     } else {
                         // Delete user permissions first
                         $pdo->prepare("DELETE FROM user_permissions WHERE user_id = ?")->execute([$uid]);
@@ -380,7 +457,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $stmt = $pdo->prepare("DELETE FROM admin_users WHERE id = ?");
                         $stmt->execute([$uid]);
 
-                        logActivity($user['id'], 'user_deleted', "Deleted user '{$target['full_name']}'");
+                        logActivity($user['id'], 'user_deleted', "Deleted user '{$target['full_name']}'" . ($target_super ? ' (a super admin)' : ''));
                         $success_msg = "User deleted successfully.";
                     }
                 }
@@ -402,6 +479,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error_msg = 'No users selected.';
                 } else {
                     $count = 0;
+                    $bulk_skipped = 0;
                     foreach ($user_ids as $uid) {
                         $uid = (int)$uid;
                         if (canManageUser($user['id'], $uid)) {
@@ -410,18 +488,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $check->execute([$uid]);
                             $current_role = $check->fetchColumn();
                             if ($current_role === false || $current_role === $new_role) continue; // missing user or no change
+                            // A limited administrator's role: super admins only. A limited editor makes no one an administrator.
+                            if ($current_role === 'admin' && !$rh_editor_is_super && rh_admin_is_limited($uid)) { $bulk_skipped++; continue; }
+                            if ($new_role === 'admin' && $rh_editor_limited) { $bulk_skipped++; continue; }
 
                             if ($current_role === 'admin' && $new_role !== 'admin') {
                                 $admin_count = $pdo->query("SELECT COUNT(*) FROM admin_users WHERE role = 'admin' AND is_active = 1")->fetchColumn();
                                 if ($admin_count <= 1) continue; // Skip last admin
+                                // A super admin: only another super admin may demote them, never the last active one.
+                                if (rh_is_super_admin_account($uid)) {
+                                    if (!$rh_editor_is_super || (rh_is_super_admin($uid) && rh_active_super_admin_count() <= 1)) continue;
+                                    if (!rh_set_super_admin_flag($uid, false, (int)$user['id'])) continue;
+                                }
                             }
 
                             $pdo->prepare("UPDATE admin_users SET role = ? WHERE id = ?")->execute([$new_role, $uid]);
-                            resetUserPermissionsToDefault($uid, $user['id']);
+                            if ($new_role === 'admin') {
+                                rh_clear_user_permission_rows($uid); // nothing from the old role carries over
+                            } else {
+                                resetUserPermissionsToDefault($uid, $user['id']);
+                            }
+                            logActivity($user['id'], 'user_role_changed', "User ID {$uid}: role {$current_role} -> {$new_role}");
                             $count++;
                         }
                     }
-                    $success_msg = "Updated role for {$count} user(s).";
+                    $success_msg = "Updated role for {$count} user(s)."
+                        . ($bulk_skipped ? " {$bulk_skipped} skipped: only a super admin can change the role of an administrator a super admin has limited, and an administrator with limits cannot make anyone an Administrator." : '');
                     logActivity($user['id'], 'bulk_role_change', "Changed {$count} users to role '{$new_role}'");
                 }
             }
@@ -444,6 +536,7 @@ if ($error_msg !== '' && in_array($action, ['add_user', 'update_user'], true)) {
         'is_active' => !empty($_POST['is_active']),
         'send_welcome' => !empty($_POST['send_welcome']),
         'customize_first' => !empty($_POST['customize_first']),
+        'is_super_admin' => !empty($_POST['is_super_admin']),
     ];
 }
 
@@ -476,7 +569,7 @@ if ($editing_user_id > 0) {
             break;
         }
     }
-    if ($editing_user && $editing_user['role'] !== 'admin') {
+    if ($editing_user && ($editing_user['role'] !== 'admin' || ($rh_editor_is_super && (int)($editing_user['is_super_admin'] ?? 0) !== 1))) {
         $editing_permissions = getUserPermissions($editing_user_id);
     }
 }
@@ -616,7 +709,7 @@ $nav_categories = getNavCategories();
                     <td>
                         <span class="role-badge <?php echo htmlspecialchars((string)$u['role']); ?>">
                             <i class="fas <?php echo $all_roles[$u['role']]['icon'] ?? 'fa-user'; ?>"></i>
-                            <?php echo $all_roles[$u['role']]['label'] ?? ucfirst($u['role']); ?>
+                            <?php echo htmlspecialchars(rh_role_display_label($u)); ?>
                         </span>
                     </td>
                     <td>
@@ -642,7 +735,8 @@ $nav_categories = getNavCategories();
                             </button>
                             <?php endif; ?>
 
-                            <?php if ($u['role'] !== 'admin' && hasPermission($user['id'], 'user_permissions') && canManageUser($user['id'], $u['id'])): ?>
+                            <?php /* Administrators: only a super admin edits their permissions; a super admin's never (owner 2026-11-11). */ ?>
+                            <?php if (($u['role'] !== 'admin' || ($rh_editor_is_super && (int)($u['is_super_admin'] ?? 0) !== 1)) && hasPermission($user['id'], 'user_permissions') && canManageUser($user['id'], $u['id'])): ?>
                             <button type="button" class="btn-sm btn-permissions" onclick="openPermissionsModal(<?php echo htmlspecialchars(json_encode($u), ENT_QUOTES); ?>)">
                                 <i class="fas fa-shield-alt"></i> Permissions
                             </button>
@@ -696,6 +790,9 @@ $nav_categories = getNavCategories();
                     <p class="permissions-modal__help">
                         Switch on what this person can open and do. Nothing changes until you click <strong id="perm-help-save">Save Permissions</strong>.
                         They see the change the next time they open or refresh a page.
+                    </p>
+                    <p class="permissions-modal__help" id="perm-admin-note" hidden>
+                        Administrators start with every permission. Anything you switch off here is taken away from this administrator.
                     </p>
 
                     <div class="permissions-modal__shortcuts">
@@ -852,6 +949,15 @@ $nav_categories = getNavCategories();
                         Active Account
                     </label>
                 </div>
+                <?php if ($rh_editor_is_super && $rh_super_ready): ?>
+                <div class="form-row">
+                    <label class="edit-active-label" style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-weight: 600; font-size: 13px; color: var(--navy);">
+                        <input type="checkbox" name="is_super_admin" id="edit-super-admin" value="1" style="width: auto;" aria-describedby="edit-super-admin-hint">
+                        Super Admin
+                    </label>
+                    <div class="hint" id="edit-super-admin-hint">Super admins can change other administrators' permissions and manage other super admins. Only a super admin can tick this. Ticking it makes the role Administrator.</div>
+                </div>
+                <?php endif; ?>
                 <div class="form-row">
                     <label for="edit-password">New Password <span style="font-weight:400; color:#888;">(leave blank to keep current)</span></label>
                     <input type="password" id="edit-password" name="new_password" autocomplete="new-password" minlength="8" placeholder="Leave blank to keep unchanged">
@@ -926,6 +1032,8 @@ function openEditModal(userData) {
     document.getElementById('edit-email').value = userData.email;
     document.getElementById('edit-role').value = userData.role;
     document.getElementById('edit-active').checked = userData.is_active == 1;
+    const superBox = document.getElementById('edit-super-admin');
+    if (superBox) superBox.checked = userData.role === 'admin' && userData.is_super_admin == 1;
     document.getElementById('edit-password').value = '';
     umClearFormErrors('editUserForm');
     openModal('editUserModal');
@@ -1100,6 +1208,8 @@ if ($rh_reopen_form): ?>
         document.getElementById('edit-email').value = r.email;
         if (r.role) document.getElementById('edit-role').value = r.role;
         document.getElementById('edit-active').checked = r.is_active;
+        const superBox = document.getElementById('edit-super-admin');
+        if (superBox) superBox.checked = r.is_super_admin;
         document.getElementById('edit-password').value = '';
         umShowFormError('editUserForm', r.error);
         openModal('editUserModal');
@@ -1121,6 +1231,9 @@ function submitDeleteUser() {
 $rh_role_defaults = [];
 foreach (array_keys($all_roles) as $rh_rk) {
     $rh_role_defaults[$rh_rk] = array_values(getDefaultPermissionsForRole((string)$rh_rk));
+    if ($rh_rk === 'admin') { // "View only" is a restriction, never part of an administrator's full set
+        $rh_role_defaults[$rh_rk] = array_values(array_diff($rh_role_defaults[$rh_rk], ['view_only']));
+    }
 }
 ?>
 // Permission data (embedded for client-side rendering)
@@ -1154,6 +1267,7 @@ function openPermissionsModal(userData, sendInviteAfter) {
     const roleLabel = roleData.label || role || '';
     const roleBadge = `<span class="role-badge ${permEsc(role)}"><i class="fas ${permEsc(roleData.icon || 'fa-user')}" aria-hidden="true"></i> ${permEsc(roleLabel)}</span>`;
     document.getElementById('perm-user-role-badge').innerHTML = roleBadge;
+    document.getElementById('perm-admin-note').hidden = role !== 'admin'; // display only: explains the admin case
     document.getElementById('perm-defaults-hint').textContent = getDefaultPermissionsForRole(role).length
         ? 'Role Defaults switches on exactly what the ' + roleLabel + ' role gets by default.'
         : 'The ' + roleLabel + ' role has no defaults, so Role Defaults switches everything off.';
