@@ -69,7 +69,8 @@ function rh_ai_daily_maybe(PDO $db): string
     }
     $done = true;
     try {
-        if ((PHP_SAPI === 'cli' && !$test) || !rh_ai_daily_is_due($db)) {
+        // NO_AI_SPEND (developer laptop): a local page load never claims or starts the hotel's daily checks
+        if (((PHP_SAPI === 'cli' || rh_ai_no_spend_env()) && !$test) || !rh_ai_daily_is_due($db)) {
             return '';
         }
         if (function_exists('fastcgi_finish_request') || function_exists('litespeed_finish_request')) {

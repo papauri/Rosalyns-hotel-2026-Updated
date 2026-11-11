@@ -47,11 +47,27 @@ function rh_ai_is_provider(string $p): bool
  */
 function rh_ai_cloud_on(): bool
 {
-    return rh_ai_setting('ai_cloud_enabled', '1') !== '0';
+    if (rh_ai_setting('ai_cloud_enabled', '1') === '0') {
+        return false;
+    }
+    return !rh_ai_no_spend_blocks();
+}
+
+/**
+ * NO_AI_SPEND=1 in the process environment (developer laptop shells) blocks every real provider call before any
+ * network use. A test that injected a fake transport or names a fake provider never reaches the network, so it
+ * is not blocked.
+ */
+function rh_ai_no_spend_blocks(): bool
+{
+    return rh_ai_no_spend_env() && !is_callable($GLOBALS['__rh_ai_transport'] ?? null) && rh_ai_fake_name() === '';
 }
 
 function rh_ai_cloud_off_message(): string
 {
+    if (rh_ai_setting('ai_cloud_enabled', '1') !== '0' && rh_ai_no_spend_blocks()) {
+        return 'Model calls are blocked on this machine (NO_AI_SPEND), so only quick local answers work.';
+    }
     return 'Cloud providers are switched off in Assistant Settings, so only quick local answers work.';
 }
 
@@ -85,6 +101,9 @@ function rh_ai_http(string $method, string $url, array $headers, ?string $body =
     if (rh_ai_fake_name() !== '') {
         $r = rh_ai_fake_transport($method, $url, $headers, $body);
         return $r + ['ms' => (int)round((microtime(true) - $t0) * 1000)];
+    }
+    if (rh_ai_no_spend_env()) { // second lock: never a real request under NO_AI_SPEND
+        return ['http' => 0, 'body' => '', 'error' => rh_ai_cloud_off_message(), 'ms' => 0];
     }
     if (!function_exists('curl_init')) {
         return ['http' => 0, 'body' => '', 'error' => 'This server cannot make web requests (PHP cURL is missing).', 'ms' => 0];

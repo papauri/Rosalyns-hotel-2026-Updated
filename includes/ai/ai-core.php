@@ -498,9 +498,22 @@ function rh_ai_remove_key(string $provider, ?PDO $db = null): void
     }
 }
 
+/**
+ * Owner 2026-11-11: shells on the developer laptop carry NO_AI_SPEND=1 (process environment only; the hotel
+ * servers never set it). Then no model call leaves the machine (rh_ai_cloud_on), the daily checks are not
+ * started from a local page load, and the blocked call is never recorded as a provider failure.
+ */
+function rh_ai_no_spend_env(): bool
+{
+    return getenv('NO_AI_SPEND') === '1';
+}
+
 /** Record a connection test result (message is already scrubbed of any key). */
 function rh_ai_record_test(string $provider, bool $ok, int $ms, string $message, ?PDO $db = null): void
 {
+    if (!$ok && (function_exists('rh_ai_no_spend_blocks') ? rh_ai_no_spend_blocks() : rh_ai_no_spend_env())) {
+        return; // NO_AI_SPEND: the provider was never contacted, so there is no result to record
+    }
     $db = $db ?? $GLOBALS['pdo'];
     $db->prepare("UPDATE ai_providers SET status = ?, last_test_at = NOW(), last_test_ms = ?, last_test_message = ? WHERE provider = ?")
         ->execute([$ok ? 'ok' : 'error', max(0, $ms), mb_substr($message, 0, 250), $provider]);
