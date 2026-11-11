@@ -1520,6 +1520,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                         }
                         ?>
                     </ul>
+                    <?php if ($mod_pos): ?><p class="eod-sub"><?php echo htmlspecialchars(rh_eod_day_rules_note($report_date, $posShort)); ?></p><?php endif; ?>
                     <?php if ($mod_gym || abs((float)$earned['gym_gross']) > 0.004): ?><p class="eod-sub"><?php echo htmlspecialchars($earned['cash_basis_note']); ?></p><?php endif; ?>
 
                     <h3 class="eod-pane-title">Cash collected</h3>

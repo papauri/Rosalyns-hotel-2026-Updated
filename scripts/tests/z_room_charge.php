@@ -147,5 +147,136 @@ $so = zr_src('admin/stock-orders.php');
 zr_check(strpos($so, "\$shift['settled_today_n']  = (int)(\$soShiftTotals['orders_all_count']") !== false, 'Orders & Tabs Settled Today = Z order count');
 zr_check(strpos(zr_src('admin/stock-dashboard.php'), "rh_so_folio_exclude_sql('o')") !== false, 'stock dashboard Net Sales still leaves guest bills out (labelled)');
 
+echo "\n--- 6. Same Z definition on the toolbar, stations overview, System Logs, CSV export (2026-11-11 LATER) ---\n";
+// 6a. Window totals: till vs room split by status 'completed', which never overlaps the till sale window.
+$wSql = rh_pos_z_window_sql();
+zr_check(substr_count($wSql, '?') === 8 && strpos($wSql, rh_pos_z_sale_sql('o')) !== false, 'window totals: the Z rule, 8 params', $wSql);
+$part = [];
+foreach (['placed', 'paid', 'completed', 'refunded', 'voided', 'cancelled'] as $st) {
+    foreach ([null, '2026-11-11 09:00:00'] as $pa) {
+        $r = ['status' => $st, 'paid_at' => $pa, 'created_at' => '2026-11-11 08:00:00', 'payment_method' => 'cash', 'split_count' => 1];
+        $t = rh_pos_z_order_tender($r);
+        if ($t !== null && (($st === 'completed') !== ($t === 'room'))) { $part[] = $r; }
+    }
+}
+zr_check($part === [], "window totals: status 'completed' is exactly the room line among Z rows", $part);
+// Fold the section-4 fixture the window-SQL way and match the Z totals of rh_pos_shift_totals_assemble.
+$fold = ['till_n' => 0, 'till_amt' => 0.0, 'room_n' => 0, 'room_amt' => 0.0];
+foreach ($orders as $ord) {
+    if (rh_pos_z_order_tender($ord) === null || !$in($ord['paid_at'] ?? $ord['created_at'])) { continue; }
+    if ($ord['status'] === 'completed') { $fold['room_n']++; $fold['room_amt'] += $ord['total']; } else { $fold['till_n']++; $fold['till_amt'] += $ord['total']; }
+}
+$wz = rh_pos_z_window_assemble($fold);
+zr_check($wz['orders'] === $with['orders_all_count'] && abs($wz['sales'] - $with['sales_all_total']) < 0.005, 'window totals = the Z orders / sales of the shift maths', [$wz, $with['orders_all_count'], $with['sales_all_total']]);
+zr_check($wz['till_count'] === $with['orders_count'] && abs($wz['till_amount'] - $with['sales_total']) < 0.005 && $wz['room_charge_amount'] === 300.0, 'window totals: till line = till-only figures, room line separate', $wz);
+zr_check(rh_pos_z_window_assemble([]) === ['till_count' => 0, 'till_amount' => 0.0, 'room_charge_count' => 0, 'room_charge_amount' => 0.0, 'orders' => 0, 'sales' => 0.0], 'window totals: empty row is all zeros');
+zr_check(rh_pos_z_window_assemble(['till_n' => '2', 'till_amt' => '10.005', 'room_n' => '1', 'room_amt' => '0.1'])['sales'] === 10.11, 'window totals: DB strings cast and rounded to cents');
+
+// 6b. Stored close + room line (System Logs, CSV): till kept, Z = till + room, drawer untouched.
+$close = ['id' => 7, 'orders_count' => 5, 'total_revenue' => 430.0, 'expected_cash' => 290.0, 'declared_cash' => 290.0, 'variance_cash' => 0.0];
+$cz = rh_pos_close_add_room($close, ['count' => 1, 'amount' => 300.0]);
+zr_check($cz['orders_count'] === 6 && $cz['total_revenue'] === 730.0 && $cz['till_orders_count'] === 5 && $cz['till_revenue'] === 430.0 && $cz['room_charge_count'] === 1 && $cz['room_charge_amount'] === 300.0, 'stored close: Z orders 5 + 1, sales 430 + 300; till kept', $cz);
+zr_check($cz['expected_cash'] === 290.0 && $cz['declared_cash'] === 290.0 && $cz['variance_cash'] === 0.0, 'stored close: drawer figures untouched');
+zr_check(rh_pos_close_add_room($close, ['count' => 0, 'amount' => 0.0])['orders_count'] === 5 && rh_pos_close_add_room($close, [])['total_revenue'] === 430.0, 'stored close: no room charge = stored figures');
+
+// 6c. Toolbar: Orders / Gross / Net on the Z definition; room chip separate.
+$tb = rh_pos_toolbar_z_figures(['orders_today' => 5, 'revenue_today' => 500.0, 'orders_all' => 6, 'revenue_all' => 800.0, 'room_charge_count' => 1, 'room_charge_amount' => 300.0, 'refund_today' => 80.0]);
+zr_check($tb === ['orders' => 6, 'gross' => 800.0, 'net' => 720.0, 'room' => 300.0], 'toolbar: orders 6, gross 800, net 800 - 80 refunds, room 300', $tb);
+$tb2 = rh_pos_toolbar_z_figures(['orders_today' => 5, 'revenue_today' => 500.0, 'room_charge_count' => 1, 'room_charge_amount' => 300.0]);
+zr_check($tb2['orders'] === 6 && $tb2['gross'] === 800.0 && $tb2['net'] === 800.0, 'toolbar: falls back to till + room when the Z keys are absent', $tb2);
+
+// 6d. Station CSV SQL: placeholder count = params, every pair [start, end), Z rule for sales, voids by void time.
+$sq = rh_pos_station_report_sql($W0, $W1, 7200);
+zr_check(($sq['detail']['params'][0] ?? null) === 7200 && strpos($sq['detail']['sql'], 'SELECT DATE(DATE_ADD(COALESCE(o.paid_at, o.voided_at, o.created_at), INTERVAL ? SECOND)) AS day') !== false, 'station CSV detail: date shifted to hotel time (offset is the first param)');
+foreach (['summary', 'detail'] as $k) {
+    $ps = $sq[$k]['params'];
+    if ($k === 'detail') { array_shift($ps); }
+    $sqlK = $k === 'detail' ? substr_replace($sq[$k]['sql'], '', strpos($sq[$k]['sql'], 'INTERVAL ?'), strlen('INTERVAL ?')) : $sq[$k]['sql'];
+    $pairsOk = count($ps) % 2 === 0;
+    for ($i = 0; $pairsOk && $i < count($ps); $i += 2) { $pairsOk = ($ps[$i] === $W0 && $ps[$i + 1] === $W1); }
+    zr_check(substr_count($sqlK, '?') === count($ps) && $pairsOk, "station CSV $k: " . count($ps) . ' placeholders = params, each a [start, end) pair');
+    zr_check(strpos($sq[$k]['sql'], rh_pos_room_charge_sql('o')) !== false && strpos($sq[$k]['sql'], "o.status='paid' THEN") === false && strpos($sq[$k]['sql'], 'o.voided_at >= ?') !== false, "station CSV $k: room column, no paid-only sum, voids by void time");
+}
+
+// 6e. Wiring (text checks).
+$pos = zr_src('admin/pos.php');
+zr_check(strpos($pos, "\$tbZ = rh_pos_toolbar_z_figures(\$shift);") !== false && strpos($pos, "'revenue_all' => (float)(\$t['sales_all_total'] ?? \$t['sales_total'])") !== false, 'toolbar first render uses the Z figures');
+zr_check(strpos($pos, "setText('tbStatOrders', String(ordersAll));") !== false && strpos($pos, "setText('closeShiftTillCount', String(orders));") !== false, 'toolbar poll: Orders = Z count; close form till count stays till-only');
+zr_check(strpos($pos, "setText('tbStatCash', currencySymbol + ' ' + fmtMoneyNoDecimals(cash));") !== false && strpos($pos, "const cash = Number(shift.cash_today || 0);") !== false, 'toolbar Cash / Mobile / Card stay drawer (till) figures');
+zr_check(strpos($pos, "rh_pos_z_window_totals(\$pdo, \$restaurantWindow['start_sql'], \$restaurantWindow['trading_end_sql'])") !== false && strpos($pos, "'room_charge_today' => (float)\$todayZ['room_charge_amount']") !== false, 'stations overview: Z orders / sales + room line');
+$sl = zr_src('admin/system-logs.php');
+zr_check(strpos($sl, '$scRoom = rh_pos_closes_room_charges_batch($pdo, $shiftCloses);') !== false && strpos($sl, 'rh_pos_close_room_charges(') === false, 'System Logs shift closes: room read for the page in one batch (no query per close)');
+$rb = zr_src('includes/report-builders.php');
+zr_check(strpos($rb, 'rh_pos_station_report_sql($a, $b, $hotelOffset)') !== false && strpos($rb, "'Date (hotel time)'") !== false && strpos($rb, 'rh_pos_z_window_totals($pdo, $a, $b)') !== false && strpos($rb, '$closeRoom = rh_pos_closes_room_charges_batch($pdo, $closeRows);') !== false, 'CSV export: station report + shift closes on the Z definition');
+
+// 6f. End of Day: which day each side uses (rules unchanged, note only).
+require_once dirname(__DIR__, 2) . '/admin/includes/eod-revenue.php';
+$note = rh_eod_day_rules_text('11 Nov', 'Nov 11 06:00 - Nov 12 06:00', 'Restaurant');
+zr_check(strpos($note, 'calendar day (11 Nov, midnight to midnight)') !== false && strpos($note, 'Restaurant sales count on the trading day (Nov 11 06:00 - Nov 12 06:00') !== false, 'EOD note names both day rules', $note);
+zr_check(strpos(rh_eod_day_rules_text('11 Nov', '', ''), 'POS sales count on the trading day (opening to the next opening)') !== false, 'EOD note: no window / label falls back to plain words');
+$sn = rh_eod_day_rules_text('11 Nov', 'Nov 11 06:00 - Nov 12 06:00', 'POS', true);
+zr_check(strlen($sn) < 120 && strpos($sn, 'calendar day (11 Nov)') !== false && strpos($sn, 'trading day (Nov 11 06:00 - Nov 12 06:00)') !== false, 'EOD note: short PDF form names both rules', $sn);
+zr_check(strpos(zr_src('admin/end-of-day-report.php'), 'rh_eod_day_rules_note($report_date, $posShort)') !== false
+    && strpos(zr_src('includes/eod-pdf-builder.php'), 'rh_pos_short_label() : \'POS\', true) : ') !== false
+    && substr_count(zr_src('admin/api/end-of-day-send.php'), 'rh_eod_day_rules_note($date,') === 2, 'EOD page, PDF, e-mail and WhatsApp carry the note');
+zr_check(strpos(zr_src('admin/includes/pos-shift-totals.php'), "WHERE voided = 0 AND DATE(posted_at) = ?") !== false, 'folio side still the calendar day (rule unchanged)');
+
+echo "\n--- 7. Daily e-mail: ended trading day, sections independent; System Logs batch (2026-11-11 fixes) ---\n";
+// 7a. Last ENDED trading day: windows 06:00 -> next day 06:00 (hotel time).
+$tz = new DateTimeZone('Africa/Blantyre');
+$winFor = static function (string $d) use ($tz): array { return ['trading_end' => (new DateTimeImmutable($d . ' 06:00:00', $tz))->modify('+1 day')]; };
+zr_check(rh_pos_last_ended_trading_date(new DateTimeImmutable('2026-11-12 03:00:00', $tz), $winFor) === '2026-11-10', 'ended day: 03:00 on the 12th -> the 10th (the 11th trades until 06:00)');
+zr_check(rh_pos_last_ended_trading_date(new DateTimeImmutable('2026-11-12 06:00:00', $tz), $winFor) === '2026-11-11', 'ended day: at the 06:00 opening the 11th has ended');
+zr_check(rh_pos_last_ended_trading_date(new DateTimeImmutable('2026-11-12 23:30:00', $tz), $winFor) === '2026-11-11', 'ended day: late evening -> yesterday, never the half day in progress');
+$win24 = static function (string $d) use ($tz): array { return ['trading_end' => new DateTimeImmutable($d . ' 23:59:59', $tz)]; };
+zr_check(rh_pos_last_ended_trading_date(new DateTimeImmutable('2026-11-12 23:59:59', $tz), $win24) === '2026-11-12', 'ended day: a day whose trading end has passed counts itself');
+// 7b. One failing section never stops the e-mail.
+require_once dirname(__DIR__, 2) . '/includes/report-sections.php';
+$logged = [];
+$logFn = static function (string $n, Throwable $e) use (&$logged): void { $logged[] = $n . ':' . $e->getMessage(); };
+$okSec = rh_report_section('bookings', static fn() => ['filename' => 'b.csv', 'csv' => 'x'], $logFn);
+$badSec = rh_report_section('station-day', static function () { throw new RuntimeException('SQLSTATE[42000] boom'); }, $logFn);
+zr_check($okSec['ok'] === true && $okSec['result']['filename'] === 'b.csv', 'section: a good builder returns its CSV');
+zr_check($badSec['ok'] === false && $badSec['result'] === null && $logged === ['station-day:SQLSTATE[42000] boom'], 'section: a failing builder is logged and comes back not ok (no exception)', $logged);
+$throwLog = rh_report_section('x', static function () { throw new RuntimeException('a'); }, static function () { throw new RuntimeException('log down'); });
+zr_check($throwLog['ok'] === false, 'section: a failing logger does not stop the e-mail either');
+zr_check(strpos(rh_report_failed_line('Station report'), 'Station report could not be loaded') === 0 && strpos(rh_report_failed_line('Station report'), 'SQLSTATE') === false, 'section: e-mail line says "could not be loaded", no error detail');
+$dr = zr_src('scripts/daily_reports.php');
+zr_check(substr_count($dr, 'rh_report_section(') === 4 && strpos($dr, "rh_log_event('daily_reports', 'error'") !== false && strpos($dr, "if (\$sec['ok'] && is_array(\$sec['result']))") !== false, 'daily e-mail: four independent sections, failures logged, only good CSVs attached');
+zr_check(strpos($dr, "rh_pos_last_ended_trading_date(new DateTimeImmutable('now', rh_site_timezone()))") !== false && strpos($dr, "trading day ' . htmlspecialchars(\$stationDays)") !== false, 'daily e-mail: station report = last ended trading day, named in the e-mail');
+// 7c. System Logs batch = the per-close rule, with no query per close.
+$biz = static function (string $d): array { return ['start_sql' => $d . ' 06:00:00', 'trading_end_sql' => (new DateTimeImmutable($d))->modify('+1 day')->format('Y-m-d') . ' 06:00:00']; };
+$cl = [
+    ['id' => 11, 'user_id' => 5, 'shift_date' => '2026-11-11', 'closed_at' => '2026-11-11 15:00:00'],
+    ['id' => 12, 'user_id' => 5, 'shift_date' => '2026-11-11', 'closed_at' => '2026-11-11 23:00:00'],
+    ['id' => 13, 'user_id' => 9, 'shift_date' => '2026-11-11', 'closed_at' => '2026-11-13 09:00:00'], // recorded late: capped at trading end
+];
+$others = array_map(static fn(array $c): array => ['id' => $c['id'], 'user_id' => $c['user_id'], 'closed_at' => $c['closed_at'], 'shift_date' => ''], $cl);
+$wins = rh_pos_close_windows_batch($cl, $others, $biz);
+zr_check($wins[11]['from'] === '2026-11-10 06:00:00' && $wins[11]['end'] === '2026-11-11 15:00:00', 'batch window: first close looks back to the floor', $wins[11]);
+zr_check($wins[12]['from'] === '2026-11-11 15:00:00' && $wins[12]['end'] === '2026-11-11 23:00:00', 'batch window: next close starts where the previous one stopped', $wins[12]);
+zr_check($wins[13]['end'] === '2026-11-12 06:00:00' && $wins[13]['from'] === '2026-11-10 06:00:00', 'batch window: a late close is capped at its trading end; other users ignored', $wins[13]);
+$rcOrders = [
+    ['uid' => 5, 'ts' => '2026-11-11 10:00:00', 'amount' => '100.00'],
+    ['uid' => 5, 'ts' => '2026-11-11 15:00:00', 'amount' => '50.00'],  // exactly at close 11's end -> close 12
+    ['uid' => 5, 'ts' => '2026-11-11 23:30:00', 'amount' => '70.00'],  // after close 12 -> neither
+    ['uid' => 9, 'ts' => '2026-11-11 20:00:00', 'amount' => '30.10'],
+];
+$byW = rh_pos_room_charges_by_windows($wins, $rcOrders);
+zr_check($byW[11] === ['count' => 1, 'amount' => 100.0] && $byW[12] === ['count' => 1, 'amount' => 50.0] && $byW[13] === ['count' => 1, 'amount' => 30.1], 'batch room charges: each order in exactly one close of its own user, [from, end)', $byW);
+$pstSrc = zr_src('admin/includes/pos-shift-totals.php');
+$bStart = strpos($pstSrc, 'function rh_pos_closes_room_charges_batch');
+$bBody = substr($pstSrc, $bStart, strpos($pstSrc, "if (!function_exists('rh_pos_station_report_sql'))") - $bStart);
+zr_check(substr_count($bBody, '->prepare(') === 2 && strpos($bBody, '->execute(') !== false && preg_match('/foreach[^\n]*\n[^\n]*->(prepare|execute)\(/', $bBody) === 0, 'batch: exactly two queries, none inside a loop');
+
+// 7d. A failed room read is never shown as 0 (absence rule); all sections failed -> exit 1.
+zr_check(strpos($pstSrc, "error_log('rh_pos_closes_room_charges_batch: ' . \$e->getMessage());\n            return null;") !== false || strpos($pstSrc, "error_log('rh_pos_closes_room_charges_batch: ' . \$e->getMessage());\r\n            return null;") !== false, 'batch: a DB error returns null, not an empty (= zero) result');
+$sl2 = zr_src('admin/system-logs.php');
+zr_check(strpos($sl2, "\$scRow['room_unavailable'] = (\$scRoom === null);") !== false && strpos($sl2, 'Charged to room could not be loaded') !== false, 'System Logs: failed room read says "could not be loaded"');
+$rb2 = zr_src('includes/report-builders.php');
+zr_check(strpos($rb2, '$roomOk = $closeRoom !== null;') !== false && strpos($rb2, "'Charged to room could not be loaded'") !== false, 'CSV shift closes: failed room read says "could not be loaded"');
+$dr2 = zr_src('scripts/daily_reports.php');
+zr_check(strpos($dr2, "if (!array_filter(\$sections, static fn(array \$sec): bool => \$sec['ok'])) {") !== false && strpos($dr2, 'exit(1);') !== false && strpos($dr2, 'Always sends FOUR') === false, 'daily e-mail: exit 1 when every section failed; header comment fixed');
+
 echo "\n=== z_room_charge: $P passed, $F failed ===\n";
 exit($F > 0 ? 1 : 0);

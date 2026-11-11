@@ -765,6 +765,299 @@ if (!function_exists('rh_pos_close_room_charges')) {
     }
 }
 
+if (!function_exists('rh_pos_close_add_room')) {
+    /**
+     * Pure: a STORED close shown on the Z definition. Keeps the stored till figures as till_orders_count /
+     * till_revenue and sets orders_count / total_revenue to till + "Charged to room" ($rc = ['count','amount'],
+     * from rh_pos_close_room_charges). Drawer figures (expected / declared / variance) are not touched.
+     */
+    function rh_pos_close_add_room(array $c, array $rc): array
+    {
+        $c['till_orders_count'] = (int)($c['orders_count'] ?? 0);
+        $c['till_revenue'] = round((float)($c['total_revenue'] ?? 0), 2);
+        $c['room_charge_count'] = (int)($rc['count'] ?? 0);
+        $c['room_charge_amount'] = round((float)($rc['amount'] ?? 0), 2);
+        $c['orders_count'] = $c['till_orders_count'] + $c['room_charge_count'];
+        $c['total_revenue'] = round($c['till_revenue'] + $c['room_charge_amount'], 2);
+        return $c;
+    }
+}
+
+if (!function_exists('rh_pos_z_window_sql')) {
+    /**
+     * One row of Z figures for [start,end), all users: till sales (rh_pos_sale_window_sql) and charged to room
+     * (rh_pos_room_charge_sql) split by status = 'completed' (the two rules never share a row). Gross order
+     * totals, the same as rh_pos_shift_totals' sales_total and rh_pos_room_charges. 8 params:
+     * rh_pos_z_sale_params($start, $end).
+     */
+    function rh_pos_z_window_sql(): string
+    {
+        return "SELECT COALESCE(SUM(CASE WHEN o.status = 'completed' THEN 0 ELSE 1 END),0) AS till_n,
+                       COALESCE(SUM(CASE WHEN o.status = 'completed' THEN 0 ELSE o.total_amount END),0) AS till_amt,
+                       COALESCE(SUM(CASE WHEN o.status = 'completed' THEN 1 ELSE 0 END),0) AS room_n,
+                       COALESCE(SUM(CASE WHEN o.status = 'completed' THEN o.total_amount ELSE 0 END),0) AS room_amt
+                FROM stock_orders o WHERE " . rh_pos_z_sale_sql('o');
+    }
+}
+
+if (!function_exists('rh_pos_z_window_assemble')) {
+    /** Pure: rh_pos_z_window_sql row -> till / room / Z totals (orders = till + room, sales = till + room). */
+    function rh_pos_z_window_assemble(array $r): array
+    {
+        $tillN = (int)($r['till_n'] ?? 0);
+        $tillAmt = round((float)($r['till_amt'] ?? 0), 2);
+        $roomN = (int)($r['room_n'] ?? 0);
+        $roomAmt = round((float)($r['room_amt'] ?? 0), 2);
+        return [
+            'till_count' => $tillN, 'till_amount' => $tillAmt,
+            'room_charge_count' => $roomN, 'room_charge_amount' => $roomAmt,
+            'orders' => $tillN + $roomN, 'sales' => round($tillAmt + $roomAmt, 2),
+        ];
+    }
+}
+
+if (!function_exists('rh_pos_z_window_totals')) {
+    /** Z figures for [start,end), all users (rh_pos_z_window_sql). Read-only; zeros on error. */
+    function rh_pos_z_window_totals(PDO $pdo, string $start, string $end): array
+    {
+        try {
+            $st = $pdo->prepare(rh_pos_z_window_sql());
+            $st->execute(rh_pos_z_sale_params($start, $end));
+            return rh_pos_z_window_assemble($st->fetch(PDO::FETCH_ASSOC) ?: []);
+        } catch (Throwable $e) {
+            error_log('rh_pos_z_window_totals: ' . $e->getMessage());
+            return rh_pos_z_window_assemble([]);
+        }
+    }
+}
+
+if (!function_exists('rh_pos_last_ended_trading_date')) {
+    /**
+     * The business date of the latest trading day that has ENDED by $now (owner 2026-11-10: "count with the day
+     * that ended"): the newest of today / yesterday / the day before whose trading end (next opening) is <= $now.
+     * With 06:00 openings: run at 23:00 on the 12th -> the 11th (the 12th is still trading); run at 03:00 on the 12th
+     * -> the 10th, because the 11th's trading day runs until the 12th's 06:00 opening and has not ended yet; from
+     * 06:00 on the 12th -> the 11th. So a run before opening reports the day before yesterday. $windowFor($date) returns a
+     * station-hours window (needs 'trading_end' as DateTimeImmutable); defaults to rh_station_union_window_for_date.
+     */
+    function rh_pos_last_ended_trading_date(DateTimeImmutable $now, ?callable $windowFor = null): string
+    {
+        if ($windowFor === null) {
+            require_once __DIR__ . '/../../includes/station-hours.php';
+            $windowFor = static fn(string $d): array => rh_station_union_window_for_date($d);
+        }
+        for ($i = 0; $i <= 2; $i++) {
+            $d = $now->modify('-' . $i . ' day')->format('Y-m-d');
+            $w = $windowFor($d);
+            if (isset($w['trading_end']) && $w['trading_end'] instanceof DateTimeInterface && $w['trading_end'] <= $now) {
+                return $d;
+            }
+        }
+        return $now->modify('-1 day')->format('Y-m-d');
+    }
+}
+
+if (!function_exists('rh_pos_close_windows_batch')) {
+    /**
+     * Pure: rh_pos_close_window for many stored closes without a query each. $closes: the closes to window
+     * (id, user_id, shift_date, closed_at). $others: every close of those users recorded on or after the earliest
+     * floor (id, user_id, closed_at, shift_date) - the rows rh_pos_shift_window_start would read. $bizFor($date)
+     * returns the station-hours window (start_sql, trading_end_sql). Same rules as rh_pos_close_window: end = the
+     * close's closed_at capped at its trading end; from = the user's previous covered end, never before the floor.
+     * @return array<int, array{user_id:int, from:string, end:string}> keyed by close id
+     */
+    function rh_pos_close_windows_batch(array $closes, array $others, callable $bizFor): array
+    {
+        $byUser = [];
+        foreach ($others as $o) {
+            $byUser[(int)($o['user_id'] ?? 0)][] = $o;
+        }
+        $out = [];
+        foreach ($closes as $c) {
+            $id = (int)($c['id'] ?? 0);
+            $uid = (int)($c['user_id'] ?? 0);
+            if ($id <= 0 || $uid <= 0 || empty($c['shift_date'])) {
+                continue;
+            }
+            $biz = $bizFor((string)$c['shift_date']);
+            $end = (string)$biz['trading_end_sql'];
+            $closedAt = (string)($c['closed_at'] ?? '');
+            if ($closedAt !== '' && $closedAt < $end) {
+                $end = $closedAt;
+            }
+            $floor = rh_pos_shift_window_floor((string)$biz['start_sql']);
+            $mine = [];
+            foreach ($byUser[$uid] ?? [] as $o) {
+                if ((int)($o['id'] ?? 0) !== $id && (string)($o['closed_at'] ?? '') >= $floor) {
+                    $mine[] = $o;
+                }
+            }
+            $out[$id] = ['user_id' => $uid, 'from' => rh_pos_shift_window_from_closes($mine, $floor, $end), 'end' => $end];
+        }
+        return $out;
+    }
+}
+
+if (!function_exists('rh_pos_room_charges_by_windows')) {
+    /**
+     * Pure: "Charged to room" per close window. $orders: room-charge rows (uid = payer, ts = paid_at else
+     * created_at, amount = total_amount) - the rh_pos_room_charge_sql rule. An order counts in a window when its
+     * payer is the close's user and from <= ts < end, exactly as rh_pos_room_charges.
+     * @return array<int, array{count:int, amount:float}> keyed by close id
+     */
+    function rh_pos_room_charges_by_windows(array $windows, array $orders): array
+    {
+        $byUser = [];
+        foreach ($orders as $o) {
+            $byUser[(int)($o['uid'] ?? 0)][] = $o;
+        }
+        $out = [];
+        foreach ($windows as $id => $w) {
+            $n = 0;
+            $amt = 0.0;
+            foreach ($byUser[(int)$w['user_id']] ?? [] as $o) {
+                $ts = (string)($o['ts'] ?? '');
+                if ($ts >= $w['from'] && $ts < $w['end']) {
+                    $n++;
+                    $amt += (float)($o['amount'] ?? 0);
+                }
+            }
+            $out[$id] = ['count' => $n, 'amount' => round($amt, 2)];
+        }
+        return $out;
+    }
+}
+
+if (!function_exists('rh_pos_closes_room_charges_batch')) {
+    /**
+     * "Charged to room" for a page of stored closes in two queries (System Logs), the same figures as calling
+     * rh_pos_close_room_charges per close. Read-only. A close with no user or shift date is not in the result (0, as
+     * before). NULL = the read FAILED: callers show "could not be loaded", never 0 (absence rule).
+     * @return array<int, array{count:int, amount:float}>|null keyed by close id
+     */
+    function rh_pos_closes_room_charges_batch(PDO $pdo, array $closes): ?array
+    {
+        if ($closes === []) {
+            return [];
+        }
+        try {
+            require_once __DIR__ . '/../../includes/station-hours.php';
+            $bizCache = [];
+            $bizFor = static function (string $d) use (&$bizCache): array {
+                if (!isset($bizCache[$d])) {
+                    $bizCache[$d] = rh_station_union_window_for_date($d);
+                }
+                return $bizCache[$d];
+            };
+            $userIds = [];
+            $minFloor = null;
+            foreach ($closes as $c) {
+                if ((int)($c['user_id'] ?? 0) > 0 && !empty($c['shift_date'])) {
+                    $userIds[(int)$c['user_id']] = true;
+                    $f = rh_pos_shift_window_floor((string)$bizFor((string)$c['shift_date'])['start_sql']);
+                    $minFloor = ($minFloor === null || $f < $minFloor) ? $f : $minFloor;
+                }
+            }
+            if ($userIds === []) {
+                return [];
+            }
+            $ids = array_keys($userIds);
+            $in = implode(',', array_fill(0, count($ids), '?'));
+            $st = $pdo->prepare("SELECT id, user_id, closed_at, shift_date FROM stock_shift_closes WHERE user_id IN ($in) AND closed_at >= ?");
+            $st->execute(array_merge($ids, [$minFloor]));
+            $windows = rh_pos_close_windows_batch($closes, $st->fetchAll(PDO::FETCH_ASSOC) ?: [], $bizFor);
+            if ($windows === []) {
+                return [];
+            }
+            $lo = min(array_column($windows, 'from'));
+            $hi = max(array_column($windows, 'end'));
+            $payer = rh_pos_payer_sql($pdo, 'o');
+            $st = $pdo->prepare("SELECT $payer AS uid, COALESCE(o.paid_at, o.created_at) AS ts, o.total_amount AS amount
+                FROM stock_orders o WHERE " . rh_pos_room_charge_sql('o') . " AND $payer IN ($in)");
+            $st->execute(array_merge([$lo, $hi, $lo, $hi], $ids));
+            return rh_pos_room_charges_by_windows($windows, $st->fetchAll(PDO::FETCH_ASSOC) ?: []);
+        } catch (Throwable $e) {
+            error_log('rh_pos_closes_room_charges_batch: ' . $e->getMessage());
+            return null;
+        }
+    }
+}
+
+if (!function_exists('rh_pos_station_report_sql')) {
+    /**
+     * Pure: the Station Day CSV's two queries (includes/report-builders.php) for [start,end) on the Z definition.
+     * Per station / item line totals: till sales (rh_pos_sale_window_sql), charged to room (rh_pos_room_charge_sql)
+     * and their total (rh_pos_z_sale_sql); orders / items / qty count Z orders only. Voided lines by void time
+     * (voided_at, else created_at), so unpaid voids still show. Every window placeholder is a [start, end) pair.
+     * Detail date: the HOTEL date of the sale / room charge / void. Timestamps are stored in the DB session zone, so
+     * $hotelOffsetSeconds (hotel zone offset minus DB zone offset) is added first; it is the detail's first param.
+     * @return array{summary: array{sql:string, params:array}, detail: array{sql:string, params:array}}
+     */
+    function rh_pos_station_report_sql(string $start, string $end, int $hotelOffsetSeconds = 0): array
+    {
+        $zSql = rh_pos_z_sale_sql('o');      // 8 params
+        $zP = rh_pos_z_sale_params($start, $end);
+        $till = rh_pos_sale_window_sql('o'); // 4 params
+        $room = rh_pos_room_charge_sql('o'); // 4 params
+        $p4 = [$start, $end, $start, $end];
+        $void = "(o.status = 'voided' AND ((o.voided_at IS NOT NULL AND o.voided_at >= ? AND o.voided_at < ?)"
+            . " OR (o.voided_at IS NULL AND o.created_at >= ? AND o.created_at < ?)))"; // 4 params
+
+        $summary = "SELECT COALESCE(NULLIF(oi.station, ''), 'unassigned') AS station,
+                          COUNT(DISTINCT CASE WHEN $zSql THEN o.id END) AS orders,
+                          SUM(CASE WHEN $zSql THEN oi.quantity ELSE 0 END) AS items,
+                          SUM(CASE WHEN $till THEN oi.line_total ELSE 0 END) AS till_sales,
+                          SUM(CASE WHEN $room THEN oi.line_total ELSE 0 END) AS room_charged,
+                          SUM(CASE WHEN $void THEN oi.line_total ELSE 0 END) AS voided_amount,
+                          SUM(CASE WHEN $void THEN 1 ELSE 0 END) AS voided_lines,
+                          SUM(CASE WHEN $zSql THEN oi.line_total ELSE 0 END) AS total_sales
+                   FROM stock_order_items oi
+                   INNER JOIN stock_orders o ON o.id = oi.order_id
+                   WHERE ($zSql OR $void)
+                   GROUP BY station
+                   ORDER BY total_sales DESC";
+        $detail = "SELECT DATE(DATE_ADD(COALESCE(o.paid_at, o.voided_at, o.created_at), INTERVAL ? SECOND)) AS day,
+                         COALESCE(NULLIF(oi.station,''),'unassigned') AS station,
+                         oi.menu_type, oi.item_name,
+                         SUM(CASE WHEN $zSql THEN oi.quantity ELSE 0 END) AS qty,
+                         SUM(CASE WHEN $till THEN oi.line_total ELSE 0 END) AS till_sales,
+                         SUM(CASE WHEN $room THEN oi.line_total ELSE 0 END) AS room_charged,
+                         SUM(CASE WHEN $void THEN oi.line_total ELSE 0 END) AS voided,
+                         SUM(CASE WHEN $zSql THEN oi.line_total ELSE 0 END) AS total_sales
+                  FROM stock_order_items oi
+                  INNER JOIN stock_orders o ON o.id = oi.order_id
+                  WHERE ($zSql OR $void)
+                  GROUP BY day, station, oi.menu_type, oi.item_name
+                  ORDER BY day, station, total_sales DESC";
+        return [
+            'summary' => ['sql' => $summary, 'params' => array_merge($zP, $zP, $p4, $p4, $p4, $p4, $zP, $zP, $p4)],
+            'detail' => ['sql' => $detail, 'params' => array_merge([$hotelOffsetSeconds], $zP, $p4, $p4, $p4, $zP, $zP, $p4)],
+        ];
+    }
+}
+
+if (!function_exists('rh_pos_toolbar_z_figures')) {
+    /**
+     * Pure: the POS toolbar's shift figures on the Z definition, from pos_fetch_shift_summary(). Orders and Gross
+     * = till + charged to room; Net = Gross less refunds paid out this shift; room = the "Charged to room" chip.
+     * Cash / Mobile / Card (drawer) are not here: they stay till-only.
+     */
+    function rh_pos_toolbar_z_figures(array $s): array
+    {
+        $tillN = (int)($s['orders_today'] ?? 0);
+        $tillAmt = (float)($s['revenue_today'] ?? 0);
+        $roomAmt = (float)($s['room_charge_amount'] ?? 0);
+        $orders = isset($s['orders_all']) ? (int)$s['orders_all'] : $tillN + (int)($s['room_charge_count'] ?? 0);
+        $gross = isset($s['revenue_all']) ? (float)$s['revenue_all'] : $tillAmt + $roomAmt;
+        return [
+            'orders' => $orders,
+            'gross' => round($gross, 2),
+            'net' => round($gross - (float)($s['refund_today'] ?? 0), 2),
+            'room' => round($roomAmt, 2),
+        ];
+    }
+}
+
 if (!function_exists('rh_pos_close_revenue')) {
     /**
      * Net sales of a stored shift close (net takings across tenders, the figure written to

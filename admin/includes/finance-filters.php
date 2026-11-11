@@ -280,3 +280,58 @@ if (!function_exists('rh_fin_valid_date')) {
         return ['sql' => 'WHERE ' . implode(' AND ', $where), 'params' => $params];
     }
 }
+
+if (!function_exists('rh_fin_search_term')) {
+    /** Payments free-text search: ?search_text=, or ?q= as an alias when search_text is empty (older deep links). */
+    function rh_fin_search_term(array $get): string
+    {
+        $t = rh_fin_get_str($get, 'search_text');
+        return $t !== '' ? $t : rh_fin_get_str($get, 'q');
+    }
+
+    /**
+     * Reports page deep-link preset (Dashboard links such as reports.php?type=accounting&range=today).
+     * - type: an alias of ?tab, used only when ?tab is absent. A known tab name is taken as is; 'accounting' (the
+     *   Dashboard's restaurant / till revenue link) means the POS tab when POS is on, else Revenue. Anything else is
+     *   ignored. The page still runs the result through its own tab whitelist and module gate.
+     * - range=today: start = end = $today (the calendar day the Reports page already uses), only when neither
+     *   start_date nor end_date was given. Any other range value is ignored.
+     * @return array{tab:string, range_today:bool}
+     */
+    function rh_fin_reports_preset(array $get, array $validTabs, bool $posOn, string $today): array
+    {
+        $tab = '';
+        if (rh_fin_get_str($get, 'tab') === '') {
+            $type = strtolower(rh_fin_get_str($get, 'type'));
+            if ($type === 'accounting') {
+                $tab = $posOn ? 'fnb' : 'revenue';
+            } elseif ($type !== '' && in_array($type, $validTabs, true)) {
+                $tab = $type;
+            }
+        }
+        $rangeToday = rh_fin_get_str($get, 'range') === 'today'
+            && rh_fin_get_str($get, 'start_date') === '' && rh_fin_get_str($get, 'end_date') === ''
+            && rh_fin_valid_date($today) !== '';
+        return ['tab' => $tab, 'range_today' => $rangeToday];
+    }
+
+    /**
+     * Payments "Accounts owing" Type badge + link for one row source. Known sources use $known; any other source
+     * (pending payment rows of a non-restaurant source) shows its OWN type name, e.g. 'gym_shop' -> "Gym shop", with a neutral badge,
+     * never the restaurant "Open tab" badge. Link: its pending rows in this ledger (booking_type + booking_id).
+     * @return array{label:string, badge:string, link:string}
+     */
+    function rh_fin_outstanding_src_meta(string $src, array $known): array
+    {
+        if (isset($known[$src]) && is_array($known[$src])) {
+            return $known[$src];
+        }
+        $name = trim(str_replace(['_', '-'], ' ', $src));
+        $label = $name === '' ? 'Other' : ucfirst(strtolower($name));
+        return [
+            'label' => $label,
+            'badge' => 'neutral',
+            'link' => 'payments.php?' . http_build_query(['booking_type' => $src]) . '&booking_id=',
+        ];
+    }
+}

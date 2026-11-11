@@ -35,7 +35,7 @@ $refundStatusLabels = ['pending' => 'pending', 'processing' => 'processing', 'co
 // Real Y-m-d dates only (anything else is ignored, so the boxes show what is actually applied).
 $startDate = rh_fin_valid_date($_GET['start_date'] ?? '');
 $endDate = rh_fin_valid_date($_GET['end_date'] ?? '');
-$searchText = rh_fin_get_str($_GET, 'search_text');
+$searchText = rh_fin_search_term($_GET); // ?search_text=, or ?q= (older Dashboard links) when that is empty
 // "Outstanding balances" view: shows accounts (bookings/conference/gym/event)
 // that still owe money — i.e. amount_due > 0 — NOT payment-ledger rows. This is
 // what the dashboard "Outstanding Balances" card counts; those accounts often
@@ -749,8 +749,9 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                         foreach ($outstandingRows as $oRow):
                             $src = (string)($oRow['src'] ?? '');
                             $oid = (int)($oRow['id'] ?? 0);
-                            // Other unpaid tabs (no account page): their own pending rows in this ledger, by type + id.
-                            $meta = $srcMeta[$src] ?? ['label' => 'Open tab', 'badge' => 'restaurant', 'link' => 'payments.php?' . http_build_query(['booking_type' => $src]) . '&booking_id='];
+                            // Other sources (no account page): their own type name, a neutral badge, and their own
+                            // pending rows in this ledger by type + id (rh_fin_outstanding_src_meta).
+                            $meta = rh_fin_outstanding_src_meta($src, $srcMeta);
                             // No link when the row cannot be pinned to one account (no id, or no type for the ledger
                             // filter): a link would open other rows, so the reference stays plain text.
                             $viewUrl = ($oid > 0 && $src !== '') ? $meta['link'] . $oid : '';

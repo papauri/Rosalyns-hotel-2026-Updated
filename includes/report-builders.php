@@ -119,47 +119,39 @@ function buildBookingsReport(string $startDate, string $endDate): array
 /* -------------------------------------------------------------------------- */
 
 /**
- * Per-station POS performance for a date range:
- * total orders, total items, gross revenue (paid), voided count/amount.
+ * Per-station POS performance for a date range, on the till Z definition (owner 2026-11-11): an order counts
+ * when it was sold at the till (by payment time, before refunds and voids) or charged to a guest room, inside
+ * the trading days of [start, end] (first day's opening to the day after end's first opening) - the same window
+ * and rule as the Z and End of Day. "Charged to room" is its own column. Voids: voided lines by void time.
  *
- * Two CSV sections joined into one file: top-level station summary + line detail.
+ * Two CSV sections joined into one file: top-level station summary + line detail, after a Z total block.
  */
 function buildStationDayReport(string $startDate, string $endDate): array
 {
     global $pdo;
+    require_once __DIR__ . '/station-hours.php';
+    require_once __DIR__ . '/../admin/includes/pos-shift-totals.php';
+
+    $wS = rh_station_union_window_for_date($startDate);
+    $wE = rh_station_union_window_for_date($endDate);
+    $a = (string)$wS['start_sql'];
+    $b = (string)$wE['trading_end_sql'];
+    // Hotel-time label (the *_sql strings are in the DB session zone).
+    $windowLabel = $wS['start']->format('j M Y H:i') . ' to ' . $wE['trading_end']->format('j M Y H:i');
+    $z = rh_pos_z_window_totals($pdo, $a, $b);
+    // Detail dates in hotel time: stored times are in the DB session zone (date_default_timezone_get()).
+    $hotelOffset = rh_site_timezone()->getOffset($wS['start']) - (new DateTimeZone(date_default_timezone_get()))->getOffset($wS['start']);
+    $q = rh_pos_station_report_sql($a, $b, $hotelOffset); // the summary + detail SQL (pure, unit tested)
 
     /* 1. Station summary */
-    $summarySql = "SELECT COALESCE(NULLIF(oi.station, ''), 'unassigned') AS station,
-                          COUNT(DISTINCT o.id) AS orders,
-                          SUM(oi.quantity) AS items,
-                          SUM(CASE WHEN o.status='paid' THEN oi.line_total ELSE 0 END) AS gross_paid,
-                          SUM(CASE WHEN o.status='voided' THEN oi.line_total ELSE 0 END) AS voided_amount,
-                          SUM(CASE WHEN o.status='voided' THEN 1 ELSE 0 END) AS voided_lines
-                   FROM stock_order_items oi
-                   INNER JOIN stock_orders o ON o.id = oi.order_id
-                   WHERE DATE(o.created_at) BETWEEN :s AND :e
-                   GROUP BY station
-                   ORDER BY gross_paid DESC";
-    $sumStmt = $pdo->prepare($summarySql);
-    $sumStmt->execute(['s' => $startDate, 'e' => $endDate]);
+    $sumStmt = $pdo->prepare($q['summary']['sql']);
+    $sumStmt->execute($q['summary']['params']);
 
-    /* 2. Per-item detail */
-    $detailSql = "SELECT DATE(o.created_at) AS day,
-                         COALESCE(NULLIF(oi.station,''),'unassigned') AS station,
-                         oi.menu_type, oi.item_name,
-                         SUM(oi.quantity) AS qty,
-                         SUM(oi.line_total) AS line_total,
-                         SUM(CASE WHEN o.status='paid' THEN oi.line_total ELSE 0 END) AS revenue,
-                         SUM(CASE WHEN o.status='voided' THEN oi.line_total ELSE 0 END) AS voided
-                  FROM stock_order_items oi
-                  INNER JOIN stock_orders o ON o.id = oi.order_id
-                  WHERE DATE(o.created_at) BETWEEN :s AND :e
-                  GROUP BY day, station, oi.menu_type, oi.item_name
-                  ORDER BY day, station, revenue DESC";
-    $detStmt = $pdo->prepare($detailSql);
-    $detStmt->execute(['s' => $startDate, 'e' => $endDate]);
+    /* 2. Per-item detail (date = when the sale, room charge or void happened) */
+    $detStmt = $pdo->prepare($q['detail']['sql']);
+    $detStmt->execute($q['detail']['params']);
 
-    /* Render — write summary section, then a blank row, then detail section */
+    /* Render — Z block, then summary section, a blank row, then detail section */
     $fp = fopen('php://temp', 'r+');
     if ($fp === false) {
         throw new RuntimeException('Unable to open CSV stream');
@@ -167,15 +159,24 @@ function buildStationDayReport(string $startDate, string $endDate): array
 
     fputcsv($fp, ['Station Day Report']);
     fputcsv($fp, ['Period', $startDate . ' to ' . $endDate]);
+    fputcsv($fp, ['Trading window', $windowLabel . ' (opening to the next opening, the same window as the till Z and End of Day)']);
     fputcsv($fp, []);
 
-    fputcsv($fp, ['SUMMARY BY STATION']);
-    fputcsv($fp, ['Station', 'Orders', 'Items', 'Gross Paid', 'Voided Lines', 'Voided Amount']);
+    fputcsv($fp, ['ORDERS AND SALES (same rule as the till Z and End of Day, before refunds and voids)']);
+    fputcsv($fp, ['Line', 'Orders', 'Amount']);
+    fputcsv($fp, ['Paid at the till', $z['till_count'], rh_money((float)$z['till_amount'])]);
+    fputcsv($fp, ['Charged to room (on guest bills, not in a drawer)', $z['room_charge_count'], rh_money((float)$z['room_charge_amount'])]);
+    fputcsv($fp, ['Total', $z['orders'], rh_money((float)$z['sales'])]);
+    fputcsv($fp, []);
+
+    fputcsv($fp, ['SUMMARY BY STATION (line totals)']);
+    fputcsv($fp, ['Station', 'Orders', 'Items', 'Till Sales', 'Charged to Room', 'Total Sales', 'Voided Lines', 'Voided Amount']);
     $totalRows = 0;
     foreach ($sumStmt as $r) {
         fputcsv($fp, [
             $r['station'], $r['orders'], (float)$r['items'],
-            rh_money((float)$r['gross_paid']),
+            rh_money((float)$r['till_sales']), rh_money((float)$r['room_charged']),
+            rh_money((float)$r['total_sales']),
             $r['voided_lines'], rh_money((float)$r['voided_amount']),
         ]);
         $totalRows++;
@@ -183,12 +184,12 @@ function buildStationDayReport(string $startDate, string $endDate): array
 
     fputcsv($fp, []);
     fputcsv($fp, ['ITEM DETAIL']);
-    fputcsv($fp, ['Day', 'Station', 'Type', 'Item', 'Qty', 'Line Total', 'Paid Revenue', 'Voided']);
+    fputcsv($fp, ['Date (hotel time)', 'Station', 'Type', 'Item', 'Qty Sold', 'Till Sales', 'Charged to Room', 'Voided']);
     foreach ($detStmt as $r) {
         fputcsv($fp, [
             $r['day'], $r['station'], $r['menu_type'], $r['item_name'],
-            (float)$r['qty'], rh_money((float)$r['line_total']),
-            rh_money((float)$r['revenue']), rh_money((float)$r['voided']),
+            (float)$r['qty'], rh_money((float)$r['till_sales']),
+            rh_money((float)$r['room_charged']), rh_money((float)$r['voided']),
         ]);
         $totalRows++;
     }
@@ -201,6 +202,7 @@ function buildStationDayReport(string $startDate, string $endDate): array
         'filename' => rh_filename('station-day-report', $startDate, $endDate),
         'csv'      => $csv,
         'rows'     => $totalRows,
+        'window_label' => $windowLabel,
     ];
 }
 
@@ -343,7 +345,7 @@ function buildAccountingSummary(string $startDate, string $endDate): array
 
     /* POS shift closes (variance) */
     $closeStmt = $pdo->prepare(
-        "SELECT shift_date, user_name, expected_cash, declared_cash, variance_cash,
+        "SELECT id, user_id, closed_at, total_revenue, shift_date, user_name, expected_cash, declared_cash, variance_cash,
                 expected_mobile, declared_mobile, variance_mobile,
                 expected_card, declared_card, variance_card,
                 orders_count, voids_count, voids_amount, notes
@@ -354,18 +356,28 @@ function buildAccountingSummary(string $startDate, string $endDate): array
 
     try {
         $closeStmt->execute(['s' => $startDate, 'e' => $endDate]);
-        fputcsv($fp, ['POS SHIFT CLOSES']);
+        // Orders on the Z definition (owner 2026-11-11): till orders as stored + charged to room read now over the
+        // close's own window. Drawer columns (expected / declared / variance) stay till-only, as stored.
+        require_once __DIR__ . '/station-hours.php';
+        require_once __DIR__ . '/../admin/includes/pos-shift-totals.php';
+        fputcsv($fp, ['POS SHIFT CLOSES (Charged to room is read now; everything else as stored at close)']);
         fputcsv($fp, ['Date', 'Cashier', 'Exp Cash', 'Decl Cash', 'Var Cash',
                       'Exp Mobile', 'Decl Mobile', 'Var Mobile',
                       'Exp Card', 'Decl Card', 'Var Card',
-                      'Orders', 'Voids', 'Void Amount', 'Notes']);
-        foreach ($closeStmt as $r) {
+                      'Orders (till + room)', 'Till Orders', 'Charged to Room Orders', 'Charged to Room Amount', 'Voids', 'Void Amount', 'Notes']);
+        $closeRows = $closeStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $closeRoom = rh_pos_closes_room_charges_batch($pdo, $closeRows); // two queries for all closes
+        foreach ($closeRows as $r) {
+            // NULL = the room read failed: say so, never 0 (absence rule). Till figures stay as stored.
+            $roomOk = $closeRoom !== null;
+            $r = rh_pos_close_add_room($r, $roomOk ? ($closeRoom[(int)$r['id']] ?? ['count' => 0, 'amount' => 0.0]) : ['count' => 0, 'amount' => 0.0]);
             fputcsv($fp, [
                 $r['shift_date'], $r['user_name'],
                 rh_money((float)$r['expected_cash']), rh_money((float)$r['declared_cash']), rh_money((float)$r['variance_cash']),
                 rh_money((float)$r['expected_mobile']), rh_money((float)$r['declared_mobile']), rh_money((float)$r['variance_mobile']),
                 rh_money((float)$r['expected_card']), rh_money((float)$r['declared_card']), rh_money((float)$r['variance_card']),
-                $r['orders_count'], $r['voids_count'], rh_money((float)$r['voids_amount']),
+                $roomOk ? $r['orders_count'] : 'could not be loaded', $r['till_orders_count'],
+                $roomOk ? $r['room_charge_count'] : 'Charged to room could not be loaded', $roomOk ? rh_money((float)$r['room_charge_amount']) : 'could not be loaded', $r['voids_count'], rh_money((float)$r['voids_amount']),
                 $r['notes'],
             ]);
         }

@@ -362,3 +362,42 @@ if (!function_exists('rh_eod_tomorrow_preview')) {
         return $tp->fetch(PDO::FETCH_ASSOC) ?: ['arrivals' => 0, 'departures' => 0, 'rev_forecast' => 0, 'tentative_arrivals' => 0];
     }
 }
+
+if (!function_exists('rh_eod_day_rules_text')) {
+    /**
+     * Pure: the plain note shown wherever End of Day puts guest-bill (folio) charges and POS sales side by side.
+     * The two rules are owner-settled and are NOT changed here: folio charges count on the calendar day
+     * (posted_at, midnight to midnight), POS sales on the trading day (rh_pos_eod_summary: first opening to the
+     * next day's first opening, the till Z's day). $tradingLabel e.g. "Nov 11 06:00 - Nov 12 06:00" ('' = unknown).
+     */
+    function rh_eod_day_rules_text(string $dayLabel, string $tradingLabel, string $posLabel = 'POS', bool $short = false): string
+    {
+        $posLabel = trim($posLabel) !== '' ? trim($posLabel) : 'POS';
+        if ($short) { // the PDF's narrow column
+            return 'Guest-bill charges: calendar day (' . $dayLabel . '). ' . $posLabel . ' sales: trading day ('
+                . ($tradingLabel !== '' ? $tradingLabel : 'opening to the next opening') . '), as the till Z.';
+        }
+        $trading = $tradingLabel !== '' ? $tradingLabel . ', opening to the next opening' : 'opening to the next opening';
+        return 'Which day each figure uses: charges posted to guest bills count on the calendar day ('
+            . $dayLabel . ', midnight to midnight); ' . $posLabel . ' sales count on the trading day ('
+            . $trading . '), the same day as the till Z, so a sale after midnight but before '
+            . 'the next opening is on this report.';
+    }
+}
+
+if (!function_exists('rh_eod_day_rules_note')) {
+    /** rh_eod_day_rules_text for a business date, with the trading window read from the station hours. */
+    function rh_eod_day_rules_note(string $date, string $posLabel = 'POS', bool $short = false): string
+    {
+        $tradingLabel = '';
+        try {
+            require_once __DIR__ . '/../../includes/station-hours.php';
+            // Labels are built from the hotel-time window (start / trading_end), not the *_sql DB-zone strings.
+            $tradingLabel = (string)(rh_station_union_window_for_date($date)['trading_window_label'] ?? '');
+        } catch (Throwable $e) {
+            error_log('rh_eod_day_rules_note: ' . $e->getMessage());
+        }
+        $ts = strtotime($date);
+        return rh_eod_day_rules_text($ts ? date('j M', $ts) : $date, $tradingLabel, $posLabel, $short);
+    }
+}

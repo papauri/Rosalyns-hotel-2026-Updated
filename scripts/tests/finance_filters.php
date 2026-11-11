@@ -188,5 +188,33 @@ check(preg_match('/<\?php if \(\$invCanPayments\): \?> ·\s*<a href="payments\.p
 check(preg_match('/<\?php if \(\$invCanPayments\): \?>\s*<a class="acct-link" href="payments\.php\?balance=outstanding&amp;booking_type=/', $inv) === 1, 'invoices: by-source View only for Payments access');
 check(preg_match('/<\?php if \(\$invCanPayments\): \?>\s*<a href="payments\.php" class="acct-quick-action">/', $inv) === 1 && preg_match('/<\?php if \(\$invCanPaymentAdd\): \?>\s*<a href="payment-add\.php"/', $inv) === 1 && preg_match('/<\?php if \(\$invCanAccounting\): \?>\s*<a href="accounting-dashboard\.php"/', $inv) === 1, 'invoices: header links follow their page permissions');
 
+// ---- Dashboard deep links (2026-11-11 LATER): payments ?q= alias, reports ?type= + range=today
+eq(rh_fin_search_term(['q' => 'RH-123']), 'RH-123', 'payments: ?q= is the search when search_text is empty');
+eq(rh_fin_search_term(['q' => 'old', 'search_text' => 'new']), 'new', 'payments: search_text wins over q');
+eq(rh_fin_search_term(['q' => ['x']]), '', 'payments: array q ignored');
+check(strpos($pay, '$searchText = rh_fin_search_term($_GET);') !== false, 'payments: page reads search through the q alias');
+$tabs = ['overview', 'revenue', 'vat', 'aging', 'bookings', 'occupancy', 'guests', 'conference', 'fnb', 'stock', 'staff', 'voids'];
+eq(rh_fin_reports_preset(['type' => 'accounting', 'range' => 'today'], $tabs, true, '2026-11-11'), ['tab' => 'fnb', 'range_today' => true], 'reports: Dashboard link -> POS tab, today');
+eq(rh_fin_reports_preset(['type' => 'accounting'], $tabs, false, '2026-11-11'), ['tab' => 'revenue', 'range_today' => false], 'reports: accounting without POS -> Revenue');
+eq(rh_fin_reports_preset(['type' => 'VAT'], $tabs, true, '2026-11-11')['tab'], 'vat', 'reports: a known tab name is taken (any case)');
+eq(rh_fin_reports_preset(['type' => $evil], $tabs, true, '2026-11-11')['tab'], '', 'reports: unknown type ignored');
+eq(rh_fin_reports_preset(['type' => ['fnb']], $tabs, true, '2026-11-11')['tab'], '', 'reports: array type ignored');
+eq(rh_fin_reports_preset(['tab' => 'vat', 'type' => 'accounting'], $tabs, true, '2026-11-11')['tab'], '', 'reports: an explicit tab wins over type');
+eq(rh_fin_reports_preset(['range' => 'today', 'start_date' => '2026-11-01'], $tabs, true, '2026-11-11')['range_today'], false, 'reports: explicit dates win over range=today');
+eq(rh_fin_reports_preset(['range' => 'week'], $tabs, true, '2026-11-11')['range_today'], false, 'reports: other range values ignored');
+$rep = (string)file_get_contents($root . '/admin/reports.php');
+check(strpos($rep, '$rh_report_preset = rh_fin_reports_preset($_GET, $valid_tabs, $mod_pos, date(\'Y-m-d\'));') !== false
+    && strpos($rep, '$rh_report_preset = ') < strpos($rep, 'if (!in_array($active_tab, $valid_tabs))'), 'reports: preset applied before the tab whitelist and module gate');
+check(strpos($rep, '<?php if ($rh_report_preset_on): ?>') !== false && strpos($rep, '<a href="?tab=<?php echo htmlspecialchars($active_tab); ?>"') !== false, 'reports: notice with Clear');
+
+// ---- Accounts owing: unknown sources show their own type name, not the restaurant "Open tab" badge
+$known = ['restaurant' => ['label' => 'Open tab', 'badge' => 'restaurant', 'link' => 'payments.php?booking_type=restaurant&booking_id=']];
+eq(rh_fin_outstanding_src_meta('restaurant', $known)['label'], 'Open tab', 'owing: restaurant keeps Open tab');
+$gs = rh_fin_outstanding_src_meta('gym_shop', $known);
+check($gs['label'] === 'Gym shop' && $gs['badge'] === 'neutral' && $gs['link'] === 'payments.php?booking_type=gym_shop&booking_id=', 'owing: unknown source -> its own name, neutral badge, its own ledger rows', json_encode($gs));
+eq(rh_fin_outstanding_src_meta('', $known)['label'], 'Other', 'owing: empty source -> Other');
+check(strpos(rh_fin_outstanding_src_meta("a&b=c", $known)['link'], 'booking_type=a%26b%3Dc') !== false, 'owing: source is URL-encoded in the link');
+check(strpos($pay, '$meta = rh_fin_outstanding_src_meta($src, $srcMeta);') !== false && strpos($pay, "\$meta = \$srcMeta[\$src] ?? ['label' => 'Open tab'") === false, 'payments: owing list uses the helper');
+
 echo "\n$pass passed, $fail failed\n";
 exit($fail ? 1 : 0);

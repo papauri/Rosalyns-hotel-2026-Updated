@@ -471,7 +471,8 @@ function buildEodPdf(
         $pdf->SetFont('helvetica', 'I', 6);
         $pdf->SetTextColorArray($TEXT2);
         $pdf->SetXY($LM, $yL);
-        $pdf->MultiCell($COL, 3.2, 'Conferences and events count on their event date; gym when paid. Rooms are nights stayed at each booking\'s booked rate.', 0, 'L', false, 1);
+        $pdf->MultiCell($COL, 3.2, 'Conferences and events count on their event date; gym when paid. Rooms are nights stayed at each booking\'s booked rate.'
+            . (function_exists('rh_eod_day_rules_note') ? ' ' . rh_eod_day_rules_note($date, function_exists('rh_pos_short_label') ? rh_pos_short_label() : 'POS', true) : ''), 0, 'L', false, 1);
         $yL = $pdf->GetY() + 1;
 
         // Cash collected (separate, cash basis)

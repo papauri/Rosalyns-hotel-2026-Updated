@@ -1766,6 +1766,8 @@ function pos_fetch_shift_summary(PDO $pdo, array $restaurantWindow, int $userId)
         'revenue_today' => (float)$t['sales_total'],
         // Charged to room: in the Z order count, never in the drawer (shown on the close form).
         'orders_all' => (int)($t['orders_all_count'] ?? $t['orders_count']),
+        // Z sales (till + charged to room): the toolbar's Orders / Gross / Net, owner 2026-11-11.
+        'revenue_all' => (float)($t['sales_all_total'] ?? $t['sales_total']),
         'room_charge_count' => (int)($t['room_charge_count'] ?? 0),
         'room_charge_amount' => (float)($t['room_charge_amount'] ?? 0),
         'refund_today' => (float)($t['refund_amount'] ?? 0),
@@ -2295,13 +2297,10 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'stations') {
         // open_tabs_visible mirrors open_tabs_all and exists only because the JS badge reads
         // whichever one is present.
         $openAll = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE status='placed' AND order_type != 'room_service'")->fetchColumn();
-        $todayTotalsStmt = $pdo->prepare("
-            SELECT COUNT(*) AS orders_count,
-                   COALESCE(SUM(CASE WHEN status='paid' THEN total_amount ELSE 0 END),0) AS revenue
-            FROM stock_orders WHERE created_at >= ? AND created_at < ?
-        ");
-        $todayTotalsStmt->execute([$restaurantWindow['start_sql'], $restaurantWindow['trading_end_sql']]);
-        $todayTotals = $todayTotalsStmt->fetch(PDO::FETCH_ASSOC) ?: ['orders_count' => 0, 'revenue' => 0];
+        // Orders / sales today on the Z definition (owner 2026-11-11): paid at the till (by payment time,
+        // before refunds and voids) + charged to a guest room, over this trading day. Room line sent apart.
+        require_once __DIR__ . '/includes/pos-shift-totals.php';
+        $todayZ = rh_pos_z_window_totals($pdo, $restaurantWindow['start_sql'], $restaurantWindow['trading_end_sql']);
 
         echo json_encode([
             'ts'             => date('c'),
@@ -2309,8 +2308,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'stations') {
             'tickets'        => $tickets,
             'open_tabs_all'  => $openAll,
             'open_tabs_visible' => $openAll,
-            'orders_today'   => (int)$todayTotals['orders_count'],
-            'revenue_today'  => (float)$todayTotals['revenue'],
+            'orders_today'   => (int)$todayZ['orders'],
+            'revenue_today'  => (float)$todayZ['sales'],
+            'room_charge_today' => (float)$todayZ['room_charge_amount'],
         ]);
     } catch (Throwable $e) {
         http_response_code(500);
@@ -2855,10 +2855,14 @@ if ($posCanStations) {
 
             <!-- ROW 2: Shift stats (scrollable) -->
             <div class="tb-row2">
-                <span class="stat"><strong id="tbStatOrders"><?php echo (int)($shift['orders_today'] ?? 0); ?></strong><span class="stat-label">Orders</span></span>
+                <?php $tbZ = rh_pos_toolbar_z_figures($shift); /* Z definition: till + charged to room (owner 2026-11-11) */ ?>
+                <span class="stat" title="Orders this shift, the same count as your Z: paid at the till plus orders charged to a guest room."><strong id="tbStatOrders"><?php echo (int)$tbZ['orders']; ?></strong><span class="stat-label">Orders</span></span>
 <?php if ($posCanSeeTakings): ?>
-                    <span class="stat" title="Sales taken this shift by payment time, before any refunds paid out and before voids."><strong id="tbStatRevenue"><?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0), 0); ?></strong><span class="stat-label">Gross sales<span class="stat-label-long"> (before refunds and voids)</span></span></span>
-                    <span class="stat" title="Gross sales less refunds and voids of paid orders paid out from this till this shift."><strong id="tbStatNet"><?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0) - (float)($shift['refund_today'] ?? 0), 0); ?></strong><span class="stat-label">Net</span></span>
+                    <span class="stat" title="Sales this shift, the same total as your Z: paid at the till (by payment time) plus orders charged to a guest room, before any refunds paid out and before voids."><strong id="tbStatRevenue"><?php echo $currency_symbol . ' ' . number_format($tbZ['gross'], 0); ?></strong><span class="stat-label">Gross sales<span class="stat-label-long"> (before refunds and voids)</span></span></span>
+                    <span class="stat" title="Gross sales less refunds and voids of paid orders paid out from this till this shift."><strong id="tbStatNet"><?php echo $currency_symbol . ' ' . number_format($tbZ['net'], 0); ?></strong><span class="stat-label">Net</span></span>
+                    <?php if (moduleEnabled('bookings')): ?>
+                    <span class="stat" title="Orders charged to a guest room this shift. Already inside Orders and Gross sales; the money is on the guest bill, not in your drawer."><strong id="tbStatRoom"><?php echo $currency_symbol . ' ' . number_format($tbZ['room'], 0); ?></strong><span class="stat-label">Charged to room</span></span>
+                    <?php endif; ?>
                     <span class="stat"><strong id="tbStatCash"><?php echo $currency_symbol . ' ' . number_format((float)($shift['cash_today'] ?? 0), 0); ?></strong><span class="stat-label">Cash</span></span>
                     <span class="stat"><strong id="tbStatMobile"><?php echo $currency_symbol . ' ' . number_format((float)($shift['mobile_today'] ?? 0), 0); ?></strong><span class="stat-label">Mobile</span></span>
                     <span class="stat"><strong id="tbStatCard"><?php echo $currency_symbol . ' ' . number_format((float)($shift['card_today'] ?? 0), 0); ?></strong><span class="stat-label">Card</span></span>
@@ -3747,8 +3751,11 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 <div class="modal-body" style="flex:1; overflow-y:auto; padding:18px 20px;">
                     <div id="stationsTotals" style="display:flex; gap:10px; flex-wrap:wrap; margin-bottom:14px; font-size:12px;">
                         <span class="stat" style="background:#f8f9fb; padding:6px 12px; border-radius:18px;">Open tabs system-wide: <strong id="stOpenTabs">0</strong></span>
-                        <span class="stat" style="background:#f8f9fb; padding:6px 12px; border-radius:18px;">Orders today: <strong id="stOrdersToday">0</strong></span>
-                        <span class="stat" style="background:#f8f9fb; padding:6px 12px; border-radius:18px;">Paid sales today (before refunds and voids): <strong id="stRevenueToday"><?php echo $currency_symbol; ?> 0.00</strong></span>
+                        <span class="stat" style="background:#f8f9fb; padding:6px 12px; border-radius:18px;" title="Orders of this trading day, all cashiers, the same count as the Z: paid at the till plus charged to a guest room.">Orders today: <strong id="stOrdersToday">0</strong></span>
+                        <span class="stat" style="background:#f8f9fb; padding:6px 12px; border-radius:18px;" title="Sales of this trading day, all cashiers, the same total as the Z: paid at the till (by payment time) plus charged to a guest room, before refunds and voids.">Sales today (before refunds and voids): <strong id="stRevenueToday"><?php echo $currency_symbol; ?> 0.00</strong></span>
+                        <?php if (moduleEnabled('bookings')): ?>
+                        <span class="stat" style="background:#f8f9fb; padding:6px 12px; border-radius:18px;" title="Orders charged to a guest room this trading day. Already inside Sales today; on guest bills, not in any drawer.">of which charged to room: <strong id="stRoomToday"><?php echo $currency_symbol; ?> 0.00</strong></span>
+                        <?php endif; ?>
                     </div>
                     <div style="display:grid; grid-template-columns:repeat(3, 1fr); gap:14px;">
                         <?php foreach (['kitchen' => ['Kitchen', 'fa-utensils', '#d4a843'], 'bar' => ['Bar', 'fa-wine-glass', '#6f42c1'], 'coffee_bar' => ['Coffee Bar', 'fa-mug-hot', '#8B5A2B']] as $stKey => $meta): ?>
@@ -6101,8 +6108,13 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         function applyShiftStats(shift) {
             if (!shift || typeof shift !== 'object') return;
 
-            const orders = parseInt(shift.orders_today, 10) || 0;
-            const revenue = Number(shift.revenue_today || 0);
+            const orders = parseInt(shift.orders_today, 10) || 0; // till-only: the close form's "paid at the till"
+            // Toolbar Orders / Gross / Net on the Z definition, till + charged to room (rh_pos_toolbar_z_figures).
+            const roomAmount = Number(shift.room_charge_amount || 0);
+            const ordersAll = parseInt(shift.orders_all ?? shift.orders_today, 10) || 0;
+            const revenue = (shift.revenue_all !== undefined && shift.revenue_all !== null)
+                ? Number(shift.revenue_all || 0)
+                : Number(shift.revenue_today || 0) + roomAmount;
             const cash = Number(shift.cash_today || 0);
             const mobile = Number(shift.mobile_today || 0);
             const card = Number(shift.card_today || 0);
@@ -6114,9 +6126,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 if (el) el.textContent = text;
             };
 
-            setText('tbStatOrders', String(orders));
+            setText('tbStatOrders', String(ordersAll));
             setText('tbStatRevenue', currencySymbol + ' ' + fmtMoneyNoDecimals(revenue));
             setText('tbStatNet', currencySymbol + ' ' + fmtMoneyNoDecimals(revenue - Number(shift.refund_today || 0)));
+            setText('tbStatRoom', currencySymbol + ' ' + fmtMoneyNoDecimals(roomAmount));
             setText('tbStatCash', currencySymbol + ' ' + fmtMoneyNoDecimals(cash));
             setText('tbStatMobile', currencySymbol + ' ' + fmtMoneyNoDecimals(mobile));
             setText('tbStatCard', currencySymbol + ' ' + fmtMoneyNoDecimals(card));
@@ -11199,6 +11212,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                         document.getElementById('stOpenTabs').textContent = d.open_tabs_all;
                         document.getElementById('stOrdersToday').textContent = d.orders_today;
                         document.getElementById('stRevenueToday').textContent = currencySymbol + ' ' + fmtMoney(d.revenue_today);
+                        const stRoom = document.getElementById('stRoomToday');
+                        if (stRoom) stRoom.textContent = currencySymbol + ' ' + fmtMoney(d.room_charge_today || 0);
                         ['kitchen', 'bar', 'coffee_bar'].forEach(stKey => {
                             const c = d.counts[stKey];
                             document.getElementById('stOpen-' + stKey).textContent = c.open_total;

@@ -55,6 +55,19 @@ $tab_module_map = [
 
 // Sanitize tab
 $valid_tabs = ['overview', 'revenue', 'vat', 'aging', 'bookings', 'occupancy', 'guests', 'conference', 'fnb', 'stock', 'staff', 'voids'];
+
+// Dashboard deep links (reports.php?type=accounting&range=today): ?type is an alias of ?tab and range=today is
+// today's calendar date, the day this page already uses (admin/includes/finance-filters.php, whitelisted). The tab
+// still goes through the whitelist and module gate below; a notice with Clear says what was applied.
+require_once __DIR__ . '/includes/finance-filters.php';
+$rh_report_preset = rh_fin_reports_preset($_GET, $valid_tabs, $mod_pos, date('Y-m-d'));
+if ($rh_report_preset['tab'] !== '') {
+    $active_tab = $rh_report_preset['tab'];
+}
+if ($rh_report_preset['range_today']) {
+    $start_date = $end_date = date('Y-m-d');
+}
+$rh_report_preset_on = ($rh_report_preset['tab'] !== '' || $rh_report_preset['range_today']);
 if (!in_array($active_tab, $valid_tabs)) {
     $active_tab = 'overview';
 }
@@ -1142,6 +1155,13 @@ try {
                 <button type="button" class="btn-filter btn-filter-outline" onclick="setDateRange('all')">All Time</button>
             </div>
         </div>
+
+        <?php if ($rh_report_preset_on): ?>
+            <div style="background:#fff7ed; border:1px solid #fed7aa; border-radius:10px; padding:10px 14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:#7c2d12;">
+                <span><i class="fas fa-link" style="margin-right:6px;"></i>Opened from a Dashboard link: showing <strong><?php echo $tabs[$active_tab]['label'] ?? 'P&amp;L Overview'; ?></strong><?php if ($rh_report_preset['range_today']): ?> for today, <strong><?php echo htmlspecialchars(date('j M Y', strtotime($start_date))); ?></strong> (calendar day)<?php endif; ?>.</span>
+                <a href="?tab=<?php echo htmlspecialchars($active_tab); ?>" style="color:#7E684B; font-weight:600; text-decoration:none;"><i class="fas fa-times"></i> Clear</a>
+            </div>
+        <?php endif; ?>
 
         <?php if ($error): ?>
             <div class="report-section">

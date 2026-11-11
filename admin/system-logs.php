@@ -509,7 +509,16 @@ if (rh_logs_table_exists($pdo, 'stock_shift_closes')) {
         $stmt->execute();
         $shiftCloses = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
         require_once __DIR__ . '/includes/pos-shift-totals.php';
-        foreach ($shiftCloses as &$scRow) { $scRow['total_revenue'] = rh_pos_close_revenue($pdo, $scRow); }
+        // Z definition (owner 2026-11-11): Orders / Revenue = till as stored + "Charged to room" read now over the
+        // close's own window, read for the whole page in two queries (rh_pos_closes_room_charges_batch). Nothing
+        // stored changes; cash variance stays till-only.
+        $scRoom = rh_pos_closes_room_charges_batch($pdo, $shiftCloses);
+        foreach ($shiftCloses as &$scRow) {
+            $scRow['total_revenue'] = rh_pos_close_revenue($pdo, $scRow);
+            // NULL = the room read failed: keep the stored till figures and say so, never show 0 (absence rule).
+            $scRow = rh_pos_close_add_room($scRow, $scRoom !== null ? ($scRoom[(int)$scRow['id']] ?? ['count' => 0, 'amount' => 0.0]) : ['count' => 0, 'amount' => 0.0]);
+            $scRow['room_unavailable'] = ($scRoom === null);
+        }
         unset($scRow);
     } catch (Throwable $e) {
     }
@@ -1207,8 +1216,8 @@ $saSingleDay = $saF['from'] === $saF['to'];
                                 <th>Shift Date</th>
                                 <th>Closed At</th>
                                 <th>User</th>
-                                <th>Orders</th>
-                                <th>Revenue</th>
+                                <th title="Orders on the Z: paid at the till (as stored at close) plus orders charged to a guest room (read now).">Orders</th>
+                                <th title="Sales on the Z: till takings as stored at close plus orders charged to a guest room (read now, on guest bills, not in the drawer).">Revenue</th>
                                 <th>Voids</th>
                                 <th>Cash Variance</th>
                                 <th>Notes</th>
@@ -1225,8 +1234,8 @@ $saSingleDay = $saF['from'] === $saF['to'];
                                     <td><?php echo htmlspecialchars((string)$sc['shift_date']); ?></td>
                                     <td class="log-nowrap"><?php echo htmlspecialchars((string)$sc['closed_at']); ?></td>
                                     <td><?php echo htmlspecialchars((string)$sc['user_name']); ?></td>
-                                    <td><?php echo (int)($sc['orders_count'] ?? 0); ?></td>
-                                    <td class="log-nowrap"><?php echo htmlspecialchars($revenueFormatted); ?></td>
+                                    <td><?php echo (int)($sc['orders_count'] ?? 0); ?><?php if ((int)($sc['room_charge_count'] ?? 0) > 0): ?><br><small style="color:#6b7280;">till <?php echo (int)$sc['till_orders_count']; ?> + room <?php echo (int)$sc['room_charge_count']; ?></small><?php endif; ?></td>
+                                    <td class="log-nowrap"><?php echo htmlspecialchars($revenueFormatted); ?><?php if ((int)($sc['room_charge_count'] ?? 0) > 0): ?><br><small style="color:#6b7280;">incl. charged to room <?php echo htmlspecialchars(($currencyCode ? $currencyCode . ' ' : '') . number_format((float)$sc['room_charge_amount'], 2)); ?> (read now)</small><?php elseif (!empty($sc['room_unavailable'])): ?><br><small style="color:#b45309;">till only: Charged to room could not be loaded</small><?php endif; ?></td>
                                     <td class="log-nowrap"><?php echo (int)($sc['voids_count'] ?? 0); ?> (<?php echo htmlspecialchars($voidsFormatted); ?>)</td>
                                     <td><span class="log-pill <?php echo $varianceClass; ?>" style="font-size:11px;"><?php echo htmlspecialchars($varianceFormatted); ?></span></td>
                                     <td style="font-size:12px;color:#6b7280;"><?php echo htmlspecialchars((string)($sc['notes'] ?: '—')); ?></td>

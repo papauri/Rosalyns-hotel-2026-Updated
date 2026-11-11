@@ -487,6 +487,7 @@ if ($channel === 'whatsapp') {
     if ($eodModGym    || abs((float)$earned['gym_gross']) > 0.004)    { $lines[] = "  🏋️ Gym (when paid): " . _money($currency_symbol, (float)$earned['gym_gross']); }
     if ($eodModEvents || abs((float)$earned['events_gross']) > 0.004) { $lines[] = "  🎟️ Events: " . _money($currency_symbol, (float)$earned['events_gross']); }
     $lines[] = "  (Conference and events count on the event date; gym when paid)";
+    $lines[] = "  (" . rh_eod_day_rules_note($date, function_exists('rh_pos_short_label') ? rh_pos_short_label() : 'POS') . ")";
     $lines[] = '';
     $lines[] = "Cash collected: *" . _money($currency_symbol, (float)$net) . "*  (received " . _money($currency_symbol, (float)$gross) . ((float)$rev['refunds'] > 0 ? ", refunds -" . _money($currency_symbol, (float)$rev['refunds']) : '') . ")";
     $lines[] = "VAT in cash collected: " . _money($currency_symbol, (float)$rev['total_vat']);
@@ -754,7 +755,7 @@ foreach ($revSrcRows as $rr) {
     $html .= $row($rr[0], $rr[1]);
 }
 $html .= '<tr style="background:#231F1C;"><td style="padding:10px 12px;font-weight:700;color:#ffffff;font-size:14px;">REVENUE EARNED</td><td style="padding:10px 12px;text-align:right;font-weight:700;color:#B18247;font-size:14px;">' . _money($currency_symbol, $earned_total) . '</td></tr>';
-$html .= '<tr><td colspan="2" style="padding:6px 12px;border-bottom:1px solid #eee;font-size:11px;color:#8A775F;">Rooms are the nights stayed at each booking&rsquo;s booked rate; guest-bill charges and sales count on the day they were posted or paid. Conferences and events count on their event date; gym counts on the day the payment is received.</td></tr>';
+$html .= '<tr><td colspan="2" style="padding:6px 12px;border-bottom:1px solid #eee;font-size:11px;color:#8A775F;">Rooms are the nights stayed at each booking&rsquo;s booked rate; guest-bill charges and sales count on the day they were posted or paid. Conferences and events count on their event date; gym counts on the day the payment is received. ' . htmlspecialchars(rh_eod_day_rules_note($date, function_exists('rh_pos_short_label') ? rh_pos_short_label() : 'POS')) . '</td></tr>';
 $html .= $section_head('Cash Collected');
 $html .= '<tr style="background:#F3ECE4;"><td style="padding:8px 12px;font-weight:700;border-bottom:1px solid #e5d9c9;">Payments received</td><td style="padding:8px 12px;text-align:right;font-weight:700;border-bottom:1px solid #e5d9c9;">' . _money($currency_symbol, $gross) . '</td></tr>';
 if ((float)$rev['refunds'] > 0) {
