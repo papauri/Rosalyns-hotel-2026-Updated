@@ -241,7 +241,7 @@ zr_check($badSec['ok'] === false && $badSec['result'] === null && $logged === ['
 $throwLog = rh_report_section('x', static function () { throw new RuntimeException('a'); }, static function () { throw new RuntimeException('log down'); });
 zr_check($throwLog['ok'] === false, 'section: a failing logger does not stop the e-mail either');
 zr_check(strpos(rh_report_failed_line('Station report'), 'Station report could not be loaded') === 0 && strpos(rh_report_failed_line('Station report'), 'SQLSTATE') === false, 'section: e-mail line says "could not be loaded", no error detail');
-$dr = zr_src('scripts/daily_reports.php');
+$dr = zr_src('scripts/daily_reports.php') . zr_src('includes/daily-reports-send.php'); // CLI + shared build/send (2026-11-11 timer)
 zr_check(substr_count($dr, 'rh_report_section(') === 4 && strpos($dr, "rh_log_event('daily_reports', 'error'") !== false && strpos($dr, "if (\$sec['ok'] && is_array(\$sec['result']))") !== false, 'daily e-mail: four independent sections, failures logged, only good CSVs attached');
 zr_check(strpos($dr, "rh_pos_last_ended_trading_date(new DateTimeImmutable('now', rh_site_timezone()))") !== false && strpos($dr, "trading day ' . htmlspecialchars(\$stationDays)") !== false, 'daily e-mail: station report = last ended trading day, named in the e-mail');
 // 7c. System Logs batch = the per-close rule, with no query per close.
@@ -276,7 +276,7 @@ zr_check(strpos($sl2, "\$scRow['room_unavailable'] = (\$scRoom === null);") !== 
 $rb2 = zr_src('includes/report-builders.php');
 zr_check(strpos($rb2, '$roomOk = $closeRoom !== null;') !== false && strpos($rb2, "'Charged to room could not be loaded'") !== false, 'CSV shift closes: failed room read says "could not be loaded"');
 $dr2 = zr_src('scripts/daily_reports.php');
-zr_check(strpos($dr2, "if (!array_filter(\$sections, static fn(array \$sec): bool => \$sec['ok'])) {") !== false && strpos($dr2, 'exit(1);') !== false && strpos($dr2, 'Always sends FOUR') === false, 'daily e-mail: exit 1 when every section failed; header comment fixed');
+zr_check(strpos($dr2, "if (!\$out['any_ok']) {") !== false && strpos(zr_src('includes/daily-reports-send.php'), "'any_ok' => (bool)array_filter(\$sections, static fn(array \$sec): bool => \$sec['ok'])") !== false && strpos($dr2, 'exit(1);') !== false && strpos($dr2, 'Always sends FOUR') === false, 'daily e-mail: exit 1 when every section failed; header comment fixed');
 
 echo "\n=== z_room_charge: $P passed, $F failed ===\n";
 exit($F > 0 ? 1 : 0);

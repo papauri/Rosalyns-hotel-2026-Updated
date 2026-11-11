@@ -472,11 +472,12 @@
       <tr data-module="bookings"><td>Reminder and notice emails: overdue payments, quotation expiry, tentative holds, pre-arrival, post-stay review request, gym renewal.</td><td>At most every Run interval (15 minutes by default).</td><td><a href="#automated-emails">Automated Emails</a>: master switch and a switch for each.</td></tr>
       <tr data-module="bookings"><td>The next recurring room-maintenance task is created.</td><td>Checked at most every 6 hours.</td><td>Room Maintenance (see the <a href="06-housekeeping.html">Housekeeping guide</a>) and its switch in Automated Emails.</td></tr>
       <tr data-module="gym"><td>A gym visit still open from a previous day is closed.</td><td>At 22:00, the gym closing time (fixed).</td><td><a href="17-gym-management.html#checkin">Gym check-in</a>.</td></tr>
+      <tr><td>The daily reports email (bookings, station day, accounting and stock health, as spreadsheet files) for the trading day that just ended, sent to the End of Day report recipients.</td><td>Once a day, soon after the next opening.</td><td><strong>Daily station reports email</strong> switch in Automated Emails (on unless switched off; only while automated emails are on).</td></tr>
       <tr><td>The nightly database backup.</td><td>Once a day, after 01:00.</td><td><a href="99-admin-dashboard-full-guide.html#backups">Backups</a>; its own switch in Automated Emails.</td></tr>
       <tr><td>Stock is taken off when something is sold, and put back when an order is cancelled or voided.</td><td>As each sale or cancel happens.</td><td><a href="20-stock-loss-prevention.html">Stopping stock going missing</a>.</td></tr>
     </tbody>
   </table>
-  <p>These do <strong>not</strong> happen by themselves: the End of Day report and the daily station reports are only emailed when someone clicks send; a cashier shift is only closed by a person; clearing the website cache on a schedule needs the hosting company to set up a timed task, so use <strong>Cache</strong> in the Admin reference when pages look old.</p>
+  <p>These do <strong>not</strong> happen by themselves: the End of Day report is only emailed when someone clicks send (the daily reports email above goes by itself); the <strong>Email</strong> button on a kitchen, bar or coffee station report sends only when clicked; a cashier shift is only closed by a person; clearing the website cache on a schedule needs the hosting company to set up a timed task, so use <strong>Cache</strong> in the Admin reference when pages look old.</p>
 
   <h2 id="rules">Rules the system enforces</h2>
   <ul>

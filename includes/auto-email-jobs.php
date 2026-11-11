@@ -1110,6 +1110,58 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
         return $res;
     }
 
+    /**
+     * Daily Operations Report e-mail, once per trading day soon after it ends (includes/daily-reports-send.php):
+     * every dated section = the last ENDED trading day (opening -> next opening). Claimed per trading day in
+     * automated_email_log (shared with scripts/daily_reports.php), so it is never sent twice. 'sent' = 1 e-mail.
+     */
+    function rh_job_daily_reports(PDO $pdo, array $o = []): array
+    {
+        $res = ['checked' => 1, 'sent' => 0, 'skipped' => 0, 'errors' => []];
+        require_once __DIR__ . '/daily-reports-send.php';
+        require_once __DIR__ . '/station-hours.php';
+        $testMode = !empty($o['test_mode']);
+        $plan = rh_daily_reports_auto_plan(new DateTimeImmutable('now', rh_site_timezone()), rh_eod_report_recipients(),
+            rh_auto_setting('automated_email_test_recipient'), $testMode);
+        $k = $plan['key'];
+        if ($plan['action'] !== 'send') {
+            rh_auto_log_skip($pdo, $k['job'], $k['type'], $k['id'], $k['stage'], $plan['note']);
+            $res['skipped'] = 1;
+            return $res;
+        }
+        if (!rh_scheduler_budget_ok()) {
+            $res['deferred'] = true;
+            return $res;
+        }
+        $emails = implode(', ', array_column($plan['recipients'], 'email'));
+        if (!rh_auto_log_claim($pdo, $k['job'], $k['type'], $k['id'], $k['stage'], $emails, 'Daily Operations Report - trading day ' . $plan['date'])) {
+            $res['skipped'] = 1; // already sent (or being sent) for this trading day
+            return $res;
+        }
+        try {
+            rh_scheduler_budget_spend();
+            $r = rh_daily_reports_build_and_send($plan['recipients'], $plan['start'], $plan['end'], $plan['station_start'], $plan['station_end'], false,
+                ['subject_prefix' => $plan['subject_prefix']]);
+            if (!empty($r['result']['success'])) {
+                // Delivered: never resend, even when every section failed (that e-mail says so; errors are in System Logs).
+                rh_auto_log_finish($pdo, $k['job'], $k['type'], $k['id'], $k['stage'], 'sent', $r['any_ok'] ? '' : 'every report section failed (see System Logs)');
+                $res['sent'] = 1;
+                if (!$r['any_ok']) {
+                    $res['errors'][] = 'every report section failed (the e-mail saying so was sent)';
+                }
+            } else {
+                $msg = (string)($r['result']['message'] ?? 'send failed');
+                rh_auto_log_finish($pdo, $k['job'], $k['type'], $k['id'], $k['stage'], 'failed', $msg);
+                $res['errors'][] = $plan['date'] . ': ' . $msg;
+            }
+        } catch (Throwable $e) {
+            rh_auto_log_finish($pdo, $k['job'], $k['type'], $k['id'], $k['stage'], 'failed', $e->getMessage());
+            $res['errors'][] = $plan['date'] . ': ' . $e->getMessage();
+            error_log('auto-scheduler daily reports: ' . $e->getMessage());
+        }
+        return $res;
+    }
+
     /* ── sample sends ("Send test to me" on Automated Emails) ─ */
 
     /** @return array<string,string> template/job key => label */

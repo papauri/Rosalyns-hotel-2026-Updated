@@ -49,18 +49,24 @@ function rh_filename(string $base, string $start, string $end): string
     return ($start === $end ? "{$base}-{$start}" : "{$base}-{$start}_to_{$end}") . '.csv';
 }
 
-function rh_table_exists(PDO $pdo, string $table): bool
-{
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?");
-    $stmt->execute([$table]);
-    return (int)$stmt->fetchColumn() > 0;
+// Guarded: admin/includes/procurement-schema.php defines the same two helpers (same queries), and the daily
+// report timer can load this file at the end of any admin page (includes/daily-reports-send.php).
+if (!function_exists('rh_table_exists')) {
+    function rh_table_exists(PDO $pdo, string $table): bool
+    {
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?");
+        $stmt->execute([$table]);
+        return (int)$stmt->fetchColumn() > 0;
+    }
 }
 
-function rh_column_exists(PDO $pdo, string $table, string $column): bool
-{
-    $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?");
-    $stmt->execute([$table, $column]);
-    return (int)$stmt->fetchColumn() > 0;
+if (!function_exists('rh_column_exists')) {
+    function rh_column_exists(PDO $pdo, string $table, string $column): bool
+    {
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND COLUMN_NAME = ?");
+        $stmt->execute([$table, $column]);
+        return (int)$stmt->fetchColumn() > 0;
+    }
 }
 
 /* -------------------------------------------------------------------------- */

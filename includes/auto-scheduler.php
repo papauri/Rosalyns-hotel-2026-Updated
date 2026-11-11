@@ -48,6 +48,7 @@ if (!function_exists('rh_auto_defaults')) {
             'automated_backup_enabled'          => '1',
             'automated_job_recurring_maintenance' => '1',
             'automated_job_stock_expiry'        => '1',
+            'automated_job_daily_reports'       => '1',
             'scheduler_last_run'                => '0',
             'scheduler_last_result'             => '',
         ];
@@ -133,6 +134,13 @@ if (!function_exists('rh_auto_defaults')) {
             'stock_expiry_sweep' => [
                 'label' => 'Expired stock write-off', 'fn' => 'rh_job_stock_expiry_sweep',
                 'toggle' => 'automated_job_stock_expiry', 'toggle_default' => '1', 'interval' => 30, 'legacy' => false, 'bcc' => 'global',
+            ],
+            // Emails the Daily Operations Report (bookings, station-day, accounting, stock-health CSVs) once per
+            // trading day, soon after it ENDS (next opening), to the End of Day report recipients (owner 2026-11-11).
+            // After the stock sweep so stock-health reflects it. Deduped per trading day with the CLI.
+            'daily_reports' => [
+                'label' => 'Daily station reports email', 'fn' => 'rh_job_daily_reports',
+                'toggle' => 'automated_job_daily_reports', 'toggle_default' => '1', 'interval' => 60, 'legacy' => false, 'bcc' => 'global',
             ],
             // Last on purpose: a backup can take a while, so every email job runs first.
             'nightly_backup' => [

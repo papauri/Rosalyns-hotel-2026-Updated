@@ -212,7 +212,7 @@ $editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_remin
                         <span><?php echo $esc($job['label']); ?></span></label>
                 <?php endforeach; ?>
             </div>
-            <p class="help-text">Tentative holds use the reminder hours from Hotel Settings. Pre-arrival, post-stay and gym renewal share the switches (and day settings) they always had in Hotel Settings / Gym Members.</p>
+            <p class="help-text">Tentative holds use the reminder hours from Hotel Settings. Pre-arrival, post-stay and gym renewal share the switches (and day settings) they always had in Hotel Settings / Gym Members. Daily station reports email sends the bookings, restaurant/till, accounting and stock reports once a day, soon after the trading day ends (next opening), to the End of Day report recipients.</p>
 
             <h3>Overdue payment reminders</h3>
             <div class="ae-grid">
@@ -289,7 +289,7 @@ $editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_remin
                             <tr>
                                 <td><?php echo $esc($row['sent_at']); ?></td>
                                 <td><?php echo $esc($jobs[$row['job']]['label'] ?? $row['job']); ?></td>
-                                <td><?php echo $esc($row['account_type'] === 'run' ? '—' : $row['account_type'] . ' #' . $row['account_id']); ?></td>
+                                <td><?php echo $esc(in_array($row['account_type'], ['run', 'trading_day'], true) ? '—' : $row['account_type'] . ' #' . $row['account_id']); ?></td>
                                 <td><?php echo $esc($row['account_type'] === 'run' ? $row['subject'] : $row['stage']); ?></td>
                                 <td><?php echo $esc($row['recipient']); ?></td>
                                 <td><span class="ae-badge ae-<?php echo $esc($row['status']); ?>"><?php echo $esc($row['status']); ?></span>

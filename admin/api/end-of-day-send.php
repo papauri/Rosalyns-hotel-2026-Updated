@@ -597,18 +597,9 @@ if ($channel === 'whatsapp') {
 // empty default, so every fallback failed and the EOD email could never be sent
 // unless `eod_report_recipients` happened to be populated. Fall back through
 // getEmailSetting() for the two keys that belong to email_settings.
-$recipientsCsv = getSetting('eod_report_recipients');
-if (!$recipientsCsv) {
-    $recipientsCsv = getEmailSetting('email_admin_email')
-        ?: getEmailSetting('email_from_email');
-}
-$recipients = [];
-foreach (preg_split('/[,;\s]+/', (string)$recipientsCsv) as $em) {
-    $em = trim($em);
-    if ($em !== '' && filter_var($em, FILTER_VALIDATE_EMAIL)) {
-        $recipients[] = ['email' => $em];
-    }
-}
+// Shared with the daily report timer (includes/daily-reports-send.php), so both use the same list.
+require_once __DIR__ . '/../../includes/daily-reports-send.php';
+$recipients = rh_eod_report_recipients();
 if (!$recipients) {
     echo json_encode(['success' => false, 'error' => 'No admin recipient configured. Add an email to site setting "eod_report_recipients" or "email_admin_email".']);
     exit;

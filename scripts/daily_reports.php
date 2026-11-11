@@ -2,13 +2,17 @@
 /**
  * Daily reports CLI.
  *
- *   php scripts/daily_reports.php --recipients=a@x.com,b@y.com --start=YYYY-MM-DD --end=YYYY-MM-DD
+ *   php scripts/daily_reports.php --recipients=a@x.com,b@y.com --start=YYYY-MM-DD --end=YYYY-MM-DD [--force]
  *
  * Defaults: bookings / accounting = today (single day); station-day = the last trading day that has ENDED
  * (--date / --start / --end pick the days of the dated reports). Recipients: env REPORT_RECIPIENTS (or fail).
  * Up to four attachments (bookings, station-day, accounting, stock-health): a section that fails is logged and
  * named as "could not be loaded" in the e-mail, and the rest are still sent.
- * Exit codes: 0 sent; 1 every section failed (the e-mail saying so is still attempted); 2 no recipients; 3 send failed.
+ * The build + send is shared with the scheduler job 'daily_reports' (includes/daily-reports-send.php). A default
+ * run (no --date / --start / --end) claims the same once-per-trading-day row as the scheduler, so a server cron
+ * and the timer never both send one day; --force sends again anyway (logged).
+ * Exit codes: 0 sent (or already sent for that trading day); 1 every section failed (the e-mail saying so is
+ * still attempted); 2 no recipients; 3 send failed.
  */
 
 declare(strict_types=1);
@@ -20,6 +24,7 @@ if (PHP_SAPI !== 'cli') {
 
 require __DIR__ . '/../includes/report-builders.php';
 require __DIR__ . '/../includes/report-mailer.php';
+require_once __DIR__ . '/../includes/daily-reports-send.php';
 
 /* ---------------- args ---------------- */
 $args = [];
@@ -34,15 +39,9 @@ foreach (array_slice($argv, 1) as $arg) {
 $today = date('Y-m-d');
 $start = $args['start'] ?? ($args['date'] ?? $today);
 $end   = $args['end']   ?? ($args['date'] ?? $today);
+$force = isset($args['force']);
 
-$recipientStr = $args['recipients'] ?? (string)getenv('REPORT_RECIPIENTS');
-$recipients = [];
-foreach (preg_split('/[,;]/', $recipientStr) as $email) {
-    $email = trim($email);
-    if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
-        $recipients[] = ['email' => $email, 'name' => ''];
-    }
-}
+$recipients = rh_daily_reports_parse_recipients($args['recipients'] ?? (string)getenv('REPORT_RECIPIENTS'));
 if (!$recipients) {
     fwrite(STDERR, "ERROR: No valid --recipients=email,email provided.\n");
     exit(2);
@@ -51,18 +50,8 @@ if (!$recipients) {
 echo "Daily reports — period {$start} to {$end}\n";
 echo 'Recipients: ' . implode(', ', array_column($recipients, 'email')) . "\n\n";
 
-/* ---------------- build ---------------- */
-// Each section on its own: one that fails is logged (rh_log_event), named in the e-mail as "could not be
-// loaded", and the rest are still sent (includes/report-sections.php).
-require_once __DIR__ . '/../includes/report-sections.php';
 require_once __DIR__ . '/../includes/station-hours.php';
 require_once __DIR__ . '/../admin/includes/pos-shift-totals.php';
-$logSection = static function (string $name, Throwable $e): void {
-    if (function_exists('rh_log_event')) {
-        rh_log_event('daily_reports', 'error', 'Daily report section could not be built: ' . $name, ['error' => $e->getMessage()]);
-    }
-    fwrite(STDERR, "  ! {$name}: " . $e->getMessage() . "\n");
-};
 
 // Station report = the trading day that has ENDED (owner 2026-11-10 "count with the day that ended"), so a run
 // before opening or during the day never sends an empty or half day. --date / --start / --end still pick days.
@@ -73,72 +62,56 @@ if (!$stationExplicit) {
     try {
         $stationStart = $stationEnd = rh_pos_last_ended_trading_date(new DateTimeImmutable('now', rh_site_timezone()));
     } catch (Throwable $e) {
-        $logSection('station-day (day)', $e);
+        if (function_exists('rh_log_event')) {
+            rh_log_event('daily_reports', 'error', 'Daily report section could not be built: station-day (day)', ['error' => $e->getMessage()]);
+        }
+        fwrite(STDERR, '  ! station-day (day): ' . $e->getMessage() . "\n");
         $stationStart = $stationEnd = date('Y-m-d', strtotime('-1 day'));
     }
 }
 
-$sections = [
-    'bookings'   => rh_report_section('bookings', static fn() => buildBookingsReport($start, $end), $logSection),
-    'station'    => rh_report_section('station-day', static fn() => buildStationDayReport($stationStart, $stationEnd), $logSection),
-    'accounting' => rh_report_section('accounting', static fn() => buildAccountingSummary($start, $end), $logSection),
-    'stock'      => rh_report_section('stock-health', static fn() => buildStockHealthReport(), $logSection),
-];
-$bookings   = $sections['bookings']['result'];
-$station    = $sections['station']['result'];
-$accounting = $sections['accounting']['result'];
-$stock      = $sections['stock']['result'];
-
-if ($bookings)   { printf("  • bookings        : %5d rows, %d bytes\n", $bookings['rows'], strlen($bookings['csv'])); }
-if ($station)    { printf("  • station-day     : %5d rows, %d bytes (trading day %s)\n", $station['rows'], strlen($station['csv']), $stationStart === $stationEnd ? $stationStart : "{$stationStart} to {$stationEnd}"); }
-if ($accounting) { printf("  • accounting      :   ---  rows, %d bytes (outstanding %s)\n", strlen($accounting['csv']), number_format($accounting['outstanding'] ?? 0, 2)); }
-if ($stock) {
-    printf("  • stock-health    : %5d rows, %d bytes (low %d, expiring %d, value %s)\n",
-        $stock['rows'], strlen($stock['csv']), $stock['low_count'], $stock['expiring'], number_format($stock['total_value'], 2));
-}
-
-$attachments = [];
-foreach ($sections as $sec) {
-    if ($sec['ok'] && is_array($sec['result'])) {
-        $attachments[] = ['filename' => $sec['result']['filename'], 'content' => $sec['result']['csv'], 'mime' => 'text/csv'];
+/* ---------------- once per trading day (shared with the scheduler) ---------------- */
+// Only a default run claims: it is what a server cron runs. A run with explicit dates is a hand-picked resend.
+$claimKey = null;
+$pdoLog = $GLOBALS['pdo'] ?? null;
+if (!$stationExplicit) {
+    require_once __DIR__ . '/../includes/auto-scheduler.php';
+    $key = rh_daily_reports_key($stationStart);
+    if ($pdoLog instanceof PDO && rh_auto_log_table_ready($pdoLog)) {
+        $emails = implode(', ', array_column($recipients, 'email'));
+        if (rh_auto_log_claim($pdoLog, $key['job'], $key['type'], $key['id'], $key['stage'], $emails, 'Daily Operations Report (CLI) - trading day ' . $stationStart)) {
+            $claimKey = $key;
+        } elseif ($force) {
+            if (function_exists('rh_log_event')) {
+                rh_log_event('daily_reports', 'warning', 'Daily report sent again with --force for trading day ' . $stationStart, ['recipients' => $emails]);
+            }
+            echo "--force: trading day {$stationStart} was already sent; sending again.\n";
+        } else {
+            echo "Trading day {$stationStart} has already been sent (by the timer or an earlier run). Nothing sent; use --force to send again.\n";
+            exit(0);
+        }
+    } else {
+        fwrite(STDERR, "WARNING: automated_email_log is not available; sending without the once-per-day check.\n");
     }
 }
 
-/* ---------------- email body ---------------- */
-$siteName = function_exists('getSetting') ? (getSetting('site_name', 'Hotel') ?: 'Hotel') : 'Hotel';
-$subject = sprintf('[%s] Daily Operations Report — %s', $siteName, $start === $end ? $start : "{$start} to {$end}");
-$stationDays = $stationStart === $stationEnd ? $stationStart : "{$stationStart} to {$stationEnd}";
+/* ---------------- build + send ---------------- */
+$out = rh_daily_reports_build_and_send($recipients, $start, $end, $stationStart, $stationEnd, $stationExplicit, ['echo' => true]);
+$result = $out['result'];
 
-$html  = '<h2 style="margin:0 0 12px 0;">Daily Operations Report</h2>';
-$html .= '<p><strong>Period:</strong> ' . htmlspecialchars($start === $end ? $start : "{$start} to {$end}") . '<br>';
-$html .= '<strong>Restaurant / till (station report):</strong> trading day ' . htmlspecialchars($stationDays)
-    . ($station ? ' (' . htmlspecialchars((string)($station['window_label'] ?? '')) . ')' : '')
-    . ($stationExplicit ? '' : ', the last trading day that has ended') . '<br>';
-$html .= '<strong>Generated:</strong> ' . date('d M Y H:i:s') . '</p>';
-$html .= '<h3>Attachments</h3><ul>';
-$html .= $bookings
-    ? '<li><strong>' . htmlspecialchars($bookings['filename']) . '</strong> — ' . (int)$bookings['rows'] . ' bookings.</li>'
-    : '<li>' . htmlspecialchars(rh_report_failed_line('Bookings report')) . '</li>';
-$html .= $station
-    ? '<li><strong>' . htmlspecialchars($station['filename']) . '</strong> — kitchen / bar / coffee bar item performance with summary, orders and sales as on the till Z (paid at the till + charged to room).</li>'
-    : '<li>' . htmlspecialchars(rh_report_failed_line('Station report')) . '</li>';
-$html .= $accounting
-    ? '<li><strong>' . htmlspecialchars($accounting['filename']) . '</strong> — revenue by booking type, payment method, outstanding receivables, POS shift closes.</li>'
-    : '<li>' . htmlspecialchars(rh_report_failed_line('Accounting summary')) . '</li>';
-$html .= $stock
-    ? '<li><strong>' . htmlspecialchars($stock['filename']) . '</strong> — low stock (' . (int)$stock['low_count'] . '), expiring batches (' . (int)$stock['expiring'] . '), stock value snapshot.</li>'
-    : '<li>' . htmlspecialchars(rh_report_failed_line('Stock health report')) . '</li>';
-$html .= '</ul>';
-$html .= '<p style="color:#666;font-size:12px;">This is an automated report. CSVs are UTF-8.</p>';
-
-/* ---------------- send ---------------- */
-$result = sendReportEmail($recipients, $subject, $html, $attachments);
+if ($claimKey !== null) {
+    try {
+        rh_auto_log_finish($pdoLog, $claimKey['job'], $claimKey['type'], $claimKey['id'], $claimKey['stage'],
+            !empty($result['success']) ? 'sent' : 'failed', !empty($result['success']) ? '' : (string)($result['message'] ?? 'send failed'));
+    } catch (Throwable $e) {
+        fwrite(STDERR, 'WARNING: could not record the send: ' . $e->getMessage() . "\n");
+    }
+}
 
 echo "\nMail send result: " . json_encode($result, JSON_UNESCAPED_SLASHES) . "\n";
 
-if (!array_filter($sections, static fn(array $sec): bool => $sec['ok'])) {
-    fwrite(STDERR, "ERROR: every report section failed (see the system log).
-");
+if (!$out['any_ok']) {
+    fwrite(STDERR, "ERROR: every report section failed (see the system log).\n");
     exit(1);
 }
 exit($result['success'] ? 0 : 3);
