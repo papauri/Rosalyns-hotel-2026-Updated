@@ -14,6 +14,8 @@ function bad(string $l, string $d = ''): void { global $fail; $fail++; echo "FAI
 function check(bool $c, string $l, string $d = ''): bool { $c ? ok($l) : bad($l, $d); return $c; }
 function eq($got, $want, string $l): void { check($got === $want, $l, 'got ' . var_export($got, true) . ', want ' . var_export($want, true)); }
 
+// Any PHP warning/notice (e.g. "Array to string conversion") is a failure, not noise.
+set_error_handler(static function (int $no, string $msg, string $file, int $line): bool { bad('PHP notice/warning', "$msg at $file:$line"); return true; });
 require_once $root . '/admin/includes/finance-filters.php';
 check(!isset($GLOBALS['pdo']) && !function_exists('getSetting'), 'loads without the database');
 
@@ -89,10 +91,40 @@ foreach (['all', 'room', 'event'] as $t) foreach ([[], ['room', 'restaurant']] a
 check($invOk, "invoices: identical and ? count == param count ($m inputs)");
 check($invInj, 'invoices: user text only ever travels as a bound param');
 eq(rh_fin_invoices_where(['type' => 'all', 'status' => 'all', 'search' => '']), ['sql' => 'WHERE p.deleted_at IS NULL', 'params' => []], 'invoices: no filters');
-eq(rh_fin_invoices_where(['type' => 'gym', 'scope_types' => ['room'], 'status' => 'paid', 'search' => 'A1']), [
-    'sql' => 'WHERE p.deleted_at IS NULL AND p.booking_type = ? AND p.payment_status = ? AND (p.invoice_number LIKE ? OR p.payment_reference LIKE ? OR p.booking_reference LIKE ?)',
-    'params' => ['gym', 'paid', '%A1%', '%A1%', '%A1%'],
-], 'invoices: type, status and search in list order');
+$r = rh_fin_invoices_where(['type' => 'gym', 'scope_types' => ['room'], 'status' => 'paid', 'search' => ' A1 '], $conf);
+check(strpos($r['sql'], 'WHERE p.deleted_at IS NULL AND p.booking_type = ? AND p.payment_status = ? AND (') === 0, 'invoices: type, status, then search');
+eq(array_slice($r['params'], 0, 2), ['gym', 'paid'], 'invoices: type and status params first');
+eq(array_values(array_unique(array_slice($r['params'], 2))), ['%A1%'], 'invoices: search term trimmed, all %term%');
+eq(count($r['params']), 2 + 11, 'invoices search binds 11 params');
+foreach (['p.invoice_number', 'p.payment_reference', 'p.booking_reference', "COALESCE(b.guest_name, '')", "COALESCE(b.guest_email, '')", "COALESCE(ci.organization_name, '')", "COALESCE(ci.contact_email, '')", "COALESCE(gi.name, '')", "COALESCE(gi.email, '')", "COALESCE(ei.name, '')", "COALESCE(ei.email, '')"] as $col) {
+    check(strpos($r['sql'], $col . " LIKE ? ESCAPE '!'") !== false, "invoices search covers $col");
+}
+$from = rh_fin_invoices_from();
+foreach (["bookings b ON p.booking_type = 'room' AND p.booking_id = b.id", "conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id", "gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id", "event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id"] as $j) {
+    check(strpos($from, $j) !== false, 'invoices card joins on the primary key: ' . explode(' ', $j)[0]);
+}
+
+// ---- LIKE wildcards typed by staff match literally; every LIKE carries the escape
+eq(rh_fin_like_param('50%_x!'), '%50!%!_x!!%', 'like param escapes % _ and the escape char');
+$r = rh_fin_payments_where(['search' => '10%'], 'transaction_reference', $conf);
+check(substr_count($r['sql'], ' LIKE ?') === substr_count($r['sql'], " LIKE ? ESCAPE '!'") && substr_count($r['sql'], ' LIKE ?') === 27, 'payments: every LIKE has ESCAPE (27)');
+eq($r['params'][0], '%10!%%', 'payments: % in search is literal');
+$r = rh_fin_invoices_where(['search' => 'a_b'], $conf);
+check(substr_count($r['sql'], ' LIKE ?') === substr_count($r['sql'], " LIKE ? ESCAPE '!'") && substr_count($r['sql'], ' LIKE ?') === 11, 'invoices: every LIKE has ESCAPE (11)');
+eq($r['params'][0], '%a!_b%', 'invoices: _ in search is literal');
+
+// ---- array-valued query params are ignored, never "Array" or (int)array === 1
+$g = ['s' => ['x'], 'n' => ['5'], 't' => ' room ', 'i' => '42', 'bad' => '4x', 'f' => 3];
+eq(rh_fin_get_str($g, 's'), '', 'get_str: array ignored');
+eq(rh_fin_get_str($g, 's', 'all'), 'all', 'get_str: array gives default');
+eq(rh_fin_get_str($g, 'missing', 'all'), 'all', 'get_str: missing gives default');
+eq(rh_fin_get_str($g, 't'), 'room', 'get_str: trimmed text');
+eq(rh_fin_get_str($g, 'f'), '3', 'get_str: number as text');
+eq(rh_fin_get_int($g, 'n'), 0, 'get_int: array is 0, not 1');
+eq(rh_fin_get_int($g, 'i'), 42, 'get_int: digits');
+eq(rh_fin_get_int($g, 'bad', 7), 7, 'get_int: junk gives default');
+eq(rh_fin_payments_where(['booking_type' => ['room'], 'booking_id' => ['9'], 'search' => ['x'], 'status' => ['paid'], 'payment_method' => ['cash'], 'refund_status' => ['pending']], 'transaction_reference', $conf), ['sql' => 'WHERE p.deleted_at IS NULL', 'params' => []], 'payments builder ignores array inputs');
+eq(rh_fin_invoices_where(['type' => ['room'], 'status' => ['paid'], 'search' => ['x']], $conf), ['sql' => 'WHERE p.deleted_at IS NULL', 'params' => []], 'invoices builder ignores array inputs');
 eq(rh_fin_invoices_where(['type' => 'all', 'scope_types' => ['room', 'gym']])['params'], ['room', 'gym'], 'invoices: module scope');
 
 // ---- wiring (page source read as text, nothing executed)
@@ -104,12 +136,33 @@ check(strpos($pay, '$countSql = "SELECT COUNT(*) as total " . $payFromSql . \' \
 check(strpos($pay, '$stmt->execute(array_merge($payFilterParams, [$limit, $offset]));') !== false, 'payments: list uses the shared params');
 check(strpos($pay, '$exportParams = $payFilterParams;') !== false && strpos($pay, '$where_conditions') === false, 'payments: CSV export uses the shared filter');
 check(substr_count($pay, '$analyticsWhereSql') === 5 && substr_count($pay, '->execute($analyticsParams)') === 4, 'payments: all four card queries read the shared filter');
+check(strpos($pay, 'All payments, not affected by filters') !== false, 'payments: Today card says it ignores the filters');
+check(strpos($pay, 'rh_receivable_rows($pdo, rh_receivable_mods(), $outstandingFailed)') !== false && strpos($pay, 'FROM bookings WHERE deleted_at IS NULL AND amount_due > 0.01') === false, 'payments: outstanding view uses the shared receivables rule');
+check(preg_match('/\(int\)\$_GET|\(string\)\(\$_GET|\? \$_GET\[/', $pay) === 0, 'payments: no raw casts of query params');
 $inv = (string)file_get_contents($root . '/admin/invoices.php');
-check(substr_count($inv, "{\$invFilter['sql']}") === 2 && substr_count($inv, "\$sql .= ' ' . \$invFilter['sql'];") === 1, 'invoices: list and both card queries use the shared WHERE');
+check(substr_count($inv, "{\$invCardWhere}") === 2 && substr_count($inv, "\$sql .= ' ' . \$invFilter['sql'];") === 1, 'invoices: list and both card queries use the shared WHERE');
+check(strpos($inv, "\$invCardWhere = 'WHERE id IN (SELECT p.id ' . rh_fin_invoices_from() . ' ' . \$invFilter['sql'] . ')';") !== false, 'invoices: cards select their rows through the same joins as the search');
+check(strpos($inv, "], \$conferenceFields);") !== false, 'invoices: search gets the conference column names');
+check(strpos($inv, "'Error: ' . \$e->getMessage()") === false && strpos($inv, "rh_log_event('admin/invoices', 'error', 'Invoice action failed'") !== false, 'invoices: action errors from the database are logged, not shown');
+check(strpos($inv, 'href="?filter_status=pending"') === false && strpos($inv, 'href="payments.php?balance=outstanding" class="acct-link">view accounts owing</a>') !== false, 'invoices: Outstanding card opens the accounts it adds up');
+check(strpos($inv, '&amp;filter_status=pending">View') === false && strpos($inv, 'payments.php?balance=outstanding&amp;booking_type=') !== false, "invoices: by-source links open that source's accounts owing");
+check(substr_count($inv, 'All accounts owing, not affected by filters') === 2, 'invoices: Outstanding card and aging panel say they ignore the filters');
+check(preg_match('/\$_GET\[\'(filter_type|filter_status|search|scope)\'\]/', $inv) === 0, 'invoices: filter params read through rh_fin_get_str');
 check(strpos($inv, "FROM payments\n        WHERE deleted_at IS NULL") === false, 'invoices: unfiltered card WHERE is gone');
 check(strpos($inv, "'Error fetching invoices: ' . \$e->getMessage()") === false, 'invoices: database error no longer shown on screen');
 $rcp = (string)file_get_contents($root . '/admin/receipts.php');
 check(strpos($rcp, "'p.payment_date <= ?'") === false && strpos($rcp, "rh_fin_date_conditions('p.payment_date'") !== false, 'receipts: whole-day To date via the shared helper');
+
+// ---- Pending / Partial card link: 'pending_partial' lists exactly the card's rows
+$r = rh_fin_payments_where(['status' => 'pending_partial', 'booking_type' => 'room'], 'transaction_reference', $conf);
+eq($r, ['sql' => "WHERE p.deleted_at IS NULL AND p.booking_type = ? AND p.payment_status IN ('pending','partial') AND COALESCE(p.payment_type, '') <> 'refund'", 'params' => ['room']], 'payments: pending_partial = the card rule (pending or partial, no refunds), other filters kept');
+check(strpos($pay, 'href="?status=pending"') === false && strpos($pay, "in_array(\$status, ['pending', 'partial'], true) ? \$status : 'pending_partial'") !== false, 'payments: Pending / Partial card opens what it counts, with the same filters');
+check(strpos($pay, '<option value="pending_partial"') !== false, 'payments: status box can show "Pending or partial"');
+
+// ---- receipts: escaped search + text-only params
+check(strpos($rcp, "rh_fin_like_any(['p.receipt_number', 'p.payment_reference', 'p.booking_reference', 'p.notes'])") !== false && strpos($rcp, 'rh_fin_like_param($search)') !== false, 'receipts: search uses the escaped LIKE helpers');
+check(strpos($rcp, "\$like = '%' . \$input['search'] . '%';") === false, 'receipts: old unescaped LIKE is gone');
+check(preg_match('/\(int\)\(\$_GET|\(string\)\(\$_GET|\$_GET\[\'(type|status|search|scope|page)\'\]/', $rcp) === 0, 'receipts: query params read through rh_fin_get_str / rh_fin_get_int');
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail ? 1 : 0);

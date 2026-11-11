@@ -22,30 +22,31 @@ $paymentTransactionColumn = finance_payment_transaction_column($pdo);
 $paymentColumns = finance_table_columns($pdo, 'payments');
 
 // Get filter parameters
-$bookingType = isset($_GET['booking_type']) ? $_GET['booking_type'] : '';
-$bookingId = isset($_GET['booking_id']) ? (int)$_GET['booking_id'] : 0;
-$status = isset($_GET['status']) ? $_GET['status'] : '';
-$paymentMethod = isset($_GET['payment_method']) ? $_GET['payment_method'] : '';
+// Text-only reads: an array such as ?status[]=x is ignored (admin/includes/finance-filters.php).
+$bookingType = rh_fin_get_str($_GET, 'booking_type');
+$bookingId = rh_fin_get_int($_GET, 'booking_id');
+$status = rh_fin_get_str($_GET, 'status');
+$paymentMethod = rh_fin_get_str($_GET, 'payment_method');
 // Refund workflow filter (whitelisted): ?refund_status=pending lists refund rows awaiting settlement.
-$refundStatus = (string)($_GET['refund_status'] ?? '');
+$refundStatus = rh_fin_get_str($_GET, 'refund_status');
 if (!in_array($refundStatus, ['pending', 'processing', 'completed', 'failed', 'rejected'], true)) {
     $refundStatus = '';
 }
 // Real Y-m-d dates only (anything else is ignored, so the boxes show what is actually applied).
 $startDate = rh_fin_valid_date($_GET['start_date'] ?? '');
 $endDate = rh_fin_valid_date($_GET['end_date'] ?? '');
-$searchText = trim((string)($_GET['search_text'] ?? ''));
+$searchText = rh_fin_get_str($_GET, 'search_text');
 // "Outstanding balances" view: shows accounts (bookings/conference/gym/event)
 // that still owe money — i.e. amount_due > 0 — NOT payment-ledger rows. This is
 // what the dashboard "Outstanding Balances" card counts; those accounts often
 // have zero payment rows yet, so they can never appear in the payments list.
-$showOutstanding = (($_GET['balance'] ?? '') === 'outstanding');
+$showOutstanding = (rh_fin_get_str($_GET, 'balance') === 'outstanding');
 $has_active_payment_filters = $bookingType !== '' || $bookingId > 0 || $status !== '' || $refundStatus !== '' || $paymentMethod !== '' || $startDate !== '' || $endDate !== '' || $searchText !== '';
 
 // Preset scoping: by default the list shows only rows whose module is enabled
 // (a gym sees gym/event/till payments, not room-booking history). Explicit
 // ?booking_type= deep links and ?scope=all bypass it; nothing is ever deleted.
-$scopeAll            = (($_GET['scope'] ?? '') === 'all');
+$scopeAll            = (rh_fin_get_str($_GET, 'scope') === 'all');
 $allBookingTypes     = ['room', 'conference', 'restaurant', 'gym', 'event'];
 $enabledBookingTypes = function_exists('rh_enabled_booking_types') ? rh_enabled_booking_types() : [];
 $scopeActive         = $bookingType === '' && !$scopeAll
@@ -53,7 +54,7 @@ $scopeActive         = $bookingType === '' && !$scopeAll
     && count($enabledBookingTypes) < count($allBookingTypes);
 $hiddenBookingTypes  = $scopeActive ? array_values(array_diff($allBookingTypes, $enabledBookingTypes)) : [];
 
-$page = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
+$page = max(1, rh_fin_get_int($_GET, 'page', 1));
 $limit = 50;
 $offset = ($page - 1) * $limit;
 
@@ -109,13 +110,13 @@ $sql = "
 // ONE filter set for the cards, the list, the row count and the CSV export (admin/includes/finance-filters.php),
 // so a figure on a card is always the sum of the rows the list shows for the same filters.
 $payFilter = rh_fin_payments_where([
-    'booking_type'   => (string)$bookingType,
+    'booking_type'   => $bookingType,
     'scope_types'    => $scopeActive ? $enabledBookingTypes : [],
     'booking_id'     => $bookingId,
     'search'         => $searchText,
-    'status'         => (string)$status,
+    'status'         => $status,
     'refund_status'  => $refundStatus,
-    'payment_method' => (string)$paymentMethod,
+    'payment_method' => $paymentMethod,
     'start_date'     => (string)$startDate,
     'end_date'       => (string)$endDate,
 ], $paymentTransactionColumn, $conferenceFields);
@@ -169,37 +170,25 @@ foreach ($payments as &$payRow) {
 unset($payRow);
 
 // ── Outstanding balances (accounts still owing) ────────────────────────────
-// Built from the source tables, scoped to the enabled modules — mirrors the
-// dashboard "Outstanding Balances" card so the numbers line up exactly.
+// The one shared receivables rule (admin/includes/receivables.php), the same rows the Dashboard, Invoices
+// "Outstanding" card, Reports aging and End of Day add up, so this list always totals to those figures.
+// ?booking_type= narrows it to one source (the Invoices "outstanding by source" links).
 $outstandingRows = [];
 $outstandingTotal = 0.0;
+$outstandingFailed = [];
 if ($showOutstanding) {
-    $confRef = $conferenceFields['reference'];
-    $confCompany = $conferenceFields['company'];
-    $confContact = $conferenceFields['contact_name'] ?? 'contact_person';
-    $outstandingSources = [];
-    if ($mod_bookings) {
-        $outstandingSources[] = "SELECT 'room' AS src, id, booking_reference AS ref, guest_name AS client, status, total_amount, amount_paid, amount_due FROM bookings WHERE deleted_at IS NULL AND amount_due > 0.01 AND (status IN ('pending','confirmed','checked-in','checked-out') OR (status = 'cancelled' AND COALESCE(cancellation_retained_amount,0) > 0))";
-    }
-    if ($mod_conference) {
-        $outstandingSources[] = "SELECT 'conference' AS src, id, {$confRef} AS ref, COALESCE(NULLIF({$confCompany},''), {$confContact}) AS client, status, total_amount, amount_paid, amount_due FROM conference_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')";
-    }
-    if ($mod_gym) {
-        $outstandingSources[] = "SELECT 'gym' AS src, id, reference_number AS ref, name AS client, status, total_amount, amount_paid, amount_due FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled','closed')";
-    }
-    if ($mod_events) {
-        $outstandingSources[] = "SELECT 'event' AS src, id, reference_number AS ref, name AS client, status, total_amount, amount_paid, amount_due FROM event_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')";
-    }
-    foreach ($outstandingSources as $osql) {
-        try {
-            foreach ($pdo->query($osql)->fetchAll(PDO::FETCH_ASSOC) as $oRow) {
-                $outstandingRows[] = $oRow;
-                $outstandingTotal += (float)($oRow['amount_due'] ?? 0);
-            }
-        } catch (Throwable $e) {
-            // A module's table may not exist yet — skip it.
+    require_once __DIR__ . '/includes/receivables.php';
+    foreach (rh_receivable_rows($pdo, rh_receivable_mods(), $outstandingFailed) as $rcvRow) {
+        if ($bookingType !== '' && $rcvRow['type'] !== $bookingType) {
+            continue;
         }
+        $outstandingRows[] = [
+            'src' => $rcvRow['type'], 'id' => $rcvRow['id'], 'ref' => $rcvRow['reference'], 'client' => $rcvRow['client'],
+            'status' => $rcvRow['status'], 'amount_paid' => $rcvRow['amount_paid'], 'amount_due' => $rcvRow['amount_due'],
+        ];
+        $outstandingTotal += (float)$rcvRow['amount_due'];
     }
+    $outstandingTotal = round($outstandingTotal, 2);
     usort($outstandingRows, static fn($a, $b) => (float)$b['amount_due'] <=> (float)$a['amount_due']);
 }
 
@@ -448,7 +437,10 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                 <span class="ck-kpi__label">Pending / Partial</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($kpi['pending_total'] ?? 0), 0); ?></span>
                 <span class="ck-kpi__sub">                    <?php echo number_format((int)($kpi['pending_count'] ?? 0)); ?> awaiting ·
-                    <a href="?status=pending" class="acct-link">view all</a>
+                    <?php if ((int)($kpi['pending_count'] ?? 0) > 0): ?>
+                    <?php /* Same filters plus "pending or partial" (refunds excluded): opens exactly the rows this card counts. */ ?>
+                    <a href="<?php echo htmlspecialchars('payments.php?' . http_build_query(array_merge($_GET, ['status' => in_array($status, ['pending', 'partial'], true) ? $status : 'pending_partial', 'page' => 1, 'balance' => null, 'export' => null]))); ?>" class="acct-link">view these</a>
+                    <?php endif; ?>
                 </span>
             </div>
             <div class="ck-kpi">
@@ -458,6 +450,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                     <?php echo $currency_symbol . number_format((float)($period['week_collected'] ?? 0), 0); ?> last 7d ·
                     <?php echo $currency_symbol . number_format((float)($period['month_collected'] ?? 0), 0); ?> this month
                 </span>
+                <span class="ck-kpi__sub" style="margin-top:0">All payments, not affected by filters</span>
             </div>
             <div class="ck-kpi ck-kpi--info">
                 <span class="ck-kpi__label">Refunds (filtered)</span>
@@ -620,6 +613,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                     <label>Status</label>
                     <select name="status">
                         <option value="">All Statuses</option>
+                        <option value="pending_partial" <?php echo $status === 'pending_partial' ? 'selected' : ''; ?>>Pending or partial</option>
                         <option value="pending" <?php echo $status === 'pending' ? 'selected' : ''; ?>>Pending</option>
                         <option value="partial" <?php echo $status === 'partial' ? 'selected' : ''; ?>>Partial</option>
                         <option value="paid" <?php echo $status === 'paid' ? 'selected' : ''; ?>>Paid</option>
@@ -698,7 +692,14 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                     <i class="fas fa-arrow-left"></i> Back to payment ledger
                 </a>
                 <span class="acct-pill acct-pill--pending" style="align-self:center;">
-                    <i class="fas fa-hand-holding-dollar"></i> <?php echo count($outstandingRows); ?> account<?php echo count($outstandingRows) === 1 ? '' : 's'; ?> owing · <?php echo $currency_symbol . number_format($outstandingTotal, 0); ?>
+                    <i class="fas fa-hand-holding-dollar"></i> <?php echo count($outstandingRows); ?> account<?php echo count($outstandingRows) === 1 ? '' : 's'; ?> owing · <?php echo !empty($outstandingFailed) ? 'total n/a' : $currency_symbol . number_format($outstandingTotal, 0); ?>
+                </span>
+                <span class="acct-muted" style="align-self:center;">
+                    <?php if ($bookingType !== ''): ?>
+                        <?php echo htmlspecialchars(rh_receivable_type_label($bookingType)); ?> only · <a href="payments.php?balance=outstanding" class="acct-link">show all sources</a> ·
+                    <?php endif; ?>
+                    Same rule as the Dashboard, Invoices and Reports owed figures; not affected by the date, status, method or search filters.
+                    <?php if (!empty($outstandingFailed)): ?> Some accounts could not be read (System Logs), so no total is shown.<?php endif; ?>
                 </span>
             <?php else: ?>
                 <a href="payments.php?balance=outstanding" class="btn-filter" style="text-decoration:none; display:inline-flex; align-items:center; gap:8px;">
@@ -731,6 +732,8 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                             'conference' => ['label' => 'Conference', 'badge' => 'conference', 'link' => 'conference-management.php?id='],
                             'gym'        => ['label' => 'Gym',        'badge' => 'gym',        'link' => 'gym-inquiries.php?id='],
                             'event'      => ['label' => 'Event',      'badge' => 'event',      'link' => 'events-inquiries.php?id='],
+                            // Open tabs have no account page: their pending payment rows in this ledger.
+                            'restaurant' => ['label' => 'Open tab',   'badge' => 'restaurant', 'link' => 'payments.php?booking_type=restaurant&booking_id='],
                         ];
                         foreach ($outstandingRows as $oRow):
                             $src = (string)($oRow['src'] ?? '');
@@ -755,7 +758,9 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                 <td data-label="Actions">
                                     <div class="quick-actions">
                                         <a href="<?php echo htmlspecialchars($viewUrl); ?>" class="btn btn-primary btn-sm" title="View account"><i class="fas fa-eye"></i></a>
+                                        <?php if (in_array($src, ['room', 'conference', 'gym', 'event'], true)): ?>
                                         <a href="payment-add.php?booking_type=<?php echo htmlspecialchars($src); ?>&booking_id=<?php echo $oid; ?>" class="btn btn-success btn-sm" title="Record a payment against this account"><i class="fas fa-plus"></i> Collect</a>
+                                        <?php endif; ?>
                                     </div>
                                 </td>
                             </tr>

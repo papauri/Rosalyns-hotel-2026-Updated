@@ -56,20 +56,26 @@ function receipts_build_where(array $input, array &$params): string
     }
     // Real Y-m-d dates only; "To" covers the whole day (admin/includes/finance-filters.php).
     $where = array_merge($where, rh_fin_date_conditions('p.payment_date', $input['date_from'] ?? '', $input['date_to'] ?? '', $params));
-    if (($input['search'] ?? '') !== '') {
-        $like = '%' . $input['search'] . '%';
-        $where[] = '(p.receipt_number LIKE ? OR p.payment_reference LIKE ? OR p.booking_reference LIKE ? OR p.notes LIKE ?)';
-        array_push($params, $like, $like, $like, $like);
+    $search = rh_fin_get_str($input, 'search');
+    if ($search !== '') {
+        // % and _ typed by staff match literally (ESCAPE '!'): admin/includes/finance-filters.php.
+        $searchSql = rh_fin_like_any(['p.receipt_number', 'p.payment_reference', 'p.booking_reference', 'p.notes']);
+        $where[] = $searchSql;
+        $like = rh_fin_like_param($search);
+        foreach (array_fill(0, substr_count($searchSql, '?'), $like) as $v) {
+            $params[] = $v;
+        }
     }
     return 'WHERE ' . implode(' AND ', $where);
 }
 
 $filters = [
-    'type' => $_GET['type'] ?? 'all',
-    'status' => $_GET['status'] ?? 'all',
+    // Text-only reads: an array such as ?search[]=x is ignored (admin/includes/finance-filters.php).
+    'type' => rh_fin_get_str($_GET, 'type', 'all'),
+    'status' => rh_fin_get_str($_GET, 'status', 'all'),
     'date_from' => rh_fin_valid_date($_GET['date_from'] ?? ''),
     'date_to' => rh_fin_valid_date($_GET['date_to'] ?? ''),
-    'search' => trim((string)($_GET['search'] ?? '')),
+    'search' => rh_fin_get_str($_GET, 'search'),
 ];
 if (!in_array($filters['type'], ['all', 'room', 'conference', 'restaurant', 'gym', 'event'], true)) {
     $filters['type'] = 'all';
@@ -80,7 +86,7 @@ if (!in_array($filters['status'], ['all', 'missing', 'generated', 'emailed'], tr
 
 // Preset scoping: default list shows receipts for enabled modules only.
 // ?type= deep links and ?scope=all bypass; history is never deleted.
-$scopeAll            = (($_GET['scope'] ?? '') === 'all');
+$scopeAll            = (rh_fin_get_str($_GET, 'scope') === 'all');
 $allBookingTypes     = ['room', 'conference', 'restaurant', 'gym', 'event'];
 $enabledBookingTypes = function_exists('rh_enabled_booking_types') ? rh_enabled_booking_types() : [];
 $scopeActive         = $filters['type'] === 'all' && !$scopeAll
@@ -181,7 +187,7 @@ if ($scopeActive && $hiddenBookingTypes !== []) {
     $hiddenScopedCount = (int)$hStmt->fetchColumn();
 }
 
-$page = max(1, (int)($_GET['page'] ?? 1));
+$page = max(1, rh_fin_get_int($_GET, 'page', 1));
 $limit = 10;
 $countStmt = $pdo->prepare("SELECT COUNT(*) FROM payments p $whereSql");
 $countStmt->execute($params);

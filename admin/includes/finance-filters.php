@@ -23,6 +23,45 @@ if (!function_exists('rh_fin_valid_date')) {
         return $d;
     }
 
+    /**
+     * A query-string value as text: trimmed when it is a string or number, $default for anything else (an array
+     * such as ?search[]=x is ignored rather than turned into "Array" or a PHP 8 TypeError).
+     */
+    function rh_fin_get_str(array $src, string $key, string $default = ''): string
+    {
+        $v = $src[$key] ?? null;
+        if (is_string($v) || is_int($v) || is_float($v)) {
+            return trim((string)$v);
+        }
+        return $default;
+    }
+
+    /** A query-string value as a whole number; arrays and non-numeric text give $default (never 1 from (int)array). */
+    function rh_fin_get_int(array $src, string $key, int $default = 0): int
+    {
+        $v = rh_fin_get_str($src, $key);
+        return preg_match('/^-?\d{1,18}$/', $v) ? (int)$v : $default;
+    }
+
+    /**
+     * LIKE pattern for "contains $term": % and _ typed by staff are matched literally. The escape character is '!'
+     * (paired with rh_fin_like_any()'s ESCAPE '!'), which works whatever MySQL's backslash mode is.
+     */
+    function rh_fin_like_param(string $term): string
+    {
+        return '%' . str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $term) . '%';
+    }
+
+    /** "(c1 LIKE ? ESCAPE '!' OR c2 LIKE ? ESCAPE '!' ...)" over trusted SQL column expressions (never user text). */
+    function rh_fin_like_any(array $cols): string
+    {
+        $parts = [];
+        foreach ($cols as $c) {
+            $parts[] = $c . " LIKE ? ESCAPE '!'";
+        }
+        return "(\n        " . implode("\n        OR ", $parts) . "\n    )";
+    }
+
     /** A trusted column name (letters, digits, underscore) or the fallback; never user text. */
     function rh_fin_ident(string $name, string $fallback): string
     {
@@ -99,35 +138,15 @@ if (!function_exists('rh_fin_valid_date')) {
     {
         $txnCol = rh_fin_ident($txnCol, 'transaction_id');
         $c = rh_fin_conf_cols($conf);
-        return "(
-        p.payment_reference LIKE ?
-        OR p.receipt_number LIKE ?
-        OR p.invoice_number LIKE ?
-        OR p.booking_reference LIKE ?
-        OR p.{$txnCol} LIKE ?
-        OR p.payment_method LIKE ?
-        OR p.payment_status LIKE ?
-        OR CAST(p.booking_id AS CHAR) LIKE ?
-        OR CAST(p.total_amount AS CHAR) LIKE ?
-        OR COALESCE(b.guest_name, '') LIKE ?
-        OR COALESCE(b.guest_email, '') LIKE ?
-        OR COALESCE(b.guest_phone, '') LIKE ?
-        OR COALESCE(b.booking_reference, '') LIKE ?
-        OR COALESCE(ci.{$c['company']}, '') LIKE ?
-        OR COALESCE(ci.{$c['reference']}, '') LIKE ?
-        OR COALESCE(ci.{$c['email']}, '') LIKE ?
-        OR COALESCE(ci.{$c['phone']}, '') LIKE ?
-        OR COALESCE(so.reference, '') LIKE ?
-        OR COALESCE(so.customer_name, '') LIKE ?
-        OR COALESCE(gi.name, '') LIKE ?
-        OR COALESCE(gi.reference_number, '') LIKE ?
-        OR COALESCE(gi.email, '') LIKE ?
-        OR COALESCE(gi.phone, '') LIKE ?
-        OR COALESCE(ei.name, '') LIKE ?
-        OR COALESCE(ei.reference_number, '') LIKE ?
-        OR COALESCE(ei.email, '') LIKE ?
-        OR COALESCE(ei.phone, '') LIKE ?
-    )";
+        return rh_fin_like_any([
+            'p.payment_reference', 'p.receipt_number', 'p.invoice_number', 'p.booking_reference', "p.{$txnCol}",
+            'p.payment_method', 'p.payment_status', 'CAST(p.booking_id AS CHAR)', 'CAST(p.total_amount AS CHAR)',
+            "COALESCE(b.guest_name, '')", "COALESCE(b.guest_email, '')", "COALESCE(b.guest_phone, '')", "COALESCE(b.booking_reference, '')",
+            "COALESCE(ci.{$c['company']}, '')", "COALESCE(ci.{$c['reference']}, '')", "COALESCE(ci.{$c['email']}, '')", "COALESCE(ci.{$c['phone']}, '')",
+            "COALESCE(so.reference, '')", "COALESCE(so.customer_name, '')",
+            "COALESCE(gi.name, '')", "COALESCE(gi.reference_number, '')", "COALESCE(gi.email, '')", "COALESCE(gi.phone, '')",
+            "COALESCE(ei.name, '')", "COALESCE(ei.reference_number, '')", "COALESCE(ei.email, '')", "COALESCE(ei.phone, '')",
+        ]);
     }
 
     /**
@@ -140,33 +159,36 @@ if (!function_exists('rh_fin_valid_date')) {
     {
         $params = [];
         $where = ['p.deleted_at IS NULL'];
-        $type = (string)($f['booking_type'] ?? '');
+        $type = rh_fin_get_str($f, 'booking_type');
         $where = array_merge($where, rh_fin_type_conditions('p.booking_type', $type, $type === '' ? (array)($f['scope_types'] ?? []) : [], $params));
-        $bookingId = (int)($f['booking_id'] ?? 0);
+        $bookingId = rh_fin_get_int($f, 'booking_id');
         if ($bookingId > 0) {
             $where[] = 'p.booking_id = ?';
             $params[] = $bookingId;
         }
-        $search = trim((string)($f['search'] ?? ''));
+        $search = rh_fin_get_str($f, 'search');
         if ($search !== '') {
             $searchSql = rh_fin_payments_search_sql($txnCol, $conf);
             $where[] = $searchSql;
-            $like = '%' . $search . '%';
+            $like = rh_fin_like_param($search);
             foreach (array_fill(0, substr_count($searchSql, '?'), $like) as $v) {
                 $params[] = $v;
             }
         }
-        $status = (string)($f['status'] ?? '');
-        if ($status !== '') {
+        $status = rh_fin_get_str($f, 'status');
+        if ($status === 'pending_partial') {
+            // The Payments "Pending / Partial" card: pending or partial, refund rows excluded.
+            $where[] = "p.payment_status IN ('pending','partial') AND COALESCE(p.payment_type, '') <> 'refund'";
+        } elseif ($status !== '') {
             $where[] = 'p.payment_status = ?';
             $params[] = $status;
         }
-        $refundStatus = (string)($f['refund_status'] ?? '');
+        $refundStatus = rh_fin_get_str($f, 'refund_status');
         if ($refundStatus !== '') {
             $where[] = "p.payment_type = 'refund' AND p.refund_status = ?";
             $params[] = $refundStatus;
         }
-        $method = (string)($f['payment_method'] ?? '');
+        $method = rh_fin_get_str($f, 'payment_method');
         if ($method !== '') {
             $where[] = 'p.payment_method = ?';
             $params[] = $method;
@@ -176,27 +198,62 @@ if (!function_exists('rh_fin_valid_date')) {
     }
 
     /**
-     * Invoices page WHERE (payment columns only, alias p), used by the cards and the list.
+     * The one FROM + joins for the Invoices page cards (list adds its 1:1 room / conference-room name joins).
+     * Every join is on the other table's primary key and restricted to its booking_type, so each payment row
+     * matches at most one row. Cards wrap it as "WHERE id IN (SELECT p.id <from> <where>)" so their own
+     * unqualified payment columns stay unambiguous.
+     */
+    function rh_fin_invoices_from(): string
+    {
+        return "
+    FROM payments p
+    LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
+    LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
+    LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
+    LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id
+";
+    }
+
+    /** Invoices page free-text search: document numbers plus the customer name and email the list shows. */
+    function rh_fin_invoices_search_sql(array $conf): string
+    {
+        $c = rh_fin_conf_cols($conf);
+        return rh_fin_like_any([
+            'p.invoice_number', 'p.payment_reference', 'p.booking_reference',
+            "COALESCE(b.guest_name, '')", "COALESCE(b.guest_email, '')",
+            "COALESCE(ci.{$c['company']}, '')", "COALESCE(ci.{$c['email']}, '')",
+            "COALESCE(gi.name, '')", "COALESCE(gi.email, '')",
+            "COALESCE(ei.name, '')", "COALESCE(ei.email, '')",
+        ]);
+    }
+
+    /**
+     * Invoices page WHERE (alias p; the search also reads b / ci / gi / ei, so pair it with rh_fin_invoices_from()
+     * or the list's own joins), used by the cards and the list.
      * $f keys: type ('all' or a booking type), scope_types[], status ('all' or a status), search.
+     * $conf: finance_conference_fields() column names (checked as identifiers).
      * @return array{sql:string, params:array}
      */
-    function rh_fin_invoices_where(array $f): array
+    function rh_fin_invoices_where(array $f, array $conf = []): array
     {
         $params = [];
         $where = ['p.deleted_at IS NULL'];
-        $type = (string)($f['type'] ?? 'all');
+        $type = rh_fin_get_str($f, 'type', 'all');
         $type = $type === 'all' ? '' : $type;
         $where = array_merge($where, rh_fin_type_conditions('p.booking_type', $type, $type === '' ? (array)($f['scope_types'] ?? []) : [], $params));
-        $status = (string)($f['status'] ?? 'all');
+        $status = rh_fin_get_str($f, 'status', 'all');
         if ($status !== 'all' && $status !== '') {
             $where[] = 'p.payment_status = ?';
             $params[] = $status;
         }
-        $search = (string)($f['search'] ?? '');
+        $search = rh_fin_get_str($f, 'search');
         if ($search !== '') {
-            $where[] = '(p.invoice_number LIKE ? OR p.payment_reference LIKE ? OR p.booking_reference LIKE ?)';
-            $like = '%' . $search . '%';
-            array_push($params, $like, $like, $like);
+            $searchSql = rh_fin_invoices_search_sql($conf);
+            $where[] = $searchSql;
+            $like = rh_fin_like_param($search);
+            foreach (array_fill(0, substr_count($searchSql, '?'), $like) as $v) {
+                $params[] = $v;
+            }
         }
         return ['sql' => 'WHERE ' . implode(' AND ', $where), 'params' => $params];
     }

@@ -244,8 +244,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
             $message = 'Credit note generated successfully! Number: ' . $creditNoteNumber;
         }
-    } catch (Exception $e) {
-        $error = 'Error: ' . $e->getMessage();
+    } catch (Throwable $e) {
+        // Only this page's own plain Exception messages (not found, lifecycle reason, wrong row type) are shown;
+        // database and other system errors get a generic line on screen and the detail in System Logs.
+        if (get_class($e) === 'Exception') {
+            $error = $e->getMessage();
+        } else {
+            rh_log_event('admin/invoices', 'error', 'Invoice action failed', [
+                'action'     => is_string($_POST['action'] ?? null) ? $_POST['action'] : '',
+                'payment_id' => (int)($_POST['payment_id'] ?? 0),
+                'error'      => $e->getMessage(),
+            ]);
+            $error = 'That action could not be completed. Please try again; if it keeps happening, check System Logs.';
+        }
     }
 
     // AJAX: return JSON immediately (no page render)
@@ -261,13 +272,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 }
 
 // Get filter parameters
-$filter_type = $_GET['filter_type'] ?? 'all';
-$filter_status = $_GET['filter_status'] ?? 'all';
-$search = $_GET['search'] ?? '';
+// Text-only reads (an array such as ?search[]=x is ignored): admin/includes/finance-filters.php.
+$filter_type = rh_fin_get_str($_GET, 'filter_type', 'all');
+$filter_type = $filter_type === '' ? 'all' : $filter_type;
+$filter_status = rh_fin_get_str($_GET, 'filter_status', 'all');
+$filter_status = $filter_status === '' ? 'all' : $filter_status;
+$search = rh_fin_get_str($_GET, 'search');
 
 // Preset scoping: default list shows invoices for enabled modules only.
 // Explicit ?filter_type= and ?scope=all bypass; history is never deleted.
-$scopeAll            = (($_GET['scope'] ?? '') === 'all');
+$scopeAll            = (rh_fin_get_str($_GET, 'scope') === 'all');
 $allBookingTypes     = ['room', 'conference', 'restaurant', 'gym', 'event'];
 $enabledBookingTypes = function_exists('rh_enabled_booking_types') ? rh_enabled_booking_types() : [];
 $scopeActive         = $filter_type === 'all' && !$scopeAll
@@ -277,13 +291,16 @@ $hiddenBookingTypes  = $scopeActive ? array_values(array_diff($allBookingTypes, 
 
 // ONE filter set for the cards and the list (admin/includes/finance-filters.php): the paid / refunded /
 // generated cards count exactly the invoice rows listed for the same type, status, search and module scope.
+// The search reads the customer name/email joins, so the cards select their rows through the same joins
+// ($invCardWhere) and keep their own unqualified payment columns.
 $invFilter = rh_fin_invoices_where([
-    'type'        => (string)$filter_type,
+    'type'        => $filter_type,
     'scope_types' => $scopeActive ? $enabledBookingTypes : [],
-    'status'      => (string)$filter_status,
-    'search'      => (string)$search,
-]);
+    'status'      => $filter_status,
+    'search'      => $search,
+], $conferenceFields);
 $params = $invFilter['params'];
+$invCardWhere = 'WHERE id IN (SELECT p.id ' . rh_fin_invoices_from() . ' ' . $invFilter['sql'] . ')';
 
 // Fetch invoices with payment details
 try {
@@ -344,8 +361,8 @@ try {
                 WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount
                 WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN -total_amount
                 ELSE 0 END), 0) as total_revenue
-        FROM payments p
-        {$invFilter['sql']}
+        FROM payments
+        {$invCardWhere}
     ");
     $stats_stmt->execute($params);
     $stats = $stats_stmt->fetch(PDO::FETCH_ASSOC);
@@ -358,8 +375,8 @@ try {
             COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN total_amount ELSE 0 END), 0) AS refunded_total,
             COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN 1 ELSE 0 END), 0) AS refunded_count,
             COALESCE(SUM(CASE WHEN YEAR(payment_date)=YEAR(CURDATE()) AND MONTH(payment_date)=MONTH(CURDATE()) AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS mtd_collected
-        FROM payments p
-        {$invFilter['sql']}
+        FROM payments
+        {$invCardWhere}
     ");
     $invoiceKpiStmt->execute($params);
     $invoiceKpi = $invoiceKpiStmt->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -457,8 +474,9 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                 <span class="ck-kpi__label">Outstanding</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo !empty($receivablesFailed) ? 'n/a' : number_format((float)($invoiceKpi['outstanding_total'] ?? 0), 0); ?></span>
                 <span class="ck-kpi__sub">                    <?php echo !empty($receivablesFailed) ? 'some accounts unreadable (System Logs)' : number_format((int)($invoiceKpi['outstanding_count'] ?? 0)) . ' awaiting'; ?> ·
-                    <a href="?filter_status=pending" class="acct-link">view pending</a>
+                    <a href="payments.php?balance=outstanding" class="acct-link">view accounts owing</a>
                 </span>
+                <span class="ck-kpi__sub" style="margin-top:0">All accounts owing, not affected by filters</span>
             </div>
             <div class="ck-kpi">
                 <span class="ck-kpi__label">Generated</span>
@@ -483,6 +501,7 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                  folded; the filters and the invoice list come straight after the totals. */ ?>
         <details class="acct-breakdown-details" style="margin-top: 18px;">
             <summary class="acct-vat-details__summary"><i class="fas fa-hourglass-half"></i> Receivables aging and outstanding by source</summary>
+            <p class="acct-muted" style="margin: 8px 0 0;">All accounts owing, not affected by filters.</p>
         <!-- Aging buckets + outstanding by source -->
         <div class="acct-grid acct-grid--2">
             <div class="acct-panel">
@@ -574,7 +593,7 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                                         <td class="num"><?php echo number_format((int)$o['cnt']); ?></td>
                                         <td class="num"><strong><?php echo $currency_symbol . number_format((float)$o['amt'], 0); ?></strong></td>
                                         <td>
-                                            <a class="acct-link" href="?filter_type=<?php echo htmlspecialchars((string)$o['booking_type']); ?>&amp;filter_status=pending">View →</a>
+                                            <a class="acct-link" href="payments.php?balance=outstanding&amp;booking_type=<?php echo urlencode((string)$o['booking_type']); ?>">View →</a>
                                         </td>
                                     </tr>
                             <?php endforeach;
@@ -619,7 +638,7 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                     </div>
                     <div class="filter-group">
                         <label>Search</label>
-                        <input type="text" name="search" placeholder="Invoice #, Payment #, Booking Ref..." value="<?php echo htmlspecialchars($search); ?>">
+                        <input type="text" name="search" placeholder="Invoice #, Payment #, Booking Ref, guest name or email..." value="<?php echo htmlspecialchars($search); ?>">
                     </div>
                     <button type="submit" class="btn-filter">
                         <i class="fas fa-filter"></i> Apply Filters
