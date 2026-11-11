@@ -2757,6 +2757,9 @@ $filter_status = $_GET['filter_status'] ?? ($_GET['status'] ?? '');
 $filter_arrival = rh_bk_arrival_filter($_GET['arrival'] ?? '');
 // ?departure=overdue (Dashboard "Overdue departures" chip): still checked in after the check-out date; same notice + Clear.
 $filter_departure = rh_bk_departure_filter($_GET['departure'] ?? '');
+// ?balance=owing (Dashboard "Departures with a balance" chip, with ?filter=checkout_today): amount due above
+// BALANCE_TOLERANCE, the chip's own rule (rh_bk_balance_clause -> rh_fd_balance_tolerance); same notice + Clear.
+$filter_balance = rh_bk_balance_filter($_GET['balance'] ?? '');
 
 // Deep links from booking-details.php (?action=assign-room|room-change&booking_id=N): narrow the list to
 // that booking so its row is on screen, then the page script opens the matching modal. When the action
@@ -2779,7 +2782,7 @@ if ($deep_link_booking_id > 0 && $search_query === '') {
         $deep_link_booking_id = 0;
     }
 }
-$has_active_room_filters = $search_query !== '' || $filter_status !== '' || $filter_date_from !== '' || $filter_date_to !== '' || $filter_arrival !== '' || $filter_departure !== '';
+$has_active_room_filters = $search_query !== '' || $filter_status !== '' || $filter_date_from !== '' || $filter_date_to !== '' || $filter_arrival !== '' || $filter_departure !== '' || $filter_balance !== '';
 
 // Remember this list view (filters, tab, page) so "Back" on a booking returns to it.
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && !isset($_GET['export']) && $deep_link_action === '') {
@@ -2881,6 +2884,10 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         }
         if (($export_departure = rh_bk_departure_clause($filter_departure)) !== null) {
             $export_where_clauses[] = $export_departure;
+        }
+        if (($export_balance = rh_bk_balance_clause($filter_balance)) !== null) {
+            $export_where_clauses[] = $export_balance['clause'];
+            $export_params = array_merge($export_params, $export_balance['params']);
         }
         $export_where_clauses = array_merge($export_where_clauses, rh_bk_tab_clauses($active_tab_override)['clauses']);
 
@@ -3034,6 +3041,11 @@ try {
     // Overdue departures (Dashboard chip): checked in, check-out date passed. Shared scope, like overdue arrivals.
     if (($bk_departure_clause = rh_bk_departure_clause($filter_departure)) !== null) {
         $where_clauses[] = $bk_departure_clause;
+    }
+    // Balance still to pay (Dashboard "Departures with a balance"): shared scope too, so the badges match the list.
+    if (($bk_balance_clause = rh_bk_balance_clause($filter_balance)) !== null) {
+        $where_clauses[] = $bk_balance_clause['clause'];
+        $params = array_merge($params, $bk_balance_clause['params']);
     }
 
     // Deleted bookings are only ever shown under the Deleted filter; every count/insight excludes them.
@@ -3202,6 +3214,9 @@ try {
     if ($filter_departure !== '') {
         $insight_base_query['departure'] = $filter_departure;
     }
+    if ($filter_balance !== '') {
+        $insight_base_query['balance'] = $filter_balance;
+    }
 
     $bookings_stats_rows = [
         'total_bookings' => $fetch_bookings_stats_rows([], [], 'b.created_at DESC'),
@@ -3294,7 +3309,7 @@ try {
     // Re-count for pagination when the list is filtered by tab override, status filter, search, or date filters.
     // Use a separate variable so $total_bookings remains the global count for the "All" tab badge.
     $list_count = $total_bookings;
-    if (!empty($tab_extra_clauses) || $filter_status !== '' || $search_query !== '' || $filter_date_from !== '' || $filter_date_to !== '' || $filter_arrival !== '' || $filter_departure !== '') {
+    if (!empty($tab_extra_clauses) || $filter_status !== '' || $search_query !== '' || $filter_date_from !== '' || $filter_date_to !== '' || $filter_arrival !== '' || $filter_departure !== '' || $filter_balance !== '') {
         $cnt_stmt = $pdo->prepare("
             SELECT COUNT(*)
             FROM bookings b
@@ -3532,7 +3547,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             <form method="GET" data-live-search-form="room-bookings" class="bookings-toolbar__form">
                 <?php echo rh_server_sort_hidden($bk_sort_key, $bk_sort_dir); ?>
                 <?php /* Searching or filtering keeps the open tab and the overdue views (the notice + Clear is the way out). */ ?>
-                <?php foreach (['filter' => $bk_filter_key, 'arrival' => $filter_arrival, 'departure' => $filter_departure] as $bk_keep_k => $bk_keep_v): if ($bk_keep_v !== ''): ?>
+                <?php foreach (['filter' => $bk_filter_key, 'arrival' => $filter_arrival, 'departure' => $filter_departure, 'balance' => $filter_balance] as $bk_keep_k => $bk_keep_v): if ($bk_keep_v !== ''): ?>
                     <input type="hidden" name="<?php echo $bk_keep_k; ?>" value="<?php echo htmlspecialchars($bk_keep_v, ENT_QUOTES); ?>" data-bk-keep>
                 <?php endif; endforeach; ?>
                 <div class="bookings-toolbar__search">
@@ -3587,10 +3602,10 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 <div style="background: #eef3ff; border: 1px solid #cfd8ff; border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
                     <div style="display: flex; align-items: center; gap: 8px; color: #1f2d6b;">
                         <i class="fas fa-filter"></i>
-                        <strong><?php echo htmlspecialchars(rh_bk_notice_title($filter_arrival, $filter_departure)); ?></strong>
+                        <strong><?php echo htmlspecialchars(rh_bk_notice_title($filter_arrival, $filter_departure, $filter_balance, $bk_filter_key)); ?></strong>
                     </div>
                     <div style="color: #2f3a63; font-size: 13px;">
-                        Showing <?php echo number_format($list_count); ?> matching room booking<?php echo $list_count === 1 ? '' : 's'; ?><?php if ($search_query !== ''): ?> for &ldquo;<?php echo htmlspecialchars($search_query); ?>&rdquo;<?php endif; ?><?php $bk_scope_words = rh_bk_date_scope_words($filter_date_from, $filter_date_to); if ($bk_scope_words !== ''): ?>, <?php echo htmlspecialchars($bk_scope_words); ?><?php endif; ?><?php if ($filter_arrival === 'overdue'): ?> whose arrival date has passed and who never checked in<?php endif; ?><?php if ($filter_departure === 'overdue'): ?> still checked in after their check-out date<?php endif; ?>.
+                        Showing <?php echo number_format($list_count); ?> matching room booking<?php echo $list_count === 1 ? '' : 's'; ?><?php if ($search_query !== ''): ?> for &ldquo;<?php echo htmlspecialchars($search_query); ?>&rdquo;<?php endif; ?><?php $bk_scope_words = rh_bk_date_scope_words($filter_date_from, $filter_date_to); if ($bk_scope_words !== ''): ?>, <?php echo htmlspecialchars($bk_scope_words); ?><?php endif; ?><?php if ($filter_arrival === 'overdue'): ?> whose arrival date has passed and who never checked in<?php endif; ?><?php if ($filter_departure === 'overdue'): ?> still checked in after their check-out date<?php endif; ?><?php if ($filter_balance === 'owing'): ?><?php echo $bk_filter_key === 'checkout_today' ? ' due out today' : ''; ?> with a balance still to pay<?php endif; ?>.
                         <a href="bookings.php" style="margin-left: 8px; color: #1f2d6b; font-weight: 600;">Clear</a>
                     </div>
                 </div>
@@ -4067,6 +4082,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         'filter'        => $bk_filter_key,   // keep the open tab (Unpaid, Today's Check-ins...) on page 2+
                         'arrival'       => $filter_arrival,
                         'departure'     => $filter_departure,
+                        'balance'       => $filter_balance,
                     ], fn($v) => $v !== '');
                     $pg_params = array_merge($pg_params, rh_server_sort_params($bk_sort_key, $bk_sort_dir));
                     $pg_base = 'bookings.php?' . (empty($pg_params) ? '' : http_build_query($pg_params) . '&');
@@ -4197,7 +4213,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 if (!f || !f.matches || !f.matches('[data-live-search-form="room-bookings"]')) return;
                 const cur = new URLSearchParams(window.location.search);
                 f.querySelectorAll('input[data-bk-keep]').forEach(i => i.remove());
-                ['filter', 'payment_status', 'arrival', 'departure'].forEach(k => {
+                ['filter', 'payment_status', 'arrival', 'departure', 'balance'].forEach(k => {
                     const v = cur.get(k);
                     if (!v) return;
                     const i = document.createElement('input');
@@ -4945,7 +4961,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             const params = new URLSearchParams(window.location.search);
             // A tab replaces every list filter that is not in the search bar: tab shortcut, status (and its
             // ?status= alias), overdue arrivals, Accounting's ?payment_status=, page.
-            ['filter', 'filter_status', 'status', 'arrival', 'departure', 'payment_status', 'page'].forEach(k => params.delete(k));
+            ['filter', 'filter_status', 'status', 'arrival', 'departure', 'balance', 'payment_status', 'page'].forEach(k => params.delete(k));
             const tabFilter = TAB_FILTER_MAP[tabName];
             if (tabFilter) {
                 for (const [k, v] of Object.entries(tabFilter)) {
@@ -4971,7 +4987,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 if (tabBtn && !tabBtn.closest('.tabs-header')) return;
                 if (tabName === 'all') {
                     const params = new URLSearchParams(window.location.search);
-                    ['filter', 'filter_status', 'status', 'arrival', 'departure', 'payment_status', 'page'].forEach(k => params.delete(k));
+                    ['filter', 'filter_status', 'status', 'arrival', 'departure', 'balance', 'payment_status', 'page'].forEach(k => params.delete(k));
                     loadBookingResults('bookings.php' + (params.toString() ? '?' + params.toString() : ''));
                 } else if (tabName) {
                     navigateToTab(tabName);

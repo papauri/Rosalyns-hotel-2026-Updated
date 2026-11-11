@@ -215,7 +215,7 @@ if (!$is_card_insight_ajax) {
     // Fetch dashboard statistics — skip queries for disabled modules
     try {
         if ($mod_bookings) {
-            $checkins_stmt = $pdo->prepare("SELECT COUNT(*) as count FROM bookings WHERE deleted_at IS NULL AND check_in_date = ? AND status IN ('confirmed', 'pending')");
+            $checkins_stmt = $pdo->prepare("SELECT COUNT(*) as count FROM bookings WHERE deleted_at IS NULL AND check_in_date = ? AND " . rh_fd_status_in_sql('status', rh_fd_still_to_arrive_statuses()));
             $checkins_stmt->execute([$today]);
             $today_checkins = $checkins_stmt->fetch(PDO::FETCH_ASSOC)['count'];
 
@@ -305,20 +305,14 @@ if (!$is_card_insight_ajax) {
             $ops['open_tabs'] = (int)$r['c'];
             $ops['open_tabs_value'] = (float)$r['v'];
             if ($mod_roomsvc) {
-                $ops['room_service_pending'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE order_type='room_service' AND status IN ('placed','pending','confirmed')")->fetchColumn();
+                $ops['room_service_pending'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE order_type='room_service' AND " . rh_fd_status_in_sql('status', rh_fd_room_service_open_statuses()))->fetchColumn();
                 $ops['room_service_reminder_pending'] = (int)$pdo->query("SELECT COUNT(*)
                     FROM bookings b
                     INNER JOIN individual_rooms ir ON ir.id = b.individual_room_id
                     WHERE b.deleted_at IS NULL AND b.status = 'checked-in'
                         AND b.individual_room_id IS NOT NULL
                         AND ir.is_active = 1
-                        AND NOT EXISTS (
-                            SELECT 1 FROM stock_orders o
-                            WHERE o.order_type = 'room_service'
-                                AND (o.booking_id = b.id OR (o.booking_id IS NULL AND o.individual_room_id = b.individual_room_id))
-                                AND (o.status IN ('completed', 'paid') OR o.kitchen_status = 'served')
-                                AND DATE(COALESCE(o.served_at, o.updated_at, o.created_at)) = CURDATE()
-                        )")->fetchColumn();
+                            AND " . rh_fd_room_service_unserved_sql('b'))->fetchColumn();
                 $ops['room_service_reminders_due'] = $roomServiceReminderDueNow ? (int)$ops['room_service_reminder_pending'] : 0;
             }
             $r = $pdo->query("SELECT COUNT(*) c, COALESCE(SUM(total_amount),0) v FROM stock_orders WHERE status IN ('paid','completed') AND DATE(COALESCE(paid_at, created_at))=CURDATE()" . $posNotFolioSql)->fetch(PDO::FETCH_ASSOC);
@@ -399,8 +393,8 @@ if (!$is_card_insight_ajax) {
             } catch (Throwable $e) { $guestSvc['pending_events'] = 0; }
         }
         if ($mod_housekeeping) {
-            $guestSvc['maintenance_open'] = rh_room_units_count(['maintenance', 'out_of_order']); // a joined room counts once
-            $guestSvc['housekeeping_due'] = (int)$pdo->query("SELECT COUNT(*) FROM housekeeping_assignments WHERE status IN ('pending','in_progress') AND (due_date IS NULL OR due_date <= CURDATE())")->fetchColumn();
+            $guestSvc['maintenance_open'] = rh_room_units_count(rh_fd_out_of_service_statuses()); // a joined room counts once
+            $guestSvc['housekeeping_due'] = (int)$pdo->query("SELECT COUNT(*) FROM housekeeping_assignments WHERE " . rh_fd_housekeeping_due_sql())->fetchColumn();
         }
     } catch (Throwable $e) { /* fine */ }
 
@@ -411,11 +405,11 @@ if (!$is_card_insight_ajax) {
                        TIMESTAMPDIFF(MINUTE, o.created_at, NOW()) AS age_min,
                        (SELECT COUNT(*) FROM stock_order_items i WHERE i.order_id=o.id) AS item_count
                 FROM stock_orders o
-                WHERE o.order_type='room_service' AND o.status IN ('placed','pending','confirmed')
+                WHERE o.order_type='room_service' AND " . rh_fd_status_in_sql('o.status', rh_fd_room_service_open_statuses()) . "
                 ORDER BY o.created_at ASC LIMIT 10
             ")->fetchAll(PDO::FETCH_ASSOC);
             // The tab badge counts every open order, not just the 10 listed.
-            $roomServiceOpenCount = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE order_type='room_service' AND status IN ('placed','pending','confirmed')")->fetchColumn();
+            $roomServiceOpenCount = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE order_type='room_service' AND " . rh_fd_status_in_sql('status', rh_fd_room_service_open_statuses()))->fetchColumn();
         } catch (Throwable $e) {
             $roomServiceQueue = [];
             $roomServiceOpenCount = 0;
@@ -428,8 +422,10 @@ if (!$is_card_insight_ajax) {
      * --------------------------------------------------------------------- */
     if ($mod_bookings) {
         try {
+            // Arrived today = checked in, including guests who already left the same day (rh_fd_arrived_statuses),
+            // the rule the Today's Check-ins popup uses, so the KPI's "arrived / total" and the popup agree.
             $st = $pdo->prepare("SELECT
-                    SUM(check_in_date = ? AND status = 'checked-in') AS arrived,
+                    SUM(check_in_date = ? AND " . rh_fd_status_in_sql('status', rh_fd_arrived_statuses()) . ") AS arrived,
                     SUM(check_out_date = ? AND status = 'checked-out') AS departed
                 FROM bookings
                 WHERE deleted_at IS NULL AND (check_in_date = ? OR check_out_date = ?)");
@@ -674,7 +670,7 @@ if ($is_card_insight_ajax) {
                                        FROM bookings b
                                        JOIN rooms r ON r.id = b.room_id
                                        LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
-                                       WHERE b.deleted_at IS NULL AND b.check_in_date = ? AND b.status IN ('confirmed','pending','checked-in','checked-out')
+                                       WHERE b.deleted_at IS NULL AND b.check_in_date = ? AND " . rh_fd_status_in_sql('b.status', array_merge(rh_fd_still_to_arrive_statuses(), rh_fd_arrived_statuses())) . "
                                        ORDER BY FIELD(b.status, 'pending', 'confirmed', 'checked-in', 'checked-out'), b.created_at ASC
                                        LIMIT 30");
                 $stmt->execute([$today]);
@@ -700,11 +696,11 @@ if ($is_card_insight_ajax) {
                     ];
                 }
                 // Both numbers counted with the list's own rules, not from the 30 rows shown (busy days have more).
-                $ciCount = $pdo->prepare("SELECT COALESCE(SUM(b.status IN ('confirmed','pending')), 0) AS still_to_arrive,
-                                                 COALESCE(SUM(b.status IN ('checked-in','checked-out')), 0) AS arrived
+                $ciCount = $pdo->prepare("SELECT COALESCE(SUM(" . rh_fd_status_in_sql('b.status', rh_fd_still_to_arrive_statuses()) . "), 0) AS still_to_arrive,
+                                                 COALESCE(SUM(" . rh_fd_status_in_sql('b.status', rh_fd_arrived_statuses()) . "), 0) AS arrived
                                           FROM bookings b
                                           JOIN rooms r ON r.id = b.room_id
-                                          WHERE b.deleted_at IS NULL AND b.check_in_date = ? AND b.status IN ('confirmed','pending','checked-in','checked-out')");
+                                          WHERE b.deleted_at IS NULL AND b.check_in_date = ? AND " . rh_fd_status_in_sql('b.status', array_merge(rh_fd_still_to_arrive_statuses(), rh_fd_arrived_statuses())));
                 $ciCount->execute([$today]);
                 $ciCounts = $ciCount->fetch(PDO::FETCH_ASSOC) ?: [];
                 $ciStillToArrive = (int)($ciCounts['still_to_arrive'] ?? 0);
@@ -1109,7 +1105,7 @@ if ($is_card_insight_ajax) {
                     ['key' => 'workload', 'label' => 'Staff Workload'],
                     ['key' => 'action', 'label' => 'Follow-up'],
                 ];
-                $payload['link'] = ['href' => 'housekeeping.php', 'label' => 'Open housekeeping follow-up'];
+                $payload['link'] = ['href' => 'room-service-dashboard.php', 'label' => 'Open Room Service Dashboard'];
 
                 $stmt = $pdo->query("SELECT
                                         b.id AS booking_id,
@@ -1120,8 +1116,7 @@ if ($is_card_insight_ajax) {
                                         hk_user.username AS housekeeping_assignee,
                                         COALESCE(hk_workload.active_tasks, 0) AS staff_active_tasks,
                                         COALESCE(hk_workload.completed_today, 0) AS staff_completed_today,
-                                        COALESCE(rs_booking.completed_today, rs_room.completed_today, 0) AS room_service_completed_today,
-                                        COALESCE(rs_booking.active_orders_today, rs_room.active_orders_today, 0) AS room_service_active_today,
+                                        COALESCE(rs_booking.active_orders_today, 0) + COALESCE(rs_room.active_orders_today, 0) AS room_service_active_today,
                                         COALESCE(rs_booking.last_service_at, rs_room.last_service_at) AS last_service_at
                                     FROM bookings b
                                     INNER JOIN individual_rooms ir ON ir.id = b.individual_room_id
@@ -1187,9 +1182,10 @@ if ($is_card_insight_ajax) {
                                           AND individual_room_id IS NOT NULL
                                         GROUP BY individual_room_id
                                     ) rs_room ON rs_room.individual_room_id = b.individual_room_id
-                                    WHERE b.status = 'checked-in'
+                                    WHERE b.deleted_at IS NULL AND b.status = 'checked-in'
                                       AND b.individual_room_id IS NOT NULL
                                       AND ir.is_active = 1
+                                      AND " . rh_fd_room_service_unserved_sql('b') . "
                                     ORDER BY ir.room_number ASC, b.id ASC
                                     LIMIT 80");
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -1201,11 +1197,9 @@ if ($is_card_insight_ajax) {
                         $roomLabel .= ' - ' . $roomName;
                     }
 
-                    $completedToday = (int)($row['room_service_completed_today'] ?? 0) > 0;
+                    // Only rooms the reminder counts are listed (no order served today), so none is "Completed".
                     $activeOrdersToday = (int)($row['room_service_active_today'] ?? 0);
-                    if ($completedToday) {
-                        $serviceState = 'Completed';
-                    } elseif ($activeOrdersToday > 0) {
+                    if ($activeOrdersToday > 0) {
                         $serviceState = 'In Progress';
                     } elseif ($roomServiceReminderDueNow) {
                         $serviceState = 'Due - Pending';
@@ -1238,7 +1232,16 @@ if ($is_card_insight_ajax) {
                         'action' => ['href' => $housekeepingLink, 'label' => 'Housekeeping', 'target' => '_blank'],
                     ];
                 }
-                $payload['empty'] = 'No occupied rooms currently require room-service reminder tracking.';
+                // The same rooms the chip counts (rh_fd_room_service_unserved_sql); note when the 80-row cap cut the list.
+                $rsRemTotal = (int)$pdo->query("SELECT COUNT(*) FROM bookings b
+                                                INNER JOIN individual_rooms ir ON ir.id = b.individual_room_id
+                                                WHERE b.deleted_at IS NULL AND b.status = 'checked-in' AND b.individual_room_id IS NOT NULL
+                                                  AND ir.is_active = 1 AND " . rh_fd_room_service_unserved_sql('b'))->fetchColumn();
+                $payload['subtitle'] = ($roomServiceReminderDueNow
+                        ? $rsRemTotal . ' occupied room(s) with no room-service order served today.'
+                        : $rsRemTotal . ' occupied room(s) with no order served yet today; the reminder becomes active daily at ' . $roomServiceReminderTime . ' (' . $roomServiceReminderTimezone . ').')
+                    . ($rsRemTotal > count($rows) ? ' Showing the first ' . count($rows) . '.' : '');
+                $payload['empty'] = 'Every occupied room has had a room-service order served today.';
                 break;
 
             case 'room_service_pending':
@@ -1252,11 +1255,11 @@ if ($is_card_insight_ajax) {
                     ['key' => 'total', 'label' => 'Total'],
                     ['key' => 'status', 'label' => 'Status'],
                 ];
-                $payload['link'] = ['href' => 'stock-orders.php?order_type=room_service&status=placed', 'label' => 'Open room-service orders'];
+                $payload['link'] = ['href' => rh_fd_room_service_open_href(), 'label' => 'Open room-service orders'];
                 $stmt = $pdo->query("SELECT o.id AS order_id, o.reference, o.room_number, o.customer_name, o.total_amount, o.status,
                                             (SELECT COUNT(*) FROM stock_order_items oi WHERE oi.order_id = o.id) AS item_count
                                      FROM stock_orders o
-                                     WHERE o.order_type = 'room_service' AND o.status IN ('placed','pending','confirmed')
+                                     WHERE o.order_type = 'room_service' AND " . rh_fd_status_in_sql('o.status', rh_fd_room_service_open_statuses()) . "
                                      ORDER BY o.created_at ASC
                                      LIMIT 30");
                 $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -1653,7 +1656,7 @@ if ($is_card_insight_ajax) {
                     } catch (Throwable $e) { /* events table may not exist yet */ }
                 }
                 if ($mod_bookings) {
-                    $todayCheckinsStmt = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE deleted_at IS NULL AND check_in_date = ? AND status IN ('confirmed', 'pending')");
+                    $todayCheckinsStmt = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE deleted_at IS NULL AND check_in_date = ? AND " . rh_fd_status_in_sql('status', rh_fd_still_to_arrive_statuses()));
                     $todayCheckinsStmt->execute([$today]);
                     $todayCheckins = (int)$todayCheckinsStmt->fetchColumn();
                     $inHouseGuests = (int)$pdo->query("SELECT COUNT(*) FROM bookings WHERE deleted_at IS NULL AND status = 'checked-in'")->fetchColumn();
@@ -1695,43 +1698,36 @@ if ($is_card_insight_ajax) {
                         : ['href' => 'payments.php', 'label' => 'Open payments']);
 
                 if ($mod_housekeeping) {
-                    $maintenanceOpen = rh_room_units_count(['maintenance', 'out_of_order']); // a joined room counts once
-                    $housekeepingDue = (int)$pdo->query("SELECT COUNT(*) FROM housekeeping_assignments WHERE status IN ('pending', 'in_progress') AND (due_date IS NULL OR due_date <= CURDATE())")->fetchColumn();
+                    $maintenanceOpen = rh_room_units_count(rh_fd_out_of_service_statuses()); // a joined room counts once
+                    $housekeepingDue = (int)$pdo->query("SELECT COUNT(*) FROM housekeeping_assignments WHERE " . rh_fd_housekeeping_due_sql())->fetchColumn();
                     $payload['rows'][] = [
                         'metric' => 'Rooms in maintenance / out of order',
                         'current' => (string)$maintenanceOpen,
                         'detail' => $maintenanceOpen > 0 ? 'Unavailable inventory requiring engineering follow-up' : 'No rooms blocked by maintenance',
-                        'action' => ['href' => 'room-maintenance.php', 'label' => 'Maintenance', 'target' => '_blank'],
+                        'action' => ['href' => 'room-maintenance.php?status=out_of_service', 'label' => 'Maintenance', 'target' => '_blank'],
                     ];
                     $payload['rows'][] = [
                         'metric' => 'Housekeeping due today',
                         'current' => (string)$housekeepingDue,
                         'detail' => 'Assignments in pending/in-progress status due now',
-                        'action' => ['href' => 'housekeeping.php', 'label' => 'Housekeeping', 'target' => '_blank'],
+                        'action' => ['href' => 'housekeeping.php?due=now', 'label' => 'Housekeeping', 'target' => '_blank'],
                     ];
                 }
                 if ($mod_roomsvc) {
-                    $roomServiceOpen = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE order_type = 'room_service' AND status IN ('placed', 'pending', 'confirmed')")->fetchColumn();
+                    $roomServiceOpen = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE order_type = 'room_service' AND " . rh_fd_status_in_sql('status', rh_fd_room_service_open_statuses()))->fetchColumn();
                     $roomServiceReminderPending = (int)$pdo->query("SELECT COUNT(*)
                                         FROM bookings b
                                         INNER JOIN individual_rooms ir ON ir.id = b.individual_room_id
                                         WHERE b.deleted_at IS NULL AND b.status = 'checked-in'
                                             AND b.individual_room_id IS NOT NULL
                                             AND ir.is_active = 1
-                                            AND NOT EXISTS (
-                                                        SELECT 1
-                                                        FROM stock_orders o
-                                                        WHERE o.order_type = 'room_service'
-                                                            AND (o.booking_id = b.id OR (o.booking_id IS NULL AND o.individual_room_id = b.individual_room_id))
-                                                            AND (o.status IN ('completed', 'paid') OR o.kitchen_status = 'served')
-                                                            AND DATE(COALESCE(o.served_at, o.updated_at, o.created_at)) = CURDATE()
-                                                )")->fetchColumn();
+                                            AND " . rh_fd_room_service_unserved_sql('b'))->fetchColumn();
                     $roomServiceReminderDue = $roomServiceReminderDueNow ? $roomServiceReminderPending : 0;
                     $payload['rows'][] = [
                         'metric' => 'Room-service orders open',
                         'current' => (string)$roomServiceOpen,
                         'detail' => 'Orders awaiting fulfilment or settlement',
-                        'action' => ['href' => 'stock-orders.php?order_type=room_service&status=placed', 'label' => 'Room Service', 'target' => '_blank'],
+                        'action' => ['href' => rh_fd_room_service_open_href(), 'label' => 'Room Service', 'target' => '_blank'],
                     ];
                     $payload['rows'][] = [
                         'metric' => 'Room-service reminders due',
@@ -1739,7 +1735,7 @@ if ($is_card_insight_ajax) {
                         'detail' => $roomServiceReminderDueNow
                             ? ('Reminder active now - ' . $roomServiceReminderDue . ' occupied room(s) pending today')
                             : ('Reminder starts at ' . $roomServiceReminderTime . ' (' . $roomServiceReminderTimezone . ')'),
-                        'action' => ['href' => 'housekeeping.php', 'label' => 'Housekeeping', 'target' => '_blank'],
+                        'action' => ['href' => 'room-service-dashboard.php', 'label' => 'Room Service', 'target' => '_blank'],
                     ];
                 }
                 if ($mod_stock) {
@@ -2024,7 +2020,7 @@ $currency_symbol = getSetting('currency_symbol');
                     FROM bookings b
                     JOIN rooms r ON b.room_id = r.id
                     LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
-                    WHERE b.deleted_at IS NULL AND b.check_in_date = ? AND b.status IN ('confirmed', 'pending', 'checked-in', 'checked-out')
+                    WHERE b.deleted_at IS NULL AND b.check_in_date = ? AND " . rh_fd_status_in_sql('b.status', array_merge(rh_fd_still_to_arrive_statuses(), rh_fd_arrived_statuses())) . "
                     ORDER BY FIELD(b.status, 'pending', 'confirmed', 'checked-in', 'checked-out'), b.created_at ASC");
                 $st->execute([$today]);
                 $checkin_bookings = $st->fetchAll(PDO::FETCH_ASSOC);
@@ -2056,7 +2052,7 @@ $currency_symbol = getSetting('currency_symbol');
         $add($attn, $mod_bookings, $noShows, 'Overdue arrivals (no-show?)', 'fa-user-clock', 'red', 'bookings.php?arrival=overdue', null, 'Arrival date passed, never checked in');
         $add($attn, $mod_bookings, $overdueDepartures, 'Overdue departures', 'fa-person-walking-luggage', 'red', 'bookings.php?departure=overdue', null, 'Checkout date passed, still checked in');
         $add($attn, $mod_bookings, (int)$pending_bookings, 'Bookings awaiting confirmation', 'fa-hourglass-half', 'amber', 'bookings.php?status=pending', 'pending_bookings');
-        $add($attn, $mod_bookings, $departuresOwing, 'Departures with a balance', 'fa-sack-dollar', 'red', 'bookings.php?filter=checkout_today', 'checkouts_today', 'Due out today, balance to collect before they leave');
+        $add($attn, $mod_bookings, $departuresOwing, 'Departures with a balance', 'fa-sack-dollar', 'red', 'bookings.php?filter=checkout_today&balance=owing', null, 'Due out today, balance to collect before they leave');
         $add($attn, $mod_finance && $dash_perm('payments', 'refund_payment'), (int)$finance['refunds_pending'], 'Refunds to approve', 'fa-rotate-left', 'red', 'payments.php?refund_status=pending', 'refunds_pending');
         $add($attn, $mod_conference, (int)$pending_conference, 'Conference enquiries to answer', 'fa-users-gear', 'amber', 'conference-management.php?status=pending', 'pending_conference');
         $add($attn, $mod_website_cms && $dash_perm('contact'), (int)$guestSvc['unread_contact'], 'Unread contact messages', 'fa-envelope', 'red', 'contact-inquiries.php?status=new');
@@ -2064,10 +2060,10 @@ $currency_symbol = getSetting('currency_symbol');
         $add($attn, $mod_website_cms && $mod_events && $dash_perm('events_bookings'), (int)$guestSvc['pending_events'], 'Event bookings pending', 'fa-calendar-check', 'amber', 'events-inquiries.php?status=pending');
         $add($attn, $mod_gym && $dash_perm('gym'), (int)$guestSvc['pending_gym'], 'Gym enquiries to answer', 'fa-dumbbell', 'amber', 'gym-inquiries.php?status=new');
         $add($attn, $mod_gym && $dash_perm('gym'), (int)$gymDash['expiring_members'], 'Gym memberships expiring (30d)', 'fa-id-card', 'amber', 'gym-members.php?filter=expiring');
-        $add($attn, $mod_housekeeping && $dash_perm('room_maintenance'), (int)$guestSvc['maintenance_open'], 'Rooms out of service', 'fa-screwdriver-wrench', 'red', 'room-maintenance.php');
-        $add($attn, $mod_housekeeping && $dash_perm('housekeeping'), (int)$guestSvc['housekeeping_due'], 'Housekeeping tasks due', 'fa-broom', 'amber', 'housekeeping.php');
-        $add($attn, $mod_roomsvc && $dash_perm('stock_orders'), (int)$ops['room_service_pending'], 'Room-service orders open', 'fa-bell-concierge', 'amber', 'stock-orders.php?order_type=room_service&status=placed', 'room_service_pending');
-        $add($attn, $mod_roomsvc && $dash_perm('stock_orders'), (int)$ops['room_service_reminders_due'], 'Room-service reminders due', 'fa-bell', 'amber', 'stock-orders.php?order_type=room_service', 'room_service_reminders_due', 'Rooms with no order served today');
+        $add($attn, $mod_housekeeping && $dash_perm('room_maintenance'), (int)$guestSvc['maintenance_open'], 'Rooms out of service', 'fa-screwdriver-wrench', 'red', 'room-maintenance.php?status=out_of_service');
+        $add($attn, $mod_housekeeping && $dash_perm('housekeeping'), (int)$guestSvc['housekeeping_due'], 'Housekeeping tasks due', 'fa-broom', 'amber', 'housekeeping.php?due=now');
+        $add($attn, $mod_roomsvc && $dash_perm('stock_orders'), (int)$ops['room_service_pending'], 'Room-service orders open', 'fa-bell-concierge', 'amber', rh_fd_room_service_open_href(), 'room_service_pending');
+        $add($attn, $mod_roomsvc && $dash_perm('stock_orders'), (int)$ops['room_service_reminders_due'], 'Room-service reminders due', 'fa-bell', 'amber', 'room-service-dashboard.php', 'room_service_reminders_due', 'Rooms with no order served today');
         $add($attn, $mod_orders && $mod_bookings, (int)$ops['open_tabs'], isRestaurantEnabled() ? 'Open tabs awaiting payment' : 'Orders awaiting payment', 'fa-receipt', 'amber', 'stock-orders.php?status=placed', 'open_tabs');
         $add($attn, $mod_stock && $dash_perm('stock_batches'), (int)$stock['expired_batches'], 'Expired stock batches', 'fa-skull-crossbones', 'red', 'stock-batches.php');
         $add($attn, $mod_stock && $dash_perm('stock_management'), (int)$stock['low_stock'], 'Items below minimum stock', 'fa-box-open', 'amber', 'stock-reorder.php');
@@ -2187,7 +2183,7 @@ $currency_symbol = getSetting('currency_symbol');
                     <span class="ck-kpi__label">Arrivals</span>
                     <span class="ck-kpi__value"><?php echo $dayProgress['arrived']; ?><small>/<?php echo $arrivalsTotal; ?></small></span>
                     <span class="ck-meter ck-meter--info"><span style="width:<?php echo $arrivalsTotal ? round($dayProgress['arrived'] / $arrivalsTotal * 100) : 0; ?>%"></span></span>
-                    <span class="ck-kpi__sub"><?php echo (int)$today_checkins > 0 ? (int)$today_checkins . ' still to arrive' : ($arrivalsTotal ? 'Everyone has arrived' : 'No arrivals today'); ?></span>
+                    <span class="ck-kpi__sub" title="Arrived = arrival date today and checked in, including guests who already checked out today. Still to arrive = confirmed or pending, not yet checked in."><?php echo (int)$today_checkins > 0 ? (int)$today_checkins . ' still to arrive' : ($arrivalsTotal ? 'Everyone has arrived' : 'No arrivals today'); ?></span>
                 </a>
                 <a class="ck-kpi js-dashboard-insight" data-insight-card="checkouts_today" data-insight-label="Today's check-outs" href="bookings.php?filter=checkout_today">
                     <span class="ck-kpi__icon"><i class="fas fa-plane-departure"></i></span>
@@ -2339,7 +2335,7 @@ $currency_symbol = getSetting('currency_symbol');
                         <?php endforeach; ?>
                     </ul>
                     <?php else: ?>
-                        <div class="ck-empty"><i class="fas fa-mug-saucer"></i><p><?php echo $dayProgress['arrived'] ? 'All ' . $dayProgress['arrived'] . ' arrivals are checked in.' : 'No arrivals scheduled for today.'; ?></p></div>
+                        <div class="ck-empty"><i class="fas fa-mug-saucer"></i><p><?php echo $dayProgress['arrived'] ? 'All ' . $dayProgress['arrived'] . ' of today\'s arrivals have arrived.' : 'No arrivals scheduled for today.'; ?></p></div>
                     <?php endif; ?>
                 </div>
 
@@ -2431,7 +2427,7 @@ $currency_symbol = getSetting('currency_symbol');
                         <?php endforeach; ?>
                     </ul>
                     <?php if ($roomServiceOpenCount > count($roomServiceQueue)): ?>
-                        <p class="ck-panel__sub">Showing the oldest <?php echo count($roomServiceQueue); ?> of <?php echo (int)$roomServiceOpenCount; ?> open orders.<?php if ($can('stock-orders.php')): ?> <a href="stock-orders.php?order_type=room_service&amp;status=placed">See all</a><?php endif; ?></p>
+                        <p class="ck-panel__sub">Showing the oldest <?php echo count($roomServiceQueue); ?> of <?php echo (int)$roomServiceOpenCount; ?> open orders.<?php if ($can('stock-orders.php')): ?> <a href="<?php echo htmlspecialchars(rh_fd_room_service_open_href()); ?>">See all</a><?php endif; ?></p>
                     <?php endif; ?>
                     <?php else: ?>
                         <div class="ck-empty"><i class="fas fa-bell-concierge"></i><p>No room-service orders in flight.</p></div>

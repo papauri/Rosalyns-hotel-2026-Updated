@@ -12,6 +12,7 @@ require_once __DIR__ . '/../includes/form-validation.php';
 require_once __DIR__ . '/../includes/room-management.php';
 require_once __DIR__ . '/../includes/maintenance-recurring.php';
 require_once __DIR__ . '/includes/bulk-actions.php';
+require_once __DIR__ . '/includes/front-desk-counts.php'; // rh_fd_out_of_service_statuses: the Dashboard chip rule
 /** @var array{id: int, username: string, role: string} $user */
 /** @var string $csrf_token */
 
@@ -1260,6 +1261,17 @@ foreach (getRoomsNeedingMaintenance($pdo) as $rnmRow) {
 }
 $roomsNeedingMaintenance = array_values($roomsNeedingMaintenance);
 
+// ?status=out_of_service (Dashboard "Rooms out of service"): only rooms in maintenance or out of order, not the
+// occupied rooms this list also shows. Whitelisted; notice + Clear above the list.
+$rmFilterStatus = (is_scalar($_GET['status'] ?? null) && (string)$_GET['status'] === 'out_of_service') ? 'out_of_service' : '';
+$rmOutOfServiceUnits = 0;
+if ($rmFilterStatus !== '') {
+    $roomsNeedingMaintenance = array_values(array_filter($roomsNeedingMaintenance, static function (array $r): bool {
+        return in_array((string)($r['room_status'] ?? ''), rh_fd_out_of_service_statuses(), true);
+    }));
+    $rmOutOfServiceUnits = rh_room_units_count(rh_fd_out_of_service_statuses()); // what the Dashboard chip shows
+}
+
 // Get staff workload
 $staffWorkload = getMaintenanceStaffWorkload($pdo);
 
@@ -1483,6 +1495,19 @@ try {
                 ];
             }, $schedules), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?: '[]'; ?>
         </script>
+
+        <?php if ($rmFilterStatus !== ''): ?>
+            <div style="background: #eef3ff; border: 1px solid #cfd8ff; border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 8px; color: #1f2d6b;">
+                    <i class="fas fa-filter"></i>
+                    <strong>Rooms out of service</strong>
+                </div>
+                <div style="color: #2f3a63; font-size: 13px;">
+                    Showing <?php echo count($roomsNeedingMaintenance); ?> room<?php echo count($roomsNeedingMaintenance) === 1 ? '' : 's'; ?> in maintenance or out of order<?php if ($rmOutOfServiceUnits !== count($roomsNeedingMaintenance)): ?> (the Dashboard counts <?php echo (int)$rmOutOfServiceUnits; ?>: a joined room pair counts once)<?php endif; ?>.
+                    <a href="room-maintenance.php" style="margin-left: 8px; color: #1f2d6b; font-weight: 600;">Clear</a>
+                </div>
+            </div>
+        <?php endif; ?>
 
         <!-- Rooms Needing Maintenance Section -->
         <?php if (!empty($roomsNeedingMaintenance)): ?>

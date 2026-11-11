@@ -9,6 +9,8 @@
  * (arrivals, in-house and departures on that day).
  */
 
+require_once __DIR__ . '/front-desk-counts.php'; // rh_fd_balance_tolerance: the one "owing" rule
+
 if (!function_exists('rh_bk_valid_date')) {
     /** 'Y-m-d' when it is a real calendar date, else ''. */
     function rh_bk_valid_date($d): string
@@ -69,9 +71,27 @@ if (!function_exists('rh_bk_valid_date')) {
         return $departure === 'overdue' ? "b.status = 'checked-in' AND b.check_out_date < CURDATE()" : null;
     }
 
-    /** Title of the filter notice: the overdue views name themselves, everything else is a search. */
-    function rh_bk_notice_title(string $arrival, string $departure): string
+    /**
+     * ?balance=owing: amount still to pay above BALANCE_TOLERANCE, the same rule the Dashboard "Departures with a
+     * balance" chip counts (rh_fd_departure_owes). The chip opens it with ?filter=checkout_today.
+     */
+    function rh_bk_balance_filter($balance): string
     {
+        return trim((string)$balance) === 'owing' ? 'owing' : '';
+    }
+
+    /** ['clause' => ..., 'params' => [...]] or null; the tolerance is bound, never written into the SQL. */
+    function rh_bk_balance_clause(string $balance): ?array
+    {
+        return $balance === 'owing' ? ['clause' => 'b.amount_due > ?', 'params' => [rh_fd_balance_tolerance()]] : null;
+    }
+
+    /** Title of the filter notice: the overdue / balance views name themselves, everything else is a search. */
+    function rh_bk_notice_title(string $arrival, string $departure, string $balance = '', string $filterKey = ''): string
+    {
+        if ($balance === 'owing' && $arrival === '' && $departure === '') {
+            return $filterKey === 'checkout_today' ? 'Departures with a balance' : 'Balance still to pay';
+        }
         if ($arrival === 'overdue' && $departure === 'overdue') return 'Overdue arrivals and departures';
         if ($arrival === 'overdue') return 'Overdue arrivals only';
         if ($departure === 'overdue') return 'Overdue departures only';

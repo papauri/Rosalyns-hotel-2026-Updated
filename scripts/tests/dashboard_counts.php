@@ -85,16 +85,71 @@ check(strpos($dash, "rh_gym_member_filter_where()") !== false && strpos($dash, "
 check(strpos($dash, "FROM gym_members WHERE status='active'\")") === false, 'dashboard: no raw status=active member count');
 check(strpos($dash, 'rh_fd_checkins_subtitle(') !== false && strpos($dash, 'count($rows) - $ciStillToArrive') === false, 'dashboard: check-ins popup counts do not come from the capped rows');
 check(strpos($dash, "count(\$roomServiceQueue)]") === false, 'dashboard: room-service tab badge is not the 10-row list length');
-foreach (["'contact-inquiries.php?status=new'", "'events-inquiries.php?status=pending'", "'gym-inquiries.php?status=new'", "'stock-orders.php?order_type=room_service&status=placed'", 'gym-members.php?filter=active'] as $lnk) {
+foreach (["'contact-inquiries.php?status=new'", "'events-inquiries.php?status=pending'", "'gym-inquiries.php?status=new'", 'gym-members.php?filter=active',
+          "'bookings.php?filter=checkout_today&balance=owing', null", "'housekeeping.php?due=now'", "'room-maintenance.php?status=out_of_service'"] as $lnk) {
     check(strpos($dash, $lnk) !== false, "dashboard: chip opens $lnk");
 }
 check(strpos($dash, "gym_inquiries WHERE status='pending' OR status='new'") === false, 'dashboard: gym enquiry count = the New tab only');
+
+// ---- Round 2026-11-11 (final): every chip / KPI counts what its link or popup lists.
+// Arrived (KPI) = the popup's "already arrived": checked in, including same-day check-outs.
+eq(rh_fd_arrived_statuses(), ['checked-in', 'checked-out'], 'arrived = checked in or already checked out');
+$dayRows = [
+    ['status' => 'confirmed'], ['status' => 'pending'], ['status' => 'checked-in'], ['status' => 'checked-out'], ['status' => 'tentative'],
+];
+$kpiArrived = count(array_filter($dayRows, function ($r) { return in_array($r['status'], rh_fd_arrived_statuses(), true); }));
+$kpiStill = count(array_filter($dayRows, function ($r) { return in_array($r['status'], rh_fd_still_to_arrive_statuses(), true); }));
+eq([$kpiArrived, $kpiStill], [2, 2], 'arrived-and-left guest is in the KPI arrived figure (2 of 4), tentative in neither');
+check(!preg_match("/check_in_date = \\? AND status = 'checked-in'\\) AS arrived/", $dash), 'dashboard: KPI arrived no longer checked-in only');
+check(strpos($dash, "rh_fd_status_in_sql('status', rh_fd_arrived_statuses())") !== false, 'dashboard: KPI arrived uses rh_fd_arrived_statuses');
+check(strpos($dash, "check_in_date = ? AND status IN (") === false && strpos($dash, "b.status IN ('confirmed','pending')") === false, 'dashboard: check-in counts use rh_fd_still_to_arrive_statuses, no hard-coded list');
+
+// SQL list builder: fixed literals only.
+eq(rh_fd_status_in_sql('b.status', ['confirmed', 'pending']), "b.status IN ('confirmed','pending')", 'status IN builder');
+$threw = false;
+try { rh_fd_status_in_sql('status', ["x') OR 1=1 -- "]); } catch (InvalidArgumentException $e) { $threw = true; }
+check($threw, 'status IN builder refuses anything but a plain status');
+require_once $root . '/admin/includes/bookings-list-filters.php';
+eq(rh_bk_tab_clauses('today-checkins')['clauses'][1], rh_fd_status_in_sql('b.status', rh_fd_still_to_arrive_statuses()), "Bookings Today's Check-ins statuses = rh_fd_still_to_arrive_statuses");
+
+// Room-service open: count statuses = the statuses the Orders & Tabs link filters on.
+eq(rh_fd_room_service_open_statuses(), ['placed', 'pending', 'confirmed'], 'room-service open statuses');
+check(strpos($dash, "'placed','pending','confirmed'") === false && strpos($dash, "'placed', 'pending', 'confirmed')\")") === false, 'dashboard: no hard-coded room-service status list in counts');
+check(substr_count($dash, 'rh_fd_room_service_open_href()') >= 4, 'dashboard: chip, popup, ops row and See all use the one link');
+if (is_file($root . '/admin/includes/stock-orders-filters.php')) {
+    require_once $root . '/admin/includes/stock-orders-filters.php';
+    parse_str((string)parse_url(rh_fd_room_service_open_href(), PHP_URL_QUERY), $rsq);
+    $rsf = rh_so_normalize_filters($rsq);
+    eq($rsf['order_type'], 'room_service', 'room-service link: order_type kept by Orders & Tabs');
+    $rsList = function_exists('rh_so_status_list') ? rh_so_status_list($rsf['status']) : [$rsf['status']];
+    eq($rsList, rh_fd_room_service_open_statuses(), 'room-service link: Orders & Tabs keeps exactly the counted statuses');
+    eq($rsf['date'], '', 'room-service link: no date window (the count has none)');
+}
+
+// Room-service reminders: one NOT EXISTS rule for both counts and the popup list.
+$unserved = rh_fd_room_service_unserved_sql('b');
+check(strpos($unserved, 'rso.booking_id = b.id OR (rso.booking_id IS NULL AND rso.individual_room_id = b.individual_room_id)') !== false, 'reminder rule: booking order, or room order without a booking');
+check(strpos($unserved, 'DATE(COALESCE(rso.served_at, rso.updated_at, rso.created_at)) = CURDATE()') !== false, 'reminder rule: served today');
+check(substr_count($dash, "rh_fd_room_service_unserved_sql('b')") >= 4, 'dashboard: reminder count, ops count, popup list and popup total share the rule');
+check(strpos($dash, 'COALESCE(rs_booking.completed_today, rs_room.completed_today') === false, 'dashboard: popup no longer hides a room order behind an older booking order');
+check(strpos($dash, "'Room-service reminders due', 'fa-bell', 'amber', 'stock-orders.php") === false, 'dashboard: reminders chip does not open an orders list');
+
+// Housekeeping due + rooms out of service: one rule for the chip and the page filter.
+eq(rh_fd_housekeeping_due_sql('ha'), "ha.status IN ('pending','in_progress') AND (ha.due_date IS NULL OR ha.due_date <= CURDATE())", 'housekeeping due rule');
+check(substr_count($dash, 'rh_fd_housekeeping_due_sql()') === 2, 'dashboard: chip and ops row use the housekeeping due rule');
+$hk = (string)file_get_contents($root . '/admin/housekeeping.php');
+check(strpos($hk, "rh_fd_housekeeping_due_sql('ha')") !== false && strpos($hk, "'rh_due_now'") !== false, 'housekeeping: ?due=now filters on the same SQL rule');
+check(strpos($hk, 'foreach ($hkTableRows as $row)') !== false && strpos($hk, '}, $assignments), JSON_HEX_TAG') !== false, 'housekeeping: table filtered, stat-card data unfiltered');
+eq(rh_fd_out_of_service_statuses(), ['maintenance', 'out_of_order'], 'out of service statuses');
+$rm = (string)file_get_contents($root . '/admin/room-maintenance.php');
+check(strpos($rm, "=== 'out_of_service'") !== false && strpos($rm, 'rh_fd_out_of_service_statuses()') !== false, 'room maintenance: ?status=out_of_service uses the chip statuses');
+check(strpos($dash, "rh_room_units_count(['maintenance', 'out_of_order'])") === false, 'dashboard: out-of-service count uses the shared statuses');
 
 // admin-anchor.js filter keys land on the results.
 $js = (string)file_get_contents($root . '/admin/js/admin-anchor.js');
 if (check((bool)preg_match('~var FILTER_KEY = /(.+)/i;~', $js, $m), 'anchor: FILTER_KEY found')) {
     $re = '/' . $m[1] . '/i';
-    foreach (['event_date', 'arrival', 'departure', 'status', 'filter', 'refund_status'] as $k) check((bool)preg_match($re, $k), "anchor: $k is a filter key");
+    foreach (['event_date', 'arrival', 'departure', 'status', 'filter', 'refund_status', 'balance', 'due'] as $k) check((bool)preg_match($re, $k), "anchor: $k is a filter key");
     foreach (['tab', 'id', 'flash', 'action'] as $k) check(!preg_match($re, $k), "anchor: $k is not a filter key");
 }
 

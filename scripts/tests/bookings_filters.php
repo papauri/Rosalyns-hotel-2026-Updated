@@ -69,6 +69,33 @@ eq(rh_bk_notice_title('', 'overdue'), 'Overdue departures only', 'notice: overdu
 eq(rh_bk_notice_title('overdue', ''), 'Overdue arrivals only', 'notice: overdue arrivals');
 eq(rh_bk_notice_title('', ''), 'Search filtered results', 'notice: plain search');
 
+// ---- ?balance=owing (Dashboard "Departures with a balance": opened with ?filter=checkout_today)
+if (!defined('BALANCE_TOLERANCE')) define('BALANCE_TOLERANCE', 0.01);
+eq(rh_bk_balance_filter('owing'), 'owing', 'balance=owing recognised');
+eq(rh_bk_balance_filter('outstanding'), '', 'other balance values ignored');
+eq(rh_bk_balance_clause(''), null, 'no balance filter -> no clause');
+$bal = rh_bk_balance_clause('owing');
+eq($bal['clause'], 'b.amount_due > ?', 'balance clause binds the tolerance (no number in the SQL)');
+eq($bal['params'], [rh_fd_balance_tolerance()], 'balance clause param = the dashboard tolerance');
+check(strpos($bal['clause'], '?') !== false && count($bal['params']) === 1, 'one placeholder, one param');
+// Same answer as the chip's per-row rule for a guest due out today (SQL: NULL amount_due is never > x).
+foreach ([0.01, 0.011, 0, -5, 5000, null] as $amt) {
+    $sql = $amt !== null && (float)$amt > $bal['params'][0];
+    $chip = rh_fd_departure_owes(['departure_state' => 'due', 'amount_due' => $amt]);
+    eq($sql, $chip, 'balance filter = chip rule for amount_due ' . var_export($amt, true));
+}
+// The tab + balance together = the chip's set: due out today (still in) AND owing.
+$checkoutTab = rh_bk_tab_clauses('today-checkouts')['clauses'];
+eq($checkoutTab, ['b.check_out_date = CURDATE()', "b.status = 'checked-in'"], "chip link tab = Today's Check-outs (due, not overdue or departed)");
+eq(rh_bk_notice_title('', '', 'owing', 'checkout_today'), 'Departures with a balance', 'notice: chip view');
+eq(rh_bk_notice_title('', '', 'owing', ''), 'Balance still to pay', 'notice: balance alone');
+eq(rh_bk_notice_title('', 'overdue', 'owing', ''), 'Overdue departures only', 'notice: overdue wins its own title');
+$bkSrc = (string)file_get_contents($root . '/admin/bookings.php');
+check(substr_count($bkSrc, "'departure', 'balance', 'payment_status', 'page'].forEach(k => params.delete(k));") === 2, 'tabs clear ?balance= like the other filters');
+check(strpos($bkSrc, "'balance' => \$filter_balance] as \$bk_keep_k") !== false && strpos($bkSrc, "['filter', 'payment_status', 'arrival', 'departure', 'balance'].forEach") !== false, 'search keeps ?balance= (server + client)');
+check(strpos($bkSrc, "'balance'       => \$filter_balance,") !== false, 'pagination keeps ?balance=');
+check(strpos($bkSrc, '$export_balance[\'params\']') !== false && strpos($bkSrc, '$bk_balance_clause[\'params\']') !== false, 'list, badges and export bind the balance param');
+
 // ---- ?filter= / ?payment_status=
 eq(rh_bk_filter_key('checkin_today'), 'checkin_today', 'filter key kept');
 eq(rh_bk_filter_key('bogus'), '', 'unknown filter dropped');

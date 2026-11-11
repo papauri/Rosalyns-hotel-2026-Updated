@@ -9,6 +9,7 @@ require_once 'admin-init.php';
 require_once 'includes/admin-modal.php';
 require_once __DIR__ . '/../includes/form-validation.php';
 require_once __DIR__ . '/includes/bulk-actions.php';
+require_once __DIR__ . '/includes/front-desk-counts.php'; // rh_fd_housekeeping_due_sql: the Dashboard "tasks due" rule
 /** @var array{id: int, username: string, role: string} $user */
 /** @var string $csrf_token */
 
@@ -1360,7 +1361,7 @@ $orderByClauses[] = "ha.created_at DESC";
 
 $assignmentsStmt = $pdo->query(
     "
-    SELECT ha.*, ir.room_number, ir.room_name, u.username as assigned_to_name, creator.username as created_by_name" .
+    SELECT ha.*, (" . rh_fd_housekeeping_due_sql('ha') . ") AS rh_due_now, ir.room_number, ir.room_name, u.username as assigned_to_name, creator.username as created_by_name" .
         ($hasVerifiedBy ? ", verifier.username as verified_by_name" : "") . "
     FROM housekeeping_assignments ha
     LEFT JOIN individual_rooms ir ON ha.individual_room_id = ir.id
@@ -1375,6 +1376,26 @@ foreach ($assignments as &$hkRow) {
     $hkRow['status'] = rhHkStatusFromRow($hkRow);
 }
 unset($hkRow);
+
+// Dashboard deep links (owner 2026-11-11: a link opens what its chip counts). Whitelisted; filter the table only, the
+// stat cards keep counting every assignment.
+//  ?due=now      "Housekeeping tasks due": pending / in progress, due today or earlier or undated (rh_due_now, same SQL).
+//  ?room=<no.>   room-service reminder row: that room's assignments (exact room number).
+$hkFilterDue = (is_scalar($_GET['due'] ?? null) && (string)$_GET['due'] === 'now') ? 'now' : '';
+$hkFilterRoom = is_scalar($_GET['room'] ?? null) ? trim((string)$_GET['room']) : '';
+if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9 _.\-]{0,29}$/', $hkFilterRoom)) {
+    $hkFilterRoom = '';
+}
+$hkTableRows = array_values(array_filter($assignments, static function (array $r) use ($hkFilterDue, $hkFilterRoom): bool {
+    if ($hkFilterDue === 'now' && (int)($r['rh_due_now'] ?? 0) !== 1) {
+        return false;
+    }
+    if ($hkFilterRoom !== '' && trim((string)($r['room_number'] ?? '')) !== $hkFilterRoom) {
+        return false;
+    }
+    return true;
+}));
+$hkTableFiltered = $hkFilterDue !== '' || $hkFilterRoom !== '';
 
 // Statistics
 // Backward compatible: works with or without migration 004 columns
@@ -1604,8 +1625,20 @@ foreach ($assignments as $a) {
 
         <!-- Assignments Table -->
         <div class="table-card" id="hkAssignmentsCard" data-rh-results>
+            <?php if ($hkTableFiltered): ?>
+                <div style="background: #eef3ff; border: 1px solid #cfd8ff; border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+                    <div style="display: flex; align-items: center; gap: 8px; color: #1f2d6b;">
+                        <i class="fas fa-filter"></i>
+                        <strong><?php echo $hkFilterDue === 'now' ? 'Tasks due now' : 'One room'; ?></strong>
+                    </div>
+                    <div style="color: #2f3a63; font-size: 13px;">
+                        Showing <?php echo count($hkTableRows); ?> assignment<?php echo count($hkTableRows) === 1 ? '' : 's'; ?><?php if ($hkFilterDue === 'now'): ?> pending or in progress, due today or earlier (or with no date)<?php endif; ?><?php if ($hkFilterRoom !== ''): ?> for room <?php echo htmlspecialchars($hkFilterRoom); ?><?php endif; ?>.
+                        <a href="housekeeping.php" style="margin-left: 8px; color: #1f2d6b; font-weight: 600;">Clear</a>
+                    </div>
+                </div>
+            <?php endif; ?>
             <div class="hk-table-toolbar">
-                <h3 class="hk-table-toolbar__title"><i class="fas fa-list-check"></i> All Assignments (<?php echo count($assignments); ?>)</h3>
+                <h3 class="hk-table-toolbar__title"><i class="fas fa-list-check"></i> <?php echo $hkTableFiltered ? 'Assignments' : 'All Assignments'; ?> (<?php echo count($hkTableRows); ?>)</h3>
                 <div class="hk-table-toolbar__filters">
                     <input type="text" id="tableSearch" class="hk-inline-control hk-inline-control--search" placeholder="Search room, staff…" oninput="filterTable()">
                     <select id="tableStatusFilter" class="hk-inline-control" onchange="filterTable()">
@@ -1633,12 +1666,12 @@ foreach ($assignments as $a) {
                     </tr>
                 </thead>
                 <tbody>
-                    <?php if (empty($assignments)): ?>
+                    <?php if (empty($hkTableRows)): ?>
                         <tr>
-                            <td colspan="9" style="text-align:center;padding:24px;color:#9ca3af;">No housekeeping assignments yet.</td>
+                            <td colspan="9" style="text-align:center;padding:24px;color:#9ca3af;"><?php echo $hkTableFiltered ? 'No assignments match this filter.' : 'No housekeeping assignments yet.'; ?></td>
                         </tr>
                     <?php else: ?>
-                        <?php foreach ($assignments as $row): ?>
+                        <?php foreach ($hkTableRows as $row): ?>
                             <tr data-status="<?php echo htmlspecialchars((string)$row['status']); ?>" data-priority="<?php echo htmlspecialchars((string)($row['priority'] ?? '')); ?>" data-type="<?php echo htmlspecialchars((string)($row['assignment_type'] ?? '')); ?>" data-room="<?php echo htmlspecialchars(trim((string)($row['room_number'] ?? '') . ' ' . (string)($row['room_name'] ?? ''))); ?>" data-assignee="<?php echo htmlspecialchars((string)($row['assigned_to_name'] ?? 'Unassigned')); ?>" data-due-date="<?php echo htmlspecialchars((string)($row['due_date'] ?? '')); ?>">
                                 <td class="admin-bulk-col"><?php echo adminBulkRowBox($row['id'], 'Select assignment for room ' . $row['room_number']); ?></td>
                                 <td><strong><?php echo htmlspecialchars($row['room_number'] . ' ' . ($row['room_name'] ?? '')); ?></strong></td>
@@ -1702,7 +1735,7 @@ foreach ($assignments as $a) {
                     <?php endif; ?>
                 </tbody>
             </table>
-            <?php if (!empty($assignments)): ?>
+            <?php if (!empty($hkTableRows)): ?>
                 <?php adminBulkBarStart('bulk_assignments', '#hkAssignmentsCard', $csrf_token); ?>
                     <select name="assigned_to" data-bulk-field aria-label="Assign selected to">
                         <option value="">Assign to...</option>

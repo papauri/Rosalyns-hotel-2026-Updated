@@ -7,14 +7,87 @@
  * - Expected arrivals (End of Day, owner ASSUMPTION 2026-11-11): confirmed + pending + already checked in; tentative
  *   holds are NOT counted and are shown on their own line ("Tentative holds (not counted)") when there are any.
  * - Missed arrival (Calendar, Room Dashboard no-show count): confirmed or pending whose arrival date has passed.
- * - Departures with a balance (Dashboard chip -> Bookings "Today's Check-outs"): due out today, still in, owing.
- *   Overdue guests have their own "Overdue departures" chip. Balances use BALANCE_TOLERANCE.
+ * - Arrived today (Dashboard Arrivals KPI + Today's Check-ins popup): arrival date today and checked in, INCLUDING
+ *   guests who already checked out the same day (rh_fd_arrived_statuses).
+ * - Departures with a balance (Dashboard chip -> Bookings "Today's Check-outs" + ?balance=owing): due out today,
+ *   still in, owing. Overdue guests have their own "Overdue departures" chip. Balances use BALANCE_TOLERANCE
+ *   (rh_fd_balance_tolerance), the same value the Bookings ?balance=owing filter binds.
+ * - Room-service orders open (chip -> Orders & Tabs ?order_type=room_service&status=placed,pending,confirmed, no date
+ *   window): rh_fd_room_service_open_statuses(), the count and the link built from the same list.
+ * - Room-service reminders due: occupied rooms with no room-service order served today (rh_fd_room_service_unserved_sql).
+ * - Housekeeping tasks due (chip -> housekeeping.php?due=now): pending / in progress, due today or earlier or undated.
+ * - Rooms out of service (chip -> room-maintenance.php?status=out_of_service): maintenance or out of order.
  */
 
 if (!function_exists('rh_fd_still_to_arrive_statuses')) {
     function rh_fd_still_to_arrive_statuses(): array
     {
         return ['confirmed', 'pending'];
+    }
+
+    /** Arrived today = checked in, including guests who already checked out the same day. */
+    function rh_fd_arrived_statuses(): array
+    {
+        return ['checked-in', 'checked-out'];
+    }
+
+    /**
+     * "col IN ('a','b')" from one of the fixed status lists above (never user input; each value is checked).
+     * The Bookings tab badges embed their clauses the same way.
+     */
+    function rh_fd_status_in_sql(string $col, array $statuses): string
+    {
+        $vals = [];
+        foreach ($statuses as $st) {
+            if (!preg_match('/^[a-z_-]{1,30}$/', (string)$st)) {
+                throw new InvalidArgumentException('Bad status literal');
+            }
+            $vals[] = "'" . $st . "'";
+        }
+        return $col . ' IN (' . ($vals ? implode(',', $vals) : "''") . ')';
+    }
+
+    /** The balance tolerance every "owing" check here and in the Bookings ?balance=owing filter uses. */
+    function rh_fd_balance_tolerance(): float
+    {
+        return defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+    }
+
+    /** Room-service orders the "open" chip counts; its Orders & Tabs link filters on exactly this list. */
+    function rh_fd_room_service_open_statuses(): array
+    {
+        return ['placed', 'pending', 'confirmed'];
+    }
+
+    /** Orders & Tabs link that opens every room-service order the chip counts (all dates, like the count). */
+    function rh_fd_room_service_open_href(): string
+    {
+        return 'stock-orders.php?order_type=room_service&status=' . implode(',', rh_fd_room_service_open_statuses());
+    }
+
+    /**
+     * Room-service reminder: NOT EXISTS an order for this stay (booking, or the room when the order has no booking)
+     * that was completed/paid or served today. $b = the bookings alias (rooms joined as individual_room_id).
+     */
+    function rh_fd_room_service_unserved_sql(string $b = 'b'): string
+    {
+        return "NOT EXISTS (SELECT 1 FROM stock_orders rso WHERE rso.order_type = 'room_service'"
+            . " AND (rso.booking_id = $b.id OR (rso.booking_id IS NULL AND rso.individual_room_id = $b.individual_room_id))"
+            . " AND (rso.status IN ('completed', 'paid') OR rso.kitchen_status = 'served')"
+            . " AND DATE(COALESCE(rso.served_at, rso.updated_at, rso.created_at)) = CURDATE())";
+    }
+
+    /** Housekeeping tasks due: pending / in progress, due today or earlier, or with no due date. $a = alias prefix. */
+    function rh_fd_housekeeping_due_sql(string $a = ''): string
+    {
+        $p = $a !== '' ? $a . '.' : '';
+        return "{$p}status IN ('pending','in_progress') AND ({$p}due_date IS NULL OR {$p}due_date <= CURDATE())";
+    }
+
+    /** Room statuses the "Rooms out of service" chip counts. */
+    function rh_fd_out_of_service_statuses(): array
+    {
+        return ['maintenance', 'out_of_order'];
     }
 
     function rh_fd_is_still_to_arrive(array $b, string $today): bool
@@ -61,8 +134,7 @@ if (!function_exists('rh_fd_still_to_arrive_statuses')) {
     /** Still in (due today or overdue) and owing above the tolerance: never shown as "Settled". */
     function rh_fd_departure_has_balance(array $d): bool
     {
-        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
-        return (string)($d['departure_state'] ?? '') !== 'departed' && (float)($d['amount_due'] ?? 0) > $tol;
+        return (string)($d['departure_state'] ?? '') !== 'departed' && (float)($d['amount_due'] ?? 0) > rh_fd_balance_tolerance();
     }
 
     /**
