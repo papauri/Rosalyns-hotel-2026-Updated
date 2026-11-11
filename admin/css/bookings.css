@@ -378,6 +378,42 @@
     }
 }
 
+/* Phones: the filter form is a two-column grid so nothing is squeezed and the year shows.
+   Row 1 search, row 2 status + Dates, row 3 From + To, row 4 Filter + Clear (Filter alone
+   spans both). 44px touch targets. The action buttons below keep their own row. */
+@media (max-width: 480px) {
+    .bookings-toolbar {
+        --rh-bookings-toolbar-control-height: 2.75rem;
+    }
+
+    .bookings-toolbar__form {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        align-items: stretch;
+        gap: 0.5rem;
+    }
+
+    .bookings-toolbar__search {
+        grid-column: 1 / -1;
+        min-width: 0;
+    }
+
+    .bookings-toolbar__form > .bookings-toolbar__input,
+    .bookings-toolbar__form > .bookings-toolbar__button {
+        width: 100%;
+        min-width: 0;
+        max-width: none;
+    }
+
+    .bookings-toolbar__form > .bookings-toolbar__input--date {
+        padding-inline: 0.5rem;
+    }
+
+    .bookings-toolbar__form > .bookings-toolbar__button--filter:last-child {
+        grid-column: 1 / -1;
+    }
+}
+
 .bookings-section .section-title {
     display: flex;
     align-items: center;

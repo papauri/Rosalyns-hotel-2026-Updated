@@ -2071,8 +2071,8 @@ $currency_symbol = getSetting('currency_symbol');
         $add($attn, $mod_roomsvc && $dash_perm('stock_orders'), (int)$ops['room_service_pending'], 'Room-service orders open', 'fa-bell-concierge', 'amber', rh_fd_room_service_open_href(), 'room_service_pending');
         $add($attn, $mod_roomsvc && $dash_perm('stock_orders'), (int)$ops['room_service_reminders_due'], 'Room-service reminders due', 'fa-bell', 'amber', 'room-service-dashboard.php', 'room_service_reminders_due', 'Rooms with no order served today');
         $add($attn, $mod_orders && $mod_bookings, (int)$ops['open_tabs'], isRestaurantEnabled() ? 'Open tabs awaiting payment' : 'Orders awaiting payment', 'fa-receipt', 'amber', 'stock-orders.php?status=placed', 'open_tabs');
-        $add($attn, $mod_stock && $dash_perm('stock_batches'), (int)$stock['expired_batches'], 'Expired stock batches', 'fa-skull-crossbones', 'red', 'stock-batches.php');
-        $add($attn, $mod_stock && $dash_perm('stock_management'), (int)$stock['low_stock'], 'Items below minimum stock', 'fa-box-open', 'amber', 'stock-reorder.php');
+        $add($attn, $mod_stock && $dash_perm('stock_batches'), (int)$stock['expired_batches'], 'Expired stock batches', 'fa-skull-crossbones', 'red', 'stock-batches.php?filter=expired');
+        $add($attn, $mod_stock && $dash_perm('stock_management'), (int)$stock['low_stock'], 'Items below minimum stock', 'fa-box-open', 'amber', 'stock-ingredients.php?filter=low');
         $attnOpen = array_values(array_filter($attn, static fn($a) => $a['count'] > 0));
         $attnClear = array_values(array_filter($attn, static fn($a) => $a['count'] <= 0));
         usort($attnOpen, static fn($a, $b) => [$a['tone'] === 'red' ? 0 : 1, -$a['count']] <=> [$b['tone'] === 'red' ? 0 : 1, -$b['count']]);
@@ -2671,9 +2671,9 @@ $currency_symbol = getSetting('currency_symbol');
                     </div>
                 </header>
                 <div class="ck-stock__trio">
-                    <a <?php echo $can('stock-reorder.php') ? 'href="stock-reorder.php"' : ''; ?> class="ck-mini<?php echo $stock['low_stock'] ? ' ck-mini--amber' : ''; ?>"><strong><?php echo (int)$stock['low_stock']; ?></strong><span>Low</span></a>
-                    <a <?php echo $can('stock-batches.php') ? 'href="stock-batches.php"' : ''; ?> class="ck-mini<?php echo $stock['expiring_batches'] ? ' ck-mini--amber' : ''; ?>"><strong><?php echo (int)$stock['expiring_batches']; ?></strong><span>Expiring 7d</span></a>
-                    <a <?php echo $can('stock-batches.php') ? 'href="stock-batches.php"' : ''; ?> class="ck-mini<?php echo $stock['expired_batches'] ? ' ck-mini--red' : ''; ?>"><strong><?php echo (int)$stock['expired_batches']; ?></strong><span>Expired</span></a>
+                    <a <?php echo $can('stock-ingredients.php') ? 'href="stock-ingredients.php?filter=low"' : ''; ?> class="ck-mini<?php echo $stock['low_stock'] ? ' ck-mini--amber' : ''; ?>"><strong><?php echo (int)$stock['low_stock']; ?></strong><span>Low</span></a>
+                    <a <?php echo $can('stock-batches.php') ? 'href="stock-batches.php?filter=expiring"' : ''; ?> class="ck-mini<?php echo $stock['expiring_batches'] ? ' ck-mini--amber' : ''; ?>"><strong><?php echo (int)$stock['expiring_batches']; ?></strong><span>Expiring 7d</span></a>
+                    <a <?php echo $can('stock-batches.php') ? 'href="stock-batches.php?filter=expired"' : ''; ?> class="ck-mini<?php echo $stock['expired_batches'] ? ' ck-mini--red' : ''; ?>"><strong><?php echo (int)$stock['expired_batches']; ?></strong><span>Expired</span></a>
                 </div>
                 <?php if (!empty($stock['low_items'])): ?>
                 <ul class="ck-levels">

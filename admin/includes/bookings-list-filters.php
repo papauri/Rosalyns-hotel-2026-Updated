@@ -4,9 +4,15 @@
  * the insight cards and the CSV export, so they can never disagree. No database, no settings.
  * Unit tested by scripts/tests/bookings_filters.php.
  *
- * Dates (owner 2026-11-11, ASSUMPTION logged in BUILD_PLAN): From / To mean "stays that overlap the range":
- * check_in_date <= To AND check_out_date >= From, so From = To = a day lists everyone staying that day
- * (arrivals, in-house and departures on that day).
+ * Dates (owner 2026-11-11 "do what is standard", like Opera / Cloudbeds / Mews): the Dates select (?date_type=)
+ * picks which date From / To apply to; both end days are included; absent or unknown = Arrival.
+ *   arrival   check_in_date between From and To
+ *   departure check_out_date between From and To
+ *   staying   in-house on at least one night in the range: check_in_date <= To AND check_out_date > From
+ *             (the departure day is not a night stayed, the hotel's night model, so a guest leaving on From is
+ *             not "staying"; use Departure for them)
+ *   booked    created_at on a hotel date between From and To: created_at >= From 00:00 AND < (To + 1 day) 00:00
+ *             (the app's DB session time_zone is the hotel's, so these are hotel dates)
  */
 
 require_once __DIR__ . '/front-desk-counts.php'; // rh_fd_balance_tolerance: the one "owing" rule
@@ -33,18 +39,62 @@ if (!function_exists('rh_bk_valid_date')) {
         return [$from, $to];
     }
 
-    /** WHERE pieces for the date range (stays overlapping it). */
-    function rh_bk_date_scope(string $from, string $to): array
+    /** ?date_type= => which date From / To apply to. Label per type (the Dates select). */
+    function rh_bk_date_types(): array
     {
+        return ['arrival' => 'Arrival', 'departure' => 'Departure', 'staying' => 'Staying', 'booked' => 'Booked on'];
+    }
+
+    /** Whitelisted ?date_type=; absent or unknown = 'arrival'. */
+    function rh_bk_date_type($type): string
+    {
+        $t = strtolower(trim((string)$type));
+        return isset(rh_bk_date_types()[$t]) ? $t : 'arrival';
+    }
+
+    /** 'Y-m-d' + 1 day (calendar arithmetic, no time of day involved). */
+    function rh_bk_next_day(string $d): string
+    {
+        return (new DateTimeImmutable($d . ' 00:00:00'))->modify('+1 day')->format('Y-m-d');
+    }
+
+    /**
+     * WHERE pieces for From / To on the chosen date type (one placeholder per clause, params in clause order).
+     * $from / $to come from rh_bk_date_range (valid or '', From <= To); $type from rh_bk_date_type.
+     */
+    function rh_bk_date_scope(string $from, string $to, string $type): array
+    {
+        $type = rh_bk_date_type($type);
         $clauses = [];
         $params = [];
-        if ($to !== '') {
-            $clauses[] = 'b.check_in_date <= ?';
-            $params[] = $to;
-        }
-        if ($from !== '') {
-            $clauses[] = 'b.check_out_date >= ?';
-            $params[] = $from;
+        if ($type === 'staying') {
+            if ($to !== '') {
+                $clauses[] = 'b.check_in_date <= ?';
+                $params[] = $to;
+            }
+            if ($from !== '') {
+                $clauses[] = 'b.check_out_date > ?';
+                $params[] = $from;
+            }
+        } elseif ($type === 'booked') {
+            if ($from !== '') {
+                $clauses[] = 'b.created_at >= ?';
+                $params[] = $from . ' 00:00:00';
+            }
+            if ($to !== '') {
+                $clauses[] = 'b.created_at < ?';
+                $params[] = rh_bk_next_day($to) . ' 00:00:00';
+            }
+        } else {
+            $col = $type === 'departure' ? 'b.check_out_date' : 'b.check_in_date';
+            if ($from !== '') {
+                $clauses[] = $col . ' >= ?';
+                $params[] = $from;
+            }
+            if ($to !== '') {
+                $clauses[] = $col . ' <= ?';
+                $params[] = $to;
+            }
         }
         return ['clauses' => $clauses, 'params' => $params];
     }
@@ -172,15 +222,38 @@ if (!function_exists('rh_bk_valid_date')) {
         ];
     }
 
-    /** Plain words for the notice: "staying 12 Nov 2026 to 14 Nov 2026" / "staying on 12 Nov 2026" / ''. */
-    function rh_bk_date_scope_words(string $from, string $to): string
+    /** A date for the notice: "12 Nov 2026". */
+    function rh_bk_day_words(string $d): string
     {
-        $f = $from !== '' ? date('j M Y', strtotime($from)) : '';
-        $t = $to !== '' ? date('j M Y', strtotime($to)) : '';
-        if ($f !== '' && $f === $t) return 'staying on ' . $f;
-        if ($f !== '' && $t !== '') return 'staying between ' . $f . ' and ' . $t;
-        if ($f !== '') return 'staying on or after ' . $f;
-        if ($t !== '') return 'staying on or before ' . $t;
+        return (new DateTimeImmutable($d . ' 00:00:00'))->format('j M Y');
+    }
+
+    /**
+     * Plain words for the notice (mid-sentence, after "Showing N matching room bookings, "), naming the date type:
+     * "arriving on 12 Nov 2026" / "arriving 12–14 Nov 2026" / "booked 28 Nov – 2 Dec 2026" /
+     * "departing on or after 12 Nov 2026" / "staying on or before 14 Nov 2026" / '' when no dates.
+     */
+    function rh_bk_date_scope_words(string $from, string $to, string $type): string
+    {
+        $verb = ['arrival' => 'arriving', 'departure' => 'departing', 'staying' => 'staying', 'booked' => 'booked'][rh_bk_date_type($type)];
+        $dash = "\u{2013}";
+        if ($from !== '' && $to !== '') {
+            if ($from === $to) {
+                return $verb . ($verb === 'staying' ? ' the night of ' : ' on ') . rh_bk_day_words($from);
+            }
+            $f = new DateTimeImmutable($from . ' 00:00:00');
+            $t = new DateTimeImmutable($to . ' 00:00:00');
+            if ($f->format('Y-m') === $t->format('Y-m')) {
+                $span = $f->format('j') . $dash . $t->format('j M Y');
+            } elseif ($f->format('Y') === $t->format('Y')) {
+                $span = $f->format('j M') . ' ' . $dash . ' ' . $t->format('j M Y');
+            } else {
+                $span = $f->format('j M Y') . ' ' . $dash . ' ' . $t->format('j M Y');
+            }
+            return $verb . ' ' . $span;
+        }
+        if ($from !== '') return $verb . ' on or after ' . rh_bk_day_words($from);
+        if ($to !== '') return $verb . ' on or before ' . rh_bk_day_words($to);
         return '';
     }
 }

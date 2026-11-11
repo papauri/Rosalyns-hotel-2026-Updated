@@ -2751,8 +2751,11 @@ $search_query = trim($_GET['search'] ?? '');
 // stat tiles that deep-link with ?status=checked-in land on the matching tab
 // (server-filtered + tab activated + row flash), not just the unfiltered list.
 $filter_status = $_GET['filter_status'] ?? ($_GET['status'] ?? '');
-// From / To = stays overlapping the range (check-in on or before To, check-out on or after From); invalid dates are ignored.
+// From / To on the date chosen in Dates (?date_type= arrival|departure|staying|booked, default arrival), both end days
+// included; invalid dates are ignored, From after To is swapped. Rules: rh_bk_date_scope (bookings-list-filters.php).
 [$filter_date_from, $filter_date_to] = rh_bk_date_range($_GET['date_from'] ?? '', $_GET['date_to'] ?? '');
+$filter_date_type = rh_bk_date_type($_GET['date_type'] ?? '');
+$bk_has_dates = $filter_date_from !== '' || $filter_date_to !== '';
 // ?arrival=overdue (Room Dashboard / Dashboard "overdue arrivals" links): a real filter, shown in the notice with Clear.
 $filter_arrival = rh_bk_arrival_filter($_GET['arrival'] ?? '');
 // ?departure=overdue (Dashboard "Overdue departures" chip): still checked in after the check-out date; same notice + Clear.
@@ -2875,8 +2878,8 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             $export_params[] = $filter_status;
         }
 
-        // Same rules as the on-screen list: dates (stays overlapping the range), overdue arrivals, the open tab.
-        $export_dates = rh_bk_date_scope($filter_date_from, $filter_date_to);
+        // Same rules as the on-screen list: dates (on the chosen date type), overdue arrivals, the open tab.
+        $export_dates = rh_bk_date_scope($filter_date_from, $filter_date_to, $filter_date_type);
         $export_where_clauses = array_merge($export_where_clauses, $export_dates['clauses']);
         $export_params = array_merge($export_params, $export_dates['params']);
         if (($export_arrival = rh_bk_arrival_clause($filter_arrival)) !== null) {
@@ -3029,8 +3032,8 @@ try {
 
     // Date filters belong to the shared scope (search + dates) so the tab counts and insight cards
     // match the list; they were added after the snapshot, so the counts ignored the dates.
-    // From / To = stays overlapping the range (rh_bk_date_scope), the same rule in badges, list, count and export.
-    $bk_date_scope = rh_bk_date_scope($filter_date_from, $filter_date_to);
+    // From / To on the chosen date type (rh_bk_date_scope), the same rule in badges, list, count, insights and export.
+    $bk_date_scope = rh_bk_date_scope($filter_date_from, $filter_date_to, $filter_date_type);
     $where_clauses = array_merge($where_clauses, $bk_date_scope['clauses']);
     $params        = array_merge($params, $bk_date_scope['params']);
     // Overdue arrivals (no-show candidates, from the Room Dashboard / Dashboard alert): arrival date passed while
@@ -3207,6 +3210,9 @@ try {
     }
     if ($filter_date_to !== '') {
         $insight_base_query['date_to'] = $filter_date_to;
+    }
+    if ($bk_has_dates) {
+        $insight_base_query['date_type'] = $filter_date_type; // the cards' links keep which date From / To apply to
     }
     if ($filter_arrival !== '') {
         $insight_base_query['arrival'] = $filter_arrival; // the cards' rows are in the same overdue scope
@@ -3569,11 +3575,18 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     <option value="no-show" <?php echo $filter_status === 'no-show' ? 'selected' : ''; ?>>No-Show</option>
                     <option value="deleted" <?php echo $filter_status === 'deleted' ? 'selected' : ''; ?>>Deleted</option>
                 </select>
+                <select name="date_type" class="bookings-toolbar__input bookings-toolbar__input--status" aria-label="Which date From and To apply to"
+                    title="Which date From and To apply to. Arrival: check-in date. Departure: check-out date. Staying: in the hotel on at least one night in the range (the departure day is not a night). Booked on: the day the booking was made."
+                    data-help="Dates|Pick which date From and To look at. Arrival = the check-in date. Departure = the check-out date. Staying = guests in the hotel on at least one night in the range (the day they leave does not count as a night). Booked on = the day the booking was made. Both end days are included.">
+                    <?php foreach (rh_bk_date_types() as $bk_dt_key => $bk_dt_label): ?>
+                        <option value="<?php echo $bk_dt_key; ?>" <?php echo $filter_date_type === $bk_dt_key ? 'selected' : ''; ?>><?php echo htmlspecialchars($bk_dt_label); ?></option>
+                    <?php endforeach; ?>
+                </select>
                 <input type="date" name="date_from" value="<?php echo htmlspecialchars($filter_date_from); ?>"
-                    placeholder="From" title="From: bookings staying on or after this date (check-out on or after it). Same date in From and To = everyone staying that day." aria-label="Staying from"
+                    placeholder="From" title="From: first day of the range, on the date chosen in Dates (Arrival, Departure, Staying or Booked on). The day itself is included. Same date in From and To = that one day." aria-label="From date"
                     class="bookings-toolbar__input bookings-toolbar__input--date">
                 <input type="date" name="date_to" value="<?php echo htmlspecialchars($filter_date_to); ?>"
-                    placeholder="To" title="To: bookings staying on or before this date (check-in on or before it). Same date in From and To = everyone staying that day." aria-label="Staying to"
+                    placeholder="To" title="To: last day of the range, on the date chosen in Dates (Arrival, Departure, Staying or Booked on). The day itself is included. Same date in From and To = that one day." aria-label="To date"
                     class="bookings-toolbar__input bookings-toolbar__input--date">
                 <button type="submit" class="bookings-toolbar__button bookings-toolbar__button--filter btn btn-primary">
                     <i class="fas fa-filter"></i> Filter
@@ -3605,7 +3618,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         <strong><?php echo htmlspecialchars(rh_bk_notice_title($filter_arrival, $filter_departure, $filter_balance, $bk_filter_key)); ?></strong>
                     </div>
                     <div style="color: #2f3a63; font-size: 13px;">
-                        Showing <?php echo number_format($list_count); ?> matching room booking<?php echo $list_count === 1 ? '' : 's'; ?><?php if ($search_query !== ''): ?> for &ldquo;<?php echo htmlspecialchars($search_query); ?>&rdquo;<?php endif; ?><?php $bk_scope_words = rh_bk_date_scope_words($filter_date_from, $filter_date_to); if ($bk_scope_words !== ''): ?>, <?php echo htmlspecialchars($bk_scope_words); ?><?php endif; ?><?php if ($filter_arrival === 'overdue'): ?> whose arrival date has passed and who never checked in<?php endif; ?><?php if ($filter_departure === 'overdue'): ?> still checked in after their check-out date<?php endif; ?><?php if ($filter_balance === 'owing'): ?><?php echo $bk_filter_key === 'checkout_today' ? ' due out today' : ''; ?> with a balance still to pay<?php endif; ?>.
+                        Showing <?php echo number_format($list_count); ?> matching room booking<?php echo $list_count === 1 ? '' : 's'; ?><?php if ($search_query !== ''): ?> for &ldquo;<?php echo htmlspecialchars($search_query); ?>&rdquo;<?php endif; ?><?php $bk_scope_words = rh_bk_date_scope_words($filter_date_from, $filter_date_to, $filter_date_type); if ($bk_scope_words !== ''): ?>, <?php echo htmlspecialchars($bk_scope_words); ?><?php endif; ?><?php if ($filter_arrival === 'overdue'): ?> whose arrival date has passed and who never checked in<?php endif; ?><?php if ($filter_departure === 'overdue'): ?> still checked in after their check-out date<?php endif; ?><?php if ($filter_balance === 'owing'): ?><?php echo $bk_filter_key === 'checkout_today' ? ' due out today' : ''; ?> with a balance still to pay<?php endif; ?>.
                         <a href="bookings.php" style="margin-left: 8px; color: #1f2d6b; font-weight: 600;">Clear</a>
                     </div>
                 </div>
@@ -4079,6 +4092,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         'filter_status' => $filter_status,
                         'date_from'     => $filter_date_from,
                         'date_to'       => $filter_date_to,
+                        'date_type'     => $bk_has_dates ? $filter_date_type : '',
                         'filter'        => $bk_filter_key,   // keep the open tab (Unpaid, Today's Check-ins...) on page 2+
                         'arrival'       => $filter_arrival,
                         'departure'     => $filter_departure,
