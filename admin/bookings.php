@@ -23,6 +23,7 @@ require_once '../includes/finance-sequences.php';
 require_once 'includes/finance-account-sync.php';
 require_once 'includes/account-receipt-send.php';
 require_once __DIR__ . '/../includes/booked-rate-change.php'; // booked rate × nights lines (also loads includes/booked-rate.php)
+require_once __DIR__ . '/includes/bookings-list-filters.php'; // tab/date/payment filter rules shared by badges, list and export
 require_once __DIR__ . '/../includes/booking-created-by.php'; // "by …" under the Created date in the list
 $message = '';
 $error = '';
@@ -2750,8 +2751,10 @@ $search_query = trim($_GET['search'] ?? '');
 // stat tiles that deep-link with ?status=checked-in land on the matching tab
 // (server-filtered + tab activated + row flash), not just the unfiltered list.
 $filter_status = $_GET['filter_status'] ?? ($_GET['status'] ?? '');
-$filter_date_from = $_GET['date_from'] ?? '';
-$filter_date_to = $_GET['date_to'] ?? '';
+// From / To = stays overlapping the range (check-in on or before To, check-out on or after From); invalid dates are ignored.
+[$filter_date_from, $filter_date_to] = rh_bk_date_range($_GET['date_from'] ?? '', $_GET['date_to'] ?? '');
+// ?arrival=overdue (Room Dashboard / Dashboard "overdue arrivals" links): a real filter, shown in the notice with Clear.
+$filter_arrival = rh_bk_arrival_filter($_GET['arrival'] ?? '');
 
 // Deep links from booking-details.php (?action=assign-room|room-change&booking_id=N): narrow the list to
 // that booking so its row is on screen, then the page script opens the matching modal. When the action
@@ -2774,7 +2777,7 @@ if ($deep_link_booking_id > 0 && $search_query === '') {
         $deep_link_booking_id = 0;
     }
 }
-$has_active_room_filters = $search_query !== '' || $filter_status !== '' || $filter_date_from !== '' || $filter_date_to !== '';
+$has_active_room_filters = $search_query !== '' || $filter_status !== '' || $filter_date_from !== '' || $filter_date_to !== '' || $filter_arrival !== '';
 
 // Remember this list view (filters, tab, page) so "Back" on a booking returns to it.
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && !isset($_GET['export']) && $deep_link_action === '') {
@@ -2783,19 +2786,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && !isset($_GET['export']) && $deep_lin
     $_SESSION['bookings_list_return'] = 'bookings.php' . ($listQuery ? '?' . http_build_query($listQuery) : '');
 }
 
-// Map ?filter= shortcuts (from dashboard badge links) to JS tab names
-$_tab_map = [
-    'checkin_today'  => 'today-checkins',
-    'checkout_today' => 'today-checkouts',
-    'checked_in'     => 'checked-in',
-    'expiring_soon'  => 'expiring-soon',
-    'paid'           => 'paid',
-    'unpaid'         => 'unpaid',
-    'today_bookings' => 'today-bookings',
-    'week_bookings'  => 'week-bookings',
-    'month_bookings' => 'month-bookings',
-];
-$active_tab_override = $_tab_map[trim($_GET['filter'] ?? '')] ?? '';
+// Map ?filter= shortcuts (from dashboard badge links) to JS tab names; ?payment_status=paid|unpaid (Accounting
+// Dashboard links) opens the matching tab.
+$bk_filter_key = rh_bk_filter_key($_GET['filter'] ?? '', $_GET['payment_status'] ?? '');
+$active_tab_override = $bk_filter_key !== '' ? rh_bk_tab_map()[$bk_filter_key] : '';
 // Status-based tabs: detect from filter_status (tab names match filter_status values directly)
 if ($active_tab_override === '' && $filter_status !== '') {
     $active_tab_override = $filter_status;
@@ -2876,15 +2870,14 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             $export_params[] = $filter_status;
         }
 
-        if (!empty($filter_date_from)) {
-            $export_where_clauses[] = "b.check_in_date >= ?";
-            $export_params[] = $filter_date_from;
+        // Same rules as the on-screen list: dates (stays overlapping the range), overdue arrivals, the open tab.
+        $export_dates = rh_bk_date_scope($filter_date_from, $filter_date_to);
+        $export_where_clauses = array_merge($export_where_clauses, $export_dates['clauses']);
+        $export_params = array_merge($export_params, $export_dates['params']);
+        if (($export_arrival = rh_bk_arrival_clause($filter_arrival)) !== null) {
+            $export_where_clauses[] = $export_arrival;
         }
-
-        if (!empty($filter_date_to)) {
-            $export_where_clauses[] = "b.check_out_date <= ?";
-            $export_params[] = $filter_date_to;
-        }
+        $export_where_clauses = array_merge($export_where_clauses, rh_bk_tab_clauses($active_tab_override)['clauses']);
 
         $export_where_sql = !empty($export_where_clauses) ? 'WHERE ' . implode(' AND ', $export_where_clauses) : '';
 
@@ -3024,13 +3017,14 @@ try {
 
     // Date filters belong to the shared scope (search + dates) so the tab counts and insight cards
     // match the list; they were added after the snapshot, so the counts ignored the dates.
-    if (!empty($filter_date_from)) {
-        $where_clauses[] = "b.check_in_date >= ?";
-        $params[]        = $filter_date_from;
-    }
-    if (!empty($filter_date_to)) {
-        $where_clauses[] = "b.check_out_date <= ?";
-        $params[]        = $filter_date_to;
+    // From / To = stays overlapping the range (rh_bk_date_scope), the same rule in badges, list, count and export.
+    $bk_date_scope = rh_bk_date_scope($filter_date_from, $filter_date_to);
+    $where_clauses = array_merge($where_clauses, $bk_date_scope['clauses']);
+    $params        = array_merge($params, $bk_date_scope['params']);
+    // Overdue arrivals (no-show candidates, from the Room Dashboard / Dashboard alert): arrival date passed while
+    // still confirmed/pending. Part of the shared scope so every tab badge counts what the list shows.
+    if (($bk_arrival_clause = rh_bk_arrival_clause($filter_arrival)) !== null) {
+        $where_clauses[] = $bk_arrival_clause;
     }
 
     // Deleted bookings are only ever shown under the Deleted filter; every count/insight excludes them.
@@ -3053,19 +3047,17 @@ try {
         $params[] = $filter_status;
     }
 
-    // Overdue arrivals (no-show candidates): booking whose arrival date has
-    // passed while still confirmed/pending — i.e. never checked in. Surfaced
-    // from the Room Dashboard no-show alert.
-    if (($_GET['arrival'] ?? '') === 'overdue') {
-        $where_clauses[] = "b.check_in_date < CURDATE() AND b.status IN ('confirmed','pending')";
-    }
-
     $where_sql       = !empty($where_clauses)       ? 'WHERE ' . implode(' AND ', $where_clauses)       : '';
     $stats_where_sql = !empty($stats_where_clauses) ? 'WHERE ' . implode(' AND ', $stats_where_clauses) : '';
 
     // ── Stats: single query for all tab-badge counts (no payments join to avoid row duplication) ──
     // Uses $stats_where_sql which includes search/date filters but excludes filter_status so badges
     // show accurate counts for the current search/date scope regardless of which tab is active.
+    // Each tab badge is SUM(<the tab's own list WHERE pieces>), so a badge and its tab can never disagree.
+    // The pieces are fixed SQL from rh_bk_tab_clauses() (no user input).
+    $bk_badge_sum = static function (string $tab): string {
+        return 'SUM(' . implode(' AND ', rh_bk_tab_clauses($tab)['clauses']) . ')';
+    };
     $stats_stmt = $pdo->prepare("
         SELECT
             COUNT(*)                                                                                      AS total,
@@ -3076,15 +3068,14 @@ try {
             SUM(b.status = 'checked-out')                                                                 AS checked_out,
             SUM(b.status = 'cancelled')                                                                   AS cancelled,
             SUM(b.status = 'no-show')                                                                     AS no_show,
-            SUM(b.payment_status IN ('paid','completed'))                                                  AS paid,
-            SUM(b.payment_status NOT IN ('paid','completed','refunded') AND b.status NOT IN ('cancelled','no-show','expired')) AS unpaid,
-            SUM(b.status IN ('confirmed','pending') AND b.check_in_date = CURDATE())                      AS today_checkins,
-            SUM(b.status = 'checked-in' AND b.check_out_date = CURDATE())                                 AS today_checkouts,
-            SUM(DATE(b.created_at) = CURDATE())                                                           AS today_bookings,
-            SUM(b.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY))                                          AS week_bookings,
-            SUM(DATE_FORMAT(b.created_at,'%Y-%m') = DATE_FORMAT(NOW(),'%Y-%m'))                           AS month_bookings,
-            SUM(b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL
-                AND b.tentative_expires_at BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 24 HOUR))           AS expiring_soon
+            {$bk_badge_sum('paid')}                                                                       AS paid,
+            {$bk_badge_sum('unpaid')}                                                                     AS unpaid,
+            {$bk_badge_sum('today-checkins')}                                                             AS today_checkins,
+            {$bk_badge_sum('today-checkouts')}                                                            AS today_checkouts,
+            {$bk_badge_sum('today-bookings')}                                                             AS today_bookings,
+            {$bk_badge_sum('week-bookings')}                                                              AS week_bookings,
+            {$bk_badge_sum('month-bookings')}                                                             AS month_bookings,
+            {$bk_badge_sum('expiring-soon')}                                                              AS expiring_soon
         FROM bookings b
         LEFT JOIN rooms r ON b.room_id = r.id
         LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
@@ -3196,6 +3187,9 @@ try {
     if ($filter_date_to !== '') {
         $insight_base_query['date_to'] = $filter_date_to;
     }
+    if ($filter_arrival !== '') {
+        $insight_base_query['arrival'] = $filter_arrival; // the cards' rows are in the same overdue scope
+    }
 
     $bookings_stats_rows = [
         'total_bookings' => $fetch_bookings_stats_rows([], [], 'b.created_at DESC'),
@@ -3270,34 +3264,10 @@ try {
 
     // Build list-specific WHERE and ORDER BY — server-side constraints for all tab shortcuts.
     // Stats query above stays unfiltered so badge counts remain accurate.
-    $tab_extra_clauses = [];
-    $list_order_by = 'b.created_at DESC';
-
-    if ($active_tab_override === 'today-checkins') {
-        $tab_extra_clauses[] = "b.check_in_date = CURDATE()";
-        $tab_extra_clauses[] = "b.status IN ('confirmed','pending')";
-        $list_order_by = 'b.check_in_date ASC, b.created_at DESC';
-    } elseif ($active_tab_override === 'today-checkouts') {
-        $tab_extra_clauses[] = "b.check_out_date = CURDATE()";
-        $tab_extra_clauses[] = "b.status = 'checked-in'";
-        $list_order_by = 'b.check_out_date ASC, b.created_at DESC';
-    } elseif ($active_tab_override === 'expiring-soon') {
-        $tab_extra_clauses[] = "b.status = 'tentative'";
-        $tab_extra_clauses[] = "b.tentative_expires_at IS NOT NULL";
-        $tab_extra_clauses[] = "b.tentative_expires_at BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 24 HOUR)";
-        $list_order_by = 'b.tentative_expires_at ASC';
-    } elseif ($active_tab_override === 'paid') {
-        $tab_extra_clauses[] = "b.payment_status IN ('paid', 'completed')";
-    } elseif ($active_tab_override === 'unpaid') {
-        $tab_extra_clauses[] = "b.payment_status NOT IN ('paid', 'completed', 'refunded')";
-        $tab_extra_clauses[] = "b.status NOT IN ('cancelled', 'no-show', 'expired')";
-    } elseif ($active_tab_override === 'today-bookings') {
-        $tab_extra_clauses[] = "DATE(b.created_at) = CURDATE()";
-    } elseif ($active_tab_override === 'week-bookings') {
-        $tab_extra_clauses[] = "b.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)";
-    } elseif ($active_tab_override === 'month-bookings') {
-        $tab_extra_clauses[] = "DATE_FORMAT(b.created_at,'%Y-%m') = DATE_FORMAT(NOW(),'%Y-%m')";
-    }
+    // Tab shortcuts: the same WHERE pieces as the badge SUMs above (rh_bk_tab_clauses).
+    $bk_tab_rule = rh_bk_tab_clauses($active_tab_override);
+    $tab_extra_clauses = $bk_tab_rule['clauses'];
+    $list_order_by = $bk_tab_rule['order'] ?? 'b.created_at DESC';
     // Status-based tabs (pending, tentative, confirmed, checked-in, checked-out, cancelled, no-show)
     // are already handled by $filter_status → $where_clauses — no extra clauses needed.
 
@@ -3312,7 +3282,7 @@ try {
     // Re-count for pagination when the list is filtered by tab override, status filter, search, or date filters.
     // Use a separate variable so $total_bookings remains the global count for the "All" tab badge.
     $list_count = $total_bookings;
-    if (!empty($tab_extra_clauses) || $filter_status !== '' || $search_query !== '' || $filter_date_from !== '' || $filter_date_to !== '') {
+    if (!empty($tab_extra_clauses) || $filter_status !== '' || $search_query !== '' || $filter_date_from !== '' || $filter_date_to !== '' || $filter_arrival !== '') {
         $cnt_stmt = $pdo->prepare("
             SELECT COUNT(*)
             FROM bookings b
@@ -3569,10 +3539,10 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     <option value="deleted" <?php echo $filter_status === 'deleted' ? 'selected' : ''; ?>>Deleted</option>
                 </select>
                 <input type="date" name="date_from" value="<?php echo htmlspecialchars($filter_date_from); ?>"
-                    placeholder="From" title="Check-in from"
+                    placeholder="From" title="From: bookings staying on or after this date (check-out on or after it). Same date in From and To = everyone staying that day." aria-label="Staying from"
                     class="bookings-toolbar__input bookings-toolbar__input--date">
                 <input type="date" name="date_to" value="<?php echo htmlspecialchars($filter_date_to); ?>"
-                    placeholder="To" title="Check-out to"
+                    placeholder="To" title="To: bookings staying on or before this date (check-in on or before it). Same date in From and To = everyone staying that day." aria-label="Staying to"
                     class="bookings-toolbar__input bookings-toolbar__input--date">
                 <button type="submit" class="bookings-toolbar__button bookings-toolbar__button--filter btn btn-primary">
                     <i class="fas fa-filter"></i> Filter
@@ -3601,10 +3571,11 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 <div style="background: #eef3ff; border: 1px solid #cfd8ff; border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
                     <div style="display: flex; align-items: center; gap: 8px; color: #1f2d6b;">
                         <i class="fas fa-filter"></i>
-                        <strong>Search filtered results</strong>
+                        <strong><?php echo $filter_arrival === 'overdue' ? 'Overdue arrivals only' : 'Search filtered results'; ?></strong>
                     </div>
                     <div style="color: #2f3a63; font-size: 13px;">
-                        Showing <?php echo number_format($list_count); ?> matching room booking<?php echo $list_count === 1 ? '' : 's'; ?><?php if ($search_query !== ''): ?> for &ldquo;<?php echo htmlspecialchars($search_query); ?>&rdquo;<?php endif; ?>.
+                        Showing <?php echo number_format($list_count); ?> matching room booking<?php echo $list_count === 1 ? '' : 's'; ?><?php if ($search_query !== ''): ?> for &ldquo;<?php echo htmlspecialchars($search_query); ?>&rdquo;<?php endif; ?><?php $bk_scope_words = rh_bk_date_scope_words($filter_date_from, $filter_date_to); if ($bk_scope_words !== ''): ?>, <?php echo htmlspecialchars($bk_scope_words); ?><?php endif; ?><?php if ($filter_arrival === 'overdue'): ?> whose arrival date has passed and who never checked in<?php endif; ?>.
+                        <a href="bookings.php" style="margin-left: 8px; color: #1f2d6b; font-weight: 600;">Clear</a>
                     </div>
                 </div>
             <?php endif; ?>
@@ -3681,7 +3652,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
 
                 <?php if (!empty($bookings)): ?>
                     <div class="table-responsive">
-                        <table class="booking-table bookings-table rh-phone-actions rh-fold-actions" data-server-sort="1">
+                        <table class="booking-table bookings-table rh-phone-actions rh-fold-actions" data-server-sort="1" data-hotel-today="<?php echo htmlspecialchars(date('Y-m-d'), ENT_QUOTES); ?>">
                             <thead>
                                 <tr>
                                     <?php rh_server_sort_th('Ref', 'ref', $bk_sort_key, $bk_sort_dir, 'col-optional'); ?>
@@ -3736,6 +3707,9 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                         data-focus="booking-<?php echo (int)$booking['id']; ?>"
                                         data-status="<?php echo htmlspecialchars($is_deleted_row ? 'deleted' : $booking['status'], ENT_QUOTES); ?>"
                                         data-payment-status="<?php echo htmlspecialchars((string)($booking['payment_status'] ?: ($booking['actual_payment_status'] ?? '')), ENT_QUOTES); ?>"
+                                        <?php $bk_pay_flags = rh_bk_payment_flags($booking['payment_status'] ?? null, (string)$booking['status']); /* same rule as the Paid / Unpaid badges */ ?>
+                                        data-paid="<?php echo $bk_pay_flags['paid'] ? '1' : '0'; ?>"
+                                        data-unpaid="<?php echo $bk_pay_flags['unpaid'] ? '1' : '0'; ?>"
                                         data-check-in="<?php echo htmlspecialchars($booking['check_in_date'], ENT_QUOTES); ?>"
                                         data-check-out="<?php echo htmlspecialchars($booking['check_out_date'], ENT_QUOTES); ?>"
                                         data-created="<?php echo htmlspecialchars(date('Y-m-d', strtotime($booking['created_at'])), ENT_QUOTES); ?>"
@@ -4074,6 +4048,8 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         'filter_status' => $filter_status,
                         'date_from'     => $filter_date_from,
                         'date_to'       => $filter_date_to,
+                        'filter'        => $bk_filter_key,   // keep the open tab (Unpaid, Today's Check-ins...) on page 2+
+                        'arrival'       => $filter_arrival,
                     ], fn($v) => $v !== '');
                     $pg_params = array_merge($pg_params, rh_server_sort_params($bk_sort_key, $bk_sort_dir));
                     $pg_base = 'bookings.php?' . (empty($pg_params) ? '' : http_build_query($pg_params) . '&');
@@ -4530,10 +4506,12 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             const rows = table.querySelectorAll('tr');
             let visibleCount = 0;
 
-            // Get today's date in LOCAL timezone (toISOString would give UTC which is wrong for UTC+2)
-            const _now = new Date();
-            const todayStr = `${_now.getFullYear()}-${String(_now.getMonth()+1).padStart(2,'0')}-${String(_now.getDate()).padStart(2,'0')}`;
-            const today = new Date(_now.getFullYear(), _now.getMonth(), _now.getDate());
+            // "Today" is the hotel's date from the server (data-hotel-today), never the device clock, so a tablet
+            // with the wrong date or time zone cannot hide rows the server listed for today.
+            const _tbl = table.closest('table');
+            const todayStr = (_tbl && /^\d{4}-\d{2}-\d{2}$/.test(_tbl.dataset.hotelToday || '')) ? _tbl.dataset.hotelToday : <?php echo json_encode(date('Y-m-d')); ?>;
+            const _tp = todayStr.split('-').map(Number);
+            const today = new Date(_tp[0], _tp[1] - 1, _tp[2]);
 
             // Calculate week start (7 days ago)
             const weekStart = new Date(today);
@@ -4544,7 +4522,6 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
 
             rows.forEach(row => {
                 const status = (row.dataset.status || '').trim().toLowerCase();
-                const payment = (row.dataset.paymentStatus || '').trim().toLowerCase();
                 const checkInDateStr = row.dataset.checkIn || '';
                 const checkOutDateStr = row.dataset.checkOut || '';
                 const createdDateStr = row.dataset.created || '';
@@ -4595,11 +4572,11 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         isVisible = status === 'no-show';
                         break;
                     case 'paid':
-                        isVisible = payment === 'paid' || payment === 'completed';
+                        // Server rule (rh_bk_payment_flags): the booking's own payment status only.
+                        isVisible = row.dataset.paid === '1';
                         break;
                     case 'unpaid':
-                        isVisible = payment !== 'paid' && payment !== 'completed' && payment !== 'refunded'
-                            && status !== 'cancelled' && status !== 'no-show' && status !== 'expired';
+                        isVisible = row.dataset.unpaid === '1';
                         break;
                     case 'today-bookings':
                         isVisible = isTodayBooking;
@@ -4926,9 +4903,9 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
 
         function navigateToTab(tabName) {
             const params = new URLSearchParams(window.location.search);
-            params.delete('filter');
-            params.delete('filter_status');
-            params.delete('page');
+            // A tab replaces every list filter that is not in the search bar: tab shortcut, status (and its
+            // ?status= alias), overdue arrivals, Accounting's ?payment_status=, page.
+            ['filter', 'filter_status', 'status', 'arrival', 'payment_status', 'page'].forEach(k => params.delete(k));
             const tabFilter = TAB_FILTER_MAP[tabName];
             if (tabFilter) {
                 for (const [k, v] of Object.entries(tabFilter)) {
@@ -4954,9 +4931,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 if (tabBtn && !tabBtn.closest('.tabs-header')) return;
                 if (tabName === 'all') {
                     const params = new URLSearchParams(window.location.search);
-                    params.delete('filter');
-                    params.delete('filter_status');
-                    params.delete('page');
+                    ['filter', 'filter_status', 'status', 'arrival', 'payment_status', 'page'].forEach(k => params.delete(k));
                     loadBookingResults('bookings.php' + (params.toString() ? '?' + params.toString() : ''));
                 } else if (tabName) {
                     navigateToTab(tabName);
