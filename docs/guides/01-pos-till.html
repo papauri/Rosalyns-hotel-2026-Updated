@@ -496,6 +496,7 @@
     <li>If each amount is within 1.00 of what the system expects, the shift closes and a <strong>Shift closed</strong> window shows a table with <strong>Tender</strong>, <strong>Expected</strong>, <strong>Declared</strong> and <strong>Variance</strong> for Cash, Mobile and Card, plus orders, voids, tips collected and tabs settled from earlier. Under the table a line reads <em>Cash: Float ... + Cash sales ... &minus; Cash refunds ... = Expected cash ...</em>. You will see <em>"Shift closed. Paid orders: 24 (settled earlier tabs: 2). Variance &mdash; cash: 0.00, mobile: 0.00, card: 0.00."</em></li>
     <li>Click <strong>Print Z-report</strong> to print that window, or <strong>Continue</strong>.</li>
   </ol>
+  <p><strong>Charged to room.</strong> Orders you closed to a guest's room bill are shown as a <strong>Charged to room</strong> line (the number of orders and the amount). They count in the order count and the sales total. They are not cash, mobile or card, so they do not change the cash, mobile or card totals, tips, expected cash or over/short.</p>
   <h3>If your count does not balance</h3>
   <ul>
     <li>Without <strong>POS Shift Override</strong> you see <em>"Shift does not balance (variance 250.00). Recount the drawer or ask a supervisor to close on your behalf with an override."</em> Recount and try again, or ask a supervisor.</li>
@@ -513,6 +514,7 @@
     <li>Click <strong>Report</strong> on a row for one cashier's report. It shows <strong>Total Revenue</strong>, <strong>Paid Orders</strong>, <strong>Voids</strong>, <strong>Settled Tabs</strong>, then <strong>Tender Reconciliation</strong> with a <strong>Cash:</strong> line (<em>Float + Cash sales &minus; Cash refunds = Expected cash</em>; it says so if no float was recorded, and labels closes made before the float was included as not counting it) (<strong>Tender</strong>, <strong>System (Expected)</strong>, <strong>Counted (Declared)</strong>, <strong>Variance</strong>, <strong>Status</strong>, where Status is <strong>BALANCED</strong>, <strong>SHORTFALL</strong> or <strong>OVERAGE</strong>), <strong>Shift Notes</strong>, <strong>Top Items</strong>, <strong>Paid Orders</strong>, <strong>Refund / Void Payouts</strong> and <strong>Voided Orders</strong>.</li>
     <li>Use <strong>Print / Save PDF</strong> to print. A short cashier shows <em>"SHORTFALL DETECTED &mdash; cumulative variance ... Management review required."</em> An override close shows <em>"Override applied."</em> with the reason.</li>
   </ol>
+  <p>The <strong>Charged to room</strong> figure on an older Z view is read from the current data (<em>"read now"</em>). It can differ from the Z-report you printed at the time. The cash, mobile, card, tip, expected cash and over/short figures are not changed by this.</p>
   <p>For day-end money checks across the whole hotel see <a href="14-reports-eod.html">Reports and end of day</a>.</p>
 
   <h2 id="offline">What happens when the internet drops</h2>

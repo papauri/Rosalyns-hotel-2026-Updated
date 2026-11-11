@@ -94,6 +94,7 @@
   <p><strong>Revenue earned</strong> is what the hotel earned that day. <strong>Cash collected</strong> is the money that came in that day, minus refunds paid out. They are different on purpose: a deposit paid today for next month is cash collected today, but it is revenue earned only on the day it is earned.</p>
   <p>The email, PDF, WhatsApp message, Print and CSV use the same figures as the screen: <strong>Revenue earned</strong> first, then <strong>Cash collected</strong>.</p>
   <p>Room revenue paid for food and drink charged to a room is moved to the till figure so it is not counted twice.</p>
+  <p>The <strong>Charged to room</strong> line shows how many orders were closed to a guest's room bill, and their total. It follows the same rule as the Z-report: it is in the order count and sales total, and never in cash, mobile, card, tips or expected cash.</p>
 
   <h3>Rate plans and packages on the day</h3>
   <p>Open <strong>The day in detail</strong> and the <strong>Pricing &amp; quotes</strong> tab. The card <strong>Dynamic pricing &amp; packages</strong> counts the bookings made today:</p>
@@ -129,6 +130,7 @@
   <p>Further down are the <strong>POS sales log</strong> and the <strong>POS audit logs</strong> for the day.</p>
 
   <h2 id="z" data-module="pos">Z-report (shift close report)</h2>
+  <p>The Z-report has a <strong>Charged to room</strong> line: orders closed to a guest's room bill. They count in the order count and sales total. Cash, mobile, card, tips, expected cash and over/short do not change. On an older Z view this figure is read from current data (<em>"read now"</em>), so it can differ from the printed Z.</p>
   <p>Click <strong>Z-report</strong> on POS Accounting to see all the shift closes for the chosen date. Managers and admins only; anyone else gets <em>"Access denied."</em> It shows total revenue, orders, voids and net variance. A red banner warns of a <em>total shortfall across all cashiers</em> to investigate before sign-off. The table lists each cashier with their cash, mobile and card variance, an <strong>OVERRIDE</strong> tag where the close was approved despite a difference, and a <strong>View</strong> link.</p>
   <p>The single report for one close shows the cashier, date and time, record number, then <strong>Tender Reconciliation</strong> with a <strong>Cash:</strong> line showing <em>Float + Cash sales &minus; Cash refunds = Expected cash</em> (closes made before the float was included say the float was not part of their expected cash) (System (Expected), Counted (Declared), Variance, and BALANCED, SHORTFALL or OVERAGE for each of cash, mobile and card), notes, top items, the paid orders, refund and void payouts, and voided orders. A refund is counted once, when it was paid out, in the way it was paid (cash, card or mobile). A card bill partly refunded in cash and later fully refunded shows the cash part under cash and only the rest under card. Click <strong>Print / Save PDF</strong> to keep a copy. A cashier who is not a manager can open only their own closes. With no date given, the page shows the last 30 closes.</p>
 
