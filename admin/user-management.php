@@ -736,28 +736,28 @@ $nav_categories = getNavCategories();
                     <td>
                         <div class="actions-cell">
                             <?php if (hasPermission($user['id'], 'user_edit') && canManageUser($user['id'], $u['id'])): ?>
-                            <button type="button" class="btn-sm btn-edit" onclick="openEditModal(<?php echo htmlspecialchars(json_encode($u), ENT_QUOTES); ?>)">
-                                <i class="fas fa-edit"></i> Edit
+                            <button type="button" class="btn-sm btn-edit" title="Edit user" aria-label="Edit <?php echo htmlspecialchars((string)$u['full_name'], ENT_QUOTES); ?>" onclick="openEditModal(<?php echo htmlspecialchars(json_encode($u), ENT_QUOTES); ?>)">
+                                <i class="fas fa-edit" aria-hidden="true"></i> <span class="um-btn-label">Edit</span>
                             </button>
                             <?php endif; ?>
 
                             <?php /* Administrators: only a super admin edits their permissions; a super admin's never (owner 2026-11-11). */ ?>
                             <?php if (($u['role'] !== 'admin' || ($rh_editor_is_super && (int)($u['is_super_admin'] ?? 0) !== 1)) && hasPermission($user['id'], 'user_permissions') && canManageUser($user['id'], $u['id'])): ?>
-                            <button type="button" class="btn-sm btn-permissions" onclick="openPermissionsModal(<?php echo htmlspecialchars(json_encode($u), ENT_QUOTES); ?>)">
-                                <i class="fas fa-shield-alt"></i> Permissions
+                            <button type="button" class="btn-sm btn-permissions" title="Permissions" aria-label="Permissions for <?php echo htmlspecialchars((string)$u['full_name'], ENT_QUOTES); ?>" onclick="openPermissionsModal(<?php echo htmlspecialchars(json_encode($u), ENT_QUOTES); ?>)">
+                                <i class="fas fa-shield-alt" aria-hidden="true"></i> <span class="um-btn-label">Permissions</span>
                             </button>
                             <?php endif; ?>
 
                             <?php if ($u['id'] != $user['id'] && !empty($u['email']) && hasPermission($user['id'], 'user_edit') && canManageUser($user['id'], $u['id'])): ?>
-                            <button type="button" class="btn-sm btn-edit" title="Resend the invitation (a fresh one-time link to set their password)"
+                            <button type="button" class="btn-sm btn-edit" title="Resend the invitation (a fresh one-time link to set their password)" aria-label="Resend the invitation to <?php echo htmlspecialchars((string)$u['full_name'], ENT_QUOTES); ?>"
                                 onclick="if (confirm('Resend the invitation to <?php echo htmlspecialchars($u['full_name'], ENT_QUOTES); ?>? They get a fresh one-time link to set their password; earlier links stop working.')) { submitResendWelcome(<?php echo (int)$u['id']; ?>); }">
-                                <i class="fas fa-envelope"></i> Resend invitation
+                                <i class="fas fa-envelope" aria-hidden="true"></i> <span class="um-btn-label">Resend invitation</span>
                             </button>
                             <?php endif; ?>
 
                             <?php if ($u['id'] != $user['id'] && hasPermission($user['id'], 'user_delete') && canManageUser($user['id'], $u['id'])): ?>
-                            <button type="button" class="btn-sm btn-delete" onclick="confirmDelete(<?php echo $u['id']; ?>, '<?php echo htmlspecialchars($u['full_name'], ENT_QUOTES); ?>')">
-                                <i class="fas fa-trash"></i>
+                            <button type="button" class="btn-sm btn-delete" title="Delete user" aria-label="Delete <?php echo htmlspecialchars((string)$u['full_name'], ENT_QUOTES); ?>" onclick="confirmDelete(<?php echo $u['id']; ?>, '<?php echo htmlspecialchars($u['full_name'], ENT_QUOTES); ?>')">
+                                <i class="fas fa-trash" aria-hidden="true"></i>
                             </button>
                             <?php endif; ?>
                         </div>

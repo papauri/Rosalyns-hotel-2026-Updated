@@ -151,12 +151,6 @@
     width: auto;
 }
 
-/* rhPlaceActionMenu sizes the open menu from this narrow cell; the shared 180px minimum
-   would then push it past the screen edge. Let the placed width stand. */
-:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced .actions-more-menu {
-    min-width: 0;
-}
-
 /* ── Panel extras (rh-panel is the shared card) ──────────────── */
 .receipts-page .rh-panel,
 .receipts-page .receipts-scope-note {

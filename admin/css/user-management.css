@@ -235,9 +235,12 @@
     }
 }
 
+/* Phones: role and status side by side, actions one row of 44px icon buttons
+   (the four full-width labelled buttons stacked made each card ~465px tall).
+   Each button keeps its title and aria-label; the label text shows from 641px up. */
 @media (max-width: 40rem) {
     .users-table.mobile-enhanced tbody tr {
-        grid-template-columns: 1fr;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .users-table.mobile-enhanced td[data-label="User"] {
@@ -245,8 +248,34 @@
         padding-bottom: 0;
     }
 
-    .users-table.mobile-enhanced .actions-cell {
-        grid-template-columns: 1fr;
+    /* #rh-admin-page: outranks the shared card-mode rule that makes every action button full width */
+    #rh-admin-page .users-table.mobile-enhanced .actions-cell {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 8px;
+    }
+
+    #rh-admin-page .users-table.mobile-enhanced .actions-cell .btn-sm,
+    #rh-admin-page .users-table.mobile-enhanced .actions-cell button {
+        flex: 0 0 auto;
+        width: 2.75rem;
+        min-width: 2.75rem;
+        height: 2.75rem;
+        min-height: 2.75rem;
+        padding: 0;
+        gap: 0;
+        justify-content: center;
+        font-size: 0.95rem;
+    }
+
+    #rh-admin-page .users-table.mobile-enhanced .actions-cell .um-btn-label {
+        display: none;
+    }
+
+    /* A row with no actions for this person (e.g. your own row): no empty "Actions" line */
+    #rh-admin-page .users-table.mobile-enhanced td[data-label="Actions"]:not(:has(button)) {
+        display: none;
     }
 }
 
@@ -1164,11 +1193,6 @@
 @media (max-width: 768px) {
     .user-management-container {
         padding: 16px;
-    }
-
-    .users-table th:nth-child(5),
-    .users-table td:nth-child(5) {
-        display: none;
     }
 
     .perm-grid {

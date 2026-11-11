@@ -674,9 +674,6 @@ body .content .sdash-section table tbody td {
     .admin-card table.mobile-enhanced {
         min-width: 0;
     }
-    .mobile-enhanced-wrapper {
-        overflow-x: auto;
-    }
 }
 
 @media (max-width: 640px) {

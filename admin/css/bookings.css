@@ -2200,3 +2200,42 @@ hr.menu-divider {
     .bookings-table td:first-child strong,
     .bookings-table td small { white-space: nowrap; }
 }
+
+/* Phones: the bookings tabs are ONE row that scrolls sideways inside its own box (the only
+   sideways scroller allowed; the page never scrolls sideways). It wrapped to four rows.
+   Edge cue: the next tab is cut at the box edge and the thin gold scrollbar stays visible.
+   The active tab is scrolled into view by admin-components.js. Higher specificity than the
+   shared "tabs wrap" phone rule in admin-uniform.css. Toolbar actions share one row. */
+@media (max-width: 640px) {
+    #booking-results .tabs-header {
+        flex-wrap: nowrap !important;
+        overflow-x: auto !important;
+        overflow-y: hidden !important;
+        gap: 6px !important;
+        padding: 8px 8px 6px !important;
+        scroll-padding-inline: 8px;
+        overscroll-behavior-x: contain;
+        scrollbar-width: thin;
+        scrollbar-color: var(--gold, #8b7355) #f0f0f0;
+    }
+
+    #booking-results .tabs-header > .tab-button {
+        flex: 0 0 auto !important;
+        min-height: 44px;
+        padding-left: 10px !important;
+        padding-right: 10px !important;
+    }
+
+    .bookings-toolbar__actions {
+        flex-wrap: nowrap;
+        gap: 6px;
+    }
+
+    .bookings-toolbar__actions .bookings-toolbar__action {
+        flex: 1 1 0;
+        min-width: 0;
+        gap: 0.25rem;
+        padding-inline: 0.45rem !important;
+        font-size: 0.74rem !important;
+    }
+}

@@ -636,7 +636,11 @@
     .ck-row__act .ck-btn { width: 100%; min-height: 42px; }
     .ck-row .ck-row__meta { display: flex; grid-column: 2; flex-direction: row; align-items: center; justify-content: flex-start; flex-wrap: wrap; min-width: 0; margin-top: -6px; }
     .ck-avatar, .ck-date { width: 38px; height: 38px; }
-    .ck-rooms__body { grid-template-columns: 1fr; justify-items: center; }
+    .ck-rooms__body { grid-template-columns: 1fr; justify-items: center; gap: 10px; }
+    /* Smaller donut on phones (148px filled the panel); the legend sits close under it */
+    .ck-donut { width: 112px; }
+    .ck-donut__hole strong { font-size: 20px; }
+    .ck-donut__hole small { font-size: 10px; margin-top: 2px; }
     .ck-legend { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
     .ck-days { gap: 4px; }
     .ck-day { padding: 8px 2px; border-radius: 12px; }

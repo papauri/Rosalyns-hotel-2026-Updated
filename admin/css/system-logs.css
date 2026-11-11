@@ -798,3 +798,44 @@
         margin-right: 12px;
     }
 }
+
+/* Phones: the help text keeps every word but takes fewer lines - smaller type, tighter
+   spacing, and each "What each figure counts" entry runs on as one paragraph (name, then meaning). */
+@media (max-width: 640px) {
+    .sa__head {
+        padding-top: 10px;
+    }
+
+    .sa__head p,
+    .sa__note,
+    .log-attention__note {
+        font-size: 12px;
+        line-height: 1.4;
+    }
+
+    .sa__legend {
+        padding: 6px 10px;
+        font-size: 12px;
+        line-height: 1.4;
+    }
+
+    .sa__legend summary {
+        min-height: 44px;
+        padding: 13px 0;
+        box-sizing: border-box;
+    }
+
+    .sa__legend dl {
+        gap: 6px;
+        margin: 2px 0 4px;
+    }
+
+    .sa__legend dt,
+    .sa__legend dd {
+        display: inline;
+    }
+
+    .sa__legend dt {
+        margin-right: 4px;
+    }
+}

@@ -717,3 +717,26 @@ body.cf-dragging { cursor: grabbing; user-select: none; -webkit-user-select: non
 .cf-drop-note { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 13px; color: #3e3930; }
 .cf-drop-note[hidden] { display: none; }
 .cf-drop-thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 6px; border: 1px solid #d3cbc0; }
+
+/* Tablets and phones: the card's toggles, More and Edit Room share one row of 44px buttons
+   (they were two rows: icons, then a full-width Edit button). Same as room-management.css. */
+@media (max-width: 1024px), (pointer: coarse) {
+    .conference-card-actions {
+        flex-direction: row;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .conference-card-actions .cmc-toolbar {
+        flex: 1 1 auto;
+        min-width: 0;
+        gap: 6px;
+    }
+
+    .conference-card-actions .cmc-edit-btn {
+        flex: 0 0 auto;
+        width: auto;
+        min-height: 44px;
+        padding: 0 16px;
+    }
+}

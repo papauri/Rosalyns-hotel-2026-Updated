@@ -233,6 +233,9 @@ button.ck-kpi { font: inherit; text-align: left; width: 100%; }
     .ck-kpi__sub { font-size: 11.5px; }
     .ck-kpi:is(a[href], button, [role="button"], [data-href], [onclick])::after { right: 12px; bottom: 12px; }
     .ck-kpi:is(a[href], button, [role="button"], [data-href], [onclick]) .ck-kpi__sub { padding-right: 14px; }
+    /* Kitchen/bar screens (KDS served report) do not load admin-main.js, which shrinks money
+       values to fit; there the currency may drop onto its own line instead of overflowing. */
+    .station-screen .ck-kpi__value--money { white-space: normal; overflow-wrap: normal; line-height: 1.15; }
 }
 @media (max-width: 340px) {
     .ck-kpis,

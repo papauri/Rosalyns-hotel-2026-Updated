@@ -968,6 +968,7 @@
             b.classList.remove('active');
         });
         btn.classList.add('active');
+        revealActiveTab(header, btn);
 
         const tabName = btn.dataset.tab || '';
 
@@ -984,6 +985,32 @@
             window.__pageTabHandler(tabName, btn);
         }
     }, true); // capture phase so page handlers can still stopPropagation if needed
+
+    // A tab strip that scrolls sideways (Bookings on phones) keeps its active tab in view.
+    // Only the strip's own scrollLeft moves, never the page. No-op when the tabs fit or wrap.
+    function revealActiveTab(strip, btn) {
+        if (!strip || strip.scrollWidth <= strip.clientWidth + 1) return;
+        btn = btn || strip.querySelector('.tab-button.active');
+        if (!btn) return;
+        const s = strip.getBoundingClientRect();
+        const b = btn.getBoundingClientRect();
+        const pad = 8;
+        if (b.left < s.left + pad) {
+            strip.scrollLeft -= (s.left + pad - b.left);
+        } else if (b.right > s.right - pad) {
+            strip.scrollLeft += (b.right - (s.right - pad));
+        }
+    }
+    function revealAllActiveTabs() {
+        document.querySelectorAll('.tabs-header').forEach(function (strip) { revealActiveTab(strip, null); });
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', revealAllActiveTabs);
+    } else {
+        revealAllActiveTabs();
+    }
+    window.addEventListener('load', revealAllActiveTabs);
+    document.addEventListener('rh:content-updated', revealAllActiveTabs);
 })();
 
 /**
@@ -1001,6 +1028,10 @@
 
     window.rhPlaceActionMenu = function (btn, menu) {
         if (!btn || !menu) return;
+        // The stylesheet's minimum width (180px for the shared menu), read before the inline
+        // styles below override it. Computed style needs no layout, so display:none is fine here.
+        menu.style.cssText = '';
+        var cssMinW = parseFloat(window.getComputedStyle(menu).minWidth) || 0;
         // Take the menu out of the page flow BEFORE anything is read (reading the viewport size
         // can flush layout): an in-flow menu briefly stretches the row, and the browser's scroll
         // anchoring then scrolls the page, which would close the menu it just opened.
@@ -1035,13 +1066,16 @@
         // Measure the natural size.
         var probe = menu.getBoundingClientRect();
         var offsetX = probe.left, offsetY = probe.top; // non-zero when an ancestor is transformed
+        // Real width: the widest item, never below the stylesheet minimum (menus clipped at the
+        // screen edge when the narrow phone cell set the width and CSS then widened it to 180px).
+        var natW = Math.max(probe.width, menu.scrollWidth * z, cssMinW * z);
 
         var width, left;
         if (cardMode) {
-            width = Math.min(Math.max(a.width, probe.width), maxW);
+            width = Math.min(Math.max(a.width, natW), maxW);
             left = a.left;
         } else {
-            width = Math.min(Math.max(probe.width, 220 * z), maxW);
+            width = Math.min(Math.max(natW, 220 * z), maxW);
             left = b.right - width;
         }
         left = Math.min(Math.max(left, pad), vw - pad - width);
@@ -1065,7 +1099,7 @@
         maxH = Math.max(120, Math.min(maxH, Math.floor(vh - pad - top)));
 
         var place = function (x, y) {
-            menu.style.cssText = 'display:block;position:fixed;z-index:12050;left:' + Math.round(x) + 'px;top:' + Math.round(y) + 'px;right:auto;margin:0;transform:none;'
+            menu.style.cssText = 'display:block;position:fixed;z-index:12050;left:' + Math.round(x) + 'px;top:' + Math.round(y) + 'px;right:auto;margin:0;transform:none;min-width:0;'
                 + 'width:' + Math.round(width / z) + 'px;max-width:' + Math.floor((vw - pad * 2) / z) + 'px;max-height:' + Math.floor(maxH / z) + 'px;overflow-y:auto;overflow-x:hidden;';
         };
         var x = (left - offsetX) / z, y = (top - offsetY) / z;

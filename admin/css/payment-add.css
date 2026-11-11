@@ -479,18 +479,6 @@
     margin-bottom: 1rem;
 }
 
-/* Phones: four type buttons don't fit one row; two per row, labels on one line */
-@media (max-width: 600px) {
-    .pa-picker__type-row {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .pa-type-btn {
-        padding: 0.6rem 0.5rem;
-    }
-}
-
 .pa-type-btn {
     flex: 1;
     display: inline-flex;
@@ -508,6 +496,29 @@
     font-family: inherit;
     cursor: pointer;
     transition: border-color 0.15s, background 0.15s, color 0.15s;
+}
+
+/* Phones: four type buttons don't fit one row; two per row, labels on one line.
+   After the base rule so its padding wins (it came first and was overridden). */
+@media (max-width: 600px) {
+    .pa-picker__type-row {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .pa-type-btn {
+        min-width: 0;
+        min-height: 44px;
+        gap: 0.3rem;
+        padding: 0.6rem 0.4rem;
+    }
+}
+
+/* Smallest phones (320px): "Room Booking" fits its half-width button */
+@media (max-width: 360px) {
+    .pa-type-btn {
+        font-size: 0.8rem;
+    }
 }
 
 .pa-type-btn:hover {

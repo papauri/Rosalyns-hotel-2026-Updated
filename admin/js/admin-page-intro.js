@@ -218,13 +218,18 @@
         ];
         const selector = commonContainerSelectors.join(', ');
 
+        /* The licence notice prints in its own .content wrapper (includes/licence-guard.php).
+           It is not the page, so it never gets a page title (the title showed twice). Left out
+           before the fallbacks, so the page's real container is still found. */
+        const isLicenceWrapper = (node) => !!node.querySelector(':scope > #rhLicenceBanner');
+
         const directRoots = Array.from(shell.children).filter((node) => {
-            return node instanceof HTMLElement && node.matches(selector);
+            return node instanceof HTMLElement && node.matches(selector) && !isLicenceWrapper(node);
         });
 
         const roots = directRoots.length > 0
             ? directRoots
-            : Array.from(shell.querySelectorAll(':scope > ' + selector));
+            : Array.from(shell.querySelectorAll(':scope > ' + selector)).filter((node) => !isLicenceWrapper(node));
 
         const fallbackRoots = roots.length > 0
             ? roots
@@ -238,6 +243,10 @@
                 }
 
                 if (node.matches('.admin-modal-overlay, .modal-overlay, .modal, [role="dialog"]')) {
+                    return false;
+                }
+
+                if (isLicenceWrapper(node)) {
                     return false;
                 }
 

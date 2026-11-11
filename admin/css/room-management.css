@@ -524,3 +524,26 @@ body.rm-dragging { cursor: grabbing; user-select: none; -webkit-user-select: non
 .room-card .detail-item { display: flex; align-items: center; }
 .room-card .detail-item i { flex: 0 0 auto; }
 .detail-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Tablets and phones: the card's toggles, More and Edit Room share one row of 44px buttons
+   (they were two rows: icons, then a full-width Edit button). */
+@media (max-width: 1024px), (pointer: coarse) {
+    .room-card-actions {
+        flex-direction: row;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .room-card-actions .rmc-toolbar {
+        flex: 1 1 auto;
+        min-width: 0;
+        gap: 6px;
+    }
+
+    .room-card-actions .rmc-edit-btn {
+        flex: 0 0 auto;
+        width: auto;
+        min-height: 44px;
+        padding: 0 16px;
+    }
+}

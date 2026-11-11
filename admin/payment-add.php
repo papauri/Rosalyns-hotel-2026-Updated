@@ -725,10 +725,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
         <!-- Hero header -->
         <div class="payment-workspace__hero" id="pa-hero">
             <div>
-                <span class="payment-workspace__eyebrow">Finance</span>
-                <h1 class="payment-workspace__title">
-                    <?php echo $editId ? 'Edit Payment' : 'Record New Payment'; ?>
-                </h1>
+                <?php /* The page title (Record Payment / Edit Payment) is the shared page header above; no second title here. */ ?>
                 <p class="payment-workspace__subtitle">
                     <?php if ($editId): ?>
                         Updating payment record. Receipts and booking balances will be recalculated on save.
