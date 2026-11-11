@@ -197,7 +197,12 @@ if (!function_exists('rh_daily_reports_parse_recipients')) {
         $html .= '<p style="color:#666;font-size:12px;">This is an automated report. CSVs are UTF-8.</p>';
 
         /* ---------------- send ---------------- */
-        $result = sendReportEmail($recipients, $subject, $html, $attachments, '', array_values((array)($opts['cc'] ?? [])));
+        $emailCtx = function_exists('rh_email_context') ? rh_email_context(['kind' => 'daily_report']) : null; // System Logs > Emails sent
+        try {
+            $result = sendReportEmail($recipients, $subject, $html, $attachments, '', array_values((array)($opts['cc'] ?? [])));
+        } finally {
+            $emailCtx = null;
+        }
 
         return [
             'sections' => $sections,

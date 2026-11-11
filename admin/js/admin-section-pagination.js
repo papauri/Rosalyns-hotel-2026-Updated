@@ -5,6 +5,9 @@
     window.__adminSectionPaginationInitialized = true;
 
     var PAGE_SIZE = 10;
+    // Owner 2026-11-12: lists show 10 per page and the user can choose to show more. A table inside an element with
+    // data-page-size-picker gets a "Show 10 / 25 / 50 / 100 per page" choice next to its pager (opt-in per screen).
+    var PAGE_SIZE_CHOICES = [10, 25, 50, 100];
 
     function getLoaderBrandName() {
         var brand = document.querySelector('.admin-header-brand h1');
@@ -216,10 +219,13 @@
 
         table.dataset.adminAutoPaginationBound = '1';
 
+        var hasSizePicker = !!table.closest('[data-page-size-picker]');
+        var pageSize = PAGE_SIZE;
+
         // Rows a page script has filtered out (data-filter-hidden="1") do not count: pages, the
         // "Showing x-y of n" summary and the pager all follow the rows that match the filter.
         var totalRows = rows.length;
-        var totalPages = Math.ceil(totalRows / PAGE_SIZE);
+        var totalPages = Math.ceil(totalRows / pageSize);
         var currentPage = 1;
 
         function matchingRows() {
@@ -228,7 +234,7 @@
 
         function syncTotals() {
             totalRows = matchingRows().length;
-            totalPages = Math.max(1, Math.ceil(totalRows / PAGE_SIZE));
+            totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
         }
 
         var nav = document.createElement('nav');
@@ -255,8 +261,8 @@
         var baseMargin = null;
 
         function showRows(page) {
-            var from = (page - 1) * PAGE_SIZE;
-            var to = from + PAGE_SIZE;
+            var from = (page - 1) * pageSize;
+            var to = from + pageSize;
             var index = 0;
             rows.forEach(function (row) {
                 if (row.dataset.filterHidden === '1') { row.hidden = true; return; }
@@ -308,8 +314,8 @@
             rows = collectDataRows(tbody); // follow the live DOM order (a header sort re-orders rows)
             syncTotals();
             currentPage = Math.max(1, Math.min(totalPages, targetPage));
-            var from = (currentPage - 1) * PAGE_SIZE;
-            var to = from + PAGE_SIZE;
+            var from = (currentPage - 1) * pageSize;
+            var to = from + pageSize;
 
             if (!tallestPage) measureTallestPage();
             showRows(currentPage);
@@ -358,8 +364,33 @@
             summary.className = 'pg-summary';
             summary.textContent = totalRows === 0 ? 'Showing 0 of 0' : 'Showing ' + (from + 1) + '–' + Math.min(to, totalRows) + ' of ' + totalRows;
             // One page or none: the page buttons would only be disabled, so show just the summary.
-            nav.classList.toggle('admin-auto-pagination--single', totalRows <= PAGE_SIZE);
+            nav.classList.toggle('admin-auto-pagination--single', totalRows <= pageSize);
             nav.appendChild(summary);
+
+            if (hasSizePicker) {
+                var sizeLabel = document.createElement('label');
+                sizeLabel.className = 'pg-size';
+                sizeLabel.appendChild(document.createTextNode('Show '));
+                var sizeSelect = document.createElement('select');
+                sizeSelect.setAttribute('aria-label', 'Rows per page');
+                PAGE_SIZE_CHOICES.forEach(function (n) {
+                    var opt = document.createElement('option');
+                    opt.value = String(n);
+                    opt.textContent = String(n);
+                    if (n === pageSize) opt.selected = true;
+                    sizeSelect.appendChild(opt);
+                });
+                sizeSelect.addEventListener('change', function () {
+                    var next = parseInt(sizeSelect.value, 10);
+                    if (PAGE_SIZE_CHOICES.indexOf(next) === -1) return;
+                    pageSize = next;
+                    tallestPage = 0;
+                    renderPage(1, false);
+                });
+                sizeLabel.appendChild(sizeSelect);
+                sizeLabel.appendChild(document.createTextNode(' per page'));
+                nav.appendChild(sizeLabel);
+            }
 
             if (shouldScroll) {
                 window.requestAnimationFrame(scrollHostIntoView);

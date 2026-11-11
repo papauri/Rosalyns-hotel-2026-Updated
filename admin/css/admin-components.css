@@ -2292,6 +2292,56 @@ body:not(:has(> .admin-header)) .admin-page-loader {
     display: none;
 }
 
+/* Rows-per-page choice next to the table pager (admin-section-pagination.js, data-page-size-picker) */
+.admin-auto-pagination .pg-size {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: 10px;
+    font-size: 13px;
+    color: #475569;
+    white-space: nowrap;
+}
+
+.admin-auto-pagination .pg-size select {
+    min-height: 32px;
+    padding: 4px 8px;
+    border: 1px solid #d9dee6;
+    border-radius: 6px;
+    background: #fff;
+    font: inherit;
+}
+
+/* Optional tick box in the confirm dialog (data-admin-confirm-check), e.g. "Email the guest" on a cancel */
+.admin-confirm-check {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    margin-top: 14px;
+    color: #334155;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.admin-confirm-check[hidden] {
+    display: none;
+}
+
+.admin-confirm-check input {
+    margin-top: 2px;
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+}
+
+.admin-confirm-check small {
+    display: block;
+    margin-top: 3px;
+    color: #64748b;
+    font-weight: 400;
+}
+
 .admin-confirm-input-wrap textarea {
     width: 100%;
     min-height: 92px;

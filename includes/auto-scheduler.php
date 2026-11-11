@@ -207,11 +207,19 @@ if (!function_exists('rh_auto_defaults')) {
             'redirect' => trim(rh_auto_setting('automated_email_test_recipient')),
             'bcc'      => $bcc,
         ];
+        // Email send log: every email a job sends is "by System (scheduler)", even when the scheduler runs inside a
+        // staff member's page request (includes/email-send-log.php).
+        require_once __DIR__ . '/email-send-log.php'; // pure helpers, connects to nothing
+        // Fresh: never inherit a context a page left open (the scheduler runs after the page in the same request).
+        $GLOBALS['rh_auto_email_ctx_guard'] = rh_email_context_fresh(['by_label' => 'System (scheduler)']);
     }
 
     function rh_auto_ctx_end(): void
     {
-        unset($GLOBALS['rh_automated_ctx']);
+        unset($GLOBALS['rh_automated_ctx'], $GLOBALS['rh_auto_email_ctx_guard']);
+        if (function_exists('rh_email_context_clear')) {
+            rh_email_context_clear();
+        }
     }
 
     /* ── idempotency log ─────────────────────────────────────────────── */

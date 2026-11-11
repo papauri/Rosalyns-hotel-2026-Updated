@@ -1446,6 +1446,10 @@
                 '<span id="adminConfirmInputLabel">Reason</span>',
                 '<textarea id="adminConfirmInput" rows="3"></textarea>',
                 '</label>',
+                '<label id="adminConfirmCheckWrap" class="admin-confirm-check" hidden>',
+                '<input type="checkbox" id="adminConfirmCheck">',
+                '<span><span id="adminConfirmCheckLabel"></span><small id="adminConfirmCheckHelp"></small></span>',
+                '</label>',
                 '</div>',
                 '<div class="admin-confirm-actions">',
                 '<button type="button" class="btn btn-secondary" data-admin-confirm-cancel>Cancel</button>',
@@ -1499,6 +1503,10 @@
 
             const input = modal.querySelector('#adminConfirmInput');
             const value = input ? input.value : '';
+            const check = modal.querySelector('#adminConfirmCheck');
+            const checkWrap = modal.querySelector('#adminConfirmCheckWrap');
+            const checkShown = !!(check && checkWrap && !checkWrap.hidden);
+            const checked = !!(check && check.checked);
             modal.classList.remove('active');
             document.body.classList.remove('modal-open');
             document.removeEventListener('keydown', handleConfirmKeydown);
@@ -1507,7 +1515,7 @@
             }
             const resolve = activeResolve;
             activeResolve = null;
-            resolve({ confirmed: !!confirmed, value: value });
+            resolve({ confirmed: !!confirmed, value: value, checked: checked, checkShown: checkShown });
         }
 
         function handleConfirmKeydown(event) {
@@ -1557,6 +1565,17 @@
             input.value = opts.inputValue || '';
             input.placeholder = opts.inputPlaceholder || '';
             modal.querySelector('#adminConfirmInputLabel').textContent = opts.inputLabel || 'Reason';
+
+            // Optional tick box (data-admin-confirm-check): e.g. "Email the guest" on a cancel.
+            const checkWrap = modal.querySelector('#adminConfirmCheckWrap');
+            if (checkWrap) {
+                checkWrap.hidden = !opts.check;
+                if (opts.check) {
+                    modal.querySelector('#adminConfirmCheck').checked = !!opts.check.checked;
+                    modal.querySelector('#adminConfirmCheckLabel').textContent = opts.check.label || '';
+                    modal.querySelector('#adminConfirmCheckHelp').textContent = opts.check.help || '';
+                }
+            }
 
             modal.classList.add('active');
             document.body.classList.add('modal-open');
@@ -1618,8 +1637,18 @@
             }
 
             event.preventDefault();
-            window.AdminConfirm.request(confirmOptionsFrom(confirmTarget)).then(function (confirmed) {
-                if (!confirmed) return;
+            const confirmOpts = confirmOptionsFrom(confirmTarget);
+            const checkField = confirmTarget.dataset.adminConfirmCheck
+                ? form.querySelector('input[type="hidden"][name="' + String(confirmTarget.dataset.adminConfirmCheck).replace(/[^A-Za-z0-9_-]/g, '') + '"]')
+                : null;
+            if (checkField) {
+                confirmOpts.check = {
+                    label: confirmTarget.dataset.adminConfirmCheckLabel || '',
+                    help: confirmTarget.dataset.adminConfirmCheckHelp || '',
+                    checked: checkField.value !== '0'
+                };
+            }
+            const proceed = function () {
                 form.dataset.adminConfirmBypass = '1';
                 if (typeof form.requestSubmit === 'function' && submitter && submitter.form === form) {
                     form.requestSubmit(submitter);
@@ -1628,6 +1657,20 @@
                 } else {
                     HTMLFormElement.prototype.submit.call(form);
                 }
+            };
+            if (!checkField) {
+                window.AdminConfirm.request(confirmOpts).then(function (confirmed) {
+                    if (!confirmed) return;
+                    proceed();
+                });
+                return;
+            }
+            request(confirmOpts).then(function (result) {
+                if (!result.confirmed) return;
+                // The tick box answer goes into the form's hidden field ('1' ticked, '0' unticked). When the box was
+                // not on screen the field keeps its default, so the old behaviour stays.
+                if (result.checkShown) checkField.value = result.checked ? '1' : '0';
+                proceed();
             });
         });
     }

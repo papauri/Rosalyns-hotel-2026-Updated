@@ -16,6 +16,8 @@ require_once __DIR__ . '/document-theme.php';
 require_once __DIR__ . '/../includes/conference-pricing.php';
 // Email identity: From = SMTP mailbox, Reply-To/contact = hotel address, hidden copies, alert recipients
 require_once __DIR__ . '/../includes/email-identity.php';
+// Email send log (System Logs > Emails sent, booking History): who sent what, when, to whom
+require_once __DIR__ . '/../includes/email-send-log.php';
 
 // WhatsApp notification functions
 if (file_exists(__DIR__ . '/../includes/whatsapp-functions.php')) {
@@ -199,6 +201,7 @@ function sendEmail(string $to, ?string $toName, string $subject, string $htmlBod
             if ($email_log_enabled) {
                 logEmail($to, $toName, $subject, 'sent');
             }
+            rh_email_send_log_mail('sent', $mail, $subject, '', $to, $toName);
 
             return [
                 'success' => true,
@@ -209,6 +212,7 @@ function sendEmail(string $to, ?string $toName, string $subject, string $htmlBod
             // never a fatal that aborts the caller after its data was already saved.
             if (!($e instanceof Exception)) {
                 error_log('sendEmail error: ' . $e->getMessage());
+                rh_email_send_log_mail('failed', $mail ?? null, $subject, $e->getMessage(), $to, $toName);
                 return ['success' => false, 'message' => 'Failed to send email: ' . $e->getMessage()];
             }
             // PHPMailer exception: retry / report below.
@@ -226,6 +230,7 @@ function sendEmail(string $to, ?string $toName, string $subject, string $htmlBod
             if ($email_log_enabled) {
                 logEmail($to, $toName, $subject, 'failed', $e->getMessage());
             }
+            rh_email_send_log_mail('failed', $mail ?? null, $subject, $e->getMessage(), $to, $toName);
 
             // If development mode, show preview instead of failing
             if ($development_mode) {
@@ -330,6 +335,7 @@ function sendEmailWithAttachments(string $to, ?string $toName, string $subject, 
             if ($email_log_enabled) {
                 logEmail($to, $toName, $subject, 'sent', '', 'attachments=' . count($attachments));
             }
+            rh_email_send_log_mail('sent', $mail, $subject, '', $to, $toName);
 
             return [
                 'success' => true,
@@ -347,6 +353,7 @@ function sendEmailWithAttachments(string $to, ?string $toName, string $subject, 
             if ($email_log_enabled) {
                 logEmail($to, $toName, $subject, 'failed', $e->getMessage(), 'attachments=' . count($attachments));
             }
+            rh_email_send_log_mail('failed', $mail ?? null, $subject, $e->getMessage(), $to, $toName);
 
             if ($development_mode) {
                 return createEmailPreview($to, $toName, $subject, $htmlBody, $textBody);
@@ -367,6 +374,7 @@ function sendEmailWithAttachments(string $to, ?string $toName, string $subject, 
  */
 function sendSimpleStatusUpdateEmail(array $booking, string $status)
 {
+    $emailCtx = rh_email_context(['kind' => 'booking_status_update'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $email_site_name, $email_from_email, $email_site_url;
 
     try {
@@ -457,6 +465,7 @@ function createEmailPreview(string $to, ?string $toName, string $subject, string
     if ($email_log_enabled) {
         logEmail($to, $toName, $subject, 'preview');
     }
+    rh_email_send_log_write(['status' => 'preview', 'to' => $to, 'to_name' => (string)$toName, 'subject' => $subject]);
 
     // Create email preview file
     $previewDir = __DIR__ . '/../logs/email-previews';
@@ -2428,7 +2437,7 @@ function logCancellationToFile(string $booking_reference, string $booking_type, 
 
     $logFile = $logDir . '/cancellations.log';
     $timestamp = date('Y-m-d H:i:s');
-    $emailStatus = $email_sent ? 'SENT' : 'FAILED';
+    $emailStatus = $email_sent ? 'SENT' : (strpos($email_status, 'Not sent:') === 0 ? 'NOT SENT' : 'FAILED');
 
     $logEntry = "[$timestamp] CANCELLATION - Ref: $booking_reference | Type: $booking_type | Email: $guest_email | Cancelled by: $cancelled_by_name | Reason: $cancellation_reason | Email: $emailStatus ($email_status)\n";
 
@@ -2477,6 +2486,7 @@ if (!function_exists('rh_booking_tax_rows_html')) {
  */
 function sendBookingReceivedEmail(array $booking)
 {
+    $emailCtx = rh_email_context(['kind' => 'booking_received'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url;
 
     try {
@@ -2577,6 +2587,7 @@ function sendBookingReceivedEmail(array $booking)
  */
 function sendBookingConfirmedEmail(array $booking)
 {
+    $emailCtx = rh_email_context(['kind' => 'booking_confirmed'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url;
 
     try {
@@ -2702,6 +2713,7 @@ function sendBookingConfirmedEmail(array $booking)
  */
 function sendBookingModifiedEmail(array $booking, array $changes = [])
 {
+    $emailCtx = rh_email_context(['kind' => 'booking_modified'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url;
 
     try {
@@ -2792,6 +2804,7 @@ function sendBookingModifiedEmail(array $booking, array $changes = [])
  */
 function sendAdminNotificationEmail(array $booking)
 {
+    $emailCtx = rh_email_context(['kind' => 'staff_new_booking_alert'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url, $pdo;
 
     try {
@@ -2972,6 +2985,7 @@ function sendAdminNotificationEmail(array $booking)
  */
 function sendConferenceEnquiryEmail(array $data)
 {
+    $emailCtx = rh_email_context(['kind' => 'conference_enquiry'] + rh_email_ctx_account('conference', $data['id'] ?? null, $data['inquiry_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url;
 
     try {
@@ -3102,6 +3116,7 @@ function sendConferenceEnquiryEmail(array $data)
  */
 function sendConferenceAdminNotificationEmail(array $data)
 {
+    $emailCtx = rh_email_context(['kind' => 'conference_staff_alert'] + rh_email_ctx_account('conference', $data['id'] ?? null, $data['inquiry_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url;
 
     try {
@@ -3228,6 +3243,7 @@ function sendConferenceAdminNotificationEmail(array $data)
  */
 function sendConferencePaymentEmail(array $data)
 {
+    $emailCtx = rh_email_context(['kind' => 'conference_payment'] + rh_email_ctx_account('conference', $data['id'] ?? null, $data['inquiry_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url;
 
     try {
@@ -3349,6 +3365,7 @@ function sendConferencePaymentEmail(array $data)
  */
 function sendConferenceConfirmedEmail(array $enquiry)
 {
+    $emailCtx = rh_email_context(['kind' => 'conference_confirmed'] + rh_email_ctx_account('conference', $enquiry['id'] ?? null, $enquiry['inquiry_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url;
 
     try {
@@ -3457,6 +3474,7 @@ function sendConferenceConfirmedEmail(array $enquiry)
  */
 function sendConferenceCancelledEmail(array $enquiry)
 {
+    $emailCtx = rh_email_context(['kind' => 'conference_cancelled'] + rh_email_ctx_account('conference', $enquiry['id'] ?? null, $enquiry['inquiry_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url;
 
     try {
@@ -3521,6 +3539,7 @@ function sendConferenceCancelledEmail(array $enquiry)
  */
 function sendGymConfirmedEmail(array $inquiry)
 {
+    $emailCtx = rh_email_context(['kind' => 'gym_confirmed'] + rh_email_ctx_account('gym', $inquiry['id'] ?? null, $inquiry['reference_number'] ?? null)); // System Logs > Emails sent: what this email is about
     global $email_from_email, $email_site_name;
 
     try {
@@ -3577,6 +3596,7 @@ function sendGymConfirmedEmail(array $inquiry)
  */
 function sendGymCancelledEmail(array $inquiry)
 {
+    $emailCtx = rh_email_context(['kind' => 'gym_cancelled'] + rh_email_ctx_account('gym', $inquiry['id'] ?? null, $inquiry['reference_number'] ?? null)); // System Logs > Emails sent: what this email is about
     global $email_from_email, $email_site_name;
 
     try {
@@ -3630,6 +3650,7 @@ function sendGymCancelledEmail(array $inquiry)
  */
 function sendGymQuotationEmail(array $inquiry, array $options = []): array
 {
+    $emailCtx = rh_email_context(['kind' => 'gym_quotation'] + rh_email_ctx_account('gym', $inquiry['id'] ?? null, $inquiry['reference_number'] ?? null)); // System Logs > Emails sent: what this email is about
     global $email_log_enabled, $email_site_name;
 
     try {
@@ -3735,6 +3756,7 @@ function sendGymQuotationEmail(array $inquiry, array $options = []): array
  */
 function sendEventBookingConfirmedEmail(array $inquiry): array
 {
+    $emailCtx = rh_email_context(['kind' => 'event_confirmed'] + rh_email_ctx_account('event', $inquiry['id'] ?? null, $inquiry['reference_number'] ?? null)); // System Logs > Emails sent: what this email is about
     global $email_from_email, $email_site_name;
 
     try {
@@ -3788,6 +3810,7 @@ function sendEventBookingConfirmedEmail(array $inquiry): array
  */
 function sendEventCancelledEmail(array $inquiry): array
 {
+    $emailCtx = rh_email_context(['kind' => 'event_cancelled'] + rh_email_ctx_account('event', $inquiry['id'] ?? null, $inquiry['reference_number'] ?? null)); // System Logs > Emails sent: what this email is about
     global $email_from_email, $email_site_name;
 
     try {
@@ -3846,6 +3869,7 @@ function sendEventCancelledEmail(array $inquiry): array
  */
 function sendEventInquiryQuotationEmail(array $inquiry, array $options = []): array
 {
+    $emailCtx = rh_email_context(['kind' => 'event_quotation'] + rh_email_ctx_account('event', $inquiry['id'] ?? null, $inquiry['reference_number'] ?? null)); // System Logs > Emails sent: what this email is about
     global $email_log_enabled, $email_site_name;
 
     try {
@@ -3949,6 +3973,7 @@ function sendEventInquiryQuotationEmail(array $inquiry, array $options = []): ar
  */
 function sendBookingCancelledEmail(array $booking, string $cancellation_reason = '')
 {
+    $emailCtx = rh_email_context(['kind' => 'booking_cancelled'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url;
 
     try {
@@ -4066,6 +4091,7 @@ function sendBookingCancelledEmail(array $booking, string $cancellation_reason =
  */
 function sendBookingRoomUpgradeEmail(array $booking)
 {
+    $emailCtx = rh_email_context(['kind' => 'booking_room_upgrade'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url;
 
     try {
@@ -4237,6 +4263,7 @@ function sendEmailWithCC(string $to, ?string $toName, string $subject, string $h
         if ($email_log_enabled) {
             logEmail($to, $toName, $subject, 'sent');
         }
+        rh_email_send_log_mail('sent', $mail, $subject, '', $to, $toName);
 
         return [
             'success' => true,
@@ -4249,6 +4276,7 @@ function sendEmailWithCC(string $to, ?string $toName, string $subject, string $h
         if ($email_log_enabled) {
             logEmail($to, $toName, $subject, 'failed', $e->getMessage());
         }
+        rh_email_send_log_mail('failed', $mail ?? null, $subject, $e->getMessage(), $to, $toName);
 
         // If development mode, show preview instead of failing
         if ($development_mode) {
@@ -4340,6 +4368,7 @@ function generateWhatsAppLink(array $booking, array $room)
  */
 function sendBookingReminderEmail(array $booking): array
 {
+    $emailCtx = rh_email_context(['kind' => 'booking_reminder'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo;
 
     try {
@@ -4434,6 +4463,7 @@ function sendBookingReminderEmail(array $booking): array
  */
 function sendTentativeBookingConfirmedEmail(array $booking)
 {
+    $emailCtx = rh_email_context(['kind' => 'tentative_confirmed'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url;
 
     try {
@@ -4557,6 +4587,7 @@ function sendTentativeBookingConfirmedEmail(array $booking)
  */
 function sendTentativeBookingReminderEmail(array $booking)
 {
+    $emailCtx = rh_email_context(['kind' => 'tentative_reminder'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url;
 
     try {
@@ -4644,6 +4675,7 @@ function sendTentativeBookingReminderEmail(array $booking)
  */
 function sendTentativeBookingExpiredEmail(array $booking)
 {
+    $emailCtx = rh_email_context(['kind' => 'tentative_expired'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url;
 
     try {
@@ -4728,6 +4760,7 @@ function sendTentativeBookingExpiredEmail(array $booking)
  */
 function sendTentativeBookingConvertedEmail(array $booking)
 {
+    $emailCtx = rh_email_context(['kind' => 'tentative_converted'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url;
 
     try {
@@ -4856,6 +4889,7 @@ function sendTentativeBookingConvertedEmail(array $booking)
  */
 function sendPendingBookingExpiredEmail(array $booking, ?array $room = null)
 {
+    $emailCtx = rh_email_context(['kind' => 'pending_expired'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url;
 
     try {
@@ -4955,6 +4989,7 @@ function rh_unpaid_confirmed_details_html(array $booking, ?array $room, string $
  */
 function sendUnpaidConfirmedReminderEmail(array $booking, string $deadline)
 {
+    $emailCtx = rh_email_context(['kind' => 'unpaid_reminder'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_email, $email_site_name;
 
     try {
@@ -4984,6 +5019,7 @@ function sendUnpaidConfirmedReminderEmail(array $booking, string $deadline)
  */
 function sendUnpaidConfirmedReleasedEmail(array $booking)
 {
+    $emailCtx = rh_email_context(['kind' => 'unpaid_released'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_email, $email_site_name, $email_site_url;
 
     try {
@@ -5014,6 +5050,7 @@ function sendUnpaidConfirmedReleasedEmail(array $booking)
  */
 function sendAdminBookingExpiredNotification(array $booking, string $booking_type = 'tentative')
 {
+    $emailCtx = rh_email_context(['kind' => 'staff_booking_expired_alert'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url;
 
     try {
@@ -5115,6 +5152,7 @@ function sendAdminBookingExpiredNotification(array $booking, string $booking_typ
  */
 function sendGymBookingEmail(array $data)
 {
+    $emailCtx = rh_email_context(['kind' => 'gym_booking'] + rh_email_ctx_account('gym', $data['id'] ?? null, $data['reference_number'] ?? ($data['booking_reference'] ?? null))); // System Logs > Emails sent: what this email is about
     global $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url;
 
     try {
@@ -5211,6 +5249,7 @@ function sendGymBookingEmail(array $data)
  */
 function sendGymAdminNotificationEmail(array $data)
 {
+    $emailCtx = rh_email_context(['kind' => 'gym_staff_alert'] + rh_email_ctx_account('gym', $data['id'] ?? null, $data['reference_number'] ?? ($data['booking_reference'] ?? null))); // System Logs > Emails sent: what this email is about
     global $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url;
 
     try {
@@ -5574,6 +5613,7 @@ function loadEmailTemplate(string $template, array $data)
  */
 function sendGymInquiryContactedEmail(array $inquiry): array
 {
+    $emailCtx = rh_email_context(['kind' => 'gym_inquiry_contacted'] + rh_email_ctx_account('gym', $inquiry['id'] ?? null, $inquiry['reference_number'] ?? null)); // System Logs > Emails sent: what this email is about
     global $email_from_email, $email_site_name, $email_site_url;
 
     try {
@@ -5637,6 +5677,7 @@ function sendGymInquiryContactedEmail(array $inquiry): array
  */
 function sendNoShowEmail(array $booking, float $refund_amount = 0.0, string $refund_ref = ''): array
 {
+    $emailCtx = rh_email_context(['kind' => 'booking_no_show'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_email, $email_site_name;
 
     try {
@@ -5749,6 +5790,7 @@ function sendNoShowEmail(array $booking, float $refund_amount = 0.0, string $ref
  */
 function sendExtendStayEmail(array $booking, float $amount_delta = 0.0, string $old_checkout = ''): array
 {
+    $emailCtx = rh_email_context(['kind' => 'booking_extend_stay'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_email, $email_site_name;
 
     try {
@@ -5866,6 +5908,7 @@ function sendExtendStayEmail(array $booking, float $amount_delta = 0.0, string $
  */
 function sendGymInquiryConvertedEmail(array $inquiry): array
 {
+    $emailCtx = rh_email_context(['kind' => 'gym_inquiry_converted'] + rh_email_ctx_account('gym', $inquiry['id'] ?? null, $inquiry['reference_number'] ?? null)); // System Logs > Emails sent: what this email is about
     global $email_from_email, $email_site_name, $email_site_url;
 
     try {
@@ -5933,6 +5976,7 @@ function sendGymInquiryConvertedEmail(array $inquiry): array
  */
 function sendNewGymInquiryAdminEmail(array $inquiry): array
 {
+    $emailCtx = rh_email_context(['kind' => 'gym_staff_alert'] + rh_email_ctx_account('gym', $inquiry['id'] ?? null, $inquiry['reference_number'] ?? null)); // System Logs > Emails sent: what this email is about
     global $email_admin_email, $email_site_name, $email_site_url;
 
     try {
@@ -5984,6 +6028,7 @@ function sendNewGymInquiryAdminEmail(array $inquiry): array
  */
 function sendContactInquiryReplyEmail(array $inquiry, string $replySubject, string $replyMessage, array $adminUser = []): array
 {
+    $emailCtx = rh_email_context(['kind' => 'contact_reply'] + rh_email_ctx_account('contact', $inquiry['id'] ?? null)); // System Logs > Emails sent: what this email is about
     global $email_from_name, $email_from_email, $email_admin_email, $email_site_name;
     global $smtp_host, $smtp_port, $smtp_username, $smtp_password, $smtp_secure, $smtp_timeout, $smtp_debug;
     global $email_bcc_admin, $development_mode, $email_log_enabled, $email_preview_enabled;
@@ -6075,6 +6120,7 @@ function sendContactInquiryReplyEmail(array $inquiry, string $replySubject, stri
         if ($email_log_enabled) {
             logEmail($recipientEmail, $guestName, $emailSubject, 'sent');
         }
+        rh_email_send_log_mail('sent', $mail, (string)$emailSubject, '', (string)$recipientEmail, (string)$guestName);
 
         return ['success' => true, 'message' => 'Reply email sent successfully.'];
     } catch (Exception $e) {
@@ -6082,6 +6128,7 @@ function sendContactInquiryReplyEmail(array $inquiry, string $replySubject, stri
         if ($email_log_enabled) {
             logEmail($recipientEmail, $guestName, $emailSubject, 'failed', $e->getMessage());
         }
+        rh_email_send_log_mail('failed', $mail ?? null, (string)($emailSubject ?? ''), $e->getMessage(), (string)($recipientEmail ?? ''), (string)($guestName ?? ''));
         return ['success' => false, 'message' => $e->getMessage()];
     }
 }
@@ -6097,6 +6144,7 @@ function sendContactInquiryReplyEmail(array $inquiry, string $replySubject, stri
  */
 function sendTentativeQuotationEmail(array $booking, array $options = []): array
 {
+    $emailCtx = rh_email_context(['kind' => 'tentative_quotation'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_name, $email_from_email, $email_site_name, $email_log_enabled;
     global $smtp_host, $smtp_port, $smtp_username, $smtp_password, $smtp_secure, $smtp_timeout, $smtp_debug;
     global $email_admin_email, $email_bcc_admin, $development_mode, $email_preview_enabled;
@@ -6397,6 +6445,7 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
                 : ('Please see the attached PDF quotation for your stay at ' . $site_name . '.');
             $mail->addStringAttachment($pdfContent, 'Quotation-' . $quote_ref . '.pdf', 'base64', 'application/pdf');
             $mail->send();
+            rh_email_send_log_mail('sent', $mail, $subject, '', (string)$booking['guest_email'], (string)$booking['guest_name']);
             $result = ['success' => true, 'message' => 'Quotation email sent.'];
         }
 
@@ -6422,6 +6471,9 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
         return $result;
     } catch (Exception $e) {
         error_log('sendTentativeQuotationEmail Error: ' . $e->getMessage());
+        if (isset($mail)) {
+            rh_email_send_log_mail('failed', $mail, (string)($subject ?? ''), $e->getMessage(), (string)($booking['guest_email'] ?? ''), (string)($booking['guest_name'] ?? ''));
+        }
         return ['success' => false, 'message' => $e->getMessage()];
     }
 }
@@ -6484,10 +6536,12 @@ function sendEmailWithBinaryAttachment(
         $mail->AltBody = $altBody !== '' ? $altBody : 'Please view this message in an HTML-compatible email client.';
         $mail->addStringAttachment($attachmentContent, $attachmentName, 'base64', $attachmentMime);
         $mail->send();
+        rh_email_send_log_mail('sent', $mail, $subject, '', $toEmail, $toName);
 
         return ['success' => true, 'message' => 'Email sent successfully.'];
     } catch (Exception $e) {
         error_log('sendEmailWithBinaryAttachment Error: ' . $e->getMessage());
+        rh_email_send_log_mail('failed', $mail ?? null, $subject, $e->getMessage(), $toEmail, $toName);
         return ['success' => false, 'message' => $e->getMessage()];
     }
 }
@@ -6602,6 +6656,7 @@ function rh_register_sent_quotation(string $type, int $sourceId, string $quoteRe
  */
 function sendConferenceQuotationEmail(array $enquiry, array $options = []): array
 {
+    $emailCtx = rh_email_context(['kind' => 'conference_quotation'] + rh_email_ctx_account('conference', $enquiry['id'] ?? null, $enquiry['inquiry_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_log_enabled, $email_from_email, $email_site_name;
 
     try {
@@ -6762,6 +6817,7 @@ function sendConferenceQuotationEmail(array $enquiry, array $options = []): arra
  */
 function sendEventQuotationEmail(array $event, array $options = []): array
 {
+    $emailCtx = rh_email_context(['kind' => 'event_quotation'] + rh_email_ctx_account('event', $event['id'] ?? null, $event['reference_number'] ?? null)); // System Logs > Emails sent: what this email is about
     global $email_log_enabled, $email_from_email, $email_site_name;
 
     try {
@@ -6926,6 +6982,7 @@ function sendEventQuotationEmail(array $event, array $options = []): array
  */
 function sendRefundNotificationEmail(array $payment, string $refundRef, float $refundAmount, string $refundReason = ''): array
 {
+    $emailCtx = rh_email_context(['kind' => 'refund'] + rh_email_ctx_account((string)($payment['booking_type'] ?? ''), $payment['booking_id'] ?? null, $payment['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $email_from_email, $email_site_name, $pdo;
 
     try {
@@ -7091,6 +7148,7 @@ function sendRefundNotificationEmail(array $payment, string $refundRef, float $r
  */
 function sendAdminWelcomeEmail(string $fullName, string $email, string $username, string $tempPassword, string $role): array
 {
+    $emailCtx = rh_email_context(['kind' => 'staff_welcome']); // System Logs > Emails sent: what this email is about
     global $email_site_name, $email_site_url;
 
     try {
@@ -7153,6 +7211,7 @@ function sendAdminWelcomeEmail(string $fullName, string $email, string $username
 
 function sendReviewAcknowledgementEmail(string $guestName, string $guestEmail, string $reviewTitle, int $rating = 0): array
 {
+    $emailCtx = rh_email_context(['kind' => 'review_ack']); // System Logs > Emails sent: what this email is about
     global $email_from_email, $email_site_name;
 
     try {
@@ -7214,6 +7273,7 @@ function sendReviewAcknowledgementEmail(string $guestName, string $guestEmail, s
  */
 function sendReviewResponseEmail(string $guestName, string $guestEmail, string $reviewTitle, string $reviewComment, string $responseText): array
 {
+    $emailCtx = rh_email_context(['kind' => 'review_reply']); // System Logs > Emails sent: what this email is about
     global $email_site_name, $email_site_url;
 
     try {
@@ -7296,6 +7356,7 @@ if (!function_exists('rh_gym_data_notice')) {
 
 function sendGymMemberCardEmail(array $member): array
 {
+    $emailCtx = rh_email_context(['kind' => 'gym_member_card'] + rh_email_ctx_account('gym_member', $member['id'] ?? null, $member['member_number'] ?? null)); // System Logs > Emails sent: what this email is about
     global $email_from_name, $email_from_email, $email_site_name, $email_admin_email, $email_bcc_admin;
     global $smtp_host, $smtp_port, $smtp_username, $smtp_password, $smtp_secure, $smtp_timeout, $smtp_debug;
     global $development_mode, $email_preview_enabled;
@@ -7461,10 +7522,12 @@ function sendGymMemberCardEmail(array $member): array
         $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
         $mail->AltBody = $altBody;
         $mail->send();
+        rh_email_send_log_mail('sent', $mail, $subject, '', (string)$toEmail, (string)$name);
 
         return ['success' => true, 'message' => 'Membership card emailed to ' . $toEmail . '.'];
     } catch (Exception $e) {
         error_log('sendGymMemberCardEmail Error: ' . $e->getMessage());
+        rh_email_send_log_mail('failed', $mail ?? null, (string)($subject ?? ''), $e->getMessage(), (string)($toEmail ?? ''), (string)($name ?? ''));
         return ['success' => false, 'message' => $e->getMessage()];
     }
 }
@@ -7481,6 +7544,7 @@ function sendGymMemberCardEmail(array $member): array
  */
 function sendGymClassReminderEmail(array $member, array $class): array
 {
+    $emailCtx = rh_email_context(['kind' => 'gym_class_reminder'] + rh_email_ctx_account('gym_member', $member['id'] ?? null, $member['member_number'] ?? null)); // System Logs > Emails sent: what this email is about
     global $email_site_name, $email_from_email;
 
     $toEmail = trim((string)($member['email'] ?? ''));
@@ -7538,6 +7602,7 @@ function sendGymClassReminderEmail(array $member, array $class): array
  */
 function sendPasswordChangeOtpEmail(string $toEmail, string $name, string $otp): array
 {
+    $emailCtx = rh_email_context(['kind' => 'password_code']); // System Logs > Emails sent: what this email is about
     global $email_site_name;
     $siteName = $email_site_name ?: getSetting('site_name', 'Hotel');
 
@@ -7564,6 +7629,7 @@ function sendPasswordChangeOtpEmail(string $toEmail, string $name, string $otp):
  */
 function sendGymRenewalReminderEmail(array $member, int $daysLeft): array
 {
+    $emailCtx = rh_email_context(['kind' => 'gym_renewal_reminder'] + rh_email_ctx_account('gym_member', $member['id'] ?? null, $member['member_number'] ?? null)); // System Logs > Emails sent: what this email is about
     global $email_site_name, $email_from_email;
 
     $toEmail = trim((string)($member['email'] ?? ''));
@@ -7621,6 +7687,7 @@ function sendGymRenewalReminderEmail(array $member, int $daysLeft): array
  */
 function sendPreArrivalReminderEmail(array $booking): array
 {
+    $emailCtx = rh_email_context(['kind' => 'pre_arrival'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_site_name;
 
     $toEmail = trim((string)($booking['guest_email'] ?? ''));
@@ -7686,6 +7753,7 @@ function sendPreArrivalReminderEmail(array $booking): array
  */
 function sendPostStayReviewRequestEmail(array $booking): array
 {
+    $emailCtx = rh_email_context(['kind' => 'post_stay_review'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $email_site_name, $email_site_url;
 
     $toEmail = trim((string)($booking['guest_email'] ?? ''));

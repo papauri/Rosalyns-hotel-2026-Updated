@@ -201,9 +201,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                $result = !empty($pdfAttachments)
-                    ? sendEmailWithAttachments($to, $toName, $subject, $html, $pdfAttachments)
-                    : sendEmail($to, $toName, $subject, $html);
+                $emailCtx = function_exists('rh_email_context') ? rh_email_context(['kind' => 'receipt'] + rh_email_ctx_account('pos', $orderRow['id'] ?? null, $orderRow['reference'] ?? null)) : null;
+                try {
+                    $result = !empty($pdfAttachments)
+                        ? sendEmailWithAttachments($to, $toName, $subject, $html, $pdfAttachments)
+                        : sendEmail($to, $toName, $subject, $html);
+                } finally {
+                    $emailCtx = null; // script scope: never left open for the scheduler that runs after the page
+                    rh_email_context_clear();
+                }
                 $ok = !empty($result['success']);
                 $statusVal = $ok ? (($result['preview'] ?? false) ? 'preview' : 'sent') : 'failed';
                 $errMsg = $ok ? null : ($result['message'] ?? 'unknown error');

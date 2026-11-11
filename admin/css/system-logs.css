@@ -839,3 +839,108 @@
         margin-right: 4px;
     }
 }
+
+/* Emails sent (owner 2026-11-12) */
+.em__intro {
+    margin: 0 0 10px;
+    color: #475569;
+    font-size: 13px;
+}
+
+.em__bar {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px 16px;
+    margin: 10px 0;
+}
+
+.em__toggle {
+    display: inline-flex;
+    border: 1px solid #d9dee6;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.em__toggle a {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 36px;
+    padding: 6px 14px;
+    color: #334155;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+    background: #fff;
+}
+
+.em__toggle a + a {
+    border-left: 1px solid #d9dee6;
+}
+
+.em__toggle a.is-on {
+    background: #7E684B;
+    color: #fff;
+}
+
+.em__note {
+    margin: 0;
+    color: #64748b;
+    font-size: 12px;
+}
+
+.em-th-help {
+    display: block;
+    margin-top: 2px;
+    max-width: 22ch;
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 400;
+    line-height: 1.3;
+    letter-spacing: 0;
+    text-transform: none;
+    white-space: normal;
+}
+
+.em-sub {
+    display: block;
+    margin-top: 2px;
+    color: #64748b;
+    font-size: 12px;
+}
+
+.em-none {
+    color: #94a3b8;
+}
+
+.em-copy {
+    max-width: 260px;
+    word-break: break-word;
+}
+
+.em-link {
+    color: #7E684B;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.em-timeline__day {
+    color: #94a3b8;
+}
+
+.em-timeline__first .em-timeline__day {
+    color: #1f2937;
+    font-weight: 700;
+}
+
+.em-timeline__first td {
+    border-top: 2px solid #e5e7eb;
+}
+
+.em-timeline__why {
+    display: block;
+    margin-top: 2px;
+    color: #b9201d;
+    font-size: 12px;
+}

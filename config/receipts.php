@@ -1329,6 +1329,9 @@ if (!function_exists('receipt_send_email')) {
         } elseif (!empty($pdf['path']) && is_file($pdf['path'])) {
             $attachments[] = ['path' => $pdf['path'], 'name' => $pdf['receipt_number'] . '.pdf', 'mime' => 'application/pdf'];
         }
+        $emailCtx = function_exists('rh_email_context') // System Logs > Emails sent: what this email is about
+            ? rh_email_context(['kind' => 'receipt'] + rh_email_ctx_account((string)($payment['booking_type'] ?? ''), $payment['booking_id'] ?? null, $payment['booking_reference'] ?? null))
+            : null;
         $sendResult = sendEmailWithAttachments(
             $to,
             (string)$context['guest_name'],

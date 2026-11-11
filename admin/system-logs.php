@@ -56,6 +56,34 @@ $autoRefresh = isset($_GET['auto']) && $_GET['auto'] === '1';
 $isAutoReload = $autoRefresh && ($_GET['r'] ?? '') === '1'; // r=1 is added only by this page's own 15-second reload
 $groupRepeats = (string)($_GET['group'] ?? '1') !== '0';
 
+// Emails sent (owner 2026-11-12): every email the system sent or was told not to send. Filters are prefixed em_ so
+// they never mix with Staff activity's from / to / type / user. Newest first, at most 500 rows on the screen.
+require_once __DIR__ . '/../includes/email-send-log.php';
+$emF = rh_email_log_filters($_GET, date('Y-m-d'));
+$emReady = rh_email_send_log_ready($pdo);
+$emLimit = 500;
+[$emRows, $emMore] = $emReady ? rh_email_send_log_list($pdo, $emF, $emLimit) : [[], false];
+$emKindOptions = [];
+foreach (rh_email_kinds() as $emKey => $emDef) {
+    $emKindOptions[$emKey] = $emDef[0];
+}
+asort($emKindOptions);
+// Links that keep every other filter on the page and change only the email ones.
+$emUrl = function (array $over = []) use ($emF) {
+    $q = [];
+    foreach ($_GET as $k => $v) {
+        if (is_string($k) && is_string($v) && strpos($k, 'em_') !== 0 && $k !== 'export') {
+            $q[$k] = $v;
+        }
+    }
+    $em = ['em_from' => $emF['from'], 'em_to' => $emF['to'], 'em_kind' => $emF['kind'], 'em_result' => $emF['result'], 'em_q' => $emF['q'], 'em_view' => $emF['view']];
+    return 'system-logs.php?' . http_build_query(array_merge($q, $em, $over)) . '#log-emails';
+};
+$emDayLabel = function (string $ymd): string {
+    $ts = strtotime($ymd);
+    return $ts ? date('D j M Y', $ts) : $ymd;
+};
+
 function rh_logs_table_exists(PDO $pdo, string $table): bool
 {
     try {
@@ -916,6 +944,128 @@ $saSingleDay = $saF['from'] === $saF['to'];
                     </tbody>
                 </table>
             </div>
+        </div>
+
+        <div class="log-section em" id="log-emails">
+            <h3><i class="fas fa-envelope-open-text"></i> Emails sent</h3>
+            <p class="em__intro">Every email the system sent, or was told not to send: who sent it, when, to whom and what happened. Newest first. Times are hotel time.</p>
+
+            <form method="get" class="log-toolbar em__filters" action="system-logs.php#log-emails">
+                <?php foreach ($_GET as $emKeepKey => $emKeepVal): if (is_string($emKeepKey) && is_string($emKeepVal) && strpos($emKeepKey, 'em_') !== 0 && $emKeepKey !== 'export' && preg_match('/^[a-z_]{1,20}$/', $emKeepKey)): ?>
+                    <input type="hidden" name="<?php echo htmlspecialchars($emKeepKey); ?>" value="<?php echo htmlspecialchars($emKeepVal); ?>">
+                <?php endif; endforeach; ?>
+                <input type="hidden" name="em_view" value="<?php echo htmlspecialchars($emF['view']); ?>">
+                <label>From
+                    <input type="date" name="em_from" value="<?php echo htmlspecialchars($emF['from']); ?>">
+                </label>
+                <label>To
+                    <input type="date" name="em_to" value="<?php echo htmlspecialchars($emF['to']); ?>">
+                </label>
+                <label>Email
+                    <select name="em_kind">
+                        <option value="all">Every kind</option>
+                        <?php foreach ($emKindOptions as $emKey => $emLabel): ?>
+                            <option value="<?php echo htmlspecialchars($emKey); ?>" <?php echo $emF['kind'] === $emKey ? 'selected' : ''; ?>><?php echo htmlspecialchars($emLabel); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label>Result
+                    <select name="em_result">
+                        <?php foreach (['all' => 'Any result', 'sent' => 'Sent', 'failed' => 'Failed', 'not_sent' => 'Not sent', 'preview' => 'Preview'] as $emKey => $emLabel): ?>
+                            <option value="<?php echo htmlspecialchars($emKey); ?>" <?php echo $emF['result'] === $emKey ? 'selected' : ''; ?>><?php echo htmlspecialchars($emLabel); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <label>Search
+                    <input type="search" name="em_q" value="<?php echo htmlspecialchars($emF['q']); ?>" placeholder="Booking ref, email address, subject or name" maxlength="100">
+                </label>
+                <button type="submit"><i class="fas fa-filter"></i> Show</button>
+            </form>
+
+            <div class="em__bar">
+                <div class="em__toggle" role="group" aria-label="Show the emails as">
+                    <a class="<?php echo $emF['view'] === 'table' ? 'is-on' : ''; ?>" href="<?php echo htmlspecialchars($emUrl(['em_view' => 'table'])); ?>" <?php echo $emF['view'] === 'table' ? 'aria-current="true"' : ''; ?>><i class="fas fa-table"></i> Table</a>
+                    <a class="<?php echo $emF['view'] === 'timeline' ? 'is-on' : ''; ?>" href="<?php echo htmlspecialchars($emUrl(['em_view' => 'timeline'])); ?>" <?php echo $emF['view'] === 'timeline' ? 'aria-current="true"' : ''; ?>><i class="fas fa-timeline"></i> Timeline</a>
+                </div>
+                <p class="em__note">
+                    <?php echo htmlspecialchars($emDayLabel($emF['from'])) . ($emF['to'] !== $emF['from'] ? ' to ' . htmlspecialchars($emDayLabel($emF['to'])) : ''); ?>:
+                    <?php echo number_format(count($emRows)) . ($emMore ? '+' : ''); ?> email<?php echo count($emRows) === 1 ? '' : 's'; ?>.
+                    <?php echo $emMore ? 'Only the newest ' . (int)$emLimit . ' are shown: pick fewer days or a kind to see the rest.' : ''; ?>
+                    <?php echo $emF['clamped'] ? 'A range can be at most 92 days, so the last 92 days of your range are shown.' : ''; ?>
+                </p>
+            </div>
+
+            <?php if (!$emReady): ?>
+                <p class="log-empty">The email log starts once the database update 081 (email_send_log) has been run with admin/migrations/migrate.php. Until then emails are sent as usual but not listed here.</p>
+            <?php elseif (!$emRows): ?>
+                <p class="log-empty">No emails match these filters. Emails are listed from the day the email log was switched on.</p>
+            <?php elseif ($emF['view'] === 'timeline'): ?>
+                <div class="log-scroll" data-page-size-picker>
+                    <table class="log-table em-timeline">
+                        <thead>
+                            <tr>
+                                <th>Day<span class="em-th-help">The day it was sent (hotel time)</span></th>
+                                <th>What happened<span class="em-th-help">Time · email and who it went to · who sent it · the booking or account · the result</span></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach (rh_email_group_by_day($emRows) as $emDay => $emDayRows): foreach ($emDayRows as $emI => $emRow):
+                                $emStatus = (string)$emRow['status'];
+                                $emErr = trim((string)($emRow['error'] ?? ''));
+                            ?>
+                                <tr class="<?php echo $emI === 0 ? 'em-timeline__first' : ''; ?>">
+                                    <td class="log-nowrap em-timeline__day"><?php echo htmlspecialchars($emDayLabel((string)$emDay)); ?></td>
+                                    <td>
+                                        <span class="em-timeline__line"><?php echo htmlspecialchars(rh_email_timeline_line($emRow)); ?></span>
+                                        <?php if ($emStatus !== 'sent' && $emErr !== ''): ?><span class="em-timeline__why"><?php echo htmlspecialchars(rh_email_result_label($emStatus, $emErr)); ?></span><?php endif; ?>
+                                    </td>
+                                </tr>
+                            <?php endforeach; endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php else: ?>
+                <div class="log-scroll" data-page-size-picker>
+                    <table class="log-table em-table">
+                        <thead>
+                            <tr>
+                                <th>When<span class="em-th-help">Hotel time</span></th>
+                                <th>Sent by<span class="em-th-help">Staff member (role); System (scheduler) for automatic emails; Guest website for online bookings</span></th>
+                                <th>To<span class="em-th-help">The address the email went to</span></th>
+                                <th>Copy to<span class="em-th-help">Copies of the same email; (hidden) = the guest did not see that copy</span></th>
+                                <th>Email<span class="em-th-help">What kind of email, and its subject line</span></th>
+                                <th>About<span class="em-th-help">The booking or account it was for</span></th>
+                                <th>Result<span class="em-th-help">Sent, Failed (with the reason), Not sent (staff chose not to) or Preview (test only)</span></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <?php foreach ($emRows as $emRow):
+                                $emStatus = (string)$emRow['status'];
+                                $emAbout = rh_email_about_label($emRow['account_type'] ?? null, $emRow['account_ref'] ?? null, $emRow['account_id'] ?? null);
+                                $emPill = ['sent' => 'success', 'failed' => 'danger', 'not_sent' => 'muted', 'preview' => 'warning'][$emStatus] ?? 'muted';
+                            ?>
+                                <tr>
+                                    <td class="log-nowrap"><?php echo htmlspecialchars(substr((string)$emRow['sent_at'], 0, 16)); ?></td>
+                                    <td><?php echo htmlspecialchars((string)$emRow['sent_by_label']); ?></td>
+                                    <td><?php echo htmlspecialchars((string)$emRow['to_email']); ?><?php if (trim((string)($emRow['to_name'] ?? '')) !== ''): ?><span class="em-sub"><?php echo htmlspecialchars((string)$emRow['to_name']); ?></span><?php endif; ?></td>
+                                    <td class="em-copy"><?php echo trim((string)($emRow['cc'] ?? '')) !== '' ? htmlspecialchars((string)$emRow['cc']) : '<span class="em-none">None</span>'; ?></td>
+                                    <td><strong><?php echo htmlspecialchars(rh_email_kind_label((string)$emRow['email_kind'])); ?></strong><?php if (trim((string)$emRow['subject']) !== ''): ?><span class="em-sub"><?php echo htmlspecialchars((string)$emRow['subject']); ?></span><?php endif; ?></td>
+                                    <td>
+                                        <?php if ($emAbout === ''): ?>
+                                            <span class="em-none">Not linked</span>
+                                        <?php elseif (($emRow['account_type'] ?? '') === 'room' && (int)($emRow['account_id'] ?? 0) > 0): ?>
+                                            <a href="booking-details.php?id=<?php echo (int)$emRow['account_id']; ?>" class="em-link"><?php echo htmlspecialchars($emAbout); ?></a>
+                                        <?php else: ?>
+                                            <?php echo htmlspecialchars($emAbout); ?>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td><span class="log-pill <?php echo $emPill; ?>"><?php echo htmlspecialchars(rh_email_result_word($emStatus)); ?></span><?php if ($emStatus !== 'sent' && trim((string)($emRow['error'] ?? '')) !== ''): ?><span class="em-sub"><?php echo htmlspecialchars(rh_email_result_label($emStatus, (string)$emRow['error'])); ?></span><?php endif; ?></td>
+                                </tr>
+                            <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+            <?php endif; ?>
         </div>
 
         <div class="log-section" id="log-logins">

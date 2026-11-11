@@ -1276,6 +1276,7 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
  */
 function sendPaymentInvoiceEmail(int $booking_id)
 {
+    $emailCtx = rh_email_context(['kind' => 'invoice'] + rh_email_ctx_account('room', $booking_id)); // System Logs > Emails sent: what this email is about
     global $pdo;
 
     try {
@@ -1390,6 +1391,7 @@ function sendPaymentInvoiceEmail(int $booking_id)
  */
 function sendPaymentInvoiceEmailWithCC(int $booking_id, array $ccRecipients = [])
 {
+    $emailCtx = rh_email_context(['kind' => 'invoice'] + rh_email_ctx_account('room', $booking_id)); // System Logs > Emails sent: what this email is about
     global $pdo;
 
     try {
@@ -1498,6 +1500,7 @@ function sendPaymentInvoiceEmailWithCC(int $booking_id, array $ccRecipients = []
  */
 function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, array $cc_recipients = [], string $invoice_number = '')
 {
+    $emailCtx = rh_email_context(['kind' => 'invoice'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_name, $email_from_email, $email_site_name, $email_site_url;
 
     try {
@@ -1688,6 +1691,7 @@ function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, arr
  */
 function sendInvoiceCopyEmails(array $booking, string $invoice_file, array $recipients)
 {
+    $emailCtx = rh_email_context(['kind' => 'invoice'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     if (empty($recipients)) {
         return ['success' => true, 'message' => 'No copy recipients'];
     }
@@ -1835,6 +1839,7 @@ function sendEmailWithAttachmentAndCC(string $to, ?string $toName, string $subje
             $cc_list = implode(', ', $ccRecipients);
             logEmail($to, $toName, $subject, 'sent', '', "CC: $cc_list");
         }
+        rh_email_send_log_mail('sent', $mail, $subject, '', $to, $toName);
 
         return [
             'success' => true,
@@ -1848,6 +1853,7 @@ function sendEmailWithAttachmentAndCC(string $to, ?string $toName, string $subje
             $cc_list = implode(', ', $ccRecipients);
             logEmail($to, $toName, $subject, 'failed', $e->getMessage(), "CC: $cc_list");
         }
+        rh_email_send_log_mail('failed', $mail ?? null, $subject, $e->getMessage(), $to, $toName);
 
         // If development mode, show preview instead of failing
         if ($dev_mode) {
@@ -2050,6 +2056,7 @@ if (!function_exists('rh_issue_paid_statement')) {
  */
 function sendFinalInvoiceEmail(array $booking, string $invoice_file, array $cc_recipients = [], float $balanceDue = 0.0)
 {
+    $emailCtx = rh_email_context(['kind' => 'invoice'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_name, $email_from_email, $email_site_name, $email_site_url;
 
     try {
@@ -2562,6 +2569,7 @@ function sendConferenceInvoiceEmailWithCC(int $enquiry_id, array $ccRecipients =
  */
 function sendConferenceInvoiceEmailToClient(array $enquiry, string $invoice_file, array $cc_recipients = [])
 {
+    $emailCtx = rh_email_context(['kind' => 'invoice'] + rh_email_ctx_account('conference', $enquiry['id'] ?? null, $enquiry['inquiry_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_name, $email_from_email, $email_site_name, $email_site_url;
 
     try {
@@ -2966,6 +2974,7 @@ function sendGymInvoiceEmail(int $inquiry_id)
  */
 function sendGymInvoiceEmailToClient(array $inquiry, string $invoice_file, array $cc_recipients = [])
 {
+    $emailCtx = rh_email_context(['kind' => 'invoice'] + rh_email_ctx_account('gym', $inquiry['id'] ?? null, $inquiry['reference_number'] ?? null)); // System Logs > Emails sent: what this email is about
     global $email_from_email, $email_site_name, $email_site_url;
 
     try {
@@ -3300,6 +3309,7 @@ function sendEventInvoiceEmail(int $inquiry_id)
  */
 function sendEventInvoiceEmailToClient(array $inquiry, string $invoice_file, array $cc_recipients = [])
 {
+    $emailCtx = rh_email_context(['kind' => 'invoice'] + rh_email_ctx_account('event', $inquiry['id'] ?? null, $inquiry['reference_number'] ?? null)); // System Logs > Emails sent: what this email is about
     global $email_from_email, $email_site_name, $email_site_url;
 
     try {

@@ -257,6 +257,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // Include email functions
             require_once '../config/email.php';
+            // System Logs > Emails sent: every email resent here is about this booking (the sender adds the kind).
+            // Script scope: cleared in the finally below so it never reaches the scheduler that runs after the page.
+            $emailCtx = rh_email_context(rh_email_ctx_account('room', $booking_id, (string)($booking['booking_reference'] ?? '')));
 
             // Parse CC emails
             $cc_array = [];
@@ -270,6 +273,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Send appropriate email based on type
             $email_result = ['success' => false, 'message' => 'Invalid email type'];
 
+            try {
             switch ($email_type) {
                 case 'booking_received':
                     $email_result = sendBookingReceivedEmail($booking);
@@ -317,6 +321,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     break;
                 default:
                     throw new Exception('Invalid email type selected');
+            }
+            } finally {
+                $emailCtx = null;
+                rh_email_context_clear();
             }
 
             if ($email_result['success']) {
@@ -997,8 +1005,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         if (!$booking) {
                             continue;
                         }
-                        // Send cancellation email
-                        $email_result = sendBookingCancelledEmail($booking, $cancellation_reason);
+                        // Owner 2026-11-12: staff may untick "Email the guest" to cancel quietly (no email, no WhatsApp).
+                        // A form without the field (page loaded before this change) keeps the old behaviour.
+                        $cancelEmailSkipped = !rh_cancel_email_choice($_POST, rh_cancel_email_default_ticked('list', (string)$cn['previous_status']));
+                        if ($cancelEmailSkipped) {
+                            $email_result = ['success' => false, 'message' => rh_cancel_email_skipped_reason()];
+                            rh_email_send_log_not_sent('booking_cancelled', (string)$booking['guest_email'], (string)$booking['guest_name'],
+                                rh_email_ctx_account('room', $booking['id'], $booking['booking_reference']), 'Staff chose not to email the guest');
+                        } else {
+                            // Send cancellation email
+                            $email_result = sendBookingCancelledEmail($booking, $cancellation_reason);
+                        }
 
                         // Log cancellation to database
                         $email_sent = $email_result['success'];
@@ -1026,7 +1043,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         );
 
                         $refTag = count($cancelledNow) > 1 ? (' [' . $booking['booking_reference'] . ']') : '';
-                        if ($email_sent) {
+                        if ($cancelEmailSkipped) {
+                            $message .= ' No email sent' . $refTag . ' (you chose not to).';
+                        } elseif ($email_sent) {
                             $message .= ' Cancellation email sent' . $refTag . '.';
                         } else {
                             $message .= ' (Email failed' . $refTag . ': ' . $email_status . ')';
@@ -3961,7 +3980,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                                     <?php endif; ?>
                                                 <?php endif; ?>
                                                 <?php if ($bk_holding && $_perm_cancel): ?>
-                                                    <button class="quick-action cancel" title="Cancel booking" aria-label="Cancel booking" onclick="openCancelBookingModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, <?php echo $bk_guest_js; ?>)">
+                                                    <button class="quick-action cancel" title="Cancel booking" aria-label="Cancel booking" onclick="openCancelBookingModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, <?php echo $bk_guest_js; ?>, <?php echo $bk_js($bk_status); ?>)">
                                                         <i class="fas fa-ban"></i>
                                                     </button>
                                                 <?php endif; ?>
@@ -5858,10 +5877,19 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         <label style="display: block; font-weight: normal; margin: 4px 0;"><input type="radio" name="scope" value="single" disabled> Only this room</label>
                         <small id="cancel_group_refs" style="color: #666;"></small>
                     </div>
+                    <div class="form-group" id="cancel_email_box">
+                        <input type="hidden" name="email_guest" value="0">
+                        <label style="display: flex; gap: 8px; align-items: flex-start; font-weight: 600; margin: 0;">
+                            <input type="checkbox" name="email_guest" value="1" id="cancel_email_guest" checked style="margin-top: 3px;">
+                            <span>Email the guest that this booking is cancelled</span>
+                        </label>
+                        <small style="color: #666; display: block; margin-top: 4px;">Untick to cancel quietly: no email or WhatsApp goes to the guest.</small>
+                        <small id="cancel_email_unconfirmed" style="color: #666; display: none; margin-top: 4px;">This booking was not confirmed yet, so no email goes to the guest.</small>
+                    </div>
                     <div class="form-group" style="background: #f8f9fa; padding: 12px; border-radius: 8px;">
                         <p style="margin: 0; color: #666; font-size: 13px;">
                             <i class="fas fa-info-circle"></i>
-                            Cancelling this booking will restore room availability and send a cancellation email to the guest.
+                            Cancelling this booking will restore room availability. The guest gets the cancellation email only when the box above is ticked.
                         </p>
                         <p style="margin: 6px 0 0; color: #444; font-size: 13px;">
                             <i class="fas fa-coins"></i>
@@ -7405,19 +7433,38 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             }
         }
 
-        function openCancelBookingModal(bookingId, bookingReference, guestName) {
+        // "Email the guest" (owner 2026-11-12): ticked exactly when cancelling would email the guest (a confirmed
+        // booking, or a group with a confirmed room); otherwise the box is replaced by a plain note.
+        function bkApplyCancelEmailChoice(wouldEmail) {
+            const box = document.getElementById('cancel_email_guest');
+            const note = document.getElementById('cancel_email_unconfirmed');
+            if (!box) return;
+            box.checked = !!wouldEmail;
+            box.disabled = !wouldEmail;
+            box.closest('label').style.display = wouldEmail ? 'flex' : 'none';
+            if (box.closest('label').nextElementSibling) box.closest('label').nextElementSibling.style.display = wouldEmail ? 'block' : 'none';
+            if (note) note.style.display = wouldEmail ? 'none' : 'block';
+        }
+
+        function openCancelBookingModal(bookingId, bookingReference, guestName, bookingStatus) {
             const modal = document.getElementById('cancelBookingModal');
             setBookingPageModalOpen(modal, true);
             document.getElementById('cancel_booking_id').value = bookingId;
             document.getElementById('cancel_booking_ref').value = bookingReference;
             document.getElementById('cancel_guest_name').value = guestName;
             document.getElementById('cancellation_reason').value = '';
+            const cancelStatus = String(bookingStatus || '');
+            bkApplyCancelEmailChoice(cancelStatus === '' || cancelStatus === 'confirmed');
             bkApplyGroupChoice('cancel_group_box', 'cancel_group_label', 'cancel_group_refs', { count: 0, members: [] });
             const submitBtn = document.querySelector('#cancelBookingForm button[type="submit"]');
             if (submitBtn) submitBtn.disabled = true; // until the group lookup answers, so the choice is never skipped
             bkFetchGroupInfo(bookingId).then(info => {
                 if (String(document.getElementById('cancel_booking_id').value) !== String(bookingId)) return;
                 bkApplyGroupChoice('cancel_group_box', 'cancel_group_label', 'cancel_group_refs', info);
+                if (cancelStatus !== '' && cancelStatus !== 'confirmed' && info && Array.isArray(info.members)
+                    && info.members.some(m => String(m.status) === 'confirmed')) {
+                    bkApplyCancelEmailChoice(true); // a confirmed room in the group is emailed when the whole group goes
+                }
                 if (submitBtn) submitBtn.disabled = false;
             });
         }

@@ -729,12 +729,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                             require_once '../config/email.php';
                             $emailsSent = 0;
                             $emailsFailed = 0;
+                            // Owner 2026-11-12: "Email the guest" unticked = cancel quietly (no email, no WhatsApp).
+                            $cancelEmailGuest = rh_cancel_email_choice($_POST, rh_cancel_email_default_ticked('details', (string)$previous_status));
                             foreach ($grpRes['cancelled'] as $gc) {
                                 logBookingStatusChange($gc['id'], $gc['reference'], $gc['previous_status'], 'cancelled', 'admin', $user['id'], $user['full_name'], $cancellation_reason);
                                 $gcStmt = $pdo->prepare("SELECT b.*, r.name AS room_name FROM bookings b LEFT JOIN rooms r ON b.room_id = r.id WHERE b.id = ?");
                                 $gcStmt->execute([$gc['id']]);
                                 $gcRow = $gcStmt->fetch(PDO::FETCH_ASSOC);
-                                if ($gcRow) {
+                                if ($gcRow && !$cancelEmailGuest) {
+                                    rh_email_send_log_not_sent('booking_cancelled', (string)$gcRow['guest_email'], (string)$gcRow['guest_name'],
+                                        rh_email_ctx_account('room', $gcRow['id'], $gcRow['booking_reference']), 'Staff chose not to email the guest');
+                                } elseif ($gcRow) {
                                     $gcMail = sendBookingCancelledEmail($gcRow, $cancellation_reason);
                                     if (!empty($gcMail['success'])) {
                                         $emailsSent++;
@@ -744,6 +749,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                                 }
                             }
                             $_SESSION['success_message'] = $grpRes['message']
+                                . (!$cancelEmailGuest ? ' No email sent (you chose not to).' : '')
                                 . ($emailsSent > 0 ? ' Cancellation email sent for ' . $emailsSent . ' booking(s).' : '')
                                 . ($emailsFailed > 0 ? ' (Email failed for ' . $emailsFailed . ' booking(s).)' : '');
                         } else {
@@ -758,10 +764,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                             $cancel_refund_msg = ' ' . $cancelRes['summary'];
 
                             require_once '../config/email.php';
-                            $email_result = sendBookingCancelledEmail($booking_to_cancel, $cancellation_reason);
+                            // Owner 2026-11-12: "Email the guest" unticked = cancel quietly (no email, no WhatsApp).
+                            if (!rh_cancel_email_choice($_POST, rh_cancel_email_default_ticked('details', (string)$previous_status))) {
+                                rh_email_send_log_not_sent('booking_cancelled', (string)$booking_to_cancel['guest_email'], (string)$booking_to_cancel['guest_name'],
+                                    rh_email_ctx_account('room', $booking_to_cancel['id'], $booking_to_cancel['booking_reference']), 'Staff chose not to email the guest');
+                                $_SESSION['success_message'] = 'Booking cancelled.' . $cancel_refund_msg . ' No email sent (you chose not to).';
+                            } else {
+                                $email_result = sendBookingCancelledEmail($booking_to_cancel, $cancellation_reason);
 
-                            $_SESSION['success_message'] = 'Booking cancelled.' . $cancel_refund_msg .
-                                ($email_result['success'] ? ' Cancellation email sent.' : ' (Email failed)');
+                                $_SESSION['success_message'] = 'Booking cancelled.' . $cancel_refund_msg .
+                                    ($email_result['success'] ? ' Cancellation email sent.' : ' (Email failed)');
+                            }
                         }
                     }
                 }
@@ -1566,15 +1579,17 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 $bd_group_refs = implode(', ', array_column($bd_group_live, 'booking_reference'));
                 ?>
                 <?php if ($can_cancel): ?>
-                    <?php if ($bd_perm_cancel && $bd_group_n > 1): ?><form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars('Cancel the WHOLE GROUP (' . $bd_group_n . ' rooms: ' . $bd_group_refs . '), release every room, and send each guest cancellation email? If any room cannot be cancelled, none is. Cancellation handling: ' . getCancellationRefundModeLabel() . '.', ENT_QUOTES); ?>" data-admin-confirm-title="Cancel whole group" data-admin-confirm-ok="Cancel whole group" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban" data-admin-submit-text="Cancelling...">
+                    <?php if ($bd_perm_cancel && $bd_group_n > 1): ?><form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars('Cancel the WHOLE GROUP (' . $bd_group_n . ' rooms: ' . $bd_group_refs . ') and release every room? If any room cannot be cancelled, none is. Cancellation handling: ' . getCancellationRefundModeLabel() . '.', ENT_QUOTES); ?>" data-admin-confirm-check="email_guest" data-admin-confirm-check-label="Email the guest that this booking is cancelled" data-admin-confirm-check-help="Untick to cancel quietly: no email or WhatsApp goes to the guest." data-admin-confirm-title="Cancel whole group" data-admin-confirm-ok="Cancel whole group" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban" data-admin-submit-text="Cancelling...">
                         <input type="hidden" name="booking_action" value="cancel">
                         <input type="hidden" name="scope" value="group">
+                        <input type="hidden" name="email_guest" value="1">
                         <input type="hidden" name="cancellation_reason" value="Cancelled by admin">
                         <button type="submit" class="action-btn cancel" aria-label="Cancel whole group"><i class="fas fa-ban"></i> Cancel Whole Group (<?php echo (int)$bd_group_n; ?> rooms)</button>
                     </form><?php endif; ?>
-                    <?php if ($bd_perm_cancel): ?><form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars('Cancel this booking, release the room, and send the guest cancellation email?' . ($bd_group_n > 1 ? ' The other rooms of the group stay booked.' : '') . ' Cancellation handling: ' . getCancellationRefundModeLabel() . '.', ENT_QUOTES); ?>" data-admin-confirm-title="Cancel booking" data-admin-confirm-ok="Cancel booking" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban" data-admin-submit-text="Cancelling...">
+                    <?php if ($bd_perm_cancel): ?><form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars('Cancel this booking and release the room?' . ($bd_group_n > 1 ? ' The other rooms of the group stay booked.' : '') . ' Cancellation handling: ' . getCancellationRefundModeLabel() . '.', ENT_QUOTES); ?>" data-admin-confirm-check="email_guest" data-admin-confirm-check-label="Email the guest that this booking is cancelled" data-admin-confirm-check-help="Untick to cancel quietly: no email or WhatsApp goes to the guest." data-admin-confirm-title="Cancel booking" data-admin-confirm-ok="Cancel booking" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban" data-admin-submit-text="Cancelling...">
                         <input type="hidden" name="booking_action" value="cancel">
                         <?php if ($bd_group_n > 1): ?><input type="hidden" name="scope" value="single"><?php endif; ?>
+                        <input type="hidden" name="email_guest" value="1">
                         <input type="hidden" name="cancellation_reason" value="Cancelled by admin">
                         <button type="submit" class="action-btn cancel" aria-label="Cancel booking"><i class="fas fa-ban"></i> <?php echo $bd_group_n > 1 ? 'Cancel This Room Only' : 'Cancel Booking'; ?></button>
                     </form><?php endif; ?>

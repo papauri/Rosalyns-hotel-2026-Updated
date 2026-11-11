@@ -131,10 +131,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->prepare("INSERT INTO tentative_booking_log (booking_id, action, performed_by, action_reason) VALUES (?, 'cancelled', ?, ?)")
                 ->execute([$booking_id, (int)$user['id'], 'Cancelled by ' . $user['full_name']]);
 
-            // Notify guest
+            // Notify guest, unless staff unticked "Email the guest" (owner 2026-11-12: cancel quietly, no email or WhatsApp)
             require_once '../config/email.php';
             $cancelReason = 'Tentative hold cancelled by hotel';
-            $cancel_email_result = sendBookingCancelledEmail($booking, $cancelReason);
+            $cancelEmailSkipped = !rh_cancel_email_choice($_POST, rh_cancel_email_default_ticked('tentative', (string)$booking['status']));
+            if ($cancelEmailSkipped) {
+                $cancel_email_result = ['success' => false, 'message' => rh_cancel_email_skipped_reason()];
+                rh_email_send_log_not_sent('booking_cancelled', (string)$booking['guest_email'], (string)$booking['guest_name'],
+                    rh_email_ctx_account('room', $booking['id'], $booking['booking_reference']), 'Staff chose not to email the guest');
+            } else {
+                $cancel_email_result = sendBookingCancelledEmail($booking, $cancelReason);
+            }
             logCancellationToDatabase(
                 $booking['id'],
                 $booking['booking_reference'],
@@ -147,7 +154,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             );
 
             $message = 'Tentative booking cancelled and room hold released.'
-                . ($cancel_email_result['success'] ? ' Guest notified.' : ' (Guest notification failed.)');
+                . ($cancelEmailSkipped ? ' No email sent (you chose not to).' : ($cancel_email_result['success'] ? ' Guest notified.' : ' (Guest notification failed.)'));
         }
     } catch (Exception $e) {
         $error = $e->getMessage();
@@ -549,8 +556,12 @@ foreach ($active as $bk) {
                                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                                                 <input type="hidden" name="action" value="cancel">
                                                 <input type="hidden" name="id" value="<?php echo (int)$bk['id']; ?>">
+                                                <input type="hidden" name="email_guest" value="1">
                                                 <button type="submit" class="acct-quick-action" style="width: 100%; color: #dc2626;"
                                                     data-admin-confirm="Cancel this tentative hold and release the room?"
+                                                    data-admin-confirm-check="email_guest"
+                                                    data-admin-confirm-check-label="Email the guest that this booking is cancelled"
+                                                    data-admin-confirm-check-help="Untick to cancel quietly: no email or WhatsApp goes to the guest."
                                                     data-admin-confirm-title="Cancel Tentative Hold"
                                                     data-admin-confirm-ok="Cancel Hold"
                                                     data-admin-confirm-tone="danger"

@@ -1390,6 +1390,10 @@ if (!function_exists('sendCreditNoteEmail')) {
             }
 
             $mail->send();
+            if (function_exists('rh_email_send_log_mail')) {
+                rh_email_send_log_mail('sent', $mail, (string)$cnEmailSubject, '', (string)$cn['guest_email'], (string)$cn['guest_name'],
+                    ['kind' => 'credit_note'] + rh_email_ctx_account((string)($cn['booking_type'] ?? ''), $cn['booking_id'] ?? null, $cn['booking_reference'] ?? null));
+            }
 
             $pdo->prepare("UPDATE credit_notes SET email_sent=1, email_sent_at=NOW(), updated_at=NOW() WHERE id=?")
                 ->execute([$creditNoteId]);
@@ -1402,6 +1406,10 @@ if (!function_exists('sendCreditNoteEmail')) {
             return ['success' => true, 'message' => 'Credit note email sent to ' . $cn['guest_email']];
         } catch (Throwable $e) {
             error_log('[credit-notes] sendCreditNoteEmail: ' . $e->getMessage());
+            if (isset($mail) && function_exists('rh_email_send_log_mail')) {
+                rh_email_send_log_mail('failed', $mail, (string)($cnEmailSubject ?? ''), $e->getMessage(), (string)($cn['guest_email'] ?? ''), (string)($cn['guest_name'] ?? ''),
+                    ['kind' => 'credit_note'] + (is_array($cn ?? null) ? rh_email_ctx_account((string)($cn['booking_type'] ?? ''), $cn['booking_id'] ?? null, $cn['booking_reference'] ?? null) : []));
+            }
             rh_log_event('credit-notes', 'error', 'Credit note email failed: ' . $e->getMessage(), ['credit_note_id' => $creditNoteId]);
             return ['success' => false, 'message' => $e->getMessage()];
         }

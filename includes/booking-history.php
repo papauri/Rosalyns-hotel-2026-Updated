@@ -14,6 +14,7 @@
  */
 
 require_once __DIR__ . '/booking-history-format.php';
+require_once __DIR__ . '/email-send-log.php'; // pure helpers: kind words + the one-step-per-email fold
 require_once __DIR__ . '/booked-rate.php';
 
 if (!function_exists('rh_hist_tables')) {
@@ -176,6 +177,9 @@ if (!function_exists('rh_hist_tables')) {
         $src['cancellations'] = rh_hist_rows($pdo, 'cancellation_log', "SELECT * FROM cancellation_log WHERE booking_id = ? AND (booking_type IS NULL OR booking_type = 'room') LIMIT 50", [$bookingId]);
         $src['comms'] = rh_hist_rows($pdo, 'guest_communication_log', 'SELECT * FROM guest_communication_log WHERE booking_id = ? LIMIT 50', [$bookingId]);
         $src['auto_emails'] = rh_hist_rows($pdo, 'automated_email_log', "SELECT * FROM automated_email_log WHERE account_type = 'room' AND account_id = ? LIMIT 100", [$bookingId]);
+        // Every email sent (or not sent) about this booking, with who and to whom (email_send_log, migration 081).
+        $src['email_log'] = rh_hist_rows($pdo, 'email_send_log', "SELECT * FROM email_send_log WHERE account_type = 'room' AND (account_id = ? OR account_ref = ?)
+            ORDER BY id LIMIT 200", [$bookingId, (string)($b['booking_reference'] ?? '')]);
         $src['tentative'] = rh_hist_rows($pdo, 'tentative_booking_log', 'SELECT * FROM tentative_booking_log WHERE booking_id = ? LIMIT 100', [$bookingId]);
         $src['booking_rooms'] = rh_hist_rows($pdo, 'booking_rooms', 'SELECT * FROM booking_rooms WHERE booking_id = ? LIMIT 50', [$bookingId]);
         $src['financial_audit'] = rh_hist_rows($pdo, 'booking_financial_audit', 'SELECT * FROM booking_financial_audit WHERE booking_id = ? LIMIT 300', [$bookingId]);

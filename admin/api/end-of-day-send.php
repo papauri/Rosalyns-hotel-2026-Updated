@@ -1145,7 +1145,13 @@ if (false) {
 
 } // end if (false) — legacy inline PDF block
 
-$result = sendReportEmail($recipients, $subject, $html, $attachments, '', $cc_emails);
+$emailCtx = function_exists('rh_email_context') ? rh_email_context(['kind' => 'end_of_day_report']) : null; // System Logs > Emails sent
+try {
+    $result = sendReportEmail($recipients, $subject, $html, $attachments, '', $cc_emails);
+} finally {
+    $emailCtx = null; // script scope: never left open for the scheduler that runs after the page
+    rh_email_context_clear();
+}
 
 if (function_exists('rh_log_event')) {
     rh_log_event('eod-report', $result['success'] ? 'info' : 'warning', 'EOD email send', [

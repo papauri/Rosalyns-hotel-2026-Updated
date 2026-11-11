@@ -334,7 +334,13 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
                         error_log('auto-email invoice pdf ' . $type . '#' . $id . ': ' . $e->getMessage());
                     }
                     rh_scheduler_budget_spend();
-                    $r = sendEmailWithAttachments($a['email'], (string)$a['name'], $tpl['subject'], $tpl['html_body'], $attach, (string)$tpl['text_body']);
+                    $emailCtx = null; // end any earlier guard before the next one is built on top of it
+                    $emailCtx = function_exists('rh_email_context') ? rh_email_context(['kind' => 'payment_reminder'] + rh_email_ctx_account((string)$type, $id, (string)($a['ref'] ?? ''))) : null;
+                    try {
+                        $r = sendEmailWithAttachments($a['email'], (string)$a['name'], $tpl['subject'], $tpl['html_body'], $attach, (string)$tpl['text_body']);
+                    } finally {
+                        $emailCtx = null;
+                    }
                     if (!empty($r['success'])) {
                         rh_auto_log_finish($pdo, $job, $type, $id, $stage, 'sent');
                         $res['sent']++;
@@ -1244,7 +1250,13 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
                     'rows' => $rows, 'currency_symbol' => $currency, 'site_name' => $siteName,
                 ] + rh_kds_report_aggregate($rows));
                 $cc = $testMode ? [] : rh_daily_reports_cc($plan['recipients'], rh_auto_setting('automated_job_station_reports_cc')); // no CC on test sends
-                $r = sendReportEmail($plan['recipients'], $subject, $html, [], '', $cc);
+                $emailCtx = null;
+                $emailCtx = function_exists('rh_email_context') ? rh_email_context(['kind' => 'station_report']) : null; // System Logs > Emails sent
+                try {
+                    $r = sendReportEmail($plan['recipients'], $subject, $html, [], '', $cc);
+                } finally {
+                    $emailCtx = null;
+                }
                 if (!empty($r['success'])) {
                     rh_auto_log_finish($pdo, $k['job'], $k['type'], $k['id'], $k['stage'], 'sent');
                     $res['sent']++;
@@ -1319,6 +1331,8 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
             return ['success' => false, 'message' => 'Unknown template.'];
         }
         $GLOBALS['rh_automated_ctx'] = ['redirect' => $to, 'bcc' => false];
+        // A staff member pressed "Send test to me": the log credits them (session), not the scheduler.
+        $emailCtx = function_exists('rh_email_context') ? rh_email_context(['kind' => 'test_email']) : null;
         try {
             if (strpos($key, 'payment_reminder_') === 0) {
                 $n = (int)substr($key, -1);

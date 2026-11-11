@@ -109,6 +109,9 @@ function sendReportEmail(array $recipients, string $subject, string $htmlBody, a
                 logEmail($r['email'], $r['name'] ?? '', $subject, 'sent', '', 'reports:' . count($attachments));
             }
         }
+        if (function_exists('rh_email_send_log_mail')) {
+            rh_email_send_log_mail('sent', $mail, $subject, '', implode(', ', array_column($valid, 'email')), count($valid) === 1 ? (string)($valid[0]['name'] ?? '') : null);
+        }
 
         return [
             'success' => true,
@@ -117,6 +120,9 @@ function sendReportEmail(array $recipients, string $subject, string $htmlBody, a
         ];
     } catch (PHPMailerException $e) {
         error_log('sendReportEmail PHPMailer: ' . $e->getMessage());
+        if (function_exists('rh_email_send_log_mail')) {
+            rh_email_send_log_mail('failed', $mail ?? null, $subject, $e->getMessage(), implode(', ', array_column($valid, 'email')));
+        }
         return ['success' => false, 'message' => $e->getMessage(), 'sent_to' => []];
     } catch (Throwable $e) {
         error_log('sendReportEmail: ' . $e->getMessage());

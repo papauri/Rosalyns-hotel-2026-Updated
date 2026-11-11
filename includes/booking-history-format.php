@@ -685,6 +685,37 @@ if (!function_exists('rh_hist_tol')) {
         return $out;
     }
 
+    /**
+     * email_send_log rows (migration 081): one 'email' step each, "<Kind> email sent to <to>" with who and when;
+     * failed / not sent / preview say so. Each event keeps 'email_kind' for rh_email_hist_fold() (includes/email-send-log.php).
+     */
+    function rh_hist_from_email_log(array $rows): array
+    {
+        if (!function_exists('rh_email_what')) {
+            return [];
+        }
+        $out = [];
+        foreach ($rows as $r) {
+            $lines = [];
+            $cc = trim((string)($r['cc'] ?? ''));
+            if ($cc !== '') $lines[] = 'Copy: ' . $cc . '.';
+            $subject = trim((string)($r['subject'] ?? ''));
+            if ($subject !== '') $lines[] = 'Subject: ' . rh_hist_clip($subject, 140);
+            $status = (string)($r['status'] ?? '');
+            $err = trim((string)($r['error'] ?? ''));
+            if ($status === 'failed' && $err !== '') $lines[] = 'Problem: ' . rh_hist_clip($err, 160);
+            $who = trim((string)($r['sent_by_label'] ?? ''));
+            $ev = rh_hist_ev((string)($r['sent_at'] ?? ''), $who !== '' ? $who : 'Not recorded', rh_email_what($r), implode("\n", $lines), 'email',
+                ['sendlog:' . (int)($r['id'] ?? 0)], 2);
+            if ($ev) {
+                // Only a real send (or failure) can be the same email as an older record; a decision not to send never folds.
+                $ev['email_kind'] = in_array($status, ['sent', 'failed'], true) ? (string)($r['email_kind'] ?? 'other') : '';
+                $out[] = $ev;
+            }
+        }
+        return $out;
+    }
+
     /** tentative_booking_log rows. */
     function rh_hist_from_tentative(array $rows, array $ctx): array
     {
@@ -1038,7 +1069,7 @@ if (!function_exists('rh_hist_tol')) {
      * cur, room_type_name, room_numbers, room_types, combo_names, combo_name, entity_names, snapshot, today_price,
      * price_changes (for the explanation), price_history (timeline rows), cn_numbers (id => number for notes issued elsewhere), audit, timeline, status_log, notes, payments,
      * payment_audit, credit_notes, cn_apps, cancellations, comms, auto_emails, tentative, booking_rooms,
-     * financial_audit, system_events, blocked_prices.
+     * financial_audit, system_events, blocked_prices, email_log.
      */
     function rh_hist_build(array $src): array
     {
@@ -1107,6 +1138,10 @@ if (!function_exists('rh_hist_tol')) {
         );
         // Rooms last: their person comes from the creation / releasing step built above.
         $events = array_merge($events, rh_hist_from_booking_rooms($src['booking_rooms'] ?? [], $ctx, array_values(array_filter($events))));
+        // Emails from the send log: folded into the older record of the same email (within 2 minutes) so none shows twice.
+        if (!empty($src['email_log']) && function_exists('rh_email_hist_fold')) {
+            $events = rh_email_hist_fold($events, rh_hist_from_email_log($src['email_log']), 120);
+        }
         return rh_hist_merge($events);
     }
 
