@@ -6,6 +6,7 @@ require_once 'admin-init.php';
 
 require_once '../config/receipts.php';
 require_once 'includes/finance-schema.php';
+require_once 'includes/finance-filters.php';
 
 if (!hasPermission((int)($user['id'] ?? 0), 'receipts')) {
     rhDenyAndRedirectHome((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF']));
@@ -53,14 +54,8 @@ function receipts_build_where(array $input, array &$params): string
     } elseif (($input['status'] ?? 'all') === 'emailed') {
         $where[] = 'p.receipt_emailed_at IS NOT NULL';
     }
-    if (($input['date_from'] ?? '') !== '') {
-        $where[] = 'p.payment_date >= ?';
-        $params[] = $input['date_from'];
-    }
-    if (($input['date_to'] ?? '') !== '') {
-        $where[] = 'p.payment_date <= ?';
-        $params[] = $input['date_to'];
-    }
+    // Real Y-m-d dates only; "To" covers the whole day (admin/includes/finance-filters.php).
+    $where = array_merge($where, rh_fin_date_conditions('p.payment_date', $input['date_from'] ?? '', $input['date_to'] ?? '', $params));
     if (($input['search'] ?? '') !== '') {
         $like = '%' . $input['search'] . '%';
         $where[] = '(p.receipt_number LIKE ? OR p.payment_reference LIKE ? OR p.booking_reference LIKE ? OR p.notes LIKE ?)';
@@ -72,8 +67,8 @@ function receipts_build_where(array $input, array &$params): string
 $filters = [
     'type' => $_GET['type'] ?? 'all',
     'status' => $_GET['status'] ?? 'all',
-    'date_from' => $_GET['date_from'] ?? '',
-    'date_to' => $_GET['date_to'] ?? '',
+    'date_from' => rh_fin_valid_date($_GET['date_from'] ?? ''),
+    'date_to' => rh_fin_valid_date($_GET['date_to'] ?? ''),
     'search' => trim((string)($_GET['search'] ?? '')),
 ];
 if (!in_array($filters['type'], ['all', 'room', 'conference', 'restaurant', 'gym', 'event'], true)) {

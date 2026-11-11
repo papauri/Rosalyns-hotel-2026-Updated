@@ -5,6 +5,7 @@ require_once 'admin-init.php';
 require_once '../includes/modal.php';
 require_once '../includes/alert.php';
 require_once 'includes/finance-schema.php';
+require_once 'includes/finance-filters.php';
 
 $site_name = getSetting('site_name');
 $currency_symbol = getSetting('currency_symbol');
@@ -30,8 +31,9 @@ $refundStatus = (string)($_GET['refund_status'] ?? '');
 if (!in_array($refundStatus, ['pending', 'processing', 'completed', 'failed', 'rejected'], true)) {
     $refundStatus = '';
 }
-$startDate = isset($_GET['start_date']) ? $_GET['start_date'] : '';
-$endDate = isset($_GET['end_date']) ? $_GET['end_date'] : '';
+// Real Y-m-d dates only (anything else is ignored, so the boxes show what is actually applied).
+$startDate = rh_fin_valid_date($_GET['start_date'] ?? '');
+$endDate = rh_fin_valid_date($_GET['end_date'] ?? '');
 $searchText = trim((string)($_GET['search_text'] ?? ''));
 // "Outstanding balances" view: shows accounts (bookings/conference/gym/event)
 // that still owe money — i.e. amount_due > 0 — NOT payment-ledger rows. This is
@@ -102,101 +104,31 @@ $sql = "
         -- Room bookings: stored figures for the booked rate x nights line (includes/booked-rate.php).
         b.total_with_vat AS bk_total_with_vat, b.total_amount AS bk_total_amount, b.vat_amount AS bk_vat_amount,
         b.number_of_nights AS bk_nights, b.package_total AS bk_package_total, b.child_supplement_total AS bk_child
-    FROM payments p
-    LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
-    LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
-    LEFT JOIN stock_orders so ON p.booking_type = 'restaurant' AND p.booking_id = so.id
-    LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
-    LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id
-";
+" . rh_fin_payments_from();
 
-$where_conditions = ["p.deleted_at IS NULL"];
-$params = [];
+// ONE filter set for the cards, the list, the row count and the CSV export (admin/includes/finance-filters.php),
+// so a figure on a card is always the sum of the rows the list shows for the same filters.
+$payFilter = rh_fin_payments_where([
+    'booking_type'   => (string)$bookingType,
+    'scope_types'    => $scopeActive ? $enabledBookingTypes : [],
+    'booking_id'     => $bookingId,
+    'search'         => $searchText,
+    'status'         => (string)$status,
+    'refund_status'  => $refundStatus,
+    'payment_method' => (string)$paymentMethod,
+    'start_date'     => (string)$startDate,
+    'end_date'       => (string)$endDate,
+], $paymentTransactionColumn, $conferenceFields);
+$payFromSql = rh_fin_payments_from();
+$payWhereSql = $payFilter['sql'];
+$payFilterParams = $payFilter['params'];
 
-if ($bookingType) {
-    $where_conditions[] = "p.booking_type = ?";
-    $params[] = $bookingType;
-} elseif ($scopeActive) {
-    $where_conditions[] = "p.booking_type IN (" . implode(',', array_fill(0, count($enabledBookingTypes), '?')) . ")";
-    $params = array_merge($params, $enabledBookingTypes);
-}
-
-if ($bookingId) {
-    $where_conditions[] = "p.booking_id = ?";
-    $params[] = $bookingId;
-}
-
-if ($searchText !== '') {
-    $where_conditions[] = "(
-        p.payment_reference LIKE ?
-        OR p.receipt_number LIKE ?
-        OR p.invoice_number LIKE ?
-        OR p.booking_reference LIKE ?
-        OR p.{$paymentTransactionColumn} LIKE ?
-        OR p.payment_method LIKE ?
-        OR p.payment_status LIKE ?
-        OR CAST(p.booking_id AS CHAR) LIKE ?
-        OR CAST(p.total_amount AS CHAR) LIKE ?
-        OR COALESCE(b.guest_name, '') LIKE ?
-        OR COALESCE(b.guest_email, '') LIKE ?
-        OR COALESCE(b.guest_phone, '') LIKE ?
-        OR COALESCE(b.booking_reference, '') LIKE ?
-        OR COALESCE(ci.{$conferenceFields['company']}, '') LIKE ?
-        OR COALESCE(ci.{$conferenceFields['reference']}, '') LIKE ?
-        OR COALESCE(ci.{$conferenceFields['email']}, '') LIKE ?
-        OR COALESCE(ci.{$conferenceFields['phone']}, '') LIKE ?
-        OR COALESCE(so.reference, '') LIKE ?
-        OR COALESCE(so.customer_name, '') LIKE ?
-    )";
-    $searchLike = '%' . $searchText . '%';
-    $params = array_merge($params, array_fill(0, 19, $searchLike));
-}
-
-if ($status) {
-    $where_conditions[] = "p.payment_status = ?";
-    $params[] = $status;
-}
-
-if ($refundStatus !== '') {
-    $where_conditions[] = "p.payment_type = 'refund' AND p.refund_status = ?";
-    $params[] = $refundStatus;
-}
-
-if ($paymentMethod) {
-    $where_conditions[] = "p.payment_method = ?";
-    $params[] = $paymentMethod;
-}
-
-if ($startDate) {
-    $where_conditions[] = "p.payment_date >= ?";
-    $params[] = $startDate;
-}
-
-if ($endDate) {
-    $where_conditions[] = "p.payment_date <= ?";
-    $params[] = $endDate;
-}
-
-if (!empty($where_conditions)) {
-    $sql .= " WHERE " . implode(' AND ', $where_conditions);
-}
+$sql .= ' ' . $payWhereSql;
 
 // Get total count
-$countSql = "
-    SELECT COUNT(*) as total
-    FROM payments p
-    LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
-    LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
-    LEFT JOIN stock_orders so ON p.booking_type = 'restaurant' AND p.booking_id = so.id
-    LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
-    LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id
-";
-
-if (!empty($where_conditions)) {
-    $countSql .= " WHERE " . implode(' AND ', $where_conditions);
-}
+$countSql = "SELECT COUNT(*) as total " . $payFromSql . ' ' . $payWhereSql;
 $countStmt = $pdo->prepare($countSql);
-$countStmt->execute($params);
+$countStmt->execute($payFilterParams);
 $total = $countStmt->fetch(PDO::FETCH_ASSOC)['total'];
 
 // Add ordering and pagination
@@ -215,11 +147,9 @@ require_once __DIR__ . '/includes/server-sort.php';
 ], 'p.payment_date DESC, p.created_at DESC', 'p.id DESC');
 $sql .= " ORDER BY " . $payOrderBy;
 $sql .= " LIMIT ? OFFSET ?";
-$params[] = $limit;
-$params[] = $offset;
 
 $stmt = $pdo->prepare($sql);
-$stmt->execute($params);
+$stmt->execute(array_merge($payFilterParams, [$limit, $offset]));
 $payments = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Room payments: "K356,000 × 3" = the nightly price the booking was MADE at x nights (owner 2026-11-09).
@@ -296,113 +226,10 @@ if ($scopeActive && $hiddenBookingTypes !== []) {
 // ──────────────────────────────────────────────────────────────────────────
 // Filter-aware analytics (respect current GET filters)
 // ──────────────────────────────────────────────────────────────────────────
-$analyticsWhere = ["deleted_at IS NULL"];
-$analyticsParams = [];
-if ($bookingType) {
-    $analyticsWhere[] = "booking_type = ?";
-    $analyticsParams[] = $bookingType;
-} elseif ($scopeActive) {
-    // Keep the summary cards consistent with the scoped list below them.
-    $analyticsWhere[] = "booking_type IN (" . implode(',', array_fill(0, count($enabledBookingTypes), '?')) . ")";
-    $analyticsParams = array_merge($analyticsParams, $enabledBookingTypes);
-}
-if ($bookingId) {
-    $analyticsWhere[] = "booking_id = ?";
-    $analyticsParams[] = $bookingId;
-}
-if ($searchText !== '') {
-    $analyticsWhere[] = "(
-                payment_reference LIKE ?
-                OR receipt_number LIKE ?
-                OR invoice_number LIKE ?
-                OR booking_reference LIKE ?
-                OR {$paymentTransactionColumn} LIKE ?
-                OR payment_method LIKE ?
-                OR payment_status LIKE ?
-                OR CAST(booking_id AS CHAR) LIKE ?
-                OR EXISTS (
-                        SELECT 1
-                        FROM bookings bx
-                        WHERE payments.booking_type = 'room'
-                            AND payments.booking_id = bx.id
-                            AND (
-                                bx.guest_name LIKE ?
-                                OR bx.guest_email LIKE ?
-                                OR bx.guest_phone LIKE ?
-                                OR bx.booking_reference LIKE ?
-                            )
-                )
-                OR EXISTS (
-                        SELECT 1
-                        FROM conference_inquiries cix
-                        WHERE payments.booking_type = 'conference'
-                            AND payments.booking_id = cix.id
-                            AND (
-                                cix.{$conferenceFields['company']} LIKE ?
-                                OR cix.{$conferenceFields['reference']} LIKE ?
-                                OR cix.{$conferenceFields['email']} LIKE ?
-                                OR cix.{$conferenceFields['phone']} LIKE ?
-                            )
-                )
-                OR EXISTS (
-                        SELECT 1
-                        FROM stock_orders sox
-                        WHERE payments.booking_type = 'restaurant'
-                            AND payments.booking_id = sox.id
-                            AND (
-                                sox.reference LIKE ?
-                                OR sox.customer_name LIKE ?
-                            )
-                )
-                OR EXISTS (
-                        SELECT 1
-                        FROM gym_inquiries gix
-                        WHERE payments.booking_type = 'gym'
-                            AND payments.booking_id = gix.id
-                            AND (
-                                gix.name LIKE ?
-                                OR gix.reference_number LIKE ?
-                                OR gix.email LIKE ?
-                                OR gix.phone LIKE ?
-                            )
-                )
-                OR EXISTS (
-                        SELECT 1
-                        FROM event_inquiries eix
-                        WHERE payments.booking_type = 'event'
-                            AND payments.booking_id = eix.id
-                            AND (
-                                eix.name LIKE ?
-                                OR eix.reference_number LIKE ?
-                                OR eix.email LIKE ?
-                                OR eix.phone LIKE ?
-                            )
-                )
-        )";
-    $analyticsSearchLike = '%' . $searchText . '%';
-    $analyticsParams = array_merge($analyticsParams, array_fill(0, 26, $analyticsSearchLike));
-}
-if ($status) {
-    $analyticsWhere[] = "payment_status = ?";
-    $analyticsParams[] = $status;
-}
-if ($refundStatus !== '') {
-    $analyticsWhere[] = "payment_type = 'refund' AND refund_status = ?";
-    $analyticsParams[] = $refundStatus;
-}
-if ($paymentMethod) {
-    $analyticsWhere[] = "payment_method = ?";
-    $analyticsParams[] = $paymentMethod;
-}
-if ($startDate) {
-    $analyticsWhere[] = "payment_date >= ?";
-    $analyticsParams[] = $startDate;
-}
-if ($endDate) {
-    $analyticsWhere[] = "payment_date <= ?";
-    $analyticsParams[] = $endDate;
-}
-$analyticsWhereSql = "WHERE " . implode(' AND ', $analyticsWhere);
+// The cards read exactly the payment rows the list shows: same FROM, same WHERE, same params as the list
+// and the count (rh_fin_payments_where). The card SUM/COUNT expressions below run over those rows only.
+$analyticsWhereSql = "WHERE id IN (SELECT p.id " . $payFromSql . ' ' . $payWhereSql . ")";
+$analyticsParams = $payFilterParams;
 
 $kpiStmt = $pdo->prepare("
     SELECT
@@ -497,17 +324,11 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                 WHEN p.booking_type = 'gym' THEN gi.name
                 WHEN p.booking_type = 'event' THEN ei.name
             END AS customer
-        FROM payments p
-        LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
-        LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
-        LEFT JOIN stock_orders so ON p.booking_type = 'restaurant' AND p.booking_id = so.id
-        LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
-        LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id
-        WHERE " . implode(' AND ', $where_conditions) . "
+        " . $payFromSql . ' ' . $payWhereSql . "
         ORDER BY p.payment_date DESC, p.created_at DESC
     ";
-    // Reuse main filter params (without the pagination LIMIT/OFFSET appended later)
-    $exportParams = array_slice($params, 0, count($params) - 2);
+    // Same filters as the list and the cards (no pagination)
+    $exportParams = $payFilterParams;
     $exportStmt = $pdo->prepare($exportSql);
     $exportStmt->execute($exportParams);
     header('Content-Type: text/csv; charset=utf-8');

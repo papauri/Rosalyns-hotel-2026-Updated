@@ -5,6 +5,7 @@ require_once 'admin-init.php';
 
 require_once '../includes/alert.php';
 require_once 'includes/finance-schema.php';
+require_once 'includes/finance-filters.php';
 require_once __DIR__ . '/includes/booking-lifecycle.php';
 require_once __DIR__ . '/includes/finance-account-sync.php';
 require_once __DIR__ . '/includes/receivables.php';
@@ -274,31 +275,15 @@ $scopeActive         = $filter_type === 'all' && !$scopeAll
     && count($enabledBookingTypes) < count($allBookingTypes);
 $hiddenBookingTypes  = $scopeActive ? array_values(array_diff($allBookingTypes, $enabledBookingTypes)) : [];
 
-// Build query
-$where_conditions = ["p.deleted_at IS NULL"];
-$params = [];
-
-if ($filter_type !== 'all') {
-    $where_conditions[] = "p.booking_type = ?";
-    $params[] = $filter_type;
-} elseif ($scopeActive) {
-    $where_conditions[] = "p.booking_type IN (" . implode(',', array_fill(0, count($enabledBookingTypes), '?')) . ")";
-    $params = array_merge($params, $enabledBookingTypes);
-}
-
-if ($filter_status !== 'all') {
-    $where_conditions[] = "p.payment_status = ?";
-    $params[] = $filter_status;
-}
-
-if (!empty($search)) {
-    $where_conditions[] = "(p.invoice_number LIKE ? OR p.payment_reference LIKE ? OR p.booking_reference LIKE ?)";
-    $params[] = "%$search%";
-    $params[] = "%$search%";
-    $params[] = "%$search%";
-}
-
-$where_clause = !empty($where_conditions) ? implode(' AND ', $where_conditions) : '';
+// ONE filter set for the cards and the list (admin/includes/finance-filters.php): the paid / refunded /
+// generated cards count exactly the invoice rows listed for the same type, status, search and module scope.
+$invFilter = rh_fin_invoices_where([
+    'type'        => (string)$filter_type,
+    'scope_types' => $scopeActive ? $enabledBookingTypes : [],
+    'status'      => (string)$filter_status,
+    'search'      => (string)$search,
+]);
+$params = $invFilter['params'];
 
 // Fetch invoices with payment details
 try {
@@ -333,9 +318,7 @@ try {
         LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
         LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id";
 
-    if (!empty($where_clause)) {
-        $sql .= " WHERE $where_clause";
-    }
+    $sql .= ' ' . $invFilter['sql'];
 
     $sql .= " ORDER BY p.payment_date DESC, p.id DESC";
 
@@ -352,8 +335,8 @@ try {
         $hiddenScopedCount = (int)$hStmt->fetchColumn();
     }
 
-    // Get statistics
-    $stats_stmt = $pdo->query("
+    // Get statistics (same rows as the list)
+    $stats_stmt = $pdo->prepare("
         SELECT
             COUNT(*) as total_invoices,
             COUNT(CASE WHEN invoice_generated = 1 THEN 1 END) as invoices_generated,
@@ -361,22 +344,24 @@ try {
                 WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount
                 WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN -total_amount
                 ELSE 0 END), 0) as total_revenue
-        FROM payments
-        WHERE deleted_at IS NULL
+        FROM payments p
+        {$invFilter['sql']}
     ");
+    $stats_stmt->execute($params);
     $stats = $stats_stmt->fetch(PDO::FETCH_ASSOC);
 
-    // Rich invoice analytics — outstanding, paid, refunded, MTD, aging buckets
-    $invoiceKpiStmt = $pdo->query("
+    // Rich invoice analytics — paid, refunded, MTD over the listed rows (outstanding/aging below are account-level)
+    $invoiceKpiStmt = $pdo->prepare("
         SELECT
             COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS paid_total,
             COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN 1 ELSE 0 END), 0) AS paid_count,
             COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN total_amount ELSE 0 END), 0) AS refunded_total,
             COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN 1 ELSE 0 END), 0) AS refunded_count,
             COALESCE(SUM(CASE WHEN YEAR(payment_date)=YEAR(CURDATE()) AND MONTH(payment_date)=MONTH(CURDATE()) AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS mtd_collected
-        FROM payments
-        WHERE deleted_at IS NULL
+        FROM payments p
+        {$invFilter['sql']}
     ");
+    $invoiceKpiStmt->execute($params);
     $invoiceKpi = $invoiceKpiStmt->fetch(PDO::FETCH_ASSOC) ?: [];
 
     // Outstanding, aging and outstanding-by-source: the accounts' amount_due through the one shared receivables
@@ -397,7 +382,9 @@ try {
     }
     usort($outstandingBySource, static function (array $x, array $y): int { return $y['amt'] <=> $x['amt']; });
 } catch (PDOException $e) {
-    $error = 'Error fetching invoices: ' . $e->getMessage();
+    // Never show the database error on screen; the detail goes to System Logs.
+    rh_log_event('admin/invoices', 'error', 'Invoices list could not be loaded', ['error' => $e->getMessage()]);
+    $error = 'The invoices could not be loaded. Please try again; if it keeps happening, check System Logs.';
     $invoices = [];
     $stats = ['total_invoices' => 0, 'invoices_generated' => 0, 'total_revenue' => 0];
     $invoiceKpi = ['paid_total' => 0, 'paid_count' => 0, 'outstanding_total' => 0, 'outstanding_count' => 0, 'refunded_total' => 0, 'refunded_count' => 0, 'mtd_collected' => 0];
