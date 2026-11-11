@@ -23,6 +23,7 @@ require_once '../includes/finance-sequences.php';
 require_once 'includes/finance-account-sync.php';
 require_once 'includes/account-receipt-send.php';
 require_once __DIR__ . '/../includes/booked-rate-change.php'; // booked rate × nights lines (also loads includes/booked-rate.php)
+require_once __DIR__ . '/../includes/booking-created-by.php'; // "by …" under the Created date in the list
 $message = '';
 $error = '';
 $currency_symbol = (string)getSetting('currency_symbol', 'MWK');
@@ -3361,6 +3362,8 @@ try {
     $stmt->execute(array_merge($params, [$per_page, $offset]));
     $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
     $current_page_count = count($bookings);
+    // Who created each booking on this page: one read-only query for the page's ids (never one per row).
+    $bk_created_by = rh_created_by_map($pdo, array_column($bookings, 'id'));
 
     // Latest conference enquiries & bookings (one table holds both). Only when the person can open the
     // Conference page (permission + module); the full list, quotes and payments live there.
@@ -3842,6 +3845,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                             <small style="color: #666; font-size: 11px;">
                                                 <i class="fas fa-clock"></i> <?php echo date('M j, H:i', strtotime($booking['created_at'])); ?>
                                             </small>
+                                            <?php echo rh_created_by_html($bk_created_by[(int)$booking['id']] ?? ['label' => '']); ?>
                                         </td>
                                         <td class="actions-cell" data-label="Actions">
                                             <?php

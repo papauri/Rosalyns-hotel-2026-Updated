@@ -2239,3 +2239,21 @@ hr.menu-divider {
         font-size: 0.74rem !important;
     }
 }
+
+/* Who created the booking: one short muted line under the Created date (owner 2026-11-11).
+   Long names end in an ellipsis; the full "Name (role)" is in the title. */
+.bk-created-by {
+    display: block;
+    max-width: 160px;
+    margin-top: 1px;
+    color: #666;
+    font-size: 11px;
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+table.mobile-enhanced .bk-created-by {
+    max-width: 100%;
+}
