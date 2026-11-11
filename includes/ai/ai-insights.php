@@ -305,7 +305,8 @@ function rh_ai_t_money_leaks(PDO $db, array $user, array $a): array
                 $staffIds[] = (int)$r['voided_by'];
                 $byStaff[(int)$r['voided_by']] = ($byStaff[(int)$r['voided_by']] ?? 0) + 1;
             }
-            $out['till_voids'] = ['total' => rh_ai_money($tot), 'count' => count($rows), 'rows' => array_slice($rows, 0, 6), '_by_staff' => $byStaff];
+            $out['till_voids'] = ['total' => rh_ai_money($tot), 'count' => count($rows), 'rows' => array_slice($rows, 0, 6), '_by_staff' => $byStaff,
+                'basis' => 'By the time voided, on calendar days. End of Day groups voids by trading day (opening to the next opening), so a void after midnight before opening can sit on the day before there.'];
         } catch (Throwable $e) {
             $out['till_voids'] = ['error' => 'Could not be read.'];
         }
@@ -456,7 +457,7 @@ function rh_ai_t_restaurant_sales(PDO $db, array $user, array $a): array
     if (!rh_ai_admin_lib('pos-shift-totals.php') || !function_exists('rh_pos_eod_summary')) {
         return ['error' => 'Till figures are not available here.'];
     }
-    $t = ['orders' => 0, 'gross' => 0.0, 'voided_count' => 0, 'voided_value' => 0.0, 'refunded_count' => 0, 'refunded_value' => 0.0];
+    $t = ['orders' => 0, 'gross' => 0.0, 'room_charge_count' => 0, 'room_charge_amount' => 0.0, 'voided_count' => 0, 'voided_value' => 0.0, 'refunded_count' => 0, 'refunded_value' => 0.0];
     $items = [];
     $reasons = [];
     for ($d = $from; $d <= $to; $d = date('Y-m-d', strtotime($d . ' +1 day'))) {
@@ -475,12 +476,12 @@ function rh_ai_t_restaurant_sales(PDO $db, array $user, array $a): array
     }
     usort($items, static fn($x, $y) => $y['revenue'] <=> $x['revenue']);
     usort($reasons, static fn($x, $y) => $y['count'] <=> $x['count']);
-    foreach (['gross', 'voided_value', 'refunded_value'] as $k) {
+    foreach (['gross', 'room_charge_amount', 'voided_value', 'refunded_value'] as $k) {
         $t[$k] = rh_ai_money($t[$k]);
     }
     return ['from' => $from, 'to' => $to, 'currency' => rh_ai_currency(), 'totals' => $t,
         'top_sellers' => array_map(static fn($i) => ['item' => $i['item'], 'qty' => round($i['qty'], 2), 'revenue' => rh_ai_money($i['revenue'])], array_slice($items, 0, 8)),
-        'void_reasons' => array_slice($reasons, 0, 5), 'basis' => 'Same as the End of Day till block (sales by the time they were paid, voids by the time they were voided).',
+        'void_reasons' => array_slice($reasons, 0, 5), 'basis' => 'Same as the End of Day till block and the Z report (sales by the time they were paid, voids by the time they were voided). Orders and gross include orders charged to a guest room bill (room_charge_count / room_charge_amount, the "Charged to room" line): they are on the guest bill, never in a cash drawer.',
         'day_basis' => 'Each day is a trading day: from opening until the next opening, so a sale after midnight before opening counts with the night before. The current trading day is ' . $today . '.',
         'link' => 'end-of-day-report.php?date=' . $to, 'link_label' => 'Open End of Day'];
 }
@@ -684,12 +685,25 @@ function rh_ai_t_inventory_watch(PDO $db, array $user, array $a): array
     $out = ['currency' => rh_ai_currency(), 'from' => $from, 'to' => $to,
         'alerts' => ['out' => $al['out'], 'low' => $al['low'], 'negative' => $al['negative'], 'opening_stock_not_recorded' => $al['never_stocked'],
             'out_items' => array_map($item, $al['out_items']), 'low_items' => array_map($item, $al['low_items']), 'negative_items' => array_map($item, $al['negative_items'])]];
-    try {
-        $rows = $db->query("SELECT i.name, b.batch_number, b.quantity_remaining, b.expiry_date FROM stock_batches b INNER JOIN stock_ingredients i ON i.id = b.ingredient_id
-                            WHERE b.status = 'active' AND b.quantity_remaining > 0 AND b.expiry_date IS NOT NULL AND b.expiry_date <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
-                            ORDER BY b.expiry_date LIMIT 8")->fetchAll(PDO::FETCH_ASSOC);
-        $out['batches_expiring_within_7_days'] = array_map(static fn($r) => ['item' => $r['name'], 'batch' => $r['batch_number'], 'quantity_left' => round((float)$r['quantity_remaining'], 2), 'expires' => $r['expiry_date']], $rows);
-    } catch (Throwable $e) {
+    // Batches: the dashboards' own rules (admin/includes/stock-list-filters.php), so each count equals the list
+    // stock-batches.php?filter=expiring|expired opens. Counts are real totals; only the lists are capped at 8.
+    if (rh_ai_admin_lib('stock-list-filters.php') && function_exists('rh_stock_batch_expiring_sql') && function_exists('rh_stock_batch_expired_sql')) {
+        $batch = static fn($r) => ['item' => $r['name'], 'batch' => $r['batch_number'], 'quantity_left' => round((float)$r['quantity_remaining'], 2), 'expires' => $r['expiry_date']];
+        foreach (['expiring' => rh_stock_batch_expiring_sql('b'), 'expired' => rh_stock_batch_expired_sql('b')] as $k => $cond) {
+            try {
+                $n = (int)$db->query("SELECT COUNT(*) FROM stock_batches b WHERE $cond")->fetchColumn();
+                $rows = $n > 0 ? $db->query("SELECT i.name, b.batch_number, b.quantity_remaining, b.expiry_date FROM stock_batches b INNER JOIN stock_ingredients i ON i.id = b.ingredient_id
+                                             WHERE $cond ORDER BY b.expiry_date, b.id LIMIT 8")->fetchAll(PDO::FETCH_ASSOC) : [];
+                if ($k === 'expiring') {
+                    $out['batches_expiring_within_7_days_total'] = $n;
+                    $out['batches_expiring_within_7_days'] = array_map($batch, $rows);
+                } else {
+                    $out['batches_expired_still_active_total'] = $n;
+                    $out['batches_expired_still_active'] = array_map($batch, $rows);
+                }
+            } catch (Throwable $e) {
+            }
+        }
     }
     try {
         $st = $db->prepare("SELECT COUNT(*) AS n, COALESCE(SUM(wastage_cost), 0) AS v FROM stock_wastage WHERE recorded_date BETWEEN ? AND ?");
@@ -1075,16 +1089,22 @@ function rh_ai_briefing_findings(PDO $db, array $user): array
             $add(['id' => 'stock_low', 'kind' => 'queue', 'severity' => min(50, $al['out'] * 8 + $al['low'] * 3), 'title' => 'Stock out or running low', 'count' => $al['out'] + $al['low'],
                 'detail' => $al['out'] . ' item(s) out, ' . $al['low'] . ' low.',
                 'items' => array_slice(array_map(static fn($i) => ['text' => $i['item'] . ': ' . $i['quantity'] . ' ' . $i['unit'] . ' left'], array_merge($al['out_items'], $al['low_items'])), 0, 4),
-                'link' => ['stock-reorder.php', 'Open Reorder']]);
+                'link' => ['stock-ingredients.php?filter=low', 'Open low and out of stock']]);
         }
         if (!empty($s['counts_waiting_for_approval'])) {
             $add(['id' => 'count_approval', 'kind' => 'decision', 'severity' => 35, 'title' => 'Stock count waiting for approval', 'count' => (int)$s['counts_waiting_for_approval'],
                 'detail' => (int)$s['counts_waiting_for_approval'] . ' count(s) submitted and waiting for approval.', 'link' => ['stock-count.php', 'Open Stock Count']]);
         }
-        if (!empty($s['batches_expiring_within_7_days'])) {
-            $add(['id' => 'batches_expiring', 'kind' => 'queue', 'severity' => 25, 'title' => 'Stock batches expiring this week', 'count' => count($s['batches_expiring_within_7_days']),
-                'detail' => 'Use or move these before they expire.', 'items' => array_slice(array_map(static fn($b) => ['text' => $b['item'] . ', ' . $b['quantity_left'] . ' left, expires ' . $b['expires']], $s['batches_expiring_within_7_days']), 0, 4),
-                'link' => ['stock-batches.php?expiry=soon', 'Open Batches']]);
+        $bLine = static fn($b) => ['text' => $b['item'] . ', ' . $b['quantity_left'] . ' left, expires ' . $b['expires']];
+        if (!empty($s['batches_expiring_within_7_days_total'])) {
+            $add(['id' => 'batches_expiring', 'kind' => 'queue', 'severity' => 25, 'title' => 'Stock batches expiring this week', 'count' => (int)$s['batches_expiring_within_7_days_total'],
+                'detail' => (int)$s['batches_expiring_within_7_days_total'] . ' batch(es) expire in the next 7 days. Use or move these before they expire.', 'items' => array_slice(array_map($bLine, $s['batches_expiring_within_7_days']), 0, 4),
+                'link' => ['stock-batches.php?filter=expiring', 'Open expiring batches']]);
+        }
+        if (!empty($s['batches_expired_still_active_total'])) {
+            $add(['id' => 'batches_expired', 'kind' => 'queue', 'severity' => 30, 'title' => 'Expired batches still in stock', 'count' => (int)$s['batches_expired_still_active_total'],
+                'detail' => (int)$s['batches_expired_still_active_total'] . ' batch(es) are past their expiry date with stock left. Check them and record the wastage.', 'items' => array_slice(array_map($bLine, $s['batches_expired_still_active']), 0, 4),
+                'link' => ['stock-batches.php?filter=expired', 'Open expired batches']]);
         }
     }
     if (($g = $run('guest_voice')) !== null) {
@@ -1163,7 +1183,7 @@ function rh_ai_brief_front_desk(PDO $db, array $user, callable $add): void
         $add(['id' => 'missed_checkout', 'kind' => 'time', 'severity' => min(70, 40 + count($overdue) * 10), 'title' => 'Guests past their check-out date, still checked in', 'count' => count($overdue),
             'detail' => count($overdue) . ' booking(s) should have checked out already. Check them out or extend the stay.',
             'items' => array_slice(array_map(static fn($r) => $line($r, 'was due out ' . $r['check_out_date']), $overdue), 0, 5),
-            'link' => [count($overdue) === 1 ? 'booking-details.php?id=' . (int)$overdue[0]['id'] : 'bookings.php?status=checked-in', count($overdue) === 1 ? 'Open the booking' : 'Open in-house list']]);
+            'link' => [count($overdue) === 1 ? 'booking-details.php?id=' . (int)$overdue[0]['id'] : 'bookings.php?departure=overdue', count($overdue) === 1 ? 'Open the booking' : 'Open overdue departures']]);
     }
     if ($today) {
         $add(['id' => 'due_out_today', 'kind' => 'time', 'severity' => min(55, ($pastCheckout ? 30 : 10) + count($today) * 4), 'title' => $pastCheckout ? 'Due out today, past check-out time' : 'Due out today, not checked out yet', 'count' => count($today),
@@ -1174,18 +1194,25 @@ function rh_ai_brief_front_desk(PDO $db, array $user, callable $add): void
     $leaving = $db->query("SELECT b.id, b.booking_reference, b.guest_name, b.check_out_date, ir.room_number FROM bookings b LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
                            WHERE b.deleted_at IS NULL AND b.status = 'checked-in' AND b.check_out_date <= DATE_ADD(CURDATE(), INTERVAL 1 DAY) ORDER BY b.check_out_date LIMIT 40")->fetchAll(PDO::FETCH_ASSOC);
     $owe = [];
+    $allToday = true;
     foreach ($leaving as $r) {
         $fo = rh_ai_folio((int)$r['id']);
         if ((float)($fo['balance_due'] ?? 0) > BALANCE_TOLERANCE) {
             $owe[] = ['guest_name' => $r['guest_name'], 'reference' => $r['booking_reference'], 'room' => $r['room_number'] !== null ? (string)$r['room_number'] : null,
                 'text' => 'leaves ' . $r['check_out_date'], 'balance_due' => $fo['balance_due'], 'booking_id' => (int)$r['id']];
+            $allToday = $allToday && $r['check_out_date'] === date('Y-m-d');
         }
     }
     if ($owe) {
+        // The list it opens holds the same bookings: Bookings ?balance=owing (amount_due above the tolerance; the payment
+        // recalculation keeps amount_due equal to the folio balance). All due out today = the Dashboard chip's own list.
+        $oweLink = count($owe) === 1 ? ['booking-details.php?id=' . $owe[0]['booking_id'], 'Open the booking']
+            : ($allToday ? ['bookings.php?filter=checkout_today&balance=owing', 'Open departures with a balance']
+                : ['bookings.php?status=checked-in&date_type=departure&date_to=' . date('Y-m-d', strtotime('+1 day')) . '&balance=owing', 'Open departures with a balance']);
         $add(['id' => 'collect_before_departure', 'kind' => 'time', 'severity' => min(60, 25 + count($owe) * 8), 'title' => 'Balances to collect before they leave', 'count' => count($owe),
             'detail' => count($owe) . ' guest(s) leaving today or tomorrow still have a balance on their booking.',
             'items' => array_slice(array_map(static fn($o) => array_diff_key($o, ['booking_id' => 1]), $owe), 0, 5),
-            'link' => [count($owe) === 1 ? 'booking-details.php?id=' . $owe[0]['booking_id'] : 'bookings.php?filter=checkout_today', count($owe) === 1 ? 'Open the booking' : 'Open today\'s check-outs']]);
+            'link' => $oweLink]);
     }
     // Arrivals today not checked in, and with no room
     $arr = $db->query("SELECT b.id, b.booking_reference, b.guest_name, b.individual_room_id, ir.room_number, ir.status AS room_status, ir.housekeeping_status
@@ -1215,7 +1242,7 @@ function rh_ai_brief_front_desk(PDO $db, array $user, callable $add): void
             'detail' => $late . ' booking(s) passed their arrival date without checking in: check in, mark no-show or move the dates.',
             'link' => ['bookings.php?arrival=overdue', 'Open overdue arrivals']]);
     }
-    $tent = $db->query("SELECT b.booking_reference, b.guest_name, b.tentative_expires_at FROM bookings b WHERE b.deleted_at IS NULL AND b.status = 'tentative' AND b.is_tentative = 1
+    $tent = $db->query("SELECT b.booking_reference, b.guest_name, b.tentative_expires_at FROM bookings b WHERE b.deleted_at IS NULL AND b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL
                         AND b.tentative_expires_at BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 24 HOUR) ORDER BY b.tentative_expires_at LIMIT 10")->fetchAll(PDO::FETCH_ASSOC);
     if ($tent) {
         $add(['id' => 'tentative_expiring', 'kind' => 'time', 'severity' => min(50, 20 + count($tent) * 8), 'title' => 'Tentative holds lapsing in the next 24 hours', 'count' => count($tent),
@@ -1226,7 +1253,7 @@ function rh_ai_brief_front_desk(PDO $db, array $user, callable $add): void
     $pending = (int)$db->query("SELECT COUNT(*) FROM bookings WHERE deleted_at IS NULL AND status = 'pending' AND check_in_date >= CURDATE()")->fetchColumn();
     if ($pending > 0) {
         $add(['id' => 'pending_to_confirm', 'kind' => 'decision', 'severity' => min(35, 10 + $pending * 3), 'title' => 'Bookings waiting to be confirmed', 'count' => $pending,
-            'detail' => $pending . ' upcoming booking(s) are still pending.', 'link' => ['bookings.php?status=pending', 'Open pending bookings']]);
+            'detail' => $pending . ' upcoming booking(s) are still pending.', 'link' => ['bookings.php?status=pending&date_type=arrival&date_from=' . date('Y-m-d'), 'Open pending bookings']]);
     }
 }
 
@@ -1253,7 +1280,7 @@ function rh_ai_brief_money(array $m, callable $add, bool $owedOk = false): void
         $add(['id' => 'refunds', 'kind' => 'money', 'severity' => $sev((float)$r['total']), 'title' => 'Refunds paid out', 'count' => $r['count'], 'amount' => $r['total'],
             'detail' => $fmt($r['total']) . ' refunded in full on ' . $r['count'] . ' payment(s), ' . $range . '.',
             'items' => array_slice(array_map(static fn($x) => ['reference' => $x['reference'], 'staff_name' => $x['staff_name'], 'text' => ($x['reason'] !== '' ? $x['reason'] : 'no reason given'), 'amount' => $x['amount']], $r['rows']), 0, 4),
-            'link' => ['payments.php?refund_status=completed&start_date=' . $m['from'] . '&end_date=' . $m['to'], 'Open refunds']]);
+            'link' => ['payments.php?refund_status=completed%2Cprocessing&start_date=' . $m['from'] . '&end_date=' . $m['to'], 'Open refunds']]);
     }
     if (!empty($m['refunds']['waiting_to_be_processed'])) {
         $add(['id' => 'refunds_pending', 'kind' => 'decision', 'severity' => 30, 'title' => 'Refunds waiting to be processed', 'count' => (int)$m['refunds']['waiting_to_be_processed'],

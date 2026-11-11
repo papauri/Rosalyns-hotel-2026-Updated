@@ -1009,7 +1009,7 @@ function rh_dec_f_bk_deposits(PDO $db, array $ctx): array
             rh_dec_option_unvalued('Collect at check-in as usual', 'Nothing changes. A guest who does not show leaves this unpaid.', $conf, 1),
         ],
         'recommend' => 0, 'recommendation' => 'Ask the guests who owe the most for a deposit now. Start at the top of the list under "Where this comes from".',
-        'tier' => 1, 'link' => ['bookings.php?filter=unpaid', 'Open unpaid bookings'],
+        'tier' => 1, 'link' => ['bookings.php?filter=unpaid&date_type=arrival&date_from=' . $start . '&date_to=' . $end, 'Open unpaid bookings'],
     ])]];
 }
 
@@ -1074,7 +1074,9 @@ function rh_dec_f_bk_arrivals(PDO $db, array $ctx): array
     $todayN = count(array_filter($flag, static fn($f) => $f['in'] === $today));
     $parts = [$c['room'] > 0 ? $c['room'] . ($c['room'] === 1 ? ' has' : ' have') . ' no room yet' : '', $c['owed'] > 0 ? $c['owed'] . ($c['owed'] === 1 ? ' still owes' : ' still owe') . ' money' : '',
         $c['req'] > 0 ? $c['req'] . ($c['req'] === 1 ? ' has' : ' have') . ' a special request to read' : ''];
-    $link = $n === 1 ? ['booking-details.php?id=' . $flag[0]['id'], 'Open the booking'] : ($todayN > 0 ? ['bookings.php?filter=checkin_today', 'Open today\'s arrivals'] : ['bookings.php', 'Open Bookings']);
+    // Bookings list on the same arrival dates (Dates = Arrival, the list's default), so every flagged stay is on it
+    $link = $n === 1 ? ['booking-details.php?id=' . $flag[0]['id'], 'Open the booking'] : ($todayN === $n ? ['bookings.php?filter=checkin_today', 'Open today\'s arrivals']
+        : ['bookings.php?date_type=arrival&date_from=' . $today . '&date_to=' . $last, 'Open these arrivals']);
     return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => [rh_dec_card([
         'key' => 'bk_arrivals', 'covers' => ['arrival_no_room', 'collect_before_arrival'],
         'decision' => 'Are ' . ($n === 1 ? 'the guest' : 'the ' . $n . ' guests') . ' arriving ' . ($arr === 1 ? 'today' : 'in the next ' . $arr . ' days') . ' ready for check-in?',

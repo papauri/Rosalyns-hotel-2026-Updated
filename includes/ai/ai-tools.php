@@ -217,7 +217,7 @@ function rh_ai_tool_registry(): array
             'perm' => ['printers_manage', 'kds_view', 'bds_view', 'cds_view'], 'module' => ['pos'], 'cache' => 15, 'handler' => 'rh_ai_t_print_queue', 'step' => 'Checking the print queue',
         ],
         'inventory_watch' => [
-            'description' => 'Stock: one item\'s level (item), one purchase order and what has arrived (purchase_order), or the stock dashboard alerts. Alerts: stock out, low or negative (the stock dashboard rule), batches expiring this week, wastage in a date range (default last 7 days), the last count\'s variance and counts waiting for approval. Read only.',
+            'description' => 'Stock: one item\'s level (item), one purchase order and what has arrived (purchase_order), or the stock dashboard alerts. Alerts: stock out, low or negative (the stock dashboard rule), batches expiring this week and expired batches still in stock (each with its real total; the lists are capped), wastage in a date range (default last 7 days), the last count\'s variance and counts waiting for approval. Read only.',
             'schema' => ['properties' => ['from' => $date, 'to' => $date, 'item' => ['type' => 'string', 'maxLength' => 80, 'description' => 'One stock item: its level, batches and what is on order'],
                 'purchase_order' => ['type' => 'string', 'maxLength' => 80, 'description' => 'Purchase order reference or supplier name']]],
             'perm' => ['stock_dashboard', 'stock_management', 'stock_reports', 'stock_count', 'stock_wastage', 'stock_batches'], 'module' => ['stock'], 'cache' => 120, 'handler' => 'rh_ai_t_inventory_watch', 'step' => 'Checking stock levels',

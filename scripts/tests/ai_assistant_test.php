@@ -86,6 +86,17 @@ try {
     $dfFront = $dfFn($dfIns, 'rh_ai_brief_front_desk', 6000);
     check(strpos($dfFront, "'collect_before_departure'") !== false && strpos($dfFront, 'dashboard_') === false,
         'Briefing: each departing guest\'s own balance stays for the front desk (no dashboard key on it)');
+    // Briefing links land on lists holding exactly what the card counts (2026-11-11 list filters)
+    check(strpos($dfFront, "'bookings.php?departure=overdue'") !== false && strpos($dfFront, "'bookings.php?filter=checkout_today&balance=owing'") !== false
+        && strpos($dfFront, "&balance=owing', 'Open departures with a balance']") !== false && strpos($dfFront, 'b.is_tentative = 1') === false,
+        'Briefing: overdue departures, departures with a balance and expiring holds open the Bookings lists with the same rule');
+    $dfStock = $dfFn($dfIns, 'rh_ai_t_inventory_watch', 4000);
+    check(strpos($dfStock, 'rh_stock_batch_expiring_sql(') !== false && strpos($dfStock, 'rh_stock_batch_expired_sql(') !== false && strpos($dfStock, "INTERVAL 7 DAY") === false
+        && strpos($dfIns, "'stock-batches.php?filter=expiring'") !== false && strpos($dfIns, "'stock-batches.php?filter=expired'") !== false
+        && strpos($dfIns, "'stock-ingredients.php?filter=low'") !== false && strpos($dfIns, 'expiry=soon') === false,
+        'Stock: expiring / expired batch counts are real totals on the batches filters\' own rule, and each card opens that filter');
+    check(strpos($dfFn($dfIns, 'rh_ai_t_restaurant_sales', 2600), "'room_charge_amount'") !== false && strpos($dfIns, 'refund_status=completed%2Cprocessing') !== false,
+        'Till sales carry the Z "Charged to room" line; refunds paid out open completed and processing refunds (the count\'s own basis)');
     $dfDig = $dfFn((string)file_get_contents($root . '/includes/ai/ai-extras.php'), 'rh_ai_digest_body', 2400);
     check(strpos($dfDig, "rh_ai_digest_room_bits(\$perf, hasPermission((int)(\$user['id'] ?? 0), 'dashboard_takings'))") !== false && strpos($dfDig, 'room_revenue_incl_vat') === false,
         'Weekly digest: the room figures line goes through the dashboard_takings check (no revenue figure listed in the body itself)');
