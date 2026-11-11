@@ -407,7 +407,9 @@ try {
                 'id' => $puid,
                 'display_name' => $userNames[$puid]['display_name'],
                 'username' => $userNames[$puid]['username'],
-                'order_count' => $pt['orders_count'],
+                'order_count' => $pt['orders_all_count'] ?? $pt['orders_count'],
+                'room_charge_count' => $pt['room_charge_count'] ?? 0,
+                'room_charge_amount' => $pt['room_charge_amount'] ?? 0,
                 'paid_total' => $pt['sales_total'],
                 'expected_cash' => $pt['drawer_cash'],
                 'opening_float' => $pt['float'],
@@ -504,6 +506,9 @@ try {
     $summary = array_merge($summary, [
         'orders' => $dayTotals['orders_count'],
         'paid_total' => $dayTotals['sales_total'],
+        // Charged to room: on the Z (orders, sales), on guest bills, never in a drawer.
+        'room_charge_count' => $dayTotals['room_charge_count'] ?? 0,
+        'room_charge_amount' => $dayTotals['room_charge_amount'] ?? 0,
         // Collected per tender (gross); refunds/voids paid out are their own line.
         'cash' => $dayTotals['gross_cash'],
         'mobile' => $dayTotals['gross_mobile'],
@@ -573,6 +578,9 @@ try {
                 <span class="ck-kpi__label">Gross POS sales</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)$summary['paid_total'], 2); ?></span>
                 <span class="ck-kpi__sub"><?php echo (int)$summary["orders"]; ?> paid order<?php echo (int)$summary["orders"] === 1 ? "" : "s"; ?> &middot; before refunds and voids (tips not included)</span>
+                <?php if ((int)($summary['room_charge_count'] ?? 0) > 0): ?>
+                <span class="ck-kpi__sub" title="Orders closed to a guest bill: on the Z order count and sales, never in a drawer.">Plus charged to room: <?php echo (int)$summary['room_charge_count']; ?> &middot; <?php echo rh_pos_accounting_money((float)$summary['room_charge_amount'], $currency_symbol); ?> (on guest bills)</span>
+                <?php endif; ?>
                 <span class="ck-kpi__sub" title="Cash, mobile and card taken today, tips included, less every refund and void paid out today at the full amount, tips included. It will not match Gross POS sales above, which leaves tips out.">Net takings after refunds and voids <?php echo rh_pos_accounting_money((float)$summary['net_takings'], $currency_symbol); ?> (tips included)</span>
             </div>
             <div data-filter-card class="ck-kpi ck-kpi--good">
@@ -673,7 +681,7 @@ try {
                                             <div class="pos-acct-detail-grid">
                                                 <div class="pos-acct-detail-cell">
                                                     <label class="pos-acct-detail-label">Orders</label>
-                                                    <div class="pos-acct-detail-value"><?php echo (int)$posUser['order_count']; ?><div class="stat-sub">Voids: <?php echo (int)$posUser['voided_count']; ?></div>
+                                                    <div class="pos-acct-detail-value"><?php echo (int)$posUser['order_count']; ?><div class="stat-sub">Voids: <?php echo (int)$posUser['voided_count']; ?><?php if ((int)($posUser['room_charge_count'] ?? 0) > 0): ?> &middot; incl. <?php echo (int)$posUser['room_charge_count']; ?> charged to room (<?php echo rh_pos_accounting_money((float)$posUser['room_charge_amount'], $currency_symbol); ?>, not in the drawer)<?php endif; ?></div>
                                                     </div>
                                                 </div>
                                                 <div class="pos-acct-detail-cell">

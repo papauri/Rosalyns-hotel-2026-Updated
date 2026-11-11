@@ -135,14 +135,14 @@ if (!function_exists('rh_eod_earned_revenue')) {
 
                 // A room-service order is charged to the guest folio (counted in 2), so it is not a POS sale
                 // as well. Same sale condition as rh_pos_eod_summary.
-                $saleCond = "((o.paid_at IS NOT NULL AND o.status IN ('paid','completed','refunded','voided') AND o.paid_at >= ? AND o.paid_at < ?)"
-                    . " OR (o.paid_at IS NULL AND o.status IN ('paid','completed') AND o.created_at >= ? AND o.created_at < ?))";
+                // Same order rule as rh_pos_eod_summary / the Z (rh_pos_z_sale_sql: till sales OR charged to room).
+                $saleCond = rh_pos_z_sale_sql('o');
                 $folioOrder = "o.order_type = 'room_service' AND EXISTS (SELECT 1 FROM booking_charges bc WHERE bc.stock_order_id = o.id)";
                 $hasLink = rh_pos_col_exists($pdo, 'booking_charges', 'stock_order_id');
 
                 if ($hasLink) {
                     $st = $pdo->prepare("SELECT COALESCE(SUM(o.total_amount),0) FROM stock_orders o WHERE $saleCond AND $folioOrder");
-                    $st->execute([$a, $b, $a, $b]);
+                    $st->execute(rh_pos_z_sale_params($a, $b));
                     $out['pos_room_folio_gross'] = (float)$st->fetchColumn();
                 }
 

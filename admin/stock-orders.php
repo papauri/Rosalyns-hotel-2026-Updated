@@ -1056,7 +1056,12 @@ if (!$error || strpos($error, 'not yet') === false) {
         $shiftStmt = $pdo->prepare("SELECT COUNT(*) AS orders_today FROM stock_orders WHERE created_at >= ? AND created_at < ?");
         $shiftStmt->execute([$soShiftWindow['start_sql'], $soShiftWindow['trading_end_sql']]);
         $shift = $shiftStmt->fetch(PDO::FETCH_ASSOC) ?: [];
-        $shift['revenue_today']    = (float)$soShiftTotals['sales_total'];
+        // Z sales: paid at the till + charged to room (owner 2026-11-11, one definition with the Z and End of Day).
+        // The tender cards, payment mix and till shares stay on till sales (room charges are never in a drawer).
+        $shift['revenue_today']    = (float)($soShiftTotals['sales_all_total'] ?? $soShiftTotals['sales_total']);
+        $shift['till_revenue_today'] = (float)$soShiftTotals['sales_total'];
+        $shift['room_charge_n']    = (int)($soShiftTotals['room_charge_count'] ?? 0);
+        $shift['room_charge_amt']  = (float)($soShiftTotals['room_charge_amount'] ?? 0);
         $shift['cash_today']       = (float)$soShiftTotals['gross_cash'];
         $shift['mobile_today']     = (float)$soShiftTotals['gross_mobile'];
         $shift['card_today']       = (float)$soShiftTotals['gross_card'];
@@ -1065,7 +1070,7 @@ if (!$error || strpos($error, 'not yet') === false) {
         $shift['refund_card']      = (float)$soShiftTotals['refund_card'];
         $shift['refund_amount']    = (float)$soShiftTotals['refund_amount'];
         $shift['tips_today']       = (float)$soShiftTotals['tips_total'];
-        $shift['settled_today_n']  = (int)$soShiftTotals['orders_count'];
+        $shift['settled_today_n']  = (int)($soShiftTotals['orders_all_count'] ?? $soShiftTotals['orders_count']); // = the Z order count
         $shift['voided_today']     = (float)$soShiftTotals['voids_amount'];
         $shift['void_count_today'] = (int)$soShiftTotals['voids_count'];
         $shift['earlier_tabs_n']   = (int)($soShiftTotals['settled_from_tabs_count'] ?? 0);
@@ -1280,8 +1285,8 @@ if (!$error || strpos($error, 'not yet') === false) {
         $ydayStmt->execute([$soPrevWindow['start_sql'], $soPrevWindow['trading_end_sql']]);
         $yesterday = [
             'orders_yesterday'          => (int)$ydayStmt->fetchColumn(),
-            'revenue_yesterday'         => (float)$soPrevTotals['sales_total'],
-            'settled_revenue_yesterday' => (float)$soPrevTotals['sales_total'],
+            'revenue_yesterday'         => (float)($soPrevTotals['sales_all_total'] ?? $soPrevTotals['sales_total']),
+            'settled_revenue_yesterday' => (float)($soPrevTotals['sales_all_total'] ?? $soPrevTotals['sales_total']),
         ];
 
         // Void reasons today (breakdown only - the card totals come from the shift figures above).
@@ -1349,9 +1354,12 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
                 <div class="val"><?php echo (int)($shift['orders_today'] ?? 0); ?></div>
             </a>
             <a class="shift-card" href="accounting-dashboard.php" title="Open accounting dashboard">
-                <div class="lbl">Gross Sales Today <i class="help" aria-label="About gross sales today" data-tip="Money from orders paid in today&#x27;s trading window, before refunds and voids come off. Uses the same figures as the till end-of-shift report.">?</i></div>
+                <div class="lbl">Gross Sales Today <i class="help" aria-label="About gross sales today" data-tip="Money from orders paid in today&#x27;s trading window plus orders charged to a guest&#x27;s room, before refunds and voids come off. Uses the same figures as the till end-of-shift report.">?</i></div>
                 <div class="val"><?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0), 2); ?></div>
                 <div class="shift-card__sub">By payment time, before refunds and voids</div>
+                <?php if ((int)($shift['room_charge_n'] ?? 0) > 0): ?>
+                    <div class="shift-card__sub">Incl. charged to room: <?php echo (int)$shift['room_charge_n']; ?> &middot; <?php echo $currency_symbol . ' ' . number_format((float)$shift['room_charge_amt'], 2); ?> (on guest bills, not in a drawer)</div>
+                <?php endif; ?>
                 <?php if ((float)($shift['refund_amount'] ?? 0) > 0.004): ?>
                     <div class="shift-card__sub">Refunds paid out: <?php echo $currency_symbol . ' ' . number_format((float)$shift['refund_amount'], 2); ?> &middot; Net: <?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0) - (float)$shift['refund_amount'], 2); ?></div>
                 <?php endif; ?>
@@ -1472,7 +1480,7 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
             $ordDelta  = $ordYday > 0 ? round((($ordToday - $ordYday) / $ordYday) * 100, 1) : null;
 
             $totalChannelRevenue = array_sum(array_column($orderTypeSplit, 'revenue')) ?: 1;
-            $totalPaymentRevenue = (float)($shift['revenue_today'] ?? 0) ?: 1;
+            $totalPaymentRevenue = (float)($shift['till_revenue_today'] ?? 0) ?: 1; // the payment mix is till tenders only
 
             $maxHourRev = !empty($hourlyBreakdown) ? max(array_column($hourlyBreakdown, 'revenue')) : 1;
             $peakHour   = null;
@@ -2756,8 +2764,8 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
                     <tr><th>Settled from earlier tabs</th><td><?php echo (int)($shift['earlier_tabs_n'] ?? 0); ?> &middot; <?php echo $currency_symbol . ' ' . number_format((float)($shift['earlier_tabs_amt'] ?? 0), 2); ?></td></tr>
                     <tr><th>Refund / void payouts</th><td>-<?php echo $currency_symbol . ' ' . number_format((float)($shift['refund_cash'] ?? 0), 2); ?></td></tr>
                     <tr><th>Expected after payouts</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['cash_today'] ?? 0) - (float)($shift['refund_cash'] ?? 0), 2); ?></td></tr>
-                    <tr><th>Total revenue today</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0), 2); ?></td></tr>
-                    <tr><th>Cash share of revenue</th><td><?php echo (float)($shift['revenue_today'] ?? 0) > 0 ? number_format(((float)($shift['cash_today'] ?? 0) / (float)$shift['revenue_today']) * 100, 1) . '%' : '0.0%'; ?></td></tr>
+                    <tr><th>Sales paid at the till today</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['till_revenue_today'] ?? 0), 2); ?></td></tr>
+                    <tr><th>Cash share of till sales</th><td><?php echo (float)($shift['till_revenue_today'] ?? 0) > 0 ? number_format(((float)($shift['cash_today'] ?? 0) / (float)$shift['till_revenue_today']) * 100, 1) . '%' : '0.0%'; ?></td></tr>
                 </tbody>
             </table>
             <div class="stock-insight-actions">
@@ -2772,8 +2780,8 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
                     <tr><th>Mobile money today</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['mobile_today'] ?? 0), 2); ?></td></tr>
                     <tr><th>Refund / void payouts</th><td>-<?php echo $currency_symbol . ' ' . number_format((float)($shift['refund_mobile'] ?? 0), 2); ?></td></tr>
                     <tr><th>Expected after payouts</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['mobile_today'] ?? 0) - (float)($shift['refund_mobile'] ?? 0), 2); ?></td></tr>
-                    <tr><th>Total revenue today</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0), 2); ?></td></tr>
-                    <tr><th>Mobile share of revenue</th><td><?php echo (float)($shift['revenue_today'] ?? 0) > 0 ? number_format(((float)($shift['mobile_today'] ?? 0) / (float)$shift['revenue_today']) * 100, 1) . '%' : '0.0%'; ?></td></tr>
+                    <tr><th>Sales paid at the till today</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['till_revenue_today'] ?? 0), 2); ?></td></tr>
+                    <tr><th>Mobile share of till sales</th><td><?php echo (float)($shift['till_revenue_today'] ?? 0) > 0 ? number_format(((float)($shift['mobile_today'] ?? 0) / (float)$shift['till_revenue_today']) * 100, 1) . '%' : '0.0%'; ?></td></tr>
                 </tbody>
             </table>
             <div class="stock-insight-actions">
@@ -2788,8 +2796,8 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
                     <tr><th>Card payments today</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['card_today'] ?? 0), 2); ?></td></tr>
                     <tr><th>Refund / void payouts</th><td>-<?php echo $currency_symbol . ' ' . number_format((float)($shift['refund_card'] ?? 0), 2); ?></td></tr>
                     <tr><th>Expected after payouts</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['card_today'] ?? 0) - (float)($shift['refund_card'] ?? 0), 2); ?></td></tr>
-                    <tr><th>Total revenue today</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['revenue_today'] ?? 0), 2); ?></td></tr>
-                    <tr><th>Card share of revenue</th><td><?php echo (float)($shift['revenue_today'] ?? 0) > 0 ? number_format(((float)($shift['card_today'] ?? 0) / (float)$shift['revenue_today']) * 100, 1) . '%' : '0.0%'; ?></td></tr>
+                    <tr><th>Sales paid at the till today</th><td><?php echo $currency_symbol . ' ' . number_format((float)($shift['till_revenue_today'] ?? 0), 2); ?></td></tr>
+                    <tr><th>Card share of till sales</th><td><?php echo (float)($shift['till_revenue_today'] ?? 0) > 0 ? number_format(((float)($shift['card_today'] ?? 0) / (float)$shift['till_revenue_today']) * 100, 1) . '%' : '0.0%'; ?></td></tr>
                 </tbody>
             </table>
             <div class="stock-insight-actions">

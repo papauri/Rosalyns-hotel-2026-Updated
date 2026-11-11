@@ -53,8 +53,28 @@ $agg           = [
     'expected_card' => 0.0,
     'declared_card' => 0.0,
     'variance_card' => 0.0,
+    'room_charge_count' => 0,
+    'room_charge_amount' => 0.0,
 ];
 $aggTotalVar   = 0.0;
+
+/**
+ * Z figures for display (owner 2026-11-11): a close STORES till orders and till takings only. "Charged to
+ * room" (orders closed to a guest bill, rh_pos_close_room_charges) is read from data over the close's own
+ * window and added on view, so every close - recorded before or after this line existed - shows
+ * Orders = till + charged to room and Sales = till takings + charged to room. Stored rows are never changed.
+ */
+$rhZRoomNote = 'Charged to room is read from current data each time this page opens; till figures are as stored at close. It can differ from the printed Z if a room charge was later closed at checkout or cancelled.';
+$rhZWithRoom = function (array $c) use ($pdo): array {
+    $rc = rh_pos_close_room_charges($pdo, $c);
+    $c['till_orders_count'] = (int)($c['orders_count'] ?? 0);
+    $c['till_revenue'] = (float)($c['total_revenue'] ?? 0);
+    $c['room_charge_count'] = (int)$rc['count'];
+    $c['room_charge_amount'] = (float)$rc['amount'];
+    $c['orders_count'] = $c['till_orders_count'] + $c['room_charge_count'];
+    $c['total_revenue'] = round($c['till_revenue'] + $c['room_charge_amount'], 2);
+    return $c;
+};
 
 if (isset($_GET['id']) && ctype_digit($_GET['id'])) {
     // ----- Single Z-report -----
@@ -77,6 +97,7 @@ if (isset($_GET['id']) && ctype_digit($_GET['id'])) {
         exit;
     }
     $close['total_revenue'] = rh_pos_close_revenue($pdo, $close); // 0/NULL on older closes: rebuilt on read
+    $close = $rhZWithRoom($close); // + charged to room (read on view, nothing stored changes)
 
     // Reconstruct this close's OWN window exactly as the till counted it (pos-shift-totals.php
     // rh_pos_close_window): from where this user's previous close stopped counting (looking back to
@@ -87,8 +108,9 @@ if (isset($_GET['id']) && ctype_digit($_GET['id'])) {
     $windowStart = $closeWin['from'];
     $windowEnd   = $closeWin['end'];
 
-    // Sales taken by this user in the window: by paid_at, whatever the order status is now
-    // (a later refund/void is a separate payout below, not a removal of the sale).
+    // Orders on this Z: sales taken by this user in the window by paid_at, whatever the order status is now
+    // (a later refund/void is a separate payout below, not a removal of the sale), plus orders charged to a
+    // room (rh_pos_z_sale_sql - the same rule as the Z totals and End of Day).
     $payerSql  = rh_pos_payer_sql($pdo, 'o');
     $ordersSql = "
         SELECT
@@ -97,15 +119,17 @@ if (isset($_GET['id']) && ctype_digit($_GET['id'])) {
             o.total_amount,
             o.payment_method,
             o.paid_at,
+            o.created_at,
+            o.split_count,
             o.created_by,
             o.status,
             (SELECT COUNT(*) FROM stock_order_items WHERE order_id = o.id) AS item_count
         FROM stock_orders o
-        WHERE " . rh_pos_sale_window_sql('o') . "
+        WHERE " . rh_pos_z_sale_sql('o') . "
           AND $payerSql = ?
-        ORDER BY o.paid_at ASC";
+        ORDER BY COALESCE(o.paid_at, o.created_at) ASC";
     $ordersStmt = $pdo->prepare($ordersSql);
-    $ordersStmt->execute([$windowStart, $windowEnd, $windowStart, $windowEnd, (int)$close['user_id']]);
+    $ordersStmt->execute(array_merge(rh_pos_z_sale_params($windowStart, $windowEnd), [(int)$close['user_id']]));
     $paidOrders = $ordersStmt->fetchAll(PDO::FETCH_ASSOC);
 
     // Voided orders (by the voiding user, at the time of the void)
@@ -167,7 +191,7 @@ if (isset($_GET['id']) && ctype_digit($_GET['id'])) {
             SUM(oi.line_total) AS revenue
         FROM stock_order_items oi
         JOIN stock_orders o ON o.id = oi.order_id
-        WHERE " . rh_pos_sale_window_sql('o') . "
+        WHERE " . rh_pos_z_sale_sql('o') . "
           AND $payerSql = ?
           AND COALESCE(oi.kds_status, '') NOT IN ('void', 'voided', 'cancelled', '86', '86d', '86ed')
         GROUP BY oi.item_name, oi.menu_type
@@ -175,7 +199,7 @@ if (isset($_GET['id']) && ctype_digit($_GET['id'])) {
         LIMIT 10
     ";
     $topItemsStmt = $pdo->prepare($topItemsSql);
-    $topItemsStmt->execute([$windowStart, $windowEnd, $windowStart, $windowEnd, (int)$close['user_id']]);
+    $topItemsStmt->execute(array_merge(rh_pos_z_sale_params($windowStart, $windowEnd), [(int)$close['user_id']]));
     $topItems = $topItemsStmt->fetchAll(PDO::FETCH_ASSOC);
 } elseif (isset($_GET['date'])) {
     // ----- Date summary (all closes for a business date) — admin/manager only -----
@@ -196,7 +220,7 @@ if (isset($_GET['id']) && ctype_digit($_GET['id'])) {
     ");
     $stmt->execute([$reportDate]);
     $closes = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($closes as &$cRow) { $cRow['total_revenue'] = rh_pos_close_revenue($pdo, $cRow); }
+    foreach ($closes as &$cRow) { $cRow['total_revenue'] = rh_pos_close_revenue($pdo, $cRow); $cRow = $rhZWithRoom($cRow); }
     unset($cRow);
 
     // Aggregate for summary
@@ -216,6 +240,8 @@ if (isset($_GET['id']) && ctype_digit($_GET['id'])) {
         'expected_card' => 0,
         'declared_card' => 0,
         'variance_card' => 0,
+        'room_charge_count' => 0,
+        'room_charge_amount' => 0,
     ];
     foreach ($closes as $c) {
         foreach (array_keys($agg) as $k) {
@@ -233,7 +259,7 @@ if (isset($_GET['id']) && ctype_digit($_GET['id'])) {
         $stmt->execute([$user['id']]);
     }
     $closes = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    foreach ($closes as &$cRow) { $cRow['total_revenue'] = rh_pos_close_revenue($pdo, $cRow); }
+    foreach ($closes as &$cRow) { $cRow['total_revenue'] = rh_pos_close_revenue($pdo, $cRow); $cRow = $rhZWithRoom($cRow); }
     unset($cRow);
     $mode   = 'list';
     $reportDate = rh_station_trading_business_date();
@@ -902,13 +928,15 @@ $printTitle = match ($mode) {
 
                 <!-- Summary strip -->
                 <div class="summary-strip">
-                    <div class="summary-cell">
-                        <div class="summary-cell__label">Total Revenue</div>
+                    <div class="summary-cell" title="Till takings (cash, mobile money, card, after refunds paid out) plus orders charged to a room.">
+                        <div class="summary-cell__label">Total Sales</div>
                         <div class="summary-cell__value"><?php echo $fmt((float)$close['total_revenue']); ?></div>
+                        <div style="font-size:11px; color:var(--muted);">Till <?php echo $fmt((float)$close['till_revenue']); ?> + room <?php echo $fmt((float)$close['room_charge_amount']); ?> (room read now)</div>
                     </div>
-                    <div class="summary-cell">
-                        <div class="summary-cell__label">Paid Orders</div>
+                    <div class="summary-cell" title="Orders paid at the till plus orders charged to a room.">
+                        <div class="summary-cell__label">Orders</div>
                         <div class="summary-cell__value"><?php echo number_format((int)$close['orders_count']); ?></div>
+                        <div style="font-size:11px; color:var(--muted);">Till <?php echo (int)$close['till_orders_count']; ?> + room <?php echo (int)$close['room_charge_count']; ?> (room read now)</div>
                     </div>
                     <div class="summary-cell<?php echo (float)$close['voids_amount'] > 0 ? ' summary-cell--alert' : ''; ?>">
                         <div class="summary-cell__label">Voids</div>
@@ -923,6 +951,8 @@ $printTitle = match ($mode) {
                         </div>
                     </div>
                 </div>
+
+                <div style="padding:0 20px;"><p class="z-room-note" style="margin:6px 0 0; font-size:11px; color:var(--muted);"><?php echo htmlspecialchars($rhZRoomNote); ?></p></div>
 
                 <!-- Tender reconciliation -->
                 <div class="section-label">Tender Reconciliation</div>
@@ -958,10 +988,17 @@ $printTitle = match ($mode) {
                                     <td class="text-center"><span class="badge badge--<?php echo $badgeCls; ?>"><?php echo $badgeText; ?></span></td>
                                 </tr>
                             <?php endforeach; ?>
+                                <tr style="color:var(--muted);" title="Orders closed to a guest bill: in the order count and sales above, never in the drawer, so nothing to count. <?php echo htmlspecialchars($rhZRoomNote); ?>">
+                                    <td><i class="fas fa-bed"></i> Charged to room (<?php echo (int)$close['room_charge_count']; ?>)<br><small style="font-size:10px;">Read from current data, not stored at close</small></td>
+                                    <td class="text-right"><?php echo $fmt((float)$close['room_charge_amount']); ?></td>
+                                    <td class="text-right">On guest bills</td>
+                                    <td class="text-right">&mdash;</td>
+                                    <td class="text-center" style="font-size:11px;">Not in drawer</td>
+                                </tr>
                         </tbody>
                         <tfoot>
                             <tr class="tfoot-row">
-                                <td>TOTAL</td>
+                                <td>DRAWER TOTAL</td>
                                 <td class="text-right"><?php echo $fmt((float)$close['expected_cash'] + (float)$close['expected_mobile'] + (float)$close['expected_card']); ?></td>
                                 <td class="text-right"><?php echo $fmt((float)$close['declared_cash'] + (float)$close['declared_mobile'] + (float)$close['declared_card']); ?></td>
                                 <td class="text-right" style="font-weight:700; color:<?php echo $vColor($vTotal); ?>;"><?php echo $vLabel($vTotal); ?></td>
@@ -1025,7 +1062,7 @@ $printTitle = match ($mode) {
             <?php if (!empty($paidOrders)): ?>
                 <div class="report-card">
                     <div class="section-label" style="border-top:none; padding-top:16px;">
-                        Paid Orders — <?php echo count($paidOrders); ?> transactions
+                        Orders — <?php echo count($paidOrders); ?> (paid at the till and charged to room)
                     </div>
                     <div class="tbl-outer">
                         <table>
@@ -1041,8 +1078,9 @@ $printTitle = match ($mode) {
                                 <?php foreach ($paidOrders as $o): ?>
                                     <tr>
                                         <td style="font-family:monospace; font-size:12px;"><?php echo htmlspecialchars($o['order_ref']); ?></td>
-                                        <td style="color:var(--muted); font-size:12px;"><?php echo htmlspecialchars(substr($o['paid_at'] ?? '', 11, 5)); ?></td>
-                                        <td><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)($o['payment_method'] ?? '')))); ?><?php if (($o['status'] ?? '') !== 'paid'): ?> <span class="badge badge--overage"><?php echo htmlspecialchars(strtoupper((string)$o['status'])); ?> LATER</span><?php endif; ?></td>
+                                        <?php $oTender = rh_pos_z_order_tender($o); ?>
+                                        <td style="color:var(--muted); font-size:12px;"><?php echo htmlspecialchars(substr((string)($o['paid_at'] ?? $o['created_at'] ?? ''), 11, 5)); ?></td>
+                                        <td><?php if ($oTender === 'room'): ?>Charged to room<?php else: ?><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)($o['payment_method'] ?? '')))); ?><?php endif; ?><?php if (!in_array(($o['status'] ?? ''), ['paid', 'completed'], true)): ?> <span class="badge badge--overage"><?php echo htmlspecialchars(strtoupper((string)$o['status'])); ?> LATER</span><?php endif; ?></td>
                                         <td class="text-right" style="font-weight:600;"><?php echo $fmt((float)$o['total_amount']); ?></td>
                                     </tr>
                                 <?php endforeach; ?>
@@ -1137,13 +1175,15 @@ $printTitle = match ($mode) {
 
                 <!-- Aggregate summary strip -->
                 <div class="summary-strip">
-                    <div class="summary-cell">
-                        <div class="summary-cell__label">Total Revenue</div>
+                    <div class="summary-cell" title="Till takings of every close plus orders charged to a room.">
+                        <div class="summary-cell__label">Total Sales</div>
                         <div class="summary-cell__value"><?php echo $fmt($agg['total_revenue']); ?></div>
+                        <div style="font-size:11px; color:var(--muted);">Incl. charged to room <?php echo $fmt((float)$agg['room_charge_amount']); ?> (read now)</div>
                     </div>
-                    <div class="summary-cell">
+                    <div class="summary-cell" title="Orders paid at the till plus orders charged to a room.">
                         <div class="summary-cell__label">All Orders</div>
                         <div class="summary-cell__value"><?php echo number_format((int)$agg['orders_count']); ?></div>
+                        <div style="font-size:11px; color:var(--muted);">Incl. <?php echo (int)$agg['room_charge_count']; ?> charged to room (read now)</div>
                     </div>
                     <div class="summary-cell<?php echo $agg['voids_amount'] > 0 ? ' summary-cell--alert' : ''; ?>">
                         <div class="summary-cell__label">Total Voids</div>
@@ -1154,6 +1194,8 @@ $printTitle = match ($mode) {
                         <div class="summary-cell__value"><?php echo $vLabel($aggTotalVar); ?></div>
                     </div>
                 </div>
+
+                <div style="padding:0 20px;"><p class="z-room-note" style="margin:6px 0 0; font-size:11px; color:var(--muted);"><?php echo htmlspecialchars($rhZRoomNote); ?></p></div>
 
                 <!-- Per-cashier table -->
                 <div class="section-label" style="border-top:1px solid var(--border);">Cashier Breakdown</div>
@@ -1166,8 +1208,8 @@ $printTitle = match ($mode) {
                                 <tr>
                                     <th>Cashier</th>
                                     <th class="col-hide-mobile">Closed</th>
-                                    <th class="text-right">Revenue</th>
-                                    <th class="text-right col-hide-mobile">Orders</th>
+                                    <th class="text-right" title="Till takings as stored at close + charged to room. <?php echo htmlspecialchars($rhZRoomNote); ?>">Revenue <small style="font-weight:400;">(till + room)</small></th>
+                                    <th class="text-right col-hide-mobile" title="Till orders as stored at close + charged to room. <?php echo htmlspecialchars($rhZRoomNote); ?>">Orders <small style="font-weight:400;">(till + room)</small></th>
                                     <th class="text-right col-hide-mobile">Voids</th>
                                     <th class="text-right col-hide-mobile">Cash Var</th>
                                     <th class="text-right col-hide-mobile">Mobile Var</th>
@@ -1185,8 +1227,8 @@ $printTitle = match ($mode) {
                                     <tr<?php echo $rowHasShortfall ? ' style="background:#fff5f5;"' : ''; ?>>
                                         <td style="font-weight:600;"><?php echo htmlspecialchars($c['user_name']); ?></td>
                                         <td class="col-hide-mobile" style="color:var(--muted); font-size:12px;"><?php echo htmlspecialchars(substr($c['closed_at'] ?? '', 11, 5)); ?></td>
-                                        <td class="text-right" style="font-weight:600;"><?php echo $fmt((float)$c['total_revenue']); ?></td>
-                                        <td class="text-right col-hide-mobile"><?php echo number_format((int)$c['orders_count']); ?></td>
+                                        <td class="text-right" style="font-weight:600;" title="Till <?php echo $fmt((float)$c['till_revenue']); ?> as stored + charged to room <?php echo $fmt((float)$c['room_charge_amount']); ?> read now"><?php echo $fmt((float)$c['total_revenue']); ?></td>
+                                        <td class="text-right col-hide-mobile" title="Till <?php echo (int)$c['till_orders_count']; ?> as stored + charged to room <?php echo (int)$c['room_charge_count']; ?> read now"><?php echo number_format((int)$c['orders_count']); ?></td>
                                         <td class="text-right col-hide-mobile<?php echo (float)$c['voids_amount'] > 0 ? '" style="color:#c82333;' : ''; ?>"><?php echo (int)$c['voids_count']; ?> / <?php echo $fmt((float)$c['voids_amount']); ?></td>
                                         <td class="text-right col-hide-mobile" style="color:<?php echo $vColor((float)$c['variance_cash']); ?>; font-weight:600;"><?php echo $vLabel((float)$c['variance_cash']); ?></td>
                                         <td class="text-right col-hide-mobile" style="color:<?php echo $vColor((float)$c['variance_mobile']); ?>; font-weight:600;"><?php echo $vLabel((float)$c['variance_mobile']); ?></td>
@@ -1237,6 +1279,7 @@ $printTitle = match ($mode) {
                     <h2><i class="fas fa-history"></i> Shift Close History</h2>
                     <p>Last 30 records<?php echo in_array($user['role'], ['admin', 'manager'], true) ? ' — all cashiers' : ' — your closes'; ?></p>
                 </div>
+                <div style="padding:0 20px;"><p class="z-room-note" style="margin:6px 0 0; font-size:11px; color:var(--muted);"><?php echo htmlspecialchars($rhZRoomNote); ?></p></div>
                 <?php if (empty($closes)): ?>
                     <div style="padding:40px; text-align:center; color:var(--muted);">No shift closes recorded yet.</div>
                 <?php else: ?>
@@ -1247,8 +1290,8 @@ $printTitle = match ($mode) {
                                     <th>Date</th>
                                     <th>Cashier</th>
                                     <th class="col-hide-mobile">Closed At</th>
-                                    <th class="text-right">Revenue</th>
-                                    <th class="text-right col-hide-mobile">Orders</th>
+                                    <th class="text-right" title="Till takings as stored at close + charged to room. <?php echo htmlspecialchars($rhZRoomNote); ?>">Revenue <small style="font-weight:400;">(till + room)</small></th>
+                                    <th class="text-right col-hide-mobile" title="Till orders as stored at close + charged to room. <?php echo htmlspecialchars($rhZRoomNote); ?>">Orders <small style="font-weight:400;">(till + room)</small></th>
                                     <th class="text-right">Variance</th>
                                     <th class="text-center no-print">Report</th>
                                 </tr>
@@ -1262,8 +1305,8 @@ $printTitle = match ($mode) {
                                         <td style="font-size:13px;"><?php echo htmlspecialchars($c['shift_date']); ?></td>
                                         <td style="font-weight:600;"><?php echo htmlspecialchars($c['user_name']); ?></td>
                                         <td class="col-hide-mobile" style="color:var(--muted); font-size:12px;"><?php echo htmlspecialchars(substr($c['closed_at'] ?? '', 11, 5)); ?></td>
-                                        <td class="text-right" style="font-weight:600;"><?php echo $fmt((float)$c['total_revenue']); ?></td>
-                                        <td class="text-right col-hide-mobile"><?php echo number_format((int)$c['orders_count']); ?></td>
+                                        <td class="text-right" style="font-weight:600;" title="Till <?php echo $fmt((float)$c['till_revenue']); ?> as stored + charged to room <?php echo $fmt((float)$c['room_charge_amount']); ?> read now"><?php echo $fmt((float)$c['total_revenue']); ?></td>
+                                        <td class="text-right col-hide-mobile" title="Till <?php echo (int)$c['till_orders_count']; ?> as stored + charged to room <?php echo (int)$c['room_charge_count']; ?> read now"><?php echo number_format((int)$c['orders_count']); ?></td>
                                         <td class="text-right" style="color:<?php echo $vColor($cVar); ?>; font-weight:700;"><?php echo $vLabel($cVar); ?></td>
                                         <td class="text-center no-print">
                                             <a href="shift-close-report.php?id=<?php echo (int)$c['id']; ?>" target="_blank"

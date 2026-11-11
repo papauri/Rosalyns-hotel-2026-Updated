@@ -1075,7 +1075,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $pdo->prepare("INSERT INTO stock_shift_closes ($closeCols) VALUES ($closePh)")->execute($closeVals);
                 $closeId = (int)$pdo->lastInsertId();
-                pos_logAudit($pdo, 0, $user['id'], $user['full_name'], 'shift_closed', json_encode(['close_id' => $closeId, 'window_start' => $shiftFrom, 'window_end' => $windowEnd, 'refund_cash' => $E['refund_cash'], 'refund_mobile' => $E['refund_mobile'], 'refund_card' => $E['refund_card'], 'opening_float' => $E['float'], 'float_recorded' => $E['float_recorded'], 'cash_sales' => $E['gross_cash'], 'expected_cash' => $expCashDrawer, 'declared_cash' => $declCash, 'variance_cash' => $vCash, 'expected_mobile' => $E['mobile'], 'declared_mobile' => $declMobile, 'variance_mobile' => $vMobile, 'expected_card' => $E['card'], 'declared_card' => $declCard, 'variance_card' => $vCard, 'tips_total' => $E['tips_total'] ?? 0, 'orders' => $E['orders_count'], 'voids' => $E['voids_count'], 'settled_from_tabs_count' => $E['settled_from_tabs_count'], 'settled_from_tabs_amount' => $E['settled_from_tabs_amount'], 'override' => $overrideRequested && $maxVar > $threshold, 'override_reason' => $overrideRequested ? $overrideReason : null]));
+                pos_logAudit($pdo, 0, $user['id'], $user['full_name'], 'shift_closed', json_encode(['close_id' => $closeId, 'window_start' => $shiftFrom, 'window_end' => $windowEnd, 'refund_cash' => $E['refund_cash'], 'refund_mobile' => $E['refund_mobile'], 'refund_card' => $E['refund_card'], 'opening_float' => $E['float'], 'float_recorded' => $E['float_recorded'], 'cash_sales' => $E['gross_cash'], 'expected_cash' => $expCashDrawer, 'declared_cash' => $declCash, 'variance_cash' => $vCash, 'expected_mobile' => $E['mobile'], 'declared_mobile' => $declMobile, 'variance_mobile' => $vMobile, 'expected_card' => $E['card'], 'declared_card' => $declCard, 'variance_card' => $vCard, 'tips_total' => $E['tips_total'] ?? 0, 'orders' => $E['orders_count'], 'room_charge_count' => $E['room_charge_count'] ?? 0, 'room_charge_amount' => $E['room_charge_amount'] ?? 0, 'voids' => $E['voids_count'], 'settled_from_tabs_count' => $E['settled_from_tabs_count'], 'settled_from_tabs_amount' => $E['settled_from_tabs_amount'], 'override' => $overrideRequested && $maxVar > $threshold, 'override_reason' => $overrideRequested ? $overrideReason : null]));
 
                 $justClosedShift = [
                     'expected_cash' => $expCashDrawer,
@@ -1092,12 +1092,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'declared_card' => $declCard,
                     'variance_card' => $vCard,
                     'orders_count' => (int)$E['orders_count'],
+                    // Charged to room: on the Z (orders, sales), on the guest bill, never in the drawer.
+                    'room_charge_count' => (int)($E['room_charge_count'] ?? 0),
+                    'room_charge_amount' => (float)($E['room_charge_amount'] ?? 0),
+                    'orders_all_count' => (int)($E['orders_all_count'] ?? $E['orders_count']),
                     'voids_count' => (int)$E['voids_count'],
                     'tips_total' => (float)($E['tips_total'] ?? 0),
                     'settled_from_tabs_count' => (int)$E['settled_from_tabs_count'],
                     'settled_from_tabs_amount' => (float)$E['settled_from_tabs_amount'],
                 ];
-                $message = 'Shift closed. Paid orders: ' . (int)$E['orders_count'] . ' (settled earlier tabs: ' . (int)$E['settled_from_tabs_count'] . '). Variance — cash: ' . number_format($vCash, 2) . ', mobile: ' . number_format($vMobile, 2) . ', card: ' . number_format($vCard, 2) . '.';
+                $message = 'Shift closed. Orders: ' . (int)($E['orders_all_count'] ?? $E['orders_count']) . ' (paid at the till: ' . (int)$E['orders_count'] . ', charged to room: ' . (int)($E['room_charge_count'] ?? 0) . '; settled earlier tabs: ' . (int)$E['settled_from_tabs_count'] . '). Variance — cash: ' . number_format($vCash, 2) . ', mobile: ' . number_format($vMobile, 2) . ', card: ' . number_format($vCard, 2) . '.';
                 pos_redirectWithFlash([
                     'message' => $message,
                     'just_closed_shift' => $justClosedShift,
@@ -1760,6 +1764,10 @@ function pos_fetch_shift_summary(PDO $pdo, array $restaurantWindow, int $userId)
     return [
         'orders_today' => (int)$t['orders_count'],
         'revenue_today' => (float)$t['sales_total'],
+        // Charged to room: in the Z order count, never in the drawer (shown on the close form).
+        'orders_all' => (int)($t['orders_all_count'] ?? $t['orders_count']),
+        'room_charge_count' => (int)($t['room_charge_count'] ?? 0),
+        'room_charge_amount' => (float)($t['room_charge_amount'] ?? 0),
         'refund_today' => (float)($t['refund_amount'] ?? 0),
         'cash_today' => (float)$t['gross_cash'],
         'mobile_today' => (float)$t['gross_mobile'],
@@ -3276,6 +3284,11 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                                 <td style="padding:8px; border-top:1px solid #eee; text-align:right; color:<?php echo $vc; ?>; font-weight:700;"><?php echo ($v > 0 ? '+' : '') . number_format($v, 2); ?></td>
                             </tr>
                         <?php endforeach; ?>
+                        <tr style="color:#6c757d;">
+                            <td style="padding:8px; border-top:1px solid #eee;">Charged to room (<?php echo (int)($justClosedShift['room_charge_count'] ?? 0); ?>)</td>
+                            <td style="padding:8px; border-top:1px solid #eee; text-align:right;"><?php echo number_format((float)($justClosedShift['room_charge_amount'] ?? 0), 2); ?></td>
+                            <td colspan="2" style="padding:8px; border-top:1px solid #eee; text-align:right; font-size:12px;">On guest bills, not in the drawer</td>
+                        </tr>
                     </tbody>
                 </table>
                 <p style="font-size:13px; color:#495057; margin:12px 0 0;">
@@ -3285,7 +3298,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     = Expected cash <strong><?php echo number_format((float)$justClosedShift['expected_cash'], 2); ?></strong>
                     <?php if (empty($justClosedShift['float_recorded'])): ?><br><em style="color:#856404;">No opening float was recorded for this shift, so it was counted as 0.</em><?php endif; ?>
                 </p>
-                <p style="font-size:12px; color:#6c757d; margin-top:14px;">Orders: <?php echo $justClosedShift['orders_count']; ?> · Voids: <?php echo $justClosedShift['voids_count']; ?><?php if (($justClosedShift['tips_total'] ?? 0) > 0): ?> · Tips collected: <strong><?php echo $currency_symbol . ' ' . number_format((float)$justClosedShift['tips_total'], 2); ?></strong><?php endif; ?> · Settled earlier tabs: <?php echo (int)($justClosedShift['settled_from_tabs_count'] ?? 0); ?> (<?php echo $currency_symbol . ' ' . number_format((float)($justClosedShift['settled_from_tabs_amount'] ?? 0), 2); ?>). Recorded in <code>stock_shift_closes</code> for management review.</p>
+                <p style="font-size:12px; color:#6c757d; margin-top:14px;">Orders: <?php echo (int)($justClosedShift['orders_all_count'] ?? $justClosedShift['orders_count']); ?> (paid at the till <?php echo (int)$justClosedShift['orders_count']; ?> + charged to room <?php echo (int)($justClosedShift['room_charge_count'] ?? 0); ?>) · Voids: <?php echo $justClosedShift['voids_count']; ?><?php if (($justClosedShift['tips_total'] ?? 0) > 0): ?> · Tips collected: <strong><?php echo $currency_symbol . ' ' . number_format((float)$justClosedShift['tips_total'], 2); ?></strong><?php endif; ?> · Settled earlier tabs: <?php echo (int)($justClosedShift['settled_from_tabs_count'] ?? 0); ?> (<?php echo $currency_symbol . ' ' . number_format((float)($justClosedShift['settled_from_tabs_amount'] ?? 0), 2); ?>). Recorded in <code>stock_shift_closes</code> for management review.</p>
                 <div class="actions">
                     <button class="a-print" type="button" onclick="window.print()"><i class="fas fa-print"></i> Print Z-report</button>
                     <a class="a-new" href="pos.php"><i class="fas fa-arrow-right"></i> Continue</a>
@@ -3399,7 +3412,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 <div class="modal-body">
                     <p style="font-size:13px; color:#6c757d; margin-top:0;">Count what is actually in the drawer / records and enter every amount (0 if none). Expected figures stay hidden until you submit; the shift must balance — variance &gt; <?php echo $currency_symbol; ?> 1.00 will be blocked unless overridden by an admin/manager.</p>
                     <div style="background:#f7f7f7; border-radius:8px; padding:12px; font-size:13px; margin-bottom:14px;">
-                        <div>Paid orders this shift: <strong id="closeShiftOrdersCount"><?php echo (int)($shift['orders_today'] ?? 0); ?></strong></div>
+                        <div>Orders this shift: <strong id="closeShiftOrdersCount"><?php echo (int)($shift['orders_all'] ?? ($shift['orders_today'] ?? 0)); ?></strong> (paid at the till <span id="closeShiftTillCount"><?php echo (int)($shift['orders_today'] ?? 0); ?></span> + charged to room <span id="closeShiftRoomCount"><?php echo (int)($shift['room_charge_count'] ?? 0); ?></span>)</div>
+                        <div>Charged to room: <strong id="closeShiftRoomAmount"><?php echo $currency_symbol . ' ' . number_format((float)($shift['room_charge_amount'] ?? 0), 2); ?></strong> <span style="color:#6c757d;">on guest bills, not in the drawer &mdash; do not count it</span></div>
                         <div>Settled earlier tabs: <strong id="closeShiftSettledCount"><?php echo (int)($shift['settled_from_tabs_count'] ?? 0); ?></strong> · <span id="closeShiftSettledAmount"><?php echo $currency_symbol . ' ' . number_format((float)($shift['settled_from_tabs_amount'] ?? 0), 2); ?></span></div>
                         <div>Opening float: <strong id="closeShiftFloat"><?php echo !empty($shift['float_recorded']) ? $currency_symbol . ' ' . number_format((float)($shift['float_amount'] ?? 0), 2) : $currency_symbol . ' 0.00 (no opening float recorded for this shift, counted as 0)'; ?></strong></div>
                         <div style="margin-top:4px; color:#6c757d;">Cash to count in the drawer = opening float + cash sales &minus; cash refunds. Include the float in your count.</div>
@@ -6107,7 +6121,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             setText('tbStatMobile', currencySymbol + ' ' + fmtMoneyNoDecimals(mobile));
             setText('tbStatCard', currencySymbol + ' ' + fmtMoneyNoDecimals(card));
 
-            setText('closeShiftOrdersCount', String(orders));
+            setText('closeShiftOrdersCount', String(parseInt(shift.orders_all ?? shift.orders_today, 10) || 0));
+            setText('closeShiftTillCount', String(orders));
+            setText('closeShiftRoomCount', String(parseInt(shift.room_charge_count, 10) || 0));
+            setText('closeShiftRoomAmount', currencySymbol + ' ' + fmtMoney(Number(shift.room_charge_amount || 0)));
             setText('closeShiftSettledCount', String(settledCount));
             setText('closeShiftSettledAmount', currencySymbol + ' ' + fmtMoney(settledAmount));
             setText('closeShiftFloat', shift.float_recorded

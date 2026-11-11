@@ -613,6 +613,10 @@ $posRows = [
     ['Voided Value',      pdfMoney($currency_symbol, (float)$pos['voided_value'])],
     ['vs Yesterday',      pdfSign($pos_change) . pdfMoney($currency_symbol, abs($pos_change))],
 ];
+if ((int)($pos['room_charge_count'] ?? 0) > 0) {
+    // Same line as the till Z: inside Total Orders and Gross Revenue, on guest bills, never in a drawer.
+    array_splice($posRows, 2, 0, [['Charged to Room', (int)$pos['room_charge_count'] . ' - ' . pdfMoney($currency_symbol, (float)$pos['room_charge_amount'])]]);
+}
 foreach ($posRows as $i => $pr2) {
     $bg = $i % 2 === 0 ? $LIGHT_BG : $CREAM;
     $pdf->SetFillColorArray($bg);

@@ -1633,6 +1633,10 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                             <?php
                             echo $kv('Orders', (string)(int)$pos_totals['orders']);
                             echo $kv('Gross', $money($pos_totals['gross']));
+                            if ((int)($pos_totals['room_charge_count'] ?? 0) > 0) {
+                                // Same line as the till Z: inside Orders and Gross above, on guest bills, never in a drawer.
+                                echo $kv('Charged to room', (int)$pos_totals['room_charge_count'] . ' &middot; ' . $money((float)$pos_totals['room_charge_amount']) . $sub('in Orders and Gross; on guest bills, not in a drawer'));
+                            }
                             echo $kv('COGS', $money($pos_totals['cogs']));
                             echo $kv('Margin (ex-VAT, net of refunds)', number_format($pos_margin_pct, 1) . '%');
                             echo $kv('Voids', (int)$pos_totals['voided_count'] . ' &middot; ' . $money($pos_totals['voided_value']), (int)$pos_totals['voided_count'] > 0 ? 'eod-warn' : '');

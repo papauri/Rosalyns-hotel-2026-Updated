@@ -405,7 +405,7 @@ $csrf_token = generateCsrfToken();
                     <?php if (($metrics['orders_paid_today'] ?? null) === null): ?>
                         Could not load today's sales
                     <?php else: ?>
-                    <?php echo number_format((int)$metrics['orders_paid_today']); ?> paid order<?php echo (int)$metrics['orders_paid_today'] !== 1 ? 's' : ''; ?>
+                    <?php echo number_format((int)$metrics['orders_paid_today']); ?> paid order<?php echo (int)$metrics['orders_paid_today'] !== 1 ? 's' : ''; ?> &middot; excl. room charges on guest bills
                     <?php if ((int)$metrics['orders_paid_today'] > 0 && $metrics['revenue_today'] > 0): ?>
                         &middot; avg <?php echo htmlspecialchars($currency_symbol) . ' ' . number_format($metrics['revenue_today'] / $metrics['orders_paid_today'], 0); ?>
                     <?php endif; ?>

@@ -511,6 +511,9 @@ if ($channel === 'whatsapp') {
     } // end rooms block (bookings)
     $lines[] = isRestaurantEnabled() ? "━━━━━━━━━━ 🍽️ F&B / POS ━━━━━━━━━━" : "━━━━━━━━━━ 🛒 POS ━━━━━━━━━━";
     $lines[] = "Orders: " . (int)$pos['orders'] . "   Gross: *" . _money($currency_symbol, (float)$pos['gross']) . "*";
+    if ((int)($pos['room_charge_count'] ?? 0) > 0) {
+        $lines[] = "  incl. charged to room: " . (int)$pos['room_charge_count'] . " (" . _money($currency_symbol, (float)$pos['room_charge_amount']) . ")";
+    }
     $lines[] = "Margin: " . _money($currency_symbol, ((float)$pos['gross'] - (float)$pos['cogs'])) . " (" . number_format((float)$pos['gross'] > 0 ? (((float)$pos['gross'] - (float)$pos['cogs']) / (float)$pos['gross']) * 100 : 0, 1) . "%)";
     $lines[] = "  " . $posArrow . " vs yesterday: " . ($pos_change >= 0 ? '+' : '') . _money($currency_symbol, $pos_change);
     if ($top) {
@@ -787,6 +790,9 @@ if ($eodModBookings) {
 $html .= $section_head(isRestaurantEnabled() ? 'POS / F&B' : 'POS');
 $html .= $row('Total Orders', (string)(int)$pos['orders']);
 $html .= $row('Gross Revenue', _money($currency_symbol, (float)$pos['gross']));
+if ((int)($pos['room_charge_count'] ?? 0) > 0) {
+    $html .= $row('Charged to Room', (int)$pos['room_charge_count'] . ' orders, ' . _money($currency_symbol, (float)$pos['room_charge_amount']) . ' (in orders and gross; on guest bills)');
+}
 $html .= $row('Cost of Goods (COGS)', _money($currency_symbol, (float)$pos['cogs']));
 $pos_margin_val = (float)($pos['margin'] ?? 0);
 $pos_marg_pct   = (float)($pos['margin_pct'] ?? 0);
@@ -1079,6 +1085,9 @@ if (false) {
     $pdfSec(isRestaurantEnabled() ? 'POS / F&B' : 'POS');
     $pdfRowA('Total Orders',  (string)(int)$pos['orders'], false, 0);
     $pdfRowA('Gross Revenue', _money($currency_symbol, (float)$pos['gross']), false, 1);
+    if ((int)($pos['room_charge_count'] ?? 0) > 0) {
+        $pdfRowA('Charged to Room', (int)$pos['room_charge_count'] . ' orders  -  ' . _money($currency_symbol, (float)$pos['room_charge_amount']), false, 0);
+    }
     $pdfRowA('Margin (ex-VAT)', _money($currency_symbol, $pos_margin_val) . ' (' . number_format($pos_marg_pct, 1) . '%)', false, 2);
     $pdfRowA('Voids',         (int)$pos['voided_count'] . ' orders  -  ' . _money($currency_symbol, (float)$pos['voided_value']), false, 3);
     $py += 3.0;

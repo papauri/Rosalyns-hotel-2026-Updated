@@ -7,7 +7,9 @@
  * calendar day, and the timestamp depends on what the card measures:
  *  - money (status=sold, or any payment_method): when the sale was PAID - rh_pos_sale_window_sql,
  *    the till / Z-report rule (paid/refunded/voided later still count; legacy paid rows by created_at),
- *    tender read per split leg like the shift totals;
+ *    tender read per split leg like the shift totals. status=sold with no tender filter is every order
+ *    on the Z: rh_pos_z_sale_sql adds orders charged to a room (owner 2026-11-11), so Settled Today =
+ *    the Z order count; a tender list stays till-only (a room charge is never in a drawer);
  *  - voids (status=voided): when it was voided (voided_at, else created_at) - same as the shift totals;
  *  - settled (status=paid/completed/settled): when it was paid (paid_at, else created_at);
  *  - everything else (orders today, open, channel, hour): when the order was started (created_at).
@@ -225,10 +227,17 @@ if (!function_exists('rh_so_list_where')) {
         $c = [];
         $p = [];
         $win = [$start, $end, $start, $end];
+        // The Z's order list (till sales + charged to room) when no tender narrows it to a drawer tender.
+        $zOrders = (($f['status'] ?? '') === 'sold' && ($f['payment_method'] ?? '') === '');
         switch (rh_so_date_basis($f)) {
             case 'sale':
-                $c[] = rh_pos_sale_window_sql('o');
-                array_push($p, ...$win);
+                if ($zOrders) {
+                    $c[] = rh_pos_z_sale_sql('o');
+                    array_push($p, ...rh_pos_z_sale_params($start, $end));
+                } else {
+                    $c[] = rh_pos_sale_window_sql('o');
+                    array_push($p, ...$win);
+                }
                 break;
             case 'void':
                 $c[] = rh_so_void_window_sql('o');
@@ -276,7 +285,8 @@ if (!function_exists('rh_so_list_where')) {
         } elseif ($s === 'sold') {
             // Without a window: every order that was sold (any later status), same shape as the sale rule.
             if (rh_so_date_basis($f) !== 'sale') {
-                $c[] = "((o.paid_at IS NOT NULL AND o.status IN ('paid','refunded','voided')) OR (o.paid_at IS NULL AND o.status = 'paid'))";
+                $c[] = "((o.paid_at IS NOT NULL AND o.status IN ('paid','refunded','voided')) OR (o.paid_at IS NULL AND o.status = 'paid')"
+                    . ($zOrders ? " OR o.status = 'completed'" : '') . ')';
             }
         } elseif (($list = rh_so_status_list($s)) !== []) {
             $c[] = 'o.status IN (' . implode(',', array_fill(0, count($list), '?')) . ')';

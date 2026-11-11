@@ -46,6 +46,10 @@ function so_in(array $get, array $w, array $row): bool
     $in = static fn(?string $t): bool => $t !== null && $t >= $w['start_sql'] && $t < $w['trading_end_sql'];
     switch (rh_so_date_basis($f)) {
         case 'sale':
+            // status=sold with no tender = every order on the Z: also orders charged to a room (completed).
+            if ($f['status'] === 'sold' && $f['payment_method'] === '' && $row['status'] === 'completed') {
+                return $in($row['paid_at'] ?? $row['created_at']);
+            }
             return ($row['paid_at'] !== null && in_array($row['status'], ['paid', 'refunded', 'voided'], true) && $in($row['paid_at']))
                 || ($row['paid_at'] === null && $row['status'] === 'paid' && $in($row['created_at']));
         case 'void':
@@ -89,7 +93,13 @@ so_check(array_slice($p, 4) === ['card_manual', 'card_pos', 'credit_card', 'card
 [$c, $p] = so_where(['date' => 'today', 'status' => 'voided'], $wDay);
 so_check(strpos($c[0], 'voided_at') !== false && count($p) === 5 && end($p) === 'voided' && strpos(implode(' ', $c), 'o.status = ?') !== false, 'void clause by voided_at + status');
 [$c, $p] = so_where(['date' => 'today', 'status' => 'sold'], $wDay);
-so_check(count($c) === 1 && count($p) === 4, 'status=sold adds no extra status clause inside the sale window', $c);
+so_check(count($c) === 1 && $c[0] === rh_pos_z_sale_sql('o') && $p === rh_pos_z_sale_params($wDay['start_sql'], $wDay['trading_end_sql']), 'status=sold = the Z order rule (till sales + charged to room), 8 params, no extra status clause', $c);
+[$c, $p] = so_where(['date' => 'today', 'status' => 'sold', 'payment_method' => 'cash'], $wDay);
+so_check($c[0] === rh_pos_sale_window_sql('o') && strpos(implode(' ', $c), 'completed') === false, 'sold + a tender = till-only (a room charge is never in a drawer)', $c);
+[$c, $p] = so_where(['status' => 'sold'], $wDay);
+so_check(strpos($c[0], "OR o.status = 'completed'") !== false && $p === [], 'sold with no date also lists room charges');
+[$c, $p] = so_where(['status' => 'sold', 'payment_method' => 'unassigned'], $wDay);
+so_check(strpos(implode(' ', $c), 'completed') === false, 'sold + unassigned tender never picks up room charges');
 [$c, $p] = so_where(['date' => 'today', 'order_type' => 'restaurant'], $wDay);
 so_check(strpos($c[1], "COALESCE(NULLIF(TRIM(o.order_type), ''), 'restaurant') = ?") !== false && end($p) === 'restaurant', 'channel match uses the panel grouping (blank = restaurant)');
 [$c, $p] = so_where(['status' => 'placed', 'order_type' => 'non_room_service'], $wDay);
@@ -110,6 +120,8 @@ so_check(!so_in(['date' => 'today', 'status' => 'sold'], $wDay, $paidThenVoided)
 so_check(so_in(['date' => 'today', 'status' => 'voided'], $wDay, $paidThenVoided), '... but in today\'s Voids list (as the Voids card)');
 $legacyPaid = ['status' => 'paid', 'created_at' => '2026-11-11 09:00:00', 'paid_at' => null, 'voided_at' => null];
 so_check(so_in(['date' => 'today', 'status' => 'sold'], $wDay, $legacyPaid), 'legacy paid row with no paid_at falls back to created_at');
+$roomCharge = ['status' => 'completed', 'created_at' => '2026-11-11 19:00:00', 'paid_at' => null, 'voided_at' => null];
+so_check(so_in(['date' => 'today', 'status' => 'sold'], $wDay, $roomCharge) && !so_in(['date' => 'today', 'status' => 'sold', 'payment_method' => 'cash'], $wDay, $roomCharge), 'room charge: in Settled Today (= Z), not in a tender list');
 
 echo "\n--- 5. Unknown values are dropped, never shown as a filter ---\n";
 $f = rh_so_normalize_filters(['date' => '2026-11-01', 'status' => 'bogus', 'payment_method' => "cash' OR 1", 'hour' => '24', 'kitchen_status' => 'x', 'health' => 'y']);

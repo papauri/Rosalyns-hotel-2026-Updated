@@ -85,6 +85,69 @@ if (!function_exists('rh_pos_sale_window_sql')) {
     }
 }
 
+if (!function_exists('rh_pos_room_charge_sql')) {
+    /**
+     * Orders CHARGED TO A ROOM in [start,end): closed to a guest bill with no till tender (status
+     * 'completed' - room service charged to the folio, closed when served / at checkout / on a booking
+     * close). Counted when the order was started (created_at), or paid_at if one was ever stamped -
+     * exactly End of Day's long-standing 'completed' rule, so the Z for a day's shifts sums to End of Day.
+     * Owner 2026-11-11 (standard hotel POS practice): a "Charged to room" line on the Z, inside the order
+     * count and sales, never in the drawer. 4 params, same as rh_pos_sale_window_sql.
+     */
+    function rh_pos_room_charge_sql(string $o = 'o'): string
+    {
+        return "($o.status = 'completed' AND (($o.paid_at IS NOT NULL AND $o.paid_at >= ? AND $o.paid_at < ?)"
+            . " OR ($o.paid_at IS NULL AND $o.created_at >= ? AND $o.created_at < ?)))";
+    }
+}
+
+if (!function_exists('rh_pos_z_sale_sql')) {
+    /**
+     * Every order on the Z for [start,end): sold at the till (rh_pos_sale_window_sql) OR charged to a room
+     * (rh_pos_room_charge_sql). The ONE order definition of the Z, End of Day and Orders & Tabs "sold".
+     * 8 params: rh_pos_z_sale_params($start, $end).
+     */
+    function rh_pos_z_sale_sql(string $o = 'o'): string
+    {
+        return '(' . rh_pos_sale_window_sql($o) . ' OR ' . rh_pos_room_charge_sql($o) . ')';
+    }
+}
+
+if (!function_exists('rh_pos_z_sale_params')) {
+    /** The 8 params of rh_pos_z_sale_sql. Pure. */
+    function rh_pos_z_sale_params(string $start, string $end): array
+    {
+        return [$start, $end, $start, $end, $start, $end, $start, $end];
+    }
+}
+
+if (!function_exists('rh_pos_z_order_tender')) {
+    /**
+     * Pure classifier: how an order sits on the Z. 'room' = charged to a guest bill (status completed, no
+     * till tender); 'split' = split bill (each leg its own tender); 'cash' / 'mobile' / 'card' = the
+     * order's tender; 'other' = a till sale with no drawer tender; null = not a sale (open, cancelled,
+     * voided or refunded before any payment). A room-service order PAID at the till is a till sale in its
+     * tender, never a room charge, so it is never counted twice.
+     */
+    function rh_pos_z_order_tender(array $o): ?string
+    {
+        $status = (string)($o['status'] ?? '');
+        $paidAt = $o['paid_at'] ?? null;
+        $paid = ($paidAt !== null && $paidAt !== '');
+        if ($status === 'completed') {
+            return 'room';
+        }
+        $sold = $paid ? in_array($status, ['paid', 'refunded', 'voided'], true) : ($status === 'paid');
+        if (!$sold) {
+            return null;
+        }
+        if ((int)($o['split_count'] ?? 1) > 1) {
+            return 'split';
+        }
+        return rh_pos_tender_bucket($o['payment_method'] ?? null) ?? 'other';
+    }
+}
+
 if (!function_exists('rh_pos_shift_window_floor')) {
     /** Earliest start of a cashier close: the PREVIOUS trading day's opening (trading start - 1 day). Pure. */
     function rh_pos_shift_window_floor(string $windowStart): string
@@ -603,31 +666,102 @@ if (!function_exists('rh_pos_shift_totals')) {
         $st->execute(array_merge($saleParams, $userId !== null ? [$userId] : []));
         $v = $st->fetch(PDO::FETCH_ASSOC) ?: [];
 
-        $net = [];
-        foreach (['cash', 'mobile', 'card'] as $k) {
-            $net[$k] = round($gross[$k] - $refund[$k], 2);
-        }
-
         // Opening float is cash that sits in the drawer but is not a sale: it only affects the
         // expected DRAWER cash ('drawer_cash'). 'cash' stays net takings so revenue views are unchanged.
         $fl = rh_pos_shift_float($pdo, $userId, $start, $end);
 
+        // Charged to room: on the Z (orders and sales), never in the drawer.
+        $rc = rh_pos_room_charges($pdo, $userId, $start, $end);
+
+        return rh_pos_shift_totals_assemble($gross, $refund, $refundCount, $refundTotal, $m, $v, $fl, $rc);
+    }
+}
+
+if (!function_exists('rh_pos_shift_totals_assemble')) {
+    /**
+     * Pure: builds the rh_pos_shift_totals result from its read figures. Drawer figures (cash / mobile /
+     * card, drawer_cash, gross_*, refund_*) come ONLY from the till tenders and payouts; room charges
+     * ($rc = ['count','amount']) never touch them. 'orders_count' / 'sales_total' stay the till's own
+     * (the figures stored on every close, old and new alike); 'room_charge_*' is the "Charged to room"
+     * line and 'orders_all_count' / 'sales_all_total' are the Z totals that include it once.
+     */
+    function rh_pos_shift_totals_assemble(array $gross, array $refund, int $refundCount, float $refundTotal, array $m, array $v, array $fl, array $rc): array
+    {
+        $net = [];
+        foreach (['cash', 'mobile', 'card'] as $k) {
+            $net[$k] = round((float)($gross[$k] ?? 0) - (float)($refund[$k] ?? 0), 2);
+        }
+        $tillN = (int)($m['n'] ?? 0);
+        $tillSales = round((float)($m['sales_total'] ?? 0), 2);
+        $rcN = (int)($rc['count'] ?? 0);
+        $rcAmt = round((float)($rc['amount'] ?? 0), 2);
         return [
-            'float' => $fl['amount'], 'float_recorded' => $fl['recorded'],
-            'drawer_cash' => round($fl['amount'] + $net['cash'], 2),
+            'float' => (float)($fl['amount'] ?? 0), 'float_recorded' => (bool)($fl['recorded'] ?? false),
+            'drawer_cash' => round((float)($fl['amount'] ?? 0) + $net['cash'], 2),
             'cash' => $net['cash'], 'mobile' => $net['mobile'], 'card' => $net['card'],
-            'gross_cash' => round($gross['cash'], 2), 'gross_mobile' => round($gross['mobile'], 2), 'gross_card' => round($gross['card'], 2),
-            'refund_cash' => round($refund['cash'], 2), 'refund_mobile' => round($refund['mobile'], 2), 'refund_card' => round($refund['card'], 2),
+            'gross_cash' => round((float)($gross['cash'] ?? 0), 2), 'gross_mobile' => round((float)($gross['mobile'] ?? 0), 2), 'gross_card' => round((float)($gross['card'] ?? 0), 2),
+            'refund_cash' => round((float)($refund['cash'] ?? 0), 2), 'refund_mobile' => round((float)($refund['mobile'] ?? 0), 2), 'refund_card' => round((float)($refund['card'] ?? 0), 2),
             'refund_count' => $refundCount,
             'refund_amount' => round($refundTotal, 2),
-            'sales_total' => round((float)($m['sales_total'] ?? 0), 2),
+            'sales_total' => $tillSales,
             'tips_total' => (float)($m['tips'] ?? 0),
-            'orders_count' => (int)($m['n'] ?? 0),
+            'orders_count' => $tillN,
             'settled_from_tabs_count' => (int)($m['tab_n'] ?? 0),
             'settled_from_tabs_amount' => (float)($m['tab_amt'] ?? 0),
             'voids_count' => (int)($v['n'] ?? 0),
             'voids_amount' => (float)($v['amt'] ?? 0),
+            'room_charge_count' => $rcN,
+            'room_charge_amount' => $rcAmt,
+            'orders_all_count' => $tillN + $rcN,
+            'sales_all_total' => round($tillSales + $rcAmt, 2),
         ];
+    }
+}
+
+if (!function_exists('rh_pos_room_charges')) {
+    /**
+     * Orders charged to a room in [start,end) (rh_pos_room_charge_sql), for one user (attributed to the
+     * order's payer, i.e. who took it: paid_by, else created_by) or all users (null). Gross order total,
+     * the same figure End of Day counts. Returns ['count' => int, 'amount' => float].
+     */
+    function rh_pos_room_charges(PDO $pdo, ?int $userId, string $start, string $end): array
+    {
+        try {
+            $payer = rh_pos_payer_sql($pdo, 'o');
+            $st = $pdo->prepare("SELECT COUNT(*) AS n, COALESCE(SUM(o.total_amount),0) AS amt
+                FROM stock_orders o WHERE " . rh_pos_room_charge_sql('o') . ($userId !== null ? " AND $payer = ?" : ''));
+            $params = [$start, $end, $start, $end];
+            if ($userId !== null) {
+                $params[] = $userId;
+            }
+            $st->execute($params);
+            $r = $st->fetch(PDO::FETCH_ASSOC) ?: [];
+            return ['count' => (int)($r['n'] ?? 0), 'amount' => round((float)($r['amt'] ?? 0), 2)];
+        } catch (Throwable $e) {
+            error_log('rh_pos_room_charges: ' . $e->getMessage());
+            return ['count' => 0, 'amount' => 0.0];
+        }
+    }
+}
+
+if (!function_exists('rh_pos_close_room_charges')) {
+    /**
+     * "Charged to room" for a STORED close, read from data on view over the close's own window (nothing
+     * stored is changed). Closes store till orders / till takings only, so every close - before or after
+     * this line existed - shows Z orders = stored orders + this count, Z sales = stored takings + this amount.
+     */
+    function rh_pos_close_room_charges(PDO $pdo, array $close): array
+    {
+        if (empty($close['user_id']) || empty($close['shift_date'])) {
+            return ['count' => 0, 'amount' => 0.0];
+        }
+        try {
+            $w = rh_pos_close_window($pdo, $close);
+            return rh_pos_room_charges($pdo, (int)$close['user_id'], $w['from'], $w['end']);
+        } catch (Throwable $e) {
+            error_log('rh_pos_close_room_charges: ' . $e->getMessage());
+            return ['count' => 0, 'amount' => 0.0];
+        }
     }
 }
 
@@ -730,13 +864,15 @@ if (!function_exists('rh_pos_eod_summary')) {
         $w = rh_station_union_window_for_date($date);
         $a = $w['start_sql'];
         $b = $w['trading_end_sql']; // trading day: opening to next opening, no gap (owner 2026-11-10)
-        $saleCond = "((o.paid_at IS NOT NULL AND o.status IN ('paid','completed','refunded','voided') AND o.paid_at >= ? AND o.paid_at < ?)"
-            . " OR (o.paid_at IS NULL AND o.status IN ('paid','completed') AND o.created_at >= ? AND o.created_at < ?))";
-        $saleParams = [$a, $b, $a, $b];
+        // The Z's own order definition (till sales OR charged to room), so the day's Zs sum to this block.
+        // Same rows as the earlier inline rule (paid/completed/refunded/voided by paid_at, paid/completed
+        // without paid_at by created_at), now shared.
+        $saleCond = rh_pos_z_sale_sql('o');
+        $saleParams = rh_pos_z_sale_params($a, $b);
         $hasRefundedAt = rh_pos_col_exists($pdo, 'stock_orders', 'refunded_at');
 
         $out = [
-            'totals' => ['orders' => 0, 'gross' => 0.0, 'cogs' => 0.0, 'net_ex_vat' => 0.0, 'margin' => 0.0, 'margin_pct' => 0.0, 'voided_value' => 0.0, 'voided_count' => 0, 'refunded_value' => 0.0, 'refunded_count' => 0],
+            'totals' => ['orders' => 0, 'gross' => 0.0, 'cogs' => 0.0, 'net_ex_vat' => 0.0, 'margin' => 0.0, 'margin_pct' => 0.0, 'voided_value' => 0.0, 'voided_count' => 0, 'refunded_value' => 0.0, 'refunded_count' => 0, 'room_charge_count' => 0, 'room_charge_amount' => 0.0],
             'by_type' => [], 'top_items' => [], 'void_reasons' => [],
             'window_start' => $a, 'window_end' => $b,
         ];
@@ -758,6 +894,10 @@ if (!function_exists('rh_pos_eod_summary')) {
         $out['totals']['margin'] = $mb['margin'];
         $out['totals']['margin_pct'] = $mb['pct'];
         $out['totals']['partial_refund_value'] = $partial['amount'];
+        // "Charged to room": inside orders / gross above (on the guest bill, never in a drawer).
+        $rc = rh_pos_room_charges($pdo, null, $a, $b);
+        $out['totals']['room_charge_count'] = $rc['count'];
+        $out['totals']['room_charge_amount'] = $rc['amount'];
 
         $st = $pdo->prepare("SELECT COUNT(*) AS n, COALESCE(SUM(o.total_amount),0) AS v FROM stock_orders o WHERE o.status = 'voided' AND o.voided_at >= ? AND o.voided_at < ?");
         $st->execute([$a, $b]);

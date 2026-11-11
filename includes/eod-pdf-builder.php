@@ -593,6 +593,9 @@ function buildEodPdf(
     $i = 0;
     $rowR('Total Orders',    (string)(int)$pos['orders'], false, $i++);
     $rowR('Gross Revenue',   $m($pos_gross), false, $i++);
+    if ((int)($pos['room_charge_count'] ?? 0) > 0) {
+        $rowR('Charged to Room', (int)$pos['room_charge_count'] . ' - ' . $m((float)$pos['room_charge_amount']), false, $i++);
+    }
     $rowR('Cost of Goods',   $m($pos_cogs),  false, $i++);
     $rowR('Margin (ex-VAT)', $m($pos_margin) . ' (' . number_format($pos_margin_pct, 1) . '%)', false, $i++);
     $rowR('Avg Order Value', $m($avg_order),  false, $i++);
