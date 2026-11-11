@@ -71,7 +71,7 @@ if (!function_exists('rh_daily_reports_parse_recipients')) {
 
     /**
      * automated_email_log key for one trading day: the scheduler job and the CLI claim the SAME row, so a re-run,
-     * two page loads at once, or a server cron running the CLI never send the same day twice.
+     * two page loads at once, or a manual CLI run (no cron at either hotel) never send the same day twice.
      * @return array{job:string, type:string, id:int, stage:string}
      */
     function rh_daily_reports_key(string $tradingDate, bool $test = false): array

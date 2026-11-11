@@ -1,8 +1,11 @@
 <?php
 
 /**
- * Automated Emails — web-triggered scheduler control panel (replaces cron).
- * Gated by the existing 'booking_settings' permission (admin/includes/permissions.php).
+ * Automated Emails — control panel of the in-app scheduler (no cron or server timer at either hotel).
+ * Gated by the existing 'booking_settings' permission (admin/includes/permissions.php). The timed report emails
+ * (daily reports + station report emails: their job switches, "go to" list and CC copies) also need
+ * 'timed_report_emails' (owner 2026-11-12); without it they show disabled and the save never writes them.
+ * The save writes a text / number setting only when its field was posted.
  *
  * Settings, per-job switches, "Run now", "Send test to me" and the activity log.
  * Engine: includes/auto-scheduler.php · jobs: includes/auto-email-jobs.php.
@@ -18,6 +21,10 @@ $messageType = 'success';
 
 $tableReady = rh_auto_log_table_ready($pdo);
 $jobs = rh_scheduler_jobs();
+// Report-email jobs whose switch, recipients and copy need the Timed report emails permission (checked server-side).
+$timedReportJobs = ['daily_reports', 'station_reports'];
+$canTimedReports = hasPermission((int)$user['id'], 'timed_report_emails');
+$timedNote = 'Needs the Timed report emails permission';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -27,44 +34,88 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = (string)($_POST['action'] ?? '');
 
         if ($action === 'save') {
-            $stages = [];
-            foreach (preg_split('/[\s,;]+/', (string)($_POST['automated_email_reminder_stages'] ?? '')) as $p) {
-                $n = (int)$p;
-                if ($n >= 1 && $n <= 365) {
-                    $stages[$n] = $n;
+            // A text / number setting is written only when its field was posted, so a form opened before a field
+            // existed (or a disabled field) never blanks the stored value. Checkboxes: absent = off, as before.
+            $posted = static function (string $k): bool {
+                return isset($_POST[$k]);
+            };
+            // Address list fields: valid addresses only, with the same plain messages as the daily reports copy.
+            $cleanList = static function (string $k, string $what) use (&$message): string {
+                $raw = trim((string)($_POST[$k] ?? ''));
+                $clean = implode(', ', array_column(rh_daily_reports_parse_recipients($raw), 'email'));
+                if ($raw !== '' && $clean === '') {
+                    $message .= 'The ' . $what . ' had no valid email address and was cleared. ';
+                } elseif ($clean !== '' && count(preg_split('/[,;\s]+/', $raw, -1, PREG_SPLIT_NO_EMPTY)) !== count(explode(', ', $clean))) {
+                    $message .= 'Some ' . $what . ' addresses were not valid and were left out. ';
                 }
+                return $clean;
+            };
+            if ($posted('automated_email_reminder_stages')) {
+                $stages = [];
+                foreach (preg_split('/[\s,;]+/', (string)($_POST['automated_email_reminder_stages'] ?? '')) as $p) {
+                    $n = (int)$p;
+                    if ($n >= 1 && $n <= 365) {
+                        $stages[$n] = $n;
+                    }
+                }
+                sort($stages);
+                $stages = array_slice(array_values($stages), 0, 3);
+                if (!$stages) {
+                    $stages = [1, 3, 7];
+                }
+                updateSetting('automated_email_reminder_stages', implode(',', $stages));
             }
-            sort($stages);
-            $stages = array_slice(array_values($stages), 0, 3);
-            if (!$stages) {
-                $stages = [1, 3, 7];
-            }
-            $testRecipient = trim((string)($_POST['automated_email_test_recipient'] ?? ''));
-            if ($testRecipient !== '' && !filter_var($testRecipient, FILTER_VALIDATE_EMAIL)) {
-                $testRecipient = '';
-                $message = 'The test recipient was not a valid email address and was cleared. ';
-            }
-            // Visible copy (CC) on the daily reports email: valid addresses only; empty = no copy.
-            $reportCcRaw = trim((string)($_POST['automated_job_daily_reports_cc'] ?? ''));
-            $reportCc = implode(', ', array_column(rh_daily_reports_parse_recipients($reportCcRaw), 'email'));
-            if ($reportCcRaw !== '' && $reportCc === '') {
-                $message .= 'The daily reports copy (CC) had no valid email address and was cleared. ';
-            } elseif ($reportCc !== '' && count(preg_split('/[,;\s]+/', $reportCcRaw, -1, PREG_SPLIT_NO_EMPTY)) !== count(explode(', ', $reportCc))) {
-                $message .= 'Some daily reports copy (CC) addresses were not valid and were left out. ';
+            if ($posted('automated_email_test_recipient')) {
+                $testRecipient = trim((string)($_POST['automated_email_test_recipient'] ?? ''));
+                if ($testRecipient !== '' && !filter_var($testRecipient, FILTER_VALIDATE_EMAIL)) {
+                    $testRecipient = '';
+                    $message = 'The test recipient was not a valid email address and was cleared. ';
+                }
+                updateSetting('automated_email_test_recipient', $testRecipient);
             }
             $flag = static function (string $k): string {
                 return isset($_POST[$k]) ? '1' : '0';
             };
             updateSetting('automated_email_master', $flag('automated_email_master'));
-            updateSetting('automated_email_reminder_stages', implode(',', $stages));
-            updateSetting('automated_email_payment_terms_days', (string)max(0, min(120, (int)($_POST['automated_email_payment_terms_days'] ?? 7))));
-            updateSetting('automated_email_lookback_days', (string)max(1, min(365, (int)($_POST['automated_email_lookback_days'] ?? 30))));
-            updateSetting('automated_email_quotation_days', (string)max(1, min(30, (int)($_POST['automated_email_quotation_days'] ?? 2))));
-            updateSetting('automated_email_interval_minutes', (string)max(5, min(1440, (int)($_POST['automated_email_interval_minutes'] ?? 15))));
+            if ($posted('automated_email_payment_terms_days')) {
+                updateSetting('automated_email_payment_terms_days', (string)max(0, min(120, (int)($_POST['automated_email_payment_terms_days'] ?? 7))));
+            }
+            if ($posted('automated_email_lookback_days')) {
+                updateSetting('automated_email_lookback_days', (string)max(1, min(365, (int)($_POST['automated_email_lookback_days'] ?? 30))));
+            }
+            if ($posted('automated_email_quotation_days')) {
+                updateSetting('automated_email_quotation_days', (string)max(1, min(30, (int)($_POST['automated_email_quotation_days'] ?? 2))));
+            }
+            if ($posted('automated_email_interval_minutes')) {
+                updateSetting('automated_email_interval_minutes', (string)max(5, min(1440, (int)($_POST['automated_email_interval_minutes'] ?? 15))));
+            }
             updateSetting('automated_email_bcc_hotel', $flag('automated_email_bcc_hotel'));
-            updateSetting('automated_email_test_recipient', $testRecipient);
-            updateSetting('automated_job_daily_reports_cc', $reportCc);
+            // Timed report emails (daily reports + station reports): switches, To and CC need 'timed_report_emails'.
+            // Without it these keys are NOT written at all; the stored values stay as they are.
+            if ($canTimedReports) {
+                if ($posted('automated_job_daily_reports_cc')) {
+                    // Visible copy (CC) on the daily reports email: valid addresses only; empty = no copy.
+                    $reportCc = $cleanList('automated_job_daily_reports_cc', 'daily reports copy (CC)');
+                    updateSetting('automated_job_daily_reports_cc', $reportCc);
+                }
+                if ($posted('automated_job_station_reports_to')) {
+                    // Empty = the End of Day report recipients.
+                    updateSetting('automated_job_station_reports_to', $cleanList('automated_job_station_reports_to', 'station report emails "go to" list'));
+                }
+                if ($posted('automated_job_station_reports_cc')) {
+                    updateSetting('automated_job_station_reports_cc', $cleanList('automated_job_station_reports_cc', 'station report emails copy (CC)'));
+                }
+            }
+            // Only the switches this form showed are written: a form opened before a job existed never switches it off.
+            // A form without the list predates 'station_reports' (2026-11-12), the only job added since.
+            $shownJobs = isset($_POST['jobs_shown']) ? (array)$_POST['jobs_shown'] : array_diff(array_keys($jobs), ['station_reports']);
             foreach ($jobs as $jobName => $job) {
+                if (!in_array($jobName, $shownJobs, true)) {
+                    continue;
+                }
+                if (!$canTimedReports && in_array($jobName, $timedReportJobs, true)) {
+                    continue; // needs the Timed report emails permission: keep the stored switch
+                }
                 updateSetting($job['toggle'], $flag('job_' . $jobName));
             }
             $message .= 'Automated email settings saved.';
@@ -217,12 +268,14 @@ $editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_remin
 
             <h3>Jobs</h3>
             <div class="ae-grid">
-                <?php foreach ($jobs as $jobName => $job): ?>
-                    <label class="ae-check"><input type="checkbox" name="job_<?php echo $esc($jobName); ?>" value="1" <?php echo rh_auto_job_enabled($jobName) ? 'checked' : ''; ?>>
-                        <span><?php echo $esc($job['label']); ?></span></label>
+                <?php foreach ($jobs as $jobName => $job):
+                    $jobLocked = !$canTimedReports && in_array($jobName, $timedReportJobs, true); ?>
+                    <input type="hidden" name="jobs_shown[]" value="<?php echo $esc($jobName); ?>">
+                    <label class="ae-check"><input type="checkbox" name="job_<?php echo $esc($jobName); ?>" value="1" <?php echo rh_auto_job_enabled($jobName) ? 'checked' : ''; ?><?php echo $jobLocked ? ' disabled' : ''; ?>>
+                        <span><?php echo $esc($job['label']); ?><?php if ($jobLocked): ?><br><small class="help-text"><?php echo $esc($timedNote); ?></small><?php endif; ?></span></label>
                 <?php endforeach; ?>
             </div>
-            <p class="help-text">Tentative holds use the reminder hours from Hotel Settings. Pre-arrival, post-stay and gym renewal share the switches (and day settings) they always had in Hotel Settings / Gym Members. Daily station reports email sends the bookings, restaurant/till, accounting and stock reports once a day, soon after the trading day ends (next opening), to the End of Day report recipients.</p>
+            <p class="help-text">Tentative holds use the reminder hours from Hotel Settings. Pre-arrival, post-stay and gym renewal share the switches (and day settings) they always had in Hotel Settings / Gym Members. Daily station reports email sends the bookings, restaurant/till, accounting and stock reports once a day, soon after the trading day ends (next opening), to the End of Day report recipients. Station report emails send each station's Station Report (the same email as the Email button on that page) once a day per station, soon after that station's trading day ends (its next opening), to the "Station report emails go to" list (empty = End of Day report recipients). A station with no tickets that day gets no email.</p>
 
             <h3>Overdue payment reminders</h3>
             <div class="ae-grid">
@@ -243,8 +296,14 @@ $editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_remin
                 <div class="form-group"><label for="testrcpt">Test recipient (leave EMPTY in production)</label>
                     <input type="email" id="testrcpt" name="automated_email_test_recipient" class="form-control" value="<?php echo $esc($cfg['automated_email_test_recipient']); ?>" placeholder="empty = send to real customers"></div>
                 <div class="form-group"><label for="reportcc">Copy (CC) on the daily reports email</label>
-                    <input type="text" id="reportcc" name="automated_job_daily_reports_cc" class="form-control" value="<?php echo $esc(rh_auto_setting('automated_job_daily_reports_cc')); ?>" placeholder="empty = no copy" autocomplete="off">
-                    <p class="help-text">Shown openly as a copy on every daily reports email. Separate several addresses with commas. Not used on test sends.</p></div>
+                    <input type="text" id="reportcc" name="automated_job_daily_reports_cc" class="form-control" value="<?php echo $esc(rh_auto_setting('automated_job_daily_reports_cc')); ?>" placeholder="empty = no copy" autocomplete="off"<?php echo $canTimedReports ? '' : ' disabled'; ?>>
+                    <p class="help-text">Shown openly as a copy on every daily reports email. Separate several addresses with commas. Not used on test sends.<?php echo $canTimedReports ? '' : ' ' . $esc($timedNote) . '.'; ?></p></div>
+                <div class="form-group"><label for="stationto">Station report emails go to</label>
+                    <input type="text" id="stationto" name="automated_job_station_reports_to" class="form-control" value="<?php echo $esc(rh_auto_setting('automated_job_station_reports_to')); ?>" placeholder="empty = End of Day report recipients" autocomplete="off"<?php echo $canTimedReports ? '' : ' disabled'; ?>>
+                    <p class="help-text">Who gets the station report emails. Separate several addresses with commas. Empty = the End of Day report recipients.<?php echo $canTimedReports ? '' : ' ' . $esc($timedNote) . '.'; ?></p></div>
+                <div class="form-group"><label for="stationcc">Copy (CC) on the station report emails</label>
+                    <input type="text" id="stationcc" name="automated_job_station_reports_cc" class="form-control" value="<?php echo $esc(rh_auto_setting('automated_job_station_reports_cc')); ?>" placeholder="empty = no copy" autocomplete="off"<?php echo $canTimedReports ? '' : ' disabled'; ?>>
+                    <p class="help-text">Shown openly as a copy on every station report email. Separate several addresses with commas. Not used on test sends.<?php echo $canTimedReports ? '' : ' ' . $esc($timedNote) . '.'; ?></p></div>
             </div>
             <label class="ae-check"><input type="checkbox" name="automated_email_bcc_hotel" value="1" <?php echo $cfg['automated_email_bcc_hotel'] === '1' ? 'checked' : ''; ?>>
                 <span>BCC the hotel (admin notification address) on payment and quotation reminders</span></label>

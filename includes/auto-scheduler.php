@@ -1,7 +1,8 @@
 <?php
 
 /**
- * Web-triggered scheduler — replaces cron on shared hosting.
+ * In-app scheduler (the only timer): there is no cron or other server timer at either hotel (owner 2026-11-12
+ * "There's no timer on my server or any cron jobs"), so every timed job lives here.
  *
  * rh_scheduler_maybe_run() is called on every admin page (admin/admin-init.php) and
  * public page (includes/footer.php). The per-request cost is one cached setting read.
@@ -9,8 +10,8 @@
  * response has been sent to the visitor (fastcgi_finish_request / litespeed_finish_request;
  * a tiny budget otherwise), takes the MySQL lock 'rh_scheduler' (so only one request runs
  * the jobs), then runs every enabled job within a time and email budget. Errors are logged
- * with error_log(), never shown. Cron stays optional: scripts/auto-scheduler-run.php runs
- * the same code.
+ * with error_log(), never shown. scripts/auto-scheduler-run.php runs the same code by hand
+ * (manual runs only; nothing schedules it).
  *
  * Settings (site_settings; defaults in rh_auto_defaults()):
  *   automated_email_master            '1'   master switch for the emails; the nightly backup ignores it (own toggle automated_backup_enabled)
@@ -51,6 +52,10 @@ if (!function_exists('rh_auto_defaults')) {
             'automated_job_daily_reports'       => '1',
             // Visible copy (CC) on the daily reports email; owner 2026-11-12: the MSP mailbox, editable on Automated Emails.
             'automated_job_daily_reports_cc'    => 'info@promanaged-it.com',
+            'automated_job_station_reports'     => '1',
+            // Station report emails (owner 2026-11-12): To, empty = End of Day report recipients; visible copy (CC) like the daily reports.
+            'automated_job_station_reports_to'  => '',
+            'automated_job_station_reports_cc'  => 'info@promanaged-it.com',
             'scheduler_last_run'                => '0',
             'scheduler_last_result'             => '',
         ];
@@ -143,6 +148,12 @@ if (!function_exists('rh_auto_defaults')) {
             'daily_reports' => [
                 'label' => 'Daily station reports email', 'fn' => 'rh_job_daily_reports',
                 'toggle' => 'automated_job_daily_reports', 'toggle_default' => '1', 'interval' => 60, 'legacy' => false, 'bcc' => 'global',
+            ],
+            // Emails each enabled station's Station Report (kitchen / bar / coffee bar, same as the Email button on the
+            // Station Report page) once per station, soon after THAT station's trading day ends (owner 2026-11-12).
+            'station_reports' => [
+                'label' => 'Station report emails (kitchen / bar / coffee bar)', 'fn' => 'rh_job_station_reports',
+                'toggle' => 'automated_job_station_reports', 'toggle_default' => '1', 'interval' => 60, 'legacy' => false, 'bcc' => 'global',
             ],
             // Last on purpose: a backup can take a while, so every email job runs first.
             'nightly_backup' => [

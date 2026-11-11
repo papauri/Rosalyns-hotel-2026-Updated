@@ -1,11 +1,12 @@
 <?php
 
 /**
- * Optional cron entry for the web-triggered scheduler (includes/auto-scheduler.php).
- * Cron is NOT required — the scheduler runs by itself on page loads. If you do have cron,
- * this runs exactly the same jobs under the same lock/interval:
+ * Manual run of the web-triggered scheduler (includes/auto-scheduler.php) from a terminal.
+ * Neither hotel uses cron or any server timer (owner 2026-11-12): every timed job runs from the
+ * in-app scheduler on page loads. This script runs exactly the same jobs under the same lock/interval,
+ * for a one-off run by hand only:
  *
- *   *\/15 * * * *  /usr/bin/php /path/to/scripts/auto-scheduler-run.php --quiet
+ *   php scripts/auto-scheduler-run.php --quiet
  *
  * Flags: --force  ignore the master/interval checks (toggles and the lock still apply)
  *        --quiet  print only on error

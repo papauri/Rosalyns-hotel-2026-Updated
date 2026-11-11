@@ -1,6 +1,7 @@
 <?php
 /**
- * Daily reports CLI.
+ * Daily reports CLI: manual runs only. There is no cron at either hotel (owner 2026-11-12); the daily email goes
+ * out by itself from the in-app timer (scheduler job 'daily_reports', Settings > Automated Emails).
  *
  *   php scripts/daily_reports.php --recipients=a@x.com,b@y.com --start=YYYY-MM-DD --end=YYYY-MM-DD [--force]
  *
@@ -9,7 +10,7 @@
  * Up to four attachments (bookings, station-day, accounting, stock-health): a section that fails is logged and
  * named as "could not be loaded" in the e-mail, and the rest are still sent.
  * The build + send is shared with the scheduler job 'daily_reports' (includes/daily-reports-send.php). A default
- * run (no --date / --start / --end) claims the same once-per-trading-day row as the scheduler, so a server cron
+ * run (no --date / --start / --end) claims the same once-per-trading-day row as the scheduler, so a manual run
  * and the timer never both send one day; --force sends again anyway (logged).
  * Exit codes: 0 sent (or already sent for that trading day); 1 every section failed (the e-mail saying so is
  * still attempted); 2 no recipients; 3 send failed.
@@ -71,7 +72,7 @@ if (!$stationExplicit) {
 }
 
 /* ---------------- once per trading day (shared with the scheduler) ---------------- */
-// Only a default run claims: it is what a server cron runs. A run with explicit dates is a hand-picked resend.
+// Only a default run claims (it sends the same day the timer would). A run with explicit dates is a hand-picked resend.
 $claimKey = null;
 $pdoLog = $GLOBALS['pdo'] ?? null;
 if (!$stationExplicit) {

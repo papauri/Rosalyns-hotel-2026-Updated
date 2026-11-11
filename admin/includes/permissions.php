@@ -76,6 +76,7 @@ function getAllRoles()
                 'refund_payment',
                 'reports',
                 'booking_settings',
+                'timed_report_emails', // daily reports + station report emails: switches, To and CC (owner 2026-11-12; ASSUMPTION admin + manager)
                 'visitor_analytics',
                 'backup_management',
                 'footer_management',
@@ -1059,6 +1060,14 @@ function getAllPermissions()
             'icon' => 'fa-cog',
             'category' => 'Settings',
             'page' => 'booking-settings.php',
+            'group' => 'settings'
+        ],
+        'timed_report_emails' => [
+            'label' => 'Timed report emails',
+            'description' => 'Switch the daily reports and station report emails on or off and choose who gets them and who is copied (Settings > Automated Emails)',
+            'icon' => 'fa-clock',
+            'category' => 'Settings',
+            'page' => '', // not a page: the report-email switches and recipients inside Automated Emails
             'group' => 'settings'
         ],
         'module_settings' => [

@@ -530,14 +530,14 @@ $current_page = 'backup-management.php';
 
             <div class="bm-card" style="grid-column: 1 / -1;">
                 <h3><i class="fas fa-terminal"></i> Local Server Backup Commands (Manual)</h3>
-                <p style="font-size:.875rem;color:#374151;margin-top:0;">Use these commands from server terminal/SSH when you want an immediate local backup outside cron schedules:</p>
+                <p style="font-size:.875rem;color:#374151;margin-top:0;">Use these commands from server terminal/SSH when you want an immediate local backup outside the automatic nightly backup:</p>
                 <div class="command-blocks">
                     <div>
                         <p class="cmd-label">Run backup now</p>
                         <div class="cmd-box"><?php echo htmlspecialchars($localRunCmd); ?></div>
                     </div>
                     <div>
-                        <p class="cmd-label">Run quiet (cron-style)</p>
+                        <p class="cmd-label">Run quietly (no progress output)</p>
                         <div class="cmd-box"><?php echo htmlspecialchars($localRunQuietCmd); ?></div>
                     </div>
                     <div>
@@ -547,13 +547,10 @@ $current_page = 'backup-management.php';
                 </div>
             </div>
 
-            <!-- How-to / cron info -->
+            <!-- How backups run (in-app timer; no server timer or cron at either hotel, owner 2026-11-12) -->
             <div class="bm-card">
-                <h3><i class="fas fa-info-circle"></i> Cron Setup &amp; Notes</h3>
-                <p style="font-size:.875rem;color:#374151;margin-top:0">Add this line to <strong>cPanel → Cron Jobs</strong> for automatic nightly backups:</p>
-                <div style="background:#f3f4f6;border-radius:6px;padding:10px 14px;font-family:monospace;font-size:.8rem;color:#1f2937;margin-bottom:16px;word-break:break-all">
-                    0 2 * * * <?php echo PHP_BINARY; ?> <?php echo htmlspecialchars($backupScript); ?> --quiet
-                </div>
+                <h3><i class="fas fa-info-circle"></i> How Backups Run &amp; Notes</h3>
+                <p style="font-size:.875rem;color:#374151;margin-top:0;margin-bottom:16px">Backups run by themselves from the in-app timer (<strong>Automated Emails &gt; Nightly database backup</strong>). No server timer is needed.</p>
                 <ul style="font-size:.85rem;color:#374151;padding-left:20px;line-height:2">
                     <li>Keeps <strong>14 daily</strong>, <strong>8 weekly</strong>, <strong>12 monthly</strong> backups — older files are pruned automatically.</li>
                     <li>Uses <code>mysqldump</code> when available; falls back to a pure-PHP dumper.</li>

@@ -1162,6 +1162,106 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
         return $res;
     }
 
+    /**
+     * Station report emails (owner 2026-11-12 "time the email on the KDS stations"): for each ENABLED station, the
+     * Station Report of its OWN last ended trading day (its opening -> its next opening), the same email as the
+     * Email button on admin/kds-report.php (includes/kds-report-data.php), one per station per day.
+     * To: automated_job_station_reports_to (empty = End of Day report recipients); CC: automated_job_station_reports_cc
+     * (none on test sends). No recipients / bad test address: skipped with NO log row, so recipients added later the
+     * same day still get it. A day with no tickets: one 'skipped' row, nothing sent. 'sent' = emails sent.
+     */
+    function rh_job_station_reports(PDO $pdo, array $o = []): array
+    {
+        $res = ['checked' => 0, 'sent' => 0, 'skipped' => 0, 'errors' => []];
+        if (!rh_auto_module_on('pos')) {
+            $res['skipped'] = 1;
+            return $res;
+        }
+        require_once __DIR__ . '/kds-report-data.php';
+        require_once __DIR__ . '/daily-reports-send.php';
+        require_once __DIR__ . '/station-hours.php';
+        $testMode = !empty($o['test_mode']);
+        $now = new DateTimeImmutable('now', rh_site_timezone());
+        $recipients = rh_station_reports_recipients(rh_auto_setting('automated_job_station_reports_to'), static fn(): array => rh_eod_report_recipients());
+        $redirect = rh_auto_setting('automated_email_test_recipient');
+        $siteName = (string)(getSetting('site_name') ?: 'Hotel');
+        $currency = (string)(getSetting('currency_symbol') ?: 'MWK');
+        $labels = [];
+        foreach (rh_station_definitions() as $s => $def) {
+            $labels[$s] = (string)$def['label'];
+        }
+        $done = $pdo->prepare('SELECT status FROM automated_email_log WHERE job = ? AND account_type = ? AND account_id = ? AND stage = ?');
+
+        foreach (array_keys(rh_station_definitions()) as $station) {
+            if (!rh_station_enabled($station)) {
+                continue;
+            }
+            $res['checked']++;
+            $plan = rh_station_reports_auto_plan($now, $station, $recipients, $redirect, $testMode);
+            if ($plan['action'] !== 'send') {
+                $res['skipped']++; // no log row on purpose (see above)
+                continue;
+            }
+            if (!rh_scheduler_budget_ok()) {
+                $res['deferred'] = true;
+                break;
+            }
+            $k = $plan['key'];
+            $date = $plan['date'];
+            $label = $labels[$station];
+            try {
+                $done->execute([$k['job'], $k['type'], $k['id'], $k['stage']]);
+                $prev = $done->fetchColumn();
+                $done->closeCursor();
+                if ($prev === 'sent' || $prev === 'skipped') {
+                    $res['skipped']++; // this station's day is already done
+                    continue;
+                }
+                $w = rh_station_window_for_date($station, $date); // same window as the Station Report page for that date
+                $rows = rh_kds_report_fetch($pdo, $station, $w['start_sql'], $w['end_sql']);
+            } catch (Throwable $e) {
+                $res['errors'][] = $label . ' ' . $date . ': ' . $e->getMessage();
+                error_log('auto-scheduler station reports: ' . $e->getMessage());
+                continue;
+            }
+            if (!$rows) {
+                rh_auto_log_skip($pdo, $k['job'], $k['type'], $k['id'], $k['stage'], 'No tickets at the ' . $label . ' on this trading day, so no report was sent.');
+                $res['skipped']++;
+                continue;
+            }
+            $subject = $plan['subject_prefix'] . sprintf('[%s] Station Report — %s — %s', $siteName, $label, $date);
+            $emails = implode(', ', array_column($plan['recipients'], 'email'));
+            if (!rh_auto_log_claim($pdo, $k['job'], $k['type'], $k['id'], $k['stage'], $emails, $subject)) {
+                $res['skipped']++; // already sent (or being sent) for this station's day
+                continue;
+            }
+            try {
+                rh_scheduler_budget_spend();
+                require_once __DIR__ . '/report-mailer.php';
+                $html = rh_kds_report_render_email([
+                    'reqStation' => $station, 'reqDate' => $date,
+                    'STATION_OPTIONS' => ['all' => 'All Stations', $station => $label], 'STATION_LABEL' => $labels,
+                    'rows' => $rows, 'currency_symbol' => $currency, 'site_name' => $siteName,
+                ] + rh_kds_report_aggregate($rows));
+                $cc = $testMode ? [] : rh_daily_reports_cc($plan['recipients'], rh_auto_setting('automated_job_station_reports_cc')); // no CC on test sends
+                $r = sendReportEmail($plan['recipients'], $subject, $html, [], '', $cc);
+                if (!empty($r['success'])) {
+                    rh_auto_log_finish($pdo, $k['job'], $k['type'], $k['id'], $k['stage'], 'sent');
+                    $res['sent']++;
+                } else {
+                    $msg = (string)($r['message'] ?? 'send failed');
+                    rh_auto_log_finish($pdo, $k['job'], $k['type'], $k['id'], $k['stage'], 'failed', $msg);
+                    $res['errors'][] = $label . ' ' . $date . ': ' . $msg;
+                }
+            } catch (Throwable $e) {
+                rh_auto_log_finish($pdo, $k['job'], $k['type'], $k['id'], $k['stage'], 'failed', $e->getMessage());
+                $res['errors'][] = $label . ' ' . $date . ': ' . $e->getMessage();
+                error_log('auto-scheduler station reports: ' . $e->getMessage());
+            }
+        }
+        return $res;
+    }
+
     /* ── sample sends ("Send test to me" on Automated Emails) ─ */
 
     /** @return array<string,string> template/job key => label */

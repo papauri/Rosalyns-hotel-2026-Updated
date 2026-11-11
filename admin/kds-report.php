@@ -16,6 +16,7 @@ require_once 'admin-init.php';
 require_once __DIR__ . '/includes/permissions.php';
 require_once __DIR__ . '/../config/email.php';
 require_once __DIR__ . '/../includes/station-hours.php';
+require_once __DIR__ . '/../includes/kds-report-data.php'; // fetch, aggregates, rh_fmt_dur/rh_fmt_dt, email render
 
 if (!hasPermission((int)$_SESSION['admin_user_id'], 'kds_reports')) {
     rhDenyAndRedirectHome((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF']));
@@ -60,114 +61,16 @@ $reportWindow = $reqStation === 'all'
 $dayStart = $reportWindow['start_sql'];
 $dayEnd   = $reportWindow['end_sql'];
 
-/* === Pull served + voided items for the day === */
-$wheres = ["o.created_at >= ? AND o.created_at < ?"];
-$params = [$dayStart, $dayEnd];
-if ($reqStation !== 'all') {
-    $wheres[] = "oi.station = ?";
-    $params[] = $reqStation;
-}
-$whereSql = implode(' AND ', $wheres);
-
-$itemSql = "SELECT
-        oi.id              AS item_id,
-        oi.order_id,
-        oi.item_name,
-        oi.menu_type,
-        oi.station,
-        oi.quantity,
-        oi.unit_price,
-        oi.line_total,
-        oi.kds_status,
-        oi.started_at,
-        oi.ready_at,
-        oi.served_at,
-        oi.notes           AS item_notes,
-        o.reference,
-        o.order_type,
-        o.table_number,
-        o.customer_name,
-        o.kitchen_status,
-        o.fired_at,
-        o.created_at       AS order_created_at,
-        o.status           AS order_status,
-        au.full_name       AS bumped_by_name,
-        au_open.full_name  AS opened_by_name
-    FROM stock_order_items oi
-    JOIN stock_orders o ON o.id = oi.order_id
-    LEFT JOIN admin_users au ON au.id = oi.bumped_by
-    LEFT JOIN admin_users au_open ON au_open.id = o.created_by
-    WHERE {$whereSql}
-    ORDER BY oi.served_at ASC, oi.id ASC";
-$st = $pdo->prepare($itemSql);
-$st->execute($params);
-$rows = $st->fetchAll(PDO::FETCH_ASSOC);
+/* === Pull served + voided items for the day (includes/kds-report-data.php, shared with the timed station emails) === */
+$rows = rh_kds_report_fetch($pdo, $reqStation, $dayStart, $dayEnd);
 
 /* === Aggregates === */
-$totalItems = 0;
-$totalQty = 0;
-$totalRevenue = 0.0;
-$totalVoid = 0;
-$totalVoidValue = 0.0;
-$prepTimes = []; // seconds from fired→served
-$byStation = []; // station => [items, qty, revenue]
-$byCategory = []; // item_name → counts (for top-items)
-foreach ($rows as $r) {
-    $st = $r['station'] ?: 'unknown';
-    if (!isset($byStation[$st])) $byStation[$st] = ['items' => 0, 'qty' => 0, 'revenue' => 0, 'voids' => 0, 'avg_seconds' => []];
-    if ($r['kds_status'] === 'void' || $r['order_status'] === 'voided' || $r['order_status'] === 'cancelled') {
-        $totalVoid++;
-        $totalVoidValue += (float)$r['line_total'];
-        $byStation[$st]['voids']++;
-        continue;
-    }
-    // Items Served / Qty / Revenue / prep times count served items only; tickets still pending,
-    // cooking or ready stay in the ticket list below but are not "served" yet.
-    if ($r['kds_status'] !== 'served') {
-        continue;
-    }
-    $byStation[$st]['items']++;
-    $totalItems++;
-    $totalQty += (float)$r['quantity'];
-    $totalRevenue += (float)$r['line_total'];
-    $byStation[$st]['qty'] += (float)$r['quantity'];
-    $byStation[$st]['revenue'] += (float)$r['line_total'];
-    if ($r['fired_at'] && $r['served_at']) {
-        $secs = strtotime($r['served_at']) - strtotime($r['fired_at']);
-        if ($secs >= 0 && $secs < 6 * 3600) {
-            $prepTimes[] = $secs;
-            $byStation[$st]['avg_seconds'][] = $secs;
-        }
-    }
-    $key = $r['item_name'];
-    if (!isset($byCategory[$key])) $byCategory[$key] = ['name' => $r['item_name'], 'station' => $r['station'], 'qty' => 0, 'revenue' => 0];
-    $byCategory[$key]['qty'] += (float)$r['quantity'];
-    $byCategory[$key]['revenue'] += (float)$r['line_total'];
-}
-$avgPrep = $prepTimes ? round(array_sum($prepTimes) / count($prepTimes)) : 0;
-$minPrep = $prepTimes ? min($prepTimes) : 0;
-$maxPrep = $prepTimes ? max($prepTimes) : 0;
-foreach ($byStation as $s => &$d) {
-    $d['avg_seconds'] = $d['avg_seconds'] ? round(array_sum($d['avg_seconds']) / count($d['avg_seconds'])) : 0;
-}
-unset($d);
-uasort($byCategory, fn($a, $b) => $b['revenue'] <=> $a['revenue']);
-$topItems = array_slice($byCategory, 0, 20, true);
-
-/* === Helpers === */
-function rh_fmt_dur(int $s): string
-{
-    if ($s <= 0) return '—';
-    $m = intdiv($s, 60);
-    $r = $s % 60;
-    return $m > 0 ? sprintf('%dm %02ds', $m, $r) : sprintf('%ds', $r);
-}
-function rh_fmt_dt(?string $iso): string
-{
-    if (!$iso) return '—';
-    $t = strtotime($iso);
-    return $t ? date('H:i:s', $t) : '—';
-}
+[
+    'totalItems' => $totalItems, 'totalQty' => $totalQty, 'totalRevenue' => $totalRevenue,
+    'totalVoid' => $totalVoid, 'totalVoidValue' => $totalVoidValue,
+    'avgPrep' => $avgPrep, 'minPrep' => $minPrep, 'maxPrep' => $maxPrep,
+    'byStation' => $byStation, 'topItems' => $topItems,
+] = rh_kds_report_aggregate($rows);
 
 /* === CSV export === */
 if (($_GET['format'] ?? '') === 'csv') {
@@ -220,9 +123,9 @@ if (($_POST['action'] ?? '') === 'email_report') {
             $emailErr = 'Provide a valid recipient email.';
         } else {
             $subject = sprintf('[%s] Station Report — %s — %s', $site_name, $STATION_OPTIONS[$reqStation], $reqDate);
-            ob_start();
-            include __DIR__ . '/includes/kds-report-email.php';
-            $html = ob_get_clean();
+            $html = rh_kds_report_render_email(compact('reqStation', 'reqDate', 'STATION_OPTIONS', 'STATION_LABEL', 'totalItems', 'totalQty',
+                'totalRevenue', 'totalVoid', 'totalVoidValue', 'avgPrep', 'minPrep', 'maxPrep', 'byStation', 'topItems', 'rows',
+                'currency_symbol', 'site_name'));
             $result = sendEmail($to, $to, $subject, $html, '');
             if (!empty($result['success'])) {
                 $emailMsg = "Report emailed to {$to}.";
