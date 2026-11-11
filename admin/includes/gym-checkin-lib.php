@@ -242,7 +242,7 @@ if (!function_exists('gym_checkin_snapshot')) {
                        TIMESTAMPDIFF(MINUTE, ga.checked_in_at, NOW()) AS minutes_in
                 FROM gym_attendance ga
                 LEFT JOIN gym_members gm ON gm.id = ga.member_id
-                WHERE ga.checked_out_at IS NULL
+                WHERE ga.checked_out_at IS NULL AND ga.checked_in_at >= CURDATE()
                 ORDER BY ga.checked_in_at ASC
                 LIMIT 100
             ")->fetchAll(PDO::FETCH_ASSOC);

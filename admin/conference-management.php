@@ -879,14 +879,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
     }
 }
 
-// Fetch conference enquiries
+// Fetch conference enquiries (?status= / ?event_date= from the dashboard; whitelisted + bound)
+require_once __DIR__ . '/includes/events-gym-filters.php';
+$conf_list_filter = rh_conf_list_filter($_GET, $confHasEndDate);
 try {
-    $enquiries_stmt = $pdo->query("
+    $conf_list_where = $conf_list_filter['clauses'] ? ('WHERE ' . implode(' AND ', $conf_list_filter['clauses'])) : '';
+    $enquiries_stmt = $pdo->prepare("
         SELECT ci.*, cr.name as room_name
         FROM conference_inquiries ci
         LEFT JOIN conference_rooms cr ON ci.conference_room_id = cr.id
+        {$conf_list_where}
         ORDER BY ci.event_date DESC, ci.created_at DESC
     ");
+    $enquiries_stmt->execute($conf_list_filter['params']);
     $conference_enquiries = $enquiries_stmt->fetchAll(PDO::FETCH_ASSOC);
     // Date range + suggested price (half day / N days) for display and the details modal
     $confRoomsById = [];
@@ -1079,7 +1084,22 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
 
         <!-- Conference Enquiries Section -->
         <div class="card conference-enquiries-card">
-            <h2 class="conference-enquiries-title"><i class="fas fa-calendar-check"></i> Conference Enquiries</h2>
+            <h2 class="conference-enquiries-title" data-rh-results><i class="fas fa-calendar-check"></i> Conference Enquiries</h2>
+            <?php if ($conf_list_filter['clauses']):
+                $confFilterCount = count($conference_enquiries);
+                $confFilterStatusLabel = $conf_list_filter['status'] !== '' ? strtolower(rh_conf_list_statuses()[$conf_list_filter['status']]) . ' ' : (!empty($conf_list_filter['open_only']) ? 'pending or confirmed ' : '');
+            ?>
+                <div style="background: #eef3ff; border: 1px solid #cfd8ff; border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+                    <div style="display: flex; align-items: center; gap: 8px; color: #1f2d6b;">
+                        <i class="fas fa-filter"></i>
+                        <strong>Filtered list</strong>
+                    </div>
+                    <div style="color: #2f3a63; font-size: 13px;">
+                        Showing <?php echo number_format($confFilterCount); ?> <?php echo htmlspecialchars($confFilterStatusLabel); ?>enquir<?php echo $confFilterCount === 1 ? 'y' : 'ies'; ?><?php if ($conf_list_filter['event_date'] !== ''): ?> taking place on <?php echo htmlspecialchars(date('M j, Y', strtotime($conf_list_filter['event_date']))); ?><?php endif; ?>.
+                        <a href="conference-management.php" style="margin-left: 8px; color: #1f2d6b; font-weight: 600;">Clear</a>
+                    </div>
+                </div>
+            <?php endif; ?>
             <div class="table-container">
                 <table class="table">
                     <thead>
@@ -1101,7 +1121,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                             <tr>
                                 <td colspan="10" class="conference-enquiries-empty">
                                     <i class="fas fa-inbox conference-enquiries-empty__icon"></i>
-                                    No conference enquiries found
+                                    <?php echo $conf_list_filter['clauses'] ? 'No conference enquiries match this filter' : 'No conference enquiries found'; ?>
                                 </td>
                             </tr>
                         <?php else: ?>

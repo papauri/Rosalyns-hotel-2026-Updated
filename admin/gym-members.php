@@ -756,20 +756,15 @@ $gm_table_missing = false;
 $gm_members = [];
 $gm_counts = ['active' => 0, 'expiring' => 0, 'expired' => 0, 'all' => 0];
 $gm_filter = (string)($_GET['filter'] ?? 'all');
+require_once __DIR__ . '/includes/events-gym-filters.php';
 try {
-    $gm_counts['all']      = (int)$pdo->query("SELECT COUNT(*) FROM gym_members")->fetchColumn();
-    $gm_counts['active']   = (int)$pdo->query("SELECT COUNT(*) FROM gym_members WHERE status='active' AND (expiry_date IS NULL OR expiry_date >= CURDATE())")->fetchColumn(); // a lapsed member (end date passed) is Expired, never also Active
-    $gm_counts['expiring'] = (int)$pdo->query("SELECT COUNT(*) FROM gym_members WHERE status='active' AND expiry_date IS NOT NULL AND expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)")->fetchColumn();
-    $gm_counts['expired']  = (int)$pdo->query("SELECT COUNT(*) FROM gym_members WHERE status='expired' OR (expiry_date IS NOT NULL AND expiry_date < CURDATE())")->fetchColumn();
-
     // Filter clauses are selected from this fixed whitelist by key — the request
     // value never reaches the SQL string, so an unexpected ?filter= falls back to
-    // '1=1' rather than being interpolated.
-    $gm_whereByFilter = [
-        'active'   => "status = 'active' AND (expiry_date IS NULL OR expiry_date >= CURDATE())",
-        'expiring' => "status = 'active' AND expiry_date IS NOT NULL AND expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)",
-        'expired'  => "(status = 'expired' OR (expiry_date IS NOT NULL AND expiry_date < CURDATE()))",
-    ];
+    // '1=1' rather than being interpolated. Tab badges count with the same clauses.
+    $gm_whereByFilter = rh_gym_member_filter_where();
+    foreach ($gm_whereByFilter as $gmFk => $gmFw) {
+        $gm_counts[$gmFk] = (int)$pdo->query("SELECT COUNT(*) FROM gym_members WHERE {$gmFw}")->fetchColumn();
+    }
     $where = $gm_whereByFilter[$gm_filter] ?? '1=1';
 
     $gm_stmt = $pdo->prepare(
@@ -797,7 +792,7 @@ if ($gm_attendance_ready) {
     try {
         foreach ($pdo->query("
             SELECT member_id, COUNT(*) AS visits, MAX(checked_in_at) AS last_in,
-                   SUM(CASE WHEN checked_out_at IS NULL THEN 1 ELSE 0 END) AS in_now,
+                   SUM(CASE WHEN " . rh_gym_in_now_sql() . " THEN 1 ELSE 0 END) AS in_now,
                    SUM(CASE WHEN checked_in_at >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN 1 ELSE 0 END) AS visits_30d
             FROM gym_attendance GROUP BY member_id
         ")->fetchAll(PDO::FETCH_ASSOC) as $vs) {
@@ -810,7 +805,7 @@ if ($gm_attendance_ready) {
         foreach ($pdo->query("SELECT member_id, WEEKDAY(checked_in_at) AS d, COUNT(*) AS c FROM gym_attendance GROUP BY member_id, d")->fetchAll(PDO::FETCH_ASSOC) as $dr) {
             $gm_peak_stats[(int)$dr['member_id']]['wdays'][(int)$dr['d']] = (int)$dr['c'];
         }
-        $gm_in_gym_now   = (int)$pdo->query("SELECT COUNT(*) FROM gym_attendance WHERE checked_out_at IS NULL")->fetchColumn();
+        $gm_in_gym_now   = (int)$pdo->query("SELECT COUNT(*) FROM gym_attendance WHERE " . rh_gym_in_now_sql())->fetchColumn(); // today's open visits only, same as Reports
         $gm_visits_today = (int)$pdo->query("SELECT COUNT(*) FROM gym_attendance WHERE checked_in_at >= CURDATE()")->fetchColumn();
     } catch (PDOException $e) {
         $gm_attendance_ready = false;

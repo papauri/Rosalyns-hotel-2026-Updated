@@ -27,7 +27,9 @@ $gc_snapshot = gym_checkin_snapshot($pdo);
 $siteName = getSetting('site_name', 'Hotel');
 $gc_member_count = 0;
 try {
-    $gc_member_count = (int)$pdo->query("SELECT COUNT(*) FROM gym_members WHERE status='active'")->fetchColumn();
+    // Same rule as the Gym Members "Active" tab: a lapsed member (end date passed) is not active.
+    require_once __DIR__ . '/includes/events-gym-filters.php';
+    $gc_member_count = (int)$pdo->query("SELECT COUNT(*) FROM gym_members WHERE " . rh_gym_member_filter_where()['active'])->fetchColumn();
 } catch (Throwable $e) { /* register table optional here */ }
 ?>
 <!DOCTYPE html>
