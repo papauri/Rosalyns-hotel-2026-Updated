@@ -842,9 +842,41 @@
 
 /* Emails sent (owner 2026-11-12) */
 .em__intro {
-    margin: 0 0 10px;
+    margin: 0;
+    padding: 12px 16px 10px;
     color: #475569;
     font-size: 13px;
+}
+
+/* Same filter bar as Staff activity: every control 44px, inset from the card edge. */
+.em__filters {
+    margin: 0 16px 12px;
+}
+
+.em__filters select,
+.em__filters input[type="date"],
+.em__filters input[type="search"] {
+    min-height: 44px;
+    border: 1px solid var(--admin-surface-border, #d7dde6);
+    border-radius: 8px;
+    padding: 8px 10px;
+    max-width: 100%;
+    box-sizing: border-box;
+    font-size: 14px;
+    background: #fff;
+    color: var(--admin-text, #1f2a37);
+}
+
+.em__filters select[name="em_kind"] {
+    width: 230px;
+}
+
+.em__filters label:has(input[type="search"]) {
+    flex: 1 1 240px;
+}
+
+.em__filters input[type="search"] {
+    width: 100%;
 }
 
 .em__bar {
@@ -852,7 +884,18 @@
     flex-wrap: wrap;
     align-items: center;
     gap: 10px 16px;
-    margin: 10px 0;
+    margin: 0 16px 12px;
+}
+
+@media (max-width: 768px) {
+    .em__filters select[name="em_kind"],
+    .em__filters input[type="date"] {
+        width: 100%;
+    }
+
+    .em__filters label:has(input[type="search"]) {
+        grid-column: 1 / -1;
+    }
 }
 
 .em__toggle {
