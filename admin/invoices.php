@@ -14,6 +14,11 @@ $message = '';
 $error = '';
 $csrf_token = $csrf_token ?? generateCsrfToken();
 $conferenceFields = finance_conference_fields($pdo);
+// Links to other finance pages show only to users who can open them (page map in admin/includes/permissions.php):
+// Invoices access alone does not open the Payments ledger or its per-account owed list, so it gets no link to them.
+$invCanPayments   = hasPermission((int)($user['id'] ?? 0), 'payments');
+$invCanPaymentAdd = hasPermission((int)($user['id'] ?? 0), 'payment_add');
+$invCanAccounting = hasPermission((int)($user['id'] ?? 0), 'accounting');
 
 // ── AJAX mode ────────────────────────────────────────────────────────────────
 // Inline email actions (resend_invoice, send_reminder) POST with _ajax=1 so
@@ -443,15 +448,21 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                 </p>
             </div>
             <div class="acct-page-header__actions">
+                <?php if ($invCanPaymentAdd): ?>
                 <a href="payment-add.php" class="acct-quick-action acct-quick-action--accent">
                     <i class="fas fa-plus"></i> New Payment
                 </a>
+                <?php endif; ?>
+                <?php if ($invCanPayments): ?>
                 <a href="payments.php" class="acct-quick-action">
                     <i class="fas fa-coins"></i> Payments Ledger
                 </a>
+                <?php endif; ?>
+                <?php if ($invCanAccounting): ?>
                 <a href="accounting-dashboard.php" class="acct-quick-action">
                     <i class="fas fa-chart-line"></i> Dashboard
                 </a>
+                <?php endif; ?>
             </div>
         </div>
 
@@ -473,8 +484,8 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
             <div class="ck-kpi ck-kpi--warn">
                 <span class="ck-kpi__label">Outstanding</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo !empty($receivablesFailed) ? 'n/a' : number_format((float)($invoiceKpi['outstanding_total'] ?? 0), 0); ?></span>
-                <span class="ck-kpi__sub">                    <?php echo !empty($receivablesFailed) ? 'some accounts unreadable (System Logs)' : number_format((int)($invoiceKpi['outstanding_count'] ?? 0)) . ' awaiting'; ?> ·
-                    <a href="payments.php?balance=outstanding" class="acct-link">view accounts owing</a>
+                <span class="ck-kpi__sub">                    <?php echo !empty($receivablesFailed) ? 'some accounts unreadable (System Logs)' : number_format((int)($invoiceKpi['outstanding_count'] ?? 0)) . ' awaiting'; ?><?php if ($invCanPayments): ?> ·
+                    <a href="payments.php?balance=outstanding" class="acct-link">view accounts owing</a><?php endif; ?>
                 </span>
                 <span class="ck-kpi__sub" style="margin-top:0">All accounts owing, not affected by filters</span>
             </div>
@@ -593,7 +604,9 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                                         <td class="num"><?php echo number_format((int)$o['cnt']); ?></td>
                                         <td class="num"><strong><?php echo $currency_symbol . number_format((float)$o['amt'], 0); ?></strong></td>
                                         <td>
+                                            <?php if ($invCanPayments): ?>
                                             <a class="acct-link" href="payments.php?balance=outstanding&amp;booking_type=<?php echo urlencode((string)$o['booking_type']); ?>">View →</a>
+                                            <?php endif; ?>
                                         </td>
                                     </tr>
                             <?php endforeach;

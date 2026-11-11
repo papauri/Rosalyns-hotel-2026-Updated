@@ -27,11 +27,11 @@ $bookingType = rh_fin_get_str($_GET, 'booking_type');
 $bookingId = rh_fin_get_int($_GET, 'booking_id');
 $status = rh_fin_get_str($_GET, 'status');
 $paymentMethod = rh_fin_get_str($_GET, 'payment_method');
-// Refund workflow filter (whitelisted): ?refund_status=pending lists refund rows awaiting settlement.
-$refundStatus = rh_fin_get_str($_GET, 'refund_status');
-if (!in_array($refundStatus, ['pending', 'processing', 'completed', 'failed', 'rejected'], true)) {
-    $refundStatus = '';
-}
+// Refund workflow filter (whitelisted): ?refund_status=pending, or a set such as pending,processing (the
+// Dashboard "Refunds to approve" queue). Unknown statuses are dropped; the kept set is rebuilt in a fixed order.
+$refundStatusList = rh_fin_refund_statuses(rh_fin_get_str($_GET, 'refund_status'));
+$refundStatus = implode(',', $refundStatusList);
+$refundStatusLabels = ['pending' => 'pending', 'processing' => 'processing', 'completed' => 'completed', 'failed' => 'failed', 'rejected' => 'rejected'];
 // Real Y-m-d dates only (anything else is ignored, so the boxes show what is actually applied).
 $startDate = rh_fin_valid_date($_GET['start_date'] ?? '');
 $endDate = rh_fin_valid_date($_GET['end_date'] ?? '');
@@ -49,7 +49,8 @@ $has_active_payment_filters = $bookingType !== '' || $bookingId > 0 || $status !
 $scopeAll            = (rh_fin_get_str($_GET, 'scope') === 'all');
 $allBookingTypes     = ['room', 'conference', 'restaurant', 'gym', 'event'];
 $enabledBookingTypes = function_exists('rh_enabled_booking_types') ? rh_enabled_booking_types() : [];
-$scopeActive         = $bookingType === '' && !$scopeAll
+// A refund-status queue is never module-scoped: it lists every refund in that state, as the Dashboard counts them.
+$scopeActive         = $bookingType === '' && !$scopeAll && $refundStatus === ''
     && !empty($enabledBookingTypes)
     && count($enabledBookingTypes) < count($allBookingTypes);
 $hiddenBookingTypes  = $scopeActive ? array_values(array_diff($allBookingTypes, $enabledBookingTypes)) : [];
@@ -586,6 +587,9 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
         <!-- Detailed Filters -->
         <form method="GET" class="filter-section" data-live-search-form="payments">
             <?php echo rh_server_sort_hidden($paySortKey, $paySortDir); ?>
+            <?php if ($refundStatus !== ''): // keep the refund-status filter when the other filters change ?>
+            <input type="hidden" name="refund_status" value="<?php echo htmlspecialchars($refundStatus); ?>">
+            <?php endif; ?>
             <div class="filter-form">
                 <div class="filter-group">
                     <label><?php echo $mod_bookings ? 'Booking Type' : 'Payment Source'; ?></label>
@@ -656,6 +660,13 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                 </div>
             </div>
         </form>
+
+        <?php if ($refundStatus !== ''): ?>
+            <div style="background:#fff7ed; border:1px solid #fed7aa; border-radius:10px; padding:10px 14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:#7c2d12;">
+                <span><i class="fas fa-rotate-left" style="margin-right:6px;"></i>Showing refunds that are <strong><?php echo htmlspecialchars(implode(' or ', array_map(static fn($k) => $refundStatusLabels[$k], $refundStatusList))); ?></strong> only<?php echo $bookingType === '' ? ', from every source' : ''; ?>.</span>
+                <a href="?<?php echo htmlspecialchars(http_build_query(array_merge($_GET, ['refund_status' => null, 'page' => null]))); ?>" style="color:#7E684B; font-weight:600; text-decoration:none;"><i class="fas fa-times"></i> Clear</a>
+            </div>
+        <?php endif; ?>
 
         <?php if ($has_active_payment_filters): ?>
             <div style="background: #eef3ff; border: 1px solid #cfd8ff; border-radius: 10px; padding: 12px 14px; margin: 0 0 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
@@ -737,9 +748,12 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                         ];
                         foreach ($outstandingRows as $oRow):
                             $src = (string)($oRow['src'] ?? '');
-                            $meta = $srcMeta[$src] ?? ['label' => ucfirst($src), 'badge' => $src, 'link' => '#'];
                             $oid = (int)($oRow['id'] ?? 0);
-                            $viewUrl = $meta['link'] . $oid;
+                            // Other unpaid tabs (no account page): their own pending rows in this ledger, by type + id.
+                            $meta = $srcMeta[$src] ?? ['label' => 'Open tab', 'badge' => 'restaurant', 'link' => 'payments.php?' . http_build_query(['booking_type' => $src]) . '&booking_id='];
+                            // No link when the row cannot be pinned to one account (no id, or no type for the ledger
+                            // filter): a link would open other rows, so the reference stays plain text.
+                            $viewUrl = ($oid > 0 && $src !== '') ? $meta['link'] . $oid : '';
                         ?>
                             <tr>
                                 <td data-label="Reference"><strong><?php echo htmlspecialchars((string)($oRow['ref'] ?? '—')); ?></strong></td>
@@ -757,7 +771,9 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                 <td data-label="Status"><span class="badge badge-<?php echo htmlspecialchars((string)($oRow['status'] ?? '')); ?>"><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)($oRow['status'] ?? '')))); ?></span></td>
                                 <td data-label="Actions">
                                     <div class="quick-actions">
+                                        <?php if ($viewUrl !== ''): ?>
                                         <a href="<?php echo htmlspecialchars($viewUrl); ?>" class="btn btn-primary btn-sm" title="View account"><i class="fas fa-eye"></i></a>
+                                        <?php endif; ?>
                                         <?php if (in_array($src, ['room', 'conference', 'gym', 'event'], true)): ?>
                                         <a href="payment-add.php?booking_type=<?php echo htmlspecialchars($src); ?>&booking_id=<?php echo $oid; ?>" class="btn btn-success btn-sm" title="Record a payment against this account"><i class="fas fa-plus"></i> Collect</a>
                                         <?php endif; ?>

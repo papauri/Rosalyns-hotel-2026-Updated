@@ -120,6 +120,8 @@ $dash_perm = static function (string ...$keys) use ($dash_uid): bool {
     }
     return false;
 };
+// payments.php itself needs 'payments': refund-only users still see the refunds figure, but not as a link there.
+$dash_can_open_payments = hasPermission($dash_uid, 'payments');
 $raw_bookings   = moduleEnabled('bookings');
 $raw_pos        = moduleEnabled('pos');
 $raw_conference = moduleEnabled('conference');
@@ -1487,7 +1489,11 @@ if ($is_card_insight_ajax) {
                     ['key' => 'status', 'label' => 'Refund Status'],
                     ['key' => 'requested', 'label' => 'Requested'],
                 ];
-                $payload['link'] = ['href' => 'payments.php?refund_status=pending', 'label' => 'Open pending refunds'];
+                if ($dash_can_open_payments) {
+                    $payload['link'] = ['href' => 'payments.php?refund_status=pending,processing', 'label' => 'Open refunds to approve'];
+                } else {
+                    $payload['link'] = null; // no link the user would be denied on (drawer footer hides)
+                }
                 $stmt = $pdo->query("SELECT id AS payment_id,
                                             COALESCE(payment_reference, CONCAT('PAY-', id)) AS payment_reference,
                                             COALESCE(booking_reference, '—') AS booking_reference,
@@ -2053,7 +2059,7 @@ $currency_symbol = getSetting('currency_symbol');
         $add($attn, $mod_bookings, $overdueDepartures, 'Overdue departures', 'fa-person-walking-luggage', 'red', 'bookings.php?departure=overdue', null, 'Checkout date passed, still checked in');
         $add($attn, $mod_bookings, (int)$pending_bookings, 'Bookings awaiting confirmation', 'fa-hourglass-half', 'amber', 'bookings.php?status=pending', 'pending_bookings');
         $add($attn, $mod_bookings, $departuresOwing, 'Departures with a balance', 'fa-sack-dollar', 'red', 'bookings.php?filter=checkout_today&balance=owing', null, 'Due out today, balance to collect before they leave');
-        $add($attn, $mod_finance && $dash_perm('payments', 'refund_payment'), (int)$finance['refunds_pending'], 'Refunds to approve', 'fa-rotate-left', 'red', 'payments.php?refund_status=pending', 'refunds_pending');
+        $add($attn, $mod_finance && $dash_perm('payments', 'refund_payment'), (int)$finance['refunds_pending'], 'Refunds to approve', 'fa-rotate-left', 'red', $dash_can_open_payments ? 'payments.php?refund_status=pending,processing' : '', $dash_can_open_payments ? 'refunds_pending' : null);
         $add($attn, $mod_conference, (int)$pending_conference, 'Conference enquiries to answer', 'fa-users-gear', 'amber', 'conference-management.php?status=pending', 'pending_conference');
         $add($attn, $mod_website_cms && $dash_perm('contact'), (int)$guestSvc['unread_contact'], 'Unread contact messages', 'fa-envelope', 'red', 'contact-inquiries.php?status=new');
         $add($attn, $mod_website_cms && $dash_perm('reviews'), (int)$guestSvc['pending_reviews'], 'Reviews to moderate', 'fa-star', 'amber', 'reviews.php?status=pending');
@@ -2457,9 +2463,10 @@ $currency_symbol = getSetting('currency_symbol');
                 <?php if ($attnOpen): ?>
                 <ul class="ck-attn__list">
                     <?php foreach ($attnOpen as $i => $a): ?>
+                    <?php $attnTag = $a['href'] !== '' ? 'a' : 'div'; // no href = plain text (user cannot open that page) ?>
                     <li>
-                        <a class="ck-attn__item ck-attn__item--<?php echo $a['tone']; ?><?php echo $i === 0 ? ' is-top' : ''; ?><?php echo $a['insight'] ? ' js-dashboard-insight' : ''; ?>"
-                           href="<?php echo htmlspecialchars($a['href']); ?>"
+                        <<?php echo $attnTag; ?> class="ck-attn__item ck-attn__item--<?php echo $a['tone']; ?><?php echo $i === 0 ? ' is-top' : ''; ?><?php echo $a['insight'] ? ' js-dashboard-insight' : ''; ?>"
+                           <?php if ($attnTag === 'a'): ?>href="<?php echo htmlspecialchars($a['href']); ?>"<?php endif; ?>
                            <?php if ($a['insight']): ?>data-insight-card="<?php echo htmlspecialchars($a['insight']); ?>" data-insight-label="<?php echo htmlspecialchars($a['label']); ?>"<?php endif; ?>>
                             <span class="ck-attn__icon"><i class="fas <?php echo $a['icon']; ?>"></i></span>
                             <span class="ck-attn__text">
@@ -2467,7 +2474,7 @@ $currency_symbol = getSetting('currency_symbol');
                                 <?php if ($a['hint']): ?><small><?php echo htmlspecialchars($a['hint']); ?></small><?php endif; ?>
                             </span>
                             <span class="ck-attn__count"><?php echo (int)$a['count']; ?></span>
-                        </a>
+                        </<?php echo $attnTag; ?>>
                     </li>
                     <?php endforeach; ?>
                 </ul>
@@ -2479,7 +2486,11 @@ $currency_symbol = getSetting('currency_symbol');
                     <summary><i class="fas fa-check"></i> <?php echo count($attnClear); ?> queue<?php echo count($attnClear) === 1 ? '' : 's'; ?> clear</summary>
                     <div class="ck-clear__chips">
                         <?php foreach ($attnClear as $a): ?>
+                            <?php if ($a['href'] !== ''): ?>
                             <a href="<?php echo htmlspecialchars($a['href']); ?>" class="ck-chip ck-chip--muted"><i class="fas <?php echo $a['icon']; ?>"></i> <?php echo htmlspecialchars($a['label']); ?></a>
+                            <?php else: ?>
+                            <span class="ck-chip ck-chip--muted"><i class="fas <?php echo $a['icon']; ?>"></i> <?php echo htmlspecialchars($a['label']); ?></span>
+                            <?php endif; ?>
                         <?php endforeach; ?>
                     </div>
                 </details>
@@ -2527,7 +2538,11 @@ $currency_symbol = getSetting('currency_symbol');
                         <li><a class="js-dashboard-insight" data-insight-card="open_tabs" data-insight-label="Open tabs" href="stock-orders.php?status=placed"><span><i class="fas fa-receipt"></i> <?php echo (int)$ops['open_tabs']; ?> open tab(s)</span><strong><?php echo $money($ops['open_tabs_value']); ?></strong></a></li>
                     <?php endif; ?>
                     <?php if ($moneyRefundLine): ?>
-                        <li><a class="js-dashboard-insight" data-insight-card="refunds_pending" data-insight-label="Refunds pending" href="payments.php?refund_status=pending"><span><i class="fas fa-rotate-left"></i> Refunds pending</span><strong><?php echo (int)$finance['refunds_pending']; ?></strong></a></li>
+                        <?php if ($dash_can_open_payments): ?>
+                        <li><a class="js-dashboard-insight" data-insight-card="refunds_pending" data-insight-label="Refunds pending" href="payments.php?refund_status=pending,processing"><span><i class="fas fa-rotate-left"></i> Refunds pending</span><strong><?php echo (int)$finance['refunds_pending']; ?></strong></a></li>
+                        <?php else: ?>
+                        <li><span><i class="fas fa-rotate-left"></i> Refunds pending</span><strong><?php echo (int)$finance['refunds_pending']; ?></strong></li>
+                        <?php endif; ?>
                     <?php endif; ?>
                 </ul>
             </section>

@@ -88,6 +88,22 @@ if (!function_exists('rh_fin_valid_date')) {
         return $out;
     }
 
+    /**
+     * Refund workflow statuses from ?refund_status= text: one status or a comma list ("pending,processing", the
+     * Dashboard "Refunds to approve" queue). Only known statuses are kept, each once, in lifecycle order; anything
+     * else is dropped, so junk gives [] (no filter) and the result is the same whatever order was typed.
+     * @return string[]
+     */
+    function rh_fin_refund_statuses($raw): array
+    {
+        $known = ['pending', 'processing', 'completed', 'failed', 'rejected'];
+        if (!is_string($raw) || $raw === '') {
+            return [];
+        }
+        $picked = array_map('trim', explode(',', strtolower($raw)));
+        return array_values(array_intersect($known, $picked));
+    }
+
     /** booking_type = ? when one type is picked, else IN (enabled types) when module scoping is on. */
     function rh_fin_type_conditions(string $col, string $type, array $scopeTypes, array &$params): array
     {
@@ -183,10 +199,16 @@ if (!function_exists('rh_fin_valid_date')) {
             $where[] = 'p.payment_status = ?';
             $params[] = $status;
         }
-        $refundStatus = rh_fin_get_str($f, 'refund_status');
-        if ($refundStatus !== '') {
+        // refund_status: one status or a comma list (rh_fin_refund_statuses), each bound as a parameter.
+        $refundStatuses = rh_fin_refund_statuses(rh_fin_get_str($f, 'refund_status'));
+        if (count($refundStatuses) === 1) {
             $where[] = "p.payment_type = 'refund' AND p.refund_status = ?";
-            $params[] = $refundStatus;
+            $params[] = $refundStatuses[0];
+        } elseif ($refundStatuses !== []) {
+            $where[] = "p.payment_type = 'refund' AND p.refund_status IN (" . implode(',', array_fill(0, count($refundStatuses), '?')) . ')';
+            foreach ($refundStatuses as $rs) {
+                $params[] = $rs;
+            }
         }
         $method = rh_fin_get_str($f, 'payment_method');
         if ($method !== '') {

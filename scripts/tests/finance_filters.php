@@ -42,6 +42,9 @@ $others = [
     [],
     ['status' => 'completed', 'payment_method' => 'cash'],
     ['refund_status' => 'pending', 'booking_id' => 42],
+    ['refund_status' => 'pending,processing'],
+    ['refund_status' => 'processing, pending,pending', 'status' => 'completed'],
+    ['refund_status' => "pending,{$evil},processing"],
     ['start_date' => '2026-11-01', 'end_date' => '2026-11-30'],
     ['start_date' => "2026-11-01'--", 'end_date' => 'nope', 'payment_method' => $evil, 'status' => $evil],
 ];
@@ -163,6 +166,27 @@ check(strpos($pay, '<option value="pending_partial"') !== false, 'payments: stat
 check(strpos($rcp, "rh_fin_like_any(['p.receipt_number', 'p.payment_reference', 'p.booking_reference', 'p.notes'])") !== false && strpos($rcp, 'rh_fin_like_param($search)') !== false, 'receipts: search uses the escaped LIKE helpers');
 check(strpos($rcp, "\$like = '%' . \$input['search'] . '%';") === false, 'receipts: old unescaped LIKE is gone');
 check(preg_match('/\(int\)\(\$_GET|\(string\)\(\$_GET|\$_GET\[\'(type|status|search|scope|page)\'\]/', $rcp) === 0, 'receipts: query params read through rh_fin_get_str / rh_fin_get_int');
+
+// ---- refund status set (Dashboard "Refunds to approve" = pending + processing, every source)
+eq(rh_fin_refund_statuses('pending,processing'), ['pending', 'processing'], 'refund set: two statuses kept');
+eq(rh_fin_refund_statuses(' Processing , pending,pending'), ['pending', 'processing'], 'refund set: trimmed, deduped, lifecycle order');
+eq(rh_fin_refund_statuses("pending,{$evil}"), ['pending'], 'refund set: unknown entries dropped');
+eq(rh_fin_refund_statuses($evil), [], 'refund set: junk gives no filter');
+eq(rh_fin_refund_statuses(['pending']), [], 'refund set: array ignored');
+eq(rh_fin_payments_where(['refund_status' => 'processing,pending'], 'transaction_reference', $conf), ['sql' => "WHERE p.deleted_at IS NULL AND p.payment_type = 'refund' AND p.refund_status IN (?,?)", 'params' => ['pending', 'processing']], 'payments: refund set is one bound IN');
+eq(rh_fin_payments_where(['refund_status' => 'pending'], 'transaction_reference', $conf), ['sql' => "WHERE p.deleted_at IS NULL AND p.payment_type = 'refund' AND p.refund_status = ?", 'params' => ['pending']], 'payments: single refund status unchanged');
+eq(rh_fin_payments_where(['refund_status' => "x,{$evil}"], 'transaction_reference', $conf), ['sql' => 'WHERE p.deleted_at IS NULL', 'params' => []], 'payments: junk refund set adds no clause');
+check(strpos($pay, "\$refundStatusList = rh_fin_refund_statuses(rh_fin_get_str(\$_GET, 'refund_status'));") !== false, 'payments: page reads the refund set through the whitelist');
+check(strpos($pay, "\$scopeActive         = \$bookingType === '' && !\$scopeAll && \$refundStatus === ''") !== false, 'payments: refund queue is not module-scoped (matches the Dashboard count)');
+check(strpos($pay, "array_merge(\$_GET, ['refund_status' => null, 'page' => null])") !== false && strpos($pay, 'name="refund_status"') !== false, 'payments: refund notice has Clear; the filter form keeps the set');
+
+// ---- accounts owing: no '#' links; links only to users who can open the page
+check(strpos($pay, "'link' => '#'") === false, "payments: outstanding rows never link to '#'");
+check(strpos($pay, "\$viewUrl = (\$oid > 0 && \$src !== '') ? \$meta['link'] . \$oid : '';") !== false && strpos($pay, "<?php if (\$viewUrl !== ''): ?>") !== false, 'payments: rows that cannot be pinned to one account show no link');
+check(strpos($inv, "\$invCanPayments   = hasPermission((int)(\$user['id'] ?? 0), 'payments');") !== false, 'invoices: Payments access checked once');
+check(preg_match('/<\?php if \(\$invCanPayments\): \?> ·\s*<a href="payments\.php\?balance=outstanding"/u', $inv) === 1, 'invoices: "view accounts owing" only for Payments access');
+check(preg_match('/<\?php if \(\$invCanPayments\): \?>\s*<a class="acct-link" href="payments\.php\?balance=outstanding&amp;booking_type=/', $inv) === 1, 'invoices: by-source View only for Payments access');
+check(preg_match('/<\?php if \(\$invCanPayments\): \?>\s*<a href="payments\.php" class="acct-quick-action">/', $inv) === 1 && preg_match('/<\?php if \(\$invCanPaymentAdd\): \?>\s*<a href="payment-add\.php"/', $inv) === 1 && preg_match('/<\?php if \(\$invCanAccounting\): \?>\s*<a href="accounting-dashboard\.php"/', $inv) === 1, 'invoices: header links follow their page permissions');
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail ? 1 : 0);
