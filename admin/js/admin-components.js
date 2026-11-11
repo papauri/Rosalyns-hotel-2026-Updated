@@ -1128,14 +1128,58 @@
     if (window.rhFoldPhoneActions) return;
     var mq = window.matchMedia ? window.matchMedia('(max-width: 640px)') : null;
 
+    // All Bookings phone list row (owner 2026-11-12, Option A): ONE labelled next-step button stays
+    // in the row. It is the first already-rendered, enabled primary action of these kinds, in the
+    // row's own order; view, cancel, no-show and extend always fold into More.
+    var NEXT_STEP = '.confirm, .checkin, .checkin--urgent, .checkout, .checkout--urgent, .paid, .refund';
+
+    function pickNextStep(row) {
+        if (!row.closest('table.bookings-table')) return null;
+        var kids = row.children;
+        for (var i = 0; i < kids.length; i++) {
+            var c = kids[i];
+            if (c.matches('.quick-action') && c.matches(NEXT_STEP)
+                && !c.classList.contains('disabled') && !c.hasAttribute('disabled')) {
+                return c;
+            }
+        }
+        return null;
+    }
+
+    // Short one-line words for the phone button (label only; the button keeps its own
+    // aria-label, title and handler).
+    function nextStepWords(btn) {
+        var aria = btn.getAttribute('aria-label') || '';
+        if (btn.matches('.paid')) return 'Mark paid';
+        if (btn.matches('.checkin, .checkin--urgent')) return 'Check in';
+        if (btn.matches('.checkout, .checkout--urgent')) return 'Check out';
+        if (btn.matches('.refund')) return 'Refund';
+        if (btn.matches('.confirm')) return /restore/i.test(aria) ? 'Restore' : 'Confirm';
+        return aria || btn.getAttribute('title') || '';
+    }
+
     function foldRow(row) {
         if (row._rhFold) return false;
         var menu = row.querySelector('.actions-more-menu');
         if (!menu) return false;
+        var next = pickNextStep(row);
+        var nextLabel = null;
+        if (next) {
+            nextLabel = document.createElement('span');
+            nextLabel.className = 'rh-next-label';
+            nextLabel.textContent = nextStepWords(next);
+            next.appendChild(nextLabel);
+            next.classList.add('rh-next-step');
+        }
         var kids = Array.prototype.filter.call(row.children, function (c) {
-            return c.matches('.quick-action, .btn') && !c.classList.contains('actions-more-toggle');
+            return c !== next && c.matches('.quick-action, .btn') && !c.classList.contains('actions-more-toggle');
         });
-        if (!kids.length) return false;
+        if (!kids.length) {
+            if (!next) return false;
+            row._rhFold = { moved: [], divider: null, next: next, nextLabel: nextLabel };
+            row.classList.add('rh-folded');
+            return true;
+        }
         var moved = [];
         var frag = document.createDocumentFragment();
         kids.forEach(function (btn) {
@@ -1155,7 +1199,7 @@
         divider.className = 'menu-divider rh-fold-divider';
         frag.appendChild(divider);
         menu.insertBefore(frag, menu.firstChild);
-        row._rhFold = { moved: moved, divider: divider };
+        row._rhFold = { moved: moved, divider: divider, next: next, nextLabel: nextLabel };
         row.classList.add('rh-folded');
         return true;
     }
@@ -1170,7 +1214,9 @@
                 m.marker.parentNode.removeChild(m.marker);
             }
         });
-        if (f.divider.parentNode) f.divider.parentNode.removeChild(f.divider);
+        if (f.divider && f.divider.parentNode) f.divider.parentNode.removeChild(f.divider);
+        if (f.next) f.next.classList.remove('rh-next-step');
+        if (f.nextLabel && f.nextLabel.parentNode) f.nextLabel.parentNode.removeChild(f.nextLabel);
         row._rhFold = null;
         row.classList.remove('rh-folded');
         return true;
@@ -1200,6 +1246,20 @@
             if (m) m.removeAttribute('style');
         }, 0);
     }, true); // capture: some row handlers stop propagation
+
+    // All Bookings phone list row: a tap anywhere on the row that is not a control opens the
+    // booking summary, through the row's own View button (same handler as tapping it).
+    document.addEventListener('click', function (e) {
+        var phone = mq ? mq.matches : window.innerWidth <= 640;
+        if (!phone || e.defaultPrevented || !e.target || !e.target.closest) return;
+        var tr = e.target.closest('table.bookings-table:not(.mobile-enhanced) > tbody > tr');
+        if (!tr) return;
+        if (e.target.closest('a, button, input, select, textarea, label, summary, [role="button"], .actions-more')) return;
+        var sel = window.getSelection ? window.getSelection() : null;
+        if (sel && !sel.isCollapsed && tr.contains(sel.anchorNode)) return; // the user is selecting text
+        var view = tr.querySelector('.quick-action.view');
+        if (view) view.click();
+    });
 
     if (mq && mq.addEventListener) mq.addEventListener('change', sync);
     else window.addEventListener('resize', sync);

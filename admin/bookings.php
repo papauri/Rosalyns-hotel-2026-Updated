@@ -3782,12 +3782,33 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                                 <br><span class="room-chip room-chip--unassigned"><i class="fas fa-minus"></i> Unassigned</span>
                                             <?php endif; ?>
                                         </td>
-                                        <td data-label="Check In"><span class="rh-ph-hide"><?php echo date('M d, Y', strtotime($booking['check_in_date'])); ?></span><span class="rh-phone-sub rh-phone-sub--dark rh-phone-sub--nw">In <?php echo date('j M', strtotime($booking['check_in_date'])); ?></span><span class="rh-phone-sub rh-phone-sub--dark rh-phone-sub--nw">Out <?php echo date('j M', strtotime($booking['check_out_date'])); ?></span></td>
+                                        <td data-label="Check In"><span class="rh-ph-hide"><?php echo date('M d, Y', strtotime($booking['check_in_date'])); ?></span><span class="rh-phone-sub rh-phone-sub--dark rh-phone-sub--nw">In <?php echo date('j M', strtotime($booking['check_in_date'])); ?></span><span class="rh-phone-sub rh-phone-sub--dark rh-phone-sub--nw">Out <?php echo date('j M', strtotime($booking['check_out_date'])); ?></span>
+                                            <?php /* Phone list row, line 2 (bookings.css, max 640px only): stay + nights + the room chip from the Room cell above. */ $bk_ph_nights = (int)$booking['number_of_nights']; ?>
+                                            <span class="bk-ph-stay"><span class="bk-ph-stay__dates"><?php echo date('j M', strtotime($booking['check_in_date'])); ?> &rarr; <?php echo date('j M', strtotime($booking['check_out_date'])); ?> &middot; <?php echo $bk_ph_nights . ($bk_ph_nights === 1 ? ' night' : ' nights'); ?></span><?php if ($roomAssignmentLabel !== ''): ?><span class="room-chip"><i class="fas fa-door-open"></i> <?php echo htmlspecialchars($roomAssignmentLabel); ?></span><?php else: ?><span class="room-chip room-chip--unassigned"><i class="fas fa-minus"></i> Unassigned</span><?php endif; ?></span>
+                                        </td>
                                         <td class="col-optional" data-label="Check Out"><?php echo date('M d, Y', strtotime($booking['check_out_date'])); ?></td>
                                         <td class="col-optional-lg" data-label="Nights"><?php echo $booking['number_of_nights']; ?></td>
                                         <td class="col-optional-lg" data-label="Guests"><?php echo $booking['number_of_guests']; ?></td>
                                         <td data-label="Total">
-                                            <strong><?php echo htmlspecialchars($currency_symbol); ?> <?php echo number_format(rh_booking_full_total($booking), 2); ?></strong><?php echo rh_booking_total_info_btn($booking); ?>
+                                            <?php
+                                            // The booking's own payment status (unpaid / partial / paid / refunded) is the
+                                            // truth for the guest's bill; the latest payment record is only one transaction
+                                            // ('completed' even when it covered part of the bill), so it is shown as the reference.
+                                            // Worked out here so the phone list row can show it beside the total; the Payment cell below uses the same values.
+                                            $status = (string)($booking['payment_status'] ?: ($booking['actual_payment_status'] ?? ''));
+                                            // Map payment statuses to user-friendly labels
+                                            $status_labels = [
+                                                'paid' => 'Paid',
+                                                'unpaid' => 'Unpaid',
+                                                'partial' => 'Partial',
+                                                'completed' => 'Paid',
+                                                'pending' => 'Pending',
+                                                'failed' => 'Failed',
+                                                'refunded' => 'Refunded',
+                                                'partially_refunded' => 'Partial Refund'
+                                            ];
+                                            ?>
+                                            <span class="bk-total-main"><strong><?php echo htmlspecialchars($currency_symbol); ?> <?php echo number_format(rh_booking_full_total($booking), 2); ?></strong><?php echo rh_booking_total_info_btn($booking); ?><span class="bk-ph-pay badge badge-<?php echo htmlspecialchars($status, ENT_QUOTES); ?>"><?php echo htmlspecialchars($status_labels[$status] ?? ucfirst($status)); ?></span></span>
                                             <?php $bk_rate = rh_booked_rate_line($booking, null, ['currency' => $currency_symbol]); // the row's own columns, no query ?>
                                             <?php if ($bk_rate['ok']): ?>
                                                 <br><small class="bk-booked-rate" style="color:#666;white-space:nowrap;" title="<?php echo htmlspecialchars('Booked at ' . $bk_rate['text'] . '. Room rate a night × nights, at the price the booking was made at; today\'s room price does not change it.', ENT_QUOTES); ?>"><?php echo htmlspecialchars($bk_rate['compact'], ENT_QUOTES); ?></small>
@@ -3822,27 +3843,9 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                             <?php endif; ?>
                                         </td>
                                         <td class="col-optional-md" data-label="Payment">
-                                            <?php
-                                            // The booking's own payment status (unpaid / partial / paid / refunded) is the
-                                            // truth for the guest's bill; the latest payment record is only one transaction
-                                            // ('completed' even when it covered part of the bill), so it is shown as the reference.
-                                            $status = (string)($booking['payment_status'] ?: ($booking['actual_payment_status'] ?? ''));
-                                            ?>
+                                            <?php /* $status / $status_labels: worked out in the Total cell above. */ ?>
                                             <span class="badge badge-<?php echo htmlspecialchars($status, ENT_QUOTES); ?>">
-                                                <?php
-                                                // Map payment statuses to user-friendly labels
-                                                $status_labels = [
-                                                    'paid' => 'Paid',
-                                                    'unpaid' => 'Unpaid',
-                                                    'partial' => 'Partial',
-                                                    'completed' => 'Paid',
-                                                    'pending' => 'Pending',
-                                                    'failed' => 'Failed',
-                                                    'refunded' => 'Refunded',
-                                                    'partially_refunded' => 'Partial Refund'
-                                                ];
-                                                echo $status_labels[$status] ?? ucfirst($status);
-                                                ?>
+                                                <?php echo htmlspecialchars($status_labels[$status] ?? ucfirst($status)); ?>
                                             </span>
                                             <?php if ($booking['payment_reference']): ?>
                                                 <br><small style="color: #666; font-size: 10px;">

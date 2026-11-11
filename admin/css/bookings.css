@@ -2309,6 +2309,284 @@ hr.menu-divider {
     }
 }
 
+/* ---- All Bookings on phones: Option A "three-line list row" (owner 2026-11-12, UI_DECISION) ----
+   Up to 640px each booking row is a two-column list row: guest + status / stay + nights + room /
+   total + payment / booked rate x nights, and an extra line only when flagged. The right column
+   holds ONE labelled next-step button (picked by rhFoldPhoneActions in admin-components.js) and
+   the More menu. Tapping the row opens the booking summary (admin-components.js). Wider screens
+   are untouched: the phone-only spans below stay hidden there. */
+table.bookings-table .bk-ph-stay,
+table.bookings-table .bk-ph-pay {
+    display: none;
+}
+
+@media (max-width: 640px) {
+    /* The list runs edge to edge inside the Room Bookings card (rows carry their own padding). */
+    .bookings-section .table-responsive:has(> table.bookings-table:not(.mobile-enhanced)) {
+        width: auto;
+        max-width: none;
+        margin-inline: -18px; /* .bookings-section side padding */
+        border-inline: 0;
+        border-radius: 0;
+        box-shadow: none;
+        overflow-x: hidden;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) {
+        display: block;
+        width: 100%;
+        min-width: 0 !important;
+        max-width: 100%;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > thead {
+        display: none;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody {
+        display: block;
+        width: 100%;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+            "name status"
+            "stay act"
+            "money act"
+            "rate act";
+        column-gap: 10px;
+        row-gap: 1px;
+        align-items: center;
+        min-width: 0;
+        overflow: hidden; /* one long value never widens the list (the More menu is position: fixed, so it is not clipped) */
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--admin-surface-border, #e9ecef);
+        cursor: pointer;
+    }
+
+    /* Rows a filter or the pager hid (hidden attribute) stay hidden. */
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr[hidden] {
+        display: none;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr:last-child {
+        border-bottom: 0;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > td {
+        display: block;
+        min-width: 0;
+        padding: 0 !important;
+        border: 0;
+        background: transparent;
+        white-space: normal;
+        line-height: 1.25;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr:hover > td {
+        background: transparent;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr:active {
+        background-color: #f7f9fc;
+    }
+
+    /* Shown elsewhere on the row or in the booking summary / Full details: reference, room type,
+       check-out, nights, guests, the separate Status and Payment columns, created. */
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > :is(td[data-label="Room"], td[data-label="Check Out"], td[data-label="Nights"], td[data-label="Guests"], td[data-label="Status"], td[data-label="Payment"], td[data-label="Created"]) {
+        display: none;
+    }
+
+    /* Line 1: guest name (one line) and the booking status badge. */
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > td[data-label="Guest"] {
+        grid-area: name;
+        overflow: hidden;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > td[data-label="Guest"] > :not(.rh-guest-name) {
+        display: none;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > td[data-label="Guest"] > .rh-guest-name {
+        display: block;
+        font-size: 15px;
+        font-weight: 700;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    /* The Total cell's parts are placed one by one (status pill, total line, rate line, flag). */
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > td[data-label="Total"] {
+        display: contents;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > td[data-label="Total"] > br {
+        display: none;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > td[data-label="Total"] > .rh-phone-sub--pill {
+        grid-area: status;
+        justify-self: end;
+        max-width: none;
+        margin: 0;
+        overflow: visible;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) td .badge {
+        padding: 1px 8px;
+        font-size: 11px;
+        line-height: 1.35;
+        white-space: nowrap;
+    }
+
+    /* Line 2: 12 Nov -> 15 Nov . 3 nights + room chip (wraps, never widens the row). */
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > td[data-label="Check In"] {
+        grid-area: stay;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > td[data-label="Check In"] > :is(.rh-ph-hide, .rh-phone-sub) {
+        display: none;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) .bk-ph-stay {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 2px 5px;
+        min-width: 0;
+        color: #231f1c;
+        font-size: 12.5px;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) .bk-ph-stay .room-chip {
+        max-width: 100%;
+        min-width: 0;
+        margin: 0;
+        padding: 1px 6px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) .bk-ph-stay .room-chip > i {
+        display: none; /* the chip colour already marks it; keeps the room on the stay line */
+    }
+
+    /* Line 3: total + payment badge. */
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) .bk-total-main {
+        grid-area: money;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 3px 8px;
+        min-width: 0;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) .bk-total-main > strong {
+        font-size: 14px;
+        white-space: nowrap;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) .bk-ph-pay {
+        display: inline-flex;
+    }
+
+    /* The "how this total is worked out" button would push the payment badge off line 3 on a phone;
+       the same breakdown is on Full details (booking-details.php) and on wider screens. */
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) .bk-total-main > .rh-info-btn {
+        display: none;
+    }
+
+    /* Line 4: booked rate x nights, small and muted. */
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > td[data-label="Total"] > .bk-booked-rate {
+        grid-area: rate;
+        min-width: 0;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        font-size: 12px;
+    }
+
+    /* Extra line only when flagged: tentative (when the status badge does not already say so),
+       missed check-in, late / overdue checkout, expires soon. */
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > td[data-label="Reference"] {
+        display: block;
+        grid-column: 1 / -1;
+        font-size: 12px;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > td[data-label="Reference"] > :is(strong, br) {
+        display: none;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > td[data-label="Reference"]:not(:has(> span)),
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr[data-status="tentative"] > td[data-label="Reference"] {
+        display: none;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > td[data-label="Total"] > .expires-soon {
+        grid-column: 1 / -1;
+        font-size: 12px;
+    }
+
+    /* Right column: one labelled next-step button + More, both 44px, at the bottom of the row. */
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > td.actions-cell {
+        grid-area: act;
+        align-self: end;
+        justify-self: end;
+        white-space: nowrap;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table.rh-phone-actions:not(.mobile-enhanced) td.actions-cell .actions-row,
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table.rh-phone-actions:not(.mobile-enhanced) td.actions-cell .actions-row.rh-folded {
+        display: flex;
+        flex-direction: row;
+        flex-wrap: nowrap;
+        align-items: center;
+        justify-content: flex-end;
+        gap: 4px;
+        width: auto;
+        margin: 0;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table.rh-phone-actions:not(.mobile-enhanced) td.actions-cell .actions-row > .quick-action.rh-next-step {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: auto;
+        min-width: 92px;
+        max-width: none;
+        height: 44px;
+        min-height: 44px;
+        padding: 0 10px;
+        font-size: 12.5px;
+        font-weight: 600;
+        line-height: 1;
+        white-space: nowrap;
+        text-align: center;
+        transform: none;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table.rh-phone-actions:not(.mobile-enhanced) td.actions-cell .actions-row > .quick-action.rh-next-step > i {
+        display: none;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table.rh-phone-actions:not(.mobile-enhanced) td.actions-cell .actions-row > .actions-more {
+        margin: 0;
+        padding: 0;
+        border: 0;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table.rh-phone-actions:not(.mobile-enhanced) td.actions-cell .actions-row > .actions-more > .actions-more-toggle {
+        width: 44px;
+        min-width: 44px;
+        height: 44px;
+        min-height: 44px;
+    }
+}
+
 /* Who created the booking: one short muted line under the Created date (owner 2026-11-11).
    Long names end in an ellipsis; the full "Name (role)" is in the title. */
 .bk-created-by {
