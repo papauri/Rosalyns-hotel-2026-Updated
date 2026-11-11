@@ -3996,7 +3996,7 @@ function sendBookingCancelledEmail(array $booking, string $cancellation_reason =
         $dbTemplate = renderBookingEmailTemplate('booking_cancelled', $templateVars);
         if ($dbTemplate) {
             $ccEmails = getCCEmails();
-            return sendEmailWithCC(
+            $emailResult = sendEmailWithCC(
                 $booking['guest_email'],
                 $booking['guest_name'],
                 $dbTemplate['subject'],
@@ -4004,6 +4004,17 @@ function sendBookingCancelledEmail(array $booking, string $cancellation_reason =
                 $dbTemplate['text_body'],
                 $ccEmails
             );
+            // The saved "Booking Cancelled" template replaces only the email; the guest and hotel WhatsApp still go,
+            // exactly as with the built-in email below (owner 2026-11-12: a saved template used to skip both).
+            $whatsappResult = ['guest' => ['success' => false, 'message' => 'WhatsApp not available'], 'hotel' => ['success' => false, 'message' => 'WhatsApp not available']];
+            if (function_exists('sendBookingCancelledWhatsApp') && function_exists('isWhatsAppEnabled') && isWhatsAppEnabled()) {
+                $bookingForWhatsApp = $booking;
+                $bookingForWhatsApp['room_name'] = $room['name'];
+                $whatsappResult = sendBookingCancelledWhatsApp($bookingForWhatsApp, $room);
+            }
+            $emailResult['whatsapp_guest_sent'] = $whatsappResult['guest']['success'] ?? false;
+            $emailResult['whatsapp_hotel_sent'] = $whatsappResult['hotel']['success'] ?? false;
+            return $emailResult;
         }
 
         // Prepare email content

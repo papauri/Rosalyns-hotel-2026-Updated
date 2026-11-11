@@ -300,6 +300,12 @@ check(strpos($waSrc, "function sendBookingCancelledWhatsApp(array \$booking, arr
 check(strpos($waSrc, "\$guestPhone  = \$only === 'hotel' ? '' :") !== false && strpos($waSrc, "\$hotelPhone  = \$only === 'guest' ? '' :") !== false, 'quiet: hotel-only never reaches the guest phone');
 check(preg_match("/function sendBookingCancelledHotelAlert\(array \\\$booking\): array.*?isWhatsAppEnabled\(\).*?sendBookingCancelledWhatsApp\(\\\$booking, \\\$room, 'hotel'\)/s", $emailSrc) === 1,
     'quiet: the hotel alert helper sends the hotel part only, when WhatsApp is on');
+$cxStart = strpos($emailSrc, 'function sendBookingCancelledEmail(');
+$cxFn = $cxStart === false ? '' : substr($emailSrc, $cxStart, strpos($emailSrc, "\nfunction ", $cxStart + 10) - $cxStart);
+check(preg_match("/if \(\\\$dbTemplate\) \{.*?sendEmailWithCC\(.*?sendBookingCancelledWhatsApp\(\\\$bookingForWhatsApp, \\\$room\).*?return \\\$emailResult;\s*\}/s", $cxFn) === 1,
+    'cancel: a saved "Booking Cancelled" template still sends the guest and hotel WhatsApp');
+check(substr_count($cxFn, 'sendBookingCancelledWhatsApp(') === 2 && substr_count($cxFn, 'return sendEmailWithCC(') === 0,
+    'cancel: both email paths (saved template, built-in) send the WhatsApp; none returns before it');
 $bdSrc = (string)file_get_contents($root . '/admin/booking-details.php');
 $bkSrc2 = (string)file_get_contents($root . '/admin/bookings.php');
 $tbSrc = (string)file_get_contents($root . '/admin/tentative-bookings.php');
