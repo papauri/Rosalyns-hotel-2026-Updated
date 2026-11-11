@@ -122,6 +122,11 @@ $dash_perm = static function (string ...$keys) use ($dash_uid): bool {
 };
 // payments.php itself needs 'payments': refund-only users still see the refunds figure, but not as a link there.
 $dash_can_open_payments = hasPermission($dash_uid, 'payments');
+// Room-service reminder links only for people who can open that page (chip, drawer link, drawer row).
+$dash_can_open_rsd = !function_exists('rhCanLinkTo') || rhCanLinkTo($dash_uid, 'room-service-dashboard.php');
+// Same for the Stock dashboard and Reports links in the drawers.
+$dash_can_open_stock_dash = !function_exists('rhCanLinkTo') || rhCanLinkTo($dash_uid, 'stock-dashboard.php');
+$dash_can_open_reports = !function_exists('rhCanLinkTo') || rhCanLinkTo($dash_uid, 'reports.php');
 $raw_bookings   = moduleEnabled('bookings');
 $raw_pos        = moduleEnabled('pos');
 $raw_conference = moduleEnabled('conference');
@@ -236,7 +241,7 @@ if (!$is_card_insight_ajax) {
                        ir.room_number as individual_room_number, ir.room_name as individual_room_name,
                        b.total_amount, b.amount_paid, b.amount_due, b.payment_status
                 FROM bookings b
-                JOIN rooms r ON b.room_id = r.id
+                LEFT JOIN rooms r ON b.room_id = r.id
                 LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
                 WHERE b.deleted_at IS NULL AND b.check_in_date BETWEEN DATE_ADD(?, INTERVAL 1 DAY) AND DATE_ADD(?, INTERVAL 7 DAY)
                 AND b.status IN ('pending', 'confirmed')
@@ -444,7 +449,7 @@ if (!$is_card_insight_ajax) {
                        CASE WHEN b.status = 'checked-out' THEN 'departed'
                             WHEN b.check_out_date < ? THEN 'overdue' ELSE 'due' END AS departure_state
                 FROM bookings b
-                JOIN rooms r ON b.room_id = r.id
+                LEFT JOIN rooms r ON b.room_id = r.id
                 LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
                 WHERE b.deleted_at IS NULL AND ((b.check_out_date = ? AND b.status IN ('checked-in', 'checked-out'))
                       OR (b.check_out_date < ? AND b.status = 'checked-in'))
@@ -670,7 +675,7 @@ if ($is_card_insight_ajax) {
                 $stmt = $pdo->prepare("SELECT b.id AS booking_id, b.booking_reference, b.guest_name, b.check_out_date, b.status, b.payment_status,
                                               r.name AS room_name, ir.room_number, ir.room_name AS individual_room_name
                                        FROM bookings b
-                                       JOIN rooms r ON r.id = b.room_id
+                                       LEFT JOIN rooms r ON r.id = b.room_id
                                        LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
                                        WHERE b.deleted_at IS NULL AND b.check_in_date = ? AND " . rh_fd_status_in_sql('b.status', array_merge(rh_fd_still_to_arrive_statuses(), rh_fd_arrived_statuses())) . "
                                        ORDER BY FIELD(b.status, 'pending', 'confirmed', 'checked-in', 'checked-out'), b.created_at ASC
@@ -701,7 +706,7 @@ if ($is_card_insight_ajax) {
                 $ciCount = $pdo->prepare("SELECT COALESCE(SUM(" . rh_fd_status_in_sql('b.status', rh_fd_still_to_arrive_statuses()) . "), 0) AS still_to_arrive,
                                                  COALESCE(SUM(" . rh_fd_status_in_sql('b.status', rh_fd_arrived_statuses()) . "), 0) AS arrived
                                           FROM bookings b
-                                          JOIN rooms r ON r.id = b.room_id
+                                          LEFT JOIN rooms r ON r.id = b.room_id
                                           WHERE b.deleted_at IS NULL AND b.check_in_date = ? AND " . rh_fd_status_in_sql('b.status', array_merge(rh_fd_still_to_arrive_statuses(), rh_fd_arrived_statuses())));
                 $ciCount->execute([$today]);
                 $ciCounts = $ciCount->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -726,7 +731,7 @@ if ($is_card_insight_ajax) {
                 $stmt = $pdo->prepare("SELECT b.id AS booking_id, b.booking_reference, b.guest_name, b.check_out_date, b.amount_due, b.status,
                                               r.name AS room_name, ir.room_number, ir.room_name AS individual_room_name
                                        FROM bookings b
-                                       JOIN rooms r ON r.id = b.room_id
+                                       LEFT JOIN rooms r ON r.id = b.room_id
                                        LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
                                        WHERE b.deleted_at IS NULL AND ((b.check_out_date = ? AND b.status IN ('checked-in', 'checked-out'))
                                              OR (b.check_out_date < ? AND b.status = 'checked-in'))
@@ -805,7 +810,7 @@ if ($is_card_insight_ajax) {
                 $stmt = $pdo->query("SELECT b.id AS booking_id, b.booking_reference, b.guest_name, b.check_out_date, b.amount_due,
                                             r.name AS room_name, ir.room_number, ir.room_name AS individual_room_name
                                      FROM bookings b
-                                     JOIN rooms r ON r.id = b.room_id
+                                     LEFT JOIN rooms r ON r.id = b.room_id
                                      LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
                                      WHERE b.deleted_at IS NULL AND b.status = 'checked-in'
                                      ORDER BY b.check_out_date ASC
@@ -971,8 +976,16 @@ if ($is_card_insight_ajax) {
                     // authoritative invoiced total and guarantees Paid + Outstanding
                     // reconcile to Total on the card.
                     $rowGrand = $rowPaid + $rowDue;
+                    // Other sources (open tabs): their payments on Payments, by source type + id; plain text if either is missing.
+                    if (isset($ob_links[$src])) {
+                        $obRef = ['href' => $ob_links[$src] . $bid, 'label' => (string)$row['ref']];
+                    } elseif ($dash_can_open_payments && $src !== '' && $bid > 0) {
+                        $obRef = ['href' => 'payments.php?booking_type=' . urlencode($src) . '&booking_id=' . urlencode((string)$bid), 'label' => (string)$row['ref']];
+                    } else {
+                        $obRef = (string)$row['ref'];
+                    }
                     $payload['rows'][] = [
-                        'reference' => ['href' => ($ob_links[$src] ?? 'payments.php?q=') . $bid, 'label' => (string)$row['ref']],
+                        'reference' => $obRef,
                         'department' => $ob_departments[$src] ?? ucfirst($src),
                         'guest' => (string)$row['who'],
                         'status' => ucfirst((string)$row['status']),
@@ -1107,7 +1120,7 @@ if ($is_card_insight_ajax) {
                     ['key' => 'workload', 'label' => 'Staff Workload'],
                     ['key' => 'action', 'label' => 'Follow-up'],
                 ];
-                $payload['link'] = ['href' => 'room-service-dashboard.php', 'label' => 'Open Room Service Dashboard'];
+                $payload['link'] = $dash_can_open_rsd ? ['href' => 'room-service-dashboard.php', 'label' => 'Open Room Service Dashboard'] : null;
 
                 $stmt = $pdo->query("SELECT
                                         b.id AS booking_id,
@@ -1355,7 +1368,7 @@ if ($is_card_insight_ajax) {
                     ['key' => 'amount', 'label' => 'Amount'],
                     ['key' => 'settled_at', 'label' => 'Settled At'],
                 ];
-                $payload['link'] = ['href' => 'reports.php?type=accounting&range=today', 'label' => 'Open restaurant revenue report'];
+                $payload['link'] = $dash_can_open_reports ? ['href' => 'reports.php?tab=fnb&range=today', 'label' => 'Open restaurant revenue report'] : null;
                 $stmt = $pdo->query("SELECT id AS order_id, reference, order_type, payment_method, total_amount, COALESCE(paid_at, created_at) AS settled_at
                                      FROM stock_orders
                                      WHERE status IN ('paid','completed')
@@ -1530,7 +1543,7 @@ if ($is_card_insight_ajax) {
                     ['key' => 'current', 'label' => 'Current'],
                     ['key' => 'detail', 'label' => 'Detail'],
                 ];
-                $payload['link'] = ['href' => 'stock-orders.php?view=stock', 'label' => 'Open stock dashboard'];
+                $payload['link'] = $dash_can_open_stock_dash ? ['href' => 'stock-dashboard.php', 'label' => 'Open stock dashboard'] : null;
 
                 $stockAlertsCard = rh_stock_alert_summary($pdo, 3);
                 $lowCount = $stockAlertsCard['attention'];
@@ -1741,7 +1754,7 @@ if ($is_card_insight_ajax) {
                         'detail' => $roomServiceReminderDueNow
                             ? ('Reminder active now - ' . $roomServiceReminderDue . ' occupied room(s) pending today')
                             : ('Reminder starts at ' . $roomServiceReminderTime . ' (' . $roomServiceReminderTimezone . ')'),
-                        'action' => ['href' => 'room-service-dashboard.php', 'label' => 'Room Service', 'target' => '_blank'],
+                        'action' => $dash_can_open_rsd ? ['href' => 'room-service-dashboard.php', 'label' => 'Room Service', 'target' => '_blank'] : '',
                     ];
                 }
                 if ($mod_stock) {
@@ -2024,7 +2037,7 @@ $currency_symbol = getSetting('currency_symbol');
                     SELECT b.*, r.name as room_name,
                            ir.room_number as individual_room_number, ir.room_name as individual_room_name
                     FROM bookings b
-                    JOIN rooms r ON b.room_id = r.id
+                    LEFT JOIN rooms r ON b.room_id = r.id
                     LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
                     WHERE b.deleted_at IS NULL AND b.check_in_date = ? AND " . rh_fd_status_in_sql('b.status', array_merge(rh_fd_still_to_arrive_statuses(), rh_fd_arrived_statuses())) . "
                     ORDER BY FIELD(b.status, 'pending', 'confirmed', 'checked-in', 'checked-out'), b.created_at ASC");
@@ -2069,7 +2082,7 @@ $currency_symbol = getSetting('currency_symbol');
         $add($attn, $mod_housekeeping && $dash_perm('room_maintenance'), (int)$guestSvc['maintenance_open'], 'Rooms out of service', 'fa-screwdriver-wrench', 'red', 'room-maintenance.php?status=out_of_service');
         $add($attn, $mod_housekeeping && $dash_perm('housekeeping'), (int)$guestSvc['housekeeping_due'], 'Housekeeping tasks due', 'fa-broom', 'amber', 'housekeeping.php?due=now');
         $add($attn, $mod_roomsvc && $dash_perm('stock_orders'), (int)$ops['room_service_pending'], 'Room-service orders open', 'fa-bell-concierge', 'amber', rh_fd_room_service_open_href(), 'room_service_pending');
-        $add($attn, $mod_roomsvc && $dash_perm('stock_orders'), (int)$ops['room_service_reminders_due'], 'Room-service reminders due', 'fa-bell', 'amber', 'room-service-dashboard.php', 'room_service_reminders_due', 'Rooms with no order served today');
+        $add($attn, $mod_roomsvc && $dash_perm('stock_orders'), (int)$ops['room_service_reminders_due'], 'Room-service reminders due', 'fa-bell', 'amber', $can('room-service-dashboard.php') ? 'room-service-dashboard.php' : '', 'room_service_reminders_due', 'Rooms with no order served today');
         $add($attn, $mod_orders && $mod_bookings, (int)$ops['open_tabs'], isRestaurantEnabled() ? 'Open tabs awaiting payment' : 'Orders awaiting payment', 'fa-receipt', 'amber', 'stock-orders.php?status=placed', 'open_tabs');
         $add($attn, $mod_stock && $dash_perm('stock_batches'), (int)$stock['expired_batches'], 'Expired stock batches', 'fa-skull-crossbones', 'red', 'stock-batches.php?filter=expired');
         $add($attn, $mod_stock && $dash_perm('stock_management'), (int)$stock['low_stock'], 'Items below minimum stock', 'fa-box-open', 'amber', 'stock-ingredients.php?filter=low');
@@ -2212,12 +2225,13 @@ $currency_symbol = getSetting('currency_symbol');
                     <span class="ck-kpi__sub">Settled through the till</span>
                 </a>
                 <?php if ($pos_sales): ?>
-                <a class="ck-kpi js-dashboard-insight" data-insight-card="restaurant_revenue_today" data-insight-label="<?php echo isRestaurantEnabled() ? 'Restaurant revenue today' : 'POS revenue today'; ?>" href="reports.php?type=accounting&range=today">
+                <?php $ckRepTag = $can('reports.php') ? 'a' : 'div'; // no Reports access = plain figure, no link ?>
+                <<?php echo $ckRepTag; ?> class="ck-kpi<?php echo $ckRepTag === 'a' ? ' js-dashboard-insight' : ''; ?>"<?php if ($ckRepTag === 'a'): ?> data-insight-card="restaurant_revenue_today" data-insight-label="<?php echo isRestaurantEnabled() ? 'Restaurant revenue today' : 'POS revenue today'; ?>" href="reports.php?tab=fnb&range=today"<?php endif; ?>>
                     <span class="ck-kpi__icon"><i class="fas fa-cash-register"></i></span>
                     <span class="ck-kpi__label"><?php echo isRestaurantEnabled() ? 'Restaurant sales' : 'POS sales'; ?></span>
                     <span class="ck-kpi__value ck-kpi__value--money"><?php echo $money($ops['restaurant_rev_today']); ?></span>
                     <span class="ck-kpi__sub">Gross settled today</span>
-                </a>
+                </<?php echo $ckRepTag; ?>>
                 <?php endif; ?>
                 <?php if ($mod_orders): ?>
                 <a class="ck-kpi<?php echo $ops['open_tabs'] > 0 ? ' ck-kpi--warn' : ''; ?> js-dashboard-insight" data-insight-card="open_tabs" data-insight-label="<?php echo isRestaurantEnabled() ? 'Open tabs' : 'Pending orders'; ?>" href="stock-orders.php?status=placed">
@@ -2314,7 +2328,7 @@ $currency_symbol = getSetting('currency_symbol');
                             <span class="ck-avatar"><?php echo htmlspecialchars($initials((string)$booking['guest_name'])); ?></span>
                             <a class="ck-row__main" href="booking-details.php?id=<?php echo (int)$booking['id']; ?>">
                                 <strong><?php echo htmlspecialchars($booking['guest_name']); ?></strong><?php if (trim((string)($booking['room_guest_name'] ?? '')) !== ''): ?><small class="room-guest-line">Room guest: <?php echo htmlspecialchars((string)$booking['room_guest_name']); ?></small><?php endif; ?>
-                                <span><?php echo htmlspecialchars($booking['booking_reference']); ?> · <?php echo htmlspecialchars($booking['room_name']); ?> · <?php echo (int)$booking['number_of_nights']; ?> night<?php echo (int)$booking['number_of_nights'] === 1 ? '' : 's'; ?></span>
+                                <span><?php echo htmlspecialchars($booking['booking_reference']); ?> · <?php echo htmlspecialchars((string)($booking['room_name'] ?? '—')); ?> · <?php echo (int)$booking['number_of_nights']; ?> night<?php echo (int)$booking['number_of_nights'] === 1 ? '' : 's'; ?></span>
                             </a>
                             <span class="ck-chip<?php echo $roomLabel($booking) === 'Unassigned' ? ' ck-chip--muted' : ''; ?>"><i class="fas fa-door-open"></i> <?php echo htmlspecialchars($roomLabel($booking)); ?></span>
                             <span class="ck-row__meta">
@@ -2353,7 +2367,7 @@ $currency_symbol = getSetting('currency_symbol');
                             <span class="ck-avatar ck-avatar--gold"><?php echo htmlspecialchars($initials((string)$d['guest_name'])); ?></span>
                             <a class="ck-row__main" href="booking-details.php?id=<?php echo (int)$d['id']; ?>">
                                 <strong><?php echo htmlspecialchars($d['guest_name']); ?></strong><?php if (trim((string)($d['room_guest_name'] ?? '')) !== ''): ?><small class="room-guest-line">Room guest: <?php echo htmlspecialchars((string)$d['room_guest_name']); ?></small><?php endif; ?>
-                                <span><?php echo htmlspecialchars($d['booking_reference']); ?> · <?php echo htmlspecialchars($d['room_name']); ?> · since <?php echo date('j M', strtotime($d['check_in_date'])); ?></span>
+                                <span><?php echo htmlspecialchars($d['booking_reference']); ?> · <?php echo htmlspecialchars((string)($d['room_name'] ?? '—')); ?> · since <?php echo date('j M', strtotime($d['check_in_date'])); ?></span>
                             </a>
                             <span class="ck-chip"><i class="fas fa-door-open"></i> <?php echo htmlspecialchars($roomLabel($d)); ?></span>
                             <span class="ck-row__meta">
@@ -2532,7 +2546,11 @@ $currency_symbol = getSetting('currency_symbol');
                         <li><span><i class="fas fa-bed"></i> <?php echo $mod_bookings ? 'Rooms &amp; services' : 'Invoiced sales'; ?> today</span><strong><?php echo !empty($finance['failed']) ? 'Unavailable' : $money($finance['ledger_today']); ?></strong></li>
                     <?php endif; ?>
                     <?php if ($pos_sales): ?>
-                        <li><a class="js-dashboard-insight" data-insight-card="restaurant_revenue_today" data-insight-label="Till sales today" href="reports.php?type=accounting&range=today"><span><i class="fas fa-cash-register"></i> <?php echo isRestaurantEnabled() ? 'Restaurant &amp; bar' : 'Till sales'; ?> today · <?php echo (int)$ops['orders_today']; ?> order(s)</span><strong><?php echo $money($ops['restaurant_rev_today']); ?></strong></a></li>
+                        <?php if ($can('reports.php')): ?>
+                        <li><a class="js-dashboard-insight" data-insight-card="restaurant_revenue_today" data-insight-label="Till sales today" href="reports.php?tab=fnb&range=today"><span><i class="fas fa-cash-register"></i> <?php echo isRestaurantEnabled() ? 'Restaurant &amp; bar' : 'Till sales'; ?> today · <?php echo (int)$ops['orders_today']; ?> order(s)</span><strong><?php echo $money($ops['restaurant_rev_today']); ?></strong></a></li>
+                        <?php else: ?>
+                        <li><span><i class="fas fa-cash-register"></i> <?php echo isRestaurantEnabled() ? 'Restaurant &amp; bar' : 'Till sales'; ?> today · <?php echo (int)$ops['orders_today']; ?> order(s)</span><strong><?php echo $money($ops['restaurant_rev_today']); ?></strong></li>
+                        <?php endif; ?>
                     <?php endif; ?>
                     <?php if ($mod_orders && $mod_bookings): ?>
                         <li><a class="js-dashboard-insight" data-insight-card="open_tabs" data-insight-label="Open tabs" href="stock-orders.php?status=placed"><span><i class="fas fa-receipt"></i> <?php echo (int)$ops['open_tabs']; ?> open tab(s)</span><strong><?php echo $money($ops['open_tabs_value']); ?></strong></a></li>
@@ -2621,7 +2639,7 @@ $currency_symbol = getSetting('currency_symbol');
                         <span class="ck-date"><b><?php echo date('j', strtotime($booking['check_in_date'])); ?></b><?php echo date('M', strtotime($booking['check_in_date'])); ?></span>
                         <a class="ck-row__main" href="booking-details.php?id=<?php echo (int)$booking['id']; ?>">
                             <strong><?php echo htmlspecialchars($booking['guest_name']); ?></strong><?php if (trim((string)($booking['room_guest_name'] ?? '')) !== ''): ?><small class="room-guest-line">Room guest: <?php echo htmlspecialchars((string)$booking['room_guest_name']); ?></small><?php endif; ?>
-                            <span><?php echo htmlspecialchars($booking['booking_reference']); ?> · <?php echo htmlspecialchars($booking['room_name']); ?> · <?php echo (int)$booking['number_of_nights']; ?> night(s)</span>
+                            <span><?php echo htmlspecialchars($booking['booking_reference']); ?> · <?php echo htmlspecialchars((string)($booking['room_name'] ?? '—')); ?> · <?php echo (int)$booking['number_of_nights']; ?> night(s)</span>
                         </a>
                         <span class="ck-chip<?php echo $roomLabel($booking) === 'Unassigned' ? ' ck-chip--muted' : ''; ?>"><i class="fas fa-door-open"></i> <?php echo htmlspecialchars($roomLabel($booking)); ?></span>
                         <span class="ck-row__meta">
@@ -2667,7 +2685,7 @@ $currency_symbol = getSetting('currency_symbol');
                     </div>
                     <div class="ck-panel__tools">
                         <button type="button" class="ck-icon-btn js-dashboard-insight" data-insight-card="stock_health" data-insight-label="Stock health" title="Stock health overview"><i class="fas fa-chart-simple"></i></button>
-                        <?php if ($can('stock-orders.php')): ?><a class="ck-link" href="stock-orders.php?view=stock">Manage <i class="fas fa-arrow-right"></i></a><?php elseif ($can('stock-dashboard.php')): ?><a class="ck-link" href="stock-dashboard.php">Stock overview <i class="fas fa-arrow-right"></i></a><?php endif; ?>
+                        <?php if ($can('stock-dashboard.php')): ?><a class="ck-link" href="stock-dashboard.php">Manage <i class="fas fa-arrow-right"></i></a><?php endif; ?>
                     </div>
                 </header>
                 <div class="ck-stock__trio">

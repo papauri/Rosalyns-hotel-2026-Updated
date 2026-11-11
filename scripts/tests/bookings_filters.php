@@ -177,6 +177,28 @@ eq(rh_bk_tab_clauses('pending'), ['clauses' => [], 'order' => null], 'status tab
 eq(rh_bk_tab_clauses('all'), ['clauses' => [], 'order' => null], 'All adds nothing');
 eq('SUM(' . implode(' AND ', rh_bk_tab_clauses('today-checkins')['clauses']) . ')', "SUM(b.check_in_date = CURDATE() AND b.status IN ('confirmed','pending'))", 'badge SUM is built from the same pieces');
 
+// ---- header sort (2026-11-11): Total = the total shown, Room = room number else type name, natural order
+eq(array_keys(rh_bk_sort_map()), ['ref', 'guest', 'room', 'check_in', 'check_out', 'nights', 'guests', 'total', 'status', 'payment', 'created'], 'sort keys unchanged (old sort links keep working)');
+$bkTot = rh_bk_sort_map()['total'];
+check(strpos($bkTot, 'b.total_with_vat') !== false && strpos($bkTot, 'b.vat_amount') !== false, 'Total sorts by total_with_vat (else total_amount + VAT), not the pre-VAT amount');
+eq($bkTot, '(CASE WHEN COALESCE(b.total_with_vat, 0) > 0.0100 THEN b.total_with_vat ELSE COALESCE(b.total_amount, 0) + COALESCE(b.vat_amount, 0) END)', 'Total sort = rh_booking_full_total rule');
+check(substr_count($bkTot, '(') === substr_count($bkTot, ')'), 'Total sort expression balanced');
+eq(rh_bk_room_sort_sql(), "COALESCE(NULLIF(TRIM(ir.room_number), ''), r.name, '')", 'Room sort value = room number when assigned, else type name');
+$bkAsc = rh_bk_room_sort_order('asc');
+$bkDesc = rh_bk_room_sort_order('desc');
+check(substr_count($bkAsc, ' ASC') + substr_count($bkAsc, ' DESC') === 4 && substr_count($bkDesc, ' ASC') + substr_count($bkDesc, ' DESC') === 4, 'Room sort: every part carries a direction');
+eq('(ir.id IS NULL) ASC, ' . strtr(substr($bkAsc, strlen('(ir.id IS NULL) ASC, ')), [' ASC' => ' DESC', ' DESC' => ' ASC']), $bkDesc, 'Room sort: desc reverses the rooms, unassigned stay last');
+check(strpos($bkDesc, '(ir.id IS NULL) ASC') === 0, 'Room sort desc: unassigned still last');
+check(strpos($bkAsc, '(ir.id IS NULL) ASC') === 0 && strpos($bkAsc, 'CAST(') !== false, 'Room sort asc: assigned first, then numeric part (2 before 10)');
+eq(rh_bk_room_sort_order("asc; DROP"), $bkDesc, 'Room sort: unknown dir -> desc (whitelisted)');
+// Natural order, in PHP, of the same rule (assigned first; digit-led first; number; text)
+$bkRows = [['n' => '10', 'a' => 1], ['n' => 'Deluxe', 'a' => 0], ['n' => '2', 'a' => 1], ['n' => 'EXEC-101', 'a' => 1], ['n' => 'Classic', 'a' => 0]];
+usort($bkRows, static function ($x, $y) {
+    $k = static fn($r) => [$r['a'] ? 0 : 1, ctype_digit(substr($r['n'], 0, 1)) ? 0 : 1, (int)$r['n'], $r['n']];
+    return $k($x) <=> $k($y);
+});
+eq(array_column($bkRows, 'n'), ['2', '10', 'EXEC-101', 'Classic', 'Deluxe'], 'Room sort rule: 2, 10, EXEC-101, then unassigned type names A-Z');
+
 // ---- Paid / Unpaid flags (match SQL incl. NULL)
 eq(rh_bk_payment_flags('paid', 'confirmed'), ['paid' => true, 'unpaid' => false], 'paid');
 eq(rh_bk_payment_flags('completed', 'checked-out'), ['paid' => true, 'unpaid' => false], 'completed counts as paid');

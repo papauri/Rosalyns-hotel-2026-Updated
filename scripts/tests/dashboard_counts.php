@@ -153,5 +153,17 @@ if (check((bool)preg_match('~var FILTER_KEY = /(.+)/i;~', $js, $m), 'anchor: FIL
     foreach (['tab', 'id', 'flash', 'action'] as $k) check(!preg_match($re, $k), "anchor: $k is not a filter key");
 }
 
+// 2026-11-11 LATER round: links that exist, permission-gated; every booking listed even with a broken room link.
+check(!preg_match('/(?<!LEFT )JOIN rooms r ON/', $dash), 'dashboard: rooms always LEFT JOINed (a booking with a broken room link still counts and shows)');
+check(strpos($dash, 'stock-orders.php?view=stock') === false, 'dashboard: no stock-orders.php?view=stock link (no such view)');
+check(substr_count($dash, '$can(\'stock-dashboard.php\')): ?><a class="ck-link" href="stock-dashboard.php">Manage') === 1, 'dashboard: Stock panel Manage -> stock-dashboard.php behind its permission');
+check(strpos($dash, "'href' => 'stock-dashboard.php', 'label' => 'Open stock dashboard'") !== false, 'dashboard: stock health drawer links stock-dashboard.php');
+check(strpos($dash, '$can(\'room-service-dashboard.php\') ? \'room-service-dashboard.php\' : \'\'') !== false, 'dashboard: reminders chip links only when the user can open room-service-dashboard.php');
+check(substr_count($dash, "'href' => 'room-service-dashboard.php'") === substr_count($dash, "\$dash_can_open_rsd ? ['href' => 'room-service-dashboard.php'"), 'dashboard: every room-service-dashboard.php drawer link is permission-gated');
+check(strpos($dash, 'payments.php?q=') === false, 'dashboard: outstanding drawer has no payments.php?q= link');
+check(strpos($dash, "'payments.php?booking_type=' . urlencode(\$src) . '&booking_id='") !== false, 'dashboard: other receivables link Payments by source type + id');
+check(strpos($dash, 'reports.php?type=accounting&range=today') === false && substr_count($dash, 'reports.php?tab=fnb&range=today') === 3, 'dashboard: restaurant revenue links open the F&B report');
+check(!preg_match('/htmlspecialchars\(\$(booking|d)\[\'room_name\'\]\)/', $dash), 'dashboard: room_name (NULL after LEFT JOIN) never passed raw to htmlspecialchars');
+
 echo "\n$pass passed, $fail failed\n";
 exit($fail ? 1 : 0);

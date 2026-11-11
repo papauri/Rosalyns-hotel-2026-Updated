@@ -2809,19 +2809,8 @@ $per_page     = 10;
 
 // Header sort runs on the server (the whole list, then page 1): fixed key -> ORDER BY map.
 require_once __DIR__ . '/includes/server-sort.php';
-$bk_sort_map = [
-    'ref'       => 'b.booking_reference',
-    'guest'     => 'b.guest_name',
-    'room'      => 'COALESCE(ir.room_number, r.name)',
-    'check_in'  => 'b.check_in_date',
-    'check_out' => 'b.check_out_date',
-    'nights'    => 'DATEDIFF(b.check_out_date, b.check_in_date)',
-    'guests'    => 'b.number_of_guests',
-    'total'     => 'b.total_amount',
-    'status'    => 'b.status',
-    'payment'   => 'actual_payment_status',
-    'created'   => 'b.created_at',
-];
+// Total sorts by the total the column shows; Room by the room number (else type name), natural order.
+$bk_sort_map = rh_bk_sort_map();
 $bk_sort_key = '';
 $bk_sort_dir = 'desc';
 
@@ -3306,7 +3295,7 @@ try {
 
     [$bk_sort_order, $bk_sort_key, $bk_sort_dir] = rh_server_sort_resolve($bk_sort_map, $list_order_by);
     if ($bk_sort_key !== '') {
-        $list_order_by = $bk_sort_order;
+        $list_order_by = $bk_sort_key === 'room' ? rh_bk_room_sort_order($bk_sort_dir) : $bk_sort_order;
     }
 
     $list_where_clauses = array_merge($where_clauses, $tab_extra_clauses);
@@ -3588,6 +3577,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 <input type="date" name="date_to" value="<?php echo htmlspecialchars($filter_date_to); ?>"
                     placeholder="To" title="To: last day of the range, on the date chosen in Dates (Arrival, Departure, Staying or Booked on). The day itself is included. Same date in From and To = that one day." aria-label="To date"
                     class="bookings-toolbar__input bookings-toolbar__input--date">
+                <span class="bookings-toolbar__btns"><?php /* Filter + Clear stay together on one line */ ?>
                 <button type="submit" class="bookings-toolbar__button bookings-toolbar__button--filter btn btn-primary">
                     <i class="fas fa-filter"></i> Filter
                 </button>
@@ -3596,6 +3586,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         <i class="fas fa-times"></i> Clear
                     </a>
                 <?php endif; ?>
+                </span>
             </form>
             <div class="bookings-toolbar__actions">
                 <a href="<?php echo htmlspecialchars('bookings.php?' . http_build_query(array_merge($_GET, ['export' => 'csv']))); ?>" class="bookings-toolbar__action bookings-toolbar__action--export">
@@ -4145,7 +4136,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 <span style="font-size: 14px; font-weight: normal; color: #666;">
                     (<?php echo $conference_total > count($conference_inquiries) ? 'latest ' . count($conference_inquiries) . ' of ' . (int)$conference_total : (int)$conference_total . ' total'; ?>)
                 </span>
-                <a href="conference-management.php" class="rh-mini-link" style="margin-left: 8px; font-size: 14px;">Open Conference page</a>
+                <a href="conference-management.php" class="rh-mini-link bookings-section__title-link" style="margin-left: 8px; font-size: 14px;">Open Conference page</a>
             </h3>
 
             <?php if (!empty($conference_inquiries)): ?>

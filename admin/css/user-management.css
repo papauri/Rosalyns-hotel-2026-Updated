@@ -179,6 +179,11 @@
         margin-top: 0.12rem;
     }
 
+    /* A row with no actions for this person (e.g. your own row): no empty "Actions" line on any card width */
+    #rh-admin-page .users-table.mobile-enhanced td[data-label="Actions"]:not(:has(button, a)) {
+        display: none;
+    }
+
     .users-table.mobile-enhanced td[data-label]::before {
         font-size: clamp(0.62rem, 0.58rem + 0.2vw, 0.72rem);
         letter-spacing: 0.06em;
@@ -270,11 +275,6 @@
     }
 
     #rh-admin-page .users-table.mobile-enhanced .actions-cell .um-btn-label {
-        display: none;
-    }
-
-    /* A row with no actions for this person (e.g. your own row): no empty "Actions" line */
-    #rh-admin-page .users-table.mobile-enhanced td[data-label="Actions"]:not(:has(button)) {
         display: none;
     }
 }

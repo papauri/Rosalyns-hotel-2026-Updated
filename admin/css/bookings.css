@@ -180,6 +180,13 @@
     }
 }
 
+/* Tablets and touch screens: 44px controls (staff tap these standing up). */
+@media (max-width: 1024px), (pointer: coarse) {
+    .bookings-toolbar {
+        --rh-bookings-toolbar-control-height: 2.75rem;
+    }
+}
+
 .bookings-toolbar__form {
     display: flex;
     flex-wrap: wrap;
@@ -294,6 +301,15 @@
     outline-offset: 2px;
 }
 
+/* Filter + Clear: one unit, so Clear never drops to a line of its own. */
+.bookings-toolbar__btns {
+    display: inline-flex;
+    flex: 0 0 auto;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: clamp(0.4rem, 0.36rem + 0.16vw, 0.6rem);
+}
+
 .bookings-toolbar__button--filter {
     flex: 0 0 auto;
     background: var(--deep-navy, var(--color-lux-ink));
@@ -398,8 +414,13 @@
         min-width: 0;
     }
 
+    /* The Filter + Clear wrapper steps aside so both buttons are grid cells. */
+    .bookings-toolbar__btns {
+        display: contents;
+    }
+
     .bookings-toolbar__form > .bookings-toolbar__input,
-    .bookings-toolbar__form > .bookings-toolbar__button {
+    .bookings-toolbar__form .bookings-toolbar__button {
         width: 100%;
         min-width: 0;
         max-width: none;
@@ -409,19 +430,26 @@
         padding-inline: 0.5rem;
     }
 
-    .bookings-toolbar__form > .bookings-toolbar__button--filter:last-child {
+    .bookings-toolbar__form .bookings-toolbar__button--filter:last-child {
         grid-column: 1 / -1;
     }
 }
 
 .bookings-section .section-title {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 10px;
     margin: 0 0 14px;
     padding-bottom: 10px; /* keep shared left padding (accent-bar clearance) */
     border-bottom: 1px solid var(--admin-surface-border, #eef0f3);
     font-size: 17px;
+}
+
+/* "Open Conference page" stays on one line; on narrow phones it moves under the title instead of folding. */
+.bookings-section .section-title .bookings-section__title-link {
+    white-space: nowrap;
+    flex: 0 0 auto;
 }
 
 .bookings-section .table-responsive {

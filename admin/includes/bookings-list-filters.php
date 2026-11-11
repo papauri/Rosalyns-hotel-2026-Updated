@@ -148,6 +148,53 @@ if (!function_exists('rh_bk_valid_date')) {
         return 'Search filtered results';
     }
 
+    /**
+     * SQL: the "Total" the list shows (rh_booking_full_total): total_with_vat when set, else total_amount + vat_amount.
+     * Constant text (tolerance is a number), never user input.
+     */
+    function rh_bk_full_total_sql(string $b = 'b'): string
+    {
+        $tol = sprintf('%.4F', rh_fd_balance_tolerance());
+        return "(CASE WHEN COALESCE({$b}.total_with_vat, 0) > {$tol} THEN {$b}.total_with_vat"
+            . " ELSE COALESCE({$b}.total_amount, 0) + COALESCE({$b}.vat_amount, 0) END)";
+    }
+
+    /** SQL: the value the Room column leads with for sorting: the room number when assigned, else the room type name. */
+    function rh_bk_room_sort_sql(): string
+    {
+        return "COALESCE(NULLIF(TRIM(ir.room_number), ''), r.name, '')";
+    }
+
+    /**
+     * ORDER BY for the Room header: assigned rooms always before unassigned ones (both directions), then in $dir
+     * (asc|desc) natural order (numbers first, 2 before 10, then the text), then the room type name.
+     */
+    function rh_bk_room_sort_order(string $dir): string
+    {
+        $d = strtolower($dir) === 'asc' ? 'ASC' : 'DESC';
+        $rd = $d === 'ASC' ? 'DESC' : 'ASC';
+        $v = rh_bk_room_sort_sql();
+        return "(ir.id IS NULL) ASC, (LEFT({$v}, 1) BETWEEN '0' AND '9') {$rd}, CAST({$v} AS UNSIGNED) {$d}, {$v} {$d}";
+    }
+
+    /** Header sort key => ORDER BY expression (server-sort.php appends the direction; 'room' is replaced by rh_bk_room_sort_order). */
+    function rh_bk_sort_map(): array
+    {
+        return [
+            'ref'       => 'b.booking_reference',
+            'guest'     => 'b.guest_name',
+            'room'      => rh_bk_room_sort_sql(),
+            'check_in'  => 'b.check_in_date',
+            'check_out' => 'b.check_out_date',
+            'nights'    => 'DATEDIFF(b.check_out_date, b.check_in_date)',
+            'guests'    => 'b.number_of_guests',
+            'total'     => rh_bk_full_total_sql('b'),
+            'status'    => 'b.status',
+            'payment'   => 'actual_payment_status',
+            'created'   => 'b.created_at',
+        ];
+    }
+
     /** ?filter= shortcut => tab name. */
     function rh_bk_tab_map(): array
     {
