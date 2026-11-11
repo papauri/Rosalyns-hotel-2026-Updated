@@ -168,6 +168,9 @@ button.ck-kpi { font: inherit; text-align: left; width: 100%; }
     text-transform: uppercase;
     color: var(--ck-muted);
 }
+/* With a corner badge the label row is as tall as the badge, so a wide figure
+   on the next line starts below it instead of running underneath. */
+.ck-kpi__icon ~ .ck-kpi__label { min-height: 26px; }
 .ck-kpi__value {
     font-family: 'Jost', system-ui, sans-serif;
     font-weight: 600;
@@ -229,6 +232,7 @@ button.ck-kpi { font: inherit; text-align: left; width: 100%; }
     .ck-kpi { padding: 12px; gap: 4px; border-radius: 14px; }
     .ck-kpi__icon { width: 26px; height: 26px; top: 10px; right: 10px; font-size: 11px; border-radius: 8px; }
     .ck-kpi__label { font-size: 10.5px; letter-spacing: .06em; padding-right: 28px; }
+    .ck-kpi__icon ~ .ck-kpi__label { min-height: 22px; }
     .ck-kpi__value:not(.ck-kpi__value--money) { font-size: clamp(20px, 14cqi, 26px); }
     .ck-kpi__sub { font-size: 11.5px; }
     .ck-kpi:is(a[href], button, [role="button"], [data-href], [onclick])::after { right: 12px; bottom: 12px; }
