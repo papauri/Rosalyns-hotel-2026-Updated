@@ -851,14 +851,41 @@ function rh_ai_pv_cancel_booking(PDO $db, array $user, array $a): array
     if ($n > 1) {
         $card['choices'][] = ['name' => 'scope', 'label' => 'Booked together: ' . $n . ' rooms', 'value' => $scope, 'options' => [['single', 'Cancel only this room'], ['group', 'Cancel all ' . $n . ' rooms']]];
     }
-    $card['warn'][] = 'Cancelling releases the room' . ($n > 1 && $scope === 'group' ? 's' : '') . ' and sends the guest the cancellation email.';
+    // Owner 2026-11-12 (quiet cancel): the guest email goes only where the screen's own rule would send it (the list
+    // path: a booking that was confirmed); there the card offers the same "Email the guest" choice, default yes.
+    // The model cannot pick it (not in the schema): only the person on the card can switch it to No.
+    require_once dirname(__DIR__) . '/email-send-log.php';
+    $statuses = [(string)$b['status']];
+    if ($scope === 'group') {
+        foreach ($group as $m) {
+            $statuses[] = (string)($m['status'] ?? '');
+        }
+    }
+    $wouldEmail = false;
+    foreach ($statuses as $s) {
+        $wouldEmail = $wouldEmail || rh_cancel_email_default_ticked('list', $s);
+    }
+    $emailGuest = $wouldEmail && (string)($a['email_guest'] ?? '1') !== '0';
+    $rooms = 'Cancelling releases the room' . ($n > 1 && $scope === 'group' ? 's' : '');
+    if ($wouldEmail) {
+        $card['choices'][] = ['name' => 'email_guest', 'label' => 'Email the guest that this booking is cancelled', 'value' => $emailGuest ? '1' : '0',
+            'options' => [['1', 'Yes, send the cancellation email'], ['0', 'No, cancel quietly']]];
+        // The card does not re-read when a choice changes, so this line holds for either answer.
+        $card['warn'][] = $rooms . '. The guest gets the cancellation email unless you choose No below; then no email or WhatsApp goes to the guest.';
+    } else {
+        $card['warn'][] = $rooms . '. No cancellation email goes to the guest: only a confirmed booking gets one.';
+    }
     $steps = [];
     if ($reason === '') {
         $card['notes'][] = 'Type the reason before confirming.';
     } else {
-        $steps[] = rh_ai_step('bookings.php', [['action', 'update_status'], ['id', (string)(int)$b['id']], ['status', 'cancelled'], ['cancellation_reason', $reason], ['scope', $scope]]);
+        $f = [['action', 'update_status'], ['id', (string)(int)$b['id']], ['status', 'cancelled'], ['cancellation_reason', $reason], ['scope', $scope]];
+        if ($wouldEmail) {
+            $f[] = ['email_guest', $emailGuest ? '1' : '0']; // left out otherwise: the screen's old behaviour (no email)
+        }
+        $steps[] = rh_ai_step('bookings.php', $f);
     }
-    return ['card' => $card, 'steps' => $steps, 'fp' => [(string)$b['status'], $mode, $paid, $owed, $n], 'facts' => rh_ai_bk_facts($b) + ['paid' => $paid, 'still_owed' => $owed, 'cancellation_rule' => $mode, 'rooms_booked_together' => $n], 'incomplete' => !$steps, 'expect_status' => 'cancelled'];
+    return ['card' => $card, 'steps' => $steps, 'fp' => [(string)$b['status'], $mode, $paid, $owed, $n, $wouldEmail], 'facts' => rh_ai_bk_facts($b) + ['paid' => $paid, 'still_owed' => $owed, 'cancellation_rule' => $mode, 'rooms_booked_together' => $n, 'email_guest' => $emailGuest ? 'yes' : 'no'], 'incomplete' => !$steps, 'expect_status' => 'cancelled'];
 }
 
 /** A free, clean room of the booking's type (or the named one). Joined-room types return null (assigned as pairs on Bookings). */

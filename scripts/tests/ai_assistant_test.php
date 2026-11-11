@@ -1677,6 +1677,12 @@ if (!$chatReady) {
         check(!$cc['success'] && stripos((string)$cc['error'], 'reason') !== false && $statusOf($bFut) === 'confirmed', 'a cancel card needs the reason typed in before it can be confirmed');
         $cc = rh_ai_confirm($pdo, $adm4u, (int)$pc['card']['id'], ['reason' => 'Guest asked', 'scope' => 'single'], $pw4);
         check($cc['success'] && in_array(['status', 'cancelled'], $cc['steps'][0]['fields'], true) && in_array(['cancellation_reason', 'Guest asked'], $cc['steps'][0]['fields'], true), 'with the reason, confirm returns the screen\'s own cancel (update_status cancelled)');
+        // Quiet cancel (owner 2026-11-12): a confirmed booking's card offers "Email the guest", default yes; No posts email_guest=0
+        $pq = rh_ai_propose($pdo, $adm4u, (int)$r['conversation_id'], 'cancel_booking', ['booking_id' => $bFut], false);
+        $pqCh = array_column((array)($pq['card']['choices'] ?? []), 'value', 'name');
+        check($pq['ok'] && ($pqCh['email_guest'] ?? '') === '1', 'cancel card on a confirmed booking: "Email the guest" offered, default yes', json_encode($pqCh));
+        $cq = $pq['ok'] ? rh_ai_confirm($pdo, $adm4u, (int)$pq['card']['id'], ['reason' => 'Guest asked', 'scope' => 'single', 'email_guest' => '0'], $pw4) : ['success' => false];
+        check(!empty($cq['success']) && in_array(['email_guest', '0'], $cq['steps'][0]['fields'] ?? [], true) && $statusOf($bFut) === 'confirmed', 'switched to No, the replay posts email_guest=0 (the screen cancels quietly)', json_encode($cq['error'] ?? ''));
         // Cancel a card
         $pk = rh_ai_propose($pdo, $adm4u, (int)$r['conversation_id'], 'send_invoice', ['booking_id' => $bFut], false);
         $ck = rh_ai_cancel_card($pdo, $adm4u, (int)$pk['card']['id']);

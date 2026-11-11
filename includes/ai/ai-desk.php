@@ -30,7 +30,7 @@ function rh_ai_desk_tools(): array
     $days = ['type' => 'integer', 'minimum' => 1, 'maximum' => 366, 'description' => 'How many days ahead (default ' . rh_ai_num('ai_upcoming_days') . ')'];
     return [
         'booking_history' => [
-            'description' => 'Who made one booking and how (online on the website by the guest, by a staff member in the portal, through another system) and what has happened to it since (status changes, check-in and out, emails, date changes, money entries), each with who did it and when, plus a short summary as the History panel shows it (price booked at, price since, latest payment, refund or credit note, latest status). The answer to "who booked X". Give a booking_id or reference from this chat\'s results.',
+            'description' => 'Who made one booking and how (online on the website by the guest, by a staff member in the portal, through another system) and what has happened to it since (status changes, check-in and out, emails, date changes, money entries), each with who did it and when, plus a short summary as the History panel shows it (price booked at, price since, latest payment, refund or credit note, latest status), plus its emails from the Emails sent log (kind, sent / failed / not sent because staff chose not to, when, by whom, whether to the guest; the log has a start date, so an email before it is not in it). The answer to "who booked X" and "was the guest emailed". Give a booking_id or reference from this chat\'s results.',
             'schema' => ['properties' => ['booking_id' => ['type' => 'integer', 'minimum' => 1], 'reference' => ['type' => 'string', 'maxLength' => 40]]],
             'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 30, 'handler' => 'rh_ai_t_booking_history', 'step' => 'Reading the booking\'s history',
         ],
@@ -496,7 +496,61 @@ function rh_ai_t_booking_history(PDO $db, array $user, array $a): array
     if ($sum) {
         $out['summary'] = implode(' ', $sum);
     }
+    $out += rh_ai_booking_emails($db, $id, (string)$b['booking_reference']);
     return $out;
+}
+
+/**
+ * "Was the guest emailed?" from the Emails sent log (email_send_log, migration 081; owner 2026-11-12), the same rows
+ * the booking's History panel shows. De-identified: kind, result word, when, who as a role, and whether it went to the
+ * booking's own guest address (compared here, never sent). No address, copy, subject or error text leaves the server.
+ * The log only holds emails from the day it started, so an empty list is said with that date, never as "never emailed".
+ */
+function rh_ai_booking_emails(PDO $db, int $bookingId, string $ref): array
+{
+    require_once dirname(__DIR__) . '/email-send-log.php';
+    if (!rh_email_send_log_ready($db)) {
+        return ['emails' => 'not available here (the email log is not set up)'];
+    }
+    try {
+        $where = "account_type = 'room' AND (account_id = ? OR (account_ref = ? AND account_ref <> '')) AND email_kind NOT IN ('test', 'test_email')";
+        $st = $db->prepare("SELECT COUNT(*) FROM email_send_log WHERE " . $where);
+        $st->execute([$bookingId, $ref]);
+        $total = (int)$st->fetchColumn();
+        $since = (string)$db->query("SELECT MIN(sent_at) FROM email_send_log")->fetchColumn();
+        $since = $since !== '' ? substr($since, 0, 10) : '';
+        if ($total === 0) {
+            return ['emails' => 'none in the email log for this booking' . ($since !== '' ? ' (the log starts ' . $since . '; emails before that are not in it)' : ''), 'emails_total' => 0];
+        }
+        $st = $db->prepare("SELECT guest_email FROM bookings WHERE id = ?");
+        $st->execute([$bookingId]);
+        $guest = strtolower(trim((string)$st->fetchColumn()));
+        $st = $db->prepare("SELECT sent_at, status, email_kind, to_email, sent_by_user_id, sent_by_label FROM email_send_log WHERE " . $where . " ORDER BY id DESC LIMIT 20");
+        $st->execute([$bookingId, $ref]);
+        $rows = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $label = trim((string)$r['sent_by_label']);
+            if ((int)$r['sent_by_user_id'] > 0) {
+                $by = 'staff';
+            } elseif (strpos($label, 'System') === 0) {
+                $by = 'the system';
+            } elseif ($label === 'Online booking (API)') {
+                $by = 'another system';
+            } elseif ($label === 'Guest website') {
+                $by = 'the guest website';
+            } else {
+                $by = 'not recorded';
+            }
+            $to = array_filter(array_map('trim', explode(',', strtolower((string)$r['to_email']))), 'strlen');
+            $rows[] = ['at' => substr((string)$r['sent_at'], 0, 16), 'email' => rh_email_kind_label((string)$r['email_kind']),
+                'result' => rh_email_result_word((string)$r['status']) . (['not_sent' => ' (staff chose not to)', 'preview' => ' only (not sent)'][(string)$r['status']] ?? ''),
+                'by' => $by, 'to_the_guest' => $guest !== '' && in_array($guest, $to, true) ? 'yes' : 'no'];
+        }
+        return ['emails' => $rows, 'emails_total' => $total, 'emails_note' => 'Newest first, from the email log' . ($since !== '' ? ' (it starts ' . $since . ')' : '') . '.'];
+    } catch (Throwable $e) {
+        error_log('Assistant booking emails: ' . $e->getMessage());
+        return ['emails' => 'could not be read just now'];
+    }
 }
 
 /** The History panel's Summary sentences for one booking (roles only), or [] when the history cannot be read. */
@@ -905,7 +959,7 @@ function rh_ai_desk_history_text(array $h): string
     $ev = is_array($h['history'] ?? null) ? $h['history'] : [];
     if (!$ev) {
         $sum = trim((string)($h['summary'] ?? ''));
-        return ($sum !== '' ? '**Summary:** ' . $sum . "\n\n" : '') . rh_ai_desk_made_text($h) . "\n\nNothing else is recorded on its history yet.";
+        return ($sum !== '' ? '**Summary:** ' . $sum . "\n\n" : '') . rh_ai_desk_made_text($h) . "\n\nNothing else is recorded on its history yet." . rh_ai_desk_emails_text($h);
     }
     $lines = [];
     foreach ($ev as $e) {
@@ -919,7 +973,26 @@ function rh_ai_desk_history_text(array $h): string
     $total = (int)($h['history_total'] ?? count($lines));
     $sum = trim((string)($h['summary'] ?? ''));
     return ($sum !== '' ? '**Summary:** ' . $sum . "\n\n" : '') . '**History of ' . ($h['guest_name'] ?? '') . '** (' . ($h['reference'] ?? '') . ')' . ($total > count($lines) ? ' - the latest ' . count($lines) . ' of ' . $total : '') . ', newest first:'
-        . rh_ai_local_lines($lines) . "\n\n" . strtok(rh_ai_desk_made_text($h), "\n");
+        . rh_ai_local_lines($lines) . "\n\n" . strtok(rh_ai_desk_made_text($h), "\n") . rh_ai_desk_emails_text($h);
+}
+
+/** The booking's emails from the Emails sent log (booking_history 'emails'), newest first; '' when the log is not there. */
+function rh_ai_desk_emails_text(array $h): string
+{
+    $em = $h['emails'] ?? null;
+    if (is_string($em)) {
+        return strpos($em, 'none in the email log') === 0 ? "\n\nEmails: " . $em . '.' : '';
+    }
+    if (!is_array($em) || !$em) {
+        return '';
+    }
+    $lines = [];
+    foreach (array_slice($em, 0, 5) as $e) {
+        $lines[] = (strtotime((string)($e['at'] ?? '')) ? date('D j M, H:i', strtotime((string)$e['at'])) : (string)($e['at'] ?? '')) . ' · ' . ($e['email'] ?? 'Email')
+            . ' email · ' . ($e['result'] ?? '') . ' · ' . (($e['to_the_guest'] ?? '') === 'yes' ? 'to the guest' : 'to another address') . ' · by ' . ($e['by'] ?? 'not recorded');
+    }
+    $total = (int)($h['emails_total'] ?? count($lines));
+    return "\n\n**Emails** (from the email log" . ($total > count($lines) ? ', the latest ' . count($lines) . ' of ' . $total : '') . '):' . rh_ai_local_lines($lines);
 }
 
 /** The next arrivals in plain words (de-identified result). */
