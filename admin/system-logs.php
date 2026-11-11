@@ -17,6 +17,26 @@ if (!hasPermission((int)$user['id'], 'system_logs')) {
 $site_name = getSetting('site_name');
 require_once __DIR__ . '/includes/system-log-attention.php';
 require_once __DIR__ . '/includes/staff-activity-lib.php';
+// Every list on this page pages on the server (owner 2026-11-12): {key}_page / {key}_size, 10 per page by default.
+require_once __DIR__ . '/includes/log-pager.php';
+require_once __DIR__ . '/includes/login-bundles.php'; // Recent Logins: sign-ins bundled per person/device/session
+// Empty pagers first (a missing table shows an empty list); each is replaced when its list loads.
+$lpEmpty = function (string $key): array {
+    return rh_lp_clamp(rh_lp_parse($_GET, $key), 0);
+};
+$evP = $lpEmpty('ev');   // System Event Stream
+$baP = $lpEmpty('ba');   // Booking Changes Audit
+$emP = $lpEmpty('em');   // Emails sent
+$lgP = $lpEmpty('lg');   // Recent Logins
+$aaP = $lpEmpty('aa');   // Recent Admin Activity
+$posP = $lpEmpty('pos'); // POS Orders
+$kdsP = $lpEmpty('kds'); // Display Screens: station events
+$smP = $lpEmpty('sm');   // Display Screens: station messages
+$scP = $lpEmpty('sc');   // Display Screens: shift closes
+$apiP = $lpEmpty('api'); // Recent API Calls
+$offP = $lpEmpty('off'); // Recent Offline Sync
+$evNote = '';
+$lgNote = '';
 
 // Staff activity filters (person, days, type). They also steer the older panels below once the person has used them.
 $saF = rh_sa_parse_filters($_GET);
@@ -50,33 +70,72 @@ $levelFilter = trim((string)($_GET['level'] ?? 'problems'));
 if (!in_array($levelFilter, $validLevels, true)) {
     $levelFilter = 'problems';
 }
-$limit = min(500, max(20, (int)($_GET['limit'] ?? 50)));
-$loginScanLimit = max(120, min(2000, $limit * 6));
+$limit = min(500, max(20, (int)($_GET['limit'] ?? 50))); // old links only (lists now page: see log-pager.php)
+$loginScanLimit = 3000; // sign-ins are bundled from the newest 3,000 records, then paged
+$eventScanLimit = 3000; // "Group repeats" groups the newest 3,000 events, then pages the groups
 $autoRefresh = isset($_GET['auto']) && $_GET['auto'] === '1';
 $isAutoReload = $autoRefresh && ($_GET['r'] ?? '') === '1'; // r=1 is added only by this page's own 15-second reload
 $groupRepeats = (string)($_GET['group'] ?? '1') !== '0';
 
 // Emails sent (owner 2026-11-12): every email the system sent or was told not to send. Filters are prefixed em_ so
-// they never mix with Staff activity's from / to / type / user. Newest first, at most 500 rows on the screen.
+// they never mix with Staff activity's from / to / type / user. Newest first, paged (em_page / em_size).
 require_once __DIR__ . '/../includes/email-send-log.php';
 $emF = rh_email_log_filters($_GET, date('Y-m-d'));
 $emReady = rh_email_send_log_ready($pdo);
-$emLimit = 500;
-[$emRows, $emMore] = $emReady ? rh_email_send_log_list($pdo, $emF, $emLimit) : [[], false];
+
+/**
+ * The Emails sent filters as SQL. Mirrors rh_email_send_log_list() (includes/email-send-log.php), with paging on top;
+ * to move into that file once its 2026-11-12 review is done.
+ */
+function rh_logs_email_where(array $f): array
+{
+    $where = ['sent_at >= ?', 'sent_at < DATE_ADD(?, INTERVAL 1 DAY)'];
+    $args = [$f['from'] . ' 00:00:00', $f['to']];
+    if (($f['kind'] ?? 'all') === 'test') {
+        $where[] = "email_kind IN ('test', 'test_email')"; // test_email: the first day's test sends
+    } elseif (($f['kind'] ?? 'all') !== 'all') {
+        $where[] = 'email_kind = ?';
+        $args[] = (string)$f['kind'];
+    }
+    if (($f['result'] ?? 'all') !== 'all') {
+        $where[] = 'status = ?';
+        $args[] = (string)$f['result'];
+    }
+    $q = trim((string)($f['q'] ?? ''));
+    if ($q !== '') {
+        $like = '%' . addcslashes($q, '\\%_') . '%';
+        $where[] = '(account_ref LIKE ? OR to_email LIKE ? OR cc LIKE ? OR subject LIKE ? OR sent_by_label LIKE ?)';
+        array_push($args, $like, $like, $like, $like, $like);
+    }
+    return [implode(' AND ', $where), $args];
+}
+
+$emRows = [];
+if ($emReady) {
+    try {
+        [$emW, $emA] = rh_logs_email_where($emF);
+        [$emP, $emRows] = rh_lp_fetch($pdo, $_GET, 'em', 'SELECT 1 FROM email_send_log WHERE ' . $emW,
+            'SELECT * FROM email_send_log WHERE ' . $emW . ' ORDER BY sent_at DESC, id DESC', $emA);
+    } catch (Throwable $e) {
+        error_log('email_send_log page: ' . $e->getMessage());
+        $emRows = [];
+    }
+}
 $emKindOptions = [];
 foreach (rh_email_kinds() as $emKey => $emDef) {
     $emKindOptions[$emKey] = $emDef[0];
 }
 asort($emKindOptions);
 // Links that keep every other filter on the page and change only the email ones.
-$emUrl = function (array $over = []) use ($emF) {
+$emUrl = function (array $over = []) use ($emF, $emP) {
     $q = [];
     foreach ($_GET as $k => $v) {
         if (is_string($k) && is_string($v) && strpos($k, 'em_') !== 0 && $k !== 'export') {
             $q[$k] = $v;
         }
     }
-    $em = ['em_from' => $emF['from'], 'em_to' => $emF['to'], 'em_kind' => $emF['kind'], 'em_result' => $emF['result'], 'em_q' => $emF['q'], 'em_view' => $emF['view']];
+    // em_page is left out: a new view or filter starts at page 1; the rows-per-page choice stays.
+    $em = ['em_from' => $emF['from'], 'em_to' => $emF['to'], 'em_kind' => $emF['kind'], 'em_result' => $emF['result'], 'em_q' => $emF['q'], 'em_view' => $emF['view'], 'em_size' => (string)$emP['size']];
     return 'system-logs.php?' . http_build_query(array_merge($q, $em, $over)) . '#log-emails';
 };
 $emDayLabel = function (string $ymd): string {
@@ -130,36 +189,6 @@ function rh_log_level_class(string $level): string
     return 'success';
 }
 
-function rh_login_browser_label(string $ua): string
-{
-    $browserLabel = 'Unknown';
-    if (stripos($ua, 'Edg/') !== false) {
-        $browserLabel = 'Edge';
-    } elseif (stripos($ua, 'OPR/') !== false) {
-        $browserLabel = 'Opera';
-    } elseif (stripos($ua, 'Chrome/') !== false) {
-        $browserLabel = 'Chrome';
-    } elseif (stripos($ua, 'Firefox/') !== false) {
-        $browserLabel = 'Firefox';
-    } elseif (stripos($ua, 'Safari/') !== false) {
-        $browserLabel = 'Safari';
-    }
-
-    if (stripos($ua, 'Windows') !== false) {
-        $browserLabel .= ' / Windows';
-    } elseif (stripos($ua, 'Macintosh') !== false) {
-        $browserLabel .= ' / macOS';
-    } elseif (stripos($ua, 'Linux') !== false) {
-        $browserLabel .= ' / Linux';
-    } elseif (stripos($ua, 'Android') !== false) {
-        $browserLabel .= ' / Android';
-    } elseif (stripos($ua, 'iPhone') !== false || stripos($ua, 'iPad') !== false) {
-        $browserLabel .= ' / iOS';
-    }
-
-    return $browserLabel;
-}
-
 $dbEvents = [];
 $stats = [
     'system_events' => 0,
@@ -205,12 +234,14 @@ try {
         }
         $whereSql = $where ? ('WHERE ' . implode(' AND ', $where)) : '';
         if ($groupRepeats) {
-            // Read a wider slice without the (large) context, group repeats, then fetch the
+            // Read a wider slice without the (large) context, group repeats, page the groups, then fetch the
             // context of just the rows that are shown.
-            $scan = min(3000, $limit * 20);
-            $stmt = $pdo->prepare("SELECT id, source, level, message, user_id, username, created_at FROM system_event_log {$whereSql} ORDER BY created_at DESC, id DESC LIMIT {$scan}");
+            $stmt = $pdo->prepare("SELECT id, source, level, message, user_id, username, created_at FROM system_event_log {$whereSql} ORDER BY created_at DESC, id DESC LIMIT {$eventScanLimit}");
             $stmt->execute($args);
-            $dbEvents = array_slice(rh_log_group_events($stmt->fetchAll(PDO::FETCH_ASSOC) ?: []), 0, $limit);
+            $evRaw = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            [$evP, $dbEvents] = rh_lp_slice($_GET, 'ev', rh_log_group_events($evRaw));
+            $evNote = 'Identical events are grouped (numbers and addresses ignored), newest first.'
+                . (count($evRaw) >= $eventScanLimit ? ' Grouped from the newest ' . number_format($eventScanLimit) . ' events: untick Group repeats to page through every event.' : '');
             $ids = array_map(function ($r) { return (int)$r['id']; }, $dbEvents);
             if ($ids) {
                 $ctx = $pdo->prepare('SELECT id, context_json FROM system_event_log WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')');
@@ -225,9 +256,9 @@ try {
                 unset($ev);
             }
         } else {
-            $stmt = $pdo->prepare("SELECT * FROM system_event_log {$whereSql} ORDER BY created_at DESC, id DESC LIMIT {$limit}");
-            $stmt->execute($args);
-            $dbEvents = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            [$evP, $dbEvents] = rh_lp_fetch($pdo, $_GET, 'ev', "SELECT 1 FROM system_event_log {$whereSql}",
+                "SELECT * FROM system_event_log {$whereSql} ORDER BY created_at DESC, id DESC", $args);
+            $evNote = trim('Newest first. ' . rh_lp_cap_note($evP));
         }
 
         $stats['system_events'] = (int)$pdo->query("SELECT COUNT(*) FROM system_event_log WHERE created_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)")->fetchColumn();
@@ -262,9 +293,8 @@ $adminActivity = [];
 if (rh_logs_table_exists($pdo, 'admin_activity_log')) {
     try {
         [$saW, $saA] = rh_sa_panel_clause($saF, 'created_at', 'user_id', 'WHERE');
-        $stmt = $pdo->prepare("SELECT user_id, username, action, details, ip_address, created_at FROM admin_activity_log{$saW} ORDER BY created_at DESC LIMIT {$limit}");
-        $stmt->execute($saA);
-        $adminActivity = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        [$aaP, $adminActivity] = rh_lp_fetch($pdo, $_GET, 'aa', "SELECT 1 FROM admin_activity_log{$saW}",
+            "SELECT user_id, username, action, details, ip_address, created_at FROM admin_activity_log{$saW} ORDER BY created_at DESC, id DESC", $saA);
     } catch (Throwable $e) {
     }
 }
@@ -273,9 +303,8 @@ $bookingAuditEvents = [];
 if (rh_logs_table_exists($pdo, 'booking_audit_log')) {
     try {
         [$saW, $saA] = rh_sa_panel_clause($saF, 'bal.performed_at', 'bal.performed_by', 'WHERE');
-        $stmt = $pdo->prepare("SELECT bal.*, au.username AS performed_by_username FROM booking_audit_log bal LEFT JOIN admin_users au ON au.id = bal.performed_by{$saW} ORDER BY bal.performed_at DESC LIMIT {$limit}");
-        $stmt->execute($saA);
-        $bookingAuditEvents = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        [$baP, $bookingAuditEvents] = rh_lp_fetch($pdo, $_GET, 'ba', "SELECT 1 FROM booking_audit_log bal{$saW}",
+            "SELECT bal.*, au.username AS performed_by_username FROM booking_audit_log bal LEFT JOIN admin_users au ON au.id = bal.performed_by{$saW} ORDER BY bal.performed_at DESC, bal.id DESC", $saA);
         $stats['booking_changes'] = (int)$pdo->query("SELECT COUNT(*) FROM booking_audit_log WHERE performed_at >= DATE_SUB(NOW(), INTERVAL 24 HOUR)")->fetchColumn();
     } catch (Throwable $e) {
         $stats['booking_changes'] = 0;
@@ -288,15 +317,11 @@ $apiActivity = [];
 if (rh_logs_table_exists($pdo, 'api_usage_logs')) {
     try {
         [$saW, $saA] = rh_sa_panel_clause($saF, 'l.created_at', null, 'WHERE');
-        $stmt = $pdo->prepare("
+        [$apiP, $apiActivity] = rh_lp_fetch($pdo, $_GET, 'api', "SELECT 1 FROM api_usage_logs l{$saW}", "
             SELECT l.endpoint, l.method, l.ip_address, l.response_code, l.response_time, l.created_at, k.client_name
             FROM api_usage_logs l
             LEFT JOIN api_keys k ON k.id = l.api_key_id{$saW}
-            ORDER BY l.created_at DESC
-            LIMIT {$limit}
-        ");
-        $stmt->execute($saA);
-        $apiActivity = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            ORDER BY l.created_at DESC, l.id DESC", $saA);
     } catch (Throwable $e) {
     }
 }
@@ -305,14 +330,10 @@ $offlineActivity = [];
 if (rh_logs_table_exists($pdo, 'offline_replay_log')) {
     try {
         [$saW, $saA] = rh_sa_panel_clause($saF, 'replayed_at', 'user_id', 'WHERE');
-        $stmt = $pdo->prepare("
+        [$offP, $offlineActivity] = rh_lp_fetch($pdo, $_GET, 'off', "SELECT 1 FROM offline_replay_log{$saW}", "
             SELECT username, endpoint, action, entity_reference, response_status, response_summary, replayed_at
             FROM offline_replay_log{$saW}
-            ORDER BY replayed_at DESC
-            LIMIT {$limit}
-        ");
-        $stmt->execute($saA);
-        $offlineActivity = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            ORDER BY replayed_at DESC, id DESC", $saA);
     } catch (Throwable $e) {
     }
 }
@@ -361,90 +382,10 @@ if (rh_logs_table_exists($pdo, 'admin_activity_log')) {
             unset($loginRow);
         }
 
-        // Bundle consecutive login events from the same source (IP + session-like signature)
-        // into one expandable row so repeated retries don't flood the table.
-        $bundleWindowSeconds = 45 * 60;
-        foreach ($recentLogins as $loginRow) {
-            $timestamp = strtotime((string)($loginRow['created_at'] ?? '')) ?: 0;
-            $usernameNorm = strtolower(trim((string)($loginRow['username'] ?? '')));
-            $ipNorm = trim((string)($loginRow['ip_address'] ?? ''));
-            $userAgent = (string)($loginRow['user_agent'] ?? '');
-            $detailsText = (string)($loginRow['details'] ?? '');
-
-            $sessionKey = $usernameNorm . '|' . $ipNorm . '|' . sha1($userAgent);
-            if (preg_match('/sid:([a-f0-9]{8,64})/i', $detailsText, $sidMatch)) {
-                $sessionKey = 'sid:' . strtolower((string)$sidMatch[1]);
-            }
-
-            $lastIndex = count($recentLoginBundles) - 1;
-            $canMerge = false;
-            if ($lastIndex >= 0) {
-                $lastBundle = $recentLoginBundles[$lastIndex];
-                $gapSeconds = $lastBundle['latest_ts'] - $timestamp;
-                $canMerge = $lastBundle['session_key'] === $sessionKey
-                    && $gapSeconds >= 0
-                    && $gapSeconds <= $bundleWindowSeconds;
-            }
-
-            if (!$canMerge) {
-                $recentLoginBundles[] = [
-                    'session_key' => $sessionKey,
-                    'latest_ts' => $timestamp,
-                    'latest_at' => (string)($loginRow['created_at'] ?? ''),
-                    'oldest_at' => (string)($loginRow['created_at'] ?? ''),
-                    'username' => (string)($loginRow['username'] ?? ''),
-                    'full_name' => (string)($loginRow['full_name'] ?? ''),
-                    'role' => (string)($loginRow['role'] ?? ''),
-                    'ip_address' => (string)($loginRow['ip_address'] ?? ''),
-                    'browser_label' => rh_login_browser_label($userAgent),
-                    'success_count' => 0,
-                    'failed_count' => 0,
-                    'blocked_count' => 0,
-                    'attempts' => [],
-                ];
-                $lastIndex = count($recentLoginBundles) - 1;
-            }
-
-            $attemptAction = (string)($loginRow['action'] ?? '');
-            if ($attemptAction === 'login_success') {
-                $recentLoginBundles[$lastIndex]['success_count']++;
-            } elseif ($attemptAction === 'login_blocked') {
-                $recentLoginBundles[$lastIndex]['blocked_count']++;
-            } else {
-                $recentLoginBundles[$lastIndex]['failed_count']++;
-            }
-
-            $recentLoginBundles[$lastIndex]['oldest_at'] = (string)($loginRow['created_at'] ?? $recentLoginBundles[$lastIndex]['oldest_at']);
-            $recentLoginBundles[$lastIndex]['attempts'][] = [
-                'created_at' => (string)($loginRow['created_at'] ?? ''),
-                'action' => $attemptAction,
-                'details' => $detailsText,
-            ];
-        }
-
-        $recentLoginBundles = array_slice($recentLoginBundles, 0, $limit);
-        foreach ($recentLoginBundles as &$bundle) {
-            $bundle['attempt_count'] = count($bundle['attempts']);
-            $typeCount = 0;
-            if ($bundle['success_count'] > 0) $typeCount++;
-            if ($bundle['failed_count'] > 0) $typeCount++;
-            if ($bundle['blocked_count'] > 0) $typeCount++;
-
-            if ($typeCount > 1) {
-                $bundle['result_class'] = 'warning';
-                $bundle['result_label'] = 'Mixed';
-            } elseif ($bundle['success_count'] > 0) {
-                $bundle['result_class'] = 'success';
-                $bundle['result_label'] = 'Success';
-            } elseif ($bundle['blocked_count'] > 0) {
-                $bundle['result_class'] = 'warning';
-                $bundle['result_label'] = 'Blocked';
-            } else {
-                $bundle['result_class'] = 'danger';
-                $bundle['result_label'] = 'Failed';
-            }
-        }
-        unset($bundle);
+        // Bundle consecutive sign-ins from the same source into one row (admin/includes/login-bundles.php), then page them.
+        [$lgP, $recentLoginBundles] = rh_lp_slice($_GET, 'lg', rh_login_bundles($recentLogins));
+        $lgNote = 'Repeated sign-ins from the same person and device are bundled, newest first.'
+            . (count($recentLogins) >= $loginScanLimit ? ' Bundled from the newest ' . number_format($loginScanLimit) . ' sign-in records.' : '');
     } catch (Throwable $e) {
     }
 }
@@ -455,32 +396,31 @@ $posOrderAudit = [];
 $currencyCode = getSetting('currency_code', '');
 if (rh_logs_table_exists($pdo, 'stock_orders')) {
     try {
-        $stmt = $pdo->prepare("
+        [$posP, $posOrders] = rh_lp_fetch($pdo, $_GET, 'pos', 'SELECT 1 FROM stock_orders', "
             SELECT so.id, so.reference, so.order_type, so.status, so.table_number, so.room_number,
                    so.total_amount, so.payment_method, so.voided_at, so.void_reason,
                    so.paid_at, so.created_at, so.opened_as_tab, so.is_priority,
                    au.username AS created_by_name
             FROM stock_orders so
             LEFT JOIN admin_users au ON au.id = so.created_by
-            ORDER BY so.created_at DESC
-            LIMIT {$limit}
-        ");
-        $stmt->execute();
-        $posOrders = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            ORDER BY so.created_at DESC, so.id DESC");
     } catch (Throwable $e) {
     }
 }
-if (rh_logs_table_exists($pdo, 'stock_order_audit')) {
+$posPageIds = array_values(array_filter(array_map(function ($o) { return (int)$o['id']; }, $posOrders)));
+if ($posPageIds && rh_logs_table_exists($pdo, 'stock_order_audit')) {
     try {
+        // The audit trail of just the orders on this page.
         $stmt = $pdo->prepare("
             SELECT soa.id, soa.order_id, soa.actor_name, soa.event, soa.details, soa.ip_address, soa.created_at,
                    so.reference
             FROM stock_order_audit soa
             LEFT JOIN stock_orders so ON so.id = soa.order_id
+            WHERE soa.order_id IN (" . implode(',', array_fill(0, count($posPageIds), '?')) . ")
             ORDER BY soa.created_at DESC
-            LIMIT {$limit}
+            LIMIT 2000
         ");
-        $stmt->execute();
+        $stmt->execute($posPageIds);
         $posOrderAudit = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
     } catch (Throwable $e) {
     }
@@ -497,45 +437,33 @@ $stationMessages = [];
 $shiftCloses = [];
 if (rh_logs_table_exists($pdo, 'stock_kds_events')) {
     try {
-        $stmt = $pdo->prepare("
+        [$kdsP, $kdsEvents] = rh_lp_fetch($pdo, $_GET, 'kds', 'SELECT 1 FROM stock_kds_events', "
             SELECT ske.id, ske.event, ske.from_status, ske.to_status, ske.user_name, ske.ip_address, ske.created_at,
                    so.reference, so.table_number,
                    soi.item_name, soi.station
             FROM stock_kds_events ske
             LEFT JOIN stock_orders so ON so.id = ske.order_id
             LEFT JOIN stock_order_items soi ON soi.id = ske.order_item_id
-            ORDER BY ske.created_at DESC
-            LIMIT {$limit}
-        ");
-        $stmt->execute();
-        $kdsEvents = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            ORDER BY ske.created_at DESC, ske.id DESC");
     } catch (Throwable $e) {
     }
 }
 if (rh_logs_table_exists($pdo, 'station_messages')) {
     try {
-        $stmt = $pdo->prepare("
+        [$smP, $stationMessages] = rh_lp_fetch($pdo, $_GET, 'sm', 'SELECT 1 FROM station_messages', "
             SELECT id, station, message, sent_by_name, source, priority, is_acknowledged, order_ref, created_at
             FROM station_messages
-            ORDER BY created_at DESC
-            LIMIT {$limit}
-        ");
-        $stmt->execute();
-        $stationMessages = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            ORDER BY created_at DESC, id DESC");
     } catch (Throwable $e) {
     }
 }
 if (rh_logs_table_exists($pdo, 'stock_shift_closes')) {
     try {
-        $stmt = $pdo->prepare("
+        [$scP, $shiftCloses] = rh_lp_fetch($pdo, $_GET, 'sc', 'SELECT 1 FROM stock_shift_closes', "
             SELECT id, user_id, user_name, shift_date, closed_at, total_revenue, orders_count,
                    voids_count, voids_amount, declared_cash, variance_cash, notes
             FROM stock_shift_closes
-            ORDER BY closed_at DESC
-            LIMIT {$limit}
-        ");
-        $stmt->execute();
-        $shiftCloses = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            ORDER BY closed_at DESC, id DESC");
         require_once __DIR__ . '/includes/pos-shift-totals.php';
         // Z definition (owner 2026-11-11): Orders / Revenue = till as stored + "Charged to room" read now over the
         // close's own window, read for the whole page in two queries (rh_pos_closes_room_charges_batch). Nothing
@@ -830,6 +758,11 @@ $saSingleDay = $saF['from'] === $saF['to'];
         <?php rh_presence_render_panel($pdo, (string)($user['role'] ?? ''), (int)$user['id']); /* Who's online: admin + manager only */ ?>
 
         <form method="get" class="log-toolbar" action="system-logs.php#log-events">
+            <?php // A new filter starts the event stream at page 1; its rows-per-page and the other lists' pages stay.
+            foreach ($_GET as $lpKeepKey => $lpKeepVal):
+                if (is_string($lpKeepKey) && is_string($lpKeepVal) && preg_match('/^(?:(?:ba|em|lg|aa|pos|kds|sm|sc|api|off)_(?:page|size)|ev_size)$/', $lpKeepKey)): ?>
+                <input type="hidden" name="<?php echo htmlspecialchars($lpKeepKey); ?>" value="<?php echo htmlspecialchars($lpKeepVal); ?>">
+            <?php endif; endforeach; ?>
             <?php if ($saF['filtered']): ?>
                 <input type="hidden" name="sa" value="1">
                 <input type="hidden" name="user" value="<?php echo (int)$saF['user']; ?>">
@@ -850,9 +783,6 @@ $saSingleDay = $saF['from'] === $saF['to'];
                         <option value="<?php echo htmlspecialchars($levelKey); ?>" <?php echo $levelFilter === $levelKey ? 'selected' : ''; ?>><?php echo htmlspecialchars($levelText); ?></option>
                     <?php endforeach; ?>
                 </select>
-            </label>
-            <label>Rows
-                <input type="number" name="limit" min="20" max="500" value="<?php echo (int)$limit; ?>">
             </label>
             <input type="hidden" name="group" value="0">
             <label class="log-toolbar__check"><input type="checkbox" name="group" value="1" <?php echo $groupRepeats ? 'checked' : ''; ?>> Group repeats</label>
@@ -894,13 +824,13 @@ $saSingleDay = $saF['from'] === $saF['to'];
                         </article>
                     <?php endforeach; ?>
                 </div>
-                <p class="log-events__foot"><?php echo $groupRepeats ? 'Identical events are grouped (numbers and addresses ignored), newest first.' : 'Newest first.'; ?> Showing up to <?php echo (int)$limit; ?>.</p>
+                <?php echo rh_lp_render('system-logs.php', $_GET, $evP, count($dbEvents), 'log-events', 'System event pages', $evNote); ?>
             <?php endif; ?>
         </div>
 
         <div class="log-section" id="log-booking-audit">
             <h3><i class="fas fa-clock-rotate-left"></i> Booking Changes Audit</h3>
-            <div class="log-scroll">
+            <div class="log-scroll" data-disable-auto-pagination>
                 <table class="log-table">
                     <thead>
                         <tr>
@@ -944,6 +874,7 @@ $saSingleDay = $saF['from'] === $saF['to'];
                     </tbody>
                 </table>
             </div>
+            <?php echo rh_lp_render('system-logs.php', $_GET, $baP, count($bookingAuditEvents), 'log-booking-audit', 'Booking change pages', rh_lp_cap_note($baP)); ?>
         </div>
 
         <div class="log-section em" id="log-emails">
@@ -955,6 +886,7 @@ $saSingleDay = $saF['from'] === $saF['to'];
                     <input type="hidden" name="<?php echo htmlspecialchars($emKeepKey); ?>" value="<?php echo htmlspecialchars($emKeepVal); ?>">
                 <?php endif; endforeach; ?>
                 <input type="hidden" name="em_view" value="<?php echo htmlspecialchars($emF['view']); ?>">
+                <input type="hidden" name="em_size" value="<?php echo (int)$emP['size']; ?>">
                 <label>From
                     <input type="date" name="em_from" value="<?php echo htmlspecialchars($emF['from']); ?>">
                 </label>
@@ -989,8 +921,7 @@ $saSingleDay = $saF['from'] === $saF['to'];
                 </div>
                 <p class="em__note">
                     <?php echo htmlspecialchars($emDayLabel($emF['from'])) . ($emF['to'] !== $emF['from'] ? ' to ' . htmlspecialchars($emDayLabel($emF['to'])) : ''); ?>:
-                    <?php echo number_format(count($emRows)) . ($emMore ? '+' : ''); ?> email<?php echo count($emRows) === 1 ? '' : 's'; ?>.
-                    <?php echo $emMore ? 'Only the newest ' . (int)$emLimit . ' are shown: pick fewer days or a kind to see the rest.' : ''; ?>
+                    <?php echo number_format($emP['total']) . ($emP['capped'] ? '+' : ''); ?> email<?php echo $emP['total'] === 1 ? '' : 's'; ?>.
                     <?php echo $emF['clamped'] ? 'A range can be at most 92 days, so the last 92 days of your range are shown.' : ''; ?>
                 </p>
             </div>
@@ -1000,7 +931,7 @@ $saSingleDay = $saF['from'] === $saF['to'];
             <?php elseif (!$emRows): ?>
                 <p class="log-empty">No emails match these filters. Emails are listed from the day the email log was switched on.</p>
             <?php elseif ($emF['view'] === 'timeline'): ?>
-                <div class="log-scroll" data-page-size-picker>
+                <div class="log-scroll" data-disable-auto-pagination>
                     <table class="log-table em-timeline">
                         <thead>
                             <tr>
@@ -1025,7 +956,7 @@ $saSingleDay = $saF['from'] === $saF['to'];
                     </table>
                 </div>
             <?php else: ?>
-                <div class="log-scroll" data-page-size-picker>
+                <div class="log-scroll" data-disable-auto-pagination>
                     <table class="log-table em-table">
                         <thead>
                             <tr>
@@ -1066,11 +997,12 @@ $saSingleDay = $saF['from'] === $saF['to'];
                     </table>
                 </div>
             <?php endif; ?>
+            <?php if ($emReady && $emRows): echo rh_lp_render('system-logs.php', $_GET, $emP, count($emRows), 'log-emails', 'Email pages', rh_lp_cap_note($emP)); endif; ?>
         </div>
 
         <div class="log-section" id="log-logins">
             <h3><i class="fas fa-right-to-bracket"></i> Recent Logins</h3>
-            <div class="log-scroll">
+            <div class="log-scroll" data-disable-auto-pagination>
                 <table class="log-table">
                     <thead>
                         <tr>
@@ -1144,11 +1076,12 @@ $saSingleDay = $saF['from'] === $saF['to'];
                     </tbody>
                 </table>
             </div>
+            <?php echo rh_lp_render('system-logs.php', $_GET, $lgP, count($recentLoginBundles), 'log-logins', 'Sign-in pages', $lgNote); ?>
         </div>
 
-        <div class="log-section">
+        <div class="log-section" id="log-admin-activity">
             <h3><i class="fas fa-user-shield"></i> Recent Admin Activity</h3>
-            <div class="log-scroll">
+            <div class="log-scroll" data-disable-auto-pagination>
                 <table class="log-table">
                     <thead>
                         <tr>
@@ -1178,6 +1111,7 @@ $saSingleDay = $saF['from'] === $saF['to'];
                     </tbody>
                 </table>
             </div>
+            <?php echo rh_lp_render('system-logs.php', $_GET, $aaP, count($adminActivity), 'log-admin-activity', 'Admin activity pages', rh_lp_cap_note($aaP)); ?>
         </div>
 
         <?php
@@ -1201,9 +1135,9 @@ $saSingleDay = $saF['from'] === $saF['to'];
         }
         ?>
 
-        <div class="log-section">
+        <div class="log-section" id="log-pos">
             <h3><i class="fas fa-cash-register"></i> POS Orders</h3>
-            <div class="log-scroll">
+            <div class="log-scroll" data-disable-auto-pagination>
                 <table class="log-table">
                     <thead>
                         <tr>
@@ -1273,13 +1207,14 @@ $saSingleDay = $saF['from'] === $saF['to'];
                     </tbody>
                 </table>
             </div>
+            <?php echo rh_lp_render('system-logs.php', $_GET, $posP, count($posOrders), 'log-pos', 'POS order pages', trim('Clicking a user shows only their orders on this page. ' . rh_lp_cap_note($posP))); ?>
         </div>
 
-        <div class="log-section">
+        <div class="log-section" id="log-kds">
             <h3><i class="fas fa-display"></i> Display Screens — KDS / BDS / CDS</h3>
 
             <h4 style="margin:0 0 12px;font-size:14px;color:var(--text-secondary,#5E554D);">Station Events</h4>
-            <div class="log-scroll">
+            <div class="log-scroll" data-disable-auto-pagination>
                 <table class="log-table">
                     <thead>
                         <tr>
@@ -1318,9 +1253,10 @@ $saSingleDay = $saF['from'] === $saF['to'];
                     </tbody>
                 </table>
             </div>
+            <?php echo rh_lp_render('system-logs.php', $_GET, $kdsP, count($kdsEvents), 'log-kds', 'Station event pages', rh_lp_cap_note($kdsP)); ?>
 
-            <h4 style="margin:24px 0 12px;font-size:14px;color:var(--text-secondary,#5E554D);">Station Messages</h4>
-            <div class="log-scroll">
+            <h4 id="log-station-messages" style="margin:24px 0 12px;font-size:14px;color:var(--text-secondary,#5E554D);">Station Messages</h4>
+            <div class="log-scroll" data-disable-auto-pagination>
                 <table class="log-table">
                     <thead>
                         <tr>
@@ -1356,10 +1292,11 @@ $saSingleDay = $saF['from'] === $saF['to'];
                     </tbody>
                 </table>
             </div>
+            <?php echo rh_lp_render('system-logs.php', $_GET, $smP, count($stationMessages), 'log-station-messages', 'Station message pages', rh_lp_cap_note($smP)); ?>
 
-            <?php if ($shiftCloses): ?>
-                <h4 style="margin:24px 0 12px;font-size:14px;color:var(--text-secondary,#5E554D);">Shift Closes</h4>
-                <div class="log-scroll">
+            <?php if ($scP['total'] > 0 || $shiftCloses): /* rows show even if the count failed */ ?>
+                <h4 id="log-shift-closes" style="margin:24px 0 12px;font-size:14px;color:var(--text-secondary,#5E554D);">Shift Closes</h4>
+                <div class="log-scroll" data-disable-auto-pagination>
                     <table class="log-table">
                         <thead>
                             <tr>
@@ -1394,12 +1331,13 @@ $saSingleDay = $saF['from'] === $saF['to'];
                         </tbody>
                     </table>
                 </div>
+                <?php echo rh_lp_render('system-logs.php', $_GET, $scP, count($shiftCloses), 'log-shift-closes', 'Shift close pages', rh_lp_cap_note($scP)); ?>
             <?php endif; ?>
         </div>
 
         <div class="log-section" id="log-api-calls">
             <h3><i class="fas fa-key"></i> Recent API Calls</h3>
-            <div class="log-scroll">
+            <div class="log-scroll" data-disable-auto-pagination>
                 <table class="log-table">
                     <thead>
                         <tr>
@@ -1430,11 +1368,12 @@ $saSingleDay = $saF['from'] === $saF['to'];
                     </tbody>
                 </table>
             </div>
+            <?php echo rh_lp_render('system-logs.php', $_GET, $apiP, count($apiActivity), 'log-api-calls', 'API call pages', rh_lp_cap_note($apiP)); ?>
         </div>
 
         <div class="log-section" id="log-offline-sync">
             <h3><i class="fas fa-cloud-arrow-up"></i> Recent Offline Sync</h3>
-            <div class="log-scroll">
+            <div class="log-scroll" data-disable-auto-pagination>
                 <table class="log-table">
                     <thead>
                         <tr>
@@ -1465,6 +1404,7 @@ $saSingleDay = $saF['from'] === $saF['to'];
                     </tbody>
                 </table>
             </div>
+            <?php echo rh_lp_render('system-logs.php', $_GET, $offP, count($offlineActivity), 'log-offline-sync', 'Offline sync pages', rh_lp_cap_note($offP)); ?>
         </div>
 
         <div class="log-section">
@@ -1473,7 +1413,17 @@ $saSingleDay = $saF['from'] === $saF['to'];
                 <?php foreach ($fileLogs as $name => $lines): ?>
                     <div class="log-file">
                         <h4><?php echo htmlspecialchars($name); ?></h4>
-                        <pre><?php echo $lines ? htmlspecialchars(implode("\n", $lines)) : 'No readable entries.'; ?></pre>
+                        <?php if (!$lines): ?>
+                            <pre>No readable entries.</pre>
+                        <?php else: ?>
+                            <pre><?php echo htmlspecialchars(implode("\n", array_slice($lines, 0, 20))); ?></pre>
+                            <?php if (count($lines) > 20): ?>
+                                <details class="log-file__more">
+                                    <summary style="min-height:44px;padding:12px 0;box-sizing:border-box;cursor:pointer;">Show <?php echo count($lines) - 20; ?> more lines</summary>
+                                    <pre><?php echo htmlspecialchars(implode("\n", array_slice($lines, 20))); ?></pre>
+                                </details>
+                            <?php endif; ?>
+                        <?php endif; ?>
                     </div>
                 <?php endforeach; ?>
             </div>
@@ -1484,159 +1434,41 @@ $saSingleDay = $saF['from'] === $saF['to'];
         (function() {
             'use strict';
 
-            function withInlinePaginationLoader(controlsEl, message, renderFn) {
-                if (typeof renderFn !== 'function') return;
-                if (!controlsEl || !controlsEl.parentNode) {
-                    renderFn();
-                    return;
-                }
-
-                var loaderWrap = document.createElement('div');
-                loaderWrap.className = 'log-table-pagination-loader-wrap';
-                loaderWrap.innerHTML = [
-                    '<div class="admin-pagination-loader" role="status" aria-live="polite" aria-label="' + (message || 'Loading results') + '">',
-                    '<span class="admin-pagination-loader__spinner" aria-hidden="true"></span>',
-                    '<span class="admin-pagination-loader__text">' + (message || 'Loading next page...') + '</span>',
-                    '</div>'
-                ].join('');
-
-                controlsEl.insertAdjacentElement('afterend', loaderWrap);
-
-                window.setTimeout(function() {
-                    try {
-                        renderFn();
-                    } finally {
-                        if (loaderWrap.parentNode) {
-                            loaderWrap.parentNode.removeChild(loaderWrap);
-                        }
-                    }
-                }, 170);
-            }
-
-            // ── POS Orders — click-to-filter by User + pagination ────────────────────
+            // ── POS Orders — click a user to show only their orders on this page ─────
+            // (Pages come from the server: the pager under the table, pos_page / pos_size.)
             var posUserCellEl = document.querySelector('td.pos-user-cell');
             if (posUserCellEl) {
-                var posSection = posUserCellEl.closest('.log-section');
                 var tbody = posUserCellEl.closest('tbody');
                 var clearBtn = document.getElementById('pos-filter-clear');
                 var activeUser = '';
-                var posPage = 1;
-                var posPageSize = 10;
-                var posBusy = false;
 
-                // Tag each data row
-                if (tbody) {
+                function renderPOS(user) {
+                    if (!tbody) return;
+                    activeUser = user;
                     tbody.querySelectorAll('tr').forEach(function(tr) {
                         var cell = tr.querySelector('.pos-user-cell');
                         if (!cell) return;
-                        tr.setAttribute('data-pos-row', '1');
-                        tr.setAttribute('data-pos-user', cell.dataset.user || '');
+                        tr.style.display = (!user || (cell.dataset.user || '').toLowerCase() === user) ? '' : 'none';
                     });
-                }
-
-                // Pagination controls for POS — inserted after table's overflow wrapper
-                var posTableEl = posSection ? posSection.querySelector('table.log-table') : null;
-                var posControls = null;
-                if (posTableEl) {
-                    posControls = document.createElement('div');
-                    posControls.className = 'log-table-pagination';
-                    posTableEl.parentNode.insertBefore(posControls, posTableEl.nextSibling);
-                }
-
-                function queuePosRender(nextPage) {
-                    if (posBusy) return;
-                    posBusy = true;
-                    if (posControls) posControls.classList.add('is-loading');
-
-                    withInlinePaginationLoader(posControls, 'Loading POS results...', function() {
-                        renderPOS(activeUser, nextPage);
-                        if (posControls) posControls.classList.remove('is-loading');
-                        posBusy = false;
-                    });
-                }
-
-                function renderPOS(user, page) {
-                    if (!tbody) return;
-                    activeUser = user;
-                    var allRows = Array.from(tbody.querySelectorAll('tr[data-pos-row]'));
-                    var filteredRows = user ?
-                        allRows.filter(function(tr) {
-                            return (tr.dataset.posUser || '').toLowerCase() === user;
-                        }) :
-                        allRows;
-                    var total = filteredRows.length;
-                    var totalPages = Math.ceil(total / posPageSize) || 1;
-                    posPage = Math.min(Math.max(1, page), totalPages);
-                    var from = (posPage - 1) * posPageSize;
-
-                    allRows.forEach(function(tr) {
-                        var idx = filteredRows.indexOf(tr);
-                        if (idx === -1) {
-                            tr.style.display = 'none';
-                        } else {
-                            tr.style.display = (idx >= from && idx < from + posPageSize) ? '' : 'none';
-                        }
-                    });
-
                     if (clearBtn) clearBtn.style.display = user ? 'inline' : 'none';
-
-                    if (posControls) {
-                        if (totalPages <= 1) {
-                            posControls.innerHTML = '';
-                        } else {
-                            var prev = document.createElement('button');
-                            prev.className = 'pg-btn';
-                            prev.textContent = '← Prev';
-                            prev.disabled = posPage <= 1;
-                            prev.onclick = function() {
-                                queuePosRender(posPage - 1);
-                            };
-
-                            var info = document.createElement('span');
-                            info.className = 'pg-summary';
-                            info.textContent = 'Page ' + posPage + ' of ' + totalPages + '  (' + total + ' rows)';
-
-                            var next = document.createElement('button');
-                            next.className = 'pg-btn';
-                            next.textContent = 'Next →';
-                            next.disabled = posPage >= totalPages;
-                            next.onclick = function() {
-                                queuePosRender(posPage + 1);
-                            };
-
-                            posControls.innerHTML = '';
-                            posControls.appendChild(prev);
-                            posControls.appendChild(info);
-                            posControls.appendChild(next);
-                        }
-                    }
                 }
 
-                function applyPosFilter(user) {
-                    renderPOS(user, 1);
-                }
-
-                // Click handler on user cells
                 if (tbody) {
                     tbody.addEventListener('click', function(e) {
                         var cell = e.target.closest('.pos-user-cell');
                         if (!cell) return;
                         var user = (cell.dataset.user || '').toLowerCase();
                         if (!user || user === '—') return;
-                        applyPosFilter(activeUser === user ? '' : user);
+                        renderPOS(activeUser === user ? '' : user);
                     });
                 }
 
-                // Clear button
                 if (clearBtn) {
                     clearBtn.addEventListener('click', function(e) {
                         e.stopPropagation();
-                        applyPosFilter('');
+                        renderPOS('');
                     });
                 }
-
-                // Initial render — show first 10 rows
-                renderPOS('', 1);
             }
 
             // ── IP Geolocation (ipwho.is — free, HTTPS, no API key) ──────────────────
