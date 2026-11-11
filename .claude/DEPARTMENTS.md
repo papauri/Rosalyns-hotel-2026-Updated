@@ -159,26 +159,32 @@ The feature freeze in BUILD_PLAN.md ("PRODUCTION READINESS GATE") still stands. 
    If port 8000 is already taken by a plain `php -S` (no router), use another port and set
    `BASE=http://localhost:<port>`.
 4. Then port to Liwonde (`php -l` the copied files; owner 2026-10-30: tests run at Rosalyn's only, never re-run at Liwonde), commit and push both.
-5. **Guides and KB**: once a change that staff will notice has shipped, `guides-kb-lead` updates the
-   matching pages in `docs/guides/` in plain, easy-to-follow English and checks the KB search finds
-   them; that update goes through the same review and is committed to both hotels.
-6. **AI lead sync** (owner 2026-10-30): after ANY other lead's change ships, `dept-ai-lead` is told
-   in the same run (short brief: commit hash, files, what changed for staff). It checks whether the
-   Assistant's lookups, actions/confirm cards, guided flows, local answers, evals or its own guide
-   depend on what changed (renamed columns/tables/settings, new statuses, moved screens, new rules,
-   permission changes) and patches + tests the Assistant if so; "no impact" is a valid answer. Its
-   fix goes through the same review and ships to both hotels. Skip only for changes made by the AI
-   lead itself.
+5. **Guides and KB — only when needed, once a day** (owner 2026-11-11): only for shipped changes that
+   change what staff SEE or DO (new/renamed button, label, notice, rule, permission, screen). Collect
+   the day's qualifying commit hashes in `.claude/TASKS.md` ("SYNC QUEUE") and send `guides-kb-lead`
+   (haiku) ONE brief for the whole day, not one per ship. Pure fixes with no visible change: no sync.
+6. **AI lead sync — only when needed, once a day** (owner 2026-11-11; was after every ship): before
+   dispatching, the orchestrator checks the day's diffs itself (Grep `includes/ai/` for the changed
+   tables, columns, settings, statuses, helpers, page URLs and permission keys). Dispatch
+   `dept-ai-lead` ONLY if something the Assistant reads, links to or acts on changed; then ONE brief for
+   the whole day's queue. "No overlap found" = no dispatch (log it in the SYNC QUEUE line). Skip for the
+   AI lead's own changes.
+7. **One review per round** (owner 2026-11-11): the day's sync fixes (guides + AI) go into ONE
+   combined review, not one review each.
 
 ## Cost rules (owner, 2026-10-19: build fast and cheap)
 
-1. **No agent for small work.** A change of one file / ~30 lines, a lint fix, a one-line QA
-   finding, a data check: the orchestrator does it directly.
-2. **Model by task, not by habit.** haiku: guides/KB, index/mapping, lint-only or small QA
-   (diff < ~150 lines, no money/stock/auth), read-only audits that only list facts.
-   Opus (owner 2026-11-09, "I cannot afford to break anything"): every real build/fix/feature and
-   QA/review of logic, money, stock, auth or security. Sonnet: ONLY very small low-risk tasks it can
-   surely do (one-line fix, copy/port, mechanical edit). Never Fable unless told.
+1. **No agent for small work — ONLY IF it cannot break anything** (owner 2026-11-11). A change of one
+   file / ~30 lines with no money, stock, booking/availability, auth/permission or shared-helper logic
+   (labels, CSS, a notice, a lint fix, a one-line QA finding, a data check): the orchestrator does it
+   directly. Anything that touches that logic still goes to the owning lead, however small.
+2. **Model by task, not by habit — switch autonomously** (owner 2026-11-11). Opus (owner 2026-11-09,
+   "I cannot afford to break anything"): every build/fix/feature and every review that touches logic —
+   money, VAT/levy, payments, refunds, stock, bookings/availability, auth/permissions, security, the
+   Assistant's rails. Sonnet: very small or tedious low-risk work it can surely do (copy/port, mechanical
+   edits, label/CSS/markup, docs wording, review of a markup-only diff). haiku: guides/KB, index/mapping,
+   lint-only checks, read-only fact listing. If unsure whether logic is touched → Opus. Never Fable
+   unless told.
 3. **Never read whole big files.** Grep `.claude/CODE_INDEX.md` for the file or function you need
    (it is ~100 KB — never read it whole; regenerate with
    `php scripts/code-index.php` — the orchestrator regenerates and commits it after every feature ship, so briefs point at current line numbers) + Grep, then Read with offset/limit around the lines you need.
@@ -193,3 +199,5 @@ The feature freeze in BUILD_PLAN.md ("PRODUCTION READINESS GATE") still stands. 
 8. **Ship with one command:** `php scripts/ship.php` (lint, tests, port to Liwonde, commit and
    push both) instead of hand steps. See `scripts/README-SHIP.md`.
 9. Max 2 builders at once; read-only audits may run beside them.
+10. **No idle dev servers** (owner 2026-11-11): stop every `php -S` the moment its browser check is
+    done; at session start and end, stop any `php -S` still running. Never reuse an old one.

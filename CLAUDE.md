@@ -24,8 +24,9 @@ do not re-derive plans or re-scan the repo ad hoc.
 - `.claude/agents/` — codebase-scout (haiku, read-only mapper) · build-planner (opus,
   plans only, never edits code) · backend-specialist (opus) · frontend-specialist
   (opus) · ui-designer (opus, polish pass on just-touched files) · qa-auditor
-  (read-only gate; haiku for lint, opus for logic/security). Model rule (owner 2026-11-09):
-  Opus for any real build/fix/review; Sonnet only for very small tasks it can surely do.
+  (read-only gate; haiku for lint, opus for logic/security). Model rule (owner 2026-11-11):
+  Opus for anything touching logic (money, stock, bookings, auth, security, Assistant rails); switch
+  autonomously to Sonnet for very small/tedious low-risk work it can surely do; haiku for docs/lint.
 - Department leads (`.claude/DEPARTMENTS.md`): `dept-rooms-lead`, `dept-restaurant-lead`,
   `dept-accounting-lead`, `dept-stock-lead`, `dept-guest-site-lead`, `dept-events-gym-lead`, `dept-pwa-lead` (patch-only: installed app, offline, POS/KDS stations), `dept-import-lead` (opus; Import button: Excel/CSV/Word/PDF → review → import, `data_import` permission default admin+manager, no staff-list import, spec `.claude/IMPORT_PLAN.md`), `dept-patch-lead` (owner-approved feature patches in `.claude/PATCH_QUEUE.md` + all security patches) (opus; each audits/fixes its department end to end and
   is the one to ask when it breaks) and `ui-lead` (one visual language; turns the leads'
@@ -43,7 +44,7 @@ do not re-derive plans or re-scan the repo ad hoc.
   trial on ("numbering has to be perfect"). The same rail applies there: no DB tests, writing scripts
   or test emails against Liwonde's DB without the owner's OK. Pure (no-DB) tests and php -l only.
 
-- **Cost**: follow the Cost rules in `.claude/DEPARTMENTS.md` (no agent for small work, haiku
+- **Cost (owner 2026-11-11)**: guides + AI-lead sync only when needed and once a day (SYNC QUEUE in TASKS.md); one review per round; small tasks inline ONLY IF they cannot break logic; stop every `php -S` when not in use. Also follow the Cost rules in `.claude/DEPARTMENTS.md` (no agent for small work, haiku
   for docs/lint/small QA, CODE_INDEX + offset reads instead of whole files, one QA per ship,
   `scripts/ship.php` to ship). Also: /compact every 3 completed tasks; /clear on phase switch; haiku for read-only/
   lint/docs, Opus for build execution and logic QA (Sonnet only for very small sure tasks); never Fable unless told;
