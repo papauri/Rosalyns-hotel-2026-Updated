@@ -2017,8 +2017,30 @@ $currency_symbol = getSetting('currency_symbol');
             foreach (array_slice($parts, 0, 2) as $p) { $out .= mb_strtoupper(mb_substr($p, 0, 1)); }
             return $out !== '' ? $out : '?';
         };
-        $roomLabel = static function (array $b): string {
-            $unit = trim((string)($b['individual_room_name'] ?? '')) ?: trim((string)($b['individual_room_number'] ?? ''));
+        // "Room 12 · Baobab": the room number always, plus the room's name when it has its own.
+        $unitText = static function ($number, $name): string {
+            $number = trim((string)$number);
+            $name = trim((string)$name);
+            if ($number === '') { return $name; }
+            $text = 'Room ' . $number;
+            if ($name !== '' && strcasecmp($name, $number) !== 0 && strcasecmp($name, $text) !== 0) { $text .= ' · ' . $name; }
+            return $text;
+        };
+        // "in 14 Nov → out 17 Nov · 3 nights": the whole stay on one line.
+        $stayText = static function (array $b): string {
+            $in = strtotime((string)($b['check_in_date'] ?? ''));
+            $out = strtotime((string)($b['check_out_date'] ?? ''));
+            $n = (int)($b['number_of_nights'] ?? 0);
+            $text = ($in ? 'in ' . date('j M', $in) : '') . ($out ? ' → out ' . date('j M', $out) : '');
+            if ($n > 0) { $text .= ' · ' . $n . ' night' . ($n === 1 ? '' : 's'); }
+            return trim($text);
+        };
+        // Room(s) per booking id for the dashboard lists, filled once below (every unit of a joined room).
+        $unitLabels = [];
+        $roomLabel = static function (array $b) use (&$unitLabels, $unitText): string {
+            $id = (int)($b['id'] ?? 0);
+            if ($id > 0 && isset($unitLabels[$id])) { return $unitLabels[$id]; }
+            $unit = $unitText($b['individual_room_number'] ?? '', $b['individual_room_name'] ?? '');
             return $unit !== '' ? $unit : 'Unassigned';
         };
         $can = static function (string $page) use ($uid): bool {
@@ -2044,6 +2066,45 @@ $currency_symbol = getSetting('currency_symbol');
                 $st->execute([$today]);
                 $checkin_bookings = $st->fetchAll(PDO::FETCH_ASSOC);
             } catch (Throwable $e) { $checkin_bookings = []; }
+        }
+
+        // Rooms held by the bookings in Today's movements and Week ahead, in one read: every unit a
+        // booking holds (both rooms of a joined room). A checked-out stay has released its rooms, so
+        // those few use getBookingRooms(), which returns the set the stay last held. Display only.
+        if ($mod_bookings) {
+            $unitIds = [];
+            foreach ([$checkin_bookings, $departureList, $upcoming_checkins] as $unitList) {
+                foreach ($unitList as $ub) { $unitIds[(int)($ub['id'] ?? 0)] = (string)($ub['status'] ?? ''); }
+            }
+            unset($unitIds[0]);
+            if ($unitIds) {
+                try {
+                    if (bookingAvailabilityTableExists('booking_rooms')) {
+                        $marks = implode(',', array_fill(0, count($unitIds), '?'));
+                        $st = $pdo->prepare("SELECT br.booking_id, ir.room_number, ir.room_name
+                            FROM booking_rooms br
+                            JOIN individual_rooms ir ON ir.id = br.individual_room_id
+                            WHERE br.booking_id IN ($marks) AND br.released_at IS NULL
+                            ORDER BY br.booking_id, br.is_primary DESC, ir.room_number ASC, br.id ASC");
+                        $st->execute(array_keys($unitIds));
+                        $unitParts = [];
+                        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $ur) {
+                            $text = $unitText($ur['room_number'] ?? '', $ur['room_name'] ?? '');
+                            if ($text !== '') { $unitParts[(int)$ur['booking_id']][$text] = true; }
+                        }
+                        foreach ($unitParts as $bid => $texts) { $unitLabels[$bid] = implode(' + ', array_keys($texts)); }
+                    }
+                    foreach ($unitIds as $bid => $ustatus) {
+                        if (isset($unitLabels[$bid]) || $ustatus !== 'checked-out') { continue; }
+                        $texts = [];
+                        foreach (getBookingRooms((int)$bid) as $ur) {
+                            $text = $unitText($ur['room_number'] ?? '', $ur['room_name'] ?? '');
+                            if ($text !== '') { $texts[$text] = true; }
+                        }
+                        if ($texts) { $unitLabels[$bid] = implode(' + ', array_keys($texts)); }
+                    }
+                } catch (Throwable $e) { /* rows fall back to the booking's own room */ }
+            }
         }
 
         $roomSummary = ($mod_bookings || $mod_roomboard || $mod_housekeeping) ? getRoomDashboardSummary() : [];
@@ -2328,7 +2389,7 @@ $currency_symbol = getSetting('currency_symbol');
                             <span class="ck-avatar"><?php echo htmlspecialchars($initials((string)$booking['guest_name'])); ?></span>
                             <a class="ck-row__main" href="booking-details.php?id=<?php echo (int)$booking['id']; ?>">
                                 <strong><?php echo htmlspecialchars($booking['guest_name']); ?></strong><?php if (trim((string)($booking['room_guest_name'] ?? '')) !== ''): ?><small class="room-guest-line">Room guest: <?php echo htmlspecialchars((string)$booking['room_guest_name']); ?></small><?php endif; ?>
-                                <span><?php echo htmlspecialchars($booking['booking_reference']); ?> · <?php echo htmlspecialchars((string)($booking['room_name'] ?? '—')); ?> · <?php echo (int)$booking['number_of_nights']; ?> night<?php echo (int)$booking['number_of_nights'] === 1 ? '' : 's'; ?></span>
+                                <span><?php echo htmlspecialchars($booking['booking_reference']); ?> · <?php echo htmlspecialchars((string)($booking['room_name'] ?? '—')); ?> · <?php echo htmlspecialchars($stayText($booking)); ?></span>
                             </a>
                             <span class="ck-chip<?php echo $roomLabel($booking) === 'Unassigned' ? ' ck-chip--muted' : ''; ?>"><i class="fas fa-door-open"></i> <?php echo htmlspecialchars($roomLabel($booking)); ?></span>
                             <span class="ck-row__meta">
@@ -2367,7 +2428,7 @@ $currency_symbol = getSetting('currency_symbol');
                             <span class="ck-avatar ck-avatar--gold"><?php echo htmlspecialchars($initials((string)$d['guest_name'])); ?></span>
                             <a class="ck-row__main" href="booking-details.php?id=<?php echo (int)$d['id']; ?>">
                                 <strong><?php echo htmlspecialchars($d['guest_name']); ?></strong><?php if (trim((string)($d['room_guest_name'] ?? '')) !== ''): ?><small class="room-guest-line">Room guest: <?php echo htmlspecialchars((string)$d['room_guest_name']); ?></small><?php endif; ?>
-                                <span><?php echo htmlspecialchars($d['booking_reference']); ?> · <?php echo htmlspecialchars((string)($d['room_name'] ?? '—')); ?> · since <?php echo date('j M', strtotime($d['check_in_date'])); ?></span>
+                                <span><?php echo htmlspecialchars($d['booking_reference']); ?> · <?php echo htmlspecialchars((string)($d['room_name'] ?? '—')); ?> · <?php echo htmlspecialchars($stayText($d)); ?></span>
                             </a>
                             <span class="ck-chip"><i class="fas fa-door-open"></i> <?php echo htmlspecialchars($roomLabel($d)); ?></span>
                             <span class="ck-row__meta">
@@ -2639,7 +2700,7 @@ $currency_symbol = getSetting('currency_symbol');
                         <span class="ck-date"><b><?php echo date('j', strtotime($booking['check_in_date'])); ?></b><?php echo date('M', strtotime($booking['check_in_date'])); ?></span>
                         <a class="ck-row__main" href="booking-details.php?id=<?php echo (int)$booking['id']; ?>">
                             <strong><?php echo htmlspecialchars($booking['guest_name']); ?></strong><?php if (trim((string)($booking['room_guest_name'] ?? '')) !== ''): ?><small class="room-guest-line">Room guest: <?php echo htmlspecialchars((string)$booking['room_guest_name']); ?></small><?php endif; ?>
-                            <span><?php echo htmlspecialchars($booking['booking_reference']); ?> · <?php echo htmlspecialchars((string)($booking['room_name'] ?? '—')); ?> · <?php echo (int)$booking['number_of_nights']; ?> night(s)</span>
+                            <span><?php echo htmlspecialchars($booking['booking_reference']); ?> · <?php echo htmlspecialchars((string)($booking['room_name'] ?? '—')); ?> · <?php echo htmlspecialchars($stayText($booking)); ?></span>
                         </a>
                         <span class="ck-chip<?php echo $roomLabel($booking) === 'Unassigned' ? ' ck-chip--muted' : ''; ?>"><i class="fas fa-door-open"></i> <?php echo htmlspecialchars($roomLabel($booking)); ?></span>
                         <span class="ck-row__meta">

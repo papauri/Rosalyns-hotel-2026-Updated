@@ -613,7 +613,8 @@
 /* Tablet portrait */
 @media (max-width: 900px) {
     .ck-row { grid-template-columns: auto minmax(0, 1fr) auto; }
-    .ck-row .ck-chip { display: none; }
+    /* The room stays on screen (owner: room number always matters): it moves under the guest line. */
+    .ck-row .ck-chip { grid-column: 2; justify-self: start; white-space: normal; margin-top: -6px; }
     .ck-row__meta { display: none; }
     .ck-rows .ck-row__main span { white-space: normal; }
 }
