@@ -920,74 +920,28 @@ $filterStatus         = '';
 $filterHealth         = '';
 $filterKitchenStatus  = '';
 $hasActiveFilter      = false; // set inside try block when filters are parsed
+$soFilters            = [];
 if (!$error || strpos($error, 'not yet') === false) {
     try {
         // ---- Filter parsing (drives the clickable shift-cards) ----
-        $filterDate           = $_GET['date'] ?? '';
-        $filterMethod         = $_GET['payment_method'] ?? '';
-        $filterOrderType      = $_GET['order_type'] ?? '';
-        $filterHour           = $_GET['hour'] ?? '';
-        $filterStatus         = $_GET['status'] ?? '';
-        $filterHealth         = $_GET['health'] ?? '';
-        $filterKitchenStatus  = $_GET['kitchen_status'] ?? '';
-        $hasActiveFilter      = false; // default; set to true below when a filter is active
-        $allowedMethods       = ['cash', 'mobile_money', 'card_manual', 'card_pos', 'unassigned'];
-        $allowedStatus        = ['placed', 'paid', 'completed', 'cancelled', 'voided', 'parked'];
-        // Single DB values
-        $allowedKitchenStatus = ['new', 'pending', 'in_progress', 'preparing', 'ready', 'collection', 'served', 'recalled'];
-        // Pipeline-stage group aliases (map to IN clauses — same groupings the ops snapshot uses)
-        $kitchenStatusGroups  = [
-            'awaiting_prep' => ['new', 'pending'],
-            'in_progress_all' => ['in_progress', 'preparing'],
-            'ready_all'       => ['ready', 'collection'],
-        ];
-        $whereClauses   = [];
-        $whereParams    = [];
-        if ($filterDate === 'today') {
-            // Settled orders belong to the day they were PAID (a tab opened last night and paid today is
-            // today's sale, as on the dashboard card); everything else to the day it was opened.
-            $whereClauses[] = in_array($filterStatus, ['paid', 'completed', 'settled'], true)
-                ? 'DATE(COALESCE(o.paid_at, o.created_at)) = CURDATE()'
-                : 'DATE(o.created_at) = CURDATE()';
-        }
-        if ($filterMethod === 'unassigned') {
-            $whereClauses[] = "(o.payment_method IS NULL OR TRIM(o.payment_method) = '')";
-        } elseif (in_array($filterMethod, $allowedMethods, true)) {
-            $whereClauses[] = 'o.payment_method = ?';
-            $whereParams[]  = $filterMethod;
-        }
-        if ($filterOrderType !== '' && preg_match('/^[a-z_]+$/', (string)$filterOrderType) === 1) {
-            $whereClauses[] = 'o.order_type = ?';
-            $whereParams[]  = $filterOrderType;
-        } else {
-            $filterOrderType = '';
-        }
-        if ($filterHour !== '' && ctype_digit((string)$filterHour) && (int)$filterHour >= 0 && (int)$filterHour <= 23) {
-            $whereClauses[] = 'HOUR(o.created_at) = ?';
-            $whereParams[]  = (int)$filterHour;
-        } else {
-            $filterHour = '';
-        }
-        if ($filterStatus === 'settled') {
-            // Paid at the till or closed through another path (both are sales).
-            $whereClauses[] = "o.status IN ('paid','completed')";
-        } elseif (in_array($filterStatus, $allowedStatus, true)) {
-            $whereClauses[] = 'o.status = ?';
-            $whereParams[]  = $filterStatus;
-        }
-        if (isset($kitchenStatusGroups[$filterKitchenStatus])) {
-            $placeholders   = implode(',', array_fill(0, count($kitchenStatusGroups[$filterKitchenStatus]), '?'));
-            $whereClauses[] = 'o.kitchen_status IN (' . $placeholders . ')';
-            foreach ($kitchenStatusGroups[$filterKitchenStatus] as $ks) {
-                $whereParams[] = $ks;
-            }
-        } elseif (in_array($filterKitchenStatus, $allowedKitchenStatus, true)) {
-            $whereClauses[] = 'o.kitchen_status = ?';
-            $whereParams[]  = $filterKitchenStatus;
-        }
+        // One trading window for the whole page (cards AND list), computed once so a load that
+        // straddles opening time cannot mix two days. The list clauses come from the pure builder in
+        // includes/stock-orders-filters.php: each card links to exactly the rows it counts.
+        require_once __DIR__ . '/includes/pos-shift-totals.php';
+        require_once __DIR__ . '/includes/stock-orders-filters.php';
+        $soShiftWindow = rh_station_union_trading_window(); // trading day: opening to next opening (owner 2026-11-10)
+        $soFilters            = rh_so_normalize_filters($_GET);
+        $filterDate           = $soFilters['date'];
+        $filterMethod         = $soFilters['payment_method'];
+        $filterOrderType      = $soFilters['order_type'];
+        $filterHour           = $soFilters['hour'];
+        $filterStatus         = $soFilters['status'];
+        $filterHealth         = $soFilters['health'];
+        $filterKitchenStatus  = $soFilters['kitchen_status'];
+        [$whereClauses, $whereParams] = rh_so_list_where($soFilters, $soShiftWindow['start_sql'], $soShiftWindow['trading_end_sql']);
         $whereSql = $whereClauses ? ('WHERE ' . implode(' AND ', $whereClauses)) : '';
         $activeFilters = compact('filterDate', 'filterMethod', 'filterOrderType', 'filterHour', 'filterStatus', 'filterHealth', 'filterKitchenStatus');
-        $hasActiveFilter = $filterDate || $filterMethod || $filterOrderType || $filterHour || $filterStatus || $filterHealth || $filterKitchenStatus;
+        $hasActiveFilter = implode('', $soFilters) !== ''; // hour '0' is a filter too
 
         $orderStmt = $pdo->prepare("
             SELECT o.*, u.full_name AS created_by_name, vu.full_name AS voided_by_name,
@@ -1071,8 +1025,7 @@ if (!$error || strpos($error, 'not yet') === false) {
         // opened yesterday and settled today is today's cash), split bills are read per leg, tips
         // are cash in the drawer, and a sale refunded/voided later stays in its window with the
         // payout shown separately. Window is the trading window, not DATE(created_at)=CURDATE().
-        require_once __DIR__ . '/includes/pos-shift-totals.php';
-        $soShiftWindow = rh_station_union_trading_window(); // trading day: opening to next opening (owner 2026-11-10)
+        // $soShiftWindow: computed once above, before the filters.
         $soShiftTotals = rh_pos_shift_totals($pdo, null, $soShiftWindow['start_sql'], $soShiftWindow['trading_end_sql'], $soShiftWindow['start_sql']);
         $shiftStmt = $pdo->prepare("SELECT COUNT(*) AS orders_today FROM stock_orders WHERE created_at >= ? AND created_at < ?");
         $shiftStmt->execute([$soShiftWindow['start_sql'], $soShiftWindow['trading_end_sql']]);
@@ -1092,23 +1045,26 @@ if (!$error || strpos($error, 'not yet') === false) {
         $shift['earlier_tabs_n']   = (int)($soShiftTotals['settled_from_tabs_count'] ?? 0);
         $shift['earlier_tabs_amt'] = (float)($soShiftTotals['settled_from_tabs_amount'] ?? 0);
 
+        $soNotRs = rh_so_not_room_service_sql('o'); // same rule as the list's order_type=non_room_service
         $opsStmt = $pdo->query("
             SELECT
                 SUM(CASE WHEN status = 'placed' THEN 1 ELSE 0 END) AS open_orders,
                 SUM(CASE WHEN status = 'placed' AND order_type = 'room_service' THEN 1 ELSE 0 END) AS open_room_service,
-                SUM(CASE WHEN status = 'placed' AND order_type <> 'room_service' THEN 1 ELSE 0 END) AS open_walk_in,
+                SUM(CASE WHEN status = 'placed' AND $soNotRs THEN 1 ELSE 0 END) AS open_walk_in,
                 SUM(CASE WHEN status = 'placed' AND kitchen_status IN ('new', 'pending') THEN 1 ELSE 0 END) AS awaiting_prep,
                 SUM(CASE WHEN status = 'placed' AND kitchen_status IN ('in_progress', 'preparing') THEN 1 ELSE 0 END) AS in_progress,
                 SUM(CASE WHEN status = 'placed' AND kitchen_status IN ('ready', 'collection') THEN 1 ELSE 0 END) AS ready_to_serve,
                 SUM(CASE WHEN status = 'placed' AND kitchen_status = 'served' THEN 1 ELSE 0 END) AS awaiting_payment,
-                SUM(CASE WHEN status IN ('paid', 'completed') AND DATE(COALESCE(paid_at, updated_at, created_at)) = CURDATE() THEN 1 ELSE 0 END) AS settled_today,
                 SUM(CASE WHEN status = 'cancelled' AND DATE(updated_at) = CURDATE() THEN 1 ELSE 0 END) AS cancelled_today,
                 SUM(CASE WHEN status = 'voided' AND DATE(updated_at) = CURDATE() THEN 1 ELSE 0 END) AS voided_today,
-                COUNT(DISTINCT CASE WHEN status = 'placed' AND order_type <> 'room_service' AND table_number IS NOT NULL AND TRIM(table_number) <> '' THEN table_number END) AS active_tables,
+                COUNT(DISTINCT CASE WHEN status = 'placed' AND $soNotRs AND table_number IS NOT NULL AND TRIM(table_number) <> '' THEN table_number END) AS active_tables,
                 COUNT(DISTINCT CASE WHEN status = 'placed' AND order_type = 'room_service' AND table_number IS NOT NULL AND TRIM(table_number) <> '' THEN table_number END) AS active_rooms
-            FROM stock_orders
+            FROM stock_orders o
         ");
         $operationsSnapshot = array_merge($operationsSnapshot, ($opsStmt->fetch(PDO::FETCH_ASSOC) ?: []));
+        // Settled today = orders SOLD in the trading window (by payment time, as the till Z-report counts
+        // them; later refunds/voids stay in): the Avg Ticket divisor, listed by status=sold.
+        $operationsSnapshot['settled_today'] = (int)($shift['settled_today_n'] ?? 0);
         $ordersSettledToday = (float)($shift['settled_today_n'] ?? 0);
         $operationsSnapshot['avg_ticket_today'] = $ordersSettledToday > 0 ? round(((float)($shift['revenue_today'] ?? 0)) / $ordersSettledToday, 2) : 0;
 
@@ -1227,7 +1183,10 @@ if (!$error || strpos($error, 'not yet') === false) {
         $paymentMixToday = array_values($mixMap);
         usort($paymentMixToday, function ($a, $b) { return $b['amount_total'] <=> $a['amount_total']; });
 
-        $topItemsStmt = $pdo->query("
+        // Top items, hourly bars and channels: orders STARTED in today's trading window (created_at),
+        // the same rule as the list they open (date=today with hour / order_type).
+        $soCreatedParams = [$soShiftWindow['start_sql'], $soShiftWindow['trading_end_sql']];
+        $topItemsStmt = $pdo->prepare("
             SELECT
                 soi.item_name,
                 soi.menu_type,
@@ -1236,39 +1195,42 @@ if (!$error || strpos($error, 'not yet') === false) {
                 SUM(CASE WHEN soi.kds_status IN ('served', 'ready', 'collection') THEN soi.quantity ELSE 0 END) AS progressed_qty
             FROM stock_order_items soi
             INNER JOIN stock_orders o ON o.id = soi.order_id
-            WHERE DATE(o.created_at) = CURDATE()
+            WHERE o.created_at >= ? AND o.created_at < ?
               AND o.status NOT IN ('cancelled', 'voided')
             GROUP BY soi.item_name, soi.menu_type
             ORDER BY quantity_total DESC, revenue_total DESC
             LIMIT 10
         ");
+        $topItemsStmt->execute($soCreatedParams);
         $topSellingItemsToday = $topItemsStmt->fetchAll(PDO::FETCH_ASSOC);
 
         // Hourly activity breakdown today (orders + settled revenue per hour)
-        $hourlyStmt = $pdo->query("
+        $hourlyStmt = $pdo->prepare("
             SELECT
                 HOUR(created_at) AS hour,
                 COUNT(*) AS orders_count,
                 COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount ELSE 0 END), 0) AS revenue
             FROM stock_orders
-            WHERE DATE(created_at) = CURDATE()
+            WHERE created_at >= ? AND created_at < ?
             GROUP BY HOUR(created_at)
             ORDER BY hour
         ");
+        $hourlyStmt->execute($soCreatedParams);
         $hourlyBreakdown = $hourlyStmt->fetchAll(PDO::FETCH_ASSOC);
 
         // Order channel / type split today
-        $channelStmt = $pdo->query("
+        $channelStmt = $pdo->prepare("
             SELECT
                 COALESCE(NULLIF(TRIM(order_type), ''), 'restaurant') AS order_type,
                 COUNT(*) AS orders_count,
                 COALESCE(SUM(CASE WHEN status IN ('paid','completed') THEN total_amount ELSE 0 END), 0) AS revenue,
                 SUM(CASE WHEN status NOT IN ('cancelled','voided') THEN 1 ELSE 0 END) AS active_count
             FROM stock_orders
-            WHERE DATE(created_at) = CURDATE()
+            WHERE created_at >= ? AND created_at < ?
             GROUP BY COALESCE(NULLIF(TRIM(order_type), ''), 'restaurant')
             ORDER BY revenue DESC
         ");
+        $channelStmt->execute($soCreatedParams);
         $orderTypeSplit = $channelStmt->fetchAll(PDO::FETCH_ASSOC);
 
         // Yesterday totals for delta comparison: the PREVIOUS trading window, on the same rules as
@@ -1309,6 +1271,11 @@ if (!$error || strpos($error, 'not yet') === false) {
 }
 
 $csrf_token = generateCsrfToken();
+// Needs Review counts the unbalanced orders in the CURRENT list, so its link keeps the current filters.
+$soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
+    array_filter($soFilters ?? [], static fn($v): bool => $v !== ''),
+    ['health' => 'review']
+));
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -1367,7 +1334,7 @@ $csrf_token = generateCsrfToken();
                 <div class="val"><?php echo $currency_symbol . ' ' . number_format((float)($shift['mobile_today'] ?? 0), 2); ?></div>
                 <div class="shift-card__sub">By payment time</div>
             </a>
-            <a class="shift-card<?php echo ($filterMethod === 'card_manual') ? ' active' : ''; ?>" href="stock-orders.php?date=today&payment_method=card_manual" title="Today's card orders">
+            <a class="shift-card<?php echo ($filterMethod === 'card') ? ' active' : ''; ?>" href="stock-orders.php?date=today&payment_method=card" title="Today's card orders">
                 <div class="lbl">Card <i class="help" aria-label="About card" data-tip="Card payments taken for orders paid in today&#x27;s trading window. Refund and void payouts are not taken off here.">?</i></div>
                 <div class="val"><?php echo $currency_symbol . ' ' . number_format((float)($shift['card_today'] ?? 0), 2); ?></div>
                 <div class="shift-card__sub">By payment time</div>
@@ -1376,7 +1343,7 @@ $csrf_token = generateCsrfToken();
                 <div class="lbl">Voids <i class="help" aria-label="About voids" data-tip="Orders voided in today&#x27;s trading window, paid or not: how many, and what they were worth.">?</i></div>
                 <div class="val"><?php echo (int)($shift['void_count_today'] ?? 0); ?> · <?php echo $currency_symbol . ' ' . number_format((float)($shift['voided_today'] ?? 0), 2); ?></div>
             </a>
-            <a class="shift-card<?php echo ((int)$healthSummary['unbalanced'] > 0) ? ' warn' : ''; ?><?php echo ($filterHealth === 'review') ? ' active' : ''; ?>" href="stock-orders.php?health=review" title="Orders that need manager review">
+            <a class="shift-card<?php echo ((int)$healthSummary['unbalanced'] > 0) ? ' warn' : ''; ?><?php echo ($filterHealth === 'review') ? ' active' : ''; ?>" href="<?php echo htmlspecialchars($soReviewHref, ENT_QUOTES, 'UTF-8'); ?>" title="Orders that need manager review">
                 <div class="lbl">Needs Review <i class="help" aria-label="About orders needing review" data-tip="Orders in the list below whose items, payments or room charges do not agree with each other. Tap to see them.">?</i></div>
                 <div class="val"><?php echo (int)$healthSummary['unbalanced']; ?></div>
             </a>
@@ -1390,9 +1357,12 @@ $csrf_token = generateCsrfToken();
             <div class="filter-bar">
                 <i class="fas fa-filter"></i>
                 <span>Filters:</span>
-                <?php if ($filterDate === 'today'): ?><span><strong>Today</strong></span><?php endif; ?>
+                <?php if ($filterDate === 'today'): ?>
+                    <?php $soBasisLabel = ['sale' => "paid in today's trading day", 'void' => "voided in today's trading day", 'settled' => "paid in today's trading day", 'created' => "started in today's trading day"][rh_so_date_basis($soFilters ?? [])] ?? "today's trading day"; ?>
+                    <span><strong>Today</strong> (<?php echo htmlspecialchars($soBasisLabel); ?><?php echo !empty($soShiftWindow['trading_window_label']) ? ', ' . htmlspecialchars($soShiftWindow['trading_window_label']) : ''; ?>)</span>
+                <?php endif; ?>
                 <?php if ($filterMethod): ?>
-                    <?php $filterMethodLabel = $filterMethod === 'unassigned' ? 'Unassigned' : ucwords(str_replace('_', ' ', $filterMethod)); ?>
+                    <?php $filterMethodLabel = $filterMethod === 'unassigned' ? 'Unassigned' : ($filterMethod === 'card' ? 'Card (manual and POS)' : ucwords(str_replace('_', ' ', $filterMethod))); ?>
                     <span>Method: <strong><?php echo htmlspecialchars($filterMethodLabel); ?></strong></span>
                 <?php endif; ?>
                 <?php if ($filterOrderType): ?>
@@ -1401,6 +1371,7 @@ $csrf_token = generateCsrfToken();
                         'walk_in' => 'Walk-In',
                         'dine_in' => 'Dine-In',
                         'room_service' => 'Room Service',
+                        'non_room_service' => 'All except room service',
                     ];
                     ?>
                     <span>Channel: <strong><?php echo htmlspecialchars($orderTypeLabels[$filterOrderType] ?? ucwords(str_replace('_', ' ', $filterOrderType))); ?></strong></span>
@@ -1415,7 +1386,7 @@ $csrf_token = generateCsrfToken();
                     ?>
                     <span>Hour: <strong><?php echo htmlspecialchars($formatHourLabel($filterHourStart) . ' - ' . $formatHourLabel($filterHourEnd)); ?></strong></span>
                 <?php endif; ?>
-                <?php if ($filterStatus): ?><span>Status: <strong><?php echo htmlspecialchars(ucfirst($filterStatus)); ?></strong></span><?php endif; ?>
+                <?php if ($filterStatus): ?><span>Status: <strong><?php echo htmlspecialchars($filterStatus === 'sold' ? 'Sold (paid; any later refund or void included)' : ($filterStatus === 'settled' ? 'Paid or completed' : ucfirst($filterStatus))); ?></strong></span><?php endif; ?>
                 <?php if ($filterKitchenStatus): ?>
                     <?php
                     $ksLabels = ['awaiting_prep' => 'Awaiting Prep', 'in_progress_all' => 'In Progress', 'ready_all' => 'Ready to Serve'];
@@ -1429,7 +1400,7 @@ $csrf_token = generateCsrfToken();
         <?php endif; ?>
 
         <?php if ((int)$healthSummary['unbalanced'] > 0): ?>
-            <a class="ops-banner ops-banner--warn" href="stock-orders.php?health=review#rh-results" title="Open the review queue for orders needing attention">
+            <a class="ops-banner ops-banner--warn" href="<?php echo htmlspecialchars($soReviewHref . '#rh-results', ENT_QUOTES, 'UTF-8'); ?>" title="Open the review queue for orders needing attention">
                 <div class="ops-banner__content">
                     <strong><i class="fas fa-triangle-exclamation"></i> Manager review needed:</strong>
                     <?php echo (int)$healthSummary['unbalanced']; ?> order(s) have accounting, folio, or room-service balance checks to review.
@@ -1549,7 +1520,7 @@ $csrf_token = generateCsrfToken();
                     <div class="lbl">Live Open Orders <i class="help" aria-label="About live open orders" data-tip="Orders still open (not yet paid or closed), from any day. Walk-in and room-service counts are shown underneath.">?</i></div>
                     <div class="val" style="font-size:22px;"><?php echo (int)($operationsSnapshot['open_orders'] ?? 0); ?></div>
                     <div style="font-size:11px;color:#6c757d;margin-top:3px;display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
-                        <a href="stock-orders.php?status=placed&order_type=walk_in"
+                        <a href="stock-orders.php?status=placed&order_type=non_room_service"
                             style="color:inherit;text-decoration:none;white-space:nowrap;"
                             title="View walk-in / dine-in orders"
                             onclick="event.stopPropagation();">
@@ -1697,7 +1668,7 @@ $csrf_token = generateCsrfToken();
                         ['label' => 'In Progress',       'val' => (int)($operationsSnapshot['in_progress'] ?? 0),      'icon' => 'fa-fire',            'color' => '#fd7e14', 'link' => 'stock-orders.php?status=placed&kitchen_status=in_progress_all', 'stage_key' => 'in_progress_all'],
                         ['label' => 'Ready to Serve',    'val' => (int)($operationsSnapshot['ready_to_serve'] ?? 0),   'icon' => 'fa-bell',            'color' => '#0d6efd', 'link' => 'stock-orders.php?status=placed&kitchen_status=ready_all',        'stage_key' => 'ready_all'],
                         ['label' => 'Awaiting Payment',  'val' => (int)($operationsSnapshot['awaiting_payment'] ?? 0), 'icon' => 'fa-credit-card',     'color' => '#dc3545', 'link' => 'stock-orders.php?status=placed&kitchen_status=served',            'stage_key' => 'served'],
-                        ['label' => 'Settled Today',     'val' => (int)($operationsSnapshot['settled_today'] ?? 0),    'icon' => 'fa-circle-check',    'color' => '#198754', 'link' => 'stock-orders.php?date=today&status=paid',                        'stage_key' => 'settled'],
+                        ['label' => 'Settled Today',     'val' => (int)($operationsSnapshot['settled_today'] ?? 0),    'icon' => 'fa-circle-check',    'color' => '#198754', 'link' => 'stock-orders.php?date=today&status=sold',                        'stage_key' => 'settled'],
                     ];
                     foreach ($pipeline as $idx => $stage):
                         $warn = ($stage['label'] === 'Awaiting Payment' && $stage['val'] > 0);
@@ -1706,7 +1677,7 @@ $csrf_token = generateCsrfToken();
                             ($stage['stage_key'] === 'in_progress_all' && $filterKitchenStatus === 'in_progress_all') ||
                             ($stage['stage_key'] === 'ready_all'       && $filterKitchenStatus === 'ready_all') ||
                             ($stage['stage_key'] === 'served'          && $filterKitchenStatus === 'served') ||
-                            ($stage['stage_key'] === 'settled'         && $filterDate === 'today' && $filterStatus === 'paid')
+                            ($stage['stage_key'] === 'settled'         && $filterDate === 'today' && $filterStatus === 'sold' && !$filterMethod)
                         );
                         $bgColor     = $isActiveStage ? '#e8f4fd' : ($warn ? '#fff3cd' : '#f8f9fa');
                         $borderColor = $isActiveStage ? '#0d6efd' : ($warn ? '#ffc107' : '#dee2e6');
@@ -1721,7 +1692,7 @@ $csrf_token = generateCsrfToken();
                             <div style="font-size:24px;font-weight:700;color:<?php echo $stage['color']; ?>;line-height:1.2;margin-top:4px;">
                                 <?php echo $stage['val']; ?>
                             </div>
-                            <div style="font-size:11px;color:#6c757d;line-height:1.3;"><?php echo htmlspecialchars($stage['label']); ?><?php $pipeTips = ['awaiting_prep' => 'Open orders the kitchen or bar has not started yet.', 'in_progress_all' => 'Open orders being prepared now.', 'ready_all' => 'Open orders ready to be taken to the guest.', 'served' => 'Open orders already served, waiting for the guest to pay.', 'settled' => 'Orders paid or completed today.']; if (isset($pipeTips[$stage['stage_key']])): ?> <i class="help" aria-label="About <?php echo htmlspecialchars($stage['label']); ?>" data-tip="<?php echo htmlspecialchars($pipeTips[$stage['stage_key']]); ?>">?</i><?php endif; ?></div>
+                            <div style="font-size:11px;color:#6c757d;line-height:1.3;"><?php echo htmlspecialchars($stage['label']); ?><?php $pipeTips = ['awaiting_prep' => 'Open orders the kitchen or bar has not started yet.', 'in_progress_all' => 'Open orders being prepared now.', 'ready_all' => 'Open orders ready to be taken to the guest.', 'served' => 'Open orders already served, waiting for the guest to pay.', 'settled' => "Orders paid in today's trading window, counted as the till end-of-shift report counts them (one later refunded or voided still counts)."]; if (isset($pipeTips[$stage['stage_key']])): ?> <i class="help" aria-label="About <?php echo htmlspecialchars($stage['label']); ?>" data-tip="<?php echo htmlspecialchars($pipeTips[$stage['stage_key']]); ?>">?</i><?php endif; ?></div>
                             <?php if ($isActiveStage): ?><div style="font-size:9px;margin-top:3px;color:#0d6efd;font-weight:700;">● Active Filter</div><?php endif; ?>
                         </a>
                         <?php if ($idx < count($pipeline) - 1): ?>
@@ -2687,7 +2658,7 @@ $csrf_token = generateCsrfToken();
                 </tbody>
             </table>
             <div class="stock-insight-actions">
-                <a href="stock-orders.php?date=today" class="btn btn-primary">Open today's orders</a>
+                <a href="stock-orders.php?date=today&status=sold" class="btn btn-primary">Open today's sales</a>
                 <a href="accounting-dashboard.php" class="btn btn-secondary">Open accounting dashboard</a>
             </div>
         </template>
@@ -2717,7 +2688,7 @@ $csrf_token = generateCsrfToken();
                 </tbody>
             </table>
             <div class="stock-insight-actions">
-                <a href="stock-orders.php?date=today&status=paid" class="btn btn-primary">Open settled orders</a>
+                <a href="stock-orders.php?date=today&status=sold" class="btn btn-primary">Open settled orders</a>
             </div>
         </template>
 
@@ -2767,7 +2738,8 @@ $csrf_token = generateCsrfToken();
                 </tbody>
             </table>
             <div class="stock-insight-actions">
-                <a href="stock-orders.php?date=today&payment_method=card_manual" class="btn btn-primary">Open manual card orders</a>
+                <a href="stock-orders.php?date=today&payment_method=card" class="btn btn-primary">Open card orders</a>
+                <a href="stock-orders.php?date=today&payment_method=card_manual" class="btn btn-secondary">Open manual card orders</a>
                 <a href="stock-orders.php?date=today&payment_method=card_pos" class="btn btn-secondary">Open POS card orders</a>
             </div>
         </template>
@@ -2783,7 +2755,7 @@ $csrf_token = generateCsrfToken();
             </table>
             <div class="stock-insight-actions">
                 <a href="stock-orders.php?date=today&status=voided" class="btn btn-primary">Open voided orders</a>
-                <a href="stock-orders.php?health=review" class="btn btn-secondary">Open review queue</a>
+                <a href="<?php echo htmlspecialchars($soReviewHref, ENT_QUOTES, 'UTF-8'); ?>" class="btn btn-secondary">Open review queue</a>
             </div>
         </template>
 
