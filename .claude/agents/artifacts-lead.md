@@ -72,6 +72,12 @@ invoices, backups watched from one place, staff and permissions managed remotely
   fictional sample businesses (one per type) and names, label them "Sample business", use plausible amounts.
   Never read live data to fill slides: no DB queries, no `.env`, no exports, no logs. Before handing back, grep
   the Showcase folder for the banned names and report the result.
+- **Proposal mode (owner 2026-11-12).** When the link carries a prospect's business name, the tour is a proposal for
+  that business: its name replaces the sample business in every page and mock, there is no "Sample business" tag and
+  no wording that names or amounts are made up, and every page has a short "How it works" explanation. The name comes
+  only from the link, never hard-coded; guests, staff, members and amounts stay invented and are never real data.
+  No provider or model names on show (the owner does not want prospects thinking "it's all AI"). The tour is to be
+  hosted on our own address for prospects, not sent as a claude.ai link.
 - **No impersonation, no false claims.** Show only what the code really does today (cite the file). No MRA,
   fiscalisation or tax-authority claims. Nothing the product doesn't do. No made-up customer counts or testimonials.
 - **Owner UI rules.** No AI-looking UI (no sparkles, wands, robots, "smart" labels). Every figure and column says
