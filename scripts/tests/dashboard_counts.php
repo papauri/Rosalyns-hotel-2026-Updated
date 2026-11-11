@@ -63,5 +63,40 @@ eq($overdue, 1, 'overdue departure = still checked in after the check-out date (
 // Tomorrow preview uses the same tentative note.
 eq(rh_fd_tentative_note(['arrivals' => 3, 'tentative_arrivals' => 1]), 'Tentative holds (not counted): 1', 'tomorrow tentative note');
 
+// Per-row departure money flags (BALANCE_TOLERANCE, not a raw 0.01).
+if (!defined('BALANCE_TOLERANCE')) define('BALANCE_TOLERANCE', 0.01);
+check(!rh_fd_departure_owes(['departure_state' => 'due', 'amount_due' => 0.01]), 'exactly the tolerance is settled');
+check(rh_fd_departure_owes(['departure_state' => 'due', 'amount_due' => 0.011]), 'just above the tolerance owes');
+check(!rh_fd_departure_owes(['departure_state' => 'overdue', 'amount_due' => 9000]), 'overdue owing is not in the due-today badge');
+check(rh_fd_departure_has_balance(['departure_state' => 'overdue', 'amount_due' => 9000]), 'overdue owing still has a balance (never "Settled")');
+check(!rh_fd_departure_has_balance(['departure_state' => 'departed', 'amount_due' => 100]), 'departed row has no live balance');
+check(!rh_fd_departure_has_balance(['departure_state' => 'due', 'amount_due' => -5]), 'credit is not a balance');
+
+// Check-ins popup subtitle: counts from COUNT queries, cap noted only when rows were cut.
+eq(rh_fd_checkins_subtitle(25, 15, 30), 'Everyone due in today, with their status: 25 still to arrive, 15 already arrived (showing first 30)', '40 check-ins, 30 shown -> real counts + cap note');
+eq(rh_fd_checkins_subtitle(3, 2, 5), 'Everyone due in today, with their status: 3 still to arrive, 2 already arrived', 'all shown -> no cap note');
+eq(rh_fd_checkins_subtitle(0, 0, 0), 'Everyone due in today, with their status: 0 still to arrive, 0 already arrived', 'empty day');
+
+// Source checks on the dashboard (no database).
+$dash = (string)file_get_contents($root . '/admin/dashboard.php');
+check(!preg_match('/>\s*0\.01\b/', $dash), 'dashboard: no raw > 0.01 money comparison');
+check(strpos($dash, '$departuresOwing = 0;') === false, 'dashboard: dead $departuresOwing = 0 removed');
+check(strpos($dash, "rh_gym_member_filter_where()") !== false && strpos($dash, "\$gmWhere['active']") !== false, 'dashboard: gym active members use the Gym Members Active rule');
+check(strpos($dash, "FROM gym_members WHERE status='active'\")") === false, 'dashboard: no raw status=active member count');
+check(strpos($dash, 'rh_fd_checkins_subtitle(') !== false && strpos($dash, 'count($rows) - $ciStillToArrive') === false, 'dashboard: check-ins popup counts do not come from the capped rows');
+check(strpos($dash, "count(\$roomServiceQueue)]") === false, 'dashboard: room-service tab badge is not the 10-row list length');
+foreach (["'contact-inquiries.php?status=new'", "'events-inquiries.php?status=pending'", "'gym-inquiries.php?status=new'", "'stock-orders.php?order_type=room_service&status=placed'", 'gym-members.php?filter=active'] as $lnk) {
+    check(strpos($dash, $lnk) !== false, "dashboard: chip opens $lnk");
+}
+check(strpos($dash, "gym_inquiries WHERE status='pending' OR status='new'") === false, 'dashboard: gym enquiry count = the New tab only');
+
+// admin-anchor.js filter keys land on the results.
+$js = (string)file_get_contents($root . '/admin/js/admin-anchor.js');
+if (check((bool)preg_match('~var FILTER_KEY = /(.+)/i;~', $js, $m), 'anchor: FILTER_KEY found')) {
+    $re = '/' . $m[1] . '/i';
+    foreach (['event_date', 'arrival', 'departure', 'status', 'filter', 'refund_status'] as $k) check((bool)preg_match($re, $k), "anchor: $k is a filter key");
+    foreach (['tab', 'id', 'flash', 'action'] as $k) check(!preg_match($re, $k), "anchor: $k is not a filter key");
+}
+
 echo "\n$pass passed, $fail failed\n";
 exit($fail ? 1 : 0);

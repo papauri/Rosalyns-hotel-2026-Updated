@@ -30,7 +30,7 @@
     var GAP = 12; // space kept between the header and the top of the results
     var NO_ANCHOR_PAGES = /\/(kds|bds|cds|pos|login|logout)\.php$/i;
     // Query keys that mean "this link changes what a list shows".
-    var FILTER_KEY = /^(status|filter\w*|health|kitchen_status|payment_method|order_type|hour|date\w*|category|type|stage|role|rating|reply|source|state|severity|level|method|search|q|refund_status|range|period|month|year|show|sort|order|page|p|\w+_page)$/i;
+    var FILTER_KEY = /^(status|filter\w*|health|kitchen_status|payment_method|order_type|hour|date\w*|category|type|stage|role|rating|reply|source|state|severity|level|method|search|q|refund_status|event_date|arrival|departure|range|period|month|year|show|sort|order|page|p|\w+_page)$/i;
     // Keys that are page sections more often than list filters: only anchor when the page marks its results.
     var SECTION_KEY = /^(tab|view|section)$/i;
     // Controls that filter a list in place (no reload).

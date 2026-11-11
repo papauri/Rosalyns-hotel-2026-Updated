@@ -11,6 +11,7 @@ require_once '../includes/station-hours.php';
 require_once '../includes/conference-pricing.php';
 require_once __DIR__ . '/includes/receivables.php';
 require_once __DIR__ . '/includes/front-desk-counts.php'; // arrivals / departures count rules shared with Bookings and End of Day
+require_once __DIR__ . '/includes/events-gym-filters.php'; // gym member tab rules shared with Gym Members (pure)
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -83,6 +84,7 @@ $gymDash = [
     'expiring_members' => 0,
 ];
 $roomServiceQueue = [];
+$roomServiceOpenCount = 0;
 $dayProgress = ['arrived' => 0, 'departed' => 0];
 $overdueDepartures = 0; // checked in past their checkout date
 $departureList = [];
@@ -382,11 +384,13 @@ if (!$is_card_insight_ajax) {
             $guestSvc['unread_contact']  = (int)$pdo->query("SELECT COUNT(*) FROM contact_inquiries WHERE status='new'")->fetchColumn();
         }
         if ($mod_gym) {
-            $guestSvc['pending_gym'] = (int)$pdo->query("SELECT COUNT(*) FROM gym_inquiries WHERE status='pending' OR status='new'")->fetchColumn();
+            $guestSvc['pending_gym'] = (int)$pdo->query("SELECT COUNT(*) FROM gym_inquiries WHERE status='new'")->fetchColumn(); // = Gym Enquiries "New" tab
             // Membership register (gym_members) — guarded until its migration runs.
             try {
-                $gymDash['active_members']   = (int)$pdo->query("SELECT COUNT(*) FROM gym_members WHERE status='active'")->fetchColumn();
-                $gymDash['expiring_members'] = (int)$pdo->query("SELECT COUNT(*) FROM gym_members WHERE status='active' AND expiry_date IS NOT NULL AND expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)")->fetchColumn();
+                // Same rules as the Gym Members Active / Expiring tabs (a lapsed member is Expired, not Active).
+                $gmWhere = rh_gym_member_filter_where();
+                $gymDash['active_members']   = (int)$pdo->query("SELECT COUNT(*) FROM gym_members WHERE " . $gmWhere['active'])->fetchColumn();
+                $gymDash['expiring_members'] = (int)$pdo->query("SELECT COUNT(*) FROM gym_members WHERE " . $gmWhere['expiring'])->fetchColumn();
             } catch (Throwable $e) { /* table pending migration */ }
         }
         if ($mod_events) {
@@ -410,8 +414,11 @@ if (!$is_card_insight_ajax) {
                 WHERE o.order_type='room_service' AND o.status IN ('placed','pending','confirmed')
                 ORDER BY o.created_at ASC LIMIT 10
             ")->fetchAll(PDO::FETCH_ASSOC);
+            // The tab badge counts every open order, not just the 10 listed.
+            $roomServiceOpenCount = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE order_type='room_service' AND status IN ('placed','pending','confirmed')")->fetchColumn();
         } catch (Throwable $e) {
             $roomServiceQueue = [];
+            $roomServiceOpenCount = 0;
         }
     }
 
@@ -653,7 +660,6 @@ if ($is_card_insight_ajax) {
             case 'checkins_today':
                 $payload['title'] = "Today's Check-ins";
                 $payload['subtitle'] = 'Everyone due in today, with their status';
-                $ciStillToArrive = 0; // the link below opens only these (Bookings "Today's Check-ins")
                 $payload['columns'] = [
                     ['key' => 'reference', 'label' => 'Booking'],
                     ['key' => 'guest', 'label' => 'Guest'],
@@ -692,12 +698,17 @@ if ($is_card_insight_ajax) {
                         'status' => ucfirst((string)$row['status']),
                         'payment' => ucfirst((string)$row['payment_status']),
                     ];
-                    if (rh_fd_is_still_to_arrive(['check_in_date' => $today, 'status' => $row['status']], $today)) {
-                        $ciStillToArrive++;
-                    }
                 }
-                $payload['subtitle'] = 'Everyone due in today, with their status: ' . $ciStillToArrive . ' still to arrive, '
-                    . (count($rows) - $ciStillToArrive) . ' already arrived';
+                // Both numbers counted with the list's own rules, not from the 30 rows shown (busy days have more).
+                $ciCount = $pdo->prepare("SELECT COALESCE(SUM(b.status IN ('confirmed','pending')), 0) AS still_to_arrive,
+                                                 COALESCE(SUM(b.status IN ('checked-in','checked-out')), 0) AS arrived
+                                          FROM bookings b
+                                          JOIN rooms r ON r.id = b.room_id
+                                          WHERE b.deleted_at IS NULL AND b.check_in_date = ? AND b.status IN ('confirmed','pending','checked-in','checked-out')");
+                $ciCount->execute([$today]);
+                $ciCounts = $ciCount->fetch(PDO::FETCH_ASSOC) ?: [];
+                $ciStillToArrive = (int)($ciCounts['still_to_arrive'] ?? 0);
+                $payload['subtitle'] = rh_fd_checkins_subtitle($ciStillToArrive, (int)($ciCounts['arrived'] ?? 0), count($rows));
                 $payload['link']['label'] = $ciStillToArrive > 0 ? 'Open the ' . $ciStillToArrive . ' still to arrive' : 'Open check-ins still to arrive';
                 $payload['empty'] = 'No check-ins are due today.';
                 break;
@@ -1241,7 +1252,7 @@ if ($is_card_insight_ajax) {
                     ['key' => 'total', 'label' => 'Total'],
                     ['key' => 'status', 'label' => 'Status'],
                 ];
-                $payload['link'] = ['href' => 'stock-orders.php?order_type=room_service', 'label' => 'Open room-service orders'];
+                $payload['link'] = ['href' => 'stock-orders.php?order_type=room_service&status=placed', 'label' => 'Open room-service orders'];
                 $stmt = $pdo->query("SELECT o.id AS order_id, o.reference, o.room_number, o.customer_name, o.total_amount, o.status,
                                             (SELECT COUNT(*) FROM stock_order_items oi WHERE oi.order_id = o.id) AS item_count
                                      FROM stock_orders o
@@ -1615,18 +1626,18 @@ if ($is_card_insight_ajax) {
                         'count' => (string)$unreadContact,
                         'priority' => $unreadContact > 0 ? 'High' : 'Low',
                         'detail' => 'Website contact messages awaiting first response',
-                        'action' => ['href' => 'contact-inquiries.php', 'label' => 'Contacts', 'target' => '_blank'],
+                        'action' => ['href' => 'contact-inquiries.php?status=new', 'label' => 'Contacts', 'target' => '_blank'],
                     ];
                     }
                 }
                 if ($mod_gym) {
-                    $pendingGym = (int)$pdo->query("SELECT COUNT(*) FROM gym_inquiries WHERE status IN ('pending', 'new')")->fetchColumn();
+                    $pendingGym = (int)$pdo->query("SELECT COUNT(*) FROM gym_inquiries WHERE status = 'new'")->fetchColumn();
                     $payload['rows'][] = [
                         'queue' => 'Gym inquiries pending',
                         'count' => (string)$pendingGym,
                         'priority' => $pendingGym > 0 ? 'Medium' : 'Low',
-                        'detail' => 'Membership/wellness requests not yet closed',
-                        'action' => ['href' => 'gym-inquiries.php', 'label' => 'Gym', 'target' => '_blank'],
+                        'detail' => 'New requests not yet answered',
+                        'action' => ['href' => 'gym-inquiries.php?status=new', 'label' => 'Gym', 'target' => '_blank'],
                     ];
                 }
                 if ($mod_website_cms && $mod_events && $dash_perm('events_bookings')) {
@@ -1637,7 +1648,7 @@ if ($is_card_insight_ajax) {
                             'count' => (string)$pendingEventsQueue,
                             'priority' => $pendingEventsQueue > 0 ? 'Medium' : 'Low',
                             'detail' => 'Event inquiries awaiting confirmation',
-                            'action' => ['href' => 'events-inquiries.php', 'label' => 'Events', 'target' => '_blank'],
+                            'action' => ['href' => 'events-inquiries.php?status=pending', 'label' => 'Events', 'target' => '_blank'],
                         ];
                     } catch (Throwable $e) { /* events table may not exist yet */ }
                 }
@@ -1720,7 +1731,7 @@ if ($is_card_insight_ajax) {
                         'metric' => 'Room-service orders open',
                         'current' => (string)$roomServiceOpen,
                         'detail' => 'Orders awaiting fulfilment or settlement',
-                        'action' => ['href' => 'stock-orders.php?order_type=room_service', 'label' => 'Room Service', 'target' => '_blank'],
+                        'action' => ['href' => 'stock-orders.php?order_type=room_service&status=placed', 'label' => 'Room Service', 'target' => '_blank'],
                     ];
                     $payload['rows'][] = [
                         'metric' => 'Room-service reminders due',
@@ -2034,7 +2045,6 @@ $currency_symbol = getSetting('currency_symbol');
         // Overdue guests (still in after their checkout date) count as departures still to do.
         $departuresTotal = (int)$today_checkouts + $dayProgress['departed'] + $overdueDepartures;
         $departuresStillToGo = (int)$today_checkouts + $overdueDepartures;
-        $departuresOwing = 0;
         // Due out today and owing: exactly the guests Bookings "Today's Check-outs" lists (overdue guests have their own chip).
         $departuresOwing = rh_fd_departures_owing($departureList);
 
@@ -2049,14 +2059,14 @@ $currency_symbol = getSetting('currency_symbol');
         $add($attn, $mod_bookings, $departuresOwing, 'Departures with a balance', 'fa-sack-dollar', 'red', 'bookings.php?filter=checkout_today', 'checkouts_today', 'Due out today, balance to collect before they leave');
         $add($attn, $mod_finance && $dash_perm('payments', 'refund_payment'), (int)$finance['refunds_pending'], 'Refunds to approve', 'fa-rotate-left', 'red', 'payments.php?refund_status=pending', 'refunds_pending');
         $add($attn, $mod_conference, (int)$pending_conference, 'Conference enquiries to answer', 'fa-users-gear', 'amber', 'conference-management.php?status=pending', 'pending_conference');
-        $add($attn, $mod_website_cms && $dash_perm('contact'), (int)$guestSvc['unread_contact'], 'Unread contact messages', 'fa-envelope', 'red', 'contact-inquiries.php');
+        $add($attn, $mod_website_cms && $dash_perm('contact'), (int)$guestSvc['unread_contact'], 'Unread contact messages', 'fa-envelope', 'red', 'contact-inquiries.php?status=new');
         $add($attn, $mod_website_cms && $dash_perm('reviews'), (int)$guestSvc['pending_reviews'], 'Reviews to moderate', 'fa-star', 'amber', 'reviews.php?status=pending');
-        $add($attn, $mod_website_cms && $mod_events && $dash_perm('events_bookings'), (int)$guestSvc['pending_events'], 'Event bookings pending', 'fa-calendar-check', 'amber', 'events-inquiries.php');
-        $add($attn, $mod_gym && $dash_perm('gym'), (int)$guestSvc['pending_gym'], 'Gym enquiries to answer', 'fa-dumbbell', 'amber', 'gym-inquiries.php');
+        $add($attn, $mod_website_cms && $mod_events && $dash_perm('events_bookings'), (int)$guestSvc['pending_events'], 'Event bookings pending', 'fa-calendar-check', 'amber', 'events-inquiries.php?status=pending');
+        $add($attn, $mod_gym && $dash_perm('gym'), (int)$guestSvc['pending_gym'], 'Gym enquiries to answer', 'fa-dumbbell', 'amber', 'gym-inquiries.php?status=new');
         $add($attn, $mod_gym && $dash_perm('gym'), (int)$gymDash['expiring_members'], 'Gym memberships expiring (30d)', 'fa-id-card', 'amber', 'gym-members.php?filter=expiring');
         $add($attn, $mod_housekeeping && $dash_perm('room_maintenance'), (int)$guestSvc['maintenance_open'], 'Rooms out of service', 'fa-screwdriver-wrench', 'red', 'room-maintenance.php');
         $add($attn, $mod_housekeeping && $dash_perm('housekeeping'), (int)$guestSvc['housekeeping_due'], 'Housekeeping tasks due', 'fa-broom', 'amber', 'housekeeping.php');
-        $add($attn, $mod_roomsvc && $dash_perm('stock_orders'), (int)$ops['room_service_pending'], 'Room-service orders open', 'fa-bell-concierge', 'amber', 'stock-orders.php?order_type=room_service', 'room_service_pending');
+        $add($attn, $mod_roomsvc && $dash_perm('stock_orders'), (int)$ops['room_service_pending'], 'Room-service orders open', 'fa-bell-concierge', 'amber', 'stock-orders.php?order_type=room_service&status=placed', 'room_service_pending');
         $add($attn, $mod_roomsvc && $dash_perm('stock_orders'), (int)$ops['room_service_reminders_due'], 'Room-service reminders due', 'fa-bell', 'amber', 'stock-orders.php?order_type=room_service', 'room_service_reminders_due', 'Rooms with no order served today');
         $add($attn, $mod_orders && $mod_bookings, (int)$ops['open_tabs'], isRestaurantEnabled() ? 'Open tabs awaiting payment' : 'Orders awaiting payment', 'fa-receipt', 'amber', 'stock-orders.php?status=placed', 'open_tabs');
         $add($attn, $mod_stock && $dash_perm('stock_batches'), (int)$stock['expired_batches'], 'Expired stock batches', 'fa-skull-crossbones', 'red', 'stock-batches.php');
@@ -2217,7 +2227,7 @@ $currency_symbol = getSetting('currency_symbol');
                 <?php endif; ?>
             <?php endif; ?>
             <?php if ($mod_gym && !$mod_bookings): ?>
-                <a class="ck-kpi<?php echo $mod_pos ? '' : ' ck-kpi--dark'; ?>" href="gym-members.php">
+                <a class="ck-kpi<?php echo $mod_pos ? '' : ' ck-kpi--dark'; ?>" href="gym-members.php?filter=active">
                     <span class="ck-kpi__icon"><i class="fas fa-id-card"></i></span>
                     <span class="ck-kpi__label">Active members</span>
                     <span class="ck-kpi__value"><?php echo (int)$gymDash['active_members']; ?></span>
@@ -2225,7 +2235,7 @@ $currency_symbol = getSetting('currency_symbol');
                 </a>
             <?php endif; ?>
             <?php if ($mod_gym && $mod_bookings): ?>
-                <a class="ck-kpi" href="gym-members.php">
+                <a class="ck-kpi" href="gym-members.php?filter=active">
                     <span class="ck-kpi__icon"><i class="fas fa-dumbbell"></i></span>
                     <span class="ck-kpi__label">Gym members</span>
                     <span class="ck-kpi__value"><?php echo (int)$gymDash['active_members']; ?></span>
@@ -2271,7 +2281,7 @@ $currency_symbol = getSetting('currency_symbol');
                 $todayTabs['departures'] = ['Departures', count($departureList)];
             }
             if ($mod_conference) { $todayTabs['events'] = ['Events', count($today_conference_events)]; }
-            if ($mod_roomsvc) { $todayTabs['roomservice'] = ['Room service', count($roomServiceQueue)]; }
+            if ($mod_roomsvc) { $todayTabs['roomservice'] = ['Room service', max($roomServiceOpenCount, count($roomServiceQueue))]; }
             ?>
             <?php if ($todayTabs): ?>
             <!-- Today: the front-desk worklist -->
@@ -2307,7 +2317,7 @@ $currency_symbol = getSetting('currency_symbol');
                             <span class="ck-chip<?php echo $roomLabel($booking) === 'Unassigned' ? ' ck-chip--muted' : ''; ?>"><i class="fas fa-door-open"></i> <?php echo htmlspecialchars($roomLabel($booking)); ?></span>
                             <span class="ck-row__meta">
                                 <span class="badge badge-<?php echo htmlspecialchars($booking['status']); ?>" id="status-<?php echo (int)$booking['id']; ?>"><?php echo ucfirst(htmlspecialchars($booking['status'])); ?></span>
-                                <?php if ((float)$booking['amount_due'] > 0.01): ?>
+                                <?php if ((float)$booking['amount_due'] > BALANCE_TOLERANCE): ?>
                                     <small class="ck-due">Due <?php echo $money($booking['amount_due']); ?></small>
                                 <?php else: ?>
                                     <small class="ck-paid"><i class="fas fa-check"></i> Paid</small>
@@ -2336,7 +2346,7 @@ $currency_symbol = getSetting('currency_symbol');
                 <div class="ck-pane" role="tabpanel" data-ck-pane="departures" hidden>
                     <?php if ($departureList): ?>
                     <ul class="ck-rows">
-                        <?php foreach ($departureList as $d): $dState = $d['departure_state']; $owes = $dState !== 'departed' && (float)$d['amount_due'] > 0.01; ?>
+                        <?php foreach ($departureList as $d): $dState = $d['departure_state']; $owes = rh_fd_departure_owes($d); $hasBalance = rh_fd_departure_has_balance($d); ?>
                         <li class="ck-row">
                             <span class="ck-avatar ck-avatar--gold"><?php echo htmlspecialchars($initials((string)$d['guest_name'])); ?></span>
                             <a class="ck-row__main" href="booking-details.php?id=<?php echo (int)$d['id']; ?>">
@@ -2350,8 +2360,10 @@ $currency_symbol = getSetting('currency_symbol');
                                 <?php elseif ($dState === 'overdue'): ?>
                                     <span class="ck-due ck-due--strong">Overdue · was due <?php echo date('j M', strtotime($d['check_out_date'])); ?></span>
                                 <?php endif; ?>
-                                <?php if ($owes): ?>
+                                <?php if ($owes): /* the rows counted by "Departures with a balance" */ ?>
                                     <span class="ck-due ck-due--strong">Owes <?php echo $money($d['amount_due']); ?></span>
+                                <?php elseif ($hasBalance): /* overdue and owing: counted by "Overdue departures" */ ?>
+                                    <small class="ck-due">Balance <?php echo $money($d['amount_due']); ?></small>
                                 <?php elseif ($dState !== 'departed'): ?>
                                     <small class="ck-paid"><i class="fas fa-check"></i> Settled</small>
                                 <?php endif; ?>
@@ -2360,8 +2372,8 @@ $currency_symbol = getSetting('currency_symbol');
                                 <?php if ($dState === 'departed' || !$dash_perm('checkout_guest')): ?>
                                 <a class="ck-btn ck-btn--sm" href="booking-details.php?id=<?php echo (int)$d['id']; ?>"><i class="fas fa-eye"></i> View</a>
                                 <?php else: ?>
-                                <a class="ck-btn ck-btn--sm <?php echo $owes ? '' : 'ck-btn--primary'; ?>" href="booking-details.php?id=<?php echo (int)$d['id']; ?>">
-                                    <i class="fas <?php echo $owes ? 'fa-hand-holding-dollar' : 'fa-right-from-bracket'; ?>"></i> <?php echo $owes ? 'Settle &amp; check out' : 'Check out'; ?>
+                                <a class="ck-btn ck-btn--sm <?php echo $hasBalance ? '' : 'ck-btn--primary'; ?>" href="booking-details.php?id=<?php echo (int)$d['id']; ?>">
+                                    <i class="fas <?php echo $hasBalance ? 'fa-hand-holding-dollar' : 'fa-right-from-bracket'; ?>"></i> <?php echo $hasBalance ? 'Settle &amp; check out' : 'Check out'; ?>
                                 </a>
                                 <?php endif; ?>
                             </span>
@@ -2418,6 +2430,9 @@ $currency_symbol = getSetting('currency_symbol');
                         </li>
                         <?php endforeach; ?>
                     </ul>
+                    <?php if ($roomServiceOpenCount > count($roomServiceQueue)): ?>
+                        <p class="ck-panel__sub">Showing the oldest <?php echo count($roomServiceQueue); ?> of <?php echo (int)$roomServiceOpenCount; ?> open orders.<?php if ($can('stock-orders.php')): ?> <a href="stock-orders.php?order_type=room_service&amp;status=placed">See all</a><?php endif; ?></p>
+                    <?php endif; ?>
                     <?php else: ?>
                         <div class="ck-empty"><i class="fas fa-bell-concierge"></i><p>No room-service orders in flight.</p></div>
                     <?php endif; ?>
@@ -2600,7 +2615,7 @@ $currency_symbol = getSetting('currency_symbol');
                         <span class="ck-chip<?php echo $roomLabel($booking) === 'Unassigned' ? ' ck-chip--muted' : ''; ?>"><i class="fas fa-door-open"></i> <?php echo htmlspecialchars($roomLabel($booking)); ?></span>
                         <span class="ck-row__meta">
                             <span class="badge badge-<?php echo htmlspecialchars($booking['status']); ?>"><?php echo ucfirst(htmlspecialchars($booking['status'])); ?></span>
-                            <?php if ((float)$booking['amount_due'] > 0.01): ?><small class="ck-due">Due <?php echo $money($booking['amount_due']); ?></small><?php else: ?><small class="ck-paid"><i class="fas fa-check"></i> Paid</small><?php endif; ?>
+                            <?php if ((float)$booking['amount_due'] > BALANCE_TOLERANCE): ?><small class="ck-due">Due <?php echo $money($booking['amount_due']); ?></small><?php else: ?><small class="ck-paid"><i class="fas fa-check"></i> Paid</small><?php endif; ?>
                         </span>
                         <span class="ck-row__act">
                             <?php if ($booking['status'] === 'pending' && $dash_perm('edit_booking')): ?>

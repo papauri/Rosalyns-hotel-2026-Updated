@@ -8,7 +8,7 @@
  *   holds are NOT counted and are shown on their own line ("Tentative holds (not counted)") when there are any.
  * - Missed arrival (Calendar, Room Dashboard no-show count): confirmed or pending whose arrival date has passed.
  * - Departures with a balance (Dashboard chip -> Bookings "Today's Check-outs"): due out today, still in, owing.
- *   Overdue guests have their own "Overdue departures" chip.
+ *   Overdue guests have their own "Overdue departures" chip. Balances use BALANCE_TOLERANCE.
  */
 
 if (!function_exists('rh_fd_still_to_arrive_statuses')) {
@@ -45,12 +45,37 @@ if (!function_exists('rh_fd_still_to_arrive_statuses')) {
      */
     function rh_fd_departures_owing(array $departureList): int
     {
-        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
         $n = 0;
         foreach ($departureList as $d) {
-            if ((string)($d['departure_state'] ?? '') === 'due' && (float)($d['amount_due'] ?? 0) > $tol) $n++;
+            if (rh_fd_departure_owes($d)) $n++;
         }
         return $n;
+    }
+
+    /** One departure row counted by "Departures with a balance": due out today and owing above the tolerance. */
+    function rh_fd_departure_owes(array $d): bool
+    {
+        return (string)($d['departure_state'] ?? '') === 'due' && rh_fd_departure_has_balance($d);
+    }
+
+    /** Still in (due today or overdue) and owing above the tolerance: never shown as "Settled". */
+    function rh_fd_departure_has_balance(array $d): bool
+    {
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        return (string)($d['departure_state'] ?? '') !== 'departed' && (float)($d['amount_due'] ?? 0) > $tol;
+    }
+
+    /**
+     * Dashboard "Today's Check-ins" popup subtitle. $stillToArrive / $arrived come from COUNT queries (not the
+     * capped row list); $shown is how many rows the popup lists.
+     */
+    function rh_fd_checkins_subtitle(int $stillToArrive, int $arrived, int $shown): string
+    {
+        $s = 'Everyone due in today, with their status: ' . $stillToArrive . ' still to arrive, ' . $arrived . ' already arrived';
+        if ($shown < $stillToArrive + $arrived) {
+            $s .= ' (showing first ' . $shown . ')';
+        }
+        return $s;
     }
 
     /** End of Day: '' or "Tentative holds (not counted): N". */
