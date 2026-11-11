@@ -1515,7 +1515,7 @@ function rh_ai_t_arrivals_departures(PDO $db, array $user, array $a): array
 {
     $day = (string)($a['date'] ?? rh_ai_today());
     $st = $db->prepare("SELECT b.id, b.booking_reference, b.guest_name, b.status, b.adult_guests, b.child_guests, b.check_out_date, b.individual_room_id, r.name AS room_name, ir.room_number
-                        FROM bookings b JOIN rooms r ON b.room_id = r.id LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
+                        FROM bookings b LEFT JOIN rooms r ON b.room_id = r.id LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
                         WHERE b.deleted_at IS NULL AND b.check_in_date = ? AND b.status IN ('confirmed', 'pending', 'checked-in', 'checked-out')
                         ORDER BY FIELD(b.status, 'pending', 'confirmed', 'checked-in', 'checked-out'), b.created_at ASC");
     $st->execute([$day]);
@@ -1533,7 +1533,7 @@ function rh_ai_t_arrivals_departures(PDO $db, array $user, array $a): array
         }
     }
     $st = $db->prepare("SELECT b.id, b.booking_reference, b.guest_name, b.status, r.name AS room_name, ir.room_number
-                        FROM bookings b JOIN rooms r ON b.room_id = r.id LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
+                        FROM bookings b LEFT JOIN rooms r ON b.room_id = r.id LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
                         WHERE b.deleted_at IS NULL AND b.check_out_date = ? AND b.status IN ('checked-in', 'checked-out')
                         ORDER BY FIELD(b.status, 'checked-in', 'checked-out'), ir.room_number");
     $st->execute([$day]);
@@ -1567,7 +1567,7 @@ function rh_ai_t_arrivals_departures(PDO $db, array $user, array $a): array
 function rh_ai_t_in_house(PDO $db, array $user, array $a): array
 {
     $rows = $db->query("SELECT b.id, b.booking_reference, b.guest_name, b.check_out_date, r.name AS room_name, ir.room_number
-                        FROM bookings b JOIN rooms r ON b.room_id = r.id LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
+                        FROM bookings b LEFT JOIN rooms r ON b.room_id = r.id LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
                         WHERE b.deleted_at IS NULL AND b.status = 'checked-in' ORDER BY b.check_out_date, ir.room_number")->fetchAll(PDO::FETCH_ASSOC);
     $list = [];
     foreach (array_slice($rows, 0, RH_AI_TOOL_ROWS) as $r) {

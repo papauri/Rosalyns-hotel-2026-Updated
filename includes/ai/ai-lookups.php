@@ -425,9 +425,10 @@ function rh_ai_gym_member_lookup(PDO $db, array $user, string $q): array
         $one['balance_owed'] = 'not shown to this account (gym invoicing or reports access needed)';
     }
     try {
-        $st = $db->prepare("SELECT checked_in_at, checked_out_at FROM gym_attendance WHERE member_id = ? ORDER BY checked_in_at DESC LIMIT " . $n);
+        // "still in" only for today's open visit (Gym Check-In's in-the-gym rule, rh_gym_in_now_sql); an older open visit was never checked out.
+        $st = $db->prepare("SELECT checked_in_at, checked_out_at, (checked_in_at >= CURDATE()) AS today FROM gym_attendance WHERE member_id = ? ORDER BY checked_in_at DESC LIMIT " . $n);
         $st->execute([(int)$m['id']]);
-        $one['last_check_ins'] = array_map(static fn($r) => (string)$r['checked_in_at'] . ($r['checked_out_at'] ? ' to ' . substr((string)$r['checked_out_at'], 11, 5) : ' (still in)'), $st->fetchAll(PDO::FETCH_ASSOC)) ?: 'none';
+        $one['last_check_ins'] = array_map(static fn($r) => (string)$r['checked_in_at'] . ($r['checked_out_at'] ? ' to ' . substr((string)$r['checked_out_at'], 11, 5) : (!empty($r['today']) ? ' (still in)' : ' (not checked out)')), $st->fetchAll(PDO::FETCH_ASSOC)) ?: 'none';
     } catch (Throwable $e) {
         // no check-in table yet
     }
@@ -601,18 +602,20 @@ function rh_ai_events_lookup(PDO $db, array $user, string $q, bool $fuzzy = true
     $q = trim($q);
     $like = '%' . rh_ai_like($q) . '%';
     $found = [];
+    $confIds = []; // index in $found => conference_inquiries.id
     $link = null;
     if (rh_ai_module_on('conference') && rh_ai_perm_any($user, ['conference'])) {
         require_once dirname(__DIR__) . '/conference-pricing.php';
         $gross = function_exists('rh_conf_gross_sql') ? rh_conf_gross_sql('ci') : 'ci.total_with_vat';
         try {
-            $st = $db->prepare("SELECT ci.inquiry_reference, ci.company_name, ci.contact_person, ci.event_date, ci.end_date, ci.start_time, ci.end_time, ci.number_of_attendees, ci.event_type,
+            $st = $db->prepare("SELECT ci.id, ci.inquiry_reference, ci.company_name, ci.contact_person, ci.event_date, ci.end_date, ci.start_time, ci.end_time, ci.number_of_attendees, ci.event_type,
                                        ci.status, ci.payment_status, $gross AS gross, ci.amount_due, cr.name AS room_name
                                 FROM conference_inquiries ci LEFT JOIN conference_rooms cr ON cr.id = ci.conference_room_id
                                 WHERE ci.inquiry_reference = ? OR ci.company_name LIKE ? OR ci.contact_person LIKE ?
                                 ORDER BY (ci.inquiry_reference = ?) DESC, (ci.event_date >= CURDATE()) DESC, ABS(DATEDIFF(ci.event_date, CURDATE())) LIMIT " . ($n + 1));
             $st->execute([$q, $like, $like, $q]);
             foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $confIds[count($found)] = (int)$r['id']; // for the one-match link (conference-management.php?id= opens it)
                 $found[] = ['kind' => 'conference booking', 'reference' => $r['inquiry_reference'], 'guest_name' => (string)$r['company_name'] !== '' ? $r['company_name'] : $r['contact_person'],
                     'contact_person' => $r['contact_person'], 'date' => $r['event_date'] . ($r['end_date'] && $r['end_date'] !== $r['event_date'] ? ' to ' . $r['end_date'] : ''),
                     'time' => $r['start_time'] ? rh_ai_clock((string)$r['start_time']) . ($r['end_time'] ? '–' . rh_ai_clock((string)$r['end_time']) : '') : null,
@@ -645,6 +648,10 @@ function rh_ai_events_lookup(PDO $db, array $user, string $q, bool $fuzzy = true
         $out['link_label'] = $link[1];
     }
     if (count($found) === 1) {
+        if (!empty($confIds[0])) { // one conference booking: open that enquiry, as the Conference screen's ?id= does
+            $out['link'] = 'conference-management.php?id=' . $confIds[0];
+            $out['link_label'] = 'Open this conference booking';
+        }
         return $out + ['match' => 'one', 'booking' => $found[0]];
     }
     if ($found) {

@@ -695,7 +695,7 @@ function rh_ai_t_inventory_watch(PDO $db, array $user, array $a): array
         foreach (['expiring' => rh_stock_batch_expiring_sql('b'), 'expired' => rh_stock_batch_expired_sql('b')] as $k => $cond) {
             try {
                 $n = (int)$db->query("SELECT COUNT(*) FROM stock_batches b WHERE $cond")->fetchColumn();
-                $rows = $n > 0 ? $db->query("SELECT i.name, b.batch_number, b.quantity_remaining, b.expiry_date FROM stock_batches b INNER JOIN stock_ingredients i ON i.id = b.ingredient_id
+                $rows = $n > 0 ? $db->query("SELECT COALESCE(i.name, CONCAT('Deleted item #', b.ingredient_id)) AS name, b.batch_number, b.quantity_remaining, b.expiry_date FROM stock_batches b LEFT JOIN stock_ingredients i ON i.id = b.ingredient_id
                                              WHERE $cond ORDER BY b.expiry_date, b.id LIMIT 8")->fetchAll(PDO::FETCH_ASSOC) : [];
                 if ($k === 'expiring') {
                     $out['batches_expiring_within_7_days_total'] = $n;
