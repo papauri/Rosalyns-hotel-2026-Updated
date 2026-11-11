@@ -2316,8 +2316,24 @@ hr.menu-divider {
    the More menu. Tapping the row opens the booking summary (admin-components.js). Wider screens
    are untouched: the phone-only spans below stay hidden there. */
 table.bookings-table .bk-ph-stay,
-table.bookings-table .bk-ph-pay {
+table.bookings-table .bk-ph-pay,
+table.bookings-table .bk-ph-left {
     display: none;
+}
+
+/* Part-paid booking: "MWK 12,500.00 left to pay" under the payment badge (Payment column; phone row line 3). */
+.bk-left-to-pay {
+    color: var(--au-danger, #b4232f);
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+/* Up to 900px the Payment column is hidden (col-optional-md), so the Total cell carries "left to pay" (the phone row rule below lays it out at 640px and under). */
+@media (max-width: 900px) {
+    table.bookings-table:not(.mobile-enhanced) .bk-ph-left {
+        display: block;
+    }
 }
 
 @media (max-width: 640px) {
@@ -2490,7 +2506,8 @@ table.bookings-table .bk-ph-pay {
         white-space: nowrap;
     }
 
-    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) .bk-ph-pay {
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) .bk-ph-pay,
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) .bk-ph-left {
         display: inline-flex;
     }
 

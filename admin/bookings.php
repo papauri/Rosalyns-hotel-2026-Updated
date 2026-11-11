@@ -2827,7 +2827,9 @@ if ($active_tab_override === '' && $filter_status !== '') {
 
 // Pagination params
 $current_page = max(1, (int)($_GET['page'] ?? 1));
-$per_page     = 10;
+// Rows per page (?size= 10/25/50/100/all, default 10); "all" is settled once the list is counted (below).
+$bk_page_size = rh_bk_page_size($_GET['size'] ?? '10');
+$per_page     = $bk_page_size === 'all' ? 10 : (int)$bk_page_size;
 
 // Header sort runs on the server (the whole list, then page 1): fixed key -> ORDER BY map.
 require_once __DIR__ . '/includes/server-sort.php';
@@ -3338,6 +3340,11 @@ try {
         $list_count = (int)$cnt_stmt->fetchColumn();
     }
 
+    // Rows per page: "All" shows every row while the list has at most RH_BK_ALL_ROWS_MAX, else 100 a page.
+    $bk_size_resolved = rh_bk_resolve_page_size($bk_page_size, $list_count);
+    $bk_page_size = $bk_size_resolved['size'];
+    $per_page     = $bk_size_resolved['per_page'];
+
     // Clamp current page to valid range and compute offset
     $total_pages  = $list_count > 0 ? (int)ceil($list_count / $per_page) : 1;
     $current_page = min($current_page, $total_pages);
@@ -3354,7 +3361,10 @@ try {
                ) as actual_payment_status,
                (SELECT px.payment_reference FROM payments px
                 WHERE px.booking_type = 'room' AND px.booking_id = b.id AND px.deleted_at IS NULL
-                ORDER BY px.created_at DESC LIMIT 1) as payment_reference,
+                ORDER BY px.created_at DESC, px.id DESC LIMIT 1) as payment_reference,
+               (SELECT px.id FROM payments px
+                WHERE px.booking_type = 'room' AND px.booking_id = b.id AND px.deleted_at IS NULL
+                ORDER BY px.created_at DESC, px.id DESC LIMIT 1) as latest_payment_id,
                (SELECT px.payment_date FROM payments px
                 WHERE px.booking_type = 'room' AND px.booking_id = b.id AND px.deleted_at IS NULL
                 ORDER BY px.created_at DESC LIMIT 1) as last_payment_date,
@@ -3564,7 +3574,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             <form method="GET" data-live-search-form="room-bookings" class="bookings-toolbar__form">
                 <?php echo rh_server_sort_hidden($bk_sort_key, $bk_sort_dir); ?>
                 <?php /* Searching or filtering keeps the open tab and the overdue views (the notice + Clear is the way out). */ ?>
-                <?php foreach (['filter' => $bk_filter_key, 'arrival' => $filter_arrival, 'departure' => $filter_departure, 'balance' => $filter_balance] as $bk_keep_k => $bk_keep_v): if ($bk_keep_v !== ''): ?>
+                <?php foreach (['filter' => $bk_filter_key, 'arrival' => $filter_arrival, 'departure' => $filter_departure, 'balance' => $filter_balance, 'size' => ($bk_page_size !== '10' ? $bk_page_size : '')] as $bk_keep_k => $bk_keep_v): if ($bk_keep_v !== ''): ?>
                     <input type="hidden" name="<?php echo $bk_keep_k; ?>" value="<?php echo htmlspecialchars($bk_keep_v, ENT_QUOTES); ?>" data-bk-keep>
                 <?php endif; endforeach; ?>
                 <div class="bookings-toolbar__search">
@@ -3708,6 +3718,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 </h3>
 
                 <?php if (!empty($bookings)): ?>
+                    <?php $bk_can_open_payment = rhCanLinkTo((int)($user['id'] ?? 0), 'payment-details.php'); // once per page: link payment refs to the payment record ?>
                     <div class="table-responsive">
                         <table class="booking-table bookings-table rh-phone-actions rh-fold-actions" data-server-sort="1" data-hotel-today="<?php echo htmlspecialchars(date('Y-m-d'), ENT_QUOTES); ?>">
                             <thead>
@@ -3829,8 +3840,11 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                                 'refunded' => 'Refunded',
                                                 'partially_refunded' => 'Partial Refund'
                                             ];
+                                            // Part-paid: what is still to pay (amount_due), shown under the payment badge; 0 = nothing shown.
+                                            $bk_left_to_pay = $is_deleted_row ? 0.0 : rh_bk_left_to_pay($status, $booking['status'] ?? '', $booking['amount_due'] ?? 0, $booking['amount_paid'] ?? 0);
+                                            $bk_left_text = $bk_left_to_pay > 0 ? $currency_symbol . ' ' . number_format($bk_left_to_pay, 2) . ' left to pay' : '';
                                             ?>
-                                            <span class="bk-total-main"><strong><?php echo htmlspecialchars($currency_symbol); ?> <?php echo number_format(rh_booking_full_total($booking), 2); ?></strong><?php echo rh_booking_total_info_btn($booking); ?><span class="bk-ph-pay badge badge-<?php echo htmlspecialchars($status, ENT_QUOTES); ?>"><?php echo htmlspecialchars($status_labels[$status] ?? ucfirst($status)); ?></span></span>
+                                            <span class="bk-total-main"><strong><?php echo htmlspecialchars($currency_symbol); ?> <?php echo number_format(rh_booking_full_total($booking), 2); ?></strong><?php echo rh_booking_total_info_btn($booking); ?><span class="bk-ph-pay badge badge-<?php echo htmlspecialchars($status, ENT_QUOTES); ?>"><?php echo htmlspecialchars($status_labels[$status] ?? ucfirst($status)); ?></span><?php if ($bk_left_text !== ''): ?><span class="bk-ph-left bk-left-to-pay"><?php echo htmlspecialchars($bk_left_text); ?></span><?php endif; ?></span>
                                             <?php $bk_rate = rh_booked_rate_line($booking, null, ['currency' => $currency_symbol]); // the row's own columns, no query ?>
                                             <?php if ($bk_rate['ok']): ?>
                                                 <br><small class="bk-booked-rate" style="color:#666;white-space:nowrap;" title="<?php echo htmlspecialchars('Booked at ' . $bk_rate['text'] . '. Room rate a night × nights, at the price the booking was made at; today\'s room price does not change it.', ENT_QUOTES); ?>"><?php echo htmlspecialchars($bk_rate['compact'], ENT_QUOTES); ?></small>
@@ -3869,9 +3883,16 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                             <span class="badge badge-<?php echo htmlspecialchars($status, ENT_QUOTES); ?>">
                                                 <?php echo htmlspecialchars($status_labels[$status] ?? ucfirst($status)); ?>
                                             </span>
+                                            <?php if ($bk_left_text !== ''): ?>
+                                                <br><strong class="bk-left-to-pay"><?php echo htmlspecialchars($bk_left_text); ?></strong>
+                                            <?php endif; ?>
                                             <?php if ($booking['payment_reference']): ?>
                                                 <br><small style="color: #666; font-size: 10px;">
-                                                    <?php echo htmlspecialchars($booking['payment_reference']); ?>
+                                                    <?php if ($bk_can_open_payment && (int)($booking['latest_payment_id'] ?? 0) > 0): ?>
+                                                        <a href="payment-details.php?id=<?php echo (int)$booking['latest_payment_id']; ?>" class="bk-pay-ref-link" aria-label="<?php echo htmlspecialchars('Open payment ' . $booking['payment_reference'], ENT_QUOTES); ?>"><?php echo htmlspecialchars($booking['payment_reference']); ?></a>
+                                                    <?php else: ?>
+                                                        <?php echo htmlspecialchars($booking['payment_reference']); ?>
+                                                    <?php endif; ?>
                                                 </small>
                                             <?php endif; ?>
                                         </td>
@@ -4101,7 +4122,9 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     </div>
                 <?php endif; ?>
 
-                <?php if ($total_pages > 1): ?>
+                <?php /* Shown whenever the list has more than 10 rows (page links only when there are pages), so the
+                         rows-per-page choice is always there to switch back from 50 / All. */ ?>
+                <?php if ($total_pages > 1 || $list_count > 10): ?>
                     <?php
                     $pg_params = array_filter([
                         'search'        => $search_query,
@@ -4113,11 +4136,13 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         'arrival'       => $filter_arrival,
                         'departure'     => $filter_departure,
                         'balance'       => $filter_balance,
+                        'size'          => $bk_page_size !== '10' ? $bk_page_size : '',   // rows per page kept on every page link
                     ], fn($v) => $v !== '');
                     $pg_params = array_merge($pg_params, rh_server_sort_params($bk_sort_key, $bk_sort_dir));
                     $pg_base = 'bookings.php?' . (empty($pg_params) ? '' : http_build_query($pg_params) . '&');
                     ?>
                     <nav class="bookings-pagination" data-admin-pagination>
+                        <?php if ($total_pages > 1): ?>
                         <?php if ($current_page > 1): ?>
                             <a href="<?php echo htmlspecialchars($pg_base . 'page=' . ($current_page - 1), ENT_QUOTES); ?>" class="pg-btn" data-page-nav data-no-spa="1">&lsaquo; Prev</a>
                         <?php endif; ?>
@@ -4146,8 +4171,15 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         <?php if ($current_page < $total_pages): ?>
                             <a href="<?php echo htmlspecialchars($pg_base . 'page=' . ($current_page + 1), ENT_QUOTES); ?>" class="pg-btn" data-page-nav data-no-spa="1">Next &rsaquo;</a>
                         <?php endif; ?>
+                        <?php endif; /* page links */ ?>
 
                         <span class="pg-summary">Showing <?php echo (($current_page - 1) * $per_page) + 1; ?>–<?php echo min($current_page * $per_page, $list_count); ?> of <?php echo $list_count; ?></span>
+                        <?php /* Rows per page: the page script (data-bk-page-size) reloads the results at page 1, keeping filters, tab and sort. */ ?>
+                        <label class="pg-size">Show <select aria-label="Rows per page" data-bk-page-size data-no-autofilter>
+                            <?php foreach (array_merge(rh_bk_page_sizes(), rh_bk_all_size_allowed($list_count) ? ['all'] : []) as $bk_sz): ?>
+                                <option value="<?php echo htmlspecialchars($bk_sz, ENT_QUOTES); ?>"<?php echo $bk_sz === $bk_page_size ? ' selected' : ''; ?>><?php echo $bk_sz === 'all' ? 'All' : htmlspecialchars($bk_sz); ?></option>
+                            <?php endforeach; ?>
+                        </select> per page</label>
                     </nav>
                 <?php endif; ?>
             </div>
@@ -4243,7 +4275,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 if (!f || !f.matches || !f.matches('[data-live-search-form="room-bookings"]')) return;
                 const cur = new URLSearchParams(window.location.search);
                 f.querySelectorAll('input[data-bk-keep]').forEach(i => i.remove());
-                ['filter', 'payment_status', 'arrival', 'departure', 'balance'].forEach(k => {
+                ['filter', 'payment_status', 'arrival', 'departure', 'balance', 'size'].forEach(k => {
                     const v = cur.get(k);
                     if (!v) return;
                     const i = document.createElement('input');
@@ -5034,6 +5066,25 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         e.preventDefault();
                         loadBookingResults(pgBtn.href);
                     }
+                });
+            }
+
+            // Rows per page (the pager's data-bk-page-size select): back to page 1 at the new size, keeping every
+            // filter, tab and sort already in the URL; tabs, sort and search then keep ?size= from the URL.
+            if (!window.__bookingsPageSizeBound) {
+                window.__bookingsPageSizeBound = true;
+                document.addEventListener('change', function(e) {
+                    if (!/bookings\.php/i.test(window.location.pathname)) return;
+                    const sel = e.target && e.target.closest ? e.target.closest('select[data-bk-page-size]') : null;
+                    if (!sel) return;
+                    const url = new URL(window.location.href);
+                    ['page', 'action', 'booking_id', 'export'].forEach(k => url.searchParams.delete(k));
+                    if (sel.value === '10') {
+                        url.searchParams.delete('size');
+                    } else {
+                        url.searchParams.set('size', sel.value);
+                    }
+                    loadBookingResults(url.pathname + url.search);
                 });
             }
 

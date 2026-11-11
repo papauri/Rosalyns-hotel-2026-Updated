@@ -303,4 +303,67 @@ if (!function_exists('rh_bk_valid_date')) {
         if ($to !== '') return $verb . ' on or before ' . rh_bk_day_words($to);
         return '';
     }
+
+    /** Most rows the list's "All" choice shows at once; above it "All" falls back to 100 a page. */
+    if (!defined('RH_BK_ALL_ROWS_MAX')) {
+        define('RH_BK_ALL_ROWS_MAX', 500);
+    }
+
+    /** Rows-per-page choices on the Bookings list (?size=), besides "All" (rh_bk_all_size_allowed). */
+    function rh_bk_page_sizes(): array
+    {
+        return ['10', '25', '50', '100'];
+    }
+
+    /** ?size= cleaned: '10' | '25' | '50' | '100' | 'all'. Anything else (missing, junk, an array) = '10'. */
+    function rh_bk_page_size($raw): string
+    {
+        if (!is_string($raw) && !is_int($raw)) {
+            return '10';
+        }
+        $s = strtolower(trim((string)$raw));
+        return ($s === 'all' || in_array($s, rh_bk_page_sizes(), true)) ? $s : '10';
+    }
+
+    /** Whether the picker offers "All" for a list of $count rows. */
+    function rh_bk_all_size_allowed(int $count): bool
+    {
+        return $count <= RH_BK_ALL_ROWS_MAX;
+    }
+
+    /**
+     * The size in force once the list is counted, and its rows per page: 'all' = every row (at least 1) while the
+     * list has at most RH_BK_ALL_ROWS_MAX rows, else '100'. Returns ['size' => string, 'per_page' => int].
+     */
+    function rh_bk_resolve_page_size($size, int $count): array
+    {
+        $size = rh_bk_page_size($size);
+        if ($size === 'all') {
+            if (rh_bk_all_size_allowed($count)) {
+                return ['size' => 'all', 'per_page' => max(1, $count)];
+            }
+            $size = '100';
+        }
+        return ['size' => $size, 'per_page' => (int)$size];
+    }
+
+    /**
+     * What a part-paid booking still has to pay, shown under its payment badge; 0.0 = show nothing. Only when
+     * amount_due is above the tolerance AND the booking is part-paid (payment status 'partial', or something already
+     * paid). Never for cancelled / no-show / expired bookings (the Unpaid tab's rule) or a refunded one.
+     */
+    function rh_bk_left_to_pay($payment_status, $status, $amount_due, $amount_paid): float
+    {
+        $tol = rh_fd_balance_tolerance();
+        $due = round((float)$amount_due, 2);
+        if ($due <= $tol) {
+            return 0.0;
+        }
+        $p = strtolower(trim((string)$payment_status));
+        $s = strtolower(trim((string)$status));
+        if ($p === 'refunded' || in_array($s, ['cancelled', 'no-show', 'expired'], true)) {
+            return 0.0;
+        }
+        return ($p === 'partial' || (float)$amount_paid > $tol) ? $due : 0.0;
+    }
 }

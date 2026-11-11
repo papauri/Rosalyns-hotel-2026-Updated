@@ -154,7 +154,8 @@ eq(rh_bk_notice_title('', '', 'owing', ''), 'Balance still to pay', 'notice: bal
 eq(rh_bk_notice_title('', 'overdue', 'owing', ''), 'Overdue departures only', 'notice: overdue wins its own title');
 $bkSrc = (string)file_get_contents($root . '/admin/bookings.php');
 check(substr_count($bkSrc, "'departure', 'balance', 'payment_status', 'page'].forEach(k => params.delete(k));") === 2, 'tabs clear ?balance= like the other filters');
-check(strpos($bkSrc, "'balance' => \$filter_balance] as \$bk_keep_k") !== false && strpos($bkSrc, "['filter', 'payment_status', 'arrival', 'departure', 'balance'].forEach") !== false, 'search keeps ?balance= (server + client)');
+check(strpos($bkSrc, "'balance' => \$filter_balance, 'size' => (\$bk_page_size !== '10' ? \$bk_page_size : '')] as \$bk_keep_k") !== false && strpos($bkSrc, "['filter', 'payment_status', 'arrival', 'departure', 'balance', 'size'].forEach") !== false, 'search keeps ?balance= and ?size= (server + client)');
+check(strpos($bkSrc, "'size'          => \$bk_page_size !== '10' ? \$bk_page_size : '',") !== false, 'page links keep ?size=');
 check(strpos($bkSrc, "'balance'       => \$filter_balance,") !== false, 'pagination keeps ?balance=');
 check(strpos($bkSrc, '$export_balance[\'params\']') !== false && strpos($bkSrc, '$bk_balance_clause[\'params\']') !== false, 'list, badges and export bind the balance param');
 
@@ -208,6 +209,35 @@ eq(rh_bk_payment_flags('unpaid', 'expired'), ['paid' => false, 'unpaid' => false
 eq(rh_bk_payment_flags('refunded', 'confirmed'), ['paid' => false, 'unpaid' => false], 'refunded is neither');
 eq(rh_bk_payment_flags('', 'pending'), ['paid' => false, 'unpaid' => true], "'' is unpaid (SQL '' NOT IN -> true)");
 eq(rh_bk_payment_flags(null, 'pending'), ['paid' => false, 'unpaid' => false], 'NULL is neither (SQL NULL semantics)');
+
+// ---- rows per page (?size=): whitelist, "All" only up to RH_BK_ALL_ROWS_MAX rows
+eq(rh_bk_page_size(null), '10', 'absent size -> 10');
+eq(rh_bk_page_size('25'), '25', 'size 25 kept');
+eq(rh_bk_page_size(50), '50', 'int size kept');
+eq(rh_bk_page_size(' ALL '), 'all', 'All is case/space tolerant');
+eq(rh_bk_page_size('7'), '10', 'size not on the list -> 10');
+eq(rh_bk_page_size('1000'), '10', 'huge size -> 10');
+eq(rh_bk_page_size("25' OR 1=1"), '10', 'junk size -> 10');
+eq(rh_bk_page_size(['50']), '10', 'array size -> 10');
+eq(rh_bk_resolve_page_size('50', 3), ['size' => '50', 'per_page' => 50], '50 stays 50');
+eq(rh_bk_resolve_page_size('all', 120), ['size' => 'all', 'per_page' => 120], 'All = every row');
+eq(rh_bk_resolve_page_size('all', 500), ['size' => 'all', 'per_page' => 500], 'All at the limit');
+eq(rh_bk_resolve_page_size('all', 501), ['size' => '100', 'per_page' => 100], 'All above the limit -> 100');
+eq(rh_bk_resolve_page_size('all', 0), ['size' => 'all', 'per_page' => 1], 'All on an empty list -> at least 1');
+eq(rh_bk_resolve_page_size('x', 40), ['size' => '10', 'per_page' => 10], 'bad size resolves to 10');
+check(rh_bk_all_size_allowed(500) && !rh_bk_all_size_allowed(501), 'All offered up to 500 rows only');
+
+// ---- left to pay under the payment badge
+eq(rh_bk_left_to_pay('partial', 'confirmed', '12500', '5000'), 12500.0, 'partial shows amount due');
+eq(rh_bk_left_to_pay('unpaid', 'confirmed', 12500, 0), 0.0, 'nothing paid yet -> not part-paid');
+eq(rh_bk_left_to_pay('unpaid', 'checked-in', 7000, 3000), 7000.0, 'paid something + due -> shown even if status lags');
+eq(rh_bk_left_to_pay('partial', 'confirmed', 0.004, 5000), 0.0, 'due within tolerance -> nothing');
+eq(rh_bk_left_to_pay('partial', 'confirmed', 0, 5000), 0.0, 'stale partial with nothing due -> nothing');
+eq(rh_bk_left_to_pay('paid', 'confirmed', 0, 20000), 0.0, 'paid -> nothing');
+eq(rh_bk_left_to_pay('partial', 'cancelled', 8000, 2000), 0.0, 'cancelled -> nothing');
+eq(rh_bk_left_to_pay('partial', 'no-show', 8000, 2000), 0.0, 'no-show -> nothing');
+eq(rh_bk_left_to_pay('refunded', 'confirmed', 8000, 2000), 0.0, 'refunded -> nothing');
+eq(rh_bk_left_to_pay('partial', 'confirmed', '1234.567', '1'), 1234.57, 'rounded to 2 places');
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail ? 1 : 0);
