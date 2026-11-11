@@ -5,7 +5,9 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); } // nev
  * includes/email-send-log.php and the history builder in includes/booking-history-format.php are loaded.
  * Checks: kind words, result words, the context stack (merge, guard ends it, no leak), who sent it, copy text,
  * the "Email the guest" default tick and choice, the history fold (one step per email, 2-minute window), the
- * System Logs filters and timeline line. Usage (repo root): php scripts/tests/email_send_log_test.php
+ * System Logs filters and timeline line. Follow-up (2026-11-12): a quiet cancel still alerts the hotel by WhatsApp,
+ * test sends are kind 'test' with no account, one row per send in preview mode, history folds only through the fixed
+ * kind -> record-key map, the booking page writes cancellation_log. Usage (repo root): php scripts/tests/email_send_log_test.php
  */
 $root = dirname(__DIR__, 2);
 $pass = 0; $fail = 0;
@@ -156,18 +158,30 @@ $f = rh_email_log_filters(['em_from' => ['x'], 'em_q' => ['y']], '2026-11-12');
 check($f['from'] === '2026-11-06' && $f['q'] === '', 'filters: array values ignored');
 
 /* ── history: one step per email ── */
-check(rh_email_hist_matches('pre_arrival', 'Before-arrival email sent to the guest comm:prearrival'), 'match: pre-arrival comm row');
-check(rh_email_hist_matches('tentative_reminder', 'Automatic email sent: Tentative hold reminder auto:tentative_hold_reminder:r1'), 'match: tentative reminder auto row');
-check(rh_email_hist_matches('receipt', 'Receipt for PAY-1 emailed to the guest receipt:PAY-1'), 'match: receipt');
-check(!rh_email_hist_matches('invoice', 'Invoice sent via WhatsApp to +265...'), 'match: a WhatsApp record is never an email');
-check(!rh_email_hist_matches('booking_cancelled', 'Receipt for PAY-1 emailed'), 'match: different kinds do not match');
-check(!rh_email_hist_matches('', 'anything'), 'match: an empty kind (not sent / preview) never matches');
+check(rh_email_hist_matches('pre_arrival', ['comm:pre_arrival']), 'match: pre-arrival comm row (real stage key)');
+check(rh_email_hist_matches('post_stay_review', ['comm:post_stay']), 'match: after-stay comm row (real stage key)');
+check(rh_email_hist_matches('tentative_reminder', ['auto:tentative_hold_reminder:r1', 'reminder']), 'match: tentative reminder auto row');
+check(rh_email_hist_matches('tentative_reminder', ['tent:reminder_sent']), 'match: tentative reminder sent by staff');
+check(rh_email_hist_matches('receipt', ['receipt:PAY-1']), 'match: receipt');
+check(rh_email_hist_matches('invoice', ['email:' . md5('Invoice email sent by admin (Mercy)'), 'email:invoice']), 'match: invoice audit record');
+check(rh_email_hist_matches('unpaid_reminder', ['email:' . md5('Payment reminder sent'), 'reminder']), 'match: unpaid reminder timeline record');
+check(!rh_email_hist_matches('invoice', ['email:' . md5('Invoice sent via WhatsApp to +265')]), 'match: a WhatsApp record is never an email');
+check(!rh_email_hist_matches('booking_cancelled', ['receipt:PAY-1']), 'match: different kinds do not match');
+check(!rh_email_hist_matches('', ['comm:pre_arrival']), 'match: an empty kind (not sent / preview) never matches');
+// Near misses the old word match paired wrongly ('reminder', 'expired', 'status', 'change').
+check(!rh_email_hist_matches('booking_reminder', ['reminder', 'auto:unpaid_confirmed_reminder:r1']), 'near miss: booking reminder is not the unpaid-booking reminder');
+check(!rh_email_hist_matches('tentative_reminder', ['auto:unpaid_confirmed_reminder:r1', 'reminder']), 'near miss: hold reminder is not the unpaid reminder');
+check(!rh_email_hist_matches('pending_expired', ['auto:tentative_expired_notice:e1']), 'near miss: unconfirmed-expired is not hold-expired');
+check(!rh_email_hist_matches('payment_reminder', ['auto:unpaid_confirmed_reminder:r1']), 'near miss: overdue payment reminder is not the unpaid reminder');
+check(!rh_email_hist_matches('booking_status_update', ['status:confirmed']), 'near miss: a status email never folds into a status change');
+check(!rh_email_hist_matches('booking_modified', ['email:' . md5('booking_created')]), 'near miss: a changed-booking email is not the emails at booking');
+check(!rh_email_hist_matches('receipt', ['receipt:']), 'near miss: a bare prefix key is not a record');
 
 $staff = [9 => ['name' => 'Mercy Kamanga', 'username' => 'mercy', 'role' => 'receptionist']];
 $bk = ['id' => 77, 'booking_reference' => 'RBH-77', 'status' => 'confirmed', 'created_at' => '2026-11-10 08:00:00', 'room_id' => 1,
     'number_of_nights' => 2, 'check_in_date' => '2026-11-20', 'check_out_date' => '2026-11-22', 'total_amount' => 100000, 'total_with_vat' => 100000];
 $src = ['booking' => $bk, 'staff' => $staff, 'cur' => 'K',
-    'comms' => [['stage' => 'prearrival', 'sent_at' => '2026-11-18 08:00:00', 'sent_to' => 'guest@x.com']],
+    'comms' => [['stage' => 'pre_arrival', 'sent_at' => '2026-11-18 08:00:00', 'sent_to' => 'guest@x.com']],
     'email_log' => [
         ['id' => 1, 'sent_at' => '2026-11-18 08:01:30', 'status' => 'sent', 'to_email' => 'guest@x.com', 'cc' => 'front@hotel.mw (hidden)',
             'subject' => 'See you soon', 'email_kind' => 'pre_arrival', 'sent_by_label' => 'System (scheduler)', 'account_type' => 'room', 'account_id' => 77],
@@ -179,7 +193,7 @@ $src = ['booking' => $bk, 'staff' => $staff, 'cur' => 'K',
 ];
 $ev = rh_hist_build($src);
 $emails = array_values(array_filter($ev, function ($e) { return $e['kind'] === 'email'; }));
-$pre = array_values(array_filter($emails, function ($e) { return stripos($e['what'], 'before-arrival') !== false; }));
+$pre = array_values(array_filter($emails, function ($e) { return stripos($e['what'], 'arrival') !== false; }));
 check(count($pre) === 1, 'history: the before-arrival email shows once (send log folded into the older record)', json_encode(array_column($emails, 'what')));
 check(isset($pre[0]) && strpos($pre[0]['detail'], 'Copy: front@hotel.mw (hidden).') !== false && $pre[0]['who'] === 'System (scheduler)',
     'history: the folded step gains the copies and who', json_encode($pre[0] ?? null));
@@ -201,6 +215,108 @@ check(count($twoEmails) === 2, 'history: two sends and one older record -> one f
 $plain = $src; unset($plain['email_log']);
 $plainEmails = array_values(array_filter(rh_hist_build($plain), function ($e) { return $e['kind'] === 'email'; }));
 check(count($plainEmails) === 1 && $plainEmails[0]['who'] === 'System', 'history: without the log (before migration 081) nothing changes');
+
+// Near miss inside a whole history: a booking-reminder send 30s after the scheduler's unpaid reminder stays apart;
+// an invoice send folds into the invoice audit record, never into the WhatsApp one 20s away.
+$nm = ['booking' => $bk, 'staff' => $staff, 'cur' => 'K',
+    'auto_emails' => [['job' => 'unpaid_confirmed_reminder', 'stage' => 'r1', 'status' => 'sent', 'subject' => 'Please pay', 'recipient' => 'guest@x.com', 'sent_at' => '2026-11-13 09:00:00']],
+    'audit' => [
+        ['action' => 'email_sent', 'note' => 'Invoice sent via WhatsApp to +265999', 'performed_at' => '2026-11-14 10:00:20', 'performed_by' => 9],
+        ['action' => 'email_sent', 'note' => 'Invoice email sent by admin (Mercy Kamanga)', 'performed_at' => '2026-11-14 10:01:10', 'performed_by' => 9],
+    ],
+    'email_log' => [
+        ['id' => 21, 'sent_at' => '2026-11-13 09:00:30', 'status' => 'sent', 'to_email' => 'guest@x.com', 'subject' => 'Reminder', 'email_kind' => 'booking_reminder', 'sent_by_label' => 'Mercy Kamanga (receptionist)'],
+        ['id' => 22, 'sent_at' => '2026-11-14 10:00:00', 'status' => 'sent', 'to_email' => 'guest@x.com', 'subject' => 'Your invoice', 'email_kind' => 'invoice', 'sent_by_label' => 'Mercy Kamanga (receptionist)'],
+    ],
+];
+$nmEmails = array_values(array_filter(rh_hist_build($nm), function ($e) { return $e['kind'] === 'email'; }));
+$nmWhat = array_column($nmEmails, 'what');
+check(count(array_filter($nmWhat, function ($w) { return stripos($w, 'Booking reminder email sent') === 0; })) === 1
+    && count(array_filter($nmWhat, function ($w) { return stripos($w, 'Automatic email sent') === 0; })) === 1,
+    'near miss: booking reminder and the scheduler unpaid reminder 30s apart stay two steps', json_encode($nmWhat));
+$nmInv = array_values(array_filter($nmEmails, function ($e) { return strpos($e['detail'], 'Subject: Your invoice') !== false; }));
+check(count($nmInv) === 1 && strpos($nmInv[0]['detail'], 'Invoice email sent by admin') !== false && strpos($nmInv[0]['detail'], 'WhatsApp') === false,
+    'invoice: the send folds into the invoice email record, not the WhatsApp record 20s nearer', json_encode($nmEmails));
+check(count($nmEmails) === 4, 'near miss: four steps (unpaid reminder, booking reminder, WhatsApp invoice, emailed invoice)', json_encode($nmWhat));
+
+/* ── test sends (Automated Emails "Send test", email template tests) ── */
+check(rh_email_kind_label('test') === 'Test' && rh_email_kind_label('test_email') === 'Test', 'test: kind label (older test_email rows too)');
+check(rh_email_what(['email_kind' => 'test', 'status' => 'sent', 'to_email' => 'me@hotel.mw']) === 'Test email sent to me@hotel.mw', 'test: reads "Test email"');
+check(rh_email_log_filters(['em_kind' => 'test'], '2026-11-12')['kind'] === 'test', 'test: a kind filter of its own');
+check(rh_email_test_apply([], 'invoice', ['account_type' => 'room', 'account_id' => 7, 'account_ref' => 'RBH-7'], 'Your invoice')
+    === ['invoice', ['account_type' => 'room', 'account_id' => 7, 'account_ref' => 'RBH-7'], 'Your invoice'], 'test: a real send is unchanged');
+$tOuter = rh_email_context(['is_test' => 1, 'test_of' => 'Tentative hold reminder']);
+$tCtx = (function () { $emailCtx = rh_email_context(['kind' => 'tentative_reminder'] + rh_email_ctx_account('room', 0, 'SAMPLE-1001')); return rh_email_context_current(); })();
+$tOuter = null;
+rh_email_context_clear();
+[$tk, $ta, $ts] = rh_email_test_apply($tCtx, (string)$tCtx['kind'], ['account_type' => $tCtx['account_type'] ?? null, 'account_id' => null, 'account_ref' => $tCtx['account_ref'] ?? null], 'Your hold ends soon');
+check($tk === 'test' && $ta === ['account_type' => null, 'account_id' => null, 'account_ref' => null] && $ts === '[Test: Tentative hold reminder] Your hold ends soon',
+    'test: the sample send (inner sender kind + SAMPLE-1001) is logged as a test with no account', json_encode([$tk, $ta, $ts]));
+[$tk, , $ts] = rh_email_test_apply(['is_test' => 1], 'payment_reminder', [], 'Payment due');
+check($tk === 'test' && $ts === '[Test: Payment reminder] Payment due', 'test: no label given -> the real kind names it');
+[, , $ts] = rh_email_test_apply(['is_test' => 1], 'other', [], '[TEST] Booking confirmed');
+check($ts === '[Test: email template] Booking confirmed', 'test: the template page\'s own [TEST] prefix is not doubled');
+[, $ta] = rh_email_test_apply(['is_test' => 1], 'credit_note', ['account_type' => 'room', 'account_id' => 5, 'account_ref' => 'RBH-5'], 'x');
+check($ta['account_id'] === null && $ta['account_ref'] === null, 'test: an account passed on the row is cleared too');
+$jobsSrc = (string)file_get_contents($root . '/includes/auto-email-jobs.php');
+check(strpos($jobsSrc, "rh_email_context(['is_test' => 1, 'test_of' => rh_auto_sample_keys()[\$key]])") !== false && strpos($jobsSrc, "'test_email'") === false,
+    'test: Automated Emails "Send test" marks its context as a test');
+$bsSrc = (string)file_get_contents($root . '/admin/booking-settings.php');
+check(substr_count($bsSrc, "rh_email_context(['is_test' => 1") === 3, 'test: the three template/settings test sends are marked as tests');
+$logSrc = (string)file_get_contents($root . '/includes/email-send-log.php');
+check(strpos($logSrc, '[$kind, $acct, $subject] = rh_email_test_apply($ctx, $kind, $acct,') !== false, 'test: the writer applies the test rule last');
+
+/* ── one row per send in preview mode ── */
+$emailSrc = (string)file_get_contents($root . '/config/email.php');
+$invSrc = (string)file_get_contents($root . '/config/invoice.php');
+$unguarded = [];
+$guarded = 0;
+foreach (['config/email.php' => $emailSrc, 'config/invoice.php' => $invSrc] as $fn => $src) {
+    $off = 0;
+    while (($p = strpos($src, "rh_email_send_log_mail('failed'", $off)) !== false) {
+        $off = $p + 10;
+        $after = substr($src, $p, 700);
+        $fnEnd = strpos($after, "\nfunction ");
+        if ($fnEnd !== false) {
+            $after = substr($after, 0, $fnEnd);
+        }
+        if (strpos($after, 'createEmailPreview(') === false) {
+            continue; // no preview fallback after this failure: it must log 'failed'
+        }
+        $before = substr($src, max(0, $p - 120), min(120, $p));
+        if (preg_match('/if \(!\$(development_mode|dev_mode)\) \{[^\n]*\s*$/', $before)) {
+            $guarded++;
+        } else {
+            $unguarded[] = $fn . ' @' . substr_count(substr($src, 0, $p), "\n");
+        }
+    }
+}
+check(!$unguarded && $guarded === 4, 'preview: every failure with a preview fallback logs one row (preview), not failed + preview', json_encode([$guarded, $unguarded]));
+check(strpos($emailSrc, "rh_email_send_log_write(['status' => 'preview'") !== false, 'preview: the preview itself is still logged');
+
+/* ── quiet cancel: nothing to the guest, the hotel's WhatsApp alert still goes ── */
+$waSrc = (string)file_get_contents($root . '/includes/whatsapp-functions.php');
+check(strpos($waSrc, "function sendBookingCancelledWhatsApp(array \$booking, array \$room = [], string \$only = ''): array") !== false, 'quiet: WhatsApp cancel has a guest/hotel switch (default both)');
+check(strpos($waSrc, "\$guestPhone  = \$only === 'hotel' ? '' :") !== false && strpos($waSrc, "\$hotelPhone  = \$only === 'guest' ? '' :") !== false, 'quiet: hotel-only never reaches the guest phone');
+check(preg_match("/function sendBookingCancelledHotelAlert\(array \\\$booking\): array.*?isWhatsAppEnabled\(\).*?sendBookingCancelledWhatsApp\(\\\$booking, \\\$room, 'hotel'\)/s", $emailSrc) === 1,
+    'quiet: the hotel alert helper sends the hotel part only, when WhatsApp is on');
+$bdSrc = (string)file_get_contents($root . '/admin/booking-details.php');
+$bkSrc2 = (string)file_get_contents($root . '/admin/bookings.php');
+$tbSrc = (string)file_get_contents($root . '/admin/tentative-bookings.php');
+check(substr_count($bdSrc, 'sendBookingCancelledHotelAlert(') === 2 && substr_count($bkSrc2, 'sendBookingCancelledHotelAlert(') === 1 && substr_count($tbSrc, 'sendBookingCancelledHotelAlert(') === 1,
+    'quiet: every quiet branch (booking page single + group, All Bookings, holds) alerts the hotel');
+foreach (['booking page' => $bdSrc, 'All Bookings' => $bkSrc2, 'holds' => $tbSrc] as $nm => $s) {
+    check(preg_match("/rh_email_send_log_not_sent\('booking_cancelled'[^;]*;\s*(if \(rh_cancel_email_default_ticked\('list'[^\n]*\n\s*)?sendBookingCancelledHotelAlert\(/", $s) === 1, 'quiet: ' . $nm . ' alerts the hotel right after recording the decision');
+}
+// All Bookings: the box starts unticked for pending / tentative (never emailed before); cancelling those sends no new
+// hotel WhatsApp. Only a box staff really unticked (old rule would email) is a quiet cancel.
+check(preg_match("/if \(rh_cancel_email_default_ticked\('list', \(string\)\\\$cn\['previous_status'\]\)\) \{\s*sendBookingCancelledHotelAlert\(\\\$booking\);/", $bkSrc2) === 1,
+    'quiet: All Bookings alerts the hotel only when the old rule would have emailed (not for pending / tentative)');
+
+/* ── booking page cancel writes cancellation_log ── */
+check(substr_count($bdSrc, 'logCancellationToDatabase(') === 2, 'cancel log: booking page single and group both write cancellation_log');
+check(preg_match("/foreach \(\\\$grpRes\['cancelled'\] as \\\$gc\) \{.*?logCancellationToDatabase\(\(int\)\\\$gc\['id'\].*?\n\s{28}\}/s", $bdSrc) === 1, 'cancel log: one row per cancelled booking of a group (inside the loop)');
+check(substr_count($bdSrc, "['success' => false, 'message' => rh_cancel_email_skipped_reason()]") === 2, 'cancel log: unticked = not emailed, with the "Not sent:" status words');
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

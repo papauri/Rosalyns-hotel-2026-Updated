@@ -1853,7 +1853,9 @@ function sendEmailWithAttachmentAndCC(string $to, ?string $toName, string $subje
             $cc_list = implode(', ', $ccRecipients);
             logEmail($to, $toName, $subject, 'failed', $e->getMessage(), "CC: $cc_list");
         }
-        rh_email_send_log_mail('failed', $mail ?? null, $subject, $e->getMessage(), $to, $toName);
+        if (!$dev_mode) { // one send = one row: the preview below logs it as 'preview'
+            rh_email_send_log_mail('failed', $mail ?? null, $subject, $e->getMessage(), $to, $toName);
+        }
 
         // If development mode, show preview instead of failing
         if ($dev_mode) {

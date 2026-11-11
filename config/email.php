@@ -230,7 +230,9 @@ function sendEmail(string $to, ?string $toName, string $subject, string $htmlBod
             if ($email_log_enabled) {
                 logEmail($to, $toName, $subject, 'failed', $e->getMessage());
             }
-            rh_email_send_log_mail('failed', $mail ?? null, $subject, $e->getMessage(), $to, $toName);
+            if (!$development_mode) { // one send = one row: the preview below logs it as 'preview'
+                rh_email_send_log_mail('failed', $mail ?? null, $subject, $e->getMessage(), $to, $toName);
+            }
 
             // If development mode, show preview instead of failing
             if ($development_mode) {
@@ -353,7 +355,9 @@ function sendEmailWithAttachments(string $to, ?string $toName, string $subject, 
             if ($email_log_enabled) {
                 logEmail($to, $toName, $subject, 'failed', $e->getMessage(), 'attachments=' . count($attachments));
             }
-            rh_email_send_log_mail('failed', $mail ?? null, $subject, $e->getMessage(), $to, $toName);
+            if (!$development_mode) { // one send = one row: the preview below logs it as 'preview'
+                rh_email_send_log_mail('failed', $mail ?? null, $subject, $e->getMessage(), $to, $toName);
+            }
 
             if ($development_mode) {
                 return createEmailPreview($to, $toName, $subject, $htmlBody, $textBody);
@@ -4087,6 +4091,29 @@ function sendBookingCancelledEmail(array $booking, string $cancellation_reason =
 }
 
 /**
+ * A quiet cancel (staff unticked "Email the guest", owner 2026-11-12): nothing goes to the guest, but the hotel's own
+ * WhatsApp alert still goes when WhatsApp is on. Called after the cancel is saved; never throws.
+ */
+function sendBookingCancelledHotelAlert(array $booking): array
+{
+    global $pdo;
+    try {
+        if (!function_exists('sendBookingCancelledWhatsApp') || !function_exists('isWhatsAppEnabled') || !isWhatsAppEnabled()) {
+            return ['success' => false, 'message' => 'WhatsApp disabled'];
+        }
+        $stmt = $pdo->prepare("SELECT * FROM rooms WHERE id = ?");
+        $stmt->execute([$booking['room_id'] ?? 0]);
+        $room = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        $booking['room_name'] = $room['name'] ?? ($booking['room_name'] ?? '');
+        $r = sendBookingCancelledWhatsApp($booking, $room, 'hotel');
+        return $r['hotel'] ?? ['success' => false, 'message' => 'Unknown'];
+    } catch (\Throwable $e) {
+        error_log('sendBookingCancelledHotelAlert: ' . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
+    }
+}
+
+/**
  * Send booking room upgrade email
  */
 function sendBookingRoomUpgradeEmail(array $booking)
@@ -4276,7 +4303,9 @@ function sendEmailWithCC(string $to, ?string $toName, string $subject, string $h
         if ($email_log_enabled) {
             logEmail($to, $toName, $subject, 'failed', $e->getMessage());
         }
-        rh_email_send_log_mail('failed', $mail ?? null, $subject, $e->getMessage(), $to, $toName);
+        if (!$development_mode) { // one send = one row: the preview below logs it as 'preview'
+            rh_email_send_log_mail('failed', $mail ?? null, $subject, $e->getMessage(), $to, $toName);
+        }
 
         // If development mode, show preview instead of failing
         if ($development_mode) {

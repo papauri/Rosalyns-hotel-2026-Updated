@@ -780,6 +780,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_test_email'], $_
         if (!$ajaxIsDocument && !function_exists('sendEmail')) {
             throw new Exception('Email sending not available');
         }
+        // Emails sent log: a test (kind 'test', no booking), never under the real kind (owner 2026-11-12).
+        $rhTestCtx = function_exists('rh_email_context') ? rh_email_context(['is_test' => 1,
+            'test_of' => rh_email_kind_clean($ajaxTestTemplateKey) !== 'other' ? rh_email_kind_label(rh_email_kind_clean($ajaxTestTemplateKey)) : 'email template']) : null;
         if ($ajaxIsDocument) {
             if (!function_exists('sendEmailWithAttachments') || !function_exists('bookingRenderPdfFromHtml')) {
                 throw new Exception('PDF attachment test sending is not available');
@@ -810,6 +813,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['send_test_email'], $_
     } catch (Exception $e) {
         echo json_encode(['success' => false, 'error' => $e->getMessage()]);
     }
+    $rhTestCtx = null;
     exit;
 }
 
@@ -846,8 +850,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['email_settings_test']
         // One try only (a dead server must not hold the page for 3 x the timeout); no SMTP debug output.
         $GLOBALS['rh_email_fast_fail'] = true;
         $GLOBALS['smtp_debug'] = 0;
-        $rhEtResult = sendEmail($rhEtTo, '', '[TEST] Email settings check', $rhEtHtml,
-            "This is a test of the saved Email Settings. If it arrived, the hotel can send email.\n\n" . $rhEtText);
+        $rhTestCtx = function_exists('rh_email_context') ? rh_email_context(['is_test' => 1, 'test_of' => 'Email settings']) : null; // logged as a test
+        try {
+            $rhEtResult = sendEmail($rhEtTo, '', '[TEST] Email settings check', $rhEtHtml,
+                "This is a test of the saved Email Settings. If it arrived, the hotel can send email.\n\n" . $rhEtText);
+        } finally {
+            $rhTestCtx = null;
+            if (function_exists('rh_email_context_clear')) {
+                rh_email_context_clear();
+            }
+        }
         unset($GLOBALS['rh_email_fast_fail']);
         if (!empty($rhEtResult['preview_url'])) {
             $rh_email_test_result['success'] = true;
@@ -1208,7 +1220,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!function_exists('sendEmail')) {
                 throw new Exception('Email sending is not available on this page.');
             }
-            $result = sendEmail($testEmail, $testEmail, '[TEST] ' . $testSubject, $testHtml);
+            $rhTestKey = trim((string)($_POST['test_template_key'] ?? ''));
+            $rhTestCtx = function_exists('rh_email_context') ? rh_email_context(['is_test' => 1, // logged as a test, never under the real kind
+                'test_of' => rh_email_kind_clean($rhTestKey) !== 'other' ? rh_email_kind_label(rh_email_kind_clean($rhTestKey)) : 'email template']) : null;
+            try {
+                $result = sendEmail($testEmail, $testEmail, '[TEST] ' . $testSubject, $testHtml);
+            } finally {
+                $rhTestCtx = null;
+                if (function_exists('rh_email_context_clear')) {
+                    rh_email_context_clear();
+                }
+            }
             if (!empty($result['success'])) {
                 $message = "Test email sent to {$testEmail} successfully!";
             } else {

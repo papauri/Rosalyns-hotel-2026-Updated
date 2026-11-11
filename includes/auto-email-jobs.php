@@ -1331,8 +1331,9 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
             return ['success' => false, 'message' => 'Unknown template.'];
         }
         $GLOBALS['rh_automated_ctx'] = ['redirect' => $to, 'bcc' => false];
-        // A staff member pressed "Send test to me": the log credits them (session), not the scheduler.
-        $emailCtx = function_exists('rh_email_context') ? rh_email_context(['kind' => 'test_email']) : null;
+        // A staff member pressed "Send test to me": the log credits them (session), not the scheduler, and records it
+        // as a test (kind 'test', no account), never under the real kind or SAMPLE-1001.
+        $emailCtx = function_exists('rh_email_context') ? rh_email_context(['is_test' => 1, 'test_of' => rh_auto_sample_keys()[$key]]) : null;
         try {
             if (strpos($key, 'payment_reminder_') === 0) {
                 $n = (int)substr($key, -1);

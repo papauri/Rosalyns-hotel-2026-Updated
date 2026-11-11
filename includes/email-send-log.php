@@ -11,78 +11,81 @@
  * The returned guard must be kept in a variable: when the function returns (any return path, or an exception) the
  * variable goes away and the context with it, so it never leaks into a later, unrelated send. Contexts stack: an inner
  * one merges over the outer (the scheduler's "System (scheduler)" stays, the sender adds kind and account).
- * Keys: kind, account_type, account_id, account_ref, by_label, by_user_id.
+ * Keys: kind, account_type, account_id, account_ref, by_label, by_user_id; is_test + test_of for "Send test" (kind 'test').
  */
 
 if (!function_exists('rh_email_kinds')) {
 
-    /** kind => [plain label (no trailing "email"), words that name the same email in older history records]. */
+    /** kind => [plain label (no trailing "email")]. Screens add " email" ("Test" reads "Test email"). */
     function rh_email_kinds(): array
     {
         return [
-            'booking_received' => ['Booking received', ['booking received', 'booking_created', 'booking created', 'received']],
-            'booking_confirmed' => ['Booking confirmed', ['confirm']],
-            'booking_modified' => ['Booking changed', ['modif', 'changed', 'change']],
-            'booking_cancelled' => ['Booking cancelled', ['cancel']],
-            'booking_status_update' => ['Booking status update', ['status']],
-            'booking_reminder' => ['Booking reminder', ['reminder']],
-            'booking_room_upgrade' => ['Room upgrade', ['upgrade']],
-            'booking_no_show' => ['No-show notice', ['no-show', 'no show', 'noshow']],
-            'booking_extend_stay' => ['Stay extended', ['extend']],
-            'booking_quotation' => ['Quotation', ['quotation', 'quote']],
-            'tentative_confirmed' => ['Booking on hold', ['hold', 'tentative']],
-            'tentative_reminder' => ['Hold reminder', ['tentative_hold_reminder', 'hold reminder', 'reminder']],
-            'tentative_expired' => ['Hold expired', ['tentative_expired_notice', 'hold expired', 'expired']],
-            'tentative_converted' => ['Hold confirmed as a booking', ['convert', 'confirm']],
-            'tentative_quotation' => ['Quotation', ['quotation', 'quote']],
-            'pending_expired' => ['Unconfirmed booking expired', ['pending_expired_notice', 'expired']],
-            'unpaid_reminder' => ['Unpaid booking reminder', ['unpaid_confirmed_reminder', 'payment reminder', 'reminder']],
-            'unpaid_released' => ['Unpaid booking released', ['unpaid_confirmed_release', 'released']],
-            'payment_reminder' => ['Payment reminder', ['overdue_payment_reminders', 'payment reminder', 'reminder']],
-            'quotation_reminder' => ['Quotation expiry reminder', ['quotation_expiry_reminder', 'quotation']],
-            'pre_arrival' => ['Before-arrival', ['before-arrival', 'prearrival', 'pre-arrival']],
-            'post_stay_review' => ['After-stay review request', ['after-stay', 'poststay', 'review request']],
-            'invoice' => ['Invoice', ['invoice']],
-            'receipt' => ['Receipt', ['receipt']],
-            'credit_note' => ['Credit note', ['credit note', 'cnemail']],
-            'refund' => ['Refund notice', ['refund']],
-            'staff_new_booking_alert' => ['New booking alert to staff', []],
-            'staff_booking_expired_alert' => ['Booking expired alert to staff', []],
-            'conference_enquiry' => ['Conference enquiry received', []],
-            'conference_staff_alert' => ['New conference enquiry alert to staff', []],
-            'conference_payment' => ['Conference payment', []],
-            'conference_confirmed' => ['Conference confirmed', []],
-            'conference_cancelled' => ['Conference cancelled', []],
-            'conference_quotation' => ['Conference quotation', []],
-            'gym_booking' => ['Gym booking received', []],
-            'gym_staff_alert' => ['New gym booking alert to staff', []],
-            'gym_confirmed' => ['Gym booking confirmed', []],
-            'gym_cancelled' => ['Gym booking cancelled', []],
-            'gym_quotation' => ['Gym quotation', []],
-            'gym_inquiry_contacted' => ['Gym enquiry reply', []],
-            'gym_inquiry_converted' => ['Gym enquiry converted', []],
-            'gym_member_card' => ['Gym member card', []],
-            'gym_class_reminder' => ['Gym class reminder', []],
-            'gym_renewal_reminder' => ['Gym renewal reminder', []],
-            'event_confirmed' => ['Event booking confirmed', []],
-            'event_cancelled' => ['Event booking cancelled', []],
-            'event_quotation' => ['Event quotation', []],
-            'contact_reply' => ['Reply to a contact message', []],
-            'review_ack' => ['Review thank-you', []],
-            'review_reply' => ['Reply to a review', []],
-            'staff_welcome' => ['Staff account invitation', []],
-            'password_code' => ['Password change code', []],
-            'daily_report' => ['Daily report', []],
-            'end_of_day_report' => ['End of day report', []],
-            'station_report' => ['Station report', []],
-            'stock_order' => ['Stock order', []],
-            'test_email' => ['Test', []],
-            'other' => ['Other', []],
+            'booking_received' => ['Booking received'],
+            'booking_confirmed' => ['Booking confirmed'],
+            'booking_modified' => ['Booking changed'],
+            'booking_cancelled' => ['Booking cancelled'],
+            'booking_status_update' => ['Booking status update'],
+            'booking_reminder' => ['Booking reminder'],
+            'booking_room_upgrade' => ['Room upgrade'],
+            'booking_no_show' => ['No-show notice'],
+            'booking_extend_stay' => ['Stay extended'],
+            'booking_quotation' => ['Quotation'],
+            'tentative_confirmed' => ['Booking on hold'],
+            'tentative_reminder' => ['Hold reminder'],
+            'tentative_expired' => ['Hold expired'],
+            'tentative_converted' => ['Hold confirmed as a booking'],
+            'tentative_quotation' => ['Quotation'],
+            'pending_expired' => ['Unconfirmed booking expired'],
+            'unpaid_reminder' => ['Unpaid booking reminder'],
+            'unpaid_released' => ['Unpaid booking released'],
+            'payment_reminder' => ['Payment reminder'],
+            'quotation_reminder' => ['Quotation expiry reminder'],
+            'pre_arrival' => ['Before-arrival'],
+            'post_stay_review' => ['After-stay review request'],
+            'invoice' => ['Invoice'],
+            'receipt' => ['Receipt'],
+            'credit_note' => ['Credit note'],
+            'refund' => ['Refund notice'],
+            'staff_new_booking_alert' => ['New booking alert to staff'],
+            'staff_booking_expired_alert' => ['Booking expired alert to staff'],
+            'conference_enquiry' => ['Conference enquiry received'],
+            'conference_staff_alert' => ['New conference enquiry alert to staff'],
+            'conference_payment' => ['Conference payment'],
+            'conference_confirmed' => ['Conference confirmed'],
+            'conference_cancelled' => ['Conference cancelled'],
+            'conference_quotation' => ['Conference quotation'],
+            'gym_booking' => ['Gym booking received'],
+            'gym_staff_alert' => ['New gym booking alert to staff'],
+            'gym_confirmed' => ['Gym booking confirmed'],
+            'gym_cancelled' => ['Gym booking cancelled'],
+            'gym_quotation' => ['Gym quotation'],
+            'gym_inquiry_contacted' => ['Gym enquiry reply'],
+            'gym_inquiry_converted' => ['Gym enquiry converted'],
+            'gym_member_card' => ['Gym member card'],
+            'gym_class_reminder' => ['Gym class reminder'],
+            'gym_renewal_reminder' => ['Gym renewal reminder'],
+            'event_confirmed' => ['Event booking confirmed'],
+            'event_cancelled' => ['Event booking cancelled'],
+            'event_quotation' => ['Event quotation'],
+            'contact_reply' => ['Reply to a contact message'],
+            'review_ack' => ['Review thank-you'],
+            'review_reply' => ['Reply to a review'],
+            'staff_welcome' => ['Staff account invitation'],
+            'password_code' => ['Password change code'],
+            'daily_report' => ['Daily report'],
+            'end_of_day_report' => ['End of day report'],
+            'station_report' => ['Station report'],
+            'stock_order' => ['Stock order'],
+            'test' => ['Test'],
+            'other' => ['Other'],
         ];
     }
 
     function rh_email_kind_label(string $kind): string
     {
+        if ($kind === 'test_email') {
+            $kind = 'test'; // rows written on 2026-11-12 before test sends got their own kind
+        }
         $k = rh_email_kinds();
         if (isset($k[$kind])) {
             return $k[$kind][0];
@@ -418,26 +421,59 @@ if (!function_exists('rh_email_kinds')) {
 
     /* ── booking history: one step per email, never twice ────────────── */
 
-    /** Does an older history record ($text: its words and keys, lower-case) name the same email as this kind? */
-    function rh_email_hist_matches(string $kind, string $text): bool
+    /**
+     * The fixed map: email kind => the keys of the older history record that is the same email (includes/
+     * booking-history-format.php). A key ending in ':' is a prefix (auto:<job>: = any stage of that scheduler job).
+     * A kind not listed (booking changed, status update, booking reminder...) has no older record: it shows on its own.
+     */
+    function rh_email_hist_keys(): array
     {
-        $text = strtolower($text);
-        if ($text === '' || strpos($text, 'whatsapp') !== false) {
+        $atBooking = 'email:' . md5('booking_created');        // admin/create-booking.php "Emails at booking"
+        $quote = ['quote', 'tent:quotation_sent'];             // bookings.last_quotation_sent_at, tentative_booking_log
+        return [
+            'booking_received' => [$atBooking],
+            'booking_confirmed' => [$atBooking],
+            'tentative_confirmed' => [$atBooking],
+            'booking_quotation' => $quote,
+            'tentative_quotation' => $quote,
+            'tentative_reminder' => ['auto:tentative_hold_reminder:', 'tent:reminder_sent'],
+            'tentative_expired' => ['auto:tentative_expired_notice:'],
+            'pending_expired' => ['auto:pending_expired_notice:'],
+            'unpaid_reminder' => ['auto:unpaid_confirmed_reminder:', 'email:' . md5('Payment reminder sent')],
+            'unpaid_released' => ['auto:unpaid_confirmed_release:'],
+            'payment_reminder' => ['auto:overdue_payment_reminders:'],
+            'quotation_reminder' => ['auto:quotation_expiry_reminder:'],
+            'pre_arrival' => ['comm:pre_arrival'],                // guest_communication_log stages
+            'post_stay_review' => ['comm:post_stay'],
+            'invoice' => ['email:invoice'],                       // booking audit "Invoice email sent/resent"
+            'receipt' => ['receipt:'],
+            'credit_note' => ['cnemail:'],
+        ];
+    }
+
+    /** Is an older history record (its keys) the same email as this kind? Only through the fixed map above. */
+    function rh_email_hist_matches(string $kind, array $keys): bool
+    {
+        $map = rh_email_hist_keys();
+        if (!isset($map[$kind])) {
             return false;
         }
-        $k = rh_email_kinds();
-        foreach ($k[$kind][1] ?? [] as $w) {
-            if ($w !== '' && strpos($text, $w) !== false) {
-                return true;
+        foreach ($keys as $key) {
+            $key = (string)$key;
+            foreach ($map[$kind] as $m) {
+                if (substr($m, -1) === ':' ? (strpos($key, $m) === 0 && strlen($key) > strlen($m)) : $key === $m) {
+                    return true;
+                }
             }
         }
         return false;
     }
 
     /**
-     * Fold each send-log step into the older record of the same email (an 'email' step whose words match the kind,
-     * within $window seconds, nearest first); the older record keeps its wording and gains the send-log line (to,
-     * copies, who). A step with no match stays as its own step. $sendEvents carry 'email_kind'. Returns all events.
+     * Fold each send-log step into the older record of the same email (an 'email' step whose keys the fixed map
+     * gives for this kind, within $window seconds, nearest first). $events are one booking's history, so the match is
+     * always the same booking. The older record keeps its wording and gains the send-log line (to, copies, who). A
+     * step with no match stays as its own step. $sendEvents carry 'email_kind'. Returns all events.
      */
     function rh_email_hist_fold(array $events, array $sendEvents, int $window = 120): array
     {
@@ -457,8 +493,7 @@ if (!function_exists('rh_email_kinds')) {
                 if ($gap > $window) {
                     continue;
                 }
-                $text = (string)($e['what'] ?? '') . ' ' . (string)($e['detail'] ?? '') . ' ' . implode(' ', (array)($e['keys'] ?? []));
-                if (!rh_email_hist_matches((string)($s['email_kind'] ?? ''), $text)) {
+                if (!rh_email_hist_matches((string)($s['email_kind'] ?? ''), (array)($e['keys'] ?? []))) {
                     continue;
                 }
                 if ($bestGap === null || $gap < $bestGap) {
@@ -517,6 +552,24 @@ if (!function_exists('rh_email_kinds')) {
         return $ready[$k];
     }
 
+    /**
+     * A "Send test" (context is_test, set by Automated Emails and the email template test sends): logged as kind
+     * 'test' with no account, so it never shows in a booking's History or under a real kind; the email it tested goes
+     * in the subject ("[Test: Hold reminder] ..."). Applied last, over the context and the row. Returns [kind, account, subject].
+     */
+    function rh_email_test_apply(array $ctx, string $kind, array $acct, string $subject): array
+    {
+        if (empty($ctx['is_test'])) {
+            return [$kind, $acct, $subject];
+        }
+        $of = trim((string)($ctx['test_of'] ?? ''));
+        if ($of === '') {
+            $of = in_array($kind, ['other', 'test', 'test_email'], true) ? 'email template' : rh_email_kind_label($kind);
+        }
+        $subject = trim((string)preg_replace('/^\s*\[TEST\]\s*/i', '', $subject));
+        return ['test', ['account_type' => null, 'account_id' => null, 'account_ref' => null], '[Test: ' . $of . '] ' . $subject];
+    }
+
     function rh_email_clip(string $s, int $len): string
     {
         return function_exists('mb_substr') ? mb_substr($s, 0, $len) : substr($s, 0, $len);
@@ -542,6 +595,7 @@ if (!function_exists('rh_email_kinds')) {
                 ['account_type' => $ctx['account_type'] ?? null, 'account_id' => $ctx['account_id'] ?? null, 'account_ref' => $ctx['account_ref'] ?? null],
                 array_intersect_key($row, ['account_type' => 1, 'account_id' => 1, 'account_ref' => 1])
             );
+            [$kind, $acct, $subject] = rh_email_test_apply($ctx, $kind, $acct, (string)($row['subject'] ?? ''));
             $err = trim((string)($row['error'] ?? ''));
             $st = $pdo->prepare('INSERT INTO email_send_log (sent_at, status, to_email, to_name, cc, subject, email_kind, account_type, account_id, account_ref,
                     sent_by_user_id, sent_by_label, error) VALUES (NOW(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
@@ -550,7 +604,7 @@ if (!function_exists('rh_email_kinds')) {
                 rh_email_clip(trim((string)($row['to'] ?? '')), 500),
                 trim((string)($row['to_name'] ?? '')) !== '' ? rh_email_clip(trim((string)$row['to_name']), 255) : null,
                 trim((string)($row['cc'] ?? '')) !== '' ? rh_email_clip(trim((string)$row['cc']), 4000) : null,
-                rh_email_clip(trim((string)($row['subject'] ?? '')), 500),
+                rh_email_clip(trim($subject), 500),
                 $kind,
                 ($acct['account_type'] ?? '') !== '' && $acct['account_type'] !== null ? rh_email_clip((string)$acct['account_type'], 20) : null,
                 (int)($acct['account_id'] ?? 0) > 0 ? (int)$acct['account_id'] : null,
@@ -621,7 +675,9 @@ if (!function_exists('rh_email_kinds')) {
         }
         $where = ['sent_at >= ?', 'sent_at < DATE_ADD(?, INTERVAL 1 DAY)'];
         $args = [$f['from'] . ' 00:00:00', $f['to']];
-        if (($f['kind'] ?? 'all') !== 'all') {
+        if (($f['kind'] ?? 'all') === 'test') {
+            $where[] = "email_kind IN ('test', 'test_email')"; // test_email: the first day's test sends
+        } elseif (($f['kind'] ?? 'all') !== 'all') {
             $where[] = 'email_kind = ?';
             $args[] = (string)$f['kind'];
         }

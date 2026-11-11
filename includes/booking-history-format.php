@@ -276,7 +276,9 @@ if (!function_exists('rh_hist_tol')) {
                 }
                 $ev = rh_hist_ev($at, $who, 'Booking ' . $ref . ' created' . (isset($new['status']) ? ' as ' . rh_hist_status_word((string)$new['status']) : ''), $detail, 'created', ['created'], 2);
             } elseif ($action === 'email_sent') {
-                $ev = rh_hist_ev($at, $who, 'Email sent for this booking', $note, 'email', ['email:' . md5($note)], 2);
+                // 'email:invoice': the fixed key the Emails sent log folds into (rh_email_hist_keys); never the WhatsApp note.
+                $ev = rh_hist_ev($at, $who, 'Email sent for this booking', $note, 'email',
+                    preg_match('/^Invoice email (re)?sent/i', $note) ? ['email:' . md5($note), 'email:invoice'] : ['email:' . md5($note)], 2);
             } elseif ($action === 'room_assigned' || $action === 'upgraded' || $action === 'downgraded') {
                 $rid = (int)($new['individual_room_id'] ?? 0);
                 $rn = $rid > 0 ? ($ctx['room_numbers'][$rid] ?? ('#' . $rid)) : '';

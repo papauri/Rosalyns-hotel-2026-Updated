@@ -730,9 +730,11 @@ function sendBookingConfirmedWhatsApp(array $booking, array $room = []): array
 }
 
 /**
- * Send WhatsApp notifications when booking is cancelled
+ * Send WhatsApp notifications when booking is cancelled.
+ * $only: '' = guest and hotel; 'hotel' = the hotel's own alert only (a quiet cancel: staff unticked
+ * "Email the guest", owner 2026-11-12); 'guest' = the guest only.
  */
-function sendBookingCancelledWhatsApp(array $booking, array $room = []): array
+function sendBookingCancelledWhatsApp(array $booking, array $room = [], string $only = ''): array
 {
     if (!isWhatsAppEnabled()) {
         return [
@@ -743,15 +745,15 @@ function sendBookingCancelledWhatsApp(array $booking, array $room = []): array
 
     $vars = buildWhatsAppBookingVars($booking, $room);
 
-    $guestResult = ['success' => false, 'message' => 'No guest phone'];
-    $guestPhone  = normaliseWhatsAppNumber($booking['guest_phone'] ?? '');
+    $guestResult = ['success' => false, 'message' => $only === 'hotel' ? 'Not sent to the guest' : 'No guest phone'];
+    $guestPhone  = $only === 'hotel' ? '' : normaliseWhatsAppNumber($booking['guest_phone'] ?? '');
     if (!empty($guestPhone)) {
         $msg = renderWhatsAppTemplate('booking_cancelled', $vars);
         $guestResult = sendWhatsAppMessage($guestPhone, $msg);
     }
 
-    $hotelResult = ['success' => false, 'message' => 'No hotel WhatsApp'];
-    $hotelPhone  = normaliseWhatsAppNumber(getHotelWhatsAppNumber());
+    $hotelResult = ['success' => false, 'message' => $only === 'guest' ? 'Not sent to the hotel' : 'No hotel WhatsApp'];
+    $hotelPhone  = $only === 'guest' ? '' : normaliseWhatsAppNumber(getHotelWhatsAppNumber());
     if (!empty($hotelPhone)) {
         $msg = renderWhatsAppTemplate('admin_booking_cancelled', $vars);
         $hotelResult = sendWhatsAppMessage($hotelPhone, $msg);

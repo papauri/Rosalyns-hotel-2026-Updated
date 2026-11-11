@@ -1012,6 +1012,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $email_result = ['success' => false, 'message' => rh_cancel_email_skipped_reason()];
                             rh_email_send_log_not_sent('booking_cancelled', (string)$booking['guest_email'], (string)$booking['guest_name'],
                                 rh_email_ctx_account('room', $booking['id'], $booking['booking_reference']), 'Staff chose not to email the guest');
+                            if (rh_cancel_email_default_ticked('list', (string)$cn['previous_status'])) {
+                                sendBookingCancelledHotelAlert($booking); // unticked: nothing to the guest; the hotel's own WhatsApp alert still goes
+                            }
                         } else {
                             // Send cancellation email
                             $email_result = sendBookingCancelledEmail($booking, $cancellation_reason);

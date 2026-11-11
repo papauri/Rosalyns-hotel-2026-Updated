@@ -729,16 +729,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                             require_once '../config/email.php';
                             $emailsSent = 0;
                             $emailsFailed = 0;
-                            // Owner 2026-11-12: "Email the guest" unticked = cancel quietly (no email, no WhatsApp).
+                            // Owner 2026-11-12: "Email the guest" unticked = cancel quietly (no email or WhatsApp to the guest;
+                            // the hotel's own WhatsApp alert still goes).
                             $cancelEmailGuest = rh_cancel_email_choice($_POST, rh_cancel_email_default_ticked('details', (string)$previous_status));
                             foreach ($grpRes['cancelled'] as $gc) {
                                 logBookingStatusChange($gc['id'], $gc['reference'], $gc['previous_status'], 'cancelled', 'admin', $user['id'], $user['full_name'], $cancellation_reason);
                                 $gcStmt = $pdo->prepare("SELECT b.*, r.name AS room_name FROM bookings b LEFT JOIN rooms r ON b.room_id = r.id WHERE b.id = ?");
                                 $gcStmt->execute([$gc['id']]);
                                 $gcRow = $gcStmt->fetch(PDO::FETCH_ASSOC);
+                                $gcMail = ['success' => false, 'message' => 'Booking not found'];
                                 if ($gcRow && !$cancelEmailGuest) {
+                                    $gcMail = ['success' => false, 'message' => rh_cancel_email_skipped_reason()];
                                     rh_email_send_log_not_sent('booking_cancelled', (string)$gcRow['guest_email'], (string)$gcRow['guest_name'],
                                         rh_email_ctx_account('room', $gcRow['id'], $gcRow['booking_reference']), 'Staff chose not to email the guest');
+                                    sendBookingCancelledHotelAlert($gcRow);
                                 } elseif ($gcRow) {
                                     $gcMail = sendBookingCancelledEmail($gcRow, $cancellation_reason);
                                     if (!empty($gcMail['success'])) {
@@ -747,6 +751,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                                         $emailsFailed++;
                                     }
                                 }
+                                // cancellation_log, one row per cancelled booking (as All Bookings does).
+                                logCancellationToDatabase((int)$gc['id'], (string)$gc['reference'], 'room', (string)($gcRow['guest_email'] ?? ''), $user['id'],
+                                    (string)$cancellation_reason, !empty($gcMail['success']), (string)($gcMail['message'] ?? ''));
                             }
                             $_SESSION['success_message'] = $grpRes['message']
                                 . (!$cancelEmailGuest ? ' No email sent (you chose not to).' : '')
@@ -764,10 +771,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                             $cancel_refund_msg = ' ' . $cancelRes['summary'];
 
                             require_once '../config/email.php';
-                            // Owner 2026-11-12: "Email the guest" unticked = cancel quietly (no email, no WhatsApp).
+                            // Owner 2026-11-12: "Email the guest" unticked = cancel quietly (no email or WhatsApp to the guest;
+                            // the hotel's own WhatsApp alert still goes).
                             if (!rh_cancel_email_choice($_POST, rh_cancel_email_default_ticked('details', (string)$previous_status))) {
+                                $email_result = ['success' => false, 'message' => rh_cancel_email_skipped_reason()];
                                 rh_email_send_log_not_sent('booking_cancelled', (string)$booking_to_cancel['guest_email'], (string)$booking_to_cancel['guest_name'],
                                     rh_email_ctx_account('room', $booking_to_cancel['id'], $booking_to_cancel['booking_reference']), 'Staff chose not to email the guest');
+                                sendBookingCancelledHotelAlert($booking_to_cancel);
                                 $_SESSION['success_message'] = 'Booking cancelled.' . $cancel_refund_msg . ' No email sent (you chose not to).';
                             } else {
                                 $email_result = sendBookingCancelledEmail($booking_to_cancel, $cancellation_reason);
@@ -775,6 +785,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                                 $_SESSION['success_message'] = 'Booking cancelled.' . $cancel_refund_msg .
                                     ($email_result['success'] ? ' Cancellation email sent.' : ' (Email failed)');
                             }
+                            // cancellation_log (as All Bookings does): whether the guest was emailed and why not.
+                            logCancellationToDatabase((int)$booking_id, (string)$booking_to_cancel['booking_reference'], 'room', (string)($booking_to_cancel['guest_email'] ?? ''),
+                                $user['id'], (string)$cancellation_reason, !empty($email_result['success']), (string)($email_result['message'] ?? ''));
                         }
                     }
                 }
