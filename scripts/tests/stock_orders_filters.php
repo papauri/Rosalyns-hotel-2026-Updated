@@ -194,5 +194,34 @@ so_check(rh_so_normalize_filters(['status' => 'placed,voided'])['status'] === ''
 so_check(rh_so_normalize_filters(['status' => 'placed,bogus'])['status'] === '' && rh_so_normalize_filters(['status' => 'placed,'])['status'] === '', 'unknown or empty member drops the list');
 so_check(rh_so_normalize_filters(['status' => 'pending'])['status'] === 'pending' && rh_so_normalize_filters(['status' => 'placed,placed'])['status'] === '', 'single pending accepted; duplicate-only list dropped');
 
+echo "\n--- 9. LATER fixes: list cap, split-leg failure, tolerance, Cash tips wording, voids link ---\n";
+so_check(rh_so_list_cap() === 2000, 'list cap is 2000');
+so_check(rh_so_cap_notice(2000, 2000) === '' && rh_so_cap_notice(150, 150) === '' && rh_so_cap_notice(2000, 1999) === '' && rh_so_cap_notice(2000, 2000, 37) === '', 'no cap notice when nothing is cut off');
+so_check(strpos(rh_so_cap_notice(2000, 2345), 'Showing 2,000 of 2,345 orders') === 0, 'cap notice: "Showing 2,000 of 2,345"', rh_so_cap_notice(2000, 2345));
+so_check(strpos(rh_so_cap_notice(2000, 2345, 37), 'Showing 37 of 2,345 orders: only the newest 2,000 were checked') === 0, 'Needs Review + cap: notice uses the shown count', rh_so_cap_notice(2000, 2345, 37));
+so_check(strpos(rh_so_cap_notice(2000, -1), 'Showing 2,000 orders (newest first) (there may be more)') === 0 && strpos(rh_so_cap_notice(2000, -1, 5), 'Showing 5 orders (there may be more)') === 0, 'count failed: shown count, "there may be more"');
+$hfAt = strpos($so, "if (\$filterHealth === 'review') {");
+so_check($hfAt !== false && strpos($so, 'rh_so_cap_notice($soCapRead, $soCapTotal, count($orders))') > $hfAt,'notice built after the Needs Review post-filter');
+so_check(strpos($so, 'LIMIT 2000') === false && strpos($so, 'LIMIT " . rh_so_list_cap() . "') !== false && strpos($so, 'SELECT COUNT(*) FROM stock_orders o $whereSql') !== false, 'list LIMIT and COUNT share the cap and the same filters');
+so_check(rh_so_legs_failed_notice() === 'Split-bill details could not be loaded; totals shown in full.', 'split-leg failure text');
+so_check(strpos($so, '$soLegsFailed = true;') !== false && strpos($so, 'rh_so_legs_failed_notice()') !== false, 'leg query failure sets the flag and the list shows the notice');
+$soLive0 = strpos($so, '<div id="soLive">'); $soLive1 = strpos($so, '/#soLive');
+$noticeAt = strpos($so, 'rh_so_legs_failed_notice()'); $capAt = strpos($so, 'htmlspecialchars($soCapNotice)');
+so_check($soLive0 !== false && $noticeAt > $soLive0 && $noticeAt < $soLive1 && $capAt > $soLive0 && $capAt < $soLive1, 'both notices render inside #soLive');
+so_check(rh_so_has_amount(0.01) && rh_so_has_amount(0.005) && !rh_so_has_amount(0.004) && !rh_so_has_amount(0.0) && rh_so_has_amount(-0.01), 'display check: shows anything that rounds to 0.01 (0.01 itself included)');
+so_check(strpos($so, '0.005') === false && strpos($so, '> BALANCE_TOLERANCE): ?>') === false && substr_count($so, 'if (rh_so_has_amount(') === 5, 'five display checks use rh_so_has_amount, no raw 0.005 / > BALANCE_TOLERANCE');
+so_check(strpos($so, 'Tips included (all methods today)') === false && strpos($so, 'Incl. cash tips only &middot; all tips today, every method:') !== false, 'Cash card says it holds cash tips only; all-method tips labelled as such');
+// Voids: the card (rh_pos_shift_totals) and every "voided" link read the same predicate and window.
+$shiftFlat = preg_replace('/\s+/', ' ', $shiftSrc);
+$voidPred = substr(rh_so_void_window_sql('o'), 1, -1);
+so_check(strpos($shiftFlat, $voidPred) !== false, 'void list predicate = shift totals Voids card predicate', $voidPred);
+[$c, $p] = so_where(['date' => 'today', 'status' => 'voided'], $wDay);
+$s0 = $wDay['start_sql']; $e0 = $wDay['trading_end_sql'];
+so_check($c === [rh_so_void_window_sql('o'), 'o.status = ?'] && $p === [$s0, $e0, $s0, $e0, 'voided'], 'voids link -> exactly the void window + status voided', [$c, $p]);
+preg_match_all('/href="stock-orders\.php\?([^"#]*status=voided[^"#]*)/', $so, $vm);
+so_check(count($vm[1]) >= 4 && count(array_unique($vm[1])) === 1 && $vm[1][0] === 'date=today&status=voided', 'every voids link (card, panel, reasons, view all) = date=today&status=voided', $vm[1]);
+$startedTodayVoidedNextDay = ['status' => 'voided', 'created_at' => '2026-11-11 09:00:00', 'paid_at' => null, 'voided_at' => '2026-11-12 09:00:00'];
+so_check(!so_in(['date' => 'today', 'status' => 'voided'], $wDay, $startedTodayVoidedNextDay), 'started today but voided next trading day: not in today\'s Voids list');
+
 echo "\nPASS $P  FAIL $F\n";
 exit($F > 0 ? 1 : 0);

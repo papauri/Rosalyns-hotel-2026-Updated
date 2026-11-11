@@ -922,6 +922,10 @@ $filterKitchenStatus  = '';
 $filterFolio          = '';
 $soTenderLegs         = []; // order id => that tender's share of a split order (tender-filtered list only)
 $soTenderLegTips      = []; // order id => tips on those legs (the tender cards include tips)
+$soLegsFailed         = false; // split legs could not be read: split rows show the whole order total
+$soCapNotice          = ''; // "Showing N of M" when the list hit its cap
+$soCapRead            = 0;  // rows the capped query returned (before the Needs Review post-filter)
+$soCapTotal           = null; // COUNT of the same filters when the cap was hit (-1 = count failed)
 $hasActiveFilter      = false; // set inside try block when filters are parsed
 $soFilters            = [];
 if (!$error || strpos($error, 'not yet') === false) {
@@ -959,10 +963,22 @@ if (!$error || strpos($error, 'not yet') === false) {
             LEFT JOIN individual_rooms ir ON ir.id = o.individual_room_id
             $whereSql
             ORDER BY o.created_at DESC
-            LIMIT 2000
+            LIMIT " . rh_so_list_cap() . "
         ");
         $orderStmt->execute($whereParams);
         $orders = $orderStmt->fetchAll(PDO::FETCH_ASSOC);
+        // Cap hit: count the same filters so the list can say how many it is not showing (notice built after the health post-filter).
+        $soCapRead = count($orders);
+        if ($soCapRead >= rh_so_list_cap()) {
+            try {
+                $capStmt = $pdo->prepare("SELECT COUNT(*) FROM stock_orders o $whereSql");
+                $capStmt->execute($whereParams);
+                $soCapTotal = (int)$capStmt->fetchColumn();
+            } catch (Throwable $e) {
+                error_log('stock-orders list count: ' . $e->getMessage());
+                $soCapTotal = -1;
+            }
+        }
 
         // Tender-filtered list: a split order shows only the part paid by that tender (same SUM(split_amount)
         // as the payment mix and shift totals), so the list adds up to the card it was opened from.
@@ -982,6 +998,7 @@ if (!$error || strpos($error, 'not yet') === false) {
                     }
                 } catch (Throwable $e) {
                     error_log('stock-orders tender legs: ' . $e->getMessage());
+                    $soLegsFailed = true;
                 }
             }
         }
@@ -1003,6 +1020,9 @@ if (!$error || strpos($error, 'not yet') === false) {
                 $h = $orderHealth[(int)$o['id']] ?? null;
                 return $h && empty($h['is_balanced']);
             }));
+        }
+        if ($soCapTotal !== null) {
+            $soCapNotice = rh_so_cap_notice($soCapRead, $soCapTotal, count($orders));
         }
 
         // ── Review detail data for unbalanced orders ────────────────
@@ -1367,24 +1387,24 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
                     <div class="shift-card__sub">Settled from earlier tabs: <?php echo (int)$shift['earlier_tabs_n']; ?> &middot; <?php echo $currency_symbol . ' ' . number_format((float)$shift['earlier_tabs_amt'], 2); ?></div>
                 <?php endif; ?>
             </a>
-            <a class="shift-card<?php echo ($filterMethod === 'cash') ? ' active' : ''; ?>" href="stock-orders.php?date=today&payment_method=cash" title="Today's cash taken (sales settled today, tips included). Refund/void payouts are shown in the detail view.">
-                <div class="lbl">Cash <i class="help" aria-label="About cash" data-tip="Cash taken for orders paid in today&#x27;s trading window, tips included. Tap to list them: each order shows its cash part and any cash tip, which together make this figure. Refund and void payouts are not taken off here.">?</i></div>
+            <a class="shift-card<?php echo ($filterMethod === 'cash') ? ' active' : ''; ?>" href="stock-orders.php?date=today&payment_method=cash" title="Today's cash taken (sales settled today, cash tips included). Refund/void payouts are shown in the detail view.">
+                <div class="lbl">Cash <i class="help" aria-label="About cash" data-tip="Cash taken for orders paid in today&#x27;s trading window, cash tips included (tips paid another way are on that method&#x27;s card). Tap to list them: each order shows its cash part and any cash tip, which together make this figure. Refund and void payouts are not taken off here.">?</i></div>
                 <div class="val"><?php echo $currency_symbol . ' ' . number_format((float)($shift['cash_today'] ?? 0), 2); ?></div>
                 <div class="shift-card__sub">By payment time</div>
-                <div class="shift-card__sub">Tips included (all methods today): <?php echo $currency_symbol . ' ' . number_format((float)($shift['tips_today'] ?? 0), 2); ?></div>
-                <?php [$r86n, $r86a] = rh_so_ref86_for_tender($soRef86Rows ?? [], 'cash'); if ($r86a > 0.005): ?><div class="shift-card__sub">Includes 86'd items paid then refunded: <?php echo $currency_symbol . ' ' . number_format($r86a, 2); ?></div><?php endif; ?>
+                <div class="shift-card__sub">Incl. cash tips only &middot; all tips today, every method: <?php echo $currency_symbol . ' ' . number_format((float)($shift['tips_today'] ?? 0), 2); ?></div>
+                <?php [$r86n, $r86a] = rh_so_ref86_for_tender($soRef86Rows ?? [], 'cash'); if (rh_so_has_amount($r86a)): ?><div class="shift-card__sub">Includes 86'd items paid then refunded: <?php echo $currency_symbol . ' ' . number_format($r86a, 2); ?></div><?php endif; ?>
             </a>
             <a class="shift-card<?php echo ($filterMethod === 'mobile_money') ? ' active' : ''; ?>" href="stock-orders.php?date=today&payment_method=mobile_money" title="Today's mobile-money orders">
                 <div class="lbl">Mobile Money <i class="help" aria-label="About mobile money" data-tip="Mobile money taken for orders paid in today&#x27;s trading window, tips included. Tap to list them: each order shows its mobile-money part and any tip, which together make this figure. Refund and void payouts are not taken off here.">?</i></div>
                 <div class="val"><?php echo $currency_symbol . ' ' . number_format((float)($shift['mobile_today'] ?? 0), 2); ?></div>
                 <div class="shift-card__sub">By payment time &middot; incl. tips</div>
-                <?php [$r86n, $r86a] = rh_so_ref86_for_tender($soRef86Rows ?? [], 'mobile_money'); if ($r86a > 0.005): ?><div class="shift-card__sub">Includes 86'd items paid then refunded: <?php echo $currency_symbol . ' ' . number_format($r86a, 2); ?></div><?php endif; ?>
+                <?php [$r86n, $r86a] = rh_so_ref86_for_tender($soRef86Rows ?? [], 'mobile_money'); if (rh_so_has_amount($r86a)): ?><div class="shift-card__sub">Includes 86'd items paid then refunded: <?php echo $currency_symbol . ' ' . number_format($r86a, 2); ?></div><?php endif; ?>
             </a>
             <a class="shift-card<?php echo ($filterMethod === 'card') ? ' active' : ''; ?>" href="stock-orders.php?date=today&payment_method=card" title="Today's card orders">
                 <div class="lbl">Card <i class="help" aria-label="About card" data-tip="Card payments taken for orders paid in today&#x27;s trading window, tips included. Tap to list them: each order shows its card part and any tip, which together make this figure. Refund and void payouts are not taken off here.">?</i></div>
                 <div class="val"><?php echo $currency_symbol . ' ' . number_format((float)($shift['card_today'] ?? 0), 2); ?></div>
                 <div class="shift-card__sub">By payment time &middot; incl. tips</div>
-                <?php [$r86n, $r86a] = rh_so_ref86_for_tender($soRef86Rows ?? [], 'card'); if ($r86a > 0.005): ?><div class="shift-card__sub">Includes 86'd items paid then refunded: <?php echo $currency_symbol . ' ' . number_format($r86a, 2); ?></div><?php endif; ?>
+                <?php [$r86n, $r86a] = rh_so_ref86_for_tender($soRef86Rows ?? [], 'card'); if (rh_so_has_amount($r86a)): ?><div class="shift-card__sub">Includes 86'd items paid then refunded: <?php echo $currency_symbol . ' ' . number_format($r86a, 2); ?></div><?php endif; ?>
             </a>
             <a class="shift-card<?php echo ((int)($shift['void_count_today'] ?? 0) > 0) ? ' warn' : ''; ?><?php echo ($filterStatus === 'voided') ? ' active' : ''; ?>" href="stock-orders.php?date=today&status=voided" title="Today's voided orders">
                 <div class="lbl">Voids <i class="help" aria-label="About voids" data-tip="Orders voided in today&#x27;s trading window, paid or not: how many, and what they were worth.">?</i></div>
@@ -1597,7 +1617,7 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
                     data-insight-key="cash-collected"
                     data-insight-title="Cash Collection Summary"
                     aria-label="Open cash collection summary">
-                    <div class="lbl">Cash Taken (incl. tips) <i class="help" aria-label="About cash taken" data-tip="Cash taken for orders paid in today&#x27;s trading window, tips included. It is not the drawer count: refund and void payouts are not taken off and the opening float is not added. Each cashier&#x27;s drawer total is on their shift close.">?</i></div>
+                    <div class="lbl">Cash Taken (incl. tips) <i class="help" aria-label="About cash taken" data-tip="Cash taken for orders paid in today&#x27;s trading window, cash tips included (tips paid another way are on that method&#x27;s card). It is not the drawer count: refund and void payouts are not taken off and the opening float is not added. Each cashier&#x27;s drawer total is on their shift close.">?</i></div>
                     <div class="val" style="font-size:22px;"><?php echo $currency_symbol . ' ' . number_format((float)($shift['cash_today'] ?? 0), 2); ?></div>
                     <div style="font-size:11px;color:#6c757d;margin-top:3px;">By payment time, before payouts</div>
                     <div class="shift-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
@@ -2402,6 +2422,12 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
         </script>
 
         <h3 style="margin-top:32px;" id="rh-results" data-rh-results>Recent Orders</h3>
+        <?php if ($soLegsFailed): ?>
+            <p class="alert alert-warning" role="status" style="font-size:13px;margin:8px 0;"><i class="fas fa-triangle-exclamation"></i> <?php echo htmlspecialchars(rh_so_legs_failed_notice()); ?></p>
+        <?php endif; ?>
+        <?php if ($soCapNotice !== ''): ?>
+            <p class="alert alert-info" role="status" style="font-size:13px;margin:8px 0;"><i class="fas fa-circle-info"></i> <?php echo htmlspecialchars($soCapNotice); ?></p>
+        <?php endif; ?>
         <?php /* Shared bulk bar (admin-bulk.js shows/hides it and counts the selection). The buttons submit this
               form only so the shared markup works; the page script below intercepts the submit and runs
               the same cancel / void / reconcile / delete / export flows as before. */ ?>
@@ -2548,7 +2574,7 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
                                 <?php
                                 // Tender cards include tips: in a tender-filtered list show this row's tip so the rows add up to the card.
                                 $soRowTip = $filterMethod === '' ? 0.0 : (isset($soTenderLegs[(int)$o['id']]) ? (float)($soTenderLegTips[(int)$o['id']] ?? 0) : ((int)($o['split_count'] ?? 1) > 1 ? 0.0 : (float)($o['tip_amount'] ?? 0)));
-                                if ($soRowTip > 0.005): ?>
+                                if (rh_so_has_amount($soRowTip)): ?>
                                     <div style="font-size:10px;font-weight:600;color:#155724;">+ tip <?php echo $currency_symbol . ' ' . number_format($soRowTip, 2); ?></div>
                                 <?php endif; ?>
                             </td>
@@ -2674,7 +2700,7 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
         // which no order row shows (their totals were lowered). Say so, so the list + this line = the card.
         if ($filterDate === 'today' && $filterMethod !== '' && $filterMethod !== 'unassigned'):
             [$soR86n, $soR86a] = rh_so_ref86_for_tender($soRef86Rows ?? [], $filterMethod);
-            if ($soR86a > 0.005): ?>
+            if (rh_so_has_amount($soR86a)): ?>
             <p style="font-size:12px;color:#6c757d;margin:8px 4px 0;">
                 The card for this method also includes <?php echo $currency_symbol . ' ' . number_format($soR86a, 2); ?> paid for <?php echo (int)$soR86n; ?> item<?php echo $soR86n === 1 ? '' : 's'; ?> 86'd after payment (refunded separately as REF86 refunds). The order rows above show the lowered totals, so that amount is not on them.
             </p>

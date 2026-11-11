@@ -313,3 +313,49 @@ if (!function_exists('rh_so_list_where')) {
         return [$c, $p];
     }
 }
+
+if (!function_exists('rh_so_list_cap')) {
+    /** Most orders the list reads in one go (the SQL LIMIT); the notice below says when there are more. */
+    function rh_so_list_cap(): int
+    {
+        return 2000;
+    }
+}
+
+if (!function_exists('rh_so_cap_notice')) {
+    /**
+     * '' unless the list was cut at the cap. $read = rows the capped query returned, $total = COUNT of the same
+     * filters (-1 = count failed), $shown = rows actually listed (fewer than $read after the Needs Review
+     * post-filter). "Showing 2,000 of 2,345 orders ..." / "Showing 37 of 2,345 orders: only the newest 2,000 ...".
+     */
+    function rh_so_cap_notice(int $read, int $total, ?int $shown = null): string
+    {
+        $shown = $shown ?? $read;
+        if ($total >= 0 && $total <= $read) {
+            return '';
+        }
+        $of = $total >= 0 ? ' of ' . number_format($total) : '';
+        $more = $total >= 0 ? '' : ' (there may be more)';
+        if ($shown !== $read) {
+            return 'Showing ' . number_format($shown) . $of . ' orders' . $more . ': only the newest ' . number_format($read)
+                . ' were checked. Narrow the filters to see the rest.';
+        }
+        return 'Showing ' . number_format($shown) . $of . ' orders (newest first)' . $more . '. Narrow the filters to see the rest.';
+    }
+}
+
+if (!function_exists('rh_so_has_amount')) {
+    /** Is there an amount worth showing: it rounds to at least 0.01 (a display check, not a balance comparison). */
+    function rh_so_has_amount(float $x): bool
+    {
+        return abs(round($x, 2)) >= 0.01;
+    }
+}
+
+if (!function_exists('rh_so_legs_failed_notice')) {
+    /** Shown on a tender list when the split-bill legs could not be read (rows then show the whole order total). */
+    function rh_so_legs_failed_notice(): string
+    {
+        return 'Split-bill details could not be loaded; totals shown in full.';
+    }
+}
