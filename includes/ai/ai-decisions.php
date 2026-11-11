@@ -394,6 +394,21 @@ function rh_dec_bk_off(): array
     return ['ok' => true, 'total' => 0, 'cards' => []];
 }
 
+/**
+ * "arriving 12–14 Nov 2026" / "arriving on 12 Nov 2026": the Bookings list notice's own words for an arrival range
+ * (rh_bk_date_scope_words), so a link label names exactly the list it opens.
+ */
+function rh_dec_bk_arriving_words(string $from, string $to): string
+{
+    if (function_exists('rh_ai_admin_lib') && rh_ai_admin_lib('bookings-list-filters.php') && function_exists('rh_bk_date_scope_words')) {
+        $w = rh_bk_date_scope_words($from, $to, 'arrival');
+        if ($w !== '') {
+            return $w;
+        }
+    }
+    return $from === $to ? 'arriving on ' . $from : 'arriving ' . $from . ' to ' . $to;
+}
+
 /** [today, last night looked at, nights ahead]: the next ai_upcoming_days nights from the context's day. */
 function rh_dec_bk_window(array $ctx): array
 {
@@ -1009,7 +1024,10 @@ function rh_dec_f_bk_deposits(PDO $db, array $ctx): array
             rh_dec_option_unvalued('Collect at check-in as usual', 'Nothing changes. A guest who does not show leaves this unpaid.', $conf, 1),
         ],
         'recommend' => 0, 'recommendation' => 'Ask the guests who owe the most for a deposit now. Start at the top of the list under "Where this comes from".',
-        'tier' => 1, 'link' => ['bookings.php?filter=unpaid&date_type=arrival&date_from=' . $start . '&date_to=' . $end, 'Open unpaid bookings'],
+        // One stay: that booking. Several: no list filter holds "nothing paid or deposit unpaid" (and ?search= takes one
+        // term), so the link says what it opens: every Unpaid-tab booking arriving in the window (part-paid ones too).
+        'tier' => 1, 'link' => $n === 1 ? ['booking-details.php?id=' . $flag[0]['id'], 'Open the booking']
+            : ['bookings.php?filter=unpaid&date_type=arrival&date_from=' . $start . '&date_to=' . $end, 'Open all unpaid bookings ' . rh_dec_bk_arriving_words($start, $end)],
     ])]];
 }
 
@@ -1060,6 +1078,7 @@ function rh_dec_f_bk_arrivals(PDO $db, array $ctx): array
             'what' => implode(', ', $what), 'value' => $owed ? $bal : 0.0, 'bal' => $bal];
     }
     $total = count($rows);
+    $todayAll = count(array_filter($rows, static fn($r) => (string)$r['check_in_date'] === $today)); // all of today's checked here
     if (!$flag) {
         return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => []];
     }
@@ -1074,9 +1093,12 @@ function rh_dec_f_bk_arrivals(PDO $db, array $ctx): array
     $todayN = count(array_filter($flag, static fn($f) => $f['in'] === $today));
     $parts = [$c['room'] > 0 ? $c['room'] . ($c['room'] === 1 ? ' has' : ' have') . ' no room yet' : '', $c['owed'] > 0 ? $c['owed'] . ($c['owed'] === 1 ? ' still owes' : ' still owe') . ' money' : '',
         $c['req'] > 0 ? $c['req'] . ($c['req'] === 1 ? ' has' : ' have') . ' a special request to read' : ''];
-    // Bookings list on the same arrival dates (Dates = Arrival, the list's default), so every flagged stay is on it
-    $link = $n === 1 ? ['booking-details.php?id=' . $flag[0]['id'], 'Open the booking'] : ($todayN === $n ? ['bookings.php?filter=checkin_today', 'Open today\'s arrivals']
-        : ['bookings.php?date_type=arrival&date_from=' . $today . '&date_to=' . $last, 'Open these arrivals']);
+    // One stay: that booking. Several: no list filter holds "no room, money owed or a request" (and ?search= takes one
+    // term), so the link opens exactly the counted rows only when they are all of today's arrivals (the Today's
+    // check-ins tab: arriving today, pending or confirmed, the rows checked here); otherwise it says what it opens.
+    $link = $n === 1 ? ['booking-details.php?id=' . $flag[0]['id'], 'Open the booking']
+        : ($todayN === $n ? ['bookings.php?filter=checkin_today', $todayAll === $n && $total < 200 ? 'Open today\'s arrivals' : 'Open all of today\'s arrivals']
+            : ['bookings.php?date_type=arrival&date_from=' . $today . '&date_to=' . $last, 'Open all bookings ' . rh_dec_bk_arriving_words($today, $last)]);
     return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => [rh_dec_card([
         'key' => 'bk_arrivals', 'covers' => ['arrival_no_room', 'collect_before_arrival'],
         'decision' => 'Are ' . ($n === 1 ? 'the guest' : 'the ' . $n . ' guests') . ' arriving ' . ($arr === 1 ? 'today' : 'in the next ' . $arr . ' days') . ' ready for check-in?',
@@ -3439,8 +3461,10 @@ function rh_dec_brief_merge(PDO $db, array $user, array $b): array
     $keep = array_values(array_filter((array)$b['findings'], static fn($f) => !isset($covered[(string)($f['id'] ?? '')])));
     $dec = [];
     foreach ($brief['decisions'] as $d) {
+        // A brief stored earlier today is re-checked: the link shows only while this person may still open the page
+        $l = is_array($d['link'] ?? null) ? rh_ai_deep_link($user, (string)($d['link']['url'] ?? ''), (string)($d['link']['label'] ?? '')) : null;
         $dec[] = ['id' => 'dec_' . $d['key'], 'kind' => 'decision', 'title' => (string)$d['decision'], 'detail' => trim((string)$d['why_now'] . ' ' . (string)$d['recommendation']),
-            'amount' => $d['at_stake'], 'link' => $d['link'], 'score' => 1000 + (int)round((float)$d['score'] * 1000)];
+            'amount' => $d['at_stake'], 'link' => $l, 'score' => 1000 + (int)round((float)$d['score'] * 1000)];
     }
     $b['findings'] = array_slice(array_merge($dec, $keep), 0, max(RH_AI_BRIEF_MAX, count($dec)));
     return $b;

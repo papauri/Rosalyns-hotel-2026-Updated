@@ -72,11 +72,14 @@ function rh_ai_staff_names(PDO $db, array $ids): array
     }
 }
 
-/** A deep link to an admin screen, only when this person may open it (else null). */
+/**
+ * A deep link to an admin screen, only when this person may open it (else null): rhCanLinkTo, the Dashboard's own
+ * $can() rule (the page's permission key + module, and a way into the portal). Fail-closed when it is not loaded.
+ */
 function rh_ai_deep_link(array $user, string $url, string $label): ?array
 {
     $page = (string)strtok($url, '?');
-    if (!preg_match('/^[a-z0-9\-_]+\.php$/i', $page) || !function_exists('rhCanOpenPage') || !rhCanOpenPage((int)$user['id'], $page)) {
+    if (!preg_match('/^[a-z0-9\-_]+\.php$/i', $page) || !function_exists('rhCanLinkTo') || !rhCanLinkTo((int)$user['id'], $page)) {
         return null;
     }
     return ['label' => $label, 'url' => $url];
@@ -1164,6 +1167,16 @@ function rh_ai_briefing_findings(PDO $db, array $user): array
     return ['lens' => $lens, 'lens_label' => rh_ai_briefing_lens_label($lens), 'date' => date('Y-m-d'), 'currency' => $cur, 'findings' => array_slice($f, 0, RH_AI_BRIEF_MAX)];
 }
 
+if (!defined('RH_AI_FD_SHOW')) {
+    define('RH_AI_FD_SHOW', 5); // rows listed under a front-desk finding (its count is always the full total)
+}
+
+/** " Showing 5 of 12." when a finding lists fewer rows than it counts; '' when the list is whole. */
+function rh_ai_fd_showing(int $shown, int $total): string
+{
+    return $shown < $total ? ' Showing ' . $shown . ' of ' . $total . '.' : '';
+}
+
 /**
  * Front-desk misses: due-outs not checked out (overdue first), arrivals not checked in or with no room,
  * balances to collect before departure (each booking's own balance - never a total), tentative holds
@@ -1174,65 +1187,83 @@ function rh_ai_brief_front_desk(PDO $db, array $user, callable $add): void
     $coTime = trim((string)getSetting('check_out_time', '')); // e.g. "11:00 AM" (one default lives in the settings)
     $coTs = $coTime !== '' ? strtotime(date('Y-m-d') . ' ' . $coTime) : false;
     $pastCheckout = $coTs !== false && time() > $coTs;
-    $rows = $db->query("SELECT b.id, b.booking_reference, b.guest_name, b.check_out_date, ir.room_number FROM bookings b LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
-                        WHERE b.deleted_at IS NULL AND b.status = 'checked-in' AND b.check_out_date <= CURDATE() ORDER BY b.check_out_date, ir.room_number LIMIT 50")->fetchAll(PDO::FETCH_ASSOC);
-    $overdue = array_values(array_filter($rows, static fn($r) => $r['check_out_date'] < date('Y-m-d')));
-    $today = array_values(array_filter($rows, static fn($r) => $r['check_out_date'] === date('Y-m-d')));
+    // Counts are real totals (COUNT on the Bookings list's own rules, bookings-list-filters.php); only the lists are
+    // capped, at the RH_AI_FD_SHOW rows shown, and a cut list says "Showing 5 of N".
+    $bkLib = rh_ai_admin_lib('bookings-list-filters.php') && function_exists('rh_bk_departure_clause') && function_exists('rh_bk_balance_clause');
+    $depOver = $bkLib ? (string)rh_bk_departure_clause('overdue') : "b.status = 'checked-in' AND b.check_out_date < CURDATE()";
+    $owing = $bkLib ? (array)rh_bk_balance_clause('owing') : ['clause' => 'b.amount_due > ?', 'params' => [BALANCE_TOLERANCE]];
+    $sel = "SELECT b.id, b.booking_reference, b.guest_name, b.check_out_date, b.amount_due, ir.room_number FROM bookings b LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id WHERE b.deleted_at IS NULL AND ";
+    $due = $db->query("SELECT COALESCE(SUM($depOver), 0) AS overdue, COALESCE(SUM(b.check_out_date = CURDATE()), 0) AS today FROM bookings b
+                       WHERE b.deleted_at IS NULL AND b.status = 'checked-in' AND b.check_out_date <= CURDATE()")->fetch(PDO::FETCH_ASSOC) ?: ['overdue' => 0, 'today' => 0];
+    $nOver = (int)$due['overdue'];
+    $nToday = (int)$due['today'];
     $line = static fn($r, string $t) => ['guest_name' => $r['guest_name'], 'reference' => $r['booking_reference'], 'room' => $r['room_number'] !== null ? (string)$r['room_number'] : null, 'text' => $t, 'booking_id' => (int)$r['id']];
-    if ($overdue) {
-        $add(['id' => 'missed_checkout', 'kind' => 'time', 'severity' => min(70, 40 + count($overdue) * 10), 'title' => 'Guests past their check-out date, still checked in', 'count' => count($overdue),
-            'detail' => count($overdue) . ' booking(s) should have checked out already. Check them out or extend the stay.',
-            'items' => array_slice(array_map(static fn($r) => $line($r, 'was due out ' . $r['check_out_date']), $overdue), 0, 5),
-            'link' => [count($overdue) === 1 ? 'booking-details.php?id=' . (int)$overdue[0]['id'] : 'bookings.php?departure=overdue', count($overdue) === 1 ? 'Open the booking' : 'Open overdue departures']]);
+    if ($nOver > 0) {
+        // Bookings ?departure=overdue: still checked in after the check-out date
+        $overdue = $db->query($sel . $depOver . " ORDER BY b.check_out_date, ir.room_number, b.id LIMIT " . RH_AI_FD_SHOW)->fetchAll(PDO::FETCH_ASSOC);
+        $one = $nOver === 1 && count($overdue) === 1;
+        $add(['id' => 'missed_checkout', 'kind' => 'time', 'severity' => min(70, 40 + $nOver * 10), 'title' => 'Guests past their check-out date, still checked in', 'count' => $nOver,
+            'detail' => $nOver . ' booking(s) should have checked out already. Check them out or extend the stay.' . rh_ai_fd_showing(count($overdue), $nOver),
+            'items' => array_map(static fn($r) => $line($r, 'was due out ' . $r['check_out_date']), $overdue),
+            'link' => [$one ? 'booking-details.php?id=' . (int)$overdue[0]['id'] : 'bookings.php?departure=overdue', $one ? 'Open the booking' : 'Open overdue departures']]);
     }
-    if ($today) {
-        $add(['id' => 'due_out_today', 'kind' => 'time', 'severity' => min(55, ($pastCheckout ? 30 : 10) + count($today) * 4), 'title' => $pastCheckout ? 'Due out today, past check-out time' : 'Due out today, not checked out yet', 'count' => count($today),
-            'detail' => count($today) . ' guest(s) still to check out today' . ($pastCheckout ? ' (check-out time ' . $coTime . ' has passed).' : '.'),
-            'items' => array_slice(array_map(static fn($r) => $line($r, 'due out today'), $today), 0, 5), 'link' => ['bookings.php?filter=checkout_today', 'Open today\'s check-outs']]);
+    if ($nToday > 0) {
+        // Bookings ?filter=checkout_today: checked in, check-out date today
+        $today = $db->query($sel . "b.status = 'checked-in' AND b.check_out_date = CURDATE() ORDER BY ir.room_number, b.id LIMIT " . RH_AI_FD_SHOW)->fetchAll(PDO::FETCH_ASSOC);
+        $add(['id' => 'due_out_today', 'kind' => 'time', 'severity' => min(55, ($pastCheckout ? 30 : 10) + $nToday * 4), 'title' => $pastCheckout ? 'Due out today, past check-out time' : 'Due out today, not checked out yet', 'count' => $nToday,
+            'detail' => $nToday . ' guest(s) still to check out today' . ($pastCheckout ? ' (check-out time ' . $coTime . ' has passed).' : '.') . rh_ai_fd_showing(count($today), $nToday),
+            'items' => array_map(static fn($r) => $line($r, 'due out today'), $today), 'link' => ['bookings.php?filter=checkout_today', 'Open today\'s check-outs']]);
     }
-    // Balances to collect before departure (leaving today or tomorrow): each booking's own folio balance
-    $leaving = $db->query("SELECT b.id, b.booking_reference, b.guest_name, b.check_out_date, ir.room_number FROM bookings b LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
-                           WHERE b.deleted_at IS NULL AND b.status = 'checked-in' AND b.check_out_date <= DATE_ADD(CURDATE(), INTERVAL 1 DAY) ORDER BY b.check_out_date LIMIT 40")->fetchAll(PDO::FETCH_ASSOC);
-    $owe = [];
-    $allToday = true;
-    foreach ($leaving as $r) {
-        $fo = rh_ai_folio((int)$r['id']);
-        if ((float)($fo['balance_due'] ?? 0) > BALANCE_TOLERANCE) {
+    // Balances to collect before departure (checked in, due out by tomorrow, overdue included): the Bookings
+    // ?balance=owing rule (rh_bk_balance_clause: amount_due above BALANCE_TOLERANCE), so the count is exactly the list
+    // the link opens and each figure is that list's Balance Due column.
+    $oweWhere = "b.status = 'checked-in' AND b.check_out_date <= DATE_ADD(CURDATE(), INTERVAL 1 DAY) AND " . $owing['clause'];
+    $st = $db->prepare("SELECT COUNT(*) AS n, COALESCE(SUM(b.check_out_date <> CURDATE()), 0) AS not_today FROM bookings b WHERE b.deleted_at IS NULL AND " . $oweWhere);
+    $st->execute($owing['params']);
+    $oc = $st->fetch(PDO::FETCH_ASSOC) ?: ['n' => 0, 'not_today' => 0];
+    $nOwe = (int)$oc['n'];
+    if ($nOwe > 0) {
+        $st = $db->prepare($sel . $oweWhere . " ORDER BY b.check_out_date, b.amount_due DESC, b.id LIMIT " . RH_AI_FD_SHOW);
+        $st->execute($owing['params']);
+        $owe = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $owe[] = ['guest_name' => $r['guest_name'], 'reference' => $r['booking_reference'], 'room' => $r['room_number'] !== null ? (string)$r['room_number'] : null,
-                'text' => 'leaves ' . $r['check_out_date'], 'balance_due' => $fo['balance_due'], 'booking_id' => (int)$r['id']];
-            $allToday = $allToday && $r['check_out_date'] === date('Y-m-d');
+                'text' => 'leaves ' . $r['check_out_date'], 'balance_due' => rh_ai_money((float)$r['amount_due']), 'booking_id' => (int)$r['id']];
         }
-    }
-    if ($owe) {
-        // The list it opens holds the same bookings: Bookings ?balance=owing (amount_due above the tolerance; the payment
-        // recalculation keeps amount_due equal to the folio balance). All due out today = the Dashboard chip's own list.
-        $oweLink = count($owe) === 1 ? ['booking-details.php?id=' . $owe[0]['booking_id'], 'Open the booking']
-            : ($allToday ? ['bookings.php?filter=checkout_today&balance=owing', 'Open departures with a balance']
+        // All due out today = the Dashboard chip's own list (?filter=checkout_today&balance=owing)
+        $oweLink = $nOwe === 1 && count($owe) === 1 ? ['booking-details.php?id=' . $owe[0]['booking_id'], 'Open the booking']
+            : ((int)$oc['not_today'] === 0 ? ['bookings.php?filter=checkout_today&balance=owing', 'Open departures with a balance']
                 : ['bookings.php?status=checked-in&date_type=departure&date_to=' . date('Y-m-d', strtotime('+1 day')) . '&balance=owing', 'Open departures with a balance']);
-        $add(['id' => 'collect_before_departure', 'kind' => 'time', 'severity' => min(60, 25 + count($owe) * 8), 'title' => 'Balances to collect before they leave', 'count' => count($owe),
-            'detail' => count($owe) . ' guest(s) leaving today or tomorrow still have a balance on their booking.',
-            'items' => array_slice(array_map(static fn($o) => array_diff_key($o, ['booking_id' => 1]), $owe), 0, 5),
+        $add(['id' => 'collect_before_departure', 'kind' => 'time', 'severity' => min(60, 25 + $nOwe * 8), 'title' => 'Balances to collect before they leave', 'count' => $nOwe,
+            'detail' => $nOwe . ' guest(s) due out by tomorrow still have a balance on their booking.' . rh_ai_fd_showing(count($owe), $nOwe),
+            'items' => array_map(static fn($o) => array_diff_key($o, ['booking_id' => 1]), $owe),
             'link' => $oweLink]);
     }
     // Arrivals today not checked in, and with no room
-    $arr = $db->query("SELECT b.id, b.booking_reference, b.guest_name, b.individual_room_id, ir.room_number, ir.status AS room_status, ir.housekeeping_status
-                       FROM bookings b LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
-                       WHERE b.deleted_at IS NULL AND b.check_in_date = CURDATE() AND b.status IN ('confirmed', 'pending') ORDER BY b.created_at LIMIT 60")->fetchAll(PDO::FETCH_ASSOC);
-    $noRoom = array_values(array_filter($arr, static fn($r) => empty($r['individual_room_id'])));
-    if ($noRoom) {
-        $add(['id' => 'arrival_no_room', 'kind' => 'time', 'severity' => min(60, 30 + count($noRoom) * 8), 'title' => 'Arrivals today with no room assigned', 'count' => count($noRoom),
-            'detail' => count($noRoom) . ' arrival(s) today have no room yet.', 'items' => array_slice(array_map(static fn($r) => $line($r, 'arrives today, no room'), $noRoom), 0, 5),
+    // Counts from COUNT (the Today's check-ins tab: arriving today, confirmed or pending); lists capped at the rows shown
+    $arrFrom = "FROM bookings b LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id WHERE b.deleted_at IS NULL AND b.check_in_date = CURDATE() AND b.status IN ('confirmed', 'pending')";
+    $noRoomSql = '(b.individual_room_id IS NULL OR b.individual_room_id = 0)';
+    $notReadySql = "b.individual_room_id IS NOT NULL AND b.individual_room_id <> 0 AND (ir.status IS NULL OR ir.status <> 'available' OR (ir.housekeeping_status IS NOT NULL AND ir.housekeeping_status <> 'completed'))";
+    $ac = $db->query("SELECT COUNT(*) AS n, COALESCE(SUM($noRoomSql), 0) AS no_room, COALESCE(SUM($notReadySql), 0) AS not_ready $arrFrom")->fetch(PDO::FETCH_ASSOC) ?: ['n' => 0, 'no_room' => 0, 'not_ready' => 0];
+    $arrSel = "SELECT b.id, b.booking_reference, b.guest_name, b.individual_room_id, ir.room_number, ir.status AS room_status, ir.housekeeping_status $arrFrom AND ";
+    $nArr = (int)$ac['n'];
+    $nNoRoom = (int)$ac['no_room'];
+    $nNotReady = (int)$ac['not_ready'];
+    if ($nNoRoom > 0) {
+        $noRoom = $db->query($arrSel . $noRoomSql . " ORDER BY b.created_at, b.id LIMIT " . RH_AI_FD_SHOW)->fetchAll(PDO::FETCH_ASSOC);
+        $add(['id' => 'arrival_no_room', 'kind' => 'time', 'severity' => min(60, 30 + $nNoRoom * 8), 'title' => 'Arrivals today with no room assigned', 'count' => $nNoRoom,
+            'detail' => $nNoRoom . ' arrival(s) today have no room yet.' . rh_ai_fd_showing(count($noRoom), $nNoRoom), 'items' => array_map(static fn($r) => $line($r, 'arrives today, no room'), $noRoom),
             'link' => ['bookings.php?filter=checkin_today', 'Open today\'s arrivals']]);
     }
-    $notReady = array_values(array_filter($arr, static fn($r) => !empty($r['individual_room_id']) && ($r['room_status'] !== 'available' || ($r['housekeeping_status'] !== null && $r['housekeeping_status'] !== 'completed'))));
-    if ($notReady) {
-        $add(['id' => 'room_not_ready', 'kind' => 'time', 'severity' => min(60, 25 + count($notReady) * 8), 'title' => 'Rooms not ready for today\'s arrivals', 'count' => count($notReady),
-            'detail' => count($notReady) . ' arriving guest(s) have a room that is not clean and free yet.',
-            'items' => array_slice(array_map(static fn($r) => $line($r, 'room ' . str_replace('_', ' ', (string)$r['room_status']) . ($r['housekeeping_status'] !== 'completed' ? ', cleaning not done' : '')), $notReady), 0, 5),
+    if ($nNotReady > 0) {
+        $notReady = $db->query($arrSel . $notReadySql . " ORDER BY b.created_at, b.id LIMIT " . RH_AI_FD_SHOW)->fetchAll(PDO::FETCH_ASSOC);
+        $add(['id' => 'room_not_ready', 'kind' => 'time', 'severity' => min(60, 25 + $nNotReady * 8), 'title' => 'Rooms not ready for today\'s arrivals', 'count' => $nNotReady,
+            'detail' => $nNotReady . ' arriving guest(s) have a room that is not clean and free yet.' . rh_ai_fd_showing(count($notReady), $nNotReady),
+            'items' => array_map(static fn($r) => $line($r, 'room ' . str_replace('_', ' ', (string)$r['room_status']) . ($r['housekeeping_status'] !== 'completed' ? ', cleaning not done' : '')), $notReady),
             'link' => ['housekeeping.php', 'Open Housekeeping']]);
     }
-    if (count($arr) > count($noRoom)) {
-        $waiting = count($arr);
+    if ($nArr > $nNoRoom) {
+        $waiting = $nArr;
         $add(['id' => 'arrivals_to_check_in', 'kind' => 'time', 'severity' => min(30, 5 + $waiting * 2), 'title' => 'Arrivals today still to check in', 'count' => $waiting,
             'detail' => $waiting . ' guest(s) due in today have not checked in yet.', 'link' => ['bookings.php?filter=checkin_today', 'Open today\'s arrivals']]);
     }

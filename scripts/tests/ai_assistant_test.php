@@ -83,7 +83,7 @@ try {
         && strpos($dfFn($dfIns, 'rh_ai_brief_money', 900), "if (\$owedOk && !empty(\$m['still_owed']['left_or_overdue_total'])") !== false
         && strpos($dfIns, 'function rh_ai_brief_money(array $m, callable $add, bool $owedOk = false): void') !== false,
         'Briefing: the hotel-wide money owed is listed only with dashboard_owed (closed by default)');
-    $dfFront = $dfFn($dfIns, 'rh_ai_brief_front_desk', 6000);
+    $dfFront = $dfFn($dfIns, 'rh_ai_brief_front_desk', 9000);
     check(strpos($dfFront, "'collect_before_departure'") !== false && strpos($dfFront, 'dashboard_') === false,
         'Briefing: each departing guest\'s own balance stays for the front desk (no dashboard key on it)');
     // Briefing links land on lists holding exactly what the card counts (2026-11-11 list filters)
@@ -100,6 +100,38 @@ try {
     $dfDig = $dfFn((string)file_get_contents($root . '/includes/ai/ai-extras.php'), 'rh_ai_digest_body', 2400);
     check(strpos($dfDig, "rh_ai_digest_room_bits(\$perf, hasPermission((int)(\$user['id'] ?? 0), 'dashboard_takings'))") !== false && strpos($dfDig, 'room_revenue_incl_vat') === false,
         'Weekly digest: the room figures line goes through the dashboard_takings check (no revenue figure listed in the body itself)');
+    // QA 2026-11-11 LATER items: counts equal the list the link opens; capped lists say so; links only to openable pages
+    $dfFd = (string)substr($dfFront, 0, (int)(strpos($dfFront, '// Arrivals today not checked in') ?: strlen($dfFront)));
+    check($dfFd !== '' && strpos($dfFd, 'LIMIT 50') === false && strpos($dfFd, 'LIMIT 40') === false && strpos($dfFd, 'rh_ai_folio(') === false
+        && strpos($dfFd, "'count' => \$nOver") !== false && strpos($dfFd, "'count' => \$nToday") !== false && strpos($dfFd, "'count' => \$nOwe") !== false
+        && substr_count($dfFd, 'rh_ai_fd_showing(count(') === 3 && substr_count($dfFd, 'LIMIT " . RH_AI_FD_SHOW') === 3,
+        'Front desk: overdue, due-out-today and balance counts come from COUNT (never a capped list); each cut list says "Showing 5 of N"');
+    check(strpos($dfFd, "rh_bk_balance_clause('owing')") !== false && strpos($dfFd, "rh_bk_departure_clause('overdue')") !== false
+        && strpos($dfFd, "'balance_due' => rh_ai_money((float)\$r['amount_due'])") !== false && strpos($dfFd, 'SELECT COUNT(*) AS n') !== false,
+        'Balances to collect: counted on the Bookings ?balance=owing rule (amount_due above BALANCE_TOLERANCE), the list the link opens, with its Balance Due figure');
+    $dfAr = (string)substr($dfFront, (int)strpos($dfFront, '// Arrivals today not checked in'), 4000);
+    check(strpos($dfAr, 'LIMIT 60') === false && strpos($dfAr, 'SELECT COUNT(*) AS n, COALESCE(SUM($noRoomSql), 0) AS no_room, COALESCE(SUM($notReadySql), 0) AS not_ready') !== false
+        && strpos($dfAr, "'count' => \$nNoRoom") !== false && strpos($dfAr, "'count' => \$nNotReady") !== false && strpos($dfAr, '$waiting = $nArr;') !== false
+        && substr_count($dfAr, 'rh_ai_fd_showing(count(') === 2,
+        'Today\'s arrivals: no-room, room-not-ready and still-to-check-in counts come from COUNT (no 60-row cap); cut lists say "Showing 5 of N"');
+    check(strpos($dfFd, "\$nOver === 1 && count(\$overdue) === 1") !== false && strpos($dfFd, "\$nOwe === 1 && count(\$owe) === 1") !== false,
+        'Front desk: "Open the booking" only when the full count is one');
+    $dfDep = $dfFn($dfDec, 'rh_dec_f_bk_deposits', 7000);
+    $dfArr = $dfFn($dfDec, 'rh_dec_f_bk_arrivals', 7000);
+    check(strpos($dfDep, "\$n === 1 ? ['booking-details.php?id=' . \$flag[0]['id'], 'Open the booking']") !== false && strpos($dfDep, "'Open all unpaid bookings ' . rh_dec_bk_arriving_words(\$start, \$end)") !== false
+        && strpos($dfDep, "'Open unpaid bookings']") === false,
+        'Deposits card: one stay opens that booking; several say they open all unpaid bookings arriving in the window');
+    check(strpos($dfArr, "'Open all bookings ' . rh_dec_bk_arriving_words(\$today, \$last)") !== false && strpos($dfArr, "'Open these arrivals'") === false
+        && strpos($dfArr, "\$todayAll === \$n && \$total < 200 ? 'Open today\\'s arrivals' : 'Open all of today\\'s arrivals'") !== false,
+        'Arrivals card: "today\'s arrivals" only when the counted rows are all of them; otherwise the label says it opens all arrivals in the range');
+    $dfLink = $dfFn($dfIns, 'rh_ai_deep_link', 700);
+    check(strpos($dfLink, "!function_exists('rhCanLinkTo') || !rhCanLinkTo((int)\$user['id'], \$page)") !== false && strpos($dfLink, 'rhCanOpenPage') === false,
+        'Deep links use the Dashboard\'s own $can() rule (rhCanLinkTo) and fail closed');
+    $dfBrief = $dfFn($dfIns, 'rh_ai_briefing_findings', 2600);
+    check(strpos($dfBrief, "\$x['link'] = rh_ai_deep_link(\$user, \$x['link'][0], \$x['link'][1]);") !== false
+        && strpos($dfFn($dfDec, 'rh_dec_for_viewer', 3200), "rh_ai_deep_link(\$user, (string)\$card['link'][0], (string)\$card['link'][1])") !== false
+        && strpos($dfFn($dfDec, 'rh_dec_brief_merge', 1800), "rh_ai_deep_link(\$user, (string)(\$d['link']['url'] ?? '')") !== false,
+        'Stock links (low stock, expiring / expired batches, Reorder) and every briefing / decision link show only to people who can open the page, re-checked on a stored brief');
     if (getenv('AI_TEST_DASH_FIGURES_ONLY')) {
         // Behaviour, still no database: the real money findings from a fixture money_leaks result
         if (!defined('BALANCE_TOLERANCE')) { define('BALANCE_TOLERANCE', 0.01); }
@@ -130,6 +162,15 @@ try {
         check($dfBitsNo === ['Occupancy %: 61.9'], 'digest without dashboard_takings: occupancy only (no room revenue, RevPAR or average rate)', json_encode($dfBitsNo));
         check(rh_ai_digest_room_bits($dfPerf) === $dfBitsNo, 'digest room figures leave revenue out unless told the person may see it');
         check(count($dfBitsYes) === 4 && strpos(implode('|', $dfBitsYes), 'Room revenue (incl. VAT): 3683333.33') !== false, 'digest with dashboard_takings: all four room figures', json_encode($dfBitsYes));
+        // Capped lists say so; link labels use the Bookings notice's own words for the range
+        check(rh_ai_fd_showing(5, 12) === ' Showing 5 of 12.' && rh_ai_fd_showing(3, 3) === '' && rh_ai_fd_showing(0, 0) === '' && RH_AI_FD_SHOW === 5,
+            'a cut front-desk list says "Showing 5 of N"; a whole list says nothing');
+        check(rh_ai_admin_lib('bookings-list-filters.php') && rh_bk_date_scope_words('2026-11-12', '2026-11-14', 'arrival') === "arriving 12\u{2013}14 Nov 2026"
+            && rh_bk_date_scope_words('2026-11-12', '2026-11-12', 'arrival') === 'arriving on 12 Nov 2026',
+            'link labels name the range as the Bookings list notice does ("arriving 12-14 Nov 2026")');
+        $dfBal = rh_bk_balance_clause('owing');
+        check($dfBal['clause'] === 'b.amount_due > ?' && abs((float)$dfBal['params'][0] - BALANCE_TOLERANCE) < 1e-9 && rh_bk_departure_clause('overdue') === "b.status = 'checked-in' AND b.check_out_date < CURDATE()",
+            'the briefing counts on the list filters\' own owing (amount_due above BALANCE_TOLERANCE) and overdue rules');
         echo "$pass passed, $fail failed\n";
         exit($fail ? 1 : 0);
     }
