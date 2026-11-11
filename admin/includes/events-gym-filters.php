@@ -99,3 +99,53 @@ if (!function_exists('rh_gym_in_now_sql')) {
         return "{$a}checked_out_at IS NULL AND {$a}checked_in_at >= CURDATE()";
     }
 }
+
+if (!function_exists('rh_conf_focus_id')) {
+    /**
+     * ?id= on the conference screen (the link in the new-enquiry email): a positive whole number,
+     * or 0 when missing or junk ('5abc', '0', '-1', arrays, '5 OR 1=1'). Always bound, never interpolated.
+     */
+    function rh_conf_focus_id(array $get): int
+    {
+        $v = $get['id'] ?? null;
+        if (is_int($v)) {
+            return $v > 0 ? $v : 0;
+        }
+        if (!is_string($v) || !preg_match('/^\d{1,10}$/', $v)) {
+            return 0;
+        }
+        $n = filter_var($v, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+        return $n === false ? 0 : (int)$n;
+    }
+}
+
+if (!function_exists('rh_gym_member_list_cap')) {
+    /** Most members the Gym Members list prints at once (the LIMIT and the "Showing X of N" note share it). */
+    function rh_gym_member_list_cap(): int
+    {
+        return 500;
+    }
+}
+
+if (!function_exists('rh_gym_member_filter_key')) {
+    /** The Gym Members tab actually shown: a known key, else 'all' (the list falls back to every member). */
+    function rh_gym_member_filter_key($raw): string
+    {
+        $k = is_string($raw) ? $raw : '';
+        return array_key_exists($k, rh_gym_member_filter_where()) ? $k : 'all';
+    }
+}
+
+if (!function_exists('rh_list_cap_note')) {
+    /**
+     * "Showing 500 of 1,234 members." when a capped list holds fewer rows than its count, else ''.
+     * $total must come from a COUNT with the same WHERE as the list.
+     */
+    function rh_list_cap_note(int $shown, int $total, int $cap, string $nounPlural): string
+    {
+        if ($cap < 1 || $shown < $cap || $total <= $shown) {
+            return '';
+        }
+        return 'Showing ' . number_format($shown) . ' of ' . number_format($total) . ' ' . $nounPlural . '.';
+    }
+}

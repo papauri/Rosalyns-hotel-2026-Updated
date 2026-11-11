@@ -4,6 +4,7 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); } // nev
  * Conference + gym list filter rules (admin/includes/events-gym-filters.php). NO DATABASE.
  * Conference ?status= whitelist, ?event_date= validation and multi-day range rule (checked against an
  * in-PHP evaluation over fixture enquiries), Gym Members tab clauses, "in the gym now" = today's open visits.
+ * Also: conference ?id= whitelist + notice classes, Gym Members 500-row cap note ("Showing X of N").
  * Usage (repo root): php scripts/tests/events_gym_filters.php
  */
 $root = dirname(__DIR__, 2);
@@ -94,6 +95,37 @@ $reports = (string)@file_get_contents($root . '/admin/gym-reports.php');
 check(strpos($reports, 'WHERE ' . rh_gym_in_now_sql() . '")') !== false, 'gym-reports.php uses the identical in-now clause');
 $lib = (string)@file_get_contents($root . '/admin/includes/gym-checkin-lib.php');
 check(strpos($lib, 'WHERE ' . rh_gym_in_now_sql('ga.')) !== false, 'check-in "Currently in the gym" list uses the same rule');
+
+// ---- conference ?id= (enquiry email link): positive int only
+eq(rh_conf_focus_id(['id' => '42']), 42, 'id 42 kept');
+eq(rh_conf_focus_id(['id' => 7]), 7, 'int id kept');
+foreach (['5abc', '0', '-1', '5 OR 1=1', ' 5', '', '1e3', '99999999999', '4.0'] as $junk) {
+    eq(rh_conf_focus_id(['id' => $junk]), 0, 'junk id ' . var_export($junk, true) . ' -> 0');
+}
+eq(rh_conf_focus_id(['id' => ['5']]), 0, 'array id -> 0');
+eq(rh_conf_focus_id([]), 0, 'no id -> 0');
+$conf = (string)@file_get_contents($root . '/admin/conference-management.php');
+check(strpos($conf, 'style="background: #eef3ff') === false, 'conference filter notice has no inline styles');
+check(strpos($conf, 'class="conf-list-notice"') !== false, 'conference filter notice uses the stylesheet class');
+check(strpos($conf, 'That enquiry was not found') !== false, '?id= not found notice present');
+check(strpos($conf, "prepare('SELECT 1 FROM conference_inquiries WHERE id = ? LIMIT 1')") !== false, '?id= existence check is bound');
+check(strpos($conf, 'var focusId = <?php echo (int)$conf_focus_id; ?>;') !== false, 'only the integer id reaches the page script');
+$confCss = (string)@file_get_contents($root . '/admin/css/conference-management.css');
+check(strpos($confCss, '.conf-list-notice {') !== false, 'notice class defined in conference-management.css');
+
+// ---- capped lists say "Showing X of N"
+eq(rh_gym_member_list_cap(), 500, 'gym members cap 500');
+eq(rh_list_cap_note(500, 812, 500, 'members'), 'Showing 500 of 812 members.', 'over the cap -> note');
+eq(rh_list_cap_note(500, 500, 500, 'members'), '', 'exactly at the cap -> no note');
+eq(rh_list_cap_note(120, 120, 500, 'members'), '', 'under the cap -> no note');
+eq(rh_list_cap_note(500, 1234, 500, 'members'), 'Showing 500 of 1,234 members.', 'thousands formatted');
+eq(rh_list_cap_note(0, 5, 0, 'members'), '', 'no cap -> no note');
+eq(rh_gym_member_filter_key('expiring'), 'expiring', 'known tab kept');
+eq(rh_gym_member_filter_key('bogus'), 'all', 'unknown tab -> all (the list falls back to every member)');
+eq(rh_gym_member_filter_key(['active']), 'all', 'array tab -> all');
+$gmSrc = (string)@file_get_contents($root . '/admin/gym-members.php');
+check(strpos($gmSrc, 'LIMIT {$gm_list_cap}') !== false && strpos($gmSrc, 'LIMIT 500') === false, 'gym members LIMIT uses the shared cap');
+check(strpos($gmSrc, 'rh_list_cap_note(count($gm_members), (int)$gm_counts[$gm_filter]') !== false, 'cap note total = the tab count (same WHERE)');
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

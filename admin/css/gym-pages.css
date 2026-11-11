@@ -23,6 +23,17 @@
     box-shadow: none;
 }
 
+/* Gym Members: the list stops at its cap; this says so ("Showing 500 of N members"). */
+.gym-list-cap-note {
+    margin: 0 0 12px;
+    color: var(--mm-muted, #5E554D);
+    font-size: 13px;
+}
+
+.gym-list-cap-note i {
+    margin-right: 4px;
+}
+
 .gym-range-note {
     margin: 0 0 16px;
     color: var(--mm-muted, #5E554D);

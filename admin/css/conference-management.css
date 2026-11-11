@@ -740,3 +740,23 @@ body.cf-dragging { cursor: grabbing; user-select: none; -webkit-user-select: non
         padding: 0 16px;
     }
 }
+
+/* Conference Enquiries: filter notice ("Filtered list ... Clear") and the ?id= not-found notice. */
+.conf-list-notice {
+    background: #eef3ff;
+    border: 1px solid #cfd8ff;
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+.conf-list-notice__title { display: flex; align-items: center; gap: 8px; color: #1f2d6b; }
+.conf-list-notice__text { color: #2f3a63; font-size: 13px; }
+.conf-list-notice__link { margin-left: 8px; color: #1f2d6b; font-weight: 600; }
+.conf-list-notice--warn { background: #fff7e8; border-color: #f0d9a8; }
+.conf-list-notice--warn .conf-list-notice__title { color: #6b4a12; }
+.conf-list-notice--warn .conf-list-notice__text { color: #5c4520; }

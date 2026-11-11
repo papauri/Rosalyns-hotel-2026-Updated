@@ -755,8 +755,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
 $gm_table_missing = false;
 $gm_members = [];
 $gm_counts = ['active' => 0, 'expiring' => 0, 'expired' => 0, 'all' => 0];
-$gm_filter = (string)($_GET['filter'] ?? 'all');
 require_once __DIR__ . '/includes/events-gym-filters.php';
+$gm_filter = rh_gym_member_filter_key($_GET['filter'] ?? 'all'); // unknown ?filter= = All (the tab it shows)
+$gm_list_cap = rh_gym_member_list_cap();
 try {
     // Filter clauses are selected from this fixed whitelist by key — the request
     // value never reaches the SQL string, so an unexpected ?filter= falls back to
@@ -765,13 +766,13 @@ try {
     foreach ($gm_whereByFilter as $gmFk => $gmFw) {
         $gm_counts[$gmFk] = (int)$pdo->query("SELECT COUNT(*) FROM gym_members WHERE {$gmFw}")->fetchColumn();
     }
-    $where = $gm_whereByFilter[$gm_filter] ?? '1=1';
+    $where = $gm_whereByFilter[$gm_filter];
 
     $gm_stmt = $pdo->prepare(
         "SELECT * FROM gym_members
          WHERE {$where}
          ORDER BY status = 'active' DESC, expiry_date IS NULL ASC, expiry_date ASC, full_name ASC
-         LIMIT 500"
+         LIMIT {$gm_list_cap}"
     );
     $gm_stmt->execute();
     $gm_members = $gm_stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -933,6 +934,10 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
             <?php endforeach; ?>
         </div>
 
+        <?php $gm_cap_note = rh_list_cap_note(count($gm_members), (int)$gm_counts[$gm_filter], $gm_list_cap, 'members'); ?>
+        <?php if ($gm_cap_note !== ''): ?>
+            <p class="gym-list-cap-note" role="status"><i class="fas fa-circle-info" aria-hidden="true"></i> <?php echo htmlspecialchars($gm_cap_note); ?> The list stops at <?php echo number_format($gm_list_cap); ?>; the tab count is the full total.</p>
+        <?php endif; ?>
         <?php if (empty($gm_members)): ?>
             <div class="empty-state" data-rh-results>
                 <i class="fas fa-id-card"></i>

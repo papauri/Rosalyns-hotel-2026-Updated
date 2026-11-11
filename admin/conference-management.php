@@ -916,6 +916,31 @@ try {
     $conference_enquiries = [];
 }
 
+// ?id= (the link in the new-enquiry email): scroll to that enquiry and open its Details.
+// Whitelisted to a positive int and bound; only the integer ever reaches the page script.
+$conf_focus_id = rh_conf_focus_id($_GET);
+$conf_focus_state = ''; // '' | 'listed' | 'filtered' (exists, hidden by the filter) | 'missing'
+if ($conf_focus_id > 0) {
+    $conf_focus_state = 'missing';
+    foreach ($conference_enquiries as $confFocusRow) {
+        if ((int)$confFocusRow['id'] === $conf_focus_id) {
+            $conf_focus_state = 'listed';
+            break;
+        }
+    }
+    if ($conf_focus_state === 'missing' && $conf_list_filter['clauses']) {
+        try {
+            $confFocusChk = $pdo->prepare('SELECT 1 FROM conference_inquiries WHERE id = ? LIMIT 1');
+            $confFocusChk->execute([$conf_focus_id]);
+            if ($confFocusChk->fetchColumn()) {
+                $conf_focus_state = 'filtered';
+            }
+        } catch (PDOException $e) {
+            // keep 'missing'
+        }
+    }
+}
+
 $currency = htmlspecialchars(getSetting('currency_symbol'));
 
 // Facebook sharing
@@ -1089,14 +1114,29 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                 $confFilterCount = count($conference_enquiries);
                 $confFilterStatusLabel = $conf_list_filter['status'] !== '' ? strtolower(rh_conf_list_statuses()[$conf_list_filter['status']]) . ' ' : (!empty($conf_list_filter['open_only']) ? 'pending or confirmed ' : '');
             ?>
-                <div style="background: #eef3ff; border: 1px solid #cfd8ff; border-radius: 10px; padding: 12px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
-                    <div style="display: flex; align-items: center; gap: 8px; color: #1f2d6b;">
-                        <i class="fas fa-filter"></i>
+                <div class="conf-list-notice">
+                    <div class="conf-list-notice__title">
+                        <i class="fas fa-filter" aria-hidden="true"></i>
                         <strong>Filtered list</strong>
                     </div>
-                    <div style="color: #2f3a63; font-size: 13px;">
+                    <div class="conf-list-notice__text">
                         Showing <?php echo number_format($confFilterCount); ?> <?php echo htmlspecialchars($confFilterStatusLabel); ?>enquir<?php echo $confFilterCount === 1 ? 'y' : 'ies'; ?><?php if ($conf_list_filter['event_date'] !== ''): ?> taking place on <?php echo htmlspecialchars(date('M j, Y', strtotime($conf_list_filter['event_date']))); ?><?php endif; ?>.
-                        <a href="conference-management.php" style="margin-left: 8px; color: #1f2d6b; font-weight: 600;">Clear</a>
+                        <a href="conference-management.php" class="conf-list-notice__link">Clear</a>
+                    </div>
+                </div>
+            <?php endif; ?>
+            <?php if ($conf_focus_state === 'missing' || $conf_focus_state === 'filtered'): ?>
+                <div class="conf-list-notice conf-list-notice--warn" role="status">
+                    <div class="conf-list-notice__title">
+                        <i class="fas fa-circle-exclamation" aria-hidden="true"></i>
+                        <strong><?php echo $conf_focus_state === 'missing' ? 'That enquiry was not found' : 'That enquiry is not in this filtered list'; ?></strong>
+                    </div>
+                    <div class="conf-list-notice__text">
+                        <?php if ($conf_focus_state === 'missing'): ?>
+                            It may have been deleted. Showing the enquiries on record.
+                        <?php else: ?>
+                            <a href="conference-management.php?id=<?php echo (int)$conf_focus_id; ?>" class="conf-list-notice__link">Show it</a>
+                        <?php endif; ?>
                     </div>
                 </div>
             <?php endif; ?>
@@ -1295,7 +1335,7 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
                                                     </div>
                                                 </div>
                                             <?php endif; ?>
-                                            <button type="button" class="btn btn-primary btn-sm" onclick="showEnquiryDetails(<?php echo htmlspecialchars(json_encode($enquiry)); ?>)">
+                                            <button type="button" class="btn btn-primary btn-sm" data-enquiry-details="<?php echo (int)$enquiry['id']; ?>" onclick="showEnquiryDetails(<?php echo htmlspecialchars(json_encode($enquiry)); ?>)">
                                                 <i class="fas fa-eye"></i> Details
                                             </button>
                                         </div>
@@ -1509,6 +1549,15 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
     <script>
         const CONFERENCE_CSRF_TOKEN = <?php echo json_encode($csrf_token); ?>;
         const CONF_HAS_END_DATE = <?php echo $confHasEndDate ? 'true' : 'false'; ?>;
+        <?php if ($conf_focus_state === 'listed'): ?>
+        // ?id= from the enquiry email: scroll to and flash the row, then open its Details.
+        document.addEventListener('DOMContentLoaded', function () {
+            var focusId = <?php echo (int)$conf_focus_id; ?>;
+            if (window.rhDeepLinkFlash) { window.rhDeepLinkFlash('enquiry-' + focusId); }
+            var btn = document.querySelector('#enquiry-' + focusId + ' [data-enquiry-details]');
+            if (btn) { setTimeout(function () { btn.click(); }, 450); }
+        });
+        <?php endif; ?>
 
         function setConferenceLoader(visible, label) {
             const loader = document.getElementById('admin-page-loader');
