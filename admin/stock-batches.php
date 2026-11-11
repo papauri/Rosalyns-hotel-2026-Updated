@@ -9,6 +9,7 @@
 require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once __DIR__ . '/../includes/form-validation.php';
+require_once __DIR__ . '/includes/stock-list-filters.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -26,10 +27,32 @@ if (!ensureStockTablesExist()) {
     $error = 'Stock tables not yet created. Please run admin/migrations/015_stock_management.php first.';
 }
 
+// Dashboard filter (?filter=expiring|expired): the same condition as the dashboard count that links here.
+$batchFilter  = rh_stock_batch_filter_key($_GET['filter'] ?? '');
+$batches_page = max(1, (int)($_GET['batches_page'] ?? 1));
+$expiredSnapshot = []; // ?filter=expired: ids read with the dashboard's rule before the sweep below writes them off
+$expiredSnapshotFailed = false;
+if (!$error && $batchFilter === 'expired' && $_SERVER['REQUEST_METHOD'] === 'GET') {
+    try {
+        $freshExpired = $pdo->query("SELECT b.id FROM stock_batches b WHERE " . rh_stock_batch_expired_sql('b') . " ORDER BY b.id")->fetchAll(PDO::FETCH_COLUMN);
+    } catch (Throwable $e) {
+        $freshExpired = [];
+        $expiredSnapshotFailed = true;
+        error_log('stock-batches expired filter: ' . $e->getMessage());
+    }
+    // Arriving from a dashboard link reads afresh; paging or picking an ingredient (keep=1) keeps today's list.
+    $reuseExpired = $batches_page > 1 || (($_GET['keep'] ?? '') === '1');
+    $expiredSnapshot = rh_stock_expired_snapshot($_SESSION['rh_stock_expired_snapshot'] ?? null, date('Y-m-d'), $reuseExpired, $freshExpired);
+    if (!$expiredSnapshotFailed) {
+        $_SESSION['rh_stock_expired_snapshot'] = ['date' => date('Y-m-d'), 'ids' => $expiredSnapshot];
+    }
+}
+
 // Auto-run expiry sweep
 if (!$error) {
     $expiredCount = runStockExpiryCheck();
-    if ($expiredCount > 0) {
+    // With ?filter=expired the notice above the list gives the count (this one also counts emptied batches).
+    if ($expiredCount > 0 && $batchFilter !== 'expired') {
         $message = "{$expiredCount} batch(es) automatically marked as expired.";
     }
 }
@@ -135,7 +158,18 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
         if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
     }
     if ($error)   $_SESSION['stock_err'] = $error;
-    header('Location: stock-batches.php' . (!empty($_GET['ingredient_id']) ? '?ingredient_id=' . (int)$_GET['ingredient_id'] : ''));
+    // Back to the same view: ingredient, status, expiry, dashboard filter and page are kept.
+    $backStatus = is_string($_GET['status'] ?? null) && in_array($_GET['status'], ['active', 'depleted', 'expired', 'wasted', 'recalled', 'all'], true) ? $_GET['status'] : '';
+    $backExpiry = is_string($_GET['expiry'] ?? null) && in_array($_GET['expiry'], ['critical', 'soon', 'upcoming'], true) ? $_GET['expiry'] : '';
+    $backQuery = http_build_query(array_filter([
+        'ingredient_id' => !empty($_GET['ingredient_id']) ? (int)$_GET['ingredient_id'] : '',
+        'status'        => $backStatus,
+        'expiry'        => $backExpiry,
+        'filter'        => $batchFilter,
+        'keep'          => $batchFilter === 'expired' ? '1' : '',
+        'batches_page'  => $batches_page > 1 ? $batches_page : '',
+    ], fn($v) => $v !== '' && $v !== 0));
+    header('Location: stock-batches.php' . ($backQuery !== '' ? '?' . $backQuery : ''));
     exit;
 }
 
@@ -149,8 +183,13 @@ if (!empty($_SESSION['stock_err'])) {
 }
 
 $ingredientFilter = isset($_GET['ingredient_id']) ? (int)$_GET['ingredient_id'] : 0;
-$statusFilter = $_GET['status'] ?? 'active';
-$expiryFilter = $_GET['expiry'] ?? '';
+$statusFilter = is_string($_GET['status'] ?? null) ? $_GET['status'] : 'active';
+$expiryFilter = is_string($_GET['expiry'] ?? null) ? $_GET['expiry'] : '';
+if ($batchFilter !== '') {
+    // A dashboard filter carries its own status/expiry rule; the toolbar's status and expiry are set aside.
+    $statusFilter = 'all';
+    $expiryFilter = '';
+}
 
 $batches = [];
 $ingredients = [];
@@ -175,6 +214,15 @@ if (!$error || strpos($error, 'not yet') === false) {
         if ($statusFilter && $statusFilter !== 'all') {
             $sql .= " AND b.status = ?";
             $params[] = $statusFilter;
+        }
+        if ($batchFilter === 'expiring') {
+            $sql .= " AND " . rh_stock_batch_expiring_sql('b');
+        } elseif ($batchFilter === 'expired') {
+            // The batches the dashboard counted, whatever the sweep above has since done to them.
+            $sql .= " AND " . rh_stock_id_in_sql('b.id', $expiredSnapshot);
+            foreach ($expiredSnapshot as $snapId) {
+                $params[] = $snapId;
+            }
         }
         if (in_array($expiryFilter, ['critical', 'soon', 'upcoming'], true)) {
             $sql .= " AND b.quantity_remaining > 0"; // emptied batches are not "expiring" stock (matches the tiles)
@@ -374,19 +422,52 @@ function expiry_tier(?string $expiry, ?int $days): array
             </div>
         </template>
 
+        <?php if ($batchFilter !== ''):
+            $bfCount = count($batches);
+            $bfIngName = '';
+            foreach ($ingredients as $ing) {
+                if ($ingredientFilter > 0 && (int)$ing['id'] === $ingredientFilter) $bfIngName = (string)$ing['name'];
+            }
+        ?>
+            <div class="stock-filter-notice" style="background:#eef3ff;border:1px solid #cfd8ff;border-radius:10px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                <div style="display:flex;align-items:center;gap:8px;color:#1f2d6b;">
+                    <i class="fas fa-filter"></i>
+                    <strong>Filtered list</strong>
+                </div>
+                <div style="color:#2f3a63;font-size:13px;flex:1 1 320px;">
+                    <?php if ($batchFilter === 'expiring'): ?>
+                        Showing <?php echo number_format($bfCount); ?> batch<?php echo $bfCount === 1 ? '' : 'es'; ?> <?php echo htmlspecialchars(rh_stock_batch_list_filters()['expiring']); ?><?php echo $bfIngName !== '' ? ' for ' . htmlspecialchars($bfIngName) : ''; ?>, the same rule as the dashboard's expiring count.
+                    <?php elseif ($expiredSnapshotFailed): ?>
+                        The batches past their expiry date could not be read just now. Reload the page to try again.
+                    <?php elseif (count($expiredSnapshot) === 0): ?>
+                        No batch is past its expiry date with stock left now. Batches already written off are listed under status
+                        <a href="stock-batches.php?status=expired" style="color:#1f2d6b;font-weight:600;">Expired</a>.
+                    <?php else: ?>
+                        <?php echo number_format(count($expiredSnapshot)); ?> batch<?php echo count($expiredSnapshot) === 1 ? ' was' : 'es were'; ?> <?php echo htmlspecialchars(rh_stock_batch_list_filters()['expired']); ?> (the dashboard's expired count)<?php echo $bfIngName !== '' ? '; ' . number_format($bfCount) . ' for ' . htmlspecialchars($bfIngName) : ''; ?>.
+                        Opening this page writes them off as expired; the Status column shows the result.
+                    <?php endif; ?>
+                    <a href="stock-batches.php" style="margin-left:8px;color:#1f2d6b;font-weight:600;">Clear</a>
+                </div>
+            </div>
+        <?php endif; ?>
+
         <form method="GET" class="stock-toolbar">
+            <?php if ($batchFilter !== ''): /* the ingredient picker narrows the dashboard filter; status or expiry leave it */ ?>
+                <input type="hidden" name="filter" value="<?php echo htmlspecialchars($batchFilter); ?>">
+                <?php if ($batchFilter === 'expired'): ?><input type="hidden" name="keep" value="1"><?php endif; ?>
+            <?php endif; ?>
             <select name="ingredient_id" onchange="this.form.submit()">
                 <option value="0">All ingredients</option>
                 <?php foreach ($ingredients as $ing): ?>
                     <option value="<?php echo (int)$ing['id']; ?>" <?php echo $ingredientFilter === (int)$ing['id'] ? 'selected' : ''; ?>><?php echo htmlspecialchars($ing['name']); ?></option>
                 <?php endforeach; ?>
             </select>
-            <select name="status" onchange="this.form.submit()">
+            <select name="status" onchange="['filter', 'keep'].forEach(function (k) { if (this.form.elements[k]) this.form.elements[k].remove(); }, this); this.form.submit()"<?php echo $batchFilter !== '' ? ' title="Picking a status leaves the dashboard filter"' : ''; ?>>
                 <?php foreach (['active' => 'Active', 'depleted' => 'Depleted', 'expired' => 'Expired', 'wasted' => 'Wasted', 'recalled' => 'Recalled', 'all' => 'All'] as $k => $v): ?>
                     <option value="<?php echo $k; ?>" <?php echo $statusFilter === $k ? 'selected' : ''; ?>><?php echo $v; ?></option>
                 <?php endforeach; ?>
             </select>
-            <select name="expiry" onchange="this.form.submit()">
+            <select name="expiry" onchange="['filter', 'keep'].forEach(function (k) { if (this.form.elements[k]) this.form.elements[k].remove(); }, this); this.form.submit()"<?php echo $batchFilter !== '' ? ' title="Picking an expiry range leaves the dashboard filter"' : ''; ?>>
                 <option value="">Any expiry</option>
                 <option value="critical" <?php echo $expiryFilter === 'critical' ? 'selected' : ''; ?>>≤ 3 days</option>
                 <option value="soon" <?php echo $expiryFilter === 'soon' ? 'selected' : ''; ?>>4 – 7 days</option>
@@ -414,7 +495,6 @@ function expiry_tier(?string $expiry, ?int $days): array
                 <tbody>
                     <?php
                     $batches_per_page    = 10;
-                    $batches_page        = max(1, (int)($_GET['batches_page'] ?? 1));
                     $batches_total       = count($batches);
                     $batches_total_pages = $batches_total > 0 ? (int)ceil($batches_total / $batches_per_page) : 1;
                     $batches_display     = array_slice($batches, ($batches_page - 1) * $batches_per_page, $batches_per_page);
@@ -473,7 +553,7 @@ function expiry_tier(?string $expiry, ?int $days): array
         <?php if ($batches_total_pages > 1): ?>
             <nav style="display:flex;align-items:center;justify-content:center;gap:6px;padding:16px 0;flex-wrap:wrap;">
                 <?php for ($pg = 1; $pg <= $batches_total_pages; $pg++):
-                    $pgParams = ['ingredient_id' => $ingredientFilter ?: '', 'status' => $statusFilter, 'expiry' => $expiryFilter, 'batches_page' => $pg];
+                    $pgParams = ['ingredient_id' => $ingredientFilter ?: '', 'status' => $batchFilter !== '' ? '' : $statusFilter, 'expiry' => $expiryFilter, 'filter' => $batchFilter, 'keep' => $batchFilter === 'expired' ? '1' : '', 'batches_page' => $pg];
                     $pgHref = 'stock-batches.php?' . http_build_query(array_filter($pgParams, fn($v) => $v !== ''));
                     $pgActive = ($pg === $batches_page);
                 ?>

@@ -10,6 +10,10 @@ require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once 'includes/procurement-schema.php';
 require_once __DIR__ . '/../includes/form-validation.php';
+require_once __DIR__ . '/includes/stock-list-filters.php';
+
+// Dashboard filter (?filter=low): exactly the items the low-stock alert counts (rh_stock_alert_summary 'attention').
+$ingFilter = rh_stock_ingredient_filter_key($_GET['filter'] ?? '');
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -535,7 +539,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         $_SESSION['stock_ingredient_form_keep'] = ['action' => (string)$action, 'error' => $error, 'post' => $keep];
     }
-    header('Location: stock-ingredients.php');
+    header('Location: stock-ingredients.php' . ($ingFilter !== '' ? '?filter=' . $ingFilter : '')); // back to the same list
     exit;
 }
 
@@ -561,9 +565,11 @@ try {
 if (!$error || strpos($error, 'Stock tables not yet') === false) {
     try {
         $histSql = rh_stock_history_sql($pdo, 'i'); // shared "has stock history" rule
+        $attentionSql = rh_stock_attention_sql(rh_stock_threshold_sql('i'), $histSql, 'i'); // the low-stock alert rule
         $stmt = $pdo->query("
             SELECT i.*,
                    (CASE WHEN {$histSql} THEN 0 ELSE 1 END) AS never_stocked,
+                   (CASE WHEN {$attentionSql} THEN 1 ELSE 0 END) AS needs_attention,
                    (SELECT MIN(b.expiry_date) FROM stock_batches b WHERE b.ingredient_id = i.id AND b.status = 'active' AND b.expiry_date IS NOT NULL AND b.quantity_remaining > 0) AS next_expiry
             FROM stock_ingredients i
             ORDER BY i.is_archived ASC, i.category ASC, i.name ASC
@@ -609,6 +615,10 @@ if (!$error || strpos($error, 'Stock tables not yet') === false) {
                 unset($keepData['id']);
             }
             $stockFormReopen = ['data' => $keepData, 'error' => (string)($keepForm['error'] ?? '')];
+        }
+        if ($ingFilter === 'low') {
+            // Applied after the flags and the refused-form rebuild above, which need every row.
+            $ingredients = array_values(array_filter($ingredients, static fn(array $r): bool => (int)$r['needs_attention'] === 1));
         }
         foreach ($ingredients as $i) {
             if (!in_array($i['category'], $categories, true)) $categories[] = $i['category'];
@@ -717,7 +727,7 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
             <h2 class="page-title"><i class="fas <?php echo $stockIsFood ? 'fa-carrot' : 'fa-boxes-stacked'; ?>" style="color:var(--color-primary,#766550);"></i> <?php echo $stockNounPl; ?></h2>
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
                 <?php if (!empty($ingredients)): ?>
-                    <a class="btn-secondary" href="?export=csv" style="display:inline-flex; align-items:center; gap:6px; text-decoration:none;" title="Download all <?php echo strtolower($stockNounPl); ?> as an Excel-compatible spreadsheet"><i class="fas fa-file-excel"></i> Export to Excel</a>
+                    <a class="btn-secondary" href="?<?php echo $ingFilter !== '' ? 'filter=' . $ingFilter . '&amp;' : ''; ?>export=csv" style="display:inline-flex; align-items:center; gap:6px; text-decoration:none;" title="Download all <?php echo strtolower($stockNounPl); ?> as an Excel-compatible spreadsheet"><i class="fas fa-file-excel"></i> Export to Excel</a>
                 <?php endif; ?>
                 <button class="btn-add" onclick="openIngredientModal()"><i class="fas fa-plus"></i> Add <?php echo $stockNoun; ?></button>
             </div>
@@ -737,6 +747,20 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 <span><i class="dot dot-crit"></i> Critical / Expired — out of stock or past date</span>
             </div>
         </div>
+
+        <?php if ($ingFilter === 'low'): $lowListCount = count($ingredients); ?>
+            <div class="stock-filter-notice" style="background:#eef3ff;border:1px solid #cfd8ff;border-radius:10px;padding:12px 14px;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;">
+                <div style="display:flex;align-items:center;gap:8px;color:#1f2d6b;">
+                    <i class="fas fa-filter"></i>
+                    <strong>Filtered list</strong>
+                </div>
+                <div style="color:#2f3a63;font-size:13px;flex:1 1 320px;">
+                    Showing <?php echo number_format($lowListCount); ?> <?php echo $lowListCount === 1 ? $stockNounLow : strtolower($stockNounPl); ?> that need restocking: out of stock, or at or below the low-stock line (reorder point, else minimum). The same rule and count as the dashboard's low-stock alert; archived items and items whose opening stock was never recorded are left out.
+                    The search, category and status boxes narrow this list further.
+                    <a href="stock-ingredients.php" style="margin-left:8px;color:#1f2d6b;font-weight:600;">Clear</a>
+                </div>
+            </div>
+        <?php endif; ?>
 
         <div class="stock-toolbar">
             <input type="text" id="filter-search" placeholder="Search <?php echo $stockNounLow; ?>..." oninput="filterTable()">
@@ -904,7 +928,11 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                             </td>
                         </tr>
                     <?php endforeach; ?>
-                    <?php if (empty($ingredients)): ?>
+                    <?php if (empty($ingredients) && $ingFilter === 'low'): ?>
+                        <tr>
+                            <td colspan="10" style="text-align:center; padding:30px; color:#6c757d;">Nothing needs restocking right now. <a href="stock-ingredients.php">Show all <?php echo strtolower($stockNounPl); ?></a></td>
+                        </tr>
+                    <?php elseif (empty($ingredients)): ?>
                         <tr>
                             <td colspan="10" style="text-align:center; padding:30px; color:#6c757d;">No <?php echo strtolower($stockNounPl); ?> yet. Click <strong>Add <?php echo $stockNoun; ?></strong> to get started.</td>
                         </tr>
