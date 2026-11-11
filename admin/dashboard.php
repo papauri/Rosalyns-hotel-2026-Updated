@@ -3105,6 +3105,9 @@ $currency_symbol = getSetting('currency_symbol');
                         });
                         panel.querySelectorAll('[data-ck-pane]').forEach(function (pane) {
                             pane.hidden = pane.dataset.ckPane !== tab.dataset.ckTab;
+                            // A pane that started hidden could not be measured: refresh its pager now it shows.
+                            const list = pane.hidden ? null : pane.querySelector('ul.ck-rows');
+                            if (list && typeof list.rhPagerRefresh === 'function') list.rhPagerRefresh(false);
                         });
                     });
                 });
@@ -3112,15 +3115,30 @@ $currency_symbol = getSetting('currency_symbol');
 
             document.querySelectorAll('[data-ck-week]').forEach(function (week) {
                 const rows = week.querySelectorAll('[data-ck-day-row]');
+                const list = week.querySelector('ul.ck-rows');
                 const empty = week.querySelector('[data-ck-day-empty]');
                 const reset = week.querySelector('.ck-panel__tools [data-ck-day]');
                 function filter(day) {
+                    // Rows outside the day are flagged data-filter-hidden; the shared pager (if the list
+                    // has one) then pages only the matching rows and shows their count.
+                    const paged = !!(list && typeof list.rhPagerRefresh === 'function');
                     let shown = 0;
                     rows.forEach(function (row) {
                         const on = day === '' || row.dataset.ckDayRow === day;
-                        row.hidden = !on;
-                        if (on) shown++;
+                        if (on) {
+                            row.removeAttribute('data-filter-hidden');
+                            shown++;
+                        } else {
+                            row.setAttribute('data-filter-hidden', '1');
+                        }
+                        if (!paged) row.hidden = !on;
                     });
+                    if (paged) {
+                        list.rhPagerRefresh(true);
+                        // A day with nothing booked shows only the empty message, not "Showing 0 of 0".
+                        const nav = list.nextElementSibling;
+                        if (nav && nav.matches('[data-admin-auto-pagination-nav]')) nav.style.display = shown === 0 ? 'none' : '';
+                    }
                     week.querySelectorAll('.ck-days [data-ck-day]').forEach(function (b) {
                         b.classList.toggle('is-active', b.dataset.ckDay === day);
                     });

@@ -5,9 +5,12 @@
     window.__adminSectionPaginationInitialized = true;
 
     var PAGE_SIZE = 10;
-    // Owner 2026-11-12: lists show 10 per page and the user can choose to show more. A table inside an element with
-    // data-page-size-picker gets a "Show 10 / 25 / 50 / 100 per page" choice next to its pager (opt-in per screen).
-    var PAGE_SIZE_CHOICES = [10, 25, 50, 100];
+    // Owner 2026-11-12: every list shows 10 per page and the user can choose to show more. Every auto-paged table
+    // and list gets a "Show 10 / 25 / 50 / 100 / All per page" choice next to its pager; an element with
+    // data-no-page-size-picker opts out. 0 = All (every row, the pager collapses to the summary).
+    var PAGE_SIZE_CHOICES = [10, 25, 50, 100, 0];
+    // Plain row lists (dashboard worklists) page the same way as tables: their direct <li> children are the rows.
+    var LIST_SELECTOR = 'ul.ck-rows';
 
     function getLoaderBrandName() {
         var brand = document.querySelector('.admin-header-brand h1');
@@ -95,10 +98,29 @@
         return table.closest('[data-admin-pagination-scope], .acct-panel, .section-card, .widget, .dashboard-section, .log-section') || table.parentElement;
     }
 
+    function isListElement(el) {
+        return !!(el && el.tagName === 'UL');
+    }
+
+    // Where the pager sits and what is measured: the table's wrapper, or the list itself (so the
+    // pager stays inside the list's own tab pane and hides with it).
+    function resolveItemsHost(el) {
+        if (!el) return null;
+        return isListElement(el) ? el : resolveTableHost(el);
+    }
+
+    // Where an existing pager would count as "already paged": a list only looks inside its own
+    // pane (or itself), never the whole section, so each tab pane gets its own pager.
+    function resolveItemsScope(el) {
+        if (!el) return null;
+        if (isListElement(el)) return el.closest('[data-admin-pagination-scope], .ck-pane') || el;
+        return resolveSectionScope(el);
+    }
+
     function findExistingPaginationNear(table) {
         if (!table) return false;
 
-        var host = resolveTableHost(table);
+        var host = resolveItemsHost(table);
         var next = host.nextElementSibling;
         var checks = 0;
 
@@ -112,7 +134,7 @@
             break;
         }
 
-        var sectionScope = resolveSectionScope(table);
+        var sectionScope = resolveItemsScope(table);
         if (sectionScope && sectionScope.querySelector('[data-admin-pagination], .bookings-pagination:not(.admin-auto-pagination), .pagination:not(.admin-auto-pagination), .log-table-pagination:not(.admin-auto-pagination), .receipts-pagination:not(.admin-auto-pagination), .pagination-bar:not(.admin-auto-pagination), .inv-pagination:not(.admin-auto-pagination)')) {
             return true;
         }
@@ -126,6 +148,22 @@
             if (tr.querySelector('td[colspan], th[colspan]') && tr.children.length === 1) return false;
             return true;
         });
+    }
+
+    function collectListItems(list) {
+        return Array.prototype.slice.call(list.querySelectorAll(':scope > li')).filter(function (li) {
+            return li.dataset.adminAutoPaginationIgnore !== '1';
+        });
+    }
+
+    // One items source for both kinds: tables page their tbody > tr rows, lists their > li items.
+    function resolveItemsContainer(el) {
+        if (isListElement(el)) return el;
+        return (el.tBodies && el.tBodies.length) ? el.tBodies[0] : null;
+    }
+
+    function collectItems(el, container) {
+        return isListElement(el) ? collectListItems(container) : collectDataRows(container);
     }
 
     function buildWindow(currentPage, totalPages) {
@@ -211,16 +249,18 @@
         if (!table || table.dataset.adminAutoPaginationBound === '1') return;
         if (findExistingPaginationNear(table)) return;
 
-        var tbody = (table.tBodies && table.tBodies.length) ? table.tBodies[0] : null;
+        // "table" is the paged element: a <table> (tbody > tr rows) or a row list (ul > li items).
+        var isList = isListElement(table);
+        var tbody = resolveItemsContainer(table);
         if (!tbody) return;
 
-        var rows = collectDataRows(tbody);
+        var rows = collectItems(table, tbody);
         if (rows.length <= PAGE_SIZE) return;
 
         table.dataset.adminAutoPaginationBound = '1';
 
-        var hasSizePicker = !!table.closest('[data-page-size-picker]');
-        var pageSize = PAGE_SIZE;
+        var hasSizePicker = !table.closest('[data-no-page-size-picker]');
+        var pageSize = PAGE_SIZE; // 0 = All
 
         // Rows a page script has filtered out (data-filter-hidden="1") do not count: pages, the
         // "Showing x-y of n" summary and the pager all follow the rows that match the filter.
@@ -232,17 +272,27 @@
             return rows.filter(function (row) { return row.dataset.filterHidden !== '1'; });
         }
 
+        // Rows on one page; "All" (0) means every row on a single page.
+        function perPage() {
+            return pageSize > 0 ? pageSize : Math.max(1, rows.length);
+        }
+
         function syncTotals() {
             totalRows = matchingRows().length;
-            totalPages = Math.max(1, Math.ceil(totalRows / pageSize));
+            totalPages = Math.max(1, Math.ceil(totalRows / perPage()));
         }
 
         var nav = document.createElement('nav');
         nav.className = 'bookings-pagination admin-auto-pagination';
         nav.setAttribute('data-admin-auto-pagination-nav', '1');
-        nav.setAttribute('aria-label', 'Table pagination');
+        nav.setAttribute('aria-label', isList ? 'List pagination' : 'Table pagination');
 
-        var host = resolveTableHost(table);
+        var host = resolveItemsHost(table);
+
+        // A list in a tab pane that starts hidden has no size yet: measure only once it is shown.
+        function hostIsVisible() {
+            return host.getClientRects().length > 0;
+        }
         if (host.nextSibling) {
             host.parentNode.insertBefore(nav, host.nextSibling);
         } else {
@@ -261,18 +311,24 @@
         var baseMargin = null;
 
         function showRows(page) {
-            var from = (page - 1) * pageSize;
-            var to = from + pageSize;
+            var size = perPage();
+            var from = (page - 1) * size;
+            var to = from + size;
             var index = 0;
+            var firstShown = false;
             rows.forEach(function (row) {
+                if (isList) row.classList.remove('rh-page-first');
                 if (row.dataset.filterHidden === '1') { row.hidden = true; return; }
                 row.hidden = !(index >= from && index < to);
+                // A list's first row on this page drops its top divider (CSS .rh-page-first).
+                if (isList && !row.hidden && !firstShown) { row.classList.add('rh-page-first'); firstShown = true; }
                 index++;
             });
         }
 
         function measureTallestPage() {
             tallestPage = 0;
+            if (!hostIsVisible()) return; // hidden pane: stays 0, the next render after it shows measures
             var limit = Math.min(totalPages, 60);
             for (var pg = 1; pg <= limit; pg++) {
                 showRows(pg);
@@ -281,6 +337,11 @@
         }
 
         function holdPagerPosition() {
+            if (!hostIsVisible()) {
+                tallestPage = 0;
+                nav.style.marginTop = '';
+                return;
+            }
             if (baseMargin === null) baseMargin = parseFloat(window.getComputedStyle(nav).marginTop) || 0;
             var height = host.getBoundingClientRect().height;
             if (height > tallestPage) tallestPage = height; // a page taller than first measured
@@ -292,7 +353,7 @@
         // then, and on resize, so the held height matches what the user actually sees.
         function remeasure() {
             if (!host.isConnected) return;
-            rows = collectDataRows(tbody);
+            rows = collectItems(table, tbody);
             measureTallestPage();
             showRows(currentPage);
             holdPagerPosition();
@@ -311,11 +372,12 @@
         window.setTimeout(remeasure, 1200);
 
         function renderPage(targetPage, shouldScroll) {
-            rows = collectDataRows(tbody); // follow the live DOM order (a header sort re-orders rows)
+            rows = collectItems(table, tbody); // follow the live DOM order (a header sort re-orders rows)
             syncTotals();
             currentPage = Math.max(1, Math.min(totalPages, targetPage));
-            var from = (currentPage - 1) * pageSize;
-            var to = from + pageSize;
+            var size = perPage();
+            var from = (currentPage - 1) * size;
+            var to = from + size;
 
             if (!tallestPage) measureTallestPage();
             showRows(currentPage);
@@ -364,7 +426,7 @@
             summary.className = 'pg-summary';
             summary.textContent = totalRows === 0 ? 'Showing 0 of 0' : 'Showing ' + (from + 1) + '–' + Math.min(to, totalRows) + ' of ' + totalRows;
             // One page or none: the page buttons would only be disabled, so show just the summary.
-            nav.classList.toggle('admin-auto-pagination--single', totalRows <= pageSize);
+            nav.classList.toggle('admin-auto-pagination--single', pageSize === 0 || totalRows <= pageSize);
             nav.appendChild(summary);
 
             if (hasSizePicker) {
@@ -375,13 +437,13 @@
                 sizeSelect.setAttribute('aria-label', 'Rows per page');
                 PAGE_SIZE_CHOICES.forEach(function (n) {
                     var opt = document.createElement('option');
-                    opt.value = String(n);
-                    opt.textContent = String(n);
+                    opt.value = n === 0 ? 'all' : String(n);
+                    opt.textContent = n === 0 ? 'All' : String(n);
                     if (n === pageSize) opt.selected = true;
                     sizeSelect.appendChild(opt);
                 });
                 sizeSelect.addEventListener('change', function () {
-                    var next = parseInt(sizeSelect.value, 10);
+                    var next = sizeSelect.value === 'all' ? 0 : parseInt(sizeSelect.value, 10);
                     if (PAGE_SIZE_CHOICES.indexOf(next) === -1) return;
                     pageSize = next;
                     tallestPage = 0;
@@ -399,6 +461,7 @@
 
         // Page scripts that filter rows call table.rhPagerRefresh(true) after flagging rows with
         // data-filter-hidden: back to page 1 (or stay on the current page) with fresh counts.
+        // Lists expose the same call on the <ul> (e.g. after a dashboard tab shows its pane).
         table.rhPagerRefresh = function (resetPage) {
             tallestPage = 0;
             renderPage(resetPage ? 1 : currentPage, false);
@@ -421,6 +484,12 @@
             // POS log table has its own user-filter pagination logic.
             if (table.classList.contains('log-table') && table.querySelector('.pos-user-cell')) return;
             mountPagination(table);
+        });
+
+        var lists = Array.prototype.slice.call(root.querySelectorAll(LIST_SELECTOR));
+        lists.forEach(function (list) {
+            if (list.closest('[data-disable-auto-pagination], .no-auto-pagination')) return;
+            mountPagination(list);
         });
     }
 

@@ -2292,7 +2292,7 @@ body:not(:has(> .admin-header)) .admin-page-loader {
     display: none;
 }
 
-/* Rows-per-page choice next to the table pager (admin-section-pagination.js, data-page-size-picker) */
+/* Rows-per-page choice next to every auto pager (admin-section-pagination.js; data-no-page-size-picker opts out) */
 .admin-auto-pagination .pg-size {
     display: inline-flex;
     align-items: center;
@@ -2310,6 +2310,10 @@ body:not(:has(> .admin-header)) .admin-page-loader {
     border-radius: 6px;
     background: #fff;
     font: inherit;
+}
+
+@media (pointer: coarse) {
+    .admin-auto-pagination .pg-size select { min-height: 44px; }
 }
 
 /* Optional tick box in the confirm dialog (data-admin-confirm-check), e.g. "Email the guest" on a cancel */
