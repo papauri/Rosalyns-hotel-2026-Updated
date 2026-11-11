@@ -34,6 +34,12 @@ You write files only. The orchestrator commits and pushes the Showcase repo and 
 - First screen = the picker: one large tile per business type plus "Managed for you". The choice sits in
   `location.hash` (`#full-hotel`, `#restaurant`, `#gym`, ...) so a link opens straight on one business; a small
   switcher stays in the header to change business at any time.
+- **Three devices side by side (owner 2026-11-12: "so clients know they are getting value for money").** Where a
+  screen really changes by device (bookings list, POS till, dashboards, guest booking flow, panel pages), the slide shows
+  it at once on Phone (412 px), Tablet (820 px) and Desktop (1440 px): each drawn at its true CSS width, scaled down to
+  fit, labelled with its real size; on narrow screens they stack or switch with a Phone / Tablet / Desktop toggle.
+  One shared shell helper (`ctx.devices(el, render)`) used by both data files. Single-device screens stay single
+  (a kitchen display is a wall screen).
 - Aim for 6–9 slides per business type and 4–6 panel slides. Fewer, better. Each slide must be understood in
   five seconds without a presenter: one plain headline, one sentence, the live mock-up, at most three points.
 
