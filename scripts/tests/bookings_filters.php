@@ -60,6 +60,15 @@ eq(rh_bk_arrival_filter('x'), '', 'other arrival values ignored');
 eq(rh_bk_arrival_clause(''), null, 'no arrival filter -> no clause');
 check(strpos((string)rh_bk_arrival_clause('overdue'), 'b.check_in_date < CURDATE()') !== false, 'overdue clause: arrival date passed');
 
+// ---- overdue departures (Dashboard chip: checked in, check-out date passed)
+eq(rh_bk_departure_filter('overdue'), 'overdue', 'departure=overdue recognised');
+eq(rh_bk_departure_filter('today'), '', 'other departure values ignored');
+eq(rh_bk_departure_clause(''), null, 'no departure filter -> no clause');
+eq(rh_bk_departure_clause('overdue'), "b.status = 'checked-in' AND b.check_out_date < CURDATE()", 'overdue departure clause = the Dashboard count rule');
+eq(rh_bk_notice_title('', 'overdue'), 'Overdue departures only', 'notice: overdue departures');
+eq(rh_bk_notice_title('overdue', ''), 'Overdue arrivals only', 'notice: overdue arrivals');
+eq(rh_bk_notice_title('', ''), 'Search filtered results', 'notice: plain search');
+
 // ---- ?filter= / ?payment_status=
 eq(rh_bk_filter_key('checkin_today'), 'checkin_today', 'filter key kept');
 eq(rh_bk_filter_key('bogus'), '', 'unknown filter dropped');

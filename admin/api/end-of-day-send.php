@@ -14,6 +14,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/api-init.php';
 require_once __DIR__ . '/../includes/pos-shift-totals.php';
 require_once __DIR__ . '/../includes/eod-revenue.php';
+require_once __DIR__ . '/../includes/front-desk-counts.php'; // tentative holds note (expected arrivals = confirmed + pending + arrived)
 require_once __DIR__ . '/../includes/receivables.php';
 require_once __DIR__ . '/../../includes/report-mailer.php';
 require_once __DIR__ . '/../../includes/whatsapp-functions.php';
@@ -82,18 +83,19 @@ try {
     // Ops
     $opsStmt = $pdo->prepare("
         SELECT
-            SUM(CASE WHEN check_in_date = ? AND status IN ('confirmed','tentative','pending','checked-in') THEN 1 ELSE 0 END) AS expected_arrivals,
+            SUM(CASE WHEN check_in_date = ? AND status IN ('confirmed','pending','checked-in') THEN 1 ELSE 0 END) AS expected_arrivals,
             SUM(CASE WHEN check_in_date = ? AND status = 'checked-in' THEN 1 ELSE 0 END) AS arrivals_completed,
             SUM(CASE WHEN check_out_date = ? AND status IN ('checked-in','checked-out') THEN 1 ELSE 0 END) AS expected_departures,
             SUM(CASE WHEN check_out_date = ? AND status = 'checked-out' THEN 1 ELSE 0 END) AS departures_completed,
             SUM(CASE WHEN check_in_date < ? AND check_out_date > ? AND status = 'checked-in' THEN 1 ELSE 0 END) AS stayovers,
             SUM(CASE WHEN DATE(created_at) = ? THEN 1 ELSE 0 END) AS new_bookings,
             0 AS cancellations,
-            SUM(CASE WHEN check_in_date = ? AND status = 'no-show' THEN 1 ELSE 0 END) AS no_shows
+            SUM(CASE WHEN check_in_date = ? AND status = 'no-show' THEN 1 ELSE 0 END) AS no_shows,
+            SUM(CASE WHEN check_in_date = ? AND status = 'tentative' THEN 1 ELSE 0 END) AS tentative_arrivals
         FROM bookings
         WHERE deleted_at IS NULL
     ");
-    $opsStmt->execute(array_fill(0, 8, $date));
+    $opsStmt->execute(array_fill(0, 9, $date));
     $ops = $opsStmt->fetch(PDO::FETCH_ASSOC) ?: [];
     // Cancellations count on the day they happened, from the booking history (owner 2026-10-21), not updated_at.
     $ops['cancellations'] = rh_cancellations_on_date($pdo, $date);
@@ -497,6 +499,9 @@ if ($channel === 'whatsapp') {
     $lines[] = "Unsold: " . $rooms_unsold . " rooms  (opp. " . _money($currency_symbol, (float)$empty_room_opportunity) . ")";
     $lines[] = '';
     $lines[] = "Arrivals:   " . (int)($ops['arrivals_completed'] ?? 0) . " done / " . (int)($ops['expected_arrivals'] ?? 0) . " expected";
+    if (($tentNote = rh_fd_tentative_note($ops)) !== '') {
+        $lines[] = "            " . $tentNote;
+    }
     $lines[] = "Departures: " . (int)($ops['departures_completed'] ?? 0) . " done / " . (int)($ops['expected_departures'] ?? 0) . " expected";
     $lines[] = "Stay-overs: " . (int)($ops['stayovers'] ?? 0) . "   New bookings: " . (int)($ops['new_bookings'] ?? 0);
     if ((int)($ops['cancellations'] ?? 0) > 0 || (int)($ops['no_shows'] ?? 0) > 0) {
@@ -553,6 +558,9 @@ if ($channel === 'whatsapp') {
         $lines[] = date('D, j M Y', strtotime($date . ' +1 day'));
         $lines[] = "Arrivals: " . (int)$tom['arrivals'] . "   Departures: " . (int)$tom['departures'];
         $lines[] = "Booked value of arrivals: " . _money($currency_symbol, (float)$tom['rev_forecast']);
+        if (($tomTentNote = rh_fd_tentative_note($tom)) !== '') {
+            $lines[] = $tomTentNote;
+        }
         $lines[] = '';
     }
     $lines[] = "— " . ($user['full_name'] ?: 'Admin') . " · " . date('H:i') . " · " . $site_name;
@@ -763,6 +771,9 @@ $html .= $row('Payment Capture Rate', number_format((float)$payment_capture_rate
 if ($eodModBookings) {
     $html .= $section_head('Front Office Activity');
     $html .= $row('Arrivals (done / expected)', (int)($ops['arrivals_completed'] ?? 0) . ' of ' . (int)($ops['expected_arrivals'] ?? 0));
+    if ((int)($ops['tentative_arrivals'] ?? 0) > 0) {
+        $html .= $row('Tentative holds (not counted)', (string)(int)$ops['tentative_arrivals']);
+    }
     $html .= $row('Departures (done / expected)', (int)($ops['departures_completed'] ?? 0) . ' of ' . (int)($ops['expected_departures'] ?? 0));
     $html .= $row('Stay-overs tonight', (string)(int)($ops['stayovers'] ?? 0));
     $html .= $row('New Bookings Created', (string)(int)($ops['new_bookings'] ?? 0));
@@ -839,7 +850,11 @@ if ($eodModBookings) {
     $html .= '<td style="text-align:center;padding:10px;border-left:1px solid #3d3733;"><div style="font-size:9px;color:#a89683;text-transform:uppercase;letter-spacing:0.1em;">Departures</div><div style="font-size:22px;font-weight:700;color:#ffffff;">' . (int)$tom['departures'] . '</div></td>';
     $html .= '<td style="text-align:center;padding:10px;border-left:1px solid #3d3733;"><div style="font-size:9px;color:#a89683;text-transform:uppercase;letter-spacing:0.1em;">Booked value of arrivals</div><div style="font-size:22px;font-weight:700;color:#B18247;">' . _money($currency_symbol, (float)$tom['rev_forecast']) . '</div></td>';
     $html .= '</tr>';
-    $html .= '</table></div>';
+    $html .= '</table>';
+    if ((int)($tom['tentative_arrivals'] ?? 0) > 0) {
+        $html .= '<div style="font-size:11px;color:#a89683;text-align:center;margin-top:6px;">' . htmlspecialchars(rh_fd_tentative_note($tom)) . '</div>';
+    }
+    $html .= '</div>';
 }
 
 // ── FOOTER ───────────────────────────────────────────────────────────────────

@@ -570,6 +570,9 @@ function buildEodPdf(
         $rowL('Arrivals',
             (int)($ops['arrivals_completed'] ?? 0) . ' done / ' . (int)($ops['expected_arrivals'] ?? 0) . ' exp.',
             false, $i++);
+        if ((int)($ops['tentative_arrivals'] ?? 0) > 0) { // tentative holds are not in "exp." (owner ASSUMPTION 2026-11-11)
+            $rowL('Tentative holds (not counted)', (string)(int)$ops['tentative_arrivals'], false, $i++);
+        }
         $rowL('Departures',
             (int)($ops['departures_completed'] ?? 0) . ' done / ' . (int)($ops['expected_departures'] ?? 0) . ' exp.',
             false, $i++);
@@ -998,7 +1001,8 @@ function buildEodPdf(
     $tvY   = $y + 8;
 
     $tomCols = [
-        ['label' => 'ARRIVALS',         'val' => (string)(int)($tom['arrivals']   ?? 0), 'gold' => false],
+        ['label' => (int)($tom['tentative_arrivals'] ?? 0) > 0 ? 'ARRIVALS (+' . (int)$tom['tentative_arrivals'] . ' TENTATIVE NOT COUNTED)' : 'ARRIVALS',
+            'val' => (string)(int)($tom['arrivals']   ?? 0), 'gold' => false],
         ['label' => 'DEPARTURES',       'val' => (string)(int)($tom['departures'] ?? 0), 'gold' => false],
         ['label' => 'BOOKED VALUE OF ARRIVALS', 'val' => $m((float)($tom['rev_forecast'] ?? 0)), 'gold' => true],
     ];

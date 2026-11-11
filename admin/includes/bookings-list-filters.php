@@ -58,6 +58,26 @@ if (!function_exists('rh_bk_valid_date')) {
         return $arrival === 'overdue' ? "b.check_in_date < CURDATE() AND b.status IN ('confirmed','pending')" : null;
     }
 
+    /** ?departure=overdue: still checked in after the check-out date (the Dashboard "Overdue departures" chip). */
+    function rh_bk_departure_filter($departure): string
+    {
+        return trim((string)$departure) === 'overdue' ? 'overdue' : '';
+    }
+
+    function rh_bk_departure_clause(string $departure): ?string
+    {
+        return $departure === 'overdue' ? "b.status = 'checked-in' AND b.check_out_date < CURDATE()" : null;
+    }
+
+    /** Title of the filter notice: the overdue views name themselves, everything else is a search. */
+    function rh_bk_notice_title(string $arrival, string $departure): string
+    {
+        if ($arrival === 'overdue' && $departure === 'overdue') return 'Overdue arrivals and departures';
+        if ($arrival === 'overdue') return 'Overdue arrivals only';
+        if ($departure === 'overdue') return 'Overdue departures only';
+        return 'Search filtered results';
+    }
+
     /** ?filter= shortcut => tab name. */
     function rh_bk_tab_map(): array
     {

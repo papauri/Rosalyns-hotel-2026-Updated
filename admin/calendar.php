@@ -8,6 +8,7 @@
 // Include admin initialization (PHP-only, no HTML output)
 require_once 'admin-init.php';
 require_once __DIR__ . '/../includes/booked-rate.php'; // booked rate × nights in the booking popup
+require_once __DIR__ . '/includes/front-desk-counts.php'; // missed-arrival rule shared with the Room Dashboard
 
 // Get date parameters
 $currentYear  = isset($_GET['year'])  ? intval($_GET['year'])  : date('Y');
@@ -642,7 +643,7 @@ $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
                                             $dayBookings = $bookingsByDate[$dateKey][$roomKey];
                                             foreach ($dayBookings as $booking) {
                                                 $statusClass = strtolower(str_replace('-', '_', $booking['status']));
-                                                $isMissedArrival = $booking['status'] === 'confirmed' && (string)$booking['check_in_date'] < $today;
+                                                $isMissedArrival = rh_fd_is_missed_arrival((string)$booking['status'], (string)$booking['check_in_date'], $today); // confirmed or pending, as the Room Dashboard counts
                                                 $isOverdueStay = $booking['status'] === 'checked-in' && (string)$booking['check_out_date'] <= $dateKey && $dateKey <= $today;
                                                 if ($isMissedArrival) {
                                                     $statusClass .= ' is-missed-arrival';

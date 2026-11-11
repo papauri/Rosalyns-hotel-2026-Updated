@@ -12,6 +12,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/api-init.php';
 require_once __DIR__ . '/../includes/pos-shift-totals.php';
 require_once __DIR__ . '/../includes/eod-revenue.php';
+require_once __DIR__ . '/../includes/front-desk-counts.php'; // tentative holds note (expected arrivals = confirmed + pending + arrived)
 require_once __DIR__ . '/../includes/receivables.php';
 
 /** @var PDO $pdo */
@@ -62,18 +63,19 @@ try {
     // 1) Ops
     $opsStmt = $pdo->prepare("
         SELECT
-            SUM(CASE WHEN check_in_date = ? AND status IN ('confirmed','tentative','pending','checked-in') THEN 1 ELSE 0 END) AS expected_arrivals,
+            SUM(CASE WHEN check_in_date = ? AND status IN ('confirmed','pending','checked-in') THEN 1 ELSE 0 END) AS expected_arrivals,
             SUM(CASE WHEN check_in_date = ? AND status = 'checked-in' THEN 1 ELSE 0 END) AS arrivals_completed,
             SUM(CASE WHEN check_out_date = ? AND status IN ('checked-in','checked-out') THEN 1 ELSE 0 END) AS expected_departures,
             SUM(CASE WHEN check_out_date = ? AND status = 'checked-out' THEN 1 ELSE 0 END) AS departures_completed,
             SUM(CASE WHEN check_in_date < ? AND check_out_date > ? AND status = 'checked-in' THEN 1 ELSE 0 END) AS stayovers,
             SUM(CASE WHEN DATE(created_at) = ? THEN 1 ELSE 0 END) AS new_bookings,
             0 AS cancellations,
-            SUM(CASE WHEN check_in_date = ? AND status = 'no-show' THEN 1 ELSE 0 END) AS no_shows
+            SUM(CASE WHEN check_in_date = ? AND status = 'no-show' THEN 1 ELSE 0 END) AS no_shows,
+            SUM(CASE WHEN check_in_date = ? AND status = 'tentative' THEN 1 ELSE 0 END) AS tentative_arrivals
         FROM bookings
         WHERE deleted_at IS NULL
     ");
-    $opsStmt->execute(array_fill(0, 8, $date));
+    $opsStmt->execute(array_fill(0, 9, $date));
     $ops = $opsStmt->fetch(PDO::FETCH_ASSOC) ?: [];
     // Cancellations count on the day they happened, from the booking history (owner 2026-10-21), not updated_at.
     $ops['cancellations'] = rh_cancellations_on_date($pdo, $date);

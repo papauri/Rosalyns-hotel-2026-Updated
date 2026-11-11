@@ -10,6 +10,7 @@ require_once '../includes/room-management.php';
 require_once '../includes/station-hours.php';
 require_once '../includes/conference-pricing.php';
 require_once __DIR__ . '/includes/receivables.php';
+require_once __DIR__ . '/includes/front-desk-counts.php'; // arrivals / departures count rules shared with Bookings and End of Day
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -652,6 +653,7 @@ if ($is_card_insight_ajax) {
             case 'checkins_today':
                 $payload['title'] = "Today's Check-ins";
                 $payload['subtitle'] = 'Everyone due in today, with their status';
+                $ciStillToArrive = 0; // the link below opens only these (Bookings "Today's Check-ins")
                 $payload['columns'] = [
                     ['key' => 'reference', 'label' => 'Booking'],
                     ['key' => 'guest', 'label' => 'Guest'],
@@ -690,7 +692,13 @@ if ($is_card_insight_ajax) {
                         'status' => ucfirst((string)$row['status']),
                         'payment' => ucfirst((string)$row['payment_status']),
                     ];
+                    if (rh_fd_is_still_to_arrive(['check_in_date' => $today, 'status' => $row['status']], $today)) {
+                        $ciStillToArrive++;
+                    }
                 }
+                $payload['subtitle'] = 'Everyone due in today, with their status: ' . $ciStillToArrive . ' still to arrive, '
+                    . (count($rows) - $ciStillToArrive) . ' already arrived';
+                $payload['link']['label'] = $ciStillToArrive > 0 ? 'Open the ' . $ciStillToArrive . ' still to arrive' : 'Open check-ins still to arrive';
                 $payload['empty'] = 'No check-ins are due today.';
                 break;
 
@@ -1233,7 +1241,7 @@ if ($is_card_insight_ajax) {
                     ['key' => 'total', 'label' => 'Total'],
                     ['key' => 'status', 'label' => 'Status'],
                 ];
-                $payload['link'] = ['href' => 'stock-orders.php?type=room_service', 'label' => 'Open room-service orders'];
+                $payload['link'] = ['href' => 'stock-orders.php?order_type=room_service', 'label' => 'Open room-service orders'];
                 $stmt = $pdo->query("SELECT o.id AS order_id, o.reference, o.room_number, o.customer_name, o.total_amount, o.status,
                                             (SELECT COUNT(*) FROM stock_order_items oi WHERE oi.order_id = o.id) AS item_count
                                      FROM stock_orders o
@@ -1712,7 +1720,7 @@ if ($is_card_insight_ajax) {
                         'metric' => 'Room-service orders open',
                         'current' => (string)$roomServiceOpen,
                         'detail' => 'Orders awaiting fulfilment or settlement',
-                        'action' => ['href' => 'stock-orders.php?type=room_service', 'label' => 'Room Service', 'target' => '_blank'],
+                        'action' => ['href' => 'stock-orders.php?order_type=room_service', 'label' => 'Room Service', 'target' => '_blank'],
                     ];
                     $payload['rows'][] = [
                         'metric' => 'Room-service reminders due',
@@ -2027,7 +2035,8 @@ $currency_symbol = getSetting('currency_symbol');
         $departuresTotal = (int)$today_checkouts + $dayProgress['departed'] + $overdueDepartures;
         $departuresStillToGo = (int)$today_checkouts + $overdueDepartures;
         $departuresOwing = 0;
-        foreach ($departureList as $d) { if ($d['departure_state'] !== 'departed' && (float)$d['amount_due'] > 0.01) { $departuresOwing++; } }
+        // Due out today and owing: exactly the guests Bookings "Today's Check-outs" lists (overdue guests have their own chip).
+        $departuresOwing = rh_fd_departures_owing($departureList);
 
         // ---- Needs-attention queue: only what is non-zero is shown loudly ----
         $attn = [];
@@ -2035,9 +2044,9 @@ $currency_symbol = getSetting('currency_symbol');
             if ($on) { $list[] = compact('count', 'label', 'icon', 'tone', 'href', 'insight', 'hint'); }
         };
         $add($attn, $mod_bookings, $noShows, 'Overdue arrivals (no-show?)', 'fa-user-clock', 'red', 'bookings.php?arrival=overdue', null, 'Arrival date passed, never checked in');
-        $add($attn, $mod_bookings, $overdueDepartures, 'Overdue departures', 'fa-person-walking-luggage', 'red', 'bookings.php?filter=checked_in', null, 'Checkout date passed, still checked in');
+        $add($attn, $mod_bookings, $overdueDepartures, 'Overdue departures', 'fa-person-walking-luggage', 'red', 'bookings.php?departure=overdue', null, 'Checkout date passed, still checked in');
         $add($attn, $mod_bookings, (int)$pending_bookings, 'Bookings awaiting confirmation', 'fa-hourglass-half', 'amber', 'bookings.php?status=pending', 'pending_bookings');
-        $add($attn, $mod_bookings, $departuresOwing, 'Departures with a balance', 'fa-sack-dollar', 'red', 'bookings.php?filter=checkout_today', 'checkouts_today', 'Collect before they leave');
+        $add($attn, $mod_bookings, $departuresOwing, 'Departures with a balance', 'fa-sack-dollar', 'red', 'bookings.php?filter=checkout_today', 'checkouts_today', 'Due out today, balance to collect before they leave');
         $add($attn, $mod_finance && $dash_perm('payments', 'refund_payment'), (int)$finance['refunds_pending'], 'Refunds to approve', 'fa-rotate-left', 'red', 'payments.php?refund_status=pending', 'refunds_pending');
         $add($attn, $mod_conference, (int)$pending_conference, 'Conference enquiries to answer', 'fa-users-gear', 'amber', 'conference-management.php?status=pending', 'pending_conference');
         $add($attn, $mod_website_cms && $dash_perm('contact'), (int)$guestSvc['unread_contact'], 'Unread contact messages', 'fa-envelope', 'red', 'contact-inquiries.php');
@@ -2047,8 +2056,8 @@ $currency_symbol = getSetting('currency_symbol');
         $add($attn, $mod_gym && $dash_perm('gym'), (int)$gymDash['expiring_members'], 'Gym memberships expiring (30d)', 'fa-id-card', 'amber', 'gym-members.php?filter=expiring');
         $add($attn, $mod_housekeeping && $dash_perm('room_maintenance'), (int)$guestSvc['maintenance_open'], 'Rooms out of service', 'fa-screwdriver-wrench', 'red', 'room-maintenance.php');
         $add($attn, $mod_housekeeping && $dash_perm('housekeeping'), (int)$guestSvc['housekeeping_due'], 'Housekeeping tasks due', 'fa-broom', 'amber', 'housekeeping.php');
-        $add($attn, $mod_roomsvc && $dash_perm('stock_orders'), (int)$ops['room_service_pending'], 'Room-service orders open', 'fa-bell-concierge', 'amber', 'stock-orders.php?type=room_service', 'room_service_pending');
-        $add($attn, $mod_roomsvc && $dash_perm('stock_orders'), (int)$ops['room_service_reminders_due'], 'Room-service reminders due', 'fa-bell', 'amber', 'stock-orders.php?type=room_service', 'room_service_reminders_due', 'Rooms with no order served today');
+        $add($attn, $mod_roomsvc && $dash_perm('stock_orders'), (int)$ops['room_service_pending'], 'Room-service orders open', 'fa-bell-concierge', 'amber', 'stock-orders.php?order_type=room_service', 'room_service_pending');
+        $add($attn, $mod_roomsvc && $dash_perm('stock_orders'), (int)$ops['room_service_reminders_due'], 'Room-service reminders due', 'fa-bell', 'amber', 'stock-orders.php?order_type=room_service', 'room_service_reminders_due', 'Rooms with no order served today');
         $add($attn, $mod_orders && $mod_bookings, (int)$ops['open_tabs'], isRestaurantEnabled() ? 'Open tabs awaiting payment' : 'Orders awaiting payment', 'fa-receipt', 'amber', 'stock-orders.php?status=placed', 'open_tabs');
         $add($attn, $mod_stock && $dash_perm('stock_batches'), (int)$stock['expired_batches'], 'Expired stock batches', 'fa-skull-crossbones', 'red', 'stock-batches.php');
         $add($attn, $mod_stock && $dash_perm('stock_management'), (int)$stock['low_stock'], 'Items below minimum stock', 'fa-box-open', 'amber', 'stock-reorder.php');
@@ -2256,7 +2265,9 @@ $currency_symbol = getSetting('currency_symbol');
             <?php
             $todayTabs = [];
             if ($mod_bookings) {
-                $todayTabs['arrivals'] = ['Arrivals', count($checkin_bookings)];
+                // Count = still to arrive (confirmed/pending due today), the same as Bookings "Today's Check-ins";
+                // guests who already arrived stay in the list with their status but are not counted.
+                $todayTabs['arrivals'] = ['Arrivals', rh_fd_count_still_to_arrive($checkin_bookings, $today)];
                 $todayTabs['departures'] = ['Departures', count($departureList)];
             }
             if ($mod_conference) { $todayTabs['events'] = ['Events', count($today_conference_events)]; }

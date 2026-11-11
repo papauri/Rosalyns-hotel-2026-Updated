@@ -18,6 +18,7 @@ require_once '../config/credit-notes.php';
 require_once '../includes/station-hours.php';
 require_once __DIR__ . '/includes/pos-shift-totals.php';
 require_once __DIR__ . '/includes/eod-revenue.php';
+require_once __DIR__ . '/includes/front-desk-counts.php'; // expected arrivals: confirmed + pending (+ arrived); tentative holds shown apart
 require_once __DIR__ . '/includes/receivables.php';
 
 // This page reuses one named placeholder (:d) several times per statement. The shared connection
@@ -86,6 +87,7 @@ $trendLabel = function (float $value, bool $isMoney = false, string $suffix = ''
 $ops = [
     'expected_arrivals'   => 0,
     'arrivals_completed'  => 0,
+    'tentative_arrivals'  => 0,
     'expected_departures' => 0,
     'departures_completed' => 0,
     'stayovers'           => 0,
@@ -97,7 +99,9 @@ if ($mod_bookings) {
     try {
         $opsStmt = $pdo->prepare("
             SELECT
-                SUM(CASE WHEN check_in_date = :d AND status IN ('confirmed','tentative','pending','checked-in') THEN 1 ELSE 0 END) AS expected_arrivals,
+                -- Expected arrivals = confirmed + pending (as the Dashboard) + already checked in; tentative holds are counted apart.
+                SUM(CASE WHEN check_in_date = :d AND status IN ('confirmed','pending','checked-in') THEN 1 ELSE 0 END) AS expected_arrivals,
+                SUM(CASE WHEN check_in_date = :d AND status = 'tentative' THEN 1 ELSE 0 END) AS tentative_arrivals,
                 SUM(CASE WHEN check_in_date = :d AND status = 'checked-in' THEN 1 ELSE 0 END) AS arrivals_completed,
                 SUM(CASE WHEN check_out_date = :d AND status IN ('checked-in','checked-out') THEN 1 ELSE 0 END) AS expected_departures,
                 SUM(CASE WHEN check_out_date = :d AND status = 'checked-out' THEN 1 ELSE 0 END) AS departures_completed,
@@ -414,7 +418,7 @@ if ($mod_bookings) {
 // ---------------------------------------------------------------------------
 // 9) Tomorrow preview
 // ---------------------------------------------------------------------------
-$tomorrow_preview = ['arrivals' => 0, 'departures' => 0, 'rev_forecast' => 0.0];
+$tomorrow_preview = ['arrivals' => 0, 'departures' => 0, 'rev_forecast' => 0.0, 'tentative_arrivals' => 0];
 if ($mod_bookings) {
     try {
         $tomorrow_preview = array_merge($tomorrow_preview, rh_eod_tomorrow_preview($pdo, $tomorrow)); // shared with the PDF / e-mail
@@ -1412,7 +1416,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                 <ul class="ck-levels">
                     <li>
                         <span class="ck-levels__name">Arrivals</span>
-                        <span class="ck-levels__qty"><strong><?php echo (int)$ops['arrivals_completed']; ?></strong> of <?php echo (int)$ops['expected_arrivals']; ?> checked in</span>
+                        <span class="ck-levels__qty"><strong><?php echo (int)$ops['arrivals_completed']; ?></strong> of <?php echo (int)$ops['expected_arrivals']; ?> checked in<?php if (($eodTentNote = rh_fd_tentative_note($ops)) !== ''): ?> <small>(<?php echo htmlspecialchars($eodTentNote); ?>)</small><?php endif; ?></span>
                         <span class="ck-meter ck-meter--<?php echo $arrivals_remaining > 0 ? 'amber' : 'good'; ?>"><span style="width:<?php echo $arrPct; ?>%"></span></span>
                     </li>
                     <li>
@@ -1449,6 +1453,9 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                 </div>
                 <ul class="ck-kv eod-kv">
                     <?php echo $kv('Booked value of arrivals', $money($tomorrow_preview['rev_forecast']) . $sub('whole stay, incl. VAT')); ?>
+                    <?php if ((int)($tomorrow_preview['tentative_arrivals'] ?? 0) > 0): ?>
+                        <?php echo $kv('Tentative holds (not counted)', (int)$tomorrow_preview['tentative_arrivals'] . $sub('not in arrivals or the value above')); ?>
+                    <?php endif; ?>
                 </ul>
             </section>
             <?php endif; ?>
@@ -1599,6 +1606,9 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                         <ul class="ck-kv eod-kv">
                             <?php
                             echo $kv('Expected arrivals', (int)$ops['expected_arrivals'] . $sub((int)$ops['arrivals_completed'] . ' checked in'));
+                            if ((int)($ops['tentative_arrivals'] ?? 0) > 0) {
+                                echo $kv('Tentative holds (not counted)', (int)$ops['tentative_arrivals'] . $sub('arriving today, not confirmed'));
+                            }
                             echo $kv('Expected departures', (int)$ops['expected_departures'] . $sub((int)$ops['departures_completed'] . ' checked out'));
                             echo $kv('Stay-overs', (int)$ops['stayovers'] . $sub('in-house tonight'));
                             ?>

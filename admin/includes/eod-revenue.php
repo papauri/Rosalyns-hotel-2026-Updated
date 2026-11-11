@@ -343,19 +343,22 @@ if (!function_exists('rh_eod_tomorrow_preview')) {
     /**
      * Tomorrow's arrivals / departures and the booked value of the arrivals (whole stay, VAT included, the same gross
      * basis as the earned-revenue calculation above). Not a forecast of the day's takings.
-     * @return array{arrivals:mixed, departures:mixed, rev_forecast:mixed}
+     * Arrivals = confirmed + pending (the same rule as today's expected arrivals and the Dashboard, owner ASSUMPTION
+     * 2026-11-11); tentative holds are returned apart as tentative_arrivals ("not counted") and are not in the value.
+     * @return array{arrivals:mixed, departures:mixed, rev_forecast:mixed, tentative_arrivals:mixed}
      */
     function rh_eod_tomorrow_preview(PDO $pdo, string $tomorrow): array
     {
         $tp = $pdo->prepare("
             SELECT
-                SUM(CASE WHEN check_in_date  = ? AND status IN ('confirmed','tentative','pending') THEN 1 ELSE 0 END) AS arrivals,
+                SUM(CASE WHEN check_in_date  = ? AND status IN ('confirmed','pending') THEN 1 ELSE 0 END) AS arrivals,
                 SUM(CASE WHEN check_out_date = ? AND status IN ('checked-in','confirmed')           THEN 1 ELSE 0 END) AS departures,
-                COALESCE(SUM(CASE WHEN check_in_date = ? AND status IN ('confirmed','tentative','pending') THEN COALESCE(NULLIF(total_with_vat, 0), total_amount + COALESCE(vat_amount, 0)) ELSE 0 END), 0) AS rev_forecast
+                COALESCE(SUM(CASE WHEN check_in_date = ? AND status IN ('confirmed','pending') THEN COALESCE(NULLIF(total_with_vat, 0), total_amount + COALESCE(vat_amount, 0)) ELSE 0 END), 0) AS rev_forecast,
+                SUM(CASE WHEN check_in_date = ? AND status = 'tentative' THEN 1 ELSE 0 END) AS tentative_arrivals
             FROM bookings
             WHERE deleted_at IS NULL
         ");
-        $tp->execute([$tomorrow, $tomorrow, $tomorrow]);
-        return $tp->fetch(PDO::FETCH_ASSOC) ?: ['arrivals' => 0, 'departures' => 0, 'rev_forecast' => 0];
+        $tp->execute([$tomorrow, $tomorrow, $tomorrow, $tomorrow]);
+        return $tp->fetch(PDO::FETCH_ASSOC) ?: ['arrivals' => 0, 'departures' => 0, 'rev_forecast' => 0, 'tentative_arrivals' => 0];
     }
 }
