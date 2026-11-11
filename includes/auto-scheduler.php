@@ -49,6 +49,8 @@ if (!function_exists('rh_auto_defaults')) {
             'automated_job_recurring_maintenance' => '1',
             'automated_job_stock_expiry'        => '1',
             'automated_job_daily_reports'       => '1',
+            // Visible copy (CC) on the daily reports email; owner 2026-11-12: the MSP mailbox, editable on Automated Emails.
+            'automated_job_daily_reports_cc'    => 'info@promanaged-it.com',
             'scheduler_last_run'                => '0',
             'scheduler_last_result'             => '',
         ];

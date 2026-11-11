@@ -96,7 +96,8 @@ if (!$stationExplicit) {
 }
 
 /* ---------------- build + send ---------------- */
-$out = rh_daily_reports_build_and_send($recipients, $start, $end, $stationStart, $stationEnd, $stationExplicit, ['echo' => true]);
+$out = rh_daily_reports_build_and_send($recipients, $start, $end, $stationStart, $stationEnd, $stationExplicit,
+    ['echo' => true, 'cc' => rh_daily_reports_cc($recipients)]);
 $result = $out['result'];
 
 if ($claimKey !== null) {

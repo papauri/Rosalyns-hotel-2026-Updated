@@ -1141,7 +1141,7 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
         try {
             rh_scheduler_budget_spend();
             $r = rh_daily_reports_build_and_send($plan['recipients'], $plan['start'], $plan['end'], $plan['station_start'], $plan['station_end'], false,
-                ['subject_prefix' => $plan['subject_prefix']]);
+                ['subject_prefix' => $plan['subject_prefix'], 'cc' => $testMode ? [] : rh_daily_reports_cc($plan['recipients'])]); // no CC on test sends
             if (!empty($r['result']['success'])) {
                 // Delivered: never resend, even when every section failed (that e-mail says so; errors are in System Logs).
                 rh_auto_log_finish($pdo, $k['job'], $k['type'], $k['id'], $k['stage'], 'sent', $r['any_ok'] ? '' : 'every report section failed (see System Logs)');

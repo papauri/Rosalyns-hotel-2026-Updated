@@ -9,6 +9,7 @@
  */
 require_once __DIR__ . '/admin-init.php';
 require_once __DIR__ . '/../includes/auto-email-jobs.php';
+require_once __DIR__ . '/../includes/daily-reports-send.php';
 /** @var array $user */
 /** @var string $csrf_token */
 
@@ -43,6 +44,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $testRecipient = '';
                 $message = 'The test recipient was not a valid email address and was cleared. ';
             }
+            // Visible copy (CC) on the daily reports email: valid addresses only; empty = no copy.
+            $reportCcRaw = trim((string)($_POST['automated_job_daily_reports_cc'] ?? ''));
+            $reportCc = implode(', ', array_column(rh_daily_reports_parse_recipients($reportCcRaw), 'email'));
+            if ($reportCcRaw !== '' && $reportCc === '') {
+                $message .= 'The daily reports copy (CC) had no valid email address and was cleared. ';
+            } elseif ($reportCc !== '' && count(preg_split('/[,;\s]+/', $reportCcRaw, -1, PREG_SPLIT_NO_EMPTY)) !== count(explode(', ', $reportCc))) {
+                $message .= 'Some daily reports copy (CC) addresses were not valid and were left out. ';
+            }
             $flag = static function (string $k): string {
                 return isset($_POST[$k]) ? '1' : '0';
             };
@@ -54,6 +63,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             updateSetting('automated_email_interval_minutes', (string)max(5, min(1440, (int)($_POST['automated_email_interval_minutes'] ?? 15))));
             updateSetting('automated_email_bcc_hotel', $flag('automated_email_bcc_hotel'));
             updateSetting('automated_email_test_recipient', $testRecipient);
+            updateSetting('automated_job_daily_reports_cc', $reportCc);
             foreach ($jobs as $jobName => $job) {
                 updateSetting($job['toggle'], $flag('job_' . $jobName));
             }
@@ -232,6 +242,9 @@ $editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_remin
                     <input type="number" id="interval" name="automated_email_interval_minutes" class="form-control" min="5" max="1440" value="<?php echo (int)$cfg['automated_email_interval_minutes']; ?>"></div>
                 <div class="form-group"><label for="testrcpt">Test recipient (leave EMPTY in production)</label>
                     <input type="email" id="testrcpt" name="automated_email_test_recipient" class="form-control" value="<?php echo $esc($cfg['automated_email_test_recipient']); ?>" placeholder="empty = send to real customers"></div>
+                <div class="form-group"><label for="reportcc">Copy (CC) on the daily reports email</label>
+                    <input type="text" id="reportcc" name="automated_job_daily_reports_cc" class="form-control" value="<?php echo $esc(rh_auto_setting('automated_job_daily_reports_cc')); ?>" placeholder="empty = no copy" autocomplete="off">
+                    <p class="help-text">Shown openly as a copy on every daily reports email. Separate several addresses with commas. Not used on test sends.</p></div>
             </div>
             <label class="ae-check"><input type="checkbox" name="automated_email_bcc_hotel" value="1" <?php echo $cfg['automated_email_bcc_hotel'] === '1' ? 'checked' : ''; ?>>
                 <span>BCC the hotel (admin notification address) on payment and quotation reminders</span></label>

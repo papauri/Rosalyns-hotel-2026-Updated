@@ -44,6 +44,32 @@ if (!function_exists('rh_daily_reports_parse_recipients')) {
     }
 
     /**
+     * Visible copy (CC) on the daily reports email (owner 2026-11-12: the MSP mailbox, editable on Automated
+     * Emails, setting automated_job_daily_reports_cc). Valid addresses only, no repeats, never one already in To.
+     * $raw is for tests; null = read the setting (its default lives in rh_auto_defaults()).
+     * @param list<array{email:string}> $recipients
+     * @return list<string>
+     */
+    function rh_daily_reports_cc(array $recipients, ?string $raw = null): array
+    {
+        if ($raw === null) {
+            if (!function_exists('rh_auto_setting')) {
+                require_once __DIR__ . '/auto-scheduler.php';
+            }
+            $raw = function_exists('getSetting') ? rh_auto_setting('automated_job_daily_reports_cc') : '';
+        }
+        $to = array_map('strtolower', array_column($recipients, 'email'));
+        $out = [];
+        foreach (rh_daily_reports_parse_recipients($raw) as $r) {
+            $lc = strtolower($r['email']);
+            if (!in_array($lc, $to, true) && !in_array($lc, array_map('strtolower', $out), true)) {
+                $out[] = $r['email'];
+            }
+        }
+        return $out;
+    }
+
+    /**
      * automated_email_log key for one trading day: the scheduler job and the CLI claim the SAME row, so a re-run,
      * two page loads at once, or a server cron running the CLI never send the same day twice.
      * @return array{job:string, type:string, id:int, stage:string}
@@ -93,7 +119,7 @@ if (!function_exists('rh_daily_reports_parse_recipients')) {
      * Build the four sections and send the e-mail. Each section on its own: one that fails is logged
      * (rh_log_event), named in the e-mail as "could not be loaded", and the rest are still sent
      * (includes/report-sections.php). Figures come from the unchanged builders in includes/report-builders.php.
-     * $opts: echo (bool, CLI progress lines + STDERR), subject_prefix (string).
+     * $opts: echo (bool, CLI progress lines + STDERR), subject_prefix (string), cc (list of visible-copy addresses).
      * @return array{sections:array, result:array, any_ok:bool, subject:string}
      */
     function rh_daily_reports_build_and_send(array $recipients, string $start, string $end, string $stationStart, string $stationEnd, bool $stationExplicit, array $opts = []): array
@@ -171,7 +197,7 @@ if (!function_exists('rh_daily_reports_parse_recipients')) {
         $html .= '<p style="color:#666;font-size:12px;">This is an automated report. CSVs are UTF-8.</p>';
 
         /* ---------------- send ---------------- */
-        $result = sendReportEmail($recipients, $subject, $html, $attachments);
+        $result = sendReportEmail($recipients, $subject, $html, $attachments, '', array_values((array)($opts['cc'] ?? [])));
 
         return [
             'sections' => $sections,

@@ -136,5 +136,16 @@ dr_check(strpos($rb, "if (!function_exists('rh_table_exists')) {") !== false && 
     'report builders guard the helpers procurement-schema.php also defines (no redeclare when the timer runs after a stock page)');
 dr_check(strpos($send, 'require_once __DIR__ . \'/report-builders.php\';') > strpos($send, 'function rh_daily_reports_build_and_send('), 'builders / mailer load only inside the send function (including the file connects to nothing)');
 
+echo "\n--- 7. Visible copy (CC), owner 2026-11-12 ---\n";
+$to = [['email' => 'eod@hotel.test', 'name' => '']];
+dr_check(rh_daily_reports_cc($to, 'info@promanaged-it.com') === ['info@promanaged-it.com'], 'MSP mailbox is CC');
+dr_check(rh_daily_reports_cc($to, '') === [], 'empty setting = no copy');
+dr_check(rh_daily_reports_cc($to, 'EOD@hotel.test, a@b.test; a@b.test, junk') === ['a@b.test'], 'drops To addresses (any case), repeats and invalid entries');
+dr_check(rh_auto_defaults()['automated_job_daily_reports_cc'] === 'info@promanaged-it.com', 'default copy address is the MSP mailbox (editable setting)');
+dr_check(strpos($jobsSrc, "'cc' => \$testMode ? [] : rh_daily_reports_cc(\$plan['recipients'])") !== false, 'job: CC on real sends, none on test sends');
+dr_check(strpos($cli, "'cc' => rh_daily_reports_cc(\$recipients)") !== false && strpos($send, "array_values((array)(\$opts['cc'] ?? []))") !== false, 'CLI passes the same CC; send function hands it to sendReportEmail');
+$ae = dr_src('admin/automated-emails.php');
+dr_check(strpos($ae, "updateSetting('automated_job_daily_reports_cc', \$reportCc);") !== false && strpos($ae, 'name="automated_job_daily_reports_cc"') !== false, 'Automated Emails: CC field shown and saved (valid addresses only)');
+
 echo "\n=== daily_reports_job: $P passed, $F failed ===\n";
 exit($F > 0 ? 1 : 0);
