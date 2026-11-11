@@ -51,7 +51,8 @@ You write files only. The orchestrator commits and pushes the Showcase repo and 
 - **One organisation; the demo is sent from the control panel by business type (owner 2026-11-12).** One link opens
   the tour on one business type for a named prospect; the format is in `SHOWCASE.md` ("Link format"). The `#send`
   page builds that link by hand today; `msp-control-panel` is to send the same link from a client/prospect record
-  (its own build task, see its `STATUS.md`). Never show "send a demo" as a panel feature in a slide until the panel
+  (its own build task, see its `STATUS.md`). Each publish of the tour makes a NEW private artifact link (owner 2026-11-12, so any
+  account can publish): never rely on an old link; the current one is in `SHOWCASE.md` under "Published". Never show "send a demo" as a panel feature in a slide until the panel
   really has it. Every change here is noted in `msp-control-panel/STATUS.md` so the panel side knows.
 
 ## What to show (pick the wow, not everything)
