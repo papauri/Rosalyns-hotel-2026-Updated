@@ -5,6 +5,7 @@
  *   stock-batches.php?filter=expiring  -> dashboard "Expiring batches (<= 7 days)" / "Expiring 7d"
  *   stock-batches.php?filter=expired   -> dashboard "Expired active batches" / stock dashboard "Expired Batches Still Active"
  *   stock-ingredients.php?filter=low   -> rh_stock_alert_summary()['attention'] (out + low; never-stocked add 0)
+ * The batch list LEFT JOINs the ingredient (the dashboard counts read stock_batches alone), so list == count.
  * CURDATE() is the hotel date (config/database.php sets the session time_zone to the hotel's).
  * Tested by scripts/tests/stock_list_filters.php.
  */
@@ -94,6 +95,37 @@ if (!function_exists('rh_stock_id_in_sql')) {
     {
         $col = preg_replace('/[^A-Za-z0-9_.]/', '', $column);
         return $ids ? $col . ' IN (' . implode(',', array_fill(0, count($ids), '?')) . ')' : '0 = 1';
+    }
+}
+
+if (!function_exists('rh_stock_batch_list_cap')) {
+    /** Most batch rows stock-batches.php loads at once (soonest expiry first); a COUNT gives the true total past it. */
+    function rh_stock_batch_list_cap(): int
+    {
+        return 2000;
+    }
+}
+
+if (!function_exists('rh_stock_batch_list_total')) {
+    /**
+     * How many batches match: the rows loaded, or the COUNT when the cap was reached (a failed COUNT, null,
+     * falls back to the rows loaded; a COUNT below the rows loaded is never believed).
+     */
+    function rh_stock_batch_list_total(int $loaded, ?int $counted): int
+    {
+        $loaded = max(0, $loaded);
+        if ($loaded < rh_stock_batch_list_cap() || $counted === null) return $loaded;
+        return max($loaded, $counted);
+    }
+}
+
+if (!function_exists('rh_stock_batch_capped_text')) {
+    /** '' when every matching batch is listed, else "Showing 2,000 of 2,345 batches ..." (plain text, escape on output). */
+    function rh_stock_batch_capped_text(int $loaded, int $total): string
+    {
+        if ($total <= $loaded) return '';
+        return 'Showing ' . number_format($loaded) . ' of ' . number_format($total) . ' batches: the '
+            . number_format($loaded) . ' with the soonest expiry. Pick an ingredient, status or expiry range to see the rest.';
     }
 }
 

@@ -111,5 +111,52 @@ check(strpos($ip, "rh_stock_attention_sql(rh_stock_threshold_sql('i'), \$histSql
 check(strpos($ip, "header('Location: stock-ingredients.php' . (\$ingFilter !== ''") !== false, 'ingredients: POST redirect keeps the filter');
 check(strpos($ip, '>Clear</a>') !== false, 'ingredients: notice has Clear');
 
+// ---- batch list cap + true total (LATER items 2026-11-11)
+$cap = rh_stock_batch_list_cap();
+eq($cap, 2000, 'list cap is 2000');
+eq(rh_stock_batch_list_total(15, null), 15, 'under the cap: rows loaded is the total');
+eq(rh_stock_batch_list_total(15, 99), 15, 'under the cap: a count is never needed');
+eq(rh_stock_batch_list_total($cap, $cap), $cap, 'at the cap, count == cap');
+eq(rh_stock_batch_list_total($cap, 2345), 2345, 'at the cap, count gives the true total');
+eq(rh_stock_batch_list_total($cap, null), $cap, 'failed count falls back to rows loaded');
+eq(rh_stock_batch_list_total($cap, 10), $cap, 'count below rows loaded never believed');
+eq(rh_stock_batch_capped_text(15, 15), '', 'no cap notice when all listed');
+eq(rh_stock_batch_capped_text($cap, $cap), '', 'no cap notice when count == cap');
+$capTxt = rh_stock_batch_capped_text($cap, 2345);
+check(strpos($capTxt, 'Showing 2,000 of 2,345 batches') === 0, 'cap notice: "Showing 2,000 of 2,345 batches"', $capTxt);
+
+$listStart = strpos($bp, 'SELECT b.*, COALESCE(i.name');
+$listSql = $listStart !== false ? substr($bp, $listStart, 600) : '';
+check($listSql !== '', 'batches: list query found');
+check(strpos($listSql, 'LEFT JOIN stock_ingredients i ON i.id = b.ingredient_id') !== false && strpos($listSql, 'INNER JOIN') === false, 'batches: list LEFT JOINs the ingredient (count == list)');
+check(strpos($listSql, "COALESCE(i.unit, '') AS unit") !== false, 'batches: unit never null for a missing item');
+check(strpos($bp, "INNER JOIN stock_ingredients i ON i.id = b.ingredient_id WHERE b.id = ? FOR UPDATE") !== false, 'batches: write-off lock select unchanged');
+check(strpos($bp, 'LIMIT " . rh_stock_batch_list_cap()') !== false, 'batches: list uses the shared cap');
+check(strpos($bp, '"SELECT COUNT(*) FROM stock_batches b WHERE 1=1" . $where') !== false, 'batches: COUNT reuses the list WHERE');
+check(preg_match('/\$where \.= " AND [^"]*\bi\./', $bp) === 0, 'batches: no WHERE clause reads the ingredient (COUNT has no join)');
+check(strpos($bp, '$bfCount = $batchesMatched;') !== false, 'batches: filter notice uses the full match');
+check(strpos($bp, 'number_format($batchesMatched); ?> batch(es)') !== false, 'batches: toolbar count uses the full match');
+check(strpos($bp, 'rh_stock_batch_capped_text(count($batches), $batchesMatched)') !== false, 'batches: cap notice shown');
+check(strpos($bp, "empty(\$b['ing_id'])") !== false, 'batches: no write-off buttons for a missing item');
+$recPos  = strpos($bp, "} elseif (\$action === 'recall') {");
+$lockPos = $recPos !== false ? strpos($bp, '$ingLockSt->execute(', $recPos) : false;
+$guardPos = $recPos !== false ? strpos($bp, "if (\$ingLockSt->fetchColumn() === false) throw new RuntimeException('Batch not found.');", $recPos) : false;
+$batchLockPos = $recPos !== false ? strpos($bp, 'SELECT * FROM stock_batches WHERE id = ? FOR UPDATE', $recPos) : false;
+check($lockPos !== false && $guardPos !== false && $batchLockPos !== false && $lockPos < $guardPos && $guardPos < $batchLockPos, 'batches: recall refuses a batch with no item record (ingredient lock, then guard, then batch lock)');
+check(strpos($bp, "if (\$expiredCount > 0 && function_exists('rh_clear_stock_dashboard_cache')) rh_clear_stock_dashboard_cache();") !== false, 'batches: expiry sweep busts the stock overview cache');
+
+// ---- ingredients export label matches the filtered download
+check(strpos($ip, "\$ingFilter === 'low' ? 'Export low-stock items' : 'Export to Excel'") !== false, 'ingredients: export button says low-stock when filtered');
+check(strpos($ip, "'Download low-stock ' . strtolower(\$stockNounPl) . ' only (this filtered list)'") !== false, 'ingredients: export title says low-stock when filtered');
+$fltPos = strpos($ip, "if (\$ingFilter === 'low') {");
+$expPos = strpos($ip, "if (isset(\$_GET['export']) && \$_GET['export'] === 'csv')");
+check($fltPos !== false && $expPos !== false && $fltPos < $expPos, 'ingredients: CSV is built after the low filter (exports what the label says)');
+
+// ---- low-stock count is live everywhere it links from (no cache to go stale)
+check(stripos($dash, 'getCache') === false && stripos($dash, 'setCache') === false, 'dashboard.php: no cache (low count is live)');
+$sdCachePos = strpos($sdash, 'setCache($cacheKey');
+$sdLivePos  = strpos($sdash, '$alertSummary = rh_stock_alert_summary($pdo');
+check($sdCachePos !== false && $sdLivePos !== false && $sdLivePos > $sdCachePos, 'stock-dashboard.php: low/out read live after the cached KPIs');
+
 echo "\n$pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

@@ -628,7 +628,7 @@ if (!$error || strpos($error, 'Stock tables not yet') === false) {
         // Export to Excel (CSV — opens directly in Excel). Mirrors the CSV export
         // convention used on stock-reports.php. Must run before any HTML output.
         if (isset($_GET['export']) && $_GET['export'] === 'csv') {
-            $fname = 'stock-management-' . date('Ymd-His') . '.csv';
+            $fname = ($ingFilter === 'low' ? 'stock-low-items-' : 'stock-management-') . date('Ymd-His') . '.csv';
             header('Content-Type: text/csv; charset=utf-8');
             header('Content-Disposition: attachment; filename="' . $fname . '"');
             $out = fopen('php://output', 'w');
@@ -727,7 +727,7 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
             <h2 class="page-title"><i class="fas <?php echo $stockIsFood ? 'fa-carrot' : 'fa-boxes-stacked'; ?>" style="color:var(--color-primary,#766550);"></i> <?php echo $stockNounPl; ?></h2>
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
                 <?php if (!empty($ingredients)): ?>
-                    <a class="btn-secondary" href="?<?php echo $ingFilter !== '' ? 'filter=' . $ingFilter . '&amp;' : ''; ?>export=csv" style="display:inline-flex; align-items:center; gap:6px; text-decoration:none;" title="Download all <?php echo strtolower($stockNounPl); ?> as an Excel-compatible spreadsheet"><i class="fas fa-file-excel"></i> Export to Excel</a>
+                    <a class="btn-secondary" href="?<?php echo $ingFilter !== '' ? 'filter=' . $ingFilter . '&amp;' : ''; ?>export=csv" style="display:inline-flex; align-items:center; gap:6px; text-decoration:none;" title="<?php echo $ingFilter === 'low' ? 'Download low-stock ' . strtolower($stockNounPl) . ' only (this filtered list)' : 'Download all ' . strtolower($stockNounPl); ?> as an Excel-compatible spreadsheet"><i class="fas fa-file-excel"></i> <?php echo $ingFilter === 'low' ? 'Export low-stock items' : 'Export to Excel'; ?></a>
                 <?php endif; ?>
                 <button class="btn-add" onclick="openIngredientModal()"><i class="fas fa-plus"></i> Add <?php echo $stockNoun; ?></button>
             </div>

@@ -51,6 +51,8 @@ if (!$error && $batchFilter === 'expired' && $_SERVER['REQUEST_METHOD'] === 'GET
 // Auto-run expiry sweep
 if (!$error) {
     $expiredCount = runStockExpiryCheck();
+    // The sweep changed batches and on-hand quantities: drop the stock overview's cached batch/value figures.
+    if ($expiredCount > 0 && function_exists('rh_clear_stock_dashboard_cache')) rh_clear_stock_dashboard_cache();
     // With ?filter=expired the notice above the list gives the count (this one also counts emptied batches).
     if ($expiredCount > 0 && $batchFilter !== 'expired') {
         $message = "{$expiredCount} batch(es) automatically marked as expired.";
@@ -122,7 +124,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Lock order (every stock write path): the ingredient row before its batch.
                 $lockIng = $pdo->prepare("SELECT ingredient_id FROM stock_batches WHERE id = ?");
                 $lockIng->execute([$batchId]);
-                $pdo->prepare("SELECT id FROM stock_ingredients WHERE id = ? FOR UPDATE")->execute([(int)$lockIng->fetchColumn()]);
+                $ingLockSt = $pdo->prepare("SELECT id FROM stock_ingredients WHERE id = ? FOR UPDATE");
+                $ingLockSt->execute([(int)$lockIng->fetchColumn()]);
+                // No item record (batch missing or its item deleted): nothing to recall against (catch rolls back).
+                if ($ingLockSt->fetchColumn() === false) throw new RuntimeException('Batch not found.');
                 $sel = $pdo->prepare("SELECT * FROM stock_batches WHERE id = ? FOR UPDATE");
                 $sel->execute([$batchId]);
                 $batch = $sel->fetch(PDO::FETCH_ASSOC);
@@ -192,53 +197,70 @@ if ($batchFilter !== '') {
 }
 
 $batches = [];
+$batchesMatched = 0; // every batch matching the filters (past the list cap too)
 $ingredients = [];
 if (!$error || strpos($error, 'not yet') === false) {
     try {
         $ingredients = $pdo->query("SELECT id, name, unit FROM stock_ingredients WHERE is_archived = 0 ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
 
+        // LEFT JOIN: a batch whose item record is gone still lists, so the list adds up to the dashboard
+        // counts (they read stock_batches alone). Every WHERE below is on b.* only, so the COUNT reuses it.
         $sql = "
-            SELECT b.*, i.name AS ingredient_name, i.unit, i.id AS ing_id,
+            SELECT b.*, COALESCE(i.name, CONCAT('Deleted item #', b.ingredient_id)) AS ingredient_name,
+                   COALESCE(i.unit, '') AS unit, i.id AS ing_id,
                    u.full_name AS created_by_name,
                    DATEDIFF(b.expiry_date, CURDATE()) AS days_to_expiry
             FROM stock_batches b
-            INNER JOIN stock_ingredients i ON i.id = b.ingredient_id
+            LEFT JOIN stock_ingredients i ON i.id = b.ingredient_id
             LEFT JOIN admin_users u ON u.id = b.created_by
             WHERE 1=1
         ";
+        $where  = '';
         $params = [];
         if ($ingredientFilter > 0) {
-            $sql .= " AND b.ingredient_id = ?";
+            $where .= " AND b.ingredient_id = ?";
             $params[] = $ingredientFilter;
         }
         if ($statusFilter && $statusFilter !== 'all') {
-            $sql .= " AND b.status = ?";
+            $where .= " AND b.status = ?";
             $params[] = $statusFilter;
         }
         if ($batchFilter === 'expiring') {
-            $sql .= " AND " . rh_stock_batch_expiring_sql('b');
+            $where .= " AND " . rh_stock_batch_expiring_sql('b');
         } elseif ($batchFilter === 'expired') {
             // The batches the dashboard counted, whatever the sweep above has since done to them.
-            $sql .= " AND " . rh_stock_id_in_sql('b.id', $expiredSnapshot);
+            $where .= " AND " . rh_stock_id_in_sql('b.id', $expiredSnapshot);
             foreach ($expiredSnapshot as $snapId) {
                 $params[] = $snapId;
             }
         }
         if (in_array($expiryFilter, ['critical', 'soon', 'upcoming'], true)) {
-            $sql .= " AND b.quantity_remaining > 0"; // emptied batches are not "expiring" stock (matches the tiles)
+            $where .= " AND b.quantity_remaining > 0"; // emptied batches are not "expiring" stock (matches the tiles)
         }
         if ($expiryFilter === 'critical') {
-            $sql .= " AND b.expiry_date IS NOT NULL AND b.expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 3 DAY)";
+            $where .= " AND b.expiry_date IS NOT NULL AND b.expiry_date BETWEEN CURDATE() AND DATE_ADD(CURDATE(), INTERVAL 3 DAY)";
         } elseif ($expiryFilter === 'soon') {
-            $sql .= " AND b.expiry_date IS NOT NULL AND b.expiry_date BETWEEN DATE_ADD(CURDATE(), INTERVAL 4 DAY) AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)";
+            $where .= " AND b.expiry_date IS NOT NULL AND b.expiry_date BETWEEN DATE_ADD(CURDATE(), INTERVAL 4 DAY) AND DATE_ADD(CURDATE(), INTERVAL 7 DAY)";
         } elseif ($expiryFilter === 'upcoming') {
-            $sql .= " AND b.expiry_date IS NOT NULL AND b.expiry_date BETWEEN DATE_ADD(CURDATE(), INTERVAL 8 DAY) AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)";
+            $where .= " AND b.expiry_date IS NOT NULL AND b.expiry_date BETWEEN DATE_ADD(CURDATE(), INTERVAL 8 DAY) AND DATE_ADD(CURDATE(), INTERVAL 30 DAY)";
         }
-        $sql .= " ORDER BY (b.expiry_date IS NULL) ASC, b.expiry_date ASC, b.received_date DESC, b.id DESC LIMIT 2000";
+        $sql .= $where . " ORDER BY (b.expiry_date IS NULL) ASC, b.expiry_date ASC, b.received_date DESC, b.id DESC LIMIT " . rh_stock_batch_list_cap();
 
         $stmt = $pdo->prepare($sql);
         $stmt->execute($params);
         $batches = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        // At the cap, count every match (same WHERE) so the page says "Showing 2,000 of N".
+        $batchesCounted = null;
+        if (count($batches) >= rh_stock_batch_list_cap()) {
+            try {
+                $cntSt = $pdo->prepare("SELECT COUNT(*) FROM stock_batches b WHERE 1=1" . $where);
+                $cntSt->execute($params);
+                $batchesCounted = (int)$cntSt->fetchColumn();
+            } catch (Throwable $e) {
+                error_log('stock-batches count: ' . $e->getMessage());
+            }
+        }
+        $batchesMatched = rh_stock_batch_list_total(count($batches), $batchesCounted);
     } catch (Throwable $e) {
         $error = 'Failed to load batches: ' . $e->getMessage();
     }
@@ -423,7 +445,7 @@ function expiry_tier(?string $expiry, ?int $days): array
         </template>
 
         <?php if ($batchFilter !== ''):
-            $bfCount = count($batches);
+            $bfCount = $batchesMatched; // the full match, also past the list cap
             $bfIngName = '';
             foreach ($ingredients as $ing) {
                 if ($ingredientFilter > 0 && (int)$ing['id'] === $ingredientFilter) $bfIngName = (string)$ing['name'];
@@ -473,8 +495,14 @@ function expiry_tier(?string $expiry, ?int $days): array
                 <option value="soon" <?php echo $expiryFilter === 'soon' ? 'selected' : ''; ?>>4 – 7 days</option>
                 <option value="upcoming" <?php echo $expiryFilter === 'upcoming' ? 'selected' : ''; ?>>8 – 30 days</option>
             </select>
-            <span style="color:#6c757d;font-size:13px;"><?php echo count($batches); ?> batch(es)</span>
+            <span style="color:#6c757d;font-size:13px;"><?php echo number_format($batchesMatched); ?> batch(es)</span>
         </form>
+
+        <?php $batchesCappedText = rh_stock_batch_capped_text(count($batches), $batchesMatched); if ($batchesCappedText !== ''): ?>
+            <div class="stock-cap-notice" style="background:#fff8e6;border:1px solid #f0d58c;border-radius:10px;padding:10px 14px;margin-bottom:12px;color:#5c4400;font-size:13px;">
+                <i class="fas fa-info-circle"></i> <?php echo htmlspecialchars($batchesCappedText); ?>
+            </div>
+        <?php endif; ?>
 
         <div class="table-responsive" data-rh-results>
             <table class="stock-table">
@@ -525,7 +553,9 @@ function expiry_tier(?string $expiry, ?int $days): array
                             </td>
                             <td><span class="status-<?php echo htmlspecialchars($b['status']); ?>"><?php echo htmlspecialchars(ucfirst($b['status'])); ?></span></td>
                             <td>
-                                <?php if ($b['status'] === 'active' && (float)$b['quantity_remaining'] > 0 && !$canWriteOffBatches): ?>
+                                <?php if (empty($b['ing_id'])): /* item record gone: write-off/recall need it */ ?>
+                                    <span style="color:#6c757d;font-size:12px;" title="This batch's item record no longer exists, so it cannot be written off or recalled here.">Item deleted</span>
+                                <?php elseif ($b['status'] === 'active' && (float)$b['quantity_remaining'] > 0 && !$canWriteOffBatches): ?>
                                     <span style="color:#6c757d;font-size:12px;" title="Writing off or recalling a batch is restricted to managers and admins.">Manager only</span>
                                 <?php elseif ($b['status'] === 'active' && (float)$b['quantity_remaining'] > 0): ?>
                                     <div class="row-actions">
@@ -561,7 +591,7 @@ function expiry_tier(?string $expiry, ?int $days): array
                         style="padding:6px 12px;border:1px solid <?php echo $pgActive ? 'var(--color-primary,#766550)' : '#dee2e6'; ?>;background:<?php echo $pgActive ? 'var(--color-primary,#766550)' : '#fff'; ?>;color:<?php echo $pgActive ? '#fff' : '#374151'; ?>;border-radius:4px;font-size:13px;text-decoration:none;"><?php echo $pg; ?></a>
                 <?php endfor; ?>
                 <span style="padding:6px 8px;font-size:12px;color:#888;">
-                    Showing <?php echo (($batches_page - 1) * $batches_per_page) + 1; ?>–<?php echo min($batches_page * $batches_per_page, $batches_total); ?> of <?php echo $batches_total; ?>
+                    Showing <?php echo (($batches_page - 1) * $batches_per_page) + 1; ?>–<?php echo min($batches_page * $batches_per_page, $batches_total); ?> of <?php echo number_format($batches_total); ?><?php echo $batchesMatched > $batches_total ? ' listed (' . number_format($batchesMatched) . ' match)' : ''; ?>
                 </span>
             </nav>
         <?php endif; ?>

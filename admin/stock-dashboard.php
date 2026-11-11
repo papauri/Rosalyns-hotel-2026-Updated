@@ -48,7 +48,11 @@ if (!$error && $canReview && $_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['a
 }
 
 // Auto-run expiry sweep
-if (!$error) runStockExpiryCheck();
+if (!$error) {
+    $sweptCount = runStockExpiryCheck();
+    // The sweep changed batches and on-hand quantities: drop the cached batch/value figures read below.
+    if ($sweptCount > 0 && function_exists('rh_clear_stock_dashboard_cache')) rh_clear_stock_dashboard_cache();
+}
 
 // "Today" on this page = the trading window (station hours), the same window Orders & Tabs and the till use.
 $dashLive = rh_station_union_trading_window(); // trading day: opening to next opening (owner 2026-11-10)
