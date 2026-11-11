@@ -292,6 +292,19 @@
     <li>Room quotations and invoices show the room rate all-in: VAT and the tourism levy are taken out of the rate and shown as lines, and nothing is added on top. The lines add up to the total on the PDF.</li>
   </ul>
   <p>A quotation still marked Sent after its <strong>Valid Until</strong> date changes to Expired when you open the page.</p>
+  <h3 id="quotes-convert">How to turn a quotation into an invoice (Convert to invoice)</h3>
+  <p>Use this when the guest says yes and you want one invoice for the stay or the conference. It works for room and conference quotations. Event quotations cannot be converted.</p>
+  <ol class="steps">
+    <li>Open <strong>Money</strong> &rarr; <strong>Quotations</strong>. Find the quotation. It must be Sent or Accepted and not declined.</li>
+    <li>Click <strong>Convert to invoice</strong>. The page shows the quoted total, the stay total now, what is paid, and what is still owed. It also shows the invoice number that will be used.</li>
+    <li>If the stay total changed since the quotation was sent, the page says so. The invoice uses the current total.</li>
+    <li>Tick <strong>Email the invoice now</strong> to send it to the guest straight away. Untick it to keep the invoice as a draft to send later from the booking or enquiry. With no valid email address on the booking, the invoice is kept as a draft.</li>
+    <li>Click <strong>Convert to invoice</strong>. The quotation is accepted, and one invoice is issued. The quotation and the invoice then point to each other.</li>
+  </ol>
+  <p>Money and stock: converting does not take any money. The invoice asks for the amount still owed. A pending or tentative room booking is confirmed by the conversion. Confirming a tentative booking that way needs the <strong>Edit Bookings</strong> permission.</p>
+  <p>Find them again: on <strong>Quotations</strong>, choose <strong>Converted to invoice</strong> in the Status filter. The card <strong>Converted to invoice</strong> counts them. On <strong>Invoices</strong>, a converted invoice shows <em>Linked to quotation</em>. Invoices made from quotations that still have a balance owed are listed in the box <strong>Invoices from quotations, balance still owed</strong>. Those invoices are not counted in the cards or totals on that page.</p>
+  <div class="note"><p>The button shows the note <em>"Converting a quotation needs a small database update first (082_quotation_invoice_link)."</em> until the administrator runs the database updates. Ask the administrator to run them, then try again.</p></div>
+  <p>Other messages you may see: <em>"This quotation was already converted to invoice [number]."</em> and <em>"This quotation was declined, so it cannot become an invoice."</em> If the page says <em>"The quotation could not be converted. Nothing was changed."</em>, try again. If it keeps happening, check System Logs.</p>
 
   <h2 id="receipts">Receipts register</h2>
   <p><strong>Money</strong> &rarr; <strong>Receipts</strong> lists Paid and Completed payments with their receipt status. Figures: Total receipts, Missing numbers, Generated PDFs, Receipt value. Filter by type, status (<strong>Missing No.</strong>, <strong>Generated</strong>, <strong>Emailed</strong>), dates and search. Ten rows show per page.</p>
