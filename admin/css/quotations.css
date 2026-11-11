@@ -80,6 +80,7 @@
 .qt-badge--expired  { background: #F3EFEB; color: #888; }
 .qt-badge--declined { background: #F8D7DA; color: #721C24; }
 .qt-badge--draft    { background: #FFF3CD; color: #856404; }
+.qt-badge--converted { background: #E3EEE6; color: #1E5631; }
 
 .qt-type-badge {
     display: inline-block;

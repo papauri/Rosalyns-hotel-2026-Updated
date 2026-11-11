@@ -36,6 +36,7 @@ require_once __DIR__ . '/includes/booking-lifecycle.php';
 require_once __DIR__ . '/includes/finance-account-sync.php';
 require_once __DIR__ . '/includes/account-receipt-send.php';
 require_once __DIR__ . '/../includes/booked-rate.php'; // booked rate × nights line (owner 2026-11-09)
+require_once __DIR__ . '/../includes/quotation-convert.php'; // "Made from quotation" on the Invoices panel
 finance_ensure_sequence_tables($pdo);
 
 // Get folio charges for this booking
@@ -949,6 +950,40 @@ try {
             'invoice_generated' => 1,
             'created_at'       => $booking['updated_at'] ?? date('Y-m-d H:i:s'),
         ];
+    }
+
+    // Invoices made from a quotation (Quotations > Convert to invoice): tag the listed invoice with its quotation, and
+    // list a converted invoice that is not shown yet (e.g. its number was already on the booking without a file).
+    $bd_quote_invoices = [];
+    if (rh_qc_columns_present($pdo)) {
+        $bdQiSt = $pdo->prepare("SELECT id, quote_reference, converted_invoice_number, converted_invoice_path, converted_at FROM quotations
+            WHERE booking_type = 'room' AND booking_id = ? AND converted_at IS NOT NULL ORDER BY converted_at ASC");
+        $bdQiSt->execute([$booking_id]);
+        $bdCanOpenQuoteInv = hasPermission((int)($user['id'] ?? 0), 'create_booking') && hasPermission((int)($user['id'] ?? 0), 'invoices');
+        foreach ($bdQiSt->fetchAll(PDO::FETCH_ASSOC) as $bdQi) {
+            $bdNum = trim((string)$bdQi['converted_invoice_number']);
+            if ($bdNum === '') {
+                continue;
+            }
+            $bd_quote_invoices[$bdNum] = (string)$bdQi['quote_reference'];
+            $bdListed = false;
+            foreach ($existing_invoices as $bdInv) {
+                if (trim((string)($bdInv['invoice_number'] ?? '')) === $bdNum) {
+                    $bdListed = true;
+                    break;
+                }
+            }
+            if (!$bdListed) {
+                $existing_invoices[] = [
+                    'id'                => null,
+                    'invoice_number'    => $bdNum,
+                    'invoice_path'      => null,
+                    'invoice_generated' => 1,
+                    'created_at'        => (string)$bdQi['converted_at'],
+                    'quote_download'    => $bdCanOpenQuoteInv ? 'quotations.php?invoice=' . (int)$bdQi['id'] : '',
+                ];
+            }
+        }
     }
 
     // Fetch booked packages for this booking
@@ -2128,8 +2163,17 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                     <div class="invoice-info">
                                         <span class="invoice-number"><i class="fas fa-file-invoice"></i> <?php echo htmlspecialchars($invoice['invoice_number']); ?></span>
                                         <span class="invoice-date">Generated <?php echo htmlspecialchars(rhToUserTime($invoice['created_at'], 'M j, Y \a\t g:i A')); ?></span>
+                                        <?php $bdFromQuote = $bd_quote_invoices[trim((string)($invoice['invoice_number'] ?? ''))] ?? ''; ?>
+                                        <?php if ($bdFromQuote !== ''): ?>
+                                            <span class="invoice-date" title="Converted from this quotation with Convert to invoice on the Quotations page.">Made from quotation <?php echo htmlspecialchars($bdFromQuote); ?></span>
+                                        <?php endif; ?>
                                     </div>
                                     <div class="invoice-actions">
+                                        <?php if (empty($invoice['invoice_path']) && !empty($invoice['quote_download'])): ?>
+                                            <a href="<?php echo htmlspecialchars($invoice['quote_download']); ?>" class="invoice-btn view" data-no-spa="1" data-no-admin-loader="1">
+                                                <i class="fas fa-download"></i> Download
+                                            </a>
+                                        <?php endif; ?>
                                         <?php if ($invoice['invoice_path']): ?>
                                             <a href="document-download.php?type=<?php echo !empty($invoice['id']) ? 'invoice&amp;id=' . (int)$invoice['id'] : 'booking_invoice&amp;id=' . (int)$booking_id; ?>" target="_blank" class="invoice-btn view">
                                                 <i class="fas fa-eye"></i> View

@@ -9,6 +9,7 @@ require_once __DIR__ . '/database.php';
 require_once __DIR__ . '/email.php';
 require_once __DIR__ . '/../includes/finance-sequences.php';
 require_once __DIR__ . '/../admin/includes/finance-account-sync.php';
+require_once __DIR__ . '/../includes/quotation-convert.php'; // function-only: linked quotation invoice numbers
 
 if (!function_exists('rh_invoice_signed_payments')) {
     /**
@@ -2211,6 +2212,11 @@ function generateConferenceInvoicePDF(int $enquiry_id, ?string $invoice_number_o
         if (trim((string)$invoice_number_override) === '') {
             $existingInv = rh_account_invoice_row($pdo, 'conference', $enquiry_id);
             $invoice_number_override = ($existingInv && $existingInv['invoice_number'] !== '') ? $existingInv['invoice_number'] : null;
+            if ($invoice_number_override === null && function_exists('rh_qc_linked_invoice_number')) {
+                // Made from a quotation (Quotations > Convert to invoice): re-sends keep that invoice's number.
+                $linkedInv = rh_qc_linked_invoice_number($pdo, 'conference', $enquiry_id);
+                $invoice_number_override = $linkedInv !== '' ? $linkedInv : null;
+            }
         }
         $invoice_number = trim((string)$invoice_number_override) !== ''
             ? trim((string)$invoice_number_override)

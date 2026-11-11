@@ -855,6 +855,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['enquiry_action'])) {
                 if ((int)$cnChk->fetchColumn() > 0) {
                     throw new Exception($delBlocked);
                 }
+                // An invoice number issued from a quotation (Quotations > Convert to invoice) is money history too.
+                $delLinkedInv = function_exists('rh_qc_linked_invoice_number') ? rh_qc_linked_invoice_number($pdo, 'conference', $enquiry_id) : '';
+                if ($delLinkedInv !== '') {
+                    throw new Exception('Invoice ' . $delLinkedInv . ' was issued for this enquiry — cancel it instead so the invoice trail stays.');
+                }
                 // Rows that belong only to this enquiry (sent-quotation log entries), then the enquiry itself.
                 $qPdfSel = $pdo->prepare("SELECT pdf_path FROM quotations WHERE booking_type = 'conference' AND booking_id = ?");
                 $qPdfSel->execute([$enquiry_id]);

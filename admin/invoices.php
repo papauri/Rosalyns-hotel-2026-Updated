@@ -10,6 +10,7 @@ require_once __DIR__ . '/includes/booking-lifecycle.php';
 require_once __DIR__ . '/includes/finance-account-sync.php';
 require_once __DIR__ . '/includes/receivables.php';
 require_once __DIR__ . '/includes/account-receipt-send.php';
+require_once __DIR__ . '/../includes/quotation-convert.php'; // "Made from quotation ..." links
 $message = '';
 $error = '';
 $csrf_token = $csrf_token ?? generateCsrfToken();
@@ -347,6 +348,33 @@ try {
     $stmt = $pdo->prepare($sql);
     $stmt->execute($params);
     $invoices = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Invoices made from a quotation (Quotations > Convert to invoice): invoice number -> quotation reference.
+    $invFromQuote = [];
+    if (rh_qc_columns_present($pdo)) {
+        $invNums = array_values(array_unique(array_filter(array_map(static function ($r) {
+            return trim((string)($r['invoice_number'] ?? ''));
+        }, $invoices))));
+        foreach (array_chunk($invNums, 500) as $invChunk) {
+            $qPh = implode(',', array_fill(0, count($invChunk), '?'));
+            $qSt = $pdo->prepare("SELECT converted_invoice_number, quote_reference FROM quotations WHERE converted_invoice_number IN ($qPh) ORDER BY converted_at ASC");
+            $qSt->execute($invChunk);
+            foreach ($qSt->fetchAll(PDO::FETCH_ASSOC) as $qRow) {
+                $invFromQuote[(string)$qRow['converted_invoice_number']] = $invFromQuote[(string)$qRow['converted_invoice_number']] ?? (string)$qRow['quote_reference'];
+            }
+        }
+    }
+
+    // Invoices made from quotations that no payment row carries yet (nothing paid on them): their own list below the
+    // main one. Read-only; not part of any card, total or report. Payment statuses do not apply, so only "All Statuses".
+    $invUnpaidConv = [];
+    if ($filter_status === 'all') {
+        try {
+            $invUnpaidConv = rh_qc_unpaid_conversions($pdo, $filter_type === 'all' ? '' : $filter_type, $scopeActive ? $enabledBookingTypes : [], $search);
+        } catch (Throwable $e) {
+            error_log('[invoices] quotation invoices: ' . $e->getMessage());
+        }
+    }
 
     // Rows hidden by preset scoping (for the notice above the table)
     $hiddenScopedCount = 0;
@@ -702,6 +730,10 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                                 <tr>
                                     <td>
                                         <strong><?php echo htmlspecialchars($invoice['invoice_number'] ?? 'N/A'); ?></strong>
+                                        <?php $invQuoteRef = $invFromQuote[trim((string)($invoice['invoice_number'] ?? ''))] ?? ''; ?>
+                                        <?php if ($invQuoteRef !== ''): ?>
+                                            <br><small style="color: #666;" title="A quotation was converted to this invoice with Convert to invoice on the Quotations page.">Linked to quotation <?php echo htmlspecialchars($invQuoteRef); ?></small>
+                                        <?php endif; ?>
                                     </td>
                                     <td>
                                         <code><?php echo htmlspecialchars($invoice['payment_reference']); ?></code>
@@ -897,6 +929,60 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                 </div>
             <?php endif; ?>
         </div>
+
+        <?php if (!empty($invUnpaidConv)):
+            $invCanOpenQuote = hasPermission((int)($user['id'] ?? 0), 'create_booking');
+        ?>
+        <!-- Invoices made from quotations with a balance still owed and no payment row carrying their number (not in the list above) -->
+        <div class="invoices-table" style="margin-top: 20px;">
+            <h2 style="font-size: 1.1rem; margin: 0 0 4px;">Invoices from quotations, balance still owed</h2>
+            <p style="margin: 0 0 12px; color: #666; font-size: 13px;">Issued with Convert to invoice on the Quotations page. No payment row carries these invoice numbers yet, so they are not in the list above. They are not counted in the cards, totals or reports on this page.</p>
+            <div class="table-responsive">
+                <table>
+                    <thead>
+                        <tr>
+                            <th title="The invoice number given when the quotation was converted.">Invoice #</th>
+                            <th title="The quotation the invoice was made from.">Quotation</th>
+                            <th title="The booking or enquiry the invoice is for.">Booking Ref</th>
+                            <th>Type</th>
+                            <th>Customer</th>
+                            <th title="When the quotation was converted to this invoice.">Issued</th>
+                            <th title="What is still to be paid on the booking or enquiry today (its full bill less any money received).">Balance owed</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($invUnpaidConv as $uc): ?>
+                            <tr>
+                                <td><strong><?php echo htmlspecialchars($uc['invoice_number']); ?></strong></td>
+                                <td><?php echo htmlspecialchars($uc['quote_reference']); ?></td>
+                                <td><strong><?php echo htmlspecialchars($uc['ref']); ?></strong></td>
+                                <td><span class="badge badge-<?php echo htmlspecialchars($uc['type']); ?>"><?php echo htmlspecialchars(ucfirst($uc['type'])); ?></span></td>
+                                <td>
+                                    <?php echo htmlspecialchars($uc['name'] !== '' ? $uc['name'] : 'N/A'); ?>
+                                    <?php if ($uc['email'] !== ''): ?><br><small style="color: #666;"><?php echo htmlspecialchars($uc['email']); ?></small><?php endif; ?>
+                                </td>
+                                <td><?php echo $uc['converted_at'] !== '' ? date('M j, Y', strtotime($uc['converted_at'])) : '—'; ?></td>
+                                <td><strong style="color: var(--gold);"><?php echo htmlspecialchars((string)getSetting('currency_symbol')); ?> <?php echo number_format($uc['due'], 0); ?></strong></td>
+                                <td>
+                                    <div class="action-buttons">
+                                        <?php if ($invCanOpenQuote): ?>
+                                            <a class="btn-action" href="quotations.php?invoice=<?php echo (int)$uc['quotation_id']; ?>" data-no-spa="1" data-no-admin-loader="1" title="Download invoice <?php echo htmlspecialchars($uc['invoice_number'], ENT_QUOTES); ?>"><i class="fas fa-download"></i></a>
+                                        <?php endif; ?>
+                                        <?php if ($uc['type'] === 'room'): ?>
+                                            <a class="btn-action" href="booking-details.php?id=<?php echo (int)$uc['booking_id']; ?>#invoices" title="View booking"><i class="fas fa-calendar-check"></i></a>
+                                        <?php else: ?>
+                                            <a class="btn-action" href="conference-management.php#enquiry-<?php echo (int)$uc['booking_id']; ?>" title="View conference enquiry"><i class="fas fa-briefcase"></i></a>
+                                        <?php endif; ?>
+                                    </div>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <?php endif; ?>
     </div>
 
     <script>
