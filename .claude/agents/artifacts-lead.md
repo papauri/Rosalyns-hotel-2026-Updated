@@ -40,8 +40,19 @@ You write files only. The orchestrator commits and pushes the Showcase repo and 
   fit, labelled with its real size; on narrow screens they stack or switch with a Phone / Tablet / Desktop toggle.
   One shared shell helper (`ctx.devices(el, render)`) used by both data files. Single-device screens stay single
   (a kitchen display is a wall screen).
-- Aim for 6–9 slides per business type and 4–6 panel slides. Fewer, better. Each slide must be understood in
-  five seconds without a presenter: one plain headline, one sentence, the live mock-up, at most three points.
+- **A full sales pitch (owner 2026-11-12, replaces the old "6–9 slides, fewer, better"):** the tour is long and
+  complete so a business owner knows exactly what they are getting and has few questions left: roughly 15–20
+  product pages per business type, 8–10 panel pages, plus pitch pages (opening, a day at the business, what you
+  get, questions owners ask, how you get started, closing). Pages are grouped in chapters with a Contents menu.
+  Each page must still be understood in five seconds without a presenter: one plain headline, one sentence, a
+  mock-up the visitor can click through, at most three points.
+- **Files now:** `index.html` (shell), `hms.js` + `hms-more.js` (product pages), `pitch.js` (pitch pages), `panel.js`
+  (Managed for you). `SHOWCASE.md` lists every page and its sources.
+- **One organisation; the demo is sent from the control panel by business type (owner 2026-11-12).** One link opens
+  the tour on one business type for a named prospect; the format is in `SHOWCASE.md` ("Link format"). The `#send`
+  page builds that link by hand today; `msp-control-panel` is to send the same link from a client/prospect record
+  (its own build task, see its `STATUS.md`). Never show "send a demo" as a panel feature in a slide until the panel
+  really has it. Every change here is noted in `msp-control-panel/STATUS.md` so the panel side knows.
 
 ## What to show (pick the wow, not everything)
 Read `.claude/CORE_SYSTEM_BRIEF.md` (domains → files) and use `.claude/SYSTEM_MAP.md` / `.claude/CODE_INDEX.md`
