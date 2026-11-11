@@ -12,6 +12,7 @@ require_once 'includes/procurement-schema.php';
 require_once 'includes/stock-budget-lib.php';
 require_once dirname(__DIR__) . '/includes/stock-loss.php';
 require_once dirname(__DIR__) . '/includes/station-hours.php';
+require_once __DIR__ . '/includes/stock-orders-filters.php'; // rh_so_folio_exclude_sql: the card and its Orders list share one rule
 require_once __DIR__ . '/includes/review-panel.php'; // the Decisions panel: prints nothing unless switched on and allowed
 
 $user = [
@@ -126,7 +127,7 @@ if (!$error && $metrics) {
                        ((o.status = 'refunded' AND o.refunded_at >= ? AND o.refunded_at < ?)
                         OR (o.status = 'voided' AND o.paid_at IS NOT NULL AND o.voided_at >= ? AND o.voided_at < ?)) AS reversed,
                        (o.status IN ('paid','completed') AND COALESCE(o.paid_at, o.created_at) >= ? AND COALESCE(o.paid_at, o.created_at) < ?
-                        AND NOT (o.order_type = 'room_service' AND EXISTS (SELECT 1 FROM booking_charges bc WHERE bc.stock_order_id = o.id))) AS settled
+                        AND " . rh_so_folio_exclude_sql('o') . ") AS settled
                 FROM stock_orders o
             ) x
         ");
@@ -142,6 +143,16 @@ if (!$error && $metrics) {
     } catch (Throwable $e) {
         error_log('stock-dashboard sales cards: ' . $e->getMessage());
     }
+    // Orders badge (Navigate): every order started in today's trading window, any status - the same count
+    // as the Orders Today card on Orders & Tabs and the list the badge opens (date=today). Live, not cached.
+    try {
+        $startedSt = $pdo->prepare("SELECT COUNT(*) FROM stock_orders WHERE created_at >= ? AND created_at < ?");
+        $startedSt->execute($dashWinParams);
+        $metrics['orders_today'] = (int)$startedSt->fetchColumn();
+    } catch (Throwable $e) {
+        error_log('stock-dashboard orders badge: ' . $e->getMessage());
+        $metrics['orders_today'] = 0;
+    }
 }
 
 // Live operational data (always fresh — not cached)
@@ -155,7 +166,7 @@ if (!$error) {
             FROM stock_order_items oi
             INNER JOIN stock_orders o ON o.id = oi.order_id
             WHERE o.status IN ('paid','completed') AND COALESCE(o.paid_at, o.created_at) >= ? AND COALESCE(o.paid_at, o.created_at) < ?
-              AND NOT (o.order_type = 'room_service' AND EXISTS (SELECT 1 FROM booking_charges bc WHERE bc.stock_order_id = o.id))
+              AND " . rh_so_folio_exclude_sql('o') . "
             GROUP BY oi.item_name, oi.menu_type
             ORDER BY qty_sold DESC, revenue DESC
             LIMIT 8
@@ -386,10 +397,10 @@ $csrf_token = generateCsrfToken();
 
         <!-- ═══ TOP KPI ROW ═══ -->
         <div class="ck-kpis ck-kpis--4">
-            <a class="ck-kpi ck-kpi--info" href="stock-orders.php?date=today&status=settled">
+            <a class="ck-kpi ck-kpi--info" href="stock-orders.php?date=today&amp;status=settled&amp;folio=exclude">
                 <span class="ck-kpi__icon"><i class="fas fa-cash-register"></i></span>
                 <span class="ck-kpi__label">Net Sales Today <i class="help" aria-label="About net sales today" data-tip="Money from orders paid in today&#x27;s trading window (the same window as Orders &amp; Tabs), after refunds and voids. Room-service orders put on a guest&#x27;s bill are left out because the bill counts them.">?</i></span>
-                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format($metrics['revenue_today'], 0); ?></span>
+                <span class="ck-kpi__value ck-kpi__value--money"><?php if (($metrics['orders_paid_today'] ?? null) === null): ?>&mdash;<?php else: ?><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span> <?php echo number_format($metrics['revenue_today'], 0); ?><?php endif; ?></span>
                 <span class="ck-kpi__sub">
                     <?php if (($metrics['orders_paid_today'] ?? null) === null): ?>
                         Could not load today's sales
@@ -678,7 +689,7 @@ $csrf_token = generateCsrfToken();
         <div class="sdash-section">
             <div class="sdash-section__header">
                 <h3 class="sdash-section__title"><i class="fas fa-fire"></i> Top Items Sold Today</h3>
-                <a href="stock-orders.php?date=today&status=settled" class="sdash-section__action">All orders →</a>
+                <a href="stock-orders.php?date=today&amp;status=settled&amp;folio=exclude" class="sdash-section__action">All orders →</a>
             </div>
             <?php if (empty($topItemsToday)): ?>
                 <div class="sdash-section__body"><p class="sdash-section__note">No settled orders today yet.</p></div>
@@ -772,11 +783,11 @@ $csrf_token = generateCsrfToken();
                     <em class="sdash-qn-badge sdash-qn-badge--warn"><?php echo $batchBadge; ?></em>
                     <?php endif; ?>
                 </a>
-                <a class="sdash-qn-item" href="stock-orders.php">
+                <a class="sdash-qn-item" href="<?php echo (int)$metrics['orders_today'] > 0 ? 'stock-orders.php?date=today' : 'stock-orders.php'; ?>" title="Orders started in today's trading window, including any since cancelled or voided">
                     <i class="fas fa-receipt"></i>
                     <span>Orders</span>
                     <?php if ((int)$metrics['orders_today'] > 0): ?>
-                    <em class="sdash-qn-badge sdash-qn-badge--blue"><?php echo $metrics['orders_today']; ?> today</em>
+                    <em class="sdash-qn-badge sdash-qn-badge--blue"><?php echo (int)$metrics['orders_today']; ?> started today</em>
                     <?php endif; ?>
                 </a>
                 <a class="sdash-qn-item" href="stock-wastage.php">

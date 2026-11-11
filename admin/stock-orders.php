@@ -919,6 +919,9 @@ $filterHour           = '';
 $filterStatus         = '';
 $filterHealth         = '';
 $filterKitchenStatus  = '';
+$filterFolio          = '';
+$soTenderLegs         = []; // order id => that tender's share of a split order (tender-filtered list only)
+$soTenderLegTips      = []; // order id => tips on those legs (the tender cards include tips)
 $hasActiveFilter      = false; // set inside try block when filters are parsed
 $soFilters            = [];
 if (!$error || strpos($error, 'not yet') === false) {
@@ -938,9 +941,10 @@ if (!$error || strpos($error, 'not yet') === false) {
         $filterStatus         = $soFilters['status'];
         $filterHealth         = $soFilters['health'];
         $filterKitchenStatus  = $soFilters['kitchen_status'];
+        $filterFolio          = $soFilters['folio'];
         [$whereClauses, $whereParams] = rh_so_list_where($soFilters, $soShiftWindow['start_sql'], $soShiftWindow['trading_end_sql']);
         $whereSql = $whereClauses ? ('WHERE ' . implode(' AND ', $whereClauses)) : '';
-        $activeFilters = compact('filterDate', 'filterMethod', 'filterOrderType', 'filterHour', 'filterStatus', 'filterHealth', 'filterKitchenStatus');
+        $activeFilters = compact('filterDate', 'filterMethod', 'filterOrderType', 'filterHour', 'filterStatus', 'filterHealth', 'filterKitchenStatus', 'filterFolio');
         $hasActiveFilter = implode('', $soFilters) !== ''; // hour '0' is a filter too
 
         $orderStmt = $pdo->prepare("
@@ -959,6 +963,28 @@ if (!$error || strpos($error, 'not yet') === false) {
         ");
         $orderStmt->execute($whereParams);
         $orders = $orderStmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // Tender-filtered list: a split order shows only the part paid by that tender (same SUM(split_amount)
+        // as the payment mix and shift totals), so the list adds up to the card it was opened from.
+        if ($filterMethod !== '') {
+            $soSplitIds = [];
+            foreach ($orders as $o) {
+                if ((int)($o['split_count'] ?? 1) > 1) { $soSplitIds[] = (int)$o['id']; }
+            }
+            $legQ = rh_so_tender_leg_sql($filterMethod, $soSplitIds);
+            if ($legQ !== null) {
+                try {
+                    $legSt = $pdo->prepare($legQ[0]);
+                    $legSt->execute($legQ[1]);
+                    foreach ($legSt->fetchAll(PDO::FETCH_ASSOC) as $lr) {
+                        $soTenderLegs[(int)$lr['order_id']] = (float)$lr['leg_amount'];
+                        $soTenderLegTips[(int)$lr['order_id']] = (float)$lr['leg_tip'];
+                    }
+                } catch (Throwable $e) {
+                    error_log('stock-orders tender legs: ' . $e->getMessage());
+                }
+            }
+        }
 
         foreach ($orders as $o) {
             $health = getRestaurantOrderHealth($pdo, $o);
@@ -1044,6 +1070,16 @@ if (!$error || strpos($error, 'not yet') === false) {
         $shift['void_count_today'] = (int)$soShiftTotals['voids_count'];
         $shift['earlier_tabs_n']   = (int)($soShiftTotals['settled_from_tabs_count'] ?? 0);
         $shift['earlier_tabs_amt'] = (float)($soShiftTotals['settled_from_tabs_amount'] ?? 0);
+        // Items 86'd after payment (REF86): the tender cards include what the guest paid for them, the order
+        // rows do not (their total was lowered). Read with the same rule so cards and lists can say so.
+        $soRef86Rows = [];
+        try {
+            $r86 = $pdo->prepare(rh_so_ref86_by_method_sql());
+            $r86->execute([$soShiftWindow['start_sql'], $soShiftWindow['trading_end_sql'], $soShiftWindow['start_sql'], $soShiftWindow['trading_end_sql']]);
+            $soRef86Rows = $r86->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            error_log('stock-orders REF86 note: ' . $e->getMessage());
+        }
 
         $soNotRs = rh_so_not_room_service_sql('o'); // same rule as the list's order_type=non_room_service
         $opsStmt = $pdo->query("
@@ -1308,7 +1344,7 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
         <!-- Today's shift bar (anti-cheat: visible totals = manager can reconcile drawer).
              Each card is a clickable filter that scopes the orders list below. -->
         <div class="shift-bar">
-            <a class="shift-card<?php echo ($filterDate === 'today' && !$filterMethod && !$filterOrderType && $filterHour === '' && !$filterStatus && $filterHealth !== 'review' && !$filterKitchenStatus) ? ' active' : ''; ?>" href="stock-orders.php?date=today" title="Show today's orders">
+            <a class="shift-card<?php echo ($filterDate === 'today' && !$filterMethod && !$filterOrderType && $filterHour === '' && !$filterStatus && $filterHealth !== 'review' && !$filterKitchenStatus && !$filterFolio) ? ' active' : ''; ?>" href="stock-orders.php?date=today" title="Show today's orders">
                 <div class="lbl">Orders Today <i class="help" aria-label="About orders today" data-tip="Orders started in today&#x27;s trading window, including any since cancelled or voided. Tap to list them.">?</i></div>
                 <div class="val"><?php echo (int)($shift['orders_today'] ?? 0); ?></div>
             </a>
@@ -1324,20 +1360,23 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
                 <?php endif; ?>
             </a>
             <a class="shift-card<?php echo ($filterMethod === 'cash') ? ' active' : ''; ?>" href="stock-orders.php?date=today&payment_method=cash" title="Today's cash taken (sales settled today, tips included). Refund/void payouts are shown in the detail view.">
-                <div class="lbl">Cash <i class="help" aria-label="About cash" data-tip="Cash taken for orders paid in today&#x27;s trading window, tips included. Refund and void payouts are not taken off here.">?</i></div>
+                <div class="lbl">Cash <i class="help" aria-label="About cash" data-tip="Cash taken for orders paid in today&#x27;s trading window, tips included. Tap to list them: each order shows its cash part and any cash tip, which together make this figure. Refund and void payouts are not taken off here.">?</i></div>
                 <div class="val"><?php echo $currency_symbol . ' ' . number_format((float)($shift['cash_today'] ?? 0), 2); ?></div>
                 <div class="shift-card__sub">By payment time</div>
-                <div class="shift-card__sub">Tips (included): <?php echo $currency_symbol . ' ' . number_format((float)($shift['tips_today'] ?? 0), 2); ?></div>
+                <div class="shift-card__sub">Tips included (all methods today): <?php echo $currency_symbol . ' ' . number_format((float)($shift['tips_today'] ?? 0), 2); ?></div>
+                <?php [$r86n, $r86a] = rh_so_ref86_for_tender($soRef86Rows ?? [], 'cash'); if ($r86a > 0.005): ?><div class="shift-card__sub">Includes 86'd items paid then refunded: <?php echo $currency_symbol . ' ' . number_format($r86a, 2); ?></div><?php endif; ?>
             </a>
             <a class="shift-card<?php echo ($filterMethod === 'mobile_money') ? ' active' : ''; ?>" href="stock-orders.php?date=today&payment_method=mobile_money" title="Today's mobile-money orders">
-                <div class="lbl">Mobile Money <i class="help" aria-label="About mobile money" data-tip="Mobile money taken for orders paid in today&#x27;s trading window. Refund and void payouts are not taken off here.">?</i></div>
+                <div class="lbl">Mobile Money <i class="help" aria-label="About mobile money" data-tip="Mobile money taken for orders paid in today&#x27;s trading window, tips included. Tap to list them: each order shows its mobile-money part and any tip, which together make this figure. Refund and void payouts are not taken off here.">?</i></div>
                 <div class="val"><?php echo $currency_symbol . ' ' . number_format((float)($shift['mobile_today'] ?? 0), 2); ?></div>
-                <div class="shift-card__sub">By payment time</div>
+                <div class="shift-card__sub">By payment time &middot; incl. tips</div>
+                <?php [$r86n, $r86a] = rh_so_ref86_for_tender($soRef86Rows ?? [], 'mobile_money'); if ($r86a > 0.005): ?><div class="shift-card__sub">Includes 86'd items paid then refunded: <?php echo $currency_symbol . ' ' . number_format($r86a, 2); ?></div><?php endif; ?>
             </a>
             <a class="shift-card<?php echo ($filterMethod === 'card') ? ' active' : ''; ?>" href="stock-orders.php?date=today&payment_method=card" title="Today's card orders">
-                <div class="lbl">Card <i class="help" aria-label="About card" data-tip="Card payments taken for orders paid in today&#x27;s trading window. Refund and void payouts are not taken off here.">?</i></div>
+                <div class="lbl">Card <i class="help" aria-label="About card" data-tip="Card payments taken for orders paid in today&#x27;s trading window, tips included. Tap to list them: each order shows its card part and any tip, which together make this figure. Refund and void payouts are not taken off here.">?</i></div>
                 <div class="val"><?php echo $currency_symbol . ' ' . number_format((float)($shift['card_today'] ?? 0), 2); ?></div>
-                <div class="shift-card__sub">By payment time</div>
+                <div class="shift-card__sub">By payment time &middot; incl. tips</div>
+                <?php [$r86n, $r86a] = rh_so_ref86_for_tender($soRef86Rows ?? [], 'card'); if ($r86a > 0.005): ?><div class="shift-card__sub">Includes 86'd items paid then refunded: <?php echo $currency_symbol . ' ' . number_format($r86a, 2); ?></div><?php endif; ?>
             </a>
             <a class="shift-card<?php echo ((int)($shift['void_count_today'] ?? 0) > 0) ? ' warn' : ''; ?><?php echo ($filterStatus === 'voided') ? ' active' : ''; ?>" href="stock-orders.php?date=today&status=voided" title="Today's voided orders">
                 <div class="lbl">Voids <i class="help" aria-label="About voids" data-tip="Orders voided in today&#x27;s trading window, paid or not: how many, and what they were worth.">?</i></div>
@@ -1386,7 +1425,8 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
                     ?>
                     <span>Hour: <strong><?php echo htmlspecialchars($formatHourLabel($filterHourStart) . ' - ' . $formatHourLabel($filterHourEnd)); ?></strong></span>
                 <?php endif; ?>
-                <?php if ($filterStatus): ?><span>Status: <strong><?php echo htmlspecialchars($filterStatus === 'sold' ? 'Sold (paid; any later refund or void included)' : ($filterStatus === 'settled' ? 'Paid or completed' : ucfirst($filterStatus))); ?></strong></span><?php endif; ?>
+                <?php if ($filterStatus): ?><span>Status: <strong><?php echo htmlspecialchars($filterStatus === 'sold' ? 'Sold (paid; any later refund or void included)' : ($filterStatus === 'settled' ? 'Paid or completed' : implode(' or ', array_map('ucfirst', explode(',', $filterStatus))))); ?></strong></span><?php endif; ?>
+                <?php if ($filterFolio === 'exclude'): ?><span><strong>Room service on a guest bill left out</strong> (the bill counts it)</span><?php endif; ?>
                 <?php if ($filterKitchenStatus): ?>
                     <?php
                     $ksLabels = ['awaiting_prep' => 'Awaiting Prep', 'in_progress_all' => 'In Progress', 'ready_all' => 'Ready to Serve'];
@@ -1606,15 +1646,15 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
                         data-insight-key="peak-hour"
                         data-insight-title="Peak Hour Snapshot"
                         aria-label="Open peak hour snapshot">
-                        <div class="lbl">Peak Hour <i class="help" aria-label="About peak hour" data-tip="The hour of today with the most money from paid orders, by the hour each order was started.">?</i></div>
+                        <div class="lbl">Peak Hour <i class="help" aria-label="About peak hour" data-tip="The hour of today whose orders are worth the most: orders started that hour that are now paid or completed. It is by start time, so it will not match Gross Sales, which counts by payment time.">?</i></div>
                         <?php
                         $ph = (int)$peakHour['hour'];
                         $phLabel = $ph === 0 ? '12am' : ($ph < 12 ? $ph . 'am' : ($ph === 12 ? '12pm' : ($ph - 12) . 'pm'));
                         ?>
                         <div class="val" style="font-size:22px;"><?php echo htmlspecialchars($phLabel); ?></div>
                         <div style="font-size:11px;color:#6c757d;margin-top:3px;">
-                            <?php echo (int)$peakHour['orders_count']; ?> orders &middot;
-                            <?php echo $currency_symbol . ' ' . number_format((float)$peakHour['revenue'], 2); ?>
+                            <?php echo (int)$peakHour['orders_count']; ?> orders started &middot;
+                            <?php echo $currency_symbol . ' ' . number_format((float)$peakHour['revenue'], 2); ?> paid or completed
                         </div>
                         <div class="shift-card__hint"><i class="fas fa-table-list"></i> Open detail</div>
                     </div>
@@ -1863,8 +1903,8 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
                 <!-- Order Channel / Type Split -->
                 <div class="ops-panel ops-panel--channel-split" style="margin:0;">
                     <div class="ops-panel__header">
-                        <strong class="ops-panel__header-title"><i class="fas <?php echo isRestaurantEnabled() ? 'fa-utensils' : 'fa-cash-register'; ?>" style="color:#7E684B;"></i> Order Channels Today</strong>
-                        <span class="ops-panel__header-note">Click a channel to filter the orders list</span>
+                        <strong class="ops-panel__header-title"><i class="fas <?php echo isRestaurantEnabled() ? 'fa-utensils' : 'fa-cash-register'; ?>" style="color:#7E684B;"></i> Order Channels Today <i class="help" tabindex="0" role="button" aria-label="About order channels" data-tip="Orders started in today&#x27;s trading window, by channel. The money is the value of those orders that are now paid or completed, so it will not add up to Gross Sales, which counts by payment time.">?</i></strong>
+                        <span class="ops-panel__header-note">Value of orders started today, paid or completed &middot; click a channel to list them</span>
                     </div>
                     <div style="margin-top:12px;display:flex;flex-direction:column;gap:10px;">
                         <?php foreach ($orderTypeSplit as $ch):
@@ -1901,11 +1941,11 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
                                     </span>
                                     <span style="font-size:12px;color:#6c757d;">
                                         <?php echo (int)($ch['orders_count'] ?? 0); ?> orders &middot;
-                                        <?php echo $currency_symbol . ' ' . number_format($chRev, 2); ?> &middot;
+                                        <?php echo $currency_symbol . ' ' . number_format($chRev, 2); ?> paid or completed &middot;
                                         <?php echo (int)($ch['active_count'] ?? 0); ?> active
                                     </span>
                                 </div>
-                                <div style="height:10px;background:#e9ecef;border-radius:5px;overflow:hidden;" title="<?php echo number_format($chPct, 1); ?>% of today's revenue">
+                                <div style="height:10px;background:#e9ecef;border-radius:5px;overflow:hidden;" title="<?php echo number_format($chPct, 1); ?>% of the value of orders started today that are paid or completed">
                                     <div style="width:<?php echo number_format($chPct, 1); ?>%;height:100%;background:#8F6A35;border-radius:5px;transition:width .4s;"></div>
                                 </div>
                                 <div style="font-size:11px;color:#8F6A35;font-weight:600;margin-top:2px;"><?php echo number_format($chPct, 1); ?>%</div>
@@ -1925,8 +1965,8 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
                 <!-- Hourly Activity Bar Chart -->
                 <div class="ops-panel ops-panel--hourly-activity" style="margin:0;">
                     <div class="ops-panel__header">
-                        <strong class="ops-panel__header-title"><i class="fas fa-chart-bar" style="color:#7E684B;"></i> Hourly Activity Today</strong>
-                        <span class="ops-panel__header-note">Click an hour bar to filter that hour</span>
+                        <strong class="ops-panel__header-title"><i class="fas fa-chart-bar" style="color:#7E684B;"></i> Hourly Activity Today <i class="help" tabindex="0" role="button" aria-label="About hourly activity" data-tip="Orders by the hour they were started in today&#x27;s trading window. Bar height is the value of orders started that hour that are now paid or completed, so the bars will not add up to Gross Sales, which counts by payment time.">?</i></strong>
+                        <span class="ops-panel__header-note">By the hour each order was started &middot; click an hour bar to list it</span>
                     </div>
                     <?php if (!empty($hourlyBreakdown)): ?>
                         <div style="display:flex;align-items:flex-end;gap:4px;height:100px;margin-top:14px;padding-bottom:22px;position:relative;">
@@ -1941,7 +1981,7 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
                                 <a class="ops-panel__chart-link<?php echo $isHourActive ? ' ops-panel__chart-link--active' : ''; ?>"
                                     href="<?php echo htmlspecialchars($hourHref, ENT_QUOTES, 'UTF-8'); ?>"
                                     style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100px;position:relative;"
-                                    title="<?php echo $hlbl; ?>: <?php echo (int)$h['orders_count']; ?> orders · <?php echo $currency_symbol . ' ' . number_format((float)$h['revenue'], 2); ?>">
+                                    title="<?php echo $hlbl; ?>: <?php echo (int)$h['orders_count']; ?> orders started · <?php echo $currency_symbol . ' ' . number_format((float)$h['revenue'], 2); ?> value of orders started this hour, paid or completed">
                                     <?php if ((int)$h['orders_count'] > 0): ?>
                                         <span style="font-size:9px;color:#7E684B;margin-bottom:2px;"><?php echo (int)$h['orders_count']; ?></span>
                                     <?php endif; ?>
@@ -1953,7 +1993,7 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
                         <div style="font-size:11px;color:#6c757d;margin-top:4px;text-align:right;">
                             <span style="display:inline-block;width:10px;height:10px;background:#8F6A35;border-radius:2px;margin-right:4px;vertical-align:middle;"></span>Peak hour &nbsp;
                             <span style="display:inline-block;width:10px;height:10px;background:#c8b89a;border-radius:2px;margin-right:4px;vertical-align:middle;"></span>Other hours
-                            &nbsp;(bar height = revenue, number = orders)
+                            &nbsp;(bar height = value of orders started this hour, paid or completed; number = orders started)
                         </div>
                     <?php else: ?>
                         <p style="color:#6c757d;font-size:13px;text-align:center;padding:24px 0;">No hourly data yet today.</p>
@@ -2382,7 +2422,7 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
                         <th>Table Status <i class="help" tabindex="0" role="button" aria-label="About table status" data-tip="Whether the table is still tied up by this order: occupied while open, awaiting payment once served, released when paid, cancelled or voided.">?</i></th>
                         <th>Room / Folio <i class="help" tabindex="0" role="button" aria-label="About room and folio" data-tip="For room-service orders: the room, the booking reference the charge goes to, and when it was posted to the guest bill.">?</i></th>
                         <th>Items <i class="help" tabindex="0" role="button" aria-label="About items" data-tip="How many lines are on the order.">?</i></th>
-                        <th style="text-align:right;">Total <i class="help" tabindex="0" role="button" aria-label="About total" data-tip="What the order comes to, as it stands now.">?</i></th>
+                        <th style="text-align:right;">Total <i class="help" tabindex="0" role="button" aria-label="About total" data-tip="What the order comes to, as it stands now. In a list filtered by payment method, a split bill shows only the part paid that way, and any tip is shown under it, so the list (with tips) adds up to the card.">?</i></th>
                         <th>Payment</th>
                         <th>Status</th>
                         <th>Health <i class="help" tabindex="0" role="button" aria-label="About order health" data-tip="Balanced means the items, payments and room charges agree with the order total. Review means something does not match.">?</i></th>
@@ -2490,7 +2530,20 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
                                 <?php endif; ?>
                             </td>
                             <td><?php echo (int)$o['line_count']; ?></td>
-                            <td style="text-align:right;font-weight:600;"><?php echo $currency_symbol . ' ' . number_format((float)$o['total_amount'], 2); ?></td>
+                            <td style="text-align:right;font-weight:600;">
+                                <?php if (isset($soTenderLegs[(int)$o['id']])): ?>
+                                    <?php echo $currency_symbol . ' ' . number_format($soTenderLegs[(int)$o['id']], 2); ?>
+                                    <div style="font-size:10px;font-weight:400;color:#6c757d;">Part paid by this method, of total <?php echo $currency_symbol . ' ' . number_format((float)$o['total_amount'], 2); ?></div>
+                                <?php else: ?>
+                                    <?php echo $currency_symbol . ' ' . number_format((float)$o['total_amount'], 2); ?>
+                                <?php endif; ?>
+                                <?php
+                                // Tender cards include tips: in a tender-filtered list show this row's tip so the rows add up to the card.
+                                $soRowTip = $filterMethod === '' ? 0.0 : (isset($soTenderLegs[(int)$o['id']]) ? (float)($soTenderLegTips[(int)$o['id']] ?? 0) : ((int)($o['split_count'] ?? 1) > 1 ? 0.0 : (float)($o['tip_amount'] ?? 0)));
+                                if ($soRowTip > 0.005): ?>
+                                    <div style="font-size:10px;font-weight:600;color:#155724;">+ tip <?php echo $currency_symbol . ' ' . number_format($soRowTip, 2); ?></div>
+                                <?php endif; ?>
+                            </td>
                             <td style="font-size:12px;">
                                 <?php echo htmlspecialchars($methodLabel); ?>
                                 <?php if ($o['payment_method'] === 'cash' && $o['change_due'] !== null && (float)$o['change_due'] > 0): ?>
@@ -2608,18 +2661,20 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
                 </tbody>
             </table>
         </div>
+        <?php
+        // Tender list for today: the card also holds what guests paid for items 86'd after payment (REF86),
+        // which no order row shows (their totals were lowered). Say so, so the list + this line = the card.
+        if ($filterDate === 'today' && $filterMethod !== '' && $filterMethod !== 'unassigned'):
+            [$soR86n, $soR86a] = rh_so_ref86_for_tender($soRef86Rows ?? [], $filterMethod);
+            if ($soR86a > 0.005): ?>
+            <p style="font-size:12px;color:#6c757d;margin:8px 4px 0;">
+                The card for this method also includes <?php echo $currency_symbol . ' ' . number_format($soR86a, 2); ?> paid for <?php echo (int)$soR86n; ?> item<?php echo $soR86n === 1 ? '' : 's'; ?> 86'd after payment (refunded separately as REF86 refunds). The order rows above show the lowered totals, so that amount is not on them.
+            </p>
+        <?php endif; endif; ?>
         <?php if ($orders_total_pages > 1): ?>
             <nav style="display:flex;align-items:center;justify-content:center;gap:6px;padding:16px 0;flex-wrap:wrap;">
                 <?php
-                $pgBase = array_filter([
-                    'date'           => $filterDate,
-                    'payment_method' => $filterMethod,
-                    'order_type'     => $filterOrderType,
-                    'hour'           => $filterHour,
-                    'status'         => $filterStatus,
-                    'health'         => $filterHealth,
-                    'kitchen_status' => $filterKitchenStatus,
-                ], fn($v) => $v !== '');
+                $pgBase = array_filter($soFilters ?? [], fn($v) => $v !== ''); // every filter, folio included
                 for ($pg = 1; $pg <= $orders_total_pages; $pg++):
                     $pgHref   = 'stock-orders.php?' . http_build_query(array_merge($pgBase, ['orders_page' => $pg]));
                     $pgActive = ($pg === $orders_page);
@@ -2774,8 +2829,8 @@ $soReviewHref = 'stock-orders.php?' . http_build_query(array_merge(
                                 ?>
                             </td>
                         </tr>
-                        <tr><th>Orders in peak hour</th><td><?php echo number_format((int)$peakHour['orders_count']); ?></td></tr>
-                        <tr><th>Revenue in peak hour</th><td><?php echo $currency_symbol . ' ' . number_format((float)$peakHour['revenue'], 2); ?></td></tr>
+                        <tr><th>Orders started in peak hour</th><td><?php echo number_format((int)$peakHour['orders_count']); ?></td></tr>
+                        <tr><th>Value of orders started this hour, paid or completed</th><td><?php echo $currency_symbol . ' ' . number_format((float)$peakHour['revenue'], 2); ?></td></tr>
                     </tbody>
                 </table>
                 <div class="stock-insight-actions">

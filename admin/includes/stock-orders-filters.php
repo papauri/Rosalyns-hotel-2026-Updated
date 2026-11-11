@@ -11,6 +11,9 @@
  *  - voids (status=voided): when it was voided (voided_at, else created_at) - same as the shift totals;
  *  - settled (status=paid/completed/settled): when it was paid (paid_at, else created_at);
  *  - everything else (orders today, open, channel, hour): when the order was started (created_at).
+ * `folio=exclude` leaves out room service charged to a guest bill (booking_charges), exactly as the
+ * stock dashboard's Net Sales card does (rh_so_folio_exclude_sql is shared by both).
+ * `status` may be a comma list of plain statuses (e.g. placed,pending,confirmed) for room-service sets.
  * Requires admin/includes/pos-shift-totals.php (rh_pos_sale_window_sql).
  */
 
@@ -39,6 +42,112 @@ if (!function_exists('rh_so_not_room_service_sql')) {
     }
 }
 
+if (!function_exists('rh_so_folio_exclude_sql')) {
+    /**
+     * Leaves out room service charged to a guest bill: the bill already counts it. The stock dashboard's
+     * Net Sales card and Top Items use this same expression, so the card and its list agree row for row
+     * (kept exactly as the card has always read it, NULL order_type included).
+     */
+    function rh_so_folio_exclude_sql(string $o = 'o'): string
+    {
+        return "NOT ($o.order_type = 'room_service' AND EXISTS (SELECT 1 FROM booking_charges bc WHERE bc.stock_order_id = $o.id))";
+    }
+}
+
+if (!function_exists('rh_so_tender_methods')) {
+    /** The payment_method values one tender filter covers ('card' = manual + POS + credit_card, as the Card card). [] = none/unassigned. */
+    function rh_so_tender_methods(string $m): array
+    {
+        if ($m === '' || $m === 'unassigned') {
+            return [];
+        }
+        return $m === 'card' ? ['card_manual', 'card_pos', 'credit_card'] : [$m];
+    }
+}
+
+if (!function_exists('rh_so_tender_leg_sql')) {
+    /**
+     * For a tender-filtered list: SQL + params summing, per split order, the legs paid by that tender
+     * (SUM(split_amount), as the payment mix and shift totals read them) and that part's tips (the tender
+     * cards include tips), so each row can show its part and the list adds up to the card.
+     * $ids = the split orders shown. Returns null when not needed.
+     */
+    function rh_so_tender_leg_sql(string $m, array $ids): ?array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static fn(int $i): bool => $i > 0)));
+        if ($m === '' || !$ids) {
+            return null;
+        }
+        $idPh = implode(',', array_fill(0, count($ids), '?'));
+        if ($m === 'unassigned') {
+            $match = "(s.payment_method IS NULL OR TRIM(s.payment_method) = '')";
+            $params = $ids;
+        } else {
+            $methods = rh_so_tender_methods($m);
+            $match = 's.payment_method IN (' . implode(',', array_fill(0, count($methods), '?')) . ')';
+            $params = array_merge($ids, $methods);
+        }
+        return ["SELECT s.order_id, COALESCE(SUM(s.split_amount), 0) AS leg_amount, COALESCE(SUM(COALESCE(s.tip_amount, 0)), 0) AS leg_tip FROM stock_order_splits s"
+            . " WHERE s.order_id IN ($idPh) AND $match GROUP BY s.order_id", $params];
+    }
+}
+
+if (!function_exists('rh_so_ref86_by_method_sql')) {
+    /**
+     * Items 86'd after payment: the guest paid the full amount, the order total was lowered and a REF86
+     * refund paid back the difference. The tender cards (rh_pos_shift_totals) add that paid value to the
+     * tender, but no order row shows it, so the cards and lists note it. Same rule and window as the
+     * shift totals' REF86 add-back; grouped by payment method. Params: the 4 sale-window params.
+     */
+    function rh_so_ref86_by_method_sql(): string
+    {
+        return "SELECT p.payment_method AS method, COUNT(*) AS n,"
+            . " COALESCE(SUM(CASE WHEN COALESCE(p.refund_amount, 0) > 0 THEN p.refund_amount ELSE p.total_amount END), 0) AS amt"
+            . " FROM payments p INNER JOIN stock_orders o ON o.id = p.booking_id"
+            . " WHERE p.booking_type = 'restaurant' AND p.payment_type = 'refund'"
+            . " AND p.payment_reference LIKE 'REF86-%' AND p.deleted_at IS NULL"
+            . " AND COALESCE(p.refund_status, 'completed') IN ('pending','processing','completed')"
+            . " AND " . rh_pos_sale_window_sql('o')
+            . " GROUP BY p.payment_method";
+    }
+}
+
+if (!function_exists('rh_so_ref86_for_tender')) {
+    /** From the grouped REF86 rows: [count, amount] for one list tender filter (card = the card bucket). */
+    function rh_so_ref86_for_tender(array $rows, string $m): array
+    {
+        $methods = rh_so_tender_methods($m);
+        $n = 0;
+        $amt = 0.0;
+        foreach ($rows as $r) {
+            if (in_array((string)($r['method'] ?? ''), $methods, true)) {
+                $n += (int)($r['n'] ?? 0);
+                $amt += (float)($r['amt'] ?? 0);
+            }
+        }
+        return [$n, round($amt, 2)];
+    }
+}
+
+if (!function_exists('rh_so_plain_statuses')) {
+    /** Order statuses a list may filter on one by one or as a comma list. */
+    function rh_so_plain_statuses(): array
+    {
+        return ['placed', 'pending', 'confirmed', 'paid', 'completed', 'cancelled', 'voided', 'parked', 'refunded'];
+    }
+}
+
+if (!function_exists('rh_so_status_list')) {
+    /** The statuses of a comma-list filter (two or more plain statuses), else []. */
+    function rh_so_status_list(string $status): array
+    {
+        if (strpos($status, ',') === false) {
+            return [];
+        }
+        return array_values(array_unique(array_map('trim', explode(',', $status))));
+    }
+}
+
 if (!function_exists('rh_so_kitchen_groups')) {
     function rh_so_kitchen_groups(): array
     {
@@ -58,12 +167,26 @@ if (!function_exists('rh_so_normalize_filters')) {
         $f = [
             'date' => $s('date'), 'payment_method' => $s('payment_method'), 'order_type' => $s('order_type'),
             'hour' => $s('hour'), 'status' => $s('status'), 'health' => $s('health'), 'kitchen_status' => $s('kitchen_status'),
+            'folio' => $s('folio'),
         ];
         if ($f['date'] !== 'today') { $f['date'] = ''; }
         if (preg_match('/^[a-z_]{1,40}$/', $f['payment_method']) !== 1) { $f['payment_method'] = ''; }
         if (preg_match('/^[a-z_]{1,40}$/', $f['order_type']) !== 1) { $f['order_type'] = ''; }
         if (!(ctype_digit($f['hour']) && (int)$f['hour'] >= 0 && (int)$f['hour'] <= 23)) { $f['hour'] = ''; } else { $f['hour'] = (string)(int)$f['hour']; }
-        if (!in_array($f['status'], ['placed', 'paid', 'completed', 'cancelled', 'voided', 'parked', 'refunded', 'settled', 'sold'], true)) { $f['status'] = ''; }
+        if (strpos($f['status'], ',') !== false) {
+            // Comma list (room-service sets such as placed,pending,confirmed): still-open statuses only;
+            // paid/void/refund statuses have their own timestamp rules, so a list holding one is dropped whole.
+            $list = rh_so_status_list($f['status']);
+            $allowed = ['placed', 'pending', 'confirmed', 'parked'];
+            $ok = count($list) >= 2;
+            foreach ($list as $one) {
+                if (!in_array($one, $allowed, true)) { $ok = false; break; }
+            }
+            $f['status'] = $ok ? implode(',', $list) : '';
+        } elseif (!in_array($f['status'], array_merge(rh_so_plain_statuses(), ['settled', 'sold']), true)) {
+            $f['status'] = '';
+        }
+        if ($f['folio'] !== 'exclude') { $f['folio'] = ''; }
         if ($f['health'] !== 'review') { $f['health'] = ''; }
         $kitchen = ['new', 'pending', 'in_progress', 'preparing', 'ready', 'collection', 'served', 'recalled'];
         if (!isset(rh_so_kitchen_groups()[$f['kitchen_status']]) && !in_array($f['kitchen_status'], $kitchen, true)) { $f['kitchen_status'] = ''; }
@@ -127,7 +250,7 @@ if (!function_exists('rh_so_list_where')) {
             $c[] = "((COALESCE(o.split_count,1) <= 1 AND (o.payment_method IS NULL OR TRIM(o.payment_method) = ''))"
                 . " OR (COALESCE(o.split_count,1) > 1 AND EXISTS (SELECT 1 FROM stock_order_splits sf WHERE sf.order_id = o.id AND (sf.payment_method IS NULL OR TRIM(sf.payment_method) = ''))))";
         } elseif ($m !== '') {
-            $methods = $m === 'card' ? ['card_manual', 'card_pos', 'credit_card'] : [$m];
+            $methods = rh_so_tender_methods($m);
             $ph = implode(',', array_fill(0, count($methods), '?'));
             $c[] = "((COALESCE(o.split_count,1) <= 1 AND o.payment_method IN ($ph))"
                 . " OR (COALESCE(o.split_count,1) > 1 AND EXISTS (SELECT 1 FROM stock_order_splits sf WHERE sf.order_id = o.id AND sf.payment_method IN ($ph))))";
@@ -155,9 +278,16 @@ if (!function_exists('rh_so_list_where')) {
             if (rh_so_date_basis($f) !== 'sale') {
                 $c[] = "((o.paid_at IS NOT NULL AND o.status IN ('paid','refunded','voided')) OR (o.paid_at IS NULL AND o.status = 'paid'))";
             }
+        } elseif (($list = rh_so_status_list($s)) !== []) {
+            $c[] = 'o.status IN (' . implode(',', array_fill(0, count($list), '?')) . ')';
+            array_push($p, ...$list);
         } elseif ($s !== '') {
             $c[] = 'o.status = ?';
             $p[] = $s;
+        }
+
+        if (($f['folio'] ?? '') === 'exclude') {
+            $c[] = rh_so_folio_exclude_sql('o');
         }
 
         $k = $f['kitchen_status'] ?? '';
