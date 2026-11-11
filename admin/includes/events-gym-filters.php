@@ -127,6 +127,14 @@ if (!function_exists('rh_gym_member_list_cap')) {
     }
 }
 
+if (!function_exists('rh_gym_checkin_list_cap')) {
+    /** Most rows each Gym Check-In list ("in the gym now", "today's activity") prints; its note and LIMIT share it. */
+    function rh_gym_checkin_list_cap(): int
+    {
+        return 100;
+    }
+}
+
 if (!function_exists('rh_gym_member_filter_key')) {
     /** The Gym Members tab actually shown: a known key, else 'all' (the list falls back to every member). */
     function rh_gym_member_filter_key($raw): string

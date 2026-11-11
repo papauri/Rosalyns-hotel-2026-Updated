@@ -14,6 +14,7 @@
 require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once __DIR__ . '/includes/gym-checkin-lib.php';
+require_once __DIR__ . '/includes/events-gym-filters.php';
 
 /** @var PDO $pdo */
 /** @var array $user */
@@ -70,16 +71,18 @@ try {
 $gr_outstanding_rows = [];
 $gr_outstanding_total = 0.0;
 $gr_outstanding_count = 0;
+$gr_outstanding_cap = 100;
 try {
+    // One row per account: gym_members.gym_inquiry_id has no UNIQUE key, so a JOIN could repeat an
+    // account; the subquery picks its first member so the rows match the COUNT below.
     $gr_outstanding_rows = $pdo->query("
         SELECT gi.id, gi.reference_number, gi.name, gi.membership_type,
                gi.total_with_vat, gi.amount_paid, gi.amount_due, gi.payment_status,
-               gm.member_number
+               (SELECT gm.member_number FROM gym_members gm WHERE gm.gym_inquiry_id = gi.id ORDER BY gm.id LIMIT 1) AS member_number
         FROM gym_inquiries gi
-        LEFT JOIN gym_members gm ON gm.gym_inquiry_id = gi.id
         WHERE gi.amount_due > 0 AND gi.status NOT IN ('cancelled')
         ORDER BY gi.amount_due DESC
-        LIMIT 100
+        LIMIT " . (int)$gr_outstanding_cap . "
     ")->fetchAll(PDO::FETCH_ASSOC);
     // Totals cover EVERY unpaid account; only the table below is capped at the 100 biggest.
     $gr_tot = $pdo->query("SELECT COUNT(*) n, COALESCE(SUM(amount_due), 0) t FROM gym_inquiries WHERE amount_due > 0 AND status NOT IN ('cancelled')")->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -312,6 +315,10 @@ $gr_fmt_dur = static function (int $mins): string {
             <?php if (empty($gr_outstanding_rows)): ?>
                 <p style="color:#2e7d32;margin:0;"><i class="fas fa-circle-check"></i> No outstanding membership balances — everyone is paid up.</p>
             <?php else: ?>
+                <?php $gr_outstanding_note = rh_list_cap_note(count($gr_outstanding_rows), $gr_outstanding_count, $gr_outstanding_cap, 'unpaid accounts'); ?>
+                <?php if ($gr_outstanding_note !== ''): ?>
+                    <p class="gym-list-cap-note" role="status"><i class="fas fa-circle-info" aria-hidden="true"></i> <?php echo htmlspecialchars($gr_outstanding_note); ?> The table lists the <?php echo number_format($gr_outstanding_cap); ?> biggest balances; the totals cover every account.</p>
+                <?php endif; ?>
                 <table class="menu-table" style="margin:0;">
                     <thead>
                         <tr>

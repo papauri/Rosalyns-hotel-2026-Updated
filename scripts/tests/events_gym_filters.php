@@ -94,7 +94,7 @@ eq(rh_gym_in_now_sql('x; DROP'), 'checked_out_at IS NULL AND checked_in_at >= CU
 $reports = (string)@file_get_contents($root . '/admin/gym-reports.php');
 check(strpos($reports, 'WHERE ' . rh_gym_in_now_sql() . '")') !== false, 'gym-reports.php uses the identical in-now clause');
 $lib = (string)@file_get_contents($root . '/admin/includes/gym-checkin-lib.php');
-check(strpos($lib, 'WHERE ' . rh_gym_in_now_sql('ga.')) !== false, 'check-in "Currently in the gym" list uses the same rule');
+check(strpos($lib, 'WHERE " . rh_gym_in_now_sql(\'ga.\')') !== false && strpos($lib, 'WHERE " . rh_gym_in_now_sql())') !== false, 'check-in "Currently in the gym" list and its count use the same rule');
 
 // ---- conference ?id= (enquiry email link): positive int only
 eq(rh_conf_focus_id(['id' => '42']), 42, 'id 42 kept');
@@ -126,6 +126,21 @@ eq(rh_gym_member_filter_key(['active']), 'all', 'array tab -> all');
 $gmSrc = (string)@file_get_contents($root . '/admin/gym-members.php');
 check(strpos($gmSrc, 'LIMIT {$gm_list_cap}') !== false && strpos($gmSrc, 'LIMIT 500') === false, 'gym members LIMIT uses the shared cap');
 check(strpos($gmSrc, 'rh_list_cap_note(count($gm_members), (int)$gm_counts[$gm_filter]') !== false, 'cap note total = the tab count (same WHERE)');
+
+// Gym Check-In lists: shared cap, full COUNT totals (not count() of the capped rows), notes in the snapshot.
+$gcCap = rh_gym_checkin_list_cap();
+eq($gcCap, 100, 'gym check-in cap 100');
+eq(rh_list_cap_note(100, 101, $gcCap, 'visits today'), 'Showing 100 of 101 visits today.', 'check-in: 100 of 101 -> note');
+eq(rh_list_cap_note(100, 100, $gcCap, 'visits today'), '', 'check-in: 100 of 100 -> no note');
+eq(rh_list_cap_note(99, 150, $gcCap, 'visits today'), '', 'check-in: 99 shown (under cap) -> no note');
+$gcSrc = (string)@file_get_contents($root . '/admin/includes/gym-checkin-lib.php');
+check(strpos($gcSrc, "\$out['in_gym_count'] = count(") === false && strpos($gcSrc, "\$out['visits_today'] = count(") === false, 'check-in totals are not count() of capped lists');
+check(substr_count($gcSrc, 'LIMIT " . (int)$cap') === 2 && strpos($gcSrc, 'LIMIT 100') === false, 'check-in lists use the shared cap');
+check(strpos($gcSrc, "'list_cap' => \$cap") !== false && strpos($gcSrc, "\$out['today_note']") !== false, 'snapshot exposes list_cap and notes');
+// Gym Reports outstanding: one row per account (no member JOIN), capped list says so.
+$grSrc = (string)@file_get_contents($root . '/admin/gym-reports.php');
+check(strpos($grSrc, 'LEFT JOIN gym_members gm ON gm.gym_inquiry_id') === false, 'outstanding list has no duplicating member join');
+check(strpos($grSrc, 'rh_list_cap_note(count($gr_outstanding_rows), $gr_outstanding_count, $gr_outstanding_cap') !== false, 'outstanding cap note uses the full count');
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

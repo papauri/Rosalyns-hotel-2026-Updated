@@ -110,6 +110,8 @@ if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPo
 .gc-list{padding:0 16px 8px}
 .gc-empty{text-align:center;padding:26px 20px;color:var(--muted);font-size:13px}
 .gc-empty i{font-size:30px;display:block;margin-bottom:10px;opacity:.3;color:var(--primary)}
+/* The lists stop at the snapshot's list_cap; this says so ("Showing 100 of N visits today."). */
+.gc-cap-note{margin:0 0 8px;padding:0 2px;color:var(--muted);font-size:12.5px}
 .gc-item{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);margin-bottom:8px;padding:11px 14px;display:flex;align-items:center;gap:12px}
 .gc-item .gi-icon{width:34px;height:34px;background:var(--surface2);border-radius:8px;display:flex;align-items:center;justify-content:center;color:var(--primary);font-size:13px;flex-shrink:0}
 .gc-item .gi-name{flex:1;font-weight:600;font-size:14px;line-height:1.3}
@@ -178,10 +180,12 @@ if (!('BarcodeDetector' in window)) { window.BarcodeDetector = BarcodeDetectorPo
 
 <!-- Currently in the gym -->
 <div class="section-head"><span><i class="fas fa-person-running" style="margin-right:6px"></i>Currently in the gym</span><span id="inGymCount"><?php echo (int)$gc_snapshot['in_gym_count']; ?></span></div>
+<p class="gc-cap-note" id="inGymCapNote" role="status"<?php echo $gc_snapshot['in_gym_note'] === '' ? ' hidden' : ''; ?>><?php echo htmlspecialchars($gc_snapshot['in_gym_note']); ?></p>
 <div class="gc-list" id="inGymList"></div>
 
 <!-- Today's activity -->
 <div class="section-head"><span><i class="fas fa-clock-rotate-left" style="margin-right:6px"></i>Today's activity</span><span id="todayCount"><?php echo (int)$gc_snapshot['visits_today']; ?></span></div>
+<p class="gc-cap-note" id="todayCapNote" role="status"<?php echo $gc_snapshot['today_note'] === '' ? ' hidden' : ''; ?>><?php echo htmlspecialchars($gc_snapshot['today_note']); ?></p>
 <div class="gc-list" id="todayList"></div>
 <div class="foot-space"></div>
 
@@ -408,6 +412,11 @@ function renderSnapshot(s){
     document.getElementById('statVisits').textContent=s.visits_today;
     document.getElementById('inGymCount').textContent=s.in_gym_count;
     document.getElementById('todayCount').textContent=s.visits_today;
+    // "Showing 100 of N" when a list hit its cap (text built server side by rh_list_cap_note).
+    [['inGymCapNote',s.in_gym_note],['todayCapNote',s.today_note]].forEach(function(p){
+        const el=document.getElementById(p[0]); if(!el) return;
+        el.textContent=p[1]||''; el.hidden=!p[1];
+    });
     const inList=document.getElementById('inGymList');
     if(!s.in_gym.length){
         inList.innerHTML='<div class="gc-empty"><i class="fas fa-door-open"></i>Nobody is checked in right now.</div>';

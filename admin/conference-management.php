@@ -1551,12 +1551,25 @@ if ($facebook_settings_css_version === '' || $facebook_settings_css_version === 
         const CONF_HAS_END_DATE = <?php echo $confHasEndDate ? 'true' : 'false'; ?>;
         <?php if ($conf_focus_state === 'listed'): ?>
         // ?id= from the enquiry email: scroll to and flash the row, then open its Details.
-        document.addEventListener('DOMContentLoaded', function () {
+        // In-app (SPA) navigation runs this straight after the swap, but the SPA then scrolls the
+        // window to the top two frames later (admin-spa.js _scrollToNavigationTarget), which undid
+        // the row scroll; so after a swap wait for rh:content-updated plus two frames.
+        (function () {
             var focusId = <?php echo (int)$conf_focus_id; ?>;
-            if (window.rhDeepLinkFlash) { window.rhDeepLinkFlash('enquiry-' + focusId); }
-            var btn = document.querySelector('#enquiry-' + focusId + ' [data-enquiry-details]');
-            if (btn) { setTimeout(function () { btn.click(); }, 450); }
-        });
+            function focusEnquiry() {
+                if (!document.getElementById('enquiry-' + focusId)) { return; } // left the page meanwhile
+                if (window.rhDeepLinkFlash) { window.rhDeepLinkFlash('enquiry-' + focusId); }
+                var btn = document.querySelector('#enquiry-' + focusId + ' [data-enquiry-details]');
+                if (btn) { setTimeout(function () { btn.click(); }, 450); }
+            }
+            if (document !== window.document) { // SPA re-run: `document` is admin-spa.js's proxy
+                document.addEventListener('rh:content-updated', function () {
+                    requestAnimationFrame(function () { requestAnimationFrame(focusEnquiry); });
+                }, { once: true });
+            } else {
+                document.addEventListener('DOMContentLoaded', focusEnquiry);
+            }
+        })();
         <?php endif; ?>
 
         function setConferenceLoader(visible, label) {

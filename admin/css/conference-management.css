@@ -741,11 +741,13 @@ body.cf-dragging { cursor: grabbing; user-select: none; -webkit-user-select: non
     }
 }
 
-/* Conference Enquiries: filter notice ("Filtered list ... Clear") and the ?id= not-found notice. */
+/* Conference Enquiries: filter notice ("Filtered list ... Clear") and the ?id= not-found notice.
+   Shared status tokens (admin-styles.css :root): border = --admin-*-border, words = --admin-*-text,
+   flat tint of the border on the surface (no gradient). Info: 8% tint; warn: 12% tint. */
 .conf-list-notice {
-    background: #eef3ff;
-    border: 1px solid #cfd8ff;
-    border-radius: 10px;
+    background: color-mix(in srgb, var(--admin-info-border, #2f6fad) 8%, var(--admin-surface, #fffdfb));
+    border: 1px solid var(--admin-info-border, #2f6fad);
+    border-radius: var(--admin-radius, 10px);
     padding: 12px 14px;
     margin-bottom: 14px;
     display: flex;
@@ -754,9 +756,13 @@ body.cf-dragging { cursor: grabbing; user-select: none; -webkit-user-select: non
     gap: 12px;
     flex-wrap: wrap;
 }
-.conf-list-notice__title { display: flex; align-items: center; gap: 8px; color: #1f2d6b; }
-.conf-list-notice__text { color: #2f3a63; font-size: 13px; }
-.conf-list-notice__link { margin-left: 8px; color: #1f2d6b; font-weight: 600; }
-.conf-list-notice--warn { background: #fff7e8; border-color: #f0d9a8; }
-.conf-list-notice--warn .conf-list-notice__title { color: #6b4a12; }
-.conf-list-notice--warn .conf-list-notice__text { color: #5c4520; }
+.conf-list-notice__title { display: flex; align-items: center; gap: 8px; color: var(--admin-info-text, #123f67); }
+.conf-list-notice__text { color: var(--admin-info-text, #123f67); font-size: 13px; }
+.conf-list-notice__link { margin-left: 8px; color: var(--admin-info-text, #123f67); font-weight: 600; text-decoration: underline; }
+.conf-list-notice--warn {
+    background: color-mix(in srgb, var(--admin-warning-border, #9a7c53) 12%, var(--admin-surface, #fffdfb));
+    border-color: var(--admin-warning-border, #9a7c53);
+}
+.conf-list-notice--warn .conf-list-notice__title,
+.conf-list-notice--warn .conf-list-notice__text,
+.conf-list-notice--warn .conf-list-notice__link { color: var(--admin-warning-text, #4f3f2a); }

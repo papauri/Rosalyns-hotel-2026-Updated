@@ -248,9 +248,14 @@
     flex: 0 1 clamp(7.8rem, 11vw, 9.2rem);
 }
 
+/* From/To fit the full dd/mm/yyyy plus the picker icon at the toolbar font size (no clipped year):
+   ~11ch of date text + ~2.25em icon area + the side padding + the 1px borders. ch/em follow the
+   input's own font size, so this scales with the toolbar clamps. Phones (<=480px grid) reset
+   min-width to 0 with a more specific rule below. */
 .bookings-toolbar__input--date {
-    flex: 0 1 clamp(6.55rem, 8.5vw, 7.8rem);
-    min-width: clamp(6.2rem, 8.2vw, 7.6rem);
+    --rh-bookings-date-width: calc(11ch + 2.25em + 2 * var(--rh-bookings-toolbar-control-pad-x) + 2px);
+    flex: 0 0 var(--rh-bookings-date-width);
+    min-width: var(--rh-bookings-date-width);
 }
 
 .bookings-toolbar__button,

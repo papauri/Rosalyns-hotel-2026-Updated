@@ -231,7 +231,10 @@ if (!function_exists('gym_checkin_snapshot')) {
      */
     function gym_checkin_snapshot(PDO $pdo): array
     {
-        $out = ['in_gym' => [], 'today' => [], 'in_gym_count' => 0, 'visits_today' => 0];
+        require_once __DIR__ . '/events-gym-filters.php';
+        $cap = rh_gym_checkin_list_cap();
+        $out = ['in_gym' => [], 'today' => [], 'in_gym_count' => 0, 'visits_today' => 0,
+                'list_cap' => $cap, 'in_gym_note' => '', 'today_note' => ''];
         if (!gym_attendance_table_exists($pdo)) {
             return $out;
         }
@@ -242,9 +245,9 @@ if (!function_exists('gym_checkin_snapshot')) {
                        TIMESTAMPDIFF(MINUTE, ga.checked_in_at, NOW()) AS minutes_in
                 FROM gym_attendance ga
                 LEFT JOIN gym_members gm ON gm.id = ga.member_id
-                WHERE ga.checked_out_at IS NULL AND ga.checked_in_at >= CURDATE()
+                WHERE " . rh_gym_in_now_sql('ga.') . "
                 ORDER BY ga.checked_in_at ASC
-                LIMIT 100
+                LIMIT " . (int)$cap . "
             ")->fetchAll(PDO::FETCH_ASSOC);
             $out['today'] = $pdo->query("
                 SELECT ga.id, ga.member_number, ga.checked_in_at, ga.checked_out_at, ga.method, gm.full_name,
@@ -254,10 +257,13 @@ if (!function_exists('gym_checkin_snapshot')) {
                 LEFT JOIN gym_members gm ON gm.id = ga.member_id
                 WHERE ga.checked_in_at >= CURDATE()
                 ORDER BY ga.checked_in_at DESC
-                LIMIT 100
+                LIMIT " . (int)$cap . "
             ")->fetchAll(PDO::FETCH_ASSOC);
-            $out['in_gym_count'] = count($out['in_gym']);
-            $out['visits_today'] = count($out['today']);
+            // Full totals (same WHERE as each list, which stops at $cap) - not count() of the capped rows.
+            $out['in_gym_count'] = (int)$pdo->query("SELECT COUNT(*) FROM gym_attendance WHERE " . rh_gym_in_now_sql())->fetchColumn();
+            $out['visits_today'] = (int)$pdo->query("SELECT COUNT(*) FROM gym_attendance WHERE checked_in_at >= CURDATE()")->fetchColumn();
+            $out['in_gym_note'] = rh_list_cap_note(count($out['in_gym']), $out['in_gym_count'], $cap, 'people in the gym');
+            $out['today_note']  = rh_list_cap_note(count($out['today']), $out['visits_today'], $cap, 'visits today');
         } catch (Throwable $e) {
             error_log('gym_checkin_snapshot: ' . $e->getMessage());
         }
