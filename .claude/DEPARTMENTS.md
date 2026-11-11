@@ -19,6 +19,7 @@ Every `dept-*-lead` and `ui-lead` reads this file after
 | `dept-ai-lead` | In-portal AI Assistant (owner 2026-10-26: handled **only** by this lead) | everything in `.claude/AI_ASSISTANT_PLAN.md`: panel, providers/keys/models, vault, tools, swarm, confirm actions, learning, self-healing, kill switches, evals, completion guardrail, its guide pages. Opus 5.5. Other leads never edit AI files |
 | `dept-import-lead` | Data Import (owner 2026-11-03) | the Import button: reads Excel/CSV/Word/PDF lists (stock, bookings, suppliers; NO staff-list import; `data_import` permission default admin+manager), maps to tables, review-then-confirm, never invents data; works with or without the Assistant. Spec `.claude/IMPORT_PLAN.md`. Sonnet. Assistant-side hook = `dept-ai-lead` |
 | `ui-lead` | Cross-system UI | one visual language across every department; reviews UI requests from the leads |
+| `artifacts-lead` | Sales showcase (owner 2026-11-12) | the anonymised interactive demo of the core features (business-type picker + MSP panel track) in `OneDrive\MSP\Showcase`; same lead in both hotel repos and msp-control-panel. Every lead: when you ship a change to a screen the demo mirrors (`SHOWCASE.md` lists them), add it to the daily SYNC QUEUE for the artifacts lead |
 
 Each lead is responsible for its department end to end: it audits, fixes, tests, and is the
 one the orchestrator asks when something in that department breaks. Leads are peers: when a

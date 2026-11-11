@@ -29,7 +29,7 @@ do not re-derive plans or re-scan the repo ad hoc.
   autonomously to Sonnet for very small/tedious low-risk work it can surely do; haiku for docs/lint.
 - Department leads (`.claude/DEPARTMENTS.md`): `dept-rooms-lead`, `dept-restaurant-lead`,
   `dept-accounting-lead`, `dept-stock-lead`, `dept-guest-site-lead`, `dept-events-gym-lead`, `dept-pwa-lead` (patch-only: installed app, offline, POS/KDS stations), `dept-import-lead` (opus; Import button: Excel/CSV/Word/PDF → review → import, `data_import` permission default admin+manager, no staff-list import, spec `.claude/IMPORT_PLAN.md`), `dept-patch-lead` (owner-approved feature patches in `.claude/PATCH_QUEUE.md` + all security patches) (opus; each audits/fixes its department end to end and
-  is the one to ask when it breaks) and `ui-lead` (one visual language; turns the leads'
+  is the one to ask when it breaks) and `artifacts-lead` (owner 2026-11-12: the anonymised sales showcase in `OneDrive\MSP\Showcase`, business-type picker + MSP panel track; same lead in msp-control-panel; told of shipped screen changes via the daily SYNC QUEUE) and `ui-lead` (one visual language; turns the leads'
   `UI_REQUEST`s into shared `UI_DECISION`s). Money changes from any department are reviewed by the
   accounting lead.
 - `.claude/skills/build-loop/SKILL.md` — the cycle: plan → build → polish (UI only) →
