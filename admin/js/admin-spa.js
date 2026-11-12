@@ -610,6 +610,50 @@
         return Promise.all(promises);
     }
 
+    // ── Shared-asset freshness ───────────────────────────────────────────────
+    /**
+     * True when a script/stylesheet outside #rh-admin-page is on both pages with a
+     * different ?v= (code shipped since this tab last fully loaded). The SPA never
+     * reloads shared code, so the caller does one real page load instead.
+     * Assets on only one page, other origins, or without a non-empty v= are ignored.
+     */
+    function _sharedAssetsStale(doc, baseHref) {
+        function collect(root, base) {
+            var map = {};
+            root.querySelectorAll('script[src], link[rel="stylesheet"][href]').forEach(function (el) {
+                if (el.closest('#' + CONTENT_ID)) return;
+                var u;
+                try { u = new URL(el.getAttribute(el.tagName === 'SCRIPT' ? 'src' : 'href'), base); } catch (e) { return; }
+                if (u.origin !== window.location.origin) return;
+                var v = u.searchParams.get('v');
+                if (!v) return;
+                if (!map[u.pathname]) map[u.pathname] = {};
+                map[u.pathname][v] = true;
+            });
+            return map;
+        }
+        var have = collect(document, document.baseURI);
+        var want = collect(doc, baseHref);
+        for (var path in want) {
+            if (!Object.prototype.hasOwnProperty.call(want, path) || !have[path]) continue;
+            for (var v in want[path]) {
+                if (Object.prototype.hasOwnProperty.call(want[path], v) && !have[path][v]) return true;
+            }
+        }
+        return false;
+    }
+
+    // Real page load of fullHref. Same URL (only the #hash differs, or back/forward where the
+    // address bar already moved) needs reload(): setting location.href would only jump to the hash.
+    function _fullLoad(fullHref) {
+        if (fullHref.split('#')[0] === window.location.href.split('#')[0]) {
+            history.replaceState(null, '', fullHref);
+            window.location.reload();
+        } else {
+            window.location.href = fullHref;
+        }
+    }
+
     // ── Inline <style> management ────────────────────────────────────────────
     function _updateInlineStyles(doc) {
         // Remove styles injected by the previous SPA navigation
@@ -1142,6 +1186,15 @@
                     return;
                 }
 
+                // New shared JS/CSS shipped since this tab loaded: load the page for real once.
+                if (_sharedAssetsStale(doc, fullHref)) {
+                    hideScopedLoader();
+                    _navigating = false;
+                    _abortController = null;
+                    _fullLoad(fullHref);
+                    return;
+                }
+
                 var newScopes = newContent.querySelectorAll(scope.selector);
                 var newScope = newScopes[scope.index] || null;
                 if (!newScope) {
@@ -1297,6 +1350,15 @@
                 var currentContent = document.getElementById(CONTENT_ID);
                 if (!currentContent) {
                     window.location.href = fullHref;
+                    return;
+                }
+
+                // New shared JS/CSS shipped since this tab loaded: load the page for real once.
+                if (_sharedAssetsStale(doc, fullHref)) {
+                    _hideLoader();
+                    _navigating = false;
+                    _abortController = null;
+                    _fullLoad(fullHref);
                     return;
                 }
 
