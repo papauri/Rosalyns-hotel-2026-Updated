@@ -1765,6 +1765,9 @@ if (!isset($folio_fnb)) {
                 <span class="ck-kpi__label">Owed to us</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><?php echo $recvFailed ? 'Unavailable' : $ckMoney($cat_recv_total); ?></span>
                 <span class="ck-kpi__sub"><?php echo (int)$cat_recv_count; ?> account<?php echo (int)$cat_recv_count === 1 ? '' : 's'; ?> with a balance &middot; pending <?php echo $ckPlain($cat_pending); ?></span>
+                <?php if (!$recvFailed && (float)($rcvAcct['company_total'] ?? 0) > BALANCE_TOLERANCE): // company pays later (084): part of the total above, not added ?>
+                    <span class="ck-kpi__sub" title="Part of the total above: what companies on account (LPO) still owe for their guests' stays. Not chased from the guests.">of which on company account <?php echo $ckPlain((float)$rcvAcct['company_total']); ?></span>
+                <?php endif; ?>
             </div>
             <?php endif; ?>
             <div class="ck-kpi js-acct-insight-trigger" title="Cash Position (Today) - cash and mobile money received today. Does not include card, bank transfer or credit." <?php echo $ckTrig('cash-today', 'Cash Position Detail'); ?> aria-label="Open cash position detail">

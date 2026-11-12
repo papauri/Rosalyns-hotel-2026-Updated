@@ -51,8 +51,16 @@ if (!function_exists('rh_receivable_rows')) {
             'reference' => 'inquiry_reference', 'company' => 'company_name', 'contact_name' => 'contact_person', 'start_date' => 'event_date',
         ];
         $queries = [];
+        // Company pays later (migration 084): an on-account booking stays ONE row (same amount_due, so every total and
+        // count is unchanged) and says who owes it: payer company / guest / both, company_due, guest_due, the company
+        // name in client, and its age counted from the company due date.
+        if (!function_exists('rh_billing_ready')) {
+            require_once __DIR__ . '/../../includes/billing-accounts.php';
+        }
+        $billOn = rh_billing_ready($pdo);
         if ($on('bookings')) {
             $queries['room'] = "SELECT 'room' AS type, b.id, b.booking_reference AS reference, b.guest_name AS client, b.status, b.amount_paid, b.amount_due,
+                    b.primary_booking_id" . ($billOn ? ', b.billing_account_id' : '') . ",
                     GREATEST(0, DATEDIFF(CURDATE(), CASE WHEN b.status IN ('checked-out','cancelled') THEN b.check_out_date ELSE CURDATE() END)) AS days_outstanding
                 FROM bookings b WHERE b.amount_due > {$tol} AND " . rh_receivable_status_sql('room', 'b');
         }
@@ -88,11 +96,27 @@ if (!function_exists('rh_receivable_rows')) {
         foreach ($queries as $srcName => $sql) {
             try {
                 foreach ($pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) as $r) {
-                    $rows[] = [
+                    $row = [
                         'type' => (string)$r['type'], 'id' => (int)$r['id'], 'reference' => (string)($r['reference'] ?? ''),
                         'client' => (string)($r['client'] ?? ''), 'status' => (string)($r['status'] ?? ''), 'amount_paid' => round((float)($r['amount_paid'] ?? 0), 2), 'amount_due' => round((float)$r['amount_due'], 2),
                         'days_outstanding' => (int)$r['days_outstanding'], 'source' => (string)$r['type'],
+                        'payer' => 'guest', 'company_due' => 0.0, 'guest_due' => round((float)$r['amount_due'], 2), 'account_name' => '',
                     ];
+                    if ($billOn && $srcName === 'room' && ((int)($r['billing_account_id'] ?? 0) > 0 || (int)($r['primary_booking_id'] ?? 0) > 0)) {
+                        $sp = rh_booking_bill_split($pdo, (int)$r['id']);
+                        if (!empty($sp['on_account'])) {
+                            $tolR = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+                            $row['company_due'] = (float)$sp['company_due'];
+                            $row['guest_due'] = (float)$sp['guest_due'];
+                            $row['account_name'] = (string)$sp['name'];
+                            $row['payer'] = $sp['company_due'] > $tolR ? ($sp['guest_due'] > $tolR ? 'both' : 'company') : 'guest';
+                            if ($sp['company_due'] > $tolR) {
+                                $row['client'] = $sp['name'] . ' (guest: ' . $row['client'] . ')';
+                                $row['days_outstanding'] = (int)$sp['days_past_due'];
+                            }
+                        }
+                    }
+                    $rows[] = $row;
                 }
             } catch (Throwable $e) {
                 error_log('rh_receivable_rows ' . $srcName . ': ' . $e->getMessage());
@@ -195,6 +219,7 @@ if (!function_exists('rh_receivable_summary')) {
         $rows = rh_receivable_rows($pdo, $mods, $failed);
         $out = [
             'count' => 0, 'total' => 0.0, 'by_type' => [], 'rows' => $rows, 'failed' => $failed,
+            'company_total' => 0.0, // of the total: owed by companies on account (migration 084); the rest is guests / clients
             'buckets' => ['0-30' => ['count' => 0, 'amount' => 0.0], '31-60' => ['count' => 0, 'amount' => 0.0],
                           '61-90' => ['count' => 0, 'amount' => 0.0], '90+' => ['count' => 0, 'amount' => 0.0]],
         ];
@@ -209,8 +234,10 @@ if (!function_exists('rh_receivable_summary')) {
             $bk = $d <= 30 ? '0-30' : ($d <= 60 ? '31-60' : ($d <= 90 ? '61-90' : '90+'));
             $out['buckets'][$bk]['count']++;
             $out['buckets'][$bk]['amount'] += $r['amount_due'];
+            $out['company_total'] += (float)($r['company_due'] ?? 0);
         }
         $out['total'] = round($out['total'], 2);
+        $out['company_total'] = round($out['company_total'], 2);
         return $out;
     }
 }

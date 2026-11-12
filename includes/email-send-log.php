@@ -43,6 +43,8 @@ if (!function_exists('rh_email_kinds')) {
             'pre_arrival' => ['Before-arrival'],
             'post_stay_review' => ['After-stay review request'],
             'invoice' => ['Invoice'],
+            'company_statement' => ['Company account statement'],
+            'company_payment_advice' => ['Company payment received'],
             'receipt' => ['Receipt'],
             'credit_note' => ['Credit note'],
             'refund' => ['Refund notice'],

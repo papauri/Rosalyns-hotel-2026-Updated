@@ -25,6 +25,10 @@ $jobs = rh_scheduler_jobs();
 $timedReportJobs = ['daily_reports', 'station_reports'];
 $canTimedReports = hasPermission((int)$user['id'], 'timed_report_emails');
 $timedNote = 'Needs the Timed report emails permission';
+// Company statements (owner D6 2026-11-13): its switch and copy list need 'company_statement_emails'.
+$companyJobs = ['company_statements'];
+$canCompanyEmails = hasPermission((int)$user['id'], 'company_statement_emails');
+$companyNote = 'Needs the Company statement emails permission';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -106,6 +110,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     updateSetting('automated_job_station_reports_cc', $cleanList('automated_job_station_reports_cc', 'station report emails copy (CC)'));
                 }
             }
+            if ($canCompanyEmails && $posted('automated_job_company_statements_cc')) {
+                updateSetting('automated_job_company_statements_cc', $cleanList('automated_job_company_statements_cc', 'company statements copy (CC)'));
+            }
             // Only the switches this form showed are written: a form opened before a job existed never switches it off.
             // A form without the list predates 'station_reports' (2026-11-12), the only job added since.
             $shownJobs = isset($_POST['jobs_shown']) ? (array)$_POST['jobs_shown'] : array_diff(array_keys($jobs), ['station_reports']);
@@ -115,6 +122,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 if (!$canTimedReports && in_array($jobName, $timedReportJobs, true)) {
                     continue; // needs the Timed report emails permission: keep the stored switch
+                }
+                if (!$canCompanyEmails && in_array($jobName, $companyJobs, true)) {
+                    continue; // needs the Company statement emails permission: keep the stored switch
                 }
                 updateSetting($job['toggle'], $flag('job_' . $jobName));
             }
@@ -269,10 +279,15 @@ $editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_remin
             <h3>Jobs</h3>
             <div class="ae-grid">
                 <?php foreach ($jobs as $jobName => $job):
-                    $jobLocked = !$canTimedReports && in_array($jobName, $timedReportJobs, true); ?>
+                    $jobLocked = !$canTimedReports && in_array($jobName, $timedReportJobs, true);
+                    $jobLockNote = $timedNote;
+                    if (!$canCompanyEmails && in_array($jobName, $companyJobs, true)) {
+                        $jobLocked = true;
+                        $jobLockNote = $companyNote;
+                    } ?>
                     <input type="hidden" name="jobs_shown[]" value="<?php echo $esc($jobName); ?>">
                     <label class="ae-check"><input type="checkbox" name="job_<?php echo $esc($jobName); ?>" value="1" <?php echo rh_auto_job_enabled($jobName) ? 'checked' : ''; ?><?php echo $jobLocked ? ' disabled' : ''; ?>>
-                        <span><?php echo $esc($job['label']); ?><?php if ($jobLocked): ?><br><small class="help-text"><?php echo $esc($timedNote); ?></small><?php endif; ?></span></label>
+                        <span><?php echo $esc($job['label']); ?><?php if ($jobLocked): ?><br><small class="help-text"><?php echo $esc($jobLockNote); ?></small><?php endif; ?></span></label>
                 <?php endforeach; ?>
             </div>
             <p class="help-text">Tentative holds use the reminder hours from Hotel Settings. Pre-arrival, post-stay and gym renewal share the switches (and day settings) they always had in Hotel Settings / Gym Members. Daily station reports email sends the bookings, restaurant/till, accounting and stock reports once a day, soon after the trading day ends (next opening), to the End of Day report recipients. Station report emails send each station's Station Report (the same email as the Email button on that page) once a day per station, soon after that station's trading day ends (its next opening), to the "Station report emails go to" list (empty = End of Day report recipients). A station with no tickets that day gets no email.</p>
@@ -304,6 +319,9 @@ $editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_remin
                 <div class="form-group"><label for="stationcc">Copy (CC) on the station report emails</label>
                     <input type="text" id="stationcc" name="automated_job_station_reports_cc" class="form-control" value="<?php echo $esc(rh_auto_setting('automated_job_station_reports_cc')); ?>" placeholder="empty = no copy" autocomplete="off"<?php echo $canTimedReports ? '' : ' disabled'; ?>>
                     <p class="help-text">Shown openly as a copy on every station report email. Separate several addresses with commas. Not used on test sends.<?php echo $canTimedReports ? '' : ' ' . $esc($timedNote) . '.'; ?></p></div>
+                <div class="form-group"><label for="companycc">Copy (CC) on the company statements</label>
+                    <input type="text" id="companycc" name="automated_job_company_statements_cc" class="form-control" value="<?php echo $esc(rh_auto_setting('automated_job_company_statements_cc')); ?>" placeholder="empty = no copy" autocomplete="off"<?php echo $canCompanyEmails ? '' : ' disabled'; ?>>
+                    <p class="help-text">Company statements go once a week to each company with an overdue booking, at its billing email (plus the company's own copy list on Company accounts) and openly copied to these addresses. A company with no billing email gets nothing. The guest is never emailed for the company share.<?php echo $canCompanyEmails ? '' : ' ' . $esc($companyNote) . '.'; ?></p></div>
             </div>
             <label class="ae-check"><input type="checkbox" name="automated_email_bcc_hotel" value="1" <?php echo $cfg['automated_email_bcc_hotel'] === '1' ? 'checked' : ''; ?>>
                 <span>BCC the hotel (admin notification address) on payment and quotation reminders</span></label>

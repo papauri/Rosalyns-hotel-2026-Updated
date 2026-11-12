@@ -1009,12 +1009,25 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         . rh_inv_bank_terms_html($site_name, $email_address, $phone_number, !$isPaid)
         . rh_inv_closing_html('Thank you for choosing us.');
 
+    // On a company account (migration 084): addressed to the company, with the LPO and the due date; the guest is named.
+    $ivBill = null;
+    if (!empty($booking['id'])) {
+        if (!function_exists('rh_booking_billing') && is_file(__DIR__ . '/../includes/billing-accounts.php')) {
+            require_once __DIR__ . '/../includes/billing-accounts.php';
+        }
+        if (function_exists('rh_billing_ready') && rh_billing_ready($pdo)) {
+            $ivBill = rh_booking_billing($pdo, ['id' => (int)$booking['id']]);
+            if (empty($ivBill['on_account'])) {
+                $ivBill = null;
+            }
+        }
+    }
     $meta = [
         [$statementMode ? 'Statement No.' : 'Invoice No.', $invoice_number],
         ['Issued', date('d M Y')],
-        ['Billed to', (string)$booking['guest_name']],
+        ['Billed to', $ivBill ? $ivBill['name'] : (string)$booking['guest_name']],
         ['Booking ref', (string)$booking['booking_reference']],
-        ['Email', (string)($booking['guest_email'] ?? '')],
+        ['Email', $ivBill ? $ivBill['billing_email'] : (string)($booking['guest_email'] ?? '')],
         ['Check-in', date('d M Y', strtotime((string)$booking['check_in_date']))],
         ['Phone', (string)($booking['guest_phone'] ?? '')],
         ['Check-out', date('d M Y', strtotime((string)$booking['check_out_date']))],
@@ -1022,9 +1035,16 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         ['Nights', (string)(int)$booking['number_of_nights']],
         ['Guests', $guestCountStr],
     ];
+    if ($ivBill) {
+        $meta[] = ['Guest', (string)$booking['guest_name']];
+        $meta[] = ['LPO / order no.', $ivBill['reference'] !== '' ? $ivBill['reference'] : '-'];
+        $meta[] = ['Payment due', $ivBill['due_date'] !== '' ? date('d M Y', strtotime($ivBill['due_date'])) : '-'];
+        $meta[] = ['Company pays', $ivBill['covers'] === 'everything' ? 'Room stay and extras' : 'Room stay (extras are the guest\'s)'];
+    }
 
     return rh_pdf_document_shell($statementMode ? 'Stay Statement - paid in full' : 'Invoice', $meta, $body, [
-        'banner' => ['text' => $isPaid ? 'Paid in full' : 'Balance due', 'tone' => $isPaid ? 'neutral' : 'danger'],
+        'banner' => ['text' => $isPaid ? 'Paid in full' : ($ivBill ? 'On account - due ' . ($ivBill['due_date'] !== '' ? date('d M Y', strtotime($ivBill['due_date'])) : '') : 'Balance due'),
+            'tone' => $isPaid ? 'neutral' : 'danger'],
     ]);
 }
 /**
@@ -1504,6 +1524,27 @@ function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, arr
     $emailCtx = rh_email_context(['kind' => 'invoice'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_name, $email_from_email, $email_site_name, $email_site_url;
 
+    // A room booking on a company account (migration 084): the invoice goes to the company billing email (+ its CC),
+    // never to the guest. No billing email = not sent and logged.
+    if (!empty($booking['id']) && empty($booking['booking_type'] ?? null) && !empty($booking['room_id'])) {
+        if (!function_exists('rh_booking_billing') && is_file(__DIR__ . '/../includes/billing-accounts.php')) {
+            require_once __DIR__ . '/../includes/billing-accounts.php';
+        }
+        if (function_exists('rh_billing_ready') && rh_billing_ready($pdo)) {
+            $ibBill = rh_booking_billing($pdo, ['id' => (int)$booking['id']]);
+            if (!empty($ibBill['on_account'])) {
+                if ($ibBill['billing_email'] === '') {
+                    rh_email_send_log_not_sent('invoice', '', $ibBill['name'], rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null),
+                        'On company account and the company has no billing email');
+                    return ['success' => false, 'message' => 'Not sent: ' . $ibBill['name'] . ' has no billing email. Add one on Company accounts.'];
+                }
+                $booking['guest_email'] = $ibBill['billing_email'];
+                $booking['guest_name'] = $ibBill['name'];
+                $cc_recipients = array_values(array_unique(array_merge($cc_recipients, $ibBill['billing_cc'])));
+            }
+        }
+    }
+
     try {
         // Get room details
         $stmt = $pdo->prepare("SELECT * FROM rooms WHERE id = ?");
@@ -1945,6 +1986,83 @@ function generateAndSendFinalInvoice(int $booking_id, ?int $processed_by = null,
         // Send final invoice email
         $email_sent = false;
         $email_error = null;
+
+        // On a company account (migration 084, owner 2026-11-13): the invoice goes to the company's billing email (+ its
+        // CC), never to the guest. No billing email = not sent, logged, staff told to add one.
+        if (!function_exists('rh_booking_billing') && is_file(__DIR__ . '/../includes/billing-accounts.php')) {
+            require_once __DIR__ . '/../includes/billing-accounts.php';
+        }
+        $coBill = null;
+        if (function_exists('rh_billing_ready') && rh_billing_ready($pdo)) {
+            $coSt = $pdo->prepare("SELECT * FROM bookings WHERE id = ?");
+            $coSt->execute([$booking_id]);
+            $coRow = $coSt->fetch(PDO::FETCH_ASSOC) ?: [];
+            $coBill = rh_booking_billing($pdo, $coRow);
+            if (empty($coBill['on_account'])) {
+                $coBill = null;
+            }
+        }
+        if ($coBill !== null) {
+            if (!function_exists('logBookingEvent') && is_file(__DIR__ . '/../includes/booking-timeline.php')) {
+                require_once __DIR__ . '/../includes/booking-timeline.php';
+            }
+            $coSplit = rh_booking_bill_split($pdo, $booking_id);
+            $coWho = $coBill['name'] . ($coBill['reference'] !== '' ? ' (LPO ' . $coBill['reference'] . ')' : '');
+            $coResult = ['success' => false, 'message' => ''];
+            if ($coBill['billing_email'] === '') {
+                if (!function_exists('rh_email_send_log_not_sent')) {
+                    require_once __DIR__ . '/../includes/email-send-log.php';
+                }
+                rh_email_send_log_not_sent('invoice', '', $coBill['name'], rh_email_ctx_account('room', $booking_id, $booking['booking_reference'] ?? null),
+                    'On company account and the company has no billing email');
+                $coNote = 'Final invoice NOT sent: ' . $coBill['name'] . ' has no billing email. Add one on Company accounts, then send it from the booking.';
+            } else {
+                $coCc = array_filter(array_map('trim', explode(',', (string)getEmailSetting('invoice_recipients', ''))));
+                $coSmtp = (string)getEmailSetting('smtp_username', '');
+                if ($coSmtp !== '' && !in_array($coSmtp, $coCc, true)) {
+                    $coCc[] = $coSmtp;
+                }
+                $coCc = array_values(array_unique(array_merge($coCc, $coBill['billing_cc'])));
+                try {
+                    $coResult = sendFinalInvoiceEmail(array_merge($booking, ['guest_email' => $coBill['billing_email'], 'guest_name' => $coBill['name']]),
+                        $invoice_file, $coCc, $balanceDueAtCheckout);
+                } catch (Throwable $coEx) {
+                    $coResult = ['success' => false, 'message' => $coEx->getMessage()];
+                }
+                if (!empty($coResult['success'])) {
+                    $pdo->prepare("UPDATE bookings SET final_invoice_sent_at = NOW() WHERE id = ?")->execute([$booking_id]);
+                }
+                $coNote = !empty($coResult['success'])
+                    ? 'Final invoice emailed to ' . $coBill['name'] . ' (' . $coBill['billing_email'] . '), not to the guest.'
+                    : 'Final invoice email to ' . $coBill['name'] . ' failed: ' . (string)($coResult['message'] ?? 'unknown error') . '.';
+            }
+            if (function_exists('logBookingEvent')) {
+                logBookingEvent($booking_id, (string)($booking['booking_reference'] ?? ''), 'Checked out on company account', 'payment',
+                    'On account - ' . $coWho . ': company owes ' . rh_billing_money((float)$coSplit['company_due'])
+                    . ($coSplit['guest_due'] > BALANCE_TOLERANCE ? ', guest owes ' . rh_billing_money((float)$coSplit['guest_due']) : '')
+                    . ', due ' . ($coBill['due_date'] !== '' ? date('j M Y', strtotime($coBill['due_date'])) : '-') . '. ' . $coNote,
+                    null, number_format((float)$coSplit['company_due'], 2, '.', ''), 'admin', $processed_by, null,
+                    ['invoice_number' => $invoice_number, 'company' => $coBill['name'], 'company_due' => $coSplit['company_due'], 'guest_due' => $coSplit['guest_due'],
+                        'sent_to' => $coBill['billing_email']]);
+            }
+            if (function_exists('rh_log_event')) {
+                rh_log_event('bookings', 'info', 'Final invoice routed to company account', ['booking_id' => $booking_id, 'company' => $coBill['name'],
+                    'invoice' => $invoice_number, 'sent' => !empty($coResult['success']), 'by' => $processed_by]);
+            }
+            return [
+                'success' => true,
+                'message' => 'Final invoice generated. ' . $coNote,
+                'balance_due' => $balanceDueAtCheckout,
+                'invoice_file' => $invoice_file,
+                'invoice_number' => $invoice_number,
+                'invoice_path' => $invoice_path,
+                'email_sent' => !empty($coResult['success']),
+                'email_error' => empty($coResult['success']) ? ($coResult['message'] ?? null) : null,
+                'company' => $coBill['name'],
+                'staff_note' => $coNote,
+                'idempotent' => false
+            ];
+        }
 
         // Pay-later booking (Check in before payment): the guest gets the invoice only when staff ticked the box.
         $payLater = false;

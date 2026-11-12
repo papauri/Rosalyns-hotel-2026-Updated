@@ -5869,6 +5869,16 @@ function sendExtendStayEmail(array $booking, float $amount_delta = 0.0, string $
     $emailCtx = rh_email_context(['kind' => 'booking_extend_stay'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_email, $email_site_name;
 
+    // On a company account (migration 084): the guest is told the new dates only, never an amount to pay.
+    if (!empty($booking['id'])) {
+        if (!function_exists('rh_booking_billing') && is_file(__DIR__ . '/../includes/billing-accounts.php')) {
+            require_once __DIR__ . '/../includes/billing-accounts.php';
+        }
+        if (function_exists('rh_billing_ready') && rh_billing_ready($pdo) && !empty(rh_booking_billing($pdo, $booking)['on_account'])) {
+            $amount_delta = 0.0;
+        }
+    }
+
     try {
         $stmt = $pdo->prepare("SELECT * FROM rooms WHERE id = ?");
         $stmt->execute([$booking['room_id']]);

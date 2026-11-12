@@ -27,6 +27,7 @@ require_once __DIR__ . '/includes/bookings-list-filters.php'; // tab/date/paymen
 require_once __DIR__ . '/../includes/booking-created-by.php'; // "by …" under the Created date in the list
 require_once __DIR__ . '/../includes/late-stay.php'; // late check-in / leave-date choices: one quote for assess and settle
 require_once __DIR__ . '/../includes/stay-nights.php'; // add / take off nights: one quote for the review card and the save
+require_once __DIR__ . '/../includes/billing-accounts.php'; // company pays later (migration 084): who owes the balance
 $message = '';
 $error = '';
 $currency_symbol = (string)getSetting('currency_symbol', 'MWK');
@@ -109,6 +110,9 @@ function bookings_final_invoice_note(int $bookingId, int $userId, ?bool $emailGu
         // Balance owed -> final INVOICE; paid in full -> a paid STATEMENT (the guest already holds every receipt).
         $owed = (float)($inv['balance_due'] ?? 0) > BALANCE_TOLERANCE;
         $docName = $owed ? 'Final invoice' : 'Stay statement (paid in full)';
+        if (!empty($inv['staff_note']) && empty($inv['idempotent'])) {
+            return ' ' . (string)$inv['staff_note']; // on a company account: sent to the company billing email (or why not)
+        }
         if (!empty($inv['email_skipped']) && empty($inv['idempotent'])) {
             return ' ' . $docName . ' generated, not emailed to the guest (pay-later booking, box not ticked).';
         }
@@ -1758,6 +1762,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $assessBalFields['pay_later'] = !empty($abk['checkin_without_payment']);
             $assessBalFields['pay_later_note'] = $assessBalFields['pay_later'] ? trim((string)($abk['checkin_arrangement_note'] ?? '')) : '';
             $assessBalFields['guest_email_on_file'] = trim((string)($abk['guest_email'] ?? '')) !== '';
+            // On a company account (owner D2 2026-11-13): balance_due above is the guest's own share only; the company
+            // share stays on the account and the final invoice goes to the company billing email (no guest tick box).
+            $assessBalFields['company_due'] = (float)($assessBal['company_due'] ?? 0);
+            $assessBalFields['company_name'] = (string)($assessBal['company_name'] ?? '');
+            if ($assessBalFields['company_name'] !== '') {
+                $assessBalFields['pay_later'] = false;
+            }
             // The rate this stay was booked at Ã— its booked nights (shown in the checkout confirm / settlement).
             $assessRate = rh_booked_rate_line($abk, null, ['currency' => $currency_symbol]);
             $assessBalFields['booked_rate_text'] = $assessRate['ok'] ? $assessRate['text'] : '';
@@ -4100,7 +4111,16 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                             <?php if ($bk_left_text !== ''): ?>
                                                 <br><strong class="bk-left-to-pay"><span class="bk-left-to-pay__amt"><?php echo htmlspecialchars($currency_symbol . ' ' . number_format($bk_left_to_pay, 2)); ?></span> left to pay</strong>
                                             <?php endif; ?>
-                                            <?php if (!empty($booking['checkin_without_payment']) && in_array((string)$booking['status'], ['pending', 'tentative', 'confirmed', 'checked-in'], true)): ?>
+                                            <?php
+                                            // Company pays later (migration 084): the list says who owes the balance instead of a plain "Unpaid".
+                                            $bkBillLabel = '';
+                                            if (rh_billing_ready($pdo) && ((int)($booking['billing_account_id'] ?? 0) > 0 || (int)($booking['primary_booking_id'] ?? 0) > 0)) {
+                                                $bkBillLabel = rh_booking_pay_label(rh_booking_bill_split($pdo, (int)$booking['id']));
+                                            }
+                                            ?>
+                                            <?php if ($bkBillLabel !== ''): ?>
+                                                <br><small class="bk-arrangement-tag" title="<?php echo htmlspecialchars('Company pays later: the room stay is billed to the company, not chased from the guest and it does not block checkout.', ENT_QUOTES); ?>"><?php echo htmlspecialchars($bkBillLabel); ?></small>
+                                            <?php elseif (!empty($booking['checkin_without_payment']) && in_array((string)$booking['status'], ['pending', 'tentative', 'confirmed', 'checked-in'], true)): ?>
                                                 <br><small class="bk-arrangement-tag" title="<?php echo htmlspecialchars('May check in before paying' . (trim((string)($booking['checkin_arrangement_note'] ?? '')) !== '' ? ': ' . trim((string)$booking['checkin_arrangement_note']) : '') . '. The balance stays owed.', ENT_QUOTES); ?>">Pay-later arrangement</small>
                                             <?php endif; ?>
                                             <?php if ($booking['payment_reference']): ?>
@@ -5565,6 +5585,11 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 settlement.balance_due = parseFloat(assessResp.balance_due || 0);
                 settlement.can_override = !!assessResp.can_override;
                 settlement.booked_rate_text = String(assessResp.booked_rate_text || '');
+                // On a company account: what stays on the company's account (never blocks checkout, owner D2).
+                window._csOnAccount = !!assessResp.company_name;
+                window._csCompany = (assessResp.company_name && parseFloat(assessResp.company_due || 0) > 0.01)
+                    ? 'On account: ' + String(assessResp.company_name) + ' owes ' + fmt(assessResp.company_due) + '. It stays on the company account and the final invoice goes to the company billing email.'
+                    : '';
                 // Pay-later booking: an UNTICKED "Email the final invoice to the guest" box in the confirm (owner 2026-11-13).
                 window._csEmailBox = (assessResp.pay_later && assessResp.guest_email_on_file) ? {
                     label: 'Email the final invoice to the guest',
@@ -5593,6 +5618,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 if (owes) {
                     coDetails.unshift('OUTSTANDING BALANCE: ' + fmt(settlement.balance_due) + ' - checking out with this balance will be recorded in the booking timeline.');
                 }
+                if (window._csCompany) coDetails.unshift(window._csCompany);
                 const coEmailBox = window._csEmailBox || null;
                 const coAnswer = await confirmAdminActionWithCheck({
                     title: owes ? 'Check out with balance?' : 'Confirm checkout',
@@ -5725,8 +5751,10 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             const q = cur.q;
             const received = q.direction === 'charge' ? Math.max(0, parseFloat(document.getElementById('cs_amount_received').value || '0') || 0) : 0;
             let balanceAfter = due;
-            if (q.direction === 'charge') balanceAfter = Math.max(0, due + parseFloat(q.amount) - received);
-            if (q.direction === 'refund') balanceAfter = Math.max(0, due - parseFloat(q.amount));
+            // On a company account the room nights are the company's: extra / unused nights move the company share, not
+            // the guest's (the server re-checks the real split before checkout).
+            if (!window._csOnAccount && q.direction === 'charge') balanceAfter = Math.max(0, due + parseFloat(q.amount) - received);
+            if (!window._csOnAccount && q.direction === 'refund') balanceAfter = Math.max(0, due - parseFloat(q.amount));
             st.balanceAfter = balanceAfter;
             const rows = [
                 ['Nights', q.nights + ' night(s): ' + q.stay_text],
@@ -6007,6 +6035,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 csDetails.push(received > 0 ? 'Received now: ' + fmt(received) : 'Nothing received now: the extra nights stay on the bill as a balance.');
             }
             csDetails.push('This will mark the booking as checked out and update room status.');
+            if (window._csCompany) csDetails.unshift(window._csCompany);
             if (balanceAfter > 0.01 && csBal.can) {
                 csDetails.unshift('OUTSTANDING BALANCE after checkout: ' + fmt(balanceAfter) + ' - it stays owed and is recorded in the booking timeline.');
                 formData.set('confirm_checkout_with_balance', '1');

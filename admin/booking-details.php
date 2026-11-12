@@ -92,6 +92,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_bdNeed = rhBookingActionPermission((string)$_POST['charge_action']);
     } elseif (isset($_POST['checkin_arrangement_save'])) {
         $_bdNeed = 'edit_booking'; // pay-later check-in arrangement (owner 2026-11-12: anyone who can edit bookings)
+    } elseif (isset($_POST['billing_save'])) {
+        $_bdNeed = 'billing_on_account'; // Who pays: company account (owner 2026-11-13, migration 084)
     }
     if ($_bdNeed !== null && !hasPermission((int)($user['id'] ?? 0), $_bdNeed)) {
         $_bdMsg = 'You do not have permission to do that (' . (getAllPermissions()[$_bdNeed]['label'] ?? $_bdNeed) . ').';
@@ -499,6 +501,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['checkin_arrangement_s
     exit;
 }
 
+// Who pays: put the booking on a company account / take it off (owner 2026-11-13, migration 084; admin/includes/billing-panel.php).
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['billing_save'])) {
+    require_once __DIR__ . '/includes/billing-panel.php';
+    rh_billing_panel_save($pdo, (int)$booking_id, $_POST, $user);
+    header('Location: booking-details.php?id=' . $booking_id);
+    exit;
+}
+
 // Handle status changes (POST-only)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
     $action = $_POST['booking_action'];
@@ -747,7 +757,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                             if (!$invoice_result['idempotent']) {
                                 $checkout_message .= ' Final invoice generated.';
                             }
-                            if (!empty($invoice_result['email_skipped'])) {
+                            if (!empty($invoice_result['staff_note'])) {
+                                $checkout_message .= ' ' . (string)$invoice_result['staff_note']; // company account: sent to the company (or why not)
+                            } elseif (!empty($invoice_result['email_skipped'])) {
                                 $checkout_message .= ' The final invoice was not emailed to the guest (pay-later booking, box not ticked).';
                             } elseif (!$invoice_result['email_sent']) {
                                 $checkout_message .= ' Note: Final invoice email could not be sent.';
@@ -1678,6 +1690,14 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     </p>
                 <?php elseif ($booking['status'] == 'checked-in'):
                     $co_balance = round(max(0.0, (float)($folio_summary['balance_due'] ?? ($booking['amount_due'] ?? 0))), 2);
+                    // On a company account (owner D2 2026-11-13): only the guest's own share gates checkout.
+                    require_once __DIR__ . '/../includes/billing-accounts.php';
+                    if (rh_billing_ready($pdo) && $co_balance > BALANCE_TOLERANCE) {
+                        $co_split = rh_booking_bill_split($pdo, (int)$booking_id);
+                        if (!empty($co_split['on_account'])) {
+                            $co_balance = round(max(0.0, $co_balance - (float)$co_split['company_due']), 2);
+                        }
+                    }
                     $co_has_balance = $co_balance > BALANCE_TOLERANCE;
                     $co_can_override = $co_has_balance && hasPermission((int)($user['id'] ?? 0), 'checkout_with_balance');
                     $co_confirm_text = $co_can_override
@@ -1850,6 +1870,10 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 <span><strong>Pay-later arrangement:</strong> this guest may be checked in before paying<?php echo $bd_arr_note !== '' ? ' (' . htmlspecialchars($bd_arr_note) . ')' : ''; ?>. The balance stays owed.</span>
             </div>
         <?php endif; ?>
+
+        <?php // Who pays (company account, migration 084): hidden until the update has run.
+        require_once __DIR__ . '/includes/billing-panel.php';
+        rh_billing_panel_render($pdo, $booking, $user, (string)$csrf_token); ?>
 
         <?php
         // A clean bookings row for the "how this total is worked out" popup: the page query above joins payments, whose

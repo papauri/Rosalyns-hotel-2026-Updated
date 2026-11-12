@@ -1,6 +1,6 @@
 # Company pays later (on account / LPO) + nights instead of amounts — design
 
-Status: DESIGN ONLY (dept-accounting-lead, 2026-11-13). FEATURE (owner asked in so many words). Nothing built.
+Status (2026-11-13): Phase 1 SHIPPED (Rosalyn's ebf7e9f, Liwonde 20755de). Phase 2 BUILT, not committed: migration 084 applied at Liwonde only; Rosalyn's after QA (orchestrator). Remaining LATER items are in BUILD_PLAN.md.
 Owner ask (verbatim in TASKS): payment type for people paying later through their company; "+1 night" / "take off
 nights" instead of typing amounts; amounts more guarded than one click.
 Real case: RBH2026461210 VICTORIA NYAHODA (id 2100008835), checked-in 10→12 Nov, 900,600.00, paid 0,

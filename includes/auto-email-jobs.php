@@ -272,6 +272,70 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
 
     /* ── job: overdue payment reminders ──────────────────────────────── */
 
+    /**
+     * Company statements (owner D6 2026-11-13, migration 084): once a week per company (stage = ISO week), its account
+     * statement to the company billing email (+ the company CC + automated_job_company_statements_cc) while at least one
+     * of its bookings is past its due date. A company with no billing email is skipped and logged (never sent anywhere
+     * else). Off by default (rh_scheduler_jobs). The guest is never emailed by this job.
+     */
+    function rh_job_company_statements(PDO $pdo, array $o = []): array
+    {
+        $res = ['checked' => 0, 'sent' => 0, 'skipped' => 0, 'errors' => []];
+        if (!function_exists('rh_billing_ready')) {
+            require_once __DIR__ . '/billing-accounts.php';
+        }
+        if (!rh_billing_ready($pdo)) {
+            return $res;
+        }
+        $job = 'company_statements';
+        $stage = (!empty($o['test_mode']) ? 'test:' : '') . 'w' . date('oW');
+        $cc = rh_billing_email_list((string)rh_auto_setting('automated_job_company_statements_cc'));
+        foreach (rh_billing_accounts($pdo, true) as $acc) {
+            if (!rh_scheduler_budget_ok()) {
+                $res['deferred'] = true;
+                break;
+            }
+            $res['checked']++;
+            $t = rh_billing_account_totals($pdo, (int)$acc['id']);
+            if ($t['overdue'] <= BALANCE_TOLERANCE) {
+                $res['skipped']++;
+                continue;
+            }
+            $to = (string)(rh_billing_email_list((string)($acc['billing_email'] ?? ''))[0] ?? '');
+            if ($to === '') {
+                rh_auto_log_skip($pdo, $job, 'company', (int)$acc['id'], $stage, 'no billing email');
+                $res['skipped']++;
+                continue;
+            }
+            // Test mode: the statement goes only to the test address, no copies (rh_billing_send_pdf applies the same rule).
+            $route = rh_billing_mail_route($to, $cc, 'Account statement - ' . $acc['name'], rh_billing_test_recipient());
+            if (!$route['send']) {
+                rh_auto_log_skip($pdo, $job, 'company', (int)$acc['id'], $stage, $route['note']);
+                $res['skipped']++;
+                continue;
+            }
+            if (!rh_auto_log_claim($pdo, $job, 'company', (int)$acc['id'], $stage, $route['to'], $route['subject'])) {
+                $res['skipped']++;
+                continue;
+            }
+            try {
+                rh_scheduler_budget_spend();
+                $r = rh_billing_send_statement($pdo, (int)$acc['id'], $cc);
+                if (!empty($r['success'])) {
+                    rh_auto_log_finish($pdo, $job, 'company', (int)$acc['id'], $stage, 'sent');
+                    $res['sent']++;
+                } else {
+                    rh_auto_log_finish($pdo, $job, 'company', (int)$acc['id'], $stage, 'failed', (string)$r['message']);
+                    $res['errors'][] = $acc['name'] . ': ' . $r['message'];
+                }
+            } catch (Throwable $e) {
+                rh_auto_log_finish($pdo, $job, 'company', (int)$acc['id'], $stage, 'failed', $e->getMessage());
+                $res['errors'][] = $acc['name'] . ': ' . $e->getMessage();
+            }
+        }
+        return $res;
+    }
+
     function rh_job_overdue_payment_reminders(PDO $pdo, array $o = []): array
     {
         $res = ['checked' => 0, 'sent' => 0, 'skipped' => 0, 'errors' => []];

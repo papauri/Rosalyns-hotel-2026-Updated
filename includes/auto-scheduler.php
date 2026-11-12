@@ -56,6 +56,10 @@ if (!function_exists('rh_auto_defaults')) {
             // Station report emails (owner 2026-11-12): To, empty = End of Day report recipients; visible copy (CC) like the daily reports.
             'automated_job_station_reports_to'  => '',
             'automated_job_station_reports_cc'  => 'info@promanaged-it.com',
+            // Company statements (owner D6 2026-11-13): OFF until switched on; the statement goes to each company's billing
+            // email (+ its own CC) and this visible copy list. Needs migration 084.
+            'automated_job_company_statements'    => '0',
+            'automated_job_company_statements_cc' => '',
             'scheduler_last_run'                => '0',
             'scheduler_last_result'             => '',
         ];
@@ -154,6 +158,13 @@ if (!function_exists('rh_auto_defaults')) {
             'station_reports' => [
                 'label' => 'Station report emails (kitchen / bar / coffee bar)', 'fn' => 'rh_job_station_reports',
                 'toggle' => 'automated_job_station_reports', 'toggle_default' => '1', 'interval' => 60, 'legacy' => false, 'bcc' => 'global',
+            ],
+            // Company pays later (owner D6 2026-11-13): once a week per company, its statement to the company billing
+            // email while it has an overdue booking. OFF by default; the switch and copy list need 'company_statement_emails'.
+            // The guest is never chased for the company share (the overdue reminders leave on-account bookings out).
+            'company_statements' => [
+                'label' => 'Company statements (overdue company accounts)', 'fn' => 'rh_job_company_statements',
+                'toggle' => 'automated_job_company_statements', 'toggle_default' => '0', 'interval' => 360, 'legacy' => false, 'bcc' => 'global',
             ],
             // Last on purpose: a backup can take a while, so every email job runs first.
             'nightly_backup' => [

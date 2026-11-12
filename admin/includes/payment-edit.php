@@ -56,6 +56,10 @@ if (!function_exists('rh_payment_edit_refusal')) {
         if ((string)($p['booking_type'] ?? '') !== 'room') {
             return 'Only room booking payments can be edited for now. Correct this one with a refund or a credit note.';
         }
+        if (!empty($p['_company_leg'])) {
+            // Part of a company payment split across bookings (migration 084): editing one line would break the split.
+            return 'This is part of a company payment split across bookings. Refund it and record the company payment again on Company accounts.';
+        }
         if ((string)($p['payment_method'] ?? '') === 'credit_note' || !empty($p['credit_note_id'])) {
             return 'This payment came from a credit note. Change or void the credit note on Credit Notes instead.';
         }
@@ -173,6 +177,10 @@ if (!function_exists('rh_payment_edit_apply')) {
             if (!$first) {
                 throw new Exception('Payment not found.');
             }
+            if (!function_exists('rh_billing_payment_is_company_leg')) {
+                require_once __DIR__ . '/../../includes/billing-accounts.php';
+            }
+            $first['_company_leg'] = rh_billing_payment_is_company_leg($pdo, (int)$first['id']);
             if (($refusal = rh_payment_edit_refusal($first)) !== null) {
                 throw new Exception($refusal);
             }

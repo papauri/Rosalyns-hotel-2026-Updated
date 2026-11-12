@@ -251,11 +251,14 @@ if (!function_exists('rh_eod_outstanding_split')) {
     {
         require_once __DIR__ . '/receivables.php';
         $failed = [];
-        $out = ['folio' => 0.0, 'accounts' => 0.0, 'tabs' => 0.0, 'total' => 0.0, 'failed' => false];
+        // 'company': part of 'folio' owed by companies on account (migration 084); never added to the total again.
+        $out = ['folio' => 0.0, 'accounts' => 0.0, 'tabs' => 0.0, 'total' => 0.0, 'failed' => false, 'company' => 0.0];
         foreach (rh_receivable_rows($pdo, $mods, $failed) as $r) {
             $k = $r['type'] === 'room' ? 'folio' : (in_array($r['type'], ['conference', 'event', 'gym'], true) ? 'accounts' : 'tabs');
             $out[$k] += $r['amount_due'];
+            $out['company'] += (float)($r['company_due'] ?? 0);
         }
+        $out['company'] = round($out['company'], 2);
         foreach (['folio', 'accounts', 'tabs'] as $k) { $out[$k] = round($out[$k], 2); }
         $out['total'] = round($out['folio'] + $out['accounts'] + $out['tabs'], 2);
         $out['failed'] = !empty($failed);

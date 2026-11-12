@@ -109,6 +109,13 @@ $checks[] = ['WARN', 'Items in more than one open opening stock count',
       WHERE c.is_opening = 1 AND c.status IN ('draft','submitted') GROUP BY l.ingredient_id HAVING COUNT(DISTINCT c.id) > 1"];
 $checks[] = ['WARN', 'User permissions whose user is missing',
     "SELECT x.id FROM user_permissions x LEFT JOIN admin_users u ON u.id = x.user_id WHERE u.id IS NULL"];
+// Company pays later (migration 084): money rows are KEEP, so these only flag a broken link (tables missing = skipped).
+$checks[] = ['WARN', 'Company payment lines whose payment or booking is missing',
+    "SELECT l.id FROM billing_remittance_lines l LEFT JOIN payments p ON p.id = l.payment_id LEFT JOIN bookings b ON b.id = l.booking_id WHERE p.id IS NULL OR b.id IS NULL"];
+$checks[] = ['WARN', 'Company payments whose company is missing',
+    "SELECT r.id FROM billing_remittances r LEFT JOIN billing_accounts a ON a.id = r.billing_account_id WHERE a.id IS NULL"];
+$checks[] = ['WARN', 'Bookings on a company account that no longer exists',
+    "SELECT b.id FROM bookings b LEFT JOIN billing_accounts a ON a.id = b.billing_account_id WHERE b.billing_account_id IS NOT NULL AND a.id IS NULL"];
 
 $fail = 0;
 $warn = 0;

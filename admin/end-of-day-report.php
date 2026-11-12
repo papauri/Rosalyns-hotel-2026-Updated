@@ -322,6 +322,7 @@ try {
     $outstanding_accounts = $outSplit['accounts'];
     $outstanding_tabs = $outSplit['tabs'];
     $outstanding_failed = $outSplit['failed'];
+    $outstanding_company = (float)($outSplit['company'] ?? 0); // part of the folio figure: on company account (084)
 } catch (Throwable $e) {
     $outstanding_failed = true;
 }
@@ -1246,6 +1247,9 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                 <span class="ck-kpi__label">Still owed</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><?php echo $outstanding_failed ? 'Unavailable' : $money($unpaid_risk); ?></span>
                 <span class="ck-kpi__sub">Folio <?php echo $money($outstanding_folio); ?> &middot; accounts <?php echo $money($outstanding_accounts); ?> &middot; open tabs <?php echo $money($outstanding_tabs); ?> &middot; pending <?php echo $money($rev['pending']); ?></span>
+                <?php if (!$outstanding_failed && (float)($outstanding_company ?? 0) > BALANCE_TOLERANCE): ?>
+                    <span class="ck-kpi__sub" title="Part of the folio figure: what companies on account (LPO) still owe. No cash until they pay; the guests are not chased for it.">of which on company account <?php echo $money((float)$outstanding_company); ?></span>
+                <?php endif; ?>
             </a>
 
             <a class="ck-kpi <?php echo $scoreKpi; ?>" href="#eodAttn">

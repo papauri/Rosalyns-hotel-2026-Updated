@@ -405,7 +405,10 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
 }
 
 // Edit payment dialog: what it may do for this row (the server re-checks everything under the booking lock).
-$pdEditRefusal = rh_payment_edit_refusal($payment);
+if (!function_exists('rh_billing_payment_is_company_leg')) {
+    require_once __DIR__ . '/../includes/billing-accounts.php';
+}
+$pdEditRefusal = rh_payment_edit_refusal($payment + ['_company_leg' => rh_billing_payment_is_company_leg($pdo, (int)($payment['id'] ?? 0))]);
 if ($pdEditRefusal === null && !empty($booking) && in_array((string)($booking['status'] ?? ''), ['cancelled', 'no-show', 'expired'], true)) {
     $pdEditRefusal = 'The booking is ' . $booking['status'] . '.';
 }

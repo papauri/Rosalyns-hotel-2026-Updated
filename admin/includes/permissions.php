@@ -77,6 +77,9 @@ function getAllRoles()
                 'reports',
                 'booking_settings',
                 'timed_report_emails', // daily reports + station report emails: switches, To and CC (owner 2026-11-12; ASSUMPTION admin + manager)
+                'company_accounts', // company pays later (owner 2026-11-13): company list, statements, company payments
+                'billing_on_account', // put a booking on a company account
+                'company_statement_emails', // the timed company statement email: switch, CC
                 'visitor_analytics',
                 'backup_management',
                 'footer_management',
@@ -188,6 +191,8 @@ function getAllRoles()
                 'refund_payment',
                 'reports',
                 'bookings',
+                'company_accounts', // company pays later (owner 2026-11-13)
+                'billing_on_account',
                 // Dashboard money figures (owner 2026-11-11): finance team + administrators only. New keys reach existing
                 // accountants through this default; nobody has a saved row for them yet, so no backfill rows are needed.
                 'dashboard_takings',
@@ -1008,6 +1013,22 @@ function getAllPermissions()
             'page' => 'accounting-dashboard.php',
             'group' => 'payments_write'
         ],
+        'company_accounts' => [
+            'label' => 'Company accounts',
+            'description' => 'Companies that pay later (on account / LPO): their bookings, statements and the payments they send',
+            'icon' => 'fa-building',
+            'category' => 'Finance',
+            'page' => 'billing-accounts.php',
+            'group' => 'invoices'
+        ],
+        'billing_on_account' => [
+            'label' => 'Put bookings on a company account',
+            'description' => 'Choose the company that pays a booking later (LPO, due date, who pays extras). The company share is not chased from the guest and does not block checkout',
+            'icon' => 'fa-handshake',
+            'category' => 'Finance',
+            'page' => '', // not a page: the Who pays panel on Booking Details
+            'group' => 'invoices'
+        ],
         'invoices' => [
             'label' => 'Invoices',
             'description' => 'View and manage invoices',
@@ -1072,6 +1093,14 @@ function getAllPermissions()
             'icon' => 'fa-cog',
             'category' => 'Settings',
             'page' => 'booking-settings.php',
+            'group' => 'settings'
+        ],
+        'company_statement_emails' => [
+            'label' => 'Company statement emails',
+            'description' => 'Switch the timed company statement email on or off and choose who is copied (Settings > Automated Emails). The statement goes to each company billing email',
+            'icon' => 'fa-building',
+            'category' => 'Settings',
+            'page' => '', // not a page: the company statement switch and CC inside Automated Emails
             'group' => 'settings'
         ],
         'timed_report_emails' => [
@@ -2104,6 +2133,7 @@ function getPermissionForPage(string $page)
         'ajax-receipt.php' => 'receipts', // email/WhatsApp a receipt
         'invoices.php' => 'invoices',
         'credit-notes.php' => 'invoices',
+        'billing-accounts.php' => 'company_accounts',
         'payment-add.php' => 'payment_add',
         'payment-refund.php' => 'refund_payment',
         'edit-booking.php' => 'edit_booking',
@@ -2232,6 +2262,7 @@ function getModuleForPage(string $page)
         'receipts.php' => 'finance',
         'invoices.php' => ['finance', 'billing'],
         'credit-notes.php' => ['finance', 'advance_booking'],
+        'billing-accounts.php' => 'finance',
         'quotations.php' => ['finance', 'billing'],
         'gym-members.php' => 'gym',
         'gym-checkin.php' => 'gym',

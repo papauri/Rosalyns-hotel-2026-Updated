@@ -2830,19 +2830,29 @@ function rh_checkin_rule_select(string $alias = ''): string
 /**
  * SQL to append to a WHERE on bookings: leaves out bookings with an approved pay-later arrangement
  * (checkin_without_payment = 1) from the automatic payment chasers (unpaid-confirmed reminder / auto-release,
- * overdue balance reminders). '' when migration 083 has not run, so no query ever names a missing column.
+ * overdue balance reminders). A group member whose PRIMARY booking has the arrangement is left out too (the group
+ * is one arrangement). '' when migration 083 has not run, so no query ever names a missing column.
  * $present = null: probe the database (cached); true/false: forced (pure tests).
  */
 function rh_checkin_arrangement_exclude_sql(string $alias = 'b', ?bool $present = null): string
 {
+    // A booking on a company account (migration 084) is never chased either, even if its 083 switch was turned off.
+    $billing = '';
     if ($present === null) {
         $present = rh_checkin_arrangement_columns_present();
+        if (!function_exists('rh_billing_exclude_sql')) {
+            require_once __DIR__ . '/../includes/billing-accounts.php';
+        }
+        $billing = rh_billing_exclude_sql($alias);
     }
     if (!$present) {
-        return '';
+        return $billing;
     }
     $a = preg_replace('/[^A-Za-z0-9_]/', '', $alias);
-    return ' AND COALESCE(' . ($a !== '' ? $a . '.' : '') . 'checkin_without_payment, 0) = 0';
+    $outer = $a !== '' ? $a : 'bookings';
+    return ' AND COALESCE(' . ($a !== '' ? $a . '.' : '') . 'checkin_without_payment, 0) = 0'
+        . ' AND NOT EXISTS (SELECT 1 FROM bookings arr_pb WHERE arr_pb.id = ' . $outer . '.primary_booking_id AND COALESCE(arr_pb.checkin_without_payment, 0) = 1)'
+        . $billing;
 }
 
 /**
@@ -10298,7 +10308,27 @@ function evaluateCheckoutBalance(PDO $pdo, int $bookingId, ?int $userId, bool $o
     $st->execute([$bookingId]);
     $balance = round(max(0.0, (float)$st->fetchColumn()), 2);
 
-    $res = ['allowed' => true, 'balance' => $balance, 'override' => false, 'needs_confirm' => false, 'can_override' => false, 'message' => ''];
+    // Company pays later (owner D2 2026-11-13): the COMPANY share of an on-account booking never blocks checkout and
+    // needs no override; only the guest's own share (extras the company does not cover) does. 'balance' is the
+    // guest's share; company_due / company_name say what stays on the company account.
+    $companyDue = 0.0;
+    $companyName = '';
+    if ($balance > BALANCE_TOLERANCE) {
+        if (!function_exists('rh_booking_bill_split')) {
+            require_once __DIR__ . '/../includes/billing-accounts.php';
+        }
+        if (rh_billing_ready($pdo)) {
+            $sp = rh_booking_bill_split($pdo, $bookingId);
+            if (!empty($sp['on_account'])) {
+                $companyDue = (float)$sp['company_due'];
+                $companyName = (string)$sp['name'];
+                $balance = round(max(0.0, $balance - $companyDue), 2);
+            }
+        }
+    }
+
+    $res = ['allowed' => true, 'balance' => $balance, 'override' => false, 'needs_confirm' => false, 'can_override' => false, 'message' => '',
+        'company_due' => $companyDue, 'company_name' => $companyName];
     if ($balance <= BALANCE_TOLERANCE) {
         return $res;
     }

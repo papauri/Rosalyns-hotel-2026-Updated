@@ -70,6 +70,7 @@ function rh_admin_nav_groups(): array
             ['invoices.php',             'fas fa-file-invoice-dollar', 'Invoices',       'invoices',       '',               ['finance', 'billing']],
             ['quotations.php',           'fas fa-file-contract',       'Quotations',     'create_booking',       '',               ['finance', 'billing']],
             ['credit-notes.php',         'fas fa-file-invoice',        'Credit Notes',   'invoices',       '',               ['finance', 'advance_booking']],
+            ['billing-accounts.php',     'fas fa-building',            'Company Accounts', 'company_accounts', '',             'finance'],
             ['pos-accounting.php',       'fas fa-cash-register',       'POS Accounting', 'pos_accounting', 'color:#7E684B;', ['finance', 'pos']],
             ['end-of-day-report.php',    'fas fa-sun',                 'End of Day',     'reports',        'color:#8F6A35;', 'finance'],
             ['reports.php',              'fas fa-chart-bar',           'Reports',        'reports',        '',               'finance'],

@@ -123,8 +123,9 @@ ok('gate blocked', rh_checkin_payment_gate(['payment_status' => 'unpaid'] + $bas
 // 8. automatic payment chasers leave approved arrangements alone (includes/auto-email-jobs.php)
 eval(lift_function($src, 'rh_checkin_arrangement_exclude_sql') . "\n");
 ok('exclude SQL: columns missing -> nothing appended (today\'s behaviour)', rh_checkin_arrangement_exclude_sql('b', false) === '');
-ok('exclude SQL: columns present -> leaves out arrangements', rh_checkin_arrangement_exclude_sql('b', true) === ' AND COALESCE(b.checkin_without_payment, 0) = 0');
-ok('exclude SQL: alias is sanitised', rh_checkin_arrangement_exclude_sql("b; DROP", true) === ' AND COALESCE(bDROP.checkin_without_payment, 0) = 0');
+ok('exclude SQL: columns present -> leaves out arrangements (own switch, and a group member whose primary has it)', rh_checkin_arrangement_exclude_sql('b', true)
+    === ' AND COALESCE(b.checkin_without_payment, 0) = 0 AND NOT EXISTS (SELECT 1 FROM bookings arr_pb WHERE arr_pb.id = b.primary_booking_id AND COALESCE(arr_pb.checkin_without_payment, 0) = 1)');
+ok('exclude SQL: alias is sanitised', strpos(rh_checkin_arrangement_exclude_sql("b; DROP", true), ' AND COALESCE(bDROP.checkin_without_payment, 0) = 0 AND NOT EXISTS (SELECT 1 FROM bookings arr_pb WHERE arr_pb.id = bDROP.primary_booking_id') === 0);
 $GLOBALS['rh_test_settings'] = ['unpaid_confirmed_release_hours' => 48];
 if (!function_exists('getSetting')) { // declared here (not hoisted): in-memory stub, no DB
     function getSetting($k, $d = null) { return $GLOBALS['rh_test_settings'][$k] ?? $d; }
