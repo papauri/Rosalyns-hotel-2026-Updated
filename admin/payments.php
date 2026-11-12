@@ -494,8 +494,14 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
         <!-- KPI Strip -->
         <div class="ck-kpis ck-kpis--4">
             <?php /* Plain scope words for the filtered cards: the dates the list is showing. */
-            $payScopeWords = ($startDate || $endDate) ? (($startDate ? date('j M Y', strtotime($startDate)) : 'the start') . ' to ' . ($endDate ? date('j M Y', strtotime($endDate)) : 'today')) : 'all dates (no date filter)'; ?>
-            <div class="ck-kpi ck-kpi--good">
+            $payScopeWords = ($startDate || $endDate) ? (($startDate ? date('j M Y', strtotime($startDate)) : 'the start') . ' to ' . ($endDate ? date('j M Y', strtotime($endDate)) : 'today')) : 'all dates (no date filter)';
+            /* Each card opens the rows behind its figure (data-href, admin-main.js): Collected opens the breakdown below,
+               Still owed the accounts owing, Today today's payments, Refunds the refund rows paid out or being paid
+               (refund_status=completed,processing: payment_type 'refund', the same rule as the figure). */
+            $payCardOwedHref = 'payments.php?' . http_build_query(array_filter(['balance' => 'outstanding', 'booking_type' => $bookingType], static fn($v) => $v !== ''));
+            $payCardTodayHref = 'payments.php?' . http_build_query(['start_date' => $today, 'end_date' => $today]); // the figure ignores the other filters
+            $payCardRefundsHref = 'payments.php?' . http_build_query(array_merge($_GET, ['refund_status' => 'completed,processing', 'status' => null, 'page' => 1, 'balance' => null, 'export' => null])); ?>
+            <div class="ck-kpi ck-kpi--good" data-href="#payBreakdown" title="Open the breakdown by source, method and status">
                 <span class="ck-kpi__label">Collected (filtered)</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format($gross_collected_total, 0); ?></span>
                 <span class="ck-kpi__sub"><?php echo number_format((int)($kpi['txn_count'] ?? 0)); ?> txns · VAT <?php echo $currency_symbol . number_format((float)($kpi['vat_collected'] ?? 0), 0); ?></span>
@@ -503,7 +509,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
             </div>
             <?php /* Still owed: what accounts still have to pay (rh_receivable_rows above), NOT payment rows marked pending.
                      A part-paid booking's payments are recorded as received ('completed'), so only its balance shows the debt. */ ?>
-            <div class="ck-kpi ck-kpi--warn">
+            <div class="ck-kpi ck-kpi--warn" data-href="<?php echo htmlspecialchars($payCardOwedHref); ?>" title="Open the accounts that still owe">
                 <span class="ck-kpi__label">Still owed</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><?php if (!empty($outstandingFailed)): ?>Unavailable<?php else: ?><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format($outstandingTotal, 0); ?><?php endif; ?></span>
                 <span class="ck-kpi__sub"><?php echo number_format(count($outstandingRows)); ?> account<?php echo count($outstandingRows) === 1 ? '' : 's'; ?> owing<?php echo $bookingType !== '' ? ' (' . htmlspecialchars(rh_receivable_type_label($bookingType)) . ' only)' : ''; ?> ·
@@ -524,7 +530,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                 </span>
                 <?php endif; ?>
             </div>
-            <div class="ck-kpi">
+            <div class="ck-kpi" data-href="<?php echo htmlspecialchars($payCardTodayHref); ?>" title="Open today's payments">
                 <span class="ck-kpi__label">Today</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($period['today_collected'] ?? 0), 0); ?></span>
                 <span class="ck-kpi__sub">                    <?php echo number_format((int)($period['today_count'] ?? 0)); ?> today ·
@@ -533,7 +539,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                 </span>
                 <span class="ck-kpi__sub" style="margin-top:0">All payments, not affected by filters</span>
             </div>
-            <div class="ck-kpi ck-kpi--info">
+            <div class="ck-kpi ck-kpi--info" data-href="<?php echo htmlspecialchars($payCardRefundsHref); ?>" title="Open the refunds in this total">
                 <span class="ck-kpi__label">Refunds (filtered)</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($kpi['refunds_total'] ?? 0), 0); ?></span>
                 <span class="ck-kpi__sub"><?php echo number_format((int)($kpi['refunds_count'] ?? 0)); ?> refund<?php echo (int)($kpi['refunds_count'] ?? 0) === 1 ? '' : 's'; ?> paid out or being paid<?php if ((int)($kpi['refunds_pending_count'] ?? 0) > 0): ?> ·
@@ -556,7 +562,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
 
         <?php /* Source / method / status splits repeat the Accounting page, so they sit folded
                  above the ledger; the filters and the ledger itself come first. */ ?>
-        <details class="acct-breakdown-details">
+        <details class="acct-breakdown-details" id="payBreakdown">
             <summary class="acct-vat-details__summary"><i class="fas fa-chart-pie"></i> Breakdown by source, method and status</summary>
         <!-- Breakdown panels: source × method × status -->
         <div class="acct-grid acct-grid--2" style="margin-bottom: 18px;">

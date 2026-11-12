@@ -955,6 +955,39 @@
         });
         if (window.__adminCardKeyboardBound) return;
         window.__adminCardKeyboardBound = true;
+        // A card with data-href opens that page when clicked anywhere outside its own links and buttons.
+        // It clicks a real (temporary) link so the SPA loader and the land-on-results anchoring both apply.
+        document.addEventListener('click', function (event) {
+            const card = event.target && event.target.closest ? event.target.closest('.ck-kpi[data-href]') : null;
+            if (!card) return;
+            if (event.target.closest('a, button, input, select, textarea, label, summary, details')) return;
+            const href = card.getAttribute('data-href');
+            if (!href) return;
+            event.preventDefault();
+            // "#id": a section on this same page (a folded breakdown opens, then the page scrolls to it).
+            if (href.charAt(0) === '#') {
+                const target = document.getElementById(href.slice(1));
+                if (!target) return;
+                if (target.tagName === 'DETAILS') target.open = true;
+                if (window.rhAnchors && typeof window.rhAnchors.scrollToResults === 'function') {
+                    window.rhAnchors.scrollToResults(target); // does nothing when it is already in view
+                } else {
+                    target.scrollIntoView({ block: 'start' });
+                }
+                return;
+            }
+            if (event.ctrlKey || event.metaKey || event.shiftKey) {
+                window.open(href, '_blank', 'noopener');
+                return;
+            }
+            const link = document.createElement('a');
+            link.href = href;
+            link.hidden = true;
+            link.setAttribute('data-admin-loader-text', 'Opening ' + ((card.querySelector('.ck-kpi__label') || card).textContent || 'page').replace(/\s+/g, ' ').trim() + '...');
+            card.appendChild(link);
+            link.click();
+            if (link.parentNode) link.parentNode.removeChild(link);
+        });
         document.addEventListener('keydown', function (event) {
             if (event.key !== 'Enter' && event.key !== ' ') return;
             const card = event.target && event.target.closest ? event.target.closest('[data-kbd-card="1"]') : null;

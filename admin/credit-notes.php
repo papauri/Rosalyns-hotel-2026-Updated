@@ -158,7 +158,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 // ─────────────────────────────────────────────────────────────────────────────
 // FILTER PARAMS
 // ─────────────────────────────────────────────────────────────────────────────
-$filterStatus    = $_GET['status']     ?? 'all';
+$filterStatus    = is_string($_GET['status'] ?? null) && $_GET['status'] !== '' ? $_GET['status'] : 'all';
 $filterType      = $_GET['type']       ?? 'all';
 
 // Module flags — gate booking-type pickers/filters by the active preset.
@@ -178,7 +178,16 @@ $offset          = ($page - 1) * $limit;
 $where   = [];
 $params  = [];
 
-if ($filterStatus !== 'all') {
+// Card views (the rows behind each figure card): 'issued' = every note except voided (Total Issued), 'open' = active +
+// partly used (Still to use), 'redeemed' = notes with credit already used (Total Redeemed). Fixed SQL, no user text.
+$cnCardViews = [
+    'issued'   => "cn.status <> 'voided'",
+    'open'     => "cn.status IN ('active','partially_applied')",
+    'redeemed' => 'cn.amount_used > 0',
+];
+if (isset($cnCardViews[$filterStatus])) {
+    $where[] = $cnCardViews[$filterStatus];
+} elseif ($filterStatus !== 'all') {
     $where[]  = 'cn.status = ?';
     $params[] = $filterStatus;
 }
@@ -490,25 +499,26 @@ $modalsHtml = ob_get_clean();
 
         <!-- KPI Strip -->
         <div class="ck-kpis ck-kpis--4">
-            <div class="ck-kpi ck-kpi--good">
+            <?php /* Each card opens the notes behind its figure, keeping the other filters (data-href, admin-main.js). */ ?>
+            <div class="ck-kpi ck-kpi--good" data-href="<?php echo htmlspecialchars('credit-notes.php?' . http_build_query(array_merge($_GET, ['status' => 'issued', 'page' => null]))); ?>" title="Open the notes in this total">
                 <span class="ck-kpi__label">Total Issued</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currencySymbol); ?></span><?php echo number_format((float)($kpi['total_value'] ?? 0), 2); ?></span>
                 <span class="ck-kpi__sub"><?php echo (int)($kpi['total_issued'] ?? 0); ?> credit note<?php echo (int)($kpi['total_issued'] ?? 0) !== 1 ? 's' : ''; ?></span>
                 <span class="ck-kpi__sub" style="margin-top:0">The full value of every credit note written (voided notes left out), used or not</span>
             </div>
-            <div class="ck-kpi ck-kpi--good">
+            <div class="ck-kpi ck-kpi--good" data-href="<?php echo htmlspecialchars('credit-notes.php?' . http_build_query(array_merge($_GET, ['status' => 'redeemed', 'page' => null]))); ?>" title="Open the notes whose credit was used">
                 <span class="ck-kpi__label">Total Redeemed</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currencySymbol); ?></span><?php echo number_format((float)($kpi['total_redeemed'] ?? 0), 2); ?></span>
                 <span class="ck-kpi__sub">Applied to bookings</span>
                 <span class="ck-kpi__sub" style="margin-top:0">Credit already used to pay a booking (a refund of that booking puts it back on the note)</span>
             </div>
-            <div class="ck-kpi ck-kpi--warn">
+            <div class="ck-kpi ck-kpi--warn" data-href="<?php echo htmlspecialchars('credit-notes.php?' . http_build_query(array_merge($_GET, ['status' => 'open', 'page' => null]))); ?>" title="Open the notes with credit still to use">
                 <span class="ck-kpi__label">Still to use</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currencySymbol); ?></span><?php echo number_format((float)($kpi['total_outstanding'] ?? 0), 2); ?></span>
                 <span class="ck-kpi__sub"><?php echo (int)($kpi['count_active'] ?? 0) + (int)($kpi['count_partial'] ?? 0); ?> active</span>
                 <span class="ck-kpi__sub" style="margin-top:0">Credit guests can still spend: what is left on active and part-used notes. It equals Total issued until a note is used, voided or expires.</span>
             </div>
-            <div class="ck-kpi">
+            <div class="ck-kpi" data-href="<?php echo htmlspecialchars('credit-notes.php?' . http_build_query(array_merge($_GET, ['status' => 'all', 'page' => null]))); ?>" title="Open every note in every state">
                 <span class="ck-kpi__label">Status Breakdown</span>
                 <span class="ck-kpi__value"><?php echo (int)($kpi['count_active'] ?? 0); ?> <small>active</small></span>
                 <span class="ck-kpi__sub">
@@ -529,6 +539,9 @@ $modalsHtml = ob_get_clean();
                 <input type="text" name="search" class="filter-input" placeholder="Search CN#, guest name, email, booking ref..." value="<?php echo htmlspecialchars($search); ?>">
                 <select name="status" class="filter-select">
                     <option value="all" <?php if ($filterStatus === 'all') echo ' selected'; ?>>All Statuses</option>
+                    <option value="issued" <?php if ($filterStatus === 'issued') echo ' selected'; ?>>Issued (all but voided)</option>
+                    <option value="open" <?php if ($filterStatus === 'open') echo ' selected'; ?>>Still to use (active or part used)</option>
+                    <option value="redeemed" <?php if ($filterStatus === 'redeemed') echo ' selected'; ?>>Credit used (fully or partly)</option>
                     <option value="active" <?php if ($filterStatus === 'active') echo ' selected'; ?>>Active</option>
                     <option value="partially_applied" <?php if ($filterStatus === 'partially_applied') echo ' selected'; ?>>Partially Applied</option>
                     <option value="fully_applied" <?php if ($filterStatus === 'fully_applied') echo ' selected'; ?>>Fully Applied</option>

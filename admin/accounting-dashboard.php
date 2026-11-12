@@ -173,6 +173,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_vat_settings']))
     }
 }
 
+// Refunds card detail (its modal): the latest refund rows of the period, read below with the summary.
+$acctRefundRows = [];
+
 // Fetch accounting statistics
 try {
     // Overall financial summary with gross/net revenue calculation
@@ -190,6 +193,8 @@ try {
             COALESCE(SUM(CASE WHEN payment_status = 'refunded' THEN total_amount ELSE 0 END), 0) as total_refunded,
             COALESCE(SUM(CASE WHEN payment_status = 'cancelled' THEN total_amount ELSE 0 END), 0) as total_cancelled,
             " . rh_refund_pending_sum_sql() . " as pending_refunds,
+            " . rh_refund_settled_count_sql() . " as refunds_settled_count,
+            " . rh_refund_pending_count_sql() . " as refunds_pending_count,
             COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status = 'completed' THEN total_amount ELSE 0 END), 0) as completed_refunds
         FROM payments
         WHERE payment_date BETWEEN ? AND ?
@@ -197,6 +202,26 @@ try {
     ");
     $financialStmt->execute([$startDate, $endDate]);
     $financialSummary = $financialStmt->fetch(PDO::FETCH_ASSOC);
+
+    // The 10 latest refund rows of the same period (paid out, being paid or awaiting approval) for the Refunds modal.
+    // Read-only and on its own: a failure here only leaves the modal list empty.
+    try {
+        $acctRefundStmt = $pdo->prepare("
+            SELECT id, payment_reference, booking_reference, booking_type, payment_date, payment_method, refund_status,
+                   " . rh_refund_amount_sql() . " AS refund_total
+            FROM payments
+            WHERE payment_date BETWEEN ? AND ?
+              AND deleted_at IS NULL
+              AND ((" . rh_refund_settled_sql() . ") OR (" . rh_refund_pending_sql() . "))
+            ORDER BY payment_date DESC, id DESC
+            LIMIT 10
+        ");
+        $acctRefundStmt->execute([$startDate, $endDate]);
+        $acctRefundRows = $acctRefundStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    } catch (Throwable $e) {
+        error_log('[accounting-dashboard] refunds detail: ' . $e->getMessage());
+        $acctRefundRows = [];
+    }
 
     $balTol = BALANCE_TOLERANCE;
     if ($mod_bookings) {
@@ -929,6 +954,86 @@ if (!isset($folio_fnb)) {
             <div class="acct-insight-actions">
                 <a href="payments.php?start_date=<?php echo urlencode($today); ?>&end_date=<?php echo urlencode($today); ?>" class="acct-btn acct-btn--primary">Open today's payments</a>
                 <?php if ($mod_pos): ?><a href="pos-accounting.php" class="acct-btn acct-btn--ghost">Open POS accounting</a><?php endif; ?>
+            </div>
+        </template>
+
+        <template id="acct-insight-template-refunds">
+            <?php
+            $acctRfCount = (int)($financialSummary['refunds_settled_count'] ?? 0);
+            $acctRfPendingCount = (int)($financialSummary['refunds_pending_count'] ?? 0);
+            $acctRfCredit = round(max(0.0, $cat_refunds_to_credit), 2);
+            $acctRfCash = round(max(0.0, round($cat_refunds, 2) - $acctRfCredit), 2);
+            $acctRfListHref = 'payments.php?' . http_build_query(['start_date' => $startDate, 'end_date' => $endDate, 'refund_status' => 'completed,processing']);
+            $acctRfPendingHref = 'payments.php?' . http_build_query(['start_date' => $startDate, 'end_date' => $endDate, 'refund_status' => 'pending']);
+            $acctRfCanDetails = function_exists('rhCanLinkTo') && rhCanLinkTo((int)($user['id'] ?? 0), 'payment-details.php');
+            $acctRfCur = htmlspecialchars((string)$currency_symbol);
+            ?>
+            <p class="acct-insight-intro">Refunds <?php echo $showAll ? 'on all dates' : 'dated ' . htmlspecialchars(date('j M Y', strtotime($startDate)) . ' - ' . date('j M Y', strtotime($endDate))); ?>, VAT included. A refund counts once it is paid out or being paid; refunds awaiting approval are shown on their own and are not in the total.</p>
+            <table class="acct-insight-table">
+                <thead>
+                    <tr>
+                        <th>Refunds</th>
+                        <th class="num">Value</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><strong>Refunds total</strong> (<?php echo number_format($acctRfCount); ?> refund<?php echo $acctRfCount === 1 ? '' : 's'; ?>)</td>
+                        <td class="num"><strong><?php echo $acctRfCur . number_format($cat_refunds, 2); ?></strong></td>
+                    </tr>
+                    <tr>
+                        <td>Paid back in cash / bank</td>
+                        <td class="num"><?php echo $acctRfCur . number_format($acctRfCash, 2); ?></td>
+                    </tr>
+                    <tr>
+                        <td>Moved to credit notes (guest credit, no cash out)</td>
+                        <td class="num"><?php echo $acctRfCur . number_format($acctRfCredit, 2); ?></td>
+                    </tr>
+                    <tr>
+                        <td>Awaiting approval, not in the total (<?php echo number_format($acctRfPendingCount); ?>)</td>
+                        <td class="num"><?php echo $acctRfCur . number_format($cat_pending_refunds, 2); ?></td>
+                    </tr>
+                </tbody>
+            </table>
+            <?php if (!empty($acctRefundRows)): ?>
+            <p class="acct-insight-intro" style="margin-top:14px;">Latest <?php echo count($acctRefundRows); ?> refund<?php echo count($acctRefundRows) === 1 ? '' : 's'; ?> in these dates, newest first (awaiting approval included and marked):</p>
+            <table class="acct-insight-table">
+                <thead>
+                    <tr>
+                        <th>Date</th>
+                        <th>Reference</th>
+                        <th>Where it went</th>
+                        <th class="num">Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($acctRefundRows as $rf):
+                        $rfState = rh_pay_row_state(['payment_type' => 'refund', 'refund_status' => (string)($rf['refund_status'] ?? ''), 'payment_method' => (string)($rf['payment_method'] ?? '')], BALANCE_TOLERANCE);
+                        $rfId = (int)($rf['id'] ?? 0);
+                        $rfRef = (string)($rf['payment_reference'] ?? '');
+                        $rfRefText = $rfRef !== '' ? $rfRef : '#' . $rfId;
+                        $rfBooking = (string)($rf['booking_reference'] ?? '');
+                        $rfMethodKey = strtolower((string)($rf['payment_method'] ?? ''));
+                        $rfMethod = ucfirst(str_replace('_', ' ', $rfMethodKey));
+                    ?>
+                    <tr>
+                        <td><?php echo !empty($rf['payment_date']) ? htmlspecialchars(date('j M Y', strtotime((string)$rf['payment_date']))) : '-'; ?></td>
+                        <td>
+                            <?php if ($acctRfCanDetails && $rfId > 0): ?><a href="payment-details.php?id=<?php echo $rfId; ?>"><?php echo htmlspecialchars($rfRefText); ?></a><?php else: ?><?php echo htmlspecialchars($rfRefText); ?><?php endif; ?>
+                            <?php if ($rfBooking !== ''): ?><br><small><?php echo htmlspecialchars($rfBooking); ?></small><?php endif; ?>
+                        </td>
+                        <td><?php echo htmlspecialchars($rfState['label']); ?><?php if ($rfMethod !== '' && $rfMethodKey !== 'credit_note'): ?><br><small><?php echo htmlspecialchars($rfMethod); ?></small><?php endif; ?></td>
+                        <td class="num">-<?php echo $acctRfCur . number_format((float)($rf['refund_total'] ?? 0), 2); ?></td>
+                    </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+            <?php else: ?>
+            <p class="acct-insight-intro" style="margin-top:14px;">No refunds in these dates.</p>
+            <?php endif; ?>
+            <div class="acct-insight-actions">
+                <a href="<?php echo htmlspecialchars($acctRfListHref); ?>" class="acct-btn acct-btn--primary">Open these refunds in Payments</a>
+                <?php if ($cat_pending_refunds > BALANCE_TOLERANCE): ?><a href="<?php echo htmlspecialchars($acctRfPendingHref); ?>" class="acct-btn acct-btn--ghost">Open refunds awaiting approval</a><?php endif; ?>
             </div>
         </template>
 
@@ -1675,16 +1780,16 @@ if (!isset($folio_fnb)) {
                     <?php if (!empty($levyEnabled)): ?> &middot; <span title="Tourism levy on bookings taken in this period, after refunds, including levy on money kept from cancellations">Tourism levy <?php echo $ckPlain($cat_levy_period); ?></span><?php endif; ?>
                 </span>
             </div>
-            <a class="ck-kpi<?php echo $cat_pending_refunds > 0.01 ? ' ck-kpi--warn' : ''; ?>" href="<?php echo $cat_pending_refunds > 0.01 ? 'payments.php?refund_status=pending' : $ckH($periodPaymentsLink); ?>" title="Refunds issued in this period">
+            <div class="ck-kpi<?php echo $cat_pending_refunds > BALANCE_TOLERANCE ? ' ck-kpi--warn' : ''; ?> js-acct-insight-trigger" title="Refunds - open the detail: cash or bank, moved to credit notes, awaiting approval and the latest refunds" <?php echo $ckTrig('refunds', 'Refunds Detail'); ?> aria-label="Open refunds detail">
                 <span class="ck-kpi__icon"><i class="fas fa-rotate-left"></i></span>
                 <span class="ck-kpi__label">Refunds</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><?php echo $ckMoney($cat_refunds); ?></span>
                 <span class="ck-kpi__sub"><?php echo $cat_pending_refunds > BALANCE_TOLERANCE ? 'Awaiting approval ' . $ckPlain($cat_pending_refunds) . ' (not in the total)' : 'None awaiting approval'; ?></span>
                 <?php $catRefundSplit = rh_refund_split_text($cat_refunds, $cat_refunds_to_credit, (string)$currency_symbol, 2); if ($catRefundSplit !== ''): ?><span class="ck-kpi__sub" style="margin-top:0"><?php echo $ckH($catRefundSplit); ?></span><?php endif; ?>
                 <span class="ck-kpi__sub" style="margin-top:0"><?php echo $showAll ? 'Refunds on all dates' : 'Refunds dated ' . $ckH($periodLabel); ?> (VAT included): money paid back plus overpayments or store credit moved to a credit note. Payments shows the same rule for the dates it is filtered to (all dates when unfiltered).</span>
-            </a>
+            </div>
             <?php if ($mod_pos && $pos_gross > 0): ?>
-            <div class="ck-kpi<?php echo $pos_margin_pct < 0 ? ' ck-kpi--alert' : ''; ?>" title="POS gross margin - revenue minus recorded cost of goods">
+            <div class="ck-kpi<?php echo $pos_margin_pct < 0 ? ' ck-kpi--alert' : ''; ?>" title="POS gross margin - revenue minus recorded cost of goods"<?php if (function_exists('rhCanLinkTo') && rhCanLinkTo((int)($user['id'] ?? 0), 'pos-accounting.php')): ?> data-href="pos-accounting.php"<?php endif; ?>>
                 <span class="ck-kpi__icon"><i class="fas fa-cash-register"></i></span>
                 <span class="ck-kpi__label"><?php echo $ckH(rh_pos_short_label()); ?> margin</span>
                 <span class="ck-kpi__value"><?php echo number_format($pos_margin_pct, 1); ?><small>%</small></span>

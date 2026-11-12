@@ -504,12 +504,15 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
 
         <!-- KPI Strip -->
         <div class="ck-kpis ck-kpis--4">
-            <div class="ck-kpi ck-kpi--good">
+            <?php /* Each card opens the rows behind its figure (data-href, admin-main.js): Paid and Generated jump to the
+                     invoice list below (same filters); Outstanding and Refunded open Payments when the user may see it. */
+            $invCardRefundsHref = 'payments.php?' . http_build_query(array_filter(['refund_status' => 'completed,processing', 'booking_type' => $filter_type !== 'all' ? $filter_type : ''], static fn($v) => $v !== '')); ?>
+            <div class="ck-kpi ck-kpi--good" data-href="#invoiceList" title="Go to the invoice list">
                 <span class="ck-kpi__label">Paid &amp; Closed</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($invoiceKpi['paid_total'] ?? 0), 0); ?></span>
                 <span class="ck-kpi__sub"><?php echo number_format((int)($invoiceKpi['paid_count'] ?? 0)); ?> invoices · MTD <?php echo $currency_symbol . number_format((float)($invoiceKpi['mtd_collected'] ?? 0), 0); ?></span>
             </div>
-            <div class="ck-kpi ck-kpi--warn">
+            <div class="ck-kpi ck-kpi--warn"<?php if ($invCanPayments): ?> data-href="payments.php?balance=outstanding" title="Open the accounts owing"<?php endif; ?>>
                 <span class="ck-kpi__label">Outstanding</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo !empty($receivablesFailed) ? 'n/a' : number_format((float)($invoiceKpi['outstanding_total'] ?? 0), 0); ?></span>
                 <span class="ck-kpi__sub">                    <?php echo !empty($receivablesFailed) ? 'some accounts unreadable (System Logs)' : number_format((int)($invoiceKpi['outstanding_count'] ?? 0)) . ' awaiting'; ?><?php if ($invCanPayments): ?> ·
@@ -517,7 +520,7 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                 </span>
                 <span class="ck-kpi__sub" style="margin-top:0">All accounts owing, not affected by filters</span>
             </div>
-            <div class="ck-kpi">
+            <div class="ck-kpi" data-href="#invoiceList" title="Go to the invoice list">
                 <span class="ck-kpi__label">Generated</span>
                 <span class="ck-kpi__value"><?php echo number_format((int)($stats['invoices_generated'] ?? 0)); ?></span>
                 <span class="ck-kpi__sub">                    of <?php echo number_format((int)($stats['total_invoices'] ?? 0)); ?> ·
@@ -529,7 +532,7 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                     ?>
                 </span>
             </div>
-            <div class="ck-kpi ck-kpi--info">
+            <div class="ck-kpi ck-kpi--info"<?php if ($invCanPayments): ?> data-href="<?php echo htmlspecialchars($invCardRefundsHref); ?>" title="Open these refunds in Payments"<?php endif; ?>>
                 <span class="ck-kpi__label">Refunded / Credit</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($invoiceKpi['refunded_total'] ?? 0), 0); ?></span>
                 <span class="ck-kpi__sub"><?php echo number_format((int)($invoiceKpi['refunded_count'] ?? 0)); ?> refund<?php echo (int)($invoiceKpi['refunded_count'] ?? 0) === 1 ? '' : 's'; ?> paid or in progress</span>
@@ -707,7 +710,7 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
         <?php endif; ?>
 
         <!-- Invoices Table -->
-        <div class="invoices-table" data-rh-results>
+        <div class="invoices-table" id="invoiceList" data-rh-results>
             <?php if (!empty($invoices)): ?>
                 <div class="table-responsive">
                     <table>
