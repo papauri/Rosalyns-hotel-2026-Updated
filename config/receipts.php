@@ -254,7 +254,22 @@ if (!function_exists('receipt_hydrate_context')) {
         }
         $vatSplit = function_exists('rh_payment_vat_lines') ? rh_payment_vat_lines($pdo, $payment) : null;
 
+        // A payment corrected with "Edit payment" (admin/includes/payment-edit.php) keeps its receipt number; every copy
+        // printed or emailed afterwards says "Corrected receipt". The marker is the receipt_events row, so it survives
+        // every later regeneration of the PDF.
+        $correctedAt = '';
+        if ((string)($payment['payment_type'] ?? '') !== 'refund' && !empty($payment['id'])) {
+            try {
+                $cst = $pdo->prepare("SELECT MAX(created_at) FROM receipt_events WHERE payment_id = ? AND event_type = 'corrected'");
+                $cst->execute([(int)$payment['id']]);
+                $correctedAt = (string)($cst->fetchColumn() ?: '');
+            } catch (Throwable $e) {
+                $correctedAt = '';
+            }
+        }
+
         return [
+            'corrected_at' => $correctedAt,
             'vat_split' => $vatSplit,
             'guest_name' => $guestName,
             'guest_email' => $guestEmail,
@@ -406,6 +421,10 @@ if (!function_exists('receipt_build_pos_style_html_raw')) {
         $voidBanner = $isRefund
             ? '<div style="background:#fde7e9;border:2px solid #c82333;color:#721c24;padding:10px;text-align:center;font-weight:700;letter-spacing:2px;margin:0 0 12px;">REFUND</div>'
             : '';
+        if (!$isRefund && (string)($context['corrected_at'] ?? '') !== '') {
+            $voidBanner = '<div style="background:#F7F3EE;border:2px solid #8B7355;color:#5E554D;padding:10px;text-align:center;font-weight:700;letter-spacing:2px;margin:0 0 12px;">CORRECTED RECEIPT</div>'
+                . '<p style="margin:0 0 12px;text-align:center;font-size:12px;color:#5E554D;">This replaces the earlier copy of receipt ' . $receiptNumber . '. The amount below is the correct one.</p>';
+        }
 
         // Detail rows
         $details = '';
@@ -1166,8 +1185,12 @@ if (!function_exists('receipt_render_payment_pdf_html')) {
         $body .= rh_pdf_spacer(6) . '<table width="100%" cellpadding="4" cellspacing="0" border="0"><tr><td align="center" style="font-family:times;font-size:11pt;color:' . $t['muted_dark'] . ';">'
             . rh_pdf_e($footer) . '</td></tr></table>';
 
+        $isCorrected = !$isRefund && (string)($context['corrected_at'] ?? '') !== '';
+        if ($isCorrected) {
+            $body = rh_pdf_note('This corrected receipt replaces the earlier copy with the same number. The amount shown here is the correct one.') . rh_pdf_spacer(3) . $body;
+        }
         return rh_pdf_document_shell($isRefund ? 'Refund Receipt' : 'Payment Receipt', $meta, $body, [
-            'banner' => $isRefund ? ['text' => 'Refund', 'tone' => 'danger'] : null,
+            'banner' => $isRefund ? ['text' => 'Refund', 'tone' => 'danger'] : ($isCorrected ? ['text' => 'Corrected receipt', 'tone' => 'info'] : null),
         ]);
     }
 }

@@ -12,6 +12,7 @@ require_once 'includes/log-pager.php';      // rh_lp_page_size / rh_lp_size_pick
 
 $site_name = getSetting('site_name');
 $currency_symbol = getSetting('currency_symbol');
+$payPermEdit = hasPermission((int)($_SESSION['admin_user_id'] ?? 0), 'payment_edit'); // "Edit payment" on received payments (payment_edit)
 $conferenceFields = finance_conference_fields($pdo);
 
 // Module flags — gate structural UI (filter options, links) by the active
@@ -1005,8 +1006,11 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                     <?php
                                         $payWaPhone = !empty($payment['contact_phone']) ? preg_replace('/[^0-9]/', '', (string)$payment['contact_phone']) : '';
                                         $payCanRefund = in_array($payment['payment_status'], ['completed', 'paid'], true) && $payment['payment_type'] != 'refund';
-                                        $payCanEdit = !in_array($payment['payment_status'], ['completed', 'paid'], true);
-                                        $payHasMore = $payCanRefund || $payCanEdit || $payWaPhone !== '';
+                                        // Pending rows: the payment form. Received rows: "Edit payment" on the details page (payment_edit only).
+                                        $payCollected = in_array($payment['payment_status'], ['completed', 'paid', 'partially_refunded', 'refunded'], true);
+                                        $payCanEdit = !$payCollected && $payment['payment_type'] != 'refund';
+                                        $payCanCorrect = $payCollected && $payPermEdit && $payment['payment_type'] != 'refund' && (string)$payment['booking_type'] === 'room' && (string)$payment['payment_method'] !== 'credit_note';
+                                        $payHasMore = $payCanRefund || $payCanEdit || $payCanCorrect || $payWaPhone !== '';
                                     ?>
                                     <?php /* View, History + Invoice stay on the row; refund, edit and WhatsApp sit in the shared More menu. */ ?>
                                     <div class="quick-actions actions-row">
@@ -1029,6 +1033,8 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                             <div class="actions-more-menu">
                                                 <?php if ($payCanEdit): ?>
                                                     <a href="payment-add.php?edit=<?php echo $payment['id']; ?>"><i class="fas fa-edit"></i> Edit payment</a>
+                                                <?php elseif ($payCanCorrect): ?>
+                                                    <a href="payment-details.php?id=<?php echo (int)$payment['id']; ?>&amp;edit=1"><i class="fas fa-pen-to-square"></i> Edit payment</a>
                                                 <?php endif; ?>
                                                 <?php if ($payWaPhone !== ''): ?>
                                                     <a href="https://wa.me/<?php echo htmlspecialchars($payWaPhone); ?>?text=<?php echo urlencode('Hello, this is ' . $site_name . ' accounts. Payment reference: ' . $payment['payment_reference']); ?>" target="_blank" rel="noopener"><i class="fab fa-whatsapp"></i> WhatsApp guest</a>

@@ -952,6 +952,18 @@ function getAllPermissions()
             'page' => 'payment-refund.php',
             'group' => 'payments_write'
         ],
+        // Owner 2026-11-12: "Adjusting payment by admin or super admin or anyone with permission." On for administrators
+        // and super admins (they hold every key); in no other role's defaults, so anyone else needs it granted in
+        // Staff & Access > Permissions. Not a page: the Edit payment dialog on Payment details
+        // (admin/includes/payment-edit.php enforces it server-side).
+        'payment_edit' => [
+            'label' => 'Edit payments',
+            'description' => 'Correct a payment already taken on a room booking (amount, method, date, reference, notes) with a required reason. The booking balance, receipt and History follow the change. On for administrators; grant it to anyone else who may correct payments',
+            'icon' => 'fa-pen-to-square',
+            'category' => 'Finance',
+            'page' => '', // not a page: the Edit payment dialog on Payment details
+            'group' => 'payments_write'
+        ],
         // Dashboard figures (owner 2026-11-11): the business's money standing on the Dashboard. Not pages; by default
         // administrators and accountants only. Each card follows its own key so the owner can grant one at a time.
         'dashboard_takings' => [

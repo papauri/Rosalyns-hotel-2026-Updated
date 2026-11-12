@@ -604,6 +604,36 @@ if (!function_exists('rh_payment_vat_lines')) {
     }
 }
 
+if (!function_exists('rh_payment_api_edit_refusal')) {
+    /**
+     * Owner 2026-11-12: a RECEIVED payment's amount, method or date is corrected only by staff holding payment_edit
+     * (Payment details > Edit payment: reason, limits, History). An API key has no staff user, so the API may not
+     * change those three fields on a received payment; sending the stored value again is fine. Other fields (status
+     * of a pending row, reference, notes) are unaffected. Pure. Returns the refusal or null.
+     */
+    function rh_payment_api_edit_refusal(array $stored, array $input): ?string
+    {
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        if (!in_array((string)($stored['payment_status'] ?? ''), ['completed', 'paid', 'partially_refunded', 'refunded'], true)) {
+            return null;
+        }
+        $changed = [];
+        if (isset($input['payment_amount']) && abs(round((float)$input['payment_amount'], 2) - round((float)($stored['total_amount'] ?? 0), 2)) > $tol) {
+            $changed[] = 'amount';
+        }
+        if (isset($input['payment_method']) && (string)$input['payment_method'] !== (string)($stored['payment_method'] ?? '')) {
+            $changed[] = 'method';
+        }
+        if (isset($input['payment_date']) && substr((string)$input['payment_date'], 0, 10) !== substr((string)($stored['payment_date'] ?? ''), 0, 10)) {
+            $changed[] = 'date';
+        }
+        if (!$changed) {
+            return null;
+        }
+        return 'This payment was already received; its ' . implode(', ', $changed) . ' can only be corrected by staff with the Edit payments permission (Payment details > Edit payment), not through the API.';
+    }
+}
+
 if (!function_exists('rh_refund_leg_rate')) {
     /**
      * The VAT rate to STORE on a refund leg of $origPayment: the original payment's TRUE rate from
@@ -738,8 +768,9 @@ if (!function_exists('rh_payment_status_supported')) {
 if (!function_exists('rh_log_payment_audit')) {
     /**
      * Write payment_audit_log rows: one per changed field in $changes (field => [old, new]); money
-     * fields compare within BALANCE_TOLERANCE. With no $changes, one row for the action itself
-     * ($note as new_value; unused when there are changes). Call inside the caller's transaction; a logging failure never blocks
+     * fields compare within BALANCE_TOLERANCE. With no $changes, one row for the action itself ($note as new_value).
+     * With changes AND a $note (e.g. the reason for a payment edit), the note is one more row after them, so the
+     * History step shows it with the changes. Call inside the caller's transaction; a logging failure never blocks
      * the money action (it goes to the error log).
      */
     function rh_log_payment_audit(PDO $pdo, int $paymentId, ?string $paymentRef, string $action, array $changes, ?int $userId, string $userName, string $note = ''): int
@@ -758,6 +789,8 @@ if (!function_exists('rh_log_payment_audit')) {
         }
         if (!$changes) {
             $rows[] = [null, null, $note !== '' ? $note : null];
+        } elseif ($rows && $note !== '') {
+            $rows[] = [null, null, $note];
         }
         if (!$rows) {
             return 0;

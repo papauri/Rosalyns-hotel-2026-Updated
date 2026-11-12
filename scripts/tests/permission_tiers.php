@@ -75,6 +75,11 @@ eq(false, $r('manager', false, 'module_settings', true, $mgr, [], ['module_setti
 eq(true, $r('manager', false, 'booking_settings', null, $mgr, [], [], 1), 'manager keeps Hotel Settings by default');
 eq(false, $r('manager', false, 'booking_settings', false, $mgr, [], [], 1), 'a saved off row still removes a default');
 eq(true, $r('receptionist', false, 'refund_payment', true, $rcp, [], [], 1), 'a saved on row still adds an ordinary key');
+// payment_edit (owner 2026-11-12: "admin or super admin or anyone with permission"): on for administrators, grantable.
+check(!in_array('payment_edit', $A, true) && !in_array('payment_edit', $rcp, true) && !in_array('payment_edit', $mgr, true), 'payment_edit: not administrators-only, in no other role default');
+eq(true, $r('receptionist', false, 'payment_edit', true, $rcp, [], [], 1), 'payment_edit: a receptionist with the grant has it');
+eq(false, $r('receptionist', false, 'payment_edit', null, $rcp, [], [], 1), 'payment_edit: a receptionist without the grant does not');
+eq(true, $r('admin', false, 'payment_edit', null, [], [], [], 1), 'payment_edit: administrator has it by default');
 eq(true, $r('manager', false, 'view_only', true, $mgr, [], [], 1), 'view only ticked on a manager');
 eq(false, $r('manager', false, 'view_only', null, $mgr, [], [], 1), 'view only off by default');
 

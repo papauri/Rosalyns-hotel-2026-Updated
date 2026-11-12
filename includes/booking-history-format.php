@@ -204,7 +204,7 @@ if (!function_exists('rh_hist_tol')) {
         if ($f === 'room_id') {
             return (string)($ctx['room_types'][(int)$v] ?? ('Room type #' . (int)$v));
         }
-        if (in_array($f, ['status', 'payment_status', 'occupancy_type', 'payment_method', 'refund_status'], true)) {
+        if (in_array($f, ['status', 'payment_status', 'occupancy_type', 'payment_method', 'refund_status', 'payment_type'], true)) {
             return rh_hist_words((string)$v);
         }
         if (in_array($f, ['check_in_date', 'check_out_date', 'payment_date'], true) && strtotime((string)$v)) {

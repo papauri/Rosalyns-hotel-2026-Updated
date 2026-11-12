@@ -211,6 +211,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new Exception('You do not have permission to do that (' . (getAllPermissions()[$_bkNeed]['label'] ?? $_bkNeed) . ').');
         }
 
+        // Owner 2026-11-12: no one-click "mark paid" (it booked the whole balance as cash). The money icon opens the
+        // Record payment dialog (full or part, method, confirm), which posts to payment-add.php. A page loaded before
+        // this change still sends 'paid' here: refuse it, nothing is recorded.
+        if ($action === 'update_payment' && (string)($_POST['payment_status'] ?? '') === 'paid') {
+            throw new Exception('Nothing was recorded. Reload the page and use the money icon (Record payment) to enter the amount the guest paid and how.');
+        }
+
         if ($action === 'delete_booking' || $action === 'restore_booking') {
             // Recoverable delete / restore (permission delete_booking; see includes/booking-soft-delete.php).
             if (!isAjaxRequest()) {
@@ -4039,7 +4046,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                                 $bk_credit > BALANCE_TOLERANCE
                                                 || (in_array($bk_status, ['cancelled', 'no-show', 'expired'], true) && $bk_paid > BALANCE_TOLERANCE)
                                             );
-                                            // One-click "mark as paid" settles the FULL total, so only when nothing is paid yet.
+                                            // The money icon (Record payment dialog: full or part, method, confirm) only before anything is paid.
                                             $can_mark_paid = $_perm_pay && in_array($bk_status, ['pending', 'confirmed'], true)
                                                 && !in_array($booking['payment_status'], ['paid', 'partial', 'completed'], true);
                                             $can_modify = $bk_holding || $bk_inhouse;
@@ -4130,7 +4137,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
 
                                                 <?php /* ── Money ── */ ?>
                                                 <?php if ($can_mark_paid && $_perm_pay): ?>
-                                                    <button class="quick-action paid" title="Record payment as paid" aria-label="Record payment as paid" data-help="Record Payment as Paid|Mark the full outstanding balance as paid in one click. Only available before any payment has been recorded — use Payments &amp; balance in the More menu for part payments." onclick="updatePayment(<?php echo $bk_id; ?>, 'paid')">
+                                                    <button class="quick-action paid" title="Record payment" aria-label="Record payment" data-help="Record Payment|Opens a dialog: take the full balance or a part payment, choose how the guest paid, then confirm. Nothing is recorded until you confirm. Only shown before any payment has been recorded; after that use Payments &amp; balance in the More menu." onclick="rhQuickPayOpen(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, <?php echo $bk_guest_js; ?>, <?php echo htmlspecialchars(json_encode(round(max(0.0, $bk_due), 2)), ENT_QUOTES); ?>)">
                                                         <i class="fas fa-money-bill-wave"></i>
                                                     </button>
                                                 <?php endif; ?>
@@ -5959,6 +5966,144 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 'noshow'
             );
         }
+    </script>
+
+    <!-- Quick pay (owner 2026-11-12: full OR part payment, never one click). Posts to payment-add.php, the same path as
+         Payments > Add Payment (balance limit, VAT split, receipt email), then comes back to this list. -->
+    <div id="rhQuickPayModal" class="modal-overlay" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="rhQuickPayTitle">
+        <div class="modal-content" style="max-width:min(96vw,32rem);width:min(96vw,32rem);">
+            <div class="modal-header">
+                <h3 id="rhQuickPayTitle"><i class="fas fa-money-bill-wave"></i> Record payment</h3>
+                <button type="button" class="modal-close" aria-label="Close" onclick="rhQuickPayClose()">&times;</button>
+            </div>
+            <form method="POST" action="payment-add.php" id="rhQuickPayForm">
+                <div class="modal-body">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
+                    <input type="hidden" name="booking_type" value="room">
+                    <input type="hidden" name="booking_id" id="rhQpId" value="">
+                    <input type="hidden" name="payment_status" value="completed">
+                    <input type="hidden" name="payment_date" value="<?php echo htmlspecialchars(date('Y-m-d'), ENT_QUOTES); ?>">
+                    <input type="hidden" name="return_to" value="bookings">
+                    <input type="hidden" name="client_uuid" id="rhQpUuid" value="">
+                    <input type="hidden" name="payment_amount" id="rhQpAmount" value="">
+                    <p id="rhQpSummary" style="margin:0 0 12px;line-height:1.5;"></p>
+                    <div id="rhQpOwedWrap">
+                        <fieldset style="border:0;padding:0;margin:0 0 12px;">
+                            <legend style="font-weight:600;margin-bottom:6px;">How much did the guest pay? *</legend>
+                            <label style="display:flex;gap:8px;align-items:center;min-height:44px;cursor:pointer;">
+                                <input type="radio" name="rh_qp_kind" value="full" id="rhQpFull">
+                                <span id="rhQpFullLabel">The full balance</span>
+                            </label>
+                            <label style="display:flex;gap:8px;align-items:center;min-height:44px;cursor:pointer;">
+                                <input type="radio" name="rh_qp_kind" value="part" id="rhQpPart">
+                                <span>Part of it</span>
+                            </label>
+                            <div id="rhQpPartWrap" style="display:none;margin:4px 0 0 26px;">
+                                <label for="rhQpPartAmount" style="display:block;font-weight:600;margin-bottom:4px;">Amount received (<?php echo htmlspecialchars((string)getSetting('currency_symbol', 'MWK'), ENT_QUOTES); ?>) *</label>
+                                <input type="number" step="0.01" min="0.01" id="rhQpPartAmount" class="form-control" inputmode="decimal">
+                                <small id="rhQpPartHint" style="display:block;margin-top:4px;"></small>
+                            </div>
+                        </fieldset>
+                        <div class="form-group" style="margin-bottom:12px;">
+                            <label for="rhQpMethod" style="display:block;font-weight:600;margin-bottom:4px;">How did they pay? *</label>
+                            <select name="payment_method" id="rhQpMethod" class="form-control" required>
+                                <option value="">Choose...</option>
+                                <option value="cash">Cash</option>
+                                <option value="mobile_money">Mobile Money</option>
+                                <option value="bank_transfer">Bank Transfer</option>
+                                <option value="credit_card">Credit Card</option>
+                                <option value="debit_card">Debit Card</option>
+                                <option value="cheque">Cheque</option>
+                                <option value="other">Other</option>
+                            </select>
+                        </div>
+                        <div class="form-group" style="margin-bottom:4px;">
+                            <label for="rhQpRef" style="display:block;font-weight:600;margin-bottom:4px;">Transaction reference</label>
+                            <input type="text" name="transaction_reference" id="rhQpRef" class="form-control" maxlength="100" placeholder="Mobile money ID, bank ref, cheque no...">
+                        </div>
+                        <p id="rhQpConfirmText" style="margin:12px 0 0;font-weight:600;" aria-live="polite"></p>
+                    </div>
+                    <p id="rhQpNothing" style="display:none;margin:0;padding:10px 12px;background:#eef6ee;border:1px solid #bcd8bc;border-radius:6px;color:#1f5f2a;font-weight:600;">Nothing is owed on this booking.</p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="rhQuickPayClose()">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="rhQpSubmit" disabled><i class="fas fa-check"></i> Confirm payment</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <script>
+    (function () {
+        var cur = <?php echo json_encode((string)getSetting('currency_symbol', 'MWK'), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        var due = 0;
+        function el(id) { return document.getElementById(id); }
+        function fmt(n) { return cur + ' ' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+        function esc(s) { var d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
+        function newUuid() {
+            if (window.crypto && crypto.randomUUID) { return crypto.randomUUID(); }
+            return 'qp-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12);
+        }
+        function setOpen(open) {
+            var m = el('rhQuickPayModal');
+            if (typeof window.setBookingPageModalOpen === 'function') { window.setBookingPageModalOpen(m, open); return; }
+            m.style.display = open ? 'flex' : 'none';
+            m.setAttribute('aria-hidden', open ? 'false' : 'true');
+        }
+        // Works out the amount from the choice and only enables Confirm when amount and method are valid.
+        function sync() {
+            var kind = el('rhQpFull').checked ? 'full' : (el('rhQpPart').checked ? 'part' : '');
+            el('rhQpPartWrap').style.display = kind === 'part' ? '' : 'none';
+            el('rhQpPartAmount').required = kind === 'part';
+            var amt = 0, hint = '', ok = false;
+            if (kind === 'full') {
+                amt = due; ok = true;
+            } else if (kind === 'part') {
+                amt = Math.round(parseFloat(el('rhQpPartAmount').value || '0') * 100) / 100;
+                if (!(amt > 0)) { hint = 'Enter the amount the guest handed over.'; }
+                else if (amt > due + 0.009) { hint = 'That is more than the balance (' + fmt(due) + '). Choose the full balance, or record an overpayment from Payments.'; }
+                else { ok = true; hint = 'Still owed after this: ' + fmt(Math.max(0, due - amt)) + '.'; }
+            }
+            el('rhQpPartHint').textContent = hint;
+            el('rhQpPartHint').style.color = (kind === 'part' && !ok) ? '#b42318' : '';
+            var method = el('rhQpMethod').value;
+            var mLabel = method ? el('rhQpMethod').options[el('rhQpMethod').selectedIndex].text : '';
+            el('rhQpAmount').value = ok ? amt.toFixed(2) : '';
+            el('rhQpConfirmText').textContent = (ok && method)
+                ? 'You are recording ' + fmt(amt) + ' paid by ' + mLabel + (kind === 'full' ? ' (the full balance).' : ' (part payment).')
+                : '';
+            el('rhQpSubmit').disabled = !(ok && method);
+            el('rhQpSubmit').innerHTML = '<i class="fas fa-check"></i> ' + ((ok && method) ? 'Confirm ' + esc(fmt(amt)) : 'Confirm payment');
+        }
+        window.rhQuickPayOpen = function (id, ref, guest, balance) {
+            due = Math.max(0, Number(balance || 0));
+            el('rhQpId').value = id;
+            el('rhQpUuid').value = newUuid();
+            el('rhQpSummary').innerHTML = '<strong>' + esc(ref) + '</strong> &middot; ' + esc(guest) + '<br>Balance due: <strong>' + esc(fmt(due)) + '</strong>';
+            el('rhQpFullLabel').textContent = 'The full balance: ' + fmt(due);
+            el('rhQpFull').checked = false;
+            el('rhQpPart').checked = false;
+            el('rhQpPartAmount').value = '';
+            el('rhQpMethod').value = '';
+            el('rhQpRef').value = '';
+            var owed = due > 0.009;
+            el('rhQpOwedWrap').style.display = owed ? '' : 'none';
+            el('rhQpNothing').style.display = owed ? 'none' : '';
+            el('rhQpMethod').required = owed;
+            el('rhQpSubmit').style.display = owed ? '' : 'none';
+            sync();
+            setOpen(true);
+        };
+        window.rhQuickPayClose = function () { setOpen(false); };
+        ['rhQpFull', 'rhQpPart', 'rhQpMethod'].forEach(function (id) { el(id).addEventListener('change', sync); });
+        el('rhQpPartAmount').addEventListener('input', sync);
+        el('rhQuickPayForm').addEventListener('submit', function (ev) {
+            sync();
+            if (el('rhQpSubmit').disabled || !el('rhQpAmount').value) { ev.preventDefault(); return; }
+            el('rhQpSubmit').disabled = true; // one click, one payment
+            el('rhQpSubmit').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Recording...';
+        });
+        el('rhQuickPayModal').addEventListener('click', function (ev) { if (ev.target === this) { window.rhQuickPayClose(); } });
+    }());
     </script>
 
     <!-- Email Resend Modal -->

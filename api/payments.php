@@ -799,12 +799,17 @@ function updatePayment(PDO $pdo, int $paymentId)
     try {
         // Lock the payment row, then re-check refund state under the lock: a refund recorded
         // between the read above and this write must not be overwritten.
-        $lockPay = $pdo->prepare("SELECT payment_status, total_amount FROM payments WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
+        $lockPay = $pdo->prepare("SELECT payment_status, total_amount, payment_method, payment_date FROM payments WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
         $lockPay->execute([$paymentId]);
         $lockedPay = $lockPay->fetch(PDO::FETCH_ASSOC);
         if (!$lockedPay) {
             $pdo->rollBack();
             ApiResponse::error('Payment not found. It may have been deleted or does not exist.', 404);
+        }
+        // Owner 2026-11-12: a received payment's amount / method / date change only through Edit payment (payment_edit).
+        if (($apiEditRefusal = rh_payment_api_edit_refusal($lockedPay, $input)) !== null) {
+            $pdo->rollBack();
+            ApiResponse::error($apiEditRefusal, 403);
         }
         $apiRefundedStmt = $pdo->prepare("SELECT COALESCE(SUM(COALESCE(refund_amount, total_amount)), 0) FROM payments WHERE original_payment_id = ? AND payment_type = 'refund' AND deleted_at IS NULL AND refund_status IN ('pending','processing','completed')");
         $apiRefundedStmt->execute([$paymentId]);

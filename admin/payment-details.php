@@ -113,6 +113,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'settl
     exit;
 }
 
+// ── Edit payment (owner 2026-11-12): correct a payment already taken, with a reason ───────
+// payment_edit (administrators only) is checked here AND inside rh_payment_edit_apply(). One transaction with the
+// booking locked; documents, emails and logs follow after the commit (admin/includes/payment-edit.php).
+require_once __DIR__ . '/includes/payment-edit.php';
+$pdCanEditPayment = hasPermission((int)$user['id'], 'payment_edit');
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'edit_payment') {
+    if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
+        $_SESSION['alert'] = ['type' => 'error', 'message' => 'Security token invalid. Refresh and try again.'];
+        header('Location: payment-details.php?id=' . $paymentId);
+        exit;
+    }
+    if (!$pdCanEditPayment) {
+        $_SESSION['alert'] = ['type' => 'error', 'message' => 'You do not have permission to edit payments (Edit payments).'];
+        header('Location: payment-details.php?id=' . $paymentId);
+        exit;
+    }
+    try {
+        $editRes = rh_payment_edit_apply($pdo, $paymentId, [
+            'amount'                => (string)($_POST['edit_amount'] ?? ''),
+            'payment_method'        => (string)($_POST['edit_method'] ?? ''),
+            'payment_date'          => (string)($_POST['edit_date'] ?? ''),
+            'transaction_reference' => (string)($_POST['edit_reference'] ?? ''),
+            'notes'                 => (string)($_POST['edit_notes'] ?? ''),
+            'reason'                => (string)($_POST['edit_reason'] ?? ''),
+        ], $user);
+        $editNotice = rh_payment_edit_after($pdo, $editRes, !empty($_POST['edit_email_guest']), $user);
+        $editCur = (string)getSetting('currency_symbol', 'MWK');
+        $_SESSION['alert'] = ['type' => 'success', 'message' => htmlspecialchars('Payment ' . $editRes['payment_reference'] . ' updated: '
+            . rh_payment_edit_change_text($editRes['changes'], $editCur) . '. The booking now owes ' . $editCur . ' ' . number_format((float)$editRes['due_after'], 2) . '.'
+            . $editNotice, ENT_QUOTES, 'UTF-8')];
+    } catch (Throwable $editEx) {
+        $_SESSION['alert'] = ['type' => 'error', 'message' => 'The payment was not changed: ' . htmlspecialchars($editEx->getMessage(), ENT_QUOTES, 'UTF-8')];
+        header('Location: payment-details.php?id=' . $paymentId . '&edit=1');
+        exit;
+    }
+    header('Location: payment-details.php?id=' . $paymentId);
+    exit;
+}
+
 // Get booking details
 $bookingDetails = null;
 if ($payment['booking_type'] === 'room') {
@@ -364,6 +403,30 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
     $opStmt->execute([(int)$payment['original_payment_id']]);
     $originalPayment = $opStmt->fetch(PDO::FETCH_ASSOC) ?: null;
 }
+
+// Edit payment dialog: what it may do for this row (the server re-checks everything under the booking lock).
+$pdEditRefusal = rh_payment_edit_refusal($payment);
+if ($pdEditRefusal === null && !empty($booking) && in_array((string)($booking['status'] ?? ''), ['cancelled', 'no-show', 'expired'], true)) {
+    $pdEditRefusal = 'The booking is ' . $booking['status'] . '.';
+}
+$pdEdit = null;
+if ($pdCanEditPayment && $pdEditRefusal === null && !empty($booking)) {
+    $pdEditTotal = round((float)$payment['total_amount'], 2);
+    $pdEdit = [
+        'total'        => $pdEditTotal,
+        'refunded'     => rh_payment_edit_refunded_from($pdo, $paymentId),
+        // What the booking owed before this payment (stored figures; the save re-derives them from the ledger).
+        'owed_without' => round((float)($booking['amount_due'] ?? 0) - (float)($booking['credit_balance'] ?? 0) + $pdEditTotal, 2),
+        'date'         => substr((string)$payment['payment_date'], 0, 10),
+        'method'       => (string)$payment['payment_method'],
+        'reference'    => (string)($payment['transaction_reference_value'] ?? ''),
+        'notes'        => (string)($payment['notes'] ?? ''),
+        'type'         => (string)($payment['payment_type'] ?? ''),
+        'receipt'      => (string)($payment['receipt_number'] ?? ''),
+        'email'        => (string)($booking['guest_email'] ?? ''),
+        'today'        => date('Y-m-d'),
+    ];
+}
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -407,10 +470,15 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
                 </p>
             </div>
             <div class="rh-page-head__actions">
-                <?php if ($payment['payment_status'] !== 'completed' && !$pd_is_refund): ?>
+                <?php if (!in_array((string)$payment['payment_status'], ['completed', 'paid', 'partially_refunded', 'refunded'], true) && !$pd_is_refund): ?>
                     <a href="payment-add.php?edit=<?php echo $paymentId; ?>" class="btn btn--primary btn--sm">
                         <i class="fas fa-edit"></i> Edit
                     </a>
+                <?php endif; ?>
+                <?php if ($pdEdit !== null): ?>
+                    <button type="button" class="btn btn--primary btn--sm" onclick="pdOpenEditModal()" title="Correct the amount, method, date, reference or notes of this payment (a reason is required)">
+                        <i class="fas fa-pen-to-square"></i> Edit payment
+                    </button>
                 <?php endif; ?>
                 <?php if (in_array($payment['payment_status'], ['completed', 'paid', 'partially_refunded'], true) && !$pd_is_refund): ?>
                     <a href="payment-refund.php?id=<?php echo $paymentId; ?>" class="btn btn--secondary btn--sm">
@@ -755,6 +823,131 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
             </aside>
         </div>
     </div>
+
+    <?php if ($pdEdit !== null): $pdE = static function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }; ?>
+    <!-- Edit payment (payment_edit): correct a payment already taken, with a reason -->
+    <div class="modal-overlay" id="pdEditModal" aria-hidden="true" style="display:none;">
+        <div class="modal-content pd-receipt-dialog" role="dialog" aria-modal="true" aria-labelledby="pdEditTitle" style="max-width:min(96vw,36rem);width:min(96vw,36rem);">
+            <div class="modal-header">
+                <div>
+                    <h3 id="pdEditTitle"><i class="fas fa-pen-to-square"></i> Edit payment</h3>
+                    <div class="pd-receipt-ref"><?php echo $pdE($payment['payment_reference']); ?><?php echo $pdEdit['receipt'] !== '' ? ' &middot; receipt ' . $pdE($pdEdit['receipt']) : ''; ?></div>
+                </div>
+                <button type="button" class="modal-close" aria-label="Close" onclick="pdCloseEditModal()">&times;</button>
+            </div>
+            <form method="POST" action="payment-details.php?id=<?php echo (int)$paymentId; ?>" id="pdEditForm"
+                data-admin-confirm="Save this correction to payment <?php echo $pdE($payment['payment_reference']); ?>? The booking balance, receipt and History will follow it."
+                data-admin-confirm-title="Edit payment" data-admin-confirm-ok="Save correction" data-admin-confirm-icon="fa-pen-to-square">
+                <div class="modal-body">
+                    <input type="hidden" name="csrf_token" value="<?php echo $pdE($csrf_token ?? generateCsrfToken()); ?>">
+                    <input type="hidden" name="action" value="edit_payment">
+                    <div class="form-group" style="margin-bottom:12px;">
+                        <label for="pdEditAmount" style="display:block;font-weight:600;margin-bottom:4px;">Amount the guest paid (<?php echo $pdE($currency_symbol); ?>, incl. VAT) *</label>
+                        <input type="number" step="0.01" min="0.01" name="edit_amount" id="pdEditAmount" class="form-control" required value="<?php echo $pdE(number_format($pdEdit['total'], 2, '.', '')); ?>">
+                        <small style="display:block;color:var(--rh-muted,#6b6258);margin-top:4px;">
+                            Recorded now: <?php echo $pdE($currency_symbol . ' ' . number_format($pdEdit['total'], 2)); ?>.
+                            The booking owed <?php echo $pdE($currency_symbol . ' ' . number_format(max(0, $pdEdit['owed_without']), 2)); ?> before this payment, so it can be at most that.
+                            <?php if ($pdEdit['refunded'] > BALANCE_TOLERANCE): ?>
+                                <?php echo $pdE($currency_symbol . ' ' . number_format($pdEdit['refunded'], 2)); ?> of it was already refunded or moved to a credit note, so it cannot go below that.
+                            <?php endif; ?>
+                        </small>
+                        <p id="pdEditPreview" style="margin:6px 0 0;font-size:.9rem;font-weight:600;" aria-live="polite"></p>
+                    </div>
+                    <div class="form-group" style="margin-bottom:12px;">
+                        <label for="pdEditMethod" style="display:block;font-weight:600;margin-bottom:4px;">How the guest paid *</label>
+                        <select name="edit_method" id="pdEditMethod" class="form-control" required>
+                            <?php $pdMethods = rh_payment_edit_methods();
+                            if (!isset($pdMethods[$pdEdit['method']]) && $pdEdit['method'] !== '') { $pdMethods = [$pdEdit['method'] => ucwords(str_replace('_', ' ', $pdEdit['method']))] + $pdMethods; }
+                            foreach ($pdMethods as $pdMv => $pdMl): ?>
+                                <option value="<?php echo $pdE($pdMv); ?>"<?php echo $pdMv === $pdEdit['method'] ? ' selected' : ''; ?>><?php echo $pdE($pdMl); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div class="form-group" style="margin-bottom:12px;">
+                        <label for="pdEditDate" style="display:block;font-weight:600;margin-bottom:4px;">Payment date *</label>
+                        <input type="date" name="edit_date" id="pdEditDate" class="form-control" required max="<?php echo $pdE($pdEdit['today']); ?>" value="<?php echo $pdE($pdEdit['date']); ?>">
+                        <p id="pdEditPastDay" style="display:none;margin:6px 0 0;padding:8px 10px;border:1px solid #e6c98f;background:#fff8ea;border-radius:6px;color:#7a4b00;font-size:.88rem;"></p>
+                    </div>
+                    <div class="form-group" style="margin-bottom:12px;">
+                        <label for="pdEditRef" style="display:block;font-weight:600;margin-bottom:4px;">Transaction reference</label>
+                        <input type="text" name="edit_reference" id="pdEditRef" class="form-control" maxlength="100" value="<?php echo $pdE($pdEdit['reference']); ?>" placeholder="Bank ref, mobile money ID, cheque no...">
+                    </div>
+                    <div class="form-group" style="margin-bottom:12px;">
+                        <label for="pdEditNotes" style="display:block;font-weight:600;margin-bottom:4px;">Notes</label>
+                        <textarea name="edit_notes" id="pdEditNotes" class="form-control" rows="2" maxlength="1000"><?php echo $pdE($pdEdit['notes']); ?></textarea>
+                    </div>
+                    <div class="form-group" style="margin-bottom:12px;">
+                        <label for="pdEditReason" style="display:block;font-weight:600;margin-bottom:4px;">Reason for the change *</label>
+                        <textarea name="edit_reason" id="pdEditReason" class="form-control" rows="2" maxlength="500" required minlength="3" placeholder="Example: guest paid part only, recorded as full by mistake"></textarea>
+                        <small style="color:var(--rh-muted,#6b6258);">Shown in the payment's and the booking's History with who changed what.</small>
+                    </div>
+                    <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;min-height:44px;">
+                        <input type="checkbox" name="edit_email_guest" value="1" id="pdEditEmail" style="margin-top:3px;"<?php echo $pdEdit['email'] === '' ? ' disabled' : ''; ?>>
+                        <span><?php echo $pdEdit['email'] !== ''
+                            ? 'Email the guest a corrected receipt (to ' . $pdE($pdEdit['email']) . ')'
+                            : 'Email the guest a corrected receipt (no email address on file)'; ?>
+                            <small style="display:block;color:var(--rh-muted,#6b6258);">Left unticked, nothing is sent; the receipt on file still shows the corrected amount<?php echo $pdEdit['receipt'] !== '' ? ', marked "Corrected receipt", with the same number' : ''; ?>.</small></span>
+                    </label>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="pdCloseEditModal()">Cancel</button>
+                    <button type="submit" class="btn btn-primary" id="pdEditSubmit"><i class="fas fa-check"></i> Save correction</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <script>
+    (function () {
+        const d = <?php echo json_encode(['total' => $pdEdit['total'], 'owed' => $pdEdit['owed_without'], 'refunded' => $pdEdit['refunded'], 'date' => $pdEdit['date'], 'today' => $pdEdit['today'], 'cur' => (string)$currency_symbol], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        const tol = 0.01;
+        function fmt(n) { return d.cur + ' ' + Number(n || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+        function el(id) { return document.getElementById(id); }
+        function niceDate(s) { const t = new Date(s + 'T00:00:00'); return isNaN(t) ? s : t.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }); }
+        function sync() {
+            const amt = parseFloat(el('pdEditAmount').value || '0');
+            const p = el('pdEditPreview');
+            let ok = true;
+            if (!(amt > 0)) {
+                p.textContent = 'Enter the amount the guest actually paid (more than zero).'; p.style.color = '#b42318'; ok = false;
+            } else if (amt + tol < d.refunded) {
+                p.textContent = 'Too low: ' + fmt(d.refunded) + ' of this payment was already refunded or moved to a credit note.'; p.style.color = '#b42318'; ok = false;
+            } else if (amt > d.total + tol && amt > d.owed + tol) {
+                p.textContent = 'Too high: the booking owed ' + fmt(Math.max(0, d.owed)) + ' before this payment. Record any extra as a new payment.'; p.style.color = '#b42318'; ok = false;
+            } else {
+                const due = Math.max(0, d.owed - amt);
+                p.textContent = 'After saving: this is a ' + (amt + tol >= d.owed ? 'full' : 'part') + ' payment and the booking owes ' + fmt(due) + '.';
+                p.style.color = '';
+            }
+            el('pdEditSubmit').disabled = !ok;
+            const dt = el('pdEditDate').value;
+            const day = (d.date < d.today) ? d.date : ((dt && dt < d.today) ? dt : '');
+            const w = el('pdEditPastDay');
+            if (day) {
+                w.textContent = 'This payment is dated ' + niceDate(day) + '. Saving changes that day\'s End of Day figures, so a copy printed or emailed earlier will be out of date. The change is kept in History.';
+                w.style.display = '';
+            } else {
+                w.style.display = 'none';
+            }
+        }
+        window.pdOpenEditModal = function () {
+            const m = el('pdEditModal');
+            if (m) { m.style.display = 'flex'; m.setAttribute('aria-hidden', 'false'); }
+            sync();
+            setTimeout(function () { el('pdEditAmount').focus(); }, 60);
+        };
+        window.pdCloseEditModal = function () {
+            const m = el('pdEditModal');
+            if (m) { m.style.display = 'none'; m.setAttribute('aria-hidden', 'true'); }
+        };
+        el('pdEditAmount').addEventListener('input', sync);
+        el('pdEditDate').addEventListener('change', sync);
+        el('pdEditModal').addEventListener('click', function (e) { if (e.target === this) { window.pdCloseEditModal(); } });
+        <?php if (!empty($_GET['edit'])): ?>
+        if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', window.pdOpenEditModal); } else { window.pdOpenEditModal(); }
+        <?php endif; ?>
+    }());
+    </script>
+    <?php endif; ?>
 
     <!-- Send Receipt Modal -->
     <div class="modal-overlay" id="pdReceiptModal" aria-hidden="true" style="display:none;">

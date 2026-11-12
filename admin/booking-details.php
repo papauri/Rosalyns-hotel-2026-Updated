@@ -1223,6 +1223,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_payment'])) {
     if (!in_array($requested_status, ['unpaid', 'partial', 'paid'], true)) {
         $requested_status = '';
     }
+    // Owner 2026-11-12: no one-click "mark paid" (it booked the whole balance as cash). A payment is recorded with its
+    // amount and method on Record payment (payment-add.php), the one path with the limits, VAT split and receipt.
+    if ($requested_status === 'paid') {
+        $_SESSION['error_message'] = 'Nothing was recorded. Use Record payment to enter the amount the guest paid and how.';
+        header('Location: booking-details.php?id=' . (int)$booking_id);
+        exit;
+    }
     $previous_status = $booking['payment_status'];
 
     try {
@@ -2237,14 +2244,11 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                             <p class="bd-paid-note"><i class="fas fa-check-circle"></i> Nothing is owed on this booking.</p>
                         <?php elseif ($booking['payment_status'] !== 'paid'): ?>
                             <div class="payment-form">
-                                <?php if ($bd_perm_pay): ?><form method="POST" data-admin-confirm="Mark this booking payment as paid and email the guest a receipt?" data-admin-confirm-title="Record payment" data-admin-confirm-ok="Mark paid" data-admin-confirm-icon="fa-money-bill-wave" data-admin-submit-text="Recording payment...">
-                                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
-                                    <input type="hidden" name="update_payment" value="1">
-                                    <input type="hidden" name="payment_status" value="paid">
-                                    <button type="submit" class="payment-mark-paid-btn">
-                                        <i class="fas fa-check-circle"></i> Mark as Paid
-                                    </button>
-                                </form><?php endif; ?>
+                                <?php if ($bd_perm_pay): /* owner 2026-11-12: full or part payment, never one click */ ?>
+                                    <a href="payment-add.php?booking_type=room&amp;booking_id=<?php echo (int)$booking_id; ?>" class="payment-mark-paid-btn" style="text-decoration:none;" title="Enter the amount the guest paid (all or part of the balance) and how they paid">
+                                        <i class="fas fa-money-bill-wave"></i> Record payment
+                                    </a>
+                                <?php endif; ?>
                             </div>
                         <?php else: ?>
                             <p class="bd-paid-note"><i class="fas fa-check-circle"></i> Payment received.</p>

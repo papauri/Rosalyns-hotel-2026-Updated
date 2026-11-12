@@ -54,6 +54,17 @@ if ($payment && (string)($payment['payment_type'] ?? '') === 'refund') {
     exit;
 }
 
+// A payment that was received (owner 2026-11-12) is corrected only with "Edit payment" on its details page: the
+// Edit payments permission, a reason, the booking-balance limits and History. This form keeps editing pending rows.
+if ($payment && in_array((string)($payment['payment_status'] ?? ''), ['completed', 'paid', 'partially_refunded', 'refunded'], true)) {
+    $paEditAllowed = hasPermission((int)($user['id'] ?? 0), 'payment_edit');
+    $_SESSION['alert'] = $paEditAllowed
+        ? ['type' => 'info', 'message' => 'A payment that was received is corrected here, with a reason.']
+        : ['type' => 'error', 'message' => 'This payment was already received. It can only be corrected from this page by someone with the Edit payments permission.'];
+    header('Location: payment-details.php?id=' . (int)$editId . ($paEditAllowed ? '&edit=1' : ''));
+    exit;
+}
+
 // An original that already has refunds against it keeps its amount and status: both are
 // owned by the refund records. The amount can never be edited below what was refunded.
 $editLocked = false;
@@ -524,9 +535,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         payment_reference, booking_type, booking_id, booking_reference, payment_date,
                         payment_amount, vat_rate, vat_amount, total_amount,
                         payment_method, payment_status, status, {$paymentTransactionColumn},
-                        receipt_number, cc_emails, processed_by, notes, client_uuid
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        receipt_number, cc_emails, processed_by, notes, client_uuid, payment_type
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ");
+                // Full when it covers what was owed, part otherwise (owner 2026-11-12: never a "full" label on a part payment).
+                $paPaymentType = $histOwedBefore !== null
+                    ? ($paymentAmount + BALANCE_TOLERANCE >= $histOwedBefore ? 'full_payment' : 'partial_payment')
+                    : null;
 
                 $__paymentClientUuid = idem_normalize_uuid($__incomingClientUuid ?? null);
                 $stmt->execute([
@@ -547,7 +562,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $ccEmails ?: null,
                     $processedBy,
                     $notes ?: null,
-                    $__paymentClientUuid
+                    $__paymentClientUuid,
+                    $paPaymentType
                 ]);
 
                 $newPaymentId = $pdo->lastInsertId();
@@ -667,6 +683,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $successMsg = 'Payment recorded successfully.' . ($overpayMsg ?? '') . $receiptNotice;
+                if (($_POST['return_to'] ?? '') === 'bookings') {
+                    // Quick pay on the Bookings list: back to the list, saying what was recorded.
+                    $successMsg = 'Payment ' . htmlspecialchars((string)$paymentRef, ENT_QUOTES, 'UTF-8') . ' of '
+                        . htmlspecialchars((string)getSetting('currency_symbol', 'MWK') . ' ' . number_format((float)$totalAmount, 2), ENT_QUOTES, 'UTF-8')
+                        . ' recorded for ' . htmlspecialchars((string)$bookingReference, ENT_QUOTES, 'UTF-8') . '.'
+                        . ($histOwedAfter !== null && $histOwedAfter > BALANCE_TOLERANCE
+                            ? ' Still owed: ' . htmlspecialchars((string)getSetting('currency_symbol', 'MWK') . ' ' . number_format((float)$histOwedAfter, 2), ENT_QUOTES, 'UTF-8') . '.'
+                            : ' Nothing more is owed.')
+                        . ($overpayMsg ?? '') . $receiptNotice;
+                    $_SESSION['alert'] = ['type' => 'success', 'message' => $successMsg];
+                    header('Location: bookings.php');
+                    exit;
+                }
                 $_SESSION['alert'] = ['type' => 'success', 'message' => $successMsg];
                 header('Location: payment-details.php?id=' . $newPaymentId . '&new_payment=1');
                 exit;
@@ -682,6 +711,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $_SESSION['alert'] = ['type' => 'error', 'message' => 'Error: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8')];
         }
+    }
+    // Quick pay on the Bookings list: a refused payment goes back to the list with the reason (nothing was saved).
+    if (!$editId && ($_POST['return_to'] ?? '') === 'bookings') {
+        if (!empty($_SESSION['alert']['message'])) {
+            $_SESSION['alert']['message'] = 'The payment was not recorded. ' . $_SESSION['alert']['message'];
+        }
+        header('Location: bookings.php');
+        exit;
     }
 }
 
