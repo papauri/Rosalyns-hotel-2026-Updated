@@ -1133,6 +1133,176 @@ function calculateOccupancyRate(array $statusCounts): float
 }
 
 /**
+ * SQL (with ? placeholders) for a booking row aliased b that holds rooms on at least one night of [?start, ?end):
+ * exactly the booking engine's rule in getRoomTypeNightlyAvailability() (blocking statuses, expired tentatives
+ * excluded, effective checkout so an overdue in-house guest still holds tonight), plus not soft-deleted.
+ * Params, in order: the blocking statuses, then $end, then $start.
+ */
+function rh_rooms_live_booking_sql(): array
+{
+    $statuses = getBookingStatusesThatBlockAvailability(true);
+    $ph = implode(',', array_fill(0, count($statuses), '?'));
+    $effCo = rh_effective_checkout_sql('b');
+    $sql = "b.deleted_at IS NULL AND b.status IN ($ph)
+        AND NOT (b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL AND b.tentative_expires_at < NOW())
+        AND b.check_in_date < ? AND {$effCo} > ?";
+    return [$sql, $statuses, $effCo];
+}
+
+/** Room id => unit key: the two rooms of a joined-only pair share one key ('p' + pair id), any other room is 'r' + id. */
+function rh_room_unit_key_map(): array
+{
+    $map = [];
+    foreach (rh_joined_only_pair_map() as $rid => $pair) {
+        $map[(int)$rid] = 'p' . (int)$pair['id'];
+    }
+    return $map;
+}
+
+/**
+ * Tonight / tomorrow outlook for the dashboard (owner fault 2026-11-12). Display only: it reads what the booking
+ * engine already decided and changes nothing.
+ *  - units: rh_sellable_room_units() (a joined-only pair is one unit; maintenance / out of order excluded).
+ *  - free:  per room type, getRoomTypeNightlyAvailability() (the engine's own per-night count: room blocks,
+ *           maintenance windows, assigned and unassigned bookings, joined pairs), zero on a night the type or
+ *           all rooms are blocked (getRoomTypeBlockedDatesOnly), summed over types that have rooms.
+ *  - booked / unassigned: rh_fd_rooms_booked_by_night() over every live booking (primary room AND booking_rooms).
+ * Returns ['ok' => bool, 'units' => int, 'nights' => [Y-m-d => ['free', 'booked', 'unassigned']]].
+ */
+function rh_rooms_night_outlook(string $today, int $nightCount = 2): array
+{
+    global $pdo;
+    static $memo = [];
+    $nightCount = max(1, min(14, $nightCount));
+    $key = $today . '|' . $nightCount;
+    if (isset($memo[$key])) {
+        return $memo[$key];
+    }
+    require_once __DIR__ . '/../admin/includes/front-desk-counts.php';
+
+    $nights = [];
+    for ($i = 0; $i < $nightCount; $i++) {
+        $nights[] = date('Y-m-d', strtotime($today . ' +' . $i . ' day'));
+    }
+    $end = date('Y-m-d', strtotime($today . ' +' . $nightCount . ' day'));
+    $fail = ['ok' => false, 'units' => 0, 'nights' => []];
+
+    try {
+        $units = rh_sellable_room_units();
+
+        // Free: the engine's per-type, per-night count.
+        $free = array_fill_keys($nights, 0);
+        $typeIds = $pdo->query('SELECT DISTINCT room_type_id FROM individual_rooms WHERE is_active = 1 AND room_type_id IS NOT NULL')->fetchAll(PDO::FETCH_COLUMN);
+        foreach ($typeIds as $tid) {
+            $tid = (int)$tid;
+            $perNight = getRoomTypeNightlyAvailability($tid, $today, $end);
+            if ($perNight === null) {
+                continue;
+            }
+            $blocked = [];
+            foreach (getRoomTypeBlockedDatesOnly($tid, $today, $end) as $bd) {
+                $blocked[substr((string)$bd['block_date'], 0, 10)] = true;
+            }
+            foreach ($nights as $n) {
+                if (!isset($blocked[$n])) {
+                    $free[$n] += (int)($perNight[$n] ?? 0);
+                }
+            }
+        }
+
+        // Booked: every room a live booking holds, plus bookings with no room yet.
+        [$live, $statuses, $effCo] = rh_rooms_live_booking_sql();
+        $params = array_merge($statuses, [$end, $today]);
+        $st = $pdo->prepare("SELECT b.individual_room_id AS room_id, b.check_in_date AS ci, {$effCo} AS co
+            FROM bookings b WHERE b.individual_room_id IS NOT NULL AND {$live}");
+        $st->execute($params);
+        $assigned = $st->fetchAll(PDO::FETCH_ASSOC);
+        $hasBr = bookingAvailabilityTableExists('booking_rooms');
+        if ($hasBr) {
+            $st = $pdo->prepare("SELECT br.individual_room_id AS room_id, b.check_in_date AS ci, {$effCo} AS co
+                FROM booking_rooms br JOIN bookings b ON b.id = br.booking_id
+                WHERE br.released_at IS NULL AND {$live}");
+            $st->execute($params);
+            $assigned = array_merge($assigned, $st->fetchAll(PDO::FETCH_ASSOC));
+        }
+        $noLink = $hasBr ? ' AND NOT EXISTS (SELECT 1 FROM booking_rooms br2 WHERE br2.booking_id = b.id AND br2.released_at IS NULL)' : '';
+        $hasCombos = bookingAvailabilityTableExists('room_combinations');
+        $typeScope = 'b.room_id IN (SELECT room_type_id FROM individual_rooms WHERE is_active = 1)'
+            . ($hasCombos ? ' OR b.room_id IN (SELECT combined_room_type_id FROM room_combinations WHERE is_active = 1)' : '');
+        $st = $pdo->prepare("SELECT b.id AS booking_id, b.room_id, b.check_in_date AS ci, {$effCo} AS co
+            FROM bookings b WHERE b.individual_room_id IS NULL AND {$live}{$noLink} AND ({$typeScope})");
+        $st->execute($params);
+        $unassigned = $st->fetchAll(PDO::FETCH_ASSOC);
+
+        // A joined booking with no room yet takes one unit when its pair is joined-only (counted once),
+        // two when its rooms keep their own types (each counted as a room).
+        $joinedOnlyTypes = [];
+        foreach (rh_joined_only_pairs(true) as $pair) {
+            $joinedOnlyTypes[(int)$pair['combined_room_type_id']] = true;
+        }
+        $comboType = [];
+        foreach ($unassigned as &$u) {
+            $t = (int)$u['room_id'];
+            if (!isset($comboType[$t])) {
+                $comboType[$t] = $hasCombos && roomTypeHasActiveCombinations($t);
+            }
+            $u['units'] = (!isset($joinedOnlyTypes[$t]) && $comboType[$t]) ? 2 : 1;
+        }
+        unset($u);
+
+        $tally = rh_fd_rooms_booked_by_night(rh_room_unit_key_map(), $assigned, $unassigned, $nights, $units);
+        $out = ['ok' => true, 'units' => $units, 'nights' => []];
+        foreach ($nights as $n) {
+            $out['nights'][$n] = [
+                'free' => $units > 0 ? min($units, $free[$n]) : $free[$n],
+                'booked' => (int)($tally[$n]['booked'] ?? 0),
+                'unassigned' => (int)($tally[$n]['unassigned'] ?? 0),
+            ];
+        }
+        return $memo[$key] = $out;
+    } catch (Throwable $e) {
+        error_log('rh_rooms_night_outlook: ' . $e->getMessage());
+        return $memo[$key] = $fail;
+    }
+}
+
+/**
+ * Live bookings (current or still to come, plus every checked-in guest) holding any of these rooms, read in two queries (primary room pointer
+ * and booking_rooms). Rows: room_id, booking_id, status, ci, co (effective checkout), booking_reference, guest_name,
+ * amount_due, amount_paid. Feed to rh_fd_room_booking_slots() for each room's current guest and next booking.
+ */
+function rh_rooms_live_booking_rows(array $roomIds, string $today): array
+{
+    global $pdo;
+    $roomIds = array_values(array_unique(array_filter(array_map('intval', $roomIds))));
+    if (!$roomIds) {
+        return [];
+    }
+    $idPh = implode(',', array_fill(0, count($roomIds), '?'));
+    [$live, $statuses, $effCo] = rh_rooms_live_booking_sql();
+    // A far-future end: every stay still to come, not only the next few nights. A checked-in guest is always
+    // read, even on check-out day (they are still in the room until checked out); night counts never use this.
+    $live = "(({$live}) OR (b.deleted_at IS NULL AND b.status = 'checked-in'))";
+    $params = array_merge($roomIds, $statuses, ['9999-12-31', $today]);
+    $cols = "b.id AS booking_id, b.status, b.check_in_date AS ci, {$effCo} AS co, b.booking_reference, b.guest_name, b.amount_due, b.amount_paid";
+    try {
+        $st = $pdo->prepare("SELECT b.individual_room_id AS room_id, {$cols} FROM bookings b WHERE b.individual_room_id IN ($idPh) AND {$live}");
+        $st->execute($params);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        if (bookingAvailabilityTableExists('booking_rooms')) {
+            $st = $pdo->prepare("SELECT br.individual_room_id AS room_id, {$cols} FROM booking_rooms br JOIN bookings b ON b.id = br.booking_id
+                WHERE br.individual_room_id IN ($idPh) AND br.released_at IS NULL AND {$live}");
+            $st->execute($params);
+            $rows = array_merge($rows, $st->fetchAll(PDO::FETCH_ASSOC));
+        }
+        return $rows;
+    } catch (Throwable $e) {
+        error_log('rh_rooms_live_booking_rows: ' . $e->getMessage());
+        return [];
+    }
+}
+
+/**
  * Auto-release rooms that have been cleaning too long
  *
  * @param int $hours Threshold in hours

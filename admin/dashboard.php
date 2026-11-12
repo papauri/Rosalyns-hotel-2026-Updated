@@ -1794,12 +1794,19 @@ if ($is_card_insight_ajax) {
                     ['key' => 'detail', 'label' => 'Detail'],
                 ];
                 $payload['link'] = ['href' => 'room-dashboard.php', 'label' => 'Open room dashboard'];
+                // The rows are the physical state now; the line above them says what tonight and tomorrow hold.
+                $ovOutlook = rh_rooms_night_outlook($today, 2);
+                $ovTomorrow = date('Y-m-d', strtotime($today . ' +1 day'));
+                if (!empty($ovOutlook['ok']) && isset($ovOutlook['nights'][$today], $ovOutlook['nights'][$ovTomorrow])) {
+                    $payload['description'] = rh_fd_rooms_outlook_line((int)$ovOutlook['units'], (int)$ovOutlook['nights'][$today]['free'], (int)$ovOutlook['nights'][$ovTomorrow]['booked'], (int)$ovOutlook['nights'][$ovTomorrow]['unassigned'])
+                        . '. The table below is each room\'s state right now.';
+                }
 
                 // A joined-only pair is ONE room: it is counted once, in its most restrictive state.
                 $statusTotals = array_map('intval', array_count_values(rh_room_unit_statuses()));
                 $totalRooms = array_sum($statusTotals);
                 $roomStatusLabels = [
-                    'available' => 'Available',
+                    'available' => 'Available now (clean and empty)',
                     'occupied' => 'Occupied',
                     'cleaning' => 'Cleaning',
                     'inspection' => 'Inspection',
@@ -1825,7 +1832,7 @@ if ($is_card_insight_ajax) {
                 if (str_starts_with($card, 'room_status_')) {
                     $statusKey = trim(substr($card, strlen('room_status_')));
                     $roomStatusLabels = [
-                        'available' => 'Available',
+                        'available' => 'Available now',
                         'occupied' => 'Occupied',
                         'cleaning' => 'Cleaning',
                         'inspection' => 'Inspection',
@@ -1837,7 +1844,9 @@ if ($is_card_insight_ajax) {
                     }
 
                     $payload['title'] = $roomStatusLabels[$statusKey] . ' Rooms';
-                    $payload['subtitle'] = 'Individual room list for this operational state';
+                    $payload['subtitle'] = $statusKey === 'available'
+                        ? 'Rooms that are clean and empty right now, with each room\'s next booking'
+                        : 'Rooms in this state right now, with the guest in each and its next booking';
                     $payload['columns'] = [
                         ['key' => 'room', 'label' => 'Room'],
                         ['key' => 'type', 'label' => 'Type'],
@@ -1845,69 +1854,145 @@ if ($is_card_insight_ajax) {
                         ['key' => 'housekeeping', 'label' => 'Housekeeping'],
                         ['key' => 'booking', 'label' => 'Current Booking'],
                         ['key' => 'guest', 'label' => 'Guest'],
+                        ['key' => 'next', 'label' => 'Next booking'],
                     ];
                     $payload['link'] = ['href' => 'individual-rooms.php?status=' . urlencode($statusKey), 'label' => 'Open filtered room list'];
 
-                    $statusStmt = $pdo->prepare("SELECT ir.id AS room_id,
+                    // Tonight / tomorrow from the booking engine: the line above the table.
+                    $rsOutlook = rh_rooms_night_outlook($today, 2);
+                    $rsTomorrow = date('Y-m-d', strtotime($today . ' +1 day'));
+                    $rsLine = '';
+                    if (!empty($rsOutlook['ok']) && isset($rsOutlook['nights'][$today], $rsOutlook['nights'][$rsTomorrow])) {
+                        $rsLine = rh_fd_rooms_outlook_line((int)$rsOutlook['units'], (int)$rsOutlook['nights'][$today]['free'], (int)$rsOutlook['nights'][$rsTomorrow]['booked'], (int)$rsOutlook['nights'][$rsTomorrow]['unassigned']) . '.';
+                        if ((int)$rsOutlook['nights'][$rsTomorrow]['booked'] > 0) {
+                            // Bookings with no room yet cannot sit on a room row: the arrivals list shows them.
+                            $payload['link2'] = ['href' => 'bookings.php?date_type=arrival&date_from=' . urlencode($rsTomorrow) . '&date_to=' . urlencode($rsTomorrow), 'label' => 'Tomorrow\'s arrivals'];
+                        }
+                    }
+                    if ($rsLine !== '') {
+                        $payload['description'] = $rsLine . ' Rooms below are in this state right now; Current Booking is the guest checked in, Next booking is the earliest booking still to come on that room and what is left to pay.';
+                    }
+
+                    // Every active room is read so a joined-only pair is matched (and listed) as ONE room in its most
+                    // restrictive state, the same way the legend counts it (rh_room_unit_statuses).
+                    $statusStmt = $pdo->query("SELECT ir.id AS room_id,
                                                         ir.room_number,
                                                         ir.room_name,
                                                         ir.floor,
+                                                        ir.status,
                                                         CASE WHEN ir.housekeeping_status IN ('pending', 'in_progress') AND ir.status <> 'cleaning' AND NOT " . rh_room_open_task_sql('ir') . " THEN 'completed' ELSE COALESCE(ir.housekeeping_status, '') END AS housekeeping_status,
-                                                        COALESCE(r.name, '—') AS room_type,
-                                                        b.id AS booking_id,
-                                                        b.booking_reference,
-                                                        b.guest_name
+                                                        COALESCE(r.name, '—') AS room_type
                                                  FROM individual_rooms ir
                                                  LEFT JOIN rooms r ON r.id = ir.room_type_id
-                                                                                                 LEFT JOIN bookings b ON b.id = (
-                                                                                                        SELECT b1.id
-                                                                                                        FROM bookings b1
-                                                                                                        WHERE b1.deleted_at IS NULL AND b1.individual_room_id = ir.id
-                                                                                                            AND b1.status = 'checked-in'
-                                                                                                        ORDER BY b1.check_in_date DESC, b1.id DESC
-                                                                                                        LIMIT 1
-                                                                                                 )
                                                  WHERE ir.is_active = 1
-                                                   AND ir.status = ?
-                                                 ORDER BY ir.room_number ASC
-                                                 LIMIT 50");
-                    $statusStmt->execute([$statusKey]);
-                    $rows = $statusStmt->fetchAll(PDO::FETCH_ASSOC);
+                                                 ORDER BY ir.room_number ASC");
+                    $rsRooms = [];
+                    foreach ($statusStmt->fetchAll(PDO::FETCH_ASSOC) as $rsRow) {
+                        $rsRooms[(int)$rsRow['room_id']] = $rsRow;
+                    }
+                    $rsUnits = [];
+                    $rsPaired = [];
+                    foreach (rh_joined_only_pairs(true) as $rsPair) {
+                        $rsA = $rsRooms[$rsPair['room_a_id']] ?? null;
+                        $rsB = $rsRooms[$rsPair['room_b_id']] ?? null;
+                        if (!$rsA || !$rsB) {
+                            continue;
+                        }
+                        $rsPaired[$rsPair['room_a_id']] = $rsPaired[$rsPair['room_b_id']] = true;
+                        $rsUnits[] = ['status' => rh_joined_pair_status((string)$rsA['status'], (string)$rsB['status']), 'members' => [$rsA, $rsB], 'pair' => $rsPair];
+                    }
+                    foreach ($rsRooms as $rsId => $rsRow) {
+                        if (!isset($rsPaired[$rsId])) {
+                            $rsUnits[] = ['status' => (string)$rsRow['status'], 'members' => [$rsRow], 'pair' => null];
+                        }
+                    }
+                    $rsUnits = array_values(array_filter($rsUnits, static fn($u) => $u['status'] === $statusKey));
+                    usort($rsUnits, static fn($x, $y) => strnatcasecmp((string)$x['members'][0]['room_number'], (string)$y['members'][0]['room_number']));
+                    $rsUnits = array_slice($rsUnits, 0, 50);
 
-                    foreach ($rows as $row) {
-                        $roomNumber = trim((string)($row['room_number'] ?? ''));
-                        $roomName = trim((string)($row['room_name'] ?? ''));
-                        $roomLabel = $roomNumber !== '' ? $roomNumber : ('Room #' . (int)($row['room_id'] ?? 0));
-                        if ($roomName !== '') {
-                            $roomLabel .= ' · ' . $roomName;
+                    // Current guest and next booking per room: two queries for the whole list (primary room and booking_rooms).
+                    $rsIds = [];
+                    foreach ($rsUnits as $u) {
+                        foreach ($u['members'] as $m) {
+                            $rsIds[] = (int)$m['room_id'];
+                        }
+                    }
+                    $rsSlots = rh_fd_room_booking_slots(rh_rooms_live_booking_rows($rsIds, $today), $today);
+                    $rsDate = static function ($d): string {
+                        $ts = strtotime((string)$d);
+                        return $ts ? date('j M', $ts) : '—';
+                    };
+
+                    foreach ($rsUnits as $u) {
+                        $current = null;
+                        $next = null;
+                        foreach ($u['members'] as $m) {
+                            $slot = $rsSlots[(int)$m['room_id']] ?? null;
+                            if (!$slot) {
+                                continue;
+                            }
+                            if ($slot['current'] && $current === null) {
+                                $current = $slot['current'];
+                            }
+                            if ($slot['next'] && ($next === null || [(string)$slot['next']['ci'], (int)$slot['next']['booking_id']] < [(string)$next['ci'], (int)$next['booking_id']])) {
+                                $next = $slot['next'];
+                            }
                         }
 
-                        $bookingId = (int)($row['booking_id'] ?? 0);
-                        $rowAction = [
-                            'href' => 'individual-rooms.php?status=' . urlencode($statusKey),
-                            'label' => 'Rooms',
-                            'target' => '_blank',
-                        ];
-                        if ($bookingId > 0) {
-                            $rowAction = [
-                                'href' => 'booking-details.php?id=' . $bookingId,
-                                'label' => 'Booking',
-                                'target' => '_blank',
-                            ];
+                        $first = $u['members'][0];
+                        if ($u['pair']) {
+                            $roomLabel = (string)$u['pair']['label'];
+                            if (trim((string)($u['pair']['combined_name'] ?? '')) !== '') {
+                                $roomLabel .= ' · ' . trim((string)$u['pair']['combined_name']);
+                            }
+                            $roomType = (string)($u['pair']['type_name'] ?? $first['room_type']);
+                        } else {
+                            $roomNumber = trim((string)($first['room_number'] ?? ''));
+                            $roomName = trim((string)($first['room_name'] ?? ''));
+                            $roomLabel = $roomNumber !== '' ? $roomNumber : ('Room #' . (int)($first['room_id'] ?? 0));
+                            if ($roomName !== '') {
+                                $roomLabel .= ' · ' . $roomName;
+                            }
+                            $roomType = (string)($first['room_type'] ?? '—');
+                        }
+                        $floors = [];
+                        $hk = [];
+                        foreach ($u['members'] as $m) {
+                            if (trim((string)($m['floor'] ?? '')) !== '') {
+                                $floors[(string)$m['floor']] = true;
+                            }
+                            $h = trim((string)($m['housekeeping_status'] ?? ''));
+                            $hk[$h !== '' ? $humanizeStatus($h) : 'N/A'] = true;
                         }
 
-                        $housekeepingStatus = trim((string)($row['housekeeping_status'] ?? ''));
+                        $nextText = '—';
+                        if ($next) {
+                            $state = rh_fd_payment_state($next['amount_due'] ?? 0, $next['amount_paid'] ?? 0);
+                            $payText = $state === 'paid' ? 'Paid' : ($state === 'partial' ? 'Partial · ' . $formatMoney((float)$next['amount_due']) . ' left to pay' : 'Unpaid');
+                            $nextText = $rsDate($next['ci']) . ' → ' . $rsDate($next['co'])
+                                . ' · ' . (string)($next['booking_reference'] ?? '')
+                                . (trim((string)($next['guest_name'] ?? '')) !== '' ? ' · ' . trim((string)$next['guest_name']) : '')
+                                . ' · ' . $payText;
+                        }
+
+                        $rowAction = ['href' => 'individual-rooms.php?status=' . urlencode($statusKey), 'label' => 'Rooms', 'target' => '_blank'];
+                        $linkBooking = $current ?: $next;
+                        if ($linkBooking && (int)$linkBooking['booking_id'] > 0) {
+                            $rowAction = ['href' => 'booking-details.php?id=' . (int)$linkBooking['booking_id'], 'label' => 'Booking', 'target' => '_blank'];
+                        }
+
                         $payload['rows'][] = [
                             'room' => $roomLabel,
-                            'type' => (string)($row['room_type'] ?? '—'),
-                            'floor' => trim((string)($row['floor'] ?? '')) !== '' ? (string)$row['floor'] : '—',
-                            'housekeeping' => $housekeepingStatus !== '' ? $humanizeStatus($housekeepingStatus) : 'N/A',
-                            'booking' => trim((string)($row['booking_reference'] ?? '')) !== '' ? (string)$row['booking_reference'] : '—',
-                            'guest' => trim((string)($row['guest_name'] ?? '')) !== '' ? (string)$row['guest_name'] : '—',
+                            'type' => $roomType !== '' ? $roomType : '—',
+                            'floor' => $floors ? implode(' / ', array_keys($floors)) : '—',
+                            'housekeeping' => implode(' / ', array_keys($hk)),
+                            'booking' => $current && trim((string)($current['booking_reference'] ?? '')) !== '' ? (string)$current['booking_reference'] : '—',
+                            'guest' => $current && trim((string)($current['guest_name'] ?? '')) !== '' ? (string)$current['guest_name'] : '—',
+                            'next' => $nextText,
                             'action' => $rowAction,
                         ];
                     }
-                    $payload['empty'] = 'No rooms currently match this status.';
+                    $payload['empty'] = 'No rooms currently match this status.' . ($rsLine !== '' ? ' ' . $rsLine : '');
                     break;
                 }
                 throw new RuntimeException('Unknown insight card');
@@ -2116,6 +2201,12 @@ $currency_symbol = getSetting('currency_symbol');
         $sellableRooms = max(0, $totalRooms - (int)($statusCounts['out_of_order'] ?? 0) - (int)($statusCounts['maintenance'] ?? 0));
         $occupancy = (float)($roomSummary['occupancy_rate'] ?? 0);
         $noShows = (int)($roomSummary['no_show_candidates'] ?? 0);
+        // Owner fault 2026-11-12: the panel counted clean rooms now as sellable while tomorrow was full. The physical state
+        // (donut) stays; the sub line now says what is free tonight and booked tomorrow, from the booking engine.
+        $roomOutlook = ($mod_roomboard && $totalRooms > 0) ? rh_rooms_night_outlook($today, 2) : ['ok' => false];
+        $outlookTomorrow = date('Y-m-d', strtotime($today . ' +1 day'));
+        $outlookTonightRow = $roomOutlook['nights'][$today] ?? null;
+        $outlookTomorrowRow = $roomOutlook['nights'][$outlookTomorrow] ?? null;
 
         $arrivalsTotal = (int)$today_checkins + $dayProgress['arrived'];
         // Overdue guests (still in after their checkout date) count as departures still to do.
@@ -2255,7 +2346,7 @@ $currency_symbol = getSetting('currency_symbol');
                     <span class="ck-kpi__label">Occupancy</span>
                     <span class="ck-kpi__value"><?php echo rtrim(rtrim(number_format($occupancy, 1), '0'), '.'); ?><small>%</small></span>
                     <span class="ck-meter"><span style="width:<?php echo min(100, $occupancy); ?>%"></span></span>
-                    <span class="ck-kpi__sub" title="Occupied rooms over rooms that can be sold (all rooms minus out of order minus maintenance)"><?php echo $occupiedRooms; ?> of <?php echo $sellableRooms; ?> sellable rooms occupied</span>
+                    <span class="ck-kpi__sub" title="Rooms with a guest checked in right now, over rooms that can be sold (all rooms minus out of order minus maintenance). Bookings for tonight or later are not counted until the guest checks in."><?php echo $occupiedRooms; ?> of <?php echo $sellableRooms; ?> sellable rooms occupied now</span>
                 </a>
                 <?php endif; ?>
                 <a class="ck-kpi js-dashboard-insight" data-insight-card="checkins_today" data-insight-label="Today's check-ins" href="bookings.php?filter=checkin_today">
@@ -2633,7 +2724,7 @@ $currency_symbol = getSetting('currency_symbol');
                 <header class="ck-panel__head">
                     <div>
                         <h2 class="ck-panel__title">Rooms</h2>
-                        <p class="ck-panel__sub"><?php echo (int)($statusCounts['available'] ?? 0); ?> ready to sell<?php if (!empty($roomSummary['cleaning_queue'])): ?> · <?php echo (int)$roomSummary['cleaning_queue']; ?> to clean<?php endif; ?></p>
+                        <p class="ck-panel__sub"><?php if (!empty($roomOutlook['ok']) && $outlookTonightRow && $outlookTomorrowRow): ?><span title="Rooms that can still be sold for tonight: rooms not booked tonight (in-house guests, and pending, tentative or confirmed bookings, with or without a room), not blocked and not out of service. A joined room counts once."><?php echo (int)$outlookTonightRow['free']; ?> free tonight</span> · <span title="Rooms booked for tomorrow night out of <?php echo (int)$roomOutlook['units']; ?> rooms that can be sold (out of order and maintenance left out)<?php echo (int)$outlookTomorrowRow['unassigned'] > 0 ? '; ' . (int)$outlookTomorrowRow['unassigned'] . ' of these bookings have no room yet' : ''; ?>.">tomorrow <?php echo (int)$outlookTomorrowRow['booked']; ?> of <?php echo (int)$roomOutlook['units']; ?> booked</span><?php else: ?><span title="Rooms that are clean and empty right now. Bookings for tonight or later are not counted here."><?php echo (int)($statusCounts['available'] ?? 0); ?> available now</span><?php endif; ?><?php if (!empty($roomSummary['cleaning_queue'])): ?> · <span title="Rooms being cleaned or with an open housekeeping task"><?php echo (int)$roomSummary['cleaning_queue']; ?> to clean</span><?php endif; ?></p>
                     </div>
                     <div class="ck-panel__tools">
                         <?php if ($can('room-dashboard.php')): ?><a class="ck-link" href="room-dashboard.php">Room board <i class="fas fa-arrow-right"></i></a><?php endif; ?>
@@ -2650,17 +2741,23 @@ $currency_symbol = getSetting('currency_symbol');
                 ?>
                 <div class="ck-rooms__body">
                     <button type="button" class="ck-donut js-dashboard-insight" data-insight-card="room_status_overview" data-insight-label="Room status"
-                        style="--ck-donut: conic-gradient(<?php echo htmlspecialchars(implode(', ', $stops)); ?>);" aria-label="Room status overview">
-                        <span class="ck-donut__hole"><strong><?php echo rtrim(rtrim(number_format($occupancy, 1), '0'), '.'); ?>%</strong><small>occupied</small></span>
+                        style="--ck-donut: conic-gradient(<?php echo htmlspecialchars(implode(', ', $stops)); ?>);" aria-label="Room status overview" title="Rooms in each state right now. Occupied now = rooms with a guest checked in, over rooms that can be sold (out of order and maintenance left out).">
+                        <span class="ck-donut__hole"><strong><?php echo rtrim(rtrim(number_format($occupancy, 1), '0'), '.'); ?>%</strong><small>occupied now</small></span>
                     </button>
                     <ul class="ck-legend">
-                        <?php foreach ($roomStatuses as $status => $info): $n = (int)($statusCounts[$status] ?? 0); ?>
+                        <?php foreach ($roomStatuses as $status => $info): $n = (int)($statusCounts[$status] ?? 0);
+                            // The legend is the physical state right now; "Available" means clean and empty now, not free tonight.
+                            $legendLabel = $status === 'available' ? 'Available now' : (string)$info['label'];
+                            $legendHelp = $status === 'available'
+                                ? 'Clean and empty right now. A room booked for tonight or tomorrow can still be here: see the free tonight and tomorrow figures above.'
+                                : (string)($info['description'] ?? $info['label']) . ', right now. A joined room counts once.'; ?>
                         <li>
                             <button type="button" class="ck-legend__item js-dashboard-insight<?php echo $n ? '' : ' is-zero'; ?>"
                                 data-insight-card="room_status_<?php echo htmlspecialchars((string)$status, ENT_QUOTES, 'UTF-8'); ?>"
-                                data-insight-label="<?php echo htmlspecialchars((string)$info['label'], ENT_QUOTES, 'UTF-8'); ?> rooms">
+                                data-insight-label="<?php echo htmlspecialchars($legendLabel, ENT_QUOTES, 'UTF-8'); ?> rooms"
+                                title="<?php echo htmlspecialchars($legendHelp, ENT_QUOTES, 'UTF-8'); ?>">
                                 <span class="ck-legend__dot" style="background:<?php echo $roomColors[$status] ?? '#ccc'; ?>"></span>
-                                <span class="ck-legend__label"><?php echo htmlspecialchars((string)$info['label']); ?></span>
+                                <span class="ck-legend__label"><?php echo htmlspecialchars($legendLabel); ?></span>
                                 <strong><?php echo $n; ?></strong>
                             </button>
                         </li>
@@ -2795,6 +2892,7 @@ $currency_symbol = getSetting('currency_symbol');
                 <p class="dashboard-insight-modal__loading"><i class="fas fa-spinner fa-spin"></i> Loading details…</p>
             </div>
             <footer class="dashboard-insight-modal__footer modal-footer" id="dashboardInsightFooter">
+                <a id="dashboardInsightLink2" class="btn btn-secondary dashboard-insight-modal__link" href="bookings.php" style="display:none"></a>
                 <a id="dashboardInsightLink" class="btn btn-primary dashboard-insight-modal__link" href="dashboard.php">Open full page</a>
             </footer>
         </div>
@@ -2967,6 +3065,17 @@ $currency_symbol = getSetting('currency_symbol');
                     _insightFooter.hidden = false;
                 } else {
                     _insightFooter.hidden = true;
+                }
+                // Optional second link (room lists: tomorrow's arrivals, where bookings with no room yet are listed).
+                const link2 = document.getElementById('dashboardInsightLink2');
+                const href2 = payload.link2 && payload.link2.href ? String(payload.link2.href) : '';
+                if (link2) {
+                    link2.style.display = href2 === '' ? 'none' : ''; // .btn sets display, so the hidden attribute alone would not hide it
+                    if (href2 !== '') {
+                        link2.href = href2;
+                        link2.textContent = payload.link2.label || 'Open';
+                        _insightFooter.hidden = false;
+                    }
                 }
             }
         }

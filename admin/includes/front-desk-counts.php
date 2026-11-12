@@ -157,3 +157,95 @@ if (!function_exists('rh_fd_still_to_arrive_statuses')) {
         return $n > 0 ? 'Tentative holds (not counted): ' . $n : '';
     }
 }
+
+if (!function_exists('rh_fd_rooms_booked_by_night')) {
+    /**
+     * Dashboard Rooms panel (owner fault 2026-11-12: "16 ready to sell" while tomorrow was full): how many room
+     * units are booked on each night. A night is held when check_in <= night < check_out (the checkout day is free;
+     * callers pass the effective checkout so an overdue in-house guest still holds tonight).
+     *
+     * $unitKeyByRoom: room id => unit key (a joined-only pair's two rooms share one key, so the pair counts once).
+     * $assigned: rows ['room_id', 'ci', 'co'] for every room a live booking holds (primary pointer AND booking_rooms).
+     * $unassigned: rows ['booking_id', 'ci', 'co', 'units'] for live bookings with no room yet; 'units' is how many
+     *              counted units the booking will take (1, or 2 for a joined booking whose rooms are counted apart).
+     * Returns night => ['booked' => int (capped at $totalUnits when > 0), 'unassigned' => bookings with no room yet].
+     */
+    function rh_fd_rooms_booked_by_night(array $unitKeyByRoom, array $assigned, array $unassigned, array $nights, int $totalUnits): array
+    {
+        $out = [];
+        foreach ($nights as $night) {
+            $night = (string)$night;
+            $keys = [];
+            foreach ($assigned as $a) {
+                $rid = (int)($a['room_id'] ?? 0);
+                if ($rid <= 0 || !((string)$a['ci'] <= $night && $night < (string)$a['co'])) {
+                    continue;
+                }
+                $keys[(string)($unitKeyByRoom[$rid] ?? ('r' . $rid))] = true;
+            }
+            $noRoom = [];
+            $noRoomUnits = 0;
+            foreach ($unassigned as $u) {
+                $bid = (int)($u['booking_id'] ?? 0);
+                if (isset($noRoom[$bid]) || !((string)$u['ci'] <= $night && $night < (string)$u['co'])) {
+                    continue;
+                }
+                $noRoom[$bid] = true;
+                $noRoomUnits += max(1, (int)($u['units'] ?? 1));
+            }
+            $booked = count($keys) + $noRoomUnits;
+            if ($totalUnits > 0) {
+                $booked = min($booked, $totalUnits);
+            }
+            $out[$night] = ['booked' => $booked, 'unassigned' => count($noRoom)];
+        }
+        return $out;
+    }
+
+    /**
+     * Per room: the guest in it now (checked-in, kept on check-out day and when overdue, latest arrival wins) and
+     * its next booking (the earliest live booking that is not checked in and has not ended). Rows: ['room_id', 'booking_id', 'status', 'ci', 'co', ...any other fields];
+     * 'co' is the effective checkout. Returns room id => ['current' => row|null, 'next' => row|null].
+     */
+    function rh_fd_room_booking_slots(array $rows, string $today): array
+    {
+        usort($rows, static function ($x, $y) {
+            return [(string)$x['ci'], (int)$x['booking_id']] <=> [(string)$y['ci'], (int)$y['booking_id']];
+        });
+        $out = [];
+        foreach ($rows as $r) {
+            $rid = (int)($r['room_id'] ?? 0);
+            $in = (string)$r['status'] === 'checked-in';
+            if ($rid <= 0 || (!$in && (string)$r['co'] <= $today)) {
+                continue;
+            }
+            $out[$rid] = $out[$rid] ?? ['current' => null, 'next' => null];
+            if ($in) {
+                $out[$rid]['current'] = $r; // rows run by arrival date: the latest checked-in stay is the one in the room
+            } elseif ($out[$rid]['next'] === null) {
+                $out[$rid]['next'] = $r;
+            }
+        }
+        return $out;
+    }
+
+    /** 'paid' (nothing left within BALANCE_TOLERANCE), 'partial' (something paid, something left) or 'unpaid'. */
+    function rh_fd_payment_state($amountDue, $amountPaid): string
+    {
+        $tol = rh_fd_balance_tolerance();
+        if ((float)$amountDue <= $tol) {
+            return 'paid';
+        }
+        return (float)$amountPaid > $tol ? 'partial' : 'unpaid';
+    }
+
+    /** Rooms panel / room insight line: "Tonight: 3 free of 17 · Tomorrow: 16 of 17 booked (2 with no room yet)". */
+    function rh_fd_rooms_outlook_line(int $units, int $freeTonight, int $bookedTomorrow, int $noRoomTomorrow): string
+    {
+        $s = 'Tonight: ' . $freeTonight . ' free of ' . $units . ' · Tomorrow: ' . $bookedTomorrow . ' of ' . $units . ' booked';
+        if ($noRoomTomorrow > 0) {
+            $s .= ' (' . $noRoomTomorrow . ' with no room yet)';
+        }
+        return $s;
+    }
+}

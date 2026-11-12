@@ -165,5 +165,49 @@ check(strpos($dash, "'payments.php?booking_type=' . urlencode(\$src) . '&booking
 check(strpos($dash, 'reports.php?type=accounting&range=today') === false && substr_count($dash, 'reports.php?tab=fnb&range=today') === 3, 'dashboard: restaurant revenue links open the F&B report');
 check(!preg_match('/htmlspecialchars\(\$(booking|d)\[\'room_name\'\]\)/', $dash), 'dashboard: room_name (NULL after LEFT JOIN) never passed raw to htmlspecialchars');
 
+// 2026-11-12 owner fault: "16 ready to sell" while tomorrow was almost full. Tonight / tomorrow tally (pure).
+$t0 = '2026-11-12'; $t1 = '2026-11-13'; $t2 = '2026-11-14'; $tm1 = '2026-11-11';
+$unitKeys = [18 => 'p1', 19 => 'p1']; // rooms 18 + 19 are one joined-only pair
+$asg = [];
+for ($r = 1; $r <= 16; $r++) { $asg[] = ['room_id' => $r, 'ci' => $t1, 'co' => '2026-11-16']; } // 16 confirmed from tomorrow
+$tally = rh_fd_rooms_booked_by_night([], $asg, [], [$t0, $t1], 17);
+eq($tally[$t0], ['booked' => 0, 'unassigned' => 0], '17 units, 16 booked from tomorrow: nothing booked tonight');
+eq($tally[$t1], ['booked' => 16, 'unassigned' => 0], '... tomorrow 16 of 17 booked');
+$pairAsg = [['room_id' => 18, 'ci' => $t0, 'co' => $t2], ['room_id' => 18, 'ci' => $t0, 'co' => $t2], ['room_id' => 19, 'ci' => $t0, 'co' => $t2]];
+eq(rh_fd_rooms_booked_by_night($unitKeys, $pairAsg, [], [$t0], 17)[$t0]['booked'], 1, 'joined-only pair (primary + both booking_rooms rows) counts once');
+eq(rh_fd_rooms_booked_by_night([], $pairAsg, [], [$t0], 17)[$t0]['booked'], 2, 'two rooms of a shared pair count as two rooms');
+$noRoom = [['booking_id' => 7, 'ci' => $t1, 'co' => $t2, 'units' => 1], ['booking_id' => 7, 'ci' => $t1, 'co' => $t2, 'units' => 1]];
+eq(rh_fd_rooms_booked_by_night([], $asg, $noRoom, [$t1], 17)[$t1], ['booked' => 17, 'unassigned' => 1], 'booking with no room yet counts once as booked and as "no room yet"');
+eq(rh_fd_rooms_booked_by_night([], [], [['booking_id' => 8, 'ci' => $t1, 'co' => $t2, 'units' => 2]], [$t1], 17)[$t1], ['booked' => 2, 'unassigned' => 1], 'unassigned joined booking whose rooms keep their own types takes two rooms');
+eq(rh_fd_rooms_booked_by_night([], $asg, [['booking_id' => 9, 'ci' => $t1, 'co' => $t2, 'units' => 2]], [$t1], 17)[$t1]['booked'], 17, 'booked never shown above the sellable rooms');
+eq(rh_fd_rooms_booked_by_night([], [['room_id' => 3, 'ci' => $tm1, 'co' => $t0]], [], [$t0], 17)[$t0]['booked'], 0, 'guest leaving today does not hold tonight (checkout day is free)');
+eq(rh_fd_rooms_booked_by_night([], [['room_id' => 3, 'ci' => $tm1, 'co' => $t1]], [], [$t0, $t1], 17), [$t0 => ['booked' => 1, 'unassigned' => 0], $t1 => ['booked' => 0, 'unassigned' => 0]], 'overdue in-house guest (effective checkout tomorrow) holds tonight only');
+eq(rh_fd_rooms_booked_by_night([], [], [], [$t0], 0)[$t0], ['booked' => 0, 'unassigned' => 0], 'no rooms: zeros, no error');
+$rm = (string)file_get_contents($root . '/includes/room-management.php');
+check(strpos($rm, '$statuses = getBookingStatusesThatBlockAvailability(true);') !== false && strpos($rm, "b.deleted_at IS NULL AND b.status IN (\$ph)") !== false, 'live booking rule = the engine\'s blocking statuses (cancelled / no-show / expired never counted)');
+check(strpos($rm, 'br.released_at IS NULL') !== false && strpos($rm, "rh_effective_checkout_sql('b')") !== false, 'tally reads booking_rooms (not just the primary room) and the effective checkout');
+
+// Room list insight: current guest and next booking per room.
+$slots = rh_fd_room_booking_slots([
+    ['room_id' => 1, 'booking_id' => 30, 'status' => 'confirmed', 'ci' => '2026-11-20', 'co' => '2026-11-22'],
+    ['room_id' => 1, 'booking_id' => 31, 'status' => 'confirmed', 'ci' => $t1, 'co' => '2026-11-16'],
+    ['room_id' => 1, 'booking_id' => 29, 'status' => 'checked-in', 'ci' => $tm1, 'co' => $t1],
+    ['room_id' => 2, 'booking_id' => 40, 'status' => 'checked-in', 'ci' => $tm1, 'co' => $t0], // due out today, still in
+    ['room_id' => 2, 'booking_id' => 41, 'status' => 'confirmed', 'ci' => $t0, 'co' => $t2],
+    ['room_id' => 3, 'booking_id' => 50, 'status' => 'checked-in', 'ci' => '2026-11-08', 'co' => $tm1], // overdue, still in
+    ['room_id' => 4, 'booking_id' => 60, 'status' => 'checked-out', 'ci' => $tm1, 'co' => $t0], // gone: not listed
+], $t0);
+eq([(int)$slots[1]['current']['booking_id'], (int)$slots[1]['next']['booking_id']], [29, 31], 'room: guest in now + earliest next booking');
+eq([(int)$slots[2]['current']['booking_id'], (int)$slots[2]['next']['booking_id']], [40, 41], 'check-out morning: guest due out today is still Current booking; the arrival tonight is Next');
+eq([(int)$slots[3]['current']['booking_id'], $slots[3]['next']], [50, null], 'overdue checked-in guest stays Current booking');
+check(!isset($slots[4]), 'checked-out stay ending today is neither current nor next');
+check(strpos($rm, "OR (b.deleted_at IS NULL AND b.status = 'checked-in')") !== false, 'room list reads every checked-in guest, even on check-out day');
+eq(rh_fd_payment_state(0.004, 0), 'paid', 'nothing left within tolerance = Paid');
+eq(rh_fd_payment_state(100, 50), 'partial', 'part paid = Partial');
+eq(rh_fd_payment_state(100, 0.005), 'unpaid', 'paid below tolerance = Unpaid');
+eq(rh_fd_rooms_outlook_line(17, 3, 16, 2), 'Tonight: 3 free of 17 · Tomorrow: 16 of 17 booked (2 with no room yet)', 'outlook line with bookings with no room');
+eq(rh_fd_rooms_outlook_line(17, 17, 16, 0), 'Tonight: 17 free of 17 · Tomorrow: 16 of 17 booked', 'outlook line, every booking has a room');
+check(strpos($dash, ' ready to sell') === false, 'dashboard: no "ready to sell" (it counted clean rooms now, not free rooms)');
+
 echo "\n$pass passed, $fail failed\n";
 exit($fail ? 1 : 0);
