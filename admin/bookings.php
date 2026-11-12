@@ -723,7 +723,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // - Cancel check-in (undo) allowed only when currently checked-in
             if ($new_status === 'checked-in') {
                 // Use centralized validation
-                $check = $pdo->prepare("SELECT id, status, payment_status, individual_room_id, booking_reference, check_in_date FROM bookings WHERE id = ?");
+                $check = $pdo->prepare("SELECT id, status, payment_status, individual_room_id, booking_reference, check_in_date" . rh_checkin_rule_select() . " FROM bookings WHERE id = ?");
                 $check->execute([$booking_id]);
                 $booking = $check->fetch(PDO::FETCH_ASSOC);
 
@@ -760,6 +760,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 logBookingCheckIn($booking_id, $booking['booking_reference'] ?? '', 'admin', $user['id'] ?? null, $user['full_name'] ?? null);
                 if ($roomGate['override']) {
                     logCheckInRoomNotReadyOverride($booking_id, (string)($booking['booking_reference'] ?? ''), $roomGate['rooms'], $user['id'] ?? null, $user['full_name'] ?? null);
+                }
+                if (!empty($validation['via_arrangement'])) {
+                    logCheckInUnderArrangement($booking_id, (string)($booking['booking_reference'] ?? ''), (string)$validation['arrangement_note'], $user['id'] ?? null, $user['full_name'] ?? null);
                 }
 
                 $scheduledCheckIn = new DateTime((string)($booking['check_in_date'] ?? 'today'));
@@ -3886,6 +3889,9 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                             <?php if ($bk_left_text !== ''): ?>
                                                 <br><strong class="bk-left-to-pay"><span class="bk-left-to-pay__amt"><?php echo htmlspecialchars($currency_symbol . ' ' . number_format($bk_left_to_pay, 2)); ?></span> left to pay</strong>
                                             <?php endif; ?>
+                                            <?php if (!empty($booking['checkin_without_payment']) && in_array((string)$booking['status'], ['pending', 'tentative', 'confirmed', 'checked-in'], true)): ?>
+                                                <br><small class="bk-arrangement-tag" title="<?php echo htmlspecialchars('May check in before paying' . (trim((string)($booking['checkin_arrangement_note'] ?? '')) !== '' ? ': ' . trim((string)$booking['checkin_arrangement_note']) : '') . '. The balance stays owed.', ENT_QUOTES); ?>">Pay-later arrangement</small>
+                                            <?php endif; ?>
                                             <?php if ($booking['payment_reference']): ?>
                                                 <br><small style="color: #666; font-size: 10px;">
                                                     <?php if ($bk_can_open_payment && (int)($booking['latest_payment_id'] ?? 0) > 0): ?>
@@ -3981,19 +3987,21 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                                     </button>
                                                 <?php elseif ($bk_status === 'confirmed'): ?>
                                                     <?php
-                                                    $is_paid = in_array($bk_payment_st, ['paid', 'partial', 'completed'], true);
+                                                    // Payment part of the one check-in rule (validateCheckIn): ok / nothing owed / arrangement / blocked.
+                                                    $ci_pay_gate = rh_checkin_payment_gate($booking);
+                                                    $is_paid = $ci_pay_gate !== 'blocked';
                                                     $checkin_date_reached = (string)$booking['check_in_date'] <= $today_str;
                                                     $can_checkin = $is_paid && $checkin_date_reached;
                                                     $checkin_error = !$is_paid
-                                                        ? 'Cannot check in: booking must have at least partial payment.'
+                                                        ? 'Cannot check in: booking must have at least partial payment (or Check in before payment switched on).'
                                                         : (!$checkin_date_reached ? 'Cannot check in: arrival date is ' . $booking['check_in_date'] . '.' : '');
                                                     $room_assigned_bool = !empty($booking['individual_room_id']) ? 'true' : 'false';
                                                     $checkin_attrs = 'data-booking-id="' . $bk_id . '" data-booking-ref="' . $bk_ref . '" data-guest-name="' . $bk_guest . (trim((string)($booking['room_guest_name'] ?? '')) !== '' ? htmlspecialchars(' (room guest: ' . $booking['room_guest_name'] . ')', ENT_QUOTES) : '')
                                                         . '" data-check-in-date="' . htmlspecialchars($booking['check_in_date'], ENT_QUOTES) . '" data-payment-status="' . htmlspecialchars((string)$bk_payment_st, ENT_QUOTES)
-                                                        . '" data-room-assigned="' . $room_assigned_bool . '" data-booking-status="confirmed"';
+                                                        . '" data-room-assigned="' . $room_assigned_bool . '" data-booking-status="confirmed" data-payment-gate="' . htmlspecialchars($ci_pay_gate, ENT_QUOTES) . '"';
                                                     ?>
                                                     <?php if ($_perm_checkin && $checkin_date_reached): /* arrivals only from the arrival date */ ?>
-                                                        <button type="button" class="quick-action <?php echo $is_missed_checkin ? 'checkin--urgent' : 'checkin'; ?> <?php echo $can_checkin ? '' : 'disabled'; ?>" data-action="check-in" <?php echo $checkin_attrs; ?> title="<?php echo htmlspecialchars($can_checkin ? ($is_missed_checkin ? 'Late check-in' : 'Check in guest') : $checkin_error, ENT_QUOTES); ?>" aria-label="<?php echo $is_missed_checkin ? 'Late check-in' : 'Check in guest'; ?>" data-help="Check In Guest|Check the guest into their room. Requires at least partial payment and the arrival date to have come.">
+                                                        <button type="button" class="quick-action <?php echo $is_missed_checkin ? 'checkin--urgent' : 'checkin'; ?> <?php echo $can_checkin ? '' : 'disabled'; ?>" data-action="check-in" <?php echo $checkin_attrs; ?> title="<?php echo htmlspecialchars($can_checkin ? ($is_missed_checkin ? 'Late check-in' : 'Check in guest') : $checkin_error, ENT_QUOTES); ?>" aria-label="<?php echo $is_missed_checkin ? 'Late check-in' : 'Check in guest'; ?>" data-help="Check In Guest|Check the guest into their room. Requires at least partial payment (or nothing owed, or Check in before payment switched on for a pay-later arrangement) and the arrival date to have come.">
                                                             <i class="fas fa-right-to-bracket"></i>
                                                         </button>
                                                     <?php endif; ?>
@@ -6032,7 +6040,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                         <td data-label="Check-in Date" class="bookings-alert-modal__overdue-cell"><?php echo date('M j, Y', strtotime($bk['check_in_date'])); ?></td>
                                         <td data-label="Overdue"><span class="badge bookings-alert-modal__badge bookings-alert-modal__badge--danger"><?php echo $bk['days_overdue']; ?> day(s)</span></td>
                                         <td data-label="Actions" class="bookings-alert-modal__actions">
-                                            <button class="btn btn-sm btn-primary bookings-alert-modal__action-btn" type="button" onclick="openMissedCheckinWorkflow(<?php echo $bk['id']; ?>, '<?php echo htmlspecialchars($bk['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($bk['guest_name'], ENT_QUOTES); ?>', '<?php echo $bk['check_in_date']; ?>', '<?php echo htmlspecialchars((string)($bk['actual_payment_status'] ?? $bk['payment_status']), ENT_QUOTES); ?>', '<?php echo !empty($bk['individual_room_id']) ? 'true' : 'false'; ?>', '<?php echo $bk['status']; ?>', 'checkin')">Late Check-in</button>
+                                            <button class="btn btn-sm btn-primary bookings-alert-modal__action-btn" type="button" onclick="openMissedCheckinWorkflow(<?php echo $bk['id']; ?>, '<?php echo htmlspecialchars($bk['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($bk['guest_name'], ENT_QUOTES); ?>', '<?php echo $bk['check_in_date']; ?>', '<?php echo htmlspecialchars((string)($bk['actual_payment_status'] ?? $bk['payment_status']), ENT_QUOTES); ?>', '<?php echo !empty($bk['individual_room_id']) ? 'true' : 'false'; ?>', '<?php echo $bk['status']; ?>', 'checkin', '<?php echo htmlspecialchars(rh_checkin_payment_gate($bk), ENT_QUOTES); ?>')">Late Check-in</button>
                                             <button class="btn btn-sm btn-danger bookings-alert-modal__action-btn" type="button" onclick="openMissedCheckinWorkflow(<?php echo $bk['id']; ?>, '<?php echo htmlspecialchars($bk['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($bk['guest_name'], ENT_QUOTES); ?>', '<?php echo $bk['check_in_date']; ?>', '<?php echo htmlspecialchars((string)($bk['actual_payment_status'] ?? $bk['payment_status']), ENT_QUOTES); ?>', '<?php echo !empty($bk['individual_room_id']) ? 'true' : 'false'; ?>', '<?php echo $bk['status']; ?>', 'noshow')">Mark No-Show</button>
                                             <button class="btn btn-sm btn-secondary bookings-alert-modal__action-btn" type="button" onclick="openMissedCancelWorkflow(<?php echo $bk['id']; ?>, '<?php echo htmlspecialchars($bk['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($bk['guest_name'], ENT_QUOTES); ?>')">Cancel Booking</button>
                                         </td>
@@ -7348,7 +7356,9 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
         }
 
         // Check In Modal Functions
-        function openCheckInModal(bookingId, bookingReference, guestName, checkInDate, paymentStatus, roomAssigned, bookingStatus, mode = 'checkin') {
+        // paymentGate (optional): the server's payment rule for this booking (rh_checkin_payment_gate):
+        // 'paid' | 'nothing_owed' | 'arrangement' | 'blocked'. Missing = the old payment-status check.
+        function openCheckInModal(bookingId, bookingReference, guestName, checkInDate, paymentStatus, roomAssigned, bookingStatus, mode = 'checkin', paymentGate = '') {
             const safeMode = mode === 'noshow' ? 'noshow' : 'checkin';
             const modal = document.getElementById('checkInModal');
             const titleEl = document.getElementById('checkin_modal_title');
@@ -7371,7 +7381,10 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             document.getElementById('checkin_guest_name').value = guestName;
             document.getElementById('checkin_date').value = checkInDate;
 
-            const paymentOk = paymentStatus === 'paid' || paymentStatus === 'completed' || paymentStatus === 'partial';
+            const gate = String(paymentGate || '');
+            const paymentOk = gate !== ''
+                ? gate !== 'blocked'
+                : (paymentStatus === 'paid' || paymentStatus === 'completed' || paymentStatus === 'partial');
             const roomOk = roomAssigned === true || roomAssigned === '1' || roomAssigned === 'true';
             const statusOk = bookingStatus === 'confirmed';
 
@@ -7382,8 +7395,12 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             const isLateCheckIn = !Number.isNaN(checkInDateObj.getTime()) && checkInDateObj < todayObj;
             const overdueDays = isLateCheckIn ? Math.floor((todayObj - checkInDateObj) / 86400000) : 0;
 
-            document.getElementById('prereq_payment').innerHTML = '<i class="fas ' + (paymentOk ? 'fa-check-circle' : 'fa-times-circle') + '"></i> ' +
-                (paymentOk ? ('Payment: ' + paymentStatus) : 'Payment required (at least partial)');
+            const prereqPaymentEl = document.getElementById('prereq_payment');
+            prereqPaymentEl.innerHTML = '<i class="fas ' + (paymentOk ? 'fa-check-circle' : 'fa-times-circle') + '"></i> ';
+            prereqPaymentEl.appendChild(document.createTextNode(
+                gate === 'arrangement' ? 'Nothing paid yet: pay-later arrangement (balance stays owed)'
+                    : (gate === 'nothing_owed' ? 'Nothing owed on this booking'
+                    : (paymentOk ? ('Payment: ' + paymentStatus) : 'Payment required (at least partial)'))));
             document.getElementById('prereq_room').innerHTML = '<i class="fas ' + (roomOk ? 'fa-check-circle' : 'fa-exclamation-circle') + '" style="color:' + (roomOk ? '' : '#f0a500') + '"></i> ' +
                 (roomOk ? 'Room assigned' : 'No specific room assigned (auto-assign)');
             document.getElementById('prereq_status').innerHTML = '<i class="fas ' + (statusOk ? 'fa-check-circle' : 'fa-times-circle') + '"></i> ' +
@@ -7635,9 +7652,9 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             setBookingPageModalOpen(modal, !modal.classList.contains('active'));
         }
 
-        function openMissedCheckinWorkflow(bookingId, bookingReference, guestName, checkInDate, paymentStatus, roomAssigned, bookingStatus, mode = 'checkin') {
+        function openMissedCheckinWorkflow(bookingId, bookingReference, guestName, checkInDate, paymentStatus, roomAssigned, bookingStatus, mode = 'checkin', paymentGate = '') {
             closeMissedCheckinsModal();
-            openCheckInModal(bookingId, bookingReference, guestName, checkInDate, paymentStatus, roomAssigned, bookingStatus, mode);
+            openCheckInModal(bookingId, bookingReference, guestName, checkInDate, paymentStatus, roomAssigned, bookingStatus, mode, paymentGate);
         }
 
         function openMissedCancelWorkflow(bookingId, bookingReference, guestName) {
@@ -8484,7 +8501,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         const roomAssigned = button.dataset.roomAssigned === 'true' || button.dataset.roomAssigned === '1';
                         const bookingStatus = button.dataset.bookingStatus;
                         if (typeof openCheckInModal === 'function') {
-                            openCheckInModal(bookingId, bookingRef, guestName, checkInDate, paymentStatus, roomAssigned, bookingStatus);
+                            openCheckInModal(bookingId, bookingRef, guestName, checkInDate, paymentStatus, roomAssigned, bookingStatus, 'checkin', button.dataset.paymentGate || '');
                         }
                     } else if (action === 'no-show') {
                         event.preventDefault();

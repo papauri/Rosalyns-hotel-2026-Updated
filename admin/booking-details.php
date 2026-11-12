@@ -90,6 +90,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_bdNeed = rhBookingActionPermission('payment');
     } elseif (isset($_POST['charge_action'])) {
         $_bdNeed = rhBookingActionPermission((string)$_POST['charge_action']);
+    } elseif (isset($_POST['checkin_arrangement_save'])) {
+        $_bdNeed = 'edit_booking'; // pay-later check-in arrangement (owner 2026-11-12: anyone who can edit bookings)
     }
     if ($_bdNeed !== null && !hasPermission((int)($user['id'] ?? 0), $_bdNeed)) {
         $_bdMsg = 'You do not have permission to do that (' . (getAllPermissions()[$_bdNeed]['label'] ?? $_bdNeed) . ').';
@@ -424,6 +426,79 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['invoice_action'])) {
     }
 }
 
+// Pay-later check-in arrangement (owner 2026-11-12): anyone with Edit Booking switches "Check in before payment"
+// on or off with a short note (invoiced company, owner's stay). Only the check-in payment gate changes; the bill,
+// the balance owed and the checkout-with-balance rule stay as they are. Every change goes to the booking history.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['checkin_arrangement_save'])) {
+    $arrOn = !empty($_POST['checkin_without_payment']) ? 1 : 0;
+    $arrNote = trim((string)preg_replace('/\s+/u', ' ', (string)($_POST['checkin_arrangement_note'] ?? '')));
+    if (!hasPermission((int)($user['id'] ?? 0), 'edit_booking')) {
+        $_SESSION['error_message'] = 'You do not have permission to do that (Edit Booking).';
+    } elseif (!rh_checkin_arrangement_columns_present($pdo)) {
+        $_SESSION['error_message'] = 'Check in before payment is not available yet: database update 083 has not been run.';
+    } elseif ($arrOn && $arrNote === '') {
+        $_SESSION['error_message'] = 'Add a short note saying why the guest may check in before paying (for example "ICTAM - invoiced monthly" or "Owner\'s stay").';
+    } elseif (mb_strlen($arrNote) > 255) {
+        $_SESSION['error_message'] = 'The note is too long (255 characters maximum).';
+    } else {
+        $arrLog = null;
+        try {
+            $pdo->beginTransaction();
+            $arrSt = $pdo->prepare("SELECT booking_reference, status, checkin_without_payment, checkin_arrangement_note FROM bookings WHERE id = ? AND deleted_at IS NULL FOR UPDATE");
+            $arrSt->execute([$booking_id]);
+            $arrRow = $arrSt->fetch(PDO::FETCH_ASSOC);
+            if (!$arrRow) {
+                $pdo->rollBack();
+                $_SESSION['error_message'] = 'Booking not found.';
+            } elseif (!in_array((string)$arrRow['status'], ['pending', 'tentative', 'confirmed'], true)) {
+                $pdo->rollBack();
+                $_SESSION['error_message'] = 'Check in before payment can only be changed before the guest checks in.';
+            } else {
+                $oldOn = !empty($arrRow['checkin_without_payment']) ? 1 : 0;
+                $oldNote = trim((string)($arrRow['checkin_arrangement_note'] ?? ''));
+                $newNote = $arrOn ? $arrNote : '';
+                if ($oldOn === $arrOn && $oldNote === $newNote) {
+                    $pdo->rollBack();
+                    $_SESSION['success_message'] = 'Nothing changed.';
+                } else {
+                    $pdo->prepare("UPDATE bookings SET checkin_without_payment = ?, checkin_arrangement_note = ?, updated_at = NOW() WHERE id = ?")
+                        ->execute([$arrOn, $arrOn ? $newNote : null, $booking_id]);
+                    $pdo->commit();
+                    $arrLog = [(string)$arrRow['booking_reference'], $oldOn, $arrOn, $oldNote, $newNote];
+                    $_SESSION['success_message'] = $arrOn
+                        ? 'Check in before payment is on for this booking. The balance stays owed.'
+                        : 'Check in before payment is off: a payment is needed again before check-in.';
+                }
+            }
+        } catch (Throwable $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+            error_log('[checkin-arrangement] save failed for booking ' . $booking_id . ': ' . $e->getMessage());
+            $_SESSION['error_message'] = 'Could not save the change. Nothing was changed.';
+        }
+        if ($arrLog !== null) {
+            [$arrRef, $oldOn, $newOn, $oldNote, $newNote] = $arrLog;
+            $onOff = static function (int $v): string { return $v ? 'On' : 'Off'; };
+            if ($oldOn !== $newOn) {
+                $arrDesc = 'Check in before payment: ' . $onOff($oldOn) . ' → ' . $onOff($newOn) . '.'
+                    . ($newOn ? ' Note: ' . $newNote : ($oldNote !== '' ? ' Previous note: ' . $oldNote : ''));
+            } else {
+                $arrDesc = 'Check in before payment note: "' . $oldNote . '" → "' . $newNote . '".';
+            }
+            logBookingEvent(
+                (int)$booking_id, $arrRef,
+                $newOn ? ($oldOn ? 'Pay-later arrangement note changed' : 'Pay-later arrangement switched on') : 'Pay-later arrangement switched off',
+                'update', $arrDesc, $onOff($oldOn), $onOff($newOn), 'admin',
+                isset($user['id']) ? (int)$user['id'] : null, $user['full_name'] ?? null,
+                ['checkin_without_payment' => ['old' => $oldOn, 'new' => $newOn], 'arrangement_note' => ['old' => $oldNote, 'new' => $newNote]]
+            );
+        }
+    }
+    header('Location: booking-details.php?id=' . $booking_id);
+    exit;
+}
+
 // Handle status changes (POST-only)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
     $action = $_POST['booking_action'];
@@ -532,7 +607,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                 break;
 
             case 'checkin':
-                $check_stmt = $pdo->prepare("SELECT b.status, b.payment_status, b.individual_room_id, b.room_id, b.booking_reference, b.check_in_date, ir.status as room_status FROM bookings b LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id WHERE b.id = ?");
+                $check_stmt = $pdo->prepare("SELECT b.status, b.payment_status, b.individual_room_id, b.room_id, b.booking_reference, b.check_in_date" . rh_checkin_rule_select('b') . ", ir.status as room_status FROM bookings b LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id WHERE b.id = ?");
                 $check_stmt->execute([$booking_id]);
                 $check_row = $check_stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -557,6 +632,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                         logBookingCheckIn($booking_id, $check_row['booking_reference'], 'admin', $user['id'], $user['full_name']);
                         if ($roomGate['override']) {
                             logCheckInRoomNotReadyOverride((int)$booking_id, (string)$check_row['booking_reference'], $roomGate['rooms'], $user['id'] ?? null, $user['full_name'] ?? null);
+                        }
+                        if (!empty($validation['via_arrangement'])) {
+                            logCheckInUnderArrangement((int)$booking_id, (string)$check_row['booking_reference'], (string)$validation['arrangement_note'], $user['id'] ?? null, $user['full_name'] ?? null);
                         }
 
                         // Late check-in detection for audit trail
@@ -1506,7 +1584,10 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
 
                 <?php if ($booking['status'] == 'confirmed'): ?>
                     <?php
-                    $can_checkin = !in_array($booking['actual_payment_status'] ?? '', ['unpaid', ''], true);
+                    // Same payment rule as the check-in itself (validateCheckIn): a payment recorded, nothing owed,
+                    // or the booking's pay-later arrangement switched on.
+                    $ci_pay_gate = rh_checkin_payment_gate($booking);
+                    $can_checkin = $ci_pay_gate !== 'blocked';
                     $room_assigned = !empty($booking['individual_room_id']);
                     $check_in_date = new DateTime($booking['check_in_date']);
                     $check_in_date->setTime(0, 0, 0);
@@ -1514,7 +1595,8 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     $checkin_date_reached = $check_in_date <= $today;
                     $checkin_disabled_reason = '';
                     if (!$can_checkin) {
-                        $checkin_disabled_reason = 'At least a partial payment must be recorded before check-in';
+                        $checkin_disabled_reason = 'At least a partial payment must be recorded before check-in'
+                            . ($bdCanEditBooking && rh_checkin_arrangement_columns_present($pdo) ? ' (or switch on "Check in before payment" below for an agreed pay-later arrangement)' : '');
                     } elseif (!$room_assigned) {
                         $checkin_disabled_reason = 'Room must be assigned before check-in';
                     } elseif (!$checkin_date_reached) {
@@ -1540,7 +1622,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     <?php if ($bd_perm_checkin): ?><form method="POST" class="booking-action-form" data-admin-confirm="<?php echo $ci_room_override ? htmlspecialchars($ci_room_gate['message'], ENT_QUOTES) : 'Check in this guest and mark the assigned room occupied?'; ?>" data-admin-confirm-title="<?php echo $ci_room_override ? 'Room not marked clean' : 'Check in guest'; ?>" data-admin-confirm-ok="<?php echo $ci_room_override ? 'Check in anyway' : 'Check in'; ?>" data-admin-confirm-icon="fa-right-to-bracket" data-admin-submit-text="Checking in...">
                         <input type="hidden" name="booking_action" value="checkin">
                         <?php if ($ci_room_override): ?><input type="hidden" name="confirm_checkin_room_not_ready" value="1"><?php endif; ?>
-                        <button type="submit" class="action-btn checkin" data-help="Check In|Check the guest into their assigned room and mark the room occupied. Requires payment recorded, a room assigned, and the check-in date to have arrived." <?php echo ($can_checkin && $room_assigned && $checkin_date_reached) ? '' : 'disabled title="' . htmlspecialchars($checkin_disabled_reason) . '"'; ?>>
+                        <button type="submit" class="action-btn checkin" data-help="Check In|Check the guest into their assigned room and mark the room occupied. Requires a payment recorded (or nothing owed, or Check in before payment switched on), a room assigned, and the check-in date to have arrived." <?php echo ($can_checkin && $room_assigned && $checkin_date_reached) ? '' : 'disabled title="' . htmlspecialchars($checkin_disabled_reason) . '"'; ?>>
                             <i class="fas fa-right-to-bracket"></i> Check In
                         </button>
                     </form><?php endif; ?>
@@ -1697,6 +1779,37 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             <div class="booking-status-alert booking-status-alert--<?php echo htmlspecialchars($booking_alert_tone); ?>">
                 <i class="fas <?php echo $booking_alert_tone === 'danger' ? 'fa-triangle-exclamation' : ($booking_alert_tone === 'warning' ? 'fa-clock' : 'fa-circle-info'); ?>"></i>
                 <span><?php echo htmlspecialchars($booking_alert_message); ?></span>
+            </div>
+        <?php endif; ?>
+
+        <?php
+        // Pay-later check-in arrangement (owner 2026-11-12): Edit Booking holders switch it on/off before arrival;
+        // everyone else sees it read-only. Hidden until database update 083 has run.
+        $bd_arr_ready = rh_checkin_arrangement_columns_present($pdo);
+        $bd_arr_on = $bd_arr_ready && !empty($booking['checkin_without_payment']);
+        $bd_arr_note = $bd_arr_on ? trim((string)($booking['checkin_arrangement_note'] ?? '')) : '';
+        $bd_arr_editable = $bd_arr_ready && $bdCanEditBooking && !$bd_deleted
+            && in_array((string)$booking['status'], ['pending', 'tentative', 'confirmed'], true);
+        ?>
+        <?php if ($bd_arr_editable): ?>
+            <form method="POST" class="booking-status-alert booking-status-alert--info bd-arrangement" id="bd-checkin-arrangement">
+                <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
+                <input type="hidden" name="checkin_arrangement_save" value="1">
+                <label class="bd-arrangement__switch">
+                    <input type="checkbox" name="checkin_without_payment" value="1" id="bd-arr-on"<?php echo $bd_arr_on ? ' checked' : ''; ?>>
+                    <strong>Check in before payment</strong>
+                </label>
+                <span class="bd-arrangement__help">For an agreed pay-later arrangement (a company invoiced later, the owner's stay). The guest can be checked in with nothing paid; the balance stays owed.</span>
+                <label class="bd-arrangement__note">
+                    <span>Why (required when on)</span>
+                    <input type="text" name="checkin_arrangement_note" maxlength="255" placeholder="e.g. ICTAM - invoiced monthly" value="<?php echo htmlspecialchars($bd_arr_note, ENT_QUOTES); ?>">
+                </label>
+                <button type="submit" class="action-btn confirm"><i class="fas fa-floppy-disk"></i> Save</button>
+            </form>
+        <?php elseif ($bd_arr_on): ?>
+            <div class="booking-status-alert booking-status-alert--info">
+                <i class="fas fa-handshake"></i>
+                <span><strong>Pay-later arrangement:</strong> this guest may be checked in before paying<?php echo $bd_arr_note !== '' ? ' (' . htmlspecialchars($bd_arr_note) . ')' : ''; ?>. The balance stays owed.</span>
             </div>
         <?php endif; ?>
 

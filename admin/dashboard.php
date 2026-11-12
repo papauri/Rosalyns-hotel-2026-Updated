@@ -2474,7 +2474,12 @@ $currency_symbol = getSetting('currency_symbol');
                     <?php if ($checkin_bookings): ?>
                     <ul class="ck-rows">
                         <?php foreach ($checkin_bookings as $booking):
-                            $can_checkin = ($booking['status'] === 'confirmed' && $booking['payment_status'] === 'paid');
+                            // The one check-in rule (validateCheckIn): confirmed, arrival date reached, and a payment
+                            // recorded (partial is enough), nothing owed, or the pay-later arrangement switched on.
+                            $ci_rule = validateCheckIn($booking);
+                            $can_checkin = !empty($ci_rule['allowed']);
+                            $ci_block_msg = $can_checkin ? '' : getBookingActionErrorMessage('check_in', (string)$ci_rule['reason']);
+                            $ci_arrangement = !empty($booking['checkin_without_payment']);
                             $guestJs = htmlspecialchars(addslashes($booking['guest_name']), ENT_QUOTES, 'UTF-8'); ?>
                         <li class="ck-row" id="checkin-row-<?php echo (int)$booking['id']; ?>">
                             <span class="ck-avatar"><?php echo htmlspecialchars($initials((string)$booking['guest_name'])); ?></span>
@@ -2490,6 +2495,9 @@ $currency_symbol = getSetting('currency_symbol');
                                 <?php else: ?>
                                     <small class="ck-paid"><i class="fas fa-check"></i> Paid</small>
                                 <?php endif; ?>
+                                <?php if ($ci_arrangement): ?>
+                                    <span class="ck-chip ck-chip--muted" title="<?php echo htmlspecialchars('May check in before paying' . (trim((string)($booking['checkin_arrangement_note'] ?? '')) !== '' ? ': ' . trim((string)$booking['checkin_arrangement_note']) : '') . '. The balance stays owed.', ENT_QUOTES, 'UTF-8'); ?>">Pay-later arrangement</span>
+                                <?php endif; ?>
                             </span>
                             <span class="ck-row__act">
                                 <?php if (in_array($booking['status'], ['checked-in', 'checked-out'], true) || !$dash_perm('checkin_guest')): ?>
@@ -2498,7 +2506,8 @@ $currency_symbol = getSetting('currency_symbol');
                                 <button type="button" id="checkin-btn-<?php echo (int)$booking['id']; ?>"
                                     class="ck-btn ck-btn--sm <?php echo $can_checkin ? 'ck-btn--primary' : ''; ?>"
                                     <?php echo $can_checkin ? '' : 'aria-disabled="true"'; ?>
-                                    onclick="<?php echo $can_checkin ? "processCheckIn(" . (int)$booking['id'] . ", '" . $guestJs . "')" : "Alert.show('Cannot check in: booking must be CONFIRMED and PAID.', 'error')"; ?>">
+                                    <?php echo $can_checkin ? '' : 'title="' . htmlspecialchars($ci_block_msg, ENT_QUOTES, 'UTF-8') . '"'; ?>
+                                    onclick="<?php echo $can_checkin ? "processCheckIn(" . (int)$booking['id'] . ", '" . $guestJs . "')" : htmlspecialchars('Alert.show(' . json_encode($ci_block_msg, JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP) . ", 'error')", ENT_QUOTES, 'UTF-8'); ?>">
                                     <i class="fas fa-right-to-bracket"></i> Check in
                                 </button>
                                 <?php endif; ?>

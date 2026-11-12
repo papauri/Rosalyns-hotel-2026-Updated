@@ -2343,6 +2343,13 @@ table.bookings-table td small.bk-status-note {
     white-space: nowrap;
 }
 
+/* "Pay-later arrangement" tag under the payment badge (booking may check in before paying) */
+.bk-arrangement-tag {
+    color: var(--au-muted, #5f6b7a);
+    font-size: 11px;
+    font-weight: 600;
+}
+
 /* Up to 900px the Payment column is hidden (col-optional-md), so the Total cell carries "left to pay" (the phone row rule below lays it out at 640px and under). */
 @media (max-width: 900px) {
     table.bookings-table:not(.mobile-enhanced) .bk-ph-left {

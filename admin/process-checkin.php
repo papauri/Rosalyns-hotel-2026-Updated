@@ -62,10 +62,12 @@ try {
             echo json_encode(['success' => false, 'message' => $roomGate['message'], 'needs_confirm_room' => $roomGate['needs_confirm']]);
             exit;
         }
-        // One rule everywhere (validateCheckIn): confirmed, at least a partial payment, on/after arrival date.
-        $ciRowStmt = $pdo->prepare("SELECT status, payment_status, check_in_date FROM bookings WHERE id = ?");
+        // One rule everywhere (validateCheckIn): confirmed, on/after arrival date, and a payment recorded,
+        // nothing owed, or the booking's pay-later arrangement switched on.
+        $ciRowStmt = $pdo->prepare("SELECT status, payment_status, check_in_date" . rh_checkin_rule_select() . " FROM bookings WHERE id = ?");
         $ciRowStmt->execute([$booking_id]);
         $ciRow = $ciRowStmt->fetch(PDO::FETCH_ASSOC);
+        $ciRule = null;
         if ($ciRow) {
             $ciRule = validateCheckIn($ciRow);
             if (!$ciRule['allowed']) {
@@ -99,6 +101,9 @@ try {
             }
             if ($booking && $roomGate['override']) {
                 logCheckInRoomNotReadyOverride($booking_id, (string)$booking['booking_reference'], $roomGate['rooms'], $admin_user_id ?: null, $user['full_name'] ?? null);
+            }
+            if ($booking && !empty($ciRule['via_arrangement'])) {
+                logCheckInUnderArrangement($booking_id, (string)$booking['booking_reference'], (string)$ciRule['arrangement_note'], $admin_user_id ?: null, $user['full_name'] ?? null);
             }
 
             // Send status update email

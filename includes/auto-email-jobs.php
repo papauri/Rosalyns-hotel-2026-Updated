@@ -131,7 +131,7 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
         $tol = BALANCE_TOLERANCE;
         if ($type === 'room') {
             $st = $pdo->prepare("SELECT b.*, r.name AS room_name, r.image_url FROM bookings b JOIN rooms r ON r.id = b.room_id
-                WHERE b.id = ? AND b.status = 'checked-out' AND b.primary_booking_id IS NULL AND b.amount_due > ?");
+                WHERE b.id = ? AND b.status = 'checked-out' AND b.primary_booking_id IS NULL AND b.amount_due > ?" . rh_checkin_arrangement_exclude_sql('b'));
             $st->execute([$id, $tol]);
             $r = $st->fetch(PDO::FETCH_ASSOC);
             if (!$r) {
@@ -193,7 +193,8 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
             return array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
         };
         if (rh_auto_module_on('bookings')) {
-            $out['room'] = $run("SELECT b.id FROM bookings b WHERE b.status = 'checked-out' AND b.primary_booking_id IS NULL AND b.amount_due > ?
+            // Pay-later arrangements (checkin_without_payment) are agreed accounts: never chased automatically.
+            $out['room'] = $run("SELECT b.id FROM bookings b WHERE b.status = 'checked-out' AND b.primary_booking_id IS NULL AND b.amount_due > ?" . rh_checkin_arrangement_exclude_sql('b') . "
                 AND b.guest_email <> '' AND COALESCE(DATE(b.checkout_completed_at), b.check_out_date) BETWEEN (CURDATE() - INTERVAL ? DAY) AND (CURDATE() - INTERVAL ? DAY)
                 ORDER BY b.id LIMIT 200", [$tol, $lookback, $minDays]);
         }
@@ -634,13 +635,15 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
         return $res;
     }
 
-    /** Candidate ids: confirmed, nothing paid, check-in in the future, confirmed at least $minAgeHours ago. */
+    /** Candidate ids: confirmed, nothing paid, check-in in the future, confirmed at least $minAgeHours ago.
+     *  Bookings with an approved pay-later arrangement (checkin_without_payment) are never candidates. */
     function rh_auto_unpaid_candidates(PDO $pdo, int $minAgeHours): array
     {
         $noPay = rh_booking_has_payment_sql('b');
+        $noArr = rh_checkin_arrangement_exclude_sql('b');
         $st = $pdo->prepare("SELECT b.id FROM bookings b WHERE b.status = 'confirmed' AND b.check_in_date > CURDATE()
             AND GREATEST(b.created_at, COALESCE(b.converted_to_confirmed_at, b.created_at)) <= (NOW() - INTERVAL ? HOUR)
-            AND NOT {$noPay} ORDER BY b.check_in_date, b.id LIMIT 100");
+            AND NOT {$noPay}{$noArr} ORDER BY b.check_in_date, b.id LIMIT 100");
         $st->execute([$minAgeHours]);
         return array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
     }
@@ -720,7 +723,8 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
             $lock = $pdo->prepare("SELECT b.* FROM bookings b WHERE b.id = ? FOR UPDATE");
             $lock->execute([$id]);
             $b = $lock->fetch(PDO::FETCH_ASSOC);
-            $still = $pdo->prepare("SELECT 1 FROM bookings b WHERE b.id = ? AND b.status = 'confirmed' AND b.check_in_date > CURDATE() AND NOT {$noPay}");
+            // Re-checked under the lock: an arrangement switched on a second ago still saves the booking.
+            $still = $pdo->prepare("SELECT 1 FROM bookings b WHERE b.id = ? AND b.status = 'confirmed' AND b.check_in_date > CURDATE() AND NOT {$noPay}" . rh_checkin_arrangement_exclude_sql('b'));
             $still->execute([$id]);
             if (!$b || !$still->fetchColumn()) {
                 $pdo->rollBack();

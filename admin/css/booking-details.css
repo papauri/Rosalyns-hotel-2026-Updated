@@ -203,6 +203,35 @@
 .booking-status-alert--danger  { background: #fef2f2; color: #991b1b; border-color: #fecaca; }
 .booking-status-alert--info    { background: #f4f0ea; color: var(--bd-ink); border-color: var(--bd-line); }
 
+/* Pay-later check-in arrangement (switch + note, Edit Booking holders) */
+.bd-arrangement { align-items: flex-end; }
+.bd-arrangement__switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 44px;
+    cursor: pointer;
+}
+.bd-arrangement__switch input { width: 20px; height: 20px; margin: 0; }
+.bd-arrangement__help { flex: 1 1 260px; color: var(--bd-muted); font-size: 0.8rem; }
+.bd-arrangement__note {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    flex: 1 1 240px;
+    font-size: 0.75rem;
+    color: var(--bd-muted);
+}
+.bd-arrangement__note input {
+    min-height: 44px;
+    padding: 0 0.7rem;
+    border: 1px solid var(--bd-line);
+    border-radius: 6px;
+    font-size: 0.9rem;
+    color: var(--bd-ink);
+    background: #fff;
+}
+
 .bd-group-notice {
     background: #f4f0ea;
     border-color: #ddd2c2;

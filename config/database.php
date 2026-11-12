@@ -306,6 +306,11 @@ function rh_unpaid_confirmed_deadline(array $b): ?string
     if ($hours <= 0 || ($b['status'] ?? '') !== 'confirmed') {
         return null;
     }
+    // An approved pay-later arrangement (bookings.checkin_without_payment, migration 083) has no pay-by deadline:
+    // never "pay or lose your room", never auto-released. Missing key (column not there yet) = no arrangement.
+    if (!empty($b['checkin_without_payment'])) {
+        return null;
+    }
     if (empty($b['check_in_date']) || (string)$b['check_in_date'] <= date('Y-m-d')) {
         return null;
     }
@@ -2778,27 +2783,145 @@ function rh_room_label_with_guest(string $roomName, $roomGuestName): string
 }
 
 /**
- * Validate if a booking can be checked in
+ * True once migration 083 added bookings.checkin_without_payment and bookings.checkin_arrangement_note.
+ * A read-only information_schema probe (never DDL), cached once per request. Until the migration runs the
+ * pay-later arrangement is simply off everywhere and check-in works exactly as before.
+ */
+function rh_checkin_arrangement_columns_present(?PDO $db = null): bool
+{
+    static $cache = null;
+    if ($cache !== null) {
+        return $cache;
+    }
+    if ($db === null) {
+        $db = $GLOBALS['pdo'] ?? null;
+    }
+    if (!$db instanceof PDO) {
+        return false;
+    }
+    try {
+        $st = $db->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'bookings'
+            AND COLUMN_NAME IN ('checkin_without_payment', 'checkin_arrangement_note')");
+        $st->execute();
+        $cache = (int)$st->fetchColumn() === 2;
+    } catch (Throwable $e) {
+        error_log('[checkin-arrangement] column probe failed: ' . $e->getMessage());
+        $cache = false;
+    }
+    return $cache;
+}
+
+/**
+ * Extra SELECT columns the check-in rule reads, for queries that name their columns (a "b.*" query already has them).
+ * The arrangement columns are only named when migration 083 has run, so a SELECT never names a missing column.
+ * $alias: table alias without the dot ('' = none).
+ */
+function rh_checkin_rule_select(string $alias = ''): string
+{
+    $p = preg_replace('/[^A-Za-z0-9_]/', '', $alias);
+    $p = $p !== '' ? $p . '.' : '';
+    $cols = ", {$p}amount_due, {$p}amount_paid, {$p}total_amount, {$p}vat_amount, {$p}total_with_vat, {$p}folio_charges_total";
+    if (rh_checkin_arrangement_columns_present()) {
+        $cols .= ", {$p}checkin_without_payment, {$p}checkin_arrangement_note";
+    }
+    return $cols;
+}
+
+/**
+ * SQL to append to a WHERE on bookings: leaves out bookings with an approved pay-later arrangement
+ * (checkin_without_payment = 1) from the automatic payment chasers (unpaid-confirmed reminder / auto-release,
+ * overdue balance reminders). '' when migration 083 has not run, so no query ever names a missing column.
+ * $present = null: probe the database (cached); true/false: forced (pure tests).
+ */
+function rh_checkin_arrangement_exclude_sql(string $alias = 'b', ?bool $present = null): string
+{
+    if ($present === null) {
+        $present = rh_checkin_arrangement_columns_present();
+    }
+    if (!$present) {
+        return '';
+    }
+    $a = preg_replace('/[^A-Za-z0-9_]/', '', $alias);
+    return ' AND COALESCE(' . ($a !== '' ? $a . '.' : '') . 'checkin_without_payment, 0) = 0';
+}
+
+/**
+ * Whether a booking row shows nothing left to pay (e.g. a house stay priced at 0). Uses only what the row carries:
+ * amount_due, and when present the bill itself (total_with_vat, else total_amount + vat_amount, plus folio charges)
+ * minus amount_paid, so a stale amount_due of 0 on an unpaid bill never lets a booking through. No figures = false.
+ */
+function rh_checkin_owes_nothing(array $b): bool
+{
+    $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+    $known = false;
+    $owed = 0.0;
+    if (array_key_exists('amount_due', $b) && $b['amount_due'] !== null && is_numeric($b['amount_due'])) {
+        $known = true;
+        $owed = max($owed, (float)$b['amount_due']);
+    }
+    if (array_key_exists('amount_paid', $b) && (array_key_exists('total_with_vat', $b) || array_key_exists('total_amount', $b))) {
+        $bill = (float)($b['total_with_vat'] ?? 0);
+        if ($bill <= 0) {
+            $bill = (float)($b['total_amount'] ?? 0) + (float)($b['vat_amount'] ?? 0);
+        }
+        $bill += (float)($b['folio_charges_total'] ?? 0);
+        $known = true;
+        $owed = max($owed, round($bill - (float)$b['amount_paid'], 2));
+    }
+    return $known && $owed <= $tol;
+}
+
+/**
+ * Payment part of the check-in rule (validateCheckIn is the one rule; screens use this to label their gate):
+ *   'paid'         payment_status shows a payment (partial is enough; the balance is collected at reception)
+ *   'nothing_owed' nothing paid but nothing is owed either (e.g. a stay priced at 0)
+ *   'arrangement'  nothing paid, but the booking has "Check in before payment" switched on (agreed pay-later
+ *                  arrangement: invoiced company, owner's stay). The balance stays owed and visible.
+ *   'blocked'      none of the above
+ * A row without the checkin_without_payment key (column missing / not selected) = arrangement off.
+ */
+function rh_checkin_payment_gate(array $booking): string
+{
+    $ps = (string)($booking['payment_status'] ?? '');
+    if ($ps !== 'unpaid' && $ps !== '') {
+        return 'paid';
+    }
+    if (rh_checkin_owes_nothing($booking)) {
+        return 'nothing_owed';
+    }
+    if (!empty($booking['checkin_without_payment'])) {
+        return 'arrangement';
+    }
+    return 'blocked';
+}
+
+/**
+ * Validate if a booking can be checked in. The ONE check-in rule: confirmed, arrival date reached, and either some
+ * payment recorded, nothing owed, or the pay-later arrangement switched on for this booking.
  *
- * @param array $booking Booking record (must include status, payment_status, individual_room_id, check_in_date)
- * @return array ['allowed' => bool, 'reason' => string]
+ * @param array $booking Booking record (must include status, payment_status, check_in_date; optional amount_due /
+ *                       amount_paid / total_with_vat / folio_charges_total / checkin_without_payment / checkin_arrangement_note)
+ * @return array ['allowed' => bool, 'reason' => string, 'via_arrangement' => bool, 'arrangement_note' => string]
+ *               via_arrangement = true only when the pay-later arrangement alone let it through.
  */
 function validateCheckIn(array $booking): array
 {
     $requiredFields = ['status', 'payment_status', 'check_in_date'];
     foreach ($requiredFields as $field) {
         if (!array_key_exists($field, $booking)) {
-            return ['allowed' => false, 'reason' => "Missing required field: {$field}"];
+            return ['allowed' => false, 'reason' => "Missing required field: {$field}", 'via_arrangement' => false, 'arrangement_note' => ''];
         }
     }
 
     if ($booking['status'] !== 'confirmed') {
-        return ['allowed' => false, 'reason' => "Booking must be CONFIRMED to check in (current: {$booking['status']})"];
+        return ['allowed' => false, 'reason' => "Booking must be CONFIRMED to check in (current: {$booking['status']})", 'via_arrangement' => false, 'arrangement_note' => ''];
     }
 
-    // Unpaid bookings cannot check in; partial payment is allowed (balance collected at reception)
-    if ($booking['payment_status'] === 'unpaid' || $booking['payment_status'] === '') {
-        return ['allowed' => false, 'reason' => "Booking must have at least a partial payment to check in (current: {$booking['payment_status']})"];
+    // Unpaid bookings cannot check in unless nothing is owed or a pay-later arrangement is on;
+    // partial payment is allowed (balance collected at reception).
+    $payGate = rh_checkin_payment_gate($booking);
+    if ($payGate === 'blocked') {
+        return ['allowed' => false, 'reason' => "Booking must have at least a partial payment to check in (current: {$booking['payment_status']})", 'via_arrangement' => false, 'arrangement_note' => ''];
     }
 
     // individual_room_id is NOT a hard requirement — not all properties track physical room numbers,
@@ -2810,10 +2933,34 @@ function validateCheckIn(array $booking): array
     $today = new DateTime('today');
 
     if ($check_in_date > $today) {
-        return ['allowed' => false, 'reason' => "Check-in date has not been reached yet (check-in: {$booking['check_in_date']})"];
+        return ['allowed' => false, 'reason' => "Check-in date has not been reached yet (check-in: {$booking['check_in_date']})", 'via_arrangement' => false, 'arrangement_note' => ''];
     }
 
-    return ['allowed' => true, 'reason' => ''];
+    $viaArrangement = $payGate === 'arrangement';
+    return [
+        'allowed' => true,
+        'reason' => '',
+        'via_arrangement' => $viaArrangement,
+        'arrangement_note' => $viaArrangement ? trim((string)($booking['checkin_arrangement_note'] ?? '')) : '',
+    ];
+}
+
+/**
+ * Timeline entry after a check-in that went ahead only because of the pay-later arrangement
+ * ("Checked in under pay-later arrangement: <note>"). Call it only when validateCheckIn() said via_arrangement.
+ */
+function logCheckInUnderArrangement(int $bookingId, string $bookingReference, string $note, ?int $userId, ?string $userName = null): void
+{
+    if (!function_exists('logBookingEvent')) {
+        require_once __DIR__ . '/../includes/booking-timeline.php';
+    }
+    $note = trim($note);
+    logBookingEvent(
+        $bookingId, $bookingReference, 'Checked in under pay-later arrangement', 'update',
+        'Checked in under pay-later arrangement: ' . ($note !== '' ? $note : '(no note)') . '. Nothing had been paid; the balance stays owed.',
+        null, null, 'admin', $userId, $userName,
+        ['checkin_without_payment' => 1, 'arrangement_note' => $note]
+    );
 }
 
 /**
@@ -3176,7 +3323,7 @@ function getBookingActionErrorMessage(string $action, string $reason): string
     $messages = [
         'check_in' => [
             'status' => 'Cannot check in: Booking must be confirmed first.',
-            'payment' => 'Cannot check in: Payment must be completed first.',
+            'payment' => 'Cannot check in: record at least a partial payment first, or (for an agreed pay-later arrangement) switch on "Check in before payment" on the booking.',
             'room' => 'Cannot check in: Please assign a room first.',
             'date' => 'Cannot check in: Check-in date has not been reached yet.',
         ],
