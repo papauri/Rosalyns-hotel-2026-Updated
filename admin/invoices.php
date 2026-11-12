@@ -506,7 +506,8 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
         <div class="ck-kpis ck-kpis--4">
             <?php /* Each card opens the rows behind its figure (data-href, admin-main.js): Paid and Generated jump to the
                      invoice list below (same filters); Outstanding and Refunded open Payments when the user may see it. */
-            $invCardRefundsHref = 'payments.php?' . http_build_query(array_filter(['refund_status' => 'completed,processing', 'booking_type' => $filter_type !== 'all' ? $filter_type : ''], static fn($v) => $v !== '')); ?>
+            // Refunded: the refund rows of this same list (type, search and module scoping kept), shown right here.
+            $invCardRefundsHref = 'invoices.php?' . http_build_query(array_merge($_GET, ['filter_status' => 'refunds', 'page' => null])) . '#invoiceList'; ?>
             <div class="ck-kpi ck-kpi--good" data-href="#invoiceList" title="Go to the invoice list">
                 <span class="ck-kpi__label">Paid &amp; Closed</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($invoiceKpi['paid_total'] ?? 0), 0); ?></span>
@@ -532,7 +533,7 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                     ?>
                 </span>
             </div>
-            <div class="ck-kpi ck-kpi--info"<?php if ($invCanPayments): ?> data-href="<?php echo htmlspecialchars($invCardRefundsHref); ?>" title="Open these refunds in Payments"<?php endif; ?>>
+            <div class="ck-kpi ck-kpi--info"<?php if (in_array($filter_status, ['all', 'refunds'], true)): // another status filter would not match the figure ?> data-href="<?php echo htmlspecialchars($invCardRefundsHref); ?>" title="Show these refunds in the list"<?php endif; ?>>
                 <span class="ck-kpi__label">Refunded / Credit</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($invoiceKpi['refunded_total'] ?? 0), 0); ?></span>
                 <span class="ck-kpi__sub"><?php echo number_format((int)($invoiceKpi['refunded_count'] ?? 0)); ?> refund<?php echo (int)($invoiceKpi['refunded_count'] ?? 0) === 1 ? '' : 's'; ?> paid or in progress</span>
@@ -677,6 +678,7 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                             <option value="paid" <?php echo $filter_status === 'paid' ? 'selected' : ''; ?>>Paid</option>
                             <option value="completed" <?php echo $filter_status === 'completed' ? 'selected' : ''; ?>>Completed</option>
                             <option value="refunded" <?php echo $filter_status === 'refunded' ? 'selected' : ''; ?>>Refunded</option>
+                            <option value="refunds" <?php echo $filter_status === 'refunds' ? 'selected' : ''; ?>>Refund rows (paid out or being paid)</option>
                             <option value="cancelled" <?php echo $filter_status === 'cancelled' ? 'selected' : ''; ?>>Cancelled</option>
                         </select>
                     </div>

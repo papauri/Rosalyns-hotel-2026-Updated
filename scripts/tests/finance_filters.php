@@ -77,6 +77,8 @@ $r = rh_fin_payments_where(['search' => 'x'], 'txn; DROP TABLE x', ['company' =>
 check(strpos($r['sql'], 'DROP') === false && strpos($r['sql'], 'p.transaction_id') !== false && strpos($r['sql'], 'ci.company_name') !== false, 'bad column names fall back to safe defaults');
 $r = rh_fin_payments_where(['end_date' => '2026-11-12'], 'transaction_reference', $conf);
 eq($r, ['sql' => 'WHERE p.deleted_at IS NULL AND p.payment_date < DATE_ADD(?, INTERVAL 1 DAY)', 'params' => ['2026-11-12']], 'payments To date is whole-day');
+$r = rh_fin_payments_where(['status' => 'received'], 'transaction_reference', $conf);
+eq($r, ['sql' => "WHERE p.deleted_at IS NULL AND p.payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(p.payment_type, '') <> 'refund'", 'params' => []], 'payments status=received = the Collected / Today rule (refund rows out)');
 $from = rh_fin_payments_from();
 foreach (["bookings b ON p.booking_type = 'room' AND p.booking_id = b.id", "gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id", "event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id"] as $j) {
     check(strpos($from, $j) !== false, 'payments joins on the primary key: ' . explode(' ', $j)[0]);
@@ -94,6 +96,7 @@ foreach (['all', 'room', 'event'] as $t) foreach ([[], ['room', 'restaurant']] a
 check($invOk, "invoices: identical and ? count == param count ($m inputs)");
 check($invInj, 'invoices: user text only ever travels as a bound param');
 eq(rh_fin_invoices_where(['type' => 'all', 'status' => 'all', 'search' => '']), ['sql' => 'WHERE p.deleted_at IS NULL', 'params' => []], 'invoices: no filters');
+eq(rh_fin_invoices_where(['type' => 'all', 'status' => 'refunds', 'search' => '']), ['sql' => "WHERE p.deleted_at IS NULL AND p.payment_type = 'refund' AND p.refund_status IN ('completed','processing')", 'params' => []], 'invoices: status=refunds = the Refunded card rule');
 $r = rh_fin_invoices_where(['type' => 'gym', 'scope_types' => ['room'], 'status' => 'paid', 'search' => ' A1 '], $conf);
 check(strpos($r['sql'], 'WHERE p.deleted_at IS NULL AND p.booking_type = ? AND p.payment_status = ? AND (') === 0, 'invoices: type, status, then search');
 eq(array_slice($r['params'], 0, 2), ['gym', 'paid'], 'invoices: type and status params first');
@@ -177,7 +180,8 @@ eq(rh_fin_payments_where(['refund_status' => 'processing,pending'], 'transaction
 eq(rh_fin_payments_where(['refund_status' => 'pending'], 'transaction_reference', $conf), ['sql' => "WHERE p.deleted_at IS NULL AND p.payment_type = 'refund' AND p.refund_status = ?", 'params' => ['pending']], 'payments: single refund status unchanged');
 eq(rh_fin_payments_where(['refund_status' => "x,{$evil}"], 'transaction_reference', $conf), ['sql' => 'WHERE p.deleted_at IS NULL', 'params' => []], 'payments: junk refund set adds no clause');
 check(strpos($pay, "\$refundStatusList = rh_fin_refund_statuses(rh_fin_get_str(\$_GET, 'refund_status'));") !== false, 'payments: page reads the refund set through the whitelist');
-check(strpos($pay, "\$scopeActive         = \$bookingType === '' && !\$scopeAll && \$refundStatus === ''") !== false, 'payments: refund queue is not module-scoped (matches the Dashboard count)');
+check(strpos($pay, "\$scopeActive         = \$bookingType === '' && !\$scopeAll && (\$refundStatus === '' || \$scopeKeep)") !== false, 'payments: refund queue is not module-scoped (matches the Dashboard count) unless ?scope=modules (the Refunds card link)');
+check(strpos($pay, "\$scopeKeep           = (rh_fin_get_str(\$_GET, 'scope') === 'modules');") !== false, 'payments: only ?scope=modules keeps scoping on a refund list');
 check(strpos($pay, "array_merge(\$_GET, ['refund_status' => null, 'page' => null])") !== false && strpos($pay, 'name="refund_status"') !== false, 'payments: refund notice has Clear; the filter form keeps the set');
 
 // ---- accounts owing: no '#' links; links only to users who can open the page

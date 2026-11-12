@@ -195,6 +195,9 @@ if (!function_exists('rh_fin_valid_date')) {
         if ($status === 'pending_partial') {
             // The Payments "Pending / Partial" card: pending or partial, refund rows excluded.
             $where[] = "p.payment_status IN ('pending','partial') AND COALESCE(p.payment_type, '') <> 'refund'";
+        } elseif ($status === 'received') {
+            // Money received (the Collected / Today figures): received statuses, refund rows excluded.
+            $where[] = "p.payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(p.payment_type, '') <> 'refund'";
         } elseif ($status !== '') {
             $where[] = 'p.payment_status = ?';
             $params[] = $status;
@@ -264,7 +267,10 @@ if (!function_exists('rh_fin_valid_date')) {
         $type = $type === 'all' ? '' : $type;
         $where = array_merge($where, rh_fin_type_conditions('p.booking_type', $type, $type === '' ? (array)($f['scope_types'] ?? []) : [], $params));
         $status = rh_fin_get_str($f, 'status', 'all');
-        if ($status !== 'all' && $status !== '') {
+        if ($status === 'refunds') {
+            // The Invoices "Refunded / Credit" card: refund rows paid out or being paid (rh_refund_settled_sql rule).
+            $where[] = "p.payment_type = 'refund' AND p.refund_status IN ('completed','processing')";
+        } elseif ($status !== 'all' && $status !== '') {
             $where[] = 'p.payment_status = ?';
             $params[] = $status;
         }

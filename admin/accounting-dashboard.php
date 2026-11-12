@@ -966,6 +966,7 @@ if (!isset($folio_fnb)) {
             $acctRfListHref = 'payments.php?' . http_build_query(['start_date' => $startDate, 'end_date' => $endDate, 'refund_status' => 'completed,processing']);
             $acctRfPendingHref = 'payments.php?' . http_build_query(['start_date' => $startDate, 'end_date' => $endDate, 'refund_status' => 'pending']);
             $acctRfCanDetails = function_exists('rhCanLinkTo') && rhCanLinkTo((int)($user['id'] ?? 0), 'payment-details.php');
+            $acctRfCanPayments = function_exists('rhCanLinkTo') && rhCanLinkTo((int)($user['id'] ?? 0), 'payments.php');
             $acctRfCur = htmlspecialchars((string)$currency_symbol);
             ?>
             <p class="acct-insight-intro">Refunds <?php echo $showAll ? 'on all dates' : 'dated ' . htmlspecialchars(date('j M Y', strtotime($startDate)) . ' - ' . date('j M Y', strtotime($endDate))); ?>, VAT included. A refund counts once it is paid out or being paid; refunds awaiting approval are shown on their own and are not in the total.</p>
@@ -1031,10 +1032,12 @@ if (!isset($folio_fnb)) {
             <?php else: ?>
             <p class="acct-insight-intro" style="margin-top:14px;">No refunds in these dates.</p>
             <?php endif; ?>
+            <?php if ($acctRfCanPayments): ?>
             <div class="acct-insight-actions">
                 <a href="<?php echo htmlspecialchars($acctRfListHref); ?>" class="acct-btn acct-btn--primary">Open these refunds in Payments</a>
                 <?php if ($cat_pending_refunds > BALANCE_TOLERANCE): ?><a href="<?php echo htmlspecialchars($acctRfPendingHref); ?>" class="acct-btn acct-btn--ghost">Open refunds awaiting approval</a><?php endif; ?>
             </div>
+            <?php endif; ?>
         </template>
 
         <template id="acct-insight-template-vat-collected">

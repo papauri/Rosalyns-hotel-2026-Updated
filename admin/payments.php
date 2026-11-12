@@ -52,10 +52,13 @@ $has_active_payment_filters = $bookingType !== '' || $bookingId > 0 || $status !
 // (a gym sees gym/event/till payments, not room-booking history). Explicit
 // ?booking_type= deep links and ?scope=all bypass it; nothing is ever deleted.
 $scopeAll            = (rh_fin_get_str($_GET, 'scope') === 'all');
+// ?scope=modules keeps module scoping on a refund-status list (the Refunds card link), so the list shows exactly the
+// refunds its figure counted on a preset with modules switched off.
+$scopeKeep           = (rh_fin_get_str($_GET, 'scope') === 'modules');
 $allBookingTypes     = ['room', 'conference', 'restaurant', 'gym', 'event'];
 $enabledBookingTypes = function_exists('rh_enabled_booking_types') ? rh_enabled_booking_types() : [];
 // A refund-status queue is never module-scoped: it lists every refund in that state, as the Dashboard counts them.
-$scopeActive         = $bookingType === '' && !$scopeAll && $refundStatus === ''
+$scopeActive         = $bookingType === '' && !$scopeAll && ($refundStatus === '' || $scopeKeep)
     && !empty($enabledBookingTypes)
     && count($enabledBookingTypes) < count($allBookingTypes);
 $hiddenBookingTypes  = $scopeActive ? array_values(array_diff($allBookingTypes, $enabledBookingTypes)) : [];
@@ -499,8 +502,10 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                Still owed the accounts owing, Today today's payments, Refunds the refund rows paid out or being paid
                (refund_status=completed,processing: payment_type 'refund', the same rule as the figure). */
             $payCardOwedHref = 'payments.php?' . http_build_query(array_filter(['balance' => 'outstanding', 'booking_type' => $bookingType], static fn($v) => $v !== ''));
-            $payCardTodayHref = 'payments.php?' . http_build_query(['start_date' => $today, 'end_date' => $today]); // the figure ignores the other filters
-            $payCardRefundsHref = 'payments.php?' . http_build_query(array_merge($_GET, ['refund_status' => 'completed,processing', 'status' => null, 'page' => 1, 'balance' => null, 'export' => null])); ?>
+            // Today: money received today from every source, as the figure counts it (no other filter, no module scoping).
+            $payCardTodayHref = 'payments.php?' . http_build_query(['start_date' => $today, 'end_date' => $today, 'status' => 'received', 'scope' => 'all']);
+            // Refunds: the same filters as the figure (status included) and the same module scoping.
+            $payCardRefundsHref = 'payments.php?' . http_build_query(array_merge($_GET, ['refund_status' => 'completed,processing', 'page' => 1, 'balance' => null, 'export' => null], $scopeActive ? ['scope' => 'modules'] : [])); ?>
             <div class="ck-kpi ck-kpi--good" data-href="#payBreakdown" title="Open the breakdown by source, method and status">
                 <span class="ck-kpi__label">Collected (filtered)</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format($gross_collected_total, 0); ?></span>
@@ -680,6 +685,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
             <?php if ($limit !== 10): // keep the rows-per-page choice when the filters change ?><input type="hidden" name="size" value="<?php echo (int)$limit; ?>"><?php endif; ?>
             <?php if ($refundStatus !== ''): // keep the refund-status filter when the other filters change ?>
             <input type="hidden" name="refund_status" value="<?php echo htmlspecialchars($refundStatus); ?>">
+            <?php if ($scopeKeep): ?><input type="hidden" name="scope" value="modules"><?php endif; ?>
             <?php endif; ?>
             <div class="filter-form">
                 <div class="filter-group">
@@ -708,6 +714,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                     <label>Status</label>
                     <select name="status">
                         <option value="">All Statuses</option>
+                        <option value="received" <?php echo $status === 'received' ? 'selected' : ''; ?>>Received (money in, refunds left out)</option>
                         <option value="pending_partial" <?php echo $status === 'pending_partial' ? 'selected' : ''; ?>>Pending or partial</option>
                         <option value="pending" <?php echo $status === 'pending' ? 'selected' : ''; ?>>Pending</option>
                         <option value="partial" <?php echo $status === 'partial' ? 'selected' : ''; ?>>Partial</option>
@@ -754,7 +761,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
 
         <?php if ($refundStatus !== ''): ?>
             <div style="background:#fff7ed; border:1px solid #fed7aa; border-radius:10px; padding:10px 14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:#7c2d12;">
-                <span><i class="fas fa-rotate-left" style="margin-right:6px;"></i>Showing refunds that are <strong><?php echo htmlspecialchars(implode(' or ', array_map(static fn($k) => $refundStatusLabels[$k], $refundStatusList))); ?></strong> only<?php echo $bookingType === '' ? ', from every source' : ''; ?>.</span>
+                <span><i class="fas fa-rotate-left" style="margin-right:6px;"></i>Showing refunds that are <strong><?php echo htmlspecialchars(implode(' or ', array_map(static fn($k) => $refundStatusLabels[$k], $refundStatusList))); ?></strong> only<?php echo $bookingType === '' ? ($scopeActive ? ', from the sections switched on' : ', from every source') : ''; ?>.</span>
                 <a href="?<?php echo htmlspecialchars(http_build_query(array_merge($_GET, ['refund_status' => null, 'page' => null]))); ?>" style="color:#7E684B; font-weight:600; text-decoration:none;"><i class="fas fa-times"></i> Clear</a>
             </div>
         <?php endif; ?>
@@ -783,7 +790,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
         <?php elseif ($scopeAll && $bookingType === ''): ?>
             <div style="background:#faf8f4; border:1px solid #e5d9c9; border-radius:10px; padding:10px 14px; margin:0 0 14px; display:flex; align-items:center; justify-content:space-between; gap:12px; flex-wrap:wrap; font-size:13px; color:#7a6f63;">
                 <span><i class="fas fa-clock-rotate-left" style="margin-right:6px;"></i>Showing full payment history, including records from disabled modules.</span>
-                <a href="?<?php echo htmlspecialchars(http_build_query($scopeQs)); ?>" style="color:#7E684B; font-weight:600; text-decoration:none;">Show relevant only &rarr;</a>
+                <a href="?<?php echo htmlspecialchars(http_build_query($scopeQs + ($refundStatus !== '' ? ['scope' => 'modules'] : []))); // a refund list needs scope=modules to stay scoped ?>" style="color:#7E684B; font-weight:600; text-decoration:none;">Show relevant only &rarr;</a>
             </div>
         <?php endif; ?>
 
