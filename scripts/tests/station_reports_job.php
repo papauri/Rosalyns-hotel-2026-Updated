@@ -109,7 +109,8 @@ sr_check($iPlan !== false && $iBudget !== false && $iFetch !== false && $iZero !
     && $iPlan < $iBudget && $iBudget < $iFetch && $iFetch < $iZero && $iZero < $iClaim && $iClaim < $iSpend && $iSpend < $iSend,
     'order per station: plan -> budget -> fetch -> zero tickets = skipped row -> claim -> spend -> send', [$iPlan, $iBudget, $iFetch, $iZero, $iClaim, $iSpend, $iSend]);
 sr_check(strpos($fn, "\$cc = \$testMode ? [] : rh_daily_reports_cc(\$plan['recipients'], rh_auto_setting('automated_job_station_reports_cc'));") !== false, 'CC from its own setting on real sends, none on test sends');
-sr_check(strpos($fn, "'failed', \$msg);") !== false && strpos($fn, "'failed', \$e->getMessage());") !== false, 'failed send -> failed row (existing retry rules)');
+sr_check(strpos($fn, "rh_auto_record_send(\$pdo, \$k, is_array(\$r) && !empty(\$r['success']), \$msg, '', \$res, \$label . ' ' . \$date);") !== false
+    && strpos($fn, "\$msg = \$e->getMessage();") !== false, 'outcome recorded once: failed send -> failed row (retry rules); delivered is never marked failed (L3)');
 sr_check(strpos($fn, "if (!rh_auto_module_on('pos')) {") !== false && strpos($fn, 'if (!rh_station_enabled($station)) {') !== false, 'only enabled stations, and nothing when the till (POS) is off');
 sr_check(strpos($fn, "sprintf('[%s] Station Report — %s — %s', \$siteName, \$label, \$date)") !== false
     && strpos(sr_src('admin/kds-report.php'), "sprintf('[%s] Station Report — %s — %s', \$site_name, \$STATION_OPTIONS[\$reqStation], \$reqDate)") !== false, 'subject matches the manual Email button');
@@ -167,8 +168,12 @@ sr_check(strpos($kr, 'function rh_fmt_dur') === false && strpos($kr, 'function r
     && strpos($kr, "require_once __DIR__ . '/../includes/kds-report-data.php';") !== false, 'Station Report page: helpers come from the shared file (no redeclare when the timer runs on that page)');
 sr_check(strpos($kr, 'rh_kds_report_fetch($pdo, $reqStation, $dayStart, $dayEnd)') !== false && strpos($kr, '] = rh_kds_report_aggregate($rows);') !== false
     && strpos($kr, 'rh_kds_report_render_email(compact(') !== false, 'page uses the shared fetch / aggregate / render');
-sr_check(strpos($kr, "hasPermission((int)\$_SESSION['admin_user_id'], 'kds_reports')") !== false && strpos($kr, '$result = sendEmail($to, $to, $subject, $html, \'\');') !== false
-    && strpos($kr, "if (\$forcedStation) \$reqStation = \$forcedStation;") !== false, 'manual Email unchanged: kds_reports, one address, staff pinned to their station');
+sr_check(strpos($kr, "hasPermission((int)\$_SESSION['admin_user_id'], 'kds_reports')") !== false
+    && strpos($kr, "\$kdsDefaultTo = rh_station_reports_recipients(rh_auto_setting('automated_job_station_reports_to'), static fn(): array => rh_eod_report_recipients());") !== false
+    && strpos($kr, "\$kdsCc = rh_daily_reports_cc(\$kdsTo, rh_auto_setting('automated_job_station_reports_cc'));") !== false
+    && strpos($kr, "return sendReportEmail(\$route['recipients'], \$route['subject'], \$html, [], '', \$route['cc']);") !== false
+    && strpos($kr, "rh_email_context(['kind' => 'station_report'])") !== false
+    && strpos($kr, "if (\$forcedStation) \$reqStation = \$forcedStation;") !== false, 'manual Email = timed email people (L11): kds_reports, To prefilled with the station list, its CC, same mailer + log kind, staff pinned to their station');
 $kd = sr_src('includes/kds-report-data.php');
 sr_check(strpos($kd, "if (!function_exists('rh_fmt_dur')) {") !== false && strpos($kd, "if (!function_exists('rh_fmt_dt')) {") !== false, 'formatters guarded');
 
@@ -192,7 +197,13 @@ foreach (['automated_job_daily_reports_cc', 'automated_job_station_reports_to', 
     sr_check(substr_count($save, "updateSetting('$k'") === 1 && strpos($gate, "if (\$posted('$k')) {") !== false && strpos($gate, "updateSetting('$k'") !== false, "save: $k written only with the permission and only when posted");
 }
 sr_check(strpos($save, "if (!\$canTimedReports && in_array(\$jobName, \$timedReportJobs, true)) {\n                    continue;") !== false, 'save: without the permission the report job switches are not written');
-foreach (['automated_email_reminder_stages', 'automated_email_test_recipient', 'automated_email_payment_terms_days', 'automated_email_lookback_days', 'automated_email_quotation_days', 'automated_email_interval_minutes'] as $k) {
+// L16 (owner 2026-11-13): the test recipient and the master switch need timed_report_emails too.
+sr_check(strpos($save, "if (\$canTimedReports && \$posted('automated_email_test_recipient')) {") !== false
+    && strpos($save, "if (\$canTimedReports) {\n                updateSetting('automated_email_master',") !== false, 'save: test recipient and master switch written only with timed_report_emails');
+sr_check(strpos($ae, 'name="automated_email_test_recipient"') !== false && strpos($ae, "placeholder=\"empty = send to real customers\"<?php echo \$canTimedReports ? '' : ' disabled'; ?>") !== false
+    && strpos($ae, "name=\"automated_email_master\" value=\"1\" <?php echo \$cfg['automated_email_master'] === '1' ? 'checked' : ''; ?><?php echo \$canTimedReports ? '' : ' disabled'; ?>") !== false,
+    'test recipient + master switch shown disabled without the permission');
+foreach (['automated_email_reminder_stages', 'automated_email_payment_terms_days', 'automated_email_lookback_days', 'automated_email_quotation_days', 'automated_email_interval_minutes'] as $k) {
     sr_check(strpos($save, "if (\$posted('$k')) {") !== false && strpos($save, "if (\$posted('$k')) {") < strpos($save, "updateSetting('$k'"), "save: $k written only when its field was posted");
 }
 sr_check(strpos($save, 'return isset($_POST[$k]);') !== false, 'posted = isset($_POST[...])');

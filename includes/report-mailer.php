@@ -28,6 +28,27 @@ function sendReportEmail(array $recipients, string $subject, string $htmlBody, a
     global $smtp_host, $smtp_port, $smtp_username, $smtp_password, $smtp_secure, $smtp_timeout, $smtp_debug;
     global $email_log_enabled;
 
+    // Test mode (owner B3 2026-11-13): while the automated test context is set (the timer in test mode, or a clicked
+    // report send at a hotel in test mode - rh_report_with_test_ctx), a report goes ONLY to the test address,
+    // subject [TEST], with no visible copy and no hidden staff copy. An unusable test address fails closed.
+    $testTo = trim((string)($GLOBALS['rh_automated_ctx']['redirect'] ?? ''));
+    $isTest = $testTo !== '';
+    if ($isTest) {
+        $recipients = filter_var($testTo, FILTER_VALIDATE_EMAIL) ? [['email' => $testTo, 'name' => '']] : [];
+        $ccEmails = [];
+        if (strpos($subject, '[TEST]') !== 0) {
+            $subject = '[TEST] ' . $subject;
+        }
+    }
+
+    // Failures before a message exists still reach System Logs > Emails sent (L20).
+    $logEarly = static function (string $msg) use ($subject, $recipients): array {
+        if (function_exists('rh_email_send_log_mail')) {
+            rh_email_send_log_mail('failed', null, $subject, $msg, implode(', ', array_filter(array_map(static fn($r) => trim((string)($r['email'] ?? '')), $recipients))));
+        }
+        return ['success' => false, 'message' => $msg, 'sent_to' => []];
+    };
+
     $valid = [];
     foreach ($recipients as $r) {
         $email = trim((string)($r['email'] ?? ''));
@@ -36,11 +57,11 @@ function sendReportEmail(array $recipients, string $subject, string $htmlBody, a
         }
     }
     if (!$valid) {
-        return ['success' => false, 'message' => 'No valid recipients supplied', 'sent_to' => []];
+        return $logEarly($isTest ? 'Test mode is on but the test address is not a valid email, so nothing was sent' : 'No valid recipients supplied');
     }
 
     if (empty($smtp_host) || empty($smtp_username) || empty($smtp_password)) {
-        return ['success' => false, 'message' => 'SMTP is not fully configured', 'sent_to' => []];
+        return $logEarly('SMTP is not fully configured');
     }
 
     try {
@@ -80,8 +101,10 @@ function sendReportEmail(array $recipients, string $subject, string $htmlBody, a
             }
         }
         // Staff-only report: one hidden copy to the staff copy email while the switch is on, unless it is
-        // already a recipient (includes/email-identity.php).
-        rh_mail_add_staff_bcc($mail, (string)($valid[0]['email'] ?? ''), (bool)getEmailSetting('email_bcc_admin', 0));
+        // already a recipient (includes/email-identity.php). Never on a test send (L1).
+        if (!$isTest) {
+            rh_mail_add_staff_bcc($mail, (string)($valid[0]['email'] ?? ''), (bool)getEmailSetting('email_bcc_admin', 0));
+        }
 
         $mail->CharSet  = PHPMailer::CHARSET_UTF8;
         $mail->Encoding = PHPMailer::ENCODING_BASE64;
@@ -126,6 +149,9 @@ function sendReportEmail(array $recipients, string $subject, string $htmlBody, a
         return ['success' => false, 'message' => $e->getMessage(), 'sent_to' => []];
     } catch (Throwable $e) {
         error_log('sendReportEmail: ' . $e->getMessage());
+        if (function_exists('rh_email_send_log_mail')) {
+            rh_email_send_log_mail('failed', $mail ?? null, $subject, $e->getMessage(), implode(', ', array_column($valid, 'email')));
+        }
         return ['success' => false, 'message' => $e->getMessage(), 'sent_to' => []];
     }
 }

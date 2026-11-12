@@ -69,7 +69,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 updateSetting('automated_email_reminder_stages', implode(',', $stages));
             }
-            if ($posted('automated_email_test_recipient')) {
+            // The test recipient and the master switch decide where (and whether) the timed report emails go, so they
+            // need 'timed_report_emails' too (owner 2026-11-13, L16). Without it they are NOT written.
+            if ($canTimedReports && $posted('automated_email_test_recipient')) {
                 $testRecipient = trim((string)($_POST['automated_email_test_recipient'] ?? ''));
                 if ($testRecipient !== '' && !filter_var($testRecipient, FILTER_VALIDATE_EMAIL)) {
                     $testRecipient = '';
@@ -80,7 +82,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $flag = static function (string $k): string {
                 return isset($_POST[$k]) ? '1' : '0';
             };
-            updateSetting('automated_email_master', $flag('automated_email_master'));
+            if ($canTimedReports) {
+                updateSetting('automated_email_master', $flag('automated_email_master'));
+            }
             if ($posted('automated_email_payment_terms_days')) {
                 updateSetting('automated_email_payment_terms_days', (string)max(0, min(120, (int)($_POST['automated_email_payment_terms_days'] ?? 7))));
             }
@@ -272,8 +276,8 @@ $editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_remin
             <h2>Settings</h2>
 
             <div class="form-group">
-                <label class="ae-check"><input type="checkbox" name="automated_email_master" value="1" <?php echo $cfg['automated_email_master'] === '1' ? 'checked' : ''; ?>>
-                    <span><strong>Master switch</strong> &mdash; turn all automated EMAIL jobs on/off (the nightly backup is controlled by its own job switch below)</span></label>
+                <label class="ae-check"><input type="checkbox" name="automated_email_master" value="1" <?php echo $cfg['automated_email_master'] === '1' ? 'checked' : ''; ?><?php echo $canTimedReports ? '' : ' disabled'; ?>>
+                    <span><strong>Master switch</strong> &mdash; turn all automated EMAIL jobs on/off (the nightly backup is controlled by its own job switch below)<?php if (!$canTimedReports): ?><br><small class="help-text"><?php echo $esc($timedNote); ?></small><?php endif; ?></span></label>
             </div>
 
             <h3>Jobs</h3>
@@ -309,7 +313,8 @@ $editableTemplates = ['payment_reminder_1', 'payment_reminder_2', 'payment_remin
                 <div class="form-group"><label for="interval">Run interval (minutes)</label>
                     <input type="number" id="interval" name="automated_email_interval_minutes" class="form-control" min="5" max="1440" value="<?php echo (int)$cfg['automated_email_interval_minutes']; ?>"></div>
                 <div class="form-group"><label for="testrcpt">Test recipient (leave EMPTY in production)</label>
-                    <input type="email" id="testrcpt" name="automated_email_test_recipient" class="form-control" value="<?php echo $esc($cfg['automated_email_test_recipient']); ?>" placeholder="empty = send to real customers"></div>
+                    <input type="email" id="testrcpt" name="automated_email_test_recipient" class="form-control" value="<?php echo $esc($cfg['automated_email_test_recipient']); ?>" placeholder="empty = send to real customers"<?php echo $canTimedReports ? '' : ' disabled'; ?>>
+                    <p class="help-text">When set, every automated email and every report email (End of Day Email, Station Report Email) goes only to this address, marked [TEST], with no copies; the End of Day WhatsApp is not sent.<?php echo $canTimedReports ? '' : ' ' . $esc($timedNote) . '.'; ?></p></div>
                 <div class="form-group"><label for="reportcc">Copy (CC) on the daily reports email</label>
                     <input type="text" id="reportcc" name="automated_job_daily_reports_cc" class="form-control" value="<?php echo $esc(rh_auto_setting('automated_job_daily_reports_cc')); ?>" placeholder="empty = no copy" autocomplete="off"<?php echo $canTimedReports ? '' : ' disabled'; ?>>
                     <p class="help-text">Shown openly as a copy on every daily reports email. Separate several addresses with commas. Not used on test sends.<?php echo $canTimedReports ? '' : ' ' . $esc($timedNote) . '.'; ?></p></div>

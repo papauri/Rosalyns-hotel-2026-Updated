@@ -1274,6 +1274,7 @@ if (!function_exists('rh_eod_folio_fnb_allocation')) {
                 WHERE booking_type = 'room' AND DATE(payment_date) = ? AND deleted_at IS NULL
                   AND payment_status IN ('completed','paid','refunded','partially_refunded')
                   AND COALESCE(payment_type, '') <> 'refund'
+                  AND COALESCE(payment_method, '') <> 'credit_note' -- guest credit used, not money received (End of Day cash view)
                 GROUP BY booking_id");
             $st->execute([$date]);
             $pays = $st->fetchAll(PDO::FETCH_ASSOC);

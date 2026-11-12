@@ -87,8 +87,9 @@ function buildBookingsReport(string $startDate, string $endDate): array
                    b.created_at
             FROM bookings b
             LEFT JOIN rooms r ON r.id = b.room_id
-            WHERE (DATE(b.created_at) BETWEEN :s1 AND :e1)
-               OR (b.check_in_date BETWEEN :s2 AND :e2)
+            WHERE b.deleted_at IS NULL
+              AND ((DATE(b.created_at) BETWEEN :s1 AND :e1)
+               OR (b.check_in_date BETWEEN :s2 AND :e2))
             ORDER BY b.created_at DESC";
     $stmt = $pdo->prepare($sql);
     $stmt->execute(['s1' => $startDate, 'e1' => $endDate, 's2' => $startDate, 'e2' => $endDate]);
@@ -229,6 +230,13 @@ function buildAccountingSummary(string $startDate, string $endDate): array
     fputcsv($fp, ['Period', $startDate . ' to ' . $endDate]);
     fputcsv($fp, []);
 
+    // Same day rule as End of Day (owner 2026-11-13, F4): money received on its payment date, a refund on the day it
+    // was paid out (admin/includes/finance-refunds.php rh_refund_eod_date_sql).
+    require_once __DIR__ . '/../admin/includes/finance-refunds.php';
+    $inPeriod = "((COALESCE(payment_type, '') <> 'refund' AND payment_date BETWEEN :s AND :e)
+                OR (payment_type = 'refund' AND " . rh_refund_eod_date_sql() . " BETWEEN :s2 AND :e2))";
+    $periodParams = ['s' => $startDate, 'e' => $endDate, 's2' => $startDate, 'e2' => $endDate];
+
     /* Revenue by booking_type from payments */
     $sumStmt = $pdo->prepare(
         "SELECT booking_type,
@@ -239,10 +247,10 @@ function buildAccountingSummary(string $startDate, string $endDate): array
          WHERE deleted_at IS NULL
            AND ((payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund')
                 OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
-           AND payment_date BETWEEN :s AND :e
+           AND $inPeriod
          GROUP BY booking_type"
     );
-    $sumStmt->execute(['s' => $startDate, 'e' => $endDate]);
+    $sumStmt->execute($periodParams);
 
     fputcsv($fp, ['REVENUE BY BOOKING TYPE']);
     fputcsv($fp, ['Booking Type', 'Transactions', 'Gross', 'VAT']);
@@ -264,11 +272,11 @@ function buildAccountingSummary(string $startDate, string $endDate): array
          WHERE deleted_at IS NULL
            AND ((payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund')
                 OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
-           AND payment_date BETWEEN :s AND :e
+           AND $inPeriod
          GROUP BY payment_method
          ORDER BY gross DESC"
     );
-    $methodStmt->execute(['s' => $startDate, 'e' => $endDate]);
+    $methodStmt->execute($periodParams);
 
     fputcsv($fp, ['BY PAYMENT METHOD']);
     fputcsv($fp, ['Method', 'Transactions', 'Gross']);
@@ -319,33 +327,23 @@ function buildAccountingSummary(string $startDate, string $endDate): array
 
     fputcsv($fp, []);
 
-    /* Outstanding receivables (booking-level snapshot at "now") */
-    $outStmt = $pdo->query(
-        "SELECT b.booking_reference, b.guest_name, r.name AS room_name,
-                b.check_in_date, b.check_out_date,
-                b.total_amount, b.total_with_vat, b.vat_amount, b.amount_paid, b.amount_due, b.payment_status
-         FROM bookings b
-         LEFT JOIN rooms r ON r.id = b.room_id
-         WHERE b.amount_due > 0
-           AND b.status IN ('confirmed','checked-in','checked-out','pending','tentative')
-         ORDER BY b.check_in_date DESC"
-    );
+    /* Still owed (snapshot at "now"): the ONE shared receivables rule (admin/includes/receivables.php), the same
+       figure as End of Day "Still owed", the Dashboard, Accounting and Reports (owner 2026-11-13, F3). */
+    require_once __DIR__ . '/../admin/includes/receivables.php';
+    $owedFailed = [];
+    $owedRows = rh_receivable_rows($pdo, rh_receivable_mods(), $owedFailed);
 
-    fputcsv($fp, ['OUTSTANDING RECEIVABLES (current snapshot)']);
-    fputcsv($fp, ['Reference', 'Guest', 'Room', 'Check-in', 'Check-out', 'Total (incl. VAT & levy)', 'Paid', 'Due', 'Status']);
+    fputcsv($fp, ['STILL OWED (current snapshot; the same rule as End of Day "Still owed" and the Dashboard)']);
+    fputcsv($fp, ['Type', 'Reference', 'Who owes', 'Status', 'Paid', 'Due', 'Days outstanding']);
     $outstandingTotal = 0.0;
-    foreach ($outStmt as $r) {
+    foreach ($owedRows as $r) {
         fputcsv($fp, [
-            $r['booking_reference'], $r['guest_name'], $r['room_name'],
-            $r['check_in_date'], $r['check_out_date'],
-            rh_money(rh_booking_full_total($r)),
-            rh_money((float)$r['amount_paid']),
-            rh_money((float)$r['amount_due']),
-            $r['payment_status'],
+            rh_receivable_type_label((string)$r['type']), $r['reference'], $r['client'], $r['status'],
+            rh_money((float)$r['amount_paid']), rh_money((float)$r['amount_due']), (int)$r['days_outstanding'],
         ]);
         $outstandingTotal += (float)$r['amount_due'];
     }
-    fputcsv($fp, ['TOTAL OUTSTANDING', '', '', '', '', '', '', rh_money($outstandingTotal)]);
+    fputcsv($fp, ['TOTAL STILL OWED', '', '', '', '', $owedFailed ? 'unavailable: could not read ' . implode(', ', $owedFailed) : rh_money($outstandingTotal)]);
 
     fputcsv($fp, []);
 

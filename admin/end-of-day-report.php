@@ -20,6 +20,8 @@ require_once __DIR__ . '/includes/pos-shift-totals.php';
 require_once __DIR__ . '/includes/eod-revenue.php';
 require_once __DIR__ . '/includes/front-desk-counts.php'; // expected arrivals: confirmed + pending (+ arrived); tentative holds shown apart
 require_once __DIR__ . '/includes/receivables.php';
+require_once __DIR__ . '/includes/eod-report-data.php';           // headline facts, WhatsApp target (pure helpers)
+require_once __DIR__ . '/../includes/daily-reports-send.php';     // recipients / CC / test-mode helpers (pure at include)
 
 // This page reuses one named placeholder (:d) several times per statement. The shared connection
 // prepares natively, which rejects a repeated name (HY093), so those queries threw, were swallowed
@@ -41,14 +43,22 @@ $vatEnabled      = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'o
 // ---------------------------------------------------------------------------
 // Date selection — defaults to today (Africa/Blantyre via DB connection TZ).
 // ---------------------------------------------------------------------------
-$report_date = $_GET['date'] ?? date('Y-m-d');
+// "Today" in the hotel's time zone (rh_site_timezone), the same clock as the timer and the send (L8).
+$eod_today   = rh_eod_today();
+$report_date = $_GET['date'] ?? $eod_today;
 if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $report_date) || !strtotime($report_date)) {
-    $report_date = date('Y-m-d');
+    $report_date = $eod_today;
 }
 $dayStart = $report_date . ' 00:00:00';
 $dayEnd   = $report_date . ' 23:59:59';
 $tomorrow = date('Y-m-d', strtotime($report_date . ' +1 day'));
-$isToday  = ($report_date === date('Y-m-d'));
+$isToday  = ($report_date === $eod_today);
+// Money received on its payment date; a refund on the day it was paid out (rh_refund_eod_date_sql, F4). Named :d
+// repeats are fine here (this page prepares with emulation on).
+// Payments made WITH a credit note are guest credit used, not money received (rh_eod_cash_row_sql): left out of the
+// cash view and shown on their own line.
+$eodPayDaySql = "((COALESCE(payment_type, '') <> 'refund' AND DATE(payment_date) = :d) OR (payment_type = 'refund' AND " . rh_refund_eod_date_sql() . " = :d))"
+    . " AND " . rh_eod_cash_row_sql();
 
 // Module flags — drives query and HTML gating
 $mod_bookings     = function_exists('moduleEnabled') && moduleEnabled('bookings');
@@ -184,7 +194,7 @@ try {
             COUNT(*) AS txn_count,
             COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN 1 ELSE 0 END), 0) AS collected_count
         FROM payments
-        WHERE DATE(payment_date) = :d
+        WHERE $eodPayDaySql
           AND deleted_at IS NULL
     ");
     $payStmt->execute([':d' => $report_date]);
@@ -454,7 +464,7 @@ try {
             COALESCE(SUM(CASE WHEN booking_type='room' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS room_gross,
             COALESCE(SUM(CASE WHEN payment_type='refund' AND refund_status IN ('completed','processing') THEN " . rh_refund_amount_sql() . " ELSE 0 END), 0) AS refunds
         FROM payments
-        WHERE DATE(payment_date) = :d
+        WHERE $eodPayDaySql
           AND deleted_at IS NULL
     ");
     $prevPay->execute([':d' => $previous_day]);
@@ -533,6 +543,15 @@ try {
     error_log('EOD cash refunds: ' . $e->getMessage());
 }
 $method_totals['cash'] -= $cash_refunds_out;
+// Refunds moved into credit notes: in the refunds total, but no cash out - shown apart (F5).
+$refunds_to_credit = 0.0;
+$cn_redeemed_pay = 0.0; // payments made with a credit note: guest credit used, no new money (own line)
+try {
+    $refunds_to_credit = rh_eod_refunds_to_credit($pdo, $report_date);
+    $cn_redeemed_pay = rh_eod_credit_notes_redeemed($pdo, $report_date);
+} catch (Throwable $e) {
+    error_log('EOD refunds to credit / credit notes redeemed: ' . $e->getMessage());
+}
 $non_cash_total = $method_totals['mobile_money'] + $method_totals['card'] + $method_totals['bank_transfer'] + $method_totals['other'];
 // Average per payment received: refund and pending rows are not payments received, so they are not in the divisor.
 $revenue_per_transaction = (int)($rev['collected_count'] ?? 0) > 0 ? $gross_revenue / (int)$rev['collected_count'] : 0;
@@ -569,24 +588,15 @@ $pos_change = (float)$pos_totals['gross'] - $previous['pos_gross'];
 $pos_change_pct = $previous['pos_gross'] > 0 ? ($pos_change / $previous['pos_gross']) * 100 : ((float)$pos_totals['gross'] > 0 ? 100 : 0);
 $order_value_change = $average_order_value - $previous_average_order_value;
 
-$daily_health_score = 100;
-if ($mod_bookings) {
-    $daily_health_score -= min(18, $arrivals_remaining * 4);
-    $daily_health_score -= min(16, $departures_remaining * 4);
-    $daily_health_score -= min(16, (int)$ops['no_shows'] * 8);
-    $daily_health_score -= min(12, (int)$ops['cancellations'] * 3);
-    $daily_health_score -= $unpaid_risk > BALANCE_TOLERANCE ? 8 : 0;
-    $daily_health_score -= $rooms_oo > 0 ? 5 : 0;
-}
-if ($mod_pos) {
-    $daily_health_score -= min(12, (int)$pos_totals['voided_count'] * 4);
-}
-$daily_health_score -= (float)$rev['pending'] > 0 ? 8 : 0;
-if ($mod_housekeeping) {
-    $daily_health_score -= ((int)$housekeeping['pending'] + (int)$housekeeping['in_progress']) > 0 ? 8 : 0;
-}
-$daily_health_score = max(0, min(100, $daily_health_score));
-$daily_health_label = $daily_health_score >= 90 ? 'Excellent close' : ($daily_health_score >= 75 ? 'Good close' : ($daily_health_score >= 55 ? 'Needs attention' : 'Critical review'));
+// Close score: ONE rule with the PDF, e-mail and WhatsApp (rh_eod_close_score, L5).
+$closeScore = rh_eod_close_score([
+    'arrivals_remaining' => $arrivals_remaining, 'departures_remaining' => $departures_remaining,
+    'no_shows' => (int)$ops['no_shows'], 'cancellations' => (int)$ops['cancellations'],
+    'voided_count' => (int)$pos_totals['voided_count'], 'pending' => (float)$rev['pending'],
+    'still_owed' => $unpaid_risk, 'hk_open' => (int)$housekeeping['pending'] + (int)$housekeeping['in_progress'], 'rooms_oo' => $rooms_oo,
+], ['bookings' => $mod_bookings, 'pos' => $mod_pos, 'housekeeping' => $mod_housekeeping]);
+$daily_health_score = $closeScore['score'];
+$daily_health_label = $closeScore['label'];
 
 // Defaults — overwritten by ENHANCEMENT C queries below
 $guest_intel       = ['new_guests' => 0, 'returning_guests' => 0, 'avg_lead_days' => 0];
@@ -628,7 +638,8 @@ if ($mod_pos && (int)$pos_totals['voided_count'] > 0) {
     $addAlert('warn', 'fa-ban', 'POS voids to review', (int)$pos_totals['voided_count'] . ' void' . ((int)$pos_totals['voided_count'] === 1 ? '' : 's') . ' worth ' . $money((float)$pos_totals['voided_value']) . '.');
 }
 if ((float)$rev['refunds'] > 0) {
-    $addAlert('watch', 'fa-rotate-left', 'Refunds processed', $money((float)$rev['refunds']) . ' refunded today.');
+    $addAlert('watch', 'fa-rotate-left', 'Refunds processed', $money((float)$rev['refunds']) . ' refunded today'
+        . ($refunds_to_credit > 0.004 ? ' (of which ' . $money($refunds_to_credit) . ' moved to credit notes, no cash out)' : '') . '.');
 }
 if ($mod_housekeeping && ((int)$housekeeping['pending'] + (int)$housekeeping['in_progress']) > 0) {
     $addAlert('watch', 'fa-broom', 'Housekeeping not fully closed', ((int)$housekeeping['pending'] + (int)$housekeeping['in_progress']) . ' room task' . (((int)$housekeeping['pending'] + (int)$housekeeping['in_progress']) === 1 ? '' : 's') . ' still open.');
@@ -677,16 +688,19 @@ $trend_start      = date('Y-m-d', strtotime($report_date . ' -6 days'));
 $trend_start_dt   = $trend_start . ' 00:00:00';
 $trend_end_dt     = $report_date . ' 23:59:59';
 try {
+    // Same day rule as the headline cash: refunds on the day they were paid out (F4).
+    $tDayExpr = "(CASE WHEN payment_type = 'refund' THEN " . rh_refund_eod_date_sql() . " ELSE DATE(payment_date) END)";
     $tRevStmt = $pdo->prepare("
-        SELECT DATE(payment_date) AS day,
+        SELECT $tDayExpr AS day,
                COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded')
                                   AND COALESCE(payment_type,'') <> 'refund' THEN total_amount ELSE 0 END), 0) AS gross,
                COALESCE(SUM(CASE WHEN payment_type='refund'
                                   AND refund_status IN ('completed','processing') THEN " . rh_refund_amount_sql() . " ELSE 0 END), 0) AS refunds
         FROM payments
-        WHERE payment_date BETWEEN :a AND :b
+        WHERE $tDayExpr BETWEEN DATE(:a) AND DATE(:b)
+          AND " . rh_eod_cash_row_sql() . "
           AND deleted_at IS NULL
-        GROUP BY DATE(payment_date)
+        GROUP BY $tDayExpr
     ");
     $tRevStmt->execute([':a' => $trend_start_dt, ':b' => $trend_end_dt]);
     $trend_rev_by_day = [];
@@ -1179,22 +1193,40 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
         <div class="eod-toolbar eod-noprint">
             <form method="GET" class="eod-datebar" action="end-of-day-report.php">
                 <a href="end-of-day-report.php?date=<?php echo htmlspecialchars($previous_day); ?>" class="ck-icon-btn eod-nav" title="Previous day" aria-label="Previous day"><i class="fas fa-chevron-left"></i></a>
-                <input type="date" name="date" aria-label="Report date" value="<?php echo htmlspecialchars($report_date); ?>" max="<?php echo date('Y-m-d'); ?>">
+                <input type="date" name="date" aria-label="Report date" value="<?php echo htmlspecialchars($report_date); ?>" max="<?php echo htmlspecialchars($eod_today); ?>">
                 <a href="end-of-day-report.php?date=<?php echo htmlspecialchars($tomorrow); ?>" class="ck-icon-btn eod-nav<?php echo $isToday ? ' is-disabled' : ''; ?>" title="Next day" aria-label="Next day"<?php echo $isToday ? ' aria-disabled="true" tabindex="-1"' : ''; ?>><i class="fas fa-chevron-right"></i></a>
                 <button type="submit" class="ck-btn ck-btn--sm"><i class="fas fa-rotate-right"></i><span>Refresh</span></button>
-                <a href="end-of-day-report.php?date=<?php echo date('Y-m-d'); ?>" class="ck-btn ck-btn--sm">Today</a>
+                <a href="end-of-day-report.php?date=<?php echo htmlspecialchars($eod_today); ?>" class="ck-btn ck-btn--sm">Today</a>
             </form>
             <div class="eod-cc">
-                <label class="eod-cc__label" for="eodCcEmail"><i class="fas fa-user-plus"></i> CC email (optional)</label>
+                <label class="eod-cc__label" for="eodCcEmail"><i class="fas fa-user-plus"></i> Extra CC (optional)</label>
                 <input
                     type="email"
                     id="eodCcEmail"
                     class="eod-cc__input"
                     placeholder="e.g. owner@example.com, gm@hotel.com"
-                    value="<?php echo htmlspecialchars(getSetting('eod_report_cc_emails') ?? ''); ?>"
+                    value=""
+                    multiple
                     autocomplete="email">
             </div>
         </div>
+        <?php
+        // Who each button reaches, before anyone clicks (L21): the same helpers the send uses.
+        $eodGoesTo = array_column(rh_eod_report_recipients(), 'email');
+        $eodSavedCc = rh_daily_reports_cc(rh_eod_report_recipients(), (string)(getSetting('eod_report_cc_emails') ?? ''));
+        $eodWa = rh_eod_whatsapp_target();
+        $eodTestTo = rh_report_test_recipient();
+        ?>
+        <p class="eod-sub eod-noprint eod-goesto" id="eodGoesTo">
+            <?php if ($eodTestTo !== ''): ?>
+                <strong>Test mode:</strong> Email goes only to <?php echo htmlspecialchars($eodTestTo); ?> (no copies); WhatsApp is not sent.
+            <?php else: ?>
+                <strong>Email goes to:</strong> <?php echo $eodGoesTo ? htmlspecialchars(implode(', ', $eodGoesTo)) : 'no one yet (set "End-of-day report recipients" in Hotel Settings)'; ?>
+                &middot; <strong>CC:</strong> <?php echo $eodSavedCc ? htmlspecialchars(implode(', ', $eodSavedCc)) : 'none'; ?> (plus any extra CC typed above)
+                &middot; <strong>WhatsApp to:</strong> <?php echo $eodWa['number'] !== '' ? htmlspecialchars($eodWa['number'] . ' (' . $eodWa['source'] . ')') : 'no number set'; ?>
+            <?php endif; ?>
+            <?php if (rh_eod_day_is_open($report_date)): ?> &middot; This day is still trading: a send now says "as at <?php echo htmlspecialchars(rh_eod_now()->format('H:i')); ?>".<?php endif; ?>
+        </p>
 
         <!-- Send result toast -->
         <div id="eodResultToast" class="eod-toast eod-noprint" role="status" aria-live="polite" hidden></div>
@@ -1260,6 +1292,38 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                 <span class="ck-kpi__sub"><?php echo htmlspecialchars($daily_health_label); ?></span>
             </a>
         </section>
+
+        <?php
+        // "The day in brief" (owner 2026-11-13, AI lead's files): the headline facts of THIS page (same keys as
+        // rh_eod_report_data) go to the AI lead's mount, which prints its own hidden element and script, or nothing
+        // at all when AI is not available. Without the AI file nothing is printed.
+        $facts = rh_eod_headline_facts([
+            'mods' => ['bookings' => $mod_bookings, 'pos' => $mod_pos, 'housekeeping' => $mod_housekeeping],
+            'earned' => $earned, 'earned_total' => $earned_total, 'net_change' => $net_change,
+            'net' => $cash_collected, 'rev' => $rev, 'cash_total' => $method_totals['cash'],
+            'still_owed' => $unpaid_risk, 'outstanding_failed' => $outstanding_failed,
+            'occupancy_pct' => $occupancy_pct, 'rooms_occupied' => $rooms_occupied, 'adr' => $adr,
+            'ops' => $ops, 'tom' => $tomorrow_preview, 'pos' => $pos_totals, 'score' => $daily_health_score,
+        ], static fn(string $key): bool => true); // every viewer of this page sees every headline figure
+        // Any error in the AI part prints nothing and is logged: it can never break this page.
+        $aiOb = ob_get_level();
+        ob_start();
+        try {
+            if (is_file(__DIR__ . '/../includes/ai/ai-eod-narrative.php')) {
+                require_once __DIR__ . '/../includes/ai/ai-eod-narrative.php';
+            }
+            if (function_exists('rh_ai_eod_mount')) {
+                rh_ai_eod_mount($report_date, $facts, (int)($user['id'] ?? 0));
+            }
+            $aiHtml = (string)ob_get_clean();
+            echo $aiHtml;
+        } catch (Throwable $e) {
+            while (ob_get_level() > $aiOb) {
+                ob_end_clean();
+            }
+            error_log('EOD day in brief (page): ' . $e->getMessage());
+        }
+        ?>
 
         <!-- ============ BENTO ============ -->
         <div class="ck-bento">
@@ -1327,6 +1391,8 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                 <?php endif; ?>
                 <ul class="ck-kv eod-kv">
                     <?php if ($cash_refunds_out > 0.004) { echo $kv('Cash refunds already taken off', '&minus;' . $money($cash_refunds_out)); } ?>
+                    <?php if ($refunds_to_credit > 0.004) { echo $kv('Refunds moved to credit notes (guest credit, no cash out)', $money($refunds_to_credit)); } ?>
+                    <?php if ($cn_redeemed_pay > 0.004) { echo $kv('Credit notes redeemed (guest credit used, no new money)', $money($cn_redeemed_pay)); } ?>
                     <?php echo $kv('Cash collected (all methods, after refunds)', $money($cash_collected)); ?>
                     <?php echo $kv('Non-cash collected', $money($non_cash_total)); ?>
                     <?php echo $kv('Pending today', $money($rev['pending']), (float)$rev['pending'] > 0 ? 'eod-warn' : ''); ?>
@@ -1565,7 +1631,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                                 </tr>
                                 <?php if ((float)$rev['refunds'] > 0): ?>
                                     <tr class="eod-table__neg">
-                                        <td>Less: refunds</td>
+                                        <td>Less: refunds<?php if ($refunds_to_credit > 0.004): ?> <span class="eod-sub">(of which <?php echo $money($refunds_to_credit); ?> moved to credit notes, no cash out)</span><?php endif; ?></td>
                                         <td class="num">&minus;<?php echo $money($rev['refunds']); ?></td>
                                         <td class="num"><?php echo (float)($rev['refund_vat'] ?? 0) > 0.004 ? '&minus;' . $money($rev['refund_vat']) : '&mdash;'; ?></td>
                                         <td class="num">&mdash;</td>
@@ -1919,7 +1985,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
 
         <!-- Footer note -->
         <footer class="eod-footer">
-            <p>Generated by <?php echo htmlspecialchars($user['full_name'] ?: 'Admin'); ?> at <?php echo date('Y-m-d H:i'); ?> &middot; All figures in <?php echo htmlspecialchars(trim($currency_symbol)); ?>.</p>
+            <p>Generated by <?php echo htmlspecialchars($user['full_name'] ?: 'Admin'); ?> at <?php echo htmlspecialchars(rh_eod_now()->format('Y-m-d H:i')); ?> &middot; All figures in <?php echo htmlspecialchars(trim($currency_symbol)); ?>.</p>
         </footer>
 
         </div><!-- /.ck -->
@@ -1979,8 +2045,9 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                     .then(r => r.json())
                     .then(data => {
                         if (data.success) {
+                            // The extra CC stays in the box: a resend reaches the same people (the saved CC list
+                            // is always added by the server).
                             showResult('Report Sent', data.message || 'Sent successfully.', false);
-                            if (channel === 'email' && ccInput) ccInput.value = '';
                         } else {
                             showResult('Could Not Send', data.error || 'Unknown error', true);
                         }

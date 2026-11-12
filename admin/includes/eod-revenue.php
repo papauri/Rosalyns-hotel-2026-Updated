@@ -36,6 +36,44 @@ require_once __DIR__ . '/finance-refunds.php'; // the one refund rule: gross tot
 
 require_once __DIR__ . '/pos-shift-totals.php';
 
+if (!function_exists('rh_eod_pay_day_sql')) {
+    /**
+     * SQL condition (2 positional params: the date twice): the payments rows a daily report puts on that day.
+     * Money received = its payment_date (a till sale: the trading day; a front-desk payment: the date entered);
+     * a refund = the day it was paid out (rh_refund_eod_date_sql: the day raised, or the later day it was settled).
+     */
+    function rh_eod_pay_day_sql(string $alias = ''): string
+    {
+        $a = rh_refund_alias($alias);
+        return "((COALESCE({$a}payment_type, '') <> 'refund' AND DATE({$a}payment_date) = ?)"
+            . " OR ({$a}payment_type = 'refund' AND " . rh_refund_eod_date_sql($alias) . " = ?))";
+    }
+
+    /**
+     * SQL condition: a payments row that is part of the CASH view (payments received, cash collected, payment mix,
+     * transactions). A payment made WITH a credit note (non-refund row, payment_method 'credit_note',
+     * config/credit-notes.php) is guest credit being used, not new money: it is left out and shown on its own line
+     * ("Credit notes redeemed"). Refund rows always stay (a refund moved INTO a credit note stays in the refunds total).
+     */
+    function rh_eod_cash_row_sql(string $alias = ''): string
+    {
+        $a = rh_refund_alias($alias);
+        return "NOT (COALESCE({$a}payment_type, '') <> 'refund' AND COALESCE({$a}payment_method, '') = 'credit_note')";
+    }
+}
+
+if (!function_exists('rh_eod_credit_notes_redeemed')) {
+    /** Payments made with a credit note on $date (guest credit used, no new money), gross. */
+    function rh_eod_credit_notes_redeemed(PDO $pdo, string $date): float
+    {
+        $st = $pdo->prepare("SELECT COALESCE(SUM(total_amount),0) FROM payments
+            WHERE DATE(payment_date) = ? AND deleted_at IS NULL AND COALESCE(payment_type, '') <> 'refund'
+              AND payment_method = 'credit_note' AND payment_status IN ('completed','paid','refunded','partially_refunded')");
+        $st->execute([$date]);
+        return (float)$st->fetchColumn();
+    }
+}
+
 if (!function_exists('rh_eod_earned_revenue')) {
     /**
      * @param array $modules optional ['bookings' => bool, 'pos' => bool]; a department whose module is
@@ -171,14 +209,15 @@ if (!function_exists('rh_eod_earned_revenue')) {
         }
 
         // 4a) Gym: payments received on the date less gym refunds paid out on it (no service date exists).
+        // A refund counts on the day it was paid out (rh_refund_eod_date_sql), like every End of Day refund.
         try {
             $st = $pdo->prepare("SELECT
                     COALESCE(SUM(CASE WHEN COALESCE(payment_type,'') <> 'refund' AND payment_status IN ('completed','paid','refunded','partially_refunded') THEN total_amount ELSE 0 END),0) AS received,
                     COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN " . rh_refund_amount_sql() . " ELSE 0 END),0) AS refunded
                 FROM payments
-                WHERE payment_date >= ? AND payment_date < ? AND deleted_at IS NULL
+                WHERE " . rh_eod_pay_day_sql() . " AND deleted_at IS NULL
                   AND booking_type = 'gym'");
-            $st->execute([$dayStart, $dayEnd]);
+            $st->execute([$date, $date]);
             $r = $st->fetch(PDO::FETCH_ASSOC) ?: [];
             $out['gym_gross'] = (float)($r['received'] ?? 0) - (float)($r['refunded'] ?? 0);
         } catch (Throwable $e) {
@@ -300,6 +339,7 @@ if (!function_exists('rh_eod_payment_mix')) {
             WHERE DATE(payment_date) = :d
               AND payment_status IN ('completed','paid','refunded','partially_refunded')
               AND COALESCE(payment_type, '') <> 'refund'
+              AND " . rh_eod_cash_row_sql() . "
               AND deleted_at IS NULL
             GROUP BY method
         ");
@@ -308,15 +348,19 @@ if (!function_exists('rh_eod_payment_mix')) {
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $mix[(string)$r['method']] = ['method' => (string)$r['method'], 'cnt' => (int)$r['cnt'], 'total' => (float)$r['total']];
         }
+        // Refunds by the day they were paid out (rh_refund_eod_date_sql). Refunds moved into a credit note
+        // ('credit_note') are not money leaving any till or account: they stay out of the mix (shown apart,
+        // rh_eod_refunds_to_credit) so Non-cash collected is never lowered by them.
         $rf = $pdo->prepare("
-            SELECT COALESCE(NULLIF(payment_method,''), :u) AS method, COALESCE(SUM(" . rh_refund_amount_sql() . "),0) AS refunded
+            SELECT COALESCE(NULLIF(payment_method,''), ?) AS method, COALESCE(SUM(" . rh_refund_amount_sql() . "),0) AS refunded
             FROM payments
-            WHERE DATE(payment_date) = :d AND deleted_at IS NULL AND payment_type = 'refund'
+            WHERE " . rh_refund_eod_date_sql() . " = ? AND deleted_at IS NULL AND payment_type = 'refund'
               AND refund_status IN ('completed','processing')
               AND LOWER(COALESCE(payment_method,'')) NOT LIKE '%cash%'
+              AND COALESCE(payment_method,'') <> 'credit_note'
             GROUP BY method
         ");
-        $rf->execute([':d' => $date, ':u' => $unassignedLabel]);
+        $rf->execute([$unassignedLabel, $date]);
         foreach ($rf->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $m = (string)$r['method'];
             $mix[$m] = $mix[$m] ?? ['method' => $m, 'cnt' => 0, 'total' => 0.0];
@@ -336,8 +380,22 @@ if (!function_exists('rh_eod_cash_refunds_out')) {
     function rh_eod_cash_refunds_out(PDO $pdo, string $date): float
     {
         $st = $pdo->prepare("SELECT COALESCE(SUM(" . rh_refund_amount_sql() . "),0) FROM payments
-            WHERE DATE(payment_date) = ? AND deleted_at IS NULL AND payment_type = 'refund'
+            WHERE " . rh_refund_eod_date_sql() . " = ? AND deleted_at IS NULL AND payment_type = 'refund'
               AND refund_status IN ('completed','processing') AND LOWER(COALESCE(payment_method,'')) LIKE '%cash%'");
+        $st->execute([$date]);
+        return (float)$st->fetchColumn();
+    }
+}
+
+if (!function_exists('rh_eod_refunds_to_credit')) {
+    /**
+     * Refunds paid out on $date whose money went INTO a credit note (rh_refund_to_credit_sql): part of "Refunds
+     * paid out" (the refunds total stays in full), shown apart as "moved to credit notes (no cash out)".
+     */
+    function rh_eod_refunds_to_credit(PDO $pdo, string $date): float
+    {
+        $st = $pdo->prepare("SELECT " . rh_refund_to_credit_sum_sql() . " FROM payments
+            WHERE " . rh_refund_eod_date_sql() . " = ? AND deleted_at IS NULL");
         $st->execute([$date]);
         return (float)$st->fetchColumn();
     }
@@ -385,7 +443,73 @@ if (!function_exists('rh_eod_day_rules_text')) {
         return 'Which day each figure uses: charges posted to guest bills count on the calendar day ('
             . $dayLabel . ', midnight to midnight); ' . $posLabel . ' sales count on the trading day ('
             . $trading . '), the same day as the till Z, so a sale after midnight but before '
-            . 'the next opening is on this report.';
+            . 'the next opening is on this report. Cash collected uses the date on each payment (a till sale: its '
+            . 'trading day; a front-desk payment: the date entered); a refund counts on the day it was paid out.';
+    }
+}
+
+if (!function_exists('rh_eod_close_score')) {
+    /**
+     * Pure: the End of Day "Close score" (0-100) and its label, ONE rule for the page, PDF, e-mail and WhatsApp.
+     * $in: arrivals_remaining, departures_remaining, no_shows, cancellations, voided_count, pending, still_owed,
+     * hk_open, rooms_oo. $mods: bookings, pos, housekeeping (a missing key = on). A department whose module is off
+     * never lowers the score.
+     * @return array{score:int,label:string}
+     */
+    function rh_eod_close_score(array $in, array $mods = []): array
+    {
+        $on = static function (string $k) use ($mods): bool { return !array_key_exists($k, $mods) || !empty($mods[$k]); };
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        $s = 100;
+        if ($on('bookings')) {
+            $s -= min(18, (int)($in['arrivals_remaining'] ?? 0) * 4);
+            $s -= min(16, (int)($in['departures_remaining'] ?? 0) * 4);
+            $s -= min(16, (int)($in['no_shows'] ?? 0) * 8);
+            $s -= min(12, (int)($in['cancellations'] ?? 0) * 3);
+            $s -= (float)($in['still_owed'] ?? 0) > $tol ? 8 : 0;
+            $s -= (int)($in['rooms_oo'] ?? 0) > 0 ? 5 : 0;
+        }
+        if ($on('pos')) {
+            $s -= min(12, (int)($in['voided_count'] ?? 0) * 4);
+        }
+        $s -= (float)($in['pending'] ?? 0) > 0 ? 8 : 0;
+        if ($on('housekeeping')) {
+            $s -= (int)($in['hk_open'] ?? 0) > 0 ? 8 : 0;
+        }
+        $s = max(0, min(100, $s));
+        $label = $s >= 90 ? 'Excellent close' : ($s >= 75 ? 'Good close' : ($s >= 55 ? 'Needs attention' : 'Critical review'));
+        return ['score' => $s, 'label' => $label];
+    }
+}
+
+if (!function_exists('rh_eod_now')) {
+    /** "Now" in the hotel's time zone (rh_site_timezone), the one clock of every End of Day surface and the timer. */
+    function rh_eod_now(): DateTimeImmutable
+    {
+        require_once __DIR__ . '/../../includes/station-hours.php';
+        return new DateTimeImmutable('now', rh_site_timezone());
+    }
+
+    /** Today's date in the hotel's time zone (Y-m-d). */
+    function rh_eod_today(): string
+    {
+        return rh_eod_now()->format('Y-m-d');
+    }
+
+    /**
+     * Is $date's trading day still running (it has not ended at the next opening)? Then its figures are partial and
+     * every send says "as at HH:MM". $endedDay is for tests (else rh_pos_last_ended_trading_date(now)).
+     */
+    function rh_eod_day_is_open(string $date, ?string $endedDay = null): bool
+    {
+        if ($endedDay === null) {
+            try {
+                $endedDay = rh_pos_last_ended_trading_date(rh_eod_now());
+            } catch (Throwable $e) {
+                $endedDay = rh_eod_now()->modify('-1 day')->format('Y-m-d');
+            }
+        }
+        return $date > $endedDay;
     }
 }
 

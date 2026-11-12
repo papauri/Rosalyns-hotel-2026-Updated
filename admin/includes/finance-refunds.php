@@ -85,6 +85,50 @@ if (!function_exists('rh_refund_settled_statuses')) {
         return rh_refund_settled_sql($alias) . " AND {$a}payment_method = 'credit_note'";
     }
 
+    /**
+     * SQL expression: the DAY a paid-out refund counts on in a daily report (End of Day page / PDF / e-mails / trend,
+     * the daily accounting CSV). Rule (accounting gate 2026-11-13): a refund counts on the FIRST day it became
+     * paid out (processing or completed), and that day never moves afterwards:
+     *   - created already paid out (processing or completed: front-desk refunds, till refunds, store credit) -> its
+     *     payment_date (a till refund: the trading day);
+     *   - created 'pending' -> the day of its pending -> processing / pending -> completed step. Every refund status
+     *     change goes through rh_settle_refund_row (admin/includes/finance-account-sync.php), which writes a
+     *     payment_audit_log row action 'refund_processing' / 'refund_completed', field refund_status, old 'pending';
+     *     its created_at (session time zone = hotel time) is that day. A later processing -> completed step
+     *     (old 'processing') never moves the day.
+     *   - no such audit row (legacy rows, an audit write that failed) -> payment_date.
+     * refund_date_processed is NOT read here: the till Z / shift close keep using it unchanged.
+     * Nothing is written. Without an alias the outer table must be `payments` (unaliased).
+     * Pure twin for tests: rh_refund_eod_day().
+     */
+    function rh_refund_eod_date_sql(string $alias = ''): string
+    {
+        $a = rh_refund_alias($alias);
+        $outerId = $a !== '' ? $a . 'id' : 'payments.id';
+        return "COALESCE((SELECT DATE(MIN(rh_pal.created_at)) FROM payment_audit_log rh_pal"
+            . " WHERE rh_pal.payment_id = {$outerId} AND rh_pal.action IN ('refund_processing','refund_completed')"
+            . " AND rh_pal.field_name = 'refund_status' AND rh_pal.old_value = 'pending'), DATE({$a}payment_date))";
+    }
+
+    /**
+     * Pure twin of rh_refund_eod_date_sql (tests): $refund = the row (payment_date), $audit = its payment_audit_log
+     * rows (action, field_name, old_value, created_at). Returns the Y-m-d day the refund counts on.
+     */
+    function rh_refund_eod_day(array $refund, array $audit): string
+    {
+        $first = null;
+        foreach ($audit as $r) {
+            if (in_array((string)($r['action'] ?? ''), ['refund_processing', 'refund_completed'], true)
+                && (string)($r['field_name'] ?? '') === 'refund_status' && (string)($r['old_value'] ?? '') === 'pending') {
+                $at = (string)($r['created_at'] ?? '');
+                if ($at !== '' && ($first === null || $at < $first)) {
+                    $first = $at;
+                }
+            }
+        }
+        return $first !== null ? substr($first, 0, 10) : substr((string)($refund['payment_date'] ?? ''), 0, 10);
+    }
+
     /** SQL aggregate: paid-out refunds moved into credit notes (no cash out), gross, positive. */
     function rh_refund_to_credit_sum_sql(string $alias = ''): string
     {

@@ -1199,7 +1199,8 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
             rh_auto_setting('automated_email_test_recipient'), $testMode);
         $k = $plan['key'];
         if ($plan['action'] !== 'send') {
-            rh_auto_log_skip($pdo, $k['job'], $k['type'], $k['id'], $k['stage'], $plan['note']);
+            // No recipients / bad test address: NO log row (owner 2026-11-13, L2), so recipients added later the same
+            // trading day still get it - exactly like the station report emails.
             $res['skipped'] = 1;
             return $res;
         }
@@ -1212,28 +1213,55 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
             $res['skipped'] = 1; // already sent (or being sent) for this trading day
             return $res;
         }
+        $r = null;
+        $msg = '';
         try {
             rh_scheduler_budget_spend();
+            // CC = daily reports copy + End of Day copy (owner B1), none on test sends; the End of Day PDF of the same
+            // trading day rides along in this ONE e-mail (same claim, never a second e-mail).
             $r = rh_daily_reports_build_and_send($plan['recipients'], $plan['start'], $plan['end'], $plan['station_start'], $plan['station_end'], false,
-                ['subject_prefix' => $plan['subject_prefix'], 'cc' => $testMode ? [] : rh_daily_reports_cc($plan['recipients'])]); // no CC on test sends
-            if (!empty($r['result']['success'])) {
-                // Delivered: never resend, even when every section failed (that e-mail says so; errors are in System Logs).
-                rh_auto_log_finish($pdo, $k['job'], $k['type'], $k['id'], $k['stage'], 'sent', $r['any_ok'] ? '' : 'every report section failed (see System Logs)');
-                $res['sent'] = 1;
-                if (!$r['any_ok']) {
-                    $res['errors'][] = 'every report section failed (the e-mail saying so was sent)';
-                }
-            } else {
-                $msg = (string)($r['result']['message'] ?? 'send failed');
-                rh_auto_log_finish($pdo, $k['job'], $k['type'], $k['id'], $k['stage'], 'failed', $msg);
-                $res['errors'][] = $plan['date'] . ': ' . $msg;
-            }
+                ['subject_prefix' => $plan['subject_prefix'], 'cc' => $testMode ? [] : rh_daily_reports_cc_all($plan['recipients']),
+                 'eod' => ['date' => $plan['date'], 'by' => 'System (scheduler)']]);
+            $msg = (string)($r['result']['message'] ?? 'send failed');
         } catch (Throwable $e) {
-            rh_auto_log_finish($pdo, $k['job'], $k['type'], $k['id'], $k['stage'], 'failed', $e->getMessage());
-            $res['errors'][] = $plan['date'] . ': ' . $e->getMessage();
-            error_log('auto-scheduler daily reports: ' . $e->getMessage());
+            $msg = $e->getMessage();
+            error_log('auto-scheduler daily reports: ' . $msg);
+        }
+        rh_auto_record_send($pdo, $k, $r !== null && !empty($r['result']['success']), $msg,
+            ($r !== null && !$r['any_ok']) ? 'every report section failed (see System Logs)' : '', $res, $plan['date']);
+        if ($r !== null && !empty($r['result']['success']) && !$r['any_ok']) {
+            $res['errors'][] = 'every report section failed (the e-mail saying so was sent)';
         }
         return $res;
+    }
+
+    /**
+     * Record the outcome of ONE claimed report send (L3, owner 2026-11-13). Delivered = 'sent' and it is never marked
+     * failed afterwards, even if writing 'sent' fails (one retry; then the row stays 'sending' and only the 15-minute
+     * crash recovery can pick it up). Not delivered = 'failed' (retried after an hour, at most 3 attempts).
+     * $res['sent'] / ['errors'] are updated.
+     */
+    function rh_auto_record_send(PDO $pdo, array $k, bool $delivered, string $msg, string $note, array &$res, string $label): void
+    {
+        if ($delivered) {
+            $res['sent'] = (int)($res['sent'] ?? 0) + 1;
+            for ($try = 1; $try <= 2; $try++) {
+                try {
+                    rh_auto_log_finish($pdo, $k['job'], $k['type'], $k['id'], $k['stage'], 'sent', $note);
+                    return;
+                } catch (Throwable $e) {
+                    error_log('auto-scheduler: sent, but recording it failed (' . $label . ', try ' . $try . '): ' . $e->getMessage());
+                }
+            }
+            $res['errors'][] = $label . ': sent, but the send could not be recorded';
+            return;
+        }
+        try {
+            rh_auto_log_finish($pdo, $k['job'], $k['type'], $k['id'], $k['stage'], 'failed', $msg);
+        } catch (Throwable $e) {
+            error_log('auto-scheduler: could not record a failed send (' . $label . '): ' . $e->getMessage());
+        }
+        $res['errors'][] = $label . ': ' . $msg;
     }
 
     /**
@@ -1309,6 +1337,8 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
                 $res['skipped']++; // already sent (or being sent) for this station's day
                 continue;
             }
+            $r = null;
+            $msg = '';
             try {
                 rh_scheduler_budget_spend();
                 require_once __DIR__ . '/report-mailer.php';
@@ -1325,19 +1355,13 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
                 } finally {
                     $emailCtx = null;
                 }
-                if (!empty($r['success'])) {
-                    rh_auto_log_finish($pdo, $k['job'], $k['type'], $k['id'], $k['stage'], 'sent');
-                    $res['sent']++;
-                } else {
-                    $msg = (string)($r['message'] ?? 'send failed');
-                    rh_auto_log_finish($pdo, $k['job'], $k['type'], $k['id'], $k['stage'], 'failed', $msg);
-                    $res['errors'][] = $label . ' ' . $date . ': ' . $msg;
-                }
+                $msg = (string)($r['message'] ?? 'send failed');
             } catch (Throwable $e) {
-                rh_auto_log_finish($pdo, $k['job'], $k['type'], $k['id'], $k['stage'], 'failed', $e->getMessage());
-                $res['errors'][] = $label . ' ' . $date . ': ' . $e->getMessage();
-                error_log('auto-scheduler station reports: ' . $e->getMessage());
+                $msg = $e->getMessage();
+                error_log('auto-scheduler station reports: ' . $msg);
             }
+            // Delivered = 'sent' and never 'failed' afterwards; not delivered = 'failed' (retried) - rh_auto_record_send.
+            rh_auto_record_send($pdo, $k, is_array($r) && !empty($r['success']), $msg, '', $res, $label . ' ' . $date);
         }
         return $res;
     }

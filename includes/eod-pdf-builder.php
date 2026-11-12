@@ -265,7 +265,7 @@ function buildEodPdf(
     $pdf->SetXY($textX, $y + 9.5);
     $pdf->Cell(110, 4, implode('  |  ', array_filter([$hotel['address'], $hotel['phone'] !== '' ? 'Tel ' . $hotel['phone'] : ''], 'strlen')), 0, 0, 'L');
     $pdf->SetXY($textX, $y + 14);
-    $pdf->Cell(110, 4, $dateLabel . '  |  Generated ' . date('H:i') . '  |  ' . $user_name, 0, 0, 'L');
+    $pdf->Cell(110, 4, $dateLabel . '  |  Figures as at ' . (string)($d['generated_hm'] ?? date('H:i')) . '  |  ' . $user_name, 0, 0, 'L');
 
     // Health score badge
     $badgeX = $LM + $CW - 23;
@@ -498,6 +498,14 @@ function buildEodPdf(
         $pdf->Cell(33, $ROW, $m($net), 0, 0, 'R', true);
         $yL += $ROW;
         $i = 0;
+        // Refunds moved into credit notes stay in the refunds total but are no cash out (F5): said apart.
+        if ((float)($d['refunds_to_credit'] ?? 0) > 0.004) {
+            $rowL('Refunds to credit notes (no cash)', $m((float)$d['refunds_to_credit']), false, $i++);
+        }
+        // Payments made with a credit note are not money received (B2): their own line.
+        if ((float)($d['credit_notes_redeemed'] ?? 0) > 0.004) {
+            $rowL('Credit notes redeemed (no new money)', $m((float)$d['credit_notes_redeemed']), false, $i++);
+        }
         $rowL('VAT in cash collected', $m((float)($rev['total_vat'] ?? 0)), false, $i++);
     } else {
     $secL('Revenue by Source');

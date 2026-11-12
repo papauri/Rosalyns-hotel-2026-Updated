@@ -56,7 +56,10 @@ if (!function_exists('rh_hotel_details_fields')) {
                 'receipt_footer'            => ['label' => 'Receipt footer', 'type' => 'text', 'max' => 255, 'default' => '', 'finance' => true],
                 'quotation_footer_text'     => ['label' => 'Quotation footer', 'type' => 'text', 'max' => 255, 'default' => '', 'finance' => true],
                 'credit_note_expiry_months' => ['label' => 'Credit notes expire after (months, 0 = never)', 'type' => 'int', 'min' => 0, 'max' => 120, 'default' => '12', 'finance' => true],
-                'eod_report_cc_emails'      => ['label' => 'End-of-day report CC (comma-separated emails)', 'type' => 'emails', 'default' => '', 'finance' => true],
+                // Who receives the End of Day report (the Email button and the timed daily report email; owner 2026-11-13).
+                'eod_report_recipients'     => ['label' => 'End-of-day report recipients (comma-separated emails)', 'type' => 'emails', 'default' => '', 'finance' => true, 'help' => 'Who gets the End of Day email (the Email button) and the daily report email the timer sends after each trading day. Empty = the staff copy email in Email Settings.'],
+                'eod_report_cc_emails'      => ['label' => 'End-of-day report CC (comma-separated emails)', 'type' => 'emails', 'default' => '', 'finance' => true, 'help' => 'Shown openly as a copy on every End of Day email: the Email button and the daily report email the timer sends.'],
+                'eod_whatsapp_number'       => ['label' => 'End of Day WhatsApp number', 'type' => 'phone', 'max' => 30, 'default' => '', 'finance' => true, 'help' => 'Where the End of Day WhatsApp button sends the summary. Empty = the hotel WhatsApp number, else the main phone number.'],
             ],
             'Restaurant & stock' => [
                 'restaurant_tagline'            => ['label' => 'Restaurant tagline', 'type' => 'text', 'max' => 100, 'default' => 'Fresh. Local. Inspired.'],

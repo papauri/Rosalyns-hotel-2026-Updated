@@ -242,7 +242,8 @@ $throwLog = rh_report_section('x', static function () { throw new RuntimeExcepti
 zr_check($throwLog['ok'] === false, 'section: a failing logger does not stop the e-mail either');
 zr_check(strpos(rh_report_failed_line('Station report'), 'Station report could not be loaded') === 0 && strpos(rh_report_failed_line('Station report'), 'SQLSTATE') === false, 'section: e-mail line says "could not be loaded", no error detail');
 $dr = zr_src('scripts/daily_reports.php') . zr_src('includes/daily-reports-send.php'); // CLI + shared build/send (2026-11-11 timer)
-zr_check(substr_count($dr, 'rh_report_section(') === 4 && strpos($dr, "rh_log_event('daily_reports', 'error'") !== false && strpos($dr, "if (\$sec['ok'] && is_array(\$sec['result']))") !== false, 'daily e-mail: four independent sections, failures logged, only good CSVs attached');
+zr_check(substr_count($dr, 'rh_report_section(') === 5 && strpos($dr, "rh_log_event('daily_reports', 'error'") !== false && strpos($dr, "if (\$sec['ok'] && is_array(\$sec['result']))") !== false
+    && strpos($dr, "rh_report_section('end-of-day',") !== false, 'daily e-mail: four CSV sections + the End of Day section (owner B1), each independent, failures logged, only good parts attached');
 zr_check(strpos($dr, "rh_pos_last_ended_trading_date(new DateTimeImmutable('now', rh_site_timezone()))") !== false && strpos($dr, "trading day ' . htmlspecialchars(\$stationDays)") !== false, 'daily e-mail: station report = last ended trading day, named in the e-mail');
 // 7c. System Logs batch = the per-close rule, with no query per close.
 $biz = static function (string $d): array { return ['start_sql' => $d . ' 06:00:00', 'trading_end_sql' => (new DateTimeImmutable($d))->modify('+1 day')->format('Y-m-d') . ' 06:00:00']; };

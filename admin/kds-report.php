@@ -111,6 +111,13 @@ if (($_GET['format'] ?? '') === 'csv') {
 }
 
 /* === Email report === */
+// Same people as the timed station report emails (L11, owner 2026-11-13): To prefilled with the "Station report emails
+// go to" list (empty = End-of-day report recipients), visible copy = the station report copy list. Test mode (B3): only
+// the test address, [TEST], no copies. Same mailer + Emails sent kind as the timed email.
+require_once __DIR__ . '/../includes/daily-reports-send.php';
+require_once __DIR__ . '/../includes/auto-scheduler.php';
+$kdsDefaultTo = rh_station_reports_recipients(rh_auto_setting('automated_job_station_reports_to'), static fn(): array => rh_eod_report_recipients());
+$kdsTestTo = rh_report_test_recipient();
 $emailMsg = '';
 $emailErr = '';
 if (($_POST['action'] ?? '') === 'email_report') {
@@ -118,19 +125,35 @@ if (($_POST['action'] ?? '') === 'email_report') {
     if (!validateCsrfToken($token)) {
         $emailErr = 'Security token invalid.';
     } else {
-        $to = trim($_POST['to'] ?? '');
-        if (!filter_var($to, FILTER_VALIDATE_EMAIL)) {
-            $emailErr = 'Provide a valid recipient email.';
+        $kdsTo = rh_daily_reports_parse_recipients(trim((string)($_POST['to'] ?? '')));
+        if (!$kdsTo && $kdsTestTo === '') {
+            $emailErr = 'Provide at least one valid recipient email.';
         } else {
             $subject = sprintf('[%s] Station Report — %s — %s', $site_name, $STATION_OPTIONS[$reqStation], $reqDate);
             $html = rh_kds_report_render_email(compact('reqStation', 'reqDate', 'STATION_OPTIONS', 'STATION_LABEL', 'totalItems', 'totalQty',
                 'totalRevenue', 'totalVoid', 'totalVoidValue', 'avgPrep', 'minPrep', 'maxPrep', 'byStation', 'topItems', 'rows',
                 'currency_symbol', 'site_name'));
-            $result = sendEmail($to, $to, $subject, $html, '');
-            if (!empty($result['success'])) {
-                $emailMsg = "Report emailed to {$to}.";
+            $kdsCc = rh_daily_reports_cc($kdsTo, rh_auto_setting('automated_job_station_reports_cc'));
+            $route = rh_report_route($kdsTo, $kdsCc, $subject, $kdsTestTo);
+            if ($route['action'] !== 'send') {
+                $emailErr = $route['note'];
             } else {
-                $emailErr = 'Email failed: ' . ($result['message'] ?? 'unknown error');
+                require_once __DIR__ . '/../includes/report-mailer.php';
+                $emailCtx = function_exists('rh_email_context') ? rh_email_context(['kind' => 'station_report']) : null; // System Logs > Emails sent
+                try {
+                    $result = rh_report_with_test_ctx($route['test'] ? $kdsTestTo : '', static function () use ($route, $html) {
+                        return sendReportEmail($route['recipients'], $route['subject'], $html, [], '', $route['cc']);
+                    });
+                } finally {
+                    $emailCtx = null;
+                }
+                if (!empty($result['success'])) {
+                    $emailMsg = $route['test']
+                        ? 'TEST MODE: report emailed only to ' . $kdsTestTo . ' (no copies).'
+                        : 'Report emailed to ' . implode(', ', array_column($route['recipients'], 'email')) . ($route['cc'] ? ' (CC: ' . implode(', ', $route['cc']) . ')' : '') . '.';
+                } else {
+                    $emailErr = 'Email failed: ' . ($result['message'] ?? 'unknown error');
+                }
             }
         }
     }
@@ -351,8 +374,17 @@ $current_page = basename($_SERVER['PHP_SELF']);
             </div>
             <div class="modal-body">
                 <p style="font-size:13px; color:#6c757d; margin:0 0 12px;">Sends an HTML summary of <strong><?php echo htmlspecialchars($STATION_OPTIONS[$reqStation]); ?></strong> for <strong><?php echo $reqDate; ?></strong>.</p>
-                <label style="font-size:12px; color:#6c757d; font-weight:600;">Recipient email</label>
-                <input type="email" name="to" required value="<?php echo htmlspecialchars(getEmailSetting('email_admin_email', '')); ?>" style="width:100%; padding:10px; border:1px solid #d8dde3; border-radius:6px; font-size:13px; margin-top:4px; margin-bottom:14px;">
+                <label style="font-size:12px; color:#6c757d; font-weight:600;" for="kdsEmailTo">Send to (separate several addresses with commas)</label>
+                <input type="email" id="kdsEmailTo" name="to" multiple<?php echo $kdsTestTo === '' ? ' required' : ''; ?> value="<?php echo htmlspecialchars(implode(', ', array_column($kdsDefaultTo, 'email'))); ?>" style="width:100%; padding:10px; border:1px solid #d8dde3; border-radius:6px; font-size:13px; margin-top:4px; margin-bottom:6px;">
+                <p style="font-size:12px; color:#6c757d; margin:0 0 14px;">
+                    <?php if ($kdsTestTo !== ''): ?>
+                        Test mode: the email goes only to <?php echo htmlspecialchars($kdsTestTo); ?>, with no copies.
+                    <?php else: ?>
+                        Starts with the "Station report emails go to" list (Automated Emails).
+                        <?php $kdsCcShow = rh_daily_reports_cc($kdsDefaultTo, rh_auto_setting('automated_job_station_reports_cc')); ?>
+                        Copy (CC): <?php echo $kdsCcShow ? htmlspecialchars(implode(', ', $kdsCcShow)) : 'none'; ?>.
+                    <?php endif; ?>
+                </p>
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" onclick="closeKdsEmailModal()">Cancel</button>

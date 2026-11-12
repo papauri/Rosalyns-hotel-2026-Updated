@@ -5,8 +5,9 @@
  *
  *   php scripts/daily_reports.php --recipients=a@x.com,b@y.com --start=YYYY-MM-DD --end=YYYY-MM-DD [--force]
  *
- * Defaults: bookings / accounting = today (single day); station-day = the last trading day that has ENDED
- * (--date / --start / --end pick the days of the dated reports). Recipients: env REPORT_RECIPIENTS (or fail).
+ * Defaults (= the timer, owner 2026-11-13): every dated section = the last trading day that has ENDED, plus that
+ * day's End of Day PDF (--date / --start / --end pick the days of the dated reports). Recipients: env
+ * REPORT_RECIPIENTS (or fail); test mode (Automated Emails > Test recipient set) sends ONLY to the test address.
  * Up to four attachments (bookings, station-day, accounting, stock-health): a section that fails is logged and
  * named as "could not be loaded" in the e-mail, and the rest are still sent.
  * The build + send is shared with the scheduler job 'daily_reports' (includes/daily-reports-send.php). A default
@@ -37,39 +38,45 @@ foreach (array_slice($argv, 1) as $arg) {
     }
 }
 
-$today = date('Y-m-d');
-$start = $args['start'] ?? ($args['date'] ?? $today);
-$end   = $args['end']   ?? ($args['date'] ?? $today);
 $force = isset($args['force']);
 
+require_once __DIR__ . '/../includes/station-hours.php';
+require_once __DIR__ . '/../admin/includes/pos-shift-totals.php';
+
+// Default run = exactly what the timer sends (L9, owner 2026-11-13): EVERY dated section is the trading day that has
+// ENDED (opening -> next opening), never today's half day, plus that day's End of Day PDF. --date / --start / --end
+// pick days by hand (a resend: no claim, no End of Day PDF unless one single day is picked).
+$stationExplicit = isset($args['start']) || isset($args['end']) || isset($args['date']);
+$endedDay = date('Y-m-d', strtotime('-1 day'));
+try {
+    $endedDay = rh_pos_last_ended_trading_date(new DateTimeImmutable('now', rh_site_timezone()));
+} catch (Throwable $e) {
+    if (function_exists('rh_log_event')) {
+        rh_log_event('daily_reports', 'error', 'Daily report section could not be built: station-day (day)', ['error' => $e->getMessage()]);
+    }
+    fwrite(STDERR, '  ! station-day (day): ' . $e->getMessage() . "\n");
+}
+$start = $args['start'] ?? ($args['date'] ?? $endedDay);
+$end   = $args['end']   ?? ($args['date'] ?? $endedDay);
+$stationStart = $start;
+$stationEnd = $end;
+
 $recipients = rh_daily_reports_parse_recipients($args['recipients'] ?? (string)getenv('REPORT_RECIPIENTS'));
+// Test mode (Automated Emails > Test recipient set): ONLY the test address, [TEST], no copies, 'test:' claim (B3).
+$testTo = rh_report_test_recipient();
+$route = rh_report_route($recipients, [], 'x', $testTo);
+if ($route['action'] !== 'send') {
+    fwrite(STDERR, 'ERROR: ' . $route['note'] . "\n");
+    exit(2);
+}
+$recipients = $route['recipients'];
 if (!$recipients) {
     fwrite(STDERR, "ERROR: No valid --recipients=email,email provided.\n");
     exit(2);
 }
 
-echo "Daily reports — period {$start} to {$end}\n";
+echo "Daily reports — period {$start} to {$end}" . ($route['test'] ? ' (TEST MODE)' : '') . "\n";
 echo 'Recipients: ' . implode(', ', array_column($recipients, 'email')) . "\n\n";
-
-require_once __DIR__ . '/../includes/station-hours.php';
-require_once __DIR__ . '/../admin/includes/pos-shift-totals.php';
-
-// Station report = the trading day that has ENDED (owner 2026-11-10 "count with the day that ended"), so a run
-// before opening or during the day never sends an empty or half day. --date / --start / --end still pick days.
-$stationExplicit = isset($args['start']) || isset($args['end']) || isset($args['date']);
-$stationStart = $start;
-$stationEnd = $end;
-if (!$stationExplicit) {
-    try {
-        $stationStart = $stationEnd = rh_pos_last_ended_trading_date(new DateTimeImmutable('now', rh_site_timezone()));
-    } catch (Throwable $e) {
-        if (function_exists('rh_log_event')) {
-            rh_log_event('daily_reports', 'error', 'Daily report section could not be built: station-day (day)', ['error' => $e->getMessage()]);
-        }
-        fwrite(STDERR, '  ! station-day (day): ' . $e->getMessage() . "\n");
-        $stationStart = $stationEnd = date('Y-m-d', strtotime('-1 day'));
-    }
-}
 
 /* ---------------- once per trading day (shared with the scheduler) ---------------- */
 // Only a default run claims (it sends the same day the timer would). A run with explicit dates is a hand-picked resend.
@@ -77,7 +84,7 @@ $claimKey = null;
 $pdoLog = $GLOBALS['pdo'] ?? null;
 if (!$stationExplicit) {
     require_once __DIR__ . '/../includes/auto-scheduler.php';
-    $key = rh_daily_reports_key($stationStart);
+    $key = rh_daily_reports_key($stationStart, $route['test']);
     if ($pdoLog instanceof PDO && rh_auto_log_table_ready($pdoLog)) {
         $emails = implode(', ', array_column($recipients, 'email'));
         if (rh_auto_log_claim($pdoLog, $key['job'], $key['type'], $key['id'], $key['stage'], $emails, 'Daily Operations Report (CLI) - trading day ' . $stationStart)) {
@@ -97,8 +104,11 @@ if (!$stationExplicit) {
 }
 
 /* ---------------- build + send ---------------- */
-$out = rh_daily_reports_build_and_send($recipients, $start, $end, $stationStart, $stationEnd, $stationExplicit,
-    ['echo' => true, 'cc' => rh_daily_reports_cc($recipients)]);
+$out = rh_report_with_test_ctx($route['test'] ? $testTo : '', static fn(): array => rh_daily_reports_build_and_send(
+    $recipients, $start, $end, $stationStart, $stationEnd, $stationExplicit,
+    ['echo' => true, 'cc' => $route['test'] ? [] : rh_daily_reports_cc_all($recipients),
+     'subject_prefix' => $route['test'] ? '[TEST] ' : '',
+     'eod' => $start === $end ? ['date' => $start, 'by' => 'System (command line)'] : []]));
 $result = $out['result'];
 
 if ($claimKey !== null) {
