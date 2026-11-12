@@ -976,43 +976,17 @@ try {
         exit;
     }
 
-    // ── Returning guest history ──────────────────────────────────────
-    $guest_history = ['total_bookings' => 0, 'completed_stays' => 0, 'lifetime_spend' => 0.0, 'bookings' => []];
-    if (!empty($booking['guest_email'])) {
-        try {
-            $ghStmt = $pdo->prepare("
-                SELECT id, booking_reference, check_in_date, check_out_date, total_amount, status
-                FROM bookings
-                WHERE guest_email = :email
-                  AND id != :current_id
-                ORDER BY check_in_date DESC
-                LIMIT 6
-            ");
-            $ghStmt->execute([':email' => $booking['guest_email'], ':current_id' => $booking_id]);
-            $past_bookings = $ghStmt->fetchAll(PDO::FETCH_ASSOC);
-
-            $cntStmt = $pdo->prepare("
-                SELECT
-                    COUNT(*) AS total_bookings,
-                    SUM(CASE WHEN status NOT IN ('cancelled','no-show','expired') THEN 1 ELSE 0 END) AS completed_stays,
-                    COALESCE(SUM(CASE WHEN status NOT IN ('cancelled','no-show','expired') THEN " . rh_booking_gross_sql('bookings') . " ELSE 0 END), 0) AS lifetime_spend
-                FROM bookings
-                WHERE guest_email = :email
-                  AND id != :current_id
-            ");
-            $cntStmt->execute([':email' => $booking['guest_email'], ':current_id' => $booking_id]);
-            $ghCounts = $cntStmt->fetch(PDO::FETCH_ASSOC) ?: [];
-
-            $guest_history = [
-                'total_bookings'  => (int)($ghCounts['total_bookings']  ?? 0),
-                'completed_stays' => (int)($ghCounts['completed_stays'] ?? 0),
-                'lifetime_spend'  => (float)($ghCounts['lifetime_spend'] ?? 0),
-                'bookings'        => $past_bookings,
-            ];
-        } catch (\Throwable $e) {
-            error_log('Guest history query: ' . $e->getMessage());
-        }
-    }
+    // ── Guest history (one rule with the Create Booking lookup: includes/guest-history.php) ──
+    // Money: shown to whoever can open this page, the same people who see this booking's Paid figure (page
+    // permission 'bookings'); checked explicitly so it stays tied to that rule.
+    require_once __DIR__ . '/../includes/guest-history.php';
+    $guest_history = rh_guest_history(
+        $pdo,
+        (string)($booking['guest_email'] ?? ''),
+        (int)$booking_id,
+        hasPermission((int)($user['id'] ?? 0), 'bookings'),
+        6
+    );
 
     // Derive room status from booking status if no individual room assigned
     if (empty($booking['individual_room_status'])) {
@@ -2386,24 +2360,34 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             <!-- RIGHT: guest history, notes, activity -->
             <aside class="rh-layout__side">
 
-                <?php if (!empty($booking['guest_email'])): ?>
+                <?php if (trim((string)($booking['guest_email'] ?? '')) !== ''): ?>
+                <?php $gh_ok = !empty($guest_history['ok']); ?>
                 <section class="rh-panel">
                     <div class="rh-panel__head">
                         <h2 class="rh-panel__title">Guest history</h2>
-                        <?php if ($guest_history['completed_stays'] >= 1): ?>
-                            <span class="gh-badge gh-badge--returning"><i class="fas fa-redo-alt"></i> Returning guest</span>
+                        <?php if (!$gh_ok): ?>
+                            <span class="gh-badge gh-badge--new"><i class="fas fa-circle-exclamation"></i> Could not load</span>
+                        <?php elseif ($guest_history['is_returning']): ?>
+                            <span class="gh-badge gh-badge--returning" title="Has a checked-out stay before or after this booking"><i class="fas fa-redo-alt"></i> Returning guest</span>
                         <?php else: ?>
-                            <span class="gh-badge gh-badge--new"><i class="fas fa-star"></i> First stay</span>
+                            <span class="gh-badge gh-badge--new" title="No other checked-out stay under this email"><i class="fas fa-star"></i> First stay</span>
                         <?php endif; ?>
                     </div>
                     <dl class="bd-stats">
-                        <div><dt>Stays</dt><dd><?php echo (int) $guest_history['completed_stays']; ?></dd></div>
-                        <div><dt>Bookings</dt><dd><?php echo (int) $guest_history['total_bookings']; ?></dd></div>
-                        <div><dt>Lifetime spend</dt><dd><?php echo $currency_symbol . number_format($guest_history['lifetime_spend'], 0); ?></dd></div>
+                        <div><dt>Completed stays<br><small class="bd-muted">checked-out stays under this email, this one included; rooms booked together count once; in-house and upcoming not counted</small></dt><dd><?php echo $gh_ok ? (int) $guest_history['completed_stays'] : '&ndash;'; ?></dd></div>
+                        <div><dt>Other bookings<br><small class="bd-muted">every other booking under this email, any status</small></dt><dd><?php echo $gh_ok ? (int) $guest_history['other_bookings'] : '&ndash;'; ?></dd></div>
+                        <?php if (is_array($guest_history['money'])): ?>
+                        <div><dt>Received<br><small class="bd-muted">money paid in across all their bookings, this one included, less refunds</small></dt><dd><?php echo htmlspecialchars((string)$currency_symbol) . number_format((float)$guest_history['money']['received'], 0); ?></dd></div>
+                        <?php if ((float)$guest_history['money']['refunded'] > BALANCE_TOLERANCE): ?>
+                        <?php $gh_split = rh_refund_split_text((float)$guest_history['money']['refunded'], (float)($guest_history['money']['to_credit'] ?? 0), (string)$currency_symbol, 0); ?>
+                        <div><dt>Refunded<br><small class="bd-muted"><?php echo htmlspecialchars($gh_split !== '' ? $gh_split . '; already taken off Received' : 'paid back in cash / bank, in full; already taken off Received'); ?></small></dt><dd><?php echo htmlspecialchars((string)$currency_symbol) . number_format((float)$guest_history['money']['refunded'], 0); ?></dd></div>
+                        <?php endif; ?>
+                        <?php endif; ?>
                     </dl>
-                    <?php if (!empty($guest_history['bookings'])): ?>
+                    <?php if (!empty($guest_history['recent_other'])): ?>
                     <div class="gh-past-list">
-                        <?php foreach ($guest_history['bookings'] as $pb): ?>
+                        <small class="bd-muted">Latest other bookings (up to 6, newest arrival first)</small>
+                        <?php foreach ($guest_history['recent_other'] as $pb): ?>
                         <div class="gh-past-item">
                             <div>
                                 <a href="booking-details.php?id=<?php echo (int)$pb['id']; ?>" class="gh-past-ref"><?php echo htmlspecialchars($pb['booking_reference']); ?></a>

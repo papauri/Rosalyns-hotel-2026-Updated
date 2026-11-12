@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 require_once __DIR__ . '/api-init.php';
+require_once __DIR__ . '/../../includes/guest-history.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
@@ -22,106 +23,60 @@ if (mb_strlen($q) < 2) {
 
 $like     = '%' . $q . '%';
 $currency = getSetting('currency_symbol', 'MWK');
-$rows     = [];
+// Money figures follow the booking page: whoever can open a booking there sees its Paid figure (page permission
+// 'bookings'), so the same people see what a guest has paid here. Checked explicitly so it stays tied to that rule.
+$canSeeMoney = hasPermission((int)($user['id'] ?? 0), 'bookings');
 
-// Primary query — joins payments for accurate lifetime spend
+// 1. The guests the search matches: up to 10 distinct emails (trimmed, case-insensitive), newest booking first.
+//    Counts and money come from the shared guest-history rule below, over ALL of each guest's bookings, not only
+//    the bookings the search text happened to match.
 try {
     $stmt = $pdo->prepare("
-        SELECT
-            b.guest_email,
-            MAX(b.guest_name)                     AS guest_name,
-            MAX(b.guest_phone)                    AS guest_phone,
-            MAX(COALESCE(b.guest_country, ''))    AS guest_country,
-            MAX(COALESCE(b.guest_address, ''))    AS guest_address,
-            COUNT(*)                              AS total_bookings,
-            SUM(CASE WHEN b.status NOT IN ('cancelled','no-show','expired')
-                     THEN 1 ELSE 0 END)           AS completed_stays,
-            MAX(b.check_in_date)                  AS last_check_in,
-            MAX(b.check_out_date)                 AS last_check_out,
-            (SELECT b2.booking_reference
-             FROM bookings b2
-             WHERE b2.deleted_at IS NULL AND b2.guest_email = b.guest_email
-               AND b2.status NOT IN ('cancelled','no-show','expired')
-               AND b2.deleted_at IS NULL
-             ORDER BY b2.check_in_date DESC LIMIT 1) AS last_booking_ref,
-            COALESCE((
-                SELECT SUM(p.payment_amount)
-                FROM payments p
-                INNER JOIN bookings b3 ON b3.id = p.booking_id
-                WHERE b3.guest_email = b.guest_email
-                  AND p.payment_status IN ('completed','paid')
-            ), 0) AS lifetime_spend
+        SELECT LOWER(TRIM(b.guest_email)) AS email_key, MAX(b.check_in_date) AS last_check_in
         FROM bookings b
-        WHERE b.guest_email != ''
+        WHERE TRIM(COALESCE(b.guest_email, '')) <> ''
           AND b.deleted_at IS NULL
           AND (b.guest_name  LIKE :q1
             OR b.guest_email LIKE :q2
             OR b.guest_phone LIKE :q3)
-        GROUP BY b.guest_email
+        GROUP BY LOWER(TRIM(b.guest_email))
         ORDER BY last_check_in DESC
         LIMIT 10
     ");
     $stmt->execute([':q1' => $like, ':q2' => $like, ':q3' => $like]);
-    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $keys = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+    // Contact details from each guest's latest booking (one row, so name/phone/address belong together).
+    $contactStmt = $pdo->prepare("
+        SELECT TRIM(b.guest_email) AS guest_email, b.guest_name, b.guest_phone,
+               COALESCE(b.guest_country, '') AS guest_country, COALESCE(b.guest_address, '') AS guest_address
+        FROM bookings b
+        WHERE b.deleted_at IS NULL AND " . rh_guest_history_email_sql('b') . "
+        ORDER BY b.check_in_date DESC, b.id DESC
+        LIMIT 1
+    ");
 } catch (\Throwable $e) {
-    // Fallback — simpler query without deleted_at or payments join
-    try {
-        $stmt = $pdo->prepare("
-            SELECT
-                guest_email,
-                MAX(guest_name)                   AS guest_name,
-                MAX(guest_phone)                  AS guest_phone,
-                MAX(COALESCE(guest_country, ''))  AS guest_country,
-                MAX(COALESCE(guest_address, ''))  AS guest_address,
-                COUNT(*)                          AS total_bookings,
-                SUM(CASE WHEN status NOT IN ('cancelled','no-show','expired')
-                         THEN 1 ELSE 0 END)       AS completed_stays,
-                MAX(check_in_date)                AS last_check_in,
-                MAX(check_out_date)               AS last_check_out,
-                MAX(booking_reference)            AS last_booking_ref,
-                COALESCE(SUM(CASE WHEN status NOT IN ('cancelled','no-show','expired')
-                                  THEN COALESCE(NULLIF(total_with_vat, 0), total_amount + COALESCE(vat_amount, 0)) ELSE 0 END), 0) AS lifetime_spend
-            FROM bookings
-            WHERE guest_email != ''
-              AND (guest_name  LIKE :q1
-                OR guest_email LIKE :q2
-                OR guest_phone LIKE :q3)
-            GROUP BY guest_email
-            ORDER BY last_check_in DESC
-            LIMIT 10
-        ");
-        $stmt->execute([':q1' => $like, ':q2' => $like, ':q3' => $like]);
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    } catch (\Throwable $e2) {
-        error_log('Guest lookup fallback: ' . $e2->getMessage());
-        http_response_code(500);
-        echo json_encode(['error' => 'Server error']);
-        exit;
-    }
+    error_log('Guest lookup: ' . $e->getMessage());
+    http_response_code(500);
+    echo json_encode(['error' => 'Server error']);
+    exit;
 }
 
-$guests = array_map(function (array $r) use ($currency): array {
-    $stays  = (int)$r['completed_stays'];
-    $lastIn = $r['last_check_in'] ?? '';
-    return [
-        'email'            => (string)$r['guest_email'],
-        'name'             => (string)$r['guest_name'],
-        'phone'            => (string)$r['guest_phone'],
-        'country'          => (string)$r['guest_country'],
-        'address'          => (string)$r['guest_address'],
-        'total_bookings'   => (int)$r['total_bookings'],
-        'completed_stays'  => $stays,
-        'last_check_in'    => $lastIn,
-        'last_check_out'   => (string)($r['last_check_out'] ?? ''),
-        'last_booking_ref' => (string)($r['last_booking_ref'] ?? ''),
-        'lifetime_spend'   => (float)$r['lifetime_spend'],
-        'currency'         => $currency,
-        'is_returning'     => $stays >= 1,
-        'stay_label'       => $stays === 0 ? 'No completed stays'
-            : ($stays === 1 ? '1 previous stay' : $stays . ' previous stays'),
-        'last_stay_label'  => $lastIn ? date('M j, Y', strtotime($lastIn)) : '',
-    ];
-}, $rows);
+$guests = [];
+foreach ($keys as $key) {
+    try {
+        $contactStmt->execute([(string)$key]);
+        $contact = $contactStmt->fetch(PDO::FETCH_ASSOC);
+    } catch (\Throwable $e) {
+        error_log('Guest lookup contact: ' . $e->getMessage());
+        $contact = false;
+    }
+    if (!$contact) {
+        continue;
+    }
+    $h = rh_guest_history($pdo, (string)$contact['guest_email'], 0, $canSeeMoney, 0);
+    $guests[] = rh_guest_history_lookup_row($contact, $h, (string)$currency);
+}
 
 echo json_encode(['guests' => $guests], JSON_UNESCAPED_UNICODE);
 exit;

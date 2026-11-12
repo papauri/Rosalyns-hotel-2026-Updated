@@ -4295,16 +4295,19 @@ try {
                 selName.textContent   = g.name;
 
                 const badges = [];
-                if (g.completed_stays >= 1) {
-                    badges.push('<span class="rg-badge rg-badge--returning"><i class="fas fa-redo-alt"></i> Returning Guest</span>');
+                // Guest history rule (includes/guest-history.php): a stay = a checked-out stay; upcoming and in-house bookings are not stays.
+                if (g.history_ok === false) {
+                    badges.push('<span class="rg-badge rg-badge--new"><i class="fas fa-circle-exclamation"></i> History could not be loaded</span>');
+                } else if (g.is_returning) {
+                    badges.push('<span class="rg-badge rg-badge--returning" title="Has at least one checked-out stay"><i class="fas fa-redo-alt"></i> Returning Guest</span>');
                 } else {
-                    badges.push('<span class="rg-badge rg-badge--new"><i class="fas fa-star"></i> First Stay</span>');
+                    badges.push('<span class="rg-badge rg-badge--new" title="No checked-out stay yet"><i class="fas fa-star"></i> First Stay</span>');
                 }
-                if (g.completed_stays >= 1) {
-                    badges.push('<span class="rg-badge rg-badge--stays"><i class="fas fa-bed"></i> ' + escHtml(g.stay_label) + '</span>');
+                if (g.history_ok !== false && g.completed_stays >= 1) {
+                    badges.push('<span class="rg-badge rg-badge--stays" title="Checked-out stays; rooms booked together count once"><i class="fas fa-bed"></i> ' + escHtml(g.stay_label) + '</span>');
                 }
-                if (g.lifetime_spend > 0) {
-                    badges.push('<span class="rg-badge rg-badge--spend"><i class="fas fa-coins"></i> ' + escHtml(fmt(g.currency, g.lifetime_spend)) + ' lifetime</span>');
+                if (typeof g.lifetime_spend === 'number' && g.lifetime_spend > 0) {
+                    badges.push('<span class="rg-badge rg-badge--spend" title="Money received from this guest across all their bookings, less refunds"><i class="fas fa-coins"></i> ' + escHtml(fmt(g.currency, g.lifetime_spend)) + ' received</span>');
                 }
                 selBadges.innerHTML = badges.join('');
 

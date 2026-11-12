@@ -720,9 +720,14 @@
 
 .bd-stats dt {
     color: var(--bd-muted);
+    min-width: 0;
 }
 
+/* The figure keeps its full width; the label and its helper line wrap instead (a long amount was clipped on phones). */
 .bd-stats dd {
+    flex-shrink: 0;
+    text-align: right;
+    white-space: nowrap;
     margin: 0;
     font-weight: 600;
     color: var(--bd-ink);
