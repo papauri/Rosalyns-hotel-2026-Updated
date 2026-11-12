@@ -40,9 +40,10 @@ do not re-derive plans or re-scan the repo ad hoc.
 - **ROSALYN'S IS LIVE (owner 2026-11-09)**: real guests and money. Extreme caution. No DB tests,
   writing scripts or test emails against Rosalyn's DB. Change Rosalyn's
   settings/data only when the owner asked for that exact change. Every dispatch brief must say this.
-- **LIWONDE IS LIVE TOO (owner 2026-11-10)**: its bookings and document numbers are real from the
-  trial on ("numbering has to be perfect"). The same rail applies there: no DB tests, writing scripts
-  or test emails against Liwonde's DB without the owner's OK. Pure (no-DB) tests and php -l only.
+- **LIWONDE IS THE DEDICATED TEST PLATFORM (owner 2026-11-12, replaces "Liwonde is live too")**: a mirror
+  of Rosalyn's bookings, accounting and rooms with made-up client details (names, emails @example.invalid,
+  phones, addresses, companies, notes) and outbound email/WhatsApp muted. DB tests, test bookings and
+  rehearsals run there. Rosalyn's stays LIVE: it is only ever a read-only source for the mirror script.
 
 - **Cost (owner 2026-11-11)**: guides + AI-lead sync only when needed and once a day (SYNC QUEUE in TASKS.md); one review per round; small tasks inline ONLY IF they cannot break logic; stop every `php -S` when not in use. Also follow the Cost rules in `.claude/DEPARTMENTS.md` (no agent for small work, haiku
   for docs/lint/small QA, CODE_INDEX + offset reads instead of whole files, one QA per ship,
