@@ -4,6 +4,7 @@ require_once 'admin-init.php';
 /** @var string $csrf_token */
 require_once 'includes/finance-schema.php';
 require_once __DIR__ . '/includes/receivables.php';
+require_once __DIR__ . '/includes/finance-refunds.php'; // the one refund rule: gross total_amount, completed + processing
 require_once '../config/credit-notes.php';
 require_once __DIR__ . '/includes/review-panel.php'; // the Decisions panel: prints nothing unless switched on and allowed
 
@@ -184,11 +185,11 @@ try {
                 - COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END), 0)
                 as total_vat_collected,
             COALESCE(SUM(CASE WHEN payment_status IN ('pending', 'partial') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) as total_pending,
-            COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN refund_amount ELSE 0 END), 0) as total_refunds_issued,
+            " . rh_refund_settled_sum_sql() . " as total_refunds_issued,
             COALESCE(SUM(CASE WHEN payment_status = 'refunded' THEN total_amount ELSE 0 END), 0) as total_refunded,
             COALESCE(SUM(CASE WHEN payment_status = 'cancelled' THEN total_amount ELSE 0 END), 0) as total_cancelled,
-            COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status = 'pending' THEN refund_amount ELSE 0 END), 0) as pending_refunds,
-            COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status = 'completed' THEN refund_amount ELSE 0 END), 0) as completed_refunds
+            " . rh_refund_pending_sum_sql() . " as pending_refunds,
+            COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status = 'completed' THEN total_amount ELSE 0 END), 0) as completed_refunds
         FROM payments
         WHERE payment_date BETWEEN ? AND ?
           AND deleted_at IS NULL
@@ -352,7 +353,7 @@ try {
         SELECT
             refund_reason,
             COUNT(*) as count,
-            COALESCE(SUM(refund_amount), 0) as total_amount
+            COALESCE(SUM(" . rh_refund_amount_sql() . "), 0) as total_amount
         FROM payments
         WHERE payment_type = 'refund'
           AND refund_status IN ('completed','processing')
@@ -537,7 +538,7 @@ try {
             COALESCE(SUM(CASE WHEN booking_type = 'restaurant' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS fnb_rev,
             COALESCE(SUM(CASE WHEN booking_type = 'gym' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS gym_rev,
             COALESCE(SUM(CASE WHEN booking_type = 'event' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS events_rev,
-            COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN refund_amount ELSE 0 END), 0) AS refunds,
+            " . rh_refund_settled_sum_sql() . " AS refunds,
             COUNT(*) AS txn_count
         FROM payments
         WHERE deleted_at IS NULL
@@ -1676,7 +1677,8 @@ if (!isset($folio_fnb)) {
                 <span class="ck-kpi__icon"><i class="fas fa-rotate-left"></i></span>
                 <span class="ck-kpi__label">Refunds</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><?php echo $ckMoney($cat_refunds); ?></span>
-                <span class="ck-kpi__sub"><?php echo $cat_pending_refunds > 0.01 ? 'Pending ' . $ckPlain($cat_pending_refunds) . ' to settle' : 'None waiting'; ?></span>
+                <span class="ck-kpi__sub"><?php echo $cat_pending_refunds > BALANCE_TOLERANCE ? 'Awaiting approval ' . $ckPlain($cat_pending_refunds) . ' (not in the total)' : 'None awaiting approval'; ?></span>
+                <span class="ck-kpi__sub" style="margin-top:0">The full amount paid back (VAT included) in this period: paid out or being paid. Same rule as Payments and Reports.</span>
             </a>
             <?php if ($mod_pos && $pos_gross > 0): ?>
             <div class="ck-kpi<?php echo $pos_margin_pct < 0 ? ' ck-kpi--alert' : ''; ?>" title="POS gross margin - revenue minus recorded cost of goods">

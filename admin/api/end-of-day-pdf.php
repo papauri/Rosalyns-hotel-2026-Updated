@@ -101,7 +101,7 @@ try {
             COALESCE(SUM(CASE WHEN booking_type='room'       AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund' THEN vat_amount ELSE 0 END),0) AS room_vat,
             COALESCE(SUM(CASE WHEN booking_type='conference' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund' THEN vat_amount ELSE 0 END),0) AS conf_vat,
             COALESCE(SUM(CASE WHEN booking_type='restaurant' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund' THEN vat_amount ELSE 0 END),0) AS fnb_vat,
-            COALESCE(SUM(CASE WHEN payment_type='refund' AND refund_status IN ('completed','processing') THEN refund_amount ELSE 0 END),0) AS refunds,
+            COALESCE(SUM(CASE WHEN payment_type='refund' AND refund_status IN ('completed','processing') THEN " . rh_refund_amount_sql() . " ELSE 0 END),0) AS refunds,
             COALESCE(SUM(CASE WHEN payment_type='refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END),0) AS refund_vat,
             COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount ELSE 0 END),0) AS pending,
             COUNT(*) AS txn_count
@@ -196,7 +196,7 @@ try {
     $prevDay = date('Y-m-d', strtotime($date . ' -1 day'));
     $prevPay = $pdo->prepare("
         SELECT COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund' THEN total_amount ELSE 0 END),0) AS gross,
-               COALESCE(SUM(CASE WHEN payment_type='refund' AND refund_status IN ('completed','processing') THEN refund_amount ELSE 0 END),0) AS refunds
+               COALESCE(SUM(CASE WHEN payment_type='refund' AND refund_status IN ('completed','processing') THEN " . rh_refund_amount_sql() . " ELSE 0 END),0) AS refunds
         FROM payments WHERE DATE(payment_date) = :d AND deleted_at IS NULL
     ");
     $prevPay->execute([':d' => $prevDay]);

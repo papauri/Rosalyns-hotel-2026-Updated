@@ -6,6 +6,8 @@ require_once '../includes/modal.php';
 require_once '../includes/alert.php';
 require_once 'includes/finance-schema.php';
 require_once 'includes/finance-filters.php';
+require_once 'includes/finance-refunds.php'; // the one refund rule + row wording (pure)
+require_once 'includes/receivables.php';     // the one "still owed" rule (Dashboard, Invoices, Reports, End of Day)
 
 $site_name = getSetting('site_name');
 $currency_symbol = getSetting('currency_symbol');
@@ -103,6 +105,22 @@ $sql = "
             WHEN p.booking_type = 'event' THEN ei.amount_due
             ELSE NULL
         END as account_amount_due,
+        -- The account's own status, and whether the shared receivables rule (admin/includes/receivables.php) counts
+        -- it as owed, so a row's still-owes note and the Still owed card use one rule (rh_pay_row_state).
+        CASE
+            WHEN p.booking_type = 'room' THEN CASE WHEN b.deleted_at IS NOT NULL THEN 'deleted' ELSE b.status END
+            WHEN p.booking_type = 'conference' THEN ci.status
+            WHEN p.booking_type = 'gym' THEN gi.status
+            WHEN p.booking_type = 'event' THEN ei.status
+            ELSE NULL
+        END as account_status,
+        CASE
+            WHEN p.booking_type = 'room' AND b.id IS NOT NULL AND (" . rh_receivable_status_sql('room', 'b') . ") THEN 1
+            WHEN p.booking_type = 'conference' AND ci.id IS NOT NULL AND (" . rh_receivable_status_sql('conference', 'ci') . ") THEN 1
+            WHEN p.booking_type = 'gym' AND gi.id IS NOT NULL AND (" . rh_receivable_status_sql('gym', 'gi') . ") THEN 1
+            WHEN p.booking_type = 'event' AND ei.id IS NOT NULL AND (" . rh_receivable_status_sql('event', 'ei') . ") THEN 1
+            ELSE 0
+        END as account_in_rule,
         -- Room bookings: stored figures for the booked rate x nights line (includes/booked-rate.php).
         b.total_with_vat AS bk_total_with_vat, b.total_amount AS bk_total_amount, b.vat_amount AS bk_vat_amount,
         b.number_of_nights AS bk_nights, b.package_total AS bk_package_total, b.child_supplement_total AS bk_child
@@ -170,26 +188,26 @@ foreach ($payments as &$payRow) {
 }
 unset($payRow);
 
-// ── Outstanding balances (accounts still owing) ────────────────────────────
+// ── Still owed (accounts still owing) ──────────────────────────────────────
 // The one shared receivables rule (admin/includes/receivables.php), the same rows the Dashboard, Invoices
-// "Outstanding" card, Reports aging and End of Day add up, so this list always totals to those figures.
-// ?booking_type= narrows it to one source (the Invoices "outstanding by source" links).
+// "Outstanding" card, Reports aging and End of Day add up, so the Still owed card and this list always total to
+// those figures. Read once: the card always shows it, ?balance=outstanding lists it.
+// ?booking_type= narrows it to one source (the Invoices "outstanding by source" links), card and list alike.
 $outstandingRows = [];
 $outstandingTotal = 0.0;
 $outstandingFailed = [];
-if ($showOutstanding) {
-    require_once __DIR__ . '/includes/receivables.php';
-    foreach (rh_receivable_rows($pdo, rh_receivable_mods(), $outstandingFailed) as $rcvRow) {
-        if ($bookingType !== '' && $rcvRow['type'] !== $bookingType) {
-            continue;
-        }
-        $outstandingRows[] = [
-            'src' => $rcvRow['type'], 'id' => $rcvRow['id'], 'ref' => $rcvRow['reference'], 'client' => $rcvRow['client'],
-            'status' => $rcvRow['status'], 'amount_paid' => $rcvRow['amount_paid'], 'amount_due' => $rcvRow['amount_due'],
-        ];
-        $outstandingTotal += (float)$rcvRow['amount_due'];
+foreach (rh_receivable_rows($pdo, rh_receivable_mods(), $outstandingFailed) as $rcvRow) {
+    if ($bookingType !== '' && $rcvRow['type'] !== $bookingType) {
+        continue;
     }
-    $outstandingTotal = round($outstandingTotal, 2);
+    $outstandingRows[] = [
+        'src' => $rcvRow['type'], 'id' => $rcvRow['id'], 'ref' => $rcvRow['reference'], 'client' => $rcvRow['client'],
+        'status' => $rcvRow['status'], 'amount_paid' => $rcvRow['amount_paid'], 'amount_due' => $rcvRow['amount_due'],
+    ];
+    $outstandingTotal += (float)$rcvRow['amount_due'];
+}
+$outstandingTotal = round($outstandingTotal, 2);
+if ($showOutstanding) {
     usort($outstandingRows, static fn($a, $b) => (float)$b['amount_due'] <=> (float)$a['amount_due']);
 }
 
@@ -228,8 +246,10 @@ $kpiStmt = $pdo->prepare("
         COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN vat_amount   ELSE 0 END), 0) AS vat_collected,
         COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS pending_total,
         COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') AND COALESCE(payment_type, '') <> 'refund' THEN 1 ELSE 0 END), 0) AS pending_count,
-        COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN total_amount ELSE 0 END), 0) AS refunds_total,
-        COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN 1 ELSE 0 END), 0) AS refunds_count
+        " . rh_refund_settled_sum_sql() . " AS refunds_total,
+        " . rh_refund_settled_count_sql() . " AS refunds_count,
+        " . rh_refund_pending_sum_sql() . " AS refunds_pending_total,
+        " . rh_refund_pending_count_sql() . " AS refunds_pending_count
     FROM payments
     $analyticsWhereSql
 ");
@@ -429,20 +449,29 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
 
         <!-- KPI Strip -->
         <div class="ck-kpis ck-kpis--4">
+            <?php /* Plain scope words for the filtered cards: the dates the list is showing. */
+            $payScopeWords = ($startDate || $endDate) ? (($startDate ?: 'the start') . ' to ' . ($endDate ?: 'today')) : 'all dates'; ?>
             <div class="ck-kpi ck-kpi--good">
                 <span class="ck-kpi__label">Collected (filtered)</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format($gross_collected_total, 0); ?></span>
                 <span class="ck-kpi__sub"><?php echo number_format((int)($kpi['txn_count'] ?? 0)); ?> txns · VAT <?php echo $currency_symbol . number_format((float)($kpi['vat_collected'] ?? 0), 0); ?></span>
+                <span class="ck-kpi__sub" style="margin-top:0">Money received (VAT included) for <?php echo htmlspecialchars($payScopeWords); ?>, before refunds are taken off</span>
             </div>
+            <?php /* Still owed: what accounts still have to pay (rh_receivable_rows above), NOT payment rows marked pending.
+                     A part-paid booking's payments are recorded as received ('completed'), so only its balance shows the debt. */ ?>
             <div class="ck-kpi ck-kpi--warn">
-                <span class="ck-kpi__label">Pending / Partial</span>
-                <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($kpi['pending_total'] ?? 0), 0); ?></span>
-                <span class="ck-kpi__sub">                    <?php echo number_format((int)($kpi['pending_count'] ?? 0)); ?> awaiting ·
-                    <?php if ((int)($kpi['pending_count'] ?? 0) > 0): ?>
-                    <?php /* Same filters plus "pending or partial" (refunds excluded): opens exactly the rows this card counts. */ ?>
-                    <a href="<?php echo htmlspecialchars('payments.php?' . http_build_query(array_merge($_GET, ['status' => in_array($status, ['pending', 'partial'], true) ? $status : 'pending_partial', 'page' => 1, 'balance' => null, 'export' => null]))); ?>" class="acct-link">view these</a>
-                    <?php endif; ?>
+                <span class="ck-kpi__label">Still owed</span>
+                <span class="ck-kpi__value ck-kpi__value--money"><?php if (!empty($outstandingFailed)): ?>Unavailable<?php else: ?><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format($outstandingTotal, 0); ?><?php endif; ?></span>
+                <span class="ck-kpi__sub"><?php echo number_format(count($outstandingRows)); ?> account<?php echo count($outstandingRows) === 1 ? '' : 's'; ?> owing<?php echo $bookingType !== '' ? ' (' . htmlspecialchars(rh_receivable_type_label($bookingType)) . ' only)' : ''; ?> ·
+                    <a href="<?php echo htmlspecialchars('payments.php?' . http_build_query(array_filter(['balance' => 'outstanding', 'booking_type' => $bookingType], static fn($v) => $v !== ''))); ?>" class="acct-link">see who owes</a>
                 </span>
+                <span class="ck-kpi__sub" style="margin-top:0">Unpaid balances on bookings, conferences, events and open tabs, after every payment received (part-payments included). Same figure as the Dashboard and Reports; not affected by the date, status, method or search filters.<?php if (!empty($outstandingFailed)): ?> Some accounts could not be read (System Logs), so no total is shown.<?php endif; ?></span>
+                <?php if ((int)($kpi['pending_count'] ?? 0) > 0): ?>
+                <span class="ck-kpi__sub" style="margin-top:0"><?php echo number_format((int)($kpi['pending_count'] ?? 0)); ?> payment record<?php echo (int)($kpi['pending_count'] ?? 0) === 1 ? '' : 's'; ?> still marked pending (not received) ·
+                    <?php /* Same filters plus "pending or partial" (refunds excluded): opens exactly those payment records. */ ?>
+                    <a href="<?php echo htmlspecialchars('payments.php?' . http_build_query(array_merge($_GET, ['status' => in_array($status, ['pending', 'partial'], true) ? $status : 'pending_partial', 'page' => 1, 'balance' => null, 'export' => null]))); ?>" class="acct-link">view these</a>
+                </span>
+                <?php endif; ?>
             </div>
             <div class="ck-kpi">
                 <span class="ck-kpi__label">Today</span>
@@ -456,7 +485,9 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
             <div class="ck-kpi ck-kpi--info">
                 <span class="ck-kpi__label">Refunds (filtered)</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($kpi['refunds_total'] ?? 0), 0); ?></span>
-                <span class="ck-kpi__sub"><?php echo number_format((int)($kpi['refunds_count'] ?? 0)); ?> refund<?php echo (int)($kpi['refunds_count'] ?? 0) === 1 ? '' : 's'; ?> paid or in progress</span>
+                <span class="ck-kpi__sub"><?php echo number_format((int)($kpi['refunds_count'] ?? 0)); ?> refund<?php echo (int)($kpi['refunds_count'] ?? 0) === 1 ? '' : 's'; ?> paid out or being paid<?php if ((int)($kpi['refunds_pending_count'] ?? 0) > 0): ?> ·
+                    <a href="<?php echo htmlspecialchars('payments.php?' . http_build_query(array_merge($_GET, ['refund_status' => 'pending', 'page' => 1, 'balance' => null, 'export' => null]))); ?>" class="acct-link"><?php echo htmlspecialchars($currency_symbol) . number_format((float)($kpi['refunds_pending_total'] ?? 0), 0); ?> awaiting approval</a><?php endif; ?></span>
+                <span class="ck-kpi__sub" style="margin-top:0">The full amount paid back (VAT included) for <?php echo htmlspecialchars($payScopeWords); ?>. Refunds awaiting approval are not in the total. Accounting and Reports use the same rule for their own dates.</span>
             </div>
         </div>
 
@@ -571,12 +602,12 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
             <div class="acct-panel" style="margin-bottom: 18px;">
                 <div class="acct-panel__head">
                     <h3 class="acct-panel__title">Status Breakdown</h3>
-                    <span class="acct-panel__sub"><?php echo number_format(array_sum(array_column($byStatus, 'txns'))); ?> transactions (amounts exclude refund rows)</span>
+                    <span class="acct-panel__sub"><?php echo number_format(array_sum(array_column($byStatus, 'txns'))); ?> transactions (amounts exclude refund rows). The status of each payment record: "Received" means the money came in, not that the bill is settled.</span>
                 </div>
                 <div style="padding: 14px 18px; display:flex; flex-wrap:wrap; gap:8px;">
                     <?php foreach ($byStatus as $s): ?>
                         <a href="?status=<?php echo htmlspecialchars((string)$s['payment_status']); ?>" class="acct-pill acct-pill--<?php echo htmlspecialchars((string)$s['payment_status']); ?>" style="text-decoration:none;">
-                            <?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)$s['payment_status']))); ?> · <?php echo number_format((int)$s['txns']); ?> · <?php echo $currency_symbol . number_format((float)$s['amt'], 0); ?>
+                            <?php $sPs = (string)$s['payment_status']; echo htmlspecialchars(in_array($sPs, ['completed', 'paid'], true) ? 'Received (' . $sPs . ')' : ucfirst(str_replace('_', ' ', $sPs))); ?> · <?php echo number_format((int)$s['txns']); ?> · <?php echo $currency_symbol . number_format((float)$s['amt'], 0); ?>
                         </a>
                     <?php endforeach; ?>
                 </div>
@@ -620,8 +651,8 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                         <option value="pending_partial" <?php echo $status === 'pending_partial' ? 'selected' : ''; ?>>Pending or partial</option>
                         <option value="pending" <?php echo $status === 'pending' ? 'selected' : ''; ?>>Pending</option>
                         <option value="partial" <?php echo $status === 'partial' ? 'selected' : ''; ?>>Partial</option>
-                        <option value="paid" <?php echo $status === 'paid' ? 'selected' : ''; ?>>Paid</option>
-                        <option value="completed" <?php echo $status === 'completed' ? 'selected' : ''; ?>>Completed</option>
+                        <option value="paid" <?php echo $status === 'paid' ? 'selected' : ''; ?>>Paid (money received)</option>
+                        <option value="completed" <?php echo $status === 'completed' ? 'selected' : ''; ?>>Completed (money received)</option>
                         <option value="failed" <?php echo $status === 'failed' ? 'selected' : ''; ?>>Failed</option>
                         <option value="refunded" <?php echo $status === 'refunded' ? 'selected' : ''; ?>>Refunded</option>
                         <option value="cancelled" <?php echo $status === 'cancelled' ? 'selected' : ''; ?>>Cancelled</option>
@@ -804,10 +835,10 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                         <?php rh_server_sort_th('Booking', 'booking', $paySortKey, $paySortDir, 'col-optional'); ?>
                         <?php rh_server_sort_th('Type', 'type', $paySortKey, $paySortDir, 'col-optional-lg'); ?>
                         <?php rh_server_sort_th('Payment Date', 'date', $paySortKey, $paySortDir, 'col-optional-md'); ?>
-                        <?php rh_server_sort_th('Amount', 'amount', $paySortKey, $paySortDir); ?>
-                        <?php rh_server_sort_th('Outstanding', 'outstanding', $paySortKey, $paySortDir, 'col-optional'); ?>
+                        <?php rh_server_sort_th('<span title="The money this payment record moved, VAT included. Refunds show with a minus: money paid back.">Amount</span>', 'amount', $paySortKey, $paySortDir); ?>
+                        <?php rh_server_sort_th('<span title="What the booking or account behind this payment still has to pay today (its full bill less every payment received). A dash: till orders, settled at the till.">Outstanding</span>', 'outstanding', $paySortKey, $paySortDir, 'col-optional'); ?>
                         <?php rh_server_sort_th('Method', 'method', $paySortKey, $paySortDir, 'col-optional-lg'); ?>
-                        <?php rh_server_sort_th('Status', 'status', $paySortKey, $paySortDir); ?>
+                        <?php rh_server_sort_th('<span title="Whether this payment&#39;s money came in (Received) or a refund&#39;s step. The line under it says whether the booking&#39;s bill is settled or still owes.">Status</span>', 'status', $paySortKey, $paySortDir); ?>
                         <?php rh_server_sort_th('Created', 'created', $paySortKey, $paySortDir, 'col-optional-lg'); ?>
                         <th class="col-optional-lg">Receipt / Txn</th>
                         <th>Actions</th>
@@ -816,6 +847,9 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                 <tbody>
                     <?php if (!empty($payments)): ?>
                         <?php foreach ($payments as $payment): ?>
+                            <?php // Row wording from the columns already joined above (no query per row): admin/includes/finance-refunds.php
+                            $payState = rh_pay_row_state($payment, (float)BALANCE_TOLERANCE, (string)$currency_symbol);
+                            $payNoteColor = ['owe' => '#c0392b', 'ok' => '#1f7a45', 'warn' => '#8a5a00', 'muted' => '#666'][$payState['tone']] ?? '#666'; ?>
                             <tr id="payment-<?php echo (int)$payment['id']; ?>" data-focus="payment-<?php echo (int)$payment['id']; ?>">
                                 <td><strong><?php echo htmlspecialchars($payment['payment_reference']); ?></strong>
                                     <span class="rh-phone-sub rh-phone-sub--dark"><?php echo htmlspecialchars($payment['booking_description'] . ($payment['booked_rate_compact'] !== '' ? ' · booked at ' . $payment['booked_rate_compact'] : '')); ?></span>
@@ -844,7 +878,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                     </small>
                                 </td>
                                 <td>
-                                    <strong><?php echo $currency_symbol; ?><?php echo number_format($payment['total_amount'], 0); ?></strong>
+                                    <strong><?php echo $payState['amount_sign'] === '-' ? '&minus;' : ''; ?><?php echo $currency_symbol; ?><?php echo number_format($payment['total_amount'], 0); ?></strong>
                                     <?php if ($payment['vat_amount'] > 0): ?>
                                         <span class="rh-hide-md"><br><small style="color: #666;">(incl. <?php echo $currency_symbol; ?><?php echo number_format($payment['vat_amount'], 0); ?> VAT)</small></span>
                                     <?php endif; ?>
@@ -856,18 +890,22 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                     $acctDue = $payment['account_amount_due'];
                                     if ($acctDue === null) {
                                         echo '<span style="color:#999;">—</span>';
-                                    } elseif ((float)$acctDue > 0.001) {
+                                    } elseif ((float)$acctDue > BALANCE_TOLERANCE) {
                                         echo '<strong style="color:#c0392b;">' . $currency_symbol . number_format((float)$acctDue, 0) . '</strong>';
                                     } else {
-                                        echo '<span style="color:#1f7a45;"><i class="fas fa-check-circle"></i> Settled</span>';
+                                        echo '<span style="color:#1f7a45;"><i class="fas fa-check-circle"></i> Bill settled</span>';
                                     }
                                     ?>
                                 </td>
                                 <td class="col-optional-lg"><?php echo ucfirst(str_replace('_', ' ', $payment['payment_method'])); ?></td>
                                 <td>
-                                    <span class="badge badge-<?php echo htmlspecialchars((string)$payment['payment_status']); ?>">
-                                        <?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)$payment['payment_status']))); ?>
+                                    <?php /* "Received" = this payment's money came in; the bill's own position is the note under it. */ ?>
+                                    <span class="badge badge-<?php echo htmlspecialchars($payState['badge']); ?>">
+                                        <?php echo htmlspecialchars($payState['label']); ?>
                                     </span>
+                                    <?php if ($payState['note'] !== ''): ?>
+                                        <br><small style="color: <?php echo $payNoteColor; ?>; font-size: 11px;"><?php echo htmlspecialchars($payState['note']); ?></small>
+                                    <?php endif; ?>
                                 </td>
                                 <td class="col-optional-lg">
                                     <small style="color: #666; font-size: 11px;">

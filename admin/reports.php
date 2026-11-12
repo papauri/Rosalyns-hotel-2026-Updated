@@ -10,6 +10,7 @@
 require_once __DIR__ . '/admin-init.php';
 require_once __DIR__ . '/includes/finance-schema.php';
 require_once __DIR__ . '/includes/receivables.php';
+require_once __DIR__ . '/includes/finance-refunds.php'; // the one refund rule: gross total_amount, completed + processing
 require_once __DIR__ . '/../includes/conference-pricing.php';
 require_once __DIR__ . '/../includes/booked-rate.php';
 
@@ -267,7 +268,7 @@ try {
         SELECT DATE_FORMAT(payment_date, '%Y-%m') as month,
                DATE_FORMAT(payment_date, '%b %Y') as month_label,
                SUM(CASE WHEN payment_type = 'refund' THEN 0 ELSE 1 END) as transaction_count,
-               COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN -refund_amount ELSE total_amount END), 0) as monthly_revenue, -- net of refunds paid out, the End of Day cash rule
+               COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN -" . rh_refund_amount_sql() . " ELSE total_amount END), 0) as monthly_revenue, -- net of refunds paid out, the End of Day cash rule
                COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN -vat_amount ELSE vat_amount END), 0) as monthly_vat
         FROM payments
         WHERE ((payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund')
@@ -330,9 +331,9 @@ try {
     // actually left the business, matching the net-revenue logic used elsewhere)
     $refundReasonStmt = $pdo->prepare("
         SELECT refund_reason, COUNT(*) as count,
-               COALESCE(SUM(refund_amount), 0) as total_amount
+               COALESCE(SUM(" . rh_refund_amount_sql() . "), 0) as total_amount
         FROM payments
-        WHERE payment_type = 'refund' AND refund_status IN ('completed','processing') AND deleted_at IS NULL
+        WHERE " . rh_refund_settled_sql() . " AND deleted_at IS NULL
         AND payment_date >= ? AND payment_date <= ?
         GROUP BY refund_reason
         ORDER BY total_amount DESC
@@ -343,7 +344,7 @@ try {
     // 10. Refund Status Breakdown
     $refundStatusStmt = $pdo->prepare("
         SELECT refund_status, COUNT(*) as count,
-               COALESCE(SUM(refund_amount), 0) as total_amount
+               COALESCE(SUM(" . rh_refund_amount_sql() . "), 0) as total_amount
         FROM payments
         WHERE payment_type = 'refund' AND deleted_at IS NULL
         AND payment_date >= ? AND payment_date <= ?
@@ -356,10 +357,10 @@ try {
     // 11. Refund Trends by Date
     $refundTrendStmt = $pdo->prepare("
         SELECT DATE(payment_date) as date, COUNT(*) as count,
-               COALESCE(SUM(refund_amount), 0) as daily_refunds,
+               COALESCE(SUM(" . rh_refund_amount_sql() . "), 0) as daily_refunds,
                refund_reason
         FROM payments
-        WHERE payment_type = 'refund' AND deleted_at IS NULL
+        WHERE " . rh_refund_settled_sql() . " AND deleted_at IS NULL -- refunds paid out only, as Total Refunds
         AND payment_date >= ? AND payment_date <= ?
         GROUP BY DATE(payment_date), refund_reason
         ORDER BY date ASC
@@ -1798,12 +1799,12 @@ try {
                         <div class="rh-strip__cell">
                             <span class="rh-strip__label">Total Refunds</span>
                             <strong class="rh-strip__value">-<?php echo $currency_symbol . ' ' . number_format($totalRefunds, 2); ?></strong>
-                            <span class="rh-strip__sub">Issued in period</span>
+                            <span class="rh-strip__sub">The full amount paid back (VAT included) in the period: paid out or being paid. The same rule as Payments and Accounting.</span>
                         </div>
                         <div class="rh-strip__cell">
                             <span class="rh-strip__label">Pending Refunds</span>
                             <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($pendingRefunds, 2); ?></strong>
-                            <span class="rh-strip__sub">Awaiting processing</span>
+                            <span class="rh-strip__sub">Waiting for approval; not in Total Refunds until approved</span>
                         </div>
                         <div class="rh-strip__cell">
                             <span class="rh-strip__label">Completed Refunds</span>

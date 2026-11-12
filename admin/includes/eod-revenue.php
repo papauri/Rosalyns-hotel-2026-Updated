@@ -1,4 +1,5 @@
 <?php
+require_once __DIR__ . '/finance-refunds.php'; // the one refund rule: gross total_amount, completed + processing
 
 /**
  * End-of-day REVENUE EARNED (accrual) - the single calculation behind the headline revenue figure on
@@ -173,7 +174,7 @@ if (!function_exists('rh_eod_earned_revenue')) {
         try {
             $st = $pdo->prepare("SELECT
                     COALESCE(SUM(CASE WHEN COALESCE(payment_type,'') <> 'refund' AND payment_status IN ('completed','paid','refunded','partially_refunded') THEN total_amount ELSE 0 END),0) AS received,
-                    COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN refund_amount ELSE 0 END),0) AS refunded
+                    COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN " . rh_refund_amount_sql() . " ELSE 0 END),0) AS refunded
                 FROM payments
                 WHERE payment_date >= ? AND payment_date < ? AND deleted_at IS NULL
                   AND booking_type = 'gym'");
@@ -305,7 +306,7 @@ if (!function_exists('rh_eod_payment_mix')) {
             $mix[(string)$r['method']] = ['method' => (string)$r['method'], 'cnt' => (int)$r['cnt'], 'total' => (float)$r['total']];
         }
         $rf = $pdo->prepare("
-            SELECT COALESCE(NULLIF(payment_method,''), :u) AS method, COALESCE(SUM(refund_amount),0) AS refunded
+            SELECT COALESCE(NULLIF(payment_method,''), :u) AS method, COALESCE(SUM(" . rh_refund_amount_sql() . "),0) AS refunded
             FROM payments
             WHERE DATE(payment_date) = :d AND deleted_at IS NULL AND payment_type = 'refund'
               AND refund_status IN ('completed','processing')
@@ -331,7 +332,7 @@ if (!function_exists('rh_eod_cash_refunds_out')) {
      */
     function rh_eod_cash_refunds_out(PDO $pdo, string $date): float
     {
-        $st = $pdo->prepare("SELECT COALESCE(SUM(refund_amount),0) FROM payments
+        $st = $pdo->prepare("SELECT COALESCE(SUM(" . rh_refund_amount_sql() . "),0) FROM payments
             WHERE DATE(payment_date) = ? AND deleted_at IS NULL AND payment_type = 'refund'
               AND refund_status IN ('completed','processing') AND LOWER(COALESCE(payment_method,'')) LIKE '%cash%'");
         $st->execute([$date]);

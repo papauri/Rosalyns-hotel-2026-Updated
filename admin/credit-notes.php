@@ -487,16 +487,19 @@ $modalsHtml = ob_get_clean();
                 <span class="ck-kpi__label">Total Issued</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currencySymbol); ?></span><?php echo number_format((float)($kpi['total_value'] ?? 0), 2); ?></span>
                 <span class="ck-kpi__sub"><?php echo (int)($kpi['total_issued'] ?? 0); ?> credit note<?php echo (int)($kpi['total_issued'] ?? 0) !== 1 ? 's' : ''; ?></span>
+                <span class="ck-kpi__sub" style="margin-top:0">The full value of every credit note written (voided notes left out), used or not</span>
             </div>
             <div class="ck-kpi ck-kpi--good">
                 <span class="ck-kpi__label">Total Redeemed</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currencySymbol); ?></span><?php echo number_format((float)($kpi['total_redeemed'] ?? 0), 2); ?></span>
                 <span class="ck-kpi__sub">Applied to bookings</span>
+                <span class="ck-kpi__sub" style="margin-top:0">Credit already used to pay a booking (a refund of that booking puts it back on the note)</span>
             </div>
             <div class="ck-kpi ck-kpi--warn">
-                <span class="ck-kpi__label">Outstanding Balance</span>
+                <span class="ck-kpi__label">Still to use</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currencySymbol); ?></span><?php echo number_format((float)($kpi['total_outstanding'] ?? 0), 2); ?></span>
                 <span class="ck-kpi__sub"><?php echo (int)($kpi['count_active'] ?? 0) + (int)($kpi['count_partial'] ?? 0); ?> active</span>
+                <span class="ck-kpi__sub" style="margin-top:0">Credit guests can still spend: what is left on active and part-used notes. It equals Total issued until a note is used, voided or expires.</span>
             </div>
             <div class="ck-kpi">
                 <span class="ck-kpi__label">Status Breakdown</span>
@@ -507,6 +510,7 @@ $modalsHtml = ob_get_clean();
                     <?php echo (int)($kpi['count_voided'] ?? 0); ?> voided &middot;
                     <?php echo (int)($kpi['count_expired'] ?? 0); ?> expired
                 </span>
+                <span class="ck-kpi__sub" style="margin-top:0">How many notes are in each state for the filters above</span>
             </div>
         </div>
 
