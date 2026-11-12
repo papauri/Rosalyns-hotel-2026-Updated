@@ -47,9 +47,9 @@ $s = rh_pay_row_state(['account_amount_due' => '0.02'] + $base, $tol, 'MWK');
 eq($s['tone'], 'owe', 'a balance just above the tolerance still owes');
 $s = rh_pay_row_state(['payment_status' => 'paid', 'account_amount_due' => '0'] + $base, $tol);
 eq([$s['label'], $s['note']], ['Received', 'Bill settled'], 'paid reads Received too');
-$s = rh_pay_row_state(['account_status' => 'pending', 'account_in_rule' => 0] + $base, $tol, 'MWK');
+$s = rh_pay_row_state(['account_status' => 'pending', 'account_in_rule' => 0, 'account_unconfirmed' => 1] + $base, $tol, 'MWK');
 eq([$s['note'], $s['tone']], ['Not confirmed yet: MWK 50,000 open', 'warn'], 'unconfirmed account: never "still owes", never "settled"');
-$s = rh_pay_row_state(['account_status' => 'tentative', 'account_in_rule' => 0] + $base, $tol, 'MWK');
+$s = rh_pay_row_state(['account_status' => 'tentative', 'account_in_rule' => 0, 'account_unconfirmed' => 1] + $base, $tol, 'MWK');
 eq($s['note'], 'Not confirmed yet: MWK 50,000 open', 'tentative hold reads not confirmed');
 $s = rh_pay_row_state(['account_status' => 'no-show', 'account_in_rule' => 0] + $base, $tol, 'MWK');
 eq([$s['note'], $s['tone']], ['No show: MWK 50,000, not counted as owed', 'warn'], 'no-show: named, not "not confirmed"');
@@ -77,6 +77,28 @@ $s = rh_pay_row_state(['payment_type' => 'refund', 'payment_status' => 'complete
 eq([$s['label'], $s['badge']], ['Refund: Paid out', 'refunded'], 'completed refund');
 $s = rh_pay_row_state(['payment_type' => 'refund', 'payment_status' => 'cancelled', 'refund_status' => 'failed'] + $base, $tol);
 eq($s['note'], 'Not counted', 'failed refund not counted');
+
+$s = rh_pay_row_state(['account_status' => 'new', 'account_in_rule' => 0, 'account_unconfirmed' => 1] + $base, $tol, 'MWK');
+eq($s['note'], 'Not confirmed yet: MWK 50,000 open', 'a new gym enquiry with a deposit reads not confirmed (same flag as the deposits line)');
+
+// ---- refunds moved into a credit note (overpayment / store credit): no cash out
+eq(rh_refund_to_credit_sql('p'), "p.payment_type = 'refund' AND p.refund_status IN ('completed','processing') AND p.payment_method = 'credit_note'", 'to-credit condition');
+check(strpos(rh_refund_to_credit_sum_sql(), "payment_method = 'credit_note' THEN total_amount") !== false, 'to-credit sum adds total_amount');
+$s = rh_pay_row_state(['payment_type' => 'refund', 'payment_status' => 'completed', 'refund_status' => 'completed', 'payment_method' => 'credit_note'] + $base, $tol);
+eq([$s['label'], $s['note'], $s['amount_sign']], ['Refund: Moved to credit note', 'Guest credit, no cash out', '-'], 'credit-note leg never reads "Paid out"');
+$s = rh_pay_row_state(['payment_type' => 'refund', 'payment_status' => 'completed', 'refund_status' => 'completed', 'payment_method' => 'cash'] + $base, $tol);
+eq($s['label'], 'Refund: Paid out', 'cash refund reads Paid out');
+eq(rh_refund_split_text(477559.57, 477559.57, 'MWK'), 'Paid back in cash / bank: MWK 0 · Moved to credit notes (guest credit, no cash out): MWK 477,560', 'split: all moved to credit notes (Liwonde case)');
+eq(rh_refund_split_text(500000, 0, 'MWK'), '', 'split: nothing to credit notes = no line');
+eq(rh_refund_split_text(1000, 250.5, '', 2), 'Paid back in cash / bank: 749.50 · Moved to credit notes (guest credit, no cash out): 250.50', 'split: mixed, 2 decimals');
+
+// ---- not confirmed yet (receivables.php): outside the owed rule and not closed
+require_once $root . '/admin/includes/receivables.php';
+$u = rh_unconfirmed_status_sql('conference', 'ci');
+check(strpos($u, "ci.status NOT IN ('cancelled','no-show','expired','closed')") !== false && strpos($u, "NOT (ci.status IN ('confirmed','completed'))") !== false, 'unconfirmed conference = open and not confirmed/completed');
+$u = rh_unconfirmed_status_sql('room', 'b');
+check(strpos($u, 'b.deleted_at IS NULL') === 0 && strpos($u, 'NOT (b.deleted_at IS NULL AND (b.status IN') !== false, 'unconfirmed room = live, open and outside the room owed rule (tentative)');
+eq(rh_unconfirmed_status_sql('restaurant', 'so'), '1=0', 'unknown type never matches');
 
 // ---- every refund total on the money pages uses the helper (source as text)
 $pages = ['admin/payments.php', 'admin/accounting-dashboard.php', 'admin/reports.php', 'admin/end-of-day-report.php',

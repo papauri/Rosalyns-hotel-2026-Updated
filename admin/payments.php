@@ -8,6 +8,7 @@ require_once 'includes/finance-schema.php';
 require_once 'includes/finance-filters.php';
 require_once 'includes/finance-refunds.php'; // the one refund rule + row wording (pure)
 require_once 'includes/receivables.php';     // the one "still owed" rule (Dashboard, Invoices, Reports, End of Day)
+require_once 'includes/log-pager.php';      // rh_lp_page_size / rh_lp_size_picker: rows per page (?size=)
 
 $site_name = getSetting('site_name');
 $currency_symbol = getSetting('currency_symbol');
@@ -42,7 +43,9 @@ $searchText = rh_fin_search_term($_GET); // ?search_text=, or ?q= (older Dashboa
 // that still owe money — i.e. amount_due > 0 — NOT payment-ledger rows. This is
 // what the dashboard "Outstanding Balances" card counts; those accounts often
 // have zero payment rows yet, so they can never appear in the payments list.
-$showOutstanding = (rh_fin_get_str($_GET, 'balance') === 'outstanding');
+// ?balance=unconfirmed: the same account list, for deposits taken on accounts not confirmed yet (never in Still owed).
+$showUnconfirmed = (rh_fin_get_str($_GET, 'balance') === 'unconfirmed');
+$showOutstanding = (rh_fin_get_str($_GET, 'balance') === 'outstanding') || $showUnconfirmed;
 $has_active_payment_filters = $bookingType !== '' || $bookingId > 0 || $status !== '' || $refundStatus !== '' || $paymentMethod !== '' || $startDate !== '' || $endDate !== '' || $searchText !== '';
 
 // Preset scoping: by default the list shows only rows whose module is enabled
@@ -58,7 +61,7 @@ $scopeActive         = $bookingType === '' && !$scopeAll && $refundStatus === ''
 $hiddenBookingTypes  = $scopeActive ? array_values(array_diff($allBookingTypes, $enabledBookingTypes)) : [];
 
 $page = max(1, rh_fin_get_int($_GET, 'page', 1));
-$limit = 50;
+$limit = rh_lp_page_size($_GET['size'] ?? null); // 10 / 25 / 50 / 100 per page, default 10 (log-pager.php)
 $offset = ($page - 1) * $limit;
 
 // Build query
@@ -121,6 +124,13 @@ $sql = "
             WHEN p.booking_type = 'event' AND ei.id IS NOT NULL AND (" . rh_receivable_status_sql('event', 'ei') . ") THEN 1
             ELSE 0
         END as account_in_rule,
+        CASE
+            WHEN p.booking_type = 'room' AND b.id IS NOT NULL AND (" . rh_unconfirmed_status_sql('room', 'b') . ") THEN 1
+            WHEN p.booking_type = 'conference' AND ci.id IS NOT NULL AND (" . rh_unconfirmed_status_sql('conference', 'ci') . ") THEN 1
+            WHEN p.booking_type = 'gym' AND gi.id IS NOT NULL AND (" . rh_unconfirmed_status_sql('gym', 'gi') . ") THEN 1
+            WHEN p.booking_type = 'event' AND ei.id IS NOT NULL AND (" . rh_unconfirmed_status_sql('event', 'ei') . ") THEN 1
+            ELSE 0
+        END as account_unconfirmed,
         -- Room bookings: stored figures for the booked rate x nights line (includes/booked-rate.php).
         b.total_with_vat AS bk_total_with_vat, b.total_amount AS bk_total_amount, b.vat_amount AS bk_vat_amount,
         b.number_of_nights AS bk_nights, b.package_total AS bk_package_total, b.child_supplement_total AS bk_child
@@ -169,7 +179,14 @@ $sql .= " ORDER BY " . $payOrderBy;
 $sql .= " LIMIT ? OFFSET ?";
 
 $stmt = $pdo->prepare($sql);
-$stmt->execute(array_merge($payFilterParams, [$limit, $offset]));
+// The shared filter values, then LIMIT / OFFSET bound as integers.
+$payListArgs = array_values($payFilterParams);
+foreach ($payListArgs as $i => $v) {
+    $stmt->bindValue($i + 1, $v);
+}
+$stmt->bindValue(count($payListArgs) + 1, (int)$limit, PDO::PARAM_INT);
+$stmt->bindValue(count($payListArgs) + 2, (int)$offset, PDO::PARAM_INT);
+$stmt->execute();
 $payments = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Room payments: "K356,000 × 3" = the nightly price the booking was MADE at x nights (owner 2026-11-09).
@@ -211,6 +228,32 @@ if ($showOutstanding) {
     usort($outstandingRows, static fn($a, $b) => (float)$b['amount_due'] <=> (float)$a['amount_due']);
 }
 
+// ── Deposits taken, not yet confirmed (owner 2026-11-12: "some hotels can take part payments just to confirm") ──
+// Accounts outside the owed rule and not closed that already paid something (rh_unconfirmed_deposit_rows). Shown as
+// their own line under Still owed and never added to it, so the shared figure (Dashboard, Reports, End of Day) does
+// not move. Amount = what they still have to pay. Same booking_type narrowing as Still owed.
+$depositRows = [];
+$depositTotal = 0.0;
+$depositFailed = [];
+foreach (rh_unconfirmed_deposit_rows($pdo, rh_receivable_mods(), $depositFailed) as $dRow) {
+    if ($bookingType !== '' && $dRow['type'] !== $bookingType) {
+        continue;
+    }
+    $depositRows[] = [
+        'src' => $dRow['type'], 'id' => $dRow['id'], 'ref' => $dRow['reference'], 'client' => $dRow['client'],
+        'status' => $dRow['status'], 'amount_paid' => $dRow['amount_paid'], 'amount_due' => $dRow['amount_due'],
+    ];
+    $depositTotal += (float)$dRow['amount_due'];
+}
+$depositTotal = round($depositTotal, 2);
+usort($depositRows, static fn($a, $b) => (float)$b['amount_due'] <=> (float)$a['amount_due']);
+
+// The account list the balance view shows: Still owed, or (?balance=unconfirmed) the deposits not yet confirmed.
+$viewRows   = $showUnconfirmed ? $depositRows : $outstandingRows;
+$viewTotal  = $showUnconfirmed ? $depositTotal : $outstandingTotal;
+$viewFailed = $showUnconfirmed ? $depositFailed : $outstandingFailed;
+$viewBalanceKey = $showUnconfirmed ? 'unconfirmed' : 'outstanding';
+
 // Get unique payment methods for filter
 $methodsStmt = $pdo->query("
     SELECT DISTINCT payment_method
@@ -249,7 +292,8 @@ $kpiStmt = $pdo->prepare("
         " . rh_refund_settled_sum_sql() . " AS refunds_total,
         " . rh_refund_settled_count_sql() . " AS refunds_count,
         " . rh_refund_pending_sum_sql() . " AS refunds_pending_total,
-        " . rh_refund_pending_count_sql() . " AS refunds_pending_count
+        " . rh_refund_pending_count_sql() . " AS refunds_pending_count,
+        " . rh_refund_to_credit_sum_sql() . " AS refunds_to_credit_total
     FROM payments
     $analyticsWhereSql
 ");
@@ -450,7 +494,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
         <!-- KPI Strip -->
         <div class="ck-kpis ck-kpis--4">
             <?php /* Plain scope words for the filtered cards: the dates the list is showing. */
-            $payScopeWords = ($startDate || $endDate) ? (($startDate ?: 'the start') . ' to ' . ($endDate ?: 'today')) : 'all dates'; ?>
+            $payScopeWords = ($startDate || $endDate) ? (($startDate ? date('j M Y', strtotime($startDate)) : 'the start') . ' to ' . ($endDate ? date('j M Y', strtotime($endDate)) : 'today')) : 'all dates (no date filter)'; ?>
             <div class="ck-kpi ck-kpi--good">
                 <span class="ck-kpi__label">Collected (filtered)</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format($gross_collected_total, 0); ?></span>
@@ -466,6 +510,13 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                     <a href="<?php echo htmlspecialchars('payments.php?' . http_build_query(array_filter(['balance' => 'outstanding', 'booking_type' => $bookingType], static fn($v) => $v !== ''))); ?>" class="acct-link">see who owes</a>
                 </span>
                 <span class="ck-kpi__sub" style="margin-top:0">Unpaid balances on bookings, conferences, events and open tabs, after every payment received (part-payments included). Same figure as the Dashboard and Reports; not affected by the date, status, method or search filters.<?php if (!empty($outstandingFailed)): ?> Some accounts could not be read (System Logs), so no total is shown.<?php endif; ?></span>
+                <?php if (!empty($depositRows) || !empty($depositFailed)): ?>
+                <?php /* Deposits on accounts not confirmed yet: their own line, never added to Still owed (rh_unconfirmed_deposit_rows). */ ?>
+                <span class="ck-kpi__sub" style="margin-top:0" title="Accounts that paid a deposit but are not confirmed yet (an unconfirmed enquiry, a tentative hold). The amount is what they still have to pay. It joins Still owed once the account is confirmed.">Not yet confirmed, deposit paid · still to pay: <?php echo !empty($depositFailed) ? 'unavailable' : htmlspecialchars($currency_symbol) . ' ' . number_format($depositTotal, 0); ?> (<?php echo number_format(count($depositRows)); ?> account<?php echo count($depositRows) === 1 ? '' : 's'; ?>) ·
+                    <a href="<?php echo htmlspecialchars('payments.php?' . http_build_query(array_filter(['balance' => 'unconfirmed', 'booking_type' => $bookingType], static fn($v) => $v !== ''))); ?>" class="acct-link">see them</a>
+                </span>
+                <span class="ck-kpi__sub" style="margin-top:0">Still to pay on accounts that paid a deposit but are not confirmed yet; not in Still owed until confirmed.</span>
+                <?php endif; ?>
                 <?php if ((int)($kpi['pending_count'] ?? 0) > 0): ?>
                 <span class="ck-kpi__sub" style="margin-top:0"><?php echo number_format((int)($kpi['pending_count'] ?? 0)); ?> payment record<?php echo (int)($kpi['pending_count'] ?? 0) === 1 ? '' : 's'; ?> still marked pending (not received) ·
                     <?php /* Same filters plus "pending or partial" (refunds excluded): opens exactly those payment records. */ ?>
@@ -487,7 +538,9 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($kpi['refunds_total'] ?? 0), 0); ?></span>
                 <span class="ck-kpi__sub"><?php echo number_format((int)($kpi['refunds_count'] ?? 0)); ?> refund<?php echo (int)($kpi['refunds_count'] ?? 0) === 1 ? '' : 's'; ?> paid out or being paid<?php if ((int)($kpi['refunds_pending_count'] ?? 0) > 0): ?> ·
                     <a href="<?php echo htmlspecialchars('payments.php?' . http_build_query(array_merge($_GET, ['refund_status' => 'pending', 'page' => 1, 'balance' => null, 'export' => null]))); ?>" class="acct-link"><?php echo htmlspecialchars($currency_symbol) . number_format((float)($kpi['refunds_pending_total'] ?? 0), 0); ?> awaiting approval</a><?php endif; ?></span>
-                <span class="ck-kpi__sub" style="margin-top:0">The full amount paid back (VAT included) for <?php echo htmlspecialchars($payScopeWords); ?>. Refunds awaiting approval are not in the total. Accounting and Reports use the same rule for their own dates.</span>
+                <?php $payRefundSplit = rh_refund_split_text((float)($kpi['refunds_total'] ?? 0), (float)($kpi['refunds_to_credit_total'] ?? 0), (string)$currency_symbol); ?>
+                <?php if ($payRefundSplit !== ''): ?><span class="ck-kpi__sub" style="margin-top:0"><?php echo htmlspecialchars($payRefundSplit); ?></span><?php endif; ?>
+                <span class="ck-kpi__sub" style="margin-top:0">Refunds for <?php echo htmlspecialchars($payScopeWords); ?> (VAT included): money paid back plus overpayments or store credit moved to a credit note. Awaiting approval is not in the total. Accounting and Reports use the same rule for their own dates.</span>
             </div>
         </div>
 
@@ -618,6 +671,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
         <!-- Detailed Filters -->
         <form method="GET" class="filter-section" data-live-search-form="payments">
             <?php echo rh_server_sort_hidden($paySortKey, $paySortDir); ?>
+            <?php if ($limit !== 10): // keep the rows-per-page choice when the filters change ?><input type="hidden" name="size" value="<?php echo (int)$limit; ?>"><?php endif; ?>
             <?php if ($refundStatus !== ''): // keep the refund-status filter when the other filters change ?>
             <input type="hidden" name="refund_status" value="<?php echo htmlspecialchars($refundStatus); ?>">
             <?php endif; ?>
@@ -734,14 +788,18 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                     <i class="fas fa-arrow-left"></i> Back to payment ledger
                 </a>
                 <span class="acct-pill acct-pill--pending" style="align-self:center;">
-                    <i class="fas fa-hand-holding-dollar"></i> <?php echo count($outstandingRows); ?> account<?php echo count($outstandingRows) === 1 ? '' : 's'; ?> owing · <?php echo !empty($outstandingFailed) ? 'total n/a' : $currency_symbol . number_format($outstandingTotal, 0); ?>
+                    <i class="fas fa-hand-holding-dollar"></i> <?php echo count($viewRows); ?> account<?php echo count($viewRows) === 1 ? '' : 's'; ?> <?php echo $showUnconfirmed ? 'with a deposit, not yet confirmed' : 'owing'; ?> · <?php echo !empty($viewFailed) ? 'total n/a' : $currency_symbol . number_format($viewTotal, 0) . ($showUnconfirmed ? ' still to pay' : ''); ?>
                 </span>
                 <span class="acct-muted" style="align-self:center;">
                     <?php if ($bookingType !== ''): ?>
-                        <?php echo htmlspecialchars(rh_receivable_type_label($bookingType)); ?> only · <a href="payments.php?balance=outstanding" class="acct-link">show all sources</a> ·
+                        <?php echo htmlspecialchars(rh_receivable_type_label($bookingType)); ?> only · <a href="payments.php?balance=<?php echo $viewBalanceKey; ?>" class="acct-link">show all sources</a> ·
                     <?php endif; ?>
+                    <?php if ($showUnconfirmed): ?>
+                    Accounts that paid a deposit but are not confirmed yet. Not in Still owed (Dashboard, Invoices, Reports) until confirmed; not affected by the date, status, method or search filters. <a href="payments.php?balance=outstanding" class="acct-link">Show Still owed</a>
+                    <?php else: ?>
                     Same rule as the Dashboard, Invoices and Reports owed figures; not affected by the date, status, method or search filters.
-                    <?php if (!empty($outstandingFailed)): ?> Some accounts could not be read (System Logs), so no total is shown.<?php endif; ?>
+                    <?php endif; ?>
+                    <?php if (!empty($viewFailed)): ?> Some accounts could not be read (System Logs), so no total is shown.<?php endif; ?>
                 </span>
             <?php else: ?>
                 <a href="payments.php?balance=outstanding" class="btn-filter" style="text-decoration:none; display:inline-flex; align-items:center; gap:8px;">
@@ -767,7 +825,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                     </tr>
                 </thead>
                 <tbody>
-                    <?php if (!empty($outstandingRows)): ?>
+                    <?php if (!empty($viewRows)): ?>
                         <?php
                         $srcMeta = [
                             'room'       => ['label' => 'Room',       'badge' => 'room',       'link' => 'booking-details.php?id='],
@@ -777,7 +835,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                             // Open tabs have no account page: their pending payment rows in this ledger.
                             'restaurant' => ['label' => 'Open tab',   'badge' => 'restaurant', 'link' => 'payments.php?booking_type=restaurant&booking_id='],
                         ];
-                        foreach ($outstandingRows as $oRow):
+                        foreach ($viewRows as $oRow):
                             $src = (string)($oRow['src'] ?? '');
                             $oid = (int)($oRow['id'] ?? 0);
                             // Other sources (no account page): their own type name, a neutral badge, and their own
@@ -817,7 +875,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                         <tr>
                             <td colspan="8" class="empty-state">
                                 <i class="fas fa-circle-check"></i>
-                                <p>No outstanding balances — every account is fully paid.</p>
+                                <p><?php echo $showUnconfirmed ? "No deposits waiting: no unconfirmed account has paid part of its bill." : "No outstanding balances — every account is fully paid."; ?></p>
                             </td>
                         </tr>
                     <?php endif; ?>
@@ -827,7 +885,8 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
         <?php else: ?>
 
         <!-- Payments Table -->
-        <div class="table-container">
+        <?php /* Server-paged (?page= + ?size=), so the shared client pager stays off this table. */ ?>
+        <div class="table-container" data-disable-auto-pagination>
             <table class="table fit-or-card rh-phone-actions rh-fold-actions" data-server-sort="1">
                 <thead>
                     <tr>
@@ -994,11 +1053,12 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
             </table>
         </div>
 
-        <!-- Pagination -->
-        <?php if ($totalPages > 1): ?>
+        <!-- Pagination: shown whenever there are more than 10 payments, so the rows-per-page choice is always there -->
+        <?php if ($totalPages > 1 || $total > 10): ?>
             <div class="pagination">
+                <?php if ($totalPages > 1): ?>
                 <?php if ($page > 1): ?>
-                    <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page - 1])); ?>">
+                    <a href="?<?php echo htmlspecialchars(http_build_query(array_merge($_GET, ['page' => $page - 1]))); ?>">
                         <i class="fas fa-chevron-left"></i> Previous
                     </a>
                 <?php else: ?>
@@ -1009,17 +1069,19 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                     <?php if ($i == $page): ?>
                         <span class="current"><?php echo $i; ?></span>
                     <?php else: ?>
-                        <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $i])); ?>"><?php echo $i; ?></a>
+                        <a href="?<?php echo htmlspecialchars(http_build_query(array_merge($_GET, ['page' => $i]))); ?>"><?php echo $i; ?></a>
                     <?php endif; ?>
                 <?php endfor; ?>
 
                 <?php if ($page < $totalPages): ?>
-                    <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page + 1])); ?>">
+                    <a href="?<?php echo htmlspecialchars(http_build_query(array_merge($_GET, ['page' => $page + 1]))); ?>">
                         Next <i class="fas fa-chevron-right"></i>
                     </a>
                 <?php else: ?>
                     <span class="disabled">Next <i class="fas fa-chevron-right"></i></span>
                 <?php endif; ?>
+                <?php endif; ?>
+                <?php /* Rows per page: keeps every filter, the sort and the balance view; starts again at page 1. */ echo rh_lp_size_picker('payments.php', $_GET, (int)$limit); ?>
             </div>
         <?php endif; ?>
 

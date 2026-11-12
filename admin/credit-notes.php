@@ -14,6 +14,7 @@ require_once 'admin-init.php';
 
 require_once '../config/credit-notes.php';
 require_once '../includes/finance-sequences.php';
+require_once __DIR__ . '/includes/log-pager.php'; // rh_lp_page_size / rh_lp_size_picker: rows per page (?size=)
 
 // Run expired-CN sweep once per page load (fast if nothing to do)
 checkExpiredCreditNotes($pdo);
@@ -168,7 +169,7 @@ $filterDateFrom  = $_GET['date_from']  ?? '';
 $filterDateTo    = $_GET['date_to']    ?? '';
 $search          = trim($_GET['search'] ?? '');
 $page            = max(1, (int)($_GET['page'] ?? 1));
-$limit           = 30;
+$limit           = rh_lp_page_size($_GET['size'] ?? null); // 10 / 25 / 50 / 100 per page, default 10
 $offset          = ($page - 1) * $limit;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -256,7 +257,6 @@ require_once __DIR__ . '/includes/server-sort.php';
     'expires' => 'cn.expires_at',
 ], 'cn.issued_at DESC, cn.id DESC', 'cn.id DESC');
 
-$listParams = array_merge($params, [$limit, $offset]);
 $listStmt   = $pdo->prepare("
     SELECT cn.*,
            au.full_name AS issued_by_name
@@ -266,7 +266,14 @@ $listStmt   = $pdo->prepare("
     ORDER BY $cnOrderBy
     LIMIT ? OFFSET ?
 ");
-$listStmt->execute($listParams);
+// The filter values, then LIMIT / OFFSET bound as integers (the cards above read every matching note).
+$listArgs = array_values($params);
+foreach ($listArgs as $i => $v) {
+    $listStmt->bindValue($i + 1, $v);
+}
+$listStmt->bindValue(count($listArgs) + 1, (int)$limit, PDO::PARAM_INT);
+$listStmt->bindValue(count($listArgs) + 2, (int)$offset, PDO::PARAM_INT);
+$listStmt->execute();
 $creditNotes = $listStmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Rows hidden by preset scoping (for the notice above the table)
@@ -518,6 +525,7 @@ $modalsHtml = ob_get_clean();
         <div class="filter-section">
             <form method="get" action="credit-notes.php" class="filter-bar">
                 <?php echo rh_server_sort_hidden($cnSortKey, $cnSortDir); ?>
+                <?php if ($limit !== 10): // keep the rows-per-page choice when the filters change ?><input type="hidden" name="size" value="<?php echo (int)$limit; ?>"><?php endif; ?>
                 <input type="text" name="search" class="filter-input" placeholder="Search CN#, guest name, email, booking ref..." value="<?php echo htmlspecialchars($search); ?>">
                 <select name="status" class="filter-select">
                     <option value="all" <?php if ($filterStatus === 'all') echo ' selected'; ?>>All Statuses</option>
@@ -558,7 +566,7 @@ $modalsHtml = ob_get_clean();
         <?php endif; ?>
 
         <!-- Credit Notes Table -->
-        <div class="table-container" data-rh-results>
+        <div class="table-container" data-rh-results data-disable-auto-pagination>
             <?php if (empty($creditNotes)): ?>
                 <div class="empty-state">
                     <i class="fas fa-file-invoice"></i>
@@ -685,23 +693,27 @@ $modalsHtml = ob_get_clean();
                     </tbody>
                 </table>
 
-                <!-- Pagination -->
-                <?php if ($totalPages > 1): ?>
+                <!-- Pagination: shown whenever there are more than 10 notes, so the rows-per-page choice is always there -->
+                <?php if ($totalPages > 1 || $total > 10): ?>
                     <div class="pagination-bar">
                         <?php
-                        $q = http_build_query(array_filter([
+                        $cnKeep = array_filter([
                             'status'    => $filterStatus !== 'all' ? $filterStatus : '',
                             'type'      => $filterType !== 'all' ? $filterType : '',
                             'date_from' => $filterDateFrom,
                             'date_to'   => $filterDateTo,
                             'search'    => $search,
-                        ] + rh_server_sort_params($cnSortKey, $cnSortDir)));
+                        ] + rh_server_sort_params($cnSortKey, $cnSortDir));
+                        $q = http_build_query($cnKeep + ($limit !== 10 ? ['size' => (string)$limit] : []));
+                        if ($totalPages > 1):
                         for ($p = 1; $p <= $totalPages; $p++): ?>
-                            <a href="credit-notes.php?page=<?php echo $p; ?>&<?php echo $q; ?>"
+                            <a href="credit-notes.php?page=<?php echo $p; ?>&<?php echo htmlspecialchars($q, ENT_QUOTES); ?>"
                                 class="pagination-item<?php echo $p === $page ? ' pagination-item--active' : ''; ?>">
                                 <?php echo $p; ?>
                             </a>
-                        <?php endfor; ?>
+                        <?php endfor;
+                        endif; ?>
+                        <?php echo rh_lp_size_picker('credit-notes.php', $cnKeep, (int)$limit); ?>
                     </div>
                 <?php endif; ?>
 

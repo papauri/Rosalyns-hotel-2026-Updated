@@ -73,6 +73,40 @@ if (!function_exists('rh_refund_settled_statuses')) {
         return 'COALESCE(SUM(CASE WHEN ' . rh_refund_pending_sql($alias) . ' THEN 1 ELSE 0 END), 0)';
     }
 
+    /**
+     * SQL condition: a paid-out refund whose money went INTO a credit note (payment_method 'credit_note': an
+     * overpayment moved to a note, or a store-credit refund). No cash left the business: the guest holds the credit
+     * on the note. It stays in the refunds total (the money is not revenue any more), but every screen shows it apart
+     * from refunds paid back in cash / bank, so staff never read it as cash paid out.
+     */
+    function rh_refund_to_credit_sql(string $alias = ''): string
+    {
+        $a = rh_refund_alias($alias);
+        return rh_refund_settled_sql($alias) . " AND {$a}payment_method = 'credit_note'";
+    }
+
+    /** SQL aggregate: paid-out refunds moved into credit notes (no cash out), gross, positive. */
+    function rh_refund_to_credit_sum_sql(string $alias = ''): string
+    {
+        return 'COALESCE(SUM(CASE WHEN ' . rh_refund_to_credit_sql($alias) . ' THEN ' . rh_refund_amount_sql($alias) . ' ELSE 0 END), 0)';
+    }
+
+    /**
+     * Plain split line for a refunds total: "Paid back in cash / bank: MWK x · Moved to credit notes (guest credit,
+     * no cash out): MWK y". '' when nothing went to a credit note (the total is then all cash / bank).
+     */
+    function rh_refund_split_text(float $total, float $toCredit, string $currency = '', int $decimals = 0): string
+    {
+        $toCredit = round(max(0.0, $toCredit), 2);
+        if ($toCredit < 0.005) {
+            return '';
+        }
+        $cash = round(max(0.0, $total - $toCredit), 2);
+        $c = $currency !== '' ? $currency . ' ' : '';
+        return 'Paid back in cash / bank: ' . $c . number_format($cash, $decimals)
+            . ' · Moved to credit notes (guest credit, no cash out): ' . $c . number_format($toCredit, $decimals);
+    }
+
     /** Plain words for a refund's lifecycle step. */
     function rh_refund_status_label(string $refundStatus): string
     {
@@ -94,7 +128,8 @@ if (!function_exists('rh_pay_row_state')) {
      * the parent account (already joined in the list query, no query per row).
      *
      * $row keys: payment_type, payment_status, refund_status, account_amount_due (null = no bill on this page, such as
-     * a till order), account_status, account_in_rule (1 when the shared receivables rule counts the account as owed).
+     * a till order), account_status, account_in_rule (1 when the shared receivables rule counts the account as owed),
+     * account_unconfirmed (1 when rh_unconfirmed_status_sql says not confirmed yet), payment_method (refund legs).
      * Money is compared with $tol (BALANCE_TOLERANCE).
      *
      * @return array{label:string, badge:string, note:string, tone:string, amount_sign:string}
@@ -108,10 +143,11 @@ if (!function_exists('rh_pay_row_state')) {
             $rs = strtolower(trim((string)($row['refund_status'] ?? '')));
             $badge = ['pending' => 'warning', 'processing' => 'info', 'completed' => 'refunded', 'failed' => 'failed', 'rejected' => 'rejected'][$rs] ?? 'neutral';
             $counts = in_array($rs, rh_refund_settled_statuses(), true);
+            $toCredit = strtolower(trim((string)($row['payment_method'] ?? ''))) === 'credit_note';
             return [
-                'label' => 'Refund: ' . rh_refund_status_label($rs),
+                'label' => ($toCredit && $counts) ? 'Refund: Moved to credit note' : 'Refund: ' . rh_refund_status_label($rs),
                 'badge' => $badge,
-                'note' => $counts ? 'Counted in Refunds' : ($rs === 'pending' ? 'Not in Refunds until approved' : 'Not counted'),
+                'note' => $counts ? ($toCredit ? 'Guest credit, no cash out' : 'Counted in Refunds') : ($rs === 'pending' ? 'Not in Refunds until approved' : 'Not counted'),
                 'tone' => 'muted',
                 'amount_sign' => '-',
             ];
@@ -149,9 +185,10 @@ if (!function_exists('rh_pay_row_state')) {
             $out['note'] = 'Booking still owes ' . $money;
             $out['tone'] = 'owe';
         } elseif ($due > $tol) {
-            // Open balance on an account the receivables rule does not count: an enquiry or hold not confirmed yet,
-            // or a no-show / expired booking. Named plainly so it never reads as owed or as settled.
-            $out['note'] = in_array($acctStatus, ['pending', 'tentative', 'waitlisted'], true)
+            // Open balance on an account the receivables rule does not count: not confirmed yet (account_unconfirmed,
+            // from rh_unconfirmed_status_sql: the same rule as the "Deposits taken, not yet confirmed" line), or a
+            // no-show / expired booking. Named plainly so it never reads as owed or as settled.
+            $out['note'] = !empty($row['account_unconfirmed'])
                 ? 'Not confirmed yet: ' . $money . ' open'
                 : ucfirst(str_replace(['_', '-'], ' ', $acctStatus !== '' ? $acctStatus : 'unknown')) . ': ' . $money . ', not counted as owed';
             $out['tone'] = 'warn';

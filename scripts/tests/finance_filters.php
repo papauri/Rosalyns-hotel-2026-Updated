@@ -136,7 +136,7 @@ check(strpos($pay, '$analyticsWhere[]') === false && strpos($pay, 'EXISTS (') ==
 check(strpos($pay, '$analyticsWhereSql = "WHERE id IN (SELECT p.id " . $payFromSql . \' \' . $payWhereSql . ")";') !== false, 'payments: cards use the list FROM + WHERE');
 check(strpos($pay, '$analyticsParams = $payFilterParams;') !== false, 'payments: cards use the list params');
 check(strpos($pay, '$countSql = "SELECT COUNT(*) as total " . $payFromSql . \' \' . $payWhereSql;') !== false, 'payments: count uses the list FROM + WHERE');
-check(strpos($pay, '$stmt->execute(array_merge($payFilterParams, [$limit, $offset]));') !== false, 'payments: list uses the shared params');
+check(strpos($pay, '$payListArgs = array_values($payFilterParams);') !== false && strpos($pay, '$stmt->bindValue(count($payListArgs) + 1, (int)$limit, PDO::PARAM_INT);') !== false, 'payments: list uses the shared params, LIMIT / OFFSET bound as integers');
 check(strpos($pay, '$exportParams = $payFilterParams;') !== false && strpos($pay, '$where_conditions') === false, 'payments: CSV export uses the shared filter');
 check(substr_count($pay, '$analyticsWhereSql') === 5 && substr_count($pay, '->execute($analyticsParams)') === 4, 'payments: all four card queries read the shared filter');
 check(strpos($pay, 'All payments, not affected by filters') !== false, 'payments: Today card says it ignores the filters');

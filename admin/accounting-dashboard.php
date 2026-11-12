@@ -186,6 +186,7 @@ try {
                 as total_vat_collected,
             COALESCE(SUM(CASE WHEN payment_status IN ('pending', 'partial') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) as total_pending,
             " . rh_refund_settled_sum_sql() . " as total_refunds_issued,
+            " . rh_refund_to_credit_sum_sql() . " as total_refunds_to_credit,
             COALESCE(SUM(CASE WHEN payment_status = 'refunded' THEN total_amount ELSE 0 END), 0) as total_refunded,
             COALESCE(SUM(CASE WHEN payment_status = 'cancelled' THEN total_amount ELSE 0 END), 0) as total_cancelled,
             " . rh_refund_pending_sum_sql() . " as pending_refunds,
@@ -706,6 +707,7 @@ if (!isset($folio_fnb)) {
         $cat_pending          = (float)($financialSummary['total_pending'] ?? 0);
         $cat_vat              = (float)($financialSummary['total_vat_collected'] ?? 0);
         $cat_refunds          = (float)($financialSummary['total_refunds_issued'] ?? 0);
+        $cat_refunds_to_credit = (float)($financialSummary['total_refunds_to_credit'] ?? 0); // moved into credit notes, no cash out
         $cat_pending_refunds  = (float)($financialSummary['pending_refunds'] ?? 0);
 
         $cat_cash_today = 0;
@@ -1678,7 +1680,8 @@ if (!isset($folio_fnb)) {
                 <span class="ck-kpi__label">Refunds</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><?php echo $ckMoney($cat_refunds); ?></span>
                 <span class="ck-kpi__sub"><?php echo $cat_pending_refunds > BALANCE_TOLERANCE ? 'Awaiting approval ' . $ckPlain($cat_pending_refunds) . ' (not in the total)' : 'None awaiting approval'; ?></span>
-                <span class="ck-kpi__sub" style="margin-top:0">The full amount paid back (VAT included) in this period: paid out or being paid. Same rule as Payments and Reports.</span>
+                <?php $catRefundSplit = rh_refund_split_text($cat_refunds, $cat_refunds_to_credit, (string)$currency_symbol); if ($catRefundSplit !== ''): ?><span class="ck-kpi__sub" style="margin-top:0"><?php echo $ckH($catRefundSplit); ?></span><?php endif; ?>
+                <span class="ck-kpi__sub" style="margin-top:0">Refunds dated <?php echo $ckH($periodLabel); ?> (VAT included): money paid back plus overpayments or store credit moved to a credit note. Payments shows the same rule for the dates it is filtered to (all dates when unfiltered).</span>
             </a>
             <?php if ($mod_pos && $pos_gross > 0): ?>
             <div class="ck-kpi<?php echo $pos_margin_pct < 0 ? ' ck-kpi--alert' : ''; ?>" title="POS gross margin - revenue minus recorded cost of goods">

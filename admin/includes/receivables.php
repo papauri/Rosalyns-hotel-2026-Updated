@@ -106,6 +106,82 @@ if (!function_exists('rh_receivable_rows')) {
     }
 }
 
+if (!function_exists('rh_unconfirmed_status_sql')) {
+    /**
+     * SQL condition (no leading AND) for an account that is NOT CONFIRMED YET: outside the receivables rule above
+     * and not closed (cancelled / no-show / expired / closed, or a deleted booking). E.g. a pending conference or
+     * event enquiry, a tentative room hold, a new gym enquiry. Owner 2026-11-12: such accounts may take a deposit
+     * ("some hotels can take part payments just to confirm"); they are shown apart and never added to Still owed,
+     * so the shared figure (Dashboard, Reports, End of Day) does not move.
+     */
+    function rh_unconfirmed_status_sql(string $type, string $alias = ''): string
+    {
+        if (!in_array($type, ['room', 'conference', 'event', 'gym'], true)) {
+            return '1=0';
+        }
+        $a = $alias !== '' ? $alias . '.' : '';
+        $open = "{$a}status NOT IN ('cancelled','no-show','expired','closed')";
+        if ($type === 'room') {
+            $open = "{$a}deleted_at IS NULL AND " . $open;
+        }
+        return $open . ' AND NOT (' . rh_receivable_status_sql($type, $alias) . ')';
+    }
+}
+
+if (!function_exists('rh_unconfirmed_deposit_rows')) {
+    /**
+     * Accounts not confirmed yet that already paid something and still have a balance (rh_unconfirmed_status_sql):
+     * the Payments "Deposits taken, not yet confirmed" line and its list. amount_due = what they still have to pay.
+     * Same row shape as rh_receivable_rows(); $failed names any source that could not be read.
+     */
+    function rh_unconfirmed_deposit_rows(PDO $pdo, array $mods = [], ?array &$failed = null): array
+    {
+        $failed = [];
+        $on = static function (string $k) use ($mods): bool {
+            return !array_key_exists($k, $mods) || !empty($mods[$k]);
+        };
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        $cf = function_exists('finance_conference_fields') ? finance_conference_fields($pdo) : [
+            'reference' => 'inquiry_reference', 'company' => 'company_name', 'contact_name' => 'contact_person',
+        ];
+        $queries = [];
+        if ($on('bookings')) {
+            $queries['room'] = "SELECT 'room' AS type, b.id, b.booking_reference AS reference, b.guest_name AS client, b.status, b.amount_paid, b.amount_due
+                FROM bookings b WHERE b.amount_paid > {$tol} AND b.amount_due > {$tol} AND " . rh_unconfirmed_status_sql('room', 'b');
+        }
+        if ($on('conference')) {
+            $queries['conference'] = "SELECT 'conference' AS type, ci.id, ci.{$cf['reference']} AS reference,
+                    COALESCE(NULLIF(ci.{$cf['company']}, ''), ci.{$cf['contact_name']}) AS client, ci.status, ci.amount_paid, ci.amount_due
+                FROM conference_inquiries ci WHERE ci.amount_paid > {$tol} AND ci.amount_due > {$tol} AND " . rh_unconfirmed_status_sql('conference', 'ci');
+        }
+        if ($on('events')) {
+            $queries['event'] = "SELECT 'event' AS type, ei.id, ei.reference_number AS reference, ei.name AS client, ei.status, ei.amount_paid, ei.amount_due
+                FROM event_inquiries ei WHERE ei.amount_paid > {$tol} AND ei.amount_due > {$tol} AND " . rh_unconfirmed_status_sql('event', 'ei');
+        }
+        if ($on('gym')) {
+            $queries['gym'] = "SELECT 'gym' AS type, gi.id, gi.reference_number AS reference, gi.name AS client, gi.status, gi.amount_paid, gi.amount_due
+                FROM gym_inquiries gi WHERE gi.amount_paid > {$tol} AND gi.amount_due > {$tol} AND " . rh_unconfirmed_status_sql('gym', 'gi');
+        }
+        $rows = [];
+        foreach ($queries as $srcName => $sql) {
+            try {
+                foreach ($pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                    $rows[] = [
+                        'type' => (string)$r['type'], 'id' => (int)$r['id'], 'reference' => (string)($r['reference'] ?? ''),
+                        'client' => (string)($r['client'] ?? ''), 'status' => (string)($r['status'] ?? ''),
+                        'amount_paid' => round((float)($r['amount_paid'] ?? 0), 2), 'amount_due' => round((float)$r['amount_due'], 2),
+                        'days_outstanding' => 0, 'source' => (string)$r['type'],
+                    ];
+                }
+            } catch (Throwable $e) {
+                error_log('rh_unconfirmed_deposit_rows ' . $srcName . ': ' . $e->getMessage());
+                $failed[] = $srcName;
+            }
+        }
+        return $rows;
+    }
+}
+
 if (!function_exists('rh_receivable_summary')) {
     /**
      * Totals from rh_receivable_rows(): overall count/total, per type, and the 0-30 / 31-60 / 61-90 / 90+ buckets.

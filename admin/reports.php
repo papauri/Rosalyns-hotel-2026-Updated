@@ -120,6 +120,7 @@ $avgRevenuePerBooking = 0;
 $cancellationRate = 0;
 $totalStatusCount = 0;
 $totalRefunds = 0;
+$refundsToCredit = 0.0; // refunds moved into credit notes (no cash out), inside $totalRefunds
 $pendingRefunds = 0;
 $completedRefunds = 0;
 $error = null;
@@ -340,6 +341,10 @@ try {
     ");
     $refundReasonStmt->execute([$start_date, $end_date]);
     $refundReasons = $refundReasonStmt->fetchAll(PDO::FETCH_ASSOC);
+    // Of those, the part moved into credit notes (overpayments, store credit): guest credit, no cash out.
+    $refundCreditStmt = $pdo->prepare("SELECT " . rh_refund_to_credit_sum_sql() . " FROM payments WHERE deleted_at IS NULL AND payment_date >= ? AND payment_date <= ?");
+    $refundCreditStmt->execute([$start_date, $end_date]);
+    $refundsToCredit = (float)$refundCreditStmt->fetchColumn();
 
     // 10. Refund Status Breakdown
     $refundStatusStmt = $pdo->prepare("
@@ -1799,7 +1804,8 @@ try {
                         <div class="rh-strip__cell">
                             <span class="rh-strip__label">Total Refunds</span>
                             <strong class="rh-strip__value">-<?php echo $currency_symbol . ' ' . number_format($totalRefunds, 2); ?></strong>
-                            <span class="rh-strip__sub">The full amount paid back (VAT included) in the period: paid out or being paid. The same rule as Payments and Accounting.</span>
+                            <span class="rh-strip__sub">Refunds dated <?php echo htmlspecialchars(date('j M Y', strtotime($start_date)) . ' to ' . date('j M Y', strtotime($end_date))); ?> (VAT included): money paid back plus overpayments or store credit moved to a credit note. Same rule as Payments and Accounting.</span>
+                            <?php $repRefundSplit = rh_refund_split_text((float)$totalRefunds, (float)$refundsToCredit, (string)$currency_symbol, 2); if ($repRefundSplit !== ''): ?><span class="rh-strip__sub"><?php echo htmlspecialchars($repRefundSplit); ?></span><?php endif; ?>
                         </div>
                         <div class="rh-strip__cell">
                             <span class="rh-strip__label">Pending Refunds</span>
