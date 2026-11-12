@@ -34,7 +34,79 @@ function receipts_csv_cell(mixed $value): string
     return '"' . str_replace('"', '""', $value) . '"';
 }
 
-function receipts_build_where(array $input, array &$params): string
+/**
+ * Where each receipt's guest name lives, per payments.booking_type (the same source receipt_hydrate_context() uses,
+ * config/receipts.php). Only tables and columns that exist on this install are returned (conference name columns
+ * differ per install; a hotel without gym/events may not have those tables), so the SQL built from it never fails.
+ * @return array<string, array{0:string,1:string}> booking_type => [table, column]
+ */
+function receipts_guest_sources(PDO $pdo): array
+{
+    static $sources = null;
+    if ($sources !== null) {
+        return $sources;
+    }
+    $candidates = [
+        'room'       => ['bookings', ['guest_name']],
+        'conference' => ['conference_inquiries', ['contact_person', 'contact_name', 'company_name', 'organization_name']],
+        'gym'        => ['gym_inquiries', ['name']],
+        'event'      => ['event_inquiries', ['name']],
+        'restaurant' => ['stock_orders', ['customer_name']],
+    ];
+    $sources = [];
+    foreach ($candidates as $type => [$table, $names]) {
+        try {
+            $cols = receipt_table_columns($pdo, $table);
+        } catch (Throwable $e) {
+            continue; // table not on this install
+        }
+        foreach ($names as $n) {
+            if (isset($cols[$n])) {
+                $sources[$type] = [$table, $n]; // first existing column, as the hydrator picks it
+                break;
+            }
+        }
+    }
+    return $sources;
+}
+
+/** "(p.booking_type = 'room' AND EXISTS (... LIKE ?) OR ...)": guest-name search, one LIKE placeholder per source. */
+function receipts_guest_search_sql(PDO $pdo): string
+{
+    $parts = [];
+    foreach (receipts_guest_sources($pdo) as $type => [$table, $col]) {
+        // Type, table and column are fixed names from receipts_guest_sources(), never user text.
+        $parts[] = "(p.booking_type = '{$type}' AND EXISTS (SELECT 1 FROM `{$table}` gs WHERE gs.id = p.booking_id AND gs.`{$col}` LIKE ? ESCAPE '!'))";
+    }
+    return $parts ? '(' . implode(' OR ', $parts) . ')' : '';
+}
+
+/** Export columns: one name lookup per source, each only on its own booking_type (separate columns, no collation mix). */
+function receipts_guest_select_sql(PDO $pdo): string
+{
+    $parts = [];
+    foreach (receipts_guest_sources($pdo) as $type => [$table, $col]) {
+        $parts[] = "CASE WHEN p.booking_type = '{$type}' THEN (SELECT gs.`{$col}` FROM `{$table}` gs WHERE gs.id = p.booking_id LIMIT 1) END AS guest_{$type}";
+    }
+    return $parts ? ', ' . implode(', ', $parts) : '';
+}
+
+/** The export's Guest cell, with the list's fallback: unknown is "Walk-in" for a till sale, blank otherwise. */
+function receipts_guest_export_name(array $row): string
+{
+    $type = (string)($row['booking_type'] ?? '');
+    $name = trim((string)($row['guest_' . $type] ?? ''));
+    if ($name === '' || $name === 'Guest') {
+        return $type === 'restaurant' ? 'Walk-in' : '';
+    }
+    // Names are typed by guests: a leading = + - @ or tab would run as a spreadsheet formula (same guard as rh_sa_csv_cell).
+    if (strpos("=+-@\t", $name[0]) !== false) {
+        $name = "'" . $name;
+    }
+    return $name;
+}
+
+function receipts_build_where(PDO $pdo, array $input, array &$params): string
 {
     $where = ["p.deleted_at IS NULL"];
     $where[] = "p.payment_status IN ('completed','paid','refunded','partially_refunded')";
@@ -61,6 +133,12 @@ function receipts_build_where(array $input, array &$params): string
     if ($search !== '') {
         // % and _ typed by staff match literally (ESCAPE '!'): admin/includes/finance-filters.php.
         $searchSql = rh_fin_like_any(['p.receipt_number', 'p.payment_reference', 'p.booking_reference', 'p.notes']);
+        // Guest name too, from the booking/account/order the receipt belongs to. Every placeholder in this block
+        // takes the same $like value, so the count below keeps the order right.
+        $guestSql = receipts_guest_search_sql($pdo);
+        if ($guestSql !== '') {
+            $searchSql = '(' . $searchSql . ' OR ' . $guestSql . ')';
+        }
         $where[] = $searchSql;
         $like = rh_fin_like_param($search);
         foreach (array_fill(0, substr_count($searchSql, '?'), $like) as $v) {
@@ -137,10 +215,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $params = [];
-$whereSql = receipts_build_where($filters, $params);
+$whereSql = receipts_build_where($pdo, $filters, $params);
 
 if (isset($_GET['export']) && $_GET['export'] === 'csv') {
-    $stmt = $pdo->prepare("SELECT p.id, p.receipt_number, p.payment_reference, p.booking_type, p.booking_reference, p.payment_date, p.payment_method, p.payment_type, p.payment_status, p.total_amount, p.receipt_generated, p.receipt_emailed_at, COALESCE(au.full_name, au.username, p.processed_by) AS recorded_by_name
+    $guestSelect = receipts_guest_select_sql($pdo);
+    $stmt = $pdo->prepare("SELECT p.id, p.receipt_number, p.payment_reference, p.booking_type, p.booking_reference, p.payment_date, p.payment_method, p.payment_type, p.payment_status, p.total_amount, p.receipt_generated, p.receipt_emailed_at, COALESCE(au.full_name, au.username, p.processed_by) AS recorded_by_name{$guestSelect}
         FROM payments p
         LEFT JOIN admin_users au ON au.id = p.recorded_by
         $whereSql
@@ -149,11 +228,12 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     $stmt->execute($params);
     header('Content-Type: text/csv');
     header('Content-Disposition: attachment; filename="receipts-' . date('Ymd-His') . '.csv"');
-    echo "Receipt Number,Payment Reference,Type,Booking Reference,Payment Date,Method,Payment Type,Status,Amount,Generated,Emailed At,Recorded By\n";
+    echo "Receipt Number,Payment Reference,Guest,Type,Booking Reference,Payment Date,Method,Payment Type,Status,Amount,Generated,Emailed At,Recorded By\n";
     while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
         echo implode(',', [
             receipts_csv_cell($row['receipt_number'] ?? ''),
             receipts_csv_cell($row['payment_reference'] ?? ''),
+            receipts_csv_cell(receipts_guest_export_name($row)),
             receipts_csv_cell($row['booking_type'] ?? ''),
             receipts_csv_cell($row['booking_reference'] ?? ''),
             receipts_csv_cell($row['payment_date'] ?? ''),
@@ -302,7 +382,7 @@ $site_name = getSetting('site_name', 'Hotel');
             <div class="rh-panel__body">
             <form method="get" action="receipts.php" class="filter-bar">
                 <?php if ($limit !== 10): ?><input type="hidden" name="size" value="<?php echo (int)$limit; ?>"><?php endif; ?>
-                <input type="text" name="search" class="filter-input" placeholder="Receipt #, payment ref, booking ref..." value="<?php echo htmlspecialchars($filters['search']); ?>">
+                <input type="text" name="search" class="filter-input" placeholder="Guest name, receipt #, payment ref, booking ref..." value="<?php echo htmlspecialchars($filters['search']); ?>">
                 <select name="type" class="filter-select">
                     <option value="all">All Types</option>
                     <?php $rc_mod_bookings = function_exists('moduleEnabled') && moduleEnabled('bookings');
