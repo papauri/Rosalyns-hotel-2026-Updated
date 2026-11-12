@@ -677,6 +677,12 @@ function rh_ai_local_intent(string $t): ?array
     if (preg_match('/^((which|what) )?rooms? (that |which )?(still )?(needs?|needing) (cl\w{0,3}n(?:ing|ed)|to be cl\w{0,3}ned|a clean)( now| today)?\s*\??$/u', $t)) {
         return ['room_board', []];
     }
+    // "how many rooms are free tonight", "free rooms tomorrow", "any rooms left tonight": the room board, which leads with the
+    // Dashboard's own free-tonight / booked-tomorrow line (the booking engine). A named room type or other dates go on to
+    // check_availability through the model.
+    if (preg_match('/^(?:how many |any |are there (?:any )?|do we have (?:any )?)?(?:(?:free|available|empty|vacant|unsold) rooms?|rooms? (?:are |is )?(?:still )?(?:free|available|left|empty|vacant|unsold))(?: do we have| are there| left| to sell)?(?: for)? (?:tonight|tomorrow(?: night)?)\s*\??$/u', $t)) {
+        return ['room_board', []];
+    }
     if (($imp = rh_ai_import_intent($t)) !== null) {
         return $imp; // "what's left on my import", "why can't I confirm the import": the Import review counts
     }
@@ -1521,7 +1527,7 @@ function rh_ai_local_format(string $tool, array $view, array $r): string
         $d = $r['departures'];
         $out = '**Departures ' . $dayLabel . ': ' . (int)$d['total'] . '** (' . (int)$d['due_out'] . ' still due out, ' . (int)$d['checked_out'] . ' checked out)';
         foreach ($d['list'] as $x) {
-            $owe = isset($x['balance_due']) && (float)$x['balance_due'] > BALANCE_TOLERANCE ? ' · owes ' . $fmt($x['balance_due']) : '';
+            $owe = isset($x['balance_due']) && (float)$x['balance_due'] > BALANCE_TOLERANCE ? ' · ' . $fmt($x['balance_due']) . ' left to pay' : '';
             $out .= "\n- " . $x['guest_name'] . ' · ' . $room($x) . ' · ' . str_replace('-', ' ', (string)$x['status']) . $owe;
         }
         if (!empty($r['overdue_departures'])) {
@@ -1543,7 +1549,7 @@ function rh_ai_local_format(string $tool, array $view, array $r): string
     if ($tool === 'in_house') {
         $out = '**In house now: ' . (int)$r['in_house'] . '**';
         foreach ($r['list'] as $x) {
-            $owe = isset($x['balance_due']) && (float)$x['balance_due'] > BALANCE_TOLERANCE ? ' · owes ' . $fmt($x['balance_due']) : '';
+            $owe = isset($x['balance_due']) && (float)$x['balance_due'] > BALANCE_TOLERANCE ? ' · ' . $fmt($x['balance_due']) . ' left to pay' : '';
             $out .= "\n- " . $x['guest_name'] . ' · ' . $room($x) . ' · leaves ' . $x['leaves'] . $owe;
         }
         return $out;
@@ -1551,9 +1557,12 @@ function rh_ai_local_format(string $tool, array $view, array $r): string
     if ($tool === 'room_board') {
         $parts = [];
         foreach ((array)$r['by_status'] as $s => $n) {
-            $parts[] = (int)$n . ' ' . str_replace('_', ' ', (string)$s);
+            $parts[] = (int)$n . ' ' . ((string)$s === 'available' ? 'available now' : str_replace('_', ' ', (string)$s)); // physical state now, as the Dashboard legend
         }
-        $out = '**Rooms: ' . (int)$r['rooms'] . '** (' . implode(', ', $parts) . ')' . ($r['occupancy_pct'] !== null ? ' · occupancy ' . $r['occupancy_pct'] . '%' : '');
+        // Free tonight / booked tomorrow first: the Dashboard's own line (the booking engine), then the physical state now
+        $ol = (string)($r['outlook']['line'] ?? '');
+        $out = ($ol !== '' ? '**' . $ol . '**' . "\n\n" : '')
+            . '**Rooms: ' . (int)$r['rooms'] . '** (' . implode(', ', $parts) . ')' . ($r['occupancy_pct'] !== null ? ' · occupancy ' . $r['occupancy_pct'] . '%' : '');
         foreach ($r['list'] as $x) {
             if (($x['status'] ?? '') === 'available' && empty($x['arrival_today'])) {
                 continue; // list only the rooms that need attention or are in use
@@ -1579,7 +1588,7 @@ function rh_ai_local_format(string $tool, array $view, array $r): string
         }
         $lines = [];
         foreach ((array)($r['largest'] ?? []) as $x) {
-            $lines[] = $x['guest_name'] . ' · ' . $x['reference'] . ' · ' . str_replace('-', ' ', (string)$x['status']) . ' · leaves ' . $x['leaves'] . ' · owes ' . $fmt($x['balance_due']);
+            $lines[] = $x['guest_name'] . ' · ' . $x['reference'] . ' · ' . str_replace('-', ' ', (string)$x['status']) . ' · leaves ' . $x['leaves'] . ' · ' . $fmt($x['balance_due']) . ' left to pay';
         }
         return '**Owing: ' . $n . ' booking' . ($n === 1 ? '' : 's') . ', ' . $fmt($r['total_owed']) . ' in total**' . rh_ai_local_lines($lines)
             . "\n\nFrom each booking's own bill, the same as Bookings" . ($tail !== '' ? ' (' . mb_strtolower(mb_substr($tail, 0, 1)) . mb_substr($tail, 1) . ')' : '') . '. Payments are taken on the booking\'s screen.';

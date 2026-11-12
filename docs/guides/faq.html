@@ -508,6 +508,36 @@
     <p>If the guest paid by credit note, the money went back to <strong>that same credit note</strong> when the booking was cancelled. It is never paid out as cash. The cancel summary says so: <em>"... paid by credit note was returned to credit note CN-... (re-opened, no cash paid out)."</em> Check the note under <strong>Money</strong> &rarr; <strong>Credit Notes</strong>. If the note was voided or has expired, it cannot be reopened. That share then shows on the booking as <em>credit owed back</em>: refund it, or issue a new credit note. See <a href="13-finance-payments.html#credit-paid">Money paid by credit note</a>.</p>
   </details>
 
+  <details class="faq" id="faq-still-owed-card">
+    <summary>What does the Still owed card on Payments count, and why is it not the same as Pending?</summary>
+    <p><strong>Still owed</strong> (it used to be called Pending) is what accounts still have to pay, after every payment received, part-payments included. It is the same figure as the Dashboard, Invoices, Reports and End of Day. Accounts that paid a deposit but are not confirmed yet are not in it; they have their own line under the card. Click the card to see the accounts owing. See <a href="13-finance-payments.html#owing">How to see who still owes money</a>. On the Bookings list, a part-paid booking shows <em>"MWK x left to pay"</em> under its payment badge.</p>
+  </details>
+
+  <details class="faq" id="faq-left-to-pay">
+    <summary>What does "MWK x left to pay" mean under the payment badge on the Bookings list?</summary>
+    <p>The booking is only part paid. The amount is the booking total minus the payments received so far, so it is what the guest still has to pay. Click the payment reference to open the payment record (only if you are allowed to see payments). The same booking is in <strong>Still owed</strong> on Payments. See <a href="07-reception-bookings.html#screen">What is on the screen (the Bookings list)</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-credit-note-cards">
+    <summary>What do Issued, Still to use and Credit used mean on Credit Notes?</summary>
+    <p>They are the three cards at the top of <strong>Money</strong> &rarr; <strong>Credit Notes</strong>, and the same three choices in the Status filter. <strong>Issued</strong> is every note except voided. <strong>Still to use</strong> is the credit left on notes that are Active or part used (it was called Outstanding). <strong>Credit used</strong> is the notes whose credit has been used, fully or partly. <strong>Status Breakdown</strong> opens every note. See <a href="13-finance-payments.html#credit">Credit notes</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-refund-totals">
+    <summary>How are refunds counted, and what is the Refunds detail window?</summary>
+    <p>Everywhere (Payments, Accounting, Reports, End of Day) a refund is the full amount paid back, VAT included, once it is Processing or Completed. Refunds awaiting approval are shown apart. The cards split the total into <strong>Paid back in cash / bank</strong> and <strong>Moved to credit notes (no cash out)</strong>. On <strong>Money</strong> &rarr; <strong>Accounting</strong>, click the <strong>Refunds</strong> card to open <strong>Refunds detail</strong>. See <a href="13-finance-payments.html#refunds-detail">Refunds detail</a>. On Credit Notes, <strong>Still to use</strong> is the credit left on notes (it was called Outstanding).</p>
+  </details>
+
+  <details class="faq" id="faq-show-more-rows">
+    <summary>How do I show more rows per page in a list (more than 10)?</summary>
+    <p>Use the <strong>Show</strong> picker next to the page numbers: 10, 25, 50, 100 (and <strong>All</strong> on Bookings, up to 500). Your choice stays when you change page, tab, sort or search. See <a href="99-admin-dashboard-full-guide.html#lists">Lists, number cards, tabs and times</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-rooms-free-tonight">
+    <summary>The Dashboard says rooms are Available now, but also "free tonight" and "booked tomorrow". What is the difference?</summary>
+    <p><strong>Available now</strong> means clean and empty right this minute. <strong>N free tonight</strong> and <strong>tomorrow B of N booked</strong> come from the booking system's count for those nights, with a joined room counted once. A room can be Available now and still be booked for tonight or tomorrow. Click a status to see each room's <strong>Next booking</strong>. See <a href="99-admin-dashboard-full-guide.html#dashboard">the Dashboard</a>.</p>
+  </details>
+
   <details class="faq" id="faq-money-owed-unavailable">
     <summary>Why does a figure say Unavailable, and why do the money-owed totals match?</summary>
     <p>The money-owed total is one figure. It is the same on the Dashboard (the <strong>Owed to us</strong> card), Accounting, End of Day, Reports and Invoices. It includes room, conference, gym and event accounts and open unpaid tabs. <strong>Unavailable</strong> means that figure could not be loaded, so it is not shown as a wrong number. Reload the page. See <a href="13-finance-payments.html#owing">How to see who still owes money</a>.</p>

@@ -1617,8 +1617,21 @@ function rh_ai_t_room_board(PDO $db, array $user, array $a): array
         }
     }
     $summary = rh_ai_room_lib() ? getRoomDashboardSummary() : [];
-    return ['rooms' => count($rooms), 'by_status' => $counts, 'occupancy_pct' => isset($summary['occupancy_rate']) ? round((float)$summary['occupancy_rate'], 1) : null,
+    $out = ['rooms' => count($rooms), 'by_status' => $counts, 'by_status_means' => 'Each room\'s physical state right now ("available" = clean and empty now, not free tonight).',
+        'occupancy_pct' => isset($summary['occupancy_rate']) ? round((float)$summary['occupancy_rate'], 1) : null,
         'list' => $list, 'link' => 'room-dashboard.php', 'link_label' => 'Open Room Board'];
+    // Free tonight / booked tomorrow: the Dashboard's own figure (includes/room-management.php rh_rooms_night_outlook, the
+    // booking engine's per-night count; a joined-only pair counts once). Left out when it cannot be read, never guessed.
+    $today = rh_ai_today();
+    $tomorrow = date('Y-m-d', strtotime($today . ' +1 day'));
+    $ol = function_exists('rh_rooms_night_outlook') ? rh_rooms_night_outlook($today, 2) : ['ok' => false];
+    if (!empty($ol['ok']) && isset($ol['nights'][$today], $ol['nights'][$tomorrow])) {
+        $out['outlook'] = ['rooms_to_sell' => (int)$ol['units'], 'free_tonight' => (int)$ol['nights'][$today]['free'],
+            'booked_tomorrow' => (int)$ol['nights'][$tomorrow]['booked'], 'no_room_yet_tomorrow' => (int)$ol['nights'][$tomorrow]['unassigned'],
+            'line' => function_exists('rh_fd_rooms_outlook_line') ? rh_fd_rooms_outlook_line((int)$ol['units'], (int)$ol['nights'][$today]['free'], (int)$ol['nights'][$tomorrow]['booked'], (int)$ol['nights'][$tomorrow]['unassigned']) : '',
+            'means' => 'From the booking engine, the same as the Dashboard Rooms line: rooms free to sell tonight, and rooms booked for tomorrow night (a joined room counts once).'];
+    }
+    return $out;
 }
 
 function rh_ai_t_guest_history(PDO $db, array $user, array $a): array

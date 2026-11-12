@@ -1388,6 +1388,44 @@ if (!$chatReady) {
         $ml = rh_ai_t_money_leaks($pdo, $adm3, []);
         rh_ai_admin_lib('receivables.php');
         check(abs((float)$ml['still_owed']['total'] - (float)rh_receivable_summary($pdo, rh_receivable_mods())['total']) <= BALANCE_TOLERANCE, 'money owed equals the receivables rule the money screens use');
+        // Refunds: the one refund rule (admin/includes/finance-refunds.php) - full total_amount, completed + processing, credit-note part
+        // apart, awaiting approval apart. A row whose refund_amount differs from total_amount proves the column the screens use.
+        $rfIns = $pdo->prepare("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, total_amount, payment_method, payment_type, payment_status, refund_status, refund_amount, refund_reason, recorded_by)
+                                VALUES (?, 'room', ?, ?, CURDATE(), ?, ?, ?, 'refund', 'refunded', ?, ?, 'other', ?)");
+        $rfIns->execute(['AIT3S' . random_int(100000, 999999), $owingId, $refB, 10000, 11650, 'bank_transfer', 'processing', 10000, (int)$adm3['id']]); // gross 11,650 (VAT in), refund_amount 10,000
+        $rfIns->execute(['AIT3C' . random_int(100000, 999999), $owingId, $refB, 7000, 7000, 'credit_note', 'completed', 7000, (int)$adm3['id']]);  // moved to a credit note
+        $rfIns->execute(['AIT3P' . random_int(100000, 999999), $owingId, $refB, 3000, 3000, 'cash', 'pending', 3000, (int)$adm3['id']]);          // awaiting approval
+        rh_ai_admin_lib('finance-refunds.php');
+        $mlR = rh_ai_t_money_leaks($pdo, $adm3, [])['refunds'] ?? [];
+        $rfSt = $pdo->prepare("SELECT " . rh_refund_settled_sum_sql() . " AS t, " . rh_refund_settled_count_sql() . " AS n, " . rh_refund_to_credit_sum_sql() . " AS c FROM payments WHERE deleted_at IS NULL AND payment_date BETWEEN ? AND ?");
+        $rfSt->execute([date('Y-m-d', strtotime('-6 days')), date('Y-m-d')]);
+        $rfScreen = $rfSt->fetch(PDO::FETCH_ASSOC);
+        $rfPend = $pdo->query("SELECT " . rh_refund_pending_count_sql() . " AS n, " . rh_refund_pending_sum_sql() . " AS v FROM payments WHERE deleted_at IS NULL")->fetch(PDO::FETCH_ASSOC);
+        check(empty($mlR['error']) && abs((float)$mlR['total'] - (float)$rfScreen['t']) <= BALANCE_TOLERANCE && (int)$mlR['count'] === (int)$rfScreen['n'] && (float)$mlR['total'] >= 20000 + 11650 + 7000 - BALANCE_TOLERANCE
+            && abs((float)$mlR['moved_to_credit_notes'] - (float)$rfScreen['c']) <= BALANCE_TOLERANCE && abs((float)$mlR['paid_back_cash_or_bank'] + (float)$mlR['moved_to_credit_notes'] - (float)$mlR['total']) <= BALANCE_TOLERANCE,
+            'refunds equal the one refund rule the money screens use (full amount with VAT, completed + processing; cash / bank and credit-note parts add up to the total)', json_encode([$mlR['total'] ?? null, $rfScreen]));
+        check((int)$mlR['awaiting_approval_count'] === (int)$rfPend['n'] && abs((float)$mlR['awaiting_approval_total'] - (float)$rfPend['v']) <= BALANCE_TOLERANCE && (int)$mlR['awaiting_approval_count'] >= 1,
+            'refunds awaiting approval are counted apart (never in the refunds total), the same figure as Payments', json_encode([$mlR['awaiting_approval_count'] ?? null, $rfPend]));
+        $bR = rh_ai_briefing_findings($pdo, $adm3);
+        $byIdR = [];
+        foreach ($bR['findings'] as $f) { $byIdR[$f['id']] = $f; }
+        check(strpos((string)($byIdR['refunds']['detail'] ?? ''), 'Moved to credit notes (guest credit, no cash out)') !== false && strpos((string)($byIdR['refunds_pending']['title'] ?? ''), 'awaiting approval') !== false,
+            'briefing: refunds split into cash / bank and moved to credit notes, and the pending ones are "awaiting approval"', json_encode([$byIdR['refunds']['detail'] ?? null, $byIdR['refunds_pending']['title'] ?? null]));
+        // Rooms: free tonight / booked tomorrow are the Dashboard's own figures (rh_rooms_night_outlook), not the physical state
+        if (rh_ai_room_lib() && function_exists('rh_rooms_night_outlook')) {
+            $rbO = rh_ai_t_room_board($pdo, $adm3, []);
+            $dsO = rh_rooms_night_outlook(rh_ai_today(), 2);
+            $tmO = date('Y-m-d', strtotime(rh_ai_today() . ' +1 day'));
+            if (!empty($dsO['ok'])) {
+                check(isset($rbO['outlook']) && $rbO['outlook']['free_tonight'] === (int)$dsO['nights'][rh_ai_today()]['free'] && $rbO['outlook']['booked_tomorrow'] === (int)$dsO['nights'][$tmO]['booked'] && $rbO['outlook']['rooms_to_sell'] === (int)$dsO['units']
+                    && strpos(rh_ai_local_format('room_board', [], $rbO), $rbO['outlook']['line']) !== false,
+                    'room board: free tonight and booked tomorrow equal the Dashboard Rooms line (booking engine), and the local answer leads with it', json_encode($rbO['outlook'] ?? null));
+            } else {
+                check(!isset($rbO['outlook']), 'room board: no tonight / tomorrow figure when the Dashboard outlook cannot be read (never guessed)');
+            }
+        }
+        check((rh_ai_local_intent('how many rooms are free tonight?')[0] ?? '') === 'room_board' && (rh_ai_local_intent('free rooms tomorrow')[0] ?? '') === 'room_board' && (rh_ai_local_intent('is the deluxe room free tonight?')[0] ?? '') !== 'room_board',
+            '"how many rooms are free tonight / tomorrow" is the room board\'s tonight line; a named room type is not');
         if (rh_module_key_enabled('stock')) {
             $iw = rh_ai_t_inventory_watch($pdo, $adm3, []);
             $sa = rh_stock_alert_summary($pdo, 8);

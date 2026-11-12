@@ -65,7 +65,16 @@
   </table>
   <p>On the Payments list, a room payment shows a small <strong>Booked at</strong> line under the booking name (booked rate a night &times; nights). Each row has a <strong>History</strong> button (see <a href="#history">How to see the history of a payment</a>).</p>
   <p>A refund line counts against the guest only once it is <strong>Processing</strong> or <strong>Completed</strong>. A <strong>Pending</strong> or <strong>Failed</strong> refund does not change the balance yet.</p>
-  <p>The Payments page shows these buttons at the top: <strong>Record Payment</strong>, <strong>Export CSV</strong>, <strong>Dashboard</strong>, and <strong>Invoices</strong> (Invoices only appears when invoicing is switched on for your hotel). Below them are four figures: <strong>Collected (filtered)</strong>, <strong>Pending / Partial</strong>, <strong>Today</strong> (with the last 7 days) and <strong>Refunds (filtered)</strong>. A fold-out called <strong>Breakdown by source, method and status</strong> splits the same figures three ways. The figures follow whatever filters you have set.</p>
+  <p><strong>One refund rule everywhere.</strong> A refund is the <strong>full amount paid back, VAT included</strong>, once it is <strong>Processing</strong> or <strong>Completed</strong>. Payments, Accounting, Reports and End of Day (screen, PDF and email) all use this rule. Refunds still <strong>awaiting approval</strong> are shown apart and are not in the total. The refund cards split the total into <strong>Paid back in cash / bank</strong> and <strong>Moved to credit notes (no cash out)</strong>, and they say their dates: <em>"Refunds on all dates"</em> when no date filter is set.</p>
+  <p>The Payments page shows these buttons at the top: <strong>Record Payment</strong>, <strong>Export CSV</strong>, <strong>Dashboard</strong>, and <strong>Invoices</strong> (Invoices only appears when invoicing is switched on for your hotel). Below them are four figure cards. Click a card to see the rows behind its figure:</p>
+  <ul>
+    <li><strong>Collected (filtered)</strong>: money received (VAT included) for the dates shown, before refunds are taken off. It opens the fold-out <strong>Breakdown by source, method and status</strong>.</li>
+    <li><strong>Still owed</strong> (this card was called <em>Pending</em>): what accounts still have to pay on bookings, conferences, events and open tabs, after every payment received, part-payments included. It opens the accounts owing. See <a href="#owing">How to see who still owes money</a>.</li>
+    <li><strong>Today</strong>: money received today from every source, with the last 7 days and this month. It opens today's money received.</li>
+    <li><strong>Refunds (filtered)</strong>: refunds paid back or being paid, for the dates shown. It opens those refund rows and keeps your status filter. A line under it shows refunds awaiting approval, and the split between <strong>Paid back in cash / bank</strong> and <strong>Moved to credit notes (no cash out)</strong>.</li>
+  </ul>
+  <p>Collected and Refunds follow your filters. Still owed and Today do not.</p>
+  <p>Each payment row reads <strong>Received</strong>, then one of <em>"Booking still owes MWK x"</em>, <em>"Bill settled"</em> or <em>"Not confirmed yet"</em>. A refund row for an overpayment that was moved to a credit note reads <em>"Refund: Moved to credit note"</em>. The list shows 10 rows to a page; use the <strong>Show</strong> picker (10, 25, 50, 100) to see more.</p>
 
   <h2 id="find">How to find a payment</h2>
   <ol class="steps">
@@ -225,7 +234,9 @@
     <li>Click <strong>Collect</strong> to record a payment for that account, or the eye to open it.</li>
     <li>Click <strong>Back to payment ledger</strong> to return.</li>
   </ol>
-  <p>The <strong>Outstanding</strong> card at the top says <em>"All accounts owing, not affected by filters"</em>. Clicking it opens the accounts-owing list, which adds up to that card. The Payments card that says <em>"All payments, not affected by filters"</em> ignores the filters too.</p>
+  <p>The <strong>Still owed</strong> card at the top adds up what accounts still have to pay after every payment received, part-payments included. It is the same figure as the Dashboard, Invoices, Reports and End of Day, and the date, status, method and search filters do not change it. Clicking it opens the accounts-owing list, which adds up to that card.</p>
+  <p>Some accounts have paid a deposit but are not confirmed yet (for example a tentative hold). They are not in Still owed. A second line under the card, <em>"Not yet confirmed, deposit paid"</em>, shows what they still have to pay, with a <strong>see them</strong> link to those rows. The amount joins Still owed once the account is confirmed. If some payment records are still marked pending, another line says how many, with <strong>view these</strong>.</p>
+  <p>The <strong>Today</strong> card says <em>"All payments, not affected by filters"</em>, so it ignores the filters too.</p>
   <p>A balance of one tambala (0.01) or less counts as paid. Anything above that is shown as owing.</p>
   <p>The money-owed total is the same everywhere it appears: the <strong>Owed to us</strong> card on the Dashboard and on Accounting, and the matching figures on End of Day, Reports and Invoices. It includes room, conference, gym and event accounts and open unpaid tabs. If a figure cannot be loaded, it shows <strong>Unavailable</strong> instead of a wrong number. Reload the page, and tell your manager if it still says Unavailable.</p>
   <p>The Owed to us card (on the Dashboard and the Accounting Dashboard) and the Accounting Dashboard's Receivables tab show only to people with <strong>See Owed to us on the Dashboard</strong> (Administrators and Accountants by default). It is also on <a href="18-staff-access.html#dashboard-figures">Staff &amp; Access</a>.</p>
@@ -242,6 +253,7 @@
 
   <h2 id="invoices">Invoices</h2>
   <p><strong>Money</strong> &rarr; <strong>Invoices</strong> (page title <strong>Invoices &amp; Credit Notes</strong>). It lists one line per payment, with the invoice number once an invoice exists. Filters: <strong>Booking Type</strong>, <strong>Payment Status</strong>, <strong>Search</strong> (invoice number, payment number, booking reference). Changing a dropdown applies at once. The fold-out <strong>Receivables aging and outstanding by source</strong> groups unpaid amounts into 0&ndash;30, 31&ndash;60, 61&ndash;90 and 90+ day age bands.</p>
+  <p>The cards at the top open the rows behind them. <strong>Paid &amp; Closed</strong> and <strong>Generated</strong> jump to the invoice list below. <strong>Outstanding</strong> (all accounts owing, the same figure as Still owed on Payments) opens Payments, if you are allowed to open it. <strong>Refunded / Credit</strong> shows the refund rows in the invoice list; it works only while no other status filter is set.</p>
   <table>
     <thead><tr><th>Button</th><th>What it does</th></tr></thead>
     <tbody>
@@ -260,7 +272,8 @@
   <p>Invoices, receipts and credit notes for a room show <strong>Booked at</strong> (the booked rate &times; nights), so the figure matches what the guest booked. Today's room price is never used for them.</p>
 
   <h2 id="credit">Credit notes</h2>
-  <p><strong>Money</strong> &rarr; <strong>Credit Notes</strong>. A credit note is a stored amount owed to a guest that can be used against a later bill. Figures at the top: <strong>Total Issued</strong>, <strong>Total Redeemed</strong>, <strong>Outstanding Balance</strong>, <strong>Status Breakdown</strong>. Statuses: Active, Partial (partially applied), Used (fully applied), Voided, Expired.</p>
+  <p><strong>Money</strong> &rarr; <strong>Credit Notes</strong>. A credit note is a stored amount owed to a guest that can be used against a later bill. Figures at the top, each with a small <strong>?</strong> that says what it counts: <strong>Total Issued</strong> (every note except voided), <strong>Total Redeemed</strong> (credit already used), <strong>Still to use</strong> (the credit left on notes that are Active or Partial; this card was called <em>Outstanding</em>) and <strong>Status Breakdown</strong>. Statuses: Active, Partial (partially applied), Used (fully applied), Voided, Expired.</p>
+  <p>Click a card to see its notes. The Status filter has the matching views: <strong>Issued</strong>, <strong>Still to use</strong> and <strong>Credit used</strong>. <strong>Status Breakdown</strong> opens every note. The list shows 10 notes to a page, with a <strong>Show</strong> picker for more.</p>
   <p>Click a column heading to sort the whole credit notes list, not just the rows on the page. Click it again to reverse. The sort stays when you change page or use the filters.</p>
   <h3>Issue a credit note</h3>
   <ol class="steps">
@@ -307,7 +320,7 @@
   <p>Other messages you may see: <em>"This quotation was already converted to invoice [number]."</em> and <em>"This quotation was declined, so it cannot become an invoice."</em> If the page says <em>"The quotation could not be converted. Nothing was changed."</em>, try again. If it keeps happening, check System Logs.</p>
 
   <h2 id="receipts">Receipts register</h2>
-  <p><strong>Money</strong> &rarr; <strong>Receipts</strong> lists Paid and Completed payments with their receipt status. Figures: Total receipts, Missing numbers, Generated PDFs, Receipt value. Filter by type, status (<strong>Missing No.</strong>, <strong>Generated</strong>, <strong>Emailed</strong>), dates and search. Ten rows show per page.</p>
+  <p><strong>Money</strong> &rarr; <strong>Receipts</strong> lists Paid and Completed payments with their receipt status. Figures: Total receipts, Missing numbers, Generated PDFs, Receipt value. Filter by type, status (<strong>Missing No.</strong>, <strong>Generated</strong>, <strong>Emailed</strong>), dates and search. Ten rows show per page; use the <strong>Show</strong> picker (10, 25, 50, 100) to see more.</p>
   <ul>
     <li><strong>Generate Missing</strong> creates receipts for up to 500 payments that have none: <em>"Generated receipts for N completed payment(s)."</em></li>
     <li>The row buttons generate or regenerate the PDF, view it, send by WhatsApp or <strong>Email receipt</strong> (enter the address, click <strong>Send Receipt</strong>).</li>
@@ -323,11 +336,20 @@
       <tr><td>Net revenue</td><td>Money collected after refunds.</td></tr>
       <tr><td>Owed to us</td><td>What customers owe and have not paid.</td></tr>
       <tr><td>Cash today</td><td>Cash and mobile money received today. Card, bank transfer and credit are not included.</td></tr>
-      <tr><td>VAT collected</td><td>Tax held on behalf of MRA. It is not the hotel's income.</td></tr>
-      <tr><td>Refunds</td><td>Refunds issued in the period.</td></tr>
+      <tr><td>VAT collected</td><td>Tax collected from guests and customers. It is not the hotel's income.</td></tr>
+      <tr><td>Refunds</td><td>The full amount paid back in the period (VAT included), Processing or Completed. The card says its dates (<em>"Refunds on all dates"</em> for All time). Click it to open <strong>Refunds detail</strong>.</td></tr>
+      <tr><td>POS margin</td><td>Till profit for the period. Click the card to open POS accounting.</td></tr>
     </tbody>
   </table>
   <p><strong>Needs attention</strong> lists things to chase: balances owed, pending payments, refunds waiting to be settled, quotations awaiting a reply, voided till orders, stock lost. The links on this page open the Payments list already filtered: <strong>Open today's payments</strong> and <strong>Today's payments</strong> show today's date range, and the completed and pending links show that status for the chosen period. The tabs below show <strong>Recent payments</strong>, <strong>Receivables</strong>, <strong>Daily detail</strong>, <strong>Refunds</strong>, <strong>POS by type</strong> and <strong>Compliance</strong>.</p>
+  <h3 id="refunds-detail">Refunds detail</h3>
+  <ol class="steps">
+    <li>Open <strong>Money</strong> &rarr; <strong>Accounting</strong> and pick your period.</li>
+    <li>Click the <strong>Refunds</strong> card. The <strong>Refunds detail</strong> window opens.</li>
+    <li>Read the total and the number of refunds, then the split: <strong>Paid back in cash / bank</strong> and <strong>Moved to credit notes (guest credit, no cash out)</strong>. Refunds <strong>awaiting approval</strong> are shown on their own and are not in the total.</li>
+    <li>Under that are the 10 latest refunds. Click one to open its payment. The <strong>Payments</strong> buttons show only for staff who can open Payments.</li>
+  </ol>
+  <p>Money: this window only shows figures. It does not move any money.</p>
   <h3 id="decisions">Decisions</h3>
   <p>The <strong>Accounting</strong> dashboard may show a <strong>Decisions</strong> tab on the right edge of the screen. The tab shows a number: how many choices are waiting. The tab lists the few choices with the most money at stake right now, such as cash outlook, money owed and credit, profit by department, control and leakage, and tax liability. The panel is closed by default, so it does not take up the page. A choice appears only when the money involved is at least a small share of the last 30 days' takings.</p>
   <ol class="steps">

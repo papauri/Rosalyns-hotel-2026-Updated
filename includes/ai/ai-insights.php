@@ -275,21 +275,35 @@ function rh_ai_t_money_leaks(PDO $db, array $user, array $a): array
         }
     }
 
-    // Refunds paid out - End of Day basis (payment_type refund, completed or processing), full amount
+    // Refunds - the one refund rule every money screen uses (admin/includes/finance-refunds.php): the full amount paid
+    // back (total_amount, VAT included), completed or processing; awaiting approval shown apart, never in the total;
+    // the part moved into credit notes (no cash out) split from the cash / bank part, as Payments / Accounting / Reports.
     try {
-        $st = $db->prepare("SELECT booking_type, booking_reference, refund_amount, refund_reason, refund_status, recorded_by, processed_by, payment_date
-                            FROM payments WHERE deleted_at IS NULL AND payment_type = 'refund' AND refund_status IN ('completed', 'processing') AND payment_date BETWEEN ? AND ?
-                            ORDER BY refund_amount DESC");
+        if (!rh_ai_admin_lib('finance-refunds.php')) {
+            throw new RuntimeException('refund rule missing');
+        }
+        $amt = rh_refund_amount_sql();
+        $st = $db->prepare("SELECT booking_type, booking_reference, {$amt} AS refund_total, payment_method, refund_reason, refund_status, recorded_by, processed_by, payment_date
+                            FROM payments WHERE deleted_at IS NULL AND " . rh_refund_settled_sql() . " AND payment_date BETWEEN ? AND ?
+                            ORDER BY {$amt} DESC");
         $st->execute([$from, $to]);
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
-        $tot = 0.0;
         foreach ($rows as $r) {
-            $tot += (float)$r['refund_amount'];
             $staffIds[] = (int)$r['recorded_by'];
         }
-        $pend = (int)$db->query("SELECT COUNT(*) FROM payments WHERE deleted_at IS NULL AND payment_type = 'refund' AND refund_status = 'pending'")->fetchColumn();
-        $out['refunds'] = ['total' => rh_ai_money($tot), 'count' => count($rows), 'waiting_to_be_processed' => $pend, 'rows' => array_slice($rows, 0, 6),
-            'note' => 'Shown in full (the whole amount paid back).'];
+        $st = $db->prepare("SELECT " . rh_refund_settled_sum_sql() . " AS total, " . rh_refund_settled_count_sql() . " AS n, " . rh_refund_to_credit_sum_sql() . " AS to_credit
+                            FROM payments WHERE deleted_at IS NULL AND payment_date BETWEEN ? AND ?");
+        $st->execute([$from, $to]);
+        $agg = $st->fetch(PDO::FETCH_ASSOC) ?: ['total' => 0, 'n' => 0, 'to_credit' => 0];
+        // Awaiting approval: every date (the Payments "awaiting approval" list it links to has no date filter)
+        $pa = $db->query("SELECT " . rh_refund_pending_count_sql() . " AS n, " . rh_refund_pending_sum_sql() . " AS v FROM payments WHERE deleted_at IS NULL")->fetch(PDO::FETCH_ASSOC) ?: ['n' => 0, 'v' => 0];
+        $tot = rh_ai_money((float)$agg['total']);
+        $toCredit = min($tot, rh_ai_money(max(0.0, (float)$agg['to_credit'])));
+        $out['refunds'] = ['total' => $tot, 'count' => (int)$agg['n'],
+            'paid_back_cash_or_bank' => rh_ai_money(max(0.0, $tot - $toCredit)), 'moved_to_credit_notes' => $toCredit,
+            'awaiting_approval_count' => (int)$pa['n'], 'awaiting_approval_total' => rh_ai_money((float)$pa['v']),
+            'waiting_to_be_processed' => (int)$pa['n'], 'rows' => array_slice($rows, 0, 6),
+            'note' => 'Shown in full (the whole amount paid back, VAT included), paid out or being paid. Moved to credit notes = guest credit, no cash out. Awaiting approval is not in the total.'];
     } catch (Throwable $e) {
         $out['refunds'] = ['error' => 'Could not be read.'];
     }
@@ -387,8 +401,9 @@ function rh_ai_t_money_leaks(PDO $db, array $user, array $a): array
     }
     $names = rh_ai_staff_names($db, $staffIds);
     if (isset($out['refunds']['rows'])) {
-        $out['refunds']['rows'] = array_map(static fn($r) => ['type' => $r['booking_type'], 'reference' => $r['booking_reference'], 'amount' => rh_ai_money((float)$r['refund_amount']),
-            'reason' => (string)$r['refund_reason'], 'status' => $r['refund_status'], 'date' => $r['payment_date'], 'staff_name' => (string)($names[(int)$r['recorded_by']] ?? $r['processed_by'] ?? '')], $out['refunds']['rows']);
+        $out['refunds']['rows'] = array_map(static fn($r) => ['type' => $r['booking_type'], 'reference' => $r['booking_reference'], 'amount' => rh_ai_money((float)$r['refund_total']),
+            'reason' => (string)$r['refund_reason'], 'status' => function_exists('rh_refund_status_label') ? rh_refund_status_label((string)$r['refund_status']) : $r['refund_status'],
+            'moved_to_credit_note' => (string)$r['payment_method'] === 'credit_note', 'date' => $r['payment_date'], 'staff_name' => (string)($names[(int)$r['recorded_by']] ?? $r['processed_by'] ?? '')], $out['refunds']['rows']);
     }
     if (isset($out['till_voids']['rows'])) {
         $out['till_voids']['rows'] = array_map(static fn($r) => ['reference' => $r['reference'], 'amount' => rh_ai_money((float)$r['total_amount']), 'reason' => $r['reason'], 'staff_name' => (string)($names[(int)$r['voided_by']] ?? '')], $out['till_voids']['rows']);
@@ -1309,13 +1324,16 @@ function rh_ai_brief_money(array $m, callable $add, bool $owedOk = false): void
     if (!empty($m['refunds']['total']) && (float)$m['refunds']['total'] > BALANCE_TOLERANCE) {
         $r = $m['refunds'];
         $add(['id' => 'refunds', 'kind' => 'money', 'severity' => $sev((float)$r['total']), 'title' => 'Refunds paid out', 'count' => $r['count'], 'amount' => $r['total'],
-            'detail' => $fmt($r['total']) . ' refunded in full on ' . $r['count'] . ' payment(s), ' . $range . '.',
+            'detail' => $fmt($r['total']) . ' refunded in full on ' . $r['count'] . ' payment(s), ' . $range . '.'
+                . (function_exists('rh_refund_split_text') && ($split = rh_refund_split_text((float)$r['total'], (float)($r['moved_to_credit_notes'] ?? 0), $cur, 2)) !== '' ? ' ' . $split . '.' : ''),
             'items' => array_slice(array_map(static fn($x) => ['reference' => $x['reference'], 'staff_name' => $x['staff_name'], 'text' => ($x['reason'] !== '' ? $x['reason'] : 'no reason given'), 'amount' => $x['amount']], $r['rows']), 0, 4),
             'link' => ['payments.php?refund_status=completed%2Cprocessing&start_date=' . $m['from'] . '&end_date=' . $m['to'], 'Open refunds']]);
     }
     if (!empty($m['refunds']['waiting_to_be_processed'])) {
-        $add(['id' => 'refunds_pending', 'kind' => 'decision', 'severity' => 30, 'title' => 'Refunds waiting to be processed', 'count' => (int)$m['refunds']['waiting_to_be_processed'],
-            'detail' => (int)$m['refunds']['waiting_to_be_processed'] . ' refund(s) are pending.', 'link' => ['payments.php?refund_status=pending', 'Open pending refunds']]);
+        $pn = (int)$m['refunds']['waiting_to_be_processed'];
+        $pv = (float)($m['refunds']['awaiting_approval_total'] ?? 0);
+        $add(['id' => 'refunds_pending', 'kind' => 'decision', 'severity' => 30, 'title' => 'Refunds awaiting approval', 'count' => $pn,
+            'detail' => $pn . ' refund(s) awaiting approval' . ($pv > BALANCE_TOLERANCE ? ', ' . $fmt($pv) . ' in full' : '') . ' - not in the refunds total until approved.', 'link' => ['payments.php?refund_status=pending', 'Open refunds awaiting approval']]);
     }
     if (!empty($m['till_voids']['count'])) {
         $v = $m['till_voids'];
@@ -1389,7 +1407,7 @@ function rh_ai_brief_line(array $it, string $cur): string
     }
     foreach (['amount', 'balance_due'] as $k) {
         if (isset($it[$k]) && $it[$k] !== null) {
-            $p[] = ($k === 'balance_due' ? 'owes ' : '') . ($cur !== '' ? $cur . ' ' : '') . number_format((float)$it[$k], 2);
+            $p[] = ($cur !== '' ? $cur . ' ' : '') . number_format((float)$it[$k], 2) . ($k === 'balance_due' ? ' left to pay' : ''); // the Bookings list's own wording
         }
     }
     return implode(' · ', $p);

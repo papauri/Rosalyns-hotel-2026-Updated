@@ -1460,8 +1460,11 @@ function rh_dec_shortages_by_staff(PDO $db, array $ctx): ?array
 function rh_dec_refunds_by_staff(PDO $db, array $ctx): ?array
 {
     try {
-        $st = $db->prepare("SELECT recorded_by, COUNT(*) AS times, COALESCE(SUM(refund_amount), 0) AS amount FROM payments
-                            WHERE deleted_at IS NULL AND payment_type = 'refund' AND refund_status IN ('completed', 'processing') AND payment_date BETWEEN ? AND ?
+        if (!function_exists('rh_refund_settled_sql')) {
+            require_once dirname(__DIR__, 2) . '/admin/includes/finance-refunds.php'; // the one refund rule (pure)
+        }
+        $st = $db->prepare("SELECT recorded_by, COUNT(*) AS times, COALESCE(SUM(" . rh_refund_amount_sql() . "), 0) AS amount FROM payments
+                            WHERE deleted_at IS NULL AND " . rh_refund_settled_sql() . " AND payment_date BETWEEN ? AND ?
                             GROUP BY recorded_by ORDER BY amount DESC LIMIT 6");
         $st->execute([$ctx['from'], $ctx['to']]);
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
@@ -1503,7 +1506,8 @@ function rh_dec_f_cash(PDO $db, array $ctx): array
             $po = $db->query("SELECT COUNT(*) AS n, COALESCE(SUM(total_cost), 0) AS v FROM stock_purchase_orders WHERE status IN ('sent', 'partial')")->fetch(PDO::FETCH_ASSOC) ?: $po;
             $poRows = $db->query("SELECT reference, status, expected_date, total_cost FROM stock_purchase_orders WHERE status IN ('sent', 'partial') ORDER BY total_cost DESC, id LIMIT 5")->fetchAll(PDO::FETCH_ASSOC);
         }
-        $pend = $db->query("SELECT COUNT(*) AS n, COALESCE(SUM(refund_amount), 0) AS v FROM payments WHERE deleted_at IS NULL AND payment_type = 'refund' AND refund_status = 'pending'")->fetch(PDO::FETCH_ASSOC) ?: ['n' => 0, 'v' => 0];
+        // Refunds awaiting approval, in full: money_leaks' figure (the one refund rule), not a second query
+        $pend = ['n' => (int)($m['refunds']['awaiting_approval_count'] ?? 0), 'v' => (float)($m['refunds']['awaiting_approval_total'] ?? 0)];
     } catch (Throwable $e) {
         return ['ok' => false, 'total' => 0, 'cards' => []];
     }
@@ -1608,9 +1612,12 @@ function rh_dec_dept_label(string $t): string
 function rh_dec_dept_takings(PDO $db, string $from, string $to): ?array
 {
     try {
+        if (!function_exists('rh_refund_settled_sql')) {
+            require_once dirname(__DIR__, 2) . '/admin/includes/finance-refunds.php'; // the one refund rule (pure)
+        }
         $st = $db->prepare("SELECT booking_type,
                 COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS collected,
-                COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN refund_amount ELSE 0 END), 0) AS refunds,
+                " . rh_refund_settled_sum_sql() . " AS refunds,
                 COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END), 0)
                     - COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END), 0) AS vat
             FROM payments WHERE payment_date BETWEEN ? AND ? AND deleted_at IS NULL GROUP BY booking_type");
