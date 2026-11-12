@@ -16,6 +16,38 @@
  */
 
 require_once __DIR__ . '/front-desk-counts.php'; // rh_fd_balance_tolerance: the one "owing" rule
+require_once __DIR__ . '/../../includes/smart-search.php'; // the shared word-by-word / phone-number search matcher
+
+if (!function_exists('rh_bk_search_where')) {
+    /**
+     * The search box (?search=) for the list and the CSV export (aliases b, r = rooms, ir = individual_rooms).
+     * Every word must match one of: reference, guest / room guest name, email, phone, country, special requests,
+     * room type, room number or name, or a live payment's reference / method / status. A typed phone number
+     * matches whatever its spacing or +265 / 0 prefix.
+     * @return array{sql:string, params:array} sql '' when the search is empty
+     */
+    function rh_bk_search_where(string $q): array
+    {
+        return rh_search_where($q, [
+            'b.booking_reference', 'b.guest_name', 'b.room_guest_name', 'b.guest_email', 'b.guest_phone',
+            'b.guest_country', 'b.special_requests', 'r.name',
+            "COALESCE(ir.room_number, '')", "COALESCE(ir.room_name, '')",
+        ], ['b.guest_phone'], [
+            "EXISTS (
+                SELECT 1
+                FROM payments px
+                WHERE px.booking_type = 'room'
+                  AND px.booking_id = b.id
+                  AND px.deleted_at IS NULL
+                  AND (
+                    px.payment_reference LIKE ? ESCAPE '!'
+                    OR px.payment_method LIKE ? ESCAPE '!'
+                    OR px.payment_status LIKE ? ESCAPE '!'
+                  )
+            )",
+        ]);
+    }
+}
 
 if (!function_exists('rh_bk_valid_date')) {
     /** 'Y-m-d' when it is a real calendar date, else ''. */

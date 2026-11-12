@@ -2128,12 +2128,16 @@
         var form = el.closest('form');
         if (!isFilterForm(form)) return;
         clearTimeout(debounceTimer);
+        /* One letter matches nearly everything: wait for a second one (an emptied box still reloads). */
+        if (el.value.trim().length === 1) return;
         debounceTimer = setTimeout(function () {
+            /* In place (admin-spa.js): the box keeps focus and the page does not jump to the list. */
+            if (window.rhSpaLiveSearch && window.rhSpaLiveSearch(form, el)) return;
             try {
                 sessionStorage.setItem(FOCUS_KEY, JSON.stringify({ page: location.pathname, name: el.getAttribute('name') }));
             } catch (err) { /* ignore */ }
             submitForm(form);
-        }, 650);
+        }, 450);
     });
 }());
 

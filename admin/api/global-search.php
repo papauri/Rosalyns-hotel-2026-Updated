@@ -26,8 +26,9 @@ if (mb_strlen($q) < 2) {
 }
 $q = mb_substr($q, 0, 80);
 $uid = (int)$user['id'];
-$like = '%' . addcslashes($q, '%_\\') . '%';
 $limit = 6;
+require_once __DIR__ . '/../../includes/smart-search.php';
+$terms = rh_search_terms($q);
 
 $can = static fn(string $page): bool => rhCanLinkTo($uid, $page);
 $hl = static fn(string $page, string $text): string => $page . (strpos($page, '?') === false ? '?' : '&') . 'rh_hl=' . rawurlencode($text);
@@ -44,16 +45,49 @@ $add = static function (string $key, string $label, string $icon, array $items) 
         $groups[] = ['key' => $key, 'label' => $label, 'icon' => $icon, 'items' => array_values($items)];
     }
 };
-/** Run one source; a failing source (missing table on an older install) never breaks the rest. */
-$rows = static function (string $sql, int $n) use ($pdo, $like, $limit): array {
+/**
+ * Run one source; a failing source (missing table on an older install) never breaks the rest.
+ * $s: select, from, cols (searched), phones (also matched by digits), where (fixed extra filter), order, preds
+ * (EXISTS-style predicates, every ? = the word), rank (the title column: an exact match, then a "starts with"
+ * match, comes before the usual order). Every word typed must match one of the columns (includes/smart-search.php).
+ */
+$find = static function (array $s) use ($pdo, $q, $terms, $limit): array {
+    $w = rh_search_where($q, $s['cols'], $s['phones'] ?? [], $s['preds'] ?? []);
+    if ($w['sql'] === '') {
+        return [];
+    }
+    $params = $w['params'];
+    $order = [];
+    if (!empty($s['rank'])) {
+        $order[] = "({$s['rank']} = ?) DESC";
+        $params[] = $q;
+        $order[] = "({$s['rank']} LIKE ? ESCAPE '!') DESC";
+        $params[] = rh_search_prefix($terms[0]);
+    }
+    if (!empty($s['order'])) {
+        $order[] = $s['order'];
+    }
+    $sql = 'SELECT ' . $s['select'] . ' FROM ' . $s['from']
+        . ' WHERE ' . (!empty($s['where']) ? '(' . $s['where'] . ') AND ' : '') . $w['sql']
+        . ($order ? ' ORDER BY ' . implode(', ', $order) : '')
+        . ' LIMIT ' . (int)($s['limit'] ?? $limit);
     try {
-        $st = $pdo->prepare($sql . ' LIMIT ' . $limit);
-        $st->execute(array_fill(0, $n, $like));
+        $st = $pdo->prepare($sql);
+        $st->execute($params);
         return $st->fetchAll(PDO::FETCH_ASSOC);
     } catch (Throwable $e) {
         error_log('global-search: ' . $e->getMessage());
         return [];
     }
+};
+/** Every typed word appears in $text (case-insensitive): Hotel Settings sections and other fixed lists. */
+$allWordsIn = static function (string $text) use ($terms): bool {
+    foreach ($terms as $t) {
+        if (mb_stripos($text, $t) === false) {
+            return false;
+        }
+    }
+    return (bool)$terms;
 };
 
 // ---- Hotel Settings sections (anchors on booking-settings.php) ----
@@ -75,7 +109,7 @@ if ($can('booking-settings.php')) {
     ];
     $items = [];
     foreach ($sections as [$anchor, $title, $kw]) {
-        if (stripos($title, $q) !== false || stripos($kw, $q) !== false) {
+        if ($allWordsIn($title . ' ' . $kw)) {
             $items[] = ['title' => $title, 'sub' => 'Hotel Settings', 'url' => 'booking-settings.php#' . $anchor];
         }
     }
@@ -90,10 +124,16 @@ if ($can('email-templates.php') && preg_match('/templ|email|pdf|wording|invoice|
 // ---- Room bookings ----
 if ($can('booking-details.php') || $can('bookings.php')) {
     $items = [];
-    foreach ($rows("SELECT b.id, b.booking_reference, b.guest_name, b.guest_email, b.guest_phone, b.room_guest_name, b.check_in_date, b.check_out_date, b.status, r.name AS room_name
-                    FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id
-                    WHERE b.deleted_at IS NULL AND (b.booking_reference LIKE ? OR b.guest_name LIKE ? OR b.room_guest_name LIKE ? OR b.guest_email LIKE ? OR b.guest_phone LIKE ?)
-                    ORDER BY b.id DESC", 5) as $r) {
+    // Upcoming and in-house stays come before old ones; within each, the newest booking first.
+    foreach ($find([
+        'select' => 'b.id, b.booking_reference, b.guest_name, b.guest_email, b.guest_phone, b.room_guest_name, b.check_in_date, b.check_out_date, b.status, r.name AS room_name',
+        'from' => 'bookings b LEFT JOIN rooms r ON r.id = b.room_id',
+        'where' => 'b.deleted_at IS NULL',
+        'cols' => ['b.booking_reference', 'b.guest_name', 'b.room_guest_name', 'b.guest_email', 'b.guest_phone', 'r.name'],
+        'phones' => ['b.guest_phone'],
+        'rank' => 'b.booking_reference',
+        'order' => '(b.check_out_date >= CURDATE()) DESC, b.id DESC',
+    ]) as $r) {
         $items[] = [
             'title' => $r['booking_reference'] . ' · ' . $r['guest_name'],
             'sub' => trim(($r['room_name'] ?? '') . (trim((string)($r['room_guest_name'] ?? '')) !== '' ? ' (' . $r['room_guest_name'] . ')' : '') . ' · ' . $fmtDate($r['check_in_date']) . ' – ' . $fmtDate($r['check_out_date']) . ' · ' . ucwords(str_replace('-', ' ', (string)$r['status'])), ' ·'),
@@ -106,10 +146,14 @@ if ($can('booking-details.php') || $can('bookings.php')) {
 // ---- Payments & receipts ----
 if ($can('payment-details.php')) {
     $items = [];
-    foreach ($rows("SELECT id, payment_reference, receipt_number, booking_reference, total_amount, payment_method, payment_date, payment_status
-                    FROM payments
-                    WHERE deleted_at IS NULL AND (payment_reference LIKE ? OR receipt_number LIKE ? OR booking_reference LIKE ? OR payment_reference_number LIKE ?)
-                    ORDER BY id DESC", 4) as $r) {
+    foreach ($find([
+        'select' => 'id, payment_reference, receipt_number, booking_reference, total_amount, payment_method, payment_date, payment_status',
+        'from' => 'payments',
+        'where' => 'deleted_at IS NULL',
+        'cols' => ['payment_reference', 'receipt_number', 'booking_reference', 'payment_reference_number'],
+        'rank' => 'receipt_number',
+        'order' => 'id DESC',
+    ]) as $r) {
         $items[] = [
             'title' => ($r['receipt_number'] ?: $r['payment_reference']) . ' · ' . $money($r['total_amount']),
             'sub' => trim(($r['booking_reference'] ?? '') . ' · ' . ucwords(str_replace('_', ' ', (string)$r['payment_method'])) . ' · ' . $fmtDate($r['payment_date']) . ' · ' . ucwords(str_replace('_', ' ', (string)$r['payment_status'])), ' ·'),
@@ -122,10 +166,14 @@ if ($can('payment-details.php')) {
 // ---- Conference enquiries ----
 if ($can('conference-management.php')) {
     $items = [];
-    foreach ($rows("SELECT id, inquiry_reference, company_name, contact_person, event_date, status
-                    FROM conference_inquiries
-                    WHERE inquiry_reference LIKE ? OR company_name LIKE ? OR contact_person LIKE ? OR email LIKE ? OR phone LIKE ?
-                    ORDER BY id DESC", 5) as $r) {
+    foreach ($find([
+        'select' => 'id, inquiry_reference, company_name, contact_person, event_date, status',
+        'from' => 'conference_inquiries',
+        'cols' => ['inquiry_reference', 'company_name', 'contact_person', 'email', 'phone'],
+        'phones' => ['phone'],
+        'rank' => 'inquiry_reference',
+        'order' => 'id DESC',
+    ]) as $r) {
         $items[] = [
             'title' => $r['inquiry_reference'] . ' · ' . ($r['company_name'] ?: $r['contact_person']),
             'sub' => trim($fmtDate($r['event_date']) . ' · ' . ucfirst((string)$r['status']), ' ·'),
@@ -138,10 +186,14 @@ if ($can('conference-management.php')) {
 // ---- Event enquiries ----
 if ($can('events-inquiries.php')) {
     $items = [];
-    foreach ($rows("SELECT id, reference_number, name, guests, status, created_at
-                    FROM event_inquiries
-                    WHERE reference_number LIKE ? OR name LIKE ? OR email LIKE ? OR phone LIKE ?
-                    ORDER BY id DESC", 4) as $r) {
+    foreach ($find([
+        'select' => 'id, reference_number, name, guests, status, created_at',
+        'from' => 'event_inquiries',
+        'cols' => ['reference_number', 'name', 'email', 'phone'],
+        'phones' => ['phone'],
+        'rank' => 'reference_number',
+        'order' => 'id DESC',
+    ]) as $r) {
         $items[] = [
             'title' => $r['reference_number'] . ' · ' . $r['name'],
             'sub' => trim((int)$r['guests'] . ' guests · ' . ucfirst((string)$r['status']), ' ·'),
@@ -154,10 +206,14 @@ if ($can('events-inquiries.php')) {
 // ---- Gym members ----
 if ($can('gym-members.php')) {
     $items = [];
-    foreach ($rows("SELECT id, member_number, full_name, membership_type, expiry_date, status
-                    FROM gym_members
-                    WHERE member_number LIKE ? OR full_name LIKE ? OR email LIKE ? OR phone LIKE ?
-                    ORDER BY id DESC", 4) as $r) {
+    foreach ($find([
+        'select' => 'id, member_number, full_name, membership_type, expiry_date, status',
+        'from' => 'gym_members',
+        'cols' => ['member_number', 'full_name', 'email', 'phone'],
+        'phones' => ['phone'],
+        'rank' => 'member_number',
+        'order' => 'id DESC',
+    ]) as $r) {
         $items[] = [
             'title' => $r['full_name'] . ' · ' . $r['member_number'],
             'sub' => trim(ucfirst((string)$r['membership_type']) . ' · expires ' . $fmtDate($r['expiry_date']) . ' · ' . ucfirst((string)$r['status']), ' ·'),
@@ -170,10 +226,13 @@ if ($can('gym-members.php')) {
 // ---- Quotations ----
 if ($can('quotations.php')) {
     $items = [];
-    foreach ($rows("SELECT id, quote_reference, guest_name, room_name, total_amount, status
-                    FROM quotations
-                    WHERE quote_reference LIKE ? OR booking_reference LIKE ? OR guest_name LIKE ? OR guest_email LIKE ?
-                    ORDER BY id DESC", 4) as $r) {
+    foreach ($find([
+        'select' => 'id, quote_reference, guest_name, room_name, total_amount, status',
+        'from' => 'quotations',
+        'cols' => ['quote_reference', 'booking_reference', 'guest_name', 'guest_email'],
+        'rank' => 'quote_reference',
+        'order' => 'id DESC',
+    ]) as $r) {
         $items[] = [
             'title' => $r['quote_reference'] . ' · ' . $r['guest_name'],
             'sub' => trim(($r['room_name'] ?? '') . ' · ' . $money($r['total_amount']) . ' · ' . ucfirst((string)$r['status']), ' ·'),
@@ -186,10 +245,13 @@ if ($can('quotations.php')) {
 // ---- Credit notes ----
 if ($can('credit-notes.php')) {
     $items = [];
-    foreach ($rows("SELECT id, credit_note_number, guest_name, balance, status
-                    FROM credit_notes
-                    WHERE credit_note_number LIKE ? OR booking_reference LIKE ? OR guest_name LIKE ? OR guest_email LIKE ?
-                    ORDER BY id DESC", 4) as $r) {
+    foreach ($find([
+        'select' => 'id, credit_note_number, guest_name, balance, status',
+        'from' => 'credit_notes',
+        'cols' => ['credit_note_number', 'booking_reference', 'guest_name', 'guest_email'],
+        'rank' => 'credit_note_number',
+        'order' => 'id DESC',
+    ]) as $r) {
         $items[] = [
             'title' => $r['credit_note_number'] . ' · ' . $r['guest_name'],
             'sub' => 'Balance ' . $money($r['balance']) . ' · ' . ucfirst((string)$r['status']),
@@ -202,7 +264,7 @@ if ($can('credit-notes.php')) {
 // ---- Rooms: types and individual rooms ----
 if ($can('room-management.php')) {
     $items = [];
-    foreach ($rows("SELECT id, name, price_per_night, is_active FROM rooms WHERE name LIKE ? OR slug LIKE ? ORDER BY display_order", 2) as $r) {
+    foreach ($find(['select' => 'id, name, price_per_night, is_active', 'from' => 'rooms', 'cols' => ['name', 'slug'], 'rank' => 'name', 'order' => 'display_order']) as $r) {
         $items[] = [
             'title' => $r['name'],
             'sub' => 'Room type · ' . $money($r['price_per_night']) . '/night' . ((int)$r['is_active'] ? '' : ' · inactive'),
@@ -213,10 +275,14 @@ if ($can('room-management.php')) {
 }
 if ($can('individual-rooms.php')) {
     $items = [];
-    foreach ($rows("SELECT ir.id, ir.room_number, ir.room_name, ir.status, ir.housekeeping_status, r.name AS type_name
-                    FROM individual_rooms ir LEFT JOIN rooms r ON r.id = ir.room_type_id
-                    WHERE ir.room_number LIKE ? OR ir.room_name LIKE ?
-                    ORDER BY ir.display_order, ir.room_number", 2) as $r) {
+    // "room 12" finds room 12: the word "room" also matches the room type name, so allow it on its own.
+    foreach ($find([
+        'select' => 'ir.id, ir.room_number, ir.room_name, ir.status, ir.housekeeping_status, r.name AS type_name',
+        'from' => 'individual_rooms ir LEFT JOIN rooms r ON r.id = ir.room_type_id',
+        'cols' => ['ir.room_number', 'ir.room_name', "COALESCE(r.name, '')", "CONCAT('room ', ir.room_number)"],
+        'rank' => 'ir.room_number',
+        'order' => 'ir.display_order, ir.room_number',
+    ]) as $r) {
         $items[] = [
             'title' => 'Room ' . $r['room_number'] . ($r['room_name'] ? ' · ' . $r['room_name'] : ''),
             'sub' => trim(($r['type_name'] ?? '') . ' · ' . ucfirst((string)$r['status']) . ' · ' . ucfirst((string)$r['housekeeping_status']), ' ·'),
@@ -230,7 +296,7 @@ if ($can('individual-rooms.php')) {
 if ($can('menu-management.php')) {
     $items = [];
     foreach ([['food_menu', 'food', 'Food'], ['drink_menu', 'drinks', 'Drink']] as [$table, $tab, $kind]) {
-        foreach ($rows("SELECT id, item_name, category, price, is_available FROM {$table} WHERE item_name LIKE ? OR category LIKE ? ORDER BY item_name", 2) as $r) {
+        foreach ($find(['select' => 'id, item_name, category, price, is_available', 'from' => $table, 'cols' => ['item_name', 'category'], 'rank' => 'item_name', 'order' => 'item_name']) as $r) {
             $items[] = [
                 'title' => $r['item_name'],
                 'sub' => $kind . ' · ' . $r['category'] . ' · ' . $money($r['price']) . ((int)$r['is_available'] ? '' : ' · unavailable'),
@@ -244,7 +310,7 @@ if ($can('menu-management.php')) {
 // ---- Stock ----
 if ($can('stock-ingredients.php')) {
     $items = [];
-    foreach ($rows("SELECT id, name, category, current_quantity, unit FROM stock_ingredients WHERE is_archived = 0 AND (name LIKE ? OR category LIKE ?) ORDER BY name", 2) as $r) {
+    foreach ($find(['select' => 'id, name, category, current_quantity, unit', 'from' => 'stock_ingredients', 'where' => 'is_archived = 0', 'cols' => ['name', 'category'], 'rank' => 'name', 'order' => 'name']) as $r) {
         $items[] = [
             'title' => $r['name'],
             'sub' => trim(($r['category'] ?? '') . ' · ' . rtrim(rtrim(number_format((float)$r['current_quantity'], 2), '0'), '.') . ' ' . $r['unit'] . ' in stock', ' ·'),
@@ -255,7 +321,7 @@ if ($can('stock-ingredients.php')) {
 }
 if ($can('stock-suppliers.php')) {
     $items = [];
-    foreach ($rows("SELECT id, name, contact_name, phone FROM stock_suppliers WHERE name LIKE ? OR contact_name LIKE ? OR email LIKE ? OR phone LIKE ? ORDER BY name", 4) as $r) {
+    foreach ($find(['select' => 'id, name, contact_name, phone', 'from' => 'stock_suppliers', 'cols' => ['name', 'contact_name', 'email', 'phone'], 'phones' => ['phone'], 'rank' => 'name', 'order' => 'name']) as $r) {
         $items[] = [
             'title' => $r['name'],
             'sub' => trim('Supplier · ' . ($r['contact_name'] ?? '') . ' · ' . ($r['phone'] ?? ''), ' ·'),
@@ -268,9 +334,13 @@ if ($can('stock-suppliers.php')) {
 // ---- Website: contact messages, reviews, events, pages ----
 if ($can('contact-inquiries.php')) {
     $items = [];
-    foreach ($rows("SELECT id, reference_number, name, subject, status FROM contact_inquiries
-                    WHERE reference_number LIKE ? OR name LIKE ? OR email LIKE ? OR subject LIKE ?
-                    ORDER BY id DESC", 4) as $r) {
+    foreach ($find([
+        'select' => 'id, reference_number, name, subject, status',
+        'from' => 'contact_inquiries',
+        'cols' => ['reference_number', 'name', 'email', 'subject'],
+        'rank' => 'reference_number',
+        'order' => 'id DESC',
+    ]) as $r) {
         $items[] = [
             'title' => ($r['reference_number'] ? $r['reference_number'] . ' · ' : '') . $r['name'],
             'sub' => trim(($r['subject'] ?? '') . ' · ' . ucfirst((string)$r['status']), ' ·'),
@@ -281,7 +351,7 @@ if ($can('contact-inquiries.php')) {
 }
 if ($can('reviews.php')) {
     $items = [];
-    foreach ($rows("SELECT id, guest_name, title, rating, status FROM reviews WHERE guest_name LIKE ? OR guest_email LIKE ? OR title LIKE ? ORDER BY id DESC", 3) as $r) {
+    foreach ($find(['select' => 'id, guest_name, title, rating, status', 'from' => 'reviews', 'cols' => ['guest_name', 'guest_email', 'title'], 'order' => 'id DESC']) as $r) {
         $items[] = [
             'title' => $r['guest_name'] . ' · ' . str_repeat('★', max(0, min(5, (int)$r['rating']))),
             'sub' => trim(($r['title'] ?? '') . ' · ' . ucfirst((string)$r['status']), ' ·'),
@@ -292,21 +362,21 @@ if ($can('reviews.php')) {
 }
 if ($can('events-management.php')) {
     $items = [];
-    foreach ($rows("SELECT id, title, event_date FROM events WHERE title LIKE ? OR location LIKE ? ORDER BY event_date DESC", 2) as $r) {
+    foreach ($find(['select' => 'id, title, event_date', 'from' => 'events', 'cols' => ['title', 'location'], 'rank' => 'title', 'order' => 'event_date DESC']) as $r) {
         $items[] = ['title' => $r['title'], 'sub' => 'Event · ' . $fmtDate($r['event_date']), 'url' => $hl('events-management.php', (string)$r['title'])];
     }
     $add('events', 'Events', 'fa-calendar-day', $items);
 }
 if ($can('conference-management.php')) {
     $items = [];
-    foreach ($rows("SELECT id, name, capacity FROM conference_rooms WHERE name LIKE ? OR description LIKE ? ORDER BY display_order", 2) as $r) {
+    foreach ($find(['select' => 'id, name, capacity', 'from' => 'conference_rooms', 'cols' => ['name', 'description'], 'rank' => 'name', 'order' => 'display_order']) as $r) {
         $items[] = ['title' => $r['name'], 'sub' => 'Conference room · ' . (int)$r['capacity'] . ' people', 'url' => $hl('conference-management.php', (string)$r['name'])];
     }
     $add('conference_rooms', 'Conference rooms', 'fa-chalkboard-user', $items);
 }
 if ($can('rate-plans.php')) {
     $items = [];
-    foreach ($rows("SELECT id, name, is_active FROM rate_plans WHERE name LIKE ? OR description LIKE ? ORDER BY priority DESC, name", 2) as $r) {
+    foreach ($find(['select' => 'id, name, is_active', 'from' => 'rate_plans', 'cols' => ['name', 'description'], 'rank' => 'name', 'order' => 'priority DESC, name']) as $r) {
         $items[] = ['title' => $r['name'], 'sub' => 'Rate plan' . ((int)$r['is_active'] ? '' : ' · inactive'), 'url' => $hl('rate-plans.php', (string)$r['name'])];
     }
     $add('rate_plans', 'Rate plans', 'fa-tags', $items);
@@ -315,7 +385,7 @@ if ($can('rate-plans.php')) {
 // ---- Staff ----
 if ($can('user-management.php')) {
     $items = [];
-    foreach ($rows("SELECT id, username, full_name, role, is_active FROM admin_users WHERE username LIKE ? OR full_name LIKE ? OR email LIKE ? ORDER BY full_name", 3) as $r) {
+    foreach ($find(['select' => 'id, username, full_name, role, is_active', 'from' => 'admin_users', 'cols' => ['username', 'full_name', 'email'], 'rank' => 'full_name', 'order' => 'full_name']) as $r) {
         $items[] = [
             'title' => $r['full_name'] . ' (' . $r['username'] . ')',
             'sub' => 'Staff · ' . ucwords(str_replace('_', ' ', (string)$r['role'])) . ((int)$r['is_active'] ? '' : ' · inactive'),

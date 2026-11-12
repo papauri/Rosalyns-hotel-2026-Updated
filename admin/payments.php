@@ -1167,7 +1167,9 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                 rows.forEach(function(row) {
                     // Skip the "no results" placeholder row.
                     if (row.querySelector('.empty-state')) return;
-                    const match = q === '' || row.textContent.toLowerCase().indexOf(q) !== -1;
+                    // Every word must appear somewhere in the row, like the server search ("phiri 50000").
+                    const text = row.textContent.toLowerCase();
+                    const match = q === '' || q.split(/\s+/).every(function(w) { return text.indexOf(w) !== -1; });
                     row.style.display = match ? '' : 'none';
                     if (match) shown++;
                 });
@@ -1195,14 +1197,24 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                 // 1) Immediate visual filter of the loaded rows.
                 instantFilter(searchInput.value);
 
-                // 2) Debounced authoritative server search across all pages.
+                // 2) Debounced authoritative server search across all pages, loaded in place (admin-spa.js): the
+                //    box keeps focus and the page does not jump down to the list. Full submit only as a fallback.
                 window.clearTimeout(searchDebounceTimer);
                 searchDebounceTimer = window.setTimeout(function() {
                     const query = searchInput.value.trim();
                     if (query.length === 0 || query.length >= 2) {
-                        searchForm.requestSubmit();
+                        if (!(window.rhSpaLiveSearch && window.rhSpaLiveSearch(searchForm, searchInput))) {
+                            searchForm.requestSubmit();
+                        }
                     }
-                }, 450);
+                }, 400);
+            });
+
+            // Enter in the box: the same in-place search at once (the Filter button still submits as before).
+            searchForm.addEventListener('submit', function(e) {
+                if (document.activeElement !== searchInput || !window.rhSpaLiveSearch) return;
+                window.clearTimeout(searchDebounceTimer);
+                if (window.rhSpaLiveSearch(searchForm, searchInput)) e.preventDefault();
             });
 
             // Apply once on load so a value restored from the URL filters instantly.

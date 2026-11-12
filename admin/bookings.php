@@ -3081,33 +3081,11 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         $export_where_clauses = [];
         $export_params = [];
 
-        if (!empty($search_query)) {
-            $export_where_clauses[] = "(
-                b.booking_reference LIKE ?
-                OR b.guest_name LIKE ?
-                OR b.room_guest_name LIKE ?
-                OR b.guest_email LIKE ?
-                OR b.guest_phone LIKE ?
-                OR b.guest_country LIKE ?
-                OR b.special_requests LIKE ?
-                OR r.name LIKE ?
-                OR COALESCE(ir.room_number, '') LIKE ?
-                OR COALESCE(ir.room_name, '') LIKE ?
-                OR EXISTS (
-                    SELECT 1
-                    FROM payments px
-                    WHERE px.booking_type = 'room'
-                      AND px.booking_id = b.id
-                      AND px.deleted_at IS NULL
-                      AND (
-                        px.payment_reference LIKE ?
-                        OR px.payment_method LIKE ?
-                        OR px.payment_status LIKE ?
-                      )
-                )
-            )";
-            $search_param = "%{$search_query}%";
-            $export_params = array_merge($export_params, array_fill(0, 13, $search_param));
+        // Same search rule as the list (rh_bk_search_where: every word matches somewhere, phone numbers by digits).
+        $export_search = rh_bk_search_where($search_query);
+        if ($export_search['sql'] !== '') {
+            $export_where_clauses[] = $export_search['sql'];
+            $export_params = array_merge($export_params, $export_search['params']);
         }
 
         $export_where_clauses[] = $filter_status === 'deleted' ? "b.deleted_at IS NOT NULL" : "b.deleted_at IS NULL";
@@ -3239,33 +3217,12 @@ try {
     $where_clauses = [];
     $params = [];
 
-    if (!empty($search_query)) {
-        $where_clauses[] = "(
-            b.booking_reference LIKE ?
-            OR b.guest_name LIKE ?
-            OR b.room_guest_name LIKE ?
-            OR b.guest_email LIKE ?
-            OR b.guest_phone LIKE ?
-            OR b.guest_country LIKE ?
-            OR b.special_requests LIKE ?
-            OR r.name LIKE ?
-            OR COALESCE(ir.room_number, '') LIKE ?
-            OR COALESCE(ir.room_name, '') LIKE ?
-            OR EXISTS (
-                SELECT 1
-                FROM payments px
-                WHERE px.booking_type = 'room'
-                  AND px.booking_id = b.id
-                  AND px.deleted_at IS NULL
-                  AND (
-                    px.payment_reference LIKE ?
-                    OR px.payment_method LIKE ?
-                    OR px.payment_status LIKE ?
-                  )
-            )
-        )";
-        $search_param = "%{$search_query}%";
-        $params = array_merge($params, array_fill(0, 13, $search_param));
+    // Search box: every word matches somewhere, a phone number matches by its digits (rh_bk_search_where, shared
+    // with the export so both give the same rows).
+    $bk_search = rh_bk_search_where($search_query);
+    if ($bk_search['sql'] !== '') {
+        $where_clauses[] = $bk_search['sql'];
+        $params = array_merge($params, $bk_search['params']);
     }
 
     // Date filters belong to the shared scope (search + dates) so the tab counts and insight cards
@@ -4535,15 +4492,38 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 return;
             }
 
+            // Search as you type reloads only the results (loadBookingResults), so the box keeps focus and the page
+            // does not jump down to the list. Same URL a submit would build: the form's fields plus the kept tab /
+            // overdue / size values from the address bar (the capture listener above).
+            function liveSearchUrl() {
+                const keep = new URLSearchParams(window.location.search);
+                const params = new URLSearchParams();
+                new FormData(searchForm).forEach(function(v, k) {
+                    if (typeof v === 'string' && !searchForm.querySelector('input[data-bk-keep][name="' + k + '"]')) params.append(k, v);
+                });
+                ['filter', 'payment_status', 'arrival', 'departure', 'balance', 'size'].forEach(function(k) {
+                    const v = keep.get(k);
+                    if (v) params.set(k, v);
+                });
+                return 'bookings.php' + (params.toString() ? '?' + params.toString() : '');
+            }
+
             let searchDebounceTimer = null;
             searchInput.addEventListener('input', function() {
                 window.clearTimeout(searchDebounceTimer);
                 searchDebounceTimer = window.setTimeout(function() {
                     const query = searchInput.value.trim();
                     if (query.length === 0 || query.length >= 2) {
-                        searchForm.requestSubmit();
+                        loadBookingResults(liveSearchUrl(), { live: true });
                     }
-                }, 450);
+                }, 350);
+            });
+            // Enter in the box: the same in-place search at once (a button click still submits as before).
+            searchForm.addEventListener('submit', function(e) {
+                if (document.activeElement !== searchInput) return;
+                e.preventDefault();
+                window.clearTimeout(searchDebounceTimer);
+                loadBookingResults(liveSearchUrl(), { live: true });
             });
         })();
 
@@ -5177,12 +5157,21 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
         }
 
         // ── AJAX results loading — only #booking-results reloads on tab/page switch ──
-        async function loadBookingResults(url) {
+        // opts.live (search as you type): no scroll to the list, the address bar is replaced not pushed, and an
+        // older search that answers late is dropped (only the newest search may draw the list).
+        async function loadBookingResults(url, opts) {
+            opts = opts || {};
             const container = document.getElementById('booking-results');
             if (!container) {
                 window.location.href = url;
                 return;
             }
+            const seq = (window.__bkResultsSeq = (window.__bkResultsSeq || 0) + 1);
+            if (window.__bkResultsAbort) {
+                try { window.__bkResultsAbort.abort(); } catch (_) { /* ignore */ }
+            }
+            const ctrl = window.AbortController ? new AbortController() : null;
+            window.__bkResultsAbort = ctrl;
 
             // Create and show minimal loader within the table section
             let loader = container.querySelector('.minimal-loader');
@@ -5218,10 +5207,12 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     headers: {
                         'X-Requested-With': 'XMLHttpRequest',
                         'Cache-Control': 'no-cache'
-                    }
+                    },
+                    signal: ctrl ? ctrl.signal : undefined
                 });
                 if (!res.ok) throw new Error('Network error');
                 const html = await res.text();
+                if (seq !== window.__bkResultsSeq) return; // a newer search or tab is on its way
                 const doc = new DOMParser().parseFromString(html, 'text/html');
 
                 // Swap results container content
@@ -5231,8 +5222,11 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
 
                 // Keep pagination/tab navigation focused on the booking table area.
                 // Shared anchoring: lands below the sticky header and stays put when the list is already in view.
+                // Not while typing a search: the page stays where it is so the box stays under the user's fingers.
                 const topAnchor = container.querySelector('[data-rh-results]') || container.querySelector('.bookings-section') || container;
-                if (window.rhAnchors) {
+                if (opts.live) {
+                    // no scroll, no focus change
+                } else if (window.rhAnchors) {
                     window.rhAnchors.scrollToResults(topAnchor);
                 } else {
                     window.scrollTo({ top: Math.max(0, (topAnchor.getBoundingClientRect().top + window.scrollY) - 88), behavior: 'smooth' });
@@ -5253,19 +5247,39 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     if (freshNums[i]) n.textContent = freshNums[i].textContent;
                 });
 
-                // Push URL and re-apply visual tab state
-                history.pushState({
-                    url: url
-                }, '', url);
+                // Push URL (replace while typing a search: Back is not filled with half-typed words) and re-apply
+                // visual tab state
+                if (opts.live) {
+                    history.replaceState({ spa: true, url: new URL(url, window.location.href).href }, '', url);
+                } else {
+                    history.pushState({
+                        url: url
+                    }, '', url);
+                }
                 const activeTab = fresh ? (fresh.dataset.activeTab || 'all') : 'all';
                 switchTab(activeTab);
 
-            } catch (_) {
+                // Export CSV sits outside the results: point it at what the list now shows (search, tab, page size).
+                const exportLink = document.querySelector('.bookings-toolbar__action--export');
+                if (exportLink) {
+                    const ex = new URL(window.location.href);
+                    ['page', 'action', 'booking_id'].forEach(k => ex.searchParams.delete(k));
+                    ex.searchParams.set('export', 'csv');
+                    ex.hash = '';
+                    exportLink.setAttribute('href', 'bookings.php' + ex.search);
+                }
+
+            } catch (err) {
+                if (err && err.name === 'AbortError') return; // superseded by a newer search or tab
+                if (seq !== window.__bkResultsSeq) return;
                 window.location.href = url;
             } finally {
-                if (loader) loader.style.display = 'none';
-                container.style.opacity = '';
-                container.style.pointerEvents = '';
+                if (seq === window.__bkResultsSeq) {
+                    if (loader) loader.style.display = 'none';
+                    container.style.opacity = '';
+                    container.style.pointerEvents = '';
+                    window.__bkResultsAbort = null;
+                }
             }
         }
 

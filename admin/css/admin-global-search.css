@@ -125,6 +125,9 @@ html.rh-gs-open { overflow: hidden; }
     padding: 6px 0;
     overflow-y: auto;
     overscroll-behavior: contain;
+    position: relative; /* offsetTop of a result is measured from the list (arrow keys scroll only the list) */
+    flex: 1 1 auto;
+    min-height: 0;
 }
 .rh-gs__group {
     padding: 10px 16px 4px;
@@ -144,6 +147,7 @@ html.rh-gs-open { overflow: hidden; }
     cursor: pointer;
 }
 .rh-gs__item.is-active { background: var(--admin-hover-bg, #edf2f8); }
+.rh-gs__item.is-stale { opacity: 0.55; } /* previous words' records while the new ones load */
 .rh-gs__icon {
     width: 18px;
     text-align: center;

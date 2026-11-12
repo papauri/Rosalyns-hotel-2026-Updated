@@ -9,6 +9,8 @@
  * Only real Y-m-d calendar dates are used; anything else is ignored.
  */
 
+require_once __DIR__ . '/../../includes/smart-search.php'; // the shared word-by-word / phone-number search matcher
+
 if (!function_exists('rh_fin_valid_date')) {
     /** 'Y-m-d' when it is a real calendar date, else ''. */
     function rh_fin_valid_date($d): string
@@ -149,12 +151,12 @@ if (!function_exists('rh_fin_valid_date')) {
 ";
     }
 
-    /** Payments page free-text search: payment fields + every linked account's name/reference/email/phone + amount. */
-    function rh_fin_payments_search_sql(string $txnCol, array $conf): string
+    /** Payments page free-text search columns: payment fields + every linked account's name/reference/email/phone + amount. */
+    function rh_fin_payments_search_cols(string $txnCol, array $conf): array
     {
         $txnCol = rh_fin_ident($txnCol, 'transaction_id');
         $c = rh_fin_conf_cols($conf);
-        return rh_fin_like_any([
+        return [
             'p.payment_reference', 'p.receipt_number', 'p.invoice_number', 'p.booking_reference', "p.{$txnCol}",
             'p.payment_method', 'p.payment_status', 'CAST(p.booking_id AS CHAR)', 'CAST(p.total_amount AS CHAR)',
             "COALESCE(b.guest_name, '')", "COALESCE(b.guest_email, '')", "COALESCE(b.guest_phone, '')", "COALESCE(b.booking_reference, '')",
@@ -162,7 +164,20 @@ if (!function_exists('rh_fin_valid_date')) {
             "COALESCE(so.reference, '')", "COALESCE(so.customer_name, '')",
             "COALESCE(gi.name, '')", "COALESCE(gi.reference_number, '')", "COALESCE(gi.email, '')", "COALESCE(gi.phone, '')",
             "COALESCE(ei.name, '')", "COALESCE(ei.reference_number, '')", "COALESCE(ei.email, '')", "COALESCE(ei.phone, '')",
-        ]);
+        ];
+    }
+
+    /** Phone columns of the accounts a payment can belong to (also compared digits-only for a typed phone number). */
+    function rh_fin_payments_phone_cols(array $conf): array
+    {
+        $c = rh_fin_conf_cols($conf);
+        return ['b.guest_phone', "ci.{$c['phone']}", 'gi.phone', 'ei.phone'];
+    }
+
+    /** One-word form of the payments search (every column LIKE ?), kept for callers that bind one pattern. */
+    function rh_fin_payments_search_sql(string $txnCol, array $conf): string
+    {
+        return rh_fin_like_any(rh_fin_payments_search_cols($txnCol, $conf));
     }
 
     /**
@@ -184,11 +199,14 @@ if (!function_exists('rh_fin_valid_date')) {
         }
         $search = rh_fin_get_str($f, 'search');
         if ($search !== '') {
-            $searchSql = rh_fin_payments_search_sql($txnCol, $conf);
-            $where[] = $searchSql;
-            $like = rh_fin_like_param($search);
-            foreach (array_fill(0, substr_count($searchSql, '?'), $like) as $v) {
-                $params[] = $v;
+            // Every word must match somewhere ("phiri 50000"), and a typed phone number matches whatever its spacing
+            // or +265 / 0 prefix (includes/smart-search.php). One word is the same clause as before.
+            $s = rh_search_where($search, rh_fin_payments_search_cols($txnCol, $conf), rh_fin_payments_phone_cols($conf));
+            if ($s['sql'] !== '') {
+                $where[] = $s['sql'];
+                foreach ($s['params'] as $v) {
+                    $params[] = $v;
+                }
             }
         }
         $status = rh_fin_get_str($f, 'status');

@@ -1244,8 +1244,57 @@
             });
     }
 
-    function _goto(href, pushState, loaderMessage) {
+    /**
+     * Live search (opts.live = the search box being typed in): the page reloads in place without leaving the box.
+     * No full-screen loader, no scroll (the list stays where it is, the page does not jump to the results), the
+     * address bar is replaced rather than pushed (Back is not filled with half-typed words), and the box keeps
+     * focus, caret and anything typed while the results were loading.
+     */
+    function _liveFieldIndex(container, field) {
+        if (!container || !field || !field.name) return -1;
+        var all = container.querySelectorAll('input[name="' + (window.CSS && CSS.escape ? CSS.escape(field.name) : field.name) + '"]');
+        for (var i = 0; i < all.length; i++) { if (all[i] === field) return i; }
+        return -1;
+    }
+
+    function _liveRestore(container, live) {
+        if (!live || !live.name || live.index < 0) return;
+        var all = container.querySelectorAll('input[name="' + (window.CSS && CSS.escape ? CSS.escape(live.name) : live.name) + '"]');
+        var fresh = all[live.index];
+        if (!fresh) return;
+        if (fresh === live.field) {
+            // Already handed over: only take focus back if a page script moved it.
+            if (live.focused && document.activeElement !== fresh) {
+                try { fresh.focus({ preventScroll: true }); } catch (e) { fresh.focus(); }
+            }
+            return;
+        }
+        var src = live.field;
+        var value = src.value;
+        if (fresh.value !== value) fresh.value = value;
+        if (live.focused) {
+            try { fresh.focus({ preventScroll: true }); } catch (e) { fresh.focus(); }
+            var a = typeof src.selectionStart === 'number' ? src.selectionStart : value.length;
+            var b = typeof src.selectionEnd === 'number' ? src.selectionEnd : value.length;
+            try { fresh.setSelectionRange(a, b); } catch (e) { /* not a text field */ }
+        }
+        live.field = fresh; // from now on the user types into the new box
+    }
+
+    function _goto(href, pushState, loaderMessage, opts) {
         if (typeof pushState === 'undefined') pushState = true;
+        opts = opts || {};
+        var live = null;
+        if (opts.live) {
+            var liveContent = document.getElementById(CONTENT_ID);
+            live = {
+                field: opts.live,
+                name: opts.live.name,
+                value: opts.live.value,
+                index: _liveFieldIndex(liveContent, opts.live),
+                focused: document.activeElement === opts.live
+            };
+        }
 
         var url;
         try { url = new URL(href); } catch (e) {
@@ -1262,8 +1311,13 @@
         }
 
         _navigating = true;
-        _showLoader(loaderMessage || 'Opening page...');
-        _cleanup();
+        if (live) {
+            var liveForm = opts.live.form;
+            if (liveForm) liveForm.setAttribute('aria-busy', 'true');
+        } else {
+            _showLoader(loaderMessage || 'Opening page...');
+            _cleanup();
+        }
 
         // AbortController for this request
         var controller = null;
@@ -1378,11 +1432,33 @@
                         // Move the address bar to the new page BEFORE its scripts run: page
                         // scripts (deep links, AJAX helpers) read window.location. On
                         // back/forward the browser has already changed the URL.
-                        if (pushState) {
+                        if (live) {
+                            history.replaceState({ spa: true, url: fullHref }, '', fullHref);
+                        } else if (pushState) {
                             history.pushState({ spa: true, url: fullHref }, '', fullHref);
                         }
 
+                        var keepY = window.pageYOffset;
+                        if (live) {
+                            // Still in the box when the results arrived? Then it keeps focus after the swap.
+                            live.focused = document.activeElement === live.field;
+                            live.boxTop = live.field.getBoundingClientRect().top;
+                        }
+                        // Keep the search box exactly where it was on screen, even when a notice above it
+                        // ("Showing 5 results for ...") appears or goes.
+                        var holdBox = function () {
+                            window.scrollTo(0, keepY);
+                            if (live.field && live.field.isConnected) {
+                                var shift = live.field.getBoundingClientRect().top - live.boxTop;
+                                if (Math.abs(shift) > 1) window.scrollBy(0, shift);
+                            }
+                        };
+
                         currentContent.innerHTML = newContent.innerHTML;
+                        if (live) {
+                            _liveRestore(currentContent, live);
+                            holdBox();
+                        }
 
                         return _runScripts(currentContent)
                             .then(function () { return _runPageTailScripts(doc); })
@@ -1392,6 +1468,18 @@
                             .then(function () {
                                 // Update nav active state
                                 _updateNavActive(fullHref);
+
+                                if (live) {
+                                    // Page scripts may have moved focus or scroll: put both back.
+                                    _liveRestore(currentContent, live);
+                                    holdBox();
+                                    _notifyContentUpdated(fullHref, 'live-search');
+                                    // Pagers and widgets re-lay out on content-updated: hold the box once more.
+                                    window.requestAnimationFrame(holdBox);
+                                    _navigating = false;
+                                    _abortController = null;
+                                    return;
+                                }
 
                                 _scrollToNavigationTarget(url);
 
@@ -1487,6 +1575,42 @@
         '',
         window.location.href
     );
+
+    /**
+     * Search-as-you-type for a GET filter form: load its results in place (see _goto live mode).
+     * Returns false when the form cannot go this way (not an SPA page), so the caller submits it as before.
+     */
+    window.rhSpaLiveSearch = function (form, field) {
+        // A typing pause timed before the last swap holds the old box, now off the page: use the box that
+        // replaced it (same name), so its value is read and its focus kept.
+        if (field && !field.isConnected) {
+            var root = document.getElementById(CONTENT_ID);
+            var name = field.name;
+            field = null;
+            if (root && name) {
+                var same = root.querySelectorAll('input[name="' + (window.CSS && CSS.escape ? CSS.escape(name) : name) + '"]');
+                for (var s = 0; s < same.length; s++) {
+                    if (same[s] === document.activeElement) { field = same[s]; break; }
+                }
+                if (!field && same.length === 1) field = same[0];
+            }
+            if (!field) return true; // nothing safe to search from; the newer box runs its own search
+            form = field.form;
+        }
+        if (!form || !field || (form.getAttribute('method') || 'get').toLowerCase() !== 'get') return false;
+        var url;
+        try {
+            url = new URL((form.getAttribute('action') || window.location.pathname).split('#')[0], window.location.href);
+            var params = new URLSearchParams();
+            new FormData(form).forEach(function (v, k) { if (typeof v === 'string') params.append(k, v); });
+            url.search = params.toString();
+        } catch (e) { return false; }
+        if (!_isSpaUrl(url.href) || !document.getElementById(CONTENT_ID)) return false;
+        var here = window.location.href.split('#')[0];
+        if (url.href === here && !_navigating) return true; // already showing these results
+        _goto(url.href, false, null, { live: field });
+        return true;
+    };
 
     _ensureLegacyAdminModalHelpers();
 

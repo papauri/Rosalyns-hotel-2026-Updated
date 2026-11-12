@@ -19,10 +19,13 @@
     window.__rhGlobalSearch = true;
 
     var API = 'api/global-search.php';
-    var DEBOUNCE_MS = 180;
+    var DEBOUNCE_MS = 160;
     var MAX_PAGES = 8;
+    var CACHE_MAX = 40;      // record searches kept for this page view (backspacing never refetches)
+    var CACHE_MS = 60000;    // ...for a minute, so new bookings still show up
 
     var overlay, input, list, status, activeIndex = -1, flat = [], timer = null, inflight = null, lastQuery = '';
+    var lastGroups = [], cache = {}, cacheKeys = [], firstStale = Infinity, pendingEnter = false;
 
     function esc(s) {
         return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
@@ -30,12 +33,41 @@
         });
     }
 
+    function words(q) {
+        return String(q || '').toLowerCase().split(/\s+/).filter(Boolean);
+    }
+
+    // Highlight every typed word (the search matches word by word, in any order).
     function mark(text, q) {
         var t = String(text || '');
-        if (!q) return esc(t);
-        var i = t.toLowerCase().indexOf(q.toLowerCase());
-        if (i < 0) return esc(t);
-        return esc(t.slice(0, i)) + '<mark>' + esc(t.slice(i, i + q.length)) + '</mark>' + esc(t.slice(i + q.length));
+        var ws = words(q);
+        if (!ws.length) return esc(t);
+        var lower = t.toLowerCase(), hits = [];
+        ws.forEach(function (w) {
+            var from = 0, i;
+            while ((i = lower.indexOf(w, from)) >= 0) { hits.push([i, i + w.length]); from = i + w.length; }
+        });
+        if (!hits.length) return esc(t);
+        hits.sort(function (a, b) { return a[0] - b[0]; });
+        var out = '', pos = 0;
+        hits.forEach(function (h) {
+            if (h[0] < pos) { if (h[1] > pos) { out += '<mark>' + esc(t.slice(pos, h[1])) + '</mark>'; pos = h[1]; } return; }
+            out += esc(t.slice(pos, h[0])) + '<mark>' + esc(t.slice(h[0], h[1])) + '</mark>';
+            pos = h[1];
+        });
+        return out + esc(t.slice(pos));
+    }
+
+    function cacheGet(q) {
+        var hit = cache[q.toLowerCase()];
+        return hit && (Date.now() - hit.at) < CACHE_MS ? hit.groups : null;
+    }
+
+    function cachePut(q, groups) {
+        var k = q.toLowerCase();
+        if (!cache[k]) cacheKeys.push(k);
+        cache[k] = { at: Date.now(), groups: groups };
+        while (cacheKeys.length > CACHE_MAX) delete cache[cacheKeys.shift()];
     }
 
     // ---- Pages from the rendered sidebar (permission-filtered by the server already) ----
@@ -56,14 +88,30 @@
         return out;
     }
 
+    // Initials of a label ("Room Dashboard" -> "rd").
+    function initials(s) {
+        return s.split(/[\s&/-]+/).filter(Boolean).map(function (w) { return w.charAt(0); }).join('');
+    }
+
+    // Every letter of q in order inside s ("bkngs" -> "bookings"): the last resort for a typo.
+    function inOrder(q, s) {
+        var j = 0;
+        for (var i = 0; i < s.length && j < q.length; i++) { if (s.charAt(i) === q.charAt(j)) j++; }
+        return j === q.length;
+    }
+
     function matchPages(q) {
-        var ql = q.toLowerCase(), words = ql.split(/\s+/).filter(Boolean);
+        var ql = q.toLowerCase().trim(), ws = words(ql), compact = ql.replace(/\s+/g, '');
         return sidebarPages().map(function (p) {
             var hay = (p.title + ' ' + p.sub).toLowerCase(), t = p.title.toLowerCase(), score = 0;
+            var starts = ws.every(function (w) { return (' ' + t).indexOf(' ' + w) >= 0; });
             if (t === ql) score = 100;
-            else if (t.indexOf(ql) === 0) score = 80;
+            else if (t.indexOf(ql) === 0) score = 85;
+            else if (starts) score = 75;                                   // "dash room" -> Room Dashboard
             else if (t.indexOf(ql) >= 0) score = 60;
-            else if (words.every(function (w) { return hay.indexOf(w) >= 0; })) score = 40;
+            else if (ws.every(function (w) { return hay.indexOf(w) >= 0; })) score = 45; // words in title or section
+            else if (compact.length >= 2 && initials(t).indexOf(compact) === 0) score = 40; // "rd" -> Room Dashboard
+            else if (compact.length >= 3 && inOrder(compact, t.replace(/\s+/g, ''))) score = 20;
             return { p: p, score: score };
         }).filter(function (x) { return x.score > 0; })
             .sort(function (a, b) { return b.score - a.score; })
@@ -73,7 +121,12 @@
 
     // ---- Rendering ----
     function render(q, pageItems, groups, loading) {
+        // Keep the highlighted result if it is still listed (results arriving must not move the selection).
+        var keepUrl = activeIndex > 0 && flat[activeIndex] ? flat[activeIndex].url : null;
         flat = [];
+        // Records still showing from the previous words while the new ones load: dimmed, and Enter waits for the
+        // fresh results instead of opening one of them.
+        firstStale = loading ? pageItems.length : Infinity;
         var html = '';
         function group(label, icon, items, defaultIcon) {
             if (!items.length) return;
@@ -82,7 +135,7 @@
                 var idx = flat.length;
                 flat.push(it);
                 var ic = it.icon ? it.icon : 'fas ' + defaultIcon;
-                html += '<li class="rh-gs__item" role="option" id="rh-gs-opt-' + idx + '" data-idx="' + idx + '" aria-selected="false">'
+                html += '<li class="rh-gs__item' + (idx >= firstStale ? ' is-stale' : '') + '" role="option" id="rh-gs-opt-' + idx + '" data-idx="' + idx + '" aria-selected="false">'
                     + '<i class="' + esc(ic) + ' rh-gs__icon" aria-hidden="true"></i>'
                     + '<span class="rh-gs__text"><span class="rh-gs__title">' + mark(it.title, q) + '</span>'
                     + (it.sub ? '<span class="rh-gs__sub">' + mark(it.sub, q) + '</span>' : '') + '</span>'
@@ -91,9 +144,14 @@
         }
         group('Pages', 'fa-compass', pageItems, 'fa-file');
         (groups || []).forEach(function (g) { group(g.label, g.icon, g.items, g.icon); });
+        var keepScroll = list.scrollTop;
         list.innerHTML = html;
         activeIndex = flat.length ? 0 : -1;
-        paintActive();
+        if (keepUrl) {
+            for (var k = 0; k < flat.length; k++) { if (flat[k].url === keepUrl) { activeIndex = k; break; } }
+        }
+        list.scrollTop = activeIndex > 0 ? keepScroll : 0;
+        paintActive(false);
         if (!q) {
             status.textContent = 'Search bookings, guests, phone numbers, receipts, rooms, menu items, staff, settings, pages — or ask “how do I…” to search the guides.';
         } else if (loading) {
@@ -103,14 +161,20 @@
         }
     }
 
-    function paintActive() {
+    // reveal: true only for arrow keys. It scrolls the result list itself, never the page or the panel, so the
+    // search box never moves while typing or hovering (scrollIntoView also scrolled the page behind it).
+    function paintActive(reveal) {
         list.querySelectorAll('.rh-gs__item').forEach(function (el) {
             var on = Number(el.dataset.idx) === activeIndex;
             el.classList.toggle('is-active', on);
             el.setAttribute('aria-selected', on ? 'true' : 'false');
             if (on) {
                 input.setAttribute('aria-activedescendant', el.id);
-                el.scrollIntoView({ block: 'nearest' });
+                if (reveal) {
+                    var top = el.offsetTop, bottom = top + el.offsetHeight;
+                    if (top < list.scrollTop) list.scrollTop = top - 28; // leave the group heading visible
+                    else if (bottom > list.scrollTop + list.clientHeight) list.scrollTop = bottom - list.clientHeight + 6;
+                }
             }
         });
         if (activeIndex < 0) input.removeAttribute('aria-activedescendant');
@@ -133,14 +197,23 @@
     }
 
     function search(q) {
+        if (q === lastQuery && q !== '') return; // same words (a space or Shift typed): nothing to redo
         lastQuery = q;
         var pages = q ? matchPages(q) : [];
+        if (inflight && inflight.abort) inflight.abort();
         if (q.length < 2) {
+            lastGroups = [];
             render(q, pages, [], false);
             return;
         }
-        render(q, pages, [], true);
-        if (inflight && inflight.abort) inflight.abort();
+        var cached = cacheGet(q);
+        if (cached) {
+            lastGroups = cached;
+            render(q, pages, cached, false);
+            return;
+        }
+        // While the records load, the previous records stay on screen (no flicker, nothing jumps).
+        render(q, pages, lastGroups, true);
         inflight = window.AbortController ? new AbortController() : null;
         fetch(API + '?q=' + encodeURIComponent(q), {
             credentials: 'same-origin',
@@ -148,12 +221,18 @@
             signal: inflight ? inflight.signal : undefined
         }).then(function (r) { return r.json(); })
             .then(function (data) {
+                var groups = (data && data.groups) || [];
+                cachePut(q, groups);
                 if (q !== lastQuery) return;
-                render(q, pages, (data && data.groups) || [], false);
+                lastGroups = groups;
+                render(q, pages, groups, false);
+                if (pendingEnter) { pendingEnter = false; if (activeIndex >= 0) go(activeIndex); }
             })
             .catch(function (e) {
                 if (e && e.name === 'AbortError') return;
                 if (q !== lastQuery) return;
+                pendingEnter = false;
+                lastGroups = [];
                 render(q, pages, [], false);
                 status.textContent = 'Could not search records just now — pages are still listed.';
             });
@@ -180,18 +259,27 @@
         overlay.querySelector('.rh-gs__close').addEventListener('click', close);
         input.addEventListener('input', function () {
             clearTimeout(timer);
-            var q = input.value.trim();
-            timer = setTimeout(function () { search(q); }, q.length < 2 ? 0 : DEBOUNCE_MS);
+            pendingEnter = false;
+            var q = input.value.trim().replace(/\s+/g, ' ');
+            // Pages match in the browser at once; records wait for a short pause (cached answers show at once too).
+            timer = setTimeout(function () { search(q); }, q.length < 2 || cacheGet(q) ? 0 : DEBOUNCE_MS);
         });
         input.addEventListener('keydown', function (e) {
-            if (e.key === 'ArrowDown') { e.preventDefault(); if (flat.length) { activeIndex = (activeIndex + 1) % flat.length; paintActive(); } }
-            else if (e.key === 'ArrowUp') { e.preventDefault(); if (flat.length) { activeIndex = (activeIndex - 1 + flat.length) % flat.length; paintActive(); } }
-            else if (e.key === 'Enter') { e.preventDefault(); if (activeIndex >= 0) go(activeIndex); }
+            if (e.key === 'ArrowDown') { e.preventDefault(); if (flat.length) { activeIndex = (activeIndex + 1) % flat.length; paintActive(true); } }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); if (flat.length) { activeIndex = (activeIndex - 1 + flat.length) % flat.length; paintActive(true); } }
+            else if (e.key === 'Enter') {
+                e.preventDefault();
+                var q = input.value.trim().replace(/\s+/g, ' ');
+                // Typed faster than the search: run it now and open the top result when it arrives.
+                if (q !== lastQuery) { clearTimeout(timer); search(q); }
+                if (activeIndex >= firstStale || (activeIndex < 0 && inflight && q.length >= 2 && !cacheGet(q))) { pendingEnter = true; return; }
+                if (activeIndex >= 0) go(activeIndex);
+            }
             else if (e.key === 'Escape') { e.preventDefault(); close(); }
         });
         list.addEventListener('mousemove', function (e) {
             var li = e.target.closest('.rh-gs__item');
-            if (li && Number(li.dataset.idx) !== activeIndex) { activeIndex = Number(li.dataset.idx); paintActive(); }
+            if (li && Number(li.dataset.idx) !== activeIndex) { activeIndex = Number(li.dataset.idx); paintActive(false); }
         });
         list.addEventListener('click', function (e) {
             var li = e.target.closest('.rh-gs__item');
@@ -206,6 +294,10 @@
         overlay.hidden = false;
         document.documentElement.classList.add('rh-gs-open');
         input.value = '';
+        lastQuery = '';
+        lastGroups = [];
+        pendingEnter = false;
+        activeIndex = -1;
         render('', [], [], false);
         setTimeout(function () { input.focus(); }, 0);
     }

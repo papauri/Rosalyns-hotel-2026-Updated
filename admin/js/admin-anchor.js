@@ -226,6 +226,10 @@
     // Arriving with #rh-results (full load, SPA swap, back/forward)
     function landOnHash() {
         if (window.location.hash !== '#' + RESULTS_ID) return;
+        // Someone is typing in a search box (search-as-you-type put them back in it): never pull the page or the
+        // focus away to the list under their fingers.
+        var typing = document.activeElement;
+        if (typing && typing.matches && typing.matches('input[type="text"], input[type="search"], input:not([type])')) return;
         var el = prepare();
         if (!el) return;
         window.requestAnimationFrame(function () {
