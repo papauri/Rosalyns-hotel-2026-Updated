@@ -97,7 +97,7 @@ function rh_ai_action_registry(): array
         ],
         'check_in' => [
             'tool' => 'propose_check_in', 'label' => 'Check in', 'page' => 'bookings.php', 'perm' => ['checkin_guest'],
-            'description' => 'Prepare a check-in card, optionally assigning a room number first.',
+            'description' => 'Prepare a check-in card, optionally assigning a room number first. A late arrival (the booked arrival date has passed) gets no check-in card: the card opens Late Check-In on Bookings.',
             'schema' => ['properties' => $bk + ['room' => ['type' => 'string', 'maxLength' => 20, 'description' => 'Room number to assign first (optional)']]],
             'preview' => 'rh_ai_pv_check_in', 'verify' => 'rh_ai_vf_status',
         ],
@@ -973,6 +973,17 @@ function rh_ai_pv_check_in(PDO $db, array $user, array $a): array
         return ['error' => function_exists('getBookingActionErrorMessage') ? getBookingActionErrorMessage('check_in', (string)$v['reason']) : (string)$v['reason']];
     }
     $rows = rh_ai_bk_rows($b);
+    // Late arrival (owner 2026-11-12 "Dont assume, have options"): front desk says what happened on Bookings' Late
+    // Check-In, so no Check-in card and no room step here - only a link there. Decided before any room is picked.
+    $lateDays = (int)($v['late_days'] ?? 0);
+    if ($lateDays > 0) {
+        $ended = !empty($v['stay_ended']);
+        $card = rh_ai_card_base('Late check-in on Bookings', 'A late arrival is checked in on Bookings, where front desk chooses what happened. Nothing is changed from here.', $rows, '',
+            ['handoff' => ['label' => 'Open Late Check-In on Bookings', 'url' => 'bookings.php?action=checkin&booking_id=' . (int)$b['id']]]);
+        $card['notes'][] = 'The booked arrival was ' . rh_ai_fmt_date((string)$b['check_in_date']) . ' (' . $lateDays . ' day' . ($lateDays === 1 ? '' : 's') . ' ago). Use Late Check-In on Bookings to choose: arrived on the booked date, arriving today'
+            . ($ended ? ', or already stayed and left' : '') . '.';
+        return ['card' => $card, 'steps' => [], 'fp' => [false], 'facts' => rh_ai_bk_facts($b) + ['late_days' => $lateDays, 'stay_ended' => $ended, 'handoff' => 'late check-in on the bookings screen']];
+    }
     $steps = [];
     $roomId = 0;
     if (!empty($a['room'])) {

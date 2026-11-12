@@ -441,7 +441,7 @@
 
   <details class="faq" id="faq-receptionist-cant" data-module="bookings">
     <summary>A receptionist cannot confirm, cancel, or mark a booking paid. Why?</summary>
-    <p>Each booking action needs its own permission in <a href="18-staff-access.html#actions">Staff &amp; Access</a>: <strong>Check-in Guests</strong>, <strong>Check-out Guests</strong>, <strong>Cancel Bookings</strong> (cancel and no-show), <strong>Add Payments</strong> (mark paid), and <strong>Edit Bookings</strong> (change dates, <strong>Confirm Booking</strong>, <strong>Convert to Confirmed</strong>, charges on the guest bill). Changing a room's status needs <strong>Housekeeping</strong> or <strong>Room Maintenance</strong>. An administrator ticks them in <strong>Permissions</strong>. See <a href="18-staff-access.html#receptionist">Example: set up a receptionist</a>.</p>
+    <p>Each booking action needs its own permission in <a href="18-staff-access.html#actions">Staff &amp; Access</a>: <strong>Check-in Guests</strong>, <strong>Check-out Guests</strong>, <strong>Cancel Bookings</strong> (cancel and no-show), <strong>Add Payments</strong> (record a payment), <strong>Edit payments</strong> (correct a received payment), and <strong>Edit Bookings</strong> (change dates, <strong>Confirm Booking</strong>, <strong>Convert to Confirmed</strong>, charges on the guest bill). Changing a room's status needs <strong>Housekeeping</strong> or <strong>Room Maintenance</strong>. An administrator ticks them in <strong>Permissions</strong>. See <a href="18-staff-access.html#receptionist">Example: set up a receptionist</a>.</p>
   </details>
 
   <details class="faq" id="faq-facebook-connect">
@@ -479,8 +479,23 @@
 
   <details class="faq" id="faq-cannot-take-payment">
     <summary>Why can't I take a payment on this booking?</summary>
-    <p>Because nothing is owed. When the balance is zero there is no payment form. You will see <em>"Nothing is owed on this booking."</em> on the Payments &amp; balance window and on the Add Payment page, and <strong>Mark as Paid</strong> says <em>"Nothing is owed on this booking. No payment was recorded."</em> If you force it you will see <em>"Nothing is owed on this booking. Use a credit note or refund instead."</em> The same goes for conference, gym and event accounts.</p>
+    <p>Because nothing is owed. When the balance is zero there is no payment form. You will see <em>"Nothing is owed on this booking."</em> on the Payments &amp; balance window and on the Add Payment page. If you force it you will see <em>"Nothing is owed on this booking. Use a credit note or refund instead."</em> The same goes for conference, gym and event accounts.</p>
     <p>If the guest really paid more than the balance, type the amount they gave you. You will see <em>"That is MWK ... more than owed. The extra will be issued to the guest as a credit note."</em> Tick <strong>The guest paid more than owed</strong> and save. Without the tick you get <em>"That is more than the balance due. Tick 'The guest paid more than owed' to record it &mdash; the extra becomes a credit note."</em> The same tick is on <strong>Amount Collected</strong> when you create a booking. See <a href="13-finance-payments.html#overpay">What happens when a guest pays too much</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-guest-left-booked-date">
+    <summary>A guest left on the booked date but we checked them out late.</summary>
+    <p>Open the booking and click <strong>Check Out &amp; Settle</strong>. Under <strong>When did the guest leave?</strong> choose <strong>Guest left on the booked date</strong>. No extra nights are charged, and the booked dates and total stay as they are. Nothing is picked for you, so you must choose. See <a href="07-reception-bookings.html#checkout">How to check a guest out</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-payment-wrong-amount">
+    <summary>Front desk recorded a full payment by mistake.</summary>
+    <p>Someone with the <strong>Edit payments</strong> permission clicks <strong>More</strong> &rarr; <strong>Edit payment</strong> on the payment's row in <strong>Payments</strong> (or opens the payment and clicks <strong>Edit payment</strong>), changes the amount, types a <strong>Reason for the change</strong> and clicks <strong>Save correction</strong>. The booking changes to Part paid or Paid by itself. The receipt keeps its number and is reissued as <strong>Corrected receipt</strong>. The change is written in the History with the old and new amount. Tick <strong>Email the guest a corrected receipt</strong> only if the guest should get the new receipt. See <a href="13-finance-payments.html#edit-received">Edit a received payment</a>.</p>
+  </details>
+
+  <details class="faq" id="faq-late-arrival-checkin">
+    <summary>Check In refuses a guest who arrived late.</summary>
+    <p>That is a late arrival. <strong>Check In</strong> on the booking page or the dashboard does not check a late arrival in. Open <strong>Bookings</strong> and click <strong>Late Check-In</strong>, then pick what happened. Nothing is picked for you. See <a href="07-reception-bookings.html#checkin">How to check a guest in</a>.</p>
   </details>
 
   <details class="faq" id="faq-resend-receipt">

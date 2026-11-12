@@ -23,7 +23,7 @@
     <dl>
       <dt>Who uses it</dt><dd>Accounts staff, managers, and front desk staff who take payments</dd>
       <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Money</strong> &rarr; <strong>Payments</strong>, <strong>Invoices</strong>, <strong>Accounting</strong>. <strong>Add Payment</strong>, <strong>Receipts</strong>, <strong>Quotations</strong> and <strong>Credit Notes</strong> are in the same group.</dd>
-      <dt>Permission needed</dt><dd>Payments list and details: <strong>View Payments</strong>. Add or edit a payment: <strong>Add Payments</strong>. Refunds: <strong>Issue &amp; settle refunds</strong>. Invoices and Credit Notes: <strong>Invoices</strong>. Quotations: <strong>Create Bookings</strong>. Receipts: <strong>Receipts</strong>. Accounting dashboard: <strong>Accounting</strong>. VAT settings: <strong>Change VAT &amp; refund settings</strong>.</dd>
+      <dt>Permission needed</dt><dd>Payments list and details: <strong>View Payments</strong>. Add or edit a payment: <strong>Add Payments</strong>. Correct a received payment: <strong>Edit payment</strong>. Refunds: <strong>Issue &amp; settle refunds</strong>. Invoices and Credit Notes: <strong>Invoices</strong>. Quotations: <strong>Create Bookings</strong>. Receipts: <strong>Receipts</strong>. Accounting dashboard: <strong>Accounting</strong>. VAT settings: <strong>Change VAT &amp; refund settings</strong>.</dd>
       <dt>Only shown when</dt><dd>The <strong>Finance &amp; Accounting</strong> module is switched on in Settings &rarr; Modules. Invoices and Quotations also need Bookings, Conference or Gym switched on. Credit Notes need Bookings or Conference.</dd>
     </dl>
   </div>
@@ -88,7 +88,7 @@
   <p>Click a column heading to sort the whole payments list, not just the rows on the page. Click it again to reverse. The sort stays when you change page or use the filters.</p>
   <div class="note"><p>The list normally shows only the kinds of payment your hotel has switched on. If older records are hidden you will see <em>"Showing records for your active modules only"</em> with a link <strong>Show all history</strong>. Click it to see everything.</p></div>
   <div class="note"><p>Pending refunds show up when you set <strong>Status</strong> to <strong>Pending</strong>, because a pending refund has the status Pending. They are marked as refunds in the <strong>Type</strong> and <strong>Reference</strong> columns. To list refunds by their refund stage, add <code>refund_status=pending</code> to the Payments page address (also <code>processing</code>, <code>completed</code>, <code>failed</code> or <code>rejected</code>). Only refund lines are then shown, and the page counts it as an active filter.</p></div>
-  <p>Each row has these buttons: the eye (<strong>View Details</strong>), the invoice button (only when invoicing is on), the undo arrow (<strong>Process Refund</strong>, only for Paid or Completed payments that are not refunds), the pencil (<strong>Edit</strong>, only for payments that are not yet Paid or Completed), and a WhatsApp button when the guest has a phone number. The <strong>Receipt / Txn</strong> column shows the receipt number, or <em>Missing</em> if a Paid or Completed payment has none.</p>
+  <p>Each row has these buttons: the eye (<strong>View Details</strong>), the invoice button (only when invoicing is on), the undo arrow (<strong>Process Refund</strong>, only for Paid or Completed payments that are not refunds), the pencil (<strong>Edit</strong>, only for payments that are not yet Paid or Completed; a received payment is changed from <strong>More</strong> &rarr; <strong>Edit payment</strong>, see <a href="#edit-received">Edit a received payment</a>), and a WhatsApp button when the guest has a phone number. The <strong>Receipt / Txn</strong> column shows the receipt number, or <em>Missing</em> if a Paid or Completed payment has none.</p>
   <p>Click <strong>Export CSV</strong> to download the filtered list as a spreadsheet.</p>
 
   <h2 id="add">How to record a payment</h2>
@@ -136,17 +136,38 @@
   <p>If you forget the tick you will see <em>"That is more than the balance due. Tick 'The guest paid more than owed' to record it &mdash; the extra becomes a credit note."</em> Check the amount for a typing slip before you tick. For software that records payments through the API, the request must contain <strong>allow_overpayment</strong> set to true, otherwise it gets the same refusal.</p>
 
   <h2 id="edit">How to edit a payment</h2>
+  <p>There are two ways. Use the first for a <strong>Pending</strong> payment that has not been received yet. Use the second for a payment that has been received.</p>
+  <h3>Edit a pending payment</h3>
   <ol class="steps">
     <li>Open the payment and click <strong>Edit</strong>, or click the pencil on the Payments list.</li>
     <li>Change the method, date, amount, status, CC emails or notes. The booking cannot be changed.</li>
     <li>Click <strong>Update Payment</strong> and confirm. You will see <em>"Payment updated successfully"</em>.</li>
   </ol>
+  <h3 id="edit-received">Edit a received payment (Edit payment)</h3>
+  <p>Needs the <strong>Edit payment</strong> permission. It is on for administrators and super administrators. Anyone else needs it ticked in <strong>Staff &amp; Access</strong> &rarr; <strong>Permissions</strong> (it is listed as <strong>Edit payments</strong>). The money paid is changed, so the booking balance changes with it.</p>
+  <ol class="steps">
+    <li>Go to <strong>Money</strong> &rarr; <strong>Payments</strong>, click <strong>More</strong> on the payment row and choose <strong>Edit payment</strong>. You can also open the payment and click <strong>Edit payment</strong>.</li>
+    <li>Change the <strong>Amount the guest paid (incl. VAT)</strong>, <strong>How the guest paid</strong>, <strong>Payment date</strong>, <strong>Transaction reference</strong> or <strong>Notes</strong>.</li>
+    <li>Type a <strong>Reason for the change</strong>. It is required, and it is written in the History.</li>
+    <li>Leave <strong>Email the guest a corrected receipt</strong> unticked unless the guest needs the new receipt. It is unticked by default, so nothing is sent unless you tick it.</li>
+    <li>Click <strong>Save correction</strong>.</li>
+  </ol>
   <ul>
-    <li>The amount is the full amount received. The VAT split keeps the rate the payment was first recorded with.</li>
+    <li><strong>Full or part is worked out for you.</strong> After you save, the booking shows Paid or Part paid by itself. You do not choose it.</li>
+    <li><strong>The limits:</strong> the amount cannot be zero, cannot be more than the booking still owed before this payment, and cannot go below what was already refunded or moved to a credit note from this payment. If it does, you will see <em>"... of this payment was already refunded or moved to a credit note, so the amount cannot go below that."</em> A zero amount is refused with <em>"The amount must be more than zero."</em></li>
+    <li><strong>The receipt is corrected, not replaced.</strong> The receipt keeps its number and is reissued as <strong>Corrected receipt</strong>.</li>
+    <li><strong>History shows the change.</strong> The payment's History and the booking's History show who changed it, the reason, and the old and new amount, method and date.</li>
+    <li><strong>Earlier days.</strong> If the payment is dated before today, you will see a warning first. Saving changes that day's End of Day figures, so a copy printed or emailed earlier will be out of date.</li>
+    <li><strong>What it cannot edit.</strong> Only payments for room bookings can be edited this way, and not on a booking that is cancelled, a no-show or expired.</li>
+    <li><strong>Refunded or credit-note payments.</strong> A payment made by credit note cannot be edited here. Change or void the credit note on <strong>Credit Notes</strong> instead. A refund line is moved on with <em>"Settle refund"</em>, not edited.</li>
+  </ul>
+  <p><strong>Pending payments only (Edit, not Edit payment):</strong></p>
+  <ul>
+    <li>The amount is the full amount received. The VAT split keeps the rate the payment was first recorded with. (With <strong>Edit payment</strong> on a received payment, a changed amount is split again at the booking's VAT.)</li>
     <li>Marking a Pending payment as Paid or Completed gives it a receipt number, recalculates the balance and emails the receipt to the guest (once; a payment that already had its receipt emailed is not sent again).</li>
     <li>Refund lines cannot be edited. Use <strong>Settle this refund</strong> instead.</li>
-    <li>A payment with refunds against it is locked: its amount and status cannot be changed.</li>
-    <li>If an edit raises the amount above what is owed, the extra becomes a credit note, as described above.</li>
+    <li>A payment with refunds against it can still be corrected with <strong>Edit payment</strong>, but never below the amount already refunded.</li>
+    <li>If a pending payment's edit raises the amount above what is owed, the extra becomes a credit note, as described above. <strong>Edit payment</strong> on a received payment never does this: it refuses an amount above what the booking owed.</li>
     <li>A payment that was cancelled (for example because its booking was cancelled) cannot be reopened or have its amount or status changed. You will see <em>"This payment was cancelled and cannot be reopened. Record a new payment instead."</em></li>
   </ul>
   <h3>Deleting a payment</h3>
