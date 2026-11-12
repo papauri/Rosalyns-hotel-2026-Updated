@@ -727,8 +727,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                         require_once '../config/invoice.php';
                         $invoice_result = generateAndSendFinalInvoice($booking_id, $user['id']);
 
+                        // "Guest has left": a room cleaned before checkout is not sent to cleaning again - say so.
+                        $coCleaningRooms = 0;
+                        $coRoomIds = $updatedRoomCount > 0 ? getBookingRoomIds((int)$booking_id, true) : [];
+                        if ($coRoomIds) {
+                            $coSt = $pdo->prepare("SELECT COUNT(*) FROM individual_rooms WHERE status = 'cleaning' AND id IN (" . implode(',', array_fill(0, count($coRoomIds), '?')) . ")");
+                            $coSt->execute(array_values($coRoomIds));
+                            $coCleaningRooms = (int)$coSt->fetchColumn();
+                        }
                         $checkout_message = 'Guest checked out successfully. Room availability restored.' .
-                            ($updatedRoomCount > 0 ? ' Room assignment marked for cleaning.' : '');
+                            ($updatedRoomCount > 0 ? ($coCleaningRooms > 0 ? ' Room assignment marked for cleaning.' : ' Room was already cleaned after the guest left.') : '');
 
                         if ($invoice_result['success']) {
                             if (!$invoice_result['idempotent']) {

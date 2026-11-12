@@ -311,7 +311,21 @@ function createHousekeepingAssignment(int $roomId, ?int $performedBy, array $opt
             WHERE individual_room_id = ? AND status IN ('pending', 'in_progress')
         ");
         $existingStmt->execute([$roomId]);
-        if ($existingStmt->fetch()) {
+        $exists = (bool)$existingStmt->fetch();
+        // Checkout only ($options['linked_booking_id'], from processGuestCheckout()): a "Guest has left" early clean
+        // for THIS booking on THIS room that staff set to 'blocked' is still this departure's clean - no second task.
+        // Callers without the option, and unrelated blocked tasks: unchanged.
+        $linkedBookingId = (int)($options['linked_booking_id'] ?? 0);
+        if (!$exists && $linkedBookingId > 0) {
+            $blockedStmt = $pdo->prepare("
+                SELECT id FROM housekeeping_assignments
+                WHERE individual_room_id = ? AND linked_booking_id = ? AND assignment_type = 'checkout_cleanup' AND status = 'blocked'
+                LIMIT 1
+            ");
+            $blockedStmt->execute([$roomId, $linkedBookingId]);
+            $exists = (bool)$blockedStmt->fetch();
+        }
+        if ($exists) {
             if ($ownTx) {
                 $pdo->commit();
             }
@@ -593,30 +607,42 @@ function processGuestCheckout(int $bookingId, ?int $performedBy = null, array $o
             // A room with an active maintenance schedule goes to maintenance, not cleaning; the
             // housekeeping task is still created and waits until maintenance releases the room.
             $roomNext = $nextStatus;
-            $toMaintenance = ($nextStatus === ROOM_STATUS_CLEANING && rh_room_has_active_maintenance($pdo, $roomId));
-            if ($toMaintenance) {
-                $roomNext = ROOM_STATUS_MAINTENANCE;
+            // "Guest has left": the departure clean was finished before checkout -> no second clean.
+            $earlyTarget = $nextStatus === ROOM_STATUS_CLEANING ? rh_checkout_early_clean_target($pdo, $roomId, $bookingId) : null;
+            $toMaintenance = $earlyTarget !== null
+                ? $earlyTarget === ROOM_STATUS_MAINTENANCE
+                : ($nextStatus === ROOM_STATUS_CLEANING && rh_room_has_active_maintenance($pdo, $roomId));
+            if ($earlyTarget !== null) {
+                $roomNext = $earlyTarget;
+                $roomResult = rh_checkout_apply_early_clean($roomId, $earlyTarget, (string)$booking['booking_reference'], $performedBy);
+            } else {
+                if ($toMaintenance) {
+                    $roomNext = ROOM_STATUS_MAINTENANCE;
+                }
+                // The 'Maintenance assignment active' prefix marks the status as schedule-driven so the
+                // maintenance reconcile may release it when the schedule closes.
+                $roomResult = updateRoomStatus(
+                    $roomId,
+                    $roomNext,
+                    $toMaintenance
+                        ? "Maintenance assignment active (guest checkout - Booking #{$booking['booking_reference']})"
+                        : "Guest checkout - Booking #{$booking['booking_reference']}",
+                    $performedBy,
+                    // linked_booking_id: a blocked "Guest has left" clean of this booking counts as the open task
+                    // (createHousekeepingAssignment()). Not on the maintenance branch: that workflow blocks open tasks
+                    // and the turnover task below must still be created to wait for the room.
+                    ['force' => true, 'notes' => $booking['booking_reference']] + ($toMaintenance ? [] : ['linked_booking_id' => $bookingId])
+                );
             }
-            // The 'Maintenance assignment active' prefix marks the status as schedule-driven so the
-            // maintenance reconcile may release it when the schedule closes.
-            $roomResult = updateRoomStatus(
-                $roomId,
-                $roomNext,
-                $toMaintenance
-                    ? "Maintenance assignment active (guest checkout - Booking #{$booking['booking_reference']})"
-                    : "Guest checkout - Booking #{$booking['booking_reference']}",
-                $performedBy,
-                ['force' => true, 'notes' => $booking['booking_reference']]
-            );
             $hkResult = null;
-            if ($nextStatus === ROOM_STATUS_CLEANING) {
+            if ($nextStatus === ROOM_STATUS_CLEANING && $earlyTarget === null) {
                 $hkResult = createHousekeepingAssignment(
                     $roomId,
                     $performedBy,
                     [
                         'priority' => !empty($options['urgent_cleaning']) ? 'urgent' : 'normal',
                         'notes' => "Turnover after {$booking['guest_name']} checkout"
-                    ]
+                    ] + ($toMaintenance ? [] : ['linked_booking_id' => $bookingId])
                 );
             }
 
@@ -702,6 +728,88 @@ function rh_room_status_supports_inspection(): bool
 }
 
 /**
+ * Where a room goes once its clean is finished: 'inspection' when an inspection is required (the
+ * room_inspection_required setting, or $forceInspection) and the schema can hold it, otherwise 'available'.
+ * One rule for markRoomClean() and the "Guest has left" checkout below.
+ */
+function rh_room_clean_release_status(bool $forceInspection = false): string
+{
+    $requireInspection = $forceInspection || getSetting('room_inspection_required', '0') === '1';
+    // individual_rooms.status has no 'inspection' member on this schema: writing it would be
+    // stored as '' (non-strict SQL mode) and strand the room outside every availability and
+    // check-in rule. Without schema support, the inspection step is skipped.
+    if ($requireInspection && !rh_room_status_supports_inspection()) {
+        $requireInspection = false;
+    }
+    return $requireInspection ? ROOM_STATUS_INSPECTION : ROOM_STATUS_AVAILABLE;
+}
+
+/**
+ * "Guest has left" (owner 2026-11-12): housekeeping may start the departure clean of a due-out room before the
+ * desk checks the guest out (a checkout_cleanup task linked to this booking + room, made by admin/housekeeping.php;
+ * the room stays 'occupied' until checkout). At checkout that clean counts. Returns the status the room gets
+ * INSTEAD of 'cleaning', or null for today's behaviour (cleaning + one open turnover task, no duplicate):
+ *  - null: the room is not 'occupied', no linked early clean is completed, or ANY task is still open on the room
+ *    (pending / in progress / blocked - the room goes to cleaning and that task releases it);
+ *  - 'maintenance': active maintenance still wins (no cleaning task is added);
+ *  - else markRoomClean()'s choice: 'inspection' or 'available'.
+ * The clean only counts when it was made on or after the booked check-out date, so a stay extended after the tap
+ * never reuses an old clean. Only called for checkouts (requested next status 'cleaning').
+ */
+function rh_checkout_early_clean_target(PDO $pdo, int $roomId, int $bookingId): ?string
+{
+    if ($roomId <= 0 || $bookingId <= 0) {
+        return null;
+    }
+    try {
+        $st = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ?");
+        $st->execute([$roomId]);
+        if ((string)$st->fetchColumn() !== ROOM_STATUS_OCCUPIED) {
+            return null;
+        }
+        $done = $pdo->prepare("
+            SELECT 1 FROM housekeeping_assignments ha
+            INNER JOIN bookings b ON b.id = ha.linked_booking_id
+            WHERE ha.individual_room_id = ? AND ha.linked_booking_id = ?
+              AND ha.assignment_type = 'checkout_cleanup' AND ha.status = 'completed'
+              AND DATE(ha.created_at) >= b.check_out_date
+            LIMIT 1
+        ");
+        $done->execute([$roomId, $bookingId]);
+        if (!$done->fetchColumn()) {
+            return null;
+        }
+        $open = $pdo->prepare("SELECT COUNT(*) FROM housekeeping_assignments WHERE individual_room_id = ? AND status IN ('pending', 'in_progress', 'blocked')");
+        $open->execute([$roomId]);
+        if ((int)$open->fetchColumn() > 0) {
+            return null;
+        }
+    } catch (Throwable $e) {
+        // Older schema (no assignment_type / linked_booking_id): today's behaviour.
+        error_log('rh_checkout_early_clean_target: ' . $e->getMessage());
+        return null;
+    }
+    if (rh_room_has_active_maintenance($pdo, $roomId)) {
+        return ROOM_STATUS_MAINTENANCE;
+    }
+    return rh_room_clean_release_status();
+}
+
+/**
+ * Checkout of a room whose departure clean is already done (target from rh_checkout_early_clean_target()):
+ * set that status through updateRoomStatus() so the same workflow runs as for a normal release (available:
+ * turnover closed + last_cleaned_at; inspection: an inspection task; maintenance: schedule-driven reason so the
+ * maintenance reconcile can release it later). No housekeeping task is created. Joins the caller's transaction.
+ */
+function rh_checkout_apply_early_clean(int $roomId, string $target, string $bookingRef, ?int $performedBy): array
+{
+    $reason = $target === ROOM_STATUS_MAINTENANCE
+        ? "Maintenance assignment active (guest checkout - Booking #{$bookingRef}; departure clean already done)"
+        : "Guest checkout - Booking #{$bookingRef}; departure clean already done before checkout";
+    return updateRoomStatus($roomId, $target, $reason, $performedBy, ['force' => true, 'notes' => $bookingRef]);
+}
+
+/**
  * Mark room as clean and ready
  *
  * @param int $roomId Individual room ID
@@ -740,16 +848,9 @@ function markRoomClean(int $roomId, ?int $performedBy = null, array $options = [
             ];
         }
 
-        // Determine if inspection is required
-        $requireInspection = !empty($options['require_inspection']) || getSetting('room_inspection_required', '0') === '1';
-        // individual_rooms.status has no 'inspection' member on this schema: writing it would be
-        // stored as '' (non-strict SQL mode) and strand the room outside every availability and
-        // check-in rule. Without schema support, the inspection step is skipped.
-        if ($requireInspection && !rh_room_status_supports_inspection()) {
-            $requireInspection = false;
-        }
-
-        $newStatus = $requireInspection ? ROOM_STATUS_INSPECTION : ROOM_STATUS_AVAILABLE;
+        // Inspection or straight to available (same rule as the "Guest has left" checkout).
+        $newStatus = rh_room_clean_release_status(!empty($options['require_inspection']));
+        $requireInspection = $newStatus === ROOM_STATUS_INSPECTION;
 
         // Update housekeeping assignment
         $pdo->prepare("

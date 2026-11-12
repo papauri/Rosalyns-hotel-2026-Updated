@@ -132,8 +132,16 @@ function validateDueDate(string $dueDate): bool
  */
 function getOccupiedRooms(PDO $pdo): array
 {
+    // "Guest has left" state per card: the latest checkout cleanup linked to this booking + room (made before checkout).
+    $earlySelect = "NULL AS early_task_status,";
+    if (housekeepingColumnExists($pdo, 'assignment_type') && housekeepingColumnExists($pdo, 'linked_booking_id')) {
+        $earlySelect = "(SELECT ha.status FROM housekeeping_assignments ha
+                WHERE ha.individual_room_id = ir.id AND ha.linked_booking_id = b.id AND ha.assignment_type = 'checkout_cleanup'
+                ORDER BY ha.id DESC LIMIT 1) AS early_task_status,";
+    }
     $sql = "
         SELECT DISTINCT
+            {$earlySelect}
             ir.id,
             ir.room_number,
             ir.room_name,
@@ -1188,6 +1196,95 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo->commit();
                 $message = 'Assignment marked as completed.';
             }
+        } elseif ($action === 'guest_left') {
+            // "Guest has left" (owner 2026-11-12): a room due out today (or overdue) whose guest has physically gone gets
+            // its departure clean now, before the desk checks the guest out. The room stays 'occupied' (not for sale);
+            // checkout later counts the finished clean (rh_checkout_early_clean_target). Undo = delete the task.
+            $glRoomId = (int)($_POST['individual_room_id'] ?? 0);
+            $glBookingId = (int)($_POST['booking_id'] ?? 0);
+            if ($glRoomId <= 0 || $glBookingId <= 0) {
+                $error = 'Choose a room to mark as left.';
+            } elseif (!housekeepingColumnExists($pdo, 'assignment_type') || !housekeepingColumnExists($pdo, 'linked_booking_id')) {
+                $error = 'This needs database migration 004. Please contact the administrator.';
+            } else {
+                $glUserId = $user['id'] ?? null;
+                $glUserName = (string)($user['username'] ?? '');
+                $pdo->beginTransaction();
+                // Booking + room row locked: a double tap waits here and then finds the task made by the first.
+                $glStmt = $pdo->prepare("
+                    SELECT b.id, b.booking_reference, b.status, b.deleted_at, b.check_out_date,
+                           (b.check_out_date <= CURDATE()) AS due_out, ir.room_number, ir.room_name
+                    FROM bookings b
+                    INNER JOIN individual_rooms ir ON ir.id = ? AND ir.is_active = 1
+                    WHERE b.id = ?
+                      AND (b.individual_room_id = ir.id OR EXISTS (
+                          SELECT 1 FROM booking_rooms br WHERE br.booking_id = b.id AND br.individual_room_id = ir.id AND br.released_at IS NULL))
+                    FOR UPDATE
+                ");
+                $glStmt->execute([$glRoomId, $glBookingId]);
+                $gl = $glStmt->fetch(PDO::FETCH_ASSOC);
+                if (!$gl) {
+                    throw new DomainException('That room does not belong to this booking. Nothing was changed.');
+                }
+                $glRoomLabel = trim((string)$gl['room_number'] . ' ' . (string)($gl['room_name'] ?? ''));
+                if ((string)$gl['status'] !== 'checked-in' || !empty($gl['deleted_at'])) {
+                    throw new DomainException('Room ' . $glRoomLabel . ': only a checked-in guest can be marked as left. Nothing was changed.');
+                }
+                if ((int)$gl['due_out'] !== 1) {
+                    throw new DomainException('Room ' . $glRoomLabel . ': the guest is not due out until ' . date('M j, Y', strtotime((string)$gl['check_out_date'])) . '. An early departure goes through the front desk. Nothing was changed.');
+                }
+                $glExisting = $pdo->prepare("SELECT id FROM housekeeping_assignments
+                    WHERE individual_room_id = ? AND linked_booking_id = ? AND assignment_type = 'checkout_cleanup' ORDER BY id DESC LIMIT 1");
+                $glExisting->execute([$glRoomId, $glBookingId]);
+                $glExistingId = (int)($glExisting->fetchColumn() ?: 0);
+                if ($glExistingId > 0) {
+                    $pdo->rollBack();
+                    $message = 'Room ' . $glRoomLabel . ' is already marked as left (task #' . $glExistingId . '). Nothing was changed.';
+                } else {
+                    $glToday = date('Y-m-d');
+                    $glDup = hkFindOpenDuplicateAssignment($pdo, $glRoomId, 'checkout_cleanup', $glToday);
+                    if ($glDup > 0) {
+                        throw new DomainException('Room ' . $glRoomLabel . ' already has an open checkout cleanup task for today (task #' . $glDup . '). Use that one. Nothing was changed.');
+                    }
+                    $glNotes = 'Guest has left - cleaned before checkout (marked by ' . ($glUserName !== '' ? $glUserName : 'staff') . ')';
+                    $glData = [
+                        'individual_room_id' => $glRoomId,
+                        'status' => 'pending',
+                        'due_date' => $glToday,
+                        'assigned_to' => null,
+                        'created_by' => $glUserId,
+                        'notes' => $glNotes,
+                        'assignment_type' => 'checkout_cleanup',
+                        'linked_booking_id' => $glBookingId,
+                    ];
+                    if (housekeepingColumnExists($pdo, 'priority')) {
+                        $glData['priority'] = 'high';
+                    }
+                    $glCols = array_keys($glData);
+                    $pdo->prepare("INSERT INTO housekeeping_assignments (" . implode(', ', $glCols) . ") VALUES (" . implode(', ', array_fill(0, count($glCols), '?')) . ")")
+                        ->execute(array_values($glData));
+                    $glTaskId = (int)$pdo->lastInsertId();
+                    logHousekeepingAction($glTaskId, 'created', null, $glData, $glUserId, $glUserName !== '' ? $glUserName : null);
+                    // Housekeeping flag only; reconcile never changes an 'occupied' room's status.
+                    reconcileIndividualRoomHousekeeping($pdo, $glRoomId, $glUserId);
+                    require_once __DIR__ . '/../includes/booking-timeline.php';
+                    logBookingEvent(
+                        $glBookingId,
+                        (string)$gl['booking_reference'],
+                        'Guest has left (housekeeping)',
+                        'note',
+                        'Room ' . $glRoomLabel . ' marked as left by ' . ($glUserName !== '' ? $glUserName : 'staff') . '; the departure clean (task #' . $glTaskId . ') started before checkout. The room stays occupied and cannot be sold until the desk checks the guest out.',
+                        null,
+                        null,
+                        'admin',
+                        $glUserId !== null ? (int)$glUserId : null,
+                        $glUserName !== '' ? $glUserName : null,
+                        ['individual_room_id' => $glRoomId, 'housekeeping_assignment_id' => $glTaskId]
+                    );
+                    $pdo->commit();
+                    $message = 'Room ' . $glRoomLabel . ': guest has left. A high-priority departure clean is on the list. The room stays occupied (not for sale) until the desk checks the guest out.';
+                }
+            }
         } elseif ($action === 'bulk_assignments') {
             // Bulk bar over the assignments table: every row goes through the same helpers/rules as the
             // single-row buttons, in one transaction; rows a rule rejects are skipped and reported.
@@ -1575,6 +1672,14 @@ foreach ($assignments as $a) {
                                 </div>
                                 <div class="guest-info"><i class="fas fa-user"></i> <?php echo htmlspecialchars($room['guest_name'] ?? 'Guest'); ?><?php if (trim((string)($room['room_guest_name'] ?? '')) !== ''): ?> <small class="room-guest-line">&middot; Room guest: <?php echo htmlspecialchars((string)$room['room_guest_name']); ?></small><?php endif; ?></div>
                                 <div class="date-info"><i class="fas fa-calendar-alt"></i> Checkout: <strong><?php echo htmlspecialchars(date('M j, Y', strtotime($room['check_out_date']))); ?></strong></div>
+                                <?php if (in_array($room['occupancy_type'], ['checkout_today', 'overdue_checkout'], true)): ?>
+                                    <?php $hkEarly = (string)($room['early_task_status'] ?? ''); ?>
+                                    <?php if ($hkEarly === 'completed'): ?>
+                                        <div class="date-info"><span class="status-pill completed">Cleaned &middot; waiting for checkout</span></div>
+                                    <?php elseif ($hkEarly !== ''): ?>
+                                        <div class="date-info"><span class="status-pill <?php echo $hkEarly === 'blocked' ? 'blocked' : 'in_progress'; ?>">Guest left &middot; <?php echo $hkEarly === 'blocked' ? 'cleaning on hold' : 'cleaning before checkout'; ?></span></div>
+                                    <?php endif; ?>
+                                <?php endif; ?>
                                 <div class="card-select-indicator">
                                     <input type="checkbox" class="room-checkbox" value="<?php echo $room['id']; ?>" tabindex="-1" onclick="event.stopPropagation()">
                                     <span class="select-label"><i class="fas fa-circle-check"></i> Selected</span>
@@ -1583,9 +1688,27 @@ foreach ($assignments as $a) {
                                 <button type="button" class="btn-quick-assign" onclick="event.stopPropagation(); quickAssignRoom(<?php echo $room['id']; ?>)" title="Assign this room individually">
                                     <i class="fas fa-bolt"></i> Quick Assign
                                 </button>
+                                <?php if (in_array($room['occupancy_type'], ['checkout_today', 'overdue_checkout'], true) && (string)($room['early_task_status'] ?? '') === ''): ?>
+                                    <?php $hkGlLabel = trim($room['room_number'] . ' ' . ($room['room_name'] ?? '')); ?>
+                                    <button type="button" class="btn-quick-assign" onclick="event.stopPropagation(); hkGuestLeft(<?php echo (int)$room['id']; ?>, <?php echo (int)$room['booking_id']; ?>, <?php echo htmlspecialchars((string)json_encode($hkGlLabel, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT), ENT_QUOTES); ?>)" title="The guest has physically gone: start the departure clean now">
+                                        <i class="fas fa-door-open"></i> Guest has left
+                                    </button>
+                                <?php endif; ?>
                             </div>
                         <?php endforeach; ?>
                     </div>
+                </form>
+                <?php if (array_filter($occupiedRooms, static function ($r) { return in_array($r['occupancy_type'], ['checkout_today', 'overdue_checkout'], true); })): ?>
+                    <p class="hk-bulk-helper">
+                        <i class="fas fa-door-open"></i> Guest has left: use it on a room due out once the guest has gone, so the departure clean can start. The room can't be sold until the desk checks the guest out.
+                    </p>
+                <?php endif; ?>
+                <!-- Separate from bulkAssignForm (a form inside a form is dropped by the browser). -->
+                <form method="POST" id="hkGuestLeftForm">
+                    <input type="hidden" name="action" value="guest_left">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                    <input type="hidden" name="individual_room_id" id="hkGuestLeftRoom" value="">
+                    <input type="hidden" name="booking_id" id="hkGuestLeftBooking" value="">
                 </form>
             </div>
         <?php endif; ?>
@@ -2222,6 +2345,15 @@ foreach ($assignments as $a) {
             document.getElementById('roomSelect').value = roomId;
             document.getElementById('recurringOptions').style.display = 'none';
             openAdminModal('assignmentModal');
+        }
+
+        // "Guest has left": starts the departure clean before checkout; the room stays occupied until the desk checks out.
+        function hkGuestLeft(roomId, bookingId, roomLabel) {
+            const form = document.getElementById('hkGuestLeftForm');
+            if (!form) return;
+            document.getElementById('hkGuestLeftRoom').value = roomId;
+            document.getElementById('hkGuestLeftBooking').value = bookingId;
+            hkConfirm(form, 'Has the guest in room ' + roomLabel + ' left? A departure clean will be added now. The room stays occupied and cannot be sold until the desk checks the guest out.', 'Guest has left', 'btn-primary');
         }
 
         // Update selected room IDs when form is submitted

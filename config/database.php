@@ -3603,6 +3603,40 @@ function updateBookingRoomsStatus(int $bookingId, string $newStatus, string $rea
         }
     }
 
+    // Checkout ('cleaning'): a room whose departure clean housekeeping already finished after the guest left
+    // ("Guest has left", admin/housekeeping.php) is not cleaned twice - it goes to inspection / available
+    // (or maintenance) and gets no new task. Same rule as processGuestCheckout(). Other rooms: unchanged.
+    if ($newStatus === 'cleaning') {
+        if (!function_exists('rh_checkout_early_clean_target')) {
+            require_once __DIR__ . '/../includes/room-management.php';
+        }
+        $refStmt = $pdo->prepare("SELECT booking_reference FROM bookings WHERE id = ?");
+        $refStmt->execute([$bookingId]);
+        $bookingRef = (string)($refStmt->fetchColumn() ?: ('Booking #' . $bookingId));
+        $plainRooms = [];
+        foreach ($roomIds as $roomId) {
+            $earlyTarget = rh_checkout_early_clean_target($pdo, (int)$roomId, $bookingId);
+            if ($earlyTarget === null) {
+                $plainRooms[] = $roomId;
+                continue;
+            }
+            $applied = rh_checkout_apply_early_clean((int)$roomId, $earlyTarget, $bookingRef, $performedBy);
+            if (!empty($applied['success'])) {
+                $updated++;
+            } else {
+                $plainRooms[] = $roomId; // could not apply: fall back to today's behaviour
+            }
+        }
+        if ($updated > 0) {
+            require_once __DIR__ . '/cache.php';
+            clearRoomCache();
+        }
+        $roomIds = $plainRooms;
+        if (empty($roomIds)) {
+            return $updated;
+        }
+    }
+
     if ($pdo->inTransaction()) {
         $statusStmt = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ?");
         $updateStmt = $pdo->prepare("UPDATE individual_rooms SET status = ? WHERE id = ?");
@@ -3649,7 +3683,15 @@ function rh_ensure_checkout_cleaning_task(int $individualRoomId, int $bookingId,
     try {
         $open = $pdo->prepare("SELECT COUNT(*) FROM housekeeping_assignments WHERE individual_room_id = ? AND status IN ('pending', 'in_progress')");
         $open->execute([$individualRoomId]);
-        if ((int)$open->fetchColumn() === 0) {
+        $hasOpen = (int)$open->fetchColumn() > 0;
+        if (!$hasOpen && $bookingId > 0) {
+            // A "Guest has left" early clean for THIS booking on THIS room that staff set to 'blocked' is still this
+            // departure's clean (it stays open on the room): no second task. Other blocked tasks: unchanged.
+            $blocked = $pdo->prepare("SELECT COUNT(*) FROM housekeeping_assignments WHERE individual_room_id = ? AND linked_booking_id = ? AND assignment_type = 'checkout_cleanup' AND status = 'blocked'");
+            $blocked->execute([$individualRoomId, $bookingId]);
+            $hasOpen = (int)$blocked->fetchColumn() > 0;
+        }
+        if (!$hasOpen) {
             $pdo->prepare("
                 INSERT INTO housekeeping_assignments
                     (individual_room_id, status, due_date, priority, assignment_type, notes, created_by, auto_created, linked_booking_id, created_at)
