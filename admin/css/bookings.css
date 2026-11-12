@@ -431,8 +431,16 @@
         max-width: none;
     }
 
-    .bookings-toolbar__form > .bookings-toolbar__input--date {
+    .bookings-toolbar__form > .bookings-toolbar__input--date,
+    .bookings-toolbar__form > .rh-inline-field > .bookings-toolbar__input--date {
         padding-inline: 0.5rem;
+    }
+
+    /* From / To carry a visible caption (shared .rh-inline-field): the box fills its grid cell. */
+    .bookings-toolbar__form > .rh-inline-field > .bookings-toolbar__input--date {
+        flex: 1 1 auto;
+        width: 100%;
+        min-width: 0;
     }
 
     .bookings-toolbar__form .bookings-toolbar__button--filter:last-child {

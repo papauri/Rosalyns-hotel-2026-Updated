@@ -773,3 +773,37 @@ body .content .sdash-section table tbody td {
         clear: both;
     }
 }
+
+/* ----------------------------------------------------------------------------
+   Inline field label: a short visible caption in front of a control that sits in
+   a one-line filter bar (date inputs show no placeholder, so From / To need one).
+   <label class="rh-inline-field"><span class="rh-inline-field__text">From</span><input type="date" …></label>
+   Phones: the caption sits above the box so the date keeps its full width.
+   ------------------------------------------------------------------------- */
+.rh-inline-field {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    font-weight: inherit;
+    min-width: 0;
+}
+.rh-inline-field__text {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--admin-muted, #5f6b7c);
+    white-space: nowrap;
+}
+@media (max-width: 480px) {
+    .rh-inline-field {
+        flex-direction: column;
+        align-items: stretch;
+        gap: 2px;
+        width: 100%;
+    }
+    .rh-inline-field > input,
+    .rh-inline-field > select {
+        width: 100%;
+        min-width: 0;
+    }
+}

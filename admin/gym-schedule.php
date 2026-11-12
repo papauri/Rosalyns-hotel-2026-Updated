@@ -216,7 +216,7 @@ $gs_nextDate = (clone $gs_dateObj)->modify('+1 day')->format('Y-m-d');
             <div class="gss-daynav">
                 <a class="btn btn-secondary btn-sm" href="gym-schedule.php?date=<?php echo $gs_prevDate; ?>">&laquo; Prev</a>
                 <form method="get" style="display:flex;gap:8px;align-items:center;">
-                    <input type="date" name="date" value="<?php echo htmlspecialchars($gs_date); ?>" onchange="this.form.submit()">
+                    <label class="rh-inline-field"><span class="rh-inline-field__text">Go to day</span><input type="date" name="date" value="<?php echo htmlspecialchars($gs_date); ?>" onchange="this.form.submit()"></label>
                 </form>
                 <a class="btn btn-secondary btn-sm" href="gym-schedule.php?date=<?php echo $gs_nextDate; ?>">Next &raquo;</a>
                 <strong style="margin-left:6px;font-family:'Cormorant Garamond',serif;font-size:1.3rem;color:#3e3930;"><?php echo $gs_dateObj->format('l, F j, Y'); ?></strong>

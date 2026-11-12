@@ -3785,12 +3785,14 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         <option value="<?php echo $bk_dt_key; ?>" <?php echo $filter_date_type === $bk_dt_key ? 'selected' : ''; ?>><?php echo htmlspecialchars($bk_dt_label); ?></option>
                     <?php endforeach; ?>
                 </select>
+                <label class="rh-inline-field"><span class="rh-inline-field__text">From</span>
                 <input type="date" name="date_from" value="<?php echo htmlspecialchars($filter_date_from); ?>"
                     placeholder="From" title="From: first day of the range, on the date chosen in Dates (Arrival, Departure, Staying or Booked on). The day itself is included. Same date in From and To = that one day." aria-label="From date"
-                    class="bookings-toolbar__input bookings-toolbar__input--date">
+                    class="bookings-toolbar__input bookings-toolbar__input--date"></label>
+                <label class="rh-inline-field"><span class="rh-inline-field__text">To</span>
                 <input type="date" name="date_to" value="<?php echo htmlspecialchars($filter_date_to); ?>"
                     placeholder="To" title="To: last day of the range, on the date chosen in Dates (Arrival, Departure, Staying or Booked on). The day itself is included. Same date in From and To = that one day." aria-label="To date"
-                    class="bookings-toolbar__input bookings-toolbar__input--date">
+                    class="bookings-toolbar__input bookings-toolbar__input--date"></label>
                 <span class="bookings-toolbar__btns"><?php /* Filter + Clear stay together on one line */ ?>
                 <button type="submit" class="bookings-toolbar__button bookings-toolbar__button--filter btn btn-primary">
                     <i class="fas fa-filter"></i> Filter

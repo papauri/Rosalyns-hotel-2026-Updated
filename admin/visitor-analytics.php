@@ -764,9 +764,8 @@ try {
                         <option value="custom" <?php echo $filter_range === 'custom' ? 'selected' : ''; ?>>Custom Range</option>
                     </select>
                     <div id="customDates" class="va-custom-dates" style="display: <?php echo $filter_range === 'custom' ? 'flex' : 'none'; ?>;">
-                        <input type="date" name="date_start" value="<?php echo htmlspecialchars($_GET['date_start'] ?? date('Y-m-d')); ?>">
-                        <span>to</span>
-                        <input type="date" name="date_end" value="<?php echo htmlspecialchars($_GET['date_end'] ?? date('Y-m-d')); ?>">
+                        <label class="rh-inline-field"><span class="rh-inline-field__text">From</span><input type="date" name="date_start" value="<?php echo htmlspecialchars($_GET['date_start'] ?? date('Y-m-d')); ?>"></label>
+                        <label class="rh-inline-field"><span class="rh-inline-field__text">To</span><input type="date" name="date_end" value="<?php echo htmlspecialchars($_GET['date_end'] ?? date('Y-m-d')); ?>"></label>
                     </div>
                     <label class="va-filter-label">Device:</label>
                     <select name="device">

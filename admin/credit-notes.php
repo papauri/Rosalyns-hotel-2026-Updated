@@ -554,8 +554,8 @@ $modalsHtml = ob_get_clean();
                     <?php if ($cn_mod_conf || $filterType === 'conference'): ?><option value="conference" <?php if ($filterType === 'conference') echo ' selected'; ?>>Conference</option><?php endif; ?>
                     <option value="goodwill" <?php if ($filterType === 'goodwill') echo ' selected'; ?>>Goodwill</option>
                 </select>
-                <input type="date" name="date_from" class="filter-input" value="<?php echo htmlspecialchars($filterDateFrom); ?>" placeholder="From">
-                <input type="date" name="date_to" class="filter-input" value="<?php echo htmlspecialchars($filterDateTo); ?>" placeholder="To">
+                <label class="rh-inline-field"><span class="rh-inline-field__text">From</span><input type="date" name="date_from" class="filter-input" value="<?php echo htmlspecialchars($filterDateFrom); ?>" title="First issue date to show (that day included)"></label>
+                <label class="rh-inline-field"><span class="rh-inline-field__text">To</span><input type="date" name="date_to" class="filter-input" value="<?php echo htmlspecialchars($filterDateTo); ?>" title="Last issue date to show (that day included)"></label>
                 <button type="submit" class="btn btn--primary btn--sm"><i class="fas fa-search"></i> Search</button>
                 <?php if ($filterStatus !== 'all' || $filterType !== 'all' || $search !== '' || $filterDateFrom !== '' || $filterDateTo !== ''): ?>
                     <a href="credit-notes.php" class="btn btn--ghost btn--sm">Clear</a>

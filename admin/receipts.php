@@ -322,8 +322,8 @@ $site_name = getSetting('site_name', 'Hotel');
                     <option value="generated" <?php echo $filters['status'] === 'generated' ? 'selected' : ''; ?>>Generated</option>
                     <option value="emailed" <?php echo $filters['status'] === 'emailed' ? 'selected' : ''; ?>>Emailed</option>
                 </select>
-                <input type="date" name="date_from" class="filter-input" value="<?php echo htmlspecialchars($filters['date_from']); ?>">
-                <input type="date" name="date_to" class="filter-input" value="<?php echo htmlspecialchars($filters['date_to']); ?>">
+                <label class="rh-inline-field"><span class="rh-inline-field__text">From</span><input type="date" name="date_from" class="filter-input" value="<?php echo htmlspecialchars($filters['date_from']); ?>" title="First payment date to show (that day included)"></label>
+                <label class="rh-inline-field"><span class="rh-inline-field__text">To</span><input type="date" name="date_to" class="filter-input" value="<?php echo htmlspecialchars($filters['date_to']); ?>" title="Last payment date to show (that day included)"></label>
                 <button type="submit" class="btn btn--primary btn--sm"><i class="fas fa-search"></i> Search</button>
                 <?php if ($filters['type'] !== 'all' || $filters['status'] !== 'all' || $filters['search'] !== '' || $filters['date_from'] !== '' || $filters['date_to'] !== ''): ?>
                     <a href="receipts.php" class="btn btn--ghost btn--sm">Clear</a>
