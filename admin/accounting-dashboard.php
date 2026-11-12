@@ -1680,8 +1680,8 @@ if (!isset($folio_fnb)) {
                 <span class="ck-kpi__label">Refunds</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><?php echo $ckMoney($cat_refunds); ?></span>
                 <span class="ck-kpi__sub"><?php echo $cat_pending_refunds > BALANCE_TOLERANCE ? 'Awaiting approval ' . $ckPlain($cat_pending_refunds) . ' (not in the total)' : 'None awaiting approval'; ?></span>
-                <?php $catRefundSplit = rh_refund_split_text($cat_refunds, $cat_refunds_to_credit, (string)$currency_symbol); if ($catRefundSplit !== ''): ?><span class="ck-kpi__sub" style="margin-top:0"><?php echo $ckH($catRefundSplit); ?></span><?php endif; ?>
-                <span class="ck-kpi__sub" style="margin-top:0">Refunds dated <?php echo $ckH($periodLabel); ?> (VAT included): money paid back plus overpayments or store credit moved to a credit note. Payments shows the same rule for the dates it is filtered to (all dates when unfiltered).</span>
+                <?php $catRefundSplit = rh_refund_split_text($cat_refunds, $cat_refunds_to_credit, (string)$currency_symbol, 2); if ($catRefundSplit !== ''): ?><span class="ck-kpi__sub" style="margin-top:0"><?php echo $ckH($catRefundSplit); ?></span><?php endif; ?>
+                <span class="ck-kpi__sub" style="margin-top:0"><?php echo $showAll ? 'Refunds on all dates' : 'Refunds dated ' . $ckH($periodLabel); ?> (VAT included): money paid back plus overpayments or store credit moved to a credit note. Payments shows the same rule for the dates it is filtered to (all dates when unfiltered).</span>
             </a>
             <?php if ($mod_pos && $pos_gross > 0): ?>
             <div class="ck-kpi<?php echo $pos_margin_pct < 0 ? ' ck-kpi--alert' : ''; ?>" title="POS gross margin - revenue minus recorded cost of goods">

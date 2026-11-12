@@ -91,6 +91,8 @@ eq($s['label'], 'Refund: Paid out', 'cash refund reads Paid out');
 eq(rh_refund_split_text(477559.57, 477559.57, 'MWK'), 'Paid back in cash / bank: MWK 0 · Moved to credit notes (guest credit, no cash out): MWK 477,560', 'split: all moved to credit notes (Liwonde case)');
 eq(rh_refund_split_text(500000, 0, 'MWK'), '', 'split: nothing to credit notes = no line');
 eq(rh_refund_split_text(1000, 250.5, '', 2), 'Paid back in cash / bank: 749.50 · Moved to credit notes (guest credit, no cash out): 250.50', 'split: mixed, 2 decimals');
+eq(rh_refund_split_text(1000.6, 500.3, '', 0), 'Paid back in cash / bank: 501 · Moved to credit notes (guest credit, no cash out): 500', 'split: parts add up to the shown total (1,001), no rounding gap');
+eq(rh_refund_split_text(999.5, 0.4, 'MWK', 0), 'Paid back in cash / bank: MWK 1,000 · Moved to credit notes (guest credit, no cash out): MWK 0', 'split: tiny credit rounds to 0 at whole kwacha, cash = shown total');
 
 // ---- not confirmed yet (receivables.php): outside the owed rule and not closed
 require_once $root . '/admin/includes/receivables.php';

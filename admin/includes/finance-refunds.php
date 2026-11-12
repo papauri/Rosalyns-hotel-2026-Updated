@@ -101,7 +101,12 @@ if (!function_exists('rh_refund_settled_statuses')) {
         if ($toCredit < 0.005) {
             return '';
         }
-        $cash = round(max(0.0, $total - $toCredit), 2);
+        // Round both parts at the precision shown, then take cash as the difference, so the two parts always add up
+        // to the refunds total the card shows (no 1-kwacha gap from rounding each part on its own).
+        $decimals = max(0, $decimals);
+        $totalShown = round(max(0.0, $total), $decimals);
+        $toCredit = min(round($toCredit, $decimals), $totalShown);
+        $cash = max(0.0, round($totalShown - $toCredit, $decimals));
         $c = $currency !== '' ? $currency . ' ' : '';
         return 'Paid back in cash / bank: ' . $c . number_format($cash, $decimals)
             . ' · Moved to credit notes (guest credit, no cash out): ' . $c . number_format($toCredit, $decimals);
