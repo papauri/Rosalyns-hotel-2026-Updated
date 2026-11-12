@@ -729,7 +729,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
 
                         // Generate and send final invoice
                         require_once '../config/invoice.php';
-                        $invoice_result = generateAndSendFinalInvoice($booking_id, $user['id']);
+                        // Pay-later booking: emailed to the guest only when "Email the final invoice to the guest" was ticked.
+                        $invoice_result = generateAndSendFinalInvoice($booking_id, $user['id'], !empty($_POST['email_final_invoice']) ? true : null);
 
                         // "Guest has left": a room cleaned before checkout is not sent to cleaning again - say so.
                         $coCleaningRooms = 0;
@@ -746,7 +747,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                             if (!$invoice_result['idempotent']) {
                                 $checkout_message .= ' Final invoice generated.';
                             }
-                            if (!$invoice_result['email_sent']) {
+                            if (!empty($invoice_result['email_skipped'])) {
+                                $checkout_message .= ' The final invoice was not emailed to the guest (pay-later booking, box not ticked).';
+                            } elseif (!$invoice_result['email_sent']) {
                                 $checkout_message .= ' Note: Final invoice email could not be sent.';
                             }
                         } else {
@@ -1686,9 +1689,11 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                         $co_confirm_text .= ' Room at the booked rate: ' . $co_rate['text'] . '.';
                     }
                 ?>
-                    <?php if ($bd_perm_checkout): ?><form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars($co_confirm_text, ENT_QUOTES); ?>" data-admin-confirm-title="Check out guest" data-admin-confirm-ok="<?php echo $co_can_override ? 'Check out with balance' : 'Check out'; ?>" data-admin-confirm-icon="fa-right-from-bracket" data-admin-submit-text="Checking out...">
+                    <?php $co_pay_later_email = !empty($booking['checkin_without_payment']) && trim((string)($booking['guest_email'] ?? '')) !== ''; // owner 2026-11-13: unticked by default ?>
+                    <?php if ($bd_perm_checkout): ?><form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars($co_confirm_text, ENT_QUOTES); ?>" data-admin-confirm-title="Check out guest" data-admin-confirm-ok="<?php echo $co_can_override ? 'Check out with balance' : 'Check out'; ?>" data-admin-confirm-icon="fa-right-from-bracket" data-admin-submit-text="Checking out..."<?php echo $co_pay_later_email ? ' data-admin-confirm-check="email_final_invoice" data-admin-confirm-check-label="Email the final invoice to the guest" data-admin-confirm-check-help="Pay-later booking (Check in before payment): the invoice is kept on the booking and is not emailed unless you tick this."' : ''; ?>>
                         <input type="hidden" name="booking_action" value="checkout">
                         <?php if ($co_can_override): ?><input type="hidden" name="confirm_checkout_with_balance" value="1"><?php endif; ?>
+                        <?php if ($co_pay_later_email): ?><input type="hidden" name="email_final_invoice" value="0"><?php endif; ?>
                         <button type="submit" class="action-btn checkout" data-help="Check Out|Check the guest out, release the room, and generate the final invoice where applicable."<?php echo ($co_has_balance && !$co_can_override) ? ' disabled title="Outstanding balance ' . htmlspecialchars($currency_symbol . ' ' . number_format($co_balance, 2), ENT_QUOTES) . ' - record payment before checkout"' : ''; ?>>
                             <i class="fas fa-right-from-bracket"></i> Check Out
                         </button>

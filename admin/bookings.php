@@ -26,6 +26,7 @@ require_once __DIR__ . '/../includes/booked-rate-change.php'; // booked rate × 
 require_once __DIR__ . '/includes/bookings-list-filters.php'; // tab/date/payment filter rules shared by badges, list and export
 require_once __DIR__ . '/../includes/booking-created-by.php'; // "by …" under the Created date in the list
 require_once __DIR__ . '/../includes/late-stay.php'; // late check-in / leave-date choices: one quote for assess and settle
+require_once __DIR__ . '/../includes/stay-nights.php'; // add / take off nights: one quote for the review card and the save
 $message = '';
 $error = '';
 $currency_symbol = (string)getSetting('currency_symbol', 'MWK');
@@ -94,18 +95,23 @@ function bookings_log_status_change(PDO $pdo, int $bookingId, ?string $oldStatus
 /**
  * Final invoice at checkout (same as the booking page does). Idempotent; never blocks the checkout.
  * Returns a short note for the success message.
+ * $emailGuest: the "Email the final invoice to the guest" tick (pay-later bookings only; null = no box shown). A
+ * pay-later booking (Check in before payment) is emailed only when it was ticked; other bookings as before.
  */
-function bookings_final_invoice_note(int $bookingId, int $userId): string
+function bookings_final_invoice_note(int $bookingId, int $userId, ?bool $emailGuest = null): string
 {
     try {
         require_once __DIR__ . '/../config/invoice.php';
-        $inv = generateAndSendFinalInvoice($bookingId, $userId);
+        $inv = generateAndSendFinalInvoice($bookingId, $userId, $emailGuest);
         if (empty($inv['success'])) {
             return ' Warning: the final invoice could not be generated.';
         }
         // Balance owed -> final INVOICE; paid in full -> a paid STATEMENT (the guest already holds every receipt).
         $owed = (float)($inv['balance_due'] ?? 0) > BALANCE_TOLERANCE;
         $docName = $owed ? 'Final invoice' : 'Stay statement (paid in full)';
+        if (!empty($inv['email_skipped']) && empty($inv['idempotent'])) {
+            return ' ' . $docName . ' generated, not emailed to the guest (pay-later booking, box not ticked).';
+        }
         return (empty($inv['idempotent']) ? ' ' . $docName . ' generated.' : '')
             . ((empty($inv['email_sent']) && empty($inv['idempotent'])) ? ' (' . $docName . ' email not sent.)' : '');
     } catch (Throwable $e) {
@@ -1701,7 +1707,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     );
 
                     $message = 'Booking ' . htmlspecialchars($bk['booking_reference']) . ' checked out successfully. Room availability restored.'
-                        . bookings_final_invoice_note((int)$booking_id, (int)($user['id'] ?? 0));
+                        . bookings_final_invoice_note((int)$booking_id, (int)($user['id'] ?? 0), !empty($_POST['email_final_invoice']) ? true : null);
                     rh_log_event('bookings', 'info', 'Guest checked out', ['booking_id' => $booking_id, 'ref' => $bk['booking_reference'], 'by' => $user['username'] ?? null]);
                     logBookingAudit($booking_id, 'checked-out', ['status' => 'checked-in'], ['status' => 'checked-out'], null, $bk['booking_reference'] ?? null);
                 } else {
@@ -1747,6 +1753,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $assess_stmt->execute([$booking_id]);
             $abk = $assess_stmt->fetch(PDO::FETCH_ASSOC) ?: $abk;
             $assessBalFields = ['balance_due' => $assessBal['balance'], 'can_override' => (bool)$assessBal['can_override']];
+            // Pay-later booking (Check in before payment): the checkout confirm shows an UNTICKED "Email the final invoice
+            // to the guest" box (owner 2026-11-13: a company pays later, the guest must not be chased).
+            $assessBalFields['pay_later'] = !empty($abk['checkin_without_payment']);
+            $assessBalFields['pay_later_note'] = $assessBalFields['pay_later'] ? trim((string)($abk['checkin_arrangement_note'] ?? '')) : '';
+            $assessBalFields['guest_email_on_file'] = trim((string)($abk['guest_email'] ?? '')) !== '';
             // The rate this stay was booked at Ã— its booked nights (shown in the checkout confirm / settlement).
             $assessRate = rh_booked_rate_line($abk, null, ['currency' => $currency_symbol]);
             $assessBalFields['booked_rate_text'] = $assessRate['ok'] ? $assessRate['text'] : '';
@@ -2115,7 +2126,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 header('Content-Type: application/json');
                 $checkoutMessage = 'Checkout completed. ' . $settleDescribe . $settlementReceiptNotice
-                    . bookings_final_invoice_note((int)$booking_id, (int)($user['id'] ?? 0));
+                    . bookings_final_invoice_note((int)$booking_id, (int)($user['id'] ?? 0), !empty($_POST['email_final_invoice']) ? true : null);
                 echo json_encode(['success' => true, 'message' => $checkoutMessage]);
                 exit;
             } catch (Throwable $e) {
@@ -2565,6 +2576,77 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             echo json_encode(['success' => true] + bookings_stay_rate_preview($spBk, $spNights, $currency_symbol, $spIn->format('Y-m-d'), $spOut->format('Y-m-d')));
             exit;
+        } elseif ($action === 'stay_nights_quote' || $action === 'stay_nights_apply') {
+            // Add / take off nights on an in-house stay (owner 2026-11-13). The quote is the review card; the apply
+            // re-quotes under the row lock and must match it (includes/stay-nights.php). Permission: checkout_guest
+            // (rhBookingActionPermission); a refund leg also needs refund_payment.
+            if (!isAjaxRequest()) {
+                throw new Exception('Invalid request');
+            }
+            header('Content-Type: application/json');
+            $snId = (int)($_POST['booking_id'] ?? 0);
+            $snDelta = (int)($_POST['delta'] ?? 0);
+            $snCanRefund = hasPermission((int)($user['id'] ?? 0), 'refund_payment');
+            if ($action === 'stay_nights_quote') {
+                $snSt = $pdo->prepare("SELECT * FROM bookings WHERE id = ? AND deleted_at IS NULL");
+                $snSt->execute([$snId]);
+                $snBk = $snSt->fetch(PDO::FETCH_ASSOC);
+                if (!$snBk) {
+                    echo json_encode(['success' => false, 'message' => 'Booking not found']);
+                    exit;
+                }
+                $snQ = rh_stay_nights_quote($pdo, $snBk, $snDelta, null, true, $currency_symbol);
+                if (empty($snQ['ok'])) {
+                    echo json_encode(['success' => false, 'message' => $snQ['error']]);
+                    exit;
+                }
+                unset($snQ['drop'], $snQ['reprice']);
+                echo json_encode(['success' => true, 'quote' => $snQ + [
+                    'reference' => (string)$snBk['booking_reference'],
+                    'guest_name' => (string)$snBk['guest_name'],
+                    'old_check_out_fmt' => date('D j M Y', strtotime($snQ['old_check_out'])),
+                    'new_check_out_fmt' => date('D j M Y', strtotime($snQ['new_check_out'])),
+                    'can_refund' => $snCanRefund,
+                    'pay_later' => !empty($snBk['checkin_without_payment']),
+                ]]);
+                exit;
+            }
+            try {
+                $snRes = rh_stay_nights_apply($pdo, $snId, [
+                    'delta' => $snDelta,
+                    'expected_new_total' => $_POST['expected_new_total'] ?? null,
+                    'expected_total_delta' => $_POST['expected_total_delta'] ?? null,
+                    'reason' => (string)($_POST['reason'] ?? ''),
+                    'money_back_mode' => (string)($_POST['money_back_mode'] ?? ''),
+                    'money_back_typed' => $_POST['money_back_typed'] ?? null,
+                    'can_refund' => $snCanRefund,
+                ], $user);
+            } catch (Throwable $snEx) {
+                echo json_encode(['success' => false, 'message' => $snEx->getMessage()]);
+                exit;
+            }
+            // Money returned = the guest is told (refund notice per leg; credit note email), after the commit.
+            foreach ($snRes['refund_legs'] as $snLeg) {
+                try {
+                    require_once '../config/email.php';
+                    $snMail = sendRefundNotificationEmail($snLeg['orig'], $snLeg['ref'], (float)$snLeg['amount'], (string)$snLeg['reason']);
+                    if (empty($snMail['success'])) {
+                        error_log('Nights refund notice not sent for ' . $snLeg['ref'] . ': ' . ($snMail['message'] ?? 'unknown'));
+                    }
+                } catch (Throwable $snMailEx) {
+                    error_log('Nights refund notice failed for ' . $snLeg['ref'] . ': ' . $snMailEx->getMessage());
+                }
+            }
+            if (!empty($snRes['credit_note']) && $snRes['credit_note']['email'] !== '') {
+                try {
+                    require_once '../config/credit-notes.php';
+                    sendCreditNoteEmail($pdo, (int)$snRes['credit_note']['id']);
+                } catch (Throwable $snCnEx) {
+                    error_log('Nights credit note email failed: ' . $snCnEx->getMessage());
+                }
+            }
+            echo json_encode(['success' => true, 'message' => htmlspecialchars($snRes['describe'], ENT_QUOTES, 'UTF-8')]);
+            exit;
         } elseif ($action === 'extend_stay') {
             // Extend the checkout date for a checked-in booking
             if (!isAjaxRequest()) {
@@ -2668,7 +2750,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             // Recalculate amount_due so it reflects the new total correctly
             recalculateBookingFinancials($booking_id);
+            // History old -> new (owner 2026-11-13, L3): dates, nights, room total and balance, in the same transaction.
+            $extAfterSt = $pdo->prepare("SELECT check_out_date, number_of_nights, total_with_vat, amount_due FROM bookings WHERE id = ?");
+            $extAfterSt->execute([$booking_id]);
+            $extAfter = $extAfterSt->fetch(PDO::FETCH_ASSOC) ?: [];
+            $extBefore = ['check_out_date' => substr((string)$bk['check_out_date'], 0, 10), 'number_of_nights' => (int)$bk['number_of_nights'],
+                'total_with_vat' => round((float)$bk['total_with_vat'], 2), 'amount_due' => round((float)$bk['amount_due'], 2)];
+            $extAfterVals = ['check_out_date' => substr((string)($extAfter['check_out_date'] ?? $new_checkout), 0, 10), 'number_of_nights' => (int)($extAfter['number_of_nights'] ?? $newNights),
+                'total_with_vat' => round((float)($extAfter['total_with_vat'] ?? $newTotal), 2), 'amount_due' => round((float)($extAfter['amount_due'] ?? 0), 2)];
+            $extDescribe = 'Stay extended: check-out ' . $extBefore['check_out_date'] . ' -> ' . $extAfterVals['check_out_date'] . ', '
+                . $extBefore['number_of_nights'] . ' -> ' . $extAfterVals['number_of_nights'] . ' night(s). Room total ' . $currency_symbol . ' '
+                . number_format($extBefore['total_with_vat'], 2) . ' -> ' . $currency_symbol . ' ' . number_format($extAfterVals['total_with_vat'], 2)
+                . '. Balance ' . $currency_symbol . ' ' . number_format($extBefore['amount_due'], 2) . ' -> ' . $currency_symbol . ' ' . number_format($extAfterVals['amount_due'], 2) . '.';
+            logBookingAudit($booking_id, 'stay_extended', $extBefore, $extAfterVals, $extDescribe, $bk['booking_reference'] ?? null);
+            logBookingEvent((int)$booking_id, (string)$bk['booking_reference'], 'Stay extended', 'update', $extDescribe,
+                $extBefore['check_out_date'], $extAfterVals['check_out_date'], 'admin', $user['id'] ?? null,
+                $user['full_name'] ?? ($user['username'] ?? null), ['old' => $extBefore, 'new' => $extAfterVals]);
             $pdo->commit();
+            rh_log_event('bookings', 'info', 'Stay extended', ['booking_id' => $booking_id, 'ref' => $bk['booking_reference'], 'old' => $extBefore, 'new' => $extAfterVals, 'by' => $user['username'] ?? null]);
 
             // Log the extension (never fatal — must not undo the successful update)
             bookings_log_status_change(
@@ -2764,6 +2863,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     rh_rate_plan_drop_clear($pdo, $booking_id);
                 }
                 recalculateBookingFinancials($booking_id);
+                // L1 (2026-11-13): a shorter stay must never leave paid money sitting on the booking as credit
+                // ("overpayment lives in the credit note only"). When this change would give money back, nothing is
+                // saved: staff use "Add / take off nights" (refund or credit note, amount retyped) or Check out & settle.
+                $acdCredit = $pdo->prepare("SELECT credit_balance FROM bookings WHERE id = ?");
+                $acdCredit->execute([$booking_id]);
+                $acdCreditAfter = round((float)$acdCredit->fetchColumn(), 2);
+                if ($acdCreditAfter > round(max(0.0, (float)($acd_locked['credit_balance'] ?? 0)), 2) + BALANCE_TOLERANCE) {
+                    throw new Exception('This shorter stay would leave ' . $currency_symbol . ' ' . number_format($acdCreditAfter, 2)
+                        . ' paid that the guest no longer owes. Nothing was changed. Use "Add / take off nights" (refund or credit note), or Check out & settle if the guest is leaving today.');
+                }
                 $pdo->commit();
             } catch (Throwable $acdEx) {
                 if ($pdo->inTransaction()) {
@@ -4130,7 +4239,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                                     <button class="quick-action <?php echo $is_overdue_checkout ? 'checkout--urgent' : 'checkout'; ?>" title="<?php echo $is_overdue_checkout ? 'Checkout now (overdue)' : ($is_early_departure ? 'Early checkout (settles unused nights)' : 'Checkout guest'); ?>" aria-label="Checkout guest" data-help="Checkout Guest|Settle the folio and close the stay. Leaving late or early opens the settlement window for the extra or unused nights." onclick="checkoutBooking(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>)">
                                                         <i class="fas fa-right-from-bracket"></i>
                                                     </button>
-                                                    <button class="quick-action extend" title="Extend stay" aria-label="Extend stay" onclick="openExtendStayModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, <?php echo $bk_js($booking['check_out_date']); ?>, <?php echo $bk_guest_js; ?>)">
+                                                    <button class="quick-action extend" title="Add or take off nights" aria-label="Add or take off nights" data-help="Add or take off nights|Add nights (room availability is checked) or take nights off the end of the stay, at the booked rate. You see the new total and balance before confirming; a reason is required." onclick="openExtendStayModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, <?php echo $bk_js($booking['check_out_date']); ?>, <?php echo $bk_guest_js; ?>)">
                                                         <i class="fas fa-calendar-plus"></i>
                                                     </button>
                                                 <?php endif; ?>
@@ -4518,6 +4627,15 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             if (overlay) {
                 overlay.style.display = 'none';
             }
+        }
+
+        // Confirm with an optional tick box (options.check = {label, help, checked}): resolves {confirmed, checked}.
+        // Uses AdminConfirm.ask (admin-main.js); without it the box is treated as unticked.
+        function confirmAdminActionWithCheck(options) {
+            if (options && options.check && window.AdminConfirm && typeof window.AdminConfirm.ask === 'function') {
+                return window.AdminConfirm.ask(options).then(r => ({ confirmed: !!(r && r.confirmed), checked: !!(r && r.confirmed && r.checkShown && r.checked) }));
+            }
+            return confirmAdminAction(options).then(c => ({ confirmed: !!c, checked: false }));
         }
 
         function confirmAdminAction(options) {
@@ -4969,6 +5087,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 tentative: 'Tentative',
                 noshow: 'No-show',
                 consolidation: 'Consolidate',
+                extend: 'Nights',
                 'actions-more-toggle': 'More'
             };
 
@@ -5446,6 +5565,12 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 settlement.balance_due = parseFloat(assessResp.balance_due || 0);
                 settlement.can_override = !!assessResp.can_override;
                 settlement.booked_rate_text = String(assessResp.booked_rate_text || '');
+                // Pay-later booking: an UNTICKED "Email the final invoice to the guest" box in the confirm (owner 2026-11-13).
+                window._csEmailBox = (assessResp.pay_later && assessResp.guest_email_on_file) ? {
+                    label: 'Email the final invoice to the guest',
+                    help: 'Pay-later booking' + (assessResp.pay_later_note ? ' (' + String(assessResp.pay_later_note) + ')' : '') + ': the invoice is kept on the booking and is not emailed unless you tick this.',
+                    checked: false
+                } : null;
             } catch (err) {
                 hideLoadingOverlay();
                 Alert.show(err.message || 'Could not assess checkout', 'error');
@@ -5468,14 +5593,16 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 if (owes) {
                     coDetails.unshift('OUTSTANDING BALANCE: ' + fmt(settlement.balance_due) + ' - checking out with this balance will be recorded in the booking timeline.');
                 }
-                const confirmed = await confirmAdminAction({
+                const coEmailBox = window._csEmailBox || null;
+                const coAnswer = await confirmAdminActionWithCheck({
                     title: owes ? 'Check out with balance?' : 'Confirm checkout',
                     message: 'Check out booking ' + reference + '?',
                     details: coDetails,
                     confirmText: owes ? 'Check Out with Balance' : 'Check Out',
-                    icon: 'fa-right-from-bracket'
+                    icon: 'fa-right-from-bracket',
+                    check: coEmailBox ? Object.assign({}, coEmailBox, { checked: false }) : undefined
                 });
-                if (!confirmed) return;
+                if (!coAnswer.confirmed) return;
 
                 showLoadingOverlay('Checking out booking...');
 
@@ -5483,6 +5610,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 formData.append('action', 'checkout');
                 formData.append('id', id);
                 if (owes) formData.append('confirm_checkout_with_balance', '1');
+                if (coEmailBox && coAnswer.checked) formData.append('email_final_invoice', '1');
                 postBookingAction(formData, 'Error checking out booking')
                     .then(data => reloadWithBookingActionMessage(data, 'Booking checked out successfully.'))
                     .catch(error => {
@@ -5886,16 +6014,19 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 showErr('The guest would still owe ' + fmt(balanceAfter) + '. Enter the amount received, or ask someone with the "Check out with balance" permission.');
                 return;
             }
-            const confirmed = await confirmAdminAction({
+            const csEmailBox = window._csEmailBox ? Object.assign({}, window._csEmailBox, { checked: false }) : null;
+            const csAnswer = await confirmAdminActionWithCheck({
                 title: 'Confirm checkout',
                 message: 'Complete checkout for booking ' + (bookingRef || ('#' + bookingId)) + '?',
                 details: csDetails,
                 confirmText: 'Complete Checkout',
-                icon: 'fa-right-from-bracket'
+                icon: 'fa-right-from-bracket',
+                check: csEmailBox || undefined
             });
-            if (!confirmed) {
+            if (!csAnswer.confirmed) {
                 return;
             }
+            if (csEmailBox && csAnswer.checked) formData.set('email_final_invoice', '1');
 
             form.dataset.busy = '1';
             if (submitBtn) setButtonLoading(submitBtn, true);
@@ -6517,7 +6648,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                         <td data-label="Overdue"><span class="badge bookings-alert-modal__badge bookings-alert-modal__badge--warning"><?php echo $bk['days_overdue'] == 0 ? 'Today' : $bk['days_overdue'] . ' day(s)'; ?></span></td>
                                         <td data-label="Actions" class="bookings-alert-modal__actions">
                                             <button class="btn btn-sm btn-danger bookings-alert-modal__action-btn" onclick="checkoutBooking(<?php echo $bk['id']; ?>, '<?php echo htmlspecialchars($bk['booking_reference'], ENT_QUOTES); ?>')"><i class="fas fa-sign-out-alt"></i> Checkout Now</button>
-                                            <button class="btn btn-sm btn-success bookings-alert-modal__action-btn" onclick="closeOverdueCheckoutsModal(); openExtendStayModal(<?php echo $bk['id']; ?>, '<?php echo htmlspecialchars($bk['booking_reference'], ENT_QUOTES); ?>', '<?php echo $bk['check_out_date']; ?>', '<?php echo htmlspecialchars($bk['guest_name'], ENT_QUOTES); ?>')"><i class="fas fa-calendar-plus"></i> Extend Stay</button>
+                                            <button class="btn btn-sm btn-success bookings-alert-modal__action-btn" onclick="closeOverdueCheckoutsModal(); openExtendStayModal(<?php echo $bk['id']; ?>, '<?php echo htmlspecialchars($bk['booking_reference'], ENT_QUOTES); ?>', '<?php echo $bk['check_out_date']; ?>', '<?php echo htmlspecialchars($bk['guest_name'], ENT_QUOTES); ?>')"><i class="fas fa-calendar-plus"></i> Add nights</button>
                                             <?php if ($_is_admin_user): ?>
                                                 <button class="btn btn-sm bookings-alert-modal__action-btn bookings-alert-modal__action-btn--admin-date" onclick="closeOverdueCheckoutsModal(); openAdminChangeDateModal(<?php echo $bk['id']; ?>, '<?php echo htmlspecialchars($bk['booking_reference'], ENT_QUOTES); ?>', '<?php echo $bk['check_out_date']; ?>', '<?php echo htmlspecialchars($bk['guest_name'], ENT_QUOTES); ?>')"><i class="fas fa-calendar-pen"></i> Change Date</button>
                                             <?php endif; ?>
@@ -6595,42 +6726,65 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
         </div>
     </div>
 
-    <!-- Extend Stay Modal -->
+    <!-- Add / take off nights (owner 2026-11-13): stepper -> review card -> confirm. Opened by openExtendStayModal(). -->
     <div id="extendStayModal" class="modal-overlay" aria-hidden="true">
-        <div class="modal-content" style="max-width: 500px;">
+        <div class="modal-content" style="max-width: 520px;">
             <div class="modal-header">
-                <h3><i class="fas fa-calendar-plus"></i> Extend Stay</h3>
+                <h3><i class="fas fa-calendar-plus"></i> <span id="sn_title">Add or take off nights</span></h3>
                 <button type="button" class="close-modal" onclick="closeExtendStayModal()" aria-label="Close">&times;</button>
             </div>
-            <form id="extendStayForm" method="POST" action="bookings.php">
+            <form id="extendStayForm" method="POST" action="bookings.php" novalidate>
                 <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
-                <input type="hidden" name="action" value="extend_stay">
-                <input type="hidden" name="booking_id" id="extend_booking_id" value="">
+                <input type="hidden" id="extend_booking_id" value="">
+                <input type="hidden" id="extend_booking_ref" value="">
+                <input type="hidden" id="extend_guest_name" value="">
+                <input type="hidden" id="extend_current_checkout" value="">
 
                 <div class="modal-body">
-                    <div class="form-group">
-                        <label>Booking Reference:</label>
-                        <input type="text" id="extend_booking_ref" class="form-control" readonly style="background: var(--au-bg, #f4f6fa);">
+                    <p id="sn_who" style="margin:0 0 10px;font-size:14px;"></p>
+
+                    <!-- Step 1: how many nights -->
+                    <div id="sn_step1">
+                        <div class="form-group">
+                            <label id="sn_stepper_label" style="font-weight:600;">Nights to add or take off</label>
+                            <small style="color: var(--au-muted, #6b7280); display:block; margin-bottom:8px;">Nights are added or taken off at the end of the stay, at the rate this booking was made at. No amount is typed here.</small>
+                            <div role="group" aria-labelledby="sn_stepper_label" style="display:flex;align-items:center;gap:12px;">
+                                <button type="button" id="sn_minus" class="btn btn-secondary" style="min-width:48px;min-height:44px;font-size:18px;" aria-label="One night fewer">&minus;</button>
+                                <output id="sn_delta_text" aria-live="polite" style="min-width:150px;text-align:center;font-size:16px;font-weight:700;">+1 night</output>
+                                <button type="button" id="sn_plus" class="btn btn-secondary" style="min-width:48px;min-height:44px;font-size:18px;" aria-label="One night more">+</button>
+                            </div>
+                        </div>
+                        <div id="sn_live" aria-live="polite" style="background:#f7f3ee;border-radius:6px;padding:10px 12px;margin-top:10px;font-size:13px;line-height:1.6;min-height:44px;"></div>
                     </div>
-                    <div class="form-group">
-                        <label>Guest Name:</label>
-                        <input type="text" id="extend_guest_name" class="form-control" readonly style="background: var(--au-bg, #f4f6fa);">
+
+                    <!-- Step 2: review, money back, reason -->
+                    <div id="sn_step2" hidden>
+                        <div id="sn_review" style="background:#f7f3ee;border-radius:6px;padding:10px 12px;font-size:13px;line-height:1.7;"></div>
+                        <div id="sn_moneyback" hidden style="border:1px solid #f0c36d;background:#fffaf0;border-radius:6px;padding:10px 12px;margin-top:12px;font-size:13px;">
+                            <strong id="sn_moneyback_title"></strong>
+                            <div style="margin-top:6px;">How does it go back?</div>
+                            <label style="display:flex;align-items:center;gap:8px;min-height:44px;cursor:pointer;"><input type="radio" name="sn_mode" value="refund" id="sn_mode_refund"> Refund to the original payment method(s), in full</label>
+                            <small id="sn_refund_noperm" style="display:none;color:#92400e;margin:-6px 0 4px 26px;">You do not have the Refund payments permission: choose a credit note, or ask someone who has it.</small>
+                            <label style="display:flex;align-items:center;gap:8px;min-height:44px;cursor:pointer;"><input type="radio" name="sn_mode" value="credit_note" id="sn_mode_credit"> Credit note (kept for the guest's next stay or bill)</label>
+                            <div class="form-group" style="margin-top:6px;">
+                                <label for="sn_typed" style="font-weight:600;">Type the amount going back to confirm</label>
+                                <input type="text" id="sn_typed" class="form-control" inputmode="decimal" autocomplete="off" style="min-height:44px;">
+                            </div>
+                        </div>
+                        <div class="form-group" style="margin-top:12px;">
+                            <label for="sn_reason" style="font-weight:600;">Reason (required)</label>
+                            <input type="text" id="sn_reason" class="form-control" maxlength="300" placeholder="e.g. guest staying one more night (company LPO)" style="min-height:44px;">
+                            <small style="color: var(--au-muted, #6b7280);">Saved in the booking History with every figure above.</small>
+                        </div>
                     </div>
-                    <div class="form-group">
-                        <label>Current Check-out Date:</label>
-                        <input type="text" id="extend_current_checkout" class="form-control" readonly style="background: var(--au-bg, #f4f6fa);">
-                    </div>
-                    <div class="form-group">
-                        <label for="new_checkout" style="font-weight: 600; color: var(--au-success, #10b981);">New Check-out Date:</label>
-                        <input type="date" id="new_checkout" name="new_checkout" class="form-control" required style="border-color: var(--au-success, #10b981);">
-                        <small style="color: var(--au-muted, #6b7280); margin-top: 4px; display: block;">The booking total will be recalculated based on the new dates.</small>
-                        <div id="extend_rate_preview" class="bk-rate-preview" hidden aria-live="polite" style="background:#f7f3ee;border-radius:6px;padding:10px 12px;margin-top:10px;font-size:13px;line-height:1.6;"></div>
-                    </div>
+                    <div id="sn_error" class="alert alert-danger" role="alert" style="display:none;margin-top:10px;"></div>
                 </div>
 
                 <div class="modal-footer">
-                    <button type="button" class="btn btn-secondary" onclick="closeExtendStayModal()">Cancel</button>
-                    <button type="submit" class="btn btn-success"><i class="fas fa-check"></i> Save Extension</button>
+                    <button type="button" class="btn btn-secondary" id="sn_cancel" onclick="closeExtendStayModal()">Cancel</button>
+                    <button type="button" class="btn btn-secondary" id="sn_back" style="display:none;">Back</button>
+                    <button type="button" class="btn btn-primary" id="sn_review_btn" disabled><i class="fas fa-magnifying-glass"></i> Review change</button>
+                    <button type="button" class="btn btn-success" id="sn_confirm_btn" style="display:none;"><i class="fas fa-check"></i> Confirm change</button>
                 </div>
             </form>
         </div>
@@ -8455,68 +8609,238 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
         window.bkStayRateDetails = bkStayRateDetails;
         window.bkRefreshStayRate = bkRefreshStayRate;
 
-        document.getElementById('new_checkout')?.addEventListener('change', function() {
-            bkRefreshStayRate('extend_rate_preview', document.getElementById('extend_booking_id')?.value, '', this.value);
-        });
         document.getElementById('acd_new_checkout')?.addEventListener('change', function() {
             bkRefreshStayRate('acd_rate_preview', document.getElementById('acd_booking_id')?.value, '', this.value);
         });
 
+        // ── Add / take off nights (owner 2026-11-13) ─────────────────────────
+        // Step 1: a -/+ stepper (no amount field); every change asks the server for the quote (stay_nights_quote, the
+        // same helper the save uses). Step 2: the review card (nights x booked rate, new total, new balance, money
+        // back), a required reason, and for money going back the refund / credit note choice with the amount retyped.
+        // Confirm posts the reviewed figures; the server re-quotes under the lock and refuses any difference.
+        const snState = { id: 0, ref: '', guest: '', checkout: '', delta: 1, quote: null, seq: 0, busy: false };
+
+        function snEl(id) { return document.getElementById(id); }
+        // Show / hide with inline display (page CSS gives .btn and .alert a display that beats the hidden attribute).
+        function snShow(el, on) { if (el) { el.hidden = !on; el.style.display = on ? '' : 'none'; } }
+        function snMoney(n) { return fmt(n); }
+        function snDeltaLabel(d) {
+            const n = Math.abs(d);
+            return (d > 0 ? '+' : '−') + n + (n === 1 ? ' night' : ' nights');
+        }
+        function snShowError(msg) {
+            const el = snEl('sn_error');
+            if (!el) return;
+            el.textContent = msg || '';
+            snShow(el, !!msg);
+        }
+        function snSetStep(step) {
+            snEl('sn_step1').hidden = step !== 1;
+            snEl('sn_step2').hidden = step !== 2;
+            snShow(snEl('sn_review_btn'), step === 1);
+            snShow(snEl('sn_back'), step === 2);
+            snShow(snEl('sn_confirm_btn'), step === 2);
+        }
+        function snLine(parent, label, value, strong) {
+            const row = document.createElement('div');
+            const b = document.createElement('strong');
+            b.textContent = label;
+            row.appendChild(b);
+            const v = document.createElement(strong ? 'strong' : 'span');
+            v.textContent = ' ' + String(value == null ? '' : value);
+            row.appendChild(v);
+            parent.appendChild(row);
+        }
+        function snRenderLive(q, err) {
+            const el = snEl('sn_live');
+            el.textContent = '';
+            snEl('sn_delta_text').textContent = snDeltaLabel(snState.delta);
+            if (err) {
+                const p = document.createElement('div');
+                p.style.color = '#b91c1c';
+                p.textContent = err;
+                el.appendChild(p);
+                snEl('sn_review_btn').disabled = true;
+                return;
+            }
+            if (!q) {
+                el.textContent = 'Working out the new total...';
+                snEl('sn_review_btn').disabled = true;
+                return;
+            }
+            snLine(el, 'New check-out:', q.new_check_out_fmt + ' (' + q.new_nights + (q.new_nights === 1 ? ' night' : ' nights') + ' in total)');
+            snLine(el, 'Room after the change:', q.new_text || snMoney(q.new_total));
+            snLine(el, 'Difference:', (q.total_delta >= 0 ? '+' : '−') + snMoney(Math.abs(q.total_delta)));
+            if (q.delta > 0 && q.available === false) {
+                const p = document.createElement('div');
+                p.style.color = '#b91c1c';
+                p.textContent = 'Not available: ' + (q.availability_error || 'the room is taken on the added night(s).');
+                el.appendChild(p);
+            }
+            snEl('sn_review_btn').disabled = (q.delta > 0 && q.available === false);
+        }
+        function snFetchQuote() {
+            const seq = ++snState.seq;
+            snState.quote = null;
+            snRenderLive(null, '');
+            const fd = new FormData();
+            fd.append('action', 'stay_nights_quote');
+            fd.append('booking_id', String(snState.id));
+            fd.append('delta', String(snState.delta));
+            return postBookingAction(fd, 'Could not work out the new total.', 20000)
+                .then(d => {
+                    if (seq !== snState.seq) return;
+                    snState.quote = d.quote || null;
+                    snRenderLive(snState.quote, snState.quote ? '' : 'Could not work out the new total.');
+                })
+                .catch(err => {
+                    if (seq !== snState.seq) return;
+                    snRenderLive(null, err.message || 'Could not work out the new total.');
+                });
+        }
+        let snTimer = null;
+        function snStep(by) {
+            let d = snState.delta + by;
+            if (d === 0) d += by; // there is no "0 nights" change
+            if (d > 60 || d < -60) return;
+            snState.delta = d;
+            snShowError('');
+            snEl('sn_delta_text').textContent = snDeltaLabel(d);
+            clearTimeout(snTimer);
+            snTimer = setTimeout(snFetchQuote, 250);
+        }
+        function snRenderReview(q) {
+            const el = snEl('sn_review');
+            el.textContent = '';
+            const n = Math.abs(q.delta);
+            const nTxt = n + (n === 1 ? ' night' : ' nights');
+            if (q.plan_note) {
+                // A discount the new stay no longer qualifies for is removed: every remaining night is repriced, so
+                // "N nights x rate" would be wrong. Show the signed change to the bill and why.
+                const d = parseFloat(q.total_delta || 0);
+                const change = d > 0.01 ? 'the bill goes up by ' + snMoney(d)
+                    : (d < -0.01 ? 'the bill goes down by ' + snMoney(Math.abs(d)) : 'the bill does not change');
+                snLine(el, q.delta > 0 ? 'Adding:' : 'Taking off:', nTxt + ': ' + change + ' because the discount no longer applies to the new stay.', true);
+            } else {
+                snLine(el, q.delta > 0 ? 'Adding:' : 'Taking off:', nTxt + ' at ' + snMoney(q.per_night) + ' a night (booked rate) = ' + snMoney(Math.abs(q.total_delta)), true);
+            }
+            snLine(el, 'Check-out:', q.old_check_out_fmt + ' → ' + q.new_check_out_fmt);
+            snLine(el, 'Nights:', q.old_nights + ' → ' + q.new_nights);
+            if (q.current_text) snLine(el, 'Room now:', q.current_text);
+            if (q.new_text) snLine(el, 'Room after:', q.new_text);
+            snLine(el, 'Room total:', snMoney(q.old_total) + ' → ' + snMoney(q.new_total), true);
+            if (q.folio > 0.01) snLine(el, 'Extras on the bill (unchanged):', snMoney(q.folio));
+            snLine(el, 'Paid so far:', snMoney(q.paid));
+            snLine(el, 'Balance owed:', snMoney(q.old_due) + ' → ' + snMoney(q.new_due), true);
+            if (q.plan_note) snLine(el, 'Discount:', q.plan_note);
+            if (q.pay_later) snLine(el, 'Pay-later booking:', 'the balance stays owed under the agreed arrangement; the guest is not chased.');
+            if (q.delta > 0) snLine(el, 'Room availability:', q.available === false ? 'NOT available' : 'checked - the room is free on the added night(s).');
+
+            const mb = snEl('sn_moneyback');
+            const back = parseFloat(q.money_back || 0);
+            mb.hidden = !(back > 0.01);
+            snEl('sn_typed').value = '';
+            snEl('sn_mode_refund').checked = false;
+            snEl('sn_mode_credit').checked = false;
+            if (back > 0.01) {
+                snEl('sn_moneyback_title').textContent = snMoney(back) + ' was paid for the nights taken off and goes back to the guest.';
+                snEl('sn_mode_refund').disabled = !q.can_refund;
+                snShow(snEl('sn_refund_noperm'), !q.can_refund);
+                snEl('sn_typed').placeholder = 'Type ' + back.toFixed(2);
+            }
+        }
+        function snGoReview() {
+            const q = snState.quote;
+            if (!q) return;
+            snShowError('');
+            snRenderReview(q);
+            snSetStep(2);
+            snEl('sn_reason').focus();
+        }
+        function snConfirm() {
+            const q = snState.quote;
+            if (!q || snState.busy) return;
+            const reason = String(snEl('sn_reason').value || '').trim();
+            if (reason.length < 3) {
+                snShowError('Say why the nights are changing (the reason is required).');
+                return;
+            }
+            const fd = new FormData();
+            fd.append('action', 'stay_nights_apply');
+            fd.append('booking_id', String(snState.id));
+            fd.append('delta', String(q.delta));
+            fd.append('expected_new_total', String(q.new_total));
+            fd.append('expected_total_delta', String(q.total_delta));
+            fd.append('reason', reason);
+            const back = parseFloat(q.money_back || 0);
+            if (back > 0.01) {
+                const mode = document.querySelector('#extendStayForm input[name="sn_mode"]:checked');
+                if (!mode) {
+                    snShowError('Choose how the ' + snMoney(back) + ' goes back: refund or credit note.');
+                    return;
+                }
+                const typed = parseFloat(String(snEl('sn_typed').value || '').replace(/[,\s]/g, ''));
+                if (!(Math.abs(typed - back) <= 0.01)) {
+                    snShowError('Type the amount going back exactly as shown (' + back.toFixed(2) + ') to confirm.');
+                    return;
+                }
+                fd.append('money_back_mode', mode.value);
+                fd.append('money_back_typed', String(typed));
+            }
+            snState.busy = true;
+            const btn = snEl('sn_confirm_btn');
+            setButtonLoading(btn, true);
+            postBookingAction(fd, 'The change was not saved.', 45000)
+                .then(data => {
+                    snState.busy = false;
+                    closeExtendStayModal();
+                    reloadWithBookingActionMessage(data, 'Stay updated.');
+                })
+                .catch(err => {
+                    snState.busy = false;
+                    try { setButtonLoading(btn, false); } catch (_) {}
+                    snShowError(err.message || 'The change was not saved.');
+                });
+        }
+
         function openExtendStayModal(bookingId, bookingRef, currentCheckout, guestName) {
             const modal = document.getElementById('extendStayModal');
-            setBookingPageModalOpen(modal, true);
-
+            if (!modal) return;
+            snState.id = parseInt(bookingId, 10) || 0;
+            snState.ref = String(bookingRef || '');
+            snState.guest = String(guestName || '');
+            snState.checkout = String(currentCheckout || '');
+            snState.quote = null;
+            snState.busy = false;
             document.getElementById('extend_booking_id').value = bookingId;
             document.getElementById('extend_booking_ref').value = bookingRef;
             document.getElementById('extend_guest_name').value = guestName;
             document.getElementById('extend_current_checkout').value = currentCheckout;
-
-            // Use UTC-safe arithmetic to avoid timezone off-by-one errors:
-            // new Date('YYYY-MM-DD') is parsed as UTC midnight, so local date methods
-            // (getDate/setDate) can shift the result in UTC-offset timezones.
-            const parts = currentCheckout.split('-');
-            const checkoutPlusOneUtc = new Date(Date.UTC(
-                parseInt(parts[0], 10),
-                parseInt(parts[1], 10) - 1,
-                parseInt(parts[2], 10) + 1
-            ));
-            const checkoutPlusOne = checkoutPlusOneUtc.toISOString().split('T')[0];
-
-            // For overdue bookings the checkout date is in the past, so the min must
-            // be at least today to prevent extending to a date that is still overdue.
-            // Use local date methods for "today" to avoid UTC midnight cross-over issues.
+            snEl('sn_who').textContent = snState.ref + (snState.guest ? ' · ' + snState.guest : '') + ' · booked check-out ' + snState.checkout;
+            // Default: one more night; an overdue stay (check-out already passed) defaults to leaving tomorrow.
             const now = new Date();
-            const todayLocal = now.getFullYear() + '-' +
-                String(now.getMonth() + 1).padStart(2, '0') + '-' +
-                String(now.getDate()).padStart(2, '0');
-
-            const minDateStr = checkoutPlusOne < todayLocal ? todayLocal : checkoutPlusOne;
-
-            // Default value: for an OVERDUE booking (checkout already passed) the
-            // minimum floor is today, but defaulting to *today* is not really an
-            // "extension" — a guest you're extending is staying at least one more
-            // night. So default to tomorrow when overdue, while still allowing the
-            // clerk to pick today via the picker. Non-overdue bookings default to
-            // the day after the current checkout (their first real extra night).
-            let defaultStr = minDateStr;
-            if (minDateStr === todayLocal) {
-                const tomorrowUtc = new Date(Date.UTC(
-                    now.getFullYear(), now.getMonth(), now.getDate() + 1
-                ));
-                defaultStr = tomorrowUtc.toISOString().split('T')[0];
-            }
-
-            const newCheckoutInput = document.getElementById('new_checkout');
-            newCheckoutInput.min = minDateStr;
-            newCheckoutInput.value = defaultStr;
-            bkRenderStayRate(document.getElementById('extend_rate_preview'), null);
-            bkRefreshStayRate('extend_rate_preview', bookingId, '', defaultStr);
+            const todayUtc = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
+            const p = snState.checkout.split('-');
+            const coUtc = Date.UTC(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+            const daysToTomorrow = Math.round((todayUtc - coUtc) / 86400000) + 1;
+            snState.delta = Math.max(1, isFinite(daysToTomorrow) ? daysToTomorrow : 1);
+            snEl('sn_reason').value = '';
+            snShowError('');
+            snSetStep(1);
+            setBookingPageModalOpen(modal, true);
+            snFetchQuote();
         }
 
         function closeExtendStayModal() {
             const modal = document.getElementById('extendStayModal');
             setBookingPageModalOpen(modal, false);
         }
+
+        snEl('sn_minus')?.addEventListener('click', function() { snStep(-1); });
+        snEl('sn_plus')?.addEventListener('click', function() { snStep(1); });
+        snEl('sn_review_btn')?.addEventListener('click', snGoReview);
+        snEl('sn_back')?.addEventListener('click', function() { snShowError(''); snSetStep(1); });
+        snEl('sn_confirm_btn')?.addEventListener('click', snConfirm);
 
         // ── Admin Change Checkout Date Modal ──────────────────────────────────
         function openAdminChangeDateModal(bookingId, bookingRef, currentCheckout, guestName) {
@@ -8590,62 +8914,9 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 });
         });
 
+        // The nights modal never submits as a form: Review / Confirm are buttons (Enter must not save money).
         document.getElementById('extendStayForm')?.addEventListener('submit', function(e) {
             e.preventDefault();
-            const formData = new FormData(this);
-            const bookingRef = document.getElementById('extend_booking_ref')?.value || '';
-            const oldCheckout = document.getElementById('extend_current_checkout')?.value || '';
-            const newCheckout = document.getElementById('new_checkout')?.value || '';
-            const submitBtn = this.querySelector('button[type="submit"]');
-            const form = this;
-
-            bkStayRateQuote(formData.get('booking_id'), '', newCheckout).then(rateQ => confirmAdminAction({
-                    title: 'Confirm stay extension',
-                    message: 'Extend stay for booking ' + (bookingRef || 'this booking') + '?',
-                    details: [
-                        'Current checkout: ' + (oldCheckout || '—'),
-                        'New checkout: ' + (newCheckout || '—')
-                    ].concat(bkStayRateDetails(rateQ)),
-                    confirmText: 'Extend Stay',
-                    icon: 'fa-calendar-plus',
-                    tone: 'success'
-                }))
-                .then(confirmed => {
-                    if (!confirmed) return;
-
-                    if (submitBtn) setButtonLoading(submitBtn, true);
-                    setModalActionLoading(form, true, 'Extending stay...');
-
-                    return postBookingAction(formData, 'Failed to extend stay.')
-                        .then(data => {
-                            setModalActionLoading(form, false);
-                            closeExtendStayModal();
-                            reloadWithBookingActionMessage(data, 'Stay extended successfully.');
-                        })
-                        .catch(error => {
-                            // Force-clear loading state — do this first before anything else
-                            // so the overlay never gets stuck even if Alert.show throws
-                            try { setModalActionLoading(form, false); } catch(_) {}
-                            try {
-                                const mc = form ? form.closest('.modal-content') : null;
-                                if (mc) {
-                                    mc.classList.remove('is-modal-busy');
-                                    const ldr = mc.querySelector('.modal-inline-loader');
-                                    if (ldr) ldr.setAttribute('hidden', 'hidden');
-                                }
-                            } catch(_) {}
-                            if (submitBtn) {
-                                try { setButtonLoading(submitBtn, false); } catch(_) {}
-                            }
-                            Alert.show(error.message || 'An error occurred while extending the stay.', 'error');
-                        });
-                })
-                .catch(() => {
-                    try { setModalActionLoading(form, false); } catch(_) {}
-                    if (submitBtn) {
-                        try { setButtonLoading(submitBtn, false); } catch(_) {}
-                    }
-                });
         });
 
         // ── Manual Consolidation Modal ────────────────────────────────────────

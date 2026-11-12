@@ -2818,6 +2818,9 @@ function rhBookingActionPermission(string $action, string $status = ''): ?string
         case 'checkin': case 'checked-in': case 'cancel_checkin': case 'cancel-checkin':
             return 'checkin_guest';
         case 'checkout': case 'checked-out': case 'checkout_assess': case 'checkout_settle':
+        // Owner 2026-11-13: adding / taking off nights on an in-house stay (and the date-based Extend stay) is front-desk
+        // departure work; a refund leg additionally needs refund_payment (checked in includes/stay-nights.php).
+        case 'extend_stay': case 'stay_nights_quote': case 'stay_nights_apply':
             return 'checkout_guest';
         case 'cancel': case 'cancelled': case 'noshow': case 'no-show':
             return 'cancel_booking';

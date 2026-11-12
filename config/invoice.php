@@ -1876,9 +1876,13 @@ function sendEmailWithAttachmentAndCC(string $to, ?string $toName, string $subje
  *
  * @param int $booking_id Booking ID
  * @param int|null $processed_by Admin user ID processing the checkout
+ * @param bool|null $emailGuest the checkout's "Email the final invoice to the guest" tick. A pay-later booking
+ *                  (bookings.checkin_without_payment, owner 2026-11-13: a company pays later, the guest must not be
+ *                  chased) is emailed ONLY when this is true; otherwise the invoice is generated, not sent, and the
+ *                  decision is logged (email_send_log 'not_sent'). Other bookings: null/true = sent as before.
  * @return array Result with success status, invoice details, and any warnings
  */
-function generateAndSendFinalInvoice(int $booking_id, ?int $processed_by = null): array
+function generateAndSendFinalInvoice(int $booking_id, ?int $processed_by = null, ?bool $emailGuest = null): array
 {
     global $pdo;
 
@@ -1941,6 +1945,49 @@ function generateAndSendFinalInvoice(int $booking_id, ?int $processed_by = null)
         // Send final invoice email
         $email_sent = false;
         $email_error = null;
+
+        // Pay-later booking (Check in before payment): the guest gets the invoice only when staff ticked the box.
+        $payLater = false;
+        if (function_exists('rh_checkin_arrangement_columns_present') && rh_checkin_arrangement_columns_present($pdo)) {
+            $plSt = $pdo->prepare("SELECT checkin_without_payment FROM bookings WHERE id = ?");
+            $plSt->execute([$booking_id]);
+            $payLater = (int)$plSt->fetchColumn() === 1;
+        }
+        if ($payLater && $emailGuest !== true) {
+            if (!function_exists('rh_email_send_log_not_sent') && is_file(__DIR__ . '/../includes/email-send-log.php')) {
+                require_once __DIR__ . '/../includes/email-send-log.php';
+            }
+            if (function_exists('rh_email_send_log_not_sent') && function_exists('rh_email_ctx_account')) {
+                rh_email_send_log_not_sent('invoice', (string)($booking['guest_email'] ?? ''), (string)($booking['guest_name'] ?? ''),
+                    rh_email_ctx_account('room', $booking_id, $booking['booking_reference'] ?? null),
+                    'Pay-later booking: staff did not tick "Email the final invoice to the guest"');
+            }
+            if (function_exists('rh_log_event')) {
+                rh_log_event('bookings', 'info', 'Final invoice not emailed (pay-later booking)', [
+                    'booking_id' => $booking_id, 'ref' => $booking['booking_reference'] ?? null, 'invoice' => $invoice_number, 'by' => $processed_by,
+                ]);
+            }
+            if (!function_exists('logBookingEvent') && is_file(__DIR__ . '/../includes/booking-timeline.php')) {
+                require_once __DIR__ . '/../includes/booking-timeline.php';
+            }
+            if (function_exists('logBookingEvent')) {
+                logBookingEvent($booking_id, (string)($booking['booking_reference'] ?? ''), 'Final invoice not emailed', 'update',
+                    'Final invoice ' . $invoice_number . ' generated and NOT emailed to the guest: pay-later booking (Check in before payment) and the "Email the final invoice to the guest" box was not ticked.',
+                    null, null, 'admin', $processed_by, null, ['invoice_number' => $invoice_number, 'email_guest' => false]);
+            }
+            return [
+                'success' => true,
+                'message' => 'Final invoice generated (not emailed: pay-later booking)',
+                'balance_due' => $balanceDueAtCheckout,
+                'invoice_file' => $invoice_file,
+                'invoice_number' => $invoice_number,
+                'invoice_path' => $invoice_path,
+                'email_sent' => false,
+                'email_skipped' => true,
+                'email_error' => null,
+                'idempotent' => false
+            ];
+        }
 
         try {
             // Get invoice recipients
