@@ -6,6 +6,7 @@
  */
 
 require_once 'admin-init.php';
+require_once __DIR__ . '/includes/log-pager.php'; // rh_lp_page_size / rh_lp_size_picker: visitor log rows per page (?size=)
 
 $user = $user ?? ['id' => 0];
 $csrf_token = $csrf_token ?? generateCsrfToken();
@@ -149,7 +150,7 @@ $visitors = [];
 $hourly_data = array_fill(0, 24, 0);
 $total_visitor_rows = 0;
 $page_num = max(1, (int)($_GET['page'] ?? 1));
-$per_page = 10;
+$per_page = rh_lp_page_size($_GET['size'] ?? null); // 10 / 25 / 50 / 100, default 10
 $total_pages = 1;
 
 // Sales & Marketing insight defaults
@@ -754,6 +755,7 @@ try {
 
                 <!-- Filters -->
                 <form class="filter-bar" method="GET">
+                    <?php if ($per_page !== 10): ?><input type="hidden" name="size" value="<?php echo (int)$per_page; ?>"><?php endif; ?>
                     <label class="va-filter-label"><i class="fas fa-filter"></i> Period:</label>
                     <select name="range" onchange="toggleCustomDates(this.value)">
                         <option value="7days" <?php echo $filter_range === '7days' ? 'selected' : ''; ?>>Last 7 Days</option>
@@ -1513,9 +1515,10 @@ try {
                         </table>
                     </div>
 
-                    <!-- Pagination -->
-                    <?php if ($total_pages > 1): ?>
+                    <!-- Pagination: shown whenever there are more than 10 rows, so the rows-per-page choice is always there -->
+                    <?php if ($total_pages > 1 || $total_visitor_rows > 10): ?>
                         <div class="pagination">
+                            <?php if ($total_pages > 1): ?>
                             <?php if ($page_num > 1): ?>
                                 <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page_num - 1])); ?>">&laquo; Prev</a>
                             <?php endif; ?>
@@ -1523,6 +1526,8 @@ try {
                             <?php if ($page_num < $total_pages): ?>
                                 <a href="?<?php echo http_build_query(array_merge($_GET, ['page' => $page_num + 1])); ?>">Next &raquo;</a>
                             <?php endif; ?>
+                            <?php endif; /* page links */ ?>
+                            <?php echo rh_lp_size_picker('visitor-analytics.php', rh_lp_keep($_GET, ''), $per_page); ?>
                         </div>
                     <?php endif; ?>
                 </div>

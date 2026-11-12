@@ -170,5 +170,22 @@ check(strpos($src, "<?php if (\$scP['total'] > 0 || \$shiftCloses):") !== false,
 check(preg_match('/action="system-logs\.php#log-events">\s*<\?php[^?]*foreach \(\$_GET as \$lpKeepKey/', $src) === 1
     && strpos($src, "(?:(?:ba|em|lg|aa|pos|kds|sm|sc|api|off)_(?:page|size)|ev_size)") !== false, 'system logs: the event filters keep ev_size and the other lists\' pages');
 
+/* ── plain ?size= for pages with their own pager (Receipts, Reviews, Visitor log, Gym visit log, Stock reports) ── */
+foreach (['10', '25', '50', '100', 25] as $s) {
+    check(rh_lp_page_size($s) === (int)$s, 'page size ' . $s . ' allowed');
+}
+foreach ([null, '', '0', '5', '30', '1000', '25x', ' 25', 'all', ['25'], 25.0] as $bad) {
+    check(rh_lp_page_size($bad) === 10, 'bad page size ' . json_encode($bad) . ' -> 10');
+}
+check(rh_lp_page_size('abc', 50) === 50 && rh_lp_page_size('abc', 7) === 10, 'page size default: a listed default is used, an unlisted one falls back to 10');
+$pk = rh_lp_size_picker('receipts.php', ['type' => 'room', 'search' => '"x"<y>', 'page' => '3', 'size' => '50', 'export' => 'csv', 'csrf_token' => 't', 'action' => 'a', 'arr' => ['1'], 'Bad-Key' => '1', 'empty' => ''], 25);
+check(strpos($pk, '<form method="get" action="receipts.php" class="pg-size-form">') === 0, 'size picker: a GET form to the page');
+check(strpos($pk, 'name="type" value="room"') !== false && strpos($pk, 'value="&quot;x&quot;&lt;y&gt;"') !== false, 'size picker: filters kept, escaped');
+check(strpos($pk, 'name="page"') === false && strpos($pk, 'type="hidden" name="size"') === false && strpos($pk, 'export') === false
+    && strpos($pk, 'csrf_token') === false && strpos($pk, 'name="action"') === false && strpos($pk, 'name="arr"') === false
+    && strpos($pk, 'Bad-Key') === false && strpos($pk, 'name="empty"') === false, 'size picker: no page, size, export, token, action, array, bad key or empty value carried');
+check(strpos($pk, '<label class="pg-size">Show <select name="size" aria-label="Rows per page">') !== false
+    && strpos($pk, '<option value="25" selected>25</option>') !== false && substr_count($pk, '<option ') === 4, 'size picker: label.pg-size with 10 / 25 / 50 / 100, current one selected');
+
 echo "\n$pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

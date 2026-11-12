@@ -20,6 +20,7 @@ require_once __DIR__ . '/includes/gym-billing-lib.php';
 require_once __DIR__ . '/includes/gym-classes-lib.php';
 require_once __DIR__ . '/includes/gym-schedule-lib.php';
 require_once __DIR__ . '/../includes/form-validation.php';
+require_once __DIR__ . '/includes/log-pager.php'; // rh_lp_page_size: visit log rows per page
 
 /** @var PDO $pdo */
 /** @var array $user */
@@ -428,8 +429,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
                 echo json_encode(['success' => true, 'visits' => [], 'pending_migration' => true]);
                 exit;
             }
-            // Paginated visit log — 10 rows per page.
-            $perPage = 10;
+            // Paginated visit log: 10 rows per page unless the log's rows picker asked for 25 / 50 / 100.
+            $perPage = rh_lp_page_size($_POST['size'] ?? null);
             $vpage = max(1, (int)($_POST['page'] ?? 1));
             $vTotal = (int)$pdo->query("SELECT COUNT(*) FROM gym_attendance WHERE member_id = " . (int)$memberId)->fetchColumn();
             $vPages = max(1, (int)ceil($vTotal / $perPage));
@@ -463,6 +464,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
                     'page'        => $vpage,
                     'total_pages' => $vPages,
                     'total'       => $vTotal,
+                    'size'        => $perPage,
                 ]);
                 exit;
             }
@@ -1415,7 +1417,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
         function gmFmtDT(dt) { if (!dt) return ''; var d = new Date(String(dt).replace(' ', 'T')); return isNaN(d) ? String(dt) : d.toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }); }
         function gmFmtDur(mins) { if (mins == null) return '<span style="color:#2e7d32;font-weight:700;">in gym</span>'; mins = parseInt(mins, 10); return mins >= 60 ? Math.floor(mins / 60) + 'h ' + (mins % 60) + 'm' : mins + 'm'; }
 
-        var gmLogState = { id: 0, name: '', page: 1, totalPages: 1, sort: '', dir: 'desc' };
+        var gmLogState = { id: 0, name: '', page: 1, totalPages: 1, sort: '', dir: 'desc', size: 10, total: 0 };
 
         function gmVisitsRows(visits) {
             if (!visits.length) { return '<tr><td colspan="4" style="text-align:center;color:#9a8f82;padding:14px;">No visits on this page.</td></tr>'; }
@@ -1425,16 +1427,27 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
         }
 
         function gmVisitsPager() {
-            if (gmLogState.totalPages <= 1) { return ''; }
+            // Shown whenever the log has more than 10 visits, so the rows-per-page choice is always there.
+            if (gmLogState.totalPages <= 1 && gmLogState.total <= 10) { return ''; }
             var p = gmLogState.page, tp = gmLogState.totalPages;
+            var size = '<label class="pg-size">Show <select aria-label="Rows per page" onchange="gmVisitsSize(this.value)">' +
+                [10, 25, 50, 100].map(function (n) { return '<option value="' + n + '"' + (n === gmLogState.size ? ' selected' : '') + '>' + n + '</option>'; }).join('') +
+                '</select> per page</label>';
             var btn = function (label, target, disabled) {
                 return '<button type="button" onclick="gmVisitsPage(' + target + ')" ' + (disabled ? 'disabled' : '') +
                     ' style="border:1px solid #d5cfc4;background:' + (disabled ? '#f3efe8' : '#fff') + ';color:#5a5147;border-radius:3px;padding:4px 10px;font-size:.78rem;cursor:' + (disabled ? 'default' : 'pointer') + ';">' + label + '</button>';
             };
-            return '<div style="display:flex;align-items:center;justify-content:center;gap:10px;margin-top:10px;">' +
-                btn('&laquo; Prev', p - 1, p <= 1) +
+            return '<div class="pagination" style="display:flex;align-items:center;justify-content:center;gap:10px;margin-top:10px;">' +
+                (tp > 1 ? btn('&laquo; Prev', p - 1, p <= 1) +
                 '<span style="font-size:.76rem;color:#7a6f63;">Page ' + p + ' of ' + tp + '</span>' +
-                btn('Next &raquo;', p + 1, p >= tp) + '</div>';
+                btn('Next &raquo;', p + 1, p >= tp) : '') + size + '</div>';
+        }
+
+        // Rows-per-page choice: page 1 of the log at the new size (same sort).
+        function gmVisitsSize(v) {
+            var n = parseInt(v, 10);
+            gmLogState.size = [10, 25, 50, 100].indexOf(n) >= 0 ? n : 10;
+            gmVisitsPage(1);
         }
 
         // Visit-log header: sort the whole log on the server, then show page 1 of the result.
@@ -1463,6 +1476,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
             fd.append('gm_action', 'member_attendance');
             fd.append('id', gmLogState.id);
             fd.append('page', page);
+            fd.append('size', gmLogState.size);
             if (gmLogState.sort) { fd.append('sort', gmLogState.sort); fd.append('dir', gmLogState.dir); }
             fd.append('visits_only', 1);
             fetch(window.location.pathname, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
@@ -1470,6 +1484,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                 .then(function (d) {
                     gmLogState.page = d.page || page;
                     gmLogState.totalPages = d.total_pages || gmLogState.totalPages;
+                    gmLogState.total = parseInt(d.total || 0, 10) || 0;
                     document.getElementById('gmVisitsBody').innerHTML = gmVisitsRows((d && d.visits) || []);
                     document.getElementById('gmVisitsPager').innerHTML = gmVisitsPager();
                     if (wrap) { wrap.style.opacity = '1'; }
@@ -1478,7 +1493,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
         }
 
         function gmShowLog(id, name) {
-            gmLogState = { id: id, name: name, page: 1, totalPages: 1, sort: '', dir: 'desc' };
+            gmLogState = { id: id, name: name, page: 1, totalPages: 1, sort: '', dir: 'desc', size: 10, total: 0 };
             document.getElementById('gmLogTitle').textContent = 'Fitness Report — ' + name;
             document.getElementById('gmLogBody').innerHTML = '<p style="color:#9a8f82;">Loading…</p>';
             gmOpen('gmLogModal');
@@ -1493,6 +1508,7 @@ $gm_currency = (string)getSetting('currency_symbol', 'MWK');
                     var visits = (d && d.visits) || [];
                     gmLogState.page = d.page || 1;
                     gmLogState.totalPages = d.total_pages || 1;
+                    gmLogState.total = parseInt(d.total || 0, 10) || 0;
                     if (!parseInt((d.stats || {}).total_visits || 0, 10)) {
                         body.innerHTML = '<p style="color:#9a8f82;margin:0;">No visits recorded yet.</p>';
                         return;

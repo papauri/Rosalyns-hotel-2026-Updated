@@ -279,6 +279,48 @@ if (!function_exists('rh_lp_parse')) {
         return $o;
     }
 
+    /**
+     * Rows per page from a plain ?size= on a page that draws its own pager (Receipts, Reviews, Visitor log, Gym
+     * members, Stock reports; owner 2026-11-12 "every list pages at 10 with a choice to show more"): 10 / 25 / 50 /
+     * 100. Anything else (missing, junk, an array, a huge number) = $default (10 unless the page says otherwise).
+     */
+    function rh_lp_page_size($raw, int $default = 10): int
+    {
+        if ((is_string($raw) || is_int($raw)) && preg_match('/^\d{1,3}$/', (string)$raw) && in_array((int)$raw, rh_lp_sizes(), true)) {
+            return (int)$raw;
+        }
+        return in_array($default, rh_lp_sizes(), true) ? $default : 10;
+    }
+
+    /**
+     * The rows picker on its own, for a page that draws its own pager: a GET form (the site's instant filters submit
+     * it on change; a Show button without JavaScript) carrying $keep, the page's other filters, so a change starts
+     * again at page 1 with every filter kept. Plain string values with safe keys only; the page number, the size
+     * itself, an export, a CSRF token or an action are never carried. Goes inside the pager nav. Escaped here.
+     */
+    function rh_lp_size_picker(string $action, array $keep, int $size, string $param = 'size'): string
+    {
+        $h = static function ($s): string {
+            return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8');
+        };
+        $o = '<form method="get" action="' . $h($action) . '" class="pg-size-form">';
+        foreach ($keep as $k => $v) {
+            if (!is_string($k) || !preg_match('/^[a-z][a-z0-9_]{0,30}$/', $k) || !(is_string($v) || is_int($v)) || (string)$v === '') {
+                continue;
+            }
+            if ($k === $param || $k === 'page' || in_array($k, ['export', 'r', 'action', 'csrf_token'], true)) {
+                continue;
+            }
+            $o .= '<input type="hidden" name="' . $h($k) . '" value="' . $h($v) . '">';
+        }
+        $o .= '<label class="pg-size">Show <select name="' . $h($param) . '" aria-label="Rows per page">';
+        foreach (rh_lp_sizes() as $n) {
+            $o .= '<option value="' . $n . '"' . ($n === $size ? ' selected' : '') . '>' . $n . '</option>';
+        }
+        $o .= '</select> per page</label><noscript><button type="submit" class="pg-btn">Show</button></noscript></form>';
+        return $o;
+    }
+
     /** The note under a capped count. */
     function rh_lp_cap_note(array $p): string
     {

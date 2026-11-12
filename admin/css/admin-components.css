@@ -2292,10 +2292,19 @@ body:not(:has(> .admin-header)) .admin-page-loader {
     display: none;
 }
 
-/* Rows-per-page choice next to every auto pager (admin-section-pagination.js; data-no-page-size-picker opts out)
-   and the server-paged Bookings list (bookings.php) */
+/* Rows-per-page choice next to every auto pager (admin-section-pagination.js; data-no-page-size-picker opts out),
+   the server-paged Bookings list (bookings.php) and the pages that draw their own pager (rh_lp_size_picker in
+   admin/includes/log-pager.php: Receipts, Reviews, Visitor log, Gym members, Stock reports) */
+.pg-size-form {
+    display: inline-flex;
+    align-items: center;
+    margin: 0;
+}
+
 .admin-auto-pagination .pg-size,
-.bookings-pagination .pg-size {
+.bookings-pagination .pg-size,
+.pagination .pg-size,
+.pagination-bar .pg-size {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -2306,7 +2315,9 @@ body:not(:has(> .admin-header)) .admin-page-loader {
 }
 
 .admin-auto-pagination .pg-size select,
-.bookings-pagination .pg-size select {
+.bookings-pagination .pg-size select,
+.pagination .pg-size select,
+.pagination-bar .pg-size select {
     min-height: 32px;
     padding: 4px 8px;
     border: 1px solid #d9dee6;
@@ -2317,7 +2328,9 @@ body:not(:has(> .admin-header)) .admin-page-loader {
 
 @media (pointer: coarse) {
     .admin-auto-pagination .pg-size select,
-    .bookings-pagination .pg-size select { min-height: 44px; }
+    .bookings-pagination .pg-size select,
+    .pagination .pg-size select,
+    .pagination-bar .pg-size select { min-height: 44px; }
 }
 
 /* Optional tick box in the confirm dialog (data-admin-confirm-check), e.g. "Email the guest" on a cancel */

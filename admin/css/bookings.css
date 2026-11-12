@@ -835,6 +835,19 @@ body .modal-overlay.active {
     transform: translate(-50%, 0);
 }
 
+/* In the last (Actions) column a centred tooltip, even while invisible, reached past the table's right edge and
+   gave the list a sideways scrollbar at laptop widths: there it opens leftwards from the button's right edge. */
+.bookings-table td.actions-cell .actions-row .quick-action[data-help]::after {
+    left: auto;
+    right: 0;
+    transform: translate(0, 4px);
+}
+
+.bookings-table td.actions-cell .actions-row .quick-action[data-help]:hover::after,
+.bookings-table td.actions-cell .actions-row .quick-action[data-help]:focus-visible::after {
+    transform: translate(0, 0);
+}
+
 /* Hide action tooltips when help mode is active to avoid duplicate help indicators */
 body.rh-help-on .actions-row .quick-action[data-help]::after {
     content: none;
@@ -2317,8 +2330,9 @@ hr.menu-divider {
    are untouched: the phone-only spans below stay hidden there. */
 table.bookings-table .bk-ph-stay,
 table.bookings-table .bk-ph-pay,
-table.bookings-table .bk-ph-left {
-    display: none;
+table.bookings-table .bk-ph-left,
+table.bookings-table td small.bk-status-note {
+    display: none; /* bk-status-note: the Status cell's deleted-by / expiry lines, shown under the pill only when the Status column drops out (laptop rule below) */
 }
 
 /* Part-paid booking: "MWK 12,500.00 left to pay" under the payment badge (Payment column; phone row line 3). */
@@ -2333,6 +2347,161 @@ table.bookings-table .bk-ph-left {
 @media (max-width: 900px) {
     table.bookings-table:not(.mobile-enhanced) .bk-ph-left {
         display: block;
+    }
+}
+
+/* ---- All Bookings on laptops and desktops: one row structure, no sideways scroll (owner 2026-11-12,
+   "row uniformity, not overlapping"; UI_DECISION) ----
+   Above 1024px every cell is top-aligned with 8px padding, and money, room chips and names stay on one line.
+   Lower-value columns drop out as the Room Bookings box narrows. The box is measured (bookings-section
+   container), not the window, so the sidebar's width counts. Each dropped column's value shows in a
+   neighbouring cell through its twin span: Nights, Guests and Created go first (booking summary has them), then
+   Ref (under the guest name) and Check Out (In / Out lines in Check In), then Status (pill under the total).
+   Payment always stays. Tablet (1024px and under) and phone rules are untouched. */
+@media (min-width: 1025px) {
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > :is(thead, tbody) > tr > :is(th, td) {
+        padding: 8px !important; /* beats admin-uniform's !important 10px 12px */
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > td {
+        vertical-align: top !important;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) .bk-total-main,
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) .room-chip,
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) td[data-label="Payment"] .bk-left-to-pay__amt {
+        white-space: nowrap;
+    }
+
+    /* Guest cell: name, phone and email on one line each, cut with an ellipsis (full name / email on hover).
+       The room guest line wraps instead. */
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) td[data-label="Guest"] > :is(.rh-guest-name, small:not(.room-guest-line)) {
+        max-width: 12rem;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) td[data-label="Guest"] > .rh-guest-name {
+        display: inline-block;
+        vertical-align: top;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) td[data-label="Guest"] > small.guest-email,
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) td[data-label="Guest"] > small:not(.guest-email) {
+        display: block;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) td[data-label="Guest"] small > br {
+        display: none; /* the email line's own leading break left a blank line in every row */
+    }
+
+    /* Room and Guest cells: one line per item (a break after a block line, e.g. the rate plan or the room guest,
+       was a blank line). */
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) td[data-label="Room"] > small + br,
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) td[data-label="Guest"] > small + br {
+        display: none;
+    }
+
+    /* Payment cell: badge, then the amount still to pay (the amount never breaks; "left to pay" may go under it). */
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) td[data-label="Payment"] .bk-left-to-pay {
+        display: inline-block;
+        margin-top: 4px;
+        white-space: normal;
+        line-height: 1.3;
+    }
+
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) .rh-phone-sub.bk-ref-twin,
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) .rh-phone-sub.bk-flag-twin,
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) td[data-label="Check In"] > .rh-phone-sub,
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) .rh-phone-sub.bk-status-twin {
+        display: none;
+    }
+
+    @container bookings-section (max-width: 1599px) {
+        :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > :is(thead, tbody) > tr > :is(.bk-col-nights, .bk-col-guests, .bk-col-created) {
+            display: none;
+        }
+    }
+
+    @container bookings-section (max-width: 1339px) {
+        :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > :is(thead, tbody) > tr > :is(.bk-col-ref, .bk-col-out) {
+            display: none;
+        }
+
+        :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) .rh-phone-sub.bk-ref-twin {
+            display: block;
+            margin-top: 2px;
+            color: #6b6258;
+            font-size: 11px;
+            white-space: nowrap;
+        }
+
+        :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) td[data-label="Guest"] > :is(.bk-ref-twin, .bk-flag-twin) + br {
+            display: none;
+        }
+
+        /* The Ref cell's flag (tentative, missed check-in, late / overdue checkout), same words and colours. */
+        :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) .rh-phone-sub.bk-flag-twin {
+            display: block;
+            margin-top: 2px;
+            font-size: 11px;
+            font-weight: 600;
+            white-space: nowrap;
+        }
+
+        :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) .bk-flag-twin--tentative {
+            color: var(--gold, #8b7355);
+        }
+
+        :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) .bk-flag-twin--danger {
+            color: #dc3545;
+        }
+
+        :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) .bk-flag-twin--warn {
+            color: #856404;
+        }
+
+        :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) td[data-label="Check In"] > .rh-ph-hide {
+            display: none;
+        }
+
+        :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) td[data-label="Check In"] > .rh-phone-sub {
+            display: block;
+            white-space: nowrap;
+        }
+    }
+
+    @container bookings-section (max-width: 1099px) {
+        :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > :is(thead, tbody) > tr > .bk-col-status {
+            display: none;
+        }
+
+        :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) .rh-phone-sub.bk-status-twin {
+            display: block;
+            margin-top: 4px;
+        }
+
+        :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) td[data-label="Guest"] > :is(.rh-guest-name, small:not(.room-guest-line)) {
+            max-width: 10rem;
+        }
+
+        /* Deleted by / when / reason, or the tentative expiry, under the status pill. */
+        :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) td[data-label="Total"] > small.bk-status-note {
+            display: block;
+            max-width: 12rem;
+            margin-top: 4px;
+            color: #555;
+            font-size: 11px;
+            line-height: 1.4;
+            white-space: normal;
+        }
+
+        /* Narrowest laptop box (1280px with the side menu open): 6px side padding so the row fits without a sideways scroll. */
+        :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > :is(thead, tbody) > tr > :is(th, td) {
+            padding-left: 6px !important;
+            padding-right: 6px !important;
+        }
     }
 }
 

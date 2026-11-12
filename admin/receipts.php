@@ -7,6 +7,7 @@ require_once 'admin-init.php';
 require_once '../config/receipts.php';
 require_once 'includes/finance-schema.php';
 require_once 'includes/finance-filters.php';
+require_once 'includes/log-pager.php'; // rh_lp_page_size / rh_lp_size_picker: rows per page (?size=)
 
 if (!hasPermission((int)($user['id'] ?? 0), 'receipts')) {
     rhDenyAndRedirectHome((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF']));
@@ -188,7 +189,7 @@ if ($scopeActive && $hiddenBookingTypes !== []) {
 }
 
 $page = max(1, rh_fin_get_int($_GET, 'page', 1));
-$limit = 10;
+$limit = rh_lp_page_size($_GET['size'] ?? null); // 10 / 25 / 50 / 100, default 10
 $countStmt = $pdo->prepare("SELECT COUNT(*) FROM payments p $whereSql");
 $countStmt->execute($params);
 $totalRows = (int)$countStmt->fetchColumn();
@@ -205,8 +206,16 @@ $listStmt = $pdo->prepare("SELECT p.*, COALESCE(au.full_name, au.username, p.pro
     FROM payments p
     LEFT JOIN admin_users au ON au.id = p.recorded_by
     $whereSql
-    ORDER BY p.payment_date DESC, p.id DESC");
-$listStmt->execute($params);
+    ORDER BY p.payment_date DESC, p.id DESC
+    LIMIT ? OFFSET ?");
+// This page's rows only (it fetched every receipt before): the filter values, then LIMIT / OFFSET bound as integers.
+$listArgs = array_values($params);
+foreach ($listArgs as $i => $v) {
+    $listStmt->bindValue($i + 1, $v);
+}
+$listStmt->bindValue(count($listArgs) + 1, (int)$limit, PDO::PARAM_INT);
+$listStmt->bindValue(count($listArgs) + 2, (int)(($page - 1) * $limit), PDO::PARAM_INT);
+$listStmt->execute();
 $payments = $listStmt->fetchAll(PDO::FETCH_ASSOC);
 
 $eventsStmt = $pdo->query("SELECT re.*, p.payment_reference FROM receipt_events re LEFT JOIN payments p ON p.id = re.payment_id ORDER BY re.created_at DESC, re.id DESC LIMIT 20");
@@ -292,6 +301,7 @@ $site_name = getSetting('site_name', 'Hotel');
         <section class="rh-panel">
             <div class="rh-panel__body">
             <form method="get" action="receipts.php" class="filter-bar">
+                <?php if ($limit !== 10): ?><input type="hidden" name="size" value="<?php echo (int)$limit; ?>"><?php endif; ?>
                 <input type="text" name="search" class="filter-input" placeholder="Receipt #, payment ref, booking ref..." value="<?php echo htmlspecialchars($filters['search']); ?>">
                 <select name="type" class="filter-select">
                     <option value="all">All Types</option>
@@ -344,7 +354,7 @@ $site_name = getSetting('site_name', 'Hotel');
             <span class="rh-page-head__meta"><?php echo number_format($totalRows); ?> match<?php echo $totalRows === 1 ? '' : 'es'; ?></span>
         </div>
         <div class="rh-panel__body">
-        <div class="table-container" data-rh-results data-admin-pagination-scope data-receipts-pagination-scope data-page-size="<?php echo (int)$limit; ?>" data-current-page="<?php echo (int)$page; ?>" data-total-pages="<?php echo (int)$totalPages; ?>">
+        <div class="table-container" data-rh-results data-admin-pagination-scope data-receipts-pagination-scope data-disable-auto-pagination data-page-size="<?php echo (int)$limit; ?>" data-current-page="<?php echo (int)$page; ?>" data-total-pages="<?php echo (int)$totalPages; ?>">
             <?php if (!$payments): ?>
                 <div class="empty-state">
                     <i class="fas fa-receipt"></i>
@@ -427,23 +437,28 @@ $site_name = getSetting('site_name', 'Hotel');
                     </tbody>
                 </table>
 
-                <!-- Pagination -->
-                <?php if ($totalPages > 1): ?>
+                <!-- Pagination: shown whenever there are more than 10 receipts, so the rows-per-page choice is always there -->
+                <?php if ($totalPages > 1 || $totalRows > 10): ?>
                     <div class="pagination-bar">
                         <?php
-                        $q = http_build_query(array_filter([
+                        $rcptKeep = array_filter([
                             'type'      => $filters['type'] !== 'all' ? $filters['type'] : '',
                             'status'    => $filters['status'] !== 'all' ? $filters['status'] : '',
                             'date_from' => $filters['date_from'],
                             'date_to'   => $filters['date_to'],
                             'search'    => $filters['search'],
-                        ]));
+                            'scope'     => $scopeAll ? 'all' : '',
+                        ], static fn($v) => $v !== '' && $v !== null);
+                        $q = http_build_query($rcptKeep + ($limit !== 10 ? ['size' => (string)$limit] : []));
+                        if ($totalPages > 1):
                         for ($p = $windowStart; $p <= $windowEnd; $p++): ?>
-                            <a href="receipts.php?page=<?php echo $p; ?>&<?php echo $q; ?>"
+                            <a href="receipts.php?page=<?php echo $p; ?>&<?php echo htmlspecialchars($q, ENT_QUOTES); ?>"
                                 class="pagination-item<?php echo $p === $page ? ' pagination-item--active' : ''; ?>">
                                 <?php echo $p; ?>
                             </a>
-                        <?php endfor; ?>
+                        <?php endfor;
+                        endif; ?>
+                        <?php echo rh_lp_size_picker('receipts.php', $rcptKeep, $limit); ?>
                     </div>
                 <?php endif; ?>
 

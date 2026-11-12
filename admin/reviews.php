@@ -2,6 +2,7 @@
 // Include admin initialization (PHP-only, no HTML output)
 require_once 'admin-init.php';
 require_once __DIR__ . '/../includes/reviews-display.php'; // rh_public_review_text(), rh_review_source_meta()
+require_once __DIR__ . '/includes/log-pager.php'; // rh_lp_page_size / rh_lp_size_picker: rows per page (?size=)
 /** @var array $user */
 /** @var string $csrf_token */
 
@@ -111,7 +112,7 @@ if ($status_filter !== 'all') {
     $list_params[] = $status_filter;
 }
 
-$per_page      = 10;
+$per_page      = rh_lp_page_size($_GET['size'] ?? null); // 10 / 25 / 50 / 100, default 10
 $total_reviews = $status_counts[$status_filter];
 $total_pages   = max(1, (int)ceil($total_reviews / $per_page));
 $page          = min(max(1, (int)($_GET['page'] ?? 1)), $total_pages);
@@ -155,7 +156,7 @@ $low_rated      = (int)($stats['low_rated'] ?? 0);
 $filters_active = $search_query !== '' || $rating_filter !== '' || $reply_filter !== '' || $type_filter !== '' || $source_filter !== '' || $sort !== 'newest';
 
 /** Build a reviews.php URL that keeps the current filters, overriding some. */
-$filter_url = static function (array $overrides = []) use ($status_filter, $rating_filter, $reply_filter, $type_filter, $source_filter, $sort, $search_query): string {
+$filter_url = static function (array $overrides = []) use ($status_filter, $rating_filter, $reply_filter, $type_filter, $source_filter, $sort, $search_query, $per_page): string {
     $q = array_merge([
         'status' => $status_filter,
         'rating' => $rating_filter,
@@ -164,8 +165,9 @@ $filter_url = static function (array $overrides = []) use ($status_filter, $rati
         'source' => $source_filter,
         'sort'   => $sort,
         'search' => $search_query,
+        'size'   => (string)$per_page,
     ], $overrides);
-    $q = array_filter($q, static fn($v, $k) => $v !== '' && $v !== null && !($k === 'status' && $v === 'all') && !($k === 'sort' && $v === 'newest') && !($k === 'page' && (int)$v <= 1), ARRAY_FILTER_USE_BOTH);
+    $q = array_filter($q, static fn($v, $k) => $v !== '' && $v !== null && !($k === 'status' && $v === 'all') && !($k === 'sort' && $v === 'newest') && !($k === 'page' && (int)$v <= 1) && !($k === 'size' && (int)$v === 10), ARRAY_FILTER_USE_BOTH);
     return 'reviews.php' . ($q ? '?' . http_build_query($q) : '');
 };
 
@@ -311,6 +313,7 @@ $brave_source_on  = strpos((string)getSetting('reviews_brave_search_key', ''), '
 
             <form class="filters-bar" method="get" action="reviews.php" id="reviews-filter-form">
                 <input type="hidden" name="status" value="<?php echo htmlspecialchars($status_filter); ?>">
+                <?php if ($per_page !== 10): ?><input type="hidden" name="size" value="<?php echo (int)$per_page; ?>"><?php endif; ?>
                 <div class="filter-group filter-group--grow">
                     <label for="search-input"><i class="fas fa-search"></i> Search</label>
                     <input type="search" id="search-input" name="search" maxlength="120"
@@ -549,9 +552,10 @@ $brave_source_on  = strpos((string)getSetting('reviews_brave_search_key', ''), '
                 </article>
             <?php endforeach; ?>
 
-            <!-- Pagination -->
-            <?php if ($total_pages > 1): ?>
+            <!-- Pagination: shown whenever there are more than 10 reviews, so the rows-per-page choice is always there -->
+            <?php if ($total_pages > 1 || $total_reviews > 10): ?>
                 <nav class="pagination" aria-label="Reviews pages">
+                    <?php if ($total_pages > 1): ?>
                     <?php if ($page > 1): ?>
                         <a href="<?php echo htmlspecialchars($filter_url(['page' => $page - 1])); ?>"><i class="fas fa-chevron-left"></i> Previous</a>
                     <?php else: ?>
@@ -573,6 +577,9 @@ $brave_source_on  = strpos((string)getSetting('reviews_brave_search_key', ''), '
                     <?php else: ?>
                         <span class="disabled">Next <i class="fas fa-chevron-right"></i></span>
                     <?php endif; ?>
+                    <?php endif; /* page links */ ?>
+                    <?php parse_str((string)parse_url($filter_url(['page' => 1]), PHP_URL_QUERY), $rv_keep); /* the same filters the page links keep */ ?>
+                    <?php echo rh_lp_size_picker('reviews.php', $rv_keep, $per_page); ?>
                 </nav>
             <?php endif; ?>
         <?php endif; ?>

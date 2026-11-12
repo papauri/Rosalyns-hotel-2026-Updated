@@ -10,6 +10,7 @@ require_once 'admin-init.php';
 /** @var array $user */
 /** @var string $csrf_token */
 require_once '../includes/alert.php';
+require_once __DIR__ . '/includes/log-pager.php'; // rh_lp_page_size / rh_lp_size_picker: rows per page (?size=)
 
 $message = '';
 $error = '';
@@ -127,10 +128,10 @@ if (strtotime($dateFrom) > strtotime($dateTo)) {
     [$dateFrom, $dateTo] = [$dateTo, $dateFrom];
 }
 $page = max(1, (int)($_GET['page'] ?? 1));
-$perPage = 50;
+$perPage = rh_lp_page_size($_GET['size'] ?? null); // 10 / 25 / 50 / 100, default 10 (owner 2026-11-12)
 $offset = ($page - 1) * $perPage;
 if (($_GET['export'] ?? '') === 'csv') {
-    // The CSV is the whole date range, not just the 50 rows of the page on screen.
+    // The CSV is the whole date range, not just the rows of the page on screen.
     $perPage = 100000;
     $offset = 0;
 }
@@ -525,6 +526,7 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
         <?php if (!in_array($tab, ['inventory', 'expiry'])): ?>
             <form method="GET" class="filter-bar">
                 <input type="hidden" name="tab" value="<?php echo htmlspecialchars($tab); ?>">
+                <?php if ($perPage !== 10 && $perPage <= 100): ?><input type="hidden" name="size" value="<?php echo (int)$perPage; ?>"><?php endif; ?>
                 <label class="filter-bar__label" for="stock-report-from">From</label>
                 <input id="stock-report-from" type="date" name="from" value="<?php echo htmlspecialchars($dateFrom); ?>">
                 <label class="filter-bar__label" for="stock-report-to">To</label>
@@ -782,15 +784,19 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
             </table>
         </div>
 
-        <?php if ($totalPages > 1): ?>
+        <?php /* Shown whenever the paged tab has more than 10 rows, so the rows-per-page choice is always there. */ ?>
+        <?php if ($totalPages > 1 || $totalCount > 10): ?>
             <div class="pagination">
+                <?php if ($totalPages > 1): ?>
                 <?php for ($p = max(1, $page - 4); $p <= min($totalPages, $page + 4); $p++): ?>
                     <?php if ($p === $page): ?>
                         <span class="current"><?php echo $p; ?></span>
                     <?php else: ?>
-                        <a href="?tab=<?php echo $tab; ?>&from=<?php echo urlencode($dateFrom); ?>&to=<?php echo urlencode($dateTo); ?>&page=<?php echo $p; ?>"><?php echo $p; ?></a>
+                        <a href="?tab=<?php echo $tab; ?>&from=<?php echo urlencode($dateFrom); ?>&to=<?php echo urlencode($dateTo); ?><?php echo $perPage !== 10 ? '&size=' . (int)$perPage : ''; ?>&page=<?php echo $p; ?>"><?php echo $p; ?></a>
                     <?php endif; ?>
                 <?php endfor; ?>
+                <?php endif; /* page links */ ?>
+                <?php echo rh_lp_size_picker('stock-reports.php', ['tab' => $tab, 'from' => $dateFrom, 'to' => $dateTo], $perPage); ?>
             </div>
         <?php endif; ?>
     </div>
