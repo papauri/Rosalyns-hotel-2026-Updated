@@ -217,8 +217,27 @@ try {
         $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
 
+    // Company pays later: who owes each room booking (one batch: Payments > Add Payment asks "Paid by" on an on-account booking).
+    $billSplits = [];
+    if ($type === 'room' && $bookings && is_file(__DIR__ . '/../../includes/billing-accounts.php')) {
+        require_once __DIR__ . '/../../includes/billing-accounts.php';
+        if (rh_billing_ready($pdo)) {
+            $sbIds = array_map(static fn($r) => (int)$r['id'], $bookings);
+            $sbSt = $pdo->prepare('SELECT * FROM bookings WHERE id IN (' . implode(',', array_fill(0, count($sbIds), '?')) . ')');
+            $sbSt->execute($sbIds);
+            $billSplits = rh_billing_splits_for_rows($pdo, $sbSt->fetchAll(PDO::FETCH_ASSOC));
+        }
+    }
+
     // Format dates for display
     foreach ($bookings as &$booking) {
+        if ($type === 'room') {
+            $sp = $billSplits[(int)$booking['id']] ?? null;
+            $booking['on_account'] = !empty($sp['on_account']);
+            $booking['company_name'] = $booking['on_account'] ? (string)$sp['name'] : '';
+            $booking['company_due'] = $booking['on_account'] ? (float)$sp['company_due'] : 0.0;
+            $booking['guest_due'] = $booking['on_account'] ? (float)$sp['guest_due'] : 0.0;
+        }
         if ($type === 'room') {
             // The nightly price this booking was MADE at x nights (owner 2026-11-09), with today's price note for staff.
             $br = rh_booked_rate_line($booking, rh_room_today_price_lookup($pdo, $booking)['price']);

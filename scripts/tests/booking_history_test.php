@@ -85,7 +85,7 @@ check(strpos($ev[0]['detail'], 'Superior Suite, 3 nights') !== false && strpos($
 check(strpos($ev[0]['detail'], 'Created manually by admin') === false, 'the generic audit note is not repeated');
 check(($ev[1]['kind'] ?? '') === 'price' && $ev[1]['what'] === 'How the price was worked out', 'step 2: how the price was worked out, right after creation');
 $px = $ev[1]['detail'] ?? '';
-check(strpos($px, 'K356,000 a night × 3 nights = K1,068,000') !== false, 'price: nightly rate × nights = total', $px);
+check(strpos($px, 'K356,000.00 a night × 3 nights = K1,068,000.00') !== false, 'price: nightly rate × nights = total', $px);
 check(strpos($px, "Today's price for this room is K450,300 a night — the booking keeps the price it was made at.") !== false, 'price: today\'s price differs and the booking keeps its price', $px);
 check(strpos($px, 'before price changes were recorded') !== false, 'price: no history row -> made before changes were recorded', $px);
 check(strpos($px, 'VAT K157,721.52') !== false && strpos($px, '17.5%') !== false && strpos($px, 'tourism levy K9,012.66') !== false, 'price: stored VAT and levy shown', $px);
@@ -231,7 +231,7 @@ check(implode(',', array_column($pf, 'kind')) === 'created,price,payment,credit_
 // ---- 5. snapshot (new bookings), override and rate plan ----
 $snapEv = rh_hist_price_explanation($booking, ['source' => 'room_type', 'rate' => 356000, 'list_rate' => 356000, 'nights' => 3, 'total_with_vat' => 1068000],
     356000.0, [], ['cur' => 'K', 'staff' => $staff, 'room_type_name' => 'Superior Suite', 'entity_names' => []]);
-check(strpos($snapEv['detail'], 'K356,000 a night × 3 nights = K1,068,000, using the double-occupancy price of Superior Suite at the time.') !== false, 'snapshot: says which price was used', $snapEv['detail']);
+check(strpos($snapEv['detail'], 'K356,000.00 a night × 3 nights = K1,068,000.00, using the double-occupancy price of Superior Suite at the time.') !== false, 'snapshot: says which price was used', $snapEv['detail']);
 check(strpos($snapEv['detail'], "Today's price") === false, 'snapshot: same price today -> no difference line');
 $ovEv = rh_hist_price_explanation($booking, ['source' => 'override', 'rate' => 300000, 'nights' => 3, 'total_with_vat' => 900000],
     450300.0, [], ['cur' => 'K', 'staff' => $staff, 'room_type_name' => 'Superior Suite', 'entity_names' => []]);

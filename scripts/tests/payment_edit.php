@@ -120,6 +120,12 @@ ok('API amount change on a received payment refused', stripos((string)rh_payment
 ok('API method / date change refused', rh_payment_api_edit_refusal($rec, ['payment_method' => 'mobile_money']) !== null && rh_payment_api_edit_refusal($rec, ['payment_date' => '2026-11-11']) !== null);
 ok('API same values and other fields still allowed', rh_payment_api_edit_refusal($rec, ['payment_amount' => '1165', 'payment_method' => 'cash', 'payment_date' => '2026-11-10', 'notes' => 'x', 'transaction_reference' => 'T1']) === null);
 ok('API pending payment amount still editable', rh_payment_api_edit_refusal(['payment_status' => 'pending'] + $rec, ['payment_amount' => 500]) === null);
+ok('API received payment moved back to pending / partial / failed: refused (refund process instead)',
+    stripos((string)rh_payment_api_edit_refusal($rec, ['payment_status' => 'pending']), 'Process Refund') !== false
+    && rh_payment_api_edit_refusal(['payment_status' => 'paid'] + $rec, ['payment_status' => 'partial']) !== null
+    && rh_payment_api_edit_refusal($rec, ['payment_status' => 'failed']) !== null);
+ok('API completed <-> paid and pending -> completed still allowed', rh_payment_api_edit_refusal($rec, ['payment_status' => 'paid']) === null
+    && rh_payment_api_edit_refusal(['payment_status' => 'pending'] + $rec, ['payment_status' => 'completed']) === null);
 ok('without payment_edit: refused server-side, nothing saved', stripos((string)($m['perm_denied'] ?? ''), 'permission') !== false && $near($m['perm_unchanged']['total_amount'] ?? 0, 1165),
     (string)($m['perm_denied'] ?? ''));
 

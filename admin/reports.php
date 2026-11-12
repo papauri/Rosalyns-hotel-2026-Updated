@@ -114,6 +114,7 @@ $totalRevenue = 0;
 $totalVatCollected = 0;
 $totalTransactions = 0;
 $totalOutstanding = 0;
+$receivablesCompany = 0.0; // of the outstanding: owed by companies on account (the rest is guests / clients)
 $totalBookings = 0;
 $avgStayLength = 0;
 $avgRevenuePerBooking = 0;
@@ -235,6 +236,7 @@ try {
         ];
     }
     $totalOutstanding = $receivables['total'];
+    $receivablesCompany = round((float)($receivables['company_total'] ?? 0), 2);
 
     // ============================================
     // REVENUE TAB QUERIES
@@ -881,6 +883,7 @@ try {
         $agingDetail[] = [
             'payment_reference' => $rcv['reference'], 'client_name' => $rcv['client'], 'booking_type' => $rcv['type'],
             'days_outstanding' => $rcv['days_outstanding'], 'total_amount' => $rcv['amount_due'],
+            'payer' => (string)($rcv['payer'] ?? ''), 'company_due' => (float)($rcv['company_due'] ?? 0), 'guest_due' => (float)($rcv['guest_due'] ?? 0),
         ];
     }
     $agingBuckets = $receivables['buckets'];
@@ -1245,7 +1248,7 @@ try {
                     <div class="rh-strip__cell">
                         <span class="rh-strip__label">Outstanding</span>
                         <strong class="rh-strip__value"><?php echo !empty($receivablesFailed) ? 'Unavailable' : $currency_symbol . ' ' . number_format($totalOutstanding, 2); ?></strong>
-                        <span class="rh-strip__sub"><?php echo count($outstandingPayments); ?> unpaid · <a href="?tab=aging&start_date=<?php echo htmlspecialchars($start_date); ?>&end_date=<?php echo htmlspecialchars($end_date); ?>" class="acct-link">View aging →</a></span>
+                        <span class="rh-strip__sub"><?php echo count($outstandingPayments); ?> unpaid<?php echo (empty($receivablesFailed) && $receivablesCompany > BALANCE_TOLERANCE) ? ' · companies ' . htmlspecialchars($currency_symbol . ' ' . number_format($receivablesCompany, 2)) . ', guests ' . htmlspecialchars($currency_symbol . ' ' . number_format(max(0, $totalOutstanding - $receivablesCompany), 2)) : ''; ?> · <a href="?tab=aging&start_date=<?php echo htmlspecialchars($start_date); ?>&end_date=<?php echo htmlspecialchars($end_date); ?>" class="acct-link">View aging →</a></span>
                     </div>
                 </div>
 
@@ -2253,7 +2256,7 @@ try {
                     <div class="rh-strip__cell">
                         <span class="rh-strip__label">Total Outstanding AR</span>
                         <strong class="rh-strip__value"><?php echo !empty($receivablesFailed) ? 'Unavailable' : $currency_symbol . ' ' . number_format($totalAgingAmount, 2); ?></strong>
-                        <span class="rh-strip__sub"><?php echo !empty($receivablesFailed) ? 'Some accounts could not be read - see System Logs' : count($agingDetail) . ' unpaid accounts'; ?></span>
+                        <span class="rh-strip__sub"><?php echo !empty($receivablesFailed) ? 'Some accounts could not be read - see System Logs' : count($agingDetail) . ' unpaid accounts'; ?><?php if (empty($receivablesFailed) && $receivablesCompany > BALANCE_TOLERANCE): ?><br>Owed by companies on account <?php echo htmlspecialchars($currency_symbol . ' ' . number_format($receivablesCompany, 2)); ?> · by guests and clients <?php echo htmlspecialchars($currency_symbol . ' ' . number_format(max(0, $totalAgingAmount - $receivablesCompany), 2)); ?><?php endif; ?></span>
                     </div>
                     <div class="rh-strip__cell">
                         <span class="rh-strip__label">Current (0–30 days)</span>
@@ -2348,7 +2351,7 @@ try {
                                         <td><?php echo htmlspecialchars($ag['client_name']); ?></td>
                                         <td><span class="acct-pill acct-pill--<?php echo htmlspecialchars($ag['booking_type']); ?>"><?php echo htmlspecialchars(rh_receivable_type_label((string)$ag['booking_type'])); ?></span></td>
                                         <td class="<?php echo $bk === '90+' ? 'acct-danger' : ($bk !== '0-30' ? 'acct-warn' : ''); ?>"><?php echo $d; ?>d</td>
-                                        <td style="font-weight:600"><?php echo $currency_symbol . ' ' . number_format($ag['total_amount'], 2); ?></td>
+                                        <td style="font-weight:600"><?php echo $currency_symbol . ' ' . number_format($ag['total_amount'], 2); ?><?php if (in_array($ag['payer'] ?? '', ['company', 'both'], true)): ?><br><small class="acct-muted">company <?php echo htmlspecialchars($currency_symbol . ' ' . number_format((float)$ag['company_due'], 2)); ?> · guest <?php echo htmlspecialchars($currency_symbol . ' ' . number_format((float)$ag['guest_due'], 2)); ?></small><?php endif; ?></td>
                                         <td><a href="payment-add.php?booking_type=<?php echo urlencode($ag['booking_type']); ?>" class="acct-link">Record →</a></td>
                                     </tr>
                                 <?php endforeach; ?>

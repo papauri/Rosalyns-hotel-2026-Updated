@@ -10,6 +10,10 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); }
  *       assess quote == settle charge; booked date writes no money and keeps the stay; another date; out of range and
  *       old 'charge' posts refused; amount received recorded through the payment path; actual-arrival basis must be
  *       chosen; late check-in needs a choice; "already stayed and left" = checked out, no extra charge; History rows.
+ *       D8-D10 (LATERs 2026-11-13): settlement closes folio room-service orders; processed_by on its payment / refund
+ *       rows; refund back to the original method; "already stayed and left" rooms follow the checkout housekeeping rule.
+ *       D10e-f, D11, D12 (2026-11-13 round 2): ended stay skips the clean-room gate; checkout_completed_at; refund method
+ *       line per amount; store credit only when refund_method_default = ask.
  * Fixtures are throw-away rows found by unique tags; the final invoice is pre-marked generated (no PDF / email).
  */
 $root = dirname(__DIR__, 2);
@@ -249,6 +253,154 @@ $aud = $r['verify'][2] ?? [];
 $last = end($aud) ?: [];
 $cur = (string)getSetting('currency_symbol', 'MWK');
 ok('D7 History: the note shows refundable and refunded as the same figure', strpos((string)($last['note'] ?? ''), 'refundable ' . $cur . ' 100.00') !== false && strpos((string)($last['note'] ?? ''), 'Refunded ' . $cur . ' 100.00') !== false, (string)($last['note'] ?? ''));
+
+echo "== D8: settlement closes folio room-service orders + names the staff member on the payment (LATERs 2026-11-13) ==\n";
+$t = lso_tag();
+$fx = lso_fixture($t, 'checked-in', $ago(4), $ago(2), 2);
+$fx[] = "INSERT INTO stock_orders (reference, order_type, table_number, room_number, customer_name, status, total_amount, subtotal, kitchen_status, fired_at, served_at, created_by, booking_id, folio_posted_at, created_at)
+    VALUES ('ZLSRS{$t}', 'room_service', 'ZL1{$t}', 'ZL1{$t}', 'ZZ LS TEST', 'placed', 100, 100, 'served', NOW(), NOW(), NULL, (" . $bid($t) . "), NOW(), NOW())";
+$r = lso_run(['post' => ['action' => 'checkout_settle', 'id' => '{b}', 'settlement_action' => 'leave', 'leave_date' => $ago(1), 'amount_received' => '300', 'payment_method' => 'cash'],
+    'setup' => $fx, 'vars' => ['b' => $bid($t)],
+    'verify' => array_merge(lso_verify($t), ["SELECT status FROM stock_orders WHERE reference = 'ZLSRS{$t}'", "SELECT processed_by, recorded_by FROM payments WHERE booking_id = (" . $bid($t) . ")"])]);
+lso_clean($r, 'D8');
+ok('D8 checked out through the settlement', ($r['verify'][0][0]['status'] ?? '') === 'checked-out', json_encode([$r['json'] ?? null, $r['raw'] ?? null]));
+ok('D8 the folio-charged room-service order is closed like every other checkout', ($r['verify'][4][0]['status'] ?? '') === 'completed', json_encode($r['verify'][4] ?? null));
+$pr = $r['verify'][5][0] ?? [];
+ok('D8 payment row names the staff member (processed_by) and keeps recorded_by', trim((string)($pr['processed_by'] ?? '')) !== '' && (int)($pr['recorded_by'] ?? 0) > 0, json_encode($pr));
+
+echo "== D9: unused-nights refund goes back to the original method (as the normal Refund) + names the staff member ==\n";
+$t = lso_tag();
+$fx = lso_fixture($t, 'checked-in', $ago(4), $ago(1), 3);
+$fx[] = "INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount, payment_method, payment_type, payment_status, status, recorded_by)
+    VALUES ('ZLSP{$t}', 'room', (" . $bid($t) . "), 'ZLS{$t}', '{$ago(4)}', 300, 0, 0, 300, 'mobile_money', 'partial_payment', 'completed', 'completed', NULL)";
+$r = lso_run(['post' => ['action' => 'checkout_assess', 'id' => '{b}'], 'setup' => $fx, 'vars' => ['b' => $bid($t)]]);
+lso_clean($r, 'D9a');
+ok('D9 assess says where the refund goes (the original method)', ($r['json']['settlement']['refund_methods'] ?? '') === 'Mobile money', json_encode([$r['json']['settlement']['refund_methods'] ?? null, $r['raw'] ?? null]));
+// An old cached page still posts a refund method: it is ignored, the refund follows the original payment.
+$r = lso_run(['post' => ['action' => 'checkout_settle', 'id' => '{b}', 'settlement_action' => 'leave', 'leave_date' => $ago(2), 'payment_method' => 'cash'], 'setup' => $fx, 'vars' => ['b' => $bid($t)],
+    'verify' => array_merge(lso_verify($t), ["SELECT payment_method, processed_by, recorded_by, total_amount FROM payments WHERE booking_id = (" . $bid($t) . ") AND payment_type = 'refund'"])]);
+lso_clean($r, 'D9b');
+$rr = $r['verify'][4] ?? [];
+ok('D9 one refund leg of 100 on the original method (mobile money), staff named', count($rr) === 1 && ($rr[0]['payment_method'] ?? '') === 'mobile_money' && abs((float)$rr[0]['total_amount'] - 100) < $tol
+    && trim((string)($rr[0]['processed_by'] ?? '')) !== '' && (int)($rr[0]['recorded_by'] ?? 0) > 0, json_encode([$rr, $r['json'] ?? null]));
+
+echo "== D10: \"already stayed and left\": rooms follow the checkout housekeeping rule, another guest's room is never touched ==\n";
+$hk = function (string $t): array {
+    $room = "(SELECT id FROM individual_rooms WHERE room_number = 'ZL1{$t}')";
+    return ["SELECT status, housekeeping_status FROM individual_rooms WHERE room_number = 'ZL1{$t}'",
+        "SELECT COUNT(*) AS n FROM housekeeping_assignments WHERE individual_room_id = $room AND status IN ('pending','in_progress')"];
+};
+$endedPost = ['action' => 'update_status', 'id' => '{b}', 'status' => 'checked-in', 'late_arrival' => 'ended', 'email_guest' => '0', 'confirm_checkout_with_balance' => '1', 'confirm_checkin_room_not_ready' => '1'];
+// a) room left marked 'occupied' (nobody else in it): cleaning + one open task, as at any checkout
+$t = lso_tag();
+$fx = lso_fixture($t, 'confirmed', $ago(4), $ago(1), 3);
+$fx[] = "UPDATE individual_rooms SET status = 'occupied' WHERE room_number = 'ZL1{$t}'";
+$r = lso_run(['post' => $endedPost, 'setup' => $fx, 'vars' => ['b' => $bid($t)], 'verify' => array_merge(lso_verify($t), $hk($t))]);
+lso_clean($r, 'D10a');
+$aud = $r['verify'][2] ?? [];
+$last = end($aud) ?: [];
+ok('D10a stale occupied room -> cleaning + one open clean task', ($r['verify'][0][0]['status'] ?? '') === 'checked-out' && ($r['verify'][4][0]['status'] ?? '') === 'cleaning' && (int)($r['verify'][5][0]['n'] ?? 0) === 1, json_encode([$r['verify'][4] ?? null, $r['verify'][5] ?? null, $r['json'] ?? null, $r['raw'] ?? null]));
+ok('D10a History says what happened to the room', strpos((string)($last['note'] ?? ''), 'sent to cleaning') !== false, (string)($last['note'] ?? ''));
+// b) room available (status ready): trusted, kept as it is, NO task (the next arrival is never held up)
+$t = lso_tag();
+$r = lso_run(['post' => $endedPost, 'setup' => lso_fixture($t, 'confirmed', $ago(4), $ago(1), 3), 'vars' => ['b' => $bid($t)], 'verify' => array_merge(lso_verify($t), $hk($t))]);
+lso_clean($r, 'D10b');
+$aud = $r['verify'][2] ?? [];
+$last = end($aud) ?: [];
+ok('D10b available room: stays available, no clean task', ($r['verify'][0][0]['status'] ?? '') === 'checked-out' && ($r['verify'][4][0]['status'] ?? '') === 'available' && (int)($r['verify'][5][0]['n'] ?? -1) === 0
+    && strpos((string)($last['note'] ?? ''), 'room status kept as it is') !== false, json_encode([$r['verify'][4] ?? null, $r['verify'][5] ?? null, $last['note'] ?? null, $r['json'] ?? null]));
+// c) a dirty room (cleaning, task open) keeps its state: no second task
+$t = lso_tag();
+$fx = lso_fixture($t, 'confirmed', $ago(4), $ago(1), 3);
+$fx[] = "UPDATE individual_rooms SET status = 'cleaning', housekeeping_status = 'pending' WHERE room_number = 'ZL1{$t}'";
+$fx[] = "INSERT INTO housekeeping_assignments (individual_room_id, status, due_date, priority, assignment_type, notes, created_at) VALUES ((SELECT id FROM individual_rooms WHERE room_number = 'ZL1{$t}'), 'pending', CURDATE(), 'medium', 'checkout_cleanup', 'zz test', NOW())";
+$r = lso_run(['post' => $endedPost, 'setup' => $fx, 'vars' => ['b' => $bid($t)], 'verify' => array_merge(lso_verify($t), $hk($t))]);
+lso_clean($r, 'D10c');
+ok('D10c dirty room keeps its state (cleaning, its one open task), nothing added', ($r['verify'][0][0]['status'] ?? '') === 'checked-out' && ($r['verify'][4][0]['status'] ?? '') === 'cleaning' && (int)($r['verify'][5][0]['n'] ?? -1) === 1, json_encode([$r['verify'][4] ?? null, $r['verify'][5] ?? null, $r['json'] ?? null]));
+// e) clean-room gate skipped for an ended stay: a not-clean room, NO override posted, still recorded; History says so
+$t = lso_tag();
+$fx = lso_fixture($t, 'confirmed', $ago(4), $ago(1), 3);
+$fx[] = "UPDATE individual_rooms SET status = 'cleaning' WHERE room_number = 'ZL1{$t}'";
+$noOverride = $endedPost;
+unset($noOverride['confirm_checkin_room_not_ready']);
+$r = lso_run(['post' => $noOverride, 'setup' => $fx, 'vars' => ['b' => $bid($t)], 'verify' => array_merge(lso_verify($t), $hk($t))]);
+lso_clean($r, 'D10e');
+$aud = $r['verify'][2] ?? [];
+ok('D10e ended stay: no clean-room gate (no override needed), recorded and checked out', !empty($r['json']['success']) && empty($r['json']['needs_confirm_room']) && ($r['verify'][0][0]['status'] ?? '') === 'checked-out', json_encode([$r['json'] ?? null, $r['raw'] ?? null]));
+ok('D10e History: "Clean-room check skipped"', strpos((string)($aud[0]['note'] ?? ''), 'Clean-room check skipped') !== false, (string)($aud[0]['note'] ?? ''));
+// f) a normal late check-in ("arriving today") still meets the gate
+$t = lso_tag();
+$fx = lso_fixture($t, 'confirmed', $ago(2), date('Y-m-d', strtotime($today . ' +1 day')), 3);
+$fx[] = "UPDATE individual_rooms SET status = 'cleaning' WHERE room_number = 'ZL1{$t}'";
+$r = lso_run(['post' => ['action' => 'update_status', 'id' => '{b}', 'status' => 'checked-in', 'late_arrival' => 'today', 'email_guest' => '0'], 'setup' => $fx, 'vars' => ['b' => $bid($t)], 'verify' => lso_verify($t)]);
+lso_clean($r, 'D10f');
+ok('D10f "arriving today" into a room not clean: gate still asks (needs_confirm_room), not checked in', empty($r['json']['success']) && !empty($r['json']['needs_confirm_room']) && ($r['verify'][0][0]['status'] ?? '') === 'confirmed', json_encode([$r['json'] ?? null, $r['verify'][0] ?? null]));
+// d) another guest is in the room now: left exactly as it is
+$t = lso_tag();
+$fx = lso_fixture($t, 'confirmed', $ago(4), $ago(1), 3);
+$fx[] = "UPDATE individual_rooms SET status = 'occupied' WHERE room_number = 'ZL1{$t}'";
+$fx[] = "INSERT INTO bookings (booking_reference, room_id, individual_room_id, guest_name, guest_email, guest_phone, guest_country, number_of_guests, adult_guests, child_guests,
+    child_price_multiplier, check_in_date, check_out_date, number_of_nights, total_amount, child_supplement_total, tourism_levy_amount, tourism_levy_percent,
+    vat_rate, vat_amount, total_with_vat, amount_due, special_requests, status, payment_status, is_tentative, occupancy_type, client_uuid, final_invoice_generated, created_at)
+ VALUES ('ZLN{$t}', (SELECT id FROM rooms WHERE slug = 'zz-ls-" . strtolower($t) . "'), (SELECT id FROM individual_rooms WHERE room_number = 'ZL1{$t}'), 'ZZ NEXT GUEST TEST', '', '+265000000009', 'Malawi', 2, 2, 0, 50,
+    '{$ago(1)}', '" . date('Y-m-d', strtotime($today . ' +1 day')) . "', 2, 200, 0, 0, 0, 0, 0, 200, 200, 'late stay test', 'checked-in', 'unpaid', 0, 'double', '" . bin2hex(random_bytes(16)) . "', 1, NOW())";
+$r = lso_run(['post' => $endedPost, 'setup' => $fx, 'vars' => ['b' => $bid($t)], 'verify' => array_merge(lso_verify($t), $hk($t))]);
+lso_clean($r, 'D10d');
+$aud = $r['verify'][2] ?? [];
+$last = end($aud) ?: [];
+ok('D10d room in use by another checked-in guest: still occupied, no task added', ($r['verify'][0][0]['status'] ?? '') === 'checked-out' && ($r['verify'][4][0]['status'] ?? '') === 'occupied' && (int)($r['verify'][5][0]['n'] ?? -1) === 0
+    && strpos((string)($last['note'] ?? ''), 'another guest is in the room now') !== false, json_encode([$r['verify'][4] ?? null, $r['verify'][5] ?? null, $last['note'] ?? null, $r['json'] ?? null]));
+
+echo "== D11: the settlement sets checkout_completed_at like every other checkout ==\n";
+$t = lso_tag();
+$r = lso_run(['post' => ['action' => 'checkout_settle', 'id' => '{b}', 'settlement_action' => 'leave', 'leave_date' => $ago(2), 'confirm_checkout_with_balance' => '1'],
+    'setup' => lso_fixture($t, 'checked-in', $ago(4), $ago(2), 2), 'vars' => ['b' => $bid($t)],
+    'verify' => ["SELECT status, DATE(checkout_completed_at) AS done FROM bookings WHERE booking_reference = 'ZLS{$t}'"]]);
+lso_clean($r, 'D11');
+ok('D11 checked out with checkout_completed_at = today', ($r['verify'][0][0]['status'] ?? '') === 'checked-out' && ($r['verify'][0][0]['done'] ?? '') === $today, json_encode([$r['verify'][0] ?? null, $r['json'] ?? null]));
+
+echo "== D12: refund method line per amount; store credit only when the refund setting is \"ask\" ==\n";
+$ask = "INSERT INTO site_settings (setting_key, setting_value) VALUES ('refund_method_default', 'ask') ON DUPLICATE KEY UPDATE setting_value = 'ask'";
+$orig = "INSERT INTO site_settings (setting_key, setting_value) VALUES ('refund_method_default', 'original') ON DUPLICATE KEY UPDATE setting_value = 'original'";
+$t = lso_tag();
+$fx = lso_fixture($t, 'checked-in', $ago(4), $ago(1), 3);
+$fx[] = "INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount, payment_method, payment_type, payment_status, status, recorded_by)
+    VALUES ('ZLSA{$t}', 'room', (" . $bid($t) . "), 'ZLS{$t}', '{$ago(4)}', 200, 0, 0, 200, 'cash', 'partial_payment', 'completed', 'completed', NULL)";
+$fx[] = "INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount, payment_method, payment_type, payment_status, status, recorded_by)
+    VALUES ('ZLSB{$t}', 'room', (" . $bid($t) . "), 'ZLS{$t}', '{$ago(3)}', 100, 0, 0, 100, 'mobile_money', 'partial_payment', 'completed', 'completed', NULL)";
+$r = lso_run(['post' => ['action' => 'checkout_assess', 'id' => '{b}'], 'setup' => array_merge($fx, [$ask]), 'vars' => ['b' => $bid($t)]]);
+lso_clean($r, 'D12a');
+$sq = $r['json']['settlement'] ?? [];
+ok('D12a refund of 100 names only the method it uses (newest payment: mobile money)', ($sq['quotes'][$ago(2)]['booked']['refund_methods'] ?? '') === 'Mobile money', json_encode([$sq['quotes'][$ago(2)]['booked'] ?? null, $r['raw'] ?? null]));
+ok('D12a refund of 200 names both methods it uses', ($sq['quotes'][$ago(3)]['booked']['refund_methods'] ?? '') === 'Mobile money, Cash', json_encode($sq['quotes'][$ago(3)]['booked'] ?? null));
+ok('D12a setting "ask": store credit offered', !empty($sq['store_credit_allowed']), json_encode($sq['store_credit_allowed'] ?? null));
+$r = lso_run(['post' => ['action' => 'checkout_assess', 'id' => '{b}'], 'setup' => array_merge($fx, [$orig]), 'vars' => ['b' => $bid($t)]]);
+lso_clean($r, 'D12b');
+ok('D12b setting "original": store credit not offered', empty($r['json']['settlement']['store_credit_allowed']), json_encode($r['json']['settlement']['store_credit_allowed'] ?? null));
+$scVerify = array_merge(lso_verify($t), [
+    "SELECT payment_method, credit_note_id, processed_by, total_amount FROM payments WHERE booking_id = (" . $bid($t) . ") AND payment_type = 'refund' ORDER BY id",
+    "SELECT credit_note_number, original_amount, guest_name FROM credit_notes WHERE booking_id = (" . $bid($t) . ")",
+]);
+$r = lso_run(['post' => ['action' => 'checkout_settle', 'id' => '{b}', 'settlement_action' => 'leave', 'leave_date' => $ago(2), 'refund_as' => 'store_credit'],
+    'setup' => array_merge($fx, [$ask]), 'vars' => ['b' => $bid($t)], 'verify' => $scVerify]);
+lso_clean($r, 'D12c');
+$rr = $r['verify'][4] ?? [];
+$cn = $r['verify'][5] ?? [];
+ok('D12c store credit: checked out, one credit note of 100 for the guest', ($r['verify'][0][0]['status'] ?? '') === 'checked-out' && count($cn) === 1 && abs((float)$cn[0]['original_amount'] - 100) < $tol, json_encode([$cn, $r['json'] ?? null, $r['raw'] ?? null]));
+ok('D12c refund row: method credit_note, linked to the note, staff named, 100', count($rr) === 1 && ($rr[0]['payment_method'] ?? '') === 'credit_note' && (int)($rr[0]['credit_note_id'] ?? 0) > 0
+    && trim((string)($rr[0]['processed_by'] ?? '')) !== '' && abs((float)$rr[0]['total_amount'] - 100) < $tol, json_encode($rr));
+$aud = $r['verify'][2] ?? [];
+$last = end($aud) ?: [];
+ok('D12c History names the credit note', strpos((string)($last['note'] ?? ''), 'as store credit: credit note ' . ($cn[0]['credit_note_number'] ?? '??')) !== false, (string)($last['note'] ?? ''));
+$r = lso_run(['post' => ['action' => 'checkout_settle', 'id' => '{b}', 'settlement_action' => 'leave', 'leave_date' => $ago(2), 'refund_as' => 'store_credit'],
+    'setup' => array_merge($fx, [$orig]), 'vars' => ['b' => $bid($t)], 'verify' => $scVerify]);
+lso_clean($r, 'D12d');
+$rr = $r['verify'][4] ?? [];
+ok('D12d setting "original": store credit posted anyway -> refund back to the original method, no credit note', count($rr) === 1 && ($rr[0]['payment_method'] ?? '') === 'mobile_money' && ($r['verify'][5] ?? null) === [], json_encode([$rr, $r['verify'][5] ?? null, $r['json'] ?? null]));
+$r = lso_run(['post' => ['action' => 'checkout_settle', 'id' => '{b}', 'settlement_action' => 'leave', 'leave_date' => $ago(2), 'refund_as' => 'bogus'],
+    'setup' => array_merge($fx, [$ask]), 'vars' => ['b' => $bid($t)], 'verify' => $scVerify]);
+lso_clean($r, 'D12e');
+ok('D12e unknown refund method refused, nothing changed', empty($r['json']['success']) && ($r['verify'][0][0]['status'] ?? '') === 'checked-in' && ($r['verify'][4] ?? null) === [], json_encode([$r['json'] ?? null, $r['verify'][0] ?? null]));
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail ? 1 : 0);

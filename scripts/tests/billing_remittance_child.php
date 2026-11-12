@@ -305,6 +305,95 @@ switch ($sc) {
         }
         break;
 
+    case 'later_fixes':
+        // LATER round 2026-11-13: split-payer group documents, the invoice email copy, credit notes made out to who
+        // overpaid, the company payment idempotency id.
+        require_once $root . '/config/invoice.php';
+        require_once $root . '/config/credit-notes.php';
+        require_once $root . '/includes/idempotency.php';
+        $rowOf = static function (PDO $pdo, int $id): array {
+            return br_row($pdo, 'SELECT b.*, r.name AS room_name FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id WHERE b.id = ?', [$id]);
+        };
+        $accName = br_row($pdo, 'SELECT name FROM billing_accounts WHERE id = ?', [$acc])['name'];
+        $pdo->prepare("UPDATE billing_accounts SET billing_email = 'a-billing@example.invalid' WHERE id = ?")->execute([$acc]);
+        $pdo->prepare("INSERT INTO billing_accounts (name, billing_email, terms_days, active, created_at) VALUES (?, 'b-billing@example.invalid', 30, 1, NOW())")
+            ->execute(['ZZ TEST CO B ' . random_int(1000, 9999)]);
+        $accB = (int)$pdo->lastInsertId();
+        $accBName = br_row($pdo, 'SELECT name FROM billing_accounts WHERE id = ?', [$accB])['name'];
+        // Group: primary + m1 on company A (stay), m2 on its OWN company B (stay). 1,165 a room.
+        [$p] = br_booking($pdo, 'checked-in', 1);
+        [$m1] = br_booking($pdo, 'checked-in', 1, $p);
+        [$m2] = br_booking($pdo, 'checked-in', 1, $p);
+        rh_billing_set_on_booking($pdo, $p, ['account_id' => $acc, 'reference' => 'LPO-A', 'covers' => 'stay'], $user);
+        $pdo->prepare("UPDATE bookings SET billing_account_id = ?, billing_reference = 'LPO-B', billing_covers = 'stay', checkin_without_payment = 1 WHERE id = ?")->execute([$accB, $m2]);
+        $out['lf_scope'] = ['p' => rh_billing_doc_scope($pdo, $p), 'm1' => rh_billing_doc_scope($pdo, $m1), 'm2' => rh_billing_doc_scope($pdo, $m2), 'ids' => [$p, $m1, $m2]];
+        $out['lf_split'] = ['p' => rh_billing_group_split($pdo, $p)['company_due'], 'm2' => rh_billing_group_split($pdo, $m2)['company_due']];
+        $doc = static function (PDO $pdo, int $id) {
+            $rows = rh_invoice_doc_rows($pdo, $id);
+            $t = null;
+            $h = buildInvoiceHTML($rows['booking'], 'TEST-LF', 'Hotel', 'x@example.invalid', '000', 'Addr', 'MWK', $rows['group_bookings'], null, false, $t);
+            return [$h, $t, (int)$rows['booking']['id'], count($rows['group_bookings'])];
+        };
+        [$hA, $tA, $leadA, $nA] = $doc($pdo, $m1);
+        [$hB, $tB, $leadB, $nB] = $doc($pdo, $m2);
+        $out['lf_docA'] = ['lead' => $leadA, 'rooms' => $nA, 'total' => $tA['total'] ?? null, 'balance' => $tA['balance'] ?? null, 'ids' => $tA['ids'] ?? null,
+            'billed_A' => strpos($hA, $accName) !== false, 'billed_B' => strpos($hA, $accBName) !== false, 'has_3495' => strpos($hA, '3,495.00') !== false];
+        $out['lf_docB'] = ['lead' => $leadB, 'rooms' => $nB, 'total' => $tB['total'] ?? null, 'balance' => $tB['balance'] ?? null, 'ids' => $tB['ids'] ?? null,
+            'billed_A' => strpos($hB, $accName) !== false, 'billed_B' => strpos($hB, $accBName) !== false];
+        // The invoice email copy for m1 (asked for one room, the company name already put in guest_name by the sender):
+        // same rooms and figures as the attachment, the real guest named.
+        $copy = rh_invoice_email_copy($pdo, ['guest_name' => $accName, 'guest_email' => 'a-billing@example.invalid'] + $rowOf($pdo, $m1), 'TEST-LF');
+        $out['lf_copy'] = ['total' => $copy['totals']['total'] ?? null, 'balance' => $copy['totals']['balance'] ?? null, 'ids' => $copy['totals']['ids'] ?? null,
+            'has_2330' => strpos($copy['html'], '2,330.00') !== false, 'guest_named' => strpos($copy['html'], 'COMPANY BILL TEST') !== false];
+
+        // Overpayment credit notes made out to who overpaid. One booking on company A, 2 nights (2,330): the company pays the
+        // stay, the guest pays 200 on top, then the bill drops to 1 night (1,165): company overpaid 1,165, guest 200.
+        [$c] = br_booking($pdo, 'checked-in', 2);
+        rh_billing_set_on_booking($pdo, $c, ['account_id' => $acc, 'reference' => 'LPO-CN', 'covers' => 'stay'], $user);
+        rh_billing_record_remittance($pdo, $acc, ['amount' => '2330', 'payment_method' => 'bank_transfer', 'received_date' => date('Y-m-d'), 'lines' => [$c => '2330'],
+            'client_uuid' => 'brlf-' . bin2hex(random_bytes(6))], $user);
+        $sp = rh_account_vat_split($pdo, 'room', $c, 200.0, 16.5);
+        $pdo->prepare("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+                payment_method, payment_type, payment_status, created_at) VALUES (?, 'room', ?, 'X', CURDATE(), ?, ?, ?, 200, 'cash', 'partial_payment', 'completed', NOW())")
+            ->execute(['BRLF' . random_int(100000, 999999), $c, $sp['net'], $sp['rate'], $sp['vat']]);
+        $pdo->prepare("UPDATE bookings SET number_of_nights = 1, check_in_date = DATE_SUB(CURDATE(), INTERVAL 1 DAY), total_amount = 1000, vat_amount = 165, total_with_vat = 1165 WHERE id = ?")->execute([$c]);
+        recalculateBookingFinancials($c);
+        $out['lf_credit_before'] = (float)br_row($pdo, 'SELECT credit_balance FROM bookings WHERE id = ?', [$c])['credit_balance'];
+        $cn = rh_auto_credit_overpayment($pdo, 'room', $c, 5000, 'TESTREF', $user['id']);
+        $out['lf_cn'] = array_map(static function ($n) use ($pdo) {
+            $r = br_row($pdo, 'SELECT guest_name, guest_email, original_amount, reason_notes FROM credit_notes WHERE id = ?', [$n['credit_note_id']]);
+            $legs = br_row($pdo, "SELECT COUNT(*) n, SUM(CASE WHEN l.payment_id IS NULL THEN 1 ELSE 0 END) guest_legs FROM payments f LEFT JOIN billing_remittance_lines l ON l.payment_id = f.original_payment_id
+                WHERE f.credit_note_id = ? AND f.payment_type = 'refund' AND f.deleted_at IS NULL", [$n['credit_note_id']]);
+            return ['payer' => $n['payer'], 'name' => $r['guest_name'], 'email' => $r['guest_email'], 'amount' => (float)$r['original_amount'],
+                'lpo' => strpos((string)$r['reason_notes'], 'LPO-CN') !== false, 'legs' => (int)$legs['n'], 'guest_legs' => (int)$legs['guest_legs']];
+        }, $cn['notes'] ?? []);
+        $out['lf_credit_after'] = (float)br_row($pdo, 'SELECT credit_balance FROM bookings WHERE id = ?', [$c])['credit_balance'];
+        // Not on account: one note to the guest, as before.
+        [$g] = br_booking($pdo, 'checked-in', 1);
+        $pdo->prepare("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+                payment_method, payment_type, payment_status, created_at) VALUES (?, 'room', ?, 'X', CURDATE(), 1500, 0, 0, 1500, 'cash', 'full_payment', 'completed', NOW())")
+            ->execute(['BRLG' . random_int(100000, 999999), $g]);
+        recalculateBookingFinancials($g);
+        $gn = rh_auto_credit_overpayment($pdo, 'room', $g, 5000, 'TESTREF2', $user['id']);
+        $out['lf_guest_cn'] = ['count' => count($gn['notes'] ?? []), 'payer' => $gn['notes'][0]['payer'] ?? null,
+            'name' => br_row($pdo, 'SELECT guest_name FROM credit_notes WHERE id = ?', [(int)($gn['credit_note_id'] ?? 0)])['guest_name'] ?? null, 'amount' => $gn['excess'] ?? null];
+        // The company payment's idempotency id is on its payment row (a replayed Add Payment finds it).
+        $uu = 'brlf-' . bin2hex(random_bytes(8));
+        [$u] = br_booking($pdo, 'checked-in', 1);
+        rh_billing_set_on_booking($pdo, $u, ['account_id' => $acc, 'covers' => 'stay'], $user);
+        $rem = rh_billing_record_remittance($pdo, $acc, ['amount' => '500', 'payment_method' => 'cash', 'received_date' => date('Y-m-d'), 'lines' => [$u => '500'], 'client_uuid' => $uu], $user);
+        $found = idem_find_existing_payment($pdo, $uu);
+        $out['lf_uuid'] = ['found' => (int)($found['id'] ?? 0) === (int)$rem['legs'][0]['payment_id']];
+        // A booking that already holds its invoice number (converted quotation / Generate Invoice): the checkout final
+        // invoice keeps that number, never a second one (no guest email on the fixture: nothing is sent).
+        [$q] = br_booking($pdo, 'checked-out', 1);
+        $qNo = 'QTLF-' . random_int(100000, 999999);
+        $pdo->prepare('UPDATE bookings SET final_invoice_number = ? WHERE id = ?')->execute([$qNo, $q]);
+        $fi = generateAndSendFinalInvoice($q, $user['id'], false);
+        $out['lf_final_no'] = ['want' => $qNo, 'got' => $fi['invoice_number'] ?? null,
+            'stored' => br_row($pdo, 'SELECT final_invoice_number n FROM bookings WHERE id = ?', [$q])['n'] ?? null];
+        break;
+
     case 'group_invoice':
         // QA fix round: a 3-room group on a company account. Every figure covers ONLY the rooms the document lists.
         require_once $root . '/config/invoice.php';

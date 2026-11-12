@@ -221,6 +221,7 @@ if (!empty($cfg['ajax'])) { $_SERVER['HTTP_X_REQUESTED_WITH'] = 'XMLHttpRequest'
 $_POST = ($cfg['post'] ?? []) + ['csrf_token' => $_SESSION['csrf_token']];
 if ($__h_vars) { foreach ($_POST as $pk => $pv) { if (is_string($pv)) { $_POST[$pk] = strtr($pv, $__h_vars); } } }
 $_GET = $cfg['get'] ?? [];
+if ($__h_vars) { foreach ($_GET as $gk => $gv) { if (is_string($gv)) { $_GET[$gk] = strtr($gv, $__h_vars); } } } // {name} in GET values too
 $_REQUEST = $_POST + $_GET;
 chdir($root . '/' . dirname($page));
 require $root . '/' . $page;

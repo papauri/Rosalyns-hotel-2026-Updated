@@ -82,86 +82,97 @@ if (!defined('PDF_PAGE_FORMAT')) {
  * @param bool $asStatement Paid-in-full checkout: the same itemised document, titled "Stay Statement - paid in full" (no balance-due wording), same invoice number
  * @return array|false Returns array with keys: filename, path, relative_path, invoice_number — or false on failure
  */
+/**
+ * The rows a room invoice for $booking_id is built from (one place, so the PDF and the copy printed inside the invoice
+ * email always list the same rooms): booking = the lead row (b.*, room_name with its room label, image_url, site_name),
+ * group_bookings = the rooms listed when more than one (else []). A group invoice is built from its primary and lists the
+ * whole group, except when the group's rooms are billed to different payers (a member on its own company account): then
+ * only the rooms billed to the same payer as $booking_id (rh_billing_doc_scope). null = booking not found.
+ * @return array{booking:array,group_bookings:array}|null
+ */
+function rh_invoice_doc_rows(PDO $pdo, int $booking_id): ?array
+{
+    if (!function_exists('rh_billing_doc_scope') && is_file(__DIR__ . '/../includes/billing-accounts.php')) {
+        require_once __DIR__ . '/../includes/billing-accounts.php';
+    }
+    $stmt = $pdo->prepare("
+        SELECT b.*, r.name as room_name, r.image_url,
+               s.setting_value as site_name
+        FROM bookings b
+        JOIN rooms r ON b.room_id = r.id
+        JOIN site_settings s ON s.setting_key = 'site_name'
+        WHERE b.id = ?
+    ");
+    $label = static function (array $row): array {
+        if (function_exists('getBookingRoomLabel')) {
+            $room_assignment = getBookingRoomLabel((int)$row['id']);
+            if ($room_assignment !== '') {
+                $row['room_name'] = trim((string)$row['room_name'] . ' - ' . $room_assignment);
+            }
+        }
+        $row['room_name'] = rh_room_label_with_guest((string)$row['room_name'], $row['room_guest_name'] ?? '');
+        return $row;
+    };
+    $stmt->execute([$booking_id]);
+    $booking = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$booking) {
+        return null;
+    }
+    $scope = function_exists('rh_billing_doc_scope') ? rh_billing_doc_scope($pdo, $booking_id) : null;
+    // For group bookings work from the primary booking (the invoice shows all rooms); a secondary is redirected to its
+    // primary - or, on a split-payer group, to the lead of the rooms billed to the same payer.
+    $leadId = $scope !== null ? (int)$scope['lead'] : (!empty($booking['primary_booking_id']) ? (int)$booking['primary_booking_id'] : $booking_id);
+    if ($leadId !== $booking_id) {
+        $stmt->execute([$leadId]);
+        $lead = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($lead) {
+            $booking = $lead;
+        }
+    }
+    $booking = $label($booking);
+    $root = !empty($booking['primary_booking_id']) ? (int)$booking['primary_booking_id'] : (int)$booking['id'];
+
+    // Every room of the group (secondaries sharing the primary booking id, including the primary itself), then only
+    // the rooms in the document's scope.
+    $siblings_stmt = $pdo->prepare("
+        SELECT b.id, b.booking_reference, b.total_amount, b.child_supplement_total,
+               b.tourism_levy_amount, b.vat_amount, b.total_with_vat,
+               b.child_guests, b.child_price_multiplier, b.child_charge_mode, b.child_charge_amount, b.free_children,
+               b.occupancy_type, b.number_of_nights, b.room_guest_name,
+               r.name as room_name
+        FROM bookings b
+        JOIN rooms r ON b.room_id = r.id
+        WHERE (b.id = ? OR b.primary_booking_id = ?)
+        ORDER BY b.id ASC
+    ");
+    $siblings_stmt->execute([$root, $root]);
+    $group_bookings = $siblings_stmt->fetchAll(PDO::FETCH_ASSOC);
+    if ($scope !== null) {
+        $in = array_flip($scope['ids']);
+        $group_bookings = array_values(array_filter($group_bookings, static fn($g) => isset($in[(int)$g['id']])));
+    }
+    if (function_exists('getBookingRoomLabel')) {
+        $group_bookings = array_map($label, $group_bookings);
+    }
+    // If only one result it's a normal single-room booking — pass empty array
+    if (count($group_bookings) <= 1) {
+        $group_bookings = [];
+    }
+    return ['booking' => $booking, 'group_bookings' => $group_bookings];
+}
+
 function generateInvoicePDF(int $booking_id, ?string $invoice_number_override = null, bool $asStatement = false)
 {
     global $pdo, $tcpdf_loaded;
 
     try {
-        // Get the requested booking
-        $stmt = $pdo->prepare("
-            SELECT b.*, r.name as room_name, r.image_url,
-                   s.setting_value as site_name
-            FROM bookings b
-            JOIN rooms r ON b.room_id = r.id
-            JOIN site_settings s ON s.setting_key = 'site_name'
-            WHERE b.id = ?
-        ");
-        $stmt->execute([$booking_id]);
-        $booking = $stmt->fetch(PDO::FETCH_ASSOC);
-
-        if (!$booking) {
+        $docRows = rh_invoice_doc_rows($pdo, $booking_id);
+        if ($docRows === null) {
             throw new Exception("Booking not found");
         }
-
-        if (function_exists('getBookingRoomLabel')) {
-            $room_assignment = getBookingRoomLabel((int)$booking['id']);
-            if ($room_assignment !== '') {
-                $booking['room_name'] = trim((string)$booking['room_name'] . ' - ' . $room_assignment);
-            }
-        }
-        $booking['room_name'] = rh_room_label_with_guest((string)$booking['room_name'], $booking['room_guest_name'] ?? '');
-
-        // For group bookings, always work from the primary booking so the invoice
-        // shows all rooms.  If the requested booking is a secondary one, redirect
-        // the invoice to its primary.
-        $is_secondary = !empty($booking['primary_booking_id']);
-        if ($is_secondary) {
-            $primary_id = (int)$booking['primary_booking_id'];
-            $stmt->execute([$primary_id]);
-            $primary = $stmt->fetch(PDO::FETCH_ASSOC);
-            if ($primary) {
-                $booking    = $primary;
-                $booking_id = $primary_id;
-                if (function_exists('getBookingRoomLabel')) {
-                    $room_assignment = getBookingRoomLabel((int)$booking['id']);
-                    if ($room_assignment !== '') {
-                        $booking['room_name'] = trim((string)$booking['room_name'] . ' - ' . $room_assignment);
-                    }
-                }
-                $booking['room_name'] = rh_room_label_with_guest((string)$booking['room_name'], $booking['room_guest_name'] ?? '');
-            }
-        }
-
-        // Fetch all sibling bookings for multi-room groups (secondaries that share
-        // this primary booking id, including the primary itself).
-        $group_bookings = [];
-        $siblings_stmt  = $pdo->prepare("
-            SELECT b.id, b.booking_reference, b.total_amount, b.child_supplement_total,
-                   b.tourism_levy_amount, b.vat_amount, b.total_with_vat,
-                   b.child_guests, b.child_price_multiplier, b.child_charge_mode, b.child_charge_amount, b.free_children,
-                   b.occupancy_type, b.number_of_nights, b.room_guest_name,
-                   r.name as room_name
-            FROM bookings b
-            JOIN rooms r ON b.room_id = r.id
-            WHERE (b.id = ? OR b.primary_booking_id = ?)
-            ORDER BY b.id ASC
-        ");
-        $siblings_stmt->execute([$booking_id, $booking_id]);
-        $group_bookings = $siblings_stmt->fetchAll(PDO::FETCH_ASSOC);
-        if (function_exists('getBookingRoomLabel')) {
-            foreach ($group_bookings as &$group_booking) {
-                $room_assignment = getBookingRoomLabel((int)$group_booking['id']);
-                if ($room_assignment !== '') {
-                    $group_booking['room_name'] = trim((string)$group_booking['room_name'] . ' - ' . $room_assignment);
-                }
-                $group_booking['room_name'] = rh_room_label_with_guest((string)$group_booking['room_name'], $group_booking['room_guest_name'] ?? '');
-            }
-            unset($group_booking);
-        }
-        // If only one result it's a normal single-room booking — pass empty array
-        if (count($group_bookings) <= 1) {
-            $group_bookings = [];
-        }
+        $booking        = $docRows['booking'];
+        $booking_id     = (int)$booking['id'];
+        $group_bookings = $docRows['group_bookings'];
 
         // Get hotel contact details
         $site_name = getSetting('site_name');
@@ -645,7 +656,7 @@ if (!function_exists('rh_inv_quotation_html')) {
 /**
  * Build HTML content for invoice - Stunning State-of-the-Art PDF Design
  */
-function buildInvoiceHTML(array $booking, string $invoice_number, string $site_name, string $email_address, string $phone_number, string $address, string $currency_symbol, array $group_bookings = [], ?array $preload = null, bool $asStatement = false)
+function buildInvoiceHTML(array $booking, string $invoice_number, string $site_name, string $email_address, string $phone_number, string $address, string $currency_symbol, array $group_bookings = [], ?array $preload = null, bool $asStatement = false, ?array &$docTotals = null)
 {
     global $pdo;
 
@@ -868,6 +879,9 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     $statusFg      = $isPaid ? '#1E6C43' : '#A63A3A';
     // Paid-in-full checkout document: a STATEMENT (never asks for money), same number as the invoice record.
     $statementMode = $asStatement && $isPaid;
+    // The figures this document prints (the invoice email states the same total and balance as its copy).
+    $docTotals = ['total' => round((float)$totalWithVat, 2), 'paid' => round((float)$amountPaid, 2), 'balance' => $isPaid ? 0.0 : round((float)$balanceDue, 2),
+        'ids' => array_values(array_map('intval', $summaryIds))];
     $totalDueDisplay = $currency_symbol . ' ' . number_format($totalWithVat, 2);
     $amountPaidDisplay = $currency_symbol . ' ' . number_format($amountPaid, 2);
     $balanceDueDisplay = $currency_symbol . ' ' . number_format($balanceDue, 2);
@@ -915,13 +929,13 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         $disc = $planLabel !== '' && (float)($row['rate_plan_discount'] ?? 0) > 0;
         $surch = $planLabel !== '' && (float)($row['rate_plan_discount'] ?? 0) < -BALANCE_TOLERANCE;
         $n = (int)$br['nights'];
-        return 'Accommodation - booked at ' . rh_hist_money($br['per_night'], $cur) . ' a night'
+        return 'Accommodation - booked at ' . rh_booked_rate_money($br['per_night'], $cur) . ' a night'
             . ($disc ? ' after the ' . $planLabel . ' discount' : '')
             . ($surch ? ' including the ' . $planLabel . ' surcharge' : '')
             . ($incl ? ', ' . implode(' and ', $incl) . ' included' : '')
             . ' x ' . $n . ($n === 1 ? ' night' : ' nights')
-            . ($br['child'] > 0 ? ' + children ' . rh_hist_money($br['child'], $cur) : '')
-            . ($br['package'] > 0 ? ' + package ' . rh_hist_money($br['package'], $cur) : '');
+            . ($br['child'] > 0 ? ' + children ' . rh_booked_rate_money($br['child'], $cur) : '')
+            . ($br['package'] > 0 ? ' + package ' . rh_booked_rate_money($br['package'], $cur) : '');
     };
     // The Unit column holds the line basis (rh_doc_stay_lines): exclusive = net, inclusive/off = without levy.
     $unitLevy = $tourismLevyAmt > 0;
@@ -1509,6 +1523,10 @@ function sendPaymentInvoiceEmail(int $booking_id)
 
         $invoice_file = '';
         $invoice_number = (string)($latestPayment['invoice_number'] ?? '');
+        if (trim($invoice_number) === '') {
+            // The booking already holds its invoice number (converted quotation / Generate Invoice): reuse it, never a second one.
+            $invoice_number = trim((string)($booking['final_invoice_number'] ?? ''));
+        }
         $invoice_path = (string)($latestPayment['invoice_path'] ?? '');
 
         if (!empty($latestPayment['invoice_generated']) && $invoice_path !== '') {
@@ -1630,6 +1648,10 @@ function sendPaymentInvoiceEmailWithCC(int $booking_id, array $ccRecipients = []
 
         $invoice_file = '';
         $invoice_number = (string)($latestPayment['invoice_number'] ?? '');
+        if (trim($invoice_number) === '') {
+            // The booking already holds its invoice number (converted quotation / Generate Invoice): reuse it, never a second one.
+            $invoice_number = trim((string)($booking['final_invoice_number'] ?? ''));
+        }
         $invoice_path = (string)($latestPayment['invoice_path'] ?? '');
 
         if (!empty($latestPayment['invoice_generated']) && $invoice_path !== '') {
@@ -1698,6 +1720,51 @@ function sendPaymentInvoiceEmailWithCC(int $booking_id, array $ccRecipients = []
 }
 
 /**
+ * The full invoice copy printed inside the invoice email. A room booking is built from rh_invoice_doc_rows() - the same
+ * lead row and rooms as the attached PDF (generateInvoicePDF) - so the copy, its total and its balance always match the
+ * attachment (never the one room the email was asked for, never the company name in the Guest row). Anything else falls
+ * back to $booking as given. Never throws: a build error gives html '' (logged).
+ * @return array{html:string,totals:?array} totals: total, paid, balance, ids (null when not built)
+ */
+function rh_invoice_email_copy(PDO $pdo, array $booking, string $invoice_number): array
+{
+    $out = ['html' => '', 'totals' => null];
+    if (!function_exists('buildInvoiceHTML')) {
+        return $out;
+    }
+    try {
+        $docBooking = $booking;
+        $docGroup = [];
+        if (!empty($booking['id']) && empty($booking['booking_type'] ?? null) && !empty($booking['room_id'])) {
+            $rows = rh_invoice_doc_rows($pdo, (int)$booking['id']);
+            if ($rows !== null) {
+                $docBooking = $rows['booking'];
+                $docGroup = $rows['group_bookings'];
+            }
+        }
+        $totals = null;
+        $out['html'] = (string)buildInvoiceHTML(
+            $docBooking,
+            $invoice_number,
+            getSetting('site_name'),
+            rh_guest_contact_email(),
+            getSetting('phone_main'),
+            implode(', ', array_filter([getSetting('address_line1'), getSetting('address_line2'), getSetting('address_country')])),
+            getSetting('currency_symbol'),
+            $docGroup,
+            null,
+            false,
+            $totals
+        );
+        $out['totals'] = is_array($totals) ? $totals : null;
+    } catch (Throwable $e) {
+        error_log('rh_invoice_email_copy: failed to build invoice doc HTML: ' . $e->getMessage());
+        $out = ['html' => '', 'totals' => null];
+    }
+    return $out;
+}
+
+/**
  * Send invoice email to guest with CC recipients
  */
 function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, array $cc_recipients = [], string $invoice_number = '')
@@ -1728,11 +1795,19 @@ function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, arr
                     $booking['amount_due'] = rh_billing_group_split($pdo, (int)$booking['id'])['company_due'];
                 }
                 $cc_recipients = array_values(array_unique(array_merge($cc_recipients, $ibBill['billing_cc'])));
+                $ibWho = rh_billing_recipients_text($ibBill['billing_email'], $cc_recipients); // said in full to staff (fix 2026-11-13)
             }
         }
     }
 
     try {
+        // The full invoice copy printed inside the email: built from the same rows as the attached PDF (fix 2026-11-13),
+        // and the email's total / balance are that document's figures.
+        $invCopy = rh_invoice_email_copy($pdo, $booking, $invoice_number);
+        if ($invCopy['totals'] !== null) {
+            $booking['amount_due'] = $invCopy['totals']['balance'];
+        }
+
         // Get room details
         $stmt = $pdo->prepare("SELECT * FROM rooms WHERE id = ?");
         $stmt->execute([$booking['room_id']]);
@@ -1825,7 +1900,7 @@ function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, arr
                         <!-- TOTAL -->
                         <div style="margin-top: 20px; padding-top: 20px; border-top: 2px solid #8B7355; text-align: center;">
                             <span style="font-size: 12px; color: #9E9E9E; text-transform: uppercase; letter-spacing: 1px;">Invoice Total</span>
-                            <p style="margin: 8px 0 0 0; font-size: 28px; font-weight: 600; color: #8B7355;">' . $currency_symbol . ' ' . number_format((float)(($booking['total_with_vat'] ?? 0) > 0 ? $booking['total_with_vat'] : $booking['total_amount']), 2) . '</p>
+                            <p style="margin: 8px 0 0 0; font-size: 28px; font-weight: 600; color: #8B7355;">' . $currency_symbol . ' ' . number_format($invCopy["totals"] !== null ? (float)$invCopy["totals"]["total"] : (float)(($booking["total_with_vat"] ?? 0) > 0 ? $booking["total_with_vat"] : $booking["total_amount"]), 2) . '</p>
                             ' . ((float)($booking['amount_due'] ?? 0) > BALANCE_TOLERANCE ? '<p style="margin: 8px 0 0 0; font-size: 15px; color: #B71C1C; font-weight: 600;">Balance due: ' . $currency_symbol . ' ' . number_format((float)$booking['amount_due'], 2) . '</p>' : '<p style="margin: 8px 0 0 0; font-size: 15px; color: #2E7D32; font-weight: 600;">Paid in full</p>') . '
                         </div>
                     </div>
@@ -1870,37 +1945,23 @@ function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, arr
             $textBody = $dbTemplate['text_body'] ?? '';
         }
 
-        // Append full invoice document HTML to the email body
-        if (function_exists('buildInvoiceHTML')) {
-            try {
-                $invDocHtml = buildInvoiceHTML(
-                    $booking,
-                    $invoice_number,
-                    getSetting('site_name'),
-                    rh_guest_contact_email(),
-                    getSetting('phone_main'),
-                    implode(', ', array_filter([getSetting('address_line1'), getSetting('address_line2'), getSetting('address_country')])),
-                    getSetting('currency_symbol')
-                );
-                if ($invDocHtml !== '') {
-                    $docSection = '<div style="background:#d5cfc4;padding:24px 20px 0;">'
-                        . '<div style="max-width:720px;margin:0 auto;">'
-                        . '<p style="font-family:Helvetica,Arial,sans-serif;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#9b8f7e;margin:0 0 12px;text-align:center;">Full Invoice</p>'
-                        . $invDocHtml
-                        . '</div></div>';
-                    if (stripos($htmlBody, '</body>') !== false) {
-                        $htmlBody = (string)preg_replace('/<\/body>/i', $docSection . '</body>', $htmlBody, 1);
-                    } else {
-                        $htmlBody .= $docSection;
-                    }
-                }
-            } catch (Throwable $e) {
-                error_log('sendInvoiceEmailToGuestWithCC: failed to build invoice doc HTML: ' . $e->getMessage());
+        // Append full invoice document HTML (built above) to the email body
+        $invDocHtml = $invCopy['html'];
+        if ($invDocHtml !== '') {
+            $docSection = '<div style="background:#d5cfc4;padding:24px 20px 0;">'
+                . '<div style="max-width:720px;margin:0 auto;">'
+                . '<p style="font-family:Helvetica,Arial,sans-serif;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:#9b8f7e;margin:0 0 12px;text-align:center;">Full Invoice</p>'
+                . $invDocHtml
+                . '</div></div>';
+            if (stripos($htmlBody, '</body>') !== false) {
+                $htmlBody = (string)preg_replace('/<\/body>/i', $docSection . '</body>', $htmlBody, 1);
+            } else {
+                $htmlBody .= $docSection;
             }
         }
 
         // Send email with attachment and CC recipients
-        return sendEmailWithAttachmentAndCC(
+        $ibSend = sendEmailWithAttachmentAndCC(
             $booking['guest_email'],
             $booking['guest_name'],
             $subject,
@@ -1909,6 +1970,12 @@ function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, arr
             $cc_recipients,
             $textBody
         );
+        if (!empty($ibWho) && is_array($ibSend)) {
+            // Company invoice: the staff message names the billing email and every copy address it went to.
+            $ibSend['message'] = (!empty($ibSend['success']) ? 'Invoice emailed to ' : 'Invoice NOT emailed to ') . $ibWho
+                . (!empty($ibSend['success']) ? '.' : ': ' . (string)($ibSend['message'] ?? 'unknown error'));
+        }
+        return $ibSend;
     } catch (Exception $e) {
         error_log("Send Invoice to Guest Error: " . $e->getMessage());
         return ['success' => false, 'message' => $e->getMessage()];
@@ -2166,8 +2233,13 @@ function generateAndSendFinalInvoice(int $booking_id, ?int $processed_by = null,
             }
         }
 
-        // Generate final invoice
-        $invoice_result = generateInvoicePDF($booking_id, null, $balanceDueAtCheckout <= BALANCE_TOLERANCE);
+        // Generate final invoice. A booking that already has its invoice number (a converted quotation, Generate Invoice,
+        // an invoice sent before any payment) keeps it: the final invoice is that same invoice, never a second number
+        // (fix 2026-11-13). Only a booking with no number yet takes the next one.
+        $fiNumStmt = $pdo->prepare("SELECT final_invoice_number FROM bookings WHERE id = ?");
+        $fiNumStmt->execute([$booking_id]);
+        $fiExistingNumber = trim((string)$fiNumStmt->fetchColumn());
+        $invoice_result = generateInvoicePDF($booking_id, $fiExistingNumber !== '' ? $fiExistingNumber : null, $balanceDueAtCheckout <= BALANCE_TOLERANCE);
         if (!$invoice_result) {
             return ['success' => false, 'message' => 'Failed to generate final invoice'];
         }
@@ -2239,7 +2311,7 @@ function generateAndSendFinalInvoice(int $booking_id, ?int $processed_by = null,
                     $pdo->prepare("UPDATE bookings SET final_invoice_sent_at = NOW() WHERE id = ?")->execute([$booking_id]);
                 }
                 $coNote = !empty($coResult['success'])
-                    ? 'Final invoice emailed to ' . $coBill['name'] . ' (' . $coBill['billing_email'] . '), not to the guest.'
+                    ? 'Final invoice emailed to ' . $coBill['name'] . ' at ' . rh_billing_recipients_text($coBill['billing_email'], $coCc) . ', not to the guest.'
                     : 'Final invoice email to ' . $coBill['name'] . ' failed: ' . (string)($coResult['message'] ?? 'unknown error') . '.';
             }
             if (function_exists('logBookingEvent')) {

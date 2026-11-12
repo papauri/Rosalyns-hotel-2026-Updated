@@ -193,6 +193,15 @@ $paidDisplay = (float)($bookingDetails['amount_paid'] ?? 0);
 $grandTotalDisplay = $paidDisplay + (float)$outstandingAmount;
 // Room bookings: the nightly price the guest BOOKED at and the nights (owner 2026-11-09), so nobody charges today's price.
 $paBookedRate = ($bookingType === 'room' && $bookingDetails) ? rh_booked_rate_for_booking($pdo, (int)$bookingId) : null;
+// Company pays later: a new payment on an on-account room booking asks who paid (guest / company), nothing preselected.
+$paPreSplit = null;
+if (!$editId && $bookingType === 'room' && $bookingDetails) {
+    require_once __DIR__ . '/../includes/billing-accounts.php';
+    $paPreSplit = rh_booking_bill_split($pdo, (int)$bookingId);
+    if (empty($paPreSplit['on_account'])) {
+        $paPreSplit = null;
+    }
+}
 
 // Process form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
@@ -449,6 +458,56 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             } else {
                 // Create new payment
+                // Company pays later (fix 2026-11-13): on an on-account room booking staff say who paid, nothing preselected,
+                // exactly like the booking's Record payment dialog. Company money becomes a one-line company payment through
+                // rh_billing_record_remittance() (the same path as Company accounts and the dialog: lock, limit = what the
+                // company owes, VAT split, receipt number, History, system log); guest money carries on below as before.
+                if ($bookingType === 'room') {
+                    require_once __DIR__ . '/../includes/billing-accounts.php';
+                    $paBill = rh_booking_billing($pdo, ['id' => (int)$bookingId]);
+                    if (!empty($paBill['on_account'])) {
+                        $paPaidBy = (string)($_POST['paid_by'] ?? '');
+                        if (!in_array($paPaidBy, ['guest', 'company'], true)) {
+                            throw new Exception('Choose who paid: the guest or ' . $paBill['name'] . '. Nothing was recorded.');
+                        }
+                        if ($paPaidBy === 'company') {
+                            // Same permission as recording it on Company accounts (page company_accounts + Add Payment).
+                            if (!hasPermission((int)($user['id'] ?? 0), 'company_accounts') || !hasPermission((int)($user['id'] ?? 0), 'payment_add')) {
+                                throw new Exception('You do not have permission to record company payments (Company accounts). Nothing was recorded.');
+                            }
+                            if (!empty($_POST['confirm_overpay'])) {
+                                throw new Exception('A company payment cannot be more than the company owes on this booking. Nothing was recorded.');
+                            }
+                            if (!in_array($paymentStatus, ['completed', 'paid'], true)) {
+                                throw new Exception('A company payment is recorded as money received: set the status to Completed or Paid. Nothing was recorded.');
+                            }
+                            $paRem = rh_billing_record_remittance($pdo, (int)$paBill['account_id'], [
+                                'amount' => (string)$paymentAmount, 'payment_method' => (string)$paymentMethod, 'received_date' => (string)$paymentDate,
+                                'bank_reference' => (string)$transactionReference, 'notes' => (string)$notes, 'lines' => [(int)$bookingId => (string)$paymentAmount],
+                                'client_uuid' => idem_normalize_uuid($__incomingClientUuid ?? null),
+                            ], $user);
+                            unset($_SESSION['admin_payment_add_uuid']);
+                            $paLeg = $paRem['legs'][0];
+                            if (function_exists('logBookingAudit')) {
+                                try {
+                                    logBookingAudit((int)$bookingId, 'payment_consolidation', ['amount_paid' => null],
+                                        ['amount_paid' => $paymentAmount, 'payment_reference' => $paLeg['payment_reference'], 'paid_by' => 'company', 'company' => $paBill['name'],
+                                            'remittance' => $paRem['reference']],
+                                        'Company payment ' . $paRem['reference'] . ' from ' . $paBill['name'] . ' recorded on the booking (Payments > Add Payment) by '
+                                            . ($user['full_name'] ?? ($user['username'] ?? '')), (string)$paLeg['reference']);
+                                } catch (Throwable $paAuditEx) {
+                                    error_log('payment-add company audit: ' . $paAuditEx->getMessage());
+                                }
+                            }
+                            $paMsg = $paBill['name'] . ' paid ' . $currency_symbol . ' ' . number_format((float)$paymentAmount, 2) . ' (company payment ' . $paRem['reference']
+                                . ', receipt ' . $paLeg['receipt_number'] . '). The company still owes ' . $currency_symbol . ' ' . number_format((float)$paLeg['company_due_after'], 2)
+                                . ' on this booking. Send the payment advice from Company accounts.';
+                            $_SESSION['alert'] = ['type' => 'success', 'message' => htmlspecialchars($paMsg, ENT_QUOTES, 'UTF-8')];
+                            header('Location: ' . ((($_POST['return_to'] ?? '') === 'bookings') ? 'bookings.php' : 'payment-details.php?id=' . (int)$paLeg['payment_id'] . '&new_payment=1'));
+                            exit;
+                        }
+                    }
+                }
                 // Lifecycle guard: block new payments on terminal / fully-settled bookings
                 if ($bookingType === 'room') {
                     $lcStmt = $pdo->prepare("SELECT status, amount_paid, amount_due, total_amount, deleted_at FROM bookings WHERE id = ?");
@@ -596,35 +655,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $excess = round(min($ovCredit, $paymentAmount), 2);
                         if ($excess > BALANCE_TOLERANCE) {
                             $ovRef = (string)($ovRow['ref'] ?? '');
-                            // Note VAT = the account's pro-rata share (levy outside the VAT base), as the refund legs reverse it
-                            $ovSplit = rh_account_vat_split($pdo, $bookingType, (int)$bookingId, $excess, (float)$vatRate);
-                            $cnResult = issueCreditNote($pdo, [
-                                'booking_type'      => $bookingType, // gym/event are stored as 'goodwill' (enum); real type+id kept in the notes
-                                'booking_id'        => $bookingId,
-                                'booking_reference' => $ovRef,
-                                'guest_name'        => trim((string)($ovRow['contact_name'] ?? '')) !== '' ? (string)$ovRow['contact_name'] : 'Customer',
-                                'guest_email'       => (string)($ovRow['contact_email'] ?? ''),
-                                'amount'            => $excess,
-                                'vat_rate'          => (float)$ovSplit['rate'],
-                                'vat_amount'        => (float)$ovSplit['vat'],
-                                'reason'            => 'overpayment',
-                                'reason_notes'      => 'Overpaid by ' . number_format($excess, 2) . ' on payment ' . $paymentRef . ' [account: ' . $bookingType . ' #' . $bookingId . ']',
-                                'issued_by'         => (int)$user['id'],
-                                'send_email'        => false,
-                                'generate_pdf'      => false,
-                            ]);
-                            if (empty($cnResult['success'])) {
-                                throw new Exception('Overpayment credit note could not be created: ' . ($cnResult['error'] ?? 'unknown error') . '. Payment not recorded.');
-                            }
-                            $cnLegs = recordCreditNoteRefundLegs($pdo, (int)$bookingId, $ovRef, $excess, (int)$cnResult['credit_note_id'], (string)$cnResult['credit_note_number'], (int)$user['id'], 'overpayment', $bookingType);
-                            if ($cnLegs['total'] + BALANCE_TOLERANCE < $excess) {
-                                throw new Exception('Could not move the full overpayment into the credit note. Payment not recorded.');
+                            // One note per payer on a company account (company money overpaid -> made out to the company), else
+                            // one note to the guest/contact; VAT = the account's pro-rata share (levy outside the VAT base).
+                            try {
+                                $ovNotes = rh_issue_overpay_credit_notes($pdo, $bookingType, (int)$bookingId, $excess,
+                                    ['ref' => $ovRef, 'name' => (string)($ovRow['contact_name'] ?? ''), 'email' => (string)($ovRow['contact_email'] ?? '')],
+                                    (string)$paymentRef, (int)$user['id'], (float)$vatRate);
+                            } catch (RuntimeException $ovEx) {
+                                throw new Exception($ovEx->getMessage() . ' Payment not recorded.');
                             }
                             if (!rh_sync_account_payments($pdo, $bookingType, (int)$bookingId)) {
                                 throw new Exception('Could not recalculate the account balance.');
                             }
+                            $cnResult = ['credit_note_id' => (int)$ovNotes[0]['credit_note_id'], 'credit_note_number' => implode(', ', array_column($ovNotes, 'credit_note_number')),
+                                'notes' => $ovNotes];
                             $overpayCnId = (int)$cnResult['credit_note_id'];
-                            $overpayEmail = (string)($ovRow['contact_email'] ?? '');
+                            $overpayEmail = (string)$ovNotes[0]['email'];
                             $overpayMsg = ' Overpayment detected — credit note ' . $cnResult['credit_note_number'] . ' for ' . number_format($excess, 2) . ' issued and queued under Credit Notes.';
                         }
                     }
@@ -665,12 +711,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                if ($overpayCnId > 0 && $overpayEmail !== '') {
-                    try {
-                        sendCreditNoteEmail($pdo, $overpayCnId);
-                    } catch (Throwable $cnMailEx) {
-                        error_log('Overpayment credit note email failed: ' . $cnMailEx->getMessage());
-                    }
+                if ($overpayCnId > 0) {
+                    rh_email_overpay_credit_notes($pdo, $cnResult); // every note with an address (company note -> billing email)
                 }
 
                 // RECEIPT: proof of money received. Every account type (room, conference, gym, event), once,
@@ -950,6 +992,19 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                             </div>
                             <?php endif; /* $pa_any_booking */ ?>
                         <?php endif; ?>
+                        <?php if (!$editId && $pa_mod_bookings): ?>
+                            <!-- Company pays later: who paid, on an on-account booking only (nothing preselected; the server checks it too) -->
+                            <fieldset class="rh-choices pa-paid-by" id="pa-paid-by" <?php echo $paPreSplit ? '' : 'hidden disabled'; ?>>
+                                <legend>Paid by * <small id="pa-paid-by-note"><?php
+                                    if ($paPreSplit) {
+                                        echo htmlspecialchars($paPreSplit['name'] . ' owes ' . $currency_symbol . ' ' . number_format((float)$paPreSplit['company_due'], 2)
+                                            . ' · the guest owes ' . $currency_symbol . ' ' . number_format((float)$paPreSplit['guest_due'], 2), ENT_QUOTES, 'UTF-8');
+                                    }
+                                ?></small></legend>
+                                <label class="rh-choice"><input type="radio" name="paid_by" value="guest" required> <span>The guest</span></label>
+                                <label class="rh-choice"><input type="radio" name="paid_by" value="company" required> <span><span id="pa-paid-by-company"><?php echo htmlspecialchars((string)($paPreSplit['name'] ?? 'The company'), ENT_QUOTES, 'UTF-8'); ?></span> (company payment)<small>Recorded as a company payment, like Company accounts. Needs the Company accounts permission.</small></span></label>
+                            </fieldset>
+                        <?php endif; ?>
                     </div>
 
                     <!-- Step 2: Payment method visual picker -->
@@ -1033,7 +1088,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                                         if ($paRateOk) {
                                             // Editing a payment: this payment is already inside Paid / Balance, so show only the booked rate
                                             // (the hint below the box shows the balance this edit may use).
-                                            echo htmlspecialchars('Booked at ' . $paBookedRate['text'] . ($editId ? '' : ' · Paid so far ' . rh_hist_money($paidDisplay, $paBookedRate['currency']) . ' · Balance due ' . rh_hist_money(max(0, (float)$outstandingAmount), $paBookedRate['currency'])));
+                                            echo htmlspecialchars('Booked at ' . $paBookedRate['text'] . ($editId ? '' : ' · Paid so far ' . rh_booked_rate_money($paidDisplay, $paBookedRate['currency']) . ' · Balance due ' . rh_booked_rate_money(max(0, (float)$outstandingAmount), $paBookedRate['currency'])));
                                         }
                                     ?></p>
                                     <small style="display:block;margin-top:0.25rem;color:var(--finance-muted);">The nightly price this guest booked at (VAT and levy included) times the nights. Charge from this, not today's room price. The balance also counts any extras on the bill.</small>
@@ -1218,11 +1273,11 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
             return CURRENCY + Number(n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
         }
         function el(id) { return document.getElementById(id); }
-        /* Same money format as the booked-rate line (rh_hist_money): "K356,000" / "MWK 356,000.50". */
+        /* Same money format as the booked-rate line (rh_booked_rate_money): "K356,000.00" / "MWK 356,000.50", always 2 decimals. */
         function money(n) {
             let v = Math.round((Number(n) || 0) * 100) / 100;
             const neg = v < 0; v = Math.abs(v);
-            const dec = Math.abs(v - Math.round(v)) > 0.004 ? 2 : 0;
+            const dec = 2;
             const sep = (CURRENCY.length > 1 && /^[A-Za-z]+$/.test(CURRENCY)) ? ' ' : '';
             return (neg ? '-' : '') + CURRENCY + sep + v.toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
         }
@@ -1283,11 +1338,38 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
             }
         }
 
+        /* Company pays later: "Paid by" shows only for an on-account room booking; nothing preselected, required then. */
+        function setPaidBy(b) {
+            const fs = el('pa-paid-by');
+            if (!fs) return;
+            const on = !!b;
+            fs.hidden = !on;
+            fs.disabled = !on;
+            fs.querySelectorAll('input[name="paid_by"]').forEach(function (r) { r.checked = false; });
+            if (on) {
+                el('pa-paid-by-company').textContent = b.company_name || 'The company';
+                el('pa-paid-by-note').textContent = (b.company_name || 'The company') + ' owes ' + fmt(b.company_due) + ' · the guest owes ' + fmt(b.guest_due);
+            }
+            updatePreview();
+        }
+        function paidByCompany() {
+            const fs = el('pa-paid-by');
+            const c = fs && !fs.disabled ? fs.querySelector('input[name="paid_by"]:checked') : null;
+            return !!(c && c.value === 'company');
+        }
+        if (el('pa-paid-by')) {
+            el('pa-paid-by').querySelectorAll('input[name="paid_by"]').forEach(function (r) { r.addEventListener('change', updatePreview); });
+        }
+
         /* Balance due next to the amount; more than owed needs the explicit tick (the server enforces it too). */
         function syncOverpay(gross) {
             const hint = el('pa-due-hint'), wrap = el('pa-over-wrap'), warn = el('pa-over-warn'), cb = el('pa-over-cb');
             if (!hint || !wrap) return;
             if (_linkedDue === null) { hint.style.display = 'none'; wrap.style.display = 'none'; cb.required = false; return; }
+            if (paidByCompany()) {
+                // A company payment can never be more than the company owes (no overpay tick; the server refuses it).
+                hint.style.display = 'none'; wrap.style.display = 'none'; cb.required = false; cb.checked = false; return;
+            }
             const limit = _linkedDue + EDIT_CREDITED;
             hint.style.display = '';
             hint.textContent = 'Balance due ' + fmt(limit);
@@ -1487,6 +1569,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
             }
 
             renderBookedRate(_paid, _due);
+            setPaidBy(_activeType === 'room' && b.on_account ? b : null);
 
             const dueEl = el('psc-due');
             dueEl.textContent = fmt(_linkedDue);
@@ -1535,6 +1618,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
             _linkedDue   = null;
             _linkedRate  = null;
             renderBookedRate(0, 0);
+            setPaidBy(null);
             if (selectedCard) selectedCard.hidden = true;
             if (pickerEl)     pickerEl.style.display = '';
             if (searchInput)  searchInput.value = '';

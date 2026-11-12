@@ -283,7 +283,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['invoice_action'])) {
                     }
                     break;
                 }
-                $invoice_result = generateInvoicePDF($booking_id);
+                // The booking keeps the invoice number it already holds (a converted quotation): never a second number.
+                $genNumStmt = $pdo->prepare("SELECT final_invoice_number FROM bookings WHERE id = ?");
+                $genNumStmt->execute([$booking_id]);
+                $genNumber = trim((string)$genNumStmt->fetchColumn());
+                $invoice_result = generateInvoicePDF($booking_id, $genNumber !== '' ? $genNumber : null);
                 if ($invoice_result) {
                     // Update booking with invoice details if not exists
                     $updateStmt = $pdo->prepare("
@@ -390,7 +394,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['invoice_action'])) {
 
                 // Auto-generate invoice if missing
                 if (empty($waBooking['final_invoice_path'])) {
-                    $inv = generateInvoicePDF($booking_id);
+                    $inv = generateInvoicePDF($booking_id, trim((string)($waBooking['final_invoice_number'] ?? '')) !== '' ? trim((string)$waBooking['final_invoice_number']) : null);
                     if ($inv) {
                         $pdo->prepare("UPDATE bookings SET final_invoice_path = ?, final_invoice_number = COALESCE(final_invoice_number, ?), updated_at = NOW() WHERE id = ? AND final_invoice_path IS NULL")
                             ->execute([$inv['relative_path'], $inv['invoice_number'], $booking_id]);
@@ -2767,8 +2771,10 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         function showBookingActionMessage(message, type) {
             var text = String(message || '').trim();
             if (!text) return;
+            // Alert.show renders HTML; these messages are plain text and can carry staff notes / guest names.
+            var safe = text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
             if (window.Alert && typeof window.Alert.show === 'function') {
-                Alert.show(text, type || 'info', {
+                Alert.show(safe, type || 'info', {
                     title:   type === 'error' ? 'Action Failed' : _bookingToastTitle(text),
                     timeout: 5500,
                     position: 'top-right'
@@ -2776,7 +2782,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 return;
             }
             (window.__rhToastQueue = window.__rhToastQueue || []).push({
-                msg: text, type: type || 'info',
+                msg: safe, type: type || 'info',
                 opts: { title: type === 'error' ? 'Action Failed' : _bookingToastTitle(text), timeout: 5500 }
             });
         }

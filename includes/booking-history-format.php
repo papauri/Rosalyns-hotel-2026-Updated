@@ -10,6 +10,19 @@
  * check_out / cancel / edit.
  */
 
+if (!function_exists('rh_booked_rate_money')) {
+    /**
+     * "K356,000.00" / "MWK 356,000.50": the booked-rate line's money (booked rate x nights, owner 2026-11-13), always two
+     * decimals like every other money figure in the app. Same sign and currency spacing as rh_hist_money().
+     */
+    function rh_booked_rate_money($amount, string $cur): string
+    {
+        $a = round((float)$amount, 2);
+        $sep = (strlen($cur) > 1 && ctype_alpha($cur)) ? ' ' : '';
+        return ($a < 0 ? '-' : '') . $cur . $sep . number_format(abs($a), 2);
+    }
+}
+
 if (!function_exists('rh_hist_tol')) {
     function rh_hist_tol(): float
     {
@@ -934,7 +947,7 @@ if (!function_exists('rh_hist_tol')) {
                 $src = ['room_type' => 'the ' . $occWord . 'price of ' . $room . ' at the time',
                     'joined_room' => 'the joined-rooms price at the time', 'rate_plan' => 'the ' . $occWord . 'price of ' . $room . ' at the time, after the rate plan'][(string)($snap['source'] ?? '')]
                     ?? 'the room price at the time';
-                $lines[] = rh_hist_money($rate, $cur) . ' a night × ' . $sn . ' night' . ($sn === 1 ? '' : 's') . ' = ' . rh_hist_money(round($rate * $sn, 2), $cur) . ', using ' . $src . '.';
+                $lines[] = rh_booked_rate_money($rate, $cur) . ' a night × ' . $sn . ' night' . ($sn === 1 ? '' : 's') . ' = ' . rh_booked_rate_money(round($rate * $sn, 2), $cur) . ', using ' . $src . '.';
                 if (isset($snap['list_rate']) && abs((float)$snap['list_rate'] - $rate) > rh_hist_tol()) {
                     $lines[] = 'List price ' . rh_hist_money((float)$snap['list_rate'], $cur) . ' a night; rate plan ' . ($snap['rate_plan_label'] ?? $ratePlan) . ' made it ' . rh_hist_money($rate, $cur) . '.';
                 }
@@ -943,7 +956,7 @@ if (!function_exists('rh_hist_tol')) {
             $child = (float)($snap['child_supplement'] ?? $child);
         } else {
             $nightly = round(($full - $child) / $n, 2);
-            $lines[] = rh_hist_money($nightly, $cur) . ' a night × ' . $n . ' night' . ($n === 1 ? '' : 's') . ' = ' . rh_hist_money(round($nightly * $n, 2), $cur)
+            $lines[] = rh_booked_rate_money($nightly, $cur) . ' a night × ' . $n . ' night' . ($n === 1 ? '' : 's') . ' = ' . rh_booked_rate_money(round($nightly * $n, 2), $cur)
                 . ' (worked out from the saved total: this booking was made before price details were recorded).';
             $compareRate = $nightly;
         }

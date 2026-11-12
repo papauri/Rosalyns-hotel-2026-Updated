@@ -21,8 +21,16 @@
 
 require_once __DIR__ . '/finance-account-sync.php';
 require_once __DIR__ . '/finance-schema.php';
-require_once __DIR__ . '/../../config/invoice.php';   // file scope: it sets globals (TCPDF) the PDF builders read
-require_once __DIR__ . '/../../config/receipts.php';
+// The document builders (config/invoice.php: TCPDF, config/receipts.php) load only when a document is made
+// (rh_payment_edit_docs_load), so viewing Payment details never loads TCPDF. invoice.php declares its TCPDF flag `global`,
+// so loading it from inside a function works.
+if (!function_exists('rh_payment_edit_docs_load')) {
+    function rh_payment_edit_docs_load(): void
+    {
+        require_once __DIR__ . '/../../config/invoice.php';
+        require_once __DIR__ . '/../../config/receipts.php';
+    }
+}
 
 if (!function_exists('rh_payment_edit_methods')) {
     /** Methods staff may pick (the payments.payment_method enum without the credit-note leg). */
@@ -354,6 +362,7 @@ if (!function_exists('rh_payment_edit_after')) {
      */
     function rh_payment_edit_after(PDO $pdo, array $res, bool $emailGuest, array $user): string
     {
+        rh_payment_edit_docs_load();
         $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
         $cur = (string)getSetting('currency_symbol', 'MWK');
         $who = (string)($user['full_name'] ?? '') !== '' ? (string)$user['full_name'] : (string)($user['username'] ?? '');

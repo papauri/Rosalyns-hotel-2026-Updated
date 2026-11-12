@@ -2548,8 +2548,8 @@ $currency_symbol = getSetting('currency_symbol');
                             <span class="ck-row__act">
                                 <?php if ($dState === 'departed' || !$dash_perm('checkout_guest')): ?>
                                 <a class="ck-btn ck-btn--sm" href="booking-details.php?id=<?php echo (int)$d['id']; ?>"><i class="fas fa-eye"></i> View</a>
-                                <?php else: ?>
-                                <a class="ck-btn ck-btn--sm <?php echo $hasBalance ? '' : 'ck-btn--primary'; ?>" href="booking-details.php?id=<?php echo (int)$d['id']; ?>">
+                                <?php else: /* overdue: straight into the checkout settlement (when did the guest leave?) on Bookings */ ?>
+                                <a class="ck-btn ck-btn--sm <?php echo $hasBalance ? '' : 'ck-btn--primary'; ?>" href="<?php echo $dState === 'overdue' ? 'bookings.php?action=checkout&amp;booking_id=' . (int)$d['id'] : 'booking-details.php?id=' . (int)$d['id']; ?>">
                                     <i class="fas <?php echo $hasBalance ? 'fa-hand-holding-dollar' : 'fa-right-from-bracket'; ?>"></i> <?php echo $hasBalance ? 'Settle &amp; check out' : 'Check out'; ?>
                                 </a>
                                 <?php endif; ?>
@@ -3218,6 +3218,12 @@ $currency_symbol = getSetting('currency_symbol');
                         if (data.needs_confirm_room && !roomOverride) {
                             dashboardConfirm({ title: 'Room not marked clean', message: data.message, confirmText: 'Check in anyway', icon: 'fa-broom' })
                                 .then(ok => { if (ok) processCheckIn(bookingId, guestName, true, emailChoice); });
+                            return;
+                        }
+                        if (data.late_checkin_url) {
+                            // Late arrival: open this booking's Late Check-In choices on Bookings (nothing was changed here).
+                            dashboardConfirm({ title: 'Late arrival', message: data.message, confirmText: 'Open Late Check-In', icon: 'fa-right-to-bracket' })
+                                .then(ok => { if (ok) window.location.href = String(data.late_checkin_url); });
                             return;
                         }
                         Alert.show('Error: ' + (data.message || 'Failed to check in guest'), 'error');

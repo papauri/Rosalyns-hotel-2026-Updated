@@ -640,13 +640,7 @@ function createPayment(PDO $pdo)
         }
 
         $pdo->commit();
-        if ($overpayCn && $overpayCn['email'] !== '') {
-            try {
-                sendCreditNoteEmail($pdo, $overpayCn['credit_note_id']);
-            } catch (Throwable $cnMailEx) {
-                error_log('Overpayment credit note email failed: ' . $cnMailEx->getMessage());
-            }
-        }
+        rh_email_overpay_credit_notes($pdo, $overpayCn); // every overpayment note with an address (company note -> billing email)
 
         // Send receipt email automatically for completed/paid payments (once; never throws)
         $receiptOutcome = 'not_collected';
@@ -888,13 +882,7 @@ function updatePayment(PDO $pdo, int $paymentId)
         }
 
         $pdo->commit();
-        if ($overpayCn && $overpayCn['email'] !== '') {
-            try {
-                sendCreditNoteEmail($pdo, $overpayCn['credit_note_id']);
-            } catch (Throwable $cnMailEx) {
-                error_log('Overpayment credit note email failed: ' . $cnMailEx->getMessage());
-            }
-        }
+        rh_email_overpay_credit_notes($pdo, $overpayCn); // every overpayment note with an address (company note -> billing email)
 
         // A pending payment marked completed/paid is money received now: send its receipt (once).
         $receiptOutcome = 'not_collected';

@@ -627,6 +627,12 @@ if (!function_exists('rh_payment_api_edit_refusal')) {
         if (isset($input['payment_date']) && substr((string)$input['payment_date'], 0, 10) !== substr((string)($stored['payment_date'] ?? ''), 0, 10)) {
             $changed[] = 'date';
         }
+        // Money received stays received (fix 2026-11-13): never moved back to pending / partial / failed here (refunds use the
+        // refund process); completed <-> paid is the same received state.
+        if (isset($input['payment_status']) && !in_array((string)$input['payment_status'], ['completed', 'paid'], true)
+            && in_array((string)($stored['payment_status'] ?? ''), ['completed', 'paid'], true)) {
+            return 'This payment was already received; it cannot be moved back to ' . (string)$input['payment_status'] . '. To give money back use Process Refund on the payment details page.';
+        }
         if (!$changed) {
             return null;
         }

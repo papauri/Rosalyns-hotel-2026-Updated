@@ -420,6 +420,7 @@ try {
     $receivablesFailed = !empty($rcv['failed']);
     $invoiceKpi['outstanding_total'] = $rcv['total'];
     $invoiceKpi['outstanding_count'] = $rcv['count'];
+    $invoiceKpi['outstanding_company'] = round((float)($rcv['company_total'] ?? 0), 2); // of it: owed by companies on account
     $aging = [
         'bucket_0_30' => $rcv['buckets']['0-30']['amount'], 'count_0_30' => $rcv['buckets']['0-30']['count'],
         'bucket_31_60' => $rcv['buckets']['31-60']['amount'], 'count_31_60' => $rcv['buckets']['31-60']['count'],
@@ -520,6 +521,9 @@ $totalAging = (float)$aging['bucket_0_30'] + (float)$aging['bucket_31_60'] + (fl
                     <a href="payments.php?balance=outstanding" class="acct-link">view accounts owing</a><?php endif; ?>
                 </span>
                 <span class="ck-kpi__sub" style="margin-top:0">All accounts owing, not affected by filters</span>
+                <?php if (empty($receivablesFailed) && (float)($invoiceKpi['outstanding_company'] ?? 0) > BALANCE_TOLERANCE): ?>
+                <span class="ck-kpi__sub" title="Part of Outstanding, not added to it: owed by companies on account (LPO) for their guests' stays, and by guests and other clients.">of which companies on account <?php echo htmlspecialchars($currency_symbol . ' ' . number_format((float)$invoiceKpi['outstanding_company'], 2)); ?> · guests and clients <?php echo htmlspecialchars($currency_symbol . ' ' . number_format(max(0, (float)$invoiceKpi['outstanding_total'] - (float)$invoiceKpi['outstanding_company']), 2)); ?></span>
+                <?php endif; ?>
             </div>
             <div class="ck-kpi" data-href="#invoiceList" title="Go to the invoice list">
                 <span class="ck-kpi__label">Generated</span>

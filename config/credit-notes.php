@@ -781,38 +781,131 @@ if (!function_exists('rh_auto_credit_overpayment')) {
         $ref   = $pick($row, ['booking_reference', 'reference_number', 'enquiry_reference', 'inquiry_reference']);
         $name  = $pick($row, ['guest_name', 'name', 'organization_name', 'company_name', 'contact_name', 'contact_person']);
         $email = $pick($row, ['guest_email', 'email', 'contact_email']);
-        // VAT on the note = the account's pro-rata share (levy is outside the VAT base), as the refund legs reverse it
         $cnVatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
-        $cnFallbackRate = $cnVatEnabled ? (float)getSetting('vat_rate') : 0.0;
-        $cnSplit = function_exists('rh_account_vat_split')
-            ? rh_account_vat_split($pdo, $bookingType, $bookingId, $excess, $cnFallbackRate)
-            : ['rate' => $cnFallbackRate, 'vat' => ($cnFallbackRate > 0 ? round($excess * ($cnFallbackRate / (100 + $cnFallbackRate)), 2) : 0.0)];
-        $cn = issueCreditNote($pdo, [
-            'booking_type'      => $bookingType,
-            'booking_id'        => $bookingId,
-            'booking_reference' => $ref,
-            'guest_name'        => $name !== '' ? $name : 'Customer',
-            'guest_email'       => $email,
-            'amount'            => $excess,
-            'vat_rate'          => (float)$cnSplit['rate'],
-            'vat_amount'        => (float)$cnSplit['vat'],
-            'reason'            => 'overpayment',
-            'reason_notes'      => 'Overpaid by ' . number_format($excess, 2) . ' on payment ' . $paymentRef . ' [account: ' . $bookingType . ' #' . $bookingId . ']',
-            'issued_by'         => $userId,
-            'send_email'        => false,
-            'generate_pdf'      => false,
-        ]);
-        if (empty($cn['success'])) {
-            throw new RuntimeException('Overpayment credit note could not be created: ' . ($cn['error'] ?? 'unknown error'));
-        }
-        $legs = recordCreditNoteRefundLegs($pdo, $bookingId, $ref, $excess, (int)$cn['credit_note_id'], (string)$cn['credit_note_number'], $userId, 'overpayment', $bookingType);
-        if ($legs['total'] + BALANCE_TOLERANCE < $excess) {
-            throw new RuntimeException('Could not move the full overpayment into the credit note.');
-        }
+        $notes = rh_issue_overpay_credit_notes($pdo, $bookingType, $bookingId, $excess, ['ref' => $ref, 'name' => $name, 'email' => $email],
+            $paymentRef, $userId, $cnVatEnabled ? (float)getSetting('vat_rate') : 0.0);
         if (!rh_sync_account_payments($pdo, $bookingType, $bookingId)) {
             throw new RuntimeException('Could not recalculate the account balance.');
         }
-        return ['credit_note_id' => (int)$cn['credit_note_id'], 'credit_note_number' => (string)$cn['credit_note_number'], 'excess' => $excess, 'email' => $email];
+        // The first note keeps the old return keys (company first); every note is in 'notes' (rh_email_overpay_credit_notes).
+        return ['credit_note_id' => (int)$notes[0]['credit_note_id'], 'credit_note_number' => implode(', ', array_column($notes, 'credit_note_number')),
+            'excess' => $excess, 'email' => (string)$notes[0]['email'], 'notes' => $notes];
+    }
+}
+
+if (!function_exists('rh_issue_overpay_credit_notes')) {
+    /**
+     * Issue the overpayment credit note(s) for $excess and move that money out of the account into them (refund legs,
+     * 'credit_note' method). Call inside the caller's transaction, with the account row locked; the caller resyncs.
+     * Who the note is made out to follows who overpaid, the same rule as refunds (fix 2026-11-13): on a room booking on a
+     * company account whose overpaid money includes the COMPANY's payments (allocateBookingRefunds -> rh_billing_refund_plan
+     * tags each leg 'company' / 'guest'), the company's part is a note made out to the company (billing name and email,
+     * LPO in the notes) and the guest's part a note to the guest. Everything else: one note to $who (name, email), as before.
+     * $who: ref, name, email. VAT on each note = the account's pro-rata share (levy outside the VAT base).
+     * @return array<int,array{credit_note_id:int,credit_note_number:string,amount:float,email:string,payer:string,name:string}> company first
+     * @throws RuntimeException when a note or its legs cannot be created (caller rolls back)
+     */
+    function rh_issue_overpay_credit_notes(PDO $pdo, string $bookingType, int $bookingId, float $excess, array $who, string $paymentRef, int $userId, float $fallbackRate): array
+    {
+        $excess = round($excess, 2);
+        $ref = (string)($who['ref'] ?? '');
+        $groups = null;
+        $bill = ['on_account' => false];
+        if ($bookingType === 'room') {
+            if (!function_exists('rh_booking_billing') && is_file(__DIR__ . '/../includes/billing-accounts.php')) {
+                require_once __DIR__ . '/../includes/billing-accounts.php';
+            }
+            if (function_exists('rh_billing_ready') && rh_billing_ready($pdo)) {
+                $bill = rh_booking_billing($pdo, ['id' => $bookingId]);
+                if (!empty($bill['on_account'])) {
+                    $byPayer = [];
+                    foreach (allocateBookingRefunds($pdo, $bookingId, $excess, true, 'any') as $al) {
+                        $byPayer[(string)($al['payer'] ?? 'guest') === 'company' ? 'company' : 'guest'][] = $al;
+                    }
+                    if (!empty($byPayer['company'])) {
+                        $groups = $byPayer;
+                    }
+                }
+            }
+        }
+        $issue = static function (float $amount, string $name, string $email, string $notes, ?array $allocs) use ($pdo, $bookingType, $bookingId, $ref, $userId, $fallbackRate): array {
+            $split = function_exists('rh_account_vat_split')
+                ? rh_account_vat_split($pdo, $bookingType, $bookingId, $amount, $fallbackRate)
+                : ['rate' => $fallbackRate, 'vat' => ($fallbackRate > 0 ? round($amount * ($fallbackRate / (100 + $fallbackRate)), 2) : 0.0)];
+            $cn = issueCreditNote($pdo, [
+                'booking_type'      => $bookingType, // gym/event are stored as 'goodwill' (enum); real type+id kept in the notes
+                'booking_id'        => $bookingId,
+                'booking_reference' => $ref,
+                'guest_name'        => $name !== '' ? $name : 'Customer',
+                'guest_email'       => $email,
+                'amount'            => $amount,
+                'vat_rate'          => (float)$split['rate'],
+                'vat_amount'        => (float)$split['vat'],
+                'reason'            => 'overpayment',
+                'reason_notes'      => mb_substr($notes, 0, 1000),
+                'issued_by'         => $userId,
+                'send_email'        => false,
+                'generate_pdf'      => false,
+            ]);
+            if (empty($cn['success'])) {
+                throw new RuntimeException('Overpayment credit note could not be created: ' . ($cn['error'] ?? 'unknown error'));
+            }
+            $legs = recordCreditNoteRefundLegs($pdo, $bookingId, $ref, $amount, (int)$cn['credit_note_id'], (string)$cn['credit_note_number'], $userId, 'overpayment', $bookingType, $allocs);
+            if ($legs['total'] + BALANCE_TOLERANCE < $amount) {
+                throw new RuntimeException('Could not move the full overpayment into the credit note.');
+            }
+            return ['credit_note_id' => (int)$cn['credit_note_id'], 'credit_note_number' => (string)$cn['credit_note_number'], 'amount' => $amount];
+        };
+        $tail = ' on payment ' . $paymentRef . ' [account: ' . $bookingType . ' #' . $bookingId . ']';
+        if ($groups === null) {
+            $name = trim((string)($who['name'] ?? ''));
+            $email = (string)($who['email'] ?? '');
+            $one = $issue($excess, $name, $email, 'Overpaid by ' . number_format($excess, 2) . $tail, null);
+            return [$one + ['email' => $email, 'payer' => 'guest', 'name' => $name !== '' ? $name : 'Customer']];
+        }
+        $notes = [];
+        foreach (['company', 'guest'] as $payer) {
+            $part = round(array_sum(array_column($groups[$payer] ?? [], 'amount')), 2);
+            if ($part <= BALANCE_TOLERANCE) {
+                continue;
+            }
+            $isCo = $payer === 'company';
+            $guestName = trim((string)($who['name'] ?? ''));
+            $name = $isCo ? (string)$bill['name'] : ($guestName !== '' ? $guestName : 'Customer');
+            $email = $isCo ? (string)$bill['billing_email'] : (string)($who['email'] ?? '');
+            $notesText = ($isCo ? 'Company payment overpaid - credit made out to ' . $bill['name'] . ' (guest: ' . $guestName
+                    . ($bill['reference'] !== '' ? ', LPO ' . $bill['reference'] : '') . '). ' : '')
+                . 'Overpaid by ' . number_format($part, 2) . $tail;
+            $notes[] = $issue($part, $name, $email, $notesText, $groups[$payer]) + ['email' => $email, 'payer' => $payer, 'name' => $name];
+        }
+        if (!$notes || round(array_sum(array_column($notes, 'amount')), 2) + BALANCE_TOLERANCE < $excess) {
+            throw new RuntimeException('Could not move the full overpayment into the credit note.');
+        }
+        return $notes;
+    }
+}
+
+if (!function_exists('rh_email_overpay_credit_notes')) {
+    /**
+     * After the commit: email every overpayment credit note that has an address (rh_auto_credit_overpayment() result;
+     * a company note goes to the company billing email it was made out to). Never throws; failures are logged.
+     */
+    function rh_email_overpay_credit_notes(PDO $pdo, ?array $cn): void
+    {
+        if (!$cn) {
+            return;
+        }
+        $list = $cn['notes'] ?? [['credit_note_id' => (int)($cn['credit_note_id'] ?? 0), 'email' => (string)($cn['email'] ?? '')]];
+        foreach ($list as $n) {
+            if ((int)$n['credit_note_id'] <= 0 || trim((string)$n['email']) === '') {
+                continue;
+            }
+            try {
+                sendCreditNoteEmail($pdo, (int)$n['credit_note_id']);
+            } catch (Throwable $e) {
+                error_log('Overpayment credit note email failed: ' . $e->getMessage());
+            }
+        }
     }
 }
 

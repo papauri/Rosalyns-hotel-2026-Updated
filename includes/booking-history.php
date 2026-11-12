@@ -143,6 +143,11 @@ if (!function_exists('rh_hist_tables')) {
             }
         }
         $src['today_price'] = rh_room_today_price($b, $combo);
+        // The room price column that applies to this booking (same choice as rh_room_today_price): the occupancy price
+        // when the booking has one and the room sets it, else price_per_night. Picks this room's price changes below.
+        $occ = strtolower((string)($b['occupancy_type'] ?? ''));
+        $occVal = ['single' => 'rh_pp_single', 'double' => 'rh_pp_double', 'triple' => 'rh_pp_triple'][$occ] ?? '';
+        $field = ($occVal !== '' && !empty($b[$occVal])) ? 'price_' . $occ . '_occupancy' : 'price_per_night';
 
         $src['audit'] = rh_hist_rows($pdo, 'booking_audit_log', 'SELECT * FROM booking_audit_log WHERE booking_id = ? ORDER BY id LIMIT 500', [$bookingId]);
         $src['timeline'] = rh_hist_rows($pdo, 'booking_timeline_logs', 'SELECT * FROM booking_timeline_logs WHERE booking_id = ? ORDER BY id LIMIT 500', [$bookingId]);

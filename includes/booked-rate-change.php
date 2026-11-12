@@ -101,7 +101,7 @@ if (!function_exists('rh_booking_money_card')) {
         if ($rateOk) {
             $n = max(1, (int)($rate['nights'] ?? 1));
             $lines[] = ['label' => 'Room', 'kind' => 'part',
-                'value' => $m((float)$rate['per_night']) . ' × ' . ($n === 1 ? '1 night' : $n . ' nights') . ' = ' . $m((float)$rate['room_total']) . ' (all-in)'];
+                'value' => rh_booked_rate_money((float)$rate['per_night'], $cur) . ' × ' . ($n === 1 ? '1 night' : $n . ' nights') . ' = ' . rh_booked_rate_money((float)$rate['room_total'], $cur) . ' (all-in)'];
             if ($child > $tol) {
                 $lines[] = ['label' => 'Child charge', 'kind' => 'part', 'value' => $m($child)];
             }

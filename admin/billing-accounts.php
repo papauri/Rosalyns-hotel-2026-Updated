@@ -134,6 +134,7 @@ if ($ready && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $id = (int)($_POST['account_id'] ?? 0);
             $back = 'billing-accounts.php?id=' . $id;
             $r = rh_billing_send_advice($pdo, (int)($_POST['remittance_id'] ?? 0));
+            rh_log_event('payments', $r['success'] ? 'info' : 'warning', 'Company payment advice emailed', ['account_id' => $id, 'remittance_id' => (int)($_POST['remittance_id'] ?? 0), 'result' => $r['message'], 'by' => $user['username'] ?? null]);
             $_SESSION[$r['success'] ? 'ba_message' : 'ba_error'] = 'Payment advice: ' . $r['message'];
         }
     } catch (Throwable $ex) {
@@ -207,7 +208,7 @@ $money = static fn(float $v): string => $cur . ' ' . number_format($v, 2);
                 <?php if ($acc): ?>
                     <a class="btn btn-secondary" href="billing-accounts.php"><i class="fas fa-arrow-left"></i> All companies</a>
                     <a class="btn btn-secondary" href="billing-accounts.php?statement=<?php echo (int)$acc['id']; ?>" target="_blank" rel="noopener"><i class="fas fa-file-pdf"></i> Statement (PDF)</a>
-                    <form method="POST" data-admin-confirm="<?php echo $e('Email the statement to ' . ($hasEmail ? $acc['billing_email'] : 'the company (no billing email: it will not be sent)') . '?'); ?>" data-admin-confirm-title="Email statement">
+                    <form method="POST" data-admin-confirm="<?php echo $e('Email the statement to ' . ($hasEmail ? rh_billing_recipients_text((string)$acc['billing_email'], rh_billing_email_list((string)$acc['billing_cc'])) : 'the company (no billing email: it will not be sent)') . '?'); ?>" data-admin-confirm-title="Email statement">
                         <input type="hidden" name="csrf_token" value="<?php echo $e($csrf_token); ?>"><input type="hidden" name="action" value="send_statement"><input type="hidden" name="account_id" value="<?php echo (int)$acc['id']; ?>">
                         <button type="submit" class="btn btn-primary"<?php echo $hasEmail ? '' : ' disabled title="Add a billing email first"'; ?>><i class="fas fa-envelope"></i> Email statement</button>
                     </form>
@@ -258,7 +259,7 @@ $money = static fn(float $v): string => $cur . ' ' . number_format($v, 2);
                     <?php foreach ($accounts as $a): $t = $totals[(int)$a['id']]; ?>
                         <tr>
                             <td><strong><?php echo $e($a['name']); ?></strong><?php echo (int)$a['active'] === 1 ? '' : ' <span class="badge badge-inactive">Inactive</span>'; ?></td>
-                            <td><?php echo trim((string)$a['billing_email']) !== '' ? $e($a['billing_email']) : '<span class="badge badge-danger">No billing email</span>'; ?></td>
+                            <td><?php echo trim((string)$a['billing_email']) !== '' ? $e($a['billing_email']) : '<span class="badge badge-danger">No billing email</span>'; ?><?php echo trim((string)$a['billing_cc']) !== '' ? '<br><small class="ba-cc">Copy: ' . $e($a['billing_cc']) . '</small>' : ''; ?></td>
                             <td><?php echo (int)$a['terms_days']; ?> days</td>
                             <td class="text-right"><?php echo (int)$t['count']; ?></td>
                             <td class="text-right"><?php echo $e($money($t['owed'])); ?></td>

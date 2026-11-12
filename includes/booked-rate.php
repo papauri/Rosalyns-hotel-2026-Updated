@@ -15,16 +15,16 @@
  *
  * Line keys: ok, per_night, nights, room_total, child, package, total, text, compact, guest_text, today_text, cancelled,
  *            currency.
- *   text       "K356,000 × 3 nights = K1,068,000" (+ children / + package when present)
- *   compact    "K356,000 × 3"            (list rows)
- *   guest_text "Superior Suite - K356,000 × 3 nights (a night, incl. VAT and tourism levy)"   guest documents
+ *   text       "K356,000.00 × 3 nights = K1,068,000.00" (+ children / + package when present)
+ *   compact    "K356,000.00 × 3"         (list rows)
+ *   guest_text "Superior Suite - K356,000.00 × 3 nights (a night, incl. VAT and tourism levy)"   guest documents
  *   today_text staff only, set when today's price differs from the booked rate by more than BALANCE_TOLERANCE.
  *
  * Figures are the stored GROSS (incl. VAT and levy) from rh_booked_stay_split(): the booked rate, never today's price.
  * room_total is the stored room figure, never per_night × nights, so rounding never changes a total.
  */
 
-require_once __DIR__ . '/booking-history-format.php'; // rh_hist_money(): "K356,000" / "MWK 356,000.50"
+require_once __DIR__ . '/booking-history-format.php'; // rh_booked_rate_money(): "K356,000.00" / "MWK 356,000.50"
 
 if (!function_exists('rh_booked_rate_text')) {
     /**
@@ -56,7 +56,7 @@ if (!function_exists('rh_booked_rate_text')) {
         $perNight = round($roomOnly / $nights, 2);
         $nightWord = $nights === 1 ? '1 night' : $nights . ' nights';
         $m = static function (float $v) use ($cur): string {
-            return rh_hist_money($v, $cur);
+            return rh_booked_rate_money($v, $cur); // always 2 decimals (owner 2026-11-13: "356,000.00", never "356,000")
         };
 
         $text = $m($perNight) . ' × ' . $nightWord . ' = ' . $m($roomOnly);

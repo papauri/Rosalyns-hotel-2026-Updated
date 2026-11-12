@@ -196,6 +196,33 @@ ok('a member checks out: balance = the attached group document\'s (2,530); ONE e
     && ($gi['gi_final']['extras'] ?? '') === 'EXT-' . ($gi['gi_refs']['m1'] ?? 'x'), json_encode([$gi['gi_final'] ?? null, $gi['gi_refs'] ?? null]));
 ok('invoice email for one room states that room\'s company share only', $near($gi['gi_email_due'] ?? 0, 1165), json_encode($gi['gi_email_due'] ?? null));
 
+echo "== LATER round: split-payer groups, invoice email copy, credit notes, idempotency (rolled back) ==\n";
+$lf = br_child('later_fixes');
+[$lp, $lm1, $lm2] = $lf['lf_scope']['ids'] ?? [0, -1, -2];
+ok('L2 split-payer group: company A\'s document = primary + m1 (lead the primary); m2 on company B = m2 alone',
+    ($lf['lf_scope']['p']['ids'] ?? null) === [$lp, $lm1] && ($lf['lf_scope']['m1']['lead'] ?? 0) === $lp && ($lf['lf_scope']['m2']['ids'] ?? null) === [$lm2]
+    && ($lf['lf_scope']['m2']['lead'] ?? 0) === $lm2, json_encode($lf['lf_scope'] ?? $lf));
+ok('L2 company A\'s invoice: 2 rooms, total 2,330 = the rows, billed to A, never B\'s room (no 3,495)', ($lf['lf_docA']['rooms'] ?? 0) === 2 && $near($lf['lf_docA']['total'] ?? 0, 2330)
+    && $near($lf['lf_docA']['balance'] ?? 0, 2330) && !empty($lf['lf_docA']['billed_A']) && empty($lf['lf_docA']['billed_B']) && empty($lf['lf_docA']['has_3495'])
+    && $near($lf['lf_split']['p'] ?? 0, 2330), json_encode([$lf['lf_docA'] ?? null, $lf['lf_split'] ?? null]));
+ok('L2 company B\'s invoice (member with its own company): its one room only, 1,165, billed to B', ($lf['lf_docB']['lead'] ?? 0) === $lm2 && ($lf['lf_docB']['rooms'] ?? -1) === 0
+    && $near($lf['lf_docB']['total'] ?? 0, 1165) && !empty($lf['lf_docB']['billed_B']) && empty($lf['lf_docB']['billed_A']) && $near($lf['lf_split']['m2'] ?? 0, 1165),
+    json_encode($lf['lf_docB'] ?? null));
+ok('L1 invoice email copy for one room = the attachment (both A rooms, 2,330), the real guest named', ($lf['lf_copy']['ids'] ?? null) === [$lp, $lm1]
+    && $near($lf['lf_copy']['total'] ?? 0, 2330) && $near($lf['lf_copy']['balance'] ?? 0, 2330) && !empty($lf['lf_copy']['has_2330']) && !empty($lf['lf_copy']['guest_named']),
+    json_encode($lf['lf_copy'] ?? null));
+$lcn = $lf['lf_cn'] ?? [];
+ok('L3 overpaid by company and guest: two notes, company first (A, billing email, LPO, only company legs) then guest (only guest legs)',
+    $near($lf['lf_credit_before'] ?? 0, 1365) && count($lcn) === 2 && ($lcn[0]['payer'] ?? '') === 'company' && strpos((string)($lcn[0]['name'] ?? ''), 'ZZ TEST CO') === 0
+    && ($lcn[0]['email'] ?? '') === 'a-billing@example.invalid' && !empty($lcn[0]['lpo']) && $near($lcn[0]['amount'] ?? 0, 1165) && ($lcn[0]['guest_legs'] ?? 1) === 0
+    && ($lcn[1]['payer'] ?? '') === 'guest' && ($lcn[1]['name'] ?? '') === 'COMPANY BILL TEST' && $near($lcn[1]['amount'] ?? 0, 200)
+    && ($lcn[1]['guest_legs'] ?? 0) === ($lcn[1]['legs'] ?? -1) && $near($lf['lf_credit_after'] ?? 1, 0), json_encode([$lf['lf_credit_before'] ?? null, $lcn, $lf['lf_credit_after'] ?? null]));
+ok('L3 not on account: one note to the guest, unchanged', ($lf['lf_guest_cn']['count'] ?? 0) === 1 && ($lf['lf_guest_cn']['payer'] ?? '') === 'guest'
+    && ($lf['lf_guest_cn']['name'] ?? '') === 'COMPANY BILL TEST' && $near($lf['lf_guest_cn']['amount'] ?? 0, 335), json_encode($lf['lf_guest_cn'] ?? null));
+ok('L4 a company payment keeps its idempotency id (a replayed Add Payment finds it)', !empty($lf['lf_uuid']['found']), json_encode($lf['lf_uuid'] ?? null));
+ok('I checkout final invoice keeps the number the booking already holds (no second number)', ($lf['lf_final_no']['got'] ?? '') === ($lf['lf_final_no']['want'] ?? 'x')
+    && ($lf['lf_final_no']['stored'] ?? '') === ($lf['lf_final_no']['want'] ?? 'x'), json_encode($lf['lf_final_no'] ?? null));
+
 $pf = br_child('perf');
 ok('F9 batch split = per-booking split on 7 kinds of booking (stay, everything, deposit, leg refund, cancelled, member, not on account)', !empty($pf['perf_ready'])
     && ($pf['perf_diff'] ?? ['x']) === [] && (int)($pf['perf_count'] ?? 0) === 7, json_encode([$pf['perf_diff'] ?? null, $pf['perf_count'] ?? null]));
@@ -228,6 +255,33 @@ ok('paid by the guest: a normal payment, no company line', !empty($pr['json']['s
 $pr = br_run('admin/bookings.php', ['action' => 'consolidation_fetch', 'id' => '{bid}'], ['ajax' => true, 'setup' => $setup, 'vars' => $vars]);
 ok('Record payment form data says the booking is on account and names the company', !empty($pr['json']['booking']['on_account']) && strpos((string)($pr['json']['booking']['company_name'] ?? ''), 'ZZ PB CO') === 0,
     json_encode($pr['json']['booking'] ?? $pr['raw'] ?? null));
+
+echo "== Payments > Add Payment: paid by guest / company (rolled back) ==\n";
+$paPost = ['booking_type' => 'room', 'booking_id' => '{bid}', 'payment_amount' => '1000', 'payment_date' => date('Y-m-d'), 'payment_method' => 'bank_transfer',
+    'payment_status' => 'completed', 'transaction_reference' => 'BT-PA', 'notes' => '', 'cc_emails' => ''];
+$paVerify = ["SELECT COUNT(*) c, COALESCE(SUM(l.amount),0) s FROM billing_remittance_lines l JOIN bookings b ON b.id = l.booking_id WHERE b.booking_reference = '$mk'",
+    "SELECT COUNT(*) c, MAX(client_uuid) u FROM payments WHERE booking_reference = '$mk' AND COALESCE(payment_type,'') <> 'refund' AND deleted_at IS NULL"];
+$pr = br_run('admin/payment-add.php', $paPost + ['client_uuid' => 'brpa-' . bin2hex(random_bytes(6))], ['setup' => $setup, 'vars' => $vars, 'verify' => $paVerify]);
+ok('Add Payment, on account, no "paid by": refused, nothing recorded', (int)($pr['verify'][1][0]['c'] ?? -1) === 0, json_encode($pr['verify'] ?? $pr['raw'] ?? null));
+$pr = br_run('admin/payment-add.php', ['paid_by' => 'company', 'payment_status' => 'pending', 'client_uuid' => 'brpa-' . bin2hex(random_bytes(6))] + $paPost,
+    ['setup' => $setup, 'vars' => $vars, 'verify' => $paVerify]);
+ok('Add Payment, company payment marked pending: refused (a company payment is money received)', (int)($pr['verify'][1][0]['c'] ?? -1) === 0, json_encode($pr['verify'] ?? $pr['raw'] ?? null));
+$pr = br_run('admin/payment-add.php', $paPost + ['paid_by' => 'company', 'confirm_overpay' => '1', 'client_uuid' => 'brpa-' . bin2hex(random_bytes(6))],
+    ['setup' => $setup, 'vars' => $vars, 'verify' => $paVerify]);
+ok('Add Payment, company payment with the overpay tick: refused', (int)($pr['verify'][1][0]['c'] ?? -1) === 0, json_encode($pr['verify'] ?? $pr['raw'] ?? null));
+$paUuid = 'brpa-' . bin2hex(random_bytes(6));
+$pr = br_run('admin/payment-add.php', $paPost + ['paid_by' => 'company', 'client_uuid' => $paUuid], ['setup' => $setup, 'vars' => $vars, 'verify' => $paVerify]);
+ok('Add Payment, paid by the company: one company payment line (1,000) carrying the form\'s idempotency id', (int)($pr['verify'][0][0]['c'] ?? 0) === 1
+    && $near($pr['verify'][0][0]['s'] ?? 0, 1000) && (int)($pr['verify'][1][0]['c'] ?? 0) === 1 && ($pr['verify'][1][0]['u'] ?? '') === $paUuid, json_encode($pr['verify'] ?? $pr['raw'] ?? null));
+$pr = br_run('admin/payment-add.php', ['paid_by' => 'company', 'payment_amount' => '1200', 'client_uuid' => 'brpa-' . bin2hex(random_bytes(6))] + $paPost,
+    ['setup' => $setup, 'vars' => $vars, 'verify' => $paVerify]);
+ok('Add Payment, company pays more than it owes (1,200 > the 1,165 it owes): refused', (int)($pr['verify'][1][0]['c'] ?? -1) === 0, json_encode($pr['verify'] ?? $pr['raw'] ?? null));
+$pr = br_run('admin/payment-add.php', $paPost + ['paid_by' => 'guest', 'client_uuid' => 'brpa-' . bin2hex(random_bytes(6))], ['setup' => $setup, 'vars' => $vars, 'verify' => $paVerify]);
+ok('Add Payment, paid by the guest: a normal payment, no company line', (int)($pr['verify'][0][0]['c'] ?? -1) === 0 && (int)($pr['verify'][1][0]['c'] ?? 0) === 1,
+    json_encode($pr['verify'] ?? $pr['raw'] ?? null));
+$pr = br_run('admin/payment-add.php', [], ['method' => 'GET', 'get' => ['booking_type' => 'room', 'booking_id' => '{bid}'], 'setup' => $setup, 'vars' => $vars,
+    'grep' => ['id="pa-paid-by"', 'name="paid_by" value="company"', 'ZZ PB CO']]);
+ok('Add Payment page shows "Paid by" for the on-account booking', !empty($pr['found']['id="pa-paid-by"']) && !empty($pr['found']['ZZ PB CO']), json_encode($pr['found'] ?? $pr['raw'] ?? null));
 
 echo "== pages (rolled back) ==\n";
 $p = br_run('admin/billing-accounts.php', [], ['method' => 'GET', 'grep' => ['Company Accounts', 'Owed by companies', 'Add a company']]);

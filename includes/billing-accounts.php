@@ -74,6 +74,13 @@ if (!function_exists('rh_billing_ready')) {
         return array_values($out);
     }
 
+    /** "billing@x (copy: a@x, b@x)" - who a company document goes to, said in full for staff (confirmations, History). */
+    function rh_billing_recipients_text(string $to, array $cc): string
+    {
+        $cc = array_values(array_filter(array_map('trim', $cc), static fn($c) => $c !== '' && strcasecmp($c, $to) !== 0));
+        return $to . ($cc ? ' (copy: ' . implode(', ', $cc) . ')' : ' (no copy address)');
+    }
+
     /** One company row (null when missing / not ready). */
     function rh_billing_account(PDO $pdo, int $id): ?array
     {
@@ -336,23 +343,70 @@ if (!function_exists('rh_billing_ready')) {
     }
 
     /**
-     * The split summed over a booking's group (primary + members; a single booking = itself), as the room invoice
-     * combines them: on_account, company_due, guest_due, company_paid, guest_paid, stay, extras, guest_extra_cover
-     * (guest money that paid extras), ids, leg_ids (the company's payment rows).
+     * The rooms ONE room invoice lists for $bookingId (fix 2026-11-13): its group (primary + members), but when the rooms
+     * of the group are billed to different payers (a member with its own company, or a company member in a guest-paid
+     * group) only the rooms billed to the SAME payer as $bookingId (payer = its company id, 0 = the guest). lead = the
+     * booking the document is built from: the group's primary when it is in that set, else the lowest id in it.
+     * Billing not ready / one payer for the whole group = the whole group, exactly as before.
+     * @return array{lead:int,ids:int[]}
      */
-    function rh_billing_group_split(PDO $pdo, int $bookingId): array
+    function rh_billing_doc_scope(PDO $pdo, int $bookingId): array
     {
-        $out = ['on_account' => false, 'company_due' => 0.0, 'guest_due' => 0.0, 'company_paid' => 0.0, 'guest_paid' => 0.0, 'stay' => 0.0,
-            'extras' => 0.0, 'guest_extra_cover' => 0.0, 'ids' => [], 'leg_ids' => []];
         $st = $pdo->prepare('SELECT COALESCE(NULLIF(primary_booking_id, 0), id) FROM bookings WHERE id = ?');
         $st->execute([$bookingId]);
         $root = (int)$st->fetchColumn();
         if ($root <= 0) {
-            return $out;
+            return ['lead' => $bookingId, 'ids' => [$bookingId]];
         }
-        $st = $pdo->prepare('SELECT id FROM bookings WHERE id = ? OR primary_booking_id = ? ORDER BY id');
+        $st = $pdo->prepare('SELECT * FROM bookings WHERE id = ? OR primary_booking_id = ? ORDER BY id');
         $st->execute([$root, $root]);
-        return rh_billing_split_for_ids($pdo, array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN)));
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        $ids = array_map(static fn($r) => (int)$r['id'], $rows);
+        if (!$ids) {
+            return ['lead' => $bookingId, 'ids' => [$bookingId]];
+        }
+        $pick = static function (array $set) use ($root): int {
+            return in_array($root, $set, true) ? $root : min($set);
+        };
+        if (count($rows) <= 1 || !rh_billing_ready($pdo)) {
+            return ['lead' => $pick($ids), 'ids' => $ids];
+        }
+        $accounts = [];
+        foreach (rh_billing_accounts($pdo) as $a) {
+            $accounts[(int)$a['id']] = $a;
+        }
+        $prim = [];
+        foreach ($rows as $r) {
+            if ((int)$r['id'] === $root) {
+                $prim = $r;
+            }
+        }
+        $keys = [];
+        foreach ($rows as $r) {
+            if ((int)($r['primary_booking_id'] ?? 0) > 0) {
+                // A member without its own company follows the primary (joined in: no extra query).
+                $r += ['pb_billing_account_id' => $prim['billing_account_id'] ?? null, 'pb_billing_reference' => $prim['billing_reference'] ?? null,
+                    'pb_billing_due_date' => $prim['billing_due_date'] ?? null, 'pb_billing_covers' => $prim['billing_covers'] ?? null];
+            }
+            $bill = rh_booking_billing($pdo, $r, $accounts);
+            $keys[(int)$r['id']] = $bill['on_account'] ? (int)$bill['account_id'] : 0;
+        }
+        if (count(array_unique($keys)) <= 1) {
+            return ['lead' => $pick($ids), 'ids' => $ids];
+        }
+        $want = $keys[$bookingId] ?? ($keys[$root] ?? 0);
+        $sub = array_values(array_map('intval', array_keys(array_filter($keys, static fn($k) => $k === $want))));
+        return ['lead' => $pick($sub), 'ids' => $sub];
+    }
+
+    /**
+     * The split summed over the rooms the room invoice for $bookingId lists (rh_billing_doc_scope: its group, or only the
+     * group's rooms billed to the same payer): on_account, company_due, guest_due, company_paid, guest_paid, stay, extras,
+     * guest_extra_cover (guest money that paid extras), ids, leg_ids (the company's payment rows).
+     */
+    function rh_billing_group_split(PDO $pdo, int $bookingId): array
+    {
+        return rh_billing_split_for_ids($pdo, rh_billing_doc_scope($pdo, $bookingId)['ids']);
     }
 
     /**
@@ -824,7 +878,7 @@ if (!function_exists('rh_billing_ready')) {
 
     /**
      * Record one company payment split across its bookings. $in: amount, payment_method, received_date (Y-m-d, not in
-     * the future), bank_reference, notes, lines (booking_id => amount). The lines must add up to the amount exactly
+     * the future), bank_reference, notes, lines (booking_id => amount), optional client_uuid (one line only). The lines must add up to the amount exactly
      * (D5: any excess is refused) and each line may not exceed what the company owes on that booking.
      * Each line becomes a normal room payment (VAT split per booking, receipt number, recalculated balance, History).
      * One transaction: all lines or nothing. Throws Exception with a staff-readable message.
@@ -873,6 +927,12 @@ if (!function_exists('rh_billing_ready')) {
         }
         if (!$lines) {
             throw new Exception('Split the payment across at least one booking.');
+        }
+        // A one-line company payment recorded from a form with an idempotency id (Payments > Add Payment): the id goes on
+        // the payment row, so a replayed submit finds it (idem_find_existing_payment) instead of recording it twice.
+        $clientUuid = null;
+        if (count($lines) === 1 && is_string($in['client_uuid'] ?? null) && preg_match('/^[A-Za-z0-9_\-:]{8,64}$/', (string)$in['client_uuid'])) {
+            $clientUuid = (string)$in['client_uuid'];
         }
         $sum = round(array_sum($lines), 2);
         if (abs($sum - $amount) > $tol) {
@@ -939,10 +999,10 @@ if (!function_exists('rh_billing_ready')) {
                 $pNotes = 'Company payment ' . $ref . ' from ' . $acc['name'] . ($bill['reference'] !== '' ? ' (LPO ' . $bill['reference'] . ')' : '')
                     . ($bankRef !== '' ? ', bank ref ' . $bankRef : '') . ($notes !== '' ? '. ' . $notes : '');
                 $pdo->prepare("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount,
-                        total_amount, payment_method, payment_type, payment_status, receipt_number, notes, recorded_by, created_at)
-                    VALUES (?, 'room', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, NOW())")
+                        total_amount, payment_method, payment_type, payment_status, receipt_number, notes, recorded_by, client_uuid, created_at)
+                    VALUES (?, 'room', ?, ?, ?, ?, ?, ?, ?, ?, ?, 'completed', ?, ?, ?, ?, NOW())")
                     ->execute([$payRef, $bid, $b['booking_reference'], $date, $split['net'], $split['rate'], $split['vat'], $lineAmt, $method, $payType,
-                        $receipt, mb_substr($pNotes, 0, 1000), $uid ?: null]);
+                        $receipt, mb_substr($pNotes, 0, 1000), $uid ?: null, $clientUuid]);
                 $pid = (int)$pdo->lastInsertId();
                 $pdo->prepare('INSERT INTO billing_remittance_lines (remittance_id, booking_id, payment_id, amount) VALUES (?, ?, ?, ?)')
                     ->execute([$remId, $bid, $pid, $lineAmt]);
@@ -1065,6 +1125,10 @@ if (!function_exists('rh_billing_ready')) {
             rh_email_send_log_not_sent($kind, $to, (string)$acc['name'], $account, $route['note']);
             return ['success' => false, 'message' => 'Not sent: ' . $route['note'], 'to' => ''];
         }
+        // Who it is for, always said in full (staff see the copy list in the confirmation and History; fix 2026-11-13).
+        $realTo = $to;
+        $realCc = $cc;
+        $who = rh_billing_recipients_text($realTo, $realCc);
         [$to, $cc, $subject] = [$route['to'], $route['cc'], $route['subject']];
         $tmp = tempnam(sys_get_temp_dir(), 'rhbill');
         $path = $tmp . '-' . preg_replace('/[^A-Za-z0-9_.-]+/', '-', $fileName);
@@ -1080,7 +1144,9 @@ if (!function_exists('rh_billing_ready')) {
         } finally {
             @unlink($path);
         }
-        return ['success' => !empty($r['success']), 'message' => !empty($r['success']) ? 'Sent to ' . $to . ($cc ? ' (copy: ' . implode(', ', $cc) . ')' : '') : 'Not sent: ' . ($r['message'] ?? 'unknown error'), 'to' => $to];
+        $sentText = $to === $realTo ? 'Sent to ' . $who : 'Sent to the test address ' . $to . ' only (test mode; normally to ' . $who . ')';
+        return ['success' => !empty($r['success']), 'message' => !empty($r['success']) ? $sentText : 'Not sent to ' . $who . ': ' . ($r['message'] ?? 'unknown error'),
+            'to' => $to, 'cc' => $cc, 'billing_email' => $realTo, 'billing_cc' => $realCc];
     }
 
     /**

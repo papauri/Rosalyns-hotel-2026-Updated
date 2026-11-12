@@ -305,23 +305,109 @@ if (!function_exists('rh_late_stay_ymd')) {
     }
 
     /**
+     * Housekeeping for a stay recorded after it ended ("already stayed and left", owner 2026-11-13): trust the room
+     * status. Each room the booking held (booking_rooms - both rooms of a joined pair - plus the primary pointer):
+     *  - held by another checked-in booking: never touched (that guest's room);
+     *  - still 'occupied': checked out like any checkout - a "Guest has left" clean already done is reused
+     *    (rh_checkout_early_clean_target / rh_checkout_apply_early_clean), otherwise 'cleaning' + one open clean task
+     *    (rh_ensure_checkout_cleaning_task, never a duplicate);
+     *  - any other status (available, cleaning, maintenance ...): kept exactly as it is, no task added, so the next
+     *    arrival is never held up by an old stay.
+     * Runs inside the caller's transaction. Returns room numbers per outcome for History.
+     *
+     * @return array{cleaning:string[],early:string[],kept:string[],in_use:string[]}
+     */
+    function rh_completed_stay_room_turnover(PDO $pdo, int $bookingId, array $roomIds, ?int $userId, string $bookingRef): array
+    {
+        $out = ['cleaning' => [], 'early' => [], 'kept' => [], 'in_use' => []];
+        if (!function_exists('rh_checkout_early_clean_target')) {
+            require_once __DIR__ . '/room-management.php';
+        }
+        $roomSt = $pdo->prepare("SELECT room_number, status FROM individual_rooms WHERE id = ?");
+        $otherSt = $pdo->prepare("
+            SELECT COUNT(*) FROM bookings b
+            WHERE b.id <> ? AND b.status = 'checked-in'
+              AND (b.individual_room_id = ? OR EXISTS (
+                    SELECT 1 FROM booking_rooms br
+                    WHERE br.booking_id = b.id AND br.individual_room_id = ? AND br.released_at IS NULL))
+        ");
+        $setSt = $pdo->prepare("UPDATE individual_rooms SET status = 'cleaning' WHERE id = ? AND status = 'occupied'");
+        $logSt = $pdo->prepare("INSERT INTO room_maintenance_log (individual_room_id, status_from, status_to, reason, performed_by) VALUES (?, 'occupied', 'cleaning', ?, ?)");
+        foreach (array_unique(array_map('intval', $roomIds)) as $roomId) {
+            if ($roomId <= 0) {
+                continue;
+            }
+            $roomSt->execute([$roomId]);
+            $room = $roomSt->fetch(PDO::FETCH_ASSOC);
+            if (!$room) {
+                continue;
+            }
+            $num = (string)$room['room_number'];
+            $otherSt->execute([$bookingId, $roomId, $roomId]);
+            if ((int)$otherSt->fetchColumn() > 0) {
+                $out['in_use'][] = $num;
+                continue;
+            }
+            if ((string)$room['status'] !== 'occupied') {
+                $out['kept'][] = $num . ' (' . str_replace('_', ' ', (string)$room['status']) . ')';
+                continue;
+            }
+            $early = rh_checkout_early_clean_target($pdo, $roomId, $bookingId);
+            if ($early !== null) {
+                $applied = rh_checkout_apply_early_clean($roomId, $early, $bookingRef, $userId);
+                if (!empty($applied['success'])) {
+                    $out['early'][] = $num;
+                    continue;
+                }
+            }
+            $setSt->execute([$roomId]);
+            if ($setSt->rowCount() > 0) {
+                $logSt->execute([$roomId, 'Completed stay recorded (guest already left): ' . $bookingRef, $userId]);
+            }
+            rh_ensure_checkout_cleaning_task($roomId, $bookingId, $userId);
+            $out['cleaning'][] = $num;
+        }
+        return $out;
+    }
+
+    /** One History sentence for rh_completed_stay_room_turnover()'s result ('' when the booking had no room). */
+    function rh_completed_stay_room_note(array $t): string
+    {
+        $parts = [];
+        $list = function (array $nums) { return 'Room ' . implode(', ', $nums); };
+        if (!empty($t['cleaning'])) {
+            $parts[] = $list($t['cleaning']) . ' was still marked occupied: sent to cleaning, as at any checkout.';
+        }
+        if (!empty($t['early'])) {
+            $parts[] = $list($t['early']) . ': the departure clean was already done, not cleaned twice.';
+        }
+        if (!empty($t['kept'])) {
+            $parts[] = $list($t['kept']) . ': room status kept as it is, no cleaning task added.';
+        }
+        if (!empty($t['in_use'])) {
+            $parts[] = $list($t['in_use']) . ': another guest is in the room now, room left as it is.';
+        }
+        return implode(' ', $parts);
+    }
+
+    /**
      * "Guest already stayed and has left": check in and check out together at the booked dates, no extra
      * charge, in ONE transaction (a balance block undoes the check-in too). Same steps as the gated checkout
      * (rh_checkout_with_gate): balance gate, checkout_completed_at, room-type stock back, room-service orders
-     * on the folio closed, the booking stops holding its rooms. The physical room's status is NOT changed:
-     * the stay ended days ago and the room may hold another guest now.
+     * on the folio closed, the booking stops holding its rooms. Rooms follow the checkout housekeeping rule
+     * through rh_completed_stay_room_turnover() (a room another guest is using now is never touched).
      *
-     * @return array{success:bool,message:string,needs_confirm:bool,override:bool,balance:float}
+     * @return array{success:bool,message:string,needs_confirm:bool,override:bool,balance:float,rooms:array}
      */
     function rh_record_completed_stay(PDO $pdo, int $bookingId, ?int $userId, bool $confirmBalance, ?string $today = null): array
     {
-        $out = ['success' => false, 'message' => '', 'needs_confirm' => false, 'override' => false, 'balance' => 0.0];
+        $out = ['success' => false, 'message' => '', 'needs_confirm' => false, 'override' => false, 'balance' => 0.0, 'rooms' => []];
         $ownTx = !$pdo->inTransaction();
         try {
             if ($ownTx) {
                 $pdo->beginTransaction();
             }
-            $st = $pdo->prepare("SELECT id, status, room_id, booking_reference, check_in_date, check_out_date FROM bookings WHERE id = ? FOR UPDATE");
+            $st = $pdo->prepare("SELECT id, status, room_id, individual_room_id, booking_reference, check_in_date, check_out_date FROM bookings WHERE id = ? FOR UPDATE");
             $st->execute([$bookingId]);
             $bk = $st->fetch(PDO::FETCH_ASSOC);
             if (!$bk) {
@@ -354,7 +440,13 @@ if (!function_exists('rh_late_stay_ymd')) {
                 require_once __DIR__ . '/room-management.php';
             }
             closeFolioChargedRoomServiceOrders($pdo, $bookingId);
+            // Every room the booking holds (read before the holds are released), then the checkout housekeeping rule.
+            $roomIds = getBookingRoomIds($bookingId);
+            if ((int)($bk['individual_room_id'] ?? 0) > 0) {
+                $roomIds[] = (int)$bk['individual_room_id'];
+            }
             rh_release_booking_room_holds($pdo, $bookingId);
+            $out['rooms'] = rh_completed_stay_room_turnover($pdo, $bookingId, $roomIds, $userId, (string)$bk['booking_reference']);
             if ($ownTx) {
                 $pdo->commit();
             }

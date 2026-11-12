@@ -4764,6 +4764,12 @@ details[open] .rh-help-panel__toggle::after {
     overflow-wrap: anywhere;
 }
 
+/* The copy (CC) list under a company's billing email in the companies table. */
+.billing-accounts-page .ba-cc {
+    color: var(--admin-muted, #5f6b7c);
+    overflow-wrap: anywhere;
+}
+
 .billing-accounts-page .ba-grid-wrap {
     margin: 4px 0 0;
 }

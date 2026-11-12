@@ -217,6 +217,7 @@ unset($payRow);
 $outstandingRows = [];
 $outstandingTotal = 0.0;
 $outstandingFailed = [];
+$outstandingCompany = 0.0; // of Still owed: owed by companies on account (company pays later); the rest is guests / clients
 foreach (rh_receivable_rows($pdo, rh_receivable_mods(), $outstandingFailed) as $rcvRow) {
     if ($bookingType !== '' && $rcvRow['type'] !== $bookingType) {
         continue;
@@ -226,8 +227,10 @@ foreach (rh_receivable_rows($pdo, rh_receivable_mods(), $outstandingFailed) as $
         'status' => $rcvRow['status'], 'amount_paid' => $rcvRow['amount_paid'], 'amount_due' => $rcvRow['amount_due'],
     ];
     $outstandingTotal += (float)$rcvRow['amount_due'];
+    $outstandingCompany += (float)($rcvRow['company_due'] ?? 0);
 }
 $outstandingTotal = round($outstandingTotal, 2);
+$outstandingCompany = round($outstandingCompany, 2);
 if ($showOutstanding) {
     usort($outstandingRows, static fn($a, $b) => (float)$b['amount_due'] <=> (float)$a['amount_due']);
 }
@@ -521,6 +524,9 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                 <span class="ck-kpi__sub"><?php echo number_format(count($outstandingRows)); ?> account<?php echo count($outstandingRows) === 1 ? '' : 's'; ?> owing<?php echo $bookingType !== '' ? ' (' . htmlspecialchars(rh_receivable_type_label($bookingType)) . ' only)' : ''; ?> ·
                     <a href="<?php echo htmlspecialchars('payments.php?' . http_build_query(array_filter(['balance' => 'outstanding', 'booking_type' => $bookingType], static fn($v) => $v !== ''))); ?>" class="acct-link">see who owes</a>
                 </span>
+                <?php if (empty($outstandingFailed) && $outstandingCompany > BALANCE_TOLERANCE): ?>
+                <span class="ck-kpi__sub" title="Part of Still owed, not added to it: what companies on account (LPO) owe for their guests' stays, and what guests and other clients owe themselves.">of which companies on account <?php echo htmlspecialchars($currency_symbol . ' ' . number_format($outstandingCompany, 2)); ?> · guests and clients <?php echo htmlspecialchars($currency_symbol . ' ' . number_format(max(0, $outstandingTotal - $outstandingCompany), 2)); ?></span>
+                <?php endif; ?>
                 <span class="ck-kpi__sub" style="margin-top:0">Unpaid balances on bookings, conferences, events and open tabs, after every payment received (part-payments included). Same figure as the Dashboard and Reports; not affected by the date, status, method or search filters.<?php if (!empty($outstandingFailed)): ?> Some accounts could not be read (System Logs), so no total is shown.<?php endif; ?></span>
                 <?php if (!empty($depositRows) || !empty($depositFailed)): ?>
                 <?php /* Deposits on accounts not confirmed yet: their own line, never added to Still owed (rh_unconfirmed_deposit_rows). */ ?>

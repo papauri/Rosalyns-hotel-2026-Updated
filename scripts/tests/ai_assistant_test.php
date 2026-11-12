@@ -6394,7 +6394,7 @@ try {
     $hsAll = json_encode($hsEv, JSON_UNESCAPED_UNICODE);
     preg_match_all('/K[\d,]+(?:\.\d+)?/', $hsT, $hsM);
     $hsBad = array_filter(array_unique($hsM[0]), static fn($a) => strpos($hsAll, $a) === false);
-    check(count($hsS) >= 3 && count($hsS) <= 5 && strpos($hsT, 'K356,000 a night × 3 nights = K1,068,000') !== false && strpos($hsT, 'Tess Hsfront (receptionist)') !== false
+    check(count($hsS) >= 3 && count($hsS) <= 5 && strpos($hsT, 'K356,000.00 a night × 3 nights = K1,068,000.00') !== false && strpos($hsT, 'Tess Hsfront (receptionist)') !== false
         && strpos($hsT, 'today it is K450,300 a night') !== false && strpos($hsT, 'K1,350,900') !== false && strpos($hsT, 'K282,900 went to credit note CN-HS07') !== false
         && strpos($hsT, 'Guest checked out on 10 Nov 2026') !== false && !$hsBad,
         'History Summary: 3-5 sentences (booked at, price since, payment with the overpay credit note, latest status), every amount copied from a step', $hsT . ' | ' . implode(',', $hsBad));
@@ -6444,7 +6444,7 @@ try {
     $brCur = (string)$brL['currency'];
     $brM = static fn(float $v): string => rh_hist_money($v, $brCur);
     $brF = rh_ai_booked_rate_fields($brL);
-    check($brPdo->q === 0 && $brL['ok'] && $brL['text'] === $brM(356000) . ' × 3 nights = ' . $brM(1068000) && $brF['per_night'] === 356000.0 && $brF['room_total'] === 1068000.0
+    check($brPdo->q === 0 && $brL['ok'] && $brL['text'] === rh_booked_rate_money(356000, $brCur) . " × 3 nights = " . rh_booked_rate_money(1068000, $brCur) && $brF['per_night'] === 356000.0 && $brF['room_total'] === 1068000.0
         && $brF['today_price'] === 450300.0 && strpos($brF['today_note'], 'keeps the price it was booked at') !== false,
         'get_booking booked_rate: the booked rate × nights as text and numbers (the reply check reads numbers), today\'s price only as the "keeps its price" note', json_encode($brF, JSON_UNESCAPED_UNICODE));
     $brSame = rh_ai_booked_rate_fields(rh_ai_booked_rate_line($brPdo, ['rh_pp_night' => 356000] + $brB));
@@ -6454,7 +6454,7 @@ try {
     check(strpos($brT, '**Stay booked at:** ' . $brL['text']) !== false && strpos($brT, $brF['today_note']) !== false && strpos($brT, 'Balance due') !== false
         && strpos(rh_ai_booking_money_text(['booked_rate' => null] + $brRes), 'Stay booked at') === false, 'bill answer: the booked rate × nights line and the today\'s-price note, under Total / Paid / Balance due', $brT);
     $brRow = rh_ai_booked_rate_row($brB, rh_reprice_at_booked_rate($brB, 4), 4);
-    check($brRow !== null && $brRow['old'] === $brL['text'] && $brRow['new'] === $brM(356000) . ' × 4 nights = ' . $brM(1424000),
+    check($brRow !== null && $brRow['old'] === $brL['text'] && $brRow['new'] === rh_booked_rate_money(356000, $brCur) . " × 4 nights = " . rh_booked_rate_money(1424000, $brCur),
         'extend / change dates card: booked rate × old nights -> booked rate × new nights, never today\'s price', json_encode($brRow, JSON_UNESCAPED_UNICODE));
     $brClaim = rh_ai_claim_check('Booked at ' . $brL['text'] . '. Today\'s price is ' . $brM(450300) . ' a night; this booking keeps the price it was booked at.',
         json_encode(['nights' => 3, 'currency' => $brCur, 'booked_rate' => $brF], JSON_UNESCAPED_UNICODE), ['today' => '2026-11-09']);

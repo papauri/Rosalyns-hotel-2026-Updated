@@ -79,7 +79,9 @@ try {
                 // A late arrival goes through Late Check-In on the bookings list, which asks what happened
                 // (owner 2026-11-12 "Dont assume, have options"). Nothing is changed here.
                 http_response_code(400);
-                echo json_encode(['success' => false, 'message' => 'This arrival is ' . (int)$ciRule['late_days'] . ' day(s) late. Use Late Check-In on the Bookings page so you can say when the guest arrived.']);
+                // late_checkin_url: the dashboard offers a button straight into this booking's Late Check-In choices.
+                echo json_encode(['success' => false, 'message' => 'This arrival is ' . (int)$ciRule['late_days'] . ' day(s) late. Use Late Check-In on the Bookings page so you can say when the guest arrived.',
+                    'late_checkin_url' => 'bookings.php?action=checkin&booking_id=' . (int)$booking_id]);
                 exit;
             }
         }

@@ -779,7 +779,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new Exception($ciChoice['error']);
                 }
 
-                $roomGate = evaluateCheckInRoomReady($booking_id, (int)($user['id'] ?? 0), !empty($_POST['confirm_checkin_room_not_ready']));
+                // The clean-room gate protects a guest moving in. "Already stayed and left" (owner 2026-11-13): nobody moves in,
+                // so no gate (said in History below); a room another in-house guest holds is never touched by that path.
+                $roomGate = $ciChoice['choice'] === 'ended'
+                    ? ['allowed' => true, 'override' => false, 'needs_confirm' => false, 'message' => '', 'rooms' => []]
+                    : evaluateCheckInRoomReady($booking_id, (int)($user['id'] ?? 0), !empty($_POST['confirm_checkin_room_not_ready']));
                 if (!$roomGate['allowed']) {
                     header('Content-Type: application/json');
                     echo json_encode(['success' => false, 'message' => $roomGate['message'], 'needs_confirm_room' => $roomGate['needs_confirm']]);
@@ -797,16 +801,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         exit;
                     }
                     $recRef = (string)($booking['booking_reference'] ?? '');
-                    $recIn = rh_late_checkin_note($ciWindow, 'ended');
+                    $recIn = rh_late_checkin_note($ciWindow, 'ended') . ' Clean-room check skipped: the stay had already ended, nobody moved into the room.';
                     $recOut = 'Completed stay: guest left on the booked date ' . rh_late_stay_fmt($ciWindow['check_out'])
-                        . ', no extra nights charged (booked ' . rh_late_stay_fmt($ciWindow['check_in']) . ' to ' . rh_late_stay_fmt($ciWindow['check_out']) . ').'
-                        . ' Room status not changed: the stay ended on ' . rh_late_stay_fmt($ciWindow['check_out']) . '.';
+                        . ', no extra nights charged (booked ' . rh_late_stay_fmt($ciWindow['check_in']) . ' to ' . rh_late_stay_fmt($ciWindow['check_out']) . ').';
+                    // Housekeeping followed the checkout rule (rh_completed_stay_room_turnover): say what happened per room.
+                    $recRoomNote = rh_completed_stay_room_note((array)($rec['rooms'] ?? []));
+                    if ($recRoomNote !== '') {
+                        $recOut .= ' ' . $recRoomNote;
+                    }
                     if ($checkin_note !== '') {
                         $recIn .= ' Check-in note: ' . $checkin_note;
                     }
                     logBookingCheckIn($booking_id, $recRef, 'admin', $user['id'] ?? null, $recUserName);
                     logBookingEvent((int)$booking_id, $recRef, 'Late check-in: completed stay recorded', 'check_in', $recIn, 'confirmed', 'checked-out', 'admin', $user['id'] ?? null, $recUserName,
-                        ['arrival_choice' => 'ended', 'actual_arrival' => $ciWindow['check_in'], 'leave_date' => $ciWindow['check_out'], 'late_days' => $ciWindow['late_days'], 'check_in_email' => 'not sent (stay ended)']);
+                        ['arrival_choice' => 'ended', 'actual_arrival' => $ciWindow['check_in'], 'leave_date' => $ciWindow['check_out'], 'late_days' => $ciWindow['late_days'], 'check_in_email' => 'not sent (stay ended)', 'clean_room_check' => 'skipped (stay ended)']);
                     if ($roomGate['override']) {
                         logCheckInRoomNotReadyOverride($booking_id, $recRef, $roomGate['rooms'], $user['id'] ?? null, $recUserName);
                     }
@@ -823,7 +831,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                     rh_log_event('bookings', 'warning', 'Late check-in: completed stay recorded (checked in and out)', [
                         'booking_id' => $booking_id, 'ref' => $recRef, 'arrival_choice' => 'ended', 'booked_check_in' => $ciWindow['check_in'],
-                        'leave_date' => $ciWindow['check_out'], 'late_days' => $ciWindow['late_days'], 'extra_nights' => 0, 'by' => $user['username'] ?? null,
+                        'leave_date' => $ciWindow['check_out'], 'late_days' => $ciWindow['late_days'], 'extra_nights' => 0, 'rooms' => $rec['rooms'] ?? [], 'clean_room_check' => 'skipped (stay ended)', 'by' => $user['username'] ?? null,
                     ]);
                     header('Content-Type: application/json');
                     echo json_encode(['success' => true, 'message' => 'Completed stay recorded for ' . $recRef . ': checked in and out at the booked dates, no extra nights charged. No check-in email sent (the stay has ended).'
@@ -1719,7 +1727,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
         } elseif ($action === 'checkout_assess') {
-            // â”€â”€ Checkout settlement: ask when the guest left (owner 2026-11-12 "Dont assume, have options") â”€â”€
+            // ── Checkout settlement: ask when the guest left (owner 2026-11-12 "Dont assume, have options") ──
             // Every choice is quoted here by includes/late-stay.php, the SAME function checkout_settle charges /
             // refunds with, so the quote always equals the money written.
             if (!isAjaxRequest()) {
@@ -1769,7 +1777,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($assessBalFields['company_name'] !== '') {
                 $assessBalFields['pay_later'] = false;
             }
-            // The rate this stay was booked at Ã— its booked nights (shown in the checkout confirm / settlement).
+            // The rate this stay was booked at × its booked nights (shown in the checkout confirm / settlement).
             $assessRate = rh_booked_rate_line($abk, null, ['currency' => $currency_symbol]);
             $assessBalFields['booked_rate_text'] = $assessRate['ok'] ? $assessRate['text'] : '';
 
@@ -1814,6 +1822,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ];
                 }
             }
+            // How an unused-nights refund is paid out, per quote, for THAT quote's refund amount: back to the original
+            // payment method(s) the same way the normal Refund records it (allocateBookingRefunds(), the helper
+            // checkout_settle refunds with). Read only. Store credit is offered only when the refund setting says "ask".
+            foreach ($quotesA as $ymdA => $rowA) {
+                foreach ($rowA as $basisA => $qA) {
+                    if ($qA['direction'] !== 'refund' || (float)$qA['refundable'] <= BALANCE_TOLERANCE) {
+                        continue;
+                    }
+                    $methodsA = [];
+                    foreach (allocateBookingRefunds($pdo, (int)$booking_id, (float)$qA['refundable']) as $allocA) {
+                        $methodsA[ucfirst(str_replace('_', ' ', (string)(($allocA['payment']['payment_method'] ?? '') ?: 'other')))] = true;
+                    }
+                    $quotesA[$ymdA][$basisA]['refund_methods'] = implode(', ', array_keys($methodsA));
+                }
+            }
+            $storeCreditA = rh_refund_rule('refund_method_default') === 'ask';
 
             header('Content-Type: application/json');
             echo json_encode($assessBalFields + [
@@ -1830,6 +1854,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'arrival_ymd'    => $optsA['arrival'],
                     'arrival_fmt'    => $optsA['arrival'] ? rh_late_stay_fmt($optsA['arrival']) : '',
                     'quotes'         => $quotesA,
+                    'store_credit_allowed' => $storeCreditA,
                     'booked_nights'  => max(1, (int)($abk['number_of_nights'] ?? 1)),
                     'amount_paid'    => (float)($abk['amount_paid'] ?? 0),
                     'amount_due'     => (float)($abk['amount_due'] ?? 0),
@@ -1842,7 +1867,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ]);
             exit;
         } elseif ($action === 'checkout_settle') {
-            // â”€â”€ Settle finances for the day the guest left, then check out â”€â”€
+            // ── Settle finances for the day the guest left, then check out ──
             // The SERVER decides charge / refund / nothing from the posted leave date (re-validated against the
             // locked row and today); posted figures are never used. A payment is recorded only for the amount
             // front desk says it actually received, through the normal limit + VAT split.
@@ -1857,6 +1882,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $amountReceived = round(max(0.0, (float)($_POST['amount_received'] ?? 0)), 2);
             $settle_notes   = mb_substr(trim((string)($_POST['notes'] ?? '')), 0, 200);
+            // "Processed by" on every payment / refund row this settlement writes: the same value Record Payment
+            // (payment-add.php) stores, so Payments, receipts and the CSV name the staff member.
+            $settleProcessedBy = (string)($user['full_name'] ?? ($user['username'] ?? 'System'));
+            // Unused-nights refund: back to the original method(s), or store credit (a credit note) - the same two ways as
+            // the normal Refund (payment-refund.php), and store credit only when the refund setting is "ask".
+            $refundAs = (string)($_POST['refund_as'] ?? 'original');
+            if (!in_array($refundAs, ['original', 'store_credit'], true)) {
+                header('Content-Type: application/json');
+                echo json_encode(['success' => false, 'message' => 'Invalid refund method.']);
+                exit;
+            }
+            if (rh_refund_rule('refund_method_default') !== 'ask') {
+                $refundAs = 'original';
+            }
+            $settleCreditNotes = []; // store credit: notes issued in the transaction, PDF + email after the commit
 
             if ($booking_id <= 0) {
                 header('Content-Type: application/json');
@@ -1911,7 +1951,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
 
                     if ($q['reprice'] !== null) {
-                        // Booked rate Ã— the nights for the leave date; the leave date (never today) is the new check-out.
+                        // Booked rate × the nights for the leave date; the leave date (never today) is the new check-out.
                         rh_write_booking_stay_totals(
                             $pdo, $booking_id, $q['reprice']['totals'], (int)$q['nights'],
                             $q['new_check_in'], $q['new_check_out'], $q['reprice']['new_child_supplement']
@@ -1950,8 +1990,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 payment_reference, booking_type, booking_id, booking_reference,
                                 payment_date, payment_amount, vat_rate, vat_amount, total_amount,
                                 payment_method, payment_type, payment_status, invoice_generated,
-                                receipt_number, status, notes, recorded_by
-                            ) VALUES (?, 'room', ?, ?, CURDATE(), ?, ?, ?, ?, ?, 'partial_payment', 'completed', 1, ?, 'completed', ?, ?)
+                                receipt_number, status, notes, recorded_by, processed_by
+                            ) VALUES (?, 'room', ?, ?, CURDATE(), ?, ?, ?, ?, ?, 'partial_payment', 'completed', 1, ?, 'completed', ?, ?, ?)
                         ")->execute([
                             $settlementPaymentReference,
                             $booking_id,
@@ -1964,6 +2004,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $settlementReceipt,
                             $settlementNotes,
                             (int)($user['id'] ?? 0),
+                            $settleProcessedBy,
                         ]);
                         $settlement_pay_id = (int)$pdo->lastInsertId();
                         if (!recalculateBookingFinancials($booking_id)) {
@@ -1979,7 +2020,65 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $fe = $finE->fetch(PDO::FETCH_ASSOC);
                         $refundAmt = max(0.0, round((float)$fe['amount_paid'] - (float)$fe['total_with_vat'] - (float)$fe['folio_charges_total'], 2));
 
-                        if ($refundAmt > BALANCE_TOLERANCE) {
+                        if ($refundAmt > BALANCE_TOLERANCE && $refundAs === 'store_credit') {
+                            // Store credit, as the normal Refund issues it: a credit note (issueCreditNote) made out to who
+                            // paid (company share -> the company's billing email), linked refund rows with method
+                            // 'credit_note' (recordCreditNoteRefundLegs), all in this transaction; PDF + email after commit.
+                            require_once __DIR__ . '/../config/credit-notes.php';
+                            $scReason = 'Guest left ' . rh_late_stay_fmt($q['leave_date']) . ': ' . (int)$q['unused_nights'] . " unused night(s) at {$currency_symbol} "
+                                . number_format((float)$q['per_night'], 2) . '/night (booked rate). Refunded as store credit.'
+                                . ($settle_notes !== '' ? ' ' . $settle_notes : '');
+                            $scGroups = [];
+                            foreach (allocateBookingRefunds($pdo, (int)$booking_id, $refundAmt, true) as $al) {
+                                $scGroups[(string)($al['payer'] ?? 'guest') === 'company' ? 'company' : 'guest'][] = $al;
+                            }
+                            $scBill = function_exists('rh_booking_billing') ? rh_booking_billing($pdo, $sbk) : ['on_account' => false];
+                            $scProc = $pdo->prepare("UPDATE payments SET processed_by = ? WHERE payment_reference = ?");
+                            foreach (['company', 'guest'] as $scPayer) {
+                                if (empty($scGroups[$scPayer])) {
+                                    continue;
+                                }
+                                $scPart = 0.0;
+                                $scVat = 0.0;
+                                foreach ($scGroups[$scPayer] as $al) {
+                                    $scPart = round($scPart + (float)$al['amount'], 2);
+                                    $scVat = round($scVat + (float)rh_refund_vat_split($al['payment'], (float)$al['amount'])['vat'], 2); // note VAT == refund VAT
+                                }
+                                $scIsCo = $scPayer === 'company' && !empty($scBill['on_account']);
+                                $scName = $scIsCo ? (string)$scBill['name'] : (trim((string)$sbk['guest_name']) !== '' ? (string)$sbk['guest_name'] : 'Guest');
+                                $scEmail = $scIsCo ? (string)$scBill['billing_email'] : (string)($sbk['guest_email'] ?? '');
+                                $scCn = issueCreditNote($pdo, [
+                                    'amount'              => $scPart,
+                                    'guest_name'          => $scName,
+                                    'guest_email'         => $scEmail !== '' ? $scEmail : null,
+                                    'booking_id'          => (int)$booking_id,
+                                    'booking_reference'   => (string)$sbk['booking_reference'],
+                                    'booking_type'        => 'room',
+                                    'reason'              => 'early_checkout',
+                                    'reason_notes'        => mb_substr($scReason, 0, 1000),
+                                    'vat_rate'            => (float)($scGroups[$scPayer][0]['payment']['vat_rate'] ?? 0),
+                                    'vat_amount'          => $scVat,
+                                    'original_payment_id' => (int)$scGroups[$scPayer][0]['payment']['id'],
+                                    'issued_by'           => (int)($user['id'] ?? 0),
+                                    'generate_pdf'        => false,
+                                    'send_email'          => false,
+                                ]);
+                                if (empty($scCn['success'])) {
+                                    throw new Exception('The credit note could not be issued, so nothing was refunded. ' . ($scCn['error'] ?? ''));
+                                }
+                                $scLegs = recordCreditNoteRefundLegs($pdo, (int)$booking_id, (string)$sbk['booking_reference'], $scPart,
+                                    (int)$scCn['credit_note_id'], (string)$scCn['credit_note_number'], (int)($user['id'] ?? 0), 'early_checkout', 'room', $scGroups[$scPayer]);
+                                if ($scLegs['total'] + BALANCE_TOLERANCE < $scPart) {
+                                    throw new Exception('Could not move the full amount into the credit note. Nothing was changed.');
+                                }
+                                foreach ($scLegs['refs'] as $scRef) {
+                                    $scProc->execute([$settleProcessedBy, $scRef]);
+                                }
+                                $refundTotal = round($refundTotal + $scPart, 2);
+                                $settleCreditNotes[] = ['id' => (int)$scCn['credit_note_id'], 'number' => (string)$scCn['credit_note_number'], 'amount' => $scPart,
+                                    'email' => trim($scEmail), 'payer' => $scIsCo ? 'company' : 'guest', 'name' => $scName];
+                            }
+                        } elseif ($refundAmt > BALANCE_TOLERANCE) {
                             $refundReason = 'Guest left ' . rh_late_stay_fmt($q['leave_date']) . ': ' . (int)$q['unused_nights'] . " unused night(s) at {$currency_symbol} "
                                 . number_format((float)$q['per_night'], 2) . '/night (booked rate)'
                                 . ($settle_notes !== '' ? '. ' . $settle_notes : '');
@@ -1989,13 +2088,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     payment_date, payment_amount, vat_rate, vat_amount, total_amount,
                                     payment_method, payment_type, payment_status, original_payment_id,
                                     refund_reason, refund_status, refund_amount, refund_notes,
-                                    recorded_by, created_at
+                                    recorded_by, processed_by, created_at
                                 ) VALUES (
                                     ?, 'room', ?, ?, ?,
                                     ?, ?, ?, ?,
                                     ?, 'refund', 'completed', ?,
                                     'early_checkout', 'completed', ?, ?,
-                                    ?, NOW()
+                                    ?, ?, NOW()
                                 )
                             ");
                             foreach (allocateBookingRefunds($pdo, (int)$booking_id, $refundAmt, true) as $alloc) {
@@ -2019,6 +2118,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     $leg,
                                     $refundReason, // free text belongs in refund_notes; refund_reason is an ENUM
                                     (int)($user['id'] ?? 0),
+                                    $settleProcessedBy,
                                 ]);
                                 $refundTotal = round($refundTotal + $leg, 2);
                                 $earlyRefundLegs[] = ['orig' => array_merge($orig, ['booking_type' => 'room', 'booking_id' => (int)$booking_id, 'booking_reference' => $sbk['booking_reference']]), 'ref' => $earlyLegRef, 'amount' => $leg, 'reason' => $refundReason];
@@ -2036,7 +2136,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 // 'skip' -> no financial record and no date change (handled outside the system); still logged below.
 
-                // â”€â”€ Balance gate (after any settlement above, before status change) â”€â”€
+                // ── Balance gate (after any settlement above, before status change) ──
                 $balGate = evaluateCheckoutBalance($pdo, (int)$booking_id, (int)($user['id'] ?? 0), !empty($_POST['confirm_checkout_with_balance']));
                 if (!$balGate['allowed']) {
                     throw new Exception($balGate['message']);
@@ -2045,12 +2145,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     logCheckoutBalanceOverride((int)$booking_id, (string)$sbk['booking_reference'], (float)$balGate['balance'], (int)($user['id'] ?? 0), $user['full_name'] ?? ($user['username'] ?? null));
                 }
 
-                // â”€â”€ Perform the actual checkout â”€â”€
-                $pdo->prepare("UPDATE bookings SET status = 'checked-out', updated_at = NOW() WHERE id = ?")
+                // ── Perform the actual checkout ──
+                // checkout_completed_at as processGuestCheckout / rh_checkout_with_gate (housekeeping, review emails read it).
+                $pdo->prepare("UPDATE bookings SET status = 'checked-out', checkout_completed_at = NOW(), updated_at = NOW() WHERE id = ?")
                     ->execute([$booking_id]);
 
                 $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available + 1 WHERE id = ? AND rooms_available < total_rooms")
                     ->execute([$sbk['room_id']]);
+                // Same close step as every other checkout (processGuestCheckout, rh_checkout_with_gate): room-service
+                // orders already charged to the folio stop being 'placed', so the room's active-order lock is released.
+                if (!function_exists('closeFolioChargedRoomServiceOrders')) {
+                    require_once __DIR__ . '/../includes/room-management.php';
+                }
+                $settleOrdersClosed = closeFolioChargedRoomServiceOrders($pdo, (int)$booking_id);
                 // The stay is over: stop holding its rooms (booking_rooms.released_at).
                 rh_release_booking_room_holds($pdo, (int)$booking_id);
 
@@ -2075,7 +2182,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($settlementPaymentReference) {
                     $settleDescribe .= ' Received ' . $currency_symbol . ' ' . number_format($amountReceived, 2) . ' (' . str_replace('_', ' ', $payment_method) . ', ' . $settlementPaymentReference . ').';
                 }
-                if ($refundTotal > BALANCE_TOLERANCE) {
+                if ($settleCreditNotes) {
+                    foreach ($settleCreditNotes as $scOne) {
+                        $settleDescribe .= ' Refunded ' . $currency_symbol . ' ' . number_format((float)$scOne['amount'], 2) . ' as store credit: credit note ' . $scOne['number']
+                            . ($scOne['payer'] === 'company' ? ' (made out to ' . $scOne['name'] . ', which paid it)' : '') . '.';
+                    }
+                } elseif ($refundTotal > BALANCE_TOLERANCE) {
                     $settleDescribe .= ' Refunded ' . $currency_symbol . ' ' . number_format($refundTotal, 2) . '.';
                 }
                 if ($settle_notes !== '') {
@@ -2094,6 +2206,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'amount'          => $q['amount'] ?? 0,
                     'amount_received' => $settlementPaymentReference ? $amountReceived : 0,
                     'refunded'        => $refundTotal,
+                    'refund_as'       => $refundTotal > BALANCE_TOLERANCE ? $refundAs : null,
+                    'credit_notes'    => array_column($settleCreditNotes, 'number'),
+                    'room_service_orders_closed' => $settleOrdersClosed,
                     'by'              => $user['username'] ?? null,
                 ];
                 rh_log_event('bookings', 'info', 'Guest checked out (settlement: ' . $settleChoice . ')', $settleCtx);
@@ -2137,6 +2252,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                     } catch (Throwable $rfEx) {
                         error_log('Early-checkout refund notice failed for ' . $erl['ref'] . ': ' . $rfEx->getMessage());
+                    }
+                }
+                // Store credit: the credit note PDF + email, best effort after the commit (as the normal Refund).
+                foreach ($settleCreditNotes as $scOne) {
+                    try {
+                        generateCreditNotePDF($pdo, (int)$scOne['id']);
+                        if ($scOne['email'] !== '' && filter_var($scOne['email'], FILTER_VALIDATE_EMAIL)) {
+                            sendCreditNoteEmail($pdo, (int)$scOne['id']);
+                        } else {
+                            $refundNoticeNote .= ' Credit note ' . $scOne['number'] . ' was not emailed (no email on file): share the number manually.';
+                        }
+                    } catch (Throwable $scEx) {
+                        $refundNoticeNote .= ' (Credit note ' . $scOne['number'] . ' PDF/email could not be produced: regenerate it from Credit Notes.)';
+                        error_log('Settlement store-credit CN post-commit failed for ' . $scOne['number'] . ': ' . $scEx->getMessage());
                     }
                 }
 
@@ -2440,13 +2569,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 echo json_encode(['success' => false, 'message' => 'Could not record the payment: ' . $crEx->getMessage()]);
                 exit;
             }
-            if ($overpayCn_cr && $overpayCn_cr['email'] !== '') {
-                try {
-                    sendCreditNoteEmail($pdo, $overpayCn_cr['credit_note_id']);
-                } catch (Throwable $cnMailEx) {
-                    error_log('Overpayment credit note email failed: ' . $cnMailEx->getMessage());
-                }
-            }
+            rh_email_overpay_credit_notes($pdo, $overpayCn_cr); // every overpayment note with an address (company note -> billing email)
 
             // Receipt email for this consolidation payment
             $consolidationReceiptNotice = '';
@@ -2736,7 +2859,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     error_log('Nights credit note email failed: ' . $snCnEx->getMessage());
                 }
             }
-            echo json_encode(['success' => true, 'message' => htmlspecialchars($snRes['describe'] . $snNote, ENT_QUOTES, 'UTF-8')]);
+            // Plain text: the page's toast (showBookingActionMessage) escapes it (escaping here too showed &#039; etc.).
+            echo json_encode(['success' => true, 'message' => $snRes['describe'] . $snNote]);
             exit;
         } elseif ($action === 'extend_stay') {
             // Extend the checkout date for a checked-in booking
@@ -4746,7 +4870,8 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 return;
             }
             if (window.Alert && typeof window.Alert.show === 'function') {
-                Alert.show(text, type);
+                // Alert.show renders HTML; these messages are plain text and can carry staff notes / guest names.
+                Alert.show(text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'), type);
                 return;
             }
             if (type === 'error') {
@@ -5882,9 +6007,25 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 proceedBtn.textContent = 'Charge & Checkout';
                 proceedBtn.className = 'btn btn-danger';
             } else if (q.direction === 'refund') {
-                refundRow.style.display = parseFloat(q.refundable) > 0 ? '' : 'none';
-                proceedBtn.textContent = parseFloat(q.refundable) > 0 ? 'Refund & Checkout' : 'Checkout (no refund due)';
+                const refundDue = parseFloat(q.refundable) > 0;
+                refundRow.style.display = refundDue ? '' : 'none';
+                // The method(s) THIS refund amount goes back to (server-computed per leave date).
+                const methods = q.refund_methods ? String(q.refund_methods) : 'the original payment method';
+                document.getElementById('cs_refund_methods').textContent = methods;
+                document.getElementById('cs_refund_as_original_help').textContent = fmt(q.refundable) + ' back to ' + methods + '.';
+                const asBox = document.getElementById('cs_refund_as_box');
+                const scAllowed = refundDue && !!s.store_credit_allowed;
+                asBox.hidden = !scAllowed;
+                asBox.querySelectorAll('input[name="cs_refund_as"]').forEach(function (r) { r.disabled = !scAllowed; });
+                const asPicked = scAllowed ? document.querySelector('#checkoutSettlementForm input[name="cs_refund_as"]:checked') : null;
+                const isSc = !!asPicked && asPicked.value === 'store_credit';
+                document.getElementById('cs_refund_method_line').hidden = scAllowed;
+                proceedBtn.textContent = refundDue ? (isSc ? 'Store Credit & Checkout' : 'Refund & Checkout') : 'Checkout (no refund due)';
                 proceedBtn.className = 'btn btn-success';
+                if (scAllowed && !asPicked) {
+                    proceedBtn.disabled = true; // front desk picks how the refund is paid
+                    return;
+                }
             } else {
                 proceedBtn.textContent = 'Checkout (no charge)';
                 proceedBtn.className = 'btn btn-primary';
@@ -6102,7 +6243,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             const showErr = function (msg) {
                 errEl.textContent = msg;
                 errEl.style.display = 'block';
-                Alert.show(msg, 'error');
+                Alert.show(escHtml(msg), 'error'); // Alert.show renders HTML: server text (notes, names) shown as text
             };
             errEl.style.display = 'none';
             if (!st) return;
@@ -6128,11 +6269,18 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             if (!cur.skip) {
                 formData.set('leave_date', cur.date);
                 if (csNeedsBasis(st.s, cur.date)) formData.set('stay_basis', cur.basis);
+                // A refund goes back to the original payment method(s), or store credit when allowed (as the normal Refund).
                 if (q.direction === 'charge' && received > 0) {
                     formData.set('amount_received', received.toFixed(2));
                     formData.set('payment_method', document.getElementById('cs_payment_method').value);
-                } else if (q.direction === 'refund') {
-                    formData.set('payment_method', document.getElementById('cs_refund_payment_method').value);
+                }
+                if (q.direction === 'refund' && parseFloat(q.refundable) > 0) {
+                    const asPicked = st.s.store_credit_allowed ? document.querySelector('#checkoutSettlementForm input[name="cs_refund_as"]:checked') : null;
+                    if (st.s.store_credit_allowed && !asPicked) {
+                        showErr('Choose how the refund is paid: back to the original payment method, or store credit.');
+                        return;
+                    }
+                    formData.set('refund_as', asPicked ? asPicked.value : 'original');
                 }
             }
             formData.set('notes', document.getElementById('cs_notes').value);
@@ -6144,13 +6292,22 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             if (q && q.direction === 'charge') {
                 csDetails.push(received > 0 ? 'Received now: ' + fmt(received) : 'Nothing received now: the extra nights stay on the bill as a balance.');
             }
+            if (q && q.direction === 'refund' && parseFloat(q.refundable) > 0) {
+                csDetails.push(formData.get('refund_as') === 'store_credit'
+                    ? 'Refund now: ' + fmt(q.refundable) + ' as store credit (a credit note).'
+                    : 'Refund now: ' + fmt(q.refundable) + ' back to ' + (q.refund_methods ? String(q.refund_methods) : 'the original payment method') + '.');
+            }
             csDetails.push('This will mark the booking as checked out and update room status.');
             if (window._csCompany) csDetails.unshift(window._csCompany);
             if (balanceAfter > 0.01 && csBal.can) {
                 csDetails.unshift('OUTSTANDING BALANCE after checkout: ' + fmt(balanceAfter) + ' - it stays owed and is recorded in the booking timeline.');
                 formData.set('confirm_checkout_with_balance', '1');
             } else if (balanceAfter > 0.01) {
-                showErr('The guest would still owe ' + fmt(balanceAfter) + '. Enter the amount received, or ask someone with the "Check out with balance" permission.');
+                // "Amount received" is only on screen when the guest owes extra nights; otherwise the balance is from
+                // before this checkout and is paid on the booking itself.
+                showErr(q && q.direction === 'charge'
+                    ? 'The guest would still owe ' + fmt(balanceAfter) + '. Enter the amount received, or ask someone with the "Check out with balance" permission.'
+                    : 'The guest still owes ' + fmt(balanceAfter) + ' from before this checkout. Record that payment on the booking first (Record Payment), then check out, or ask someone with the "Check out with balance" permission.');
                 return;
             }
             const csEmailBox = window._csEmailBox ? Object.assign({}, window._csEmailBox, { checked: false }) : null;
@@ -6214,7 +6371,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         other.focus();
                     }
                 }
-                if (t.name === 'cs_leave' || t.name === 'cs_basis' || t.id === 'cs_leave_other' || t.id === 'cs_amount_received') {
+                if (t.name === 'cs_leave' || t.name === 'cs_basis' || t.name === 'cs_refund_as' || t.id === 'cs_leave_other' || t.id === 'cs_amount_received') {
                     const errEl = document.getElementById('cs_error');
                     if (errEl && e.type === 'change') errEl.style.display = 'none';
                     if (typeof window.renderCheckoutSettlement === 'function') window.renderCheckoutSettlement();
@@ -6252,7 +6409,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     <input type="hidden" name="booking_type" value="room">
                     <input type="hidden" name="booking_id" id="rhQpId" value="">
                     <input type="hidden" name="payment_status" value="completed">
-                    <input type="hidden" name="payment_date" value="<?php echo htmlspecialchars(date('Y-m-d'), ENT_QUOTES); ?>">
+                    <input type="hidden" name="payment_date" id="rhQpDate" value="<?php echo htmlspecialchars(date('Y-m-d'), ENT_QUOTES); ?>">
                     <input type="hidden" name="return_to" value="bookings">
                     <input type="hidden" name="client_uuid" id="rhQpUuid" value="">
                     <input type="hidden" name="payment_amount" id="rhQpAmount" value="">
@@ -6311,7 +6468,26 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
         function esc(s) { var d = document.createElement('div'); d.textContent = String(s == null ? '' : s); return d.innerHTML; }
         function newUuid() {
             if (window.crypto && crypto.randomUUID) { return crypto.randomUUID(); }
-            return 'qp-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12);
+            // Plain HTTP has no randomUUID: 16 random bytes from getRandomValues (else time + two random parts), so a
+            // double submit still carries one id the server dedupes on (idempotency: payments.client_uuid).
+            if (window.crypto && crypto.getRandomValues) {
+                var b = new Uint8Array(16);
+                crypto.getRandomValues(b);
+                return 'qp-' + Array.prototype.map.call(b, function (x) { return ('0' + x.toString(16)).slice(-2); }).join('');
+            }
+            return 'qp-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 12) + Math.random().toString(36).slice(2, 12);
+        }
+        // Today in the hotel's time zone (the app date), not the date the page was loaded: a dialog left open past midnight
+        // must not record yesterday. Falls back to the server date printed with the page.
+        var qpTz = <?php echo json_encode(date_default_timezone_get(), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        function hotelToday() {
+            try {
+                var p = new Intl.DateTimeFormat('en-CA', { timeZone: qpTz, year: 'numeric', month: '2-digit', day: '2-digit' }).formatToParts(new Date());
+                var v = {};
+                p.forEach(function (x) { v[x.type] = x.value; });
+                if (v.year && v.month && v.day) { return v.year + '-' + v.month + '-' + v.day; }
+            } catch (e) { /* old browser: keep the page date */ }
+            return el('rhQpDate').defaultValue;
         }
         function setOpen(open) {
             var m = el('rhQuickPayModal');
@@ -6347,6 +6523,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
         window.rhQuickPayOpen = function (id, ref, guest, balance) {
             due = Math.max(0, Number(balance || 0));
             el('rhQpId').value = id;
+            el('rhQpDate').value = hotelToday();
             el('rhQpUuid').value = newUuid();
             el('rhQpSummary').innerHTML = '<strong>' + esc(ref) + '</strong> &middot; ' + esc(guest) + '<br>Balance due: <strong>' + esc(fmt(due)) + '</strong>';
             el('rhQpFullLabel').textContent = 'The full balance: ' + fmt(due);
@@ -6368,6 +6545,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
         el('rhQpPartAmount').addEventListener('input', sync);
         el('rhQuickPayForm').addEventListener('submit', function (ev) {
             sync();
+            el('rhQpDate').value = hotelToday(); // the day it is recorded, in the hotel's time zone
             if (el('rhQpSubmit').disabled || !el('rhQpAmount').value) { ev.preventDefault(); return; }
             el('rhQpSubmit').disabled = true; // one click, one payment
             el('rhQpSubmit').innerHTML = '<i class="fas fa-spinner fa-spin"></i> Recording...';
@@ -7052,18 +7230,23 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         </div>
                     </div>
 
-                    <!-- Payment method for refund -->
+                    <!-- How the refund is paid out: back to the original payment method(s), as the normal Refund records it -->
                     <div id="cs_refund_row" style="display:none;">
-                        <div class="form-group">
-                            <label for="cs_refund_payment_method">Refund method <span class="required">*</span></label>
-                            <select id="cs_refund_payment_method" name="cs_refund_payment_method" class="form-control">
-                                <option value="cash">Cash</option>
-                                <option value="bank_transfer">Bank Transfer</option>
-                                <option value="credit_card">Credit Card</option>
-                                <option value="debit_card">Debit Card</option>
-                                <option value="mobile_money">Mobile Money</option>
-                                <option value="other">Other</option>
-                            </select>
+                        <?php /* Store credit only when the refund setting is "ask", as on the normal Refund. Nothing preselected. */ ?>
+                        <fieldset id="cs_refund_as_box" class="cs-choices rh-choices" hidden>
+                            <legend>How is the refund paid? <small>Pick one, as on the Refund button.</small></legend>
+                            <label class="cs-choice rh-choice">
+                                <input type="radio" name="cs_refund_as" value="original">
+                                <span><strong>Back to the original payment method</strong><small id="cs_refund_as_original_help"></small></span>
+                            </label>
+                            <label class="cs-choice rh-choice">
+                                <input type="radio" name="cs_refund_as" value="store_credit">
+                                <span><strong>Store credit (credit note)</strong><small>A credit note for the refund amount, emailed to whoever paid; no money is paid out now.</small></span>
+                            </label>
+                        </fieldset>
+                        <div class="form-group" id="cs_refund_method_line">
+                            <strong>Refund method:</strong> <span id="cs_refund_methods">the original payment method</span>
+                            <small>The refund goes back the way the guest paid, the same as the Refund button on a payment.</small>
                         </div>
                     </div>
 
