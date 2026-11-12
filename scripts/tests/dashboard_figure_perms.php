@@ -56,8 +56,13 @@ check((bool)preg_match('/<\?php if \(\$show_owed\): \?>\s*<\?php if \(\$mod_rece
 check(strpos($d, "\$hasMoney = \$show_takings || \$pos_sales || \$moneyRefundLine;") !== false, 'Money panel: takings, till or refunds queue');
 check(strpos($d, "if (\$show_takings) { // the 7-day chart") !== false, '7-day chart read only with dashboard_takings');
 check(strpos($d, "<?php if (\$mod_finance && \$can('accounting-dashboard.php')): ?>") !== false, 'Accounting button unchanged');
-check(strpos($d, "\$add(\$attn, \$mod_finance && \$dash_perm('payments', 'refund_payment'), (int)\$finance['refunds_pending']") !== false, 'refunds to approve unchanged');
-check(strpos($d, "'refunds_pending'           => \$mod_finance && \$dash_perm('payments', 'refund_payment'),") !== false, 'refunds insight has the same gate as its line');
+// Refunds to approve (Needs attention, admin/includes/dashboard-attention.php since 2026-11-12): finance module, a finance
+// page permission AND payments / refund_payment, as before; the popup rows only for users who can open Payments.
+require_once $root . '/admin/includes/dashboard-attention.php';
+$refDef = rh_dash_attention_defs()['refunds_pending'] ?? [];
+check(($refDef['when'] ?? null) === [['modules' => ['finance'], 'perms' => [['accounting', 'payments', 'reports'], ['payments', 'refund_payment']]]], 'refunds to approve unchanged');
+check(!empty($refDef['insight_needs_link']) && strpos($d, "'refunds_pending'        => (int)\$finance['refunds_pending'],") !== false, 'refunds count + popup only with the Payments link');
+check(strpos($d, "'refunds_pending'           => \$attnGate['refunds_pending'] && \$dash_can_open_payments,") !== false, 'refunds insight has the same gate as its line');
 check(substr_count($d, "\$mod_finance && \$mod_receivables") === 0, 'no owed figure left on the old finance gate');
 
 echo "dashboard_figure_perms: $pass passed, $fail failed\n";

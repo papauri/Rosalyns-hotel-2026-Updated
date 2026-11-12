@@ -265,6 +265,10 @@ function rh_ai_setting_defaults(): array
         'ai_review_arrival_days'       => '3',   // arrivals needing action: from today, this many days (later stays are checked for deposits)
         'ai_review_gap_nights'         => '2',   // a free gap of this many nights or fewer between two stays in one room is a short gap
         'ai_review_pattern_days'       => '180', // cancellation, no-show and fall-through patterns look back this many days
+        // Owner 2026-11-12 (Dashboard Needs-attention note, includes/ai/ai-attention-note.php): code defaults only
+        'ai_attn_note_cache_minutes'   => '45',  // one note per person per set of open items is kept this long (a reload costs nothing)
+        'ai_attn_note_gap_minutes'     => '10',  // at most one model call per person in this many minutes; a changed list inside it shows no note
+        'ai_attn_note_tokens'          => '220', // most words (tokens) the note call may send back
     ];
 }
 

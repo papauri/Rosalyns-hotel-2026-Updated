@@ -170,6 +170,18 @@ $mod_receivables = $raw_bookings || $raw_conference || $raw_gym || $raw_events;
 // Till revenue must still reach the takings total when the viewer sees takings
 // but not the till sales card.
 $pos_rev_needed  = $raw_pos && ($pos_sales || $show_takings);
+// Needs attention (owner 2026-11-12, admin/includes/dashboard-attention.php): one gate per item = its modules on and
+// the permission of the list it counts. The panel, its counts, the popups and their endpoint all read these.
+require_once __DIR__ . '/includes/dashboard-attention.php';
+$dash_can = static function (string $page) use ($dash_uid): bool {
+    return !function_exists('rhCanLinkTo') || rhCanLinkTo($dash_uid, $page);
+};
+$attnGate = rh_dash_attention_gates($dash_perm, static function (string $k): bool {
+    return function_exists('rh_module_key_enabled') ? rh_module_key_enabled($k) : moduleEnabled($k);
+});
+$dash_open_tabs = $attnGate['open_tabs']; // open tabs tile, money line, popup and Needs-attention item: one rule
+$dash_guest_queue_on = rh_dash_guest_services_gate($attnGate, $mod_bookings);
+$dash_ops_queue_on = rh_dash_operations_gate($attnGate, $show_owed && $mod_receivables);
 // A room-service order charged to a guest folio is not a till sale: it is already part of the guest's
 // bill and is paid through a booking payment (End of Day excludes it the same way, eod-revenue.php).
 // Without this it was counted once here and again when the folio was paid.
@@ -311,7 +323,7 @@ if (!$is_card_insight_ajax) {
             $r = $pdo->query("SELECT COUNT(*) c, COALESCE(SUM(total_amount),0) v FROM stock_orders WHERE status='placed'")->fetch(PDO::FETCH_ASSOC);
             $ops['open_tabs'] = (int)$r['c'];
             $ops['open_tabs_value'] = (float)$r['v'];
-            if ($mod_roomsvc) {
+            if ($mod_roomsvc || $attnGate['room_service_open']) {
                 $ops['room_service_pending'] = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE order_type='room_service' AND " . rh_fd_status_in_sql('status', rh_fd_room_service_open_statuses()))->fetchColumn();
                 $ops['room_service_reminder_pending'] = (int)$pdo->query("SELECT COUNT(*)
                     FROM bookings b
@@ -399,8 +411,11 @@ if (!$is_card_insight_ajax) {
                 $guestSvc['pending_events'] = (int)$pdo->query("SELECT COUNT(*) FROM event_inquiries WHERE status='pending'")->fetchColumn();
             } catch (Throwable $e) { $guestSvc['pending_events'] = 0; }
         }
-        if ($mod_housekeeping) {
+        // Each figure is read when its Needs-attention item shows (rooms out of service follow the bookings module).
+        if ($attnGate['rooms_out_of_service']) {
             $guestSvc['maintenance_open'] = rh_room_units_count(rh_fd_out_of_service_statuses()); // a joined room counts once
+        }
+        if ($attnGate['housekeeping_due']) {
             $guestSvc['housekeeping_due'] = (int)$pdo->query("SELECT COUNT(*) FROM housekeeping_assignments WHERE " . rh_fd_housekeeping_due_sql())->fetchColumn();
         }
     } catch (Throwable $e) { /* fine */ }
@@ -498,24 +513,25 @@ if ($is_card_insight_ajax) {
     $insightCardGates = [
         'checkins_today'            => $mod_bookings,
         'checkouts_today'           => $mod_bookings,
-        'pending_bookings'          => $mod_bookings,
+        'pending_bookings'          => $attnGate['pending_bookings'],
         'inhouse_guests'            => $mod_bookings,
         'expired_bookings'          => $mod_bookings,
-        'pending_conference'        => $mod_conference,
+        'pending_conference'        => $attnGate['pending_conference'], // the enquiry list needs 'conference'
         'today_conferences'         => $mod_conference,
         'outstanding_balances'      => $show_owed && $mod_receivables,
-        'open_tabs'                 => $mod_orders,
-        'room_service_reminders_due'=> $mod_roomsvc,
-        'room_service_pending'      => $mod_roomsvc,
+        'open_tabs'                 => $dash_open_tabs,
+        'room_service_reminders_due'=> $attnGate['room_service_reminders'],
+        'room_service_pending'      => $attnGate['room_service_open'],
         'kitchen_tickets'           => $mod_pos && $mod_station_kds,
         'bar_tickets'               => $mod_pos && $mod_station_bds,
         'coffee_tickets'            => $mod_pos && $mod_station_cds,
         'restaurant_revenue_today'  => $pos_sales,
         'total_revenue_today'       => $show_takings,
-        'refunds_pending'           => $mod_finance && $dash_perm('payments', 'refund_payment'), // same gate as its dashboard line
+        // Same gate as its dashboard line; the refund rows themselves only for users who can open Payments.
+        'refunds_pending'           => $attnGate['refunds_pending'] && $dash_can_open_payments,
         'stock_health'              => $mod_stock,
-        'guest_services_queue'      => $mod_website_cms || $mod_gym || $mod_bookings,
-        'operations_facilities'     => $mod_bookings || $mod_housekeeping || $mod_pos || $mod_finance || ($show_owed && $mod_receivables),
+        'guest_services_queue'      => $dash_guest_queue_on,
+        'operations_facilities'     => $dash_ops_queue_on,
         'room_status_overview'      => $mod_roomboard,
     ];
     $gateKey = str_starts_with($card, 'room_status_') ? 'room_status_overview' : $card;
@@ -1614,7 +1630,9 @@ if ($is_card_insight_ajax) {
                 // Only queues from modules this preset runs — a gym must not see
                 // "Today's check-ins", a shop must not see gym inquiries. Mirrors
                 // the row gating of the Guest Services widget on the dashboard.
-                $payload['title'] = ($mod_bookings ? 'Guest' : 'Customer') . ' Services Queue';
+                // Rows follow the Needs-attention gates ($attnGate): each row only for people who can see that list.
+                // Guest / Customer wording follows the business type (rooms module), not the viewer's permissions.
+                $payload['title'] = ($raw_bookings ? 'Guest' : 'Customer') . ' Services Queue';
                 $payload['subtitle'] = $mod_bookings
                     ? 'Front-desk and guest communication workloads'
                     : 'Customer communication workloads';
@@ -1624,14 +1642,19 @@ if ($is_card_insight_ajax) {
                     ['key' => 'priority', 'label' => 'Priority'],
                     ['key' => 'detail', 'label' => 'Detail'],
                 ];
-                $payload['link'] = $mod_website_cms
-                    ? ['href' => 'reviews.php?status=pending', 'label' => 'Open guest services pages']
-                    : ($mod_gym
-                        ? ['href' => 'gym-inquiries.php', 'label' => 'Open gym inquiries']
-                        : ['href' => 'bookings.php', 'label' => 'Open bookings']);
+                $payload['link'] = null;
+                foreach ([
+                    [$attnGate['pending_reviews'], 'reviews.php?status=pending', 'Open reviews'],
+                    [$attnGate['unread_contact'], 'contact-inquiries.php?status=new', 'Open contact messages'],
+                    [$attnGate['pending_gym'], 'gym-inquiries.php', 'Open gym inquiries'],
+                    [$attnGate['pending_events'], 'events-inquiries.php?status=pending', 'Open event bookings'],
+                    [$mod_bookings, 'bookings.php', 'Open bookings'],
+                ] as [$gsOn, $gsHref, $gsLabel]) {
+                    if ($gsOn && $dash_can(rh_dash_link_page($gsHref))) { $payload['link'] = ['href' => $gsHref, 'label' => $gsLabel]; break; }
+                }
 
                 if ($mod_website_cms) {
-                    if ($dash_perm('reviews')) {
+                    if ($attnGate['pending_reviews']) {
                     $pendingReviews = (int)$pdo->query("SELECT COUNT(*) FROM reviews WHERE status = 'pending'")->fetchColumn();
                     $payload['rows'][] = [
                         'queue' => 'Reviews awaiting moderation',
@@ -1641,7 +1664,7 @@ if ($is_card_insight_ajax) {
                         'action' => ['href' => 'reviews.php?status=pending', 'label' => 'Reviews', 'target' => '_blank'],
                     ];
                     }
-                    if ($dash_perm('contact')) {
+                    if ($attnGate['unread_contact']) {
                     $unreadContact = (int)$pdo->query("SELECT COUNT(*) FROM contact_inquiries WHERE status = 'new'")->fetchColumn();
                     $payload['rows'][] = [
                         'queue' => 'Unread contact inquiries',
@@ -1652,8 +1675,8 @@ if ($is_card_insight_ajax) {
                     ];
                     }
                 }
-                if ($mod_gym) {
-                    $pendingGym = (int)$pdo->query("SELECT COUNT(*) FROM gym_inquiries WHERE status = 'new'")->fetchColumn();
+                if ($attnGate['pending_gym']) { // enquiries need 'gym', not check-in / packages / reports access
+                    $pendingGym =(int)$pdo->query("SELECT COUNT(*) FROM gym_inquiries WHERE status = 'new'")->fetchColumn();
                     $payload['rows'][] = [
                         'queue' => 'Gym inquiries pending',
                         'count' => (string)$pendingGym,
@@ -1662,7 +1685,7 @@ if ($is_card_insight_ajax) {
                         'action' => ['href' => 'gym-inquiries.php?status=new', 'label' => 'Gym', 'target' => '_blank'],
                     ];
                 }
-                if ($mod_website_cms && $mod_events && $dash_perm('events_bookings')) {
+                if ($attnGate['pending_events']) {
                     try {
                         $pendingEventsQueue = (int)$pdo->query("SELECT COUNT(*) FROM event_inquiries WHERE status = 'pending'")->fetchColumn();
                         $payload['rows'][] = [
@@ -1702,7 +1725,10 @@ if ($is_card_insight_ajax) {
                 // must never see hotel rows (maintenance, housekeeping, room
                 // service). Mirrors the Operations & Facilities widget gating.
                 $payload['title'] = 'Operations & Facilities';
-                $payload['subtitle'] = $mod_housekeeping
+                // Rows follow the Needs-attention gates ($attnGate): maintenance and housekeeping each need their own
+                // permission, open tabs need Orders & Tabs, the owed total needs dashboard_owed.
+                $opsRoomsOn = $attnGate['rooms_out_of_service'] || $attnGate['housekeeping_due'];
+                $payload['subtitle'] = $opsRoomsOn
                     ? 'Maintenance, housekeeping, service and payment pressure points'
                     : 'Service and payment pressure points';
                 $payload['columns'] = [
@@ -1710,21 +1736,28 @@ if ($is_card_insight_ajax) {
                     ['key' => 'current', 'label' => 'Current'],
                     ['key' => 'detail', 'label' => 'Detail'],
                 ];
-                $payload['link'] = $mod_housekeeping
-                    ? ['href' => 'room-maintenance.php', 'label' => 'Open operations tools']
-                    : ($mod_orders
-                        ? ['href' => 'stock-orders.php', 'label' => 'Open orders']
-                        : ['href' => 'payments.php', 'label' => 'Open payments']);
+                $payload['link'] = null;
+                foreach ([
+                    [$attnGate['rooms_out_of_service'], 'room-maintenance.php', 'Open operations tools'],
+                    [$attnGate['housekeeping_due'], 'housekeeping.php', 'Open housekeeping'],
+                    [$dash_open_tabs, 'stock-orders.php', 'Open orders'],
+                    [$attnGate['room_service_open'], rh_fd_room_service_open_href(), 'Open room-service orders'],
+                    [$show_owed && $mod_receivables, 'payments.php?balance=outstanding', 'Open payments'],
+                ] as [$opOn, $opHref, $opLabel]) {
+                    if ($opOn && $dash_can(rh_dash_link_page($opHref))) { $payload['link'] = ['href' => $opHref, 'label' => $opLabel]; break; }
+                }
 
-                if ($mod_housekeeping) {
+                if ($attnGate['rooms_out_of_service']) {
                     $maintenanceOpen = rh_room_units_count(rh_fd_out_of_service_statuses()); // a joined room counts once
-                    $housekeepingDue = (int)$pdo->query("SELECT COUNT(*) FROM housekeeping_assignments WHERE " . rh_fd_housekeeping_due_sql())->fetchColumn();
                     $payload['rows'][] = [
                         'metric' => 'Rooms in maintenance / out of order',
                         'current' => (string)$maintenanceOpen,
                         'detail' => $maintenanceOpen > 0 ? 'Unavailable inventory requiring engineering follow-up' : 'No rooms blocked by maintenance',
                         'action' => ['href' => 'room-maintenance.php?status=out_of_service', 'label' => 'Maintenance', 'target' => '_blank'],
                     ];
+                }
+                if ($attnGate['housekeeping_due']) {
+                    $housekeepingDue = (int)$pdo->query("SELECT COUNT(*) FROM housekeeping_assignments WHERE " . rh_fd_housekeeping_due_sql())->fetchColumn();
                     $payload['rows'][] = [
                         'metric' => 'Housekeeping due today',
                         'current' => (string)$housekeepingDue,
@@ -1732,8 +1765,16 @@ if ($is_card_insight_ajax) {
                         'action' => ['href' => 'housekeeping.php?due=now', 'label' => 'Housekeeping', 'target' => '_blank'],
                     ];
                 }
-                if ($mod_roomsvc) {
+                if ($attnGate['room_service_open']) {
                     $roomServiceOpen = (int)$pdo->query("SELECT COUNT(*) FROM stock_orders WHERE order_type = 'room_service' AND " . rh_fd_status_in_sql('status', rh_fd_room_service_open_statuses()))->fetchColumn();
+                    $payload['rows'][] = [
+                        'metric' => 'Room-service orders open',
+                        'current' => (string)$roomServiceOpen,
+                        'detail' => 'Orders awaiting fulfilment or settlement',
+                        'action' => ['href' => rh_fd_room_service_open_href(), 'label' => 'Room Service', 'target' => '_blank'],
+                    ];
+                }
+                if ($attnGate['room_service_reminders']) {
                     $roomServiceReminderPending = (int)$pdo->query("SELECT COUNT(*)
                                         FROM bookings b
                                         INNER JOIN individual_rooms ir ON ir.id = b.individual_room_id
@@ -1743,12 +1784,6 @@ if ($is_card_insight_ajax) {
                                             AND " . rh_fd_room_service_unserved_sql('b'))->fetchColumn();
                     $roomServiceReminderDue = $roomServiceReminderDueNow ? $roomServiceReminderPending : 0;
                     $payload['rows'][] = [
-                        'metric' => 'Room-service orders open',
-                        'current' => (string)$roomServiceOpen,
-                        'detail' => 'Orders awaiting fulfilment or settlement',
-                        'action' => ['href' => rh_fd_room_service_open_href(), 'label' => 'Room Service', 'target' => '_blank'],
-                    ];
-                    $payload['rows'][] = [
                         'metric' => 'Room-service reminders due',
                         'current' => (string)$roomServiceReminderDue,
                         'detail' => $roomServiceReminderDueNow
@@ -1757,8 +1792,8 @@ if ($is_card_insight_ajax) {
                         'action' => $dash_can_open_rsd ? ['href' => 'room-service-dashboard.php', 'label' => 'Room Service', 'target' => '_blank'] : '',
                     ];
                 }
-                if ($mod_stock) {
-                    $openTabsStmt = $pdo->query("SELECT COUNT(*) AS c, COALESCE(SUM(total_amount), 0) AS v FROM stock_orders WHERE status = 'placed'")->fetch(PDO::FETCH_ASSOC);
+                if ($dash_open_tabs) { // the open tabs list (Orders & Tabs), not any stock permission
+                    $openTabsStmt =$pdo->query("SELECT COUNT(*) AS c, COALESCE(SUM(total_amount), 0) AS v FROM stock_orders WHERE status = 'placed'")->fetch(PDO::FETCH_ASSOC);
                     $openTabsCount = (int)($openTabsStmt['c'] ?? 0);
                     $openTabsValue = (float)($openTabsStmt['v'] ?? 0);
                     $payload['rows'][] = [
@@ -1775,7 +1810,7 @@ if ($is_card_insight_ajax) {
                     $outstandingCount = $rcvOf['count'];
                     $outstandingValue = $rcvOf['total'];
                     $payload['rows'][] = [
-                        'metric' => ($mod_bookings ? 'Bookings' : 'Accounts') . ' with balance due',
+                        'metric' => ($raw_bookings ? 'Bookings' : 'Accounts') . ' with balance due', // business type, not viewer
                         'current' => (string)$outstandingCount,
                         'detail' => (!empty($rcvOf['failed']) ? 'Unavailable (some accounts could not be read)' : $formatMoney($outstandingValue) . ' still receivable'),
                         'action' => ['href' => 'payments.php?balance=outstanding', 'label' => 'Balances', 'target' => '_blank'],
@@ -1999,6 +2034,8 @@ if ($is_card_insight_ajax) {
         }
 
         $normalizeInsightRows($payload);
+        // No popup offers a page the user would be refused (card buttons, row actions, linked cells).
+        $payload = rh_dash_insight_strip_links($payload, $dash_can);
 
         echo json_encode($payload);
     } catch (Throwable $e) {
@@ -2216,32 +2253,29 @@ $currency_symbol = getSetting('currency_symbol');
         $departuresOwing = rh_fd_departures_owing($departureList);
 
         // ---- Needs-attention queue: only what is non-zero is shown loudly ----
-        $attn = [];
-        $add = static function (array &$list, bool $on, int $count, string $label, string $icon, string $tone, string $href, ?string $insight = null, string $hint = '') {
-            if ($on) { $list[] = compact('count', 'label', 'icon', 'tone', 'href', 'insight', 'hint'); }
-        };
-        $add($attn, $mod_bookings, $noShows, 'Overdue arrivals (no-show?)', 'fa-user-clock', 'red', 'bookings.php?arrival=overdue', null, 'Arrival date passed, never checked in');
-        $add($attn, $mod_bookings, $overdueDepartures, 'Overdue departures', 'fa-person-walking-luggage', 'red', 'bookings.php?departure=overdue', null, 'Checkout date passed, still checked in');
-        $add($attn, $mod_bookings, (int)$pending_bookings, 'Bookings awaiting confirmation', 'fa-hourglass-half', 'amber', 'bookings.php?status=pending', 'pending_bookings');
-        $add($attn, $mod_bookings, $departuresOwing, 'Departures with a balance', 'fa-sack-dollar', 'red', 'bookings.php?filter=checkout_today&balance=owing', null, 'Due out today, balance to collect before they leave');
-        $add($attn, $mod_finance && $dash_perm('payments', 'refund_payment'), (int)$finance['refunds_pending'], 'Refunds to approve', 'fa-rotate-left', 'red', $dash_can_open_payments ? 'payments.php?refund_status=pending,processing' : '', $dash_can_open_payments ? 'refunds_pending' : null);
-        $add($attn, $mod_conference, (int)$pending_conference, 'Conference enquiries to answer', 'fa-users-gear', 'amber', 'conference-management.php?status=pending', 'pending_conference');
-        $add($attn, $mod_website_cms && $dash_perm('contact'), (int)$guestSvc['unread_contact'], 'Unread contact messages', 'fa-envelope', 'red', 'contact-inquiries.php?status=new');
-        $add($attn, $mod_website_cms && $dash_perm('reviews'), (int)$guestSvc['pending_reviews'], 'Reviews to moderate', 'fa-star', 'amber', 'reviews.php?status=pending');
-        $add($attn, $mod_website_cms && $mod_events && $dash_perm('events_bookings'), (int)$guestSvc['pending_events'], 'Event bookings pending', 'fa-calendar-check', 'amber', 'events-inquiries.php?status=pending');
-        $add($attn, $mod_gym && $dash_perm('gym'), (int)$guestSvc['pending_gym'], 'Gym enquiries to answer', 'fa-dumbbell', 'amber', 'gym-inquiries.php?status=new');
-        $add($attn, $mod_gym && $dash_perm('gym'), (int)$gymDash['expiring_members'], 'Gym memberships expiring (30d)', 'fa-id-card', 'amber', 'gym-members.php?filter=expiring');
-        $add($attn, $mod_housekeeping && $dash_perm('room_maintenance'), (int)$guestSvc['maintenance_open'], 'Rooms out of service', 'fa-screwdriver-wrench', 'red', 'room-maintenance.php?status=out_of_service');
-        $add($attn, $mod_housekeeping && $dash_perm('housekeeping'), (int)$guestSvc['housekeeping_due'], 'Housekeeping tasks due', 'fa-broom', 'amber', 'housekeeping.php?due=now');
-        $add($attn, $mod_roomsvc && $dash_perm('stock_orders'), (int)$ops['room_service_pending'], 'Room-service orders open', 'fa-bell-concierge', 'amber', rh_fd_room_service_open_href(), 'room_service_pending');
-        $add($attn, $mod_roomsvc && $dash_perm('stock_orders'), (int)$ops['room_service_reminders_due'], 'Room-service reminders due', 'fa-bell', 'amber', $can('room-service-dashboard.php') ? 'room-service-dashboard.php' : '', 'room_service_reminders_due', 'Rooms with no order served today');
-        $add($attn, $mod_orders && $mod_bookings, (int)$ops['open_tabs'], isRestaurantEnabled() ? 'Open tabs awaiting payment' : 'Orders awaiting payment', 'fa-receipt', 'amber', 'stock-orders.php?status=placed', 'open_tabs');
-        $add($attn, $mod_stock && $dash_perm('stock_batches'), (int)$stock['expired_batches'], 'Expired stock batches', 'fa-skull-crossbones', 'red', 'stock-batches.php?filter=expired');
-        $add($attn, $mod_stock && $dash_perm('stock_management'), (int)$stock['low_stock'], 'Items below minimum stock', 'fa-box-open', 'amber', 'stock-ingredients.php?filter=low');
-        $attnOpen = array_values(array_filter($attn, static fn($a) => $a['count'] > 0));
-        $attnClear = array_values(array_filter($attn, static fn($a) => $a['count'] <= 0));
-        usort($attnOpen, static fn($a, $b) => [$a['tone'] === 'red' ? 0 : 1, -$a['count']] <=> [$b['tone'] === 'red' ? 0 : 1, -$b['count']]);
-        $attnTotal = array_sum(array_column($attnOpen, 'count'));
+        // Items, gates, links and hints: admin/includes/dashboard-attention.php (one gate per item, $attnGate above);
+        // a link shows only when the user can open its page, otherwise the item is plain text.
+        $attn = rh_dash_attention_items($attnGate, [
+            'overdue_arrivals'       => $noShows,
+            'overdue_departures'     => $overdueDepartures,
+            'pending_bookings'       => (int)$pending_bookings,
+            'departures_owing'       => $departuresOwing,
+            'refunds_pending'        => (int)$finance['refunds_pending'],
+            'pending_conference'     => (int)$pending_conference,
+            'unread_contact'         => (int)$guestSvc['unread_contact'],
+            'pending_reviews'        => (int)$guestSvc['pending_reviews'],
+            'pending_events'         => (int)$guestSvc['pending_events'],
+            'pending_gym'            => (int)$guestSvc['pending_gym'],
+            'gym_expiring'           => (int)$gymDash['expiring_members'],
+            'rooms_out_of_service'   => (int)$guestSvc['maintenance_open'],
+            'housekeeping_due'       => (int)$guestSvc['housekeeping_due'],
+            'room_service_open'      => (int)$ops['room_service_pending'],
+            'room_service_reminders' => (int)$ops['room_service_reminders_due'],
+            'open_tabs'              => (int)$ops['open_tabs'],
+            'expired_batches'        => (int)$stock['expired_batches'],
+            'low_stock'              => (int)$stock['low_stock'],
+        ], $can, isRestaurantEnabled());
+        [$attnOpen, $attnClear, $attnTotal] = rh_dash_attention_split($attn);
 
         // ---- Hero sentence ----
         $lede = [];
@@ -2255,7 +2289,8 @@ $currency_symbol = getSetting('currency_symbol');
         }
         if ($mod_conference && $today_conferences > 0) { $lede[] = $today_conferences . ' event' . ($today_conferences == 1 ? '' : 's'); }
         $ledeText = $lede ? implode(', ', $lede) . ' today' : 'Here is your day';
-        $ledeText .= count($attnOpen) ? ' — ' . count($attnOpen) . ' thing' . (count($attnOpen) === 1 ? '' : 's') . ' need' . (count($attnOpen) === 1 ? 's' : '') . ' you.' : ' — nothing needs you right now.';
+        // Same live figure as the Needs-attention badge ($attnTotal = sum of the open items' counts), so the two always match.
+        $ledeText .= $attnTotal > 0 ? ' — ' . $attnTotal . ' thing' . ($attnTotal === 1 ? '' : 's') . ' need' . ($attnTotal === 1 ? 's' : '') . ' you.' : ' — nothing needs you right now.';
 
         // ---- Trend chart scaling ----
         $trendMax = max(1.0, ...array_values($revenueTrend ?: [0]));
@@ -2385,7 +2420,7 @@ $currency_symbol = getSetting('currency_symbol');
                     <span class="ck-kpi__sub">Gross settled today</span>
                 </<?php echo $ckRepTag; ?>>
                 <?php endif; ?>
-                <?php if ($mod_orders): ?>
+                <?php if ($dash_open_tabs): // the Orders & Tabs list it opens (stock_orders), same rule as its popup ?>
                 <a class="ck-kpi<?php echo $ops['open_tabs'] > 0 ? ' ck-kpi--warn' : ''; ?> js-dashboard-insight" data-insight-card="open_tabs" data-insight-label="<?php echo isRestaurantEnabled() ? 'Open tabs' : 'Pending orders'; ?>" href="stock-orders.php?status=placed">
                     <span class="ck-kpi__icon"><i class="fas fa-hourglass-half"></i></span>
                     <span class="ck-kpi__label"><?php echo isRestaurantEnabled() ? 'Open tabs' : 'Pending orders'; ?></span>
@@ -2625,12 +2660,24 @@ $currency_symbol = getSetting('currency_symbol');
                     <div>
                         <h2 class="ck-panel__title">Needs attention <?php if ($attnTotal): ?><span class="ck-badge"><?php echo (int)$attnTotal; ?></span><?php endif; ?></h2>
                         <p class="ck-panel__sub">Most urgent first.</p>
+                        <?php
+                        // Optional note (includes/ai/ai-attention-note.php): only while the Assistant is usable for this
+                        // person and 2+ items are open; otherwise prints nothing. The panel never depends on it.
+                        if ($attnOpen && is_file(__DIR__ . '/../includes/ai/ai-attention-note.php')) {
+                            try {
+                                require_once __DIR__ . '/../includes/ai/ai-attention-note.php';
+                                rh_ai_an_mount($attnOpen, $dash_uid);
+                            } catch (Throwable $e) {
+                                error_log('dashboard attention note: ' . $e->getMessage());
+                            }
+                        }
+                        ?>
                     </div>
                     <div class="ck-panel__tools">
-                        <?php if ($mod_website_cms || $mod_gym || $mod_bookings): ?>
+                        <?php if ($dash_guest_queue_on): // at least one row the user may see ?>
                             <button type="button" class="ck-icon-btn js-dashboard-insight" data-insight-card="guest_services_queue" data-insight-label="Guest services queue" title="Guest services overview"><i class="fas fa-headset"></i></button>
                         <?php endif; ?>
-                        <?php if ($mod_bookings || $mod_housekeeping || $mod_pos || $mod_finance || ($show_owed && $mod_receivables)): ?>
+                        <?php if ($dash_ops_queue_on): ?>
                             <button type="button" class="ck-icon-btn js-dashboard-insight" data-insight-card="operations_facilities" data-insight-label="Operations &amp; facilities" title="Operations overview"><i class="fas fa-screwdriver-wrench"></i></button>
                         <?php endif; ?>
                     </div>
@@ -2713,7 +2760,7 @@ $currency_symbol = getSetting('currency_symbol');
                         <li><span><i class="fas fa-cash-register"></i> <?php echo isRestaurantEnabled() ? 'Restaurant &amp; bar' : 'Till sales'; ?> today · <?php echo (int)$ops['orders_today']; ?> order(s)</span><strong><?php echo $money($ops['restaurant_rev_today']); ?></strong></li>
                         <?php endif; ?>
                     <?php endif; ?>
-                    <?php if ($mod_orders && $mod_bookings): ?>
+                    <?php if ($dash_open_tabs && $mod_bookings): ?>
                         <li><a class="js-dashboard-insight" data-insight-card="open_tabs" data-insight-label="Open tabs" href="stock-orders.php?status=placed"><span><i class="fas fa-receipt"></i> <?php echo (int)$ops['open_tabs']; ?> open tab(s)</span><strong><?php echo $money($ops['open_tabs_value']); ?></strong></a></li>
                     <?php endif; ?>
                     <?php if ($moneyRefundLine): ?>

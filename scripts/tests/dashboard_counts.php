@@ -85,9 +85,11 @@ check(strpos($dash, "rh_gym_member_filter_where()") !== false && strpos($dash, "
 check(strpos($dash, "FROM gym_members WHERE status='active'\")") === false, 'dashboard: no raw status=active member count');
 check(strpos($dash, 'rh_fd_checkins_subtitle(') !== false && strpos($dash, 'count($rows) - $ciStillToArrive') === false, 'dashboard: check-ins popup counts do not come from the capped rows');
 check(strpos($dash, "count(\$roomServiceQueue)]") === false, 'dashboard: room-service tab badge is not the 10-row list length');
+// Needs-attention items live in admin/includes/dashboard-attention.php since 2026-11-12 (scripts/tests/dashboard_attention.php).
+$dashAttn = $dash . (string)@file_get_contents($root . '/admin/includes/dashboard-attention.php');
 foreach (["'contact-inquiries.php?status=new'", "'events-inquiries.php?status=pending'", "'gym-inquiries.php?status=new'", 'gym-members.php?filter=active',
-          "'bookings.php?filter=checkout_today&balance=owing', null", "'housekeeping.php?due=now'", "'room-maintenance.php?status=out_of_service'"] as $lnk) {
-    check(strpos($dash, $lnk) !== false, "dashboard: chip opens $lnk");
+          "'bookings.php?filter=checkout_today&balance=owing'", "'housekeeping.php?due=now'", "'room-maintenance.php?status=out_of_service'"] as $lnk) {
+    check(strpos($dashAttn, $lnk) !== false, "dashboard: chip opens $lnk");
 }
 check(strpos($dash, "gym_inquiries WHERE status='pending' OR status='new'") === false, 'dashboard: gym enquiry count = the New tab only');
 
@@ -158,7 +160,7 @@ check(!preg_match('/(?<!LEFT )JOIN rooms r ON/', $dash), 'dashboard: rooms alway
 check(strpos($dash, 'stock-orders.php?view=stock') === false, 'dashboard: no stock-orders.php?view=stock link (no such view)');
 check(substr_count($dash, '$can(\'stock-dashboard.php\')): ?><a class="ck-link" href="stock-dashboard.php">Manage') === 1, 'dashboard: Stock panel Manage -> stock-dashboard.php behind its permission');
 check(strpos($dash, "'href' => 'stock-dashboard.php', 'label' => 'Open stock dashboard'") !== false, 'dashboard: stock health drawer links stock-dashboard.php');
-check(strpos($dash, '$can(\'room-service-dashboard.php\') ? \'room-service-dashboard.php\' : \'\'') !== false, 'dashboard: reminders chip links only when the user can open room-service-dashboard.php');
+check(strpos($dashAttn, "'href' => 'room-service-dashboard.php',") !== false && strpos($dashAttn, "'href'    => \$canOpen ? (string)\$def['href'] : '',") !== false, 'dashboard: reminders chip links only when the user can open room-service-dashboard.php');
 check(substr_count($dash, "'href' => 'room-service-dashboard.php'") === substr_count($dash, "\$dash_can_open_rsd ? ['href' => 'room-service-dashboard.php'"), 'dashboard: every room-service-dashboard.php drawer link is permission-gated');
 check(strpos($dash, 'payments.php?q=') === false, 'dashboard: outstanding drawer has no payments.php?q= link');
 check(strpos($dash, "'payments.php?booking_type=' . urlencode(\$src) . '&booking_id='") !== false, 'dashboard: other receivables link Payments by source type + id');

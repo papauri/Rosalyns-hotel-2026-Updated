@@ -837,6 +837,7 @@ rh_ai_set_transport($queueTransport);
 if (getenv('AI_TEST_OWNER_ROUND')) { goto rh_ai_test_owner_round; }
 if (getenv('AI_TEST_MENU_ONLY')) { goto rh_ai_test_menu; } // only the menu & recipe advisor checks (2026-10-30)
 if (getenv('AI_TEST_BOOKED_RATE_ONLY')) { goto rh_ai_test_booked_rate; } // only the pure booked rate / rate plan checks (2026-11-10)
+if (getenv('AI_TEST_ATTN_NOTE_ONLY')) { goto rh_ai_test_attn_note; } // only the Dashboard Needs-attention note checks (2026-11-12)
 
 // ════ Tools: read only, no forbidden tool ════
 $reg = rh_ai_tool_registry();
@@ -6566,6 +6567,145 @@ try {
     check(strpos($tdDesc, 'trading day') !== false && strpos($tdDesc, 'leave from/to out') !== false, 'the model is told to leave the dates out for "today" (the trading day)', $tdDesc);
 } catch (Throwable $e) {
     bad('Till trading day checks threw', get_class($e) . ': ' . $e->getMessage());
+}
+
+// ── Dashboard Needs-attention note (owner 2026-11-12): an optional line, only while the Assistant is on and usable for
+//    this person; built from the panel's own items for this person; numbers checked against the input; cached. Fake
+//    transport (no network); every database step inside a transaction that is rolled back. ──
+rh_ai_test_attn_note:
+echo "\n-- Needs-attention note --\n";
+try {
+    require_once $root . '/admin/includes/dashboard-attention.php';
+    require_once $root . '/includes/ai/ai-attention-note.php';
+    rh_ai_an_engine();
+    $anAll = rh_dash_attention_gates(static fn(string ...$k): bool => true, static fn(string $m): bool => true);
+    $anCounts = ['overdue_departures' => 2, 'departures_owing' => 3, 'pending_bookings' => 5, 'low_stock' => 4, 'gym_expiring' => 0, 'refunds_pending' => 1];
+    [$anOpen] = rh_dash_attention_split(rh_dash_attention_items($anAll, $anCounts, static fn(string $p): bool => true, false));
+    $anItems = rh_ai_an_items($anOpen);
+    $anIds = array_column($anItems, 'id');
+    check(count($anItems) === 5 && !in_array('gym_expiring', $anIds, true) && $anIds[0] === 'departures_owing',
+        'note input = the panel\'s open items only (a clear queue is never sent), in panel order', json_encode($anIds));
+    $anPay = rh_ai_an_payload($anItems);
+    check(strpos($anPay, 'bookings.php') === false && strpos($anPay, 'href') === false && strpos($anPay, 'fa-') === false
+        && strpos($anPay, '"Departures with a balance"') !== false && strpos($anPay, '"count":3') !== false,
+        'note input carries the fixed label, hint and count only (no link, no icon, no name)', $anPay);
+    check(rh_ai_an_items([['key' => 'not_an_item', 'count' => 3, 'label' => 'x'], ['key' => 'low_stock', 'count' => 0, 'label' => 'y']]) === [],
+        'an unknown item or a zero count never reaches the note');
+    // A receptionist without Bookings: the booking items never reach the model
+    $anGatesNoBk = rh_dash_attention_gates(static fn(string ...$k): bool => !in_array('bookings', $k, true), static fn(string $m): bool => true);
+    $anNoBk = rh_ai_an_permitted($anItems, $anGatesNoBk);
+    check(array_column($anNoBk, 'id') === ['refunds_pending', 'low_stock'], 'items whose gate this person fails are dropped before the prompt', json_encode(array_column($anNoBk, 'id')));
+    // Stored copy: only this person's, only fresh
+    check(rh_ai_an_stored(7, ['uid' => 7, 'at' => time(), 'items' => $anOpen]) === $anItems && rh_ai_an_stored(8, ['uid' => 7, 'at' => time(), 'items' => $anOpen]) === null
+        && rh_ai_an_stored(7, ['uid' => 7, 'at' => time() - RH_AI_AN_MAX_AGE - 5, 'items' => $anOpen]) === null,
+        'the endpoint uses only the copy kept for this signed-in person, and only while it is fresh');
+    // The check on the model's reply
+    check(rh_ai_an_check('Collect the balances from the 3 guests due out before they leave, then deal with the 2 overdue departures.', $anItems) !== null,
+        'a note using only the input\'s numbers is kept');
+    check(rh_ai_an_check('Start with the 7 overdue departures.', $anItems) === null, 'a note with a number not in the input is dropped');
+    check(rh_ai_an_check('Start with the eleven overdue departures.', $anItems) === null, 'a number written as a word that is not in the input is dropped');
+    check(rh_ai_an_items($anItems) === $anItems, 'the stored items keep their shape when read again (the endpoint path)');
+    check(rh_ai_an_check('Refunds are next. Nothing else is waiting.', $anItems) === null && rh_ai_an_check('Stock is all clear after that.', $anItems) === null
+        && rh_ai_an_check('Start with departures; there are 0 arrivals.', $anItems) === null, 'a note claiming something is clear, none or zero is dropped');
+    check(rh_ai_an_check('The Assistant thinks the departures come first.', $anItems) === null && rh_ai_an_check('Smart tip: departures first.', $anItems) === null
+        && rh_ai_an_check('A. B. C. D.', $anItems) === null && rh_ai_an_check('Check https://x.example first.', $anItems) === null,
+        'a note that sounds artificial, has more than three sentences or a link is dropped');
+    check(rh_ai_an_check('Settle the hotel bills first.', $anItems) === null, 'no hotel-only wording the items do not use themselves (any business type)');
+    $anPrompt = rh_ai_an_prompt();
+    check(stripos($anPrompt, 'hotel') === false && stripos($anPrompt, 'guest') === false && strpos($anPrompt, 'never add, total or estimate') !== false,
+        'the instruction has no hotel-only wording and forbids new numbers');
+
+    // Model calls: counted by a fake transport (no network)
+    $GLOBALS['an_calls'] = [];
+    $GLOBALS['an_reply'] = 'Collect the balances from the 3 due out before they leave, then the 2 overdue departures.';
+    rh_ai_set_transport(static function ($method, $url, $headers, $body, $timeout) {
+        $GLOBALS['an_calls'][] = (string)$body;
+        return ['http' => 200, 'body' => json_encode(['candidates' => [['content' => ['role' => 'model', 'parts' => [['text' => $GLOBALS['an_reply']]]], 'finishReason' => 'STOP']],
+            'usageMetadata' => ['promptTokenCount' => 180, 'candidatesTokenCount' => 30]])];
+    });
+    $GLOBALS['__rh_ai_an_models'] = ['provider' => 'google', 'fast' => ['model_id' => 'test-fast-model', 'price_in_per_mtok' => null, 'price_out_per_mtok' => null]];
+    $pdo->beginTransaction();
+    try {
+        $anU = ait_temp_user($pdo, 'admin', 'An-note-pw-1');
+        // Off: the page prints nothing and the gate is shut
+        foreach ($offSetup as $q) { $pdo->exec($q); }
+        rh_ai_settings($pdo, true);
+        ob_start();
+        rh_ai_an_mount($anOpen, $anU['id']);
+        $anHtml = ob_get_clean();
+        check($anHtml === '' && !rh_ai_an_gate($pdo, $anU['id']), 'Assistant off: the panel gets no note line, no script, nothing');
+        // On + usable (fake key, a Fast model): the hidden line and its loader, nothing more
+        if ($schemaReady && rh_ai_chat_ready($pdo)) {
+            rh_ai_save_settings(['ai_enabled' => '1', 'ai_provider' => 'google', 'ai_cloud_enabled' => '1'], $pdo);
+            $pdo->exec("UPDATE enabled_modules SET is_enabled = 1 WHERE module_key = 'ai_assistant'");
+            rh_ai_store_key('google', 'AIzaSyFAKEKEY0123456789abcdefghijklmnop', (int)$anU['id'], $pdo); // a fake key, rolled back
+            $pdo->prepare("INSERT INTO ai_models (provider, model_id, label, source, is_selected, role, sort) VALUES ('google', 'test-fast-model', 'Test fast', 'catalog', 1, 'fast', 1)
+                           ON DUPLICATE KEY UPDATE is_selected = 1, role = 'fast', source = 'catalog'")->execute();
+            rh_ai_settings($pdo, true);
+            ob_start();
+            rh_ai_an_mount($anOpen, $anU['id']);
+            $anHtml = ob_get_clean();
+            check(rh_ai_an_gate($pdo, $anU['id']) && strpos($anHtml, 'data-attn-note hidden') !== false && strpos($anHtml, 'class="ck-panel__sub"') !== false
+                && strpos($anHtml, 'js/attention-note.js') !== false && stripos($anHtml, 'AI') === false, 'Assistant on and usable: a hidden plain line + its after-load script', $anHtml);
+            ob_start();
+            rh_ai_an_mount([$anOpen[0]], $anU['id']);
+            check(ob_get_clean() === '', 'one open item: no note (the list already says it all)');
+            $anRec = ait_temp_user($pdo, 'receptionist', 'An-note-pw-1');
+            ob_start();
+            rh_ai_an_mount($anOpen, $anRec['id']);
+            $anRecHtml = ob_get_clean();
+            check(!hasPermission($anRec['id'], 'ai_assistant_use') && !rh_ai_an_gate($pdo, $anRec['id']) && $anRecHtml === '',
+                'without ai_assistant_use there is no note line (Assistant on)');
+        } else {
+            skip('Assistant on: migrations 070/071 have not run here');
+        }
+        // The note: one call, only the permitted items in it
+        $pdo->exec("DELETE FROM ai_tool_cache WHERE user_id = " . (int)$anU['id']);
+        $r1 = rh_ai_an_note($pdo, $anU['id'], $anNoBk);
+        $sent = implode("\n", $GLOBALS['an_calls']);
+        check(count($GLOBALS['an_calls']) === 1 && strpos($sent, 'Items below minimum stock') !== false && strpos($sent, 'Refunds to approve') !== false
+            && strpos($sent, 'Departures with a balance') === false && strpos($sent, 'Overdue departures') === false && strpos($sent, 'Bookings awaiting') === false,
+            'the prompt holds only the items this person may see', count($GLOBALS['an_calls']) . ' calls: ' . mb_substr($sent, 0, 600));
+        check($r1['called'] && $r1['note'] === '' && $r1['reason'] === 'dropped', 'a reply quoting numbers not in this person\'s items (3, 2) is dropped: nothing shown', json_encode($r1));
+        $r2 = rh_ai_an_note($pdo, $anU['id'], $anNoBk);
+        check(count($GLOBALS['an_calls']) === 1 && $r2['cached'] && $r2['note'] === '', 'reload with the same items: from the cache, no model call (a dropped note is not asked again)');
+        // A changed list inside the gap: no call and no old note
+        $r3 = rh_ai_an_note($pdo, $anU['id'], $anItems);
+        check(count($GLOBALS['an_calls']) === 1 && $r3['note'] === '' && $r3['reason'] === 'gap', 'a new item set inside the call gap: no model call, no stale note', json_encode($r3));
+        // After the gap: a good note is kept, then served from the cache
+        $pdo->exec("DELETE FROM ai_tool_cache WHERE user_id = " . (int)$anU['id']);
+        $r4 = rh_ai_an_note($pdo, $anU['id'], $anItems);
+        $r5 = rh_ai_an_note($pdo, $anU['id'], $anItems);
+        check(count($GLOBALS['an_calls']) === 2 && $r4['note'] === $GLOBALS['an_reply'] && $r5['cached'] && $r5['note'] === $r4['note'],
+            'a note within the input\'s numbers is shown; the next load is a cache hit (no provider call)', json_encode([$r4, $r5]));
+        $anUse = (int)$pdo->query("SELECT COALESCE(SUM(requests), 0) FROM ai_usage_daily WHERE user_id = " . (int)$anU['id'] . " AND day = CURDATE()")->fetchColumn();
+        check($anUse === 2, 'every note call is recorded in the usage figures', (string)$anUse);
+        $r6 = rh_ai_an_note($pdo, $anU['id'], [$anItems[0]]);
+        check(count($GLOBALS['an_calls']) === 2 && $r6['reason'] === 'few', 'fewer than two open items: no model call');
+        // No model chosen: no call, no note
+        $GLOBALS['__rh_ai_an_models'] = ['provider' => ''];
+        $pdo->exec("DELETE FROM ai_tool_cache WHERE user_id = " . (int)$anU['id']);
+        $r7 = rh_ai_an_note($pdo, $anU['id'], $anNoBk);
+        check(count($GLOBALS['an_calls']) === 2 && $r7['note'] === '' && $r7['reason'] === 'model', 'no usable model: no call and no note');
+    } finally {
+        $pdo->rollBack();
+        unset($GLOBALS['__rh_ai_an_models']);
+        rh_ai_settings($pdo, true);
+    }
+    // The endpoint and the script, by their source
+    $anApi = (string)file_get_contents($root . '/admin/api/ai-attention-note.php');
+    $pE = strpos($anApi, 'rh_ai_enabled($pdo)');
+    $pC = strpos($anApi, 'validateCsrfToken(');
+    $pW = strpos($anApi, 'session_write_close()');
+    $pN = strpos($anApi, 'rh_ai_an_note(');
+    check($pE !== false && $pC > $pE && $pW > $pC && $pN > $pW && strpos($anApi, "'ai_assistant_use'") !== false && strpos($anApi, 'rh_ai_an_permitted(') !== false
+        && strpos($anApi, '$_POST[\'items') === false && strpos($anApi, '404') !== false,
+        'endpoint: off = 404, CSRF, ai_assistant_use, gates worked out again, session closed before the call, no items from the request');
+    $anJs = (string)file_get_contents($root . '/admin/js/attention-note.js');
+    check(strpos($anJs, 'textContent') !== false && strpos($anJs, 'innerHTML') === false && strpos($anJs, 'abort') !== false && strpos($anJs, 'console.') === false,
+        'script: text only, times out quietly, never logs to the console');
+} catch (Throwable $e) {
+    bad('Needs-attention note checks threw', get_class($e) . ': ' . $e->getMessage());
 }
 
 rh_ai_set_transport(null);
