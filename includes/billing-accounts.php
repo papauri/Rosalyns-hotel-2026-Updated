@@ -1192,7 +1192,7 @@ if (!function_exists('rh_billing_ready')) {
             require_once __DIR__ . '/../config/email.php';
         }
         $pdf = bookingRenderPdfFromHtml(rh_billing_statement_html($pdo, $acc, $rows), 'Statement ' . $acc['name']);
-        $site = function_exists('getSetting') ? (string)getSetting('site_name', 'the hotel') : 'the hotel';
+        $site = function_exists('getSetting') ? (string)getSetting('site_name', 'Hotel') : 'Hotel';
         $e = static fn($v) => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
         $html = '<p>Dear ' . $e(trim((string)$acc['contact_name']) !== '' ? $acc['contact_name'] : $acc['name']) . ',</p>'
             . '<p>Please find attached your account statement from ' . $e($site) . '. Total owed: <strong>' . $e(rh_billing_money($total)) . '</strong> on '
@@ -1233,7 +1233,7 @@ if (!function_exists('rh_billing_ready')) {
             require_once __DIR__ . '/../config/email.php';
         }
         $pdf = bookingRenderPdfFromHtml(rh_pdf_document_shell('Payment received', $meta, $body, ['banner' => ['text' => 'Thank you', 'tone' => 'neutral']]), 'Payment ' . $rem['remittance_reference']);
-        $site = function_exists('getSetting') ? (string)getSetting('site_name', 'the hotel') : 'the hotel';
+        $site = function_exists('getSetting') ? (string)getSetting('site_name', 'Hotel') : 'Hotel';
         $e = static fn($v) => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
         $html = '<p>Dear ' . $e(trim((string)$acc['contact_name']) !== '' ? $acc['contact_name'] : $acc['name']) . ',</p><p>Thank you: we received '
             . $e(rh_billing_money((float)$rem['amount'])) . ' (' . $e($rem['remittance_reference']) . '). The attached advice shows how it was applied to your bookings.</p>';
