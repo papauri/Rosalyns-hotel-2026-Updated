@@ -297,6 +297,16 @@ function rh_ai_money_booking_text(PDO $db, array $res, string $ask, int $id): st
         default:
             $head = '**Paid so far: ' . $f($paid) . '** of ' . $f($total) . '. ' . ($owed <= BALANCE_TOLERANCE ? 'Nothing is owed.' : 'Still to pay: ' . $f($owed) . '.');
     }
+    if (!empty($m['on_account'])) {
+        // Company pays later (owner 2026-11-13): the company share is billed to the company, never the guest's debt
+        $name = trim((string)($m['billed_to']['guest_name'] ?? ''));
+        $gOwes = (float)($m['guest_owes'] ?? 0);
+        $cOwes = (float)($m['company_owes'] ?? 0);
+        $split = '**On a company account' . ($name !== '' ? ' (' . $name . ')' : '') . '** - ' . ($gOwes > BALANCE_TOLERANCE ? 'the guest owes ' . $f($gOwes) : 'the guest owes nothing')
+            . ($cOwes > BALANCE_TOLERANCE ? '; ' . $f($cOwes) . ' is billed to the company (company pays later, not the guest\'s debt)' : '; nothing is left on the company account')
+            . '. Paid so far ' . $f($paid) . ' of ' . $f($total) . '.';
+        $head = $ask === 'last' ? $head . "\n" . $split : $split; // "last payment" keeps its answer first
+    }
     $rate = rh_ai_booked_rate_text($res); // the rate it was booked at × nights, never today's price (owner 2026-11-09)
     return $head . "\n\n" . rh_ai_booking_line($res) . ($rate !== '' ? "\n" . $rate : '') . ($lastLine !== '' ? "\n" . $lastLine : '') . "\n\nThe booking's own bill, the same figures as the booking screen.";
 }

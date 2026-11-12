@@ -982,7 +982,7 @@ function rh_dec_f_bk_deposits(PDO $db, array $ctx): array
             continue;
         }
         $paid = (float)$f['paid'];
-        $bal = (float)$f['balance_due'];
+        $bal = rh_ai_guest_owes($f); // the guest's own share: a company-account share is never asked of the guest
         $depAsked = (int)$r['deposit_required'] === 1 && (int)$r['deposit_paid'] !== 1 && (float)$r['deposit_amount'] > BALANCE_TOLERANCE && $paid + BALANCE_TOLERANCE < (float)$r['deposit_amount'];
         if ($bal > BALANCE_TOLERANCE && ($paid <= BALANCE_TOLERANCE || $depAsked)) {
             $flag[] = ['id' => (int)$r['id'], 'reference' => (string)$r['booking_reference'], 'guest' => (string)$r['guest_name'], 'in' => (string)$r['check_in_date'],
@@ -1064,7 +1064,7 @@ function rh_dec_f_bk_arrivals(PDO $db, array $ctx): array
             $partial = true;
         }
         $noRoom = empty($r['individual_room_id']) && empty($r['held']);
-        $bal = (float)($f['balance_due'] ?? 0);
+        $bal = $f ? rh_ai_guest_owes($f) : 0.0; // still owed BY THE GUEST: a company-account share is billed to the company
         $owed = $bal > BALANCE_TOLERANCE;
         $req = !empty($r['has_req']);
         if (!$noRoom && !$owed && !$req) {
@@ -1337,7 +1337,10 @@ function rh_dec_f_collections(PDO $db, array $ctx): array
     foreach ((array)$o['largest_left_or_overdue'] as $r) {
         $top += (float)$r['amount_due'];
         $oldest = max($oldest, (int)$r['days_outstanding']);
-        $rows[] = ['label' => (string)$r['type'] . ', ' . (string)$r['status'] . ', owed for ' . rh_dec_n((int)$r['days_outstanding'], 'day'), 'reference' => (string)$r['reference'],
+        // Company pays later: say who to chase (the company for its share, the guest only for theirs)
+        $payer = (string)($r['payer'] ?? '');
+        $who = $payer === 'company' ? ', chase the company (company account)' : ($payer === 'both' ? ', company owes ' . rh_dec_fmt($cur, (float)$r['company_owes']) . ', guest owes ' . rh_dec_fmt($cur, (float)$r['guest_owes']) : '');
+        $rows[] = ['label' => (string)$r['type'] . ', ' . (string)$r['status'] . ', owed for ' . rh_dec_n((int)$r['days_outstanding'], 'day') . $who, 'reference' => (string)$r['reference'],
             'guest_name' => (string)$r['guest_name'], 'amount' => (float)$r['amount_due']];
     }
     $k = count($rows);
@@ -1464,7 +1467,7 @@ function rh_dec_refunds_by_staff(PDO $db, array $ctx): ?array
             require_once dirname(__DIR__, 2) . '/admin/includes/finance-refunds.php'; // the one refund rule (pure)
         }
         $st = $db->prepare("SELECT recorded_by, COUNT(*) AS times, COALESCE(SUM(" . rh_refund_amount_sql() . "), 0) AS amount FROM payments
-                            WHERE deleted_at IS NULL AND " . rh_refund_settled_sql() . " AND payment_date BETWEEN ? AND ?
+                            WHERE deleted_at IS NULL AND " . rh_refund_settled_sql() . " AND " . rh_refund_eod_date_sql() . " BETWEEN ? AND ?
                             GROUP BY recorded_by ORDER BY amount DESC LIMIT 6");
         $st->execute([$ctx['from'], $ctx['to']]);
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);

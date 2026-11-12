@@ -246,7 +246,7 @@
     <thead><tr><th>Permission</th><th>What it lets the person do</th><th>Default for</th></tr></thead>
     <tbody>
       <tr><td><strong>Check-in Guests</strong></td><td>Check a guest in, and undo a check-in.</td><td>Manager, Receptionist</td></tr>
-      <tr><td><strong>Check-out Guests</strong></td><td>Check a guest out.</td><td>Manager, Receptionist</td></tr>
+      <tr><td><strong>Check-out Guests</strong></td><td>Check a guest out. Also needed to <strong>Extend stay</strong>, and to <strong>Add or take off nights</strong> on a checked-in guest.</td><td>Manager, Receptionist</td></tr>
       <tr><td><strong>Check-in to Room Not Clean</strong></td><td>Check a guest in although housekeeping has not marked the room clean. It is written on the booking's timeline.</td><td>Manager</td></tr>
       <tr><td><strong>Check-out With Balance</strong></td><td>Check a guest out although they still owe money. They must confirm, and it is written on the timeline.</td><td>Nobody</td></tr>
     </tbody>
@@ -343,11 +343,13 @@
       <tr><td><strong>Receipts</strong></td><td>Make, send, export and check receipts.</td><td>Manager, Accountant</td></tr>
       <tr><td><strong>Add Payments</strong></td><td>Record a payment, mark a booking paid, change a payment.</td><td>Manager, Accountant</td></tr>
       <tr><td><strong>Edit payments</strong></td><td>Correct the amount, method, date or notes of a payment already received. Each change needs a reason and is kept in History. The receipt is reissued as a corrected receipt.</td><td>Admin and Super Admin (can be granted to anyone)</td></tr>
-      <tr><td><strong>Issue &amp; settle refunds</strong></td><td>Refund money and move a refund from pending to done.</td><td>Manager, Accountant</td></tr>
+      <tr><td><strong>Issue &amp; settle refunds</strong></td><td>Refund money and move a refund from pending to done. A refund part of Add or take off nights also needs it.</td><td>Manager, Accountant</td></tr>
       <tr><td><strong>Change VAT &amp; refund settings</strong></td><td>Change the VAT mode and rate, refund and cancellation rules, bank and invoice details. Administrators only.</td><td>Nobody</td></tr>
       <tr><td><strong>Invoices</strong></td><td>Open Invoices and Credit Notes and work them. (Quotations needs <strong>Create Bookings</strong>.)</td><td>Manager, Accountant</td></tr>
       <tr><td><strong>Reports</strong></td><td>Open Reports and End of Day.</td><td>Manager, Accountant, Viewer</td></tr>
       <tr><td><strong>Visitor Analytics</strong></td><td>See how many people visit the website.</td><td>Manager</td></tr>
+      <tr><td><strong>Company accounts</strong></td><td>Open Company Accounts: the companies that pay later (on account or LPO), their statements, and the payments they send.</td><td>Manager, Accountant</td></tr>
+      <tr><td><strong>Put bookings on a company account</strong></td><td>Choose the company that pays a booking later (LPO, due date, who pays the extras). The company share is not chased from the guest and does not block check-out.</td><td>Manager, Accountant</td></tr>
     </tbody>
   </table>
 
@@ -368,6 +370,8 @@
     <thead><tr><th>Permission</th><th>What it lets the person do</th><th>Default for</th></tr></thead>
     <tbody>
       <tr><td><strong>Hotel Settings</strong></td><td>Open Hotel Settings, Rate Plans, Room Packages and Automated Emails: hotel details and booking rules. The email server (SMTP) part is <strong>Super admin only</strong>, and the site switches are <strong>Administrators only</strong>.</td><td>Manager</td></tr>
+      <tr><td><strong>Timed report emails</strong></td><td>Switch the daily reports and station report emails on or off, and choose who gets them and who is copied (Automated Emails). Without it these fields are greyed out.</td><td>Administrator, Manager</td></tr>
+      <tr><td><strong>Company statement emails</strong></td><td>Switch the timed company statement email on or off and choose who is copied (Automated Emails). The statement goes to each company's billing email.</td><td>Administrator, Manager</td></tr>
       <tr><td><strong>Edit message templates</strong></td><td>Change the wording of guest emails, PDFs and receipt messages in Email Templates. Nothing else in Settings. <strong>Administrators only</strong>: managers no longer get it by default.</td><td>Nobody</td></tr>
       <tr><td><strong>Module Settings</strong></td><td>Switch parts of the system on and off, and apply business presets. <strong>Super admin only.</strong></td><td>Nobody</td></tr>
       <tr><td><strong>Page Management</strong></td><td>Switch website pages on and off and reorder them. <strong>Administrators only.</strong></td><td>Nobody</td></tr>

@@ -164,9 +164,18 @@
     <li><strong>Folio / Charges</strong>: the guest's bill. <strong>Add Custom Charge</strong>, <strong>Add Menu Item to Folio</strong> and <strong>Void Charge</strong> are explained in <a href="#folio">How to add or void folio charges</a>. Food and drinks charged to the room from the till or room service also appear here.</li>
     <li><strong>Payment breakdown</strong>: every payment, refund and credit, and what is still owed. See <a href="#payment">How to take a payment</a>.</li>
     <li><strong>Totals on this page include VAT and levy.</strong> For rooms booked together as a group, a line at the top reads <strong>Group total (incl. VAT &amp; levy)</strong>: every room in the group that is still live, at its full amount. A cancelled room is left out. On <strong>Payment Details</strong> for a room payment the row is called <strong>Total (incl. VAT &amp; levy)</strong> and shows the whole bill (room, VAT, levy and any folio extras), so <strong>Paid</strong> plus <strong>Due</strong> adds up to it. The small <strong>i</strong> next to the folio total, the payment breakdown and the group total explains how the figure is made up (see <a href="#total-info">How a booking total is worked out</a>).</li>
-    <li><strong>Invoices</strong>: documents sent to the guest. <strong>Guest history</strong>: the guest's other stays. <strong>Internal notes</strong>: notes only staff see. <strong>Activity timeline</strong>: who did what and when (see <a href="#notes">How to add a note and read the timeline</a>).</li>
+    <li><strong>Invoices</strong>: documents sent to the guest. <strong>Guest history</strong>: the guest's stays across all their bookings, with three figures. <strong>Completed stays</strong> counts checked-out stays under this email, this one included (rooms booked together count once). <strong>Other bookings</strong> counts every other booking under this email, any status. <strong>Received</strong> is the money paid in, less refunds. A returning guest shows a <em>Returning guest</em> badge. <strong>Internal notes</strong>: notes only staff see. <strong>Activity timeline</strong>: who did what and when (see <a href="#notes">How to add a note and read the timeline</a>).</li>
+    <li><strong>Who pays</strong> (on a company account only): who pays this booking, the LPO or reference, and the due date. See <a href="#company">How to put a booking on a company account</a>.</li>
   </ul>
   <p>Times on this page (Created, Updated, the timeline) are shown in your own device's time zone. If they look wrong, check the clock and time zone on your phone or computer.</p>
+
+  <h3 id="guest-history">Guest history: completed stays, other bookings and received</h3>
+  <p>The Guest history box is on the booking page, and the returning-guest lookup uses the same rule. It counts by the guest's email address.</p>
+  <ul>
+    <li><strong>Completed stays</strong>: checked-out stays under this email, this one included. Rooms booked together count once. In-house and upcoming stays are not counted.</li>
+    <li><strong>Other bookings</strong>: every other booking under this email, any status.</li>
+    <li><strong>Received</strong>: money paid in across all their bookings, this one included, less refunds.</li>
+  </ul>
 
   <h2 id="booked-rate">The booked rate: what a stay is charged at</h2>
   <p>Every booking keeps the nightly price it was made at. This is the <strong>booked rate</strong>, VAT and levy included. Money screens show it as <em>Booked at MWK 356,000 &times; 3 nights = MWK 1,068,000</em>.</p>
@@ -301,7 +310,7 @@
   <ul>
     <li><strong>Before taking a payment, check the Booked at line and the Balance due.</strong> The Record Payment box shows <em>Booked at MWK 356,000 &times; 3 nights = MWK 1,068,000</em> next to the amount, with <strong>Paid so far</strong> and <strong>Balance due</strong>. Charge what is still owed on that booked price, never on today's room price.</li>
     <li><strong>At booking time:</strong> use <strong>Payment Received Now</strong> and <strong>Amount Collected</strong> on the Payment step.</li>
-    <li><strong>Record a payment from the booking:</strong> the money icon (title <strong>Record payment</strong>) on the Bookings list opens the <strong>Record payment</strong> window. Under <em>How much did the guest pay?</em> choose <strong>The full balance</strong> or <strong>Part of it</strong>. Then choose <em>How did they pay?</em>, and confirm. Nothing is marked paid with one click. Each payment saved as Paid or Completed is written in the booking's History.</li>
+    <li><strong>Record a payment from the booking:</strong> the money icon (title <strong>Record payment</strong>) on the Bookings list opens the <strong>Record payment</strong> window. Under <em>How much did the guest pay?</em> choose <strong>The full balance</strong> or <strong>Part of it</strong>. Then choose <em>How did they pay?</em>, and confirm. Nothing is marked paid with one click. Each payment saved as Paid or Completed is written in the booking's History. On a booking that is on a company account, the window also asks <strong>Paid by</strong>: <strong>The guest</strong> or the company. Nothing is picked for you, so choose one (the company is the one on the booking).</li>
     <li><strong>Part payments or other methods:</strong> use <strong>Money</strong> &rarr; <strong>Payments</strong> &rarr; <strong>Record Payment</strong> (or <strong>Money</strong> &rarr; <strong>Add Payment</strong>), or <strong>More</strong> &rarr; <strong>Payments &amp; balance</strong> on the list (needs Add Payments). The <strong>Record payment</strong> money icon on the list is hidden once any payment exists, so use these for a booking that already has a deposit.</li>
     <li><strong>What the guest is sent:</strong> every payment saved as Paid or Completed (any of the ways above, including the extra-night payment at check-out) emails the guest a <strong>receipt</strong> with a PDF, once. A payment never sends an invoice. The green message tells you what happened, for example <em>"Receipt emailed to the guest."</em> or <em>"Receipt not emailed: guest has no email address - use Email receipt on the payment."</em> See <a href="13-finance-payments.html#sent">What the guest is sent, and when</a>.</li>
     <li><strong>Nothing owed means no payment.</strong> Once the balance is zero there is no payment form. The <strong>Payments &amp; balance</strong> window shows <em>"Nothing is owed on this booking."</em> with a <strong>Close</strong> button, and no <strong>Record payment</strong> window is offered. Use a credit note or a refund if money has to move.</li>
@@ -309,6 +318,23 @@
     <li><strong>The guest handed over more than owed:</strong> type the real amount. You will see <em>"That is MWK ... more than owed. The extra will be issued to the guest as a credit note."</em> and a tick box <strong>The guest paid more than owed</strong>. Tick it to save. The booking shows Paid with zero balance and the extra becomes a credit note. Without the tick the payment is refused. On <strong>Create Booking</strong>, the <strong>Amount Collected</strong> box has the same warning and the same tick.</li>
   </ul>
   <p>The <strong>Payment breakdown</strong> adds up line by line. <strong>Room base</strong>, <strong>Packages</strong> and <strong>Extras</strong> (all excl. VAT) make <strong>Subtotal (excl. VAT and levy)</strong>. Then come <strong>Tourism Levy</strong>, <strong>VAT</strong> and <strong>Total</strong>, then <strong>Paid</strong> and <strong>Balance</strong>. A rate plan discount is a row that says it is already taken off the room rate. A surcharge is a row such as <em>Festive Season surcharge (already in the room rate) +10,000 &times; 3 nights</em>. Neither is added again. When the guest has paid too much the last line reads <strong>Credit owed to guest</strong>.</p>
+
+  <h2 id="company">How to put a booking on a company account (company pays later)</h2>
+  <p>Use this when a company pays for the stay later, on an LPO or order number. Needs <strong>Put bookings on a company account</strong>. The company must already exist: add it on <strong>Money</strong> &rarr; <strong>Company Accounts</strong> (needs <strong>Company accounts</strong>).</p>
+  <ol class="steps">
+    <li>Open the booking (<strong>More</strong> &rarr; <strong>Full details</strong>). Find the <strong>Who pays</strong> panel.</li>
+    <li>Choose the company in <strong>Who pays</strong>. To go back to the guest, choose <strong>The guest</strong>.</li>
+    <li>Type the <strong>LPO / order no.</strong> if the company gave one.</li>
+    <li>Set the <strong>Due date</strong>. Leave it empty to use the company's payment terms.</li>
+    <li>Under <strong>Extras (bar, room service)</strong> choose <strong>Guest pays the extras</strong> or <strong>Company pays the extras too</strong>.</li>
+    <li>Click <strong>Save</strong>.</li>
+  </ol>
+  <ul>
+    <li>The company share is not chased from the guest, and it does not block check-out. The guest still pays their own share.</li>
+    <li>A company that is switched off stays on its bookings. A company cannot be switched or removed while its payments are on the booking.</li>
+    <li>To record money from the company, open <strong>Company Accounts</strong> and use <strong>Record company payment</strong> (see the <a href="13-finance-payments.html#company">Finance guide</a>).</li>
+  </ul>
+  <div class="warn"><p>If you do not have the permission you will see <em>"You do not have permission to do that (Put bookings on a company account)."</em></p></div>
 
   <h2 id="folio">How to add or void folio charges</h2>
   <p>The <strong>Folio / Charges</strong> box on the booking page holds extras such as minibar or laundry. It is locked on cancelled, no-show and checked-out bookings.</p>
@@ -341,7 +367,23 @@
     <li>Click <strong>Confirm Adjustment</strong>. You will see <em>"Stay dates adjusted successfully."</em> with the extra amount due or the refund or credit. The guest is emailed about the change when an email address is on file.</li>
   </ol>
   <p>If the new dates no longer fit a <strong>length-of-stay</strong>, <strong>weekend</strong> or <strong>seasonal</strong> discount, that discount comes off. The nightly rate goes back up by the discount. <strong>Early-bird</strong>, <strong>last-minute</strong> and <strong>promotion</strong> discounts stay. Early and late check-out keep the booked rate. A surcharge is never removed or added. <strong>History</strong> records who made the change and the old and new rate and total.</p>
-  <p>For an in-house guest who is staying longer, the list has <strong>Extend stay</strong> for every checked-in guest. Extra nights are charged at the guest's booked rate. Administrators can use <strong>More</strong> &rarr; <strong>Change checkout date</strong> for an overdue guest and must type a reason.</p>
+  <h3 id="nights">How to add or take off nights on an in-house guest</h3>
+  <p>For a guest who is checked in, the Bookings list has the <strong>Add or take off nights</strong> button on their row. It needs <strong>Check-out Guests</strong>. Nights are added or taken off at the end of the stay, at the rate this booking was made at. No amount is typed.</p>
+  <ol class="steps">
+    <li>Click <strong>Add or take off nights</strong> on the guest's row.</li>
+    <li>Use <strong>+1 night</strong> or the <strong>-</strong> button to set the nights to add or take off.</li>
+    <li>Click <strong>Review change</strong>. The card shows the new total and the balance before and after.</li>
+    <li>If money goes back to the guest, choose <strong>Refund to the original payment method(s), in full</strong> or <strong>Credit note (kept for the guest's next stay or bill)</strong>. A refund also needs <strong>Issue &amp; settle refunds</strong>. Type the amount going back to confirm.</li>
+    <li>Type the <strong>Reason (required)</strong>.</li>
+    <li>Click <strong>Confirm change</strong>. The change is written in the booking's History with every figure.</li>
+  </ol>
+  <ul>
+    <li>Nights already stayed cannot be taken off here. Tonight does not count either when the guest leaves today. For a guest leaving today, use <strong>Check Out &amp; Settle</strong> instead, which settles the unused nights.</li>
+    <li>Up to 60 nights can be changed at a time.</li>
+    <li>If the guest is not checked in you will see <em>"Nights can only be added or taken off while the guest is checked in."</em></li>
+    <li>If you are not allowed to refund you will see <em>"You do not have the Issue &amp; settle refunds permission: choose a credit note, or ask someone who has it."</em></li>
+  </ul>
+  <p>Administrators can use <strong>More</strong> &rarr; <strong>Change checkout date</strong> for an overdue guest and must type a reason.</p>
 
   <h2 id="edit">How to edit a booking</h2>
   <p>What you can change depends on where the booking is in its life, exactly like at a real front desk:</p>

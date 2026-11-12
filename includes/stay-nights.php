@@ -227,7 +227,7 @@ if (!function_exists('rh_stay_nights_quote')) {
                     throw new Exception('Choose how the ' . rh_stay_nights_money((float)$q['money_back'], $cur) . ' goes back to the guest: refund or credit note.');
                 }
                 if ($mode === 'refund' && empty($in['can_refund'])) {
-                    throw new Exception('You do not have permission to refund payments. Choose a credit note, or ask someone with the Refund payments permission.');
+                    throw new Exception('You do not have permission to refund payments. Choose a credit note, or ask someone with the Issue & settle refunds permission.');
                 }
                 $typed = isset($in['money_back_typed']) ? (float)str_replace([',', ' '], '', (string)$in['money_back_typed']) : -1.0;
                 if (abs($typed - (float)$q['money_back']) > $tol) {

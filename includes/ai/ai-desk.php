@@ -609,11 +609,12 @@ function rh_ai_t_booking_holds(PDO $db, array $user, array $a): array
                         FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id WHERE $where
                         ORDER BY COALESCE(b.tentative_expires_at, b.expires_at, b.check_in_date), b.id LIMIT " . rh_ai_num('ai_list_page_rows'))->fetchAll(PDO::FETCH_ASSOC);
     $list = [];
+    $splits = rh_ai_billing_splits($db, array_map(static fn($r) => (int)$r['id'], $rows));
     foreach ($rows as $r) {
         $ends = (string)($r['status'] === 'tentative' ? ($r['tentative_expires_at'] ?? '') : ($r['expires_at'] ?? ''));
-        $f = rh_ai_folio((int)$r['id']);
+        $f = rh_ai_folio((int)$r['id'], $splits[(int)$r['id']] ?? null);
         $list[] = array_filter(['booking_id' => (int)$r['id'], 'reference' => $r['booking_reference'], 'guest_name' => $r['guest_name'], 'status' => $r['status'], 'room_type' => $r['room_name'],
-            'check_in' => $r['check_in_date'], 'check_out' => $r['check_out_date'], 'hold_ends' => $ends !== '' ? substr($ends, 0, 16) : null, 'balance_due' => $f['balance_due'] ?? null], static fn($v) => $v !== null);
+            'check_in' => $r['check_in_date'], 'check_out' => $r['check_out_date'], 'hold_ends' => $ends !== '' ? substr($ends, 0, 16) : null] + ($f ? rh_ai_owe_fields($f) : []), static fn($v) => $v !== null);
     }
     return ['pending' => (int)($c['p'] ?? 0), 'tentative' => (int)($c['t'] ?? 0), 'holds_ending_soon' => (int)($c['soon'] ?? 0), 'ending_soon_hours' => rh_ai_num('ai_hold_soon_hours'), 'currency' => rh_ai_currency(),
         'list' => $list ?: 'none', 'link' => 'bookings.php', 'link_label' => 'Open on Bookings'];
@@ -1029,7 +1030,8 @@ function rh_ai_desk_holds_text(array $r): string
     foreach (is_array($r['list'] ?? null) ? $r['list'] : [] as $x) {
         $lines[] = '**' . $x['guest_name'] . '** (' . $x['reference'] . ') · ' . $x['status'] . ' · arrives ' . date('D j M', strtotime((string)$x['check_in']))
             . (!empty($x['hold_ends']) ? ' · hold ends ' . date('D j M, H:i', strtotime((string)$x['hold_ends'])) : '')
-            . (isset($x['balance_due']) && (float)$x['balance_due'] > BALANCE_TOLERANCE ? ' · owes ' . rh_ai_fmt_cur($cur, $x['balance_due']) : '');
+            . (!empty($x['on_account']) ? (($w = rh_ai_owe_words($x, static fn($v) => rh_ai_fmt_cur($cur, $v))) !== '' ? ' · ' . $w : '')
+                : (isset($x['balance_due']) && (float)$x['balance_due'] > BALANCE_TOLERANCE ? ' · owes ' . rh_ai_fmt_cur($cur, $x['balance_due']) : ''));
     }
     $soon = (int)($r['holds_ending_soon'] ?? 0);
     $hrs = (int)($r['ending_soon_hours'] ?? rh_ai_num('ai_hold_soon_hours'));

@@ -459,8 +459,10 @@ function rh_ai_booking_money_text(array $r): string
     $cur = (string)($r['currency'] ?? '');
     $owed = (float)$m['balance_due'];
     $rate = rh_ai_booked_rate_text($r);
+    // Company pays later (owner 2026-11-13): who owes the balance, the company share never worded as the guest's debt
+    $who = !empty($m['on_account']) && function_exists('rh_ai_owe_words') ? rh_ai_owe_words($m, static fn($v) => rh_ai_fmt_cur($cur, $v)) : '';
     return '**Total:** ' . rh_ai_fmt_cur($cur, $m['total']) . ' · **Paid:** ' . rh_ai_fmt_cur($cur, $m['paid']) . ' · **Balance due:** ' . rh_ai_fmt_cur($cur, $owed)
-        . ($owed <= BALANCE_TOLERANCE ? ' (nothing is owed)' : '') . ($rate !== '' ? "\n" . $rate : '') . "\n\nThis is the booking's own bill, the same figures as the booking screen.";
+        . ($owed <= BALANCE_TOLERANCE ? ' (nothing is owed)' : ($who !== '' ? ' (' . $who . ')' : '')) . ($rate !== '' ? "\n" . $rate : '') . "\n\nThis is the booking's own bill, the same figures as the booking screen.";
 }
 
 /**

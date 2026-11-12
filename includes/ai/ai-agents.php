@@ -1527,8 +1527,8 @@ function rh_ai_local_format(string $tool, array $view, array $r): string
         $d = $r['departures'];
         $out = '**Departures ' . $dayLabel . ': ' . (int)$d['total'] . '** (' . (int)$d['due_out'] . ' still due out, ' . (int)$d['checked_out'] . ' checked out)';
         foreach ($d['list'] as $x) {
-            $owe = isset($x['balance_due']) && (float)$x['balance_due'] > BALANCE_TOLERANCE ? ' · ' . $fmt($x['balance_due']) . ' left to pay' : '';
-            $out .= "\n- " . $x['guest_name'] . ' · ' . $room($x) . ' · ' . str_replace('-', ' ', (string)$x['status']) . $owe;
+            $owe = rh_ai_owe_words($x, $fmt); // a company-account share is never worded as the guest's debt
+            $out .= "\n- " . $x['guest_name'] . ' · ' . $room($x) . ' · ' . str_replace('-', ' ', (string)$x['status']) . ($owe !== '' ? ' · ' . $owe : '');
         }
         if (!empty($r['overdue_departures'])) {
             $out .= "\n\n" . (int)$r['overdue_departures'] . ' guest(s) are past their check-out date and still checked in.';
@@ -1549,8 +1549,8 @@ function rh_ai_local_format(string $tool, array $view, array $r): string
     if ($tool === 'in_house') {
         $out = '**In house now: ' . (int)$r['in_house'] . '**';
         foreach ($r['list'] as $x) {
-            $owe = isset($x['balance_due']) && (float)$x['balance_due'] > BALANCE_TOLERANCE ? ' · ' . $fmt($x['balance_due']) . ' left to pay' : '';
-            $out .= "\n- " . $x['guest_name'] . ' · ' . $room($x) . ' · leaves ' . $x['leaves'] . $owe;
+            $owe = rh_ai_owe_words($x, $fmt);
+            $out .= "\n- " . $x['guest_name'] . ' · ' . $room($x) . ' · leaves ' . $x['leaves'] . ($owe !== '' ? ' · ' . $owe : '');
         }
         return $out;
     }
@@ -1588,9 +1588,10 @@ function rh_ai_local_format(string $tool, array $view, array $r): string
         }
         $lines = [];
         foreach ((array)($r['largest'] ?? []) as $x) {
-            $lines[] = $x['guest_name'] . ' · ' . $x['reference'] . ' · ' . str_replace('-', ' ', (string)$x['status']) . ' · leaves ' . $x['leaves'] . ' · ' . $fmt($x['balance_due']) . ' left to pay';
+            $lines[] = $x['guest_name'] . ' · ' . $x['reference'] . ' · ' . str_replace('-', ' ', (string)$x['status']) . ' · leaves ' . $x['leaves'] . ' · ' . rh_ai_owe_words($x, $fmt);
         }
-        return '**Owing: ' . $n . ' booking' . ($n === 1 ? '' : 's') . ', ' . $fmt($r['total_owed']) . ' in total**' . rh_ai_local_lines($lines)
+        $split = isset($r['owed_by_company_accounts']) ? ' (guests ' . $fmt($r['owed_by_guests']) . ', company accounts ' . $fmt($r['owed_by_company_accounts']) . ')' : '';
+        return '**Owing: ' . $n . ' booking' . ($n === 1 ? '' : 's') . ', ' . $fmt($r['total_owed']) . ' in total**' . $split . rh_ai_local_lines($lines)
             . "\n\nFrom each booking's own bill, the same as Bookings" . ($tail !== '' ? ' (' . mb_strtolower(mb_substr($tail, 0, 1)) . mb_substr($tail, 1) . ')' : '') . '. Payments are taken on the booking\'s screen.';
     }
     if ($tool === 'inventory_watch' && isset($r['alerts'])) {

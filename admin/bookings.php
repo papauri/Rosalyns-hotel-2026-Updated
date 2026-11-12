@@ -7081,7 +7081,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                             <strong id="sn_moneyback_title"></strong>
                             <p class="rh-choice-q">How does it go back?</p>
                             <label class="rh-choice"><input type="radio" name="sn_mode" value="refund" id="sn_mode_refund"> <span>Refund to the original payment method(s), in full</span></label>
-                            <small id="sn_refund_noperm" class="rh-choice-note" style="display:none;">You do not have the Refund payments permission: choose a credit note, or ask someone who has it.</small>
+                            <small id="sn_refund_noperm" class="rh-choice-note" style="display:none;">You do not have the Issue &amp; settle refunds permission: choose a credit note, or ask someone who has it.</small>
                             <label class="rh-choice"><input type="radio" name="sn_mode" value="credit_note" id="sn_mode_credit"> <span>Credit note (kept for the guest's next stay or bill)</span></label>
                             <div class="form-group">
                                 <label for="sn_typed">Type the amount going back to confirm</label>

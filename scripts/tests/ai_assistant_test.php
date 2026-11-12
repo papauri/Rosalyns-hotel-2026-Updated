@@ -83,7 +83,7 @@ try {
         && strpos($dfFn($dfIns, 'rh_ai_brief_money', 900), "if (\$owedOk && !empty(\$m['still_owed']['left_or_overdue_total'])") !== false
         && strpos($dfIns, 'function rh_ai_brief_money(array $m, callable $add, bool $owedOk = false): void') !== false,
         'Briefing: the hotel-wide money owed is listed only with dashboard_owed (closed by default)');
-    $dfFront = $dfFn($dfIns, 'rh_ai_brief_front_desk', 9000);
+    $dfFront = $dfFn($dfIns, 'rh_ai_brief_front_desk', 11000); // 2026-11-13: the company-account split made the function longer
     check(strpos($dfFront, "'collect_before_departure'") !== false && strpos($dfFront, 'dashboard_') === false,
         'Briefing: each departing guest\'s own balance stays for the front desk (no dashboard key on it)');
     // Briefing links land on lists holding exactly what the card counts (2026-11-11 list filters)
@@ -838,6 +838,7 @@ if (getenv('AI_TEST_OWNER_ROUND')) { goto rh_ai_test_owner_round; }
 if (getenv('AI_TEST_MENU_ONLY')) { goto rh_ai_test_menu; } // only the menu & recipe advisor checks (2026-10-30)
 if (getenv('AI_TEST_BOOKED_RATE_ONLY')) { goto rh_ai_test_booked_rate; } // only the pure booked rate / rate plan checks (2026-11-10)
 if (getenv('AI_TEST_ATTN_NOTE_ONLY')) { goto rh_ai_test_attn_note; } // only the Dashboard Needs-attention note checks (2026-11-12)
+if (getenv('AI_TEST_SYNC_ONLY')) { goto rh_ai_test_sync_1113; } // only the 2026-11-13 sync checks (stay permissions, company split, guest history, refund day)
 
 // ════ Tools: read only, no forbidden tool ════
 $reg = rh_ai_tool_registry();
@@ -2028,10 +2029,12 @@ if (!$chatReady || !$adm) {
 
             // ── Kill switches 1-6 stop chat, actions and the checks ──
             rh_ai_save_settings(['ai_enabled' => '0'], $pdo);
-            check(!$turnB($adm, 'arrivals today', [])['ok'] && rh_ai_daily_run($pdo, true)['status'] === 'off' && !rh_ai_eval_run($pdo, 'smoke')['ran'], 'kill switch 1 (master): chat, the daily checks and the question set stop');
+            $ks1 = [$turnB($adm, 'arrivals today', [])['ok'], rh_ai_daily_run($pdo, true)['status'], rh_ai_eval_run($pdo, 'smoke')['ran']];
+            check(!$ks1[0] && $ks1[1] === 'off' && !$ks1[2], 'kill switch 1 (master): chat, the daily checks and the question set stop', json_encode($ks1)); // 'locked' = another connection holds the daily-run lock
             $setOn();
             $pdo->exec("UPDATE enabled_modules SET is_enabled = 0 WHERE module_key = 'ai_assistant'");
-            check(!$turnB($adm, 'arrivals today', [])['ok'] && rh_ai_daily_run($pdo, true)['status'] === 'off', 'kill switch 2 (module): chat and the daily checks stop');
+            $ks2 = [$turnB($adm, 'arrivals today', [])['ok'], rh_ai_daily_run($pdo, true)['status']];
+            check(!$ks2[0] && $ks2[1] === 'off', 'kill switch 2 (module): chat and the daily checks stop', json_encode($ks2));
             $setOn();
             if ($recB) {
                 $gp = $pdo->prepare("INSERT INTO user_permissions (user_id, permission_key, is_granted) VALUES (?, ?, ?) ON DUPLICATE KEY UPDATE is_granted = VALUES(is_granted)");
@@ -4112,7 +4115,7 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
         $s3 = rh_ai_t_search_bookings($pdo, $admF, ['query' => 'Zzqxvb']);
         $h1 = rh_ai_t_guest_history($pdo, $admF, ['guest' => 'Charles Qwntahni']);
         check(($s1['close_match'] ?? '') === 'clear' && (int)($s1['bookings'][0]['booking_id'] ?? 0) === $qwId && count((array)($s2['close_matches'] ?? [])) === 2 && !empty($s2['ask'])
-            && (int)($s3['count'] ?? -1) === 0 && empty($s3['close_matches']) && isset($s3['total_in_system'], $s3['latest_bookings']) && (int)($h1['bookings_found'] ?? 0) === 1 && !empty($h1['read_as']),
+            && (int)($s3['count'] ?? -1) === 0 && empty($s3['close_matches']) && isset($s3['total_in_system'], $s3['latest_bookings']) && (int)($h1['bookings_found'] ?? 0) >= 1 && !empty($h1['read_as']),
             'search_bookings and guest_history: a clear close name is used (read_as), two are asked about, none gives the totals and the latest bookings', json_encode([$s1, $s2['ask'] ?? null, $h1['read_as'] ?? null]));
 
         // An invented booking id is refused; the booking in focus is used
@@ -6567,6 +6570,123 @@ try {
     check(strpos($tdDesc, 'trading day') !== false && strpos($tdDesc, 'leave from/to out') !== false, 'the model is told to leave the dates out for "today" (the trading day)', $tdDesc);
 } catch (Throwable $e) {
     bad('Till trading day checks threw', get_class($e) . ': ' . $e->getMessage());
+}
+
+// ── Daily sync 2026-11-13: screen permissions for stay changes, company pays later (who owes), guest history on the
+//    booking page's rule, refunds on the End of Day day. Pure checks first; database checks rolled back. ──
+rh_ai_test_sync_1113:
+echo "\n-- Sync 2026-11-13 --\n";
+try {
+    require_once $root . '/includes/ai/ai-actions.php';
+    require_once $root . '/includes/ai/ai-money.php';
+    // 1. Every bookings.php action a card replays needs at least the screen's own permission
+    $sRegA = rh_ai_action_registry();
+    $sDrift = [];
+    foreach (['extend_stay' => 'extend_stay', 'change_checkout' => 'admin_update_checkout_date', 'check_in' => 'checkin', 'check_out' => 'checkout', 'cancel_booking' => 'cancel', 'confirm_booking' => 'confirm'] as $k => $act) {
+        $need = function_exists('rhBookingActionPermission') ? rhBookingActionPermission($act) : '?';
+        if ($need !== null && !in_array($need, (array)$sRegA[$k]['perm'], true)) {
+            $sDrift[] = $k . ' needs ' . $need;
+        }
+    }
+    check(!$sDrift && function_exists('rhBookingActionPermission'), 'every stay card asks for the screen\'s own permission (extend stay = checkout_guest, as Bookings)', implode('; ', $sDrift));
+    // A shorter stay that would leave paid money as credit is refused on the screen, so no card replays it
+    check(rh_ai_shorter_stay_leaves_credit(['amount_paid' => 1000, 'folio_charges_total' => 0, 'credit_balance' => 0], 500.0)
+        && !rh_ai_shorter_stay_leaves_credit(['amount_paid' => 1000, 'folio_charges_total' => 0, 'credit_balance' => 0], 1000.0)
+        && !rh_ai_shorter_stay_leaves_credit(['amount_paid' => 1000, 'folio_charges_total' => 600, 'credit_balance' => 0], 500.0)
+        && !rh_ai_shorter_stay_leaves_credit(['amount_paid' => 1000, 'folio_charges_total' => 0, 'credit_balance' => 500], 500.0)
+        && rh_ai_shorter_stay_leaves_credit(['amount_paid' => 1000, 'folio_charges_total' => 0, 'credit_balance' => 100], 500.0),
+        'shorter stay: money left over as credit is spotted the same way as the screen (paid minus room and extras, above the credit already there)');
+    // 2. Company pays later: who owes the balance
+    $sFmt = static fn($v) => 'MWK ' . number_format((float)$v, 2);
+    $sSp = rh_ai_folio_split(1, ['total' => 1200.0, 'paid' => 200.0, 'balance_due' => 1000.0], ['on_account' => true, 'company_due' => 800.0, 'name' => 'Acme Ltd']);
+    $sCap = rh_ai_folio_split(1, ['balance_due' => 500.0], ['on_account' => true, 'company_due' => 900.0, 'name' => 'Acme Ltd']);
+    $sOff = rh_ai_folio_split(1, ['balance_due' => 500.0], ['on_account' => false]);
+    check(!empty($sSp['on_account']) && abs($sSp['company_owes'] - 800.0) < 0.001 && abs($sSp['guest_owes'] - 200.0) < 0.001 && abs($sSp['guest_owes'] + $sSp['company_owes'] - $sSp['balance_due']) <= BALANCE_TOLERANCE
+        && abs($sCap['company_owes'] - 500.0) < 0.001 && (float)$sCap['guest_owes'] === 0.0 && !isset($sOff['on_account']) && rh_ai_guest_owes($sSp) === 200.0 && rh_ai_guest_owes($sOff) === 500.0,
+        'company pays later: guest share + company share = the balance; the company share never above the balance; not on account = unchanged', json_encode([$sSp, $sCap, $sOff]));
+    $sW1 = rh_ai_owe_words($sSp, $sFmt);
+    $sW2 = rh_ai_owe_words($sCap, $sFmt);
+    $sW3 = rh_ai_owe_words($sOff, $sFmt);
+    check(strpos($sW1, 'guest owes MWK 200.00') !== false && strpos($sW1, 'MWK 800.00 on the company account (Acme Ltd)') !== false && strpos($sW1, 'left to pay') === false
+        && strpos($sW2, 'guest owes') === false && strpos($sW2, 'company account') !== false && $sW3 === 'MWK 500.00 left to pay',
+        'owe wording: the company share is said apart and never as the guest\'s debt', json_encode([$sW1, $sW2, $sW3]));
+    $sMt = rh_ai_money_booking_text($pdo, ['money' => $sCap + ['total' => 500.0, 'paid' => 0.0], 'currency' => 'MWK', 'guest_name' => 'X', 'reference' => 'R'], 'full', 0);
+    check(strpos($sMt, 'company account') !== false && strpos($sMt, 'the guest owes nothing') !== false && stripos($sMt, 'still to pay') === false && stripos($sMt, 'fully paid') === false,
+        '"is it fully paid?" on a company account: the guest owes nothing, the rest is billed to the company (never "fully paid", never the guest\'s debt)', $sMt);
+    // 3 + 4. By their source: guest history reuses the one rule; refunds count on the End of Day day
+    $sTools = (string)file_get_contents($root . '/includes/ai/ai-tools.php');
+    $sGh = substr($sTools, (int)strpos($sTools, 'function rh_ai_t_guest_history('), 6000);
+    check(strpos($sGh, 'rh_guest_history($db') !== false && strpos($sGh, 'rh_guest_history_email_sql(') !== false && strpos($sGh, "'nights'") === false,
+        'guest history uses the booking page\'s one rule (includes/guest-history.php), no own count');
+    $sIns = (string)file_get_contents($root . '/includes/ai/ai-insights.php');
+    $sMl = substr($sIns, (int)strpos($sIns, '// Refunds - the one refund rule'), 2600);
+    $sDec = (string)file_get_contents($root . '/includes/ai/ai-decisions.php');
+    $sRs = substr($sDec, (int)strpos($sDec, 'function rh_dec_refunds_by_staff('), 900);
+    check(substr_count($sMl, '{$day} BETWEEN ? AND ?') === 2 && strpos($sMl, '$day = rh_refund_eod_date_sql()') !== false && strpos($sMl, 'payment_date BETWEEN') === false
+        && strpos($sRs, 'rh_refund_eod_date_sql()') !== false && strpos($sRs, 'payment_date BETWEEN') === false,
+        'refunds in a range count on the day they were paid out (End of Day basis), credit notes kept apart');
+} catch (Throwable $e) {
+    bad('Sync 2026-11-13 pure checks threw', get_class($e) . ': ' . $e->getMessage());
+}
+try {
+    $sAdm = $pdo->query("SELECT id, role, username, full_name FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    $sRoom = (int)$pdo->query("SELECT id FROM rooms WHERE is_active = 1 ORDER BY id LIMIT 1")->fetchColumn();
+    if (!$sAdm || $sRoom <= 0) {
+        skip('Sync 2026-11-13 database checks: no admin or room');
+    } else {
+        $pdo->beginTransaction();
+        try {
+            $sIns = $pdo->prepare("INSERT INTO bookings (booking_reference, room_id, guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights, number_of_guests, adult_guests, child_guests,
+                                       total_amount, total_with_vat, amount_paid, amount_due, status, primary_booking_id, deleted_at)
+                                   VALUES (?, ?, ?, ?, '+265 991 000 778', ?, ?, ?, 1, 1, 0, ?, ?, ?, ?, ?, ?, ?)");
+            $sBk = static function (string $name, string $email, string $in, string $out, int $n, float $tot, float $paid, string $status, ?int $prim = null, ?string $del = null) use ($sIns, $sRoom, $pdo): int {
+                $sIns->execute(['AITSY' . random_int(100000, 999999), $sRoom, $name, $email, $in, $out, $n, $tot, $tot, $paid, max(0, $tot - $paid), $status, $prim, $del]);
+                return (int)$pdo->lastInsertId();
+            };
+            // 3. Guest history: exact trimmed email any case, deleted out, stays = checked-out, a group counted once
+            $sMail = 'aisync.hist' . random_int(1000, 9999) . '@example.invalid';
+            $sBk('AISync Histguest', $sMail, '2026-01-02', '2026-01-04', 2, 100, 100, 'checked-out');
+            $sP = $sBk('AISync Histguest', ' ' . strtoupper($sMail) . ' ', '2026-02-02', '2026-02-03', 1, 100, 100, 'checked-out');
+            $sBk('AISync Histguest', $sMail, '2026-02-02', '2026-02-03', 1, 100, 100, 'checked-out', $sP);
+            $sBk('AISync Histguest', $sMail, '2026-03-02', '2026-03-03', 1, 100, 0, 'checked-out', null, date('Y-m-d H:i:s'));
+            $sBk('AISync Histguest', $sMail, '2026-04-02', '2026-04-03', 1, 100, 0, 'cancelled');
+            $sH1 = rh_ai_t_guest_history($pdo, $sAdm, ['guest' => $sMail]);
+            $sH2 = rh_ai_t_guest_history($pdo, $sAdm, ['guest' => 'AISync Histguest']);
+            $sRef = rh_guest_history($pdo, $sMail, 0, true, 10);
+            check((int)($sH1['completed_stays'] ?? -1) === 2 && (int)($sH1['bookings_found'] ?? -1) === 4 && (int)$sRef['completed_stays'] === 2
+                && ($sH2['completed_stays'] ?? null) === ($sH1['completed_stays'] ?? 0) && abs((float)($sH1['money']['received'] ?? -1) - (float)$sRef['money']['received']) <= BALANCE_TOLERANCE,
+                'guest history = the booking page\'s figures: a group counted once, the deleted booking left out, by email or by name', json_encode([$sH1, $sH2['completed_stays'] ?? null]));
+            // 2. Company pays later, on a real booking
+            if (function_exists('rh_ai_billing_on') && rh_ai_billing_on()) {
+                $pdo->prepare("INSERT INTO billing_accounts (name, billing_email, terms_days, active, created_at) VALUES (?, NULL, 30, 1, NOW())")->execute(['ZZ AI SYNC CO ' . random_int(1000, 9999)]);
+                $sAcc = (int)$pdo->lastInsertId();
+                $sCo = $sBk('AISync Company Guest', 'aisync.co@example.invalid', date('Y-m-d', strtotime('-1 day')), date('Y-m-d'), 1, 1000, 0, 'checked-in');
+                $pdo->prepare("UPDATE bookings SET billing_account_id = ?, billing_covers = 'stay', checkin_without_payment = 1 WHERE id = ?")->execute([$sAcc, $sCo]);
+                $sF = rh_ai_folio($sCo);
+                check(!empty($sF['on_account']) && abs((float)$sF['guest_owes'] + (float)$sF['company_owes'] - (float)$sF['balance_due']) <= BALANCE_TOLERANCE && (float)$sF['company_owes'] > BALANCE_TOLERANCE
+                    && rh_ai_guest_owes($sF) < (float)$sF['balance_due'],
+                    'company-account booking: the Assistant reads the shared split (guest + company = the balance)', json_encode($sF));
+                $sBd = rh_ai_t_balances_due($pdo, $sAdm, []);
+                check((float)($sBd['owed_by_company_accounts'] ?? 0) >= (float)$sF['company_owes'] - BALANCE_TOLERANCE && isset($sBd['owed_by_guests'], $sBd['company_accounts']),
+                    'who still owes: the company-account share is counted apart from what guests owe', json_encode(array_intersect_key($sBd, ['total_owed' => 1, 'owed_by_guests' => 1, 'owed_by_company_accounts' => 1])));
+                $sPv = rh_ai_pv_check_out($pdo, $sAdm, ['booking_id' => $sCo]);
+                $sLabels = array_column((array)($sPv['card']['rows'] ?? []), 'label');
+                check(empty($sPv['error']) && in_array('Guest owes', $sLabels, true) && in_array('Company account', $sLabels, true)
+                    && (rh_ai_guest_owes($sF) > BALANCE_TOLERANCE || !empty($sPv['steps']) || rh_checkout_settlement_reason($pdo->query('SELECT * FROM bookings WHERE id = ' . $sCo)->fetch(PDO::FETCH_ASSOC)) !== null),
+                    'check-out card: the company share does not hold up checkout (the screen\'s rule); guest and company shown apart', json_encode([$sPv['error'] ?? null, $sLabels, count((array)($sPv['steps'] ?? []))]));
+            } else {
+                skip('Sync 2026-11-13: company pays later not installed here (migration 084)');
+            }
+        } finally {
+            $pdo->rollBack();
+        }
+    }
+} catch (Throwable $e) {
+    bad('Sync 2026-11-13 database checks threw', get_class($e) . ': ' . $e->getMessage());
+}
+if (getenv('AI_TEST_SYNC_ONLY')) {
+    echo "$pass passed, $fail failed" . ($skip ? ", $skip skipped" : '') . "\n";
+    exit($fail ? 1 : 0);
 }
 
 // ── Dashboard Needs-attention note (owner 2026-11-12): an optional line, only while the Assistant is on and usable for

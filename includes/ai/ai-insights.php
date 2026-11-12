@@ -267,7 +267,10 @@ function rh_ai_t_money_leaks(PDO $db, array $user, array $a): array
             $out['still_owed'] = [
                 'total' => rh_ai_money((float)$sum['total']), 'accounts' => (int)$sum['count'], 'by_age_days' => $sum['buckets'],
                 'left_or_overdue_total' => rh_ai_money($leftTotal), 'left_or_overdue_accounts' => count($left),
-                'largest_left_or_overdue' => array_map(static fn($r) => ['type' => rh_receivable_type_label($r['type']), 'reference' => $r['reference'], 'guest_name' => $r['client'], 'status' => $r['status'], 'amount_due' => $r['amount_due'], 'days_outstanding' => $r['days_outstanding']], array_slice($left, 0, 6)),
+                // Company pays later: the receivables rule says who owes it (payer company / guest / both); a company
+                // share is chased with the company, never the guest
+                'largest_left_or_overdue' => array_map(static fn($r) => ['type' => rh_receivable_type_label($r['type']), 'reference' => $r['reference'], 'guest_name' => $r['client'], 'status' => $r['status'], 'amount_due' => $r['amount_due'], 'days_outstanding' => $r['days_outstanding']]
+                    + (in_array($r['payer'] ?? 'guest', ['company', 'both'], true) ? ['payer' => $r['payer'], 'company_owes' => rh_ai_money((float)$r['company_due']), 'guest_owes' => rh_ai_money((float)$r['guest_due'])] : []), array_slice($left, 0, 6)),
                 'complete' => empty($sum['failed']),
             ];
         } catch (Throwable $e) {
@@ -282,9 +285,12 @@ function rh_ai_t_money_leaks(PDO $db, array $user, array $a): array
         if (!rh_ai_admin_lib('finance-refunds.php')) {
             throw new RuntimeException('refund rule missing');
         }
+        // Day basis = End of Day (89cc9a9): a refund counts on the first day it was paid out (rh_refund_eod_date_sql),
+        // so a refund approved days after it was asked for lands on the approval day, as on End of Day.
         $amt = rh_refund_amount_sql();
-        $st = $db->prepare("SELECT booking_type, booking_reference, {$amt} AS refund_total, payment_method, refund_reason, refund_status, recorded_by, processed_by, payment_date
-                            FROM payments WHERE deleted_at IS NULL AND " . rh_refund_settled_sql() . " AND payment_date BETWEEN ? AND ?
+        $day = rh_refund_eod_date_sql();
+        $st = $db->prepare("SELECT booking_type, booking_reference, {$amt} AS refund_total, payment_method, refund_reason, refund_status, recorded_by, processed_by, {$day} AS paid_out_day
+                            FROM payments WHERE deleted_at IS NULL AND " . rh_refund_settled_sql() . " AND {$day} BETWEEN ? AND ?
                             ORDER BY {$amt} DESC");
         $st->execute([$from, $to]);
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
@@ -292,7 +298,7 @@ function rh_ai_t_money_leaks(PDO $db, array $user, array $a): array
             $staffIds[] = (int)$r['recorded_by'];
         }
         $st = $db->prepare("SELECT " . rh_refund_settled_sum_sql() . " AS total, " . rh_refund_settled_count_sql() . " AS n, " . rh_refund_to_credit_sum_sql() . " AS to_credit
-                            FROM payments WHERE deleted_at IS NULL AND payment_date BETWEEN ? AND ?");
+                            FROM payments WHERE deleted_at IS NULL AND payment_type = 'refund' AND {$day} BETWEEN ? AND ?");
         $st->execute([$from, $to]);
         $agg = $st->fetch(PDO::FETCH_ASSOC) ?: ['total' => 0, 'n' => 0, 'to_credit' => 0];
         // Awaiting approval: every date (the Payments "awaiting approval" list it links to has no date filter)
@@ -403,7 +409,7 @@ function rh_ai_t_money_leaks(PDO $db, array $user, array $a): array
     if (isset($out['refunds']['rows'])) {
         $out['refunds']['rows'] = array_map(static fn($r) => ['type' => $r['booking_type'], 'reference' => $r['booking_reference'], 'amount' => rh_ai_money((float)$r['refund_total']),
             'reason' => (string)$r['refund_reason'], 'status' => function_exists('rh_refund_status_label') ? rh_refund_status_label((string)$r['refund_status']) : $r['refund_status'],
-            'moved_to_credit_note' => (string)$r['payment_method'] === 'credit_note', 'date' => $r['payment_date'], 'staff_name' => (string)($names[(int)$r['recorded_by']] ?? $r['processed_by'] ?? '')], $out['refunds']['rows']);
+            'moved_to_credit_note' => (string)$r['payment_method'] === 'credit_note', 'date' => $r['paid_out_day'], 'staff_name' => (string)($names[(int)$r['recorded_by']] ?? $r['processed_by'] ?? '')], $out['refunds']['rows']);
     }
     if (isset($out['till_voids']['rows'])) {
         $out['till_voids']['rows'] = array_map(static fn($r) => ['reference' => $r['reference'], 'amount' => rh_ai_money((float)$r['total_amount']), 'reason' => $r['reason'], 'staff_name' => (string)($names[(int)$r['voided_by']] ?? '')], $out['till_voids']['rows']);
@@ -1241,9 +1247,25 @@ function rh_ai_brief_front_desk(PDO $db, array $user, callable $add): void
         $st = $db->prepare($sel . $oweWhere . " ORDER BY b.check_out_date, b.amount_due DESC, b.id LIMIT " . RH_AI_FD_SHOW);
         $st->execute($owing['params']);
         $owe = [];
-        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
-            $owe[] = ['guest_name' => $r['guest_name'], 'reference' => $r['booking_reference'], 'room' => $r['room_number'] !== null ? (string)$r['room_number'] : null,
+        $oweRows = $st->fetchAll(PDO::FETCH_ASSOC);
+        // Company pays later: the count stays the linked list's (its Balance Due column), but each figure says who owes
+        // it - the company share is never put to the guest as money to collect
+        $splits = function_exists('rh_ai_billing_splits') ? rh_ai_billing_splits($db, array_map(static fn($r) => (int)$r['id'], $oweRows)) : [];
+        $cur = rh_ai_currency();
+        $fmtC = static fn($v) => ($cur !== '' ? $cur . ' ' : '') . number_format((float)$v, 2);
+        foreach ($oweRows as $r) {
+            $o = ['guest_name' => $r['guest_name'], 'reference' => $r['booking_reference'], 'room' => $r['room_number'] !== null ? (string)$r['room_number'] : null,
                 'text' => 'leaves ' . $r['check_out_date'], 'balance_due' => rh_ai_money((float)$r['amount_due']), 'booking_id' => (int)$r['id']];
+            $sp = $splits[(int)$r['id']] ?? null;
+            if (!empty($sp['on_account'])) {
+                $f = rh_ai_folio_split((int)$r['id'], ['balance_due' => $o['balance_due']], $sp);
+                $w = rh_ai_owe_words($f, $fmtC);
+                if ($w !== '') {
+                    $o['text'] .= ' · ' . $w;
+                    unset($o['balance_due']);
+                }
+            }
+            $owe[] = $o;
         }
         // All due out today = the Dashboard chip's own list (?filter=checkout_today&balance=owing)
         $oweLink = $nOwe === 1 && count($owe) === 1 ? ['booking-details.php?id=' . $owe[0]['booking_id'], 'Open the booking']
@@ -1318,7 +1340,8 @@ function rh_ai_brief_money(array $m, callable $add, bool $owedOk = false): void
         $o = $m['still_owed'];
         $add(['id' => 'left_owing', 'kind' => 'money', 'severity' => $sev((float)$o['left_or_overdue_total']) + 10, 'title' => 'Money still owed after departure or overdue', 'count' => $o['left_or_overdue_accounts'], 'amount' => $o['left_or_overdue_total'],
             'detail' => $fmt($o['left_or_overdue_total']) . ' on ' . $o['left_or_overdue_accounts'] . ' account(s) that have left or are overdue (all money owed: ' . $fmt($o['total']) . ').',
-            'items' => array_slice(array_map(static fn($r) => ['guest_name' => $r['guest_name'], 'reference' => $r['reference'], 'text' => $r['type'] . ', ' . $r['status'] . ', ' . $r['days_outstanding'] . ' day(s)', 'amount' => $r['amount_due']], $o['largest_left_or_overdue']), 0, 4),
+            'items' => array_slice(array_map(static fn($r) => ['guest_name' => $r['guest_name'], 'reference' => $r['reference'], 'text' => $r['type'] . ', ' . $r['status'] . ', ' . $r['days_outstanding'] . ' day(s)'
+                . (($r['payer'] ?? '') === 'company' ? ', company account' : (($r['payer'] ?? '') === 'both' ? ', company account and guest' : '')), 'amount' => $r['amount_due']], $o['largest_left_or_overdue']), 0, 4),
             'link' => ['payments.php?balance=outstanding', 'Open money owed']]);
     }
     if (!empty($m['refunds']['total']) && (float)$m['refunds']['total'] > BALANCE_TOLERANCE) {

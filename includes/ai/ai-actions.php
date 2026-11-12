@@ -70,7 +70,8 @@ function rh_ai_action_registry(): array
             'preview' => 'rh_ai_pv_edit_booking', 'verify' => 'rh_ai_vf_edit_booking',
         ],
         'extend_stay' => [
-            'tool' => 'propose_extend_stay', 'label' => 'Extend stay', 'page' => 'bookings.php', 'perm' => [],
+            // Owner 2026-11-13: Extend stay is front-desk departure work, the screen's own rule (rhBookingActionPermission).
+            'tool' => 'propose_extend_stay', 'label' => 'Extend stay', 'page' => 'bookings.php', 'perm' => ['checkout_guest'],
             'description' => 'Prepare a card to extend an in-house guest\'s stay to a later check-out date (booked nightly rate).',
             'schema' => ['properties' => $bk + ['new_checkout' => $date], 'required' => ['new_checkout']],
             'preview' => 'rh_ai_pv_extend_stay', 'verify' => 'rh_ai_vf_checkout_date',
@@ -739,6 +740,14 @@ function rh_ai_pv_new_checkout(PDO $db, array $user, array $a, bool $correction)
     if ($dropBits['row']) {
         $rows[] = $dropBits['row'];
     }
+    if ($correction && $new < $old && rh_ai_shorter_stay_leaves_credit($b, $total)) {
+        // The screen's own rule (admin_update_checkout_date, L1 2026-11-13): a shorter stay that would leave paid money on
+        // the booking is refused there, so no card is offered here. Taking off nights with money going back stays with staff.
+        $card = rh_ai_card_base('Take off nights on Bookings', 'A shorter stay here would leave money paid that the guest no longer owes, so the date is not corrected from the chat.', $rows, '',
+            ['handoff' => ['label' => 'Open the booking on Bookings', 'url' => 'bookings.php?search=' . rawurlencode((string)$b['booking_reference'])]]);
+        $card['warn'][] = 'Use "Add / take off nights" on Bookings (refund or credit note, amount retyped), or Check out & settle if the guest is leaving today.';
+        return ['card' => $card, 'steps' => [], 'fp' => [false], 'facts' => rh_ai_bk_facts($b) + ['new_checkout' => $new, 'handoff' => 'take off nights on the bookings screen']];
+    }
     if ($correction) {
         $reason = trim((string)($a['reason'] ?? ''));
         $card = rh_ai_card_base('Correct check-out date', 'Administrators and managers: fixes a wrong check-out date. The stay is repriced at the booked nightly rate.', $rows, 'Correct the date',
@@ -766,6 +775,37 @@ function rh_ai_pv_extend_stay(PDO $db, array $user, array $a): array
 function rh_ai_pv_change_checkout(PDO $db, array $user, array $a): array
 {
     return rh_ai_pv_new_checkout($db, $user, $a, true);
+}
+
+/**
+ * Card rows for a booking on a company account (company pays later, owner 2026-11-13): the guest's own share and the
+ * company's share, each on its own line, so the company share is never shown as the guest's debt. [] when the booking
+ * is not on account (or the feature is not installed). $balance = the booking balance the card already shows.
+ */
+function rh_ai_company_rows(int $bookingId, float $balance, ?array $folio = null): array
+{
+    $f = $folio ?? (function_exists('rh_ai_folio_split') ? rh_ai_folio_split($bookingId, ['balance_due' => round($balance, 2)]) : []);
+    if (empty($f['on_account'])) {
+        return [];
+    }
+    $name = trim((string)($f['billed_to']['guest_name'] ?? ''));
+    return [
+        ['label' => 'Guest owes', 'new' => rh_ai_fmt_money((float)$f['guest_owes']), 'tone' => (float)$f['guest_owes'] > BALANCE_TOLERANCE ? 'money' : ''],
+        ['label' => 'Company account', 'new' => rh_ai_fmt_money((float)$f['company_owes']) . ($name !== '' ? ' - ' . $name : '') . ' (company pays later, not the guest\'s debt)'],
+    ];
+}
+
+/**
+ * PURE. Would a shorter stay leave paid money on the booking as credit? The same test admin_update_checkout_date makes
+ * after repricing (recalculateBookingFinancials: credit = paid - (room gross + folio charges), above BALANCE_TOLERANCE),
+ * compared with the credit already there. $b = the bookings row (amount_paid, folio_charges_total, credit_balance).
+ */
+function rh_ai_shorter_stay_leaves_credit(array $b, float $newRoomGross): bool
+{
+    $bill = $newRoomGross + (float)($b['folio_charges_total'] ?? 0);
+    $balance = $bill - max(0.0, (float)($b['amount_paid'] ?? 0));
+    $after = $balance < -BALANCE_TOLERANCE ? round(-$balance, 2) : 0.0;
+    return $after > round(max(0.0, (float)($b['credit_balance'] ?? 0)), 2) + BALANCE_TOLERANCE;
 }
 
 function rh_ai_pv_room_type_change(PDO $db, array $user, array $a): array
@@ -841,6 +881,7 @@ function rh_ai_pv_cancel_booking(PDO $db, array $user, array $a): array
     $rows[] = ['label' => 'Status', 'old' => ucfirst(str_replace('-', ' ', (string)$b['status'])), 'new' => 'Cancelled', 'tone' => 'danger'];
     $rows[] = ['label' => 'Paid so far', 'new' => rh_ai_fmt_money($paid)];
     $rows[] = ['label' => 'Still owed', 'new' => rh_ai_fmt_money($owed)];
+    $rows = array_merge($rows, rh_ai_company_rows((int)$b['id'], $owed));
     $rows[] = ['label' => 'Money paid', 'new' => $mode];
     $reason = trim((string)($a['reason'] ?? ''));
     $scope = ($a['scope'] ?? 'single') === 'group' && $n > 1 ? 'group' : 'single';
@@ -1000,7 +1041,11 @@ function rh_ai_pv_check_in(PDO $db, array $user, array $a): array
     }
     $f = rh_ai_folio((int)$b['id']);
     if ($f) {
-        $rows[] = ['label' => 'Balance to collect', 'new' => rh_ai_fmt_money((float)$f['balance_due']), 'tone' => (float)$f['balance_due'] > BALANCE_TOLERANCE ? 'money' : ''];
+        // Only the guest's own share is collected at the desk; a company-account share is billed to the company
+        $rows[] = ['label' => 'Balance to collect', 'new' => rh_ai_fmt_money(rh_ai_guest_owes($f)), 'tone' => rh_ai_guest_owes($f) > BALANCE_TOLERANCE ? 'money' : ''];
+        if (!empty($f['on_account'])) {
+            $rows[] = rh_ai_company_rows((int)$b['id'], (float)$f['balance_due'], $f)[1];
+        }
     }
     $rows[] = ['label' => 'Status', 'old' => ucfirst((string)$b['status']), 'new' => 'Checked in'];
     $card = rh_ai_card_base('Check in', 'Uses the same check-in as Bookings (payment and clean-room rules included).', $rows, 'Check in');
@@ -1047,8 +1092,12 @@ function rh_ai_pv_check_out(PDO $db, array $user, array $a): array
     }
     $rows = rh_ai_bk_rows($b);
     $f = rh_ai_folio((int)$b['id']);
-    $owed = round((float)($f['balance_due'] ?? 0), 2);
-    $rows[] = ['label' => 'Balance', 'new' => rh_ai_fmt_money($owed), 'tone' => $owed > BALANCE_TOLERANCE ? 'danger' : ''];
+    // The checkout gate's own rule (evaluateCheckoutBalance): on a company account only the guest's share holds up checkout
+    $owed = rh_ai_guest_owes($f);
+    $rows[] = ['label' => !empty($f['on_account']) ? 'Guest owes' : 'Balance', 'new' => rh_ai_fmt_money($owed), 'tone' => $owed > BALANCE_TOLERANCE ? 'danger' : ''];
+    if (!empty($f['on_account'])) {
+        $rows[] = rh_ai_company_rows((int)$b['id'], (float)$f['balance_due'], $f)[1];
+    }
     $settle = rh_checkout_settlement_reason($b);
     $link = ['label' => 'Open checkout on Bookings', 'url' => 'bookings.php?action=checkout&booking_id=' . (int)$b['id']];
     if ($settle !== null || $owed > BALANCE_TOLERANCE) {
@@ -1058,10 +1107,12 @@ function rh_ai_pv_check_out(PDO $db, array $user, array $a): array
         return ['card' => $card, 'steps' => [], 'fp' => [false], 'facts' => rh_ai_bk_facts($b) + ['balance_due' => $owed, 'handoff' => 'settlement on the bookings screen']];
     }
     $rows[] = ['label' => 'Status', 'old' => 'Checked in', 'new' => 'Checked out'];
-    $card = rh_ai_card_base('Check out', 'Nothing is owed and the guest leaves on the booked day. The final invoice or paid statement is made by the checkout, the same as on Bookings.', $rows, 'Check out');
+    $onAcc = !empty($f['on_account']) && (float)($f['company_owes'] ?? 0) > BALANCE_TOLERANCE;
+    $card = rh_ai_card_base('Check out', ($onAcc ? 'The guest owes nothing (the rest stays on the company account, company pays later)' : 'Nothing is owed')
+        . ' and the guest leaves on the booked day. The final invoice or paid statement is made by the checkout, the same as on Bookings.', $rows, 'Check out');
     $steps = [rh_ai_step('bookings.php', [['action', 'checkout_assess'], ['id', (string)(int)$b['id']]], 'assess_clear'),
         rh_ai_step('bookings.php', [['action', 'checkout'], ['id', (string)(int)$b['id']]])];
-    return ['card' => $card, 'steps' => $steps, 'fp' => [true], 'facts' => rh_ai_bk_facts($b) + ['balance_due' => $owed], 'expect_status' => 'checked-out', 'handoff_on_fail' => $link];
+    return ['card' => $card, 'steps' => $steps, 'fp' => [true], 'facts' => rh_ai_bk_facts($b) + ['balance_due' => $owed] + ($onAcc ? ['company_owes' => (float)$f['company_owes']] : []), 'expect_status' => 'checked-out', 'handoff_on_fail' => $link];
 }
 
 /**
@@ -1096,6 +1147,7 @@ function rh_ai_pv_confirm_booking(PDO $db, array $user, array $a): array
     $f = rh_ai_folio((int)$b['id']);
     if ($f) {
         $rows[] = ['label' => 'Still owed', 'new' => rh_ai_fmt_money((float)$f['balance_due']), 'tone' => (float)$f['balance_due'] > BALANCE_TOLERANCE ? 'money' : ''];
+        $rows = array_merge($rows, rh_ai_company_rows((int)$b['id'], (float)$f['balance_due'], $f));
     }
     $card = rh_ai_card_base('Confirm booking', 'The same Confirm as on Bookings: the room is checked again when you confirm, and the room count is updated.', $rows, 'Confirm booking');
     $card['notes'][] = 'The guest gets the hotel\'s ' . ($tentative ? 'booking confirmed (converted hold)' : 'booking confirmed') . ' email, as when you confirm on Bookings.';

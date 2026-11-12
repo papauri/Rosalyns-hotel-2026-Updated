@@ -112,6 +112,9 @@
   <p>What goes out automatically when you save as <strong>Paid</strong> or <strong>Completed</strong>: a <strong>receipt</strong> with a PDF goes to the guest's email, once, for every type (Room, Conference, Gym and Event). Your <strong>Additional CC Emails</strong> get it too. No invoice is sent, because an invoice asks for money and this guest has just paid. The success line tells you what happened, for example <em>"Receipt emailed to the guest."</em> See <a href="#sent">What the guest is sent, and when</a>. If the receipt cannot go, the same line says why (see Problems and fixes).</p>
   <div class="note"><p>Clicking <strong>Record Payment</strong> twice by accident does not record it twice. You will see <em>"Payment already recorded (reference). Duplicate submission ignored."</em></p></div>
 
+  <h3 id="paid-by">Paid by: the guest or the company</h3>
+  <p>On a booking that is on a company account (company pays later), the Record payment window asks <strong>Paid by</strong>: <strong>The guest</strong> or the company. Nothing is picked for you, and you must choose one. Choosing the company records the money against the company's share. Needs <strong>Add Payments</strong>, and <strong>Company Accounts</strong> to record a company payment.</p>
+
   <h2 id="history">How to see the history of a payment</h2>
   <p>The History window lists every step for the payment in order: when it happened, who did it (name and role), what happened, and the amounts before and after where money changed. It changes nothing.</p>
   <ol class="steps">
@@ -194,6 +197,7 @@
     <li>A payment never sends an invoice. In the Record Payment window for a conference, gym or event, the tick <strong>Also email an invoice for any balance still due</strong> is off by default. Tick it only if you also want the guest asked for the rest. If nothing is left to pay you will see <em>"No invoice sent: nothing is left to pay, the receipt covers this payment."</em></li>
     <li>The guest needs a valid email address. Without one nothing can be emailed. The success line says so, and you can use <strong>Send Receipt</strong> on the payment later.</li>
     <li>The automatic receipt uses the <strong>Receipt Email</strong> template. If it is switched off (see <a href="12-email-templates.php">Email templates</a>), no receipt goes by itself, but <strong>Send Receipt</strong> still works.</li>
+    <li>On a company account booking each payer gets its own documents. The company's invoice lists only the company's share of the rooms, and its refund notices and credit notes are made out to the company's billing email. When the guest has extras to pay on a checked-out stay, the guest gets a separate extras-only document (number starting <em>EXT-</em>).</li>
     <li>The receipt goes out once per payment. To send it again, use <strong>Send Receipt</strong> on the payment, or <strong>Send receipt</strong> on the booking or enquiry.</li>
     <li>Which button you see depends on the money. <strong>Send quotation</strong> shows only while nothing has been paid. <strong>Send invoice (balance due)</strong> shows only while something is owed. <strong>Send receipt</strong> shows once any payment has come in. A booking that is part paid shows the invoice first, then the receipt. A fully paid booking shows the receipt only.</li>
     <li>If you ask for an invoice on a paid account (for example from an old page left open) you will see <em>"This booking is fully paid. Send the receipt instead."</em></li>
@@ -239,6 +243,9 @@
   </ul>
   <p>Example: a guest paid MWK 200,000 and leaves a day early. Refund MWK 60,000, reason Early Checkout, status Pending. Later, when the money is sent, settle it (next section).</p>
 
+  <h3 id="refund-who-paid">Refunds on a company account: the refund follows who paid</h3>
+  <p>On a booking that is on a company account, a refund comes out of whoever paid that money. The company's share is refunded to the company, and the guest's share goes back to the guest. The refund notice or credit note for the company is made out to the company, and it goes to the company's billing email. Needs <strong>Issue &amp; settle refunds</strong>.</p>
+
   <h2 id="settle">How to settle a pending refund</h2>
   <ol class="steps">
     <li>Open the refund line (reference starting with REF). A panel <strong>Settle this refund</strong> shows when it is Pending or Processing.</li>
@@ -271,6 +278,23 @@
     <li>Press <strong>Esc</strong> or click outside the window to close it.</li>
   </ol>
   <p>VAT is shown as <em>included in the room rate above</em> (not added again) or as <em>added</em>, depending on your VAT setting. If VAT is switched off there is no VAT line. The full explanation of each line is in <a href="07-reception-bookings.html#total-info">the Reception and Bookings guide</a>.</p>
+
+  <h2 id="company">Company Accounts: companies that pay later</h2>
+  <p>Open <strong>Money</strong> &rarr; <strong>Company Accounts</strong>. Needs <strong>Company accounts</strong>. A company pays for a stay later, on an LPO. Its share is kept apart from the guest's share, so the guest is never chased for it.</p>
+  <ul>
+    <li><strong>Owed by companies</strong>: what companies still owe for their guests' stays (and extras when they cover them), after their payments. <strong>Overdue</strong> is the part past its due date. <strong>Received this month</strong> is the company payments received from the 1st of this month.</li>
+    <li><strong>Companies</strong> table: each company with its <strong>Billing email</strong>, <strong>Terms</strong> (days after check-out), open bookings, what is <strong>Owed</strong>, what is <strong>Overdue</strong> and the <strong>Oldest late</strong> days. <strong>Add a company</strong> makes a new one. A company with no billing email cannot be emailed.</li>
+  </ul>
+  <h3>How to record a payment from a company</h3>
+  <ol class="steps">
+    <li>Open the company and find <strong>Record company payment</strong>.</li>
+    <li>Type the <strong>Amount received</strong>, choose <strong>How it was paid</strong>, and set the <strong>Date received</strong>. Add a <strong>Bank / cheque reference</strong> if there is one.</li>
+    <li>Choose the bookings it pays. <strong>Fill oldest first</strong> spreads the money over the oldest bookings first.</li>
+    <li>Click <strong>Review payment</strong>, then <strong>Confirm and record</strong>.</li>
+  </ol>
+  <p>Tick <strong>Email a payment advice to the company</strong> to send a payment advice. Company statements are listed in the same place: <strong>Statement (PDF)</strong> downloads one, and <strong>Email statement</strong> sends it to the billing email. Both need a billing email on the company. The timed company statement email is set in Automated Emails (see the <a href="19-hotel-settings.html#automated-emails">Hotel Settings guide</a>). It needs <strong>Company statement emails</strong>.</p>
+  <div class="warn"><p>If the company has no billing email, the button says <em>"Add a billing email first"</em>. If Company Accounts is not set up yet you will see <em>"Company accounts are not available yet: database update 084 has not been run."</em> Ask the person who looks after the system to run the update.</p></div>
+  <p>The Reports pages show what companies owe and what guests owe as two separate figures. The totals are the same as before.</p>
 
   <h2 id="invoices">Invoices</h2>
   <p><strong>Money</strong> &rarr; <strong>Invoices</strong> (page title <strong>Invoices &amp; Credit Notes</strong>). It lists one line per payment, with the invoice number once an invoice exists. Filters: <strong>Booking Type</strong>, <strong>Payment Status</strong>, <strong>Search</strong> (invoice number, payment number, booking reference). Changing a dropdown applies at once. The fold-out <strong>Receivables aging and outstanding by source</strong> groups unpaid amounts into 0&ndash;30, 31&ndash;60, 61&ndash;90 and 90+ day age bands.</p>

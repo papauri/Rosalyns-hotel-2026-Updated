@@ -135,7 +135,7 @@ function rh_ai_tool_registry(): array
             'perm' => ['room_dashboard', 'housekeeping', 'individual_rooms'], 'module' => ['bookings', 'housekeeping'], 'cache' => 45, 'handler' => 'rh_ai_t_room_board',
         ],
         'guest_history' => [
-            'description' => 'Past and future stays of one guest (by name, email or phone; tokens are fine): how many stays and nights, first and last visit.',
+            'description' => 'One guest\'s history (by name, email or phone; tokens are fine), the booking page\'s Guest history rule: completed stays, bookings under their email, last stay, recent bookings and money received.',
             'schema' => ['properties' => ['guest' => ['type' => 'string', 'maxLength' => 120]], 'required' => ['guest']],
             'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 120, 'handler' => 'rh_ai_t_guest_history',
         ],
@@ -685,8 +685,14 @@ function rh_ai_money(float $v): float
     return round($v, 2);
 }
 
-/** Folio balance for one booking, the same helper the booking screens use. */
-function rh_ai_folio(int $bookingId): array
+/**
+ * Folio balance for one booking, the same helper the booking screens use. balance_due = the whole booking balance (the
+ * Bookings Balance Due column). A booking on a company account (company pays later, owner 2026-11-13) also carries
+ * on_account, guest_owes (the guest's own share, the only part asked of the guest or blocking checkout), company_owes
+ * (billed to the company, never the guest's debt) and billed_to - see rh_ai_folio_split. $split: a precomputed split
+ * for this booking (rh_ai_billing_splits), else it is read here.
+ */
+function rh_ai_folio(int $bookingId, ?array $split = null): array
 {
     if (!function_exists('getBookingFolioSummary')) {
         return [];
@@ -695,7 +701,115 @@ function rh_ai_folio(int $bookingId): array
     if (!empty($f['error'])) {
         return [];
     }
-    return ['total' => rh_ai_money((float)($f['grand_total'] ?? 0)), 'paid' => rh_ai_money((float)($f['amount_paid'] ?? 0)), 'balance_due' => rh_ai_money((float)($f['balance_due'] ?? 0))];
+    $out = ['total' => rh_ai_money((float)($f['grand_total'] ?? 0)), 'paid' => rh_ai_money((float)($f['amount_paid'] ?? 0)), 'balance_due' => rh_ai_money((float)($f['balance_due'] ?? 0))];
+    return rh_ai_folio_split($bookingId, $out, $split);
+}
+
+/** Company pays later is installed (includes/billing-accounts.php loaded, migration 084 run). Read only. */
+function rh_ai_billing_on(): bool
+{
+    if (!function_exists('rh_billing_ready')) {
+        $file = dirname(__DIR__) . '/billing-accounts.php';
+        if (!is_file($file)) {
+            return false;
+        }
+        require_once $file;
+    }
+    $db = $GLOBALS['pdo'] ?? null;
+    return $db instanceof PDO && rh_billing_ready($db);
+}
+
+/** Splits for many bookings at once (lists): id => the shared split (rh_billing_splits_for_rows). [] before 084. */
+function rh_ai_billing_splits(PDO $db, array $ids): array
+{
+    $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static fn($i) => $i > 0)));
+    if (!$ids || !rh_ai_billing_on()) {
+        return [];
+    }
+    try {
+        $st = $db->prepare('SELECT * FROM bookings WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')');
+        $st->execute($ids);
+        return rh_billing_splits_for_rows($db, $st->fetchAll(PDO::FETCH_ASSOC));
+    } catch (Throwable $e) {
+        return [];
+    }
+}
+
+/**
+ * Adds who owes the balance to a folio array (total, paid, balance_due). Not on account: unchanged. On account: the
+ * company share is the shared split's company_due (includes/billing-accounts.php), capped at the balance; the guest's
+ * share is the rest - the same rule as the checkout gate (evaluateCheckoutBalance). $split null = read it here.
+ */
+function rh_ai_folio_split(int $bookingId, array $f, ?array $split = null): array
+{
+    if (!$f || !isset($f['balance_due'])) {
+        return $f;
+    }
+    if ($split === null) {
+        if (!rh_ai_billing_on()) {
+            return $f;
+        }
+        try {
+            $split = rh_booking_bill_split($GLOBALS['pdo'], $bookingId);
+        } catch (Throwable $e) {
+            return $f;
+        }
+    }
+    if (empty($split['on_account'])) {
+        return $f;
+    }
+    $bal = max(0.0, (float)$f['balance_due']);
+    $company = min(max(0.0, (float)($split['company_due'] ?? 0)), $bal);
+    $guest = max(0.0, $bal - $company);
+    $f['on_account'] = true;
+    $f['company_owes'] = $company <= BALANCE_TOLERANCE ? 0.0 : rh_ai_money($company);
+    $f['guest_owes'] = $guest <= BALANCE_TOLERANCE ? 0.0 : rh_ai_money($guest);
+    $f['billed_to'] = ['guest_name' => (string)($split['name'] ?? '')]; // a name: tokenised like every name
+    $f['who_owes'] = 'Company pays later: company_owes is billed to the company account and is not owed by the guest; guest_owes is the guest\'s own share (the only part to ask the guest for).';
+    return $f;
+}
+
+/** The owe fields of a folio array, for a list row (balance_due plus the company split when on account). */
+function rh_ai_owe_fields(array $f): array
+{
+    $out = ['balance_due' => $f['balance_due'] ?? null];
+    if (!empty($f['on_account'])) {
+        $out += ['on_account' => true, 'guest_owes' => $f['guest_owes'], 'company_owes' => $f['company_owes'], 'billed_to' => $f['billed_to']];
+    }
+    return $out;
+}
+
+/**
+ * Plain owe words for one row (balance_due, + the company split when on account): "MWK 5,000.00 left to pay", or on a
+ * company account "guest owes MWK 5,000.00 · MWK 90,000.00 on the company account (Acme)". '' when nothing is owed.
+ * The company share is never worded as the guest's debt.
+ */
+function rh_ai_owe_words(array $x, callable $fmt): string
+{
+    if (!empty($x['on_account'])) {
+        $parts = [];
+        if ((float)($x['guest_owes'] ?? 0) > BALANCE_TOLERANCE) {
+            $parts[] = 'guest owes ' . $fmt($x['guest_owes']);
+        }
+        if ((float)($x['company_owes'] ?? 0) > BALANCE_TOLERANCE) {
+            $name = trim((string)($x['billed_to']['guest_name'] ?? ''));
+            $parts[] = $fmt($x['company_owes']) . ' on the company account' . ($name !== '' ? ' (' . $name . ')' : '');
+        }
+        return implode(' · ', $parts);
+    }
+    return isset($x['balance_due']) && (float)$x['balance_due'] > BALANCE_TOLERANCE ? $fmt($x['balance_due']) . ' left to pay' : '';
+}
+
+/** One line for list results that hold a company-account booking (said once, not per row). */
+function rh_ai_company_owe_note(): string
+{
+    return 'Rows with on_account: the company pays later. company_owes is billed to the company (billed_to) and is not the guest\'s debt; guest_owes is all the guest owes and the only part that holds up their checkout.';
+}
+
+/** What the guest themself owes on a folio row: guest_owes on a company account, else the whole balance. */
+function rh_ai_guest_owes(array $f): float
+{
+    return round(max(0.0, (float)(!empty($f['on_account']) ? ($f['guest_owes'] ?? 0) : ($f['balance_due'] ?? 0))), 2);
 }
 
 /**
@@ -1540,6 +1654,7 @@ function rh_ai_t_arrivals_departures(PDO $db, array $user, array $a): array
     $dep = $st->fetchAll(PDO::FETCH_ASSOC);
     $dueOut = 0;
     $departures = [];
+    $depSplits = rh_ai_billing_splits($db, array_map(static fn($r) => (int)$r['id'], array_slice(array_values(array_filter($dep, static fn($r) => $r['status'] === 'checked-in')), 0, RH_AI_TOOL_ROWS)));
     foreach ($dep as $r) {
         $isDue = $r['status'] === 'checked-in';
         $dueOut += $isDue ? 1 : 0;
@@ -1547,8 +1662,8 @@ function rh_ai_t_arrivals_departures(PDO $db, array $user, array $a): array
             $row = ['booking_id' => (int)$r['id'], 'reference' => $r['booking_reference'], 'guest_name' => $r['guest_name'], 'room_type' => $r['room_name'],
                 'room_number' => $r['room_number'] !== null ? (string)$r['room_number'] : null, 'status' => $r['status']];
             if ($isDue) {
-                $f = rh_ai_folio((int)$r['id']);
-                $row['balance_due'] = $f['balance_due'] ?? null;
+                $f = rh_ai_folio((int)$r['id'], $depSplits[(int)$r['id']] ?? null);
+                $row += $f ? rh_ai_owe_fields($f) : ['balance_due' => null];
             }
             $departures[] = $row;
         }
@@ -1557,6 +1672,9 @@ function rh_ai_t_arrivals_departures(PDO $db, array $user, array $a): array
         'arrivals' => ['total' => count($arr), 'still_to_arrive' => $toCome, 'arrived' => count($arr) - $toCome, 'no_room_assigned' => $noRoom, 'list' => $arrivals],
         'departures' => ['total' => count($dep), 'due_out' => $dueOut, 'checked_out' => count($dep) - $dueOut, 'list' => $departures],
         'link' => 'dashboard.php', 'link_label' => 'Open Dashboard'];
+    if (array_filter($departures, static fn($x) => !empty($x['on_account']))) {
+        $out['company_accounts'] = rh_ai_company_owe_note();
+    }
     if ($day === rh_ai_today()) {
         $out['overdue_departures'] = (int)$db->query("SELECT COUNT(*) FROM bookings WHERE deleted_at IS NULL AND status = 'checked-in' AND check_out_date < CURDATE()")->fetchColumn();
         $out['overdue_arrivals'] = (int)$db->query("SELECT COUNT(*) FROM bookings WHERE deleted_at IS NULL AND status IN ('confirmed', 'pending') AND check_in_date < CURDATE()")->fetchColumn();
@@ -1570,12 +1688,20 @@ function rh_ai_t_in_house(PDO $db, array $user, array $a): array
                         FROM bookings b LEFT JOIN rooms r ON b.room_id = r.id LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
                         WHERE b.deleted_at IS NULL AND b.status = 'checked-in' ORDER BY b.check_out_date, ir.room_number")->fetchAll(PDO::FETCH_ASSOC);
     $list = [];
-    foreach (array_slice($rows, 0, RH_AI_TOOL_ROWS) as $r) {
-        $f = rh_ai_folio((int)$r['id']);
+    $shown = array_slice($rows, 0, RH_AI_TOOL_ROWS);
+    $splits = rh_ai_billing_splits($db, array_map(static fn($r) => (int)$r['id'], $shown));
+    $company = false;
+    foreach ($shown as $r) {
+        $f = rh_ai_folio((int)$r['id'], $splits[(int)$r['id']] ?? null);
+        $company = $company || !empty($f['on_account']);
         $list[] = ['booking_id' => (int)$r['id'], 'reference' => $r['booking_reference'], 'guest_name' => $r['guest_name'], 'room_type' => $r['room_name'],
-            'room_number' => $r['room_number'] !== null ? (string)$r['room_number'] : null, 'leaves' => $r['check_out_date'], 'balance_due' => $f['balance_due'] ?? null];
+            'room_number' => $r['room_number'] !== null ? (string)$r['room_number'] : null, 'leaves' => $r['check_out_date']] + ($f ? rh_ai_owe_fields($f) : ['balance_due' => null]);
     }
-    return ['in_house' => count($rows), 'currency' => rh_ai_currency(), 'list' => $list, 'link' => 'bookings.php?status=checked-in', 'link_label' => 'Open in-house list'];
+    $out = ['in_house' => count($rows), 'currency' => rh_ai_currency(), 'list' => $list, 'link' => 'bookings.php?status=checked-in', 'link_label' => 'Open in-house list'];
+    if ($company) {
+        $out['company_accounts'] = rh_ai_company_owe_note();
+    }
+    return $out;
 }
 
 function rh_ai_t_room_board(PDO $db, array $user, array $a): array
@@ -1634,14 +1760,27 @@ function rh_ai_t_room_board(PDO $db, array $user, array $a): array
     return $out;
 }
 
+/**
+ * Guest history on the ONE rule of the booking page and the Create Booking lookup (includes/guest-history.php,
+ * 9d60577): a guest = the booking email (trimmed, any case); deleted bookings out; stays = checked-out bookings, a
+ * group of rooms counted once; Received = net paid (refunds out), shown only to whoever sees a booking's Paid figure
+ * (page permission 'bookings', the booking page's own check). A name or phone is first resolved to that email: one
+ * email = that guest, several = one short question, none = no history to read (history follows the email).
+ */
 function rh_ai_t_guest_history(PDO $db, array $user, array $a): array
 {
-    $g = (string)$a['guest'];
-    $st = $db->prepare("SELECT b.booking_reference, b.guest_name, b.guest_email, b.check_in_date, b.check_out_date, b.number_of_nights, b.status, r.name AS room_name
-                        FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id
-                        WHERE b.deleted_at IS NULL AND (b.guest_email = ? OR b.guest_name LIKE ? OR b.guest_phone = ?)
-                        ORDER BY b.check_in_date DESC LIMIT 200");
-    $st->execute([$g, '%' . rh_ai_like($g) . '%', $g]);
+    $g = trim((string)$a['guest']);
+    if (!function_exists('rh_guest_history')) {
+        require_once dirname(__DIR__) . '/guest-history.php';
+    }
+    if (filter_var($g, FILTER_VALIDATE_EMAIL)) {
+        $st = $db->prepare("SELECT b.guest_name, TRIM(b.guest_email) AS guest_email FROM bookings b WHERE b.deleted_at IS NULL AND " . rh_guest_history_email_sql('b') . " ORDER BY b.check_in_date DESC, b.id DESC");
+        $st->execute([$g]);
+    } else {
+        $st = $db->prepare("SELECT b.guest_name, TRIM(b.guest_email) AS guest_email FROM bookings b
+                            WHERE b.deleted_at IS NULL AND (b.guest_name LIKE ? OR b.guest_phone = ?) ORDER BY b.check_in_date DESC, b.id DESC LIMIT 200");
+        $st->execute(['%' . rh_ai_like($g) . '%', $g]);
+    }
     $rows = $st->fetchAll(PDO::FETCH_ASSOC);
     if (!$rows && empty($a['_close'])) {
         // A misspelt name (owner 2026-10-29): one clearly closest guest is the one meant; several close ones are asked about
@@ -1662,23 +1801,38 @@ function rh_ai_t_guest_history(PDO $db, array $user, array $a): array
         $t = rh_ai_booking_totals($db);
         return ['stays' => 0, 'not_found' => 'No bookings found for that guest' . ($t['total_in_system'] > 0 ? '; the system holds other bookings (total_in_system).' : '.'), 'total_in_system' => $t['total_in_system'], 'upcoming_arrivals' => $t['upcoming_arrivals']];
     }
-    $stays = 0;
-    $nights = 0;
-    $first = null;
-    $last = null;
-    $list = [];
+    // The guest is the booking email: the distinct (trimmed, any case) emails behind the match
+    $emails = [];
     foreach ($rows as $r) {
-        if (!in_array($r['status'], ['cancelled', 'no-show', 'expired'], true)) {
-            $stays++;
-            $nights += (int)$r['number_of_nights'];
-            $first = $first === null || $r['check_in_date'] < $first ? $r['check_in_date'] : $first;
-            $last = $last === null || $r['check_in_date'] > $last ? $r['check_in_date'] : $last;
-        }
-        if (count($list) < 10) {
-            $list[] = ['reference' => $r['booking_reference'], 'guest_name' => $r['guest_name'], 'check_in' => $r['check_in_date'], 'check_out' => $r['check_out_date'], 'status' => $r['status'], 'room_type' => $r['room_name']];
+        $em = trim((string)$r['guest_email']);
+        if ($em !== '' && !isset($emails[mb_strtolower($em)])) {
+            $emails[mb_strtolower($em)] = ['guest_name' => (string)$r['guest_name'], 'guest_email' => $em];
         }
     }
-    return ['bookings_found' => count($rows), 'stays' => $stays, 'nights' => $nights, 'first_stay' => $first, 'last_stay' => $last, 'recent' => $list];
+    if (!$emails) {
+        return ['bookings_found' => count($rows), 'no_history' => 'These bookings have no guest email. Guest history follows the booking email (the booking page\'s rule), so there is no history to read.'];
+    }
+    if (count($emails) > 1) {
+        return ['guests_matching' => count($emails), 'options' => array_slice(array_values($emails), 0, 6),
+            'ask' => 'Several guests (different booking emails) match. Ask one short question listing them; never pick one or add them up yourself.'];
+    }
+    $who = reset($emails);
+    $money = function_exists('hasPermission') && hasPermission((int)($user['id'] ?? 0), 'bookings'); // the booking page's own money check
+    $h = rh_guest_history($db, $who['guest_email'], 0, $money, 10);
+    if (empty($h['ok'])) {
+        return ['error' => 'The guest history could not be read just now. Open a booking of this guest to see it.'];
+    }
+    $last = is_array($h['last_stay']) ? ['reference' => $h['last_stay']['booking_reference'], 'check_in' => $h['last_stay']['check_in_date'], 'check_out' => $h['last_stay']['check_out_date']] : null;
+    $out = ['guest' => $who, 'completed_stays' => (int)$h['completed_stays'], 'in_house_now' => (int)$h['in_house'], 'bookings_found' => (int)$h['total_bookings'],
+        'returning_guest' => (int)$h['completed_stays'] >= 1, 'last_stay' => $last,
+        'recent' => array_map(static fn($r) => ['reference' => $r['booking_reference'], 'check_in' => $r['check_in_date'], 'check_out' => $r['check_out_date'], 'status' => $r['status']], (array)$h['recent_other']),
+        'means' => 'The booking page\'s Guest history rule: one guest = one booking email; completed stays = checked-out bookings (rooms booked together count once); bookings_found = every booking under this email, any status.'];
+    if (is_array($h['money'])) {
+        $out['money'] = ['received' => rh_ai_money((float)$h['money']['received']), 'refunded' => rh_ai_money((float)$h['money']['refunded']), 'moved_to_credit_notes' => rh_ai_money((float)$h['money']['to_credit']),
+            'means' => 'Received = money taken from the guest net of refunds, all their room bookings. Refunded = paid back in full (moved_to_credit_notes is the part that became guest credit).'];
+        $out['currency'] = rh_ai_currency();
+    }
+    return $out;
 }
 
 function rh_ai_t_rate_plans_and_deals(PDO $db, array $user, array $a): array
@@ -1714,17 +1868,28 @@ function rh_ai_t_balances_due(PDO $db, array $user, array $a): array
                          ORDER BY b.check_out_date LIMIT 300")->fetchAll(PDO::FETCH_ASSOC);
     $owing = [];
     $total = 0.0;
+    $byCompany = 0.0;
+    $splits = rh_ai_billing_splits($db, array_map(static fn($r) => (int)$r['id'], $cands));
     foreach ($cands as $r) {
-        $f = rh_ai_folio((int)$r['id']);
+        $f = rh_ai_folio((int)$r['id'], $splits ? ($splits[(int)$r['id']] ?? ['on_account' => false]) : null);
         $bal = (float)($f['balance_due'] ?? 0);
         if ($bal > BALANCE_TOLERANCE) {
             $total += $bal;
-            $owing[] = ['booking_id' => (int)$r['id'], 'reference' => $r['booking_reference'], 'guest_name' => $r['guest_name'], 'status' => $r['status'], 'leaves' => $r['check_out_date'], 'balance_due' => rh_ai_money($bal)];
+            $byCompany += !empty($f['on_account']) ? (float)$f['company_owes'] : 0.0;
+            $owing[] = ['booking_id' => (int)$r['id'], 'reference' => $r['booking_reference'], 'guest_name' => $r['guest_name'], 'status' => $r['status'], 'leaves' => $r['check_out_date']]
+                + rh_ai_owe_fields(['balance_due' => rh_ai_money($bal)] + $f);
         }
     }
     usort($owing, static fn($x, $y) => $y['balance_due'] <=> $x['balance_due']);
-    return ['bookings_owing' => count($owing), 'checked' => count($cands), 'total_owed' => rh_ai_money($total), 'currency' => rh_ai_currency(), 'scope' => 'Room bookings leaving from 90 days ago onwards',
+    $out = ['bookings_owing' => count($owing), 'checked' => count($cands), 'total_owed' => rh_ai_money($total), 'currency' => rh_ai_currency(), 'scope' => 'Room bookings leaving from 90 days ago onwards',
         'largest' => array_slice($owing, 0, RH_AI_TOOL_ROWS), 'link' => 'bookings.php', 'link_label' => 'Open Bookings'];
+    if ($byCompany > BALANCE_TOLERANCE) {
+        // Company pays later: the split of the total, so the company share is never read as guests' debt
+        $out['owed_by_guests'] = rh_ai_money(max(0.0, $total - $byCompany));
+        $out['owed_by_company_accounts'] = rh_ai_money($byCompany);
+        $out['company_accounts'] = rh_ai_company_owe_note();
+    }
+    return $out;
 }
 
 // ── Guides & knowledge base ──────────────────────────────────────────────────
