@@ -519,46 +519,18 @@
     }
 }
 
-/* ---- Staff activity (admin/system-logs.php #staff-activity) ---- */
-.sa__head {
-    padding: 14px 16px 4px;
-}
-
-.sa__head p,
+/* ---- Staff activity (admin/system-logs.php #staff-activity). Intro, filter bar, quick dates, bar note and column
+   helpers share the Emails sent rules below (.log-intro, .sa__filters/.em__filters, .log-toggle, .log-bar, .log-th-help). ---- */
 .sa__note {
-    margin: 4px 0 0;
+    margin: 0;
+    padding: 0 16px 12px;
     font-size: 13px;
     color: var(--admin-muted, #5f6b7c);
     line-height: 1.5;
 }
 
-.sa__note {
-    padding: 0 16px 12px;
-}
-
-.sa__filters {
-    margin: 10px 16px;
-}
-
-.sa__filters select,
-.sa__filters input[type="date"] {
-    min-height: 44px;
-    border: 1px solid var(--admin-surface-border, #d7dde6);
-    border-radius: 8px;
-    padding: 8px 10px;
-    max-width: 100%;
-    box-sizing: border-box;
-}
-
-.sa__quick {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    padding: 0 16px 8px;
-}
-
-.sa__quick a,
-.sa__pager a {
+/* A plain button in a bar (the CSV download): white, bordered, 44px tall. */
+.log-bar__btn {
     min-height: 44px;
     display: inline-flex;
     align-items: center;
@@ -571,15 +543,16 @@
     text-decoration: none;
     font-weight: 600;
     font-size: 13px;
+    box-sizing: border-box;
 }
 
-.sa__quick a.is-on {
-    background: var(--color-primary, #766550);
+.log-bar__btn:hover,
+.log-bar__btn:focus-visible {
     border-color: var(--color-primary, #766550);
-    color: #fff;
 }
 
-.sa__results {
+.sa__results,
+#staff-activity-timeline {
     scroll-margin-top: 80px;
 }
 
@@ -647,17 +620,46 @@
 }
 
 .sa-card__counts li {
+    min-width: 0;
+}
+
+/* Each figure is a link to those lines in the list below. */
+.sa-card__counts a {
     border: 1px solid var(--admin-surface-border, #d7dde6);
     border-radius: 8px;
     padding: 5px 9px;
     display: flex;
     flex-direction: column;
     min-width: 0;
+    color: inherit;
+    text-decoration: none;
+}
+
+.sa-card__counts a:hover,
+.sa-card__counts a:focus-visible {
+    border-color: var(--color-primary, #766550);
 }
 
 .sa-card__counts strong {
     font-size: 14px;
     overflow-wrap: anywhere;
+}
+
+.sa-card__see {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    min-height: 36px;
+    color: #7E684B;
+    font-size: 13px;
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.sa-card__see:hover,
+.sa-card__see:focus-visible {
+    text-decoration: underline;
 }
 
 .sa-card__counts li.sa-card__none {
@@ -703,78 +705,30 @@
     color: var(--admin-muted, #5f6b7c);
 }
 
-.sa-timeline {
-    list-style: none;
-    margin: 0;
-    padding: 0 16px;
-}
-
-.sa-item {
-    display: flex;
-    gap: 12px;
-    padding: 10px 0;
-    border-top: 1px solid var(--admin-surface-border, #d7dde6);
-    min-width: 0;
-}
-
-.sa-item__time {
-    flex: 0 0 96px;
-    font-size: 12px;
-    color: var(--admin-muted, #5f6b7c);
-    font-variant-numeric: tabular-nums;
-}
-
-.sa-item__body {
-    min-width: 0;
-    flex: 1;
-}
-
-.sa-item__what {
+/* Timeline table: the sentence column takes the room; time stays on one line (wraps on phones via .log-nowrap). */
+.sa-table__what {
+    min-width: 220px;
     overflow-wrap: anywhere;
 }
 
-.sa-item__meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    align-items: center;
-    margin-top: 4px;
-    font-size: 12px;
-    color: var(--admin-muted, #5f6b7c);
+.sa-table time {
+    font-variant-numeric: tabular-nums;
 }
 
-.sa-item__meta a {
-    font-weight: 700;
-}
-
-.sa-item__tag {
+.sa__tag {
+    display: inline-block;
+    margin-left: 4px;
     border: 1px solid var(--admin-surface-border, #d7dde6);
     border-radius: 999px;
     padding: 0 8px;
-}
-
-.sa__pager {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 10px 16px;
-    font-size: 13px;
+    font-size: 11px;
+    color: var(--admin-muted, #5f6b7c);
+    white-space: nowrap;
 }
 
 @media (max-width: 768px) {
-    .sa__filters {
-        margin: 10px 12px;
-    }
-
-    .sa__filters select,
-    .sa__filters input[type="date"] {
-        width: 100%;
-    }
-
-    .sa__quick,
     .sa__cards,
-    .sa-timeline,
-    .sa__head {
+    .sa__note {
         padding-left: 12px;
         padding-right: 12px;
     }
@@ -783,13 +737,12 @@
         grid-template-columns: 1fr;
     }
 
-    .sa-item {
-        flex-direction: column;
-        gap: 2px;
+    .sa-card__see {
+        min-height: 44px;
     }
 
-    .sa-item__time {
-        flex: none;
+    .sa-table__what {
+        min-width: 180px;
     }
 
     .sa__sub,
@@ -802,11 +755,6 @@
 /* Phones: the help text keeps every word but takes fewer lines - smaller type, tighter
    spacing, and each "What each figure counts" entry runs on as one paragraph (name, then meaning). */
 @media (max-width: 640px) {
-    .sa__head {
-        padding-top: 10px;
-    }
-
-    .sa__head p,
     .sa__note,
     .log-attention__note {
         font-size: 12px;
@@ -840,19 +788,39 @@
     }
 }
 
-/* Emails sent (owner 2026-11-12) */
-.em__intro {
+/* Emails sent (owner 2026-11-12). The intro, filter bar, toggle, bar and column helpers are shared with Staff activity. */
+.em__intro,
+.log-intro {
     margin: 0;
     padding: 12px 16px 10px;
     color: #475569;
     font-size: 13px;
 }
 
-/* Same filter bar as Staff activity: every control 44px, inset from the card edge. */
+@media (max-width: 768px) {
+    .em__intro,
+    .log-intro {
+        padding-left: 12px;
+        padding-right: 12px;
+    }
+}
+
+@media (max-width: 640px) {
+    .em__intro,
+    .log-intro {
+        font-size: 12px;
+        line-height: 1.4;
+    }
+}
+
+/* One filter bar for Staff activity and Emails sent: every control 44px, inset from the card edge. */
+.sa__filters,
 .em__filters {
     margin: 0 16px 12px;
 }
 
+.sa__filters select,
+.sa__filters input[type="date"],
 .em__filters select,
 .em__filters input[type="date"],
 .em__filters input[type="search"] {
@@ -879,7 +847,8 @@
     width: 100%;
 }
 
-.em__bar {
+.em__bar,
+.log-bar {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
@@ -888,6 +857,16 @@
 }
 
 @media (max-width: 768px) {
+    .sa__filters,
+    .em__filters,
+    .em__bar,
+    .log-bar {
+        margin-left: 12px;
+        margin-right: 12px;
+    }
+
+    .sa__filters select,
+    .sa__filters input[type="date"],
     .em__filters select[name="em_kind"],
     .em__filters input[type="date"] {
         width: 100%;
@@ -898,14 +877,17 @@
     }
 }
 
-.em__toggle {
+/* Segmented control: Emails Table / Timeline and Staff activity quick dates. */
+.em__toggle,
+.log-toggle {
     display: inline-flex;
     border: 1px solid #d9dee6;
     border-radius: 8px;
     overflow: hidden;
 }
 
-.em__toggle a {
+.em__toggle a,
+.log-toggle a {
     display: inline-flex;
     align-items: center;
     gap: 6px;
@@ -918,22 +900,33 @@
     background: #fff;
 }
 
-.em__toggle a + a {
+.em__toggle a + a,
+.log-toggle a + a {
     border-left: 1px solid #d9dee6;
 }
 
-.em__toggle a.is-on {
+.em__toggle a.is-on,
+.log-toggle a.is-on {
     background: #7E684B;
     color: #fff;
 }
 
-.em__note {
+@media (max-width: 768px) {
+    .em__toggle a,
+    .log-toggle a {
+        min-height: 44px;
+    }
+}
+
+.em__note,
+.log-bar__note {
     margin: 0;
     color: #64748b;
     font-size: 12px;
 }
 
-.em-th-help {
+.em-th-help,
+.log-th-help {
     display: block;
     margin-top: 2px;
     max-width: 22ch;

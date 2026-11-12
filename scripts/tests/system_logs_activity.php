@@ -33,9 +33,37 @@ check($f['from'] === '2026-11-06' && $f['to'] === '2026-11-06' && $f['filtered']
 $f = rh_sa_parse_filters(['range' => '7d'], '2026-11-07');
 check($f['from'] === '2026-11-01' && $f['to'] === '2026-11-07', 'last 7 days is 7 days including today');
 $f = rh_sa_parse_filters(['from' => '2026-11-05', 'to' => '2026-11-02', 'user' => '12', 'type' => 'stock', 'p' => '3'], '2026-11-07');
-check($f['from'] === '2026-11-02' && $f['to'] === '2026-11-05' && $f['user'] === 12 && $f['type'] === 'stock' && $f['page'] === 3, 'range swapped when backwards; user, type, page read');
+check($f['from'] === '2026-11-02' && $f['to'] === '2026-11-05' && $f['user'] === 12 && $f['type'] === 'stock' && !isset($f['page']), 'range swapped when backwards; user, type read; an old ?p= is ignored (paging is sa_page)');
 $f = rh_sa_parse_filters(['from' => '2026-13-45', 'to' => 'x', 'type' => 'evil', 'user' => '-4', 'p' => '9999'], '2026-11-07');
-check($f['from'] === '2026-11-07' && $f['type'] === 'all' && $f['user'] === 0 && $f['page'] <= 20, 'bad date / type / user / page fall back safely');
+check($f['from'] === '2026-11-07' && $f['type'] === 'all' && $f['user'] === 0, 'bad date / type / user fall back safely');
+
+// ---- Timeline pager (pure): shared pager, key 'sa', newest 1000 lines reachable ----
+$pg = rh_sa_pager([], 25);
+check($pg['size'] === 10 && $pg['pages'] === 3 && $pg['page'] === 1 && $pg['more'] && rh_lp_summary($pg, 10) === "Showing 1\u{2013}10 of 25", 'pager: 10 per page by default, total shown', rh_lp_summary($pg, 10));
+$pg = rh_sa_pager(['sa_page' => '9'], 25);
+check($pg['page'] === 3 && $pg['offset'] === 20 && !$pg['more'], 'pager: a page past the end moves to the last page');
+$pg = rh_sa_pager(['sa_page' => '500'], 2345);
+check($pg['pages'] === 100 && $pg['page'] === 100 && $pg['offset'] === 990 && $pg['beyond'] && rh_lp_summary($pg, 10) === "Showing 991\u{2013}1,000 of 2,345", 'pager: over 1000 lines, pages stop at 1000 but the real total is shown', rh_lp_summary($pg, 10));
+check(strpos(rh_sa_pager_note($pg), 'Only the newest 1000 lines can be paged through') === 0 && rh_sa_pager_note(rh_sa_pager([], 25)) === '', 'pager: depth note only when there is more than can be paged');
+$pg = rh_sa_pager(['sa_size' => '25', 'sa_page' => '2'], 2345);
+check($pg['size'] === 25 && $pg['pages'] === 40 && $pg['offset'] === 25, 'pager: size picker 25');
+$pg = rh_sa_pager(['sa_size' => '100', 'sa_page' => '99'], 5000);
+check($pg['page'] === 10 && $pg['offset'] === 900, 'pager: size 100 reaches line 1000 and no further');
+$pg = rh_sa_pager([], 20000);
+check($pg['capped'] && $pg['total'] === RH_SA_COUNT_CAP && strpos(rh_lp_summary($pg, 10), '10,000+') !== false, 'pager: total above the count cap reads 10,000+');
+$pg = rh_sa_pager(['sa_page' => '3'], -1);
+$pgM = rh_sa_pager_more($pg, true);
+$pgL = rh_sa_pager_more($pg, false);
+check($pg['unknown'] && $pg['page'] === 3 && $pgM['more'] && $pgM['pages'] === 4 && !$pgL['more'] && strpos(rh_lp_summary($pgM, 10), 'count unavailable') !== false, 'pager: count failed, Next follows the timeline');
+$pgD = rh_sa_pager_more(rh_sa_pager(['sa_page' => '100'], -1), true);
+check($pgD['page'] === 100 && !$pgD['more'], 'pager: count failed, Next never goes past line 1000');
+$q = rh_sa_query(rh_sa_parse_filters(['user' => 5, 'from' => D1, 'to' => D1]), ['range' => 'today'],
+    ['source' => 'pos', 'ev_page' => '3', 'sa_page' => '4', 'sad_page' => '2', 'sa_size' => '25', 'p' => '2', 'export' => 'csv', 'r' => '1', 'user' => '9']);
+parse_str($q, $qa);
+check(($qa['source'] ?? '') === 'pos' && ($qa['ev_page'] ?? '') === '3' && ($qa['sa_size'] ?? '') === '25' && ($qa['user'] ?? '') === '5'
+    && !isset($qa['sa_page']) && !isset($qa['sad_page']) && !isset($qa['p']) && !isset($qa['export']) && !isset($qa['r']), 'links keep the other sections and sizes, restart the pages', $q);
+check(rh_sa_counter_type('refunds') === 'payments' && rh_sa_counter_type('orders') === 'till' && rh_sa_counter_type('saves') === 'all', 'day-card figures open the matching kind of work');
+check(rh_sa_who(['_uid' => 0, '_name' => ''], []) === 'System / unknown user' && rh_sa_who(['_uid' => 0, '_name' => 'Guest website'], []) === 'System / unknown user (Guest website)', 'lines with no staff account are labelled System / unknown user');
 $f = rh_sa_parse_filters(['from' => '2026-01-01', 'to' => '2026-11-07'], '2026-11-07');
 check($f['clamped'] && $f['to'] === '2026-11-07' && $f['from'] === '2026-10-08', 'range clamped to 31 days, newest days kept');
 check(rh_sa_panel_clause(rh_sa_parse_filters([]), 'created_at', 'user_id') === ['', []], 'older panels: no extra condition until the filters are used');
@@ -159,6 +187,14 @@ try {
     $last = rh_sa_timeline($pdo, $fA, 0, 100);
     check(!$last['has_more'], 'paging: no further page after the last row');
 
+    // ---- Count: same filters as the timeline ----
+    $cA = rh_sa_count($pdo, $fA);
+    check($cA === count($last['rows']), 'count: equals the timeline lines for the person and day', "$cA vs " . count($last['rows']));
+    $ff = $fA; $ff['type'] = 'payments';
+    $cP = rh_sa_count($pdo, $ff);
+    check($cP === count(rh_sa_timeline($pdo, $ff, 0, 100)['rows']) && $cP > 0, 'count: equals the timeline lines for one type', (string)$cP);
+    check(rh_sa_count($pdo, $fA, 3) === 4, 'count: stops just past its cap');
+
     // ---- Summary ----
     $s = rh_sa_summary($pdo, $fA);
     $row = $s['rows'][0] ?? null;
@@ -265,7 +301,7 @@ $r = $runPage(['method' => 'GET', 'get' => [], 'grep' => ['id="staff-activity"',
 check(!empty($r['found']['id="staff-activity"']) && !empty($r['found']['Each person, each day']) && !empty($r['found']['What each figure counts']) && !empty($r['found']['Download this list (CSV)']), 'page: Staff activity section renders with its filters, cards, helper list and CSV link', json_encode($r['found'] ?? $r));
 check(empty($r['found']['Fatal error']) && empty($r['found']['Warning:']), 'page: no PHP errors on the default view');
 check($clean($r), 'page run rolled back', json_encode($r));
-$r = $runPage(['method' => 'GET', 'get' => ['sa' => '1', 'user' => '1', 'from' => '2020-03-05', 'to' => '2020-03-05', 'type' => 'payments', 'p' => '2'], 'grep' => ['older panels further down follow', 'Fatal error', 'Warning:']]);
+$r = $runPage(['method' => 'GET', 'get' => ['sa' => '1', 'user' => '1', 'from' => '2020-03-05', 'to' => '2020-03-05', 'type' => 'payments', 'sa_page' => '2'], 'grep' => ['older panels further down follow', 'Fatal error', 'Warning:']]);
 check(!empty($r['found']['older panels further down follow']) && empty($r['found']['Fatal error']) && empty($r['found']['Warning:']), 'page: filtered view (person, day, type, page 2) renders and says the older panels follow it', json_encode($r['found'] ?? $r));
 $r = $runPage(['method' => 'GET', 'get' => ['export' => 'csv', 'from' => '2020-03-05', 'to' => '2020-03-05'], 'grep' => ['Time,Person,Type,What,Where', '<html']]);
 check(!empty($r['found']['Time,Person,Type,What,Where']) && empty($r['found']['<html']), 'page: CSV export sends only the CSV', json_encode($r['found'] ?? $r));

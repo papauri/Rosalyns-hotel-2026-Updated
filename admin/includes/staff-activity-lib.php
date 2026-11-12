@@ -15,11 +15,15 @@
  */
 
 if (!defined('RH_SA_PER_PAGE')) {
-    define('RH_SA_PER_PAGE', 50);
+    define('RH_SA_PER_PAGE', 10);      // default rows per page (the shared pager's picker offers 10 / 25 / 50 / 100)
     define('RH_SA_MAX_DEPTH', 1000);   // newest rows a person can page through
     define('RH_SA_MAX_DAYS', 31);      // widest date range
     define('RH_SA_CSV_ROWS', 3000);
+    define('RH_SA_COUNT_CAP', 10000);  // the timeline total is counted up to here ("10,000+" above it)
 }
+
+// The timeline and the day cards page with the shared System Logs pager (keys 'sa' and 'sad'). Loading it connects to nothing.
+require_once __DIR__ . '/log-pager.php';
 
 if (!function_exists('rh_sa_parse_filters')) {
 
@@ -136,10 +140,10 @@ if (!function_exists('rh_sa_parse_filters')) {
             $from = date('Y-m-d', strtotime($to . ' -' . (RH_SA_MAX_DAYS - 1) . ' days'));
             $clamped = true;
         }
-        $page = max(1, min((int)(RH_SA_MAX_DEPTH / RH_SA_PER_PAGE), (int)($get['p'] ?? 1)));
+        // The page is not a filter: the timeline pages with sa_page / sa_size (rh_sa_pager). An old ?p= is ignored.
         return [
             'user' => $user, 'type' => $type, 'from' => $from, 'to' => $to, 'range' => $range,
-            'page' => $page, 'clamped' => $clamped, 'filtered' => isset($get['sa']),
+            'clamped' => $clamped, 'filtered' => isset($get['sa']),
         ];
     }
 
@@ -149,10 +153,28 @@ if (!function_exists('rh_sa_parse_filters')) {
         return [$f['from'] . ' 00:00:00', date('Y-m-d', strtotime($f['to'] . ' +1 day')) . ' 00:00:00'];
     }
 
-    /** The filter as GET parameters (for links), without the page number. */
-    function rh_sa_query(array $f, array $over = []): string
+    /** Query keys that belong to Staff activity itself (links set them afresh; the page numbers start again at 1). */
+    function rh_sa_own_keys(): array
     {
-        $q = ['sa' => 1, 'user' => $f['user'] ?: '', 'type' => $f['type'], 'from' => $f['from'], 'to' => $f['to']];
+        return ['sa', 'user', 'type', 'from', 'to', 'range', 'p', 'sa_page', 'sad_page', 'export', 'r'];
+    }
+
+    /**
+     * The filter as GET parameters (for links), without a page number. $get (the page's query string) is kept for the
+     * other sections (source, level, group, auto, their {key}_page / {key}_size) and the rows-per-page choices
+     * sa_size / sad_size; Staff activity's own keys, its page numbers, an export and the auto-reload marker are not.
+     */
+    function rh_sa_query(array $f, array $over = [], array $get = []): string
+    {
+        $q = [];
+        $own = rh_sa_own_keys();
+        foreach ($get as $k => $v) {
+            if (is_string($k) && is_string($v) && preg_match('/^[a-z][a-z0-9_]{0,30}$/', $k) && !in_array($k, $own, true)
+                && !in_array($k, ['action', 'csrf_token'], true)) {
+                $q[$k] = $v;
+            }
+        }
+        $q = array_merge($q, ['sa' => 1, 'user' => $f['user'] ?: '', 'type' => $f['type'], 'from' => $f['from'], 'to' => $f['to']]);
         foreach ($over as $k => $v) {
             $q[$k] = $v;
         }
@@ -185,6 +207,68 @@ if (!function_exists('rh_sa_parse_filters')) {
             $args[] = $f['user'];
         }
         return [' ' . $lead . $sql, $args];
+    }
+
+    /** Which timeline type a day-card figure opens (Screen saves overlap every type, so they open everything). */
+    function rh_sa_counter_type(string $counter): string
+    {
+        $map = ['signins' => 'signins', 'bookings' => 'bookings', 'payments' => 'payments', 'refunds' => 'payments',
+            'orders' => 'till', 'till' => 'till', 'kitchen' => 'kitchen', 'stock' => 'stock', 'settings' => 'settings', 'saves' => 'all'];
+        return $map[$counter] ?? 'all';
+    }
+
+    // ------------------------------------------------------------------ paging (shared System Logs pager, key 'sa')
+
+    /**
+     * The timeline's pager from the query string (sa_page / sa_size) and the counted total (rh_sa_count: at most
+     * RH_SA_COUNT_CAP + 1, or -1 when it could not be counted). Only the newest RH_SA_MAX_DEPTH lines can be paged
+     * through, so the pages stop there while the summary keeps the real total ('beyond' = there are more). A page
+     * past the end moves to the last page. Same array shape as rh_lp_parse(), for rh_lp_render().
+     */
+    function rh_sa_pager(array $get, int $total, int $depth = RH_SA_MAX_DEPTH): array
+    {
+        $p = rh_lp_parse($get, 'sa');
+        $maxPage = max(1, (int)ceil($depth / $p['size']));
+        $p['beyond'] = false;
+        $p['max_page'] = $maxPage;
+        if ($total < 0) {
+            // Count failed: keep the asked page (never past the depth); rh_sa_pager_more lets the rows decide Next.
+            $p['unknown'] = true;
+            $p['total'] = 0;
+            $p['page'] = min($p['page'], $maxPage);
+            $p['pages'] = $p['page'];
+        } else {
+            $p['capped'] = $total > RH_SA_COUNT_CAP;
+            $p['total'] = $p['capped'] ? RH_SA_COUNT_CAP : $total;
+            $p['beyond'] = $total > $depth;
+            $p['pages'] = max(1, (int)ceil(min($p['total'], $depth) / $p['size']));
+            $p['page'] = min($p['page'], $p['pages']);
+        }
+        $p['offset'] = ($p['page'] - 1) * $p['size'];
+        $p['more'] = $p['page'] < $p['pages'];
+        return $p;
+    }
+
+    /** After the timeline loaded: with no count, Next shows while the timeline has more (never past the depth). */
+    function rh_sa_pager_more(array $p, bool $hasMore): array
+    {
+        if (!empty($p['unknown'])) {
+            $p['more'] = $hasMore && $p['page'] < $p['max_page'];
+            $p['pages'] = $p['page'] + ($p['more'] ? 1 : 0);
+        }
+        return $p;
+    }
+
+    /** The plain sentence under the timeline's pager ('' when none is needed). */
+    function rh_sa_pager_note(array $p): string
+    {
+        if (!empty($p['unknown'])) {
+            return rh_lp_cap_note($p);
+        }
+        if (!empty($p['beyond'])) {
+            return 'Only the newest ' . (int)RH_SA_MAX_DEPTH . ' lines can be paged through. Pick one person or a shorter range, or download the CSV.';
+        }
+        return '';
     }
 
     // ------------------------------------------------------------------ names, pages, wording
@@ -551,6 +635,44 @@ if (!function_exists('rh_sa_parse_filters')) {
     // ------------------------------------------------------------------ timeline
 
     /**
+     * The FROM + WHERE every timeline source is read with, shared by the timeline and its count so they can never
+     * drift apart. Table and column names come only from rh_sa_sources(); every value is a placeholder.
+     * @return array{0:string,1:array}
+     */
+    function rh_sa_source_from(array $s, array $f): array
+    {
+        [$a, $b] = rh_sa_bounds($f);
+        $sql = " FROM {$s['table']} WHERE {$s['ts']} >= ? AND {$s['ts']} < ?";
+        $args = [$a, $b];
+        if ($f['user'] > 0) {
+            $sql .= " AND {$s['uid']} = ?";
+            $args[] = $f['user'];
+        }
+        if (!empty($s['where'])) {
+            $sql .= ' AND ' . $s['where'];
+        }
+        return [$sql, $args];
+    }
+
+    /** The same for the admin activity log (sign-ins, named audit events, screen saves), with the type filter. */
+    function rh_sa_activity_from(array $f): array
+    {
+        [$a, $b] = rh_sa_bounds($f);
+        $sql = ' FROM admin_activity_log WHERE created_at >= ? AND created_at < ?';
+        $args = [$a, $b];
+        if ($f['user'] > 0) {
+            $sql .= ' AND user_id = ?';
+            $args[] = $f['user'];
+        }
+        [$tsql, $targs] = rh_sa_activity_type_sql($f['type']);
+        if ($tsql !== '') {
+            $sql .= ' AND ' . $tsql;
+            $args = array_merge($args, $targs);
+        }
+        return [$sql, $args];
+    }
+
+    /**
      * Newest-first merged timeline. $offset/$limit are rows of the merged list; each source is asked for the newest
      * offset+limit+1 rows, then they are merged and sliced here. @return array{rows:array,has_more:bool}
      */
@@ -558,24 +680,15 @@ if (!function_exists('rh_sa_parse_filters')) {
     {
         $offset = max(0, min($offset, RH_SA_MAX_DEPTH));
         $limit = max(1, min($limit, RH_SA_CSV_ROWS));
-        $need = min($offset + $limit + 1, RH_SA_CSV_ROWS + 1);
-        [$a, $b] = rh_sa_bounds($f);
+        $need = min($offset + $limit + 1, RH_SA_CSV_ROWS + 1); // UI pages: offset <= 900 + 100 rows, well inside
         $staff = rh_sa_staff($pdo);
         $all = [];
 
         foreach (rh_sa_active_sources($pdo, $f['type']) as $key => $s) {
             try {
+                [$from, $args] = rh_sa_source_from($s, $f);
                 $sql = "SELECT {$s['id']} AS _id, {$s['ts']} AS _ts, {$s['uid']} AS _uid, " . ($s['name'] ? $s['name'] : 'NULL') . " AS _name, {$s['cols']}"
-                    . " FROM {$s['table']} WHERE {$s['ts']} >= ? AND {$s['ts']} < ?";
-                $args = [$a, $b];
-                if ($f['user'] > 0) {
-                    $sql .= " AND {$s['uid']} = ?";
-                    $args[] = $f['user'];
-                }
-                if (!empty($s['where'])) {
-                    $sql .= ' AND ' . $s['where'];
-                }
-                $sql .= " ORDER BY {$s['ts']} DESC, {$s['id']} DESC LIMIT " . (int)$need;
+                    . $from . " ORDER BY {$s['ts']} DESC, {$s['id']} DESC LIMIT " . (int)$need;
                 $st = $pdo->prepare($sql);
                 $st->execute($args);
                 foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
@@ -587,19 +700,9 @@ if (!function_exists('rh_sa_parse_filters')) {
         }
 
         try {
-            [$tsql, $targs] = rh_sa_activity_type_sql($f['type']);
-            $sql = "SELECT id AS _id, created_at AS _ts, user_id AS _uid, username AS _name, action, details FROM admin_activity_log WHERE created_at >= ? AND created_at < ?";
-            $args = [$a, $b];
-            if ($f['user'] > 0) {
-                $sql .= ' AND user_id = ?';
-                $args[] = $f['user'];
-            }
-            if ($tsql !== '') {
-                $sql .= ' AND ' . $tsql;
-                $args = array_merge($args, $targs);
-            }
-            $sql .= ' ORDER BY created_at DESC, id DESC LIMIT ' . (int)$need;
-            $st = $pdo->prepare($sql);
+            [$from, $args] = rh_sa_activity_from($f);
+            $st = $pdo->prepare('SELECT id AS _id, created_at AS _ts, user_id AS _uid, username AS _name, action, details' . $from
+                . ' ORDER BY created_at DESC, id DESC LIMIT ' . (int)$need);
             $st->execute($args);
             foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
                 $all[] = rh_sa_describe('activity', $r, $staff);
@@ -614,6 +717,41 @@ if (!function_exists('rh_sa_parse_filters')) {
         return ['rows' => $slice, 'has_more' => count($all) > $offset + $limit];
     }
 
+    /**
+     * How many timeline lines the filter matches, counted up to $cap (returns at most $cap + 1). Each source is
+     * counted with exactly the timeline's FROM + WHERE; a source whose query fails is skipped, as the timeline skips
+     * it. -1 when nothing could be counted at all (the pager then says "count unavailable").
+     */
+    function rh_sa_count(PDO $pdo, array $f, int $cap = RH_SA_COUNT_CAP): int
+    {
+        $parts = [];
+        foreach (rh_sa_active_sources($pdo, $f['type']) as $s) {
+            $parts[] = rh_sa_source_from($s, $f);
+        }
+        $parts[] = rh_sa_activity_from($f);
+        $total = 0;
+        $counted = 0;
+        foreach ($parts as [$from, $args]) {
+            try {
+                $st = $pdo->prepare('SELECT COUNT(*) FROM (SELECT 1 AS one' . $from . ' LIMIT ' . ((int)$cap + 1) . ') rh_sa_x');
+                $st->execute($args);
+                $total += (int)$st->fetchColumn();
+                $counted++;
+            } catch (Throwable $e) {
+                // skipped, as in the timeline
+            }
+            if ($total > $cap) {
+                return $cap + 1;
+            }
+        }
+        return $counted > 0 ? $total : -1;
+    }
+
+    /**
+     * Who a line belongs to. A line with no staff account behind it (the system, the guest website, an API client, a
+     * failed sign-in) reads "System / unknown user", with any name the record carries in brackets. Day cards only
+     * cover staff accounts, so these lines show in the list and the CSV but get no card.
+     */
     function rh_sa_who(array $r, array $staff): string
     {
         $uid = (int)($r['_uid'] ?? 0);
@@ -621,10 +759,10 @@ if (!function_exists('rh_sa_parse_filters')) {
             return $staff[$uid]['name'];
         }
         $n = trim((string)($r['_name'] ?? ''));
-        if ($n !== '') {
-            return $n;
+        if ($uid > 0) {
+            return $n !== '' ? $n : 'User #' . $uid;
         }
-        return $uid > 0 ? 'User #' . $uid : 'Unknown';
+        return 'System / unknown user' . ($n !== '' ? ' (' . (function_exists('mb_substr') ? mb_substr($n, 0, 60) : substr($n, 0, 60)) . ')' : '');
     }
 
     /** One source row to a timeline row: ts, who, type, what, where, link. */
@@ -772,8 +910,11 @@ if (!function_exists('rh_sa_parse_filters')) {
 
     // ------------------------------------------------------------------ summary
 
-    /** One row per person per day. @return array{rows:array,limited:bool} */
-    function rh_sa_summary(PDO $pdo, array $f, int $maxRows = 300): array
+    /**
+     * One row per person (staff accounts only) per day. The page pages these cards (key 'sad'); $maxRows only guards
+     * memory, so paging, not the cap, limits what can be reached. @return array{rows:array,limited:bool}
+     */
+    function rh_sa_summary(PDO $pdo, array $f, int $maxRows = 2000): array
     {
         [$a, $b] = rh_sa_bounds($f);
         $staff = rh_sa_staff($pdo);

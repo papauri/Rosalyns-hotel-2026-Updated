@@ -525,7 +525,12 @@ $saStaff = rh_sa_staff($pdo);
 $saTypes = rh_sa_types();
 $saCounters = rh_sa_counters();
 $saSummary = rh_sa_summary($pdo, $saF);
-$saTimeline = rh_sa_timeline($pdo, $saF, ($saF['page'] - 1) * RH_SA_PER_PAGE, RH_SA_PER_PAGE);
+// Day cards page in memory (key 'sad'); the timeline pages on a capped count (key 'sa', newest 1000 lines reachable).
+[$sadP, $sadRows] = rh_lp_slice($_GET, 'sad', $saSummary['rows']);
+$saTotal = rh_sa_count($pdo, $saF);
+$saP = rh_sa_pager($_GET, $saTotal);
+$saTimeline = rh_sa_timeline($pdo, $saF, $saP['offset'], $saP['size']);
+$saP = rh_sa_pager_more($saP, $saTimeline['has_more']);
 $saRetention = rh_sa_retention($pdo);
 $saLinkOk = function (?array $l) use ($user) {
     if (!$l || empty($l['page'])) {
@@ -545,13 +550,21 @@ $saLinkOk = function (?array $l) use ($user) {
     }
     return true;
 };
+// Links keep the other sections' filters and pages plus the rows-per-page choices; Staff activity's pages restart at 1.
 $saUrl = function (array $over = []) use ($saF) {
-    return 'system-logs.php?' . rh_sa_query($saF, $over);
+    return 'system-logs.php?' . rh_sa_query($saF, $over, $_GET);
+};
+// One person on one day (a day card), optionally one kind of work: lands on the timeline.
+$saDayUrl = function (int $uid, string $day, string $type = 'all') {
+    return 'system-logs.php?' . rh_sa_query(['user' => $uid, 'type' => $type, 'from' => $day, 'to' => $day], [], $_GET) . '#staff-activity-timeline';
 };
 $saDayLabel = function (string $ymd) {
     return date('D j M Y', strtotime($ymd));
 };
 $saSingleDay = $saF['from'] === $saF['to'];
+$saWhoLabel = $saF['user'] > 0 ? ($saStaff[$saF['user']]['name'] ?? ('User #' . $saF['user'])) : 'everyone';
+$saLines = $saP['unknown'] ? 'count unavailable'
+    : number_format($saP['total']) . ($saP['capped'] ? '+' : '') . ' line' . ($saP['total'] === 1 ? '' : 's');
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -577,16 +590,18 @@ $saSingleDay = $saF['from'] === $saF['to'];
         </div>
 
         <section class="log-section sa" id="staff-activity" aria-labelledby="staff-activity-title">
-            <div class="sa__head">
-                <h3 id="staff-activity-title"><i class="fas fa-user-clock"></i> Staff activity</h3>
-                <p>Pick a staff member and a day to see what they did. The figures and the list are read from the hotel's own records: Booking History, payments, orders, shifts, the kitchen and bar screens, stock records and the sign-in log.</p>
-            </div>
+            <h3 id="staff-activity-title"><i class="fas fa-user-clock"></i> Staff activity</h3>
+            <p class="log-intro">Pick a staff member and a day to see what they did. Read from the hotel's own records: Booking History, payments, orders, shifts, the kitchen and bar screens, stock records and the sign-in log.</p>
 
             <form method="get" class="log-toolbar sa__filters" action="system-logs.php#staff-activity-results">
                 <input type="hidden" name="sa" value="1">
-                <?php foreach (['source', 'level', 'limit', 'group', 'auto'] as $keepKey): if (isset($_GET[$keepKey]) && is_string($_GET[$keepKey])): ?>
-                    <input type="hidden" name="<?php echo $keepKey; ?>" value="<?php echo htmlspecialchars($_GET[$keepKey]); ?>">
+                <?php // Keep the other sections' filters and pages; Staff activity's own keys come from this form, its pages restart at 1.
+                foreach ($_GET as $saKeepKey => $saKeepVal): if (is_string($saKeepKey) && is_string($saKeepVal) && preg_match('/^[a-z][a-z0-9_]{0,30}$/', $saKeepKey)
+                    && !in_array($saKeepKey, array_merge(rh_sa_own_keys(), ['sa_size', 'sad_size', 'action', 'csrf_token']), true)): ?>
+                    <input type="hidden" name="<?php echo htmlspecialchars($saKeepKey); ?>" value="<?php echo htmlspecialchars($saKeepVal); ?>">
                 <?php endif; endforeach; ?>
+                <input type="hidden" name="sa_size" value="<?php echo (int)$saP['size']; ?>">
+                <input type="hidden" name="sad_size" value="<?php echo (int)$sadP['size']; ?>">
                 <label>Staff member
                     <select name="user">
                         <option value="0">Everyone</option>
@@ -611,26 +626,32 @@ $saSingleDay = $saF['from'] === $saF['to'];
                 </label>
                 <button type="submit"><i class="fas fa-filter"></i> Show</button>
             </form>
-            <div class="sa__quick" role="group" aria-label="Quick dates">
-                <a class="<?php echo $saF['range'] === 'today' ? 'is-on' : ''; ?>" href="<?php echo htmlspecialchars($saUrl(['range' => 'today'])); ?>#staff-activity-results">Today</a>
-                <a class="<?php echo $saF['range'] === 'yesterday' ? 'is-on' : ''; ?>" href="<?php echo htmlspecialchars($saUrl(['range' => 'yesterday'])); ?>#staff-activity-results">Yesterday</a>
-                <a class="<?php echo $saF['range'] === '7d' ? 'is-on' : ''; ?>" href="<?php echo htmlspecialchars($saUrl(['range' => '7d'])); ?>#staff-activity-results">Last 7 days</a>
-                <a href="<?php echo htmlspecialchars($saUrl(['export' => 'csv'])); ?>"><i class="fas fa-file-csv"></i> Download this list (CSV)</a>
+            <div class="log-bar">
+                <div class="log-toggle" role="group" aria-label="Quick dates">
+                    <?php foreach (['today' => 'Today', 'yesterday' => 'Yesterday', '7d' => 'Last 7 days'] as $saRangeKey => $saRangeLabel): $saOn = $saF['range'] === $saRangeKey; ?>
+                        <a class="<?php echo $saOn ? 'is-on' : ''; ?>" href="<?php echo htmlspecialchars($saUrl(['range' => $saRangeKey])); ?>#staff-activity-results" <?php echo $saOn ? 'aria-current="true"' : ''; ?>><?php echo htmlspecialchars($saRangeLabel); ?></a>
+                    <?php endforeach; ?>
+                </div>
+                <p class="log-bar__note">
+                    <?php echo htmlspecialchars($saDayLabel($saF['from'])) . ($saSingleDay ? '' : ' to ' . htmlspecialchars($saDayLabel($saF['to']))); ?>,
+                    <?php echo htmlspecialchars($saWhoLabel); ?><?php echo $saF['type'] !== 'all' ? ', ' . htmlspecialchars($saTypes[$saF['type']]) : ''; ?>:
+                    <?php echo htmlspecialchars($saLines); ?>.
+                </p>
+                <a class="log-bar__btn" href="<?php echo htmlspecialchars('system-logs.php?' . rh_sa_query($saF, ['export' => 'csv'])); ?>" title="The list below with these filters, up to <?php echo number_format(RH_SA_CSV_ROWS); ?> lines, as a spreadsheet file."><i class="fas fa-file-csv"></i> Download this list (CSV)</a>
             </div>
-            <p class="sa__note">Showing <?php echo $saSingleDay ? htmlspecialchars($saDayLabel($saF['from'])) : htmlspecialchars($saDayLabel($saF['from'])) . ' to ' . htmlspecialchars($saDayLabel($saF['to'])); ?>,
-                <?php echo $saF['user'] > 0 ? htmlspecialchars($saStaff[$saF['user']]['name'] ?? ('user #' . $saF['user'])) : 'everyone'; ?>.
-                A range can be at most <?php echo (int)RH_SA_MAX_DAYS; ?> days.<?php echo $saF['clamped'] ? ' The range you asked for was longer, so the last ' . (int)RH_SA_MAX_DAYS . ' days are shown.' : ''; ?>
-                The &ldquo;What they did&rdquo; choice narrows the list below; the day cards always show everything.
+            <p class="sa__note">
+                Up to <?php echo (int)RH_SA_MAX_DAYS; ?> days at a time<?php echo $saF['clamped'] ? ' (your range was longer, so its last ' . (int)RH_SA_MAX_DAYS . ' days are shown)' : ''; ?>.
+                &ldquo;What they did&rdquo; narrows the list, not the day cards. Lines with no staff account show as &ldquo;System / unknown user&rdquo; and get no day card.
                 <?php echo $saF['filtered'] ? 'The older panels further down follow the same person and days.' : 'The older panels further down show everything until you press Show.'; ?>
             </p>
 
             <div id="staff-activity-results" class="sa__results">
                 <h4 class="sa__sub">Each person, each day</h4>
-                <?php if (!$saSummary['rows']): ?>
+                <?php if (!$sadRows): ?>
                     <p class="log-empty">No recorded activity for that person and those days.</p>
                 <?php else: ?>
-                    <div class="sa__cards">
-                        <?php foreach ($saSummary['rows'] as $saRow): ?>
+                    <div class="sa__cards" data-disable-auto-pagination>
+                        <?php foreach ($sadRows as $saRow): ?>
                             <article class="sa-card">
                                 <header>
                                     <strong><?php echo htmlspecialchars($saRow['who']); ?></strong>
@@ -638,30 +659,34 @@ $saSingleDay = $saF['from'] === $saF['to'];
                                 </header>
                                 <dl class="sa-card__times">
                                     <div title="The first time this person signed in that day."><dt>First sign-in</dt><dd><?php echo $saRow['first_in'] ? htmlspecialchars(substr($saRow['first_in'], 11, 5)) : '&mdash;'; ?></dd></div>
-                                    <div title="The latest recorded action by this person that day."><dt>Last activity</dt><dd><?php echo htmlspecialchars(substr($saRow['last_seen'], 11, 5)); ?></dd></div>
+                                    <div title="From this person's first to their last recorded action that day, in any record (sign-ins, bookings, payments, orders, screen saves)."><dt>Active</dt><dd><?php echo htmlspecialchars(substr($saRow['first_seen'], 11, 5)); ?>&ndash;<?php echo htmlspecialchars(substr($saRow['last_seen'], 11, 5)); ?></dd></div>
                                     <div title="The last time this person pressed Sign out that day. Blank when they never did (the session timed out or the browser was closed)."><dt>Signed out</dt><dd><?php echo $saRow['last_out'] ? htmlspecialchars(substr($saRow['last_out'], 11, 5)) : '&mdash;'; ?></dd></div>
                                 </dl>
                                 <ul class="sa-card__counts">
                                     <?php $saAny = false; foreach ($saCounters as $saCk => [$saCl, $saCh]):
                                         if ((int)$saRow['counts'][$saCk] <= 0) { continue; }
                                         $saAny = true; ?>
-                                        <li title="<?php echo htmlspecialchars($saCh); ?>">
-                                            <span><?php echo htmlspecialchars($saCl); ?></span>
-                                            <strong><?php echo number_format((int)$saRow['counts'][$saCk]); ?><?php
-                                                if ($saCk === 'payments' && $saRow['payments_total'] > 0) { echo ' &middot; ' . htmlspecialchars(rh_sa_money((float)$saRow['payments_total'])); }
-                                                if ($saCk === 'refunds' && $saRow['refunds_total'] > 0) { echo ' &middot; ' . htmlspecialchars(rh_sa_money((float)$saRow['refunds_total'])); }
-                                            ?></strong>
+                                        <li>
+                                            <a href="<?php echo htmlspecialchars($saDayUrl((int)$saRow['uid'], (string)$saRow['day'], rh_sa_counter_type($saCk))); ?>" title="<?php echo htmlspecialchars($saCh . ' Opens these lines in the list below.'); ?>">
+                                                <span><?php echo htmlspecialchars($saCl); ?></span>
+                                                <strong><?php echo number_format((int)$saRow['counts'][$saCk]); ?><?php
+                                                    if ($saCk === 'payments' && $saRow['payments_total'] > 0) { echo ' &middot; ' . htmlspecialchars(rh_sa_money((float)$saRow['payments_total'])); }
+                                                    if ($saCk === 'refunds' && $saRow['refunds_total'] > 0) { echo ' &middot; ' . htmlspecialchars(rh_sa_money((float)$saRow['refunds_total'])); }
+                                                ?></strong>
+                                            </a>
                                         </li>
                                     <?php endforeach; ?>
                                     <?php if (!$saAny): ?><li class="sa-card__none">Nothing recorded besides activity times.</li><?php endif; ?>
                                 </ul>
+                                <a class="sa-card__see" href="<?php echo htmlspecialchars($saDayUrl((int)$saRow['uid'], (string)$saRow['day'])); ?>" title="Shows everything this person did that day in the list below.">See what they did <i class="fas fa-arrow-down" aria-hidden="true"></i></a>
                             </article>
                         <?php endforeach; ?>
                     </div>
-                    <?php if ($saSummary['limited']): ?><p class="sa__note">More people and days matched than fit here. Pick one person or a shorter range.</p><?php endif; ?>
+                    <?php echo rh_lp_render('system-logs.php', $_GET, $sadP, count($sadRows), 'staff-activity-results', 'Day card pages',
+                        $saSummary['limited'] ? 'More people and days matched than can be listed. Pick one person or a shorter range.' : ''); ?>
                 <?php endif; ?>
 
-                <details class="sa__legend" open>
+                <details class="sa__legend">
                     <summary>What each figure counts</summary>
                     <dl>
                         <?php foreach ($saCounters as $saCl): ?>
@@ -671,35 +696,49 @@ $saSingleDay = $saF['from'] === $saF['to'];
                     <p>Amounts are the full amount paid or refunded, shown in full; refunds are never netted off payments.</p>
                 </details>
 
-                <h4 class="sa__sub">What happened, newest first<?php echo $saF['type'] !== 'all' ? ' &mdash; ' . htmlspecialchars($saTypes[$saF['type']]) : ''; ?></h4>
+                <h4 class="sa__sub" id="staff-activity-timeline">What happened, newest first<?php echo $saF['type'] !== 'all' ? ' &mdash; ' . htmlspecialchars($saTypes[$saF['type']]) : ''; ?></h4>
                 <?php if (!$saTimeline['rows']): ?>
                     <p class="log-empty">Nothing recorded for this choice. Try another day or &ldquo;Everything&rdquo;.</p>
                 <?php else: ?>
-                    <ol class="sa-timeline">
-                        <?php foreach ($saTimeline['rows'] as $saItem): ?>
-                            <li class="sa-item">
-                                <time class="sa-item__time" datetime="<?php echo htmlspecialchars(str_replace(' ', 'T', $saItem['ts'])); ?>" title="Recorded at this time."><?php echo $saSingleDay ? htmlspecialchars(substr($saItem['ts'], 11, 8)) : htmlspecialchars(date('D j M, H:i', strtotime($saItem['ts']))); ?></time>
-                                <div class="sa-item__body">
-                                    <div class="sa-item__what"><strong><?php echo htmlspecialchars($saItem['who']); ?></strong> &mdash; <?php echo htmlspecialchars($saItem['what']); ?></div>
-                                    <div class="sa-item__meta">
-                                        <span class="log-pill muted" title="The kind of work this line is."><?php echo htmlspecialchars($saTypes[$saItem['type']] ?? 'Other'); ?></span>
-                                        <span title="The screen or area it was done in."><?php echo htmlspecialchars($saItem['where']); ?></span>
-                                        <?php if (!empty($saItem['screen_save'])): ?><span class="sa-item__tag" title="Recorded automatically when a screen saved. It only says which screen and action, never what was typed.">screen save</span><?php endif; ?>
-                                        <?php if ($saLinkOk($saItem['link'])): ?>
-                                            <a href="<?php echo htmlspecialchars($saItem['link']['page'] . ($saItem['link']['query'] !== '' ? '?' . $saItem['link']['query'] : '')); ?>">Open</a>
-                                        <?php endif; ?>
-                                    </div>
-                                </div>
-                            </li>
-                        <?php endforeach; ?>
-                    </ol>
-                    <nav class="sa__pager" aria-label="Pages of the list">
-                        <?php if ($saF['page'] > 1): ?><a href="<?php echo htmlspecialchars($saUrl(['p' => $saF['page'] - 1])); ?>#staff-activity-results">&larr; Newer</a><?php endif; ?>
-                        <span>Page <?php echo (int)$saF['page']; ?></span>
-                        <?php if ($saTimeline['has_more'] && $saF['page'] * RH_SA_PER_PAGE < RH_SA_MAX_DEPTH): ?><a href="<?php echo htmlspecialchars($saUrl(['p' => $saF['page'] + 1])); ?>#staff-activity-results">Older &rarr;</a><?php endif; ?>
-                    </nav>
-                    <?php if ($saTimeline['has_more'] && $saF['page'] * RH_SA_PER_PAGE >= RH_SA_MAX_DEPTH): ?><p class="sa__note">Only the newest <?php echo (int)RH_SA_MAX_DEPTH; ?> lines can be paged through. Pick one person or a shorter range, or download the CSV.</p><?php endif; ?>
+                    <div class="log-scroll" data-disable-auto-pagination>
+                        <table class="log-table sa-table">
+                            <thead>
+                                <tr>
+                                    <th>When<span class="log-th-help"><?php echo $saSingleDay ? 'Time it was recorded (hotel time)' : 'Day and time it was recorded (hotel time)'; ?></span></th>
+                                    <th>Person<span class="log-th-help">The staff member; System / unknown user when no staff account is on the record</span></th>
+                                    <th>What they did<span class="log-th-help">Names, references, amounts and field names only, never what was typed</span></th>
+                                    <th>Kind<span class="log-th-help">The kind of work, as in the &ldquo;What they did&rdquo; filter</span></th>
+                                    <th>Where<span class="log-th-help">The screen or area; &ldquo;screen save&rdquo; = recorded when a screen saved</span></th>
+                                    <th>Open<span class="log-th-help">The record itself, when you may open it</span></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($saTimeline['rows'] as $saItem): ?>
+                                    <tr>
+                                        <td class="log-nowrap"><time datetime="<?php echo htmlspecialchars(str_replace(' ', 'T', $saItem['ts'])); ?>"><?php echo $saSingleDay ? htmlspecialchars(substr($saItem['ts'], 11, 8)) : htmlspecialchars(date('D j M, H:i', strtotime($saItem['ts']))); ?></time></td>
+                                        <td><?php echo htmlspecialchars($saItem['who']); ?></td>
+                                        <td class="sa-table__what"><?php echo htmlspecialchars($saItem['what']); ?></td>
+                                        <td><span class="log-pill muted"><?php echo htmlspecialchars($saTypes[$saItem['type']] ?? 'Other'); ?></span></td>
+                                        <td>
+                                            <?php echo htmlspecialchars($saItem['where']); ?>
+                                            <?php if (!empty($saItem['screen_save'])): ?><span class="sa__tag" title="Recorded automatically when a screen saved. It only says which screen and action, never what was typed.">screen save</span><?php endif; ?>
+                                        </td>
+                                        <td>
+                                            <?php if ($saLinkOk($saItem['link'])): ?>
+                                                <a class="em-link" href="<?php echo htmlspecialchars($saItem['link']['page'] . ($saItem['link']['query'] !== '' ? '?' . $saItem['link']['query'] : '')); ?>">Open</a>
+                                            <?php else: ?>
+                                                <span class="em-none">&mdash;</span>
+                                            <?php endif; ?>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
                 <?php endif; ?>
+                <?php if ($saTimeline['rows'] || $saP['page'] > 1): // an empty later page still offers the way back
+                    echo rh_lp_render('system-logs.php', $_GET, $saP, count($saTimeline['rows']), 'staff-activity-timeline', 'Staff activity pages', rh_sa_pager_note($saP));
+                endif; ?>
 
                 <p class="sa__note sa__retention">
                     How far back the records go:
@@ -879,7 +918,7 @@ $saSingleDay = $saF['from'] === $saF['to'];
 
         <div class="log-section em" id="log-emails">
             <h3><i class="fas fa-envelope-open-text"></i> Emails sent</h3>
-            <p class="em__intro">Every email the system sent, or was told not to send: who sent it, when, to whom and what happened. Newest first. Times are hotel time.</p>
+            <p class="em__intro log-intro">Every email the system sent, or was told not to send: who sent it, when, to whom and what happened. Newest first. Times are hotel time.</p>
 
             <form method="get" class="log-toolbar em__filters" action="system-logs.php#log-emails">
                 <?php foreach ($_GET as $emKeepKey => $emKeepVal): if (is_string($emKeepKey) && is_string($emKeepVal) && strpos($emKeepKey, 'em_') !== 0 && $emKeepKey !== 'export' && preg_match('/^[a-z_]{1,20}$/', $emKeepKey)): ?>
