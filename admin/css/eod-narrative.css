@@ -1,0 +1,91 @@
+/* End of Day "The day in brief" (includes/ai/ai-eod-narrative.php). A calm card in the KPI strip's style, built only
+   from the shared --ck-* tokens (admin-kpi.css), so it follows the admin theme. Printed only when the brief may be shown. */
+.eod-brief[hidden],
+.eod-brief__look[hidden] { display: none !important; }
+
+.eod-brief {
+    gap: 10px;
+    margin: var(--ck-gap, 16px) 0;
+    background: linear-gradient(180deg, var(--ck-softer), var(--ck-surface) 70%);
+    color: var(--ck-text);
+}
+.eod-brief__head { display: flex; align-items: center; gap: 10px; }
+.eod-brief__icon {
+    display: grid;
+    place-items: center;
+    flex: 0 0 auto;
+    width: 34px;
+    height: 34px;
+    border-radius: 10px;
+    background: var(--ck-gold-soft);
+    color: var(--ck-gold);
+    font-size: 14px;
+}
+.eod-brief__title {
+    margin: 0;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+    color: var(--ck-muted);
+}
+.eod-brief__story {
+    margin: 0;
+    max-width: 72ch;
+    font-size: 15px;
+    line-height: 1.6;
+    color: var(--ck-ink);
+    overflow-wrap: anywhere;
+}
+.eod-brief__look {
+    padding-top: 10px;
+    border-top: 1px solid var(--ck-line);
+}
+.eod-brief__look-title {
+    margin: 0 0 6px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+    color: var(--ck-warn);
+}
+.eod-brief__list { margin: 0; padding-left: 18px; }
+.eod-brief__list li {
+    margin: 2px 0;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--ck-text);
+    overflow-wrap: anywhere;
+}
+.eod-brief__list li::marker { color: var(--ck-warn); }
+.eod-brief__foot { margin: 0; font-size: 11.5px; color: var(--ck-muted); }
+
+/* Placeholder while the brief is asked for (only after the gate passed); the section goes if no text arrives */
+.eod-brief__skeleton { display: none; flex-direction: column; gap: 8px; }
+.eod-brief.is-loading .eod-brief__skeleton { display: flex; }
+.eod-brief.is-loading .eod-brief__story,
+.eod-brief.is-loading .eod-brief__look { display: none; }
+.eod-brief__skeleton span {
+    display: block;
+    height: 12px;
+    border-radius: 99px;
+    background: linear-gradient(90deg, var(--ck-soft), var(--ck-line), var(--ck-soft));
+    background-size: 200% 100%;
+    animation: eod-brief-shimmer 1.6s ease-in-out infinite;
+}
+.eod-brief__skeleton span:nth-child(2) { width: 92%; }
+.eod-brief__skeleton span:nth-child(3) { width: 64%; }
+@keyframes eod-brief-shimmer { from { background-position: 100% 0; } to { background-position: -100% 0; } }
+@media (prefers-reduced-motion: reduce) {
+    .eod-brief__skeleton span { animation: none; }
+}
+
+@media (max-width: 680px) {
+    .eod-brief { padding: 14px; }
+    .eod-brief__icon { width: 28px; height: 28px; font-size: 12px; border-radius: 8px; }
+    .eod-brief__story { font-size: 14.5px; }
+}
+@media print {
+    .eod-brief { box-shadow: none; break-inside: avoid; background: none; }
+    .eod-brief.is-loading { display: none !important; }
+}

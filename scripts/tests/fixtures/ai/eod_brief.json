@@ -1,0 +1,10 @@
+{
+    "about": "Fake provider script for scripts/tests/ai_eod_narrative.php (RH_AI_FAKE_PROVIDER=eod_brief): one reply per call, in order. 0 = a number not in the figures, 1 = good, 2 = an unverified absence claim, 3 = a number not in the figures again, 4 = good (the e-mail with figures that moved after a page view).",
+    "replies": [
+        {"text": "{\"story\":\"Revenue earned was MWK 1,600,000.00 for the day. Occupancy was 45.8% with 11 rooms occupied. Cash collected came to MWK 980,000.00.\",\"worth_a_look\":[]}", "usage": {"in": 900, "out": 80}},
+        {"text": "{\"story\":\"Revenue earned was MWK 1,500,000.00, which is MWK 120,000.00 lower than the day before. Occupancy was 45.8% with 11 rooms occupied. Cash collected came to MWK 980,000.00. No refunds were paid out.\",\"worth_a_look\":[\"MWK 250,000.00 is still owed.\",\"There were 2 till voids.\"]}", "usage": {"in": 950, "out": 110}},
+        {"text": "{\"story\":\"Revenue earned was MWK 1,500,000.00. Occupancy was 45.8% with 11 rooms occupied. There were no till voids.\",\"worth_a_look\":[]}", "usage": {"in": 900, "out": 60}},
+        {"text": "{\"story\":\"Revenue earned was MWK 1,500,000.00. Occupancy was 47% with 11 rooms occupied. Cash collected came to MWK 980,000.00.\",\"worth_a_look\":[]}", "usage": {"in": 900, "out": 60}},
+        {"text": "{\"story\":\"Revenue earned was MWK 1,500,000.00, which is MWK 120,000.00 lower than the day before. Occupancy was 45.8% with 12 rooms occupied. Cash collected came to MWK 980,000.00.\",\"worth_a_look\":[\"MWK 250,000.00 is still owed.\"]}", "usage": {"in": 950, "out": 90}}
+    ]
+}
