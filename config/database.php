@@ -2901,27 +2901,41 @@ function rh_checkin_payment_gate(array $booking): string
  *
  * @param array $booking Booking record (must include status, payment_status, check_in_date; optional amount_due /
  *                       amount_paid / total_with_vat / folio_charges_total / checkin_without_payment / checkin_arrangement_note)
- * @return array ['allowed' => bool, 'reason' => string, 'via_arrangement' => bool, 'arrangement_note' => string]
- *               via_arrangement = true only when the pay-later arrangement alone let it through.
+ * @return array ['allowed' => bool, 'reason' => string, 'via_arrangement' => bool, 'arrangement_note' => string,
+ *               'late_days' => int, 'stay_ended' => bool]
+ *               via_arrangement = true only when the pay-later arrangement alone let it through. late_days = days
+ *               the booked check-in is behind today; stay_ended = the booked check-out is today or earlier (needs
+ *               check_out_date in the row, else false). Neither blocks.
  */
 function validateCheckIn(array $booking): array
 {
+    // late_days / stay_ended (owner 2026-11-12 "Dont assume, have options"): never block, only tell the caller
+    // how late the arrival is and whether the booked stay is already over, so the check-in dialog can ask.
+    $late = ['late_days' => 0, 'stay_ended' => false];
+    $ciRaw = substr((string)($booking['check_in_date'] ?? ''), 0, 10);
+    $coRaw = substr((string)($booking['check_out_date'] ?? ''), 0, 10);
+    $todayYmd = date('Y-m-d');
+    if ($ciRaw !== '' && strtotime($ciRaw) !== false && $ciRaw < $todayYmd) {
+        $late['late_days'] = (int)(new DateTime($ciRaw))->diff(new DateTime($todayYmd))->days;
+    }
+    $late['stay_ended'] = $coRaw !== '' && strtotime($coRaw) !== false && $coRaw <= $todayYmd;
+
     $requiredFields = ['status', 'payment_status', 'check_in_date'];
     foreach ($requiredFields as $field) {
         if (!array_key_exists($field, $booking)) {
-            return ['allowed' => false, 'reason' => "Missing required field: {$field}", 'via_arrangement' => false, 'arrangement_note' => ''];
+            return ['allowed' => false, 'reason' => "Missing required field: {$field}", 'via_arrangement' => false, 'arrangement_note' => ''] + $late;
         }
     }
 
     if ($booking['status'] !== 'confirmed') {
-        return ['allowed' => false, 'reason' => "Booking must be CONFIRMED to check in (current: {$booking['status']})", 'via_arrangement' => false, 'arrangement_note' => ''];
+        return ['allowed' => false, 'reason' => "Booking must be CONFIRMED to check in (current: {$booking['status']})", 'via_arrangement' => false, 'arrangement_note' => ''] + $late;
     }
 
     // Unpaid bookings cannot check in unless nothing is owed or a pay-later arrangement is on;
     // partial payment is allowed (balance collected at reception).
     $payGate = rh_checkin_payment_gate($booking);
     if ($payGate === 'blocked') {
-        return ['allowed' => false, 'reason' => "Booking must have at least a partial payment to check in (current: {$booking['payment_status']})", 'via_arrangement' => false, 'arrangement_note' => ''];
+        return ['allowed' => false, 'reason' => "Booking must have at least a partial payment to check in (current: {$booking['payment_status']})", 'via_arrangement' => false, 'arrangement_note' => ''] + $late;
     }
 
     // individual_room_id is NOT a hard requirement — not all properties track physical room numbers,
@@ -2933,7 +2947,7 @@ function validateCheckIn(array $booking): array
     $today = new DateTime('today');
 
     if ($check_in_date > $today) {
-        return ['allowed' => false, 'reason' => "Check-in date has not been reached yet (check-in: {$booking['check_in_date']})", 'via_arrangement' => false, 'arrangement_note' => ''];
+        return ['allowed' => false, 'reason' => "Check-in date has not been reached yet (check-in: {$booking['check_in_date']})", 'via_arrangement' => false, 'arrangement_note' => ''] + $late;
     }
 
     $viaArrangement = $payGate === 'arrangement';
@@ -2942,7 +2956,7 @@ function validateCheckIn(array $booking): array
         'reason' => '',
         'via_arrangement' => $viaArrangement,
         'arrangement_note' => $viaArrangement ? trim((string)($booking['checkin_arrangement_note'] ?? '')) : '',
-    ];
+    ] + $late;
 }
 
 /**
@@ -3117,8 +3131,8 @@ function rh_checkout_settlement_reason(array $booking): ?string
     }
     $days = (int)(new DateTime($out))->diff(new DateTime($today))->days;
     return $out < $today
-        ? "The guest is leaving {$days} night(s) after the booked departure ({$out}). Use Checkout on the bookings list to charge (or waive) the extra night(s)."
-        : "The guest is leaving {$days} night(s) before the booked departure ({$out}). Use Checkout on the bookings list to refund (or keep) the unused night(s).";
+        ? "The booked departure ({$out}) was {$days} day(s) ago. Use Checkout on the bookings list to say when the guest left; the bill follows that date."
+        : "The guest is leaving {$days} night(s) before the booked departure ({$out}). Use Checkout on the bookings list to say when the guest left and refund (or keep) the unused night(s).";
 }
 
 /**

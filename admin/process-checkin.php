@@ -75,6 +75,13 @@ try {
                 echo json_encode(['success' => false, 'message' => 'Cannot check in: ' . $ciRule['reason']]);
                 exit;
             }
+            if ((int)($ciRule['late_days'] ?? 0) > 0) {
+                // A late arrival goes through Late Check-In on the bookings list, which asks what happened
+                // (owner 2026-11-12 "Dont assume, have options"). Nothing is changed here.
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => 'This arrival is ' . (int)$ciRule['late_days'] . ' day(s) late. Use Late Check-In on the Bookings page so you can say when the guest arrived.']);
+                exit;
+            }
         }
         $stmt = $pdo->prepare("UPDATE bookings SET status = 'checked-in' WHERE id = ? AND status = 'confirmed'");
         $stmt->execute([$booking_id]);

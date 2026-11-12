@@ -25,6 +25,7 @@ require_once 'includes/account-receipt-send.php';
 require_once __DIR__ . '/../includes/booked-rate-change.php'; // booked rate × nights lines (also loads includes/booked-rate.php)
 require_once __DIR__ . '/includes/bookings-list-filters.php'; // tab/date/payment filter rules shared by badges, list and export
 require_once __DIR__ . '/../includes/booking-created-by.php'; // "by …" under the Created date in the list
+require_once __DIR__ . '/../includes/late-stay.php'; // late check-in / leave-date choices: one quote for assess and settle
 $message = '';
 $error = '';
 $currency_symbol = (string)getSetting('currency_symbol', 'MWK');
@@ -111,6 +112,22 @@ function bookings_final_invoice_note(int $bookingId, int $userId): string
         error_log('Final invoice at checkout failed for booking ' . $bookingId . ': ' . $e->getMessage());
         return ' Warning: the final invoice could not be generated.';
     }
+}
+
+/**
+ * What the check-in dialog needs to ask about a late arrival, from the SERVER's today (never the browser clock):
+ * late_days, stay_ended and the booked dates shown in the choices.
+ */
+function bookings_late_checkin_info(array $bk): array
+{
+    $w = rh_late_stay_window($bk);
+    return [
+        'late_days' => (int)$w['late_days'],
+        'stay_ended' => (bool)$w['stay_ended'],
+        'check_in' => rh_late_stay_fmt($w['check_in']),
+        'check_out' => rh_late_stay_fmt($w['check_out']),
+        'today' => rh_late_stay_fmt($w['today']),
+    ];
 }
 
 function getSignedDateDiffDays(DateTimeInterface $fromDate, DateTimeInterface $toDate): int
@@ -723,7 +740,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // - Cancel check-in (undo) allowed only when currently checked-in
             if ($new_status === 'checked-in') {
                 // Use centralized validation
-                $check = $pdo->prepare("SELECT id, status, payment_status, individual_room_id, booking_reference, check_in_date" . rh_checkin_rule_select() . " FROM bookings WHERE id = ?");
+                $check = $pdo->prepare("SELECT id, status, payment_status, individual_room_id, booking_reference, check_in_date, check_out_date" . rh_checkin_rule_select() . " FROM bookings WHERE id = ?");
                 $check->execute([$booking_id]);
                 $booking = $check->fetch(PDO::FETCH_ASSOC);
 
@@ -737,10 +754,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new Exception(getBookingActionErrorMessage('check_in', $validation['reason']));
                 }
 
+                // Late arrival (owner 2026-11-12 "Dont assume, have options"): front desk says what happened -
+                // arrived on the booked date, arriving today, or (stay over) already stayed and left. Re-checked here.
+                $ciWindow = rh_late_stay_window($booking);
+                $ciChoice = rh_late_checkin_choice($ciWindow, $_POST['late_arrival'] ?? null);
+                if (!$ciChoice['ok']) {
+                    throw new Exception($ciChoice['error']);
+                }
+
                 $roomGate = evaluateCheckInRoomReady($booking_id, (int)($user['id'] ?? 0), !empty($_POST['confirm_checkin_room_not_ready']));
                 if (!$roomGate['allowed']) {
                     header('Content-Type: application/json');
                     echo json_encode(['success' => false, 'message' => $roomGate['message'], 'needs_confirm_room' => $roomGate['needs_confirm']]);
+                    exit;
+                }
+
+                if ($ciChoice['choice'] === 'ended') {
+                    // "Guest already stayed and has left": check in and out together at the booked dates, no extra
+                    // charge, one transaction (the balance rule still applies). Never a check-in email for an ended stay.
+                    $recUserName = $user['full_name'] ?? ($user['username'] ?? null);
+                    $rec = rh_record_completed_stay($pdo, (int)$booking_id, (int)($user['id'] ?? 0), !empty($_POST['confirm_checkout_with_balance']));
+                    if (!$rec['success']) {
+                        header('Content-Type: application/json');
+                        echo json_encode(['success' => false, 'message' => $rec['message'] !== '' ? $rec['message'] : 'Nothing was changed.', 'needs_confirm_balance' => $rec['needs_confirm']]);
+                        exit;
+                    }
+                    $recRef = (string)($booking['booking_reference'] ?? '');
+                    $recIn = rh_late_checkin_note($ciWindow, 'ended');
+                    $recOut = 'Completed stay: guest left on the booked date ' . rh_late_stay_fmt($ciWindow['check_out'])
+                        . ', no extra nights charged (booked ' . rh_late_stay_fmt($ciWindow['check_in']) . ' to ' . rh_late_stay_fmt($ciWindow['check_out']) . ').'
+                        . ' Room status not changed: the stay ended on ' . rh_late_stay_fmt($ciWindow['check_out']) . '.';
+                    if ($checkin_note !== '') {
+                        $recIn .= ' Check-in note: ' . $checkin_note;
+                    }
+                    logBookingCheckIn($booking_id, $recRef, 'admin', $user['id'] ?? null, $recUserName);
+                    logBookingEvent((int)$booking_id, $recRef, 'Late check-in: completed stay recorded', 'check_in', $recIn, 'confirmed', 'checked-out', 'admin', $user['id'] ?? null, $recUserName,
+                        ['arrival_choice' => 'ended', 'actual_arrival' => $ciWindow['check_in'], 'leave_date' => $ciWindow['check_out'], 'late_days' => $ciWindow['late_days'], 'check_in_email' => 'not sent (stay ended)']);
+                    if ($roomGate['override']) {
+                        logCheckInRoomNotReadyOverride($booking_id, $recRef, $roomGate['rooms'], $user['id'] ?? null, $recUserName);
+                    }
+                    if (!empty($validation['via_arrangement'])) {
+                        logCheckInUnderArrangement($booking_id, $recRef, (string)$validation['arrangement_note'], $user['id'] ?? null, $recUserName);
+                    }
+                    logBookingAudit($booking_id, 'checked-in', ['status' => 'confirmed'],
+                        ['status' => 'checked-in', 'arrival_choice' => 'ended', 'actual_arrival' => $ciWindow['check_in'], 'check_in_email' => 'not sent (stay ended)'], $recIn, $recRef);
+                    logBookingCheckOut($booking_id, $recRef, 'admin', $user['id'] ?? null, $recUserName);
+                    logBookingAudit($booking_id, 'checked-out', ['status' => 'checked-in'],
+                        ['status' => 'checked-out', 'settlement' => 'completed_stay', 'leave_date' => $ciWindow['check_out'], 'extra_nights' => 0, 'amount' => 0], $recOut, $recRef);
+                    if ($rec['override']) {
+                        logCheckoutBalanceOverride((int)$booking_id, $recRef, (float)$rec['balance'], (int)($user['id'] ?? 0), $recUserName);
+                    }
+                    rh_log_event('bookings', 'warning', 'Late check-in: completed stay recorded (checked in and out)', [
+                        'booking_id' => $booking_id, 'ref' => $recRef, 'arrival_choice' => 'ended', 'booked_check_in' => $ciWindow['check_in'],
+                        'leave_date' => $ciWindow['check_out'], 'late_days' => $ciWindow['late_days'], 'extra_nights' => 0, 'by' => $user['username'] ?? null,
+                    ]);
+                    header('Content-Type: application/json');
+                    echo json_encode(['success' => true, 'message' => 'Completed stay recorded for ' . $recRef . ': checked in and out at the booked dates, no extra nights charged. No check-in email sent (the stay has ended).'
+                        . bookings_final_invoice_note((int)$booking_id, (int)($user['id'] ?? 0))]);
                     exit;
                 }
 
@@ -780,6 +850,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'days_late' => $lateDays,
                     'by' => $user['username'] ?? null,
                 ];
+                $ciActualArrival = $ciChoice['choice'] !== '' ? rh_late_checkin_arrival($ciWindow, $ciChoice['choice']) : null;
+                if ($ciChoice['choice'] !== '') {
+                    $checkInEventContext['arrival_choice'] = $ciChoice['choice'];
+                    $checkInEventContext['actual_arrival'] = $ciActualArrival;
+                }
                 if ($checkin_note !== '') {
                     $checkInEventContext['note'] = $checkin_note;
                 }
@@ -792,16 +867,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $checkInAuditNote = $checkin_note !== '' ? ('Check-in note: ' . $checkin_note) : null;
                 if ($isLateCheckIn && $lateDays > 0) {
-                    $lateDescriptor = 'Late check-in (' . $lateDays . ' day(s) overdue)';
+                    // The chosen option and the actual arrival date go in the note (History) and in new_values
+                    // (actual_arrival is what the checkout settlement reads back for "nights actually stayed").
+                    $lateDescriptor = $ciChoice['choice'] !== ''
+                        ? rh_late_checkin_note($ciWindow, $ciChoice['choice'])
+                        : 'Late check-in (' . $lateDays . ' day(s) overdue)';
                     $checkInAuditNote = $checkInAuditNote !== null
                         ? ($lateDescriptor . ' - ' . $checkInAuditNote)
                         : $lateDescriptor;
+                    if ($ciChoice['choice'] !== '') {
+                        logBookingEvent((int)$booking_id, (string)($booking['booking_reference'] ?? ''), 'Late check-in', 'check_in', $lateDescriptor,
+                            (string)$booking['check_in_date'], (string)$ciActualArrival, 'admin', $user['id'] ?? null, $user['full_name'] ?? null,
+                            ['arrival_choice' => $ciChoice['choice'], 'actual_arrival' => $ciActualArrival, 'late_days' => $lateDays]);
+                    }
+                }
+                $ciAuditNew = ['status' => 'checked-in'];
+                if ($ciChoice['choice'] !== '') {
+                    $ciAuditNew['arrival_choice'] = $ciChoice['choice'];
+                    $ciAuditNew['actual_arrival'] = $ciActualArrival;
                 }
                 logBookingAudit(
                     $booking_id,
                     'checked-in',
                     ['status' => 'confirmed'],
-                    ['status' => 'checked-in'],
+                    $ciAuditNew,
                     $checkInAuditNote,
                     $booking['booking_reference'] ?? null
                 );
@@ -1613,7 +1702,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
         } elseif ($action === 'checkout_assess') {
-            // ── Assess whether a checkout requires financial settlement ──
+            // â”€â”€ Checkout settlement: ask when the guest left (owner 2026-11-12 "Dont assume, have options") â”€â”€
+            // Every choice is quoted here by includes/late-stay.php, the SAME function checkout_settle charges /
+            // refunds with, so the quote always equals the money written.
             if (!isAjaxRequest()) {
                 throw new Exception('Invalid request');
             }
@@ -1627,8 +1718,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $assess_stmt = $pdo->prepare("
                 SELECT b.*,
                        r.name AS room_type_name,
-                       r.price_per_night, r.price_single_occupancy,
-                       r.price_double_occupancy, r.price_triple_occupancy,
                        ir.room_number AS individual_room_number
                 FROM bookings b
                 LEFT JOIN rooms r ON b.room_id = r.id
@@ -1647,38 +1736,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Live balance + whether this user may check out with it (UI only; the
             // server re-checks in checkout / checkout_settle).
             $assessBal = evaluateCheckoutBalance($pdo, (int)$booking_id, (int)($user['id'] ?? 0), false);
+            // evaluateCheckoutBalance() re-derived paid / due: quote from the fresh row, not the cached columns.
+            $assess_stmt->execute([$booking_id]);
+            $abk = $assess_stmt->fetch(PDO::FETCH_ASSOC) ?: $abk;
             $assessBalFields = ['balance_due' => $assessBal['balance'], 'can_override' => (bool)$assessBal['can_override']];
-            // The rate this stay was booked at × its booked nights (shown in the checkout confirm / settlement).
+            // The rate this stay was booked at Ã— its booked nights (shown in the checkout confirm / settlement).
             $assessRate = rh_booked_rate_line($abk, null, ['currency' => $currency_symbol]);
             $assessBalFields['booked_rate_text'] = $assessRate['ok'] ? $assessRate['text'] : '';
 
-            $today_a            = new DateTime('today');
-            $checkIn_a          = new DateTime((string)$abk['check_in_date']);
-            $scheduledCheckoutA = new DateTime((string)$abk['check_out_date']);
-            $checkIn_a->setTime(0, 0, 0);
-            $scheduledCheckoutA->setTime(0, 0, 0);
-            $actualNights = max(1, (int)$today_a->diff($checkIn_a)->days);
-            $schedNights  = max(1, (int)$scheduledCheckoutA->diff($checkIn_a)->days);
-            // positive = late checkout days, negative = early checkout days
-            $nightDiff    = getSignedDateDiffDays($scheduledCheckoutA, $today_a);
-
-            $occupancy_a  = $abk['occupancy_type'] ?? 'single';
-            if ($occupancy_a === 'double' && !empty($abk['price_double_occupancy'])) {
-                $ppn_a = (float)$abk['price_double_occupancy'];
-            } elseif ($occupancy_a === 'triple' && !empty($abk['price_triple_occupancy'])) {
-                $ppn_a = (float)$abk['price_triple_occupancy'];
-            } elseif (!empty($abk['price_single_occupancy'])) {
-                $ppn_a = (float)$abk['price_single_occupancy'];
-            } else {
-                $ppn_a = (float)($abk['price_per_night'] ?? 0);
-            }
-
-            $guest_name_a  = trim($abk['guest_name'] ?? '');
-            $room_label_a  = trim($abk['individual_room_number'] ?? $abk['room_type_name'] ?? 'N/A');
-            $check_in_fmt  = date('d M Y', strtotime($abk['check_in_date']));
-            $sched_out_fmt = $scheduledCheckoutA->format('d M Y');
-
-            if ($nightDiff === 0) {
+            $todayA = date('Y-m-d');
+            $schedOutA = substr((string)$abk['check_out_date'], 0, 10);
+            if ($schedOutA === $todayA) {
                 header('Content-Type: application/json');
                 echo json_encode($assessBalFields + [
                     'success'    => true,
@@ -1687,274 +1755,259 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
 
-            // Quote from the guest's BOOKED rate so it equals what checkout_settle charges / refunds.
-            if (!function_exists('rh_stay_totals')) {
-                require_once __DIR__ . '/../includes/pricing.php';
+            // Recorded actual arrival ("Guest is arriving today" at a late check-in) -> the "nights actually
+            // stayed" basis is offered too (owner decision 2026-11-12, front desk chooses each time).
+            $arrivalA = rh_late_stay_actual_arrival($pdo, (int)$booking_id, (string)$abk['check_in_date']);
+            $optsA = rh_late_stay_options($abk, $arrivalA, $todayA);
+            $quotesA = [];
+            foreach ($optsA['dates'] as $ymdA => $rowA) {
+                foreach ($rowA as $basisA => $qA) {
+                    if (empty($qA['ok'])) {
+                        continue;
+                    }
+                    $lineA = '';
+                    if ($qA['reprice'] !== null) {
+                        $lnA = rh_booked_rate_change_for_booking($abk, $qA['reprice'], (int)$qA['nights'], ['currency' => $currency_symbol]);
+                        $lineA = !empty($lnA['ok']) ? (string)$lnA['text'] : '';
+                    }
+                    $quotesA[$ymdA][$basisA] = [
+                        'direction'     => $qA['direction'],
+                        'amount'        => $qA['amount'],
+                        'refundable'    => $qA['refundable'],
+                        'nights'        => $qA['nights'],
+                        'extra_nights'  => $qA['extra_nights'],
+                        'unused_nights' => $qA['unused_nights'],
+                        'per_night'     => $qA['per_night'],
+                        'new_gross'     => $qA['new_gross'],
+                        'stay_text'     => rh_late_stay_fmt($qA['new_check_in']) . ' to ' . rh_late_stay_fmt($qA['new_check_out']),
+                        'new_rate_text' => $lineA,
+                        'describe'      => rh_late_stay_describe($qA, $currency_symbol),
+                    ];
+                }
             }
-            $quoteSplit = rh_booked_stay_split($abk);
-            $quoteUnit  = rh_stay_totals($quoteSplit['per_night'], 'final', rh_booking_has_levy($abk))['total_with_vat'];
-            $ppn_a      = $quoteUnit;
-            if ($nightDiff > 0) {
-                // Late checkout extends the stay at the booked rate (same as Extend stay).
-                $quoteRp   = rh_reprice_at_booked_rate($abk, $actualNights);
-                $adjAmount = max(0.0, round($quoteRp['new_gross'] - $quoteRp['old_gross'], 2));
-            } else {
-                $quoteRp   = rh_reprice_at_booked_rate($abk, $actualNights);
-                $adjAmount = max(0.0, round($quoteRp['old_gross'] - $quoteRp['new_gross'], 2));
-            }
-            $amountPaid_a = (float)($abk['amount_paid'] ?? 0);
-            $amountDue_a  = (float)($abk['amount_due'] ?? 0);
-            // Booked rate × the nights actually stayed = the room total after this checkout.
-            $quoteLine = rh_booked_rate_change_for_booking($abk, $quoteRp, $actualNights, ['currency' => $currency_symbol]);
 
-            $baseFields = [
-                'new_rate_text'   => $quoteLine['ok'] ? $quoteLine['text'] : '',
-                'actual_nights'   => $actualNights,
-                'sched_nights'    => $schedNights,
-                'price_per_night' => $ppn_a,
-                'amount_paid'     => $amountPaid_a,
-                'amount_due'      => $amountDue_a,
-                'total_amount'    => (float)$abk['total_amount'],
-                'sched_checkout'  => $sched_out_fmt,
-                'actual_checkout' => $today_a->format('d M Y'),
-                'check_in_date'   => $check_in_fmt,
-                'guest_name'      => $guest_name_a,
-                'room_label'      => $room_label_a,
-                'booking_ref'     => $abk['booking_reference'],
-            ];
-
-            if ($nightDiff > 0) {
-                // Overdue: guest owes extra nights
-                header('Content-Type: application/json');
-                echo json_encode($assessBalFields + [
-                    'success'    => true,
-                    'settlement' => array_merge($baseFields, [
-                        'needed'        => true,
-                        'type'          => 'charge',
-                        'extra_nights'  => $nightDiff,
-                        'charge_amount' => $adjAmount,
-                    ]),
-                ]);
-            } else {
-                // Early: guest may be owed a refund for unused nights
-                // Unused = booked nights minus the nights billed (a same-day checkout still bills 1 night), so the modal's nights add up
-                $unusedNights = max(0, $schedNights - $actualNights);
-                $quoteBill    = $quoteRp['new_gross'] + (float)($abk['folio_charges_total'] ?? 0);
-                $refundable   = max(0.0, min($adjAmount, round($amountPaid_a - $quoteBill, 2) + 0.0));
-                header('Content-Type: application/json');
-                echo json_encode($assessBalFields + [
-                    'success'    => true,
-                    'settlement' => array_merge($baseFields, [
-                        'needed'        => true,
-                        'type'          => 'refund',
-                        'unused_nights' => $unusedNights,
-                        'refund_amount' => $adjAmount,
-                        'refundable'    => $refundable,
-                    ]),
-                ]);
-            }
+            header('Content-Type: application/json');
+            echo json_encode($assessBalFields + [
+                'success'    => true,
+                'settlement' => [
+                    'needed'         => true,
+                    'type'           => 'leave',
+                    'overdue'        => $schedOutA < $todayA,
+                    'sched_checkout' => rh_late_stay_fmt($schedOutA),
+                    'sched_ymd'      => $schedOutA,
+                    'today_ymd'      => $todayA,
+                    'today_fmt'      => rh_late_stay_fmt($todayA),
+                    'min_ymd'        => $optsA['min'],
+                    'arrival_ymd'    => $optsA['arrival'],
+                    'arrival_fmt'    => $optsA['arrival'] ? rh_late_stay_fmt($optsA['arrival']) : '',
+                    'quotes'         => $quotesA,
+                    'booked_nights'  => max(1, (int)($abk['number_of_nights'] ?? 1)),
+                    'amount_paid'    => (float)($abk['amount_paid'] ?? 0),
+                    'amount_due'     => (float)($abk['amount_due'] ?? 0),
+                    'total_amount'   => (float)$abk['total_amount'],
+                    'check_in_date'  => rh_late_stay_fmt((string)$abk['check_in_date']),
+                    'guest_name'     => trim((string)($abk['guest_name'] ?? '')),
+                    'room_label'     => trim((string)($abk['individual_room_number'] ?? $abk['room_type_name'] ?? 'N/A')),
+                    'booking_ref'    => $abk['booking_reference'],
+                ],
+            ]);
             exit;
         } elseif ($action === 'checkout_settle') {
-            // ── Settle finances then perform checkout ──
+            // â”€â”€ Settle finances for the day the guest left, then check out â”€â”€
+            // The SERVER decides charge / refund / nothing from the posted leave date (re-validated against the
+            // locked row and today); posted figures are never used. A payment is recorded only for the amount
+            // front desk says it actually received, through the normal limit + VAT split.
             if (!isAjaxRequest()) {
                 throw new Exception('Invalid request');
             }
-            $booking_id        = (int)($_POST['id'] ?? 0);
-            $settlement_action = $_POST['settlement_action'] ?? 'skip'; // 'charge' | 'refund' | 'skip'
-            $payment_method    = $_POST['payment_method'] ?? 'cash';
-            $settle_notes      = trim($_POST['notes'] ?? '');
+            $booking_id     = (int)($_POST['id'] ?? 0);
+            $settleChoice   = (string)($_POST['settlement_action'] ?? ''); // 'leave' | 'skip'
+            $payment_method = (string)($_POST['payment_method'] ?? 'cash');
+            if (!in_array($payment_method, ['cash', 'bank_transfer', 'mobile_money', 'credit_card', 'debit_card', 'cheque', 'other'], true)) {
+                $payment_method = 'other';
+            }
+            $amountReceived = round(max(0.0, (float)($_POST['amount_received'] ?? 0)), 2);
+            $settle_notes   = mb_substr(trim((string)($_POST['notes'] ?? '')), 0, 200);
 
             if ($booking_id <= 0) {
                 header('Content-Type: application/json');
                 echo json_encode(['success' => false, 'message' => 'Missing booking id']);
                 exit;
             }
-
-            $settle_stmt = $pdo->prepare("
-                SELECT b.*,
-                       r.price_per_night, r.price_single_occupancy,
-                       r.price_double_occupancy, r.price_triple_occupancy,
-                       r.name as room_name
-                FROM bookings b
-                LEFT JOIN rooms r ON b.room_id = r.id
-                WHERE b.id = ? AND b.status = 'checked-in'
-            ");
-            $settle_stmt->execute([$booking_id]);
-            $sbk = $settle_stmt->fetch(PDO::FETCH_ASSOC);
-
-            if (!$sbk) {
+            if (!in_array($settleChoice, ['leave', 'skip'], true)) {
+                // Old cached pages posted 'charge' / 'refund' without a leave date: never charge on an assumption.
                 header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'message' => 'Booking not found or not checked-in']);
+                echo json_encode(['success' => false, 'message' => 'Choose when the guest left (or Skip settlement) before checking out. Reload the page if this keeps happening.']);
                 exit;
             }
 
-            $today_s            = new DateTime('today');
-            $todayStr_s         = $today_s->format('Y-m-d');
-            $checkIn_s          = new DateTime((string)$sbk['check_in_date']);
-            $scheduledCheckoutS = new DateTime((string)$sbk['check_out_date']);
-            $checkIn_s->setTime(0, 0, 0);
-            $scheduledCheckoutS->setTime(0, 0, 0);
-            $actualNights_s = max(1, (int)$today_s->diff($checkIn_s)->days);
-            $schedNights_s  = max(1, (int)$scheduledCheckoutS->diff($checkIn_s)->days);
-            // positive = late checkout days, negative = early checkout days
-            $nightDiff_s    = getSignedDateDiffDays($scheduledCheckoutS, $today_s);
-
-            $occupancy_s = $sbk['occupancy_type'] ?? 'single';
-            if ($occupancy_s === 'double' && !empty($sbk['price_double_occupancy'])) {
-                $ppn_s = (float)$sbk['price_double_occupancy'];
-            } elseif ($occupancy_s === 'triple' && !empty($sbk['price_triple_occupancy'])) {
-                $ppn_s = (float)$sbk['price_triple_occupancy'];
-            } elseif (!empty($sbk['price_single_occupancy'])) {
-                $ppn_s = (float)$sbk['price_single_occupancy'];
-            } else {
-                $ppn_s = (float)($sbk['price_per_night'] ?? 0);
-            }
-
+            $settlement_pay_id = 0;
+            $settlementPaymentReference = null;
             $earlyRefundLegs = []; // refund notices go out after the commit (money returned = guest is told)
+            $refundTotal = 0.0;
             $pdo->beginTransaction();
             try {
-                $settlementPaymentReference = null;
+                $lockS = $pdo->prepare("SELECT * FROM bookings WHERE id = ? FOR UPDATE");
+                $lockS->execute([$booking_id]);
+                $sbk = $lockS->fetch(PDO::FETCH_ASSOC);
+                if (!$sbk || $sbk['status'] !== 'checked-in') {
+                    throw new Exception('Booking not found or not checked-in');
+                }
+                // Same figures the quote used: re-derive paid / due under the lock, then read the row again.
+                if (!recalculateBookingFinancials($booking_id)) {
+                    throw new Exception('Could not recalculate the booking balance.');
+                }
+                $lockS->execute([$booking_id]);
+                $sbk = $lockS->fetch(PDO::FETCH_ASSOC) ?: $sbk;
+                $todayStr_s = date('Y-m-d');
+                $before_s = ['status' => 'checked-in', 'check_in_date' => $sbk['check_in_date'], 'check_out_date' => $sbk['check_out_date'],
+                    'number_of_nights' => (int)$sbk['number_of_nights'], 'total_with_vat' => (float)$sbk['total_with_vat']];
+                $q = null;
 
-                if ($settlement_action === 'charge' && $nightDiff_s > 0) {
-                    // Late checkout is repriced like Extend stay (owner, 2026-10-18): the stay runs to
-                    // today at the guest's BOOKED nightly rate, VAT and levy extracted from the gross,
-                    // and no separate late-checkout folio charge is posted.
-                    $extraNights_s = $nightDiff_s;
-                    $lockL = $pdo->prepare("SELECT * FROM bookings WHERE id = ? FOR UPDATE");
-                    $lockL->execute([$booking_id]);
-                    $lockedL = $lockL->fetch(PDO::FETCH_ASSOC);
-                    if (!$lockedL) {
-                        throw new Exception('Booking not found.');
+                if ($settleChoice === 'leave') {
+                    $leaveS = rh_late_stay_ymd((string)($_POST['leave_date'] ?? ''));
+                    $arrivalS = rh_late_stay_actual_arrival($pdo, (int)$booking_id, (string)$sbk['check_in_date']);
+                    $basisS = (string)($_POST['stay_basis'] ?? '');
+                    if ($arrivalS !== null && $leaveS !== null && $leaveS > substr((string)$sbk['check_out_date'], 0, 10)) {
+                        // Late arrival + late departure: front desk chooses the basis each time (owner 2026-11-12).
+                        if (!in_array($basisS, ['booked', 'actual'], true)) {
+                            throw new Exception('Choose how to count the nights: keep the booked nights and charge the nights after the booked check-out, or charge only the nights actually stayed.');
+                        }
+                    } else {
+                        $basisS = 'booked';
                     }
-                    $rpLate = rh_reprice_at_booked_rate($lockedL, $actualNights_s);
-                    rh_write_booking_stay_totals(
-                        $pdo, $booking_id, $rpLate['totals'], $actualNights_s,
-                        (string)$lockedL['check_in_date'], $todayStr_s, $rpLate['new_child_supplement']
-                    );
-                    if (!recalculateBookingFinancials($booking_id)) {
-                        throw new Exception('Could not recalculate the booking balance.');
+                    $q = rh_late_stay_quote($sbk, (string)$leaveS, $basisS, $arrivalS, $todayStr_s);
+                    if (empty($q['ok'])) {
+                        throw new Exception($q['error']);
                     }
-                    $ppn_s          = $rpLate['per_night'];
-                    $chargeAmount_s = max(0.0, round($rpLate['new_gross'] - $rpLate['old_gross'], 2));
-                    $lcoTt          = rh_stay_totals($chargeAmount_s, 'final', rh_booking_has_levy($lockedL));
-                    $chargeVat_s    = round((float)$lcoTt['vat'], 2);
 
-                    // Record immediate payment for extra-night settlement.
-                    $paymentRefBase = 'PAY-EC-' . date('Y') . '-' . str_pad((string)$booking_id, 6, '0', STR_PAD_LEFT);
-                    $settlementPaymentReference = $paymentRefBase;
-                    $paymentRefSuffix = 1;
-                    $paymentRefCheck = $pdo->prepare('SELECT COUNT(*) FROM payments WHERE payment_reference = ?');
-                    $paymentRefCheck->execute([$settlementPaymentReference]);
-                    while ((int)$paymentRefCheck->fetchColumn() > 0) {
-                        $paymentRefSuffix++;
-                        $settlementPaymentReference = $paymentRefBase . '-' . $paymentRefSuffix;
+                    if ($q['reprice'] !== null) {
+                        // Booked rate Ã— the nights for the leave date; the leave date (never today) is the new check-out.
+                        rh_write_booking_stay_totals(
+                            $pdo, $booking_id, $q['reprice']['totals'], (int)$q['nights'],
+                            $q['new_check_in'], $q['new_check_out'], $q['reprice']['new_child_supplement']
+                        );
+                        if (!recalculateBookingFinancials($booking_id)) {
+                            throw new Exception('Could not recalculate the booking balance.');
+                        }
+                    }
+
+                    if ($amountReceived > BALANCE_TOLERANCE) {
+                        if ($q['direction'] !== 'charge') {
+                            throw new Exception('A payment can only be taken here when the guest owes extra nights. Record other payments on the booking.');
+                        }
+                        $limitErr_s = rh_payment_limit_error($amountReceived, rh_account_balance_due($pdo, 'room', (int)$booking_id), false);
+                        if ($limitErr_s !== null) {
+                            throw new Exception($limitErr_s);
+                        }
+                        $vatRate_s = rh_vat_enabled() ? (float)getSetting('vat_rate') : 0.0;
+                        $split_s = rh_account_vat_split($pdo, 'room', (int)$booking_id, $amountReceived, $vatRate_s);
+
+                        $paymentRefBase = 'PAY-EC-' . date('Y') . '-' . str_pad((string)$booking_id, 6, '0', STR_PAD_LEFT);
+                        $settlementPaymentReference = $paymentRefBase;
+                        $paymentRefSuffix = 1;
+                        $paymentRefCheck = $pdo->prepare('SELECT COUNT(*) FROM payments WHERE payment_reference = ?');
                         $paymentRefCheck->execute([$settlementPaymentReference]);
-                    }
-
-                    $settlementReceipt = finance_next_receipt_number($pdo, $todayStr_s);
-                    $settlementNotes = 'Overdue checkout settlement: ' . $extraNights_s . ' extra night(s)';
-                    if ($settle_notes !== '') {
-                        $settlementNotes .= '. ' . $settle_notes;
-                    }
-
-                    $pdo->prepare("\n                        INSERT INTO payments (\n                            payment_reference, booking_type, booking_id, booking_reference,\n                            payment_date, payment_amount, vat_rate, vat_amount, total_amount,\n                            payment_method, payment_type, payment_status, invoice_generated,\n                            receipt_number, status, notes, recorded_by\n                        ) VALUES (?, 'room', ?, ?, CURDATE(), ?, ?, ?, ?, ?, 'partial_payment', 'completed', 1, ?, 'completed', ?, ?)\n                    ")->execute([
-                        $settlementPaymentReference,
-                        $booking_id,
-                        $sbk['booking_reference'],
-                        round($chargeAmount_s - $chargeVat_s, 2),
-                        $lcoTt['vat_rate'],
-                        $chargeVat_s,
-                        $chargeAmount_s,
-                        $payment_method,
-                        $settlementReceipt,
-                        $settlementNotes,
-                        (int)($user['id'] ?? 0),
-                    ]);
-                    $settlement_pay_id = (int)$pdo->lastInsertId();
-
-                    // Re-sync booking financials after settlement payment insert.
-                    recalculateBookingFinancials($booking_id);
-                } elseif ($settlement_action === 'refund' && $nightDiff_s < 0) {
-                    // Early checkout: reprice to the nights actually stayed at the BOOKED
-                    // nightly rate, reduce the bill, and refund (net paid - new bill) in this
-                    // same transaction against the original payment(s) / method(s).
-                    $unusedNights_s = max(0, $schedNights_s - $actualNights_s); // same count the assess step showed
-                    $lockB = $pdo->prepare("SELECT * FROM bookings WHERE id = ? FOR UPDATE");
-                    $lockB->execute([$booking_id]);
-                    $lockedBk = $lockB->fetch(PDO::FETCH_ASSOC);
-                    if (!$lockedBk) {
-                        throw new Exception('Booking not found.');
-                    }
-                    $rpEarly = rh_reprice_at_booked_rate($lockedBk, $actualNights_s);
-                    rh_write_booking_stay_totals(
-                        $pdo, $booking_id, $rpEarly['totals'], $actualNights_s,
-                        (string)$lockedBk['check_in_date'], $todayStr_s, $rpEarly['new_child_supplement']
-                    );
-                    if (!recalculateBookingFinancials($booking_id)) {
-                        throw new Exception('Could not recalculate the booking balance.');
-                    }
-                    $finE = $pdo->prepare("SELECT amount_paid, folio_charges_total, total_with_vat FROM bookings WHERE id = ?");
-                    $finE->execute([$booking_id]);
-                    $fe = $finE->fetch(PDO::FETCH_ASSOC);
-                    $refundAmt = max(0.0, round((float)$fe['amount_paid'] - (float)$fe['total_with_vat'] - (float)$fe['folio_charges_total'], 2));
-
-                    if ($refundAmt > BALANCE_TOLERANCE) {
-                        $refundReason = "Early checkout: {$unusedNights_s} unused night(s) at {$currency_symbol} "
-                            . number_format($rpEarly['per_night'], 2) . "/night (booked rate)"
-                            . ($settle_notes ? '. ' . $settle_notes : '');
-                        $insRef = $pdo->prepare("
+                        while ((int)$paymentRefCheck->fetchColumn() > 0) {
+                            $paymentRefSuffix++;
+                            $settlementPaymentReference = $paymentRefBase . '-' . $paymentRefSuffix;
+                            $paymentRefCheck->execute([$settlementPaymentReference]);
+                        }
+                        $settlementReceipt = finance_next_receipt_number($pdo, $todayStr_s);
+                        $settlementNotes = 'Late checkout: guest left ' . rh_late_stay_fmt($q['leave_date']) . ', ' . (int)$q['extra_nights']
+                            . ' extra night(s) at the booked rate' . ($settle_notes !== '' ? '. ' . $settle_notes : '');
+                        $pdo->prepare("
                             INSERT INTO payments (
                                 payment_reference, booking_type, booking_id, booking_reference,
                                 payment_date, payment_amount, vat_rate, vat_amount, total_amount,
-                                payment_method, payment_type, payment_status, original_payment_id,
-                                refund_reason, refund_status, refund_amount, refund_notes,
-                                recorded_by, created_at
-                            ) VALUES (
-                                ?, 'room', ?, ?, ?,
-                                ?, ?, ?, ?,
-                                ?, 'refund', 'completed', ?,
-                                'early_checkout', 'completed', ?, ?,
-                                ?, NOW()
-                            )
-                        ");
-                        foreach (allocateBookingRefunds($pdo, (int)$booking_id, $refundAmt, true) as $alloc) {
-                            $orig = $alloc['payment'];
-                            $leg  = (float)$alloc['amount'];
-                            $spE  = rh_refund_vat_split($orig, $leg);
-                            $vr   = rh_refund_leg_rate($pdo, $orig, (float)$spE['rate']); // true rate; VAT amount / net unchanged
-                            $va   = $spE['vat'];
-                            $earlyLegRef = finance_next_refund_reference($pdo, $todayStr_s);
-                            $insRef->execute([
-                                $earlyLegRef,
-                                $booking_id,
-                                $sbk['booking_reference'],
-                                $todayStr_s,
-                                round($leg - $va, 2),
-                                $vr,
-                                $va,
-                                $leg,
-                                $orig['payment_method'] ?: 'other',
-                                (int)$orig['id'],
-                                $leg,
-                                $refundReason, // free text belongs in refund_notes; refund_reason is an ENUM
-                                (int)($user['id'] ?? 0),
-                            ]);
-                            $earlyRefundLegs[] = ['orig' => array_merge($orig, ['booking_type' => 'room', 'booking_id' => (int)$booking_id, 'booking_reference' => $sbk['booking_reference']]), 'ref' => $earlyLegRef, 'amount' => $leg, 'reason' => $refundReason];
-                            if (!function_exists('rh_refresh_original_payment_status') && is_file(__DIR__ . '/includes/finance-account-sync.php')) {
-                                require_once __DIR__ . '/includes/finance-account-sync.php';
-                            }
-                            if (function_exists('rh_refresh_original_payment_status')) {
-                                rh_refresh_original_payment_status($pdo, (int)$orig['id']);
-                            }
+                                payment_method, payment_type, payment_status, invoice_generated,
+                                receipt_number, status, notes, recorded_by
+                            ) VALUES (?, 'room', ?, ?, CURDATE(), ?, ?, ?, ?, ?, 'partial_payment', 'completed', 1, ?, 'completed', ?, ?)
+                        ")->execute([
+                            $settlementPaymentReference,
+                            $booking_id,
+                            $sbk['booking_reference'],
+                            $split_s['net'],
+                            $split_s['rate'],
+                            $split_s['vat'],
+                            $amountReceived,
+                            $payment_method,
+                            $settlementReceipt,
+                            $settlementNotes,
+                            (int)($user['id'] ?? 0),
+                        ]);
+                        $settlement_pay_id = (int)$pdo->lastInsertId();
+                        if (!recalculateBookingFinancials($booking_id)) {
+                            throw new Exception('Could not recalculate the booking balance after the payment.');
                         }
                     }
-                    // Re-derive paid / due / credit after the bill reduction and refund
-                    recalculateBookingFinancials($booking_id);
-                }
-                // 'skip' → no financial record; just proceed
 
-                // ── Balance gate (after any settlement above, before status change) ──
-                $pdo->prepare("SELECT id FROM bookings WHERE id = ? FOR UPDATE")->execute([$booking_id]);
+                    if ($q['direction'] === 'refund') {
+                        // Unused nights: the bill was reduced above; refund (net paid - new bill) in this same
+                        // transaction against the original payment(s) / method(s), shown in full.
+                        $finE = $pdo->prepare("SELECT amount_paid, folio_charges_total, total_with_vat FROM bookings WHERE id = ?");
+                        $finE->execute([$booking_id]);
+                        $fe = $finE->fetch(PDO::FETCH_ASSOC);
+                        $refundAmt = max(0.0, round((float)$fe['amount_paid'] - (float)$fe['total_with_vat'] - (float)$fe['folio_charges_total'], 2));
+
+                        if ($refundAmt > BALANCE_TOLERANCE) {
+                            $refundReason = 'Guest left ' . rh_late_stay_fmt($q['leave_date']) . ': ' . (int)$q['unused_nights'] . " unused night(s) at {$currency_symbol} "
+                                . number_format((float)$q['per_night'], 2) . '/night (booked rate)'
+                                . ($settle_notes !== '' ? '. ' . $settle_notes : '');
+                            $insRef = $pdo->prepare("
+                                INSERT INTO payments (
+                                    payment_reference, booking_type, booking_id, booking_reference,
+                                    payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+                                    payment_method, payment_type, payment_status, original_payment_id,
+                                    refund_reason, refund_status, refund_amount, refund_notes,
+                                    recorded_by, created_at
+                                ) VALUES (
+                                    ?, 'room', ?, ?, ?,
+                                    ?, ?, ?, ?,
+                                    ?, 'refund', 'completed', ?,
+                                    'early_checkout', 'completed', ?, ?,
+                                    ?, NOW()
+                                )
+                            ");
+                            foreach (allocateBookingRefunds($pdo, (int)$booking_id, $refundAmt, true) as $alloc) {
+                                $orig = $alloc['payment'];
+                                $leg  = (float)$alloc['amount'];
+                                $spE  = rh_refund_vat_split($orig, $leg);
+                                $vr   = rh_refund_leg_rate($pdo, $orig, (float)$spE['rate']); // true rate; VAT amount / net unchanged
+                                $va   = $spE['vat'];
+                                $earlyLegRef = finance_next_refund_reference($pdo, $todayStr_s);
+                                $insRef->execute([
+                                    $earlyLegRef,
+                                    $booking_id,
+                                    $sbk['booking_reference'],
+                                    $todayStr_s,
+                                    round($leg - $va, 2),
+                                    $vr,
+                                    $va,
+                                    $leg,
+                                    $orig['payment_method'] ?: 'other',
+                                    (int)$orig['id'],
+                                    $leg,
+                                    $refundReason, // free text belongs in refund_notes; refund_reason is an ENUM
+                                    (int)($user['id'] ?? 0),
+                                ]);
+                                $refundTotal = round($refundTotal + $leg, 2);
+                                $earlyRefundLegs[] = ['orig' => array_merge($orig, ['booking_type' => 'room', 'booking_id' => (int)$booking_id, 'booking_reference' => $sbk['booking_reference']]), 'ref' => $earlyLegRef, 'amount' => $leg, 'reason' => $refundReason];
+                                if (!function_exists('rh_refresh_original_payment_status') && is_file(__DIR__ . '/includes/finance-account-sync.php')) {
+                                    require_once __DIR__ . '/includes/finance-account-sync.php';
+                                }
+                                if (function_exists('rh_refresh_original_payment_status')) {
+                                    rh_refresh_original_payment_status($pdo, (int)$orig['id']);
+                                }
+                            }
+                        }
+                        // Re-derive paid / due / credit after the bill reduction and refund
+                        recalculateBookingFinancials($booking_id);
+                    }
+                }
+                // 'skip' -> no financial record and no date change (handled outside the system); still logged below.
+
+                // â”€â”€ Balance gate (after any settlement above, before status change) â”€â”€
                 $balGate = evaluateCheckoutBalance($pdo, (int)$booking_id, (int)($user['id'] ?? 0), !empty($_POST['confirm_checkout_with_balance']));
                 if (!$balGate['allowed']) {
                     throw new Exception($balGate['message']);
@@ -1963,7 +2016,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     logCheckoutBalanceOverride((int)$booking_id, (string)$sbk['booking_reference'], (float)$balGate['balance'], (int)($user['id'] ?? 0), $user['full_name'] ?? ($user['username'] ?? null));
                 }
 
-                // ── Perform the actual checkout ──
+                // â”€â”€ Perform the actual checkout â”€â”€
                 $pdo->prepare("UPDATE bookings SET status = 'checked-out', updated_at = NOW() WHERE id = ?")
                     ->execute([$booking_id]);
 
@@ -1975,36 +2028,72 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 updateBookingRoomsStatus(
                     $booking_id,
                     'cleaning',
-                    'Checkout completed (' . $settlement_action . '): ' . ($sbk['booking_reference'] ?? ('Booking #' . $booking_id)),
+                    'Checkout completed (' . $settleChoice . '): ' . ($sbk['booking_reference'] ?? ('Booking #' . $booking_id)),
                     (int)($user['id'] ?? 0)
                 );
 
-                rh_log_event('bookings', 'info', 'Guest checked out (settlement: ' . $settlement_action . ')', [
-                    'booking_id'  => $booking_id,
-                    'ref'         => $sbk['booking_reference'],
-                    'settlement'  => $settlement_action,
-                    'night_diff'  => $nightDiff_s,
-                    'ppn'         => $ppn_s,
-                    'by'          => $user['username'] ?? null,
-                ]);
+                // History (owner: "Make sure there is logs and all"): the chosen option, the leave date, nights, money.
+                $afterS = $pdo->prepare("SELECT check_in_date, check_out_date, number_of_nights, total_with_vat FROM bookings WHERE id = ?");
+                $afterS->execute([$booking_id]);
+                $after_s = $afterS->fetch(PDO::FETCH_ASSOC) ?: [];
+                if ($q !== null) {
+                    $settleDescribe = rh_late_stay_describe($q, $currency_symbol);
+                } else {
+                    $settleDescribe = 'Checkout settlement skipped (handled outside the system): booked stay '
+                        . rh_late_stay_fmt((string)$sbk['check_in_date']) . ' to ' . rh_late_stay_fmt((string)$sbk['check_out_date'])
+                        . ', ' . (int)$sbk['number_of_nights'] . ' night(s), room total ' . $currency_symbol . ' ' . number_format((float)$sbk['total_with_vat'], 2) . ' unchanged.';
+                }
+                if ($settlementPaymentReference) {
+                    $settleDescribe .= ' Received ' . $currency_symbol . ' ' . number_format($amountReceived, 2) . ' (' . str_replace('_', ' ', $payment_method) . ', ' . $settlementPaymentReference . ').';
+                }
+                if ($refundTotal > BALANCE_TOLERANCE) {
+                    $settleDescribe .= ' Refunded ' . $currency_symbol . ' ' . number_format($refundTotal, 2) . '.';
+                }
+                if ($settle_notes !== '') {
+                    $settleDescribe .= ' Note: ' . $settle_notes;
+                }
+                $settleCtx = [
+                    'booking_id'      => $booking_id,
+                    'ref'             => $sbk['booking_reference'],
+                    'settlement'      => $settleChoice,
+                    'leave_date'      => $q['leave_date'] ?? null,
+                    'basis'           => $q['basis'] ?? null,
+                    'nights'          => $q['nights'] ?? (int)$sbk['number_of_nights'],
+                    'extra_nights'    => $q['extra_nights'] ?? 0,
+                    'unused_nights'   => $q['unused_nights'] ?? 0,
+                    'direction'       => $q['direction'] ?? 'skipped',
+                    'amount'          => $q['amount'] ?? 0,
+                    'amount_received' => $settlementPaymentReference ? $amountReceived : 0,
+                    'refunded'        => $refundTotal,
+                    'by'              => $user['username'] ?? null,
+                ];
+                rh_log_event('bookings', 'info', 'Guest checked out (settlement: ' . $settleChoice . ')', $settleCtx);
+                logBookingEvent((int)$booking_id, (string)$sbk['booking_reference'], 'Checkout settlement', 'check_out', $settleDescribe,
+                    (string)$sbk['check_out_date'], (string)($after_s['check_out_date'] ?? $sbk['check_out_date']), 'admin', $user['id'] ?? null,
+                    $user['full_name'] ?? ($user['username'] ?? null), $settleCtx);
                 logBookingAudit(
                     $booking_id,
                     'checked-out',
-                    ['status' => 'checked-in'],
-                    ['status' => 'checked-out', 'settlement' => $settlement_action],
-                    null,
+                    $before_s,
+                    ['status' => 'checked-out', 'settlement' => $settleChoice, 'leave_date' => $q['leave_date'] ?? null, 'basis' => $q['basis'] ?? null,
+                        'check_in_date' => $after_s['check_in_date'] ?? null, 'check_out_date' => $after_s['check_out_date'] ?? null,
+                        'number_of_nights' => isset($after_s['number_of_nights']) ? (int)$after_s['number_of_nights'] : null,
+                        'total_with_vat' => isset($after_s['total_with_vat']) ? (float)$after_s['total_with_vat'] : null,
+                        'direction' => $q['direction'] ?? 'skipped', 'amount' => $q['amount'] ?? 0,
+                        'amount_received' => $settlementPaymentReference ? $amountReceived : 0, 'refunded' => $refundTotal],
+                    $settleDescribe,
                     $sbk['booking_reference'] ?? null
                 );
 
                 $pdo->commit();
 
-                // Receipt for the extra-night settlement payment, if one was recorded.
+                // Receipt for the money received at this checkout, if any.
                 $settlementReceiptNotice = '';
-                if (!empty($settlement_pay_id)) {
+                if ($settlement_pay_id > 0) {
                     require_once '../config/receipts.php';
                     $settlementReceiptNotice = receipt_after_payment($pdo, (int)$settlement_pay_id, $user)['notice'];
                 }
-                // Refund notice for unused nights returned at an early checkout (one per refund leg).
+                // Refund notice for unused nights (one per refund leg).
                 foreach ($earlyRefundLegs as $erl) {
                     try {
                         require_once '../config/email.php';
@@ -2018,11 +2107,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 header('Content-Type: application/json');
-                $checkoutMessage = 'Checkout completed successfully.';
-                if (!empty($settlementPaymentReference)) {
-                    $checkoutMessage .= ' Extra-night payment recorded (' . $settlementPaymentReference . ').' . $settlementReceiptNotice;
-                }
-                $checkoutMessage .= bookings_final_invoice_note((int)$booking_id, (int)($user['id'] ?? 0));
+                $checkoutMessage = 'Checkout completed. ' . $settleDescribe . $settlementReceiptNotice
+                    . bookings_final_invoice_note((int)$booking_id, (int)($user['id'] ?? 0));
                 echo json_encode(['success' => true, 'message' => $checkoutMessage]);
                 exit;
             } catch (Throwable $e) {
@@ -2031,7 +2117,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 error_log("checkout_settle error: " . $e->getMessage());
                 header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'message' => 'Checkout failed: ' . $e->getMessage()]);
+                echo json_encode(['success' => false, 'message' => 'Checkout failed - nothing was changed. ' . $e->getMessage()]);
                 exit;
             }
         } elseif ($action === 'consolidation_fetch') {
@@ -2802,7 +2888,7 @@ $filter_balance = rh_bk_balance_filter($_GET['balance'] ?? '');
 // that booking so its row is on screen, then the page script opens the matching modal. When the action
 // finishes or is cancelled the page returns to the booking (see BK_DEEP_RETURN_URL), so the list is
 // never left filtered down to one booking and a reload never re-opens the modal.
-$deep_link_action = in_array(($_GET['action'] ?? ''), ['assign-room', 'room-change', 'checkout'], true) ? (string)$_GET['action'] : '';
+$deep_link_action = in_array(($_GET['action'] ?? ''), ['assign-room', 'room-change', 'checkout', 'checkin'], true) ? (string)$_GET['action'] : '';
 $deep_link_booking_id = $deep_link_action !== '' ? (int)($_GET['booking_id'] ?? 0) : 0;
 if ($deep_link_booking_id > 0 && $search_query === '') {
     $dlSt = $pdo->prepare("SELECT booking_reference, status FROM bookings WHERE id = ? AND deleted_at IS NULL");
@@ -4007,7 +4093,8 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                                     $room_assigned_bool = !empty($booking['individual_room_id']) ? 'true' : 'false';
                                                     $checkin_attrs = 'data-booking-id="' . $bk_id . '" data-booking-ref="' . $bk_ref . '" data-guest-name="' . $bk_guest . (trim((string)($booking['room_guest_name'] ?? '')) !== '' ? htmlspecialchars(' (room guest: ' . $booking['room_guest_name'] . ')', ENT_QUOTES) : '')
                                                         . '" data-check-in-date="' . htmlspecialchars($booking['check_in_date'], ENT_QUOTES) . '" data-payment-status="' . htmlspecialchars((string)$bk_payment_st, ENT_QUOTES)
-                                                        . '" data-room-assigned="' . $room_assigned_bool . '" data-booking-status="confirmed" data-payment-gate="' . htmlspecialchars($ci_pay_gate, ENT_QUOTES) . '"';
+                                                        . '" data-room-assigned="' . $room_assigned_bool . '" data-booking-status="confirmed" data-payment-gate="' . htmlspecialchars($ci_pay_gate, ENT_QUOTES)
+                                                        . '" data-late-info="' . htmlspecialchars(json_encode(bookings_late_checkin_info($booking)), ENT_QUOTES) . '"';
                                                     ?>
                                                     <?php if ($_perm_checkin && $checkin_date_reached): /* arrivals only from the arrival date */ ?>
                                                         <button type="button" class="quick-action <?php echo $is_missed_checkin ? 'checkin--urgent' : 'checkin'; ?> <?php echo $can_checkin ? '' : 'disabled'; ?>" data-action="check-in" <?php echo $checkin_attrs; ?> title="<?php echo htmlspecialchars($can_checkin ? ($is_missed_checkin ? 'Late check-in' : 'Check in guest') : $checkin_error, ENT_QUOTES); ?>" aria-label="<?php echo $is_missed_checkin ? 'Late check-in' : 'Check in guest'; ?>" data-help="Check In Guest|Check the guest into their room. Requires at least partial payment (or nothing owed, or Check in before payment switched on for a pay-later arrangement) and the arrival date to have come.">
@@ -5414,78 +5501,176 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             });
         }
 
-        function openCheckoutSettlementModal(bookingId, reference, s) {
-            const modal = document.getElementById('checkoutSettlementModal');
-            if (!modal) return;
+        // The settlement asks WHEN the guest left (owner 2026-11-12). Every leave date's figures come from the server
+        // (checkout_assess, the same helper the settle step charges with); this only picks the matching quote.
+        function csSelectedLeave() {
+            const s = window._csState && window._csState.s;
+            const picked = document.querySelector('#checkoutSettlementForm input[name="cs_leave"]:checked');
+            if (!s || !picked) return { choice: '', date: '' };
+            if (picked.value === 'skip') return { choice: 'skip', date: '' };
+            if (picked.value === 'booked') return { choice: 'booked', date: s.sched_ymd };
+            if (picked.value === 'today') return { choice: 'today', date: s.today_ymd };
+            const v = String(document.getElementById('cs_leave_other').value || '');
+            return { choice: 'other', date: v };
+        }
 
-            document.getElementById('cs_booking_id').value = bookingId;
-            document.getElementById('cs_booking_ref').value = reference;
-            document.getElementById('cs_settlement_type').value = s.type;
+        function csNeedsBasis(s, date) {
+            return !!(s && s.arrival_ymd && date && date > s.sched_ymd);
+        }
 
-            const titleEl = document.getElementById('cs_title');
-            const bodyEl = document.getElementById('cs_body');
+        // The quote for the current choice, or null (with a reason) when the choice is incomplete.
+        function csCurrentQuote() {
+            const s = window._csState && window._csState.s;
+            const sel = csSelectedLeave();
+            if (!s || !sel.choice) return { q: null, why: 'Choose when the guest left.' };
+            if (sel.choice === 'skip') return { q: null, skip: true, why: '' };
+            const row = sel.date && s.quotes ? s.quotes[sel.date] : null;
+            if (!row) return { q: null, why: 'Pick a date between ' + (s.check_in_date || '') + ' and today (' + s.today_fmt + ').' };
+            let basis = 'booked';
+            if (csNeedsBasis(s, sel.date)) {
+                const b = document.querySelector('#checkoutSettlementForm input[name="cs_basis"]:checked');
+                if (!b) return { q: null, why: 'Choose how to count the nights.', row: row, date: sel.date };
+                basis = b.value;
+            }
+            const q = row[basis];
+            if (!q) return { q: null, why: 'That way of counting is not possible for this date.' };
+            return { q: q, basis: basis, date: sel.date, row: row };
+        }
+
+        function csMoneyLine(q) {
+            if (!q) return '';
+            if (q.direction === 'charge') return 'Charge ' + fmt(q.amount) + ' (' + q.extra_nights + ' night(s) more than booked)';
+            if (q.direction === 'refund') return 'Bill reduced by ' + fmt(q.amount) + ' (' + q.unused_nights + ' unused night(s))';
+            return 'No money change';
+        }
+
+        function renderCheckoutSettlement() {
+            const st = window._csState;
+            if (!st) return;
+            const s = st.s;
+            const quoteEl = document.getElementById('cs_quote');
             const chargeRow = document.getElementById('cs_charge_row');
             const refundRow = document.getElementById('cs_refund_row');
             const proceedBtn = document.getElementById('cs_proceed_btn');
+            const basisBox = document.getElementById('cs_basis_box');
+            const otherInput = document.getElementById('cs_leave_other');
+            const sel = csSelectedLeave();
 
-            function csGuestInfo(s, ref) {
-                const name = s.guest_name ? escHtml(s.guest_name) : escHtml(ref);
-                const room = s.room_label ? ' &nbsp;|&nbsp; Room <strong>' + escHtml(s.room_label) + '</strong>' : '';
-                return '<div style="background:#f7f3ee;border-radius:6px;padding:10px 12px;margin-bottom:12px;font-size:13px;line-height:1.7;">' +
-                    '<strong>' + name + '</strong>' + room + '<br>' +
-                    '<span style="color:#666;">Ref: ' + escHtml(s.booking_ref || ref) + '</span>&nbsp;&nbsp;' +
-                    '<span style="color:#666;">Check-in: ' + escHtml(s.check_in_date || '') + '</span>' +
-                    '</div>';
+            otherInput.disabled = sel.choice !== 'other';
+            const showBasis = csNeedsBasis(s, sel.date);
+            basisBox.hidden = !showBasis;
+            basisBox.querySelectorAll('input[name="cs_basis"]').forEach(function (r) { r.disabled = !showBasis; if (!showBasis) r.checked = false; });
+            if (showBasis && s.quotes[sel.date]) {
+                const row = s.quotes[sel.date];
+                document.getElementById('cs_basis_booked_help').textContent = row.booked ? (csMoneyLine(row.booked) + '. ' + row.booked.describe) : '';
+                document.getElementById('cs_basis_actual_help').textContent = row.actual ? (csMoneyLine(row.actual) + '. ' + row.actual.describe) : '';
             }
 
-            // The rate the stay was BOOKED at (never today's room price) x nights, and the room total after this checkout.
-            const csRateRows = (s.booked_rate_text
-                    ? '<tr><td>Booked at<br><small style="color:#666;">rate a night &times; booked nights</small></td><td>' + escHtml(s.booked_rate_text) + '</td></tr>'
-                    : '<tr><td>Rate per night</td><td>' + fmt(s.price_per_night) + '</td></tr>') +
-                (s.new_rate_text
-                    ? '<tr><td>Room for the nights stayed<br><small style="color:#666;">same booked rate &times; nights stayed</small></td><td>' + escHtml(s.new_rate_text) + '</td></tr>'
-                    : '');
-
-            if (s.type === 'charge') {
-                titleEl.innerHTML = '<i class="fas fa-exclamation-triangle" style="color:#ffc107;"></i> Overdue Checkout — Extra Charges';
-                bodyEl.innerHTML =
-                    csGuestInfo(s, reference) +
-                    '<p style="margin:0 0 10px;">Guest stayed <strong>' + s.actual_nights + ' nights</strong> ' +
-                    'but was only scheduled for <strong>' + s.sched_nights + ' night(s)</strong>. ' +
-                    'Scheduled checkout was <strong>' + escHtml(s.sched_checkout) + '</strong>.</p>' +
-                    '<table class="cs-table">' +
-                    '<tr><td>Extra nights</td><td><strong>' + s.extra_nights + '</strong></td></tr>' +
-                    csRateRows +
-                    '<tr><td>Amount paid so far</td><td>' + fmt(s.amount_paid) + '</td></tr>' +
-                    '<tr class="cs-total"><td>Amount to charge</td><td><strong>' + fmt(s.charge_amount) + '</strong></td></tr>' +
-                    '</table>';
+            const cur = csCurrentQuote();
+            chargeRow.style.display = 'none';
+            refundRow.style.display = 'none';
+            quoteEl.hidden = false;
+            const due = parseFloat((window._csBalance || {}).due || 0);
+            if (cur.skip) {
+                quoteEl.innerHTML = '<p style="margin:0;color:#555;">No charge or refund is recorded. The booked stay (' + escHtml(s.check_in_date) + ' to ' + escHtml(s.sched_checkout) + ', ' + s.booked_nights + ' night(s)) and its total stay as they are.</p>';
+                proceedBtn.disabled = false;
+                proceedBtn.textContent = 'Check out (skip settlement)';
+                proceedBtn.className = 'btn btn-secondary';
+                st.balanceAfter = due;
+                return;
+            }
+            if (!cur.q) {
+                quoteEl.innerHTML = cur.why ? '<p style="margin:0;color:#856404;">' + escHtml(cur.why) + '</p>' : '';
+                quoteEl.hidden = !cur.why;
+                proceedBtn.disabled = true;
+                proceedBtn.textContent = 'Proceed & Checkout';
+                proceedBtn.className = 'btn btn-primary';
+                return;
+            }
+            const q = cur.q;
+            const received = q.direction === 'charge' ? Math.max(0, parseFloat(document.getElementById('cs_amount_received').value || '0') || 0) : 0;
+            let balanceAfter = due;
+            if (q.direction === 'charge') balanceAfter = Math.max(0, due + parseFloat(q.amount) - received);
+            if (q.direction === 'refund') balanceAfter = Math.max(0, due - parseFloat(q.amount));
+            st.balanceAfter = balanceAfter;
+            const rows = [
+                ['Nights', q.nights + ' night(s): ' + q.stay_text],
+                ...(q.new_rate_text ? [['Room for these nights<br><small style="color:#666;">booked rate &times; nights</small>', escHtml(q.new_rate_text)]] : []),
+                ...(q.direction === 'charge' ? [['Extra nights', String(q.extra_nights)], ['Added to the bill', '<strong>' + fmt(q.amount) + '</strong>']] : []),
+                ...(q.direction === 'refund' ? [['Unused nights', String(q.unused_nights)], ['Bill reduced by', fmt(q.amount)], ['Refund now (capped at paid)', '<strong>' + fmt(q.refundable) + '</strong>']] : []),
+                ['Paid so far', fmt(s.amount_paid)],
+                ['Balance after checkout', '<strong>' + fmt(balanceAfter) + '</strong>']
+            ];
+            quoteEl.innerHTML = '<p style="margin:0 0 8px;">' + escHtml(q.describe) + '</p>' +
+                '<table class="cs-table">' + rows.map(function (r) { return '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>'; }).join('') + '</table>';
+            if (q.direction === 'charge') {
                 chargeRow.style.display = '';
-                refundRow.style.display = 'none';
+                document.getElementById('cs_amount_received').max = String((due + parseFloat(q.amount)).toFixed(2));
                 proceedBtn.textContent = 'Charge & Checkout';
-                proceedBtn.style.background = '#dc3545';
+                proceedBtn.className = 'btn btn-danger';
+            } else if (q.direction === 'refund') {
+                refundRow.style.display = parseFloat(q.refundable) > 0 ? '' : 'none';
+                proceedBtn.textContent = parseFloat(q.refundable) > 0 ? 'Refund & Checkout' : 'Checkout (no refund due)';
+                proceedBtn.className = 'btn btn-success';
             } else {
-                titleEl.innerHTML = '<i class="fas fa-rotate-left" style="color:#28a745;"></i> Early Checkout' + (parseFloat(s.refundable) > 0 ? ' — Refund' : '');
-                bodyEl.innerHTML =
-                    csGuestInfo(s, reference) +
-                    (parseInt(s.unused_nights, 10) > 0
-                        ? '<p style="margin:0 0 10px;">Guest is checking out after <strong>' + s.actual_nights + ' night(s)</strong> ' +
-                          'but was booked for <strong>' + s.sched_nights + ' nights</strong>. ' +
-                          'Scheduled checkout was <strong>' + escHtml(s.sched_checkout) + '</strong>.</p>'
-                        : '<p style="margin:0 0 10px;">Guest is checking out on or after the booked check-out date (<strong>' + escHtml(s.sched_checkout) + '</strong>), so there are no unused nights.</p>') +
-                    '<table class="cs-table">' +
-                    '<tr><td>Unused nights</td><td><strong>' + s.unused_nights + '</strong></td></tr>' +
-                    csRateRows +
-                    '<tr><td>Amount paid</td><td>' + fmt(s.amount_paid) + '</td></tr>' +
-                    '<tr><td>Full refund value</td><td>' + fmt(s.refund_amount) + '</td></tr>' +
-                    '<tr class="cs-total"><td>Refundable (capped at paid)</td><td><strong>' + fmt(s.refundable) + '</strong></td></tr>' +
-                    '</table>' +
-                    (s.refundable <= 0 ? '<p style="color:#888;font-size:12px;">' + (parseFloat(s.amount_paid) > 0.01 ? 'Paid ' + fmt(s.amount_paid) + '; no refund due.' : 'No payment on record — no refund will be issued.') + '</p>' : '');
-                chargeRow.style.display = 'none';
-                refundRow.style.display = s.refundable > 0 ? '' : 'none';
-                proceedBtn.textContent = s.refundable > 0 ? 'Refund & Checkout' : 'Checkout (no refund)';
-                proceedBtn.style.background = '#28a745';
+                proceedBtn.textContent = 'Checkout (no charge)';
+                proceedBtn.className = 'btn btn-primary';
             }
+            proceedBtn.disabled = false;
+        }
 
+        function openCheckoutSettlementModal(bookingId, reference, s) {
+            const modal = document.getElementById('checkoutSettlementModal');
+            const form = document.getElementById('checkoutSettlementForm');
+            if (!modal || !form) return;
+
+            form.reset();
+            form.dataset.busy = '';
+            setModalActionLoading(form, false);
+            const proceedBtn = document.getElementById('cs_proceed_btn');
+            proceedBtn.classList.remove('btn-loading');
+            proceedBtn.style.pointerEvents = '';
+            proceedBtn.style.opacity = '';
+            delete proceedBtn.dataset.originalContent;
+            document.getElementById('cs_error').style.display = 'none';
+
+            window._csState = { bookingId: bookingId, reference: reference, s: s, balanceAfter: 0 };
+            document.getElementById('cs_booking_id').value = bookingId;
+            document.getElementById('cs_booking_ref').value = reference;
+            document.getElementById('cs_settlement_type').value = s.type || 'leave';
+
+            const name = s.guest_name ? escHtml(s.guest_name) : escHtml(reference);
+            const room = s.room_label ? ' &nbsp;|&nbsp; Room <strong>' + escHtml(s.room_label) + '</strong>' : '';
+            document.getElementById('cs_title').innerHTML = s.overdue
+                ? '<i class="fas fa-exclamation-triangle" style="color:#ffc107;"></i> Checkout after the booked date'
+                : '<i class="fas fa-rotate-left" style="color:#28a745;"></i> Checkout before the booked date';
+            document.getElementById('cs_body').innerHTML =
+                '<div style="background:#f7f3ee;border-radius:6px;padding:10px 12px;font-size:13px;line-height:1.7;">' +
+                '<strong>' + name + '</strong>' + room + '<br>' +
+                '<span style="color:#666;">Ref: ' + escHtml(s.booking_ref || reference) + '</span>&nbsp;&nbsp;' +
+                '<span style="color:#666;">Booked: ' + escHtml(s.check_in_date || '') + ' to ' + escHtml(s.sched_checkout || '') + ' (' + s.booked_nights + ' night(s))</span>' +
+                (s.arrival_fmt ? '<br><span style="color:#666;">Arrival recorded at check-in: ' + escHtml(s.arrival_fmt) + '</span>' : '') +
+                (s.booked_rate_text ? '<br><span style="color:#666;">Booked at: ' + escHtml(s.booked_rate_text) + '</span>' : '') +
+                '</div>';
+
+            // Choices: "booked date" only once that date has passed; "today"; any other date from the stay start.
+            const bookedWrap = document.getElementById('cs_opt_booked_wrap');
+            bookedWrap.hidden = !s.overdue;
+            bookedWrap.querySelector('input').disabled = !s.overdue;
+            const qb = s.quotes && s.quotes[s.sched_ymd] ? s.quotes[s.sched_ymd].booked : null;
+            const qt = s.quotes && s.quotes[s.today_ymd] ? s.quotes[s.today_ymd].booked : null;
+            document.getElementById('cs_opt_booked_label').textContent = 'Guest left on the booked date (' + s.sched_checkout + ')';
+            document.getElementById('cs_opt_booked_help').textContent = qb ? csMoneyLine(qb) + '.' : '';
+            document.getElementById('cs_opt_today_label').textContent = (s.overdue ? 'Guest stayed until today (' : 'Guest is leaving today (') + s.today_fmt + ')';
+            document.getElementById('cs_opt_today_help').textContent = qt ? csMoneyLine(qt) + (s.arrival_ymd && s.overdue ? ' if the booked nights are kept.' : '.') : '';
+            const other = document.getElementById('cs_leave_other');
+            other.min = s.min_ymd || '';
+            other.max = s.today_ymd || '';
+            other.value = '';
+            document.getElementById('cs_opt_other_help').textContent = 'Pick the day the guest left (' + (s.check_in_date || '') + ' to ' + s.today_fmt + ').';
+            document.getElementById('cs_arrival_fmt').textContent = s.arrival_fmt || '';
+
+            renderCheckoutSettlement();
             setBookingPageModalOpen(modal, true);
         }
 
@@ -5638,39 +5823,61 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             if (!form || !form.getAttribute || form.getAttribute('id') !== 'checkoutSettlementForm') {
                 return;
             }
+            if (form.dataset.busy === '1') return; // a request is already running
+            const st = window._csState;
+            const errEl = document.getElementById('cs_error');
+            const showErr = function (msg) {
+                errEl.textContent = msg;
+                errEl.style.display = 'block';
+                Alert.show(msg, 'error');
+            };
+            errEl.style.display = 'none';
+            if (!st) return;
 
             const bookingId = document.getElementById('cs_booking_id').value;
             const bookingRef = document.getElementById('cs_booking_ref').value;
-            const settleType = document.getElementById('cs_settlement_type').value;
-            const payMethod = document.getElementById('cs_payment_method').value;
-            const refPayMethod = document.getElementById('cs_refund_payment_method').value;
-            const skipToggle = document.getElementById('cs_skip_toggle').checked;
-            const notes = document.getElementById('cs_notes').value;
+            const cur = csCurrentQuote();
+            if (!cur.skip && !cur.q) {
+                showErr(cur.why || 'Choose when the guest left.');
+                return;
+            }
+            const q = cur.q;
+            const received = q && q.direction === 'charge' ? Math.max(0, parseFloat(document.getElementById('cs_amount_received').value || '0') || 0) : 0;
+            if (q && q.direction === 'charge' && received > parseFloat((window._csBalance || {}).due || 0) + parseFloat(q.amount) + 0.01) {
+                showErr('The amount received is more than the guest owes.');
+                return;
+            }
 
-            let settlementAction = skipToggle ? 'skip' : settleType;
-
-            const formData = new FormData(form);
+            const formData = new FormData();
             formData.set('action', 'checkout_settle');
             formData.set('id', bookingId);
-            formData.set('settlement_action', settlementAction);
-            formData.set('payment_method', settleType === 'charge' ? payMethod : refPayMethod);
-            formData.set('notes', notes);
+            formData.set('settlement_action', cur.skip ? 'skip' : 'leave');
+            if (!cur.skip) {
+                formData.set('leave_date', cur.date);
+                if (csNeedsBasis(st.s, cur.date)) formData.set('stay_basis', cur.basis);
+                if (q.direction === 'charge' && received > 0) {
+                    formData.set('amount_received', received.toFixed(2));
+                    formData.set('payment_method', document.getElementById('cs_payment_method').value);
+                } else if (q.direction === 'refund') {
+                    formData.set('payment_method', document.getElementById('cs_refund_payment_method').value);
+                }
+            }
+            formData.set('notes', document.getElementById('cs_notes').value);
 
-            const submitBtn = form.querySelector('#cs_proceed_btn') || form.querySelector('button[type="submit"]');
-            const csBal = window._csBalance || {
-                due: 0,
-                can: false
-            };
-            const csDetails = [
-                'Settlement option: ' + (settlementAction === 'skip' ? 'No financial adjustment' : settlementAction),
-                ...(csBal.newRate && settlementAction !== 'skip' ? ['Room for the nights stayed, at the booked rate: ' + csBal.newRate] : []),
-                'This will mark the booking as checked out and update room status.'
-            ];
-            if (csBal.due > 0.01 && csBal.can) {
-                csDetails.unshift('OUTSTANDING BALANCE before settlement: ' + fmt(csBal.due) + ' - if any balance remains it will be recorded in the booking timeline.');
+            const submitBtn = document.getElementById('cs_proceed_btn');
+            const csBal = window._csBalance || { due: 0, can: false };
+            const balanceAfter = parseFloat(st.balanceAfter || 0);
+            const csDetails = [cur.skip ? 'Skip settlement: no charge or refund recorded, booked stay unchanged.' : q.describe];
+            if (q && q.direction === 'charge') {
+                csDetails.push(received > 0 ? 'Received now: ' + fmt(received) : 'Nothing received now: the extra nights stay on the bill as a balance.');
+            }
+            csDetails.push('This will mark the booking as checked out and update room status.');
+            if (balanceAfter > 0.01 && csBal.can) {
+                csDetails.unshift('OUTSTANDING BALANCE after checkout: ' + fmt(balanceAfter) + ' - it stays owed and is recorded in the booking timeline.');
                 formData.set('confirm_checkout_with_balance', '1');
-            } else if (csBal.due > 0.01) {
-                csDetails.unshift('Guest owes ' + fmt(csBal.due) + ' - checkout is blocked unless the settlement clears the balance.');
+            } else if (balanceAfter > 0.01) {
+                showErr('The guest would still owe ' + fmt(balanceAfter) + '. Enter the amount received, or ask someone with the "Check out with balance" permission.');
+                return;
             }
             const confirmed = await confirmAdminAction({
                 title: 'Confirm checkout',
@@ -5683,31 +5890,62 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 return;
             }
 
+            form.dataset.busy = '1';
             if (submitBtn) setButtonLoading(submitBtn, true);
             setModalActionLoading(form, true, 'Processing settlement and checkout...');
 
             try {
-                const data = await postBookingAction(formData, 'Checkout failed');
-                if (data.success) {
-                    closeCheckoutSettlementModal();
-                    reloadWithBookingActionMessage(data, 'Checkout completed successfully.');
-                } else {
-                    setModalActionLoading(form, false);
-                    if (submitBtn) setButtonLoading(submitBtn, false);
-                    Alert.show(data.message || 'Checkout failed.', 'error');
-                }
+                // The final invoice may be emailed: give the server longer than the 30 s default.
+                const data = await postBookingAction(formData, 'Checkout failed', 90000);
+                closeCheckoutSettlementModal();
+                showLoadingOverlay('Updating the list...');
+                reloadWithBookingActionMessage(data, 'Checkout completed successfully.');
             } catch (err) {
+                form.dataset.busy = '';
                 setModalActionLoading(form, false);
                 if (submitBtn) setButtonLoading(submitBtn, false);
-                Alert.show(err.message || 'Checkout failed.', 'error');
+                const msg = String((err && err.message) || 'Checkout failed.');
+                showErr(msg.indexOf('timed out') !== -1
+                    ? 'The server took too long to answer. The checkout may still have gone through: reload the page and check the booking before trying again.'
+                    : msg);
             }
         }
+        window.handleCheckoutSettlementSubmit = handleCheckoutSettlementSubmit;
 
-        document.addEventListener('submit', function(e) {
-            if (e.target && e.target.getAttribute && e.target.getAttribute('id') === 'checkoutSettlementForm') {
-                handleCheckoutSettlementSubmit(e);
-            }
-        });
+        // Bound ONCE per browser page: the admin SPA re-runs this script on every visit, and a second
+        // document-level listener used to open the confirm twice (and post twice).
+        if (!window.__rhCsSubmitBound) {
+            window.__rhCsSubmitBound = true;
+            document.addEventListener('submit', function(e) {
+                if (e.target && e.target.getAttribute && e.target.getAttribute('id') === 'checkoutSettlementForm' && typeof window.handleCheckoutSettlementSubmit === 'function') {
+                    window.handleCheckoutSettlementSubmit(e);
+                }
+            });
+        }
+        window.renderCheckoutSettlement = renderCheckoutSettlement;
+        // The settlement form is printed AFTER this script, so its inputs are watched from the document (bound once:
+        // the SPA re-runs this script on every visit) and always call the latest render function.
+        if (!window.__rhCsChoiceBound) {
+            window.__rhCsChoiceBound = true;
+            const csOnChoice = function (e) {
+                const t = e.target;
+                if (!t || !t.closest || !t.closest('#checkoutSettlementForm')) return;
+                if (e.type === 'change' && t.name === 'cs_leave' && t.value === 'other') {
+                    const other = document.getElementById('cs_leave_other');
+                    if (other) {
+                        other.disabled = false;
+                        other.focus();
+                    }
+                }
+                if (t.name === 'cs_leave' || t.name === 'cs_basis' || t.id === 'cs_leave_other' || t.id === 'cs_amount_received') {
+                    const errEl = document.getElementById('cs_error');
+                    if (errEl && e.type === 'change') errEl.style.display = 'none';
+                    if (typeof window.renderCheckoutSettlement === 'function') window.renderCheckoutSettlement();
+                }
+            };
+            document.addEventListener('change', csOnChoice);
+            document.addEventListener('input', csOnChoice);
+        }
 
         function markNoShow(id, reference, guestName, checkInDate, paymentStatus, roomAssigned, bookingStatus) {
             openCheckInModal(
@@ -5876,6 +6114,23 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     </div>
 
                     <div id="checkin_context_note" class="bookings-checkin-modal__context-note" style="display: none;"></div>
+
+                    <?php /* Late arrival (owner 2026-11-12 "Dont assume, have options"): nothing preselected; the server re-checks the choice. */ ?>
+                    <fieldset id="checkin_late_choices" class="bookings-checkin-modal__late" hidden>
+                        <legend>What happened? <small>Pick one. Nothing is assumed.</small></legend>
+                        <label class="bookings-checkin-modal__late-option">
+                            <input type="radio" name="late_arrival" value="booked_date" disabled>
+                            <span><strong id="late_opt_booked_label">Guest arrived on the booked date, recorded late</strong><small>Booked dates and total stay as booked.</small></span>
+                        </label>
+                        <label class="bookings-checkin-modal__late-option">
+                            <input type="radio" name="late_arrival" value="today" disabled>
+                            <span><strong id="late_opt_today_label">Guest is arriving today</strong><small>Booked dates and total stay as booked. Today is recorded as the arrival date.</small></span>
+                        </label>
+                        <label class="bookings-checkin-modal__late-option" id="late_opt_ended_wrap" hidden>
+                            <input type="radio" name="late_arrival" value="ended" disabled>
+                            <span><strong id="late_opt_ended_label">Guest already stayed and has left: record the completed stay</strong><small>Checks in and out together at the booked dates. No extra nights charged, no check-in email. The balance rules still apply.</small></span>
+                        </label>
+                    </fieldset>
 
                     <div class="bookings-checkin-modal__identity-grid">
                         <div class="form-group">
@@ -6058,9 +6313,9 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                         <td data-label="Check-in Date" class="bookings-alert-modal__overdue-cell"><?php echo date('M j, Y', strtotime($bk['check_in_date'])); ?></td>
                                         <td data-label="Overdue"><span class="badge bookings-alert-modal__badge bookings-alert-modal__badge--danger"><?php echo $bk['days_overdue']; ?> day(s)</span></td>
                                         <td data-label="Actions" class="bookings-alert-modal__actions">
-                                            <button class="btn btn-sm btn-primary bookings-alert-modal__action-btn" type="button" onclick="openMissedCheckinWorkflow(<?php echo $bk['id']; ?>, '<?php echo htmlspecialchars($bk['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($bk['guest_name'], ENT_QUOTES); ?>', '<?php echo $bk['check_in_date']; ?>', '<?php echo htmlspecialchars((string)($bk['actual_payment_status'] ?? $bk['payment_status']), ENT_QUOTES); ?>', '<?php echo !empty($bk['individual_room_id']) ? 'true' : 'false'; ?>', '<?php echo $bk['status']; ?>', 'checkin', '<?php echo htmlspecialchars(rh_checkin_payment_gate($bk), ENT_QUOTES); ?>')">Late Check-in</button>
-                                            <button class="btn btn-sm btn-danger bookings-alert-modal__action-btn" type="button" onclick="openMissedCheckinWorkflow(<?php echo $bk['id']; ?>, '<?php echo htmlspecialchars($bk['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($bk['guest_name'], ENT_QUOTES); ?>', '<?php echo $bk['check_in_date']; ?>', '<?php echo htmlspecialchars((string)($bk['actual_payment_status'] ?? $bk['payment_status']), ENT_QUOTES); ?>', '<?php echo !empty($bk['individual_room_id']) ? 'true' : 'false'; ?>', '<?php echo $bk['status']; ?>', 'noshow')">Mark No-Show</button>
-                                            <button class="btn btn-sm btn-secondary bookings-alert-modal__action-btn" type="button" onclick="openMissedCancelWorkflow(<?php echo $bk['id']; ?>, '<?php echo htmlspecialchars($bk['booking_reference'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($bk['guest_name'], ENT_QUOTES); ?>')">Cancel Booking</button>
+                                            <button class="btn btn-sm btn-primary bookings-alert-modal__action-btn" type="button" onclick="openMissedCheckinWorkflow(<?php echo $bk['id']; ?>, <?php echo htmlspecialchars((string)json_encode((string)$bk['booking_reference'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP), ENT_QUOTES); ?>, <?php echo htmlspecialchars((string)json_encode((string)$bk['guest_name'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP), ENT_QUOTES); ?>, '<?php echo $bk['check_in_date']; ?>', '<?php echo htmlspecialchars((string)($bk['actual_payment_status'] ?? $bk['payment_status']), ENT_QUOTES); ?>', '<?php echo !empty($bk['individual_room_id']) ? 'true' : 'false'; ?>', '<?php echo $bk['status']; ?>', 'checkin', '<?php echo htmlspecialchars(rh_checkin_payment_gate($bk), ENT_QUOTES); ?>', <?php echo htmlspecialchars(json_encode(bookings_late_checkin_info($bk), JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP), ENT_QUOTES); ?>)">Late Check-in</button>
+                                            <button class="btn btn-sm btn-danger bookings-alert-modal__action-btn" type="button" onclick="openMissedCheckinWorkflow(<?php echo $bk['id']; ?>, <?php echo htmlspecialchars((string)json_encode((string)$bk['booking_reference'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP), ENT_QUOTES); ?>, <?php echo htmlspecialchars((string)json_encode((string)$bk['guest_name'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP), ENT_QUOTES); ?>, '<?php echo $bk['check_in_date']; ?>', '<?php echo htmlspecialchars((string)($bk['actual_payment_status'] ?? $bk['payment_status']), ENT_QUOTES); ?>', '<?php echo !empty($bk['individual_room_id']) ? 'true' : 'false'; ?>', '<?php echo $bk['status']; ?>', 'noshow')">Mark No-Show</button>
+                                            <button class="btn btn-sm btn-secondary bookings-alert-modal__action-btn" type="button" onclick="openMissedCancelWorkflow(<?php echo $bk['id']; ?>, <?php echo htmlspecialchars((string)json_encode((string)$bk['booking_reference'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP), ENT_QUOTES); ?>, <?php echo htmlspecialchars((string)json_encode((string)$bk['guest_name'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP), ENT_QUOTES); ?>)">Cancel Booking</button>
                                         </td>
                                     </tr>
                                 <?php endforeach;
@@ -6300,12 +6555,54 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
 
                 <div class="modal-body">
                     <!-- Dynamic summary injected by JS -->
-                    <div id="cs_body" style="margin-bottom: 16px; font-size: 14px; color: #333;"></div>
+                    <div id="cs_body" style="margin-bottom: 12px; font-size: 14px; color: #333;"></div>
 
-                    <!-- Payment method for extra charge -->
+                    <?php /* Owner 2026-11-12 "Dont assume, have options": when did the guest leave? Nothing preselected; the
+                        server re-checks the date and decides charge / refund / nothing from it. */ ?>
+                    <fieldset id="cs_leave_box" class="cs-choices">
+                        <legend>When did the guest leave? <small>Pick one. Nothing is assumed.</small></legend>
+                        <label class="cs-choice" id="cs_opt_booked_wrap">
+                            <input type="radio" name="cs_leave" value="booked">
+                            <span><strong id="cs_opt_booked_label">Guest left on the booked date</strong><small id="cs_opt_booked_help"></small></span>
+                        </label>
+                        <label class="cs-choice">
+                            <input type="radio" name="cs_leave" value="today">
+                            <span><strong id="cs_opt_today_label">Guest is leaving today</strong><small id="cs_opt_today_help"></small></span>
+                        </label>
+                        <label class="cs-choice">
+                            <input type="radio" name="cs_leave" value="other">
+                            <span><strong>Guest left on another date</strong><small id="cs_opt_other_help">Pick the day the guest left.</small>
+                                <input type="date" id="cs_leave_other" class="form-control" aria-label="Date the guest left" disabled></span>
+                        </label>
+                        <label class="cs-choice">
+                            <input type="radio" name="cs_leave" value="skip">
+                            <span><strong>Skip settlement: check out without recording a charge or refund</strong><small>Use only if the adjustment has been handled outside the system. The booked dates and total stay as they are.</small></span>
+                        </label>
+                    </fieldset>
+
+                    <fieldset id="cs_basis_box" class="cs-choices" hidden>
+                        <legend>How should the nights be counted? <small>Arrival was recorded as <span id="cs_arrival_fmt"></span>, after the booked check-in.</small></legend>
+                        <label class="cs-choice">
+                            <input type="radio" name="cs_basis" value="booked">
+                            <span><strong>Keep booked nights + charge nights after the booked checkout</strong><small id="cs_basis_booked_help"></small></span>
+                        </label>
+                        <label class="cs-choice">
+                            <input type="radio" name="cs_basis" value="actual">
+                            <span><strong>Charge only the nights actually stayed</strong><small id="cs_basis_actual_help"></small></span>
+                        </label>
+                    </fieldset>
+
+                    <div id="cs_quote" style="margin-bottom: 12px;" hidden></div>
+
+                    <!-- Money received now for the extra nights (optional; only what was actually received) -->
                     <div id="cs_charge_row" style="display:none;">
                         <div class="form-group">
-                            <label style="font-weight:600;">Payment method for extra charge <span style="color:#dc3545;">*</span></label>
+                            <label for="cs_amount_received" style="font-weight:600;">Amount received now (optional)</label>
+                            <input type="number" id="cs_amount_received" class="form-control" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
+                            <small style="color:#666;display:block;margin-top:4px;">Enter only money the guest actually paid now. Anything not paid stays on the bill as a balance.</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="cs_payment_method" style="font-weight:600;">Payment method</label>
                             <select id="cs_payment_method" name="cs_payment_method" class="form-control">
                                 <option value="cash">Cash</option>
                                 <option value="bank_transfer">Bank Transfer</option>
@@ -6333,22 +6630,15 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     </div>
 
                     <div class="form-group">
-                        <label>Notes (optional)</label>
+                        <label for="cs_notes">Notes (optional)</label>
                         <input type="text" id="cs_notes" name="cs_notes" class="form-control" placeholder="e.g. guest agreed, cash collected" maxlength="200">
                     </div>
-
-                    <div class="form-group" style="background:#f8f8f8; border-radius:6px; padding:10px 12px; margin-top:8px;">
-                        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;color:#555;">
-                            <input type="checkbox" id="cs_skip_toggle" name="cs_skip_toggle" style="width:16px;height:16px;">
-                            Skip settlement — checkout without recording a charge or refund
-                        </label>
-                        <small style="color:#888;display:block;margin-top:4px;">Use only if the adjustment has been handled outside the system.</small>
-                    </div>
+                    <p id="cs_error" class="bookings-checkin-modal__error" style="display:none;"></p>
                 </div>
 
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="closeCheckoutSettlementModal()">Cancel</button>
-                    <button type="button" id="cs_proceed_btn" class="btn btn-danger" onclick="const f=document.getElementById('checkoutSettlementForm'); if(f){ f.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})); } return false;">Proceed & Checkout</button>
+                    <button type="button" id="cs_proceed_btn" class="btn btn-primary" disabled onclick="const f=document.getElementById('checkoutSettlementForm'); if(f){ f.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})); } return false;">Proceed & Checkout</button>
                 </div>
             </form>
         </div>
@@ -6404,6 +6694,70 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
 
         .modal-content.is-modal-busy {
             pointer-events: none;
+        }
+
+        /* The loader's display:flex used to beat the [hidden] attribute, so after the first failed attempt the
+           "Processing..." layer stayed over the dialog and swallowed every click (the "stalling" check-in modal). */
+        .modal-inline-loader[hidden] {
+            display: none;
+        }
+
+        /* Late check-in / checkout leave-date choices (radio cards, 44px tap targets). */
+        .bookings-checkin-modal__late,
+        .cs-choices {
+            border: 1px solid #e3ddd3;
+            border-radius: 8px;
+            padding: 8px 12px 10px;
+            margin: 0 0 14px;
+        }
+        .bookings-checkin-modal__late legend,
+        .cs-choices legend {
+            font-size: 13px;
+            font-weight: 600;
+            padding: 0 4px;
+        }
+        .bookings-checkin-modal__late legend small,
+        .cs-choices legend small {
+            font-weight: 400;
+            color: #666;
+        }
+        .bookings-checkin-modal__late-option,
+        .cs-choice {
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+            min-height: 44px;
+            padding: 8px 4px;
+            cursor: pointer;
+            font-size: 13px;
+            border-top: 1px solid #f1ece4;
+        }
+        .bookings-checkin-modal__late-option:first-of-type,
+        .cs-choice:first-of-type {
+            border-top: 0;
+        }
+        .bookings-checkin-modal__late-option input,
+        .cs-choice input[type="radio"] {
+            margin-top: 3px;
+            width: 18px;
+            height: 18px;
+            flex: 0 0 auto;
+        }
+        .bookings-checkin-modal__late-option small,
+        .cs-choice small {
+            display: block;
+            color: #666;
+            font-size: 12px;
+            margin-top: 2px;
+        }
+        .bookings-checkin-modal__late-option[hidden],
+        .cs-choice[hidden] {
+            display: none;
+        }
+        .cs-choice input[type="date"] {
+            margin-top: 6px;
+            min-height: 40px;
+            max-width: 220px;
         }
 
         @keyframes modal-inline-spin {
@@ -7376,7 +7730,51 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
         // Check In Modal Functions
         // paymentGate (optional): the server's payment rule for this booking (rh_checkin_payment_gate):
         // 'paid' | 'nothing_owed' | 'arrangement' | 'blocked'. Missing = the old payment-status check.
-        function openCheckInModal(bookingId, bookingReference, guestName, checkInDate, paymentStatus, roomAssigned, bookingStatus, mode = 'checkin', paymentGate = '') {
+        // Clears anything a previous attempt left behind (busy overlay, spinner button, pointer-events), so the
+        // dialog never opens frozen after a request that failed, timed out or was closed mid-way.
+        function resetCheckInModalState() {
+            const form = document.getElementById('checkInForm');
+            const submitBtn = document.getElementById('checkin_submit_btn');
+            if (form) {
+                form.dataset.busy = '';
+                setModalActionLoading(form, false);
+            }
+            if (submitBtn) {
+                submitBtn.classList.remove('btn-loading');
+                submitBtn.style.pointerEvents = '';
+                submitBtn.style.opacity = '';
+                delete submitBtn.dataset.originalContent;
+            }
+        }
+
+        // Late check-in choices: enabled only for a late arrival, nothing preselected. "Already stayed and left"
+        // switches the check-in email off (an ended stay never gets a welcome email).
+        function applyCheckInLateChoice() {
+            const form = document.getElementById('checkInForm');
+            const submitBtn = document.getElementById('checkin_submit_btn');
+            const box = document.getElementById('checkin_late_choices');
+            const emailBox = document.getElementById('checkin_email_guest');
+            const emailGroup = document.getElementById('checkin_email_group');
+            if (!form || !submitBtn || !box || box.hidden) return;
+            const picked = form.querySelector('input[name="late_arrival"]:checked');
+            const ended = !!picked && picked.value === 'ended';
+            if (emailBox) {
+                if (ended) {
+                    emailBox.checked = false;
+                    emailBox.disabled = true;
+                } else if (emailBox.disabled) {
+                    emailBox.disabled = false;
+                    emailBox.checked = true;
+                }
+            }
+            if (emailGroup) emailGroup.classList.toggle('is-disabled', ended);
+            submitBtn.disabled = !(form.dataset.prereqOk === '1' && picked);
+            submitBtn.innerHTML = ended
+                ? '<i class="fas fa-flag-checkered"></i> Record completed stay'
+                : '<i class="fas fa-sign-in-alt"></i> Confirm Late Check-In';
+        }
+
+        function openCheckInModal(bookingId, bookingReference, guestName, checkInDate, paymentStatus, roomAssigned, bookingStatus, mode = 'checkin', paymentGate = '', lateInfo = null) {
             const safeMode = mode === 'noshow' ? 'noshow' : 'checkin';
             const modal = document.getElementById('checkInModal');
             const titleEl = document.getElementById('checkin_modal_title');
@@ -7391,7 +7789,12 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             const statusInput = document.getElementById('checkin_status');
             const modeInput = document.getElementById('checkin_modal_mode');
             const submitBtn = document.getElementById('checkin_submit_btn');
+            const formEl = document.getElementById('checkInForm');
+            const lateBox = document.getElementById('checkin_late_choices');
+            const endedWrap = document.getElementById('late_opt_ended_wrap');
 
+            resetCheckInModalState();
+            if (formEl) formEl.reset();
             setBookingPageModalOpen(modal, true);
 
             document.getElementById('checkin_booking_id').value = bookingId;
@@ -7406,12 +7809,18 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             const roomOk = roomAssigned === true || roomAssigned === '1' || roomAssigned === 'true';
             const statusOk = bookingStatus === 'confirmed';
 
+            // Lateness comes from the SERVER (lateInfo) so the choices shown always match what it requires;
+            // the browser clock is only a fallback for an old cached call without it.
+            const li = (lateInfo && typeof lateInfo === 'object') ? lateInfo : null;
             const checkInDateObj = new Date(String(checkInDate) + 'T00:00:00');
             const todayObj = new Date();
             todayObj.setHours(0, 0, 0, 0);
-            const dateReached = !Number.isNaN(checkInDateObj.getTime()) && checkInDateObj <= todayObj;
-            const isLateCheckIn = !Number.isNaN(checkInDateObj.getTime()) && checkInDateObj < todayObj;
-            const overdueDays = isLateCheckIn ? Math.floor((todayObj - checkInDateObj) / 86400000) : 0;
+            const clientLate = !Number.isNaN(checkInDateObj.getTime()) && checkInDateObj < todayObj
+                ? Math.floor((todayObj - checkInDateObj) / 86400000) : 0;
+            const overdueDays = li ? (parseInt(li.late_days, 10) || 0) : clientLate;
+            const isLateCheckIn = overdueDays > 0;
+            const stayEnded = !!(li && li.stay_ended);
+            const dateReached = li ? true : (!Number.isNaN(checkInDateObj.getTime()) && checkInDateObj <= todayObj);
 
             const prereqPaymentEl = document.getElementById('prereq_payment');
             prereqPaymentEl.innerHTML = '<i class="fas ' + (paymentOk ? 'fa-check-circle' : 'fa-times-circle') + '"></i> ';
@@ -7427,7 +7836,24 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             modeInput.value = safeMode;
             contextEl.style.display = 'block';
             errorEl.style.display = 'none';
+            errorEl.style.color = '';
             noteGroupEl.style.display = 'block';
+
+            // Late choices: hidden + disabled (never posted) unless this is a late check-in.
+            const showLate = safeMode === 'checkin' && isLateCheckIn;
+            if (lateBox) {
+                lateBox.hidden = !showLate;
+                lateBox.querySelectorAll('input[name="late_arrival"]').forEach(function (r) {
+                    r.checked = false;
+                    r.disabled = !showLate || (r.value === 'ended' && !stayEnded);
+                });
+            }
+            if (endedWrap) endedWrap.hidden = !(showLate && stayEnded);
+            if (showLate && li) {
+                document.getElementById('late_opt_booked_label').textContent = 'Guest arrived on the booked date (' + (li.check_in || checkInDate) + '), recorded late';
+                document.getElementById('late_opt_today_label').textContent = 'Guest is arriving today (' + (li.today || '') + ')';
+                document.getElementById('late_opt_ended_label').textContent = 'Guest already stayed and has left: record the completed stay (' + (li.check_in || '') + ' to ' + (li.check_out || '') + ')';
+            }
 
             // "Email the guest a check-in confirmation": check-in only (ticked each time the modal opens); a no-show
             // never posts it.
@@ -7435,6 +7861,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             if (emailGroupEl) {
                 const isCheckin = safeMode === 'checkin';
                 emailGroupEl.style.display = isCheckin ? 'block' : 'none';
+                emailGroupEl.classList.remove('is-disabled');
                 emailGroupEl.querySelectorAll('input').forEach(function (el) { el.disabled = !isCheckin; });
                 const emailBox = document.getElementById('checkin_email_guest');
                 if (emailBox) emailBox.checked = true;
@@ -7457,6 +7884,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 submitBtn.classList.remove('btn-primary');
                 submitBtn.classList.add('btn-danger');
                 submitBtn.innerHTML = '<i class="fas fa-user-slash"></i> Mark No-Show';
+                if (formEl) formEl.dataset.prereqOk = canNoShow ? '1' : '0';
 
                 if (!canNoShow) {
                     const issues = [];
@@ -7472,18 +7900,19 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             statusInput.value = 'checked-in';
             titleEl.innerHTML = '<i class="fas fa-sign-in-alt"></i> ' + (isLateCheckIn ? 'Late Check-In' : 'Check In Guest');
             subtitleEl.textContent = isLateCheckIn ?
-                'Guest is arriving after the scheduled check-in date.' :
+                'The booked arrival date has passed. Say what happened before checking in.' :
                 'Verify prerequisites and complete guest arrival.';
             modeBadgeEl.textContent = isLateCheckIn ? 'Late Check-In' : 'Standard Check-In';
             modeBadgeEl.classList.remove('is-danger');
             modeHintEl.textContent = 'Check-in updates booking and occupancy immediately.';
             contextEl.innerHTML = isLateCheckIn ?
-                ('<i class="fas fa-clock"></i> Check-in is overdue by ' + overdueDays + ' day(s).') :
+                ('<i class="fas fa-clock"></i> Check-in is overdue by ' + overdueDays + ' day(s).' + (stayEnded ? ' The booked stay has already ended.' : '')) :
                 '<i class="fas fa-calendar-check"></i> On-time check-in workflow.';
             prerequisitesEl.style.display = 'block';
 
             const canCheckIn = paymentOk && statusOk && dateReached; // roomOk is advisory only
-            submitBtn.disabled = !canCheckIn;
+            if (formEl) formEl.dataset.prereqOk = canCheckIn ? '1' : '0';
+            submitBtn.disabled = !canCheckIn || showLate; // a late check-in waits for a choice
             submitBtn.classList.remove('btn-danger');
             submitBtn.classList.add('btn-primary');
             submitBtn.innerHTML = '<i class="fas fa-sign-in-alt"></i> ' + (isLateCheckIn ? 'Confirm Late Check-In' : 'Check In');
@@ -7506,6 +7935,8 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             const modal = document.getElementById('checkInModal');
             setBookingPageModalOpen(modal, false);
             document.getElementById('checkInForm').reset();
+            resetCheckInModalState();
+            bkDeepCancel(); // opened from booking-details (?action=checkin): go back to the booking
         }
 
         // Cancel Booking Modal Functions
@@ -7598,55 +8029,107 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 });
         });
 
+        document.getElementById('checkInForm').addEventListener('change', function(e) {
+            if (e.target && e.target.name === 'late_arrival') {
+                applyCheckInLateChoice();
+                const errorEl = document.getElementById('checkin_error_message');
+                if (errorEl && errorEl.dataset.lateError === '1') {
+                    errorEl.style.display = 'none';
+                    errorEl.dataset.lateError = '';
+                }
+            }
+        });
+
+        // Every path ends with the dialog usable again: the button and the busy overlay are restored on any
+        // error (server message, non-JSON answer, timeout, network), and a second click while a request is
+        // running does nothing instead of sending it twice.
         document.getElementById('checkInForm').addEventListener('submit', function(e) {
             e.preventDefault();
-            const formData = new FormData(this);
-            const note = document.getElementById('checkin_note').value;
-            const mode = document.getElementById('checkin_modal_mode').value;
-            if (note) {
-                formData.append('checkin_note', note);
-            }
-
-            const submitBtn = this.querySelector('button[type="submit"]');
             const form = this;
-            if (submitBtn) setButtonLoading(submitBtn, true);
-            setModalActionLoading(form, true, mode === 'noshow' ? 'Marking as No-Show...' : 'Checking in guest...');
+            if (form.dataset.busy === '1') return;
+            const mode = document.getElementById('checkin_modal_mode').value;
+            const errorEl = document.getElementById('checkin_error_message');
+            const lateBox = document.getElementById('checkin_late_choices');
+            if (mode !== 'noshow' && lateBox && !lateBox.hidden && !form.querySelector('input[name="late_arrival"]:checked')) {
+                errorEl.textContent = 'Choose what happened (arrived on the booked date, arriving today' + (document.getElementById('late_opt_ended_wrap').hidden ? '' : ', or already stayed and left') + ') before checking in.';
+                errorEl.style.color = '';
+                errorEl.style.display = 'block';
+                errorEl.dataset.lateError = '1';
+                return;
+            }
+            const formData = new FormData(this); // checkin_note is posted by its own field
+            const picked = form.querySelector('input[name="late_arrival"]:checked');
+            const isEnded = mode !== 'noshow' && !!picked && picked.value === 'ended';
+            const submitBtn = this.querySelector('button[type="submit"]');
+            const busyText = mode === 'noshow' ? 'Marking as No-Show...' : (isEnded ? 'Recording the completed stay...' : 'Checking in guest...');
+            const failText = mode === 'noshow' ? 'Error marking booking as no-show' : 'Error checking in guest';
+            const okText = mode === 'noshow' ? 'Booking marked as no-show successfully.' : (isEnded ? 'Completed stay recorded.' : 'Guest checked in successfully.');
+            const setBusy = function(on) {
+                form.dataset.busy = on ? '1' : '';
+                if (submitBtn) setButtonLoading(submitBtn, on);
+                setModalActionLoading(form, on, busyText);
+            };
+            const showError = function(msg) {
+                errorEl.textContent = msg;
+                errorEl.style.color = '';
+                errorEl.style.display = 'block';
+                Alert.show(msg, 'error');
+            };
 
-            postBookingAction(formData, mode === 'noshow' ? 'Error marking booking as no-show' : 'Error checking in guest')
-                .then(data => {
-                    setModalActionLoading(form, false);
-                    reloadWithBookingActionMessage(data, mode === 'noshow' ? 'Booking marked as no-show successfully.' : 'Guest checked in successfully.');
-                })
-                .catch(async error => {
-                    setModalActionLoading(form, false);
-                    if (submitBtn) setButtonLoading(submitBtn, false);
-                    if (error.data && error.data.needs_confirm_room && !formData.has('confirm_checkin_room_not_ready')) {
+            const send = async function() {
+                setBusy(true);
+                let data;
+                try {
+                    // A check-in may send the guest an email: give the server longer than the 30 s default.
+                    data = await postBookingAction(formData, failText, 90000);
+                } catch (error) {
+                    setBusy(false);
+                    const d = (error && error.data) || {};
+                    if (d.needs_confirm_room && !formData.has('confirm_checkin_room_not_ready')) {
                         const anyway = await confirmAdminAction({
                             title: 'Room not marked clean',
-                            message: error.data.message,
+                            message: d.message,
                             confirmText: 'Check in anyway',
                             icon: 'fa-broom'
                         });
                         if (anyway) {
                             formData.append('confirm_checkin_room_not_ready', '1');
-                            if (submitBtn) setButtonLoading(submitBtn, true);
-                            setModalActionLoading(form, true, 'Checking in guest...');
-                            postBookingAction(formData, 'Error checking in guest')
-                                .then(data => {
-                                    setModalActionLoading(form, false);
-                                    reloadWithBookingActionMessage(data, 'Guest checked in successfully.');
-                                })
-                                .catch(err2 => {
-                                    setModalActionLoading(form, false);
-                                    if (submitBtn) setButtonLoading(submitBtn, false);
-                                    Alert.show(err2.message || 'Error checking in guest', 'error');
-                                });
+                            return send();
                         }
                         return;
                     }
-                    Alert.show(error.message || (mode === 'noshow' ? 'Error marking booking as no-show' : 'Error checking in guest'), 'error');
-                });
+                    if (d.needs_confirm_balance && !formData.has('confirm_checkout_with_balance')) {
+                        const withBalance = await confirmAdminAction({
+                            title: 'Record the stay with a balance?',
+                            message: d.message,
+                            details: ['The stay is recorded as checked in and out; the balance stays owed and is recorded in the booking timeline.'],
+                            confirmText: 'Record with balance',
+                            icon: 'fa-right-from-bracket'
+                        });
+                        if (withBalance) {
+                            formData.append('confirm_checkout_with_balance', '1');
+                            return send();
+                        }
+                        return;
+                    }
+                    const msg = String((error && error.message) || failText);
+                    showError(msg.indexOf('timed out') !== -1
+                        ? 'The server took too long to answer. The check-in may still have gone through: reload the page and check the booking before trying again.'
+                        : msg);
+                    return;
+                }
+                closeCheckInModalSilently();
+                showLoadingOverlay('Updating the list...');
+                reloadWithBookingActionMessage(data, okText);
+            };
+            send();
         });
+
+        // Success: the page reloads; hide the dialog first so it never sits on screen "busy".
+        function closeCheckInModalSilently() {
+            const modal = document.getElementById('checkInModal');
+            if (modal) setBookingPageModalOpen(modal, false);
+        }
 
         document.getElementById('cancelBookingForm').addEventListener('submit', function(e) {
             e.preventDefault();
@@ -7681,9 +8164,9 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             setBookingPageModalOpen(modal, !modal.classList.contains('active'));
         }
 
-        function openMissedCheckinWorkflow(bookingId, bookingReference, guestName, checkInDate, paymentStatus, roomAssigned, bookingStatus, mode = 'checkin', paymentGate = '') {
+        function openMissedCheckinWorkflow(bookingId, bookingReference, guestName, checkInDate, paymentStatus, roomAssigned, bookingStatus, mode = 'checkin', paymentGate = '', lateInfo = null) {
             closeMissedCheckinsModal();
-            openCheckInModal(bookingId, bookingReference, guestName, checkInDate, paymentStatus, roomAssigned, bookingStatus, mode, paymentGate);
+            openCheckInModal(bookingId, bookingReference, guestName, checkInDate, paymentStatus, roomAssigned, bookingStatus, mode, paymentGate, lateInfo);
         }
 
         function openMissedCancelWorkflow(bookingId, bookingReference, guestName) {
@@ -8530,7 +9013,9 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         const roomAssigned = button.dataset.roomAssigned === 'true' || button.dataset.roomAssigned === '1';
                         const bookingStatus = button.dataset.bookingStatus;
                         if (typeof openCheckInModal === 'function') {
-                            openCheckInModal(bookingId, bookingRef, guestName, checkInDate, paymentStatus, roomAssigned, bookingStatus, 'checkin', button.dataset.paymentGate || '');
+                            let lateInfo = null;
+                            try { lateInfo = button.dataset.lateInfo ? JSON.parse(button.dataset.lateInfo) : null; } catch (lateErr) { lateInfo = null; }
+                            openCheckInModal(bookingId, bookingRef, guestName, checkInDate, paymentStatus, roomAssigned, bookingStatus, 'checkin', button.dataset.paymentGate || '', lateInfo);
                         }
                     } else if (action === 'no-show') {
                         event.preventDefault();
@@ -8541,7 +9026,9 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         const roomAssigned = button.dataset.roomAssigned === 'true' || button.dataset.roomAssigned === '1';
                         const bookingStatus = button.dataset.bookingStatus;
                         if (typeof openCheckInModal === 'function') {
-                            openCheckInModal(bookingId, bookingRef, guestName, checkInDate, paymentStatus, roomAssigned, bookingStatus, 'noshow');
+                            let lateInfoNs = null;
+                            try { lateInfoNs = button.dataset.lateInfo ? JSON.parse(button.dataset.lateInfo) : null; } catch (lateErr) { lateInfoNs = null; }
+                            openCheckInModal(bookingId, bookingRef, guestName, checkInDate, paymentStatus, roomAssigned, bookingStatus, 'noshow', '', lateInfoNs);
                         }
                     } else if (action === 'upgrade-room') {
                         event.preventDefault();
@@ -8588,6 +9075,16 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         checkoutBooking(deepId, row.querySelector('td strong') ? row.querySelector('td strong').textContent.trim() : '');
                     } else {
                         bounce('Only an in-house (checked-in) guest can be checked out.');
+                    }
+                } else if (deepAction === 'checkin') {
+                    // From booking-details: a late arrival is checked in here, where the dialog asks what happened.
+                    const ciBtn = document.querySelector('[data-action="check-in"][data-booking-id="' + deepId + '"]');
+                    if (ciBtn && !ciBtn.classList.contains('disabled')) {
+                        ciBtn.click();
+                    } else if (ciBtn) {
+                        bounce(ciBtn.getAttribute('title') || 'This booking cannot be checked in yet.');
+                    } else {
+                        bounce('This booking cannot be checked in from here (it must be confirmed, with the arrival date reached, and you need the check-in permission).');
                     }
                 } else if (deepAction === 'assign-room') {
                     const btn = document.querySelector('[data-action="assign-room"][data-booking-id="' + deepId + '"]');

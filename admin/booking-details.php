@@ -620,6 +620,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                         : null;
                     if (!$validation['allowed']) {
                         $_SESSION['error_message'] = getBookingActionErrorMessage('check_in', $validation['reason']);
+                    } elseif ((int)($validation['late_days'] ?? 0) > 0) {
+                        // A late arrival is checked in on the bookings list, where the dialog asks what happened
+                        // (owner 2026-11-12 "Dont assume, have options"). Nothing is changed here.
+                        $_SESSION['error_message'] = 'This arrival is ' . (int)$validation['late_days'] . ' day(s) late. Use Late Check-In so you can say when the guest arrived.';
                     } elseif (!$roomGate['allowed']) {
                         $_SESSION['error_message'] = $roomGate['message'];
                     } else {
@@ -1635,7 +1639,12 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                         </a>
                     <?php endif; ?>
 
-                    <?php if ($bd_perm_checkin): ?><form method="POST" class="booking-action-form" data-admin-confirm="<?php echo $ci_room_override ? htmlspecialchars($ci_room_gate['message'], ENT_QUOTES) : 'Check in this guest and mark the assigned room occupied?'; ?>" data-admin-confirm-title="<?php echo $ci_room_override ? 'Room not marked clean' : 'Check in guest'; ?>" data-admin-confirm-ok="<?php echo $ci_room_override ? 'Check in anyway' : 'Check in'; ?>" data-admin-confirm-icon="fa-right-to-bracket" data-admin-submit-text="Checking in..." data-admin-confirm-check="email_guest" data-admin-confirm-check-label="Email the guest a check-in confirmation" data-admin-confirm-check-help="Untick to check in quietly: no check-in email goes to the guest.">
+                    <?php $ci_late = $checkin_date_reached && $check_in_date < $today; /* late arrival: the bookings-list dialog asks what happened */ ?>
+                    <?php if ($bd_perm_checkin && $ci_late): ?>
+                        <a href="bookings.php?action=checkin&amp;booking_id=<?php echo (int)$booking_id; ?>" class="action-btn checkin<?php echo ($can_checkin && $room_assigned) ? '' : ' is-disabled'; ?>"<?php echo ($can_checkin && $room_assigned) ? '' : ' aria-disabled="true" onclick="return false;" title="' . htmlspecialchars($checkin_disabled_reason, ENT_QUOTES) . '"'; ?> data-help="Late Check-In|The booked arrival date has passed. This opens the check-in dialog, which asks what happened: arrived on the booked date, arriving today, or (if the stay is over) already stayed and left.">
+                            <i class="fas fa-right-to-bracket"></i> Late Check-In
+                        </a>
+                    <?php elseif ($bd_perm_checkin): ?><form method="POST" class="booking-action-form" data-admin-confirm="<?php echo $ci_room_override ? htmlspecialchars($ci_room_gate['message'], ENT_QUOTES) : 'Check in this guest and mark the assigned room occupied?'; ?>" data-admin-confirm-title="<?php echo $ci_room_override ? 'Room not marked clean' : 'Check in guest'; ?>" data-admin-confirm-ok="<?php echo $ci_room_override ? 'Check in anyway' : 'Check in'; ?>" data-admin-confirm-icon="fa-right-to-bracket" data-admin-submit-text="Checking in..." data-admin-confirm-check="email_guest" data-admin-confirm-check-label="Email the guest a check-in confirmation" data-admin-confirm-check-help="Untick to check in quietly: no check-in email goes to the guest.">
                         <input type="hidden" name="booking_action" value="checkin">
                         <input type="hidden" name="email_guest" value="1">
                         <?php if ($ci_room_override): ?><input type="hidden" name="confirm_checkin_room_not_ready" value="1"><?php endif; ?>
