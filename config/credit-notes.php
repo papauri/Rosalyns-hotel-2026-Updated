@@ -515,7 +515,7 @@ if (!function_exists('recordCreditNoteRefundLegs')) {
      *
      * @return array{total:float,refs:array}
      */
-    function recordCreditNoteRefundLegs(PDO $pdo, int $bookingId, string $bookingReference, float $amount, int $creditNoteId, string $creditNoteNumber, int $adminUserId, string $reason = 'overpayment', string $bookingType = 'room'): array
+    function recordCreditNoteRefundLegs(PDO $pdo, int $bookingId, string $bookingReference, float $amount, int $creditNoteId, string $creditNoteNumber, int $adminUserId, string $reason = 'overpayment', string $bookingType = 'room', ?array $presetAllocs = null): array
     {
         require_once __DIR__ . '/../includes/finance-sequences.php';
         $out = ['total' => 0.0, 'refs' => []];
@@ -526,7 +526,9 @@ if (!function_exists('recordCreditNoteRefundLegs')) {
         if (is_file($syncInclude)) {
             require_once $syncInclude;
         }
-        if ($bookingType === 'room') {
+        if ($presetAllocs !== null) {
+            $allocs = $presetAllocs; // already split by payer by the caller (company pays later: one note per payer)
+        } elseif ($bookingType === 'room') {
             $allocs = allocateBookingRefunds($pdo, $bookingId, $amount, true, 'any'); // money into a note, not a cash payout
         } else {
             $allocs = rh_allocate_account_refunds($pdo, $bookingType, $bookingId, $amount, true);

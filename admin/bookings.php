@@ -2122,13 +2122,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     require_once '../config/receipts.php';
                     $settlementReceiptNotice = receipt_after_payment($pdo, (int)$settlement_pay_id, $user)['notice'];
                 }
-                // Refund notice for unused nights (one per refund leg).
+                // Refund notice for unused nights (one per refund leg). Company money: to the company (staff told if it
+                // could not be sent).
+                $refundNoticeNote = '';
                 foreach ($earlyRefundLegs as $erl) {
                     try {
                         require_once '../config/email.php';
                         $erlRes = sendRefundNotificationEmail($erl['orig'], $erl['ref'], (float)$erl['amount'], (string)$erl['reason']);
                         if (empty($erlRes['success'])) {
                             error_log('Early-checkout refund notice not sent for ' . $erl['ref'] . ': ' . ($erlRes['message'] ?? 'unknown'));
+                            if (strpos((string)($erlRes['message'] ?? ''), 'went back to') !== false) {
+                                $refundNoticeNote .= ' ' . $erlRes['message'];
+                            }
                         }
                     } catch (Throwable $rfEx) {
                         error_log('Early-checkout refund notice failed for ' . $erl['ref'] . ': ' . $rfEx->getMessage());
@@ -2136,7 +2141,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 header('Content-Type: application/json');
-                $checkoutMessage = 'Checkout completed. ' . $settleDescribe . $settlementReceiptNotice
+                $checkoutMessage = 'Checkout completed. ' . $settleDescribe . $settlementReceiptNotice . $refundNoticeNote
                     . bookings_final_invoice_note((int)$booking_id, (int)($user['id'] ?? 0), !empty($_POST['email_final_invoice']) ? true : null);
                 echo json_encode(['success' => true, 'message' => $checkoutMessage]);
                 exit;
@@ -2212,6 +2217,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ");
             $refunds_stmt->execute([$booking_id]);
             $cf_refunds = $refunds_stmt->fetchAll(PDO::FETCH_ASSOC);
+            // Company pays later: Record payment asks who paid (guest / company) on an on-account booking.
+            $cf_split = rh_booking_bill_split($pdo, (int)$booking_id, $cf_bk);
 
             header('Content-Type: application/json');
             echo json_encode([
@@ -2232,6 +2239,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'folio_charges'    => (float)($cf_bk['folio_charges_total'] ?? 0),
                     'amount_paid'      => (float)($cf_bk['amount_paid'] ?? 0),
                     'amount_due'       => (float)($cf_bk['amount_due'] ?? 0),
+                    'on_account'       => !empty($cf_split['on_account']),
+                    'company_name'     => (string)($cf_split['name'] ?? ''),
+                    'company_due'      => (float)($cf_split['company_due'] ?? 0),
+                    'guest_due'        => (float)($cf_split['guest_due'] ?? 0),
                 ],
                 'charges'  => $cf_charges,
                 'payments' => $cf_pays,
@@ -2275,6 +2286,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             if (!in_array($pay_method, ['cash', 'bank_transfer', 'mobile_money', 'credit_card', 'debit_card', 'cheque', 'other'], true)) {
                 $pay_method = 'other';
+            }
+
+            // Company pays later (fix 2026-11-13): on an on-account booking staff say who paid, nothing preselected.
+            // Company money becomes a one-line company payment (billing_remittances + line) through the same helper
+            // as Company accounts, so it counts as the company's; guest money stays a normal payment below.
+            $cr_bill = rh_booking_billing($pdo, ['id' => $booking_id]);
+            if (!empty($cr_bill['on_account'])) {
+                $cr_paidBy = (string)($_POST['paid_by'] ?? '');
+                if (!in_array($cr_paidBy, ['guest', 'company'], true)) {
+                    header('Content-Type: application/json');
+                    echo json_encode(['success' => false, 'message' => 'Choose who paid: the guest or ' . $cr_bill['name'] . '. Nothing was recorded.']);
+                    exit;
+                }
+                if ($cr_paidBy === 'company') {
+                    // Same permission as recording it on Company accounts (page company_accounts + Add Payment).
+                    if (!hasPermission((int)($user['id'] ?? 0), 'company_accounts') || !hasPermission((int)($user['id'] ?? 0), 'payment_add')) {
+                        header('Content-Type: application/json');
+                        echo json_encode(['success' => false, 'message' => 'You do not have permission to record company payments (Company accounts). Nothing was recorded.']);
+                        exit;
+                    }
+                    if (!empty($_POST['confirm_overpay'])) {
+                        header('Content-Type: application/json');
+                        echo json_encode(['success' => false, 'message' => 'A company payment cannot be more than the company owes on this booking. Nothing was recorded.']);
+                        exit;
+                    }
+                    try {
+                        $cr_rem = rh_billing_record_remittance($pdo, (int)$cr_bill['account_id'], [
+                            'amount' => (string)$pay_amount, 'payment_method' => $pay_method, 'received_date' => $pay_date,
+                            'bank_reference' => '', 'notes' => $combined_notes, 'lines' => [$booking_id => (string)$pay_amount],
+                        ], $user);
+                    } catch (Throwable $crRemEx) {
+                        header('Content-Type: application/json');
+                        echo json_encode(['success' => false, 'message' => 'Could not record the company payment: ' . $crRemEx->getMessage()]);
+                        exit;
+                    }
+                    $cr_leg = $cr_rem['legs'][0];
+                    $upd_stmt = $pdo->prepare("SELECT amount_paid, amount_due, payment_status, booking_reference FROM bookings WHERE id = ?");
+                    $upd_stmt->execute([$booking_id]);
+                    $upd = $upd_stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+                    logBookingAudit($booking_id, 'payment_consolidation', ['amount_paid' => null],
+                        ['amount_paid' => $pay_amount, 'payment_reference' => $cr_leg['payment_reference'], 'paid_by' => 'company', 'company' => $cr_bill['name'],
+                            'remittance' => $cr_rem['reference']],
+                        'Company payment ' . $cr_rem['reference'] . ' from ' . $cr_bill['name'] . ' recorded on the booking by ' . ($user['full_name'] ?? ($user['username'] ?? '')),
+                        (string)($upd['booking_reference'] ?? ''));
+                    header('Content-Type: application/json');
+                    echo json_encode([
+                        'success'           => true,
+                        'message'           => $cr_bill['name'] . ' paid ' . $currency_symbol . ' ' . number_format($pay_amount, 2) . ' (company payment ' . $cr_rem['reference']
+                            . ', receipt ' . $cr_leg['receipt_number'] . '). The company still owes ' . $currency_symbol . ' ' . number_format((float)$cr_leg['company_due_after'], 2)
+                            . ' on this booking. Send the payment advice from Company accounts.',
+                        'payment_reference' => $cr_leg['payment_reference'],
+                        'new_amount_paid'   => (float)($upd['amount_paid'] ?? 0),
+                        'new_amount_due'    => (float)($upd['amount_due'] ?? 0),
+                        'new_payment_status' => (string)($upd['payment_status'] ?? ''),
+                    ]);
+                    exit;
+                }
             }
 
             // Unique reference
@@ -2637,26 +2705,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
             // Money returned = the guest is told (refund notice per leg; credit note email), after the commit.
+            // Company money (company pays later): the notice / credit note goes to the company billing email.
+            $snNote = '';
             foreach ($snRes['refund_legs'] as $snLeg) {
                 try {
                     require_once '../config/email.php';
                     $snMail = sendRefundNotificationEmail($snLeg['orig'], $snLeg['ref'], (float)$snLeg['amount'], (string)$snLeg['reason']);
                     if (empty($snMail['success'])) {
                         error_log('Nights refund notice not sent for ' . $snLeg['ref'] . ': ' . ($snMail['message'] ?? 'unknown'));
+                        if (strpos((string)($snMail['message'] ?? ''), 'went back to') !== false) {
+                            $snNote .= ' ' . $snMail['message'];
+                        }
                     }
                 } catch (Throwable $snMailEx) {
                     error_log('Nights refund notice failed for ' . $snLeg['ref'] . ': ' . $snMailEx->getMessage());
                 }
             }
-            if (!empty($snRes['credit_note']) && $snRes['credit_note']['email'] !== '') {
+            foreach (($snRes['credit_notes'] ?? []) as $snCn) {
+                if ($snCn['email'] === '') {
+                    if ($snCn['payer'] === 'company') {
+                        $snNote .= ' Credit note ' . $snCn['number'] . ' was not emailed: ' . $snCn['name'] . ' has no billing email.';
+                        rh_log_event('payments', 'warning', 'Company credit note not emailed', ['booking_id' => $snId, 'credit_note' => $snCn['number'], 'company' => $snCn['name']]);
+                    }
+                    continue;
+                }
                 try {
                     require_once '../config/credit-notes.php';
-                    sendCreditNoteEmail($pdo, (int)$snRes['credit_note']['id']);
+                    sendCreditNoteEmail($pdo, (int)$snCn['id']);
                 } catch (Throwable $snCnEx) {
                     error_log('Nights credit note email failed: ' . $snCnEx->getMessage());
                 }
             }
-            echo json_encode(['success' => true, 'message' => htmlspecialchars($snRes['describe'], ENT_QUOTES, 'UTF-8')]);
+            echo json_encode(['success' => true, 'message' => htmlspecialchars($snRes['describe'] . $snNote, ENT_QUOTES, 'UTF-8')]);
             exit;
         } elseif ($action === 'extend_stay') {
             // Extend the checkout date for a checked-in booking
@@ -3570,6 +3650,10 @@ try {
     $current_page_count = count($bookings);
     // Who created each booking on this page: one read-only query for the page's ids (never one per row).
     $bk_created_by = rh_created_by_map($pdo, array_column($bookings, 'id'));
+    // Company pays later: who owes each on-account row on this page, in one batch (never queries per row).
+    $bk_bill_splits = rh_billing_ready($pdo) ? rh_billing_splits_for_rows($pdo, array_values(array_filter($bookings, static function ($r) {
+        return (int)($r['billing_account_id'] ?? 0) > 0 || (int)($r['primary_booking_id'] ?? 0) > 0;
+    }))) : [];
 
     // Latest conference enquiries & bookings (one table holds both). Only when the person can open the
     // Conference page (permission + module); the full list, quotes and payments live there.
@@ -4073,8 +4157,8 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                             <?php
                                             // Company pays later (migration 084): the list says who owes the balance instead of a plain "Unpaid".
                                             $bkBillLabel = '';
-                                            if (rh_billing_ready($pdo) && ((int)($booking['billing_account_id'] ?? 0) > 0 || (int)($booking['primary_booking_id'] ?? 0) > 0)) {
-                                                $bkBillLabel = rh_booking_pay_label(rh_booking_bill_split($pdo, (int)$booking['id']));
+                                            if (isset($bk_bill_splits[(int)$booking['id']])) {
+                                                $bkBillLabel = rh_booking_pay_label($bk_bill_splits[(int)$booking['id']]);
                                             }
                                             ?>
                                             <?php if ($bkBillLabel !== ''): ?>
@@ -4225,7 +4309,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
 
                                                 <?php /* ── Money ── */ ?>
                                                 <?php if ($can_mark_paid && $_perm_pay): ?>
-                                                    <button class="quick-action paid" title="Record payment" aria-label="Record payment" data-help="Record Payment|Opens a dialog: take the full balance or a part payment, choose how the guest paid, then confirm. Nothing is recorded until you confirm. Only shown before any payment has been recorded; after that use Payments &amp; balance in the More menu." onclick="rhQuickPayOpen(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, <?php echo $bk_guest_js; ?>, <?php echo htmlspecialchars(json_encode(round(max(0.0, $bk_due), 2)), ENT_QUOTES); ?>)">
+                                                    <button class="quick-action paid" title="Record payment" aria-label="Record payment" data-help="Record Payment|Opens a dialog: take the full balance or a part payment, choose how the guest paid, then confirm. Nothing is recorded until you confirm. Only shown before any payment has been recorded; after that use Payments &amp; balance in the More menu." onclick="<?php if (!empty($bk_bill_splits[$bk_id]['on_account'])): /* company pays later: the Payments & balance dialog asks who paid (guest / company) */ ?>openConsolidationModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>)<?php else: ?>rhQuickPayOpen(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, <?php echo $bk_guest_js; ?>, <?php echo htmlspecialchars(json_encode(round(max(0.0, $bk_due), 2)), ENT_QUOTES); ?>)<?php endif; ?>">
                                                         <i class="fas fa-money-bill-wave"></i>
                                                     </button>
                                                 <?php endif; ?>
@@ -5603,6 +5687,8 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 settlement.booked_rate_text = String(assessResp.booked_rate_text || '');
                 // On a company account: what stays on the company's account (never blocks checkout, owner D2).
                 window._csOnAccount = !!assessResp.company_name;
+                window._csCompanyName = String(assessResp.company_name || '');
+                window._csCompanyDue = parseFloat(assessResp.company_due || 0) || 0;
                 window._csCompany = (assessResp.company_name && parseFloat(assessResp.company_due || 0) > 0.01)
                     ? 'On account: ' + String(assessResp.company_name) + ' owes ' + fmt(assessResp.company_due) + '. It stays on the company account and the final invoice goes to the company billing email.'
                     : '';
@@ -5771,6 +5857,13 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             // the guest's (the server re-checks the real split before checkout).
             if (!window._csOnAccount && q.direction === 'charge') balanceAfter = Math.max(0, due + parseFloat(q.amount) - received);
             if (!window._csOnAccount && q.direction === 'refund') balanceAfter = Math.max(0, due - parseFloat(q.amount));
+            // On account (owner D2): the extra nights go on the company's share (no override); money received now is the
+            // guest's and pays the guest's own share first, any rest lowers the company's share.
+            let companyAfter = null;
+            if (window._csOnAccount && q.direction === 'charge') {
+                balanceAfter = Math.max(0, due - received);
+                companyAfter = Math.max(0, (window._csCompanyDue || 0) + parseFloat(q.amount) - Math.max(0, received - due));
+            }
             st.balanceAfter = balanceAfter;
             const rows = [
                 ['Nights', q.nights + ' night(s): ' + q.stay_text],
@@ -5778,7 +5871,8 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 ...(q.direction === 'charge' ? [['Extra nights', String(q.extra_nights)], ['Added to the bill', '<strong>' + fmt(q.amount) + '</strong>']] : []),
                 ...(q.direction === 'refund' ? [['Unused nights', String(q.unused_nights)], ['Bill reduced by', fmt(q.amount)], ['Refund now (capped at paid)', '<strong>' + fmt(q.refundable) + '</strong>']] : []),
                 ['Paid so far', fmt(s.amount_paid)],
-                ['Balance after checkout', '<strong>' + fmt(balanceAfter) + '</strong>']
+                [window._csOnAccount ? 'Guest owes after checkout' : 'Balance after checkout', '<strong>' + fmt(balanceAfter) + '</strong>'],
+                ...(companyAfter !== null ? [[escHtml(window._csCompanyName) + ' owes after checkout<br><small style="color:#666;">stays on the company account</small>', fmt(companyAfter)]] : [])
             ];
             quoteEl.innerHTML = '<p style="margin:0 0 8px;">' + escHtml(q.describe) + '</p>' +
                 '<table class="cs-table">' + rows.map(function (r) { return '<tr><td>' + r[0] + '</td><td>' + r[1] + '</td></tr>'; }).join('') + '</table>';
@@ -6147,7 +6241,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
     <!-- Quick pay (owner 2026-11-12: full OR part payment, never one click). Posts to payment-add.php, the same path as
          Payments > Add Payment (balance limit, VAT split, receipt email), then comes back to this list. -->
     <div id="rhQuickPayModal" class="modal-overlay" aria-hidden="true" role="dialog" aria-modal="true" aria-labelledby="rhQuickPayTitle">
-        <div class="modal-content" style="max-width:min(96vw,32rem);width:min(96vw,32rem);">
+        <div class="modal-content rh-dialog-narrow">
             <div class="modal-header">
                 <h3 id="rhQuickPayTitle"><i class="fas fa-money-bill-wave"></i> Record payment</h3>
                 <button type="button" class="modal-close" aria-label="Close" onclick="rhQuickPayClose()">&times;</button>
@@ -6162,26 +6256,26 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     <input type="hidden" name="return_to" value="bookings">
                     <input type="hidden" name="client_uuid" id="rhQpUuid" value="">
                     <input type="hidden" name="payment_amount" id="rhQpAmount" value="">
-                    <p id="rhQpSummary" style="margin:0 0 12px;line-height:1.5;"></p>
+                    <p id="rhQpSummary" class="rh-dialog-lead"></p>
                     <div id="rhQpOwedWrap">
-                        <fieldset style="border:0;padding:0;margin:0 0 12px;">
-                            <legend style="font-weight:600;margin-bottom:6px;">How much did the guest pay? *</legend>
-                            <label style="display:flex;gap:8px;align-items:center;min-height:44px;cursor:pointer;">
+                        <fieldset class="rh-choices">
+                            <legend>How much did the guest pay? *</legend>
+                            <label class="rh-choice">
                                 <input type="radio" name="rh_qp_kind" value="full" id="rhQpFull">
                                 <span id="rhQpFullLabel">The full balance</span>
                             </label>
-                            <label style="display:flex;gap:8px;align-items:center;min-height:44px;cursor:pointer;">
+                            <label class="rh-choice">
                                 <input type="radio" name="rh_qp_kind" value="part" id="rhQpPart">
                                 <span>Part of it</span>
                             </label>
-                            <div id="rhQpPartWrap" style="display:none;margin:4px 0 0 26px;">
-                                <label for="rhQpPartAmount" style="display:block;font-weight:600;margin-bottom:4px;">Amount received (<?php echo htmlspecialchars((string)getSetting('currency_symbol', 'MWK'), ENT_QUOTES); ?>) *</label>
+                            <div id="rhQpPartWrap" class="form-group rh-choice-detail" style="display:none;">
+                                <label for="rhQpPartAmount">Amount received (<?php echo htmlspecialchars((string)getSetting('currency_symbol', 'MWK'), ENT_QUOTES); ?>) *</label>
                                 <input type="number" step="0.01" min="0.01" id="rhQpPartAmount" class="form-control" inputmode="decimal">
-                                <small id="rhQpPartHint" style="display:block;margin-top:4px;"></small>
+                                <small id="rhQpPartHint"></small>
                             </div>
                         </fieldset>
-                        <div class="form-group" style="margin-bottom:12px;">
-                            <label for="rhQpMethod" style="display:block;font-weight:600;margin-bottom:4px;">How did they pay? *</label>
+                        <div class="form-group">
+                            <label for="rhQpMethod">How did they pay? *</label>
                             <select name="payment_method" id="rhQpMethod" class="form-control" required>
                                 <option value="">Choose...</option>
                                 <option value="cash">Cash</option>
@@ -6193,13 +6287,13 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                 <option value="other">Other</option>
                             </select>
                         </div>
-                        <div class="form-group" style="margin-bottom:4px;">
-                            <label for="rhQpRef" style="display:block;font-weight:600;margin-bottom:4px;">Transaction reference</label>
+                        <div class="form-group">
+                            <label for="rhQpRef">Transaction reference</label>
                             <input type="text" name="transaction_reference" id="rhQpRef" class="form-control" maxlength="100" placeholder="Mobile money ID, bank ref, cheque no...">
                         </div>
-                        <p id="rhQpConfirmText" style="margin:12px 0 0;font-weight:600;" aria-live="polite"></p>
+                        <p id="rhQpConfirmText" class="rh-live-note" aria-live="polite"></p>
                     </div>
-                    <p id="rhQpNothing" style="display:none;margin:0;padding:10px 12px;background:#eef6ee;border:1px solid #bcd8bc;border-radius:6px;color:#1f5f2a;font-weight:600;">Nothing is owed on this booking.</p>
+                    <p id="rhQpNothing" class="rh-review-card" style="display:none;"><strong>Nothing is owed on this booking.</strong></p>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" onclick="rhQuickPayClose()">Cancel</button>
@@ -6437,17 +6531,17 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     <div id="checkin_context_note" class="bookings-checkin-modal__context-note" style="display: none;"></div>
 
                     <?php /* Late arrival (owner 2026-11-12 "Dont assume, have options"): nothing preselected; the server re-checks the choice. */ ?>
-                    <fieldset id="checkin_late_choices" class="bookings-checkin-modal__late" hidden>
+                    <fieldset id="checkin_late_choices" class="bookings-checkin-modal__late rh-choices" hidden>
                         <legend>What happened? <small>Pick one. Nothing is assumed.</small></legend>
-                        <label class="bookings-checkin-modal__late-option">
+                        <label class="bookings-checkin-modal__late-option rh-choice">
                             <input type="radio" name="late_arrival" value="booked_date" disabled>
                             <span><strong id="late_opt_booked_label">Guest arrived on the booked date, recorded late</strong><small>Booked dates and total stay as booked.</small></span>
                         </label>
-                        <label class="bookings-checkin-modal__late-option">
+                        <label class="bookings-checkin-modal__late-option rh-choice">
                             <input type="radio" name="late_arrival" value="today" disabled>
                             <span><strong id="late_opt_today_label">Guest is arriving today</strong><small>Booked dates and total stay as booked. Today is recorded as the arrival date.</small></span>
                         </label>
-                        <label class="bookings-checkin-modal__late-option" id="late_opt_ended_wrap" hidden>
+                        <label class="bookings-checkin-modal__late-option rh-choice" id="late_opt_ended_wrap" hidden>
                             <input type="radio" name="late_arrival" value="ended" disabled>
                             <span><strong id="late_opt_ended_label">Guest already stayed and has left: record the completed stay</strong><small>Checks in and out together at the booked dates. No extra nights charged, no check-in email. The balance rules still apply.</small></span>
                         </label>
@@ -6773,7 +6867,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
 
     <!-- Add / take off nights (owner 2026-11-13): stepper -> review card -> confirm. Opened by openExtendStayModal(). -->
     <div id="extendStayModal" class="modal-overlay" aria-hidden="true">
-        <div class="modal-content" style="max-width: 520px;">
+        <div class="modal-content rh-dialog-narrow">
             <div class="modal-header">
                 <h3><i class="fas fa-calendar-plus"></i> <span id="sn_title">Add or take off nights</span></h3>
                 <button type="button" class="close-modal" onclick="closeExtendStayModal()" aria-label="Close">&times;</button>
@@ -6786,50 +6880,50 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 <input type="hidden" id="extend_current_checkout" value="">
 
                 <div class="modal-body">
-                    <p id="sn_who" style="margin:0 0 10px;font-size:14px;"></p>
+                    <p id="sn_who" class="rh-dialog-lead"></p>
 
                     <!-- Step 1: how many nights -->
                     <div id="sn_step1">
                         <div class="form-group">
-                            <label id="sn_stepper_label" style="font-weight:600;">Nights to add or take off</label>
-                            <small style="color: var(--au-muted, #6b7280); display:block; margin-bottom:8px;">Nights are added or taken off at the end of the stay, at the rate this booking was made at. No amount is typed here.</small>
-                            <div role="group" aria-labelledby="sn_stepper_label" style="display:flex;align-items:center;gap:12px;">
-                                <button type="button" id="sn_minus" class="btn btn-secondary" style="min-width:48px;min-height:44px;font-size:18px;" aria-label="One night fewer">&minus;</button>
-                                <output id="sn_delta_text" aria-live="polite" style="min-width:150px;text-align:center;font-size:16px;font-weight:700;">+1 night</output>
-                                <button type="button" id="sn_plus" class="btn btn-secondary" style="min-width:48px;min-height:44px;font-size:18px;" aria-label="One night more">+</button>
+                            <label id="sn_stepper_label">Nights to add or take off</label>
+                            <small>Nights are added or taken off at the end of the stay, at the rate this booking was made at. No amount is typed here.</small>
+                            <div role="group" aria-labelledby="sn_stepper_label" class="rh-stepper">
+                                <button type="button" id="sn_minus" class="btn btn-secondary" aria-label="One night fewer">&minus;</button>
+                                <output id="sn_delta_text" aria-live="polite">+1 night</output>
+                                <button type="button" id="sn_plus" class="btn btn-secondary" aria-label="One night more">+</button>
                             </div>
                         </div>
-                        <div id="sn_live" aria-live="polite" style="background:#f7f3ee;border-radius:6px;padding:10px 12px;margin-top:10px;font-size:13px;line-height:1.6;min-height:44px;"></div>
+                        <div id="sn_live" class="rh-review-card rh-review-card--live" aria-live="polite"></div>
                     </div>
 
                     <!-- Step 2: review, money back, reason -->
                     <div id="sn_step2" hidden>
-                        <div id="sn_review" style="background:#f7f3ee;border-radius:6px;padding:10px 12px;font-size:13px;line-height:1.7;"></div>
-                        <div id="sn_moneyback" hidden style="border:1px solid #f0c36d;background:#fffaf0;border-radius:6px;padding:10px 12px;margin-top:12px;font-size:13px;">
+                        <div id="sn_review" class="rh-review-card"></div>
+                        <div id="sn_moneyback" class="rh-review-card rh-review-card--warn" hidden>
                             <strong id="sn_moneyback_title"></strong>
-                            <div style="margin-top:6px;">How does it go back?</div>
-                            <label style="display:flex;align-items:center;gap:8px;min-height:44px;cursor:pointer;"><input type="radio" name="sn_mode" value="refund" id="sn_mode_refund"> Refund to the original payment method(s), in full</label>
-                            <small id="sn_refund_noperm" style="display:none;color:#92400e;margin:-6px 0 4px 26px;">You do not have the Refund payments permission: choose a credit note, or ask someone who has it.</small>
-                            <label style="display:flex;align-items:center;gap:8px;min-height:44px;cursor:pointer;"><input type="radio" name="sn_mode" value="credit_note" id="sn_mode_credit"> Credit note (kept for the guest's next stay or bill)</label>
-                            <div class="form-group" style="margin-top:6px;">
-                                <label for="sn_typed" style="font-weight:600;">Type the amount going back to confirm</label>
-                                <input type="text" id="sn_typed" class="form-control" inputmode="decimal" autocomplete="off" style="min-height:44px;">
+                            <p class="rh-choice-q">How does it go back?</p>
+                            <label class="rh-choice"><input type="radio" name="sn_mode" value="refund" id="sn_mode_refund"> <span>Refund to the original payment method(s), in full</span></label>
+                            <small id="sn_refund_noperm" class="rh-choice-note" style="display:none;">You do not have the Refund payments permission: choose a credit note, or ask someone who has it.</small>
+                            <label class="rh-choice"><input type="radio" name="sn_mode" value="credit_note" id="sn_mode_credit"> <span>Credit note (kept for the guest's next stay or bill)</span></label>
+                            <div class="form-group">
+                                <label for="sn_typed">Type the amount going back to confirm</label>
+                                <input type="text" id="sn_typed" class="form-control" inputmode="decimal" autocomplete="off">
                             </div>
                         </div>
-                        <div class="form-group" style="margin-top:12px;">
-                            <label for="sn_reason" style="font-weight:600;">Reason (required)</label>
-                            <input type="text" id="sn_reason" class="form-control" maxlength="300" placeholder="e.g. guest staying one more night (company LPO)" style="min-height:44px;">
-                            <small style="color: var(--au-muted, #6b7280);">Saved in the booking History with every figure above.</small>
+                        <div class="form-group rh-mt">
+                            <label for="sn_reason">Reason (required)</label>
+                            <input type="text" id="sn_reason" class="form-control" maxlength="300" placeholder="e.g. guest staying one more night (company LPO)">
+                            <small>Saved in the booking History with every figure above.</small>
                         </div>
                     </div>
-                    <div id="sn_error" class="alert alert-danger" role="alert" style="display:none;margin-top:10px;"></div>
+                    <div id="sn_error" class="alert alert-error rh-mt" role="alert" style="display:none;"></div>
                 </div>
 
                 <div class="modal-footer">
                     <button type="button" class="btn btn-secondary" id="sn_cancel" onclick="closeExtendStayModal()">Cancel</button>
                     <button type="button" class="btn btn-secondary" id="sn_back" style="display:none;">Back</button>
                     <button type="button" class="btn btn-primary" id="sn_review_btn" disabled><i class="fas fa-magnifying-glass"></i> Review change</button>
-                    <button type="button" class="btn btn-success" id="sn_confirm_btn" style="display:none;"><i class="fas fa-check"></i> Confirm change</button>
+                    <button type="button" class="btn btn-primary" id="sn_confirm_btn" style="display:none;"><i class="fas fa-check"></i> Confirm change</button>
                 </div>
             </form>
         </div>
@@ -6884,7 +6978,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
 
     <!-- Checkout Settlement Modal -->
     <div id="checkoutSettlementModal" class="modal-overlay" aria-hidden="true">
-        <div class="modal-content" style="max-width: 520px;">
+        <div class="modal-content rh-dialog-narrow">
             <div class="modal-header">
                 <h3 id="cs_title"><i class="fas fa-receipt"></i> Checkout Settlement</h3>
                 <button type="button" class="close-modal" onclick="closeCheckoutSettlementModal()" aria-label="Close">&times;</button>
@@ -6899,54 +6993,54 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
 
                 <div class="modal-body">
                     <!-- Dynamic summary injected by JS -->
-                    <div id="cs_body" style="margin-bottom: 12px; font-size: 14px; color: #333;"></div>
+                    <div id="cs_body" class="rh-dialog-lead"></div>
 
                     <?php /* Owner 2026-11-12 "Dont assume, have options": when did the guest leave? Nothing preselected; the
                         server re-checks the date and decides charge / refund / nothing from it. */ ?>
-                    <fieldset id="cs_leave_box" class="cs-choices">
+                    <fieldset id="cs_leave_box" class="cs-choices rh-choices">
                         <legend>When did the guest leave? <small>Pick one. Nothing is assumed.</small></legend>
-                        <label class="cs-choice" id="cs_opt_booked_wrap">
+                        <label class="cs-choice rh-choice" id="cs_opt_booked_wrap">
                             <input type="radio" name="cs_leave" value="booked">
                             <span><strong id="cs_opt_booked_label">Guest left on the booked date</strong><small id="cs_opt_booked_help"></small></span>
                         </label>
-                        <label class="cs-choice">
+                        <label class="cs-choice rh-choice">
                             <input type="radio" name="cs_leave" value="today">
                             <span><strong id="cs_opt_today_label">Guest is leaving today</strong><small id="cs_opt_today_help"></small></span>
                         </label>
-                        <label class="cs-choice">
+                        <label class="cs-choice rh-choice">
                             <input type="radio" name="cs_leave" value="other">
                             <span><strong>Guest left on another date</strong><small id="cs_opt_other_help">Pick the day the guest left.</small>
                                 <input type="date" id="cs_leave_other" class="form-control" aria-label="Date the guest left" disabled></span>
                         </label>
-                        <label class="cs-choice">
+                        <label class="cs-choice rh-choice">
                             <input type="radio" name="cs_leave" value="skip">
                             <span><strong>Skip settlement: check out without recording a charge or refund</strong><small>Use only if the adjustment has been handled outside the system. The booked dates and total stay as they are.</small></span>
                         </label>
                     </fieldset>
 
-                    <fieldset id="cs_basis_box" class="cs-choices" hidden>
+                    <fieldset id="cs_basis_box" class="cs-choices rh-choices" hidden>
                         <legend>How should the nights be counted? <small>Arrival was recorded as <span id="cs_arrival_fmt"></span>, after the booked check-in.</small></legend>
-                        <label class="cs-choice">
+                        <label class="cs-choice rh-choice">
                             <input type="radio" name="cs_basis" value="booked">
                             <span><strong>Keep booked nights + charge nights after the booked checkout</strong><small id="cs_basis_booked_help"></small></span>
                         </label>
-                        <label class="cs-choice">
+                        <label class="cs-choice rh-choice">
                             <input type="radio" name="cs_basis" value="actual">
                             <span><strong>Charge only the nights actually stayed</strong><small id="cs_basis_actual_help"></small></span>
                         </label>
                     </fieldset>
 
-                    <div id="cs_quote" style="margin-bottom: 12px;" hidden></div>
+                    <div id="cs_quote" class="rh-dialog-lead" hidden></div>
 
                     <!-- Money received now for the extra nights (optional; only what was actually received) -->
                     <div id="cs_charge_row" style="display:none;">
                         <div class="form-group">
-                            <label for="cs_amount_received" style="font-weight:600;">Amount received now (optional)</label>
+                            <label for="cs_amount_received">Amount received now (optional)</label>
                             <input type="number" id="cs_amount_received" class="form-control" min="0" step="0.01" inputmode="decimal" placeholder="0.00">
-                            <small style="color:#666;display:block;margin-top:4px;">Enter only money the guest actually paid now. Anything not paid stays on the bill as a balance.</small>
+                            <small>Enter only money the guest actually paid now. Anything not paid stays on the bill as a balance.</small>
                         </div>
                         <div class="form-group">
-                            <label for="cs_payment_method" style="font-weight:600;">Payment method</label>
+                            <label for="cs_payment_method">Payment method</label>
                             <select id="cs_payment_method" name="cs_payment_method" class="form-control">
                                 <option value="cash">Cash</option>
                                 <option value="bank_transfer">Bank Transfer</option>
@@ -6961,7 +7055,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     <!-- Payment method for refund -->
                     <div id="cs_refund_row" style="display:none;">
                         <div class="form-group">
-                            <label style="font-weight:600;">Refund method <span style="color:#28a745;">*</span></label>
+                            <label for="cs_refund_payment_method">Refund method <span class="required">*</span></label>
                             <select id="cs_refund_payment_method" name="cs_refund_payment_method" class="form-control">
                                 <option value="cash">Cash</option>
                                 <option value="bank_transfer">Bank Transfer</option>
@@ -7046,63 +7140,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             display: none;
         }
 
-        /* Late check-in / checkout leave-date choices (radio cards, 44px tap targets). */
-        .bookings-checkin-modal__late,
-        .cs-choices {
-            border: 1px solid #e3ddd3;
-            border-radius: 8px;
-            padding: 8px 12px 10px;
-            margin: 0 0 14px;
-        }
-        .bookings-checkin-modal__late legend,
-        .cs-choices legend {
-            font-size: 13px;
-            font-weight: 600;
-            padding: 0 4px;
-        }
-        .bookings-checkin-modal__late legend small,
-        .cs-choices legend small {
-            font-weight: 400;
-            color: #666;
-        }
-        .bookings-checkin-modal__late-option,
-        .cs-choice {
-            display: flex;
-            gap: 10px;
-            align-items: flex-start;
-            min-height: 44px;
-            padding: 8px 4px;
-            cursor: pointer;
-            font-size: 13px;
-            border-top: 1px solid #f1ece4;
-        }
-        .bookings-checkin-modal__late-option:first-of-type,
-        .cs-choice:first-of-type {
-            border-top: 0;
-        }
-        .bookings-checkin-modal__late-option input,
-        .cs-choice input[type="radio"] {
-            margin-top: 3px;
-            width: 18px;
-            height: 18px;
-            flex: 0 0 auto;
-        }
-        .bookings-checkin-modal__late-option small,
-        .cs-choice small {
-            display: block;
-            color: #666;
-            font-size: 12px;
-            margin-top: 2px;
-        }
-        .bookings-checkin-modal__late-option[hidden],
-        .cs-choice[hidden] {
-            display: none;
-        }
-        .cs-choice input[type="date"] {
-            margin-top: 6px;
-            min-height: 40px;
-            max-width: 220px;
-        }
+        /* Late check-in / checkout choice cards: shared .rh-choices / .rh-choice in admin-components.css. */
 
         @keyframes modal-inline-spin {
             from {
@@ -8702,7 +8740,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             snEl('sn_delta_text').textContent = snDeltaLabel(snState.delta);
             if (err) {
                 const p = document.createElement('div');
-                p.style.color = '#b91c1c';
+                p.className = 'rh-text-danger';
                 p.textContent = err;
                 el.appendChild(p);
                 snEl('sn_review_btn').disabled = true;
@@ -8718,7 +8756,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             snLine(el, 'Difference:', (q.total_delta >= 0 ? '+' : '−') + snMoney(Math.abs(q.total_delta)));
             if (q.delta > 0 && q.available === false) {
                 const p = document.createElement('div');
-                p.style.color = '#b91c1c';
+                p.className = 'rh-text-danger';
                 p.textContent = 'Not available: ' + (q.availability_error || 'the room is taken on the added night(s).');
                 el.appendChild(p);
             }
@@ -9045,6 +9083,12 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     : '<form id="conPaymentForm" method="post" data-no-autofilter>' +
                     '<input type="hidden" name="action" value="consolidation_record">' +
                     '<input type="hidden" name="id" value="' + b.id + '">' +
+                    // Company pays later: who paid, nothing preselected (company money is recorded as the company's).
+                    (b.on_account
+                        ? '<fieldset class="rh-choices" id="con_paid_by"><legend>Paid by * <small>' + escHtml(b.company_name) + ' owes ' + fmtMWK(b.company_due) + ' &middot; the guest owes ' + fmtMWK(b.guest_due) + '</small></legend>' +
+                          '<label class="rh-choice"><input type="radio" name="paid_by" value="guest" required> <span>The guest</span></label>' +
+                          '<label class="rh-choice"><input type="radio" name="paid_by" value="company" required> <span>' + escHtml(b.company_name) + ' (company payment)</span></label></fieldset>'
+                        : '') +
                     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">' +
                     '<div class="form-group" style="margin:0;"><label style="font-weight:600;">Amount (' + _currencySymbol + ') <span style="color:#dc3545;">*</span></label><input type="number" name="amount" id="con_amount" class="form-control" min="0.01" step="0.01" value="' + conDue.toFixed(2) + '" required style="border-color:#8F6A35;"><small style="color:#6b6258;display:block;margin-top:4px;">Balance due ' + fmtMWK(conDue) + '</small>' +
                     '<div id="con_over_wrap" style="display:none;margin-top:6px;"><div id="con_over_warn" style="color:#8a4b00;font-size:12px;margin-bottom:4px;"></div><label style="display:flex;gap:6px;align-items:flex-start;font-size:12px;color:#8a4b00;cursor:pointer;"><input type="checkbox" name="confirm_overpay" value="1" id="con_over_cb" style="margin-top:2px;"> <span>The guest paid more than owed</span></label></div></div>' +
@@ -9078,14 +9122,27 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 const conPayForm = document.getElementById('conPaymentForm');
                 if (!conPayForm) return; // nothing owed: no payment form
                 const conAmt = document.getElementById('con_amount');
+                const conIsCompany = function () {
+                    const c = conPayForm.querySelector('input[name="paid_by"]:checked');
+                    return !!(c && c.value === 'company');
+                };
                 conAmt.addEventListener('input', function() {
                     const extra = (parseFloat(conAmt.value) || 0) - conDue;
-                    const over = extra > 0.01;
+                    // A company payment can never be more than owed (refused on the server): no overpay box for it.
+                    const over = extra > 0.01 && !conIsCompany();
                     document.getElementById('con_over_wrap').style.display = over ? '' : 'none';
                     document.getElementById('con_over_warn').textContent = over
                         ? 'That is ' + fmtMWK(extra) + ' more than owed. The extra will be issued to the guest as a credit note.' : '';
                     document.getElementById('con_over_cb').required = over;
                     if (!over) document.getElementById('con_over_cb').checked = false;
+                });
+                conPayForm.querySelectorAll('input[name="paid_by"]').forEach(function (r) {
+                    r.addEventListener('change', function () {
+                        // Prefill the share of whoever paid (guest share / company share), never the full balance.
+                        const share = parseFloat(r.value === 'company' ? b.company_due : b.guest_due) || 0;
+                        if (share > 0.01) conAmt.value = share.toFixed(2);
+                        conAmt.dispatchEvent(new Event('input'));
+                    });
                 });
                 conPayForm.addEventListener('submit', async function(e) {
                     e.preventDefault();

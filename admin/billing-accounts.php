@@ -145,22 +145,23 @@ if ($ready && $_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $accounts = $ready ? rh_billing_accounts($pdo) : [];
 $acc = $ready && $viewId > 0 ? rh_billing_account($pdo, $viewId) : null;
+// One load of open bookings (batch split): the list view loads every company's at once, the company view only its own.
 $totals = [];
 $sumOwed = 0.0;
 $sumOverdue = 0.0;
-foreach ($accounts as $a) {
-    $t = rh_billing_account_totals($pdo, (int)$a['id']);
-    $totals[(int)$a['id']] = $t;
-    $sumOwed += $t['owed'];
-    $sumOverdue += $t['overdue'];
-}
 $receivedMonth = 0.0;
-if ($ready) {
-    $rm = $pdo->prepare('SELECT COALESCE(SUM(amount), 0) FROM billing_remittances WHERE received_date >= ?');
-    $rm->execute([date('Y-m-01')]);
-    $receivedMonth = (float)$rm->fetchColumn();
-}
 $open = $acc ? rh_billing_open_bookings($pdo, (int)$acc['id']) : [];
+if ($ready && !$acc) {
+    $openAll = rh_billing_open_bookings_all($pdo);
+    foreach ($accounts as $a) {
+        $t = rh_billing_totals_from_rows($openAll[(int)$a['id']] ?? []);
+        $totals[(int)$a['id']] = $t;
+        $sumOwed += $t['owed'];
+        $sumOverdue += $t['overdue'];
+    }
+    // Company money received this month, net of refunds of those payments (refunds dated this month).
+    $receivedMonth = rh_billing_received_net($pdo, date('Y-m-01'));
+}
 $rems = [];
 if ($acc) {
     $rs = $pdo->prepare('SELECT r.*, (SELECT COUNT(*) FROM billing_remittance_lines l WHERE l.remittance_id = r.id) AS line_count
@@ -185,20 +186,43 @@ $money = static fn(float $v): string => $cur . ' ' . number_format($v, 2);
 <body>
     <?php require_once 'includes/admin-header.php'; ?>
 
+    <?php
+    $hasEmail = $acc && trim((string)$acc['billing_email']) !== '';
+    // "?" column / figure helper (shared .help dot; on phones admin-mobile.js lists them under "What the columns mean").
+    $help = static fn(string $tip): string => ' <i class="help" data-tip="' . htmlspecialchars($tip, ENT_QUOTES, 'UTF-8') . '">?</i>';
+    ?>
     <div class="admin-container finance-page billing-accounts-page">
-        <?php if ($message !== ''): ?><div class="alert alert--success"><i class="fas fa-check-circle"></i> <?php echo $e($message); ?></div><?php endif; ?>
-        <?php if ($error !== ''): ?><div class="alert alert--danger"><i class="fas fa-exclamation-triangle"></i> <?php echo $e($error); ?></div><?php endif; ?>
-
-        <div class="cn-page-header" style="display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;align-items:flex-end;">
-            <div>
-                <h2 class="section-title"><i class="fas fa-building"></i> Company Accounts</h2>
-                <p style="margin:4px 0 0;color:#6b7280;">Companies that pay later for their guests (on account / LPO). The room stay is billed to the company; the guest is never chased for it.</p>
+        <header class="rh-page-head">
+            <div class="rh-page-head__main">
+                <div class="rh-page-head__title">
+                    <h1><?php echo $acc ? $e($acc['name']) : 'Company Accounts'; ?></h1>
+                    <?php if ($acc && (int)$acc['active'] !== 1): ?><span class="badge badge-inactive">Inactive</span><?php endif; ?>
+                </div>
+                <p class="rh-page-head__meta"><?php echo $acc
+                    ? 'Company account: its open bookings, statement and the payments it sent.'
+                    : 'Companies that pay later for their guests (on account / LPO). The room stay is billed to the company; the guest is never chased for it.'; ?></p>
             </div>
-            <?php if ($ready && $acc): ?><a class="btn btn--secondary" href="billing-accounts.php"><i class="fas fa-arrow-left"></i> All companies</a><?php endif; ?>
-        </div>
+            <?php if ($ready): ?>
+            <div class="rh-page-head__actions">
+                <?php if ($acc): ?>
+                    <a class="btn btn-secondary" href="billing-accounts.php"><i class="fas fa-arrow-left"></i> All companies</a>
+                    <a class="btn btn-secondary" href="billing-accounts.php?statement=<?php echo (int)$acc['id']; ?>" target="_blank" rel="noopener"><i class="fas fa-file-pdf"></i> Statement (PDF)</a>
+                    <form method="POST" data-admin-confirm="<?php echo $e('Email the statement to ' . ($hasEmail ? $acc['billing_email'] : 'the company (no billing email: it will not be sent)') . '?'); ?>" data-admin-confirm-title="Email statement">
+                        <input type="hidden" name="csrf_token" value="<?php echo $e($csrf_token); ?>"><input type="hidden" name="action" value="send_statement"><input type="hidden" name="account_id" value="<?php echo (int)$acc['id']; ?>">
+                        <button type="submit" class="btn btn-primary"<?php echo $hasEmail ? '' : ' disabled title="Add a billing email first"'; ?>><i class="fas fa-envelope"></i> Email statement</button>
+                    </form>
+                <?php else: ?>
+                    <a class="btn btn-primary" href="#ba-company-form"><i class="fas fa-plus"></i> Add a company</a>
+                <?php endif; ?>
+            </div>
+            <?php endif; ?>
+        </header>
+
+        <?php if ($message !== ''): ?><div class="alert alert-success"><i class="fas fa-check-circle"></i> <?php echo $e($message); ?></div><?php endif; ?>
+        <?php if ($error !== ''): ?><div class="alert alert-error"><i class="fas fa-exclamation-triangle"></i> <?php echo $e($error); ?></div><?php endif; ?>
 
         <?php if (!$ready): ?>
-            <div class="alert alert--warning"><i class="fas fa-circle-info"></i> Company accounts are not available yet: database update 084 has not been run.</div>
+            <div class="alert alert-warning"><i class="fas fa-circle-info"></i> Company accounts are not available yet: database update 084 has not been run.</div>
         <?php else: ?>
 
         <?php if (!$acc): ?>
@@ -213,180 +237,192 @@ $money = static fn(float $v): string => $cur . ' ' . number_format($v, 2);
                     <span class="ck-kpi__sub">Company payments recorded with a received date from the 1st of this month</span></div>
             </div>
 
-            <div class="filter-section">
-                <table class="admin-table">
+            <section class="rh-panel rh-panel--flush ba-panel" id="ba-companies">
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Companies</h2></div>
+                <div class="rh-panel__body">
+                <table class="table">
                     <thead><tr>
-                        <th title="The company that pays later for its guests">Company</th>
-                        <th title="Where invoices, statements and payment advice are emailed (plus the copy list)">Billing email</th>
-                        <th title="Days after check-out the company has to pay, unless a due date is set on the booking">Terms</th>
-                        <th title="Bookings the company still owes money on" class="text-right">Open bookings</th>
-                        <th title="What the company still owes in total" class="text-right">Owed</th>
-                        <th title="Of that, the part past its due date" class="text-right">Overdue</th>
-                        <th title="Days the oldest unpaid booking is past its due date">Oldest late</th>
-                        <th>Actions</th>
+                        <th>Company<?php echo $help('The company that pays later for its guests'); ?></th>
+                        <th>Billing email<?php echo $help('Where invoices, statements and payment advice are emailed (plus the copy list)'); ?></th>
+                        <th>Terms<?php echo $help('Days after check-out the company has to pay, unless a due date is set on the booking'); ?></th>
+                        <th class="text-right">Open bookings<?php echo $help('Bookings the company still owes money on'); ?></th>
+                        <th class="text-right">Owed<?php echo $help('What the company still owes in total: room stays (and extras when it covers them), less its payments'); ?></th>
+                        <th class="text-right">Overdue<?php echo $help('Of that, the part past its due date'); ?></th>
+                        <th>Oldest late<?php echo $help('Days the oldest unpaid booking is past its due date'); ?></th>
+                        <th class="text-right">Actions<?php echo $help('Open the company: its bookings, statement and payments'); ?></th>
                     </tr></thead>
                     <tbody>
                     <?php if (!$accounts): ?>
-                        <tr><td colspan="8" style="text-align:center;color:#6b7280;">No companies yet. Add the first one below.</td></tr>
+                        <tr><td colspan="8" class="rh-empty">No companies yet. Add the first one below.</td></tr>
                     <?php endif; ?>
                     <?php foreach ($accounts as $a): $t = $totals[(int)$a['id']]; ?>
                         <tr>
-                            <td><strong><?php echo $e($a['name']); ?></strong><?php echo (int)$a['active'] === 1 ? '' : ' <small>(inactive)</small>'; ?></td>
-                            <td><?php echo trim((string)$a['billing_email']) !== '' ? $e($a['billing_email']) : '<span style="color:#b91c1c;">none: documents cannot be sent</span>'; ?></td>
+                            <td><strong><?php echo $e($a['name']); ?></strong><?php echo (int)$a['active'] === 1 ? '' : ' <span class="badge badge-inactive">Inactive</span>'; ?></td>
+                            <td><?php echo trim((string)$a['billing_email']) !== '' ? $e($a['billing_email']) : '<span class="badge badge-danger">No billing email</span>'; ?></td>
                             <td><?php echo (int)$a['terms_days']; ?> days</td>
                             <td class="text-right"><?php echo (int)$t['count']; ?></td>
                             <td class="text-right"><?php echo $e($money($t['owed'])); ?></td>
-                            <td class="text-right"><?php echo $t['overdue'] > BALANCE_TOLERANCE ? '<strong style="color:#b91c1c;">' . $e($money($t['overdue'])) . '</strong>' : '-'; ?></td>
-                            <td><?php echo $t['oldest_days'] > 0 ? (int)$t['oldest_days'] . ' days' : '-'; ?></td>
-                            <td><a class="btn btn--sm btn--primary" href="billing-accounts.php?id=<?php echo (int)$a['id']; ?>" style="min-height:36px;">Open</a></td>
+                            <td class="text-right"><?php echo $t['overdue'] > BALANCE_TOLERANCE ? '<strong class="rh-text-danger">' . $e($money($t['overdue'])) . '</strong>' : '-'; ?></td>
+                            <td><?php echo $t['oldest_days'] > 0 ? '<span class="badge badge-overdue">' . (int)$t['oldest_days'] . ' days</span>' : '-'; ?></td>
+                            <td class="text-right"><a class="btn btn-sm btn-primary" href="billing-accounts.php?id=<?php echo (int)$a['id']; ?>">Open</a></td>
                         </tr>
                     <?php endforeach; ?>
                     </tbody>
                 </table>
-            </div>
+                </div>
+            </section>
         <?php endif; ?>
 
-        <?php if ($acc): $t = rh_billing_account_totals($pdo, (int)$acc['id']); ?>
+        <?php if ($acc): $t = rh_billing_totals_from_rows($open); ?>
             <div class="ck-kpis ck-kpis--4">
-                <div class="ck-kpi ck-kpi--warn"><span class="ck-kpi__label"><?php echo $e($acc['name']); ?> owes</span><span class="ck-kpi__value ck-kpi__value--money"><?php echo $e($money($t['owed'])); ?></span>
-                    <span class="ck-kpi__sub">On <?php echo (int)$t['count']; ?> booking(s), after every payment the company sent</span></div>
+                <div class="ck-kpi ck-kpi--warn"><span class="ck-kpi__label">Company owes</span><span class="ck-kpi__value ck-kpi__value--money"><?php echo $e($money($t['owed'])); ?></span>
+                    <span class="ck-kpi__sub">On <?php echo (int)$t['count']; ?> booking(s): room stays (and extras when it covers them), after every payment the company sent</span></div>
                 <div class="ck-kpi ck-kpi--bad"><span class="ck-kpi__label">Overdue</span><span class="ck-kpi__value ck-kpi__value--money"><?php echo $e($money($t['overdue'])); ?></span>
                     <span class="ck-kpi__sub">Bookings past their due date<?php echo $t['oldest_days'] > 0 ? '; oldest ' . (int)$t['oldest_days'] . ' days late' : ''; ?></span></div>
-                <div class="ck-kpi"><span class="ck-kpi__label">Billing email</span><span class="ck-kpi__value" style="font-size:1rem;"><?php echo trim((string)$acc['billing_email']) !== '' ? $e($acc['billing_email']) : 'None yet'; ?></span>
+                <div class="ck-kpi"><span class="ck-kpi__label">Billing email</span><span class="ck-kpi__value ba-kpi-text"><?php echo $hasEmail ? $e($acc['billing_email']) : 'None yet'; ?></span>
                     <span class="ck-kpi__sub">Invoices, statements and payment advice go here<?php echo trim((string)$acc['billing_cc']) !== '' ? ' (copy: ' . $e($acc['billing_cc']) . ')' : ''; ?></span></div>
                 <div class="ck-kpi"><span class="ck-kpi__label">Terms</span><span class="ck-kpi__value"><?php echo (int)$acc['terms_days']; ?> days</span>
                     <span class="ck-kpi__sub">Due this many days after check-out, unless a booking has its own due date</span></div>
             </div>
 
-            <div class="filter-section" style="display:flex;flex-wrap:wrap;gap:10px;align-items:center;">
-                <a class="btn btn--secondary" href="billing-accounts.php?statement=<?php echo (int)$acc['id']; ?>" target="_blank" rel="noopener" style="min-height:44px;"><i class="fas fa-file-pdf"></i> Statement (PDF)</a>
-                <form method="POST" style="margin:0;" data-admin-confirm="<?php echo $e('Email the statement to ' . (trim((string)$acc['billing_email']) !== '' ? $acc['billing_email'] : 'the company (no billing email: it will not be sent)') . '?'); ?>" data-admin-confirm-title="Email statement">
-                    <input type="hidden" name="csrf_token" value="<?php echo $e($csrf_token); ?>"><input type="hidden" name="action" value="send_statement"><input type="hidden" name="account_id" value="<?php echo (int)$acc['id']; ?>">
-                    <button type="submit" class="btn btn--primary" style="min-height:44px;"<?php echo trim((string)$acc['billing_email']) === '' ? ' disabled title="Add a billing email first"' : ''; ?>><i class="fas fa-envelope"></i> Email statement</button>
-                </form>
-            </div>
-
-            <h3 class="section-title" style="font-size:1.05rem;">Bookings the company owes on</h3>
-            <div class="filter-section">
-                <table class="admin-table">
+            <section class="rh-panel rh-panel--flush ba-panel" id="ba-open">
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Bookings the company owes on</h2></div>
+                <div class="rh-panel__body">
+                <table class="table">
                     <thead><tr>
-                        <th title="The booking and the guest who stayed">Booking</th>
-                        <th title="Check-in to check-out">Stay</th>
-                        <th title="The company's order number for this stay">LPO</th>
-                        <th title="The final invoice sent to the company at checkout">Invoice</th>
-                        <th title="Check-out + the company's terms, or the date set on the booking">Due</th>
-                        <th class="text-right" title="What the company still owes on this booking (room stay, plus extras when it covers them), after its payments">Company owes</th>
-                        <th class="text-right" title="Extras the guest pays themselves, still unpaid">Guest owes</th>
+                        <th>Booking<?php echo $help('The booking, the guest who stayed and the booking status'); ?></th>
+                        <th>Stay<?php echo $help('Check-in to check-out'); ?></th>
+                        <th>LPO<?php echo $help("The company's order number for this stay"); ?></th>
+                        <th>Invoice<?php echo $help('The final invoice sent to the company at checkout'); ?></th>
+                        <th>Due<?php echo $help("Check-out + the company's terms, or the date set on the booking"); ?></th>
+                        <th class="text-right">Company owes<?php echo $help('What the company still owes on this booking (room stay, plus extras when it covers them), after its payments'); ?></th>
+                        <th class="text-right">Guest owes<?php echo $help('Extras the guest pays themselves, still unpaid'); ?></th>
                     </tr></thead>
                     <tbody>
-                    <?php if (!$open): ?><tr><td colspan="7" style="text-align:center;color:#6b7280;">Nothing owed. Bookings appear here once they are on this company's account (Booking Details > Who pays).</td></tr><?php endif; ?>
+                    <?php if (!$open): ?><tr><td colspan="7" class="rh-empty">Nothing owed. Bookings appear here once they are on this company's account (Booking Details &gt; Who pays).</td></tr><?php endif; ?>
                     <?php foreach ($open as $r): $b = $r['booking']; $s = $r['split']; ?>
                         <tr>
-                            <td><a href="booking-details.php?id=<?php echo (int)$b['id']; ?>"><?php echo $e($b['booking_reference']); ?></a><br><small><?php echo $e($b['guest_name']); ?> &middot; <?php echo $e($b['status']); ?></small></td>
+                            <td><a href="booking-details.php?id=<?php echo (int)$b['id']; ?>"><strong><?php echo $e($b['booking_reference']); ?></strong></a><br><small><?php echo $e($b['guest_name']); ?></small>
+                                <br><span class="badge badge-<?php echo $e($b['status']); ?>"><?php echo $e(ucfirst(str_replace('-', ' ', (string)$b['status']))); ?></span></td>
                             <td><?php echo $e(date('j M', strtotime((string)$b['check_in_date'])) . ' - ' . date('j M Y', strtotime((string)$b['check_out_date']))); ?></td>
                             <td><?php echo $s['reference'] !== '' ? $e($s['reference']) : '-'; ?></td>
-                            <td><?php echo trim((string)($b['final_invoice_number'] ?? '')) !== '' ? $e($b['final_invoice_number']) : '<small>at checkout</small>'; ?></td>
-                            <td><?php echo $s['due_date'] !== '' ? $e(date('j M Y', strtotime($s['due_date']))) . ($s['days_past_due'] > 0 ? '<br><small style="color:#b91c1c;">' . (int)$s['days_past_due'] . ' days late</small>' : '') : '-'; ?></td>
+                            <td><?php echo trim((string)($b['final_invoice_number'] ?? '')) !== '' ? $e($b['final_invoice_number']) : '<small>At checkout</small>'; ?></td>
+                            <td><?php echo $s['due_date'] !== '' ? $e(date('j M Y', strtotime($s['due_date']))) . ($s['days_past_due'] > 0 ? '<br><span class="badge badge-overdue">' . (int)$s['days_past_due'] . ' days late</span>' : '') : '-'; ?></td>
                             <td class="text-right"><strong><?php echo $e($money((float)$s['company_due'])); ?></strong></td>
                             <td class="text-right"><?php echo $s['guest_due'] > BALANCE_TOLERANCE ? $e($money((float)$s['guest_due'])) : '-'; ?></td>
                         </tr>
                     <?php endforeach; ?>
                     </tbody>
                 </table>
-            </div>
+                </div>
+            </section>
 
             <?php if ($canPay && $open): ?>
-            <h3 class="section-title" style="font-size:1.05rem;" id="ba-pay">Record company payment</h3>
-            <form method="POST" id="ba-pay-form" class="filter-section" novalidate>
-                <input type="hidden" name="csrf_token" value="<?php echo $e($csrf_token); ?>"><input type="hidden" name="action" value="record_payment"><input type="hidden" name="account_id" value="<?php echo (int)$acc['id']; ?>">
-                <p style="margin:0 0 10px;color:#6b7280;">Enter what the company paid, then split it across its bookings. The lines must add up to the amount exactly; an amount that is not for these bookings cannot be recorded here. Nothing is saved until you review and confirm.</p>
-                <div id="ba-step1" style="display:flex;flex-wrap:wrap;gap:12px;">
-                    <label style="display:flex;flex-direction:column;gap:4px;">Amount received (<?php echo $e($cur); ?>)<input type="text" inputmode="decimal" name="amount" id="ba-amount" class="filter-input" required style="min-height:44px;"></label>
-                    <label style="display:flex;flex-direction:column;gap:4px;">How it was paid<select name="payment_method" id="ba-method" class="filter-select" style="min-height:44px;">
-                        <?php foreach (rh_billing_methods() as $k => $lbl): ?><option value="<?php echo $e($k); ?>"><?php echo $e($lbl); ?></option><?php endforeach; ?>
-                    </select></label>
-                    <label style="display:flex;flex-direction:column;gap:4px;">Date received<input type="date" name="received_date" id="ba-date" class="filter-input" value="<?php echo $e(date('Y-m-d')); ?>" max="<?php echo $e(date('Y-m-d')); ?>" style="min-height:44px;"></label>
-                    <label style="display:flex;flex-direction:column;gap:4px;">Bank / cheque reference<input type="text" name="bank_reference" maxlength="80" class="filter-input" style="min-height:44px;"></label>
-                    <label style="display:flex;flex-direction:column;gap:4px;flex:1 1 220px;">Notes<input type="text" name="notes" maxlength="255" class="filter-input" style="min-height:44px;"></label>
+            <section class="rh-panel ba-panel" id="ba-pay">
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Record company payment</h2></div>
+                <div class="rh-panel__body">
+                <form method="POST" id="ba-pay-form" novalidate>
+                    <input type="hidden" name="csrf_token" value="<?php echo $e($csrf_token); ?>"><input type="hidden" name="action" value="record_payment"><input type="hidden" name="account_id" value="<?php echo (int)$acc['id']; ?>">
+                    <p class="rh-form-hint">Enter what the company paid, then split it across its bookings. The lines must add up to the amount exactly; an amount that is not for these bookings cannot be recorded here. Nothing is saved until you review and confirm.</p>
+                    <div id="ba-step1" class="rh-form-grid">
+                        <div class="form-group"><label for="ba-amount">Amount received (<?php echo $e($cur); ?>)</label><input type="text" inputmode="decimal" name="amount" id="ba-amount" class="form-control" required></div>
+                        <div class="form-group"><label for="ba-method">How it was paid</label><select name="payment_method" id="ba-method" class="form-control">
+                            <?php foreach (rh_billing_methods() as $k => $lbl): ?><option value="<?php echo $e($k); ?>"><?php echo $e($lbl); ?></option><?php endforeach; ?>
+                        </select></div>
+                        <div class="form-group"><label for="ba-date">Date received</label><input type="date" name="received_date" id="ba-date" class="form-control" value="<?php echo $e(date('Y-m-d')); ?>" max="<?php echo $e(date('Y-m-d')); ?>"></div>
+                        <div class="form-group"><label for="ba-bankref">Bank / cheque reference</label><input type="text" name="bank_reference" id="ba-bankref" maxlength="80" class="form-control"></div>
+                        <div class="form-group rh-form-grid__full"><label for="ba-notes">Notes</label><input type="text" name="notes" id="ba-notes" maxlength="255" class="form-control"></div>
+                    </div>
+                    <div class="table-responsive ba-grid-wrap" data-disable-auto-pagination>
+                        <table class="table" id="ba-grid">
+                            <thead><tr>
+                                <th>Booking<?php echo $help('The booking the money is for, and its guest'); ?></th>
+                                <th>LPO<?php echo $help('Its LPO / order number'); ?></th>
+                                <th class="text-right">Company owes<?php echo $help('What the company owes on this booking now'); ?></th>
+                                <th class="text-right">Apply<?php echo $help('How much of this payment goes to this booking (at most what the company owes)'); ?></th>
+                            </tr></thead>
+                            <tbody>
+                            <?php foreach ($open as $r): $b = $r['booking']; $s = $r['split']; ?>
+                                <tr>
+                                    <td><strong><?php echo $e($b['booking_reference']); ?></strong><br><small><?php echo $e($b['guest_name']); ?></small></td>
+                                    <td><?php echo $s['reference'] !== '' ? $e($s['reference']) : '-'; ?></td>
+                                    <td class="text-right"><?php echo $e($money((float)$s['company_due'])); ?></td>
+                                    <td class="text-right"><input type="text" inputmode="decimal" class="form-control ba-line" name="line[<?php echo (int)$b['id']; ?>]" data-max="<?php echo $e(number_format((float)$s['company_due'], 2, '.', '')); ?>" data-ref="<?php echo $e($b['booking_reference']); ?>" value="" placeholder="0.00" aria-label="<?php echo $e('Amount for ' . $b['booking_reference']); ?>"></td>
+                                </tr>
+                            <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p id="ba-sum" class="ba-sum" aria-live="polite"></p>
+                    <div id="ba-review" class="rh-review-card" hidden></div>
+                    <label class="rh-check"><input type="checkbox" name="email_advice" value="1"<?php echo $hasEmail ? ' checked' : ' disabled'; ?>> Email a payment advice to the company<?php echo $hasEmail ? '' : ' (no billing email)'; ?></label>
+                    <p id="ba-error" role="alert" class="rh-text-danger ba-error" style="display:none;"></p>
+                    <div class="rh-actions-row">
+                        <button type="button" class="btn btn-secondary" id="ba-fill"><i class="fas fa-list-ol"></i> Fill oldest first</button>
+                        <button type="button" class="btn btn-secondary" id="ba-back" style="display:none;"><i class="fas fa-arrow-left"></i> Back</button>
+                        <button type="button" class="btn btn-primary" id="ba-review-btn"><i class="fas fa-magnifying-glass"></i> Review payment</button>
+                        <button type="submit" class="btn btn-primary" id="ba-confirm" style="display:none;"><i class="fas fa-check"></i> Confirm and record</button>
+                    </div>
+                </form>
                 </div>
-                <div data-disable-auto-pagination style="margin-top:12px;overflow-x:auto;">
-                    <table class="admin-table" id="ba-grid">
-                        <thead><tr>
-                            <th title="The booking the money is for">Booking</th>
-                            <th title="Its LPO / order number">LPO</th>
-                            <th class="text-right" title="What the company owes on this booking now">Company owes</th>
-                            <th class="text-right" title="How much of this payment goes to this booking (at most what the company owes)">Apply</th>
-                        </tr></thead>
-                        <tbody>
-                        <?php foreach ($open as $r): $b = $r['booking']; $s = $r['split']; ?>
-                            <tr>
-                                <td><?php echo $e($b['booking_reference']); ?><br><small><?php echo $e($b['guest_name']); ?></small></td>
-                                <td><?php echo $s['reference'] !== '' ? $e($s['reference']) : '-'; ?></td>
-                                <td class="text-right"><?php echo $e(number_format((float)$s['company_due'], 2)); ?></td>
-                                <td class="text-right"><input type="text" inputmode="decimal" class="filter-input ba-line" name="line[<?php echo (int)$b['id']; ?>]" data-max="<?php echo $e(number_format((float)$s['company_due'], 2, '.', '')); ?>" data-ref="<?php echo $e($b['booking_reference']); ?>" value="" style="max-width:140px;min-height:44px;text-align:right;" aria-label="<?php echo $e('Amount for ' . $b['booking_reference']); ?>"></td>
-                            </tr>
-                        <?php endforeach; ?>
-                        </tbody>
-                    </table>
-                </div>
-                <p id="ba-sum" aria-live="polite" style="margin:10px 0;font-weight:600;"></p>
-                <div id="ba-review" hidden style="background:#f7f3ee;border-radius:6px;padding:10px 12px;margin:10px 0;font-size:13px;line-height:1.7;"></div>
-                <label style="display:flex;align-items:center;gap:8px;min-height:44px;"><input type="checkbox" name="email_advice" value="1"<?php echo trim((string)$acc['billing_email']) !== '' ? ' checked' : ' disabled'; ?>> Email a payment advice to the company<?php echo trim((string)$acc['billing_email']) === '' ? ' (no billing email)' : ''; ?></label>
-                <div style="display:flex;flex-wrap:wrap;gap:10px;">
-                    <button type="button" class="btn btn--secondary" id="ba-fill" style="min-height:44px;">Fill oldest first</button>
-                    <button type="button" class="btn btn--primary" id="ba-review-btn" style="min-height:44px;">Review payment</button>
-                    <button type="button" class="btn btn--secondary" id="ba-back" style="display:none;min-height:44px;">Back</button>
-                    <button type="submit" class="btn btn--success" id="ba-confirm" style="display:none;min-height:44px;"><i class="fas fa-check"></i> Confirm and record</button>
-                </div>
-                <p id="ba-error" role="alert" style="display:none;color:#b91c1c;margin:8px 0 0;"></p>
-            </form>
+            </section>
             <?php endif; ?>
 
-            <h3 class="section-title" style="font-size:1.05rem;">Payments received from <?php echo $e($acc['name']); ?></h3>
-            <div class="filter-section">
-                <table class="admin-table">
+            <section class="rh-panel rh-panel--flush ba-panel" id="ba-payments">
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Payments received from <?php echo $e($acc['name']); ?></h2></div>
+                <div class="rh-panel__body">
+                <table class="table">
                     <thead><tr>
-                        <th title="Our reference for the company payment">Reference</th>
-                        <th title="The date the money was received">Received</th>
-                        <th title="How the company paid, and its bank or cheque reference">Method</th>
-                        <th class="text-right" title="How many bookings the payment was split across">Bookings</th>
-                        <th class="text-right" title="The whole amount the company paid">Amount</th>
-                        <th>Actions</th>
+                        <th>Reference<?php echo $help('Our reference for the company payment'); ?></th>
+                        <th>Received<?php echo $help('The date the money was received'); ?></th>
+                        <th>Method<?php echo $help('How the company paid, and its bank or cheque reference'); ?></th>
+                        <th class="text-right">Bookings<?php echo $help('How many bookings the payment was split across'); ?></th>
+                        <th class="text-right">Amount<?php echo $help('The whole amount the company paid'); ?></th>
+                        <th class="text-right">Actions<?php echo $help('Email the payment advice (which bookings it paid) to the company again'); ?></th>
                     </tr></thead>
                     <tbody>
-                    <?php if (!$rems): ?><tr><td colspan="6" style="text-align:center;color:#6b7280;">No payments from this company yet.</td></tr><?php endif; ?>
+                    <?php if (!$rems): ?><tr><td colspan="6" class="rh-empty">No payments from this company yet.</td></tr><?php endif; ?>
                     <?php foreach ($rems as $rm): ?>
                         <tr>
-                            <td><?php echo $e($rm['remittance_reference']); ?></td>
+                            <td><strong><?php echo $e($rm['remittance_reference']); ?></strong></td>
                             <td><?php echo $e(date('j M Y', strtotime((string)$rm['received_date']))); ?></td>
                             <td><?php echo $e(rh_billing_methods()[(string)$rm['payment_method']] ?? $rm['payment_method']); ?><?php echo trim((string)$rm['bank_reference']) !== '' ? '<br><small>' . $e($rm['bank_reference']) . '</small>' : ''; ?></td>
                             <td class="text-right"><?php echo (int)$rm['line_count']; ?></td>
                             <td class="text-right"><?php echo $e($money((float)$rm['amount'])); ?></td>
-                            <td><form method="POST" style="margin:0;"><input type="hidden" name="csrf_token" value="<?php echo $e($csrf_token); ?>"><input type="hidden" name="action" value="send_advice"><input type="hidden" name="account_id" value="<?php echo (int)$acc['id']; ?>"><input type="hidden" name="remittance_id" value="<?php echo (int)$rm['id']; ?>">
-                                <button type="submit" class="btn btn--sm btn--secondary" style="min-height:36px;"<?php echo trim((string)$acc['billing_email']) === '' ? ' disabled title="Add a billing email first"' : ''; ?>>Email advice</button></form></td>
+                            <td class="text-right"><form method="POST" class="ba-inline-form"><input type="hidden" name="csrf_token" value="<?php echo $e($csrf_token); ?>"><input type="hidden" name="action" value="send_advice"><input type="hidden" name="account_id" value="<?php echo (int)$acc['id']; ?>"><input type="hidden" name="remittance_id" value="<?php echo (int)$rm['id']; ?>">
+                                <button type="submit" class="btn btn-sm btn-secondary"<?php echo $hasEmail ? '' : ' disabled title="Add a billing email first"'; ?>><i class="fas fa-envelope"></i> Email advice</button></form></td>
                         </tr>
                     <?php endforeach; ?>
                     </tbody>
                 </table>
-            </div>
+                </div>
+            </section>
         <?php endif; ?>
 
         <?php $ea = $acc ?: ['id' => 0, 'name' => '', 'contact_name' => '', 'billing_email' => '', 'billing_cc' => '', 'phone' => '', 'address' => '', 'tax_number' => '', 'terms_days' => 30, 'active' => 1, 'notes' => '']; ?>
-        <h3 class="section-title" style="font-size:1.05rem;"><?php echo $acc ? 'Edit company' : 'Add a company'; ?></h3>
-        <form method="POST" class="filter-section" style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end;">
-            <input type="hidden" name="csrf_token" value="<?php echo $e($csrf_token); ?>"><input type="hidden" name="action" value="save_account"><input type="hidden" name="account_id" value="<?php echo (int)$ea['id']; ?>">
-            <label style="display:flex;flex-direction:column;gap:4px;flex:1 1 220px;">Company name<input type="text" name="name" maxlength="150" required class="filter-input" value="<?php echo $e($ea['name']); ?>" style="min-height:44px;"></label>
-            <label style="display:flex;flex-direction:column;gap:4px;flex:1 1 200px;">Contact person<input type="text" name="contact_name" maxlength="150" class="filter-input" value="<?php echo $e($ea['contact_name']); ?>" style="min-height:44px;"></label>
-            <label style="display:flex;flex-direction:column;gap:4px;flex:1 1 220px;">Billing email<input type="email" name="billing_email" maxlength="190" class="filter-input" value="<?php echo $e($ea['billing_email']); ?>" style="min-height:44px;"></label>
-            <label style="display:flex;flex-direction:column;gap:4px;flex:1 1 220px;">Copy (CC), comma separated<input type="text" name="billing_cc" maxlength="255" class="filter-input" value="<?php echo $e($ea['billing_cc']); ?>" style="min-height:44px;"></label>
-            <label style="display:flex;flex-direction:column;gap:4px;">Phone<input type="text" name="phone" maxlength="50" class="filter-input" value="<?php echo $e($ea['phone']); ?>" style="min-height:44px;"></label>
-            <label style="display:flex;flex-direction:column;gap:4px;">Terms (days after check-out)<input type="number" name="terms_days" min="0" max="365" class="filter-input" value="<?php echo (int)$ea['terms_days']; ?>" style="min-height:44px;"></label>
-            <label style="display:flex;flex-direction:column;gap:4px;flex:1 1 220px;">Address<input type="text" name="address" maxlength="255" class="filter-input" value="<?php echo $e($ea['address']); ?>" style="min-height:44px;"></label>
-            <label style="display:flex;flex-direction:column;gap:4px;">Tax number<input type="text" name="tax_number" maxlength="60" class="filter-input" value="<?php echo $e($ea['tax_number']); ?>" style="min-height:44px;"></label>
-            <label style="display:flex;flex-direction:column;gap:4px;flex:1 1 220px;">Notes<input type="text" name="notes" maxlength="255" class="filter-input" value="<?php echo $e($ea['notes']); ?>" style="min-height:44px;"></label>
-            <label style="display:flex;align-items:center;gap:8px;min-height:44px;"><input type="checkbox" name="active" value="1"<?php echo (int)$ea['active'] === 1 ? ' checked' : ''; ?>> Active (can be chosen on bookings)</label>
-            <button type="submit" class="btn btn--primary" style="min-height:44px;"><i class="fas fa-floppy-disk"></i> <?php echo $acc ? 'Save company' : 'Add company'; ?></button>
-        </form>
+        <section class="rh-panel ba-panel" id="ba-company-form">
+            <div class="rh-panel__head"><h2 class="rh-panel__title"><?php echo $acc ? 'Edit company' : 'Add a company'; ?></h2></div>
+            <div class="rh-panel__body">
+            <form method="POST">
+                <input type="hidden" name="csrf_token" value="<?php echo $e($csrf_token); ?>"><input type="hidden" name="action" value="save_account"><input type="hidden" name="account_id" value="<?php echo (int)$ea['id']; ?>">
+                <div class="rh-form-grid">
+                    <div class="form-group"><label for="ba-f-name">Company name</label><input type="text" name="name" id="ba-f-name" maxlength="150" required class="form-control" value="<?php echo $e($ea['name']); ?>"></div>
+                    <div class="form-group"><label for="ba-f-contact">Contact person</label><input type="text" name="contact_name" id="ba-f-contact" maxlength="150" class="form-control" value="<?php echo $e($ea['contact_name']); ?>"></div>
+                    <div class="form-group"><label for="ba-f-email">Billing email</label><input type="email" name="billing_email" id="ba-f-email" maxlength="190" class="form-control" value="<?php echo $e($ea['billing_email']); ?>"></div>
+                    <div class="form-group"><label for="ba-f-cc">Copy (CC), comma separated</label><input type="text" name="billing_cc" id="ba-f-cc" maxlength="255" class="form-control" value="<?php echo $e($ea['billing_cc']); ?>"></div>
+                    <div class="form-group"><label for="ba-f-phone">Phone</label><input type="text" name="phone" id="ba-f-phone" maxlength="50" class="form-control" value="<?php echo $e($ea['phone']); ?>"></div>
+                    <div class="form-group"><label for="ba-f-terms">Terms (days after check-out)</label><input type="number" name="terms_days" id="ba-f-terms" min="0" max="365" class="form-control" value="<?php echo (int)$ea['terms_days']; ?>"></div>
+                    <div class="form-group"><label for="ba-f-tax">Tax number</label><input type="text" name="tax_number" id="ba-f-tax" maxlength="60" class="form-control" value="<?php echo $e($ea['tax_number']); ?>"></div>
+                    <div class="form-group"><label for="ba-f-address">Address</label><input type="text" name="address" id="ba-f-address" maxlength="255" class="form-control" value="<?php echo $e($ea['address']); ?>"></div>
+                    <div class="form-group rh-form-grid__full"><label for="ba-f-notes">Notes</label><input type="text" name="notes" id="ba-f-notes" maxlength="255" class="form-control" value="<?php echo $e($ea['notes']); ?>"></div>
+                </div>
+                <div class="rh-actions-row">
+                    <label class="rh-check ba-active-check"><input type="checkbox" name="active" value="1"<?php echo (int)$ea['active'] === 1 ? ' checked' : ''; ?>> Active (can be chosen on bookings)</label>
+                    <button type="submit" class="btn btn-primary"><i class="fas fa-floppy-disk"></i> <?php echo $acc ? 'Save company' : 'Add company'; ?></button>
+                </div>
+            </form>
+            </div>
+        </section>
         <?php endif; ?>
     </div>
 

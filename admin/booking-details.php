@@ -252,6 +252,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['invoice_action'])) {
 
     try {
         switch ($invoice_action) {
+            case 'guest_extras_invoice':
+            case 'guest_extras_email':
+                // Company pays the stay only (owner 2026-11-13): the guest's extras-only document, EXT-<booking ref>.
+                require_once '../config/invoice.php';
+                $gxRes = rh_guest_extras_document($pdo, (int)$booking_id, $invoice_action === 'guest_extras_email', (int)($user['id'] ?? 0));
+                if (empty($gxRes['success'])) {
+                    $_SESSION['error_message'] = $gxRes['message'];
+                    break;
+                }
+                if ($invoice_action === 'guest_extras_invoice' && is_file((string)$gxRes['filepath'])) {
+                    header('Content-Type: application/pdf');
+                    header('Content-Disposition: inline; filename="' . basename((string)$gxRes['filepath']) . '"');
+                    readfile((string)$gxRes['filepath']);
+                    exit;
+                }
+                $_SESSION[!empty($gxRes['email_sent']) ? 'success_message' : 'error_message'] = $gxRes['message'];
+                break;
+
             case 'generate_invoice':
                 // Generate invoice without sending
                 require_once '../config/invoice.php';

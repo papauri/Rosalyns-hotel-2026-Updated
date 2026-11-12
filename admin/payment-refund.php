@@ -275,6 +275,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $payment
                     'late_checkout_charge' => 'other',
                     'other'                => 'other',
                 ];
+                // Company pays later (fix 2026-11-13): store credit from a COMPANY payment is made out to the company
+                // (its billing email), never to the guest.
+                if (($payment['booking_type'] ?? '') === 'room') {
+                    require_once __DIR__ . '/../includes/billing-accounts.php';
+                    $cnCompany = rh_billing_refund_recipient($pdo, $payment);
+                    if ($cnCompany !== null) {
+                        $payment['customer_name'] = $cnCompany['name'];
+                        $payment['customer_email'] = $cnCompany['billing_email'] !== '' ? $cnCompany['billing_email'] : null;
+                    }
+                }
                 $cnGuestName = trim((string)($payment['customer_name'] ?? ''));
                 if ($cnGuestName === '') {
                     $cnGuestName = trim((string)($payment['booking_reference'] ?? '')) ?: 'Guest';

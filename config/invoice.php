@@ -824,6 +824,43 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         $balanceDue   = ($sumDue <= BALANCE_TOLERANCE) ? 0.0 : $sumDue;
     }
 
+    // On a company account (migration 084): addressed to the company, with the LPO and the due date; the guest is named.
+    $ivBill = null;
+    if (!empty($booking['id'])) {
+        if (!function_exists('rh_booking_billing') && is_file(__DIR__ . '/../includes/billing-accounts.php')) {
+            require_once __DIR__ . '/../includes/billing-accounts.php';
+        }
+        if (function_exists('rh_billing_ready') && rh_billing_ready($pdo)) {
+            $ivBill = rh_booking_billing($pdo, ['id' => (int)$booking['id']]);
+            if (empty($ivBill['on_account'])) {
+                $ivBill = null;
+            }
+        }
+    }
+    // Owner decision 2026-11-13 "Extras-only invoice to guest": when the company pays the stay only, the company's
+    // invoice shows ONLY the company's share - the stay lines, no extras, balance = what the company owes. The guest's
+    // extras go on their own document (rh_guest_extras_invoice_html). 'everything' = the whole bill, as before.
+    $ivCompanyShare = $ivBill !== null && $ivBill['covers'] !== 'everything' && $preload === null;
+    if ($ivCompanyShare) {
+        // Only the rooms THIS document lists ($summaryIds: the group when it prints the group, else this room).
+        $ivGrp = rh_billing_split_for_ids($pdo, $summaryIds);
+        $folioCharges = [];
+        $folioTotal   = 0.0;
+        $folioVat     = 0.0;
+        $vatAmount    = $baseVatParts['vat'];
+        $totalWithVat = round($ivGrp['stay'], 2);
+        $subtotalShown = $linesTotal;
+        $balanceDue   = $ivGrp['company_due'] <= BALANCE_TOLERANCE ? 0.0 : $ivGrp['company_due'];
+        // Amount paid = the company's own payments; guest money that went to the stay is its own row (so it foots).
+        $amountPaid   = round($ivGrp['company_paid'], 2);
+        $ivGuestStay  = round(max(0.0, $totalWithVat - $balanceDue - $amountPaid), 2);
+        // Only the company's own payments (and their refunds) are listed on its invoice.
+        $ivLegs = array_flip($ivGrp['leg_ids']);
+        $payments = array_values(array_filter($payments, static function ($p) use ($ivLegs) {
+            return isset($ivLegs[(int)($p['id'] ?? 0)]) || isset($ivLegs[(int)($p['original_payment_id'] ?? 0)]);
+        }));
+    }
+
     // Status badge
     $isPaid        = $balanceDue <= BALANCE_TOLERANCE;
     $statusText    = $isPaid ? 'PAID IN FULL' : 'BALANCE DUE';
@@ -998,9 +1035,15 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     if ($statementMode) {
         $totals[] = ['label' => 'Total charges', 'value' => $money($totalWithVat), 'type' => 'strong'];
         $totals[] = ['label' => 'Total paid', 'value' => $money($amountPaid), 'type' => 'total'];
+        if (!empty($ivGuestStay) && $ivGuestStay > BALANCE_TOLERANCE) {
+            $totals[] = ['label' => 'Paid by the guest towards the stay', 'value' => $money($ivGuestStay), 'type' => 'paid'];
+        }
     } else {
         $totals[] = ['label' => 'Invoice total', 'value' => $money($totalWithVat), 'type' => 'strong'];
         $totals[] = ['label' => 'Amount paid', 'value' => $money($amountPaid), 'type' => 'paid'];
+        if (!empty($ivGuestStay) && $ivGuestStay > BALANCE_TOLERANCE) {
+            $totals[] = ['label' => 'Paid by the guest towards the stay', 'value' => $money($ivGuestStay), 'type' => 'paid'];
+        }
         $totals[] = ['label' => 'Balance due', 'value' => $money(max(0, $balanceDue)), 'type' => 'total'];
     }
 
@@ -1009,19 +1052,6 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         . rh_inv_bank_terms_html($site_name, $email_address, $phone_number, !$isPaid)
         . rh_inv_closing_html('Thank you for choosing us.');
 
-    // On a company account (migration 084): addressed to the company, with the LPO and the due date; the guest is named.
-    $ivBill = null;
-    if (!empty($booking['id'])) {
-        if (!function_exists('rh_booking_billing') && is_file(__DIR__ . '/../includes/billing-accounts.php')) {
-            require_once __DIR__ . '/../includes/billing-accounts.php';
-        }
-        if (function_exists('rh_billing_ready') && rh_billing_ready($pdo)) {
-            $ivBill = rh_booking_billing($pdo, ['id' => (int)$booking['id']]);
-            if (empty($ivBill['on_account'])) {
-                $ivBill = null;
-            }
-        }
-    }
     $meta = [
         [$statementMode ? 'Statement No.' : 'Invoice No.', $invoice_number],
         ['Issued', date('d M Y')],
@@ -1039,7 +1069,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         $meta[] = ['Guest', (string)$booking['guest_name']];
         $meta[] = ['LPO / order no.', $ivBill['reference'] !== '' ? $ivBill['reference'] : '-'];
         $meta[] = ['Payment due', $ivBill['due_date'] !== '' ? date('d M Y', strtotime($ivBill['due_date'])) : '-'];
-        $meta[] = ['Company pays', $ivBill['covers'] === 'everything' ? 'Room stay and extras' : 'Room stay (extras are the guest\'s)'];
+        $meta[] = ['Company pays', $ivBill['covers'] === 'everything' ? 'Room stay and extras' : 'Room stay (extras are invoiced to the guest)'];
     }
 
     return rh_pdf_document_shell($statementMode ? 'Stay Statement - paid in full' : 'Invoice', $meta, $body, [
@@ -1047,6 +1077,157 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
             'tone' => $isPaid ? 'neutral' : 'danger'],
     ]);
 }
+
+/**
+ * Guest EXTRAS document for a booking on a company account where the company pays the stay only (owner decision
+ * 2026-11-13 "Extras-only invoice to guest"): the folio extras (bar, room service, charge-to-room) only, billed to the
+ * guest; balance = what the guest owes (guest_due). Never shows the company's share. Paid = a statement, no request for money.
+ * $booking: bookings row (+ room_name). Returns '' when the booking has no guest extras on a company account.
+ */
+function rh_guest_extras_invoice_html(array $booking, string $number): string
+{
+    global $pdo;
+    if (!function_exists('rh_booking_bill_split') && is_file(__DIR__ . '/../includes/billing-accounts.php')) {
+        require_once __DIR__ . '/../includes/billing-accounts.php';
+    }
+    if (!function_exists('rh_billing_ready') || !rh_billing_ready($pdo) || empty($booking['id'])) {
+        return '';
+    }
+    $sp = rh_booking_bill_split($pdo, (int)$booking['id']);
+    if (empty($sp['on_account']) || $sp['covers'] === 'everything' || (float)$sp['extras'] <= BALANCE_TOLERANCE) {
+        return '';
+    }
+    $cur = trim((string)getSetting('currency_symbol', '')) !== '' ? trim((string)getSetting('currency_symbol', '')) : hotel_brand_tokens()['hotel']['currency'];
+    $money = static fn($v): string => rh_pdf_money((float)$v, $cur);
+    $vMode = vat_mode();
+    $cs = $pdo->prepare("SELECT charge_type, description, quantity, unit_price, line_subtotal, vat_amount, line_total FROM booking_charges
+        WHERE booking_id = ? AND voided = 0 ORDER BY posted_at ASC, id ASC");
+    $cs->execute([(int)$booking['id']]);
+    $rows = [];
+    $tot = 0.0;
+    $vat = 0.0;
+    $sub = 0.0;
+    foreach ($cs->fetchAll(PDO::FETCH_ASSOC) as $fc) {
+        $shown = $vMode === 'exclusive' ? (float)$fc['line_subtotal'] : (float)$fc['line_total'];
+        $qty = max(1, (int)$fc['quantity']);
+        $tot += (float)$fc['line_total'];
+        $vat += (float)$fc['vat_amount'];
+        $sub += $shown;
+        $rows[] = [
+            rh_pdf_e($fc['description']) . rh_inv_sub(ucfirst((string)(($fc['charge_type'] ?? '') !== '' ? $fc['charge_type'] : 'Extra'))),
+            rh_pdf_e((string)(int)$fc['quantity']),
+            rh_pdf_e($money($vMode === 'exclusive' ? $shown / $qty : (float)$fc['unit_price'])),
+            rh_pdf_e($money($shown)),
+        ];
+    }
+    $due = (float)$sp['guest_due'] <= BALANCE_TOLERANCE ? 0.0 : (float)$sp['guest_due'];
+    $paidExtras = round(max(0.0, (float)$sp['extras'] - $due), 2);
+    $isPaid = $due <= BALANCE_TOLERANCE;
+    $totals = [['label' => $vMode === 'exclusive' ? 'Subtotal (excl. VAT)' : ($vMode === 'inclusive' ? 'Subtotal (incl. VAT)' : 'Subtotal'), 'value' => $money($vMode === 'off' ? $tot : $sub)]];
+    foreach (rh_pdf_vat_rows($vat, $vMode === 'off' ? 0.0 : (float)getSetting('vat_rate', 0), $cur) as $vr) {
+        $totals[] = $vr;
+    }
+    $totals[] = ['label' => 'Extras total', 'value' => $money($sp['extras']), 'type' => 'strong'];
+    $totals[] = ['label' => 'Amount paid', 'value' => $money($paidExtras), 'type' => 'paid'];
+    if (!$isPaid) {
+        $totals[] = ['label' => 'Balance due', 'value' => $money($due), 'type' => 'total'];
+    }
+    $site = (string)getSetting('site_name');
+    $body = rh_pdf_items_table([
+        ['label' => 'Description', 'width' => 46, 'align' => 'left'], ['label' => 'Qty', 'width' => 10, 'align' => 'right'],
+        ['label' => $vMode === 'exclusive' ? 'Unit (excl. VAT)' : 'Unit', 'width' => 21, 'align' => 'right'], ['label' => 'Amount', 'width' => 23, 'align' => 'right'],
+    ], $rows) . rh_pdf_spacer(3) . rh_inv_keep_together(rh_pdf_totals_table($totals))
+        . rh_inv_bank_terms_html($site, rh_guest_contact_email(), (string)getSetting('phone_main'), !$isPaid)
+        . rh_inv_closing_html('Thank you for choosing us.');
+    $meta = [
+        [$isPaid ? 'Statement No.' : 'Invoice No.', $number],
+        ['Issued', date('d M Y')],
+        ['Billed to', (string)$booking['guest_name']],
+        ['Booking ref', (string)$booking['booking_reference']],
+        ['Email', (string)($booking['guest_email'] ?? '')],
+        ['Check-in', date('d M Y', strtotime((string)$booking['check_in_date']))],
+        ['Phone', (string)($booking['guest_phone'] ?? '')],
+        ['Check-out', date('d M Y', strtotime((string)$booking['check_out_date']))],
+        ['Room', (string)($booking['room_name'] ?? '')],
+        ['Room stay', 'Billed to ' . $sp['name'] . ' (not on this document)'],
+    ];
+    return rh_pdf_document_shell($isPaid ? 'Extras statement - paid in full' : 'Invoice - extras', $meta, $body, [
+        'banner' => ['text' => $isPaid ? 'Paid in full' : 'Balance due', 'tone' => $isPaid ? 'neutral' : 'danger'],
+    ]);
+}
+
+/**
+ * Make (and optionally email to the guest) the guest extras document of a company-account booking. Number
+ * EXT-<booking reference>: tied to the booking, never taken from the invoice sequence, the same every time (the file is
+ * overwritten, so making it again is safe). Emailed only to the guest's own email, never to the company; no guest email =
+ * not sent, logged, staff told. History + system log.
+ * @return array{success:bool,message:string,number?:string,relative_path?:string,filepath?:string,owing?:float,email_sent?:bool}
+ */
+function rh_guest_extras_document(PDO $pdo, int $bookingId, bool $email = false, ?int $userId = null): array
+{
+    try {
+        $st = $pdo->prepare('SELECT b.*, r.name AS room_name FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id WHERE b.id = ?');
+        $st->execute([$bookingId]);
+        $b = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$b) {
+            return ['success' => false, 'message' => 'Booking not found'];
+        }
+        $number = 'EXT-' . preg_replace('/[^A-Za-z0-9_-]+/', '-', (string)$b['booking_reference']);
+        $html = rh_guest_extras_invoice_html($b, $number);
+        if ($html === '') {
+            return ['success' => false, 'message' => 'This booking has no guest extras on a company account.'];
+        }
+        if (!function_exists('bookingRenderPdfFromHtml')) {
+            require_once __DIR__ . '/email.php';
+        }
+        $dir = __DIR__ . '/../invoices';
+        if (!is_dir($dir)) {
+            mkdir($dir, 0755, true);
+        }
+        $file = $dir . '/' . $number . '.pdf';
+        file_put_contents($file, bookingRenderPdfFromHtml($html, 'Invoice ' . $number));
+        $sp = rh_booking_bill_split($pdo, $bookingId);
+        $owing = (float)$sp['guest_due'] <= BALANCE_TOLERANCE ? 0.0 : (float)$sp['guest_due'];
+        $out = ['success' => true, 'message' => 'Guest extras ' . ($owing > 0 ? 'invoice' : 'statement') . ' ' . $number . ' made.', 'number' => $number,
+            'relative_path' => 'invoices/' . $number . '.pdf', 'filepath' => $file, 'owing' => $owing, 'email_sent' => false];
+        if ($email) {
+            $to = trim((string)($b['guest_email'] ?? ''));
+            if ($to === '' || !filter_var($to, FILTER_VALIDATE_EMAIL)) {
+                if (!function_exists('rh_email_send_log_not_sent')) {
+                    require_once __DIR__ . '/../includes/email-send-log.php';
+                }
+                rh_email_send_log_not_sent('invoice', $to, (string)$b['guest_name'], rh_email_ctx_account('room', $bookingId, $b['booking_reference'] ?? null),
+                    'Guest extras document: the guest has no valid email');
+                $out['message'] .= ' Not emailed: the guest has no email address - print it or add an email.';
+            } else {
+                $cc = array_filter(array_map('trim', explode(',', (string)getEmailSetting('invoice_recipients', ''))));
+                $smtp = (string)getEmailSetting('smtp_username', '');
+                if ($smtp !== '' && !in_array($smtp, $cc, true)) {
+                    $cc[] = $smtp;
+                }
+                $r = sendFinalInvoiceEmail($b, $file, array_values($cc), $owing, true);
+                $out['email_sent'] = !empty($r['success']);
+                $out['message'] .= $out['email_sent'] ? ' Emailed to the guest (' . $to . ').' : ' Email to the guest failed: ' . (string)($r['message'] ?? 'unknown error') . '.';
+            }
+        }
+        if (!function_exists('logBookingEvent') && is_file(__DIR__ . '/../includes/booking-timeline.php')) {
+            require_once __DIR__ . '/../includes/booking-timeline.php';
+        }
+        if (function_exists('logBookingEvent')) {
+            logBookingEvent($bookingId, (string)$b['booking_reference'], 'Guest extras invoice', 'payment',
+                $out['message'] . ' Extras ' . rh_billing_money((float)$sp['extras']) . ', guest owes ' . rh_billing_money($owing) . '; the room stay is on ' . $sp['name'] . '\'s account.',
+                null, number_format($owing, 2, '.', ''), 'admin', $userId, null, ['number' => $number, 'guest_due' => $owing, 'emailed' => $out['email_sent']]);
+        }
+        if (function_exists('rh_log_event')) {
+            rh_log_event('bookings', 'info', 'Guest extras document', ['booking_id' => $bookingId, 'number' => $number, 'guest_due' => $owing, 'emailed' => $out['email_sent'], 'by' => $userId]);
+        }
+        return $out;
+    } catch (Throwable $e) {
+        error_log('rh_guest_extras_document: ' . $e->getMessage());
+        return ['success' => false, 'message' => $e->getMessage()];
+    }
+}
+
 /**
  * Renders an admin-customised payment_invoice_document DB template (legacy placeholders).
  * Receives the variable scope of buildInvoiceHTML().
@@ -1540,6 +1721,12 @@ function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, arr
                 }
                 $booking['guest_email'] = $ibBill['billing_email'];
                 $booking['guest_name'] = $ibBill['name'];
+                if ($ibBill['covers'] !== 'everything') {
+                    // The email states the company's share only (never the guest's extras), for the SAME rooms the
+                    // attached invoice prints: generateInvoicePDF() prints a group room from its primary (the whole
+                    // group), so use the group split exactly as the checkout final invoice does.
+                    $booking['amount_due'] = rh_billing_group_split($pdo, (int)$booking['id'])['company_due'];
+                }
                 $cc_recipients = array_values(array_unique(array_merge($cc_recipients, $ibBill['billing_cc'])));
             }
         }
@@ -1960,6 +2147,25 @@ function generateAndSendFinalInvoice(int $booking_id, ?int $processed_by = null,
         $dueStmt->execute([$booking_id]);
         $balanceDueAtCheckout = round((float)$dueStmt->fetchColumn(), 2);
 
+        // On a company account that pays the stay only, the final invoice is the COMPANY's: its balance is the company's
+        // share of the group (owner decision 2026-11-13 "Extras-only invoice to guest"); the guest's extras go on their
+        // own document below.
+        if (!function_exists('rh_booking_billing') && is_file(__DIR__ . '/../includes/billing-accounts.php')) {
+            require_once __DIR__ . '/../includes/billing-accounts.php';
+        }
+        $coGroup = null;
+        if (function_exists('rh_billing_ready') && rh_billing_ready($pdo)) {
+            // The rooms generateInvoicePDF() prints for this booking (a group room prints from its primary: the whole
+            // group) - the email amount and statement flag match exactly what the attached document lists.
+            $coGroup = rh_billing_group_split($pdo, $booking_id);
+            $coFirst = rh_booking_billing($pdo, ['id' => $booking_id]);
+            if (empty($coGroup['on_account']) || empty($coFirst['on_account'])) {
+                $coGroup = null;
+            } elseif ($coFirst['covers'] !== 'everything') {
+                $balanceDueAtCheckout = round((float)$coGroup['company_due'], 2);
+            }
+        }
+
         // Generate final invoice
         $invoice_result = generateInvoicePDF($booking_id, null, $balanceDueAtCheckout <= BALANCE_TOLERANCE);
         if (!$invoice_result) {
@@ -1993,7 +2199,7 @@ function generateAndSendFinalInvoice(int $booking_id, ?int $processed_by = null,
             require_once __DIR__ . '/../includes/billing-accounts.php';
         }
         $coBill = null;
-        if (function_exists('rh_billing_ready') && rh_billing_ready($pdo)) {
+        if ($coGroup !== null) {
             $coSt = $pdo->prepare("SELECT * FROM bookings WHERE id = ?");
             $coSt->execute([$booking_id]);
             $coRow = $coSt->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -2049,8 +2255,26 @@ function generateAndSendFinalInvoice(int $booking_id, ?int $processed_by = null,
                 rh_log_event('bookings', 'info', 'Final invoice routed to company account', ['booking_id' => $booking_id, 'company' => $coBill['name'],
                     'invoice' => $invoice_number, 'sent' => !empty($coResult['success']), 'by' => $processed_by]);
             }
+            // The guest's own extras (company pays the stay only): a separate extras-only document to the guest's email.
+            $guestExtras = null;
+            // Only for the booking being checked out (each group guest gets theirs at their own checkout).
+            if ($coBill['covers'] !== 'everything' && $coGroup !== null && (float)$coSplit['extras'] > BALANCE_TOLERANCE) {
+                $guestExtras = ['number' => '', 'email_sent' => false, 'message' => ''];
+                foreach ([$booking_id] as $gxId) {
+                    $gx = rh_guest_extras_document($pdo, (int)$gxId, true, $processed_by);
+                    if (!empty($gx['success'])) {
+                        $guestExtras['number'] = trim($guestExtras['number'] . ', ' . $gx['number'], ', ');
+                        $guestExtras['email_sent'] = $guestExtras['email_sent'] || !empty($gx['email_sent']);
+                        $guestExtras['message'] = trim($guestExtras['message'] . ' ' . $gx['message']);
+                    }
+                }
+                if ($guestExtras['message'] !== '') {
+                    $coNote .= ' ' . $guestExtras['message'];
+                }
+            }
             return [
                 'success' => true,
+                'guest_extras' => $guestExtras,
                 'message' => 'Final invoice generated. ' . $coNote,
                 'balance_due' => $balanceDueAtCheckout,
                 'invoice_file' => $invoice_file,
@@ -2222,7 +2446,7 @@ if (!function_exists('rh_issue_paid_statement')) {
  *                          without any request for money.
  * @return array Result with success status
  */
-function sendFinalInvoiceEmail(array $booking, string $invoice_file, array $cc_recipients = [], float $balanceDue = 0.0)
+function sendFinalInvoiceEmail(array $booking, string $invoice_file, array $cc_recipients = [], float $balanceDue = 0.0, bool $extrasOnly = false)
 {
     $emailCtx = rh_email_context(['kind' => 'invoice'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_name, $email_from_email, $email_site_name, $email_site_url;
@@ -2273,7 +2497,7 @@ function sendFinalInvoiceEmail(array $booking, string $invoice_file, array $cc_r
 
                 <div style="background: #d4edda; padding: 15px; border-left: 4px solid #28a745; border-radius: 5px; margin: 20px 0;">
                     <h3 style="color: #155724; margin-top: 0;">✅ ' . ($fiOwed ? 'Final Invoice Attached' : 'Statement Attached (paid in full)') . '</h3>
-                    <p style="color: #155724; margin: 0;">Please find your ' . $fiDocName . ' attached to this email. It includes all room charges, extras, and payments made during your stay.</p>
+                    <p style="color: #155724; margin: 0;">Please find your ' . $fiDocName . ' attached to this email. ' . ($extrasOnly ? 'It lists only your own extras (bar, room service and similar) and what you paid for them; your room stay is billed to your company separately.' : 'It includes all room charges, extras, and payments made during your stay.') . '</p>
                 </div>
 
                 <div style="background: #e7f3ff; padding: 15px; border-left: 4px solid #0d6efd; border-radius: 5px;">

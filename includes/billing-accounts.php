@@ -114,7 +114,7 @@ if (!function_exists('rh_billing_ready')) {
      * @return array{on_account:bool,account_id:int,account:?array,name:string,reference:string,due_date:string,
      *               covers:string,billing_email:string,billing_cc:array,terms_days:int,from_primary:bool}
      */
-    function rh_booking_billing(PDO $pdo, array $b): array
+    function rh_booking_billing(PDO $pdo, array $b, ?array $accounts = null): array
     {
         $out = ['on_account' => false, 'account_id' => 0, 'account' => null, 'name' => '', 'reference' => '', 'due_date' => '',
             'covers' => 'stay', 'billing_email' => '', 'billing_cc' => [], 'terms_days' => 0, 'from_primary' => false];
@@ -128,16 +128,23 @@ if (!function_exists('rh_billing_ready')) {
             $src = $st->fetch(PDO::FETCH_ASSOC) ?: $src;
         }
         if ((int)($src['billing_account_id'] ?? 0) <= 0 && (int)($src['primary_booking_id'] ?? 0) > 0) {
-            $st = $pdo->prepare('SELECT billing_account_id, billing_reference, billing_due_date, billing_covers, check_out_date FROM bookings WHERE id = ?');
-            $st->execute([(int)$src['primary_booking_id']]);
-            $p = $st->fetch(PDO::FETCH_ASSOC);
+            if (array_key_exists('pb_billing_account_id', $src)) {
+                // The primary's billing columns were joined into the row (list / batch queries): no extra query.
+                $p = ['billing_account_id' => $src['pb_billing_account_id'], 'billing_reference' => $src['pb_billing_reference'] ?? null,
+                    'billing_due_date' => $src['pb_billing_due_date'] ?? null, 'billing_covers' => $src['pb_billing_covers'] ?? null];
+            } else {
+                $st = $pdo->prepare('SELECT billing_account_id, billing_reference, billing_due_date, billing_covers, check_out_date FROM bookings WHERE id = ?');
+                $st->execute([(int)$src['primary_booking_id']]);
+                $p = $st->fetch(PDO::FETCH_ASSOC);
+            }
             if ($p && (int)$p['billing_account_id'] > 0) {
                 $src = array_merge($src, ['billing_account_id' => $p['billing_account_id'], 'billing_reference' => $p['billing_reference'],
                     'billing_due_date' => $p['billing_due_date'], 'billing_covers' => $p['billing_covers']]);
                 $out['from_primary'] = true;
             }
         }
-        $acc = rh_billing_account($pdo, (int)($src['billing_account_id'] ?? 0));
+        $accId = (int)($src['billing_account_id'] ?? 0);
+        $acc = $accounts !== null ? ($accounts[$accId] ?? null) : rh_billing_account($pdo, $accId);
         if (!$acc) {
             return $out;
         }
@@ -164,18 +171,39 @@ if (!function_exists('rh_billing_ready')) {
     /** Net money the company paid on a booking: its remittance payment rows, less refunds of those rows. */
     function rh_billing_company_paid(PDO $pdo, int $bookingId): float
     {
-        if (!rh_billing_ready($pdo)) {
-            return 0.0;
+        return rh_billing_company_paid_map($pdo, [$bookingId])[$bookingId] ?? 0.0;
+    }
+
+    /**
+     * Net company money per booking for many bookings in one query: booking_id => paid legs (canonical paid statuses)
+     * less refunds of those legs (completed / processing). A booking with no company money is left out (= 0).
+     */
+    function rh_billing_company_paid_map(PDO $pdo, array $bookingIds): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $bookingIds), static fn($i) => $i > 0)));
+        if (!$ids || !rh_billing_ready($pdo)) {
+            return [];
         }
-        $st = $pdo->prepare("SELECT COALESCE(SUM(CASE WHEN p.payment_status IN ('completed','paid','refunded','partially_refunded')
-                AND COALESCE(p.payment_type,'') <> 'refund' THEN p.total_amount ELSE 0 END), 0)
-            FROM billing_remittance_lines l JOIN payments p ON p.id = l.payment_id AND p.deleted_at IS NULL WHERE l.booking_id = ?");
-        $st->execute([$bookingId]);
-        $paid = (float)$st->fetchColumn();
-        $st = $pdo->prepare("SELECT COALESCE(SUM(r.total_amount), 0) FROM payments r JOIN billing_remittance_lines l ON l.payment_id = r.original_payment_id
-            WHERE l.booking_id = ? AND r.payment_type = 'refund' AND r.refund_status IN ('completed','processing') AND r.deleted_at IS NULL");
-        $st->execute([$bookingId]);
-        return round(max(0.0, $paid - (float)$st->fetchColumn()), 2);
+        $out = [];
+        foreach (array_chunk($ids, 500) as $chunk) {
+            $in = implode(',', array_fill(0, count($chunk), '?'));
+            // Two halves, one statement and one GROUP BY: the paid legs, and the refunds of those legs (kept apart so a
+            // join never counts a leg twice).
+            $st = $pdo->prepare("SELECT x.booking_id, SUM(x.paid) - SUM(x.refunded) AS net FROM (
+                    SELECT l.booking_id, CASE WHEN p.payment_status IN ('completed','paid','refunded','partially_refunded')
+                        AND COALESCE(p.payment_type,'') <> 'refund' THEN p.total_amount ELSE 0 END AS paid, 0 AS refunded
+                    FROM billing_remittance_lines l JOIN payments p ON p.id = l.payment_id AND p.deleted_at IS NULL WHERE l.booking_id IN ($in)
+                    UNION ALL
+                    SELECT l.booking_id, 0 AS paid, r.total_amount AS refunded
+                    FROM payments r JOIN billing_remittance_lines l ON l.payment_id = r.original_payment_id
+                    WHERE l.booking_id IN ($in) AND r.payment_type = 'refund' AND r.refund_status IN ('completed','processing') AND r.deleted_at IS NULL
+                ) x GROUP BY x.booking_id");
+            $st->execute(array_merge($chunk, $chunk));
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $out[(int)$r['booking_id']] = round(max(0.0, (float)$r['net']), 2);
+            }
+        }
+        return $out;
     }
 
     /**
@@ -232,7 +260,13 @@ if (!function_exists('rh_billing_ready')) {
             $row = $st->fetch(PDO::FETCH_ASSOC) ?: [];
         }
         $bill = rh_booking_billing($pdo, $row + ['id' => $bookingId]);
-        $fig = rh_billing_split_figures($row, $bill['on_account'], $bill['covers'], $bill['on_account'] ? rh_billing_company_paid($pdo, $bookingId) : 0.0);
+        return rh_billing_split_result($row, $bill, $bill['on_account'] ? rh_billing_company_paid($pdo, $bookingId) : 0.0);
+    }
+
+    /** PURE. The array rh_booking_bill_split() returns, from the row, its billing and the company's net money. */
+    function rh_billing_split_result(array $row, array $bill, float $companyPaid): array
+    {
+        $fig = rh_billing_split_figures($row, $bill['on_account'], $bill['covers'], $bill['on_account'] ? $companyPaid : 0.0);
         $daysPast = 0;
         if ($bill['on_account'] && $bill['due_date'] !== '') {
             $daysPast = max(0, (int)floor((strtotime(date('Y-m-d')) - strtotime($bill['due_date'])) / 86400));
@@ -242,6 +276,268 @@ if (!function_exists('rh_billing_ready')) {
             'due_date' => $bill['due_date'], 'covers' => $bill['covers'], 'billing_email' => $bill['billing_email'], 'billing_cc' => $bill['billing_cc'],
             'amount_due' => round(max(0.0, (float)($row['amount_due'] ?? 0)), 2), 'days_past_due' => $daysPast,
         ];
+    }
+
+    /**
+     * Splits for many bookings at once (lists, receivables, the company page): id => the same array as
+     * rh_booking_bill_split(). $rows: bookings rows (SELECT b.*; optionally with pb_billing_* joined from the primary).
+     * Queries: one for the companies, at most one for group primaries not joined in, one for the company money.
+     */
+    function rh_billing_splits_for_rows(PDO $pdo, array $rows): array
+    {
+        $out = [];
+        if (!$rows) {
+            return $out;
+        }
+        $accounts = [];
+        if (rh_billing_ready($pdo)) {
+            foreach (rh_billing_accounts($pdo) as $a) {
+                $accounts[(int)$a['id']] = $a;
+            }
+            $need = [];
+            foreach ($rows as $r) {
+                if ((int)($r['billing_account_id'] ?? 0) <= 0 && (int)($r['primary_booking_id'] ?? 0) > 0 && !array_key_exists('pb_billing_account_id', $r)) {
+                    $need[(int)$r['primary_booking_id']] = true;
+                }
+            }
+            $prim = [];
+            foreach (array_chunk(array_keys($need), 500) as $chunk) {
+                $st = $pdo->prepare('SELECT id, billing_account_id, billing_reference, billing_due_date, billing_covers FROM bookings WHERE id IN ('
+                    . implode(',', array_fill(0, count($chunk), '?')) . ')');
+                $st->execute($chunk);
+                foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $p) {
+                    $prim[(int)$p['id']] = $p;
+                }
+            }
+            foreach ($rows as $i => $r) {
+                $pid = (int)($r['primary_booking_id'] ?? 0);
+                if ((int)($r['billing_account_id'] ?? 0) <= 0 && $pid > 0 && !array_key_exists('pb_billing_account_id', $r)) {
+                    $p = $prim[$pid] ?? [];
+                    $rows[$i] += ['pb_billing_account_id' => $p['billing_account_id'] ?? null, 'pb_billing_reference' => $p['billing_reference'] ?? null,
+                        'pb_billing_due_date' => $p['billing_due_date'] ?? null, 'pb_billing_covers' => $p['billing_covers'] ?? null];
+                }
+            }
+        }
+        $bills = [];
+        $onIds = [];
+        foreach ($rows as $r) {
+            $id = (int)$r['id'];
+            $bills[$id] = rh_booking_billing($pdo, $r, $accounts);
+            if ($bills[$id]['on_account']) {
+                $onIds[] = $id;
+            }
+        }
+        $paid = rh_billing_company_paid_map($pdo, $onIds);
+        foreach ($rows as $r) {
+            $id = (int)$r['id'];
+            $out[$id] = rh_billing_split_result($r, $bills[$id], $paid[$id] ?? 0.0);
+        }
+        return $out;
+    }
+
+    /**
+     * The split summed over a booking's group (primary + members; a single booking = itself), as the room invoice
+     * combines them: on_account, company_due, guest_due, company_paid, guest_paid, stay, extras, guest_extra_cover
+     * (guest money that paid extras), ids, leg_ids (the company's payment rows).
+     */
+    function rh_billing_group_split(PDO $pdo, int $bookingId): array
+    {
+        $out = ['on_account' => false, 'company_due' => 0.0, 'guest_due' => 0.0, 'company_paid' => 0.0, 'guest_paid' => 0.0, 'stay' => 0.0,
+            'extras' => 0.0, 'guest_extra_cover' => 0.0, 'ids' => [], 'leg_ids' => []];
+        $st = $pdo->prepare('SELECT COALESCE(NULLIF(primary_booking_id, 0), id) FROM bookings WHERE id = ?');
+        $st->execute([$bookingId]);
+        $root = (int)$st->fetchColumn();
+        if ($root <= 0) {
+            return $out;
+        }
+        $st = $pdo->prepare('SELECT id FROM bookings WHERE id = ? OR primary_booking_id = ? ORDER BY id');
+        $st->execute([$root, $root]);
+        return rh_billing_split_for_ids($pdo, array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN)));
+    }
+
+    /**
+     * The split summed over EXACTLY these bookings (the rooms one document lists - never more), same keys as
+     * rh_billing_group_split().
+     */
+    function rh_billing_split_for_ids(PDO $pdo, array $ids): array
+    {
+        $out = ['on_account' => false, 'company_due' => 0.0, 'guest_due' => 0.0, 'company_paid' => 0.0, 'guest_paid' => 0.0, 'stay' => 0.0,
+            'extras' => 0.0, 'guest_extra_cover' => 0.0, 'ids' => [], 'leg_ids' => []];
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static fn($i) => $i > 0)));
+        if (!$ids) {
+            return $out;
+        }
+        $st = $pdo->prepare('SELECT * FROM bookings WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ') ORDER BY id');
+        $st->execute($ids);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        foreach (rh_billing_splits_for_rows($pdo, $rows) as $id => $sp) {
+            $out['ids'][] = (int)$id;
+            if (empty($sp['on_account'])) {
+                continue;
+            }
+            $out['on_account'] = true;
+            foreach (['company_due', 'guest_due', 'company_paid', 'guest_paid', 'stay', 'extras'] as $k) {
+                $out[$k] = round($out[$k] + (float)$sp[$k], 2);
+            }
+            $out['guest_extra_cover'] = round($out['guest_extra_cover'] + min((float)$sp['guest_paid'], (float)$sp['extras']), 2);
+        }
+        if ($out['ids'] && rh_billing_ready($pdo)) {
+            $st = $pdo->prepare('SELECT payment_id FROM billing_remittance_lines WHERE booking_id IN (' . implode(',', array_fill(0, count($out['ids']), '?')) . ')');
+            $st->execute($out['ids']);
+            $out['leg_ids'] = array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
+        }
+        return $out;
+    }
+
+    /**
+     * PURE. Who is owed the money going back on an on-account booking. $companyLeft / $guestLeft: what is still
+     * refundable on the company's payments / everybody else's; $billAfter: the bill once this refund is done
+     * (paid - refund); $extras: folio extras; $covers 'stay' | 'everything'. The company is responsible for the stay
+     * (and the extras when it covers everything); the guest for the extras it pays. Guest money above its extras first
+     * fills any gap in the company's share; only the rest is the guest's own overpayment.
+     * @return array{company:float,guest:float} the overpaid share of each
+     */
+    function rh_billing_refund_overpaid(float $companyLeft, float $guestLeft, float $billAfter, float $extras, string $covers): array
+    {
+        $billAfter = max(0.0, $billAfter);
+        $guestShare = $covers === 'everything' ? 0.0 : min(max(0.0, $extras), $billAfter);
+        $companyShare = $billAfter - $guestShare;
+        return [
+            'company' => round(max(0.0, $companyLeft - $companyShare), 2),
+            'guest' => round(max(0.0, $guestLeft - $guestShare - max(0.0, $companyShare - $companyLeft)), 2),
+        ];
+    }
+
+    /**
+     * Refund order for an on-account booking (called by allocateBookingRefunds): the company's payments first, up to
+     * the company's overpaid share; then the guest's own payments, up to the guest's overpaid share; anything left
+     * (should not happen) newest payment first, logged. null = not on account / no company money: the caller keeps
+     * its newest-first order. $rows: the caller's candidate payments (newest first, with already_refunded).
+     * Each entry: ['payment' => row, 'amount' => float, 'payer' => 'company'|'guest'].
+     */
+    function rh_billing_refund_plan(PDO $pdo, int $bookingId, array $rows, float $amount): ?array
+    {
+        $tol = rh_billing_tol();
+        if (!rh_billing_ready($pdo) || $amount <= $tol) {
+            return null;
+        }
+        $st = $pdo->prepare('SELECT * FROM bookings WHERE id = ?');
+        $st->execute([$bookingId]);
+        $b = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$b) {
+            return null;
+        }
+        $bill = rh_booking_billing($pdo, $b);
+        if (!$bill['on_account']) {
+            return null;
+        }
+        $st = $pdo->prepare('SELECT payment_id FROM billing_remittance_lines WHERE booking_id = ?');
+        $st->execute([$bookingId]);
+        $legs = array_flip(array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN)));
+        if (!$legs) {
+            return null;
+        }
+        // Everything still refundable on the booking (all methods), split by payer.
+        $st = $pdo->prepare("SELECT p.id, p.total_amount - COALESCE((SELECT SUM(COALESCE(r.refund_amount, r.total_amount)) FROM payments r
+                    WHERE r.original_payment_id = p.id AND r.payment_type = 'refund' AND r.refund_status IN ('completed','processing','pending') AND r.deleted_at IS NULL), 0) AS lft
+            FROM payments p WHERE p.booking_type = 'room' AND p.booking_id = ? AND COALESCE(p.payment_type, '') <> 'refund'
+              AND p.payment_status IN ('completed','paid','refunded','partially_refunded') AND p.deleted_at IS NULL");
+        $st->execute([$bookingId]);
+        $cLeft = 0.0;
+        $gLeft = 0.0;
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $p) {
+            $l = max(0.0, round((float)$p['lft'], 2));
+            if (isset($legs[(int)$p['id']])) {
+                $cLeft += $l;
+            } else {
+                $gLeft += $l;
+            }
+        }
+        $over = rh_billing_refund_overpaid($cLeft, $gLeft, $cLeft + $gLeft - $amount, (float)($b['folio_charges_total'] ?? 0), $bill['covers']);
+        $left = round($amount, 2);
+        $cap = ['company' => min($left, $over['company']), 'guest' => $over['guest']];
+        $take = [];
+        $room = [];
+        foreach ($rows as $p) {
+            $room[(int)$p['id']] = max(0.0, round((float)$p['total_amount'] - (float)$p['already_refunded'], 2));
+        }
+        foreach (['company', 'guest', 'rest'] as $pass) {
+            foreach ($rows as $p) {
+                $pid = (int)$p['id'];
+                $payer = isset($legs[$pid]) ? 'company' : 'guest';
+                if ($left <= $tol || ($pass !== 'rest' && $payer !== $pass) || $room[$pid] <= $tol) {
+                    continue;
+                }
+                $n = $pass === 'rest' ? min($left, $room[$pid]) : min($left, $room[$pid], $cap[$pass]);
+                $n = round($n, 2);
+                if ($n <= $tol) {
+                    continue;
+                }
+                if ($pass !== 'rest') {
+                    $cap[$pass] = round($cap[$pass] - $n, 2);
+                } elseif (function_exists('rh_log_event')) {
+                    rh_log_event('payments', 'warning', 'Refund on a company account booking went beyond the payer shares', [
+                        'booking_id' => $bookingId, 'payment_id' => $pid, 'amount' => $n, 'payer' => $payer]);
+                }
+                $room[$pid] = round($room[$pid] - $n, 2);
+                $left = round($left - $n, 2);
+                if (isset($take[$pid])) {
+                    $take[$pid]['amount'] = round($take[$pid]['amount'] + $n, 2);
+                } else {
+                    $take[$pid] = ['payment' => $p, 'amount' => $n, 'payer' => $payer];
+                }
+            }
+        }
+        return array_values($take);
+    }
+
+    /**
+     * Who is told about a refund of $payment (the refund row or the original payment): when the money refunded is a
+     * company payment, the company (billing email, test-mode routed); null = not a company payment (the guest is told).
+     * @return array{name:string,to:string,note:string,billing_email:string}|null to '' = do not send (note says why); billing_email = the real address
+     */
+    function rh_billing_refund_recipient(PDO $pdo, array $payment): ?array
+    {
+        if (!rh_billing_ready($pdo) || (string)($payment['booking_type'] ?? 'room') !== 'room') {
+            return null;
+        }
+        $legId = (string)($payment['payment_type'] ?? '') === 'refund' ? (int)($payment['original_payment_id'] ?? 0) : (int)($payment['id'] ?? 0);
+        if (!rh_billing_payment_is_company_leg($pdo, $legId)) {
+            return null;
+        }
+        $st = $pdo->prepare('SELECT a.* FROM billing_remittance_lines l JOIN billing_remittances r ON r.id = l.remittance_id JOIN billing_accounts a ON a.id = r.billing_account_id WHERE l.payment_id = ?');
+        $st->execute([$legId]);
+        $acc = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$acc) {
+            return null;
+        }
+        $to = (string)(rh_billing_email_list((string)($acc['billing_email'] ?? ''))[0] ?? '');
+        if ($to === '') {
+            return ['name' => (string)$acc['name'], 'to' => '', 'note' => (string)$acc['name'] . ' has no billing email', 'billing_email' => ''];
+        }
+        $route = rh_billing_mail_route($to, [], '', rh_billing_test_recipient());
+        return ['name' => (string)$acc['name'], 'to' => $route['send'] ? $route['to'] : '', 'note' => $route['send'] ? '' : $route['note'], 'billing_email' => $to];
+    }
+
+    /**
+     * Company money received from $from (Y-m-d) on: company payments received in the period, less refunds of
+     * their payment rows dated in the period (completed / processing). $accountId null = every company.
+     */
+    function rh_billing_received_net(PDO $pdo, string $from, ?int $accountId = null): float
+    {
+        if (!rh_billing_ready($pdo)) {
+            return 0.0;
+        }
+        $accSql = $accountId !== null ? ' AND r.billing_account_id = ?' : '';
+        $args = $accountId !== null ? [$from, $accountId] : [$from];
+        $st = $pdo->prepare('SELECT COALESCE(SUM(r.amount), 0) FROM billing_remittances r WHERE r.received_date >= ?' . $accSql);
+        $st->execute($args);
+        $in = (float)$st->fetchColumn();
+        $st = $pdo->prepare("SELECT COALESCE(SUM(f.total_amount), 0) FROM payments f
+            JOIN billing_remittance_lines l ON l.payment_id = f.original_payment_id JOIN billing_remittances r ON r.id = l.remittance_id
+            WHERE f.payment_type = 'refund' AND f.refund_status IN ('completed','processing') AND f.deleted_at IS NULL AND f.payment_date >= ?" . $accSql);
+        $st->execute($args);
+        return round($in - (float)$st->fetchColumn(), 2);
     }
 
     /** Short status words for lists: '' when the booking is not on account (callers keep their normal label). */
@@ -289,29 +585,68 @@ if (!function_exists('rh_billing_ready')) {
         if (!function_exists('rh_receivable_status_sql')) {
             require_once __DIR__ . '/../admin/includes/receivables.php';
         }
-        $st = $pdo->prepare("SELECT b.* FROM bookings b
-            WHERE (b.billing_account_id = ? OR (b.billing_account_id IS NULL AND b.primary_booking_id IN (SELECT p.id FROM bookings p WHERE p.billing_account_id = ?)))
+        $st = $pdo->prepare("SELECT b.*, pb.billing_account_id AS pb_billing_account_id, pb.billing_reference AS pb_billing_reference,
+                pb.billing_due_date AS pb_billing_due_date, pb.billing_covers AS pb_billing_covers
+            FROM bookings b LEFT JOIN bookings pb ON pb.id = b.primary_booking_id
+            WHERE (b.billing_account_id = ? OR (b.billing_account_id IS NULL AND pb.billing_account_id = ?))
               AND " . rh_receivable_status_sql('room', 'b') . " ORDER BY b.check_out_date, b.id");
         $st->execute([$accountId, $accountId]);
-        $rows = [];
-        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $b) {
-            $sp = rh_booking_bill_split($pdo, (int)$b['id'], $b);
-            if (!$includeSettled && $sp['company_due'] <= rh_billing_tol()) {
+        return rh_billing_open_rows($pdo, $st->fetchAll(PDO::FETCH_ASSOC), $includeSettled)[$accountId] ?? [];
+    }
+
+    /**
+     * Every company's open bookings in ONE load (the Company accounts list): account id => rows exactly as
+     * rh_billing_open_bookings() returns them.
+     */
+    function rh_billing_open_bookings_all(PDO $pdo): array
+    {
+        if (!rh_billing_ready($pdo)) {
+            return [];
+        }
+        if (!function_exists('rh_receivable_status_sql')) {
+            require_once __DIR__ . '/../admin/includes/receivables.php';
+        }
+        $found = $pdo->query("SELECT b.*, pb.billing_account_id AS pb_billing_account_id, pb.billing_reference AS pb_billing_reference,
+                pb.billing_due_date AS pb_billing_due_date, pb.billing_covers AS pb_billing_covers
+            FROM bookings b LEFT JOIN bookings pb ON pb.id = b.primary_booking_id
+            WHERE (b.billing_account_id IS NOT NULL OR pb.billing_account_id IS NOT NULL)
+              AND " . rh_receivable_status_sql('room', 'b') . " ORDER BY b.check_out_date, b.id")->fetchAll(PDO::FETCH_ASSOC);
+        return rh_billing_open_rows($pdo, $found, false);
+    }
+
+    /** Batch split of booking rows grouped by company: account id => [['booking' => row, 'split' => split], ...], oldest due first. */
+    function rh_billing_open_rows(PDO $pdo, array $found, bool $includeSettled): array
+    {
+        $splits = rh_billing_splits_for_rows($pdo, $found);
+        $by = [];
+        foreach ($found as $b) {
+            $sp = $splits[(int)$b['id']];
+            if (!$sp['on_account'] || (!$includeSettled && $sp['company_due'] <= rh_billing_tol())) {
                 continue;
             }
-            $rows[] = ['booking' => $b, 'split' => $sp];
+            unset($b['pb_billing_account_id'], $b['pb_billing_reference'], $b['pb_billing_due_date'], $b['pb_billing_covers']);
+            $by[(int)$sp['account_id']][] = ['booking' => $b, 'split' => $sp];
         }
-        usort($rows, static function ($x, $y) {
-            return strcmp((string)$x['split']['due_date'], (string)$y['split']['due_date']) ?: ((int)$x['booking']['id'] <=> (int)$y['booking']['id']);
-        });
-        return $rows;
+        foreach ($by as &$rows) {
+            usort($rows, static function ($x, $y) {
+                return strcmp((string)$x['split']['due_date'], (string)$y['split']['due_date']) ?: ((int)$x['booking']['id'] <=> (int)$y['booking']['id']);
+            });
+        }
+        unset($rows);
+        return $by;
     }
 
     /** Totals for a company: owed, overdue, count, oldest days past due. */
     function rh_billing_account_totals(PDO $pdo, int $accountId): array
     {
+        return rh_billing_totals_from_rows(rh_billing_open_bookings($pdo, $accountId));
+    }
+
+    /** PURE. Totals from rh_billing_open_bookings() rows: owed, overdue, count, oldest days past due. */
+    function rh_billing_totals_from_rows(array $rows): array
+    {
         $out = ['owed' => 0.0, 'overdue' => 0.0, 'count' => 0, 'oldest_days' => 0];
-        foreach (rh_billing_open_bookings($pdo, $accountId) as $r) {
+        foreach ($rows as $r) {
             $out['owed'] += $r['split']['company_due'];
             $out['count']++;
             if ($r['split']['days_past_due'] > 0) {
@@ -349,7 +684,7 @@ if (!function_exists('rh_billing_ready')) {
             }
         }
         $acc = $accId > 0 ? rh_billing_account($pdo, $accId) : null;
-        if ($accId > 0 && (!$acc || (int)$acc['active'] !== 1)) {
+        if ($accId > 0 && !$acc) {
             throw new Exception('Choose an active company.');
         }
         $arrCols = function_exists('rh_checkin_arrangement_columns_present') && rh_checkin_arrangement_columns_present($pdo);
@@ -369,6 +704,32 @@ if (!function_exists('rh_billing_ready')) {
             }
             if (!in_array((string)$b['status'], ['pending', 'tentative', 'confirmed', 'checked-in', 'checked-out'], true)) {
                 throw new Exception('Who pays can only be changed on a live or checked-out booking.');
+            }
+            $curId = (int)($b['billing_account_id'] ?? 0);
+            // A deactivated company stays on the bookings it already has (an LPO / due date edit keeps it); it cannot be
+            // newly chosen.
+            if ($acc && (int)$acc['active'] !== 1 && (int)$acc['id'] !== $curId) {
+                throw new Exception('Choose an active company.');
+            }
+            // Fix 7: the company's payments belong to it. While any are on this booking (or on a group member that
+            // follows it), the company cannot be removed or switched: move or refund them first.
+            if ($curId > 0 && $curId !== ($acc ? (int)$acc['id'] : 0)) {
+                $grp = $pdo->prepare('SELECT id FROM bookings WHERE id = ? OR (primary_booking_id = ? AND billing_account_id IS NULL)');
+                $grp->execute([$bookingId, $bookingId]);
+                $held = array_sum(rh_billing_company_paid_map($pdo, array_map('intval', $grp->fetchAll(PDO::FETCH_COLUMN))));
+                if ($held > rh_billing_tol()) {
+                    $curName = (string)((rh_billing_account($pdo, $curId)['name'] ?? '') ?: ('#' . $curId));
+                    if ($ownTx) {
+                        $pdo->rollBack();
+                    }
+                    if (function_exists('rh_log_event')) {
+                        rh_log_event('bookings', 'warning', 'Company account change refused: company money on the booking', ['booking_id' => $bookingId,
+                            'ref' => $b['booking_reference'], 'company' => $curName, 'company_paid' => round($held, 2), 'wanted' => $acc ? (string)$acc['name'] : 'Guest pays',
+                            'by' => $user['username'] ?? null]);
+                    }
+                    throw new Exception('Move or refund ' . $curName . '\'s payment first: ' . rh_billing_money($held) . ' of ' . $curName
+                        . '\'s money is on this booking' . ($acc ? '' : ', so the company cannot be taken off') . '. Nothing was changed.');
+                }
             }
             $names = rh_billing_account_names($pdo);
             $old = [

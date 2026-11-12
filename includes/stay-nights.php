@@ -260,6 +260,8 @@ if (!function_exists('rh_stay_nights_quote')) {
             $refundTotal = 0.0;
             $refundLegs = [];
             $creditNote = null;
+            $creditNotes = [];
+            $refundCompany = 0.0;
             $describe = rh_stay_nights_describe($q, $cur);
             if ($mode === 'refund') {
                 $refundReason = $describe . ' Reason: ' . $reason;
@@ -291,35 +293,66 @@ if (!function_exists('rh_stay_nights_quote')) {
                     ]);
                     rh_refresh_original_payment_status($pdo, (int)$orig['id']);
                     $refundTotal = round($refundTotal + $leg, 2);
+                    if (($alloc['payer'] ?? '') === 'company') {
+                        $refundCompany = round($refundCompany + $leg, 2);
+                    }
                     $refundLegs[] = ['orig' => array_merge($orig, ['booking_type' => 'room', 'booking_id' => $bookingId, 'booking_reference' => $b['booking_reference']]),
-                        'ref' => $legRef, 'amount' => $leg, 'reason' => $refundReason];
+                        'ref' => $legRef, 'amount' => $leg, 'reason' => $refundReason, 'payer' => (string)($alloc['payer'] ?? 'guest')];
                 }
                 if ($refundTotal + $tol < (float)$q['money_back']) {
                     throw new Exception('Could not refund the full ' . rh_stay_nights_money((float)$q['money_back'], $cur) . ' against the payments on this booking. Nothing was changed.');
                 }
             } elseif ($mode === 'credit_note') {
                 $vatOn = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
-                $split = rh_account_vat_split($pdo, 'room', $bookingId, (float)$q['money_back'], $vatOn ? (float)getSetting('vat_rate') : 0.0);
-                $cn = issueCreditNote($pdo, [
-                    'booking_type' => 'room', 'booking_id' => $bookingId, 'booking_reference' => (string)$b['booking_reference'],
-                    'guest_name' => trim((string)$b['guest_name']) !== '' ? (string)$b['guest_name'] : 'Guest',
-                    'guest_email' => (string)($b['guest_email'] ?? ''),
-                    'amount' => (float)$q['money_back'], 'vat_rate' => (float)$split['rate'], 'vat_amount' => (float)$split['vat'],
-                    'reason' => 'early_checkout',
-                    'reason_notes' => mb_substr($describe . ' Reason: ' . $reason, 0, 1000),
-                    'issued_by' => $uid > 0 ? $uid : (int)$pdo->query('SELECT MIN(id) FROM admin_users')->fetchColumn(),
-                    'send_email' => false, 'generate_pdf' => false,
-                ]);
-                if (empty($cn['success'])) {
-                    throw new Exception('The credit note could not be created: ' . ($cn['error'] ?? 'unknown error') . '. Nothing was changed.');
+                // Company pays later (fix 2026-11-13): the money is matched to who paid it (allocateBookingRefunds tags
+                // each leg 'company' / 'guest' on an on-account booking); the company's part becomes a credit note made
+                // out to the company (its billing email), the guest's part one made out to the guest.
+                $cnAllocs = allocateBookingRefunds($pdo, $bookingId, (float)$q['money_back'], true, 'any');
+                $groups = [];
+                foreach ($cnAllocs as $al) {
+                    $groups[(string)($al['payer'] ?? 'guest') === 'company' ? 'company' : 'guest'][] = $al;
                 }
-                $legs = recordCreditNoteRefundLegs($pdo, $bookingId, (string)$b['booking_reference'], (float)$q['money_back'],
-                    (int)$cn['credit_note_id'], (string)$cn['credit_note_number'], $uid, 'early_checkout', 'room');
-                if ($legs['total'] + $tol < (float)$q['money_back']) {
+                $cnBill = function_exists('rh_booking_billing') ? rh_booking_billing($pdo, $b) : ['on_account' => false];
+                $creditNotes = [];
+                foreach (['company', 'guest'] as $payer) {
+                    if (empty($groups[$payer])) {
+                        continue;
+                    }
+                    $part = round(array_sum(array_column($groups[$payer], 'amount')), 2);
+                    $isCo = $payer === 'company' && !empty($cnBill['on_account']);
+                    $toName = $isCo ? (string)$cnBill['name'] : (trim((string)$b['guest_name']) !== '' ? (string)$b['guest_name'] : 'Guest');
+                    $toEmail = $isCo ? (string)$cnBill['billing_email'] : (string)($b['guest_email'] ?? '');
+                    $split = rh_account_vat_split($pdo, 'room', $bookingId, $part, $vatOn ? (float)getSetting('vat_rate') : 0.0);
+                    $cn = issueCreditNote($pdo, [
+                        'booking_type' => 'room', 'booking_id' => $bookingId, 'booking_reference' => (string)$b['booking_reference'],
+                        'guest_name' => $toName,
+                        'guest_email' => $toEmail,
+                        'amount' => $part, 'vat_rate' => (float)$split['rate'], 'vat_amount' => (float)$split['vat'],
+                        'reason' => 'early_checkout',
+                        'reason_notes' => mb_substr(($isCo ? 'Company payment returned (guest: ' . (string)$b['guest_name']
+                            . ($cnBill['reference'] !== '' ? ', LPO ' . $cnBill['reference'] : '') . '). ' : '') . $describe . ' Reason: ' . $reason, 0, 1000),
+                        'issued_by' => $uid > 0 ? $uid : (int)$pdo->query('SELECT MIN(id) FROM admin_users')->fetchColumn(),
+                        'send_email' => false, 'generate_pdf' => false,
+                    ]);
+                    if (empty($cn['success'])) {
+                        throw new Exception('The credit note could not be created: ' . ($cn['error'] ?? 'unknown error') . '. Nothing was changed.');
+                    }
+                    $legs = recordCreditNoteRefundLegs($pdo, $bookingId, (string)$b['booking_reference'], $part,
+                        (int)$cn['credit_note_id'], (string)$cn['credit_note_number'], $uid, 'early_checkout', 'room', $groups[$payer]);
+                    if ($legs['total'] + $tol < $part) {
+                        throw new Exception('Could not move the full amount into the credit note. Nothing was changed.');
+                    }
+                    $creditNotes[] = ['id' => (int)$cn['credit_note_id'], 'number' => (string)$cn['credit_note_number'], 'amount' => $part,
+                        'email' => trim($toEmail), 'payer' => $isCo ? 'company' : 'guest', 'name' => $toName];
+                }
+                if (round(array_sum(array_column($creditNotes, 'amount')), 2) + $tol < (float)$q['money_back']) {
                     throw new Exception('Could not move the full amount into the credit note. Nothing was changed.');
                 }
-                $creditNote = ['id' => (int)$cn['credit_note_id'], 'number' => (string)$cn['credit_note_number'], 'amount' => (float)$q['money_back'],
-                    'email' => trim((string)($b['guest_email'] ?? ''))];
+                $creditNote = $creditNotes[0] ?? null;
+                if ($creditNote && count($creditNotes) > 1) {
+                    $creditNote['number'] = implode(', ', array_column($creditNotes, 'number'));
+                    $creditNote['amount'] = (float)$q['money_back'];
+                }
             }
             if (!recalculateBookingFinancials($bookingId)) {
                 throw new Exception('Could not recalculate the booking balance - nothing was changed.');
@@ -336,10 +369,12 @@ if (!function_exists('rh_stay_nights_quote')) {
                 'amount_paid' => round((float)($a['amount_paid'] ?? 0), 2),
             ];
             if ($refundTotal > $tol) {
-                $describe .= ' Refunded ' . rh_stay_nights_money($refundTotal, $cur) . ' to the original payment(s).';
+                $describe .= ' Refunded ' . rh_stay_nights_money($refundTotal, $cur) . ' to the original payment(s)'
+                    . ($refundCompany > $tol ? ' (' . rh_stay_nights_money($refundCompany, $cur) . ' of it to the company that paid it)' : '') . '.';
             }
-            if ($creditNote) {
-                $describe .= ' ' . rh_stay_nights_money($creditNote['amount'], $cur) . ' moved to credit note ' . $creditNote['number'] . '.';
+            foreach ($creditNotes as $cnOne) {
+                $describe .= ' ' . rh_stay_nights_money($cnOne['amount'], $cur) . ' moved to credit note ' . $cnOne['number']
+                    . ($cnOne['payer'] === 'company' ? ' (made out to ' . $cnOne['name'] . ', which paid it)' : '') . '.';
             }
             $describe .= ' Reason: ' . $reason;
             $meta = [
@@ -376,6 +411,6 @@ if (!function_exists('rh_stay_nights_quote')) {
             rh_rate_plan_drop_log($bookingId, $b['booking_reference'] ?? null, $q['drop'], (float)rh_booked_stay_split($b)['per_night'],
                 (float)$q['reprice']['per_night'], (float)$q['reprice']['old_gross'], (float)$q['reprice']['new_gross'], $who);
         }
-        return ['quote' => $q, 'describe' => $describe, 'refund_total' => $refundTotal, 'refund_legs' => $refundLegs, 'credit_note' => $creditNote, 'after' => $after];
+        return ['quote' => $q, 'describe' => $describe, 'refund_total' => $refundTotal, 'refund_legs' => $refundLegs, 'credit_note' => $creditNote, 'credit_notes' => $creditNotes, 'after' => $after];
     }
 }

@@ -2902,7 +2902,55 @@ function rh_checkin_payment_gate(array $booking): string
     if (!empty($booking['checkin_without_payment'])) {
         return 'arrangement';
     }
+    // Company pays later (fix 2026-11-13): the booking's own company, or a group member whose PRIMARY has the pay-later
+    // switch or a company (the switch is set on the primary only) - the same rule as rh_checkin_arrangement_exclude_sql.
+    if (function_exists('rh_checkin_arrangement_inherited') && rh_checkin_arrangement_inherited($booking)) {
+        return 'arrangement';
+    }
     return 'blocked';
+}
+
+/**
+ * Whether a booking is covered by a pay-later arrangement it does not carry in its own switch: its own company
+ * (migration 084), or its primary booking's switch / company. Reads the primary fresh (no cache). Needs the row's
+ * billing_account_id / primary_booking_id keys; missing keys = false.
+ */
+function rh_checkin_arrangement_inherited(array $booking): bool
+{
+    global $pdo;
+    if (!$pdo instanceof PDO) {
+        return false;
+    }
+    if (!function_exists('rh_billing_ready') && is_file(__DIR__ . '/../includes/billing-accounts.php')) {
+        require_once __DIR__ . '/../includes/billing-accounts.php';
+    }
+    $billing = function_exists('rh_billing_ready') && rh_billing_ready($pdo);
+    if ($billing && (int)($booking['billing_account_id'] ?? 0) > 0) {
+        return true;
+    }
+    $pid = (int)($booking['primary_booking_id'] ?? 0);
+    if ($pid <= 0 || $pid === (int)($booking['id'] ?? 0)) {
+        return false;
+    }
+    $cols = [];
+    if (rh_checkin_arrangement_columns_present($pdo)) {
+        $cols[] = 'COALESCE(checkin_without_payment, 0) AS sw';
+    }
+    if ($billing) {
+        $cols[] = 'billing_account_id';
+    }
+    if (!$cols) {
+        return false;
+    }
+    try {
+        $st = $pdo->prepare('SELECT ' . implode(', ', $cols) . ' FROM bookings WHERE id = ?');
+        $st->execute([$pid]);
+        $p = $st->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        error_log('rh_checkin_arrangement_inherited: ' . $e->getMessage());
+        return false;
+    }
+    return $p && (!empty($p['sw']) || (int)($p['billing_account_id'] ?? 0) > 0);
 }
 
 /**
@@ -9852,10 +9900,26 @@ function allocateBookingRefunds(PDO $pdo, int $bookingId, float $amount, bool $l
         ORDER BY p.payment_date DESC, p.id DESC
         " . ($lock ? "FOR UPDATE" : ""));
     $stmt->execute([$bookingId]);
+    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Company pays later (migration 084, fix 2026-11-13): on an on-account booking the money goes back to whoever paid it.
+    // The company's payments first, up to the company's overpaid share; the guest's own payments only for the guest's
+    // overpaid share. Entries then also carry 'payer' => 'company' | 'guest'. Not on account: newest first, as before.
+    if ($scope !== 'credit_note') {
+        if (!function_exists('rh_billing_refund_plan') && is_file(__DIR__ . '/../includes/billing-accounts.php')) {
+            require_once __DIR__ . '/../includes/billing-accounts.php';
+        }
+        if (function_exists('rh_billing_refund_plan')) {
+            $plan = rh_billing_refund_plan($pdo, $bookingId, $rows, round($amount, 2));
+            if ($plan !== null) {
+                return $plan;
+            }
+        }
+    }
 
     $out = [];
     $left = round($amount, 2);
-    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $p) {
+    foreach ($rows as $p) {
         if ($left <= BALANCE_TOLERANCE) {
             break;
         }
@@ -10311,19 +10375,19 @@ function evaluateCheckoutBalance(PDO $pdo, int $bookingId, ?int $userId, bool $o
     // Company pays later (owner D2 2026-11-13): the COMPANY share of an on-account booking never blocks checkout and
     // needs no override; only the guest's own share (extras the company does not cover) does. 'balance' is the
     // guest's share; company_due / company_name say what stays on the company account.
+    // The company fields are filled whenever the booking is on account, also when nothing is owed yet (a fully paid
+    // on-account stay can still get late-checkout nights, which are the company's - fix 2026-11-13).
     $companyDue = 0.0;
     $companyName = '';
-    if ($balance > BALANCE_TOLERANCE) {
-        if (!function_exists('rh_booking_bill_split')) {
-            require_once __DIR__ . '/../includes/billing-accounts.php';
-        }
-        if (rh_billing_ready($pdo)) {
-            $sp = rh_booking_bill_split($pdo, $bookingId);
-            if (!empty($sp['on_account'])) {
-                $companyDue = (float)$sp['company_due'];
-                $companyName = (string)$sp['name'];
-                $balance = round(max(0.0, $balance - $companyDue), 2);
-            }
+    if (!function_exists('rh_booking_bill_split')) {
+        require_once __DIR__ . '/../includes/billing-accounts.php';
+    }
+    if (rh_billing_ready($pdo)) {
+        $sp = rh_booking_bill_split($pdo, $bookingId);
+        if (!empty($sp['on_account'])) {
+            $companyDue = (float)$sp['company_due'];
+            $companyName = (string)$sp['name'];
+            $balance = round(max(0.0, $balance - $companyDue), 2);
         }
     }
 

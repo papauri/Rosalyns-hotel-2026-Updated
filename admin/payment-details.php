@@ -479,7 +479,7 @@ if ($pdCanEditPayment && $pdEditRefusal === null && !empty($booking)) {
                     </a>
                 <?php endif; ?>
                 <?php if ($pdEdit !== null): ?>
-                    <button type="button" class="btn btn--primary btn--sm" onclick="pdOpenEditModal()" title="Correct the amount, method, date, reference or notes of this payment (a reason is required)">
+                    <button type="button" class="btn btn-primary btn-sm" onclick="pdOpenEditModal()" title="Correct the amount, method, date, reference or notes of this payment (a reason is required)">
                         <i class="fas fa-pen-to-square"></i> Edit payment
                     </button>
                 <?php endif; ?>
@@ -830,7 +830,7 @@ if ($pdCanEditPayment && $pdEditRefusal === null && !empty($booking)) {
     <?php if ($pdEdit !== null): $pdE = static function ($v) { return htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8'); }; ?>
     <!-- Edit payment (payment_edit): correct a payment already taken, with a reason -->
     <div class="modal-overlay" id="pdEditModal" aria-hidden="true" style="display:none;">
-        <div class="modal-content pd-receipt-dialog" role="dialog" aria-modal="true" aria-labelledby="pdEditTitle" style="max-width:min(96vw,36rem);width:min(96vw,36rem);">
+        <div class="modal-content pd-receipt-dialog rh-dialog-narrow" role="dialog" aria-modal="true" aria-labelledby="pdEditTitle">
             <div class="modal-header">
                 <div>
                     <h3 id="pdEditTitle"><i class="fas fa-pen-to-square"></i> Edit payment</h3>
@@ -844,20 +844,20 @@ if ($pdCanEditPayment && $pdEditRefusal === null && !empty($booking)) {
                 <div class="modal-body">
                     <input type="hidden" name="csrf_token" value="<?php echo $pdE($csrf_token ?? generateCsrfToken()); ?>">
                     <input type="hidden" name="action" value="edit_payment">
-                    <div class="form-group" style="margin-bottom:12px;">
-                        <label for="pdEditAmount" style="display:block;font-weight:600;margin-bottom:4px;">Amount the guest paid (<?php echo $pdE($currency_symbol); ?>, incl. VAT) *</label>
+                    <div class="form-group">
+                        <label for="pdEditAmount">Amount the guest paid (<?php echo $pdE($currency_symbol); ?>, incl. VAT) *</label>
                         <input type="number" step="0.01" min="0.01" name="edit_amount" id="pdEditAmount" class="form-control" required value="<?php echo $pdE(number_format($pdEdit['total'], 2, '.', '')); ?>">
-                        <small style="display:block;color:var(--rh-muted,#6b6258);margin-top:4px;">
+                        <small>
                             Recorded now: <?php echo $pdE($currency_symbol . ' ' . number_format($pdEdit['total'], 2)); ?>.
                             The booking owed <?php echo $pdE($currency_symbol . ' ' . number_format(max(0, $pdEdit['owed_without']), 2)); ?> before this payment, so it can be at most that.
                             <?php if ($pdEdit['refunded'] > BALANCE_TOLERANCE): ?>
                                 <?php echo $pdE($currency_symbol . ' ' . number_format($pdEdit['refunded'], 2)); ?> of it was already refunded or moved to a credit note, so it cannot go below that.
                             <?php endif; ?>
                         </small>
-                        <p id="pdEditPreview" style="margin:6px 0 0;font-size:.9rem;font-weight:600;" aria-live="polite"></p>
+                        <p id="pdEditPreview" class="rh-live-note" aria-live="polite"></p>
                     </div>
-                    <div class="form-group" style="margin-bottom:12px;">
-                        <label for="pdEditMethod" style="display:block;font-weight:600;margin-bottom:4px;">How the guest paid *</label>
+                    <div class="form-group">
+                        <label for="pdEditMethod">How the guest paid *</label>
                         <select name="edit_method" id="pdEditMethod" class="form-control" required>
                             <?php $pdMethods = rh_payment_edit_methods();
                             if (!isset($pdMethods[$pdEdit['method']]) && $pdEdit['method'] !== '') { $pdMethods = [$pdEdit['method'] => ucwords(str_replace('_', ' ', $pdEdit['method']))] + $pdMethods; }
@@ -866,30 +866,30 @@ if ($pdCanEditPayment && $pdEditRefusal === null && !empty($booking)) {
                             <?php endforeach; ?>
                         </select>
                     </div>
-                    <div class="form-group" style="margin-bottom:12px;">
-                        <label for="pdEditDate" style="display:block;font-weight:600;margin-bottom:4px;">Payment date *</label>
+                    <div class="form-group">
+                        <label for="pdEditDate">Payment date *</label>
                         <input type="date" name="edit_date" id="pdEditDate" class="form-control" required max="<?php echo $pdE($pdEdit['today']); ?>" value="<?php echo $pdE($pdEdit['date']); ?>">
-                        <p id="pdEditPastDay" style="display:none;margin:6px 0 0;padding:8px 10px;border:1px solid #e6c98f;background:#fff8ea;border-radius:6px;color:#7a4b00;font-size:.88rem;"></p>
+                        <p id="pdEditPastDay" class="rh-review-card rh-review-card--warn" style="display:none;"></p>
                     </div>
-                    <div class="form-group" style="margin-bottom:12px;">
-                        <label for="pdEditRef" style="display:block;font-weight:600;margin-bottom:4px;">Transaction reference</label>
+                    <div class="form-group">
+                        <label for="pdEditRef">Transaction reference</label>
                         <input type="text" name="edit_reference" id="pdEditRef" class="form-control" maxlength="100" value="<?php echo $pdE($pdEdit['reference']); ?>" placeholder="Bank ref, mobile money ID, cheque no...">
                     </div>
-                    <div class="form-group" style="margin-bottom:12px;">
-                        <label for="pdEditNotes" style="display:block;font-weight:600;margin-bottom:4px;">Notes</label>
+                    <div class="form-group">
+                        <label for="pdEditNotes">Notes</label>
                         <textarea name="edit_notes" id="pdEditNotes" class="form-control" rows="2" maxlength="1000"><?php echo $pdE($pdEdit['notes']); ?></textarea>
                     </div>
-                    <div class="form-group" style="margin-bottom:12px;">
-                        <label for="pdEditReason" style="display:block;font-weight:600;margin-bottom:4px;">Reason for the change *</label>
+                    <div class="form-group">
+                        <label for="pdEditReason">Reason for the change *</label>
                         <textarea name="edit_reason" id="pdEditReason" class="form-control" rows="2" maxlength="500" required minlength="3" placeholder="Example: guest paid part only, recorded as full by mistake"></textarea>
-                        <small style="color:var(--rh-muted,#6b6258);">Shown in the payment's and the booking's History with who changed what.</small>
+                        <small>Shown in the payment's and the booking's History with who changed what.</small>
                     </div>
-                    <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer;min-height:44px;">
-                        <input type="checkbox" name="edit_email_guest" value="1" id="pdEditEmail" style="margin-top:3px;"<?php echo $pdEdit['email'] === '' ? ' disabled' : ''; ?>>
+                    <label class="rh-check rh-check--top">
+                        <input type="checkbox" name="edit_email_guest" value="1" id="pdEditEmail"<?php echo $pdEdit['email'] === '' ? ' disabled' : ''; ?>>
                         <span><?php echo $pdEdit['email'] !== ''
                             ? 'Email the guest a corrected receipt (to ' . $pdE($pdEdit['email']) . ')'
                             : 'Email the guest a corrected receipt (no email address on file)'; ?>
-                            <small style="display:block;color:var(--rh-muted,#6b6258);">Left unticked, nothing is sent; the receipt on file still shows the corrected amount<?php echo $pdEdit['receipt'] !== '' ? ', marked "Corrected receipt", with the same number' : ''; ?>.</small></span>
+                            <small>Left unticked, nothing is sent; the receipt on file still shows the corrected amount<?php echo $pdEdit['receipt'] !== '' ? ', marked "Corrected receipt", with the same number' : ''; ?>.</small></span>
                     </label>
                 </div>
                 <div class="modal-footer">

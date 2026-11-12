@@ -136,6 +136,7 @@ ok('History on the booking: "Company payment recorded"', ($a['rem_history']['act
 ok('Edit payment refuses a company leg', stripos((string)($a['edit_leg'] ?? ''), 'company payment') !== false, (string)($a['edit_leg'] ?? ''));
 ok('a 500 refund of a company leg puts 500 back on the company (read from the payment rows)', $near($a['split1_refund']['company_paid'] ?? 0, 1830) && $near($a['split1_refund']['company_due'] ?? 0, 500)
     && $near($a['split1_refund']['guest_due'] ?? 0, 200), json_encode($a['split1_refund'] ?? []));
+ok('taking the company off while it has money on the booking is refused', stripos((string)($a['b1_off_refused'] ?? ''), 'payment first') !== false, (string)($a['b1_off_refused'] ?? ''));
 ok('taking the company off: the automatic 083 switch goes off too', (int)($a['b1_off']['checkin_without_payment'] ?? 1) === 0 && empty($a['b1_off']['billing_account_id']), json_encode($a['b1_off'] ?? []));
 
 echo "== group ==\n";
@@ -156,6 +157,77 @@ ok('final invoice: not_sent logged, History "Checked out on company account"', (
 ok('statement PDF lists the LPO', !empty($d['statement_html_has_lpo']));
 ok('invoice is billed to the company with the LPO', !empty($d['invoice_billed_to_company']));
 ok('no email was sent at all', (int)($d['sent_rows'] ?? -1) === 0);
+
+echo "== fix round 2026-11-13 (audit repros) ==\n";
+$x = br_child('fixes');
+ok('F1 refund on a company-paid stay comes from the company payment, not the guest\'s bar money', ($x['f1a'] ?? null) == [['company', 1165.0]], json_encode($x['f1a'] ?? $x));
+ok('F1 the guest\'s own overpaid share is refunded from the guest\'s payment', ($x['f1b'] ?? null) == [['guest', 100.0]], json_encode($x['f1b'] ?? []));
+ok('F1 not on account: newest payment first, unchanged', ($x['f1c'] ?? null) == [['guest', 565.0], ['company', 135.0]], json_encode($x['f1c'] ?? []));
+ok('F1 refund notice for company money: not sent to the guest, company has no billing email, staff told', empty($x['f1d_mail']['success'])
+    && stripos((string)($x['f1d_mail']['message'] ?? ''), 'billing email') !== false && ($x['f1d_log']['status'] ?? '') === 'not_sent', json_encode([$x['f1d_mail'] ?? null, $x['f1d_log'] ?? null]));
+ok('F1 nights off as a credit note on company money: the note is made out to the company', strpos((string)($x['f1e_cn']['guest_name'] ?? ''), 'ZZ TEST CO') === 0
+    && abs((float)($x['f1e_cn']['original_amount'] ?? 0) - 1165) < 0.02, json_encode([$x['f1e_quote'] ?? null, $x['f1e_cn'] ?? null, $x['f1e_err'] ?? null]));
+ok('F2 company invoice: balance is the company share (2,330), no bar bill on it', !empty($x['f2_company']['has_2330']) && empty($x['f2_company']['has_2530']) && empty($x['f2_company']['has_bar']), json_encode($x['f2_company'] ?? []));
+ok('F2 guest extras document: bar bill only, 200 owed, billed to the guest', !empty($x['f2_guest']['has_bar']) && !empty($x['f2_guest']['has_200']) && empty($x['f2_guest']['has_2330'])
+    && !empty($x['f2_guest']['billed_guest']), json_encode($x['f2_guest'] ?? 'missing'));
+ok('F2 final invoice at checkout: balance = company share, guest extras document made (not sent: no guest email)', $near($x['f2_final']['balance_due'] ?? 0, 2330)
+    && !empty($x['f2_final']['guest_extras']['number']) && empty($x['f2_final']['guest_extras']['email_sent']), json_encode($x['f2_final'] ?? []));
+ok('F2 final invoice stays idempotent', !empty($x['f2_final_again']));
+ok('F4 group member of an on-account primary may check in', ($x['f4_gate'] ?? '') === 'arrangement' && !empty($x['f4_allowed']), json_encode([$x['f4_gate'] ?? null, $x['f4_allowed'] ?? null]));
+ok('F4 ... also when only the primary\'s company is set; a normal unpaid booking stays blocked', ($x['f4_gate_company_only'] ?? '') === 'arrangement' && ($x['f4_control'] ?? '') === 'blocked',
+    json_encode([$x['f4_gate_company_only'] ?? null, $x['f4_control'] ?? null]));
+ok('F5 fully paid on-account booking: checkout still names the company', ($x['f5']['company_name'] ?? '') !== '' && !empty($x['f5']['allowed']), json_encode($x['f5'] ?? []));
+ok('F6 deactivated company: an LPO edit keeps the company', ($x['f6_edit'] ?? '') === 'NOT REFUSED' && (int)($x['f6_row']['billing_account_id'] ?? 0) === (int)($x['acc'] ?? -1)
+    && ($x['f6_row']['billing_reference'] ?? '') === 'LPO-F6b', json_encode([$x['f6_edit'] ?? null, $x['f6_row'] ?? null]));
+ok('F6 switching to another inactive company is refused', stripos((string)($x['f6_other_inactive'] ?? ''), 'active company') !== false, (string)($x['f6_other_inactive'] ?? ''));
+ok('F6 Who pays list keeps the current (inactive) company selected', !empty($x['f6_panel_lists_current']));
+ok('F7 removing / switching the company while its payment is on the booking is refused', stripos((string)($x['f7_remove'] ?? ''), 'payment first') !== false
+    && stripos((string)($x['f7_switch'] ?? ''), 'payment first') !== false && (int)($x['f7_row'] ?? 0) === (int)($x['acc'] ?? -1), json_encode([$x['f7_remove'] ?? null, $x['f7_switch'] ?? null]));
+ok('F7 an LPO edit on the same company is still allowed', ($x['f7_lpo_edit'] ?? '') === 'NOT REFUSED', (string)($x['f7_lpo_edit'] ?? ''));
+ok('F8 received this month nets refunds of company payments', isset($x['f8']) && $near(($x['f8']['before'] ?? 0) - ($x['f8']['after'] ?? 0), 300), json_encode($x['f8'] ?? 'missing'));
+
+$gi = br_child('group_invoice');
+ok('group: one room on its own shows that room\'s company share only (1,165), never the group\'s 2,530', !empty($gi['gi_m1_alone']['has_1165']) && empty($gi['gi_m1_alone']['has_2530'])
+    && empty($gi['gi_m1_alone']['has_765']) && empty($gi['gi_m1_alone']['has_bar']), json_encode($gi['gi_m1_alone'] ?? $gi));
+ok('company invoice "Amount paid" = company money only (765); the guest\'s 200 towards the stay is its own row; owes 200', !empty($gi['gi_p_alone']['paid_765'])
+    && !empty($gi['gi_p_alone']['guest_row']) && !empty($gi['gi_p_alone']['owes_200']) && empty($gi['gi_p_alone']['has_965']), json_encode($gi['gi_p_alone'] ?? null));
+ok('group document (from the primary, every room): company owes 2,530 in total, no bar bill', !empty($gi['gi_group']['has_2530']) && empty($gi['gi_group']['has_bar']), json_encode($gi['gi_group'] ?? null));
+ok('a member checks out: balance = the attached group document\'s (2,530); ONE extras document, for that guest only', $near($gi['gi_final']['balance_due'] ?? 0, 2530)
+    && ($gi['gi_final']['extras'] ?? '') === 'EXT-' . ($gi['gi_refs']['m1'] ?? 'x'), json_encode([$gi['gi_final'] ?? null, $gi['gi_refs'] ?? null]));
+ok('invoice email for one room states that room\'s company share only', $near($gi['gi_email_due'] ?? 0, 1165), json_encode($gi['gi_email_due'] ?? null));
+
+$pf = br_child('perf');
+ok('F9 batch split = per-booking split on 7 kinds of booking (stay, everything, deposit, leg refund, cancelled, member, not on account)', !empty($pf['perf_ready'])
+    && ($pf['perf_diff'] ?? ['x']) === [] && (int)($pf['perf_count'] ?? 0) === 7, json_encode([$pf['perf_diff'] ?? null, $pf['perf_count'] ?? null]));
+ok('F9 receivables rows (batched) = per-booking split', ($pf['perf_recv_diff'] ?? ['x']) === [] && (int)($pf['perf_recv_n'] ?? 0) >= 4, json_encode([$pf['perf_recv_diff'] ?? null, $pf['perf_recv_n'] ?? null]));
+ok('F9 company totals from the one load = per-company totals', isset($pf['perf_totals_rows']) && $pf['perf_totals_rows'] == $pf['perf_totals'], json_encode([$pf['perf_totals'] ?? null, $pf['perf_totals_rows'] ?? null]));
+
+echo "== Record payment: paid by guest / company (rolled back) ==\n";
+$mk = 'BRPB' . random_int(10000, 99999);
+$setup = ["INSERT INTO billing_accounts (name, billing_email, terms_days, active, created_at) VALUES ('ZZ PB CO $mk', NULL, 30, 1, NOW())",
+    "INSERT INTO bookings (booking_reference, room_id, guest_name, guest_email, guest_phone, guest_country, number_of_guests, adult_guests, child_guests, child_price_multiplier,
+        check_in_date, check_out_date, number_of_nights, total_amount, child_supplement_total, tourism_levy_amount, tourism_levy_percent, vat_rate, vat_amount, total_with_vat,
+        special_requests, status, payment_status, is_tentative, occupancy_type, client_uuid, billing_account_id, billing_covers, checkin_without_payment, created_at)
+     VALUES ('$mk', (SELECT id FROM rooms ORDER BY id LIMIT 1), 'PAID BY TEST', '', '+265000000009', 'Malawi', 1, 1, 0, 50, DATE_SUB(CURDATE(), INTERVAL 1 DAY), CURDATE(), 1, 1000, 0, 0, 0,
+        16.5, 165, 1165, 'paid by test', 'checked-in', 'unpaid', 0, 'single', '" . bin2hex(random_bytes(16)) . "', (SELECT id FROM billing_accounts WHERE name = 'ZZ PB CO $mk'), 'stay', 1, NOW())"];
+$vars = ['bid' => "SELECT id FROM bookings WHERE booking_reference = '$mk'"];
+$post = ['action' => 'consolidation_record', 'id' => '{bid}', 'amount' => '1000', 'payment_method' => 'bank_transfer', 'payment_type' => 'partial_payment', 'payment_date' => date('Y-m-d')];
+$pr = br_run('admin/bookings.php', $post, ['ajax' => true, 'setup' => $setup, 'vars' => $vars, 'verify' => ["SELECT COUNT(*) c FROM payments WHERE booking_reference = '$mk' AND deleted_at IS NULL"]]);
+ok('on account, no "paid by" chosen: refused, nothing recorded', empty($pr['json']['success']) && stripos((string)($pr['json']['message'] ?? ''), 'who paid') !== false
+    && (int)($pr['verify'][0][0]['c'] ?? -1) === 0, json_encode([$pr['json'] ?? $pr['raw'] ?? null, $pr['verify'] ?? null]));
+$pr = br_run('admin/bookings.php', $post + ['paid_by' => 'company'], ['ajax' => true, 'setup' => $setup, 'vars' => $vars,
+    'verify' => ["SELECT COUNT(*) c, COALESCE(SUM(l.amount),0) s FROM billing_remittance_lines l JOIN bookings b ON b.id = l.booking_id WHERE b.booking_reference = '$mk'",
+        "SELECT amount_due FROM bookings WHERE booking_reference = '$mk'"]]);
+ok('paid by the company: a one-line company payment (remittance line), the company share drops', !empty($pr['json']['success']) && (int)($pr['verify'][0][0]['c'] ?? 0) === 1
+    && $near($pr['verify'][0][0]['s'] ?? 0, 1000) && $near($pr['verify'][1][0]['amount_due'] ?? 0, 165), json_encode([$pr['json'] ?? $pr['raw'] ?? null, $pr['verify'] ?? null]));
+$pr = br_run('admin/bookings.php', $post + ['paid_by' => 'guest'], ['ajax' => true, 'setup' => $setup, 'vars' => $vars,
+    'verify' => ["SELECT COUNT(*) c FROM billing_remittance_lines l JOIN bookings b ON b.id = l.booking_id WHERE b.booking_reference = '$mk'",
+        "SELECT COUNT(*) c FROM payments WHERE booking_reference = '$mk' AND payment_type <> 'refund' AND deleted_at IS NULL"]]);
+ok('paid by the guest: a normal payment, no company line', !empty($pr['json']['success']) && (int)($pr['verify'][0][0]['c'] ?? -1) === 0 && (int)($pr['verify'][1][0]['c'] ?? 0) === 1,
+    json_encode([$pr['json'] ?? $pr['raw'] ?? null, $pr['verify'] ?? null]));
+$pr = br_run('admin/bookings.php', ['action' => 'consolidation_fetch', 'id' => '{bid}'], ['ajax' => true, 'setup' => $setup, 'vars' => $vars]);
+ok('Record payment form data says the booking is on account and names the company', !empty($pr['json']['booking']['on_account']) && strpos((string)($pr['json']['booking']['company_name'] ?? ''), 'ZZ PB CO') === 0,
+    json_encode($pr['json']['booking'] ?? $pr['raw'] ?? null));
 
 echo "== pages (rolled back) ==\n";
 $p = br_run('admin/billing-accounts.php', [], ['method' => 'GET', 'grep' => ['Company Accounts', 'Owed by companies', 'Add a company']]);

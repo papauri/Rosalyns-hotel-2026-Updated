@@ -59,10 +59,14 @@ if (!function_exists('rh_receivable_rows')) {
         }
         $billOn = rh_billing_ready($pdo);
         if ($on('bookings')) {
+            // On a company account the split needs the bill figures and the primary's billing (joined in: no per-row query).
             $queries['room'] = "SELECT 'room' AS type, b.id, b.booking_reference AS reference, b.guest_name AS client, b.status, b.amount_paid, b.amount_due,
-                    b.primary_booking_id" . ($billOn ? ', b.billing_account_id' : '') . ",
+                    b.primary_booking_id" . ($billOn ? ', b.billing_account_id, b.billing_reference, b.billing_due_date, b.billing_covers, b.check_out_date,
+                    b.total_with_vat, b.total_amount, b.vat_amount, b.cancellation_retained_amount, b.folio_charges_total,
+                    pb.billing_account_id AS pb_billing_account_id, pb.billing_reference AS pb_billing_reference, pb.billing_due_date AS pb_billing_due_date,
+                    pb.billing_covers AS pb_billing_covers' : '') . ",
                     GREATEST(0, DATEDIFF(CURDATE(), CASE WHEN b.status IN ('checked-out','cancelled') THEN b.check_out_date ELSE CURDATE() END)) AS days_outstanding
-                FROM bookings b WHERE b.amount_due > {$tol} AND " . rh_receivable_status_sql('room', 'b');
+                FROM bookings b" . ($billOn ? ' LEFT JOIN bookings pb ON pb.id = b.primary_booking_id' : '') . " WHERE b.amount_due > {$tol} AND " . rh_receivable_status_sql('room', 'b');
         }
         if ($on('conference')) {
             $queries['conference'] = "SELECT 'conference' AS type, ci.id, ci.{$cf['reference']} AS reference,
@@ -95,15 +99,23 @@ if (!function_exists('rh_receivable_rows')) {
         $rows = [];
         foreach ($queries as $srcName => $sql) {
             try {
-                foreach ($pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $srcRows = $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+                // Company pays later: every on-account split of this source in one batch (one query for company money).
+                $billSplits = [];
+                if ($billOn && $srcName === 'room') {
+                    $billSplits = rh_billing_splits_for_rows($pdo, array_values(array_filter($srcRows, static function ($r) {
+                        return (int)($r['billing_account_id'] ?? 0) > 0 || (int)($r['pb_billing_account_id'] ?? 0) > 0;
+                    })));
+                }
+                foreach ($srcRows as $r) {
                     $row = [
                         'type' => (string)$r['type'], 'id' => (int)$r['id'], 'reference' => (string)($r['reference'] ?? ''),
                         'client' => (string)($r['client'] ?? ''), 'status' => (string)($r['status'] ?? ''), 'amount_paid' => round((float)($r['amount_paid'] ?? 0), 2), 'amount_due' => round((float)$r['amount_due'], 2),
                         'days_outstanding' => (int)$r['days_outstanding'], 'source' => (string)$r['type'],
                         'payer' => 'guest', 'company_due' => 0.0, 'guest_due' => round((float)$r['amount_due'], 2), 'account_name' => '',
                     ];
-                    if ($billOn && $srcName === 'room' && ((int)($r['billing_account_id'] ?? 0) > 0 || (int)($r['primary_booking_id'] ?? 0) > 0)) {
-                        $sp = rh_booking_bill_split($pdo, (int)$r['id']);
+                    if (isset($billSplits[(int)$r['id']])) {
+                        $sp = $billSplits[(int)$r['id']];
                         if (!empty($sp['on_account'])) {
                             $tolR = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
                             $row['company_due'] = (float)$sp['company_due'];

@@ -4118,3 +4118,324 @@ select.rh-input-invalid.rh-input-invalid {
         margin-top: 6px;
     }
 }
+
+/* ==========================================================================
+   Shared money-dialog and form pieces (ui-lead 2026-11-13). One look for:
+   - .rh-form-grid      labelled fields in an even grid (company payment, company form)
+   - .rh-actions-row    a row of buttons aligned right, same height and gap (Cancel/Back first, primary last)
+   - .rh-review-card    the "what will happen" summary before a confirm (nights, company payment)
+   - .rh-choices/.rh-choice  radio choice cards (late check-in, checkout settlement, quick pay, money back)
+   - .rh-stepper        the minus / value / plus control (add or take off nights)
+   Existing tokens only (--tbl-*, --admin-muted, --au-border). Rules that set display keep [hidden] working.
+   ========================================================================== */
+.rh-form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 200px), 1fr));
+    gap: 12px 16px;
+    align-items: end;
+    margin: 0 0 12px;
+}
+
+.rh-form-grid .form-group {
+    margin: 0;
+    min-width: 0;
+}
+
+/* .rh-form-grid .form-group .form-control beats .form-group input[type="text"] (42px): fields here are 44px tap targets. */
+.rh-form-grid .form-group .form-control,
+.rh-form-grid .form-control {
+    width: 100%;
+    min-height: 44px;
+}
+
+.rh-form-grid__full {
+    grid-column: 1 / -1;
+}
+
+.rh-form-hint {
+    margin: 0 0 12px;
+    color: var(--admin-muted, #5f6b7c);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.rh-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    margin: 0;
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.rh-check input {
+    width: 18px;
+    height: 18px;
+    margin: 0;
+    flex: 0 0 auto;
+}
+
+.rh-actions-row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 12px;
+    margin-top: 12px;
+}
+
+.rh-actions-row--start {
+    justify-content: flex-start;
+}
+
+.rh-actions-row > .btn,
+.rh-actions-row > form > .btn,
+.rh-actions-row > a.btn {
+    min-height: 44px;
+    margin: 0;
+}
+
+.rh-actions-row > form {
+    margin: 0;
+}
+
+.rh-review-card {
+    background: var(--tbl-head-bg, #f7f3ee);
+    border: 1px solid var(--tbl-border, #e8e0d6);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin: 10px 0 0;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--admin-text, #1f2a37);
+}
+
+.rh-review-card[hidden] {
+    display: none;
+}
+
+.rh-review-card--live {
+    min-height: 44px;
+}
+
+/* Label / value rows (rows built as <div><b|strong>Label</b> value</div>). */
+.rh-review-card > div:has(> b, > strong) {
+    display: grid;
+    grid-template-columns: minmax(0, 12rem) minmax(0, 1fr);
+    gap: 2px 12px;
+    padding: 4px 0;
+    border-top: 1px solid var(--tbl-border, #e8e0d6);
+}
+
+.rh-review-card > div:has(> b, > strong):first-child {
+    border-top: 0;
+}
+
+.rh-review-card--warn {
+    background: #fffbeb;
+    border-color: #fde68a;
+}
+
+.rh-text-danger {
+    color: #b91c1c;
+}
+
+.rh-stepper {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.rh-stepper .btn {
+    min-width: 48px;
+    min-height: 44px;
+    padding: 0 12px;
+    font-size: 18px;
+    line-height: 1;
+    justify-content: center;
+}
+
+.rh-stepper output {
+    min-width: 150px;
+    text-align: center;
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.rh-choices {
+    border: 1px solid var(--tbl-border, #e8e0d6);
+    border-radius: 8px;
+    padding: 8px 12px 10px;
+    margin: 0 0 14px;
+    min-width: 0;
+}
+
+.rh-choices legend {
+    font-size: 13px;
+    font-weight: 600;
+    padding: 0 4px;
+}
+
+.rh-choices legend small {
+    font-weight: 400;
+    color: var(--admin-muted, #5f6b7c);
+}
+
+.rh-choice {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    min-height: 44px;
+    padding: 8px 4px;
+    margin: 0;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 400;
+    border-top: 1px solid var(--tbl-border, #e8e0d6);
+}
+
+.rh-choice:first-of-type {
+    border-top: 0;
+}
+
+.rh-choice[hidden] {
+    display: none;
+}
+
+.rh-choice:has(input[type="radio"]:checked) {
+    background: var(--tbl-row-hover, #faf6f0);
+}
+
+.rh-choice input[type="radio"] {
+    margin: 3px 0 0;
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+}
+
+.rh-choice small {
+    display: block;
+    color: var(--admin-muted, #5f6b7c);
+    font-size: 12px;
+    margin-top: 2px;
+}
+
+.rh-choice input[type="date"] {
+    margin-top: 6px;
+    min-height: 44px;
+    max-width: 220px;
+}
+
+.rh-choice-detail {
+    margin: 4px 0 4px 28px;
+}
+
+@media (max-width: 480px) {
+    .rh-actions-row > .btn,
+    .rh-actions-row > form,
+    .rh-actions-row > a.btn {
+        flex: 1 1 auto;
+    }
+
+    .rh-actions-row > form > .btn {
+        width: 100%;
+    }
+
+    .rh-review-card > div:has(> b, > strong) {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .rh-stepper output {
+        min-width: 0;
+        flex: 1 1 auto;
+    }
+}
+
+/* One width for the small money dialogs (Record payment, Edit payment, Add or take off nights, Checkout settlement). */
+.modal-content.rh-dialog-narrow {
+    width: min(96vw, 34rem);
+    max-width: min(96vw, 34rem);
+}
+
+/* A live line under a field or at the end of a dialog ("You are recording ...", "After saving ..."). */
+.rh-live-note {
+    margin: 8px 0 0;
+    font-size: 0.9rem;
+    font-weight: 600;
+    line-height: 1.5;
+}
+
+.rh-live-note:empty {
+    display: none;
+}
+
+.rh-check--top {
+    align-items: flex-start;
+}
+
+.rh-check--top input {
+    margin-top: 3px;
+}
+
+.rh-check small {
+    display: block;
+    color: var(--admin-muted, #5f6b7c);
+    font-weight: 400;
+}
+
+/* Opening line of a small dialog (who / which booking / what is owed). */
+.rh-dialog-lead {
+    margin: 0 0 12px;
+    font-size: 14px;
+    line-height: 1.5;
+    color: var(--admin-text, #1f2a37);
+}
+
+.rh-dialog-lead[hidden] {
+    display: none;
+}
+
+.rh-choice-q {
+    margin: 8px 0 2px;
+    font-weight: 600;
+}
+
+.rh-choice-note {
+    display: block;
+    margin: 0 0 4px 28px;
+    color: #92400e;
+    font-size: 12px;
+}
+
+.rh-mt {
+    margin-top: 12px;
+}
+
+/* Inside a choice card the detail field (part amount) sits under the radio text. */
+.rh-choices .rh-choice-detail {
+    margin: 4px 0 8px 28px;
+}
+
+.rh-review-card .rh-choices,
+.rh-review-card .rh-choice {
+    background: transparent;
+}
+
+.rh-review-card .form-group {
+    margin: 8px 0 0;
+}
+
+/* Touch screens: fields in the small money dialogs are 44px tap targets too (the shared modal field rule stops at 42px). */
+@media (max-width: 1024px), (pointer: coarse) {
+    .modal-content.rh-dialog-narrow .modal-body .form-group .form-control,
+    .modal-content.rh-dialog-narrow .modal-body .form-control {
+        min-height: 44px;
+    }
+}
+
+/* The nights stepper keeps its 44px buttons on desktop as well (it was sized inline before). */
+#rh-admin-page .rh-stepper .btn {
+    min-width: 48px;
+    min-height: 44px;
+}

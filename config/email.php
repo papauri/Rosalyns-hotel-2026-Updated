@@ -7085,6 +7085,29 @@ function sendRefundNotificationEmail(array $payment, string $refundRef, float $r
             $bRow = $bStmt->fetch(PDO::FETCH_ASSOC);
             $guestName  = $bRow['guest_name']  ?? '';
             $guestEmail = $bRow['guest_email'] ?? '';
+            // Company pays later (fix 2026-11-13): a refund of COMPANY money is the company's news, never the guest's.
+            // It goes to the company billing email; none = not sent, logged, and the caller tells staff.
+            if (!function_exists('rh_billing_refund_recipient') && is_file(__DIR__ . '/../includes/billing-accounts.php')) {
+                require_once __DIR__ . '/../includes/billing-accounts.php';
+            }
+            $rfCompany = function_exists('rh_billing_refund_recipient') ? rh_billing_refund_recipient($pdo, $payment) : null;
+            if ($rfCompany !== null) {
+                if ($rfCompany['to'] === '') {
+                    if (!function_exists('rh_email_send_log_not_sent')) {
+                        require_once __DIR__ . '/../includes/email-send-log.php';
+                    }
+                    rh_email_send_log_not_sent('refund', '', $rfCompany['name'], rh_email_ctx_account('room', $payment['booking_id'] ?? null, $payment['booking_reference'] ?? null),
+                        'Refund of a company payment: ' . $rfCompany['note']);
+                    if (function_exists('rh_log_event')) {
+                        rh_log_event('payments', 'warning', 'Company refund notice not sent', ['booking_id' => $payment['booking_id'] ?? null, 'refund' => $refundRef,
+                            'company' => $rfCompany['name'], 'reason' => $rfCompany['note']]);
+                    }
+                    return ['success' => false, 'message' => 'Refund notice not sent (the money went back to ' . $rfCompany['name'] . ', not the guest): '
+                        . $rfCompany['note'] . '. Tell the company yourself, or add a billing email on Company accounts.'];
+                }
+                $guestName = $rfCompany['name'];
+                $guestEmail = $rfCompany['to'];
+            }
         } elseif ($bookingType === 'conference') {
             // Use the customer_name / customer_email if already joined, else re-query
             $guestName  = $payment['customer_name']  ?? '';
