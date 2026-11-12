@@ -3150,16 +3150,33 @@ $currency_symbol = getSetting('currency_symbol');
             return Promise.resolve(confirm(options.message || options.title || 'Confirm action'));
         }
 
-        async function processCheckIn(bookingId, guestName, roomOverride) {
-            const confirmed = roomOverride || await dashboardConfirm({
-                title: 'Confirm guest check-in',
-                message: `Check in ${guestName}?`,
-                details: ['The booking status will be changed to checked-in.', 'This action will be recorded in the audit trail.'],
-                confirmText: 'Check In',
-                icon: 'fa-right-to-bracket',
-                tone: 'success'
-            });
-            if (!confirmed) return;
+        // emailGuest: '1' / '0' from the "Email the guest a check-in confirmation" box (owner 2026-11-12, ticked by
+        // default); carried into the "room not marked clean" retry so the choice is asked once.
+        async function processCheckIn(bookingId, guestName, roomOverride, emailGuest) {
+            let emailChoice = emailGuest === '0' ? '0' : '1';
+            if (!roomOverride) {
+                const checkOpt = {
+                    label: 'Email the guest a check-in confirmation',
+                    help: 'Untick to check in quietly: no check-in email goes to the guest.',
+                    checked: true
+                };
+                const confirmOpts = {
+                    title: 'Confirm guest check-in',
+                    message: `Check in ${guestName}?`,
+                    details: ['The booking status will be changed to checked-in.', 'This action will be recorded in the audit trail.'],
+                    confirmText: 'Check In',
+                    icon: 'fa-right-to-bracket',
+                    tone: 'success',
+                    check: checkOpt
+                };
+                if (window.AdminConfirm && typeof window.AdminConfirm.ask === 'function') {
+                    const res = await window.AdminConfirm.ask(confirmOpts);
+                    if (!res || !res.confirmed) return;
+                    if (res.checkShown) emailChoice = res.checked ? '1' : '0';
+                } else if (!(await dashboardConfirm(Object.assign({}, confirmOpts, { check: null })))) { // no box: sends as before
+                    return;
+                }
+            }
 
             const actionButton = document.getElementById(`checkin-btn-${bookingId}`);
             if (window.ButtonLoader && actionButton) ButtonLoader.show(actionButton, {
@@ -3172,6 +3189,7 @@ $currency_symbol = getSetting('currency_symbol');
             formData.append('booking_id', bookingId);
             formData.append('csrf_token', _dashCsrf);
             if (roomOverride) formData.append('confirm_checkin_room_not_ready', '1');
+            formData.append('email_guest', emailChoice);
 
             fetch('process-checkin.php', {
                     method: 'POST',
@@ -3193,13 +3211,13 @@ $currency_symbol = getSetting('currency_symbol');
                         }
 
                         if (window.AdminPageLoader) AdminPageLoader.hide();
-                        Alert.show(`${guestName} successfully checked in!`, 'success');
+                        Alert.show(`${guestName} successfully checked in!` + (emailChoice === '0' ? ' No email sent (you chose not to).' : ''), 'success');
                     } else {
                         if (window.AdminPageLoader) AdminPageLoader.hide();
                         if (window.ButtonLoader && actionButton) ButtonLoader.hide(actionButton);
                         if (data.needs_confirm_room && !roomOverride) {
                             dashboardConfirm({ title: 'Room not marked clean', message: data.message, confirmText: 'Check in anyway', icon: 'fa-broom' })
-                                .then(ok => { if (ok) processCheckIn(bookingId, guestName, true); });
+                                .then(ok => { if (ok) processCheckIn(bookingId, guestName, true, emailChoice); });
                             return;
                         }
                         Alert.show('Error: ' + (data.message || 'Failed to check in guest'), 'error');

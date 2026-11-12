@@ -1627,6 +1627,10 @@
             request: function (options) {
                 return request(options).then(function (result) { return result.confirmed; });
             },
+            // Same dialog, full answer: { confirmed, value, checked, checkShown } (for an options.check tick box).
+            ask: function (options) {
+                return request(options);
+            },
             prompt: function (options) {
                 return request(Object.assign({ input: true }, options || {})).then(function (result) {
                     return result.confirmed ? result.value : null;

@@ -458,6 +458,42 @@ function sendSimpleStatusUpdateEmail(array $booking, string $status)
 }
 
 /**
+ * After a staff check-in (owner 2026-11-12, "A tick box"): $send = true emails the guest the check-in confirmation
+ * (sendSimpleStatusUpdateEmail, logged in Emails sent as booking_status_update); a failure is only error_logged and never
+ * undoes the check-in. $send = false writes the History line "Check-in email not sent (staff choice)" instead.
+ * Never throws. Returns true when the email went out.
+ */
+function rh_checkin_guest_email(PDO $pdo, int $bookingId, bool $send, ?int $userId = null, ?string $userName = null): bool
+{
+    try {
+        $st = $pdo->prepare("SELECT b.*, r.name AS room_name FROM bookings b LEFT JOIN rooms r ON b.room_id = r.id WHERE b.id = ?");
+        $st->execute([$bookingId]);
+        $booking = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$booking) {
+            return false;
+        }
+        if (!$send) {
+            if (!function_exists('logBookingEvent')) {
+                require_once __DIR__ . '/../includes/booking-timeline.php';
+            }
+            logBookingEvent($bookingId, (string)$booking['booking_reference'], 'Check-in email not sent (staff choice)', 'email',
+                'Staff unticked "Email the guest a check-in confirmation", so no check-in email went to the guest.',
+                null, null, 'admin', $userId, $userName, ['email_type' => 'checkin_confirmation', 'sent' => false]);
+            return false;
+        }
+        $res = sendSimpleStatusUpdateEmail($booking, 'checked-in');
+        if (empty($res['success'])) {
+            error_log('Check-in email failed for booking ' . $bookingId . ': ' . (string)($res['message'] ?? 'unknown'));
+            return false;
+        }
+        return true;
+    } catch (Throwable $e) {
+        error_log('Check-in email step failed for booking ' . $bookingId . ': ' . $e->getMessage());
+        return false;
+    }
+}
+
+/**
  * Create email preview for development mode
  */
 function createEmailPreview(string $to, ?string $toName, string $subject, string $htmlBody, string $textBody = '')

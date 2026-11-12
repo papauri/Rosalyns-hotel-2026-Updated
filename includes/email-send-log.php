@@ -302,6 +302,19 @@ if (!function_exists('rh_email_kinds')) {
         return $wouldEmail && (string)$v === '1';
     }
 
+    /**
+     * Check-in "Email the guest a check-in confirmation" box (owner 2026-11-12, ticked by default). Field present:
+     * '1' = send, '0' = staff chose not to. Absent (a page loaded before this change, the Assistant's check-in) =
+     * $defaultWhenAbsent, today's behaviour for that path (dashboard: send; booking page / Bookings list: no email).
+     */
+    function rh_checkin_email_choice(array $post, bool $defaultWhenAbsent): bool
+    {
+        if (!array_key_exists('email_guest', $post)) {
+            return $defaultWhenAbsent;
+        }
+        return rh_cancel_email_choice($post, true);
+    }
+
     /** The reason stored on the log rows when staff untick the box. */
     function rh_cancel_email_skipped_reason(): string
     {

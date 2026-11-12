@@ -805,6 +805,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $checkInAuditNote,
                     $booking['booking_reference'] ?? null
                 );
+
+                // "Email the guest a check-in confirmation" box (owner 2026-11-12). No field (old cached page, the
+                // Assistant's check-in) = today's behaviour here: no email. Never blocks the check-in.
+                if (array_key_exists('email_guest', $_POST)) {
+                    require_once __DIR__ . '/../config/email.php';
+                    $ciEmailWanted = rh_checkin_email_choice($_POST, false);
+                    $ciEmailSent = rh_checkin_guest_email($pdo, (int)$booking_id, $ciEmailWanted, isset($user['id']) ? (int)$user['id'] : null, $user['full_name'] ?? null);
+                    $message .= $ciEmailWanted ? ($ciEmailSent ? ' Check-in email sent.' : ' The check-in email could not be sent.') : ' No email sent (you chose not to).';
+                }
             } elseif ($new_status === 'cancel-checkin') {
                 $check = $pdo->prepare("SELECT id, status, booking_reference FROM bookings WHERE id = ?");
                 $check->execute([$booking_id]);
@@ -5897,6 +5906,15 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         <textarea name="checkin_note" id="checkin_note" class="form-control" rows="2" placeholder="Add any check-in or no-show notes..."></textarea>
                     </div>
 
+                    <?php /* Owner 2026-11-12 "A tick box": hidden 0 before the box, so unticked posts email_guest=0. */ ?>
+                    <div class="form-group" id="checkin_email_group">
+                        <input type="hidden" name="email_guest" value="0" id="checkin_email_guest_off">
+                        <label class="admin-confirm-check">
+                            <input type="checkbox" name="email_guest" value="1" id="checkin_email_guest" checked>
+                            <span>Email the guest a check-in confirmation<small>Untick to check in quietly: no check-in email goes to the guest.</small></span>
+                        </label>
+                    </div>
+
                     <p id="checkin_error_message" class="bookings-checkin-modal__error" style="display: none;"></p>
                 </div>
                 <div class="modal-footer bookings-checkin-modal__footer">
@@ -7410,6 +7428,17 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             contextEl.style.display = 'block';
             errorEl.style.display = 'none';
             noteGroupEl.style.display = 'block';
+
+            // "Email the guest a check-in confirmation": check-in only (ticked each time the modal opens); a no-show
+            // never posts it.
+            const emailGroupEl = document.getElementById('checkin_email_group');
+            if (emailGroupEl) {
+                const isCheckin = safeMode === 'checkin';
+                emailGroupEl.style.display = isCheckin ? 'block' : 'none';
+                emailGroupEl.querySelectorAll('input').forEach(function (el) { el.disabled = !isCheckin; });
+                const emailBox = document.getElementById('checkin_email_guest');
+                if (emailBox) emailBox.checked = true;
+            }
 
             if (safeMode === 'noshow') {
                 actionInput.value = 'noshow';

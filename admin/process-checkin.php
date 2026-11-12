@@ -106,15 +106,16 @@ try {
                 logCheckInUnderArrangement($booking_id, (string)$booking['booking_reference'], (string)$ciRule['arrangement_note'], $admin_user_id ?: null, $user['full_name'] ?? null);
             }
 
-            // Send status update email
+            // "Email the guest a check-in confirmation" box (owner 2026-11-12). No field (old cached page,
+            // Assistant) = today's behaviour on this path: send.
+            $ciEmailSent = false;
+            $ciEmailWanted = rh_checkin_email_choice($_POST, true);
             if ($booking) {
-                $email_result = sendSimpleStatusUpdateEmail($booking, 'checked-in');
-                if (!$email_result['success']) {
-                    error_log("Failed to send check-in email: " . $email_result['message']);
-                }
+                $ciEmailSent = rh_checkin_guest_email($pdo, (int)$booking_id, $ciEmailWanted, $admin_user_id ?: null, $user['full_name'] ?? null);
             }
 
-            echo json_encode(['success' => true, 'message' => 'Guest checked in successfully']);
+            echo json_encode(['success' => true, 'message' => 'Guest checked in successfully'
+                . ($ciEmailWanted ? ($ciEmailSent ? '. Check-in email sent.' : '. The check-in email could not be sent.') : '. No email sent (you chose not to).')]);
             exit;
         }
 

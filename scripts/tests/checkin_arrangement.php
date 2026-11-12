@@ -137,7 +137,18 @@ ok('unpaid confirmed booking gets a pay-by deadline', rh_unpaid_confirmed_deadli
 ok('same booking with the arrangement: no pay-by deadline (no reminder, no auto-release)', rh_unpaid_confirmed_deadline(['checkin_without_payment' => 1] + $future) === null);
 ok('arrangement "0": deadline as before', rh_unpaid_confirmed_deadline(['checkin_without_payment' => '0'] + $future) !== null);
 
-// 9. the migration file is additive and loads without running
+// 9. check-in "Email the guest a check-in confirmation" box (includes/email-send-log.php), owner 2026-11-12
+$esrc = (string)file_get_contents($root . '/includes/email-send-log.php');
+eval(lift_function($esrc, 'rh_cancel_email_choice') . "\n");
+eval(lift_function($esrc, 'rh_checkin_email_choice') . "\n");
+ok('box ticked (hidden 0 then 1 -> PHP keeps 1): send', rh_checkin_email_choice(['email_guest' => '1'], false) === true);
+ok('box unticked (only hidden 0): no email', rh_checkin_email_choice(['email_guest' => '0'], true) === false);
+ok('array form: last value wins', rh_checkin_email_choice(['email_guest' => ['0', '1']], false) === true);
+ok('no field on the dashboard path (old page / Assistant): sends as today', rh_checkin_email_choice([], true) === true);
+ok('no field on booking page / Bookings list: no email as today', rh_checkin_email_choice(['booking_action' => 'checkin'], false) === false);
+ok('junk value: no email', rh_checkin_email_choice(['email_guest' => 'yes'], true) === false);
+
+// 10. the migration file is additive and loads without running
 $m = require $root . '/admin/migrations/083_booking_checkin_arrangement.php';
 ok('migration 083 returns name/check/up', is_array($m) && ($m['name'] ?? '') === 'booking_checkin_arrangement' && is_callable($m['check']) && is_callable($m['up']));
 $msrc = (string)file_get_contents($root . '/admin/migrations/083_booking_checkin_arrangement.php');

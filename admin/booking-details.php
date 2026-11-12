@@ -660,6 +660,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                         $successMsg = 'Guest checked in successfully.';
                         if ($updatedRoomCount > 0) $successMsg .= ' Room marked as occupied.';
                         if ($isLateCI) $successMsg .= ' Note: late check-in (' . $lateCIDays . ' day(s) overdue).';
+                        // "Email the guest a check-in confirmation" box (owner 2026-11-12). No field (old cached page)
+                        // = today's behaviour on this page: no email. Never blocks the check-in.
+                        if (array_key_exists('email_guest', $_POST)) {
+                            require_once __DIR__ . '/../config/email.php';
+                            $ciEmailWanted = rh_checkin_email_choice($_POST, false);
+                            $ciEmailSent = rh_checkin_guest_email($pdo, (int)$booking_id, $ciEmailWanted, isset($user['id']) ? (int)$user['id'] : null, $user['full_name'] ?? null);
+                            $successMsg .= $ciEmailWanted ? ($ciEmailSent ? ' Check-in email sent.' : ' The check-in email could not be sent.') : ' No email sent (you chose not to).';
+                        }
                         $_SESSION['success_message'] = $successMsg;
                     }
                 }
@@ -1619,8 +1627,9 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                         </a>
                     <?php endif; ?>
 
-                    <?php if ($bd_perm_checkin): ?><form method="POST" class="booking-action-form" data-admin-confirm="<?php echo $ci_room_override ? htmlspecialchars($ci_room_gate['message'], ENT_QUOTES) : 'Check in this guest and mark the assigned room occupied?'; ?>" data-admin-confirm-title="<?php echo $ci_room_override ? 'Room not marked clean' : 'Check in guest'; ?>" data-admin-confirm-ok="<?php echo $ci_room_override ? 'Check in anyway' : 'Check in'; ?>" data-admin-confirm-icon="fa-right-to-bracket" data-admin-submit-text="Checking in...">
+                    <?php if ($bd_perm_checkin): ?><form method="POST" class="booking-action-form" data-admin-confirm="<?php echo $ci_room_override ? htmlspecialchars($ci_room_gate['message'], ENT_QUOTES) : 'Check in this guest and mark the assigned room occupied?'; ?>" data-admin-confirm-title="<?php echo $ci_room_override ? 'Room not marked clean' : 'Check in guest'; ?>" data-admin-confirm-ok="<?php echo $ci_room_override ? 'Check in anyway' : 'Check in'; ?>" data-admin-confirm-icon="fa-right-to-bracket" data-admin-submit-text="Checking in..." data-admin-confirm-check="email_guest" data-admin-confirm-check-label="Email the guest a check-in confirmation" data-admin-confirm-check-help="Untick to check in quietly: no check-in email goes to the guest.">
                         <input type="hidden" name="booking_action" value="checkin">
+                        <input type="hidden" name="email_guest" value="1">
                         <?php if ($ci_room_override): ?><input type="hidden" name="confirm_checkin_room_not_ready" value="1"><?php endif; ?>
                         <button type="submit" class="action-btn checkin" data-help="Check In|Check the guest into their assigned room and mark the room occupied. Requires a payment recorded (or nothing owed, or Check in before payment switched on), a room assigned, and the check-in date to have arrived." <?php echo ($can_checkin && $room_assigned && $checkin_date_reached) ? '' : 'disabled title="' . htmlspecialchars($checkin_disabled_reason) . '"'; ?>>
                             <i class="fas fa-right-to-bracket"></i> Check In
