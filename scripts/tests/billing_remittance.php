@@ -223,6 +223,47 @@ ok('L4 a company payment keeps its idempotency id (a replayed Add Payment finds 
 ok('I checkout final invoice keeps the number the booking already holds (no second number)', ($lf['lf_final_no']['got'] ?? '') === ($lf['lf_final_no']['want'] ?? 'x')
     && ($lf['lf_final_no']['stored'] ?? '') === ($lf['lf_final_no']['want'] ?? 'x'), json_encode($lf['lf_final_no'] ?? null));
 
+echo "== Group booking documents: per-room rows, cancelled rooms, extras per room, one receipt per room (rolled back) ==\n";
+foreach (['group_docs' => 'kit layout', 'group_docs_custom' => 'stored template', 'group_docs_excl' => 'kit layout, VAT exclusive'] as $gdSc => $gdName) {
+    $gx = br_child($gdSc);
+    $gd = $gx['gd'] ?? [];
+    if ($gdSc === 'group_docs_excl' && ($gd['mode'] ?? '') !== 'exclusive') {
+        echo "[SKIP] $gdName: VAT is off at this hotel
+";
+        continue;
+    }
+    if ($gdSc === 'group_docs_custom' && empty($gd['legacy'])) {
+        echo "[SKIP] $gdName: this hotel has no stored invoice template\n";
+        continue;
+    }
+    $foot = ($gd['mode'] ?? '') === 'exclusive' ? (float)($gd['subtotal'] ?? 0) + (float)($gd['vat'] ?? 0) + (float)($gd['levy'] ?? 0)
+        : (float)($gd['subtotal'] ?? 0) + (float)($gd['levy'] ?? 0);
+    ok("$gdName: total / paid / balance = the folio summaries of the listed rooms (lead, member, cancelled room with money, expired room still billed): 6,025 / 1,165 / 4,860",
+        ($gd['ids'] ?? null) === ($gd['want_ids'] ?? 'x') && $near($gd['total'] ?? 0, 6025) && $near($gd['total'] ?? 0, $gd['sum_grand'] ?? -1)
+        && $near($gd['paid'] ?? 0, 1165) && $near($gd['paid'] ?? 0, $gd['sum_paid'] ?? -1) && $near($gd['balance'] ?? 0, 4860), json_encode($gd));
+    ok("$gdName: Amount paid = every payment row of the group (= the sum of the per-room receipts)", $near($gd['paid'] ?? 0, $gd['paid_rows'] ?? -1), json_encode($gd));
+    ok("$gdName: the lines foot to the total (the member's bar bill is counted in the lines, not only in the total)", $near($foot, $gd['total'] ?? -1), json_encode($gd));
+    ok("$gdName: cancelled and deleted rooms with no money are left off; the cancelled room with money and the expired room still billed stay, marked",
+        ($gd['zero_shown'] ?? 0) === -1 && ($gd['deleted_shown'] ?? 0) === -1 && ($gd['p_cancel'] ?? -1) > 0 && ($gd['p_cpaid'] ?? -1) > ($gd['p_cancel'] ?? 0)
+        && ($gd['p_expired'] ?? -1) > ($gd['p_cancel'] ?? 0) && ($gd['p_eguest'] ?? -1) > ($gd['p_expired'] ?? 0), json_encode($gd));
+    ok("$gdName: lead first, then the member with its own dates, its child supplement and its bar bill under it, then the cancelled room; header says 2 rooms",
+        ($gd['p_lead'] ?? -1) > 0 && ($gd['p_member'] ?? -1) > ($gd['p_lead'] ?? 0) && ($gd['p_child'] ?? -1) > ($gd['p_member'] ?? 0)
+        && ($gd['p_bar'] ?? -1) > ($gd['p_child'] ?? 0) && ($gd['p_cancel'] ?? -1) > ($gd['p_bar'] ?? 0) && !empty($gd['member_dates']) && !empty($gd['rooms_hdr']), json_encode($gd));
+    if ($gdSc === 'group_docs') {
+        $rm = $gx['gd_receipt_m1'] ?? [];
+        $rc = $gx['gd_receipt_c1'] ?? [];
+        $rmTxt = implode(' | ', $rm);
+        ok('receipt of one group room: only that room (guest, dates, rate x nights + children), "Part of group REF (2 rooms)", never another room',
+            count($rm) === 3 && strpos($rm[0], 'Room: ') === 0 && strpos($rm[0], 'GDOC MEMBER') !== false && strpos($rm[1], ' to ') !== false
+            && strpos($rm[1], '1 night') !== false && strpos($rm[1], 'children') !== false && $rm[2] === 'Part of group ' . ($gx['gd_ref'] ?? 'x') . ' (2 rooms)'
+            && strpos($rmTxt, 'GDOC LEAD') === false && strpos($rmTxt, 'GDOC CANCEL') === false, json_encode($rm, JSON_UNESCAPED_UNICODE));
+        ok('receipt of the cancelled room: its own room, counted with the live rooms (3 rooms)', ($rc[2] ?? '') === 'Part of group ' . ($gx['gd_ref'] ?? 'x') . ' (3 rooms)'
+            && strpos($rc[0] ?? '', 'GDOC CANCELPAID') !== false, json_encode($rc, JSON_UNESCAPED_UNICODE));
+        ok('receipt of a booking outside a group: exactly as before', !empty($gx['gd_solo_same']) && count($gx['gd_solo'] ?? []) === 1
+            && strpos(($gx['gd_solo'] ?? [''])[0], 'Room: ') === 0, json_encode($gx['gd_solo'] ?? null, JSON_UNESCAPED_UNICODE));
+    }
+}
+
 $pf = br_child('perf');
 ok('F9 batch split = per-booking split on 7 kinds of booking (stay, everything, deposit, leg refund, cancelled, member, not on account)', !empty($pf['perf_ready'])
     && ($pf['perf_diff'] ?? ['x']) === [] && (int)($pf['perf_count'] ?? 0) === 7, json_encode([$pf['perf_diff'] ?? null, $pf['perf_count'] ?? null]));

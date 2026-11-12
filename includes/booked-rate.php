@@ -12,6 +12,8 @@
  *   rh_booked_rate_for_booking(PDO $pdo, int $bookingId, bool $withToday = true): array   reads one booking -> line
  *   rh_booked_rate_group_texts(PDO $pdo, int $bookingId): string[]   guest_text of every room in the booking's group
  *   rh_booked_rate_group_lines(array $guestTexts): string[]   PURE: "Room: ..." / "Room 1: ..." / "6 rooms: ..."
+ *   rh_booked_rate_room_receipt_lines(PDO $pdo, int $bookingId): string[]   one room of a group: its own room, guest,
+ *              dates, rate + "Part of group REF (N rooms)"; anything else as before (rh_booked_rate_room_lines: PURE)
  *
  * Line keys: ok, per_night, nights, room_total, child, package, total, text, compact, guest_text, today_text, cancelled,
  *            currency.
@@ -319,5 +321,91 @@ if (!function_exists('rh_booked_rate_group_texts')) {
             }
         }
         return $out;
+    }
+}
+
+if (!function_exists('rh_booked_rate_room_lines')) {
+    /**
+     * PURE. The lines a receipt for ONE room of a group prints (owner 2026-11-13: "every room should have its own
+     * receipt"): only that room, never the other rooms' rates.
+     *   "Room: Deluxe Room - 12 - Guest: Mr Banda"
+     *   "12 Nov 2026 to 15 Nov 2026 - K356,000.00 × 3 nights (a night, incl. VAT and tourism levy)"
+     *   "Part of group BK-123 (3 rooms)"
+     * $room: room (type + number), guest, check_in, check_out (Y-m-d); $rateText: rh_booked_rate_line() guest_text built
+     * with room_name '' ('' = no rate line part); $groupRef / $rooms: the group's reference and live room count.
+     * @return string[]
+     */
+    function rh_booked_rate_room_lines(array $room, string $rateText, string $groupRef, int $rooms): array
+    {
+        $out = [];
+        $head = trim((string)($room['room'] ?? ''));
+        $guest = trim((string)($room['guest'] ?? ''));
+        if ($head !== '' || $guest !== '') {
+            $out[] = 'Room: ' . implode(' - ', array_filter([$head, $guest !== '' ? 'Guest: ' . $guest : '']));
+        }
+        $dates = '';
+        $ci = strtotime((string)($room['check_in'] ?? ''));
+        $co = strtotime((string)($room['check_out'] ?? ''));
+        if ($ci !== false && $co !== false && !empty($room['check_in']) && !empty($room['check_out'])) {
+            $dates = date('d M Y', $ci) . ' to ' . date('d M Y', $co);
+        }
+        $second = implode(' - ', array_filter([$dates, trim($rateText)]));
+        if ($second !== '') {
+            $out[] = $second;
+        }
+        if (trim($groupRef) !== '' && $rooms > 1) {
+            $out[] = 'Part of group ' . trim($groupRef) . ' (' . $rooms . ' rooms)';
+        }
+        return $out;
+    }
+}
+
+if (!function_exists('rh_booked_rate_room_receipt_lines')) {
+    /**
+     * Booked-rate lines for a room payment's receipt. A room in a group with more than one live room (same rooms as
+     * rh_booked_rate_group_texts: deleted / other cancelled, expired, no-show rooms left out) prints only its OWN room,
+     * guest, dates and nights x booked rate, plus "Part of group REF (N rooms)" (REF = the lead booking's reference).
+     * Any other booking prints exactly what it printed before (rh_booked_rate_group_lines of the group texts).
+     * Read-only; never today's price; a read error falls back to the previous lines.
+     * @return string[]
+     */
+    function rh_booked_rate_room_receipt_lines(PDO $pdo, int $bookingId): array
+    {
+        if ($bookingId <= 0) {
+            return [];
+        }
+        try {
+            $st = $pdo->prepare('SELECT b.*, r.name AS room_name FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id WHERE b.id = ?');
+            $st->execute([$bookingId]);
+            $b = $st->fetch(PDO::FETCH_ASSOC);
+            if ($b) {
+                $leadId = (int)($b['primary_booking_id'] ?? 0) > 0 ? (int)$b['primary_booking_id'] : $bookingId;
+                $q = $pdo->prepare("SELECT COUNT(*) FROM bookings
+                    WHERE (id = ? OR primary_booking_id = ?) AND deleted_at IS NULL
+                      AND (id = ? OR status NOT IN ('cancelled', 'expired', 'no-show'))");
+                $q->execute([$leadId, $leadId, $bookingId]);
+                $rooms = (int)$q->fetchColumn();
+                if ($rooms > 1) {
+                    $ref = $pdo->prepare('SELECT booking_reference FROM bookings WHERE id = ?');
+                    $ref->execute([$leadId]);
+                    $groupRef = (string)($ref->fetchColumn() ?: ($b['booking_reference'] ?? ''));
+                    $no = function_exists('getBookingRoomLabel') ? trim(getBookingRoomLabel($bookingId)) : '';
+                    $type = trim((string)($b['room_name'] ?? ''));
+                    $roomTxt = $no !== '' && stripos($type, $no) === false ? trim($type . ' - ' . $no, ' -') : $type;
+                    $g = trim((string)($b['room_guest_name'] ?? ''));
+                    $br = rh_booked_rate_line($b, null, ['room_name' => '']);
+                    return rh_booked_rate_room_lines(
+                        ['room' => $roomTxt, 'guest' => $g !== '' ? $g : (string)($b['guest_name'] ?? ''),
+                            'check_in' => (string)($b['check_in_date'] ?? ''), 'check_out' => (string)($b['check_out_date'] ?? '')],
+                        $br['ok'] ? $br['guest_text'] : '',
+                        $groupRef,
+                        $rooms
+                    );
+                }
+            }
+        } catch (Throwable $e) {
+            error_log('booked-rate room receipt: ' . $e->getMessage());
+        }
+        return rh_booked_rate_group_lines(rh_booked_rate_group_texts($pdo, $bookingId));
     }
 }

@@ -435,6 +435,80 @@ switch ($sc) {
         $out['gi_email_due'] = rh_billing_split_for_ids($pdo, [$m2])['company_due'];
         break;
 
+    case 'group_docs':
+    case 'group_docs_custom':
+    case 'group_docs_excl':
+        // Group booking documents (owner decisions 2026-11-13): per-room rows with each room's own guest and dates, extras
+        // under their own room, a cancelled / deleted room with no money comes off, one with money stays marked, and the
+        // receipt of one room prints only that room + "Part of group REF (N rooms)". Not on a company account.
+        if ($sc === 'group_docs_custom') {
+            // In memory only (no DB / file cache write): render the admin-customised stored template path.
+            $GLOBALS['_SITE_SETTINGS']['invoice_document_template_mode'] = 'custom';
+        }
+        if ($sc === 'group_docs_excl') {
+            $GLOBALS['_SITE_SETTINGS']['vat_pricing_mode'] = 'exclusive'; // in memory only: VAT shown as its own row
+        }
+        require_once $root . '/config/invoice.php';
+        require_once $root . '/includes/booked-rate.php';
+        [$p, $pRef] = br_booking($pdo, 'checked-in', 2);   // lead, 2,330
+        [$m1] = br_booking($pdo, 'checked-in', 1, $p);     // 1,165 incl. a 165 child supplement + a 200 bar bill
+        [$c1] = br_booking($pdo, 'confirmed', 2, $p);      // cancelled, first night kept (1,165), guest paid 1,165
+        [$c2] = br_booking($pdo, 'confirmed', 1, $p);      // cancelled, nothing kept, nothing paid -> off
+        [$d1] = br_booking($pdo, 'confirmed', 1, $p);      // deleted, nothing kept, nothing paid -> off
+        [$e1] = br_booking($pdo, 'confirmed', 1, $p);      // expired: its folio summary still bills the full stay (1,165) -> stays, marked
+        $guestOf = [$p => 'GDOC LEAD', $m1 => 'GDOC MEMBER', $c1 => 'GDOC CANCELPAID', $c2 => 'GDOC CANCELZERO', $d1 => 'GDOC DELETED', $e1 => 'GDOC EXPIRED'];
+        foreach ($guestOf as $id => $g) {
+            $pdo->prepare('UPDATE bookings SET room_guest_name = ? WHERE id = ?')->execute([$g, $id]);
+        }
+        $pdo->prepare("UPDATE bookings SET check_in_date = DATE_ADD(check_in_date, INTERVAL 1 DAY), check_out_date = DATE_ADD(check_out_date, INTERVAL 1 DAY) WHERE id = ?")->execute([$m1]);
+        $pdo->prepare('UPDATE bookings SET child_guests = 1, number_of_guests = 2, child_supplement_total = 165 WHERE id = ?')->execute([$m1]);
+        br_charge($pdo, $m1, 200.0);
+        $pdo->prepare("UPDATE bookings SET status = 'cancelled', cancellation_retained_amount = 1165 WHERE id = ?")->execute([$c1]);
+        $pdo->prepare("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+                payment_method, payment_type, payment_status, created_at) VALUES (?, 'room', ?, 'X', CURDATE(), 1165, 0, 0, 1165, 'cash', 'partial_payment', 'completed', NOW())")
+            ->execute(['BRGD' . random_int(100000, 999999), $c1]);
+        $pdo->prepare("UPDATE bookings SET status = 'cancelled', cancellation_retained_amount = NULL WHERE id IN (?, ?)")->execute([$c2, $d1]);
+        $pdo->prepare('UPDATE bookings SET deleted_at = NOW() WHERE id = ?')->execute([$d1]);
+        $pdo->prepare("UPDATE bookings SET status = 'expired' WHERE id = ?")->execute([$e1]);
+        foreach ([$p, $m1, $c1, $c2, $d1, $e1] as $id) {
+            recalculateBookingFinancials($id);
+        }
+        $rows = rh_invoice_doc_rows($pdo, $m1);
+        $t = null;
+        $h = buildInvoiceHTML($rows['booking'], 'TEST-GD', 'Hotel', 'x@example.invalid', '000', 'Addr', 'MWK', $rows['group_bookings'], null, false, $t);
+        $pos = static function (string $needle) use ($h): int {
+            $at = stripos($h, $needle);
+            return $at === false ? -1 : $at;
+        };
+        $sumGrand = 0.0;
+        $sumPaid = 0.0;
+        foreach ([$p, $m1, $c1, $e1] as $id) {
+            $fs = getBookingFolioSummary($id);
+            $sumGrand += (float)$fs['grand_total'];
+            $sumPaid += (float)$fs['amount_paid'];
+        }
+        $paidRows = (float)br_row($pdo, "SELECT COALESCE(SUM(total_amount),0) s FROM payments WHERE booking_type = 'room' AND deleted_at IS NULL AND payment_status = 'completed'
+            AND booking_id IN (?, ?, ?, ?, ?, ?)", [$p, $m1, $c1, $c2, $d1, $e1])['s'];
+        $mIn = br_row($pdo, 'SELECT check_in_date, check_out_date FROM bookings WHERE id = ?', [$m1]);
+        $out['gd'] = [
+            'ids' => $t['ids'] ?? null, 'want_ids' => [$p, $m1, $c1, $e1],
+            'total' => $t['total'] ?? null, 'paid' => $t['paid'] ?? null, 'balance' => $t['balance'] ?? null, 'subtotal' => $t['subtotal'] ?? null,
+            'vat' => $t['vat'] ?? null, 'levy' => $t['levy'] ?? null,
+            'sum_grand' => round($sumGrand, 2), 'sum_paid' => round($sumPaid, 2), 'paid_rows' => round($paidRows, 2),
+            'p_lead' => $pos('GDOC LEAD'), 'p_member' => $pos('GDOC MEMBER'), 'p_child' => $pos('Child supplement'), 'p_bar' => $pos('Bar (test)'),
+            'p_cancel' => $pos('Cancelled room:'), 'p_expired' => $pos('Expired room:'), 'p_eguest' => $pos('GDOC EXPIRED'), 'p_cpaid' => $pos('GDOC CANCELPAID'), 'zero_shown' => $pos('GDOC CANCELZERO'), 'deleted_shown' => $pos('GDOC DELETED'),
+            'member_dates' => strpos($h, date('d M Y', strtotime($mIn['check_in_date'])) . ' to ' . date('d M Y', strtotime($mIn['check_out_date']))) !== false,
+            'rooms_hdr' => strpos($h, '2 rooms') !== false, 'legacy' => strpos($h, '<!--rh-th=') === false, 'mode' => vat_mode(),
+        ];
+        // Receipts: one room only + "Part of group REF (N rooms)"; a booking outside a group prints exactly as before.
+        $out['gd_receipt_m1'] = rh_booked_rate_room_receipt_lines($pdo, $m1);
+        $out['gd_receipt_c1'] = rh_booked_rate_room_receipt_lines($pdo, $c1);
+        $out['gd_ref'] = $pRef;
+        [$solo] = br_booking($pdo, 'checked-in', 1);
+        $out['gd_solo_same'] = rh_booked_rate_room_receipt_lines($pdo, $solo) === rh_booked_rate_group_lines(rh_booked_rate_group_texts($pdo, $solo));
+        $out['gd_solo'] = rh_booked_rate_room_receipt_lines($pdo, $solo);
+        break;
+
     case 'perf':
         // F9: the batch split (one query for company money, primary billing joined in) gives exactly the figures of
         // the per-booking rh_booking_bill_split() on every kind of booking.

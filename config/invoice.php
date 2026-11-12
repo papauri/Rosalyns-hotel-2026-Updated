@@ -653,6 +653,100 @@ if (!function_exists('rh_inv_quotation_html')) {
     }
 }
 
+if (!function_exists('rh_inv_group_rooms')) {
+    /**
+     * The rooms a GROUP invoice lists, in print order (owner decisions 2026-11-13, group booking documents).
+     * $rows: the group rows the caller passed (any columns; the caller's room_name label wins). Each row is completed
+     * from bookings (b.*) and gets: rh_inv_type (room type name), rh_inv_no (room number(s), getBookingRoomLabel),
+     * rh_inv_guest (room_guest_name, else guest_name), rh_inv_removed ('' = live room; else 'Cancelled' / 'No-show' /
+     * 'Expired' / 'Deleted'), rh_inv_paid (canonical net paid on that room).
+     *
+     * A cancelled, expired, no-show or deleted room comes OFF the invoice (the same rooms the receipts leave out) when it
+     * carries no money: nothing billed in its folio summary, no counted payment or refund row, no live folio charge. A
+     * closed room that still carries money stays, marked, so no money vanishes and the invoice's Amount paid keeps
+     * matching the sum of the per-room receipts. The lead ($booking) always stays. Order: lead first, then the live rooms
+     * by room number / name, then the closed rooms that carry money. Read-only. A read error keeps every row as given.
+     */
+    function rh_inv_group_rooms(PDO $pdo, array $booking, array $rows): array
+    {
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        $leadId = (int)($booking['id'] ?? 0);
+        $ids = array_values(array_filter(array_map(static fn($r) => (int)($r['id'] ?? 0), $rows)));
+        if (!$ids) {
+            return $rows;
+        }
+        try {
+            $ph = implode(',', array_fill(0, count($ids), '?'));
+            $st = $pdo->prepare("SELECT b.*, r.name AS rh_inv_type FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id WHERE b.id IN ($ph)");
+            $st->execute($ids);
+            $db = [];
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $d) {
+                $db[(int)$d['id']] = $d;
+            }
+            $paySt = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE booking_type = 'room' AND booking_id = ? AND deleted_at IS NULL
+                AND ((payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund')
+                  OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))");
+            $chgSt = $pdo->prepare('SELECT COUNT(*) FROM booking_charges WHERE booking_id = ? AND voided = 0');
+            $live = [];
+            $closed = [];
+            foreach ($rows as $r) {
+                $id = (int)($r['id'] ?? 0);
+                $r = $r + ($db[$id] ?? []);
+                $r['rh_inv_type'] = (string)($r['rh_inv_type'] ?? '');
+                $r['rh_inv_no'] = function_exists('getBookingRoomLabel') ? getBookingRoomLabel($id) : '';
+                $g = trim((string)($r['room_guest_name'] ?? ''));
+                $r['rh_inv_guest'] = $g !== '' ? $g : trim((string)($r['guest_name'] ?? ''));
+                $fs = getBookingFolioSummary($id);
+                $r['rh_inv_paid'] = isset($fs['amount_paid']) ? round((float)$fs['amount_paid'], 2) : 0.0;
+                $status = strtolower((string)($r['status'] ?? ''));
+                $isDeleted = !empty($r['deleted_at']);
+                $isClosed = $isDeleted || in_array($status, ['cancelled', 'expired', 'no-show'], true);
+                $r['rh_inv_removed'] = '';
+                if ($id === $leadId || !$isClosed) {
+                    $live[] = $r;
+                    continue;
+                }
+                $paySt->execute([$id]);
+                $chgSt->execute([$id]);
+                $billed = isset($fs['error']) ? $tol + 1 : (float)($fs['grand_total'] ?? 0);
+                $hasMoney = $billed > $tol || (int)$paySt->fetchColumn() > 0 || (int)$chgSt->fetchColumn() > 0;
+                if (!$hasMoney) {
+                    continue; // nothing billed, paid or charged: off the invoice
+                }
+                $r['rh_inv_removed'] = $isDeleted ? 'Deleted' : ['cancelled' => 'Cancelled', 'expired' => 'Expired', 'no-show' => 'No-show'][$status];
+                $closed[] = $r;
+            }
+        } catch (Throwable $e) {
+            error_log('rh_inv_group_rooms: ' . $e->getMessage());
+            return $rows;
+        }
+        $byRoom = static function (array $a, array $b): int {
+            $ka = trim(($a['rh_inv_no'] ?? '') . ' ' . ($a['rh_inv_type'] ?? ''));
+            $kb = trim(($b['rh_inv_no'] ?? '') . ' ' . ($b['rh_inv_type'] ?? ''));
+            $c = strnatcasecmp($ka, $kb);
+            return $c !== 0 ? $c : ((int)$a['id'] <=> (int)$b['id']);
+        };
+        $lead = array_values(array_filter($live, static fn($r) => (int)$r['id'] === $leadId));
+        $others = array_values(array_filter($live, static fn($r) => (int)$r['id'] !== $leadId));
+        usort($others, $byRoom);
+        usort($closed, $byRoom);
+        return array_merge($lead, $others, $closed);
+    }
+}
+
+if (!function_exists('rh_inv_room_title')) {
+    /** "Deluxe Room - 12" (room type, then the room number when one is assigned). Plain text. */
+    function rh_inv_room_title(array $r): string
+    {
+        $type = trim((string)($r['rh_inv_type'] ?? ''));
+        if ($type === '') {
+            $type = trim((string)($r['room_name'] ?? 'Room'));
+        }
+        $no = trim((string)($r['rh_inv_no'] ?? ''));
+        return $no !== '' && stripos($type, $no) === false ? $type . ' - ' . $no : $type;
+    }
+}
+
 /**
  * Build HTML content for invoice - Stunning State-of-the-Art PDF Design
  */
@@ -703,6 +797,15 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     if (!function_exists('rh_doc_stay_lines')) {
         require_once __DIR__ . '/../includes/pricing.php';
     }
+    // Group invoice (owner decisions 2026-11-13): one row per room in print order (lead first, then by room number /
+    // name); a closed room with no money comes off; one with money stays, marked (rh_inv_group_rooms). One room left =
+    // the single-room layout.
+    if (!empty($group_bookings) && $preload === null) {
+        $group_bookings = rh_inv_group_rooms($pdo, $booking, array_values($group_bookings));
+        if (count($group_bookings) <= 1) {
+            $group_bookings = [];
+        }
+    }
     $docRows   = !empty($group_bookings) ? array_values($group_bookings) : [$booking];
     $pkgRowIdx = 0;
     foreach ($docRows as $di => $dr) {
@@ -714,6 +817,43 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     $docLines = [];
     foreach ($docRows as $di => $dr) {
         $docLines[$di] = rh_doc_stay_lines($dr, $di === $pkgRowIdx ? $pkgTotal : 0.0);
+        if (!empty($dr['rh_inv_removed']) && strtolower((string)($dr['status'] ?? '')) === 'cancelled') {
+            // A cancelled room bills only what was kept on cancellation (getBookingFolioSummary / recalc): no VAT, no levy.
+            $kept = round(max(0.0, (float)($dr['cancellation_retained_amount'] ?? 0)), 2);
+            $docLines[$di] = ['mode' => $docLines[$di]['mode'], 'gross' => $kept, 'vat' => 0.0, 'levy' => 0.0, 'lines_total' => $kept,
+                'room' => $kept, 'child' => 0.0, 'pkg' => 0.0, 'subtotal' => $kept, 'total' => $kept];
+        }
+    }
+    // Header for a group: the group's overall dates (earliest check-in to latest check-out), the room count and every
+    // live room's guests. Single room: the booking's own figures, as before.
+    $hdrCheckIn  = (string)$booking['check_in_date'];
+    $hdrCheckOut = (string)$booking['check_out_date'];
+    $hdrRooms    = 1;
+    $hdrNights   = (string)(int)$booking['number_of_nights'];
+    if (!empty($group_bookings)) {
+        $hdrRooms = 0;
+        $nightSet = [];
+        $adultGuests = 0;
+        $childGuests = 0;
+        foreach ($group_bookings as $grm) {
+            if (!empty($grm['rh_inv_removed'])) {
+                continue;
+            }
+            $hdrRooms++;
+            if (!empty($grm['check_in_date']) && strcmp((string)$grm['check_in_date'], $hdrCheckIn) < 0) {
+                $hdrCheckIn = (string)$grm['check_in_date'];
+            }
+            if (!empty($grm['check_out_date']) && strcmp((string)$grm['check_out_date'], $hdrCheckOut) > 0) {
+                $hdrCheckOut = (string)$grm['check_out_date'];
+            }
+            $nightSet[(int)($grm['number_of_nights'] ?? 0)] = true;
+            $gc = (int)($grm['child_guests'] ?? 0);
+            $childGuests += $gc;
+            $adultGuests += (int)($grm['adult_guests'] ?? max(1, (int)($grm['number_of_guests'] ?? 1) - $gc));
+        }
+        $hdrNights = count($nightSet) === 1 ? (string)array_key_first($nightSet) : 'See each room';
+        $check_in  = date('j F Y', strtotime($hdrCheckIn));
+        $check_out = date('j F Y', strtotime($hdrCheckOut));
     }
     if ($ratePlanDiscount > 0 && $ratePlanLabel !== '') {
         // The discount prints as its own negative row, so the room line shows the rate BEFORE the discount.
@@ -750,10 +890,13 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     $folioTotal   = 0.0;
     $folioVat     = 0.0;
     try {
-        $cs = $pdo->prepare("SELECT charge_type, description, quantity, unit_price, line_subtotal, vat_amount, line_total, posted_at
-                              FROM booking_charges WHERE booking_id = ? AND voided = 0
+        // Every room the document lists (a group prints each room's extras under that room), so the extra lines add up
+        // to the folio totals the invoice total already counts.
+        $fcIds = array_values(array_map(static fn($r) => (int)($r['id'] ?? 0), $docRows));
+        $cs = $pdo->prepare("SELECT booking_id, charge_type, description, quantity, unit_price, line_subtotal, vat_amount, line_total, posted_at
+                              FROM booking_charges WHERE booking_id IN (" . implode(',', array_fill(0, count($fcIds), '?')) . ") AND voided = 0
                               ORDER BY posted_at ASC, id ASC");
-        $cs->execute([$booking['id']]);
+        $cs->execute($fcIds);
         $folioCharges = $cs->fetchAll(PDO::FETCH_ASSOC);
         foreach ($folioCharges as $c) {
             $folioTotal += (float)$c['line_total'];
@@ -881,7 +1024,8 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     $statementMode = $asStatement && $isPaid;
     // The figures this document prints (the invoice email states the same total and balance as its copy).
     $docTotals = ['total' => round((float)$totalWithVat, 2), 'paid' => round((float)$amountPaid, 2), 'balance' => $isPaid ? 0.0 : round((float)$balanceDue, 2),
-        'ids' => array_values(array_map('intval', $summaryIds))];
+        'ids' => array_values(array_map('intval', $summaryIds)),
+        'subtotal' => round((float)$subtotalShown, 2), 'vat' => round((float)$vatAmount, 2), 'levy' => round((float)$tourismLevyAmt, 2)];
     $totalDueDisplay = $currency_symbol . ' ' . number_format($totalWithVat, 2);
     $amountPaidDisplay = $currency_symbol . ' ' . number_format($amountPaid, 2);
     $balanceDueDisplay = $currency_symbol . ' ' . number_format($balanceDue, 2);
@@ -948,40 +1092,10 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     }
 
     // Item rows: [description, qty, unit, amount]
-    $itemRows = [];
-    if (!empty($group_bookings)) {
-        foreach (array_values($group_bookings) as $gi => $grm) {
-            $grmSubtotal = (float)$docLines[$gi]['room'];
-            $nightRate   = $grmSubtotal / max(1, (int)$grm['number_of_nights']);
-            // The primary row carries the package and rate-plan columns; siblings have none.
-            $itemRows[] = [
-                rh_pdf_e($grm['room_name']) . rh_inv_sub($accomSub($gi === $pkgRowIdx ? $booking : $grm)),
-                rh_pdf_e((string)(int)$grm['number_of_nights']),
-                rh_pdf_e($money($nightRate)),
-                rh_pdf_e($money($grmSubtotal)),
-            ];
-        }
-    } else {
-        $nightRate = $roomSubtotal / max(1, (int)$booking['number_of_nights']);
-        $itemRows[] = [
-            rh_pdf_e($booking['room_name']) . rh_inv_sub($accomSub($booking)),
-            rh_pdf_e((string)(int)$booking['number_of_nights']),
-            rh_pdf_e($money($nightRate)),
-            rh_pdf_e($money($roomSubtotal)),
-        ];
-    }
-    if ($showChildLine) {
-        $childQty = $childDocQty;
-        $itemRows[] = [
-
-            rh_pdf_e('Child supplement') . rh_inv_sub($childDocLabel !== '' ? $childDocLabel : ('x ' . $childQty)),
-            rh_pdf_e((string)$childQty),
-            rh_pdf_e($money($childQty > 0 ? $childSuppTotal / $childQty : 0)),
-            rh_pdf_e($money($childSuppTotal)),
-        ];
-    }
+    // The lead's rate-plan and package rows (they live on the lead booking only).
+    $planRows = [];
     if ($ratePlanDiscount > 0 && $ratePlanLabel !== '') {
-        $itemRows[] = [
+        $planRows[] = [
             rh_pdf_e($ratePlanLabel) . rh_inv_sub('Rate discount'),
             rh_pdf_e((string)(int)$booking['number_of_nights']),
             '',
@@ -990,7 +1104,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     }
     if ($ratePlanSurcharge > 0) {
         // Information only: the surcharge is already in the room line above, so the Amount column stays blank.
-        $itemRows[] = [
+        $planRows[] = [
             rh_pdf_e($ratePlanLabel . ' surcharge (already in the room rate) +' . $money($ratePlanSurcharge)),
             rh_pdf_e((string)(int)$booking['number_of_nights']),
             '',
@@ -998,14 +1112,14 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         ];
     }
     foreach ($pkgRows as $pkg) {
-        $itemRows[] = [
+        $planRows[] = [
             rh_pdf_e($pkg['package_name']) . rh_inv_sub('Package add-on'),
             rh_pdf_e((string)(int)$pkg['quantity']),
             rh_pdf_e($money((float)$pkg['price_amount'])),
             rh_pdf_e($money((float)$pkg['total_cost'])),
         ];
     }
-    foreach ($folioCharges as $fc) {
+    $fcRow = static function (array $fc) use ($vMode, $money): array {
         $typeLabel = match (strtolower((string)($fc['charge_type'] ?? ''))) {
             'food'  => 'Food',
             'drink' => 'Beverage',
@@ -1015,12 +1129,100 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         // Exclusive: the line shows its net amount (VAT is its own total row); inclusive/off: the all-in line total.
         $fcShown = $vMode === 'exclusive' ? (float)$fc['line_subtotal'] : (float)$fc['line_total'];
         $fcQty   = max(1, (int)$fc['quantity']);
-        $itemRows[] = [
+        return [
             rh_pdf_e($fc['description']) . rh_inv_sub($typeLabel),
             rh_pdf_e((string)(int)$fc['quantity']),
             rh_pdf_e($money($vMode === 'exclusive' ? $fcShown / $fcQty : (float)$fc['unit_price'])),
             rh_pdf_e($money($fcShown)),
         ];
+    };
+    $itemRows = [];
+    if (!empty($group_bookings)) {
+        // One block per room (owner 2026-11-13): room, guest, its own dates, nights x booked rate = line; that room's
+        // children, then (lead only) its rate plan and packages, then that room's extras.
+        $fcByRoom = [];
+        foreach ($folioCharges as $fc) {
+            $fcByRoom[(int)($fc['booking_id'] ?? 0)][] = $fc;
+        }
+        foreach (array_values($group_bookings) as $gi => $grm) {
+            $gid       = (int)$grm['id'];
+            $removed   = (string)($grm['rh_inv_removed'] ?? '');
+            $keptOnly  = $removed !== '' && strtolower((string)($grm['status'] ?? '')) === 'cancelled';
+            $grmNights = (int)($grm['number_of_nights'] ?? 0);
+            $grmRoom   = (float)$docLines[$gi]['room'];
+            $whoWhen   = implode(' - ', array_filter([
+                ($grm['rh_inv_guest'] ?? '') !== '' ? 'Guest: ' . $grm['rh_inv_guest'] : '',
+                !empty($grm['check_in_date']) ? date('d M Y', strtotime((string)$grm['check_in_date'])) . ' to ' . date('d M Y', strtotime((string)$grm['check_out_date'])) : '',
+            ]));
+            $title = '<b>' . rh_pdf_e(($removed !== '' ? $removed . ' room: ' : '') . rh_inv_room_title($grm)) . '</b>' . rh_inv_sub($whoWhen);
+            if ($keptOnly) {
+                // Cancelled room that still carries money: what was kept on cancellation is its whole room charge.
+                $itemRows[] = [
+                    $title . rh_inv_sub('Cancelled - kept on cancellation ' . $money($grmRoom) . '; paid on this room '
+                        . $money((float)($grm['rh_inv_paid'] ?? 0)) . ' (in the payments below)'),
+                    rh_pdf_e('1'),
+                    rh_pdf_e($money($grmRoom)),
+                    rh_pdf_e($money($grmRoom)),
+                ];
+            } else {
+                // The lead row carries the package and rate-plan columns; the other rooms have none.
+                $itemRows[] = [
+                    $title . rh_inv_sub($accomSub($gi === $pkgRowIdx ? $booking : $grm))
+                        . ($removed !== '' ? rh_inv_sub($removed . ' - still billed; paid on this room ' . $money((float)($grm['rh_inv_paid'] ?? 0))) : ''),
+                    rh_pdf_e((string)$grmNights),
+                    rh_pdf_e($money($grmRoom / max(1, $grmNights))),
+                    rh_pdf_e($money($grmRoom)),
+                ];
+                $grmChild = (float)$docLines[$gi]['child'];
+                $grmChildLabel = rh_child_doc_label([$grm], $cur);
+                if ($grmChild > 0 || ($grmChildLabel !== '' && stripos($grmChildLabel, 'free') !== false)) {
+                    $grmChildQty = rh_child_doc_charged([$grm], (int)($grm['child_guests'] ?? 0));
+                    $itemRows[] = [
+                        rh_pdf_e('Child supplement') . rh_inv_sub($grmChildLabel !== '' ? $grmChildLabel : ('x ' . $grmChildQty)),
+                        rh_pdf_e((string)$grmChildQty),
+                        rh_pdf_e($money($grmChildQty > 0 ? $grmChild / $grmChildQty : 0)),
+                        rh_pdf_e($money($grmChild)),
+                    ];
+                }
+            }
+            if ($gi === $pkgRowIdx) {
+                foreach ($planRows as $pr) {
+                    $itemRows[] = $pr;
+                }
+            }
+            foreach ($fcByRoom[$gid] ?? [] as $fc) {
+                $itemRows[] = $fcRow($fc);
+            }
+            unset($fcByRoom[$gid]);
+        }
+        foreach ($fcByRoom as $rest) { // never expected: a charge on a room not listed still prints, so lines foot
+            foreach ($rest as $fc) {
+                $itemRows[] = $fcRow($fc);
+            }
+        }
+    } else {
+        $nightRate = $roomSubtotal / max(1, (int)$booking['number_of_nights']);
+        $itemRows[] = [
+            rh_pdf_e($booking['room_name']) . rh_inv_sub($accomSub($booking)),
+            rh_pdf_e((string)(int)$booking['number_of_nights']),
+            rh_pdf_e($money($nightRate)),
+            rh_pdf_e($money($roomSubtotal)),
+        ];
+        if ($showChildLine) {
+            $childQty = $childDocQty;
+            $itemRows[] = [
+                rh_pdf_e('Child supplement') . rh_inv_sub($childDocLabel !== '' ? $childDocLabel : ('x ' . $childQty)),
+                rh_pdf_e((string)$childQty),
+                rh_pdf_e($money($childQty > 0 ? $childSuppTotal / $childQty : 0)),
+                rh_pdf_e($money($childSuppTotal)),
+            ];
+        }
+        foreach ($planRows as $pr) {
+            $itemRows[] = $pr;
+        }
+        foreach ($folioCharges as $fc) {
+            $itemRows[] = $fcRow($fc);
+        }
     }
     $itemsHtml = rh_pdf_items_table([
         ['label' => 'Description', 'width' => 46, 'align' => 'left'],
@@ -1072,11 +1274,12 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         ['Billed to', $ivBill ? $ivBill['name'] : (string)$booking['guest_name']],
         ['Booking ref', (string)$booking['booking_reference']],
         ['Email', $ivBill ? $ivBill['billing_email'] : (string)($booking['guest_email'] ?? '')],
-        ['Check-in', date('d M Y', strtotime((string)$booking['check_in_date']))],
+        ['Check-in', date('d M Y', strtotime($hdrCheckIn))],
         ['Phone', (string)($booking['guest_phone'] ?? '')],
-        ['Check-out', date('d M Y', strtotime((string)$booking['check_out_date']))],
-        ['Room', (string)$booking['room_name']],
-        ['Nights', (string)(int)$booking['number_of_nights']],
+        ['Check-out', date('d M Y', strtotime($hdrCheckOut))],
+        // A group: the room count (each room, its guest and its own dates are listed below).
+        !empty($group_bookings) ? ['Rooms', $hdrRooms . ($hdrRooms === 1 ? ' room' : ' rooms')] : ['Room', (string)$booking['room_name']],
+        ['Nights', $hdrNights],
         ['Guests', $guestCountStr],
     ];
     if ($ivBill) {
@@ -1259,88 +1462,150 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
     $rowBg = ['#F7F3EE', '#EDE8E0'];
     $ri    = 0;
 
-    // Accommodation rows — one per room for group bookings, single row otherwise
-    if (!empty($group_bookings)) {
-        foreach ($group_bookings as $grm) {
-            $grm_subtotal = (float)$grm['total_amount'];
-            $night_rate   = $grm_subtotal / max(1, (int)$grm['number_of_nights']);
-            $chargeRows .= '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
-                <td width="50%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0; line-height:1.35;">' . htmlspecialchars($grm['room_name']) . ' — Accommodation</td>
-                <td width="10%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . (int)$grm['number_of_nights'] . '</td>
-                <td width="15%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $currency_symbol . ' ' . number_format($night_rate, 2) . '</td>
-                <td width="25%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $currency_symbol . ' ' . number_format($grm_subtotal, 2) . '</td>
-            </tr>';
-        }
-    } else {
-        $nightRate = $roomSubtotal / max(1, (int)$booking['number_of_nights']);
-        $chargeRows .= '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
-            <td width="50%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0; line-height:1.35;">' . htmlspecialchars($booking['room_name']) . ' — Accommodation</td>
-            <td width="10%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . (int)$booking['number_of_nights'] . '</td>
-            <td width="15%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $currency_symbol . ' ' . number_format($nightRate, 2) . '</td>
-            <td width="25%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $currency_symbol . ' ' . number_format($roomSubtotal, 2) . '</td>
+    // Row builders (shared by the single-room and the per-room group layouts).
+    $roomRowHtml = static function (string $descHtml, string $qty, float $unit, float $amount) use (&$ri, $rowBg, $currency_symbol): string {
+        return '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
+            <td width="50%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0; line-height:1.35;">' . $descHtml . '</td>
+            <td width="10%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . htmlspecialchars($qty) . '</td>
+            <td width="15%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $currency_symbol . ' ' . number_format($unit, 2) . '</td>
+            <td width="25%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $currency_symbol . ' ' . number_format($amount, 2) . '</td>
         </tr>';
-    }
-
-    if ($childGuests > 0 && $showChildLine) {
-        $chargeRows .= '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
-            <td width="50%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0; line-height:1.35;">Child Supplement' . ($childDocLabel !== '' ? '<br><span style="font-size:10px; color:#5E554D;">' . htmlspecialchars($childDocLabel) . '</span>' : ' &times; ' . $childGuests) . '</td>
-            <td width="10%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $childDocQty . '</td>
-            <td width="15%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $currency_symbol . ' ' . number_format($childDocQty > 0 ? $childSuppTotal / $childDocQty : 0, 2) . '</td>
-            <td width="25%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $currency_symbol . ' ' . number_format($childSuppTotal, 2) . '</td>
+    };
+    $childRowHtml = static function (string $label, int $qty, float $amount, int $kids) use (&$ri, $rowBg, $currency_symbol): string {
+        return '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
+            <td width="50%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0; line-height:1.35;">Child Supplement' . ($label !== '' ? '<br><span style="font-size:10px; color:#5E554D;">' . htmlspecialchars($label) . '</span>' : ' &times; ' . $kids) . '</td>
+            <td width="10%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $qty . '</td>
+            <td width="15%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $currency_symbol . ' ' . number_format($qty > 0 ? $amount / $qty : 0, 2) . '</td>
+            <td width="25%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $currency_symbol . ' ' . number_format($amount, 2) . '</td>
         </tr>';
-    }
-
-    // Rate plan discount row
-    if ($ratePlanDiscount > 0 && $ratePlanLabel !== '') {
-        $chargeRows .= '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
+    };
+    // The lead booking's rate-plan discount / surcharge and package rows.
+    $planRowsHtml = static function () use (&$ri, $rowBg, $currency_symbol, $ratePlanDiscount, $ratePlanLabel, $ratePlanSurcharge, $booking, $pkgRows): string {
+        $out = '';
+        // Rate plan discount row
+        if ($ratePlanDiscount > 0 && $ratePlanLabel !== '') {
+            $out .= '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
             <td width="50%" style="padding:6px 8px; font-size:12px; color:#1a3c2a; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0; line-height:1.35;">' . htmlspecialchars($ratePlanLabel) . ' — Rate Discount</td>
             <td width="10%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . (int)$booking['number_of_nights'] . '</td>
             <td width="15%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">—</td>
             <td width="25%" style="padding:6px 8px; font-size:12px; color:#1a3c2a; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">-' . $currency_symbol . ' ' . number_format($ratePlanDiscount, 2) . '</td>
         </tr>';
-    }
-    // Rate plan surcharge row: information only, already inside the accommodation line, so no amount is printed.
-    if (!empty($ratePlanSurcharge) && $ratePlanSurcharge > 0) {
-        $chargeRows .= '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
+        }
+        // Rate plan surcharge row: information only, already inside the accommodation line, so no amount is printed.
+        if (!empty($ratePlanSurcharge) && $ratePlanSurcharge > 0) {
+            $out .= '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
             <td width="50%" style="padding:6px 8px; font-size:12px; color:#5E554D; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0; line-height:1.35;">' . htmlspecialchars($ratePlanLabel) . ' surcharge (already in the room rate) +' . $currency_symbol . ' ' . number_format($ratePlanSurcharge, 2) . '</td>
             <td width="10%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . (int)$booking['number_of_nights'] . '</td>
             <td width="15%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">—</td>
             <td width="25%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">—</td>
         </tr>';
-    }
-
-    // Package add-on rows
-    foreach ($pkgRows as $pkg) {
-        $chargeRows .= '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
+        }
+        // Package add-on rows
+        foreach ($pkgRows as $pkg) {
+            $out .= '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
             <td width="50%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0; line-height:1.35;">' . htmlspecialchars($pkg['package_name']) . ' — Package Add-on</td>
             <td width="10%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . (int)$pkg['quantity'] . '</td>
             <td width="15%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $currency_symbol . ' ' . number_format((float)$pkg['price_amount'], 2) . '</td>
             <td width="25%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $currency_symbol . ' ' . number_format((float)$pkg['total_cost'], 2) . '</td>
         </tr>';
-    }
-
-    if ($tourismLevyAmt > 0) {
-        $chargeRows .= '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
+        }
+        return $out;
+    };
+    $levyRowHtml = static function () use (&$ri, $rowBg, $currency_symbol, $tourismLevyAmt, $tourismLevyPct): string {
+        if ($tourismLevyAmt <= 0) {
+            return '';
+        }
+        return '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
             <td width="50%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0; line-height:1.35;">Tourism Levy ' . ($tourismLevyPct > 0 ? '(' . number_format($tourismLevyPct, 1) . '%)' : '') . '</td>
             <td width="10%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">1</td>
             <td width="15%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">—</td>
             <td width="25%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $currency_symbol . ' ' . number_format($tourismLevyAmt, 2) . '</td>
         </tr>';
-    }
-
-    foreach ($folioCharges as $fc) {
+    };
+    $folioRowHtml = static function (array $fc) use (&$ri, $rowBg, $currency_symbol): string {
         $typeIcon = match (strtolower($fc['charge_type'] ?? '')) {
             'food'  => 'Food',
             'drink' => 'Beverage',
             'spa'   => 'Spa',
             default => ucfirst((string)($fc['charge_type'] ?? 'Extra')),
         };
-        $chargeRows .= '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
+        return '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
             <td width="50%" style="padding:4px 6px; font-size:11px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0; line-height:1.25;">' . htmlspecialchars($fc['description']) . ' <span style="font-size:9px; color:#B18247; font-style:italic;">' . $typeIcon . '</span></td>
             <td width="10%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . (int)$fc['quantity'] . '</td>
             <td width="15%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $currency_symbol . ' ' . number_format((float)$fc['unit_price'], 2) . '</td>
             <td width="25%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $currency_symbol . ' ' . number_format((float)$fc['line_total'], 2) . '</td>
         </tr>';
+    };
+    $subHtml = static function (string $t): string {
+        return trim($t) === '' ? '' : '<br><span style="font-size:10px; color:#5E554D;">' . htmlspecialchars($t) . '</span>';
+    };
+
+    if (!empty($group_bookings)) {
+        // One block per room (owner 2026-11-13), the same rows as the kit layout: room, guest, its own dates,
+        // nights x booked rate = line (rh_doc_stay_lines, never the net total_amount); that room's children; the lead's
+        // rate plan and packages; that room's extras. A closed room that still carries money is marked.
+        $fcByRoom = [];
+        foreach ($folioCharges as $fc) {
+            $fcByRoom[(int)($fc['booking_id'] ?? 0)][] = $fc;
+        }
+        $curTxt = trim((string)$currency_symbol) !== '' ? trim((string)$currency_symbol) : 'MWK';
+        if (!function_exists('rh_booked_rate_line')) {
+            require_once __DIR__ . '/../includes/booked-rate.php';
+        }
+        foreach (array_values($group_bookings) as $gi => $grm) {
+            $gid       = (int)$grm['id'];
+            $removed   = (string)($grm['rh_inv_removed'] ?? '');
+            $keptOnly  = $removed !== '' && strtolower((string)($grm['status'] ?? '')) === 'cancelled';
+            $grmNights = (int)($grm['number_of_nights'] ?? 0);
+            $grmRoom   = (float)$docLines[$gi]['room'];
+            $whoWhen   = implode(' - ', array_filter([
+                ($grm['rh_inv_guest'] ?? '') !== '' ? 'Guest: ' . $grm['rh_inv_guest'] : '',
+                !empty($grm['check_in_date']) ? date('d M Y', strtotime((string)$grm['check_in_date'])) . ' to ' . date('d M Y', strtotime((string)$grm['check_out_date'])) : '',
+            ]));
+            $title = '<strong>' . htmlspecialchars(($removed !== '' ? $removed . ' room: ' : '') . rh_inv_room_title($grm)) . '</strong>' . $subHtml($whoWhen);
+            $paidHere = $currency_symbol . ' ' . number_format((float)($grm['rh_inv_paid'] ?? 0), 2);
+            if ($keptOnly) {
+                $chargeRows .= $roomRowHtml($title . $subHtml('Cancelled - kept on cancellation ' . $currency_symbol . ' ' . number_format($grmRoom, 2)
+                    . '; paid on this room ' . $paidHere . ' (in the payment history)'), '1', $grmRoom, $grmRoom);
+            } else {
+                $brSrc = $gi === $pkgRowIdx ? $booking : $grm;
+                $br = function_exists('rh_booked_rate_line') ? rh_booked_rate_line($brSrc, null, ['currency' => $curTxt, 'room_name' => '']) : ['ok' => false];
+                $rateTxt = !empty($br['ok']) ? 'Booked at ' . str_replace(['×', '·'], ['x', '-'], (string)$br['guest_text']) : '';
+                $chargeRows .= $roomRowHtml($title . $subHtml($rateTxt)
+                    . ($removed !== '' ? $subHtml($removed . ' - still billed; paid on this room ' . $paidHere) : ''),
+                    (string)$grmNights, $grmRoom / max(1, $grmNights), $grmRoom);
+                $grmChild = (float)$docLines[$gi]['child'];
+                $grmChildLabel = rh_child_doc_label([$grm], $curTxt);
+                if ($grmChild > 0 || ($grmChildLabel !== '' && stripos($grmChildLabel, 'free') !== false)) {
+                    $chargeRows .= $childRowHtml($grmChildLabel, rh_child_doc_charged([$grm], (int)($grm['child_guests'] ?? 0)), $grmChild, (int)($grm['child_guests'] ?? 0));
+                }
+            }
+            if ($gi === $pkgRowIdx) {
+                $chargeRows .= $planRowsHtml();
+            }
+            foreach ($fcByRoom[$gid] ?? [] as $fc) {
+                $chargeRows .= $folioRowHtml($fc);
+            }
+            unset($fcByRoom[$gid]);
+        }
+        $chargeRows .= $levyRowHtml();
+        foreach ($fcByRoom as $rest) { // never expected: a charge on a room not listed still prints, so lines foot
+            foreach ($rest as $fc) {
+                $chargeRows .= $folioRowHtml($fc);
+            }
+        }
+    } else {
+        // Single room: exactly the rows as before.
+        $nightRate = $roomSubtotal / max(1, (int)$booking['number_of_nights']);
+        $chargeRows .= $roomRowHtml(htmlspecialchars($booking['room_name']) . ' — Accommodation', (string)(int)$booking['number_of_nights'], $nightRate, $roomSubtotal);
+        if ($childGuests > 0 && $showChildLine) {
+            $chargeRows .= $childRowHtml($childDocLabel, (int)$childDocQty, (float)$childSuppTotal, (int)$childGuests);
+        }
+        $chargeRows .= $planRowsHtml();
+        $chargeRows .= $levyRowHtml();
+        foreach ($folioCharges as $fc) {
+            $chargeRows .= $folioRowHtml($fc);
+        }
     }
 
     // ── PAYMENT ROWS ────────────────────────────────────────
@@ -1438,7 +1703,14 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
                     require_once __DIR__ . '/../includes/booked-rate.php';
                 }
                 $brTexts = rh_booked_rate_group_texts($brPdo, (int)$booking['id']);
-                $brLines = count($brTexts) > 1 ? rh_booked_rate_group_lines($brTexts) : $brTexts;
+                // A group: one line per room, however many rooms (never the "6 rooms: ...; ..." run-on line).
+                $brLines = $brTexts;
+                if (count($brTexts) > 1) {
+                    $brLines = [];
+                    foreach (array_values($brTexts) as $bi => $bt) {
+                        $brLines[] = 'Room ' . ($bi + 1) . ': ' . $bt;
+                    }
+                }
                 $bookedRateHtml = implode('<br>', array_map(static function (string $l): string {
                     return htmlspecialchars(str_replace(['×', '·'], ['x', '-'], $l), ENT_QUOTES, 'UTF-8');
                 }, $brLines));
@@ -1453,10 +1725,11 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
                 '{{guest_phone}}'             => htmlspecialchars($booking['guest_phone']),
                 '{{booking_reference}}'       => htmlspecialchars($booking['booking_reference']),
                 '{{room_icon_html}}'          => $roomIconHtml,
-                '{{room_name}}'               => htmlspecialchars($booking['room_name']),
+                // A group: "N rooms" and the group's overall dates (each room is listed in the charges table).
+                '{{room_name}}'               => !empty($group_bookings) ? htmlspecialchars($hdrRooms . ($hdrRooms === 1 ? ' room' : ' rooms')) : htmlspecialchars($booking['room_name']),
                 '{{check_in}}'                => $check_in,
                 '{{check_out}}'               => $check_out,
-                '{{nights}}'                  => (string)(int)$booking['number_of_nights'],
+                '{{nights}}'                  => !empty($group_bookings) ? htmlspecialchars((string)$hdrNights) : (string)(int)$booking['number_of_nights'],
                 '{{guests}}'                  => $guestCountStr,
                 '{{status_text}}'             => $statusText,
                 '{{status_bg}}'               => $statusBg,

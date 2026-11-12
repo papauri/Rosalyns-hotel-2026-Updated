@@ -175,8 +175,9 @@ if (!function_exists('receipt_hydrate_context')) {
             if (!function_exists('rh_booked_rate_for_booking')) {
                 require_once __DIR__ . '/../includes/booked-rate.php';
             }
-            // Group / multi-room booking: one line per room, "N rooms: ..." past 4 (lines joined with "\n").
-            $bookedRate = implode("\n", rh_booked_rate_group_lines(rh_booked_rate_group_texts($pdo, (int)$payment['booking_id'])));
+            // One receipt per room (owner 2026-11-13): a room of a group prints only its own room, guest, dates and
+            // nights x booked rate, plus "Part of group REF (N rooms)"; a single booking prints as before (lines joined with "\n").
+            $bookedRate = implode("\n", rh_booked_rate_room_receipt_lines($pdo, (int)$payment['booking_id']));
         } elseif (($payment['booking_type'] ?? '') === 'conference' && !empty($payment['booking_id'])) {
             try {
                 // Column names differ between installs: pick what exists (a missing column used to fail the
