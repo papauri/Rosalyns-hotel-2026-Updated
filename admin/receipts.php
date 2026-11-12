@@ -364,13 +364,13 @@ $site_name = getSetting('site_name', 'Hotel');
                 <table class="table receipts-table">
                     <thead>
                         <tr>
-                            <th>Receipt #</th>
-                            <th>Payment</th>
-                            <th>Source</th>
-                            <th>Date</th>
-                            <th class="text-right">Amount</th>
-                            <th>Status</th>
-                            <th>Actions</th>
+                            <th class="rc-ref">Receipt / Payment</th>
+                            <th class="rc-guest">Guest</th>
+                            <th class="rc-source">Source</th>
+                            <th class="rc-date">Date</th>
+                            <th class="rc-amount text-right">Amount</th>
+                            <th class="rc-status">Status</th>
+                            <th class="rc-actions">Actions</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -382,25 +382,43 @@ $site_name = getSetting('site_name', 'Hotel');
                             $waPhone = preg_replace('/[^0-9]+/', '', (string)$waContext['guest_phone']);
                             $waUrl = ($waPhone !== '' ? 'https://wa.me/' . $waPhone : 'https://wa.me/') . '?text=' . rawurlencode($waMessage);
                             $guestEmail = htmlspecialchars((string)($waContext['guest_email'] ?? ''), ENT_QUOTES, 'UTF-8');
+                            // Guest column: name from the linked booking/account/order; 'Guest' is the hydrator's fallback for unknown or walk-in.
+                            $rcGuestName = trim((string)($waContext['guest_name'] ?? ''));
+                            $rcGuestKnown = $rcGuestName !== '' && $rcGuestName !== 'Guest';
+                            $rcGuestEmail = trim((string)($waContext['guest_email'] ?? ''));
+                            $rcGuestPhone = trim((string)($waContext['guest_phone'] ?? ''));
                             ?>
                             <tr data-receipts-row data-page-index="<?php echo (int)floor($index / max(1, $limit)) + 1; ?>">
-                                <td>
+                                <td class="rc-ref">
                                     <strong class="tbl-ref"><?php echo htmlspecialchars((string)($payment['receipt_number'] ?: '—')); ?></strong>
                                     <?php if (empty($payment['receipt_number'])): ?>
                                         <span class="badge badge-warning" style="margin-top:3px;display:inline-block;">Missing</span>
                                     <?php endif; ?>
+                                    <div class="rc-ref__payment">
+                                        <small class="text-muted rc-ref__payref"><?php echo htmlspecialchars((string)$payment['payment_reference']); ?></small>
+                                        <small class="text-muted rc-ref__by"><?php echo htmlspecialchars((string)($payment['recorded_by_name'] ?? 'System')); ?></small>
+                                    </div>
                                 </td>
-                                <td>
-                                    <div><?php echo htmlspecialchars((string)$payment['payment_reference']); ?></div>
-                                    <small class="text-muted"><?php echo htmlspecialchars((string)($payment['recorded_by_name'] ?? 'System')); ?></small>
+                                <td class="rc-guest">
+                                    <?php if ($rcGuestKnown): ?>
+                                        <span class="rc-guest__name"><?php echo htmlspecialchars($rcGuestName, ENT_QUOTES, 'UTF-8'); ?></span>
+                                    <?php else: ?>
+                                        <span class="rc-guest__name text-muted"><?php echo (string)($payment['booking_type'] ?? '') === 'restaurant' ? 'Walk-in' : '—'; ?></span>
+                                    <?php endif; ?>
+                                    <?php if ($rcGuestEmail !== ''): ?>
+                                        <small class="text-muted rc-guest__email" title="<?php echo htmlspecialchars($rcGuestEmail, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($rcGuestEmail, ENT_QUOTES, 'UTF-8'); ?></small>
+                                    <?php endif; ?>
+                                    <?php if ($rcGuestPhone !== ''): ?>
+                                        <small class="text-muted rc-guest__phone"><?php echo htmlspecialchars($rcGuestPhone, ENT_QUOTES, 'UTF-8'); ?></small>
+                                    <?php endif; ?>
                                 </td>
-                                <td>
+                                <td class="rc-source">
                                     <span class="badge badge-info"><?php echo htmlspecialchars(ucfirst((string)$payment['booking_type'])); ?></span>
                                     <small class="text-muted" style="display:block;margin-top:2px;"><?php echo htmlspecialchars((string)$payment['booking_reference']); ?></small>
                                 </td>
-                                <td><?php echo htmlspecialchars(date('d M Y', strtotime((string)$payment['payment_date']))); ?></td>
-                                <td class="text-right"><strong><?php echo receipts_money((float)$payment['total_amount'], $currency_symbol); ?></strong></td>
-                                <td>
+                                <td class="rc-date"><?php echo htmlspecialchars(date('d M Y', strtotime((string)$payment['payment_date']))); ?></td>
+                                <td class="rc-amount text-right"><strong><?php echo receipts_money((float)$payment['total_amount'], $currency_symbol); ?></strong></td>
+                                <td class="rc-status">
                                     <?php $isRefundRow = (string)($payment['payment_type'] ?? '') === 'refund'; ?>
                                     <span class="badge <?php echo !empty($payment['receipt_generated']) ? 'badge-success' : ($isRefundRow ? 'badge-info' : 'badge-warning'); ?>">
                                         <?php echo !empty($payment['receipt_generated']) ? 'PDF ready' : ($isRefundRow ? 'Refund' : 'Needs PDF'); ?>
@@ -409,7 +427,7 @@ $site_name = getSetting('site_name', 'Hotel');
                                         <small class="text-muted" style="display:block;margin-top:2px;">Emailed <?php echo htmlspecialchars(date('d M Y', strtotime((string)$payment['receipt_emailed_at']))); ?></small>
                                     <?php endif; ?>
                                 </td>
-                                <td class="actions-cell">
+                                <td class="rc-actions actions-cell">
                                     <form method="post" class="receipts-generate-form" style="display:inline;">
                                         <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES, 'UTF-8'); ?>">
                                         <input type="hidden" name="payment_id" value="<?php echo (int)$payment['id']; ?>">

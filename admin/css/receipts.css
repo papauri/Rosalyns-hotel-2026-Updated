@@ -12,10 +12,49 @@
     white-space: nowrap;
 }
 
+/* Amount: header and cell both right-aligned (beats `.table thead th { text-align:left }`),
+   digits line up, currency sits on the number's baseline. */
+.receipts-table th.text-right,
+.receipts-table td.text-right {
+    text-align: right;
+}
+
+.receipts-table td.rc-amount {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.receipts-table td.rc-amount .finance-money__currency {
+    font-size: 0.7em;
+    vertical-align: baseline;
+}
+
+/* Desktop table: slimmer side padding so 7 columns fit beside the sidebar (the wrapper clips sideways) */
+.receipts-table:not(.mobile-enhanced) thead th,
+.receipts-table:not(.mobile-enhanced) tbody td {
+    padding-left: 10px;
+    padding-right: 10px;
+}
+
+/* Guest: name, then email and phone as their own muted lines; a long email is cut with … (full address on hover).
+   contain:inline-size stops the email from widening the column; it fills whatever width the column gets. */
+.receipts-table td.rc-guest .rc-guest__name {
+    display: block;
+}
+
+.receipts-table td.rc-guest .rc-guest__email {
+    max-width: 15rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    contain: inline-size;
+}
+
 /* ── Card mode (tablet/phone): each receipt is one compact list row, no field labels ──
-   Cells (receipts.php order): 1 Receipt #, 2 Payment, 3 Source, 4 Date, 5 Amount,
-   6 Status, 7 Actions. Lines: [Receipt # ... Amount] / [Source badge + booking ref · Date] /
-   [Payment ref · recorded by] / [Status (+ Emailed) ... action icons]. */
+   Cells carry a class each (receipts.php): rc-ref (receipt # + payment ref + recorded by), rc-guest,
+   rc-source, rc-date, rc-amount, rc-status, rc-actions; selectors use the classes, never column position.
+   Lines: [Receipt # ... Amount, payment ref · recorded by underneath] / [Guest name · email · phone] /
+   [Source badge + booking ref · Date] / [Status (+ Emailed) ... action icons]. */
 :is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr:not(.mobile-enhanced-empty-row) {
     display: flex;
     flex-wrap: wrap;
@@ -43,19 +82,32 @@
 }
 
 /* Line 1: Receipt # (bold) left, Amount right */
-:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td:nth-child(1) {
+:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td.rc-ref {
     order: 1;
     align-self: baseline;
     flex: 1 1 auto;
     font-size: 0.875rem !important;
 }
 
-:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td:nth-child(1) .badge {
+:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td.rc-ref .badge {
     margin: 0 0 0 0.35rem !important;
     vertical-align: middle;
 }
 
-:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td:nth-child(5) {
+/* Under the receipt number: payment ref · recorded by */
+:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td.rc-ref .rc-ref__payment {
+    display: block;
+    margin-top: 0.1rem;
+    font-weight: 400;
+    font-size: 0.8rem;
+}
+
+:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td.rc-ref .rc-ref__by::before {
+    content: "\00B7";
+    margin: 0 0.4rem;
+}
+
+:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td.rc-amount {
     order: 2;
     align-self: baseline;
     flex: 0 0 auto;
@@ -65,9 +117,40 @@
     font-size: 0.875rem !important;
 }
 
-/* Line 2: source badge + booking ref · date */
-:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td:nth-child(3) {
+/* Line 2: guest name · email · phone (own full-width line) */
+:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td.rc-guest {
     order: 4;
+    flex: 1 1 100%;
+    max-width: none;
+    min-width: 0;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0 0.4rem;
+    overflow-wrap: anywhere;
+}
+
+:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td.rc-guest .rc-guest__name {
+    display: inline;
+    font-weight: 600;
+}
+
+:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td.rc-guest small::before {
+    content: "\00B7";
+    margin-right: 0.4rem;
+}
+
+:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td.rc-guest .rc-guest__email {
+    max-width: none;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    contain: none;
+}
+
+/* Line 3: source badge + booking ref · date */
+:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td.rc-source {
+    order: 5;
     align-self: baseline;
     flex: 0 1 auto;
     display: flex;
@@ -76,14 +159,14 @@
     gap: 0.2rem 0.4rem;
 }
 
-:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td:nth-child(4) {
-    order: 5;
+:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td.rc-date {
+    order: 6;
     align-self: baseline;
     flex: 1 1 auto;
     color: var(--au-muted, #5f6b7a);
 }
 
-:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td:nth-child(4)::before {
+:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td.rc-date::before {
     content: "\00B7";
     display: inline;
     margin: 0 0.4rem 0 0;
@@ -91,25 +174,9 @@
     color: inherit;
 }
 
-/* Line 3: payment ref · recorded by */
-:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td:nth-child(2) {
-    order: 6;
-    flex: 1 1 100%;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 0 0.4rem;
-    color: var(--au-muted, #5f6b7a);
-}
-
-:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td:nth-child(2) small::before {
-    content: "\00B7";
-    margin-right: 0.4rem;
-}
-
 /* Line 4: status (+ Emailed date) left, action icons right */
-:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td:nth-child(6) {
-    order: 7;
+:is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td.rc-status {
+    order: 8;
     flex: 1 1 0%;
     display: flex;
     flex-wrap: wrap;
@@ -125,7 +192,7 @@
 }
 
 :is(.admin-content, #rh-admin-page) table.receipts-table.mobile-enhanced tbody tr > td.actions-cell {
-    order: 8;
+    order: 9;
     flex: 0 0 auto;
     margin-left: auto;
     display: flex;
