@@ -12,6 +12,9 @@ The owner starts EVERY session with the same prompt: **"Run the next step of .cl
    emails there; Liwonde only), DEPARTMENTS.md ship gate, one builder + one review, stop every `php -S`.
 5. If an owner decision is genuinely needed, ask it, park the row as `BLOCKED: <question>` and stop. Do not start the
    next step.
+   Steps 1-5 also add their entry to `.claude/GUIDES_AI_SYNC.md` in the ship commit (DEPARTMENTS.md rule 5,
+   owner 2026-11-14: guides + Assistant always last). Model policy: Opus builds; Fable 5.2 only in the three cases in
+   DEPARTMENTS.md (step 4 qualifies for ONE Fable call).
 6. When the step has shipped to BOTH hotels: set the row to `SHIPPED <date> <Rosalyn's hash> / <Liwonde hash>`, update
    TASKS.md, commit + push, and END the session with exactly this message to the owner:
 
@@ -25,7 +28,7 @@ The owner starts EVERY session with the same prompt: **"Run the next step of .cl
 
 | # | Status | Step | Read | Builder -> gate |
 |---|---|---|---|---|
-| 0 | TODO | Wait: Hotel Settings change log + settings page order/search shipped (other session) | TASKS.md "DOING 2026-11-14 ... logs lead" | check only |
+| 0 | SHIPPED 2026-11-14 7a4cadc + dee8489 + 976db55 (other session; its LATER items stay in TASKS.md) | Wait: Hotel Settings change log + settings page order/search shipped (other session) | TASKS.md "DOING 2026-11-14 ... logs lead" | check only |
 | 1 | TODO | B1 Guest booking lookup correctness (+ "Booking Received" heading) | GUEST_BOOKING_ALIGNMENT_PLAN.md F1, F5, F8, F11, §3 B1 | dept-guest-site-lead -> dept-accounting-lead + qa-auditor |
 | 2 | TODO | B3 History price snapshot on online bookings | GUEST_BOOKING_ALIGNMENT_PLAN.md F4, §3 B3 | dept-rooms-lead -> qa-auditor opus |
 | 3 | TODO | F7 Live quote for 2+ joined room pairs | GUEST_BOOKING_ALIGNMENT_PLAN.md F7 | dept-rooms-lead -> qa-auditor opus |
@@ -72,7 +75,8 @@ Every owner question is answered (Q1 online cancel with an "I accept" tick: yes;
 pending: no fee; tiers charge at FEWER THAN X days; waive permission admin + manager by default, grantable). It
 includes F2 (guest cancels the whole party: only rows under the proven email; company-billed parties see "contact the
 hotel") and §4's corrected stamp placements. ONE Opus builder; money gate: dept-accounting-lead; then one qa-auditor
-(opus). Ship with the switch OFF. Migration 085 runs at LIWONDE only; ask the owner before running it at Rosalyn's,
+(opus). Model policy case (a): ONE Fable 5.2 spec check of CANCELLATION_POLICY_SPEC.md (effort high, exact files,
+one verdict) BEFORE the builder starts. Ship with the switch OFF. Migration 085 runs at LIWONDE only; ask the owner before running it at Rosalyn's,
 with the exact command. Ship to both hotels.
 
 **Step 5 - F10 guest emails.** Read GUEST_BOOKING_ALIGNMENT_PLAN.md §2 F10. Add "booked rate x N nights", the rate plan
@@ -81,8 +85,9 @@ same mechanism step 4 added for `{{cancellation_policy_text}}`. Stored DB templa
 Builder: dept-guest-site-lead (Opus); money gate: dept-accounting-lead. No test emails at Rosalyn's; Liwonde test mode
 only. Ship to both hotels.
 
-**Step 6 - Staff guides + help search.** Read the SYNC QUEUE and "TODO SEPARATE SESSION" lines in TASKS.md, then
-`git log` since the last guides commit, to list what changed for staff. Expected: group documents (per-room invoice,
+**Step 6 - Staff guides + help search.** (Owner pre-approved this run as part of the queue, 2026-11-14.) Read
+`.claude/GUIDES_AI_SYNC.md` (every pending entry, incl. those carried over from the old SYNC QUEUE) to list what changed
+for staff. Expected: group documents (per-room invoice,
 receipt per room, group charge), kept cancellation fees, Hotel Settings change log + settings page order/search, guest
 lookup fixes, History price note on online bookings, cancellation & no-show policies (settings, tiers "fewer than X
 days", locked at booking, fee shown before cancel, lower/waive permission, guest whole-booking cancel online), guest
@@ -90,10 +95,12 @@ email additions. Agent: guides-kb-lead (haiku). Update ONLY the matching pages i
 faq) in plain staff language, with a worked cancellation-fee example (MWK 100,000 x 3 nights). Verify the KB search
 (includes/guide-knowledge-base.php) answers: "how do I cancel with a fee", "can I waive a cancellation fee", "where do
 I set the cancellation policy", "who changed this setting". Rosalyn's has no gym: keep gym pages hidden there. No
-AI-looking wording. Docs only, no DB. One haiku review. Ship to both hotels and clear the guides part of the SYNC QUEUE.
+AI-looking wording. Docs only, no DB. One haiku review. Ship to both hotels and mark the guides part of each entry
+done in GUIDES_AI_SYNC.md.
 
-**Step 7 - AI Assistant sync.** Only dept-ai-lead (Opus) builds or tests the Assistant. Read the SYNC QUEUE line in
-TASKS.md, CANCELLATION_POLICY_SPEC.md §1, §3 and §5, and `git log` since the last Assistant sync. Grep includes/ai/
+**Step 7 - AI Assistant sync.** (Owner pre-approved as part of the queue.) Only dept-ai-lead (Opus) builds or tests
+the Assistant. Read `.claude/GUIDES_AI_SYNC.md` (Assistant part of every pending entry) and CANCELLATION_POLICY_SPEC.md
+§1, §3 and §5. Grep includes/ai/
 (ai-tools.php, ai-money.php and the read tools) for every place that shows money owed, refunds, cancellations, no-shows,
 group totals, booking History or settings. Update only where a shipped change makes an answer wrong or incomplete.
 It must answer correctly:
@@ -111,4 +118,4 @@ Rails stay:
 - the Assistant may quote a fee but never cancels, lowers or waives one without the staff member's confirm
 
 Add eval cases for each new answer. Run only the Assistant suites, at LIWONDE (cheapest top-3 models, minimal live
-tests). One opus review. Ship to both hotels and clear the SYNC QUEUE line.
+tests). One opus review. Ship to both hotels and mark the Assistant part of each entry done in GUIDES_AI_SYNC.md.
