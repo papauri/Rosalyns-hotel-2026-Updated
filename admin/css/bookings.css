@@ -1813,7 +1813,8 @@ hr.menu-divider {
     width: 100%;
 }
 
-/* Settlement and other secondary modals must appear above .bookings-alert-modal (4000) */
+/* admin-components.css lifts .bookings-alert-modal to 10000 (above the Assistant and help buttons);
+   every action inside it closes it before opening the next dialog. */
 #checkoutSettlementModal {
     z-index: 4100;
 }
@@ -2090,6 +2091,21 @@ hr.menu-divider {
     font-size: clamp(0.7rem, 0.68rem + 0.08vw, 0.79rem);
 }
 
+/* In the real table the Actions cell stays a table cell (a flex cell shrank its buttons to
+   slivers); the buttons stack as full-width blocks instead. */
+.bookings-alert-modal__table td.bookings-alert-modal__actions {
+    display: table-cell;
+}
+
+.bookings-alert-modal__table td.bookings-alert-modal__actions .bookings-alert-modal__action-btn {
+    display: flex;
+    white-space: nowrap;
+}
+
+.bookings-alert-modal__table td.bookings-alert-modal__actions .bookings-alert-modal__action-btn + .bookings-alert-modal__action-btn {
+    margin-top: 0.35rem;
+}
+
 .bookings-alert-modal__action-btn--admin-date {
     background: color-mix(in srgb, var(--color-primary, #766550) 80%, var(--color-lux-gold, #8F6A35));
     color: var(--color-white, #fff);
@@ -2237,6 +2253,45 @@ hr.menu-divider {
     .bookings-alert-modal__table {
         min-width: 0;
         table-layout: auto;
+    }
+
+    /* Phone cards: label above its value, so a cell with two lines (room + room number,
+       guest + phone) reads top to bottom instead of being split across the row. */
+    .modal-body .bookings-alert-modal__table tbody td {
+        display: block;
+        white-space: normal;
+    }
+
+    /* Fields read left-aligned (outranks the desktop centred Actions column); the
+       "nothing here" row keeps its centred text. */
+    .modal-body .bookings-alert-modal__table tbody td:not([colspan]) {
+        text-align: left;
+    }
+
+    .modal-body .bookings-alert-modal__table tbody td::before {
+        display: block;
+        min-width: 0;
+        margin-bottom: 0.2rem;
+    }
+
+    .modal-body .bookings-alert-modal__table tbody td.bookings-alert-modal__actions {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 0.4rem;
+    }
+
+    .modal-body .bookings-alert-modal__table tbody td.bookings-alert-modal__actions::before {
+        margin-bottom: 0;
+    }
+
+    .modal-body .bookings-alert-modal__table tbody td.bookings-alert-modal__actions .bookings-alert-modal__action-btn {
+        margin: 0;
+    }
+
+    /* The last card keeps its field dividers (the desktop rule drops the last row's borders). */
+    .modal-body .bookings-alert-modal__table tbody tr:last-child td:not(:last-child) {
+        border-bottom: 1px solid var(--admin-surface-border, #eaecef);
     }
 
     .bookings-checkin-modal__identity-grid {

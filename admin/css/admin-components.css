@@ -486,6 +486,16 @@ tr.rh-flash-group > td {
         padding: 0.58rem 0.72rem;
     }
 
+    /* One field per line: a page's desktop column widths (e.g. td:nth-child(2) { width: 22% })
+       must not squeeze the field to a sliver here. */
+    .modal__body table tbody td,
+    .modal-body table tbody td,
+    .admin-modal__body table tbody td {
+        width: auto !important;
+        max-width: none !important;
+        min-width: 0 !important;
+    }
+
     .modal__body table tbody td:last-child,
     .modal-body table tbody td:last-child,
     .admin-modal__body table tbody td:last-child {
@@ -3068,7 +3078,7 @@ body:not(:has(> .admin-header)) .admin-page-loader {
 }
 
 /* Backdrops of every modal system sit above the sidebar (z 1000-1200) and header */
-:is(.mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg, .dashboard-insight-modal) {
+:is(.mm-modal, .admin-modal-overlay, .rt-modal-overlay, .rp-modal-overlay, .sup-modal-bg, .dashboard-insight-modal, .bookings-alert-modal) {
     z-index: 10000 !important;
 }
 
