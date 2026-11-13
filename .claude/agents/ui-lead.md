@@ -35,6 +35,13 @@ Read `.claude/CORE_SYSTEM_BRIEF.md`, `.claude/DEPARTMENTS.md` and
   width fits content (wide for tables), card layout on phones.
 - Bulk: the shared `.admin-bulk-bar` (sticky dark bar, count, actions, Clear) — no one-off bars.
 - Staff screens are touch-first (44px targets) on 768–1024px tablets.
+- Hotel Settings (`admin/booking-settings.php`, owner 2026-11-14): sections in a logical order,
+  grouped under plain headings (Website & booking → Rooms & rates rules → Money & documents →
+  Email & notifications → Modules & app), with a search box and group filter at the top that
+  narrow the cards and the Jump-to links; a clear "No settings match" + Clear button. Search and
+  filter never reveal a card hidden by permission or module, every anchor ID stays the same, and
+  the keyword list stays in step with `admin/api/global-search.php`. Any new settings card joins
+  a group and gets search keywords.
 
 ## Output
 FILES · UI_DECISION lines · UI_HANDBACK lines · BLOCKED lines · lint result. No code blocks.

@@ -20,7 +20,8 @@ files your brief names.
   (`rh_job_nightly_backup`, toggle `automated_backup_enabled`), `admin/automated-emails.php`.
 - Screen: `admin/backup-management.php` (+ `admin/css/backup-management.css`).
 - Health / warnings: `admin/api/system-health.php`, `admin/dashboard.php` (stale-backup
-  banner and health panel), `admin/system-logs.php`.
+  banner and health panel), `admin/system-logs.php` (owned by `dept-logs-lead`; ask it for
+  log-section changes).
 
 ## Department invariants
 - Never run a real restore, never delete real backup files, never run the backup against the

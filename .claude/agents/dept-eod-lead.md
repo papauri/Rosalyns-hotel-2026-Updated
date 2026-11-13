@@ -43,6 +43,8 @@ Then only the files your brief names.
 - `dept-rooms-lead` — owns arrivals/departures/occupancy/in-house definitions; EOD must use the
   same rule as the dashboard and bookings list.
 - `dept-events-gym-lead` — conference/event/gym revenue dating.
+- `dept-logs-lead` — owns System Logs; changes to EOD recipients/CC in Hotel Settings show in its
+  settings change log (owner 2026-11-14), so "who changed who gets the report" is answered there.
 - `dept-ai-lead` — the Assistant reads EOD figures (`includes/ai/ai-insights.php`,
   `ai-tools.php`). You never edit AI files; overlaps go to the daily SYNC QUEUE.
 - `guides-kb-lead` — guide 19 (Automated Emails), the EOD guide page, `docs/guides/owner-handover.php`;

@@ -370,6 +370,9 @@ if (!function_exists('rh_auto_defaults')) {
      */
     function rh_scheduler_execute(bool $force = false, array $opts = [], bool $detach = false): array
     {
+        if (function_exists('rh_settings_log_end')) {
+            rh_settings_log_end(); // timed jobs never write Hotel Settings change rows (includes/settings-change-log.php)
+        }
         $pdo = $GLOBALS['pdo'] ?? null;
         if (!($pdo instanceof PDO)) {
             return ['status' => 'skipped', 'reason' => 'no_db'];

@@ -9,7 +9,9 @@
  * the sources are merged in PHP (no SQL UNION of text columns, so no collation clashes).
  *
  * Never shown: old/new values, passwords, tokens, card data, request bodies, context_json. Sentences are built from
- * names, references, amounts and field NAMES only.
+ * names, references, amounts and field NAMES only. The one exception: 'setting_change' rows (Hotel Settings, owner
+ * 2026-11-14) read "Changed Tourism levy % from 1 to 1.5"; their values were cleaned and secrets masked when written
+ * (includes/settings-change-log.php).
  *
  * The hook that writes the 'page_action' rows is admin/includes/activity-hook.php.
  */
@@ -24,6 +26,8 @@ if (!defined('RH_SA_PER_PAGE')) {
 
 // The timeline and the day cards page with the shared System Logs pager (keys 'sa' and 'sad'). Loading it connects to nothing.
 require_once __DIR__ . '/log-pager.php';
+// Hotel Settings change rows ('setting_change'): their sentence. Loading it connects to nothing and logs nothing.
+require_once __DIR__ . '/../../includes/settings-change-log.php';
 
 if (!function_exists('rh_sa_parse_filters')) {
 
@@ -38,6 +42,7 @@ if (!function_exists('rh_sa_parse_filters')) {
             'kitchen' => 'Kitchen/bar screens',
             'stock' => 'Stock',
             'settings' => 'Settings & users',
+            'setting_changes' => 'Hotel Settings changes',
             'other' => 'Other',
         ];
     }
@@ -59,10 +64,14 @@ if (!function_exists('rh_sa_parse_filters')) {
         ];
     }
 
-    /** Named admin_activity_log action prefixes per type (first match wins; the SQL type filter uses the same table). */
+    /**
+     * Named admin_activity_log action prefixes per type (first match wins; the SQL type filter uses the same table).
+     * Every entry keeps the shape '^(a|b)': the "Other" filter strips '^(' and ')' to build one exclusion list.
+     */
     function rh_sa_action_prefixes(): array
     {
         return [
+            'setting_changes' => '^(setting_change)',
             'signins' => '^(login|logout)',
             'payments' => '^(refund|payment|receipt|invoice|credit_note)',
             'till' => '^(pos|shift|till)',
@@ -898,6 +907,11 @@ if (!function_exists('rh_sa_parse_filters')) {
                     if ($page !== '' && !empty($pages[$page]['nav'])) {
                         $row['link'] = ['page' => $page, 'query' => ''];
                     }
+                } elseif ($action === 'setting_change') {
+                    // One row per setting that really changed on Hotel Settings; values cleaned and secrets masked when written.
+                    $row['type'] = 'setting_changes';
+                    $row['what'] = rh_settings_log_sentence((string)($r['details'] ?? ''));
+                    $row['where'] = 'Hotel Settings';
                 } else {
                     $row['type'] = rh_sa_action_type($action);
                     $row['what'] = rh_sa_named_action_text($action, (string)($r['details'] ?? ''));
@@ -1016,6 +1030,8 @@ if (!function_exists('rh_sa_parse_filters')) {
                     }
                 } elseif ($act === 'page_action') {
                     $people[$k]['counts']['saves'] += (int)$r['n'];
+                } elseif ($act === 'setting_change') {
+                    // Not counted: the same save is already one "Screen saves" (its page_action row on Hotel Settings).
                 } else {
                     $type = rh_sa_action_type($act);
                     if (in_array($type, ['settings', 'stock', 'till'], true) && $act !== 'refund_created') {

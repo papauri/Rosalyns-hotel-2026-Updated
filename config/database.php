@@ -1666,8 +1666,15 @@ function updateEmailSetting(string $key, mixed $value, ?string $description = nu
                 description = VALUES(description),
                 updated_at = CURRENT_TIMESTAMP";
 
+        // Hotel Settings change log (includes/settings-change-log.php): old value read only while that page's context is on.
+        $rhLogOld = function_exists('rh_settings_log_old') ? rh_settings_log_old($pdo, 'email_settings', $key) : null;
+
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$key, $final_value, $final_is_encrypted, $description]);
+
+        if ($rhLogOld !== null) {
+            rh_settings_log_record('email_settings', $key, $rhLogOld['value'], is_scalar($value) ? (string)$value : '', $rhLogOld['encrypted'] || $final_is_encrypted === 1);
+        }
 
         // Clear cache for this setting
         global $_SITE_SETTINGS;
@@ -1700,8 +1707,15 @@ function updateSetting(string $key, mixed $value)
                 setting_value = VALUES(setting_value),
                 updated_at = CURRENT_TIMESTAMP";
 
+        // Hotel Settings change log (includes/settings-change-log.php): old value read only while that page's context is on.
+        $rhLogOld = function_exists('rh_settings_log_old') ? rh_settings_log_old($pdo, 'site_settings', $key) : null;
+
         $stmt = $pdo->prepare($sql);
         $stmt->execute([$key, $value]);
+
+        if ($rhLogOld !== null) {
+            rh_settings_log_record('site_settings', $key, $rhLogOld['value'], is_scalar($value) ? (string)$value : '');
+        }
 
         // Clear cache for this setting
         global $_SITE_SETTINGS;

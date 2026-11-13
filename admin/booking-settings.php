@@ -4,6 +4,8 @@ require_once 'admin-init.php';
 /** @var string $csrf_token */
 require_once __DIR__ . '/../includes/booking-functions.php';
 require_once __DIR__ . '/../config/email.php';
+// Hotel Settings change log (owner 2026-11-14): switched on only around the save handlers below, off before anything else.
+require_once __DIR__ . '/../includes/settings-change-log.php';
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -160,7 +162,12 @@ $booking_template_short_names = [
 if (isset($_GET['enable'])) {
     // A state change must never fire from a bare link (cross-site image/link): require the CSRF token.
     if (validateCsrfToken((string)($_GET['csrf_token'] ?? '')) && $canSiteSwitches) { // owner 2026-11-11: site_switches
-        updateSetting('booking_system_enabled', '1');
+        rh_settings_log_begin($user);
+        try {
+            updateSetting('booking_system_enabled', '1');
+        } finally {
+            rh_settings_log_end();
+        }
     }
     header('Location: booking-settings.php');
     exit;
@@ -178,6 +185,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['_ajax_preview'])) {
         $error = 'Security token invalid. Refresh the page.';
         $_SERVER['REQUEST_METHOD'] = '__BLOCKED__'; // prevent all subsequent POST handlers
     }
+}
+
+// Settings change log, first span: the save handlers from here to "Get booking system settings" (no exits in between).
+// Ended explicitly below; the scheduler also ends it first thing (includes/auto-scheduler.php).
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    rh_settings_log_begin($user);
 }
 
 // Handle one-switch booking system toggle
@@ -461,6 +474,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_disabled_acti
         $message = "Disabled mode settings updated successfully!";
     }
 }
+rh_settings_log_end(); // end of the first span: the previews and test sends below never log settings
 
 // Get booking system settings
 $booking_enabled = isBookingEnabled();
@@ -922,6 +936,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['email_settings_test']
 
 // Handle setting updates
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    rh_settings_log_begin($user); // settings change log, second span: this block only (ended in finally)
     try {
         // Check which form was submitted
         if (isset($_POST['max_advance_booking_days'])) {
@@ -1292,8 +1307,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (mb_strlen($receiptWhatsapp) > 2000) {
                 throw new Exception('The receipt WhatsApp message is too long (max 2000 characters).');
             }
+            $rhWaOld = rh_settings_log_old($pdo, 'site_settings', 'receipt_whatsapp_template'); // settings change log
             $stmtWa = $pdo->prepare("INSERT INTO site_settings (setting_key, setting_value, setting_group) VALUES (?, ?, 'finance') ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = NOW()");
             $stmtWa->execute(['receipt_whatsapp_template', $receiptWhatsapp]);
+            if ($rhWaOld !== null) {
+                rh_settings_log_record('site_settings', 'receipt_whatsapp_template', $rhWaOld['value'], $receiptWhatsapp);
+            }
             if (function_exists('deleteCache')) {
                 deleteCache('setting_receipt_whatsapp_template');
             }
@@ -1454,6 +1473,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     } catch (Exception $e) {
         $error = 'Error: ' . $e->getMessage();
+    } finally {
+        rh_settings_log_end();
     }
 }
 
