@@ -9610,6 +9610,17 @@ function rh_noshow_fee_tag(int $bookingId): string
 }
 
 /**
+ * A folio charge description as people see it: drops a trailing no-show / expiry tag ("[noshow-fee:<id>]") and nothing
+ * else. Display only: the stored description keeps the tag (it is the idempotency key rh_noshow_fee_tagged matches).
+ */
+function rh_charge_display_desc(?string $desc): string
+{
+    $desc = (string)$desc;
+    $out = preg_replace('/\s*\[noshow-fee:\d+\]\s*$/', '', $desc);
+    return $out === null ? $desc : $out;
+}
+
+/**
  * True when the booking carries its group no-show / expiry charge row (voided or not: a voided row = charged nothing).
  * Such a no-show / expired room bills from its folio charges only; its booked stay is no longer billed.
  */
@@ -9736,7 +9747,7 @@ function rh_group_noshow_fee_apply(PDO $pdo, int $bookingId, string $event, int 
                 logBookingEvent($bookingId, (string)($b['booking_reference'] ?? ''), $event === 'no-show' ? 'No-show charge posted' : 'Expiry charge posted', 'financial',
                     'Part of a group: the room is no longer billed its booked stay (' . number_format($was, 2) . '); charged '
                     . ($isZero ? 'nothing' : number_format($amount, 2) . ' (' . $what . ')') . ' under the hotel setting.',
-                    'room bill ' . number_format($was, 2), 'charge ' . number_format($amount, 2) . ' ' . trim(rh_noshow_fee_tag($bookingId), '[]'),
+                    'room bill ' . number_format($was, 2), 'charge ' . number_format($amount, 2),
                     $userId > 0 ? 'admin' : 'system', $userId > 0 ? $userId : null, $userId > 0 ? ($userName !== '' ? $userName : null) : 'System');
             }
             $out['posted'] = true;

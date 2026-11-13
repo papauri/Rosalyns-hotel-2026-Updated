@@ -1301,7 +1301,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         $fcShown = $vMode === 'exclusive' ? (float)$fc['line_subtotal'] : (float)$fc['line_total'];
         $fcQty   = max(1, (int)$fc['quantity']);
         return [
-            rh_pdf_e($fc['description']) . rh_inv_sub($typeLabel),
+            rh_pdf_e(rh_charge_display_desc($fc['description'] ?? '')) . rh_inv_sub($typeLabel),
             rh_pdf_e((string)(int)$fc['quantity']),
             rh_pdf_e($money($vMode === 'exclusive' ? $fcShown / $fcQty : (float)$fc['unit_price'])),
             rh_pdf_e($money($fcShown)),
@@ -1521,7 +1521,7 @@ function rh_guest_extras_invoice_html(array $booking, string $number): string
         $vat += (float)$fc['vat_amount'];
         $sub += $shown;
         $rows[] = [
-            rh_pdf_e($fc['description']) . rh_inv_sub(ucfirst((string)(($fc['charge_type'] ?? '') !== '' ? $fc['charge_type'] : 'Extra'))),
+            rh_pdf_e(rh_charge_display_desc($fc['description'] ?? '')) . rh_inv_sub(ucfirst((string)(($fc['charge_type'] ?? '') !== '' ? $fc['charge_type'] : 'Extra'))),
             rh_pdf_e((string)(int)$fc['quantity']),
             rh_pdf_e($money($vMode === 'exclusive' ? $shown / $qty : (float)$fc['unit_price'])),
             rh_pdf_e($money($shown)),
@@ -1721,7 +1721,7 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
             default => ucfirst((string)($fc['charge_type'] ?? 'Extra')),
         };
         return '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
-            <td width="50%" style="padding:4px 6px; font-size:11px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0; line-height:1.25;">' . htmlspecialchars($fc['description']) . ' <span style="font-size:9px; color:#B18247; font-style:italic;">' . $typeIcon . '</span></td>
+            <td width="50%" style="padding:4px 6px; font-size:11px; color:#231F1C; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0; line-height:1.25;">' . htmlspecialchars(rh_charge_display_desc($fc['description'] ?? '')) . ' <span style="font-size:9px; color:#B18247; font-style:italic;">' . $typeIcon . '</span></td>
             <td width="10%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . (int)$fc['quantity'] . '</td>
             <td width="15%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $currency_symbol . ' ' . number_format((float)$fc['unit_price'], 2) . '</td>
             <td width="25%" style="padding:6px 8px; font-size:12px; color:#231F1C; font-weight:600; text-align:right; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . $currency_symbol . ' ' . number_format((float)$fc['line_total'], 2) . '</td>

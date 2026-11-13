@@ -2172,7 +2172,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                                 <?php endif; ?>
                                             </td>
                                             <td>
-                                                <?php echo htmlspecialchars($charge['description']); ?>
+                                                <?php echo htmlspecialchars(rh_charge_display_desc($charge['description'] ?? '')); ?>
                                                 <?php if ($charge['voided'] && $charge['void_reason']): ?>
                                                     <br><small class="void-reason">Reason: <?php echo htmlspecialchars($charge['void_reason']); ?></small>
                                                 <?php endif; ?>
@@ -2183,7 +2183,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                             <td class="num strong"><?php echo $currency_symbol; ?><?php echo number_format($charge['line_total'], 2); ?></td>
                                             <td>
                                                 <?php if (!$charge['voided'] && $bPerms['can_void_charge']): ?>
-                                                    <button class="void-charge-btn" onclick="openVoidChargeModal(<?php echo $charge['id']; ?>, '<?php echo htmlspecialchars($charge['description'], ENT_QUOTES); ?>')">
+                                                    <button class="void-charge-btn" onclick="openVoidChargeModal(<?php echo $charge['id']; ?>, '<?php echo htmlspecialchars(rh_charge_display_desc($charge['description'] ?? ''), ENT_QUOTES); ?>')">
                                                         <i class="fas fa-ban"></i> Void
                                                     </button>
                                                 <?php elseif (!$charge['voided']): ?>

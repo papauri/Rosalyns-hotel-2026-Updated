@@ -71,6 +71,12 @@ $admin = (int)$pdo->query("SELECT id FROM admin_users WHERE is_active = 1 AND ro
 
 $dsn = 'mysql:host=' . getenv('DB_HOST') . ';port=' . (getenv('DB_PORT') ?: '3306') . ';dbname=' . getenv('DB_NAME') . ';charset=utf8mb4';
 $chk = new PDO($dsn, getenv('DB_USER'), getenv('DB_PASS'));
+// ---- display helper: the idempotency tag never reaches a person; only a trailing tag is dropped ----
+ok('display: trailing tag stripped', rh_charge_display_desc('No-show charge - first night [noshow-fee:123]') === 'No-show charge - first night');
+ok('display: tag in the middle left alone', rh_charge_display_desc('Fee [noshow-fee:5] extra') === 'Fee [noshow-fee:5] extra');
+ok('display: other bracket tags left alone', rh_charge_display_desc('Late fee [ref:5]') === 'Late fee [ref:5]' && rh_charge_display_desc('Minibar') === 'Minibar');
+ok('display: empty / null give empty', rh_charge_display_desc('') === '' && rh_charge_display_desc(null) === '');
+ok('display: the real tag shape is what is stripped', rh_charge_display_desc('X ' . rh_noshow_fee_tag(987654)) === 'X');
 $pdo->beginTransaction();
 try {
     // ---- Off (default): nothing posted, today's figures ----
@@ -112,6 +118,9 @@ try {
         $near($inv2['t']['total'], 3495) && $near($inv2['t']['total'], $fsP2['grand_total'] + $fs2['grand_total']) && stripos($inv2['h'], 'No-show room:') !== false
         && stripos($inv2['h'], 'No-show charge - first night') !== false && $near((float)$inv2['t']['subtotal'] + (vat_mode() === 'exclusive' ? (float)$inv2['t']['vat'] : 0.0) + (float)$inv2['t']['levy'], $inv2['t']['total']), json_encode($inv2['t']));
     ok('On first night: End of Day earned revenue counts the charge once (guest-bill extras +1,165)', $near($eodDelta, 1165), (string)$eodDelta);
+    ok('On first night: the invoice prints the charge without its internal tag; the stored row keeps it (still detected)',
+        strpos($inv2['h'], 'noshow-fee:') === false && rh_noshow_fee_tagged($pdo, $m2)
+        && substr((string)$rows2[0]['description'], -strlen(rh_noshow_fee_tag($m2))) === rh_noshow_fee_tag($m2), (string)($rows2[0]['description'] ?? ''));
     $again = rh_group_noshow_fee_apply($pdo, $m2, 'no-show', $admin);
     $setMode('full');
     $again2 = rh_group_noshow_fee_apply($pdo, $m2, 'no-show', $admin);
@@ -120,7 +129,7 @@ try {
     $tl->execute([$m2]);
     $tlRows = $tl->fetchAll(PDO::FETCH_ASSOC);
     ok('history: one "No-show charge posted" entry (old -> new) by the staff member', count($tlRows) === 1 && $tlRows[0]['performed_by_type'] === 'admin'
-        && strpos((string)$tlRows[0]['new_value'], 'noshow-fee:' . $m2) !== false, json_encode($tlRows));
+        && strpos((string)$tlRows[0]['new_value'], 'charge ') === 0 && strpos((string)$tlRows[0]['new_value'], 'noshow-fee') === false, json_encode($tlRows));
 
     // ---- single booking: never charged ----
     $setMode('first_night');

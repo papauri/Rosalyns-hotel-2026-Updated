@@ -2322,6 +2322,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ");
             $charges_stmt->execute([$booking_id]);
             $cf_charges = $charges_stmt->fetchAll(PDO::FETCH_ASSOC);
+            foreach ($cf_charges as &$cfc) { // shown to staff: no internal no-show tag
+                $cfc['description'] = rh_charge_display_desc($cfc['description'] ?? '');
+            }
+            unset($cfc);
 
             // Completed payments (excluding refunds)
             $pays_stmt = $pdo->prepare("
