@@ -2265,6 +2265,19 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
 
     $occupancyType = (string)($booking['occupancy_type'] ?? '');
     $occupancyLabel = $occupancyType !== '' ? rh_occupancy_tier_label($occupancyType, isset($room['max_guests']) ? (int)$room['max_guests'] : null) : '';
+    // Rate plan money vars of one booking row (also used below to fill them from the stored row of a single room).
+    $planMoneyVars = static function (array $b): array {
+        $n = max(1, (int)($b['number_of_nights'] ?? 1));
+        return [
+            'rate_plan_discount_formatted' => isset($b['rate_plan_discount']) && (float)$b['rate_plan_discount'] > 0
+                ? number_format((float)$b['rate_plan_discount'] * $n, 0) : '',
+            // A negative rate_plan_discount is a surcharge, already inside the room rate (shown for information only).
+            'rate_plan_surcharge_formatted' => isset($b['rate_plan_discount']) && (float)$b['rate_plan_discount'] < -BALANCE_TOLERANCE
+                ? number_format(-(float)$b['rate_plan_discount'] * $n, 0) : '',
+            'package_total_formatted' => isset($b['package_total']) && (float)$b['package_total'] > 0
+                ? number_format((float)$b['package_total'], 0) : '',
+        ];
+    };
 
     $vars = [
         'site_name' => $email_site_name,
@@ -2300,14 +2313,7 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
         'special_requests' => $booking['special_requests'] ?? '',
         'cancellation_reason' => $extra['cancellation_reason'] ?? '',
         'rate_plan_label' => $booking['rate_plan_label'] ?? '',
-        'rate_plan_discount_formatted' => isset($booking['rate_plan_discount']) && (float)$booking['rate_plan_discount'] > 0
-            ? number_format((float)$booking['rate_plan_discount'] * max(1, (int)($booking['number_of_nights'] ?? 1)), 0) : '',
-        // A negative rate_plan_discount is a surcharge, already inside the room rate (shown for information only).
-        'rate_plan_surcharge_formatted' => isset($booking['rate_plan_discount']) && (float)$booking['rate_plan_discount'] < -BALANCE_TOLERANCE
-            ? number_format(-(float)$booking['rate_plan_discount'] * max(1, (int)($booking['number_of_nights'] ?? 1)), 0) : '',
-        'package_total_formatted' => isset($booking['package_total']) && (float)$booking['package_total'] > 0
-            ? number_format((float)$booking['package_total'], 0) : '',
-    ];
+    ] + $planMoneyVars($booking);
 
     // ── Booking packages / extras ────────────────────────────────────────────
     $packagesHtml = '';
@@ -2379,6 +2385,51 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
     $vars['address']       = htmlspecialchars((string)getSetting('hotel_address', getSetting('address', '')), ENT_QUOTES, 'UTF-8');
     $vars['contact_phone'] = htmlspecialchars((string)getSetting('phone_main', ''), ENT_QUOTES, 'UTF-8');
 
+    // Booked rate x nights, rate plan and every room's reference ({{booked_rate_block}}, escaped HTML), read from the
+    // STORED rows of the booking's party: the same lines invoices and History print (includes/booked-rate.php), never
+    // today's price. The public callers pass party totals without the rate plan columns, so the plan label (and, for a
+    // single room, its money vars) is filled from the stored row when the caller did not pass it. '' without an id.
+    $vars['booked_rate_block'] = '';
+    if ($bookingId > 0 && isset($pdo) && $pdo instanceof PDO) {
+        try { // information only: a fault here must never stop the email
+            $brRows = rh_email_booked_rate_rows($pdo, $bookingId);
+            $brSelf = null;
+            foreach ($brRows as $brRow) {
+                if ((int)($brRow['id'] ?? 0) === $bookingId) {
+                    $brSelf = $brRow;
+                }
+            }
+            if ($brSelf !== null) {
+                if (!array_key_exists('rate_plan_label', $booking)) {
+                    // Every plan in the party (rooms of a mixed party can be on different plans), e.g. "Early Bird, Corporate".
+                    $vars['rate_plan_label'] = implode(', ', array_values(array_unique(array_filter(array_map(static function ($r): string {
+                        return trim((string)($r['rate_plan_label'] ?? ''));
+                    }, $brRows), 'strlen'))));
+                }
+                // One room only: a group's money vars would be one room's figure under the party's total.
+                if (count($brRows) === 1) {
+                    $brFill = $booking;
+                    foreach (['rate_plan_discount', 'package_total'] as $brKey) {
+                        if (!array_key_exists($brKey, $booking)) {
+                            $brFill[$brKey] = $brSelf[$brKey] ?? null;
+                        }
+                    }
+                    $vars = $planMoneyVars($brFill) + $vars;
+                }
+            }
+            $vars['booked_rate_block'] = rh_email_booked_rate_block(
+                $brRows,
+                $bookingId,
+                (float)rh_booking_owed($booking)['owed'],
+                (string)$currency,
+                is_array($booking['all_references'] ?? null) ? $booking['all_references'] : []
+            );
+        } catch (\Throwable $e) {
+            $vars['booked_rate_block'] = '';
+            error_log('buildBookingEmailVariables booked rate block: ' . $e->getMessage());
+        }
+    }
+
     // Guest-supplied text goes into HTML email bodies: escape it here once so a name or request
     // like "<a href=...>" can never inject markup/links into mail sent from the hotel's address.
     // (renderBookingEmailTemplate() decodes the entities again for the plain-text subject/body.)
@@ -2429,6 +2480,189 @@ function rh_email_cancel_policy_blocks(array $vars, bool $withFee = false): stri
 }
 
 /**
+ * The live rooms of a booking's party, as stored bookings rows (b.*, room_name = room type, room_label = the room
+ * number(s) assigned): rh_booking_group_ids() (not deleted, not cancelled / no-show / expired / checked out), the lead
+ * first, then id order. A booking outside a group, or one that is no longer live, gives just its own row.
+ * Read-only; a read error gives [].
+ */
+function rh_email_booked_rate_rows(PDO $pdo, int $bookingId): array
+{
+    if ($bookingId <= 0) {
+        return [];
+    }
+    $ids = function_exists('rh_booking_group_ids') ? rh_booking_group_ids($pdo, $bookingId) : [];
+    if (!$ids) {
+        $ids = [$bookingId];
+    }
+    try {
+        $in = implode(',', array_fill(0, count($ids), '?'));
+        $st = $pdo->prepare("SELECT b.*, r.name AS room_name FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id
+            WHERE b.id IN ($in) AND b.deleted_at IS NULL ORDER BY (b.primary_booking_id IS NULL) DESC, b.id ASC");
+        $st->execute(array_values($ids));
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    } catch (\Throwable $e) {
+        error_log('rh_email_booked_rate_rows: ' . $e->getMessage());
+        return [];
+    }
+    foreach ($rows as $i => $r) {
+        try {
+            $rows[$i]['room_label'] = function_exists('getBookingRoomLabel') ? trim(getBookingRoomLabel((int)$r['id'])) : '';
+        } catch (\Throwable $e) {
+            $rows[$i]['room_label'] = '';
+        }
+    }
+    return $rows;
+}
+
+/**
+ * Rate plan wording of one bookings row, as the invoice words it: "Early Bird - MWK 10,000.00 a night off, already in
+ * your rate" / "Festive Season - MWK 5,000.00 a night added, already in your rate" / "Early Bird". '' without a plan.
+ * Plain text (not escaped).
+ */
+function rh_email_rate_plan_text(array $row, string $currency): string
+{
+    $label = trim((string)($row['rate_plan_label'] ?? ''));
+    if ($label === '') {
+        return '';
+    }
+    $d = round((float)($row['rate_plan_discount'] ?? 0), 2);
+    if ($d > BALANCE_TOLERANCE) {
+        return $label . ' - ' . rh_booked_rate_money($d, $currency) . ' a night off, already in your rate';
+    }
+    if ($d < -BALANCE_TOLERANCE) {
+        return $label . ' - ' . rh_booked_rate_money(-$d, $currency) . ' a night added, already in your rate';
+    }
+    return $label;
+}
+
+/**
+ * PURE. The "Your rate" / "Your rooms" block of a guest booking email (escaped HTML, '' when there is nothing to say).
+ * $rows: rh_email_booked_rate_rows() (the party's live stored rows); $selfId: the booking the email is about; $owed: the
+ * total the email prints (rh_booking_owed); $fallbackRefs: the caller's all_references, used for the room list only
+ * when the rows could not be read.
+ *  - Your rate: rh_booked_rate_line() guest_text of every room (rh_booked_rate_group_lines: "Room: ..." / "Room 1: ..."),
+ *    only when those rooms add up to $owed (BALANCE_TOLERANCE per room); else this room's own line when it alone is
+ *    $owed; else no rate line (never a figure that disagrees with the total). Then the rate plan line(s).
+ *  - Your rooms: each live room's reference with its room type (and number) when the party has more than one room.
+ */
+function rh_email_booked_rate_block(array $rows, int $selfId, float $owed, string $currency, array $fallbackRefs = []): string
+{
+    if (!function_exists('rh_booked_rate_line')) {
+        require_once __DIR__ . '/../includes/booked-rate.php';
+    }
+    $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+    $esc = static function (string $s): string {
+        return htmlspecialchars($s, ENT_QUOTES, 'UTF-8');
+    };
+    $p = static function (string $text) use ($esc): string {
+        return '<p style="margin:0 0 6px;color:#5C4A32;text-align:left;">' . $esc($text) . "</p>\n";
+    };
+    $rows = array_values(array_filter($rows, 'is_array'));
+
+    // Your rate
+    $printed = [];
+    $rateLines = [];
+    if ($rows && $owed > $tol) {
+        $lines = [];
+        $sum = 0.0;
+        $allOk = true;
+        $self = null;
+        foreach ($rows as $i => $r) {
+            $br = rh_booked_rate_line($r, null, ['currency' => $currency, 'room_name' => (string)($r['room_name'] ?? '')]);
+            $lines[$i] = $br;
+            $allOk = $allOk && !empty($br['ok']);
+            $sum += (float)$br['total'];
+            if ((int)($r['id'] ?? 0) === $selfId) {
+                $self = $i;
+            }
+        }
+        if ($allOk && abs($sum - $owed) <= $tol * count($rows)) {
+            $printed = array_keys($rows);
+        } elseif ($self !== null && !empty($lines[$self]['ok']) && abs((float)$lines[$self]['total'] - $owed) <= $tol) {
+            $printed = [$self];
+        }
+        $rateLines = rh_booked_rate_group_lines(array_map(static function ($i) use ($lines) {
+            return $lines[$i]['guest_text'];
+        }, $printed));
+    }
+    // Rate plan: the printed rooms, else this booking's own row.
+    $planRows = $printed;
+    if (!$planRows) {
+        foreach ($rows as $i => $r) {
+            if ((int)($r['id'] ?? 0) === $selfId) {
+                $planRows = [$i];
+            }
+        }
+    }
+    $planTexts = [];
+    foreach ($planRows as $i) {
+        $planTexts[$i] = rh_email_rate_plan_text($rows[$i], $currency);
+    }
+    $planLines = [];
+    $distinct = array_values(array_unique($planTexts));
+    if (count($distinct) === 1 && $distinct[0] !== '') {
+        $planLines[] = (count($planTexts) > 1 ? 'Rate plan for every room: ' : 'Rate plan: ') . $distinct[0];
+    } elseif (count($distinct) > 1) {
+        $pos = 0;
+        foreach ($planTexts as $i => $t) {
+            $pos++;
+            if ($t !== '') {
+                $planLines[] = 'Rate plan, ' . (count($planTexts) <= 4 ? 'room ' . $pos : trim((string)($rows[$i]['room_name'] ?? 'room'))) . ': ' . $t;
+            }
+        }
+    }
+
+    $html = '';
+    if ($rateLines || $planLines) {
+        $html .= '<div style="background:#FDF6EC;padding:15px;border-left:4px solid #8B7355;border-radius:5px;margin:20px 0;">' . "\n"
+            . '<h3 style="color:#5C4A32;margin-top:0;text-align:left;">Your rate</h3>' . "\n";
+        foreach (array_merge($rateLines, $planLines) as $line) {
+            $html .= $p($line);
+        }
+        $html .= "</div>\n";
+    }
+
+    // Your rooms (a party of more than one room)
+    $refs = [];
+    if (count($rows) > 1) {
+        foreach ($rows as $r) {
+            $type = trim((string)($r['room_name'] ?? ''));
+            $no = trim((string)($r['room_label'] ?? ''));
+            $room = $no !== '' && stripos($type, $no) === false ? trim($type . ' - ' . $no, ' -') : $type;
+            $refs[] = trim(trim((string)($r['booking_reference'] ?? '')) . ($room !== '' ? ' - ' . $room : ''), ' -');
+        }
+    } elseif (!$rows) {
+        $refs = array_map(static function ($r): string {
+            return trim((string)$r);
+        }, $fallbackRefs);
+    }
+    $refs = array_values(array_filter($refs, static function (string $r): bool {
+        return $r !== '';
+    }));
+    if (count($refs) > 1) {
+        $html .= '<div style="background:#FDF6EC;padding:15px;border-left:4px solid #8B7355;border-radius:5px;margin:20px 0;">' . "\n"
+            . '<h3 style="color:#5C4A32;margin-top:0;text-align:left;">Your rooms</h3>' . "\n"
+            . $p('Each room has its own booking reference:');
+        foreach ($refs as $r) {
+            $html .= $p($r);
+        }
+        $html .= "</div>\n";
+    }
+    return $html;
+}
+
+/** Plain-text version of an email block (one line per paragraph / heading) for the text part of the email. */
+function rh_email_block_plain(string $html): string
+{
+    $text = (string)preg_replace('#<(br\s*/?|/p|/h[1-6]|/div|/li)>#i', "\n", $html);
+    $text = html_entity_decode(strip_tags($text), ENT_QUOTES | ENT_HTML5, 'UTF-8');
+    $lines = array_filter(array_map('trim', preg_split('/\R/', $text) ?: []), static function (string $l): bool {
+        return $l !== '';
+    });
+    return implode("\n", $lines);
+}
+
+/**
  * Render booking email template from DB
  */
 function renderBookingEmailTemplate(string $templateKey, array $vars)
@@ -2441,10 +2675,23 @@ function renderBookingEmailTemplate(string $templateKey, array $vars)
     if (empty($template['subject']) || empty($template['html_body']) || (int)($template['is_active'] ?? 1) !== 1) {
         return null;
     }
+    return rh_render_booking_email_template_row($templateKey, $template, $vars);
+}
 
+/**
+ * PURE. Fill one booking email template row (subject, html_body, text_body) with $vars and add the blocks a stored
+ * template does not place itself (booked rate, cancellation policy). renderBookingEmailTemplate() reads the row.
+ */
+function rh_render_booking_email_template_row(string $templateKey, array $template, array $vars): array
+{
     $replace = [];
     foreach ($vars as $k => $v) {
         $replace['{{' . $k . '}}'] = (string)$v;
+    }
+    // A block of HTML placed in the plain-text part goes in as plain lines.
+    $textReplace = $replace;
+    if (isset($replace['{{booked_rate_block}}'])) {
+        $textReplace['{{booked_rate_block}}'] = htmlspecialchars(rh_email_block_plain($replace['{{booked_rate_block}}']), ENT_QUOTES, 'UTF-8');
     }
 
     // Variables arrive HTML-escaped (safe for the HTML body); the subject and plain-text part
@@ -2452,8 +2699,19 @@ function renderBookingEmailTemplate(string $templateKey, array $vars)
     $out = [
         'subject' => html_entity_decode(strtr($template['subject'], $replace), ENT_QUOTES | ENT_HTML5, 'UTF-8'),
         'html_body' => strtr($template['html_body'], $replace),
-        'text_body' => !empty($template['text_body']) ? html_entity_decode(strtr($template['text_body'], $replace), ENT_QUOTES | ENT_HTML5, 'UTF-8') : ''
+        'text_body' => !empty($template['text_body']) ? html_entity_decode(strtr($template['text_body'], $textReplace), ENT_QUOTES | ENT_HTML5, 'UTF-8') : ''
     ];
+    // Booked rate x nights, rate plan and every room's reference (F10): stored templates are never edited (live data),
+    // so when one does not place {{booked_rate_block}} itself the block is added at the end, before the cancellation
+    // policy. Only the emails that confirm what was booked; '' (nothing added) when there is nothing to say.
+    $brKeys = ['booking_received', 'booking_confirmed', 'tentative_booking_created', 'tentative_booking_converted', 'tentative_quotation'];
+    $brBlock = (string)($vars['booked_rate_block'] ?? '');
+    if ($brBlock !== '' && in_array($templateKey, $brKeys, true) && strpos((string)$template['html_body'], '{{booked_rate_block}}') === false) {
+        $out['html_body'] .= $brBlock;
+        if ($out['text_body'] !== '' && strpos((string)$template['text_body'], '{{booked_rate_block}}') === false) {
+            $out['text_body'] .= "\n\n" . rh_email_block_plain($brBlock);
+        }
+    }
     // Cancellation policy: the stored DB templates are never edited (live data). When a booking made under a policy is
     // emailed with a template that does not place {{cancellation_policy_text}} itself, the block is added at the end
     // (booking_cancelled also gets "Cancellation fee charged"). Nothing is added for a booking without a policy.
@@ -2664,6 +2922,7 @@ function sendBookingReceivedEmail(array $booking)
             </div>';
         }
 
+        $htmlBody .= (string)($templateVars['booked_rate_block'] ?? ''); // booked rate x nights, rate plan, room references ('' when none)
         $htmlBody .= rh_email_cancel_policy_blocks($templateVars); // cancellation policy ('' without one)
 
         $htmlBody .= '
@@ -2777,6 +3036,7 @@ function sendBookingConfirmedEmail(array $booking)
             </div>';
         }
 
+        $htmlBody .= (string)($templateVars['booked_rate_block'] ?? ''); // booked rate x nights, rate plan, room references ('' when none)
         $htmlBody .= rh_email_cancel_policy_blocks($templateVars); // cancellation policy ('' without one)
 
         $htmlBody .= '
@@ -4707,6 +4967,8 @@ function sendTentativeBookingConfirmedEmail(array $booking)
             </div>';
         }
 
+        $htmlBody .= (string)($templateVars['booked_rate_block'] ?? ''); // booked rate x nights, rate plan, room references ('' when none)
+
         $htmlBody .= '
         <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
 
@@ -5009,6 +5271,7 @@ function sendTentativeBookingConvertedEmail(array $booking)
             </div>';
         }
 
+        $htmlBody .= (string)($templateVars['booked_rate_block'] ?? ''); // booked rate x nights, rate plan, room references ('' when none)
         $htmlBody .= rh_email_cancel_policy_blocks($templateVars); // cancellation policy ('' without one)
 
         $htmlBody .= '
