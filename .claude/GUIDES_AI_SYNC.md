@@ -115,6 +115,19 @@ when prompted."
   text (templates/emails/checkin-reminder.php has no caller); cancellation_policy + golden tests not in
   run_tests.php; unused `cancelBooking()` JS in admin/bookings.php posts no fee (no caller; server would refuse).
 
+### Guest booking emails: rate, rate plan, room references (2026-11-14, NEXT_BUILD_ORDER step 5) — SHIPPED (hashes: see TASKS.md line)
+- Guides: guest-facing emails only (Booking received, Booking confirmed, Tentative booking created / converted,
+  Quotation). Each now ends with a short block: the booked room rate x nights (never today's price), the rate plan
+  the booking was made on, and for a multi-room party every room with its own booking reference (cancelled rooms
+  left out). The "Rate Plan" row in the email body is no longer blank for website bookings. Nothing is added to
+  cancellation, reminder, refund or invoice emails. Stored email templates were not changed; a template can place
+  the block itself with `{{booked_rate_block}}` (Email templates guide: add the tag to the list if tags are listed).
+- Assistant: check only. New email tag `{{booked_rate_block}}` (config/email.php); no table, setting, status or
+  permission changed.
+- LATER (not pulled): when the rate lines are left out (figures do not match the total), the plan's per-night
+  figure still prints; a template that places the tag in the HTML only gets no block in its text part; the
+  quotation's own "Rate Per Night" is on the line basis while the block shows the all-in rate (labelled).
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` fails in unchanged code: claim-check self-test (Room Board "Tomorrow"; staff
   activity "4 of 3 staff accounts"), History Summary "K1,068,000," flagged; digest-recipients fail.
