@@ -77,9 +77,37 @@ function logBookingEvent(
 }
 
 /**
- * Log booking creation
+ * A creation price snapshot made safe to store as JSON (History "How the price was worked out", read by
+ * rh_hist_snapshot()): flat scalars only, a non-finite number becomes null, anything that cannot be encoded drops the
+ * whole snapshot. Never throws; null = nothing to store.
  */
-function logBookingCreated(array $booking, string $performed_by_type = 'guest', ?int $performed_by_id = null, ?string $performed_by_name = null): bool {
+function rh_booking_price_snapshot_clean(?array $price): ?array {
+    if ($price === null) {
+        return null;
+    }
+    try {
+        $out = [];
+        foreach ($price as $k => $v) {
+            if (is_float($v)) {
+                $out[$k] = is_finite($v) ? $v : null;
+            } elseif ($v === null || is_bool($v) || is_int($v) || is_string($v)) {
+                $out[$k] = $v;
+            }
+        }
+        if (!$out || json_encode($out) === false) {
+            return null;
+        }
+        return $out;
+    } catch (Throwable $e) {
+        return null;
+    }
+}
+
+/**
+ * Log booking creation. $price: optional price snapshot (same keys as admin create-booking.php), stored as
+ * metadata.price; omitted = the row is written exactly as before.
+ */
+function logBookingCreated(array $booking, string $performed_by_type = 'guest', ?int $performed_by_id = null, ?string $performed_by_name = null, ?array $price = null): bool {
     // The total shown in the history is the full amount (room + VAT + levy), owner 2026-10-23; read the saved row
     // so callers that only pass total_amount (ex-VAT) still log the right figure.
     $fullTotal = (float)($booking['total_amount'] ?? 0);
@@ -95,26 +123,41 @@ function logBookingCreated(array $booking, string $performed_by_type = 'guest', 
     } catch (Throwable $e) {
         // keep the passed total
     }
-    return logBookingEvent(
+    $metadata = [
+        'room_id' => $booking['room_id'] ?? null,
+        'check_in' => $booking['check_in_date'] ?? null,
+        'check_out' => $booking['check_out_date'] ?? null,
+        'guests' => $booking['number_of_guests'] ?? null,
+        'total' => $fullTotal,
+        'is_tentative' => $booking['is_tentative'] ?? false
+    ];
+    $withPrice = $metadata;
+    if ($price !== null) {
+        $cleanPrice = rh_booking_price_snapshot_clean($price);
+        if ($cleanPrice !== null) {
+            $withPrice['price'] = $cleanPrice;
+        }
+    }
+    $description = "New booking created for {$booking['number_of_nights']} night(s) - Total: " . number_format($fullTotal, 2, '.', '');
+    $logged = logBookingEvent(
         $booking['id'],
         $booking['booking_reference'],
         'Booking created',
         'create',
-        "New booking created for {$booking['number_of_nights']} night(s) - Total: " . number_format($fullTotal, 2, '.', ''),
+        $description,
         null,
         $booking['status'],
         $performed_by_type,
         $performed_by_id,
         $performed_by_name,
-        [
-            'room_id' => $booking['room_id'] ?? null,
-            'check_in' => $booking['check_in_date'] ?? null,
-            'check_out' => $booking['check_out_date'] ?? null,
-            'guests' => $booking['number_of_guests'] ?? null,
-            'total' => $fullTotal,
-            'is_tentative' => $booking['is_tentative'] ?? false
-        ]
+        $withPrice
     );
+    if (!$logged && isset($withPrice['price'])) {
+        // The snapshot is logging only: never lose the creation row because of it.
+        $logged = logBookingEvent($booking['id'], $booking['booking_reference'], 'Booking created', 'create', $description,
+            null, $booking['status'], $performed_by_type, $performed_by_id, $performed_by_name, $metadata);
+    }
+    return $logged;
 }
 
 /**
@@ -386,8 +429,10 @@ function logBookingNote(int $booking_id, string $booking_reference, string $note
  * Called from the public booking form so that the admin Audit Log modal
  * is not empty for brand-new online bookings.
  * Safe no-op if the table cannot be created or the insert fails.
+ * $price: optional price snapshot (same keys as admin create-booking.php), stored as new_values {"price": {...}};
+ * omitted = the row is written exactly as before. A snapshot that cannot be stored never loses the row itself.
  */
-function logBookingCreatedAudit(int $bookingId, string $bookingReference, string $performedByType = 'guest', ?string $performedByName = null): void {
+function logBookingCreatedAudit(int $bookingId, string $bookingReference, string $performedByType = 'guest', ?string $performedByName = null, ?array $price = null): void {
     global $pdo;
     try {
         $pdo->exec("CREATE TABLE IF NOT EXISTS booking_audit_log (
@@ -410,16 +455,41 @@ function logBookingCreatedAudit(int $bookingId, string $bookingReference, string
             KEY idx_bal_performed_at (performed_at)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='Audit log for booking actions'");
 
+        $auditNote = 'Booking made online' . ($performedByName ? ' by ' . $performedByName : '');
+        $auditIp = $_SERVER['REMOTE_ADDR'] ?? null;
+        $auditUa = substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 500) ?: null;
+
+        // With a price snapshot: the same row plus new_values {"price": {...}}. If that write fails for any reason the
+        // plain row below is still written, so the booking always has its 'created' audit row.
+        $priceJson = false;
+        if ($price !== null) {
+            $cleanPrice = rh_booking_price_snapshot_clean($price);
+            if ($cleanPrice !== null) {
+                $priceJson = json_encode(['price' => $cleanPrice]);
+            }
+        }
+        if ($priceJson !== false) {
+            try {
+                $pstmt = $pdo->prepare("INSERT INTO booking_audit_log
+                    (booking_id, booking_reference, action, new_values, note, performed_by_name, ip_address, user_agent)
+                    VALUES (?, ?, 'created', ?, ?, ?, ?, ?)");
+                $pstmt->execute([$bookingId, $bookingReference, $priceJson, $auditNote, $performedByName, $auditIp, $auditUa]);
+                return;
+            } catch (Throwable $e) {
+                error_log('logBookingCreatedAudit price snapshot not stored: ' . $e->getMessage());
+            }
+        }
+
         $stmt = $pdo->prepare("INSERT INTO booking_audit_log
             (booking_id, booking_reference, action, note, performed_by_name, ip_address, user_agent)
             VALUES (?, ?, 'created', ?, ?, ?, ?)");
         $stmt->execute([
             $bookingId,
             $bookingReference,
-            'Booking made online' . ($performedByName ? ' by ' . $performedByName : ''),
+            $auditNote,
             $performedByName,
-            $_SERVER['REMOTE_ADDR'] ?? null,
-            substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 500) ?: null,
+            $auditIp,
+            $auditUa,
         ]);
     } catch (Throwable $e) {
         error_log('logBookingCreatedAudit failed: ' . $e->getMessage());

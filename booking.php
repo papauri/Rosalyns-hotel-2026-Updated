@@ -576,6 +576,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
             $createdBookingIds = [];
             $createdReferences = [];
+            $createdPriceSnaps = [];
             $createdBookingTotals = [];
             $createdGuestCounts = [];
             $bookingGroupTotal = 0.0;
@@ -697,6 +698,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
+                // History: how this row's price was worked out, as saved (same keys as admin create-booking.php).
+                // Plain values only here; rounded and logged after the commit, where a failure never stops the booking.
+                $createdPriceSnaps[] = [
+                    'source' => $usesCombinations ? 'joined_room' : (!empty($dynamicThisBooking['rate_plan_id']) ? 'rate_plan' : 'room_type'),
+                    'rate' => $rateThisBooking, 'list_rate' => $baseRateThisBooking,
+                    'nights' => (int)$number_of_nights, 'occupancy' => $occThisBooking, 'room_type_id' => (int)$room_id, 'room_type' => (string)($room['name'] ?? ''),
+                    'rate_plan_id' => $dynamicThisBooking['rate_plan_id'] ?? null, 'rate_plan_label' => ($dynamicThisBooking['rate_plan_label'] ?? '') ?: null,
+                    'rate_plan_discount' => ($dynamicThisBooking['discount_amount'] ?? 0) ?: null, 'child_supplement' => $childSupplementThisBooking,
+                    'vat_rate' => $vatRateThisBooking, 'vat_amount' => $vatAmtThisBooking, 'levy_rate' => $tourismLevyPctBooking, 'levy_amount' => $tourismLevyThisBooking,
+                    'total_with_vat' => $totalWithVatBooking, 'joined_rooms_id' => $usesCombinations ? (int)($combinationQueue[$i]['id'] ?? 0) : null,
+                ];
                 $createdBookingIds[] = $newBookingId;
                 $createdReferences[] = $refForBooking;
                 $createdBookingTotals[] = $totalThisBooking;
@@ -754,8 +766,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'status' => $booking_status,
                     'is_tentative' => $is_tentative
                 ];
-                logBookingCreated($timelineBookingData, 'guest', null, $guest_name);
-                logBookingCreatedAudit($bookingId, $createdReferences[$index], 'guest', $guest_name);
+                $priceSnap = null;
+                try {
+                    $priceSnap = $createdPriceSnaps[$index] ?? null;
+                    if (is_array($priceSnap)) {
+                        $priceSnap['rate'] = round((float)$priceSnap['rate'], 2);
+                        $priceSnap['list_rate'] = round((float)$priceSnap['list_rate'], 2);
+                        $priceSnap['child_supplement'] = round((float)$priceSnap['child_supplement'], 2);
+                    }
+                } catch (Throwable $snapEx) {
+                    $priceSnap = null;
+                }
+                logBookingCreated($timelineBookingData, 'guest', null, $guest_name, $priceSnap);
+                logBookingCreatedAudit($bookingId, $createdReferences[$index], 'guest', $guest_name, $priceSnap);
             }
 
             // Send email notifications using working email system

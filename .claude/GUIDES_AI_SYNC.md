@@ -60,6 +60,17 @@ when prompted."
   bookings (was "Booking Confirmed"). Front-desk guide/FAQ lines that quote the old heading: update if any.
 - Assistant: no sync needed (grep includes/ai/ for "Booking Confirmed" and booking-lookup: no hits).
 
+### History price note on online bookings (2026-11-14, NEXT_BUILD_ORDER step 2) — SHIPPED (hashes: see TASKS.md line)
+- Guides: booking History > "How the price was worked out" now shows the booked room rate × nights for bookings
+  made online (website, mixed-room parties, API) from the day this shipped, the same as bookings staff create; the
+  rate no longer includes packages. Online bookings made before this still say "worked out from the saved total".
+- Assistant: check only. Booking History answers that read the price snapshot (audit `new_values.price` /
+  timeline `metadata.price`) now find one on new online bookings; API bookings have no rate plan fields.
+- Logs lead: online 'created' audit rows now carry `new_values.price`; timeline 'create' rows carry
+  `metadata.price`. Audit screens list changed fields only, so nothing new shows there.
+- LATER (not pulled): no "Packages: +" line in the price explanation; the history test builds rows by hand and
+  never calls `rh_booking_price_snapshot_clean()`.
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` fails in unchanged code: claim-check self-test (Room Board "Tomorrow"; staff
   activity "4 of 3 staff accounts"), History Summary "K1,068,000," flagged; digest-recipients fail.

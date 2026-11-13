@@ -243,6 +243,42 @@ $rpS = $booking; $rpS['rate_plan_label'] = 'Festival Season'; $rpS['rate_plan_di
 $rpSEv = rh_hist_price_explanation($rpS, null, 450300.0, [], ['cur' => 'K', 'staff' => $staff, 'room_type_name' => 'Superior Suite', 'entity_names' => []]);
 check(strpos($rpSEv['detail'], 'Rate plan applied: Festival Season (surcharge +K82,855.20 a night, already in the room rate).') !== false && strpos($rpSEv['detail'], 'discount') === false, 'old booking with a surcharge plan: surcharge named as already in the rate, never called a discount', $rpSEv['detail']);
 
+// ---- 5b. online booking with a package (F4): the snapshot written by the public paths ----
+// Room K356,000 x 3 nights + a K100,000 package: total_with_vat K1,168,000 includes the package; today's price unchanged.
+$onl = $booking; $onl['total_with_vat'] = 1168000.00; $onl['package_total'] = 100000.00;
+$onlSnap = ['source' => 'room_type', 'rate' => 356000.0, 'list_rate' => 356000.0, 'nights' => 3, 'occupancy' => 'double', 'room_type_id' => 2,
+    'room_type' => 'Superior Suite', 'rate_plan_id' => null, 'rate_plan_label' => null, 'rate_plan_discount' => null, 'child_supplement' => 0.0,
+    'vat_rate' => 17.5, 'vat_amount' => 172614.04, 'levy_rate' => 1.0, 'levy_amount' => 9012.66, 'total_with_vat' => 1168000.0, 'joined_rooms_id' => null];
+$onlCtx = ['cur' => 'K', 'staff' => $staff, 'room_type_name' => 'Superior Suite', 'entity_names' => []];
+$onlEv = rh_hist_price_explanation($onl, $onlSnap, 356000.0, [], $onlCtx);
+$onlPx = $onlEv['detail'] ?? '';
+check(strpos($onlPx, 'K356,000.00 a night × 3 nights = K1,068,000.00, using the double-occupancy price of Superior Suite at the time.') !== false, 'online + package, snapshot: the booked room rate × nights (not total ÷ nights)', $onlPx);
+check(strpos($onlPx, 'before price details were recorded') === false, 'online + package, snapshot: no "made before price details were recorded" text', $onlPx);
+check(strpos($onlPx, "Today's price") === false, 'online + package, snapshot: no false "Today\'s price" line', $onlPx);
+check(strpos($onlPx, 'Total K1,168,000') !== false, 'online + package, snapshot: the total still includes the package', $onlPx);
+$onlOld = rh_hist_price_explanation($onl, null, 356000.0, [], $onlCtx)['detail'] ?? '';
+check(strpos($onlOld, 'K389,333.33 a night × 3 nights') !== false && strpos($onlOld, 'before price details were recorded') !== false
+    && strpos($onlOld, "Today's price for this room is K356,000") !== false, 'online + package, no snapshot (older booking): unchanged behaviour', $onlOld);
+// a rate-plan online booking: list price and plan named from the snapshot
+$onlRp = $onl; $onlRp['rate_plan_label'] = 'Long stay'; $onlRp['rate_plan_discount'] = 35600;
+$onlRpSnap = ['source' => 'rate_plan', 'rate' => 320400.0, 'list_rate' => 356000.0, 'rate_plan_id' => 4, 'rate_plan_label' => 'Long stay', 'rate_plan_discount' => 35600.0] + $onlSnap;
+$onlRpPx = rh_hist_price_explanation($onlRp, $onlRpSnap, 356000.0, [], $onlCtx)['detail'] ?? '';
+check(strpos($onlRpPx, 'K320,400.00 a night × 3 nights = K961,200.00') !== false && strpos($onlRpPx, 'List price K356,000 a night; rate plan Long stay made it K320,400.') !== false
+    && strpos($onlRpPx, "Today's price") === false, 'online rate-plan booking, snapshot: plan rate × nights, list price named, no false today line', $onlRpPx);
+
+// the stored shape is the one the History reader finds (audit new_values.price and timeline metadata.price)
+require_once $root . '/includes/booking-history.php'; // loads without the database; only the pure reader is called
+check(!isset($GLOBALS['pdo']), 'the History reader loads without the database');
+if (function_exists('rh_hist_snapshot')) {
+    $auditRow = ['action' => 'created', 'new_values' => json_encode(['price' => $onlSnap]), 'note' => 'Booking made online by Jane Guest'];
+    check(rh_hist_snapshot([$auditRow], []) == $onlSnap, 'reader: the audit row new_values {"price": ...} round-trips to the same snapshot (JSON keeps 356000.0 as 356000)');
+    $tlRow = ['action_type' => 'create', 'metadata' => json_encode(['room_id' => 2, 'total' => 1168000.0, 'is_tentative' => 0, 'price' => $onlSnap])];
+    check(rh_hist_snapshot([], [$tlRow]) == $onlSnap, 'reader: the timeline metadata.price round-trips to the same snapshot');
+    check(rh_hist_snapshot([['action' => 'created', 'new_values' => null, 'note' => 'Booking made online']], []) === null, 'reader: an online row with no snapshot -> null (older bookings unchanged)');
+} else {
+    bad('reader: rh_hist_snapshot() not found in includes/booking-history.php');
+}
+
 // ---- 6. the note written when a payment is saved ----
 $note = rh_hist_payment_saved_note(1350900, 'cash', 1068000, -282900, true, 'CN-2026-000003', 282900, 'K');
 check($note === 'Received K1,350,900 by cash. Owed before: K1,068,000. Owed after: K0. The overpay box was ticked. Credit note CN-2026-000003 for K282,900 issued for the extra.', 'payment saved note', $note);

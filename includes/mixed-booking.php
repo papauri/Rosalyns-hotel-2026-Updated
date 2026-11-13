@@ -563,6 +563,17 @@ if (!function_exists('rh_mixed_load_room')) {
                     'occupancy_type' => $row['occupancy_type'], 'rate_per_night' => $p['rate_per_night'],
                     'total_amount' => $totalAmount, 'total_with_vat' => $withVat, 'vat' => $vatAmt, 'levy' => $levy,
                     'child_supplement' => $p['child_supplement'],
+                    // History: how this row's price was worked out, as saved (same keys as admin create-booking.php).
+                    // Plain values only here; rounded and logged in rh_mixed_finish(), where a failure never stops the booking.
+                    'price' => [
+                        'source' => $row['combination'] ? 'joined_room' : (!empty($p['dynamic']['rate_plan_id']) ? 'rate_plan' : 'room_type'),
+                        'rate' => $p['rate_per_night'], 'list_rate' => $p['dynamic']['original_price'] ?? $p['rate_per_night'],
+                        'nights' => $nights, 'occupancy' => $row['occupancy_type'], 'room_type_id' => (int)$row['room_id'], 'room_type' => (string)($row['room_name'] ?? ''),
+                        'rate_plan_id' => $p['dynamic']['rate_plan_id'] ?? null, 'rate_plan_label' => ($p['dynamic']['rate_plan_label'] ?? '') ?: null,
+                        'rate_plan_discount' => ($p['dynamic']['discount_amount'] ?? 0) ?: null, 'child_supplement' => $p['child_supplement'],
+                        'vat_rate' => $p['stay']['vat_rate'] ?? null, 'vat_amount' => $vatAmt, 'levy_rate' => $p['stay']['levy_rate'] ?? null, 'levy_amount' => $levy,
+                        'total_with_vat' => $withVat, 'joined_rooms_id' => $row['combination'] ? (int)($row['combination']['id'] ?? 0) : null,
+                    ],
                 ];
                 $group['total'] += $totalAmount;
                 $group['vat'] += $vatAmt;
@@ -614,14 +625,25 @@ if (!function_exists('rh_mixed_load_room')) {
         $group = $created['group'];
 
         foreach ($rows as $r) {
+            $priceSnap = null;
+            try {
+                $priceSnap = $r['price'] ?? null;
+                if (is_array($priceSnap)) {
+                    $priceSnap['rate'] = round((float)$priceSnap['rate'], 2);
+                    $priceSnap['list_rate'] = round((float)$priceSnap['list_rate'], 2);
+                    $priceSnap['child_supplement'] = round((float)$priceSnap['child_supplement'], 2);
+                }
+            } catch (Throwable $snapEx) {
+                $priceSnap = null;
+            }
             logBookingCreated([
                 'id' => $r['id'], 'booking_reference' => $r['reference'], 'room_id' => $r['room_id'],
                 'guest_name' => $c['guest_name'], 'guest_email' => $c['guest_email'],
                 'check_in_date' => $c['check_in'], 'check_out_date' => $c['check_out'], 'number_of_nights' => $nights,
                 'number_of_guests' => $r['guests'], 'total_amount' => $r['total_amount'],
                 'status' => $c['status'], 'is_tentative' => $c['is_tentative'],
-            ], 'guest', null, $c['guest_name']);
-            logBookingCreatedAudit($r['id'], $r['reference'], 'guest', $c['guest_name']);
+            ], 'guest', null, $c['guest_name'], $priceSnap);
+            logBookingCreatedAudit($r['id'], $r['reference'], 'guest', $c['guest_name'], $priceSnap);
         }
 
         $lead = $rows[0];

@@ -361,6 +361,7 @@ try {
         ]);
         
         $bookingId = (int)$pdo->lastInsertId();
+        $__assignedComboId = null; // History price snapshot: the joined rooms this booking actually holds
 
         if (roomTypeHasActiveCombinations((int)$bookingData['room_id'])) {
             $availableCombinations = getAvailableRoomCombinations((int)$bookingData['room_id'], $bookingData['check_in_date'], $bookingData['check_out_date'], $bookingId);
@@ -373,6 +374,7 @@ try {
                 if ($pdo->inTransaction()) { $pdo->rollBack(); }
                 ApiResponse::error($assignment['message'] ?? 'Failed to reserve joined rooms for this booking.', 409);
             }
+            $__assignedComboId = (int)$availableCombinations[0]['id'];
         }
         
         // Update room availability count for confirmed bookings
@@ -397,8 +399,26 @@ try {
             'status'           => $bookingStatus,
             'is_tentative'     => $isTentative,
         ];
-        logBookingCreated($__timelineData, 'api', null, $bookingData['guest_name']);
-        logBookingCreatedAudit($bookingId, $bookingReference, 'api', $bookingData['guest_name']);
+        // History: how the price was worked out, as saved (same keys as admin create-booking.php). This path applies
+        // no rate plan, so the list rate is the booked rate. It always charges the room-type rate, even when a joined
+        // pair is assigned, so the source is always room_type. Logging only: a failure here never stops the booking.
+        $__priceSnap = null;
+        try {
+            $__priceSnap = [
+                'source' => 'room_type',
+                'rate' => round((float)$roomRate, 2), 'list_rate' => round((float)$roomRate, 2),
+                'nights' => (int)$nights, 'occupancy' => (string)$bookingData['occupancy_type'],
+                'room_type_id' => (int)$bookingData['room_id'], 'room_type' => (string)($room['name'] ?? ''),
+                'rate_plan_id' => null, 'rate_plan_label' => null, 'rate_plan_discount' => null,
+                'child_supplement' => round((float)$childSupplementTotal, 2),
+                'vat_rate' => $vatRateBooking, 'vat_amount' => $vatAmountBooking, 'levy_rate' => $tourismLevyPercent, 'levy_amount' => $tourismLevyAmount,
+                'total_with_vat' => $totalWithVat, 'joined_rooms_id' => $__assignedComboId,
+            ];
+        } catch (Throwable $__snapEx) {
+            $__priceSnap = null;
+        }
+        logBookingCreated($__timelineData, 'api', null, $bookingData['guest_name'], $__priceSnap);
+        logBookingCreatedAudit($bookingId, $bookingReference, 'api', $bookingData['guest_name'], $__priceSnap);
 
         // Prepare booking data for email
         $bookingForEmail = [
