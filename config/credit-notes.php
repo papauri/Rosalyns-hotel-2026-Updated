@@ -1484,6 +1484,7 @@ if (!function_exists('sendCreditNoteEmail')) {
                 );
             }
 
+            if (function_exists('rh_test_platform_mail_apply')) { rh_test_platform_mail_apply($mail); } // test platform: only the test recipient
             $mail->send();
             if (function_exists('rh_email_send_log_mail')) {
                 rh_email_send_log_mail('sent', $mail, (string)$cnEmailSubject, '', (string)$cn['guest_email'], (string)$cn['guest_name'],

@@ -18,6 +18,8 @@ require_once __DIR__ . '/../includes/conference-pricing.php';
 require_once __DIR__ . '/../includes/email-identity.php';
 // Email send log (System Logs > Emails sent, booking History): who sent what, when, to whom
 require_once __DIR__ . '/../includes/email-send-log.php';
+// Test platform guard: on the test hotel every email goes only to the test recipient (security 2026-11-14)
+require_once __DIR__ . '/../includes/test-platform-mail.php';
 
 // WhatsApp notification functions
 if (file_exists(__DIR__ . '/../includes/whatsapp-functions.php')) {
@@ -97,6 +99,7 @@ $development_mode = $is_localhost && $email_development_mode;
  */
 function rh_automated_email_adjust(string &$to, string &$subject, bool &$bccAdmin): void
 {
+    unset($GLOBALS['rh_tp_redirected_from']);
     $ctx = $GLOBALS['rh_automated_ctx'] ?? null;
     if (!is_array($ctx)) {
         return;
@@ -110,6 +113,9 @@ function rh_automated_email_adjust(string &$to, string &$subject, bool &$bccAdmi
         return;
     }
     if ($redirect !== '') {
+        if (function_exists('rh_test_platform_active') && rh_test_platform_active()) {
+            $GLOBALS['rh_tp_redirected_from'] = [$to]; // listed as the original To in the test-platform notice
+        }
         $to = $redirect;
         if (strpos($subject, '[TEST]') !== 0) {
             $subject = '[TEST] ' . $subject;
@@ -195,6 +201,7 @@ function sendEmail(string $to, ?string $toName, string $subject, string $htmlBod
             $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
             $mail->AltBody = $textBody ?: strip_tags($htmlBody);
 
+            rh_test_platform_mail_apply($mail); // test platform: only the test recipient
             $mail->send();
 
             // Log email if enabled
@@ -332,6 +339,7 @@ function sendEmailWithAttachments(string $to, ?string $toName, string $subject, 
             $mail->Subject = $subject;
             $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
             $mail->AltBody = $textBody !== '' ? $textBody : strip_tags($htmlBody);
+            rh_test_platform_mail_apply($mail); // test platform: only the test recipient
             $mail->send();
 
             if ($email_log_enabled) {
@@ -798,6 +806,10 @@ if (!function_exists('hotel_embed_logo_cid')) {
      */
     function hotel_embed_logo_cid(PHPMailer $mail, string $html): string
     {
+        // Test platform: recipients and subject are set by now on every path (invoices included).
+        if (function_exists('rh_test_platform_mail_apply')) {
+            rh_test_platform_mail_apply($mail, null, $html);
+        }
         $pubUrl = function_exists('hotel_email_logo_url') ? hotel_email_logo_url() : '';
         if ($pubUrl === '' || !rh_email_logo_host_blocks_images($pubUrl)) {
             return $html;
@@ -4331,6 +4343,7 @@ function sendEmailWithCC(string $to, ?string $toName, string $subject, string $h
         $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
         $mail->AltBody = $textBody ?: strip_tags($htmlBody);
 
+        rh_test_platform_mail_apply($mail); // test platform: only the test recipient
         $mail->send();
 
         // Log email if enabled
@@ -6201,6 +6214,7 @@ function sendContactInquiryReplyEmail(array $inquiry, string $replySubject, stri
         $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $emailSubject));
         $mail->AltBody = $textBody;
 
+        rh_test_platform_mail_apply($mail); // test platform: only the test recipient
         $mail->send();
 
         if ($email_log_enabled) {
@@ -6530,6 +6544,7 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
                 ? $textBody
                 : ('Please see the attached PDF quotation for your stay at ' . $site_name . '.');
             $mail->addStringAttachment($pdfContent, 'Quotation-' . $quote_ref . '.pdf', 'base64', 'application/pdf');
+            rh_test_platform_mail_apply($mail); // test platform: only the test recipient
             $mail->send();
             rh_email_send_log_mail('sent', $mail, $subject, '', (string)$booking['guest_email'], (string)$booking['guest_name']);
             $result = ['success' => true, 'message' => 'Quotation email sent.'];
@@ -6621,6 +6636,7 @@ function sendEmailWithBinaryAttachment(
         $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
         $mail->AltBody = $altBody !== '' ? $altBody : 'Please view this message in an HTML-compatible email client.';
         $mail->addStringAttachment($attachmentContent, $attachmentName, 'base64', $attachmentMime);
+        rh_test_platform_mail_apply($mail); // test platform: only the test recipient
         $mail->send();
         rh_email_send_log_mail('sent', $mail, $subject, '', $toEmail, $toName);
 
@@ -7630,6 +7646,7 @@ function sendGymMemberCardEmail(array $member): array
         }
         $mail->Body = hotel_embed_logo_cid($mail, wrapEmailTemplate($htmlBody, $subject));
         $mail->AltBody = $altBody;
+        rh_test_platform_mail_apply($mail); // test platform: only the test recipient
         $mail->send();
         rh_email_send_log_mail('sent', $mail, $subject, '', (string)$toEmail, (string)$name);
 

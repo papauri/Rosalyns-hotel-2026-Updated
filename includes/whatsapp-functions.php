@@ -62,6 +62,14 @@ function sendWhatsAppMessage(string $to, string $body): array
     if (!isWhatsAppEnabled()) {
         return ['success' => false, 'message' => 'WhatsApp notifications are disabled'];
     }
+    // Test platform (site_is_test_platform = '1'): never message a real phone, whatever the WhatsApp settings say.
+    if (!function_exists('rh_test_platform_active') && is_file(__DIR__ . '/test-platform-mail.php')) {
+        require_once __DIR__ . '/test-platform-mail.php';
+    }
+    if (function_exists('rh_test_platform_active') && rh_test_platform_active()) {
+        logWhatsApp($to, 'test-platform', false, 'Refused: this site is the test platform, WhatsApp is muted');
+        return ['success' => false, 'message' => 'WhatsApp is muted on the test platform'];
+    }
 
     // Normalize number (ensure + prefix)
     $to = normaliseWhatsAppNumber($to);

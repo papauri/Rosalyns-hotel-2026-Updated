@@ -209,6 +209,10 @@ if (!empty($cfg['fake_smtp'])) {
     }
     $chk = $pdo->query("SELECT setting_value FROM email_settings WHERE setting_key = 'smtp_host'")->fetchColumn();
     if ($chk !== '127.0.0.1') { fwrite(STDERR, "fake smtp override failed\n"); exit(3); }
+    // The capture server already keeps every email local, so the test-platform redirect (includes/test-platform-mail.php,
+    // on at Liwonde) is switched off for this rolled-back run: suites can check the real recipients. A test of the
+    // redirect itself switches it back on in memory.
+    $pdo->exec("INSERT INTO site_settings (setting_key, setting_value) VALUES ('site_is_test_platform','0') ON DUPLICATE KEY UPDATE setting_value='0'");
 }
 
 $_SERVER['REQUEST_METHOD'] = (($cfg['method'] ?? 'POST') === 'GET') ? 'GET' : 'POST'; // 'method':'GET' renders a page (read-only)

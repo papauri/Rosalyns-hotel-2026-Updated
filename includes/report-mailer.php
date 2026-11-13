@@ -33,7 +33,13 @@ function sendReportEmail(array $recipients, string $subject, string $htmlBody, a
     // subject [TEST], with no visible copy and no hidden staff copy. An unusable test address fails closed.
     $testTo = trim((string)($GLOBALS['rh_automated_ctx']['redirect'] ?? ''));
     $isTest = $testTo !== '';
+    unset($GLOBALS['rh_tp_redirected_from']);
     if ($isTest) {
+        if (function_exists('rh_test_platform_active') && rh_test_platform_active()) {
+            // Test platform notice lists who the report would have gone to.
+            $GLOBALS['rh_tp_redirected_from'] = array_values(array_filter(array_merge(
+                array_map(static fn($r) => trim((string)($r['email'] ?? '')), $recipients), array_map('strval', $ccEmails))));
+        }
         $recipients = filter_var($testTo, FILTER_VALIDATE_EMAIL) ? [['email' => $testTo, 'name' => '']] : [];
         $ccEmails = [];
         if (strpos($subject, '[TEST]') !== 0) {
@@ -125,6 +131,7 @@ function sendReportEmail(array $recipients, string $subject, string $htmlBody, a
             $mail->addStringAttachment($content, $name, PHPMailer::ENCODING_BASE64, $mime);
         }
 
+        if (function_exists('rh_test_platform_mail_apply')) { rh_test_platform_mail_apply($mail); } // test platform: only the test recipient
         $mail->send();
 
         if ($email_log_enabled) {

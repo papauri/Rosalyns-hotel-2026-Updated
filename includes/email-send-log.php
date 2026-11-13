@@ -656,11 +656,20 @@ if (!function_exists('rh_email_kinds')) {
             if (!$to && trim($fallbackTo) !== '') {
                 $to = [trim($fallbackTo)];
             }
+            $copyText = rh_email_copy_text($cc, $bcc);
+            $tpOrig = function_exists('rh_test_platform_mail_original') ? rh_test_platform_mail_original($mail) : null;
+            if ($tpOrig !== null) {
+                // Test platform redirect: the copy column records who it would have gone to; subject as sent.
+                $copyText = rh_test_platform_log_text($tpOrig);
+                if (trim((string)($mail->Subject ?? '')) !== '') {
+                    $subject = (string)$mail->Subject;
+                }
+            }
             rh_email_send_log_write($extra + [
                 'status' => $status,
                 'to' => implode(', ', $to),
                 'to_name' => (string)$toName,
-                'cc' => rh_email_copy_text($cc, $bcc),
+                'cc' => $copyText,
                 'subject' => $subject,
                 'error' => $error,
             ]);
