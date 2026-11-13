@@ -26,6 +26,7 @@ figure's source updates this file in the same ship. Money figures: `dept-account
 | R5 | **Station report emails** (kitchen / bar / coffee bar) | in-app timer, job `station_reports` | once per station per trading day, within about an hour after that station's next opening | `automated_job_station_reports_to`, empty = §2.1 | `automated_job_station_reports_cc` (default info@promanaged-it.com) | staff copy email(s) when the switch is on |
 | R6 | R4 by hand | `php scripts/daily_reports.php` (CLI, never at Rosalyn's) | when run | `--recipients` / env `REPORT_RECIPIENTS` | as R4 | staff copy email(s) |
 | R7 | **Station Report email, by hand** | a person, Email on Station Report | when clicked | prefilled with R5's To list (editable) | `automated_job_station_reports_cc` | staff copy email(s) |
+| R8 | **Overdue payment reminders** (template `payment_reminder_1..3` + invoice PDF) | in-app timer, job `overdue_payment_reminders` (every 60 min) | stages 1/3/7 days overdue (`automated_email_reminder_stages`), each at most once | the account's guest / client; a GROUP: the booker on its effective lead (company share never: weekly company statement, §R8) | none | staff copy email(s) when `automated_email_bcc_hotel` is on |
 
 **Test mode** (Automated Emails > Test recipient set, Liwonde): EVERY row above that emails goes ONLY to the test
 address, subject `[TEST]`, no CC, no hidden copy; R2 WhatsApp is not sent ("Test mode is on … not sent"); the
@@ -163,6 +164,39 @@ Permission `kds_reports` (+CSRF); chef / bar / coffee staff pinned to their stat
 (editable, several addresses), CC `automated_job_station_reports_cc`, sent with `sendReportEmail` (kind
 `station_report`), test mode as R1 (L11 fixed; restaurant lead reviews).
 
+### R8 — Overdue payment reminders (timer, `includes/auto-email-jobs.php`) — group rule owner 2026-11-13
+Trigger: scheduler job `overdue_payment_reminders` (switch `automated_email_job_overdue`, 60 min). Stages =
+`automated_email_reminder_stages` (default 1,3,7, max 3); the highest stage reached is sent, earlier ones are
+logged `skipped` ("superseded"). Stop after `automated_email_lookback_days` (default 30) days overdue. CC: none.
+BCC: staff copy when `automated_email_bcc_hotel` = 1. Test mode: the mailer sends only to the test address,
+`[TEST]`, no copies; dedupe stage gets the `test:` prefix so test sends never block real ones. Log:
+`automated_email_log` (claimed before sending; failed = retried up to 3 times, 1 h apart) + System Logs > Emails
+sent (kind `payment_reminder`). A payment a second before stops it (fresh re-read before each send).
+- **Single room** (no member rooms): unchanged — checked out, `amount_due` above `BALANCE_TOLERANCE`, days from
+  its checkout, To = `guest_email`, its own invoice. Key (`room`, booking id, `rN`).
+- **Group** (rooms linked by `primary_booking_id`): ONE reminder per group and payer, never per room; a member or
+  the lead alone is never chased any more. Due once EVERY live room (not cancelled / expired / deleted) is
+  checked out or no-show, with at least one checked out (an all-no-show group is not chased, like a single
+  no-show). Days overdue from the LAST checkout. Amount = sum of `amount_due` of every room that counts under
+  `rh_receivable_status_sql('room')` (live rooms, owing no-shows, a cancelled room only for what it kept, an
+  expired room only under the group no-show charge) = Still owed basis = the group invoice balance (tested).
+  To = the booker (`guest_email`) on the effective lead (`rh_booking_group_effective_lead`: a cancelled lead
+  hands over), reference + attachment = the GROUP invoice for that payer's rooms (`rh_invoice_doc_rows`, no
+  invoice number consumed). Any room with a pay-later arrangement = the group is not chased.
+- **Company group** (migration 084; decision 2026-11-13): the company share is NEVER chased by this job — the
+  weekly company statement (`company_statements`) is the only chase for company money, exactly as for a single
+  company booking. The guest is chased for their own share only (`guest_due`, e.g. bar extras on a stay-only
+  company), to the booker, attachment = the guest EXTRAS document (`rh_guest_extras_invoice_html`) of each room
+  they owe on, never the company invoice. No valid guest email = skipped, NOT logged (goes out once an address
+  is added); never sent to anyone else.
+- Candidate window: groups with a room checked out within `lookback` days, still owing; newest first, 200 per run.
+- **Dedupe key** (job, account_type, account_id = group ROOT = the original lead id, never changes, stage):
+  `room` (guest-paid rooms — the same key the old per-lead reminder used, so a group chased before keeps its
+  stages), `room_g:<company id>` (guest share of a company group).
+- Read-only preview for tests / dry runs: `rh_auto_overdue_preview()` (claims and sends nothing).
+- Test: `scripts/tests/overdue_group_reminders.php` (Liwonde only, rolled back).
+- ASSUMPTION (2026-11-13): an all-no-show group is not chased (no checkout to count from).
+
 ---
 
 ## 3. Figure parity
@@ -227,6 +261,10 @@ Still open (routed by the orchestrator):
 - L14 — station report "revenue" = value of items served, not sales (restaurant lead, UI wording).
 - L18 — "Still owed" sub-line includes pending (ui-lead).
 - L19 — no tourism levy figure on End of Day (owner FEATURE if wanted).
+- L22 — R8 groups: a stale pending/confirmed room (never checked in, never marked no-show) blocks the group's
+  reminder; a group with guest-paid rooms AND a stay-only company can send the booker two reminders (keys `room`
+  and `room_g:`); a deleted room's extras show on the group invoice but not in the reminder amount (receivables
+  rule). Guide 12/19 wording for group reminders (guides-kb-lead, SYNC QUEUE).
 - UI_REQUESTs in §5 not done this round.
 
 ### 4.3 Owner decisions — DECIDED 2026-11-13
