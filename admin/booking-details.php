@@ -1898,7 +1898,25 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         <div class="bd-group-notice">
             <i class="fas fa-layer-group"></i>
             <span class="bd-group-notice__title">
-                <?php echo !empty($booking['primary_booking_id']) ? 'Secondary room in a group booking' : 'Primary booking — group of ' . (count($group_bookings) + 1) . ' rooms'; ?>
+                <?php
+                // A cancelled lead hands the group's documents to the next active room (rh_booking_group_doc_lead).
+                $bd_grp_lead = rh_booking_group_effective_lead($pdo, (int)$booking['id']);
+                $bd_grp_refs = [(int)$booking['id'] => (string)($booking['booking_reference'] ?? '')];
+                foreach ($group_bookings as $gb) {
+                    $bd_grp_refs[(int)$gb['id']] = (string)($gb['booking_reference'] ?? '');
+                }
+                if ($bd_grp_lead !== $primary_id_for_group && isset($bd_grp_refs[$bd_grp_lead], $bd_grp_refs[$primary_id_for_group])) {
+                    if ((int)$booking['id'] === $primary_id_for_group) {
+                        echo htmlspecialchars('Cancelled lead room — the group is now led by ' . $bd_grp_refs[$bd_grp_lead] . ' (its invoice is built from that room)');
+                    } elseif ((int)$booking['id'] === $bd_grp_lead) {
+                        echo htmlspecialchars('Group lead — group of ' . (count($group_bookings) + 1) . ' rooms (took over from the cancelled lead ' . $bd_grp_refs[$primary_id_for_group] . ')');
+                    } else {
+                        echo htmlspecialchars('Secondary room in a group booking led by ' . $bd_grp_refs[$bd_grp_lead]);
+                    }
+                } else {
+                    echo !empty($booking['primary_booking_id']) ? 'Secondary room in a group booking' : 'Primary booking — group of ' . (count($group_bookings) + 1) . ' rooms';
+                }
+                ?>
             </span>
             <span class="bd-group-notice__label">Linked rooms:</span>
             <?php foreach ($group_bookings as $gb): ?>

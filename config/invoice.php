@@ -120,8 +120,9 @@ function rh_invoice_doc_rows(PDO $pdo, int $booking_id): ?array
     }
     $scope = function_exists('rh_billing_doc_scope') ? rh_billing_doc_scope($pdo, $booking_id) : null;
     // For group bookings work from the primary booking (the invoice shows all rooms); a secondary is redirected to its
-    // primary - or, on a split-payer group, to the lead of the rooms billed to the same payer.
-    $leadId = $scope !== null ? (int)$scope['lead'] : (!empty($booking['primary_booking_id']) ? (int)$booking['primary_booking_id'] : $booking_id);
+    // primary - or, on a split-payer group, to the lead of the rooms billed to the same payer. A cancelled primary hands
+    // the document to the next active room (rh_booking_group_doc_lead); it is then listed as a cancelled room.
+    $leadId = $scope !== null ? (int)$scope['lead'] : rh_booking_group_effective_lead($pdo, $booking_id);
     if ($leadId !== $booking_id) {
         $stmt->execute([$leadId]);
         $lead = $stmt->fetch(PDO::FETCH_ASSOC);

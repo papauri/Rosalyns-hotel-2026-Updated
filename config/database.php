@@ -10495,6 +10495,66 @@ function rh_booking_group_ids(PDO $pdo, int $bookingId): array
 }
 
 /**
+ * The room a group's documents are built from (owner 2026-11-13, cancelled lead room). $rows: bookings rows of ONE group,
+ * or the part of it one document lists (each with id, status, deleted_at); $rootId: the group's lead (the id the others
+ * point at through primary_booking_id). The lead, unless the lead is CANCELLED while another room in $rows is still active
+ * (not cancelled / no-show / expired, not deleted; a checked-out room counts): then that room becomes the lead - the
+ * lowest room number (natural order, rooms not yet assigned after), then the lowest id. Read-only: no row is re-parented,
+ * so company billing (members follow the original lead), guest history, payments and the overdue chase stay as they are,
+ * and the original lead comes back by itself if it is ever live again. 0 = $rootId is not in $rows (caller keeps its pick).
+ */
+function rh_booking_group_doc_lead(array $rows, int $rootId): int
+{
+    $root = null;
+    $cands = [];
+    foreach ($rows as $r) {
+        $id = (int)($r['id'] ?? 0);
+        if ($id === $rootId) {
+            $root = $r;
+        } elseif ($id > 0 && empty($r['deleted_at']) && !in_array(strtolower((string)($r['status'] ?? '')), ['cancelled', 'no-show', 'expired'], true)) {
+            $cands[] = ['id' => $id, 'no' => ''];
+        }
+    }
+    if ($root === null) {
+        return 0;
+    }
+    if (strtolower((string)($root['status'] ?? '')) !== 'cancelled' || !$cands) {
+        return $rootId;
+    }
+    foreach ($cands as $i => $c) { // room labels only when the lead really hands over (no extra queries otherwise)
+        $cands[$i]['no'] = function_exists('getBookingRoomLabel') ? trim(getBookingRoomLabel($c['id'])) : '';
+    }
+    usort($cands, static function (array $a, array $b): int {
+        if (($a['no'] === '') !== ($b['no'] === '')) {
+            return $a['no'] === '' ? 1 : -1;
+        }
+        $c = strnatcasecmp($a['no'], $b['no']);
+        return $c !== 0 ? $c : ($a['id'] <=> $b['id']);
+    });
+    return (int)$cands[0]['id'];
+}
+
+/** rh_booking_group_doc_lead() for the whole group of $bookingId (any member id). A booking not in a group = itself. */
+function rh_booking_group_effective_lead(PDO $pdo, int $bookingId): int
+{
+    try {
+        $st = $pdo->prepare('SELECT COALESCE(NULLIF(primary_booking_id, 0), id) FROM bookings WHERE id = ?');
+        $st->execute([$bookingId]);
+        $root = (int)$st->fetchColumn();
+        if ($root <= 0) {
+            return $bookingId;
+        }
+        $st = $pdo->prepare('SELECT id, status, deleted_at FROM bookings WHERE id = ? OR primary_booking_id = ? ORDER BY id');
+        $st->execute([$root, $root]);
+        $lead = rh_booking_group_doc_lead($st->fetchAll(PDO::FETCH_ASSOC), $root);
+        return $lead > 0 ? $lead : $root;
+    } catch (Throwable $e) {
+        error_log('rh_booking_group_effective_lead failed for booking ' . $bookingId . ': ' . $e->getMessage());
+        return $bookingId;
+    }
+}
+
+/**
  * Cancel every booking in $bookingIds in ONE transaction: each goes through cancelRoomBookingSettled (bill
  * treatment + refunds per booking), and if any one refuses or fails the whole group is rolled back and nothing
  * changes. A caller transaction is joined (the caller then commits / rolls back).

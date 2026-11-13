@@ -435,8 +435,9 @@ if (!function_exists('rh_booked_rate_room_receipt_lines')) {
                 $invRooms = rh_booked_rate_invoice_room_count($pdo, $bookingId);
                 $rooms = $invRooms ?? $liveRooms;
                 if (max($liveRooms, $rooms) > 1) {
+                    // REF = the room the group invoice is built from (a cancelled lead hands over to the next active room).
                     $ref = $pdo->prepare('SELECT booking_reference FROM bookings WHERE id = ?');
-                    $ref->execute([$leadId]);
+                    $ref->execute([function_exists('rh_booking_group_effective_lead') ? rh_booking_group_effective_lead($pdo, $leadId) : $leadId]);
                     $groupRef = (string)($ref->fetchColumn() ?: ($b['booking_reference'] ?? ''));
                     $no = function_exists('getBookingRoomLabel') ? trim(getBookingRoomLabel($bookingId)) : '';
                     $type = trim((string)($b['room_name'] ?? ''));

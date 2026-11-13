@@ -365,8 +365,16 @@ if (!function_exists('rh_billing_ready')) {
         if (!$ids) {
             return ['lead' => $bookingId, 'ids' => [$bookingId]];
         }
-        $pick = static function (array $set) use ($root): int {
-            return in_array($root, $set, true) ? $root : min($set);
+        // A cancelled lead hands the document to the next active room of the set (rh_booking_group_doc_lead); the
+        // cancelled lead is then listed like any other cancelled room (rh_inv_group_rooms). Otherwise as before.
+        $pick = static function (array $set) use ($root, $rows): int {
+            if (!in_array($root, $set, true)) {
+                return min($set);
+            }
+            $in = array_flip($set);
+            $lead = function_exists('rh_booking_group_doc_lead')
+                ? rh_booking_group_doc_lead(array_values(array_filter($rows, static fn($r) => isset($in[(int)$r['id']]))), $root) : 0;
+            return $lead > 0 ? $lead : $root;
         };
         if (count($rows) <= 1 || !rh_billing_ready($pdo)) {
             return ['lead' => $pick($ids), 'ids' => $ids];
