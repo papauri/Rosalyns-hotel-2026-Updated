@@ -713,6 +713,13 @@ if (!function_exists('rh_inv_group_rooms')) {
                     $fs['balance_due'] = round(max(0.0, $fs['grand_total'] - (float)($fs['amount_paid'] ?? 0)), 2);
                     $r['rh_inv_no_room_charge'] = true;
                 }
+                if (!$isDeleted && in_array($status, ['no-show', 'expired'], true) && function_exists('rh_noshow_fee_tagged') && rh_noshow_fee_tagged($pdo, $id)) {
+                    // Charged under group_noshow_charge: the folio summary already bills only its charges (the no-show /
+                    // expiry charge row prints under it); marked even when it is the lead.
+                    $r['rh_inv_no_room_charge'] = true;
+                    $r['rh_inv_noshow_fee'] = true;
+                    $r['rh_inv_removed'] = $status === 'expired' ? 'Expired' : 'No-show';
+                }
                 if (!isset($fs['error'])) {
                     $r['rh_inv_fs'] = $fs;
                 }
@@ -851,13 +858,15 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     $docLines = [];
     foreach ($docRows as $di => $dr) {
         $docLines[$di] = rh_doc_stay_lines($dr, $di === $pkgRowIdx ? $pkgTotal : 0.0);
-        $drNoRoom = !empty($dr['rh_inv_no_room_charge']);
-        if (!empty($dr['rh_inv_removed']) && (strtolower((string)($dr['status'] ?? '')) === 'cancelled' || $drNoRoom)) {
+        $drNoRoom = !empty($dr['rh_inv_no_room_charge'])
+            || (empty($group_bookings) && $preload === null && in_array(strtolower((string)($dr['status'] ?? '')), ['no-show', 'expired'], true)
+                && function_exists('rh_noshow_fee_tagged') && rh_noshow_fee_tagged($pdo, (int)($dr['id'] ?? 0)));
+        if ((!empty($dr['rh_inv_removed']) && strtolower((string)($dr['status'] ?? '')) === 'cancelled') || $drNoRoom) {
             // A cancelled room bills only what was kept on cancellation (getBookingFolioSummary / recalc): no VAT, no levy.
             // A deleted room that was not cancelled keeps nothing (rh_inv_group_rooms).
             $kept = $drNoRoom ? 0.0 : round(max(0.0, (float)($dr['cancellation_retained_amount'] ?? 0)), 2);
             $docLines[$di] = ['mode' => $docLines[$di]['mode'], 'gross' => $kept, 'vat' => 0.0, 'levy' => 0.0, 'lines_total' => $kept,
-                'room' => $kept, 'child' => 0.0, 'pkg' => 0.0, 'subtotal' => $kept, 'total' => $kept];
+                'room' => $kept, 'child' => 0.0, 'pkg' => 0.0, 'subtotal' => $kept, 'total' => $kept, 'no_room' => $drNoRoom];
         }
     }
     // Header for a group: the group's overall dates (earliest check-in to latest check-out), the room count and every
@@ -891,6 +900,12 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         $hdrNights = count($nightSet) === 1 ? (string)array_key_first($nightSet) : 'See each room';
         $check_in  = date('j F Y', strtotime($hdrCheckIn));
         $check_out = date('j F Y', strtotime($hdrCheckOut));
+    }
+    // No room charge on the lead (a no-show / expired lead charged under group_noshow_charge): no discount row either.
+    $leadNoRoom = !empty($docLines[$pkgRowIdx]['no_room']);
+    if ($leadNoRoom) {
+        $ratePlanDiscount = 0.0;
+        $ratePlanSurcharge = 0.0;
     }
     if ($ratePlanDiscount > 0 && $ratePlanLabel !== '') {
         // The discount prints as its own negative row, so the room line shows the rate BEFORE the discount.
@@ -1205,7 +1220,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
                 // Cancelled room that still carries money: what was kept on cancellation is its whole room charge.
                 // A deleted room (not cancelled) keeps no room charge; only its money is shown.
                 $itemRows[] = [
-                    $title . rh_inv_sub(($noRoomChg ? 'Deleted - no room charge' : 'Cancelled - kept on cancellation ' . $money($grmRoom)) . '; paid on this room '
+                    $title . rh_inv_sub(($noRoomChg ? (!empty($grm['rh_inv_noshow_fee']) ? $removed . ' - the booked stay is not charged; the ' . strtolower($removed) . ' charge is below' : 'Deleted - no room charge') : 'Cancelled - kept on cancellation ' . $money($grmRoom)) . '; paid on this room '
                         . $money((float)($grm['rh_inv_paid'] ?? 0)) . ' (in the payments below)'),
                     rh_pdf_e('1'),
                     rh_pdf_e($money($grmRoom)),
@@ -1617,7 +1632,7 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
             $title = '<strong>' . htmlspecialchars(($removed !== '' ? $removed . ' room: ' : '') . rh_inv_room_title($grm)) . '</strong>' . $subHtml($whoWhen);
             $paidHere = $currency_symbol . ' ' . number_format((float)($grm['rh_inv_paid'] ?? 0), 2);
             if ($keptOnly) {
-                $chargeRows .= $roomRowHtml($title . $subHtml(($noRoomChg ? 'Deleted - no room charge' : 'Cancelled - kept on cancellation ' . $currency_symbol . ' ' . number_format($grmRoom, 2))
+                $chargeRows .= $roomRowHtml($title . $subHtml(($noRoomChg ? (!empty($grm['rh_inv_noshow_fee']) ? $removed . ' - the booked stay is not charged; the ' . strtolower($removed) . ' charge is below' : 'Deleted - no room charge') : 'Cancelled - kept on cancellation ' . $currency_symbol . ' ' . number_format($grmRoom, 2))
                     . '; paid on this room ' . $paidHere . ' (in the payment history)'), '1', $grmRoom, $grmRoom);
             } else {
                 $brSrc = $gi === $pkgRowIdx ? $booking : $grm;

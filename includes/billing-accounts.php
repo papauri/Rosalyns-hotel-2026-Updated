@@ -428,7 +428,11 @@ if (!function_exists('rh_billing_ready')) {
         $st->execute($ids);
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
         foreach ($rows as $i => $r) {
-            if ((int)$r['id'] !== $leadId && !empty($r['deleted_at']) && strtolower((string)($r['status'] ?? '')) !== 'cancelled') {
+            $rSt = strtolower((string)($r['status'] ?? ''));
+            // Same for a no-show / expired room charged under group_noshow_charge (lead included): its bill is its charges.
+            $rTagged = empty($r['deleted_at']) && in_array($rSt, ['no-show', 'expired'], true) && function_exists('rh_noshow_fee_tagged')
+                && rh_noshow_fee_tagged($pdo, (int)$r['id']);
+            if (((int)$r['id'] !== $leadId && !empty($r['deleted_at']) && $rSt !== 'cancelled') || $rTagged) {
                 $rows[$i]['total_with_vat'] = 0.0;
                 $rows[$i]['total_amount'] = 0.0;
                 $rows[$i]['vat_amount'] = 0.0;

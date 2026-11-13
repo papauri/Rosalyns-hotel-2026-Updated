@@ -248,6 +248,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_cancellation_ref
     }
 }
 
+// Group no-show / expiry charge (setting group_noshow_charge; code default '0' = Off). Its own form, so no other save
+// ever writes it; written only when the choice actually changes. Money setting: finance_settings, like the refund rules.
+$rh_group_noshow_choices = [
+    '0'           => ['Off - bill the booked stay, as today', 'A no-show or expired room in a group keeps billing its booked stay, exactly as before.'],
+    'none'        => ['On - charge nothing', 'The room stops billing its stay and is charged nothing; with no payment on it, it comes off the group invoice.'],
+    'first_night' => ['On - charge the first night', 'The room stops billing its stay and is charged its first night (booked total incl. VAT and levy, divided by the nights).'],
+    'full'        => ['On - charge the full stay', 'The room stops billing its stay and is charged the full booked stay as one charge.'],
+];
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_group_noshow_charge'])) {
+    $newGns = (string)($_POST['group_noshow_charge'] ?? '');
+    $oldGns = rh_group_noshow_charge_mode();
+    $oldGns = $oldGns === '' ? '0' : $oldGns;
+    if (!hasPermission((int)($user['id'] ?? 0), 'finance_settings')) {
+        $error = 'You do not have permission to change refund and cancellation settings.';
+    } elseif (!isset($rh_group_noshow_choices[$newGns])) {
+        $error = 'Invalid no-show charge option.';
+    } elseif ($newGns === $oldGns) {
+        $message = 'No-show charge for group rooms unchanged.';
+    } else {
+        updateSetting('group_noshow_charge', $newGns);
+        if (function_exists('rh_log_event')) {
+            rh_log_event('admin/' . basename(__FILE__, '.php'), 'warning', 'Group no-show / expiry charge changed', [
+                'user' => $user['username'] ?? '', 'user_id' => $user['id'] ?? null, 'from' => $oldGns, 'to' => $newGns,
+            ]);
+        }
+        $message = 'No-show charge for group rooms saved. It applies to rooms that become a no-show or expire from now on.';
+    }
+}
+
 // Hotel details & policies (registry-driven; see admin/includes/hotel-details-settings.php)
 require_once __DIR__ . '/includes/hotel-details-settings.php';
 require_once __DIR__ . '/includes/review-sources-settings.php';
@@ -1887,6 +1916,30 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         </fieldset>
                         <?php if ($canEditRefundRules): ?>
                         <button type="submit" class="btn-submit" style="margin-top: 14px;"><i class="fas fa-save"></i> Save Refund Settings</button>
+                        <?php endif; ?>
+                    </div>
+                </form>
+                <?php $gnsNow = rh_group_noshow_charge_mode(); $gnsNow = $gnsNow === '' ? '0' : $gnsNow; ?>
+                <form method="POST" action="booking-settings.php#group-noshow-charge" id="group-noshow-charge">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
+                    <input type="hidden" name="save_group_noshow_charge" value="1">
+                    <div class="form-group">
+                        <h3 style="margin:18px 0 8px;">Charge no-show / expired rooms in a group</h3>
+                        <p class="help-text">For a room that is part of a group booking (2 or more rooms) when it is marked a no-show or expires. Single bookings are never changed. The charge is posted once, as its own line on that room's bill, and anything paid above it (and above any extras) goes back to the guest: as a refund when the no-show refund rule is First night or Full, or as credit owed to the guest when it is No automatic refund.</p>
+                        <fieldset <?php echo $canEditRefundRules ? '' : 'disabled'; ?> style="border:0;padding:0;margin:0;min-width:0;">
+                        <?php foreach ($rh_group_noshow_choices as $gnsKey => [$gnsTitle, $gnsHelp]): ?>
+                            <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin-bottom:12px;">
+                                <input type="radio" name="group_noshow_charge" value="<?php echo htmlspecialchars((string)$gnsKey, ENT_QUOTES); ?>" <?php echo $gnsNow === (string)$gnsKey ? 'checked' : ''; ?> style="margin-top:4px;">
+                                <span>
+                                    <span style="font-weight:600;color:#1A1A1A;"><?php echo htmlspecialchars($gnsTitle); ?></span><br>
+                                    <span class="help-text"><?php echo htmlspecialchars($gnsHelp); ?></span>
+                                </span>
+                            </label>
+                        <?php endforeach; ?>
+                        <p class="help-text"><i class="fas fa-info-circle"></i> Applies only to rooms that become a no-show or expire after you save. Rooms already charged are never charged again.</p>
+                        </fieldset>
+                        <?php if ($canEditRefundRules): ?>
+                        <button type="submit" class="btn-submit" style="margin-top: 14px;"><i class="fas fa-save"></i> Save No-show Charge</button>
                         <?php endif; ?>
                     </div>
                 </form>

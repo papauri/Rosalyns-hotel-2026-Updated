@@ -257,7 +257,14 @@ function _expireStaleTentativeBookings(PDO $pdo): void
                 $ph = implode(',', array_fill(0, count($lapsing), '?'));
                 $done = $pdo->prepare("SELECT id FROM bookings WHERE status = 'expired' AND id IN ($ph)");
                 $done->execute($lapsing);
-                rh_release_holds_for_booking_ids($pdo, $done->fetchAll(PDO::FETCH_COLUMN));
+                $doneIds = $done->fetchAll(PDO::FETCH_COLUMN);
+                rh_release_holds_for_booking_ids($pdo, $doneIds);
+                // Group no-show / expiry charge: the setting is read first; Off = nothing else runs. Never throws.
+                if (rh_group_noshow_charge_mode() !== '') {
+                    foreach ($doneIds as $doneId) {
+                        rh_group_noshow_fee_apply($pdo, (int)$doneId, 'expired');
+                    }
+                }
             }
         }
     } catch (PDOException $e) {
@@ -364,6 +371,10 @@ function _expireStalePendingBookings(PDO $pdo): void
             if ($upd->rowCount() === 1) {
                 // A pending booking never has orders; release its rooms and expire its open quotations.
                 rh_release_holds_for_booking_ids($pdo, [(int)$r['id']]);
+                // Group no-show / expiry charge: the setting is read first; Off = nothing else runs. Never throws.
+                if (rh_group_noshow_charge_mode() !== '') {
+                    rh_group_noshow_fee_apply($pdo, (int)$r['id'], 'expired');
+                }
                 try {
                     if (!function_exists('logBookingStatusChange') && is_file(__DIR__ . '/../includes/booking-timeline.php')) {
                         require_once __DIR__ . '/../includes/booking-timeline.php';
@@ -7517,6 +7528,10 @@ function markTentativeBookingExpired(int $booking_id)
 
         // A lapsed hold must not keep a room or an open quotation (a tentative booking has no orders).
         rh_release_booking_holds($pdo, $booking_id, 0, 'tentative hold expired');
+        // Group no-show / expiry charge (savepoint inside this transaction; Off = nothing runs; never throws).
+        if (rh_group_noshow_charge_mode() !== '') {
+            rh_group_noshow_fee_apply($pdo, (int)$booking_id, 'expired');
+        }
 
         // Log the action
         logTentativeBookingAction($booking_id, 'expired', [
@@ -9561,6 +9576,197 @@ function getBookingCharges(int $bookingId, bool $includeVoided = false): array
 }
 
 /**
+ * Hotel setting group_noshow_charge (Hotel Settings > Refunds & cancellations; code default '0' = Off, never seeded):
+ * what a room that is part of a group (2+ rooms) is charged when it becomes a no-show or expires.
+ * Returns '' (Off: today's behaviour, the room keeps billing its booked stay) or 'none' / 'first_night' / 'full'.
+ * Reads the in-memory setting first, then getSetting(); a read error = Off.
+ */
+function rh_group_noshow_charge_mode(): string
+{
+    global $pdo;
+    $v = null;
+    if (isset($GLOBALS['_SITE_SETTINGS']['group_noshow_charge'])) {
+        $v = $GLOBALS['_SITE_SETTINGS']['group_noshow_charge'];
+    } elseif (function_exists('getCache')) {
+        $v = getSetting('group_noshow_charge', '0');
+    } else {
+        // Very early in the request (the expiry sweeps): read the row directly.
+        try {
+            $st = $pdo->prepare("SELECT setting_value FROM site_settings WHERE setting_key = 'group_noshow_charge'");
+            $st->execute();
+            $v = $st->fetchColumn();
+        } catch (Throwable $e) {
+            return '';
+        }
+    }
+    $v = is_string($v) ? trim($v) : '';
+    return in_array($v, ['none', 'first_night', 'full'], true) ? $v : '';
+}
+
+/** The idempotency tag a group no-show / expiry charge carries at the end of its folio description. */
+function rh_noshow_fee_tag(int $bookingId): string
+{
+    return '[noshow-fee:' . $bookingId . ']';
+}
+
+/**
+ * True when the booking carries its group no-show / expiry charge row (voided or not: a voided row = charged nothing).
+ * Such a no-show / expired room bills from its folio charges only; its booked stay is no longer billed.
+ */
+function rh_noshow_fee_tagged(PDO $pdo, int $bookingId): bool
+{
+    if ($bookingId <= 0) {
+        return false;
+    }
+    try {
+        $st = $pdo->prepare('SELECT 1 FROM booking_charges WHERE booking_id = ? AND description LIKE ? LIMIT 1');
+        $st->execute([$bookingId, '%' . rh_noshow_fee_tag($bookingId)]);
+        return (bool)$st->fetchColumn();
+    } catch (Throwable $e) {
+        error_log('rh_noshow_fee_tagged: ' . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * The group no-show / expiry charge for one booking row under a mode ('none' / 'first_night' / 'full'), worked out only
+ * (pure, nothing read or written): first night = booked total incl. VAT and levy / nights, with its VAT share; full = the
+ * booked total with its VAT; 'none' or anything under BALANCE_TOLERANCE = 0. 'gross' = the booked stay it replaces.
+ * @return array{amount:float,vat:float,gross:float}
+ */
+function rh_group_noshow_fee_amount(array $b, string $mode): array
+{
+    $gross = (float)($b['total_with_vat'] ?? 0);
+    if ($gross <= 0) {
+        $gross = (float)($b['total_amount'] ?? 0) + (float)($b['vat_amount'] ?? 0);
+    }
+    $gross = max(0.0, $gross);
+    $vat = max(0.0, (float)($b['vat_amount'] ?? 0));
+    $nights = max(1, (int)($b['number_of_nights'] ?? 1));
+    $amount = 0.0;
+    $vatPart = 0.0;
+    if ($mode === 'first_night') {
+        // Same basis as the no-show refund's first night: booked total incl. VAT and levy / nights.
+        $amount = round(min($gross, $gross / $nights), 2);
+        $vatPart = round(min($amount, $vat / $nights), 2);
+    } elseif ($mode === 'full') {
+        $amount = round($gross, 2);
+        $vatPart = round(min($amount, $vat), 2);
+    }
+    if ($amount <= BALANCE_TOLERANCE) {
+        $amount = 0.0;
+        $vatPart = 0.0;
+    }
+    return ['amount' => $amount, 'vat' => $vatPart, 'gross' => $gross];
+}
+
+/**
+ * Read-only: would this booking row get the group no-show / expiry charge? True for a booking not deleted, not already
+ * charged (rh_noshow_fee_tagged) and part of a group of 2+ rooms not deleted (root = primary_booking_id ?: id). The
+ * status is not checked here (a preview runs before the no-show); the setting is not checked either.
+ */
+function rh_group_noshow_fee_applies(PDO $pdo, array $b): bool
+{
+    $bookingId = (int)($b['id'] ?? 0);
+    if ($bookingId <= 0 || !empty($b['deleted_at']) || rh_noshow_fee_tagged($pdo, $bookingId)) {
+        return false;
+    }
+    $root = (int)($b['primary_booking_id'] ?? 0) > 0 ? (int)$b['primary_booking_id'] : $bookingId;
+    $cnt = $pdo->prepare('SELECT COUNT(*) FROM bookings WHERE (id = ? OR primary_booking_id = ?) AND deleted_at IS NULL');
+    $cnt->execute([$root, $root]);
+    return (int)$cnt->fetchColumn() >= 2;
+}
+
+/**
+ * Group no-show / expiry charge (setting group_noshow_charge). Call right after a booking's status became 'no-show' or
+ * 'expired'. Off: returns at once, nothing read or written. On, for a room of a group (2+ rooms not deleted, counted
+ * now and frozen by the row): posts ONE folio row tagged rh_noshow_fee_tag() - first night (booked total incl. VAT
+ * and levy / nights, its VAT share) or the full booked stay; "none" (or a zero amount) is stored as a VOIDED zero row,
+ * so it is never money anywhere but still marks the room as charged nothing. Never posts twice (tag checked under the
+ * booking row lock). Recalculates the balance and writes the booking history (actor: the user, or system).
+ * Inside a caller's transaction it runs behind a savepoint, else in its own; any failure is rolled back, logged and
+ * reported in 'error' - it never throws, so a no-show or an expiry always stands.
+ * @return array{posted:bool,mode:string,amount:float,error:string}
+ */
+function rh_group_noshow_fee_apply(PDO $pdo, int $bookingId, string $event, int $userId = 0, string $userName = ''): array
+{
+    $out = ['posted' => false, 'mode' => '', 'amount' => 0.0, 'error' => ''];
+    $mode = rh_group_noshow_charge_mode();
+    if ($mode === '') {
+        return $out;
+    }
+    $out['mode'] = $mode;
+    if ($bookingId <= 0 || !in_array($event, ['no-show', 'expired'], true)) {
+        return $out;
+    }
+    $inTx = $pdo->inTransaction();
+    $sp = 'rh_group_noshow_fee';
+    try {
+        if ($inTx) {
+            $pdo->exec('SAVEPOINT ' . $sp);
+        } else {
+            $pdo->beginTransaction();
+        }
+        $st = $pdo->prepare('SELECT * FROM bookings WHERE id = ? FOR UPDATE');
+        $st->execute([$bookingId]);
+        $b = $st->fetch(PDO::FETCH_ASSOC);
+        $go = $b && (string)$b['status'] === $event && rh_group_noshow_fee_applies($pdo, $b);
+        if ($go) {
+            $fee = rh_group_noshow_fee_amount($b, $mode);
+            $gross = $fee['gross'];
+            $amount = $fee['amount'];
+            $vatPart = $fee['vat'];
+            $isZero = $amount <= BALANCE_TOLERANCE;
+            $what = ['none' => 'no charge', 'first_night' => 'first night', 'full' => 'full stay'][$isZero ? 'none' : $mode];
+            $desc = ($event === 'no-show' ? 'No-show charge' : 'Expired booking charge') . ' - ' . $what . ' ' . rh_noshow_fee_tag($bookingId);
+            $ins = $pdo->prepare("INSERT INTO booking_charges (booking_id, charge_type, description, quantity, unit_price, line_subtotal, vat_rate, vat_amount, line_total,
+                    posted_at, added_by, voided, voided_at, void_reason, voided_by)
+                VALUES (?, 'other', ?, 1, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?)");
+            $ins->execute([$bookingId, $desc, $amount, round($amount - $vatPart, 2), $vatPart > 0 ? (float)($b['vat_rate'] ?? 0) : 0, $vatPart, $amount,
+                $userId > 0 ? $userId : null, $isZero ? 1 : 0, $isZero ? date('Y-m-d H:i:s') : null,
+                $isZero ? 'Group no-show / expiry setting: no charge' : null, $isZero && $userId > 0 ? $userId : null]);
+            if (!recalculateBookingFinancials($bookingId)) {
+                throw new RuntimeException('Could not recalculate the booking balance.');
+            }
+            if (!function_exists('logBookingEvent') && is_file(__DIR__ . '/../includes/booking-timeline.php')) {
+                require_once __DIR__ . '/../includes/booking-timeline.php';
+            }
+            if (function_exists('logBookingEvent')) {
+                $was = round($gross, 2);
+                logBookingEvent($bookingId, (string)($b['booking_reference'] ?? ''), $event === 'no-show' ? 'No-show charge posted' : 'Expiry charge posted', 'financial',
+                    'Part of a group: the room is no longer billed its booked stay (' . number_format($was, 2) . '); charged '
+                    . ($isZero ? 'nothing' : number_format($amount, 2) . ' (' . $what . ')') . ' under the hotel setting.',
+                    'room bill ' . number_format($was, 2), 'charge ' . number_format($amount, 2) . ' ' . trim(rh_noshow_fee_tag($bookingId), '[]'),
+                    $userId > 0 ? 'admin' : 'system', $userId > 0 ? $userId : null, $userId > 0 ? ($userName !== '' ? $userName : null) : 'System');
+            }
+            $out['posted'] = true;
+            $out['amount'] = $amount;
+        }
+        if ($inTx) {
+            $pdo->exec('RELEASE SAVEPOINT ' . $sp);
+        } else {
+            $pdo->commit();
+        }
+    } catch (Throwable $e) {
+        try {
+            if ($inTx) {
+                $pdo->exec('ROLLBACK TO SAVEPOINT ' . $sp);
+                $pdo->exec('RELEASE SAVEPOINT ' . $sp);
+            } elseif ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+        } catch (Throwable $e2) {
+            error_log('rh_group_noshow_fee_apply rollback: ' . $e2->getMessage());
+        }
+        error_log('rh_group_noshow_fee_apply failed for booking ' . $bookingId . ': ' . $e->getMessage());
+        $out['posted'] = false;
+        $out['amount'] = 0.0;
+        $out['error'] = $e->getMessage();
+    }
+    return $out;
+}
+
+/**
  * Get booking folio summary with totals breakdown
  *
  * @param int $bookingId Booking ID
@@ -9636,6 +9842,11 @@ function getBookingFolioSummary(int $bookingId): array
             $retained = max(0.0, (float)($booking['cancellation_retained_amount'] ?? 0));
             $baseGross = $retained;
             $baseNet = $baseGross;
+            $baseVat = 0.0;
+        } elseif (in_array(($booking['status'] ?? ''), ['no-show', 'expired'], true) && rh_noshow_fee_tagged($pdo, $bookingId)) {
+            // A group room charged under group_noshow_charge: billed from its folio charges only (the tagged row).
+            $baseGross = 0.0;
+            $baseNet = 0.0;
             $baseVat = 0.0;
         }
         $extrasSubtotal = (float)($folioTotals['folio_subtotal'] ?? 0);
@@ -9741,8 +9952,14 @@ function recalculateBookingFinancials(int $bookingId): bool
         // (cancellation_retained_amount; NULL = bill voided = 0). The original
         // total_amount / total_with_vat stay untouched as history. Folio charges already
         // posted and not voided remain billable.
+        // A group room charged under group_noshow_charge (no-show / expired with its tagged row): billed from its folio
+        // charges only, its booked stay no longer billed (getBookingFolioSummary does the same).
+        $baseReplaced = ($booking['status'] ?? '') === 'cancelled';
         if (($booking['status'] ?? '') === 'cancelled') {
             $baseTotalWithVat = max(0.0, (float)($booking['cancellation_retained_amount'] ?? 0));
+        } elseif (in_array(($booking['status'] ?? ''), ['no-show', 'expired'], true) && rh_noshow_fee_tagged($pdo, $bookingId)) {
+            $baseTotalWithVat = 0.0;
+            $baseReplaced = true;
         }
         $totalWithVat = $baseTotalWithVat + $chargesTotal; // charges_total already includes VAT
         $balance = $totalWithVat - $amountPaid;
@@ -9753,14 +9970,14 @@ function recalculateBookingFinancials(int $bookingId): bool
         $creditBalance = $balance < -BALANCE_TOLERANCE ? round(-$balance, 2) : 0.00;
         $paymentStatus = $amountDue <= BALANCE_TOLERANCE ? 'paid' : ($amountPaid > BALANCE_TOLERANCE ? 'partial' : 'unpaid');
         // A cancelled booking with nothing billed and nothing ever paid is simply unpaid.
-        if (($booking['status'] ?? '') === 'cancelled'
+        if ($baseReplaced
             && $totalWithVat <= BALANCE_TOLERANCE
             && $amountPaid <= BALANCE_TOLERANCE
             && (float)($payments['total_refunded'] ?? 0) <= BALANCE_TOLERANCE) {
             $paymentStatus = 'unpaid';
         }
         // A cancelled booking whose money has all gone back out reads 'refunded'.
-        if (($booking['status'] ?? '') === 'cancelled'
+        if ($baseReplaced
             && $amountPaid <= BALANCE_TOLERANCE
             && (float)($payments['total_refunded'] ?? 0) > BALANCE_TOLERANCE
             && $amountDue <= BALANCE_TOLERANCE) {

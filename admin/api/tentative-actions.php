@@ -179,6 +179,10 @@ try {
 
             // A tentative / pending booking has no orders; release its rooms and expire its open quotations.
             rh_release_booking_holds($pdo, $booking_id, (int)$user['id'], 'booking expired manually');
+            // Group no-show / expiry charge (hotel setting; Off = nothing runs; savepoint, never throws).
+            if (rh_group_noshow_charge_mode() !== '') {
+                rh_group_noshow_fee_apply($pdo, (int)$booking_id, 'expired', (int)$user['id'], (string)($user['full_name'] ?? ''));
+            }
 
             $pdo->prepare("
                 INSERT INTO tentative_booking_log (booking_id, action, performed_by, action_reason)
