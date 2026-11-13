@@ -6,6 +6,8 @@
  *  - overdue_payment_reminders  checked-out room balances + conference / event / gym accounts
  *                               past their due date; stages from automated_email_reminder_stages
  *                               (default 1,3,7 days overdue, max 3), invoice PDF attached.
+ *                               A GROUP booking is chased ONCE per group and payer for the whole group
+ *                               balance, with the group invoice (owner 2026-11-13; rh_auto_group_reminders).
  *  - quotation_expiry_reminder  sent quotations that expire within automated_email_quotation_days.
  *  - tentative_hold_reminder    one reminder per hold, tentative_reminder_hours before it lapses.
  *  - tentative_expired_notice   guest + hotel notice once a hold has lapsed (last 24 h).
@@ -194,7 +196,10 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
         };
         if (rh_auto_module_on('bookings')) {
             // Pay-later arrangements (checkin_without_payment) are agreed accounts: never chased automatically.
+            // Single rooms only: a group's lead (it has member rooms) is chased once for the whole group
+            // (rh_auto_overdue_group_roots / rh_auto_group_reminders), never for its own balance alone.
             $out['room'] = $run("SELECT b.id FROM bookings b WHERE b.status = 'checked-out' AND b.primary_booking_id IS NULL AND b.amount_due > ?" . rh_checkin_arrangement_exclude_sql('b') . "
+                AND NOT EXISTS (SELECT 1 FROM bookings grp_m WHERE grp_m.primary_booking_id = b.id)
                 AND b.guest_email <> '' AND COALESCE(DATE(b.checkout_completed_at), b.check_out_date) BETWEEN (CURDATE() - INTERVAL ? DAY) AND (CURDATE() - INTERVAL ? DAY)
                 ORDER BY b.id LIMIT 200", [$tol, $lookback, $minDays]);
         }
@@ -214,6 +219,261 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
                 ORDER BY gi.id LIMIT 200", [$tol, $terms, $lookback, $minDays]);
         }
         return $out;
+    }
+
+    /* ── group bookings: ONE reminder per group and payer (owner 2026-11-13) ── */
+
+    /**
+     * PURE. Whether every LIVE room of a group is finished. $rows: the group's bookings rows (status, deleted_at,
+     * checkout_completed_at, check_out_date). Live = not deleted and not cancelled / expired; a no-show room counts as
+     * finished (it still owes its bill). Finished = no live room is pending / confirmed / checked-in AND at least one room
+     * is checked out (an all-no-show group has no checkout to count from and is not chased, like a single no-show).
+     * last_out: the latest checkout day of the checked-out rooms (checkout_completed_at, else check_out_date).
+     * @return array{finished:bool,last_out:string,open:int,checked_out:int}
+     */
+    function rh_auto_group_finished(array $rows): array
+    {
+        $last = '';
+        $open = 0;
+        $out = 0;
+        foreach ($rows as $r) {
+            if (!empty($r['deleted_at'])) {
+                continue;
+            }
+            $s = strtolower((string)($r['status'] ?? ''));
+            if (in_array($s, ['cancelled', 'expired', 'no-show'], true)) {
+                continue;
+            }
+            if ($s !== 'checked-out') {
+                $open++;
+                continue;
+            }
+            $out++;
+            $d = !empty($r['checkout_completed_at']) ? substr((string)$r['checkout_completed_at'], 0, 10) : substr((string)($r['check_out_date'] ?? ''), 0, 10);
+            if ($d > $last) {
+                $last = $d;
+            }
+        }
+        return ['finished' => $open === 0 && $out > 0 && $last !== '', 'last_out' => $last, 'open' => $open, 'checked_out' => $out];
+    }
+
+    /** PURE. The highest reminder stage (1-based) $days overdue has reached; 0 = none yet. */
+    function rh_auto_stage_for_days(int $days, array $stages): int
+    {
+        $s = 0;
+        foreach (array_values($stages) as $i => $threshold) {
+            if ($days >= (int)$threshold) {
+                $s = $i + 1;
+            }
+        }
+        return $s;
+    }
+
+    /**
+     * Group roots (the id the members point at through primary_booking_id) worth checking: a group with a room checked
+     * out inside the chase window that still has a room owing money (rh_receivable_status_sql). A superset; the exact
+     * rule is applied per group by rh_auto_group_reminders(). Newest groups first, so a long backlog never starves this
+     * week's groups.
+     * @return int[]
+     */
+    function rh_auto_overdue_group_roots(PDO $pdo, int $minDays, int $lookback): array
+    {
+        if (!rh_auto_module_on('bookings')) {
+            return [];
+        }
+        if (!function_exists('rh_receivable_status_sql')) {
+            require_once __DIR__ . '/../admin/includes/receivables.php';
+        }
+        $rootX = 'COALESCE(NULLIF(x.primary_booking_id, 0), x.id)';
+        $outX = 'COALESCE(DATE(x.checkout_completed_at), x.check_out_date)';
+        $p = [$lookback, $minDays, BALANCE_TOLERANCE];
+        $st = $pdo->prepare("SELECT DISTINCT $rootX AS root FROM bookings x
+            WHERE x.status = 'checked-out' AND x.deleted_at IS NULL
+              AND $outX BETWEEN (CURDATE() - INTERVAL ? DAY) AND (CURDATE() - INTERVAL ? DAY)
+              AND (COALESCE(x.primary_booking_id, 0) > 0 OR EXISTS (SELECT 1 FROM bookings grp_m WHERE grp_m.primary_booking_id = x.id))
+              AND EXISTS (SELECT 1 FROM bookings o WHERE (o.id = $rootX OR o.primary_booking_id = $rootX)
+                    AND o.amount_due > ? AND " . rh_receivable_status_sql('room', 'o') . ")
+            ORDER BY root DESC LIMIT 200");
+        $st->execute($p);
+        return array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /**
+     * The reminders ONE group owes right now (read-only: SELECTs only, nothing claimed or sent). Rule (owner 2026-11-13,
+     * accounting lead's proposal): one reminder per group and payer, for the group's whole balance, once every live room
+     * is finished (rh_auto_group_finished). Amount = the amount_due of every room that counts as owed under the one
+     * receivables rule (rh_receivable_status_sql('room'): live rooms, owing no-shows, a cancelled room only for what it
+     * kept, an expired room only under the group no-show charge) - the same basis as Still owed and the group invoice.
+     * Payers: the guest (booker on the group's effective lead) for every room not on a company account; on a company
+     * account ONLY the guest's own share (guest_due) - the company share is chased solely by the weekly company statement
+     * (rh_job_company_statements), as for single company bookings. Days overdue: from the last room's checkout. A
+     * pay-later arrangement on any room = the group is not chased.
+     *
+     * Dedupe key: account_type 'room' (guest-paid rooms; the SAME key the old per-lead reminder used, so a group chased
+     * before keeps its stages) or 'room_g:<company id>' (guest share of a company group); account_id = the group ROOT (the original lead: never changes, even when the lead is cancelled later).
+     * Recipient, reference and invoice follow the effective lead (rh_booking_group_effective_lead / rh_billing_doc_scope).
+     *
+     * @param int[] $stages ascending day thresholds (rh_auto_reminder_stages)
+     * @return array{root:int,reason:string,entries:array<int,array<string,mixed>>}
+     */
+    function rh_auto_group_reminders(PDO $pdo, int $root, array $stages, int $lookback): array
+    {
+        $out = ['root' => $root, 'reason' => '', 'entries' => []];
+        $tol = BALANCE_TOLERANCE;
+        if (!function_exists('rh_receivable_status_sql')) {
+            require_once __DIR__ . '/../admin/includes/receivables.php';
+        }
+        if (!function_exists('rh_billing_ready')) {
+            require_once __DIR__ . '/billing-accounts.php';
+        }
+        $st = $pdo->prepare('SELECT b.*, CASE WHEN ' . rh_receivable_status_sql('room', 'b') . ' THEN 1 ELSE 0 END AS rh_owed
+            FROM bookings b WHERE b.id = ? OR b.primary_booking_id = ? ORDER BY b.id');
+        $st->execute([$root, $root]);
+        $rows = [];
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+            $rows[(int)$r['id']] = $r;
+        }
+        if (count($rows) <= 1 || !isset($rows[$root])) {
+            $out['reason'] = 'not a group';
+            return $out;
+        }
+        if (rh_checkin_arrangement_columns_present($pdo)) {
+            foreach ($rows as $r) {
+                if (empty($r['deleted_at']) && (int)($r['checkin_without_payment'] ?? 0) === 1) {
+                    $out['reason'] = 'pay-later arrangement';
+                    return $out;
+                }
+            }
+        }
+        $fin = rh_auto_group_finished(array_values($rows));
+        if (!$fin['finished']) {
+            $out['reason'] = $fin['open'] > 0 ? 'rooms still open' : 'no room checked out';
+            return $out;
+        }
+        $today = date('Y-m-d');
+        $daysOf = static function (string $due) use ($today): int {
+            return (int)floor((strtotime($today) - strtotime($due)) / 86400);
+        };
+        $owed = [];
+        foreach ($rows as $id => $r) {
+            if ((int)$r['rh_owed'] === 1 && (float)$r['amount_due'] > $tol) {
+                $owed[$id] = $r;
+            }
+        }
+        if (!$owed) {
+            $out['reason'] = 'nothing owed';
+            return $out;
+        }
+        // Who pays each owed room: its company (own, or the group primary's), 0 = the guest.
+        $splits = rh_billing_ready($pdo) ? rh_billing_splits_for_rows($pdo, array_values($owed)) : [];
+        $sets = [];
+        foreach ($owed as $id => $r) {
+            $sp = $splits[$id] ?? [];
+            $sets[!empty($sp['on_account']) ? (int)$sp['account_id'] : 0][] = $id;
+        }
+        ksort($sets);
+        $eff = rh_booking_group_effective_lead($pdo, $root);
+        $booker = $rows[$eff] ?? $rows[$root];
+        $email = trim((string)($booker['guest_email'] ?? ''));
+        if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $email = trim((string)($rows[$root]['guest_email'] ?? ''));
+        }
+        $guestEmail = filter_var($email, FILTER_VALIDATE_EMAIL) ? $email : '';
+        foreach ($sets as $accId => $ids) {
+            // The document lead of this payer's rooms: the room the group invoice for them is built from.
+            $docLead = (int)rh_billing_doc_scope($pdo, (int)$ids[0])['lead'];
+            $lead = $rows[$docLead] ?? $booker;
+            $ref = (string)$lead['booking_reference'];
+            $inv = trim((string)($lead['final_invoice_number'] ?? ''));
+            // Attachment: the group invoice for this payer's rooms. The guest share of a company group gets the guest EXTRAS
+            // document of each room it owes on
+            // (rh_guest_extras_invoice_html: balance = that room's guest_due), never the company's invoice.
+            $base = ['root' => $root, 'lead_id' => (int)$lead['id'], 'doc_id' => (int)$ids[0], 'ids' => $ids, 'ref' => $ref,
+                'invoice_no' => $inv !== '' ? $inv : 'STMT-' . $ref, 'account_id' => (int)$accId, 'last_out' => $fin['last_out'],
+                'docs' => [['kind' => 'group', 'id' => (int)$ids[0]]]];
+            $guestDue = $fin['last_out'];
+            if ($accId === 0) {
+                $amt = 0.0;
+                foreach ($ids as $id) {
+                    $amt += (float)$owed[$id]['amount_due'];
+                }
+                $parts = [['payer' => 'guest', 'key_type' => 'room', 'amount' => round($amt, 2), 'due' => $guestDue,
+                    'name' => (string)$booker['guest_name'], 'email' => $guestEmail]];
+            } else {
+                // The company share is NEVER chased here (decision 2026-11-13): the weekly company statement
+                // (rh_job_company_statements) is the only chase for company money, as for a single company booking.
+                $split = rh_billing_split_for_ids($pdo, $ids, $docLead);
+                $extDocs = [];
+                $extNos = [];
+                foreach ($ids as $id) {
+                    if ((float)($splits[$id]['guest_due'] ?? 0) > $tol) {
+                        $extDocs[] = ['kind' => 'extras', 'id' => (int)$id];
+                        $extNos[] = 'EXT-' . preg_replace('/[^A-Za-z0-9_-]+/', '-', (string)$owed[$id]['booking_reference']);
+                    }
+                }
+                $parts = [
+                    ['payer' => 'guest', 'key_type' => 'room_g:' . $accId, 'amount' => round((float)$split['guest_due'], 2), 'due' => $guestDue,
+                        'name' => (string)$booker['guest_name'], 'email' => $guestEmail, 'docs' => $extDocs,
+                        'invoice_no' => $extNos ? implode(', ', $extNos) : $base['invoice_no']],
+                ];
+            }
+            foreach ($parts as $p) {
+                if ($p['amount'] <= $tol) {
+                    continue;
+                }
+                $days = $daysOf($p['due']);
+                if ($days > $lookback) {
+                    continue; // past "Stop chasing after (days overdue)"
+                }
+                $out['entries'][] = $p + $base + ['days_overdue' => $days, 'stage' => rh_auto_stage_for_days($days, $stages)];
+            }
+        }
+        if (!$out['entries']) {
+            $out['reason'] = 'outside the chase window';
+        }
+        return $out;
+    }
+
+    /**
+     * Read-only list of what the overdue job would chase now (singles + groups): nothing is claimed, logged or sent.
+     * Each row: type, key_type, key_id, ref, payer, name, email, amount, days_overdue, stage (0 = not due yet) and
+     * log (the automated_email_log status of that stage, '' = not sent yet). Used by the tests and the dry-run proof.
+     */
+    function rh_auto_overdue_preview(PDO $pdo, bool $testMode = false): array
+    {
+        $stages = rh_auto_reminder_stages();
+        $terms = rh_auto_terms_days();
+        $lookback = rh_auto_lookback_days();
+        $prefix = $testMode ? 'test:' : '';
+        $logSt = $pdo->prepare("SELECT status FROM automated_email_log WHERE job = 'overdue_payment_reminders' AND account_type = ? AND account_id = ? AND stage = ?");
+        $log = static function (string $type, int $id, int $s) use ($logSt, $prefix): string {
+            if ($s <= 0) {
+                return '';
+            }
+            $logSt->execute([$type, $id, $prefix . 'r' . $s]);
+            return (string)($logSt->fetchColumn() ?: '');
+        };
+        $rows = [];
+        foreach (rh_auto_overdue_candidates($pdo, $stages[0], $lookback, $terms) as $type => $ids) {
+            foreach ($ids as $id) {
+                $a = rh_auto_load_account($pdo, $type, $id, $terms);
+                if (!$a) {
+                    continue;
+                }
+                $s = rh_auto_stage_for_days((int)$a['days_overdue'], $stages);
+                $rows[] = ['type' => $type, 'key_type' => $type, 'key_id' => $id, 'ref' => $a['ref'], 'payer' => 'guest', 'name' => $a['name'],
+                    'email' => $a['email'], 'amount' => round((float)$a['amount_due'], 2), 'days_overdue' => (int)$a['days_overdue'], 'stage' => $s,
+                    'log' => $log($type, $id, $s), 'group' => false];
+            }
+        }
+        foreach (rh_auto_overdue_group_roots($pdo, $stages[0], $lookback) as $root) {
+            foreach (rh_auto_group_reminders($pdo, $root, $stages, $lookback)['entries'] as $e) {
+                $rows[] = ['type' => 'room', 'key_type' => $e['key_type'], 'key_id' => $root, 'ref' => $e['ref'], 'payer' => $e['payer'], 'name' => $e['name'],
+                    'email' => $e['email'], 'amount' => $e['amount'], 'days_overdue' => $e['days_overdue'], 'stage' => $e['stage'],
+                    'log' => $log($e['key_type'], $root, (int)$e['stage']), 'group' => true, 'ids' => $e['ids']];
+            }
+        }
+        return $rows;
     }
 
     /* ── invoice PDF (no new invoice number is ever consumed) ─────────── */
@@ -268,6 +528,62 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
         }
         $file = preg_replace('/[^A-Za-z0-9_-]+/', '-', $no) . '.pdf';
         return [$file, bookingRenderPdfFromHtml($html, 'Invoice ' . $no)];
+    }
+
+    /**
+     * HTML of the GROUP invoice for one payer's rooms: exactly the document config/invoice.php builds for $docId
+     * (rh_invoice_doc_rows: the group from its effective lead, or only the rooms billed to the same payer). Never
+     * consumes an invoice number and writes no file. $totals: the invoice's own total / paid / balance.
+     */
+    function rh_auto_group_invoice_html(PDO $pdo, int $docId, string $no, ?array &$totals = null): string
+    {
+        rh_auto_require_invoice();
+        $doc = rh_invoice_doc_rows($pdo, $docId);
+        if ($doc === null) {
+            throw new RuntimeException('group invoice: booking not found');
+        }
+        $addr = getSetting('address_line1') . ', ' . getSetting('address_line2') . ', ' . getSetting('address_country');
+        return buildInvoiceHTML($doc['booking'], $no, (string)getSetting('site_name'), rh_guest_contact_email(), (string)getSetting('phone_main'), $addr,
+            (string)getSetting('currency_symbol'), $doc['group_bookings'], null, false, $totals);
+    }
+
+    /**
+     * The documents of ONE group reminder entry (rh_auto_group_reminders 'docs'), as [number, html, balance] each:
+     * 'group' = the group invoice for that payer's rooms (balance = the invoice's own balance), 'extras' = the guest extras
+     * document of one room on a company account (balance = that room's guest_due). Read-only, no number consumed.
+     * @return array<int,array{0:string,1:string,2:float}>
+     */
+    function rh_auto_group_entry_docs(PDO $pdo, array $e): array
+    {
+        rh_auto_require_invoice();
+        $out = [];
+        foreach ($e['docs'] ?? [] as $d) {
+            if (($d['kind'] ?? '') === 'extras') {
+                $st = $pdo->prepare('SELECT b.*, r.name AS room_name FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id WHERE b.id = ?');
+                $st->execute([(int)$d['id']]);
+                $b = $st->fetch(PDO::FETCH_ASSOC);
+                $no = $b ? 'EXT-' . preg_replace('/[^A-Za-z0-9_-]+/', '-', (string)$b['booking_reference']) : '';
+                $html = $b ? rh_guest_extras_invoice_html($b, $no) : '';
+                if ($html !== '') {
+                    $out[] = [$no, $html, (float)rh_booking_bill_split($pdo, (int)$d['id'])['guest_due']];
+                }
+                continue;
+            }
+            $t = null;
+            $html = rh_auto_group_invoice_html($pdo, (int)$d['id'], (string)$e['invoice_no'], $t);
+            $out[] = [(string)$e['invoice_no'], $html, (float)($t['balance'] ?? 0)];
+        }
+        return $out;
+    }
+
+    /** @return array<int,array{0:string,1:string}> [filename, pdf bytes] of each document of a group reminder entry. */
+    function rh_auto_group_entry_pdfs(PDO $pdo, array $e): array
+    {
+        $out = [];
+        foreach (rh_auto_group_entry_docs($pdo, $e) as [$no, $html]) {
+            $out[] = [preg_replace('/[^A-Za-z0-9_-]+/', '-', $no) . '.pdf', bookingRenderPdfFromHtml($html, 'Invoice ' . $no)];
+        }
+        return $out;
     }
 
     /* ── job: overdue payment reminders ──────────────────────────────── */
@@ -336,14 +652,75 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
         return $res;
     }
 
+    /**
+     * Send ONE overdue reminder stage: supersede the earlier stages, render the template, claim the never-twice row
+     * (job, $type, $id, stage) and send with the invoice PDF ($pdf() => list of [file, bytes]; a PDF failure still sends).
+     * $a: name, email, amount_due, due, days_overdue, invoice_no, ref, pay_type ('room' / 'conference' / ...),
+     * ctx_type, ctx_id (the account the Emails-sent log names).
+     */
+    function rh_auto_overdue_send(PDO $pdo, array &$res, string $job, string $type, int $id, int $s, string $prefix, array $a, callable $pdf): void
+    {
+        for ($i = 1; $i < $s; $i++) {
+            rh_auto_log_skip($pdo, $job, $type, $id, $prefix . 'r' . $i, 'superseded by stage ' . $s);
+        }
+        $stage = $prefix . 'r' . $s;
+
+        $vars = rh_auto_template_vars((string)$a['name'], $a['email'], [
+            'amount_due' => rh_auto_money($a['amount_due']),
+            'due_date' => date('F j, Y', strtotime($a['due'])),
+            'days_overdue' => (string)$a['days_overdue'],
+            'invoice_number' => $a['invoice_no'],
+            'account_reference' => $a['ref'],
+            'pay_instructions' => rh_auto_pay_instructions((string)$a['ref'], (string)$a['pay_type']),
+        ]);
+        $tpl = renderBookingEmailTemplate('payment_reminder_' . min($s, 3), $vars);
+        if (!$tpl) {
+            $res['skipped']++; // template switched off in the editor = stage switched off
+            return;
+        }
+        if (!rh_auto_log_claim($pdo, $job, $type, $id, $stage, $a['email'], $tpl['subject'])) {
+            $res['skipped']++; // already sent / being sent
+            return;
+        }
+        try {
+            $attach = [];
+            try {
+                foreach ($pdf() as [$file, $bytes]) {
+                    $attach[] = ['content' => $bytes, 'name' => $file, 'mime' => 'application/pdf'];
+                }
+            } catch (Throwable $e) {
+                error_log('auto-email invoice pdf ' . $type . '#' . $id . ': ' . $e->getMessage());
+            }
+            rh_scheduler_budget_spend();
+            $emailCtx = null; // end any earlier guard before the next one is built on top of it
+            $emailCtx = function_exists('rh_email_context') ? rh_email_context(['kind' => 'payment_reminder'] + rh_email_ctx_account((string)$a['ctx_type'], (int)$a['ctx_id'], (string)($a['ref'] ?? ''))) : null;
+            try {
+                $r = sendEmailWithAttachments($a['email'], (string)$a['name'], $tpl['subject'], $tpl['html_body'], $attach, (string)$tpl['text_body']);
+            } finally {
+                $emailCtx = null;
+            }
+            if (!empty($r['success'])) {
+                rh_auto_log_finish($pdo, $job, $type, $id, $stage, 'sent');
+                $res['sent']++;
+            } else {
+                rh_auto_log_finish($pdo, $job, $type, $id, $stage, 'failed', (string)($r['message'] ?? 'unknown'));
+                $res['errors'][] = $a['ref'] . ': ' . (string)($r['message'] ?? 'send failed');
+            }
+        } catch (Throwable $e) {
+            rh_auto_log_finish($pdo, $job, $type, $id, $stage, 'failed', $e->getMessage());
+            $res['errors'][] = $a['ref'] . ': ' . $e->getMessage();
+        }
+    }
+
     function rh_job_overdue_payment_reminders(PDO $pdo, array $o = []): array
     {
         $res = ['checked' => 0, 'sent' => 0, 'skipped' => 0, 'errors' => []];
         $job = 'overdue_payment_reminders';
         $stages = rh_auto_reminder_stages();
         $terms = rh_auto_terms_days();
+        $lookback = rh_auto_lookback_days();
         $prefix = !empty($o['test_mode']) ? 'test:' : '';
-        $cands = rh_auto_overdue_candidates($pdo, $stages[0], rh_auto_lookback_days(), $terms);
+        $cands = rh_auto_overdue_candidates($pdo, $stages[0], $lookback, $terms);
 
         foreach ($cands as $type => $ids) {
             foreach ($ids as $id) {
@@ -357,66 +734,54 @@ if (!function_exists('rh_job_overdue_payment_reminders')) {
                     $res['skipped']++;
                     continue;
                 }
-                $due = [];
-                foreach ($stages as $i => $threshold) {
-                    if ($a['days_overdue'] >= $threshold) {
-                        $due[] = $i + 1;
-                    }
-                }
-                if (!$due) {
+                $s = rh_auto_stage_for_days((int)$a['days_overdue'], $stages);
+                if ($s === 0) {
                     $res['skipped']++;
                     continue;
                 }
-                $s = max($due);
-                for ($i = 1; $i < $s; $i++) {
-                    rh_auto_log_skip($pdo, $job, $type, $id, $prefix . 'r' . $i, 'superseded by stage ' . $s);
-                }
-                $stage = $prefix . 'r' . $s;
+                rh_auto_overdue_send($pdo, $res, $job, $type, $id, $s, $prefix, $a + ['pay_type' => $type, 'ctx_type' => $type, 'ctx_id' => $id],
+                    static function () use ($a): array {
+                        return [rh_auto_invoice_pdf($a)];
+                    });
+            }
+        }
+        if (!empty($res['deferred'])) {
+            return $res;
+        }
 
-                $vars = rh_auto_template_vars((string)$a['name'], $a['email'], [
-                    'amount_due' => rh_auto_money($a['amount_due']),
-                    'due_date' => date('F j, Y', strtotime($a['due'])),
-                    'days_overdue' => (string)$a['days_overdue'],
-                    'invoice_number' => $a['invoice_no'],
-                    'account_reference' => $a['ref'],
-                    'pay_instructions' => rh_auto_pay_instructions((string)$a['ref'], $type),
-                ]);
-                $tpl = renderBookingEmailTemplate('payment_reminder_' . min($s, 3), $vars);
-                if (!$tpl) {
-                    $res['skipped']++; // template switched off in the editor = stage switched off
+        // Group bookings (owner 2026-11-13): ONE reminder per group and payer for the whole group balance, with the group
+        // invoice. Each group is re-read just before its send (rh_auto_group_reminders), so a payment made a second ago or a
+        // room still in the house stops it.
+        foreach (rh_auto_overdue_group_roots($pdo, $stages[0], $lookback) as $root) {
+            if (!rh_scheduler_budget_ok()) {
+                $res['deferred'] = true;
+                break;
+            }
+            $plan = rh_auto_group_reminders($pdo, $root, $stages, $lookback);
+            if (!$plan['entries']) {
+                $res['checked']++;
+                $res['skipped']++;
+                continue;
+            }
+            foreach ($plan['entries'] as $e) {
+                if (!rh_scheduler_budget_ok()) {
+                    $res['deferred'] = true;
+                    break 2;
+                }
+                $res['checked']++;
+                // No valid address (guest without a valid email): skipped and NOT logged, so the
+                // stage goes out once an address is added. Never sent to anyone else.
+                if ((int)$e['stage'] === 0 || !filter_var((string)$e['email'], FILTER_VALIDATE_EMAIL)) {
+                    $res['skipped']++;
                     continue;
                 }
-                if (!rh_auto_log_claim($pdo, $job, $type, $id, $stage, $a['email'], $tpl['subject'])) {
-                    $res['skipped']++; // already sent / being sent
-                    continue;
-                }
-                try {
-                    $attach = [];
-                    try {
-                        [$file, $bytes] = rh_auto_invoice_pdf($a);
-                        $attach[] = ['content' => $bytes, 'name' => $file, 'mime' => 'application/pdf'];
-                    } catch (Throwable $e) {
-                        error_log('auto-email invoice pdf ' . $type . '#' . $id . ': ' . $e->getMessage());
-                    }
-                    rh_scheduler_budget_spend();
-                    $emailCtx = null; // end any earlier guard before the next one is built on top of it
-                    $emailCtx = function_exists('rh_email_context') ? rh_email_context(['kind' => 'payment_reminder'] + rh_email_ctx_account((string)$type, $id, (string)($a['ref'] ?? ''))) : null;
-                    try {
-                        $r = sendEmailWithAttachments($a['email'], (string)$a['name'], $tpl['subject'], $tpl['html_body'], $attach, (string)$tpl['text_body']);
-                    } finally {
-                        $emailCtx = null;
-                    }
-                    if (!empty($r['success'])) {
-                        rh_auto_log_finish($pdo, $job, $type, $id, $stage, 'sent');
-                        $res['sent']++;
-                    } else {
-                        rh_auto_log_finish($pdo, $job, $type, $id, $stage, 'failed', (string)($r['message'] ?? 'unknown'));
-                        $res['errors'][] = $a['ref'] . ': ' . (string)($r['message'] ?? 'send failed');
-                    }
-                } catch (Throwable $e) {
-                    rh_auto_log_finish($pdo, $job, $type, $id, $stage, 'failed', $e->getMessage());
-                    $res['errors'][] = $a['ref'] . ': ' . $e->getMessage();
-                }
+                $a = ['name' => $e['name'], 'email' => (string)$e['email'], 'amount_due' => (float)$e['amount'], 'due' => $e['due'],
+                    'days_overdue' => (int)$e['days_overdue'], 'invoice_no' => $e['invoice_no'], 'ref' => $e['ref'], 'pay_type' => 'room',
+                    'ctx_type' => 'room', 'ctx_id' => (int)$e['lead_id']];
+                rh_auto_overdue_send($pdo, $res, $job, (string)$e['key_type'], $root, (int)$e['stage'], $prefix, $a,
+                    static function () use ($pdo, $e): array {
+                        return rh_auto_group_entry_pdfs($pdo, $e);
+                    });
             }
         }
         return $res;
