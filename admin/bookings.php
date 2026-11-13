@@ -2348,6 +2348,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $cf_refunds = $refunds_stmt->fetchAll(PDO::FETCH_ASSOC);
             // Company pays later: Record payment asks who paid (guest / company) on an on-account booking.
             $cf_split = rh_booking_bill_split($pdo, (int)$booking_id, $cf_bk);
+            require_once __DIR__ . '/includes/group-payment.php';
 
             header('Content-Type: application/json');
             echo json_encode([
@@ -2372,6 +2373,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'company_name'     => (string)($cf_split['name'] ?? ''),
                     'company_due'      => (float)($cf_split['company_due'] ?? 0),
                     'guest_due'        => (float)($cf_split['guest_due'] ?? 0),
+                    // Whole-group payment: rooms in this booking's group (1 = single booking, no group question).
+                    'group_rooms'      => (int)(rh_group_pay_counts($pdo, [(int)$cf_bk['id']])[(int)$cf_bk['id']] ?? 1),
                 ],
                 'charges'  => $cf_charges,
                 'payments' => $cf_pays,
@@ -2415,6 +2418,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             if (!in_array($pay_method, ['cash', 'bank_transfer', 'mobile_money', 'credit_card', 'debit_card', 'cheque', 'other'], true)) {
                 $pay_method = 'other';
+            }
+
+            // Whole group (owner 2026-11-13): "Whole group (split across rooms)" chosen on a room in a group. The same server code
+            // as Add Payment (admin/includes/group-payment.php): one row + receipt per room, split by balance, one transaction,
+            // the balances shown in the preview re-checked under lock. "This room only" carries on below exactly as before.
+            if ((string)($_POST['pay_scope'] ?? '') === 'group') {
+                require_once __DIR__ . '/includes/group-payment.php';
+                require_once __DIR__ . '/includes/finance-schema.php';
+                require_once __DIR__ . '/../includes/idempotency.php';
+                header('Content-Type: application/json');
+                $cg_uuid = idem_normalize_uuid($_POST['client_uuid'] ?? null);
+                if ($cg_uuid && (int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote('rh_idem_pay_' . md5($cg_uuid)) . ', 15)')->fetchColumn() !== 1) {
+                    echo json_encode(['success' => false, 'message' => 'This payment is still being saved from the first click. Nothing more was recorded; check Payments before trying again.']);
+                    exit;
+                }
+                if ($cg_uuid && ($cg_dup = idem_find_existing_payment($pdo, $cg_uuid))) {
+                    echo json_encode(['success' => true, 'message' => 'This group payment was already recorded. Duplicate submission ignored.',
+                        'payment_reference' => (string)$cg_dup['payment_reference']]);
+                    exit;
+                }
+                $cg_expect = json_decode((string)($_POST['group_expect'] ?? ''), true);
+                $cg_overpay = !empty($_POST['confirm_overpay']);
+                try {
+                    $pdo->beginTransaction();
+                    $cg_res = rh_group_pay_record($pdo, $booking_id, [
+                        'amount' => $pay_amount, 'method' => $pay_method, 'date' => $pay_date, 'status' => 'completed', 'reference' => '',
+                        'notes' => $combined_notes, 'cc_emails' => '', 'client_uuid' => $cg_uuid, 'confirm_overpay' => $cg_overpay,
+                        'expect' => is_array($cg_expect) ? $cg_expect : [], 'vat_rate' => rh_vat_enabled() ? (float)getSetting('vat_rate') : 0.0,
+                        'processed_by' => (string)($user['full_name'] ?? ($user['username'] ?? '')), 'txn_column' => finance_payment_transaction_column($pdo),
+                    ], $user);
+                    $pdo->commit();
+                } catch (Throwable $cgEx) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    echo json_encode(['success' => false, 'message' => $cgEx->getMessage()]);
+                    exit;
+                }
+                $cg_after = rh_group_pay_after_commit($pdo, $cg_res, $user, $pay_method, 'completed', $cg_overpay, 'bookings');
+                echo json_encode(['success' => true, 'message' => $cg_after['message'],
+                    'payment_reference' => implode(', ', array_column($cg_res['legs'], 'payment_reference'))]);
+                exit;
             }
 
             // Company pays later (fix 2026-11-13): on an on-account booking staff say who paid, nothing preselected.
@@ -3778,6 +3823,10 @@ try {
     $bk_bill_splits = rh_billing_ready($pdo) ? rh_billing_splits_for_rows($pdo, array_values(array_filter($bookings, static function ($r) {
         return (int)($r['billing_account_id'] ?? 0) > 0 || (int)($r['primary_booking_id'] ?? 0) > 0;
     }))) : [];
+    // Whole-group payment (owner 2026-11-13): rooms in each row's group, one query for the page. Only a group (2+) makes
+    // Record payment / Payments & balance ask "This room only / Whole group"; single bookings never run the group check.
+    require_once __DIR__ . '/includes/group-payment.php';
+    $bk_group_rooms = rh_group_pay_counts($pdo, array_column($bookings, 'id'));
 
     // Latest conference enquiries & bookings (one table holds both). Only when the person can open the
     // Conference page (permission + module); the full list, quotes and payments live there.
@@ -4433,7 +4482,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
 
                                                 <?php /* ── Money ── */ ?>
                                                 <?php if ($can_mark_paid && $_perm_pay): ?>
-                                                    <button class="quick-action paid" title="Record payment" aria-label="Record payment" data-help="Record Payment|Opens a dialog: take the full balance or a part payment, choose how the guest paid, then confirm. Nothing is recorded until you confirm. Only shown before any payment has been recorded; after that use Payments &amp; balance in the More menu." onclick="<?php if (!empty($bk_bill_splits[$bk_id]['on_account'])): /* company pays later: the Payments & balance dialog asks who paid (guest / company) */ ?>openConsolidationModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>)<?php else: ?>rhQuickPayOpen(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, <?php echo $bk_guest_js; ?>, <?php echo htmlspecialchars(json_encode(round(max(0.0, $bk_due), 2)), ENT_QUOTES); ?>)<?php endif; ?>">
+                                                    <button class="quick-action paid" title="Record payment" aria-label="Record payment" data-help="Record Payment|Opens a dialog: take the full balance or a part payment, choose how the guest paid, then confirm. Nothing is recorded until you confirm. Only shown before any payment has been recorded; after that use Payments &amp; balance in the More menu." onclick="<?php if (!empty($bk_bill_splits[$bk_id]['on_account'])): /* company pays later: the Payments & balance dialog asks who paid (guest / company) */ ?>openConsolidationModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>)<?php else: ?>rhQuickPayOpen(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, <?php echo $bk_guest_js; ?>, <?php echo htmlspecialchars(json_encode(round(max(0.0, $bk_due), 2)), ENT_QUOTES); ?>, <?php echo (int)($bk_group_rooms[$bk_id] ?? 1); ?>)<?php endif; ?>">
                                                         <i class="fas fa-money-bill-wave"></i>
                                                     </button>
                                                 <?php endif; ?>
@@ -6415,6 +6464,20 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     <input type="hidden" name="payment_amount" id="rhQpAmount" value="">
                     <p id="rhQpSummary" class="rh-dialog-lead"></p>
                     <div id="rhQpOwedWrap">
+                        <!-- Room in a group (owner 2026-11-13): shown only when this room has other open rooms in its group. -->
+                        <fieldset class="rh-choices" id="rhQpScopeWrap" hidden disabled>
+                            <legend>Which rooms is this payment for? * <small id="rhQpScopeNote"></small></legend>
+                            <label class="rh-choice">
+                                <input type="radio" name="pay_scope" value="room" id="rhQpScopeRoom">
+                                <span>This room only</span>
+                            </label>
+                            <label class="rh-choice">
+                                <input type="radio" name="pay_scope" value="group" id="rhQpScopeGroup">
+                                <span>Whole group (split across rooms)<small>Split by what each room still owes. Rooms paid in full get nothing; every room gets its own receipt.</small></span>
+                            </label>
+                            <input type="hidden" name="group_expect" id="rhQpExpect" value="">
+                        </fieldset>
+                        <p id="rhQpGroupBlocked" class="rh-review-card" hidden></p>
                         <fieldset class="rh-choices">
                             <legend>How much did the guest pay? *</legend>
                             <label class="rh-choice">
@@ -6449,6 +6512,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                             <input type="text" name="transaction_reference" id="rhQpRef" class="form-control" maxlength="100" placeholder="Mobile money ID, bank ref, cheque no...">
                         </div>
                         <p id="rhQpConfirmText" class="rh-live-note" aria-live="polite"></p>
+                        <div id="rhQpGroupPreview" class="rh-review-card" hidden aria-live="polite"></div>
                     </div>
                     <p id="rhQpNothing" class="rh-review-card" style="display:none;"><strong>Nothing is owed on this booking.</strong></p>
                 </div>
@@ -6495,8 +6559,72 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             m.style.display = open ? 'flex' : 'none';
             m.setAttribute('aria-hidden', open ? 'false' : 'true');
         }
+        // Room in a group (owner 2026-11-13): "This room only" / "Whole group (split across rooms)". The split comes from
+        // payment-add.php?rh_group_split (read-only), the same code that records it; the balances it used are posted back
+        // and the server refuses if any changed. Single bookings: no question, nothing changes.
+        var roomDue = 0, grp = null, grpState = 'none', gPrev = null, gTimer = null, gSeq = 0, gOpenSeq = 0, qpBookingId = 0;
+        function scope() {
+            var fs = el('rhQpScopeWrap');
+            if (fs.disabled) { return ''; }
+            return el('rhQpScopeGroup').checked ? 'group' : (el('rhQpScopeRoom').checked ? 'room' : '');
+        }
+        function gFetch(id, amount) {
+            return fetch('payment-add.php?rh_group_split=1&booking_id=' + encodeURIComponent(id) + '&amount=' + encodeURIComponent((Number(amount) || 0).toFixed(2)),
+                { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' } })
+                .then(function (r) { if (!r.ok) { throw new Error('http ' + r.status); } return r.json(); });
+        }
+        function splitHtml(d) {
+            var rows = '', paidFull = 0, n = 0;
+            d.rooms.forEach(function (r) {
+                if (!(r.owed > 0.009) && !(r.apply > 0.009)) { paidFull++; return; }
+                if (r.apply > 0.009) { n++; }
+                rows += '<tr><td data-label="Room"><span class="rh-group-split-room">' + esc(r.room || r.booking_reference) + (r.status === 'no-show' ? ' <small>(no-show)</small>' : '') + '<br><small>' + esc(r.booking_reference) + '</small></span></td>'
+                    + '<td data-label="Guest">' + esc(r.guest_name) + '</td><td class="num" data-label="Owed">' + esc(fmt(r.owed)) + '</td><td class="num" data-label="To apply"><strong>' + esc(fmt(r.apply)) + '</strong></td></tr>';
+            });
+            return '<strong>How this payment is split</strong>'
+                + '<p class="rh-group-split-help">Owed is what the room still owes. To apply is the share of the payment for that room.</p>'
+                + '<div class="rh-group-split-wrap"><table class="rh-group-split"><thead><tr><th>Room<small>Room and booking reference</small></th><th>Guest<small>Who the room is booked for</small></th><th class="num">Owed<small>Still unpaid on this room</small></th><th class="num">To apply<small>Share of the payment for this room</small></th></tr></thead><tbody>'
+                + rows + '</tbody></table></div>'
+                + '<p class="rh-group-split-note">' + esc(fmt(d.amount)) + ' split across ' + n + ' room' + (n === 1 ? '' : 's') + ', one receipt each.'
+                + (paidFull ? ' ' + paidFull + ' room' + (paidFull === 1 ? ' is' : 's are') + ' already paid in full and get nothing.' : '') + '</p>';
+        }
+        // The split for this amount, fetched once per amount (debounced); Confirm waits for it.
+        function groupPreview(amt) {
+            var box = el('rhQpGroupPreview');
+            if (scope() !== 'group' || !(amt > 0)) {
+                box.hidden = true; box.innerHTML = ''; el('rhQpExpect').value = '';
+                clearTimeout(gTimer);
+                return false;
+            }
+            box.hidden = false;
+            if (gPrev && gPrev.ok && gPrev.can_group && Math.abs(gPrev.amount - amt) < 0.005) {
+                box.innerHTML = splitHtml(gPrev);
+                el('rhQpExpect').value = JSON.stringify(gPrev.expect || {});
+                return true;
+            }
+            el('rhQpExpect').value = '';
+            if (gPrev && gPrev.ok === false && Math.abs((gPrev.amount || 0) - amt) < 0.005) {
+                box.innerHTML = '<strong>' + esc(gPrev.error || 'Could not work out the split.') + '</strong>';
+                return false;
+            }
+            box.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Working out the split...';
+            clearTimeout(gTimer);
+            var seq = ++gSeq, id = qpBookingId;
+            gTimer = setTimeout(function () {
+                gFetch(id, amt).then(function (d) {
+                    if (seq !== gSeq || id !== qpBookingId) { return; }
+                    gPrev = d; sync();
+                }).catch(function () {
+                    if (seq !== gSeq) { return; }
+                    gPrev = { ok: false, amount: amt, error: 'Could not work out the split. Check the connection and try again.' }; sync();
+                });
+            }, 250);
+            return false;
+        }
         // Works out the amount from the choice and only enables Confirm when amount and method are valid.
         function sync() {
+            due = (scope() === 'group' && grp) ? grp.group_owed : roomDue;
+            el('rhQpFullLabel').textContent = 'The full balance: ' + fmt(due) + (scope() === 'group' ? ' (whole group)' : '');
             var kind = el('rhQpFull').checked ? 'full' : (el('rhQpPart').checked ? 'part' : '');
             el('rhQpPartWrap').style.display = kind === 'part' ? '' : 'none';
             el('rhQpPartAmount').required = kind === 'part';
@@ -6513,15 +6641,58 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             el('rhQpPartHint').style.color = (kind === 'part' && !ok) ? '#b42318' : '';
             var method = el('rhQpMethod').value;
             var mLabel = method ? el('rhQpMethod').options[el('rhQpMethod').selectedIndex].text : '';
+            // Room in a group: wait for the group check, require the choice, and for the whole group the split shown below.
+            var gWait = grpState === 'loading' ? 'Checking for other rooms in this group...'
+                : ((grpState === 'ready' && !scope()) ? 'Choose this room only or the whole group.' : '');
+            var gShown = groupPreview(ok ? amt : 0);
+            var ready = ok && method && gWait === '' && (scope() !== 'group' || gShown);
             el('rhQpAmount').value = ok ? amt.toFixed(2) : '';
-            el('rhQpConfirmText').textContent = (ok && method)
-                ? 'You are recording ' + fmt(amt) + ' paid by ' + mLabel + (kind === 'full' ? ' (the full balance).' : ' (part payment).')
-                : '';
-            el('rhQpSubmit').disabled = !(ok && method);
-            el('rhQpSubmit').innerHTML = '<i class="fas fa-check"></i> ' + ((ok && method) ? 'Confirm ' + esc(fmt(amt)) : 'Confirm payment');
+            el('rhQpConfirmText').textContent = gWait !== '' ? ((grpState === 'loading' && !(ok && method)) ? '' : gWait) : ((ok && method)
+                ? 'You are recording ' + fmt(amt) + ' paid by ' + mLabel + (scope() === 'group'
+                    ? ' for the whole group, split across the rooms below.'
+                    : (kind === 'full' ? ' (the full balance).' : ' (part payment).'))
+                : '');
+            el('rhQpSubmit').disabled = !ready;
+            el('rhQpSubmit').innerHTML = '<i class="fas fa-check"></i> ' + (ready ? 'Confirm ' + esc(fmt(amt)) : 'Confirm payment');
         }
-        window.rhQuickPayOpen = function (id, ref, guest, balance) {
+        window.rhQuickPayOpen = function (id, ref, guest, balance, groupRooms) {
             due = Math.max(0, Number(balance || 0));
+            roomDue = due;
+            qpBookingId = Number(id) || 0;
+            grp = null; gPrev = null; grpState = 'loading';
+            clearTimeout(gTimer);
+            el('rhQpScopeWrap').hidden = true;
+            el('rhQpScopeWrap').disabled = true;
+            el('rhQpScopeRoom').checked = false;
+            el('rhQpScopeGroup').checked = false;
+            el('rhQpExpect').value = '';
+            el('rhQpScopeNote').textContent = '';
+            var openSeq = ++gOpenSeq;
+            el('rhQpGroupBlocked').hidden = true;
+            el('rhQpGroupBlocked').textContent = '';
+            // Single booking (counted on the server when the list was drawn): no group check, nothing to wait for.
+            if (!(Number(groupRooms) > 1)) { grpState = 'none'; }
+            else gFetch(qpBookingId, 0).then(function (d) {
+                if (openSeq !== gOpenSeq) { return; }
+                if (d && d.ok && d.is_group && !d.can_group && d.reason) {
+                    // Company-billed group: say why there is no whole-group choice here.
+                    el('rhQpGroupBlocked').textContent = d.reason;
+                    el('rhQpGroupBlocked').hidden = false;
+                }
+                if (d && d.ok && d.is_group && d.can_group) {
+                    grp = d; grpState = 'ready';
+                    var owing = d.rooms.filter(function (r) { return r.owed > 0.009; }).length;
+                    el('rhQpScopeNote').textContent = d.rooms.length + ' rooms in this group, ' + owing + ' still owe. Group balance ' + fmt(d.group_owed) + '.';
+                    el('rhQpScopeWrap').hidden = false;
+                    el('rhQpScopeWrap').disabled = false;
+                } else {
+                    grpState = 'none';
+                }
+                sync();
+            }).catch(function () {
+                if (openSeq !== gOpenSeq) { return; }
+                grpState = 'none'; sync(); // not readable: this room only, exactly as before
+            });
             el('rhQpId').value = id;
             el('rhQpDate').value = hotelToday();
             el('rhQpUuid').value = newUuid();
@@ -6541,7 +6712,11 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             setOpen(true);
         };
         window.rhQuickPayClose = function () { setOpen(false); };
-        ['rhQpFull', 'rhQpPart', 'rhQpMethod'].forEach(function (id) { el(id).addEventListener('change', sync); });
+        // Shared with Payments & balance (same page): the group split fetch and the per-room split table.
+        window.rhGroupSplitFetch = gFetch;
+        window.rhGroupSplitHtml = splitHtml;
+        window.rhNewPayUuid = newUuid;
+        ['rhQpFull', 'rhQpPart', 'rhQpMethod', 'rhQpScopeRoom', 'rhQpScopeGroup'].forEach(function (id) { el(id).addEventListener('change', sync); });
         el('rhQpPartAmount').addEventListener('input', sync);
         el('rhQuickPayForm').addEventListener('submit', function (ev) {
             sync();
@@ -9272,8 +9447,17 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                           '<label class="rh-choice"><input type="radio" name="paid_by" value="guest" required> <span>The guest</span></label>' +
                           '<label class="rh-choice"><input type="radio" name="paid_by" value="company" required> <span>' + escHtml(b.company_name) + ' (company payment)</span></label></fieldset>'
                         : '') +
+                    // Room in a group (owner 2026-11-13): this room only, or the whole group split across its rooms.
+                    (b.group_rooms > 1
+                        ? '<fieldset class="rh-choices" id="con_scope" hidden disabled><legend>Which rooms is this payment for? * <small id="con_scope_note"></small></legend>' +
+                          '<label class="rh-choice"><input type="radio" name="pay_scope" value="room" required> <span>This room only</span></label>' +
+                          '<label class="rh-choice"><input type="radio" name="pay_scope" value="group" required> <span>Whole group (split across rooms)<small>Split by what each room still owes. Rooms paid in full get nothing; every room gets its own receipt.</small></span></label>' +
+                          '<input type="hidden" name="group_expect" id="con_group_expect" value=""><input type="hidden" name="client_uuid" id="con_group_uuid" value=""></fieldset>' +
+                          '<p id="con_group_loading" class="rh-live-note"><i class="fas fa-spinner fa-spin"></i> Checking the other rooms in this group...</p>' +
+                          '<p id="con_group_blocked" class="rh-review-card" hidden></p>'
+                        : '') +
                     '<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">' +
-                    '<div class="form-group" style="margin:0;"><label style="font-weight:600;">Amount (' + _currencySymbol + ') <span style="color:#dc3545;">*</span></label><input type="number" name="amount" id="con_amount" class="form-control" min="0.01" step="0.01" value="' + conDue.toFixed(2) + '" required style="border-color:#8F6A35;"><small style="color:#6b6258;display:block;margin-top:4px;">Balance due ' + fmtMWK(conDue) + '</small>' +
+                    '<div class="form-group" style="margin:0;"><label style="font-weight:600;">Amount (' + _currencySymbol + ') <span style="color:#dc3545;">*</span></label><input type="number" name="amount" id="con_amount" class="form-control" min="0.01" step="0.01" value="' + conDue.toFixed(2) + '" required style="border-color:#8F6A35;"><small id="con_due_hint" style="color:#6b6258;display:block;margin-top:4px;">Balance due ' + fmtMWK(conDue) + '</small>' +
                     '<div id="con_over_wrap" style="display:none;margin-top:6px;"><div id="con_over_warn" style="color:#8a4b00;font-size:12px;margin-bottom:4px;"></div><label style="display:flex;gap:6px;align-items:flex-start;font-size:12px;color:#8a4b00;cursor:pointer;"><input type="checkbox" name="confirm_overpay" value="1" id="con_over_cb" style="margin-top:2px;"> <span>The guest paid more than owed</span></label></div></div>' +
                     '<div class="form-group" style="margin:0;"><label style="font-weight:600;">Payment method <span style="color:#dc3545;">*</span></label><select name="payment_method" class="form-control"><option value="cash">Cash</option><option value="bank_transfer">Bank Transfer</option><option value="credit_card">Credit Card</option><option value="debit_card">Debit Card</option><option value="mobile_money">Mobile Money</option><option value="cheque">Cheque</option><option value="other">Other</option></select></div>' +
                     '</div>' +
@@ -9283,6 +9467,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     '</div>' +
                     '<div class="form-group" style="margin-bottom:10px;"><label>General notes</label><input type="text" name="notes" class="form-control" placeholder="e.g. Cash collected at front desk" maxlength="200"></div>' +
                     '<div class="form-group" style="margin-bottom:14px;"><label style="font-weight:600;"><i class="fas fa-calculator" style="color:#8F6A35;"></i> Accountant notes</label><input type="text" name="accountant_notes" class="form-control" placeholder="e.g. Reconciled against invoice RFD-20260514, balance cleared" maxlength="300" style="border-color:#8F6A35;"><small style="color:#888;display:block;margin-top:4px;">Stored as &ldquo;ACCT: &hellip;&rdquo; prefix in payment notes &mdash; visible on invoices and ledger reports.</small></div>' +
+                    (b.group_rooms > 1 ? '<div id="con_group_preview" class="rh-review-card" hidden aria-live="polite"></div>' : '') +
                     '<div class="modal-actions" style="border-top:1px solid #eee;padding-top:14px;">' +
                     '<button type="button" class="btn btn-secondary" onclick="closeConsolidationModal()">Close</button>' +
                     '<button type="submit" id="con_submit_btn" class="btn btn-primary"><i class="fas fa-scale-balanced"></i> Record Payment</button>' +
@@ -9309,8 +9494,78 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     const c = conPayForm.querySelector('input[name="paid_by"]:checked');
                     return !!(c && c.value === 'company');
                 };
+                // Whole group: the balance that counts is the group's; the split comes from the server (same code that records it).
+                let conGroup = null, conPrev = null, conPrevTimer = null, conPrevSeq = 0;
+                const conScope = function () {
+                    const fs = document.getElementById('con_scope');
+                    const c = fs && !fs.disabled ? fs.querySelector('input[name="pay_scope"]:checked') : null;
+                    return c ? c.value : '';
+                };
+                const conDueNow = function () { return (conScope() === 'group' && conGroup) ? conGroup.group_owed : conDue; };
+                const conPrevReady = function () {
+                    const amt = Math.round((parseFloat(conAmt.value) || 0) * 100) / 100;
+                    return !!(conPrev && conPrev.ok && conPrev.can_group && amt > 0 && Math.abs(conPrev.amount - amt) < 0.005);
+                };
+                const conRenderPrev = function () {
+                    const box = document.getElementById('con_group_preview');
+                    if (!box) return;
+                    const exp = document.getElementById('con_group_expect');
+                    if (conScope() !== 'group') { box.hidden = true; box.innerHTML = ''; exp.value = ''; return; }
+                    box.hidden = false;
+                    const amt = Math.round((parseFloat(conAmt.value) || 0) * 100) / 100;
+                    if (!(amt > 0)) { box.innerHTML = '<strong>Enter the amount received to see how it is split across the rooms.</strong>'; exp.value = ''; return; }
+                    if (conPrevReady()) { box.innerHTML = window.rhGroupSplitHtml(conPrev); exp.value = JSON.stringify(conPrev.expect || {}); return; }
+                    exp.value = '';
+                    if (conPrev && conPrev.ok === false && Math.abs((conPrev.amount || 0) - amt) < 0.005) { box.innerHTML = '<strong>' + escHtml(conPrev.error || 'Could not work out the split.') + '</strong>'; return; }
+                    box.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Working out the split...';
+                    clearTimeout(conPrevTimer);
+                    const seq = ++conPrevSeq;
+                    conPrevTimer = setTimeout(function () {
+                        window.rhGroupSplitFetch(b.id, amt).then(function (d) {
+                            if (seq !== conPrevSeq) return;
+                            conPrev = d; conRenderPrev();
+                        }).catch(function () {
+                            if (seq !== conPrevSeq) return;
+                            conPrev = { ok: false, amount: amt, error: 'Could not work out the split. Check the connection and try again.' }; conRenderPrev();
+                        });
+                    }, 250);
+                };
+                if (b.group_rooms > 1 && typeof window.rhGroupSplitFetch === 'function') {
+                    window.rhGroupSplitFetch(b.id, 0).then(function (d) {
+                        const ld = document.getElementById('con_group_loading');
+                        if (ld) ld.hidden = true;
+                        if (d && d.ok && d.is_group && d.can_group) {
+                            conGroup = d;
+                            const fs = document.getElementById('con_scope');
+                            const owing = d.rooms.filter(function (r) { return r.owed > 0.009; }).length;
+                            document.getElementById('con_scope_note').textContent = d.rooms.length + ' rooms in this group, ' + owing + ' still owe. Group balance ' + fmtMWK(d.group_owed) + '.';
+                            fs.hidden = false; fs.disabled = false;
+                        } else if (d && d.ok && d.is_group && d.reason) {
+                            // Company-billed group: say why there is no whole-group choice here.
+                            const bl = document.getElementById('con_group_blocked');
+                            bl.textContent = d.reason; bl.hidden = false;
+                        }
+                    }).catch(function () {
+                        const ld = document.getElementById('con_group_loading');
+                        if (ld) ld.hidden = true; // not readable: this room only, exactly as before
+                    });
+                } else if (document.getElementById('con_group_loading')) {
+                    document.getElementById('con_group_loading').hidden = true;
+                }
+                conPayForm.querySelectorAll('input[name="pay_scope"]').forEach(function (r) {
+                    r.addEventListener('change', function () {
+                        if (!conGroup) return;
+                        const cur = Math.round((parseFloat(conAmt.value) || 0) * 100) / 100;
+                        if (conScope() === 'group' && Math.abs(cur - conDue) < 0.005) conAmt.value = conGroup.group_owed.toFixed(2);
+                        if (conScope() === 'room' && Math.abs(cur - conGroup.group_owed) < 0.005) conAmt.value = conDue.toFixed(2);
+                        document.getElementById('con_due_hint').textContent = conScope() === 'group'
+                            ? 'Group balance due ' + fmtMWK(conGroup.group_owed) : 'Balance due ' + fmtMWK(conDue);
+                        conAmt.dispatchEvent(new Event('input'));
+                    });
+                });
+                conAmt.addEventListener('input', conRenderPrev);
                 conAmt.addEventListener('input', function() {
-                    const extra = (parseFloat(conAmt.value) || 0) - conDue;
+                    const extra = (parseFloat(conAmt.value) || 0) - conDueNow();
                     // A company payment can never be more than owed (refused on the server): no overpay box for it.
                     const over = extra > 0.01 && !conIsCompany();
                     document.getElementById('con_over_wrap').style.display = over ? '' : 'none';
@@ -9331,6 +9586,14 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     e.preventDefault();
                     // Submit guard: one payment per click, never a second post while the first is in flight
                     if (conPayForm.dataset.submitting === '1') return;
+                    // Room in a group: the choice is required; a whole-group payment only goes with the split shown for this amount.
+                    const conFs = document.getElementById('con_scope');
+                    if (conFs && !conFs.disabled && !conScope()) { Alert.show('Choose "This room only" or "Whole group". Nothing was recorded.', 'error'); return; }
+                    if (conScope() === 'group') {
+                        if (!conPrevReady()) { conRenderPrev(); Alert.show('Wait for the split to show, check it, then record the payment.', 'error'); return; }
+                        const uu = document.getElementById('con_group_uuid');
+                        if (!uu.value) uu.value = window.rhNewPayUuid();
+                    }
                     conPayForm.dataset.submitting = '1';
                     const fd2 = new FormData(this);
                     const btn = document.getElementById('con_submit_btn');

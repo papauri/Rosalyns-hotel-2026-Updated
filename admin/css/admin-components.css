@@ -4229,6 +4229,149 @@ select.rh-input-invalid.rh-input-invalid {
     min-height: 44px;
 }
 
+/* Whole-group payment split (Record payment dialogs): room, guest, owed, to apply.
+   Table with header helpers from 48rem up; on a phone each room becomes a card with label / value rows. */
+.rh-group-split-wrap {
+    max-height: 260px;
+    overflow: auto;
+    margin: 6px 0;
+}
+
+.rh-group-split {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.rh-group-split th,
+.rh-group-split td {
+    padding: 6px 8px;
+    border-top: 1px solid var(--tbl-border, #e8e0d6);
+    text-align: left;
+    vertical-align: top;
+}
+
+.rh-group-split th {
+    position: sticky;
+    top: 0;
+    background: var(--tbl-head-bg, #f7f3ee);
+    font-weight: 600;
+}
+
+.rh-group-split th small {
+    display: block;
+    font-weight: 400;
+    font-size: 11.5px;
+    line-height: 1.35;
+    color: var(--admin-muted, #5f6b7c);
+}
+
+.rh-group-split .num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.rh-group-split td.num {
+    white-space: nowrap;
+}
+
+.rh-group-split td small {
+    color: var(--admin-muted, #5f6b7c);
+}
+
+.rh-group-split-help {
+    display: none;
+    margin: 4px 0 0;
+    font-size: 12px;
+    color: var(--admin-muted, #5f6b7c);
+}
+
+.rh-group-split-note {
+    margin: 4px 0 0;
+}
+
+@media (max-width: 48rem) {
+    .rh-group-split-help {
+        display: block;
+    }
+
+    .rh-group-split-wrap {
+        max-height: none;
+        overflow: visible;
+    }
+
+    .rh-group-split-wrap .rh-group-split,
+    .rh-group-split-wrap .rh-group-split tbody {
+        display: block;
+        width: 100%;
+    }
+
+    .rh-group-split-wrap .rh-group-split thead {
+        display: none;
+    }
+
+    .rh-group-split-wrap .rh-group-split tbody {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+    }
+
+    .rh-group-split-wrap .rh-group-split tbody tr {
+        display: block;
+        border: 1px solid var(--tbl-border, #e8e0d6);
+        border-radius: 8px;
+        background: var(--admin-surface, #fff);
+        overflow: hidden;
+    }
+
+    .rh-group-split-wrap .rh-group-split tbody td {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 12px;
+        min-height: 36px;
+        padding: 6px 12px;
+        border-top: 1px solid var(--tbl-border, #e8e0d6);
+        border-bottom: 0;
+        text-align: right;
+        white-space: normal;
+        overflow-wrap: anywhere;
+    }
+
+    .rh-group-split-wrap .rh-group-split tbody td:first-child {
+        border-top: 0;
+    }
+
+    .rh-group-split-wrap .rh-group-split tbody td::before {
+        content: attr(data-label);
+        flex: 0 0 5.5rem;
+        min-width: 0;
+        text-align: left;
+        text-transform: none;
+        letter-spacing: 0;
+        font-size: 12.5px;
+        font-weight: 600;
+        color: var(--admin-muted, #5f6b7c);
+    }
+
+    .rh-group-split-wrap .rh-group-split tbody td.num {
+        white-space: nowrap;
+    }
+
+    .rh-group-split-wrap .rh-group-split tbody td:last-child {
+        background: var(--tbl-head-bg, #f7f3ee);
+    }
+
+    .rh-group-split-wrap .rh-group-split tbody td:last-child::before {
+        color: var(--admin-text, #1f2a37);
+    }
+
+    .rh-group-split-room {
+        display: block;
+        min-width: 0;
+    }
+}
+
 /* Label / value rows (rows built as <div><b|strong>Label</b> value</div>). */
 .rh-review-card > div:has(> b, > strong) {
     display: grid;

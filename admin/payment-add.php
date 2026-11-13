@@ -30,6 +30,26 @@ finance_ensure_sequence_tables($pdo);
 $vatEnabled = rh_vat_enabled();
 $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0;
 
+// Whole-group payment preview (owner 2026-11-13): read-only JSON for the Record payment dialogs (this page and the
+// Bookings list). Is the room in a group, what each room owes, and how an amount would be split. Writes nothing.
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['rh_group_split'])) {
+    require_once __DIR__ . '/includes/group-payment.php';
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    if (!hasPermission((int)($user['id'] ?? 0), 'payment_add') || !(function_exists('moduleEnabled') && moduleEnabled('bookings'))) {
+        http_response_code(403);
+        echo json_encode(['ok' => false, 'error' => 'You do not have permission to record payments.']);
+        exit;
+    }
+    try {
+        echo json_encode(rh_group_pay_preview($pdo, (int)($_GET['booking_id'] ?? 0), max(0.0, (float)($_GET['amount'] ?? 0))));
+    } catch (Throwable $e) {
+        error_log('payment-add group split preview: ' . $e->getMessage());
+        echo json_encode(['ok' => false, 'error' => 'Could not read the group. Try again.']);
+    }
+    exit;
+}
+
 // Check if editing existing payment
 $editId = isset($_GET['edit']) ? (int)$_GET['edit'] : 0;
 $payment = null;
@@ -193,6 +213,13 @@ $paidDisplay = (float)($bookingDetails['amount_paid'] ?? 0);
 $grandTotalDisplay = $paidDisplay + (float)$outstandingAmount;
 // Room bookings: the nightly price the guest BOOKED at and the nights (owner 2026-11-09), so nobody charges today's price.
 $paBookedRate = ($bookingType === 'room' && $bookingDetails) ? rh_booked_rate_for_booking($pdo, (int)$bookingId) : null;
+// Whole-group payment (owner 2026-11-13): how many rooms of this booking's group count (one cheap query). Only a group
+// (2+) makes the page ask "This room only / Whole group"; a single booking never runs the group check.
+$paGroupRooms = 1;
+if (!$editId && $bookingType === 'room' && $bookingDetails) {
+    require_once __DIR__ . '/includes/group-payment.php';
+    $paGroupRooms = (int)(rh_group_pay_counts($pdo, [(int)$bookingId])[(int)$bookingId] ?? 1);
+}
 // Company pays later: a new payment on an on-account room booking asks who paid (guest / company), nothing preselected.
 $paPreSplit = null;
 if (!$editId && $bookingType === 'room' && $bookingDetails) {
@@ -458,6 +485,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             } else {
                 // Create new payment
+                // Whole group (owner 2026-11-13): staff chose "Whole group (split across rooms)" on a room in a group. One row,
+                // reference and receipt per room, split by each room's balance, all in ONE transaction (all rooms or none).
+                // "This room only" (or no choice posted: single bookings, older pages) carries on below exactly as before.
+                if ($bookingType === 'room' && (string)($_POST['pay_scope'] ?? '') === 'group') {
+                    require_once __DIR__ . '/includes/group-payment.php';
+                    if (!hasPermission((int)($user['id'] ?? 0), 'payment_add')) {
+                        throw new Exception('You do not have permission to record payments. Nothing was recorded.');
+                    }
+                    $gpExpect = json_decode((string)($_POST['group_expect'] ?? ''), true);
+                    $gpOverpay = !empty($_POST['confirm_overpay']);
+                    $pdo->beginTransaction();
+                    $gpRes = rh_group_pay_record($pdo, (int)$bookingId, [
+                        'amount' => $paymentAmount, 'method' => (string)$paymentMethod, 'date' => (string)$paymentDate, 'status' => (string)$paymentStatus,
+                        'reference' => (string)$transactionReference, 'notes' => (string)$notes, 'cc_emails' => (string)$ccEmails,
+                        'client_uuid' => $__incomingClientUuid, 'confirm_overpay' => $gpOverpay, 'expect' => is_array($gpExpect) ? $gpExpect : [],
+                        'vat_rate' => (float)$vatRate, 'processed_by' => (string)$processedBy, 'txn_column' => (string)$paymentTransactionColumn,
+                    ], $user);
+                    $pdo->commit();
+                    unset($_SESSION['admin_payment_add_uuid']);
+
+                    // After the commit (shared with Payments & balance): History on every room, credit note email, a receipt per room.
+                    $gpAfter = rh_group_pay_after_commit($pdo, $gpRes, $user, (string)$paymentMethod, (string)$paymentStatus, $gpOverpay, 'payment-add');
+                    $gpMsg = $gpAfter['message'];
+                    $_SESSION['alert'] = ['type' => 'success', 'message' => htmlspecialchars($gpMsg, ENT_QUOTES, 'UTF-8')];
+                    header('Location: ' . ((($_POST['return_to'] ?? '') === 'bookings') ? 'bookings.php' : 'payment-details.php?id=' . (int)$gpRes['legs'][0]['payment_id'] . '&new_payment=1'));
+                    exit;
+                }
                 // Company pays later (fix 2026-11-13): on an on-account room booking staff say who paid, nothing preselected,
                 // exactly like the booking's Record payment dialog. Company money becomes a one-line company payment through
                 // rh_billing_record_remittance() (the same path as Company accounts and the dialog: lock, limit = what the
@@ -1004,6 +1058,14 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                                 <label class="rh-choice"><input type="radio" name="paid_by" value="guest" required> <span>The guest</span></label>
                                 <label class="rh-choice"><input type="radio" name="paid_by" value="company" required> <span><span id="pa-paid-by-company"><?php echo htmlspecialchars((string)($paPreSplit['name'] ?? 'The company'), ENT_QUOTES, 'UTF-8'); ?></span> (company payment)<small>Recorded as a company payment, like Company accounts. Needs the Company accounts permission.</small></span></label>
                             </fieldset>
+                            <!-- Room in a group (owner 2026-11-13): this room only, or the whole group split across its rooms. Shown only for a group. -->
+                            <fieldset class="rh-choices pa-group-scope" id="pa-group-scope" hidden disabled>
+                                <legend>Which rooms is this payment for? * <small id="pa-group-note"></small></legend>
+                                <label class="rh-choice"><input type="radio" name="pay_scope" value="room" required> <span>This room only</span></label>
+                                <label class="rh-choice"><input type="radio" name="pay_scope" value="group" required> <span>Whole group (split across rooms)<small>Split by what each room still owes. Rooms paid in full get nothing; every room gets its own receipt.</small></span></label>
+                                <input type="hidden" name="group_expect" id="pa-group-expect" value="">
+                            </fieldset>
+                            <p id="pa-group-blocked" class="rh-review-card" hidden></p>
                         <?php endif; ?>
                     </div>
 
@@ -1101,6 +1163,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                                         <input type="checkbox" name="confirm_overpay" value="1" id="pa-over-cb" style="margin-top:3px;"> <span>The guest paid more than owed</span>
                                     </label>
                                 </div>
+                                <div id="pa-group-preview" class="rh-review-card" hidden aria-live="polite"></div>
                             </div>
                             <div>
                                 <label class="pa-label" for="pa-date">
@@ -1258,6 +1321,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
         const IS_EDIT       = <?php echo $editId ? 'true' : 'false'; ?>;
         const PRE_BOOKING   = <?php echo $bookingDetails ? 'true' : 'false'; ?>;
         const PRE_DUE       = <?php echo (float)$outstandingAmount; ?>;
+        const PRE_GROUP_ROOMS = <?php echo (int)$paGroupRooms; ?>; // rooms in this booking's group (1 = single booking: no group check)
         const PRE_RATE      = <?php echo json_encode(!empty($paBookedRate['ok']) ? ['text' => $paBookedRate['text'], 'today_text' => $paBookedRate['today_text']] : null, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
         const EDIT_CREDITED = <?php echo ($editId && $payment && in_array((string)$payment['payment_status'], ['completed', 'paid'], true)) ? (float)$payment['total_amount'] : 0; ?>;
 
@@ -1377,7 +1441,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
             const over = limit > 0.01 && extra > 0.01;
             wrap.style.display = over ? '' : 'none';
             let overText = 'That is ' + fmt(extra) + ' more than owed. The extra will be issued to the guest as a credit note.';
-            if (over && _linkedRate && _linkedRate.text) {
+            if (over && _linkedRate && _linkedRate.text && groupScope() !== 'group') {
                 overText = 'This booking was booked at ' + _linkedRate.text + '; balance due ' + money(limit) + '. You are entering ' + money(gross) + ' (' + money(extra) + ' more than owed).'
                     + (_linkedRate.today_text ? ' ' + _linkedRate.today_text : '')
                     + ' Tick the box only if the guest really paid more: the extra becomes a credit note.';
@@ -1570,6 +1634,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
 
             renderBookedRate(_paid, _due);
             setPaidBy(_activeType === 'room' && b.on_account ? b : null);
+            loadGroupFor(_activeType === 'room' && _linkedDue > 0.01 ? b.id : 0, b.group_rooms || 1);
 
             const dueEl = el('psc-due');
             dueEl.textContent = fmt(_linkedDue);
@@ -1619,6 +1684,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
             _linkedRate  = null;
             renderBookedRate(0, 0);
             setPaidBy(null);
+            loadGroupFor(0);
             if (selectedCard) selectedCard.hidden = true;
             if (pickerEl)     pickerEl.style.display = '';
             if (searchInput)  searchInput.value = '';
@@ -1647,11 +1713,13 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
         statusSel.addEventListener('change', function () {
             el('prev-status').textContent = statusSel.options[statusSel.selectedIndex].text;
             updatePreview();
+            requestGroupPreview();
         });
         el('prev-status').textContent = statusSel.options[statusSel.selectedIndex].text;
 
         /* ── Amount watcher ───────────────────────────────────── */
         amountInput.addEventListener('input', updatePreview);
+        amountInput.addEventListener('input', requestGroupPreview);
 
         /* ── Form submission guard ────────────────────────────── */
         document.getElementById('pa-form').addEventListener('submit', function (e) {
@@ -1661,8 +1729,147 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                 el('pa-method-panel').scrollIntoView({ behavior: 'smooth', block: 'center' });
                 ok = false;
             }
+            // Room in a group: the choice is required, and a whole-group payment only goes with the split shown for this amount.
+            const gfs = el('pa-group-scope');
+            if (ok && gfs && !gfs.disabled && !groupScope()) {
+                gfs.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el('pa-group-note').textContent = 'Choose this room only or the whole group.';
+                ok = false;
+            }
+            if (ok && groupScope() === 'group' && !groupPreviewReady()) {
+                renderGroupPreview();
+                el('pa-group-preview').scrollIntoView({ behavior: 'smooth', block: 'center' });
+                ok = false;
+            }
             if (!ok) e.preventDefault();
         });
+
+        /* -- Room in a group (owner 2026-11-13): "This room only" / "Whole group (split across rooms)" --
+           The split comes from the server (payment-add.php?rh_group_split, read-only) so what staff see is exactly what is
+           recorded; the balances it used are posted back and the server refuses if any changed. Nothing is recorded
+           until Record Payment is confirmed. */
+        let _group = null, _roomDue = null, _gpPreview = null, _gpTimer = null, _gpLoadSeq = 0, _gpPrevSeq = 0;
+        function groupScope() {
+            const fs = el('pa-group-scope');
+            const c = fs && !fs.disabled ? fs.querySelector('input[name="pay_scope"]:checked') : null;
+            return c ? c.value : '';
+        }
+        function gpFetch(id, amount) {
+            return fetch('payment-add.php?rh_group_split=1&booking_id=' + encodeURIComponent(id) + '&amount=' + encodeURIComponent((Number(amount) || 0).toFixed(2)),
+                { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' } })
+                .then(function (r) { if (!r.ok) { throw new Error('http ' + r.status); } return r.json(); });
+        }
+        function setGroup(data) {
+            const fs = el('pa-group-scope');
+            if (!fs) return;
+            if (_group && groupScope() === 'group' && _roomDue !== null) { _linkedDue = _roomDue; }
+            _group = (data && data.ok && data.is_group && data.can_group) ? data : null;
+            // A group that cannot take a whole-group payment here (company-billed): say why, in plain words.
+            const blk = el('pa-group-blocked');
+            if (blk) {
+                const why = (data && data.ok && data.is_group && !data.can_group && data.reason) ? data.reason : '';
+                blk.textContent = why;
+                blk.hidden = why === '';
+            }
+            _roomDue = _group ? _linkedDue : null;
+            _gpPreview = null;
+            fs.hidden = !_group;
+            fs.disabled = !_group;
+            fs.querySelectorAll('input[name="pay_scope"]').forEach(function (r) { r.checked = false; });
+            el('pa-group-expect').value = '';
+            if (_group) {
+                const owing = _group.rooms.filter(function (r) { return r.owed > 0.009; }).length;
+                el('pa-group-note').textContent = _group.rooms.length + ' rooms in this group, ' + owing + ' still owe. Group balance ' + fmt(_group.group_owed) + '.';
+            }
+            renderGroupPreview();
+            updatePreview();
+        }
+        function loadGroupFor(id, rooms) {
+            const seq = ++_gpLoadSeq;
+            setGroup(null);
+            // Only rooms the server counted as part of a group pay for the group check; single bookings never wait for it.
+            if (IS_EDIT || !id || hdType.value !== 'room' || !el('pa-group-scope') || !(Number(rooms) > 1)) return;
+            gpFetch(id, 0).then(function (d) {
+                if (seq === _gpLoadSeq && String(hdId.value) === String(id)) setGroup(d);
+            }).catch(function () { /* not readable: this room only, exactly as before */ });
+        }
+        function onScopeChange() {
+            if (!_group) return;
+            const cur = Math.round((parseFloat(amountInput.value) || 0) * 100) / 100;
+            if (groupScope() === 'group') {
+                _linkedDue = _group.group_owed;
+                if (!amountInput.value || Math.abs(cur - (_roomDue || 0)) < 0.005) amountInput.value = _group.group_owed.toFixed(2);
+            } else {
+                _linkedDue = _roomDue;
+                if (!amountInput.value || Math.abs(cur - _group.group_owed) < 0.005) amountInput.value = (_roomDue || 0).toFixed(2);
+            }
+            updatePreview();
+            requestGroupPreview();
+        }
+        /* A whole-group payment is money received only (the server refuses pending ones too). */
+        function groupStatusOk() {
+            return !statusSel || ['completed', 'paid'].indexOf(statusSel.value) !== -1;
+        }
+        function groupPreviewReady() {
+            const amt = Math.round((parseFloat(amountInput.value) || 0) * 100) / 100;
+            return !!(groupStatusOk() && _gpPreview && _gpPreview.ok && _gpPreview.can_group && amt > 0 && Math.abs(_gpPreview.amount - amt) < 0.005 && el('pa-group-expect').value);
+        }
+        function requestGroupPreview() {
+            clearTimeout(_gpTimer);
+            if (groupScope() !== 'group') { _gpPreview = null; if (el('pa-group-expect')) el('pa-group-expect').value = ''; renderGroupPreview(); return; }
+            const amt = Math.round((parseFloat(amountInput.value) || 0) * 100) / 100;
+            if (!groupPreviewReady()) { _gpPreview = null; el('pa-group-expect').value = ''; }
+            renderGroupPreview();
+            if (!(amt > 0)) return;
+            const id = hdId.value, seq = ++_gpPrevSeq;
+            _gpTimer = setTimeout(function () {
+                gpFetch(id, amt).then(function (d) {
+                    if (seq !== _gpPrevSeq || String(hdId.value) !== String(id)) return;
+                    _gpPreview = d;
+                    el('pa-group-expect').value = (d && d.ok && d.can_group) ? JSON.stringify(d.expect || {}) : '';
+                    renderGroupPreview();
+                }).catch(function () {
+                    if (seq !== _gpPrevSeq) return;
+                    _gpPreview = { ok: false, error: 'Could not work out the split. Check the connection and try again.' };
+                    renderGroupPreview();
+                });
+            }, 250);
+        }
+        function renderGroupPreview() {
+            const box = el('pa-group-preview');
+            if (!box) return;
+            if (groupScope() !== 'group') { box.hidden = true; box.innerHTML = ''; return; }
+            box.hidden = false;
+            const amt = Math.round((parseFloat(amountInput.value) || 0) * 100) / 100;
+            if (!groupStatusOk()) { box.innerHTML = '<strong>Pending whole-group payments are not allowed.</strong> Split a payment across the group only once the money is received: set the status to Completed or Paid, or choose "This room only".'; return; }
+            if (!(amt > 0)) { box.innerHTML = '<strong>Enter the amount received to see how it is split across the rooms.</strong>'; return; }
+            if (_gpPreview && _gpPreview.ok === false) { box.innerHTML = '<strong>' + _esc(_gpPreview.error || 'Could not work out the split.') + '</strong>'; return; }
+            if (!groupPreviewReady()) { box.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Working out the split...'; return; }
+            box.innerHTML = groupSplitHtml(_gpPreview, fmt);
+        }
+        /* The per-room split table (same layout as the Bookings list dialog). */
+        function groupSplitHtml(d, money) {
+            let rows = '', paidFull = 0, n = 0;
+            d.rooms.forEach(function (r) {
+                if (!(r.owed > 0.009) && !(r.apply > 0.009)) { paidFull++; return; }
+                if (r.apply > 0.009) n++;
+                rows += '<tr><td data-label="Room"><span class="rh-group-split-room">' + _esc(r.room || r.booking_reference) + (r.status === 'no-show' ? ' <small>(no-show)</small>' : '') + '<br><small>' + _esc(r.booking_reference) + '</small></span></td>'
+                    + '<td data-label="Guest">' + _esc(r.guest_name) + '</td><td class="num" data-label="Owed">' + _esc(money(r.owed)) + '</td><td class="num" data-label="To apply"><strong>' + _esc(money(r.apply)) + '</strong></td></tr>';
+            });
+            let foot = '<p class="rh-group-split-note">' + _esc(money(d.amount)) + ' split across ' + n + ' room' + (n === 1 ? '' : 's') + ', one receipt each.'
+                + (paidFull ? ' ' + paidFull + ' room' + (paidFull === 1 ? ' is' : 's are') + ' already paid in full and get nothing.' : '') + '</p>';
+            if (d.excess > 0.009) {
+                const xr = d.rooms.filter(function (r) { return r.id === d.excess_room_id; })[0];
+                foot += '<p class="rh-group-split-note">' + _esc(money(d.excess)) + ' is more than the group owes. It goes on ' + _esc(xr ? (xr.room || xr.booking_reference) : 'one room') + ' and becomes a credit note (tick the box above).</p>';
+            }
+            return '<strong>How this payment is split</strong>'
+                + '<p class="rh-group-split-help">Owed is what the room still owes. To apply is the share of the payment for that room.</p>'
+                + '<div class="rh-group-split-wrap"><table class="rh-group-split"><thead><tr><th>Room<small>Room and booking reference</small></th><th>Guest<small>Who the room is booked for</small></th><th class="num">Owed<small>Still unpaid on this room</small></th><th class="num">To apply<small>Share of the payment for this room</small></th></tr></thead><tbody>'
+                + rows + '</tbody></table></div>' + foot;
+        }
+        if (el('pa-group-scope')) {
+            el('pa-group-scope').querySelectorAll('input[name="pay_scope"]').forEach(function (r) { r.addEventListener('change', onScopeChange); });
+        }
 
         /* ── Initial render ───────────────────────────────────── */
         updatePreview();
@@ -1677,6 +1884,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                 amountInput.value = PRE_DUE.toFixed(2);
             }
             updatePreview();
+            if (!IS_EDIT && PRE_DUE > 0.01 && hdType.value === 'room') loadGroupFor(hdId.value, PRE_GROUP_ROOMS);
         }
 
         /* ── Helpers ──────────────────────────────────────────── */

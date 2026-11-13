@@ -229,9 +229,18 @@ try {
         }
     }
 
+    // Whole-group payment (owner 2026-11-13): rooms in each booking's group, so Add Payment asks "This room only /
+    // Whole group" for a group only (one query; a single booking never runs the group check).
+    $groupRooms = [];
+    if ($type === 'room' && $bookings && is_file(__DIR__ . '/../includes/group-payment.php')) {
+        require_once __DIR__ . '/../includes/group-payment.php';
+        $groupRooms = rh_group_pay_counts($pdo, array_map(static fn($r) => (int)$r['id'], $bookings));
+    }
+
     // Format dates for display
     foreach ($bookings as &$booking) {
         if ($type === 'room') {
+            $booking['group_rooms'] = (int)($groupRooms[(int)$booking['id']] ?? 1);
             $sp = $billSplits[(int)$booking['id']] ?? null;
             $booking['on_account'] = !empty($sp['on_account']);
             $booking['company_name'] = $booking['on_account'] ? (string)$sp['name'] : '';
