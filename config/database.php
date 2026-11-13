@@ -9621,6 +9621,67 @@ function rh_charge_display_desc(?string $desc): string
 }
 
 /**
+ * Owner 2026-11-14 ("Like a room night"): a part of a booking's booked stay billed on its own - the night kept on a
+ * cancellation, a group no-show / expiry charge - is taxed like a room night: its VAT and tourism levy are the same
+ * share of $amount as the booking's stored VAT and levy are of its stored gross (total_with_vat, else total_amount +
+ * vat_amount). The stored figures follow vat_pricing_mode as the booking was priced (VAT off = 0 VAT). Pure.
+ * vat and levy are rounded; net = amount - vat - levy, so the three always add up to the amount exactly.
+ * @return array{gross:float,vat:float,levy:float,net:float}
+ */
+function rh_room_night_share(array $b, float $amount): array
+{
+    $amount = round(max(0.0, $amount), 2);
+    $gross = (float)($b['total_with_vat'] ?? 0);
+    if ($gross <= 0) {
+        $gross = (float)($b['total_amount'] ?? 0) + (float)($b['vat_amount'] ?? 0);
+    }
+    $vat = 0.0;
+    $levy = 0.0;
+    if ($amount > 0 && $gross > BALANCE_TOLERANCE) {
+        $ratio = min(1.0, $amount / $gross);
+        $vat = round(max(0.0, (float)($b['vat_amount'] ?? 0)) * $ratio, 2);
+        $levy = round(max(0.0, (float)($b['tourism_levy_amount'] ?? 0)) * $ratio, 2);
+        $vat = min($vat, $amount);
+        $levy = min($levy, round($amount - $vat, 2));
+    }
+    return ['gross' => $amount, 'vat' => $vat, 'levy' => $levy, 'net' => round($amount - $vat - $levy, 2)];
+}
+
+/**
+ * Badge text for a cancelled booking that still owes money (its kept fee / unpaid extras: amount_due above
+ * BALANCE_TOLERANCE, owner 2026-11-14): "Cancelled - fee owed". '' for anything else, so the caller keeps its own
+ * label. Plain text; the caller escapes it. Pure.
+ */
+function rh_cancelled_fee_owed_label(?string $status, $amountDue = 0): string
+{
+    return strtolower(trim((string)$status)) === 'cancelled' && round((float)$amountDue, 2) > BALANCE_TOLERANCE
+        ? 'Cancelled - fee owed' : '';
+}
+
+/**
+ * The tourism levy inside a booking's group no-show / expiry charge (owner 2026-11-14: taxed like a room night). The
+ * charge row stores its VAT; its levy share is worked out from the booking's stored levy (rh_room_night_share on the
+ * row's line_total), so the levy line includes it. 0 when the booking has no live (not voided) tagged row. Read-only.
+ * $b: the bookings row (id, total_with_vat / total_amount + vat_amount, tourism_levy_amount).
+ */
+function rh_noshow_fee_levy(PDO $pdo, array $b): float
+{
+    $bookingId = (int)($b['id'] ?? 0);
+    if ($bookingId <= 0 || (float)($b['tourism_levy_amount'] ?? 0) <= 0) {
+        return 0.0;
+    }
+    try {
+        $st = $pdo->prepare('SELECT COALESCE(SUM(line_total), 0) FROM booking_charges WHERE booking_id = ? AND voided = 0 AND description LIKE ?');
+        $st->execute([$bookingId, '%' . rh_noshow_fee_tag($bookingId)]);
+        $fee = (float)$st->fetchColumn();
+    } catch (Throwable $e) {
+        error_log('rh_noshow_fee_levy: ' . $e->getMessage());
+        return 0.0;
+    }
+    return $fee > BALANCE_TOLERANCE ? rh_room_night_share($b, $fee)['levy'] : 0.0;
+}
+
+/**
  * True when the booking carries its group no-show / expiry charge row (voided or not: a voided row = charged nothing).
  * Such a no-show / expired room bills from its folio charges only; its booked stay is no longer billed.
  */
@@ -9847,18 +9908,26 @@ function getBookingFolioSummary(int $bookingId): array
         }
         $baseNet = (float)($booking['total_amount'] ?? 0);
         $baseVat = (float)($booking['vat_amount'] ?? 0);
+        $baseLevy = max(0.0, (float)($booking['tourism_levy_amount'] ?? 0));
+        $extrasLevy = 0.0;
         // Cancelled: bill only what was retained on cancellation (mirrors
-        // recalculateBookingFinancials); original totals stay as history.
+        // recalculateBookingFinancials); original totals stay as history. The kept amount is taxed like a room night
+        // (owner 2026-11-14): its VAT and levy are the booking's own share (rh_room_night_share); the gross is unchanged.
         if (($booking['status'] ?? '') === 'cancelled') {
             $retained = max(0.0, (float)($booking['cancellation_retained_amount'] ?? 0));
+            $kept = rh_room_night_share($booking, $retained);
             $baseGross = $retained;
-            $baseNet = $baseGross;
-            $baseVat = 0.0;
+            $baseVat = $kept['vat'];
+            $baseNet = round($baseGross - $baseVat, 2);
+            $baseLevy = $kept['levy'];
         } elseif (in_array(($booking['status'] ?? ''), ['no-show', 'expired'], true) && rh_noshow_fee_tagged($pdo, $bookingId)) {
-            // A group room charged under group_noshow_charge: billed from its folio charges only (the tagged row).
+            // A group room charged under group_noshow_charge: billed from its folio charges only (the tagged row). That
+            // charge carries its levy share like a room night (rh_noshow_fee_levy): it is in the extras, not the base.
             $baseGross = 0.0;
             $baseNet = 0.0;
             $baseVat = 0.0;
+            $baseLevy = 0.0;
+            $extrasLevy = rh_noshow_fee_levy($pdo, $booking);
         }
         $extrasSubtotal = (float)($folioTotals['folio_subtotal'] ?? 0);
         $extrasVat = (float)($folioTotals['folio_vat'] ?? 0);
@@ -9882,7 +9951,12 @@ function getBookingFolioSummary(int $bookingId): array
             'amount_paid' => $amountPaid,
             'balance_due' => $balanceDue,
             'charges_by_type' => $chargesByType,
-            'total_items' => (int)($folioTotals['total_items'] ?? 0)
+            'total_items' => (int)($folioTotals['total_items'] ?? 0),
+            // Tourism levy inside these figures (levy sits in total_subtotal, outside the VAT): the booked stay's levy
+            // (a cancelled booking: the kept amount's share), plus the levy share of a group no-show / expiry charge.
+            'base_levy' => round($baseLevy, 2),
+            'extras_levy' => round($extrasLevy, 2),
+            'total_levy' => round($baseLevy + $extrasLevy, 2),
         ];
     } catch (PDOException $e) {
         error_log("getBookingFolioSummary error: " . $e->getMessage());

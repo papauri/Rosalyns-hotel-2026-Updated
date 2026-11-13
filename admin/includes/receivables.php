@@ -4,8 +4,8 @@
  * One receivables rule for every screen (Reports Overview + Aging, Invoices Outstanding, Accounting
  * dashboard, End of Day "Still owed"): money owed is the ACCOUNT's amount_due, never a pending payment row.
  *
- *   room        every live booking with a balance (pending/confirmed/checked-in/checked-out, plus the first
- *               night kept on a cancellation, plus a no-show still owing, plus an expired room charged under the
+ *   room        every live booking with a balance (pending/confirmed/checked-in/checked-out, plus a cancelled
+ *               room whose folio still owes - its kept fee and/or extras left posted, plus a no-show still owing, plus an expired room charged under the
  *               group no-show charge; an untagged expired hold never counts)
  *   conference  confirmed or completed bookings only (an unconfirmed enquiry is not owed money)
  *   event       confirmed or completed bookings only
@@ -27,9 +27,12 @@ if (!function_exists('rh_receivable_status_sql')) {
                 // the group no-show / expiry charge (tag rh_noshow_fee_tag(): '[noshow-fee:<id>]'); an untagged expired
                 // hold is an unpaid hold, not a debt. amount_due is kept equal to the folio balance by
                 // recalculateBookingFinancials (same tagged rule as getBookingFolioSummary); a credit gives 0, so it never counts.
+                // Cancelled (owner 2026-11-14 "count it everywhere"): a cancelled room counts while its folio still owes -
+                // the fee kept on cancellation and/or folio extras left posted (amount_due = that folio balance, kept by
+                // recalculateBookingFinancials). Nothing kept and no extras (void + refund all) never counts.
                 $idCol = $alias !== '' ? $a . 'id' : 'bookings.id';
                 return "{$a}deleted_at IS NULL AND ({$a}status IN ('pending','confirmed','checked-in','checked-out','no-show')"
-                    . " OR ({$a}status = 'cancelled' AND COALESCE({$a}cancellation_retained_amount,0) > 0)"
+                    . " OR ({$a}status = 'cancelled' AND (COALESCE({$a}cancellation_retained_amount,0) > 0 OR COALESCE({$a}folio_charges_total,0) > 0))"
                     . " OR ({$a}status = 'expired' AND EXISTS (SELECT 1 FROM booking_charges nsf WHERE nsf.booking_id = {$idCol}"
                     . " AND nsf.description LIKE CONCAT('%[noshow-fee:', {$idCol}, ']'))))";
             case 'conference':

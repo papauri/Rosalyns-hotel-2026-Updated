@@ -394,9 +394,13 @@ if (!function_exists('rh_bk_valid_date')) {
         $p = strtolower(trim((string)$payment_status));
         $s = strtolower(trim((string)$status));
         // A no-show keeps billing its stay (owner 2026-11-13: a no-show pays 100%), so what it still owes is shown, as in
-        // Still owed. Cancelled / expired stay out here.
-        if ($p === 'refunded' || in_array($s, ['cancelled', 'expired'], true)) {
+        // Still owed. A cancelled booking that still owes (owner 2026-11-14: its kept fee / extras; amount_due is that
+        // folio balance) shows it whether or not anything was paid, as in Still owed. Expired stays out here.
+        if ($p === 'refunded' || $s === 'expired') {
             return 0.0;
+        }
+        if ($s === 'cancelled') {
+            return $due;
         }
         return ($p === 'partial' || (float)$amount_paid > $tol) ? $due : 0.0;
     }

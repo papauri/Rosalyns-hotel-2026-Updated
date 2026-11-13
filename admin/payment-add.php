@@ -1853,7 +1853,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
             d.rooms.forEach(function (r) {
                 if (!(r.owed > 0.009) && !(r.apply > 0.009)) { paidFull++; return; }
                 if (r.apply > 0.009) n++;
-                rows += '<tr><td data-label="Room"><span class="rh-group-split-room">' + _esc(r.room || r.booking_reference) + (r.status === 'no-show' ? ' <small>(no-show)</small>' : '') + '<br><small>' + _esc(r.booking_reference) + '</small></span></td>'
+                rows += '<tr><td data-label="Room"><span class="rh-group-split-room">' + _esc(r.room || r.booking_reference) + (r.status === 'no-show' ? ' <small>(no-show)</small>' : (r.status === 'cancelled' ? ' <small>(cancelled - fee owed)</small>' : '')) + '<br><small>' + _esc(r.booking_reference) + '</small></span></td>'
                     + '<td data-label="Guest">' + _esc(r.guest_name) + '</td><td class="num" data-label="Owed">' + _esc(money(r.owed)) + '</td><td class="num" data-label="To apply"><strong>' + _esc(money(r.apply)) + '</strong></td></tr>';
             });
             let foot = '<p class="rh-group-split-note">' + _esc(money(d.amount)) + ' split across ' + n + ' room' + (n === 1 ? '' : 's') + ', one receipt each.'

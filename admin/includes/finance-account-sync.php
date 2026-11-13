@@ -550,7 +550,9 @@ if (!function_exists('rh_payment_vat_lines')) {
      * What to SHOW for a stored payment / refund row: net without VAT and levy, levy share and the true
      * VAT rate. Room rows read the booking's levy and gross (total_with_vat + folio extras, the same base
      * the VAT was split on); every other row, or a room with no levy, is shown as stored. Read-only.
-     * Also shown as stored: a CANCELLED booking (its folio bills no levy) and any row whose worked-out rate
+     * Gross and levy come from the folio summary (a cancelled booking: the kept amount and its levy share, taxed like a
+     * room night - owner 2026-11-14; a cancelled booking that kept nothing has no levy, so its rows show as stored).
+     * Also shown as stored: any row whose worked-out rate
      * would exceed the booking's own vat_rate + 0.05 (its VAT was taken at the flat rate, levy included,
      * e.g. rows from before 2026-10-01), so no levy line is invented for them.
      * $cache = true reuses one booking's totals across rows (CSV export).
@@ -572,7 +574,7 @@ if (!function_exists('rh_payment_vat_lines')) {
                 $st = $pdo->prepare("SELECT tourism_levy_amount, total_with_vat, total_amount, vat_amount, vat_rate, status FROM bookings WHERE id = ? LIMIT 1");
                 $st->execute([$bid]);
                 if ($b = $st->fetch(PDO::FETCH_ASSOC)) {
-                    $a['levy'] = (string)($b['status'] ?? '') === 'cancelled' ? 0.0 : max(0.0, (float)($b['tourism_levy_amount'] ?? 0));
+                    $a['levy'] = max(0.0, (float)($b['tourism_levy_amount'] ?? 0));
                     $a['vat_rate'] = (float)($b['vat_rate'] ?? 0);
                     if ($a['levy'] > $tol) {
                         $g = (float)($b['total_with_vat'] ?? 0);
@@ -580,7 +582,18 @@ if (!function_exists('rh_payment_vat_lines')) {
                             $g = (float)($b['total_amount'] ?? 0) + (float)($b['vat_amount'] ?? 0);
                         }
                         if (function_exists('getBookingFolioSummary')) {
-                            $g += (float)(getBookingFolioSummary($bid)['extras_total'] ?? 0);
+                            // The folio's own gross and levy (owner 2026-11-14 "like a room night"): a cancelled booking
+                            // bills the kept amount with its levy share, a group no-show / expiry charge carries its share.
+                            $fs = getBookingFolioSummary($bid);
+                            if (isset($fs['grand_total'], $fs['total_levy'])) {
+                                $g = (float)$fs['grand_total'];
+                                $a['levy'] = max(0.0, (float)$fs['total_levy']);
+                            } else {
+                                $g += (float)($fs['extras_total'] ?? 0);
+                                if ((string)($b['status'] ?? '') === 'cancelled') {
+                                    $a['levy'] = 0.0; // summary unreadable: never invent a levy on a cancelled booking
+                                }
+                            }
                         }
                         $a['gross'] = $g;
                     }
@@ -645,7 +658,7 @@ if (!function_exists('rh_refund_leg_rate')) {
      * The VAT rate to STORE on a refund leg of $origPayment: the original payment's TRUE rate from
      * rh_payment_vat_lines() (VAT / net without the tourism levy, e.g. 17.50 not 17.33). Only the rate value;
      * the refund's VAT amount and payment_amount come from rh_refund_vat_split() unchanged. A cancelled
-     * booking, a flat-rate row or a row missing booking_type / booking_id keeps the stored rate.
+     * booking that kept nothing, a flat-rate row or a row missing booking_type / booking_id keeps the stored rate.
      * $origPayment: payments row (booking_type, booking_id, payment_amount, vat_amount, total_amount, vat_rate).
      */
     function rh_refund_leg_rate(PDO $pdo, array $origPayment, float $storedRate): float
@@ -682,18 +695,9 @@ if (!function_exists('rh_account_vat_split')) {
                 $s = getBookingFolioSummary($bookingId);
                 $g = (float)($s['grand_total'] ?? 0);
                 $v = (float)($s['total_vat'] ?? 0);
-                // Levy is part of the folio base gross; a cancelled booking's folio bills only the
-                // retained amount with no VAT, so no levy is taken out there.
-                $levy = 0.0;
-                try {
-                    $lv = $pdo->prepare("SELECT tourism_levy_amount, status FROM bookings WHERE id = ? LIMIT 1");
-                    $lv->execute([$bookingId]);
-                    if (($lr = $lv->fetch(PDO::FETCH_ASSOC)) && (string)($lr['status'] ?? '') !== 'cancelled') {
-                        $levy = max(0.0, (float)($lr['tourism_levy_amount'] ?? 0));
-                    }
-                } catch (Throwable $e) {
-                    $levy = 0.0; // levy unknown: the VAT amount is unaffected, only the rate stays diluted
-                }
+                // Levy is part of the folio gross: the folio summary's own levy (a cancelled booking: the kept
+                // amount's share; a group no-show / expiry charge: its share), owner 2026-11-14 "like a room night".
+                $levy = max(0.0, (float)($s['total_levy'] ?? 0));
                 $sp = rh_vat_split_from_totals($gross, $g, $v, $levy);
                 if ($sp !== null) {
                     return ['rate' => $sp['rate'], 'vat' => $sp['vat'], 'net' => $sp['net'], 'levy' => $sp['levy']];

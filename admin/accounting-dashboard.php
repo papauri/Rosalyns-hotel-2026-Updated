@@ -243,7 +243,7 @@ try {
                         AND p2.deleted_at IS NULL
                     )
                     AND b2.amount_due > {$balTol}
-                    AND (b2.status IN ('pending','confirmed','checked-in','checked-out') OR (b2.status = 'cancelled' AND COALESCE(b2.cancellation_retained_amount,0) > 0))
+                    AND (" . rh_receivable_status_sql('room', 'b2') . ")
                 ) as total_room_outstanding
             FROM payments p
             WHERE p.booking_type = 'room'

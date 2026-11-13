@@ -234,7 +234,13 @@ eq(rh_bk_left_to_pay('unpaid', 'checked-in', 7000, 3000), 7000.0, 'paid somethin
 eq(rh_bk_left_to_pay('partial', 'confirmed', 0.004, 5000), 0.0, 'due within tolerance -> nothing');
 eq(rh_bk_left_to_pay('partial', 'confirmed', 0, 5000), 0.0, 'stale partial with nothing due -> nothing');
 eq(rh_bk_left_to_pay('paid', 'confirmed', 0, 20000), 0.0, 'paid -> nothing');
-eq(rh_bk_left_to_pay('partial', 'cancelled', 8000, 2000), 0.0, 'cancelled -> nothing');
+eq(rh_bk_left_to_pay('partial', 'cancelled', 8000, 2000), 8000.0, 'cancelled still owing its kept fee -> shown (owner 2026-11-14)');
+eq(rh_bk_left_to_pay('unpaid', 'cancelled', 8000, 0), 8000.0, 'cancelled fee owed, nothing paid yet -> shown');
+eq(rh_bk_left_to_pay('unpaid', 'cancelled', 0, 0), 0.0, 'cancelled, nothing kept (void + refund all) -> nothing');
+eq(rh_bk_left_to_pay('paid', 'cancelled', 0, 8000), 0.0, 'cancelled, fee paid in full -> nothing');
+eq(rh_bk_left_to_pay('refunded', 'cancelled', 0, 0), 0.0, 'cancelled, refunded -> nothing');
+eq(rh_bk_left_to_pay('partial', 'cancelled', 0.004, 2000), 0.0, 'cancelled, due within tolerance -> nothing');
+eq(rh_bk_left_to_pay('partial', 'expired', 8000, 2000), 0.0, 'expired -> nothing');
 eq(rh_bk_left_to_pay('partial', 'no-show', 8000, 2000), 8000.0, 'no-show still owing -> shown (a no-show pays 100%)');
 eq(rh_bk_left_to_pay('paid', 'no-show', 0, 2000), 0.0, 'no-show paid in full -> nothing');
 eq(rh_bk_left_to_pay('refunded', 'confirmed', 8000, 2000), 0.0, 'refunded -> nothing');

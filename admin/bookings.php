@@ -4294,7 +4294,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                             <?php if ($bk_rate['ok']): ?>
                                                 <br><small class="bk-booked-rate" style="color:#666;white-space:nowrap;" title="<?php echo htmlspecialchars('Booked at ' . $bk_rate['text'] . '. Room rate a night × nights, at the price the booking was made at; today\'s room price does not change it.', ENT_QUOTES); ?>"><?php echo htmlspecialchars($bk_rate['compact'], ENT_QUOTES); ?></small>
                                             <?php endif; ?>
-                                            <span class="rh-phone-sub rh-phone-sub--pill bk-status-twin"><span class="badge badge-<?php echo htmlspecialchars($is_deleted_row ? 'cancelled' : $booking['status'], ENT_QUOTES); ?>"><?php echo $is_deleted_row ? 'Deleted' : htmlspecialchars(ucfirst((string)$booking['status'])); ?></span></span><?php /* Status note twin: the Status cell's deleted-by / when / reason or tentative expiry, shown under the pill when the Status column drops out (bookings.css, laptops). */ ?><?php if ($is_deleted_row): ?><small class="bk-status-note">by <?php echo htmlspecialchars((string)($booking['deleted_by_name'] ?? 'unknown')); ?>, <?php echo date('j M Y, H:i', strtotime((string)$booking['deleted_at'])); ?><?php if (trim((string)($booking['deleted_reason'] ?? '')) !== ''): ?><br><em><?php echo htmlspecialchars((string)$booking['deleted_reason']); ?></em><?php endif; ?></small><?php endif; ?><?php if ($is_tentative && $booking['tentative_expires_at']): ?><small class="bk-status-note">Expires: <?php echo (new DateTime($booking['tentative_expires_at']))->format('M d, H:i'); ?></small><?php endif; ?>
+                                            <span class="rh-phone-sub rh-phone-sub--pill bk-status-twin"><span class="badge badge-<?php echo htmlspecialchars($is_deleted_row ? 'cancelled' : $booking['status'], ENT_QUOTES); ?>"><?php echo $is_deleted_row ? 'Deleted' : htmlspecialchars(rh_cancelled_fee_owed_label($booking['status'], $booking['amount_due'] ?? 0) ?: ucfirst((string)$booking['status'])); ?></span></span><?php /* Status note twin: the Status cell's deleted-by / when / reason or tentative expiry, shown under the pill when the Status column drops out (bookings.css, laptops). */ ?><?php if ($is_deleted_row): ?><small class="bk-status-note">by <?php echo htmlspecialchars((string)($booking['deleted_by_name'] ?? 'unknown')); ?>, <?php echo date('j M Y, H:i', strtotime((string)$booking['deleted_at'])); ?><?php if (trim((string)($booking['deleted_reason'] ?? '')) !== ''): ?><br><em><?php echo htmlspecialchars((string)$booking['deleted_reason']); ?></em><?php endif; ?></small><?php endif; ?><?php if ($is_tentative && $booking['tentative_expires_at']): ?><small class="bk-status-note">Expires: <?php echo (new DateTime($booking['tentative_expires_at']))->format('M d, H:i'); ?></small><?php endif; ?>
                                             <?php if ($is_tentative && $booking['tentative_expires_at']): ?>
                                                 <?php if ($expires_soon): ?>
                                                     <br><span class="expires-soon"><i class="fas fa-exclamation-triangle"></i> Expires soon!</span>
@@ -4311,7 +4311,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                                 </small>
                                             <?php else: ?>
                                             <span class="badge badge-<?php echo htmlspecialchars($booking['status'], ENT_QUOTES); ?>">
-                                                <?php echo ucfirst($booking['status']); ?>
+                                                <?php echo htmlspecialchars(rh_cancelled_fee_owed_label($booking['status'], $booking['amount_due'] ?? 0) ?: ucfirst((string)$booking['status'])); ?>
                                             </span>
                                             <?php endif; ?>
                                             <?php if ($is_tentative && $booking['tentative_expires_at']): ?>
@@ -6582,7 +6582,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             d.rooms.forEach(function (r) {
                 if (!(r.owed > 0.009) && !(r.apply > 0.009)) { paidFull++; return; }
                 if (r.apply > 0.009) { n++; }
-                rows += '<tr><td data-label="Room"><span class="rh-group-split-room">' + esc(r.room || r.booking_reference) + (r.status === 'no-show' ? ' <small>(no-show)</small>' : '') + '<br><small>' + esc(r.booking_reference) + '</small></span></td>'
+                rows += '<tr><td data-label="Room"><span class="rh-group-split-room">' + esc(r.room || r.booking_reference) + (r.status === 'no-show' ? ' <small>(no-show)</small>' : (r.status === 'cancelled' ? ' <small>(cancelled - fee owed)</small>' : '')) + '<br><small>' + esc(r.booking_reference) + '</small></span></td>'
                     + '<td data-label="Guest">' + esc(r.guest_name) + '</td><td class="num" data-label="Owed">' + esc(fmt(r.owed)) + '</td><td class="num" data-label="To apply"><strong>' + esc(fmt(r.apply)) + '</strong></td></tr>';
             });
             return '<strong>How this payment is split</strong>'

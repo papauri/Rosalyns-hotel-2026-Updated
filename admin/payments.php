@@ -878,7 +878,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                 <td data-label="Total"><?php echo $currency_symbol . number_format($oGrand, 0); ?></td>
                                 <td data-label="Paid"><?php echo $currency_symbol . number_format((float)($oRow['amount_paid'] ?? 0), 0); ?></td>
                                 <td data-label="Outstanding"><strong style="color:#c0392b;"><?php echo $currency_symbol . number_format((float)($oRow['amount_due'] ?? 0), 0); ?></strong></td>
-                                <td data-label="Status"><span class="badge badge-<?php echo htmlspecialchars((string)($oRow['status'] ?? '')); ?>"><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)($oRow['status'] ?? '')))); ?></span></td>
+                                <td data-label="Status"><span class="badge badge-<?php echo htmlspecialchars((string)($oRow['status'] ?? '')); ?>"><?php echo htmlspecialchars((($oRow['src'] ?? '') === 'room' ? rh_cancelled_fee_owed_label((string)($oRow['status'] ?? ''), $oRow['amount_due'] ?? 0) : '') ?: ucfirst(str_replace('_', ' ', (string)($oRow['status'] ?? '')))); ?></span></td>
                                 <td data-label="Actions">
                                     <div class="quick-actions">
                                         <?php if ($viewUrl !== ''): ?>

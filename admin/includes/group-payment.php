@@ -9,18 +9,34 @@
  *    helpers use. Rooms that count: not deleted, not cancelled, not expired. A no-show room counts (a no-show pays
  *    100%), and so does a checked-out room; both only take money while they still owe. rh_booking_group_members()
  *    is NOT used here because it leaves no-show and checked-out rooms out (cancel/delete rely on that).
+ *    A cancelled room counts while it still owes (owner 2026-11-14: its kept fee / extras, the Still owed rule:
+ *    rh_group_pay_owing_cancelled_sql), so paying the group invoice's balance due settles it too.
  *  - Split basis = each room's own balance due. Rooms paid in full get nothing; no room is ever taken above its
  *    balance. Shares are proportional to the balance, rounded down to the cent; the cents left over go to the room
  *    with the most balance left (spilling to the next only if that room cannot take them), so the total is exact.
  *  - More than the whole group owes = today's overpayment rule applied ONCE: the explicit tick is needed, every room is
  *    paid to its balance and the extra goes to one room (the group's lead when it counts, else the room the payment
- *    was opened from), which issues the one credit note.
+ *    was opened from; never a cancelled room while the group has another), which issues the one credit note.
  *  - Money received only (status completed / paid). Company-billed (on-account) groups are refused: company money
  *    goes through Company accounts.
  */
 
 require_once __DIR__ . '/finance-account-sync.php';
 require_once __DIR__ . '/../../includes/finance-sequences.php';
+require_once __DIR__ . '/receivables.php';
+
+if (!function_exists('rh_group_pay_owing_cancelled_sql')) {
+    /**
+     * SQL condition (no leading AND) for a CANCELLED room that still owes (owner 2026-11-14): counted as owed by the one
+     * receivables rule (rh_receivable_status_sql: its kept fee or extras left posted) with amount_due above
+     * BALANCE_TOLERANCE. $alias: the bookings table alias.
+     */
+    function rh_group_pay_owing_cancelled_sql(string $alias): string
+    {
+        $tol = (float)BALANCE_TOLERANCE;
+        return "({$alias}.status = 'cancelled' AND {$alias}.amount_due > {$tol} AND " . rh_receivable_status_sql('room', $alias) . ')';
+    }
+}
 
 if (!function_exists('rh_group_pay_rooms')) {
     /**
@@ -47,7 +63,7 @@ if (!function_exists('rh_group_pay_rooms')) {
             LEFT JOIN rooms r ON r.id = b.room_id
             WHERE (b.id = ? OR b.primary_booking_id = ?)
               AND b.deleted_at IS NULL
-              AND b.status NOT IN ('cancelled', 'expired')
+              AND (b.status NOT IN ('cancelled', 'expired') OR " . rh_group_pay_owing_cancelled_sql('b') . ")
             ORDER BY b.id ASC
         ");
         $q->execute([$root, $root]);
@@ -91,7 +107,7 @@ if (!function_exists('rh_group_pay_counts')) {
                 SELECT b.id,
                        (SELECT COUNT(*) FROM bookings g
                          WHERE (g.id = COALESCE(NULLIF(b.primary_booking_id, 0), b.id) OR g.primary_booking_id = COALESCE(NULLIF(b.primary_booking_id, 0), b.id))
-                           AND g.deleted_at IS NULL AND g.status NOT IN ('cancelled', 'expired')) AS n
+                           AND g.deleted_at IS NULL AND (g.status NOT IN ('cancelled', 'expired') OR " . rh_group_pay_owing_cancelled_sql('g') . ")) AS n
                 FROM bookings b
                 WHERE b.id IN (" . implode(',', array_fill(0, count($ids), '?')) . ")
             ");
@@ -189,11 +205,37 @@ if (!function_exists('rh_group_pay_split')) {
 }
 
 if (!function_exists('rh_group_pay_excess_room')) {
-    /** The room that takes an overpayment: the group's lead when it counts, else the room the payment was opened on. */
-    function rh_group_pay_excess_room(PDO $pdo, int $bookingId, array $roomIds): int
+    /**
+     * The room that takes an overpayment: the group's lead when it counts, else the room the payment was opened on.
+     * $roomIds: the counted rooms; $cancelledIds: those that are cancelled (owing their kept fee). A cancelled room never
+     * takes the extra while another room can (its credit note is not issued on a cancelled booking): the first
+     * non-cancelled room then takes it.
+     */
+    function rh_group_pay_excess_room(PDO $pdo, int $bookingId, array $roomIds, array $cancelledIds = []): int
     {
+        $open = array_values(array_diff(array_map('intval', $roomIds), array_map('intval', $cancelledIds)));
         $lead = function_exists('rh_booking_group_effective_lead') ? rh_booking_group_effective_lead($pdo, $bookingId) : 0;
-        return in_array($lead, $roomIds, true) ? $lead : $bookingId;
+        if (in_array($lead, $open, true)) {
+            return $lead;
+        }
+        if (in_array($bookingId, $open, true) || !$open) {
+            return $bookingId;
+        }
+        return (int)$open[0];
+    }
+}
+
+if (!function_exists('rh_group_pay_cancelled_ids')) {
+    /** The cancelled rooms among rh_group_pay_rooms() rows (they count only for what they still owe). */
+    function rh_group_pay_cancelled_ids(array $rooms): array
+    {
+        $out = [];
+        foreach ($rooms as $r) {
+            if ((string)($r['status'] ?? '') === 'cancelled') {
+                $out[] = (int)$r['id'];
+            }
+        }
+        return $out;
     }
 }
 
@@ -236,7 +278,7 @@ if (!function_exists('rh_group_pay_preview')) {
         }
         $out['can_group'] = true;
         $owed = array_column($rooms, 'owed', 'id');
-        $excessRoom = rh_group_pay_excess_room($pdo, $bookingId, $ids);
+        $excessRoom = rh_group_pay_excess_room($pdo, $bookingId, $ids, rh_group_pay_cancelled_ids($rooms));
         $split = rh_group_pay_split($owed, $out['amount'], $excessRoom);
         $expect = [];
         foreach ($rooms as $r) {
@@ -324,7 +366,7 @@ if (!function_exists('rh_group_pay_record')) {
         if ($limitErr !== null) {
             throw new Exception(str_replace('this booking', 'this group', $limitErr) . ' Nothing was recorded.');
         }
-        $excessRoom = rh_group_pay_excess_room($pdo, $bookingId, $ids);
+        $excessRoom = rh_group_pay_excess_room($pdo, $bookingId, $ids, rh_group_pay_cancelled_ids($rooms));
         $split = rh_group_pay_split($owed, $amount, $excessRoom);
         if (abs(array_sum($split['shares']) - $amount) > 0.001) {
             throw new RuntimeException('Group split does not add up. Nothing was recorded.');

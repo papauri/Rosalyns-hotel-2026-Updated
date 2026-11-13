@@ -962,11 +962,16 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         // bills only what was kept, like any other cancelled room (fix 2026-11-13; it never carries rh_inv_removed).
         $drCancelLead = $preload === null && $di === $pkgRowIdx && strtolower((string)($dr['status'] ?? '')) === 'cancelled';
         if ((!empty($dr['rh_inv_removed']) && strtolower((string)($dr['status'] ?? '')) === 'cancelled') || $drNoRoom || $drCancelLead) {
-            // A cancelled room bills only what was kept on cancellation (getBookingFolioSummary / recalc): no VAT, no levy.
+            // A cancelled room bills only what was kept on cancellation (getBookingFolioSummary / recalc), taxed like a
+            // room night (owner 2026-11-14): its VAT and levy are the booking's own share (rh_room_night_share), split out
+            // on the VAT and levy lines by the same vat_pricing_mode rule as a stay (rh_doc_stay_lines). 'kept' = the gross.
             // A deleted room that was not cancelled keeps nothing (rh_inv_group_rooms).
             $kept = $drNoRoom ? 0.0 : round(max(0.0, (float)($dr['cancellation_retained_amount'] ?? 0)), 2);
-            $docLines[$di] = ['mode' => $docLines[$di]['mode'], 'gross' => $kept, 'vat' => 0.0, 'levy' => 0.0, 'lines_total' => $kept,
-                'room' => $kept, 'child' => 0.0, 'pkg' => 0.0, 'subtotal' => $kept, 'total' => $kept, 'no_room' => $drNoRoom,
+            $keptSplit = rh_room_night_share($dr, $kept);
+            $keptLines = rh_doc_stay_lines(['total_with_vat' => $kept, 'vat_amount' => $keptSplit['vat'], 'tourism_levy_amount' => $keptSplit['levy']]);
+            $docLines[$di] = ['mode' => $docLines[$di]['mode'], 'gross' => $kept, 'vat' => $keptSplit['vat'], 'levy' => $keptSplit['levy'],
+                'lines_total' => $keptLines['lines_total'], 'room' => $keptLines['room'], 'child' => 0.0, 'pkg' => 0.0,
+                'subtotal' => $keptLines['lines_total'], 'total' => $kept, 'no_room' => $drNoRoom, 'kept' => $kept,
                 'cancel_lead' => $drCancelLead && !$drNoRoom];
         }
     }
@@ -1008,7 +1013,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     // the voided stay, not in the total); its own line says when it was cancelled and what was kept.
     $leadCancelled = !empty($docLines[$pkgRowIdx]['cancel_lead']);
     $leadCancelNote = $leadCancelled
-        ? rh_inv_cancel_note($pdo, $booking, (float)$docLines[$pkgRowIdx]['room'], static function ($v) use ($currency_symbol): string {
+        ? rh_inv_cancel_note($pdo, $booking, (float)($docLines[$pkgRowIdx]['kept'] ?? $docLines[$pkgRowIdx]['room']), static function ($v) use ($currency_symbol): string {
             return rh_pdf_money((float)$v, trim((string)$currency_symbol) !== '' ? trim((string)$currency_symbol) : hotel_brand_tokens()['hotel']['currency']);
         }) : '';
     if ($leadNoRoom || $leadCancelled) {
@@ -1114,7 +1119,39 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     // Printed subtotal: inclusive/off = VAT-inclusive lines; exclusive = net lines (VAT and levy are their own
     // rows), so subtotal + VAT + levy = total in every mode.
     $linesTotal    = round(array_sum(array_column($docLines, 'lines_total')), 2);
-    $subtotalShown = $vMode === 'exclusive' ? $linesTotal + $folioTotal - $folioVat : $linesTotal + $folioTotal;
+    // A group no-show / expiry charge is taxed like a room night (owner 2026-11-14): its levy share (rh_noshow_fee_levy
+    // basis) prints on the levy line, so its own line shows the amount without that levy (the total is unchanged).
+    $feeLevy = 0.0;
+    if ($preload === null && function_exists('rh_room_night_share')) {
+        $rowById = [];
+        foreach ($docRows as $dr) {
+            $rowById[(int)($dr['id'] ?? 0)] = $dr;
+        }
+        foreach ($folioCharges as $fk => $fc) {
+            $fBid = (int)($fc['booking_id'] ?? 0);
+            if ($fBid <= 0 || !preg_match('/\[noshow-fee:' . $fBid . '\]\s*$/', (string)($fc['description'] ?? ''))) {
+                continue;
+            }
+            $fRow = $rowById[$fBid] ?? [];
+            if (!array_key_exists('tourism_levy_amount', $fRow) || !array_key_exists('total_with_vat', $fRow)) {
+                $fSt = $pdo->prepare('SELECT id, total_with_vat, total_amount, vat_amount, tourism_levy_amount FROM bookings WHERE id = ?');
+                $fSt->execute([$fBid]);
+                $fRow = $fSt->fetch(PDO::FETCH_ASSOC) ?: [];
+            }
+            $fLevy = rh_room_night_share($fRow, (float)$fc['line_total'])['levy'];
+            if ($fLevy <= 0) {
+                continue;
+            }
+            $fQty = max(1, (int)($fc['quantity'] ?? 1));
+            $folioCharges[$fk]['line_total'] = round((float)$fc['line_total'] - $fLevy, 2);
+            $folioCharges[$fk]['line_subtotal'] = round((float)$fc['line_subtotal'] - $fLevy, 2);
+            $folioCharges[$fk]['unit_price'] = round($folioCharges[$fk]['line_total'] / $fQty, 2);
+            $feeLevy += $fLevy;
+        }
+        $feeLevy = round($feeLevy, 2);
+        $tourismLevyAmt = round($tourismLevyAmt + $feeLevy, 2);
+    }
+    $subtotalShown = ($vMode === 'exclusive' ? $linesTotal + $folioTotal - $folioVat : $linesTotal + $folioTotal) - $feeLevy;
     $amountPaid    = array_sum(array_column($payments, 'total_amount'));
     $balanceDue    = max(0.0, $totalWithVat - $amountPaid);
 
@@ -1171,6 +1208,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         $folioCharges = [];
         $folioTotal   = 0.0;
         $folioVat     = 0.0;
+        $tourismLevyAmt = round($tourismLevyAmt - $feeLevy, 2); // the no-show charge is an extra: not on the company's share
         $vatAmount    = $baseVatParts['vat'];
         $totalWithVat = round($ivGrp['stay'], 2);
         $subtotalShown = $linesTotal;
@@ -1334,7 +1372,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
                 // Cancelled room that still carries money: what was kept on cancellation is its whole room charge.
                 // A deleted room (not cancelled) keeps no room charge; only its money is shown.
                 $itemRows[] = [
-                    $title . rh_inv_sub(($noRoomChg ? (!empty($grm['rh_inv_noshow_fee']) ? $removed . ' - the booked stay is not charged; the ' . strtolower($removed) . ' charge is below' : 'Deleted - no room charge') : rh_inv_cancel_note($pdo, $grm, $grmRoom, $money)) . '; paid on this room '
+                    $title . rh_inv_sub(($noRoomChg ? (!empty($grm['rh_inv_noshow_fee']) ? $removed . ' - the booked stay is not charged; the ' . strtolower($removed) . ' charge is below' : 'Deleted - no room charge') : rh_inv_cancel_note($pdo, $grm, (float)($docLines[$gi]['kept'] ?? $grmRoom), $money)) . '; paid on this room '
                         . $money((float)($grm['rh_inv_paid'] ?? 0)) . ' (in the payments below)'),
                     rh_pdf_e('1'),
                     rh_pdf_e($money($grmRoom)),
@@ -1760,7 +1798,7 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
             $title = '<strong>' . htmlspecialchars(($removed !== '' ? $removed . ' room: ' : '') . rh_inv_room_title($grm)) . '</strong>' . $subHtml($whoWhen);
             $paidHere = $currency_symbol . ' ' . number_format((float)($grm['rh_inv_paid'] ?? 0), 2);
             if ($keptOnly) {
-                $chargeRows .= $roomRowHtml($title . $subHtml(($noRoomChg ? (!empty($grm['rh_inv_noshow_fee']) ? $removed . ' - the booked stay is not charged; the ' . strtolower($removed) . ' charge is below' : 'Deleted - no room charge') : rh_inv_cancel_note($pdo, $grm, $grmRoom, static function ($v) use ($currency_symbol): string {
+                $chargeRows .= $roomRowHtml($title . $subHtml(($noRoomChg ? (!empty($grm['rh_inv_noshow_fee']) ? $removed . ' - the booked stay is not charged; the ' . strtolower($removed) . ' charge is below' : 'Deleted - no room charge') : rh_inv_cancel_note($pdo, $grm, (float)($docLines[$gi]['kept'] ?? $grmRoom), static function ($v) use ($currency_symbol): string {
                     return $currency_symbol . ' ' . number_format((float)$v, 2);
                 }))
                     . '; paid on this room ' . $paidHere . ' (in the payment history)'), '1', $grmRoom, $grmRoom);

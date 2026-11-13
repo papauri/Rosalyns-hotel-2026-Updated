@@ -1399,7 +1399,8 @@ $folio_subtotal_before_vat = max(0.0, $folio_total_amount - $folio_total_vat);
 // Payment breakdown rows, all excl. VAT and levy: Room base + packages + Extras = Subtotal, and
 // Subtotal + Tourism levy + VAT = Total (folio grand total, unchanged). Package costs are stored all-in (VAT inside,
 // no levy), so each package shows its net; extras show net of their VAT; the room base is what remains (room net).
-// A cancelled stay bills only the kept amount (no levy, no VAT on it), so no levy row then. Display only.
+// A cancelled stay bills only the kept amount, taxed like a room night (owner 2026-11-14): its levy and VAT shares come
+// from the folio summary (total_levy / total_vat), as does the levy share of a group no-show / expiry charge. Display only.
 if (!function_exists('rh_stay_totals')) {
     require_once __DIR__ . '/../includes/pricing.php';
 }
@@ -1413,9 +1414,13 @@ if (!$bd_is_cancelled) {
         $bd_pkg_net_sum += $bd_pn;
     }
 }
-$bd_levy_row = $bd_is_cancelled ? 0.0 : round(max(0.0, (float)($booking['tourism_levy_amount'] ?? 0)), 2);
+$bd_levy_row = isset($folio_summary['total_levy'])
+    ? round(max(0.0, (float)$folio_summary['total_levy']), 2)
+    : ($bd_is_cancelled ? 0.0 : round(max(0.0, (float)($booking['tourism_levy_amount'] ?? 0)), 2));
 $bd_subtotal = round($folio_subtotal_before_vat - $bd_levy_row, 2);
-$bd_extras_net = round((float)($folio_summary['extras_total'] ?? 0) - (float)($folio_summary['extras_vat'] ?? 0), 2);
+// Extras net of VAT and of the levy inside a group no-show / expiry charge (that levy is on the levy row).
+$bd_extras_levy = round(max(0.0, (float)($folio_summary['extras_levy'] ?? 0)), 2);
+$bd_extras_net =round((float)($folio_summary['extras_total'] ?? 0) - (float)($folio_summary['extras_vat'] ?? 0) - (float)($folio_summary['extras_levy'] ?? 0), 2);
 $bd_room_base = isset($folio_summary['grand_total'])
     ? round($bd_subtotal - $bd_extras_net - $bd_pkg_net_sum, 2)
     : round((float)($booking['total_amount'] ?? 0) - $bd_levy_row - $bd_pkg_net_sum, 2);
@@ -1577,7 +1582,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     <h1>Booking <?php echo htmlspecialchars($booking['booking_reference']); ?></h1>
                     <span class="hero-status-badge">
                         <i class="fas <?php echo htmlspecialchars($current_status['icon']); ?>"></i>
-                        <?php echo htmlspecialchars(ucfirst(str_replace('-', ' ', $booking['status']))); ?>
+                        <?php echo htmlspecialchars(rh_cancelled_fee_owed_label($booking['status'], $folio_summary['balance_due'] ?? ($booking['amount_due'] ?? 0)) ?: ucfirst(str_replace('-', ' ', $booking['status']))); ?>
                     </span>
                 </div>
                 <p class="bd-header__sub">
@@ -2211,7 +2216,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                         <div class="payment-tax-breakdown">
                             <div class="payment-tax-row payment-tax-row--sub">
                                 <?php if ($bd_is_cancelled): ?>
-                                <span>Room (amount kept on cancellation)<br><small class="bd-muted">only this part of the stay is billed</small></span>
+                                <span>Room (amount kept on cancellation, excl. VAT and levy)<br><small class="bd-muted">only this part of the stay is billed; taxed like a room night</small></span>
                                 <?php else: ?>
                                 <span>Room base (excl. VAT and levy)<br><small class="bd-muted">the stay (and any child charge) without VAT or levy<?php echo $bd_pkg_rows ? '; packages listed below' : ''; ?></small></span>
                                 <?php endif; ?>
@@ -2235,7 +2240,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                 </div>
                             <?php endforeach; ?>
                             <div class="payment-tax-row payment-tax-row--sub">
-                                <span>Extras (excl. VAT)<br><small class="bd-muted">folio charges; their VAT is in the VAT row</small></span>
+                                <span>Extras (excl. VAT<?php echo $bd_extras_levy > 0 ? ' and levy' : ''; ?>)<br><small class="bd-muted">folio charges; their VAT is in the VAT row<?php echo $bd_extras_levy > 0 ? ', the no-show charge' . "'" . 's levy in the levy row' : ''; ?></small></span>
                                 <strong class="bd-amt"><?php echo $currency_symbol; ?><?php echo number_format($bd_extras_net, 2); ?></strong>
                             </div>
                             <div class="payment-tax-row">
@@ -2244,7 +2249,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                             </div>
                             <?php if ($bd_levy_row > 0): ?>
                                 <div class="payment-tax-row">
-                                    <span>+ Tourism Levy<?php echo $booking_levy_percent > 0 ? ' (' . number_format($booking_levy_percent, 2) . '%)' : ''; ?><br><small class="bd-muted">on the room, not on packages or extras</small></span>
+                                    <span>+ Tourism Levy<?php echo $booking_levy_percent > 0 ? ' (' . number_format($booking_levy_percent, 2) . '%)' : ''; ?><br><small class="bd-muted"><?php echo $bd_extras_levy > 0 ? 'on the no-show charge (taxed like a room night)' : 'on the room, not on packages or extras'; ?></small></span>
                                     <strong class="bd-amt"><?php echo $currency_symbol; ?><?php echo number_format($bd_levy_row, 2); ?></strong>
                                 </div>
                             <?php endif; ?>
