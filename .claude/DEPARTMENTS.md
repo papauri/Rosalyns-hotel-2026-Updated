@@ -187,8 +187,16 @@ The feature freeze in BUILD_PLAN.md ("PRODUCTION READINESS GATE") still stands. 
    money, VAT/levy, payments, refunds, stock, bookings/availability, auth/permissions, security, the
    Assistant's rails. Sonnet: very small or tedious low-risk work it can surely do (copy/port, mechanical
    edits, label/CSS/markup, docs wording, review of a markup-only diff). haiku: guides/KB, index/mapping,
-   lint-only checks, read-only fact listing. If unsure whether logic is touched → Opus. Never Fable
-   unless told.
+   lint-only checks, read-only fact listing. If unsure whether logic is touched → Opus.
+   **Fable 5.2 (owner 2026-11-14), only these three cases, chosen by the orchestrator (`model: fable`
+   on that one dispatch, effort high, never max):** (a) ONE spec/design check before a money,
+   cancellation/refund, migration/schema or auth decision is built; (b) ONE final review of a
+   high-risk diff (money rules, migration, auth/permissions, security) AFTER an Opus review has
+   passed, only where a miss would hit real guests or money; (c) a fault Opus has failed to fix
+   twice. Usually one Fable call per big feature (a or b, not both by default). Brief = exact
+   files + the question/failing case, one verdict back, no exploring, no build loops. Never for
+   building, porting, lint, docs, guides, browser checks, the end-of-day sync or routine reviews.
+   Log each Fable call in the task's TASKS.md line ("Fable: <case>").
 3. **Never read whole big files.** Grep `.claude/CODE_INDEX.md` for the file or function you need
    (it is ~100 KB — never read it whole; regenerate with
    `php scripts/code-index.php` — the orchestrator regenerates and commits it after every feature ship, so briefs point at current line numbers) + Grep, then Read with offset/limit around the lines you need.
