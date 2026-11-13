@@ -225,6 +225,11 @@ check(count($g5) === 1 && strpos($g5[0], '5 rooms: Superior Suite - K356,000.00 
 $plain = str_replace(['×', '·'], ['x', '-'], $g2[0]);
 check($plain === 'Room 1: Superior Suite - K356,000.00 x 3 nights' && strpos($plain, '×') === false, 'PDF copy uses a plain x', $plain);
 check(strpos(implode(' ', $g5), "Today's price") === false, 'guest lines never carry today\'s price');
+// One room's receipt in a group: a cancelled room says so on the group line; no note = the line as before.
+$rl = rh_booked_rate_room_lines(['room' => 'Deluxe Room - 12', 'guest' => 'Mr Banda', 'check_in' => '2026-11-12', 'check_out' => '2026-11-15'], 'K300,000.00 × 3 nights', 'BK-1', 3, 'this room cancelled 10 Nov 2026');
+check(($rl[2] ?? '') === 'Part of group BK-1 (3 rooms) - this room cancelled 10 Nov 2026', 'room receipt lines: cancelled note on the group line', json_encode($rl, JSON_UNESCAPED_UNICODE));
+$rl0 = rh_booked_rate_room_lines(['room' => 'Deluxe Room - 12', 'guest' => '', 'check_in' => '', 'check_out' => ''], '', 'BK-1', 3);
+check(($rl0[1] ?? '') === 'Part of group BK-1 (3 rooms)', 'room receipt lines: no note = unchanged group line', json_encode($rl0, JSON_UNESCAPED_UNICODE));
 
 echo "\n{$pass} passed, {$fail} failed\n";
 exit($fail > 0 ? 1 : 0);

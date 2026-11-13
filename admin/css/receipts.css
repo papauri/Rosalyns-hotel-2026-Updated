@@ -36,6 +36,14 @@
     padding-right: 10px;
 }
 
+/* Laptop widths just above the card breakpoint (about 1025-1200px): the 7 columns can need more room than the panel
+   beside the sidebar. The table then scrolls sideways inside its panel instead of being clipped (owner rule P3-05:
+   above 1024px a real table stays and its wrapper scrolls). The actions menu is position:fixed, so it is not clipped. */
+.receipts-page .rh-panel .table-container:has(> table.receipts-table:not(.mobile-enhanced)) {
+    overflow-x: auto;
+    overflow-y: hidden;
+}
+
 /* Guest: name, then email and phone as their own muted lines; a long email is cut with … (full address on hover).
    contain:inline-size stops the email from widening the column; it fills whatever width the column gets. */
 .receipts-table td.rc-guest .rc-guest__name {

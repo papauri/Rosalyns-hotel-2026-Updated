@@ -498,7 +498,7 @@ switch ($sc) {
             'p_lead' => $pos('GDOC LEAD'), 'p_member' => $pos('GDOC MEMBER'), 'p_child' => $pos('Child supplement'), 'p_bar' => $pos('Bar (test)'),
             'p_cancel' => $pos('Cancelled room:'), 'p_expired' => $pos('Expired room:'), 'p_eguest' => $pos('GDOC EXPIRED'), 'p_cpaid' => $pos('GDOC CANCELPAID'), 'zero_shown' => $pos('GDOC CANCELZERO'), 'deleted_shown' => $pos('GDOC DELETED'),
             'member_dates' => strpos($h, date('d M Y', strtotime($mIn['check_in_date'])) . ' to ' . date('d M Y', strtotime($mIn['check_out_date']))) !== false,
-            'rooms_hdr' => strpos($h, '2 rooms') !== false, 'legacy' => strpos($h, '<!--rh-th=') === false, 'mode' => vat_mode(),
+            'rooms_hdr' => strpos($h, '4 rooms') !== false, 'legacy' => strpos($h, '<!--rh-th=') === false, 'mode' => vat_mode(),
         ];
         // Receipts: one room only + "Part of group REF (N rooms)"; a booking outside a group prints exactly as before.
         $out['gd_receipt_m1'] = rh_booked_rate_room_receipt_lines($pdo, $m1);
@@ -507,6 +507,63 @@ switch ($sc) {
         [$solo] = br_booking($pdo, 'checked-in', 1);
         $out['gd_solo_same'] = rh_booked_rate_room_receipt_lines($pdo, $solo) === rh_booked_rate_group_lines(rh_booked_rate_group_texts($pdo, $solo));
         $out['gd_solo'] = rh_booked_rate_room_receipt_lines($pdo, $solo);
+        break;
+
+    case 'group_docs_deleted':
+    case 'group_docs_deleted_custom':
+        // A deleted room that was NOT cancelled follows the cancelled-room rule (nothing kept): no money = off the
+        // invoice; money = a marked line carrying only that money (its room charge is not billed). A seasonal surcharge
+        // prints as a rate note under every room it applies to, never as its own row.
+        if ($sc === 'group_docs_deleted_custom') {
+            $GLOBALS['_SITE_SETTINGS']['invoice_document_template_mode'] = 'custom'; // in memory only
+        }
+        require_once $root . '/config/invoice.php';
+        require_once $root . '/includes/booked-rate.php';
+        [$p, $pRef] = br_booking($pdo, 'confirmed', 2);   // lead, 2,330
+        [$m1] = br_booking($pdo, 'confirmed', 1, $p);     // 1,165
+        [$dz] = br_booking($pdo, 'confirmed', 1, $p);     // deleted, nothing paid -> off
+        [$dp] = br_booking($pdo, 'confirmed', 1, $p);     // deleted, guest paid 500 -> stays, carries only the 500
+        $pdo->prepare("UPDATE bookings SET rate_plan_discount = -100, rate_plan_label = 'Festive TEST' WHERE id IN (?, ?)")->execute([$p, $m1]);
+        $pdo->prepare("UPDATE bookings SET room_guest_name = 'GDEL PAID' WHERE id = ?")->execute([$dp]);
+        $pdo->prepare("UPDATE bookings SET room_guest_name = 'GDEL ZERO' WHERE id = ?")->execute([$dz]);
+        $pdo->prepare("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+                payment_method, payment_type, payment_status, created_at) VALUES (?, 'room', ?, 'X', CURDATE(), 500, 0, 0, 500, 'cash', 'partial_payment', 'completed', NOW())")
+            ->execute(['BRGX' . random_int(100000, 999999), $dp]);
+        $pdo->prepare('UPDATE bookings SET deleted_at = NOW() WHERE id IN (?, ?)')->execute([$dz, $dp]);
+        foreach ([$p, $m1, $dz, $dp] as $id) {
+            recalculateBookingFinancials($id);
+        }
+        $rows = rh_invoice_doc_rows($pdo, $p);
+        $t = null;
+        $h = buildInvoiceHTML($rows['booking'], 'TEST-GDEL', 'Hotel', 'x@example.invalid', '000', 'Addr', 'MWK', $rows['group_bookings'], null, false, $t);
+        $out['gx'] = [
+            'ids' => $t['ids'] ?? null, 'want_ids' => [$p, $m1, $dp],
+            'total' => $t['total'] ?? null, 'paid' => $t['paid'] ?? null, 'balance' => $t['balance'] ?? null,
+            'subtotal' => $t['subtotal'] ?? null, 'vat' => $t['vat'] ?? null, 'levy' => $t['levy'] ?? null, 'mode' => vat_mode(),
+            'zero_shown' => stripos($h, 'GDEL ZERO') !== false, 'paid_shown' => stripos($h, 'GDEL PAID') !== false,
+            'deleted_mark' => stripos($h, 'Deleted room:') !== false, 'no_room_charge' => stripos($h, 'no room charge') !== false,
+            'surch_notes' => substr_count($h, 'Festive TEST surcharge +'), 'surch_row' => stripos($h, 'surcharge (already in the room rate)') !== false, 'rooms_hdr' => strpos($h, '3 rooms') !== false,
+            'legacy' => strpos($h, '<!--rh-th=') === false,
+        ];
+        $out['gx_receipt_dp'] = rh_booked_rate_room_receipt_lines($pdo, $dp);
+        $out['gx_ref'] = $pRef;
+        // Split payer: the member alone on its own company's invoice still gets a receipt of ONLY its own room (never
+        // the lead's rate), and no "Part of group" line (its invoice lists one room).
+        $pdo->prepare("UPDATE bookings SET room_guest_name = 'GDEL LEAD' WHERE id = ?")->execute([$p]);
+        $pdo->prepare("UPDATE bookings SET room_guest_name = 'GDEL MEMBER' WHERE id = ?")->execute([$m1]);
+        rh_billing_set_on_booking($pdo, $m1, ['account_id' => $acc, 'reference' => 'LPO-SPLIT', 'covers' => 'stay'], $user);
+        $out['gx_split_scope'] = rh_billing_doc_scope($pdo, $m1)['ids'];
+        rh_booked_rate_invoice_room_count($pdo, 0, true); // the group changed in this request
+        $out['gx_receipt_split'] = rh_booked_rate_room_receipt_lines($pdo, $m1);
+        // Company pays the stay for the whole group (the deleted rooms follow the primary): the company invoice's lines
+        // and its total both leave the deleted room's stay out (rh_billing_split_for_ids treats it like the invoice).
+        rh_billing_set_on_booking($pdo, $p, ['account_id' => $acc, 'reference' => 'LPO-ALL', 'covers' => 'stay'], $user);
+        $rows = rh_invoice_doc_rows($pdo, $p);
+        $tc = null;
+        $hc = buildInvoiceHTML($rows['booking'], 'TEST-GDELCO', 'Hotel', 'x@example.invalid', '000', 'Addr', 'MWK', $rows['group_bookings'], null, false, $tc);
+        $out['gx_co'] = ['ids' => $tc['ids'] ?? null, 'total' => $tc['total'] ?? null, 'subtotal' => $tc['subtotal'] ?? null, 'vat' => $tc['vat'] ?? null,
+            'levy' => $tc['levy'] ?? null, 'balance' => $tc['balance'] ?? null, 'paid' => $tc['paid'] ?? null, 'mode' => vat_mode(),
+            'company' => strpos($hc, 'ZZ TEST CO') !== false, 'rooms_hdr' => strpos($hc, '3 rooms') !== false];
         break;
 
     case 'perf':

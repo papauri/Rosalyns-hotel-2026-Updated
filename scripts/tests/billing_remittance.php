@@ -246,21 +246,54 @@ foreach (['group_docs' => 'kit layout', 'group_docs_custom' => 'stored template'
     ok("$gdName: cancelled and deleted rooms with no money are left off; the cancelled room with money and the expired room still billed stay, marked",
         ($gd['zero_shown'] ?? 0) === -1 && ($gd['deleted_shown'] ?? 0) === -1 && ($gd['p_cancel'] ?? -1) > 0 && ($gd['p_cpaid'] ?? -1) > ($gd['p_cancel'] ?? 0)
         && ($gd['p_expired'] ?? -1) > ($gd['p_cancel'] ?? 0) && ($gd['p_eguest'] ?? -1) > ($gd['p_expired'] ?? 0), json_encode($gd));
-    ok("$gdName: lead first, then the member with its own dates, its child supplement and its bar bill under it, then the cancelled room; header says 2 rooms",
+    ok("$gdName: lead first, then the member with its own dates, its child supplement and its bar bill under it, then the cancelled room; header says 4 rooms (every room the invoice lists, the same N as each receipt)",
         ($gd['p_lead'] ?? -1) > 0 && ($gd['p_member'] ?? -1) > ($gd['p_lead'] ?? 0) && ($gd['p_child'] ?? -1) > ($gd['p_member'] ?? 0)
         && ($gd['p_bar'] ?? -1) > ($gd['p_child'] ?? 0) && ($gd['p_cancel'] ?? -1) > ($gd['p_bar'] ?? 0) && !empty($gd['member_dates']) && !empty($gd['rooms_hdr']), json_encode($gd));
     if ($gdSc === 'group_docs') {
         $rm = $gx['gd_receipt_m1'] ?? [];
         $rc = $gx['gd_receipt_c1'] ?? [];
         $rmTxt = implode(' | ', $rm);
-        ok('receipt of one group room: only that room (guest, dates, rate x nights + children), "Part of group REF (2 rooms)", never another room',
+        // N = the rooms the group invoice lists (lead, member, cancelled room with money, expired room still billed) = 4.
+        ok('receipt of one group room: only that room (guest, dates, rate x nights + children), "Part of group REF (4 rooms)" = the rooms the invoice lists, never another room',
             count($rm) === 3 && strpos($rm[0], 'Room: ') === 0 && strpos($rm[0], 'GDOC MEMBER') !== false && strpos($rm[1], ' to ') !== false
-            && strpos($rm[1], '1 night') !== false && strpos($rm[1], 'children') !== false && $rm[2] === 'Part of group ' . ($gx['gd_ref'] ?? 'x') . ' (2 rooms)'
+            && strpos($rm[1], '1 night') !== false && strpos($rm[1], 'children') !== false && $rm[2] === 'Part of group ' . ($gx['gd_ref'] ?? 'x') . ' (4 rooms)'
             && strpos($rmTxt, 'GDOC LEAD') === false && strpos($rmTxt, 'GDOC CANCEL') === false, json_encode($rm, JSON_UNESCAPED_UNICODE));
-        ok('receipt of the cancelled room: its own room, counted with the live rooms (3 rooms)', ($rc[2] ?? '') === 'Part of group ' . ($gx['gd_ref'] ?? 'x') . ' (3 rooms)'
+        ok('receipt of the cancelled room: its own room, the same 4 rooms as the invoice, "this room cancelled"', strpos($rc[2] ?? '', 'Part of group ' . ($gx['gd_ref'] ?? 'x') . ' (4 rooms) - this room cancelled') === 0
             && strpos($rc[0] ?? '', 'GDOC CANCELPAID') !== false, json_encode($rc, JSON_UNESCAPED_UNICODE));
         ok('receipt of a booking outside a group: exactly as before', !empty($gx['gd_solo_same']) && count($gx['gd_solo'] ?? []) === 1
             && strpos(($gx['gd_solo'] ?? [''])[0], 'Room: ') === 0, json_encode($gx['gd_solo'] ?? null, JSON_UNESCAPED_UNICODE));
+    }
+}
+
+echo "== Group documents: deleted (not cancelled) rooms and surcharge notes (rolled back) ==\n";
+foreach (['group_docs_deleted' => 'kit layout', 'group_docs_deleted_custom' => 'stored template'] as $gxSc => $gxName) {
+    $gy = br_child($gxSc);
+    $gz = $gy['gx'] ?? [];
+    if ($gxSc === 'group_docs_deleted_custom' && empty($gz['legacy'])) {
+        echo "[SKIP] $gxName: this hotel has no stored invoice template\n";
+        continue;
+    }
+    $gzFoot = ($gz['mode'] ?? '') === 'exclusive' ? (float)($gz['subtotal'] ?? 0) + (float)($gz['vat'] ?? 0) + (float)($gz['levy'] ?? 0)
+        : (float)($gz['subtotal'] ?? 0) + (float)($gz['levy'] ?? 0);
+    ok("$gxName: a deleted room with no money is left off; one with a payment stays, marked, with no room charge (total 3,495 = lead 2,330 + member 1,165; paid 500; balance 3,495)",
+        ($gz['ids'] ?? null) === ($gz['want_ids'] ?? 'x') && empty($gz['zero_shown']) && !empty($gz['paid_shown']) && !empty($gz['deleted_mark'])
+        && !empty($gz['no_room_charge']) && $near($gz['total'] ?? 0, 3495) && $near($gz['paid'] ?? 0, 500) && $near($gz['balance'] ?? 0, 3495), json_encode($gz));
+    ok("$gxName: the lines still foot to the total", $near($gzFoot, $gz['total'] ?? -1), json_encode($gz));
+    ok("$gxName: the surcharge is a rate note under each room it applies to (2), never its own row", (int)($gz['surch_notes'] ?? 0) === 2 && empty($gz['surch_row']), json_encode($gz));
+    ok("$gxName: header says 3 rooms (the rooms listed, the same N as the receipts)", !empty($gz['rooms_hdr']), json_encode($gz));
+    if ($gxSc === 'group_docs_deleted') {
+        ok('receipt of the deleted room that carries money: the same 3 rooms as the invoice', (($gy['gx_receipt_dp'] ?? [])[2] ?? '') === 'Part of group ' . ($gy['gx_ref'] ?? 'x') . ' (3 rooms)',
+            json_encode($gy['gx_receipt_dp'] ?? null, JSON_UNESCAPED_UNICODE));
+        $rs = $gy['gx_receipt_split'] ?? [];
+        ok('receipt of a group room alone on its own company invoice: only its own room, never the lead\'s rate, no group line',
+            count($gy['gx_split_scope'] ?? []) === 1 && strpos($rs[0] ?? '', 'Room: ') === 0 && strpos($rs[0] ?? '', 'GDEL MEMBER') !== false
+            && strpos(implode(' | ', $rs), 'GDEL LEAD') === false && strpos(implode(' | ', $rs), 'Room 1:') === false && strpos(implode(' | ', $rs), 'Part of group') === false,
+            json_encode([$gy['gx_split_scope'] ?? null, $rs], JSON_UNESCAPED_UNICODE));
+        $co = $gy['gx_co'] ?? [];
+        $coFoot = ($co['mode'] ?? '') === 'exclusive' ? (float)($co['subtotal'] ?? 0) + (float)($co['vat'] ?? 0) + (float)($co['levy'] ?? 0)
+            : (float)($co['subtotal'] ?? 0) + (float)($co['levy'] ?? 0);
+        ok('company pays the stay, group with a deleted room that carries money: total = the stays of the live rooms only (3,495) and the lines foot to it; 3 rooms',
+            !empty($co['company']) && $near($co['total'] ?? 0, 3495) && $near($coFoot, $co['total'] ?? -1) && !empty($co['rooms_hdr']), json_encode($co));
     }
 }
 

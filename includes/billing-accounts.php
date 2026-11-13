@@ -406,14 +406,17 @@ if (!function_exists('rh_billing_ready')) {
      */
     function rh_billing_group_split(PDO $pdo, int $bookingId): array
     {
-        return rh_billing_split_for_ids($pdo, rh_billing_doc_scope($pdo, $bookingId)['ids']);
+        $scope = rh_billing_doc_scope($pdo, $bookingId);
+        return rh_billing_split_for_ids($pdo, $scope['ids'], (int)$scope['lead']);
     }
 
     /**
      * The split summed over EXACTLY these bookings (the rooms one document lists - never more), same keys as
-     * rh_billing_group_split().
+     * rh_billing_group_split(). $leadId: the room the document is built from. Any OTHER room that was deleted without
+     * being cancelled bills no room charge (the group invoice rule, rh_inv_group_rooms): its stay counts 0 and its
+     * balance is only its extras less what was paid on it.
      */
-    function rh_billing_split_for_ids(PDO $pdo, array $ids): array
+    function rh_billing_split_for_ids(PDO $pdo, array $ids, int $leadId = 0): array
     {
         $out = ['on_account' => false, 'company_due' => 0.0, 'guest_due' => 0.0, 'company_paid' => 0.0, 'guest_paid' => 0.0, 'stay' => 0.0,
             'extras' => 0.0, 'guest_extra_cover' => 0.0, 'ids' => [], 'leg_ids' => []];
@@ -424,6 +427,14 @@ if (!function_exists('rh_billing_ready')) {
         $st = $pdo->prepare('SELECT * FROM bookings WHERE id IN (' . implode(',', array_fill(0, count($ids), '?')) . ') ORDER BY id');
         $st->execute($ids);
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as $i => $r) {
+            if ((int)$r['id'] !== $leadId && !empty($r['deleted_at']) && strtolower((string)($r['status'] ?? '')) !== 'cancelled') {
+                $rows[$i]['total_with_vat'] = 0.0;
+                $rows[$i]['total_amount'] = 0.0;
+                $rows[$i]['vat_amount'] = 0.0;
+                $rows[$i]['amount_due'] = round(max(0.0, (float)($r['folio_charges_total'] ?? 0) - (float)($r['amount_paid'] ?? 0)), 2);
+            }
+        }
         foreach (rh_billing_splits_for_rows($pdo, $rows) as $id => $sp) {
             $out['ids'][] = (int)$id;
             if (empty($sp['on_account'])) {

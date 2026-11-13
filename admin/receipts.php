@@ -28,6 +28,13 @@ function receipts_money(float $amount, string $symbol): string
         . '</span></span>';
 }
 
+/** A payment row's amount as the list shows it: money paid out (a refund row) is negative, as in the Receipt value summary. */
+function receipts_signed_amount(array $row): float
+{
+    $amount = (float)($row['total_amount'] ?? 0);
+    return (string)($row['payment_type'] ?? '') === 'refund' ? -abs($amount) : $amount;
+}
+
 function receipts_csv_cell(mixed $value): string
 {
     $value = str_replace(["\r", "\n"], ' ', (string)$value);
@@ -240,7 +247,8 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             receipts_csv_cell($row['payment_method'] ?? ''),
             receipts_csv_cell($row['payment_type'] ?? ''),
             receipts_csv_cell($row['payment_status'] ?? ''),
-            receipts_csv_cell(number_format((float)($row['total_amount'] ?? 0), 2, '.', '')),
+            // Refund rows go out as a plain negative number (e.g. -500.00), the same sign the Receipt value summary uses.
+            receipts_csv_cell(number_format(receipts_signed_amount($row), 2, '.', '')),
             receipts_csv_cell(!empty($row['receipt_generated']) ? 'yes' : 'no'),
             receipts_csv_cell($row['receipt_emailed_at'] ?? ''),
             receipts_csv_cell($row['recorded_by_name'] ?? ''),
@@ -497,7 +505,7 @@ $site_name = getSetting('site_name', 'Hotel');
                                     <small class="text-muted" style="display:block;margin-top:2px;"><?php echo htmlspecialchars((string)$payment['booking_reference']); ?></small>
                                 </td>
                                 <td class="rc-date"><?php echo htmlspecialchars(date('d M Y', strtotime((string)$payment['payment_date']))); ?></td>
-                                <td class="rc-amount text-right"><strong><?php echo receipts_money((float)$payment['total_amount'], $currency_symbol); ?></strong></td>
+                                <td class="rc-amount text-right"><strong><?php echo receipts_money(receipts_signed_amount($payment), $currency_symbol); ?></strong></td>
                                 <td class="rc-status">
                                     <?php $isRefundRow = (string)($payment['payment_type'] ?? '') === 'refund'; ?>
                                     <span class="badge <?php echo !empty($payment['receipt_generated']) ? 'badge-success' : ($isRefundRow ? 'badge-info' : 'badge-warning'); ?>">

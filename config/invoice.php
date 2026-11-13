@@ -659,13 +659,16 @@ if (!function_exists('rh_inv_group_rooms')) {
      * $rows: the group rows the caller passed (any columns; the caller's room_name label wins). Each row is completed
      * from bookings (b.*) and gets: rh_inv_type (room type name), rh_inv_no (room number(s), getBookingRoomLabel),
      * rh_inv_guest (room_guest_name, else guest_name), rh_inv_removed ('' = live room; else 'Cancelled' / 'No-show' /
-     * 'Expired' / 'Deleted'), rh_inv_paid (canonical net paid on that room).
+     * 'Expired' / 'Deleted'), rh_inv_paid (canonical net paid on that room), rh_inv_fs (that room's folio summary as the
+     * invoice bills it: grand_total / amount_paid / balance_due, read once here and reused by the invoice body).
      *
      * A cancelled, expired, no-show or deleted room comes OFF the invoice (the same rooms the receipts leave out) when it
      * carries no money: nothing billed in its folio summary, no counted payment or refund row, no live folio charge. A
      * closed room that still carries money stays, marked, so no money vanishes and the invoice's Amount paid keeps
      * matching the sum of the per-room receipts. The lead ($booking) always stays. Order: lead first, then the live rooms
      * by room number / name, then the closed rooms that carry money. Read-only. A read error keeps every row as given.
+     * A deleted room that was not cancelled follows the cancelled-room rule with nothing kept: its room charge is not
+     * billed (rh_inv_fs drops it), so it stays only when a payment, refund or live folio charge is on it.
      */
     function rh_inv_group_rooms(PDO $pdo, array $booking, array $rows): array
     {
@@ -702,6 +705,17 @@ if (!function_exists('rh_inv_group_rooms')) {
                 $isDeleted = !empty($r['deleted_at']);
                 $isClosed = $isDeleted || in_array($status, ['cancelled', 'expired', 'no-show'], true);
                 $r['rh_inv_removed'] = '';
+                if ($id !== $leadId && $isDeleted && $status !== 'cancelled' && !isset($fs['error'])) {
+                    // Deleted, not cancelled: nothing of the room charge is billed (cancelled-room rule, nothing kept);
+                    // its extras and its payments / refunds stay.
+                    $fs['grand_total'] = round(max(0.0, (float)($fs['grand_total'] ?? 0) - (float)($fs['booking_base_amount'] ?? 0)), 2);
+                    $fs['booking_base_amount'] = 0.0;
+                    $fs['balance_due'] = round(max(0.0, $fs['grand_total'] - (float)($fs['amount_paid'] ?? 0)), 2);
+                    $r['rh_inv_no_room_charge'] = true;
+                }
+                if (!isset($fs['error'])) {
+                    $r['rh_inv_fs'] = $fs;
+                }
                 if ($id === $leadId || !$isClosed) {
                     $live[] = $r;
                     continue;
@@ -744,6 +758,26 @@ if (!function_exists('rh_inv_room_title')) {
         }
         $no = trim((string)($r['rh_inv_no'] ?? ''));
         return $no !== '' && stripos($type, $no) === false ? $type . ' - ' . $no : $type;
+    }
+}
+
+if (!function_exists('rh_inv_surcharge_note')) {
+    /**
+     * Group invoice rate note for ONE room with a seasonal / rate-plan surcharge (its own rate_plan_discount < 0 per
+     * night, with a label): "Festive Season surcharge +K82,855.20 a night x 3 nights = +K248,565.60, already in this
+     * room's rate". Information only (the surcharge is inside the room line). Plain text; '' when none applies.
+     * $money: callable(float): string (the document's money format).
+     */
+    function rh_inv_surcharge_note(array $row, int $nights, callable $money): string
+    {
+        $label = trim((string)($row['rate_plan_label'] ?? ''));
+        $perNight = -(float)($row['rate_plan_discount'] ?? 0);
+        if ($label === '' || $perNight <= BALANCE_TOLERANCE) {
+            return '';
+        }
+        $nights = max(1, $nights);
+        return $label . ' surcharge +' . $money($perNight) . ' a night x ' . $nights . ($nights === 1 ? ' night' : ' nights')
+            . ' = +' . $money(round($perNight * $nights, 2)) . ", already in this room's rate";
     }
 }
 
@@ -817,21 +851,25 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     $docLines = [];
     foreach ($docRows as $di => $dr) {
         $docLines[$di] = rh_doc_stay_lines($dr, $di === $pkgRowIdx ? $pkgTotal : 0.0);
-        if (!empty($dr['rh_inv_removed']) && strtolower((string)($dr['status'] ?? '')) === 'cancelled') {
+        $drNoRoom = !empty($dr['rh_inv_no_room_charge']);
+        if (!empty($dr['rh_inv_removed']) && (strtolower((string)($dr['status'] ?? '')) === 'cancelled' || $drNoRoom)) {
             // A cancelled room bills only what was kept on cancellation (getBookingFolioSummary / recalc): no VAT, no levy.
-            $kept = round(max(0.0, (float)($dr['cancellation_retained_amount'] ?? 0)), 2);
+            // A deleted room that was not cancelled keeps nothing (rh_inv_group_rooms).
+            $kept = $drNoRoom ? 0.0 : round(max(0.0, (float)($dr['cancellation_retained_amount'] ?? 0)), 2);
             $docLines[$di] = ['mode' => $docLines[$di]['mode'], 'gross' => $kept, 'vat' => 0.0, 'levy' => 0.0, 'lines_total' => $kept,
                 'room' => $kept, 'child' => 0.0, 'pkg' => 0.0, 'subtotal' => $kept, 'total' => $kept];
         }
     }
     // Header for a group: the group's overall dates (earliest check-in to latest check-out), the room count and every
-    // live room's guests. Single room: the booking's own figures, as before.
+    // live room's guests. Single room: the booking's own figures, as before. The room count = every room the invoice
+    // lists (closed rooms that still carry money included): the same N each room receipt prints
+    // (rh_booked_rate_invoice_room_count).
     $hdrCheckIn  = (string)$booking['check_in_date'];
     $hdrCheckOut = (string)$booking['check_out_date'];
     $hdrRooms    = 1;
     $hdrNights   = (string)(int)$booking['number_of_nights'];
     if (!empty($group_bookings)) {
-        $hdrRooms = 0;
+        $hdrRooms = count($group_bookings);
         $nightSet = [];
         $adultGuests = 0;
         $childGuests = 0;
@@ -839,7 +877,6 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
             if (!empty($grm['rh_inv_removed'])) {
                 continue;
             }
-            $hdrRooms++;
             if (!empty($grm['check_in_date']) && strcmp((string)$grm['check_in_date'], $hdrCheckIn) < 0) {
                 $hdrCheckIn = (string)$grm['check_in_date'];
             }
@@ -962,8 +999,15 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         $summaryIds = [(int)$booking['id']]; // sample rendering: one supplied summary for the whole document
     }
     $sumGrand = 0.0; $sumPaid = 0.0; $sumDue = 0.0; $summaryOk = true;
+    // A group room's summary was already read (and, for a deleted room, its room charge dropped) by rh_inv_group_rooms.
+    $fsById = [];
+    foreach ($group_bookings as $grmFs) {
+        if (isset($grmFs['rh_inv_fs']) && is_array($grmFs['rh_inv_fs'])) {
+            $fsById[(int)$grmFs['id']] = $grmFs['rh_inv_fs'];
+        }
+    }
     foreach ($summaryIds as $sid) {
-        $fs = ($preload !== null && isset($preload['summary'])) ? (array)$preload['summary'] : getBookingFolioSummary($sid);
+        $fs = ($preload !== null && isset($preload['summary'])) ? (array)$preload['summary'] : ($fsById[(int)$sid] ?? getBookingFolioSummary($sid));
         if (isset($fs['error']) || !isset($fs['grand_total'], $fs['amount_paid'], $fs['balance_due'])) {
             $summaryOk = false;
             break;
@@ -997,7 +1041,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     $ivCompanyShare = $ivBill !== null && $ivBill['covers'] !== 'everything' && $preload === null;
     if ($ivCompanyShare) {
         // Only the rooms THIS document lists ($summaryIds: the group when it prints the group, else this room).
-        $ivGrp = rh_billing_split_for_ids($pdo, $summaryIds);
+        $ivGrp = rh_billing_split_for_ids($pdo, $summaryIds, (int)$booking['id']);
         $folioCharges = [];
         $folioTotal   = 0.0;
         $folioVat     = 0.0;
@@ -1102,8 +1146,9 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
             '<span style="color:' . $tc['success'] . ';">' . rh_pdf_e($money(-$ratePlanDiscount)) . '</span>',
         ];
     }
-    if ($ratePlanSurcharge > 0) {
+    if ($ratePlanSurcharge > 0 && empty($group_bookings)) {
         // Information only: the surcharge is already in the room line above, so the Amount column stays blank.
+        // A group prints it as a rate note under every room it applies to instead ($surchNote).
         $planRows[] = [
             rh_pdf_e($ratePlanLabel . ' surcharge (already in the room rate) +' . $money($ratePlanSurcharge)),
             rh_pdf_e((string)(int)$booking['number_of_nights']),
@@ -1147,7 +1192,8 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         foreach (array_values($group_bookings) as $gi => $grm) {
             $gid       = (int)$grm['id'];
             $removed   = (string)($grm['rh_inv_removed'] ?? '');
-            $keptOnly  = $removed !== '' && strtolower((string)($grm['status'] ?? '')) === 'cancelled';
+            $noRoomChg = $removed !== '' && !empty($grm['rh_inv_no_room_charge']);
+            $keptOnly  = $removed !== '' && (strtolower((string)($grm['status'] ?? '')) === 'cancelled' || $noRoomChg);
             $grmNights = (int)($grm['number_of_nights'] ?? 0);
             $grmRoom   = (float)$docLines[$gi]['room'];
             $whoWhen   = implode(' - ', array_filter([
@@ -1157,8 +1203,9 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
             $title = '<b>' . rh_pdf_e(($removed !== '' ? $removed . ' room: ' : '') . rh_inv_room_title($grm)) . '</b>' . rh_inv_sub($whoWhen);
             if ($keptOnly) {
                 // Cancelled room that still carries money: what was kept on cancellation is its whole room charge.
+                // A deleted room (not cancelled) keeps no room charge; only its money is shown.
                 $itemRows[] = [
-                    $title . rh_inv_sub('Cancelled - kept on cancellation ' . $money($grmRoom) . '; paid on this room '
+                    $title . rh_inv_sub(($noRoomChg ? 'Deleted - no room charge' : 'Cancelled - kept on cancellation ' . $money($grmRoom)) . '; paid on this room '
                         . $money((float)($grm['rh_inv_paid'] ?? 0)) . ' (in the payments below)'),
                     rh_pdf_e('1'),
                     rh_pdf_e($money($grmRoom)),
@@ -1166,8 +1213,11 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
                 ];
             } else {
                 // The lead row carries the package and rate-plan columns; the other rooms have none.
+                $grmSrc = $gi === $pkgRowIdx ? $booking : $grm;
+                $grmSurch = rh_inv_surcharge_note($grmSrc, $ratePlanNightsOf($grmSrc), $money);
                 $itemRows[] = [
-                    $title . rh_inv_sub($accomSub($gi === $pkgRowIdx ? $booking : $grm))
+                    $title . rh_inv_sub($accomSub($grmSrc))
+                        . ($grmSurch !== '' ? rh_inv_sub($grmSurch) : '')
                         . ($removed !== '' ? rh_inv_sub($removed . ' - still billed; paid on this room ' . $money((float)($grm['rh_inv_paid'] ?? 0))) : ''),
                     rh_pdf_e((string)$grmNights),
                     rh_pdf_e($money($grmRoom / max(1, $grmNights))),
@@ -1480,7 +1530,8 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
         </tr>';
     };
     // The lead booking's rate-plan discount / surcharge and package rows.
-    $planRowsHtml = static function () use (&$ri, $rowBg, $currency_symbol, $ratePlanDiscount, $ratePlanLabel, $ratePlanSurcharge, $booking, $pkgRows): string {
+    // A group prints the surcharge as a rate note under every room it applies to ($withSurcharge = false).
+    $planRowsHtml = static function (bool $withSurcharge = true) use (&$ri, $rowBg, $currency_symbol, $ratePlanDiscount, $ratePlanLabel, $ratePlanSurcharge, $booking, $pkgRows): string {
         $out = '';
         // Rate plan discount row
         if ($ratePlanDiscount > 0 && $ratePlanLabel !== '') {
@@ -1492,7 +1543,7 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
         </tr>';
         }
         // Rate plan surcharge row: information only, already inside the accommodation line, so no amount is printed.
-        if (!empty($ratePlanSurcharge) && $ratePlanSurcharge > 0) {
+        if ($withSurcharge && !empty($ratePlanSurcharge) && $ratePlanSurcharge > 0) {
             $out .= '<tr style="background:' . $rowBg[$ri++ % 2] . ';">
             <td width="50%" style="padding:6px 8px; font-size:12px; color:#5E554D; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0; line-height:1.35;">' . htmlspecialchars($ratePlanLabel) . ' surcharge (already in the room rate) +' . $currency_symbol . ' ' . number_format($ratePlanSurcharge, 2) . '</td>
             <td width="10%" style="padding:6px 8px; font-size:12px; color:#5E554D; text-align:center; font-family:Helvetica,Arial,sans-serif; border:1px solid #C8BEB0;">' . (int)$booking['number_of_nights'] . '</td>
@@ -1555,7 +1606,8 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
         foreach (array_values($group_bookings) as $gi => $grm) {
             $gid       = (int)$grm['id'];
             $removed   = (string)($grm['rh_inv_removed'] ?? '');
-            $keptOnly  = $removed !== '' && strtolower((string)($grm['status'] ?? '')) === 'cancelled';
+            $noRoomChg = $removed !== '' && !empty($grm['rh_inv_no_room_charge']);
+            $keptOnly  = $removed !== '' && (strtolower((string)($grm['status'] ?? '')) === 'cancelled' || $noRoomChg);
             $grmNights = (int)($grm['number_of_nights'] ?? 0);
             $grmRoom   = (float)$docLines[$gi]['room'];
             $whoWhen   = implode(' - ', array_filter([
@@ -1565,13 +1617,16 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
             $title = '<strong>' . htmlspecialchars(($removed !== '' ? $removed . ' room: ' : '') . rh_inv_room_title($grm)) . '</strong>' . $subHtml($whoWhen);
             $paidHere = $currency_symbol . ' ' . number_format((float)($grm['rh_inv_paid'] ?? 0), 2);
             if ($keptOnly) {
-                $chargeRows .= $roomRowHtml($title . $subHtml('Cancelled - kept on cancellation ' . $currency_symbol . ' ' . number_format($grmRoom, 2)
+                $chargeRows .= $roomRowHtml($title . $subHtml(($noRoomChg ? 'Deleted - no room charge' : 'Cancelled - kept on cancellation ' . $currency_symbol . ' ' . number_format($grmRoom, 2))
                     . '; paid on this room ' . $paidHere . ' (in the payment history)'), '1', $grmRoom, $grmRoom);
             } else {
                 $brSrc = $gi === $pkgRowIdx ? $booking : $grm;
                 $br = function_exists('rh_booked_rate_line') ? rh_booked_rate_line($brSrc, null, ['currency' => $curTxt, 'room_name' => '']) : ['ok' => false];
                 $rateTxt = !empty($br['ok']) ? 'Booked at ' . str_replace(['×', '·'], ['x', '-'], (string)$br['guest_text']) : '';
-                $chargeRows .= $roomRowHtml($title . $subHtml($rateTxt)
+                $surchTxt = rh_inv_surcharge_note($brSrc, $ratePlanNightsOf($brSrc), static function (float $v) use ($currency_symbol): string {
+                    return $currency_symbol . ' ' . number_format($v, 2);
+                });
+                $chargeRows .= $roomRowHtml($title . $subHtml($rateTxt) . $subHtml($surchTxt)
                     . ($removed !== '' ? $subHtml($removed . ' - still billed; paid on this room ' . $paidHere) : ''),
                     (string)$grmNights, $grmRoom / max(1, $grmNights), $grmRoom);
                 $grmChild = (float)$docLines[$gi]['child'];
@@ -1581,7 +1636,7 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
                 }
             }
             if ($gi === $pkgRowIdx) {
-                $chargeRows .= $planRowsHtml();
+                $chargeRows .= $planRowsHtml(false);
             }
             foreach ($fcByRoom[$gid] ?? [] as $fc) {
                 $chargeRows .= $folioRowHtml($fc);
@@ -1702,7 +1757,21 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
                 if (!function_exists('rh_booked_rate_group_texts')) {
                     require_once __DIR__ . '/../includes/booked-rate.php';
                 }
-                $brTexts = rh_booked_rate_group_texts($brPdo, (int)$booking['id']);
+                $brTexts = [];
+                if (!empty($group_bookings)) {
+                    // A group: the rooms of the charges table, in its order (rh_inv_group_rooms: lead, live rooms by
+                    // number, then the closed rooms that carry money, marked the same way).
+                    foreach (array_values($group_bookings) as $brRow) {
+                        $brOne = rh_booked_rate_for_booking($brPdo, (int)($brRow['id'] ?? 0), false);
+                        if (!empty($brOne['ok'])) {
+                            $brMark = (string)($brRow['rh_inv_removed'] ?? '');
+                            $brTexts[] = ($brMark !== '' ? '(' . $brMark . ') ' : '') . $brOne['guest_text'];
+                        }
+                    }
+                }
+                if (!$brTexts) {
+                    $brTexts = rh_booked_rate_group_texts($brPdo, (int)$booking['id']);
+                }
                 // A group: one line per room, however many rooms (never the "6 rooms: ...; ..." run-on line).
                 $brLines = $brTexts;
                 if (count($brTexts) > 1) {
