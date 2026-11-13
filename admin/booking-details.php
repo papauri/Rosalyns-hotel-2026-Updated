@@ -147,6 +147,36 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['charge_action'])) {
                     $_SESSION['error_message'] = 'Please provide a description for the charge.';
                 } elseif ($unit_price < 0) {
                     $_SESSION['error_message'] = 'Unit price cannot be negative.';
+                } elseif (in_array($_POST['charge_scope'] ?? 'room', ['group_line', 'group_split'], true)) {
+                    // Whole group (owner 2026-11-14): one line on the group's lead, or split evenly across the rooms.
+                    require_once __DIR__ . '/includes/group-charge.php';
+                    $gcMode = $_POST['charge_scope'] === 'group_line' ? 'line' : 'split';
+                    if (!empty($_POST['group_preview'])) {
+                        $gcPlan = rh_group_charge_plan(rh_group_charge_rooms($pdo, (int)$booking_id), $gcMode, $description, $quantity, $unit_price);
+                        $gcOut = rh_group_charge_preview_json($gcPlan, (string)$currency_symbol);
+                        if (!empty($gcPlan['ok'])) { // one-time confirm token for this preview (a resend of the confirm is refused)
+                            if (!isset($_SESSION['rh_gc_nonce']) || !is_array($_SESSION['rh_gc_nonce'])) {
+                                $_SESSION['rh_gc_nonce'] = [];
+                            }
+                            $gcOut['nonce'] = rh_group_charge_nonce_issue($_SESSION['rh_gc_nonce'], (int)$booking_id, (string)$gcPlan['sig']);
+                        }
+                        header('Content-Type: application/json; charset=utf-8');
+                        echo json_encode($gcOut);
+                        exit;
+                    }
+                    $gcSig = trim((string)($_POST['group_sig'] ?? ''));
+                    if (!isset($_SESSION['rh_gc_nonce']) || !is_array($_SESSION['rh_gc_nonce'])) {
+                        $_SESSION['rh_gc_nonce'] = [];
+                    }
+                    // The token is used up here, before anything is posted, whatever happens next.
+                    $gcRefuse = $gcSig === '' ? 'Check the per-room preview first, then confirm. Nothing was added.'
+                        : rh_group_charge_nonce_take($_SESSION['rh_gc_nonce'], (int)$booking_id, trim((string)($_POST['group_nonce'] ?? '')), $gcSig);
+                    if ($gcRefuse !== '') {
+                        $_SESSION['error_message'] = $gcRefuse;
+                    } else {
+                        $gcRes = rh_group_charge_post($pdo, (int)$booking_id, $gcMode, $charge_type, $description, $quantity, $unit_price, $user, $gcSig);
+                        $_SESSION[$gcRes['success'] ? 'success_message' : 'error_message'] = $gcRes['success'] ? $gcRes['message'] : 'Failed to add the group charge: ' . $gcRes['message'];
+                    }
                 } else {
                     $result = addBookingCharge($booking_id, $charge_type, $description, $quantity, $unit_price, null, $user['id']);
                     if ($result['success']) {
@@ -1024,6 +1054,20 @@ try {
     ");
     $sib_stmt->execute([':pid' => $primary_id_for_group, ':pid2' => $primary_id_for_group, ':current' => $booking_id]);
     $group_bookings = $sib_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+    // Add Charge "This room / Whole group" (owner 2026-11-14): only rooms of a group (2+ rooms) see the choice.
+    $bd_gc = ['n' => 1, 'lead' => null, 'can' => 0];
+    if ($group_bookings) {
+        require_once __DIR__ . '/includes/group-charge.php';
+        $bd_gc_rooms = rh_group_charge_rooms($pdo, (int)$booking_id);
+        $bd_gc['n'] = count($bd_gc_rooms['rooms']);
+        foreach ($bd_gc_rooms['rooms'] as $bd_gc_r) {
+            if ($bd_gc_r['id'] === (int)$bd_gc_rooms['lead']) {
+                $bd_gc['lead'] = $bd_gc_r;
+            }
+            $bd_gc['can'] += $bd_gc_r['can'] ? 1 : 0;
+        }
+    }
 
     // Fetch booking notes
     $notes_stmt = $pdo->prepare("
@@ -2537,6 +2581,22 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     <label>Unit Price</label>
                     <input type="number" name="unit_price" placeholder="0.00" min="0" step="0.01" required data-currency="<?php echo htmlspecialchars($currency_symbol, ENT_QUOTES); ?>">
                 </div>
+                <?php if ($bd_gc['n'] >= 2): ?>
+                <!-- Room in a group (owner 2026-11-14): this room, or the whole group (one line on the lead, or split evenly). -->
+                <fieldset class="rh-choices" id="gcScope">
+                    <legend>Who is this charge for? <small>This room is in a group of <?php echo (int)$bd_gc['n']; ?> rooms.</small></legend>
+                    <label class="rh-choice"><input type="radio" name="charge_scope" value="room" checked> <span>This room<small>One line on this room's bill, as usual.</small></span></label>
+                    <label class="rh-choice"><input type="radio" name="charge_scope" value="group_line"> <span>Whole group: one line for the group<small>One "Group:" line on the lead room<?php
+                        if ($bd_gc['lead']) {
+                            echo ' (' . htmlspecialchars(trim(($bd_gc['lead']['room'] !== '' ? $bd_gc['lead']['room'] . ', ' : '') . $bd_gc['lead']['booking_reference']), ENT_QUOTES, 'UTF-8') . ')';
+                        }
+                    ?>. It prints under the lead on the group invoice and counts in what the group owes.</small></span></label>
+                    <label class="rh-choice"><input type="radio" name="charge_scope" value="group_split"> <span>Whole group: split evenly across the rooms<small>One line on each room that can take charges now (<?php echo (int)$bd_gc['can']; ?> of <?php echo (int)$bd_gc['n']; ?>). Cancelled, no-show and checked-out rooms are skipped. Any cent left over goes on the lead room.</small></span></label>
+                    <input type="hidden" name="group_sig" id="gcSig" value="">
+                    <input type="hidden" name="group_nonce" id="gcNonce" value="">
+                </fieldset>
+                <div id="gcPreview" class="rh-review-card" hidden aria-live="polite"></div>
+                <?php endif; ?>
                 </div>
                 <div class="modal-actions modal-footer">
                     <div id="addChargeFeedback" class="admin-modal-feedback" style="width:100%;margin-bottom:8px;"></div>
@@ -2829,6 +2889,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         function closeAddChargeModal() {
             document.getElementById('addChargeModal').classList.remove('active');
             document.getElementById('addChargeForm').reset();
+            gcReset();
             var fb = document.getElementById('addChargeFeedback');
             fb.className = 'admin-modal-feedback';
             fb.innerHTML = '';
@@ -2940,7 +3001,8 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     saveBtn.innerHTML = origHtml;
                     fb.style.width = '100%';
                     fb.className = 'admin-modal-feedback ' + (res.success ? 'admin-modal-feedback--success' : 'admin-modal-feedback--error') + ' visible';
-                    fb.innerHTML = '<i class="fas fa-' + (res.success ? 'check-circle' : 'exclamation-circle') + '"></i> ' + res.message;
+                    fb.innerHTML = '<i class="fas fa-' + (res.success ? 'check-circle' : 'exclamation-circle') + '"></i> ' + _bdEsc(res.message);
+                    if (formId === 'addChargeForm') gcReset(); // the next group charge (or a retry after a refusal) needs a new preview
                     if (res.success) refreshFolioSection();
                 })
                 .catch(function() {
@@ -2950,8 +3012,95 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     fb.innerHTML = '<i class="fas fa-exclamation-circle"></i> Network error - please try again.';
                 });
         }
+        // Messages and guest names are plain text: escape before they go into HTML.
+        function _bdEsc(v) {
+            return String(v == null ? '' : v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+        /* Add Charge on a room in a group (owner 2026-11-14): "Whole group" shows a per-room preview first; the
+           confirm posts the preview's signature back, and the server refuses if the group changed in between. */
+        function gcScopeValue() {
+            var c = document.querySelector('#gcScope input[name="charge_scope"]:checked');
+            return c ? c.value : 'room';
+        }
+        var _gcSeq = 0; // a preview answer that arrives after the form changed is ignored
+        function gcReset() {
+            var sig = document.getElementById('gcSig');
+            if (!sig) return;
+            _gcSeq++;
+            sig.value = '';
+            var nonce = document.getElementById('gcNonce'); if (nonce) nonce.value = '';
+            var box = document.getElementById('gcPreview');
+            if (box) { box.hidden = true; box.innerHTML = ''; }
+            var btn = document.getElementById('addChargeSaveBtn');
+            if (btn && !btn.disabled) btn.innerHTML = gcScopeValue() === 'room' ? 'Add Charge' : 'Preview group charge';
+        }
+        function gcRenderPreview(d) {
+            var box = document.getElementById('gcPreview');
+            var rows = '';
+            d.lines.forEach(function (l) {
+                rows += '<tr><td data-label="Room"><span class="rh-group-split-room">' + _bdEsc(l.room || l.ref) + '<br><small>' + _bdEsc(l.ref) + '</small></span></td>'
+                    + '<td data-label="Guest">' + _bdEsc(l.guest) + '</td><td data-label="Line">' + _bdEsc(l.description) + '</td>'
+                    + '<td class="num" data-label="Amount"><strong>' + _bdEsc(l.amount_text) + '</strong></td></tr>';
+            });
+            var foot = '<p class="rh-group-split-note">' + (d.mode === 'line'
+                ? 'One line of ' + _bdEsc(d.total_text) + ' on the lead room.'
+                : _bdEsc(d.total_text) + ' split across ' + d.lines.length + ' room' + (d.lines.length === 1 ? '' : 's') + ', one line each. The lines add up to the amount exactly.') + '</p>';
+            if (d.skipped && d.skipped.length) {
+                foot += '<p class="rh-group-split-note">Not charged (cannot take charges now): ' + d.skipped.map(function (s) {
+                    return _bdEsc((s.room ? s.room + ', ' : '') + s.ref + ' - ' + s.guest + ' (' + s.status + ')');
+                }).join('; ') + '.</p>';
+            }
+            box.innerHTML = '<strong>Check before adding</strong>'
+                + '<p class="rh-group-split-help">Each row is one line on that room\'s bill. Prices include VAT, as for any charge.</p>'
+                + '<div class="rh-group-split-wrap"><table class="rh-group-split"><thead><tr><th>Room<small>Room and booking reference</small></th><th>Guest<small>Who the room is booked for</small></th><th>Line<small>What the bill will show</small></th><th class="num">Amount<small>This room\'s line, VAT included</small></th></tr></thead><tbody>'
+                + rows + '</tbody></table></div>' + foot;
+            box.hidden = false;
+            if (box.scrollIntoView) box.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); // the preview lands in view (it sits below the form)
+        }
+        (function () {
+            var form = document.getElementById('addChargeForm');
+            if (!document.getElementById('gcScope')) return;
+            form.addEventListener('change', gcReset);
+            form.addEventListener('input', gcReset);
+        })();
         document.getElementById('addChargeForm').addEventListener('submit', function(e) {
             e.preventDefault();
+            var sig = document.getElementById('gcSig');
+            if (gcScopeValue() !== 'room' && sig && sig.value === '') {
+                var form = this;
+                var btn = document.getElementById('addChargeSaveBtn');
+                var fb = document.getElementById('addChargeFeedback');
+                var fd = new FormData(form);
+                fd.append('group_preview', '1');
+                var seq = ++_gcSeq;
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Checking...';
+                fb.className = 'admin-modal-feedback';
+                fb.innerHTML = '';
+                fetch(window.location.pathname + window.location.search, { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: fd })
+                    .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+                    .then(function (d) {
+                        btn.disabled = false;
+                        if (seq !== _gcSeq) { gcReset(); return; } // the form changed while this preview was on its way
+                        btn.innerHTML = 'Preview group charge';
+                        if (!d.success || !d.preview) {
+                            fb.className = 'admin-modal-feedback admin-modal-feedback--error visible';
+                            fb.innerHTML = '<i class="fas fa-exclamation-circle"></i> ' + _bdEsc(d.message || 'Could not work out the group charge.');
+                            return;
+                        }
+                        gcRenderPreview(d);
+                        sig.value = d.sig;
+                        document.getElementById('gcNonce').value = d.nonce || '';
+                        btn.innerHTML = 'Confirm: add ' + d.lines.length + ' line' + (d.lines.length === 1 ? '' : 's');
+                    })
+                    .catch(function () {
+                        btn.disabled = false;
+                        btn.innerHTML = 'Preview group charge';
+                        fb.className = 'admin-modal-feedback admin-modal-feedback--error visible';
+                        fb.innerHTML = '<i class="fas fa-exclamation-circle"></i> Network error - please try again.';
+                    });
+                return;
+            }
             handleFolioFormSubmit('addChargeForm', 'addChargeSaveBtn', 'addChargeFeedback', null);
         });
         document.getElementById('menuForm').addEventListener('submit', function(e) {

@@ -190,6 +190,7 @@ if (empty($cfg['anon'])) {
     $_SESSION['admin_last_activity'] = time();
 }
 $_SESSION['csrf_token'] = bin2hex(random_bytes(16));
+foreach ((array)($cfg['session'] ?? []) as $sk => $sv) { $_SESSION[$sk] = $sv; } // optional cfg.session = {key: value}: extra session state (e.g. a one-time token)
 session_write_close();
 
 // Optional seed rows (cfg.setup = [sql,...]): run inside the same never-committing transaction, before the page runs.
