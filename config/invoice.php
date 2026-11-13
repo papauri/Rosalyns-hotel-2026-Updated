@@ -521,7 +521,7 @@ if (!function_exists('rh_inv_payments_html')) {
 
 if (!function_exists('rh_inv_bank_terms_html')) {
     /** Bank details + payment terms (from settings) and the shared document terms. */
-    function rh_inv_bank_terms_html(string $siteName, string $email, string $phone, bool $owing, string $fallbackTerms = ''): string
+    function rh_inv_bank_terms_html(string $siteName, string $email, string $phone, bool $owing, string $fallbackTerms = '', string $cancelTerms = ''): string
     {
         $out = '';
         if ($owing) {
@@ -543,6 +543,10 @@ if (!function_exists('rh_inv_bank_terms_html')) {
                 $terms = strtr($terms, ['{{contact_email}}' => $email, '{{contact_phone}}' => $phone, '{{site_name}}' => $siteName]);
                 $out .= rh_pdf_spacer(5) . rh_pdf_section_title('Payment terms') . rh_pdf_spacer(1) . rh_pdf_note($terms);
             }
+        }
+        // Cancellation policy locked on the booking (its stored fine print; '' for a booking without one = nothing printed).
+        if (trim($cancelTerms) !== '') {
+            $out .= rh_pdf_spacer(5) . rh_pdf_section_title('Cancellation policy') . rh_pdf_spacer(1) . rh_pdf_note(trim($cancelTerms));
         }
         $shared = hotel_brand_tokens()['terms_text'];
         if ($shared !== '') {
@@ -696,6 +700,10 @@ if (!function_exists('rh_inv_quotation_html')) {
         $notes = trim((string)$a['notes']);
         if ($notes !== '') {
             $body .= rh_pdf_spacer(4) . rh_pdf_section_title('Notes') . rh_pdf_spacer(1) . rh_pdf_note($notes);
+        }
+        $cancelTerms = trim((string)($a['cancellation_terms'] ?? '')); // optional: a room booking's stored policy text
+        if ($cancelTerms !== '') {
+            $body .= rh_pdf_spacer(4) . rh_pdf_section_title('Cancellation policy') . rh_pdf_spacer(1) . rh_pdf_note($cancelTerms);
         }
         $shared = hotel_brand_tokens()['terms_text'];
         if ($shared !== '') {
@@ -1493,7 +1501,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
 
     $body = $itemsHtml . rh_pdf_spacer(3) . rh_inv_keep_together(rh_pdf_totals_table($totals))
         . rh_inv_payments_html($payments, $cur)
-        . rh_inv_bank_terms_html($site_name, $email_address, $phone_number, !$isPaid)
+        . rh_inv_bank_terms_html($site_name, $email_address, $phone_number, !$isPaid, '', (($GLOBALS['pdo'] ?? null) instanceof PDO) ? rh_booking_policy_text_by_id($GLOBALS['pdo'], (int)($booking['id'] ?? 0)) : '')
         . rh_inv_closing_html('Thank you for choosing us.');
 
     $meta = [
@@ -1935,6 +1943,15 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
                 . '<p style="margin:0;font-size:10px;line-height:1.5;color:#5F5343;">' . nl2br(htmlspecialchars($invoiceTermsText, ENT_QUOTES, 'UTF-8')) . '</p>'
                 . '</div>'
                 : '';
+            // {{cancellation_terms}}: the booking's (group lead's) stored cancellation policy text; '' without one.
+            $cancellationTermsText = ((isset($pdo) && $pdo instanceof PDO) || (($GLOBALS['pdo'] ?? null) instanceof PDO))
+                ? rh_booking_policy_text_by_id((isset($pdo) && $pdo instanceof PDO) ? $pdo : $GLOBALS['pdo'], (int)($booking['id'] ?? 0)) : '';
+            $cancellationTermsHtml = $cancellationTermsText !== ''
+                ? '<div style="background:#FCFAF7;padding:9px 11px;border-top:2px solid #20303E;">'
+                . '<p style="margin:0 0 5px;font-size:10px;letter-spacing:0.12em;text-transform:uppercase;color:#20303E;font-weight:700;">Cancellation Policy</p>'
+                . '<p style="margin:0;font-size:10px;line-height:1.5;color:#5F5343;">' . nl2br(htmlspecialchars($cancellationTermsText, ENT_QUOTES, 'UTF-8')) . '</p>'
+                . '</div>'
+                : '';
 
             // {{booked_rate}}: "Superior Suite - K356,000 x 3 nights", the nightly price the booking was made at
             // (one line per room for a group), never today's price. Plain "x" / "-": PDF core font.
@@ -2005,7 +2022,13 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
                 '{{payment_history_section}}' => $payHistorySection,
                 '{{bank_details}}'            => $bankDetailsHtml,
                 '{{invoice_terms}}'           => $invoiceTermsHtml,
+                // Cancellation policy locked on the booking ('' for a booking without one).
+                '{{cancellation_terms}}'      => $cancellationTermsHtml,
             ];
+            // A saved template without the new token: the policy block goes right after the invoice terms ('' = no change).
+            if ($cancellationTermsHtml !== '' && strpos((string)$docTemplate['html_body'], '{{cancellation_terms}}') === false) {
+                $replacements['{{invoice_terms}}'] = $invoiceTermsHtml . $cancellationTermsHtml;
+            }
             return strtr($docTemplate['html_body'], $replacements);
         }
     }

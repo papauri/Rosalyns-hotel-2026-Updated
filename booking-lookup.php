@@ -93,56 +93,94 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_booking'])) {
                 $stmt->execute([$reference, $email]);
                 $cancel_booking = $stmt->fetch(PDO::FETCH_ASSOC);
 
+                $cancel_party = [];
                 if (!$cancel_booking) {
                     $error = 'Booking not found.';
                 } elseif (in_array($cancel_booking['status'], ['cancelled', 'expired', 'checked-in', 'checked-out', 'no-show'])) {
                     $error = 'This booking cannot be cancelled (current status: ' . ucfirst($cancel_booking['status']) . ').';
+                } elseif (rh_guest_cancel_company_billed($pdo, $cancel_booking)) {
+                    // Company-billed parties are never cancelled online (owner 2026-11-14): the company arranges it.
+                    $error = 'This booking is billed to a company account, so it cannot be cancelled online. Please contact us directly.';
                 } else {
-                    // Enforce cancellation notice window before proceeding
+                    // The whole party is cancelled together (owner 2026-11-14): every room of this booking that carries the
+                    // email the guest proved, not deleted, not yet checked in.
+                    $cancel_party = rh_guest_cancel_party($pdo, $cancel_booking, $email);
+                    if (count($cancel_party) <= 1) {
+                        $cancel_party = [$cancel_booking]; // one room: exactly the row looked up, as before
+                    }
+                    // Enforce cancellation notice window before proceeding (on the party's earliest check-in)
                     $cancelNoticeDays = (int)getSetting('cancellation_notice_days', 0);
                     if ($cancelNoticeDays > 0) {
-                        // Compare calendar dates (not midnight timestamps) so a same-day
-                        // check-in is correctly inside the notice window.
-                        $tz = new DateTimeZone('Africa/Blantyre');
-                        $today = new DateTimeImmutable('today', $tz);
-                        $checkInDt = DateTimeImmutable::createFromFormat('Y-m-d', substr((string)$cancel_booking['check_in_date'], 0, 10), $tz);
-                        if ($checkInDt) {
-                            $daysUntil = (int)$today->diff($checkInDt->setTime(0, 0))->format('%r%a');
-                            if ($daysUntil < $cancelNoticeDays) {
-                                $error = 'Online cancellations are not available within ' . $cancelNoticeDays
-                                    . ' day(s) of check-in. Please contact us directly.';
-                            }
+                        // Compare calendar dates in the hotel timezone so a same-day check-in is inside the window.
+                        // An unreadable date is never blocked (rh_days_before_arrival gives PHP_INT_MAX).
+                        $daysUntil = min(array_map(static fn ($r) => rh_days_before_arrival((string)$r['check_in_date']), $cancel_party));
+                        if ($daysUntil !== PHP_INT_MAX && $daysUntil < $cancelNoticeDays) {
+                            $error = 'Online cancellations are not available within ' . $cancelNoticeDays
+                                . ' day(s) of check-in. Please contact us directly.';
+                        }
+                    }
+                    // Cancellation policy: a fee needs the guest's explicit "I accept" tick (owner 2026-11-14, Q1).
+                    if (empty($error)) {
+                        $partyFee = 0.0;
+                        foreach ($cancel_party as $pr) {
+                            $partyFee += (float)rh_cancellation_fee_quote($pdo, $pr)['amount'];
+                        }
+                        if (round($partyFee, 2) > BALANCE_TOLERANCE && (string)($_POST['accept_fee'] ?? '') !== '1') {
+                            $error = 'Please tick the box to accept the cancellation fee, then cancel again.';
                         }
                     }
                 }
                 if (empty($error) && $cancel_booking) {
-                    // Cancel the booking through the shared settled path (status, room
-                    // release, bill treatment and refund per the active cancellation mode,
-                    // all in one transaction). Ownership was verified above.
-                    $settled = cancelRoomBookingSettled($pdo, (int)$cancel_booking['id'], 0, 'Guest cancelled: ' . $cancel_reason, rh_refund_rule('guest_self_cancel_refund') === 'auto' ? 'completed' : 'pending');
-                    if (empty($settled['success'])) {
-                        error_log('Guest self-cancel failed for booking ' . (int)$cancel_booking['id'] . ': ' . ($settled['error'] ?? ''));
-                        throw new RuntimeException('cancel_failed');
+                    // Cancel through the shared settled path (status, room release, bill treatment and refund per the
+                    // active cancellation mode, all in one transaction; a party all-or-nothing). Ownership was verified above.
+                    $guestRefundStatus = rh_refund_rule('guest_self_cancel_refund') === 'auto' ? 'completed' : 'pending';
+                    $guestQuoted = trim((string)($_POST['fee_quoted'] ?? ''));
+                    $guestFeeChoice = $guestQuoted !== '' ? ['quoted' => $guestQuoted] : null; // never an override
+                    $guestRefundTotal = 0.0;
+                    if (count($cancel_party) > 1) {
+                        $grpSettled = rh_cancel_booking_group($pdo, array_column($cancel_party, 'id'), 0, 'Guest cancelled: ' . $cancel_reason, $guestRefundStatus, $guestFeeChoice);
+                        $settledOk = !empty($grpSettled['success']);
+                        $settledErr = (string)($grpSettled['error'] ?? '');
+                        foreach (($grpSettled['cancelled'] ?? []) as $gc) {
+                            $guestRefundTotal += (float)($gc['refund_total'] ?? 0);
+                        }
+                    } else {
+                        $settled = cancelRoomBookingSettled($pdo, (int)$cancel_booking['id'], 0, 'Guest cancelled: ' . $cancel_reason, $guestRefundStatus, $guestFeeChoice);
+                        $settledOk = !empty($settled['success']);
+                        $settledErr = (string)($settled['error'] ?? '');
+                        $guestRefundTotal = (float)($settled['refund_total'] ?? 0);
+                    }
+                    if (!$settledOk) {
+                        error_log('Guest self-cancel failed for booking ' . (int)$cancel_booking['id'] . ': ' . $settledErr);
+                        if (strpos($settledErr, 'The cancellation fee changed') !== false || strpos($settledErr, 'Review the cancellation fee') !== false) {
+                            // Nothing changed: the fee moved since the page was shown (e.g. a day passed). Show it again.
+                            $error = 'The cancellation fee has changed since this page was opened. Nothing was cancelled. Please look up your booking again to see the current fee.';
+                        } else {
+                            throw new RuntimeException('cancel_failed');
+                        }
+                    }
+                }
+                if (empty($error) && $cancel_booking) {
+                    // Send the cancellation email and log each cancelled room
+                    require_once 'config/email.php';
+                    foreach ($cancel_party as $pr) {
+                        $email_result = sendBookingCancelledEmail($pr, $cancel_reason);
+                        logCancellationToDatabase(
+                            $pr['id'],
+                            $pr['booking_reference'],
+                            'room',
+                            $pr['guest_email'],
+                            0, // guest-initiated (no admin user)
+                            'Guest cancelled: ' . $cancel_reason,
+                            $email_result['success'],
+                            $email_result['message']
+                        );
                     }
 
-                    // Send cancellation email
-                    require_once 'config/email.php';
-                    $email_result = sendBookingCancelledEmail($cancel_booking, $cancel_reason);
-
-                    // Log cancellation
-                    logCancellationToDatabase(
-                        $cancel_booking['id'],
-                        $cancel_booking['booking_reference'],
-                        'room',
-                        $cancel_booking['guest_email'],
-                        0, // guest-initiated (no admin user)
-                        'Guest cancelled: ' . $cancel_reason,
-                        $email_result['success'],
-                        $email_result['message']
-                    );
-
-                    $success = 'Your booking has been cancelled successfully. A confirmation email has been sent to your email address.';
-                    if (($settled['refund_total'] ?? 0) > 0 && rh_refund_rule('guest_self_cancel_refund') !== 'auto') {
+                    $success = count($cancel_party) > 1
+                        ? 'Your booking (all ' . count($cancel_party) . ' rooms) has been cancelled successfully. A confirmation email has been sent to your email address.'
+                        : 'Your booking has been cancelled successfully. A confirmation email has been sent to your email address.';
+                    if ($guestRefundTotal > 0 && rh_refund_rule('guest_self_cancel_refund') !== 'auto') {
                         $success .= ' Any refund due is pending approval by our team and will be processed shortly.';
                     }
                     $booking = null; // Clear the booking display
@@ -365,24 +403,101 @@ try {
                         </div>
                     <?php endif; ?>
 
+                    <?php
+                    // The cancellation policy this booking was made under (its stored wording; nothing for older bookings).
+                    $lookup_policy_text = rh_booking_policy_text($booking);
+                    if ($lookup_policy_text !== ''): ?>
+                        <div style="margin-top: 20px;">
+                            <label style="display: block; font-size: 11px; color: #999; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px;">Cancellation Policy</label>
+                            <div style="font-size: 14px; color: #333; line-height: 1.6;"><?php echo nl2br(htmlspecialchars($lookup_policy_text)); ?></div>
+                        </div>
+                    <?php endif; ?>
+
                     <?php if (in_array($booking['status'], ['pending', 'confirmed', 'tentative'])): ?>
+                        <?php
+                        // Whole-party cancel (owner 2026-11-14): every room of this booking with the email the guest proved,
+                        // not yet checked in. Company-billed parties are cancelled by the hotel, never online.
+                        $lookup_company = rh_guest_cancel_company_billed($pdo, $booking);
+                        $lookup_party = $lookup_company ? [] : rh_guest_cancel_party($pdo, $booking, (string)$booking['guest_email']);
+                        if (count($lookup_party) <= 1) {
+                            $lookup_party = [$booking];
+                        }
+                        $lookup_room_names = array_column($lookup_group_rooms, 'room_name', 'id');
+                        $lookup_fee = 0.0;
+                        $lookup_refund = 0.0;
+                        $lookup_credit = 0.0;
+                        $lookup_has_policy = false;
+                        $lookup_lines = [];
+                        foreach ($lookup_party as $lookup_pr) {
+                            $lookup_pv = rh_cancel_policy_preview($pdo, $lookup_pr);
+                            $lookup_has_policy = $lookup_has_policy || $lookup_pv['source'] === 'policy';
+                            $lookup_fee = round($lookup_fee + (float)$lookup_pv['amount'], 2);
+                            $lookup_refund = round($lookup_refund + (float)$lookup_pv['refund'], 2);
+                            $lookup_credit = round($lookup_credit + (float)$lookup_pv['credit'], 2);
+                            $lookup_lines[] = ['ref' => (string)$lookup_pr['booking_reference'], 'room' => (string)($lookup_room_names[$lookup_pr['id']] ?? ($lookup_pr['room_name'] ?? '')), 'pv' => $lookup_pv];
+                        }
+                        $lookup_money = static fn (float $v): string => (string)$currency_symbol . number_format($v, 2);
+                        ?>
                         <div class="cancel-section">
                             <h4><i class="fas fa-exclamation-triangle"></i> Need to Cancel?</h4>
+                            <?php if ($lookup_company): ?>
+                                <p style="color: #666; font-size: 14px; margin-bottom: 0;">
+                                    This booking is billed to a company account, so it cannot be cancelled online. Please contact us using the details below.
+                                </p>
+                            <?php else: ?>
                             <p style="color: #666; font-size: 14px; margin-bottom: 16px;">
                                 If you need to cancel your reservation, please provide a reason below.
                             </p>
+                            <?php if (count($lookup_party) > 1 || $lookup_has_policy): ?>
+                                <div style="font-size: 14px; color: #333; line-height: 1.6; margin-bottom: 14px;">
+                                    <?php if (count($lookup_party) > 1): ?>
+                                        <p style="margin: 0 0 6px;">Cancelling cancels all <?php echo (int)count($lookup_party); ?> rooms of this booking:</p>
+                                    <?php endif; ?>
+                                    <ul style="margin: 0 0 8px; padding-left: 18px;">
+                                        <?php foreach ($lookup_lines as $lookup_ln): ?>
+                                            <li><?php echo htmlspecialchars(($lookup_ln['room'] !== '' ? $lookup_ln['room'] . ' - ' : '') . $lookup_ln['ref']); ?>
+                                                <?php if ($lookup_ln['pv']['source'] === 'policy'): ?>
+                                                    <small>(<?php echo htmlspecialchars($lookup_ln['pv']['tier_label'] . ((float)$lookup_ln['pv']['amount'] > BALANCE_TOLERANCE ? ': ' . $lookup_ln['pv']['fee_text'] : '')); ?>)</small>
+                                                <?php endif; ?></li>
+                                        <?php endforeach; ?>
+                                    </ul>
+                                    <?php if ($lookup_has_policy): ?>
+                                        <p style="margin: 0;"><strong>Cancellation fee: <?php echo htmlspecialchars($lookup_fee > BALANCE_TOLERANCE ? $lookup_money($lookup_fee) : 'none'); ?></strong></p>
+                                        <p style="margin: 0;">
+                                            <?php if ($lookup_credit > BALANCE_TOLERANCE): ?>
+                                                Money paid above the fee (<?php echo htmlspecialchars($lookup_money($lookup_credit)); ?>) stays as credit with us.
+                                            <?php else: ?>
+                                                Refund: <?php echo htmlspecialchars($lookup_money($lookup_refund)); ?><?php echo $lookup_refund > BALANCE_TOLERANCE && rh_refund_rule('guest_self_cancel_refund') !== 'auto' ? ' (checked by our team before it is paid)' : ''; ?>.
+                                            <?php endif; ?>
+                                        </p>
+                                        <?php if ($lookup_fee > BALANCE_TOLERANCE): ?>
+                                            <p style="margin: 0; color: #666; font-size: 13px;">The fee is a % of the whole stay (booked rate x nights, incl. VAT and tourism levy) under the cancellation policy shown above. Extras already used stay payable.</p>
+                                        <?php endif; ?>
+                                    <?php endif; ?>
+                                </div>
+                            <?php endif; ?>
                             <form method="POST" id="cancel-form">
                                 <input type="hidden" name="cancel_booking" value="1">
                                 <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars(pub_csrf_generate('lookup'), ENT_QUOTES, 'UTF-8'); ?>">
                                 <input type="hidden" name="booking_reference" value="<?php echo htmlspecialchars($booking['booking_reference']); ?>">
                                 <input type="hidden" name="guest_email" value="<?php echo htmlspecialchars($booking['guest_email']); ?>">
+                                <?php if ($lookup_has_policy): ?>
+                                    <input type="hidden" name="fee_quoted" value="<?php echo htmlspecialchars(number_format($lookup_fee, 2, '.', ''), ENT_QUOTES); ?>">
+                                <?php endif; ?>
                                 <div class="form-group" style="margin-bottom: 12px;">
                                     <textarea name="cancel_reason" class="form-control" rows="2" placeholder="Reason for cancellation (optional)" style="width:100%; box-sizing:border-box; padding: 10px; border: 2px solid #e0e0e0; border-radius: 8px; font-family: 'Jost', sans-serif;"></textarea>
                                 </div>
+                                <?php if ($lookup_has_policy && $lookup_fee > BALANCE_TOLERANCE): ?>
+                                    <label style="display: flex; gap: 8px; align-items: flex-start; font-size: 14px; margin-bottom: 12px; cursor: pointer;">
+                                        <input type="checkbox" name="accept_fee" value="1" required style="margin-top: 4px; min-width: 18px; min-height: 18px;">
+                                        <span>I accept the cancellation fee of <?php echo htmlspecialchars($lookup_money($lookup_fee)); ?>.</span>
+                                    </label>
+                                <?php endif; ?>
                                 <button type="submit" class="btn-cancel-booking">
-                                    <i class="fas fa-times"></i> Cancel My Booking
+                                    <i class="fas fa-times"></i> <?php echo count($lookup_party) > 1 ? 'Cancel My Booking (all ' . (int)count($lookup_party) . ' rooms)' : 'Cancel My Booking'; ?>
                                 </button>
                             </form>
+                            <?php endif; ?>
                         </div>
                     <?php endif; ?>
                 </div>

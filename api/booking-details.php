@@ -149,7 +149,8 @@ try {
             'can_cancel' => in_array($booking['status'], ['pending', 'confirmed']),
             'can_check_in' => $booking['status'] === 'confirmed',
             'can_check_out' => $booking['status'] === 'checked-in',
-            'cancellation_policy' => getSetting('cancellation_policy')
+            // The booking's locked cancellation policy text when it was made under one, else the setting (as before).
+            'cancellation_policy' => (function_exists('rh_booking_policy_text') && rh_booking_policy_text($booking) !== '') ? rh_booking_policy_text($booking) : getSetting('cancellation_policy')
         ],
         'contact' => [
             'hotel_name' => getSetting('site_name'),

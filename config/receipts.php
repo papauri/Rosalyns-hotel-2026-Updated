@@ -1175,6 +1175,14 @@ if (!function_exists('receipt_render_payment_pdf_html')) {
         }
 
         $body = $items . rh_pdf_spacer(3) . rh_pdf_totals_table($totals);
+        // Room payment: the booking's (group lead's) stored cancellation policy text; '' without one = nothing printed.
+        if (!$isRefund && (string)($payment['booking_type'] ?? '') === 'room' && function_exists('rh_booking_policy_text_by_id')
+            && ($GLOBALS['pdo'] ?? null) instanceof PDO) {
+            $cpTerms = rh_booking_policy_text_by_id($GLOBALS['pdo'], (int)($payment['booking_id'] ?? 0));
+            if ($cpTerms !== '') {
+                $body .= rh_pdf_spacer(4) . rh_pdf_section_title('Cancellation policy') . rh_pdf_spacer(1) . rh_pdf_note($cpTerms);
+            }
+        }
         $terms = hotel_brand_tokens()['terms_text'];
         if ($terms !== '') {
             $body .= rh_pdf_spacer(4) . rh_pdf_note($terms);

@@ -78,6 +78,43 @@ when prompted."
 - LATER (not pulled): the quote can still say a joined type is free when fewer separate pairs are free than the
   party needs (pairs sharing a room are counted twice); booking.php refuses at submit.
 
+### Cancellation & no-show policies + guest whole-party cancel (2026-11-14, NEXT_BUILD_ORDER step 4) — SHIPPED, switch OFF (hashes: see TASKS.md line)
+- Guides (settings): Hotel Settings > Refunds & cancellations has a new card "Cancellation & no-show policy":
+  On/Off switch, up to 5 rows "Cancelled fewer than [X] days before arrival -> [N] % of the stay" (cancelling
+  exactly X days before is still free; arrival day = 0), No-show %, optional separate policy for groups of N rooms
+  or more, optional extra note, and "What guests will read" preview. The No-show refund rule is now visible and
+  editable there. Only people with Finance settings can change it. At Rosalyn's the card says it needs the
+  database update until migration 085 has been run.
+- Guides (bookings): each booking made while the switch is On keeps the policy it was made under (Booking Details
+  panel "Cancellation policy (locked at booking, vN)"). Cancelling a CONFIRMED booking inside a fee window shows
+  the fee before you cancel ("50% of the stay MWK X (booked rate Y x 3 nights)"), what was paid and the refund;
+  pending, tentative and expired bookings pay no fee. People with "Lower or waive cancellation fees"
+  (administrators + managers by default, grantable to anyone) can lower the fee with a required reason, at cancel
+  time or afterwards on Booking Details; the difference becomes credit owed back. History shows it. Worked example
+  for the guide: MWK 100,000 x 3 nights.
+- Guides (no-show): under a policy, 100% = the booked stay keeps billing as today; below 100% one "No-show
+  charge - N% of the stay" line is posted and money paid above it is owed back.
+- Guides (guest site, LIVE NOW at both hotels, not behind the switch): "Cancel My Booking" on booking lookup
+  cancels every room in the party under the guest's email (rooms listed first; checked-in rooms left alone); one
+  cancellation email per room. Parties billed to a company see "contact the hotel" instead of the button. Under a
+  policy the guest sees the fee and refund and must tick "I accept the cancellation fee".
+- Guides (documents): invoice, quotation, receipt, booking emails, booking lookup, the public Cancellation policy
+  window, the booking summary and the create-booking review step print the policy wording (booking's own locked
+  wording on its documents). Nothing prints for bookings without a policy.
+- Assistant: includes/ai/ai-money.php (~:74-80) still reads only `no_show_refund_policy`; it must read
+  `bookings.cancellation_policy_snapshot` and `rh_cancellation_fee_quote()` (includes/cancellation-policy.php);
+  new permission key `waive_cancellation_fee`; new settings `cancellation_policy_enabled/_individual/_group/
+  _group_min_rooms/_note/_version`. Step 7 covers this.
+- Logs lead: new History events 'Cancellation settled' (policy kind/version/tier/%), 'Cancellation fee lowered',
+  'No-show charge posted'; `rh_log_event` 'Cancellation policy changed'.
+- EOD lead: lowering a fee after cancellation changes a past day's kept-fee figure (counted on the check-in
+  date); a below-100% no-show charge is a tagged 'other' folio row ("guest-bill extras").
+- LATER (not pulled): fee of exactly 0.01 shows "No fee" but is kept (cancellation-policy.php :489, `<` vs `<=`);
+  group dialog totals `rh_booking_group_ids` while the cancel runs on `$cancelGroupIds`; lower/waive for
+  legacy-kept first nights not built (ASSUMPTION, keeps the ship inert); sent reminder emails carry no policy
+  text (templates/emails/checkin-reminder.php has no caller); cancellation_policy + golden tests not in
+  run_tests.php; unused `cancelBooking()` JS in admin/bookings.php posts no fee (no caller; server would refuse).
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` fails in unchanged code: claim-check self-test (Room Board "Tomorrow"; staff
   activity "4 of 3 staff accounts"), History Summary "K1,068,000," flagged; digest-recipients fail.

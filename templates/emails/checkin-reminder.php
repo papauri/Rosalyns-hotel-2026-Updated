@@ -261,6 +261,13 @@
                 If you need to modify or cancel your reservation, please contact us at least <?php echo $cancellation_policy ?? getSetting('booking_change_policy', '48 hours'); ?> before your check-in date.<br>
                 We look forward to making your stay memorable!
             </p>
+            <?php // Cancellation policy locked at booking (plain text: rh_booking_policy_text()); '' = booking without a policy, nothing shown.
+            if (!empty($cancellation_policy_text)): ?>
+            <div style="margin-top: 20px; padding: 15px; background: #FDF6EC; border-left: 4px solid #8B7355; border-radius: 5px; font-size: 13px; color: #5C4A32; line-height: 1.6;">
+                <strong>Cancellation policy</strong><br>
+                <?php echo nl2br(htmlspecialchars((string)$cancellation_policy_text, ENT_QUOTES, 'UTF-8')); ?>
+            </div>
+            <?php endif; ?>
         </div>
         
         <div class="footer">

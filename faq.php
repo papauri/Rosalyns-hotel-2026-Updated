@@ -109,6 +109,9 @@ $seo_data = [
                 <p>Yes. Use our <a href="booking-lookup.php">Booking Lookup</a> page with your booking reference and details to view your booking status.</p>
                 <h3>How do I cancel or change my booking?</h3>
                 <p>Start from the <a href="booking-lookup.php">Booking Lookup</a> page to find your booking, then follow the options available there. Contact the front desk for current cancellation policy details.</p>
+                <?php if (function_exists('rh_current_policy_text_all') && rh_current_policy_text_all() !== ''): /* only when a cancellation policy is switched on */ ?>
+                <p>You can also read our <a href="#" class="policy-link" data-policy="cancellation-policy">cancellation policy</a>.</p>
+                <?php endif; ?>
             </section>
 
             <!-- Section 4: Leaving a Review -->

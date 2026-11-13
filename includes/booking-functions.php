@@ -628,7 +628,16 @@ function createNoShowRefund(array $booking, int $adminUserId, PDO $pdo): array
         }
 
         $refundAmount = 0.0;
-        if (rh_noshow_fee_tagged($pdo, (int)$booking['id'])) {
+        $nsSnap = rh_cancel_policy_snapshot($fresh); // cancellation policy locked at booking ($fresh is SELECT *)
+        if ($nsSnap !== null && (float)$nsSnap['noshow_pct'] >= 100) {
+            // 100% policy: no charge row, the booked stay keeps billing; refund only what was paid above the stay and
+            // the extras (never the first-night refund).
+            $nsBase = rh_cancel_policy_base($balRow + $fresh);
+            $refundAmount = max(0.0, round($amountPaid - $nsBase - $folioCharges, 2));
+        } elseif ($nsSnap !== null && !rh_noshow_fee_tagged($pdo, (int)$booking['id'])) {
+            // Below 100% the policy's tagged charge must be on the bill before anything is refunded.
+            throw new RuntimeException('The no-show charge under the cancellation policy is not on the bill, so no refund was made. Check the booking.');
+        } elseif (rh_noshow_fee_tagged($pdo, (int)$booking['id'])) {
             // A group room charged under group_noshow_charge: its bill is now its folio charges (the no-show charge plus
             // any extras), so whatever was paid above that goes back - the charge replaces the policy's own first-night
             // retention (never kept twice), under 'first_night' and 'full' alike.
@@ -814,9 +823,15 @@ function rh_mark_booking_no_show(PDO $pdo, int $bookingId, int $userId, string $
 
         // Group no-show charge (hotel setting group_noshow_charge; Off = nothing runs). Posted BEFORE the refund so the
         // refund is sized against the charge. Savepoint inside; a failure is logged and the no-show still stands.
+        // A booking under a cancellation policy (snapshot) gets the policy's no-show charge instead and NEVER the group
+        // charge (whose 'none' row would take the tag first). Expiry paths are not touched (they never charge a policy).
+        if (rh_cancel_policy_snapshot($bk) !== null) {
+            $out['group_fee'] = rh_policy_noshow_fee_apply($pdo, $bookingId, $userId, $userName);
+        } else {
         $out['group_fee'] = rh_group_noshow_charge_mode() !== ''
             ? rh_group_noshow_fee_apply($pdo, $bookingId, 'no-show', $userId, $userName)
             : ['posted' => false, 'mode' => '', 'amount' => 0.0, 'error' => ''];
+        }
 
         // Auto-refund per the no_show_refund_policy setting. A savepoint keeps a failed refund from leaving
         // half its legs behind while the no-show itself stands (same outcome as before this was one transaction).

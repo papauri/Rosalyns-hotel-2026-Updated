@@ -45,11 +45,18 @@ if (!function_exists('quotationPdfRenderDocument')) {
 }
 
 if (!function_exists('quotationPdfClosingNotes')) {
-    /** Validity line + optional document_terms_text, shared by all quotations. */
-    function quotationPdfClosingNotes(string $validityText): string
+    /**
+     * Validity line + optional document_terms_text, shared by all quotations. $cancelTerms: a room booking's stored
+     * cancellation policy text ('' = nothing printed, as before).
+     */
+    function quotationPdfClosingNotes(string $validityText, string $cancelTerms = ''): string
     {
         $terms = hotel_brand_tokens()['terms_text'];
-        return rh_pdf_spacer(3) . rh_pdf_note($validityText . ($terms !== '' ? "\n" . $terms : ''));
+        $out = '';
+        if (trim($cancelTerms) !== '') {
+            $out .= rh_pdf_spacer(3) . rh_pdf_section_title('Cancellation policy', 25) . rh_pdf_spacer(2) . rh_pdf_note(trim($cancelTerms));
+        }
+        return $out . rh_pdf_spacer(3) . rh_pdf_note($validityText . ($terms !== '' ? "\n" . $terms : ''));
     }
 }
 
@@ -192,7 +199,8 @@ function generateQuotationPDF(array $booking, array $room, array $options = []):
     if ($notes !== '') {
         $body .= rh_pdf_spacer(3) . rh_pdf_section_title('Note from our team', 25) . rh_pdf_spacer(2) . rh_pdf_note($notes);
     }
-    $body .= quotationPdfClosingNotes('This quotation is valid until ' . $valid_until->format('F j, Y') . '. Rates and availability are subject to change after this date. We look forward to welcoming you.');
+    $body .= quotationPdfClosingNotes('This quotation is valid until ' . $valid_until->format('F j, Y') . '. Rates and availability are subject to change after this date. We look forward to welcoming you.',
+        function_exists('rh_booking_policy_text') ? rh_booking_policy_text($booking) : ''); // the booking's locked cancellation policy
 
     $kitHtml = rh_pdf_document_shell('Hotel Quotation', $meta, $body);
 

@@ -305,3 +305,60 @@ runs migration 085. 3. Owner checks that the hand-written Cancellation Policy pa
 2. DECIDED 2026-11-14 (owner: "no"): the automatic release of an unpaid confirmed booking charges no fee.
 3. DECIDED 2026-11-14 (owner: "no"): pending (not yet confirmed) snapshot bookings are exempt like tentative holds;
    fee 0, paid money refunded per the refund mode.
+
+## 9. Spec-check corrections (Fable 5.2, 2026-11-14) - these OVERRIDE anything above that disagrees
+
+1. **Fee only when the locked previous status is `confirmed`.** `validateBookingCancellation` (database.php :3350)
+   lets `expired` through. For a snapshot row that is pending, tentative or expired the quote returns source
+   `policy`, amount 0. A snapshot row NEVER returns `legacy` (else `keep_first_night` retains at :10376).
+2. **`rh_policy_noshow_fee_apply` does not copy the group gates.** `rh_group_noshow_fee_apply` returns early when
+   `group_noshow_charge` is Off (:9780-9783) and needs a 2+ room group (:9799). The policy function gates only on:
+   status `no-show`, not deleted, not already tagged. It never reads the group setting.
+3. **`createNoShowRefund` snapshot branch decides from the snapshot's `noshow_pct`,** not from "no tagged row":
+   >= 100: refund paid - base - folio; < 100 and tagged: the existing branch (:631); < 100 and NOT tagged: no
+   refund, return an error. Read the snapshot from `$fresh` (:609, SELECT *), not `$balRow` (:618). Keep it after
+   the early returns at :588 and :594 so rule `none` still refunds nothing.
+4. **admin/create-booking.php stamp:** ONE call after the loops close (:956), before the commit (:1035), with
+   `array_column($created_bookings, 'id')`. Not at :838 (inside the per-room loop; `primary_booking_id` is set in
+   the INSERT, there is no link step).
+5. **Expiry is untouched.** Only the no-show slot (booking-functions.php :815-819) switches to the policy function.
+   The `expired` callers of `rh_group_noshow_fee_apply` (database.php :265, :376, :7547,
+   admin/api/tentative-actions.php :184) stay exactly as they are.
+6. **process-checkin.php :403:** no screen posts `action=cancel` to it. No UI work. Server side: if the quote is
+   `policy` with amount above tolerance, refuse with "Cancel this booking from Booking Details so the cancellation
+   fee can be reviewed."; otherwise proceed as today.
+7. **Never name the new column in a SELECT or INSERT.** Explicit lists: booking-lookup.php :261, admin/bookings.php
+   :973, admin/process-checkin.php :383, booking-functions.php :618. Helpers take a `SELECT *` row, or re-read by
+   id with `SELECT *` when `array_key_exists('cancellation_policy_snapshot', $b)` is false. Only the guarded stamp
+   UPDATE names the column.
+8. **Nothing new appears for NULL-snapshot bookings.** The lower/waive form, the "Cancellation fee charged: X"
+   email line, the fee block in the cancel modals and the FAQ link render/act only when the snapshot is non-null
+   (public text and FAQ link only when the generated text is non-empty). Legacy cancels post no `fee_quoted` and
+   keep the "(first night)" summary (:10488). ASSUMPTION (orchestrator): lower/waive for legacy-kept first nights
+   is NOT built now (keeps the ship inert at Rosalyn's); owner can ask for it later.
+9. **F2 whole-party guest cancel is NOT inert** (owner-decided; changes group bookings at both hotels on ship).
+   Party = rows with the proven email, not deleted, status pending, tentative or confirmed (a checked-in room is
+   excluded, else `rh_cancel_booking_group` rolls back the whole group, :10693-10695). Notice-days check runs on
+   the earliest check-in. Add lookup test cases for it.
+10. **`rh_days_before_arrival` swap (booking-lookup.php :106):** today an unparseable date means "not blocked"
+    (:109); the caller must keep that.
+11. **Override permission:** allowed only when `function_exists('hasPermission')`, `$adminUserId > 0` and the
+    permission is held. Validate `$feeChoice` straight after database.php :10349, before `rh_booking_close_orders`.
+    Admin cancel of a policy booking with a fee above tolerance but no `fee_quoted`: refuse ("Review the fee").
+12. **`$feeChoice` shapes:** single = `{quoted, override, reason}`. Group = `{quoted: sum of rooms, override_pct,
+    reason}`; `rh_cancel_booking_group` checks the sum inside its transaction before the loop, then passes each
+    room `{quoted: that room's quote, override: round(room base x pct / 100, 2) capped at the room fee, reason}`.
+    New signature tail after `$reason`: `string $refundStatus = 'completed', ?array $feeChoice = null`.
+13. **Stamp:** check the setting first (no information_schema query when Off); column-ready cache static per
+    request; try/catch, log a warning, never refuse a booking; kind from `count($ids)` vs the minimum rooms.
+    `$out['group_fee']` keeps its shape `{posted, mode, amount, error}` for both no-show functions.
+14. **Permission declaration:** like `billing_on_account` (permissions.php :1024-1029, `'page' => ''`), category
+    Finance, group `payments_write`; add to the manager default list (pattern :128); admins get it automatically.
+    Do NOT add it to `rh_admin_only_permissions` (:1383).
+
+Current lines: `cancelRoomBookingSettled` :10315 (lock :10339, bill treatment :10375-10384, refund :10411-10414,
+summary :10486-10500, History :10502-10508); `rh_cancel_booking_group` :10663; booking.php loop :588-721, link
+:726-731, commit :751; mixed-booking.php link :586-589, commit :598; api/bookings.php combination :366-378, commit
+:385; create-booking.php transaction :747; no-show lock `SELECT b.*` :775; booking-settings.php
+`group_noshow_charge` save :264-291; booking-lookup.php cancel form :368-386; admin/tentative-bookings.php :126
+calls `cancelRoomBookingSettled` directly (exempt).

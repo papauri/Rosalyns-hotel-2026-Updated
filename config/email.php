@@ -2389,7 +2389,43 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
         $extra['cancellation_reason'] = htmlspecialchars((string)$extra['cancellation_reason'], ENT_QUOTES, 'UTF-8');
     }
 
+    // Cancellation policy (bookings made under one): {{cancellation_policy_text}} = the fine print STORED on the booking
+    // (escaped HTML), {{cancellation_fee_charged}} = "Cancellation fee charged: MWK X" once it is cancelled with a fee.
+    // Both '' for a booking without a policy, so its emails are unchanged.
+    $cpText = function_exists('rh_booking_policy_text') ? rh_booking_policy_text($booking) : '';
+    $vars['cancellation_policy_text'] = $cpText !== '' ? rh_cancel_policy_html($cpText) : '';
+    $vars['cancellation_fee_charged'] = '';
+    if ($cpText !== '' && $bookingId > 0 && isset($pdo)) {
+        try {
+            $cfSt = $pdo->prepare('SELECT status, cancellation_retained_amount FROM bookings WHERE id = ?');
+            $cfSt->execute([$bookingId]);
+            $cf = $cfSt->fetch(PDO::FETCH_ASSOC) ?: [];
+            if (($cf['status'] ?? '') === 'cancelled' && round((float)($cf['cancellation_retained_amount'] ?? 0), 2) > BALANCE_TOLERANCE) {
+                $vars['cancellation_fee_charged'] = htmlspecialchars('Cancellation fee charged: ' . $currency . ' ' . number_format((float)$cf['cancellation_retained_amount'], 2), ENT_QUOTES, 'UTF-8');
+            }
+        } catch (\Throwable $e) {
+            error_log('buildBookingEmailVariables cancellation fee: ' . $e->getMessage());
+        }
+    }
+
     return array_merge($vars, $extra);
+}
+
+/**
+ * Cancellation policy blocks for a booking email (HTML): the stored fine print and, on the cancelled email, the fee
+ * charged. '' when the booking has no policy. $vars: buildBookingEmailVariables() result.
+ */
+function rh_email_cancel_policy_blocks(array $vars, bool $withFee = false): string
+{
+    $html = '';
+    if ($withFee && (string)($vars['cancellation_fee_charged'] ?? '') !== '') {
+        $html .= '<p style="margin:16px 0 0;font-weight:bold;color:#5C4A32;">' . (string)$vars['cancellation_fee_charged'] . '</p>'; // already escaped
+    }
+    if ((string)($vars['cancellation_policy_text'] ?? '') !== '') {
+        $html .= '<div style="background:#FDF6EC;padding:15px;border-left:4px solid #8B7355;border-radius:5px;margin:20px 0;">'
+            . '<h3 style="color:#5C4A32;margin-top:0;text-align:left;">Cancellation policy</h3>' . (string)$vars['cancellation_policy_text'] . '</div>';
+    }
+    return $html;
 }
 
 /**
@@ -2413,11 +2449,29 @@ function renderBookingEmailTemplate(string $templateKey, array $vars)
 
     // Variables arrive HTML-escaped (safe for the HTML body); the subject and plain-text part
     // are not HTML, so decode entities there ("O&#039;Brien" -> "O'Brien").
-    return [
+    $out = [
         'subject' => html_entity_decode(strtr($template['subject'], $replace), ENT_QUOTES | ENT_HTML5, 'UTF-8'),
         'html_body' => strtr($template['html_body'], $replace),
         'text_body' => !empty($template['text_body']) ? html_entity_decode(strtr($template['text_body'], $replace), ENT_QUOTES | ENT_HTML5, 'UTF-8') : ''
     ];
+    // Cancellation policy: the stored DB templates are never edited (live data). When a booking made under a policy is
+    // emailed with a template that does not place {{cancellation_policy_text}} itself, the block is added at the end
+    // (booking_cancelled also gets "Cancellation fee charged"). Nothing is added for a booking without a policy.
+    $cpKeys = ['booking_received', 'booking_confirmed', 'tentative_booking_created', 'tentative_booking_converted', 'tentative_quotation', 'booking_cancelled'];
+    if (in_array($templateKey, $cpKeys, true) && (string)($vars['cancellation_policy_text'] ?? '') !== '') {
+        $withFee = $templateKey === 'booking_cancelled' && strpos((string)$template['html_body'], '{{cancellation_fee_charged}}') === false;
+        $hasText = strpos((string)$template['html_body'], '{{cancellation_policy_text}}') !== false;
+        $add = rh_email_cancel_policy_blocks($hasText ? ['cancellation_fee_charged' => $vars['cancellation_fee_charged'] ?? ''] : $vars, $withFee);
+        if ($add !== '') {
+            $out['html_body'] .= $add;
+            if ($out['text_body'] !== '') {
+                $plain = ($withFee && (string)($vars['cancellation_fee_charged'] ?? '') !== '' ? "\n\n" . html_entity_decode((string)$vars['cancellation_fee_charged'], ENT_QUOTES | ENT_HTML5, 'UTF-8') : '')
+                    . (!$hasText ? "\n\nCancellation policy\n" . trim(html_entity_decode(strip_tags((string)$vars['cancellation_policy_text']), ENT_QUOTES | ENT_HTML5, 'UTF-8')) : '');
+                $out['text_body'] .= $plain;
+            }
+        }
+    }
+    return $out;
 }
 
 ensureBookingEmailTemplateDefaults();
@@ -2610,6 +2664,8 @@ function sendBookingReceivedEmail(array $booking)
             </div>';
         }
 
+        $htmlBody .= rh_email_cancel_policy_blocks($templateVars); // cancellation policy ('' without one)
+
         $htmlBody .= '
         <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
 
@@ -2720,6 +2776,8 @@ function sendBookingConfirmedEmail(array $booking)
                 <p style="color: #5C4A32; margin: 0;">' . htmlspecialchars($booking['special_requests']) . '</p>
             </div>';
         }
+
+        $htmlBody .= rh_email_cancel_policy_blocks($templateVars); // cancellation policy ('' without one)
 
         $htmlBody .= '
         <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>
@@ -4097,6 +4155,8 @@ function sendBookingCancelledEmail(array $booking, string $cancellation_reason =
             </div>';
         }
 
+        $htmlBody .= rh_email_cancel_policy_blocks($templateVars, true); // cancellation policy ('' without one)
+
         $htmlBody .= '
         <div style="background: #f8d7da; padding: 15px; border-left: 4px solid #dc3545; border-radius: 5px; margin: 20px 0;">
             <h3 style="color: #721c24; margin-top: 0;;text-align:left;">❌ Booking Status: Cancelled</h3>
@@ -4948,6 +5008,8 @@ function sendTentativeBookingConvertedEmail(array $booking)
                 <p style="color: #5C4A32; margin: 0;">' . htmlspecialchars($booking['special_requests']) . '</p>
             </div>';
         }
+
+        $htmlBody .= rh_email_cancel_policy_blocks($templateVars); // cancellation policy ('' without one)
 
         $htmlBody .= '
         <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a> or call ' . getSetting('phone_main') . '.</p>

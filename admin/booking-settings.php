@@ -290,6 +290,108 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_group_noshow_cha
     }
 }
 
+// Cancellation & no-show policies (CANCELLATION_POLICY_SPEC.md §6). Own form + flag; each key is written only when its
+// value changes, and cancellation_policy_version goes up by one on every save that changes anything. Money setting:
+// finance_settings. Needs database update 085 (the editor is hidden until it has run).
+$rh_cp_form_errors = [];
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_cancellation_policy'])) {
+    $cpOld = rh_cancel_policy_settings();
+    $cpTiers = static function (string $prefix): array {
+        $days = (array)($_POST[$prefix . '_days'] ?? []);
+        $pcts = (array)($_POST[$prefix . '_pct'] ?? []);
+        $rows = [];
+        foreach ($days as $i => $d) {
+            $rows[] = ['days' => is_scalar($d) ? (string)$d : '', 'pct' => isset($pcts[$i]) && is_scalar($pcts[$i]) ? (string)$pcts[$i] : ''];
+        }
+        return $rows;
+    };
+    if (!hasPermission((int)($user['id'] ?? 0), 'finance_settings')) {
+        $error = 'You do not have permission to change refund and cancellation settings.';
+    } elseif (!rh_cancel_policy_column_ready($pdo)) {
+        $error = 'Cancellation policies need the database update (085) first. Nothing was saved.';
+    } else {
+        $cpErrI = $cpErrG = [];
+        $cpInd = rh_cancel_policy_validate(['tiers' => $cpTiers('cp_ind'), 'noshow_pct' => (string)($_POST['cp_ind_noshow'] ?? '')], $cpErrI);
+        $cpGrpOn = !empty($_POST['cp_grp_on']);
+        $cpGrp = $cpGrpOn ? rh_cancel_policy_validate(['tiers' => $cpTiers('cp_grp'), 'noshow_pct' => (string)($_POST['cp_grp_noshow'] ?? '')], $cpErrG) : null;
+        $cpMinRaw = trim((string)($_POST['cp_group_min'] ?? '2'));
+        $cpNote = trim(str_replace(["\r\n", "\r"], "\n", (string)($_POST['cp_note'] ?? '')));
+        $cpOn = !empty($_POST['cp_enabled']) ? '1' : '0';
+        foreach ($cpErrI as $m) { $rh_cp_form_errors[] = 'Individual: ' . $m; }
+        foreach ($cpErrG as $m) { $rh_cp_form_errors[] = 'Group: ' . $m; }
+        if (!preg_match('/^\d+$/', $cpMinRaw) || (int)$cpMinRaw < 2 || (int)$cpMinRaw > 50) {
+            $rh_cp_form_errors[] = 'Group size must be a whole number of rooms from 2 to 50.';
+        }
+        if ((function_exists('mb_strlen') ? mb_strlen($cpNote) : strlen($cpNote)) > 300) {
+            $rh_cp_form_errors[] = 'Keep the extra note to 300 characters.';
+        }
+        if ($rh_cp_form_errors) {
+            $error = 'Cancellation policy not saved: ' . implode(' ', $rh_cp_form_errors);
+        } else {
+            $cpJson = static fn (?array $p): string => $p === null ? '' : (string)json_encode(['tiers' => $p['tiers'], 'noshow_pct' => $p['noshow_pct']]);
+            $cpNew = [
+                'cancellation_policy_enabled'         => $cpOn,
+                'cancellation_policy_individual'      => $cpJson($cpInd),
+                'cancellation_policy_group'           => $cpJson($cpGrp),
+                'cancellation_policy_group_min_rooms' => (string)(int)$cpMinRaw,
+                'cancellation_policy_note'            => $cpNote,
+            ];
+            $cpPrev = [
+                'cancellation_policy_enabled'         => $cpOld['enabled'] ? '1' : '0',
+                'cancellation_policy_individual'      => $cpJson($cpOld['individual']),
+                'cancellation_policy_group'           => $cpJson($cpOld['group']),
+                'cancellation_policy_group_min_rooms' => (string)(int)$cpOld['group_min_rooms'],
+                'cancellation_policy_note'            => (string)$cpOld['note'],
+            ];
+            $cpChanged = array_keys(array_diff_assoc($cpNew, $cpPrev));
+            if (!$cpChanged) {
+                $message = 'Cancellation policy unchanged.';
+            } else {
+                foreach ($cpChanged as $k) {
+                    updateSetting($k, $cpNew[$k]);
+                }
+                $cpVer = (int)$cpOld['version'] + 1;
+                updateSetting('cancellation_policy_version', (string)$cpVer);
+                if (function_exists('rh_log_event')) {
+                    rh_log_event('admin/' . basename(__FILE__, '.php'), 'warning', 'Cancellation policy changed', [
+                        'user' => $user['username'] ?? '', 'user_id' => $user['id'] ?? null,
+                        'from' => array_intersect_key($cpPrev, array_flip($cpChanged)), 'to' => array_intersect_key($cpNew, array_flip($cpChanged)),
+                        'version' => $cpVer,
+                    ]);
+                }
+                $message = 'Cancellation policy saved (version ' . $cpVer . '). It applies to bookings made from now on; each booking keeps the policy it was made under.';
+            }
+        }
+    }
+}
+
+// No-show refund rule (setting no_show_refund_policy; code default 'none'). Its own form; written only when it changes.
+$rh_noshow_refund_choices = [
+    'none'        => ['None - keep the money', 'No automatic refund. For bookings under a cancellation policy: money paid above the no-show charge stays as credit owed back to the guest.'],
+    'first_night' => ['First night', 'Keep the first night and refund the rest as a pending refund. For bookings under a cancellation policy: refund what was paid above the no-show charge.'],
+    'full'        => ['Full', 'Refund everything paid (extras on the bill stay payable) as a pending refund. For bookings under a cancellation policy: refund what was paid above the no-show charge.'],
+];
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_no_show_refund_policy'])) {
+    $nsNew = (string)($_POST['no_show_refund_policy'] ?? '');
+    $nsOld = (string)getSetting('no_show_refund_policy', 'none');
+    $nsOld = isset($rh_noshow_refund_choices[$nsOld]) ? $nsOld : 'none';
+    if (!hasPermission((int)($user['id'] ?? 0), 'finance_settings')) {
+        $error = 'You do not have permission to change refund and cancellation settings.';
+    } elseif (!isset($rh_noshow_refund_choices[$nsNew])) {
+        $error = 'Invalid no-show refund option.';
+    } elseif ($nsNew === $nsOld) {
+        $message = 'No-show refund rule unchanged.';
+    } else {
+        updateSetting('no_show_refund_policy', $nsNew);
+        if (function_exists('rh_log_event')) {
+            rh_log_event('admin/' . basename(__FILE__, '.php'), 'warning', 'No-show refund rule changed', [
+                'user' => $user['username'] ?? '', 'user_id' => $user['id'] ?? null, 'from' => $nsOld, 'to' => $nsNew,
+            ]);
+        }
+        $message = 'No-show refund rule saved. It applies to bookings marked no-show from now on.';
+    }
+}
+
 // Hotel details & policies (registry-driven; see admin/includes/hotel-details-settings.php)
 require_once __DIR__ . '/includes/hotel-details-settings.php';
 require_once __DIR__ . '/includes/review-sources-settings.php';
@@ -2039,6 +2141,197 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         <div class="value"><?php echo htmlspecialchars(getCancellationRefundModeLabel($cancelModeNow)); ?></div>
                     </div>
                 </div>
+                <?php
+                // Cancellation & no-show policy card (CANCELLATION_POLICY_SPEC.md §6). Sticky values after a refused save.
+                $cpS = rh_cancel_policy_settings();
+                $cpReady = rh_cancel_policy_column_ready($pdo);
+                $cpSticky = !empty($rh_cp_form_errors) && isset($_POST['save_cancellation_policy']);
+                $cpRows = static function (?array $p, string $prefix) use ($cpSticky): array {
+                    if ($cpSticky) {
+                        $rows = [];
+                        foreach ((array)($_POST[$prefix . '_days'] ?? []) as $i => $d) {
+                            $rows[] = ['days' => is_scalar($d) ? (string)$d : '', 'pct' => (is_array($_POST[$prefix . '_pct'] ?? null) && is_scalar($_POST[$prefix . '_pct'][$i] ?? null)) ? (string)$_POST[$prefix . '_pct'][$i] : ''];
+                        }
+                    } else {
+                        $rows = array_map(static fn ($t) => ['days' => (string)$t['days'], 'pct' => rh_cancel_policy_pct_label($t['pct'])], (array)($p['tiers'] ?? []));
+                    }
+                    $rows = array_values(array_filter($rows, static fn ($r) => trim($r['days']) !== '' || trim($r['pct']) !== ''));
+                    return array_slice(array_pad($rows, 5, ['days' => '', 'pct' => '']), 0, 5);
+                };
+                $cpVal = static fn (string $k, string $fallback): string => $cpSticky ? (string)($_POST[$k] ?? '') : $fallback;
+                $cpOn = $cpSticky ? !empty($_POST['cp_enabled']) : $cpS['enabled'];
+                $cpGrpOn = $cpSticky ? !empty($_POST['cp_grp_on']) : $cpS['group'] !== null;
+                $cpArrival = (new DateTimeImmutable('today', new DateTimeZone(RH_TIMEZONE)))->modify('+30 days');
+                $cpPreview = static function (string $kind) use ($cpS): string {
+                    $p = rh_cancel_policy_for_kind($kind, $cpS);
+                    return $p === null ? '' : rh_cancel_policy_text($p, $kind);
+                };
+                ?>
+                <div class="form-group" id="cancellation-policy" style="border:1px solid #e8e0d4;border-radius:10px;padding:14px 16px;margin:0 0 18px;">
+                    <h3 style="margin:0 0 6px;">Cancellation &amp; no-show policy</h3>
+                    <p class="help-text">Charge a % of the whole stay when a confirmed booking is cancelled close to arrival, and set what a no-show pays. Applies to bookings made after you save. Each booking keeps the policy it was made under.</p>
+                    <?php if (!$cpReady): ?>
+                        <p class="help-text"><i class="fas fa-lock"></i> Cancellation policies need the database update (085). Until it has run, every cancellation follows the rule below and nothing here can be changed.</p>
+                    <?php else: ?>
+                    <?php if (!$canEditRefundRules): ?>
+                        <p class="help-text"><i class="fas fa-lock"></i> You can view these rules. Only users with the "Change VAT &amp; refund settings" permission can change them.</p>
+                    <?php endif; ?>
+                    <form method="POST" action="booking-settings.php#cancellation-policy" id="cp-form">
+                        <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
+                        <input type="hidden" name="save_cancellation_policy" value="1">
+                        <fieldset <?php echo $canEditRefundRules ? '' : 'disabled'; ?> style="border:0;padding:0;margin:0;min-width:0;">
+                            <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin:6px 0 4px;">
+                                <input type="checkbox" name="cp_enabled" value="1" <?php echo $cpOn ? 'checked' : ''; ?> style="margin-top:4px;">
+                                <span><span style="font-weight:600;color:#1A1A1A;">Use cancellation policies for new bookings</span><br>
+                                <span class="help-text">On: every booking made from now on is locked to the policy below (shown to the guest before booking, printed on their documents). Off: new bookings follow the rule under "When a room booking is cancelled". Bookings already made never change.</span></span>
+                            </label>
+                            <?php foreach ([['cp_ind', 'Individual bookings', $cpS['individual'], 'For a booking of fewer rooms than the group size below (or every booking when there is no group policy).'], ['cp_grp', 'Group bookings', $cpS['group'], 'For a booking of the group size or more rooms made together. A family in joined rooms is one booking (individual).']] as [$cpPfx, $cpTitle, $cpPol, $cpHelp]): ?>
+                                <div class="cp-block" data-cp-block="<?php echo $cpPfx; ?>" style="margin-top:14px;">
+                                    <?php if ($cpPfx === 'cp_grp'): ?>
+                                        <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin-bottom:6px;">
+                                            <input type="checkbox" name="cp_grp_on" value="1" id="cp_grp_on" <?php echo $cpGrpOn ? 'checked' : ''; ?> style="margin-top:4px;">
+                                            <span><span style="font-weight:600;color:#1A1A1A;">Use a different policy for groups of
+                                                <input type="number" name="cp_group_min" min="2" max="50" step="1" value="<?php echo htmlspecialchars($cpVal('cp_group_min', (string)$cpS['group_min_rooms']), ENT_QUOTES); ?>" style="width:70px;display:inline-block;" aria-label="Group size in rooms"> rooms or more</span><br>
+                                            <span class="help-text">Unticked: groups use the individual policy. The group size also decides which bookings count as a group.</span></span>
+                                        </label>
+                                    <?php else: ?>
+                                        <h4 style="margin:0 0 4px;"><?php echo htmlspecialchars($cpTitle); ?></h4>
+                                    <?php endif; ?>
+                                    <div class="cp-rows" data-cp-rows="<?php echo $cpPfx; ?>"<?php echo $cpPfx === 'cp_grp' && !$cpGrpOn ? ' hidden' : ''; ?>>
+                                        <p class="help-text" style="margin:0 0 6px;"><?php echo htmlspecialchars($cpHelp); ?> Each row: cancelled FEWER than this many days before arrival (arrival day = 0) charges this % of the whole stay. Cancelling exactly that many days before is still free. Up to 5 rows; blank rows are ignored.</p>
+                                        <?php foreach ($cpRows($cpPol, $cpPfx) as $cpRi => $cpR): ?>
+                                            <div class="cp-row" style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:6px;"<?php echo $cpRi > 0 && trim($cpR['days']) === '' && trim($cpR['pct']) === '' ? ' hidden' : ''; ?>>
+                                                <span>Cancelled fewer than</span>
+                                                <input type="number" name="<?php echo $cpPfx; ?>_days[]" min="1" max="365" step="1" value="<?php echo htmlspecialchars($cpR['days'], ENT_QUOTES); ?>" style="width:80px;" aria-label="Days before arrival">
+                                                <span>days before arrival &rarr;</span>
+                                                <input type="number" name="<?php echo $cpPfx; ?>_pct[]" min="0" max="100" step="0.01" value="<?php echo htmlspecialchars($cpR['pct'], ENT_QUOTES); ?>" style="width:90px;" aria-label="Percent of the stay">
+                                                <span>% of the stay</span>
+                                                <button type="button" class="btn btn-secondary btn-sm cp-remove" style="min-height:44px;min-width:44px;" aria-label="Remove this row"><i class="fas fa-xmark"></i> Remove</button>
+                                            </div>
+                                        <?php endforeach; ?>
+                                        <button type="button" class="btn btn-secondary btn-sm cp-add" style="min-height:44px;min-width:44px;margin-bottom:8px;"><i class="fas fa-plus"></i> Add a row</button>
+                                        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px;">
+                                            <span style="font-weight:600;">No-show &rarr;</span>
+                                            <input type="number" name="<?php echo $cpPfx; ?>_noshow" min="0" max="100" step="0.01" value="<?php echo htmlspecialchars($cpVal($cpPfx . '_noshow', $cpPol !== null ? rh_cancel_policy_pct_label($cpPol['noshow_pct']) : '100'), ENT_QUOTES); ?>" style="width:90px;" aria-label="No-show percent of the stay">
+                                            <span>% of the stay</span>
+                                        </div>
+                                        <p class="help-text" style="margin:4px 0 0;">100% = the guest who never arrives pays the booked stay (as today). Below 100%, the charge is posted as one line on the bill and the stay is no longer billed.</p>
+                                    </div>
+                                </div>
+                            <?php endforeach; ?>
+                            <div style="margin-top:14px;">
+                                <label for="cp_note" style="font-weight:600;">Extra note (optional)</label>
+                                <textarea name="cp_note" id="cp_note" rows="2" maxlength="300" class="form-control" placeholder="e.g. Refunds are paid to the card or account the money came from."><?php echo htmlspecialchars($cpVal('cp_note', $cpS['note'])); ?></textarea>
+                                <p class="help-text">Printed after the policy wording, up to 300 characters.</p>
+                            </div>
+                            <div style="margin-top:14px;background:#f8f9fa;border-radius:8px;padding:12px;">
+                                <strong>What guests will read</strong>
+                                <p class="help-text" style="margin:2px 0 8px;">The wording is made from the rows above. After you save, the saved wording is what each new booking keeps.</p>
+                                <div id="cp-preview" data-arrival="<?php echo htmlspecialchars($cpArrival->format('Y-m-d'), ENT_QUOTES); ?>" style="white-space:pre-line;font-size:13px;color:#333;"><?php
+                                    $cpPrevInd = $cpPreview('individual');
+                                    $cpPrevGrp = $cpS['group'] !== null ? $cpPreview('group') : '';
+                                    $cpEx = $cpS['individual'] !== null ? rh_cancel_policy_example($cpS['individual'], $cpArrival) : '';
+                                    echo htmlspecialchars(trim($cpPrevInd . ($cpPrevGrp !== '' ? "\n\n" . $cpPrevGrp : '') . ($cpEx !== '' ? "\n\n" . $cpEx : '')) ?: 'No policy set yet.');
+                                ?></div>
+                            </div>
+                            <p class="help-text" style="margin-top:10px;"><i class="fas fa-info-circle"></i> Percentages are of the whole stay as it stands when cancelled (room nights, children, packages, VAT and tourism levy); extras already used stay payable. Pending and tentative bookings never pay a fee. Current version: <?php echo (int)$cpS['version']; ?>.</p>
+                        </fieldset>
+                        <?php if ($canEditRefundRules): ?>
+                        <button type="submit" class="btn-submit" style="margin-top: 10px;"><i class="fas fa-save"></i> Save Cancellation Policy</button>
+                        <?php endif; ?>
+                    </form>
+                    <script>
+                    (function () {
+                        var form = document.getElementById('cp-form');
+                        if (!form || form.dataset.cpReady === '1') return;
+                        form.dataset.cpReady = '1';
+                        var grpOn = document.getElementById('cp_grp_on');
+                        function pctLabel(v) { var n = Math.round((parseFloat(v) || 0) * 100) / 100; return String(n); }
+                        function readPolicy(pfx) {
+                            var tiers = [];
+                            form.querySelectorAll('[data-cp-rows="' + pfx + '"] .cp-row').forEach(function (row) {
+                                var d = row.querySelector('input[name="' + pfx + '_days[]"]').value.trim();
+                                var p = row.querySelector('input[name="' + pfx + '_pct[]"]').value.trim();
+                                if (d === '' || p === '') return;
+                                var di = parseInt(d, 10), pf = parseFloat(p);
+                                if (!(di >= 1 && di <= 365) || !(pf >= 0 && pf <= 100)) return;
+                                tiers.push({ days: di, pct: pf });
+                            });
+                            tiers.sort(function (a, b) { return b.days - a.days; });
+                            var ns = form.querySelector('input[name="' + pfx + '_noshow"]').value.trim();
+                            return { tiers: tiers, noshow_pct: ns === '' ? 100 : parseFloat(ns) };
+                        }
+                        // Same wording as rh_cancel_policy_text() (includes/cancellation-policy.php); the saved text is always the server's.
+                        function policyText(p, kind, hasGroup, min, note) {
+                            var head = !hasGroup ? 'Cancellation policy.' : (kind === 'group' ? 'Cancellation policy (group bookings of ' + min + ' rooms or more).' : 'Cancellation policy (individual bookings, fewer than ' + min + ' rooms).');
+                            var parts = [head];
+                            if (!p.tiers.length) {
+                                parts.push('Cancelled any time before arrival: no charge.');
+                            } else {
+                                p.tiers.forEach(function (t, i) {
+                                    var when = t.days === 1 ? 'Cancelled on the arrival day' : 'Cancelled less than ' + t.days + ' days before arrival';
+                                    var what = t.pct <= 0 ? 'no charge' : pctLabel(t.pct) + '%' + (i === 0 ? ' of the stay is charged' : '');
+                                    parts.push(when + ': ' + what + '.');
+                                });
+                                parts.push('Cancelled ' + p.tiers[0].days + ' or more days before arrival: no charge.');
+                            }
+                            var ns = isNaN(p.noshow_pct) ? 100 : p.noshow_pct;
+                            var text = parts.join(' ') + '\n' + 'No-show: ' + (ns <= 0 ? 'no charge.' : pctLabel(ns) + '% of the stay.') + ' Percentages are of the whole stay including VAT and tourism levy; extras already used stay payable.';
+                            if (note) text += '\n' + note;
+                            return text;
+                        }
+                        function example(p, arrivalIso) {
+                            if (!p.tiers.length) return '';
+                            var days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'], mons = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                            var a = arrivalIso.split('-'), arr = new Date(Date.UTC(+a[0], +a[1] - 1, +a[2]));
+                            var fmt = function (dt, yr) { return days[dt.getUTCDay()] + ' ' + dt.getUTCDate() + ' ' + mons[dt.getUTCMonth()] + (yr ? ' ' + dt.getUTCFullYear() : ''); };
+                            var t = p.tiers[0], d = t.days;
+                            var free = new Date(arr.getTime() - d * 86400000), fee = new Date(arr.getTime() - (d - 1) * 86400000);
+                            var feeWhen = d === 1 ? 'on the arrival day' : '(' + (d - 1) + ' day' + (d - 1 === 1 ? '' : 's') + ' before)';
+                            return 'Example: arrival ' + fmt(arr, true) + '. Cancelled on ' + fmt(free) + ' (' + d + ' day' + (d === 1 ? '' : 's') + ' before): no charge. Cancelled on ' + fmt(fee) + ' ' + feeWhen + ': ' + pctLabel(t.pct) + '% of the stay.';
+                        }
+                        function refresh() {
+                            var box = document.getElementById('cp-preview');
+                            if (!box) return;
+                            var hasGroup = !!(grpOn && grpOn.checked);
+                            var minEl = form.querySelector('input[name="cp_group_min"]');
+                            var min = Math.max(2, Math.min(50, parseInt(minEl && minEl.value, 10) || 2));
+                            var note = (document.getElementById('cp_note').value || '').trim();
+                            var ind = readPolicy('cp_ind');
+                            var out = policyText(ind, 'individual', hasGroup, min, note);
+                            if (hasGroup) out += '\n\n' + policyText(readPolicy('cp_grp'), 'group', true, min, note);
+                            var ex = example(ind, box.dataset.arrival || '');
+                            if (ex) out += '\n\n' + ex;
+                            box.textContent = out;
+                        }
+                        form.addEventListener('input', refresh);
+                        form.addEventListener('change', function (e) {
+                            if (e.target === grpOn) {
+                                var rows = form.querySelector('[data-cp-rows="cp_grp"]');
+                                if (rows) rows.hidden = !grpOn.checked;
+                            }
+                            refresh();
+                        });
+                        form.addEventListener('click', function (e) {
+                            var add = e.target.closest('.cp-add'), rem = e.target.closest('.cp-remove');
+                            if (add) {
+                                var next = add.parentNode.querySelector('.cp-row[hidden]');
+                                if (next) next.hidden = false;
+                                add.disabled = !add.parentNode.querySelector('.cp-row[hidden]');
+                            } else if (rem) {
+                                var row = rem.closest('.cp-row');
+                                row.querySelectorAll('input').forEach(function (i) { i.value = ''; });
+                                var wrap = row.parentNode;
+                                if (wrap.querySelectorAll('.cp-row:not([hidden])').length > 1) row.hidden = true;
+                                var addBtn = wrap.querySelector('.cp-add');
+                                if (addBtn) addBtn.disabled = false;
+                                refresh();
+                            }
+                        });
+                    })();
+                    </script>
+                    <?php endif; ?>
+                </div>
                 <form method="POST" action="booking-settings.php#cancellation">
                     <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
                     <input type="hidden" name="save_cancellation_refund_mode" value="1">
@@ -2120,6 +2413,30 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                         </fieldset>
                         <?php if ($canEditRefundRules): ?>
                         <button type="submit" class="btn-submit" style="margin-top: 14px;"><i class="fas fa-save"></i> Save No-show Charge</button>
+                        <?php endif; ?>
+                    </div>
+                </form>
+                <?php $nsRuleNow = (string)getSetting('no_show_refund_policy', 'none'); $nsRuleNow = isset($rh_noshow_refund_choices[$nsRuleNow]) ? $nsRuleNow : 'none'; ?>
+                <form method="POST" action="booking-settings.php#no-show-refund-rule" id="no-show-refund-rule">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
+                    <input type="hidden" name="save_no_show_refund_policy" value="1">
+                    <div class="form-group">
+                        <h3 style="margin:18px 0 8px;">Refund when a guest is a no-show</h3>
+                        <p class="help-text">What happens to money already paid when a booking is marked a no-show. A refund made here is created as pending, for staff to settle on the refunds screen.</p>
+                        <fieldset <?php echo $canEditRefundRules ? '' : 'disabled'; ?> style="border:0;padding:0;margin:0;min-width:0;">
+                        <?php foreach ($rh_noshow_refund_choices as $nsKey => [$nsTitle, $nsHelp]): ?>
+                            <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;margin-bottom:12px;">
+                                <input type="radio" name="no_show_refund_policy" value="<?php echo htmlspecialchars($nsKey, ENT_QUOTES); ?>" <?php echo $nsRuleNow === $nsKey ? 'checked' : ''; ?> style="margin-top:4px;">
+                                <span>
+                                    <span style="font-weight:600;color:#1A1A1A;"><?php echo htmlspecialchars($nsTitle); ?></span><br>
+                                    <span class="help-text"><?php echo htmlspecialchars($nsHelp); ?></span>
+                                </span>
+                            </label>
+                        <?php endforeach; ?>
+                        <p class="help-text"><i class="fas fa-info-circle"></i> Applies to bookings marked no-show after you save.</p>
+                        </fieldset>
+                        <?php if ($canEditRefundRules): ?>
+                        <button type="submit" class="btn-submit" style="margin-top: 14px;"><i class="fas fa-save"></i> Save No-show Refund Rule</button>
                         <?php endif; ?>
                     </div>
                 </form>

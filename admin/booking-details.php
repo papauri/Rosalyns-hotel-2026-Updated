@@ -94,6 +94,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_bdNeed = 'edit_booking'; // pay-later check-in arrangement (owner 2026-11-12: anyone who can edit bookings)
     } elseif (isset($_POST['billing_save'])) {
         $_bdNeed = 'billing_on_account'; // Who pays: company account (owner 2026-11-13, migration 084)
+    } elseif (isset($_POST['lower_cancel_fee'])) {
+        $_bdNeed = 'waive_cancellation_fee'; // lower / waive a kept cancellation fee (cancellation policy, owner 2026-11-14)
     }
     if ($_bdNeed !== null && !hasPermission((int)($user['id'] ?? 0), $_bdNeed)) {
         $_bdMsg = 'You do not have permission to do that (' . (getAllPermissions()[$_bdNeed]['label'] ?? $_bdNeed) . ').';
@@ -561,6 +563,87 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['billing_save'])) {
     exit;
 }
 
+// Lower or waive the fee a cancelled booking kept under its cancellation policy (permission waive_cancellation_fee, a
+// reason is required). Under the row lock: retained lowered, balance recalculated, History 'Cancellation fee lowered'.
+// The difference becomes credit owed back to the guest; staff refund it or issue a credit note on the usual screens.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['lower_cancel_fee'])) {
+    $lfUid = (int)($user['id'] ?? 0);
+    $lfCur = (string)getSetting('currency_symbol', 'MWK');
+    $lfLog = null;
+    try {
+        if ($lfUid <= 0 || !hasPermission($lfUid, 'waive_cancellation_fee')) {
+            throw new RuntimeException('You do not have permission to lower or waive cancellation fees.');
+        }
+        $lfRaw = trim((string)($_POST['new_fee'] ?? ''));
+        $lfWhy = trim((string)($_POST['fee_reason'] ?? ''));
+        if ($lfRaw === '' || !is_numeric($lfRaw)) {
+            throw new RuntimeException('Enter the new fee (0 waives it). Nothing was changed.');
+        }
+        if ($lfWhy === '') {
+            throw new RuntimeException('Give a reason for lowering the cancellation fee. Nothing was changed.');
+        }
+        if ((function_exists('mb_strlen') ? mb_strlen($lfWhy) : strlen($lfWhy)) > 300) {
+            throw new RuntimeException('Keep the reason to 300 characters. Nothing was changed.');
+        }
+        $lfNew = round((float)$lfRaw, 2);
+        $pdo->beginTransaction();
+        $lfSt = $pdo->prepare('SELECT * FROM bookings WHERE id = ? AND deleted_at IS NULL FOR UPDATE');
+        $lfSt->execute([$booking_id]);
+        $lfRow = $lfSt->fetch(PDO::FETCH_ASSOC);
+        if (!$lfRow) {
+            throw new RuntimeException('Booking not found.');
+        }
+        if ((string)$lfRow['status'] !== 'cancelled') {
+            throw new RuntimeException('Only a cancelled booking\'s fee can be lowered here. Nothing was changed.');
+        }
+        if (rh_cancel_policy_snapshot($lfRow) === null) {
+            throw new RuntimeException('This booking was not made under a cancellation policy. Nothing was changed.');
+        }
+        $lfOld = round((float)($lfRow['cancellation_retained_amount'] ?? 0), 2);
+        if ($lfOld <= BALANCE_TOLERANCE) {
+            throw new RuntimeException('This booking kept no cancellation fee. Nothing was changed.');
+        }
+        if ($lfNew < 0 || $lfNew > $lfOld + BALANCE_TOLERANCE) {
+            throw new RuntimeException('The fee can only be lowered: enter an amount from 0 to ' . $lfCur . ' ' . number_format($lfOld, 2) . '. Nothing was changed.');
+        }
+        if (abs($lfNew - $lfOld) <= BALANCE_TOLERANCE) {
+            $pdo->rollBack();
+            $_SESSION['success_message'] = 'The fee is already ' . $lfCur . ' ' . number_format($lfOld, 2) . '. Nothing changed.';
+        } else {
+            $lfNew = max(0.0, min($lfOld, $lfNew));
+            $pdo->prepare('UPDATE bookings SET cancellation_retained_amount = ?, updated_at = NOW() WHERE id = ?')->execute([$lfNew, $booking_id]);
+            if (!recalculateBookingFinancials((int)$booking_id)) {
+                throw new RuntimeException('Could not recalculate the booking balance. Nothing was changed.');
+            }
+            $lfMoney = static fn (float $v): string => $lfCur . ' ' . number_format($v, 2);
+            logBookingEvent((int)$booking_id, (string)$lfRow['booking_reference'], 'Cancellation fee lowered', 'financial',
+                'Cancellation fee lowered after cancellation from ' . $lfMoney($lfOld) . ' to ' . $lfMoney($lfNew) . '. Reason: ' . $lfWhy,
+                $lfMoney($lfOld), $lfMoney($lfNew), 'admin', $lfUid, $user['full_name'] ?? null,
+                ['fee' => $lfOld, 'new_fee' => $lfNew, 'reason' => $lfWhy]);
+            $lfCr = $pdo->prepare('SELECT credit_balance FROM bookings WHERE id = ?');
+            $lfCr->execute([$booking_id]);
+            $lfCredit = round((float)$lfCr->fetchColumn(), 2);
+            $pdo->commit();
+            $lfLog = ['from' => $lfOld, 'to' => $lfNew];
+            $_SESSION['success_message'] = 'Cancellation fee lowered from ' . $lfMoney($lfOld) . ' to ' . $lfMoney($lfNew) . '.'
+                . ($lfCredit > BALANCE_TOLERANCE ? ' ' . $lfMoney($lfCredit) . ' is now owed back to the guest: refund it or issue a credit note.' : '');
+        }
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $_SESSION['error_message'] = $e instanceof RuntimeException ? $e->getMessage() : 'Could not lower the fee. Nothing was changed.';
+        if (!($e instanceof RuntimeException)) {
+            error_log('[lower-cancel-fee] booking ' . $booking_id . ': ' . $e->getMessage());
+        }
+    }
+    if ($lfLog !== null && function_exists('rh_log_event')) {
+        rh_log_event('bookings', 'info', 'Cancellation fee lowered', ['booking_id' => $booking_id, 'from' => $lfLog['from'], 'to' => $lfLog['to'], 'by' => $user['username'] ?? null]);
+    }
+    header('Location: booking-details.php?id=' . $booking_id);
+    exit;
+}
+
 // Handle status changes (POST-only)
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
     $action = $_POST['booking_action'];
@@ -888,7 +971,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                         // transaction (all go or none); anything else is today's single-room cancel.
                         $cancelGroupIds = ($_POST['scope'] ?? '') === 'group' ? rh_booking_group_ids($pdo, (int)$booking_id) : [];
                         if (count($cancelGroupIds) > 1) {
-                            $grpRes = rh_cancel_booking_group($pdo, $cancelGroupIds, (int)($user['id'] ?? 0), (string)$cancellation_reason);
+                            // Cancellation policy: the fee shown on the form (none posted for bookings without a policy).
+                            $grpRes = rh_cancel_booking_group($pdo, $cancelGroupIds, (int)($user['id'] ?? 0), (string)$cancellation_reason, 'completed', rh_cancel_fee_choice_from_post($_POST, true));
                             if (!$grpRes['success']) {
                                 throw new RuntimeException('Cancellation failed - nothing was changed. ' . $grpRes['error']);
                             }
@@ -928,7 +1012,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                         } else {
                             // One transaction: status + room/stock release + bill treatment +
                             // refund, booking row locked. Any failure rolls everything back.
-                            $cancelRes = cancelRoomBookingSettled($pdo, (int)$booking_id, (int)($user['id'] ?? 0), (string)$cancellation_reason);
+                            $cancelRes = cancelRoomBookingSettled($pdo, (int)$booking_id, (int)($user['id'] ?? 0), (string)$cancellation_reason, 'completed', rh_cancel_fee_choice_from_post($_POST, false));
                             if (!$cancelRes['success']) {
                                 throw new RuntimeException('Cancellation failed - nothing was changed. ' . $cancelRes['error']);
                             }
@@ -1810,18 +1894,29 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 $bd_group_live = ($can_cancel && $bd_perm_cancel) || $bd_can_delete ? rh_booking_group_members($pdo, (int)$booking_id) : [];
                 $bd_group_n = count($bd_group_live);
                 $bd_group_refs = implode(', ', array_column($bd_group_live, 'booking_reference'));
+                // Cancellation policy (bookings made under one): the fee each form would charge. A booking without a
+                // policy gets policy=false, so its forms and confirm texts stay exactly as they were.
+                $bd_cp = ($can_cancel && $bd_perm_cancel) ? rh_cancel_policy_dialog_quote($pdo, (int)$booking_id) : ['policy' => false, 'single' => null, 'group' => null];
+                $bd_cp_on = !empty($bd_cp['policy']) && $bd_cp['single'] !== null;
+                $bd_cp_cur = (string)getSetting('currency_symbol', 'MWK');
+                $bd_cp_single_fee = $bd_cp_on ? (float)$bd_cp['single']['amount'] : 0.0;
+                $bd_cp_group_fee = ($bd_cp_on && !empty($bd_cp['group'])) ? (float)$bd_cp['group']['fee'] : 0.0;
+                $bd_cp_single_msg = $bd_cp_on ? ' Cancellation fee: ' . ($bd_cp_single_fee > BALANCE_TOLERANCE ? $bd_cp['single']['fee_text'] : 'none') . '.' : '';
+                $bd_cp_group_msg = ($bd_cp_on && !empty($bd_cp['group'])) ? ' Cancellation fee for the group: ' . ($bd_cp_group_fee > BALANCE_TOLERANCE ? $bd_cp_cur . ' ' . number_format($bd_cp_group_fee, 2) : 'none') . '.' : '';
                 ?>
                 <?php if ($can_cancel): ?>
-                    <?php if ($bd_perm_cancel && $bd_group_n > 1): ?><form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars('Cancel the WHOLE GROUP (' . $bd_group_n . ' rooms: ' . $bd_group_refs . ') and release every room? If any room cannot be cancelled, none is. Cancellation handling: ' . getCancellationRefundModeLabel() . '.', ENT_QUOTES); ?>" data-admin-confirm-check="email_guest" data-admin-confirm-check-label="Email the guest that this booking is cancelled" data-admin-confirm-check-help="Untick to cancel quietly: no email or WhatsApp goes to the guest." data-admin-confirm-title="Cancel whole group" data-admin-confirm-ok="Cancel whole group" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban" data-admin-submit-text="Cancelling...">
+                    <?php if ($bd_perm_cancel && $bd_group_n > 1): ?><form method="POST" class="booking-action-form" id="bdCancelGroupForm" data-admin-confirm="<?php echo htmlspecialchars('Cancel the WHOLE GROUP (' . $bd_group_n . ' rooms: ' . $bd_group_refs . ') and release every room? If any room cannot be cancelled, none is. Cancellation handling: ' . getCancellationRefundModeLabel() . '.' . $bd_cp_group_msg, ENT_QUOTES); ?>" data-admin-confirm-check="email_guest" data-admin-confirm-check-label="Email the guest that this booking is cancelled" data-admin-confirm-check-help="Untick to cancel quietly: no email or WhatsApp goes to the guest." data-admin-confirm-title="Cancel whole group" data-admin-confirm-ok="Cancel whole group" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban" data-admin-submit-text="Cancelling...">
                         <input type="hidden" name="booking_action" value="cancel">
                         <input type="hidden" name="scope" value="group">
+                        <?php if ($bd_cp_on && !empty($bd_cp['group'])): ?><input type="hidden" name="fee_quoted" value="<?php echo htmlspecialchars(number_format($bd_cp_group_fee, 2, '.', ''), ENT_QUOTES); ?>"><?php endif; ?>
                         <input type="hidden" name="email_guest" value="1">
                         <input type="hidden" name="cancellation_reason" value="Cancelled by admin">
                         <button type="submit" class="action-btn cancel" aria-label="Cancel whole group"><i class="fas fa-ban"></i> Cancel Whole Group (<?php echo (int)$bd_group_n; ?> rooms)</button>
                     </form><?php endif; ?>
-                    <?php if ($bd_perm_cancel): ?><form method="POST" class="booking-action-form" data-admin-confirm="<?php echo htmlspecialchars('Cancel this booking and release the room?' . ($bd_group_n > 1 ? ' The other rooms of the group stay booked.' : '') . ' Cancellation handling: ' . getCancellationRefundModeLabel() . '.', ENT_QUOTES); ?>" data-admin-confirm-check="email_guest" data-admin-confirm-check-label="Email the guest that this booking is cancelled" data-admin-confirm-check-help="Untick to cancel quietly: no email or WhatsApp goes to the guest." data-admin-confirm-title="Cancel booking" data-admin-confirm-ok="Cancel booking" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban" data-admin-submit-text="Cancelling...">
+                    <?php if ($bd_perm_cancel): ?><form method="POST" class="booking-action-form" id="bdCancelSingleForm" data-admin-confirm="<?php echo htmlspecialchars('Cancel this booking and release the room?' . ($bd_group_n > 1 ? ' The other rooms of the group stay booked.' : '') . ' Cancellation handling: ' . getCancellationRefundModeLabel() . '.' . $bd_cp_single_msg, ENT_QUOTES); ?>" data-admin-confirm-check="email_guest" data-admin-confirm-check-label="Email the guest that this booking is cancelled" data-admin-confirm-check-help="Untick to cancel quietly: no email or WhatsApp goes to the guest." data-admin-confirm-title="Cancel booking" data-admin-confirm-ok="Cancel booking" data-admin-confirm-tone="danger" data-admin-confirm-icon="fa-ban" data-admin-submit-text="Cancelling...">
                         <input type="hidden" name="booking_action" value="cancel">
                         <?php if ($bd_group_n > 1): ?><input type="hidden" name="scope" value="single"><?php endif; ?>
+                        <?php if ($bd_cp_on): ?><input type="hidden" name="fee_quoted" value="<?php echo htmlspecialchars(number_format($bd_cp_single_fee, 2, '.', ''), ENT_QUOTES); ?>"><?php endif; ?>
                         <input type="hidden" name="email_guest" value="1">
                         <input type="hidden" name="cancellation_reason" value="Cancelled by admin">
                         <button type="submit" class="action-btn cancel" aria-label="Cancel booking"><i class="fas fa-ban"></i> <?php echo $bd_group_n > 1 ? 'Cancel This Room Only' : 'Cancel Booking'; ?></button>
@@ -1919,6 +2014,75 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         <?php // Who pays (company account, migration 084): hidden until the update has run.
         require_once __DIR__ . '/includes/billing-panel.php';
         rh_billing_panel_render($pdo, $booking, $user, (string)$csrf_token); ?>
+
+        <?php
+        // Cancellation policy locked at booking (only for bookings made under one; NULL = nothing shown, today's rules).
+        $bd_cp_snap = rh_cancel_policy_snapshot($booking);
+        if ($bd_cp_snap !== null):
+            // (Set in the actions header; not there for a deleted booking.)
+            $bd_cp_on = !empty($bd_cp_on);
+            $bd_cp = $bd_cp ?? ['policy' => false, 'single' => null, 'group' => null];
+            $bd_cp_cur = $bd_cp_cur ?? (string)getSetting('currency_symbol', 'MWK');
+            $bd_cp_single_fee = $bd_cp_single_fee ?? 0.0;
+            $bd_cp_group_fee = $bd_cp_group_fee ?? 0.0;
+            $bd_cp_canov = hasPermission((int)($user['id'] ?? 0), 'waive_cancellation_fee');
+            $bd_cp_m = static fn ($v): string => $bd_cp_cur . ' ' . number_format((float)$v, 2);
+            $bd_cp_kept = round((float)($booking['cancellation_retained_amount'] ?? 0), 2);
+        ?>
+            <div class="booking-status-alert booking-status-alert--info bd-arrangement" id="bd-cancel-policy">
+                <strong><i class="fas fa-file-contract"></i> Cancellation policy (locked at booking, v<?php echo (int)$bd_cp_snap['policy_version']; ?>)</strong>
+                <span class="bd-arrangement__help"><?php echo nl2br(htmlspecialchars($bd_cp_snap['text'], ENT_QUOTES)); ?></span>
+                <span class="bd-arrangement__help">This booking keeps the policy it was made under, even if the hotel's policy changes later. Fees are a % of the whole stay as it stands when cancelled (booked rate x nights, incl. VAT and tourism levy).</span>
+                <?php if ($bd_cp_on): ?>
+                    <span class="bd-arrangement__help"><strong>If cancelled now<?php echo !empty($bd_cp['group']) ? ' (this room only)' : ''; ?>:</strong>
+                        <?php echo htmlspecialchars($bd_cp['single']['tier_label'] . '. Fee: ' . ($bd_cp_single_fee > BALANCE_TOLERANCE ? $bd_cp['single']['fee_text'] : 'none')
+                            . '. Paid ' . $bd_cp_m($bd_cp['single']['paid']) . '; ' . ((float)$bd_cp['single']['credit'] > BALANCE_TOLERANCE ? 'kept as guest credit ' . $bd_cp_m($bd_cp['single']['credit']) : 'refund ' . $bd_cp_m($bd_cp['single']['refund'])) . '.', ENT_QUOTES); ?></span>
+                    <?php if (!empty($bd_cp['group'])): ?>
+                        <span class="bd-arrangement__help"><strong>If the whole group (<?php echo (int)$bd_cp['group']['count']; ?> rooms) is cancelled now:</strong>
+                            <?php echo htmlspecialchars('fee ' . $bd_cp_m($bd_cp_group_fee) . ' in total; paid ' . $bd_cp_m($bd_cp['group']['paid']) . '; '
+                                . ((float)$bd_cp['group']['credit'] > BALANCE_TOLERANCE ? 'kept as guest credit ' . $bd_cp_m($bd_cp['group']['credit']) : 'refund ' . $bd_cp_m($bd_cp['group']['refund'])) . '.', ENT_QUOTES); ?></span>
+                    <?php endif; ?>
+                    <?php if ($bd_cp_canov && $bd_cp_single_fee > BALANCE_TOLERANCE): ?>
+                        <label class="bd-arrangement__note">
+                            <span>Lower the fee for "<?php echo !empty($bd_cp['group']) ? 'Cancel This Room Only' : 'Cancel Booking'; ?>" to (optional, 0 to <?php echo htmlspecialchars($bd_cp_m($bd_cp_single_fee)); ?>)</span>
+                            <input type="number" name="fee_override" form="bdCancelSingleForm" min="0" max="<?php echo htmlspecialchars(number_format($bd_cp_single_fee, 2, '.', ''), ENT_QUOTES); ?>" step="0.01" placeholder="Leave empty to charge the fee">
+                        </label>
+                        <label class="bd-arrangement__note">
+                            <span>Reason for lowering it (required when lowered; kept in the booking history)</span>
+                            <input type="text" name="fee_override_reason" form="bdCancelSingleForm" maxlength="300" placeholder="e.g. Manager agreed - regular guest">
+                        </label>
+                    <?php endif; ?>
+                    <?php if ($bd_cp_canov && !empty($bd_cp['group']) && $bd_cp_group_fee > BALANCE_TOLERANCE): ?>
+                        <label class="bd-arrangement__note">
+                            <span>Lower the fee for "Cancel Whole Group" to (optional, % of each room's own stay, 0 to <?php echo htmlspecialchars(rh_cancel_policy_pct_label($bd_cp['group']['max_pct'])); ?>; never more than a room's fee)</span>
+                            <input type="number" name="fee_override_pct" form="bdCancelGroupForm" min="0" max="<?php echo htmlspecialchars((string)$bd_cp['group']['max_pct'], ENT_QUOTES); ?>" step="0.01" placeholder="Leave empty to charge the fees">
+                        </label>
+                        <label class="bd-arrangement__note">
+                            <span>Reason for lowering the group fee (required when lowered; kept in the booking history)</span>
+                            <input type="text" name="fee_override_reason" form="bdCancelGroupForm" maxlength="300" placeholder="e.g. Manager agreed - event moved">
+                        </label>
+                    <?php endif; ?>
+                <?php endif; ?>
+                <?php if ((string)$booking['status'] === 'cancelled' && $bd_cp_kept > BALANCE_TOLERANCE && !$bd_deleted): ?>
+                    <span class="bd-arrangement__help"><strong>Cancellation fee kept:</strong> <?php echo htmlspecialchars($bd_cp_m($bd_cp_kept)); ?></span>
+                    <?php if ($bd_cp_canov): ?>
+                        <form method="POST" class="bd-arrangement" style="margin:0;padding:0;border:0;background:none;">
+                            <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
+                            <input type="hidden" name="lower_cancel_fee" value="1">
+                            <label class="bd-arrangement__note">
+                                <span>New fee (0 waives it; at most <?php echo htmlspecialchars($bd_cp_m($bd_cp_kept)); ?>). The difference becomes credit owed back to the guest: refund it or issue a credit note.</span>
+                                <input type="number" name="new_fee" min="0" max="<?php echo htmlspecialchars(number_format($bd_cp_kept, 2, '.', ''), ENT_QUOTES); ?>" step="0.01" required>
+                            </label>
+                            <label class="bd-arrangement__note">
+                                <span>Reason (required; kept in the booking history)</span>
+                                <input type="text" name="fee_reason" maxlength="300" required placeholder="e.g. Guest rebooked for next month">
+                            </label>
+                            <button type="submit" class="action-btn confirm"><i class="fas fa-hand-holding-dollar"></i> Lower the fee</button>
+                        </form>
+                    <?php endif; ?>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
 
         <?php
         // A clean bookings row for the "how this total is worked out" popup: the page query above joins payments, whose

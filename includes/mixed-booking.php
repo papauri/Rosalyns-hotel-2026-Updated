@@ -587,6 +587,8 @@ if (!function_exists('rh_mixed_load_room')) {
             foreach (array_slice($ids, 1) as $secondaryId) {
                 $link->execute([$ids[0], $secondaryId]);
             }
+            // Cancellation policy locked onto every room of this booking (after linking; Off = nothing happens).
+            rh_cancel_policy_stamp($pdo, $ids);
             if (!empty($in['package_rows'])) {
                 $pkgStmt = $pdo->prepare("INSERT INTO booking_packages
                     (booking_id, package_id, package_name, price_type, price_amount, quantity, total_cost)

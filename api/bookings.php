@@ -380,7 +380,10 @@ try {
         // Update room availability count for confirmed bookings
         // Note: 'pending' bookings don't decrement availability until confirmed
         // Individual rooms are assigned later during check-in or manually
-        
+
+        // Cancellation policy locked onto the booking (the API never links rooms: always individual; Off = nothing).
+        rh_cancel_policy_stamp($pdo, [$bookingId]);
+
         // Commit transaction
         $pdo->commit();
 

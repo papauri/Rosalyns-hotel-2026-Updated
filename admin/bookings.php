@@ -186,6 +186,32 @@ function bookings_stay_rate_preview(array $bk, int $newNights, string $cur, ?str
     ];
 }
 
+// Read-only fee quote for the cancel dialog (cancellation policy): GET ?action=cancel_quote&id=N. Changes nothing.
+if ($_SERVER['REQUEST_METHOD'] === 'GET' && (string)($_GET['action'] ?? '') === 'cancel_quote') {
+    header('Content-Type: application/json');
+    header('Cache-Control: no-store, private');
+    $cqUid = (int)($user['id'] ?? 0);
+    if ($cqUid <= 0 || !hasPermission($cqUid, 'bookings')) {
+        echo json_encode(['success' => false, 'message' => 'You do not have permission to do that.']);
+        exit;
+    }
+    $cq = rh_cancel_policy_dialog_quote($pdo, (int)($_GET['id'] ?? 0));
+    $cqRoom = static fn (?array $p): ?array => $p === null ? null : [
+        'source' => $p['source'], 'fee' => (float)$p['amount'], 'pct' => (float)$p['pct'], 'tier_label' => (string)$p['tier_label'],
+        'fee_text' => (string)$p['fee_text'], 'paid' => (float)$p['paid'], 'refund' => (float)$p['refund'], 'credit' => (float)$p['credit'],
+        'kind' => (string)$p['kind'], 'version' => (int)$p['version'],
+    ];
+    echo json_encode([
+        'success' => true,
+        'policy' => (bool)$cq['policy'],
+        'currency' => $currency_symbol,
+        'single' => $cqRoom($cq['single']),
+        'group' => $cq['group'],
+        'can_override' => hasPermission($cqUid, 'waive_cancellation_fee'),
+    ]);
+    exit;
+}
+
 // Handle booking actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -996,7 +1022,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // room of the group in ONE transaction (all go or none); scope=single (or none) is one room.
                     $cancelGroupIds = ($_POST['scope'] ?? '') === 'group' ? rh_booking_group_ids($pdo, (int)$booking_id) : [];
                     if (count($cancelGroupIds) > 1) {
-                        $grpRes = rh_cancel_booking_group($pdo, $cancelGroupIds, (int)($user['id'] ?? 0), (string)$cancellation_reason);
+                        // Cancellation policy: the fee the dialog showed (none posted for bookings without a policy).
+                        $grpRes = rh_cancel_booking_group($pdo, $cancelGroupIds, (int)($user['id'] ?? 0), (string)$cancellation_reason, 'completed', rh_cancel_fee_choice_from_post($_POST, true));
                         if (!$grpRes['success']) {
                             throw new Exception('Cancellation failed - nothing was changed. ' . $grpRes['error']);
                         }
@@ -1007,7 +1034,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             logBookingAudit($gc['id'], $new_status, ['status' => $gc['previous_status']], ['status' => $new_status], 'Cancelled with its group (' . count($cancelGroupIds) . ' rooms)', $gc['reference']);
                         }
                     } else {
-                        $cancelRes = cancelRoomBookingSettled($pdo, (int)$booking_id, (int)($user['id'] ?? 0), (string)$cancellation_reason);
+                        $cancelRes = cancelRoomBookingSettled($pdo, (int)$booking_id, (int)($user['id'] ?? 0), (string)$cancellation_reason, 'completed', rh_cancel_fee_choice_from_post($_POST, false));
                         if (!$cancelRes['success']) {
                             throw new Exception('Cancellation failed - nothing was changed. ' . $cancelRes['error']);
                         }
@@ -6984,6 +7011,21 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         <label style="display: block; font-weight: normal; margin: 4px 0;"><input type="radio" name="scope" value="single" disabled> Only this room</label>
                         <small id="cancel_group_refs" style="color: #666;"></small>
                     </div>
+                    <?php /* Cancellation policy: shown (and its inputs enabled) only for a booking under a policy; nothing is posted otherwise. */ ?>
+                    <div class="form-group" id="cancel_fee_box" style="display: none; background: #fff8e6; padding: 12px; border-radius: 8px;">
+                        <input type="hidden" name="fee_quoted" id="cancel_fee_quoted" value="" disabled>
+                        <label style="margin-bottom: 6px;"><i class="fas fa-file-contract"></i> Cancellation fee (policy locked at booking)</label>
+                        <div id="cancel_fee_lines" style="font-size: 13px; color: #333; line-height: 1.5;"></div>
+                        <small style="color: #666; display: block; margin-top: 4px;">Worked out from the cancellation policy this booking was made under: a % of the whole stay (incl. VAT and tourism levy) by how many days before arrival it is cancelled. Extras already used stay payable.</small>
+                        <div id="cancel_fee_override" style="display: none; margin-top: 10px;">
+                            <label for="cancel_fee_override_amount" id="cancel_fee_override_label" style="font-weight: 600;">Lower the fee to (optional)</label>
+                            <input type="number" step="0.01" min="0" name="fee_override" id="cancel_fee_override_amount" class="form-control" disabled>
+                            <input type="number" step="0.01" min="0" max="100" name="fee_override_pct" id="cancel_fee_override_pct" class="form-control" disabled style="display: none;">
+                            <small id="cancel_fee_override_help" style="color: #666; display: block; margin-top: 4px;">Leave empty to charge the fee above. You can only lower it; the reason is required and kept in the booking history.</small>
+                            <label for="cancel_fee_override_reason" style="font-weight: 600; margin-top: 8px;">Reason for lowering the fee</label>
+                            <textarea name="fee_override_reason" id="cancel_fee_override_reason" class="form-control" rows="2" maxlength="300" disabled placeholder="Example: Guest is a regular; manager agreed"></textarea>
+                        </div>
+                    </div>
                     <div class="form-group" id="cancel_email_box">
                         <input type="hidden" name="email_guest" value="0">
                         <label style="display: flex; gap: 8px; align-items: flex-start; font-weight: 600; margin: 0;">
@@ -8733,9 +8775,13 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             bkApplyGroupChoice('cancel_group_box', 'cancel_group_label', 'cancel_group_refs', { count: 0, members: [] });
             const submitBtn = document.querySelector('#cancelBookingForm button[type="submit"]');
             if (submitBtn) submitBtn.disabled = true; // until the group lookup answers, so the choice is never skipped
-            bkFetchGroupInfo(bookingId).then(info => {
+            bkCancelQuote = null;
+            bkApplyCancelFee();
+            Promise.all([bkFetchGroupInfo(bookingId), bkFetchCancelQuote(bookingId)]).then(([info, quote]) => {
                 if (String(document.getElementById('cancel_booking_id').value) !== String(bookingId)) return;
                 bkApplyGroupChoice('cancel_group_box', 'cancel_group_label', 'cancel_group_refs', info);
+                bkCancelQuote = quote;
+                bkApplyCancelFee();
                 if (cancelStatus !== '' && cancelStatus !== 'confirmed' && info && Array.isArray(info.members)
                     && info.members.some(m => String(m.status) === 'confirmed')) {
                     bkApplyCancelEmailChoice(true); // a confirmed room in the group is emailed when the whole group goes
@@ -8748,7 +8794,81 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             const modal = document.getElementById('cancelBookingModal');
             setBookingPageModalOpen(modal, false);
             document.getElementById('cancelBookingForm').reset();
+            bkCancelQuote = null;
+            bkApplyCancelFee();
         }
+
+        // Cancellation policy (read-only quote; a booking without a policy answers policy:false and nothing new shows).
+        let bkCancelQuote = null;
+        function bkFetchCancelQuote(bookingId) {
+            return fetch(rhBookingsPostUrl() + '?action=cancel_quote&id=' + encodeURIComponent(bookingId), {
+                credentials: 'same-origin',
+                headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            }).then(r => r.json()).then(d => (d && d.success) ? d : { policy: false }).catch(() => ({ policy: false }));
+        }
+        function bkCancelMoney(cur, v) {
+            return String(cur || '') + ' ' + (Number(v) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+        // Shows the fee for the scope picked (this room / whole group); the inputs are enabled only while shown, so a
+        // booking without a policy posts no fee fields and is cancelled exactly as before.
+        function bkApplyCancelFee() {
+            const box = document.getElementById('cancel_fee_box');
+            if (!box) return;
+            const q = bkCancelQuote;
+            const quoted = document.getElementById('cancel_fee_quoted');
+            const ovWrap = document.getElementById('cancel_fee_override');
+            const ovAmt = document.getElementById('cancel_fee_override_amount');
+            const ovPct = document.getElementById('cancel_fee_override_pct');
+            const ovReason = document.getElementById('cancel_fee_override_reason');
+            const lines = document.getElementById('cancel_fee_lines');
+            const off = !q || !q.policy || !q.single;
+            [quoted, ovAmt, ovPct, ovReason].forEach(el => { el.disabled = true; });
+            if (off) {
+                box.style.display = 'none';
+                quoted.value = '';
+                lines.textContent = '';
+                return;
+            }
+            const scopeEl = document.querySelector('#cancelBookingForm input[name="scope"]:checked:not(:disabled)');
+            const isGroup = !!(scopeEl && scopeEl.value === 'group' && q.group);
+            const cur = q.currency || '';
+            const rows = [];
+            let fee = 0;
+            if (isGroup) {
+                fee = Number(q.group.fee) || 0;
+                rows.push('Whole group (' + q.group.count + ' rooms): fee ' + bkCancelMoney(cur, fee));
+                (q.group.rooms || []).forEach(r => {
+                    rows.push(r.reference + ': ' + (r.source === 'policy' ? (r.tier_label + (Number(r.fee) > 0.01 ? ' - ' + r.fee_text : '')) : 'no policy on this room (usual cancellation rules)'));
+                });
+                rows.push('Paid ' + bkCancelMoney(cur, q.group.paid) + '. ' + (Number(q.group.credit) > 0.01 ? 'Kept as guest credit: ' + bkCancelMoney(cur, q.group.credit) : 'Refund: ' + bkCancelMoney(cur, q.group.refund)) + '.');
+            } else {
+                const s = q.single;
+                fee = Number(s.fee) || 0;
+                rows.push(s.source === 'policy' ? s.tier_label + '.' : 'This room has no policy (usual cancellation rules).');
+                rows.push('Fee: ' + (fee > 0.01 ? s.fee_text : 'none'));
+                rows.push('Paid ' + bkCancelMoney(cur, s.paid) + '. ' + (Number(s.credit) > 0.01 ? 'Kept as guest credit: ' + bkCancelMoney(cur, s.credit) : 'Refund: ' + bkCancelMoney(cur, s.refund)) + '.');
+            }
+            lines.replaceChildren(...rows.map(t => { const d = document.createElement('div'); d.textContent = t; return d; }));
+            quoted.value = fee.toFixed(2);
+            quoted.disabled = false;
+            const canOv = !!q.can_override && fee > 0.01;
+            ovWrap.style.display = canOv ? '' : 'none';
+            ovAmt.style.display = isGroup ? 'none' : '';
+            ovPct.style.display = isGroup ? '' : 'none';
+            ovAmt.max = fee.toFixed(2);
+            ovPct.max = isGroup ? String(q.group.max_pct) : '100';
+            if (!isGroup) ovPct.value = ''; else ovAmt.value = '';
+            document.getElementById('cancel_fee_override_label').textContent = isGroup
+                ? "Lower the fee to (% of each room's stay, optional)" : 'Lower the fee to (amount, optional)';
+            document.getElementById('cancel_fee_override_help').textContent = isGroup
+                ? 'Leave empty to charge the fees above. Each room is charged this % of its own stay, never more than its fee. The reason is required and kept in the booking history.'
+                : 'Leave empty to charge the fee above. From 0 up to ' + bkCancelMoney(cur, fee) + '; the reason is required and kept in the booking history.';
+            ovAmt.disabled = !canOv || isGroup;
+            ovPct.disabled = !canOv || !isGroup;
+            ovReason.disabled = !canOv;
+            box.style.display = '';
+        }
+        document.getElementById('cancel_group_box').addEventListener('change', bkApplyCancelFee);
 
         // Form submission for new modals
         document.getElementById('makeTentativeForm').addEventListener('submit', function(e) {
@@ -8877,6 +8997,14 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
 
         document.getElementById('cancelBookingForm').addEventListener('submit', function(e) {
             e.preventDefault();
+            // Lowering a policy fee needs a reason (the server checks it too).
+            const ovFilled = ['cancel_fee_override_amount', 'cancel_fee_override_pct'].some(id => { const el = document.getElementById(id); return el && !el.disabled && el.value.trim() !== ''; });
+            const ovReasonEl = document.getElementById('cancel_fee_override_reason');
+            if (ovFilled && ovReasonEl && ovReasonEl.value.trim() === '') {
+                Alert.show('Give a reason for lowering the cancellation fee.', 'error');
+                ovReasonEl.focus();
+                return;
+            }
             const formData = new FormData(this);
 
             const submitBtn = this.querySelector('button[type="submit"]');

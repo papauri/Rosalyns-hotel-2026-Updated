@@ -35,6 +35,8 @@ if (!function_exists('footer_parse_tags')) {
                 '{{check_out_time}}'     => getSetting('check_out_time', '11:00 AM'),
                 '{{payment_policy}}'     => getSetting('payment_policy', ''),
                 '{{cancellation_policy}}' => getSetting('cancellation_policy', ''),
+                // Cancellation policy as set in Hotel Settings (current wording; '' when switched off)
+                '{{cancellation_terms}}'  => function_exists('rh_current_policy_text_all') ? rh_current_policy_text_all() : '',
                 // Finance
                 '{{currency}}'           => getSetting('currency_code', ''),
                 '{{vat_rate}}'           => getSetting('vat_rate', ''),
@@ -241,8 +243,13 @@ if (!function_exists('footer_parse_tags')) {
         <?php foreach ($policies as $policy): ?>
             <?php
             $policyContent = '';
+            // Cancellation policy page: the policy set in Hotel Settings goes first (current wording; none when Off).
+            $cpFooterText = ($policy['slug'] ?? '') === 'cancellation-policy' && strpos((string)($policy['content'] ?? '') . (string)($policy['summary'] ?? ''), '{{cancellation_terms}}') === false && function_exists('rh_current_policy_text_all') ? rh_current_policy_text_all() : '';
+            if ($cpFooterText !== '') {
+                $policyContent .= '<p class="policy-summary">' . nl2br(htmlspecialchars($cpFooterText)) . '</p>';
+            }
             if (!empty($policy['summary'])) {
-                $policyContent = '<p class="policy-summary">' . htmlspecialchars(footer_parse_tags($policy['summary'])) . '</p>';
+                $policyContent .= '<p class="policy-summary">' . htmlspecialchars(footer_parse_tags($policy['summary'])) . '</p>';
             }
             $policyContent .= '<p>' . nl2br(htmlspecialchars(footer_parse_tags($policy['content']))) . '</p>';
 
@@ -309,10 +316,11 @@ A: Yes, we have wheelchair-accessible rooms and facilities. Please specify your 
             if (function_exists('rh_is_policy_hidden') && rh_is_policy_hidden((string)($policy['slug'] ?? ''))) {
                 continue;
             }
+            $cpFooterText = $policy['slug'] === 'cancellation-policy' && function_exists('rh_current_policy_text_all') ? rh_current_policy_text_all() : '';
             renderModal(
                 'policy-' . $policy['slug'],
                 $policy['title'],
-                '<p>' . nl2br(htmlspecialchars($policy['content'])) . '</p>',
+                ($cpFooterText !== '' ? '<p class="policy-summary">' . nl2br(htmlspecialchars($cpFooterText)) . '</p>' : '') . '<p>' . nl2br(htmlspecialchars($policy['content'])) . '</p>',
                 [
                     'size' => 'md',
                     'show_close' => true

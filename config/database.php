@@ -107,6 +107,7 @@ if (!defined('RH_TIMEZONE')) {
 }
 date_default_timezone_set(RH_TIMEZONE);
 require_once __DIR__ . '/../includes/user-timezone.php';
+require_once __DIR__ . '/../includes/cancellation-policy.php'; // functions only (cancellation & no-show policies)
 
 // Create PDO connection with performance optimizations
 try {
@@ -9764,6 +9765,22 @@ function rh_group_noshow_fee_applies(PDO $pdo, array $b): bool
 }
 
 /**
+ * The one INSERT behind a tagged no-show / expiry charge row (group_noshow_charge and the cancellation policy's no-show
+ * charge). $b: the locked bookings row (id, vat_rate). A zero amount (<= BALANCE_TOLERANCE) is stored VOIDED with
+ * $zeroReason, so it is never money anywhere but still marks the room as charged. The caller recalculates and logs.
+ */
+function rh_noshow_fee_insert_row(PDO $pdo, array $b, string $desc, float $amount, float $vatPart, int $userId, string $zeroReason): void
+{
+    $isZero = $amount <= BALANCE_TOLERANCE;
+    $ins = $pdo->prepare("INSERT INTO booking_charges (booking_id, charge_type, description, quantity, unit_price, line_subtotal, vat_rate, vat_amount, line_total,
+            posted_at, added_by, voided, voided_at, void_reason, voided_by)
+        VALUES (?, 'other', ?, 1, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?)");
+    $ins->execute([(int)$b['id'], $desc, $amount, round($amount - $vatPart, 2), $vatPart > 0 ? (float)($b['vat_rate'] ?? 0) : 0, $vatPart, $amount,
+        $userId > 0 ? $userId : null, $isZero ? 1 : 0, $isZero ? date('Y-m-d H:i:s') : null,
+        $isZero ? $zeroReason : null, $isZero && $userId > 0 ? $userId : null]);
+}
+
+/**
  * Group no-show / expiry charge (setting group_noshow_charge). Call right after a booking's status became 'no-show' or
  * 'expired'. Off: returns at once, nothing read or written. On, for a room of a group (2+ rooms not deleted, counted
  * now and frozen by the row): posts ONE folio row tagged rh_noshow_fee_tag() - first night (booked total incl. VAT
@@ -9805,12 +9822,7 @@ function rh_group_noshow_fee_apply(PDO $pdo, int $bookingId, string $event, int 
             $isZero = $amount <= BALANCE_TOLERANCE;
             $what = ['none' => 'no charge', 'first_night' => 'first night', 'full' => 'full stay'][$isZero ? 'none' : $mode];
             $desc = ($event === 'no-show' ? 'No-show charge' : 'Expired booking charge') . ' - ' . $what . ' ' . rh_noshow_fee_tag($bookingId);
-            $ins = $pdo->prepare("INSERT INTO booking_charges (booking_id, charge_type, description, quantity, unit_price, line_subtotal, vat_rate, vat_amount, line_total,
-                    posted_at, added_by, voided, voided_at, void_reason, voided_by)
-                VALUES (?, 'other', ?, 1, ?, ?, ?, ?, ?, NOW(), ?, ?, ?, ?, ?)");
-            $ins->execute([$bookingId, $desc, $amount, round($amount - $vatPart, 2), $vatPart > 0 ? (float)($b['vat_rate'] ?? 0) : 0, $vatPart, $amount,
-                $userId > 0 ? $userId : null, $isZero ? 1 : 0, $isZero ? date('Y-m-d H:i:s') : null,
-                $isZero ? 'Group no-show / expiry setting: no charge' : null, $isZero && $userId > 0 ? $userId : null]);
+            rh_noshow_fee_insert_row($pdo, $b, $desc, $amount, $vatPart, $userId, 'Group no-show / expiry setting: no charge');
             if (!recalculateBookingFinancials($bookingId)) {
                 throw new RuntimeException('Could not recalculate the booking balance.');
             }
@@ -10310,9 +10322,15 @@ function rh_refund_rule(string $key): string
  * If the caller already has a transaction open, this joins it and does NOT commit or
  * roll back (on failure it returns success=false and the caller must roll back).
  *
- * @return array{success:bool,error:string,mode:string,previous_status:string,booking_reference:string,retained:float,refund_total:float,refund_refs:array,credit_balance:float,summary:string}
+ * Cancellation policy (bookings with a policy snapshot, includes/cancellation-policy.php): the fee from
+ * rh_cancellation_fee_quote() is the ONLY retention (never the first night). $feeChoice = {quoted, override, reason}:
+ * quoted must match the live fee (else refused, nothing changes); a fee above BALANCE_TOLERANCE without a quoted figure is
+ * refused ("review the fee"); override only lowers (0..fee), needs permission waive_cancellation_fee and a reason.
+ * Bookings without a snapshot ignore $feeChoice and run exactly as before.
+ *
+ * @return array{success:bool,error:string,mode:string,previous_status:string,booking_reference:string,retained:float,refund_total:float,refund_refs:array,credit_balance:float,summary:string,fee_source:string,fee_pct:float,fee_override:?float}
  */
-function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, string $reason = '', string $refundStatus = 'completed'): array
+function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, string $reason = '', string $refundStatus = 'completed', ?array $feeChoice = null): array
 {
     // 'pending' = refund rows are queued for staff to settle through the refund lifecycle
     // (used for guest self-cancel); 'completed' = paid out now by staff.
@@ -10320,7 +10338,7 @@ function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, st
     $result = [
         'success' => false, 'error' => '', 'mode' => getCancellationRefundMode(), 'previous_status' => '',
         'booking_reference' => '', 'retained' => 0.0, 'refund_total' => 0.0, 'refund_refs' => [],
-        'credit_balance' => 0.0, 'summary' => '',
+        'credit_balance' => 0.0, 'summary' => '', 'fee_source' => 'legacy', 'fee_pct' => 0.0, 'fee_override' => null,
     ];
     $ownTx = !$pdo->inTransaction();
 
@@ -10351,6 +10369,46 @@ function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, st
         $result['previous_status'] = $prev;
         $result['booking_reference'] = $ref;
 
+        // Cancellation policy (snapshot bookings only; NULL snapshot = source legacy = today's code below). Checked
+        // under the row lock and BEFORE anything changes, so a refusal leaves the booking exactly as it was.
+        $feeQ = rh_cancellation_fee_quote($pdo, $b, 'cancel');
+        $feeOverride = null;
+        $feeOverrideReason = '';
+        if ($feeQ['source'] === 'policy') {
+            $feeNow = (float)$feeQ['amount'];
+            $feeFmt = $currency . ' ' . number_format($feeNow, 2);
+            $quoted = ($feeChoice !== null && isset($feeChoice['quoted']) && $feeChoice['quoted'] !== '' && is_numeric($feeChoice['quoted'])) ? round((float)$feeChoice['quoted'], 2) : null;
+            if ($quoted !== null && abs($quoted - $feeNow) > BALANCE_TOLERANCE) {
+                throw new RuntimeException('The cancellation fee changed (now ' . $feeFmt . '). Review and cancel again.');
+            }
+            if ($feeNow > BALANCE_TOLERANCE && $quoted === null) {
+                throw new RuntimeException('Review the cancellation fee (' . $feeFmt . ') and cancel again.');
+            }
+            $ovRaw = $feeChoice['override'] ?? null;
+            if ($feeNow > BALANCE_TOLERANCE && $ovRaw !== null && $ovRaw !== '') {
+                if (!is_numeric($ovRaw)) {
+                    throw new RuntimeException('Enter the lower fee as an amount.');
+                }
+                $ov = round((float)$ovRaw, 2);
+                if (abs($ov - $feeNow) > BALANCE_TOLERANCE) {
+                    if (!(function_exists('hasPermission') && $adminUserId > 0 && hasPermission($adminUserId, 'waive_cancellation_fee'))) {
+                        throw new RuntimeException('You do not have permission to lower or waive cancellation fees.');
+                    }
+                    if ($ov < 0 || $ov > $feeNow + BALANCE_TOLERANCE) {
+                        throw new RuntimeException('The fee can only be lowered: enter an amount from 0 to ' . $feeFmt . '.');
+                    }
+                    $feeOverrideReason = trim((string)($feeChoice['reason'] ?? ''));
+                    if ($feeOverrideReason === '') {
+                        throw new RuntimeException('Give a reason for lowering the cancellation fee.');
+                    }
+                    if ((function_exists('mb_strlen') ? mb_strlen($feeOverrideReason) : strlen($feeOverrideReason)) > 300) {
+                        throw new RuntimeException('Keep the reason for lowering the fee to 300 characters.');
+                    }
+                    $feeOverride = max(0.0, min($feeNow, $ov));
+                }
+            }
+        }
+
         // Close the booking's live orders (room tab / room service) FIRST, so a refusal (part-paid or
         // already-started order) changes nothing. Their folio effect is recalculated before the refund below.
         $orderClose = rh_booking_close_orders($pdo, $bookingId, $adminUserId, 'Booking ' . ($ref !== '' ? $ref : ('#' . $bookingId)) . ' cancelled' . ($reason !== '' ? ': ' . $reason : ''));
@@ -10373,7 +10431,10 @@ function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, st
         // (total_with_vat / nights), capped at what is billed. Never-confirmed tentative
         // holds are not charged.
         $retained = 0.0;
-        if ($mode === 'keep_first_night' && $prev !== 'tentative') {
+        if ($feeQ['source'] === 'policy') {
+            // The policy fee REPLACES the first-night retention (every refund mode); 0 unless the booking was confirmed.
+            $retained = $feeOverride !== null ? round($feeOverride, 2) : round((float)$feeQ['amount'], 2);
+        } elseif ($mode === 'keep_first_night' && $prev !== 'tentative') {
             $gross = (float)($b['total_with_vat'] ?? 0);
             if ($gross <= 0) {
                 $gross = (float)($b['total_amount'] ?? 0) + (float)($b['vat_amount'] ?? 0);
@@ -10483,9 +10544,22 @@ function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, st
         $after->execute([$bookingId]);
         $credit = round((float)$after->fetchColumn(), 2);
 
+        if ($feeQ['source'] === 'policy') {
+            // Policy booking: the fee (and how it was worked out) replaces the mode's own retention.
+            $summary = 'Cancellation policy v' . (int)$feeQ['version'] . ' (' . $feeQ['kind'] . ' bookings): ' . $feeQ['tier_label'] . '.';
+            if ($feeOverride !== null) {
+                $summary .= ' Fee lowered from ' . $currency . ' ' . number_format((float)$feeQ['amount'], 2) . ' to ' . $currency . ' ' . number_format($retained, 2) . ' (' . $feeOverrideReason . ').';
+            } elseif ($retained > 0) {
+                $summary .= ' Fee kept ' . $currency . ' ' . number_format($retained, 2) . ': ' . $feeQ['fee_text'] . '.';
+            }
+            if ($mode === 'void_keep_credit') {
+                $summary .= ' Money paid above the fee stays as guest credit (no automatic refund).';
+            }
+        } else {
         $summary = 'Cancellation mode: ' . getCancellationRefundModeLabel($mode) . '.';
         if ($retained > 0) {
             $summary .= ' Retained ' . $currency . ' ' . number_format($retained, 2) . ' (first night).';
+        }
         }
         if ($refunded > 0) {
             $summary .= ($refundStatus === 'pending' ? ' Refund queued for staff to settle ' : ' Refunded ')
@@ -10500,11 +10574,25 @@ function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, st
         }
 
         if (function_exists('logBookingEvent')) {
+            $histMeta = ['mode' => $mode, 'retained' => $retained, 'refunded' => $refunded, 'credit_balance' => $credit, 'reason' => $reason];
+            if ($feeQ['source'] === 'policy') {
+                $histMeta['policy'] = ['kind' => $feeQ['kind'], 'version' => (int)$feeQ['version'], 'days_before' => (int)$feeQ['days_before'],
+                    'tier_days' => (int)$feeQ['tier_days'], 'pct' => (float)$feeQ['pct'], 'fee' => (float)$feeQ['amount'], 'base' => (float)$feeQ['base'],
+                    'override' => $feeOverride];
+            }
             logBookingEvent(
                 $bookingId, $ref, 'Cancellation settled', 'financial', $summary,
                 $prev, 'cancelled', 'admin', $adminUserId ?: null, null,
-                ['mode' => $mode, 'retained' => $retained, 'refunded' => $refunded, 'credit_balance' => $credit, 'reason' => $reason]
+                $histMeta
             );
+            if ($feeOverride !== null) {
+                logBookingEvent(
+                    $bookingId, $ref, 'Cancellation fee lowered', 'financial',
+                    'Cancellation fee lowered at cancellation from ' . $currency . ' ' . number_format((float)$feeQ['amount'], 2) . ' to ' . $currency . ' ' . number_format($retained, 2) . '. Reason: ' . $feeOverrideReason,
+                    $currency . ' ' . number_format((float)$feeQ['amount'], 2), $currency . ' ' . number_format($retained, 2), 'admin', $adminUserId ?: null, null,
+                    ['fee' => (float)$feeQ['amount'], 'new_fee' => $retained, 'reason' => $feeOverrideReason]
+                );
+            }
         }
 
         if ($ownTx) {
@@ -10526,6 +10614,9 @@ function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, st
         $result['refund_refs'] = $refs;
         $result['credit_balance'] = $credit;
         $result['summary'] = $summary;
+        $result['fee_source'] = (string)$feeQ['source'];
+        $result['fee_pct'] = (float)$feeQ['pct'];
+        $result['fee_override'] = $feeOverride;
         return $result;
     } catch (Throwable $e) {
         if ($ownTx && $pdo->inTransaction()) {
@@ -10658,9 +10749,15 @@ function rh_booking_group_effective_lead(PDO $pdo, int $bookingId): int
  * treatment + refunds per booking), and if any one refuses or fails the whole group is rolled back and nothing
  * changes. A caller transaction is joined (the caller then commits / rolls back).
  *
+ * $refundStatus: 'completed' (staff) or 'pending' (guest self-cancel queues the refunds for staff).
+ * $feeChoice (cancellation policy): {quoted: the sum of every room's fee, override_pct: ?float, reason}. The sum is checked
+ * inside the transaction before the loop (a changed fee refuses the whole group); each room then gets
+ * {quoted: its own fee, override: round(room stay x pct / 100, 2) capped at its fee, reason}. Rooms without a policy
+ * snapshot ignore it.
+ *
  * @return array{success:bool,error:string,message:string,cancelled:array<int,array{id:int,reference:string,previous_status:string,summary:string}>}
  */
-function rh_cancel_booking_group(PDO $pdo, array $bookingIds, int $adminUserId, string $reason = ''): array
+function rh_cancel_booking_group(PDO $pdo, array $bookingIds, int $adminUserId, string $reason = '', string $refundStatus = 'completed', ?array $feeChoice = null): array
 {
     $ids = array_values(array_unique(array_filter(array_map('intval', $bookingIds), static fn ($i) => $i > 0)));
     sort($ids); // fixed lock order: two staff cancelling the same group cannot deadlock
@@ -10688,8 +10785,51 @@ function rh_cancel_booking_group(PDO $pdo, array $bookingIds, int $adminUserId, 
         } else {
             $pdo->exec("SAVEPOINT rh_grp_cancel"); // joined caller transaction: a refusal still undoes the whole group
         }
+        // Cancellation policy: every room's fee, worked out under its row lock (ascending id) before anything changes.
+        $roomChoice = [];
+        $feeSum = 0.0;
+        $anyPolicy = false;
+        $maxPct = 0.0;
+        $lockRow = $pdo->prepare('SELECT * FROM bookings WHERE id = ? FOR UPDATE');
         foreach ($ids as $id) {
-            $res = cancelRoomBookingSettled($pdo, $id, $adminUserId, $reason);
+            $lockRow->execute([$id]);
+            $row = $lockRow->fetch(PDO::FETCH_ASSOC);
+            if (!$row) {
+                continue;
+            }
+            $q = rh_cancellation_fee_quote($pdo, $row, 'cancel');
+            if ($q['source'] !== 'policy') {
+                continue;
+            }
+            $anyPolicy = true;
+            $feeSum = round($feeSum + (float)$q['amount'], 2);
+            $maxPct = max($maxPct, (float)$q['pct']);
+            $roomChoice[$id] = $q;
+        }
+        if ($anyPolicy) {
+            $gCur = (string)getSetting('currency_symbol', 'MWK');
+            $gQuoted = ($feeChoice !== null && isset($feeChoice['quoted']) && $feeChoice['quoted'] !== '' && is_numeric($feeChoice['quoted'])) ? round((float)$feeChoice['quoted'], 2) : null;
+            if ($gQuoted !== null && abs($gQuoted - $feeSum) > BALANCE_TOLERANCE) {
+                throw new RuntimeException('Group of ' . count($ids) . ' bookings (' . $allRefs . '): nothing was cancelled. The cancellation fee changed (now ' . $gCur . ' ' . number_format($feeSum, 2) . '). Review and cancel again.');
+            }
+            if ($feeSum > BALANCE_TOLERANCE && $gQuoted === null) {
+                throw new RuntimeException('Group of ' . count($ids) . ' bookings (' . $allRefs . '): nothing was cancelled. Review the cancellation fee (' . $gCur . ' ' . number_format($feeSum, 2) . ') and cancel again.');
+            }
+            $ovPct = $feeChoice['override_pct'] ?? null;
+            $ovPct = ($ovPct === null || $ovPct === '') ? null : $ovPct;
+            if ($ovPct !== null && (!is_numeric($ovPct) || (float)$ovPct < 0 || (float)$ovPct > $maxPct + 0.0001)) {
+                throw new RuntimeException('The fee can only be lowered: enter a percentage from 0 to ' . rh_cancel_policy_pct_label($maxPct) . '.');
+            }
+            foreach ($roomChoice as $id => $q) {
+                $ov = null;
+                if ($ovPct !== null && (float)$q['amount'] > BALANCE_TOLERANCE) {
+                    $ov = min((float)$q['amount'], round((float)$q['base'] * (float)$ovPct / 100, 2));
+                }
+                $roomChoice[$id] = ['quoted' => (float)$q['amount'], 'override' => $ov, 'reason' => (string)($feeChoice['reason'] ?? '')];
+            }
+        }
+        foreach ($ids as $id) {
+            $res = cancelRoomBookingSettled($pdo, $id, $adminUserId, $reason, $refundStatus, $roomChoice[$id] ?? null);
             if (empty($res['success'])) {
                 throw new RuntimeException('Group of ' . count($ids) . ' bookings (' . $allRefs . '): nothing was cancelled. '
                     . $refOf($id) . ' could not be cancelled: ' . ($res['error'] !== '' ? $res['error'] : 'unknown error'));
@@ -10699,6 +10839,8 @@ function rh_cancel_booking_group(PDO $pdo, array $bookingIds, int $adminUserId, 
                 'reference' => (string)($res['booking_reference'] ?: $refOf($id)),
                 'previous_status' => (string)$res['previous_status'],
                 'summary' => (string)$res['summary'],
+                'retained' => (float)$res['retained'],
+                'refund_total' => (float)$res['refund_total'],
             ];
             if (!empty($res['order_notices']) && is_array($res['order_notices'])) {
                 $notices = array_merge($notices, $res['order_notices']);

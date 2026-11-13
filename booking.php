@@ -730,6 +730,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
 
+            // Cancellation policy locked onto every room of this booking (after linking; Off = nothing happens).
+            rh_cancel_policy_stamp($pdo, $createdBookingIds);
+
             // Insert booking_packages rows inside the transaction (atomic with the booking insert)
             if (!empty($packageRowsToInsert) && !empty($createdBookingIds)) {
                 $pkgStmt = $pdo->prepare("INSERT INTO booking_packages
@@ -1622,6 +1625,46 @@ try {
                             </div>
                             <div class="bsum-total-amount" id="summaryTotal">—</div>
                         </div>
+
+                        <?php
+                        // Cancellation policy the guest agrees to (current settings; nothing shown when switched off). Individual
+                        // vs group wording follows the number of rooms in the summary.
+                        $bkCpSet = rh_cancel_policy_settings();
+                        $bkCpInd = rh_current_policy_text('individual');
+                        $bkCpGrp = $bkCpSet['group'] !== null ? rh_current_policy_text('group') : $bkCpInd;
+                        if ($bkCpInd !== '' || $bkCpGrp !== ''):
+                        ?>
+                        <div class="bsum-detail-row" id="summaryCancelPolicy" style="display:block;"
+                             data-cp-individual="<?php echo htmlspecialchars($bkCpInd, ENT_QUOTES); ?>"
+                             data-cp-group="<?php echo htmlspecialchars($bkCpGrp, ENT_QUOTES); ?>"
+                             data-cp-min="<?php echo (int)$bkCpSet['group_min_rooms']; ?>">
+                            <div style="font-weight:600;"><i class="fas fa-file-contract" aria-hidden="true"></i> Cancellation policy</div>
+                            <div id="summaryCancelPolicyText" style="white-space:pre-line;font-size:13px;line-height:1.5;margin-top:4px;"><?php echo htmlspecialchars($bkCpInd !== '' ? $bkCpInd : $bkCpGrp); ?></div>
+                        </div>
+                        <script>
+                        (function () {
+                            var box = document.getElementById('summaryCancelPolicy');
+                            var summary = document.getElementById('bookingSummary');
+                            if (!box || !summary || box.dataset.cpBound === '1') return;
+                            box.dataset.cpBound = '1';
+                            var min = parseInt(box.dataset.cpMin, 10) || 2;
+                            function rooms() {
+                                var txt = ((document.getElementById('summaryOccupancyType') || {}).textContent || '') + ' ' + ((document.getElementById('summaryRoom') || {}).textContent || '');
+                                var m = txt.match(/(\d+)\s+rooms/);
+                                return m ? parseInt(m[1], 10) : 1;
+                            }
+                            function apply() {
+                                var t = rooms() >= min ? box.dataset.cpGroup : box.dataset.cpIndividual;
+                                var el = document.getElementById('summaryCancelPolicyText');
+                                if (el && t && el.textContent !== t) el.textContent = t;
+                            }
+                            var timer = null;
+                            new MutationObserver(function () { clearTimeout(timer); timer = setTimeout(apply, 50); })
+                                .observe(summary, { childList: true, subtree: true, characterData: true });
+                            apply();
+                        })();
+                        </script>
+                        <?php endif; ?>
 
                     </div><!-- /#bookingSummary -->
 

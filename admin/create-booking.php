@@ -955,6 +955,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
             }
         }
 
+        // Cancellation policy locked onto every room created here (one call, after the loops; Off = nothing happens).
+        rh_cancel_policy_stamp($pdo, array_column($created_bookings, 'id'));
+
         // ── Payment record — split proportionally across all created bookings ──
         $primary_id  = $created_bookings[0]['id'];
         $primary_ref = $created_bookings[0]['ref'];
@@ -2647,6 +2650,45 @@ try {
                             </div>
                         </div>
                     </div>
+                    <?php
+                    // Cancellation policy this booking will be locked to (current settings; nothing shown when switched off).
+                    // Individual vs group wording follows the rooms chosen; the saved booking keeps the server's wording.
+                    $cbCpSet = rh_cancel_policy_settings();
+                    $cbCpInd = rh_current_policy_text('individual');
+                    $cbCpGrp = $cbCpSet['group'] !== null ? rh_current_policy_text('group') : $cbCpInd;
+                    if ($cbCpInd !== '' || $cbCpGrp !== ''):
+                    ?>
+                    <div id="cbCancelPolicy" style="margin-top:16px;padding:16px;background:#FAF6F0;border-radius:6px;border:1px solid #D2C8BC;"
+                         data-cp-individual="<?php echo htmlspecialchars($cbCpInd, ENT_QUOTES); ?>"
+                         data-cp-group="<?php echo htmlspecialchars($cbCpGrp, ENT_QUOTES); ?>"
+                         data-cp-min="<?php echo (int)$cbCpSet['group_min_rooms']; ?>">
+                        <h4 style="margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:0.06em;color:#766550;font-family:inherit;">
+                            <i class="fas fa-file-contract"></i> Cancellation policy
+                        </h4>
+                        <div id="cbCancelPolicyText" style="white-space:pre-line;font-size:13px;line-height:1.5;"><?php echo htmlspecialchars($cbCpInd !== '' ? $cbCpInd : $cbCpGrp); ?></div>
+                        <small style="display:block;margin-top:6px;color:#766550;">This booking is locked to this policy when you create it (group wording for <?php echo (int)$cbCpSet['group_min_rooms']; ?> rooms or more). Tell the guest before confirming.</small>
+                    </div>
+                    <script>
+                    (function () {
+                        var box = document.getElementById('cbCancelPolicy');
+                        var form = document.getElementById('createBookingForm');
+                        if (!box || !form || box.dataset.cpBound === '1') return;
+                        box.dataset.cpBound = '1';
+                        var min = parseInt(box.dataset.cpMin, 10) || 2;
+                        function apply() {
+                            var n = 0;
+                            form.querySelectorAll('input[name="room_line_qty[]"], select[name="room_line_qty[]"]').forEach(function (el) { n += Math.max(0, parseInt(el.value, 10) || 0); });
+                            if (n === 0) { var q = form.querySelector('[name="rooms_quantity"]'); n = q ? (parseInt(q.value, 10) || 1) : 1; }
+                            var el = document.getElementById('cbCancelPolicyText');
+                            var t = n >= min ? box.dataset.cpGroup : box.dataset.cpIndividual;
+                            if (el && t) el.textContent = t;
+                        }
+                        form.addEventListener('input', apply);
+                        form.addEventListener('change', apply);
+                        apply();
+                    })();
+                    </script>
+                    <?php endif; ?>
                     <div class="cb-section-nav" style="border-top:none; padding-top:8px; margin-top:8px;">
                         <button type="button" class="cb-nav-btn cb-nav-prev" onclick="cbPrev(6)"><i class="fas fa-arrow-up"></i> Payment</button>
                         <span></span>

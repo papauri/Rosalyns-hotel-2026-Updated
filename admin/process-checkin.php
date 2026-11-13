@@ -398,6 +398,15 @@ try {
             exit;
         }
 
+        // Cancellation policy: a booking that would owe a fee is cancelled from Booking Details, where the fee is shown
+        // and can be reviewed (the quote re-reads the row by id; NULL snapshot = legacy = no change here).
+        $cpQuote = rh_cancellation_fee_quote($pdo, ['id' => (int)$booking_id] + $booking, 'cancel');
+        if ($cpQuote['source'] === 'policy' && (float)$cpQuote['amount'] > BALANCE_TOLERANCE) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'message' => 'Cancel this booking from Booking Details so the cancellation fee can be reviewed.']);
+            exit;
+        }
+
         // One transaction: status + room/stock release + bill treatment + refund
         // (booking row locked). Any failure rolls everything back.
         $cancelRes = cancelRoomBookingSettled($pdo, (int)$booking_id, (int)$admin_user_id, 'Cancelled via check-in workflow');

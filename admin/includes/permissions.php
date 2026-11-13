@@ -79,6 +79,7 @@ function getAllRoles()
                 'timed_report_emails', // daily reports + station report emails: switches, To and CC (owner 2026-11-12; ASSUMPTION admin + manager)
                 'company_accounts', // company pays later (owner 2026-11-13): company list, statements, company payments
                 'billing_on_account', // put a booking on a company account
+                'waive_cancellation_fee', // lower or waive a cancellation fee (owner 2026-11-14: administrators + managers by default)
                 'company_statement_emails', // the timed company statement email: switch, CC
                 'visitor_analytics',
                 'backup_management',
@@ -1028,6 +1029,16 @@ function getAllPermissions()
             'category' => 'Finance',
             'page' => '', // not a page: the Who pays panel on Booking Details
             'group' => 'invoices'
+        ],
+        // Owner 2026-11-14 (cancellation policies): on for administrators and managers by default, grantable to any other
+        // role or person on the permissions screen. Server-side check in cancelRoomBookingSettled and booking-details.
+        'waive_cancellation_fee' => [
+            'label' => 'Lower or waive cancellation fees',
+            'description' => 'Lower or waive the cancellation fee a booking owes under its cancellation policy, when cancelling or afterwards (a reason is always required and kept in the booking history)',
+            'icon' => 'fa-hand-holding-dollar',
+            'category' => 'Finance',
+            'page' => '', // not a page: the cancel forms and Booking Details
+            'group' => 'payments_write'
         ],
         'invoices' => [
             'label' => 'Invoices',
