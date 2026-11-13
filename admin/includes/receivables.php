@@ -5,7 +5,8 @@
  * dashboard, End of Day "Still owed"): money owed is the ACCOUNT's amount_due, never a pending payment row.
  *
  *   room        every live booking with a balance (pending/confirmed/checked-in/checked-out, plus the first
- *               night kept on a cancellation)
+ *               night kept on a cancellation, plus a no-show still owing, plus an expired room charged under the
+ *               group no-show charge; an untagged expired hold never counts)
  *   conference  confirmed or completed bookings only (an unconfirmed enquiry is not owed money)
  *   event       confirmed or completed bookings only
  *   gym         confirmed or converted enquiries only
@@ -21,7 +22,16 @@ if (!function_exists('rh_receivable_status_sql')) {
         $a = $alias !== '' ? $alias . '.' : '';
         switch ($type) {
             case 'room':
-                return "{$a}deleted_at IS NULL AND ({$a}status IN ('pending','confirmed','checked-in','checked-out') OR ({$a}status = 'cancelled' AND COALESCE({$a}cancellation_retained_amount,0) > 0))";
+                // No-show (owner 2026-11-13): a no-show still owes its bill (the full stay, or only its group no-show
+                // charge when tagged), so it counts while amount_due is open. An expired hold counts ONLY when it carries
+                // the group no-show / expiry charge (tag rh_noshow_fee_tag(): '[noshow-fee:<id>]'); an untagged expired
+                // hold is an unpaid hold, not a debt. amount_due is kept equal to the folio balance by
+                // recalculateBookingFinancials (same tagged rule as getBookingFolioSummary); a credit gives 0, so it never counts.
+                $idCol = $alias !== '' ? $a . 'id' : 'bookings.id';
+                return "{$a}deleted_at IS NULL AND ({$a}status IN ('pending','confirmed','checked-in','checked-out','no-show')"
+                    . " OR ({$a}status = 'cancelled' AND COALESCE({$a}cancellation_retained_amount,0) > 0)"
+                    . " OR ({$a}status = 'expired' AND EXISTS (SELECT 1 FROM booking_charges nsf WHERE nsf.booking_id = {$idCol}"
+                    . " AND nsf.description LIKE CONCAT('%[noshow-fee:', {$idCol}, ']'))))";
             case 'conference':
             case 'event':
                 return "{$a}status IN ('confirmed','completed')";
@@ -65,7 +75,7 @@ if (!function_exists('rh_receivable_rows')) {
                     b.total_with_vat, b.total_amount, b.vat_amount, b.cancellation_retained_amount, b.folio_charges_total,
                     pb.billing_account_id AS pb_billing_account_id, pb.billing_reference AS pb_billing_reference, pb.billing_due_date AS pb_billing_due_date,
                     pb.billing_covers AS pb_billing_covers' : '') . ",
-                    GREATEST(0, DATEDIFF(CURDATE(), CASE WHEN b.status IN ('checked-out','cancelled') THEN b.check_out_date ELSE CURDATE() END)) AS days_outstanding
+                    GREATEST(0, DATEDIFF(CURDATE(), CASE WHEN b.status IN ('checked-out','cancelled') THEN b.check_out_date WHEN b.status IN ('no-show','expired') THEN b.check_in_date ELSE CURDATE() END)) AS days_outstanding
                 FROM bookings b" . ($billOn ? ' LEFT JOIN bookings pb ON pb.id = b.primary_booking_id' : '') . " WHERE b.amount_due > {$tol} AND " . rh_receivable_status_sql('room', 'b');
         }
         if ($on('conference')) {

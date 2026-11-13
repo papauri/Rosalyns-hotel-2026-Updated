@@ -235,8 +235,9 @@ if (!function_exists('rh_pay_row_state')) {
             $out['tone'] = 'owe';
         } elseif ($due > $tol) {
             // Open balance on an account the receivables rule does not count: not confirmed yet (account_unconfirmed,
-            // from rh_unconfirmed_status_sql: the same rule as the "Deposits taken, not yet confirmed" line), or a
-            // no-show / expired booking. Named plainly so it never reads as owed or as settled.
+            // from rh_unconfirmed_status_sql: the same rule as the "Deposits taken, not yet confirmed" line), or an
+            // expired hold without the group no-show charge (a no-show still owing IS in the rule, owner 2026-11-13).
+            // Named plainly so it never reads as owed or as settled.
             $out['note'] = !empty($row['account_unconfirmed'])
                 ? 'Not confirmed yet: ' . $money . ' open'
                 : ucfirst(str_replace(['_', '-'], ' ', $acctStatus !== '' ? $acctStatus : 'unknown')) . ': ' . $money . ', not counted as owed';

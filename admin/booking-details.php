@@ -1927,15 +1927,22 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             <?php endforeach; ?>
             <?php
             // Group total = every live room in the group at its full amount (room + VAT + levy), owner 2026-10-23.
+            // A no-show room still bills its booked stay (owner 2026-11-13: a no-show pays 100%), so it stays in, as on
+            // the group invoice; one charged under the group no-show charge bills that folio charge only and stays out.
+            $bd_grp_out = static function (array $r) use ($pdo): bool {
+                $st = (string)($r['status'] ?? '');
+                return in_array($st, ['cancelled', 'expired'], true)
+                    || ($st === 'no-show' && rh_noshow_fee_tagged($pdo, (int)($r['id'] ?? 0)));
+            };
             $bd_group_total = rh_booking_full_total($bd_row_fresh);
             $bd_group_rows = [$bd_row_fresh];
             foreach ($group_bookings as $gb) {
-                if (!in_array((string)($gb['status'] ?? ''), ['cancelled', 'no-show', 'expired'], true)) {
+                if (!$bd_grp_out($gb)) {
                     $bd_group_total += rh_booking_full_total($gb);
                     $bd_group_rows[] = $gb;
                 }
             }
-            if (in_array((string)($booking['status'] ?? ''), ['cancelled', 'no-show', 'expired'], true)) {
+            if ($bd_grp_out(['status' => $booking['status'] ?? '', 'id' => $booking['id'] ?? 0])) {
                 $bd_group_total -= rh_booking_full_total($bd_row_fresh);
                 array_shift($bd_group_rows);
             }
