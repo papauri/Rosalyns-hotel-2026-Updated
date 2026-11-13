@@ -155,11 +155,70 @@ function rh_invoice_doc_rows(PDO $pdo, int $booking_id): ?array
     if (function_exists('getBookingRoomLabel')) {
         $group_bookings = array_map($label, $group_bookings);
     }
+    // Every room in the document's scope (before closed rooms drop off): the rooms that share ONE invoice number.
+    $scopeIds = array_values(array_map(static fn($g) => (int)$g['id'], $group_bookings));
     // If only one result it's a normal single-room booking — pass empty array
     if (count($group_bookings) <= 1) {
         $group_bookings = [];
     }
-    return ['booking' => $booking, 'group_bookings' => $group_bookings];
+    return ['booking' => $booking, 'group_bookings' => $group_bookings, 'scope_ids' => $scopeIds ?: [(int)$booking['id']], 'root_id' => $root];
+}
+
+if (!function_exists('rh_invoice_payment_save')) {
+    /**
+     * Remember a generated room invoice on a payment row. payments.invoice_number is UNIQUE: when the number already sits
+     * on another payment row (a group has ONE invoice number, rh_invoice_group_number), only this row's file is refreshed -
+     * the same rule as admin/invoices.php. Returns true when the number itself was stored on this row.
+     */
+    function rh_invoice_payment_save(PDO $pdo, int $paymentId, string $path, string $number): bool
+    {
+        $taken = $pdo->prepare("SELECT COUNT(*) FROM payments WHERE invoice_number = ? AND id <> ?");
+        $taken->execute([$number, $paymentId]);
+        if ((int)$taken->fetchColumn() > 0) {
+            $pdo->prepare("UPDATE payments SET invoice_path = ?, invoice_generated = 1 WHERE id = ?")->execute([$path, $paymentId]);
+            return false;
+        }
+        $pdo->prepare("UPDATE payments SET invoice_path = ?, invoice_number = ?, invoice_generated = 1 WHERE id = ?")->execute([$path, $number, $paymentId]);
+        return true;
+    }
+}
+
+if (!function_exists('rh_invoice_group_number')) {
+    /**
+     * The invoice number a GROUP already holds for one payer's document (fix 2026-11-13: a group has ONE invoice number,
+     * even after a cancelled lead hands the document to another room). $ids: the rooms the document covers
+     * (rh_invoice_doc_rows()['scope_ids'] - a split-payer group gives each payer its own set, so each payer keeps its own
+     * number); $rootId: the group's original lead. Looks, in order, at the original lead's final_invoice_number, any other
+     * room's (lowest id first), then the newest invoice number held on a payment row of those rooms (refund rows hold
+     * credit-note numbers: never). '' = nothing issued yet, or fewer than 2 rooms (a single booking is never looked up
+     * here: unchanged). Read-only.
+     */
+    function rh_invoice_group_number(PDO $pdo, array $ids, int $rootId): string
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static fn($i) => $i > 0)));
+        if (count($ids) < 2) {
+            return '';
+        }
+        try {
+            $ph = implode(',', array_fill(0, count($ids), '?'));
+            $st = $pdo->prepare("SELECT id, final_invoice_number FROM bookings WHERE id IN ($ph)
+                AND final_invoice_number IS NOT NULL AND TRIM(final_invoice_number) <> '' ORDER BY (id = ?) DESC, id ASC");
+            $st->execute(array_merge($ids, [$rootId]));
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $n = trim((string)$r['final_invoice_number']);
+                if ($n !== '' && stripos($n, 'STMT-') !== 0) {
+                    return $n;
+                }
+            }
+            $st = $pdo->prepare("SELECT invoice_number FROM payments WHERE booking_type = 'room' AND booking_id IN ($ph) AND deleted_at IS NULL
+                AND COALESCE(payment_type, '') <> 'refund' AND invoice_number IS NOT NULL AND TRIM(invoice_number) <> '' ORDER BY id DESC LIMIT 1");
+            $st->execute($ids);
+            return trim((string)($st->fetchColumn() ?: ''));
+        } catch (Throwable $e) {
+            error_log('rh_invoice_group_number: ' . $e->getMessage());
+            return '';
+        }
+    }
 }
 
 function generateInvoicePDF(int $booking_id, ?string $invoice_number_override = null, bool $asStatement = false)
@@ -195,9 +254,14 @@ function generateInvoicePDF(int $booking_id, ?string $invoice_number_override = 
         if ($invoice_number_override !== '') {
             $invoice_number = $invoice_number_override;
         } else {
-            $invoice_prefix = getSetting('invoice_prefix', 'INV');
-            $invoice_start = (int)getSetting('invoice_start_number', 1000);
-            $invoice_number = finance_next_invoice_number($pdo, $invoice_prefix, $invoice_start, date('Y-m-d'), 'room');
+            // A group has ONE invoice number per payer: the number already issued on any of the document's rooms (e.g. the
+            // original lead, before a cancelled lead handed the document to another room) is reused, never a second one.
+            $invoice_number = rh_invoice_group_number($pdo, (array)($docRows['scope_ids'] ?? []), (int)($docRows['root_id'] ?? 0));
+            if ($invoice_number === '') {
+                $invoice_prefix = getSetting('invoice_prefix', 'INV');
+                $invoice_start = (int)getSetting('invoice_start_number', 1000);
+                $invoice_number = finance_next_invoice_number($pdo, $invoice_prefix, $invoice_start, date('Y-m-d'), 'room');
+            }
         }
 
         $safeInvoiceNumber = preg_replace('/[^A-Za-z0-9_-]+/', '-', $invoice_number);
@@ -769,6 +833,38 @@ if (!function_exists('rh_inv_room_title')) {
     }
 }
 
+if (!function_exists('rh_inv_cancel_note')) {
+    /**
+     * The plain line a cancelled room prints instead of its booked stay (fix 2026-11-13): "Cancelled on 12 Nov 2026 - the
+     * first night is kept: K356,000.00", "... - nothing billed for the stay" (+ "; K200,000.00 paid is held as the
+     * guest's credit" while a credit is owed). Read from what the booking holds (cancellation_retained_amount = $kept,
+     * credit_balance), never from today's cancellation setting, which may have changed since. The date is the booking
+     * history entry every cancel path writes; none found = no date. Plain text. $money: callable(float): string.
+     */
+    function rh_inv_cancel_note(PDO $pdo, array $row, float $kept, callable $money): string
+    {
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        $when = '';
+        try {
+            $cd = $pdo->prepare("SELECT MAX(created_at) FROM booking_timeline_logs WHERE booking_id = ? AND new_value = 'cancelled'
+                AND action_type IN ('status_change', 'financial', 'cancellation')");
+            $cd->execute([(int)($row['id'] ?? 0)]);
+            $cAt = (string)($cd->fetchColumn() ?: '');
+            if ($cAt !== '' && strtotime($cAt) !== false) {
+                $when = ' on ' . date('d M Y', strtotime($cAt));
+            }
+        } catch (Throwable $e) {
+            error_log('rh_inv_cancel_note: ' . $e->getMessage());
+        }
+        $what = $kept > $tol ? 'the first night is kept: ' . $money($kept) : 'nothing billed for the stay';
+        $credit = round((float)($row['credit_balance'] ?? 0), 2);
+        if ($credit > $tol) {
+            $what .= '; ' . $money($credit) . " paid is held as the guest's credit";
+        }
+        return 'Cancelled' . $when . ' - ' . $what;
+    }
+}
+
 if (!function_exists('rh_inv_surcharge_note')) {
     /**
      * Group invoice rate note for ONE room with a seasonal / rate-plan surcharge (its own rate_plan_discount < 0 per
@@ -862,12 +958,16 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         $drNoRoom = !empty($dr['rh_inv_no_room_charge'])
             || (empty($group_bookings) && $preload === null && in_array(strtolower((string)($dr['status'] ?? '')), ['no-show', 'expired'], true)
                 && function_exists('rh_noshow_fee_tagged') && rh_noshow_fee_tagged($pdo, (int)($dr['id'] ?? 0)));
-        if ((!empty($dr['rh_inv_removed']) && strtolower((string)($dr['status'] ?? '')) === 'cancelled') || $drNoRoom) {
+        // The document's own lead when it is cancelled (a cancelled single booking, or a fully cancelled group's lead): it
+        // bills only what was kept, like any other cancelled room (fix 2026-11-13; it never carries rh_inv_removed).
+        $drCancelLead = $preload === null && $di === $pkgRowIdx && strtolower((string)($dr['status'] ?? '')) === 'cancelled';
+        if ((!empty($dr['rh_inv_removed']) && strtolower((string)($dr['status'] ?? '')) === 'cancelled') || $drNoRoom || $drCancelLead) {
             // A cancelled room bills only what was kept on cancellation (getBookingFolioSummary / recalc): no VAT, no levy.
             // A deleted room that was not cancelled keeps nothing (rh_inv_group_rooms).
             $kept = $drNoRoom ? 0.0 : round(max(0.0, (float)($dr['cancellation_retained_amount'] ?? 0)), 2);
             $docLines[$di] = ['mode' => $docLines[$di]['mode'], 'gross' => $kept, 'vat' => 0.0, 'levy' => 0.0, 'lines_total' => $kept,
-                'room' => $kept, 'child' => 0.0, 'pkg' => 0.0, 'subtotal' => $kept, 'total' => $kept, 'no_room' => $drNoRoom];
+                'room' => $kept, 'child' => 0.0, 'pkg' => 0.0, 'subtotal' => $kept, 'total' => $kept, 'no_room' => $drNoRoom,
+                'cancel_lead' => $drCancelLead && !$drNoRoom];
         }
     }
     // Header for a group: the group's overall dates (earliest check-in to latest check-out), the room count and every
@@ -904,7 +1004,14 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     }
     // No room charge on the lead (a no-show / expired lead charged under group_noshow_charge): no discount row either.
     $leadNoRoom = !empty($docLines[$pkgRowIdx]['no_room']);
-    if ($leadNoRoom) {
+    // A cancelled lead prints only what was kept on cancellation: no rate-plan, package or child rows (they are inside
+    // the voided stay, not in the total); its own line says when it was cancelled and what was kept.
+    $leadCancelled = !empty($docLines[$pkgRowIdx]['cancel_lead']);
+    $leadCancelNote = $leadCancelled
+        ? rh_inv_cancel_note($pdo, $booking, (float)$docLines[$pkgRowIdx]['room'], static function ($v) use ($currency_symbol): string {
+            return rh_pdf_money((float)$v, trim((string)$currency_symbol) !== '' ? trim((string)$currency_symbol) : hotel_brand_tokens()['hotel']['currency']);
+        }) : '';
+    if ($leadNoRoom || $leadCancelled) {
         $ratePlanDiscount = 0.0;
         $ratePlanSurcharge = 0.0;
     }
@@ -918,7 +1025,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     // Quantity = the children who pay (the free ones are named in the description), so qty x unit = the amount.
     $childDocQty     = rh_child_doc_charged($docRows, $childGuests);
     // A line also prints when children stay free under a free allowance, so the guest sees the allowance applied.
-    $showChildLine   = $childSuppTotal > 0 || ($childDocLabel !== '' && stripos($childDocLabel, 'free') !== false);
+    $showChildLine   = !$leadCancelled && ($childSuppTotal > 0 || ($childDocLabel !== '' && stripos($childDocLabel, 'free') !== false));
     $tourismLevyAmt  = array_sum(array_column($docLines, 'levy'));
     $tourismLevyPct  = (float)(!empty($group_bookings)
         ? ($group_bookings[0]['tourism_levy_percent'] ?? ($booking['tourism_levy_percent'] ?? 0))
@@ -931,6 +1038,9 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         $pkgRows = $ps2->fetchAll(PDO::FETCH_ASSOC);
     } catch (PDOException $e) {
         error_log("Invoice booking_packages error: " . $e->getMessage());
+    }
+    if ($leadCancelled) {
+        $pkgRows = []; // packages are inside the voided stay
     }
 
     // VAT
@@ -1208,6 +1318,9 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         foreach (array_values($group_bookings) as $gi => $grm) {
             $gid       = (int)$grm['id'];
             $removed   = (string)($grm['rh_inv_removed'] ?? '');
+            if ($removed === '' && !empty($docLines[$gi]['cancel_lead'])) {
+                $removed = 'Cancelled'; // a fully cancelled group's lead: the same kept-only row as any cancelled room
+            }
             $noRoomChg = $removed !== '' && !empty($grm['rh_inv_no_room_charge']);
             $keptOnly  = $removed !== '' && (strtolower((string)($grm['status'] ?? '')) === 'cancelled' || $noRoomChg);
             $grmNights = (int)($grm['number_of_nights'] ?? 0);
@@ -1221,7 +1334,7 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
                 // Cancelled room that still carries money: what was kept on cancellation is its whole room charge.
                 // A deleted room (not cancelled) keeps no room charge; only its money is shown.
                 $itemRows[] = [
-                    $title . rh_inv_sub(($noRoomChg ? (!empty($grm['rh_inv_noshow_fee']) ? $removed . ' - the booked stay is not charged; the ' . strtolower($removed) . ' charge is below' : 'Deleted - no room charge') : 'Cancelled - kept on cancellation ' . $money($grmRoom)) . '; paid on this room '
+                    $title . rh_inv_sub(($noRoomChg ? (!empty($grm['rh_inv_noshow_fee']) ? $removed . ' - the booked stay is not charged; the ' . strtolower($removed) . ' charge is below' : 'Deleted - no room charge') : rh_inv_cancel_note($pdo, $grm, $grmRoom, $money)) . '; paid on this room '
                         . $money((float)($grm['rh_inv_paid'] ?? 0)) . ' (in the payments below)'),
                     rh_pdf_e('1'),
                     rh_pdf_e($money($grmRoom)),
@@ -1265,6 +1378,17 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
             foreach ($rest as $fc) {
                 $itemRows[] = $fcRow($fc);
             }
+        }
+    } elseif ($leadCancelled) {
+        // Cancelled booking: only what was kept on cancellation (the booked stay is not billed), then its extras.
+        $itemRows[] = [
+            rh_pdf_e($booking['room_name']) . rh_inv_sub($leadCancelNote),
+            rh_pdf_e('1'),
+            rh_pdf_e($money($roomSubtotal)),
+            rh_pdf_e($money($roomSubtotal)),
+        ];
+        foreach ($folioCharges as $fc) {
+            $itemRows[] = $fcRow($fc);
         }
     } else {
         $nightRate = $roomSubtotal / max(1, (int)$booking['number_of_nights']);
@@ -1622,6 +1746,9 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
         foreach (array_values($group_bookings) as $gi => $grm) {
             $gid       = (int)$grm['id'];
             $removed   = (string)($grm['rh_inv_removed'] ?? '');
+            if ($removed === '' && !empty($docLines[$gi]['cancel_lead'])) {
+                $removed = 'Cancelled'; // a fully cancelled group's lead: the same kept-only row as any cancelled room
+            }
             $noRoomChg = $removed !== '' && !empty($grm['rh_inv_no_room_charge']);
             $keptOnly  = $removed !== '' && (strtolower((string)($grm['status'] ?? '')) === 'cancelled' || $noRoomChg);
             $grmNights = (int)($grm['number_of_nights'] ?? 0);
@@ -1633,7 +1760,9 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
             $title = '<strong>' . htmlspecialchars(($removed !== '' ? $removed . ' room: ' : '') . rh_inv_room_title($grm)) . '</strong>' . $subHtml($whoWhen);
             $paidHere = $currency_symbol . ' ' . number_format((float)($grm['rh_inv_paid'] ?? 0), 2);
             if ($keptOnly) {
-                $chargeRows .= $roomRowHtml($title . $subHtml(($noRoomChg ? (!empty($grm['rh_inv_noshow_fee']) ? $removed . ' - the booked stay is not charged; the ' . strtolower($removed) . ' charge is below' : 'Deleted - no room charge') : 'Cancelled - kept on cancellation ' . $currency_symbol . ' ' . number_format($grmRoom, 2))
+                $chargeRows .= $roomRowHtml($title . $subHtml(($noRoomChg ? (!empty($grm['rh_inv_noshow_fee']) ? $removed . ' - the booked stay is not charged; the ' . strtolower($removed) . ' charge is below' : 'Deleted - no room charge') : rh_inv_cancel_note($pdo, $grm, $grmRoom, static function ($v) use ($currency_symbol): string {
+                    return $currency_symbol . ' ' . number_format((float)$v, 2);
+                }))
                     . '; paid on this room ' . $paidHere . ' (in the payment history)'), '1', $grmRoom, $grmRoom);
             } else {
                 $brSrc = $gi === $pkgRowIdx ? $booking : $grm;
@@ -1666,9 +1795,13 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
             }
         }
     } else {
-        // Single room: exactly the rows as before.
+        // Single room: exactly the rows as before (a cancelled booking: only what was kept on cancellation).
         $nightRate = $roomSubtotal / max(1, (int)$booking['number_of_nights']);
-        $chargeRows .= $roomRowHtml(htmlspecialchars($booking['room_name']) . ' — Accommodation', (string)(int)$booking['number_of_nights'], $nightRate, $roomSubtotal);
+        if (!empty($leadCancelled)) {
+            $chargeRows .= $roomRowHtml(htmlspecialchars($booking['room_name']) . $subHtml((string)$leadCancelNote), '1', $roomSubtotal, $roomSubtotal);
+        } else {
+            $chargeRows .= $roomRowHtml(htmlspecialchars($booking['room_name']) . ' — Accommodation', (string)(int)$booking['number_of_nights'], $nightRate, $roomSubtotal);
+        }
         if ($childGuests > 0 && $showChildLine) {
             $chargeRows .= $childRowHtml($childDocLabel, (int)$childDocQty, (float)$childSuppTotal, (int)$childGuests);
         }
@@ -1917,7 +2050,7 @@ function sendPaymentInvoiceEmail(int $booking_id)
                 // Persist generated invoice against the latest payment row.
                 $update_stmt = $pdo->prepare("\n                UPDATE payments\n                SET invoice_path = ?, invoice_number = ?, invoice_generated = 1\n                WHERE id = ?\n            ");
                 if ((int)$latestPayment['id'] > 0) {
-                    $update_stmt->execute([$invoice_path, $invoice_number, (int)$latestPayment['id']]);
+                    rh_invoice_payment_save($pdo, (int)$latestPayment['id'], $invoice_path, $invoice_number);
                 } elseif (trim((string)($booking['final_invoice_number'] ?? '')) === '') {
                     // No payment row to hold the number: remember it on the booking so a re-send reuses it.
                     $pdo->prepare("UPDATE bookings SET final_invoice_number = ? WHERE id = ? AND (final_invoice_number IS NULL OR final_invoice_number = '')")
@@ -2039,14 +2172,9 @@ function sendPaymentInvoiceEmailWithCC(int $booking_id, array $ccRecipients = []
                 $invoice_number = $invoice_result['invoice_number'];
                 $invoice_path = $invoice_result['relative_path'];
 
-                // Persist generated invoice against the latest payment row.
-                $update_stmt = $pdo->prepare("
-                UPDATE payments
-                SET invoice_path = ?, invoice_number = ?, invoice_generated = 1
-                WHERE id = ?
-            ");
+                // Persist generated invoice against the latest payment row (rh_invoice_payment_save: UNIQUE-safe).
                 if ((int)$latestPayment['id'] > 0) {
-                    $update_stmt->execute([$invoice_path, $invoice_number, (int)$latestPayment['id']]);
+                    rh_invoice_payment_save($pdo, (int)$latestPayment['id'], $invoice_path, $invoice_number);
                 } elseif (trim((string)($booking['final_invoice_number'] ?? '')) === '') {
                     // No payment row to hold the number: remember it on the booking so a re-send reuses it.
                     $pdo->prepare("UPDATE bookings SET final_invoice_number = ? WHERE id = ? AND (final_invoice_number IS NULL OR final_invoice_number = '')")
@@ -2829,6 +2957,10 @@ if (!function_exists('rh_issue_paid_statement')) {
                 return ['success' => false, 'message' => 'Booking not found'];
             }
             $number = trim((string)($b['final_invoice_number'] ?? ''));
+            if ($number === '' && ($docR = rh_invoice_doc_rows($pdo, $bookingId)) !== null) {
+                // A group room without its own number: the group's one invoice number (rh_invoice_group_number).
+                $number = rh_invoice_group_number($pdo, $docR['scope_ids'], $docR['root_id']);
+            }
             // No number yet: the statement carries a STMT-<reference> label (file name / document number only). It is
             // never stored in bookings.final_invoice_number, so invoice numbering stays untouched.
             $label = $number !== '' ? $number : 'STMT-' . preg_replace('/[^A-Za-z0-9_-]+/', '-', (string)$b['booking_reference']);
