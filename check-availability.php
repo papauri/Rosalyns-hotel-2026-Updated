@@ -10,6 +10,7 @@ require_once 'config/database.php';
 require_once 'includes/pricing.php';
 require_once 'includes/guest-allocation.php';
 require_once 'includes/mixed-booking.php';
+require_once __DIR__ . '/includes/joined-quote.php'; // one joined pair per room, each priced off its own pair
 require_once __DIR__ . '/includes/demand-log.php'; // lost-demand log (never affects the answer)
 
 header('Content-Type: application/json');
@@ -35,7 +36,10 @@ $_SESSION[$rate_key][] = time();
 // 1+ adult per room) live in includes/guest-allocation.php and are shared with
 // booking.php, api/bookings.php and admin/create-booking.php.
 
-function availabilityBuildSplitPricing(PDO $pdo, array $room, string $checkIn, string $checkOut, int $nights, int $totalGuests, int $childGuests): array
+// $joinedQueue: for joined-room types, the non-overlapping pairs the party would be given (same order as
+// booking.php); room N is priced off pair N. $joinedTypeRate is the room type's own price per night, used when a
+// pair has no price of its own. Rooms beyond the queue keep $room's (headline) price.
+function availabilityBuildSplitPricing(PDO $pdo, array $room, string $checkIn, string $checkOut, int $nights, int $totalGuests, int $childGuests, array $joinedQueue = [], float $joinedTypeRate = 0.0): array
 {
     $allocationResult = ga_plan($room, $totalGuests, $childGuests);
     $roomsNeeded = (int)($allocationResult['rooms_needed'] ?? 1);
@@ -64,7 +68,10 @@ function availabilityBuildSplitPricing(PDO $pdo, array $room, string $checkIn, s
         $childrenThisRoom = (int)$allocationRoom['children'];
         $adultsThisRoom = (int)$allocationRoom['adults'];
         $occupancyType = $allocationRoom['occupancy_type'];
-        $baseRate = ga_price_for_occupancy($room, $occupancyType);
+        $roomForThisRoom = isset($joinedQueue[$index])
+            ? rh_joined_quote_room($room, $joinedQueue[$index], $joinedTypeRate)
+            : $room;
+        $baseRate = ga_price_for_occupancy($roomForThisRoom, $occupancyType);
         $dynamicResult = applyDynamicPricing($pdo, (int)$room['id'], $checkIn, $checkOut, $nights, $baseRate);
         $rateThisRoom = (float)$dynamicResult['final_price'];
         $childSupplementThisRoom = rh_child_supplement($childRule, $childrenThisRoom, (int)$nights, $rateThisRoom);
@@ -144,6 +151,8 @@ function availabilityBuildSplitPricing(PDO $pdo, array $room, string $checkIn, s
 function availabilityBuildResponse(PDO $pdo, array $room, string $checkIn, string $checkOut, DateTime $checkInDate, DateTime $checkOutDate, int $childGuests, int $totalGuests, ?int $requestedRoomsNeeded = null): array
 {
     $nights = $checkInDate->diff($checkOutDate)->days;
+    $joinedQueue = [];
+    $joinedTypeRate = (float)($room['price_per_night'] ?? 0);
 
     if (roomTypeHasActiveCombinations((int)$room['id'])) {
         $combinations = getAvailableRoomCombinations((int)$room['id'], $checkIn, $checkOut);
@@ -158,10 +167,11 @@ function availabilityBuildResponse(PDO $pdo, array $room, string $checkIn, strin
             ];
         }
 
-        $combination = $combinations[0];
-        $combinedRate = $combination['price_override'] !== null && $combination['price_override'] !== ''
-            ? (float)$combination['price_override']
-            : (float)$room['price_per_night'];
+        // Same queue booking.php reserves: pairs that share no physical room, in list order. The headline
+        // figures come from the first pair; each room of the party is priced off its own pair below.
+        $joinedQueue = rh_joined_quote_queue($combinations);
+        $combination = $joinedQueue[0] ?? $combinations[0];
+        $combinedRate = rh_joined_quote_rate($combination, $joinedTypeRate);
         $room['price_per_night'] = $combinedRate;
         $room['price_single_occupancy'] = $combinedRate;
         $room['price_double_occupancy'] = $combinedRate;
@@ -169,7 +179,7 @@ function availabilityBuildResponse(PDO $pdo, array $room, string $checkIn, strin
         $room['max_guests'] = max((int)($room['max_guests'] ?? 0), (int)($combination['max_guests_combined'] ?? 0));
     }
 
-    $splitPricing = availabilityBuildSplitPricing($pdo, $room, $checkIn, $checkOut, $nights, $totalGuests, $childGuests);
+    $splitPricing = availabilityBuildSplitPricing($pdo, $room, $checkIn, $checkOut, $nights, $totalGuests, $childGuests, $joinedQueue, $joinedTypeRate);
     $roomsNeeded = (int)($splitPricing['rooms_needed'] ?? max(1, ceil($totalGuests / max(1, (int)($room['max_guests'] ?? 1)))));
     $childRoomsNeeded = 0;
 

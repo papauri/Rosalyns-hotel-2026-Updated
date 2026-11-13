@@ -71,6 +71,13 @@ when prompted."
 - LATER (not pulled): no "Packages: +" line in the price explanation; the history test builds rows by hand and
   never calls `rh_booking_price_snapshot_clean()`.
 
+### Joined-room live quote (2026-11-14, NEXT_BUILD_ORDER step 3) — SHIPPED (hashes: see TASKS.md line)
+- Guides: no sync needed. Guest website only: a party that needs two or more joined rooms now sees a quote that
+  adds up each joined pair at its own price, the same figure the booking is saved with.
+- Assistant: no overlap (check-availability.php and the new includes/joined-quote.php are not read by includes/ai/).
+- LATER (not pulled): the quote can still say a joined type is free when fewer separate pairs are free than the
+  party needs (pairs sharing a room are counted twice); booking.php refuses at submit.
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` fails in unchanged code: claim-check self-test (Room Board "Tomorrow"; staff
   activity "4 of 3 staff accounts"), History Summary "K1,068,000," flagged; digest-recipients fail.

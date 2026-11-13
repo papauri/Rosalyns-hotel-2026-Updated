@@ -66,6 +66,7 @@ $suites = [
     'System logs staff activity (timeline, summary, hook)' => 'scripts/tests/system_logs_activity.php',
     'Payment limits'        => 'scripts/tests/payment_limits.php',
     'Booked rate line'      => 'scripts/tests/booked_rate_line_test.php',
+    'Joined-room live quote' => 'scripts/tests/joined_quote.php',
     'Rehearsal fixes'       => 'scripts/tests/rehearsal_fixes.php',
     'Shop returns + wording' => 'scripts/tests/shop_returns.php',
     'Stock loss prevention' => 'scripts/tests/stock_loss.php',
