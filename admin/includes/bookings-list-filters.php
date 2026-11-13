@@ -393,7 +393,9 @@ if (!function_exists('rh_bk_valid_date')) {
         }
         $p = strtolower(trim((string)$payment_status));
         $s = strtolower(trim((string)$status));
-        if ($p === 'refunded' || in_array($s, ['cancelled', 'no-show', 'expired'], true)) {
+        // A no-show keeps billing its stay (owner 2026-11-13: a no-show pays 100%), so what it still owes is shown, as in
+        // Still owed. Cancelled / expired stay out here.
+        if ($p === 'refunded' || in_array($s, ['cancelled', 'expired'], true)) {
             return 0.0;
         }
         return ($p === 'partial' || (float)$amount_paid > $tol) ? $due : 0.0;
