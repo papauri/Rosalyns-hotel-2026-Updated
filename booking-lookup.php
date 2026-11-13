@@ -48,7 +48,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['lookup'])) {
                            r.short_description as room_description
                     FROM bookings b
                     JOIN rooms r ON b.room_id = r.id
-                    WHERE b.booking_reference = ? AND b.guest_email = ?
+                    WHERE b.booking_reference = ? AND b.guest_email = ? AND b.deleted_at IS NULL
                 ");
                 $stmt->execute([$reference, $email]);
                 $booking = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -88,14 +88,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['cancel_booking'])) {
                     SELECT b.*, r.name as room_name
                     FROM bookings b
                     JOIN rooms r ON b.room_id = r.id
-                    WHERE b.booking_reference = ? AND b.guest_email = ?
+                    WHERE b.booking_reference = ? AND b.guest_email = ? AND b.deleted_at IS NULL
                 ");
                 $stmt->execute([$reference, $email]);
                 $cancel_booking = $stmt->fetch(PDO::FETCH_ASSOC);
 
                 if (!$cancel_booking) {
                     $error = 'Booking not found.';
-                } elseif (in_array($cancel_booking['status'], ['cancelled', 'checked-in', 'checked-out', 'no-show'])) {
+                } elseif (in_array($cancel_booking['status'], ['cancelled', 'expired', 'checked-in', 'checked-out', 'no-show'])) {
                     $error = 'This booking cannot be cancelled (current status: ' . ucfirst($cancel_booking['status']) . ').';
                 } else {
                     // Enforce cancellation notice window before proceeding
@@ -251,14 +251,16 @@ try {
 
                     <div class="result-grid">
                         <?php
-                        // One party in rooms of different types (linked by primary_booking_id): list every room with its type.
+                        // One party in several rooms (linked by primary_booking_id, same or different types): list every
+                        // room. Soft-deleted rooms are left out; cancelled rooms stay listed with their status but do not
+                        // count in the party's guests or total.
                         $lookup_group_rooms = [];
                         try {
                             $lookup_lead_id = (int)($booking['primary_booking_id'] ?: $booking['id']);
                             $lookup_group_stmt = $pdo->prepare("
-                                SELECT b.id, b.booking_reference, b.number_of_guests, b.total_with_vat, b.total_amount, b.vat_amount, r.name AS room_name
+                                SELECT b.id, b.booking_reference, b.status, b.number_of_guests, b.total_with_vat, b.total_amount, b.vat_amount, r.name AS room_name
                                 FROM bookings b JOIN rooms r ON b.room_id = r.id
-                                WHERE (b.id = ? OR b.primary_booking_id = ?) AND b.guest_email = ?
+                                WHERE (b.id = ? OR b.primary_booking_id = ?) AND b.guest_email = ? AND b.deleted_at IS NULL
                                 ORDER BY b.id ASC
                             ");
                             $lookup_group_stmt->execute([$lookup_lead_id, $lookup_lead_id, $booking['guest_email']]);
@@ -266,16 +268,26 @@ try {
                         } catch (PDOException $e) {
                             error_log('Booking lookup group query: ' . $e->getMessage());
                         }
-                        $lookup_mixed = count($lookup_group_rooms) > 1
-                            && count(array_unique(array_column($lookup_group_rooms, 'room_name'))) > 1;
+                        $lookup_is_group = count($lookup_group_rooms) > 1;
+                        // The rooms that count in the party's guests and total: every room that is not cancelled. If every
+                        // room is cancelled, all of them (as a single cancelled booking shows its own total).
+                        $lookup_counted_rooms = array_values(array_filter($lookup_group_rooms, static function ($row) {
+                            return ($row['status'] ?? '') !== 'cancelled';
+                        }));
+                        if (!$lookup_counted_rooms) {
+                            $lookup_counted_rooms = $lookup_group_rooms;
+                        }
                         ?>
                         <div class="result-item">
                             <label>Room</label>
-                            <?php if ($lookup_mixed): ?>
+                            <?php if ($lookup_is_group): ?>
                                 <div class="value">
                                     <?php foreach ($lookup_group_rooms as $lookup_room_line): ?>
                                         <div><?php echo htmlspecialchars($lookup_room_line['room_name']); ?>
-                                            <small>(<?php echo (int)$lookup_room_line['number_of_guests']; ?> guest<?php echo (int)$lookup_room_line['number_of_guests'] === 1 ? '' : 's'; ?>, <?php echo htmlspecialchars($lookup_room_line['booking_reference']); ?>)</small></div>
+                                            <small>(<?php echo (int)$lookup_room_line['number_of_guests']; ?> guest<?php echo (int)$lookup_room_line['number_of_guests'] === 1 ? '' : 's'; ?>, <?php echo htmlspecialchars($lookup_room_line['booking_reference']); ?>)</small>
+                                            <?php if (($lookup_room_line['status'] ?? '') === 'cancelled'): ?>
+                                                <span class="status-badge status-cancelled">Cancelled</span>
+                                            <?php endif; ?></div>
                                     <?php endforeach; ?>
                                 </div>
                             <?php else: ?>
@@ -300,21 +312,17 @@ try {
                         </div>
                         <div class="result-item">
                             <label>Guests</label>
-                            <div class="value"><?php echo $lookup_mixed ? (int)array_sum(array_column($lookup_group_rooms, 'number_of_guests')) : $booking['number_of_guests']; ?></div>
+                            <div class="value"><?php echo $lookup_is_group ? (int)array_sum(array_column($lookup_counted_rooms, 'number_of_guests')) : (int)$booking['number_of_guests']; ?></div>
                         </div>
                         <div class="result-item">
                             <label>Total Amount</label>
                             <div class="value" style="color: var(--gold);"><?php echo $currency_symbol; ?><?php
-                                // What the guest owes (VAT-inclusive); older rows without it fall back to total_amount.
-                                $lookup_owed = (float)($booking['total_with_vat'] ?? 0);
-                                if ($lookup_owed <= 0) {
-                                    $lookup_owed = rh_booking_full_total($booking);
-                                }
-                                if ($lookup_mixed) { // the whole party, every room
+                                // What the guest owes (VAT-inclusive; older rows without it: total_amount + VAT).
+                                $lookup_owed = rh_booking_full_total($booking);
+                                if ($lookup_is_group) { // the whole party: every room that is not cancelled
                                     $lookup_owed = 0.0;
-                                    foreach ($lookup_group_rooms as $lookup_room_line) {
-                                        $line_owed = (float)($lookup_room_line['total_with_vat'] ?? 0);
-                                        $lookup_owed += $line_owed > 0 ? $line_owed : (float)$lookup_room_line['total_amount'] + (float)$lookup_room_line['vat_amount'];
+                                    foreach ($lookup_counted_rooms as $lookup_room_line) {
+                                        $lookup_owed += rh_booking_full_total($lookup_room_line);
                                     }
                                 }
                                 echo number_format($lookup_owed, 0);

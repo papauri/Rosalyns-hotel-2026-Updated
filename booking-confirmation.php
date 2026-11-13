@@ -91,9 +91,12 @@ try {
 <head>
     <meta charset="UTF-8">
     <?php
+    // Same rule as the page heading: a pending booking has been received, not confirmed.
+    $conf_title_received = !empty($booking) && ($booking['status'] ?? '') === 'pending' && empty($booking['is_tentative']);
+    $conf_title_tentative = !empty($booking) && (($booking['status'] ?? '') === 'tentative' || !empty($booking['is_tentative']));
     $seo_data = [
-        'title' => 'Booking Confirmed | ' . $site_name,
-        'description' => "Your booking at {$site_name} has been confirmed.",
+        'title' => ($conf_title_tentative ? 'Tentative Booking Received' : ($conf_title_received ? 'Booking Received' : 'Booking Confirmed')) . ' | ' . $site_name,
+        'description' => "Your booking at {$site_name} has been " . (($conf_title_tentative || $conf_title_received) ? 'received.' : 'confirmed.'),
         'noindex' => true,
         'type' => 'website'
     ];
@@ -134,7 +137,7 @@ try {
             <?php
             $is_tentative = ($booking['status'] === 'tentative' || $booking['is_tentative'] == 1);
             $icon_class   = $is_tentative ? 'fa-clock' : 'fa-check-circle';
-            $heading      = $is_tentative ? 'Tentative Booking Received' : 'Booking Confirmed';
+            $heading      = $is_tentative ? 'Tentative Booking Received' : ($booking['status'] === 'pending' ? 'Booking Received' : 'Booking Confirmed');
             $subtitle     = $is_tentative
                 ? 'Your room has been placed on a temporary hold. We\'ll send you a reminder before it expires.'
                 : 'Thank you for choosing ' . htmlspecialchars($site_name) . '. Your reservation has been received and is being reviewed.';

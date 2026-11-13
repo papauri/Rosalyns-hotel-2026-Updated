@@ -29,7 +29,7 @@ The owner starts EVERY session with the same prompt: **"Run the next step of .cl
 | # | Status | Step | Read | Builder -> gate |
 |---|---|---|---|---|
 | 0 | SHIPPED 2026-11-14 7a4cadc + dee8489 + 976db55 (other session; its LATER items stay in TASKS.md) | Wait: Hotel Settings change log + settings page order/search shipped (other session) | TASKS.md "DOING 2026-11-14 ... logs lead" | check only |
-| 1 | TODO | B1 Guest booking lookup correctness (+ "Booking Received" heading) | GUEST_BOOKING_ALIGNMENT_PLAN.md F1, F5, F8, F11, §3 B1 | dept-guest-site-lead -> dept-accounting-lead + qa-auditor |
+| 1 | DOING 2026-11-14 | B1 Guest booking lookup correctness (+ "Booking Received" heading) | GUEST_BOOKING_ALIGNMENT_PLAN.md F1, F5, F8, F11, §3 B1 | dept-guest-site-lead -> dept-accounting-lead + qa-auditor |
 | 2 | TODO | B3 History price snapshot on online bookings | GUEST_BOOKING_ALIGNMENT_PLAN.md F4, §3 B3 | dept-rooms-lead -> qa-auditor opus |
 | 3 | TODO | F7 Live quote for 2+ joined room pairs | GUEST_BOOKING_ALIGNMENT_PLAN.md F7 | dept-rooms-lead -> qa-auditor opus |
 | 4 | TODO | Cancellation & no-show policies (+ F2 whole-booking guest cancel) | CANCELLATION_POLICY_SPEC.md | one Opus builder -> dept-accounting-lead + qa-auditor opus |
