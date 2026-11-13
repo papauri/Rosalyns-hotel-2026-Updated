@@ -6,6 +6,7 @@
 
 require_once 'admin-init.php';
 require_once '../config/email.php';
+require_once __DIR__ . '/../includes/settings-change-log.php'; // System Logs > Settings changes
 
 $csrf_token = $csrf_token ?? generateCsrfToken();
 
@@ -124,8 +125,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !isset($_POST['test_whatsapp'])) {
             ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)
         ");
         
-        foreach ($settings as $key => $value) {
-            $stmt->execute([$key, $value]);
+        // Settings change log (System Logs > Settings changes): one row per setting that changed, written in the same
+        // transaction. The old-name copies (whatsapp_meta_*, whatsapp_hotel_number, whatsapp_notifications_enabled)
+        // mirror a setting already logged, so they are not logged twice. The token is encrypted: it shows as hidden.
+        $waLogMirrors = ['whatsapp_notifications_enabled' => true, 'whatsapp_meta_phone_number_id' => true,
+            'whatsapp_meta_business_account_id' => true, 'whatsapp_hotel_number' => true, 'whatsapp_meta_access_token' => true];
+        rh_settings_log_begin($user);
+        try {
+            $waLogOld = [];
+            foreach ($settings as $key => $value) {
+                if (!isset($waLogMirrors[$key])) {
+                    $waLogOld[$key] = rh_settings_log_old($pdo, 'site_settings', $key);
+                }
+            }
+            foreach ($settings as $key => $value) {
+                $stmt->execute([$key, $value]);
+                if (($waLogOld[$key] ?? null) !== null) {
+                    rh_settings_log_record('site_settings', $key, $waLogOld[$key]['value'], $value);
+                }
+            }
+        } finally {
+            rh_settings_log_end();
         }
         
         $pdo->commit();

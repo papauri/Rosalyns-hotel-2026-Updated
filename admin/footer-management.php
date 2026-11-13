@@ -10,6 +10,7 @@ require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once 'includes/admin-modal.php';
 require_once __DIR__ . '/../includes/form-validation.php';
+require_once __DIR__ . '/../includes/settings-change-log.php'; // System Logs > Settings changes
 
 if (!hasPermission((int)$user['id'], 'footer_management')) {
     rhDenyAndRedirectHome((int)$_SESSION['admin_user_id'], (string)($_SESSION['admin_role'] ?? ''), basename($_SERVER['PHP_SELF']));
@@ -282,8 +283,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                foreach ($fields as $k => $v) {
-                    updateSetting($k, $v);
+                // Settings change log (System Logs > Settings changes): these writes only, ended in finally.
+                rh_settings_log_begin($user);
+                try {
+                    foreach ($fields as $k => $v) {
+                        updateSetting($k, $v);
+                    }
+                } finally {
+                    rh_settings_log_end();
                 }
                 // Bust site settings cache
                 if (function_exists('clearCache')) {

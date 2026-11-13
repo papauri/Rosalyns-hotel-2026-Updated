@@ -7,6 +7,7 @@ require_once __DIR__ . '/includes/receivables.php';
 require_once __DIR__ . '/includes/finance-refunds.php'; // the one refund rule: gross total_amount, completed + processing
 require_once '../config/credit-notes.php';
 require_once __DIR__ . '/includes/review-panel.php'; // the Decisions panel: prints nothing unless switched on and allowed
+require_once __DIR__ . '/../includes/settings-change-log.php'; // System Logs > Settings changes (VAT save)
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -140,10 +141,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_vat_settings']))
                 : $postedVatMode;
 
             $oldVatMode = $vatModeNow;
-            $savedEnabled = updateSetting('vat_enabled', $vatEnabledValue);
-            $savedRate = updateSetting('vat_rate', (string)$vatRateValue);
-            $savedNumber = updateSetting('vat_number', $vatNumberValue);
-            $savedMode = updateSetting('vat_pricing_mode', $vatPricingModeValue);
+            // Settings change log (System Logs > Settings changes): these four writes only, ended in finally.
+            rh_settings_log_begin($user);
+            try {
+                $savedEnabled = updateSetting('vat_enabled', $vatEnabledValue);
+                $savedRate = updateSetting('vat_rate', (string)$vatRateValue);
+                $savedNumber = updateSetting('vat_number', $vatNumberValue);
+                $savedMode = updateSetting('vat_pricing_mode', $vatPricingModeValue);
+            } finally {
+                rh_settings_log_end();
+            }
 
             if (!$savedEnabled || !$savedRate || !$savedNumber || !$savedMode) {
                 throw new Exception('Unable to save VAT settings right now.');

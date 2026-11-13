@@ -5,6 +5,7 @@ header('Content-Type: application/json; charset=utf-8');
 
 require_once __DIR__ . '/api-init.php';
 require_once __DIR__ . '/../includes/module-presets.php';
+require_once __DIR__ . '/../../includes/settings-change-log.php'; // System Logs > Settings changes
 /** @var array $user */
 /** @var PDO $pdo */
 
@@ -63,12 +64,19 @@ try {
 
     // Guest-facing pages that aren't derivable from module flags alone
     // (e.g. POS being on for a gym till doesn't mean "show a restaurant page").
+    // Settings change log (System Logs > Settings changes, page Modules): these two writes only, ended in finally.
+    // Its rows are inside the transaction, so a rolled-back preset leaves no change rows either.
     $front_end = $preset['front_end'] ?? [];
-    if (isset($front_end['restaurant_page'])) {
-        updateSetting('restaurant_system_enabled', $front_end['restaurant_page'] ? '1' : '0');
-    }
-    if (isset($front_end['events_page'])) {
-        updateSetting('events_system_enabled', $front_end['events_page'] ? '1' : '0');
+    rh_settings_log_begin($user, null, 'module-settings.php');
+    try {
+        if (isset($front_end['restaurant_page'])) {
+            updateSetting('restaurant_system_enabled', $front_end['restaurant_page'] ? '1' : '0');
+        }
+        if (isset($front_end['events_page'])) {
+            updateSetting('events_system_enabled', $front_end['events_page'] ? '1' : '0');
+        }
+    } finally {
+        rh_settings_log_end();
     }
 
     // Seed POS starter categories for the business type. Additive-only: a
@@ -96,7 +104,12 @@ try {
 
     // Remember which preset was chosen so the page can highlight it even if
     // individual switches are changed afterwards.
-    updateSetting('business_preset', $preset_key);
+    rh_settings_log_begin($user, null, 'module-settings.php');
+    try {
+        updateSetting('business_preset', $preset_key);
+    } finally {
+        rh_settings_log_end();
+    }
 
     if (function_exists('rh_log_event')) {
         rh_log_event('admin/module-settings', 'info',

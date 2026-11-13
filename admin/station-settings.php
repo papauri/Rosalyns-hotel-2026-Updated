@@ -5,6 +5,7 @@
 require_once 'admin-init.php';
 require_once __DIR__ . '/../includes/alert.php';
 require_once __DIR__ . '/../includes/station-hours.php';
+require_once __DIR__ . '/../includes/settings-change-log.php'; // System Logs > Settings changes
 
 /** @var PDO $pdo */
 /** @var array $user */
@@ -40,9 +41,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if ($error === '') {
-            foreach ($updates as $stationKey => $hours) {
-                updateSetting(rh_station_setting_key($stationKey, 'opens_at'), $hours['opens_at']);
-                updateSetting(rh_station_setting_key($stationKey, 'closes_at'), $hours['closes_at']);
+            // Settings change log (System Logs > Settings changes): these writes only, ended in finally.
+            rh_settings_log_begin($user);
+            try {
+                foreach ($updates as $stationKey => $hours) {
+                    updateSetting(rh_station_setting_key($stationKey, 'opens_at'), $hours['opens_at']);
+                    updateSetting(rh_station_setting_key($stationKey, 'closes_at'), $hours['closes_at']);
+                }
+            } finally {
+                rh_settings_log_end();
             }
 
             rh_log_event('station_settings', 'info', 'Station hours updated', ['stations' => $updates]);

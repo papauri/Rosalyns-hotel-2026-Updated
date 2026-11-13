@@ -29,7 +29,7 @@ $baP = $lpEmpty('ba');   // Booking Changes Audit
 $emP = $lpEmpty('em');   // Emails sent
 $lgP = $lpEmpty('lg');   // Recent Logins
 $aaP = $lpEmpty('aa');   // Recent Admin Activity
-$stP = $lpEmpty('st');   // Hotel Settings changes
+$stP = $lpEmpty('st');   // Settings changes
 $posP = $lpEmpty('pos'); // POS Orders
 $kdsP = $lpEmpty('kds'); // Display Screens: station events
 $smP = $lpEmpty('sm');   // Display Screens: station messages
@@ -300,11 +300,21 @@ if (rh_logs_table_exists($pdo, 'admin_activity_log')) {
     }
 }
 
-// Hotel Settings changes (owner 2026-11-14): one 'setting_change' row per setting that changed (includes/settings-change-log.php).
+// Settings changes (owner 2026-11-14): one 'setting_change' row per setting that changed on a settings screen
+// (includes/settings-change-log.php). Page filter st_screen: one of rh_settings_log_pages(), else every page.
 $settingChanges = [];
+$stScreen = (string)($_GET['st_screen'] ?? '');
+if (!isset(rh_settings_log_pages()[$stScreen])) {
+    $stScreen = '';
+}
 if (rh_logs_table_exists($pdo, 'admin_activity_log')) {
     try {
         [$saW, $saA] = rh_sa_panel_clause($saF, 'created_at', 'user_id', 'AND');
+        if ($stScreen !== '') {
+            // Rows written before the page was stored start at "key=" and all came from Hotel Settings.
+            $saW .= $stScreen === 'booking-settings.php' ? " AND (details LIKE ? OR details LIKE 'key=%')" : ' AND details LIKE ?';
+            $saA[] = 'page=' . $stScreen . ';%';
+        }
         [$stP, $settingChanges] = rh_lp_fetch($pdo, $_GET, 'st', "SELECT 1 FROM admin_activity_log WHERE action = 'setting_change'{$saW}",
             "SELECT id, user_id, username, details, created_at FROM admin_activity_log WHERE action = 'setting_change'{$saW} ORDER BY created_at DESC, id DESC", $saA);
     } catch (Throwable $e) {
@@ -1166,10 +1176,28 @@ $saLines = $saP['unknown'] ? 'count unavailable'
         </div>
 
         <div class="log-section" id="log-settings">
-            <h3><i class="fas fa-sliders"></i> Hotel Settings changes</h3>
-            <p class="log-intro">Every setting changed on Hotel Settings: who changed it, when, and what it was before and after. Newest first. Passwords, API keys and other secrets show as hidden.</p>
+            <h3><i class="fas fa-sliders"></i> Settings changes</h3>
+            <p class="log-intro">Every setting changed on a settings page (Hotel Settings, Automated Emails, VAT, Modules, Station Hours, WhatsApp, Facebook, Gym, Website Footer): which page, who changed it, when, and what it was before and after. Newest first. Passwords, access tokens, API keys and other secrets show as hidden.</p>
+            <form method="get" class="log-toolbar" action="system-logs.php#log-settings">
+                <?php // A new page filter starts this list at page 1; everything else on the page stays.
+                foreach ($_GET as $stKeepKey => $stKeepVal): if (is_string($stKeepKey) && is_string($stKeepVal) && strpos($stKeepKey, 'st_') !== 0 && $stKeepKey !== 'export' && preg_match('/^[a-z_]{1,20}$/', $stKeepKey)): ?>
+                    <input type="hidden" name="<?php echo htmlspecialchars($stKeepKey); ?>" value="<?php echo htmlspecialchars($stKeepVal); ?>">
+                <?php endif; endforeach; ?>
+                <input type="hidden" name="st_size" value="<?php echo (int)$stP['size']; ?>">
+                <label>Page
+                    <select name="st_screen">
+                        <option value="">Every settings page</option>
+                        <?php foreach (rh_settings_log_pages() as $stFile => $stName): ?>
+                            <option value="<?php echo htmlspecialchars($stFile); ?>" <?php echo $stScreen === $stFile ? 'selected' : ''; ?>><?php echo htmlspecialchars($stName); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </label>
+                <button type="submit"><i class="fas fa-filter"></i> Show</button>
+            </form>
             <?php if (!$settingChanges): ?>
-                <p class="log-empty">No Hotel Settings changes recorded yet. Changes are listed from the day this log was switched on.</p>
+                <p class="log-empty"><?php echo $stScreen !== ''
+                    ? 'No changes recorded on ' . htmlspecialchars(rh_settings_log_page_name($stScreen)) . ' yet. Choose &ldquo;Every settings page&rdquo; to see the others.'
+                    : 'No settings changes recorded yet. Changes are listed from the day this log was switched on for each page.'; ?></p>
             <?php else: ?>
                 <div class="log-scroll" data-disable-auto-pagination>
                     <table class="log-table">
@@ -1177,7 +1205,8 @@ $saLines = $saP['unknown'] ? 'count unavailable'
                             <tr>
                                 <th>When<span class="log-th-help">Hotel time of the save</span></th>
                                 <th>Who<span class="log-th-help">The staff member signed in when it was saved</span></th>
-                                <th>Setting<span class="log-th-help">The setting as it is named on Hotel Settings</span></th>
+                                <th>Page<span class="log-th-help">The settings page the change was saved on</span></th>
+                                <th>Setting<span class="log-th-help">The setting as it is named on that page</span></th>
                                 <th>Before<span class="log-th-help">The saved value before the change; (blank) = empty</span></th>
                                 <th>After<span class="log-th-help">The value saved; long text is cut at 120 characters</span></th>
                             </tr>
@@ -1192,8 +1221,9 @@ $saLines = $saP['unknown'] ? 'count unavailable'
                                     <td class="log-nowrap"><?php echo htmlspecialchars(substr((string)$stRow['created_at'], 0, 16)); ?></td>
                                     <td><?php echo htmlspecialchars($stWho); ?></td>
                                     <?php if ($stParsed === null): ?>
-                                        <td colspan="3"><?php echo htmlspecialchars((string)$stRow['details']); ?></td>
+                                        <td colspan="4"><?php echo htmlspecialchars((string)$stRow['details']); ?></td>
                                     <?php else: ?>
+                                        <td><?php echo htmlspecialchars(rh_settings_log_page_name($stParsed['page'])); ?></td>
                                         <td><?php echo htmlspecialchars($stParsed['label']); ?></td>
                                         <?php foreach (['old', 'new'] as $stSide): ?>
                                             <td class="em-copy"><?php echo $stParsed[$stSide] === '' ? '<span class="em-none">(blank)</span>' : htmlspecialchars($stParsed[$stSide]); ?></td>
@@ -1205,7 +1235,7 @@ $saLines = $saP['unknown'] ? 'count unavailable'
                     </table>
                 </div>
             <?php endif; ?>
-            <?php if ($settingChanges): echo rh_lp_render('system-logs.php', $_GET, $stP, count($settingChanges), 'log-settings', 'Hotel Settings change pages', rh_lp_cap_note($stP)); endif; ?>
+            <?php if ($settingChanges): echo rh_lp_render('system-logs.php', $_GET, $stP, count($settingChanges), 'log-settings', 'Settings change pages', rh_lp_cap_note($stP)); endif; ?>
         </div>
 
         <?php

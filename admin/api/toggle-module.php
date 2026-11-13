@@ -4,6 +4,7 @@ declare(strict_types=1);
 header('Content-Type: application/json; charset=utf-8');
 
 require_once __DIR__ . '/api-init.php';
+require_once __DIR__ . '/../../includes/settings-change-log.php'; // System Logs > Settings changes
 /** @var array $user */
 /** @var PDO $pdo */
 
@@ -44,9 +45,19 @@ if ($module_key === 'data_import') {
         exit;
     }
     try {
-        $up = $pdo->prepare("INSERT INTO site_settings (setting_key, setting_value, setting_group) VALUES ('data_import_enabled', ?, 'import')
-                             ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
-        $up->execute([$is_enabled ? '1' : '0']);
+        // Settings change log (System Logs > Settings changes, page Modules): this one write only, ended in finally.
+        rh_settings_log_begin($user, null, 'module-settings.php');
+        try {
+            $diOld = rh_settings_log_old($pdo, 'site_settings', 'data_import_enabled');
+            $up = $pdo->prepare("INSERT INTO site_settings (setting_key, setting_value, setting_group) VALUES ('data_import_enabled', ?, 'import')
+                                 ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)");
+            $up->execute([$is_enabled ? '1' : '0']);
+            if ($diOld !== null) {
+                rh_settings_log_record('site_settings', 'data_import_enabled', $diOld['value'], $is_enabled ? '1' : '0');
+            }
+        } finally {
+            rh_settings_log_end();
+        }
         if (function_exists('deleteCache')) {
             deleteCache('setting_data_import_enabled');
         }
@@ -66,7 +77,13 @@ if ($module_key === 'data_import') {
 
 if (isset($front_end_flags[$module_key])) {
     try {
-        updateSetting($front_end_flags[$module_key], $is_enabled ? '1' : '0');
+        // Settings change log (System Logs > Settings changes, page Modules): this one write only, ended in finally.
+        rh_settings_log_begin($user, null, 'module-settings.php');
+        try {
+            updateSetting($front_end_flags[$module_key], $is_enabled ? '1' : '0');
+        } finally {
+            rh_settings_log_end();
+        }
         if (function_exists('rh_log_event')) {
             rh_log_event('admin/module-settings', $is_enabled ? 'info' : 'warning',
                 'Guest page ' . ($is_enabled ? 'enabled' : 'disabled') . ': ' . $module_key,

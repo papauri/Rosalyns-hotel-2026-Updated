@@ -45,7 +45,7 @@ when prompted."
 - Assistant: any Assistant links to `booking-settings.php#<anchor>` keep working (anchors unchanged);
   check only.
 
-### Settings change log on the other settings pages (2026-11-14) — IN PROGRESS, not shipped yet
+### Settings change log on the other settings pages (2026-11-14) — SHIPPED (hashes: see TASKS.md line)
 - Guides: System Logs section renamed "Settings changes" with a Page column; covers Automated
   Emails, VAT (Accounting), Modules, Station hours, WhatsApp, Facebook, Gym slots/reminders, Footer.
 - Assistant: `ai-settings.php` (Assistant Settings) is AI-lead only — decide whether its saves

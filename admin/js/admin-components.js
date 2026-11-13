@@ -14,11 +14,12 @@
     // MODAL CONTROLLER
     // ============================================
 
-    // Column header text for card labels: the text of the <th> without its "?" help dot.
+    // Column header text for card labels: the text of the <th> without its "?" help dot or its helper line
+    // (.log-th-help / .em-th-help on System Logs), so a phone card shows only the column name.
     window.rhHeaderLabel = function (th) {
         if (!th) return '';
         const copy = th.cloneNode(true);
-        copy.querySelectorAll('.help').forEach((dot) => dot.remove());
+        copy.querySelectorAll('.help, .log-th-help, .em-th-help').forEach((dot) => dot.remove());
         return (copy.textContent || '').replace(/\s+/g, ' ').trim();
     };
 

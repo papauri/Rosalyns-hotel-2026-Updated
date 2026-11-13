@@ -20,6 +20,7 @@ require_once __DIR__ . '/includes/gym-billing-lib.php';
 require_once __DIR__ . '/includes/gym-classes-lib.php';
 require_once __DIR__ . '/includes/gym-schedule-lib.php';
 require_once __DIR__ . '/../includes/form-validation.php';
+require_once __DIR__ . '/../includes/settings-change-log.php'; // System Logs > Settings changes
 require_once __DIR__ . '/includes/log-pager.php'; // rh_lp_page_size: visit log rows per page
 
 /** @var PDO $pdo */
@@ -605,8 +606,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gm_action'])) {
             if ($days < 1 || $days > 30) {
                 $gm_json(false, 'Reminder days must be between 1 and 30.');
             }
-            updateSetting('gym_reminder_enabled', $enabled);
-            updateSetting('gym_reminder_days', (string)$days);
+            // Settings change log (System Logs > Settings changes): these writes only, ended before the JSON reply exits.
+            rh_settings_log_begin($user);
+            try {
+                updateSetting('gym_reminder_enabled', $enabled);
+                updateSetting('gym_reminder_days', (string)$days);
+            } finally {
+                rh_settings_log_end();
+            }
             $gm_json(true, $enabled === '1'
                 ? 'Renewal reminders on — members are emailed ' . $days . ' day(s) before expiry.'
                 : 'Renewal reminders switched off.');

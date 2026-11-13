@@ -12,6 +12,7 @@
 require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once __DIR__ . '/includes/gym-schedule-lib.php';
+require_once __DIR__ . '/../includes/settings-change-log.php'; // System Logs > Settings changes
 
 /** @var PDO $pdo */
 /** @var array $user */
@@ -46,10 +47,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gs_action'])) {
             $capacity = max(1, min(1000, (int)($_POST['capacity'] ?? 20)));
             $duration = max(15, min(240, (int)($_POST['duration'] ?? 60)));
             $advance  = max(0, min(60, (int)($_POST['advance_days'] ?? 7)));
-            updateSetting('gym_slot_booking_enabled', $enabled);
-            updateSetting('gym_slot_capacity', (string)$capacity);
-            updateSetting('gym_slot_duration_minutes', (string)$duration);
-            updateSetting('gym_slot_advance_days', (string)$advance);
+            // Settings change log (System Logs > Settings changes): these writes only, ended before the JSON reply exits.
+            rh_settings_log_begin($user);
+            try {
+                updateSetting('gym_slot_booking_enabled', $enabled);
+                updateSetting('gym_slot_capacity', (string)$capacity);
+                updateSetting('gym_slot_duration_minutes', (string)$duration);
+                updateSetting('gym_slot_advance_days', (string)$advance);
+            } finally {
+                rh_settings_log_end();
+            }
             $gs_json(true, 'Slot booking settings saved.');
         }
 

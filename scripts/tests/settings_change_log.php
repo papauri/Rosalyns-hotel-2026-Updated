@@ -1,7 +1,7 @@
 <?php
 if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); } // never runnable over the web
 /**
- * Hotel Settings change log: includes/settings-change-log.php (context, mask, truncation, labels, parse) and how
+ * Settings change log: includes/settings-change-log.php (context, page, mask, truncation, labels, parse) and how
  * System Logs > Staff activity reads 'setting_change' rows (admin/includes/staff-activity-lib.php).
  * Usage (from the repo root): php scripts/tests/settings_change_log.php
  * Pure: no database. Rows go to a test sink instead of admin_activity_log.
@@ -27,14 +27,14 @@ check(rh_settings_log_record('site_settings', 'tourism_levy_percent', '1', '1.5'
 check(rh_settings_log_old(null, 'site_settings', 'tourism_levy_percent') === null, 'context off: no old-value read');
 
 // ---- Context on: only real changes ----
-rh_settings_log_begin(['id' => 42, 'username' => 'mercy'], $sink);
+rh_settings_log_begin(['id' => 42, 'username' => 'mercy'], $sink, 'booking-settings.php');
 check(rh_settings_log_on(), 'begin switches the context on');
 check(rh_settings_log_record('site_settings', 'tourism_levy_percent', '1.5', '1.5') === 'same' && !$rows, 'old == new: no row');
 check(rh_settings_log_record('site_settings', 'tourism_levy_percent', ' 1.5 ', '1.5') === 'same' && !$rows, 'compared as trimmed strings');
 check(rh_settings_log_record('site_settings', 'tourism_levy_percent', '1', 1.5) === 'written' && count($rows) === 1, 'a change writes one row');
 $r = $rows[0]['row'] ?? [];
 check(($r[0] ?? null) === 42 && ($r[1] ?? '') === 'mercy' && ($r[2] ?? '') === 'setting_change', 'row: user id, username, action setting_change');
-check(($r[3] ?? '') === 'key=tourism_levy_percent; label=Tourism levy %; old=1; new=1.5', 'details text', (string)($r[3] ?? ''));
+check(($r[3] ?? '') === 'page=booking-settings.php; key=tourism_levy_percent; label=Tourism levy %; old=1; new=1.5', 'details text (page in front)', (string)($r[3] ?? ''));
 check(preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', (string)($r[5] ?? '')) === 1, 'created_at is a PHP time');
 check(rh_settings_log_record('site_settings', 'tourism_levy_enabled', '', '1') === 'written', 'missing row (blank) -> 1 is a change');
 
@@ -62,7 +62,8 @@ foreach (array_unique($keys) as $k) {
     }
 }
 sort($hidden);
-check($hidden === ['reviews_brave_search_key', 'reviews_google_places_key', 'smtp_password', 'smtp_username'], 'mask: hidden keys are exactly the passwords, SMTP user and API keys', implode(',', $hidden));
+check($hidden === ['facebook_app_secret', 'facebook_page_access_token', 'reviews_brave_search_key', 'reviews_google_places_key', 'smtp_password', 'smtp_username', 'whatsapp_api_token'],
+    'mask: hidden keys are exactly the passwords, SMTP user, API keys, access tokens and the App Secret', implode(',', $hidden));
 check(rh_settings_log_sentence((string)rh_settings_log_details('smtp_password', 'x', 'y')) === 'Changed Email server password (value hidden)', 'hidden sentence never has a value');
 check(strpos((string)rh_settings_log_details('reviews_google_place_id', 'rk1:QUJD', 'rk1:REVG'), 'rk1:') === false, 'mask: an rk1: encrypted value is hidden whatever the key');
 check(strpos((string)rh_settings_log_details('email_from_name', 'Old', 'New', true), 'Old') === false, 'mask: is_encrypted hides the value');
@@ -114,7 +115,7 @@ rh_settings_log_end();
 check(!rh_settings_log_on() && rh_settings_log_record('site_settings', 'gym_email', 'b@x.com', 'c@x.com') === 'off' && count($rows) === 1, 'end switches it off (twice is safe); nothing after it');
 
 // ---- Staff activity reads the rows ----
-check((rh_sa_types()['setting_changes'] ?? '') === 'Hotel Settings changes', 'Staff activity type "Hotel Settings changes"');
+check((rh_sa_types()['setting_changes'] ?? '') === 'Settings changes', 'Staff activity type "Settings changes"');
 check(rh_sa_action_type('setting_change') === 'setting_changes' && rh_sa_action_type('settings_saved') === 'settings', 'setting_change rows get their own type');
 foreach (rh_sa_action_prefixes() as $t => $re) {
     check(preg_match('/^\^\([^()]+\)$/', $re) === 1, 'prefix shape ^(...) for ' . $t);
@@ -122,10 +123,75 @@ foreach (rh_sa_action_prefixes() as $t => $re) {
 [$oSql, $oArgs] = rh_sa_activity_type_sql('other');
 check(strpos((string)($oArgs[0] ?? ''), '|setting_change|') !== false || strpos((string)($oArgs[0] ?? ''), '^(setting_change|') === 0, '"Other" excludes setting_change rows', (string)($oArgs[0] ?? ''));
 [$tSql, $tArgs] = rh_sa_activity_type_sql('setting_changes');
-check(strpos($tSql, 'REGEXP') !== false && ($tArgs[0] ?? '') === '^(setting_change)', 'type filter Hotel Settings changes');
+check(strpos($tSql, 'REGEXP') !== false && ($tArgs[0] ?? '') === '^(setting_change)', 'type filter Settings changes');
 $desc = rh_sa_describe('activity', ['_ts' => '2026-11-14 10:00:00', '_id' => 1, '_uid' => 42, 'action' => 'setting_change',
     'details' => 'key=tourism_levy_percent; label=Tourism levy %; old=1; new=1.5'], [42 => ['name' => 'Mercy', 'username' => 'mercy', 'role' => 'manager']]);
 check($desc['type'] === 'setting_changes' && $desc['what'] === 'Changed Tourism levy % from 1 to 1.5' && $desc['where'] === 'Hotel Settings' && !$desc['screen_save'], 'timeline sentence for a setting change', $desc['what']);
+
+// ---- Other settings pages (owner 2026-11-14): the page in front of the details ----
+$rows = [];
+$_SERVER['SCRIPT_NAME'] = '/admin/automated-emails.php';
+rh_settings_log_begin(['id' => 7, 'username' => 'ops'], $sink);
+rh_settings_log_record('site_settings', 'automated_email_master', '0', '1');
+$ae = (string)($rows[0]['row'][3] ?? '');
+check(strpos($ae, 'page=automated-emails.php; key=automated_email_master; ') === 0, 'page defaults to the running script', $ae);
+$pa = rh_settings_log_parse($ae);
+check($pa !== null && $pa['page'] === 'automated-emails.php' && $pa['key'] === 'automated_email_master' && $pa['old'] === '0' && $pa['new'] === '1', 'parse a row with a page');
+check(rh_settings_log_page_name('automated-emails.php') === 'Automated Emails' && rh_settings_log_page_name('module-settings.php') === 'Modules', 'plain page names');
+check(rh_settings_log_page_name('some-new-page.php') === 'Some new page', 'page name fallback from the file name');
+$rows = [];
+rh_settings_log_begin(['id' => 7, 'username' => 'ops'], $sink, 'module-settings.php');
+rh_settings_log_record('site_settings', 'data_import_enabled', '0', '1');
+check(strpos((string)($rows[0]['row'][3] ?? ''), 'page=module-settings.php; ') === 0, 'JSON endpoints name the screen (module-settings.php)');
+$rows = [];
+$_SERVER['SCRIPT_NAME'] = '/admin/Bad Name<x>.php';
+rh_settings_log_begin(['id' => 7, 'username' => 'ops'], $sink);
+rh_settings_log_record('site_settings', 'gym_email', 'a@x.com', 'b@x.com');
+check(strpos((string)($rows[0]['row'][3] ?? ''), 'key=gym_email; ') === 0, 'an odd script name is not stored (no page)');
+unset($_SERVER['SCRIPT_NAME']);
+$old = rh_settings_log_parse('key=tourism_levy_percent; label=Tourism levy %; old=1; new=1.5');
+check($old !== null && $old['page'] === 'booking-settings.php' && $old['new'] === '1.5', 'a row written before pages were stored reads as Hotel Settings');
+check(rh_settings_log_sentence('page=station-settings.php; key=station_kitchen_opens_at; label=Kitchen opens at; old=06:00; new=07:00') === 'Changed Kitchen opens at from 06:00 to 07:00', 'sentence with a page');
+check(rh_settings_log_parse('page=automated-emails.php; action=save') === null, 'parse: a page_action text with a page is not a change');
+$descP = rh_sa_describe('activity', ['_ts' => '2026-11-14 11:00:00', '_id' => 2, '_uid' => 42, 'action' => 'setting_change',
+    'details' => 'page=automated-emails.php; key=automated_email_master; label=Automated emails master switch; old=0; new=1'], [42 => ['name' => 'Mercy', 'username' => 'mercy', 'role' => 'manager']]);
+check($descP['where'] === 'Automated Emails' && $descP['type'] === 'setting_changes', 'timeline: where = the page name', $descP['where']);
+
+// ---- New keys: labels, masks, numbers ----
+check(rh_settings_log_label('station_kitchen_opens_at') === 'Kitchen opens at' && rh_settings_log_label('station_bar_closes_at') === 'Bar closes at', 'station hour labels');
+check(rh_settings_log_label('vat_rate') === 'VAT rate %', 'VAT label');
+foreach (['whatsapp_api_token', 'whatsapp_meta_access_token', 'facebook_app_secret', 'facebook_page_access_token'] as $sk) {
+    $sd = (string)rh_settings_log_details($sk, 'plain-old', 'plain-new');
+    $pp = rh_settings_log_parse($sd);
+    check($pp !== null && $pp['hidden'] && strpos($sd, 'plain') === false, 'mask: ' . $sk . ' is hidden', $sd);
+}
+foreach (['facebook_app_id', 'facebook_page_id', 'facebook_login_config_id', 'whatsapp_phone_id', 'whatsapp_business_id'] as $nk) {
+    $pp = rh_settings_log_parse((string)rh_settings_log_details($nk, '12345', '67890'));
+    check($pp !== null && !$pp['hidden'] && $pp['new'] === '67890', 'not a secret: ' . $nk);
+}
+check(strpos((string)rh_settings_log_details('whatsapp_phone_id', 'wa1:QUJD', 'wa1:REVG'), 'wa1:') === false, 'mask: a wa1: encrypted value is hidden whatever the key');
+check(strpos((string)rh_settings_log_details('facebook_page_name', 'fb1:QUJD', 'x'), 'fb1:') === false, 'mask: an fb1: encrypted value is hidden whatever the key');
+check(rh_settings_log_details('facebook_app_secret', 'fb1:QUJD', 'fb1:QUJD') !== null, 'an fb1: secret saved again reads "changed" (cannot be compared)');
+check(rh_settings_log_details('vat_rate', '16.50', '16.5') === null && rh_settings_log_details('vat_rate', '16', '16.00') === null, 'same number written differently is no change');
+check(rh_settings_log_details('vat_rate', '16.5', '17') !== null, 'a different rate is a change');
+check(rh_settings_log_details('phone_main', '0999123456', '999123456') !== null, 'a leading zero in a phone number is a change');
+
+// ---- Context off: the helpers each page calls write nothing ----
+rh_settings_log_end();
+$rows = [];
+check(rh_settings_log_old(null, 'site_settings', 'whatsapp_enabled') === null, 'context off: page old-value read returns null (page skips record)');
+check(rh_settings_log_record('site_settings', 'facebook_posting_enabled', '0', '1') === 'off' && !$rows, 'context off: a write from these helpers is no row');
+
+// ---- Every page in scope loads the log and ends each span in finally ----
+$pageFiles = ['admin/automated-emails.php', 'admin/accounting-dashboard.php', 'admin/api/toggle-module.php', 'admin/api/apply-preset.php',
+    'admin/station-settings.php', 'admin/whatsapp-settings.php', 'admin/facebook-settings.php', 'admin/gym-schedule.php',
+    'admin/gym-members.php', 'admin/footer-management.php'];
+foreach ($pageFiles as $pf) {
+    $src = (string)file_get_contents($root . '/' . $pf);
+    $nb = substr_count($src, 'rh_settings_log_begin(');
+    $ne = preg_match_all('/finally \{\s*rh_settings_log_end\(\);/', $src);
+    check(strpos($src, "includes/settings-change-log.php'") !== false && $nb > 0 && $nb === $ne, $pf . ': requires the log, every begin ends in finally', "begin=$nb end-in-finally=$ne");
+}
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

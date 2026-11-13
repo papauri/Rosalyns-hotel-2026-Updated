@@ -15,6 +15,7 @@ require_once 'admin-init.php';
 /** @var string $csrf_token */
 
 require_once '../includes/facebook-functions.php';
+require_once __DIR__ . '/../includes/settings-change-log.php'; // System Logs > Settings changes
 
 $csrf_token = $csrf_token ?? generateCsrfToken();
 
@@ -237,15 +238,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             VALUES (?, ?)
             ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)
         ");
-        foreach ($settings as $key => $value) {
-            $stmt->execute([$key, $value]);
-        }
-        // Secrets are stored encrypted, and only when a new one was submitted.
-        if ($newSecret !== '') {
-            $stmt->execute(['facebook_app_secret', facebookEncryptSecret($newSecret)]);
-        }
-        if ($manual !== null) {
-            $stmt->execute(['facebook_page_access_token', facebookEncryptSecret($manual)]);
+        // Settings change log (System Logs > Settings changes): one row per setting that changed, written in the same
+        // transaction and ended before the connection stamps below. The App Secret and Page token show as hidden.
+        rh_settings_log_begin($user);
+        try {
+            $fbWrites = $settings;
+            // Secrets are stored encrypted, and only when a new one was submitted.
+            if ($newSecret !== '') {
+                $fbWrites['facebook_app_secret'] = facebookEncryptSecret($newSecret);
+            }
+            if ($manual !== null) {
+                $fbWrites['facebook_page_access_token'] = facebookEncryptSecret($manual);
+            }
+            $fbLogOld = [];
+            foreach ($fbWrites as $key => $value) {
+                $fbLogOld[$key] = rh_settings_log_old($pdo, 'site_settings', $key);
+            }
+            foreach ($fbWrites as $key => $value) {
+                $stmt->execute([$key, $value]);
+                if ($fbLogOld[$key] !== null) {
+                    rh_settings_log_record('site_settings', $key, $fbLogOld[$key]['value'], $value);
+                }
+            }
+        } finally {
+            rh_settings_log_end();
         }
 
         $pdo->commit();
