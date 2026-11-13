@@ -45,7 +45,7 @@ do not re-derive plans or re-scan the repo ad hoc.
   phones, addresses, companies, notes) and outbound email/WhatsApp muted. DB tests, test bookings and
   rehearsals run there. Rosalyn's stays LIVE: it is only ever a read-only source for the mirror script.
 
-- **Cost (owner 2026-11-11)**: guides + AI-lead sync only when needed and once a day (SYNC QUEUE in TASKS.md); one review per round; small tasks inline ONLY IF they cannot break logic; stop every `php -S` when not in use. Also follow the Cost rules in `.claude/DEPARTMENTS.md` (no agent for small work, haiku
+- **Cost (owner 2026-11-11)**: guides + AI Assistant always LAST and only when the owner prompts (end of day or on request; owner 2026-11-14) — every ship logs what changed for them in `.claude/GUIDES_AI_SYNC.md`, never run the sync unprompted; one review per round; small tasks inline ONLY IF they cannot break logic; stop every `php -S` when not in use. Also follow the Cost rules in `.claude/DEPARTMENTS.md` (no agent for small work, haiku
   for docs/lint/small QA, CODE_INDEX + offset reads instead of whole files, one QA per ship,
   `scripts/ship.php` to ship). Also: /compact every 3 completed tasks; /clear on phase switch; haiku for read-only/
   lint/docs, Opus for build execution and logic QA (Sonnet only for very small sure tasks); never Fable unless told;

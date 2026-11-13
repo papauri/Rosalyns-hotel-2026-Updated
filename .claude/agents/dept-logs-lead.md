@@ -48,7 +48,7 @@ files your brief names.
   is shown with the exact before/after the accounting lead expects.
 - `dept-eod-lead` — EOD recipients/CC settings changes appear in the settings log.
 - `ui-lead` — layout of System Logs sections; send UI_REQUESTs, never restyle yourself.
-- `dept-ai-lead` — only if the Assistant reads `admin_activity_log` (daily SYNC QUEUE).
+- `dept-ai-lead` — only if the Assistant reads `admin_activity_log` (add it to `.claude/GUIDES_AI_SYNC.md`; done only when the owner prompts).
 
 ## Rails
 ROSALYN'S IS LIVE: no DB tests, writing scripts or test saves there; tests and test saves run at

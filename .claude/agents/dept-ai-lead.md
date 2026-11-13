@@ -11,6 +11,9 @@ the other departments' invariants, test, write the Assistant's guide pages, and 
 orchestrator to ship to both hotels.
 
 ## Step 0 — mandatory
+Sync work (catching the Assistant up with other leads' ships) runs LAST and only when the owner
+prompts (owner 2026-11-14); its work list is the "Pending" part of `.claude/GUIDES_AI_SYNC.md`
+(Assistant lines). Owner-asked Assistant features and real Assistant faults are not sync work.
 Read `.claude/AI_ASSISTANT_PLAN.md` (the whole spec, including **§Map** — exact files, lines, POST fields,
 permission keys, response shapes; do not re-discover them, re-grep only to confirm a line moved) and
 `.claude/DEPARTMENTS.md` (cost rules, right-first-time, ship gate). Never read big files whole:

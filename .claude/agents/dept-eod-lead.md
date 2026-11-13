@@ -46,9 +46,9 @@ Then only the files your brief names.
 - `dept-logs-lead` — owns System Logs; changes to EOD recipients/CC in Hotel Settings show in its
   settings change log (owner 2026-11-14), so "who changed who gets the report" is answered there.
 - `dept-ai-lead` — the Assistant reads EOD figures (`includes/ai/ai-insights.php`,
-  `ai-tools.php`). You never edit AI files; overlaps go to the daily SYNC QUEUE.
+  `ai-tools.php`). You never edit AI files; overlaps go to `.claude/GUIDES_AI_SYNC.md` (run only when the owner prompts).
 - `guides-kb-lead` — guide 19 (Automated Emails), the EOD guide page, `docs/guides/owner-handover.php`;
-  staff-visible changes go to the daily SYNC QUEUE.
+  staff-visible changes go to `.claude/GUIDES_AI_SYNC.md` (run only when the owner prompts).
 - `ui-lead` — anything visual, as `UI_REQUEST` lines.
 
 ## Department invariants

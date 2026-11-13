@@ -162,11 +162,12 @@ The feature freeze in BUILD_PLAN.md ("PRODUCTION READINESS GATE") still stands. 
    If port 8000 is already taken by a plain `php -S` (no router), use another port and set
    `BASE=http://localhost:<port>`.
 4. Then port to Liwonde (`php -l` the copied files; owner 2026-10-30: tests run at Rosalyn's only, never re-run at Liwonde), commit and push both.
-5. **Guides and KB — only when needed, once a day** (owner 2026-11-11): only for shipped changes that
-   change what staff SEE or DO (new/renamed button, label, notice, rule, permission, screen). Collect
-   the day's qualifying commit hashes in `.claude/TASKS.md` ("SYNC QUEUE") and send `guides-kb-lead`
-   (haiku) ONE brief for the whole day, not one per ship. Pure fixes with no visible change: no sync.
-6. **AI lead sync — only when needed, once a day** (owner 2026-11-11; was after every ship): before
+5. **Guides and KB — always last, only when the owner prompts** (owner 2026-11-14; was once a day):
+   every ship adds an entry to `.claude/GUIDES_AI_SYNC.md` (what staff now SEE or DO, what the
+   Assistant reads that changed) in the same commit. Nobody runs the sync until the owner asks (end
+   of day or on request); then `guides-kb-lead` (haiku) gets ONE brief for every pending entry.
+   Pure fixes with no visible change: one "no sync needed" line.
+6. **AI lead sync — always last, only when the owner prompts** (same doc, same trigger): before
    dispatching, the orchestrator checks the day's diffs itself (Grep `includes/ai/` for the changed
    tables, columns, settings, statuses, helpers, page URLs and permission keys). Dispatch
    `dept-ai-lead` ONLY if something the Assistant reads, links to or acts on changed; then ONE brief for
