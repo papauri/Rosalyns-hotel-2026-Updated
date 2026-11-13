@@ -1578,28 +1578,73 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
         </header>
 
         <?php if (!$rh_templates_only): ?>
+        <?php
+        /* Settings cards in page order (owner 2026-11-14): anchor => [group, Jump-to label, search words, shown].
+           Search words = the card title + the words in admin/api/global-search.php "Hotel Settings sections";
+           keep the two lists in step. hotel-details and review-sources carry the same words in their
+           includes (admin/includes/hotel-details-settings.php, review-sources-settings.php).
+           Any new settings card joins a group here and gets search words. */
+        $bsGroups = [
+            'web' => 'Website & booking',
+            'rooms' => 'Rooms & rates rules',
+            'money' => 'Money & documents',
+            'email' => 'Email & notifications',
+            'modules' => 'Modules & app',
+        ];
+        $bsCards = [
+            'maintenance' => ['web', 'Maintenance', 'Frontend maintenance mode maintenance offline website down', true],
+            'booking-status' => ['web', 'Booking status', 'Booking system on/off booking enabled disabled online booking redirect', $mod_bookings],
+            'hotel-details' => ['web', 'Hotel details', 'Hotel details & policies hotel name address phone check-in check-out time bank details policy vat', $mod_bookings],
+            'advance-booking' => ['rooms', 'Advance booking', 'Advance booking window advance days max booking ahead', $mod_bookings],
+            'tentative' => ['rooms', 'Tentative', 'Tentative bookings tentative hold provisional expiry', $mod_bookings],
+            'booking-references' => ['rooms', 'References', 'Booking reference prefix reference prefix booking number', $mod_bookings],
+            'cancellation' => ['money', 'Refunds', 'Refunds & cancellations refund cancel cancellation policy credit note', $mod_bookings],
+            'tourism-levy' => ['money', 'Tourism levy', 'Tourism levy / city tax tourism levy city tax', $mod_bookings],
+            'document-branding' => ['money', 'Branding', 'Document branding invoice pdf logo branding colours receipt', $mod_bookings],
+            'email-config' => ['email', 'Email', 'Email server (SMTP) email smtp mail server password sender', true],
+            'notification-email' => ['email', 'Notifications', 'Booking notification emails notification email alerts pre-arrival post-stay review', $mod_bookings],
+            'service-modules' => ['modules', 'Service modules', 'Service modules & notification emails conference gym restaurant notification module', true],
+            'review-sources' => ['modules', 'Review sources', 'Review sources (web importer) reviews google places brave api key import web', $mod_website_cms],
+            'pwa-settings' => ['modules', 'PWA', 'Install app banner (PWA) pwa install app banner', true],
+        ];
+        $bsAttr = static function (string $anchor) use ($bsCards): string {
+            return ' data-bs-group="' . htmlspecialchars($bsCards[$anchor][0], ENT_QUOTES, 'UTF-8') . '"'
+                . ' data-bs-keywords="' . htmlspecialchars($bsCards[$anchor][2], ENT_QUOTES, 'UTF-8') . '"';
+        };
+        $bsGroupsShown = [];
+        foreach ($bsCards as $bsCard) {
+            if ($bsCard[3]) {
+                $bsGroupsShown[$bsCard[0]] = true;
+            }
+        }
+        ?>
+        <div class="filter-bar bs-tools" role="search" aria-label="Find a setting">
+            <label class="bs-tools__field bs-tools__field--search" for="bs-search">
+                <span>Search settings</span>
+                <input type="search" id="bs-search" placeholder="e.g. levy, SMTP, logo" autocomplete="off" aria-describedby="bs-count">
+            </label>
+            <label class="bs-tools__field bs-tools__field--group" for="bs-group-filter">
+                <span>Group</span>
+                <select id="bs-group-filter">
+                    <option value="">All groups</option>
+                    <?php foreach ($bsGroups as $bsKey => $bsName): if (empty($bsGroupsShown[$bsKey])) { continue; } ?>
+                    <option value="<?php echo htmlspecialchars($bsKey, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($bsName, ENT_QUOTES, 'UTF-8'); ?></option>
+                    <?php endforeach; ?>
+                </select>
+            </label>
+            <p class="bs-tools__count" id="bs-count" role="status" aria-live="polite"></p>
+        </div>
         <nav class="bs-jump" aria-label="Settings sections">
             <span class="bs-jump__label">Jump to</span>
-            <a href="#maintenance">Maintenance</a>
-            <?php if ($mod_bookings): ?>
-                <a href="#booking-status">Booking status</a>
-                <a href="#advance-booking">Advance booking</a>
-                <a href="#cancellation">Refunds</a>
-                <a href="#hotel-details">Hotel details</a>
-                <a href="#booking-references">References</a>
-                <a href="#document-branding">Branding</a>
-                <a href="#tentative">Tentative</a>
-                <a href="#tourism-levy">Tourism levy</a>
-            <?php endif; ?>
-            <a href="#email-config">Email</a>
-            <?php if ($mod_website_cms): ?><a href="#review-sources">Review sources</a><?php endif; ?>
-            <?php if ($mod_bookings): ?>
-                <a href="#notification-email">Notifications</a>
-            <?php endif; ?>
-            <a href="#service-modules">Service modules</a>
-            <a href="#pwa-settings">PWA</a>
+            <?php foreach ($bsCards as $bsAnchor => $bsCard): if (!$bsCard[3]) { continue; } ?>
+            <a href="#<?php echo htmlspecialchars($bsAnchor, ENT_QUOTES, 'UTF-8'); ?>" data-bs-jump="<?php echo htmlspecialchars($bsAnchor, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($bsCard[1], ENT_QUOTES, 'UTF-8'); ?></a>
+            <?php endforeach; ?>
             <a href="email-templates.php">Email templates &rarr;</a>
         </nav>
+        <div class="bs-empty" id="bs-empty" hidden>
+            <p id="bs-empty-text">No settings match.</p>
+            <button type="button" class="btn btn-outline" id="bs-clear"><i class="fas fa-xmark"></i> Clear</button>
+        </div>
         <?php endif; ?>
 
         <?php if ($message): ?>
@@ -1617,7 +1662,10 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
         <?php endif; ?>
 
         <?php if (!$rh_templates_only): ?>
-        <div class="rh-panel settings-card" id="maintenance">
+        <section class="bs-group" data-bs-section="web" aria-labelledby="bs-group-web">
+            <h2 class="bs-group__title" id="bs-group-web">Website &amp; booking</h2>
+
+        <div class="rh-panel settings-card" id="maintenance"<?php echo $bsAttr('maintenance'); ?>>
                 <div class="rh-panel__head"><h2 class="rh-panel__title">Frontend Maintenance Mode</h2></div>
 
             <div class="current-value">
@@ -1672,7 +1720,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
         </div>
 
         <?php if ($mod_bookings): ?>
-        <div class="rh-panel settings-card" id="booking-status">
+        <div class="rh-panel settings-card" id="booking-status"<?php echo $bsAttr('booking-status'); ?>>
                 <div class="rh-panel__head"><h2 class="rh-panel__title">Booking System Status</h2></div>
 
             <div class="current-value">
@@ -1829,7 +1877,16 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 toggleDisabledAction();
             </script>
 
-            <div class="rh-panel settings-card" id="advance-booking">
+            <?php rh_hotel_details_render($user, $csrf_token); ?>
+
+            <?php endif; /* $mod_bookings — Booking status, script, Hotel details */ ?>
+        </section>
+
+            <?php if ($mod_bookings): ?>
+        <section class="bs-group" data-bs-section="rooms" aria-labelledby="bs-group-rooms">
+            <h2 class="bs-group__title" id="bs-group-rooms">Rooms &amp; rates rules</h2>
+
+            <div class="rh-panel settings-card" id="advance-booking"<?php echo $bsAttr('advance-booking'); ?>>
                 <div class="rh-panel__head"><h2 class="rh-panel__title">Advance Booking Configuration</h2></div>
 
                 <form method="POST" action="booking-settings.php">
@@ -1867,7 +1924,109 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 </details>
             </div>
 
-            <div class="rh-panel settings-card" id="cancellation">
+            <div class="rh-panel settings-card" id="tentative"<?php echo $bsAttr('tentative'); ?>>
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Tentative Bookings</h2></div>
+
+                <?php $tentativeCurrentlyEnabled = getSetting('tentative_bookings_enabled', '1') !== '0'; ?>
+                <div class="current-value">
+                    <i class="fas fa-<?php echo $tentativeCurrentlyEnabled ? 'check-circle' : 'times-circle'; ?>" style="color: <?php echo $tentativeCurrentlyEnabled ? '#28a745' : '#dc3545'; ?>;"></i>
+                    <div class="current-value-info">
+                        <h3>Tentative Bookings are <?php echo $tentativeCurrentlyEnabled ? 'Enabled' : 'Disabled'; ?></h3>
+                        <div class="value"><?php echo $tentativeCurrentlyEnabled ? 'Active' : 'Inactive'; ?></div>
+                    </div>
+                </div>
+
+                <form method="POST" action="booking-settings.php#tentative" id="tentative-toggle-form">
+                    <input type="hidden" name="toggle_tentative_bookings" value="1">
+                    <div class="form-group">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox"
+                                id="tentative_bookings_enabled"
+                                name="tentative_bookings_enabled"
+                                value="1"
+                                <?php echo $tentativeCurrentlyEnabled ? 'checked' : ''; ?>
+                                onchange="onTentativeToggleChange()">
+                            <span style="font-weight: 600; color: #1A1A1A;">Allow Tentative (Hold) Bookings</span>
+                        </label>
+                        <p class="help-text">
+                            <i class="fas fa-info-circle"></i>
+                            When enabled, guests can hold a room for
+                            <?php echo (int)getSetting('tentative_duration_hours', 48); ?> hours without immediate payment.
+                            When disabled, the tentative option is hidden on both the public booking page and admin booking forms.
+                        </p>
+                        <div id="tentative-disable-warning" style="display:<?php echo $tentativeCurrentlyEnabled ? 'none' : 'block'; ?>;margin-top:10px;padding:10px 14px;background:#fff7ed;border:1px solid #fb923c;border-radius:8px;font-size:13px;color:#9a3412;">
+                            <i class="fas fa-triangle-exclamation"></i>
+                            <strong>Disabled:</strong> Guests cannot create new tentative holds. Existing holds in the system are unaffected.
+                        </div>
+                        <button type="submit" id="tentative-save-btn" class="btn-submit" style="margin-top: 14px;">
+                            <i class="fas fa-save"></i> <span id="tentative-save-label"><?php echo $tentativeCurrentlyEnabled ? 'Save — Keep Enabled' : 'Save — Keep Disabled'; ?></span>
+                        </button>
+                    </div>
+                </form>
+
+                <script>
+                    function onTentativeToggleChange() {
+                        var cb = document.getElementById('tentative_bookings_enabled');
+                        var warning = document.getElementById('tentative-disable-warning');
+                        var label = document.getElementById('tentative-save-label');
+                        var btn = document.getElementById('tentative-save-btn');
+                        if (cb.checked) {
+                            warning.style.display = 'none';
+                            label.textContent = 'Save — Enable Tentative Bookings';
+                            btn.style.background = '';
+                        } else {
+                            warning.style.display = 'block';
+                            label.textContent = 'Save — Disable Tentative Bookings';
+                            btn.style.background = '#c0392b';
+                        }
+                    }
+                    document.getElementById('tentative-toggle-form').addEventListener('submit', function(e) {
+                        var cb = document.getElementById('tentative_bookings_enabled');
+                        if (!cb.checked) {
+                            if (!window.confirm('Disable tentative bookings? Guests will no longer be able to place tentative holds from the public booking page or admin forms.\n\nExisting tentative bookings in the system will not be affected.')) {
+                                e.preventDefault();
+                            }
+                        }
+                    });
+                </script>
+
+                <details class="tips-box">
+                    <summary><i class="fas fa-circle-info"></i> What happens when tentative is disabled</summary>
+                    <div class="tips-body">
+                        <ul>
+                            <li>The "Tentative Booking" card on the public booking page is removed entirely</li>
+                            <li>The "Tentative (hold)" option in admin booking forms is removed</li>
+                            <li>Existing tentative bookings are unaffected — they remain in the system</li>
+                            <li>Email templates for tentative bookings remain configured for future use</li>
+                        </ul>
+                    </div>
+                </details>
+            </div>
+
+            <div class="rh-panel settings-card" id="booking-references"<?php echo $bsAttr('booking-references'); ?>>
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Booking references</h2></div>
+                <?php $refPrefixNow = rh_booking_reference_prefix(); ?>
+                <form method="POST" action="booking-settings.php#booking-references">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
+                    <input type="hidden" name="save_booking_reference_prefix" value="1">
+                    <?php echo $rh_site_switch_note; ?>
+                    <div class="form-group">
+                        <label for="booking_reference_prefix">Reference prefix (2-6 letters or digits)</label>
+                        <input type="text" id="booking_reference_prefix" name="booking_reference_prefix" maxlength="6" pattern="[A-Za-z0-9]{2,6}" required<?php echo $rhSwDis; ?>
+                               value="<?php echo htmlspecialchars($refPrefixNow, ENT_QUOTES); ?>" style="text-transform:uppercase;max-width:160px;">
+                        <p class="help-text">New bookings get references like <strong><?php echo htmlspecialchars($refPrefixNow . date('Y'), ENT_QUOTES); ?>012345</strong>. Used by the website, Create Booking and the API. Existing bookings keep their reference.</p>
+                    </div>
+                    <?php if ($canSiteSwitches): ?>
+                    <button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save Prefix</button>
+                    <?php endif; ?>
+                </form>
+            </div>
+        </section>
+
+        <section class="bs-group" data-bs-section="money" aria-labelledby="bs-group-money">
+            <h2 class="bs-group__title" id="bs-group-money">Money &amp; documents</h2>
+
+            <div class="rh-panel settings-card" id="cancellation"<?php echo $bsAttr('cancellation'); ?>>
                 <div class="rh-panel__head"><h2 class="rh-panel__title">Refunds &amp; cancellations</h2></div>
                 <?php
                 $cancelModeNow = getCancellationRefundMode();
@@ -1966,149 +2125,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 </form>
             </div>
 
-            <?php rh_hotel_details_render($user, $csrf_token); ?>
-
-            <div class="rh-panel settings-card" id="booking-references">
-                <div class="rh-panel__head"><h2 class="rh-panel__title">Booking references</h2></div>
-                <?php $refPrefixNow = rh_booking_reference_prefix(); ?>
-                <form method="POST" action="booking-settings.php#booking-references">
-                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
-                    <input type="hidden" name="save_booking_reference_prefix" value="1">
-                    <?php echo $rh_site_switch_note; ?>
-                    <div class="form-group">
-                        <label for="booking_reference_prefix">Reference prefix (2-6 letters or digits)</label>
-                        <input type="text" id="booking_reference_prefix" name="booking_reference_prefix" maxlength="6" pattern="[A-Za-z0-9]{2,6}" required<?php echo $rhSwDis; ?>
-                               value="<?php echo htmlspecialchars($refPrefixNow, ENT_QUOTES); ?>" style="text-transform:uppercase;max-width:160px;">
-                        <p class="help-text">New bookings get references like <strong><?php echo htmlspecialchars($refPrefixNow . date('Y'), ENT_QUOTES); ?>012345</strong>. Used by the website, Create Booking and the API. Existing bookings keep their reference.</p>
-                    </div>
-                    <?php if ($canSiteSwitches): ?>
-                    <button type="submit" class="btn-submit"><i class="fas fa-save"></i> Save Prefix</button>
-                    <?php endif; ?>
-                </form>
-            </div>
-
-            <div class="rh-panel settings-card" id="document-branding">
-                <div class="rh-panel__head"><h2 class="rh-panel__title">Document branding</h2></div>
-                <?php
-                $canEditBranding = hasPermission((int)($user['id'] ?? 0), 'finance_settings');
-                $brandPrimaryNow = rh_theme_hex(getSetting('brand_primary_color', ''), '#524b3f');
-                $brandAccentNow = rh_theme_hex(getSetting('brand_accent_color', ''), '#9b8f7e');
-                ?>
-                <form method="POST" action="booking-settings.php#document-branding">
-                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
-                    <input type="hidden" name="save_document_branding" value="1">
-                    <?php if (!$canEditBranding): ?>
-                        <p class="help-text"><i class="fas fa-lock"></i> You can view these. Only users with the "Change VAT &amp; refund settings" permission can change them.</p>
-                    <?php endif; ?>
-                    <fieldset <?php echo $canEditBranding ? '' : 'disabled'; ?> style="border:0;padding:0;margin:0;min-width:0;">
-                        <div class="form-group">
-                            <label for="brand_primary_color">Primary colour (table headers, total bar, title band)</label>
-                            <input type="color" id="brand_primary_color" name="brand_primary_color" value="<?php echo htmlspecialchars($brandPrimaryNow, ENT_QUOTES); ?>" pattern="#[0-9a-fA-F]{6}" style="width:70px;height:40px;padding:2px;">
-                        </div>
-                        <div class="form-group">
-                            <label for="brand_accent_color">Accent colour (small labels and rules)</label>
-                            <input type="color" id="brand_accent_color" name="brand_accent_color" value="<?php echo htmlspecialchars($brandAccentNow, ENT_QUOTES); ?>" pattern="#[0-9a-fA-F]{6}" style="width:70px;height:40px;padding:2px;">
-                        </div>
-                        <div class="form-group">
-                            <label for="document_footer_text">Footer line (printed at the bottom of every PDF)</label>
-                            <input type="text" id="document_footer_text" name="document_footer_text" maxlength="160" value="<?php echo htmlspecialchars((string)getSetting('document_footer_text', ''), ENT_QUOTES); ?>" placeholder="Thank you for staying with us">
-                        </div>
-                        <div class="form-group">
-                            <label for="document_terms_text">Terms / note under the totals</label>
-                            <textarea id="document_terms_text" name="document_terms_text" rows="3" maxlength="600"><?php echo htmlspecialchars((string)getSetting('document_terms_text', ''), ENT_QUOTES); ?></textarea>
-                        </div>
-                        <div class="form-group">
-                            <label for="document_logo_height_mm">Logo height on documents (10-40 mm)</label>
-                            <input type="number" id="document_logo_height_mm" name="document_logo_height_mm" min="10" max="40" step="0.5" value="<?php echo htmlspecialchars((string)getSetting('document_logo_height_mm', ''), ENT_QUOTES); ?>" placeholder="24">
-                            <p class="help-text">Leave blank for the default (24 mm).</p>
-                        </div>
-                    </fieldset>
-                    <?php if ($canEditBranding): ?>
-                    <button type="submit" class="btn-submit" style="margin-top: 8px;"><i class="fas fa-save"></i> Save Document Branding</button>
-                    <?php endif; ?>
-                </form>
-            </div>
-
-            <div class="rh-panel settings-card" id="tentative">
-                <div class="rh-panel__head"><h2 class="rh-panel__title">Tentative Bookings</h2></div>
-
-                <?php $tentativeCurrentlyEnabled = getSetting('tentative_bookings_enabled', '1') !== '0'; ?>
-                <div class="current-value">
-                    <i class="fas fa-<?php echo $tentativeCurrentlyEnabled ? 'check-circle' : 'times-circle'; ?>" style="color: <?php echo $tentativeCurrentlyEnabled ? '#28a745' : '#dc3545'; ?>;"></i>
-                    <div class="current-value-info">
-                        <h3>Tentative Bookings are <?php echo $tentativeCurrentlyEnabled ? 'Enabled' : 'Disabled'; ?></h3>
-                        <div class="value"><?php echo $tentativeCurrentlyEnabled ? 'Active' : 'Inactive'; ?></div>
-                    </div>
-                </div>
-
-                <form method="POST" action="booking-settings.php#tentative" id="tentative-toggle-form">
-                    <input type="hidden" name="toggle_tentative_bookings" value="1">
-                    <div class="form-group">
-                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
-                            <input type="checkbox"
-                                id="tentative_bookings_enabled"
-                                name="tentative_bookings_enabled"
-                                value="1"
-                                <?php echo $tentativeCurrentlyEnabled ? 'checked' : ''; ?>
-                                onchange="onTentativeToggleChange()">
-                            <span style="font-weight: 600; color: #1A1A1A;">Allow Tentative (Hold) Bookings</span>
-                        </label>
-                        <p class="help-text">
-                            <i class="fas fa-info-circle"></i>
-                            When enabled, guests can hold a room for
-                            <?php echo (int)getSetting('tentative_duration_hours', 48); ?> hours without immediate payment.
-                            When disabled, the tentative option is hidden on both the public booking page and admin booking forms.
-                        </p>
-                        <div id="tentative-disable-warning" style="display:<?php echo $tentativeCurrentlyEnabled ? 'none' : 'block'; ?>;margin-top:10px;padding:10px 14px;background:#fff7ed;border:1px solid #fb923c;border-radius:8px;font-size:13px;color:#9a3412;">
-                            <i class="fas fa-triangle-exclamation"></i>
-                            <strong>Disabled:</strong> Guests cannot create new tentative holds. Existing holds in the system are unaffected.
-                        </div>
-                        <button type="submit" id="tentative-save-btn" class="btn-submit" style="margin-top: 14px;">
-                            <i class="fas fa-save"></i> <span id="tentative-save-label"><?php echo $tentativeCurrentlyEnabled ? 'Save — Keep Enabled' : 'Save — Keep Disabled'; ?></span>
-                        </button>
-                    </div>
-                </form>
-
-                <script>
-                    function onTentativeToggleChange() {
-                        var cb = document.getElementById('tentative_bookings_enabled');
-                        var warning = document.getElementById('tentative-disable-warning');
-                        var label = document.getElementById('tentative-save-label');
-                        var btn = document.getElementById('tentative-save-btn');
-                        if (cb.checked) {
-                            warning.style.display = 'none';
-                            label.textContent = 'Save — Enable Tentative Bookings';
-                            btn.style.background = '';
-                        } else {
-                            warning.style.display = 'block';
-                            label.textContent = 'Save — Disable Tentative Bookings';
-                            btn.style.background = '#c0392b';
-                        }
-                    }
-                    document.getElementById('tentative-toggle-form').addEventListener('submit', function(e) {
-                        var cb = document.getElementById('tentative_bookings_enabled');
-                        if (!cb.checked) {
-                            if (!window.confirm('Disable tentative bookings? Guests will no longer be able to place tentative holds from the public booking page or admin forms.\n\nExisting tentative bookings in the system will not be affected.')) {
-                                e.preventDefault();
-                            }
-                        }
-                    });
-                </script>
-
-                <details class="tips-box">
-                    <summary><i class="fas fa-circle-info"></i> What happens when tentative is disabled</summary>
-                    <div class="tips-body">
-                        <ul>
-                            <li>The "Tentative Booking" card on the public booking page is removed entirely</li>
-                            <li>The "Tentative (hold)" option in admin booking forms is removed</li>
-                            <li>Existing tentative bookings are unaffected — they remain in the system</li>
-                            <li>Email templates for tentative bookings remain configured for future use</li>
-                        </ul>
-                    </div>
-                </details>
-            </div>
-
-            <div class="rh-panel settings-card" id="tourism-levy">
+            <div class="rh-panel settings-card" id="tourism-levy"<?php echo $bsAttr('tourism-levy'); ?>>
                 <div class="rh-panel__head"><h2 class="rh-panel__title">Tourism Levy / City Tax</h2></div>
 
                 <form method="POST" action="booking-settings.php">
@@ -2167,11 +2184,55 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 </details>
             </div>
 
-            <?php endif; /* $mod_bookings — Booking Status / Advance / Tentative / Tourism Levy */ ?>
+            <div class="rh-panel settings-card" id="document-branding"<?php echo $bsAttr('document-branding'); ?>>
+                <div class="rh-panel__head"><h2 class="rh-panel__title">Document branding</h2></div>
+                <?php
+                $canEditBranding = hasPermission((int)($user['id'] ?? 0), 'finance_settings');
+                $brandPrimaryNow = rh_theme_hex(getSetting('brand_primary_color', ''), '#524b3f');
+                $brandAccentNow = rh_theme_hex(getSetting('brand_accent_color', ''), '#9b8f7e');
+                ?>
+                <form method="POST" action="booking-settings.php#document-branding">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token, ENT_QUOTES); ?>">
+                    <input type="hidden" name="save_document_branding" value="1">
+                    <?php if (!$canEditBranding): ?>
+                        <p class="help-text"><i class="fas fa-lock"></i> You can view these. Only users with the "Change VAT &amp; refund settings" permission can change them.</p>
+                    <?php endif; ?>
+                    <fieldset <?php echo $canEditBranding ? '' : 'disabled'; ?> style="border:0;padding:0;margin:0;min-width:0;">
+                        <div class="form-group">
+                            <label for="brand_primary_color">Primary colour (table headers, total bar, title band)</label>
+                            <input type="color" id="brand_primary_color" name="brand_primary_color" value="<?php echo htmlspecialchars($brandPrimaryNow, ENT_QUOTES); ?>" pattern="#[0-9a-fA-F]{6}" style="width:70px;height:40px;padding:2px;">
+                        </div>
+                        <div class="form-group">
+                            <label for="brand_accent_color">Accent colour (small labels and rules)</label>
+                            <input type="color" id="brand_accent_color" name="brand_accent_color" value="<?php echo htmlspecialchars($brandAccentNow, ENT_QUOTES); ?>" pattern="#[0-9a-fA-F]{6}" style="width:70px;height:40px;padding:2px;">
+                        </div>
+                        <div class="form-group">
+                            <label for="document_footer_text">Footer line (printed at the bottom of every PDF)</label>
+                            <input type="text" id="document_footer_text" name="document_footer_text" maxlength="160" value="<?php echo htmlspecialchars((string)getSetting('document_footer_text', ''), ENT_QUOTES); ?>" placeholder="Thank you for staying with us">
+                        </div>
+                        <div class="form-group">
+                            <label for="document_terms_text">Terms / note under the totals</label>
+                            <textarea id="document_terms_text" name="document_terms_text" rows="3" maxlength="600"><?php echo htmlspecialchars((string)getSetting('document_terms_text', ''), ENT_QUOTES); ?></textarea>
+                        </div>
+                        <div class="form-group">
+                            <label for="document_logo_height_mm">Logo height on documents (10-40 mm)</label>
+                            <input type="number" id="document_logo_height_mm" name="document_logo_height_mm" min="10" max="40" step="0.5" value="<?php echo htmlspecialchars((string)getSetting('document_logo_height_mm', ''), ENT_QUOTES); ?>" placeholder="24">
+                            <p class="help-text">Leave blank for the default (24 mm).</p>
+                        </div>
+                    </fieldset>
+                    <?php if ($canEditBranding): ?>
+                    <button type="submit" class="btn-submit" style="margin-top: 8px;"><i class="fas fa-save"></i> Save Document Branding</button>
+                    <?php endif; ?>
+                </form>
+            </div>
+        </section>
 
-            <?php if ($mod_website_cms): rh_review_sources_render($user, $csrf_token); endif; ?>
+            <?php endif; /* $mod_bookings — Rooms & rates rules, Money & documents */ ?>
 
-            <div class="rh-panel settings-card" id="email-config">
+        <section class="bs-group" data-bs-section="email" aria-labelledby="bs-group-email">
+            <h2 class="bs-group__title" id="bs-group-email">Email &amp; notifications</h2>
+
+            <div class="rh-panel settings-card" id="email-config"<?php echo $bsAttr('email-config'); ?>>
                 <div class="rh-panel__head"><h2 class="rh-panel__title">Email Configuration</h2></div>
 
                 <?php
@@ -2437,7 +2498,7 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             </div>
 
             <?php if ($mod_bookings): ?>
-            <div class="rh-panel settings-card" id="notification-email">
+            <div class="rh-panel settings-card" id="notification-email"<?php echo $bsAttr('notification-email'); ?>>
                 <div class="rh-panel__head"><h2 class="rh-panel__title">Booking Notification Email</h2></div>
                 <form method="POST" action="booking-settings.php">
                     <input type="hidden" name="booking_notification_settings" value="1">
@@ -2496,8 +2557,12 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
             </div>
 
             <?php endif; /* $mod_bookings — Booking Notification Email */ ?>
+        </section>
 
-            <div class="rh-panel settings-card" id="service-modules">
+        <section class="bs-group" data-bs-section="modules" aria-labelledby="bs-group-modules">
+            <h2 class="bs-group__title" id="bs-group-modules">Modules &amp; app</h2>
+
+            <div class="rh-panel settings-card" id="service-modules"<?php echo $bsAttr('service-modules'); ?>>
                 <div class="rh-panel__head"><h2 class="rh-panel__title">Service Modules &amp; Dedicated Notification Emails</h2></div>
                 <p class="help-text">Turning a service off here also removes its page — and every page that module governs — from the guest site navigation. The Events switch lives in <a href="module-settings.php">Module Settings</a>.</p>
                 <?php echo $rh_site_switch_note; ?>
@@ -2572,7 +2637,9 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                 </form>
             </div>
 
-            <div class="rh-panel settings-card" id="pwa-settings">
+            <?php if ($mod_website_cms): rh_review_sources_render($user, $csrf_token); endif; ?>
+
+            <div class="rh-panel settings-card" id="pwa-settings"<?php echo $bsAttr('pwa-settings'); ?>>
                 <div class="rh-panel__head"><h2 class="rh-panel__title">PWA Install Banner</h2></div>
                 <p class="help-text">Controls how often the &ldquo;Install Admin App&rdquo; banner reappears after a staff member dismisses it.</p>
                 <form method="POST" action="booking-settings.php#pwa-settings">
@@ -2591,6 +2658,114 @@ foreach ($canonicalTemplateDefaults as $templateKey => $templateDefaults) {
                     </button>
                 </form>
             </div>
+        </section>
+
+            <script>
+            /* Hotel Settings: search box + group filter narrow the cards and the Jump-to links.
+               Hides only with the bs-out class, so it can never show a card the server did not render. */
+            (function () {
+                var box = document.getElementById('bs-search');
+                if (!box || box.getAttribute('data-bound') === '1') { return; }
+                box.setAttribute('data-bound', '1');
+                var groupSel = document.getElementById('bs-group-filter');
+                var countEl = document.getElementById('bs-count');
+                var emptyEl = document.getElementById('bs-empty');
+                var emptyText = document.getElementById('bs-empty-text');
+                var clearBtn = document.getElementById('bs-clear');
+                var each = function (list, fn) { Array.prototype.forEach.call(list, fn); };
+                var cards = [];
+                each(document.querySelectorAll('.settings-card[data-bs-group]'), function (card) {
+                    var parts = [card.getAttribute('data-bs-keywords') || ''];
+                    each(card.querySelectorAll('.rh-panel__title, h3, label, legend, summary'), function (el) {
+                        parts.push(el.textContent || '');
+                    });
+                    cards.push({ el: card, group: card.getAttribute('data-bs-group'), text: parts.join(' ').replace(/\s+/g, ' ').toLowerCase() });
+                });
+                var sections = document.querySelectorAll('.bs-group[data-bs-section]');
+                var links = document.querySelectorAll('.bs-jump a[data-bs-jump]');
+
+                function apply() {
+                    var q = box.value.replace(/\s+/g, ' ').replace(/^ | $/g, '');
+                    var words = q.toLowerCase().replace(/[,;.]+/g, ' ').split(' ').filter(function (w) { return w !== ''; });
+                    var g = groupSel ? groupSel.value : '';
+                    var shown = 0;
+                    var visible = {};
+                    cards.forEach(function (c) {
+                        var ok = (g === '' || c.group === g) && words.every(function (w) { return c.text.indexOf(w) !== -1; });
+                        c.el.classList.toggle('bs-out', !ok);
+                        if (ok) { shown++; visible[c.el.id] = true; }
+                    });
+                    each(sections, function (s) {
+                        s.classList.toggle('bs-out', !s.querySelector('.settings-card[data-bs-group]:not(.bs-out)'));
+                    });
+                    each(links, function (a) {
+                        a.classList.toggle('bs-out', !visible[a.getAttribute('data-bs-jump')]);
+                    });
+                    var active = words.length > 0 || g !== '';
+                    var groupName = (g !== '' && groupSel) ? groupSel.options[groupSel.selectedIndex].text : '';
+                    countEl.textContent = active ? shown + ' of ' + cards.length + (cards.length === 1 ? ' setting' : ' settings') + ' shown' : '';
+                    if (shown === 0) {
+                        emptyText.textContent = 'No settings match' + (q !== '' ? ' \u201c' + q + '\u201d' : '') + (groupName !== '' ? ' in ' + groupName : '') + '.';
+                        emptyEl.hidden = false;
+                    } else {
+                        emptyEl.hidden = true;
+                    }
+                }
+
+                function clear(focus) {
+                    box.value = '';
+                    if (groupSel) { groupSel.value = ''; }
+                    apply();
+                    if (focus) { box.focus(); }
+                }
+                box._bsClear = clear;
+
+                box.addEventListener('input', apply);
+                if (groupSel) { groupSel.addEventListener('change', apply); }
+                clearBtn.addEventListener('click', function () { clear(true); });
+                box.addEventListener('keydown', function (e) {
+                    if ((e.key === 'Escape' || e.key === 'Esc') && (box.value !== '' || (groupSel && groupSel.value !== ''))) {
+                        e.preventDefault();
+                        clear(true);
+                    }
+                });
+
+                /* An anchor (#tourism-levy, global search, Jump-to) always lands: clear the filter if it hides the target. */
+                function bsReveal(hash) {
+                    var b = document.getElementById('bs-search');
+                    if (!b || !b._bsClear || !hash || hash.length < 2) { return null; }
+                    var target = null;
+                    try { target = document.getElementById(decodeURIComponent(hash.slice(1))); } catch (err) { return null; }
+                    if (!target || !target.closest) { return null; }
+                    var card = target.closest('.settings-card');
+                    var group = target.closest('.bs-group');
+                    if ((card && card.classList.contains('bs-out')) || (group && group.classList.contains('bs-out'))) {
+                        b._bsClear(false);
+                        return target;
+                    }
+                    return null;
+                }
+                if (!window.rhBsAnchorBound) {
+                    window.rhBsAnchorBound = true;
+                    document.addEventListener('click', function (e) {
+                        var a = e.target && e.target.closest ? e.target.closest('a[href^="#"]') : null;
+                        if (a) { bsReveal(a.getAttribute('href')); }
+                    });
+                    window.addEventListener('hashchange', function () {
+                        var t = bsReveal(window.location.hash);
+                        if (t) { t.scrollIntoView(); }
+                    });
+                }
+
+                var m = /[?&]q=([^&#]*)/.exec(window.location.search);
+                if (m) {
+                    try { box.value = decodeURIComponent(m[1].replace(/\+/g, ' ')); } catch (err) { box.value = ''; }
+                    apply();
+                    var t = bsReveal(window.location.hash);
+                    if (t) { t.scrollIntoView(); }
+                }
+            })();
+            </script>
 
             <?php endif; /* !$rh_templates_only: settings cards above */ ?>
 

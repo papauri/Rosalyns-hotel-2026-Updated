@@ -130,7 +130,8 @@ if (!function_exists('rh_review_sources_save')) {
             ? '<span class="badge badge-success">Connected</span>'
             : '<span class="badge badge-neutral">Not set up</span>';
 
-        echo '<div class="rh-panel settings-card" id="review-sources"><div class="rh-panel__head"><h2 class="rh-panel__title">Review sources (web importer)</h2></div>';
+        // Group + search words for the Hotel Settings filter; keep in step with $bsCards in booking-settings.php and admin/api/global-search.php.
+        echo '<div class="rh-panel settings-card" id="review-sources" data-bs-group="modules" data-bs-keywords="Review sources (web importer) reviews google places brave api key import web"><div class="rh-panel__head"><h2 class="rh-panel__title">Review sources (web importer)</h2></div>';
         echo '<p class="help-text">Used by <a href="reviews.php">Reviews &rarr; Import reviews from the web</a>. Keys are saved encrypted in the live database and are never shown again; leave a box empty to keep the saved key.</p>';
         echo '<form method="POST" action="booking-settings.php#review-sources" autocomplete="off">';
         echo '<input type="hidden" name="csrf_token" value="' . $e($csrf) . '"><input type="hidden" name="save_review_sources" value="1">';

@@ -234,7 +234,8 @@ if (!function_exists('rh_hotel_details_fields')) {
         $canFinance = hasPermission((int)($user['id'] ?? 0), 'finance_settings');
         $isAdmin = rh_hotel_details_is_admin((int)($user['id'] ?? 0));
         $e = static fn($v): string => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
-        echo '<div class="rh-panel settings-card" id="hotel-details"><div class="rh-panel__head"><h2 class="rh-panel__title">Hotel details &amp; policies</h2></div>';
+        // Group + search words for the Hotel Settings filter; keep in step with $bsCards in booking-settings.php and admin/api/global-search.php.
+        echo '<div class="rh-panel settings-card" id="hotel-details" data-bs-group="web" data-bs-keywords="Hotel details &amp; policies hotel name address phone check-in check-out time bank details policy vat"><div class="rh-panel__head"><h2 class="rh-panel__title">Hotel details &amp; policies</h2></div>';
         echo '<form method="POST" action="booking-settings.php#hotel-details">';
         echo '<input type="hidden" name="csrf_token" value="' . $e($csrf) . '"><input type="hidden" name="save_hotel_details" value="1">';
         foreach (rh_hotel_details_fields() as $group => $fields) {

@@ -39,8 +39,9 @@ when prompted."
   `setting_change` now raises per-person action counts and shows as "Setting change" in history (no
   values). Decide: count it as a save, or exclude; optionally answer "who changed setting X / when".
 
-### Hotel Settings order + search/filter (2026-11-14) — IN PROGRESS, not shipped yet
-- Guides: Hotel Settings guide — new group order, search box and group filter, "No settings match".
+### Hotel Settings order + search/filter (2026-11-14) — SHIPPED (hashes: see TASKS.md line)
+- Guides: Hotel Settings guide — 5 groups (Website & booking; Rooms & rates rules; Money & documents;
+  Email & notifications; Modules & app), search box, group filter, "No settings match" + Clear, Esc clears.
 - Assistant: any Assistant links to `booking-settings.php#<anchor>` keep working (anchors unchanged);
   check only.
 

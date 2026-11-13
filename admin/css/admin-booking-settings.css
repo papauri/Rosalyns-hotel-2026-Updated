@@ -43,6 +43,100 @@
     }
 }
 
+/* ---- Find a setting: search + group filter (shared .filter-bar, every control 44px) ---- */
+.filter-bar.bs-tools {
+    --rh-toolbar-control-height: 2.75rem;
+    align-items: flex-end;
+    margin-bottom: 0.6rem;
+}
+
+.bs-tools__field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--rh-muted, #5E554D);
+}
+
+.bs-tools__field--search {
+    flex: 1 1 260px;
+}
+
+.bs-tools__field--group {
+    flex: 0 1 220px;
+}
+
+.bs-tools__field input,
+.bs-tools__field select {
+    width: 100%;
+    box-sizing: border-box;
+    text-transform: none;
+    letter-spacing: 0;
+}
+
+.bs-tools__count {
+    align-self: center;
+    margin: 0;
+    color: var(--rh-muted, #5E554D);
+    font-size: 0.8rem;
+    font-weight: 600;
+}
+
+/* Nothing matches: plain message + Clear, same height as the toolbar controls. */
+.bs-empty {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem 1rem;
+    margin-bottom: 1rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid #c9bda9;
+    border-radius: 8px;
+    background: #fff;
+}
+
+.bs-empty[hidden] {
+    display: none;
+}
+
+.bs-empty p {
+    margin: 0;
+    color: var(--rh-ink, #231F1C);
+    font-size: 0.9rem;
+}
+
+.bs-empty .btn {
+    min-height: 44px;
+}
+
+/* ---- Group headings (Website & booking, Rooms & rates rules, ...) ---- */
+.bs-group__title {
+    margin: 1.25rem 0 0.6rem;
+    padding: 0;
+    border: 0;
+    color: var(--rh-muted, #5E554D);
+    font-size: 0.78rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+/* Filtered out by the search box or group filter (never used for permission or module hiding). */
+.bs-out {
+    display: none !important;
+}
+
+@media (max-width: 580px) {
+    .bs-tools__field--search,
+    .bs-tools__field--group {
+        flex: 1 1 100%;
+    }
+}
+
 .rh-page-head .back-link {
     display: inline-flex;
     align-items: center;

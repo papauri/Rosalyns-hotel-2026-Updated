@@ -91,22 +91,28 @@ $allWordsIn = static function (string $text) use ($terms): bool {
 };
 
 // ---- Hotel Settings sections (anchors on booking-settings.php) ----
+// Same order and words as $bsCards in admin/booking-settings.php (its search box); keep the two in step.
 if ($can('booking-settings.php')) {
     $sections = [
         ['maintenance', 'Frontend maintenance mode', 'maintenance offline website down'],
         ['booking-status', 'Booking system on/off', 'booking enabled disabled online booking redirect'],
-        ['advance-booking', 'Advance booking window', 'advance days max booking ahead'],
-        ['cancellation', 'Refunds & cancellations', 'refund cancel cancellation policy credit note'],
         ['hotel-details', 'Hotel details & policies', 'hotel name address phone check-in check-out time bank details policy vat'],
-        ['booking-references', 'Booking reference prefix', 'reference prefix booking number'],
-        ['document-branding', 'Document branding', 'invoice pdf logo branding colours receipt'],
+        ['advance-booking', 'Advance booking window', 'advance days max booking ahead'],
         ['tentative', 'Tentative bookings', 'tentative hold provisional expiry'],
+        ['booking-references', 'Booking reference prefix', 'reference prefix booking number'],
+        ['cancellation', 'Refunds & cancellations', 'refund cancel cancellation policy credit note'],
         ['tourism-levy', 'Tourism levy / city tax', 'tourism levy city tax'],
+        ['document-branding', 'Document branding', 'invoice pdf logo branding colours receipt'],
         ['email-config', 'Email server (SMTP)', 'email smtp mail server password sender'],
         ['notification-email', 'Booking notification emails', 'notification email alerts pre-arrival post-stay review'],
         ['service-modules', 'Service modules & notification emails', 'conference gym restaurant notification module'],
+        ['review-sources', 'Review sources (web importer)', 'reviews google places brave api key import web'],
         ['pwa-settings', 'Install app banner (PWA)', 'pwa install app banner'],
     ];
+    // Review sources only exists on the page while the website module is on (same check as booking-settings.php).
+    $sections = array_values(array_filter($sections, static function (array $s): bool {
+        return $s[0] !== 'review-sources' || !function_exists('moduleEnabled') || moduleEnabled('website_cms');
+    }));
     $items = [];
     foreach ($sections as [$anchor, $title, $kw]) {
         if ($allWordsIn($title . ' ' . $kw)) {
