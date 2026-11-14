@@ -19,7 +19,11 @@ when prompted."
 
 ## Pending (oldest first)
 
-(nothing pending - add the next ship's entry here)
+### Booking Details dialog compact on phones + tablets, row click opens it (2026-11-14, step 8) — 0a860b9 / 142aee6
+- Guides: on the Bookings page, clicking or tapping anywhere on a booking row (not a button) opens Booking Details, on
+  phone, tablet and desktop. On phones and tablets the dialog starts with one summary block (guest, room, dates and
+  nights, total, balance, booked rate x nights); tapping it or "Full Details" opens the full booking page. Guide 07.
+- Assistant: no sync needed (layout only; no table, setting, status, URL or permission changed).
 
 ### Assistant sync (2026-11-14, NEXT_BUILD_ORDER step 7) — SHIPPED (hashes: see TASKS.md line)
 - Guides: staff can now ask the Assistant "what is the cancellation fee on <booking>" (fee from the booking's locked

@@ -36,8 +36,10 @@ The owner starts EVERY session with the same prompt: **"Run the next step of .cl
 | 5 | SHIPPED 2026-11-14 905aecb / f3bd2e7 | F10 Guest booking emails (rate x nights, rate plan, all room refs) | GUEST_BOOKING_ALIGNMENT_PLAN.md F10 | dept-guest-site-lead -> dept-accounting-lead |
 | 6 | SHIPPED 2026-11-14 844f21f / 4a02c11 | Staff guides + help search sync | this file, step 6 brief | guides-kb-lead (haiku) -> haiku review |
 | 7 | SHIPPED 2026-11-14 5acf82b / d31e5ab | AI Assistant sync | this file, step 7 brief | dept-ai-lead (Opus) -> opus review |
-| 8 | TODO | Booking Details modal on phones + tablets: compact cards, tap a booking to open full details (owner 2026-11-14) | this file, step 8 brief | dept-rooms-lead + ui-lead (Opus) -> qa-auditor + browser check 390 / 768 / 1400 |
+| 8 | SHIPPED 2026-11-14 0a860b9 / 142aee6 | Booking Details modal on phones + tablets: compact cards, tap a booking to open full details (owner 2026-11-14) | this file, step 8 brief | dept-rooms-lead + ui-lead (Opus) -> qa-auditor + browser check 390 / 768 / 1400 |
+| 8a | TODO | AI Assistant revisit: stay facts for a named guest ("when did <guest> check out") must be answered, never "the chat was cleared" / "I don't know" (owner 2026-11-14) | this file, step 8a brief | dept-ai-lead (Opus) -> opus review |
 | 9 | TODO | Other admin modals with the same problem on phones + tablets: check all, fix the affected ones (owner 2026-11-14) | this file, step 9 brief | ui-lead (Opus) -> qa-auditor + browser check 390 / 768 / 1400 |
+| 10 | TODO | Bookings list on tablets: compact rows instead of the large cards (owner 2026-11-14) | this file, step 10 brief | ui-lead (Opus) -> qa-auditor + browser check 390 / 768 / 1400 |
 
 **LATER (never pulled by this queue; only when the owner asks):** F3 + F6 + F5 API part (no outside client uses the API,
 owner 2026-11-14) · F9 split-booking note into booking_notes · F11 payment line from `payment_policy` · admin
@@ -154,6 +156,22 @@ we should be able to click a booking to open the full booking details.")
 - If "click a booking" turns out to mean a different list than the one the builder finds (e.g. the group/linked
   bookings list inside the modal vs the Bookings page cards), cover both; log it as `ASSUMPTION:`.
 
+**Step 8a - AI Assistant revisit.** (Owner 2026-11-14, after step 8: the Assistant sync "is not going well" - asked
+when a guest at Rosalyn's checked out, by first name, the Assistant said the chat was cleared or it did not know.)
+Only dept-ai-lead (Opus) builds or tests the Assistant.
+- Reproduce at LIWONDE only (the mirror holds the same bookings with made-up names; pick a checked-out guest there and
+  ask "when did <first name> check out"). Rosalyn's is LIVE: no tests, no writes, no model calls there.
+- Find the cause, not the symptom: why a first-name-only question about a stay fact (checked in / checked out / when,
+  by whom) ends in "chat was cleared" or "I don't know" instead of a guest lookup + booking History read. Check the
+  router/intent, the guest-name match (infer the obvious match and show the real name; several plausible = one short
+  question), the read tool for actual check-in/checkout times (History, app $pdo times, not raw UTC), and what the
+  "chat cleared" message is and when it fires.
+- Then sweep the same class: for each stay fact staff ask daily (arrived, left, extended, moved room, cancelled, who
+  did it and when) add an eval case and fix what fails. Rails unchanged (confirm, permissions, never "none/0"
+  unverified, no hard-coded facts, privacy).
+- Live model test at LIWONDE only, cheapest model, at most 10 questions, hard cap US$0.10. One opus review. Ship to
+  both hotels; entry in GUIDES_AI_SYNC.md.
+
 **Step 9 - Other modals on phones and tablets.** (Owner 2026-11-14: "Also check other modals affected the same for
 mobile and tabs especially and add it in the build order.") Confirm step 8 is SHIPPED; reuse its `UI_DECISION`.
 - Part 1, check (read-only, cheap): list every admin modal (Grep `admin/`, `js/`, `css/` for the shared modal classes
@@ -170,3 +188,10 @@ mobile and tabs especially and add it in the build order.") Confirm step 8 is SH
 - Builder: ui-lead (Opus), department leads consulted only for their own screens. Gate: one qa-auditor review +
   browser check at 390, 768 and 1400 of every modal touched (stop `php -S` after). UI only: no DB tests. Ship to
   both hotels; add the entry to GUIDES_AI_SYNC.md.
+
+**Step 10 - Bookings list on tablets.** (Owner 2026-11-14.) At 641-1024px the Bookings list switches to large cards
+(admin-mobile.js `.mobile-enhanced`), about one booking per screen. Make it compact like the phone rows of 4cc94f4
+(name + status; stay, nights, room; total + payment badge; booked rate x nights; one next-step button + More), reusing
+those classes and the step 8 UI_DECISION. Row click already opens Booking Details (step 8). Layout only, desktop and
+phone unchanged. Builder: ui-lead (Opus). Gate: one qa-auditor review + browser check 390 / 768 / 1400 at LIWONDE.
+Ship to both hotels; entry in GUIDES_AI_SYNC.md.
