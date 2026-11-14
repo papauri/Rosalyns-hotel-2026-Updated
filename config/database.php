@@ -10447,6 +10447,17 @@ function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, st
         // A payment still pending (e.g. an unfinished online/mobile-money payment) must not be left
         // open on a cancelled booking: it could clear later and land as an unrefunded payment.
         // Pending payments never count as paid, so no amounts change here.
+        // History (full-history rule): the rows this closes, read first with the same filter, logged after the commit.
+        $pendCloseSt = $pdo->prepare("
+            SELECT id, payment_reference, total_amount FROM payments
+            WHERE booking_type = 'room' AND booking_id = ?
+              AND COALESCE(payment_type, '') <> 'refund'
+              AND payment_status = 'pending'
+              AND deleted_at IS NULL
+            FOR UPDATE
+        ");
+        $pendCloseSt->execute([$bookingId]);
+        $pendClosed = $pendCloseSt->fetchAll(PDO::FETCH_ASSOC);
         $pdo->prepare("
             UPDATE payments
             SET payment_status = 'cancelled', status = 'failed',
@@ -10457,6 +10468,20 @@ function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, st
               AND payment_status = 'pending'
               AND deleted_at IS NULL
         ")->execute([$bookingId]);
+        if ($pendClosed) {
+            if (!function_exists('rh_payment_audit_defer') && is_file(__DIR__ . '/../admin/includes/finance-account-sync.php')) {
+                require_once __DIR__ . '/../admin/includes/finance-account-sync.php';
+            }
+            if (function_exists('rh_payment_audit_defer')) {
+                $pendWho = $adminUserId > 0 ? '' : (stripos($reason, 'Guest cancelled') === 0 ? 'Guest (website)' : 'System');
+                foreach ($pendClosed as $pc) {
+                    rh_payment_audit_defer(['payment_id' => (int)$pc['id'], 'payment_ref' => (string)$pc['payment_reference'], 'action' => 'edited',
+                        'expect' => 'status:cancelled', 'changes' => ['payment_status' => ['pending', 'cancelled']],
+                        'user_id' => $adminUserId, 'who' => $pendWho,
+                        'note' => 'Booking cancelled before this payment cleared: the pending payment was closed (it never counted as paid).']);
+                }
+            }
+        }
 
         if (!recalculateBookingFinancials($bookingId)) {
             throw new RuntimeException('Could not recalculate the booking balance.');
@@ -10597,6 +10622,9 @@ function cancelRoomBookingSettled(PDO $pdo, int $bookingId, int $adminUserId, st
 
         if ($ownTx) {
             $pdo->commit();
+            if (function_exists('rh_payment_audit_flush')) {
+                rh_payment_audit_flush($pdo); // History rows queued above (a caller that owns the transaction: end of request)
+            }
             rh_send_booking_order_notices($pdo, $orderClose['notices']);
         } else {
             $result['order_notices'] = $orderClose['notices']; // caller sends them after its own commit

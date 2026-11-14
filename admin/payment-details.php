@@ -389,12 +389,19 @@ $refundsAgainstStmt = $pdo->prepare("
 ");
 $refundsAgainstStmt->execute([$paymentId]);
 $refundsAgainst = $refundsAgainstStmt->fetchAll(PDO::FETCH_ASSOC);
+// Refunded = completed + processing refunds only (the canonical net-paid rule); a pending refund is not money out yet
+// and is shown on its own line.
 $totalRefundedHere = 0.0;
+$pendingRefundHere = 0.0;
 foreach ($refundsAgainst as $r) {
-    if (in_array($r['refund_status'], ['completed', 'processing', 'pending'], true)) {
+    if (in_array($r['refund_status'], ['completed', 'processing'], true)) {
         $totalRefundedHere += (float)($r['refund_amount'] ?: $r['total_amount']);
+    } elseif (($r['refund_status'] ?? '') === 'pending') {
+        $pendingRefundHere += (float)($r['refund_amount'] ?: $r['total_amount']);
     }
 }
+$totalRefundedHere = round($totalRefundedHere, 2);
+$pendingRefundHere = round($pendingRefundHere, 2);
 
 // If THIS payment is itself a refund, fetch the original
 $originalPayment = null;
@@ -408,7 +415,45 @@ if (($payment['payment_type'] ?? '') === 'refund' && !empty($payment['original_p
 if (!function_exists('rh_billing_payment_is_company_leg')) {
     require_once __DIR__ . '/../includes/billing-accounts.php';
 }
-$pdEditRefusal = rh_payment_edit_refusal($payment + ['_company_leg' => rh_billing_payment_is_company_leg($pdo, (int)($payment['id'] ?? 0))]);
+
+// Who received it, who paid (company on account or the guest), the group it belongs to and the credit note it is
+// linked to (read-only, shown in the Payment panel).
+$pdReceivedBy = '';
+if ((int)($payment['recorded_by'] ?? 0) > 0) {
+    $rbSt = $pdo->prepare("SELECT COALESCE(NULLIF(full_name, ''), username) FROM admin_users WHERE id = ?");
+    $rbSt->execute([(int)$payment['recorded_by']]);
+    $pdReceivedBy = (string)($rbSt->fetchColumn() ?: '');
+}
+if ($pdReceivedBy === '') {
+    $pdReceivedBy = trim((string)($payment['processed_by'] ?? ''));
+}
+$pdCompanyLeg = rh_billing_payment_is_company_leg($pdo, (int)($payment['id'] ?? 0));
+$pdPaidBy = '';
+if (($payment['payment_type'] ?? '') !== 'refund') {
+    $pdPaidBy = $pdCompanyLeg ? 'The company (on account)' : trim((string)($payment['customer_name'] ?? ''));
+}
+$pdGroup = null;
+if ($payment['booking_type'] === 'room' && (int)($payment['booking_id'] ?? 0) > 0) {
+    try {
+        $gSt = $pdo->prepare("SELECT p.id, p.booking_reference,
+                (SELECT COUNT(*) FROM bookings g WHERE (g.id = p.id OR g.primary_booking_id = p.id) AND g.deleted_at IS NULL) AS rooms
+            FROM bookings b JOIN bookings p ON p.id = COALESCE(NULLIF(b.primary_booking_id, 0), b.id) WHERE b.id = ?");
+        $gSt->execute([(int)$payment['booking_id']]);
+        $gRow = $gSt->fetch(PDO::FETCH_ASSOC);
+        if ($gRow && (int)$gRow['rooms'] > 1) {
+            $pdGroup = ['id' => (int)$gRow['id'], 'ref' => (string)$gRow['booking_reference'], 'rooms' => (int)$gRow['rooms']];
+        }
+    } catch (Throwable $gEx) {
+        $pdGroup = null;
+    }
+}
+$pdCreditNote = null;
+if ((int)($payment['credit_note_id'] ?? 0) > 0) {
+    $cnSt = $pdo->prepare("SELECT id, credit_note_number, status FROM credit_notes WHERE id = ?");
+    $cnSt->execute([(int)$payment['credit_note_id']]);
+    $pdCreditNote = $cnSt->fetch(PDO::FETCH_ASSOC) ?: null;
+}
+$pdEditRefusal = rh_payment_edit_refusal($payment + ['_company_leg' => $pdCompanyLeg]);
 if ($pdEditRefusal === null && !empty($booking) && in_array((string)($booking['status'] ?? ''), ['cancelled', 'no-show', 'expired'], true)) {
     $pdEditRefusal = 'The booking is ' . $booking['status'] . '.';
 }
@@ -519,37 +564,40 @@ if ($pdCanEditPayment && $pdEditRefusal === null && !empty($booking)) {
         <div class="rh-strip" role="group" aria-label="Payment summary">
             <div class="rh-strip__cell">
                 <span class="rh-strip__label">This payment</span>
-                <strong class="rh-strip__value"><?php echo $currency_symbol . number_format((float)$payment['total_amount'], 0); ?></strong>
+                <strong class="rh-strip__value"><?php echo $currency_symbol . number_format((float)$payment['total_amount'], 2); ?></strong>
                 <?php $pdStripSplit = rh_payment_vat_lines($pdo, $payment); $pdStripLevy = (float)$pdStripSplit['levy'] > BALANCE_TOLERANCE; $pdStripCur = htmlspecialchars((string)$currency_symbol, ENT_QUOTES, 'UTF-8'); ?>
                 <span class="rh-strip__sub">
                     <?php if ($pdStripLevy): ?>
-                        Net <?php echo $pdStripCur . number_format((float)$pdStripSplit['net'], 0); ?>
-                        &middot; Levy <?php echo $pdStripCur . number_format((float)$pdStripSplit['levy'], 0); ?>
+                        Net <?php echo $pdStripCur . number_format((float)$pdStripSplit['net'], 2); ?>
+                        &middot; Levy <?php echo $pdStripCur . number_format((float)$pdStripSplit['levy'], 2); ?>
                     <?php else: ?>
-                        Subtotal <?php echo $pdStripCur . number_format((float)$payment['payment_amount'], 0); ?>
+                        Subtotal <?php echo $pdStripCur . number_format((float)$payment['payment_amount'], 2); ?>
                     <?php endif; ?>
                     <?php if ((float)$payment['vat_amount'] > 0): ?>
-                        &middot; VAT <?php echo $pdStripCur . number_format((float)$payment['vat_amount'], 0); ?>
+                        &middot; VAT <?php echo $pdStripCur . number_format((float)$payment['vat_amount'], 2); ?>
                     <?php endif; ?>
                 </span>
             </div>
             <div class="rh-strip__cell">
                 <span class="rh-strip__label">Booking total</span>
-                <strong class="rh-strip__value"><?php echo $currency_symbol . number_format((float)$bookingTotalAmount, 0); ?></strong><?php echo $pd_total_info; ?>
-                <span class="rh-strip__sub">Paid <?php echo $currency_symbol . number_format((float)$paymentSummary['total_paid'], 0); ?> of total</span>
+                <strong class="rh-strip__value"><?php echo $currency_symbol . number_format((float)$bookingTotalAmount, 2); ?></strong><?php echo $pd_total_info; ?>
+                <span class="rh-strip__sub">Paid <?php echo $currency_symbol . number_format((float)$paymentSummary['total_paid'], 2); ?> of total</span>
                 <?php if (!empty($bookingDetails['booked_rate']['ok'])): ?>
                     <span class="rh-strip__sub" style="display:block;" title="The nightly price this guest booked at (VAT and levy included) times the nights. It never changes when the room price changes later.">Booked at <?php echo htmlspecialchars($bookingDetails['booked_rate']['compact']) . ((int)$bookingDetails['booked_rate']['nights'] === 1 ? ' night' : ' nights'); ?></span>
                 <?php endif; ?>
             </div>
             <div class="rh-strip__cell">
                 <span class="rh-strip__label">Outstanding</span>
-                <strong class="rh-strip__value <?php echo $dueAmount > 0 ? 'rh-strip__value--alert' : 'rh-strip__value--ok'; ?>"><?php echo $currency_symbol . number_format(max(0, (float)$dueAmount), 0); ?></strong>
+                <strong class="rh-strip__value <?php echo $dueAmount > 0 ? 'rh-strip__value--alert' : 'rh-strip__value--ok'; ?>"><?php echo $currency_symbol . number_format(max(0, (float)$dueAmount), 2); ?></strong>
                 <span class="rh-strip__sub"><?php echo htmlspecialchars($paymentStatusText); ?> &middot; <?php echo number_format($paymentPercentage, 0); ?>% complete</span>
             </div>
             <div class="rh-strip__cell">
-                <span class="rh-strip__label">Refunded</span>
-                <strong class="rh-strip__value"><?php echo $currency_symbol . number_format($totalRefundedHere, 0); ?></strong>
+                <span class="rh-strip__label" title="Refunds of this payment that are completed or being processed. A pending refund is not money out yet and is shown below, not counted.">Refunded</span>
+                <strong class="rh-strip__value"><?php echo $currency_symbol . number_format($totalRefundedHere, 2); ?></strong>
                 <span class="rh-strip__sub"><?php echo count($refundsAgainst); ?> refund<?php echo count($refundsAgainst) === 1 ? '' : 's'; ?></span>
+                <?php if ($pendingRefundHere > BALANCE_TOLERANCE): ?>
+                    <span class="rh-strip__sub" style="display:block;">Pending <?php echo $currency_symbol . number_format($pendingRefundHere, 2); ?> (not counted yet)</span>
+                <?php endif; ?>
             </div>
         </div>
 
@@ -641,8 +689,17 @@ if ($pdCanEditPayment && $pdEditRefusal === null && !empty($booking)) {
                             <?php if (!empty($payment['transaction_reference_value'])): ?>
                                 <tr><th scope="row">Transaction reference</th><td><?php echo htmlspecialchars($payment['transaction_reference_value']); ?></td></tr>
                             <?php endif; ?>
-                            <tr><th scope="row">Processed by</th><td><?php echo htmlspecialchars($payment['processed_by'] ?? 'System'); ?></td></tr>
-                            <tr><th scope="row">Created</th><td><?php echo date('F j, Y g:i A', strtotime($payment['created_at'])); ?></td></tr>
+                            <?php if ($pdPaidBy !== ''): ?>
+                                <tr><th scope="row" title="Who the money came from: the guest or customer, or the company when the booking is on a company account.">Paid by</th><td><?php echo htmlspecialchars($pdPaidBy); ?></td></tr>
+                            <?php endif; ?>
+                            <tr><th scope="row" title="The staff member who recorded this payment (System when it came from the website or an automatic step).">Received by</th><td><?php echo htmlspecialchars($pdReceivedBy !== '' ? $pdReceivedBy : 'System'); ?></td></tr>
+                            <?php if ($pdGroup !== null): ?>
+                                <tr><th scope="row" title="This room is one of a group booked together; the link opens the group&#39;s first booking.">Group</th><td><a class="rh-mini-link" href="booking-details.php?id=<?php echo (int)$pdGroup['id']; ?>"><?php echo htmlspecialchars($pdGroup['ref']); ?></a> &middot; <?php echo (int)$pdGroup['rooms']; ?> rooms</td></tr>
+                            <?php endif; ?>
+                            <?php if ($pdCreditNote !== null): ?>
+                                <tr><th scope="row" title="The credit note this money was paid from or moved into.">Credit note</th><td><a class="rh-mini-link" href="credit-notes.php?search=<?php echo urlencode((string)$pdCreditNote['credit_note_number']); ?>"><?php echo htmlspecialchars((string)$pdCreditNote['credit_note_number']); ?></a> &middot; <?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)$pdCreditNote['status']))); ?></td></tr>
+                            <?php endif; ?>
+                            <tr><th scope="row" title="Date and time the payment was saved.">Recorded at</th><td><?php echo date('F j, Y g:i A', strtotime($payment['created_at'])); ?></td></tr>
                             <?php if ($payment['updated_at'] !== $payment['created_at']): ?>
                                 <tr><th scope="row">Last updated</th><td><?php echo date('F j, Y g:i A', strtotime($payment['updated_at'])); ?></td></tr>
                             <?php endif; ?>
@@ -693,7 +750,7 @@ if ($pdCanEditPayment && $pdEditRefusal === null && !empty($booking)) {
                     <section class="rh-panel rh-panel--flush">
                         <div class="rh-panel__head">
                             <h2 class="rh-panel__title">Refunds against this payment</h2>
-                            <span class="rh-page-head__meta"><?php echo count($refundsAgainst); ?> total &middot; <?php echo $currency_symbol . number_format($totalRefundedHere, 0); ?> refunded</span>
+                            <span class="rh-page-head__meta"><?php echo count($refundsAgainst); ?> total &middot; <?php echo $currency_symbol . number_format($totalRefundedHere, 2); ?> refunded<?php echo $pendingRefundHere > BALANCE_TOLERANCE ? ' &middot; ' . $currency_symbol . number_format($pendingRefundHere, 2) . ' pending' : ''; ?></span>
                         </div>
                         <div class="rh-panel__body">
                             <table class="acct-table">

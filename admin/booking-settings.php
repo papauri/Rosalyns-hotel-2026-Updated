@@ -755,6 +755,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_email_templat
             })(),
             '{{levy_rate}}'                => '1.0',
             '{{levy_amount}}'              => (string)getSetting('currency_symbol', 'MWK') . number_format(45, 2),
+            '{{invoice_total_amount}}'     => (string)getSetting('currency_symbol', 'MWK') . number_format(4545, 2),
+            '{{amount_paid_amount}}'       => (string)getSetting('currency_symbol', 'MWK') . number_format(45, 2),
+            '{{balance_due_amount}}'       => (string)getSetting('currency_symbol', 'MWK') . number_format(4500, 2),
         ];
 
         $ajaxResSubject  = strtr($ajaxSubject,  $ajaxVars);
@@ -1331,6 +1334,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 })(),
                 '{{levy_rate}}'                => '1.0',
                 '{{levy_amount}}'              => $currencySymbol . number_format(45, 2),
+                '{{invoice_total_amount}}'     => $currencySymbol . number_format(4545, 2),
+                '{{amount_paid_amount}}'       => $currencySymbol . number_format(45, 2),
+                '{{balance_due_amount}}'       => $currencySymbol . number_format(4500, 2),
             ];
 
             $resolvedSubject  = strtr($subjectRaw,  $previewVars);

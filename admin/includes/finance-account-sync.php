@@ -826,6 +826,92 @@ if (!function_exists('rh_log_payment_audit')) {
     }
 }
 
+if (!function_exists('rh_payment_audit_defer')) {
+    /**
+     * Queue one payment History row (payment_audit_log via rh_log_payment_audit) to be written AFTER the money transaction
+     * commits, never inside it: a failed or deadlocked log write can never undo a payment (owner full-history rule
+     * 2026-11-09). Call it where the money row is written; rh_payment_audit_flush() writes the queue right after the
+     * caller's commit and once more at the end of the request (safety net for helpers inside someone else's transaction).
+     * Each entry is checked against the committed row first, so a rolled-back write leaves nothing in History.
+     *
+     * $e: payment_id, payment_ref, action ('created' / 'deleted' / 'refund_recorded' / 'status_changed' ...), user_id (null
+     * = no staff session), who (staff name, or a named actor: 'Guest (website)', 'System', 'API: <key name>'), note,
+     * changes (optional, field => [old, new]), verify_ref (payment_reference to check; default payment_ref), expect:
+     * 'exists' (default) | 'deleted' (deleted_at set) | 'status:<payment_status>'.
+     */
+    function rh_payment_audit_defer(array $e): void
+    {
+        if ((int)($e['payment_id'] ?? 0) <= 0) {
+            return;
+        }
+        if (!isset($GLOBALS['rh_payment_audit_queue']) || !is_array($GLOBALS['rh_payment_audit_queue'])) {
+            $GLOBALS['rh_payment_audit_queue'] = [];
+        }
+        $GLOBALS['rh_payment_audit_queue'][] = $e;
+        if (empty($GLOBALS['rh_payment_audit_shutdown'])) {
+            $GLOBALS['rh_payment_audit_shutdown'] = true;
+            register_shutdown_function(static function (): void {
+                $p = $GLOBALS['pdo'] ?? null;
+                if ($p instanceof PDO) {
+                    rh_payment_audit_flush($p);
+                }
+            });
+        }
+    }
+}
+
+if (!function_exists('rh_payment_audit_flush')) {
+    /**
+     * Write the queued payment History rows (rh_payment_audit_defer). Does nothing while a transaction is open (the money
+     * is not committed yet: the rows wait for the next flush). An entry whose row is not there in the committed state
+     * (rolled back, or not in the expected state) is dropped. Never throws. Returns the number of rows written.
+     */
+    function rh_payment_audit_flush(PDO $pdo): int
+    {
+        if (empty($GLOBALS['rh_payment_audit_queue']) || $pdo->inTransaction()) {
+            return 0;
+        }
+        $queue = $GLOBALS['rh_payment_audit_queue'];
+        $GLOBALS['rh_payment_audit_queue'] = [];
+        $written = 0;
+        foreach ($queue as $e) {
+            try {
+                $ref = (string)($e['verify_ref'] ?? ($e['payment_ref'] ?? ''));
+                if ($ref === '') {
+                    $chk = $pdo->prepare('SELECT payment_status, deleted_at FROM payments WHERE id = ? LIMIT 1');
+                    $chk->execute([(int)$e['payment_id']]);
+                } else {
+                    $chk = $pdo->prepare('SELECT payment_status, deleted_at FROM payments WHERE payment_reference = ? ORDER BY id DESC LIMIT 1');
+                    $chk->execute([$ref]);
+                }
+                $row = $chk->fetch(PDO::FETCH_ASSOC);
+                if (!$row) {
+                    continue;
+                }
+                $expect = (string)($e['expect'] ?? 'exists');
+                if ($expect === 'deleted' && empty($row['deleted_at'])) {
+                    continue;
+                }
+                if (strpos($expect, 'status:') === 0 && (string)$row['payment_status'] !== substr($expect, 7)) {
+                    continue;
+                }
+                $uid = isset($e['user_id']) && (int)$e['user_id'] > 0 ? (int)$e['user_id'] : null;
+                $pref = (string)($e['payment_ref'] ?? '');
+                if ($pref === '') { // the logged payment's own reference (refund callers often hold only the original's id)
+                    $rq = $pdo->prepare('SELECT payment_reference FROM payments WHERE id = ?');
+                    $rq->execute([(int)$e['payment_id']]);
+                    $pref = (string)($rq->fetchColumn() ?: '');
+                }
+                $written += rh_log_payment_audit($pdo, (int)$e['payment_id'], $pref !== '' ? $pref : null, (string)($e['action'] ?? 'created'),
+                    is_array($e['changes'] ?? null) ? $e['changes'] : [], $uid, (string)($e['who'] ?? ''), (string)($e['note'] ?? ''));
+            } catch (Throwable $ex) {
+                error_log('rh_payment_audit_flush: ' . $ex->getMessage());
+            }
+        }
+        return $written;
+    }
+}
+
 if (!function_exists('rh_refresh_original_payment_status')) {
     /**
      * Recompute an original payment's status from its SETTLED refunds (completed or
@@ -866,6 +952,11 @@ if (!function_exists('rh_refresh_original_payment_status')) {
         if ($new !== $current) {
             $pdo->prepare("UPDATE payments SET payment_status = ?, status = ?, updated_at = NOW() WHERE id = ?")
                 ->execute([$new, $new === 'refunded' ? 'refunded' : 'completed', $originalPaymentId]);
+            // History: the status follows its refunds (written after the caller's commit; dropped if it rolls back). Not for till
+            // payments: a till order with audit rows can no longer be deleted (pos-order-delete.php), and the till keeps its own trail.
+            if ((string)$orig['booking_type'] !== 'restaurant') rh_payment_audit_defer(['payment_id' => $originalPaymentId, 'action' => 'status_changed', 'expect' => 'status:' . $new,
+                'changes' => ['payment_status' => [$current, $new]], 'user_id' => null, 'who' => 'System',
+                'note' => 'Status follows its refunds: ' . number_format($settled, 2) . ' of ' . number_format($total, 2) . ' refunded (completed or processing).']);
         }
         return $new;
     }
@@ -1101,6 +1192,9 @@ if (!function_exists('rh_cancel_auto_refund_account')) {
                 (int)$orig['id'],
                 $leg, 'Cancellation (auto-refund per settings)', $adminUserId ?: null,
             ]);
+            rh_payment_audit_defer(['payment_id' => (int)$orig['id'], 'verify_ref' => $legRef, 'action' => 'refund_recorded',
+                'user_id' => $adminUserId, 'who' => (int)$adminUserId > 0 ? '' : 'System',
+                'note' => 'Refund ' . $legRef . ' of ' . number_format($leg, 2) . ' (cancellation, auto-refund per settings, completed)']);
             rh_refresh_original_payment_status($pdo, (int)$orig['id']);
             $out['refunded'] = round($out['refunded'] + $leg, 2);
             $out['refs'][] = $legRef;

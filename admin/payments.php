@@ -374,7 +374,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     $exportSql = "
         SELECT
             p.payment_reference, p.booking_type, p.booking_id, p.booking_reference,
-            p.payment_date, p.payment_amount, p.vat_rate, p.vat_amount, p.total_amount,
+            " . rh_pay_count_day_sql('p') . " AS payment_date, p.payment_amount, p.vat_rate, p.vat_amount, p.total_amount,
             p.payment_method, p.payment_type, p.payment_status, p.{$paymentTransactionColumn} AS transaction_ref,
             p.receipt_number, p.invoice_number,
             p.created_at, p.processed_by,
@@ -834,13 +834,13 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
             <table class="table fit-or-card">
                 <thead>
                     <tr>
-                        <th>Reference</th>
-                        <th>Client</th>
-                        <th>Type</th>
-                        <th>Total</th>
-                        <th>Paid</th>
-                        <th>Outstanding</th>
-                        <th>Status</th>
+                        <th><span title="The account&#39;s reference. Click the row to open the account.">Reference</span></th>
+                        <th><span title="The guest, company or customer on the account.">Client</span></th>
+                        <th><span title="Room, conference, gym, event or open tab.">Type</span></th>
+                        <th><span title="The whole bill, VAT and levy included: paid plus outstanding.">Total</span></th>
+                        <th><span title="Money received on the account, less refunds paid out or being paid.">Paid</span></th>
+                        <th><span title="What the account still has to pay today.">Outstanding</span></th>
+                        <th><span title="The account&#39;s own status.">Status</span></th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -865,7 +865,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                             // filter): a link would open other rows, so the reference stays plain text.
                             $viewUrl = ($oid > 0 && $src !== '') ? $meta['link'] . $oid : '';
                         ?>
-                            <tr>
+                            <tr<?php echo $viewUrl !== '' ? ' data-row-open' : ''; ?>>
                                 <td data-label="Reference"><strong><?php echo htmlspecialchars((string)($oRow['ref'] ?? '—')); ?></strong></td>
                                 <td data-label="Client"><?php echo htmlspecialchars((string)($oRow['client'] ?? '—')); ?></td>
                                 <td data-label="Type"><span class="badge badge-<?php echo htmlspecialchars($meta['badge']); ?>"><?php echo htmlspecialchars($meta['label']); ?></span></td>
@@ -882,7 +882,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                 <td data-label="Actions">
                                     <div class="quick-actions">
                                         <?php if ($viewUrl !== ''): ?>
-                                        <a href="<?php echo htmlspecialchars($viewUrl); ?>" class="btn btn-primary btn-sm" title="View account"><i class="fas fa-eye"></i></a>
+                                        <a href="<?php echo htmlspecialchars($viewUrl); ?>" class="btn btn-primary btn-sm rh-row-view" title="View account"><i class="fas fa-eye"></i></a>
                                         <?php endif; ?>
                                         <?php if (in_array($src, ['room', 'conference', 'gym', 'event'], true)): ?>
                                         <a href="payment-add.php?booking_type=<?php echo htmlspecialchars($src); ?>&booking_id=<?php echo $oid; ?>" class="btn btn-success btn-sm" title="Record a payment against this account"><i class="fas fa-plus"></i> Collect</a>
@@ -910,16 +910,16 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
             <table class="table fit-or-card rh-phone-actions rh-fold-actions" data-server-sort="1">
                 <thead>
                     <tr>
-                        <?php rh_server_sort_th('Reference', 'reference', $paySortKey, $paySortDir); ?>
-                        <?php rh_server_sort_th('Booking', 'booking', $paySortKey, $paySortDir, 'col-optional'); ?>
-                        <?php rh_server_sort_th('Type', 'type', $paySortKey, $paySortDir, 'col-optional-lg'); ?>
-                        <?php rh_server_sort_th('Payment Date', 'date', $paySortKey, $paySortDir, 'col-optional-md'); ?>
+                        <?php rh_server_sort_th('<span title="The payment or refund record&#39;s own reference. Click the row to open it.">Reference</span>', 'reference', $paySortKey, $paySortDir); ?>
+                        <?php rh_server_sort_th('<span title="The booking, account or order this money belongs to, with its booked rate x nights.">Booking</span>', 'booking', $paySortKey, $paySortDir, 'col-optional'); ?>
+                        <?php rh_server_sort_th('<span title="Where the money came from: room, conference, restaurant, gym or event.">Type</span>', 'type', $paySortKey, $paySortDir, 'col-optional-lg'); ?>
+                        <?php rh_server_sort_th('<span title="The day the money was received. Date filters and the cards count a refund on the day it was paid out (as End of Day); a refund still pending counts in no period.">Payment Date</span>', 'date', $paySortKey, $paySortDir, 'col-optional-md'); ?>
                         <?php rh_server_sort_th('<span title="The money this payment record moved, VAT included. Refunds show with a minus: money paid back.">Amount</span>', 'amount', $paySortKey, $paySortDir); ?>
                         <?php rh_server_sort_th('<span title="What the booking or account behind this payment still has to pay today (its full bill less every payment received). A dash: till orders, settled at the till.">Outstanding</span>', 'outstanding', $paySortKey, $paySortDir, 'col-optional'); ?>
-                        <?php rh_server_sort_th('Method', 'method', $paySortKey, $paySortDir, 'col-optional-lg'); ?>
+                        <?php rh_server_sort_th('<span title="How the money moved: cash, card, bank transfer, mobile money, credit note ...">Method</span>', 'method', $paySortKey, $paySortDir, 'col-optional-lg'); ?>
                         <?php rh_server_sort_th('<span title="Whether this payment&#39;s money came in (Received) or a refund&#39;s step. The line under it says whether the booking&#39;s bill is settled or still owes.">Status</span>', 'status', $paySortKey, $paySortDir); ?>
-                        <?php rh_server_sort_th('Created', 'created', $paySortKey, $paySortDir, 'col-optional-lg'); ?>
-                        <th class="col-optional-lg">Receipt / Txn</th>
+                        <?php rh_server_sort_th('<span title="When the record was saved in the system.">Created</span>', 'created', $paySortKey, $paySortDir, 'col-optional-lg'); ?>
+                        <th class="col-optional-lg"><span title="The receipt number issued for this payment, and the bank or provider transaction reference if one was entered.">Receipt / Txn</span></th>
                         <th>Actions</th>
                     </tr>
                 </thead>
@@ -929,7 +929,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                             <?php // Row wording from the columns already joined above (no query per row): admin/includes/finance-refunds.php
                             $payState = rh_pay_row_state($payment, (float)BALANCE_TOLERANCE, (string)$currency_symbol);
                             $payNoteColor = ['owe' => '#c0392b', 'ok' => '#1f7a45', 'warn' => '#8a5a00', 'muted' => '#666'][$payState['tone']] ?? '#666'; ?>
-                            <tr id="payment-<?php echo (int)$payment['id']; ?>" data-focus="payment-<?php echo (int)$payment['id']; ?>">
+                            <tr id="payment-<?php echo (int)$payment['id']; ?>" data-focus="payment-<?php echo (int)$payment['id']; ?>" data-row-open>
                                 <td><strong><?php echo htmlspecialchars($payment['payment_reference']); ?></strong>
                                     <span class="rh-phone-sub rh-phone-sub--dark"><?php echo htmlspecialchars($payment['booking_description'] . ($payment['booked_rate_compact'] !== '' ? ' · booked at ' . $payment['booked_rate_compact'] : '')); ?></span>
                                     <span class="rh-phone-sub rh-phone-sub--md"><?php echo date('M j, Y', strtotime($payment['payment_date'])); ?></span></td>
@@ -1020,7 +1020,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                     ?>
                                     <?php /* View, History + Invoice stay on the row; refund, edit and WhatsApp sit in the shared More menu. */ ?>
                                     <div class="quick-actions actions-row">
-                                        <a href="payment-details.php?id=<?php echo $payment['id']; ?>" class="btn btn-primary btn-sm" title="View Details">
+                                        <a href="payment-details.php?id=<?php echo $payment['id']; ?>" class="btn btn-primary btn-sm rh-row-view" title="View Details">
                                             <i class="fas fa-eye"></i>
                                         </a>
                                         <button type="button" class="btn btn-secondary btn-sm" data-rh-history="payment:<?php echo (int)$payment['id']; ?>" title="History: every step for this payment" aria-label="History of payment <?php echo htmlspecialchars((string)$payment['payment_reference'], ENT_QUOTES); ?>">
@@ -1149,7 +1149,27 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
             if (e.key === 'Escape') closePaymentMenus();
         });
 
+        // Row click (UI_DECISION step 8): a click anywhere on a payment or account row that is not a control opens it
+        // through the row's own View link; the View link stays the keyboard path; a text selection never opens it.
+        if (!window.rhPaymentsRowOpenBound) {
+            window.rhPaymentsRowOpenBound = true;
+            document.addEventListener('click', function (e) {
+                if (e.defaultPrevented || !e.target || !e.target.closest) return;
+                var tr = e.target.closest('tr[data-row-open]');
+                if (!tr) return;
+                if (e.target.closest('a, button, input, select, textarea, label, summary, [role="button"], [role="menu"], .actions-more')) return;
+                var sel = window.getSelection ? window.getSelection() : null;
+                if (sel && !sel.isCollapsed && tr.contains(sel.anchorNode)) return;
+                var view = tr.querySelector('a.rh-row-view');
+                if (view) view.click();
+            });
+        }
     </script>
+    <style>
+        @media (min-width: 641px) {
+            tr[data-row-open] { cursor: pointer; }
+        }
+    </style>
     <script>
         (function initPaymentsLiveSearch() {
             const searchForm = document.querySelector('[data-live-search-form="payments"]');

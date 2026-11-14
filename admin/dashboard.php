@@ -12,6 +12,7 @@ require_once '../includes/conference-pricing.php';
 require_once __DIR__ . '/includes/receivables.php';
 require_once __DIR__ . '/includes/front-desk-counts.php'; // arrivals / departures count rules shared with Bookings and End of Day
 require_once __DIR__ . '/includes/events-gym-filters.php'; // gym member tab rules shared with Gym Members (pure)
+require_once __DIR__ . '/includes/finance-refunds.php'; // rh_pay_count_day_sql: a refund counts on its payout day
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -219,10 +220,11 @@ $takingsByDay = static function (string $from, string $to, bool $withLedger, boo
     }
     if ($withLedger || $withPos) {
         $typeSql = ($withLedger && $withPos) ? '' : ($withLedger ? " AND booking_type <> 'restaurant'" : " AND booking_type = 'restaurant'");
-        $st = $pdo->prepare("SELECT DATE(payment_date) d, COALESCE(SUM(refund_amount),0) v FROM payments
-            WHERE DATE(payment_date) BETWEEN ? AND ? AND payment_type = 'refund'
+        // A refund counts on the day it was paid out (rh_pay_count_day_sql), as End of Day and Reports.
+        $st = $pdo->prepare("SELECT " . rh_pay_count_day_sql() . " d, COALESCE(SUM(refund_amount),0) v FROM payments
+            WHERE " . rh_pay_count_day_sql() . " BETWEEN ? AND ? AND payment_type = 'refund'
               AND refund_status IN ('completed','processing') AND deleted_at IS NULL{$typeSql}
-            GROUP BY DATE(payment_date)");
+            GROUP BY d");
         $st->execute([$from, $to]);
         $add($st->fetchAll(PDO::FETCH_ASSOC), -1);
     }

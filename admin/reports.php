@@ -211,7 +211,7 @@ try {
                                  ELSE 0 END), 0) as total_vat
         FROM payments
         WHERE (payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') OR payment_type = 'refund') AND deleted_at IS NULL
-        AND payment_date >= ? AND payment_date <= ?
+        AND " . rh_pay_count_day_sql() . " >= ? AND " . rh_pay_count_day_sql() . " <= ?
         GROUP BY booking_type
     ");
     $revenueByTypeStmt->execute([$start_date, $end_date]);
@@ -268,8 +268,8 @@ try {
 
     // 6. Monthly Revenue Trend
     $monthlyRevenueStmt = $pdo->prepare("
-        SELECT DATE_FORMAT(payment_date, '%Y-%m') as month,
-               DATE_FORMAT(payment_date, '%b %Y') as month_label,
+        SELECT DATE_FORMAT(" . rh_pay_count_day_sql() . ", '%Y-%m') as month,
+               DATE_FORMAT(" . rh_pay_count_day_sql() . ", '%b %Y') as month_label,
                SUM(CASE WHEN payment_type = 'refund' THEN 0 ELSE 1 END) as transaction_count,
                COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN -" . rh_refund_amount_sql() . " ELSE total_amount END), 0) as monthly_revenue, -- net of refunds paid out, the End of Day cash rule
                COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN -vat_amount ELSE vat_amount END), 0) as monthly_vat
@@ -277,7 +277,7 @@ try {
         WHERE ((payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund')
                OR (payment_type = 'refund' AND refund_status IN ('completed', 'processing')))
         AND deleted_at IS NULL
-        AND payment_date >= ? AND payment_date <= ?
+        AND " . rh_pay_count_day_sql() . " >= ? AND " . rh_pay_count_day_sql() . " <= ?
         GROUP BY month, month_label ORDER BY month ASC
     ");
     $monthlyRevenueStmt->execute([$start_date, $end_date]);
@@ -285,15 +285,15 @@ try {
 
     // 7. VAT Collected
     $vatCollectedStmt = $pdo->prepare("
-        SELECT DATE(payment_date) as date, SUM(CASE WHEN payment_type = 'refund' THEN 0 ELSE 1 END) as transaction_count,
+        SELECT " . rh_pay_count_day_sql() . " as date, SUM(CASE WHEN payment_type = 'refund' THEN 0 ELSE 1 END) as transaction_count,
                COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount
                                  WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN -vat_amount
                                  ELSE 0 END), 0) as vat_collected,
                COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) as total_revenue
         FROM payments
         WHERE (payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') OR payment_type = 'refund') AND deleted_at IS NULL
-        AND payment_date >= ? AND payment_date <= ?
-        GROUP BY DATE(payment_date) ORDER BY date ASC
+        AND " . rh_pay_count_day_sql() . " >= ? AND " . rh_pay_count_day_sql() . " <= ?
+        GROUP BY date ORDER BY date ASC
     ");
     $vatCollectedStmt->execute([$start_date, $end_date]);
     $vatCollected = $vatCollectedStmt->fetchAll(PDO::FETCH_ASSOC);
@@ -337,14 +337,14 @@ try {
                COALESCE(SUM(" . rh_refund_amount_sql() . "), 0) as total_amount
         FROM payments
         WHERE " . rh_refund_settled_sql() . " AND deleted_at IS NULL
-        AND payment_date >= ? AND payment_date <= ?
+        AND " . rh_pay_count_day_sql() . " >= ? AND " . rh_pay_count_day_sql() . " <= ?
         GROUP BY refund_reason
         ORDER BY total_amount DESC
     ");
     $refundReasonStmt->execute([$start_date, $end_date]);
     $refundReasons = $refundReasonStmt->fetchAll(PDO::FETCH_ASSOC);
     // Of those, the part moved into credit notes (overpayments, store credit): guest credit, no cash out.
-    $refundCreditStmt = $pdo->prepare("SELECT " . rh_refund_to_credit_sum_sql() . " FROM payments WHERE deleted_at IS NULL AND payment_date >= ? AND payment_date <= ?");
+    $refundCreditStmt = $pdo->prepare("SELECT " . rh_refund_to_credit_sum_sql() . " FROM payments WHERE deleted_at IS NULL AND " . rh_pay_count_day_sql() . " >= ? AND " . rh_pay_count_day_sql() . " <= ?");
     $refundCreditStmt->execute([$start_date, $end_date]);
     $refundsToCredit = (float)$refundCreditStmt->fetchColumn();
 
@@ -354,7 +354,7 @@ try {
                COALESCE(SUM(" . rh_refund_amount_sql() . "), 0) as total_amount
         FROM payments
         WHERE payment_type = 'refund' AND deleted_at IS NULL
-        AND payment_date >= ? AND payment_date <= ?
+        AND " . rh_pay_count_day_sql() . " >= ? AND " . rh_pay_count_day_sql() . " <= ?
         GROUP BY refund_status
         ORDER BY refund_status ASC
     ");
@@ -363,13 +363,13 @@ try {
 
     // 11. Refund Trends by Date
     $refundTrendStmt = $pdo->prepare("
-        SELECT DATE(payment_date) as date, COUNT(*) as count,
+        SELECT " . rh_pay_count_day_sql() . " as date, COUNT(*) as count,
                COALESCE(SUM(" . rh_refund_amount_sql() . "), 0) as daily_refunds,
                refund_reason
         FROM payments
         WHERE " . rh_refund_settled_sql() . " AND deleted_at IS NULL -- refunds paid out only, as Total Refunds
-        AND payment_date >= ? AND payment_date <= ?
-        GROUP BY DATE(payment_date), refund_reason
+        AND " . rh_pay_count_day_sql() . " >= ? AND " . rh_pay_count_day_sql() . " <= ?
+        GROUP BY date, refund_reason
         ORDER BY date ASC
     ");
     $refundTrendStmt->execute([$start_date, $end_date]);
@@ -819,7 +819,7 @@ try {
     // ============================================
 
     $vatRegisterStmt = $pdo->prepare("
-        SELECT p.payment_date, p.payment_reference, p.booking_type, p.payment_method,
+        SELECT " . rh_pay_count_day_sql('p') . " AS payment_date, p.payment_reference, p.booking_type, p.payment_method,
                p.vat_rate,
                CASE WHEN p.payment_type = 'refund' THEN -p.payment_amount ELSE p.payment_amount END AS payment_amount,
                CASE WHEN p.payment_type = 'refund' THEN -p.vat_amount ELSE p.vat_amount END AS vat_amount,
@@ -831,12 +831,12 @@ try {
         LEFT JOIN stock_orders so ON p.booking_type = 'restaurant' AND p.booking_id = so.id
         LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
         LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id
-        WHERE p.payment_date >= ? AND p.payment_date <= ?
+        WHERE " . rh_pay_count_day_sql('p') . " >= ? AND " . rh_pay_count_day_sql('p') . " <= ?
         AND ((COALESCE(p.payment_type, '') != 'refund' AND p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded'))
              OR (p.payment_type = 'refund' AND p.refund_status IN ('completed', 'processing')))
         AND p.deleted_at IS NULL
         AND p.vat_amount > 0
-        ORDER BY p.payment_date ASC
+        ORDER BY payment_date ASC, p.id ASC
         LIMIT 500
     ");
     $vatRegisterStmt->execute([$start_date, $end_date]);
@@ -848,7 +848,7 @@ try {
                COALESCE(SUM(CASE WHEN p.payment_type = 'refund' THEN -p.vat_amount ELSE p.vat_amount END), 0) AS vat,
                COALESCE(SUM(CASE WHEN p.payment_type = 'refund' THEN -p.total_amount ELSE p.total_amount END), 0) AS gross
         FROM payments p
-        WHERE p.payment_date >= ? AND p.payment_date <= ?
+        WHERE " . rh_pay_count_day_sql('p') . " >= ? AND " . rh_pay_count_day_sql('p') . " <= ?
         AND ((COALESCE(p.payment_type, '') != 'refund' AND p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded'))
              OR (p.payment_type = 'refund' AND p.refund_status IN ('completed', 'processing')))
         AND p.deleted_at IS NULL
@@ -865,7 +865,7 @@ try {
                SUM(CASE WHEN payment_type = 'refund' THEN -vat_amount ELSE vat_amount END) AS total_vat,
                SUM(CASE WHEN payment_type = 'refund' THEN -total_amount ELSE total_amount END) AS total_revenue
         FROM payments
-        WHERE payment_date >= ? AND payment_date <= ?
+        WHERE " . rh_pay_count_day_sql() . " >= ? AND " . rh_pay_count_day_sql() . " <= ?
         AND ((COALESCE(payment_type, '') != 'refund' AND payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded'))
              OR (payment_type = 'refund' AND refund_status IN ('completed', 'processing')))
         AND deleted_at IS NULL AND vat_amount > 0
@@ -968,17 +968,17 @@ try {
     $vatByQuarter = [];
     try {
         $vatByQStmt = $pdo->prepare("
-            SELECT YEAR(payment_date) as yr, QUARTER(payment_date) as qtr,
+            SELECT YEAR(" . rh_pay_count_day_sql() . ") as yr, QUARTER(" . rh_pay_count_day_sql() . ") as qtr,
                    COUNT(*) as txns,
                    SUM(CASE WHEN payment_type = 'refund' THEN -vat_amount ELSE vat_amount END) as vat,
                    SUM(CASE WHEN payment_type = 'refund' THEN -total_amount ELSE total_amount END) as gross,
                    SUM(CASE WHEN payment_type = 'refund' THEN -(total_amount - vat_amount) ELSE total_amount - vat_amount END) as net_ex_vat
             FROM payments
-            WHERE payment_date >= ? AND payment_date <= ?
+            WHERE " . rh_pay_count_day_sql() . " >= ? AND " . rh_pay_count_day_sql() . " <= ?
               AND ((COALESCE(payment_type,'') != 'refund' AND payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded'))
                    OR (payment_type = 'refund' AND refund_status IN ('completed', 'processing')))
               AND deleted_at IS NULL AND vat_amount > 0
-            GROUP BY YEAR(payment_date), QUARTER(payment_date)
+            GROUP BY yr, qtr
             ORDER BY yr ASC, qtr ASC
         ");
         $vatByQStmt->execute([$start_date, $end_date]);

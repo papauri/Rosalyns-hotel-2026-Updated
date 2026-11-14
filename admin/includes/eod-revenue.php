@@ -82,7 +82,7 @@ if (!function_exists('rh_eod_earned_revenue')) {
      *   date:string, rooms_gross:float, package_gross:float, rooms_total_gross:float,
      *   folio_fnb_gross:float, folio_other_gross:float, pos_sales_gross:float, pos_room_folio_gross:float,
      *   pos_reversed:float, pos_net:float, fnb_gross:float, extras_gross:float,
-     *   conf_gross:float, gym_gross:float, events_gross:float, cancel_kept_gross:float, in_house_bookings:int,
+     *   conf_gross:float, gym_gross:float, events_gross:float, cancel_kept_gross:float, no_show_kept_gross:float, in_house_bookings:int,
      *   total:float, cash_basis_note:string
      * }
      */
@@ -106,6 +106,7 @@ if (!function_exists('rh_eod_earned_revenue')) {
             'in_house_bookings' => 0,
             'total' => 0.0,
             'cancel_kept_gross' => 0.0,
+            'no_show_kept_gross' => 0.0,
             'cash_basis_note' => 'Gym revenue is counted when the payment is received (less refunds paid out), because gym fees have no service date to earn them on.',
         ];
         $dayStart = $date . ' 00:00:00';
@@ -143,6 +144,23 @@ if (!function_exists('rh_eod_earned_revenue')) {
                 error_log('rh_eod_earned_revenue cancellations: ' . $e->getMessage());
             }
 
+            // 1c) No-shows (owner 2026-11-14): status no-show bookings whose check-in date is this date, as their own line
+            // (never in ADR / RevPAR): rh_eod_noshow_earned = the tagged no-show charge when one exists, otherwise the booked
+            // stay's gross (what the folio bills). A no-show that kept a cancellation amount is skipped here (its tagged charge
+            // stays in 2); for every other no-show the tagged charge is left out of 2), so each amount is counted once.
+            try {
+                $st = $pdo->prepare("SELECT id, status, total_amount, vat_amount, total_with_vat, cancellation_retained_amount
+                    FROM bookings
+                    WHERE deleted_at IS NULL AND status = 'no-show'
+                      AND COALESCE(cancellation_retained_amount, 0) <= 0 AND check_in_date = ?");
+                $st->execute([$date]);
+                foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $nb) {
+                    $out['no_show_kept_gross'] += rh_eod_noshow_earned($pdo, $nb);
+                }
+            } catch (Throwable $e) {
+                error_log('rh_eod_earned_revenue no-shows: ' . $e->getMessage());
+            }
+
             // 2) Folio charges posted on this date (not voided).
             try {
                 $st = $pdo->prepare("SELECT bc.charge_type, COALESCE(SUM(bc.line_total),0) AS g
@@ -150,6 +168,8 @@ if (!function_exists('rh_eod_earned_revenue')) {
                     INNER JOIN bookings b ON b.id = bc.booking_id AND b.deleted_at IS NULL
                     WHERE bc.voided = 0 AND bc.charge_type <> 'room'
                       AND bc.posted_at >= ? AND bc.posted_at < ?
+                      AND NOT (b.status = 'no-show' AND COALESCE(b.cancellation_retained_amount, 0) <= 0
+                               AND bc.description LIKE CONCAT('%[noshow-fee:', b.id, ']'))
                     GROUP BY bc.charge_type");
                 $st->execute([$dayStart, $dayEnd]);
                 foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
@@ -250,15 +270,42 @@ if (!function_exists('rh_eod_earned_revenue')) {
             error_log('rh_eod_earned_revenue events: ' . $e->getMessage());
         }
 
-        foreach (['rooms_gross', 'package_gross', 'folio_fnb_gross', 'folio_other_gross', 'pos_sales_gross', 'pos_room_folio_gross', 'pos_reversed', 'pos_net', 'conf_gross', 'gym_gross', 'events_gross', 'cancel_kept_gross'] as $k) {
+        foreach (['rooms_gross', 'package_gross', 'folio_fnb_gross', 'folio_other_gross', 'pos_sales_gross', 'pos_room_folio_gross', 'pos_reversed', 'pos_net', 'conf_gross', 'gym_gross', 'events_gross', 'cancel_kept_gross', 'no_show_kept_gross'] as $k) {
             $out[$k] = round((float)$out[$k], 2);
         }
         $out['rooms_total_gross'] = round($out['rooms_gross'] + $out['package_gross'], 2);
         $out['fnb_gross'] = round($out['pos_net'] + $out['folio_fnb_gross'], 2);
         $out['extras_gross'] = $out['folio_other_gross'];
-        $out['total'] = round($out['rooms_total_gross'] + $out['extras_gross'] + $out['cancel_kept_gross'] + $out['fnb_gross'] + $out['conf_gross'] + $out['gym_gross'] + $out['events_gross'], 2);
+        $out['total'] = round($out['rooms_total_gross'] + $out['extras_gross'] + $out['cancel_kept_gross'] + $out['no_show_kept_gross'] + $out['fnb_gross'] + $out['conf_gross'] + $out['gym_gross'] + $out['events_gross'], 2);
 
         return $memo[$key] = $out;
+    }
+}
+
+if (!function_exists('rh_eod_noshow_earned')) {
+    /**
+     * What one no-show booking earns (owner 2026-11-14), equal to what its folio bills for the stay under its locked
+     * policy (getBookingFolioSummary): tagged with a group no-show charge -> that charge (live rows only; a voided row =
+     * nothing); untagged -> the booked stay's gross (total_with_vat, else total_amount + vat_amount). Other folio charges
+     * on it are counted on their posted date (EOD 2). 0 for anything that is not an untouched no-show (checked in / out,
+     * or a cancellation amount kept). $b: id, status, total_amount, vat_amount, total_with_vat, cancellation_retained_amount.
+     */
+    function rh_eod_noshow_earned(PDO $pdo, array $b): float
+    {
+        $id = (int)($b['id'] ?? 0);
+        if ($id <= 0 || (string)($b['status'] ?? '') !== 'no-show' || (float)($b['cancellation_retained_amount'] ?? 0) > 0) {
+            return 0.0;
+        }
+        if (rh_noshow_fee_tagged($pdo, $id)) {
+            $st = $pdo->prepare('SELECT COALESCE(SUM(line_total), 0) FROM booking_charges WHERE booking_id = ? AND voided = 0 AND description LIKE ?');
+            $st->execute([$id, '%' . rh_noshow_fee_tag($id)]);
+            return round((float)$st->fetchColumn(), 2);
+        }
+        $gross = (float)($b['total_with_vat'] ?? 0);
+        if ($gross <= 0) {
+            $gross = (float)($b['total_amount'] ?? 0) + (float)($b['vat_amount'] ?? 0);
+        }
+        return round(max(0.0, $gross), 2);
     }
 }
 

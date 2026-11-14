@@ -565,6 +565,7 @@ $revenue_sources = [];
 if ($has($mod_bookings, (float)$earned['rooms_total_gross']))   { $revenue_sources[] = ['label' => 'Rooms (nights stayed)', 'value' => (float)$earned['rooms_total_gross'], 'key' => 'rooms']; }
 if (abs((float)$earned['extras_gross']) > 0.004)                { $revenue_sources[] = ['label' => 'Other guest-bill charges', 'value' => (float)$earned['extras_gross'], 'key' => 'extras']; }
 if (abs((float)$earned['cancel_kept_gross']) > 0.004)          { $revenue_sources[] = ['label' => 'Kept on cancellations', 'value' => (float)$earned['cancel_kept_gross'], 'key' => 'kept']; }
+if (abs((float)($earned['no_show_kept_gross'] ?? 0)) > 0.004) { $revenue_sources[] = ['label' => 'Kept on no-shows', 'value' => (float)$earned['no_show_kept_gross'], 'key' => 'noshow', 'help' => 'Bookings marked no-show, on their check-in date: the no-show charge when one was posted, otherwise the booked stay the guest still owes under the booking policy. Not in ADR or RevPAR.']; }
 if ($has($mod_conference, (float)$earned['conf_gross']))        { $revenue_sources[] = ['label' => 'Conferences', 'value' => (float)$earned['conf_gross'], 'key' => 'conf']; }
 if ($has($mod_pos, (float)$earned['fnb_gross']))                { $revenue_sources[] = ['label' => rh_pos_category_label(), 'value' => (float)$earned['fnb_gross'], 'key' => 'fnb']; }
 if ($has($mod_gym, (float)$earned['gym_gross']))                { $revenue_sources[] = ['label' => 'Gym', 'value' => (float)$earned['gym_gross'], 'key' => 'gym']; }
@@ -831,6 +832,7 @@ $prev_sources = [
     'room_gross'   => (float)$previousEarned['rooms_total_gross'],
     'extras_gross' => (float)$previousEarned['extras_gross'],
     'kept_gross'   => (float)$previousEarned['cancel_kept_gross'],
+    'noshow_gross' => (float)($previousEarned['no_show_kept_gross'] ?? 0),
     'conf_gross'   => (float)$previousEarned['conf_gross'],
     'fnb_gross'    => (float)$previousEarned['fnb_gross'],
     'gym_gross'    => (float)$previousEarned['gym_gross'],
@@ -839,6 +841,7 @@ $prev_sources = [
 $room_rev_change   = (float)$earned['rooms_total_gross'] - $prev_sources['room_gross'];
 $extras_rev_change = (float)$earned['extras_gross'] - $prev_sources['extras_gross'];
 $kept_rev_change   = (float)$earned['cancel_kept_gross'] - $prev_sources['kept_gross'];
+$noshow_rev_change = (float)($earned['no_show_kept_gross'] ?? 0) - $prev_sources['noshow_gross'];
 $conf_rev_change   = (float)$earned['conf_gross'] - $prev_sources['conf_gross'];
 $fnb_rev_change    = (float)$earned['fnb_gross'] - $prev_sources['fnb_gross'];
 $gym_rev_change    = (float)$earned['gym_gross'] - $prev_sources['gym_gross'];
@@ -925,6 +928,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         'Room Revenue Earned (nights stayed)',
         'Other Guest-Bill Charges Earned',
         'Kept On Cancellations',
+        'Kept On No-Shows',
         'Conference Revenue (by event date)',
         rh_pos_short_label() . ' Revenue Earned',
         'Gym Revenue (payments received)',
@@ -996,6 +1000,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         number_format((float)$earned['rooms_total_gross'], 2, '.', ''),
         number_format((float)$earned['extras_gross'], 2, '.', ''),
         number_format((float)$earned['cancel_kept_gross'], 2, '.', ''),
+        number_format((float)($earned['no_show_kept_gross'] ?? 0), 2, '.', ''),
         number_format((float)$earned['conf_gross'], 2, '.', ''),
         number_format((float)$earned['fnb_gross'], 2, '.', ''),
         number_format((float)$earned['gym_gross'], 2, '.', ''),
@@ -1452,6 +1457,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                     if ($mod_bookings) { echo $mv('Rooms revenue', $room_rev_change, $trendLabel($room_rev_change, true)); }
                     if (abs((float)$earned['extras_gross']) > 0.004 || abs($prev_sources['extras_gross']) > 0.004) { echo $mv('Other guest-bill charges', $extras_rev_change, $trendLabel($extras_rev_change, true)); }
                     if (abs((float)$earned['cancel_kept_gross']) > 0.004 || abs($prev_sources['kept_gross']) > 0.004) { echo $mv('Kept on cancellations', $kept_rev_change, $trendLabel($kept_rev_change, true)); }
+                    if (abs((float)($earned['no_show_kept_gross'] ?? 0)) > 0.004 || abs($prev_sources['noshow_gross']) > 0.004) { echo $mv('Kept on no-shows', $noshow_rev_change, $trendLabel($noshow_rev_change, true)); }
                     if ($mod_conference && ((float)$earned['conf_gross'] > 0 || (float)$prev_sources['conf_gross'] > 0)) { echo $mv('Conference revenue', $conf_rev_change, $trendLabel($conf_rev_change, true)); }
                     if ($mod_pos) { echo $mv(htmlspecialchars($posShort), $fnb_rev_change, $trendLabel($fnb_rev_change, true)); }
                     if ($mod_gym && ((float)$earned['gym_gross'] > 0 || (float)$prev_sources['gym_gross'] > 0)) { echo $mv('Gym revenue', $gym_rev_change, $trendLabel($gym_rev_change, true)); }
@@ -1564,7 +1570,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                                     $share = $earned_total > 0.004 ? ($r['value'] / $earned_total) * 100 : 0;
                                 ?>
                                     <tr>
-                                        <td><?php echo htmlspecialchars((string)$r['label']); ?></td>
+                                        <td<?php echo !empty($r['help']) ? ' title="' . htmlspecialchars((string)$r['help'], ENT_QUOTES) . '"' : ''; ?>><?php echo htmlspecialchars((string)$r['label']); ?></td>
                                         <td class="num"><?php echo $money($r['value']); ?></td>
                                         <td class="num eod-mixcell"><span class="ck-meter ck-meter--gold"><span style="width:<?php echo number_format(max(0, min(100, $share)), 1, '.', ''); ?>%"></span></span><?php echo number_format($share, 1); ?>%</td>
                                     </tr>

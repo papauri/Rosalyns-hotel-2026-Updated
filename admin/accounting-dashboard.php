@@ -204,7 +204,7 @@ try {
             " . rh_refund_pending_count_sql() . " as refunds_pending_count,
             COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status = 'completed' THEN total_amount ELSE 0 END), 0) as completed_refunds
         FROM payments
-        WHERE payment_date BETWEEN ? AND ?
+        WHERE " . rh_pay_count_day_sql() . " BETWEEN ? AND ?
           AND deleted_at IS NULL
     ");
     $financialStmt->execute([$startDate, $endDate]);
@@ -214,10 +214,10 @@ try {
     // Read-only and on its own: a failure here only leaves the modal list empty.
     try {
         $acctRefundStmt = $pdo->prepare("
-            SELECT id, payment_reference, booking_reference, booking_type, payment_date, payment_method, refund_status,
+            SELECT id, payment_reference, booking_reference, booking_type, " . rh_pay_count_day_sql() . " AS payment_date, payment_method, refund_status,
                    " . rh_refund_amount_sql() . " AS refund_total
             FROM payments
-            WHERE payment_date BETWEEN ? AND ?
+            WHERE " . rh_pay_count_day_sql() . " BETWEEN ? AND ?
               AND deleted_at IS NULL
               AND ((" . rh_refund_settled_sql() . ") OR (" . rh_refund_pending_sql() . "))
             ORDER BY payment_date DESC, id DESC
@@ -254,7 +254,7 @@ try {
                 ) as total_room_outstanding
             FROM payments p
             WHERE p.booking_type = 'room'
-            AND p.payment_date BETWEEN ? AND ?
+            AND " . rh_pay_count_day_sql('p') . " BETWEEN ? AND ?
             AND p.deleted_at IS NULL
         ");
         $roomStmt->execute([$startDate, $endDate, $startDate, $endDate]);
@@ -283,7 +283,7 @@ try {
                 ) as total_conf_outstanding
             FROM payments p
             WHERE p.booking_type = 'conference'
-            AND p.payment_date BETWEEN ? AND ?
+            AND " . rh_pay_count_day_sql('p') . " BETWEEN ? AND ?
             AND p.deleted_at IS NULL
         ");
         $confStmt->execute([$startDate, $endDate, $startDate, $endDate]);
@@ -312,7 +312,7 @@ try {
                 ) as total_gym_outstanding
             FROM payments p
             WHERE p.booking_type = 'gym'
-            AND p.payment_date BETWEEN ? AND ?
+            AND " . rh_pay_count_day_sql('p') . " BETWEEN ? AND ?
             AND p.deleted_at IS NULL
         ");
         $gymStmt->execute([$startDate, $endDate, $startDate, $endDate]);
@@ -341,7 +341,7 @@ try {
                 ) as total_events_outstanding
             FROM payments p
             WHERE p.booking_type = 'event'
-            AND p.payment_date BETWEEN ? AND ?
+            AND " . rh_pay_count_day_sql('p') . " BETWEEN ? AND ?
             AND p.deleted_at IS NULL
         ");
         $eventsStmt->execute([$startDate, $endDate, $startDate, $endDate]);
@@ -359,7 +359,7 @@ try {
                     as restaurant_vat_collected
             FROM payments p
             WHERE p.booking_type = 'restaurant'
-            AND p.payment_date BETWEEN ? AND ?
+            AND " . rh_pay_count_day_sql('p') . " BETWEEN ? AND ?
             AND p.deleted_at IS NULL
         ");
         $restaurantStmt->execute([$startDate, $endDate]);
@@ -390,7 +390,7 @@ try {
         FROM payments
         WHERE payment_type = 'refund'
           AND refund_status IN ('completed','processing')
-          AND payment_date BETWEEN ? AND ?
+          AND " . rh_pay_count_day_sql() . " BETWEEN ? AND ?
           AND deleted_at IS NULL
         GROUP BY refund_reason
         ORDER BY total_amount DESC
@@ -417,7 +417,7 @@ try {
         LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
         LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id
                 WHERE p.deleted_at IS NULL
-                    AND p.payment_date BETWEEN ? AND ?
+                    AND " . rh_pay_count_day_sql('p') . " BETWEEN ? AND ?
         ORDER BY p.payment_date DESC, p.created_at DESC
         LIMIT 20
     ");
@@ -565,7 +565,7 @@ try {
     $trendStart = date('Y-m-d', $trendStartCandidate);
     $trendStmt = $pdo->prepare("
         SELECT
-            DATE(payment_date) AS day,
+            " . rh_pay_count_day_sql() . " AS day,
             COALESCE(SUM(CASE WHEN booking_type = 'room' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS room_rev,
             COALESCE(SUM(CASE WHEN booking_type = 'conference' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS conf_rev,
             COALESCE(SUM(CASE WHEN booking_type = 'restaurant' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS fnb_rev,
@@ -575,8 +575,8 @@ try {
             COUNT(*) AS txn_count
         FROM payments
         WHERE deleted_at IS NULL
-          AND DATE(payment_date) BETWEEN ? AND ?
-        GROUP BY DATE(payment_date)
+          AND " . rh_pay_count_day_sql() . " BETWEEN ? AND ?
+        GROUP BY day
         ORDER BY day DESC
     ");
     $trendStmt->execute([$trendStart, $trendEnd]);
@@ -750,7 +750,7 @@ if (!isset($folio_fnb)) {
                     WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN -total_amount
                     ELSE 0 END),0)
                 FROM payments
-                WHERE payment_method IN ('cash','mobile_money') AND DATE(payment_date)=CURRENT_DATE() AND deleted_at IS NULL");
+                WHERE payment_method IN ('cash','mobile_money') AND " . rh_pay_count_day_sql() . "=CURRENT_DATE() AND deleted_at IS NULL");
             $cashStmt->execute();
             $cat_cash_today = (float)$cashStmt->fetchColumn();
         } catch (Throwable $e) { /* ignore */

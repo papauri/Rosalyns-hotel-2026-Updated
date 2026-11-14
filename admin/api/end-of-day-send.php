@@ -191,6 +191,7 @@ if ($channel === 'whatsapp') {
     if ($eodModBookings)   { $lines[] = "  🏨 Rooms (nights stayed): " . _money($currency_symbol, (float)$earned['rooms_total_gross']); }
     if (abs((float)$earned['extras_gross']) > 0.004) { $lines[] = "  🧾 Other guest-bill charges: " . _money($currency_symbol, (float)$earned['extras_gross']); }
     if (abs((float)$earned['cancel_kept_gross']) > 0.004) { $lines[] = "  🛏️ Kept on cancellations: " . _money($currency_symbol, (float)$earned['cancel_kept_gross']); }
+    if (abs((float)($earned['no_show_kept_gross'] ?? 0)) > 0.004) { $lines[] = "  🛏️ Kept on no-shows: " . _money($currency_symbol, (float)$earned['no_show_kept_gross']); }
     if ($eodModConference || abs((float)$earned['conf_gross']) > 0.004) { $lines[] = "  🎪 Conference: " . _money($currency_symbol, (float)$earned['conf_gross']); }
     $lines[] = (isRestaurantEnabled() ? "  🍽️ F&B:         " : "  🛒 POS:         ") . _money($currency_symbol, (float)$earned['fnb_gross']);
     if ($eodModGym    || abs((float)$earned['gym_gross']) > 0.004)    { $lines[] = "  🏋️ Gym (when paid): " . _money($currency_symbol, (float)$earned['gym_gross']); }
@@ -422,6 +423,7 @@ $revSrcRows = [];
 if ($eodModBookings)   { $revSrcRows[] = ['Rooms (nights stayed)', _money($currency_symbol, (float)$earned['rooms_total_gross'])]; }
 if (abs((float)$earned['extras_gross']) > 0.004) { $revSrcRows[] = ['Other guest-bill charges', _money($currency_symbol, (float)$earned['extras_gross'])]; }
 if (abs((float)$earned['cancel_kept_gross']) > 0.004) { $revSrcRows[] = ['Kept on cancellations', _money($currency_symbol, (float)$earned['cancel_kept_gross'])]; }
+if (abs((float)($earned['no_show_kept_gross'] ?? 0)) > 0.004) { $revSrcRows[] = ['Kept on no-shows (on the check-in date)', _money($currency_symbol, (float)$earned['no_show_kept_gross'])]; }
 if ($eodModConference || abs((float)$earned['conf_gross']) > 0.004) { $revSrcRows[] = ['Conferences (on event date)', _money($currency_symbol, (float)$earned['conf_gross'])]; }
 $revSrcRows[] = [isRestaurantEnabled() ? 'F&B / POS' : 'POS', _money($currency_symbol, (float)$earned['fnb_gross'])];
 if ($eodModGym    || abs((float)$earned['gym_gross']) > 0.004)    { $revSrcRows[] = ['Gym (when paid)',    _money($currency_symbol, (float)$earned['gym_gross'])]; }

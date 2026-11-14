@@ -1806,7 +1806,9 @@ function ensureBookingEmailTemplateDefaults()
                         ['Sub-total',                      '{{subtotal_amount}}'],
                         ['Tourism Levy ({{levy_rate}}%)',   '{{levy_amount}}'],
                         ['VAT ({{vat_rate}}%)',             '{{vat_amount}}'],
-                        ['Total Due',                      '{{total_amount}}', true],
+                        ['Invoice total',                  '{{invoice_total_amount}}'],
+                        ['Amount paid',                    '{{amount_paid_amount}}'],
+                        ['Balance due',                    '{{total_amount}}', true],
                     ])
                     . '<tr><td style="padding:0 48px 8px;text-align:center;">{{vat_number_html}}</td></tr>'
 

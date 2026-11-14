@@ -33,6 +33,7 @@ if (!in_array($_exportRole, ['admin', 'manager', 'accountant'], true)) {
 require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/licence-guard.php'; rh_licence_guard_request(); // licence: read-only / locked; does nothing unless this build is licensed
 require_once __DIR__ . '/../admin/includes/finance-schema.php';
+require_once __DIR__ . '/../admin/includes/finance-refunds.php'; // rh_pay_count_day_sql: a refund counts on its payout day
 require_once __DIR__ . '/../includes/conference-pricing.php';
 require_once __DIR__ . '/../admin/includes/permissions.php';
 rhApiModuleGate('reports.php'); // blocked when the finance module is switched off, as the page is
@@ -70,7 +71,9 @@ if ($output === false) {
 }
 
 // Build WHERE clause
-$date_filter = "AND payment_date >= ? AND payment_date <= ?";
+// The day a row counts on (owner 2026-11-14, as End of Day): a refund on the day it was paid out, anything else on its
+// payment_date (rh_pay_count_day_sql). For queries on `FROM payments` without an alias; the aliased one builds its own.
+$date_filter = "AND " . rh_pay_count_day_sql() . " >= ? AND " . rh_pay_count_day_sql() . " <= ?";
 
 // ============================================
 // EXPORT BASED ON REPORT TYPE
@@ -277,7 +280,7 @@ function exportRevenueReport($output, string $start_date, string $end_date, stri
 
     $dailyQuery = "
         SELECT
-            DATE(payment_date) as date,
+            " . rh_pay_count_day_sql() . " as date,
             COUNT(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN 1 END) as transaction_count,
             SUM(CASE WHEN COALESCE(payment_type, '') = 'refund' THEN -total_amount ELSE total_amount END) as daily_revenue,
             SUM(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END)
@@ -288,7 +291,7 @@ function exportRevenueReport($output, string $start_date, string $end_date, stri
                OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
         AND deleted_at IS NULL
         $date_filter
-        GROUP BY DATE(payment_date)
+        GROUP BY date
         ORDER BY date ASC
     ";
     $dailyStmt = $pdo->prepare($dailyQuery);
@@ -323,7 +326,7 @@ function exportRevenueReport($output, string $start_date, string $end_date, stri
         WHERE (p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(p.payment_type, '') != 'refund'
                OR (p.payment_type = 'refund' AND p.refund_status IN ('completed','processing')))
         AND p.deleted_at IS NULL
-        $date_filter
+        AND " . rh_pay_count_day_sql('p') . " >= ? AND " . rh_pay_count_day_sql('p') . " <= ?
         GROUP BY client_name, p.booking_type
         ORDER BY total_spent DESC
         LIMIT 20
@@ -445,7 +448,7 @@ function exportVATReport($output, string $start_date, string $end_date, string $
 
     $dailyQuery = "
         SELECT
-            DATE(payment_date) as date,
+            " . rh_pay_count_day_sql() . " as date,
             COUNT(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN 1 END) as transaction_count,
             SUM(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END)
                 - COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END), 0)
@@ -456,7 +459,7 @@ function exportVATReport($output, string $start_date, string $end_date, string $
                OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
         AND deleted_at IS NULL
         $date_filter
-        GROUP BY DATE(payment_date)
+        GROUP BY date
         ORDER BY date ASC
     ";
     $dailyStmt = $pdo->prepare($dailyQuery);

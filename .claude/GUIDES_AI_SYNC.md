@@ -176,6 +176,26 @@ when prompted."
   error_log_clear, stock_count_approval*, documents_flow, rehearsal_fixes have no refuse-at-Rosalyn's guard; past
   same-day early checkouts at Rosalyn's keep the old night count in their History text (no money effect).
 
+### Payments accuracy + Payments page (2026-11-15, NEXT_BUILD_ORDER step 8b) — SHIPPED (hashes: see TASKS.md line)
+- Guides (Payments, Payment details, Bookings "Payments & balance", End of Day, Reports, Credit notes, email templates):
+  click anywhere on a Payments row (or an "accounts that owe" row) to open it; Payment details now shows paid by,
+  received by, group and credit note; "Refunded" counts only refunds actually made (pending on its own line, 2 decimals).
+  "Payments & balance" lists refunded payments and every refund; Total charged = the bill (kept fee / no-show charge).
+  Room invoice email shows the invoice's own totals; its last row is the balance (new tags {{invoice_total_amount}},
+  {{amount_paid_amount}}, {{balance_due_amount}}; stored templates unchanged, so they still say "Total Due" above the
+  balance). A partly refunded payment can be refunded again up to what is left. OWNER RULES 2026-11-14/15: a no-show is
+  money earned per its policy (new End of Day line "Kept on no-shows", on the check-in date, not in ADR/RevPAR; past
+  days' totals change); a refund counts on the day it was paid out in every report, pending refunds in no period; the
+  levy is a once-off on the room booking. Every payment write now shows in History.
+- Assistant: check at sync time. No grep hit in includes/ai/ for rh_eod_earned_revenue, rh_pay_count_day_sql,
+  payment_audit_log or find_payment_for_refund; check any refund-by-date figure it reads against the payout-day rule.
+- LATER (not pulled): Payments list date column/sort still use the day a refund was raised; dashboard today feed
+  (dashboard.php:1461), api/payments.php:182-238, billing-accounts.php:615 and accounting-dashboard.php:376 count
+  refunds by the day raised; new date filters cannot use the payment_date index; Rosalyn's stored payment_invoice
+  template label "Total Due" (owner); row click on Receipts/Invoices/Quotations/Credit notes; dead code
+  api/payments.php:1070-1150, bookings.php:1634, booking-details.php:1423; till refund status rows not in History;
+  receipts/CSV still show a per-payment levy share (owner: levy is booking-level).
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` fails in unchanged code: claim-check self-test (Room Board "Tomorrow"; staff
   activity "4 of 3 staff accounts"), History Summary "K1,068,000," flagged; digest-recipients fail.

@@ -1011,8 +1011,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
                     $user['id'],
                     $pay_uuid,
                 ]);
+                $cb_pay_id = (int)$pdo->lastInsertId();
                 $pdo->prepare("UPDATE bookings SET last_payment_date = CURDATE() WHERE id = ?")->execute([$cb['id']]);
                 recalculateBookingFinancials($cb['id']);
+                // History: taken with the new booking (written after the commit below).
+                require_once __DIR__ . '/includes/finance-account-sync.php';
+                rh_payment_audit_defer(['payment_id' => $cb_pay_id, 'payment_ref' => $pay_ref, 'action' => 'created',
+                    'user_id' => (int)($user['id'] ?? 0), 'who' => (string)($user['full_name'] ?? ($user['username'] ?? '')),
+                    'note' => 'Taken at booking (new booking at the front desk): ' . $currency_symbol . ' ' . number_format($this_amount, 2)
+                        . ' (' . str_replace('_', ' ', (string)$payment_method) . '), receipt ' . $receipt_number . '.']);
                 $payment_shares[(int)$cb['id']] = ['amount' => $this_amount, 'ref' => $pay_ref];
             }
         }
@@ -1036,6 +1043,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['create_booking'])) {
         }
 
         $pdo->commit();
+        if (function_exists('rh_payment_audit_flush')) {
+            rh_payment_audit_flush($pdo); // History rows queued above, now that the booking and payment are committed
+        }
         unset($_SESSION['admin_create_booking_uuid']);
 
         $overpay_msg = '';

@@ -627,6 +627,12 @@ function createPayment(PDO $pdo)
         ]);
 
         $paymentId = $pdo->lastInsertId();
+        // History: recorded through the API, named by the API client (never the key itself); written after the commit.
+        $apiCreateClient = $GLOBALS['rh_api_client'] ?? [];
+        rh_payment_audit_defer(['payment_id' => (int)$paymentId, 'payment_ref' => $paymentRef, 'action' => 'created', 'user_id' => null,
+            'who' => 'API: ' . (string)($apiCreateClient['client_name'] ?? 'unknown client'),
+            'note' => 'Recorded through the API: ' . number_format((float)$totalAmount, 2) . ' (' . str_replace('_', ' ', (string)$input['payment_method']) . ', ' . (string)$input['payment_status'] . ')'
+                . ($receiptNumber ? ', receipt ' . $receiptNumber : '') . '.']);
 
         // Update account totals
         if (!rh_sync_account_payments($pdo, (string)$input['booking_type'], (int)$input['booking_id'])) {
@@ -640,6 +646,7 @@ function createPayment(PDO $pdo)
         }
 
         $pdo->commit();
+        rh_payment_audit_flush($pdo);
         rh_email_overpay_credit_notes($pdo, $overpayCn); // every overpayment note with an address (company note -> billing email)
 
         // Send receipt email automatically for completed/paid payments (once; never throws)

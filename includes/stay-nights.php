@@ -292,6 +292,9 @@ if (!function_exists('rh_stay_nights_quote')) {
                         $leg, mb_substr($refundReason, 0, 1000), $uid ?: null,
                     ]);
                     rh_refresh_original_payment_status($pdo, (int)$orig['id']);
+                    rh_payment_audit_defer(['payment_id' => (int)$orig['id'], 'verify_ref' => $legRef, 'action' => 'refund_recorded',
+                        'user_id' => $uid, 'who' => $who !== '' ? $who : 'System',
+                        'note' => 'Refund ' . $legRef . ' of ' . number_format($leg, 2) . ' (nights taken off, completed). ' . $refundReason]);
                     $refundTotal = round($refundTotal + $leg, 2);
                     if (($alloc['payer'] ?? '') === 'company') {
                         $refundCompany = round($refundCompany + $leg, 2);
@@ -391,6 +394,7 @@ if (!function_exists('rh_stay_nights_quote')) {
             }
             if ($ownTx) {
                 $pdo->commit();
+                rh_payment_audit_flush($pdo); // History rows queued above (a caller that owns the transaction: end of request)
             }
         } catch (Throwable $e) {
             if ($ownTx && $pdo->inTransaction()) {

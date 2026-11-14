@@ -361,7 +361,7 @@ if (!function_exists('applyCreditNote')) {
 
             // Payment type logic (amount due was read under the account lock above)
             $outstandingAmount = $accountDue;
-            $paymentType = ($amountToApply >= $outstandingAmount - 0.01 && $outstandingAmount > 0)
+            $paymentType = ($amountToApply >= $outstandingAmount - BALANCE_TOLERANCE && $outstandingAmount > 0)
                 ? 'full_payment'
                 : 'partial_payment';
 
@@ -452,7 +452,18 @@ if (!function_exists('applyCreditNote')) {
                 syncEventInquiryPaymentSnapshot($pdo, $bookingId);
             }
 
+            // History: the payment made by this credit note (written after the commit).
+            if (function_exists('rh_payment_audit_defer')) {
+                rh_payment_audit_defer(['payment_id' => $paymentId, 'payment_ref' => $payRef, 'action' => 'created',
+                    'user_id' => $adminUserId, 'who' => $adminUserId > 0 ? '' : 'System',
+                    'note' => 'Paid by credit note ' . $cn['credit_note_number'] . ': ' . number_format($amountToApply, 2)
+                        . ' (note balance left ' . number_format(max(0, $newBalance), 2) . ').' . ($notes !== '' ? ' ' . $notes : '')]);
+            }
+
             $pdo->commit();
+            if (function_exists('rh_payment_audit_flush')) {
+                rh_payment_audit_flush($pdo);
+            }
 
             rh_log_event('credit-notes', 'info', "Credit note {$cn['credit_note_number']} applied", [
                 'credit_note_id'   => $creditNoteId,
@@ -561,6 +572,11 @@ if (!function_exists('recordCreditNoteRefundLegs')) {
                 $reason, $leg, 'Moved to credit note ' . $creditNoteNumber,
                 $creditNoteId, $adminUserId ?: null,
             ]);
+            if (function_exists('rh_payment_audit_defer')) { // History, written after the caller's commit
+                rh_payment_audit_defer(['payment_id' => (int)$orig['id'], 'verify_ref' => $ref, 'action' => 'refund_recorded',
+                    'user_id' => $adminUserId, 'who' => $adminUserId > 0 ? '' : 'System',
+                    'note' => 'Refund ' . $ref . ' of ' . number_format($leg, 2) . ' moved into credit note ' . $creditNoteNumber . ' (' . str_replace('_', ' ', $reason) . ')']);
+            }
             $out['total'] = round($out['total'] + $leg, 2);
             $out['refs'][] = $ref;
             if (function_exists('rh_refresh_original_payment_status')) {
@@ -946,7 +962,7 @@ if (!function_exists('voidCreditNote')) {
             // money into this note (any account type — room, conference, gym, event).
             // Whatever was already applied elsewhere (amount_used) stays out of the
             // account, so that part is re-recorded.
-            $legStmt = $pdo->prepare("SELECT id, booking_type, booking_id, booking_reference, original_payment_id FROM payments WHERE credit_note_id = ? AND payment_type = 'refund' AND deleted_at IS NULL FOR UPDATE");
+            $legStmt = $pdo->prepare("SELECT id, payment_reference, booking_type, booking_id, booking_reference, original_payment_id FROM payments WHERE credit_note_id = ? AND payment_type = 'refund' AND deleted_at IS NULL FOR UPDATE");
             $legStmt->execute([$creditNoteId]);
             $legRows = $legStmt->fetchAll(PDO::FETCH_ASSOC);
             if ($legRows) {
@@ -961,6 +977,11 @@ if (!function_exists('voidCreditNote')) {
                 $origIds      = [];
                 foreach ($legRows as $legRow) {
                     $softDel->execute([(int)$legRow['id']]);
+                    if (function_exists('rh_payment_audit_defer')) { // History: removed by the person who voided the note
+                        rh_payment_audit_defer(['payment_id' => (int)$legRow['id'], 'payment_ref' => (string)($legRow['payment_reference'] ?? ''), 'action' => 'deleted',
+                            'expect' => 'deleted', 'user_id' => $adminUserId, 'who' => $adminUserId > 0 ? '' : 'System',
+                            'note' => 'Credit note ' . $cn['credit_note_number'] . ' voided: the money it held goes back to the account. Reason: ' . $reason]);
+                    }
                     if (!empty($legRow['original_payment_id'])) {
                         $origIds[(int)$legRow['original_payment_id']] = true;
                     }
@@ -1018,6 +1039,9 @@ if (!function_exists('voidCreditNote')) {
 
             if ($ownTx) {
                 $pdo->commit();
+                if (function_exists('rh_payment_audit_flush')) {
+                    rh_payment_audit_flush($pdo);
+                }
             }
             return ['success' => true, 'error' => null];
         } catch (Throwable $e) {

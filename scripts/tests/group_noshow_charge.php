@@ -117,7 +117,12 @@ try {
     ok('On first night: group invoice total = lead 2,330 + 1,165 = sum of folio summaries; the room is marked No-show; the lines foot',
         $near($inv2['t']['total'], 3495) && $near($inv2['t']['total'], $fsP2['grand_total'] + $fs2['grand_total']) && stripos($inv2['h'], 'No-show room:') !== false
         && stripos($inv2['h'], 'No-show charge - first night') !== false && $near((float)$inv2['t']['subtotal'] + (vat_mode() === 'exclusive' ? (float)$inv2['t']['vat'] : 0.0) + (float)$inv2['t']['levy'], $inv2['t']['total']), json_encode($inv2['t']));
-    ok('On first night: End of Day earned revenue counts the charge once (guest-bill extras +1,165)', $near($eodDelta, 1165), (string)$eodDelta);
+    // Owner 2026-11-14 (step 8b F8): a no-show is earned on its check-in date as its own line (Kept on no-shows), so the
+    // tagged charge is no longer a guest-bill extra on the day it was posted, and is counted once, on the check-in date.
+    $m2Row = $pdo->query('SELECT * FROM bookings WHERE id = ' . (int)$m2)->fetch(PDO::FETCH_ASSOC);
+    $eodIn = rh_eod_earned_revenue($pdo, (string)$m2Row['check_in_date'], ['bookings' => true, 'pos' => true]);
+    ok('On first night: End of Day counts the charge once, on the check-in date as Kept on no-shows (1,165), not as a guest-bill extra today',
+        $near($eodDelta, 0) && $near(rh_eod_noshow_earned($pdo, $m2Row), 1165) && (float)$eodIn['no_show_kept_gross'] >= 1165 - 0.01, json_encode([$eodDelta, $eodIn['no_show_kept_gross']]));
     ok('On first night: the invoice prints the charge without its internal tag; the stored row keeps it (still detected)',
         strpos($inv2['h'], 'noshow-fee:') === false && rh_noshow_fee_tagged($pdo, $m2)
         && substr((string)$rows2[0]['description'], -strlen(rh_noshow_fee_tag($m2))) === rh_noshow_fee_tag($m2), (string)($rows2[0]['description'] ?? ''));

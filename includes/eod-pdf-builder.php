@@ -455,6 +455,7 @@ function buildEodPdf(
         if ($eodModBookings)   { $rowL('Rooms (nights stayed)', $m((float)($earned['rooms_total_gross'] ?? 0)), false, $i++); }
         if ($eNz('extras_gross')) { $rowL('Other guest-bill charges', $m((float)$earned['extras_gross']), false, $i++); }
         if ($eNz('cancel_kept_gross')) { $rowL('Kept on cancellations', $m((float)$earned['cancel_kept_gross']), false, $i++); }
+        if ($eNz('no_show_kept_gross')) { $rowL('Kept on no-shows (on the check-in date)', $m((float)$earned['no_show_kept_gross']), false, $i++); }
         if ($eodModConference || $eNz('conf_gross')) { $rowL('Conferences (on event date)', $m((float)($earned['conf_gross'] ?? 0)), false, $i++); }
         $rowL(isRestaurantEnabled() ? 'F&B / POS' : 'POS', $m((float)($earned['fnb_gross'] ?? 0)), false, $i++);
         if ($eodModGym    || $eNz('gym_gross'))    { $rowL('Gym (when paid)',    $m((float)($earned['gym_gross'] ?? 0)),    false, $i++); }

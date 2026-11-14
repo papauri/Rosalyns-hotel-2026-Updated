@@ -111,7 +111,20 @@ if (!function_exists('rh_refund_settled_statuses')) {
     }
 
     /**
-     * Pure twin of rh_refund_eod_date_sql (tests): $refund = the row (payment_date), $audit = its payment_audit_log
+     * SQL expression: the DAY a payments row counts on in any dated figure (owner 2026-11-14, Reports / Accounting
+     * dashboard / Payments the same as End of Day): a refund on the day it was paid out (rh_refund_eod_date_sql), any
+     * other row on its payment_date. A refund still pending is not paid out: every money total also filters it out by
+     * refund_status (it never counts in any period); where pending refunds are listed they keep their own date.
+     * Use in place of payment_date in a date filter / GROUP BY (same placeholders). Alias as rh_refund_eod_date_sql.
+     */
+    function rh_pay_count_day_sql(string $alias = ''): string
+    {
+        $a = rh_refund_alias($alias);
+        return "(CASE WHEN {$a}payment_type = 'refund' THEN " . rh_refund_eod_date_sql($alias) . " ELSE DATE({$a}payment_date) END)";
+    }
+
+    /**
+     * Pure twin of rh_refund_eod_date_sql (tests):$refund = the row (payment_date), $audit = its payment_audit_log
      * rows (action, field_name, old_value, created_at). Returns the Y-m-d day the refund counts on.
      */
     function rh_refund_eod_day(array $refund, array $audit): string

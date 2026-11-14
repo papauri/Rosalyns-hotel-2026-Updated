@@ -15,6 +15,7 @@ require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once __DIR__ . '/includes/gym-checkin-lib.php';
 require_once __DIR__ . '/includes/events-gym-filters.php';
+require_once __DIR__ . '/includes/finance-refunds.php'; // rh_pay_count_day_sql: a refund counts on its payout day
 
 /** @var PDO $pdo */
 /** @var array $user */
@@ -144,7 +145,7 @@ try {
                         WHERE booking_type='gym' AND deleted_at IS NULL
                           AND ((COALESCE(payment_type,'') <> 'refund' AND payment_status IN ('completed','paid','refunded','partially_refunded'))
                                OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
-                          AND payment_date BETWEEN ? AND ?");
+                          AND " . rh_pay_count_day_sql() . " BETWEEN ? AND ?"); // a refund on the day it was paid out
     $s->execute([$gr_start, $gr_end]);
     $row = $s->fetch(PDO::FETCH_ASSOC) ?: [];
     $gr_rev = ['count' => (int)($row['c'] ?? 0), 'total' => (float)($row['t'] ?? 0)];

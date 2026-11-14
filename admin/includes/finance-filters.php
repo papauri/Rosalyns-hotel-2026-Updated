@@ -236,7 +236,7 @@ if (!function_exists('rh_fin_valid_date')) {
             $where[] = 'p.payment_method = ?';
             $params[] = $method;
         }
-        $where = array_merge($where, rh_fin_date_conditions('p.payment_date', $f['start_date'] ?? '', $f['end_date'] ?? '', $params));
+        $where = array_merge($where, rh_fin_date_conditions(function_exists('rh_pay_count_day_sql') ? rh_pay_count_day_sql('p') : 'p.payment_date', $f['start_date'] ?? '', $f['end_date'] ?? '', $params));
         return ['sql' => 'WHERE ' . implode(' AND ', $where), 'params' => $params];
     }
 

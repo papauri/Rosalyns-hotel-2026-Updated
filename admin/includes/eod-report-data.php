@@ -293,7 +293,7 @@ if (!function_exists('rh_eod_headline_facts')) {
             }
             $f[] = ['key' => $key, 'label' => $label, 'value' => $unit === 'count' ? (int)$value : round((float)$value, 2), 'unit' => $unit, 'basis' => $basis];
         };
-        $add('revenue_earned', 'Revenue earned', $d['earned_total'] ?? ($earned['total'] ?? 0), 'money', 'Room nights stayed, guest-bill charges, till sales, conferences and events on their date, gym payments; VAT and levy included');
+        $add('revenue_earned', 'Revenue earned', $d['earned_total'] ?? ($earned['total'] ?? 0), 'money', 'Room nights stayed, guest-bill charges, amounts kept on cancellations and no-shows, till sales, conferences and events on their date, gym payments; VAT and levy included');
         $add('revenue_vs_previous_day', 'Revenue earned compared with the day before', $d['net_change'] ?? 0, 'money', 'This day\'s revenue earned less the day before\'s');
         if ($on('bookings')) {
             $add('rooms_revenue', 'Rooms (nights stayed)', $earned['rooms_total_gross'] ?? 0, 'money', 'Each in-house booking\'s booked nightly rate for this night, packages spread over the stay');

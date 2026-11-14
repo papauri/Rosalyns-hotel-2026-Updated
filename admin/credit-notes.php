@@ -54,7 +54,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $issueBkRef  = trim($_POST['booking_reference']  ?? '');
             $issueBkType = trim($_POST['booking_type']        ?? '');
 
-            $result = issueCreditNote($pdo, [
+            // A note on a room booking: VAT split pro rata to the booking, as every other room credit note (the levy is
+            // not VAT). Goodwill / conference notes keep the flat rate extraction inside issueCreditNote.
+            $issueVat = [];
+            if ($issueBkType === 'room' && $issueBkId > 0) {
+                require_once __DIR__ . '/includes/finance-account-sync.php';
+                $issueFallbackRate = rh_vat_enabled() ? (float)getSetting('vat_rate') : 0.0;
+                $issueSplit = rh_account_vat_split($pdo, 'room', $issueBkId, round($amount, 2), $issueFallbackRate);
+                $issueVat = ['vat_rate' => (float)$issueSplit['rate'], 'vat_amount' => (float)$issueSplit['vat']];
+            }
+
+            $result = issueCreditNote($pdo, $issueVat + [
                 'booking_type'      => in_array($issueBkType, ['room', 'conference'], true) ? $issueBkType : 'goodwill',
                 'booking_id'        => $issueBkId > 0 ? $issueBkId : null,
                 'booking_reference' => $issueBkRef !== '' ? $issueBkRef : null,

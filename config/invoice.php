@@ -1241,7 +1241,9 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
     // The figures this document prints (the invoice email states the same total and balance as its copy).
     $docTotals = ['total' => round((float)$totalWithVat, 2), 'paid' => round((float)$amountPaid, 2), 'balance' => $isPaid ? 0.0 : round((float)$balanceDue, 2),
         'ids' => array_values(array_map('intval', $summaryIds)),
-        'subtotal' => round((float)$subtotalShown, 2), 'vat' => round((float)$vatAmount, 2), 'levy' => round((float)$tourismLevyAmt, 2)];
+        // subtotal = the Subtotal row exactly as the totals table below prints it (VAT off: total less levy).
+        'subtotal' => round($vMode === 'off' ? (float)$totalWithVat - (float)$tourismLevyAmt : (float)$subtotalShown, 2),
+        'vat' => round((float)$vatAmount, 2), 'levy' => round((float)$tourismLevyAmt, 2), 'vat_mode' => $vMode];
     $totalDueDisplay = $currency_symbol . ' ' . number_format($totalWithVat, 2);
     $amountPaidDisplay = $currency_symbol . ' ' . number_format($amountPaid, 2);
     $balanceDueDisplay = $currency_symbol . ' ' . number_format($balanceDue, 2);
@@ -2312,6 +2314,43 @@ function rh_invoice_email_copy(PDO $pdo, array $booking, string $invoice_number)
 }
 
 /**
+ * PURE. The money lines of the invoice email ({{subtotal_amount}}, {{levy_amount}}, {{vat_amount}}, {{total_amount}},
+ * {{invoice_total_amount}}, {{amount_paid_amount}}, {{balance_due_amount}}) from the attached invoice's own totals
+ * (rh_invoice_email_copy()['totals']), so the email states exactly what the PDF prints: the subtotal row as printed
+ * (never already holding the levy), VAT as the PDF shows it for the VAT mode, and {{total_amount}} = the invoice's
+ * balance (0.00 when paid). Passed to buildBookingEmailVariables() as $extra overrides.
+ */
+function rh_invoice_email_money_vars(array $totals, string $currency): array
+{
+    $fmt = static function (float $v) use ($currency): string {
+        return $currency . ' ' . number_format($v, 2);
+    };
+    $mode = (string)($totals['vat_mode'] ?? (function_exists('vat_mode') ? vat_mode() : 'exclusive'));
+    $vat = round((float)($totals['vat'] ?? 0), 2);
+    $levy = round((float)($totals['levy'] ?? 0), 2);
+    $balance = round((float)($totals['balance'] ?? 0), 2);
+    if ($balance <= BALANCE_TOLERANCE) {
+        $balance = 0.0;
+    }
+    if ($mode === 'exclusive') {
+        $vatText = $vat > BALANCE_TOLERANCE ? $fmt($vat) : '—';
+    } elseif ($mode === 'inclusive') {
+        $vatText = vat_document_value($fmt($vat));
+    } else {
+        $vatText = '—';
+    }
+    return [
+        'subtotal_amount'      => $fmt((float)($totals['subtotal'] ?? 0)),
+        'levy_amount'          => $levy > BALANCE_TOLERANCE ? $fmt($levy) : '—',
+        'vat_amount'           => $vatText,
+        'total_amount'         => $fmt($balance),
+        'invoice_total_amount' => $fmt((float)($totals['total'] ?? 0)),
+        'amount_paid_amount'   => $fmt((float)($totals['paid'] ?? 0)),
+        'balance_due_amount'   => $fmt($balance),
+    ];
+}
+
+/**
  * Send invoice email to guest with CC recipients
  */
 function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, array $cc_recipients = [], string $invoice_number = '')
@@ -2368,7 +2407,19 @@ function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, arr
                 'invoice_number' => $invoice_number,
                 'check_out'      => $checkOut,
                 'invoice_link'   => $invoiceLink,
-            ])
+            ] + ($invCopy['totals'] !== null
+                // Sub-total / levy / VAT / balance = the attached invoice's own figures (fix 2026-11-14).
+                ? rh_invoice_email_money_vars($invCopy['totals'], (string)getSetting('currency_symbol'))
+                : (static function (array $b): array { // copy not built (logged): the booking's own stored figures, never an empty placeholder
+                    $c = (string)getSetting('currency_symbol');
+                    $due = isset($b['amount_due']) ? $c . ' ' . number_format(max(0.0, (float)$b['amount_due']), 2) : '—';
+                    return [
+                        'invoice_total_amount' => isset($b['total_with_vat']) ? $c . ' ' . number_format((float)$b['total_with_vat'] + (float)($b['folio_charges_total'] ?? 0), 2) : '—',
+                        'amount_paid_amount'   => isset($b['amount_paid']) ? $c . ' ' . number_format((float)$b['amount_paid'], 2) : '—',
+                        'balance_due_amount'   => $due,
+                        'total_amount'         => $due,
+                    ];
+                })($booking)))
             : [];
         $dbTemplate = function_exists('renderBookingEmailTemplate')
             ? renderBookingEmailTemplate('payment_invoice', $templateVars)

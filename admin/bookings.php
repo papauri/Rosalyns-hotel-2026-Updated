@@ -1548,13 +1548,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             exit;
         } elseif ($action === 'find_payment_for_refund') {
             $bid = (int)($_POST['booking_id'] ?? 0);
-            $stmt = $pdo->prepare("SELECT id, payment_reference, total_amount, payment_status, payment_type FROM payments
-                WHERE booking_type = 'room' AND booking_id = ?
-                  AND (deleted_at IS NULL)
-                  AND payment_status IN ('completed','paid')
-                  AND COALESCE(payment_type, '') <> 'refund'
-                ORDER BY created_at DESC LIMIT 1");
-            $stmt->execute([$bid]);
+            // The latest payment that still has something left to refund: a partly refunded payment counts (staff were
+            // told "No refundable payment" when it was the only one). Remainder = total less every refund still alive
+            // (completed / processing / pending), the same cap payment-refund.php applies under its lock.
+            $stmt = $pdo->prepare("SELECT p.id, p.payment_reference, p.total_amount, p.payment_status, p.payment_type,
+                    ROUND(p.total_amount - COALESCE((SELECT SUM(COALESCE(r.refund_amount, r.total_amount)) FROM payments r
+                        WHERE r.original_payment_id = p.id AND r.payment_type = 'refund' AND r.deleted_at IS NULL
+                          AND r.refund_status IN ('completed', 'processing', 'pending')), 0), 2) AS refundable
+                FROM payments p
+                WHERE p.booking_type = 'room' AND p.booking_id = ?
+                  AND (p.deleted_at IS NULL)
+                  AND p.payment_status IN ('completed','paid','partially_refunded')
+                  AND COALESCE(p.payment_type, '') <> 'refund'
+                HAVING refundable > ?
+                ORDER BY p.created_at DESC, p.id DESC LIMIT 1");
+            $stmt->execute([$bid, BALANCE_TOLERANCE]);
             $p = $stmt->fetch(PDO::FETCH_ASSOC);
             header('Content-Type: application/json');
             echo json_encode($p ? ['success' => true, 'payment' => $p] : ['success' => false, 'message' => 'No refundable payment found for this booking.']);
@@ -2034,6 +2042,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $settleProcessedBy,
                         ]);
                         $settlement_pay_id = (int)$pdo->lastInsertId();
+                        rh_payment_audit_defer(['payment_id' => $settlement_pay_id, 'payment_ref' => $settlementPaymentReference, 'action' => 'created',
+                            'user_id' => (int)($user['id'] ?? 0), 'who' => $settleProcessedBy,
+                            'note' => 'Taken at checkout: ' . $currency_symbol . ' ' . number_format($amountReceived, 2) . ' (' . str_replace('_', ' ', (string)$payment_method) . '), receipt ' . $settlementReceipt . '. ' . $settlementNotes]);
                         if (!recalculateBookingFinancials($booking_id)) {
                             throw new Exception('Could not recalculate the booking balance after the payment.');
                         }
@@ -2147,6 +2158,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     (int)($user['id'] ?? 0),
                                     $settleProcessedBy,
                                 ]);
+                                rh_payment_audit_defer(['payment_id' => (int)$orig['id'], 'payment_ref' => (string)($orig['payment_reference'] ?? ''), 'verify_ref' => $earlyLegRef,
+                                    'action' => 'refund_recorded', 'user_id' => (int)($user['id'] ?? 0), 'who' => $settleProcessedBy,
+                                    'note' => 'Refund ' . $earlyLegRef . ' of ' . number_format($leg, 2) . ' at checkout (unused nights, completed). ' . $refundReason]);
                                 $refundTotal = round($refundTotal + $leg, 2);
                                 $earlyRefundLegs[] = ['orig' => array_merge($orig, ['booking_type' => 'room', 'booking_id' => (int)$booking_id, 'booking_reference' => $sbk['booking_reference']]), 'ref' => $earlyLegRef, 'amount' => $leg, 'reason' => $refundReason];
                                 if (!function_exists('rh_refresh_original_payment_status') && is_file(__DIR__ . '/includes/finance-account-sync.php')) {
@@ -2257,6 +2271,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 );
 
                 $pdo->commit();
+                rh_payment_audit_flush($pdo); // History rows queued above, now that the checkout is committed
 
                 // Receipt for the money received at this checkout, if any.
                 $settlementReceiptNotice = '';
@@ -2354,29 +2369,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             unset($cfc);
 
-            // Completed payments (excluding refunds)
+            // Payments in the canonical paid set (a partly or fully refunded original is still money received; its
+            // refunds are listed on their own below, so the original is shown at its full amount, never netted twice).
+            // refunded_amount = its completed / processing refunds (information only).
             $pays_stmt = $pdo->prepare("
-                SELECT payment_reference, payment_date, total_amount, payment_method, payment_type, notes
-                FROM payments
-                WHERE booking_type = 'room' AND booking_id = ?
-                  AND payment_status IN ('completed','paid') AND COALESCE(payment_type, '') != 'refund'
-                  AND deleted_at IS NULL
-                ORDER BY payment_date ASC, id ASC
+                SELECT p.payment_reference, p.payment_date, p.total_amount, p.payment_method, p.payment_type, p.payment_status, p.notes,
+                       COALESCE((SELECT SUM(COALESCE(r.refund_amount, r.total_amount)) FROM payments r
+                                 WHERE r.original_payment_id = p.id AND r.payment_type = 'refund' AND r.deleted_at IS NULL
+                                   AND r.refund_status IN ('completed', 'processing')), 0) AS refunded_amount
+                FROM payments p
+                WHERE p.booking_type = 'room' AND p.booking_id = ?
+                  AND p.payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(p.payment_type, '') != 'refund'
+                  AND p.deleted_at IS NULL
+                ORDER BY p.payment_date ASC, p.id ASC
             ");
             $pays_stmt->execute([$booking_id]);
             $cf_pays = $pays_stmt->fetchAll(PDO::FETCH_ASSOC);
 
-            // Refunds
+            // Refunds: completed / processing count; pending is listed as pending (not counted); failed is left out.
             $refunds_stmt = $pdo->prepare("
-                SELECT payment_reference, payment_date, total_amount, payment_method, refund_reason
+                SELECT payment_reference, payment_date, total_amount, payment_method, refund_reason, refund_status
                 FROM payments
                 WHERE booking_type = 'room' AND booking_id = ?
                   AND payment_type = 'refund'
+                  AND refund_status IN ('completed', 'processing', 'pending')
                   AND deleted_at IS NULL
                 ORDER BY payment_date ASC, id ASC
             ");
             $refunds_stmt->execute([$booking_id]);
             $cf_refunds = $refunds_stmt->fetchAll(PDO::FETCH_ASSOC);
+            // Total charged = the folio grand total (a cancelled booking's kept fee, a no-show charge), as every other screen.
+            $cf_folio = getBookingFolioSummary((int)$booking_id);
+            $cf_total_charged = isset($cf_folio['error']) || !isset($cf_folio['grand_total'])
+                ? (float)($cf_bk['total_with_vat'] ?? $cf_bk['total_amount']) + (float)($cf_bk['folio_charges_total'] ?? 0)
+                : round((float)$cf_folio['grand_total'], 2);
             // Company pays later: Record payment asks who paid (guest / company) on an on-account booking.
             $cf_split = rh_booking_bill_split($pdo, (int)$booking_id, $cf_bk);
             require_once __DIR__ . '/includes/group-payment.php';
@@ -2398,6 +2424,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'total_amount'     => (float)$cf_bk['total_amount'],
                     'total_with_vat'   => (float)($cf_bk['total_with_vat'] ?? $cf_bk['total_amount']),
                     'folio_charges'    => (float)($cf_bk['folio_charges_total'] ?? 0),
+                    'total_charged'    => $cf_total_charged,
                     'amount_paid'      => (float)($cf_bk['amount_paid'] ?? 0),
                     'amount_due'       => (float)($cf_bk['amount_due'] ?? 0),
                     'on_account'       => !empty($cf_split['on_account']),
@@ -2628,6 +2655,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     (int)($user['id'] ?? 0),
                 ]);
                 $consolidation_pay_id = (int)$pdo->lastInsertId();
+                // History: who recorded it from Payments & balance (written after the commit below).
+                rh_payment_audit_defer(['payment_id' => $consolidation_pay_id, 'payment_ref' => $payRef_cr, 'action' => 'created',
+                    'user_id' => (int)($user['id'] ?? 0), 'who' => (string)($user['full_name'] ?? ($user['username'] ?? '')),
+                    'note' => 'Recorded from Payments & balance: ' . $currency_symbol . ' ' . number_format($pay_amount, 2) . ' (' . str_replace('_', ' ', $pay_method) . '), receipt ' . $receipt_number_cr . '.'
+                        . ($combined_notes !== '' ? ' Notes: ' . $combined_notes : '')]);
 
                 if (!recalculateBookingFinancials($booking_id)) {
                     throw new RuntimeException('Could not recalculate the booking balance after the payment - nothing was recorded.');
@@ -2645,6 +2677,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 echo json_encode(['success' => false, 'message' => 'Could not record the payment: ' . $crEx->getMessage()]);
                 exit;
             }
+            rh_payment_audit_flush($pdo); // History rows queued above, now that the payment is committed
             rh_email_overpay_credit_notes($pdo, $overpayCn_cr); // every overpayment note with an address (company note -> billing email)
 
             // Receipt email for this consolidation payment
@@ -9605,22 +9638,29 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 if (payments.length) {
                     paysHtml = '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:6px;"><thead><tr style="background:#f7f3ee;"><th style="padding:5px 8px;text-align:left;font-weight:600;">Reference</th><th style="padding:5px 8px;text-align:left;font-weight:600;">Date</th><th style="padding:5px 8px;text-align:left;font-weight:600;">Method</th><th style="padding:5px 8px;text-align:right;font-weight:600;">Amount</th></tr></thead><tbody>';
                     payments.forEach(p => {
-                        paysHtml += '<tr style="border-bottom:1px solid #eee;"><td style="padding:5px 8px;">' + escHtml(p.payment_reference) + (p.notes ? '<br><small style="color:#888;">' + escHtml(p.notes) + '</small>' : '') + '</td><td style="padding:5px 8px;">' + escHtml(p.payment_date) + '</td><td style="padding:5px 8px;">' + escHtml(p.payment_method.replace(/_/g, ' ')) + '</td><td style="padding:5px 8px;text-align:right;font-weight:600;color:#28a745;">' + fmtMWK(p.total_amount) + '</td></tr>';
+                        // A refunded original stays at its full amount; its refunds are listed below (never netted twice).
+                        const refundedPart = parseFloat(p.refunded_amount) || 0;
+                        const refundedTag = p.payment_status === 'refunded'
+                            ? '<br><small style="color:#dc3545;">Refunded in full (' + fmtMWK(refundedPart) + ')</small>'
+                            : (refundedPart > 0.01 ? '<br><small style="color:#dc3545;">Partly refunded: ' + fmtMWK(refundedPart) + ' back</small>' : '');
+                        paysHtml += '<tr style="border-bottom:1px solid #eee;"><td style="padding:5px 8px;">' + escHtml(p.payment_reference) + (p.notes ? '<br><small style="color:#888;">' + escHtml(p.notes) + '</small>' : '') + refundedTag + '</td><td style="padding:5px 8px;">' + escHtml(p.payment_date) + '</td><td style="padding:5px 8px;">' + escHtml(String(p.payment_method || '').replace(/_/g, ' ')) + '</td><td style="padding:5px 8px;text-align:right;font-weight:600;color:#28a745;">' + fmtMWK(p.total_amount) + '</td></tr>';
                     });
                     paysHtml += '</tbody></table>';
-                    refunds.forEach(r => {
-                        paysHtml += '<p style="font-size:11px;color:#dc3545;margin:4px 0 0;"><i class="fas fa-rotate-left"></i> Refund ' + escHtml(r.payment_reference) + ' \u2014 ' + fmtMWK(r.total_amount) + ' (' + escHtml(r.payment_date) + ')' + (r.refund_reason ? ': ' + escHtml(r.refund_reason) : '') + '</p>';
-                    });
                 } else {
                     paysHtml = '<p style="color:#999;font-size:12px;margin:6px 0 0;">No payments recorded yet.</p>';
                 }
+                // Refunds on their own lines, even when no other payment shows. Pending = not money out yet, not counted.
+                refunds.forEach(r => {
+                    const pendingTag = r.refund_status === 'pending' ? ' [pending, not counted yet]' : '';
+                    paysHtml += '<p style="font-size:11px;color:#dc3545;margin:4px 0 0;"><i class="fas fa-rotate-left"></i> Refund ' + escHtml(r.payment_reference) + ' \u2014 ' + fmtMWK(r.total_amount) + ' (' + escHtml(r.payment_date) + ')' + (r.refund_reason ? ': ' + escHtml(r.refund_reason) : '') + escHtml(pendingTag) + '</p>';
+                });
 
                 // Summary bar
                 const summaryBar =
                     '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px;">' +
-                    '<div style="background:#f7f3ee;border-radius:6px;padding:10px 12px;text-align:center;"><div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.06em;">Total Charged</div><div style="font-size:18px;font-weight:700;color:#2a2723;margin-top:2px;">' + fmtMWK(b.total_with_vat + b.folio_charges) + '</div></div>' +
-                    '<div style="background:#e8f5e9;border-radius:6px;padding:10px 12px;text-align:center;"><div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.06em;">Amount Paid</div><div style="font-size:18px;font-weight:700;color:#28a745;margin-top:2px;">' + fmtMWK(b.amount_paid) + '</div></div>' +
-                    '<div style="background:' + (b.amount_due > 0.01 ? '#fff3f3' : '#e8f5e9') + ';border-radius:6px;padding:10px 12px;text-align:center;"><div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.06em;">Balance Due</div><div style="font-size:18px;font-weight:700;color:' + (b.amount_due > 0.01 ? '#dc3545' : '#28a745') + ';margin-top:2px;">' + fmtMWK(b.amount_due) + '</div></div>' +
+                    '<div style="background:#f7f3ee;border-radius:6px;padding:10px 12px;text-align:center;"><div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.06em;" title="Everything this booking is billed: the stay (or, once cancelled, the fee kept), plus folio charges, VAT and levy included.">Total Charged</div><div style="font-size:18px;font-weight:700;color:#2a2723;margin-top:2px;">' + fmtMWK(b.total_charged) + '</div></div>' +
+                    '<div style="background:#e8f5e9;border-radius:6px;padding:10px 12px;text-align:center;"><div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.06em;" title="Money received less refunds that are completed or being processed. Pending refunds are not taken off yet.">Amount Paid</div><div style="font-size:18px;font-weight:700;color:#28a745;margin-top:2px;">' + fmtMWK(b.amount_paid) + '</div></div>' +
+                    '<div style="background:' + (b.amount_due > 0.01 ? '#fff3f3' : '#e8f5e9') + ';border-radius:6px;padding:10px 12px;text-align:center;"><div style="font-size:11px;color:#888;text-transform:uppercase;letter-spacing:.06em;" title="What is still owed: total charged less amount paid.">Balance Due</div><div style="font-size:18px;font-weight:700;color:' + (b.amount_due > 0.01 ? '#dc3545' : '#28a745') + ';margin-top:2px;">' + fmtMWK(b.amount_due) + '</div></div>' +
                     '</div>';
 
                 // Record Payment form (only offered while something is owed; the server refuses it otherwise)

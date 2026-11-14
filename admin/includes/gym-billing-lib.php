@@ -137,6 +137,20 @@ if (!function_exists('rh_gym_void_unpaid_for_member')) {
             }
             // Pending (uncleared) payments never count as paid; close them so they cannot land on a voided bill.
             if ($cancelledPayStatus) {
+                // History: the rows closed here, read first with the same filter, logged after the caller's commit.
+                $pendSt = $pdo->prepare("SELECT id, payment_reference FROM payments
+                     WHERE booking_type = 'gym' AND booking_id = ?
+                       AND COALESCE(payment_type, '') <> 'refund'
+                       AND payment_status = 'pending'
+                       AND deleted_at IS NULL
+                     FOR UPDATE");
+                $pendSt->execute([$id]);
+                foreach ($pendSt->fetchAll(PDO::FETCH_ASSOC) as $pc) {
+                    rh_payment_audit_defer(['payment_id' => (int)$pc['id'], 'payment_ref' => (string)$pc['payment_reference'], 'action' => 'edited',
+                        'expect' => 'status:cancelled', 'changes' => ['payment_status' => ['pending', 'cancelled']],
+                        'user_id' => null, 'who' => $actor !== '' ? $actor : 'System',
+                        'note' => 'Member ' . $memberNumber . ' cancelled before this payment cleared: the pending payment was closed (it never counted as paid).']);
+                }
                 $pdo->prepare("
                     UPDATE payments
                        SET payment_status = 'cancelled', status = 'failed',

@@ -162,6 +162,11 @@ if (!function_exists('rh_record_account_payment')) {
                 $notes !== '' ? $notes : null, $txnRef !== '' ? $txnRef : null, $clientUuid,
             ]);
             $paymentId = (int)$pdo->lastInsertId();
+            // History: who recorded it (written after the commit).
+            rh_payment_audit_defer(['payment_id' => $paymentId, 'payment_ref' => $paymentRef, 'action' => 'created',
+                'user_id' => $userId, 'who' => $userName !== '' ? $userName : ($userId > 0 ? '' : 'System'),
+                'note' => 'Recorded on the ' . $type . ' account ' . $bookingRef . ': ' . number_format($amount, 2)
+                    . ' (' . str_replace('_', ' ', (string)$method) . '), receipt ' . $receiptNumber . '.' . ($notes !== '' ? ' Notes: ' . $notes : '')]);
 
             if (!rh_sync_account_payments($pdo, $type, $id)) {
                 throw new Exception('Could not recalculate the account balance.');
@@ -176,6 +181,7 @@ if (!function_exists('rh_record_account_payment')) {
             $after = rh_sum_account_paid($pdo, $type, $id);
             if ($ownTx) {
                 $pdo->commit();
+                rh_payment_audit_flush($pdo);
             }
             return [
                 'payment_id' => $paymentId, 'payment_reference' => $paymentRef, 'amount' => $amount,
