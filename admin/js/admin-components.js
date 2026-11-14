@@ -1250,10 +1250,12 @@
 
     // All Bookings phone list row: a tap anywhere on the row that is not a control opens the
     // booking summary, through the row's own View button (same handler as tapping it).
+    // Tablets and desktop too (owner 2026-11-14: "clicking a row on desktop to open too"): the list may stay a
+    // table or become cards (.mobile-enhanced, admin-mobile.js); either way the row keeps its own View button.
     document.addEventListener('click', function (e) {
         var phone = mq ? mq.matches : window.innerWidth <= 640;
-        if (!phone || e.defaultPrevented || !e.target || !e.target.closest) return;
-        var tr = e.target.closest('table.bookings-table:not(.mobile-enhanced) > tbody > tr');
+        if (e.defaultPrevented || !e.target || !e.target.closest) return;
+        var tr = e.target.closest(phone ? 'table.bookings-table:not(.mobile-enhanced) > tbody > tr' : 'table.bookings-table > tbody > tr');
         if (!tr) return;
         if (e.target.closest('a, button, input, select, textarea, label, summary, [role="button"], .actions-more')) return;
         var sel = window.getSelection ? window.getSelection() : null;

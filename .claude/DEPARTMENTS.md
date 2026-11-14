@@ -213,3 +213,21 @@ The feature freeze in BUILD_PLAN.md ("PRODUCTION READINESS GATE") still stands. 
 9. Max 2 builders at once; read-only audits may run beside them.
 10. **No idle dev servers** (owner 2026-11-11): stop every `php -S` the moment its browser check is
     done; at session start and end, stop any `php -S` still running. Never reuse an old one.
+
+## UI decisions (shared patterns; step 9 and later reuse these, no redesign)
+
+`UI_DECISION | compact detail dialog on phones and tablets | every admin detail/summary dialog, first #viewBookingModal (admin/bookings.php) | one card per field wastes the screen (owner 2026-11-14)`
+- Breakpoints: phone up to 640px, tablet 641-1024px. Every rule sits inside `@media (max-width: 1024px)`;
+  desktop is untouched and the new elements are hidden there.
+- `.rh-dialog-summary` (admin/css/admin-components.css): ONE block at the top, a real `<a>` to the full page with a
+  focus-visible outline. Parts: `__title` (who), `__line` (what; when + nights), `__money` (total + the server's own
+  balance line, never calculated in the browser), `__muted` (booked rate x N nights), `__go` (label "Full Details").
+  No status pills inside it: the dialog header already shows them.
+- `.rh-dialog-section`: small uppercase section title. `.rh-dl`: the field grid becomes dense label / value rows
+  (label about a third, hairline between rows, no boxes).
+- `.rh-compact-hide`: put on a field the summary or header already shows; hidden up to 1024px only. Nothing is
+  removed from the dialog's markup or from desktop.
+- Footer: one row, 44px buttons, Close first, the primary action takes the spare width.
+- Lists: a click or tap anywhere on a row that is not a control (a, button, input, select, label, menu) opens that
+  row's dialog through the row's own View button, at every width; pointer cursor from 641px up; the View button
+  stays the keyboard path; a text selection never opens it.

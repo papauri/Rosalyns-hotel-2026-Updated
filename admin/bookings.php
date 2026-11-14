@@ -7581,12 +7581,27 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 <button type="button" class="close-modal" onclick="closeViewBookingModal()" aria-label="Close booking details modal"><i class="fas fa-times" aria-hidden="true"></i></button>
             </div>
             <div class="modal-body">
-                <div class="details-grid" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;">
-                    <div class="detail-item">
+                <?php /* Phones and tablets only (up to 1024px, admin-components.css .rh-dialog-summary): the key facts in
+                         one tappable block that opens the full booking page. Desktop keeps the field grid below as it was.
+                         Filled by populateViewBookingModalFields() with textContent; href set in openViewBookingModal(). */ ?>
+                <a id="view_summary_link" class="rh-dialog-summary" href="#" target="_blank" rel="noopener">
+                    <span id="view_sum_guest" class="rh-dialog-summary__title">—</span>
+                    <span id="view_sum_room" class="rh-dialog-summary__line">—</span>
+                    <span id="view_sum_stay" class="rh-dialog-summary__line">—</span>
+                    <span class="rh-dialog-summary__money"><strong id="view_sum_total">—</strong><span id="view_sum_balance"></span></span>
+                    <span id="view_sum_rate" class="rh-dialog-summary__muted"></span>
+                    <span id="view_sum_rate_today" class="rh-dialog-summary__muted" hidden></span>
+                    <span class="rh-dialog-summary__go">Full Details <i class="fas fa-chevron-right" aria-hidden="true"></i></span>
+                </a>
+                <h4 class="rh-dialog-section">More details</h4>
+                <?php /* rh-dl: up to 1024px the cards below become dense label / value rows; rh-compact-hide rows are
+                         already shown in the summary above or the header pills, so they are hidden there (desktop unchanged). */ ?>
+                <div class="details-grid rh-dl" style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 16px;">
+                    <div class="detail-item rh-compact-hide">
                         <label>Booking Reference:</label>
                         <div id="view_booking_ref" class="detail-value"></div>
                     </div>
-                    <div class="detail-item">
+                    <div class="detail-item rh-compact-hide">
                         <label>Guest Name:</label>
                         <div id="view_guest_name" class="detail-value"></div>
                     </div>
@@ -7598,44 +7613,44 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         <label>Phone:</label>
                         <div id="view_guest_phone" class="detail-value"></div>
                     </div>
-                    <div class="detail-item">
+                    <div class="detail-item rh-compact-hide">
                         <label>Room:</label>
                         <div id="view_room_name" class="detail-value"></div>
                     </div>
-                    <div class="detail-item">
+                    <div class="detail-item rh-compact-hide">
                         <label>Individual Room:</label>
                         <div id="view_individual_room" class="detail-value"></div>
                     </div>
-                    <div class="detail-item">
+                    <div class="detail-item rh-compact-hide">
                         <label>Check-in:</label>
                         <div id="view_check_in" class="detail-value"></div>
                     </div>
-                    <div class="detail-item">
+                    <div class="detail-item rh-compact-hide">
                         <label>Check-out:</label>
                         <div id="view_check_out" class="detail-value"></div>
                     </div>
-                    <div class="detail-item">
+                    <div class="detail-item rh-compact-hide">
                         <label>Nights:</label>
                         <div id="view_nights" class="detail-value"></div>
                     </div>
-                    <div class="detail-item">
+                    <div class="detail-item rh-compact-hide">
                         <label>Guests:</label>
                         <div id="view_guests" class="detail-value"></div>
                     </div>
-                    <div class="detail-item">
+                    <div class="detail-item rh-compact-hide">
                         <label>Total Amount (incl. VAT &amp; levy):<span id="view_total_info"></span></label>
                         <div id="view_total" class="detail-value"></div>
                     </div>
-                    <div class="detail-item">
+                    <div class="detail-item rh-compact-hide">
                         <label>Booked at (room rate a night &times; nights):</label>
                         <div id="view_booked_rate" class="detail-value"></div>
                         <div id="view_booked_rate_today" style="color:#666;font-size:12px;" hidden></div>
                     </div>
-                    <div class="detail-item">
+                    <div class="detail-item rh-compact-hide">
                         <label>Status:</label>
                         <div id="view_status" class="detail-value"></div>
                     </div>
-                    <div class="detail-item">
+                    <div class="detail-item rh-compact-hide">
                         <label>Payment Status:</label>
                         <div id="view_payment" class="detail-value"></div>
                     </div>
@@ -7913,6 +7928,47 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             setText('view_booking_header_ref', booking.booking_reference, '—');
             setText('view_booking_header_status', booking.status_label || booking.status, '—');
             setText('view_booking_header_payment', booking.payment_status_label || booking.payment_status, '—');
+
+            // Phone/tablet summary (shown up to 1024px only): the same values as the fields above, no new figures.
+            // The balance line is the server-built money card line as it stands (label + value), never worked out here.
+            (function () {
+                const part = function(v) { return String(v ?? '').trim(); };
+                const roomBits = [part(booking.room_name), individualRoom].filter(function(v) { return v !== ''; });
+                setText('view_sum_guest', booking.guest_name, '—');
+                setText('view_sum_room', roomBits.join(' · '), '—');
+                const checkIn = part(booking.check_in_date_formatted || booking.check_in_date);
+                const checkOut = part(booking.check_out_date_formatted || booking.check_out_date);
+                const nights = Number.parseInt(part(booking.number_of_nights), 10);
+                const guests = Number.parseInt(part(booking.number_of_guests), 10);
+                const stayBits = [];
+                if (checkIn !== '' || checkOut !== '') stayBits.push((checkIn || '—') + ' → ' + (checkOut || '—'));
+                if (Number.isFinite(nights) && nights > 0) stayBits.push(nights + (nights === 1 ? ' night' : ' nights'));
+                if (Number.isFinite(guests) && guests > 0) stayBits.push(guests + (guests === 1 ? ' guest' : ' guests'));
+                setText('view_sum_stay', stayBits.join(' · '), '—');
+                // Same total string as the Total field; the fetched one is a bare number, so the page's currency goes in front.
+                let total = part(booking.total_formatted || booking.total_amount);
+                const cur = part(window._currencySymbol);
+                if (total !== '' && cur !== '' && /^[0-9.,-]+$/.test(total)) total = cur + ' ' + total;
+                setText('view_sum_total', total !== '' ? 'Total ' + total : '', '—');
+                let balanceText = '';
+                const card = booking.money_card;
+                if (card && card.ok && Array.isArray(card.lines)) {
+                    card.lines.forEach(function(ln) {
+                        const label = part(ln && ln.label);
+                        if (ln && ln.kind === 'money' && /^(Balance due|Still owed|Credit owed)/.test(label)) {
+                            balanceText = label + ': ' + part(ln.value);
+                        }
+                    });
+                }
+                setText('view_sum_balance', balanceText, '');
+                setText('view_sum_rate', booking.booked_rate_text ? 'Booked at ' + part(booking.booked_rate_text) : '', '');
+                const todayEl = document.getElementById('view_sum_rate_today');
+                if (todayEl) {
+                    const t = part(booking.booked_rate_today);
+                    todayEl.textContent = t;
+                    todayEl.hidden = t === '';
+                }
+            })();
         }
 
         function openViewBookingModal(bookingId, bookingReference, triggerButton = null, clickEvent = null) {
@@ -7952,6 +8008,9 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             // Set full details link
             const fullDetailsLink = document.getElementById('view_full_details_link');
             fullDetailsLink.href = `booking-details.php?id=${normalizedBookingId}`;
+            // Phone/tablet summary block opens the same full booking page.
+            const summaryLink = document.getElementById('view_summary_link');
+            if (summaryLink) summaryLink.href = fullDetailsLink.href;
 
             // Immediately hydrate with row-level fallback values so the modal is
             // still useful even if the network request is slow or fails.

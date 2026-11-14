@@ -736,6 +736,77 @@ body .modal-overlay.active {
     }
 }
 
+/* View booking summary on phones and tablets (owner 2026-11-14): summary block + dense rows come from the
+   shared .rh-dialog-summary / .rh-dl rules (admin-components.css). Only this dialog's own parts are here:
+   the money breakdown and special requests lose their card boxes, and the footer keeps Close + Full Details
+   on one row with the full-details link the wider, 44px button. Desktop (over 1024px) is unchanged. */
+@media (max-width: 1024px) {
+    #viewBookingModal .modal-body {
+        padding: 0.75rem 0.8rem 0.8rem;
+    }
+
+    body #rh-admin-page #viewBookingModal .bk-money-grid:not([hidden]) {
+        display: block !important;
+        margin-top: 0;
+    }
+
+    body #rh-admin-page #viewBookingModal :is(.bk-money-grid > .bk-money-card, .modal-body > .detail-item) {
+        display: block;
+        min-height: 0;
+        height: auto;
+        padding: 0;
+        border: 0;
+        border-radius: 0;
+        background: transparent;
+    }
+
+    /* Their labels read as the shared small section title (.rh-dialog-section). */
+    body #rh-admin-page #viewBookingModal :is(.bk-money-card, .modal-body > .detail-item) > label {
+        margin: 12px 0 2px;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        line-height: 1.3;
+    }
+
+    #viewBookingModal .bk-money-line {
+        padding: 0.12rem 0;
+        font-size: 13px;
+    }
+
+    #viewBookingModal #view_special_requests {
+        min-height: 0;
+        padding: 0.4rem 0.55rem !important;
+        font-size: 13px;
+    }
+
+    /* The shared footer rule makes this a flex row, but the old max-width 768px .modal-footer rules
+       (admin-components.css) turn it into a column on tablets. One row, both 44px, Full Details takes
+       the spare room. Phones may still wrap a long label (admin-uniform.css). */
+    body #rh-admin-page #viewBookingModal .modal-footer {
+        flex-direction: row;
+        flex-wrap: nowrap;
+    }
+
+    body #rh-admin-page #viewBookingModal .modal-footer .btn {
+        width: auto;
+        flex: 1 1 auto;
+        min-height: 44px;
+    }
+
+    body #rh-admin-page #viewBookingModal .modal-footer #view_full_details_link {
+        flex-grow: 2;
+    }
+}
+
+/* All Bookings on tablets and desktop (641px up): the whole row opens the booking summary, as on phones
+   (admin-components.js); the pointer shows it. The row's own View button stays the keyboard path. */
+@media (min-width: 641px) {
+    :is(.admin-content, #rh-admin-page) table.bookings-table > tbody > tr:has(.quick-action.view) {
+        cursor: pointer;
+    }
+}
+
 .bookings-table .actions-cell .actions-row,
 .booking-table .actions-cell .actions-row {
     display: inline-flex;

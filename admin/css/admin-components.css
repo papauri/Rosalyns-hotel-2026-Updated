@@ -4592,3 +4592,171 @@ select.rh-input-invalid.rh-input-invalid {
     min-width: 48px;
     min-height: 44px;
 }
+
+/* ==========================================================================
+   COMPACT DETAIL DIALOG on phones and tablets (owner 2026-11-14, UI_DECISION in .claude/DEPARTMENTS.md).
+   Up to 1024px a detail dialog leads with ONE summary block (.rh-dialog-summary: who, what, when,
+   money + booked rate x nights, then the footer primary's own label), and the rest of its fields become
+   dense label / value rows (.rh-dl: one row per child, label left, value right, hairline between),
+   under a small section title (.rh-dialog-section). Rows whose fact the summary or the header
+   pills already show carry .rh-compact-hide. Wider screens are untouched: the summary and the
+   section title are hidden there and the dialog keeps its own grid. Adopted by: Bookings > View
+   booking summary (#viewBookingModal). Same type sizes as the All Bookings phone row (4cc94f4).
+   ========================================================================== */
+:is(#rh-admin-page, body) .rh-dialog-summary,
+:is(#rh-admin-page, body) .rh-dialog-section {
+    display: none;
+}
+
+@media (max-width: 1024px) {
+    :is(#rh-admin-page, body) .modal-body .rh-dialog-summary {
+        display: grid;
+        gap: 2px;
+        margin: 0 0 10px;
+        padding: 10px 12px;
+        border: 1px solid var(--admin-surface-border, #d7dde6);
+        border-radius: 10px;
+        background: color-mix(in srgb, var(--color-background, #F7F3EE) 42%, var(--color-white, #fff));
+        color: var(--color-text-primary, #2A2723);
+        text-decoration: none;
+        min-width: 0;
+        overflow-wrap: anywhere;
+    }
+
+    :is(#rh-admin-page, body) .modal-body a.rh-dialog-summary {
+        cursor: pointer;
+    }
+
+    :is(#rh-admin-page, body) .modal-body a.rh-dialog-summary:active {
+        background-color: color-mix(in srgb, var(--color-background, #F7F3EE) 80%, var(--color-white, #fff));
+    }
+
+    :is(#rh-admin-page, body) .modal-body a.rh-dialog-summary:focus-visible {
+        outline: 2px solid var(--gold, #7E684B);
+        outline-offset: 2px;
+    }
+
+    .rh-dialog-summary > [hidden] {
+        display: none;
+    }
+
+    .rh-dialog-summary__title {
+        font-size: 15px;
+        font-weight: 700;
+        line-height: 1.25;
+    }
+
+    .rh-dialog-summary__line {
+        font-size: 12.5px;
+        line-height: 1.3;
+    }
+
+    .rh-dialog-summary__money {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: baseline;
+        gap: 2px 10px;
+        margin-top: 2px;
+        font-size: 12.5px;
+        line-height: 1.3;
+    }
+
+    .rh-dialog-summary__money > strong {
+        font-size: 14px;
+        font-weight: 700;
+    }
+
+    .rh-dialog-summary__money > span:empty {
+        display: none;
+    }
+
+    .rh-dialog-summary__muted {
+        color: var(--color-text-secondary, #5E554D);
+        font-size: 12px;
+        line-height: 1.3;
+    }
+
+    .rh-dialog-summary__muted:empty {
+        display: none;
+    }
+
+    .rh-dialog-summary__go {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        min-height: 32px;
+        margin-top: 4px;
+        color: color-mix(in srgb, var(--color-primary, #8F6A35) 80%, var(--color-text-primary, #2A2723));
+        font-size: 12.5px;
+        font-weight: 600;
+    }
+
+    .rh-dialog-summary__go > i {
+        font-size: 10px;
+    }
+
+    :is(#rh-admin-page, body) .modal-body .rh-dialog-section {
+        display: block;
+        margin: 12px 0 2px;
+        padding: 0;
+        font-size: 11px;
+        font-weight: 700;
+        letter-spacing: 0.06em;
+        line-height: 1.3;
+        text-transform: uppercase;
+        color: var(--color-text-secondary, #5E554D);
+    }
+
+    /* Dense rows: the container stops being a card grid; each child is one row. */
+    :is(#rh-admin-page, body) .modal-body .rh-dl {
+        display: block !important;
+        gap: 0 !important;
+        margin: 0;
+        min-width: 0;
+    }
+
+    :is(#rh-admin-page, body) .modal-body .rh-dl > * {
+        display: grid !important;
+        grid-template-columns: minmax(5.5rem, 34%) minmax(0, 1fr);
+        column-gap: 10px;
+        align-items: baseline;
+        min-width: 0;
+        min-height: 0 !important;
+        height: auto !important;
+        margin: 0;
+        padding: 7px 0 !important;
+        border: 0 !important;
+        border-bottom: 1px solid var(--admin-surface-border, #e9ecef) !important;
+        border-radius: 0 !important;
+        background: transparent !important;
+        box-shadow: none !important;
+    }
+
+    :is(#rh-admin-page, body) .modal-body .rh-dl > *:last-child {
+        border-bottom: 0 !important;
+    }
+
+    :is(#rh-admin-page, body) .modal-body .rh-dl > * > label {
+        grid-column: 1;
+        margin: 0 !important;
+        font-size: 12px !important;
+        font-weight: 600;
+        letter-spacing: 0 !important;
+        text-transform: none !important;
+        line-height: 1.3;
+        color: var(--color-text-secondary, #5E554D);
+    }
+
+    :is(#rh-admin-page, body) .modal-body .rh-dl > * > :not(label) {
+        grid-column: 2;
+        min-width: 0;
+        min-height: 0 !important;
+        font-size: 13px;
+        line-height: 1.35;
+        overflow-wrap: anywhere;
+    }
+
+    :is(#rh-admin-page, body) .modal-body .rh-dl > :is(.rh-compact-hide, [hidden]) {
+        display: none !important;
+    }
+}
