@@ -56,8 +56,11 @@
   <ul>
     <li>The heading <strong>Hotel Settings</strong> and a <strong>Back to Dashboard</strong> link.</li>
     <li>A <strong>Jump to</strong> bar with links: <strong>Maintenance</strong>, <strong>Booking status</strong>, <strong>Advance booking</strong>, <strong>Refunds</strong>, <strong>Hotel details</strong>, <strong>References</strong>, <strong>Branding</strong>, <strong>Tentative</strong>, <strong>Tourism levy</strong>, <strong>Email</strong>, <strong>Notifications</strong>, <strong>Service modules</strong>, <strong>PWA</strong>, and <strong>Email templates &rarr;</strong> (opens the separate Email Templates page).</li>
+    <li>The settings are arranged in five groups: <strong>Website &amp; booking</strong>; <strong>Rooms &amp; rates rules</strong>; <strong>Money &amp; documents</strong>; <strong>Email &amp; notifications</strong>; and <strong>Modules &amp; app</strong>.</li>
+    <li>A <strong>search box</strong> (for example "levy", "SMTP" or "logo") and a <strong>group filter</strong> narrow the page. If nothing matches, the page says <em>"No settings match."</em> Click <strong>Clear</strong> to show everything again. Press <strong>Esc</strong> to clear the search box.</li>
     <li>After you save, a green box at the top shows the result. A red box shows an error. Each card has its own save button, and a save button saves <strong>only its own card</strong>. Anything you typed in another card is not saved.</li>
   </ul>
+  <p>Every change you save is recorded in <strong>System Logs</strong>, section <strong>Settings changes</strong>. Each entry shows When, Who, Page, Setting, Before and After. Secrets such as passwords and keys show as hidden. Only real changes are recorded, so a save with nothing changed adds no entry. This covers Automated Emails, VAT (Accounting), Modules, Station hours, WhatsApp, Facebook, Gym slots and reminders, and Footer settings. The activity list shows these as the type <strong>Hotel Settings changes</strong>.</p>
   <div class="warn"><p>Always click the save button on the card you changed before you scroll to another card. A card's save button saves that card only.</p></div>
 
   <h2 id="maintenance">Frontend Maintenance Mode</h2>
@@ -147,6 +150,37 @@
     <li><em>"Invalid refund or cancellation option."</em></li>
   </ul>
   <p>Each change is written to the system log with the person's name, the old choices and the new choices.</p>
+  <h3 id="group-noshow">Charge no-show / expired rooms in a group</h3>
+  <p>Its own card with its own <strong>Save</strong> button. It decides what a room in a group is charged when it becomes a no-show or expires. It needs the permission <strong>Change VAT &amp; refund settings</strong>.</p>
+  <table>
+    <thead><tr><th>Choice</th><th>What it does</th></tr></thead>
+    <tbody>
+      <tr><td><strong>Off - bill the booked stay, as today</strong> (the default)</td><td>The room keeps billing its full booked stay, as before.</td></tr>
+      <tr><td><strong>On - charge nothing</strong></td><td>The room stops billing its stay and is charged nothing. With no payment on it, it comes off the group invoice.</td></tr>
+      <tr><td><strong>On - charge the first night</strong></td><td>The room stops billing its stay and is charged its first night (booked total incl. VAT and levy, divided by the nights).</td></tr>
+      <tr><td><strong>On - charge the full stay</strong></td><td>The room stops billing its stay and is charged the full booked stay as one charge.</td></tr>
+    </tbody>
+  </table>
+  <p>The refund rule respects this choice.</p>
+  <h3 id="cancellation-policy">Cancellation &amp; no-show policy</h3>
+  <p>A card in the <strong>Money &amp; documents</strong> group, with its own <strong>Save Cancellation Policy</strong> button. It sets a fee, as a % of the whole stay, for a confirmed booking cancelled close to arrival, and what a no-show pays. It is <strong>off</strong> until the hotel turns it on with the switch <strong>Use cancellation policies for new bookings</strong>. While it is off, the rule in "When a room booking is cancelled" above applies.</p>
+  <ol class="steps">
+    <li>Open <strong>Hotel Settings</strong> and find <strong>Cancellation &amp; no-show policy</strong> (or search "cancellation").</li>
+    <li>Tick <strong>Use cancellation policies for new bookings</strong>.</li>
+    <li>Under <strong>Individual bookings</strong>, add rows. Each row reads <em>"Cancelled fewer than [X] days before arrival -&gt; [N] % of the stay"</em>. Up to 5 rows. Arrival day counts as 0 days. Cancelling exactly X days before arrival is still free.</li>
+    <li>Set <strong>No-show &rarr; [N] % of the stay</strong>. 100% means the booked stay is billed as before.</li>
+    <li>Optional: tick <strong>Use a different policy for groups of [N] rooms or more</strong> and add rows for groups.</li>
+    <li>Optional: type an <strong>Extra note</strong> (up to 300 characters).</li>
+    <li>Check <strong>What guests will read</strong>, then click <strong>Save Cancellation Policy</strong>. You will see <em>"Cancellation policy saved (version N)."</em></li>
+  </ol>
+  <ul>
+    <li><strong>Who can change it:</strong> people with <strong>Change VAT &amp; refund settings</strong>. Everyone else sees the card greyed out.</li>
+    <li><strong>Each booking keeps its own policy.</strong> A change affects new bookings only. Bookings made before the switch was turned on follow the older rules.</li>
+    <li><strong>Where the wording prints:</strong> invoice, quotation, receipt, booking emails, booking lookup, the website's Cancellation policy window, the booking summary and the create-booking review step. Nothing prints for a booking without a policy.</li>
+    <li><strong>Example (for example only):</strong> a stay of MWK 100,000 x 3 nights = MWK 300,000. Rule: "Cancelled fewer than 7 days before arrival -&gt; 50% of the stay". Cancel 7 days before arrival: no fee. Cancel 6 days before arrival: fee MWK 150,000. If the guest paid MWK 300,000, MWK 150,000 is owed back to the guest.</li>
+  </ul>
+  <div class="warn"><p>If the card says <em>"Cancellation policies need the database update (085)."</em>, the card cannot be changed yet. Tell the manager. Until the update has run, every cancellation follows the refund rule above.</p></div>
+  <p>Details for staff: <a href="07-reception-bookings.html#cancel">How to cancel a booking</a> and <a href="13-finance-payments.html#cancellation-fees">Cancellation fees</a>.</p>
 
   <h2 id="details">Hotel details &amp; policies</h2>
   <p>Only shown when the Bookings &amp; Reservations module is on. One form with four groups of fields. Nothing is saved until you click <strong>Save Hotel Details</strong> at the bottom. Under the button the page shows the system time zone: <em>"Time zone: ..."</em>. It is set when the system is installed and cannot be changed here.</p>
@@ -432,7 +466,7 @@
   <table>
     <thead><tr><th>Job</th><th>What it sends or does</th><th>Notes</th></tr></thead>
     <tbody>
-      <tr><td>Overdue payment reminders</td><td>Chases money owed after the due date, at each reminder stage.</td><td>Stages and limits are set below.</td></tr>
+      <tr><td>Overdue payment reminders</td><td>Chases money owed after the due date, at each reminder stage. A group gets ONE reminder for its whole balance, once every room has checked out. A company group gets no guest reminder: the weekly company statement is its only reminder, and the guest gets their own share.</td><td>Stages and limits are set below.</td></tr>
       <tr><td>Quotation expiry reminders</td><td>Reminds a client before a quotation expires.</td><td><strong>Quotation reminder (days before expiry)</strong>, default 2.</td></tr>
       <tr><td>Tentative hold reminders / Tentative hold expired notices</td><td>Warns the guest before a tentative hold runs out, and tells them when it has.</td><td>Use the reminder hours in <a href="#tentative">Tentative Bookings</a>.</td></tr>
       <tr><td>Pending booking expired notices</td><td>Tells the guest when an unconfirmed (pending) booking has expired.</td><td></td></tr>

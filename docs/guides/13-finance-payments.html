@@ -110,6 +110,7 @@
   <p>If nothing is owed, there is no way to take a payment. The page shows <em>"Nothing is owed on this booking."</em> with <em>"No payment can be recorded here. Use a credit note or refund instead."</em>, the amount box stays locked and <strong>Record Payment</strong> is switched off. In the list of matching bookings, a settled one reads <em>"Nothing owed"</em> instead of a balance. The same rule applies to a payment saved through the API, and to <strong>Record payment</strong> on conference, gym and event enquiries.</p>
   <p>If the guest paid more than the balance, see the next section. Without the tick the payment is refused.</p>
   <p>What goes out automatically when you save as <strong>Paid</strong> or <strong>Completed</strong>: a <strong>receipt</strong> with a PDF goes to the guest's email, once, for every type (Room, Conference, Gym and Event). Your <strong>Additional CC Emails</strong> get it too. No invoice is sent, because an invoice asks for money and this guest has just paid. The success line tells you what happened, for example <em>"Receipt emailed to the guest."</em> See <a href="#sent">What the guest is sent, and when</a>. If the receipt cannot go, the same line says why (see Problems and fixes).</p>
+  <p><strong>A room in a group.</strong> Under the booking, choose <strong>This room only</strong> or <strong>Whole group (split across rooms)</strong>. Whole group shares the amount out by what each room still owes. Rooms paid in full get nothing, and every room gets its own receipt. A company-billed group, or a group that is still pending, cannot take a whole-group payment; the window says why. The same choice is on Add Payment and Payments &amp; balance.</p>
   <div class="note"><p>Clicking <strong>Record Payment</strong> twice by accident does not record it twice. You will see <em>"Payment already recorded (reference). Duplicate submission ignored."</em></p></div>
 
   <h3 id="paid-by">Paid by: the guest or the company</h3>
@@ -315,6 +316,16 @@
   <p>A fully paid account is never asked for money again, so its rows do not offer an invoice email, a reminder or WhatsApp. They offer <strong>Send receipt</strong> instead.</p>
   <p>Invoice emails are supported for Room, Conference, Gym and Event payments only.</p>
   <p>Invoices, receipts and credit notes for a room show <strong>Booked at</strong> (the booked rate &times; nights), so the figure matches what the guest booked. Today's room price is never used for them.</p>
+  <p>A group booking has one invoice number for the whole group (one per payer), with a block for each room. A cancelled room prints one line: <em>"Cancelled on [date] - nothing billed"</em>, or <em>"the first night is kept: [amount]"</em>.</p>
+
+  <h2 id="cancellation-fees">Cancellation fees</h2>
+  <p>A booking under a cancellation policy can keep a fee when it is cancelled close to arrival. The fee is a % of the whole stay, set in <a href="19-hotel-settings.html#cancellation-policy">Hotel Settings</a>. How staff cancel is in <a href="07-reception-bookings.html#cancel-fee">Cancellation fee under a policy</a>.</p>
+  <ul>
+    <li>The kept fee stays owed on the booking. It shows in <strong>Still owed</strong> until it is paid.</li>
+    <li>A refund after a fee is the amount paid minus the fee. For example, if the guest paid MWK 300,000 and the fee is MWK 150,000, MWK 150,000 is refunded.</li>
+    <li>Lowering a fee later (with a reason, by someone with <strong>Lower or waive cancellation fees</strong>) creates credit owed back to the guest.</li>
+    <li>Kept fees and no-show charges are taxed like a room night, with the same VAT and levy.</li>
+  </ul>
 
   <h2 id="credit">Credit notes</h2>
   <p><strong>Money</strong> &rarr; <strong>Credit Notes</strong>. A credit note is a stored amount owed to a guest that can be used against a later bill. Figures at the top, each with a small <strong>?</strong> that says what it counts: <strong>Total Issued</strong> (every note except voided), <strong>Total Redeemed</strong> (credit already used), <strong>Still to use</strong> (the credit left on notes that are Active or Partial; this card was called <em>Outstanding</em>) and <strong>Status Breakdown</strong>. Statuses: Active, Partial (partially applied), Used (fully applied), Voided, Expired.</p>
@@ -365,7 +376,7 @@
   <p>Other messages you may see: <em>"This quotation was already converted to invoice [number]."</em> and <em>"This quotation was declined, so it cannot become an invoice."</em> If the page says <em>"The quotation could not be converted. Nothing was changed."</em>, try again. If it keeps happening, check System Logs.</p>
 
   <h2 id="receipts">Receipts register</h2>
-  <p><strong>Money</strong> &rarr; <strong>Receipts</strong> lists Paid and Completed payments with their receipt status. Figures: Total receipts, Missing numbers, Generated PDFs, Receipt value. Filter by type, status (<strong>Missing No.</strong>, <strong>Generated</strong>, <strong>Emailed</strong>), dates and search. Ten rows show per page; use the <strong>Show</strong> picker (10, 25, 50, 100) to see more.</p>
+  <p><strong>Money</strong> &rarr; <strong>Receipts</strong> lists Paid and Completed payments with their receipt status. Figures: Total receipts, Missing numbers, Generated PDFs, Receipt value. Filter by type, status (<strong>Missing No.</strong>, <strong>Generated</strong>, <strong>Emailed</strong>), dates and search. Ten rows show per page; use the <strong>Show</strong> picker (10, 25, 50, 100) to see more. A refund shows with a minus sign, on the screen and in the CSV.</p>
   <ul>
     <li><strong>Generate Missing</strong> creates receipts for up to 500 payments that have none: <em>"Generated receipts for N completed payment(s)."</em></li>
     <li>The row buttons generate or regenerate the PDF, view it, send by WhatsApp or <strong>Email receipt</strong> (enter the address, click <strong>Send Receipt</strong>).</li>

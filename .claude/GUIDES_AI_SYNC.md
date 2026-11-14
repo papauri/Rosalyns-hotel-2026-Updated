@@ -19,6 +19,10 @@ when prompted."
 
 ## Pending (oldest first)
 
+**GUIDES PART OF EVERY ENTRY BELOW: DONE 2026-11-14 (NEXT_BUILD_ORDER step 6; guides 07, 13, 14, 19, 99, faq; help
+search answers checked). Only the Assistant parts remain (step 7). The guide edits from the Rosalyn's stash "PARKED
+2026-11-14 guides + Assistant sync" are shipped; its includes/ai + test part is still parked for step 7.**
+
 ### Group documents / no-show / kept fees / group charge (2026-11-11 → 2026-11-14)
 - Commits (Rosalyn's): 0d2ef59, e4867fc, 28a5f0d, a3e5a95, 1e9c2a7, e291682, ec2e069, 58ea5ea, 2472594, f06fac1.
 - Guides: 07, 13, 14, 19, faq — group invoices/receipts per room, no-show charges, kept cancellation
