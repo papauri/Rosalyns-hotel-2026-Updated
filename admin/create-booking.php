@@ -2450,16 +2450,18 @@ try {
                                 <td>Child supplement (<span id="accChildCount">0</span> <span id="accChildWord">child</span> × <span id="accChildPct">50</span>% rate)</td>
                                 <td id="accChildTotal">—</td>
                             </tr>
+                            <?php // Owner 2026-11-15: the stay price is all-in, so the subtotal is the amount BEFORE levy and VAT;
+                            // the levy (once per booking) and VAT are each a % of that one subtotal and add up to the total. ?>
+                            <tr class="subtotal">
+                                <td>Subtotal (before levy and VAT)</td>
+                                <td id="accSubtotal">—</td>
+                            </tr>
                             <?php if ($levy_enabled): ?>
                                 <tr id="accRowLevy" class="tax-row">
-                                    <td>Tourism levy (<?php echo $levy_pct_cfg; ?>%)</td>
+                                    <td>Tourism levy (<?php echo $levy_pct_cfg; ?>%) — included in price</td>
                                     <td id="accLevyTotal">—</td>
                                 </tr>
                             <?php endif; ?>
-                            <tr class="subtotal">
-                                <td>Subtotal</td>
-                                <td id="accSubtotal">—</td>
-                            </tr>
                             <?php if ($vat_enabled): ?>
                                 <tr id="accRowVat" class="tax-row">
                                     <td>VAT (<?php echo $vat_rate_cfg; ?>%)<?php echo vat_mode() === 'inclusive' ? ' — included in price' : ''; ?></td>
@@ -4049,7 +4051,7 @@ try {
                 grandBase += lineBase;
                 grandChild += lineChild;
                 grandLevy += tt.levy;
-                grandSub += tt.net + tt.levy;
+                grandSub += tt.net; // before levy and VAT: subtotal + levy + VAT = total (levy counted once)
                 grandVat += tt.vat;
                 grandTotal += tt.total;
             });
