@@ -61,6 +61,145 @@ function rh_ai_desk_tools(): array
 }
 
 /**
+ * Settings changes from the activity log ('setting_change' rows, includes/settings-change-log.php), newest first,
+ * for the desk's local answer only (rh_ai_desk_local, behind System Logs' own permission). Deliberately NOT a tool the
+ * model can call: the hard limits allow no tool about settings (rh_ai_hard_limit_problems); it stays read only.
+ * optionally for one setting (every word of $a['setting'] in its label or key) and a period. Old / new exactly as
+ * stored: a secret was stored as "(hidden)" and is never looked up or shown. The total checked and the log's first
+ * day come along, so "none" always has a checked total behind it. Read only.
+ */
+function rh_ai_t_settings_changes(PDO $db, array $user, array $a): array
+{
+    if (!function_exists('rh_settings_log_parse')) {
+        $lib = dirname(__DIR__) . '/settings-change-log.php';
+        if (is_file($lib)) {
+            require_once $lib;
+        }
+    }
+    if (!function_exists('rh_settings_log_parse')) {
+        return ['error' => 'The settings change log is not installed here.'];
+    }
+    $from = (string)($a['from'] ?? '');
+    $to = (string)($a['to'] ?? '');
+    if ($from !== '' && $to !== '' && $to < $from) {
+        [$from, $to] = [$to, $from];
+    }
+    $want = trim((string)preg_replace('/^(?:the|a|our)\s+|\s+settings?$/u', '', mb_strtolower(trim((string)($a['setting'] ?? '')))));
+    $words = array_values(array_filter(preg_split('/[\s_\-]+/u', $want) ?: [], static fn($w) => mb_strlen($w) >= 2));
+    $cap = 500;
+    try {
+        $first = $db->query("SELECT MIN(created_at) FROM admin_activity_log WHERE action = 'setting_change'")->fetchColumn();
+        $st = $db->prepare("SELECT l.username, l.details, l.created_at, u.full_name FROM admin_activity_log l LEFT JOIN admin_users u ON u.id = l.user_id
+                            WHERE l.action = 'setting_change' AND l.created_at >= ? AND l.created_at < ? ORDER BY l.created_at DESC, l.id DESC LIMIT " . $cap);
+        $st->execute([$from !== '' ? $from : '1970-01-01', $to !== '' ? date('Y-m-d', strtotime($to . ' +1 day')) : '2999-01-01']);
+        $raw = $st->fetchAll(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return ['error' => 'The settings changes could not be read just now. Open System Logs to see them.', 'link' => 'system-logs.php', 'link_label' => 'Open System Logs'];
+    }
+    $rows = [];
+    $checked = 0;
+    $found = 0;
+    foreach ($raw as $r) {
+        $p = rh_settings_log_parse((string)$r['details']);
+        if ($p === null) {
+            continue;
+        }
+        $checked++;
+        $hay = mb_strtolower($p['label'] . ' ' . str_replace('_', ' ', $p['key']));
+        foreach ($words as $w) {
+            if (mb_strpos($hay, $w) === false) {
+                continue 2;
+            }
+        }
+        $found++;
+        if (count($rows) < RH_AI_TOOL_ROWS) {
+            $who = trim((string)($r['full_name'] ?? '')) !== '' ? (string)$r['full_name'] : (string)$r['username'];
+            $rows[] = ['at' => substr((string)$r['created_at'], 0, 16), 'staff_name' => $who !== '' ? $who : 'unknown', 'page' => rh_settings_log_page_name($p['page']),
+                'setting' => $p['label'], 'old' => $p['hidden'] ? '(hidden)' : $p['old'], 'new' => $p['hidden'] ? '(hidden)' : $p['new'], 'hidden' => $p['hidden']];
+        }
+    }
+    return ['from' => $from !== '' ? $from : null, 'to' => $to !== '' ? $to : null, 'setting_asked' => $want !== '' ? $want : null,
+        'changes_found' => $found, 'changes_checked' => $checked, 'checked_all' => count($raw) < $cap,
+        'log_starts' => $first ? substr((string)$first, 0, 10) : null, 'changes' => $rows,
+        'values_mean' => 'old and new exactly as the log stored them; "(hidden)" = a password, key or token, never shown; a bank account number keeps its last 4 digits only',
+        'link' => 'system-logs.php#log-settings', 'link_label' => 'Open System Logs'];
+}
+
+/**
+ * "Who changed the tourism levy setting", "when was the currency setting changed", "who changed the settings today",
+ * "settings changes this week": ['setting', 'from', 'to', 'when'] or null. The word "setting(s)" is required, so a
+ * booking question ("who changed the dates") stays with the booking history.
+ */
+function rh_ai_desk_settings_intent(string $l): ?array
+{
+    $l = trim($l, " ?.!");
+    if (!preg_match('/\bsettings?\b/u', $l)) {
+        return null;
+    }
+    // 2026-11-14 live check: "who changed the VAT setting, and when?", "who and when changed ...", "... and when was it done"
+    $l = trim((string)preg_replace('/\s*[,;]?\s*(?:and|&)\s+when(?:\s+(?:was (?:it|that)|did (?:it|that|they)|did (?:it|that) happen)(?:\s+(?:done|changed|happen))?)?$/u', '', $l), " ,?.!");
+    $l = (string)preg_replace('/^who\s+(?:and|&)\s+when\s+/u', 'who ', $l);
+    $p = rh_ai_period_parse($l);
+    $bare = $p !== null ? trim((string)preg_replace('/^(?:(?:in|over|during|for|from|on)\s+)?(?:the\s+)?/u', '', trim($p['match']))) : '';
+    if ($p !== null && $bare !== '' && preg_match('/\s+' . preg_quote($bare, '/') . '$/u', $l)) {
+        $l = trim((string)preg_replace('/(?:\s+(?:in|over|during|for|from|on|the))*\s+' . preg_quote($bare, '/') . '$/u', '', $l));
+    } else {
+        $p = null;
+    }
+    $chg = '(?:changed|edited|updated|altered|set|modified|turned (?:on|off)|switched (?:on|off))';
+    $what = null;
+    if (preg_match('/^(?:who|when)(?: has| had| last)?\s+' . $chg . '\s+(?:the\s+)?settings?(?:\s+(?:for|of|called|named)\s+(?<w>.+))?$/u', $l, $m)) {
+        $what = trim((string)($m['w'] ?? ''));
+    } elseif (preg_match('/^(?:who|when)(?: has| had| last)?\s+' . $chg . '\s+(?:the\s+|our\s+)?(?<w>.+?)\s+settings?$/u', $l, $m)) {
+        $what = trim($m['w']);
+    } elseif (preg_match('/^when (?:was|were|did|has|have) (?:the\s+|our\s+)?(?<w>.+?)\s+settings? (?:last\s+)?(?:get\s+|been\s+)?' . $chg . '$/u', $l, $m)) {
+        $what = trim($m['w']);
+    } elseif (preg_match('/^(?:what|which|any) settings? (?:were|was|have been|has been|got)?\s*' . $chg . '$/u', $l)
+        || preg_match('/^(?:the\s+)?settings? (?:changes?|change log|history)$/u', $l)
+        || preg_match('/^(?:show|list)(?: me)? (?:the\s+)?settings? changes?$/u', $l)) {
+        $what = '';
+    }
+    if ($what === null) {
+        return null;
+    }
+    $today = rh_ai_today();
+    return ['setting' => $what, 'from' => $p !== null ? $p['from'] : '', 'to' => $p !== null ? min($p['to'], $today) : '', 'when' => $p !== null ? $p['label'] : ''];
+}
+
+/** May this person read the settings change log here: the staff activity lookup (its permission, module, gate) and System Logs. */
+function rh_ai_settings_changes_allowed(array $user): bool
+{
+    return rh_ai_tool_allowed($user, 'staff_activity') && rh_ai_has_perm((int)($user['id'] ?? 0), 'system_logs');
+}
+
+/** The settings-changes answer in plain words (de-identified result: names are tokens). */
+function rh_ai_desk_settings_text(array $r, string $when = ''): string
+{
+    if (!empty($r['error'])) {
+        return (string)$r['error'];
+    }
+    $what = (string)($r['setting_asked'] ?? '');
+    $span = $when !== '' ? ' ' . $when : '';
+    $found = (int)($r['changes_found'] ?? 0);
+    $checked = (int)($r['changes_checked'] ?? 0);
+    $start = (string)($r['log_starts'] ?? '');
+    $since = $start !== '' ? 'the log starts on ' . date('D j M Y', (int)strtotime($start)) : 'nothing has been logged yet';
+    if ($found === 0) {
+        return 'No change to ' . ($what !== '' ? 'a setting matching "' . $what . '"' : 'any setting') . ' is logged' . $span . ' (checked ' . $checked . ' setting change' . ($checked === 1 ? '' : 's')
+            . (empty($r['checked_all']) ? ', the latest only' : '') . '; ' . $since . ', so older changes are not in it).';
+    }
+    $val = static fn(string $v): string => $v === '' ? '(blank)' : $v;
+    $lines = [];
+    foreach ((array)$r['changes'] as $x) {
+        $lines[] = date('D j M Y, H:i', (int)strtotime((string)$x['at'])) . ' · ' . $x['staff_name'] . ' · ' . $x['page'] . ' · **' . $x['setting'] . '**: '
+            . (!empty($x['hidden']) ? 'changed (value hidden)' : $val((string)$x['old']) . ' -> ' . $val((string)$x['new']));
+    }
+    $head = $what !== '' ? '**Changes to settings matching "' . $what . '"' . $span . ': ' . $found . '**, newest first' : '**Settings changes' . $span . ': ' . $found . '**, newest first';
+    $more = $found > count($lines) ? "\n(" . count($lines) . ' of ' . $found . ' shown - System Logs > Settings changes has them all)' : '';
+    return $head . ' (' . $since . '; secrets are stored hidden and stay hidden):' . rh_ai_local_lines($lines) . $more;
+}
+
+/**
  * Staff active between two dates: distinct people in admin_activity_log (every sign-in, change and Assistant card writes
  * a row) plus admin_presence (seen in the portal in that time, even with nothing logged). Counts, first / last activity,
  * role. One person (staff): their logged actions, newest first. The total of staff accounts comes along, so a "none"
@@ -77,10 +216,12 @@ function rh_ai_t_staff_activity(PDO $db, array $user, array $a): array
     $accounts = (int)$db->query("SELECT COUNT(*) FROM admin_users WHERE is_active = 1")->fetchColumn();
     $people = [];
     try {
-        $st = $db->prepare("SELECT user_id, COUNT(*) AS n, SUM(action = 'page_action') AS saves, MIN(created_at) AS first_at, MAX(created_at) AS last_at FROM admin_activity_log WHERE created_at >= ? AND created_at < ? AND user_id > 0 GROUP BY user_id");
+        // 2026-11-14: one Settings save writes a 'setting_change' row per setting changed (on top of its 'page_action'
+        // save), so those rows are counted apart (settings_changed) and never inflate the logged actions.
+        $st = $db->prepare("SELECT user_id, SUM(action <> 'setting_change') AS n, SUM(action = 'page_action') AS saves, SUM(action = 'setting_change') AS sc, MIN(created_at) AS first_at, MAX(created_at) AS last_at FROM admin_activity_log WHERE created_at >= ? AND created_at < ? AND user_id > 0 GROUP BY user_id");
         $st->execute([$from, $toEx]);
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
-            $people[(int)$r['user_id']] = ['actions' => (int)$r['n'], 'saves' => (int)$r['saves'], 'first' => (string)$r['first_at'], 'last' => (string)$r['last_at'], 'seen' => '', 'signed_in' => ''];
+            $people[(int)$r['user_id']] = ['actions' => (int)$r['n'], 'saves' => (int)$r['saves'], 'settings_changed' => (int)$r['sc'], 'first' => (string)$r['first_at'], 'last' => (string)$r['last_at'], 'seen' => '', 'signed_in' => ''];
         }
     } catch (Throwable $e) {
         // no activity log: sign-ins below still count
@@ -142,7 +283,7 @@ function rh_ai_t_staff_activity(PDO $db, array $user, array $a): array
             // 2026-11-07: every staff save now also writes a 'page_action' row (page + action code words only). They read
             // through the System Logs wording ("Checked a guest in (Bookings)"), and repeats in a row fold into one
             // entry with a count, so a busy run of saves does not push the named events out of the list.
-            $st = $db->prepare("SELECT action, details, created_at FROM admin_activity_log WHERE user_id = ? AND created_at >= ? AND created_at < ? ORDER BY created_at DESC, id DESC LIMIT " . ($keep * 4));
+            $st = $db->prepare("SELECT action, details, created_at FROM admin_activity_log WHERE user_id = ? AND created_at >= ? AND created_at < ? AND action <> 'setting_change' ORDER BY created_at DESC, id DESC LIMIT " . ($keep * 4));
             $st->execute([$hit, $from, $toEx]);
             $rows = $st->fetchAll(PDO::FETCH_ASSOC);
             $full = true;
@@ -169,9 +310,18 @@ function rh_ai_t_staff_activity(PDO $db, array $user, array $a): array
         }
         $p = $people[$hit];
         return ['from' => $from, 'to' => $to, 'staff_name' => $names[$hit]['name'], 'role' => $roleLabel($names[$hit]['role']), 'active' => 'yes',
-            'actions' => $p['actions'], 'screen_saves' => $p['saves'] ?? 0, 'signed_in' => $p['signed_in'] !== '' ? substr($p['signed_in'], 0, 16) : null, 'last_seen' => substr(max($p['seen'], $p['last']), 0, 16),
+            'actions' => $p['actions'], 'screen_saves' => $p['saves'] ?? 0, 'signed_in' => $p['signed_in'] !== '' ? substr($p['signed_in'], 0, 16) : null, 'last_seen' => substr(max($p['seen'], $p['last']), 0, 16)]
+            + (($p['settings_changed'] ?? 0) > 0 ? ['settings_changed' => (int)$p['settings_changed'], 'settings_changed_means' => 'settings this person changed (not counted in actions); System Logs > Settings changes shows which, when, old and new'] : []) + [
             'latest_actions' => $acts ?: 'none logged (seen in the portal only)',
             'actions_mean' => 'every logged entry: sign-ins, each save on a screen (screen_saves) and named changes, so one save can appear twice'];
+    }
+    // "N of M staff accounts": M counts every account that could be among the N - the active accounts plus any account
+    // switched off since that was active in the period (fault: "4 of 3 staff accounts").
+    if ($people) {
+        $ids = array_keys($people);
+        $st = $db->prepare("SELECT COUNT(*) FROM admin_users WHERE is_active = 1 OR id IN (" . implode(',', array_fill(0, count($ids), '?')) . ")");
+        $st->execute($ids);
+        $accounts = (int)$st->fetchColumn();
     }
     $list = [];
     foreach ($people as $id => $p) {
@@ -302,6 +452,8 @@ function rh_ai_desk_staff_text(array $r, string $when): string
         $na = (int)$r['actions'];
         $sv = (int)($r['screen_saves'] ?? 0);
         $why = $na > 0 ? $na . ' logged action' . ($na === 1 ? '' : 's') . ($sv > 0 ? ' (' . $sv . ' of them saves on a screen)' : '') : (!empty($r['signed_in']) ? 'signed in ' . date('D j M, H:i', strtotime((string)$r['signed_in'])) . ', nothing logged' : 'seen in the portal, nothing logged');
+        $sc = (int)($r['settings_changed'] ?? 0);
+        $why .= $sc > 0 ? ', and changed ' . $sc . ' setting' . ($sc === 1 ? '' : 's') . ' (System Logs > Settings changes shows which)' : '';
         return '**' . $r['staff_name'] . '** (' . ($r['role'] ?? '') . ') ' . $span . ': ' . $why . ', last seen ' . date('D j M, H:i', strtotime((string)$r['last_seen'])) . '.'
             . ($lines ? rh_ai_local_lines($lines) : '');
     }
@@ -1160,6 +1312,17 @@ function rh_ai_desk_local(PDO $db, array $user, int $conv, string $message, arra
         $text = $sa['top'] !== null ? rh_ai_desk_staff_top_text((array)$r['result'], $sa['when'], (int)$sa['top']) : rh_ai_desk_staff_text((array)$r['result'], $sa['when']);
         return ['text' => $text, 'links' => $r['links'], 'chips' => $sa['staff'] === '' ? ['Who is online now?'] : [],
             'local' => ['tool' => 'staff_activity', 'view' => $args + ['_when' => $sa['when']] + ($sa['top'] !== null ? ['_top' => (int)$sa['top']] : [])]];
+    }
+    // 7. Who changed a setting and when (2026-11-14, the settings change log): local only, for people who may use the
+    // staff activity lookup AND open System Logs (the screen that shows these rows). Never a model tool (hard limits).
+    if (($sc = rh_ai_desk_settings_intent($l)) !== null) {
+        if (!rh_ai_settings_changes_allowed($user)) {
+            return rh_ai_desk_declined($user, 'staff_activity');
+        }
+        rh_ai_step_set($db, (int)$user['id'], 'Checking settings changes');
+        $res = rh_ai_t_settings_changes($db, $user, array_filter(['setting' => $sc['setting'], 'from' => $sc['from'], 'to' => $sc['to']], static fn($v) => $v !== ''));
+        $res = rh_ai_vault_protect($db, $conv, $res); // names as tokens and values scrubbed, as every lookup result (shown real on screen)
+        return ['text' => rh_ai_desk_settings_text($res, $sc['when']), 'links' => [['label' => 'Open System Logs', 'url' => 'system-logs.php#log-settings']], 'chips' => []];
     }
     return null;
 }

@@ -877,18 +877,61 @@ function rh_ai_pv_cancel_booking(PDO $db, array $user, array $a): array
     $group = function_exists('rh_booking_group_members') ? rh_booking_group_members($db, (int)$b['id']) : [];
     $n = max(1, count($group));
     $mode = getCancellationRefundModeLabel();
+    $reason = trim((string)($a['reason'] ?? ''));
+    $scope = ($a['scope'] ?? 'single') === 'group' && $n > 1 ? 'group' : 'single';
+    // Cancellation policy locked at booking (2026-11-14): the fee, refund and credit the cancel dialog shows
+    // (rh_cancel_policy_dialog_quote, the screens' helper). The card posts the quoted fee as the dialog does
+    // (fee_quoted), so the screen re-checks it under its row lock; it never posts a lower fee (lowering or waiving
+    // is done by staff on Booking Details). No policy on any room: exactly the old card.
+    $cq = function_exists('rh_cancel_policy_dialog_quote') ? rh_cancel_policy_dialog_quote($db, (int)$b['id']) : ['policy' => false, 'single' => null, 'group' => null];
+    $feeQuoted = null;
+    $policyRows = [];
+    $one = (array)($cq['single'] ?? []);
+    if (!empty($cq['policy']) && $scope === 'group' && is_array($cq['group'] ?? null)) {
+        $g = $cq['group'];
+        $feeQuoted = round((float)$g['fee'], 2);
+        $policyRows[] = ['label' => 'Cancellation fee (all ' . (int)$g['count'] . ' rooms)', 'new' => rh_ai_fmt_money($feeQuoted), 'tone' => 'money'];
+        foreach (array_slice((array)$g['rooms'], 0, 10) as $r) {
+            $policyRows[] = ['label' => 'Room ' . $r['reference'], 'new' => $r['source'] !== 'policy' ? 'No policy locked: ' . $mode : ((float)$r['fee'] > BALANCE_TOLERANCE ? (string)$r['fee_text'] : 'No fee (' . $r['tier_label'] . ')')];
+        }
+        $policyRows[] = ['label' => 'Refunded on cancelling', 'new' => rh_ai_fmt_money((float)$g['refund'])];
+        if ((float)$g['credit'] > BALANCE_TOLERANCE) {
+            $policyRows[] = ['label' => 'Kept as the guest\'s credit', 'new' => rh_ai_fmt_money((float)$g['credit'])];
+        }
+    } elseif (($one['source'] ?? '') === 'policy') {
+        $feeQuoted = round((float)$one['amount'], 2);
+        $policyRows[] = ['label' => 'Cancellation policy', 'new' => 'Locked at booking' . ((int)$one['version'] > 0 ? ' (v' . (int)$one['version'] . ', ' . $one['kind'] . ' bookings)' : '')];
+        $policyRows[] = ['label' => 'Cancellation fee', 'new' => !empty($one['applies']) ? (string)$one['fee_text'] : 'No fee (' . $one['tier_label'] . ')', 'tone' => 'money'];
+        if (!empty($one['applies'])) {
+            $policyRows[] = ['label' => 'Why this fee', 'new' => (string)$one['tier_label']];
+        }
+        $policyRows[] = ['label' => 'Refunded on cancelling', 'new' => rh_ai_fmt_money((float)$one['refund'])];
+        if ((float)$one['credit'] > BALANCE_TOLERANCE) {
+            $policyRows[] = ['label' => 'Kept as the guest\'s credit', 'new' => rh_ai_fmt_money((float)$one['credit'])];
+        }
+    }
     $rows = rh_ai_bk_rows($b);
     $rows[] = ['label' => 'Status', 'old' => ucfirst(str_replace('-', ' ', (string)$b['status'])), 'new' => 'Cancelled', 'tone' => 'danger'];
     $rows[] = ['label' => 'Paid so far', 'new' => rh_ai_fmt_money($paid)];
     $rows[] = ['label' => 'Still owed', 'new' => rh_ai_fmt_money($owed)];
     $rows = array_merge($rows, rh_ai_company_rows((int)$b['id'], $owed));
-    $rows[] = ['label' => 'Money paid', 'new' => $mode];
-    $reason = trim((string)($a['reason'] ?? ''));
-    $scope = ($a['scope'] ?? 'single') === 'group' && $n > 1 ? 'group' : 'single';
-    $card = rh_ai_card_base('Cancel booking', 'The cancellation rule set in Booking Settings decides what happens to money paid. Refunds are recorded by staff on screen; this card never works one out.', $rows, 'Cancel booking', [
+    if ($feeQuoted !== null) {
+        $rows = array_merge($rows, $policyRows);
+    } else {
+        $rows[] = ['label' => 'Money paid', 'new' => $mode];
+    }
+    $help = $feeQuoted !== null
+        ? 'The fee comes from the cancellation policy locked when this booking was made: a % of the booked stay (booked rate x nights), the same figures the cancel dialog shows. The screen checks the fee again when you confirm.'
+        : 'The cancellation rule set in Booking Settings decides what happens to money paid. Refunds are recorded by staff on screen; this card never works one out.';
+    $card = rh_ai_card_base('Cancel booking', $help, $rows, 'Cancel booking', [
         'danger' => true,
         'fields' => [['name' => 'reason', 'label' => 'Reason for cancelling', 'type' => 'text', 'value' => $reason, 'required' => true]],
     ]);
+    if ($feeQuoted !== null && $feeQuoted > BALANCE_TOLERANCE) {
+        $card['warn'][] = rh_ai_has_perm((int)($user['id'] ?? 0), 'waive_cancellation_fee')
+            ? 'This card charges the fee shown. To lower or waive it, cancel from Booking Details, where you give the reason.'
+            : 'This card charges the fee shown. Lowering or waiving a cancellation fee needs that permission (a manager or an administrator).';
+    }
     if ($n > 1) {
         $card['choices'][] = ['name' => 'scope', 'label' => 'Booked together: ' . $n . ' rooms', 'value' => $scope, 'options' => [['single', 'Cancel only this room'], ['group', 'Cancel all ' . $n . ' rooms']]];
     }
@@ -924,9 +967,13 @@ function rh_ai_pv_cancel_booking(PDO $db, array $user, array $a): array
         if ($wouldEmail) {
             $f[] = ['email_guest', $emailGuest ? '1' : '0']; // left out otherwise: the screen's old behaviour (no email)
         }
+        if ($feeQuoted !== null) {
+            $f[] = ['fee_quoted', number_format($feeQuoted, 2, '.', '')]; // the dialog's own field; never a lower fee
+        }
         $steps[] = rh_ai_step('bookings.php', $f);
     }
-    return ['card' => $card, 'steps' => $steps, 'fp' => [(string)$b['status'], $mode, $paid, $owed, $n, $wouldEmail], 'facts' => rh_ai_bk_facts($b) + ['paid' => $paid, 'still_owed' => $owed, 'cancellation_rule' => $mode, 'rooms_booked_together' => $n, 'email_guest' => $emailGuest ? 'yes' : 'no'], 'incomplete' => !$steps, 'expect_status' => 'cancelled'];
+    return ['card' => $card, 'steps' => $steps, 'fp' => [(string)$b['status'], $mode, $paid, $owed, $n, $wouldEmail] + ($feeQuoted !== null ? [6 => $scope, 7 => $feeQuoted] : []), 'facts' => rh_ai_bk_facts($b) + ['paid' => $paid, 'still_owed' => $owed, 'cancellation_rule' => $feeQuoted !== null ? 'cancellation policy locked at booking' : $mode, 'rooms_booked_together' => $n, 'email_guest' => $emailGuest ? 'yes' : 'no']
+        + ($feeQuoted !== null ? ['cancellation_fee' => $feeQuoted, 'fee_reason' => $scope === 'group' ? 'each room\'s own locked policy' : (string)($one['tier_label'] ?? '')] : []), 'incomplete' => !$steps, 'expect_status' => 'cancelled'];
 }
 
 /** A free, clean room of the booking's type (or the named one). Joined-room types return null (assigned as pairs on Bookings). */

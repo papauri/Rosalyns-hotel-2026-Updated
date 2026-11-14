@@ -280,7 +280,10 @@ function rh_ai_vault_stopwords(): array
             . 'housekeeping maintenance clean dirty ready available occupied blocked tentative confirmed pending cancelled cancel noshow no-show '
             . 'january february march april may june july august september october november december jan feb mar apr jun jul aug sep sept oct nov dec '
             . 'monday tuesday wednesday thursday friday saturday sunday mon tue wed thu fri sat sun mr mrs ms miss dr sir madam '
-            . 'show tell find give list open book move change add make get set see help how much many who'), true);
+            . 'show tell find give list open book move change add make get set see help how much many who '
+            // Portal words in staff account names ("Test Staff (do not delete)", "System Administrator") are never a
+            // person's name on their own, and the token words never are (a name part "staff" re-tokenised "[STAFF_3]").
+            . 'staff admin administrator manager receptionist accountant housekeeping viewer system test user users account delete email phone bk'), true);
     }
     return $s;
 }
@@ -305,7 +308,7 @@ function rh_ai_vault_people(PDO $db): array
         if (!isset($people['full'][$l]) || $kind === 'STAFF') {
             $people['full'][$l] = $kind;
         }
-        foreach (preg_split('/[\s,]+/u', $l) as $part) {
+        foreach (preg_split('/[^\p{L}\p{N}\'\-.]+/u', $l) as $part) { // "(do not delete)": brackets are not part of a name
             $part = trim($part, ".'-");
             if (mb_strlen($part) >= 3 && !isset($people['part'][$part])) {
                 $people['part'][$part] = $kind;

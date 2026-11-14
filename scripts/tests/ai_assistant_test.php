@@ -4896,6 +4896,72 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
             && abs((float)$nsRule['refund'] - (float)($realNs['refund']['refund_amount'] ?? 0)) <= BALANCE_TOLERANCE && !empty($realNs['success'])
             && in_array('booking-details.php?id=' . $nId, array_column((array)$ns['links'], 'url'), true) && (int)$ns['tokens_in'] === 0,
             'no-show: one line and the booking screen, with what the hotel\'s no-show rule keeps and queues for refund - the same figure the no-show itself works out', json_encode([$ns['reply'], $nsRule, $realNs['refund'] ?? null]));
+        // Group no-show charge (setting group_noshow_charge, owner 2026-11-13): the preview agrees with the no-show itself.
+        // Settings are overridden in memory only (no setting row is written) and restored in finally; data rolls back.
+        $gnKeys = ['group_noshow_charge', 'no_show_refund_policy'];
+        $gnSaved = [];
+        foreach ($gnKeys as $k) {
+            $gnSaved[$k] = array_key_exists($k, (array)($GLOBALS['_SITE_SETTINGS'] ?? [])) ? $GLOBALS['_SITE_SETTINGS'][$k] : null;
+        }
+        $nsRow = static fn(): array => (array)$pdo->query("SELECT * FROM bookings WHERE id = " . (int)$nId)->fetch(PDO::FETCH_ASSOC);
+        try {
+            $GLOBALS['_SITE_SETTINGS']['no_show_refund_policy'] = 'full';
+            $pdo->exec('SAVEPOINT aitest_gn');
+            [$gnSib] = $mkG('Nora Gdgroupmate', date('Y-m-d', strtotime('-2 days')), 'confirmed');
+            $pdo->prepare("UPDATE bookings SET primary_booking_id = ? WHERE id = ?")->execute([$nId, $gnSib]);
+            $pdo->prepare("INSERT INTO booking_charges (booking_id, charge_type, description, quantity, unit_price, line_subtotal, vat_rate, vat_amount, line_total, posted_at, added_by, voided)
+                           VALUES (?, 'other', 'AITest Gd extra', 1, 10000, 10000, 0, 0, 10000, NOW(), ?, 0)")->execute([$nId, (int)$admR['id']]);
+            recalculateBookingFinancials($nId);
+            $GLOBALS['_SITE_SETTINGS']['group_noshow_charge'] = '0';
+            $gnOff = rh_ai_noshow_money($pdo, $nsRow());
+            $GLOBALS['_SITE_SETTINGS']['group_noshow_charge'] = 'first_night';
+            $gnOn = rh_ai_noshow_money($pdo, $nsRow());
+            $gnChat = $chatR('mark them no-show', $cvM);
+            $gnReal = rh_mark_booking_no_show($pdo, $nId, (int)$admR['id'], 'AITest', 'AITest');
+            $pdo->exec('ROLLBACK TO SAVEPOINT aitest_gn');
+            // Policy none + charge On: no refund, and paid above charge + extras is the guest's credit (not kept)
+            $pdo->exec('SAVEPOINT aitest_gn');
+            [$gnSib2] = $mkG('Nora Gdgroupmate', date('Y-m-d', strtotime('-2 days')), 'confirmed');
+            $pdo->prepare("UPDATE bookings SET primary_booking_id = ? WHERE id = ?")->execute([$nId, $gnSib2]);
+            $pdo->prepare("INSERT INTO booking_charges (booking_id, charge_type, description, quantity, unit_price, line_subtotal, vat_rate, vat_amount, line_total, posted_at, added_by, voided)
+                           VALUES (?, 'other', 'AITest Gd extra', 1, 10000, 10000, 0, 0, 10000, NOW(), ?, 0)")->execute([$nId, (int)$admR['id']]);
+            recalculateBookingFinancials($nId);
+            $GLOBALS['_SITE_SETTINGS']['no_show_refund_policy'] = 'none';
+            $gnNone = rh_ai_noshow_money($pdo, $nsRow());
+            $gnNoneChat = $chatR('mark them no-show', $cvM);
+            $gnNoneReal = rh_mark_booking_no_show($pdo, $nId, (int)$admR['id'], 'AITest', 'AITest');
+            $gnNoneF = getBookingFolioSummary($nId);
+            $pdo->exec('ROLLBACK TO SAVEPOINT aitest_gn');
+            $GLOBALS['_SITE_SETTINGS']['no_show_refund_policy'] = 'full';
+            $gnRealCredit = round((float)($gnNoneF['amount_paid'] ?? 0) - (float)($gnNoneF['grand_total'] ?? 0), 2);
+            check($gnNone['refund'] === 0.0 && abs($gnNone['credit'] - 90000) <= BALANCE_TOLERANCE && abs($gnNone['kept'] - 110000) <= BALANCE_TOLERANCE
+                && abs($gnNone['credit'] - $gnRealCredit) <= BALANCE_TOLERANCE && (float)($gnNoneReal['refund']['refund_amount'] ?? 0) <= BALANCE_TOLERANCE
+                && strpos($gnNoneChat['reply'], 'left as credit for the guest') !== false && strpos($gnNoneChat['reply'], '90,000.00') !== false && strpos($gnNoneChat['reply'], 'keeps what was paid') === false,
+                'group no-show charge On, policy none: no refund, kept 110,000 (charge + extras) and 90,000 left as the guest\'s credit - the same credit the real no-show leaves', json_encode([$gnNone, $gnRealCredit, $gnNoneChat['reply']]));
+            check($gnOff['group_charge'] === 0.0 && $gnOff['group_charge_mode'] === '' && abs($gnOff['refund'] - 190000) <= BALANCE_TOLERANCE,
+                'group no-show charge Off: a group room\'s preview is as before (policy full: paid 200,000 - extras 10,000 = 190,000 queued; no group charge)', json_encode($gnOff));
+            check($gnOn['group_charge_mode'] === 'first_night' && abs($gnOn['group_charge'] - 100000) <= BALANCE_TOLERANCE && abs($gnOn['refund'] - 90000) <= BALANCE_TOLERANCE
+                && abs($gnOn['refund'] - (float)($gnReal['refund']['refund_amount'] ?? -1)) <= BALANCE_TOLERANCE && abs($gnOn['group_charge'] - (float)($gnReal['group_fee']['amount'] ?? -1)) <= BALANCE_TOLERANCE
+                && !empty($gnReal['group_fee']['posted']) && abs($gnOn['kept'] - 110000) <= BALANCE_TOLERANCE,
+                'group no-show charge On (first night): the preview shows the 100,000 charge and refund = paid - charge - extras = 90,000, the same figures the no-show itself posts', json_encode([$gnOn, $gnReal['refund'] ?? null, $gnReal['group_fee'] ?? null]));
+            check(strpos($gnChat['reply'], 'part of a group') !== false && strpos($gnChat['reply'], 'the first night (') !== false && strpos($gnChat['reply'], '100,000.00') !== false
+                && empty($gnChat['cards']) && $gnChat['route'] === 'declined',
+                'group no-show charge On: the chat says the room is part of a group and will be charged the first night instead of its booked stay (still no card)', $gnChat['reply']);
+            // A single booking (no group): the setting changes nothing
+            $gnOn1 = rh_ai_noshow_money($pdo, $nsRow());
+            $GLOBALS['_SITE_SETTINGS']['group_noshow_charge'] = '0';
+            $gnOff1 = rh_ai_noshow_money($pdo, $nsRow());
+            check($gnOn1 === $gnOff1 && $gnOn1['group_charge'] === 0.0 && $gnOn1['group_charge_mode'] === '' && $gnOn1['credit'] === 0.0 && $gnOff['credit'] === 0.0,
+                'group no-show charge On, single booking: the preview is identical to Off (no group charge)', json_encode([$gnOn1, $gnOff1]));
+        } finally {
+            foreach ($gnSaved as $k => $v) {
+                if ($v === null) {
+                    unset($GLOBALS['_SITE_SETTINGS'][$k]);
+                } else {
+                    $GLOBALS['_SITE_SETTINGS'][$k] = $v;
+                }
+            }
+        }
         $tk = $chatR('take 50,000 cash from him', $cvM);
         check($tk['route'] === 'declined' && strpos($tk['reply'], "I don't take or record payments") !== false && strpos($tk['reply'], 'Balance due') !== false
             && in_array('payment-add.php?booking_type=room&booking_id=' . $nId, array_column((array)$tk['links'], 'url'), true),
@@ -5277,7 +5343,12 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
             $st->execute([$from, $toEx]);
             return [$act, (int)$st->fetchColumn()];
         };
-        $acc = (int)$pdo->query("SELECT COUNT(*) FROM admin_users WHERE is_active = 1")->fetchColumn();
+        // "of M staff accounts": the active accounts plus any switched-off account that was active today (a switched-off
+        // account active in the period used to give "4 of 3 staff accounts")
+        $accSt = $pdo->prepare("SELECT COUNT(*) FROM admin_users WHERE is_active = 1 OR id IN (SELECT user_id FROM admin_activity_log WHERE created_at >= ? AND created_at < ? AND user_id > 0
+                                UNION SELECT user_id FROM admin_presence WHERE last_seen_at >= ? AND last_seen_at < ?)");
+        $accSt->execute([$ccT, date('Y-m-d', strtotime($ccT . ' +1 day')), $ccT, date('Y-m-d', strtotime($ccT . ' +1 day'))]);
+        $acc = (int)$accSt->fetchColumn();
         [$actT, $logT] = $dt($ccT, $ccT);
         $c1 = $chatR('How many staff were active today', 0);
         $calls1 = count($GLOBALS['ai2_calls']);
@@ -6396,7 +6467,7 @@ try {
     $hsS = rh_ai_history_summary($hsEv, true);
     $hsT = implode(' ', $hsS);
     $hsAll = json_encode($hsEv, JSON_UNESCAPED_UNICODE);
-    preg_match_all('/K[\d,]+(?:\.\d+)?/', $hsT, $hsM);
+    preg_match_all('/K\d{1,3}(?:,\d{3})*(?:\.\d+)?/', $hsT, $hsM); // a figure, not the sentence's comma after it ("Owed before K1,068,000, owed after K0")
     $hsBad = array_filter(array_unique($hsM[0]), static fn($a) => strpos($hsAll, $a) === false);
     check(count($hsS) >= 3 && count($hsS) <= 5 && strpos($hsT, 'K356,000.00 a night × 3 nights = K1,068,000.00') !== false && strpos($hsT, 'Tess Hsfront (receptionist)') !== false
         && strpos($hsT, 'today it is K450,300 a night') !== false && strpos($hsT, 'K1,350,900') !== false && strpos($hsT, 'K282,900 went to credit note CN-HS07') !== false
@@ -6677,12 +6748,392 @@ try {
             } else {
                 skip('Sync 2026-11-13: company pays later not installed here (migration 084)');
             }
+            // Sync 2026-11-14: "who still owes" uses the screens' receivables rule (rh_receivable_status_sql): a no-show
+            // still owing and a cancelled room still owing its kept fee count; an untagged expired hold never does.
+            $sOw0 = rh_ai_t_balances_due($pdo, $sAdm, []);
+            $sOd = date('Y-m-d', strtotime('-88 days'));
+            $sOi = date('Y-m-d', strtotime('-90 days'));
+            $sNs = $sBk('AISync Owenoshow', 'aisync.ns@example.invalid', $sOi, $sOd, 2, 700, 0, 'no-show');
+            $sCx = $sBk('AISync Owecancel', 'aisync.cx@example.invalid', $sOi, $sOd, 2, 600, 0, 'cancelled');
+            $pdo->prepare("UPDATE bookings SET cancellation_retained_amount = 300 WHERE id = ?")->execute([$sCx]);
+            $sEx = $sBk('AISync Oweexpired', 'aisync.ex@example.invalid', $sOi, $sOd, 2, 500, 0, 'expired');
+            foreach ([$sNs, $sCx, $sEx] as $sId) {
+                recalculateBookingFinancials($sId);
+            }
+            $sOw1 = rh_ai_t_balances_due($pdo, $sAdm, []);
+            $sNsBal = (float)(rh_ai_folio($sNs)['balance_due'] ?? 0);
+            $sCxBal = (float)(rh_ai_folio($sCx)['balance_due'] ?? 0);
+            $sRecv = function_exists('rh_receivable_rows') ? array_column(rh_receivable_rows($pdo, ['conference' => false, 'gym' => false, 'events' => false, 'tabs' => false]), 'id') : [];
+            check(empty($sOw1['error']) && (int)$sOw1['bookings_owing'] - (int)$sOw0['bookings_owing'] === 2 && (int)$sOw1['checked'] - (int)$sOw0['checked'] === 2
+                && $sNsBal > BALANCE_TOLERANCE && $sCxBal > BALANCE_TOLERANCE && abs((float)$sOw1['total_owed'] - (float)$sOw0['total_owed'] - $sNsBal - $sCxBal) <= BALANCE_TOLERANCE
+                && in_array($sNs, $sRecv, true) && in_array($sCx, $sRecv, true) && !in_array($sEx, $sRecv, true),
+                'who still owes = the screens\' rule: a no-show still owing and a cancelled room\'s kept fee count, an untagged expired hold does not', json_encode([$sOw0['bookings_owing'], $sOw1['bookings_owing'], $sOw0['total_owed'], $sOw1['total_owed'], $sNsBal, $sCxBal]));
         } finally {
             $pdo->rollBack();
         }
     }
 } catch (Throwable $e) {
     bad('Sync 2026-11-13 database checks threw', get_class($e) . ': ' . $e->getMessage());
+}
+
+// ── Sync 2026-11-14: cancellation & no-show policies locked at booking (fee quote, cancel card, no-show preview, still
+//    owed), lowering / waiving needs waive_cancellation_fee, who changed a setting (secrets stay hidden). Writes run
+//    only at the test hotel, inside one transaction that is rolled back; settings are overridden in memory only. ──
+echo "\n-- Sync 2026-11-14 --\n";
+try {
+    require_once $root . '/includes/ai/ai-actions.php';
+    require_once $root . '/includes/ai/ai-money.php';
+    require_once $root . '/includes/ai/ai-desk.php';
+    require_once $root . '/includes/booking-functions.php';
+    require_once $root . '/includes/settings-change-log.php';
+    // Pure: the words
+    $s4i = rh_ai_money_read_intent("What's the cancellation fee for booking RH2026123456?");
+    $s4j = rh_ai_money_read_intent('how much would it cost if they cancel?');
+    check(($s4i['ask'] ?? '') === 'cancelfee' && ($s4i['who'] ?? '') === 'RH2026123456' && ($s4j['ask'] ?? '') === 'cancelfee' && rh_ai_money_read_intent('cancel their booking') === null
+        && rh_ai_money_read_intent('what is the cancellation fee for the conference?') === null,
+        'cancellation fee: a question about the fee is read as one (a reference or the booking in focus); "cancel their booking" stays a request for the card', json_encode([$s4i, $s4j]));
+    $s4w = rh_ai_money_action_intent('waive the cancellation fee for Mr Banda');
+    check(($s4w['kind'] ?? '') === 'waive' && (rh_ai_money_action_intent('lower the no-show charge')['kind'] ?? '') === 'waive' && (rh_ai_money_action_intent('mark them no-show')['kind'] ?? '') === 'noshow'
+        && rh_ai_money_action_intent('can I waive a cancellation fee?') === null && (rh_ai_money_action_intent('cancel the no-show charge')['kind'] ?? '') === 'waive'
+        && rh_ai_money_action_intent('cancel their booking and charge the cancellation fee') === null && rh_ai_money_action_intent('can you cancel it and keep the cancellation fee') === null,
+        'waive / lower a cancellation or no-show fee is read as a money action (never a card); a question about it is not, and "cancel their booking ... cancellation fee" stays a cancel request', json_encode($s4w));
+    // Decisions (2026-11-14): cancellations are no longer called "refunded in full" (a kept fee can be owed); the
+    // "who to chase" rows read a cancelled room owing its kept fee as the screens do
+    $s4dec = (string)file_get_contents($root . '/includes/ai/ai-decisions.php');
+    $s4ins = (string)file_get_contents($root . '/includes/ai/ai-insights.php');
+    check(strpos($s4dec, 'refunded in full') === false && strpos($s4dec, "days that were cancelled'") !== false
+        && strpos($s4ins, "rh_cancelled_fee_owed_label((string)\$r['status'], \$r['amount_due'])") !== false,
+        'Decisions: the deposits card no longer says cancellations are "refunded in full"; still owed rows use the screens\' "Cancelled - fee owed" label');
+    $s4si = rh_ai_desk_settings_intent('who changed the tourism levy setting');
+    $s4sj = rh_ai_desk_settings_intent('when was the currency setting changed');
+    check(($s4si['setting'] ?? null) === 'tourism levy' && ($s4sj['setting'] ?? null) === 'currency' && (rh_ai_desk_settings_intent('who changed the settings today')['setting'] ?? null) === ''
+        && rh_ai_desk_settings_intent('who changed the dates on the booking') === null,
+        '"who changed setting X" / "when was X changed" / "who changed the settings today" are read; a booking question is not', json_encode([$s4si, $s4sj]));
+    $s4tools = rh_ai_tool_registry();
+    require_once $root . '/includes/ai/ai-selfheal.php';
+    check(!array_filter(array_keys($s4tools), static fn($n) => stripos($n, 'setting') !== false) && !rh_ai_hard_limit_problems()
+        && strpos((string)file_get_contents($root . '/includes/ai/ai-desk.php'), "rh_ai_tool_allowed(\$user, 'staff_activity') && rh_ai_has_perm((int)(\$user['id'] ?? 0), 'system_logs')") !== false,
+        'who changed a setting: answered locally behind staff activity + System Logs\' own permission, never a tool the model can call (hard limits stay green)');
+    // Privacy vault: portal words in staff account names ("Test Staff (do not delete)", "System Administrator") and role
+    // names are never read as a person's name, so "Staff active today" is never tokenised (read only)
+    rh_ai_vault_people_reset();
+    $s4vp = rh_ai_vault_people($pdo);
+    rh_ai_vault_people_reset();
+    check(!isset($s4vp['part']['staff']) && !isset($s4vp['part']['administrator']) && !isset($s4vp['part']['receptionist']) && !isset($s4vp['part']['(do']) && !isset($s4vp['part']['delete)'])
+        && !isset($s4vp['part']['system']) && count($s4vp['full']) > 0,
+        'privacy vault: "staff", "administrator", role names and bracketed words in account names are never name parts (full names still are)', json_encode(array_intersect_key($s4vp['part'], array_flip(['staff', 'administrator', 'receptionist', '(do', 'delete)', 'system']))));
+    // The reply check (claim-check): still flags a figure the data does not hold; a sentence's comma after a figure is
+    // not part of it; the Room Board's "Tomorrow" is held to the outlook's own date (fault: flagged when no listed row
+    // happened to carry tomorrow's date)
+    $s4cEv = '{"owed_before":1068000,"owed_after":0,"paid":1350900}';
+    $s4cOk = rh_ai_claim_check('Owed before K1,068,000, owed after K0.', $s4cEv, ['today' => '2026-11-14']);
+    $s4cBad = rh_ai_claim_check('Owed before K1,086,000, owed after K0.', $s4cEv, ['today' => '2026-11-14']);
+    check(!$s4cOk['bad'] && $s4cOk['claims'] >= 2 && array_column($s4cBad['bad'], 'raw') === ['K1,086,000'],
+        'reply check: "K1,068,000," (a comma after the figure) matches the data; a wrong figure (K1,086,000) is still flagged', json_encode([$s4cOk['bad'], array_column($s4cBad['bad'], 'raw')]));
+    $s4rbT = "Tonight: 3 free of 12 · Tomorrow: 5 of 12 booked";
+    $s4rbL = '"line":"' . $s4rbT . '"';
+    $s4rbNo = rh_ai_claim_check($s4rbT, '{"outlook":{"rooms_to_sell":12,"free_tonight":3,"booked_tomorrow":5,' . $s4rbL . '}}', ['today' => '2026-11-14']);
+    $s4rbYes = rh_ai_claim_check($s4rbT, '{"outlook":{"tonight_date":"2026-11-14","tomorrow_date":"2026-11-15","rooms_to_sell":12,"free_tonight":3,"booked_tomorrow":5,' . $s4rbL . '}}', ['today' => '2026-11-14']);
+    $s4rbWrong = rh_ai_claim_check(str_replace('5 of 12', '7 of 12', $s4rbT), '{"outlook":{"tonight_date":"2026-11-14","tomorrow_date":"2026-11-15","rooms_to_sell":12,"free_tonight":3,"booked_tomorrow":5,' . $s4rbL . '}}', ['today' => '2026-11-14']);
+    check(array_column($s4rbNo['bad'], 'raw') === ['Tomorrow'] && !$s4rbYes['bad'] && in_array('7', array_column($s4rbWrong['bad'], 'raw'), true)
+        && strpos((string)file_get_contents($root . '/includes/ai/ai-tools.php'), "'tonight_date' => \$today, 'tomorrow_date' => \$tomorrow") !== false,
+        'reply check: the Room Board outlook carries tonight\'s and tomorrow\'s dates, so "Tomorrow: 5 of 12 booked" is held to them (a wrong 7 is still flagged)', json_encode([$s4rbNo['bad'], $s4rbYes['bad'], array_column($s4rbWrong['bad'], 'raw')]));
+} catch (Throwable $e) {
+    bad('Sync 2026-11-14 pure checks threw', get_class($e) . ': ' . $e->getMessage());
+}
+try {
+    $s4Adm = $pdo->query("SELECT id, role, username, full_name FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    $s4Room = (int)$pdo->query("SELECT id FROM rooms WHERE is_active = 1 ORDER BY id LIMIT 1")->fetchColumn();
+    if (stripos((string)DB_NAME, 'rosalyn') !== false) {
+        skip('Sync 2026-11-14 database checks: Rosalyn\'s is LIVE, they run at the test hotel only');
+    } elseif (!$s4Adm || $s4Room <= 0 || !function_exists('rh_cancel_policy_column_ready') || !rh_cancel_policy_column_ready($pdo)) {
+        skip('Sync 2026-11-14 database checks: no admin, no room, or the cancellation policy column (migration 085) is not here');
+    } else {
+        $s4Keys = ['cancellation_policy_enabled', 'no_show_refund_policy', 'group_noshow_charge', 'cancellation_refund_mode'];
+        $s4Saved = [];
+        foreach ($s4Keys as $k) {
+            $s4Saved[$k] = array_key_exists($k, (array)($GLOBALS['_SITE_SETTINGS'] ?? [])) ? $GLOBALS['_SITE_SETTINGS'][$k] : null;
+        }
+        $pdo->beginTransaction();
+        try {
+            $GLOBALS['_SITE_SETTINGS']['cancellation_refund_mode'] = 'void_refund_all';
+            $s4Ins = $pdo->prepare("INSERT INTO bookings (booking_reference, room_id, guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights, number_of_guests, adult_guests, child_guests,
+                                        total_amount, total_with_vat, amount_paid, amount_due, status, primary_booking_id)
+                                    VALUES (?, ?, ?, 'aisync14@example.invalid', '+265 991 000 714', ?, ?, 2, 1, 1, 0, 200000, 200000, 0, 200000, ?, ?)");
+            $s4Bk = static function (string $name, string $in, string $status, ?array $snap, ?int $prim = null) use ($s4Ins, $s4Room, $pdo): array {
+                $ref = 'AITSF' . random_int(100000, 999999);
+                $s4Ins->execute([$ref, $s4Room, $name, $in, date('Y-m-d', strtotime($in . ' +2 days')), $status, $prim]);
+                $id = (int)$pdo->lastInsertId();
+                if ($snap !== null) {
+                    $pdo->prepare('UPDATE bookings SET cancellation_policy_snapshot = ? WHERE id = ?')->execute([json_encode($snap), $id]);
+                }
+                recalculateBookingFinancials($id);
+                return [$id, $ref];
+            };
+            $s4Snap = ['v' => 1, 'kind' => 'individual', 'group_min_rooms' => 2, 'rooms_at_booking' => 1, 'tiers' => [['days' => 7, 'pct' => 50], ['days' => 2, 'pct' => 100]],
+                'noshow_pct' => 50, 'policy_version' => 3, 'taken_at' => date('Y-m-d H:i:s'), 'text' => 'AITest policy'];
+            $s4Tz = new DateTimeZone(defined('RH_TIMEZONE') ? RH_TIMEZONE : 'Africa/Blantyre');
+            $s4Day = static fn(int $d): string => (new DateTimeImmutable('today', $s4Tz))->modify(($d >= 0 ? '+' : '') . $d . ' days')->format('Y-m-d');
+            $s4Res = static fn(int $id): array => rh_ai_t_get_booking($pdo, $s4Adm, ['booking_id' => $id]);
+            // 1. The fee quote from the LOCKED policy: exactly 7 days before = free, 6 days = 50% of the booked stay
+            [$s4F7] = $s4Bk('AISync Feeseven', $s4Day(7), 'confirmed', $s4Snap);
+            [$s4F6, $s4F6Ref] = $s4Bk('AISync Feesix', $s4Day(6), 'confirmed', $s4Snap);
+            [$s4Pd] = $s4Bk('AISync Feepending', $s4Day(6), 'pending', $s4Snap);
+            [$s4Lg] = $s4Bk('AISync Feelegacy', $s4Day(6), 'confirmed', null);
+            $GLOBALS['_SITE_SETTINGS']['cancellation_policy_enabled'] = '0';
+            $t7 = rh_ai_money_cancel_fee_text($pdo, $s4Res($s4F7), $s4F7);
+            $t6 = rh_ai_money_cancel_fee_text($pdo, $s4Res($s4F6), $s4F6);
+            $tP = rh_ai_money_cancel_fee_text($pdo, $s4Res($s4Pd), $s4Pd);
+            $tL = rh_ai_money_cancel_fee_text($pdo, $s4Res($s4Lg), $s4Lg);
+            $GLOBALS['_SITE_SETTINGS']['cancellation_policy_enabled'] = '1';
+            $t6On = rh_ai_money_cancel_fee_text($pdo, $s4Res($s4F6), $s4F6);
+            $tLOn = rh_ai_money_cancel_fee_text($pdo, $s4Res($s4Lg), $s4Lg);
+            $q6 = rh_cancellation_fee_quote($pdo, (array)$pdo->query('SELECT * FROM bookings WHERE id = ' . $s4F6)->fetch(PDO::FETCH_ASSOC));
+            check(strpos($t7, 'No cancellation fee if cancelled today') !== false && strpos($t7, 'cancelling exactly 7 days before is still free') !== false && strpos($t7, '100,000.00') === false,
+                'fee quote: cancelling exactly 7 days before arrival under a "fewer than 7 days" tier is free, and the answer says when the fee starts', $t7);
+            check(abs($q6['amount'] - 100000) <= BALANCE_TOLERANCE && strpos($t6, 'Cancellation fee if cancelled today') !== false && strpos($t6, '100,000.00') !== false
+                && strpos($t6, 'x 2 nights') !== false && strpos($t6, 'less than 7 days') !== false && strpos($t6, 'locked at booking, v3') !== false,
+                'fee quote: 6 days before arrival = 50% of the booked stay (booked rate x 2 nights) = 100,000.00, from the booking\'s locked policy v3 (the same figure the cancel uses)', $t6);
+            check(strpos($tP, 'No cancellation fee') !== false && strpos($tP, 'not confirmed') !== false && strpos($tP, '100,000.00') === false,
+                'fee quote: a pending booking under a policy pays no fee', $tP);
+            check(strpos($tL, 'No cancellation policy is locked') !== false && strpos($tL, 'No cancellation fee') === false && strpos($tL, '100,000.00') === false && $tLOn === $tL,
+                'fee quote: a booking with no locked policy follows today\'s cancellation rule by name - never "no fee", never a made-up figure (switch On or Off)', $tL);
+            check($t6On === $t6, 'fee quote: the policy switch (Off at both hotels now) never changes the answer for a booking already locked', $t6On);
+            // 2. The cancel card posts the quoted fee as the screen's dialog does (else the screen refuses), never a lower one
+            $pc6 = rh_ai_pv_cancel_booking($pdo, $s4Adm, ['booking_id' => $s4F6, 'reason' => 'AITest guest asked']);
+            $pcL = rh_ai_pv_cancel_booking($pdo, $s4Adm, ['booking_id' => $s4Lg, 'reason' => 'AITest guest asked']);
+            $pc6F = (array)($pc6['steps'][0]['fields'] ?? []);
+            $pc6Rows = array_column((array)($pc6['card']['rows'] ?? []), 'new', 'label');
+            check(in_array(['fee_quoted', '100000.00'], $pc6F, true) && !array_filter($pc6F, static fn($f) => strpos($f[0], 'fee_override') === 0)
+                && strpos((string)($pc6Rows['Cancellation fee'] ?? ''), '100,000.00') !== false && !isset($pc6Rows['Money paid'])
+                && !in_array('fee_quoted', array_column((array)($pcL['steps'][0]['fields'] ?? []), 0), true) && isset(array_column((array)$pcL['card']['rows'], 'new', 'label')['Money paid']),
+                'cancel card: a locked policy shows the fee and posts fee_quoted 100000.00 (never a lower fee); a booking without a policy is the old card', json_encode([$pc6Rows, $pc6F]));
+            $pdo->exec('SAVEPOINT ait_s4c');
+            $s4Post = [];
+            foreach ($pc6F as $f) {
+                $s4Post[$f[0]] = $f[1];
+            }
+            $s4Ow0 = rh_ai_t_balances_due($pdo, $s4Adm, []);
+            $s4Bal0 = (float)(rh_ai_folio($s4F6)['balance_due'] ?? 0);
+            $cx6 = cancelRoomBookingSettled($pdo, $s4F6, (int)$s4Adm['id'], 'AITest guest asked', 'completed', rh_cancel_fee_choice_from_post($s4Post, false));
+            $s4Bal1 = (float)(rh_ai_folio($s4F6)['balance_due'] ?? 0);
+            $s4Ow1 = rh_ai_t_balances_due($pdo, $s4Adm, []);
+            $tC = rh_ai_money_cancel_fee_text($pdo, $s4Res($s4F6), $s4F6);
+            $pdo->exec('ROLLBACK TO SAVEPOINT ait_s4c');
+            check(!empty($cx6['success']) && abs((float)$cx6['retained'] - 100000) <= BALANCE_TOLERANCE && abs($s4Bal1 - 100000) <= BALANCE_TOLERANCE
+                && (int)$s4Ow1['bookings_owing'] === (int)$s4Ow0['bookings_owing'] && abs((float)$s4Ow1['total_owed'] - (float)$s4Ow0['total_owed'] - ($s4Bal1 - $s4Bal0)) <= BALANCE_TOLERANCE
+                && rh_cancelled_fee_owed_label('cancelled', $s4Bal1) === 'Cancelled - fee owed',
+                'cancel card replayed: the screen accepts the quoted fee and keeps 100,000.00; "who still owes" keeps counting the cancelled room for its kept fee', json_encode([$cx6['error'] ?? '', $cx6['retained'] ?? null, $s4Bal0, $s4Bal1]));
+            check(strpos($tC, 'No cancellation fee') === false && strpos($tC, 'Cancellation fee if cancelled today') === false
+                && preg_match('/fee kept: [^*\n]*100,000\.00/', $tC) && preg_match('/Still owed: [^*\n]*100,000\.00/', $tC) && strpos($tC, 'Cancelled - fee owed') !== false,
+                'fee question on an ALREADY CANCELLED booking that kept a fee: the kept fee (100,000.00) and what is still owed (100,000.00), never "No cancellation fee"', $tC);
+            // The kept-fee labels in the top lists ("who still owes" top 20, Decisions top 6): a stay far above anything
+            // owed at the test hotel (40,000,000, 50% kept = 20,000,000) so the cancelled room is surely in both lists.
+            $pdo->exec('SAVEPOINT ait_s4k');
+            [$s4K, $s4KRef] = $s4Bk('AISync Feebig', $s4Day(6), 'confirmed', $s4Snap);
+            $pdo->prepare('UPDATE bookings SET total_amount = 40000000, total_with_vat = 40000000 WHERE id = ?')->execute([$s4K]);
+            recalculateBookingFinancials($s4K);
+            $s4KPost = [];
+            foreach ((array)(rh_ai_pv_cancel_booking($pdo, $s4Adm, ['booking_id' => $s4K, 'reason' => 'AITest guest asked'])['steps'][0]['fields'] ?? []) as $f) {
+                $s4KPost[$f[0]] = $f[1];
+            }
+            $cxK = cancelRoomBookingSettled($pdo, $s4K, (int)$s4Adm['id'], 'AITest guest asked', 'completed', rh_cancel_fee_choice_from_post($s4KPost, false));
+            $s4KOw = rh_ai_t_balances_due($pdo, $s4Adm, []);
+            $s4Kept = array_values(array_filter((array)$s4KOw['largest'], static fn($x) => (int)$x['booking_id'] === $s4K));
+            $s4Ml = function_exists('rh_ai_t_money_leaks') ? rh_ai_t_money_leaks($pdo, $s4Adm, []) : [];
+            $pdo->exec('ROLLBACK TO SAVEPOINT ait_s4k');
+            check(!empty($cxK['success']) && abs((float)$cxK['retained'] - 20000000) <= BALANCE_TOLERANCE && count($s4Kept) === 1 && ($s4Kept[0]['status'] ?? '') === 'Cancelled - fee owed'
+                && abs((float)($s4Kept[0]['balance_due'] ?? 0) - 20000000) <= BALANCE_TOLERANCE,
+                '"who still owes" lists the cancelled room for its kept fee (20,000,000.00) as "Cancelled - fee owed"', json_encode([$cxK['error'] ?? '', $cxK['retained'] ?? null, $s4Kept]));
+            // 3. A group: each room's own fee and the total (scope group), the card posts the group sum
+            [$s4G1, $s4G1Ref] = $s4Bk('AISync Grouplead', $s4Day(6), 'confirmed', ['kind' => 'group', 'rooms_at_booking' => 2] + $s4Snap);
+            [$s4G2, $s4G2Ref] = $s4Bk('AISync Groupmate', $s4Day(6), 'confirmed', ['kind' => 'group', 'rooms_at_booking' => 2, 'tiers' => [['days' => 7, 'pct' => 25]]] + $s4Snap, $s4G1);
+            $tG = rh_ai_money_cancel_fee_text($pdo, $s4Res($s4G1), $s4G1);
+            $pcG = rh_ai_pv_cancel_booking($pdo, $s4Adm, ['booking_id' => $s4G1, 'reason' => 'AITest group', 'scope' => 'group']);
+            $pcGRows = array_column((array)($pcG['card']['rows'] ?? []), 'new', 'label');
+            check(strpos($tG, 'Booked together: 2 rooms') !== false && strpos($tG, $s4G1Ref . ': 50% of the stay') !== false && strpos($tG, $s4G2Ref . ': 25% of the stay') !== false && strpos($tG, '150,000.00 in total') !== false
+                && in_array(['fee_quoted', '150000.00'], (array)($pcG['steps'][0]['fields'] ?? []), true) && strpos((string)($pcGRows['Room ' . $s4G2Ref] ?? ''), '50,000.00') !== false
+                && strpos((string)($pcGRows['Cancellation fee (all 2 rooms)'] ?? ''), '150,000.00') !== false,
+                'group: each room\'s own locked fee (100,000 + 50,000) and the 150,000 total, per room on the answer and the card; the card posts the group sum', json_encode([$tG, $pcGRows]));
+            // 4. No-show under a locked policy (50%): the policy charge wins over the group charge; the preview equals the no-show
+            $GLOBALS['_SITE_SETTINGS']['group_noshow_charge'] = 'first_night';
+            [$s4N, $s4NRef] = $s4Bk('AISync Noshowpaid', $s4Day(-2), 'confirmed', $s4Snap);
+            $s4Bk('AISync Noshowmate', $s4Day(-2), 'confirmed', $s4Snap, $s4N);
+            $pdo->prepare("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, total_amount, payment_method, payment_status, recorded_by)
+                           VALUES (?, 'room', ?, ?, ?, 200000, 200000, 'cash', 'completed', ?)")->execute(['AITSFP' . random_int(100000, 999999), $s4N, $s4NRef, $s4Day(-5), (int)$s4Adm['id']]);
+            recalculateBookingFinancials($s4N);
+            $s4Row = static fn(int $id): array => (array)$pdo->query('SELECT * FROM bookings WHERE id = ' . $id)->fetch(PDO::FETCH_ASSOC);
+            $GLOBALS['_SITE_SETTINGS']['no_show_refund_policy'] = 'full';
+            $nsF = rh_ai_noshow_money($pdo, $s4Row($s4N));
+            $pdo->exec('SAVEPOINT ait_s4n');
+            $nsFR = rh_mark_booking_no_show($pdo, $s4N, (int)$s4Adm['id'], 'AITest', 'AITest');
+            $pdo->exec('ROLLBACK TO SAVEPOINT ait_s4n');
+            $GLOBALS['_SITE_SETTINGS']['no_show_refund_policy'] = 'none';
+            $nsN = rh_ai_noshow_money($pdo, $s4Row($s4N));
+            $pdo->exec('SAVEPOINT ait_s4n');
+            $nsNR = rh_mark_booking_no_show($pdo, $s4N, (int)$s4Adm['id'], 'AITest', 'AITest');
+            $nsNF = getBookingFolioSummary($s4N);
+            $pdo->exec('ROLLBACK TO SAVEPOINT ait_s4n');
+            check(is_array($nsF['locked']) && $nsF['group_charge_mode'] === '' && abs($nsF['locked']['charge'] - 100000) <= BALANCE_TOLERANCE && abs($nsF['refund'] - 100000) <= BALANCE_TOLERANCE
+                && abs($nsF['refund'] - (float)($nsFR['refund']['refund_amount'] ?? -1)) <= BALANCE_TOLERANCE && ($nsFR['group_fee']['mode'] ?? '') === 'policy' && abs((float)($nsFR['group_fee']['amount'] ?? 0) - 100000) <= BALANCE_TOLERANCE,
+                'no-show, locked policy 50% (group charge On is not used): charge 100,000, refund paid above it 100,000 - the same figures the no-show itself posts', json_encode([$nsF, $nsFR['refund'] ?? null, $nsFR['group_fee'] ?? null]));
+            check($nsN['refund'] === 0.0 && abs($nsN['credit'] - 100000) <= BALANCE_TOLERANCE && abs($nsN['kept'] - 100000) <= BALANCE_TOLERANCE
+                && abs($nsN['credit'] - round((float)$nsNF['amount_paid'] - (float)$nsNF['grand_total'], 2)) <= BALANCE_TOLERANCE && !empty($nsNR['success']),
+                'no-show, locked policy 50%, no automatic refund: 100,000 kept, 100,000 left as the guest\'s credit - the credit the real no-show leaves', json_encode([$nsN, $nsNF['amount_paid'] ?? null, $nsNF['grand_total'] ?? null]));
+            // A 100% no-show policy: no charge line, the booked stay keeps billing; only money paid above it goes back
+            [$s4H, $s4HRef] = $s4Bk('AISync Noshowfull', $s4Day(-2), 'confirmed', ['noshow_pct' => 100] + $s4Snap);
+            $pdo->prepare("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, total_amount, payment_method, payment_status, recorded_by)
+                           VALUES (?, 'room', ?, ?, ?, 250000, 250000, 'cash', 'completed', ?)")->execute(['AITSFH' . random_int(100000, 999999), $s4H, $s4HRef, $s4Day(-5), (int)$s4Adm['id']]);
+            recalculateBookingFinancials($s4H);
+            $GLOBALS['_SITE_SETTINGS']['no_show_refund_policy'] = 'full';
+            $nsH = rh_ai_noshow_money($pdo, $s4Row($s4H));
+            $pdo->exec('SAVEPOINT ait_s4h');
+            $nsHR = rh_mark_booking_no_show($pdo, $s4H, (int)$s4Adm['id'], 'AITest', 'AITest');
+            $pdo->exec('ROLLBACK TO SAVEPOINT ait_s4h');
+            check(is_array($nsH['locked']) && !empty($nsH['locked']['stay_billed']) && abs($nsH['refund'] - 50000) <= BALANCE_TOLERANCE
+                && abs($nsH['refund'] - (float)($nsHR['refund']['refund_amount'] ?? -1)) <= BALANCE_TOLERANCE && empty($nsHR['group_fee']['posted']) && !empty($nsHR['success']),
+                'no-show, locked policy 100%: the booked stay keeps billing (no charge line), refund = paid above the stay (250,000 - 200,000 = 50,000), the same as the no-show itself', json_encode([$nsH, $nsHR['refund'] ?? null, $nsHR['group_fee'] ?? null]));
+            // The no-show charge is still owed when nothing was paid ("who still owes" keeps counting it)
+            [$s4U] = $s4Bk('AISync Noshowunpaid', $s4Day(-2), 'confirmed', $s4Snap);
+            $s4UOw0 = rh_ai_t_balances_due($pdo, $s4Adm, []);
+            $pdo->exec('SAVEPOINT ait_s4u');
+            $nsU = rh_mark_booking_no_show($pdo, $s4U, (int)$s4Adm['id'], 'AITest', 'AITest');
+            $s4UBal = (float)(rh_ai_folio($s4U)['balance_due'] ?? 0);
+            $s4UOw1 = rh_ai_t_balances_due($pdo, $s4Adm, []);
+            $tN = rh_ai_money_cancel_fee_text($pdo, $s4Res($s4U), $s4U);
+            $pdo->exec('ROLLBACK TO SAVEPOINT ait_s4u');
+            check(strpos($tN, 'No cancellation fee') === false && strpos($tN, 'Cancellation fee if cancelled today') === false && strpos($tN, 'Marked as a no-show') !== false
+                && strpos($tN, 'No-show: 50% of the stay') !== false && preg_match('/Still owed: [^*\n]*100,000\.00/', $tN),
+                'fee question on a no-show: its no-show charge rule (50%) and what is still owed (100,000.00), not a cancellation fee line', $tN);
+            // Checked in: can no longer be cancelled (no fee line); arrival day (0 days before) under a "fewer than 2 days" 100% tier
+            [$s4Ci] = $s4Bk('AISync Feecheckedin', $s4Day(-1), 'checked-in', $s4Snap);
+            [$s4A0] = $s4Bk('AISync Feearrival', $s4Day(0), 'confirmed', $s4Snap);
+            $tCi = rh_ai_money_cancel_fee_text($pdo, $s4Res($s4Ci), $s4Ci);
+            $tA0 = rh_ai_money_cancel_fee_text($pdo, $s4Res($s4A0), $s4A0);
+            check(strpos($tCi, 'can no longer be cancelled') !== false && strpos($tCi, 'No cancellation fee') === false && strpos($tCi, 'Cancellation fee if cancelled today') === false,
+                'fee question on a checked-in booking: it can no longer be cancelled, no fee line', $tCi);
+            check(strpos($tA0, 'Cancellation fee if cancelled today') !== false && strpos($tA0, '200,000.00') !== false && strpos($tA0, 'On the arrival day') !== false && strpos($tA0, 'No cancellation fee') === false,
+                'fee question on the arrival day (0 days before): the 100% tier, 200,000.00 (the whole booked stay)', $tA0);
+            check(!empty($nsU['success']) && abs($s4UBal - 100000) <= BALANCE_TOLERANCE && (int)$s4UOw1['bookings_owing'] === (int)$s4UOw0['bookings_owing']
+                && abs((float)$s4UOw1['total_owed'] - (float)$s4UOw0['total_owed'] + 100000) <= BALANCE_TOLERANCE,
+                'a no-show charge (50% = 100,000) is still owed: "who still owes" counts the no-show at its charge, not its old stay', json_encode([$s4UBal, $s4UOw0['total_owed'], $s4UOw1['total_owed']]));
+            // 5. Lowering or waiving a fee: never done here; without the permission, said so with nothing offered
+            $s4Rec = ait_temp_user($pdo, 'receptionist', 'Aitest-S4-' . bin2hex(random_bytes(3)));
+            $wNo = rh_ai_money_action_reply($pdo, $s4Rec, 0, ['kind' => 'waive', 'who' => ''], ['focus' => $s4F6], 0);
+            $wYes = rh_ai_money_action_reply($pdo, $s4Adm, 0, ['kind' => 'waive', 'who' => ''], ['focus' => $s4F6], 0);
+            check(!rh_ai_has_perm((int)$s4Rec['id'], 'waive_cancellation_fee') && strpos($wNo['text'], "don't have permission to lower or waive") !== false && $wNo['links'] === [] && $wNo['route'] === 'declined'
+                && strpos($wYes['text'], "I don't lower or waive fees") !== false && strpos($wYes['text'], 'Booking Details') !== false && $wYes['route'] === 'declined',
+                'waive / lower a fee: without waive_cancellation_fee the answer says so and offers nothing; with it, it points to Booking Details (never done in the chat)', json_encode([$wNo, $wYes['text']]));
+            // 6. Who changed a setting and when: as the log stored it, secrets stay hidden; not counted as actions
+            $s4Who = ait_temp_user($pdo, 'admin', 'Aitest-S4b-' . bin2hex(random_bytes(3)));
+            $s4At = (string)$pdo->query("SELECT CONCAT(CURDATE(), ' 12:00:00')")->fetchColumn();
+            $s4Log = $pdo->prepare("INSERT INTO admin_activity_log (user_id, username, action, details, ip_address, created_at) VALUES (?, ?, ?, ?, '127.0.0.1', ?)");
+            $s4Log->execute([(int)$s4Who['id'], $s4Who['username'], 'page_action', 'booking-settings.php', $s4At]);
+            $s4Log->execute([(int)$s4Who['id'], $s4Who['username'], 'setting_change', 'page=booking-settings.php; ' . rh_settings_log_details('aitest_levy_percent', '1', '1.5'), $s4At]);
+            $s4Log->execute([(int)$s4Who['id'], $s4Who['username'], 'setting_change', 'page=booking-settings.php; ' . rh_settings_log_details('aitest_smtp_password', 'Old-Secret-1', 'New-Secret-2'), $s4At]);
+            $scA = rh_ai_t_settings_changes($pdo, $s4Adm, ['setting' => 'aitest levy']);
+            $scB = rh_ai_t_settings_changes($pdo, $s4Adm, ['setting' => 'aitest smtp password']);
+            $scT = rh_ai_desk_settings_text($scA) . "\n" . rh_ai_desk_settings_text($scB);
+            check((int)$scA['changes_found'] === 1 && ($scA['changes'][0]['old'] ?? '') === '1' && ($scA['changes'][0]['new'] ?? '') === '1.5' && ($scA['changes'][0]['staff_name'] ?? '') === 'Aitest Temp'
+                && ($scA['changes'][0]['page'] ?? '') === 'Hotel Settings' && strpos($scT, '1 -> 1.5') !== false,
+                'who changed a setting: who, when, the page, old -> new, exactly as the log stored it', json_encode($scA));
+            check((int)$scB['changes_found'] === 1 && !empty($scB['changes'][0]['hidden']) && ($scB['changes'][0]['old'] ?? '') === '(hidden)' && strpos($scT, 'value hidden') !== false
+                && strpos(json_encode([$scB, $scT]), 'Secret') === false,
+                'who changed a secret setting: "value hidden", the value never shown (the log never stored it)', json_encode($scB));
+            $scN = rh_ai_t_settings_changes($pdo, $s4Adm, ['setting' => 'aitest nothing like this']);
+            check((int)$scN['changes_found'] === 0 && (int)$scN['changes_checked'] >= 2 && strpos(rh_ai_desk_settings_text($scN), 'checked ') !== false && !rh_ai_settings_changes_allowed($s4Rec),
+                'no matching change: said with the number of changes checked and where the log starts (never a bare "none"); a receptionist cannot use the lookup', rh_ai_desk_settings_text($scN));
+            $s4Day0 = (string)$pdo->query('SELECT CURDATE()')->fetchColumn();
+            $saS = rh_ai_t_staff_activity($pdo, $s4Adm, ['staff' => 'Aitest Temp', 'from' => $s4Day0, 'to' => $s4Day0]);
+            check((int)($saS['actions'] ?? -1) === 1 && (int)($saS['settings_changed'] ?? 0) === 2 && strpos(json_encode($saS['latest_actions'] ?? ''), 'Setting change') === false,
+                'staff activity: setting changes are counted apart (2 settings changed), never as extra logged actions (1)', json_encode($saS));
+            // 6b. Live check 2026-11-14 (4 fails): the fee, group and settings questions are answered locally (no model call)
+            // for any reference shape - the hotel's own (LSH/RBH + year) and others (AITSF...) - and the booking lookup the
+            // model reads carries the checked fee
+            $s4TrPrev = $GLOBALS['__rh_ai_transport'] ?? null;
+            rh_ai_set_transport($queueTransport);
+            $s4Ask = static function (string $msg) use ($pdo, $s4Adm): array {
+                $GLOBALS['ai2_q'] = [];
+                $GLOBALS['ai2_calls'] = [];
+                $r = rh_ai_turn($pdo, $s4Adm, ['conversation_id' => 0, 'message' => $msg, 'page' => 'bookings.php']);
+                return ['route' => (string)($r['route'] ?? ''), 'text' => (string)($r['reply'] ?? ''), 'calls' => count($GLOBALS['ai2_calls']), 'error' => (string)($r['error'] ?? '')];
+            };
+            $s4ReRef = static function (int $id, string $prefix) use ($pdo): string {
+                $ref = $prefix . '2026' . random_int(100000, 999999);
+                $pdo->prepare('UPDATE bookings SET booking_reference = ? WHERE id = ?')->execute([$ref, $id]);
+                return $ref;
+            };
+            $s4PdRef = (string)$pdo->query('SELECT booking_reference FROM bookings WHERE id = ' . (int)$s4Pd)->fetchColumn();
+            [$s4L1] = $s4Bk('AISync Feelsh', $s4Day(6), 'confirmed', $s4Snap);
+            $s4L1Ref = $s4ReRef($s4L1, 'LSH');
+            [$s4R1] = $s4Bk('AISync Feerbh', $s4Day(6), 'pending', $s4Snap);
+            $s4R1Ref = $s4ReRef($s4R1, 'RBH');
+            $s4Loc = static fn(array $a): bool => $a['route'] === 'local' && $a['calls'] === 0 && $a['error'] === '';
+            $a1 = $s4Ask("What is the cancellation fee on booking $s4F6Ref if it is cancelled today?");
+            $a1b = $s4Ask("How much to cancel booking $s4L1Ref?");
+            check($s4Loc($a1) && strpos($a1['text'], 'Cancellation fee if cancelled today: ') !== false && strpos($a1['text'], '100,000.00') !== false
+                && $s4Loc($a1b) && strpos($a1b['text'], '100,000.00') !== false && strpos($a1b['text'], $s4L1Ref) !== false,
+                'live check #1: "the cancellation fee on booking AITSF... if it is cancelled today" and "how much to cancel booking LSH2026..." are answered locally with the locked fee 100,000.00 (no model call)', json_encode([$a1, $a1b]));
+            $a2 = $s4Ask("What would the cancellation fee be on booking $s4PdRef?");
+            $a2b = $s4Ask("What is the fee if I cancel booking $s4R1Ref?");
+            check($s4Loc($a2) && strpos($a2['text'], 'No cancellation fee') !== false && strpos($a2['text'], 'not confirmed') !== false && strpos($a2['text'], '100,000.00') === false
+                && $s4Loc($a2b) && strpos($a2b['text'], 'No cancellation fee') !== false && strpos($a2b['text'], 'pending') !== false && strpos($a2b['text'], $s4R1Ref) !== false,
+                'live check #2: "what would the cancellation fee be" on a pending booking (AITSF... and RBH2026...) is answered locally: no fee until it is confirmed, never "0 because nothing was paid"', json_encode([$a2, $a2b]));
+            $gbF6 = rh_ai_t_get_booking($pdo, $s4Adm, ['booking_id' => $s4F6]);
+            $gbPd = rh_ai_t_get_booking($pdo, $s4Adm, ['booking_id' => $s4Pd]);
+            $gbLg = rh_ai_t_get_booking($pdo, $s4Adm, ['booking_id' => $s4Lg]);
+            check(abs((float)($gbF6['cancellation_fee']['if_cancelled_today'] ?? -1) - 100000) <= BALANCE_TOLERANCE && strpos((string)($gbF6['cancellation_fee']['policy'] ?? ''), 'locked at booking, v3') !== false
+                && (float)($gbPd['cancellation_fee']['if_cancelled_today'] ?? -1) === 0.0 && strpos((string)($gbPd['cancellation_fee']['why'] ?? ''), 'Not confirmed yet (pending)') !== false
+                && !isset($gbLg['cancellation_fee']['if_cancelled_today']) && strpos((string)($gbLg['cancellation_fee']['note'] ?? ''), 'never say "no fee"') !== false,
+                'model path: the booking lookup carries the checked fee (100,000.00 locked; pending = no fee until confirmed; no policy = today\'s rule, no figure)', json_encode([$gbF6['cancellation_fee'] ?? null, $gbPd['cancellation_fee'] ?? null, $gbLg['cancellation_fee'] ?? null]));
+            // #5 group: every room and the group total (AITSF group: 2 x 200,000); an RBH group with one room cancelled
+            // and owing its kept fee (100,000) shows it as "Cancelled - fee owed"
+            $a5 = $s4Ask("For the group booking $s4G1Ref, what does each room owe and what is the total for the whole group?");
+            $pdo->exec('SAVEPOINT ait_s4g');
+            [$s4H1] = $s4Bk('AISync Grbhlead', $s4Day(6), 'confirmed', ['kind' => 'group', 'rooms_at_booking' => 2] + $s4Snap);
+            [$s4H2] = $s4Bk('AISync Grbhmate', $s4Day(6), 'confirmed', ['kind' => 'group', 'rooms_at_booking' => 2] + $s4Snap, $s4H1);
+            $s4H1Ref = $s4ReRef($s4H1, 'RBH');
+            $s4H2Ref = $s4ReRef($s4H2, 'RBH');
+            $s4HPost = [];
+            foreach ((array)(rh_ai_pv_cancel_booking($pdo, $s4Adm, ['booking_id' => $s4H2, 'reason' => 'AITest one room'])['steps'][0]['fields'] ?? []) as $f) {
+                $s4HPost[$f[0]] = $f[1];
+            }
+            $cxH = cancelRoomBookingSettled($pdo, $s4H2, (int)$s4Adm['id'], 'AITest one room', 'completed', rh_cancel_fee_choice_from_post($s4HPost, false));
+            $s4HBal = [(float)(rh_ai_folio($s4H1)['balance_due'] ?? -1), (float)(rh_ai_folio($s4H2)['balance_due'] ?? -1)];
+            $a5b = $s4Ask("What is still owed on each room of group booking $s4H1Ref?");
+            $pdo->exec('ROLLBACK TO SAVEPOINT ait_s4g');
+            check($s4Loc($a5) && strpos($a5['text'], 'Booked together: 2 rooms') !== false && strpos($a5['text'], $s4G1Ref) !== false && strpos($a5['text'], $s4G2Ref) !== false
+                && substr_count($a5['text'], '200,000.00 left to pay') === 2 && strpos($a5['text'], 'the whole group still owes ') !== false && strpos($a5['text'], '400,000.00**') !== false,
+                'live check #5: "what does each room owe and the total for the whole group" lists every room of the group (reference, room, owed) and the group total 400,000.00, locally', json_encode($a5));
+            check(!empty($cxH['success']) && $s4Loc($a5b) && strpos($a5b['text'], $s4H1Ref) !== false && strpos($a5b['text'], $s4H2Ref . ' · ') !== false && strpos($a5b['text'], 'Cancelled - fee owed (fee kept') !== false
+                && strpos($a5b['text'], number_format($s4HBal[0] + $s4HBal[1], 2) . '**') !== false && abs($s4HBal[1] - 100000) <= BALANCE_TOLERANCE,
+                'live check #5 (RBH2026 group, one room cancelled): the cancelled room reads "Cancelled - fee owed" with its kept fee, and the group total counts it (each room\'s own bill)', json_encode([$a5b, $s4HBal]));
+            // #6 who changed a setting, "... and when?" phrasings
+            $a6 = $s4Ask('Who changed the VAT setting, and when?');
+            $a6b = $s4Ask('Who updated the aitest levy setting and when was it done?');
+            check($s4Loc($a6) && (strpos($a6['text'], 'checked ') !== false || strpos($a6['text'], ' -> ') !== false),
+                'live check #6: "Who changed the VAT setting, and when?" is answered locally from the settings change log with the checked count (never just a link)', json_encode($a6));
+            check($s4Loc($a6b) && strpos($a6b['text'], '1 -> 1.5') !== false,
+                'live check #6: "Who updated the ... setting and when was it done?" is answered locally: who, when, old -> new', json_encode($a6b));
+            rh_ai_set_transport($s4TrPrev);
+            // 7. Decisions: "who to chase" reads a cancelled room still owing its kept fee as the screens do
+            $s4MlRows = (array)($s4Ml['still_owed']['largest_left_or_overdue'] ?? []);
+            $s4MlMine = array_values(array_filter($s4MlRows, static fn($r) => ($r['reference'] ?? '') === $s4KRef));
+            check(isset($s4Ml['still_owed']) && !array_filter($s4MlRows, static fn($r) => ($r['status'] ?? '') === 'cancelled') && count($s4MlMine) === 1 && ($s4MlMine[0]['status'] ?? '') === 'Cancelled - fee owed',
+                'Decisions / money leaks: a cancelled room in "still owed" reads "Cancelled - fee owed", never a bare "cancelled"', json_encode($s4Ml['still_owed']['largest_left_or_overdue'] ?? null));
+        } finally {
+            $pdo->rollBack();
+            foreach ($s4Saved as $k => $v) {
+                if ($v === null) {
+                    unset($GLOBALS['_SITE_SETTINGS'][$k]);
+                } else {
+                    $GLOBALS['_SITE_SETTINGS'][$k] = $v;
+                }
+            }
+        }
+    }
+} catch (Throwable $e) {
+    bad('Sync 2026-11-14 database checks threw', get_class($e) . ': ' . $e->getMessage());
 }
 if (getenv('AI_TEST_SYNC_ONLY')) {
     echo "$pass passed, $fail failed" . ($skip ? ", $skip skipped" : '') . "\n";

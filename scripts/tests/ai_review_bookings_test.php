@@ -400,9 +400,9 @@ try {
         && stripos((string)$dp['at_stake_note'], 'not a saving') !== false, 'deposits: asking for a deposit brings money in sooner, it is not a saving: every option "Not valued" (no best, expected or worst)', json_encode($dp['options'] ?? null));
     $nsRow = $ev($dp, 'Stays due in the last');
     $dpRows = array_column((array)($dp['evidence']['rows'] ?? []), 'value', 'label');
-    $cxLabel = array_values(array_filter(array_keys($dpRows), static fn($l) => strpos($l, 'that were cancelled (refunded in full)') !== false))[0] ?? '';
+    $cxLabel = array_values(array_filter(array_keys($dpRows), static fn($l) => strpos($l, 'that were cancelled') !== false && strpos($l, 'refunded in full') === false))[0] ?? '';
     check($nsRow !== null && strpos((string)$nsRow['label'], 'did not show') !== false && strpos((string)$nsRow['value'], '1 of 4 ') === 0 && $cxLabel !== '' && strpos((string)$dpRows[$cxLabel], '1 of 4 ') === 0 && strpos((string)$dp['why_now'], '25.0% of guests did not show') !== false,
-        'deposits: no-shows (1 of 4, the only ones that keep money) and cancellations (1 of 4, refunded in full) are shown apart', json_encode($dpRows));
+        'deposits: no-shows (1 of 4) and cancellations (1 of 4) are shown apart; cancellations are no longer called "refunded in full" (a kept fee can be owed, 2026-11-14)', json_encode($dpRows));
     // Below the history needed: forecasts are blank ("Not enough history"), never invented
     $short = $ctx;
     $short['history_min'] = 1000000;

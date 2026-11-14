@@ -985,6 +985,8 @@ function rh_ai_t_get_booking(PDO $db, array $user, array $a): array
         'booked_rate' => rh_ai_booked_rate_fields(rh_ai_booked_rate_line($db, $b)),
         // What the stay includes (packages, rate plan, room extras) and whether any of it is breakfast (owner fault 2026-10-29)
         'included' => rh_ai_booking_inclusions($db, $b),
+        // The cancellation fee as the cancel dialog / the local answer give it (2026-11-14 live check: never from nothing)
+        'cancellation_fee' => function_exists('rh_ai_cancel_fee_facts') ? rh_ai_cancel_fee_facts($db, $b) : null,
         'link' => 'booking-details.php?id=' . (int)$b['id'], 'link_label' => 'Open booking',
     ];
     if ($out['special_requests'] === '') {
@@ -992,6 +994,9 @@ function rh_ai_t_get_booking(PDO $db, array $user, array $a): array
     }
     if ($out['booked_rate'] === null) {
         unset($out['booked_rate']);
+    }
+    if ($out['cancellation_fee'] === null) {
+        unset($out['cancellation_fee']);
     }
     return $out;
 }
@@ -1752,7 +1757,9 @@ function rh_ai_t_room_board(PDO $db, array $user, array $a): array
     $tomorrow = date('Y-m-d', strtotime($today . ' +1 day'));
     $ol = function_exists('rh_rooms_night_outlook') ? rh_rooms_night_outlook($today, 2) : ['ok' => false];
     if (!empty($ol['ok']) && isset($ol['nights'][$today], $ol['nights'][$tomorrow])) {
-        $out['outlook'] = ['rooms_to_sell' => (int)$ol['units'], 'free_tonight' => (int)$ol['nights'][$today]['free'],
+        // The two nights' own dates come along: the answer says "Tonight" / "Tomorrow", and a day named in an answer is
+        // held to a date in its source (the reply check), so the outlook carries them (fault: "Tomorrow" was flagged).
+        $out['outlook'] = ['tonight_date' => $today, 'tomorrow_date' => $tomorrow, 'rooms_to_sell' => (int)$ol['units'], 'free_tonight' => (int)$ol['nights'][$today]['free'],
             'booked_tomorrow' => (int)$ol['nights'][$tomorrow]['booked'], 'no_room_yet_tomorrow' => (int)$ol['nights'][$tomorrow]['unassigned'],
             'line' => function_exists('rh_fd_rooms_outlook_line') ? rh_fd_rooms_outlook_line((int)$ol['units'], (int)$ol['nights'][$today]['free'], (int)$ol['nights'][$tomorrow]['booked'], (int)$ol['nights'][$tomorrow]['unassigned']) : '',
             'means' => 'From the booking engine, the same as the Dashboard Rooms line: rooms free to sell tonight, and rooms booked for tomorrow night (a joined room counts once).'];
@@ -1861,9 +1868,15 @@ function rh_ai_t_rate_plans_and_deals(PDO $db, array $user, array $a): array
 
 function rh_ai_t_balances_due(PDO $db, array $user, array $a): array
 {
+    // Which bookings can owe: the screens' one receivables rule (rh_receivable_status_sql: live stays, a no-show still
+    // owing, a cancelled room with its kept fee / extras, a charged expired room). No fallback list: without the shared
+    // rule the answer would disagree with the screens, so it says it could not be read instead.
+    if (!rh_ai_admin_lib('receivables.php') || !function_exists('rh_receivable_status_sql')) {
+        return ['error' => 'The balances owed could not be read just now. Open Bookings to see them.', 'link' => 'bookings.php', 'link_label' => 'Open Bookings'];
+    }
     $cands = $db->query("SELECT b.id, b.booking_reference, b.guest_name, b.status, b.check_out_date
                          FROM bookings b
-                         WHERE b.deleted_at IS NULL AND b.status IN ('pending', 'confirmed', 'checked-in', 'checked-out')
+                         WHERE " . rh_receivable_status_sql('room', 'b') . "
                            AND b.check_out_date >= DATE_SUB(CURDATE(), INTERVAL 90 DAY)
                          ORDER BY b.check_out_date LIMIT 300")->fetchAll(PDO::FETCH_ASSOC);
     $owing = [];
@@ -1876,7 +1889,8 @@ function rh_ai_t_balances_due(PDO $db, array $user, array $a): array
         if ($bal > BALANCE_TOLERANCE) {
             $total += $bal;
             $byCompany += !empty($f['on_account']) ? (float)$f['company_owes'] : 0.0;
-            $owing[] = ['booking_id' => (int)$r['id'], 'reference' => $r['booking_reference'], 'guest_name' => $r['guest_name'], 'status' => $r['status'], 'leaves' => $r['check_out_date']]
+            $feeOwed = function_exists('rh_cancelled_fee_owed_label') ? rh_cancelled_fee_owed_label((string)$r['status'], $bal) : '';
+            $owing[] = ['booking_id' => (int)$r['id'], 'reference' => $r['booking_reference'], 'guest_name' => $r['guest_name'], 'status' => $feeOwed !== '' ? $feeOwed : $r['status'], 'leaves' => $r['check_out_date']]
                 + rh_ai_owe_fields(['balance_due' => rh_ai_money($bal)] + $f);
         }
     }

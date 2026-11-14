@@ -269,7 +269,10 @@ function rh_ai_t_money_leaks(PDO $db, array $user, array $a): array
                 'left_or_overdue_total' => rh_ai_money($leftTotal), 'left_or_overdue_accounts' => count($left),
                 // Company pays later: the receivables rule says who owes it (payer company / guest / both); a company
                 // share is chased with the company, never the guest
-                'largest_left_or_overdue' => array_map(static fn($r) => ['type' => rh_receivable_type_label($r['type']), 'reference' => $r['reference'], 'guest_name' => $r['client'], 'status' => $r['status'], 'amount_due' => $r['amount_due'], 'days_outstanding' => $r['days_outstanding']]
+                'largest_left_or_overdue' => array_map(static fn($r) => ['type' => rh_receivable_type_label($r['type']), 'reference' => $r['reference'], 'guest_name' => $r['client'],
+                    // a cancelled room still owing its kept fee reads as the screens say it ("Cancelled - fee owed")
+                    'status' => ($r['type'] === 'room' && function_exists('rh_cancelled_fee_owed_label') ? rh_cancelled_fee_owed_label((string)$r['status'], $r['amount_due']) : '') ?: $r['status'],
+                    'amount_due' => $r['amount_due'], 'days_outstanding' => $r['days_outstanding']]
                     + (in_array($r['payer'] ?? 'guest', ['company', 'both'], true) ? ['payer' => $r['payer'], 'company_owes' => rh_ai_money((float)$r['company_due']), 'guest_owes' => rh_ai_money((float)$r['guest_due'])] : []), array_slice($left, 0, 6)),
                 'complete' => empty($sum['failed']),
             ];

@@ -942,7 +942,7 @@ function rh_dec_f_cancellations(PDO $db, array $ctx): array
 /**
  * Deposit exposure: stays arriving after the arrivals window and within ai_upcoming_days with nothing paid yet, or with
  * a deposit asked for and not paid (each booking's own folio: the Payments screen's and balances_due's rule). Asking for
- * a deposit brings money in sooner; it is not a saving (cancellations are refunded in full; only a no-show keeps money),
+ * a deposit brings money in sooner; it is not a saving (what a cancellation or no-show keeps depends on the booking's rules),
  * so no option is valued. The hotel's own no-show and cancellation shares are evidence, shown with enough history only.
  */
 function rh_dec_f_bk_deposits(PDO $db, array $ctx): array
@@ -1009,7 +1009,7 @@ function rh_dec_f_bk_deposits(PDO $db, array $ctx): array
     }
     if ($enough) {
         $rows[] = ['label' => 'Stays due in the last ' . $pd . ' days where the guest did not show', 'value' => (int)$fr['ns'] . ' of ' . (int)$fr['n'] . ' (' . number_format($nsRate * 100, 1) . '%)'];
-        $rows[] = ['label' => 'Stays due in the last ' . $pd . ' days that were cancelled (refunded in full)', 'value' => (int)$fr['cx'] . ' of ' . (int)$fr['n'] . ' (' . number_format((int)$fr['cx'] / (int)$fr['n'] * 100, 1) . '%)'];
+        $rows[] = ['label' => 'Stays due in the last ' . $pd . ' days that were cancelled', 'value' => (int)$fr['cx'] . ' of ' . (int)$fr['n'] . ' (' . number_format((int)$fr['cx'] / (int)$fr['n'] * 100, 1) . '%)'];
     }
     return ['ok' => true, 'partial' => $partial, 'total' => $total, 'cards' => [rh_dec_card([
         'key' => 'bk_deposits', 'covers' => ['deposit_exposure'],

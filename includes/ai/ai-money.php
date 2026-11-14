@@ -45,7 +45,11 @@ function rh_ai_money_action_intent(string $raw): ?array
     }
     $amt = '(?:\d[\d,\.]*\s*(?:k|mwk|kwacha|usd|dollars?)?)';
     $kind = null;
-    if (preg_match('/\bno[\s\-]?shows?\b/u', $l) && preg_match('/^(?:mark|set|make|record|log|put|flag|change|move|turn|register)\b|^no[\s\-]?show\b/u', $l)) {
+    $feeNoun = '(?:cancell?ation|cancell?ing|no[\s\-]?show)\s+(?:fees?|charges?|penalty|penalties)\b';
+    if (preg_match('/^(?:waive|lower|reduce|drop|remove|forgive|write off|discount)\b.{0,50}\b' . $feeNoun . '/u', $l)
+        || preg_match('/^(?:cancel|scrap|clear|cut)\s+(?:the |their |his |her |this |that |a |any )?' . $feeNoun . '/u', $l)) {
+        $kind = 'waive'; // lowering / waiving a cancellation or no-show fee (2026-11-14: done on Booking Details, needs waive_cancellation_fee)
+    } elseif (preg_match('/\bno[\s\-]?shows?\b/u', $l) && preg_match('/^(?:mark|set|make|record|log|put|flag|change|move|turn|register)\b|^no[\s\-]?show\b/u', $l)) {
         $kind = 'noshow';
     } elseif (preg_match('/^(?:refund|reverse (?:the |a |their |his |her |that )?payment|cancel the payment|give (?:back|the money back))\b|^(?:give|send|pay|issue|process|do|make|record|raise)\b.{0,30}\brefunds?\b/u', $l)) {
         $kind = 'refund';
@@ -73,7 +77,18 @@ function rh_ai_money_action_intent(string $raw): ?array
  * What the hotel's no-show rule would do with the money on this booking, worked out read-only with the same rule the
  * no-show uses (createNoShowRefund: the no_show_refund_policy setting, the first night including its VAT/levy share,
  * folio charges stay billed, capped at what the room payments can still refund). Nothing is written.
- * @return array{policy:string,label:string,paid:float,refund:float,kept:float,can_mark:bool,why:string}
+ * A room of a group under the group_noshow_charge setting (On, 2+ rooms, not yet charged) is worked out as the no-show
+ * will do it: its booked stay is replaced by the group charge (rh_group_noshow_fee_amount), so under 'first_night' and
+ * 'full' the refund is paid - (folio charges + that charge); 'group_charge' / 'group_charge_mode' say so (0 / '' when
+ * not, and then every other figure is exactly as before). 'credit' = paid above that charge + folio charges that is not
+ * queued for refund (policy 'none'): it stays on the booking as the guest's credit, so 'kept' never includes it.
+ * A booking with a cancellation policy locked at booking (bookings.cancellation_policy_snapshot, 2026-11-14) follows
+ * that policy instead, as rh_mark_booking_no_show does: never the group charge; its no-show % of the stay
+ * (rh_cancellation_fee_quote 'noshow'): 100% = the booked stay stays billed, below 100% = one no-show charge replaces it;
+ * under 'first_night' / 'full' the refund is what was paid above that charge and any extras (createNoShowRefund's
+ * snapshot branch), under 'none' that money stays on the booking as the guest's credit. 'locked' carries the policy
+ * (null = no policy locked: today's rules, every figure exactly as before).
+ * @return array{policy:string,label:string,paid:float,refund:float,kept:float,can_mark:bool,why:string,group_charge:float,group_charge_mode:string,credit:float,locked:?array}
  */
 function rh_ai_noshow_money(PDO $db, array $b): array
 {
@@ -82,9 +97,35 @@ function rh_ai_noshow_money(PDO $db, array $b): array
     $f = function_exists('getBookingFolioSummary') ? getBookingFolioSummary((int)$b['id']) : [];
     $paid = round(max(0.0, (float)($f['amount_paid'] ?? 0)), 2);
     $folio = round((float)($f['extras_total'] ?? 0), 2);
+    // Cancellation policy locked at booking: the same quote the no-show charge is posted from (read only).
+    $lock = null;
+    if (function_exists('rh_cancellation_fee_quote')) {
+        $q = rh_cancellation_fee_quote($db, $b, 'noshow');
+        if (($q['source'] ?? '') === 'policy') {
+            $full100 = (float)$q['pct'] >= 100;
+            $lock = ['pct' => (float)$q['pct'], 'version' => (int)$q['version'], 'kind' => (string)$q['kind'], 'base' => (float)$q['base'], 'basis' => (string)$q['basis'],
+                'charge' => $full100 ? (float)$q['base'] : (float)$q['amount'], 'stay_billed' => $full100, 'fee_text' => (string)$q['fee_text']];
+            $labels['first_night'] = $labels['full'] = 'what was paid above the no-show charge and any extras is queued for refund';
+        }
+    }
+    // Group no-show charge: the same mode, group test and amount the no-show itself uses (read only). Never with a
+    // locked policy (the policy owns the no-show charge).
+    $gMode = $lock === null && function_exists('rh_group_noshow_charge_mode') ? rh_group_noshow_charge_mode() : '';
+    $gCharge = 0.0;
+    $inGroup = false;
+    if ($gMode !== '' && function_exists('rh_group_noshow_fee_applies') && rh_group_noshow_fee_applies($db, $b)) {
+        $inGroup = true;
+        $gCharge = (float)rh_group_noshow_fee_amount($b, $gMode)['amount'];
+    }
     $refund = 0.0;
     if ($paid > BALANCE_TOLERANCE && in_array($policy, ['full', 'first_night'], true)) {
-        if ($policy === 'full') {
+        if ($lock !== null) {
+            // createNoShowRefund, policy branch: paid - (the stay at 100%, else the no-show charge) - extras
+            $refund = max(0.0, round($paid - ($folio + $lock['charge']), 2));
+        } elseif ($inGroup) {
+            // The charge replaces the policy's own first-night retention (createNoShowRefund: paid - folio charges).
+            $refund = max(0.0, round($paid - ($folio + $gCharge), 2));
+        } elseif ($policy === 'full') {
             $refund = max(0.0, round($paid - $folio, 2));
         } else {
             $nights = max(1, (int)($b['number_of_nights'] ?? 1));
@@ -112,7 +153,238 @@ function rh_ai_noshow_money(PDO $db, array $b): array
         $can = false;
         $why = 'A ' . str_replace('-', ' ', (string)$b['status']) . ' booking cannot be marked as a no-show.';
     }
-    return ['policy' => $policy, 'label' => $labels[$policy] ?? $policy, 'paid' => $paid, 'refund' => $refund, 'kept' => round(max(0.0, $paid - $refund), 2), 'can_mark' => $can, 'why' => $why];
+    // A charged group room bills only its charge + folio charges: whatever was paid above that and is not queued for
+    // refund stays on the booking as credit owed to the guest (never "kept" by the hotel). Off / single: always 0.
+    $credit = 0.0;
+    if ($inGroup || $lock !== null) {
+        $credit = max(0.0, round($paid - ($folio + ($lock !== null ? $lock['charge'] : $gCharge)) - $refund, 2));
+        if ($credit <= BALANCE_TOLERANCE) {
+            $credit = 0.0;
+        } elseif ($policy === 'none') {
+            $labels['none'] = 'no automatic refund'; // the hotel does not keep the credit, so not "keeps what was paid"
+        }
+    }
+    return ['policy' => $policy, 'label' => $labels[$policy] ?? $policy, 'paid' => $paid, 'refund' => $refund, 'kept' => round(max(0.0, $paid - $refund - $credit), 2), 'can_mark' => $can, 'why' => $why,
+        'group_charge' => $inGroup ? $gCharge : 0.0, 'group_charge_mode' => $inGroup ? $gMode : '', 'credit' => $credit, 'locked' => $lock];
+}
+
+/** "this booking's cancellation policy (locked at booking, v3, group bookings)" - the words for a locked policy. */
+function rh_ai_locked_policy_words(int $version, string $kind): string
+{
+    return "this booking's cancellation policy (locked at booking" . ($version > 0 ? ', v' . $version : '') . ($kind !== '' ? ', ' . $kind . ' bookings' : '') . ')';
+}
+
+/**
+ * The cancellation fee answer for one room booking, from the booking's LOCKED policy (rh_cancel_policy_preview /
+ * rh_cancel_policy_dialog_quote - the figures the cancel dialogs show; nothing is worked out here). No policy locked:
+ * today's cancellation rule by name, never a figure and never "no fee". A booking made together with other rooms also
+ * gets every room's own fee and the total for the whole group. Read only.
+ */
+function rh_ai_money_cancel_fee_text(PDO $db, array $res, int $id): string
+{
+    $line = rh_ai_booking_line($res);
+    $st = $db->prepare('SELECT * FROM bookings WHERE id = ? AND deleted_at IS NULL');
+    $st->execute([$id]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$row || !function_exists('rh_cancel_policy_dialog_quote')) {
+        return 'The cancellation fee for this booking could not be read just now. Open the booking to see it.';
+    }
+    $cur = (string)($res['currency'] ?? rh_ai_currency());
+    $fm = static fn($v) => rh_ai_fmt_cur($cur, (float)$v);
+    $status = strtolower((string)$row['status']);
+    // 2026-11-14 review: a booking that is already cancelled, a no-show, checked in or checked out is never answered
+    // "No cancellation fee". Its figures are the stored ones the screens show: the kept fee
+    // (bookings.cancellation_retained_amount, as Booking Details shows it) and the balance (getBookingFolioSummary via
+    // rh_ai_folio, the Bookings Balance Due figure); every comparison with BALANCE_TOLERANCE.
+    if (in_array($status, ['cancelled', 'no-show', 'checked-in', 'checked-out'], true)) {
+        $f = rh_ai_folio($id);
+        $owedTxt = static function (array $f) use ($fm): string {
+            if (!isset($f['balance_due'])) {
+                return 'What is still owed could not be read just now - open Booking Details to see it.';
+            }
+            return (float)$f['balance_due'] > BALANCE_TOLERANCE ? '**Still owed: ' . $fm($f['balance_due']) . '** (paid ' . $fm($f['paid'] ?? 0) . ').'
+                : 'Nothing is owed on it now (paid ' . $fm($f['paid'] ?? 0) . ').';
+        };
+        $out = [];
+        if ($status === 'cancelled') {
+            $kept = round((float)($row['cancellation_retained_amount'] ?? 0), 2);
+            if ($kept > BALANCE_TOLERANCE) {
+                $owedLabel = isset($f['balance_due']) && function_exists('rh_cancelled_fee_owed_label') ? rh_cancelled_fee_owed_label('cancelled', $f['balance_due']) : '';
+                $out[] = '**Already cancelled - cancellation fee kept: ' . $fm($kept) . '**' . ($owedLabel !== '' ? ' (the booking reads "' . $owedLabel . '")' : '') . '.';
+            } else {
+                $out[] = '**Already cancelled - no kept cancellation fee is recorded on this booking** (the kept fee it stores is ' . $fm(0) . ').';
+            }
+            $out[] = $owedTxt($f);
+            $out[] = 'The booking\'s History shows who cancelled it, when, and the fee that was set.';
+        } elseif ($status === 'no-show') {
+            $q = function_exists('rh_cancellation_fee_quote') ? rh_cancellation_fee_quote($db, $row, 'noshow') : [];
+            $out[] = '**Marked as a no-show** - a no-show is charged under its no-show rule, not a cancellation fee'
+                . (($q['source'] ?? '') === 'policy' ? ' (' . $q['tier_label'] . ', under ' . rh_ai_locked_policy_words((int)$q['version'], (string)$q['kind']) . ')' : '') . '.';
+            $out[] = isset($f['total']) ? 'Charged on the booking: ' . $fm($f['total']) . '. ' . $owedTxt($f) : $owedTxt($f);
+            $out[] = 'Booking Details shows the no-show charge line.';
+        } else {
+            $out[] = '**' . ($status === 'checked-in' ? 'Checked in' : 'Checked out') . ' - this booking can no longer be cancelled**, so a cancellation fee does not come into it.';
+            $out[] = $owedTxt($f);
+        }
+        return implode("\n", $out) . "\n\n" . $line . "\n\nLowering or waiving a fee is done by staff on the booking.";
+    }
+    if (!in_array($status, ['confirmed', 'pending', 'tentative', 'expired'], true)) {
+        return 'The cancellation fee for this booking could not be worked out from its status (' . $status . '). Open Booking Details to see it.' . "\n\n" . $line;
+    }
+    $dq = rh_cancel_policy_dialog_quote($db, $id);
+    $p = (array)($dq['single'] ?? []);
+    $mode = function_exists('getCancellationRefundModeLabel') ? getCancellationRefundModeLabel() : '';
+    $out = [];
+    if (($p['source'] ?? 'legacy') !== 'policy') {
+        // Owner rule: never "no fee" / a figure without a checked total. A booking with no locked policy follows the
+        // cancellation rule set in Hotel Settings, which the cancel dialog applies.
+        $out[] = '**No cancellation policy is locked on this booking** (it was booked while the policy was off, or before it existed), so today\'s cancellation rule applies'
+            . ($mode !== '' ? ': ' . $mode : '') . '. The cancel dialog on Booking Details shows what it does to the money before you confirm.';
+    } else {
+        $snap = function_exists('rh_cancel_policy_snapshot') ? rh_cancel_policy_snapshot($row) : null;
+        $who = rh_ai_locked_policy_words((int)$p['version'], (string)$p['kind']);
+        if ($status !== 'confirmed') {
+            $out[] = '**No cancellation fee** - the booking is ' . str_replace('-', ' ', $status) . ' (not confirmed), and ' . $who . ' charges a fee only on a confirmed booking.';
+        } elseif (!empty($p['applies'])) {
+            $out[] = '**Cancellation fee if cancelled today: ' . $fm($p['amount']) . '** - ' . trim((string)$p['fee_text']) . '.';
+            $out[] = 'Why: ' . $p['tier_label'] . ', under ' . $who . '.';
+        } else {
+            $out[] = '**No cancellation fee if cancelled today** - ' . $p['tier_label'] . ', under ' . $who . '.';
+            $maxDays = 0;
+            foreach ((array)($snap['tiers'] ?? []) as $t) {
+                $maxDays = max($maxDays, (int)($t['days'] ?? 0));
+            }
+            if ($maxDays > 0 && (int)$p['days_before'] >= $maxDays && function_exists('rh_days_before_arrival')) {
+                $tz = new DateTimeZone(defined('RH_TIMEZONE') ? RH_TIMEZONE : 'Africa/Blantyre');
+                $from = (new DateTimeImmutable((string)$row['check_in_date'], $tz))->modify('-' . ($maxDays - 1) . ' days');
+                $out[] = 'A fee starts when it is fewer than ' . $maxDays . ' days before arrival (from ' . $from->format('D j M Y') . '); cancelling exactly ' . $maxDays . ' days before is still free.';
+            }
+        }
+        if ($status === 'confirmed') {
+            $money = 'Paid so far ' . $fm($p['paid'] ?? 0);
+            if ((float)($p['refund'] ?? 0) > BALANCE_TOLERANCE) {
+                $money .= '; refunded on cancelling ' . $fm($p['refund']);
+            }
+            if ((float)($p['credit'] ?? 0) > BALANCE_TOLERANCE) {
+                $money .= '; kept on the booking as the guest\'s credit ' . $fm($p['credit']);
+            }
+            if ((float)($p['owed'] ?? 0) > BALANCE_TOLERANCE) {
+                $money .= '; still owed after cancelling ' . $fm($p['owed']);
+            }
+            $out[] = $money . ' (the same figures the cancel dialog shows).';
+        }
+    }
+    $g = is_array($dq['group'] ?? null) ? $dq['group'] : null;
+    if ($g !== null && !empty($dq['policy'])) {
+        $lines = [];
+        // A room of the group that is already cancelled / a no-show / checked in or out is not part of cancelling now:
+        // said so, never "no fee" (the same rule as the single answer above).
+        $gIds = array_map(static fn($r) => (int)$r['id'], (array)$g['rooms']);
+        $gSt = [];
+        if ($gIds) {
+            $q = $db->prepare('SELECT id, status FROM bookings WHERE id IN (' . implode(',', array_fill(0, count($gIds), '?')) . ')');
+            $q->execute($gIds);
+            $gSt = $q->fetchAll(PDO::FETCH_KEY_PAIR);
+        }
+        foreach (array_slice((array)$g['rooms'], 0, 10) as $r) {
+            $rs = strtolower((string)($gSt[(int)$r['id']] ?? ''));
+            if (in_array($rs, ['cancelled', 'no-show', 'checked-in', 'checked-out'], true)) {
+                $lines[] = $r['reference'] . ': already ' . str_replace('-', ' ', $rs) . ' - not part of cancelling now (ask about that booking for its own figures)';
+                continue;
+            }
+            $lines[] = $r['reference'] . ': ' . ($r['source'] !== 'policy' ? 'no policy locked (today\'s cancellation rule)' : (!empty($r['fee']) && (float)$r['fee'] > BALANCE_TOLERANCE ? $r['fee_text'] : 'no fee (' . $r['tier_label'] . ')'));
+        }
+        $out[] = '**Booked together: ' . (int)$g['count'] . ' rooms** - each room pays its own fee on its own stay; cancelling all of them: ' . $fm($g['fee']) . ' in total.'
+            . rh_ai_local_lines($lines) . (count((array)$g['rooms']) > 10 ? "\n(first 10 rooms shown)" : '');
+    }
+    return implode("\n", $out) . "\n\n" . $line . "\n\nI only quote the fee: cancelling, and lowering or waiving a fee, are done by staff on the booking.";
+}
+
+/**
+ * What each room of a group booking owes and the group total (2026-11-14 live check): the rooms are the group's links
+ * (lead + primary_booking_id, as rh_booking_group_members), every status, each room's figure is its own bill (rh_ai_folio ->
+ * getBookingFolioSummary, the Bookings Balance Due figure, company share kept apart by rh_ai_owe_words), a cancelled
+ * room still owing its kept fee reads "Cancelled - fee owed" (rh_cancelled_fee_owed_label). null = not in a group (the
+ * caller answers for the one booking). Read only.
+ */
+function rh_ai_money_group_text(PDO $db, array $res, int $id): ?string
+{
+    // The group as rh_booking_group_members links it (the lead + every room whose primary_booking_id is the lead), but
+    // every status: a cancelled room still owing its kept fee, a no-show owing its charge or a checked-out room with a
+    // balance is still money owed by the group (rh_booking_group_ids leaves closed rooms out - it decides what a cancel
+    // touches, not what is owed).
+    $lead = $db->prepare('SELECT COALESCE(primary_booking_id, id) FROM bookings WHERE id = ?');
+    $lead->execute([$id]);
+    $leadId = (int)$lead->fetchColumn();
+    if ($leadId <= 0) {
+        return null;
+    }
+    $st = $db->prepare('SELECT b.id, b.booking_reference, b.status, b.cancellation_retained_amount, ir.room_number, r.name AS room_type
+                        FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id LEFT JOIN individual_rooms ir ON ir.id = b.individual_room_id
+                        WHERE b.deleted_at IS NULL AND (b.id = ? OR b.primary_booking_id = ?) ORDER BY b.id');
+    $st->execute([$leadId, $leadId]);
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+    if (count($rows) < 2) {
+        return null;
+    }
+    $cur = (string)($res['currency'] ?? rh_ai_currency());
+    $fm = static fn($v) => rh_ai_fmt_cur($cur, (float)$v);
+    $lines = [];
+    $total = 0.0;
+    $paid = 0.0;
+    $unread = 0;
+    foreach ($rows as $b) {
+        $f = rh_ai_folio((int)$b['id']);
+        $where = trim((string)($b['room_type'] ?? '') . ($b['room_number'] !== null && (string)$b['room_number'] !== '' ? ' room ' . $b['room_number'] : ' (room not assigned)'));
+        if (!isset($f['balance_due'])) {
+            $unread++;
+            $lines[] = $b['booking_reference'] . ' · ' . $where . ': could not be read - open the booking';
+            continue;
+        }
+        $bal = (float)$f['balance_due'];
+        $total += $bal;
+        $paid += (float)($f['paid'] ?? 0);
+        $st2 = strtolower((string)$b['status']);
+        $label = function_exists('rh_cancelled_fee_owed_label') ? rh_cancelled_fee_owed_label($st2, $bal) : '';
+        $kept = round((float)($b['cancellation_retained_amount'] ?? 0), 2);
+        $owe = rh_ai_owe_words($f, $fm);
+        $lines[] = $b['booking_reference'] . ' · ' . $where . ' · ' . ($label !== '' ? $label : str_replace('-', ' ', $st2))
+            . ($st2 === 'cancelled' && $kept > BALANCE_TOLERANCE ? ' (fee kept ' . $fm($kept) . ')' : '')
+            . ': ' . ($owe !== '' ? $owe : 'nothing owed') . ' (paid ' . $fm($f['paid'] ?? 0) . ')';
+    }
+    $head = '**Booked together: ' . count($rows) . ' rooms - the whole group still owes ' . $fm($total) . '**' . ($unread > 0 ? ' (' . $unread . ' room(s) could not be read, so this total leaves them out)' : '')
+        . '; paid so far ' . $fm($paid) . '.';
+    return $head . rh_ai_local_lines($lines) . "\n\nEach room's own bill, the same figures as Bookings. Payments are taken on each booking's screen.";
+}
+
+/**
+ * The cancellation fee facts for one bookings row, for the booking lookup the model reads (2026-11-14 live check: the
+ * model must never answer a fee from nothing). The same sources as the local answer: the stored kept fee for a
+ * cancelled booking, rh_cancellation_fee_quote for a locked policy (pending / tentative / expired = no fee until
+ * confirmed), today's rule by name when no policy is locked (no figure). Read only.
+ */
+function rh_ai_cancel_fee_facts(PDO $db, array $b): array
+{
+    $status = strtolower((string)($b['status'] ?? ''));
+    if ($status === 'cancelled') {
+        $kept = rh_ai_money(round((float)($b['cancellation_retained_amount'] ?? 0), 2));
+        return ['already_cancelled' => true, 'fee_kept' => $kept, 'note' => $kept > BALANCE_TOLERANCE ? 'Already cancelled; this fee was kept. What is still owed is money.balance_due.'
+            : 'Already cancelled; no kept fee is recorded (stored figure checked). What is still owed is money.balance_due; History shows the cancel.'];
+    }
+    if ($status === 'no-show') {
+        return ['note' => 'A no-show: charged under its no-show rule, not a cancellation fee. What is owed is money.balance_due; Booking Details shows the no-show charge line.'];
+    }
+    if (in_array($status, ['checked-in', 'checked-out'], true)) {
+        return ['note' => 'Can no longer be cancelled (' . $status . '), so no cancellation fee applies to it.'];
+    }
+    $q = function_exists('rh_cancellation_fee_quote') ? rh_cancellation_fee_quote($db, $b) : ['source' => 'legacy'];
+    if (($q['source'] ?? '') === 'policy') {
+        return ['policy' => rh_ai_locked_policy_words((int)$q['version'], (string)$q['kind']), 'if_cancelled_today' => rh_ai_money((float)$q['amount']),
+            'fee_text' => (string)$q['fee_text'], 'why' => (string)$q['tier_label']];
+    }
+    $mode = function_exists('getCancellationRefundModeLabel') ? getCancellationRefundModeLabel() : '';
+    return ['policy' => 'none locked at booking', 'note' => 'Today\'s cancellation rule applies' . ($mode !== '' ? ' (' . $mode . ')' : '')
+        . '; the cancel dialog on Booking Details shows the money. Quote no fee figure and never say "no fee" for this booking.'];
 }
 
 /** The latest money received on a room booking (not refunds): ['amount','method','date','receipt'] or null. */
@@ -150,6 +422,23 @@ function rh_ai_money_booking(PDO $db, array $user, int $conv, string $who, array
 function rh_ai_money_action_reply(PDO $db, array $user, int $conv, array $mi, array $focus, int $pageBooking): array
 {
     $uid = (int)$user['id'];
+    $canOpen = static fn(string $p): bool => function_exists('rhCanOpenPage') ? rhCanOpenPage($uid, $p) : false;
+    if ($mi['kind'] === 'waive') {
+        // Lowering / waiving a cancellation or no-show fee (2026-11-14): never done here. Without the permission
+        // (waive_cancellation_fee) the person is told so and offered nothing - no figures, no link.
+        if (!rh_ai_has_perm($uid, 'waive_cancellation_fee')) {
+            return ['text' => "You don't have permission to lower or waive cancellation fees, so I can't help with that. A manager or an administrator can do it.", 'links' => [], 'chips' => [], 'route' => 'declined'];
+        }
+        $wid = rh_ai_tool_allowed($user, 'get_booking') && rh_ai_module_on('bookings') ? rh_ai_money_booking($db, $user, $conv, (string)$mi['who'], $focus, $pageBooking) : 0;
+        $links = [];
+        if ($wid > 0 && $canOpen('booking-details.php')) {
+            $links[] = ['label' => 'Open booking', 'url' => 'booking-details.php?id=' . $wid];
+        } elseif ($canOpen('bookings.php')) {
+            $links[] = ['label' => 'Open Bookings', 'url' => 'bookings.php'];
+        }
+        return ['text' => "I don't lower or waive fees - you do it on Booking Details, with a reason: when you cancel the booking, or afterwards on the booking. The booking's History keeps who changed it and why.",
+            'links' => $links, 'chips' => [], 'route' => 'declined', 'focus' => $wid > 0 ? $wid : null];
+    }
     $lines = [
         'payment' => "I don't take or record payments - record it on the booking (Add payment), so the receipt, the balance and the reports stay right.",
         'refund' => "I don't do refunds - they are recorded by staff on the Payments screen (Refund).",
@@ -158,8 +447,7 @@ function rh_ai_money_action_reply(PDO $db, array $user, int $conv, array $mi, ar
     ];
     $text = $lines[$mi['kind']];
     $links = [];
-    $canOpen = static fn(string $p): bool => function_exists('rhCanOpenPage') ? rhCanOpenPage($uid, $p) : false;
-    $id = rh_ai_tool_allowed($user, 'get_booking') && rh_ai_module_on('bookings') ? rh_ai_money_booking($db, $user, $conv, (string)$mi['who'], $focus, $pageBooking) : 0;
+    $id =rh_ai_tool_allowed($user, 'get_booking') && rh_ai_module_on('bookings') ? rh_ai_money_booking($db, $user, $conv, (string)$mi['who'], $focus, $pageBooking) : 0;
     $b = null;
     if ($id > 0) {
         $r = rh_ai_run_tool($db, $user, $conv, 'get_booking', ['booking_id' => $id]);
@@ -182,8 +470,23 @@ function rh_ai_money_action_reply(PDO $db, array $user, int $conv, array $mi, ar
             $full = $st->fetch(PDO::FETCH_ASSOC) ?: [];
             $ns = rh_ai_noshow_money($db, $full);
             $cur = (string)($res['currency'] ?? '');
-            $text .= "\n\n**If marked as a no-show** (the hotel's rule: " . $ns['label'] . '): paid ' . rh_ai_fmt_cur($cur, $ns['paid']) . ', kept ' . rh_ai_fmt_cur($cur, $ns['kept'])
-                . ', queued for refund ' . rh_ai_fmt_cur($cur, $ns['refund']) . '.' . ($ns['can_mark'] ? '' : ' ' . $ns['why']);
+            $grp = '';
+            if ($ns['group_charge_mode'] !== '') {
+                // A room of a group under the hotel's group no-show setting: billed the charge instead of its booked stay.
+                $what = $ns['group_charge'] <= BALANCE_TOLERANCE ? 'nothing' : ($ns['group_charge_mode'] === 'full' ? 'its full booked stay' : 'the first night') . ' (' . rh_ai_fmt_cur($cur, $ns['group_charge']) . ')';
+                $grp = ' This room is part of a group, so it will be charged ' . $what . ' instead of its booked stay'
+                    . (in_array($ns['policy'], ['first_night', 'full'], true) ? '; the refund is what was paid above that charge and any extras.'
+                        : ($ns['credit'] > BALANCE_TOLERANCE ? '; what was paid above that charge and any extras stays on the booking as credit for the guest (no automatic refund).' : '.'));
+            }
+            if (is_array($ns['locked'] ?? null)) {
+                // A cancellation policy locked at booking decides the no-show charge (never the group charge)
+                $lk = $ns['locked'];
+                $grp = ' Under ' . rh_ai_locked_policy_words((int)$lk['version'], (string)$lk['kind']) . ' a no-show is charged '
+                    . ($lk['stay_billed'] ? 'the whole booked stay (100%), which stays billed.' : ($lk['charge'] <= BALANCE_TOLERANCE ? 'nothing (0% of the stay).' : $lk['fee_text'] . ', one "No-show charge" line that replaces the booked stay.'));
+            }
+            $text .= "\n\n**If marked as a no-show** (" . (is_array($ns['locked'] ?? null) ? 'refund rule' : "the hotel's rule") . ': ' . $ns['label'] . '): paid ' . rh_ai_fmt_cur($cur, $ns['paid']) . ', kept ' . rh_ai_fmt_cur($cur, $ns['kept'])
+                . ', queued for refund ' . rh_ai_fmt_cur($cur, $ns['refund']) . ($ns['credit'] > BALANCE_TOLERANCE ? ', left as credit for the guest ' . rh_ai_fmt_cur($cur, $ns['credit']) : '')
+                . '.' . $grp . ($ns['can_mark'] ? '' : ' ' . $ns['why']);
         }
         if ($mi['kind'] === 'payment' && $canOpen('payment-add.php')) {
             $links[] = ['label' => 'Add payment', 'url' => 'payment-add.php?booking_type=room&booking_id=' . $id];
@@ -216,7 +519,13 @@ function rh_ai_money_read_intent(string $raw): ?array
         return null; // "what's left on my import" is about an Import review, not money owed
     }
     $ask = null;
-    if (preg_match('/\b(fully|completely|all) paid\b|\bpaid (in full|up|everything|it all|off)\b|\b(settled|paid off)\b|\bpaid for\b.*\?$/u', $l)) {
+    if (rh_ai_money_is_question($l) && (preg_match('/\b(?:cancell?ation|cancell?ing|cancel)\s+(?:fees?|charges?|penalty|penalties)\b/u', $l)
+        || preg_match('/\b(?:how much|what)\b.{0,40}\b(?:cost|charge|pay|owe|fee|keep|lose)\b.{0,30}\bcancel/u', $l)
+        || preg_match('/\b(?:cost|charge|fee)\b.{0,12}\bto cancel\b|\bif (?:they|he|she|the guest|we|i|the booking|it) (?:cancels?|cancelled|were cancelled|is cancelled)\b/u', $l)
+        || preg_match('/\bhow much\b.{0,30}\bto cancel\b|\b(?:fees?|charges?|penalty)\b.{0,40}\bif (?:it(?:\'s| is| were| was| gets)? )?cancell?ed\b/u', $l))) {
+        // 2026-11-14: the cancellation fee from the booking's locked policy (a question only: "cancel it" stays a card)
+        $ask = 'cancelfee';
+    } elseif (preg_match('/\b(fully|completely|all) paid\b|\bpaid (in full|up|everything|it all|off)\b|\b(settled|paid off)\b|\bpaid for\b.*\?$/u', $l)) {
         $ask = 'full';
     } elseif (preg_match('/\b(left|remaining|still) to pay\b|\bhow much (is |do |does |did )?(\S+ ){0,3}(still )?(owe|owes|owing|outstanding|left|remaining|due)\b|\bwhat(\'s| is| does) (\S+ ){0,5}(left|outstanding|owing|owed|due|owe)\b|\b(balance|amount) (due|left|remaining|outstanding|owing)\b|\bany(thing)? (still )?(owing|owed|outstanding|due)\b|^(the |their |his |her )?balance\??$/u', $l)) {
         $ask = 'left';
@@ -238,10 +547,21 @@ function rh_ai_money_read_intent(string $raw): ?array
     } elseif (preg_match('/\btable\s+(\S+)|\b(tab|room service|order)\b/u', $l)) {
         $subject = 'tab';
     }
+    if ($ask === 'cancelfee' && $subject !== 'booking') {
+        return null; // cancellation policies are for room bookings only
+    }
     $out = ['ask' => $ask, 'subject' => $subject, 'who' => ''];
+    // 2026-11-14 live check: "what does each room owe / the total for the whole group" = every room of the group
+    if ($subject === 'booking' && $ask !== 'cancelfee' && preg_match('/\b(?:each|every|per|all (?:the |of the )?)\s*rooms?\b|\b(?:whole|entire|the) group\b|\bgroup (?:booking|total)\b/u', $l)) {
+        $out['group'] = true;
+    }
     // A booking reference, or a document number with its hotel letters when the hotel sets them
-    // ("LSH-INV-2026-000001", "LSH-CONF-INV-...", "LSH-RFD-REF-...", "RCP2026000001"), captured whole.
-    if (preg_match('/\b([A-Z]{2,6}20\d{6,10}|(?:[a-z0-9]{1,6}-)?(?:[a-z]{2,6}-)?[a-z]{2,6}-\d[\d\-]{3,30})\b/iu', $raw, $m)) {
+    // ("LSH-INV-2026-000001", "LSH-CONF-INV-...", "LSH-RFD-REF-...", "RCP2026000001"), captured whole. 2026-11-14 live
+    // check: any other reference shape the booking lookup can find ("AILC962961": letters then digits, or the word
+    // after "booking" / "reference" when it holds a digit), never a currency amount ("MWK50000").
+    if (preg_match('/\b([A-Z]{2,6}20\d{6,10}|(?:[a-z0-9]{1,6}-)?(?:[a-z]{2,6}-)?[a-z]{2,6}-\d[\d\-]{3,30})\b/iu', $raw, $m)
+        || preg_match('/\b(?!(?:MWK|USD|ZAR|EUR|GBP|K)\d)([A-Z]{2,8}\d{5,14})\b/u', $raw, $m)
+        || preg_match('/\b(?:booking|reservation|ref(?:erence)?)\s+(?:ref(?:erence)?\s+|no\.?\s+|number\s+|#\s*)?((?=[a-z0-9\-]*\d)[a-z][a-z0-9\-]{3,24})\b/iu', $raw, $m)) {
         $out['who'] = strtoupper($m[1]);
     } elseif (preg_match('/\btable\s+([a-z0-9\-]{1,10})\b/u', $l, $m)) {
         $out['table'] = $m[1];
@@ -354,7 +674,11 @@ function rh_ai_money_read_reply(PDO $db, array $user, int $conv, array $mi, arra
             return null;
         }
         rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => 'get_booking', 'args' => ['booking_id' => $id], 'result' => $r['json'], 'agent' => 'local']);
-        return ['text' => rh_ai_money_booking_text($db, (array)$r['result'], (string)$mi['ask'], $id), 'links' => $r['links'], 'chips' => ['What is included?'], 'focus' => $id, 'focus_offer' => 0, 'local' => ['tool' => 'get_booking', 'view' => []]];
+        if (!empty($mi['group']) && ($gt = rh_ai_money_group_text($db, (array)$r['result'], $id)) !== null) {
+            return ['text' => $gt, 'links' => $r['links'], 'chips' => [], 'focus' => $id, 'focus_offer' => 0, 'local' => ['tool' => 'get_booking', 'view' => []]];
+        }
+        $txt = $mi['ask'] === 'cancelfee' ? rh_ai_money_cancel_fee_text($db, (array)$r['result'], $id) : rh_ai_money_booking_text($db, (array)$r['result'], (string)$mi['ask'], $id);
+        return ['text' => $txt, 'links' => $r['links'], 'chips' => ['What is included?'], 'focus' => $id, 'focus_offer' => 0, 'local' => ['tool' => 'get_booking', 'view' => []]];
     }
     if ($mi['subject'] === 'gym') {
         if ($mi['who'] === '') {

@@ -19,9 +19,27 @@ when prompted."
 
 ## Pending (oldest first)
 
-**GUIDES PART OF EVERY ENTRY BELOW: DONE 2026-11-14 (NEXT_BUILD_ORDER step 6; guides 07, 13, 14, 19, 99, faq; help
-search answers checked). Only the Assistant parts remain (step 7). The guide edits from the Rosalyn's stash "PARKED
-2026-11-14 guides + Assistant sync" are shipped; its includes/ai + test part is still parked for step 7.**
+(nothing pending - add the next ship's entry here)
+
+### Assistant sync (2026-11-14, NEXT_BUILD_ORDER step 7) — SHIPPED (hashes: see TASKS.md line)
+- Guides: staff can now ask the Assistant "what is the cancellation fee on <booking>" (fee from the booking's locked
+  policy, booked rate x nights, tier and days before arrival; pending/tentative/expired = no fee; an already cancelled
+  booking shows the fee kept and what is still owed), "what does each room in this group owe", and "who changed the
+  <name> setting" (needs staff activity + System Logs). The Assistant quotes a fee but never lowers or waives one:
+  that stays on Booking Details. Mention in guide 14 / the Assistant page at the next guides sync.
+- Assistant: done in this entry (includes/ai/ai-money.php, ai-actions.php, ai-tools.php, ai-desk.php, ai-vault.php,
+  ai-insights.php, ai-decisions.php). Live check at Liwonde on gemini-3.5-flash-lite: 10/10 after fixes, US$0.021 total.
+- LATER (not pulled): Assistant Settings saves write no settings-change rows; still-owed list can stop at 300 rows
+  without saying so; vault stop words (staff, admin, manager, test, user ...) also apply to guest name parts (full
+  names still hidden); staff-count test repeats its rule in SQL; History Summary check misses figures written without
+  commas; settings-lookup refusal names the wrong missing permission; 10 money cases in ai_assistant_test.php have no
+  refuse-at-Rosalyn's guard; 7 data-dependent fails at Liwonde (briefing left-owing + refunds, 4 alert checks, digest
+  recipients) - they also fail on the previous code; idea: cancellations decision could offer the policy as an option.
+
+## Synced 2026-11-14 (guides: step 6, 844f21f / 4a02c11 · Assistant: step 7) — entries kept for reference
+
+**Both parts of every entry below are DONE. Stashes "PARKED 2026-11-14 guides + Assistant sync" (Rosalyn's) and
+"PARKED 2026-11-14 Assistant sync port" (Liwonde) are superseded by the step 7 ship; drop them only when the owner says.**
 
 ### Group documents / no-show / kept fees / group charge (2026-11-11 → 2026-11-14)
 - Commits (Rosalyn's): 0d2ef59, e4867fc, 28a5f0d, a3e5a95, 1e9c2a7, e291682, ec2e069, 58ea5ea, 2472594, f06fac1.
