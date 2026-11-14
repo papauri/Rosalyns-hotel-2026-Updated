@@ -1170,13 +1170,48 @@ try {
         $notStarted = in_array($from, ['pending', 'placed'], true);
         $userId = (int)$user['id'];
 
-        // Room-service line: find its folio charge (posted at order time) so it can be voided with the line.
+        // Room-service line: find its OWN folio charge (posted at order time) so it can be voided with the line.
+        // Lines and charges are created together, so ALL of the order's lines and charges (voided ones too) are
+        // paired oldest-first on menu item + quantity, each charge used once: of two identical lines each keeps
+        // its own charge. The pair is used only while that charge is live; otherwise (e.g. its charge was voided
+        // on its own) the first live charge for the same item + quantity is taken, as before.
         $rsCharge = null;
         if ((string)$ordRow['order_type'] === 'room_service') {
             try {
-                $chStmt = $pdo->prepare("SELECT id, booking_id, charge_type, source_item_id, quantity, stock_tracked FROM booking_charges WHERE stock_order_id = ? AND source_item_id = ? AND quantity = ? AND voided = 0 ORDER BY id ASC LIMIT 1 FOR UPDATE");
-                $chStmt->execute([$orderId, (int)$it['menu_item_id'], (float)$it['quantity']]);
-                $rsCharge = $chStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+                $chStmt = $pdo->prepare("SELECT id, booking_id, charge_type, source_item_id, quantity, stock_tracked, voided FROM booking_charges WHERE stock_order_id = ? ORDER BY id ASC");
+                $chStmt->execute([$orderId]);
+                $rsCharges = $chStmt->fetchAll(PDO::FETCH_ASSOC);
+                $lnStmt = $pdo->prepare("SELECT id, menu_item_id, quantity FROM stock_order_items WHERE order_id = ? ORDER BY id ASC");
+                $lnStmt->execute([$orderId]);
+                $usedCharges = [];
+                $pairedChargeId = 0;
+                foreach ($lnStmt->fetchAll(PDO::FETCH_ASSOC) as $pairLine) {
+                    foreach ($rsCharges as $ci => $ch) {
+                        if (isset($usedCharges[$ci])) {
+                            continue;
+                        }
+                        if ((int)$ch['source_item_id'] === (int)$pairLine['menu_item_id'] && abs((float)$ch['quantity'] - (float)$pairLine['quantity']) < 0.005) {
+                            $usedCharges[$ci] = true;
+                            if ((int)$pairLine['id'] === $itemId && (int)$ch['voided'] === 0) {
+                                $pairedChargeId = (int)$ch['id'];
+                            }
+                            break;
+                        }
+                    }
+                    if ((int)$pairLine['id'] === $itemId) {
+                        break;
+                    }
+                }
+                if ($pairedChargeId > 0) {
+                    $chLock = $pdo->prepare("SELECT id, booking_id, charge_type, source_item_id, quantity, stock_tracked FROM booking_charges WHERE id = ? AND voided = 0 FOR UPDATE");
+                    $chLock->execute([$pairedChargeId]);
+                    $rsCharge = $chLock->fetch(PDO::FETCH_ASSOC) ?: null;
+                }
+                if ($rsCharge === null) {
+                    $chStmt = $pdo->prepare("SELECT id, booking_id, charge_type, source_item_id, quantity, stock_tracked FROM booking_charges WHERE stock_order_id = ? AND source_item_id = ? AND quantity = ? AND voided = 0 ORDER BY id ASC LIMIT 1 FOR UPDATE");
+                    $chStmt->execute([$orderId, (int)$it['menu_item_id'], (float)$it['quantity']]);
+                    $rsCharge = $chStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+                }
             } catch (Throwable $e) {
                 error_log('void_item charge lookup: ' . $e->getMessage());
             }
@@ -1191,7 +1226,8 @@ try {
                     jerr('Could not restore stock for ' . $it['item_name'] . ' - nothing was changed. Please retry.', 500);
                 }
                 $stockOutcome = 'restored';
-            } elseif ((int)$it['stock_deducted']) {
+            } elseif ((int)$it['stock_deducted'] && rh_pos_line_has_deduction($pdo, $itemId)) {
+                // ONE GATE: only a line with its own deduction record is restored (a flag without one = nothing taken).
                 // Use item ID as source_id (matches how deduction was recorded - per item, not per order)
                 if (!restoreStockForMenuItem((int)$it['menu_item_id'], (string)$it['menu_type'], (float)$it['quantity'], 'KDS 86 - item voided', $userId, $itemId, 'pos_order')) {
                     $pdo->rollBack();
@@ -1560,7 +1596,12 @@ try {
         $pdo->beginTransaction();
         // Only allow recall within 10 minutes of bump (and never on a voided / cancelled order,
         // whose kitchen_status/served_at were stamped by the void itself)
-        kds_lock_live_order($pdo, $orderId);
+        $recallOrderStatus = kds_lock_live_order($pdo, $orderId);
+        if ($recallOrderStatus === 'refunded') {
+            // A refunded order's food is settled (its unserved lines were closed by the refund): it cannot come back.
+            $pdo->rollBack();
+            jerr('This order was refunded - it cannot be recalled.', 409);
+        }
         $st = $pdo->prepare("SELECT served_at FROM stock_orders WHERE id=? FOR UPDATE");
         $st->execute([$orderId]);
         $srv = $st->fetchColumn();
@@ -1592,22 +1633,30 @@ try {
             $recallStmt = $pdo->prepare("SELECT id, menu_item_id, menu_type, quantity FROM stock_order_items WHERE order_id=? AND station=? AND kds_status IN ('served','collection') AND stock_deducted=1");
             $recallStmt->execute([$orderId, $STATION]);
         }
-        $itemsToRestore = $recallStmt->fetchAll(PDO::FETCH_ASSOC);
+        /* ONE GATE: only lines with their own KDS (pos_order) deduction record are restored. A room-service
+         * line's stock rides on its folio charge, which the recall does not void, so it moves no stock here
+         * and keeps stock_deducted = 1 (a cleared flag would make the re-bump deduct it a second time). */
+        $itemsToRestore = array_values(array_filter($recallStmt->fetchAll(PDO::FETCH_ASSOC), static fn(array $r): bool => rh_pos_line_has_deduction($pdo, (int)$r['id'])));
         // Lock order across lines: every ingredient these lines can touch, ascending id, before any batch.
         rh_stock_lock_ingredients_for_lines($pdo, array_map(static fn(array $r): array => ['menu_item_id' => (int)$r['menu_item_id'], 'source_type' => 'pos_order', 'source_id' => (int)$r['id']], $itemsToRestore));
+        $restoredLineIds = [];
         foreach ($itemsToRestore as $ri) {
             // Use item ID as source_id (matches deduction record — per item, not per order)
             if (!restoreStockForMenuItem((int)$ri['menu_item_id'], (string)$ri['menu_type'], (float)$ri['quantity'], 'KDS recall - stock restored', (int)$user['id'], (int)$ri['id'], 'pos_order')) {
                 $pdo->rollBack();
                 jerr('Could not restore stock for the recalled items - nothing was changed. Please retry.', 500);
             }
+            $restoredLineIds[] = (int)$ri['id'];
         }
 
-        // Recall served and collection items back to preparing; clear stock_deducted flag
+        // Recall served and collection items back to preparing; stock_deducted is cleared only where the restore was written
         if ($isPrivileged && !$reqStation) {
-            $pdo->prepare("UPDATE stock_order_items SET kds_status='preparing', served_at=NULL, stock_deducted=0 WHERE order_id=? AND kds_status IN ('served','collection')")->execute([$orderId]);
+            $pdo->prepare("UPDATE stock_order_items SET kds_status='preparing', served_at=NULL WHERE order_id=? AND kds_status IN ('served','collection')")->execute([$orderId]);
         } else {
-            $pdo->prepare("UPDATE stock_order_items SET kds_status='preparing', served_at=NULL, stock_deducted=0 WHERE order_id=? AND station=? AND kds_status IN ('served','collection')")->execute([$orderId, $STATION]);
+            $pdo->prepare("UPDATE stock_order_items SET kds_status='preparing', served_at=NULL WHERE order_id=? AND station=? AND kds_status IN ('served','collection')")->execute([$orderId, $STATION]);
+        }
+        if ($restoredLineIds) {
+            $pdo->prepare("UPDATE stock_order_items SET stock_deducted=0 WHERE id IN (" . implode(',', array_fill(0, count($restoredLineIds), '?')) . ")")->execute($restoredLineIds);
         }
         $pdo->prepare("UPDATE stock_orders SET kitchen_status='recalled', served_at=NULL WHERE id=?")->execute([$orderId]);
         // A folio-charged room-service order closed when it was served comes back to life with the recall

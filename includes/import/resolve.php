@@ -840,7 +840,9 @@ if (!function_exists('import_resolve')) {
                 $effCost = (float)$ex['cost_per_unit'] > 0 ? (float)$ex['cost_per_unit'] : null;
             }
             $inCount = false;
-            if ($balance !== null && $balance > 0.00005) {
+            // a 0 written in the file and ticked for an existing item is a count of nothing (a shortage line); a blank cell is null, never 0
+            $zeroTicked = $ex && $balance !== null && $balance <= 0.00005 && in_array('quantity', $ticked, true);
+            if ($balance !== null && ($balance > 0.00005 || $zeroTicked)) {
                 if ($ex) {
                     $inCount = in_array('quantity', $ticked, true) && $effCost !== null && $effCost > 0;
                     if (in_array('quantity', $ticked, true) && !$inCount) {

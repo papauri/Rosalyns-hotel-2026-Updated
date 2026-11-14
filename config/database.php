@@ -9536,6 +9536,43 @@ function voidBookingCharge(int $chargeId, string $voidReason, ?int $voidedBy = n
             }
         }
 
+        // The charge's UNSERVED kitchen line goes with it (tracked or not): void + stock flag cleared, so a
+        // later 86 / order close cannot settle its stock a second time. A served line is left as it is.
+        // Runs after the stock call above (that reads the line status). Order totals are not touched.
+        if (in_array($charge['charge_type'], ['food', 'drink'], true) && !empty($charge['source_item_id'])) {
+            try {
+                $lineOrderId = 0;
+                try {
+                    $loStmt = $pdo->prepare("SELECT stock_order_id FROM booking_charges WHERE id = ?");
+                    $loStmt->execute([$chargeId]);
+                    $lineOrderId = (int)$loStmt->fetchColumn();
+                } catch (Throwable $loEx) {
+                    $lineOrderId = 0; // legacy schema without booking_charges.stock_order_id
+                }
+                if ($lineOrderId > 0) {
+                    if (!function_exists('rh_close_unserved_line_for_voided_charge')) {
+                        require_once __DIR__ . '/../admin/includes/restaurant-payment-sync.php';
+                    }
+                    $pdo->exec('SAVEPOINT rh_vbc_line');
+                    rh_close_unserved_line_for_voided_charge($pdo, $lineOrderId, (int)$charge['source_item_id'], (float)$charge['quantity'], $voidedBy);
+                    $pdo->exec('RELEASE SAVEPOINT rh_vbc_line');
+                }
+            } catch (Throwable $lineEx) {
+                if (rh_is_lock_conflict($lineEx)) {
+                    throw $lineEx; // the DB already rolled the whole transaction back
+                }
+                try {
+                    $pdo->exec('ROLLBACK TO SAVEPOINT rh_vbc_line');
+                } catch (Throwable $spEx) {
+                    // savepoint not reached (failed before it): nothing to undo
+                }
+                error_log("voidBookingCharge kitchen line close failed for charge {$chargeId}: " . $lineEx->getMessage());
+                if (function_exists('rh_log_event')) {
+                    rh_log_event('pos', 'warning', "Charge #{$chargeId} voided but its unserved kitchen line could not be closed - check the order on the stations.", ['charge_id' => $chargeId, 'error' => $lineEx->getMessage()]);
+                }
+            }
+        }
+
         // Recalculate booking financials
         recalculateBookingFinancials($charge['booking_id']);
 
@@ -12734,6 +12771,9 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
         $restCostNum = []; // ingredient_id => sum(qty x original cost_at_time) of the deductions restored
         $restCostDen = [];
         $closedWriteOffs = []; // restored quantity whose original batch is closed (recalled/wasted/expired): written off, not shelved
+        $tracedQty = []; // ingredient_id => restored quantity that goes back through a batch row (shelved or written off with it)
+        $tracedVal = []; // ingredient_id => that quantity x its batch cost
+        $restAdjCost = []; // ingredient_id => cost_at_time written on the restore adjustment
         $hadDeductionTrail = false;
 
         if ($originalChargeId !== null) {
@@ -12891,6 +12931,9 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
                 if (!$info) {
                     continue; // batch row deleted; the ingredient total below still restores
                 }
+                $tIng = (int)$info['ingredient_id'];
+                $tracedQty[$tIng] = ($tracedQty[$tIng] ?? 0.0) + (float)$q;
+                $tracedVal[$tIng] = ($tracedVal[$tIng] ?? 0.0) + (float)$q * (float)$info['cost_per_unit'];
                 $bStatus = (string)$info['status'];
                 $batchDatePassed = !empty($info['expiry_date']) && (string)$info['expiry_date'] < date('Y-m-d');
                 // Active batch (even one past its date: the rest of it is still on the shelf and the sweep
@@ -12924,6 +12967,7 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
                 $costSel->execute([$ingId]); // recipe fallback: no trail, today's average
                 $costAtTime = (float)($costSel->fetchColumn() ?: 0);
             }
+            $restAdjCost[$ingId] = $costAtTime;
             $adjArgs = [$ingId, $q, mb_substr($reason, 0, 250), $originalChargeId, $costAtTime, $doneBy];
             if ($hasRestoreCol) {
                 $adjArgs[] = $sourceType;
@@ -12963,6 +13007,44 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
                 $wastageId = rh_insert_batch_wastage_row($pdo, $w['ingredient_id'], $w['batch_id'], $wq, $w['cost'], $wReason, $doneBy);
                 $woAdj->execute([$w['ingredient_id'], -$wq, mb_substr($aReason, 0, 255), $w['kind'], $w['kind'] === 'wastage' ? $wastageId : $w['batch_id'], $w['cost'], $doneBy]);
             }
+        }
+
+        /* Step 8c S1: the part of the restore that had no batch to go back to (sold beyond the batches, or a
+         * recipe-fallback leftover with no room in any batch) is added to the total above but to no batch. When a
+         * delivery settled that deficit in between, the total would end above the batches. Put back an R-batch
+         * (batch row only: the restore adjustment above already records the movement) of
+         * min(untraced part, total - active batches) at the untraced part's OWN cost (what the sale charged for it,
+         * not the blended cost_at_time); the fallback uses the restore adjustment's cost. 0 -> today's average. */
+        $rGapSel = $pdo->prepare("SELECT (SELECT current_quantity FROM stock_ingredients WHERE id = ?) - COALESCE((SELECT SUM(quantity_remaining) FROM stock_batches WHERE ingredient_id = ? AND status = 'active' AND quantity_remaining > 0.0001), 0)");
+        foreach ($byIngredient as $ingId => $q) {
+            $untraced = round((float)$q - ($tracedQty[$ingId] ?? 0.0), 6);
+            if ($untraced <= 0.0001) {
+                continue;
+            }
+            $rGapSel->execute([$ingId, $ingId]);
+            $rQty = round(min($untraced, (float)$rGapSel->fetchColumn()), 6);
+            if ($rQty <= 0.0001) {
+                continue;
+            }
+            if (!$usedRecipeFallback && !empty($restCostDen[$ingId])) {
+                $rCost = ((float)($restCostNum[$ingId] ?? 0.0) - ($tracedVal[$ingId] ?? 0.0)) / $untraced;
+            } else {
+                $rCost = (float)($restAdjCost[$ingId] ?? 0.0);
+            }
+            $rCost = round($rCost, 4);
+            if ($rCost <= 0.00001) {
+                $costSel->execute([$ingId]);
+                $rCost = (float)($costSel->fetchColumn() ?: 0);
+            }
+            $pdo->prepare("
+                INSERT INTO stock_batches (ingredient_id, batch_number, quantity_received, quantity_remaining, cost_per_unit,
+                    supplier_name, supplier_contact, received_date, expiry_date, expiry_alert_days, status, notes, created_by)
+                VALUES (?, ?, ?, ?, ?, NULL, NULL, CURDATE(), NULL, 7, 'active', ?, ?)
+            ")->execute([$ingId, 'TMP-R-' . strtoupper(substr(str_replace('.', '', uniqid('', true)), -12)), $rQty, $rQty, max(0.0, $rCost),
+                'Restored stock: part that was sold beyond the batches', $doneBy]);
+            $rBatchId = (int)$pdo->lastInsertId();
+            $pdo->prepare('UPDATE stock_batches SET batch_number = ? WHERE id = ?')
+                ->execute(['R' . date('Ymd') . '-' . str_pad((string)$rBatchId, 6, '0', STR_PAD_LEFT), $rBatchId]);
         }
 
         if ($ownTx) $pdo->commit();
@@ -13602,6 +13684,8 @@ function rhBarcodeVariants(string $raw): array
  * @param string $scope One of stock_first, sale_first, ingredient, menu_item.
  * @return array{kind:string,barcode:string,row:array}|null
  *         kind is 'ingredient' or 'menu_item'; null when unregistered.
+ *         An ingredient row carries is_archived (archived items are still found, for uniqueness checks;
+ *         screens that move stock refuse them).
  */
 function rhLookupBarcode(PDO $pdo, string $raw, string $scope = 'stock_first'): ?array
 {
@@ -13614,7 +13698,7 @@ function rhLookupBarcode(PDO $pdo, string $raw, string $scope = 'stock_first'): 
     $findIngredient = static function () use ($pdo, $place, $args): ?array {
         $stmt = $pdo->prepare("
             SELECT sib.id AS mapping_id, sib.barcode, sib.pack_size, sib.pack_label,
-                   si.id AS ingredient_id, si.name, si.unit, si.current_quantity, si.cost_per_unit
+                   si.id AS ingredient_id, si.name, si.unit, si.current_quantity, si.cost_per_unit, si.is_archived
             FROM stock_ingredient_barcodes sib
             JOIN stock_ingredients si ON si.id = sib.ingredient_id
             WHERE sib.barcode IN ($place)

@@ -742,9 +742,14 @@ if (!function_exists('import_job_analyse')) {
             return ['ok' => false, 'error' => 'That import was not found.'];
         }
         if (in_array($job['status'], ['committed', 'cancelled'], true)) {
-            return ['ok' => false, 'error' => 'This import is already ' . $job['status'] . '.'];
+            return ['ok' => false, 'error' => $job['status'] === 'committed' ? 'This import was already imported, so nothing was cancelled.' : 'This import was already cancelled.'];
         }
-        $pdo->prepare("UPDATE import_jobs SET status = 'cancelled', stored_path = NULL WHERE id = ?")->execute([$jobId]);
+        // the status is checked again in the UPDATE itself: an import that finished saving after the read above stays imported
+        $st = $pdo->prepare("UPDATE import_jobs SET status = 'cancelled', stored_path = NULL WHERE id = ? AND status NOT IN ('committed','cancelled')");
+        $st->execute([$jobId]);
+        if ($st->rowCount() !== 1) {
+            return ['ok' => false, 'error' => 'This import was already imported or cancelled, so nothing was cancelled.'];
+        }
         if ($job['stored_path']) {
             import_delete_stored((string)$job['stored_path']);
         }

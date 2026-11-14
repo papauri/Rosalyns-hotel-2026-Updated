@@ -204,6 +204,7 @@ if (isset($_GET['ajax'])) {
             $created = 0;
             $skipped = [];
             $noCost = [];
+            $archived = [];
             // Line labels come back from the client, and end up in the activity log.
             $label = static function ($item, int $id): string {
                 $raw = is_array($item) ? trim((string)($item['name'] ?? '')) : '';
@@ -220,11 +221,16 @@ if (isset($_GET['ajax'])) {
                 }
 
                 // Lock + get current ingredient
-                $sel = $pdo->prepare("SELECT current_quantity, cost_per_unit FROM stock_ingredients WHERE id = ? FOR UPDATE");
+                $sel = $pdo->prepare("SELECT name, current_quantity, cost_per_unit, is_archived FROM stock_ingredients WHERE id = ? FOR UPDATE");
                 $sel->execute([$ingId]);
                 $ing = $sel->fetch(PDO::FETCH_ASSOC);
                 if (!$ing) {
                     $skipped[] = $label($item, $ingId);
+                    continue;
+                }
+                // An archived item is out of the stock value and alerts: it must not take stock in.
+                if ((int)$ing['is_archived'] === 1) {
+                    $archived[] = mb_substr((string)$ing['name'], 0, 80);
                     continue;
                 }
 
@@ -246,6 +252,12 @@ if (isset($_GET['ajax'])) {
                 );
 
                 $created++;
+            }
+            if ($archived) {
+                $pdo->rollBack();
+                http_response_code(422);
+                echo json_encode(['error' => 'Nothing was received. These items are archived: ' . implode(', ', array_slice($archived, 0, 8)) . (count($archived) > 8 ? ', ...' : '') . '. Remove them from the delivery, or restore them on the Ingredients page first.', 'archived' => $archived]);
+                exit;
             }
             if ($noCost) {
                 $pdo->rollBack();
@@ -1260,7 +1272,11 @@ async function _fetchLookup(barcode) {
 }
 
 function _handleResult(barcode, data) {
-    if (data.found && data.type === 'ingredient') {
+    if (data.found && data.type === 'ingredient' && Number(data.ingredient.is_archived) === 1) {
+        // Archived items cannot take stock in (the server refuses them too).
+        fbError();
+        flashMsg(data.ingredient.name + ' is archived - restore it on the Ingredients page to receive it.', true);
+    } else if (data.found && data.type === 'ingredient') {
         fbSuccess();
         addToBatch(data.ingredient);
         flashMsg('+ ' + data.ingredient.name);

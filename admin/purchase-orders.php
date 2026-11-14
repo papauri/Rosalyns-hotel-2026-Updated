@@ -558,6 +558,13 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
+                // Double-submit guard: the identical receipt of this order from this session within 20 seconds is a
+                // double click or a resent form - refuse it so the stock is never booked twice.
+                $poRecvFp = md5(json_encode([$poId, $lineIds, $recvQtys, $recvCosts, $recvQtyIn, $recvCostIn, $expiries]));
+                if (($_SESSION['po_receive_last_fp'] ?? '') === $poRecvFp && (time() - (int)($_SESSION['po_receive_last_at'] ?? 0)) < 20) {
+                    throw new RuntimeException('This delivery was just received - duplicate submission ignored.');
+                }
+
                 $pdo->beginTransaction();
                 // Re-read the status under the row lock: only sent / confirmed / partially-received POs
                 // accept stock (a draft has not gone to the supplier; cancelled/closed/received are done).
@@ -661,6 +668,8 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     $pdo->prepare("UPDATE stock_purchase_orders SET status = 'partial', received_at = COALESCE(received_at, NOW()) WHERE id = ?")->execute([$poId]);
                 }
                 $pdo->commit();
+                $_SESSION['po_receive_last_fp'] = $poRecvFp;
+                $_SESSION['po_receive_last_at'] = time();
                 if (function_exists('deleteCache')) rh_clear_stock_dashboard_cache();
                 $message = 'Stock received against purchase order.';
                 $redirectTo = 'purchase-orders.php?id=' . $poId;

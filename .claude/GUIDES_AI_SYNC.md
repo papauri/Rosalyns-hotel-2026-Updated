@@ -209,6 +209,10 @@ when prompted."
 - Guides (Create Booking, page 07 or wherever "Payment to Collect" is explained): the table now reads Room rate -> rate plan -> x nights (the all-in price) -> Subtotal (before levy and VAT) -> Tourism levy 1% (included in price) -> VAT 17.5% (included in price) -> Total to collect. Subtotal + levy + VAT = total; the levy is charged once. Display only: saved amounts were already right.
 - Assistant: no change (it reads saved booking figures, which did not change).
 
+### Stock review fixes (2026-11-15, NEXT_BUILD_ORDER step 8c) — SHIPPED (hashes: see TASKS.md line)
+- Guides (Stock: ingredients, recipes, wastage, receiving, purchase orders, barcode receive, Data Import; POS/KDS void, recall, delete): new refusals staff can now see: archiving an item a recipe uses (names the dishes); saving a recipe with an archived item (and a warning listing recipes that already use one); receiving an archived item by barcode; throwing out an empty/closed batch; backdated wastage before an approved count ("this loss is already in the count of <date>"); a second click on Receive / Stock in is ignored; KDS recall refused on a refunded order; Import: "another import is being saved", "nothing was cancelled", a new-item row whose name now exists is refused ("review the import again"), a ticked quantity of 0 is counted. Recipe "yields N portions" help now says quantities are per ONE portion sold (the yield is for reference).
+- Assistant: stock figures it reads stay the same tables; check any answer that explains why stock was or was not put back after a void / recall / delete (only lines with a recorded deduction are restored; recall of a room-service line moves no stock).
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` fails in unchanged code: claim-check self-test (Room Board "Tomorrow"; staff
   activity "4 of 3 staff accounts"), History Summary "K1,068,000," flagged; digest-recipients fail.

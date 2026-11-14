@@ -845,15 +845,19 @@ function rh_close_refunded_order_lines(PDO $pdo, int $orderId, int $userId, stri
  *   - no kitchen line found (legacy charge)   -> restored, as before
  * Runs inside the caller's transaction. Never throws for a stock failure (the money void must
  * stand); failures are logged for reconciliation.
+ * Callers that settle SEVERAL charges of one order pass $usedLines (by reference, ids => true, charges
+ * in id order): each charge then follows its OWN kitchen line (a line is never picked twice), so of two
+ * identical lines the served one is wasted and the unserved one restored. Untracked charges still claim
+ * their line in that set.
  *
  * @param array $charge booking_charges row: id, charge_type, source_item_id, quantity, stock_tracked
  * @return string 'restored' | 'wastage' | 'skipped'
  */
-function rh_restore_room_service_charge_stock(PDO $pdo, int $orderId, array $charge, string $reason, ?int $doneBy): string
+function rh_restore_room_service_charge_stock(PDO $pdo, int $orderId, array $charge, string $reason, ?int $doneBy, ?array &$usedLines = null): string
 {
-    if (empty($charge['stock_tracked'])
-        || !in_array((string)($charge['charge_type'] ?? ''), ['food', 'drink'], true)
+    if (!in_array((string)($charge['charge_type'] ?? ''), ['food', 'drink'], true)
         || empty($charge['source_item_id'])
+        || ($usedLines === null && empty($charge['stock_tracked']))
     ) {
         return 'skipped';
     }
@@ -862,26 +866,26 @@ function rh_restore_room_service_charge_stock(PDO $pdo, int $orderId, array $cha
     $qty = (float)$charge['quantity'];
     $menuType = (string)$charge['charge_type'];
     $kdsStatus = null;
+    $line = null;
     try {
-        $ln = $pdo->prepare("SELECT soi.id, soi.menu_type, soi.kds_status,
-                                    EXISTS (SELECT 1 FROM stock_adjustments sa
-                                             WHERE sa.source_type = 'pos_order' AND sa.source_id = soi.id AND sa.quantity_change < 0) AS has_trail
-                               FROM stock_order_items soi
-                              WHERE soi.order_id = ? AND soi.menu_item_id = ? AND ABS(soi.quantity - ?) < 0.005
-                           ORDER BY (soi.kds_status = 'void') ASC, soi.id ASC");
-        $ln->execute([$orderId, $itemId, $qty]);
-        $line = $ln->fetch(PDO::FETCH_ASSOC);
-        if ($line) {
-            if ((string)$line['kds_status'] === 'void' || (int)$line['has_trail'] === 1) {
-                return 'skipped';
-            }
-            $kdsStatus = (string)$line['kds_status'];
-            if ((string)$line['menu_type'] !== '') {
-                $menuType = (string)$line['menu_type'];
-            }
-        }
+        $line = rh_room_service_charge_line($pdo, $orderId, $itemId, $qty, $usedLines ?? []);
     } catch (Throwable $e) {
         error_log('rh_restore_room_service_charge_stock line lookup (charge ' . $chargeId . '): ' . $e->getMessage());
+    }
+    if ($line && $usedLines !== null) {
+        $usedLines[(int)$line['id']] = true;
+    }
+    if (empty($charge['stock_tracked'])) {
+        return 'skipped';
+    }
+    if ($line) {
+        if ((string)$line['kds_status'] === 'void' || (int)$line['has_trail'] === 1) {
+            return 'skipped';
+        }
+        $kdsStatus = (string)$line['kds_status'];
+        if ((string)$line['menu_type'] !== '') {
+            $menuType = (string)$line['menu_type'];
+        }
     }
 
     try {
@@ -898,4 +902,101 @@ function rh_restore_room_service_charge_stock(PDO $pdo, int $orderId, array $cha
         error_log('rh_restore_room_service_charge_stock charge ' . $chargeId . ': ' . $e->getMessage());
         return 'skipped';
     }
+}
+
+/**
+ * ONE GATE for putting a till line's stock back (step 8c): a 'pos_order' restore runs only when the line
+ * has a deduction record of its own. A line flagged stock_deducted = 1 without one (a room-service line,
+ * whose stock rides on its folio charge, or a line deducted before its recipe existed) has nothing to put
+ * back; without this gate the restore falls back to the recipe and credits stock that never left.
+ */
+function rh_pos_line_has_deduction(PDO $pdo, int $lineId): bool
+{
+    if ($lineId <= 0) {
+        return false;
+    }
+    $st = $pdo->prepare("SELECT EXISTS (SELECT 1 FROM stock_adjustments WHERE source_type = 'pos_order' AND source_id = ? AND quantity_change < 0)");
+    $st->execute([$lineId]);
+    return (int)$st->fetchColumn() === 1;
+}
+
+/**
+ * The kitchen line a room-service folio charge belongs to: same menu item and quantity on the order, live
+ * lines first, oldest first, skipping lines already claimed in $usedLines (ids => true). Null when none.
+ *
+ * @return array{id:int|string, menu_type:string, kds_status:string, has_trail:int|string}|null
+ */
+function rh_room_service_charge_line(PDO $pdo, int $orderId, int $itemId, float $qty, array $usedLines = []): ?array
+{
+    $ln = $pdo->prepare("SELECT soi.id, soi.menu_type, soi.kds_status,
+                                EXISTS (SELECT 1 FROM stock_adjustments sa
+                                         WHERE sa.source_type = 'pos_order' AND sa.source_id = soi.id AND sa.quantity_change < 0) AS has_trail
+                           FROM stock_order_items soi
+                          WHERE soi.order_id = ? AND soi.menu_item_id = ? AND ABS(soi.quantity - ?) < 0.005
+                       ORDER BY (soi.kds_status = 'void') ASC, soi.id ASC");
+    $ln->execute([$orderId, $itemId, $qty]);
+    foreach ($ln->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        if (!isset($usedLines[(int)$row['id']])) {
+            return $row;
+        }
+    }
+    return null;
+}
+
+/**
+ * A voided room-service folio charge takes its UNSERVED kitchen line with it (step 8c): the line goes to
+ * kds 'void' with stock_deducted = 0 (as when a booking closes, pos-order-close.php) and the order's
+ * kitchen_status is recomputed from the lines still live. Call it AFTER the charge's stock was settled
+ * (rh_restore_room_service_charge_stock reads the line status). A SERVED line is left exactly as it is
+ * (its flag 1 means the stock is taken; clearing it would make a later void take a fresh wastage).
+ * Order totals are left alone (the folio total comes from the charges). Runs in the caller's transaction.
+ *
+ * @return int|null the id of the line closed, or null when there was none to close
+ */
+function rh_close_unserved_line_for_voided_charge(PDO $pdo, int $orderId, int $itemId, float $qty, ?int $userId): ?int
+{
+    if ($orderId <= 0 || $itemId <= 0) {
+        return null;
+    }
+    $line = rh_room_service_charge_line($pdo, $orderId, $itemId, $qty);
+    if (!$line || in_array((string)$line['kds_status'], ['void', 'served'], true)) {
+        return null;
+    }
+    $lineId = (int)$line['id'];
+    $up = $pdo->prepare("UPDATE stock_order_items SET kds_status = 'void', served_at = COALESCE(served_at, NOW()), bumped_by = ?, stock_deducted = 0
+                          WHERE id = ? AND kds_status NOT IN ('void', 'served')");
+    $up->execute([$userId !== null && $userId > 0 ? $userId : null, $lineId]);
+    if ($up->rowCount() !== 1) {
+        return null;
+    }
+    $ks = $pdo->prepare("SELECT kitchen_status FROM stock_orders WHERE id = ?");
+    $ks->execute([$orderId]);
+    $kitchen = (string)$ks->fetchColumn();
+    $live = $pdo->prepare("SELECT kds_status FROM stock_order_items WHERE order_id = ? AND kds_status <> 'void'");
+    $live->execute([$orderId]);
+    $liveStates = $live->fetchAll(PDO::FETCH_COLUMN);
+    if ($liveStates) {
+        if (count(array_diff($liveStates, ['served'])) === 0) {
+            $kitchen = 'served';
+        } elseif (in_array('preparing', $liveStates, true)) {
+            $kitchen = 'in_progress';
+        } elseif (in_array('ready', $liveStates, true) || in_array('collection', $liveStates, true)) {
+            $kitchen = 'ready';
+        }
+        $pdo->prepare("UPDATE stock_orders SET kitchen_status = ?, served_at = CASE WHEN ? = 'served' THEN COALESCE(served_at, NOW()) ELSE served_at END WHERE id = ?")
+            ->execute([$kitchen, $kitchen, $orderId]);
+    }
+    try {
+        $actorName = '';
+        if ($userId !== null && $userId > 0) {
+            $an = $pdo->prepare("SELECT COALESCE(NULLIF(full_name, ''), username) FROM admin_users WHERE id = ?");
+            $an->execute([$userId]);
+            $actorName = (string)$an->fetchColumn();
+        }
+        $pdo->prepare("INSERT INTO stock_kds_events (order_id, order_item_id, event, from_status, to_status, user_id, user_name, ip_address) VALUES (?, ?, 'voided', ?, 'void', ?, ?, ?)")
+            ->execute([$orderId, $lineId, (string)$line['kds_status'], $userId, $actorName, $_SERVER['REMOTE_ADDR'] ?? null]);
+    } catch (Throwable $e) {
+        // legacy event schema
+    }
+    return $lineId;
 }

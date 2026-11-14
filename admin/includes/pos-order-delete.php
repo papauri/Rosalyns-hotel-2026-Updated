@@ -145,6 +145,65 @@ function rh_pos_deleted_client_uuid(PDO $pdo, string $clientUuid): ?array
 }
 
 /**
+ * Count a line's stock trail (same rules as rh_pos_del_put_back_trail below): its deduction rows since the
+ * order existed, how many are still HELD (untagged and not paired with a restore, oldest-first per
+ * ingredient) and how many were reclassified as wastage ('Voided to wastage'). legacy_restored = schema
+ * without restore_of_type and some restore exists against this id (treated as handled).
+ *
+ * @return array{deductions:int, held:int, tagged:int, legacy_restored:bool}
+ */
+function rh_pos_del_trail_state(PDO $pdo, string $sourceType, int $sourceId, string $notBefore): array
+{
+    $out = ['deductions' => 0, 'held' => 0, 'tagged' => 0, 'legacy_restored' => false];
+    if ($sourceId <= 0) {
+        return $out;
+    }
+    $sel = $pdo->prepare("SELECT id, ingredient_id, COALESCE(reason, '') AS reason
+                            FROM stock_adjustments
+                           WHERE source_type = ? AND source_id = ? AND quantity_change < 0 AND created_at >= ?
+                        ORDER BY id ASC");
+    $sel->execute([$sourceType, $sourceId, $notBefore]);
+    $deductions = $sel->fetchAll(PDO::FETCH_ASSOC);
+    $out['deductions'] = count($deductions);
+    if (!$deductions) {
+        return $out;
+    }
+
+    $restoredLeft = [];
+    $hasRestoreCol = function_exists('rh_stock_adjustments_has_restore_col') && rh_stock_adjustments_has_restore_col();
+    if ($hasRestoreCol) {
+        $rc = $pdo->prepare("SELECT ingredient_id, COUNT(*) FROM stock_adjustments
+                              WHERE source_type = 'void_restore' AND restore_of_type = ? AND source_id = ? AND created_at >= ?
+                           GROUP BY ingredient_id");
+        $rc->execute([$sourceType, $sourceId, $notBefore]);
+        $restoredLeft = $rc->fetchAll(PDO::FETCH_KEY_PAIR);
+    } else {
+        // Legacy schema (no restore_of_type): any restore against this id means it was handled.
+        $rc = $pdo->prepare("SELECT COUNT(*) FROM stock_adjustments WHERE source_type = 'void_restore' AND source_id = ? AND created_at >= ?");
+        $rc->execute([$sourceId, $notBefore]);
+        if ((int)$rc->fetchColumn() > 0) {
+            $out['legacy_restored'] = true;
+            return $out;
+        }
+    }
+
+    // Untagged deductions are paired with the restores oldest-first; tagged ones are already wasted.
+    foreach ($deductions as $d) {
+        if (strncasecmp((string)$d['reason'], 'Voided to wastage', 17) === 0) {
+            $out['tagged']++;
+            continue;
+        }
+        $iid = (int)$d['ingredient_id'];
+        if (($restoredLeft[$iid] ?? 0) > 0) {
+            $restoredLeft[$iid]--;
+            continue;
+        }
+        $out['held']++;
+    }
+    return $out;
+}
+
+/**
  * Put back what a PENDING line (never started) still holds deducted, from its own trail in stock_adjustments.
  *
  * Trail rules (the same pairing the void / 86 / recall code uses):
@@ -164,48 +223,12 @@ function rh_pos_del_put_back_trail(PDO $pdo, string $sourceType, int $sourceId, 
     if ($sourceId <= 0) {
         return 'none';
     }
-    $sel = $pdo->prepare("SELECT id, ingredient_id, COALESCE(reason, '') AS reason
-                            FROM stock_adjustments
-                           WHERE source_type = ? AND source_id = ? AND quantity_change < 0 AND created_at >= ?
-                        ORDER BY id ASC");
-    $sel->execute([$sourceType, $sourceId, $notBefore]);
-    $deductions = $sel->fetchAll(PDO::FETCH_ASSOC);
-    if (!$deductions) {
+    $trail = rh_pos_del_trail_state($pdo, $sourceType, $sourceId, $notBefore);
+    if ($trail['deductions'] === 0 || $trail['legacy_restored']) {
         return 'none';
     }
-
-    $restoredLeft = [];
-    $hasRestoreCol = function_exists('rh_stock_adjustments_has_restore_col') && rh_stock_adjustments_has_restore_col();
-    if ($hasRestoreCol) {
-        $rc = $pdo->prepare("SELECT ingredient_id, COUNT(*) FROM stock_adjustments
-                              WHERE source_type = 'void_restore' AND restore_of_type = ? AND source_id = ? AND created_at >= ?
-                           GROUP BY ingredient_id");
-        $rc->execute([$sourceType, $sourceId, $notBefore]);
-        $restoredLeft = $rc->fetchAll(PDO::FETCH_KEY_PAIR);
-    } else {
-        // Legacy schema (no restore_of_type): any restore against this id means it was handled.
-        $rc = $pdo->prepare("SELECT COUNT(*) FROM stock_adjustments WHERE source_type = 'void_restore' AND source_id = ? AND created_at >= ?");
-        $rc->execute([$sourceId, $notBefore]);
-        if ((int)$rc->fetchColumn() > 0) {
-            return 'none';
-        }
-    }
-
-    // Untagged deductions are paired with the restores oldest-first; tagged ones are already wasted.
-    $heldUntagged = 0;
-    $heldTagged = 0;
-    foreach ($deductions as $d) {
-        if (strncasecmp((string)$d['reason'], 'Voided to wastage', 17) === 0) {
-            $heldTagged++;
-            continue;
-        }
-        $iid = (int)$d['ingredient_id'];
-        if (($restoredLeft[$iid] ?? 0) > 0) {
-            $restoredLeft[$iid]--;
-            continue;
-        }
-        $heldUntagged++;
-    }
+    $heldUntagged = $trail['held'];
+    $heldTagged = $trail['tagged'];
     if ($heldUntagged === 0) {
         return $heldTagged > 0 ? 'wasted' : 'none';
     }
@@ -398,6 +421,15 @@ function rh_delete_pos_order(PDO $pdo, int $orderId, int $userId, string $reason
                                                 WHERE stock_order_id = ? AND source_item_id = ? AND ABS(quantity - ?) < 0.005
                                                   AND stock_tracked = 1 AND voided = 0");
         }
+        // Any room-service charge of this order (voided or not) that ever took this line's stock out: a charge
+        // voided alone after service settles that stock as wastage on the charge, so the line must not take it again.
+        $chargeDeductedSel = null;
+        if ($isRoomService && $hasChargeOrderCol) {
+            $chargeDeductedSel = $pdo->prepare("SELECT EXISTS (SELECT 1 FROM stock_adjustments sa
+                                                  JOIN booking_charges bc ON sa.source_type = 'room_service' AND sa.source_id = bc.id
+                                                 WHERE bc.stock_order_id = ? AND bc.source_item_id = ? AND ABS(bc.quantity - ?) < 0.005
+                                                   AND sa.quantity_change < 0)");
+        }
         $hasTrailSel = $pdo->prepare("SELECT COUNT(*) FROM stock_adjustments WHERE source_type = 'pos_order' AND source_id = ? AND quantity_change < 0 AND created_at >= ?");
 
         // ── (a) STOCK, line by line. Done BEFORE folio charges are voided. ──
@@ -435,8 +467,30 @@ function rh_delete_pos_order(PDO $pdo, int $orderId, int $userId, string $reason
                 continue;
             }
             // Kitchen started (preparing / ready / collection / served): the food exists - wastage, never restored.
+            // Decided from the line's own trail, not its flag (step 8c):
+            //   - stock still HELD as usage            -> reclassified as wastage (no new deduction);
+            //   - order already voided / cancelled / refunded -> NEVER a new deduction (that close settled the
+            //     line: its wastage is keyed on the wastage row, and the close cleared the flag);
+            //   - live order, trail already all wasted -> nothing more;
+            //   - live order, never deducted (or all put back) -> the wastage deduction is taken now.
             $alreadyOff = ((int)$it['stock_deducted'] === 1);
-            $n = rh_record_item_wastage($pdo, (int)$it['menu_item_id'], (string)$it['menu_type'], (float)$it['quantity'], !$alreadyOff, $userId, $stockReason . ' - wastage (' . $name . ', ' . $status . ')', 'pos_order', $lineId);
+            $trail = rh_pos_del_trail_state($pdo, 'pos_order', $lineId, $orderCreatedAt);
+            $closedOrder = in_array((string)$order['status'], ['voided', 'cancelled', 'refunded'], true);
+            $n = 0;
+            $chargeTookIt = false;
+            if ($chargeDeductedSel && $alreadyOff && $trail['deductions'] === 0) {
+                $chargeDeductedSel->execute([$orderId, (int)$it['menu_item_id'], (float)$it['quantity']]);
+                $chargeTookIt = (int)$chargeDeductedSel->fetchColumn() === 1;
+            }
+            if ($chargeTookIt) {
+                $lineOutcomes[] = ['line_id' => $lineId, 'name' => $name, 'status' => $status, 'outcome' => 'stock settled on voided folio charge'];
+                continue;
+            }
+            if ($trail['held'] > 0) {
+                $n = rh_record_item_wastage($pdo, (int)$it['menu_item_id'], (string)$it['menu_type'], (float)$it['quantity'], false, $userId, $stockReason . ' - wastage (' . $name . ', ' . $status . ')', 'pos_order', $lineId);
+            } elseif (!$closedOrder && !($trail['deductions'] > 0 && $trail['tagged'] > 0)) {
+                $n = rh_record_item_wastage($pdo, (int)$it['menu_item_id'], (string)$it['menu_type'], (float)$it['quantity'], true, $userId, $stockReason . ' - wastage (' . $name . ', ' . $status . ')', 'pos_order', $lineId);
+            }
             if ($n > 0) {
                 $tally['wasted']++;
                 $namesWasted[] = $name;
@@ -477,23 +531,22 @@ function rh_delete_pos_order(PDO $pdo, int $orderId, int $userId, string $reason
         $voidedByBooking = [];
         if ($hasChargeOrderCol) {
             $chSel = $pdo->prepare("SELECT id, booking_id, charge_type, source_item_id, quantity, stock_tracked, voided, line_total
-                                      FROM booking_charges WHERE stock_order_id = ? FOR UPDATE");
+                                      FROM booking_charges WHERE stock_order_id = ? ORDER BY id ASC FOR UPDATE");
             $chSel->execute([$orderId]);
             $charges = $chSel->fetchAll(PDO::FETCH_ASSOC);
             $voidChargeUpd = $pdo->prepare("UPDATE booking_charges SET voided = 1, voided_at = NOW(), void_reason = ?, voided_by = ?, updated_at = NOW() WHERE id = ? AND voided = 0");
+            $usedLines = []; // each live charge follows its OWN kitchen line (untracked ones claim theirs too; the helper skips their stock)
             foreach ($charges as $ch) {
                 $bid = (int)$ch['booking_id'];
                 $bookingIds[$bid] = true;
                 if ((int)$ch['voided'] === 1) {
                     continue; // already voided earlier; its stock was dealt with then
                 }
-                if (!empty($ch['stock_tracked'])) {
-                    $r = rh_restore_room_service_charge_stock($pdo, $orderId, $ch, $stockReason, $userId);
-                    if ($r === 'restored') {
-                        $tally['restored']++;
-                    } elseif ($r === 'wastage') {
-                        $tally['wasted']++;
-                    }
+                $r = rh_restore_room_service_charge_stock($pdo, $orderId, $ch, $stockReason, $userId, $usedLines);
+                if ($r === 'restored') {
+                    $tally['restored']++;
+                } elseif ($r === 'wastage') {
+                    $tally['wasted']++;
                 }
                 $voidChargeUpd->execute([mb_substr('Order ' . $reference . ' deleted: ' . $reason, 0, 255), $userId, (int)$ch['id']]);
                 $voidedByBooking[$bid] = round(($voidedByBooking[$bid] ?? 0.0) + (float)$ch['line_total'], 2);

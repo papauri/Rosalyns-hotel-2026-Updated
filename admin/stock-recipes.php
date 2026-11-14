@@ -106,7 +106,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 // and the same ingredient is not repeated.
                 $lines = [];
                 $seenIng = [];
-                $ingNameStmt = $pdo->prepare("SELECT name FROM stock_ingredients WHERE id = ?");
+                $ingNameStmt = $pdo->prepare("SELECT name, is_archived FROM stock_ingredients WHERE id = ?");
                 $count = count($ingIds);
                 for ($k = 0; $k < $count; $k++) {
                     if (!empty($delim[$k])) continue;
@@ -123,8 +123,13 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         throw new RuntimeException('Yield percent must be above 0 and at most 100.');
                     }
                     $ingNameStmt->execute([$iid]);
-                    $ingName = $ingNameStmt->fetchColumn();
-                    if ($ingName === false) throw new RuntimeException('A selected ingredient no longer exists.');
+                    $ingRow = $ingNameStmt->fetch(PDO::FETCH_ASSOC);
+                    if (!$ingRow) throw new RuntimeException('A selected ingredient no longer exists.');
+                    $ingName = (string)$ingRow['name'];
+                    if ((int)$ingRow['is_archived'] === 1) {
+                        // An archived item must not move stock: a recipe line would deduct it on every sale.
+                        throw new RuntimeException('"' . $ingName . '" is archived, so it cannot be used in a recipe. Remove that line or choose another ingredient (or restore the item on the Ingredients page first).');
+                    }
                     if (isset($seenIng[$iid])) {
                         throw new RuntimeException('"' . $ingName . '" appears more than once in this recipe. Combine the quantities into one line.');
                     }
@@ -219,6 +224,17 @@ if (!$error || strpos($error, 'not yet') === false) {
             ORDER BY mc.sort_order ASC, mi.item_name ASC
         ")->fetchAll(PDO::FETCH_ASSOC);
         $ingredients = $pdo->query("SELECT id, name, category, unit, cost_per_unit, current_quantity FROM stock_ingredients WHERE is_archived = 0 ORDER BY category, name")->fetchAll(PDO::FETCH_ASSOC);
+        // Recipes saved before archived items were refused: listed only (nothing is changed), so staff can fix them.
+        $archivedInRecipes = $pdo->query("
+            SELECT COALESCE(mi.item_name, CONCAT('menu item #', sr.menu_item_id)) AS dish, i.name AS ingredient
+            FROM stock_recipe_ingredients sri
+            INNER JOIN stock_recipes sr ON sr.id = sri.recipe_id
+            INNER JOIN stock_ingredients i ON i.id = sri.ingredient_id
+            LEFT JOIN menu_items mi ON mi.id = sr.menu_item_id
+            WHERE i.is_archived = 1
+            ORDER BY dish, ingredient
+            LIMIT 11
+        ")->fetchAll(PDO::FETCH_ASSOC);
     } catch (Throwable $e) {
         $error = 'Failed to load: ' . $e->getMessage();
     }
@@ -252,6 +268,16 @@ $csrf_token = generateCsrfToken();
         endif; ?>
         <?php if ($error):   showAlert($error,   'error');
         endif; ?>
+        <?php if (!empty($archivedInRecipes)):
+            $airList = [];
+            foreach (array_slice($archivedInRecipes, 0, 10) as $air) {
+                $airList[] = $air['dish'] . ' (' . $air['ingredient'] . ')';
+            } ?>
+            <p class="alert alert-warning" role="status" style="font-size:13px;margin:8px 0;"><i class="fas fa-triangle-exclamation"></i>
+                These recipes still use an archived ingredient, which is taken off stock each time the dish sells:
+                <?php echo htmlspecialchars(implode(', ', $airList) . (count($archivedInRecipes) > 10 ? ', and more' : '')); ?>.
+                Open each recipe and remove or replace that ingredient.</p>
+        <?php endif; ?>
 
         <div class="recipe-layout">
             <div class="menu-list">
@@ -326,7 +352,7 @@ $csrf_token = generateCsrfToken();
             <input type="hidden" name="menu_type" id="re_menu_type">
 
             <div style="margin-bottom:14px; display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-                <label style="font-size:12px; font-weight:600;" title="If one batch of this recipe yields multiple portions, set this. E.g. a 4-portion stew enters quantities once and is divided.">
+                <label style="font-size:12px; font-weight:600;" title="For reference only: how many portions one batch of this recipe makes. Stock is NOT divided by this number - each portion sold takes the quantities below, so enter them for ONE portion.">
                     Recipe yields
                     <input type="number" name="portions_per_recipe" id="re_portions" value="1" min="1" max="200"
                         style="width:70px; padding:6px; border:1px solid #d6d8db; border-radius:6px; margin:0 4px;">

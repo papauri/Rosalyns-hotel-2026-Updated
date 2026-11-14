@@ -179,6 +179,19 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new RuntimeException('Cannot archive: ' . rtrim(rtrim(number_format((float)$cur['current_quantity'], 3, '.', ''), '0'), '.')
                         . ' ' . $cur['unit'] . ' is still in stock. Count it in a stock count or record it as wastage first, so its value is written off properly.');
                 }
+                // An archived item must not move stock: refuse while a recipe still uses it (each sale would deduct it).
+                $useQ = $pdo->prepare("SELECT DISTINCT COALESCE(mi.item_name, CONCAT('menu item #', sr.menu_item_id)) AS dish
+                                       FROM stock_recipe_ingredients sri
+                                       INNER JOIN stock_recipes sr ON sr.id = sri.recipe_id
+                                       LEFT JOIN menu_items mi ON mi.id = sr.menu_item_id
+                                       WHERE sri.ingredient_id = ? ORDER BY dish LIMIT 4");
+                $useQ->execute([$id]);
+                $dishes = $useQ->fetchAll(PDO::FETCH_COLUMN);
+                if ($dishes) {
+                    $more = count($dishes) > 3 ? ' and others' : '';
+                    throw new RuntimeException('Cannot archive: this ingredient is still in the recipe for ' . implode(', ', array_slice($dishes, 0, 3)) . $more
+                        . '. Remove it from those recipes (or swap in another ingredient) on the Recipes page first.');
+                }
                 $stmt = $pdo->prepare("UPDATE stock_ingredients SET is_archived = 1, updated_at = NOW() WHERE id = ?");
                 $stmt->execute([$id]);
                 $message = 'Ingredient archived.';
@@ -263,6 +276,12 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($supplier !== '') { $supplier = mb_substr(rh_clean_text($supplier), 0, 255); }
                 $supplierContact = mb_substr(rh_clean_text($supplierContact), 0, 255);
 
+                // Double-submit guard: the identical receipt from this session within 20 seconds is a double click.
+                $stockInFp = md5(json_encode([$id, $qty, $cost, $supplierId, $supplier, $expiry, $batchNotes]));
+                if (($_SESSION['stock_in_last_fp'] ?? '') === $stockInFp && (time() - (int)($_SESSION['stock_in_last_at'] ?? 0)) < 20) {
+                    throw new RuntimeException('This stock was just received - duplicate submission ignored.');
+                }
+
                 $pdo->beginTransaction();
                 // Lock ingredient row
                 $sel = $pdo->prepare("SELECT current_quantity, cost_per_unit, category FROM stock_ingredients WHERE id = ? FOR UPDATE");
@@ -334,6 +353,8 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $adj->execute([$id, $qty, $settle['settled'] > 0 ? 'Stock received (batch; ' . $settledTxt . ' settled unallocated deficit)' : 'Stock received (batch)', $batchId, $cost, $user['id']]);
 
                 $pdo->commit();
+                $_SESSION['stock_in_last_fp'] = $stockInFp;
+                $_SESSION['stock_in_last_at'] = time();
                 $message = sprintf('Stock received: %s units. New avg cost: %s %s/unit.', number_format($qty, 3), $currency_symbol, number_format($newAvg, 2));
             } elseif ($action === 'adjust') {
                 // Manual quantity adjustment — restricted to admin/manager only.
@@ -483,11 +504,14 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $lockIng = $pdo->prepare("SELECT ingredient_id FROM stock_batches WHERE id = ?");
                 $lockIng->execute([$batchId]);
                 $pdo->prepare("SELECT id FROM stock_ingredients WHERE id = ? FOR UPDATE")->execute([(int)$lockIng->fetchColumn()]);
-                $sel = $pdo->prepare("SELECT ingredient_id, batch_number, quantity_remaining, cost_per_unit FROM stock_batches WHERE id = ? FOR UPDATE");
+                $sel = $pdo->prepare("SELECT ingredient_id, batch_number, quantity_remaining, cost_per_unit, status FROM stock_batches WHERE id = ? FOR UPDATE");
                 $sel->execute([$batchId]);
                 $b = $sel->fetch(PDO::FETCH_ASSOC);
                 if (!$b) throw new RuntimeException('Batch not found.');
                 $remaining = (float)$b['quantity_remaining'];
+                // Same guard as the Batches page: an empty or closed batch has nothing to discard (closing a used-up
+                // batch would make a later void / return from it be written off instead of put back).
+                if ($remaining <= 0.0001 || ($b['status'] ?? '') !== 'active') throw new RuntimeException('Batch is already empty or closed.');
                 $ingredId = (int)$b['ingredient_id'];
                 $cost = (float)$b['cost_per_unit'];
 

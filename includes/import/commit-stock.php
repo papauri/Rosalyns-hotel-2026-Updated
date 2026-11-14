@@ -11,7 +11,8 @@
  *   - ONE opening count left SUBMITTED with staged expiry batches: a different manager approves it (two-person rule) and only then does
  *     stock appear. Nothing is stocked in directly, no quantity is UPDATEd, nothing is deleted/archived, recipes are untouched.
  *   - stock on hand with no cost is NOT put in the count (shown as a warning on the review screen).
- * One DB transaction, all-or-nothing. A second call for a committed job changes nothing and returns the stored result.
+ * One DB transaction, all-or-nothing, one import commit at a time (named lock, taken before the transaction). A second call for a
+ * committed job changes nothing and returns the stored result.
  * Everything is re-validated here (import_job_revalidate): the browser's statuses are never read.
  * $opts: fail_after_apply (CLI tests only: force a failure after the writes, to prove the rollback leaves nothing behind).
  */
@@ -72,6 +73,10 @@ if (!function_exists('import_commit_stock')) {
                     $changes[$f] = $it['diff'][$f];
                 }
             }
+            // a ticked par also sets the reorder point when the file has a minimum (rh_ssi_apply writes only the listed fields)
+            if (isset($changes['par']) && $it['min'] !== null && abs((float)$it['min'] - (float)$ex['reorder_point']) > 0.00005) {
+                $changes['reorder'] = [(float)$ex['reorder_point'], (float)$it['min']];
+            }
             $plan['items'][$key] = $base + [
                 'dept' => isset($t['category']) ? (string)$it['category'] : (string)$ex['category'], 'unit' => (string)$ex['unit'],
                 'cost' => isset($t['cost']) ? $it['cost'] : null, 'pack' => isset($t['pack']) ? ($it['pack'] ?: null) : null,
@@ -109,16 +114,44 @@ if (!function_exists('import_commit_stock')) {
             $pdo->exec('ALTER TABLE stock_counts ADD COLUMN is_opening TINYINT(1) NOT NULL DEFAULT 0');
         }
 
+        // One import commit at a time (I1): taken BEFORE the transaction starts, so this transaction's read snapshot is made after
+        // any earlier import has committed. A second import that shares a new item then sees it as existing instead of creating
+        // it again. Same pattern as the count approval lock in admin/stock-count.php. Named lock = no row locks, no deadlock.
+        $commitLock = import_commit_lock_name();
+        if ((int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote($commitLock) . ', 10)')->fetchColumn() !== 1) {
+            return import_commit_fail('Another import is being saved right now, so nothing was imported. Wait a few seconds and press Import again.');
+        }
+        try {
+            return import_commit_stock_locked($pdo, $jobId, $userId, $opts);
+        } finally {
+            try {
+                $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote($commitLock) . ')');
+            } catch (Throwable $e) {
+                // closing the connection releases it
+            }
+        }
+    }
+
+    /** Name of the import-commit lock (one per database). */
+    function import_commit_lock_name(): string
+    {
+        return substr('rh_import_commit_' . (defined('DB_NAME') ? DB_NAME : 'db'), 0, 64);
+    }
+
+    /** The commit itself; the caller holds the import-commit lock. The job row is read again here, inside the lock. */
+    function import_commit_stock_locked(PDO $pdo, int $jobId, int $userId, array $opts): array
+    {
         $pdo->beginTransaction();
         try {
-            $lock = $pdo->prepare('SELECT status, result_json FROM import_jobs WHERE id = ? FOR UPDATE');
+            $lock = $pdo->prepare('SELECT * FROM import_jobs WHERE id = ? FOR UPDATE');
             $lock->execute([$jobId]);
             $cur = $lock->fetch(PDO::FETCH_ASSOC);
+            $job = $cur ?: [];      // the row as it is now, inside the lock (another request may have changed it while this one waited)
             if ($cur && $cur['status'] === 'committed') {
                 $pdo->rollBack();
                 return ['ok' => true, 'error' => '', 'already' => true, 'result' => json_decode((string)$cur['result_json'], true)];
             }
-            if (!$cur || !in_array($cur['status'], ['analysed', 'reviewing', 'confirmed'], true)) {
+            if (!$cur || ($cur['target'] ?? '') !== 'stock' || !in_array($cur['status'], ['analysed', 'reviewing', 'confirmed'], true)) {
                 $pdo->rollBack();
                 return import_commit_fail('This import can no longer be imported.');
             }

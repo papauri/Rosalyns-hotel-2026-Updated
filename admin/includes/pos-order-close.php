@@ -132,15 +132,16 @@ if (!function_exists('rh_close_pos_order')) {
         $folioVoided = 0;
         $bookingIds = [];
         if (rh_pos_close_has_charge_order_col($pdo)) {
-            $cs = $pdo->prepare("SELECT id, booking_id, charge_type, source_item_id, quantity, stock_tracked FROM booking_charges WHERE stock_order_id = ? AND voided = 0 FOR UPDATE");
+            $cs = $pdo->prepare("SELECT id, booking_id, charge_type, source_item_id, quantity, stock_tracked FROM booking_charges WHERE stock_order_id = ? AND voided = 0 ORDER BY id ASC FOR UPDATE");
             $cs->execute([$orderId]);
             $charges = $cs->fetchAll(PDO::FETCH_ASSOC);
+            $usedLines = []; // each charge follows its OWN kitchen line (twins: served one wasted, unserved one restored)
             if ($charges) {
                 $chargeReason = $isVoid ? $details : 'Room-service order cancelled before prep: ' . $details;
                 $cu = $pdo->prepare("UPDATE booking_charges SET voided = 1, voided_at = NOW(), void_reason = ?, voided_by = ?, updated_at = NOW() WHERE id = ?");
                 foreach ($charges as $charge) {
                     $cu->execute([mb_substr($chargeReason, 0, 255), $actorId, (int)$charge['id']]);
-                    $outcome = rh_restore_room_service_charge_stock($pdo, $orderId, $charge, ($isVoid ? 'Room service order voided: ' : 'Room service order cancelled: ') . $chargeReason, $userId);
+                    $outcome = rh_restore_room_service_charge_stock($pdo, $orderId, $charge, ($isVoid ? 'Room service order voided: ' : 'Room service order cancelled: ') . $chargeReason, $userId, $usedLines);
                     if ($outcome === 'restored') {
                         $stockRestored++;
                     } elseif ($outcome === 'wastage') {
@@ -444,13 +445,13 @@ if (!function_exists('rh_close_order_keep_started')) {
                         throw new RuntimeException('Stock restore failed for ' . (string)$ln['item_name'] . ' - nothing was changed. Please retry or contact a manager.');
                     }
                     $restored++;
-                } elseif ((int)$ln['stock_deducted'] === 1) {
+                } elseif ((int)$ln['stock_deducted'] === 1 && rh_pos_line_has_deduction($pdo, $lineId)) { // ONE GATE: a flag without a deduction record = nothing taken
                     if (!restoreStockForMenuItem($itemId, $menuType, $qty, 'Booking closed: line not started', $userId, $lineId, 'pos_order')) {
                         throw new RuntimeException('Stock restore failed for ' . (string)$ln['item_name'] . ' - nothing was changed. Please retry or contact a manager.');
                     }
                     $restored++;
                 }
-            } elseif ((int)$ln['stock_deducted'] === 1) {
+            } elseif ((int)$ln['stock_deducted'] === 1 && rh_pos_line_has_deduction($pdo, $lineId)) { // ONE GATE
                 if (!restoreStockForMenuItem($itemId, $menuType, $qty, 'Booking closed: line not started', $userId, $lineId, 'pos_order')) {
                     throw new RuntimeException('Stock restore failed for ' . (string)$ln['item_name'] . ' - nothing was changed. Please retry or contact a manager.');
                 }

@@ -45,6 +45,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
             $count = count($ingIds);
             $saved = 0;
             $bookedNow = false;
+            $hasCountedAt = null;
 
             // Validate every filled row before anything is written.
             for ($k = 0; $k < $count; $k++) {
@@ -95,6 +96,25 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (!$row) continue;
                 $cost = (float)$row['cost_per_unit'];
                 $currentQty = (float)$row['current_quantity'];
+
+                // A loss dated before an APPROVED count of this item is already in that count's shortage:
+                // booking it as well would take it off stock twice.
+                if ($date < date('Y-m-d')) {
+                    if ($hasCountedAt === null) {
+                        $hasCountedAt = (bool)$pdo->query("SHOW COLUMNS FROM stock_count_lines LIKE 'counted_at'")->fetch(); // migration 062
+                    }
+                    $laterCnt = $pdo->prepare("SELECT sc.count_date, i.name FROM stock_counts sc
+                                               INNER JOIN stock_count_lines scl ON scl.count_id = sc.id
+                                               INNER JOIN stock_ingredients i ON i.id = scl.ingredient_id
+                                               WHERE sc.status = 'approved' AND scl.ingredient_id = ? AND sc.count_date > ?"
+                                               . ($hasCountedAt ? " AND scl.counted_at IS NOT NULL" : "") . "
+                                               ORDER BY sc.count_date DESC LIMIT 1");
+                    $laterCnt->execute([$iid, $date]);
+                    if ($lc = $laterCnt->fetch(PDO::FETCH_ASSOC)) {
+                        throw new RuntimeException('"' . $lc['name'] . '": this loss is already in the count of ' . date('j M Y', strtotime((string)$lc['count_date']))
+                            . ' (that count found what was really on the shelf). Nothing was recorded.');
+                    }
+                }
 
                 if ($q > $currentQty + 0.0001) {
                     throw new RuntimeException('Wastage quantity exceeds current stock for ingredient #' . $iid . '.');

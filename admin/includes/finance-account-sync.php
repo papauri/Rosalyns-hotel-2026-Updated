@@ -994,11 +994,27 @@ if (!function_exists('rh_sync_restaurant_order_refund_state')) {
                 $pdo->prepare("UPDATE stock_orders SET status = 'refunded', refunded_at = NOW(), refund_reason = ? WHERE id = ?")
                     ->execute([mb_substr($reason !== '' ? $reason : 'Refunded via payments', 0, 250), $orderId]);
                 // Linked data: a fully refunded order keeps no unserved lines on the stations.
+                // All or nothing (step 8c): a failure part-way (e.g. one line's stock restore) is undone back to
+                // the savepoint, so no line is left half closed / half restored; the refund itself stands.
                 if (function_exists('rh_close_refunded_order_lines')) {
+                    $pdo->exec('SAVEPOINT rh_refund_close_lines');
                     try {
                         rh_close_refunded_order_lines($pdo, $orderId, (int)($_SESSION['admin_user_id'] ?? 0), 'Refunded via payments');
+                        $pdo->exec('RELEASE SAVEPOINT rh_refund_close_lines');
                     } catch (Throwable $e) {
+                        if (function_exists('rh_is_lock_conflict') && rh_is_lock_conflict($e)) {
+                            throw $e; // the DB already rolled the whole transaction back: the caller must see it
+                        }
+                        try {
+                            $pdo->exec('ROLLBACK TO SAVEPOINT rh_refund_close_lines');
+                            $pdo->exec('RELEASE SAVEPOINT rh_refund_close_lines');
+                        } catch (Throwable $spEx) {
+                            error_log('rh_sync_restaurant_order_refund_state savepoint: ' . $spEx->getMessage());
+                        }
                         error_log('rh_sync_restaurant_order_refund_state close lines: ' . $e->getMessage());
+                        if (function_exists('rh_log_event')) {
+                            rh_log_event('pos', 'error', "Refund of order #{$orderId}: its unserved lines could not be closed, so nothing was changed on them - close them from Orders & Tabs.", ['order_id' => $orderId, 'error' => $e->getMessage()]);
+                        }
                     }
                 }
             }

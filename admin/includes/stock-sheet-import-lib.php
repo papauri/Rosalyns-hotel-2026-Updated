@@ -649,14 +649,42 @@ if (!function_exists('rh_ssi_apply')) {
 
         $ins = $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, min_quantity, cost_per_unit, yield_percent, notes, reorder_point, par_level, pack_name, pack_size)
                               VALUES (?, ?, ?, 0, 0, ?, 100, ?, ?, ?, ?, ?)");
-        $upd = $pdo->prepare("UPDATE stock_ingredients SET category = ?, cost_per_unit = ?, notes = ?, reorder_point = ?, par_level = ?, pack_name = ?, pack_size = ?, updated_at = NOW() WHERE id = ?");
+        // Matched rows are read again WITH a row lock (I3): a cost, par or quantity changed by someone else since the plan was made is
+        // what this import starts from; only the fields listed in 'changes' (what was ticked / what the sheet changes) are written.
+        $locked = [];
+        $updIds = [];
+        foreach ($plan['items'] as $it) {
+            if ($it['action'] === 'update' && !empty($it['existing']['id'])) {
+                $updIds[] = (int)$it['existing']['id'];
+            }
+        }
+        sort($updIds);
+        foreach (array_chunk(array_values(array_unique($updIds)), 400) as $chunk) {
+            $q = $pdo->prepare('SELECT * FROM stock_ingredients WHERE id IN (' . implode(',', array_fill(0, count($chunk), '?')) . ') ORDER BY id FOR UPDATE');
+            $q->execute($chunk);
+            foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $locked[(int)$r['id']] = $r;
+            }
+        }
+        $dupName = $pdo->prepare('SELECT id, name FROM stock_ingredients WHERE name = ? FOR UPDATE');      // locking read (sees rows committed since the plan), uses the name index
+        $dupKey = $pdo->prepare('SELECT id, name FROM stock_ingredients WHERE LOWER(TRIM(name)) = ? LIMIT 1');
         foreach ($plan['items'] as $k => &$it) {
             if ($it['action'] === 'create') {
-                $dup = $pdo->prepare("SELECT id FROM stock_ingredients WHERE LOWER(TRIM(name)) = ? LIMIT 1");
-                $dup->execute([$it['key']]);
-                if ($id = (int)$dup->fetchColumn()) {   // appeared since the plan was made: treat as existing, change nothing
-                    $it['id'] = $id; $it['system_qty'] = null;
-                    continue;
+                // A name that exists by now (added after the plan was made) is refused (I2): the whole write is rolled back by the
+                // caller. Treating it as "existing, change nothing" would still give it a count line from a system quantity of 0.
+                $dupName->execute([trim((string)$it['name'])]);
+                $hit = null;
+                foreach ($dupName->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                    if (rh_ssi_key((string)$r['name']) === $it['key']) {
+                        $hit = $r;
+                    }
+                }
+                if (!$hit) {
+                    $dupKey->execute([$it['key']]);
+                    $hit = $dupKey->fetch(PDO::FETCH_ASSOC) ?: null;
+                }
+                if ($hit) {
+                    throw new RuntimeException('"' . $it['name'] . '" matches existing "' . $hit['name'] . '", which was added after this import was checked. Review the import again.');
                 }
                 $ins->execute([
                     mb_substr($it['name'], 0, 255), $it['dept'], $it['unit'], $it['cost'] ?? 0, $it['notes'] !== '' ? $it['notes'] : null,
@@ -666,15 +694,40 @@ if (!function_exists('rh_ssi_apply')) {
                 $it['system_qty'] = 0.0;
                 $res['created']++;
             } elseif ($it['action'] === 'update') {
-                $e = $it['existing'];
+                $e = $locked[(int)$it['existing']['id']] ?? null;
+                if (!$e) {
+                    throw new RuntimeException('"' . $it['existing']['name'] . '" no longer exists. Review the import again.');
+                }
+                $it['existing'] = $e;                 // the count line below takes its cost from the locked row when the cost is not changed
                 $it['id'] = (int)$e['id'];
                 $it['system_qty'] = (float)$e['current_quantity'];
-                if ($it['changes']) {
-                    $upd->execute([
-                        $it['dept'], $it['cost'] ?? (float)$e['cost_per_unit'], $it['notes'] !== '' ? $it['notes'] : null,
-                        $it['reorder'], $it['par'],
-                        $it['pack'] ? 'crate' : ($e['pack_name'] ?: null), $it['pack'] ?: ($e['pack_size'] ?: null), $it['id'],
-                    ]);
+                $set = [];
+                $args = [];
+                foreach (array_keys((array)$it['changes']) as $field) {
+                    if ($field === 'category') {
+                        $set[] = 'category = ?';
+                        $args[] = $it['dept'];
+                    } elseif ($field === 'cost' && $it['cost'] !== null) {
+                        $set[] = 'cost_per_unit = ?';
+                        $args[] = $it['cost'];
+                    } elseif ($field === 'par') {
+                        $set[] = 'par_level = ?';
+                        $args[] = $it['par'];
+                    } elseif ($field === 'reorder') {
+                        $set[] = 'reorder_point = ?';
+                        $args[] = $it['reorder'];
+                    } elseif ($field === 'pack' && $it['pack']) {
+                        $set[] = "pack_name = 'crate'";
+                        $set[] = 'pack_size = ?';
+                        $args[] = $it['pack'];
+                    } elseif ($field === 'notes') {
+                        $set[] = 'notes = ?';
+                        $args[] = $it['notes'] !== '' ? $it['notes'] : null;
+                    }
+                }
+                if ($set) {
+                    $args[] = $it['id'];
+                    $pdo->prepare('UPDATE stock_ingredients SET ' . implode(', ', $set) . ', updated_at = NOW() WHERE id = ?')->execute($args);
                     $res['updated']++;
                 }
             } elseif (in_array($it['action'], ['skip_conflict', 'skip_archived'], true) && !empty($it['existing'])) {
