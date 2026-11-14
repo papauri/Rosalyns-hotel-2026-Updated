@@ -126,3 +126,6 @@ Parallel session: step 8d (refunds on payout day) is building in the same tree -
 **Fable: case a (2026-11-15) GO WITH CHANGES** - applied above (ONE GATE, P1 status rule, P2 no stock for
 charge lines, P3 unserved-only close, P4 no flag change, P5 lock-conflict rethrow, P6 recall-only, P7 pulled in, S1 untraced
 cost, S2 no filter in rhLookupBarcode, S9 strict date). I4 confirmed a fault fix (explicit ticked 0; blank = null).
+
+**OWNER 2026-11-15 (usage):** "When you reach 99% of this session 5hr usage automatically switch to fable ... not at high but equivalent of opus". Rule for the rest of 8c: if an Opus agent or the session hits a usage-limit error, re-dispatch that same work with `model: fable`, effort medium (not high). Logged as an owner exception to the Fable 3-case rule, this step only.
+Cheapest way to switch (orchestrator advice to owner 2026-11-15): do NOT switch this long session to Fable (the whole history would be re-read by Fable, uncached). Instead /clear, /model Fable, then "Run the next step of .claude/NEXT_BUILD_ORDER.md": the state is in this file + the 8c lines in TASKS.md + the uncommitted Liwonde tree (builds A, B, C).
