@@ -19,6 +19,15 @@ when prompted."
 
 ## Pending (oldest first)
 
+### Refunds on the payout day everywhere (2026-11-15, NEXT_BUILD_ORDER step 8d) — e90b5c7 / 5151a26
+- Guides (Dashboard, Payments, Accounting, Company accounts): a refund now shows and counts on the day it was paid
+  out on the Dashboard "today" list (with the payout time), the Payments list Payment Date column and its date sort,
+  the Accounting payment-method counts and Company accounts "received this month" - the same day as End of Day and
+  Reports. A refund still pending shows the day it was raised and counts in no period. The time under Payment Date is
+  still when the record was saved. No amounts changed.
+- Assistant: check at sync time whether any read tool filters refunds by payment_date (grep includes/ai/ for
+  payment_type = 'refund' with a date filter) and apply the payout-day rule.
+
 ### Payments accuracy + Payments page (2026-11-15, NEXT_BUILD_ORDER step 8b) — SHIPPED (hashes: see TASKS.md line)
 - Guides (Payments, Payment details, Bookings "Payments & balance", End of Day, Reports, Credit notes, email templates):
   click anywhere on a Payments row (or an "accounts that owe" row) to open it; Payment details now shows paid by,

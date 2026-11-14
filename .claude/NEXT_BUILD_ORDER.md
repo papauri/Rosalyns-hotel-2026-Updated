@@ -39,7 +39,8 @@ The owner starts EVERY session with the same prompt: **"Run the next step of .cl
 | 8 | SHIPPED 2026-11-14 0a860b9 / 142aee6 | Booking Details modal on phones + tablets: compact cards, tap a booking to open full details (owner 2026-11-14) | this file, step 8 brief | dept-rooms-lead + ui-lead (Opus) -> qa-auditor + browser check 390 / 768 / 1400 |
 | 8a | SHIPPED 2026-11-15 13cabec / 13df47e (owner confirmed the real question works) | AI Assistant revisit: stay facts for a named guest ("when did <guest> check out") must be answered, never "the chat was cleared" / "I don't know" (owner 2026-11-14) | this file, step 8a brief | dept-ai-lead (Opus) -> opus review |
 | 8b | SHIPPED 2026-11-15 6303bf1 / a148654 | Payments: money accurate end to end + Payments page complete (row click opens the payment, History/logs, notes) + invoices, quotations, receipts, credit notes agree (owner 2026-11-14) | this file, step 8b brief | dept-accounting-lead (Opus) audit -> build -> qa-auditor opus + browser check 390 / 768 / 1400 |
-| 8c | TODO | Stock review: works as intended, end to end, with the POS (deduct/restore, batches, counts, wastage, receiving, barcodes, suppliers/POs, Data Import). No new features (owner 2026-11-14) | this file, step 8c brief | dept-stock-lead (Opus) audit -> fix -> qa-auditor opus; dept-import-lead + dept-restaurant-lead for their parts |
+| 8c | DOING 2026-11-15 (audit done, plan .claude/STOCK_REVIEW_8C.md; continued in its own session on owner input while 8d runs in another) | Stock review: works as intended, end to end, with the POS (deduct/restore, batches, counts, wastage, receiving, barcodes, suppliers/POs, Data Import). No new features (owner 2026-11-14) | this file, step 8c brief | dept-stock-lead (Opus) audit -> fix -> qa-auditor opus; dept-import-lead + dept-restaurant-lead for their parts |
+| 8d | SHIPPED 2026-11-15 e90b5c7 / 5151a26 (owner: "do 8d now") | Refunds counted on the payout day everywhere: the 4 places 8b left on the day raised (dashboard today feed, api/payments.php list + summary, company "received this month", Accounting payment-method counts) + Payments list date column/sort | this file, step 8d brief | dept-accounting-lead (Opus) -> qa-auditor opus + browser check 390 / 768 / 1400 |
 | 9 | TODO | Other admin modals with the same problem on phones + tablets: check all, fix the affected ones (owner 2026-11-14) | this file, step 9 brief | ui-lead (Opus) -> qa-auditor + browser check 390 / 768 / 1400 |
 | 10 | TODO | Bookings list on tablets: compact rows instead of the large cards (owner 2026-11-14) | this file, step 10 brief | ui-lead (Opus) -> qa-auditor + browser check 390 / 768 / 1400 |
 
@@ -228,6 +229,16 @@ TASKS.md as LATER for the owner. Rosalyn's is LIVE (read-only); every test, coun
 - Gate: ONE qa-auditor (opus) review; the stock + POS suites at LIWONDE; browser check 390 / 768 / 1400 of any screen
   touched (POS till and stock pages). No migration without the owner's OK for Rosalyn's. Ship to both hotels; entry
   in GUIDES_AI_SYNC.md.
+
+**Step 8d - Refunds on the payout day everywhere.** (Owner 2026-11-15: "do 8d now", ahead of 8c.) OWNER RULE (8b,
+2026-11-14/15): a refund counts on the day it was paid out in every report; a pending refund counts in no period.
+Helper: `rh_pay_count_day_sql()` in admin/includes/finance-refunds.php (already used by EOD, Reports, Accounting cards,
+Payments filters). Apply it where 8b left the day raised: admin/dashboard.php ~1461 (today feed refunds),
+api/payments.php ~182-238 (list + summary date filters), includes/billing-accounts.php ~615 (company received net),
+admin/accounting-dashboard.php ~376 (payment-method counts), admin/payments.php ~175 + list Payment Date column. No
+change to amounts, only which day a refund lands on. Fable: not needed (rule already spec-checked in 8b). Builder:
+dept-accounting-lead (Opus); gate qa-auditor opus; tests at LIWONDE only (payments_accuracy_8b + finance_refunds +
+billing suites + one new case); browser check 390 / 768 / 1400 at Liwonde. Ship to both hotels; entry in GUIDES_AI_SYNC.md.
 
 **Step 9 - Other modals on phones and tablets.** (Owner 2026-11-14: "Also check other modals affected the same for
 mobile and tabs especially and add it in the build order.") Confirm step 8 is SHIPPED; reuse its `UI_DECISION`.
