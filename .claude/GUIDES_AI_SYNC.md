@@ -128,6 +128,18 @@ when prompted."
   figure still prints; a template that places the tag in the HTML only gets no block in its text part; the
   quotation's own "Rate Per Night" is on the line basis while the block shows the all-in rate (labelled).
 
+### Failing test suites fixed (2026-11-14) — SHIPPED (hashes: see TASKS.md line)
+- Guides: one small wording change. Early checkout on the day the guest arrived: the dialog, History and the
+  refund reason now say the right number of unused nights (one night is still charged, so a 2-night stay shows
+  1 unused night, not 2). The refund amount did not change. Everything else was test files.
+- Assistant: no sync needed (includes/ai/ does not read `unused_nights`; check with a grep at sync time).
+- MSP panel: a failed staff step now reports only the error type ("details in this site's error log"), never the
+  error text. Liwonde has a permanent test staff account `test.staff` (receptionist, id 5351) - never delete it.
+- LATER (not pulled): pin `staff_error` in licence_client.php to the known message starts; an older saved
+  licence_staff_error goes out until the next staff run; late_stay_options leaves STMT-ZLS*.pdf files in invoices/;
+  error_log_clear, stock_count_approval*, documents_flow, rehearsal_fixes have no refuse-at-Rosalyn's guard; past
+  same-day early checkouts at Rosalyn's keep the old night count in their History text (no money effect).
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` fails in unchanged code: claim-check self-test (Room Board "Tomorrow"; staff
   activity "4 of 3 staff accounts"), History Summary "K1,068,000," flagged; digest-recipients fail.

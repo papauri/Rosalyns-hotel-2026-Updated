@@ -486,7 +486,8 @@ if (!function_exists('rh_licence_staff_run')) {
             return $out;
         } catch (Throwable $e) {
             error_log('licence staff: ' . $e->getMessage());
-            $out['error'] = 'The staff step failed: ' . get_class($e) . ' ' . mb_substr($e->getMessage(), 0, 150);
+            // Only the error type leaves the hotel (sent with the next check-in): the message can hold SQL or row values; it is in error_log above.
+            $out['error'] = 'The staff step failed: ' . get_class($e) . ' (details in this site\'s error log).';
             return $out;
         } finally {
             if ($locked) {

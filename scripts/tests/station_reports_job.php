@@ -196,10 +196,11 @@ $gate = (string)strstr((string)strstr($save, 'if ($canTimedReports) {'), "      
 foreach (['automated_job_daily_reports_cc', 'automated_job_station_reports_to', 'automated_job_station_reports_cc'] as $k) {
     sr_check(substr_count($save, "updateSetting('$k'") === 1 && strpos($gate, "if (\$posted('$k')) {") !== false && strpos($gate, "updateSetting('$k'") !== false, "save: $k written only with the permission and only when posted");
 }
-sr_check(strpos($save, "if (!\$canTimedReports && in_array(\$jobName, \$timedReportJobs, true)) {\n                    continue;") !== false, 'save: without the permission the report job switches are not written');
+// Whitespace-tolerant (indentation and CRLF/LF line endings differ between the two hotels' copies).
+sr_check(preg_match('/if \(!\$canTimedReports && in_array\(\$jobName, \$timedReportJobs, true\)\) \{\s+continue;/', $save) === 1, 'save: without the permission the report job switches are not written');
 // L16 (owner 2026-11-13): the test recipient and the master switch need timed_report_emails too.
 sr_check(strpos($save, "if (\$canTimedReports && \$posted('automated_email_test_recipient')) {") !== false
-    && strpos($save, "if (\$canTimedReports) {\n                updateSetting('automated_email_master',") !== false, 'save: test recipient and master switch written only with timed_report_emails');
+    && preg_match('/if \(\$canTimedReports\) \{\s+updateSetting\(\'automated_email_master\',/', $save) === 1,'save: test recipient and master switch written only with timed_report_emails');
 sr_check(strpos($ae, 'name="automated_email_test_recipient"') !== false && strpos($ae, "placeholder=\"empty = send to real customers\"<?php echo \$canTimedReports ? '' : ' disabled'; ?>") !== false
     && strpos($ae, "name=\"automated_email_master\" value=\"1\" <?php echo \$cfg['automated_email_master'] === '1' ? 'checked' : ''; ?><?php echo \$canTimedReports ? '' : ' disabled'; ?>") !== false,
     'test recipient + master switch shown disabled without the permission');

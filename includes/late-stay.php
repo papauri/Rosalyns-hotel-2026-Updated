@@ -214,7 +214,9 @@ if (!function_exists('rh_late_stay_ymd')) {
         if ($basis === 'booked') {
             // Owner (A): booked nights stand; extra nights run from the booked check-out to the leave date.
             $q['extra_nights'] = max(0, rh_late_stay_days($bookedOut, $leave));
-            $q['unused_nights'] = max(0, rh_late_stay_days($leave, $bookedOut));
+            // Unused nights run from the new check-out (a same-day departure still bills one night) to the booked
+            // check-out, so the count matches the nights taken off the bill.
+            $q['unused_nights'] = max(0, rh_late_stay_days($newOut, $bookedOut));
         }
         if ($delta > $tol) {
             $q['direction'] = 'charge';

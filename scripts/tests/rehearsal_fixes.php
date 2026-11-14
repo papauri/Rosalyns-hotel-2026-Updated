@@ -106,15 +106,18 @@ echo "== F2/F6 early checkout ==\n";
 $bid = rf_id(); $ref = 'RFC' . $bid % 100000;
 $setup = [rf_booking_sql($bid, $ref, 'checked-in', 0, 2), rf_paid_sql($bid, $ref, 200.0), "UPDATE bookings SET amount_paid = 200, amount_due = 0, payment_status = 'paid' WHERE id = $bid"];
 $r = rf_run('admin/bookings.php', ['action' => 'checkout_assess', 'id' => $bid], ['ajax' => true, 'setup' => $setup]);
+// The assess answer is a leave-date picker: one quote per date (settlement.quotes[Y-m-d].booked); leaving today is the refund.
 $s = $r['json']['settlement'] ?? [];
-ok('assess: early refund settlement offered', ($s['type'] ?? '') === 'refund', json_encode($r['json'] ?? $r['raw'] ?? ''));
-ok('assess: nights add up (booked 2, billed 1, unused 1)', ($s['sched_nights'] ?? 0) == 2 && ($s['actual_nights'] ?? 0) == 1 && ($s['unused_nights'] ?? 0) == 1, json_encode($s));
+$qt = $s['quotes'][$s['today_ymd'] ?? date('Y-m-d')]['booked'] ?? [];
+ok('assess: early refund settlement offered', !empty($s['needed']) && ($qt['direction'] ?? '') === 'refund', json_encode($r['json'] ?? $r['raw'] ?? ''));
+ok('assess: nights add up (booked 2, billed 1, unused 1)', ($s['booked_nights'] ?? 0) == 2 && ($qt['nights'] ?? 0) == 1 && ($qt['unused_nights'] ?? 0) == 1, json_encode($s));
 ok('assess: paid amount is reported (for the "Paid X; no refund due" wording)', abs((float)($s['amount_paid'] ?? 0) - 200) < 0.01, json_encode($s));
 
 // Checked in yesterday, booked 3 nights, paid in full: early checkout today refunds the unused night(s)
 $bid = rf_id(); $ref = 'RFD' . $bid % 100000;
 $setup = [rf_booking_sql($bid, $ref, 'checked-in', -1, 3), rf_paid_sql($bid, $ref, 300.0), "UPDATE bookings SET amount_paid = 300, amount_due = 0, payment_status = 'paid' WHERE id = $bid"];
-$r = rf_run('admin/bookings.php', ['action' => 'checkout_settle', 'id' => $bid, 'settlement_action' => 'refund', 'payment_method' => 'cash', 'notes' => 'rehearsal'], [
+// Posted as the checkout dialog posts it: settlement_action 'leave' + the leave date (the server prices it).
+$r = rf_run('admin/bookings.php', ['action' => 'checkout_settle', 'id' => $bid, 'settlement_action' => 'leave', 'leave_date' => date('Y-m-d'), 'refund_as' => 'original', 'payment_method' => 'cash', 'notes' => 'rehearsal'], [
     'ajax' => true, 'setup' => $setup,
     'verify' => ["SELECT status FROM bookings WHERE id = $bid", "SELECT COUNT(*) AS n, COALESCE(SUM(total_amount),0) AS amt FROM payments WHERE booking_type='room' AND booking_id = $bid AND payment_type = 'refund'"],
 ]);
@@ -197,7 +200,8 @@ $r = rf_run('admin/booking-details.php', ['noop' => '1'], [
 $html = is_file($dump) ? (string)file_get_contents($dump) : '';
 @unlink($dump);
 $flat = trim((string)preg_replace('/\s+/', ' ', strip_tags($html)));
-ok('booking page timeline: shows "Nights 1 -> 3"', preg_match('/Nights 1 -> 3/', $flat) === 1 && strpos($flat, 'Nights ? ->') === false, substr($flat, 0, 120));
+// The timeline uses the History wording: "Nights: 1 → 3".
+ok('booking page timeline: shows "Nights: 1 → 3"', preg_match('/Nights:? 1 (?:->|→) 3/u', $flat) === 1 && preg_match('/Nights:? \?/u', $flat) === 0, substr($flat, 0, 120));
 ok('booking page timeline: the amount line says it is the room charge change', strpos($flat, 'Room charge change') !== false);
 
 echo "\n$pass passed, $fail failed\n";

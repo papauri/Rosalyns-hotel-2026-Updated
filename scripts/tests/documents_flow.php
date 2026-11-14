@@ -213,11 +213,12 @@ ok('conference payment: NO invoice emailed with the payment', dx_count($r['email
 echo "== ROOM: booking details / bookings list / consolidation ==\n";
 $bid = dx_next_id(); $ref = 'DXRM' . $bid % 100000;
 $r = dx_run('admin/booking-details.php', ['update_payment' => '1', 'payment_status' => 'paid'], ['get' => ['id' => $bid], 'setup' => [dx_booking_sql($bid, $ref, $mail)], 'verify' => ["SELECT payment_status, receipt_emailed_at IS NOT NULL AS emailed FROM payments WHERE booking_id = $bid"]]);
-ok('booking page "mark paid": one receipt, no invoice', dx_count($r['emails'], 'receipt') === 1 && count($r['emails']) === 1, json_encode([dx_kinds($r['emails']), $r['verify'][0] ?? $r, $r['raw'] ?? '']));
+// Owner 2026-11-12: one-click "mark paid" is refused (payments go through Record payment, tested above).
+ok('booking page "mark paid" is refused: nothing recorded, nothing emailed', count($r['emails']) === 0 && isset($r['verify'][0]) && $r['verify'][0] === [], json_encode([dx_kinds($r['emails']), $r['verify'][0] ?? $r, $r['raw'] ?? '']));
 
 $bid = dx_next_id(); $ref = 'DXRM' . $bid % 100000;
 $r = dx_run('admin/bookings.php', ['action' => 'update_payment', 'id' => $bid, 'payment_status' => 'paid'], ['setup' => [dx_booking_sql($bid, $ref, $mail)], 'verify' => ["SELECT payment_status, receipt_emailed_at IS NOT NULL AS emailed FROM payments WHERE booking_id = $bid"]]);
-ok('bookings list "mark paid": one receipt, no invoice', dx_count($r['emails'], 'receipt') === 1 && count($r['emails']) === 1, json_encode([dx_kinds($r['emails']), $r['verify'][0] ?? $r, $r['raw'] ?? '']));
+ok('bookings list "mark paid" is refused: nothing recorded, nothing emailed', count($r['emails']) === 0 && isset($r['verify'][0]) && $r['verify'][0] === [], json_encode([dx_kinds($r['emails']), $r['verify'][0] ?? $r, $r['raw'] ?? '']));
 
 $bid = dx_next_id(); $ref = 'DXRM' . $bid % 100000;
 $r = dx_run('admin/bookings.php', ['action' => 'consolidation_record', 'id' => $bid, 'amount' => '25', 'payment_method' => 'cash', 'payment_type' => 'partial_payment', 'payment_date' => $today], ['ajax' => true, 'setup' => [dx_booking_sql($bid, $ref, $mail)], 'verify' => ["SELECT payment_status, receipt_emailed_at IS NOT NULL AS emailed FROM payments WHERE booking_id = $bid"]]);
@@ -236,7 +237,7 @@ ok('checkout PAID IN FULL: NO final invoice (the guest already holds the receipt
 ok('checkout PAID IN FULL: a paid-in-full stay STATEMENT is sent instead, with the PDF', dx_count($r['emails'], 'statement') === 1 && dx_has_pdf($r['emails'], 'statement'), json_encode(dx_kinds($r['emails'])));
 
 $bid = dx_next_id(); $ref = 'DXRM' . $bid % 100000; $pid = dx_next_id('payments');
-$r = dx_run('admin/bookings.php', ['action' => 'checkout_settle', 'id' => $bid, 'settlement_action' => 'refund', 'payment_method' => 'cash', 'notes' => 'documents test'], ['ajax' => true,
+$r = dx_run('admin/bookings.php', ['action' => 'checkout_settle', 'id' => $bid, 'settlement_action' => 'leave', 'leave_date' => $today, 'refund_as' => 'original', 'payment_method' => 'cash', 'notes' => 'documents test'], ['ajax' => true,
     'setup' => [dx_booking_sql($bid, $ref, $mail, 'checked-in', date('Y-m-d', strtotime('-2 day')), date('Y-m-d', strtotime('+2 day')), 4), dx_payment_sql($pid, $bid, $ref, 'completed', 100.0, 'RDXPAID' . $pid)],
     'verify' => ["SELECT COUNT(*) AS refunds, COALESCE(SUM(total_amount),0) AS refunded FROM payments WHERE booking_id = $bid AND payment_type = 'refund'"]]);
 ok('early checkout that returns money: the guest gets a REFUND notice (not a receipt, not an invoice)', ($r['verify'][0][0]['refunds'] ?? 0) >= 1 && count(array_filter($r['emails'], fn($m) => preg_match('/refund/i', (string)$m['subject']))) >= 1 && dx_count($r['emails'], 'receipt') === 0, json_encode([array_column($r['emails'], 'subject'), $r['verify'][0] ?? $r, $r['json'] ?? ($r['raw'] ?? '')]));

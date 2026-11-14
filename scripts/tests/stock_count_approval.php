@@ -261,11 +261,13 @@ $hScenario = function (array $post, array $grep = []) use ($harness, $hRun): arr
         // 5: the left-out names were logged
         "SELECT COUNT(*) AS n FROM admin_activity_log WHERE action = 'stock_count_lines_left_out' AND details LIKE $refLike AND details LIKE '%ZZT " . $hRun . " Blank%'",
     ];
-    // "perm no" needs a signed-in user the admin role does not bypass: an existing active manager (the child denies them the permission).
+    // "perm no" needs a signed-in user the admin role does not bypass: an existing active non-admin (a manager first;
+    // the child denies them the approve permission and gives them the Stock Count page, both rolled back).
     $asUser = '';
     if (($post['perm'] ?? '') === 'no') {
         global $pdo;
-        $asUser = (string)$pdo->query("SELECT username FROM admin_users WHERE is_active = 1 AND role = 'manager' ORDER BY id LIMIT 1")->fetchColumn();
+        $asUser = (string)$pdo->query("SELECT username FROM admin_users WHERE is_active = 1 AND role <> 'admin' ORDER BY (role = 'manager') DESC, id LIMIT 1")->fetchColumn();
+        if ($asUser === '') { return ['error' => 'no active non-admin user to sign in as', 'rolled_back' => false]; }
     }
     $cfg = base64_encode(json_encode(['post' => $post + ['run' => $hRun], 'verify' => $verify, 'grep' => $grep] + ($asUser !== '' ? ['as_username' => $asUser] : [])));
     $out = shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($harness) . ' scripts/tests/stock_count_approval_child.php ' . escapeshellarg($cfg) . ' 2>&1');

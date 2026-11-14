@@ -244,7 +244,10 @@ if ($up) {
     eq(['tenant', 'domain', 'key', 'version'], array_slice(array_keys((array)$req), 0, 4), 'request fields');
     // backup report (2026-11-09): only dates, size and an error code - never a path, a file name, an error text or hotel data
     $bk = $req['backup'] ?? null;
-    check(array_diff(array_keys((array)$req), ['tenant', 'domain', 'key', 'version', 'backup']) === []
+    // staff_done_id / staff_error: the staff step's own check-in fields (includes/licence-staff.php, tested in licence_staff.php).
+    check(array_diff(array_keys((array)$req), ['tenant', 'domain', 'key', 'version', 'backup', 'staff_done_id', 'staff_error']) === []
+        && (!array_key_exists('staff_done_id', (array)$req) || is_int($req['staff_done_id']))
+        && (!array_key_exists('staff_error', (array)$req) || (is_string($req['staff_error']) && mb_strlen($req['staff_error']) <= 240))
         && ($bk === null || (array_keys($bk) === ['last_at', 'size', 'error_at', 'error_code', 'offsite_at', 'requested_seen']
             && is_int($bk['last_at']) && is_int($bk['size']) && is_int($bk['error_at']) && is_int($bk['offsite_at']) && is_int($bk['requested_seen'])
             && preg_match('/^[a-z_]{0,30}$/', $bk['error_code']) === 1)),

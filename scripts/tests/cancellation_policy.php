@@ -560,9 +560,13 @@ ok('bookings list cancel_quote (no policy): policy false (the dialog shows nothi
 $r = cp_run('admin/booking-settings.php', ['anon' => false, 'method' => 'GET']);
 ok('Hotel Settings: the cancellation policy card renders with its switch, tier rows and preview', strpos($r['html'], 'Use cancellation policies for new bookings') !== false
     && strpos($r['html'], 'name="cp_ind_days[]"') !== false && strpos($r['html'], 'id="cp-preview"') !== false && strpos($r['html'], 'name="save_no_show_refund_policy"') !== false);
+// A hotel may already hold some of these rows (a save or migration 085): compare the rows before and after, never assume none.
+$cpRowsSql = "SELECT setting_key, setting_value FROM site_settings WHERE setting_key IN ('cancellation_policy_enabled','cancellation_policy_individual','cancellation_policy_group','cancellation_policy_group_min_rooms','cancellation_policy_note','cancellation_policy_version') ORDER BY setting_key";
+$cpRows = static fn($rows): array => is_array($rows) ? array_column($rows, 'setting_value', 'setting_key') : ['error' => $rows];
+$cpRowsBefore = $cpRows($pdo->query($cpRowsSql)->fetchAll(PDO::FETCH_ASSOC));
 $r = cp_run('admin/booking-settings.php', ['anon' => false, 'post' => ['save_cancellation_policy' => '1', 'cp_enabled' => '1', 'cp_ind_days' => ['0'], 'cp_ind_pct' => ['50'], 'cp_ind_noshow' => '100', 'cp_group_min' => '2', 'cp_note' => ''],
-    'verify' => ["SELECT COUNT(*) AS n FROM site_settings WHERE setting_key IN ('cancellation_policy_enabled','cancellation_policy_individual','cancellation_policy_group','cancellation_policy_group_min_rooms','cancellation_policy_note','cancellation_policy_version')"]]);
-ok('Hotel Settings: an invalid tier (0 days) is refused and writes nothing', (int)($r['verify'][0][0]['n'] ?? -1) === 0, json_encode($r['verify'] ?? []));
+    'verify' => [$cpRowsSql]]);
+ok('Hotel Settings: an invalid tier (0 days) is refused and writes nothing', $cpRows($r['verify'][0] ?? null) === $cpRowsBefore, json_encode([$cpRowsBefore, $r['verify'] ?? []]));
 $r = cp_run('admin/booking-settings.php', ['anon' => false, 'post' => ['save_cancellation_policy' => '1', 'cp_enabled' => '1', 'cp_ind_days' => ['7', '2'], 'cp_ind_pct' => ['50', '100'], 'cp_ind_noshow' => '100', 'cp_group_min' => '3', 'cp_note' => ''],
     'verify' => ["SELECT setting_key, setting_value FROM site_settings WHERE setting_key IN ('cancellation_policy_enabled','cancellation_policy_individual','cancellation_policy_group','cancellation_policy_group_min_rooms','cancellation_policy_note','cancellation_policy_version') ORDER BY setting_key"]]);
 $saved = array_column(is_array($r['verify'][0] ?? null) ? $r['verify'][0] : [], 'setting_value', 'setting_key');
@@ -575,8 +579,8 @@ $probe = new PDO("mysql:host=" . DB_HOST . ";port=" . DB_PORT . ";dbname=" . DB_
 $left = $probe->prepare("SELECT COUNT(*) FROM bookings WHERE booking_reference LIKE 'ZCPT%' OR booking_reference LIKE ? OR guest_email IN (?, 'zz.cp@example.invalid', 'zz.party@example.invalid')");
 $left->execute([$prefix . '%', $email]);
 ok('no test bookings left behind', (int)$left->fetchColumn() === 0);
-$leftS = (int)$probe->query("SELECT COUNT(*) FROM site_settings WHERE setting_key IN ('cancellation_policy_enabled','cancellation_policy_individual','cancellation_policy_group','cancellation_policy_group_min_rooms','cancellation_policy_note','cancellation_policy_version')")->fetchColumn();
-ok('no cancellation policy setting row written', $leftS === 0, (string)$leftS);
+$leftS = $cpRows($probe->query($cpRowsSql)->fetchAll(PDO::FETCH_ASSOC));
+ok('no cancellation policy setting row written (rows exactly as before)', $leftS === $cpRowsBefore, json_encode([$cpRowsBefore, $leftS]));
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

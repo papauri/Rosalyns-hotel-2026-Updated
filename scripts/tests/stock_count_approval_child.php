@@ -22,6 +22,8 @@ $counter = ((string)($_POST['counter'] ?? 'me') === 'me') ? $me : $other;
 
 if (!$perm) {
     $pdo->prepare("INSERT INTO user_permissions (user_id, permission_key, is_granted) VALUES (?, 'stock_count_approve', 0) ON DUPLICATE KEY UPDATE is_granted = 0")->execute([$me]);
+    // The signed-in non-admin may open the Stock Count page (any role); only the approve permission is withheld. Rolled back.
+    $pdo->prepare("INSERT INTO user_permissions (user_id, permission_key, is_granted) VALUES (?, 'stock_count', 1) ON DUPLICATE KEY UPDATE is_granted = 1")->execute([$me]);
 }
 updateSetting('stock_count_second_approver', $ruleOn ? '1' : '0');
 updateSetting('stock_variance_block_pct', '10');

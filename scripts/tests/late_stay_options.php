@@ -275,7 +275,7 @@ $fx[] = "INSERT INTO payments (payment_reference, booking_type, booking_id, book
     VALUES ('ZLSP{$t}', 'room', (" . $bid($t) . "), 'ZLS{$t}', '{$ago(4)}', 300, 0, 0, 300, 'mobile_money', 'partial_payment', 'completed', 'completed', NULL)";
 $r = lso_run(['post' => ['action' => 'checkout_assess', 'id' => '{b}'], 'setup' => $fx, 'vars' => ['b' => $bid($t)]]);
 lso_clean($r, 'D9a');
-ok('D9 assess says where the refund goes (the original method)', ($r['json']['settlement']['refund_methods'] ?? '') === 'Mobile money', json_encode([$r['json']['settlement']['refund_methods'] ?? null, $r['raw'] ?? null]));
+ok('D9 assess says where the refund goes (the original method)', ($r['json']['settlement']['quotes'][$ago(2)]['booked']['refund_methods'] ?? '') === 'Mobile money', json_encode([$r['json']['settlement']['quotes'][$ago(2)]['booked'] ?? null, $r['raw'] ?? null]));
 // An old cached page still posts a refund method: it is ignored, the refund follows the original payment.
 $r = lso_run(['post' => ['action' => 'checkout_settle', 'id' => '{b}', 'settlement_action' => 'leave', 'leave_date' => $ago(2), 'payment_method' => 'cash'], 'setup' => $fx, 'vars' => ['b' => $bid($t)],
     'verify' => array_merge(lso_verify($t), ["SELECT payment_method, processed_by, recorded_by, total_amount FROM payments WHERE booking_id = (" . $bid($t) . ") AND payment_type = 'refund'"])]);

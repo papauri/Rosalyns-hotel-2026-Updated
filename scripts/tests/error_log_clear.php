@@ -168,10 +168,18 @@ check($unchanged() && is_file($root . '/config/database.php') && is_file($root .
 $uid = (int)$non['id'];
 $grant = ["DELETE FROM user_permissions WHERE user_id = $uid AND permission_key = 'cache'", "INSERT INTO user_permissions (user_id, permission_key, is_granted) VALUES ($uid, 'cache', 1)"];
 $ver = ["SELECT COUNT(*) AS c FROM system_event_log WHERE source = 'cache_management' AND message LIKE 'Error log clear refused%' AND user_id = $uid"];
+// Cache is an administrator-only permission (rh_admin_only_permissions): even a saved grant row does not give it to
+// another role, so a non-admin is turned away by the page gate (admin-init.php) before any clear can run.
+$pdo->beginTransaction();
+foreach ($grant as $g) { $pdo->exec($g); }
+check(!hasPermission($uid, 'cache'), 'a saved Cache grant does not give a non-admin the Cache permission (administrator-only)');
+$pdo->rollBack();
+// The in-page "Only an administrator can clear" check (cache-management.php) stays as a second line behind the gate.
+check(strpos((string)file_get_contents($root . '/admin/cache-management.php'), 'Only an administrator can clear') !== false, 'the page keeps its own administrator check behind the gate');
 $r = run_page('admin/cache-management.php', ['action' => 'clear_all_error_logs'], $grant, $ver, $non['username'], ['Only an administrator can clear', 'error-logs-panel']);
-check(said($r, 'Only an administrator can clear'), 'non-admin with the Cache permission: clear all refused', json_encode($r['raw'] ?? ''));
+check(!empty($r['rolled_back']) && (int)($r['bytes'] ?? -1) === 0 && !said($r, 'error-logs-panel'), 'non-admin with a saved Cache grant: clear all refused at the page gate (nothing shown)', json_encode($r['raw'] ?? $r));
 $r2 = run_page('admin/cache-management.php', ['action' => 'clear_error_log', 'log_key' => 'root'], $grant, $ver, $non['username'], ['Only an administrator can clear', 'error-logs-panel']);
-check(said($r2, 'Only an administrator can clear'), 'non-admin with the Cache permission: single clear refused');
+check(!empty($r2['rolled_back']) && (int)($r2['bytes'] ?? -1) === 0, 'non-admin with a saved Cache grant: single clear refused at the page gate');
 check(!said($r2, 'error-logs-panel'), 'non-admin does not even see the Error logs panel');
 check($unchanged(), 'real logs not emptied by the non-admin attempts');
 
