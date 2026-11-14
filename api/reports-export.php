@@ -536,7 +536,7 @@ function exportBookingsReport($output, string $start_date, string $end_date, str
 
     $statusStmt = $pdo->prepare("
         SELECT status, COUNT(*) as count, COALESCE(SUM(COALESCE(NULLIF(total_with_vat, 0), total_amount + COALESCE(vat_amount, 0))), 0) as total_value
-        FROM bookings WHERE created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
+        FROM bookings WHERE deleted_at IS NULL AND created_at >= ? AND created_at <= DATE_ADD(?, INTERVAL 1 DAY)
         GROUP BY status ORDER BY count DESC
     ");
     $statusStmt->execute([$start_date, $end_date]);
@@ -564,7 +564,7 @@ function exportBookingsReport($output, string $start_date, string $end_date, str
 
     $allStmt = $pdo->prepare("
         SELECT b.*, r.name as room_name FROM bookings b LEFT JOIN rooms r ON b.room_id = r.id
-        WHERE b.created_at >= ? AND b.created_at <= DATE_ADD(?, INTERVAL 1 DAY) ORDER BY b.created_at DESC
+        WHERE b.deleted_at IS NULL AND b.created_at >= ? AND b.created_at <= DATE_ADD(?, INTERVAL 1 DAY) ORDER BY b.created_at DESC
     ");
     $allStmt->execute([$start_date, $end_date]);
     while ($row = $allStmt->fetch(PDO::FETCH_ASSOC)) {

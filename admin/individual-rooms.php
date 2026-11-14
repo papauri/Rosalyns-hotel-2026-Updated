@@ -119,6 +119,87 @@ function ir_combo_booking_count(PDO $pdo, int $combinationId): int
     return rh_combination_booking_count($pdo, $combinationId);
 }
 
+/**
+ * Name of the joined room type that would be left with NO pair row at all if combination $combinationId
+ * stopped naming it (deleted, or its "Book As" type changed), when that type has no active room of its
+ * own; null when it is safe. Such a type would fall back to the legacy room count and be sold with no
+ * rooms behind it (step 8e), so the pair must be deactivated instead.
+ */
+function ir_last_pair_of_roomless_type(PDO $pdo, int $combinationId): ?string
+{
+    $st = $pdo->prepare("SELECT rc.combined_room_type_id, r.name FROM room_combinations rc LEFT JOIN rooms r ON r.id = rc.combined_room_type_id WHERE rc.id = ?");
+    $st->execute([$combinationId]);
+    $row = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        return null;
+    }
+    $typeId = (int)$row['combined_room_type_id'];
+    $others = $pdo->prepare("SELECT COUNT(*) FROM room_combinations WHERE combined_room_type_id = ? AND id <> ?");
+    $others->execute([$typeId, $combinationId]);
+    if ((int)$others->fetchColumn() > 0) {
+        return null;
+    }
+    $own = $pdo->prepare("SELECT COUNT(*) FROM individual_rooms WHERE room_type_id = ? AND is_active = 1");
+    $own->execute([$typeId]);
+    if ((int)$own->fetchColumn() > 0) {
+        return null;
+    }
+    return (string)($row['name'] ?? ('room type ' . $typeId));
+}
+
+/** One sentence for the save message: which waiting joined-room bookings got rooms, and which still wait. */
+function ir_waiting_assign_message(array $res): string
+{
+    $msg = '';
+    if (!empty($res['assigned'])) {
+        $msg .= ' Joined rooms assigned to waiting booking' . (count($res['assigned']) === 1 ? '' : 's') . ' ' . implode(', ', $res['assigned']) . '.';
+    }
+    if (!empty($res['waiting'])) {
+        $msg .= ' Still without rooms (no free pair for their dates): ' . implode(', ', $res['waiting']) . '.';
+    }
+    return $msg;
+}
+
+/**
+ * After a pair is saved or switched on: give it (or another free pair of the same type) to every live
+ * booking of that joined type that still holds no room, earliest arrival first. Each assignment runs in
+ * its own transaction with the usual locks and stock checks (assignRoomCombinationToBooking), and is
+ * written to the booking's History. Returns [assigned refs, refs that could not get a pair].
+ *
+ * @return array{assigned:string[], waiting:string[]}
+ */
+function ir_assign_waiting_joined_bookings(PDO $pdo, int $joinedTypeId, ?int $userId): array
+{
+    $out = ['assigned' => [], 'waiting' => []];
+    if ($joinedTypeId <= 0 || !roomTypeHasActiveCombinations($joinedTypeId)) {
+        return $out;
+    }
+    $statuses = ['pending', 'tentative', 'confirmed', 'checked-in'];
+    $ph = implode(',', array_fill(0, count($statuses), '?'));
+    $st = $pdo->prepare("SELECT b.id, b.booking_reference FROM bookings b
+        WHERE b.room_id = ? AND b.deleted_at IS NULL AND b.status IN ($ph)
+          AND b.individual_room_id IS NULL AND b.check_out_date > CURDATE()
+          AND NOT (b.status = 'tentative' AND b.tentative_expires_at IS NOT NULL AND b.tentative_expires_at < NOW())
+          AND NOT EXISTS (SELECT 1 FROM booking_rooms br WHERE br.booking_id = b.id AND br.released_at IS NULL)
+        ORDER BY b.check_in_date ASC, b.id ASC LIMIT 200");
+    $st->execute(array_merge([$joinedTypeId], $statuses));
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $b) {
+        $res = autoAssignIndividualRoom((int)$b['id']);
+        $ref = (string)$b['booking_reference'];
+        if (!empty($res['success']) && !empty($res['room_ids'])) {
+            $out['assigned'][] = $ref;
+            if (function_exists('logBookingAudit')) {
+                logBookingAudit((int)$b['id'], 'room_assigned', ['individual_room_id' => null, 'room_combination_id' => null],
+                    ['individual_room_id' => $res['assigned_room_id'] ?? null],
+                    'Joined rooms ' . ($res['assigned_room_number'] ?? '') . ' assigned automatically when the joined pair was set up', $ref);
+            }
+        } else {
+            $out['waiting'][] = $ref;
+        }
+    }
+    return $out;
+}
+
 function saveRoomAmenities(PDO $pdo, int $roomId, string $amenitiesRaw): void
 {
     $pdo->prepare("DELETE FROM individual_room_amenities WHERE individual_room_id = ?")->execute([$roomId]);
@@ -346,6 +427,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $sharedSt->execute([$id, $room_a_id, $room_b_id, $room_a_id, $room_b_id]);
                 $sharedCombo = $sharedSt->fetchColumn();
                 $moveBlocker = $sale_mode === 'joined_only' ? ir_combo_move_blocker($pdo, [$room_a_id, $room_b_id], $combined_room_type_id) : null;
+                // Changing the "Book As" type of the only pair of a joined type that has no rooms of its own would
+                // leave that type with nothing behind it (it would fall back to the old room count): refuse.
+                $retypeBlocker = null;
+                if ($id > 0) {
+                    $oldTypeSt = $pdo->prepare('SELECT combined_room_type_id FROM room_combinations WHERE id = ?');
+                    $oldTypeSt->execute([$id]);
+                    $oldType = $oldTypeSt->fetchColumn();
+                    if ($oldType !== false && (int)$oldType !== $combined_room_type_id) {
+                        $lastOf = ir_last_pair_of_roomless_type($pdo, (int)$id);
+                        if ($lastOf !== null) {
+                            $retypeBlocker = 'This is the only pair for "' . $lastOf . '". Changing its "Book As" type would leave "' . $lastOf . '" with no rooms behind it. Add another pair for "' . $lastOf . '" first, or deactivate this one.';
+                        }
+                    }
+                }
                 if (mb_strlen($combined_name) > 120) {
                     $error = 'Combination name is too long (max 120 characters).';
                 } elseif ((int)$roomCheck->fetchColumn() !== 2) {
@@ -362,6 +457,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error = 'One of these rooms is already part of the active joined room "' . $sharedCombo . '". Deactivate or delete that combination first.';
                 } elseif ($moveBlocker !== null) {
                     $error = $moveBlocker;
+                } elseif ($retypeBlocker !== null) {
+                    $error = $retypeBlocker;
                 } elseif ($id > 0) {
                     $stmt = $pdo->prepare(" 
                         UPDATE room_combinations
@@ -404,6 +501,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (empty($error)) {
                     require_once __DIR__ . '/../config/cache.php';
                     clearRoomCache();
+                    // An active pair joins rooms on demand: hand it to bookings of this joined type still waiting for rooms.
+                    if ($is_active) {
+                        $waitRes = ir_assign_waiting_joined_bookings($pdo, $combined_room_type_id, isset($user['id']) ? (int)$user['id'] : null);
+                        $message .= ir_waiting_assign_message($waitRes);
+                    }
                 }
             }
         } elseif ($action === 'deactivate_room_combination') {
@@ -434,6 +536,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $message = 'Joined-room combination reactivated.';
                     require_once __DIR__ . '/../config/cache.php';
                     clearRoomCache();
+                    $typeSt = $pdo->prepare('SELECT combined_room_type_id FROM room_combinations WHERE id = ?');
+                    $typeSt->execute([$id]);
+                    $waitRes = ir_assign_waiting_joined_bookings($pdo, (int)$typeSt->fetchColumn(), isset($user['id']) ? (int)$user['id'] : null);
+                    $message .= ir_waiting_assign_message($waitRes);
                 }
             }
             $autoOpenCombinations = true;
@@ -448,7 +554,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'Combination not found.';
             } else {
                 $used = ir_combo_booking_count($pdo, $id);
-                if ($used > 0) {
+                $lastOf = ir_last_pair_of_roomless_type($pdo, $id);
+                if ($lastOf !== null) {
+                    $error = '"' . $comboName . '" is the only pair for "' . $lastOf . '", which has no rooms of its own. Deleting it would let "' . $lastOf . '" be sold with no rooms behind it. Deactivate it instead - it will no longer be sold.';
+                } elseif ($used > 0) {
                     $error = '"' . $comboName . '" has been used by ' . $used . ' booking' . ($used === 1 ? '' : 's') . ', so it is kept for their history. Deactivate it instead - it will no longer be sold.';
                 } else {
                     $pdo->prepare("DELETE FROM room_combinations WHERE id = ?")->execute([$id]);
@@ -1794,6 +1903,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                             <div>
                                 <label for="price_override" class="combo-label">Rate Override <span style="text-transform:none;font-weight:400;">(optional)</span></label>
                                 <input type="number" name="price_override" id="price_override" step="0.01" min="0" placeholder="Room type rate">
+                                <small class="helper-text">All-in price per night (VAT and levy included). Blank = the "Book As" room type's own price and its rate plans.</small>
                             </div>
                             <div>
                                 <label for="max_guests_combined" class="combo-label">Max Guests *</label>
@@ -1822,7 +1932,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                             <label>
                                 <input type="radio" name="combination_sale_mode" value="shared" id="combo_mode_shared">
                                 <span>On their own <strong>and</strong> as the joined room
-                                    <small>Each room keeps its own room type. When the pair is booked, both rooms are taken; when either room is booked, the pair is unavailable.</small>
+                                    <small>Each room keeps its own room type. The rooms are joined only for the nights a joined-room booking takes the pair; on other nights they sell on their own. When either room is booked, the pair is unavailable.</small>
                                 </span>
                             </label>
                         </div>

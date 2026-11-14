@@ -19,6 +19,19 @@ when prompted."
 
 ## Pending (oldest first)
 
+### Joined rooms on demand (2026-11-15, NEXT_BUILD_ORDER step 8e) — hashes in TASKS.md
+- Guides (Individual Rooms > Room Combinations, New Booking, Bookings check-in, Room Types): a joined room type
+  with no ACTIVE pair now shows sold out everywhere (it was sold on its stored room count with no rooms behind it).
+  A pair in "On their own and as the joined room" (Shared) mode joins the two rooms only for the nights a joined
+  booking takes it. Saving or switching on a pair gives it to joined bookings still waiting for rooms (the message
+  lists who got it and who still waits). Check-in of a joined booking with no rooms joins a free pair, or is refused
+  ("No free joined pair for this stay"). The last pair of a joined type cannot be deleted or re-typed (deactivate it).
+  Rate Override blank = the joined type's own price and rate plans. Room Types cards and price fields show the VAT
+  and tourism levy inside the price (each line only when it is switched on). Upgrade into a joined type is priced at
+  the pair's rate (one rate whatever the occupancy). Pick Shared, not "Only as the joined room", for 7A + 7B.
+- Assistant: availability/quotes go through checkRoomAvailability, so a joined type without a pair now reads 0 left;
+  check includes/ai/ for any room-count read that uses rooms.total_rooms / rooms_available directly.
+
 ### Refunds on the payout day everywhere (2026-11-15, NEXT_BUILD_ORDER step 8d) — e90b5c7 / 5151a26
 - Guides (Dashboard, Payments, Accounting, Company accounts): a refund now shows and counts on the day it was paid
   out on the Dashboard "today" list (with the payout time), the Payments list Payment Date column and its date sort,

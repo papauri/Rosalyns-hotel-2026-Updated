@@ -58,9 +58,42 @@ function rh_room_change_reasons(string $direction): array
     ];
 }
 
+/**
+ * Nightly rate of a joined ("Book As") room type for this booking, priced exactly as the create paths price it
+ * (one rate whatever the occupancy): the pair's own rate override when set, else the type's price per night. The
+ * pair is the one the booking already holds (same type), else the first pair free for its dates. Null when the
+ * type is not sold through active pairs (caller uses the normal occupancy prices).
+ */
+function rh_joined_type_rack_rate(array $room, array $b): ?float
+{
+    global $pdo;
+    $typeId = (int)($room['id'] ?? 0);
+    if ($typeId <= 0 || !function_exists('roomTypeHasActiveCombinations') || !roomTypeHasActiveCombinations($typeId)) {
+        return null;
+    }
+    $typeRate = (float)($room['price_per_night'] ?? 0);
+    $combo = null;
+    if ((int)($b['room_id'] ?? 0) === $typeId && (int)($b['room_combination_id'] ?? 0) > 0) {
+        $st = $pdo->prepare('SELECT price_override FROM room_combinations WHERE id = ?');
+        $st->execute([(int)$b['room_combination_id']]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        $combo = $row ?: null;
+    }
+    if ($combo === null && !empty($b['check_in_date']) && !empty($b['check_out_date'])) {
+        $free = getAvailableRoomCombinations($typeId, substr((string)$b['check_in_date'], 0, 10), substr((string)$b['check_out_date'], 0, 10), (int)($b['id'] ?? 0) ?: null);
+        $combo = $free[0] ?? null;
+    }
+    $override = $combo['price_override'] ?? null;
+    return ($override !== null && $override !== '') ? (float)$override : $typeRate;
+}
+
 /** Catalogue room rate per night (price basis) of a room type at this booking's occupancy, children not included. */
 function rh_room_type_base_rate(array $room, array $b): float
 {
+    $joinedRate = rh_joined_type_rack_rate($room, $b);
+    if ($joinedRate !== null) {
+        return $joinedRate; // a joined room is sold at one rate whatever the occupancy (as booking.php prices it)
+    }
     $occ = (string)($b['occupancy_type'] ?? 'single');
     if ($occ === 'double' && (float)($room['price_double_occupancy'] ?? 0) > 0) {
         return (float)$room['price_double_occupancy'];

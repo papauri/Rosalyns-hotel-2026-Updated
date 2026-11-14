@@ -17,6 +17,33 @@ require_once __DIR__ . '/../includes/pricing.php';
 require_once __DIR__ . '/../includes/price-history.php';
 require_once __DIR__ . '/includes/child-charge-fields.php';
 
+/**
+ * The tax inside an all-in room price, for display: "Room X · VAT <rate>% Y · Tourism levy <rate>% Z" from
+ * rh_stay_totals() (the helper every booking uses). A part that is switched off is left out; '' when both
+ * VAT and levy are off. Display only.
+ */
+function rm_tax_line(float $price, string $currency): string
+{
+    if ($price <= 0) {
+        return '';
+    }
+    $t = rh_stay_totals($price, 'price');
+    $vatOn = (float)$t['vat_rate'] > 0;
+    $levyOn = (float)$t['levy_rate'] > 0;
+    if (!$vatOn && !$levyOn) {
+        return '';
+    }
+    $fmtPct = static fn($p) => rtrim(rtrim(number_format((float)$p, 2, '.', ''), '0'), '.');
+    $parts = ['Room ' . $currency . ' ' . number_format((float)$t['net'], 0)];
+    if ($vatOn) {
+        $parts[] = 'VAT ' . $fmtPct($t['vat_rate']) . '% ' . $currency . ' ' . number_format((float)$t['vat'], 0);
+    }
+    if ($levyOn) {
+        $parts[] = 'Tourism levy ' . $fmtPct($t['levy_rate']) . '% ' . $currency . ' ' . number_format((float)$t['levy'], 0);
+    }
+    return implode(' &middot; ', $parts);
+}
+
 function syncRoomManagedMedia(array $room): void
 {
     if (!function_exists('upsertManagedMediaForSource')) {
@@ -684,6 +711,10 @@ try {
             if ($pairTotal > 0) {
                 $pairRoomRow['units_total'] = $pairTotal;
                 $pairRoomRow['units_avail'] = rh_room_type_sellable_count((int)$pairRoomRow['id'], 0);
+            } elseif (rh_joined_type_without_pairs((int)$pairRoomRow['id'])) {
+                // A joined type with no active pair has nothing to sell (step 8e): 0 / 0, never the stored count.
+                $pairRoomRow['units_total'] = 0;
+                $pairRoomRow['units_avail'] = 0;
             }
         }
         unset($pairRoomRow);
@@ -785,6 +816,8 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                             <div class="room-card-desc"><?php echo htmlspecialchars($room['short_description'] ?? $room['description'] ?? ''); ?></div>
 
                             <div class="room-card-price"><?php echo $currency; ?> <?php echo number_format($room['price_per_night'], 0); ?><small>/night</small></div>
+                            <?php $rmCardTax = rm_tax_line((float)$room['price_per_night'], $currency); ?>
+                            <?php if ($rmCardTax !== ''): ?><small class="helper-text room-card-tax" title="The price per night is the all-in amount the guest pays; this is the VAT and tourism levy inside it."><?php echo $rmCardTax; ?></small><?php endif; ?>
 
                             <div class="room-card-details">
                                 <?php if ((float)($room['size_sqm'] ?? 0) > 0): ?><div class="detail-item"><i class="fas fa-expand-arrows-alt"></i> <?php echo (float)$room['size_sqm']; ?> sqm</div><?php endif; ?>
@@ -937,11 +970,13 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                                     <label>Price Per Night *</label>
                                     <input type="number" name="price_per_night" id="editPrice" step="0.01" min="0" required data-money data-currency="<?php echo $currency; ?>" placeholder="0.00">
                                     <small class="helper-text">What one night costs. Must be more than 0.</small>
+                                    <small class="helper-text rm-tax-line" data-tax-for="editPrice"></small>
                                 </div>
                                 <div class="form-group">
                                     <label>Single Occupancy Price</label>
                                     <input type="number" name="price_single_occupancy" id="editPriceSingle" step="0.01" min="0" data-money placeholder="Optional" data-currency="<?php echo $currency; ?>">
                                     <small class="helper-text">Nightly price for 1 guest. Blank = use the price per night.</small>
+                                    <small class="helper-text rm-tax-line" data-tax-for="editPriceSingle"></small>
                                 </div>
                             </div>
                             <div class="form-row">
@@ -949,11 +984,13 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                                     <label>Double Occupancy Price</label>
                                     <input type="number" name="price_double_occupancy" id="editPriceDouble" step="0.01" min="0" data-money placeholder="Optional" data-currency="<?php echo $currency; ?>">
                                     <small class="helper-text">Nightly price for 2 guests. Blank = use the price per night.</small>
+                                    <small class="helper-text rm-tax-line" data-tax-for="editPriceDouble"></small>
                                 </div>
                                 <div class="form-group">
                                     <label>Triple Occupancy Price</label>
                                     <input type="number" name="price_triple_occupancy" id="editPriceTriple" step="0.01" min="0" data-money placeholder="Optional" data-currency="<?php echo $currency; ?>">
                                     <small class="helper-text">Nightly price for 3 guests. Blank = use the price per night.</small>
+                                    <small class="helper-text rm-tax-line" data-tax-for="editPriceTriple"></small>
                                 </div>
                             </div>
                             <div class="form-group">
@@ -1087,11 +1124,13 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                                     <label>Price Per Night *</label>
                                     <input type="number" name="price_per_night" id="addPrice" step="0.01" min="0" required data-money data-currency="<?php echo $currency; ?>" placeholder="0.00">
                                     <small class="helper-text">What one night costs. Must be more than 0.</small>
+                                    <small class="helper-text rm-tax-line" data-tax-for="addPrice"></small>
                                 </div>
                                 <div class="form-group">
                                     <label>Single Occupancy Price</label>
                                     <input type="number" name="price_single_occupancy" id="addPriceSingle" step="0.01" min="0" data-money placeholder="Optional" data-currency="<?php echo $currency; ?>">
                                     <small class="helper-text">Nightly price for 1 guest. Blank = use the price per night.</small>
+                                    <small class="helper-text rm-tax-line" data-tax-for="addPriceSingle"></small>
                                 </div>
                             </div>
                             <div class="form-row">
@@ -1099,11 +1138,13 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                                     <label>Double Occupancy Price</label>
                                     <input type="number" name="price_double_occupancy" id="addPriceDouble" step="0.01" min="0" data-money placeholder="Optional" data-currency="<?php echo $currency; ?>">
                                     <small class="helper-text">Nightly price for 2 guests. Blank = use the price per night.</small>
+                                    <small class="helper-text rm-tax-line" data-tax-for="addPriceDouble"></small>
                                 </div>
                                 <div class="form-group">
                                     <label>Triple Occupancy Price</label>
                                     <input type="number" name="price_triple_occupancy" id="addPriceTriple" step="0.01" min="0" data-money placeholder="Optional" data-currency="<?php echo $currency; ?>">
                                     <small class="helper-text">Nightly price for 3 guests. Blank = use the price per night.</small>
+                                    <small class="helper-text rm-tax-line" data-tax-for="addPriceTriple"></small>
                                 </div>
                             </div>
                             <div class="form-group">
@@ -1330,6 +1371,40 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
 
         <script src="js/admin-form-guard.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-form-guard.js'); ?>"></script>
         <script>
+            // VAT / tourism levy inside an all-in price, as rh_stay_totals() works it out (rates from the server, no
+            // hard-coded figures): net = price / (1 + VAT% + levy%), each part rounded like the server. Display only.
+            (function() {
+                window.__rmTax = <?php $rmTaxRates = rh_stay_totals(100.0, 'price'); echo json_encode(['vat' => (float)$rmTaxRates['vat_rate'], 'levy' => (float)$rmTaxRates['levy_rate'], 'cur' => html_entity_decode($currency, ENT_QUOTES, 'UTF-8')], JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+                function fmt(n) { return Math.round(n).toLocaleString('en-US'); }
+                function pct(p) { return String(Math.round(p * 100) / 100); }
+                window.rmTaxText = function(price) {
+                    var t = window.__rmTax || {vat: 0, levy: 0, cur: ''};
+                    var v = t.vat / 100, l = t.levy / 100;
+                    if (v <= 0 && l <= 0) return '';
+                    if (!(price > 0)) return '';
+                    var net = price / (1 + v + l);
+                    var vat = Math.round(net * v * 100) / 100, levy = Math.round(net * l * 100) / 100;
+                    var room = Math.round((price - vat - levy) * 100) / 100;
+                    var parts = ['Room ' + t.cur + ' ' + fmt(room)];
+                    if (v > 0) parts.push('VAT ' + pct(t.vat) + '% ' + t.cur + ' ' + fmt(vat));
+                    if (l > 0) parts.push('Tourism levy ' + pct(t.levy) + '% ' + t.cur + ' ' + fmt(levy));
+                    return parts.join(' \u00b7 ');
+                };
+                window.rmTaxRefresh = function() {
+                    document.querySelectorAll('.rm-tax-line[data-tax-for]').forEach(function(el) {
+                        var input = document.getElementById(el.getAttribute('data-tax-for'));
+                        el.textContent = input ? window.rmTaxText(parseFloat(input.value)) : '';
+                    });
+                };
+                if (!window.__rmTaxBound) {
+                    window.__rmTaxBound = true;
+                    document.addEventListener('input', function(e) {
+                        if (e.target && e.target.id && document.querySelector('.rm-tax-line[data-tax-for="' + e.target.id + '"]')) window.rmTaxRefresh();
+                    });
+                }
+                window.rmTaxRefresh();
+            })();
+
             // Every page POST carries the admin token. This sits in the page body (not <head>) because the
             // admin in-place navigation drops head scripts, which made every save/upload here fail with
             // "Security token invalid" after the screen was opened from the menu.
@@ -1385,6 +1460,7 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                 document.getElementById('editPriceSingle').value = rmMoney(room.price_single_occupancy, false);
                 document.getElementById('editPriceDouble').value = rmMoney(room.price_double_occupancy, false);
                 document.getElementById('editPriceTriple').value = rmMoney(room.price_triple_occupancy, false);
+                if (window.rmTaxRefresh) window.rmTaxRefresh();
                 // Child charge: percent (default) or fixed amount, free children, most children per room.
                 document.getElementById('editChildMode').value = room.child_charge_mode === 'fixed' ? 'fixed' : 'percent';
                 document.getElementById('editChildPct').value = (room.child_price_multiplier === null || room.child_price_multiplier === undefined || room.child_price_multiplier === '') ? '50.00' : rmMoney(room.child_price_multiplier, true);

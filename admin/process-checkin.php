@@ -84,6 +84,21 @@ try {
                     'late_checkin_url' => 'bookings.php?action=checkin&booking_id=' . (int)$booking_id]);
                 exit;
             }
+            // A joined-room booking with no rooms yet is given a free pair now (or the check-in is refused); the
+            // clean-room gate then runs again on the two rooms it was given.
+            $joinedPair = rh_checkin_ensure_joined_pair((int)$booking_id);
+            if (!$joinedPair['ok']) {
+                http_response_code(400);
+                echo json_encode(['success' => false, 'message' => $joinedPair['message']]);
+                exit;
+            }
+            if ($joinedPair['assigned'] !== '') {
+                $roomGate = evaluateCheckInRoomReady($booking_id, $admin_user_id ?: null, !empty($_POST['confirm_checkin_room_not_ready']));
+                if (!$roomGate['allowed']) {
+                    echo json_encode(['success' => false, 'message' => 'Joined rooms ' . $joinedPair['assigned'] . ' assigned. ' . $roomGate['message'], 'needs_confirm_room' => $roomGate['needs_confirm']]);
+                    exit;
+                }
+            }
         }
         $stmt = $pdo->prepare("UPDATE bookings SET status = 'checked-in' WHERE id = ? AND status = 'confirmed'");
         $stmt->execute([$booking_id]);

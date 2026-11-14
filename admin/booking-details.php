@@ -760,10 +760,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
                     $_SESSION['error_message'] = 'Booking not found.';
                 } else {
                     $validation = validateCheckIn($check_row);
-                    $roomGate = $validation['allowed']
+                    // A joined-room booking with no rooms yet is given a free pair now (or the check-in is refused),
+                    // before the clean-room gate looks at its rooms. Late arrivals go through Late Check-In instead.
+                    $joinedPair = ($validation['allowed'] && (int)($validation['late_days'] ?? 0) === 0)
+                        ? rh_checkin_ensure_joined_pair((int)$booking_id)
+                        : ['ok' => true, 'message' => '', 'assigned' => ''];
+                    $roomGate = $validation['allowed'] && $joinedPair['ok']
                         ? evaluateCheckInRoomReady((int)$booking_id, (int)($user['id'] ?? 0), !empty($_POST['confirm_checkin_room_not_ready']))
                         : null;
-                    if (!$validation['allowed']) {
+                    if ($validation['allowed'] && !$joinedPair['ok']) {
+                        $_SESSION['error_message'] = $joinedPair['message'];
+                    } elseif (!$validation['allowed']) {
                         $_SESSION['error_message'] = getBookingActionErrorMessage('check_in', $validation['reason']);
                     } elseif ((int)($validation['late_days'] ?? 0) > 0) {
                         // A late arrival is checked in on the bookings list, where the dialog asks what happened

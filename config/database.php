@@ -3127,6 +3127,45 @@ function getBookingRoomsNotReady(int $bookingId): array
  *
  * @return array{allowed:bool,override:bool,needs_confirm:bool,can_override:bool,message:string,rooms:array}
  */
+/**
+ * Check-in of a joined-room booking that holds no rooms yet (step 8e, owner 2026-11-15): join a free pair for the
+ * stay now (autoAssignIndividualRoom -> assignRoomCombinationToBooking, own transaction, usual locks and stock
+ * checks); with no free pair the check-in is refused, because a joined booking always holds a whole pair. Any
+ * other booking, or one that already holds rooms, is left alone. Call it AFTER validateCheckIn() passed and
+ * BEFORE evaluateCheckInRoomReady(), outside any open transaction; never from render/preview code.
+ *
+ * @return array{ok:bool, message:string, assigned:string}
+ */
+function rh_checkin_ensure_joined_pair(int $bookingId): array
+{
+    global $pdo;
+    $res = ['ok' => true, 'message' => '', 'assigned' => ''];
+    $st = $pdo->prepare("SELECT room_id, individual_room_id, booking_reference FROM bookings WHERE id = ?");
+    $st->execute([$bookingId]);
+    $b = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$b) {
+        return $res;
+    }
+    $typeId = (int)$b['room_id'];
+    $isJoinedType = roomTypeHasActiveCombinations($typeId) || rh_joined_type_without_pairs($typeId);
+    if (!$isJoinedType || !empty($b['individual_room_id']) || !empty(getBookingRoomIds($bookingId))) {
+        return $res;
+    }
+    $as = roomTypeHasActiveCombinations($typeId) ? autoAssignIndividualRoom($bookingId) : ['success' => false];
+    if (empty($as['success']) || empty($as['room_ids'])) {
+        $res['ok'] = false;
+        $res['message'] = 'No free joined pair for this stay. Assign rooms first (Bookings > Assign room), then check the guest in.';
+        return $res;
+    }
+    $res['assigned'] = (string)($as['assigned_room_number'] ?? '');
+    if (function_exists('logBookingAudit')) {
+        logBookingAudit($bookingId, 'room_assigned', ['individual_room_id' => null, 'room_combination_id' => null],
+            ['individual_room_id' => $as['assigned_room_id'] ?? null],
+            'Joined rooms ' . $res['assigned'] . ' assigned automatically at check-in', (string)$b['booking_reference']);
+    }
+    return $res;
+}
+
 function evaluateCheckInRoomReady(int $bookingId, ?int $userId, bool $override = false): array
 {
     $res = ['allowed' => true, 'override' => false, 'needs_confirm' => false, 'can_override' => false, 'message' => '', 'rooms' => []];
@@ -3817,6 +3856,9 @@ function rh_room_type_sellable_count(int $roomTypeId, int $fallback = 0): int
         return $memo[$roomTypeId];
     }
     try {
+        if (rh_joined_type_without_pairs($roomTypeId)) {
+            return $memo[$roomTypeId] = 0; // joined type with no active pair: nothing to sell
+        }
         if (roomTypeHasActiveCombinations($roomTypeId)) {
             // Joined rooms are sold as pairs: count pairs whose two rooms are both active and in
             // service (a member in maintenance / out of order takes the whole pair off sale).
@@ -3874,6 +3916,36 @@ function roomTypeHasActiveCombinations(int $roomTypeId): bool
         return (int)$stmt->fetchColumn() > 0;
     } catch (Throwable $e) {
         error_log('roomTypeHasActiveCombinations warning: ' . $e->getMessage());
+        return false;
+    }
+}
+
+/**
+ * A joined ("Book As") room type that has nothing to sell: a room_combinations row names it (active or
+ * not), none of those pairs is active, and it has no active room of its own. Such a type has ZERO units on
+ * every date. Without this it fell through to the legacy rooms.total_rooms count and was sold with no
+ * rooms behind it (step 8e). A type never named by a pair keeps the legacy count; a deactivated joined-only
+ * pair (its rooms still belong to the joined type) keeps selling those rooms as today.
+ */
+function rh_joined_type_without_pairs(int $roomTypeId): bool
+{
+    global $pdo;
+
+    if ($roomTypeId <= 0 || !bookingAvailabilityTableExists('room_combinations')) {
+        return false;
+    }
+    if (roomTypeHasActiveCombinations($roomTypeId)) {
+        return false;
+    }
+    try {
+        $st = $pdo->prepare("SELECT
+                EXISTS (SELECT 1 FROM room_combinations WHERE combined_room_type_id = ?) AS named,
+                EXISTS (SELECT 1 FROM individual_rooms WHERE room_type_id = ? AND is_active = 1) AS has_rooms");
+        $st->execute([$roomTypeId, $roomTypeId]);
+        $row = $st->fetch(PDO::FETCH_ASSOC) ?: [];
+        return !empty($row['named']) && empty($row['has_rooms']);
+    } catch (Throwable $e) {
+        error_log('rh_joined_type_without_pairs warning: ' . $e->getMessage());
         return false;
     }
 }
@@ -4714,6 +4786,17 @@ function rh_room_needed_for_joined(int $individualRoomId, string $checkIn, strin
 function getRoomCombinationAvailabilitySummary(int $roomTypeId, string $checkIn, string $checkOut, ?int $excludeBookingId = null): ?array
 {
     if (!roomTypeHasActiveCombinations($roomTypeId)) {
+        if (rh_joined_type_without_pairs($roomTypeId)) {
+            // A joined type with no active pair has nothing to sell (never the legacy total_rooms count).
+            $holds = rh_combination_unassigned_holds($roomTypeId, $checkIn, $checkOut, $excludeBookingId);
+            return [
+                'inventory_count' => 0,
+                'remaining_rooms' => 0,
+                'unassigned_booking_count' => (int)$holds['count'],
+                'available_combinations' => [],
+                'max_guests' => 0,
+            ];
+        }
         return null;
     }
 
@@ -4750,7 +4833,15 @@ function assignRoomCombinationToBooking(int $bookingId, int $combinationId, ?int
     $ownTransaction = !$pdo->inTransaction();
 
     try {
+        // Standalone assign (desk "Assign pair", auto-assign): lock the joined type AND the member room types,
+        // like every sale does, so a pair can never take rooms another booking was just sold. The type set is
+        // read BEFORE the transaction (rh_related_room_type_ids rule). A caller that owns the transaction (the
+        // create paths) has already taken these locks and run the stock check.
+        $assignLockTypeIds = [];
         if ($ownTransaction) {
+            $preSt = $pdo->prepare("SELECT room_id FROM bookings WHERE id = ?");
+            $preSt->execute([$bookingId]);
+            $assignLockTypeIds = rh_related_room_type_ids($pdo, [(int)$preSt->fetchColumn()]);
             $pdo->beginTransaction();
         }
 
@@ -4760,12 +4851,16 @@ function assignRoomCombinationToBooking(int $bookingId, int $combinationId, ?int
         if (!$booking) {
             throw new RuntimeException('Booking not found');
         }
+        if ($ownTransaction && $assignLockTypeIds) {
+            rh_lock_room_types($pdo, $assignLockTypeIds);
+        }
         if (!in_array((string)$booking['status'], getBookingStatusesThatBlockAvailability(true), true)) {
             throw new RuntimeException('Rooms can only be assigned to active bookings (current: ' . $booking['status'] . ')');
         }
 
         $comboStmt = $pdo->prepare("
-            SELECT rc.*, a.room_number AS room_a_number, b.room_number AS room_b_number
+            SELECT rc.*, a.room_number AS room_a_number, b.room_number AS room_b_number,
+                   a.room_type_id AS room_a_type_id, b.room_type_id AS room_b_type_id
             FROM room_combinations rc
             JOIN individual_rooms a ON a.id = rc.room_a_id
             JOIN individual_rooms b ON b.id = rc.room_b_id
@@ -4817,6 +4912,18 @@ function assignRoomCombinationToBooking(int $bookingId, int $combinationId, ?int
             $lockedConflict = rh_individual_room_locked_conflict($roomId, $comboFrom, (string)$booking['check_out_date'], $bookingId);
             if ($lockedConflict !== null) {
                 throw new RuntimeException('One of the joined rooms was just taken by booking ' . $lockedConflict);
+            }
+        }
+        // The member room types must still have the rooms to give (a member-type booking sold a moment ago may
+        // hold no room yet). Only nights from today on: the availability check refuses a past check-in date.
+        if ($ownTransaction) {
+            $stockFrom = max($comboFrom, date('Y-m-d'));
+            $stockTo = substr((string)$booking['check_out_date'], 0, 10);
+            if ($stockFrom < $stockTo) {
+                $stockErr = rh_joined_members_stock_error([$combination], $stockFrom, $stockTo, $bookingId);
+                if ($stockErr !== '') {
+                    throw new RuntimeException($stockErr);
+                }
             }
         }
 
@@ -5235,7 +5342,9 @@ function checkRoomAvailability(int $room_id, string $check_in_date, string $chec
             if ($remainingCombinations <= 0) {
                 $result['available'] = false;
                 $result['error'] = 'All joined-room combinations are unavailable for the selected dates';
-                $result['conflict_message'] = 'Each joined room pair has at least one physical room booked, blocked, under maintenance, or not ready.';
+                $result['conflict_message'] = !roomTypeHasActiveCombinations($room_id)
+                    ? 'No joined-room pair is set up and active for this room type (Individual Rooms > Room Combinations).'
+                    : 'Each joined room pair has at least one physical room booked, blocked, under maintenance, or not ready.';
             }
 
             return $result;
@@ -5416,14 +5525,24 @@ function getRoomTypeNightlyAvailability(int $room_id, string $start_date, string
     $roomsStmt = $pdo->prepare("SELECT id, status FROM individual_rooms WHERE room_type_id = ? AND is_active = 1");
     $roomsStmt->execute([$room_id]);
     $rooms = $roomsStmt->fetchAll(PDO::FETCH_ASSOC);
-    if (empty($rooms)) {
+    // A joined type sold through Shared pairs owns no rooms itself: it is still counted per night from its
+    // pairs (never the legacy total_rooms figure). A joined type with no active pair sells nothing.
+    $hasPairs = roomTypeHasActiveCombinations($room_id);
+    if (empty($rooms) && !$hasPairs) {
+        if (rh_joined_type_without_pairs($room_id)) {
+            $zero = [];
+            for ($d = new DateTime($start), $e = new DateTime($end); $d < $e; $d->modify('+1 day')) {
+                $zero[$d->format('Y-m-d')] = 0;
+            }
+            return $zero;
+        }
         return null;
     }
 
     $roomIds = array_map('intval', array_column($rooms, 'id'));
     // Joined-room types sell pairs whose rooms can belong to another type: watch those rooms too.
     $pairs = [];
-    if (roomTypeHasActiveCombinations($room_id)) {
+    if ($hasPairs) {
         $cst = $pdo->prepare("SELECT room_a_id, room_b_id FROM room_combinations WHERE combined_room_type_id = ? AND is_active = 1");
         $cst->execute([$room_id]);
         $pairs = $cst->fetchAll(PDO::FETCH_ASSOC);

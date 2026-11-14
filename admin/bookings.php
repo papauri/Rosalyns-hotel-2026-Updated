@@ -805,6 +805,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new Exception($ciChoice['error']);
                 }
 
+                // A joined-room booking with no rooms yet is given a free pair now (or the check-in is refused). Not for
+                // "already stayed and left": nobody moves in.
+                if ($ciChoice['choice'] !== 'ended') {
+                    $joinedPair = rh_checkin_ensure_joined_pair((int)$booking_id);
+                    if (!$joinedPair['ok']) {
+                        throw new Exception($joinedPair['message']);
+                    }
+                }
+
                 // The clean-room gate protects a guest moving in. "Already stayed and left" (owner 2026-11-13): nobody moves in,
                 // so no gate (said in History below); a room another in-house guest holds is never touched by that path.
                 $roomGate = $ciChoice['choice'] === 'ended'
