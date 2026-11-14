@@ -456,6 +456,9 @@ function rh_ai_eval_run(PDO $db, string $kind = 'full', array $opt = []): array
  */
 function rh_ai_eval_setup(PDO $db, string $kind): array
 {
+    if ($kind === 'checked_out_first') {
+        return rh_ai_eval_setup_checked_out($db);
+    }
     if ($kind !== 'latest_booking') {
         return [];
     }
@@ -491,6 +494,36 @@ function rh_ai_eval_setup(PDO $db, string $kind): array
             continue; // the surname is on more than one booking: "Mr {surname}" would rightly be asked about
         }
         return ['{guest_close}' => $close, '{guest_last}' => $last, '{bk_id}' => (string)(int)$r['id']];
+    }
+    return [];
+}
+
+/**
+ * checked_out_first (owner fault 2026-11-14, "when did Victoria check out"): the newest checked-out booking whose guest's
+ * first name (3+ letters, a title dropped) is on no other stay that has begun (checked in or out), so "when did <first
+ * name> check out" has one plain answer. {guest_first} in lower case (as staff type it) and {bk_id}. [] = none here.
+ */
+function rh_ai_eval_setup_checked_out(PDO $db): array
+{
+    try {
+        $rows = $db->query("SELECT id, guest_name FROM bookings WHERE deleted_at IS NULL AND status = 'checked-out' AND guest_name <> '' ORDER BY id DESC LIMIT 20")->fetchAll(PDO::FETCH_ASSOC);
+        $same = $db->prepare("SELECT COUNT(*) FROM bookings WHERE deleted_at IS NULL AND status IN ('checked-in', 'checked-out')
+                              AND (guest_name LIKE ? OR room_guest_name LIKE ? OR guest_email LIKE ? OR guest_phone LIKE ? OR booking_reference LIKE ?)");
+    } catch (Throwable $e) {
+        return [];
+    }
+    foreach ($rows as $r) {
+        $name = trim((string)preg_replace('/^(?:mr|mrs|ms|miss|mx|dr|prof)\.?\s+/iu', '', trim((string)$r['guest_name'])));
+        $first = (string)(preg_split('/\s+/u', $name)[0] ?? '');
+        if (!preg_match('/^\p{L}{3,}$/u', $first) || (function_exists('rh_ai_vault_stopwords') && isset(rh_ai_vault_stopwords()[mb_strtolower($first)]))) {
+            continue;
+        }
+        $like = '%' . rh_ai_like($first) . '%';
+        $same->execute([$like, $like, $like, $like, $like]);
+        if ((int)$same->fetchColumn() !== 1) {
+            continue; // another stay under that first name: the question would rightly be asked back
+        }
+        return ['{guest_first}' => mb_strtolower($first), '{bk_id}' => (string)(int)$r['id']];
     }
     return [];
 }

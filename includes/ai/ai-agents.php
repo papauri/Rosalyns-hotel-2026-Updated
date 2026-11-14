@@ -2671,7 +2671,7 @@ function rh_ai_maybe_summarise(PDO $db, int $uid, int $conv, array $models): voi
 function rh_ai_lane_words(): array
 {
     return [
-        'front_desk'   => '/\b(book(ing|ings|ed)?|reserv\w*|arriv\w*|depart\w*|check.?(in|out|ins|outs)|in.?house|guests?|stay\w*|nights?|free|availab\w*|vacan\w*|quote|room types?|assign\w*|due out|leav\w*|walk.?in|extend|cancel\w*|child(ren)?|kids?|infants?|single|double|triple|occupancy (rates?|prices?)|price list|tariffs?|tentative|holds?|pending|confirm\w*|blocked|history|timeline)\b/u',
+        'front_desk'   => '/\b(book(ing|ings|ed)?|reserv\w*|arriv\w*|depart\w*|check.?(in|out|ins|outs)|in.?house|guests?|stay\w*|nights?|free|availab\w*|vacan\w*|quote|room types?|assign\w*|due out|leav\w*|left|no.?shows?|moved|walk.?in|extend\w*|cancel\w*|child(ren)?|kids?|infants?|single|double|triple|occupancy (rates?|prices?)|price list|tariffs?|tentative|holds?|pending|confirm\w*|blocked|history|timeline)\b/u',
         'housekeeping' => '/\b(housekeep\w*|clean\w*|dirty|maintenance|repair\w*|broken|fix\w*|room status|status of room|not ready|off sale|out of order|inspect\w*|jobs?|tasks?)\b/u',
         'restaurant'   => '/\b(restaurant|bar|kitchen|till|food|drinks?|meals?|orders?|top sell\w*|voids?|tickets?|coffee|breakfast|lunch|dinner|dish(es)?|tabs?|tables?|room service|receipts?|menu|recipes?|portions?|ingredients?|food cost|chef|cook\w*)\b/u',
         'money'        => '/\b(owe[sd]?|owing|balances?|unpaid|paid|payments?|refunds?|discounts?|money|cash|debts?|invoices?|losing|leaks?|revenue|takings|spend\w*)\b/u',
@@ -3003,6 +3003,7 @@ function rh_ai_turn_run(PDO $db, array $user, array $in): array
         $db->prepare("UPDATE ai_conversations SET title = ? WHERE id = ?")->execute([rh_ai_title_from($tok), $conv]);
     }
     $GLOBALS['__rh_ai_current_q'] = mb_substr($tok, 0, 400); // tokenised: kept with any incident this question raises
+    $GLOBALS['__rh_ai_current_q_conv'] = $conv; // the chat it belongs to (its name tokens are only read in this chat)
     // Typos in the question's own words (owner 2026-10-29: "arivals", "ocupancy", "brekfast"): read locally, PHP only. The
     // local answers read the corrected text; the stored message stays as typed; the model is told the words read.
     $typo = rh_ai_typo_fix($tok, rh_ai_module_on('bookings') ? array_column(rh_ai_room_type_names($db), 'name') : []);

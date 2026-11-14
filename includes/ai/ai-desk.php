@@ -9,7 +9,8 @@
  *    tentative holds), and blocked dates.
  *  - Local answers, no model and no tokens: "Who booked Mr Nthani in", "Who made the booking for ...", "booking history
  *    for ...", "When is the next arrival", "Any other day" after an arrivals answer, "tentative bookings", "blocked
- *    dates"; and cards straight from the words: "check him in", "check out Mr Banda", "confirm their booking",
+ *    dates", stay facts from the booking's History ("when did ulemu check out", "has Moyo left", "who checked them in",
+ *    "who cancelled Banda's booking", "was Phiri a no-show", "did she extend her stay", "was he moved"); and cards straight from the words: "check him in", "check out Mr Banda", "confirm their booking",
  *    "assign a room to them", "room 12 is clean", "start cleaning room 12", "room 12 is fixed". A card is only ever
  *    prepared (rh_ai_propose: the person's own permissions, then Confirm replays the screen's own endpoint).
  *  - Fault of 2026-10-29 ("No booking was found for Mr Nthani" with the booking on file): a named "no booking for X" in
@@ -30,7 +31,7 @@ function rh_ai_desk_tools(): array
     $days = ['type' => 'integer', 'minimum' => 1, 'maximum' => 366, 'description' => 'How many days ahead (default ' . rh_ai_num('ai_upcoming_days') . ')'];
     return [
         'booking_history' => [
-            'description' => 'Who made one booking and how (online on the website by the guest, by a staff member in the portal, through another system) and what has happened to it since (status changes, check-in and out, emails, date changes, money entries), each with who did it and when, plus a short summary as the History panel shows it (price booked at, price since, latest payment, refund or credit note, latest status), plus its emails from the Emails sent log (kind, sent / failed / not sent because staff chose not to, when, by whom, whether to the guest; the log has a start date, so an email before it is not in it). The answer to "who booked X" and "was the guest emailed". Give a booking_id or reference from this chat\'s results.',
+            'description' => 'Who made one booking and how (online on the website by the guest, by a staff member in the portal, through another system) and what has happened to it since (status changes, check-in and out, emails, date changes, money entries), each with who did it and when, plus "stay": when the guest actually checked in and out, a cancellation, a no-show, stay date changes (extended / shortened) and room steps (moved), each with when and who, from the History panel itself (the answer to "when did X check out", "has X left", "who checked them in", "was X moved"; a step that is not there was not recorded), plus a short summary as the History panel shows it (price booked at, price since, latest payment, refund or credit note, latest status), plus its emails from the Emails sent log (kind, sent / failed / not sent because staff chose not to, when, by whom, whether to the guest; the log has a start date, so an email before it is not in it). The answer to "who booked X" and "was the guest emailed". Give a booking_id or reference from this chat\'s results.',
             'schema' => ['properties' => ['booking_id' => ['type' => 'integer', 'minimum' => 1], 'reference' => ['type' => 'string', 'maxLength' => 40]]],
             'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 30, 'handler' => 'rh_ai_t_booking_history', 'step' => 'Reading the booking\'s history',
         ],
@@ -644,13 +645,110 @@ function rh_ai_t_booking_history(PDO $db, array $user, array $a): array
         'link' => 'booking-details.php?id=' . $id, 'link_label' => 'Open booking'];
     // The History panel's Summary (owner 2026-11-09), from the panel's own step-by-step builder (money steps included).
     // Roles only, no names: the summary is free text, so no name is left for the privacy pass to miss.
-    $sum = rh_ai_booking_history_summary($db, $id);
+    // The stay itself (owner fault 2026-11-14: "when did Victoria check out" got "I don't know"): when the guest really
+    // checked in and out, a cancellation, a no-show, date changes and room moves, each with who did it - the History
+    // panel's own steps (hotel-local times), not the timeline's last few rows. One read of the steps serves both.
+    $steps = rh_ai_booking_history_steps($db, $id);
+    $sum = $steps !== null ? rh_ai_history_summary($steps, false) : [];
     if ($sum) {
         $out['summary'] = implode(' ', $sum);
     }
+    $out['stay'] = $steps !== null ? rh_ai_stay_facts_from($steps) : ['error' => 'could not be read just now'];
     $out += rh_ai_booking_emails($db, $id, (string)$b['booking_reference']);
     return $out;
 }
+
+/**
+ * PURE. Who did a History step ("Jane Banda (receptionist)", "Guest (Name)", "System", "Not recorded", "Staff member #4",
+ * "Name (online booking)") as fields: 'by' in plain words, 'staff_name' (a privacy field: tokenised before it leaves)
+ * and 'role'. A stored name with no role is kept as the name recorded (not said to be staff).
+ */
+function rh_ai_stay_who(string $who): array
+{
+    $who = trim((string)preg_replace('/\s+—\s+from the .+$/u', '', trim($who)));
+    if ($who === '' || $who === 'Not recorded') {
+        return ['by' => 'not recorded'];
+    }
+    if ($who === 'System') {
+        return ['by' => 'the system'];
+    }
+    if ($who === 'Online booking' || preg_match('/\(online booking\)$/', $who)) {
+        return ['by' => 'an online booking'];
+    }
+    if (strpos($who, 'Guest') === 0) {
+        return ['by' => 'the guest'];
+    }
+    if (preg_match('/^Staff member #\d+$/', $who)) {
+        return ['by' => 'a staff member'];
+    }
+    if (preg_match('/^(.+?)\s*\(([^()]+)\)$/u', $who, $m)) {
+        return ['by' => 'staff', 'staff_name' => trim($m[1]), 'role' => trim($m[2])];
+    }
+    return ['by' => 'name recorded', 'staff_name' => $who];
+}
+
+/**
+ * PURE. The stay facts from a History list (rh_booking_history, oldest first): the latest check-in, check-out,
+ * cancellation and no-show steps, and the date changes and room steps (newest first, at most 5 each). Only the step's
+ * own sentence and its date / room lines are kept - never a note or reason someone typed, never a money line.
+ */
+function rh_ai_stay_facts_from(array $events): array
+{
+    $one = static function (array $e): array {
+        return ['at' => (string)($e['at'] ?? ''), 'what' => (string)($e['what'] ?? '')] + rh_ai_stay_who((string)($e['who'] ?? ''));
+    };
+    $out = ['checked_in' => null, 'checked_out' => null, 'cancelled' => null, 'no_show' => null, 'date_changes' => [], 'room_steps' => [], 'moved' => false];
+    $assigned = 0;
+    foreach (array_values(array_filter($events, 'is_array')) as $e) {
+        $kind = (string)($e['kind'] ?? '');
+        $what = (string)($e['what'] ?? '');
+        if ($kind === 'check_in' && $what !== 'Check-in undone') {
+            $out['checked_in'] = $one($e);
+        } elseif ($kind === 'check_out') {
+            $out['checked_out'] = $one($e);
+        } elseif ($kind === 'cancel') {
+            $out['cancelled'] = $one($e);
+        } elseif ($kind === 'status' && preg_match('/no.?show/i', $what)) {
+            $out['no_show'] = $one($e);
+        } elseif ($kind === 'edit' || $kind === 'room') {
+            $lines = [];
+            foreach (preg_split('/\n/', (string)($e['detail'] ?? '')) as $ln) {
+                $ln = trim($ln);
+                if ($kind === 'edit' ? preg_match('/^(Check-in date|Check-out date|Nights): [^\n]+ → [^\n]+$/u', $ln) : preg_match('/^(Room|Room type|Joined rooms): [^\n]+ → [^\n]+$/u', $ln)) {
+                    $lines[] = $ln;
+                }
+            }
+            if ($kind === 'edit') {
+                // "Stay extended: check-out 2026-11-12 -> 2026-11-14, 2 -> 4 night(s). Room total ..." (the timeline's own wording)
+                if (!$lines && preg_match('/check-out (\d{4}-\d{2}-\d{2}) -> (\d{4}-\d{2}-\d{2})(?:, (\d+) -> (\d+) night)?/i', (string)($e['detail'] ?? ''), $dm)) {
+                    $lines[] = 'Check-out date: ' . date('j M Y', strtotime($dm[1])) . ' → ' . date('j M Y', strtotime($dm[2]));
+                    if (!empty($dm[3])) {
+                        $lines[] = 'Nights: ' . $dm[3] . ' → ' . $dm[4];
+                    }
+                }
+                if (!$lines && !preg_match('/\b(extend\w*|shorten\w*|stay dates?|dates? (changed|adjusted))\b/i', $what)) {
+                    continue; // another kind of change (a note, a price, a guest detail): not a date change
+                }
+                array_unshift($out['date_changes'], $one($e) + ($lines ? ['change' => implode('; ', $lines)] : []));
+            } else {
+                if (preg_match('/\breleased$/i', $what)) {
+                    continue; // a room let go at check-out or a move: not a step of its own here
+                }
+                if (preg_match('/\bassigned$/i', $what)) {
+                    $assigned++;
+                }
+                if ($lines || $assigned > 1 || preg_match('/\b(upgraded|downgraded|moved|changed)\b/i', $what)) {
+                    $out['moved'] = true;
+                }
+                array_unshift($out['room_steps'], $one($e) + ($lines ? ['change' => implode('; ', $lines)] : []));
+            }
+        }
+    }
+    $out['date_changes'] = array_slice($out['date_changes'], 0, 5);
+    $out['room_steps'] = array_slice($out['room_steps'], 0, 5);
+    return $out;
+}
+
 
 /**
  * "Was the guest emailed?" from the Emails sent log (email_send_log, migration 081; owner 2026-11-12), the same rows
@@ -702,6 +800,19 @@ function rh_ai_booking_emails(PDO $db, int $bookingId, string $ref): array
     } catch (Throwable $e) {
         error_log('Assistant booking emails: ' . $e->getMessage());
         return ['emails' => 'could not be read just now'];
+    }
+}
+
+/** The History panel's steps for one booking (rh_booking_history, oldest first), or null when they cannot be read. */
+function rh_ai_booking_history_steps(PDO $db, int $bookingId): ?array
+{
+    try {
+        require_once dirname(__DIR__) . '/booking-history.php';
+        require_once __DIR__ . '/ai-history.php';
+        return rh_booking_history($db, $bookingId);
+    } catch (Throwable $e) {
+        error_log('Assistant booking history steps: ' . $e->getMessage());
+        return null;
     }
 }
 
@@ -876,6 +987,370 @@ function rh_ai_desk_booking_intent(string $m): ?array
         }
     }
     return null;
+}
+
+/**
+ * PURE. A stay fact about one guest, asked after the event (owner fault 2026-11-14, "when did Victoria at Rosalyn's check
+ * out" got "the chat was cleared" / "I don't know"): "when did ulemu check out", "has Moyo left", "who checked them in",
+ * "was Banda's booking cancelled", "who marked Phiri as a no-show", "did Mr Moyo extend their stay", "was she moved to
+ * another room". Returns ['fact' => checked_out|checked_in|cancelled|no_show|extended|moved, 'who' => the name as written
+ * ('' = the booking in focus), 'yesno' => a yes / no question] or null. A change request ("check her out", "cancel his
+ * booking", "move them to room 5") is never one: every shape asks about something already done. $hotel: the hotel's own
+ * name - "at Rosalyn's" says where, not who.
+ */
+function rh_ai_desk_stay_intent(string $m, string $hotel = ''): ?array
+{
+    $m = trim((string)preg_replace('/\s+/u', ' ', str_replace(['’', '‘'], "'", $m)));
+    // when words at the end ("did Ulemu check out yesterday") say nothing about who
+    $timeWords = '/(?:\s+(?:today|yesterday|this morning|this afternoon|last night|tonight|already|yet|exactly|then))+$/iu';
+    $m = trim((string)preg_replace($timeWords, '', $m));
+    $m = rh_ai_desk_strip_hotel($m, $hotel, true); // "... check out at Rosalyn's": where, not part of the question
+    $m = trim((string)preg_replace($timeWords, '', $m)); // "... check out yesterday at Rosalyn's"
+    $m = trim((string)preg_replace('/^(?:(?:and|so|ok|okay|hi|hey)[,]?\s+)?(?:(?:tell me|do you know|i want to know|i\'d like to know|find out|check|see)\s+)?/iu', '', $m));
+    if ($m === '' || mb_strlen($m) > 120) {
+        return null;
+    }
+    $W = '(?<who>.+?)';
+    $poss = "(?:(?:'s|s') (?:booking|reservation|stay))?";
+    $when = '(?:when|what time|what day|which day|what date|at what time)';
+    $shapes = [
+        'checked_out' => [
+            ['/^' . $when . ' (?:did|has|was) ' . $W . ' (?:check(?:ed)?[\s\-]?out|leave|left|depart(?:ed)?|go home|went home)(?: of the hotel| from the hotel)?$/iu', false],
+            ['/^(?:has|did|is) ' . $W . ' (?:checked[\s\-]?out|check[\s\-]?out|left|leave|gone|departed|depart|gone home|go home)$/iu', true],
+            ['/^who checked ' . $W . ' out$/iu', false],
+            ['/^who checked[\s\-]?out ' . $W . '$/iu', false],
+            ['/^who (?:did|handled|processed) (?:the )?check[\s\-]?out (?:of|for) ' . $W . '$/iu', false],
+        ],
+        'checked_in' => [
+            ['/^' . $when . ' (?:did|has|was) ' . $W . ' (?:check(?:ed)?[\s\-]?in|arrive|arrived|come in|came in|get in|got in)$/iu', false],
+            ['/^(?:has|did|is) ' . $W . ' (?:checked[\s\-]?in|check[\s\-]?in|arrived|arrive|come in|came in|shown up|show up|showed up|turned up)$/iu', true],
+            ['/^who checked ' . $W . ' in$/iu', false],
+            ['/^who checked[\s\-]?in ' . $W . '$/iu', false],
+            ['/^who (?:did|handled|processed) (?:the )?check[\s\-]?in (?:of|for) ' . $W . '$/iu', false],
+        ],
+        'cancelled' => [
+            ['/^' . $when . ' (?:was|did) ' . $W . $poss . ' (?:get )?cancel(?:l)?ed$/iu', false],
+            ['/^when did ' . $W . ' cancel(?: (?:the|their|his|her) (?:booking|reservation|stay))?$/iu', false],
+            ['/^(?:was|has|is) ' . $W . $poss . ' (?:been |got )?cancel(?:l)?ed$/iu', true],
+            ['/^did ' . $W . ' cancel(?: (?:the|their|his|her) (?:booking|reservation|stay))?$/iu', true],
+            ['/^who cancel(?:l)?ed ' . $W . $poss . '$/iu', false],
+            ['/^who cancel(?:l)?ed (?:the )?(?:booking|reservation|stay) (?:for|of) ' . $W . '$/iu', false],
+        ],
+        'no_show' => [
+            ['/^(?:was|is|did) ' . $W . ' (?:marked |recorded )?(?:as )?(?:a )?no[\s\-]?show$/iu', true],
+            ['/^did ' . $W . ' (?:not show(?: up)?|not turn up|not come)$/iu', true],
+            ['/^' . $when . ' (?:was|did) ' . $W . ' (?:get )?(?:marked|recorded) (?:as )?(?:a )?no[\s\-]?show$/iu', false],
+            ['/^who (?:marked|recorded|made) ' . $W . ' (?:as )?(?:a )?no[\s\-]?show$/iu', false],
+        ],
+        'extended' => [
+            ['/^(?:was|has|did) ' . $W . "(?:(?:'s|s') stay| stay)? (?:been |get |got )?(?:extended|shortened)$/iu", true],
+            ['/^did ' . $W . ' (?:extend|shorten|change) (?:the |their |his |her )?(?:stay|dates|booking dates|check[\s\-]?out(?: date)?)$/iu', true],
+            ['/^did ' . $W . ' stay (?:longer|on|extra nights?|another night)$/iu', true],
+            ['/^who (?:extended|shortened|changed) ' . $W . "(?:'s|s')? (?:stay|dates|check[\s\-]?out(?: date)?)$/iu", false],
+            ['/^who (?:extended|shortened) (?:the )?stay (?:of|for) ' . $W . '$/iu', false],
+            ['/^' . $when . ' (?:was|did) ' . $W . "(?:(?:'s|s') stay)? (?:get )?(?:extended|shortened)$/iu", false],
+        ],
+        'moved' => [
+            ['/^(?:was|has|did) ' . $W . ' (?:been |get |got )?(?:moved|upgraded|downgraded|switched)(?: rooms?| (?:to )?(?:another|a different|a new|a better) room)?$/iu', true],
+            ['/^did ' . $W . ' (?:move|change|switch) (?:rooms?|(?:to )?(?:another|a different|a new) room)$/iu', true],
+            ['/^who (?:moved|upgraded|downgraded|switched) ' . $W . '(?: rooms?| (?:to )?(?:another|a different|a new|a better) room)?$/iu', false],
+            ['/^' . $when . ' (?:was|did) ' . $W . ' (?:get )?(?:moved|move|upgraded|downgraded)(?: rooms?| (?:to )?(?:another|a different|a new) room)?$/iu', false],
+            ['/^which rooms? (?:did|was|has) ' . $W . ' (?:been )?(?:move|moved|switch|switched) (?:to|into)$/iu', false],
+        ],
+    ];
+    foreach ($shapes as $fact => $res) {
+        foreach ($res as [$re, $yesno]) {
+            if (!preg_match($re, $m, $g)) {
+                continue;
+            }
+            $w = rh_ai_desk_strip_hotel(trim((string)$g['who']), $hotel);
+            if ($w === '' || rh_ai_desk_is_pronoun($w) || preg_match('/^(he|she|they)$/iu', $w)) {
+                return ['fact' => $fact, 'who' => '', 'yesno' => $yesno];
+            }
+            $name = rh_ai_desk_stay_name($w);
+            return $name === null ? null : ['fact' => $fact, 'who' => $name, 'yesno' => $yesno];
+        }
+    }
+    return null;
+}
+
+/**
+ * rh_ai_desk_stay_intent() with this hotel's own name and people: a name that only a staff member has ("has Jay checked
+ * in") is not a guest's stay, so it is left to the usual answers (as before 2026-11-14).
+ */
+function rh_ai_desk_stay_question(PDO $db, string $m): ?array
+{
+    $si = rh_ai_desk_stay_intent($m, function_exists('getSetting') ? (string)getSetting('site_name', '') : '');
+    if ($si === null || $si['who'] === '' || preg_match('/\d/', $si['who'])) {
+        return $si;
+    }
+    $people = rh_ai_vault_people($db);
+    $lw = mb_strtolower($si['who']);
+    if (isset($people['full'][$lw])) {
+        return $people['full'][$lw] === 'STAFF' && !isset($people['shared'][$lw]) ? null : $si;
+    }
+    foreach (preg_split('/\s+/u', $lw) as $w) {
+        if (($people['part'][$w] ?? '') !== 'STAFF' || isset($people['shared'][$w])) {
+            return $si; // a guest's name word, or one nobody has yet: a stay question
+        }
+    }
+    return null;
+}
+
+/**
+ * PURE. "Victoria at Rosalyn's" -> "Victoria": a closing "at / in / from" the hotel itself (its own name, or "the
+ * hotel", "here") says where, not who. Anything else is left as written.
+ */
+function rh_ai_desk_strip_hotel(string $who, string $hotel, bool $wholeTail = false): string
+{
+    // a name: from the first "at" ("Victoria at Rosalyn's checked out" leaves "Victoria"); a question's end: the last one
+    if (!preg_match($wholeTail ? '/^(.+)\s+(?:at|in|from)\s+(?:the\s+)?(\S+)(.*)$/iu' : '/^(.+?)\s+(?:at|in|from)\s+(?:the\s+)?(\S+)(.*)$/iu', $who, $m)) {
+        return $who;
+    }
+    $own =['hotel' => true, 'here' => true, 'lodge' => true, 'property' => true, 'our' => true];
+    foreach (function_exists('rh_ai_vault_place_words') ? rh_ai_vault_place_words($hotel) : [] as $pw) {
+        if (mb_strlen($pw) >= 3) {
+            $own[$pw] = true;
+        }
+    }
+    $bare = static fn(string $w): string => mb_strtolower((string)preg_replace("/(?:'s|s'|')$/u", '', str_replace('’', "'", trim($w, " ,.?!"))));
+    if (!isset($own[$bare($m[2])])) {
+        return $who;
+    }
+    if ($wholeTail) { // the end of a question: only when every word after "at" is the hotel's ("... checked out at Liwonde Sun")
+        foreach (preg_split('/\s+/u', trim($m[3])) as $w) {
+            if ($w !== '' && !isset($own[$bare($w)])) {
+                return $who;
+            }
+        }
+    }
+    return trim($m[1]);
+}
+
+/**
+ * The guest's name in a stay question: as rh_ai_desk_name (a title, a capital letter or a reference), and also a name
+ * typed in lower case ("has ulemu left": staff type names as they come) when no word of it is an ordinary word.
+ */
+function rh_ai_desk_stay_name(string $who): ?string
+{
+    $n = rh_ai_desk_name($who);
+    if ($n !== null) {
+        return $n;
+    }
+    $who = trim($who);
+    if (!preg_match('/^\p{Ll}[\p{L}\'\-]+(?:\s\p{L}[\p{L}\'\-]+){0,3}$/u', $who)) {
+        return null;
+    }
+    $stop = function_exists('rh_ai_vault_stopwords') ? rh_ai_vault_stopwords() : [];
+    foreach (preg_split('/\s+/u', mb_strtolower($who)) as $w) {
+        if (isset($stop[$w]) || preg_match('/^(they|them|their|he|him|his|she|her|it|we|you|i|guest|guests|everyone|anyone|someone|somebody|people|group|staff|person|man|woman|lady|gentleman|family|couple|everybody|nobody)$/u', $w)) {
+            return null;
+        }
+    }
+    return $who;
+}
+
+/**
+ * The booking a stay question is about. A name is searched in every status the question could concern ($statuses, all
+ * collected before deciding: "when did X check out" looks at checked-out AND in-house stays). One guest (one name on
+ * file, even with several bookings: their latest stay) is answered; two or more different guests always get one short
+ * question with their real names, references and dates (reviewer fault 2026-11-14: a first name shared by a guest who
+ * left and one in house was answered without asking). No match there falls back to the usual search
+ * (rh_ai_desk_pick): a filtered "none" is never the answer.
+ */
+function rh_ai_desk_stay_pick(PDO $db, array $user, int $conv, string $who, array $state, int $pageBooking, array $statuses): array
+{
+    if ($who === '' || !$statuses || !rh_ai_tool_allowed($user, 'search_bookings')) {
+        return rh_ai_desk_pick($db, $user, $conv, $who, $state, $pageBooking);
+    }
+    $fit = [];
+    $links = [];
+    foreach ($statuses as $s) {
+        $r = rh_ai_run_tool($db, $user, $conv, 'search_bookings', ['query' => $who, 'status' => (string)$s]);
+        $res = $r['ok'] ? (array)$r['result'] : [];
+        if (($res['close_match'] ?? '') === 'clear') {
+            continue; // only a name on file decides here; a spelling slip is read by the plain search below, across every status
+        }
+        $rows = is_array($res['bookings'] ?? null) ? $res['bookings'] : [];
+        if ($rows) {
+            rh_ai_message_add($db, $conv, 'tool', '', ['tool_name' => 'search_bookings', 'args' => rh_ai_vault_protect($db, $conv, ['query' => $who, 'status' => (string)$s]), 'result' => $r['json'], 'agent' => 'local']);
+            $links = $links ?: $r['links'];
+        }
+        foreach ($rows as $row) {
+            $fit[(int)$row['booking_id']] = $row;
+        }
+    }
+    if (!$fit) {
+        return rh_ai_desk_pick($db, $user, $conv, $who, $state, $pageBooking);
+    }
+    // One guest = one name on file (the same name is the same privacy token here, whatever its case)
+    $guests = [];
+    foreach ($fit as $row) {
+        $guests[mb_strtolower(trim((string)($row['guest_name'] ?? '')))][] = $row;
+    }
+    if (count($guests) === 1) {
+        $rows = reset($guests);
+        usort($rows, static fn($a, $b) => [(string)($b['check_in'] ?? ''), (int)$b['booking_id']] <=> [(string)($a['check_in'] ?? ''), (int)$a['booking_id']]);
+        return ['id' => (int)$rows[0]['booking_id'], 'row' => $rows[0]]; // their latest stay
+    }
+    $cap = max(2, (int)rh_ai_num('ai_list_page_rows'));
+    $list = array_slice(array_values($fit), 0, $cap);
+    $opts = array_map('rh_ai_booking_option', $list);
+    $last = array_pop($opts);
+    return ['reply' => ['text' => count($guests) . ' guests match "' . rh_ai_scrub_outbound($db, $conv, $who) . '". Which one do you mean: ' . implode(', ', $opts) . ' or ' . $last . '?'
+        . (count($fit) > count($list) ? ' (the first ' . count($list) . ' of ' . count($fit) . ' bookings; give me the reference or the full name)' : ''),
+        'links' => $links, 'chips' => [], 'focus' => 0]];
+}
+
+/** "**Thu 12 Nov 2026, 16:53**" for a stay step ('' when it has no time). */
+function rh_ai_desk_stay_time(?array $s): string
+{
+    $ts = $s ? strtotime((string)($s['at'] ?? '')) : false;
+    return $ts ? '**' . date('D j M Y, H:i', $ts) . '**' : '';
+}
+
+/** " on **Thu 12 Nov 2026, 16:53**" for a stay step ('' when it has no time). */
+function rh_ai_desk_stay_at(?array $s): string
+{
+    $t = rh_ai_desk_stay_time($s);
+    return $t !== '' ? ' on ' . $t : '';
+}
+
+/** " by **Jane Banda** (receptionist)" / " by the guest" / "; who did it was not recorded" for a stay step. */
+function rh_ai_desk_stay_by(?array $s): string
+{
+    if (!$s) {
+        return '';
+    }
+    $by = (string)($s['by'] ?? '');
+    if (!empty($s['staff_name'])) {
+        return ' by **' . $s['staff_name'] . '**' . (!empty($s['role']) ? ' (' . $s['role'] . ')' : '');
+    }
+    $words = ['a staff member' => ' by a staff member (their name was not recorded)', 'the guest' => ' by the guest', 'the system' => ' by the system', 'an online booking' => ' through an online booking'];
+    return $words[$by] ?? '; who did it was not recorded';
+}
+
+/**
+ * The answer to a stay question from the booking_history result (de-identified: names are privacy tokens until the panel
+ * shows them). Every time and name is the History panel's own step; a step that is not there is said to be not recorded,
+ * with the booked dates - never "I don't know", never a guess.
+ */
+function rh_ai_desk_stay_text(array $h, array $si): string
+{
+    $who = '**' . ($h['guest_name'] ?? '') . '** (' . ($h['reference'] ?? '') . ')';
+    $st = (string)($h['status'] ?? '');
+    $s = is_array($h['stay'] ?? null) ? $h['stay'] : [];
+    $yes = !empty($si['yesno']);
+    $d = static fn($x) => $x && strtotime((string)$x) ? date('D j M Y', strtotime((string)$x)) : (string)$x;
+    $step = static fn(?array $x): string => rh_ai_desk_stay_at($x) . rh_ai_desk_stay_by($x);
+    $ci = $s['checked_in'] ?? null;
+    $co = $s['checked_out'] ?? null;
+    $cx = $s['cancelled'] ?? null;
+    $ns = $s['no_show'] ?? null;
+    $statusWords = str_replace('-', ' ', $st);
+    // A booking where the guest never stayed (not arrived yet, cancelled, a no-show)
+    $notStayed = static function () use ($who, $st, $h, $d, $cx, $ns, $step, $yes, $statusWords): string {
+        if ($st === 'cancelled' || $st === 'expired') {
+            return ($yes ? 'No - ' : '') . $who . ' did not stay: the booking was cancelled' . ($cx ? $step($cx) : ' (no cancellation step is recorded on its History)') . '.';
+        }
+        if ($st === 'no-show') {
+            return ($yes ? 'No - ' : '') . $who . ' did not stay: the guest was marked as a no-show' . ($ns ? $step($ns) : '') . '.';
+        }
+        return ($yes ? 'No - ' : '') . $who . ' has not arrived yet: due in ' . $d($h['check_in'] ?? '') . ', out ' . $d($h['check_out'] ?? '') . ' (' . $statusWords . ').';
+    };
+    $fact = (string)($si['fact'] ?? '');
+    if (!empty($s['error'])) {
+        $t = 'The History of ' . $who . ' could not be read just now, so I cannot say when that happened. Open the booking to see its History.';
+    } elseif ($fact === 'checked_out') {
+        if ($co) {
+            $t = ($yes ? 'Yes - ' : '') . $who . ' checked out' . $step($co) . '.';
+        } elseif ($st === 'checked-out') {
+            $t = ($yes ? 'Yes - ' : '') . $who . ' is checked out, but its History has no check-out step, so the exact time and who did it were not recorded. The booked check-out date was ' . $d($h['check_out'] ?? '') . '.';
+        } elseif ($st === 'checked-in') {
+            $t = ($yes ? 'No - ' : '') . $who . ' has not checked out yet: in house, due out ' . $d($h['check_out'] ?? '') . ($ci ? ' (checked in' . $step($ci) . ')' : '') . '.';
+        } else {
+            $t = $notStayed();
+        }
+    } elseif ($fact === 'checked_in') {
+        if ($ci) {
+            $t = ($yes ? 'Yes - ' : '') . $who . ' checked in' . $step($ci) . '.' . ($co ? ' Checked out' . $step($co) . '.' : '');
+        } elseif ($st === 'checked-in' || $st === 'checked-out') {
+            $t = ($yes ? 'Yes - ' : '') . $who . ' is ' . $statusWords . ', but its History has no check-in step, so the exact time and who did it were not recorded. The booked arrival date was ' . $d($h['check_in'] ?? '') . '.';
+        } else {
+            $t = $notStayed();
+        }
+    } elseif ($fact === 'cancelled') {
+        if ($cx) {
+            $what = (string)($cx['what'] ?? '');
+            $t = ($yes ? 'Yes - ' : '') . $who . ' was cancelled' . $step($cx) . '.' . ($what !== '' && $what !== 'Booking cancelled' ? ' (' . rtrim($what, '.') . '.)' : '');
+        } elseif ($st === 'cancelled' || $st === 'expired') {
+            $t = ($yes ? 'Yes - ' : '') . $who . ' is cancelled, but its History has no cancellation step, so when and who did it were not recorded.';
+        } else {
+            $t = ($yes ? 'No - ' : '') . $who . ' is not cancelled: it is ' . $statusWords . '.';
+        }
+    } elseif ($fact === 'no_show') {
+        if ($ns) {
+            $t = ($yes ? 'Yes - ' : '') . $who . ' was marked as a no-show' . $step($ns) . '.';
+        } elseif ($st === 'no-show') {
+            $t = ($yes ? 'Yes - ' : '') . $who . ' is a no-show, but its History has no no-show step, so when and who did it were not recorded.';
+        } else {
+            $t = ($yes ? 'No - ' : '') . $who . ' is not a no-show: it is ' . $statusWords . '.';
+        }
+    } elseif ($fact === 'extended') {
+        $ch = is_array($s['date_changes'] ?? null) ? $s['date_changes'] : [];
+        $span = ' The stay runs ' . $d($h['check_in'] ?? '') . ' to ' . $d($h['check_out'] ?? '') . ((int)($h['nights'] ?? 0) > 0 ? ' (' . (int)$h['nights'] . ' night' . ((int)$h['nights'] === 1 ? '' : 's') . ')' : '') . '.';
+        if ($ch) {
+            $lines = array_map(static fn($x) => rh_ai_desk_stay_time($x) . ' · ' . ($x['what'] ?? '') . (!empty($x['change']) ? ' · ' . $x['change'] : '') . rh_ai_desk_stay_by($x), $ch);
+            $t = ($yes ? 'Yes - ' : '') . 'The stay dates of ' . $who . ' were changed ' . (count($ch) === 1 ? 'once' : count($ch) . ' times') . ' (newest first):' . rh_ai_local_lines($lines) . "\n\n" . ltrim($span);
+        } else {
+            $t = ($yes ? 'No - no' : 'No') . ' change to the stay dates of ' . $who . ' is recorded on its History.' . $span;
+        }
+    } elseif ($fact === 'moved') {
+        $rs = is_array($s['room_steps'] ?? null) ? $s['room_steps'] : [];
+        $lines = array_map(static fn($x) => rh_ai_desk_stay_time($x) . ' · ' . ($x['what'] ?? '') . (!empty($x['change']) ? ' · ' . $x['change'] : '') . rh_ai_desk_stay_by($x), $rs);
+        if (!empty($s['moved'])) {
+            $t = ($yes ? 'Yes - ' : '') . 'Room steps of ' . $who . ' (newest first):' . rh_ai_local_lines($lines);
+        } else {
+            $t = ($yes ? 'No - no' : 'No') . ' room move is recorded on the History of ' . $who . '.' . ($lines ? ' Its room steps:' . rh_ai_local_lines($lines) : '');
+        }
+    } else {
+        $t = rh_ai_desk_history_text($h);
+    }
+    return $t . "\n\n" . rh_ai_booking_line($h);
+}
+
+/**
+ * The desk's answer to a stay question (rh_ai_desk_stay_intent): the booking (named, in focus or on screen), then its
+ * History through the booking_history lookup (Bookings permission and module, like the screen). Read only.
+ */
+function rh_ai_desk_stay_reply(PDO $db, array $user, int $conv, array $si, array $state, int $pageBooking): array
+{
+    if (!rh_ai_tool_allowed($user, 'booking_history')) {
+        return rh_ai_desk_declined($user, 'booking_history');
+    }
+    // Every status the question could concern, searched together (a stay still to come cannot have checked out or moved)
+    $statuses = [
+        'checked_out' => ['checked-out', 'checked-in'],
+        'checked_in' => ['checked-in', 'checked-out'],
+        'cancelled' => ['cancelled', 'expired'],
+        'no_show' => ['no-show'],
+        'extended' => [],
+        'moved' => ['checked-in', 'checked-out'],
+    ][(string)$si['fact']] ?? [];
+    $pick = rh_ai_desk_stay_pick($db, $user, $conv, (string)$si['who'], $state, $pageBooking, $statuses);
+    if (isset($pick['reply'])) {
+        return $pick['reply'];
+    }
+    $r = rh_ai_desk_read($db, $user, $conv, 'booking_history', ['booking_id' => (int)$pick['id']]);
+    if ($r === null) {
+        return ['text' => 'I could not read that booking\'s History just now. Open the booking to see it.', 'links' => [['label' => 'Open on Bookings', 'url' => 'bookings.php']], 'chips' => []];
+    }
+    $h = (array)$r['result'];
+    $text = rh_ai_desk_stay_text($h, $si);
+    if (!empty($pick['read_as']) && (string)$si['who'] !== '') {
+        $text = 'Taking "' . rh_ai_scrub_outbound($db, $conv, (string)$si['who']) . '" as **' . ($h['guest_name'] ?? '') . '** (the closest name on file).' . "\n\n" . $text;
+    }
+    return ['text' => $text, 'links' => $r['links'], 'chips' => ['Show its history'], 'focus' => (int)$pick['id'], 'focus_offer' => 0];
 }
 
 /** "When is the next arrival", "upcoming arrivals", "arrivals next week": ['from','days','when'] or null. $l: lower case. */
@@ -1232,6 +1707,11 @@ function rh_ai_desk_local(PDO $db, array $user, int $conv, string $message, arra
         return null;
     }
     $l = mb_strtolower($m);
+    // 0. When a guest really checked in or out, was cancelled, a no-show, extended or moved, and who did it (owner fault
+    // 2026-11-14): the booking's own History steps, local, zero tokens. Asked about something already done, so never a card.
+    if (($si = rh_ai_desk_stay_question($db, $m)) !== null) {
+        return rh_ai_desk_stay_reply($db, $user, $conv, $si, $state, $pageBooking);
+    }
     // 1. A change one card does, straight from the words
     if (($ci = rh_ai_desk_card_intent($m)) !== null) {
         if ($ci['key'] === 'booking_note' && $raw !== '' && preg_match('/^[^:]*:\s*(\S.*)$/su', trim($raw), $nm)) {
@@ -1477,15 +1957,24 @@ function rh_ai_named_absence_fix(PDO $db, array $user, int $conv, string $reply,
     $parts = preg_split('/(?<=[.!?;])\s+|\n+/u', $reply); // the same split as the claims
     $swap = [];
     foreach ($claims as $i => [$subject, $name]) {
+        unset($asWritten);
         $q = trim((string)preg_replace('/^(?:mr|mrs|ms|miss|mx|dr|prof|mister|madam|sir)\.?\s+/iu', '', rh_ai_vault_rehydrate($db, $conv, rh_ai_vault_canon($name))));
         if ($q === '') {
             continue;
         }
-        if (rh_ai_vault_unresolved_in($q)) { // cleared at sign-out: cannot be checked, so it is not said
-            if (isset($parts[$i]) && trim((string)$parts[$i]) !== '') {
-                $swap[] = [trim((string)$parts[$i]), rh_ai_vault_unresolved_msg()];
+        if (rh_ai_vault_unresolved_in($q)) {
+            // A name token with no value: the one person this question names is checked instead (owner fault 2026-11-14);
+            // otherwise it cannot be checked, so it is not said - the sign-out line only when names really were cleared
+            $fromQ = rh_ai_vault_args_from_question($db, $conv, ['q' => $q]);
+            if ($fromQ === null) {
+                if (isset($parts[$i]) && trim((string)$parts[$i]) !== '') {
+                    $swap[] = [trim((string)$parts[$i]), rh_ai_vault_unresolved_line($db, $conv, false)];
+                }
+                continue;
             }
-            continue;
+            $q = (string)$fromQ['q'];
+            $asWritten = $name;
+            $name = (string)array_key_first(rh_ai_vault_question_people($db, $conv));
         }
         $tool = ['bookings' => 'search_bookings', 'gym_members' => 'gym_watch', 'conference' => 'events_pipeline'][$subject];
         $args = ['bookings' => ['query' => $q], 'gym_members' => ['member' => $q], 'conference' => ['query' => $q]][$subject];
@@ -1520,6 +2009,10 @@ function rh_ai_named_absence_fix(PDO $db, array $user, int $conv, string $reply,
                 $new = 'Checked again: ' . ($match === 'several' ? 'several records match ' . $name : $what . ' does match ' . $name . ($label !== '' ? ' (' . $label . ')' : '')) . ' - ask me to show it.';
             }
         }
+        if ($new === '' && isset($asWritten) && isset($parts[$i])) {
+            $new = str_replace($asWritten, $name, trim((string)$parts[$i])); // the search backs the claim: said with the name asked about
+        }
+        unset($asWritten);
         if ($new !== '' && isset($parts[$i]) && trim((string)$parts[$i]) !== '') {
             $swap[] = [trim((string)$parts[$i]), $new];
         }

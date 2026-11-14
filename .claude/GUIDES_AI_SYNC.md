@@ -19,6 +19,16 @@ when prompted."
 
 ## Pending (oldest first)
 
+### Assistant: stay questions by first name (2026-11-15, step 8a) — hashes in TASKS.md
+- Guides: staff can ask the Assistant "when did <first name> check in / out", "has X left / arrived", "who checked them
+  in / out", "who cancelled X's booking", "was X a no-show", "did X extend", "was X moved". The answer comes from the
+  booking's History with the time and the staff member. Lower-case names and the hotel's name in the question are fine;
+  if several guests share the name it asks one question listing names, references and dates. Guide 14 / Assistant page.
+- Assistant: done in this entry (ai-desk.php, ai-vault.php, ai-tools.php, ai-focus.php, ai-agents.php, evals). LATER:
+  in the model path "when did X check out" can still offer a check-out card; room-number questions still go to the
+  model; an undone check-in still shows the earlier check-in step; 'expired' is not a search_bookings status; fix round
+  verified by tests (1217 pass / 7 known data-dependent), not re-reviewed; no live model check.
+
 ### Booking Details dialog compact on phones + tablets, row click opens it (2026-11-14, step 8) — 0a860b9 / 142aee6
 - Guides: on the Bookings page, clicking or tapping anywhere on a booking row (not a button) opens Booking Details, on
   phone, tablet and desktop. On phones and tablets the dialog starts with one summary block (guest, room, dates and

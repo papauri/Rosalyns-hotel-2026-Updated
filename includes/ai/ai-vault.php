@@ -112,7 +112,19 @@ function rh_ai_vault_token(PDO $db, int $conv, string $kind, string $value): str
     $memo = &rh_ai_vault_memo();
     $h = rh_ai_vault_hash($kind, $value);
     if (isset($memo[$conv]['hash'][$h])) {
-        return $memo[$conv]['hash'][$h];
+        $t = $memo[$conv]['hash'][$h];
+        $held = (string)($memo[$conv]['tok'][$t] ?? '');
+        // A name typed in lower case ("has ulemu kachale arrived") and then read from a booking ("Ulemu Kachale"): the name
+        // as it is on file is the one shown (same person, same token)
+        if ($held !== '' && $held !== $value && $held === mb_strtolower($held) && $value !== mb_strtolower($value) && preg_match('/^\[([A-Z]+)_(\d+)\]$/', $t, $tm)) {
+            try {
+                $db->prepare("UPDATE ai_vault SET value_text = ? WHERE conversation_id = ? AND kind = ? AND num = ? AND value_hash = ?")->execute([$value, $conv, $tm[1], (int)$tm[2], $h]);
+                $memo[$conv]['tok'][$t] = $value;
+            } catch (Throwable $e) {
+                // the typed spelling stays: still the same person
+            }
+        }
+        return $t;
     }
     rh_ai_vault_floor($db, $conv);
     $num = rh_ai_vault_next_num($memo[$conv], $kind);
@@ -231,6 +243,96 @@ function rh_ai_vault_unresolved_msg(): string
 }
 
 /**
+ * The person tokens ([GUEST_n] / [STAFF_n]) in this turn's own question that hold a real value here, token => value, in
+ * the order written. The question is the tokenised copy rh_ai_turn_run keeps for the turn ($GLOBALS['__rh_ai_current_q']).
+ */
+function rh_ai_vault_question_people(PDO $db, int $conv): array
+{
+    $q = (string)($GLOBALS['__rh_ai_current_q'] ?? '');
+    if ((int)($GLOBALS['__rh_ai_current_q_conv'] ?? 0) !== $conv) {
+        return []; // the question kept belongs to another chat (a long run of several chats): never borrow its names
+    }
+    if ($q === '' || !preg_match_all('/\[(?:GUEST|STAFF)_\d+\]/', $q, $m)) {
+        return [];
+    }
+    $v = rh_ai_vault_load($db, $conv);
+    $out = [];
+    foreach (array_unique($m[0]) as $t) {
+        if (trim((string)($v['tok'][$t] ?? '')) !== '') {
+            $out[$t] = (string)$v['tok'][$t];
+        }
+    }
+    return $out;
+}
+
+/** Has this chat really had names cleared (sign-out, or the ended-session sweep)? Only then is the sign-out line true. */
+function rh_ai_vault_has_cleared(PDO $db, int $conv): bool
+{
+    if ($conv <= 0) {
+        return false;
+    }
+    try {
+        $st = $db->prepare("SELECT 1 FROM ai_vault WHERE conversation_id = ? AND value_text = '' LIMIT 1");
+        $st->execute([$conv]);
+        return (bool)$st->fetchColumn();
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
+/**
+ * Lookup arguments that still hold a person token with no value (one the model made up or relabelled, [GUEST_2] for the
+ * question's [STAFF_2]) or a cleared name's plain word ("(guest)", read from an older turn): when this turn's question
+ * names exactly one person, that is who the lookup is about (owner fault 2026-11-14: "when did Victoria check out" was
+ * answered "names are cleared after sign-out"). null when it cannot be told (no name or several names in the question,
+ * or an unknown email, phone or booking token).
+ */
+function rh_ai_vault_args_from_question(PDO $db, int $conv, array $args): ?array
+{
+    $people = rh_ai_vault_question_people($db, $conv);
+    if (count($people) !== 1) {
+        return null;
+    }
+    $val = (string)reset($people);
+    $bad = false;
+    $walk = static function ($a) use (&$walk, $val, &$bad) {
+        if (is_array($a)) {
+            foreach ($a as $k => $x) {
+                $a[$k] = $walk($x);
+            }
+            return $a;
+        }
+        if (!is_string($a) || $a === '' || !rh_ai_vault_unresolved_in($a)) {
+            return $a;
+        }
+        $a = (string)preg_replace('/\[(?:GUEST|STAFF)_\d+\]|\((?:guest|staff)\)/i', $val, rh_ai_vault_canon($a));
+        if (rh_ai_vault_unresolved_in($a)) {
+            $bad = true; // an email, phone or booking token with no value: never filled in from a name
+        }
+        return $a;
+    };
+    $out = $walk($args);
+    return $bad ? null : $out;
+}
+
+/**
+ * The line for a name that cannot be used. The sign-out line only when this chat really had names cleared and the
+ * question names nobody; otherwise the question's own name tokens ($forModel: for the model, which then uses them) or a
+ * plain "which guest?" for the person.
+ */
+function rh_ai_vault_unresolved_line(PDO $db, int $conv, bool $forModel = true): string
+{
+    $people = rh_ai_vault_question_people($db, $conv);
+    if ($people && $forModel) {
+        return 'That name token is not one from this chat. Use the name token(s) in the question exactly as written: ' . implode(', ', array_keys($people)) . '.';
+    }
+    if (!$people && rh_ai_vault_has_cleared($db, $conv)) {
+        return rh_ai_vault_unresolved_msg();
+    }
+    return 'I could not tell which guest that is. Please give me the guest\'s name as it is on the booking, or the booking reference.';
+}
+
+/**
  * Tool arguments from the model: every token inside a string becomes the real value. A token the model wrote without
  * its brackets ("STAFF_2", owner fault 2026-10-29: the search then looked for the word STAFF_2) counts as the token.
  */
@@ -336,6 +438,8 @@ function rh_ai_vault_people(PDO $db): array
         $names = $db->query("SELECT name FROM rooms")->fetchAll(PDO::FETCH_COLUMN);
         $names[] = function_exists('getSetting') ? (string)getSetting('site_name', '') : '';
         foreach ($names as $n) {
+            // the words as written only: "Rosalyn's" stays a stop word but a guest or staff member called Rosalyn is still
+            // masked (the possessive-free form is used only to read "at Rosalyn's" in a stay question, rh_ai_desk_strip_hotel)
             foreach (preg_split('/[\s,\-]+/u', mb_strtolower((string)$n)) as $w) {
                 if ($w !== '') {
                     $stop[$w] = true;
@@ -352,6 +456,28 @@ function rh_ai_vault_people(PDO $db): array
         }
     }
     return $GLOBALS['__rh_ai_people'] = $people;
+}
+
+/**
+ * PURE. The words of the hotel's own name, lower case, each also without its possessive: "Rosalyn's Hotel" -> rosalyn's,
+ * rosalyn, hotel. Used only by a stay question to read "at Rosalyn's" as where, not who (rh_ai_desk_strip_hotel); never
+ * as global stop words, so a person called Rosalyn is still masked before anything leaves.
+ */
+function rh_ai_vault_place_words(string $name): array
+{
+    $out = [];
+    foreach (preg_split('/[\s,\-]+/u', mb_strtolower(str_replace('’', "'", $name))) as $w) {
+        $w = trim($w, ".()\"");
+        if ($w === '') {
+            continue;
+        }
+        $out[$w] = true;
+        $bare = (string)preg_replace("/(?:'s|s'|')$/u", '', $w);
+        if ($bare !== '' && $bare !== $w) {
+            $out[$bare] = true;
+        }
+    }
+    return array_keys($out);
 }
 
 /** Forget the cached list of people (tests that add a guest inside a transaction). */

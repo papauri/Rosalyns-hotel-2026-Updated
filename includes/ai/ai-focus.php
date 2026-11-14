@@ -557,6 +557,11 @@ function rh_ai_focus_local(PDO $db, array $user, int $conv, string $message, str
     if ($lower === '' || mb_strlen($lower) > 160 || rh_ai_focus_is_change($lower)) {
         return null;
     }
+    // "Has Ulemu checked out", "when did they check out": a stay fact the desk answers from the booking's History (when
+    // and who), not the booking line with its booked dates (owner fault 2026-11-14)
+    if (function_exists('rh_ai_desk_stay_question') && rh_ai_desk_stay_question($db, rh_ai_desk_clean($message)) !== null) {
+        return null;
+    }
     // 1. A person search
     if (($name = rh_ai_person_search_intent($message)) !== null) {
         $r = rh_ai_run_tool($db, $user, $conv, 'search_bookings', ['query' => $name]);

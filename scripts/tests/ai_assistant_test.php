@@ -4268,6 +4268,34 @@ check($biD('Who booked Mr Nthani in') === ['kind' => 'made', 'who' => 'Nthani'] 
     && $biD('who booked them?') === ['kind' => 'made', 'who' => ''] && $biD('Show its history') === ['kind' => 'history', 'who' => ''] && $biD('booking history for Charles Nthani') === ['kind' => 'history', 'who' => 'Charles Nthani']
     && $biD('Who booked the most rooms') === null && $biD('who booked in') === null,
     '"Who booked Mr Nthani in" / "Who made the booking for Mr Nthani" ask who made that booking (title dropped); "them" is the booking in focus; "who booked the most rooms" is not one');
+// Stay facts (owner fault 2026-11-14): the question shapes, pure
+$siD = static fn(string $q, string $h = "Rosalyn's Hotel") => rh_ai_desk_stay_intent(rh_ai_desk_clean($q), $h);
+check($siD("when did victoria at rosalyn checked out") === ['fact' => 'checked_out', 'who' => 'victoria', 'yesno' => false]
+    && $siD("When did Victoria check out at Rosalyn's?") === ['fact' => 'checked_out', 'who' => 'Victoria', 'yesno' => false]
+    && $siD('has ulemu left') === ['fact' => 'checked_out', 'who' => 'ulemu', 'yesno' => true]
+    && $siD('who checked them in') === ['fact' => 'checked_in', 'who' => '', 'yesno' => false]
+    && $siD('who cancelled Mr Banda\'s booking') === ['fact' => 'cancelled', 'who' => 'Banda', 'yesno' => false]
+    && $siD('who marked Phiri as a no-show') === ['fact' => 'no_show', 'who' => 'Phiri', 'yesno' => false]
+    && $siD('did Mr Moyo extend their stay') === ['fact' => 'extended', 'who' => 'Moyo', 'yesno' => true]
+    && $siD('was she moved to another room') === ['fact' => 'moved', 'who' => '', 'yesno' => true]
+    && $siD('did Ulemu check in yesterday') === ['fact' => 'checked_in', 'who' => 'Ulemu', 'yesno' => true]
+    && $siD('check victoria out') === null && $siD('cancel his booking') === null && $siD('move them to room 5') === null && $siD('extend her stay') === null
+    && $siD('when is victoria checking out') === null && $siD('who checked in today') === null && $siD('has the group checked out') === null && $siD('when did the guest in room 5 check out') === null,
+    'stay questions are read with the name as written (lower case too, the hotel\'s own name dropped); change requests, future questions and rooms are not');
+check(in_array('rosalyn', rh_ai_vault_place_words("Rosalyn's Hotel"), true) && in_array("rosalyn's", rh_ai_vault_place_words('Rosalyn’s Hotel'), true) && in_array('hotel', rh_ai_vault_place_words("Rosalyn's Hotel"), true),
+    'a stay question reads the hotel\'s own name with and without the possessive ("at Rosalyn\'s" says where, not who)', json_encode(rh_ai_vault_place_words("Rosalyn's Hotel")));
+$sfD = rh_ai_stay_facts_from([
+    ['at' => '2026-11-10 14:05:00', 'who' => 'Jane Qd (receptionist)', 'what' => 'Guest checked in', 'detail' => "Status: Confirmed → Checked in\nGuest asked for a late lunch", 'kind' => 'check_in'],
+    ['at' => '2026-11-11 09:00:00', 'who' => 'Jane Qd (receptionist)', 'what' => 'Booking Stay extended', 'detail' => "Check-out date: 12 Nov 2026 → 13 Nov 2026\nTotal: K100 → K150", 'kind' => 'edit'],
+    ['at' => '2026-11-11 09:30:00', 'who' => 'System', 'what' => 'Room 5 assigned', 'detail' => '', 'kind' => 'room'],
+    ['at' => '2026-11-11 10:00:00', 'who' => 'Paul Qd (manager)', 'what' => 'Booking upgraded', 'detail' => 'Room: Room 5 → Room 7', 'kind' => 'room'],
+    ['at' => '2026-11-13 10:42:00', 'who' => 'Not recorded', 'what' => 'Guest checked out', 'detail' => 'Status: Checked in → Checked out', 'kind' => 'check_out'],
+    ['at' => '2026-11-13 10:43:00', 'who' => 'Paul Qd (manager)', 'what' => 'Note added', 'detail' => 'Left a jacket', 'kind' => 'note'],
+]);
+check(($sfD['checked_in']['staff_name'] ?? '') === 'Jane Qd' && ($sfD['checked_in']['role'] ?? '') === 'receptionist' && ($sfD['checked_out']['by'] ?? '') === 'not recorded' && ($sfD['checked_out']['at'] ?? '') === '2026-11-13 10:42:00'
+    && ($sfD['date_changes'][0]['change'] ?? '') === 'Check-out date: 12 Nov 2026 → 13 Nov 2026' && $sfD['moved'] === true && ($sfD['room_steps'][0]['change'] ?? '') === 'Room: Room 5 → Room 7'
+    && $sfD['cancelled'] === null && $sfD['no_show'] === null && strpos(json_encode($sfD), 'late lunch') === false && strpos(json_encode($sfD), 'jacket') === false && strpos(json_encode($sfD), 'K150') === false,
+    'stay facts from the History steps: who and when for check-in / out, date changes and room moves - never a typed note or a money line', json_encode($sfD));
 $ciD = static fn(string $q) => rh_ai_desk_card_intent(rh_ai_desk_clean($q));
 check(($ciD('check him in')['key'] ?? '') === 'check_in' && ($ciD('Check in Mr Banda')['who'] ?? '') === 'Banda' && ($ciD('check them out')['key'] ?? '') === 'check_out'
     && ($ciD('confirm their booking')['key'] ?? '') === 'confirm_booking' && ($ciD('put them in room 12')['room'] ?? '') === '12'
@@ -4436,6 +4464,140 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
                 'a "no booking" that the search backs (nothing close either) is left as it is, after the search ran and gave the totals', json_encode([$absName, mb_substr((string)($bxD['evidence'] ?? ''), 0, 200)]));
         }
 
+        // ── Stay facts (owner fault 2026-11-14: "when did Victoria at Rosalyn's check out" got "the chat was cleared" or
+        //    "I don't know"): when a guest really checked in / out, a cancellation, a no-show, an extension, a room move, and
+        //    who did it - from the booking's History, by first name, in any case, with the hotel's name in the question ──
+        $past = static fn(int $d, string $t): string => date('Y-m-d', strtotime('-' . $d . ' days')) . ' ' . $t;
+        [$svId, $svRef] = $mkQd('Qsvictoria Moyo', date('Y-m-d', strtotime('-4 days')), 'checked-out', 'paid');
+        [$sv2Id, $sv2Ref] = $mkQd('Qsvictoria Banda', date('Y-m-d', strtotime('+9 days')), 'confirmed');
+        [$sr1Id, $sr1Ref] = $mkQd('Qsruth Phiri', date('Y-m-d', strtotime('-5 days')), 'checked-out', 'paid');
+        [$sr2Id, $sr2Ref] = $mkQd('Qsruth Banda', date('Y-m-d', strtotime('-6 days')), 'checked-out', 'paid');
+        [$sgId, $sgRef] = $mkQd('Qsgrace Tembo', date('Y-m-d', strtotime('+12 days')), 'cancelled');
+        [$spId, $spRef] = $mkQd('Qspeter Mvula', date('Y-m-d', strtotime('-2 days')), 'no-show');
+        $auS = $pdo->prepare("INSERT INTO booking_audit_log (booking_id, booking_reference, action, old_values, new_values, note, performed_by, performed_by_name, performed_at) VALUES (?, ?, ?, ?, ?, NULL, ?, 'Mphatso Qdnthani', ?)");
+        $auS->execute([$svId, $svRef, 'checked-in', null, null, $staffQd, $past(4, '14:05:00')]);
+        $auS->execute([$svId, $svRef, 'stay_extended', json_encode(['check_out_date' => date('Y-m-d', strtotime('-3 days'))]), json_encode(['check_out_date' => date('Y-m-d', strtotime('-2 days')), 'number_of_nights' => 2]), $staffQd, $past(3, '09:15:00')]);
+        $auS->execute([$svId, $svRef, 'upgraded', json_encode(['room_id' => $qdRoom]), json_encode(['room_id' => $qdRoom]), $staffQd, $past(3, '11:20:00')]);
+        $auS->execute([$svId, $svRef, 'checked-out', null, null, $staffQd, $past(2, '10:42:00')]);
+        $auS->execute([$sr1Id, $sr1Ref, 'checked-out', null, null, $staffQd, $past(3, '09:00:00')]);
+        $auS->execute([$sr2Id, $sr2Ref, 'checked-out', null, null, $staffQd, $past(4, '09:30:00')]);
+        $auS->execute([$sgId, $sgRef, 'cancelled', null, null, $staffQd, $past(1, '16:10:00')]);
+        $auS->execute([$spId, $spRef, 'no-show', null, null, $staffQd, $past(1, '08:05:00')]);
+        rh_ai_vault_people_reset();
+        $siteS = function_exists('getSetting') ? (string)getSetting('site_name', '') : '';
+        $outAt = date('D j M Y', strtotime('-2 days')) . ', 10:42';
+        $st1 = $chatD('when did qsvictoria check out', 0);
+        $st2 = $chatD('When did Qsvictoria checked out' . ($siteS !== '' ? ' at ' . $siteS : ''), 0);
+        $st3 = $chatD('has qsvictoria left', 0);
+        check($st1['route'] === 'local' && !$GLOBALS['ai2_calls'] && strpos($st1['reply'], 'Qsvictoria Moyo') !== false && strpos($st1['reply'], $svRef) !== false && strpos($st1['reply'], $outAt) !== false
+            && strpos($st1['reply'], 'Mphatso Qdnthani') !== false && strpos($st1['reply'], $sv2Ref) === false && stripos($st1['reply'], 'no longer have') === false,
+            '"when did qsvictoria check out" (first name, lower case): the other guest with that first name only arrives in 9 days (a stay still to come cannot have checked out), so the one who stayed is answered - real check-out time, who did it, full name and reference (no model call)', $st1['reply']);
+        // The same first name on different guests in any status the question could concern: always one question
+        [, $saRef] = $mkQd('Qsamara Moyo', date('Y-m-d', strtotime('-4 days')), 'checked-out', 'paid');
+        [, $sbbRef] = $mkQd('Qsamara Phiri', date('Y-m-d', strtotime('-1 day')), 'checked-in');
+        $mkQd('Qsnora Tembo', date('Y-m-d', strtotime('-12 days')), 'checked-out', 'paid');
+        [, $snRef] = $mkQd('Qsnora Tembo', date('Y-m-d', strtotime('-1 day')), 'checked-in');
+        rh_ai_vault_people_reset();
+        $st1b = $chatD('when did qsamara check out', 0);
+        $st1c = $chatD('was qsamara moved', 0);
+        $st1d = $chatD('when did qsnora check out', 0);
+        check(strpos($st1b['reply'], 'Which one do you mean') !== false && strpos($st1b['reply'], $saRef) !== false && strpos($st1b['reply'], $sbbRef) !== false && strpos($st1b['reply'], 'Qsamara Phiri') !== false
+            && strpos($st1c['reply'], 'Which one do you mean') !== false && strpos($st1c['reply'], $saRef) !== false && strpos($st1c['reply'], $sbbRef) !== false
+            && strpos($st1d['reply'], 'Which one') === false && strpos($st1d['reply'], $snRef) !== false && strpos($st1d['reply'], 'has not checked out yet') !== false
+            && $st1b['route'] === 'local' && $st1c['route'] === 'local' && $st1d['route'] === 'local' && !$GLOBALS['ai2_calls'],
+            'a guest who left and another in house with the same first name: "when did ... check out" and "was ... moved" ask one question (names, references, dates); one guest with two stays is one guest (their latest)', json_encode([$st1b['reply'], $st1c['reply'], $st1d['reply']]));
+        check($st2['route'] === 'local' && strpos($st2['reply'], $outAt) !== false && strpos($st2['reply'], $svRef) !== false && strpos($st3['reply'], 'Yes - ') === 0 && strpos($st3['reply'], $outAt) !== false,
+            'the hotel\'s own name in the question ("... checked out at ' . $siteS . '") is where, not who; "has qsvictoria left" is a yes with the time', $st2['reply'] . ' | ' . $st3['reply']);
+        $st4 = $chatD('when did qsruth check out', 0);
+        check($st4['route'] === 'local' && strpos($st4['reply'], 'Which one do you mean') !== false && strpos($st4['reply'], 'Qsruth Phiri') !== false && strpos($st4['reply'], 'Qsruth Banda') !== false
+            && strpos($st4['reply'], $sr1Ref) !== false && strpos($st4['reply'], $sr2Ref) !== false && strpos($st4['reply'], 'left ') !== false && !$GLOBALS['ai2_calls'],
+            'two checked-out guests with the same first name: one short question listing both real names, references and dates (never a guess)', $st4['reply']);
+        $st5 = $chatD('who checked Qsvictoria Moyo in', 0);
+        $st6 = $chatD('who cancelled Qsgrace\'s booking', 0);
+        $st7 = $chatD('was qspeter a no-show', 0);
+        check(strpos($st5['reply'], date('D j M Y', strtotime('-4 days')) . ', 14:05') !== false && strpos($st5['reply'], 'Mphatso Qdnthani') !== false
+            && strpos($st6['reply'], 'was cancelled on **' . date('D j M Y', strtotime('-1 day')) . ', 16:10') !== false && strpos($st6['reply'], $sgRef) !== false && strpos($st6['reply'], 'Mphatso Qdnthani') !== false
+            && strpos($st7['reply'], 'Yes - ') === 0 && strpos($st7['reply'], 'no-show on **' . date('D j M Y', strtotime('-1 day')) . ', 08:05') !== false && strpos($st7['reply'], $spRef) !== false
+            && $st5['route'] === 'local' && $st6['route'] === 'local' && $st7['route'] === 'local' && !$GLOBALS['ai2_calls'],
+            'who checked a guest in, who cancelled a booking and whether a guest was a no-show: the History step\'s time and the staff member, locally', json_encode([$st5['reply'], $st6['reply'], $st7['reply']]));
+        $st8 = $chatD('did Qsvictoria Moyo extend their stay', 0);
+        $st9 = $chatD('was Qsvictoria Moyo moved to another room', 0);
+        $st10 = $chatD('did Qsruth Phiri extend their stay', 0);
+        check(strpos($st8['reply'], 'Yes - ') === 0 && strpos($st8['reply'], 'Check-out date: ' . date('j M Y', strtotime('-3 days')) . ' → ' . date('j M Y', strtotime('-2 days'))) !== false && strpos($st8['reply'], 'Mphatso Qdnthani') !== false
+            && strpos($st9['reply'], 'Yes - ') === 0 && stripos($st9['reply'], 'upgraded') !== false && strpos($st10['reply'], 'No - no change to the stay dates') === 0
+            && $st8['route'] === 'local' && $st9['route'] === 'local' && $st10['route'] === 'local' && !$GLOBALS['ai2_calls'],
+            'extended and moved: the date change (check-out before -> after) and the room step with who did them; a stay never changed says so, with its dates', json_encode([$st8['reply'], $st9['reply'], $st10['reply']]));
+        $st11 = $chatD('has qsvictoria banda arrived', 0);
+        $cvS11 = (int)$st11['conversation_id'];
+        $st12 = $chatD('when did they check out', (int)$st1['conversation_id']);
+        check(strpos($st11['reply'], 'No - **Qsvictoria Banda**') === 0 && strpos($st11['reply'], 'has not arrived yet') !== false && strpos($st12['reply'], $outAt) !== false && $st12['route'] === 'local',
+            'not arrived yet is a plain no with the booked dates, the name shown as on file (typed in lower case); "when did they check out" uses the booking in focus', json_encode([$st11['reply'], $st12['reply']]));
+        // A name on file is never swapped for a close spelling of another guest's name in a narrower search
+        [$sbId, $sbRef] = $mkQd('Charles Qsbanda', date('Y-m-d', strtotime('-1 day')), 'checked-in');
+        $mkQd('Peter Qsbandu', date('Y-m-d', strtotime('-5 days')), 'checked-out', 'paid');
+        rh_ai_vault_people_reset();
+        $st13 = $chatD('when did Qsbanda check out', 0);
+        check(strpos($st13['reply'], 'Charles Qsbanda') !== false && strpos($st13['reply'], $sbRef) !== false && strpos($st13['reply'], 'has not checked out yet') !== false
+            && strpos($st13['reply'], 'Taking') === false && strpos($st13['reply'], 'Qsbandu') === false,
+            'an in-house guest asked about by name is that guest ("not checked out yet"), never a checked-out guest with a close spelling', $st13['reply']);
+        // A guest first-named like the hotel ("Qsrosa" at "Qsrosa's Lodge", in memory only, never saved): still masked in
+        // what goes to the model, and "when did qsrosa at Qsrosa's check out" still finds that guest
+        $siteKeep = $GLOBALS['_SITE_SETTINGS']['site_name'] ?? null;
+        $GLOBALS['_SITE_SETTINGS']['site_name'] = "Qsrosa's Lodge";
+        try {
+            [, $srRef] = $mkQd('Qsrosa Mbewe', date('Y-m-d', strtotime('-4 days')), 'checked-out', 'paid');
+            rh_ai_vault_people_reset();
+            $cvR = rh_ai_conversation_create($pdo, (int)$admD['id'], 'dashboard.php');
+            $outR = rh_ai_scrub_outbound($pdo, $cvR, 'did qsrosa pay, and is Qsrosa happy', true);
+            $st14 = $chatD("when did qsrosa at Qsrosa's check out", 0);
+            check(stripos($outR, 'qsrosa') === false && preg_match_all('/\[GUEST_\d+\]/', $outR) === 2 && strpos($st14['reply'], 'Qsrosa Mbewe') !== false && strpos($st14['reply'], $srRef) !== false && $st14['route'] === 'local',
+                'a guest first-named like the hotel is still masked before anything leaves (typed and capitalised); "when did qsrosa at Qsrosa\'s check out" still finds that guest', json_encode([$outR, $st14['reply']]));
+        } finally {
+            if ($siteKeep === null) {
+                unset($GLOBALS['_SITE_SETTINGS']['site_name']);
+            } else {
+                $GLOBALS['_SITE_SETTINGS']['site_name'] = $siteKeep;
+            }
+            rh_ai_vault_people_reset();
+        }
+        $tokS = (string)$pdo->query("SELECT GROUP_CONCAT(content SEPARATOR ' ') FROM ai_messages WHERE conversation_id IN (" . (int)$st1['conversation_id'] . ',' . (int)$st5['conversation_id'] . ',' . $cvS11 . ") AND role = 'assistant'")->fetchColumn();
+        check(stripos($tokS, 'Qsvictoria') === false && strpos($tokS, 'Qdnthani') === false && strpos($tokS, $svRef) === false, 'stay answers are stored with privacy tokens (guest, staff and reference)', mb_substr($tokS, 0, 300));
+        foreach (['check qsvictoria out', 'cancel qsgrace\'s booking', 'move qsvictoria to room 5', 'extend qsvictoria\'s stay', 'mark qspeter as no-show', 'who checked in today', 'when is qsvictoria banda arriving'] as $chg) {
+            if (rh_ai_desk_stay_intent(rh_ai_desk_clean($chg), $siteS) !== null) {
+                bad('a change request or a future question is never a stay fact', $chg);
+                break;
+            }
+        }
+        // The cleared-chat fault: names in an old chat were cleared (sign-out / ended session), then a fresh, named question.
+        // The model reaching back for the old "(guest)", or passing a token that was never issued, gets the question's own
+        // name - never the sign-out line; with no name in the question the sign-out line still stands.
+        $cl0 = $chatD('Who booked Mr Qdnthani in', 0);
+        $cvCl = (int)$cl0['conversation_id'];
+        $pdo->prepare("UPDATE ai_vault SET value_text = '', value_hash = '' WHERE conversation_id = ?")->execute([$cvCl]);
+        rh_ai_vault_forget();
+        $cl1 = $chatD('Is Qsvictoria Moyo a guest of ours', $cvCl, [['tool_calls' => [['id' => 'c1', 'name' => 'search_bookings', 'args' => ['query' => '(guest)']]]], ['text' => 'Found the booking.']]);
+        $trC1 = (string)$pdo->query("SELECT tool_result_json FROM ai_messages WHERE conversation_id = " . $cvCl . " AND tool_name = 'search_bookings' ORDER BY id DESC LIMIT 1")->fetchColumn();
+        $cl2 = $chatD('Is Qsvictoria Moyo a guest of ours', $cvCl, [['tool_calls' => [['id' => 'c2', 'name' => 'search_bookings', 'args' => ['query' => '[GUEST_99]']]]], ['text' => 'Found the booking.']]);
+        $trC2 = (string)$pdo->query("SELECT tool_result_json FROM ai_messages WHERE conversation_id = " . $cvCl . " AND tool_name = 'search_bookings' ORDER BY id DESC LIMIT 1")->fetchColumn();
+        // A "no booking for [GUEST_99]" that reaches the named-absence check is checked with the question's own name
+        $GLOBALS['__rh_ai_current_q_conv'] = $cvCl;
+        $GLOBALS['__rh_ai_current_q'] = (string)$pdo->query("SELECT content FROM ai_messages WHERE conversation_id = " . $cvCl . " AND role = 'user' ORDER BY id DESC LIMIT 1")->fetchColumn();
+        $naStale = rh_ai_vault_args_from_question($pdo, $cvCl + 1, ['query' => '(guest)']); // another chat never borrows this question's name
+        $bxC = [];
+        $naC = rh_ai_vault_show($pdo, $cvCl, rh_ai_named_absence_fix($pdo, $admD, $cvCl, 'No booking was found for [GUEST_99].', $bxC), 'test', false);
+        $GLOBALS['__rh_ai_current_q'] = '';
+        check(strpos($trC1, '"count":1') !== false && strpos($trC2, '"count":1') !== false && stripos($trC1 . $trC2, 'no longer have') === false && stripos($cl1['reply'] . $cl2['reply'] . $naC, 'no longer have') === false
+            && strpos($naC, 'Checked again: there is a booking for Qsvictoria Moyo') !== false && strpos($naC, $svRef) !== false && $naStale === null,
+            'a fresh named question in a chat whose names were cleared: "(guest)" from an old turn and a made-up [GUEST_99] are read as the name asked about - never "names are cleared after sign-out"', json_encode([mb_substr($trC1, 0, 160), mb_substr($trC2, 0, 120), $cl1['reply'], $cl2['reply'], $naC]));
+        $GLOBALS['__rh_ai_current_q'] = 'is that guest booked'; // no name in the question
+        $cl3 = rh_ai_run_tool($pdo, $admD, $cvCl, 'search_bookings', ['query' => '(guest)']);
+        $GLOBALS['__rh_ai_current_q'] = 'is [GUEST_1] or [STAFF_1] booked'; // two names, neither held: the plain question
+        $GLOBALS['__rh_ai_current_q_conv'] = 0;
+        $cl4 = rh_ai_run_tool($pdo, $admD, 0, 'search_bookings', ['query' => '[GUEST_98]']);
+        $GLOBALS['__rh_ai_current_q'] = '';
+        check(!$cl3['ok'] && strpos($cl3['error'], 'no longer have that name') !== false && !$cl4['ok'] && strpos($cl4['error'], 'no longer have') === false && strpos($cl4['error'], 'which guest') !== false,
+            'with no name in the question, a cleared name still gets the sign-out line (it really was cleared); a token never issued in a chat with nothing cleared asks which guest', json_encode([$cl3['error'], $cl4['error']]));
+
         // Next arrival, holds, blocked dates: local, the same figures as the data
         $truth0 = rh_ai_t_upcoming_arrivals($pdo, $admD, []);
         $u0 = $chatD('When is the next arrival', 0);
@@ -4572,6 +4734,24 @@ if (!$chatReady || !rh_ai_memory_ready($pdo)) {
         }
         $evFail = array_filter($evRes, static fn($v) => !is_array($v) || $v[0] !== 'pass');
         check(!$evFail, 'the new questions (the fault\'s three, next arrival, who booked them, holds, blocked dates) pass against data on file', json_encode($evFail));
+        // The 2026-11-14 regression questions (a checked-out guest by first name, lower case), on their own setup and here
+        $evS = [];
+        $setS = rh_ai_eval_setup($pdo, 'checked_out_first');
+        foreach (['when_checked_out_first_name', 'has_left_first_name'] as $eid) {
+            if (!isset($evD[$eid])) {
+                $evS[$eid] = 'missing';
+                continue;
+            }
+            foreach (['setup' => $setS, 'qsvictoria' => ['{guest_first}' => 'qsvictoria', '{bk_id}' => (string)$svId]] as $how => $vars) {
+                if (!$vars) {
+                    $evS[$eid . ':' . $how] = 'no setup';
+                    continue;
+                }
+                $cS = rh_ai_eval_bind($evD[$eid], $vars);
+                $evS[$eid . ':' . $how] = rh_ai_eval_check($pdo, $admD, $cS, $chatD($cS['q'], 0));
+            }
+        }
+        check(!array_filter($evS, static fn($v) => !is_array($v) || $v[0] !== 'pass'), 'question set: "when did <first name> check out" and "has <first name> left" pass on the setup\'s own booking and on the test guest', json_encode($evS));
     } catch (Throwable $e) {
         bad('desk checks threw', get_class($e) . ': ' . $e->getMessage() . ' @' . $e->getFile() . ':' . $e->getLine());
     } finally {
