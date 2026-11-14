@@ -37,7 +37,9 @@ The owner starts EVERY session with the same prompt: **"Run the next step of .cl
 | 6 | SHIPPED 2026-11-14 844f21f / 4a02c11 | Staff guides + help search sync | this file, step 6 brief | guides-kb-lead (haiku) -> haiku review |
 | 7 | SHIPPED 2026-11-14 5acf82b / d31e5ab | AI Assistant sync | this file, step 7 brief | dept-ai-lead (Opus) -> opus review |
 | 8 | SHIPPED 2026-11-14 0a860b9 / 142aee6 | Booking Details modal on phones + tablets: compact cards, tap a booking to open full details (owner 2026-11-14) | this file, step 8 brief | dept-rooms-lead + ui-lead (Opus) -> qa-auditor + browser check 390 / 768 / 1400 |
-| 8a | TODO | AI Assistant revisit: stay facts for a named guest ("when did <guest> check out") must be answered, never "the chat was cleared" / "I don't know" (owner 2026-11-14) | this file, step 8a brief | dept-ai-lead (Opus) -> opus review |
+| 8a | DOING 2026-11-14 | AI Assistant revisit: stay facts for a named guest ("when did <guest> check out") must be answered, never "the chat was cleared" / "I don't know" (owner 2026-11-14) | this file, step 8a brief | dept-ai-lead (Opus) -> opus review |
+| 8b | TODO | Payments: money accurate end to end + Payments page complete (row click opens the payment, History/logs, notes) + invoices, quotations, receipts, credit notes agree (owner 2026-11-14) | this file, step 8b brief | dept-accounting-lead (Opus) audit -> build -> qa-auditor opus + browser check 390 / 768 / 1400 |
+| 8c | TODO | Stock review: works as intended, end to end, with the POS (deduct/restore, batches, counts, wastage, receiving, barcodes, suppliers/POs, Data Import). No new features (owner 2026-11-14) | this file, step 8c brief | dept-stock-lead (Opus) audit -> fix -> qa-auditor opus; dept-import-lead + dept-restaurant-lead for their parts |
 | 9 | TODO | Other admin modals with the same problem on phones + tablets: check all, fix the affected ones (owner 2026-11-14) | this file, step 9 brief | ui-lead (Opus) -> qa-auditor + browser check 390 / 768 / 1400 |
 | 10 | TODO | Bookings list on tablets: compact rows instead of the large cards (owner 2026-11-14) | this file, step 10 brief | ui-lead (Opus) -> qa-auditor + browser check 390 / 768 / 1400 |
 
@@ -171,6 +173,61 @@ Only dept-ai-lead (Opus) builds or tests the Assistant.
   unverified, no hard-coded facts, privacy).
 - Live model test at LIWONDE only, cheapest model, at most 10 questions, hard cap US$0.10. One opus review. Ship to
   both hotels; entry in GUIDES_AI_SYNC.md.
+
+**Step 8b - Payments accuracy and completeness.** (Owner 2026-11-14: "add payments as another step, we have to
+absolutely make sure money is accurate and that pages like payments have everything including clicking rows to display
+info or showing any other important payment details like logs and notes and also making sure invoices, quotes,
+receipts etc".) ASSUMPTION: the last part means those documents must show the same money as the payment records.
+Owner: dept-accounting-lead (Opus). Money change = full suite at LIWONDE before ship; Rosalyn's is LIVE (read-only).
+- Part 1, audit (read-only, at Liwonde): for a sample covering single, group, company-billed, part-paid, overpaid,
+  refunded, cancelled-with-kept-fee, no-show and edited payments, check that ONE figure agrees everywhere: the
+  payment row, payment details, booking folio / left to pay, Still owed, Payments + Accounting cards, EOD, receipt,
+  invoice, quotation (and its converted invoice), credit note, the emailed copies and the CSV exports. VAT 17.5% +
+  levy 1% split, BALANCE_TOLERANCE, booked rate x N nights, refunds = full amount paid shown in full. List every
+  mismatch with file:line and the two figures in TASKS.md; no fix before the list exists.
+- Part 2, Payments page (admin/payments.php + payment-details.php): a click anywhere on a row that is not a control
+  opens that payment (step 8 UI_DECISION: same handler rule, pointer, View button stays the keyboard path) showing
+  who paid, for which booking / room / group, method, reference, amount with VAT + levy, received by, date and time,
+  linked receipt / invoice / credit note / refund, notes, and the step-by-step History (who, what, old -> new; edits
+  with their reason). Missing notes or History on any payment write path = add the logging (full history rule,
+  owner 2026-11-09). Lists paginate at 10 with the picker; every column and card has its helper. Same row click on
+  Receipts, Invoices, Quotations and Credit notes where a details view exists.
+- Part 3, fix the mismatches from part 1, highest money risk first, each with a test case in the area suite. If the
+  list is longer than one session, ship the money-wrong items first and leave display-only items as LATER in
+  TASKS.md for the owner; do not grow the step mid-way.
+- Fable 5.2 (owner 2026-11-14, model policy): ONE spec check of the part 1 mismatch list + planned fixes BEFORE the
+  build (money build), and ONE final high-risk review of the money diff AFTER the Opus review passed. A third call
+  only for a fault Opus failed twice.
+- Gate: dept-accounting-lead builds, ONE qa-auditor (opus) review, then the Fable final review. Browser check 390 / 768 / 1400 at LIWONDE. No migration
+  without the owner's OK for Rosalyn's. Ship to both hotels; entry in GUIDES_AI_SYNC.md.
+
+**Step 8c - Stock review.** (Owner 2026-11-14: "add stock on its own as a step to review which should include things
+like the import scraper too and small things like barcode. We don't want to add features to these but make absolutely
+sure it works as it's intended at optimum. This will work with the POS too.") ASSUMPTION: "import scraper" = the Data
+Import button (Excel/CSV/Word/PDF -> review -> import, IMPORT_PLAN.md) for stock lists.
+NO NEW FEATURES: faults, wrong figures, broken flows and slow paths only. Anything that would be a feature goes to
+TASKS.md as LATER for the owner. Rosalyn's is LIVE (read-only); every test, count and import rehearsal runs at LIWONDE.
+- Part 1, audit (read-only, at Liwonde), owner dept-stock-lead (Opus): walk each flow end to end and compare the
+  result with what it is meant to do: ingredients + recipes; POS sale and room-service order -> stock deduction; void /
+  refund / order delete / return -> restore (exact, once, never twice); FIFO batches and cost; stock counts (partial,
+  opening, approval); wastage and loss; receiving against purchase orders; suppliers and buying; low-stock figures and
+  the stock cards / reports (card figure = the rows behind it); barcodes (scan to find, scan to receive, duplicates,
+  unknown code, the till and stock pages agree). dept-restaurant-lead checks the POS side of every deduct/restore;
+  dept-import-lead checks the stock import (mapping shown, unclear rows asked, nothing invented, re-import does not
+  double stock, permission `data_import`). List every fault with file:line, expected vs actual, in TASKS.md before
+  fixing anything.
+- Part 2, fix: stock-quantity and cost faults first, then broken flows, then speed (per-row queries on the stock
+  pages, slow scans). Each fix gets a case in its own suite (stock_*, POS/KDS smoke, shop_returns, stock_loss, import
+  tests). Money touched (cost of sales, margins, POS accounting) = dept-accounting-lead reviews.
+- If the list is longer than one session: ship the quantity/cost faults first, list the rest as LATER; do not grow
+  the step mid-way.
+- Fable 5.2 (owner 2026-11-14, model policy): if any fix changes stock deduction/restore quantities, batch cost,
+  cost of sales or margins - ONE spec check of the fault list + planned fixes before the build and ONE final
+  high-risk review after the Opus review passed. Display-only or speed-only fixes: no Fable. Otherwise only for a
+  fault Opus failed twice.
+- Gate: ONE qa-auditor (opus) review; the stock + POS suites at LIWONDE; browser check 390 / 768 / 1400 of any screen
+  touched (POS till and stock pages). No migration without the owner's OK for Rosalyn's. Ship to both hotels; entry
+  in GUIDES_AI_SYNC.md.
 
 **Step 9 - Other modals on phones and tablets.** (Owner 2026-11-14: "Also check other modals affected the same for
 mobile and tabs especially and add it in the build order.") Confirm step 8 is SHIPPED; reuse its `UI_DECISION`.
