@@ -50,6 +50,8 @@ if (count($pathParts) >= 3 && is_numeric($pathParts[2])) {
 require_once __DIR__ . '/../includes/finance-sequences.php';
 require_once __DIR__ . '/../admin/includes/finance-account-sync.php';
 require_once __DIR__ . '/../config/credit-notes.php';
+require_once __DIR__ . '/../admin/includes/finance-refunds.php'; // pure: rh_pay_count_day_sql (a refund counts on its payout day)
+require_once __DIR__ . '/../admin/includes/finance-schema.php'; // pure: finance_conference_fields / finance_payment_transaction_column (not loaded by the router)
 finance_ensure_sequence_tables($pdo);
 
 try {
@@ -178,13 +180,14 @@ function listPayments(PDO $pdo)
         $params[] = $paymentMethod;
     }
 
+    // Date filters use the day a row counts on: a refund on the day it was paid out (owner 2026-11-14).
     if ($startDate) {
-        $sql .= " AND p.payment_date >= ?";
+        $sql .= " AND " . rh_pay_count_day_sql('p') . " >= ?";
         $params[] = $startDate;
     }
 
     if ($endDate) {
-        $sql .= " AND p.payment_date <= ?";
+        $sql .= " AND " . rh_pay_count_day_sql('p') . " <= ?";
         $params[] = $endDate;
     }
 
@@ -231,11 +234,11 @@ function listPayments(PDO $pdo)
         $summaryParams[] = $bookingId;
     }
     if ($startDate) {
-        $summarySql .= " AND payment_date >= ?";
+        $summarySql .= " AND " . rh_pay_count_day_sql() . " >= ?";
         $summaryParams[] = $startDate;
     }
     if ($endDate) {
-        $summarySql .= " AND payment_date <= ?";
+        $summarySql .= " AND " . rh_pay_count_day_sql() . " <= ?";
         $summaryParams[] = $endDate;
     }
 

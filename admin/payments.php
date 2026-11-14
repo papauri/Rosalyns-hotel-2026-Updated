@@ -72,6 +72,7 @@ $offset = ($page - 1) * $limit;
 $sql = "
     SELECT
         p.*,
+        " . rh_pay_count_day_sql('p') . " AS pay_day,
         CASE
             WHEN p.booking_type = 'room' THEN CONCAT(b.guest_name, ' (', b.booking_reference, ')')
             WHEN p.booking_type = 'conference' THEN CONCAT(ci.{$conferenceFields['company']}, ' (', ci.{$conferenceFields['reference']}, ')')
@@ -167,18 +168,19 @@ $total = $countStmt->fetch(PDO::FETCH_ASSOC)['total'];
 
 // Add ordering and pagination
 // Header sort (whole list, fixed key -> ORDER BY map; never request text).
+// pay_day (SELECT alias) = the day a row counts on: a refund on the day it was paid out, as the filters and cards.
 require_once __DIR__ . '/includes/server-sort.php';
 [$payOrderBy, $paySortKey, $paySortDir] = rh_server_sort_resolve([
     'reference'   => 'p.payment_reference',
     'booking'     => 'booking_description',
     'type'        => 'p.booking_type',
-    'date'        => 'p.payment_date',
+    'date'        => 'pay_day',
     'amount'      => 'p.total_amount',
     'outstanding' => 'account_amount_due',
     'method'      => 'p.payment_method',
     'status'      => 'p.payment_status',
     'created'     => 'p.created_at',
-], 'p.payment_date DESC, p.created_at DESC', 'p.id DESC');
+], 'pay_day DESC, p.created_at DESC', 'p.id DESC');
 $sql .= " ORDER BY " . $payOrderBy;
 $sql .= " LIMIT ? OFFSET ?";
 
@@ -913,7 +915,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                         <?php rh_server_sort_th('<span title="The payment or refund record&#39;s own reference. Click the row to open it.">Reference</span>', 'reference', $paySortKey, $paySortDir); ?>
                         <?php rh_server_sort_th('<span title="The booking, account or order this money belongs to, with its booked rate x nights.">Booking</span>', 'booking', $paySortKey, $paySortDir, 'col-optional'); ?>
                         <?php rh_server_sort_th('<span title="Where the money came from: room, conference, restaurant, gym or event.">Type</span>', 'type', $paySortKey, $paySortDir, 'col-optional-lg'); ?>
-                        <?php rh_server_sort_th('<span title="The day the money was received. Date filters and the cards count a refund on the day it was paid out (as End of Day); a refund still pending counts in no period.">Payment Date</span>', 'date', $paySortKey, $paySortDir, 'col-optional-md'); ?>
+                        <?php rh_server_sort_th('<span title="The day the money was received; for a refund, the day it was paid out (as End of Day). Date filters, sorting and the cards use this same day; a refund still pending shows the day it was raised and counts in no period. The time under it is when the record was saved.">Payment Date</span>', 'date', $paySortKey, $paySortDir, 'col-optional-md'); ?>
                         <?php rh_server_sort_th('<span title="The money this payment record moved, VAT included. Refunds show with a minus: money paid back.">Amount</span>', 'amount', $paySortKey, $paySortDir); ?>
                         <?php rh_server_sort_th('<span title="What the booking or account behind this payment still has to pay today (its full bill less every payment received). A dash: till orders, settled at the till.">Outstanding</span>', 'outstanding', $paySortKey, $paySortDir, 'col-optional'); ?>
                         <?php rh_server_sort_th('<span title="How the money moved: cash, card, bank transfer, mobile money, credit note ...">Method</span>', 'method', $paySortKey, $paySortDir, 'col-optional-lg'); ?>
@@ -932,7 +934,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                             <tr id="payment-<?php echo (int)$payment['id']; ?>" data-focus="payment-<?php echo (int)$payment['id']; ?>" data-row-open>
                                 <td><strong><?php echo htmlspecialchars($payment['payment_reference']); ?></strong>
                                     <span class="rh-phone-sub rh-phone-sub--dark"><?php echo htmlspecialchars($payment['booking_description'] . ($payment['booked_rate_compact'] !== '' ? ' · booked at ' . $payment['booked_rate_compact'] : '')); ?></span>
-                                    <span class="rh-phone-sub rh-phone-sub--md"><?php echo date('M j, Y', strtotime($payment['payment_date'])); ?></span></td>
+                                    <span class="rh-phone-sub rh-phone-sub--md"><?php echo date('M j, Y', strtotime((string)($payment['pay_day'] ?? $payment['payment_date']))); ?></span></td>
                                 <td class="col-optional">
                                     <div><?php echo htmlspecialchars($payment['booking_description']); ?></div>
                                     <?php if ($payment['booked_rate_compact'] !== ''): ?>
@@ -951,7 +953,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                                     </span>
                                 </td>
                                 <td class="col-optional-md">
-                                    <?php echo date('M j, Y', strtotime($payment['payment_date'])); ?>
+                                    <?php echo date('M j, Y', strtotime((string)($payment['pay_day'] ?? $payment['payment_date']))); ?>
                                     <br><small style="color: #666; font-size: 11px;">
                                         <i class="fas fa-clock"></i> <?php echo date('H:i', strtotime($payment['created_at'])); ?>
                                     </small>

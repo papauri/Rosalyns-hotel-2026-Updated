@@ -1450,19 +1450,24 @@ if ($is_card_insight_ajax) {
                     ];
                 }
 
-                // Refunds paid out today are deducted from the Takings figure, so they are listed (negative).
+                // Refunds paid out today are deducted from the Takings figure, so they are listed (negative). A refund
+                // counts on the day it was PAID OUT (rh_pay_count_day_sql, owner 2026-11-14), and its time is the payout
+                // moment: the first pending -> processing/completed audit step (same rule as the helper), else created_at.
                 $refStmt = $pdo->query("SELECT id AS payment_id,
                                                 COALESCE(payment_reference, CONCAT('PAY-', id)) AS payment_reference,
                                                 COALESCE(booking_reference, booking_type, 'Refund') AS context_label,
                                                 COALESCE(payment_method, 'other') AS payment_method,
                                                 COALESCE(refund_amount, total_amount, 0) AS amount,
-                                                COALESCE(created_at, CONCAT(payment_date, ' 00:00:00')) AS ts
+                                                COALESCE((SELECT MIN(rh_pal.created_at) FROM payment_audit_log rh_pal
+                                                          WHERE rh_pal.payment_id = payments.id AND rh_pal.action IN ('refund_processing','refund_completed')
+                                                            AND rh_pal.field_name = 'refund_status' AND rh_pal.old_value = 'pending'),
+                                                         created_at, CONCAT(payment_date, ' 00:00:00')) AS ts
                                          FROM payments
-                                         WHERE DATE(payment_date) = CURDATE()
+                                         WHERE " . rh_pay_count_day_sql() . " = CURDATE()
                                            AND payment_type = 'refund' AND refund_status IN ('completed','processing')
                                            AND deleted_at IS NULL"
                                            . ($pos_rev_needed ? '' : " AND booking_type <> 'restaurant'") . "
-                                         ORDER BY COALESCE(created_at, CONCAT(payment_date, ' 00:00:00')) DESC
+                                         ORDER BY ts DESC
                                          LIMIT 20");
                 foreach ($refStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                     $combined[] = [

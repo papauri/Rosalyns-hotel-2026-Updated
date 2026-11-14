@@ -610,9 +610,17 @@ if (!function_exists('rh_billing_ready')) {
         $st = $pdo->prepare('SELECT COALESCE(SUM(r.amount), 0) FROM billing_remittances r WHERE r.received_date >= ?' . $accSql);
         $st->execute($args);
         $in = (float)$st->fetchColumn();
+        // A refund counts from the day it was PAID OUT (owner 2026-11-14). The helper is pure; never fatal without it.
+        if (!function_exists('rh_pay_count_day_sql')) {
+            $rhRefundHelper = __DIR__ . '/../admin/includes/finance-refunds.php';
+            if (is_file($rhRefundHelper)) {
+                require_once $rhRefundHelper;
+            }
+        }
+        $refundDay = function_exists('rh_pay_count_day_sql') ? rh_pay_count_day_sql('f') : 'f.payment_date';
         $st = $pdo->prepare("SELECT COALESCE(SUM(f.total_amount), 0) FROM payments f
             JOIN billing_remittance_lines l ON l.payment_id = f.original_payment_id JOIN billing_remittances r ON r.id = l.remittance_id
-            WHERE f.payment_type = 'refund' AND f.refund_status IN ('completed','processing') AND f.deleted_at IS NULL AND f.payment_date >= ?" . $accSql);
+            WHERE f.payment_type = 'refund' AND f.refund_status IN ('completed','processing') AND f.deleted_at IS NULL AND " . $refundDay . " >= ?" . $accSql);
         $st->execute($args);
         return round($in - (float)$st->fetchColumn(), 2);
     }

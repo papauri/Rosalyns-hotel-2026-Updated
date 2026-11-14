@@ -366,14 +366,15 @@ try {
         $restaurantSummary = $restaurantStmt->fetch(PDO::FETCH_ASSOC);
     }
 
-    // Payment method breakdown
+    // Payment method breakdown. A refund counts on the day it was paid out (owner 2026-11-14); a refund not paid out
+    // (pending / failed / rejected) is not counted in any period. Amounts unchanged.
     $methodStmt = $pdo->prepare("
         SELECT
             payment_method,
-            COUNT(*) as count,
+            COALESCE(SUM(CASE WHEN COALESCE(payment_type, '') = 'refund' AND COALESCE(refund_status, '') NOT IN ('completed','processing') THEN 0 ELSE 1 END), 0) as count,
             COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) as total
         FROM payments
-        WHERE payment_date BETWEEN ? AND ?
+        WHERE " . rh_pay_count_day_sql() . " BETWEEN ? AND ?
           AND deleted_at IS NULL
         GROUP BY payment_method
         ORDER BY total DESC
