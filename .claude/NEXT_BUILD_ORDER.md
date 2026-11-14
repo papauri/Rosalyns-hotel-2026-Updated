@@ -34,7 +34,7 @@ The owner starts EVERY session with the same prompt: **"Run the next step of .cl
 | 3 | SHIPPED 2026-11-14 754aba7 / 19fdb11 | F7 Live quote for 2+ joined room pairs | GUEST_BOOKING_ALIGNMENT_PLAN.md F7 | dept-rooms-lead -> qa-auditor opus |
 | 4 | SHIPPED 2026-11-14 eaef2d2 / d408fc2 (switch OFF; 085 run at both hotels, Rosalyn's on owner request 2026-11-14) | Cancellation & no-show policies (+ F2 whole-booking guest cancel) | CANCELLATION_POLICY_SPEC.md | one Opus builder -> dept-accounting-lead + qa-auditor opus |
 | 5 | SHIPPED 2026-11-14 905aecb / f3bd2e7 | F10 Guest booking emails (rate x nights, rate plan, all room refs) | GUEST_BOOKING_ALIGNMENT_PLAN.md F10 | dept-guest-site-lead -> dept-accounting-lead |
-| 6 | TODO | Staff guides + help search sync | this file, step 6 brief | guides-kb-lead (haiku) -> haiku review |
+| 6 | SHIPPED 2026-11-14 844f21f / 4a02c11 | Staff guides + help search sync | this file, step 6 brief | guides-kb-lead (haiku) -> haiku review |
 | 7 | TODO | AI Assistant sync | this file, step 7 brief | dept-ai-lead (Opus) -> opus review |
 
 **LATER (never pulled by this queue; only when the owner asks):** F3 + F6 + F5 API part (no outside client uses the API,
