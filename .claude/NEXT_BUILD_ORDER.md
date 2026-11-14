@@ -35,7 +35,9 @@ The owner starts EVERY session with the same prompt: **"Run the next step of .cl
 | 4 | SHIPPED 2026-11-14 eaef2d2 / d408fc2 (switch OFF; 085 run at both hotels, Rosalyn's on owner request 2026-11-14) | Cancellation & no-show policies (+ F2 whole-booking guest cancel) | CANCELLATION_POLICY_SPEC.md | one Opus builder -> dept-accounting-lead + qa-auditor opus |
 | 5 | SHIPPED 2026-11-14 905aecb / f3bd2e7 | F10 Guest booking emails (rate x nights, rate plan, all room refs) | GUEST_BOOKING_ALIGNMENT_PLAN.md F10 | dept-guest-site-lead -> dept-accounting-lead |
 | 6 | SHIPPED 2026-11-14 844f21f / 4a02c11 | Staff guides + help search sync | this file, step 6 brief | guides-kb-lead (haiku) -> haiku review |
-| 7 | TODO | AI Assistant sync | this file, step 7 brief | dept-ai-lead (Opus) -> opus review |
+| 7 | SHIPPED 2026-11-14 5acf82b / d31e5ab | AI Assistant sync | this file, step 7 brief | dept-ai-lead (Opus) -> opus review |
+| 8 | TODO | Booking Details modal on phones + tablets: compact cards, tap a booking to open full details (owner 2026-11-14) | this file, step 8 brief | dept-rooms-lead + ui-lead (Opus) -> qa-auditor + browser check 390 / 768 / 1400 |
+| 9 | TODO | Other admin modals with the same problem on phones + tablets: check all, fix the affected ones (owner 2026-11-14) | this file, step 9 brief | ui-lead (Opus) -> qa-auditor + browser check 390 / 768 / 1400 |
 
 **LATER (never pulled by this queue; only when the owner asks):** F3 + F6 + F5 API part (no outside client uses the API,
 owner 2026-11-14) · F9 split-booking note into booking_notes · F11 payment line from `payment_policy` · admin
@@ -117,5 +119,54 @@ Rails stay:
 - no hard-coded hotel facts
 - the Assistant may quote a fee but never cancels, lowers or waives one without the staff member's confirm
 
+Decisions go with it (owner 2026-11-14: "add decisions to the AI Assistant sync ... if any decisions AI have to be
+updated"): check the Assistant's decisions (`includes/ai/ai-decisions.php` and anything else that raises a decision or
+"needs attention" item) against the same shipped changes - cancellation fees from the locked policy, kept fees and
+no-show charges owed, fee lowered/waived, group per-room figures, setting changes - and update only the decisions a
+shipped change made wrong or incomplete. Same rails; a decision never acts without the staff member's confirm.
+
+Also in this step (owner 2026-11-14): fix the three known claim-check fails in ai_assistant_test.php at the cause
+(never by loosening the check), and ONE live model test at LIWONDE on the cheapest model, at most 10 questions,
+hard cap US$0.10 in total (owner: "Don't run tasks that will cost even more than 10 cents overall").
+
 Add eval cases for each new answer. Run only the Assistant suites, at LIWONDE (cheapest top-3 models, minimal live
 tests). One opus review. Ship to both hotels and mark the Assistant part of each entry done in GUIDES_AI_SYNC.md.
+
+**Step 8 - Booking Details modal on phones and tablets.** (Owner 2026-11-14, in the owner's words: "fix the booking
+details UI modal on mobiles and tabs. The cards don't look great and have to be compact like what we did to the booking
+page on mobile a few days ago. We don't need every detail on an individual card, it's taking up unnecessary space. Also
+we should be able to click a booking to open the full booking details.")
+- Scope: the Booking Details modal (admin) at phone (390) and tablet (768) widths ONLY. Desktop stays as it is.
+- Cards become compact, the same pattern as the recent mobile Bookings page work (find that ship in `git log` /
+  TASKS.md Shipped and reuse its classes and tokens; no new visual language). Each card shows only the key facts
+  (ASSUMPTION unless the owner says otherwise: guest, room, dates + nights, status, balance); the rest moves behind
+  the full details view, nothing is removed from the system.
+- Tapping a booking (the whole card/row, not only a small button) opens the full Booking Details. Keep keyboard
+  access and a visible focus state; action buttons inside a card must not also trigger the open.
+- Layout and markup only: no money, booking or permission logic changes. Figures keep "booked rate x N nights".
+  Remember the SPA rule: modal markup and scripts must sit inside `#rh-admin-page` / `<main>`.
+- Find the files via Grep on `.claude/CODE_INDEX.md` ("booking details", the modal's id) - never read big files whole.
+- Builder: dept-rooms-lead with a UI_REQUEST to ui-lead (one shared pattern), Opus. Gate: one qa-auditor review +
+  headless browser check at 390, 768 and 1400 at LIWONDE (stop `php -S` after). UI only: no DB tests. Ship to both
+  hotels; add the entry to GUIDES_AI_SYNC.md.
+- While building, write the compact-modal pattern down as ONE shared `UI_DECISION` (classes, spacing, what a compact
+  card shows, tap-to-open) so step 9 can apply it to the other modals without redesigning.
+- If "click a booking" turns out to mean a different list than the one the builder finds (e.g. the group/linked
+  bookings list inside the modal vs the Bookings page cards), cover both; log it as `ASSUMPTION:`.
+
+**Step 9 - Other modals on phones and tablets.** (Owner 2026-11-14: "Also check other modals affected the same for
+mobile and tabs especially and add it in the build order.") Confirm step 8 is SHIPPED; reuse its `UI_DECISION`.
+- Part 1, check (read-only, cheap): list every admin modal (Grep `admin/`, `js/`, `css/` for the shared modal classes
+  and ids; CODE_INDEX, never whole files) and look at each one at 390 and 768 with the headless browser check at
+  LIWONDE. Mark each: fine / affected (oversized cards, every detail on its own card, wasted space, sideways scroll,
+  buttons off screen, tap targets too small). Put the table in TASKS.md under this step.
+- Part 2, fix: apply the step 8 compact pattern to the affected modals, highest-use first (payments, folio/charges,
+  check-in/out, room assignment, POS/order and stock modals before rarely used settings dialogs). Prefer fixing the
+  SHARED modal styles once over per-modal overrides.
+- Layout and markup only: no money, stock, booking or permission logic; nothing removed from the system; desktop
+  unchanged. Modal markup stays inside `#rh-admin-page` / `<main>` (SPA rule). No AI-looking icons or labels.
+- If more than about 8 modals need more than the shared fix, ship the shared fix + the highest-use ones in this
+  step and list the rest in TASKS.md as LATER for the owner to approve; do not grow the step mid-way.
+- Builder: ui-lead (Opus), department leads consulted only for their own screens. Gate: one qa-auditor review +
+  browser check at 390, 768 and 1400 of every modal touched (stop `php -S` after). UI only: no DB tests. Ship to
+  both hotels; add the entry to GUIDES_AI_SYNC.md.
