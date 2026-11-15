@@ -246,5 +246,36 @@ eq(rh_bk_left_to_pay('paid', 'no-show', 0, 2000), 0.0, 'no-show paid in full -> 
 eq(rh_bk_left_to_pay('refunded', 'confirmed', 8000, 2000), 0.0, 'refunded -> nothing');
 eq(rh_bk_left_to_pay('partial', 'confirmed', '1234.567', '1'), 1234.57, 'rounded to 2 places');
 
+// ---- More filters (step 8g): whitelists, fixed SQL pieces, bound numbers, notice words
+eq(rh_bk_kind_filter('Group'), 'group', 'kind: case-insensitive');
+eq(rh_bk_kind_filter('joined'), 'joined', 'kind: joined');
+eq(rh_bk_kind_filter("group' OR 1=1"), '', 'kind: junk -> none');
+eq(rh_bk_kind_filter(['group']), '', 'kind: array -> none');
+eq(rh_bk_room_type_filter('7', [3, 7]), 7, 'room type: known id');
+eq(rh_bk_room_type_filter('8', [3, 7]), 0, 'room type: unknown id -> none');
+eq(rh_bk_room_type_filter('7 OR 1', null), 0, 'room type: junk -> none');
+eq(rh_bk_room_type_filter('0', null), 0, 'room type: zero -> none');
+eq(rh_bk_room_type_filter(['7'], null), 0, 'room type: array -> none');
+eq(rh_bk_pay_filter('fee_owed'), 'fee_owed', 'pay: fee owed');
+eq(rh_bk_pay_filter('owing'), '', 'pay: unknown -> none');
+eq(rh_bk_more_scope('', 0, ''), ['clauses' => [], 'params' => []], 'more scope: nothing set -> nothing');
+$ms = rh_bk_more_scope('group', 5, 'fee_owed');
+eq(count($ms['clauses']), 4, 'more scope: group + room type + fee owed (2 pieces)');
+eq($ms['params'], [5, rh_fd_balance_tolerance()], 'more scope: room id then tolerance bound, in clause order');
+eq(substr_count(implode(' AND ', $ms['clauses']), '?'), count($ms['params']), 'more scope: one placeholder per param');
+eq(rh_bk_tab_clauses('group-bookings')['clauses'], [rh_bk_group_sql()], 'Group tab = Booking kind Group rule');
+eq(rh_bk_kind_clause('group'), rh_bk_group_sql(), 'kind group = group rule');
+check(strpos(rh_bk_group_sql(), 'primary_booking_id') !== false, 'group rule uses primary_booking_id (create-booking group link)');
+check(strpos(rh_bk_joined_sql(false), 'room_combinations') === false, 'joined rule without the combinations table: pair only');
+check(strpos(rh_bk_kind_clause('single'), 'NOT (COALESCE(b.primary_booking_id') !== false, 'single = not group and not joined');
+eq(rh_bk_pay_clause('paid')['clauses'], rh_bk_tab_clauses('paid')['clauses'], 'pay paid = Paid tab');
+eq(rh_bk_pay_clause('unpaid')['clauses'], rh_bk_tab_clauses('unpaid')['clauses'], 'pay unpaid = Unpaid tab');
+check(in_array("b.payment_status = 'partial'", rh_bk_pay_clause('part')['clauses'], true), 'pay part = Unpaid tab + partial');
+eq(rh_bk_tab_map()['group_bookings'] ?? '', 'group-bookings', '?filter=group_bookings opens the Group tab');
+eq(rh_bk_filter_key('group_bookings'), 'group_bookings', 'group_bookings is a known filter key');
+eq(rh_bk_more_scope_words('joined', 'Family <Suite>', 'part'), ', joined-room bookings only, room type Family <Suite>, part paid', 'notice words (caller escapes)');
+eq(rh_bk_more_scope_words('', '', ''), '', 'notice words: none');
+check(strpos(rh_bk_joined_sql(true), 'combined_room_type_id IS NOT NULL') !== false, 'joined rule: NULL type ids skipped (Single never turns NULL)');
+
 echo "\n$pass passed, $fail failed\n";
 exit($fail ? 1 : 0);

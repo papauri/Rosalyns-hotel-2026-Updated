@@ -47,7 +47,80 @@ $searchText = rh_fin_search_term($_GET); // ?search_text=, or ?q= (older Dashboa
 // ?balance=unconfirmed: the same account list, for deposits taken on accounts not confirmed yet (never in Still owed).
 $showUnconfirmed = (rh_fin_get_str($_GET, 'balance') === 'unconfirmed');
 $showOutstanding = (rh_fin_get_str($_GET, 'balance') === 'outstanding') || $showUnconfirmed;
-$has_active_payment_filters = $bookingType !== '' || $bookingId > 0 || $status !== '' || $refundStatus !== '' || $paymentMethod !== '' || $startDate !== '' || $endDate !== '' || $searchText !== '';
+// ── More filters (step 8g, owner 2026-11-15) ─────────────────────────────────
+// Each GET value is checked against its list (admin/includes/finance-filters.php) or against the rows loaded here, so
+// a junk value is dropped, never shown as an active filter, and never reaches the SQL.
+$bookingColumns = finance_table_columns($pdo, 'bookings');
+$payHasGroupCol = isset($bookingColumns['primary_booking_id']);
+$payHasCompanyCol = isset($bookingColumns['billing_account_id']);
+$payHasRecordedByCol = isset($paymentColumns['recorded_by']);
+$payGroupKinds = rh_fin_pay_group_kinds();
+if (!$payHasGroupCol) {
+    unset($payGroupKinds['group'], $payGroupKinds['group_company']);
+}
+if (!$payHasCompanyCol) {
+    unset($payGroupKinds['company'], $payGroupKinds['group_company']);
+}
+$payDirection = rh_fin_pick(rh_fin_get_str($_GET, 'direction'), rh_fin_pay_directions());
+$payBookingStatus = rh_fin_pick(rh_fin_get_str($_GET, 'booking_status'), rh_fin_pay_booking_statuses());
+$payGroup = rh_fin_pick(rh_fin_get_str($_GET, 'group'), $payGroupKinds);
+// Staff who recorded payments: the recorded_by id, else a processed_by name / username / id (Payment details rule).
+$payStaff = []; // id => ['name' => shown name, 'names' => [full_name, username]]
+// Matched in PHP (no cross-table text compare in SQL, so no collation mix can hide the list): two small reads.
+try {
+    $payWho = $pdo->query("SELECT DISTINCT " . ($payHasRecordedByCol ? 'recorded_by' : 'NULL') . " AS rb, processed_by AS pb FROM payments WHERE deleted_at IS NULL")->fetchAll(PDO::FETCH_ASSOC);
+    $paySeenIds = [];
+    $paySeenNames = [];
+    foreach ($payWho as $w) {
+        if ((int)($w['rb'] ?? 0) > 0) {
+            $paySeenIds[(int)$w['rb']] = true;
+        } elseif (trim((string)($w['pb'] ?? '')) !== '') {
+            $paySeenNames[strtolower(trim((string)$w['pb']))] = true; // only rows with no recorded_by, as the filter
+        }
+    }
+    foreach ($pdo->query("SELECT id, username, full_name FROM admin_users")->fetchAll(PDO::FETCH_ASSOC) as $su) {
+        $sid = (int)$su['id'];
+        $sFull = trim((string)($su['full_name'] ?? ''));
+        $sUser = trim((string)($su['username'] ?? ''));
+        $seen = isset($paySeenIds[$sid]) || isset($paySeenNames[(string)$sid])
+            || ($sFull !== '' && isset($paySeenNames[strtolower($sFull)])) || ($sUser !== '' && isset($paySeenNames[strtolower($sUser)]));
+        if ($seen) {
+            $payStaff[$sid] = ['name' => $sFull !== '' ? $sFull : $sUser, 'names' => [$sFull, $sUser]];
+        }
+    }
+    uasort($payStaff, static fn($a, $b) => strcasecmp($a['name'], $b['name']));
+} catch (Throwable $e) {
+    $payStaff = [];
+}
+$payRecordedBy = rh_fin_get_int($_GET, 'recorded_by');
+if (!isset($payStaff[$payRecordedBy])) {
+    $payRecordedBy = 0;
+}
+// Room types (the rooms table holds the types; a room booking's type is bookings.room_id).
+$payRoomTypes = [];
+try {
+    foreach ($pdo->query("SELECT id, name FROM rooms ORDER BY name")->fetchAll(PDO::FETCH_ASSOC) as $rt) {
+        $payRoomTypes[(int)$rt['id']] = (string)$rt['name'];
+    }
+} catch (Throwable $e) {
+    $payRoomTypes = [];
+}
+$payRoomType = rh_fin_get_int($_GET, 'room_type');
+if (!isset($payRoomTypes[$payRoomType])) {
+    $payRoomType = 0;
+}
+$payAmountFrom = rh_fin_amount(rh_fin_get_str($_GET, 'amount_from'));
+$payAmountTo = rh_fin_amount(rh_fin_get_str($_GET, 'amount_to'));
+if ($payAmountFrom !== '' && $payAmountTo !== '' && (float)$payAmountFrom > (float)$payAmountTo) {
+    [$payAmountFrom, $payAmountTo] = [$payAmountTo, $payAmountFrom]; // the boxes then show what is applied
+}
+$payMoreActive = $payDirection !== '' || $payBookingStatus !== '' || $payGroup !== '' || $payRecordedBy > 0
+    || $payRoomType > 0 || $payAmountFrom !== '' || $payAmountTo !== '';
+$payMoreCount = count(array_filter([$payDirection !== '', $payBookingStatus !== '', $payGroup !== '', $payRecordedBy > 0,
+    $payRoomType > 0, ($payAmountFrom !== '' || $payAmountTo !== '')]));
+
+$has_active_payment_filters = $bookingType !== '' || $bookingId > 0 || $status !== '' || $refundStatus !== '' || $paymentMethod !== '' || $startDate !== '' || $endDate !== '' || $searchText !== ''
+    || $payMoreActive;
 
 // Preset scoping: by default the list shows only rows whose module is enabled
 // (a gym sees gym/event/till payments, not room-booking history). Explicit
@@ -153,6 +226,19 @@ $payFilter = rh_fin_payments_where([
     'payment_method' => $paymentMethod,
     'start_date'     => (string)$startDate,
     'end_date'       => (string)$endDate,
+    // Step 8g More filters: same builder, so the cards, list, count and export follow them alike.
+    'direction'         => $payDirection,
+    'booking_status'    => $payBookingStatus,
+    'group'             => $payGroup,
+    'has_group'         => $payHasGroupCol,
+    'has_company'       => $payHasCompanyCol,
+    'recorded_by'       => $payRecordedBy,
+    'recorded_by_names' => $payRecordedBy > 0 ? $payStaff[$payRecordedBy]['names'] : [],
+    'has_recorded_by'   => $payHasRecordedByCol,
+    'room_type'         => $payRoomType,
+    'amount_from'       => $payAmountFrom,
+    'amount_to'         => $payAmountTo,
+    'tolerance'         => (float)BALANCE_TOLERANCE,
 ], $paymentTransactionColumn, $conferenceFields);
 $payFromSql = rh_fin_payments_from();
 $payWhereSql = $payFilter['sql'];
@@ -511,7 +597,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
             // Today: money received today from every source, as the figure counts it (no other filter, no module scoping).
             $payCardTodayHref = 'payments.php?' . http_build_query(['start_date' => $today, 'end_date' => $today, 'status' => 'received', 'scope' => 'all']);
             // Refunds: the same filters as the figure (status included) and the same module scoping.
-            $payCardRefundsHref = 'payments.php?' . http_build_query(array_merge($_GET, ['refund_status' => 'completed,processing', 'page' => 1, 'balance' => null, 'export' => null], $scopeActive ? ['scope' => 'modules'] : [])); ?>
+            $payCardRefundsHref = 'payments.php?' . http_build_query(array_merge($_GET, ['refund_status' => 'completed,processing', 'page' => 1, 'balance' => null, 'export' => null, 'direction' => null], $scopeActive ? ['scope' => 'modules'] : [])); ?>
             <div class="ck-kpi ck-kpi--good" data-href="#payBreakdown" title="Open the breakdown by source, method and status">
                 <span class="ck-kpi__label">Collected (filtered)</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format($gross_collected_total, 0); ?></span>
@@ -529,7 +615,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                 <?php if (empty($outstandingFailed) && $outstandingCompany > BALANCE_TOLERANCE): ?>
                 <span class="ck-kpi__sub" title="Part of Still owed, not added to it: what companies on account (LPO) owe for their guests' stays, and what guests and other clients owe themselves.">of which companies on account <?php echo htmlspecialchars($currency_symbol . ' ' . number_format($outstandingCompany, 2)); ?> · guests and clients <?php echo htmlspecialchars($currency_symbol . ' ' . number_format(max(0, $outstandingTotal - $outstandingCompany), 2)); ?></span>
                 <?php endif; ?>
-                <span class="ck-kpi__sub" style="margin-top:0">Unpaid balances on bookings, conferences, events and open tabs, after every payment received (part-payments included). Same figure as the Dashboard and Reports; not affected by the date, status, method or search filters.<?php if (!empty($outstandingFailed)): ?> Some accounts could not be read (System Logs), so no total is shown.<?php endif; ?></span>
+                <span class="ck-kpi__sub" style="margin-top:0">Unpaid balances on bookings, conferences, events and open tabs, after every payment received (part-payments included). Same figure as the Dashboard and Reports; not affected by the list filters (dates, status, method, search or More filters).<?php if (!empty($outstandingFailed)): ?> Some accounts could not be read (System Logs), so no total is shown.<?php endif; ?></span>
                 <?php if (!empty($depositRows) || !empty($depositFailed)): ?>
                 <?php /* Deposits on accounts not confirmed yet: their own line, never added to Still owed (rh_unconfirmed_deposit_rows). */ ?>
                 <span class="ck-kpi__sub" style="margin-top:0" title="Accounts that paid a deposit but are not confirmed yet (an unconfirmed enquiry, a tentative hold). The amount is what they still have to pay. It joins Still owed once the account is confirmed.">Not yet confirmed, deposit paid · still to pay: <?php echo !empty($depositFailed) ? 'unavailable' : htmlspecialchars($currency_symbol) . ' ' . number_format($depositTotal, 0); ?> (<?php echo number_format(count($depositRows)); ?> account<?php echo count($depositRows) === 1 ? '' : 's'; ?>) ·
@@ -540,7 +626,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                 <?php if ((int)($kpi['pending_count'] ?? 0) > 0): ?>
                 <span class="ck-kpi__sub" style="margin-top:0"><?php echo number_format((int)($kpi['pending_count'] ?? 0)); ?> payment record<?php echo (int)($kpi['pending_count'] ?? 0) === 1 ? '' : 's'; ?> still marked pending (not received) ·
                     <?php /* Same filters plus "pending or partial" (refunds excluded): opens exactly those payment records. */ ?>
-                    <a href="<?php echo htmlspecialchars('payments.php?' . http_build_query(array_merge($_GET, ['status' => in_array($status, ['pending', 'partial'], true) ? $status : 'pending_partial', 'page' => 1, 'balance' => null, 'export' => null]))); ?>" class="acct-link">view these</a>
+                    <a href="<?php echo htmlspecialchars('payments.php?' . http_build_query(array_merge($_GET, ['status' => in_array($status, ['pending', 'partial'], true) ? $status : 'pending_partial', 'page' => 1, 'balance' => null, 'export' => null, 'direction' => null]))); ?>" class="acct-link">view these</a>
                 </span>
                 <?php endif; ?>
             </div>
@@ -557,7 +643,7 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                 <span class="ck-kpi__label">Refunds (filtered)</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($kpi['refunds_total'] ?? 0), 0); ?></span>
                 <span class="ck-kpi__sub"><?php echo number_format((int)($kpi['refunds_count'] ?? 0)); ?> refund<?php echo (int)($kpi['refunds_count'] ?? 0) === 1 ? '' : 's'; ?> paid out or being paid<?php if ((int)($kpi['refunds_pending_count'] ?? 0) > 0): ?> ·
-                    <a href="<?php echo htmlspecialchars('payments.php?' . http_build_query(array_merge($_GET, ['refund_status' => 'pending', 'page' => 1, 'balance' => null, 'export' => null]))); ?>" class="acct-link"><?php echo htmlspecialchars($currency_symbol) . number_format((float)($kpi['refunds_pending_total'] ?? 0), 0); ?> awaiting approval</a><?php endif; ?></span>
+                    <a href="<?php echo htmlspecialchars('payments.php?' . http_build_query(array_merge($_GET, ['refund_status' => 'pending', 'page' => 1, 'balance' => null, 'export' => null, 'direction' => null]))); ?>" class="acct-link"><?php echo htmlspecialchars($currency_symbol) . number_format((float)($kpi['refunds_pending_total'] ?? 0), 0); ?> awaiting approval</a><?php endif; ?></span>
                 <?php $payRefundSplit = rh_refund_split_text((float)($kpi['refunds_total'] ?? 0), (float)($kpi['refunds_to_credit_total'] ?? 0), (string)$currency_symbol); ?>
                 <?php if ($payRefundSplit !== ''): ?><span class="ck-kpi__sub" style="margin-top:0"><?php echo htmlspecialchars($payRefundSplit); ?></span><?php endif; ?>
                 <span class="ck-kpi__sub" style="margin-top:0">Refunds for <?php echo htmlspecialchars($payScopeWords); ?> (VAT included): money paid back plus overpayments or store credit moved to a credit note. Awaiting approval is not in the total. Accounting and Reports use the same rule for their own dates.</span>
@@ -757,6 +843,95 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                     <input type="date" name="end_date" value="<?php echo htmlspecialchars($endDate); ?>">
                 </div>
 
+                <?php
+                // More filters (step 8g): always shown from 641px up; on phones folded behind one button, open when
+                // one of them is on. Room-only filters show when room bookings are switched on (or one is already set).
+                $payShowRoomFilters = $mod_bookings || $payBookingStatus !== '' || $payGroup !== '' || $payRoomType > 0;
+                $payShowStatusFilter = $payShowRoomFilters || $mod_conference || $mod_gym || $mod_events;
+                ?>
+                <div class="pay-more<?php echo $payMoreActive ? ' is-open' : ''; ?>">
+                    <button type="button" class="btn-reset pay-more__toggle" aria-expanded="<?php echo $payMoreActive ? 'true' : 'false'; ?>" aria-controls="payMoreFilters">
+                        <i class="fas fa-sliders" aria-hidden="true"></i> More filters<?php echo $payMoreCount > 0 ? ' (' . (int)$payMoreCount . ' on)' : ''; ?>
+                    </button>
+                    <div class="filter-form pay-more__body" id="payMoreFilters">
+                        <div class="filter-group">
+                            <label for="payFDirection">Money in or out</label>
+                            <select name="direction" id="payFDirection">
+                                <option value="">Both</option>
+                                <?php foreach (rh_fin_pay_directions() as $k => $lbl): ?>
+                                    <option value="<?php echo htmlspecialchars($k); ?>" <?php echo $payDirection === $k ? 'selected' : ''; ?>><?php echo htmlspecialchars($lbl); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <small class="pay-filter-help">Money in: payments received. Refunds: money paid back, dated by the day it was paid out.</small>
+                        </div>
+
+                        <?php if ($payShowStatusFilter): ?>
+                        <div class="filter-group">
+                            <label for="payFBookingStatus">Booking status</label>
+                            <select name="booking_status" id="payFBookingStatus">
+                                <option value="">Any status</option>
+                                <?php foreach (rh_fin_pay_booking_statuses() as $k => $lbl):
+                                    if ($k !== 'cancelled' && !$payShowRoomFilters) { continue; } ?>
+                                    <option value="<?php echo htmlspecialchars($k); ?>" <?php echo $payBookingStatus === $k ? 'selected' : ''; ?>><?php echo htmlspecialchars($lbl); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <small class="pay-filter-help">The status of the booking the money is for, as it stands today. Cancelled also covers conference, gym and event bookings.</small>
+                        </div>
+                        <?php endif; ?>
+
+                        <?php if ($payShowRoomFilters && $payGroupKinds !== []): ?>
+                        <div class="filter-group">
+                            <label for="payFGroup">Group or company</label>
+                            <select name="group" id="payFGroup">
+                                <option value="">All bookings</option>
+                                <?php foreach ($payGroupKinds as $k => $lbl): ?>
+                                    <option value="<?php echo htmlspecialchars($k); ?>" <?php echo $payGroup === $k ? 'selected' : ''; ?>><?php echo htmlspecialchars($lbl); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <small class="pay-filter-help">Room bookings made as one group of 2 or more rooms, or billed to a company that pays later.</small>
+                        </div>
+                        <?php endif; ?>
+
+                        <?php if ($payStaff !== []): ?>
+                        <div class="filter-group">
+                            <label for="payFRecordedBy">Recorded by</label>
+                            <select name="recorded_by" id="payFRecordedBy">
+                                <option value="">Anyone</option>
+                                <?php foreach ($payStaff as $sid => $sInfo): ?>
+                                    <option value="<?php echo (int)$sid; ?>" <?php echo $payRecordedBy === (int)$sid ? 'selected' : ''; ?>><?php echo htmlspecialchars($sInfo['name']); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <small class="pay-filter-help">The staff member who took the payment or recorded the refund (shown as Received by on the payment).</small>
+                        </div>
+                        <?php endif; ?>
+
+                        <?php if ($payShowRoomFilters && $payRoomTypes !== []): ?>
+                        <div class="filter-group">
+                            <label for="payFRoomType">Room type</label>
+                            <select name="room_type" id="payFRoomType">
+                                <option value="">All room types</option>
+                                <?php foreach ($payRoomTypes as $rid => $rName): ?>
+                                    <option value="<?php echo (int)$rid; ?>" <?php echo $payRoomType === (int)$rid ? 'selected' : ''; ?>><?php echo htmlspecialchars($rName); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                            <small class="pay-filter-help">Room payments only: the room type on the booking.</small>
+                        </div>
+                        <?php endif; ?>
+
+                        <div class="filter-group">
+                            <label for="payFAmountFrom">Amount from</label>
+                            <input type="number" name="amount_from" id="payFAmountFrom" min="0" step="0.01" inputmode="decimal" value="<?php echo htmlspecialchars($payAmountFrom); ?>" placeholder="e.g. 50000">
+                            <small class="pay-filter-help">The Amount column, VAT included. A refund counts by the amount paid back.</small>
+                        </div>
+
+                        <div class="filter-group">
+                            <label for="payFAmountTo">Amount to</label>
+                            <input type="number" name="amount_to" id="payFAmountTo" min="0" step="0.01" inputmode="decimal" value="<?php echo htmlspecialchars($payAmountTo); ?>" placeholder="e.g. 500000">
+                            <small class="pay-filter-help">Both amounts are included. Leave a box empty for no limit.</small>
+                        </div>
+                    </div>
+                </div>
+
                 <div class="filter-actions">
                     <button type="submit" class="btn-filter">
                         <i class="fas fa-filter"></i> Filter
@@ -775,15 +950,48 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
             </div>
         <?php endif; ?>
 
-        <?php if ($has_active_payment_filters): ?>
-            <div style="background: #eef3ff; border: 1px solid #cfd8ff; border-radius: 10px; padding: 12px 14px; margin: 0 0 14px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
-                <div style="display: flex; align-items: center; gap: 8px; color: #1f2d6b;">
-                    <i class="fas fa-filter"></i>
-                    <strong>Search filtered results</strong>
+        <?php if ($has_active_payment_filters):
+            // Every filter that is on, each with its own Clear (refund status has its own notice above). The links
+            // keep every other filter, the sort and rows per page, start at page 1 and land on the list.
+            $payFmtAmt = static fn(string $a): string => $currency_symbol . number_format((float)$a, ((float)$a == floor((float)$a)) ? 0 : 2);
+            $payChips = [];
+            if ($bookingType !== '') { $payChips[] = ['Type: ' . ucfirst($bookingType), ['booking_type']]; }
+            if ($bookingId > 0) { $payChips[] = ['Booking ID ' . $bookingId, ['booking_id']]; }
+            if ($searchText !== '') { $payChips[] = ['Search: “' . $searchText . '”', ['search_text', 'q']]; }
+            if ($status !== '') { $payChips[] = ['Status: ' . (['received' => 'Received', 'pending_partial' => 'Pending or partial'][$status] ?? ucfirst(str_replace('_', ' ', $status))), ['status']]; }
+            if ($paymentMethod !== '') { $payChips[] = ['Method: ' . ucfirst(str_replace('_', ' ', $paymentMethod)), ['payment_method']]; }
+            if ($startDate !== '' || $endDate !== '') {
+                $payChips[] = ['Dates: ' . ($startDate !== '' ? date('j M Y', strtotime($startDate)) : 'any') . ' to ' . ($endDate !== '' ? date('j M Y', strtotime($endDate)) : 'any'), ['start_date', 'end_date']];
+            }
+            if ($payDirection !== '') { $payChips[] = [rh_fin_pay_directions()[$payDirection], ['direction']]; }
+            if ($payBookingStatus !== '') { $payChips[] = ['Booking: ' . rh_fin_pay_booking_statuses()[$payBookingStatus], ['booking_status']]; }
+            if ($payGroup !== '') { $payChips[] = [$payGroupKinds[$payGroup], ['group']]; }
+            if ($payRecordedBy > 0) { $payChips[] = ['Recorded by ' . $payStaff[$payRecordedBy]['name'], ['recorded_by']]; }
+            if ($payRoomType > 0) { $payChips[] = ['Room type: ' . $payRoomTypes[$payRoomType], ['room_type']]; }
+            if ($payAmountFrom !== '' || $payAmountTo !== '') {
+                $payChips[] = [$payAmountFrom !== '' && $payAmountTo !== '' ? 'Amount ' . $payFmtAmt($payAmountFrom) . ' to ' . $payFmtAmt($payAmountTo)
+                    : ($payAmountFrom !== '' ? 'Amount from ' . $payFmtAmt($payAmountFrom) : 'Amount up to ' . $payFmtAmt($payAmountTo)), ['amount_from', 'amount_to']];
+            }
+            $payClearAllQs = array_intersect_key($_GET, ['sort' => 1, 'dir' => 1, 'size' => 1]);
+            if (rh_fin_get_str($_GET, 'scope') === 'all') { $payClearAllQs['scope'] = 'all'; }
+        ?>
+            <div class="pay-active-filters">
+                <div class="pay-active-filters__head">
+                    <span><i class="fas fa-filter" aria-hidden="true"></i> <strong>Filtered list</strong> &middot; showing <?php echo number_format($total); ?> payment record<?php echo (int)$total === 1 ? '' : 's'; ?>. The cards and totals above use the same filters.</span>
+                    <?php if (count($payChips) > 1): ?>
+                        <a href="?<?php echo htmlspecialchars(http_build_query($payClearAllQs)); ?>#rh-results" class="pay-active-filters__all"><i class="fas fa-times" aria-hidden="true"></i> Clear all</a>
+                    <?php endif; ?>
                 </div>
-                <div style="color: #2f3a63; font-size: 13px;">
-                    Showing <?php echo number_format($total); ?> payment result<?php echo (int)$total === 1 ? '' : 's'; ?><?php if ($searchText !== ''): ?> for &ldquo;<?php echo htmlspecialchars($searchText); ?>&rdquo;<?php endif; ?>.
-                </div>
+                <?php if ($payChips !== []): ?>
+                <ul class="pay-active-filters__list">
+                    <?php foreach ($payChips as [$chipLabel, $chipKeys]):
+                        $chipQs = $_GET;
+                        foreach (array_merge($chipKeys, ['page', 'export']) as $ck) { unset($chipQs[$ck]); } ?>
+                        <li><span><?php echo htmlspecialchars($chipLabel); ?></span>
+                            <a href="?<?php echo htmlspecialchars(http_build_query($chipQs)); ?>#rh-results" aria-label="Clear <?php echo htmlspecialchars($chipLabel, ENT_QUOTES); ?>"><i class="fas fa-times" aria-hidden="true"></i> Clear</a></li>
+                    <?php endforeach; ?>
+                </ul>
+                <?php endif; ?>
             </div>
         <?php endif; ?>
 
@@ -817,9 +1025,9 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                         <?php echo htmlspecialchars(rh_receivable_type_label($bookingType)); ?> only · <a href="payments.php?balance=<?php echo $viewBalanceKey; ?>" class="acct-link">show all sources</a> ·
                     <?php endif; ?>
                     <?php if ($showUnconfirmed): ?>
-                    Accounts that paid a deposit but are not confirmed yet. Not in Still owed (Dashboard, Invoices, Reports) until confirmed; not affected by the date, status, method or search filters. <a href="payments.php?balance=outstanding" class="acct-link">Show Still owed</a>
+                    Accounts that paid a deposit but are not confirmed yet. Not in Still owed (Dashboard, Invoices, Reports) until confirmed; not affected by the list filters (dates, status, method, search or More filters). <a href="payments.php?balance=outstanding" class="acct-link">Show Still owed</a>
                     <?php else: ?>
-                    Same rule as the Dashboard, Invoices and Reports owed figures; not affected by the date, status, method or search filters.
+                    Same rule as the Dashboard, Invoices and Reports owed figures; not affected by the list filters (dates, status, method, search or More filters).
                     <?php endif; ?>
                     <?php if (!empty($viewFailed)): ?> Some accounts could not be read (System Logs), so no total is shown.<?php endif; ?>
                 </span>
@@ -1166,10 +1374,42 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                 if (view) view.click();
             });
         }
+
+        // More filters (phones): one button folds the extra filters open or closed. Bound once (SPA page swaps).
+        if (!window.rhPaymentsMoreBound) {
+            window.rhPaymentsMoreBound = true;
+            document.addEventListener('click', function (e) {
+                var btn = e.target && e.target.closest ? e.target.closest('.pay-more__toggle') : null;
+                if (!btn) return;
+                var wrap = btn.closest('.pay-more');
+                if (!wrap) return;
+                var open = wrap.classList.toggle('is-open');
+                btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            });
+        }
     </script>
     <style>
         @media (min-width: 641px) {
             tr[data-row-open] { cursor: pointer; }
+        }
+        /* Step 8g More filters: same filter-group fields; a full-width row inside the filter form. */
+        .pay-more { grid-column: 1 / -1; min-width: 0; }
+        .pay-more__toggle { display: none; }
+        .pay-more__body { align-items: start; }
+        .pay-filter-help { display: block; margin-top: 4px; font-size: 11.5px; line-height: 1.35; color: #6b7280; }
+        .pay-active-filters { background: #eef3ff; border: 1px solid #cfd8ff; border-radius: 10px; padding: 12px 14px; margin: 0 0 14px; color: #2f3a63; font-size: 13px; }
+        .pay-active-filters__head { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
+        .pay-active-filters__head strong { color: #1f2d6b; }
+        .pay-active-filters__all, .pay-active-filters__list a { color: #7E684B; font-weight: 600; text-decoration: none; white-space: nowrap; }
+        .pay-active-filters__list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 8px; }
+        .pay-active-filters__list li { display: inline-flex; align-items: center; gap: 8px; max-width: 100%; background: #fff; border: 1px solid #cfd8ff; border-radius: 999px; padding: 4px 6px 4px 12px; }
+        .pay-active-filters__list li > span { overflow-wrap: anywhere; }
+        .pay-active-filters__list a { display: inline-flex; align-items: center; gap: 4px; min-height: 32px; padding: 0 8px; }
+        @media (max-width: 640px) {
+            .pay-more__toggle { display: inline-flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 44px; border-radius: var(--radius, 10px); }
+            .pay-more:not(.is-open) .pay-more__body { display: none; }
+            .pay-more.is-open .pay-more__body { margin-top: 8px; }
+            .pay-active-filters__list a { min-height: 44px; }
         }
     </style>
     <script>

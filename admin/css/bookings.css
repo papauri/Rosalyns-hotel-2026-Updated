@@ -2962,3 +2962,57 @@ table.bookings-table .bk-guests-twin {
         }
     }
 }
+
+/* More filters (step 8g): a full-width row under the filter form, closed until one of its filters is in use.
+   Same toolbar controls; the selects wrap, never scroll the page sideways. */
+.bookings-more-filters {
+    flex: 1 1 100%;
+    min-width: 0;
+}
+
+.bookings-more-filters > summary.bookings-more-filters__toggle {
+    list-style: none;
+    display: inline-flex;
+    width: auto;
+}
+
+.bookings-more-filters > summary.bookings-more-filters__toggle::-webkit-details-marker {
+    display: none;
+}
+
+.bookings-more-filters__row {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: clamp(0.4rem, 0.36rem + 0.16vw, 0.6rem);
+    margin-top: 0.5rem;
+}
+
+.bookings-more-filters__row > .bookings-toolbar__input--status {
+    flex: 0 1 clamp(10rem, 18vw, 15rem);
+    min-width: 0;
+    max-width: 100%;
+}
+
+.bookings-more-filters__help {
+    flex: 1 1 100%;
+    margin: 0;
+    color: var(--color-text-secondary);
+    font-size: 12px;
+}
+
+@media (max-width: 480px) {
+    .bookings-more-filters {
+        grid-column: 1 / -1;
+    }
+
+    .bookings-more-filters > summary.bookings-more-filters__toggle {
+        display: flex;
+        width: 100%;
+    }
+
+    .bookings-more-filters__row > .bookings-toolbar__input--status {
+        flex: 1 1 100%;
+        width: 100%;
+    }
+}

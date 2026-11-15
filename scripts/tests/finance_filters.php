@@ -84,6 +84,53 @@ foreach (["bookings b ON p.booking_type = 'room' AND p.booking_id = b.id", "gym_
     check(strpos($from, $j) !== false, 'payments joins on the primary key: ' . explode(' ', $j)[0]);
 }
 
+// ---- payments: step 8g More filters (direction, booking status, group / company, recorded by, room type, amount)
+check(!defined('BALANCE_TOLERANCE'), '8g: tolerance falls back without config/database.php');
+$g8Ok = true; $g8Inj = true; $k = 0;
+foreach (['', 'in', 'out', $evil] as $d) foreach (['', 'cancelled', 'upcoming', $evil] as $bs) foreach (['', 'group', 'company', 'group_company', $evil] as $gk)
+foreach ([0, 7] as $rb) foreach (['', '1,250.50', $evil] as $af) foreach (['', '100', '-5'] as $at) {
+    $f = ['direction' => $d, 'booking_status' => $bs, 'group' => $gk, 'has_group' => true, 'has_company' => true,
+        'recorded_by' => $rb, 'recorded_by_names' => ['Jane Phiri', 'jane', $evil], 'has_recorded_by' => ($k % 2 === 0),
+        'room_type' => $rb, 'amount_from' => $af, 'amount_to' => $at];
+    $a = rh_fin_payments_where($f, 'transaction_reference', $conf);
+    $k++;
+    if ($a !== rh_fin_payments_where($f, 'transaction_reference', $conf) || substr_count($a['sql'], '?') !== count($a['params'])) { $g8Ok = false; bad('8g placeholders', json_encode($f)); }
+    if (strpos($a['sql'], 'OR 1=1') !== false || strpos($a['sql'], 'Jane') !== false) { $g8Inj = false; }
+}
+check($g8Ok, "8g: identical SQL/params and ? count == param count ($k inputs)");
+check($g8Inj, '8g: names and junk only ever travel as bound params');
+eq(rh_fin_payments_where(['direction' => 'sideways', 'booking_status' => 'deleted', 'group' => 'family', 'recorded_by' => 'x', 'room_type' => '-3', 'amount_from' => 'abc', 'amount_to' => '1e5'], 'transaction_reference', $conf),
+    ['sql' => 'WHERE p.deleted_at IS NULL', 'params' => []], '8g: unknown values add nothing');
+eq(rh_fin_payments_where(['direction' => ['in'], 'booking_status' => ['cancelled'], 'group' => ['group'], 'recorded_by' => [3], 'room_type' => [2], 'amount_from' => ['5']], 'transaction_reference', $conf),
+    ['sql' => 'WHERE p.deleted_at IS NULL', 'params' => []], '8g: array inputs add nothing');
+$r = rh_fin_payments_where(['direction' => 'out'], 'transaction_reference', $conf);
+eq($r['sql'], "WHERE p.deleted_at IS NULL AND p.payment_type = 'refund'", '8g: Refunds = refund rows only');
+$r = rh_fin_payments_where(['direction' => 'in'], 'transaction_reference', $conf);
+eq($r['sql'], "WHERE p.deleted_at IS NULL AND COALESCE(p.payment_type, '') <> 'refund'", '8g: Money in = every row that is not a refund');
+$r = rh_fin_payments_where(['booking_status' => 'cancelled'], 'transaction_reference', $conf);
+check(strpos($r['sql'], "b.status = 'cancelled'") !== false && strpos($r['sql'], 'b.deleted_at IS NULL') !== false && strpos($r['sql'], "ci.status = 'cancelled'") !== false && strpos($r['sql'], "ei.status = 'cancelled'") !== false, '8g: Cancelled reads room (not deleted), conference, gym and event');
+$r = rh_fin_payments_where(['booking_status' => 'no_show'], 'transaction_reference', $conf);
+check(strpos($r['sql'], "b.status = 'no-show'") !== false && strpos($r['sql'], "p.booking_type = 'room'") !== false, '8g: No-show = room status no-show');
+$r = rh_fin_payments_where(['group' => 'group_company', 'has_group' => true, 'has_company' => false], 'transaction_reference', $conf);
+check(strpos($r['sql'], 'primary_booking_id') !== false && strpos($r['sql'], 'billing_account_id') === false, '8g: a missing company column is never read');
+eq(rh_fin_payments_where(['group' => 'company'], 'transaction_reference', $conf)['sql'], 'WHERE p.deleted_at IS NULL', '8g: no column flags = no group condition');
+$r = rh_fin_payments_where(['recorded_by' => 7, 'recorded_by_names' => ['Jane Phiri', 'jane', 'jane', ''], 'has_recorded_by' => true], 'transaction_reference', $conf);
+eq($r['params'], [7, '7', 'Jane Phiri', 'jane'], '8g: recorded by = id, else processed_by name / username / id (deduped)');
+$r = rh_fin_payments_where(['recorded_by' => 7, 'recorded_by_names' => ['Jane Phiri']], 'transaction_reference', $conf);
+check(strpos($r['sql'], 'recorded_by') === false && $r['params'] === ['7', 'Jane Phiri'], '8g: no recorded_by column = processed_by only');
+$r = rh_fin_payments_where(['room_type' => 4], 'transaction_reference', $conf);
+eq($r, ['sql' => "WHERE p.deleted_at IS NULL AND p.booking_type = 'room' AND b.room_id = ?", 'params' => [4]], '8g: room type = room payments of that type');
+$r = rh_fin_payments_where(['amount_from' => '500,000', 'amount_to' => '100000'], 'transaction_reference', $conf);
+eq($r, ['sql' => 'WHERE p.deleted_at IS NULL AND ABS(p.total_amount) >= ? AND ABS(p.total_amount) <= ?', 'params' => ['99999.9900', '500000.0100']], '8g: amount bounds swapped when reversed, tolerance on both ends');
+$r = rh_fin_payments_where(['amount_from' => '0', 'tolerance' => 0.05], 'transaction_reference', $conf);
+eq($r['params'], ['0.0000'], '8g: amount from never goes below zero; tolerance passed in is used');
+eq(rh_fin_amount('1,250.5'), '1250.50', '8g: amount with grouping');
+eq(rh_fin_amount('-5'), '', '8g: negative amount dropped');
+eq(rh_fin_amount('12.345'), '', '8g: 3 decimals dropped');
+eq(rh_fin_pick('cancelled', rh_fin_pay_booking_statuses()), 'cancelled', '8g: pick keeps a known key');
+eq(rh_fin_pick($evil, rh_fin_pay_booking_statuses()), '', '8g: pick drops junk');
+check(strpos($pay ?? (string)file_get_contents($root . '/admin/payments.php'), "'direction' => null]") !== false, '8g: card links that add a refund or pending filter drop direction');
+
 // ---- invoices
 $invOk = true; $invInj = true; $m = 0;
 foreach (['all', 'room', 'event'] as $t) foreach ([[], ['room', 'restaurant']] as $sc) foreach (['all', 'pending', $evil] as $st) foreach (['', 'INV-2026', $evil] as $q) {

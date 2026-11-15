@@ -3332,6 +3332,24 @@ $filter_departure = rh_bk_departure_filter($_GET['departure'] ?? '');
 // ?balance=owing (Dashboard "Departures with a balance" chip, with ?filter=checkout_today): amount due above
 // BALANCE_TOLERANCE, the chip's own rule (rh_bk_balance_clause -> rh_fd_balance_tolerance); same notice + Clear.
 $filter_balance = rh_bk_balance_filter($_GET['balance'] ?? '');
+// "More filters" (step 8g): Booking kind (?kind=), Room type (?room_type= a rooms.id from the list below) and Payment
+// (?pay=). Whitelisted in bookings-list-filters.php; part of the shared scope like ?balance=, so badges, list, count,
+// insight cards and the CSV export all follow them.
+$bk_room_types = [];
+try {
+    $bk_room_types = $pdo->query("SELECT id, name, is_active FROM rooms ORDER BY is_active DESC, display_order ASC, name ASC")->fetchAll(PDO::FETCH_ASSOC);
+} catch (Throwable $e) {
+    error_log('Bookings room type filter list: ' . $e->getMessage());
+}
+$bk_room_type_names = [];
+foreach ($bk_room_types as $bk_rt_row) {
+    $bk_room_type_names[(int)$bk_rt_row['id']] = (string)$bk_rt_row['name'];
+}
+$filter_kind = rh_bk_kind_filter($_GET['kind'] ?? '');
+$filter_room_type = rh_bk_room_type_filter($_GET['room_type'] ?? '', array_keys($bk_room_type_names));
+$filter_pay = rh_bk_pay_filter($_GET['pay'] ?? '');
+$bk_has_combos = bookingAvailabilityTableExists('room_combinations');
+$bk_more_active = $filter_kind !== '' || $filter_room_type > 0 || $filter_pay !== '';
 
 // Deep links from booking-details.php (?action=assign-room|room-change&booking_id=N): narrow the list to
 // that booking so its row is on screen, then the page script opens the matching modal. When the action
@@ -3354,7 +3372,7 @@ if ($deep_link_booking_id > 0 && $search_query === '') {
         $deep_link_booking_id = 0;
     }
 }
-$has_active_room_filters = $search_query !== '' || $filter_status !== '' || $filter_date_from !== '' || $filter_date_to !== '' || $filter_arrival !== '' || $filter_departure !== '' || $filter_balance !== '';
+$has_active_room_filters = $search_query !== '' || $filter_status !== '' || $filter_date_from !== '' || $filter_date_to !== '' || $filter_arrival !== '' || $filter_departure !== '' || $filter_balance !== '' || $bk_more_active;
 
 // Remember this list view (filters, tab, page) so "Back" on a booking returns to it.
 if ($_SERVER['REQUEST_METHOD'] === 'GET' && !isset($_GET['export']) && $deep_link_action === '') {
@@ -3389,7 +3407,7 @@ $bk_sort_dir = 'desc';
 $total_bookings = $pending = $tentative = $confirmed = $checked_in = 0;
 $checked_out = $cancelled = $no_show = $paid = $unpaid = 0;
 $today_checkins = $today_checkouts = $today_bookings = 0;
-$week_bookings = $month_bookings = $expiring_soon = 0;
+$week_bookings = $month_bookings = $expiring_soon = $group_bookings = 0;
 $list_count = 0;
 $deleted_count = 0;
 $current_page_count = 0;
@@ -3430,6 +3448,10 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
             $export_where_clauses[] = $export_balance['clause'];
             $export_params = array_merge($export_params, $export_balance['params']);
         }
+        // More filters (kind, room type, payment): the same pieces as the list.
+        $export_more = rh_bk_more_scope($filter_kind, $filter_room_type, $filter_pay, $bk_has_combos);
+        $export_where_clauses = array_merge($export_where_clauses, $export_more['clauses']);
+        $export_params = array_merge($export_params, $export_more['params']);
         $export_where_clauses = array_merge($export_where_clauses, rh_bk_tab_clauses($active_tab_override)['clauses']);
 
         $export_where_sql = !empty($export_where_clauses) ? 'WHERE ' . implode(' AND ', $export_where_clauses) : '';
@@ -3567,6 +3589,11 @@ try {
         $where_clauses[] = $bk_balance_clause['clause'];
         $params = array_merge($params, $bk_balance_clause['params']);
     }
+    // More filters (Booking kind, Room type, Payment; rh_bk_more_scope): shared scope too, so every badge counts what the
+    // list shows.
+    $bk_more_scope = rh_bk_more_scope($filter_kind, $filter_room_type, $filter_pay, $bk_has_combos);
+    $where_clauses = array_merge($where_clauses, $bk_more_scope['clauses']);
+    $params        = array_merge($params, $bk_more_scope['params']);
 
     // Deleted bookings are only ever shown under the Deleted filter; every count/insight excludes them.
     $deleted_scope_clauses = $where_clauses;
@@ -3616,7 +3643,8 @@ try {
             {$bk_badge_sum('today-bookings')}                                                             AS today_bookings,
             {$bk_badge_sum('week-bookings')}                                                              AS week_bookings,
             {$bk_badge_sum('month-bookings')}                                                             AS month_bookings,
-            {$bk_badge_sum('expiring-soon')}                                                              AS expiring_soon
+            {$bk_badge_sum('expiring-soon')}                                                              AS expiring_soon,
+            {$bk_badge_sum('group-bookings')}                                                             AS group_bookings
         FROM bookings b
         LEFT JOIN rooms r ON b.room_id = r.id
         LEFT JOIN individual_rooms ir ON b.individual_room_id = ir.id
@@ -3648,6 +3676,7 @@ try {
     $week_bookings   = (int)($stats['week_bookings']   ?? 0);
     $month_bookings  = (int)($stats['month_bookings']  ?? 0);
     $expiring_soon   = (int)($stats['expiring_soon']   ?? 0);
+    $group_bookings  = (int)($stats['group_bookings']  ?? 0);
 
     $bookings_stats_insight_limit = 8;
 
@@ -3739,6 +3768,16 @@ try {
     }
     if ($filter_balance !== '') {
         $insight_base_query['balance'] = $filter_balance;
+    }
+    // More filters: the cards' links keep them (the cards' rows are in the same scope).
+    if ($filter_kind !== '') {
+        $insight_base_query['kind'] = $filter_kind;
+    }
+    if ($filter_room_type > 0) {
+        $insight_base_query['room_type'] = (string)$filter_room_type;
+    }
+    if ($filter_pay !== '') {
+        $insight_base_query['pay'] = $filter_pay;
     }
 
     $bookings_stats_rows = [
@@ -3832,7 +3871,7 @@ try {
     // Re-count for pagination when the list is filtered by tab override, status filter, search, or date filters.
     // Use a separate variable so $total_bookings remains the global count for the "All" tab badge.
     $list_count = $total_bookings;
-    if (!empty($tab_extra_clauses) || $filter_status !== '' || $search_query !== '' || $filter_date_from !== '' || $filter_date_to !== '' || $filter_arrival !== '' || $filter_departure !== '' || $filter_balance !== '') {
+    if (!empty($tab_extra_clauses) || $filter_status !== '' || $search_query !== '' || $filter_date_from !== '' || $filter_date_to !== '' || $filter_arrival !== '' || $filter_departure !== '' || $filter_balance !== '' || $bk_more_active) {
         $cnt_stmt = $pdo->prepare("
             SELECT COUNT(*)
             FROM bookings b
@@ -4133,6 +4172,39 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     </a>
                 <?php endif; ?>
                 </span>
+                <?php /* More filters (step 8g): closed until one of them is in use, so phones keep a short toolbar.
+                         The selects are part of this form, so Filter, live search, tabs, sort, paging and the CSV export
+                         keep them. */ ?>
+                <details class="bookings-more-filters"<?php echo $bk_more_active ? ' open' : ''; ?>>
+                    <summary class="bookings-toolbar__button bookings-toolbar__button--clear bookings-more-filters__toggle"
+                        title="More ways to narrow the list: booking kind, room type and payment. Pick, then press Filter.">
+                        <i class="fas fa-sliders-h" aria-hidden="true"></i> More filters<?php if ($bk_more_active): ?> <span class="bookings-toolbar__badge"><?php echo (int)($filter_kind !== '') + (int)($filter_room_type > 0) + (int)($filter_pay !== ''); ?></span><?php endif; ?>
+                    </summary>
+                    <div class="bookings-more-filters__row">
+                        <select name="kind" class="bookings-toolbar__input bookings-toolbar__input--status" aria-label="Booking kind"
+                            title="Booking kind. Group: rooms booked together as one group (one lead booking and the rooms linked to it). Joined room: a joined pair of rooms sold as one room. Single: neither.">
+                            <option value="">Any booking kind</option>
+                            <?php foreach (rh_bk_kinds() as $bk_k => $bk_k_label): ?>
+                                <option value="<?php echo $bk_k; ?>" <?php echo $filter_kind === $bk_k ? 'selected' : ''; ?>><?php echo htmlspecialchars($bk_k_label); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <select name="room_type" class="bookings-toolbar__input bookings-toolbar__input--status" aria-label="Room type"
+                            title="Room type: the room type the booking was made for (not the room number).">
+                            <option value="">Any room type</option>
+                            <?php foreach ($bk_room_types as $bk_rt_row): $bk_rt_id = (int)$bk_rt_row['id']; ?>
+                                <option value="<?php echo $bk_rt_id; ?>" <?php echo $filter_room_type === $bk_rt_id ? 'selected' : ''; ?>><?php echo htmlspecialchars((string)$bk_rt_row['name']); ?><?php echo empty($bk_rt_row['is_active']) ? ' (not on sale)' : ''; ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <select name="pay" class="bookings-toolbar__input bookings-toolbar__input--status" aria-label="Payment"
+                            title="Payment. Paid: fully paid. Part paid: some paid, some still to pay. Unpaid: anything still to pay, part paid included (same as the Unpaid tab). Refunded: cancelled and all money given back. Fee owed: a cancelled or no-show booking that still owes its fee or extras (same rule as Still owed).">
+                            <option value="">Any payment</option>
+                            <?php foreach (rh_bk_pay_options() as $bk_p => $bk_p_label): ?>
+                                <option value="<?php echo $bk_p; ?>" <?php echo $filter_pay === $bk_p ? 'selected' : ''; ?>><?php echo htmlspecialchars($bk_p_label); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                        <p class="bookings-more-filters__help">Pick one or more, then press Filter. Group = rooms booked together under one lead booking. Joined room = two rooms sold as one.</p>
+                    </div>
+                </details>
             </form>
             <div class="bookings-toolbar__actions">
                 <a href="<?php echo htmlspecialchars('bookings.php?' . http_build_query(array_merge($_GET, ['export' => 'csv']))); ?>" class="bookings-toolbar__action bookings-toolbar__action--export">
@@ -4155,7 +4227,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         <strong><?php echo htmlspecialchars(rh_bk_notice_title($filter_arrival, $filter_departure, $filter_balance, $bk_filter_key)); ?></strong>
                     </div>
                     <div style="color: #2f3a63; font-size: 13px;">
-                        Showing <?php echo number_format($list_count); ?> matching room booking<?php echo $list_count === 1 ? '' : 's'; ?><?php if ($search_query !== ''): ?> for &ldquo;<?php echo htmlspecialchars($search_query); ?>&rdquo;<?php endif; ?><?php $bk_scope_words = rh_bk_date_scope_words($filter_date_from, $filter_date_to, $filter_date_type); if ($bk_scope_words !== ''): ?>, <?php echo htmlspecialchars($bk_scope_words); ?><?php endif; ?><?php if ($filter_arrival === 'overdue'): ?> whose arrival date has passed and who never checked in<?php endif; ?><?php if ($filter_departure === 'overdue'): ?> still checked in after their check-out date<?php endif; ?><?php if ($filter_balance === 'owing'): ?><?php echo $bk_filter_key === 'checkout_today' ? ' due out today' : ''; ?> with a balance still to pay<?php endif; ?>.
+                        Showing <?php echo number_format($list_count); ?> matching room booking<?php echo $list_count === 1 ? '' : 's'; ?><?php if ($search_query !== ''): ?> for &ldquo;<?php echo htmlspecialchars($search_query); ?>&rdquo;<?php endif; ?><?php $bk_scope_words = rh_bk_date_scope_words($filter_date_from, $filter_date_to, $filter_date_type); if ($bk_scope_words !== ''): ?>, <?php echo htmlspecialchars($bk_scope_words); ?><?php endif; ?><?php if ($filter_arrival === 'overdue'): ?> whose arrival date has passed and who never checked in<?php endif; ?><?php if ($filter_departure === 'overdue'): ?> still checked in after their check-out date<?php endif; ?><?php if ($filter_balance === 'owing'): ?><?php echo $bk_filter_key === 'checkout_today' ? ' due out today' : ''; ?> with a balance still to pay<?php endif; ?><?php echo htmlspecialchars(rh_bk_more_scope_words($filter_kind, $filter_room_type > 0 ? ($bk_room_type_names[$filter_room_type] ?? '') : '', $filter_pay)); ?>.
                         <a href="bookings.php" style="margin-left: 8px; color: #1f2d6b; font-weight: 600;">Clear</a>
                     </div>
                 </div>
@@ -4164,8 +4236,9 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             <!-- Tab Navigation -->
             <div class="tabs-container">
                 <div class="tabs-header">
-                    <?php /* Everyday tabs only. Confirmed, Checked Out, Cancelled and No-Show are in the
-                             status filter; Paid and booked-today/week/month still work via ?filter=. */ ?>
+                    <?php /* Everyday tabs, then Checked Out / Cancelled / No-Show / Group bookings (step 8g, owner 2026-11-15:
+                             "i dont see cancelled"). Confirmed is in the status filter; Paid and booked-today/week/month
+                             still work via ?filter=. */ ?>
                     <button class="tab-button <?php echo $active_tab_override === '' ? 'active' : ''; ?>" data-tab="all" data-count="<?php echo $total_bookings; ?>">
                         <i class="fas fa-list"></i>
                         All
@@ -4207,6 +4280,26 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         <i class="fas fa-exclamation-circle"></i>
                         Unpaid
                         <span class="tab-count"><?php echo $unpaid; ?></span>
+                    </button>
+                    <button class="tab-button" data-tab="checked-out" data-count="<?php echo $checked_out; ?>" title="Checked out: guests who have left.">
+                        <i class="fas fa-sign-out-alt"></i>
+                        Checked Out
+                        <span class="tab-count"><?php echo $checked_out; ?></span>
+                    </button>
+                    <button class="tab-button" data-tab="cancelled" data-count="<?php echo $cancelled; ?>" title="Cancelled bookings (status Cancelled). Fee still owed: More filters, Payment.">
+                        <i class="fas fa-times-circle"></i>
+                        Cancelled
+                        <span class="tab-count"><?php echo $cancelled; ?></span>
+                    </button>
+                    <button class="tab-button" data-tab="no-show" data-count="<?php echo $no_show; ?>" title="No-show bookings: the guest never arrived (status No-Show).">
+                        <i class="fas fa-user-slash"></i>
+                        No-Show
+                        <span class="tab-count"><?php echo $no_show; ?></span>
+                    </button>
+                    <button class="tab-button" data-tab="group-bookings" data-count="<?php echo $group_bookings; ?>" title="Group bookings: every room booked together as one group (the lead booking and the rooms linked to it), any status.">
+                        <i class="fas fa-users"></i>
+                        Group Bookings
+                        <span class="tab-count"><?php echo $group_bookings; ?></span>
                     </button>
                     <?php if ($deleted_count > 0 || $filter_status === 'deleted'): ?>
                     <button class="tab-button <?php echo $filter_status === 'deleted' ? 'active' : ''; ?>" data-tab="deleted" data-count="<?php echo $deleted_count; ?>" title="Deleted bookings: who deleted them, when and why. Restore from here.">
@@ -4665,6 +4758,9 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         'arrival'       => $filter_arrival,
                         'departure'     => $filter_departure,
                         'balance'       => $filter_balance,
+                        'kind'          => $filter_kind,      // More filters kept on every page link
+                        'room_type'     => $filter_room_type > 0 ? (string)$filter_room_type : '',
+                        'pay'           => $filter_pay,
                         'size'          => $bk_page_size !== '10' ? $bk_page_size : '',   // rows per page kept on every page link
                     ], fn($v) => $v !== '');
                     $pg_params = array_merge($pg_params, rh_server_sort_params($bk_sort_key, $bk_sort_dir));
@@ -5267,6 +5363,10 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     case 'month-bookings':
                         isVisible = isMonthBooking;
                         break;
+                    case 'group-bookings':
+                        // Server-filtered (rh_bk_tab_clauses 'group-bookings'): every loaded row belongs.
+                        isVisible = true;
+                        break;
                     default:
                         // Generic status-named tab (e.g. "expired") that has no
                         // bespoke rule above — match the row's status directly so
@@ -5317,7 +5417,8 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 'unpaid': 'Unpaid Bookings',
                 'today-bookings': "Today's Bookings",
                 'week-bookings': "This Week's Bookings",
-                'month-bookings': "This Month's Bookings"
+                'month-bookings': "This Month's Bookings",
+                'group-bookings': 'Group Bookings'
             };
 
             const icon = titleElement.querySelector('i');
@@ -5342,6 +5443,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             if (tabName === 'today-bookings') newIcon = 'fa-calendar-day';
             if (tabName === 'week-bookings') newIcon = 'fa-calendar-week';
             if (tabName === 'month-bookings') newIcon = 'fa-calendar-alt';
+            if (tabName === 'group-bookings') newIcon = 'fa-users';
 
             titleElement.innerHTML = `<i class="fas ${newIcon}"></i> ${newTitle} `;
             if (countSpan) {
@@ -5401,6 +5503,9 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             },
             'month-bookings': {
                 filter: 'month_bookings'
+            },
+            'group-bookings': {
+                filter: 'group_bookings'
             },
         };
 

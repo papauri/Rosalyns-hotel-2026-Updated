@@ -240,6 +240,7 @@ if (!function_exists('rh_bk_valid_date')) {
             'today_bookings' => 'today-bookings',
             'week_bookings'  => 'week-bookings',
             'month_bookings' => 'month-bookings',
+            'group_bookings' => 'group-bookings',
         ];
     }
 
@@ -280,6 +281,9 @@ if (!function_exists('rh_bk_valid_date')) {
                 return ['clauses' => ['b.created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)'], 'order' => null];
             case 'month-bookings':
                 return ['clauses' => ["DATE_FORMAT(b.created_at,'%Y-%m') = DATE_FORMAT(NOW(),'%Y-%m')"], 'order' => null];
+            case 'group-bookings':
+                // Group bookings tab (step 8g): every room of a group, the same rule as Booking kind = Group.
+                return ['clauses' => [rh_bk_group_sql()], 'order' => null];
         }
         return ['clauses' => [], 'order' => null];
     }
@@ -403,5 +407,180 @@ if (!function_exists('rh_bk_valid_date')) {
             return $due;
         }
         return ($p === 'partial' || (float)$amount_paid > $tol) ? $due : 0.0;
+    }
+}
+
+if (!function_exists('rh_bk_kind_filter')) {
+    /*
+     * "More filters" on the Bookings list (step 8g, owner 2026-11-15): Booking kind (?kind=), Room type (?room_type=) and
+     * Payment (?pay=). Each value is whitelisted here; the SQL is fixed text (alias b = bookings only, plus
+     * self-contained subqueries with their own aliases) and numbers are bound, so the list, the count, the tab badges,
+     * the insight cards and the CSV export all use the same pieces. No database, no settings.
+     *   Group       bookings tied together the way create-booking.php / booking.php / mixed-booking.php tie them:
+     *               bookings.primary_booking_id (NULL on the lead, the lead's id on every other room; the rule of
+     *               rh_booking_group_members). A lead counts while at least one not-deleted room points at it.
+     *   Joined room a booking holding a joined pair (room_combination_id), or booked as a joined ("Book As") room type:
+     *               a type named by any room_combinations row, active or not (rh_joined_type_without_pairs' rule).
+     *   Single      neither of the above. A joined room inside a group is both Group and Joined room.
+     */
+
+    /** ?kind= choices => label. */
+    function rh_bk_kinds(): array
+    {
+        return ['single' => 'Single booking', 'group' => 'Group booking', 'joined' => 'Joined room'];
+    }
+
+    /** Whitelisted ?kind=; '' when absent or unknown. */
+    function rh_bk_kind_filter($kind): string
+    {
+        $k = is_string($kind) ? strtolower(trim($kind)) : '';
+        return isset(rh_bk_kinds()[$k]) ? $k : '';
+    }
+
+    /** SQL: the booking is part of a group (fixed text). */
+    function rh_bk_group_sql(): string
+    {
+        return '(COALESCE(b.primary_booking_id, 0) > 0 OR EXISTS (SELECT 1 FROM bookings bkgrp WHERE bkgrp.primary_booking_id = b.id AND bkgrp.deleted_at IS NULL))';
+    }
+
+    /** SQL: the booking is a joined room (fixed text). $hasCombos = the room_combinations table exists. */
+    function rh_bk_joined_sql(bool $hasCombos = true): string
+    {
+        return $hasCombos
+            ? '(b.room_combination_id IS NOT NULL OR b.room_id IN (SELECT bkrc.combined_room_type_id FROM room_combinations bkrc WHERE bkrc.combined_room_type_id IS NOT NULL))'
+            : '(b.room_combination_id IS NOT NULL)';
+    }
+
+    /** The WHERE piece for a ?kind= value, or null when none. */
+    function rh_bk_kind_clause(string $kind, bool $hasCombos = true): ?string
+    {
+        switch ($kind) {
+            case 'group':
+                return rh_bk_group_sql();
+            case 'joined':
+                return rh_bk_joined_sql($hasCombos);
+            case 'single':
+                return '(NOT ' . rh_bk_group_sql() . ' AND NOT ' . rh_bk_joined_sql($hasCombos) . ')';
+        }
+        return null;
+    }
+
+    /** Whitelisted ?room_type= (a rooms.id); 0 when absent, not a positive whole number, or not in $knownIds (when given). */
+    function rh_bk_room_type_filter($raw, ?array $knownIds = null): int
+    {
+        if (!is_string($raw) && !is_int($raw)) {
+            return 0;
+        }
+        $s = trim((string)$raw);
+        if (!preg_match('/^[1-9]\d{0,9}$/', $s)) {
+            return 0;
+        }
+        $id = (int)$s;
+        if ($knownIds !== null && !in_array($id, array_map('intval', $knownIds), true)) {
+            return 0;
+        }
+        return $id;
+    }
+
+    /** ['clause' => 'b.room_id = ?', 'params' => [id]] or null. The booked room type (bookings.room_id). */
+    function rh_bk_room_type_clause(int $roomTypeId): ?array
+    {
+        return $roomTypeId > 0 ? ['clause' => 'b.room_id = ?', 'params' => [$roomTypeId]] : null;
+    }
+
+    /** ?pay= choices => label. */
+    function rh_bk_pay_options(): array
+    {
+        return [
+            'paid'     => 'Paid',
+            'part'     => 'Part paid',
+            'unpaid'   => 'Unpaid',
+            'refunded' => 'Refunded',
+            'fee_owed' => 'Fee owed after cancel or no-show',
+        ];
+    }
+
+    /** Whitelisted ?pay=; '' when absent or unknown. */
+    function rh_bk_pay_filter($pay): string
+    {
+        $p = is_string($pay) ? strtolower(trim($pay)) : '';
+        return isset(rh_bk_pay_options()[$p]) ? $p : '';
+    }
+
+    /**
+     * ['clauses' => [...], 'params' => [...]] for a ?pay= value, or null. Only existing rules, never a new money rule:
+     *   paid      the Paid tab (booking payment status paid / completed)
+     *   unpaid    the Unpaid tab (not paid / completed / refunded, not cancelled / no-show / expired; part paid included)
+     *   part      the Unpaid tab's rows whose payment status is 'partial' (recalculateBookingFinancials: something paid,
+     *             something still to pay)
+     *   refunded  payment status 'refunded' (recalculateBookingFinancials: a cancelled booking whose money all went back)
+     *   fee_owed  the Still owed (receivables) rule for cancelled and no-show rooms: amount due above BALANCE_TOLERANCE
+     *             (bound) and a no-show, or a cancelled room that kept a fee or still has folio extras posted
+     *             (rh_receivable_status_sql). Expired holds carrying a group no-show charge are not included here.
+     */
+    function rh_bk_pay_clause(string $pay): ?array
+    {
+        switch ($pay) {
+            case 'paid':
+                return ['clauses' => rh_bk_tab_clauses('paid')['clauses'], 'params' => []];
+            case 'unpaid':
+                return ['clauses' => rh_bk_tab_clauses('unpaid')['clauses'], 'params' => []];
+            case 'part':
+                return ['clauses' => array_merge(rh_bk_tab_clauses('unpaid')['clauses'], ["b.payment_status = 'partial'"]), 'params' => []];
+            case 'refunded':
+                return ['clauses' => ["b.payment_status = 'refunded'"], 'params' => []];
+            case 'fee_owed':
+                return ['clauses' => [
+                    'b.amount_due > ?',
+                    "(b.status = 'no-show' OR (b.status = 'cancelled' AND (COALESCE(b.cancellation_retained_amount, 0) > 0 OR COALESCE(b.folio_charges_total, 0) > 0)))",
+                ], 'params' => [rh_fd_balance_tolerance()]];
+        }
+        return null;
+    }
+
+    /**
+     * Every "More filters" piece at once, in a fixed order (kind, room type, payment), for the list and the export.
+     * @return array{clauses: string[], params: array}
+     */
+    function rh_bk_more_scope(string $kind, int $roomTypeId, string $pay, bool $hasCombos = true): array
+    {
+        $clauses = [];
+        $params = [];
+        if (($k = rh_bk_kind_clause($kind, $hasCombos)) !== null) {
+            $clauses[] = $k;
+        }
+        if (($rt = rh_bk_room_type_clause($roomTypeId)) !== null) {
+            $clauses[] = $rt['clause'];
+            $params = array_merge($params, $rt['params']);
+        }
+        if (($p = rh_bk_pay_clause($pay)) !== null) {
+            $clauses = array_merge($clauses, $p['clauses']);
+            $params = array_merge($params, $p['params']);
+        }
+        return ['clauses' => $clauses, 'params' => $params];
+    }
+
+    /**
+     * Plain words for the notice (each part starts with ", "), e.g. ", group bookings only, room type Deluxe, part paid".
+     * $roomTypeName is plain text: the caller escapes the whole sentence.
+     */
+    function rh_bk_more_scope_words(string $kind, string $roomTypeName, string $pay): string
+    {
+        $w = '';
+        $kw = ['single' => 'single bookings only (not in a group, not a joined room)', 'group' => 'group bookings only', 'joined' => 'joined-room bookings only'];
+        if (isset($kw[$kind])) {
+            $w .= ', ' . $kw[$kind];
+        }
+        if ($roomTypeName !== '') {
+            $w .= ', room type ' . $roomTypeName;
+        }
+        $pw = [
+            'paid' => 'paid in full', 'part' => 'part paid', 'unpaid' => 'not fully paid',
+            'refunded' => 'refunded', 'fee_owed' => 'with a fee still owed after a cancellation or no-show',
+        ];
+        if (isset($pw[$pay])) {
+            $w .= ', ' . $pw[$pay];
+        }
+        return $w;
     }
 }

@@ -183,7 +183,9 @@ if (!function_exists('rh_fin_valid_date')) {
     /**
      * Payments page WHERE, used by the cards, the list, the count and the CSV export (pair it with
      * rh_fin_payments_from()). $f keys: booking_type, scope_types[], booking_id, search, status, refund_status,
-     * payment_method, start_date, end_date.
+     * payment_method, start_date, end_date; optional (step 8g) direction, booking_status, group (+ has_group /
+     * has_company column flags), recorded_by (+ recorded_by_names[], has_recorded_by), room_type, amount_from,
+     * amount_to, tolerance (default BALANCE_TOLERANCE).
      * @return array{sql:string, params:array}
      */
     function rh_fin_payments_where(array $f, string $txnCol, array $conf): array
@@ -235,6 +237,63 @@ if (!function_exists('rh_fin_valid_date')) {
         if ($method !== '') {
             $where[] = 'p.payment_method = ?';
             $params[] = $method;
+        }
+        // Step 8g "More filters" (all optional; every value is checked again here, so junk adds nothing).
+        $direction = rh_fin_pick(rh_fin_get_str($f, 'direction'), rh_fin_pay_directions());
+        if ($direction === 'in') {
+            $where[] = "COALESCE(p.payment_type, '') <> 'refund'";
+        } elseif ($direction === 'out') {
+            $where[] = "p.payment_type = 'refund'";
+        }
+        $bkStatusSql = rh_fin_pay_booking_status_sql(rh_fin_pick(rh_fin_get_str($f, 'booking_status'), rh_fin_pay_booking_statuses()));
+        if ($bkStatusSql !== '') {
+            $where[] = $bkStatusSql;
+        }
+        $groupSql = rh_fin_pay_group_sql(rh_fin_pick(rh_fin_get_str($f, 'group'), rh_fin_pay_group_kinds()), !empty($f['has_group']), !empty($f['has_company']));
+        if ($groupSql !== '') {
+            $where[] = $groupSql;
+        }
+        // Recorded by: the staff id in recorded_by, else (rows saved with only a name, e.g. Record payment) processed_by
+        // equal to that person's name, username or id - the same order Payment details uses for "Received by".
+        $recBy = rh_fin_get_int($f, 'recorded_by');
+        if ($recBy > 0) {
+            $names = [];
+            foreach (array_merge([(string)$recBy], (array)($f['recorded_by_names'] ?? [])) as $n) {
+                if (is_string($n) && trim($n) !== '' && !in_array(trim($n), $names, true)) {
+                    $names[] = trim($n);
+                }
+            }
+            $in = implode(',', array_fill(0, count($names), '?'));
+            if (!empty($f['has_recorded_by'])) {
+                $where[] = "(p.recorded_by = ? OR (COALESCE(p.recorded_by, 0) = 0 AND p.processed_by IN ({$in})))";
+                $params[] = $recBy;
+            } else {
+                $where[] = "p.processed_by IN ({$in})";
+            }
+            foreach ($names as $n) {
+                $params[] = $n;
+            }
+        }
+        $roomType = rh_fin_get_int($f, 'room_type');
+        if ($roomType > 0) {
+            $where[] = "p.booking_type = 'room' AND b.room_id = ?";
+            $params[] = $roomType;
+        }
+        // Amount from / to: the amount the list shows (total_amount; refunds by the amount paid back), both ends included
+        // within BALANCE_TOLERANCE.
+        $tol = isset($f['tolerance']) ? abs((float)$f['tolerance']) : (defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01);
+        $amtFrom = rh_fin_amount($f['amount_from'] ?? '');
+        $amtTo = rh_fin_amount($f['amount_to'] ?? '');
+        if ($amtFrom !== '' && $amtTo !== '' && (float)$amtFrom > (float)$amtTo) {
+            [$amtFrom, $amtTo] = [$amtTo, $amtFrom];
+        }
+        if ($amtFrom !== '') {
+            $where[] = 'ABS(p.total_amount) >= ?';
+            $params[] = sprintf('%.4f', max(0.0, (float)$amtFrom - $tol));
+        }
+        if ($amtTo !== '') {
+            $where[] = 'ABS(p.total_amount) <= ?';
+            $params[] = sprintf('%.4f', (float)$amtTo + $tol);
         }
         $where = array_merge($where, rh_fin_date_conditions(function_exists('rh_pay_count_day_sql') ? rh_pay_count_day_sql('p') : 'p.payment_date', $f['start_date'] ?? '', $f['end_date'] ?? '', $params));
         return ['sql' => 'WHERE ' . implode(' AND ', $where), 'params' => $params];
@@ -357,5 +416,106 @@ if (!function_exists('rh_fin_search_term')) {
             'badge' => 'neutral',
             'link' => 'payments.php?' . http_build_query(['booking_type' => $src]) . '&booking_id=',
         ];
+    }
+}
+
+if (!function_exists('rh_fin_pay_directions')) {
+    /**
+     * Payments page "More filters" (step 8g, owner 2026-11-15): the whitelists the page reads its GET values against
+     * and the pure SQL pieces rh_fin_payments_where() adds, so the cards, list, count and CSV export follow them alike.
+     * No new money rule: refunds keep their payout day through the existing date filter (rh_pay_count_day_sql).
+     */
+
+    /** ?direction=: money in (every row that is not a refund) or refunds (money paid back). */
+    function rh_fin_pay_directions(): array
+    {
+        return ['in' => 'Money in', 'out' => 'Refunds (money out)'];
+    }
+
+    /** ?booking_status=: the status of the booking the payment belongs to. Only Cancelled reads non-room accounts. */
+    function rh_fin_pay_booking_statuses(): array
+    {
+        return [
+            'upcoming'    => 'Upcoming (not arrived yet)',
+            'in_house'    => 'In-house (checked in)',
+            'checked_out' => 'Checked out',
+            'no_show'     => 'No-show',
+            'cancelled'   => 'Cancelled',
+        ];
+    }
+
+    /** ?group=: room bookings in a group of 2+ rooms, billed to a company account, or either. */
+    function rh_fin_pay_group_kinds(): array
+    {
+        return ['group' => 'Group bookings (2+ rooms)', 'company' => 'Company on account', 'group_company' => 'Group or company'];
+    }
+
+    /** $value when it is a key of $list, else ''. */
+    function rh_fin_pick(string $value, array $list): string
+    {
+        return ($value !== '' && isset($list[$value])) ? $value : '';
+    }
+
+    /**
+     * An amount box: digits with an optional ,-grouping and up to 2 decimals ("1,250.50"), as '1250.50'; anything else ''.
+     * Never negative (refunds are searched by the amount paid back, as the list shows it).
+     */
+    function rh_fin_amount($raw): string
+    {
+        if (!is_string($raw) && !is_int($raw) && !is_float($raw)) {
+            return '';
+        }
+        $v = str_replace([',', ' '], '', trim((string)$raw));
+        if (!preg_match('/^\d{1,12}(\.\d{1,2})?$/', $v)) {
+            return '';
+        }
+        return number_format((float)$v, 2, '.', '');
+    }
+
+    /** SQL condition (fixed text, no parameters) for a ?booking_status= key; '' for an unknown key. */
+    function rh_fin_pay_booking_status_sql(string $key): string
+    {
+        $room = static function (string $cond): string {
+            return "(p.booking_type = 'room' AND b.id IS NOT NULL AND b.deleted_at IS NULL AND {$cond})";
+        };
+        switch ($key) {
+            case 'upcoming':
+                return $room("b.status IN ('pending','confirmed','tentative') AND b.check_in_date >= CURDATE()");
+            case 'in_house':
+                return $room("b.status = 'checked-in'");
+            case 'checked_out':
+                return $room("b.status = 'checked-out'");
+            case 'no_show':
+                return $room("b.status = 'no-show'");
+            case 'cancelled':
+                return '(' . $room("b.status = 'cancelled'")
+                    . " OR (p.booking_type = 'conference' AND ci.status = 'cancelled')"
+                    . " OR (p.booking_type = 'gym' AND gi.status = 'cancelled')"
+                    . " OR (p.booking_type = 'event' AND ei.status = 'cancelled'))";
+        }
+        return '';
+    }
+
+    /**
+     * SQL condition (fixed text) for a ?group= key. Group = the booking's group root (primary_booking_id, else itself)
+     * has 2+ rooms not deleted, the same rule as the Group line on Payment details. Company = billing_account_id set.
+     * $hasGroup / $hasCompany: whether bookings has those columns; a kind whose column is missing gives ''.
+     */
+    function rh_fin_pay_group_sql(string $key, bool $hasGroup, bool $hasCompany): string
+    {
+        $root = 'COALESCE(NULLIF(b.primary_booking_id, 0), b.id)';
+        $group = "(SELECT COUNT(*) FROM bookings g WHERE (g.id = {$root} OR g.primary_booking_id = {$root}) AND g.deleted_at IS NULL) > 1";
+        $company = 'COALESCE(b.billing_account_id, 0) > 0';
+        $parts = [];
+        if (($key === 'group' || $key === 'group_company') && $hasGroup) {
+            $parts[] = $group;
+        }
+        if (($key === 'company' || $key === 'group_company') && $hasCompany) {
+            $parts[] = $company;
+        }
+        if ($parts === []) {
+            return '';
+        }
+        return "(p.booking_type = 'room' AND b.id IS NOT NULL AND (" . implode(' OR ', $parts) . '))';
     }
 }

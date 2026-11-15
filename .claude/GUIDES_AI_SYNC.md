@@ -242,6 +242,11 @@ when prompted."
 - Guides (Bookings list, phone/tablet/laptop screenshots or wording): every booking row now shows the number of guests. Phones: line 2 reads "27 Nov -> 29 Nov · 2 nights · 4 guests". Tablets and laptops where the Guests column is hidden: "4 guests" under the Check In / Out dates. Wide screens keep the Guests column.
 - Assistant: no change (layout only; number_of_guests unchanged).
 
+### Better filtering on Bookings and Payments (2026-11-15, NEXT_BUILD_ORDER step 8g) — SHIPPED (hashes: see NEXT_BUILD_ORDER.md row 8g)
+- Guides (Bookings list): new tabs Checked Out, Cancelled, No-Show, Group Bookings (each with its count). New "More filters" button: Booking kind (Single / Group / Joined room), Room type, Payment (Paid / Part paid / Unpaid / Refunded / Fee owed after cancel or no-show). Group = rooms booked together under one lead booking; joined room = two rooms sold as one. Filters stay on through paging, sorting and CSV export; the "Showing N ..." line names them with Clear.
+- Guides (Payments): new filters Money in / Refunds (money out), Booking status (upcoming / in-house / checked out / no-show / cancelled), Group or company, Recorded by (staff), Room type, Amount from / to; on phones behind "More filters". The money cards follow the filters except Still owed and Today (their helpers say so). Each filter shows as a chip with its own Clear.
+- Assistant: no change to data it reads; if it links staff to filtered Bookings/Payments lists, the new GET params are kind / room_type / pay / filter=group_bookings (Bookings) and direction / booking_status / group / recorded_by / room_type / amount_from / amount_to (Payments).
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` fails in unchanged code: claim-check self-test (Room Board "Tomorrow"; staff
   activity "4 of 3 staff accounts"), History Summary "K1,068,000," flagged; digest-recipients fail.
