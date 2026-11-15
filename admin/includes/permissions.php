@@ -1149,7 +1149,7 @@ function getAllPermissions()
         // Clear Stock Data (owner 2026-11-06): administrator role only. It is NOT in the manager default list; the page also hard-checks role === 'admin'.
         'data_reset' => [
             'label' => 'Clear Stock Data',
-            'description' => 'Remove stock data (items, batches, recipes, suppliers, purchase orders, budgets) after a backup, with an undo. Administrator accounts only',
+            'description' => 'Remove stock data (items, batches, recipes, suppliers, purchase orders, budgets) after a backup, with an undo; wipe stock counts and the stock they added (no undo, full backup only); delete Import history entries. Administrator accounts only',
             'icon' => 'fa-eraser',
             'category' => 'Settings',
             'page' => 'stock-clear.php',

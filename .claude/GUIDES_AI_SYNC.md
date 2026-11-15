@@ -19,6 +19,19 @@ when prompted."
 
 ## Pending (oldest first)
 
+### Stock count wipe + Delete on Import history (2026-11-15, owner ask) — hashes in TASKS.md
+- Guides (Settings > Clear Stock Data, Stock > Import): Clear Stock Data has a new section "Stock counts and the stock
+  they added": lists every count, wipes all counts plus the batches/adjustments their approval added and puts item
+  quantities back; full backup + snapshot first, logged as stock_count_wipe; refused (with the item named) when stock
+  has moved since or an item that keeps stock had its cost averaged with the count; tick "I understand" + type WIPE +
+  own password; no Undo on the page (restore from the full backup). Optional tick also removes the Import history
+  entries that created the counts. Import page: Delete on finished import entries (committed/failed/cancelled) for
+  holders of Clear Stock Data (administrator, super admin only unless switched on); type DELETE + own password; removes
+  the entry and its stored file (backup copy kept in backups/import-delete/), does NOT undo the stock it brought in,
+  the "already imported" check forgets that file; logged as import_history_delete.
+- Assistant: check at sync time whether any read tool reads stock_counts, import_jobs or the data_reset permission
+  wording (grep includes/ai/ai-import.php, ai-tools.php, ai-insights.php); no action tools added.
+
 ### Joined rooms follow-up (2026-11-15, step 8e follow-up) — hashes in TASKS.md
 - Guides (Bookings > Change room type, Individual Rooms, Reports > Occupancy): an upgrade into a joined room is now
   priced like a new booking of it (the pair's rate, else the joined room price, plus the joined room's rate plans) and

@@ -251,8 +251,93 @@
                         cx.addEventListener('click', function () { cancelJob(j.id, false); });
                         acts.appendChild(cx);
                     }
+                    // Delete from history: only for holders of the high-level permission, and never for an import still in progress (the server decides both)
+                    if (r.can_delete && j.deletable && delModal) {
+                        var dx = h('button', 'btn-secondary di-btn di-btn--quiet', ' Delete');
+                        dx.type = 'button';
+                        dx.title = 'Remove this entry from Import history. Stock it brought in is not changed.';
+                        dx.insertBefore(h('i', 'fas fa-trash-alt'), dx.firstChild);
+                        dx.addEventListener('click', function () { openDelete(j); });
+                        acts.appendChild(dx);
+                    }
                     add(row, main, st, det ? h('span', 'di-job-det', det) : null, acts);
                     mineList.appendChild(row);
+                });
+            });
+        }
+
+        // ---------- delete from Import history (high-level: typed DELETE + own password; the server checks everything again) ----------
+        var delModal = root.querySelector('#diDelModal');
+        var delForm = root.querySelector('#diDelForm');
+        var delJob = 0;
+        function delEls() {
+            return { word: root.querySelector('#diDelWord'), pw: root.querySelector('#diDelPw'), err: root.querySelector('#diDelErr'), go: root.querySelector('#diDelGo') };
+        }
+        function delError(text) {
+            var e = delEls().err;
+            if (!e) { return; }
+            clear(e);
+            if (text) { add(e, h('i', 'fas fa-exclamation-circle'), ' ', h('span', null, text)); }
+            e.hidden = !text;
+        }
+        function delReset() {
+            var e = delEls();
+            if (e.word) { e.word.value = ''; }
+            if (e.pw) { e.pw.value = ''; }
+            if (e.go) { e.go.disabled = false; }
+            delError('');
+        }
+        function delShow(open) {
+            if (window.Modal && typeof window.Modal.open === 'function') {
+                if (open) { window.Modal.open('diDelModal'); } else { window.Modal.close('diDelModal'); }
+                return;
+            }
+            delModal.classList.toggle('active', open);
+            document.body.classList.toggle('modal-open', open);
+        }
+        function openDelete(j) {
+            if (!delModal) { return; }
+            delJob = j.id;
+            delReset();
+            root.querySelector('#diDelFile').textContent = j.file;
+            var meta = (JOB_STATUS[j.status] || j.status) + ' · started ' + j.created_at + (j.by ? ' by ' + j.by : '');
+            if (j.status === 'committed') { meta += ' · ' + (j.created || 0) + ' created, ' + (j.updated || 0) + ' updated'; }
+            root.querySelector('#diDelMeta').textContent = '(' + meta + ')';
+            Array.prototype.forEach.call(delModal.querySelectorAll('[data-del-when]'), function (li) {
+                li.hidden = (li.getAttribute('data-del-when') === 'committed') !== (j.status === 'committed');
+            });
+            delShow(true);
+            window.setTimeout(function () { var w = delEls().word; if (w) { w.focus(); } }, 120);
+        }
+        if (delModal && delForm) {
+            delModal.addEventListener('modal:close', function () { delReset(); delJob = 0; });
+            if (!window.Modal) {        // admin-components.js normally closes it; this keeps Close working without it
+                Array.prototype.forEach.call(delModal.querySelectorAll('[data-modal-close]'), function (b) {
+                    b.addEventListener('click', function () { delShow(false); delReset(); delJob = 0; });
+                });
+            }
+            delForm.addEventListener('submit', function (ev) {
+                ev.preventDefault();
+                var e = delEls();
+                if (!delJob || !e.go || e.go.disabled) { return; }
+                if (e.word.value !== 'DELETE') { delError('Type the word DELETE exactly, in capital letters.'); e.word.focus(); return; }
+                if (e.pw.value === '') { delError('Enter your own password to confirm.'); e.pw.focus(); return; }
+                e.go.disabled = true;
+                delError('');
+                var id = delJob;
+                post('delete', { job: id, confirm_word: e.word.value, confirm_password: e.pw.value }).then(function (r) {
+                    e.pw.value = '';
+                    if (!r.ok) {
+                        e.go.disabled = false;
+                        delError(r.error || 'The entry could not be deleted. Nothing was changed.');
+                        return;
+                    }
+                    delShow(false);
+                    delReset();
+                    delJob = 0;
+                    if (id === S.job) { S.job = 0; S.sum = null; S.result = null; S.reach = 1; setUrl(0); showStep(1); }
+                    msg('The entry was deleted from Import history. A backup copy was kept, and nothing it imported was changed.', 'ok');
+                    loadMine();
                 });
             });
         }

@@ -10,7 +10,9 @@
  * Access: admin-init.php (session, data_import permission, stock module) + this file (kill switch data_import_enabled, fail-closed,
  * and stock_management). A job can only be opened by the person who uploaded it, or an admin.
  *
- * AJAX (POST, CSRF, JSON): upload | summary | review_page | bulk | answer | fields | skip | unskip | unit_items | unit_choice | heal_undo | fixed_list | cancel | confirm | list.
+ * AJAX (POST, CSRF, JSON): upload | summary | review_page | bulk | answer | fields | skip | unskip | unit_items | unit_choice | heal_undo | fixed_list | cancel | confirm | list | delete.
+ * delete = remove one finished entry from Import history (owner 2026-11-15): same high-level permission as Clear Stock Data (rh_sc_authorize:
+ * administrator + data_reset), the typed word DELETE and the person's own password; a backup is written first (includes/import/delete.php).
  * GET ?action=csv&job=ID downloads the preview CSV; GET ?action=skipped&job=ID&format=csv|xlsx downloads the rows that were left out;
  * GET ?action=original&job=ID downloads the uploaded file as it was uploaded (while the stored copy still exists).
  * All page text built from the file (names, sheets, cells) is set with textContent in the browser - it is never parsed as HTML.
@@ -20,6 +22,8 @@ require_once __DIR__ . '/includes/import-schema.php';
 require_once __DIR__ . '/../includes/import/commit-stock.php';
 require_once __DIR__ . '/../includes/import/memory.php';          // will this file / job fit in this server's memory and time (plain message, never a fatal error)
 require_once __DIR__ . '/../includes/import/review-view.php';     // Step 3 paging / filters / bulk answers (server side)
+require_once __DIR__ . '/../includes/import/delete.php';          // remove an entry from Import history (backup first; high-level permission)
+require_once __DIR__ . '/includes/stock-clear-lib.php';           // rh_sc_authorize / rh_sc_check_confirm: the Clear Stock Data permission + typed word + password
 
 $user = [
     'id'        => $_SESSION['admin_user_id'],
@@ -329,9 +333,17 @@ if ($isAjax) {
                 'by' => (string)$j['by_name'], 'mine' => (int)$j['created_by'] === $uid, 'error' => (string)$j['error_text'],
                 'created' => is_array($res) ? (int)($res['created'] ?? 0) : null, 'updated' => is_array($res) ? (int)($res['updated'] ?? 0) : null,
                 'has_file' => import_job_file_path($j) !== '',   // the uploaded copy is still stored, so the Download button can show
+                'deletable' => import_job_delete_block_reason($j) === '',   // finished, failed or cancelled (never one in progress)
             ];
         }
-        di_json(['ok' => true, 'jobs' => $out]);
+        [$canDelete] = rh_sc_authorize($pdo, $uid);
+        di_json(['ok' => true, 'jobs' => $out, 'can_delete' => (bool)$canDelete]);
+    }
+
+    // Remove one entry from Import history. Permission first (before the job is looked at), then DELETE + own password, then the delete itself.
+    if ($action === 'delete') {
+        $r = import_job_delete_checked($pdo, dirname(__DIR__), $jobId, $user, (string)($_POST['confirm_word'] ?? ''), (string)($_POST['confirm_password'] ?? ''));
+        di_json(['ok' => !empty($r['ok']), 'error' => (string)$r['error'], 'snapshot' => (string)$r['snapshot'], 'job' => $r['job']]);
     }
 
     $job = di_job($pdo, $jobId, $uid, $isAdmin);
@@ -485,6 +497,7 @@ if ($isAjax) {
 $csrf_token = generateCsrfToken();
 $maxBytes = di_max_upload_bytes($pdo);
 $canReimport = rh_import_can_reimport($uid, $pdo);
+[$canDeleteHistory] = rh_sc_authorize($pdo, $uid);
 $startJob = (int)($_GET['job'] ?? 0);
 $cssV = @filemtime(__DIR__ . '/css/data-import.css');
 $jsV = @filemtime(__DIR__ . '/js/data-import.js');
@@ -587,6 +600,41 @@ $jsV = @filemtime(__DIR__ . '/js/data-import.js');
                 <p class="di-help">Imports you started in the last 30 days. Open one to carry on where you stopped, or cancel one you no longer need.</p>
                 <div id="diMineList" class="di-list"><p class="di-muted">Loading&hellip;</p></div>
             </section>
+            <?php if ($canDeleteHistory):
+                /* Delete from Import history: inside #di-root (so inside #rh-admin-page) or the SPA drops it. Text from the job is filled in with textContent. */
+                require_once __DIR__ . '/../includes/modal.php';
+                ob_start(); ?>
+                <form id="diDelForm" class="di-del" autocomplete="off" novalidate>
+                    <p class="di-del-file">Entry: <strong id="diDelFile"></strong> <span class="di-muted" id="diDelMeta"></span></p>
+                    <p class="di-del-h"><strong>What is removed</strong></p>
+                    <ul class="di-del-list">
+                        <li>This entry in Import history, and its stored copy of the file if one is still kept. A backup copy of both is saved on the server first.</li>
+                    </ul>
+                    <p class="di-del-h"><strong>What is not undone</strong></p>
+                    <ul class="di-del-list">
+                        <li data-del-when="committed">The stock items, counts and quantities this import brought in stay exactly as they are. To remove those, use Clear Stock Data.</li>
+                        <li data-del-when="committed">Import will forget that this file was already imported, so the same file can be imported again without the &ldquo;Import again&rdquo; tick (unless another entry for the same file is still in the history).</li>
+                        <li data-del-when="other">Nothing was imported from this file, so your stock is not affected.</li>
+                        <li>The delete is logged under your name.</li>
+                    </ul>
+                    <div class="form-group">
+                        <label class="form-label" for="diDelWord">Type DELETE to confirm</label>
+                        <input type="text" id="diDelWord" class="form-control" autocomplete="off" autocapitalize="characters" spellcheck="false" required>
+                        <p class="di-help">In capital letters, exactly as shown.</p>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label" for="diDelPw">Your password</label>
+                        <input type="password" id="diDelPw" class="form-control" autocomplete="current-password" required>
+                        <p class="di-help">The password you sign in with. It shows this is really you.</p>
+                    </div>
+                    <div class="di-msg di-msg--error" id="diDelErr" role="alert" hidden></div>
+                </form>
+                <?php
+                $delBody = ob_get_clean();
+                $delFooter = '<button type="button" class="btn-secondary di-btn" data-modal-close>Keep it</button>'
+                    . '<button type="submit" form="diDelForm" class="btn-danger di-btn" id="diDelGo"><i class="fas fa-trash-alt" aria-hidden="true"></i> Delete from history</button>';
+                renderModal('diDelModal', 'Delete from Import history?', $delBody, ['size' => 'md', 'footer' => $delFooter, 'close_on_overlay' => false]);
+            endif; ?>
         </div>
     </div>
 

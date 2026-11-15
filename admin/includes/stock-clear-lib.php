@@ -16,7 +16,13 @@
  *  - Undo re-inserts only that snapshot, parents first, and refuses if any of those tables has rows again.
  *  - Both functions accept 'external_tx' => true: the caller owns the transaction (used by the test, which rolls back).
  *
- * Never touched: stock_orders and its item/audit/delivery/split/KDS/shift tables, payments, menu_items, import_*.
+ * Never touched: stock_orders and its item/audit/delivery/split/KDS/shift tables, payments, menu_items. import_* is never
+ * touched by a clear; the stock count wipe (owner 2026-11-15, rh_sc_run_count_wipe) may, when ticked, ask the Import
+ * feature's own import_job_delete() to remove the Import history entries that created the wiped counts.
+ *
+ * Stock count wipe: removes every stock count, its lines and opening batches, and the stock its approval added (the surplus
+ * batches and the variance adjustments), and puts each item's on-hand quantity back. It is refused, with a plain reason,
+ * whenever stock has moved in a way that cannot be reversed exactly. No Undo: only the full backup taken first restores it.
  */
 
 if (!defined('RH_SC_SNAPSHOT_DIR')) {
@@ -749,6 +755,9 @@ function rh_sc_run_undo(PDO $pdo, string $root, array $actor, string $id, array 
     if (!$man) {
         return $fail('Nothing was changed. The record for that clear was not found.');
     }
+    if (rh_sc_manifest_is_count_wipe($man)) {
+        return $fail('Nothing was changed. A stock count wipe has no Undo. ' . rh_sc_count_wipe_restore_text($man));
+    }
     $area = (string)($man['area'] ?? '');
     $a = rh_sc_area($area);
     if (!$a) {
@@ -930,4 +939,735 @@ function rh_sc_run_undo(PDO $pdo, string $root, array $actor, string $id, array 
         logActivity((int)($actor['id'] ?? 0), 'stock_clear_undo', 'Undid the stock clear ' . $id . ': ' . rh_sc_sentence($area, $want) . ' put back.');
     }
     return ['ok' => true, 'error' => '', 'counts' => $want, 'sentence' => rh_sc_sentence($area, $want)];
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Stock count wipe (owner 2026-11-15): every stock count and the stock its approval added. No Undo; full backup only.
+// ---------------------------------------------------------------------------------------------------------------------
+
+if (!defined('RH_SC_CW_TOL')) {
+    define('RH_SC_CW_TOL', 0.0001); // quantities are DECIMAL(16,6): never compare with raw float equality
+}
+
+/** True when a manifest describes a stock count wipe (these have no Undo). */
+function rh_sc_manifest_is_count_wipe(array $man): bool
+{
+    return ($man['kind'] ?? '') === 'count_wipe' || (array_key_exists('undo', $man) && $man['undo'] === false);
+}
+
+/** "Restore from the full backup <name> on the Backups page." for a count wipe manifest. */
+function rh_sc_count_wipe_restore_text(array $man): string
+{
+    $name = trim((string)($man['full_backup'] ?? ''));
+    return 'Restore from the full backup ' . ($name !== '' ? $name : '(none was recorded)') . ' on the Backups page.';
+}
+
+/** The sentence every block reason ends with. */
+function rh_sc_cw_tail(): string
+{
+    return ' Use the full Stock reset above instead.';
+}
+
+/** 12.5 rather than 12.500000. */
+function rh_sc_cw_qty(float $q): string
+{
+    $s = rtrim(rtrim(number_format($q, 6, '.', ''), '0'), '.');
+    return $s === '-0' ? '0' : $s;
+}
+
+/** Count reference as staff see it (the old SC- prefix dropped, as on Stock Count). */
+function rh_sc_cw_ref(string $ref): string
+{
+    $ref = trim($ref);
+    return $ref === '' ? '(no reference)' : (string)preg_replace('/^SC-/i', '', $ref);
+}
+
+/** "?,?,?" for a list (callers never pass an empty list). */
+function rh_sc_cw_ph(array $ids): string
+{
+    return implode(',', array_fill(0, count($ids), '?'));
+}
+
+/** Does a batch note belong to this count reference? ("Stock count surplus REF" exactly, or followed by a space.) */
+function rh_sc_cw_note_matches(string $note, string $ref): bool
+{
+    $base = 'Stock count surplus ' . $ref;
+    return $note === $base || strncmp($note, $base . ' ', strlen($base) + 1) === 0;
+}
+
+/**
+ * Read everything the wipe would touch and work out whether it can be reversed exactly.
+ * $lock = true: locking reads inside the caller's transaction, ingredient rows first by ascending id (the lock order every
+ * stock write path uses), then counts, lines, adjustments, batches.
+ * @return array raw rows (for the snapshot) + 'view' (for the preview) + 'blocked' (plain reasons)
+ */
+function rh_sc_cw_gather(PDO $pdo, bool $lock): array
+{
+    $fu = $lock ? ' FOR UPDATE' : '';
+    $out = [
+        'counts' => [], 'lines' => [], 'adjs' => [], 'batches' => [], 'batch_count' => [], 'opening' => [], 'ings' => [], 'alert_ids' => [],
+        'review_rows' => [], 'import_jobs' => [], 'adj_sum_exact' => [], 'blocked' => [], 'view' => [],
+    ];
+    if (!rh_sc_table_exists($pdo, 'stock_counts') || !rh_sc_table_exists($pdo, 'stock_count_lines')) {
+        $out['view'] = rh_sc_cw_view($out, [], [], []);
+        return $out;
+    }
+    $all = static function (string $sql, array $p = []) use ($pdo): array {
+        $st = $pdo->prepare($sql);
+        $st->execute($p);
+        return $st->fetchAll(PDO::FETCH_ASSOC);
+    };
+    $block = static function (string $why) use (&$out): void {
+        $out['blocked'][] = $why . rh_sc_cw_tail();
+    };
+
+    // 1) Ingredient rows first (lock order), from a plain read of which items the counts' approvals changed.
+    $preIng = [];
+    if ($lock) {
+        $preIng = array_map('intval', array_column($all(
+            "SELECT DISTINCT a.ingredient_id FROM stock_adjustments a JOIN stock_counts c ON a.source_id = c.id WHERE a.source_type = ? ORDER BY a.ingredient_id",
+            ['variance']
+        ), 'ingredient_id'));
+        if ($preIng) {
+            $all("SELECT id FROM stock_ingredients WHERE id IN (" . rh_sc_cw_ph($preIng) . ") ORDER BY id FOR UPDATE", $preIng);
+        }
+    }
+
+    // 2) Counts, all lines, the counts' variance adjustments.
+    $counts = $all("SELECT * FROM stock_counts ORDER BY id" . $fu);
+    $out['counts'] = $counts;
+    $countById = [];
+    foreach ($counts as $c) {
+        $countById[(int)$c['id']] = $c;
+    }
+    $allLines = $all("SELECT * FROM stock_count_lines ORDER BY id" . $fu);
+    $orphanLines = 0;
+    $linesByCount = [];
+    foreach ($allLines as $l) {
+        $cid = (int)$l['count_id'];
+        if (!isset($countById[$cid])) {
+            $orphanLines++;
+            continue;
+        }
+        $out['lines'][] = $l;
+        $linesByCount[$cid][] = $l;
+    }
+    if ($orphanLines > 0) {
+        $block($orphanLines . ' count line' . ($orphanLines === 1 ? ' belongs' : 's belong') . ' to no stock count, so the counts cannot be matched exactly.');
+    }
+    if (!$counts) {
+        $out['view'] = rh_sc_cw_view($out, [], [], []);
+        return $out;
+    }
+    $countIds = array_keys($countById);
+    $adjs = $all("SELECT * FROM stock_adjustments WHERE source_type = ? AND source_id IN (" . rh_sc_cw_ph($countIds) . ") ORDER BY id" . $fu,
+        array_merge(['variance'], $countIds));
+    $out['adjs'] = $adjs;
+    $adjByCount = [];
+    $adjIngIds = [];
+    foreach ($adjs as $a) {
+        $adjByCount[(int)$a['source_id']][] = $a;
+        $adjIngIds[(int)$a['ingredient_id']] = true;
+    }
+    $adjIngIds = array_keys($adjIngIds);
+    sort($adjIngIds);
+    if ($lock && array_diff($adjIngIds, $preIng)) {
+        $out['blocked'][] = 'A stock count was approved while this was being checked. Try again.';
+    }
+
+    // 3) The surplus batches each approval created: notes "Stock count surplus <ref>" exactly, or followed by a space
+    //    (" batch <label>", " (settled ...)"). The reference is escaped, so REF-1 never matches REF-10.
+    $batchCount = [];
+    foreach ($counts as $c) {
+        $ref = (string)$c['reference'];
+        if (trim($ref) === '') {
+            continue;
+        }
+        $like = 'Stock count surplus ' . str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $ref) . ' %';
+        foreach ($all("SELECT * FROM stock_batches WHERE notes = ? OR notes LIKE ? ESCAPE '!' ORDER BY id" . $fu, ['Stock count surplus ' . $ref, $like]) as $b) {
+            $bid = (int)$b['id'];
+            if (!rh_sc_cw_note_matches((string)$b['notes'], $ref)) {
+                continue; // collation-insensitive match that is not an exact one: not this count's batch
+            }
+            if (isset($batchCount[$bid])) {
+                $block('A stock batch (#' . $bid . ') matches two counts, so it cannot be told which count added it.');
+                continue;
+            }
+            $batchCount[$bid] = (int)$c['id'];
+            $out['batches'][] = $b;
+        }
+    }
+    $out['batch_count'] = $batchCount;
+    $batchIds = array_keys($batchCount);
+
+    // Names for messages (plain read).
+    $nameIds = $adjIngIds;
+    foreach ($out['lines'] as $l) {
+        $nameIds[] = (int)$l['ingredient_id'];
+    }
+    foreach ($out['batches'] as $b) {
+        $nameIds[] = (int)$b['ingredient_id'];
+    }
+    $nameIds = array_values(array_unique($nameIds));
+    $names = [];
+    if ($nameIds) {
+        foreach ($all("SELECT id, name FROM stock_ingredients WHERE id IN (" . rh_sc_cw_ph($nameIds) . ")", $nameIds) as $r) {
+            $names[(int)$r['id']] = (string)$r['name'];
+        }
+    }
+    $nm = static fn(int $id): string => isset($names[$id]) && $names[$id] !== '' ? '"' . $names[$id] . '"' : 'stock item #' . $id;
+
+    // 4) Per count: lines' adjustment ids == its variance adjustments; (b) no shortage; batches == what the approval added.
+    foreach ($counts as $c) {
+        $cid = (int)$c['id'];
+        $ref = rh_sc_cw_ref((string)$c['reference']);
+        $lineAdj = [];
+        foreach ($linesByCount[$cid] ?? [] as $l) {
+            if ((int)($l['adjustment_id'] ?? 0) > 0) {
+                $lineAdj[] = (int)$l['adjustment_id'];
+            }
+        }
+        $cAdjIds = array_map(static fn($a) => (int)$a['id'], $adjByCount[$cid] ?? []);
+        sort($lineAdj);
+        sort($cAdjIds);
+        if ($lineAdj !== $cAdjIds) {
+            $block('Count ' . $ref . ': the stock changes recorded by its approval do not match its lines, so they cannot be reversed exactly.');
+        }
+        $short = [];
+        $posByIng = [];
+        foreach ($adjByCount[$cid] ?? [] as $a) {
+            $q = (float)$a['quantity_change'];
+            if ($q < -RH_SC_CW_TOL) {
+                $short[] = $nm((int)$a['ingredient_id']) . ' (' . rh_sc_cw_qty(-$q) . ' short)';
+            } elseif ($q > RH_SC_CW_TOL) {
+                $posByIng[(int)$a['ingredient_id']] = ($posByIng[(int)$a['ingredient_id']] ?? 0.0) + $q;
+            }
+        }
+        if ($short) {
+            $block('Count ' . $ref . ' took stock off for ' . count($short) . ' item' . (count($short) === 1 ? '' : 's') . ' (' . implode(', ', array_slice($short, 0, 5))
+                . (count($short) > 5 ? ' and ' . (count($short) - 5) . ' more' : '') . '). A shortage is taken from the delivery batches, so it cannot be put back exactly.');
+        }
+        $recvByIng = [];
+        foreach ($out['batches'] as $b) {
+            if ($batchCount[(int)$b['id']] === $cid) {
+                $recvByIng[(int)$b['ingredient_id']] = ($recvByIng[(int)$b['ingredient_id']] ?? 0.0) + (float)$b['quantity_received'];
+            }
+        }
+        foreach (array_unique(array_merge(array_keys($posByIng), array_keys($recvByIng))) as $iid) {
+            $added = $posByIng[$iid] ?? 0.0;
+            $inBatches = $recvByIng[$iid] ?? 0.0;
+            if (abs($added - $inBatches) > RH_SC_CW_TOL) {
+                $block('Count ' . $ref . ': for ' . $nm((int)$iid) . ' its approval added ' . rh_sc_cw_qty($added) . ' but the stock batches it created hold '
+                    . rh_sc_cw_qty($inBatches) . ', so they cannot be matched exactly.');
+            }
+        }
+    }
+
+    // 5) (a) Every count batch untouched: nothing taken, no deduction recorded against it, still active.
+    $deductByBatch = [];
+    if ($batchIds && rh_sc_table_exists($pdo, 'stock_batch_deductions')) {
+        foreach ($all("SELECT id, batch_id FROM stock_batch_deductions WHERE batch_id IN (" . rh_sc_cw_ph($batchIds) . ") ORDER BY id" . $fu, $batchIds) as $d) {
+            $deductByBatch[(int)$d['batch_id']] = ($deductByBatch[(int)$d['batch_id']] ?? 0) + 1;
+        }
+    }
+    foreach ($out['batches'] as $b) {
+        $bid = (int)$b['id'];
+        $ref = rh_sc_cw_ref((string)$countById[$batchCount[$bid]]['reference']);
+        $rec = (float)$b['quantity_received'];
+        $rem = (float)$b['quantity_remaining'];
+        if (abs($rec - $rem) > RH_SC_CW_TOL) {
+            $block('Count ' . $ref . ': the batch it added for ' . $nm((int)$b['ingredient_id']) . ' has been partly used (' . rh_sc_cw_qty($rem) . ' of ' . rh_sc_cw_qty($rec) . ' left).');
+        } elseif (!empty($deductByBatch[$bid])) {
+            $block('Count ' . $ref . ': stock from the batch it added for ' . $nm((int)$b['ingredient_id']) . ' has been used by sales or other stock movements.');
+        } elseif ((string)$b['status'] !== 'active') {
+            $block('Count ' . $ref . ': the batch it added for ' . $nm((int)$b['ingredient_id']) . ' is marked ' . (string)$b['status'] . ', so the stock has moved since.');
+        }
+    }
+
+    // 6) Opening batches of these counts: an applied one must point at a batch that same count added.
+    if (rh_sc_table_exists($pdo, 'stock_opening_batches')) {
+        $out['opening'] = $all("SELECT * FROM stock_opening_batches WHERE count_id IN (" . rh_sc_cw_ph($countIds) . ") ORDER BY id" . $fu, $countIds);
+        foreach ($out['opening'] as $ob) {
+            $ap = (int)($ob['applied_batch_id'] ?? 0);
+            if ($ap > 0 && ($batchCount[$ap] ?? 0) !== (int)$ob['count_id']) {
+                $block('Count ' . rh_sc_cw_ref((string)($countById[(int)$ob['count_id']]['reference'] ?? '')) . ': an opening batch for ' . $nm((int)$ob['ingredient_id'])
+                    . ' points to a stock batch that cannot be matched to the count.');
+            }
+        }
+    }
+
+    // 7) (c) Each item: on hand minus what the counts added must equal its OTHER active batches, and not go below 0.
+    $other = [];
+    if ($adjIngIds) {
+        $out['ings'] = $all("SELECT id, name, unit, current_quantity, cost_per_unit, updated_at FROM stock_ingredients WHERE id IN (" . rh_sc_cw_ph($adjIngIds) . ") ORDER BY id" . $fu, $adjIngIds);
+        $adjIdList = array_map(static fn($a) => (int)$a['id'], $adjs);
+        foreach ($all("SELECT ingredient_id, SUM(quantity_change) AS s FROM stock_adjustments WHERE id IN (" . rh_sc_cw_ph($adjIdList) . ") GROUP BY ingredient_id", $adjIdList) as $r) {
+            $out['adj_sum_exact'][(int)$r['ingredient_id']] = (string)$r['s'];
+        }
+        $excl = $batchIds ? ' AND id NOT IN (' . rh_sc_cw_ph($batchIds) . ')' : '';
+        foreach ($all("SELECT ingredient_id, COALESCE(SUM(quantity_remaining), 0) AS s FROM stock_batches WHERE ingredient_id IN (" . rh_sc_cw_ph($adjIngIds) . ") AND status = 'active'" . $excl . " GROUP BY ingredient_id" . $fu,
+            array_merge($adjIngIds, $batchIds)) as $r) {
+            $other[(int)$r['ingredient_id']] = (float)$r['s'];
+        }
+        $found = array_map(static fn($i) => (int)$i['id'], $out['ings']);
+        foreach (array_diff($adjIngIds, $found) as $missing) {
+            $block('Stock item #' . (int)$missing . ', which a count changed, no longer exists.');
+        }
+        // Items whose count surplus carried a cost: approval averaged that cost into the item's unit cost, and the cost before
+        // approval is not stored, so an item that keeps stock afterwards would be valued wrong (no restore formula is guessed).
+        $costed = [];
+        foreach ($adjs as $a) {
+            if ((float)$a['quantity_change'] > RH_SC_CW_TOL && (float)$a['cost_at_time'] > 0) {
+                $costed[(int)$a['ingredient_id']] = true;
+            }
+        }
+        foreach ($out['ings'] as $i) {
+            $iid = (int)$i['id'];
+            $cur = (float)$i['current_quantity'];
+            $sub = (float)($out['adj_sum_exact'][$iid] ?? 0);
+            $after = $cur - $sub;
+            $oth = $other[$iid] ?? 0.0;
+            if ($after > RH_SC_CW_TOL && !empty($costed[$iid])) {
+                $block($nm($iid) . ' would keep ' . rh_sc_cw_qty($after) . ' in stock, but its unit cost was averaged with the count, so what is left would be valued wrong.');
+            }
+            if ($after < -RH_SC_CW_TOL) {
+                $block($nm($iid) . ': on hand is ' . rh_sc_cw_qty($cur) . ' but the counts added ' . rh_sc_cw_qty($sub) . ', so taking that off would go below 0.');
+            } elseif (abs($after - $oth) > RH_SC_CW_TOL) {
+                $block($nm($iid) . ': on hand is ' . rh_sc_cw_qty($cur) . ' and the counts added ' . rh_sc_cw_qty($sub) . ', but its other batches hold ' . rh_sc_cw_qty($oth)
+                    . ', so the stock has moved since.');
+            }
+        }
+    }
+
+    // 8) Residue: open count-approval alerts, saved stock review panels; the Import history entries that made these counts.
+    if (rh_sc_table_exists($pdo, 'ai_alerts')) {
+        $out['alert_ids'] = array_map('intval', array_column($all("SELECT id FROM ai_alerts WHERE resolved_at IS NULL AND dismissed_at IS NULL AND alert_key LIKE ? ORDER BY id" . $fu, ['count_approval:%']), 'id'));
+    }
+    if (rh_sc_table_exists($pdo, 'ai_review_cache')) {
+        $out['review_rows'] = $all("SELECT * FROM ai_review_cache WHERE area = ? ORDER BY id" . $fu, ['stock']);
+    }
+    $out['import_jobs'] = rh_sc_cw_import_jobs($pdo, $countIds);
+
+    $out['view'] = rh_sc_cw_view($out, $linesByCount, $adjByCount, $other);
+    return $out;
+}
+
+/** The first record of each named @-type in a snapshot file (used to verify the alert ids and Import history lines). */
+function rh_sc_cw_snapshot_records(string $file, array $types): array
+{
+    $want = array_flip($types);
+    $out = [];
+    $gz = @gzopen($file, 'rb');
+    if (!$gz) {
+        throw new RuntimeException('The snapshot file could not be opened');
+    }
+    while (!gzeof($gz)) {
+        $line = gzgets($gz);
+        if ($line === false || trim($line) === '') {
+            continue;
+        }
+        $o = json_decode($line, true);
+        $t = is_array($o) ? (string)($o['t'] ?? '') : '';
+        if (isset($want[$t]) && !isset($out[$t])) {
+            $out[$t] = $o;
+        }
+    }
+    gzclose($gz);
+    return $out;
+}
+
+/** Import history entries (import_jobs) whose result names one of these counts as its opening count. Read-only. */
+function rh_sc_cw_import_jobs(PDO $pdo, array $countIds): array
+{
+    if (!$countIds || !rh_sc_table_exists($pdo, 'import_jobs')) {
+        return [];
+    }
+    $want = array_flip(array_map('intval', $countIds));
+    $st = $pdo->prepare("SELECT id, original_name, status, result_json FROM import_jobs WHERE result_json IS NOT NULL AND result_json LIKE ? ORDER BY id");
+    $st->execute(['%opening_count_id%']);
+    $out = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $j = json_decode((string)$r['result_json'], true);
+        $cid = is_array($j) ? (int)($j['opening_count_id'] ?? 0) : 0;
+        if ($cid > 0 && isset($want[$cid])) {
+            $out[] = ['id' => (int)$r['id'], 'name' => (string)$r['original_name'], 'status' => (string)$r['status'], 'count_id' => $cid];
+        }
+    }
+    return $out;
+}
+
+/** The preview shape built from gathered rows. */
+function rh_sc_cw_view(array $g, array $linesByCount, array $adjByCount, array $other): array
+{
+    $batchesByCount = [];
+    foreach ((array)($g['batch_count'] ?? []) as $cid) {
+        $batchesByCount[$cid] = ($batchesByCount[$cid] ?? 0) + 1;
+    }
+    $openingByCount = [];
+    foreach ($g['opening'] as $ob) {
+        $openingByCount[(int)$ob['count_id']] = ($openingByCount[(int)$ob['count_id']] ?? 0) + 1;
+    }
+    $rows = [];
+    $value = 0.0;
+    foreach ($g['counts'] as $c) {
+        $cid = (int)$c['id'];
+        $v = 0.0;
+        foreach ($adjByCount[$cid] ?? [] as $a) {
+            $v += (float)$a['quantity_change'] * (float)$a['cost_at_time'];
+        }
+        $value += $v;
+        $rows[] = [
+            'id' => $cid, 'reference' => rh_sc_cw_ref((string)$c['reference']), 'count_date' => (string)$c['count_date'], 'status' => (string)$c['status'],
+            'is_opening' => !empty($c['is_opening']), 'lines' => count($linesByCount[$cid] ?? []), 'adjustments' => count($adjByCount[$cid] ?? []),
+            'batches' => (int)($batchesByCount[$cid] ?? 0), 'opening_batches' => (int)($openingByCount[$cid] ?? 0), 'value' => round($v, 2),
+        ];
+    }
+    $items = [];
+    $toZero = 0;
+    $drop = 0.0;
+    foreach ($g['ings'] as $i) {
+        $iid = (int)$i['id'];
+        $cur = (float)$i['current_quantity'];
+        $sub = (float)($g['adj_sum_exact'][$iid] ?? 0);
+        $after = $cur - $sub;
+        $zero = abs($after) <= RH_SC_CW_TOL;
+        if ($zero) {
+            $toZero++;
+            $after = 0.0;
+        }
+        // Stock value = quantity x the item's unit cost (rh_stock_valuation), so the real drop is before minus after at that cost.
+        $cpu = (float)$i['cost_per_unit'];
+        $itemDrop = $cur * $cpu - $after * $cpu;
+        $drop += $itemDrop;
+        $items[] = ['id' => $iid, 'name' => (string)$i['name'], 'unit' => (string)($i['unit'] ?? ''), 'on_hand' => $cur, 'remove' => $sub,
+            'after' => $after, 'other_batches' => (float)($other[$iid] ?? 0), 'to_zero' => $zero, 'value_drop' => round($itemDrop, 2)];
+    }
+    return [
+        'counts' => $rows,
+        'items'  => $items,
+        'totals' => [
+            'counts' => count($g['counts']), 'lines' => count($g['lines']), 'batches' => count($g['batches']), 'adjustments' => count($g['adjs']),
+            'opening_batches' => count($g['opening']), 'items' => count($items), 'items_to_zero' => $toZero,
+            'value' => round($drop, 2), 'value_added' => round($value, 2),
+            'alerts' => count($g['alert_ids']), 'review_cache' => count($g['review_rows']), 'import_jobs' => count($g['import_jobs']),
+        ],
+    ];
+}
+
+/**
+ * What a stock count wipe would remove, without changing anything.
+ * @return array{counts:array,items:array,totals:array,import_jobs:array,blocked:string[]}
+ */
+function rh_sc_count_wipe_preview(PDO $pdo): array
+{
+    $g = rh_sc_cw_gather($pdo, false);
+    return $g['view'] + ['import_jobs' => $g['import_jobs'], 'blocked' => $g['blocked']];
+}
+
+/**
+ * Wipe every stock count and the stock its approval added. Same safety pattern as rh_sc_run_clear: full backup before the
+ * transaction, one transaction, locking reads, verified snapshot, delete by id with counts checked, post-check, commit.
+ * Every block rule is checked again inside the transaction under lock.
+ *
+ * @param array $opts external_tx (bool), full_backup (callable|false: tests only, with external_tx),
+ *                    delete_import_history (bool): after the commit, remove the Import history entries that created the counts
+ * @return array{ok:bool,error:string,blocked:string[],id:string,counts:array,sentence:string,snapshot:string,full_backup:string,totals:array,import:array}
+ */
+function rh_sc_run_count_wipe(PDO $pdo, string $root, array $actor, array $opts = []): array
+{
+    $fail = static function (string $why, array $blocked = []): array {
+        return ['ok' => false, 'error' => $why . ' Nothing was changed.', 'blocked' => $blocked, 'id' => '', 'counts' => [], 'sentence' => '',
+            'snapshot' => '', 'full_backup' => '', 'totals' => [], 'import' => []];
+    };
+    $external = !empty($opts['external_tx']);
+    if ($external !== $pdo->inTransaction()) {
+        return $fail($external ? 'No transaction is open.' : 'Another change is in progress on this connection.');
+    }
+    // Fast refusal before the (slow) full backup; the same rules run again under lock below.
+    $pre = rh_sc_cw_gather($pdo, false);
+    if ($pre['blocked']) {
+        return $fail('The stock counts cannot be wiped exactly.', $pre['blocked']);
+    }
+    if (!$pre['counts']) {
+        return $fail('There are no stock counts to remove.');
+    }
+
+    // 1) Folder + full database backup, before any transaction opens.
+    try {
+        rh_sc_dir($root);
+    } catch (Throwable $e) {
+        return $fail($e->getMessage());
+    }
+    $fb = array_key_exists('full_backup', $opts) ? $opts['full_backup'] : 'real';
+    if ($fb === false) {
+        if (!$external) {
+            return $fail('The safety backup cannot be skipped.');
+        }
+        $fullBackupName = '(skipped in test)';
+    } else {
+        if ($external) {
+            return $fail('A safety backup cannot be taken inside a transaction.');
+        }
+        $b = is_callable($fb) ? $fb($pdo, $root) : rh_sc_full_backup($pdo, $root);
+        if (empty($b['ok'])) {
+            return $fail('The safety backup of the whole database could not be saved (' . trim((string)($b['error'] ?? 'unknown reason')) . ').');
+        }
+        $fullBackupName = basename((string)$b['path']);
+    }
+
+    // No count may be approved while this runs: the same named lock approval takes (GET_LOCK never commits anything).
+    $lockName = substr('rh_stock_count_approve_' . (defined('DB_NAME') ? DB_NAME : 'db'), 0, 64);
+    if ((int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote($lockName) . ', 30)')->fetchColumn() !== 1) {
+        return $fail('A stock count is being approved at this moment. Wait a few seconds and try again (the full backup ' . $fullBackupName . ' was still saved).');
+    }
+    $release = static function () use ($pdo, $lockName): void {
+        try { $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote($lockName) . ')'); } catch (Throwable $e) { /* released when the connection closes */ }
+    };
+
+    $id = rh_sc_new_id($root);
+    $p = rh_sc_paths($root, $id);
+    $started = false;
+    $manifestWritten = false;
+    $g = ['blocked' => []];
+    $tables = [];
+    $residue = ['alerts_resolved' => 0, 'review_cache_rows' => 0];
+    $rowIds = static fn(array $rows): array => array_map(static fn($r) => (int)$r['id'], $rows);
+    try {
+        if (!$external) {
+            $pdo->beginTransaction();
+            $started = true;
+        }
+        // 2) Locking read + every block rule again.
+        $g = rh_sc_cw_gather($pdo, true);
+        if ($g['blocked']) {
+            throw new RuntimeException('BLOCKED');
+        }
+        if (!$g['counts']) {
+            throw new RuntimeException('There are no stock counts to remove');
+        }
+        $hasOpening = rh_sc_table_exists($pdo, 'stock_opening_batches');
+        $tables = [
+            'stock_counts'          => count($g['counts']),
+            'stock_count_lines'     => count($g['lines']),
+            'stock_opening_batches' => count($g['opening']),
+            'stock_adjustments'     => count($g['adjs']),
+            'stock_batches'         => count($g['batches']),
+        ];
+
+        // 3) Snapshot: every row removed, each item's row before, the alerts closed and the review panels removed.
+        $gz = @gzopen($p['tmp'], 'wb6');
+        if (!$gz) {
+            throw new RuntimeException('The snapshot file could not be created');
+        }
+        rh_sc_write_line($gz, ['t' => '@header', 'id' => $id, 'area' => 'stock', 'kind' => 'count_wipe', 'at' => date('Y-m-d H:i:s')]);
+        $map = ['stock_counts' => 'counts', 'stock_count_lines' => 'lines', 'stock_opening_batches' => 'opening', 'stock_adjustments' => 'adjs', 'stock_batches' => 'batches'];
+        foreach ($map as $t => $k) {
+            foreach ($g[$k] as $row) {
+                rh_sc_write_line($gz, ['t' => $t, 'r' => $row]);
+            }
+        }
+        foreach ($g['ings'] as $row) {
+            rh_sc_write_line($gz, ['t' => '@ingredient_before', 'r' => $row, 'subtract' => (string)($g['adj_sum_exact'][(int)$row['id']] ?? '0')]);
+        }
+        rh_sc_write_line($gz, ['t' => '@alert_ids', 'ids' => $g['alert_ids']]);
+        foreach ($g['review_rows'] as $row) {
+            rh_sc_write_line($gz, ['t' => '@ai_review_cache', 'r' => $row]);
+        }
+        rh_sc_write_line($gz, ['t' => '@import_jobs', 'jobs' => $g['import_jobs']]);
+        gzclose($gz);
+        $fileCounts = rh_sc_snapshot_counts($p['tmp']);
+        foreach ($tables as $t => $n) {
+            if ((int)($fileCounts[$t] ?? 0) !== $n) {
+                throw new RuntimeException('The snapshot did not match the data (' . $t . ')');
+            }
+        }
+        if ((int)($fileCounts['@ingredient_before'] ?? 0) !== count($g['ings']) || (int)($fileCounts['@ai_review_cache'] ?? 0) !== count($g['review_rows'])) {
+            throw new RuntimeException('The snapshot did not match the data (stock items)');
+        }
+        if ((int)($fileCounts['@alert_ids'] ?? 0) !== 1 || (int)($fileCounts['@import_jobs'] ?? 0) !== 1) {
+            throw new RuntimeException('The snapshot did not match the data (alerts and Import history)');
+        }
+        $rec = rh_sc_cw_snapshot_records($p['tmp'], ['@alert_ids', '@import_jobs']);
+        if (array_map('intval', (array)($rec['@alert_ids']['ids'] ?? [])) !== $g['alert_ids']
+            || array_map(static fn($j) => (int)($j['id'] ?? 0), (array)($rec['@import_jobs']['jobs'] ?? [])) !== array_map(static fn($j) => (int)$j['id'], $g['import_jobs'])) {
+            throw new RuntimeException('The snapshot did not match the data (alerts and Import history)');
+        }
+        if (!@rename($p['tmp'], $p['snapshot'])) {
+            throw new RuntimeException('The snapshot file could not be saved');
+        }
+        $totals = $g['view']['totals'];
+        $manifest = [
+            'id'             => $id,
+            'area'           => 'stock',
+            'kind'           => 'count_wipe',
+            'undo'           => false,
+            'created_at'     => date('Y-m-d H:i:s'),
+            'by_user_id'     => (int)($actor['id'] ?? 0),
+            'by_username'    => (string)($actor['username'] ?? ''),
+            'by_name'        => (string)($actor['full_name'] ?? ''),
+            'groups'         => ['count_wipe'],
+            'forced'         => [],
+            'tables'         => $tables,
+            'count_refs'     => array_map(static fn($c) => (string)$c['reference'], $g['counts']),
+            'items'          => (int)$totals['items'],
+            'items_to_zero'  => (int)$totals['items_to_zero'],
+            'value'          => (float)$totals['value'],
+            'residue'        => ['alert_ids' => $g['alert_ids'], 'review_cache_rows' => count($g['review_rows'])],
+            'fk_nulls'       => [],
+            'import_jobs'    => array_map(static fn($j) => (int)$j['id'], $g['import_jobs']),
+            'snapshot_file'  => basename($p['snapshot']),
+            'snapshot_bytes' => (int)@filesize($p['snapshot']),
+            'full_backup'    => $fullBackupName,
+            'undone_at'      => null,
+            'undone_by'      => null,
+        ];
+        if (@file_put_contents($p['manifest'], json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)) === false) {
+            throw new RuntimeException('The snapshot description could not be saved');
+        }
+        $manifestWritten = true;
+
+        // 4) Delete by id, children first, every count verified.
+        $del = static function (string $t, array $list) use ($pdo): void {
+            $n = 0;
+            foreach (array_chunk($list, 500) as $chunk) {
+                $s = $pdo->prepare("DELETE FROM `$t` WHERE id IN (" . rh_sc_cw_ph($chunk) . ")");
+                $s->execute($chunk);
+                $n += $s->rowCount();
+            }
+            if ($n !== count($list)) {
+                throw new RuntimeException($t . ': removed ' . $n . ', expected ' . count($list));
+            }
+        };
+        $del('stock_count_lines', $rowIds($g['lines']));
+        if ($hasOpening) {
+            $del('stock_opening_batches', $rowIds($g['opening']));
+        }
+        $del('stock_counts', $rowIds($g['counts']));
+        $del('stock_adjustments', $rowIds($g['adjs']));
+        $del('stock_batches', $rowIds($g['batches']));
+
+        // 5) Each item's on-hand back by exactly what the counts added (exact DECIMAL sum from SQL, subtracted in SQL).
+        $upd = $pdo->prepare("UPDATE stock_ingredients SET current_quantity = current_quantity - CAST(? AS DECIMAL(20,6)), updated_at = NOW() WHERE id = ?");
+        foreach ($g['ings'] as $i) {
+            $sub = (string)($g['adj_sum_exact'][(int)$i['id']] ?? '0');
+            if (!preg_match('/^-?\d+(\.\d+)?$/', $sub)) {
+                throw new RuntimeException('Unexpected quantity for stock item #' . (int)$i['id']);
+            }
+            $upd->execute([$sub, (int)$i['id']]);
+        }
+
+        // 6) Residue: open count-approval alerts closed, saved stock review panels removed.
+        foreach (array_chunk($g['alert_ids'], 500) as $chunk) {
+            $s = $pdo->prepare("UPDATE ai_alerts SET resolved_at = NOW() WHERE resolved_at IS NULL AND dismissed_at IS NULL AND id IN (" . rh_sc_cw_ph($chunk) . ")");
+            $s->execute($chunk);
+            $residue['alerts_resolved'] += $s->rowCount();
+        }
+        foreach (array_chunk($rowIds($g['review_rows']), 500) as $chunk) {
+            $s = $pdo->prepare("DELETE FROM ai_review_cache WHERE area = ? AND id IN (" . rh_sc_cw_ph($chunk) . ")");
+            $s->execute(array_merge(['stock'], $chunk));
+            $residue['review_cache_rows'] += $s->rowCount();
+        }
+
+        // 7) Post-check: none of those rows left, no lines on the removed counts, each item exactly before minus added, never below 0.
+        $checks = ['stock_counts' => $rowIds($g['counts']), 'stock_count_lines' => $rowIds($g['lines']), 'stock_adjustments' => $rowIds($g['adjs']), 'stock_batches' => $rowIds($g['batches'])];
+        if ($hasOpening) {
+            $checks['stock_opening_batches'] = $rowIds($g['opening']);
+        }
+        foreach ($checks as $t => $list) {
+            foreach (array_chunk($list, 500) as $chunk) {
+                $s = $pdo->prepare("SELECT COUNT(*) FROM `$t` WHERE id IN (" . rh_sc_cw_ph($chunk) . ")");
+                $s->execute($chunk);
+                if ((int)$s->fetchColumn() !== 0) {
+                    throw new RuntimeException('Post-check: rows are left in ' . $t);
+                }
+            }
+        }
+        $cids = $rowIds($g['counts']);
+        $s = $pdo->prepare("SELECT COUNT(*) FROM stock_count_lines WHERE count_id IN (" . rh_sc_cw_ph($cids) . ")");
+        $s->execute($cids);
+        if ((int)$s->fetchColumn() !== 0) {
+            throw new RuntimeException('Post-check: count lines were added while the wipe was running');
+        }
+        $chk = $pdo->prepare("SELECT current_quantity FROM stock_ingredients WHERE id = ?");
+        foreach ($g['ings'] as $i) {
+            $chk->execute([(int)$i['id']]);
+            $now = (float)$chk->fetchColumn();
+            $want = (float)$i['current_quantity'] - (float)($g['adj_sum_exact'][(int)$i['id']] ?? 0);
+            if (abs($now - $want) > 0.000001 || $now < -RH_SC_CW_TOL) {
+                throw new RuntimeException('Post-check: the quantity of stock item #' . (int)$i['id'] . ' is not what was expected');
+            }
+        }
+        if ($started) {
+            $pdo->commit();
+            $started = false;
+        }
+    } catch (Throwable $e) {
+        if ($started && $pdo->inTransaction()) {
+            try { $pdo->rollBack(); } catch (Throwable $e2) { /* connection gone: nothing was committed */ }
+        }
+        if (isset($gz) && is_resource($gz)) {
+            @gzclose($gz);
+        }
+        foreach ([$p['tmp'], $p['snapshot'], $manifestWritten || is_file($p['manifest']) ? $p['manifest'] : ''] as $f) {
+            if ($f !== '' && is_file($f)) {
+                @unlink($f);
+            }
+        }
+        $release();
+        if ($e->getMessage() === 'BLOCKED') {
+            return $fail('The stock counts cannot be wiped exactly.', (array)($g['blocked'] ?? []));
+        }
+        error_log('Stock count wipe failed: ' . $e->getMessage());
+        return $fail('The wipe did not complete (' . rtrim($e->getMessage(), '.') . ').');
+    }
+    $release();
+
+    // 8) After the commit: activity log, cached numbers, then (when ticked) the Import history entries.
+    $totals = $g['view']['totals'];
+    $sentence = rh_sc_sentence('stock', $tables);
+    if (function_exists('logActivity')) {
+        logActivity((int)($actor['id'] ?? 0), 'stock_count_wipe',
+            'Wiped stock counts: ' . $sentence . '. ' . (int)$totals['items'] . ' stock item(s) reduced by what the counts added ('
+            . (int)$totals['items_to_zero'] . ' to 0); stock value removed ' . number_format((float)$totals['value'], 2)
+            . '. Counts: ' . implode(', ', array_map(static fn($c) => rh_sc_cw_ref((string)$c['reference']), $g['counts']))
+            . '. Snapshot ' . basename($p['snapshot']) . '; full backup ' . $fullBackupName . '; ' . $residue['alerts_resolved'] . ' alert(s) closed. No Undo.');
+    }
+    if (function_exists('rh_clear_stock_dashboard_cache')) {
+        rh_clear_stock_dashboard_cache();
+    }
+    $import = [];
+    if (!empty($opts['delete_import_history']) && $g['import_jobs']) {
+        $file = dirname(__DIR__, 2) . '/includes/import/delete.php';
+        foreach ($g['import_jobs'] as $j) {
+            $row = ['job_id' => (int)$j['id'], 'name' => (string)$j['name'], 'ok' => false, 'error' => '', 'snapshot' => ''];
+            try {
+                if ($pdo->inTransaction()) {
+                    // Under external_tx the caller still owns an open transaction: the Import delete runs its own, so it is not called.
+                    $row['error'] = 'Not removed: another change is still open on this connection.';
+                } else {
+                    if (!function_exists('import_job_delete') && file_exists($file)) {
+                        require_once $file;
+                    }
+                    if (!function_exists('import_job_delete')) {
+                        $row['error'] = 'Not removed: removing Import history is not available on this system yet.';
+                    } else {
+                        $r = import_job_delete($pdo, $root, (int)$j['id'], $actor, ['log_note' => 'Removed as part of the stock count wipe; the counts and the stock they added were wiped too.']);
+                        $row['ok'] = !empty($r['ok']);
+                        $row['error'] = (string)($r['error'] ?? '');
+                        $row['snapshot'] = (string)($r['snapshot'] ?? '');
+                    }
+                }
+            } catch (Throwable $e) {
+                if (!$external && $pdo->inTransaction()) {
+                    try { $pdo->rollBack(); } catch (Throwable $e2) { /* the wipe itself is already committed */ }
+                }
+                $row['error'] = 'Not removed (' . $e->getMessage() . ').';
+            }
+            $import[] = $row;
+        }
+    }
+    return [
+        'ok' => true, 'error' => '', 'blocked' => [], 'id' => $id, 'counts' => $tables, 'sentence' => $sentence,
+        'snapshot' => basename($p['snapshot']), 'full_backup' => $fullBackupName, 'totals' => $totals + $residue, 'import' => $import,
+    ];
 }

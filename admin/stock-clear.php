@@ -37,11 +37,14 @@ $allKeys = array_keys($A['groups']);
 
 $message = '';
 $error   = '';
-$view    = 'form';      // form | confirm | result | undone
+$view    = 'form';      // form | confirm | result | undone | cw_preview | cw_confirm | cw_result
 $preview = null;
 $result  = null;
 $undone  = null;
 $picked  = [];
+$cwPreview = null;      // stock count wipe: preview (read-only)
+$cwResult  = null;      // stock count wipe: result
+$cwImport  = false;     // stock count wipe: also remove the Import history entries
 
 /** Too many wrong passwords in a row from this session: stop for ten minutes. */
 function sc_locked_out(): bool
@@ -131,10 +134,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
             }
         }
+    } elseif ($action === 'cw_preview' || $action === 'cw_confirm') {
+        // Stock count wipe, steps 1 and 2 (read-only). A blocked preview never reaches the confirm screen.
+        $cwPreview = rh_sc_count_wipe_preview($pdo);
+        $view = ($action === 'cw_confirm' && !$cwPreview['blocked'] && (int)$cwPreview['totals']['counts'] > 0) ? 'cw_confirm' : 'cw_preview';
+    } elseif ($action === 'cw_wipe') {
+        $cwImport = !empty($_POST['cw_import']);
+        if (sc_locked_out()) {
+            $error = 'Too many wrong attempts. Nothing was changed. Wait ten minutes and try again.';
+            $cwPreview = rh_sc_count_wipe_preview($pdo);
+            $view = 'cw_preview';
+        } elseif (empty($_POST['cw_understand'])) {
+            $error = 'Nothing was changed. Tick "I understand" to show you have read what this does.';
+            $cwPreview = rh_sc_count_wipe_preview($pdo);
+            $view = $cwPreview['blocked'] ? 'cw_preview' : 'cw_confirm';
+        } else {
+            [$okC, $whyC] = rh_sc_check_confirm($pdo, $user['id'], 'WIPE', (string)($_POST['confirm_word'] ?? ''), (string)($_POST['confirm_password'] ?? ''));
+            if (!$okC) {
+                sc_note_failure();
+                $error = $whyC;
+                $cwPreview = rh_sc_count_wipe_preview($pdo);
+                $view = $cwPreview['blocked'] ? 'cw_preview' : 'cw_confirm';
+            } else {
+                $_SESSION['sc_fail'] = ['n' => 0, 't' => 0];
+                @set_time_limit(900);
+                @ignore_user_abort(true);
+                $r = rh_sc_run_count_wipe($pdo, $ROOT, $user, ['delete_import_history' => $cwImport]);
+                if ($r['ok']) {
+                    $cwResult = $r;
+                    $view = 'cw_result';
+                } else {
+                    $error = $r['error'];
+                    $cwPreview = rh_sc_count_wipe_preview($pdo);
+                    $view = $cwPreview['blocked'] ? 'cw_preview' : 'cw_confirm';
+                }
+            }
+        }
     } else {
         $error = 'That action is not recognised. Nothing was changed.';
     }
 }
+if ($view === 'form' && $cwPreview === null) {
+    $cwPreview = rh_sc_count_wipe_preview($pdo); // read-only summary for the section on the first screen
+}
+$currency = (string)getSetting('currency_symbol');
+$cwStatus = ['draft' => 'Being counted', 'submitted' => 'Waiting for approval', 'approved' => 'Approved', 'rejected' => 'Rejected'];
 
 // What each group would remove right now (read-only), for the first screen.
 $groupCounts = [];
@@ -168,7 +212,7 @@ $e = static fn($v): string => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
     <div class="content" id="sc-page">
         <div class="content-header">
             <h2><i class="fas fa-eraser" style="color:var(--gold)"></i> Clear Stock Data</h2>
-            <p class="sc-lead">Empty stock data at this hotel so it can be set up again (for example before a fresh import). A backup is taken first, and every clear can be undone.</p>
+            <p class="sc-lead">Empty stock data at this hotel so it can be set up again (for example before a fresh import). A backup is taken first, and every clear can be undone. Wiping stock counts (further down) is the one exception: it has no Undo.</p>
         </div>
 
         <?php if ($message): ?>
@@ -294,6 +338,194 @@ $e = static fn($v): string => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
                 <?php endif; ?>
             </div>
 
+        <?php elseif ($view === 'cw_result' && $cwResult): ?>
+            <!-- ================= STOCK COUNT WIPE: RESULT ================= -->
+            <div class="sc-card">
+                <h3><i class="fas fa-check-circle"></i> Stock counts wiped</h3>
+                <p>Removed: <strong><?php echo $e($cwResult['sentence']); ?></strong>.</p>
+                <p class="sc-small"><?php echo (int)$cwResult['totals']['items']; ?> stock item(s) went down by what the counts had added (<?php echo (int)$cwResult['totals']['items_to_zero']; ?> of them to 0). Stock value fell by <?php echo $e($currency); ?> <?php echo number_format((float)$cwResult['totals']['value'], 2); ?>.
+                    <?php if ((int)$cwResult['totals']['alerts_resolved'] > 0): ?><?php echo (int)$cwResult['totals']['alerts_resolved']; ?> open count-approval alert(s) were closed. <?php endif; ?>
+                    Sales, orders, payments and bookings were not touched.</p>
+                <div class="sc-kpis">
+                    <div class="sc-kpi">
+                        <span class="sc-kpi__label">Full database backup taken first</span>
+                        <span class="sc-kpi__value sc-kpi__value--file"><?php echo $e($cwResult['full_backup']); ?></span>
+                        <span class="sc-kpi__help">The only way to bring the counts back: restore this file on the Backups page.</span>
+                    </div>
+                    <div class="sc-kpi">
+                        <span class="sc-kpi__label">Record of what was removed</span>
+                        <span class="sc-kpi__value sc-kpi__value--file"><?php echo $e($cwResult['snapshot']); ?></span>
+                        <span class="sc-kpi__help">Every removed row, kept on the server for reference. It cannot be used as an Undo.</span>
+                    </div>
+                </div>
+                <?php if (!empty($cwResult['import'])): ?>
+                    <p class="sc-small"><strong>Import history entries:</strong></p>
+                    <ul class="sc-list">
+                        <?php foreach ($cwResult['import'] as $ir): ?>
+                            <li><?php echo $e($ir['name'] !== '' ? $ir['name'] : ('Import #' . $ir['job_id'])); ?>:
+                                <?php echo $ir['ok'] ? 'removed' . ($ir['snapshot'] !== '' ? ' (record ' . $e($ir['snapshot']) . ')' : '') . '.' : $e($ir['error'] !== '' ? $ir['error'] : 'not removed.'); ?></li>
+                        <?php endforeach; ?>
+                    </ul>
+                <?php endif; ?>
+                <p><a class="sc-link" href="stock-clear.php">Back to Clear Stock Data</a></p>
+            </div>
+
+        <?php elseif (($view === 'cw_preview' || $view === 'cw_confirm') && $cwPreview): $cwT = $cwPreview['totals']; ?>
+            <!-- ================= STOCK COUNT WIPE: PREVIEW / CONFIRM ================= -->
+            <div class="sc-card sc-card--danger">
+                <h3><i class="fas fa-clipboard-list"></i> Stock counts and the stock they added<?php echo $view === 'cw_confirm' ? ': confirm' : ''; ?></h3>
+                <p class="sc-warning"><strong>This removes every stock count at this hotel, and takes back off stock what their approvals added.</strong> There is no Undo for this.</p>
+
+                <?php if ((int)$cwT['counts'] === 0 && !$cwPreview['blocked']): ?>
+                    <div class="sc-alert sc-alert--info" role="status"><i class="fas fa-info-circle"></i> <div>There are no stock counts at this hotel, so there is nothing to wipe.</div></div>
+                    <p><a class="sc-link" href="stock-clear.php">Back</a></p>
+                <?php else: ?>
+                    <div class="sc-kpis">
+                        <div class="sc-kpi">
+                            <span class="sc-kpi__label">Stock counts</span>
+                            <span class="sc-kpi__value sc-kpi__value--file"><?php echo number_format((int)$cwT['counts']); ?></span>
+                            <span class="sc-kpi__help">Every count, whatever its status, with its <?php echo number_format((int)$cwT['lines']); ?> counted line(s).</span>
+                        </div>
+                        <div class="sc-kpi">
+                            <span class="sc-kpi__label">Stock items that change</span>
+                            <span class="sc-kpi__value sc-kpi__value--file"><?php echo number_format((int)$cwT['items']); ?></span>
+                            <span class="sc-kpi__help">Items whose stock on hand goes down; <?php echo number_format((int)$cwT['items_to_zero']); ?> of them go to 0 because the count was their only stock.</span>
+                        </div>
+                        <div class="sc-kpi">
+                            <span class="sc-kpi__label">Stock value removed</span>
+                            <span class="sc-kpi__value sc-kpi__value--file"><?php echo $e($currency); ?> <?php echo number_format((float)$cwT['value'], 2); ?></span>
+                            <span class="sc-kpi__help">How much the stock valuation drops: each item's stock on hand now minus after, × its unit cost.</span>
+                        </div>
+                        <div class="sc-kpi">
+                            <span class="sc-kpi__label">Batches and stock changes removed</span>
+                            <span class="sc-kpi__value sc-kpi__value--file"><?php echo number_format((int)$cwT['batches']); ?> batch(es), <?php echo number_format((int)$cwT['adjustments']); ?> change(s)</span>
+                            <span class="sc-kpi__help">The batches the approvals created and their stock change records, plus <?php echo number_format((int)$cwT['opening_batches']); ?> opening batch(es).</span>
+                        </div>
+                    </div>
+
+                    <?php if ($cwPreview['blocked']): ?>
+                        <div class="sc-alert sc-alert--bad" role="alert"><i class="fas fa-ban"></i>
+                            <div><strong>This cannot be done exactly, so it is switched off.</strong> Stock has moved since these counts were approved:
+                                <ul>
+                                    <?php foreach (array_slice($cwPreview['blocked'], 0, 30) as $why): ?>
+                                        <li><?php echo $e($why); ?></li>
+                                    <?php endforeach; ?>
+                                    <?php if (count($cwPreview['blocked']) > 30): ?><li>and <?php echo count($cwPreview['blocked']) - 30; ?> more.</li><?php endif; ?>
+                                </ul>
+                            </div>
+                        </div>
+                    <?php endif; ?>
+
+                    <p class="sc-small">The counts that would be removed. Each row says what its approval added.</p>
+                    <div class="sc-tablewrap">
+                        <table class="sc-table">
+                            <thead>
+                                <tr>
+                                    <th>Count<span class="sc-th-help">Reference and date counted</span></th>
+                                    <th>Status<span class="sc-th-help">Where the count is now</span></th>
+                                    <th>Opening<span class="sc-th-help">Yes = the first count when stock was set up</span></th>
+                                    <th class="sc-num">Lines<span class="sc-th-help">Items counted on it</span></th>
+                                    <th class="sc-num">Value added<span class="sc-th-help">What its approval added to stock (<?php echo $e($currency); ?>)</span></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($cwPreview['counts'] as $cr): ?>
+                                    <tr>
+                                        <td><strong><?php echo $e($cr['reference']); ?></strong><br><span class="sc-small"><?php echo $e($cr['count_date']); ?></span></td>
+                                        <td><?php echo $e($cwStatus[$cr['status']] ?? $cr['status']); ?></td>
+                                        <td><?php echo $cr['is_opening'] ? 'Yes' : 'No'; ?></td>
+                                        <td class="sc-num"><?php echo number_format((int)$cr['lines']); ?></td>
+                                        <td class="sc-num"><?php echo number_format((float)$cr['value'], 2); ?></td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <?php if ($cwPreview['items']): ?>
+                        <details class="sc-undo">
+                            <summary class="sc-btn sc-btn--secondary sc-btn--small"><i class="fas fa-list"></i> Show the <?php echo number_format(count($cwPreview['items'])); ?> stock item(s) that change</summary>
+                            <div class="sc-tablewrap">
+                                <table class="sc-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Stock item<span class="sc-th-help">Name and unit</span></th>
+                                            <th class="sc-num">On hand now<span class="sc-th-help">Current stock</span></th>
+                                            <th class="sc-num">Taken off<span class="sc-th-help">What the counts added</span></th>
+                                            <th class="sc-num">On hand after<span class="sc-th-help">Now minus taken off</span></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <?php foreach ($cwPreview['items'] as $it): ?>
+                                            <tr>
+                                                <td><strong><?php echo $e($it['name']); ?></strong><?php if ($it['unit'] !== ''): ?> <span class="sc-small">(<?php echo $e($it['unit']); ?>)</span><?php endif; ?></td>
+                                                <td class="sc-num"><?php echo $e(rh_sc_cw_qty((float)$it['on_hand'])); ?></td>
+                                                <td class="sc-num"><?php echo $e(rh_sc_cw_qty((float)$it['remove'])); ?></td>
+                                                <td class="sc-num"><?php echo $e(rh_sc_cw_qty((float)$it['after'])); ?></td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </details>
+                    <?php endif; ?>
+
+                    <?php if ($cwPreview['blocked']): ?>
+                        <p><a class="sc-link" href="stock-clear.php">Back to Clear Stock Data</a></p>
+                    <?php elseif ($view === 'cw_preview'): ?>
+                        <form method="POST" class="sc-actions">
+                            <input type="hidden" name="_tok" value="<?php echo $e($csrf_token); ?>">
+                            <input type="hidden" name="action" value="cw_confirm">
+                            <button type="submit" class="sc-btn sc-btn--primary"><i class="fas fa-arrow-right"></i> Continue to confirm</button>
+                            <a class="sc-link" href="stock-clear.php">Cancel, change nothing</a>
+                        </form>
+                    <?php else: ?>
+                        <div class="sc-alert sc-alert--bad" role="note"><i class="fas fa-exclamation-triangle"></i>
+                            <div><strong>What this will do:</strong>
+                                <ul>
+                                    <li>Stock on hand goes down for <?php echo number_format((int)$cwT['items']); ?> item(s), by what the counts added (<?php echo number_format((int)$cwT['items_to_zero']); ?> of them to 0, where the count was the only stock). The list above shows each one.</li>
+                                    <li>Stock value falls by <?php echo $e($currency); ?> <?php echo number_format((float)$cwT['value'], 2); ?>, and stock reports and valuations change from now on.</li>
+                                    <li>All count history and approvals disappear from Stock Count.</li>
+                                    <li>There is no Undo on this page. Only the full backup taken first can bring them back, and restoring it also rolls back everything else done since.</li>
+                                    <li>Sales, orders, payments and bookings are not touched.</li>
+                                </ul>
+                            </div>
+                        </div>
+                        <form method="POST" autocomplete="off">
+                            <input type="hidden" name="_tok" value="<?php echo $e($csrf_token); ?>">
+                            <input type="hidden" name="action" value="cw_wipe">
+                            <div class="sc-groups">
+                                <label class="sc-group">
+                                    <input type="checkbox" name="cw_understand" value="1" class="sc-group__box" required>
+                                    <span class="sc-group__body">
+                                        <span class="sc-group__title">I understand</span>
+                                        <span class="sc-group__help">I have read what this does, and I know it can only be reversed by restoring the full backup.</span>
+                                    </span>
+                                </label>
+                                <?php if ((int)$cwT['import_jobs'] > 0): ?>
+                                    <label class="sc-group">
+                                        <input type="checkbox" name="cw_import" value="1" class="sc-group__box" <?php echo $cwImport ? 'checked' : ''; ?>>
+                                        <span class="sc-group__body">
+                                            <span class="sc-group__title">Also remove the Import history entries that created these counts</span>
+                                            <span class="sc-group__help"><?php echo number_format((int)$cwT['import_jobs']); ?> entr<?php echo (int)$cwT['import_jobs'] === 1 ? 'y' : 'ies'; ?> on the Import page. Optional: done after the wipe, and the wipe still counts if one of them cannot be removed.</span>
+                                        </span>
+                                    </label>
+                                <?php endif; ?>
+                            </div>
+                            <p class="sc-small">Before anything is removed, the system saves a full backup of the whole database and a record of exactly these rows. If either cannot be saved, nothing is changed. This can take up to a minute; keep the page open.</p>
+                            <div class="sc-confirm"><div class="sc-confirm__row">
+                                <label>Type <strong>WIPE</strong> to confirm <input type="text" name="confirm_word" class="form-control" autocomplete="off" required></label>
+                                <label>Your own password <input type="password" name="confirm_password" class="form-control" autocomplete="current-password" required></label>
+                            </div></div>
+                            <div class="sc-actions">
+                                <button type="submit" class="sc-btn sc-btn--danger"><i class="fas fa-eraser"></i> Back up and wipe the counts</button>
+                                <a class="sc-link" href="stock-clear.php">Cancel, change nothing</a>
+                            </div>
+                        </form>
+                    <?php endif; ?>
+                <?php endif; ?>
+            </div>
+
         <?php else: ?>
             <!-- ================= CHOOSE ================= -->
             <form method="POST" id="sc-choose" class="sc-card">
@@ -346,6 +578,34 @@ $e = static fn($v): string => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
                 </ul>
             </div>
 
+            <!-- ================= STOCK COUNT WIPE: SECTION ================= -->
+            <?php $cwT = $cwPreview['totals'] ?? ['counts' => 0, 'items' => 0, 'value' => 0]; ?>
+            <form method="POST" class="sc-card sc-card--danger">
+                <input type="hidden" name="_tok" value="<?php echo $e($csrf_token); ?>">
+                <input type="hidden" name="action" value="cw_preview">
+                <h3><i class="fas fa-clipboard-list"></i> Stock counts and the stock they added</h3>
+                <p class="sc-small">Removes every stock count (counted, waiting, approved or rejected) and takes back off stock what the approved counts added, so stock goes back to what it was before the counts. Use it when counts were entered by mistake. <strong>This has no Undo:</strong> only the full backup taken first can bring them back.</p>
+                <div class="sc-kpis">
+                    <div class="sc-kpi">
+                        <span class="sc-kpi__label">Stock counts now</span>
+                        <span class="sc-kpi__value sc-kpi__value--file"><?php echo number_format((int)$cwT['counts']); ?></span>
+                        <span class="sc-kpi__help">Every count on Stock Count, whatever its status.</span>
+                    </div>
+                    <div class="sc-kpi">
+                        <span class="sc-kpi__label">Stock value that would be removed</span>
+                        <span class="sc-kpi__value sc-kpi__value--file"><?php echo $e($currency); ?> <?php echo number_format((float)$cwT['value'], 2); ?></span>
+                        <span class="sc-kpi__help">The drop in stock valuation (on hand now minus after, × unit cost) across <?php echo number_format((int)$cwT['items']); ?> stock item(s).</span>
+                    </div>
+                </div>
+                <?php if (!empty($cwPreview['blocked'])): ?>
+                    <p class="sc-alert sc-alert--bad" role="status"><i class="fas fa-ban"></i> <span>This cannot be done exactly right now (<?php echo count($cwPreview['blocked']); ?> reason<?php echo count($cwPreview['blocked']) === 1 ? '' : 's'; ?>). Review the counts to see why.</span></p>
+                <?php endif; ?>
+                <div class="sc-actions">
+                    <button type="submit" class="sc-btn sc-btn--secondary" <?php echo (int)$cwT['counts'] === 0 && empty($cwPreview['blocked']) ? 'disabled' : ''; ?>><i class="fas fa-eye"></i> Review the counts first</button>
+                    <?php if ((int)$cwT['counts'] === 0 && empty($cwPreview['blocked'])): ?><span class="sc-small">There are no stock counts to wipe.</span><?php endif; ?>
+                </div>
+            </form>
+
             <!-- ================= PAST CLEARS ================= -->
             <div class="sc-card">
                 <h3><i class="fas fa-clock-rotate-left"></i> Past clears</h3>
@@ -369,11 +629,14 @@ $e = static fn($v): string => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
                                         <td><?php echo $e($pc['created_at'] ?? ''); ?></td>
                                         <td><?php echo $e(($pc['by_name'] ?? '') !== '' ? $pc['by_name'] : ($pc['by_username'] ?? '')); ?></td>
                                         <td>
-                                            <?php echo $e(rh_sc_sentence($area, (array)($pc['tables'] ?? []))); ?><br>
+                                            <?php echo rh_sc_manifest_is_count_wipe($pc) ? '<strong>Stock count wipe:</strong> ' : ''; ?><?php echo $e(rh_sc_sentence($area, (array)($pc['tables'] ?? []))); ?><br>
                                             <span class="sc-small"><?php echo $e($pc['snapshot_file'] ?? ''); ?></span>
                                         </td>
                                         <td>
-                                            <?php if (!empty($pc['undone_at'])): ?>
+                                            <?php if (rh_sc_manifest_is_count_wipe($pc)): ?>
+                                                <span class="sc-pill">No Undo</span><br>
+                                                <span class="sc-small"><?php echo $e(rh_sc_count_wipe_restore_text($pc)); ?></span>
+                                            <?php elseif (!empty($pc['undone_at'])): ?>
                                                 <span class="sc-pill">Undone <?php echo $e($pc['undone_at']); ?></span>
                                             <?php elseif (empty($pc['snapshot_exists'])): ?>
                                                 <span class="sc-pill sc-pill--bad">Snapshot file missing</span>

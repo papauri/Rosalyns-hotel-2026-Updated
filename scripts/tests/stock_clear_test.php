@@ -120,6 +120,9 @@ try {
     $mgrId = put($pdo, 'admin_users', ['username' => 'ZZ_CLEARTEST_mgr', 'email' => 'zz_cleartest_mgr@example.invalid', 'full_name' => 'ZZ_CLEARTEST Manager', 'role' => 'manager', 'is_active' => 1, 'password_hash' => password_hash($pw, PASSWORD_DEFAULT)]);
     guard_tx($pdo, 'temporary accounts');
     $actor = ['id' => $adminId, 'username' => 'ZZ_CLEARTEST_admin', 'full_name' => 'ZZ_CLEARTEST Admin'];
+    // data_reset is Tier S (owner 2026-11-11): a super admin holds it; a plain administrator only when a super admin switches it on.
+    $hasSuperCol = $pdo->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'admin_users' AND COLUMN_NAME = 'is_super_admin'")->fetchColumn();
+    if ((int)$hasSuperCol > 0) { $pdo->prepare("UPDATE admin_users SET is_super_admin = 1 WHERE id = ?")->execute([$adminId]); }
 
     // access + confirmation
     [$okA] = rh_sc_authorize($pdo, $adminId);
