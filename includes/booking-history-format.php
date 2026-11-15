@@ -307,6 +307,19 @@ if (!function_exists('rh_hist_tol')) {
                 if ($note !== '') $detail .= "\n" . $note;
                 $ev = rh_hist_ev($at, $who, 'Payment status now ' . rh_hist_status_word($ns), $detail, 'payment',
                     ['pstatus_chg:' . (int)($r['id'] ?? 0) . ':' . $ns], 2);
+            } elseif ($action === 'charge_voided') {
+                // Written by voidBookingCharge() (step 12): one line per voided folio charge.
+                $cid = (int)($new['charge_id'] ?? 0);
+                $desc = trim((string)($new['description'] ?? ''));
+                $amt = (float)($new['line_total'] ?? ($old['line_total'] ?? 0));
+                $what = 'Charge voided: ' . ($desc !== '' ? rh_hist_clip($desc, 80) . ' ' : '') . rh_hist_money($amt, $ctx['cur']);
+                $lines = [];
+                $type = trim((string)($new['charge_type'] ?? ''));
+                if ($type !== '') $lines[] = 'Type: ' . rh_hist_words($type);
+                $vr = trim((string)($new['void_reason'] ?? ''));
+                if ($vr !== '') $lines[] = 'Reason: ' . rh_hist_clip($vr, 200);
+                $lines[] = 'Taken off the bill: ' . rh_hist_money($amt, $ctx['cur']);
+                $ev = rh_hist_ev($at, $who, $what, implode("\n", $lines), 'edit', ['chargevoid:' . ($cid > 0 ? $cid : (int)($r['id'] ?? 0))], 2);
             } elseif ($action === 'payment_updated') {
                 $ns = (string)($new['payment_status'] ?? '');
                 $ev = rh_hist_ev($at, $who, 'Payment status set to ' . rh_hist_status_word($ns), $note, 'payment', ['pstatus:' . $ns], 2);

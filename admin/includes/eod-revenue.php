@@ -212,8 +212,11 @@ if (!function_exists('rh_eod_earned_revenue')) {
                 $st->execute([$a, $b]);
                 $out['pos_reversed'] += (float)$st->fetchColumn();
                 if (rh_pos_col_exists($pdo, 'stock_orders', 'refunded_at')) {
+                    // Dated by payout day, exactly as the Z and the EOD summary (step 9 B2): a refund
+                    // raised pending counts when it is settled, never while it is still pending.
+                    [$refundAt, $refundNotPending] = rh_pos_refund_paid_out_sql('o');
                     $st = $pdo->prepare("SELECT COALESCE(SUM(o.total_amount),0) FROM stock_orders o
-                        WHERE o.status = 'refunded' AND o.refunded_at >= ? AND o.refunded_at < ?$notFolio");
+                        WHERE o.status = 'refunded' AND $refundNotPending AND $refundAt >= ? AND $refundAt < ?$notFolio");
                     $st->execute([$a, $b]);
                     $out['pos_reversed'] += (float)$st->fetchColumn();
                 }

@@ -100,6 +100,10 @@ function rt_apply_payment_to_order(PDO $pdo, array $user, array $order, string $
 {
     $orderId = (int)($order['id'] ?? 0);
     $reference = (string)($order['reference'] ?? '');
+    // Billed to a room already (live folio charge): never take till money for it too (step 12).
+    if (rh_order_has_live_folio_charges($pdo, $orderId)) {
+        throw new RuntimeException('Order ' . $reference . ' is already charged to a guest room bill. Settle it on the booking, or void the room charge first.');
+    }
     $totalAmount = (float)($order['total_amount'] ?? 0);
     $tendered = (float)($post['tendered_amount'] ?? 0);
     $mobileProvider = trim((string)($post['mobile_wallet_provider'] ?? ''));

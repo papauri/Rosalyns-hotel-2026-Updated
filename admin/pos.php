@@ -447,6 +447,10 @@ function pos_forceServeKitchenItems(PDO $pdo, int $orderId, array $actor, ?int $
  */
 function pos_applyPaymentToOrder(PDO $pdo, array $user, int $orderId, string $reference, float $totalAmount, string $paymentMethod, array $post, int $splitCount = 1, int $splitNumber = 1): array
 {
+    // Billed to a room already (live folio charge): never take till money for it too (step 12).
+    if (rh_order_has_live_folio_charges($pdo, $orderId)) {
+        throw new RuntimeException('Order ' . $reference . ' is already charged to a guest room bill. Settle it on the booking, or void the room charge first.');
+    }
     $tipAmount       = max(0.0, round((float)($post['tip_amount'] ?? 0), 2));
     $tendered        = (float)($post['tendered_amount'] ?? 0);
     $mobileProvider  = trim($post['mobile_wallet_provider'] ?? '');

@@ -9611,7 +9611,7 @@ function voidBookingCharge(int $chargeId, string $voidReason, ?int $voidedBy = n
         $pdo->beginTransaction();
 
         // Get charge details (need extra fields for stock restoration)
-        $stmt = $pdo->prepare("SELECT booking_id, voided, charge_type, source_item_id, quantity, stock_tracked, line_total FROM booking_charges WHERE id = ? FOR UPDATE");
+        $stmt = $pdo->prepare("SELECT booking_id, voided, charge_type, description, source_item_id, quantity, stock_tracked, line_total FROM booking_charges WHERE id = ? FOR UPDATE");
         $stmt->execute([$chargeId]);
         $charge = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -9773,6 +9773,42 @@ function voidBookingCharge(int $chargeId, string $voidReason, ?int $voidedBy = n
 
         // Recalculate booking financials
         recalculateBookingFinancials($charge['booking_id']);
+
+        // Booking History: who voided which charge, its amount and the reason (step 12). Same transaction.
+        // Written as the voider even when the page's $user is someone else / not set (CLI, API).
+        if (!function_exists('logBookingAudit') && is_file(__DIR__ . '/../admin/includes/audit-functions.php')) {
+            require_once __DIR__ . '/../admin/includes/audit-functions.php';
+        }
+        // Only when the table exists: creating it here would end the transaction (implicit commit).
+        if (function_exists('logBookingAudit') && function_exists('auditTableExists') && auditTableExists($pdo, 'booking_audit_log')) {
+            $hadUser = array_key_exists('user', $GLOBALS);
+            $prevUser = $hadUser ? $GLOBALS['user'] : null;
+            $swapUser = $voidedBy !== null && $voidedBy > 0 && (int)(is_array($prevUser) ? ($prevUser['id'] ?? 0) : 0) !== $voidedBy;
+            if ($swapUser) {
+                $vu = $pdo->prepare("SELECT id, username, full_name FROM admin_users WHERE id = ?");
+                $vu->execute([$voidedBy]);
+                $GLOBALS['user'] = $vu->fetch(PDO::FETCH_ASSOC) ?: ['id' => $voidedBy];
+            }
+            try {
+                $amt = round((float)($charge['line_total'] ?? 0), 2);
+                logBookingAudit(
+                    (int)$charge['booking_id'],
+                    'charge_voided',
+                    ['voided' => 0, 'line_total' => $amt],
+                    ['voided' => 1, 'charge_id' => $chargeId, 'charge_type' => (string)$charge['charge_type'],
+                     'description' => (string)($charge['description'] ?? ''), 'line_total' => $amt, 'void_reason' => $voidReason],
+                    'Charge #' . $chargeId . ' voided: ' . (string)($charge['description'] ?? '') . ' (' . number_format($amt, 2) . '). Reason: ' . $voidReason
+                );
+            } finally {
+                if ($swapUser) {
+                    if ($hadUser) {
+                        $GLOBALS['user'] = $prevUser;
+                    } else {
+                        unset($GLOBALS['user']);
+                    }
+                }
+            }
+        }
 
         $pdo->commit();
 

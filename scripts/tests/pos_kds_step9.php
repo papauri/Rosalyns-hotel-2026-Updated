@@ -298,6 +298,31 @@ if (($argv[1] ?? '') === '--child') {
     require_once $zz9Root . '/admin/includes/restaurant-payment-sync.php';
     require_once $zz9Root . '/admin/includes/pos-order-close.php';
     require_once $zz9Root . '/admin/includes/pos-order-delete.php';
+    require_once $zz9Root . '/admin/includes/eod-revenue.php';
+    require_once $zz9Root . '/includes/booking-history-format.php';
+    /** Step 12 fixtures: a checked-in test booking, a folio charge (gross 100) linked to an order, a restaurant refund row. */
+    function zz12_booking(string $tag): int
+    {
+        $room = (int)$GLOBALS['pdo']->query('SELECT id FROM rooms ORDER BY id LIMIT 1')->fetchColumn();
+        zz_q("INSERT INTO bookings (booking_reference, room_id, guest_name, guest_email, guest_phone, check_in_date, check_out_date, number_of_nights, number_of_guests, adult_guests, child_guests, total_amount, total_with_vat, amount_paid, amount_due, status)
+              VALUES (?, ?, 'ZZ9 Guest', 'zz9@example.invalid', '000', CURDATE(), DATE_ADD(CURDATE(), INTERVAL 2 DAY), 2, 1, 1, 0, 1000, 1000, 0, 1000, 'checked-in')",
+            ['ZZ9-' . $tag . '-' . random_int(1000, 9999), $room]);
+        return (int)$GLOBALS['pdo']->lastInsertId();
+    }
+    function zz12_charge(int $bookingId, ?int $orderId, string $desc): int
+    {
+        $c = addBookingCharge($bookingId, 'food', $desc, 1, 100, null, $GLOBALS['zz_admin']);
+        if (empty($c['success']) || empty($c['charge_id'])) { throw new RuntimeException('fixture: charge failed ' . json_encode($c)); }
+        if ($orderId !== null) { zz_q('UPDATE booking_charges SET stock_order_id = ? WHERE id = ?', [$orderId, (int)$c['charge_id']]); }
+        return (int)$c['charge_id'];
+    }
+    function zz12_refund(int $orderId, float $amt, string $status, string $processedSql): void
+    {
+        zz_q("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+              payment_method, payment_type, payment_status, refund_reason, refund_status, refund_amount, refund_date_processed, recorded_by, created_at)
+              VALUES (?, 'restaurant', ?, 'ZZ9', CURDATE(), ?, 0, 0, ?, 'cash', 'refund', ?, 'other', ?, ?, $processedSql, ?, NOW())",
+            ['ZZ9-RF-' . random_int(100000, 999999), $orderId, $amt, $amt, $status === 'completed' ? 'completed' : 'pending', $status, $amt, $GLOBALS['zz_admin']]);
+    }
     $A = $GLOBALS['zz_admin'];
 
     try {
@@ -533,6 +558,131 @@ if (($argv[1] ?? '') === '--child') {
             };
             break;
 
+        /* ---------- Step 12 (1): End of Day revenue dates a whole-order refund by its payout, pending excluded ---------- */
+        case 'S12_1_refund_pending':
+            $biz = (string)rh_station_union_trading_window()['business_date'];
+            $before = rh_eod_earned_revenue($pdo, $biz, ['bookings' => false]); // a second memo key, so the after-read is fresh
+            $o = zz_order('S12p', 'served', 250, 'refunded');
+            zz_q('UPDATE stock_orders SET paid_at = DATE_SUB(NOW(), INTERVAL 3 DAY), refunded_at = NOW() WHERE id = ?', [$o]);
+            zz12_refund($o, 250, 'pending', 'NULL');
+            $after = rh_eod_earned_revenue($pdo, $biz);
+            $GLOBALS['zz_after'] = static function () use ($before, $after): void {
+                zz_check('S12 (1): a refund still pending is not in End of Day revenue (reversed unchanged)', abs($after['pos_reversed'] - $before['pos_reversed']) < 0.005, [$before['pos_reversed'], $after['pos_reversed']]);
+            };
+            break;
+
+        case 'S12_1_refund_paid_today':
+            $biz = (string)rh_station_union_trading_window()['business_date'];
+            $before = rh_eod_earned_revenue($pdo, $biz, ['bookings' => false]);
+            $o = zz_order('S12d', 'served', 250, 'refunded');
+            // raised 2 days ago, paid out now: counts today (payout day), like the Z and the EOD summary
+            zz_q('UPDATE stock_orders SET paid_at = DATE_SUB(NOW(), INTERVAL 3 DAY), refunded_at = DATE_SUB(NOW(), INTERVAL 2 DAY) WHERE id = ?', [$o]);
+            zz12_refund($o, 250, 'completed', 'NOW()');
+            $after = rh_eod_earned_revenue($pdo, $biz);
+            $GLOBALS['zz_after'] = static function () use ($before, $after): void {
+                zz_check('S12 (1): a refund paid out today counts today at the order total (250)', abs(($after['pos_reversed'] - $before['pos_reversed']) - 250) < 0.005, [$before['pos_reversed'], $after['pos_reversed']]);
+            };
+            break;
+
+        /* ---------- Step 12 (2): a voided folio charge lowers the order's cost of goods by the same ratio ---------- */
+        case 'S12_2_total_cost':
+            $bk = zz12_booking('S12c');
+            $o = zz_order('S12c', 'served', 200, 'completed');
+            zz_q("UPDATE stock_orders SET order_type = 'room_service', booking_id = ? WHERE id = ?", [$bk, $o]);
+            $c1 = zz12_charge($bk, $o, 'ZZ9 S12 dish one');
+            $c2 = zz12_charge($bk, $o, 'ZZ9 S12 dish two');
+            $g1 = (float)zz_v('SELECT line_total FROM booking_charges WHERE id = ?', [$c1]);
+            $g2 = (float)zz_v('SELECT line_total FROM booking_charges WHERE id = ?', [$c2]);
+            zz_q('UPDATE stock_orders SET subtotal = ?, total_amount = ?, total_cost = 80 WHERE id = ?', [round($g1 + $g2, 2), round($g1 + $g2, 2), $o]);
+            $vr = voidBookingCharge($c1, 'ZZ9 S12 cost', $A);
+            $ord = zz_q('SELECT total_amount, total_cost FROM stock_orders WHERE id = ?', [$o])->fetch();
+            $det = (string)zz_v("SELECT details FROM stock_order_audit WHERE order_id = ? AND event = 'folio_charge_voided' ORDER BY id DESC LIMIT 1", [$o]);
+            $GLOBALS['zz_after'] = static function () use ($vr, $ord, $det, $g1, $g2): void {
+                $exp = round(80 * ($g2 / ($g1 + $g2)), 4);
+                zz_check('S12 (2): charge voided', !empty($vr['success']), $vr);
+                zz_check('S12 (2): total_cost lowered by the subtotal ratio (80 -> ' . $exp . ')', abs((float)$ord['total_cost'] - $exp) < 0.005, [$ord, $exp]);
+                zz_check('S12 (2): order audit names the cost change', strpos($det, 'cost 80.00 -> ' . number_format($exp, 2)) !== false, $det);
+            };
+            break;
+
+        /* ---------- Step 12 (3): a paid order that still has a live folio charge counts once ---------- */
+        case 'S12_3_paid_with_folio':
+            $biz = (string)rh_station_union_trading_window()['business_date'];
+            $before = rh_eod_earned_revenue($pdo, $biz, ['bookings' => false]);
+            $bk = zz12_booking('S12f');
+            $o = zz_order('S12f', 'served', 100, 'paid');
+            zz_q("UPDATE stock_orders SET order_type = 'room_service', booking_id = ?, paid_at = NOW(), payment_method = 'cash' WHERE id = ?", [$bk, $o]);
+            $c = zz12_charge($bk, $o, 'ZZ9 S12 paid and on the folio');
+            $tot = (float)zz_v('SELECT line_total FROM booking_charges WHERE id = ?', [$c]);
+            zz_q('UPDATE stock_orders SET subtotal = ?, total_amount = ? WHERE id = ?', [$tot, $tot, $o]);
+            $after = rh_eod_earned_revenue($pdo, $biz);
+            $live = rh_order_has_live_folio_charges($pdo, $o);
+            $GLOBALS['zz_after'] = static function () use ($before, $after, $tot, $live): void {
+                zz_check('S12 (3): the order is seen as billed to a room', $live === true);
+                zz_check('S12 (3): till side takes it off again (folio gross + ' . $tot . ', POS net unchanged)',
+                    abs(($after['pos_room_folio_gross'] - $before['pos_room_folio_gross']) - $tot) < 0.005 && abs($after['pos_net'] - $before['pos_net']) < 0.005,
+                    [$before['pos_room_folio_gross'], $after['pos_room_folio_gross'], $before['pos_net'], $after['pos_net']]);
+                zz_check('S12 (3): the folio side keeps it (folio F&B includes the live charge)', $after['folio_fnb_gross'] + 0.005 >= $tot, $after['folio_fnb_gross']);
+            };
+            break;
+
+        case 'S12_3_pay_refused': // an open tab with a live folio charge can no longer be paid at the till
+            $k = zz_item('S12g dish', 'kitchen');
+            $bk = zz12_booking('S12g');
+            $o = zz_order('S12g', 'served', 100);
+            zz_line($o, $k, 'kitchen', 'served', 'ZZ9 S12g dish');
+            zz12_charge($bk, $o, 'ZZ9 S12 tab on a folio');
+            zz_page('admin/pos.php', ['action' => 'pay_existing', 'order_id' => (string)$o, 'payment_method' => 'cash', 'tendered_amount' => '100', 'split_count' => '1', 'split_number' => '1'], [], false);
+            $GLOBALS['zz_after'] = static function () use ($o): void {
+                zz_check('S12 (3): till payment refused, order still open, no payment row', (string)zz_v('SELECT status FROM stock_orders WHERE id = ?', [$o]) === 'placed'
+                    && (int)zz_v("SELECT COUNT(*) FROM payments WHERE booking_type = 'restaurant' AND booking_id = ? AND deleted_at IS NULL", [$o]) === 0);
+            };
+            break;
+
+        case 'S12_3_pay_after_void': // twin: the same tab once its folio charge is voided pays normally (the guard caused the refusal)
+            $k = zz_item('S12v dish', 'kitchen');
+            $bk = zz12_booking('S12v');
+            $o = zz_order('S12v', 'served', 100);
+            zz_line($o, $k, 'kitchen', 'served', 'ZZ9 S12v dish');
+            $cv = zz12_charge($bk, $o, 'ZZ9 S12 tab charge voided');
+            zz_q("UPDATE booking_charges SET voided = 1, voided_at = NOW(), void_reason = 'ZZ9' WHERE id = ?", [$cv]);
+            zz_page('admin/pos.php', ['action' => 'pay_existing', 'order_id' => (string)$o, 'payment_method' => 'cash', 'tendered_amount' => '100', 'split_count' => '1', 'split_number' => '1'], [], false);
+            $GLOBALS['zz_after'] = static function () use ($o): void {
+                zz_check('S12 (3): no live folio charge -> the same tab is paid at the till', (string)zz_v('SELECT status FROM stock_orders WHERE id = ?', [$o]) === 'paid');
+            };
+            break;
+
+        /* ---------- Step 12 (4): voiding a folio charge writes a Booking History line ---------- */
+        case 'S12_4_history':
+            $bk = zz12_booking('S12h');
+            $c = zz12_charge($bk, null, 'ZZ9 S12 minibar');
+            $amt = (float)zz_v('SELECT line_total FROM booking_charges WHERE id = ?', [$c]);
+            unset($GLOBALS['user']); // no page user (CLI / API): the line must still name the voider
+            $vr = voidBookingCharge($c, 'ZZ9 S12 posted to the wrong room', $A);
+            $userLeftUnset = !array_key_exists('user', $GLOBALS);
+            $rows = zz_q("SELECT * FROM booking_audit_log WHERE booking_id = ? AND action = 'charge_voided'", [$bk])->fetchAll();
+            $adm = zz_q('SELECT full_name, username, role FROM admin_users WHERE id = ?', [$A])->fetch();
+            $name = (string)($adm['full_name'] ?: $adm['username']);
+            $ctx = ['booking' => ['booking_reference' => 'ZZ9'], 'staff' => [$A => ['name' => $name, 'username' => $adm['username'], 'role' => $adm['role']]], 'cur' => 'MWK', 'room_numbers' => []];
+            $ev = rh_hist_from_audit($rows, $ctx);
+            // A second charge voided straight after: the History list (merge of every audit row of the booking) keeps both lines.
+            $c2 = zz12_charge($bk, null, 'ZZ9 S12 laundry');
+            voidBookingCharge($c2, 'ZZ9 S12 second void', $A);
+            $all = zz_q('SELECT * FROM booking_audit_log WHERE booking_id = ? ORDER BY id', [$bk])->fetchAll();
+            $merged = rh_hist_merge(rh_hist_from_audit($all, $ctx));
+            $voidLines = count(array_filter($merged, static fn($m) => strpos((string)$m['what'], 'Charge voided: ') === 0));
+            $GLOBALS['zz_after'] = static function () use ($vr, $rows, $ev, $A, $amt, $name, $userLeftUnset, $voidLines, $merged): void {
+                zz_check('S12 (4): two charges voided back to back stay two History lines', $voidLines === 2, $merged);
+                zz_check('S12 (4): charge voided', !empty($vr['success']), $vr);
+                zz_check('S12 (4): one History row, written as the voider', count($rows) === 1 && (int)$rows[0]['performed_by'] === $A, $rows);
+                zz_check('S12 (4): the page $user is left as it was (unset)', $userLeftUnset);
+                $e = $ev[0] ?? [];
+                zz_check('S12 (4): plain words: what, amount, who, reason', count($ev) === 1
+                    && strpos((string)$e['what'], 'Charge voided: ZZ9 S12 minibar') === 0 && strpos((string)$e['what'], rh_hist_money($amt, 'MWK')) !== false
+                    && strpos((string)$e['who'], $name) === 0 && strpos((string)$e['detail'], 'Reason: ZZ9 S12 posted to the wrong room') !== false, $ev);
+            };
+            break;
+
         default:
             throw new RuntimeException('unknown case ' . $GLOBALS['zz_case']);
         }
@@ -561,7 +711,8 @@ if (($argv[1] ?? '') === '--child') {
 [$zz9Target] = zz9_target($argv, $zz9Root);
 $cases = ['A1_park_first', 'A1_park_retry', 'A1_tab_first', 'A1_tab_retry', 'A6_tab_all_pending', 'A2_round2_ready',
           'A3_poll_after_close', 'A3_my_orders_after_close', 'A7_note', 'A7_rush', 'A8_86_last', 'A8_86_not_last', 'A9_delete_stop',
-          'B4_pay_existing', 'B4_pay_new', 'B4_normal_discount'];
+          'B4_pay_existing', 'B4_pay_new', 'B4_normal_discount',
+          'S12_1_refund_pending', 'S12_1_refund_paid_today', 'S12_2_total_cost', 'S12_3_paid_with_folio', 'S12_3_pay_refused', 'S12_3_pay_after_void', 'S12_4_history'];
 $only = array_values(array_filter(array_slice($argv, 1), static fn($a) => strpos((string)$a, '--') !== 0));
 if ($only) {
     $cases = array_values(array_filter($cases, static function (string $c) use ($only): bool {

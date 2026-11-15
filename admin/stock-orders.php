@@ -780,6 +780,8 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($order['status'] !== 'placed') throw new RuntimeException('Order is not open — cannot settle a ' . $order['status'] . ' order.');
                 if ((int)($order['split_paid_count'] ?? 0) > 0) throw new RuntimeException('This order is mid split-payment (' . (int)$order['split_paid_count'] . ' of ' . (int)($order['split_count'] ?? 0) . ' paid) — finish the remaining legs from the POS till; it cannot be settled in full again.');
                 if (($order['order_type'] ?? '') === 'room_service') throw new RuntimeException('Room-service orders are charged to the booking folio — use the booking module to settle them.');
+                // Billed to a room already (live folio charge): never take till money for it too (step 12).
+                if (rh_order_has_live_folio_charges($pdo, $orderId)) throw new RuntimeException('Order ' . $order['reference'] . ' is already charged to a guest room bill. Settle it on the booking, or void the room charge first.');
 
                 $totalAmount = (float)$order['total_amount'];
                 if ($totalAmount <= 0) throw new RuntimeException('Order total is zero — cannot settle.');

@@ -1027,6 +1027,31 @@ function rh_close_unserved_line_for_voided_charge(PDO $pdo, int $orderId, int $i
 }
 
 /**
+ * True when the order still has a live (non-voided) charge on a guest folio. Such an order is billed to the
+ * room, so it must never ALSO be paid at the till: the same money would count twice (folio revenue + till
+ * sale) and a later void would reverse it twice (step 12). Legacy schema without
+ * booking_charges.stock_order_id: false (nothing is linked).
+ */
+function rh_order_has_live_folio_charges(PDO $pdo, int $orderId): bool
+{
+    static $hasLink = null;
+    if ($hasLink === null) {
+        try {
+            $st = $pdo->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'booking_charges' AND COLUMN_NAME = 'stock_order_id'");
+            $hasLink = ((int)$st->fetchColumn() > 0);
+        } catch (Throwable $e) {
+            $hasLink = false;
+        }
+    }
+    if (!$hasLink || $orderId <= 0) {
+        return false;
+    }
+    $st = $pdo->prepare("SELECT COUNT(*) FROM booking_charges WHERE stock_order_id = ? AND voided = 0");
+    $st->execute([$orderId]);
+    return (int)$st->fetchColumn() > 0;
+}
+
+/**
  * A voided folio charge on a CLOSED room-service order (status 'completed' = charged to room) takes its
  * money off the order too (step 9 B3), so the order total, the Z / End of Day "Charged to room" line and
  * the folio agree. Same maths as the KDS 86 (api/kds-action.php): prices are gross, the line comes off the
@@ -1045,7 +1070,19 @@ function rh_lower_order_total_for_voided_charge(PDO $pdo, int $orderId, float $l
     if ($orderId <= 0 || $lineGross <= $tolerance) {
         return null;
     }
-    $sel = $pdo->prepare("SELECT reference, status, subtotal, total_amount, tax_amount, discount_amount, service_charge
+    // Cost of goods follows the money down (step 12): total_cost scales with the subtotal like tax /
+    // discount / service, so COGS and margin stop counting the voided line.
+    static $hasCost = null;
+    if ($hasCost === null) {
+        try {
+            $st = $pdo->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stock_orders' AND COLUMN_NAME = 'total_cost'");
+            $hasCost = ((int)$st->fetchColumn() > 0);
+        } catch (Throwable $e) {
+            $hasCost = false;
+        }
+    }
+    $sel = $pdo->prepare("SELECT reference, status, subtotal, total_amount, tax_amount, discount_amount, service_charge"
+                            . ($hasCost ? ", total_cost" : "") . "
                             FROM stock_orders WHERE id = ? FOR UPDATE");
     $sel->execute([$orderId]);
     $o = $sel->fetch(PDO::FETCH_ASSOC);
@@ -1062,8 +1099,15 @@ function rh_lower_order_total_for_voided_charge(PDO $pdo, int $orderId, float $l
     $newTax = round((float)$o['tax_amount'] * $scale, 2);
     $newDiscount = round((float)$o['discount_amount'] * $scale, 2);
     $newService = round((float)$o['service_charge'] * $scale, 2);
-    $pdo->prepare("UPDATE stock_orders SET subtotal = ?, total_amount = ?, tax_amount = ?, discount_amount = ?, service_charge = ?, updated_at = NOW() WHERE id = ?")
-        ->execute([$newSubtotal, $newTotal, $newTax, $newDiscount, $newService, $orderId]);
+    $oldCost = $hasCost ? (float)($o['total_cost'] ?? 0) : 0.0;
+    $newCost = round($oldCost * $scale, 4);
+    if ($hasCost) {
+        $pdo->prepare("UPDATE stock_orders SET subtotal = ?, total_amount = ?, tax_amount = ?, discount_amount = ?, service_charge = ?, total_cost = ?, updated_at = NOW() WHERE id = ?")
+            ->execute([$newSubtotal, $newTotal, $newTax, $newDiscount, $newService, $newCost, $orderId]);
+    } else {
+        $pdo->prepare("UPDATE stock_orders SET subtotal = ?, total_amount = ?, tax_amount = ?, discount_amount = ?, service_charge = ?, updated_at = NOW() WHERE id = ?")
+            ->execute([$newSubtotal, $newTotal, $newTax, $newDiscount, $newService, $orderId]);
+    }
 
     $actorName = '';
     if ($userId !== null && $userId > 0) {
@@ -1074,7 +1118,8 @@ function rh_lower_order_total_for_voided_charge(PDO $pdo, int $orderId, float $l
     $pdo->prepare("INSERT INTO stock_order_audit (order_id, actor_id, actor_name, event, details, ip_address) VALUES (?, ?, ?, 'folio_charge_voided', ?, ?)")
         ->execute([
             $orderId, $userId !== null && $userId > 0 ? $userId : null, $actorName,
-            mb_substr($reason . ' | line ' . number_format($lineGross, 2) . ' removed, total ' . number_format($oldTotal, 2) . ' -> ' . number_format($newTotal, 2), 0, 500),
+            mb_substr($reason . ' | line ' . number_format($lineGross, 2) . ' removed, total ' . number_format($oldTotal, 2) . ' -> ' . number_format($newTotal, 2)
+                . ($hasCost ? ', cost ' . number_format($oldCost, 2) . ' -> ' . number_format($newCost, 2) : ''), 0, 500),
             $_SERVER['REMOTE_ADDR'] ?? null,
         ]);
     return ['old_total' => round($oldTotal, 2), 'new_total' => $newTotal];

@@ -132,7 +132,7 @@ foreach ($tipDriftRows as $r) {
 
 // ---------------------------------------------------------------------------
 // 2) Historical shift-close accuracy — recompute expected cash/mobile/card under the
-//    fixed split-aware logic and compare against what was actually stored at close time.
+//    shift rule the Z report uses (rh_pos_shift_totals) and compare against what was stored at close time.
 // ---------------------------------------------------------------------------
 $closesStmt = $pdo->prepare("
     SELECT id, user_id, user_name, shift_date, closed_at,
@@ -281,7 +281,7 @@ foreach ($closeRows as $c) {
             <div class="pos-acct-section-head">
                 <div>
                     <h3><i class="fas fa-scale-unbalanced"></i> Historical shift-close accuracy</h3>
-                    <p>Every closed shift's expected cash/mobile/card, recomputed under the fixed split-aware logic and compared against what was actually recorded at close time. Only shows shifts where the two figures differ.</p>
+                    <p>Every closed shift's expected cash/mobile/card, worked out again today the same way the Z report does it, and compared with what was recorded when the shift was closed. Only shows shifts where the two figures differ.</p>
                 </div>
             </div>
             <div class="acct-table-wrap">
