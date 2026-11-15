@@ -959,6 +959,65 @@ try {
     $uC = $updC();
     $ck('cost (clear all): only the cost ticks go, every quantity tick stays', $xd['n'] === 2 && $xa['ok'] && $uC[$kQ('QH Zero')] === ['quantity'] && $uC[$kQ('QI Priced')] === ['quantity'] && $uC[$kQ('QJ Keep')] === ['quantity'], json_encode($uC));
 
+    // ---- the sheet's value column vs Quantity x Unit Cost (owner 2026-11-16: a warning + the stock-check workbook; never changes the import) ----
+    $vcCsvT = function (array $hdr, array $rows) { $fh = fopen('php://memory', 'w+'); fputcsv($fh, $hdr); foreach ($rows as $r) { fputcsv($fh, $r); } rewind($fh); return stream_get_contents($fh); };
+    $vcRowsT = [[$n('VC Match'), 2, 'kg', 100, 200], [$n('VC Over'), 1, 'kg', 1000, 5000], [$n('VC Under'), 10, 'kg', 500, 2000], [$n('VC NoQty'), 0, 'kg', 300, 1200],
+        [$n('VC Round'), 3, 'kg', 33.33, 100], [$n('VC NoPrice'), 5, 'kg', '', ''], [$n('VC Stocked'), 4, 'kg', 0, '']];
+    // an item already in stock WITH a cost: the sheet's price 0 does not make it a "missing price" (the import counts it at its stock cost)
+    $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit, par_level, reorder_point) VALUES (?, 'ZZT VC', 'kg', 0, 650, 0, 0)")->execute([$n('VC Stocked')]);
+    $upV = $upload($put($vcCsvT(['Item Name', 'Balance', 'Unit', 'Unit Price', 'Stock Value'], $vcRowsT), 'vcstock.csv'), 'zzt-vc-' . $run . '.csv', $admin);
+    $upV2 = $upload($put($vcCsvT(['Item Name', 'Balance', 'Unit', 'Unit Price'], array_map(function ($r) { return array_slice($r, 0, 4); }, $vcRowsT)), 'vcstock.csv'), 'zzt-vc-' . $run . '.csv', $admin);
+    $jV = (int)$upV['job_id']; $jV2 = (int)$upV2['job_id'];
+    import_job_analyse($pdo, $jV); import_job_analyse($pdo, $jV2);
+    $ovV = import_job_review_view($pdo, $jV, null, []);
+    $vcO = $ovV['value_check'] ?? [];
+    $gV = $vcO['groups'][0] ?? [];
+    $ck('value check: the review overview warns about the Stock Value column (3 rows: 5,200 more on 2, 3,000 less on 1, one with no quantity) and one item with no unit cost',
+        !empty($vcO['show']) && ($vcO['differ'] ?? 0) === 3 && ($gV['header'] ?? '') === 'Stock Value' && ($gV['more_n'] ?? 0) === 2 && abs(($gV['more_sum'] ?? 0) - 5200) < 0.005
+        && ($gV['less_n'] ?? 0) === 1 && abs(($gV['less_sum'] ?? 0) - 3000) < 0.005 && ($gV['no_qty_n'] ?? 0) === 1 && ($vcO['missing_n'] ?? 0) === 1 && !isset($vcO['rows']) && array_key_exists('currency', $vcO), json_encode($vcO));
+    $ck('missing prices: only the new item with no price is listed (not the stocked item with a cost), and the count equals the Step 4 "no cost" count',
+        ($vcO['missing_sample'] ?? []) === [$n('VC NoPrice')] && ($vcO['missing_n'] ?? -1) === (int)($ovV['confirm']['not_counted']['by']['no_cost']['n'] ?? -2), json_encode([$vcO['missing_sample'] ?? null, $ovV['confirm']['not_counted']['by']['no_cost'] ?? null]));
+    $lite = import_job_review_view($pdo, $jV, ['size' => 25], ['overview' => false]);
+    $ck('value check: the lighter page reply leaves the summary out (paging changes nothing in it; answers return the full overview)', !empty($lite['ok']) && !isset($lite['value_check']));
+    $vr = import_job_value_rows($pdo, $jV, 1, 10);
+    $ck('value check: the rows come largest difference first', !empty($vr['ok']) && $vr['total'] === 3 && array_column($vr['rows'], 'name') === [$n('VC Over'), $n('VC Under'), $n('VC NoQty')] && $vr['rows'][2]['kind'] === 'no-qty', json_encode($vr));
+    $ovV2 = import_job_review_view($pdo, $jV2, null, []);
+    $ck('value check: no value column = no warning (the missing price is still reported)', ($ovV2['value_check']['differ'] ?? -1) === 0 && !($ovV2['value_check']['groups'] ?? [1]) && ($ovV2['value_check']['missing_n'] ?? 0) === 1);
+    $strip = function (array $items) { return array_map(function ($it) { unset($it['uids']); return $it; }, $items); };
+    $sV = import_job_review_summary($pdo, $jV); $sV2 = import_job_review_summary($pdo, $jV2);
+    $ck('value check: the import is the same with and without the value column (items, counts, questions to answer)',
+        md5(json_encode($strip($sV['items']))) === md5(json_encode($strip($sV2['items']))) && $sV['counts'] === $sV2['counts'] && $sV['can_confirm'] === $sV2['can_confirm'] && count($sV['questions']) === count($sV2['questions']));
+    $xV = import_job_stock_check_export($pdo, $jV);
+    $rdV = !empty($xV['ok']) ? import_xlsx_read((string)$xV['body'], true) : [];
+    $ck('stock check workbook: "<file> stock check <date>.xlsx" with Summary, "Stock Value wrong" (3 rows) and Missing prices (1 row)',
+        !empty($xV['ok']) && $xV['name'] === 'zzt-vc-' . $run . ' stock check ' . (string)$pdo->query('SELECT CURDATE()')->fetchColumn() . '.xlsx' && array_column($rdV['sheets'] ?? [], 'name') === ['Summary', 'Stock Value wrong', 'Missing prices']
+        && count($rdV['sheets'][1]['cells'] ?? []) === 4 && count($rdV['sheets'][2]['cells'] ?? []) === 2, json_encode([$xV['name'] ?? $xV['error'] ?? '', array_column($rdV['sheets'] ?? [], 'name')]));
+    $sVa = $answerAll($jV, $admin);
+    $cV = import_commit_stock($pdo, $jV, $admin);
+    $costOf = function (string $nm) use ($pdo) { $st = $pdo->prepare('SELECT cost_per_unit FROM stock_ingredients WHERE name = ?'); $st->execute([$nm]); return $st->fetchColumn(); };
+    $ck('value check: the commit uses Quantity x Unit Price, never the Stock Value column, and records what the check found',
+        !empty($cV['ok']) && abs((float)$costOf($n('VC Over')) - 1000) < 0.00005 && abs((float)$costOf($n('VC Under')) - 500) < 0.00005
+        && ($cV['result']['stock_check'] ?? null) === ['differ' => 3, 'missing' => 1], json_encode([$sVa['stuck'] ?? null, $cV['error'] ?? null, $cV['result']['stock_check'] ?? null]));
+    $xC = import_job_stock_check_export($pdo, $jV);
+    $sumC = !empty($xC['ok']) ? json_encode(import_xlsx_read((string)$xC['body'], true)['sheets'][0]['cells'] ?? []) : '';
+    $ck('stock check workbook after the import: still offered, with the system stock value and the opening count', !empty($xC['ok']) && strpos($sumC, 'System stock value') !== false && strpos($sumC, 'Opening count from this import') !== false, (string)($xC['error'] ?? ''));
+    $upN = $upload($put($vcCsvT(['Item Name', 'Balance', 'Unit', 'Unit Price', 'Stock Value'], [[$n('VN A'), 2, 'kg', 100, 200], [$n('VN B'), 3, 'kg', 33.33, 100]]), 'vcok.csv'), 'zzt-vcok-' . $run . '.csv', $admin);
+    import_job_analyse($pdo, (int)$upN['job_id']);
+    $ovN = import_job_review_view($pdo, (int)$upN['job_id'], null, []);
+    $ck('value check: nothing to report = no warning and no download', empty($ovN['value_check']['show']) && empty(import_job_stock_check_export($pdo, (int)$upN['job_id'])['ok']));
+    // our own export: its "Total Cost" is Purchase Qty x Unit Price (a buying list), so reading it back raises no value warning
+    require_once $root . '/includes/import/export-stock.php';
+    $catV = $n('VC Cat');
+    $insV = $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit, par_level, reorder_point) VALUES (?, ?, 'kg', ?, ?, ?, 0)");
+    foreach ([['VX A', 2, 100, 10], ['VX B', 1, 50, 6], ['VX C', 5, 20, 5]] as $v0) {
+        $insV->execute([$n($v0[0]), $catV, $v0[1], $v0[2], $v0[3]]);
+    }
+    $bV = import_export_stock_workbook($pdo, ['tabs' => [$catV]]);
+    $bytesV = ''; if (!empty($bV['ok'])) { rewind($bV['stream']); $bytesV = (string)stream_get_contents($bV['stream']); fclose($bV['stream']); }
+    $anX = $bytesV !== '' ? import_analyze_file($put($bytesV, 'vcexport.xlsx'), 'vcexport.xlsx', import_load_aliases($pdo)) : [];
+    $finX = $anX ? import_vc_finish(import_vc_collect($anX), $anX['questions']) : ['differ' => -1, 'groups' => [1]];
+    $ck('value check: our own stock export read back raises no value warning (its Total Cost is a buying cost)', $bytesV !== '' && $finX['differ'] === 0 && !$finX['groups'], json_encode([$bV['error'] ?? '', $finX['differ'], count($finX['groups'])]));
+
     // ---- cleanup of staged files, purge ---------------------------------------------------------------
     $pg = import_purge_staged($pdo, true);
     $ck('purge: runs and reports counts', is_array($pg) && isset($pg['files_deleted']));

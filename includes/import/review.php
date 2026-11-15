@@ -28,6 +28,7 @@
 
 require_once __DIR__ . '/store.php';
 require_once __DIR__ . '/resolve.php';
+require_once __DIR__ . '/value-check.php';
 require_once dirname(__DIR__, 2) . '/admin/includes/import-schema.php';
 
 if (!function_exists('import_job_analyse')) {
@@ -338,6 +339,7 @@ if (!function_exists('import_job_analyse')) {
         unset($analysis);
         $state['row_src'] = import_review_row_sources($state['analysis']);      // slim copies of the little the screens need from the rows ...
         $state['uid_cat'] = import_review_uid_categories($state['analysis']);
+        $state['vc_col'] = import_vc_collect($state['analysis']);      // the sheet's value column vs Quantity x Unit Cost (report only, never imported)
         $state['res'] = import_resolve_inplace($state['analysis'], $answers, $ctx, true);     // ... because resolving lets go of the rows themselves
         if ($mkey !== '') {
             $memo = [$mkey => $state];          // one picture at a time (a 20,000-row state is large)
@@ -504,6 +506,12 @@ if (!function_exists('import_job_analyse')) {
         }
         $pdo->prepare("UPDATE import_jobs SET answers_json = ?, status = 'reviewing' WHERE id = ? AND status IN ('analysed','reviewing')")->execute([import_json($answers), $jobId]);
         return ['ok' => true, 'error' => ''];
+    }
+
+    /** The value-column check of a job's state (see value-check.php): counts, sums, the disagreeing rows and the items with no unit cost. */
+    function import_job_value_check(array $state): array
+    {
+        return import_vc_finish((array)($state['vc_col'] ?? []), (array)($state['analysis']['questions'] ?? []), (array)($state['res']['items'] ?? []));
     }
 
     function import_job_can_confirm(PDO $pdo, int $jobId): bool
@@ -795,6 +803,7 @@ if (!function_exists('import_job_analyse')) {
         if ($violations) {
             return $bad('A value in the preview does not match the file, so nothing was imported.', array_slice($violations, 0, 20));
         }
+        $vcCol = import_vc_collect($analysis);         // report only (the value column is never imported): kept before the rows are released
         $res = import_resolve_inplace($analysis, $answers, $ctx, true);      // rows are released as they are read; the commit only uses the resolved items
         if (!$res['can_confirm']) {
             return $bad($res['why_not'] !== '' ? $res['why_not'] : 'Some questions still need an answer.') + ['analysis' => $analysis, 'res' => $res, 'ctx' => $ctx];
@@ -827,7 +836,7 @@ if (!function_exists('import_job_analyse')) {
         if ($viol) {
             return $bad('Some values cannot be imported.', $viol);
         }
-        return ['ok' => true, 'error' => '', 'analysis' => $analysis, 'res' => $res, 'ctx' => $ctx, 'violations' => []];
+        return ['ok' => true, 'error' => '', 'analysis' => $analysis, 'res' => $res, 'ctx' => $ctx, 'violations' => [], 'vc_col' => $vcCol];
     }
 }
 

@@ -1140,6 +1140,123 @@ $aDs = $figRun(['Item', 'Qty', 'Days in Stock'], [['ZZT A', 2, 12], ['ZZT B', 3,
 $t(!$figRows($aTb, 'unit_price') && !$figRows($aVs, 'qty_single') && $figRows($aDs, 'qty_single') === [2.0, 3.0, 4.0],
     'files: "Total Buying Cost" 5000 is never a unit price, "Value in Stock" 5000 never a balance, "Days in Stock" 12 never a balance (the real Qty column still is)');
 
+// ---- the sheet's own value column vs Quantity x Unit Cost (owner 2026-11-16, report only; value-check.php) ----
+require_once $root . '/includes/import/value-check.php';
+require_once $root . '/includes/import/xlsx-reader.php';
+$vcCsv = function (array $hdr, array $rows, string $name = 'vc.csv') use ($put) { $fh = fopen('php://temp', 'w+'); fputcsv($fh, $hdr); foreach ($rows as $r) { fputcsv($fh, $r); } rewind($fh);
+    $b = stream_get_contents($fh); fclose($fh); return $put($b, $name); };
+// every fixture gets a Unit column (last) so its items can be ready; the missing-price list comes from the resolved items, like the import
+$vcRun = function (array $hdr, array $rows, array $answers = [], array $existing = []) use ($vcCsv, $al) {
+    $hdr[] = 'Unit';
+    $rows = array_map(function ($r) { $r[] = 'kg'; return $r; }, $rows);
+    $an = import_analyze_file($vcCsv($hdr, $rows), 'vc.csv', $al, ['known_names' => array_column($existing, 'name')]);
+    $before = md5(json_encode($an));
+    $col = import_vc_collect($an);
+    $res = import_resolve($an, $answers, ['existing' => $existing, 'unit_options' => ['kg', 'each', 'bottle'], 'corrections' => []]);
+    if ($answers) { import_apply_answers($an, $answers, []); }
+    $fin = import_vc_finish($col, $an['questions'], $res['items']);
+    return [$an, $fin, $before, $res];
+};
+$vcHdr = ['Item', 'Qty', 'Unit Cost', 'Stock Value'];
+$vcRows = [
+    ['ZZV Match A', 2, 100, 200], ['ZZV Match B', 3, 50, 150],
+    ['ZZV Over big', 1, 1000, 5000],            // +4,000
+    ['ZZV Over small', 2, 100, 300],            // +100
+    ['ZZV Under big', 10, 500, 2000],           // -3,000
+    ['ZZV Under small', 4, 25, 50],             // -50
+    ['ZZV No qty', 0, 300, 1200],               // +1,200, value with no quantity
+    ['ZZV Rounding', 3, 33.33, 100],            // 99.99 vs 100: rounding
+    ['ZZV Half pct', 1000, 10, 10040],          // 40 on 10,000 = 0.4%: rounding
+    ['ZZV No price', 5, '', ''],                // stock with no unit cost
+];
+[$vcAn, $vcF, $vcMd5] = $vcRun($vcHdr, $vcRows);
+$g = $vcF['groups'][0] ?? null;
+$t($g && $g['header'] === 'Stock Value' && $g['compared'] === 9 && $g['differ'] === 5 && $g['more_n'] === 3 && abs($g['more_sum'] - 5300) < 0.005 && $g['less_n'] === 2 && abs($g['less_sum'] - 3050) < 0.005 && $g['no_qty_n'] === 1,
+    'value check: 9 rows compared, 5 disagree: 3 show 5,300 more (one with no quantity), 2 show 3,050 less; the two rounding rows are not counted', json_encode($g));
+$t($g && abs($g['calc_total'] - 16749.99) < 0.005 && abs($g['column_total'] - 19040) < 0.005, 'value check: sheet total = sum of Quantity x Unit Cost (16,749.99) and the column total (19,040) over the compared rows');
+$t(array_column($vcF['rows'], 'name') === ['ZZV Over big', 'ZZV Under big', 'ZZV No qty', 'ZZV Over small', 'ZZV Under small'], 'value check: rows sorted by the largest difference first', json_encode(array_column($vcF['rows'], 'name')));
+$t(($vcF['rows'][2]['kind'] ?? '') === 'no-qty' && ($vcF['rows'][0]['diff'] ?? 0) == 4000 && ($vcF['rows'][1]['diff'] ?? 0) == -3000 && ($vcF['rows'][0]['cell'] ?? '') === 'vc!D4', 'value check: signed differences, the no-quantity row is marked, the value cell is named', json_encode($vcF['rows'][0] ?? null));
+$t($vcF['missing_n'] === 1 && $vcF['missing'][0]['name'] === 'ZZV No price' && $vcF['missing'][0]['row'] === 11 && $vcF['show'] === true, 'value check: the new item with stock and no unit cost is listed as a missing price (row 11)', json_encode($vcF['missing']));
+// "missing prices" = the import's own "no cost" rule: an existing item counted at its stock cost is NOT listed, skipped rows are not listed
+$exV = [['id' => 91, 'name' => 'ZZV Stocked', 'category' => 'vc', 'unit' => 'kg', 'current_quantity' => 1, 'cost_per_unit' => 650, 'par_level' => 0, 'reorder_point' => 0, 'notes' => '', 'pack_name' => null, 'pack_size' => null, 'is_archived' => 0, 'recipes' => 0]];
+$mpRows = [['ZZV Stocked', 4, 0, ''], ['ZZV New free', 2, '', ''], ['ZZV New priced', 3, 40, '']];
+$mpNo = function (array $res) { return import_cont_not_counted($res['items'], [], PHP_INT_MAX)['by']['no_cost']; };
+[$mpAn, $mp1, , $mpR1] = $vcRun($vcHdr, $mpRows, [], $exV);
+$t(array_column($mp1['missing'], 'name') === ['ZZV New free'] && $mp1['missing_n'] === $mpNo($mpR1)['n'], 'missing prices: an existing item with a stock cost and a sheet price of 0 is NOT listed, the new item with no price IS, and the count equals the "no cost" count of the import', json_encode([$mp1['missing'], $mpNo($mpR1)]));
+$tickV = ['_updates' => [rh_ssi_key('ZZV Stocked') => ['quantity']]];
+[, $mp2, , $mpR2] = $vcRun($vcHdr, $mpRows, $tickV, $exV);
+$t(array_column($mp2['missing'], 'name') === ['ZZV New free'] && $mp2['missing_n'] === $mpNo($mpR2)['n'], 'missing prices: with its quantity ticked the existing item is counted at its stock cost and still not listed; counts match');
+$uidFree = '';
+foreach ($mpAn['sheets'][0]['rows'] as $rw) { if ($rw['fields']['item_name']['value'] === 'ZZV New free') { $uidFree = $rw['uid']; } }
+[, $mp3, , $mpR3] = $vcRun($vcHdr, $mpRows, ['_skip_rows' => [$uidFree => ['why' => 'test', 'code' => 'chosen']]], $exV);
+$t($uidFree !== '' && $mp3['missing_n'] === 0 && $mpNo($mpR3)['n'] === 0, 'missing prices: a skipped row is not listed (and the server does not count it as "no cost" either)');
+$t(md5(json_encode($vcAn)) === $vcMd5, 'value check: reading the check changes nothing in the analysis');
+$ov = import_vc_overview($vcF);
+$t(!isset($ov['rows']) && count($ov['groups']) === 1 && $ov['differ'] === 5, 'value check: the summary carries counts and sums only, no row list');
+$vcBig = $vcF; $vcBig['rows'] = array_merge($vcF['rows'], $vcF['rows'], $vcF['rows']);      // 15 rows: two pages of 10
+$pg = import_vc_rows($vcBig, 2, 10);
+$t($pg['total'] === 15 && $pg['pages'] === 2 && $pg['page'] === 2 && count($pg['rows']) === 5 && import_vc_rows($vcBig, 1, 0)['pages'] === 1 && count(import_vc_rows($vcBig, 1, 0)['rows']) === 15
+    && import_vc_rows($vcBig, 1, 7)['size'] === 10 && import_vc_rows($vcBig, 9, 25)['page'] === 1, 'value check: rows come page by page (10/25/50/100, anything else = 10) or all at once');
+// the import result is the same with and without the value column (the column is never imported)
+$vcNoCol = array_map(function ($r) { return array_merge(array_slice($r, 0, 3), ['kg']); }, $vcRows);
+$ctxV = ['existing' => [], 'unit_options' => ['kg', 'each'], 'corrections' => []];
+$vcWithCol = array_map(function ($r) { return array_merge(array_slice($r, 0, 3), ['kg', $r[3]]); }, $vcRows);
+$resWith = import_resolve(import_analyze_file($vcCsv(['Item', 'Qty', 'Unit Cost', 'Unit', 'Stock Value'], $vcWithCol), 'vc.csv', $al), [], $ctxV);
+$resWithout = import_resolve(import_analyze_file($vcCsv(['Item', 'Qty', 'Unit Cost', 'Unit'], $vcNoCol), 'vc.csv', $al), [], $ctxV);
+$noUid = function (array $items) { return array_map(function ($it) { unset($it['uids']); return $it; }, $items); };     // a row id carries a hash of the file bytes
+$t(count($resWith['items']) === 10 && md5(json_encode($noUid($resWith['items']))) === md5(json_encode($noUid($resWithout['items']))) && $resWith['counts'] === $resWithout['counts'] && $resWith['can_confirm'] === $resWithout['can_confirm'],
+    'value check: the import result (items, counts, can confirm) is identical with and without the value column');
+// no warning when the column matches or is absent
+[, $vcOk] = $vcRun($vcHdr, [['ZZV A', 2, 100, 200], ['ZZV B', 3, 50, 150], ['ZZV C', 3, 33.33, 100]]);
+$t($vcOk['differ'] === 0 && $vcOk['show'] === false && !import_vc_overview($vcOk)['groups'], 'value check: no warning and no download when the column agrees (rounding included)');
+[, $vcAbs] = $vcRun(['Item', 'Qty', 'Unit Cost'], [['ZZV A', 2, 100], ['ZZV B', 3, 50]]);
+$t(!$vcAbs['groups'] && $vcAbs['differ'] === 0 && $vcAbs['show'] === false, 'value check: no warning when the sheet has no value column');
+[, $vcAbsP] = $vcRun(['Item', 'Qty', 'Unit Cost'], [['ZZV A', 2, 100], ['ZZV B', 3, '']]);
+$t(!$vcAbsP['groups'] && $vcAbsP['missing_n'] === 1 && $vcAbsP['show'] === true, 'value check: no value column but stock with no unit cost: no warning, the download is still offered');
+// a tracker "Total Cost" that is Purchase Qty x Unit Price is a buying list, not a stock value: not reported
+[, $vcPq] = $vcRun(['Item', 'Balance', 'Purchase Qty', 'Unit Price', 'Total Cost'], [['ZZV A', 2, 8, 100, 800], ['ZZV B', 5, 1, 50, 50], ['ZZV C', 1, 0, 30, 0], ['ZZV D', 4, 6, 10, 60]]);
+$t(!$vcPq['groups'] && $vcPq['differ'] === 0, 'value check: a Total Cost column that is Purchase Qty x Unit Price is not reported as a wrong stock value');
+[, $vcPqU] = $vcRun(['Item', 'Balance', 'Purchase Qty', 'Unit Price', 'Total Cost'], [['ZZV A', 2, '', 100, 800], ['ZZV B', 5, '', 50, 50], ['ZZV C', 1, '', 30, 0]]);
+$t(!$vcPqU['groups'] && $vcPqU['differ'] === 0, 'value check: next to a Purchase Qty with no usable numbers (blank or uncached formulas) a Total Cost is not judged');
+$t($vcF['rows_n'] === 10 && count(import_vc_collect($vcAn)['sheets'][0]['rows']) === 9, 'value check: rows_n counts every item row of the sheet; only the 9 rows with a value cell are kept');
+// a per-case answer: the unit cost is the case price divided by the pack size, exactly as the import uses it
+$vcPeers = [];
+foreach (['Aaa', 'Bbb', 'Ccc', 'Ddd', 'Eee'] as $pn) { $vcPeers[] = ['Zq ' . $pn, 1, 'bottle', 5000, 5000]; }
+$vcCaseRows = array_merge($vcPeers, [['Qwerty', 2, 'bottle', 60000, 120000]]);
+$vcCaseHdr = ['Item Name', 'Balance', 'Unit', 'Unit Price', 'Stock Value'];
+[$vcCaseAn, $vcCase0] = $vcRun($vcCaseHdr, $vcCaseRows);
+$resCase = import_resolve($vcCaseAn, [], $ctxV + ['unit_options' => ['bottle']]);
+$cpqV = null;
+foreach ($resCase['questions'] as $q) { if ($q['type'] === 'case-price') { $cpqV = $q; } }
+$t($cpqV !== null && $vcCase0['differ'] === 0, 'value check: before the per-case answer the 60,000 row agrees with its own Stock Value (2 x 60,000)');
+[, $vcCase1] = $vcRun($vcCaseHdr, $vcCaseRows, $cpqV ? [$cpqV['qkey'] => ['key' => 'per-case', 'pack_size' => 12]] : []);
+$r0 = $vcCase1['rows'][0] ?? [];
+$t($vcCase1['differ'] === 1 && ($r0['pack'] ?? 0) === 12 && abs(($r0['cost'] ?? 0) - 5000) < 0.00005 && abs(($r0['calc'] ?? 0) - 10000) < 0.005 && abs(($r0['diff'] ?? 0) - 110000) < 0.005,
+    'value check: after "per case of 12" the row is compared with 2 x 5,000 (the cost the import uses), so the 120,000 shows 110,000 more', json_encode($r0));
+// the stock-check workbook: three tabs, the right rows and sums, values only, the real header names, the file name
+$wb = import_vc_workbook($vcF, ['file' => 'RBH test list.xlsx', 'date' => '2026-11-16', 'currency' => 'MWK']);
+$t(!empty($wb['ok']) && $wb['name'] === 'RBH test list stock check 2026-11-16.xlsx', 'stock check workbook: named "<file> stock check <date>.xlsx"', (string)($wb['name'] ?? ''));
+$rd = import_xlsx_read((string)($wb['body'] ?? ''), true);
+$tabs = array_column($rd['sheets'] ?? [], 'name');
+$t(!empty($rd['ok']) && $tabs === ['Summary', 'Stock Value wrong', 'Missing prices'], 'stock check workbook: reads back with three tabs (Summary, "Stock Value wrong", Missing prices)', json_encode($tabs));
+$cellsOf = function ($sh) { $o = []; foreach ($sh['cells'] as $r => $cs) { foreach ($cs as $c => $cl) { $o[$r][$c] = $cl['v']; } } return $o; };
+$wd = isset($rd['sheets'][1]) ? $cellsOf($rd['sheets'][1]) : [];
+$wm = isset($rd['sheets'][2]) ? $cellsOf($rd['sheets'][2]) : [];
+$diffSum = 0; $diffNames = [];
+foreach ($wd as $r => $cs) { if ($r > 1) { $diffSum += (float)($cs[9] ?? 0); $diffNames[] = $cs[2] ?? ''; } }
+$t(count($wd) === 6 && $diffNames === array_column($vcF['rows'], 'name') && abs($diffSum - (5300 - 3050)) < 0.005 && ($wd[1][8] ?? '') === 'Sheet "Stock Value" says' && ($wd[1][11] ?? '') === "Manager's explanation",
+    'stock check workbook: the wrong-value tab has the 5 rows in order, differences add up to 5,300 - 3,050, and a blank explanation column', json_encode([count($wd), $diffSum]));
+$t(count($wm) === 2 && ($wm[2][2] ?? '') === 'ZZV No price' && ($wm[1][6] ?? '') === 'Unit Cost (fill in)', 'stock check workbook: the missing-prices tab lists the one item, with a "Unit Cost (fill in)" column');
+$ws = isset($rd['sheets'][0]) ? $cellsOf($rd['sheets'][0]) : [];
+$sumText = json_encode($ws);
+$t(strpos($sumText, '=B2*C2 in D2') !== false && strpos($sumText, '16749.99') !== false && strpos($sumText, 'NOT proof of loss') !== false, 'stock check workbook: the summary gives the totals and the fix with the sheet\'s own letters (=B2*C2 in D2)');
+$noF = true; foreach ($rd['sheets'] ?? [] as $sh) { foreach ($sh['cells'] as $cs) { foreach ($cs as $cl) { if (!empty($cl['is_formula'])) { $noF = false; } } } }
+$t($noF, 'stock check workbook: values only, no formulas');
+[, $vcInj] = $vcRun($vcHdr, [['=HYPERLINK("x")', 1, 10, 99]]);
+$rdi = import_xlsx_read((string)import_vc_workbook($vcInj, ['file' => 'x.csv'])['body'], true);
+$injOk = false; foreach ($rdi['sheets'][1]['cells'] ?? [] as $cs) { foreach ($cs as $cl) { if ($cl['v'] === '=HYPERLINK("x")' && empty($cl['is_formula'])) { $injOk = true; } } }
+$t($injOk, 'stock check workbook: an item name that looks like a formula is written as plain text');
+
 // cleanup
 foreach ($tmpFiles as $f) { @unlink($f); }
 @rmdir($tmpDir);

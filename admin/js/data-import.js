@@ -245,6 +245,7 @@
                         orig.title = 'Download the file exactly as it was uploaded. The copy is kept only until the import is finished or cancelled.';
                         orig.insertBefore(h('i', 'fas fa-download'), orig.firstChild); acts.appendChild(orig);
                     }
+                    if (j.check) { acts.appendChild(stockCheckLink(j.id)); }
                     var open = h('button', 'btn-secondary di-btn', j.status === 'committed' ? 'View result' : 'Open');
                     open.type = 'button';
                     if (j.status !== 'failed') { open.addEventListener('click', function () { loadJob(j.id); }); acts.appendChild(open); }
@@ -985,6 +986,7 @@
             S.R = {};
             add(p, h('h3', 'di-h', 'Step 3 · Review and answer'));
             add(p, helpLine('Each line below is one stock item as it would be imported. The small grey tag under every value (like "BAR!C12") is the cell it was read from. Answer the questions that sit under an item; nothing is saved to stock until step 4.'));
+            var vcBox3 = valueCheckBlock(); if (vcBox3) { p.appendChild(vcBox3); }
             var structOpen = s.questions.filter(function (q) { return isStructural(q) && isOpenQ(q) && q.blocking; });
             if (structOpen.length) {
                 var b = h('p', 'di-warn');
@@ -1135,7 +1137,7 @@
         }
         function absorb(r) {
             // r = a page reply (lite) or an answer/bulk/fields reply's summary (overview + page)
-            ['can_confirm', 'why_not', 'entry_counts', 'progress', 'confirm', 'counts', 'questions', 'sheets', 'totals', 'warnings', 'file', 'job', 'skipped_by_code', 'skipped_by_you', 'heal_counts', 'heal_total', 'heals_undone', 'handled'].forEach(function (k) { if (r[k] !== undefined) { S.sum[k] = r[k]; } });
+            ['can_confirm', 'why_not', 'entry_counts', 'progress', 'confirm', 'counts', 'questions', 'sheets', 'totals', 'warnings', 'file', 'job', 'skipped_by_code', 'skipped_by_you', 'heal_counts', 'heal_total', 'heals_undone', 'handled', 'value_check'].forEach(function (k) { if (r[k] !== undefined) { S.sum[k] = r[k]; } });
             var pg = r.page;
             if (!pg) { return; }
             if (pg.facets) { S.facets = pg.facets; } else if (S.page && S.page.facets) { pg.facets = S.page.facets; }
@@ -1655,6 +1657,82 @@
             return (S.step === 3 && S.f.view === 'list' && S.R && S.R.results) ? fpayload({ paged: '1', facets: '1' }) : {};
         }
 
+        // ---------- the sheet's own value column vs Quantity x Unit Cost (report only: it never blocks and never changes what is imported) ----------
+        function stockCheckLink(jobId) {
+            var a = h('a', 'btn-secondary di-btn', ' Download the stock check (Excel)');
+            a.href = page + '?action=stock_check&job=' + encodeURIComponent(jobId);      // no download attribute: a refusal shows as a plain page, never a broken .xlsx
+            a.title = 'An Excel workbook for the manager: a summary, every row where the value column is wrong (with a column to explain each one) and the items with stock but no unit cost.';
+            a.insertBefore(h('i', 'fas fa-download'), a.firstChild);
+            return a;
+        }
+        function rowsN(n) { return num(n, 0) + ' row' + (n === 1 ? '' : 's'); }
+        function valueCheckBlock() {
+            var vc = (S.sum && S.sum.value_check) || null;
+            if (!vc || !vc.show) { return null; }
+            var cur = vc.currency ? vc.currency + ' ' : '';
+            var money = function (x) { return cur + num(x, 2); };
+            var box = h('div', 'di-what di-valuecheck');
+            var multi = Object.keys(vc.sheets || {}).length > 1;
+            (vc.groups || []).forEach(function (g) {
+                var parts = [];
+                if (g.more_n) { parts.push(money(g.more_sum) + ' more on ' + rowsN(g.more_n)); }
+                if (g.less_n) { parts.push(money(g.less_sum) + ' less on ' + rowsN(g.less_n)); }
+                var t = (multi ? 'Sheet "' + g.sheet + '": ' : '') + 'The sheet\'s \'' + g.header + '\' column disagrees with Quantity × Unit Cost on ' + rowsN(g.differ) + '. It shows ' + parts.join(' and ') +
+                    '. The import uses Quantity × Unit Cost (sheet total ' + money(g.calc_total) + '), not this column.';
+                if (g.no_qty_n) { t += ' ' + num(g.no_qty_n, 0) + ' of these rows ' + (g.no_qty_n === 1 ? 'shows' : 'show') + ' a value with no quantity.'; }
+                box.appendChild(h('p', 'di-warn', t));
+                var sh = (vc.sheets || {})[g.sheet] || {};
+                box.appendChild(helpLine('Quantity = "' + (sh.qty_heads || []).join('" + "') + '", Unit Cost = "' + (sh.price_head || '') + '" (divided by the pack size where you said a price is per case). The sheet total adds Quantity × Unit Cost over the ' + rowsN(g.compared) + ' that have all three filled in; the column\'s own total is ' + money(g.column_total) + '. Differences under 0.5% (or 0.5) are rounding and not counted. This is only a warning: it does not stop the import.'));
+            });
+            if (vc.missing_n) {
+                box.appendChild(h('p', 'di-warn', num(vc.missing_n, 0) + ' item' + (vc.missing_n === 1 ? ' has' : 's have') + ' stock but no unit cost, so ' + (vc.missing_n === 1 ? 'it is' : 'they are') + ' not in the opening count' + ((vc.missing_sample || []).length ? ': ' + vc.missing_sample.join(', ') + (vc.missing_n > vc.missing_sample.length ? ' and ' + num(vc.missing_n - vc.missing_sample.length, 0) + ' more' : '') : '') + '.'));
+            }
+            var dl = h('div', 'di-actions'); dl.appendChild(stockCheckLink(S.job)); box.appendChild(dl);
+            box.appendChild(helpLine('The download lists every row so the manager can explain them one by one (largest difference first), plus the items to price.'));
+            if (vc.differ) { box.appendChild(valueRowsList(vc, money)); }
+            return box;
+        }
+        function valueRowsList(vc, money) {
+            var det = h('details', 'di-details');
+            var heads = (vc.groups || []).map(function (g) { return g.header; }).filter(function (x, i, a) { return a.indexOf(x) === i; });
+            var colHead = heads.length === 1 ? heads[0] : 'Value column';
+            det.appendChild(h('summary', null, 'Show the ' + rowsN(vc.differ) + ' (largest difference first)'));
+            var st = { page: 1, size: 10, loaded: false };
+            var info = helpLine('Quantity and Unit cost are read from your sheet; Quantity × Unit cost is what the import uses; "' + colHead + '" is the sheet\'s own figure (never imported); Difference = the sheet\'s figure minus Quantity × Unit cost.');
+            var sizeSel = h('select', 'di-select'); sizeSel.setAttribute('aria-label', 'Rows per page');
+            [[10, 'Show 10'], [25, 'Show 25'], [50, 'Show 50'], [100, 'Show 100'], [0, 'Show all']].forEach(function (o) { var op = h('option', null, o[1]); op.value = String(o[0]); sizeSel.appendChild(op); });
+            var wrap = h('div', 'di-tablewrap'), tb = h('table', 'di-table di-lt'), thead = h('thead'), htr = h('tr');
+            ['Item', 'Quantity', 'Unit cost', 'Quantity × Unit cost', colHead, 'Difference'].forEach(function (x) { htr.appendChild(h('th', null, x)); });
+            thead.appendChild(htr); tb.appendChild(thead);
+            var body = h('tbody'); tb.appendChild(body); wrap.appendChild(tb);
+            var pgBox = h('div');
+            var ctrl = h('div', 'di-bulk-row'); ctrl.appendChild(ctlWrap('Rows per page', sizeSel, 'How many rows to show at once.'));
+            add(det, info, ctrl, wrap, pgBox);
+            var load = function () {
+                post('value_rows', { job: S.job, page: st.page, size: st.size }).then(function (r) {
+                    if (!r.ok) { msg(r.error || 'The list could not be loaded.'); return; }
+                    clear(body);
+                    r.rows.forEach(function (x) {
+                        var tr = h('tr', 'di-row');
+                        var t1 = cell('Item'); add(t1, itemNameEl(x.name), h('div', 'di-capline'), src(x.cell));
+                        if (x.kind === 'no-qty') { t1.appendChild(h('div', 'di-small', 'shows value with no quantity')); }
+                        var t2 = cell('Quantity'); t2.textContent = num(x.qty);
+                        var t3 = cell('Unit cost'); t3.textContent = money(x.cost);
+                        if (x.pack) { t3.appendChild(h('div', 'di-small', num(x.price, 2) + ' per case of ' + num(x.pack, 0))); }
+                        var t4 = cell('Quantity × Unit cost'); t4.textContent = money(x.calc);
+                        var t5 = cell(colHead); t5.textContent = money(x.value);
+                        var t6 = cell('Difference'); add(t6, h('strong', null, (x.diff > 0 ? '+' : '−') + money(Math.abs(x.diff))), h('div', 'di-small', x.diff > 0 ? 'the sheet shows more' : 'the sheet shows less'));
+                        add(tr, t1, t2, t3, t4, t5, t6); body.appendChild(tr);
+                    });
+                    clear(pgBox);
+                    if (r.pages > 1) { pgBox.appendChild(pagerEl({ page: r.page, pages: r.pages, size: r.size || r.total, total: r.total }, function (n) { st.page = n; load(); })); }
+                });
+            };
+            sizeSel.addEventListener('change', function () { st.size = parseInt(sizeSel.value, 10) || 0; st.page = 1; load(); });
+            det.addEventListener('toggle', function () { if (det.open && !st.loaded) { st.loaded = true; load(); } });
+            return det;
+        }
+
         // ---------- step 4: confirm ----------
         function renderConfirm() {
             var p = clear(panels[4]);
@@ -1691,6 +1769,7 @@
             p.appendChild(what);
             fixedSections(p);
             // right before the Import button: the stock that will NOT be in the opening count, by its true reason (worked out on the server)
+            var vcBox4 = valueCheckBlock(); if (vcBox4) { p.appendChild(vcBox4); }
             var ncBox = notCountedBlock(cf.not_counted, cf.qty_tick, cf.cost_tick);
             if (ncBox) { p.appendChild(ncBox); }
             var why = h('p', 'di-why');
@@ -1871,6 +1950,11 @@
                 document.body.appendChild(f); f.submit(); document.body.removeChild(f);
             });
             nav.appendChild(xb);
+            var sc = r.stock_check || null;
+            if (sc && ((sc.differ || 0) + (sc.missing || 0)) > 0 && S.job) {
+                nav.appendChild(stockCheckLink(S.job));
+                p.appendChild(h('p', 'di-small', (sc.differ ? 'The sheet\'s value column disagreed with Quantity × Unit Cost on ' + rowsN(sc.differ) + '. ' : '') + (sc.missing ? num(sc.missing, 0) + ' item' + (sc.missing === 1 ? '' : 's') + ' had stock but no unit cost. ' : '') + 'The stock check workbook lists them for the manager.'));
+            }
             if (r.opening_count_id) {
                 var a = h('a', 'btn-primary di-btn', 'Open the opening count' + (r.opening_count_ref ? ' (' + r.opening_count_ref + ')' : ''));
                 a.href = 'stock-count.php?id=' + encodeURIComponent(r.opening_count_id);

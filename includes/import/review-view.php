@@ -713,6 +713,8 @@ if (!function_exists('import_rv_build')) {
         $an = $state['analysis'];
         $out = ['ok' => true];
         if (($opts['overview'] ?? true) !== false) {
+            // the sheet's own value column vs Quantity x Unit Cost: counts and sums only (the rows come page by page from action value_rows)
+            $vc = import_vc_overview(import_job_value_check($state)) + ['currency' => function_exists('getSetting') ? (string)getSetting('currency_symbol', '') : ''];
             $out += [
                 'job' => ['id' => (int)$state['job']['id'], 'file' => $state['job']['original_name'], 'status' => $state['job']['status'], 'target' => $state['job']['target'],
                     'created_at' => $state['job']['created_at']],
@@ -723,7 +725,7 @@ if (!function_exists('import_rv_build')) {
                     return $V['qs'][$id];
                 }, $V['struct_qids']),
                 'entry_counts' => $V['entry_counts'], 'progress' => $V['progress'], 'confirm' => import_rv_count_check($pdo, $res) + $V['confirm'],
-            ] + import_cont_overview($res) + ['handled' => import_cont_handled_rows($an)];
+            ] + import_cont_overview($res) + ['handled' => import_cont_handled_rows($an), 'value_check' => $vc];
         } else {
             $out += ['can_confirm' => $res['can_confirm'], 'why_not' => $res['why_not'], 'entry_counts' => $V['entry_counts'], 'progress' => $V['progress']] + import_cont_overview($res);
         }
@@ -917,5 +919,43 @@ if (!function_exists('import_rv_build')) {
             return null;
         }
         return $job;
+    }
+
+    /** One page of the rows whose value-column figure disagrees with Quantity x Unit Cost (largest difference first). $size: 10/25/50/100, 0 = all. */
+    function import_job_value_rows(PDO $pdo, int $jobId, int $page, int $size): array
+    {
+        $state = import_job_state($pdo, $jobId);
+        if (!$state) {
+            return ['ok' => false, 'error' => 'That import cannot be reviewed.'];
+        }
+        return ['ok' => true] + import_vc_rows(import_job_value_check($state), $page, $size);
+    }
+
+    /**
+     * The stock-check workbook of a job (Summary / "<value column> wrong" / Missing prices). Read only, from the stored analysis (no file read).
+     * A committed job also shows the system stock value now and its opening count reference. Returns ['ok','name','body'] or ['ok'=>false,'error'].
+     */
+    function import_job_stock_check_export(PDO $pdo, int $jobId): array
+    {
+        $state = import_job_state($pdo, $jobId);
+        if (!$state) {
+            return ['ok' => false, 'error' => 'The details of this import are no longer stored, so the stock check cannot be made.'];
+        }
+        $fin = import_job_value_check($state);
+        if (empty($fin['show'])) {
+            return ['ok' => false, 'error' => 'Nothing to report: the value column agrees with Quantity x Unit Cost and every item with stock has a unit cost.'];
+        }
+        $job = $state['job'];
+        $now = (string)$pdo->query("SELECT DATE_FORMAT(NOW(), '%Y-%m-%d %H:%i')")->fetchColumn();     // the hotel's clock (the app's database session), as the stock export
+        $meta = ['file' => (string)$job['original_name'], 'date' => substr($now, 0, 10),
+            'currency' => function_exists('getSetting') ? (string)getSetting('currency_symbol', '') : ''];
+        if (($job['status'] ?? '') === 'committed') {
+            $r = json_decode((string)($job['result_json'] ?? ''), true);
+            $meta['committed'] = true;
+            $meta['count_ref'] = is_array($r) ? (string)($r['opening_count_ref'] ?? '') : '';
+            $meta['system_value'] = function_exists('rh_stock_valuation') ? rh_stock_valuation($pdo) : null;
+            $meta['valued_at'] = $now;
+        }
+        return import_vc_workbook($fin, $meta);
     }
 }

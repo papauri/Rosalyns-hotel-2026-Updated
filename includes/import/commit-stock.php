@@ -200,6 +200,14 @@ if (!function_exists('import_commit_stock')) {
                 'skipped_by_you' => (int)import_cont_overview($v['res'])['skipped_by_you'], 'fixed_for_you' => (int)array_sum($v['res']['heal_counts']),
                 'next_step' => 'A different manager must approve the opening count on Stock Count before any stock appears.',
             ];
+            // report only: does the sheet's own value column disagree with Quantity x Unit Cost, or is there stock with no unit cost?
+            // (shown on the result screen and in Import history as the stock-check workbook; never changes what was imported)
+            try {
+                $vcFin = import_vc_finish((array)($v['vc_col'] ?? []), (array)($v['analysis']['questions'] ?? []), (array)($v['res']['items'] ?? []));
+                $result['stock_check'] = ['differ' => (int)$vcFin['differ'], 'missing' => (int)$vcFin['missing_n']];
+            } catch (Throwable $e) {
+                // a fault in the report never stops the import (no stock_check key = no stock-check link in Import history)
+            }
             $pdo->prepare("UPDATE import_jobs SET status = 'committed', committed_by = ?, committed_at = NOW(), result_json = ?, error_text = NULL WHERE id = ?")
                 ->execute([$userId > 0 ? $userId : null, import_json($result), $jobId]);
             if (function_exists('logActivity')) {

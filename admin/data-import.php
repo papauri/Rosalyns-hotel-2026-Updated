@@ -14,6 +14,7 @@
  * delete = remove one finished entry from Import history (owner 2026-11-15): same high-level permission as Clear Stock Data (rh_sc_authorize:
  * administrator + data_reset), the typed word DELETE and the person's own password; a backup is written first (includes/import/delete.php).
  * GET ?action=csv&job=ID downloads the preview CSV; GET ?action=skipped&job=ID&format=csv|xlsx downloads the rows that were left out;
+ * GET ?action=stock_check&job=ID downloads the stock-check workbook (value column vs Quantity x Unit Cost, stock with no unit cost); POST value_rows pages its rows.
  * GET ?action=original&job=ID downloads the uploaded file as it was uploaded (while the stored copy still exists).
  * All page text built from the file (names, sheets, cells) is set with textContent in the browser - it is never parsed as HTML.
  */
@@ -176,6 +177,59 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET' && $action === 'skipped') {
     exit;
 }
 
+// ---- download: the stock-check workbook (the sheet's value column vs Quantity x Unit Cost, and stock with no unit cost) -------------------------
+// Same gates as above; only the uploader or an admin. Built from the stored analysis (no file read), so it still works after the import while
+// the job's details are kept. Read only: it never changes what is (or was) imported.
+if (($_SERVER['REQUEST_METHOD'] ?? '') === 'GET' && $action === 'stock_check') {
+    // a refusal is a small plain page (the link has no download attribute), never an error text saved under an .xlsx name
+    $scFail = function (int $code, string $text) {
+        while (ob_get_level() > 0) {
+            @ob_end_clean();
+        }
+        http_response_code($code);
+        header('Content-Type: text/html; charset=utf-8');
+        header('X-Content-Type-Options: nosniff');
+        header('Cache-Control: no-store');
+        echo '<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Stock check</title></head>'
+            . '<body style="font-family:sans-serif;max-width:640px;margin:40px auto;padding:0 16px;line-height:1.5"><h1 style="font-size:20px">The stock check cannot be downloaded</h1><p>'
+            . htmlspecialchars($text, ENT_QUOTES, 'UTF-8') . '</p><p><a href="data-import.php">Back to Import</a></p></body></html>';
+        exit;
+    };
+    $jobId = (int)($_GET['job'] ?? 0);
+    $job = di_job($pdo, $jobId, $uid, $isAdmin);
+    if (!$job || !in_array($job['status'], ['analysed', 'reviewing', 'confirmed', 'committed'], true)) {
+        $scFail(404, 'That import is not available.');
+    }
+    if ((int)($job['analysis_bytes'] ?? 0) === 0) {
+        $scFail(410, 'The details of this import are no longer stored, so the stock check cannot be made.');
+    }
+    $mem = import_mem_check_review((int)$job['analysis_bytes'], import_default_aliases());
+    if (!$mem['ok']) {
+        $scFail(422, (string)$mem['message']);
+    }
+    if (session_status() === PHP_SESSION_ACTIVE) {
+        session_write_close();          // a big workbook must not hold the person's session (other tabs keep working)
+    }
+    @set_time_limit(180);
+    $f = import_job_stock_check_export($pdo, $jobId);
+    if (empty($f['ok'])) {
+        $scFail(422, (string)$f['error']);
+    }
+    while (ob_get_level() > 0) {
+        @ob_end_clean();
+    }
+    if (function_exists('logActivity')) {
+        logActivity($uid, 'stock_check_export', 'Stock check workbook downloaded: import #' . $jobId . ' (' . import_clean_name((string)$job['original_name']) . ').');
+    }
+    $ascii = trim((string)preg_replace('/[^A-Za-z0-9._ ()-]+/', '_', (string)$f['name']));
+    header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    header('X-Content-Type-Options: nosniff');
+    header('Content-Disposition: attachment; filename="' . $ascii . '"; filename*=UTF-8\'\'' . rawurlencode((string)$f['name']));
+    header('Cache-Control: no-store');
+    echo $f['body'];
+    exit;
+}
+
 // ---- download: the original uploaded file, exactly as it was uploaded, with its own name ---------------------------------------
 // Same gates as above (kill switch, data_import AND stock_management). Only the uploader or an admin. Read-only, streamed from the
 // private folder; the copy exists only until the import is finished / cancelled / expired (import_purge_staged), then 410.
@@ -318,7 +372,7 @@ if ($isAjax) {
 
     if ($action === 'list') {
         import_purge_staged($pdo);
-        $sql = "SELECT j.id, j.original_name, j.stored_path, j.status, j.created_at, j.committed_at, j.error_text, j.result_json, j.created_by,
+        $sql = "SELECT j.id, j.original_name, j.stored_path, j.status, j.created_at, j.committed_at, j.error_text, j.result_json, j.created_by, (j.analysis_json IS NOT NULL AND j.analysis_json <> '') AS has_analysis,
                        COALESCE(NULLIF(u.full_name, ''), u.username, '') AS by_name
                 FROM import_jobs j LEFT JOIN admin_users u ON u.id = j.created_by
                 WHERE j.target = 'stock' AND j.status <> 'cancelled' AND j.created_at > DATE_SUB(NOW(), INTERVAL 30 DAY)"
@@ -334,6 +388,9 @@ if ($isAjax) {
                 'created' => is_array($res) ? (int)($res['created'] ?? 0) : null, 'updated' => is_array($res) ? (int)($res['updated'] ?? 0) : null,
                 'has_file' => import_job_file_path($j) !== '',   // the uploaded copy is still stored, so the Download button can show
                 'deletable' => import_job_delete_block_reason($j) === '',   // finished, failed or cancelled (never one in progress)
+                // the stock-check workbook (value column wrong / stock with no unit cost), counted at commit; offered while the job's details are kept
+                'check' => (string)$j['status'] === 'committed' && !empty($j['has_analysis']) && is_array($res) && isset($res['stock_check'])
+                    && ((int)($res['stock_check']['differ'] ?? 0) + (int)($res['stock_check']['missing'] ?? 0)) > 0,
             ];
         }
         [$canDelete] = rh_sc_authorize($pdo, $uid);
@@ -352,7 +409,7 @@ if ($isAjax) {
     }
 
     // Opening an analysed job decodes and resolves its stored analysis: where this server's memory_limit cannot hold that (and cannot be raised), say so plainly.
-    if (in_array($action, ['summary', 'review_page', 'bulk', 'answer', 'fields', 'skip', 'unskip', 'unit_items', 'unit_choice', 'heal_undo', 'fixed_list', 'tick_all'], true) && (int)($job['analysis_bytes'] ?? 0) > 0) {
+    if (in_array($action, ['summary', 'review_page', 'bulk', 'answer', 'fields', 'skip', 'unskip', 'unit_items', 'unit_choice', 'heal_undo', 'fixed_list', 'tick_all', 'value_rows'], true) && (int)($job['analysis_bytes'] ?? 0) > 0) {
         $mem = import_mem_check_review((int)$job['analysis_bytes'], import_default_aliases());
         if (!$mem['ok']) {
             di_json(['ok' => false, 'error' => $mem['message'], 'state' => 'toobig']);
@@ -361,7 +418,11 @@ if ($isAjax) {
 
     if ($action === 'summary') {
         if ($job['status'] === 'committed') {
-            di_json(['ok' => true, 'state' => 'committed', 'file' => $job['original_name'], 'result' => json_decode((string)$job['result_json'], true)]);
+            $resC = json_decode((string)$job['result_json'], true);
+            if (is_array($resC) && (int)($job['analysis_bytes'] ?? 0) === 0) {
+                unset($resC['stock_check']);        // the stock check is built from the stored analysis: gone = no link
+            }
+            di_json(['ok' => true, 'state' => 'committed', 'file' => $job['original_name'], 'result' => $resC]);
         }
         if ($job['status'] === 'cancelled') {
             di_json(['ok' => false, 'error' => 'This import was cancelled.', 'state' => 'cancelled']);
@@ -483,6 +544,10 @@ if ($isAjax) {
             $r['summary']['state'] = 'review';
         }
         di_json($r);
+    }
+
+    if ($action === 'value_rows') {       // the rows whose value-column figure disagrees with Quantity x Unit Cost, largest difference first (report only)
+        di_json(import_job_value_rows($pdo, $jobId, (int)($_POST['page'] ?? 1), (int)($_POST['size'] ?? 10)));
     }
 
     if ($action === 'fixed_list') {       // Step 4 lists: rows left out (kind=skipped) and repairs (kind=heals), grouped / searched / paged on the server

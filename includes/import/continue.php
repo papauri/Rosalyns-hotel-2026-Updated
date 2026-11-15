@@ -848,6 +848,34 @@ if (!function_exists('import_job_skip')) {
      *   overlap         the item is already in another unfinished opening count ($overlapIds = ingredient id => true), so it is left out of this one
      * Items still waiting for an answer are not listed (they block Import anyway). Counts are exact; names are capped at $cap per reason.
      */
+    /** Why ONE item's stock is left out of the opening count (no_cost, not_ticked, cost_not_ticked, same, skipped, overlap), or null when it is counted / has no stock / is not ready. */
+    function import_cont_not_counted_reason(array $it, array $overlapIds = []): ?string
+    {
+        $bal = $it['balance'] ?? null;
+        if ($bal === null || (float)$bal <= 0.00005) {
+            return null;
+        }
+        $st = (string)($it['status'] ?? '');
+        $ex = !empty($it['match']);
+        $ticked = (array)($it['ticked'] ?? []);
+        if ($st === 'skipped') {
+            return 'skipped';
+        }
+        if ($st !== 'ready') {
+            return null;
+        }
+        if (!empty($it['in_count'])) {
+            return ($ex && isset($overlapIds[(int)$it['match']['id']])) ? 'overlap' : null;
+        }
+        if (!$ex) {
+            return 'no_cost';
+        }
+        if (in_array('quantity', $ticked, true)) {
+            return (isset($it['diff']['cost']) && !in_array('cost', $ticked, true) && $it['cost'] !== null && (float)$it['cost'] > 0) ? 'cost_not_ticked' : 'no_cost';
+        }
+        return isset($it['diff']['quantity']) ? 'not_ticked' : 'same';
+    }
+
     function import_cont_not_counted(array $items, array $overlapIds = [], int $cap = 40): array
     {
         $by = [];
@@ -855,31 +883,7 @@ if (!function_exists('import_job_skip')) {
             $by[$k] = ['n' => 0, 'names' => []];
         }
         foreach ($items as $it) {
-            $bal = $it['balance'] ?? null;
-            if ($bal === null || (float)$bal <= 0.00005) {
-                continue;
-            }
-            $st = (string)($it['status'] ?? '');
-            $ex = !empty($it['match']);
-            $ticked = (array)($it['ticked'] ?? []);
-            $why = null;
-            if ($st === 'skipped') {
-                $why = 'skipped';
-            } elseif ($st !== 'ready') {
-                continue;
-            } elseif (!empty($it['in_count'])) {
-                if ($ex && isset($overlapIds[(int)$it['match']['id']])) {
-                    $why = 'overlap';
-                }
-            } elseif (!$ex) {
-                $why = 'no_cost';
-            } elseif (in_array('quantity', $ticked, true)) {
-                $why = (isset($it['diff']['cost']) && !in_array('cost', $ticked, true) && $it['cost'] !== null && (float)$it['cost'] > 0) ? 'cost_not_ticked' : 'no_cost';
-            } elseif (isset($it['diff']['quantity'])) {
-                $why = 'not_ticked';
-            } else {
-                $why = 'same';
-            }
+            $why = import_cont_not_counted_reason($it, $overlapIds);
             if ($why === null) {
                 continue;
             }

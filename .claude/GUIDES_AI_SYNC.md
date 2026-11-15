@@ -19,6 +19,15 @@ when prompted."
 
 ## Pending (oldest first)
 
+### Import stock check: value column warning + stock check workbook (2026-11-16, owner ask) — hashes in TASKS.md
+- Guides (Stock > Import, review / confirm / result / history): when the sheet's value column (e.g. "Stock Value")
+  disagrees with Quantity x Unit Cost, a warning shows how many rows and how much more/less (MWK), with the rows (10 per
+  page). "Download stock check" gives a workbook: Summary, "<column> wrong" (biggest gap first, red = sheet shows more,
+  green = less, implied quantity, blank Manager's explanation column) and Missing prices (items with stock but no cost,
+  same count as the "no cost" list before Import). Offered in review, after Import and from Import history; logged as
+  stock_check_export. Never changes what is imported.
+- Assistant: result_json gains value_check / stock_check keys (includes/ai/ai-import.php reads result_json) - check at sync.
+
 ### Import wizard reads more column headings (2026-11-16, owner ask) — hashes in TASKS.md
 - Guides (Stock > Import, step 2): the wizard now recognises our own Stock > Ingredients export headings and common
   variants (Current Quantity level / Current Qty = Balance; Unit Cost / Cost/Unit / Average cost = Unit price; Max qty /
