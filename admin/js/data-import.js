@@ -11,7 +11,10 @@
     var FIELD_LABEL = {
         item_name: 'Item name', batch: 'Batch', qty_primary: 'Balance (bar / kitchen)', qty_secondary: 'Balance (stores)', qty_single: 'Balance',
         unit: 'Unit', expiry: 'Expiry date', max_level: 'Par / maximum level', min_level: 'Reorder level', unit_price: 'Unit price',
-        remarks: 'Remarks', category: 'Category'
+        remarks: 'Remarks', category: 'Category',
+        // columns that are recognised but never imported (shown greyed)
+        min_qty: 'Minimum quantity', lead_time: 'Lead time (days)', qty_total: 'Total balance', days_to_expiry: 'Days to expiry',
+        status: 'Status', action: 'Action', purchase_qty: 'Quantity to order', total_cost: 'Total value', row_no: 'Row number'
     };
     var DIFF_LABEL = { category: 'Category', cost: 'Cost per unit', par: 'Par level', pack: 'Pack size', quantity: 'Opening stock quantity' };
     var STATUS_LABEL = { 'ready': 'Ready', 'needs-answer': 'Needs answer', 'skipped': 'Skipped', 'blocked': 'Blocked' };
@@ -846,13 +849,27 @@
             });
             thead.appendChild(tr); tb.appendChild(thead);
             var body = h('tbody');
+            var hasReorderCol = (sh.columns || []).some(function (x) { return x.field === 'min_level' && !x.derived && x.state === 'mapped'; });
             (sh.columns || []).forEach(function (c) {
                 var r = h('tr', c.derived || !c.field ? 'is-grey' : '');
                 var what, as;
-                if (c.derived) { as = FIELD_LABEL[c.field] || c.field; what = 'Not imported: worked out from other columns.'; }
+                if (c.derived) {
+                    as = FIELD_LABEL[c.field] || c.field;
+                    if (c.field === 'min_qty') {
+                        what = hasReorderCol ? 'Not imported: this sheet has its own reorder level column, and stock keeps one minimum level.'
+                            : 'Not imported: another column of this sheet may be the reorder level (see the questions), and stock keeps one minimum level.';
+                    }
+                    else if (c.field === 'lead_time') { what = 'Not imported: the import does not set lead times.'; }
+                    else if (c.field === 'row_no') { what = 'Not imported: a row number or code, not stock data.'; }
+                    else { what = 'Not imported: worked out from other columns.'; }
+                }
                 else if (!c.field) { as = '—'; what = c.header ? 'Not imported: not recognised as stock data.' : 'Empty column.'; }
                 else if (c.state === 'question') { as = FIELD_LABEL[c.field] || c.field; what = 'Not sure: you are asked in the next step.'; }
-                else { as = FIELD_LABEL[c.field] || c.field; what = 'Imported' + (c.filled !== null && c.filled !== undefined ? ' (' + c.filled + ' filled)' : '') + '.'; }
+                else {
+                    as = FIELD_LABEL[c.field] || c.field;
+                    what = 'Imported' + (c.filled !== null && c.filled !== undefined ? ' (' + c.filled + ' filled)' : '') + '.';
+                    if (c.fallback_from === 'min_qty') { what += ' Used as the reorder level because the sheet has no reorder level column.'; }
+                }
                 var td1 = h('td', null, c.letter); td1.setAttribute('data-label', 'Column');
                 var td2 = h('td'); td2.setAttribute('data-label', 'Heading in your file');
                 add(td2, h('span', null, c.header || '(no heading)'), ' ', src(c.ref));

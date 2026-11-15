@@ -21,11 +21,15 @@ if (!function_exists('import_default_aliases')) {
     function import_default_aliases(): array
     {
         return [
-            'version' => 1,
+            // Bump when phrases are added: import_seed_aliases() then tops every existing hotel up ONCE (INSERT IGNORE on the
+            // alias hash, so nothing is ever doubled). v2 (2026-11-16): our own Stock > Ingredients CSV export headings and
+            // renamed copies of it ("Current Quantity level", "Minimum Quantity level", "Lead Time (days)" ...).
+            'version' => 2,
             'fields' => [
                 'item_name' => [
                     'item name', 'item', 'items', 'item description', 'description', 'product', 'product name',
                     'name', 'article', 'stock item', 'particulars', 'ingredient', 'material', 'goods', 'details',
+                    'ingredient name', 'stock name', 'stock description', 'product description', 'commodity',
                 ],
                 'batch' => ['batch', 'batch no', 'batch number', 'batch ref', 'lot', 'lot no', 'lot number'],
                 'qty_primary' => [
@@ -40,23 +44,39 @@ if (!function_exists('import_default_aliases')) {
                     'balance', 'qty', 'quantity', 'stock', 'stock balance', 'on hand', 'qty on hand',
                     'quantity on hand', 'closing balance', 'closing stock', 'current stock', 'count',
                     'physical count', 'opening balance', 'opening stock', 'stock on hand', 'available',
+                    // v2. "Current Qty", "Closing Qty", "Qty Available" ... already read as Balance through "qty"; adding them
+                    // word for word would only turn headings like "Main Store Current Qty" into questions, so they are left out.
+                    'current quantity level', 'current level', 'current stock level', 'in stock', 'on hand qty',
                 ],
-                'unit' => ['unit', 'units', 'uom', 'unit of measure', 'unit of measurement', 'measure', 'measurement'],
+                'unit' => [
+                    'unit', 'units', 'uom', 'unit of measure', 'unit of measurement', 'measure', 'measurement',
+                    'unit type', 'units of measure',
+                ],
                 'expiry' => [
                     'expiry', 'expiry date', 'expiration', 'expiration date', 'expire date', 'expires', 'exp',
-                    'exp date', 'best before', 'best before date', 'use by', 'use by date',
+                    'exp date', 'best before', 'best before date', 'use by', 'use by date', 'next expiry date',
                 ],
                 'max_level' => [
                     'max level', 'maximum level', 'max', 'maximum', 'max stock', 'maximum stock', 'par', 'par level',
                     'par stock', 'order up to',
+                    'maximum quantity', 'maximum quantity level', 'max qty', 'max quantity', 'order up to level', 'par qty',
                 ],
                 'min_level' => [
                     'min level', 'minimum level', 'min', 'minimum', 'min stock', 'minimum stock', 'reorder level',
                     're order level', 'reorder point', 're order point', 'safety stock',
+                    'minimum stock level', 'min stock level', 'low stock level', 'alert level',
+                ],
+                // A minimum QUANTITY column ("Min Qty" in our own export): stock keeps one level the import can set (the reorder
+                // point = min_level). Listed under 'derived' (greyed, never imported) and promoted to min_level only when the sheet
+                // has no reorder/min-level column of its own: see 'field_fallbacks' and import_map_apply_fallbacks().
+                'min_qty' => [
+                    'min qty', 'min quantity', 'minimum qty', 'minimum quantity', 'minimum quantity level', 'min quantity level',
+                    'min qty level',
                 ],
                 'unit_price' => [
                     'unit price', 'price', 'cost', 'unit cost', 'cost price', 'buying price', 'purchase price',
                     'rate', 'price per unit', 'cost per unit', 'unit rate',
+                    'cost unit', 'unit cost price', 'avg cost', 'average cost', 'weighted average cost', 'buying cost',
                 ],
                 'remarks' => ['remarks', 'remark', 'comments', 'comment', 'notes', 'note', 'observations'],
                 'category' => ['category', 'categories', 'department', 'dept', 'group', 'type', 'section', 'class'],
@@ -68,15 +88,22 @@ if (!function_exists('import_default_aliases')) {
                 'purchase_qty' => [
                     'purchase qty', 'purchase quantity', 'order qty', 'order quantity', 'qty to order',
                     'quantity to order', 'to order', 'reorder qty', 'reorder quantity', 're order qty', 'qty to buy',
-                    'qty needed', 'shortfall',
+                    'qty needed', 'shortfall', 'quantity in reorder',
                 ],
                 'total_cost' => [
                     'total cost', 'total value', 'total price', 'line total', 'line cost', 'amount', 'stock value',
-                    'value', 'total amount', 'total estimated cost', 'extended cost',
+                    'value', 'total amount', 'total estimated cost', 'extended cost', 'inventory value', 'closing value', 'valuation',
+                    'stock valuation', 'inventory valuation',
                 ],
-                'row_no' => ['no', 'sn', 's n', 'sr', 'sr no', 'serial', 'serial no', 'serial number', 'number', 'ref', 'ref no', 'id', 'code', 'sku'],
+                'lead_time' => ['lead time', 'lead time days', 'lead days', 'supplier lead time', 'reorder time', 'reorder time in days'],
+                'row_no' => [
+                    'no', 'sn', 's n', 'sr', 'sr no', 'serial', 'serial no', 'serial number', 'number', 'ref', 'ref no', 'id', 'code', 'sku',
+                    'commodity code',
+                ],
             ],
-            'derived' => ['qty_total', 'days_to_expiry', 'status', 'action', 'purchase_qty', 'total_cost', 'row_no'],
+            'derived' => ['qty_total', 'days_to_expiry', 'status', 'action', 'purchase_qty', 'total_cost', 'row_no', 'lead_time', 'min_qty'],
+            // derived field => the field it stands in for when the sheet has NO column of that field (stored as kind field_fallback)
+            'field_fallbacks' => ['min_qty' => 'min_level'],
             'units' => [
                 'piece', 'pieces', 'pc', 'pcs', 'each', 'ea', 'bottle', 'bottles', 'btl', 'btls', 'can', 'cans', 'kg', 'kgs',
                 'kilo', 'kilos', 'kilogram', 'kilograms', 'g', 'gram', 'grams', 'litre', 'litres', 'liter', 'liters',
@@ -117,6 +144,9 @@ if (!function_exists('import_default_aliases')) {
                 'instructions', 'chart', 'charts', 'pivot', 'lookup', 'legend', 'about',
             ],
             'noise_tokens' => ['mwk', 'mk', 'kwacha', 'usd', 'zar', 'kes', 'tzs', 'gbp', 'eur', 'currency'],
+            // a heading with one of these words ("Total Buying Cost", "Value in Stock", "Days in Stock") is a worked-out figure: it is
+            // never read as an imported field from PART of its words (only a word-for-word heading match is applied; else a question)
+            'guard_words' => ['total', 'totals', 'subtotal', 'value', 'values', 'valuation', 'amount', 'amounts', 'days'],
         ];
     }
 
@@ -150,6 +180,8 @@ if (!function_exists('import_default_aliases')) {
                 foreach ($val as $field => $phrases) {
                     $base['fields'][$field] = array_values(array_unique(array_merge($base['fields'][$field] ?? [], (array)$phrases)));
                 }
+            } elseif ($key === 'field_fallbacks' && is_array($val)) {
+                $base[$key] = array_merge((array)($base[$key] ?? []), $val);   // keyed (derived field => field): keys kept
             } elseif (is_array($val) && isset($base[$key]) && is_array($base[$key])) {
                 $base[$key] = array_values(array_unique(array_merge($base[$key], $val)));
             } else {

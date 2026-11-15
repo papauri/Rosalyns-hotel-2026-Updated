@@ -1029,6 +1029,117 @@ $t(($kinds['learned_unit_item'] ?? 0) === 3 && ($kinds['learned_category'] ?? 0)
 // ---- nothing changes where no rule fires ----
 $t(!array_key_exists('heals', $anz) && md5(json_encode($anz)) === 'eec1072db2624a61ef1cbd9067550585', 'engine output is byte-identical where no rule fires: the generated 5,000-item sheet has no repair key and keeps its frozen md5');
 
+// ---- our own Stock > Ingredients export + a renamed copy of it read with ZERO header questions (owner 2026-11-16) ----
+echo "-- our own export headings and renamed copies --\n";
+$hdrNorm = [];
+$dupPhrase = [];
+foreach ($al['fields'] as $fv => $ps) { foreach ($ps as $p) { $nv = import_norm_text($p); if (isset($hdrNorm[$nv]) && $hdrNorm[$nv] !== $fv) { $dupPhrase[] = $p; } $hdrNorm[$nv] = $fv; } }
+$t(!$dupPhrase, 'vocabulary: no header phrase is listed under two fields (the database picks the first by id, so a duplicate could flip) ' . implode(', ', $dupPhrase));
+$t(in_array('min_qty', $al['derived'], true) && in_array('lead_time', $al['derived'], true) && ($al['field_fallbacks']['min_qty'] ?? '') === 'min_level', 'vocabulary: Min Qty and Lead Time are derived (greyed); Min Qty stands in for the reorder level only as a fallback');
+$t(import_merge_aliases($al, ['fields' => ['item_name' => ['zz']]])['field_fallbacks'] === ['min_qty' => 'min_level'], 'merging learned header words keeps the keyed fallback list intact');
+// Invented rows only (ZZT ...). Row 3 has no expiry: the cell stays blank and must stay blank.
+$expRows = [
+    ['ZZT Lager 330ml', 'ZZT Beers', 'bottle', 24, 6, 12, 48, 3, '850.50', '20412.00', '2027-03-27', 'Active'],
+    ['ZZT Flour 2kg', 'ZZT Dry Goods', 'kg', 10.5, 2, 4, 20, 7, '1200.00', '12600.00', '2027-01-01', 'Active'],
+    ['ZZT Bleach 5L', 'ZZT Cleaning', 'L', 3, 1, 2, 6, 14, '4300.25', '12900.75', '', 'Active'],
+];
+$ourHdr = ['Name', 'Category', 'Unit', 'Current Qty', 'Min Qty', 'Reorder Point', 'Par Level', 'Lead Time (days)', 'Cost/Unit', 'Stock Value', 'Next Expiry', 'Status'];
+$ownerHdr = ['Name', 'Category', 'Unit', 'Current Quantity level', 'Minimum Quantity level', 'Reorder Point', 'Par Level', 'Lead Time (days)', 'Unit Cost', 'Stock Value', 'Next Expiry', 'Status'];
+$csvOf = function (array $hdr, array $rows, array $drop = []) {   // same shape as stock-ingredients.php ?export=csv: BOM, fputcsv
+    $fh = fopen('php://temp', 'w+'); fwrite($fh, "\xEF\xBB\xBF");
+    $keep = function ($r) use ($drop) { foreach ($drop as $i) { unset($r[$i]); } return array_values($r); };
+    fputcsv($fh, $keep($hdr)); foreach ($rows as $r) { fputcsv($fh, $keep($r)); }
+    rewind($fh); $s = stream_get_contents($fh); fclose($fh); return $s;
+};
+$xlsxOf = function (array $hdr, array $rows, string $sheet) {      // the owner's renamed copy: a workbook, numbers as numbers, dates as dates, Stock Value a formula
+    $L = range('A', 'L'); $out = [1 => []];
+    foreach ($hdr as $i => $hv) { $out[1][$L[$i]] = fx_S($hv); }
+    $serial = ['2027-03-27' => 46473, '2027-01-01' => 46388];
+    foreach ($rows as $k => $r) {
+        $rn = $k + 2; $row = [];
+        foreach ($r as $i => $v) {
+            if ($i === 9) { $row[$L[$i]] = fx_F('D' . $rn . '*I' . $rn, (string)((float)$r[3] * (float)$r[8])); }
+            elseif ($i === 10) { if ($v !== '') { $row[$L[$i]] = fx_D($serial[$v]); } }
+            elseif (is_int($v) || is_float($v) || ($i === 8)) { $row[$L[$i]] = fx_N((float)$v); }
+            else { $row[$L[$i]] = fx_S((string)$v); }
+        }
+        $out[$rn] = $row;
+    }
+    return fx_xlsx(['sheets' => [['name' => $sheet, 'rows' => $out]]]);
+};
+$hdrQ = function (array $an) { return array_values(array_filter($an['questions'], function ($q) { return in_array($q['type'], ['mapping-unsure', 'no-item-column', 'sheet-unknown'], true); })); };
+$colMap = function (array $sh) { $m = []; foreach ($sh['columns'] as $c) { $m[$c['letter']] = [$c['field'], !empty($c['derived']), $c['state'], $c['fallback_from'] ?? null]; } return $m; };
+$expectCols = ['A' => 'item_name', 'B' => 'category', 'C' => 'unit', 'D' => 'qty_single', 'E' => 'min_qty', 'F' => 'min_level', 'G' => 'max_level',
+    'H' => 'lead_time', 'I' => 'unit_price', 'J' => 'total_cost', 'K' => 'expiry', 'L' => 'status'];
+$greyCols = ['E', 'H', 'J', 'L'];
+$cases = [
+    'our export (CSV)' => import_analyze_file($put($csvOf($ourHdr, $expRows), 'stock-management.csv'), 'stock-management.csv', $al),
+    'owner\'s renamed copy (xlsx, sheet "in")' => import_analyze_file($put($xlsxOf($ownerHdr, $expRows, 'in'), 'revised.xlsx'), 'revised.xlsx', $al),
+];
+foreach ($cases as $label => $anE) {
+    $sh = $anE['sheets'][0] ?? ['columns' => [], 'rows' => [], 'triage' => ['action' => '']];
+    $cm = $colMap($sh);
+    $t($anE['ok'] !== false && ($sh['triage']['action'] ?? '') === 'import' && !$hdrQ($anE), $label . ': read with zero header questions (' . count($hdrQ($anE)) . ')');
+    $badCols = [];
+    foreach ($expectCols as $L => $fv) {
+        $isGrey = in_array($L, $greyCols, true);
+        if (($cm[$L][0] ?? null) !== $fv || ($cm[$L][2] ?? '') !== 'mapped' || ($cm[$L][1] ?? null) !== $isGrey) { $badCols[] = $L . '=' . json_encode($cm[$L] ?? null); }
+    }
+    $t(!$badCols, $label . ': D Balance, F Reorder level, G Par level, I Unit price, K Expiry imported; E Min Qty, H Lead time, J Stock value, L Status greyed ' . implode(' ', $badCols));
+    $byRow = []; foreach ($sh['rows'] as $rw) { $byRow[$rw['row']] = $rw; }
+    $okVals = count($byRow) === 3;
+    foreach ($expRows as $k => $er) {
+        $rw = $byRow[$k + 2] ?? null;
+        $okVals = $okVals && $rw
+            && abs((float)($rw['fields']['qty_single']['value'] ?? -1) - (float)$er[3]) < 0.00005 && substr((string)$rw['fields']['qty_single']['source'], -3) === '!D' . ($k + 2)
+            && abs((float)($rw['fields']['min_level']['value'] ?? -1) - (float)$er[5]) < 0.00005 && substr((string)$rw['fields']['min_level']['source'], -3) === '!F' . ($k + 2)
+            && abs((float)($rw['fields']['unit_price']['value'] ?? -1) - (float)$er[8]) < 0.00005
+            && !array_intersect(array_keys($rw['fields']), ['min_qty', 'lead_time', 'total_cost', 'status']);
+    }
+    $t($okVals, $label . ': each value comes from its own cell (qty from D, reorder level from F, never from Min Qty E); greyed columns never reach a row');
+    $r4 = $byRow[4] ?? ['fields' => [], 'warnings' => []];
+    $dateQ = array_filter($anE['questions'], function ($q) { return in_array($q['type'], ['ambiguous-date'], true); });
+    $t(($byRow[2]['fields']['expiry']['value'] ?? '') === '2027-03-27' && (!isset($r4['fields']['expiry']) || $r4['fields']['expiry']['value'] === null || $r4['fields']['expiry']['value'] === '') && !$dateQ,
+        $label . ': Next Expiry is read as a date, and a blank Next Expiry stays blank (no date invented, no question)');
+}
+// Without a Reorder Point column, Min Qty is the only minimum the sheet has: it becomes the reorder level
+$anNoRp = import_analyze_file($put($csvOf($ourHdr, $expRows, [5]), 'no-reorder.csv'), 'no-reorder.csv', $al);
+$cmN = $colMap($anNoRp['sheets'][0] ?? ['columns' => []]);
+$rN = []; foreach (($anNoRp['sheets'][0]['rows'] ?? []) as $rw) { $rN[$rw['row']] = $rw; }
+$t(!$hdrQ($anNoRp) && ($cmN['E'] ?? null) === ['min_level', false, 'mapped', 'min_qty'] && ($cmN['F'][0] ?? null) === 'max_level'
+    && abs((float)($rN[2]['fields']['min_level']['value'] ?? -1) - 6) < 0.00005 && substr((string)($rN[2]['fields']['min_level']['source'] ?? ''), -3) === '!E2',
+    'no Reorder Point column: Min Qty (E) is used as the reorder level from its own cells, with no question ' . json_encode($cmN['E'] ?? null));
+// The owner's heading for E alone, with a Reorder Point that is only a QUESTION (a misspelt heading): E stays greyed, never asked
+$anQ = import_analyze_file($put($csvOf(['Name', 'Qty', 'Minimum Quantity level', 'Reordr Pont'], [['ZZT A', 1, 2, 3], ['ZZT B', 4, 5, 6], ['ZZT C', 7, 8, 9]]), 'q.csv'), 'q.csv', $al);
+$cmQ = $colMap($anQ['sheets'][0] ?? ['columns' => []]);
+$t(($cmQ['C'] ?? null) === ['min_qty', true, 'mapped', null] && count($hdrQ($anQ)) === 1,
+    'Min Qty stays greyed while a reorder-level column is still being asked about (only that one question) ' . json_encode($cmQ));
+// headings that already had an owner must keep it (the new phrases steal nothing)
+$keepMap = ['Main Store Balance' => 'qty_secondary', 'Bar Qty' => 'qty_primary', 'Stock Value' => 'total_cost', 'Reorder Qty' => 'purchase_qty', 'Days to Expiry' => 'days_to_expiry',
+    'Max Stock Level' => 'max_level', 'Safety Stock' => 'min_level', 'Total Cost' => 'total_cost', 'Unit Cost' => 'unit_price', 'Current Qty' => 'qty_single',
+    'Main Store Current Qty' => 'qty_secondary', 'Expiry Date' => 'expiry', 'Quantity in Stock' => 'qty_single', 'Inventory Value' => 'total_cost', 'Reorder Time in Days' => 'lead_time',
+    'Quantity in Reorder' => 'purchase_qty', 'Stock Valuation' => 'total_cost', 'Commodity' => 'item_name', 'Commodity Code' => 'row_no', 'Unit Type' => 'unit'];
+$keepBad = [];
+foreach ($keepMap as $hv => $fv) { $m = import_match_header($hv, $al); if ($m['field'] !== $fv || $m['conf'] < import_map_auto_threshold()) { $keepBad[] = $hv . '->' . $m['field'] . '@' . $m['conf']; } }
+$t(!$keepBad, 'headings map to their own field with confidence (old owners kept, new ones added) ' . implode('; ', $keepBad));
+// QA 2026-11-16: a worked-out figure (total / value / amount / days) never lands on Unit price or Balance from part of its words
+$figBad = [];
+foreach (['Total Buying Cost', 'Avg Cost Value', 'Total Avg Cost', 'Average Cost Total', 'Weighted Average Cost Value', 'Total Unit Cost', 'Unit Price Total',
+    'Value in Stock', 'Days in Stock', 'Current Level Value', 'Current Quantity Level Value', 'On Hand Qty Value', 'Days on Hand', 'Balance Amount',
+    'Qty Total Value', 'Buying Cost Amount', 'Cost Unit Total'] as $hv) {
+    $m = import_match_header($hv, $al);
+    if ($m['conf'] >= import_map_auto_threshold() && !import_field_is_derived((string)$m['field'], $al)) { $figBad[] = $hv . '->' . $m['field']; }
+}
+$t(!$figBad, 'total / value / amount / days headings are never auto-read as an imported field (greyed or a question) ' . implode('; ', $figBad));
+$figRun = function (array $hdr, array $rows) use ($put, $al) { $fh = fopen('php://temp', 'w+'); fputcsv($fh, $hdr); foreach ($rows as $r) { fputcsv($fh, $r); } rewind($fh);
+    $s = stream_get_contents($fh); fclose($fh); return import_analyze_file($put($s, 'fig.csv'), 'fig.csv', $al); };
+$figRows = function (array $an, string $f) { $v = []; foreach (($an['sheets'][0]['rows'] ?? []) as $rw) { if (isset($rw['fields'][$f])) { $v[] = (float)$rw['fields'][$f]['value']; } } return $v; };
+$aTb = $figRun(['Item', 'Qty', 'Unit', 'Total Buying Cost'], [['ZZT A', 2, 'kg', 5000], ['ZZT B', 3, 'kg', 6000], ['ZZT C', 4, 'kg', 7000]]);
+$aVs = $figRun(['Item', 'Bar', 'Stores', 'Value in Stock'], [['ZZT A', 2, 1, 5000], ['ZZT B', 3, 1, 6000], ['ZZT C', 4, 1, 7000]]);
+$aDs = $figRun(['Item', 'Qty', 'Days in Stock'], [['ZZT A', 2, 12], ['ZZT B', 3, 14], ['ZZT C', 4, 16]]);
+$t(!$figRows($aTb, 'unit_price') && !$figRows($aVs, 'qty_single') && $figRows($aDs, 'qty_single') === [2.0, 3.0, 4.0],
+    'files: "Total Buying Cost" 5000 is never a unit price, "Value in Stock" 5000 never a balance, "Days in Stock" 12 never a balance (the real Qty column still is)');
+
 // cleanup
 foreach ($tmpFiles as $f) { @unlink($f); }
 @rmdir($tmpDir);

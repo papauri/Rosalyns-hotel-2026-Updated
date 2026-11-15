@@ -25,7 +25,7 @@ if (!function_exists('import_match_header')) {
         static $lastOut = null;
         // The same alias array is passed on every call of a run (once per cell): recognising it is a pointer / value comparison,
         // not a json_encode + md5 of the whole vocabulary per cell (that was most of the time of reading a big sheet).
-        $sub = [$aliases['fields'] ?? [], $aliases['noise_tokens'] ?? []];
+        $sub = [$aliases['fields'] ?? [], $aliases['noise_tokens'] ?? [], $aliases['guard_words'] ?? [], $aliases['derived'] ?? []];
         if ($lastIn !== null && $sub === $lastIn) {
             return $lastOut;
         }
@@ -57,8 +57,13 @@ if (!function_exists('import_match_header')) {
         usort($list, function ($a, $b) {
             return $b['n'] <=> $a['n'];
         });
+        $guard = [];
+        foreach (($aliases['guard_words'] ?? []) as $g) {
+            $guard[import_norm_text($g)] = true;
+        }
         $lastIn = $sub;
-        return $lastOut = $cache[$key] = ['noise' => $noise, 'exact' => $exact, 'list' => $list];
+        return $lastOut = $cache[$key] = ['noise' => $noise, 'exact' => $exact, 'list' => $list, 'guard' => $guard,
+            'derived' => array_flip(array_map('strval', $aliases['derived'] ?? []))];
     }
 
     function import_header_tokens(string $text, array $idx): array
@@ -148,6 +153,11 @@ if (!function_exists('import_match_header')) {
         if (isset($cands[1]) && $cands[1]['conf'] === $best['conf'] && ($cands[1]['n'] ?? 0) === ($best['n'] ?? 0) && $cands[1]['field'] !== $best['field']) {
             $conf = min($conf, 0.6);
         }
+        // a worked-out figure ("Total Buying Cost", "Value in Stock", "Days in Stock") is never read as an imported NUMBER or DATE from part of
+        // its words: only a word-for-word match is applied, anything else becomes a question
+        if ($conf < 1.0 && $idx['guard'] && !isset($idx['derived'][$best['field']]) && import_field_kind((string)$best['field']) !== 'text' && array_intersect_key($idx['guard'], array_flip($tokens))) {
+            $conf = min($conf, 0.6);
+        }
         return ['field' => $best['field'], 'conf' => $conf, 'alias' => $best['alias'], 'candidates' => array_map(function ($c) {
             return ['field' => $c['field'], 'conf' => $c['conf'], 'alias' => $c['alias']];
         }, $cands)];
@@ -167,6 +177,40 @@ if (!function_exists('import_match_header')) {
             return 'date';
         }
         return 'text';
+    }
+
+    /**
+     * A derived field that stands in for a real one ($aliases['field_fallbacks'], e.g. min_qty => min_level): its column is used
+     * as that field ONLY when no column of the sheet is (or is asked about as) that field; otherwise it stays greyed and is never
+     * imported or asked about. A promoted column carries 'fallback_from'; nothing changes on a sheet where the rule does not fire.
+     */
+    function import_map_apply_fallbacks(array &$columns, array $aliases): void
+    {
+        $fallbacks = (array)($aliases['field_fallbacks'] ?? []);
+        if (!$fallbacks) {
+            return;
+        }
+        $present = [];
+        foreach ($columns as $info) {
+            if ($info['state'] === 'mapped' && $info['field'] !== null) {
+                $present[$info['field']] = true;
+            } elseif ($info['state'] === 'question' && !empty($info['suggested_field'])) {
+                $present[$info['suggested_field']] = true;
+            }
+        }
+        foreach ($columns as $c => $info) {
+            $from = $info['field'];
+            if ($info['state'] !== 'mapped' || $from === null || !isset($fallbacks[$from]) || !import_field_is_derived($from, $aliases)) {
+                continue;
+            }
+            $to = (string)$fallbacks[$from];
+            if ($to === '' || isset($present[$to]) || import_field_is_derived($to, $aliases)) {
+                continue;
+            }
+            $columns[$c]['field'] = $to;
+            $columns[$c]['derived'] = false;
+            $columns[$c]['fallback_from'] = $from;
+        }
     }
 
     /** Header cell text of a cell (string) or ''. */
@@ -216,6 +260,7 @@ if (!function_exists('import_match_header')) {
             }
             $columns[$c] = $info;
         }
+        import_map_apply_fallbacks($columns, $aliases);
         // two columns claiming the same non-derived field: highest confidence keeps it, rest become questions
         $claims = [];
         foreach ($columns as $c => $info) {

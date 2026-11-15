@@ -36,6 +36,32 @@ ok('schema: no import_rows table (answers live on the job)', !rh_table_exists($p
 $n1 = (int)$pdo->query('SELECT COUNT(*) FROM import_aliases WHERE is_hotel_learned = 0')->fetchColumn();
 import_seed_aliases($pdo);
 ok('schema: the alias seed is added once only', (int)$pdo->query('SELECT COUNT(*) FROM import_aliases WHERE is_hotel_learned = 0')->fetchColumn() === $n1 && $n1 > 100);
+// v2 phrases reach a database seeded before them (top-up once per seed version), each exactly once
+$seedVer = (string)(int)import_default_aliases()['version'];
+$st = $pdo->prepare("SELECT COUNT(*) FROM import_aliases WHERE kind = 'seed_version' AND term = ?"); $st->execute([$seedVer]);
+ok('schema: the seed version marker v' . $seedVer . ' is written exactly once', (int)$st->fetchColumn() === 1);
+$missing = []; $doubled = [];
+$cnt = $pdo->prepare("SELECT COUNT(*) FROM import_aliases WHERE kind = ? AND term = ? AND maps_to = ?");
+foreach (import_alias_seed_rows() as [$k, $tm, $mp]) { $cnt->execute([$k, $tm, $mp]); $c = (int)$cnt->fetchColumn(); if ($c === 0) { $missing[] = "$k:$tm"; } elseif ($c > 1) { $doubled[] = "$k:$tm"; } }
+ok('schema: every seed phrase (old and new) is in this database exactly once', !$missing && !$doubled, 'missing ' . implode(', ', array_slice($missing, 0, 8)) . ' doubled ' . implode(', ', array_slice($doubled, 0, 8)));
+require_once $root . '/includes/import/analyze.php';
+$dbAl = import_load_aliases($pdo);
+ok('schema: the database vocabulary carries the Min Qty fallback and the new derived fields', ($dbAl['field_fallbacks']['min_qty'] ?? '') === 'min_level' && in_array('lead_time', $dbAl['derived'], true) && in_array('min_qty', $dbAl['derived'], true));
+$gb = []; foreach (['Total Buying Cost', 'Avg Cost Value', 'Total Avg Cost', 'Value in Stock', 'Days in Stock', 'Current Level Value'] as $gh) { $gm = import_match_header($gh, $dbAl); if ($gm['conf'] >= import_map_auto_threshold() && !import_field_is_derived((string)$gm['field'], $dbAl)) { $gb[] = $gh . '->' . $gm['field']; } }
+ok('schema: with the database vocabulary a total / value / days heading is never auto-read as a unit price or balance', in_array('days', $dbAl['guard_words'], true) && !$gb, implode('; ', $gb));
+$hdrSets = ['our export' => ['Name', 'Category', 'Unit', 'Current Qty', 'Min Qty', 'Reorder Point', 'Par Level', 'Lead Time (days)', 'Cost/Unit', 'Stock Value', 'Next Expiry', 'Status'],
+    'renamed copy' => ['Name', 'Category', 'Unit', 'Current Quantity level', 'Minimum Quantity level', 'Reorder Point', 'Par Level', 'Lead Time (days)', 'Unit Cost', 'Stock Value', 'Next Expiry', 'Status']];
+foreach ($hdrSets as $lbl => $hs) {
+    $tmpCsv = tempnam(sys_get_temp_dir(), 'zzt');
+    $fh = fopen($tmpCsv, 'w'); fputcsv($fh, $hs);
+    foreach ([['ZZT A', 'ZZT Cat', 'kg', 5, 1, 2, 9, 3, '10.00', '50.00', '', 'Active'], ['ZZT B', 'ZZT Cat', 'L', 6, 1, 2, 9, 3, '20.00', '120.00', '2027-03-27', 'Active'], ['ZZT C', 'ZZT Cat', 'kg', 7, 1, 2, 9, 3, '30.00', '210.00', '', 'Active']] as $rw) { fputcsv($fh, $rw); }
+    fclose($fh);
+    $anDb = import_analyze_file($tmpCsv, 'zzt.csv', $dbAl);
+    @unlink($tmpCsv);
+    $hq = array_filter($anDb['questions'], function ($q) { return in_array($q['type'], ['mapping-unsure', 'no-item-column', 'sheet-unknown'], true); });
+    $flds = array_map(function ($c) { return ($c['field'] ?? '-') . (!empty($c['derived']) ? '(grey)' : ''); }, $anDb['sheets'][0]['columns'] ?? []);
+    ok("schema: with this database's vocabulary the $lbl headings need zero header questions", !$hq && $flds === ['item_name', 'category', 'unit', 'qty_single', 'min_qty(grey)', 'min_level', 'max_level', 'lead_time(grey)', 'unit_price', 'total_cost(grey)', 'expiry', 'status(grey)'], implode(',', $flds));
+}
 ok('schema: the kill switch row exists and is not switched on by the schema', in_array(rh_import_setting('data_import_enabled', $pdo), ['0', '1'], true));
 ok('permissions.php: data_import is in the manager default list and not in receptionist', (function () {
     require_once dirname(__DIR__, 2) . '/admin/includes/permissions.php';

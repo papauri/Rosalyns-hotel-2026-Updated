@@ -682,7 +682,7 @@ if (!function_exists('import_job_analyse')) {
                 'header_row' => $sh['header_row'] ?? null, 'hidden' => !empty($sh['hidden']), 'categories' => $sh['categories'] ?? [],
                 'columns' => array_map(function ($c) {
                     return ['letter' => $c['letter'], 'header' => $c['header'], 'ref' => $c['header_ref'], 'field' => $c['field'], 'derived' => !empty($c['derived']),
-                        'state' => $c['state'] ?? '', 'filled' => $c['shape']['filled'] ?? null];
+                        'state' => $c['state'] ?? '', 'filled' => $c['shape']['filled'] ?? null, 'fallback_from' => $c['fallback_from'] ?? null];
                 }, $sh['columns'] ?? []),
                 'non_item_rows' => array_slice(array_map(function ($r) {
                     return ['row' => $r['row'], 'kind' => $r['kind'], 'label' => $r['label'], 'source' => $r['source'], 'reason' => $r['reason']];

@@ -115,7 +115,7 @@ if (!function_exists('rh_import_setting_defaults')) {
             $rows[] = ['derived', (string)$f, ''];
         }
         $kinds = ['units' => 'unit', 'section_words' => 'section_word', 'total_words' => 'total_word',
-            'summary_phrases' => 'summary_phrase', 'skip_sheet_words' => 'skip_sheet_word', 'noise_tokens' => 'noise_token'];
+            'summary_phrases' => 'summary_phrase', 'skip_sheet_words' => 'skip_sheet_word', 'noise_tokens' => 'noise_token', 'guard_words' => 'guard_word'];
         foreach ($kinds as $key => $kind) {
             foreach ($d[$key] as $w) {
                 $rows[] = [$kind, (string)$w, ''];
@@ -123,6 +123,9 @@ if (!function_exists('rh_import_setting_defaults')) {
         }
         foreach ((array)($d['unit_synonyms'] ?? []) as $spelling => $unit) {
             $rows[] = ['unit_synonym', (string)$spelling, (string)$unit];
+        }
+        foreach ((array)($d['field_fallbacks'] ?? []) as $from => $to) {
+            $rows[] = ['field_fallback', (string)$from, (string)$to];
         }
         return $rows;
     }
@@ -135,6 +138,12 @@ if (!function_exists('rh_import_setting_defaults')) {
     /**
      * Seed import_aliases KIND BY KIND: a kind that has no seeded row yet gets its seed rows (so a new kind, like unit_synonym, reaches hotels that
      * were seeded before it existed, and a kind a hotel has edited is never refilled). Safe to call again. Returns the number of rows added.
+     *
+     * Then a one-time TOP-UP per seed version (import_default_aliases()['version']): when this database has no marker row
+     * (kind seed_version, term = the version) every seed row is offered again with INSERT IGNORE on the unique alias hash, so
+     * phrases added to the seed in that version reach hotels seeded earlier, nothing is ever doubled, and hotel-learned rows are
+     * untouched. The marker is written last, so a run cut short simply repeats. (There is no screen that deletes seed rows; a
+     * seed phrase someone removed by hand would come back once, at the next version.)
      */
     function import_seed_aliases(PDO $pdo): int
     {
@@ -147,6 +156,16 @@ if (!function_exists('rh_import_setting_defaults')) {
             }
             $ins->execute([$kind, $term, $maps, import_alias_hash($kind, $term, $maps)]);
             $n += $ins->rowCount();
+        }
+        $version = (string)(int)(import_default_aliases()['version'] ?? 1);
+        $mark = $pdo->prepare("SELECT 1 FROM import_aliases WHERE kind = 'seed_version' AND term = ? AND is_hotel_learned = 0 LIMIT 1");
+        $mark->execute([$version]);
+        if ($mark->fetchColumn() === false) {
+            foreach (import_alias_seed_rows() as [$kind, $term, $maps]) {
+                $ins->execute([$kind, $term, $maps, import_alias_hash($kind, $term, $maps)]);
+                $n += $ins->rowCount();
+            }
+            $ins->execute(['seed_version', $version, '', import_alias_hash('seed_version', $version, '')]);
         }
         return $n;
     }
@@ -172,13 +191,15 @@ if (!function_exists('rh_import_setting_defaults')) {
             return $out;
         }
         $listKey = ['unit' => 'units', 'section_word' => 'section_words', 'total_word' => 'total_words',
-            'summary_phrase' => 'summary_phrases', 'skip_sheet_word' => 'skip_sheet_words', 'noise_token' => 'noise_tokens'];
+            'summary_phrase' => 'summary_phrases', 'skip_sheet_word' => 'skip_sheet_words', 'noise_token' => 'noise_tokens', 'guard_word' => 'guard_words'];
         $res = ['version' => $out['version'], 'fields' => [], 'derived' => [], 'units' => [], 'section_words' => [],
-            'total_words' => [], 'summary_phrases' => [], 'skip_sheet_words' => [], 'noise_tokens' => [], 'unit_synonyms' => []];
+            'total_words' => [], 'summary_phrases' => [], 'skip_sheet_words' => [], 'noise_tokens' => [], 'unit_synonyms' => [], 'field_fallbacks' => [], 'guard_words' => []];
         foreach ($rows as $r) {
             $k = $r['kind'];
             if ($k === 'unit_synonym') {
                 $res['unit_synonyms'][mb_strtolower((string)$r['term'])] = (string)$r['maps_to'];
+            } elseif ($k === 'field_fallback') {
+                $res['field_fallbacks'][(string)$r['term']] = (string)$r['maps_to'];
             } elseif ($k === 'field') {
                 $res['fields'][$r['maps_to']][] = $r['term'];
             } elseif ($k === 'derived') {
@@ -186,6 +207,12 @@ if (!function_exists('rh_import_setting_defaults')) {
             } elseif (isset($listKey[$k])) {
                 $res[$listKey[$k]][] = $r['term'];
             }
+        }
+        if (!$res['guard_words']) {
+            $res['guard_words'] = (array)($out['guard_words'] ?? []);
+        }
+        if (!$res['field_fallbacks']) {
+            $res['field_fallbacks'] = (array)($out['field_fallbacks'] ?? []);
         }
         if (!$res['unit_synonyms']) {
             $res['unit_synonyms'] = $out['unit_synonyms'];

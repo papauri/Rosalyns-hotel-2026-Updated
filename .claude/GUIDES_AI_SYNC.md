@@ -19,6 +19,14 @@ when prompted."
 
 ## Pending (oldest first)
 
+### Import wizard reads more column headings (2026-11-16, owner ask) — hashes in TASKS.md
+- Guides (Stock > Import, step 2): the wizard now recognises our own Stock > Ingredients export headings and common
+  variants (Current Quantity level / Current Qty = Balance; Unit Cost / Cost/Unit / Average cost = Unit price; Max qty /
+  Order up to = Par; Next Expiry = Expiry; Lead Time greyed). "Min Qty / Minimum Quantity level" is greyed when the sheet
+  has a Reorder Point column, otherwise used as the reorder level. Headings with total / value / amount / days are only
+  used on an exact match, otherwise asked.
+- Assistant: no change in what it reads (vocabulary only); no sync needed beyond noting new field ids min_qty/lead_time.
+
 ### Wipe all stock (full reset) permission + section (2026-11-16, owner ask) — hashes in TASKS.md
 - Guides (Settings > Clear Stock Data, User Management > permissions): new permission "Wipe all stock (full reset)"
   (super admins always; a plain administrator only when a super admin switches it on; never managers/staff). Clear
