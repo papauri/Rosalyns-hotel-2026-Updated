@@ -682,9 +682,8 @@ $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
                                                     . ($isBlocked ? ' - CONFLICT: night is blocked' : '');
 
                                                 // Payment info
-                                                $paymentStatus = !empty($booking['payment_status'])
-                                                    ? ucfirst(htmlspecialchars($booking['payment_status'], ENT_QUOTES, 'UTF-8'))
-                                                    : 'Pending';
+                                                // Step 8i: from the booking's money (paid so far vs balance due), never a payment record's status.
+                                                $paymentStatus = htmlspecialchars(rh_booking_pay_state($booking, ['currency' => (string)getSetting('currency_symbol')])['label'], ENT_QUOTES, 'UTF-8');
                                                 $totalAmount = number_format(rh_booking_full_total($booking), 2); // full amount incl. VAT & levy
                                                 $currencySymbol = getSetting('currency_symbol');
                                                 // The room rate a night it was BOOKED at × nights (the row's own columns, no query).

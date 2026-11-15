@@ -299,6 +299,14 @@ if (!function_exists('rh_hist_tol')) {
                 $lines = rh_hist_changes($old, $new, $ctx);
                 if ($note !== '') $lines[] = $note;
                 $ev = rh_hist_ev($at, $who, $what, implode("\n", $lines), 'room', [$rn !== '' ? 'room:' . $rn : 'room:' . md5($at)], 2);
+            } elseif ($action === 'payment_status_changed') {
+                // Written by recalculateBookingFinancials() when the money moves the payment status (step 8i).
+                $os = (string)($old['payment_status'] ?? '');
+                $ns = (string)($new['payment_status'] ?? '');
+                $detail = 'Payment status: ' . rh_hist_words($os !== '' ? $os : 'none') . ' → ' . rh_hist_words($ns);
+                if ($note !== '') $detail .= "\n" . $note;
+                $ev = rh_hist_ev($at, $who, 'Payment status now ' . rh_hist_status_word($ns), $detail, 'payment',
+                    ['pstatus_chg:' . (int)($r['id'] ?? 0) . ':' . $ns], 2);
             } elseif ($action === 'payment_updated') {
                 $ns = (string)($new['payment_status'] ?? '');
                 $ev = rh_hist_ev($at, $who, 'Payment status set to ' . rh_hist_status_word($ns), $note, 'payment', ['pstatus:' . $ns], 2);

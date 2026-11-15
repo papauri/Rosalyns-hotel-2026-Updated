@@ -690,7 +690,7 @@ if ($is_card_insight_ajax) {
                     ['key' => 'payment', 'label' => 'Payment'],
                 ];
                 $payload['link'] = ['href' => 'bookings.php?filter=checkin_today&flash=results', 'label' => 'Open check-ins list'];
-                $stmt = $pdo->prepare("SELECT b.id AS booking_id, b.booking_reference, b.guest_name, b.check_out_date, b.status, b.payment_status,
+                $stmt = $pdo->prepare("SELECT b.id AS booking_id, b.booking_reference, b.guest_name, b.check_out_date, b.status, b.payment_status, b.amount_paid, b.amount_due, b.credit_balance,
                                               r.name AS room_name, ir.room_number, ir.room_name AS individual_room_name
                                        FROM bookings b
                                        LEFT JOIN rooms r ON r.id = b.room_id
@@ -717,7 +717,7 @@ if ($is_card_insight_ajax) {
                         'room' => $room,
                         'checkout' => date('M j, Y', strtotime((string)$row['check_out_date'])),
                         'status' => ucfirst((string)$row['status']),
-                        'payment' => ucfirst((string)$row['payment_status']),
+                        'payment' => rh_booking_pay_state($row, ['currency' => (string)getSetting('currency_symbol')])['label'], // step 8i: from the money
                     ];
                 }
                 // Both numbers counted with the list's own rules, not from the 30 rows shown (busy days have more).

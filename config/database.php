@@ -108,6 +108,7 @@ if (!defined('RH_TIMEZONE')) {
 date_default_timezone_set(RH_TIMEZONE);
 require_once __DIR__ . '/../includes/user-timezone.php';
 require_once __DIR__ . '/../includes/cancellation-policy.php'; // functions only (cancellation & no-show policies)
+require_once __DIR__ . '/../includes/booking-pay-state.php'; // pure: a booking's payment status from its money (step 8i)
 
 // Create PDO connection with performance optimizations
 try {
@@ -10207,6 +10208,52 @@ function getBookingFolioSummary(int $bookingId): array
 }
 
 /**
+ * Booking History row for a payment status change made by recalculateBookingFinancials() (step 8i): booking_audit_log
+ * action 'payment_status_changed', old -> new payment_status, the staff member signed in (else System), and the paid /
+ * owed figures behind it. Plain INSERT only (never CREATE TABLE: DDL would commit the caller's transaction); skipped
+ * when the table is missing; any failure is logged and ignored.
+ */
+function rh_log_payment_status_change(PDO $pdo, array $booking, string $old, string $new, float $paid, float $due): void
+{
+    static $hasTable = [];
+    try {
+        $k = spl_object_id($pdo);
+        if (!isset($hasTable[$k])) {
+            $hasTable[$k] = (bool)$pdo->query("SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'booking_audit_log' LIMIT 1")->fetchColumn();
+        }
+        if (!$hasTable[$k]) {
+            return;
+        }
+        $u = (isset($GLOBALS['user']) && is_array($GLOBALS['user'])) ? $GLOBALS['user'] : [];
+        $byId = isset($u['id']) ? (int)$u['id'] : (isset($_SESSION['admin_user_id']) ? (int)$_SESSION['admin_user_id'] : null);
+        $byName = (string)($u['full_name'] ?? $u['username'] ?? $_SESSION['admin_full_name'] ?? $_SESSION['admin_username'] ?? '');
+        if ($byName === '' && !$byId) {
+            $byName = 'System';
+        }
+        $cur = function_exists('getSetting') ? trim((string)getSetting('currency_symbol', 'MWK')) : 'MWK';
+        $cur = $cur !== '' ? $cur : 'MWK';
+        $note = 'Follows the money: paid so far ' . $cur . ' ' . number_format($paid, 2) . ', balance due ' . $cur . ' ' . number_format($due, 2) . '.';
+        $pdo->prepare("INSERT INTO booking_audit_log
+                (booking_id, booking_reference, action, old_values, new_values, changed_fields, note, performed_by, performed_by_name, ip_address, user_agent)
+                VALUES (?, ?, 'payment_status_changed', ?, ?, ?, ?, ?, ?, ?, ?)")
+            ->execute([
+                (int)$booking['id'],
+                ($booking['booking_reference'] ?? '') !== '' ? (string)$booking['booking_reference'] : null,
+                json_encode(['payment_status' => $old]),
+                json_encode(['payment_status' => $new]),
+                json_encode(['payment_status']),
+                $note,
+                $byId ?: null,
+                $byName !== '' ? $byName : null,
+                $_SERVER['REMOTE_ADDR'] ?? null,
+                substr((string)($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 500) ?: null,
+            ]);
+    } catch (Throwable $e) {
+        error_log('rh_log_payment_status_change: ' . $e->getMessage());
+    }
+}
+
+/**
  * Recalculate booking financials based on room base + active charges
  * This is called automatically when charges are added/voided
  *
@@ -10295,21 +10342,10 @@ function recalculateBookingFinancials(int $bookingId): bool
         // stays correct as charges and payments move — otherwise a credit written by
         // adjustBookingDates() would go stale the moment a folio charge is added.
         $creditBalance = $balance < -BALANCE_TOLERANCE ? round(-$balance, 2) : 0.00;
-        $paymentStatus = $amountDue <= BALANCE_TOLERANCE ? 'paid' : ($amountPaid > BALANCE_TOLERANCE ? 'partial' : 'unpaid');
-        // A cancelled booking with nothing billed and nothing ever paid is simply unpaid.
-        if ($baseReplaced
-            && $totalWithVat <= BALANCE_TOLERANCE
-            && $amountPaid <= BALANCE_TOLERANCE
-            && (float)($payments['total_refunded'] ?? 0) <= BALANCE_TOLERANCE) {
-            $paymentStatus = 'unpaid';
-        }
-        // A cancelled booking whose money has all gone back out reads 'refunded'.
-        if ($baseReplaced
-            && $amountPaid <= BALANCE_TOLERANCE
-            && (float)($payments['total_refunded'] ?? 0) > BALANCE_TOLERANCE
-            && $amountDue <= BALANCE_TOLERANCE) {
-            $paymentStatus = 'refunded';
-        }
+        // One rule (includes/booking-pay-state.php, step 8i): paid / partial / unpaid from the money; a cancelled bill
+        // with nothing billed and nothing paid is unpaid; one whose money all went back out is refunded.
+        $paymentStatus = rh_pay_state_key($amountPaid, $amountDue, $baseReplaced, $totalWithVat,
+            (float)($payments['total_refunded'] ?? 0) > BALANCE_TOLERANCE);
 
         // Update booking
         $updateStmt = $pdo->prepare("
@@ -10333,6 +10369,13 @@ function recalculateBookingFinancials(int $bookingId): bool
             $paymentStatus,
             $bookingId
         ]);
+
+        // Booking History: the payment status moved (a payment, refund, charge, reprice, extend, room change or
+        // cancellation changed the money). Who / when / old -> new; a failed log never fails the recalculation.
+        $oldPaymentStatus = (string)($booking['payment_status'] ?? '');
+        if ($oldPaymentStatus !== $paymentStatus) {
+            rh_log_payment_status_change($pdo, $booking, $oldPaymentStatus, $paymentStatus, $amountPaid, $amountDue);
+        }
 
         return true;
     } catch (PDOException $e) {

@@ -2172,10 +2172,17 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         <?php endif; ?>
 
         <?php
-        $bd_pay_raw = strtolower((string)($booking['payment_status'] ?? 'unpaid'));
-        $bd_pay_class = in_array($bd_pay_raw, ['paid', 'completed'], true) ? 'ok' : ($bd_pay_raw === 'partial' ? 'warn' : 'alert');
-        $bd_pay_labels = ['paid' => 'Paid', 'completed' => 'Paid', 'partial' => 'Part paid', 'unpaid' => 'Unpaid', 'pending' => 'Unpaid', 'refunded' => 'Refunded', 'failed' => 'Failed'];
-        $bd_pay_label = $bd_pay_labels[$bd_pay_raw] ?? ucfirst($bd_pay_raw);
+        // Payment status from the same Paid / Balance due / Credit figures as the strip beside it (step 8i,
+        // includes/booking-pay-state.php): never "Paid" while a balance is owed.
+        $bd_pay_state = rh_booking_pay_state([
+            'amount_paid' => $folio_amount_paid,
+            'amount_due' => $folio_balance_due,
+            'credit_balance' => $folio_credit_balance,
+            'status' => $booking['status'] ?? '',
+            'payment_status' => $booking['payment_status'] ?? '',
+        ], ['currency' => $currency_symbol]);
+        $bd_pay_class = $bd_pay_state['class'];
+        $bd_pay_label = $bd_pay_state['label'];
         $bd_has_credit = $folio_credit_balance > BALANCE_TOLERANCE;
         $bd_has_due = !$bd_has_credit && $folio_balance_due > BALANCE_TOLERANCE;
         $bd_info_btn = rh_booking_total_info_btn($bd_row_fresh, [
@@ -2216,7 +2223,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             <?php endif; ?>
             <div class="rh-strip__cell">
                 <span class="rh-strip__label">Payment status</span>
-                <span class="rh-pill rh-pill--<?php echo $bd_pay_class; ?>"><?php echo htmlspecialchars($bd_pay_label); ?></span>
+                <span class="rh-pill rh-pill--<?php echo $bd_pay_class; ?>" title="<?php echo htmlspecialchars($bd_pay_state['help'], ENT_QUOTES); ?>"><?php echo htmlspecialchars($bd_pay_label); ?></span>
             </div>
             <div class="rh-strip__cell">
                 <span class="rh-strip__label">Room status</span>
@@ -2425,7 +2432,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     <section class="rh-panel bd-payment">
                         <div class="rh-panel__head">
                             <h2 class="rh-panel__title">Payment breakdown</h2>
-                            <span class="rh-pill rh-pill--<?php echo $bd_pay_class; ?>"><?php echo htmlspecialchars($bd_pay_label); ?></span>
+                            <span class="rh-pill rh-pill--<?php echo $bd_pay_class; ?>" title="<?php echo htmlspecialchars($bd_pay_state['help'], ENT_QUOTES); ?>"><?php echo htmlspecialchars($bd_pay_label); ?></span>
                         </div>
 
                         <div class="payment-tax-breakdown">

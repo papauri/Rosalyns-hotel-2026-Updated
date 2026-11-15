@@ -2840,7 +2840,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $booking['money_card'] = rh_booking_money_card($booking, $gbdRate, ['currency' => $currency_symbol]);
             // Plain words: "partially_refunded" -> "Partially refunded", "checked-in" -> "Checked in".
             $booking['status_label'] = rh_hist_words((string)$booking['status']);
-            $booking['payment_status_label'] = rh_hist_words((string)($booking['actual_payment_status'] ?? $booking['payment_status']));
+            // Payment status from the booking's money (Paid so far vs Balance due, the money card's figures), never one
+            // payment record's 'completed' (step 8i).
+            $gbdPay = rh_booking_pay_state($booking, ['currency' => $currency_symbol]);
+            $booking['payment_status_label'] = $gbdPay['label'];
+            $booking['payment_status_key'] = $gbdPay['key'];
+            $booking['payment_status_help'] = $gbdPay['help'];
 
             header('Content-Type: application/json');
             echo json_encode([
@@ -4381,7 +4386,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                         id="booking-<?php echo (int)$booking['id']; ?>"
                                         data-focus="booking-<?php echo (int)$booking['id']; ?>"
                                         data-status="<?php echo htmlspecialchars($is_deleted_row ? 'deleted' : $booking['status'], ENT_QUOTES); ?>"
-                                        data-payment-status="<?php echo htmlspecialchars((string)($booking['payment_status'] ?: ($booking['actual_payment_status'] ?? '')), ENT_QUOTES); ?>"
+                                        data-payment-status="<?php echo htmlspecialchars((string)($booking['payment_status'] ?? ''), ENT_QUOTES); ?>"
                                         <?php $bk_pay_flags = rh_bk_payment_flags($booking['payment_status'] ?? null, (string)$booking['status']); /* same rule as the Paid / Unpaid badges */ ?>
                                         data-paid="<?php echo $bk_pay_flags['paid'] ? '1' : '0'; ?>"
                                         data-unpaid="<?php echo $bk_pay_flags['unpaid'] ? '1' : '0'; ?>"
@@ -4435,12 +4440,15 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                             // truth for the guest's bill; the latest payment record is only one transaction
                                             // ('completed' even when it covered part of the bill), so it is shown as the reference.
                                             // Worked out here so the phone list row can show it beside the total; the Payment cell below uses the same values.
-                                            $status = (string)($booking['payment_status'] ?: ($booking['actual_payment_status'] ?? ''));
+                                            // Step 8i: from the booking's money (Paid so far vs Balance due, includes/booking-pay-state.php),
+                                            // never a payment record's 'completed'.
+                                            $bk_pay_state = rh_booking_pay_state($booking, ['currency' => $currency_symbol]);
+                                            $status = $bk_pay_state['key'];
                                             // Map payment statuses to user-friendly labels
                                             $status_labels = [
-                                                'paid' => 'Paid',
+                                                'paid' => 'Paid in full',
                                                 'unpaid' => 'Unpaid',
-                                                'partial' => 'Partial',
+                                                'partial' => 'Part paid',
                                                 'completed' => 'Paid',
                                                 'pending' => 'Pending',
                                                 'failed' => 'Failed',
@@ -4549,7 +4557,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                             $bk_holding = in_array($bk_status, ['pending', 'tentative', 'confirmed'], true); // reservation, not yet arrived
                                             $bk_inhouse = $bk_status === 'checked-in';
                                             $bk_closed  = in_array($bk_status, ['checked-out', 'cancelled', 'no-show', 'expired'], true);
-                                            $bk_payment_st = (string)($booking['payment_status'] ?: ($booking['actual_payment_status'] ?? ''));
+                                            $bk_payment_st = (string)$bk_pay_state['key']; // step 8i: from the money (Total cell above)
 
                                             // Money owed back (overpaid / cancelled with payment) -> Refund. A no-show forfeits by
                                             // policy, but staff may still refund at their discretion while money is held.
@@ -4576,7 +4584,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                             $can_delete = $_perm_delete && !$bk_inhouse && $bk_paid <= BALANCE_TOLERANCE && $bk_folio <= BALANCE_TOLERANCE;
                                             ?>
                                             <div class="actions-row">
-                                                <button type="button" class="quick-action view" title="View booking summary" aria-label="View booking summary" data-booking-id="<?php echo $bk_id; ?>" data-booking-ref="<?php echo $bk_ref; ?>" data-guest-name="<?php echo htmlspecialchars((string)($booking['guest_name'] ?? ''), ENT_QUOTES); ?>" data-guest-email="<?php echo htmlspecialchars((string)($booking['guest_email'] ?? ''), ENT_QUOTES); ?>" data-guest-phone="<?php echo htmlspecialchars((string)($booking['guest_phone'] ?? ''), ENT_QUOTES); ?>" data-room-name="<?php echo htmlspecialchars((string)($booking['room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-name="<?php echo htmlspecialchars((string)($booking['individual_room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-number="<?php echo htmlspecialchars((string)($booking['individual_room_number'] ?? ''), ENT_QUOTES); ?>" data-check-in-date="<?php echo htmlspecialchars((string)($booking['check_in_date'] ?? ''), ENT_QUOTES); ?>" data-check-out-date="<?php echo htmlspecialchars((string)($booking['check_out_date'] ?? ''), ENT_QUOTES); ?>" data-number-of-nights="<?php echo htmlspecialchars((string)($booking['number_of_nights'] ?? ''), ENT_QUOTES); ?>" data-number-of-guests="<?php echo htmlspecialchars((string)($booking['number_of_guests'] ?? ''), ENT_QUOTES); ?>" data-total-display="<?php echo htmlspecialchars($currency_symbol . ' ' . number_format(rh_booking_full_total($booking), 2), ENT_QUOTES); ?>" data-booked-rate="<?php echo htmlspecialchars(!empty($bk_rate['ok']) ? $bk_rate['text'] : '', ENT_QUOTES); ?>" data-status-label="<?php echo htmlspecialchars($bk_deleted ? 'Deleted' : rh_hist_words($bk_status), ENT_QUOTES); ?>" data-payment-status-label="<?php echo htmlspecialchars(rh_hist_words((string)$bk_payment_st), ENT_QUOTES); ?>" data-created-at-label="<?php echo htmlspecialchars(!empty($booking['created_at']) ? date('M j, Y H:i', strtotime((string)$booking['created_at'])) : '', ENT_QUOTES); ?>" data-special-requests="<?php echo htmlspecialchars((string)($booking['special_requests'] ?? ''), ENT_QUOTES); ?>" onclick="openViewBookingModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, this, typeof event !== 'undefined' ? event : null)">
+                                                <button type="button" class="quick-action view" title="View booking summary" aria-label="View booking summary" data-booking-id="<?php echo $bk_id; ?>" data-booking-ref="<?php echo $bk_ref; ?>" data-guest-name="<?php echo htmlspecialchars((string)($booking['guest_name'] ?? ''), ENT_QUOTES); ?>" data-guest-email="<?php echo htmlspecialchars((string)($booking['guest_email'] ?? ''), ENT_QUOTES); ?>" data-guest-phone="<?php echo htmlspecialchars((string)($booking['guest_phone'] ?? ''), ENT_QUOTES); ?>" data-room-name="<?php echo htmlspecialchars((string)($booking['room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-name="<?php echo htmlspecialchars((string)($booking['individual_room_name'] ?? ''), ENT_QUOTES); ?>" data-individual-room-number="<?php echo htmlspecialchars((string)($booking['individual_room_number'] ?? ''), ENT_QUOTES); ?>" data-check-in-date="<?php echo htmlspecialchars((string)($booking['check_in_date'] ?? ''), ENT_QUOTES); ?>" data-check-out-date="<?php echo htmlspecialchars((string)($booking['check_out_date'] ?? ''), ENT_QUOTES); ?>" data-number-of-nights="<?php echo htmlspecialchars((string)($booking['number_of_nights'] ?? ''), ENT_QUOTES); ?>" data-number-of-guests="<?php echo htmlspecialchars((string)($booking['number_of_guests'] ?? ''), ENT_QUOTES); ?>" data-total-display="<?php echo htmlspecialchars($currency_symbol . ' ' . number_format(rh_booking_full_total($booking), 2), ENT_QUOTES); ?>" data-booked-rate="<?php echo htmlspecialchars(!empty($bk_rate['ok']) ? $bk_rate['text'] : '', ENT_QUOTES); ?>" data-status-label="<?php echo htmlspecialchars($bk_deleted ? 'Deleted' : rh_hist_words($bk_status), ENT_QUOTES); ?>" data-payment-status-label="<?php echo htmlspecialchars((string)$bk_pay_state['label'], ENT_QUOTES); ?>" data-created-at-label="<?php echo htmlspecialchars(!empty($booking['created_at']) ? date('M j, Y H:i', strtotime((string)$booking['created_at'])) : '', ENT_QUOTES); ?>" data-special-requests="<?php echo htmlspecialchars((string)($booking['special_requests'] ?? ''), ENT_QUOTES); ?>" onclick="openViewBookingModal(<?php echo $bk_id; ?>, <?php echo $bk_ref_js; ?>, this, typeof event !== 'undefined' ? event : null)">
                                                     <i class="fas fa-circle-info"></i>
                                                     <span class="label">View details</span>
                                                 </button>
@@ -8075,6 +8083,11 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             setText('view_booking_header_ref', booking.booking_reference, '—');
             setText('view_booking_header_status', booking.status_label || booking.status, '—');
             setText('view_booking_header_payment', booking.payment_status_label || booking.payment_status, '—');
+            // Plain helper for the payment status (step 8i): what the words are worked out from.
+            ['view_payment', 'view_booking_header_payment'].forEach(function (id) {
+                var el = document.getElementById(id);
+                if (el) el.title = String(booking.payment_status_help || 'From Paid so far and Balance due in How the total is made up.');
+            });
 
             // Phone/tablet summary (shown up to 1024px only): the same values as the fields above, no new figures.
             // The balance line is the server-built money card line as it stands (label + value), never worked out here.

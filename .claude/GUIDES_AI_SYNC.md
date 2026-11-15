@@ -268,6 +268,10 @@ when prompted."
 - Guides (Rate Plans, Add/Edit pop-up): now in 4 numbered parts: 1. Name and when it applies, 2. Which room types (Applies To moved up, before the prices), 3. Price change (amounts, per room type, apply on, what each room type will cost), 4. Settings (Priority, Stack with other plans, Active - the two switches were cut off before and now show properly). Update any screenshot/step order.
 - Assistant: no change.
 
+### Payment status tells the truth (2026-11-16, NEXT_BUILD_ORDER step 8i) — SHIPPED (hashes: see NEXT_BUILD_ORDER.md row 8i)
+- Guides (Bookings list, Booking Details pop-up + page, Dashboard check-in card, Calendar tooltip): payment status now comes from the money: "Paid in full", "Part paid (MWK X left)", "Unpaid", "Refunded". "Paid" is now "Paid in full", "Partial" is now "Part paid (MWK X left)". The pop-up no longer says "Completed" for a booking that still owes (it was showing one payment's status). A cancelled/no-show booking with nothing paid or owed shows "Unpaid". Booking History gets a "Payment status now ..." line whenever the status changes.
+- Assistant: no data change (bookings.payment_status was already right); if it words a booking's payment state, use the same four labels (includes/booking-pay-state.php rh_booking_pay_state).
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` fails in unchanged code: claim-check self-test (Room Board "Tomorrow"; staff
   activity "4 of 3 staff accounts"), History Summary "K1,068,000," flagged; digest-recipients fail.

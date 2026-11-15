@@ -222,7 +222,7 @@ if (!function_exists('rh_bk_valid_date')) {
             'guests'    => 'b.number_of_guests',
             'total'     => rh_bk_full_total_sql('b'),
             'status'    => 'b.status',
-            'payment'   => 'actual_payment_status',
+            'payment'   => 'b.payment_status', // the booking's own status (from its money), not one payment record's (step 8i)
             'created'   => 'b.created_at',
         ];
     }
