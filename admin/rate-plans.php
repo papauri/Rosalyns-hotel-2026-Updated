@@ -82,6 +82,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pvBasis = ($rpBasisMatters && ($_POST['price_basis'] ?? 'all_in') === 'base') ? 'base' : 'all_in';
             // Rows with a bad value are left out of the preview (the save explains why).
             $pvOverrides = [];
+            $pvZero = [];
             if ($pvMode === 'per_room') {
                 foreach ((array)($_POST['room_adj'] ?? []) as $rid => $row) {
                     $rid = (int)$rid;
@@ -89,7 +90,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         continue;
                     }
                     $raw = trim((string)($row['value'] ?? ''));
-                    if ($raw === '' || !is_numeric($raw) || abs((float)$raw) < 0.005) {
+                    if ($raw !== '' && is_numeric($raw) && abs((float)$raw) < 0.005) {
+                        $pvZero[$rid] = true; // 0 = keeps its normal price (left out of the plan on save)
+                        continue;
+                    }
+                    if ($raw === '' || !is_numeric($raw)) {
                         continue;
                     }
                     $pvOverrides[$rid] = ['type' => ($row['type'] ?? '') === 'fixed' ? 'fixed' : 'percentage', 'value' => round((float)$raw, 2)];
@@ -100,7 +105,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pvValid = is_numeric($_POST['adjustment_value'] ?? null) && abs((float)$_POST['adjustment_value']) >= 0.005;
             foreach ($rpRooms as $rid => $info) {
                 $eff = rh_rate_plan_effective($pvPlan, $rid);
-                if ($eff === null || abs($eff['value']) < 0.005 || (!$pvValid && !$eff['override'])) {
+                if ($eff === null || isset($pvZero[$rid]) || abs($eff['value']) < 0.005 || (!$pvValid && !$eff['override'])) {
                     continue;
                 }
                 $bd = rh_rate_plan_breakdown($pvPlan, $rid, (float)$info['standard'], $rpFactor, $rpCur);
@@ -161,42 +166,50 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $roomIdsPosted = ($appliesTo === 'room_types') ? array_values(array_unique(array_map('intval', (array)($_POST['room_type_ids'] ?? [])))) : [];
             $badRoomIds = array_diff($roomIdsPosted, $validRoomIds);
 
-            // "Different per room type" with the bottom amount left empty (owner 2026-11-16: "adjustment value must
-            // be non zero" after filling the room amounts). For a plan on chosen room types where every chosen room
-            // type has its own amount, the bottom amount is never used for a price: store the first chosen room
-            // type's amount there (keeps the increase/discount checks). A plan on every room type still needs it:
-            // a room type added later would use it.
+            // "Different per room type" (owner 2026-11-16: "not allowing 0% or 0 price ... why is it asking me if all
+            // 3 rooms are selected. Better smarter logic"):
+            //  - a room type set to 0 keeps its normal price: it is left out of the plan;
+            //  - the bottom amount empty or 0 = room types with no amount of their own keep their normal price: they are
+            //    left out too, and the plan stores the first remaining room type's amount there (never used for a
+            //    price: every covered room type prices from its own amount; keeps the increase/discount checks);
+            //  - whenever room types are left out this way, the plan covers exactly the room types that change (a room
+            //    type added later is not changed by it).
             $perRoomBlankDefault = '';
-            if ($rp086 && ($_POST['adj_mode'] ?? 'same') === 'per_room' && (!is_numeric($adjRaw) || $adjValue == 0)) {
+            if ($rp086 && ($_POST['adj_mode'] ?? 'same') === 'per_room') {
                 $rpPosted = (array)($_POST['room_adj'] ?? []);
-                $rpFilled = static function ($rid) use ($rpPosted): ?array {
-                    $row = $rpPosted[$rid] ?? null;
-                    $raw = is_array($row) ? trim((string)($row['value'] ?? '')) : '';
-                    if ($raw === '' || !is_numeric($raw) || abs(round((float)$raw, 2)) < 0.000001) {
-                        return null;
-                    }
-                    return ['type' => ($row['type'] ?? '') === 'fixed' ? 'fixed' : 'percentage', 'value' => round((float)$raw, 2)];
-                };
+                $rpDefaultBlank = !is_numeric($adjRaw) || abs($adjValue) < 0.000001;
                 $rpCoverIds = $appliesTo === 'room_types' ? $roomIdsPosted : array_map('intval', array_keys($rpRooms));
-                $rpEmpty = [];
+                $rpKeep = [];
                 $rpFirst = null;
+                $rpNarrow = $rpDefaultBlank;
                 foreach ($rpCoverIds as $rpCid) {
-                    $rpAmt = $rpFilled($rpCid);
-                    if ($rpAmt === null) {
-                        $rpEmpty[] = (string)($rpRooms[$rpCid]['name'] ?? ('#' . $rpCid));
-                    } elseif ($rpFirst === null) {
-                        $rpFirst = $rpAmt;
+                    $row = $rpPosted[$rpCid] ?? null;
+                    $raw = is_array($row) ? trim((string)($row['value'] ?? '')) : '';
+                    if ($raw !== '' && is_numeric($raw) && abs(round((float)$raw, 2)) < 0.000001) {
+                        $rpNarrow = true; // 0 = this room type keeps its normal price
+                        continue;
+                    }
+                    if ($raw === '' && $rpDefaultBlank) {
+                        continue; // empty + no bottom amount = keeps its normal price
+                    }
+                    $rpKeep[] = $rpCid;
+                    if ($rpFirst === null && $raw !== '' && is_numeric($raw)) {
+                        $rpFirst = ['type' => ($row['type'] ?? '') === 'fixed' ? 'fixed' : 'percentage', 'value' => round((float)$raw, 2)];
                     }
                 }
-                if ($appliesTo !== 'room_types') {
-                    $perRoomBlankDefault = 'Fill in "Amount for any room type left empty above": this plan covers every room type, so a room type added later uses that amount.'
-                        . ($rpEmpty ? ' Room types with no amount of their own: ' . implode(', ', $rpEmpty) . '.' : '');
-                } elseif ($rpEmpty) {
-                    $perRoomBlankDefault = 'Give these room types their own amount, or fill in "Amount for any room type left empty above": ' . implode(', ', $rpEmpty) . '.';
-                } elseif ($rpFirst !== null && !$badRoomIds) {
-                    $adjType  = $rpFirst['type'];
-                    $adjValue = $rpFirst['value'];
-                    $adjRaw   = (string)$adjValue;
+                if ($rpNarrow && $rpCoverIds && !$badRoomIds) {
+                    if (!$rpKeep) {
+                        $perRoomBlankDefault = 'Nothing would change: every room type is 0 or empty and the amount for room types left empty is empty or 0. Give at least one room type an amount.';
+                    } else {
+                        $appliesTo = 'room_types';
+                        $roomIdsPosted = $rpKeep;
+                        $roomTypeIds = json_encode(array_values($rpKeep));
+                        if ($rpDefaultBlank && $rpFirst !== null) {
+                            $adjType  = $rpFirst['type'];
+                            $adjValue = $rpFirst['value'];
+                            $adjRaw   = (string)$adjValue;
+                        }
+                    }
                 }
             }
 
@@ -1240,7 +1253,7 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
                                 <label><input type="radio" name="adj_mode" value="same" id="fieldAdjModeSame" checked> Same for all room types</label>
                                 <label><input type="radio" name="adj_mode" value="per_room" id="fieldAdjModePerRoom"> Different per room type</label>
                             </div>
-                            <p class="form-hint">Different per room type: give a room type its own % or fixed amount. Leave a room type empty to use the amount below. One plan is either all increases or all discounts.</p>
+                            <p class="form-hint">Different per room type: give a room type its own % or fixed amount. Put 0 for a room type that keeps its normal price. Leave it empty to use the amount below (if that is empty or 0, it keeps its normal price too). One plan is either all increases or all discounts.</p>
                         </div>
                         <div class="rp-room-rows" id="rpRoomRows" style="display:none;">
                             <?php foreach ($rpRooms as $rpRid => $rpInfo): ?>
@@ -1531,7 +1544,7 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
                 const dt = document.getElementById('rpDefaultTitle');
                 if (dt) dt.style.display = rpMode() === 'per_room' ? 'block' : 'none';
                 const dh = document.getElementById('rpDefaultHint');
-                if (dh) dh.textContent = rpMode() === 'per_room' ? 'Used for every room type left empty above. Can stay empty when the plan is for chosen room types and each has its own amount.' :'Used for every room type.';
+                if (dh) dh.textContent = rpMode() === 'per_room' ? 'Used for every room type left empty above. Leave it empty or 0 to keep those room types at their normal price.' :'Used for every room type.';
                 const all = document.getElementById('fieldAppliesTo').value !== 'room_types';
                 const chosen = Array.from(document.querySelectorAll('.rp-room-chk:checked')).map(c => c.value);
                 box.querySelectorAll('.rp-room-row').forEach(row => {

@@ -296,6 +296,7 @@ when prompted."
 ### Rate plan: bottom amount optional when every chosen room type has its own (2026-11-16, owner fault) — hashes in TASKS.md
 - Guides (Rate Plans): with "Different per room type", a plan for chosen room types where each has its own amount can leave "Amount for any room type left empty above" empty; a plan for all room types still needs it (a room type added later uses it); the error names any room type left without an amount.
 - Assistant: no change in what it reads (adjustment_value still set: the first chosen room type's amount).
+- Follow-up (same day, owner): a room type at 0 keeps its normal price and is left out of the plan; bottom amount empty or 0 = room types without their own amount keep their normal price; the plan then covers exactly the room types that change (so a room type added later is untouched). Replaces the line above about all-room-type plans needing the bottom amount.
 
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` fails in unchanged code: claim-check self-test (Room Board "Tomorrow"; staff
