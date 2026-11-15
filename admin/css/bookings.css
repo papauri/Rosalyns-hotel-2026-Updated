@@ -2931,3 +2931,34 @@ table.bookings-table td small.bk-status-note {
 table.mobile-enhanced .bk-created-by {
     max-width: 100%;
 }
+
+/* ---- Step 8f (owner 2026-11-15): number of guests on every booking row at every width ----
+   The Guests column shows only when the Room Bookings box is 1600px+ wide. Where it drops out (laptop box under
+   1600px, tablets 641-1024px) the Check In cell carries "N guests" under the dates; phones show it on line 2
+   ("12 Nov -> 15 Nov . 3 nights . 2 guests", in bookings.php). Card mode (mobile-enhanced) keeps its labelled
+   Guests field, so the twin stays hidden there. */
+table.bookings-table .bk-guests-twin {
+    display: none;
+}
+
+@media (min-width: 641px) and (max-width: 1024px) {
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) td[data-label="Check In"] > .bk-guests-twin {
+        display: block;
+        margin-top: 2px;
+        color: #6b6258;
+        font-size: 11px;
+        white-space: nowrap;
+    }
+}
+
+@media (min-width: 1025px) {
+    @container bookings-section (max-width: 1599px) {
+        :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) td[data-label="Check In"] > .bk-guests-twin {
+            display: block;
+            margin-top: 2px;
+            color: #6b6258;
+            font-size: 11px;
+            white-space: nowrap;
+        }
+    }
+}
