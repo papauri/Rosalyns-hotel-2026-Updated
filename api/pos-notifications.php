@@ -139,9 +139,10 @@ if ($action === 'poll') {
 
     /* Return current business-day notifications that are still valid and unseen for this user. */
     try {
-        $notificationWindow = rh_station_union_business_window();
+        // Trading day (opening to the NEXT opening): a "ready" after the stations closed still reaches the till (step 9 A3).
+        $notificationWindow = rh_station_union_trading_window();
         $windowStart = (string)$notificationWindow['start_sql'];
-        $windowEnd = (string)$notificationWindow['end_sql'];
+        $windowEnd = (string)$notificationWindow['trading_end_sql'];
         $st = $pdo->prepare("SELECT n.id, n.order_id, n.`reference`, n.table_label, n.station, n.placed_by, n.message, n.seen_by,
                                 (SELECT COUNT(*)
                                      FROM stock_order_items soi

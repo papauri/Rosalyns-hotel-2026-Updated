@@ -747,6 +747,28 @@ function rh_delete_pos_order(PDO $pdo, int $orderId, int $userId, string $reason
         $pdo->prepare("DELETE FROM stock_order_splits WHERE order_id = ?")->execute([$orderId]);
         if ($hasStationMessages) {
             $pdo->prepare("DELETE FROM station_messages WHERE order_id = ?")->execute([$orderId]);
+            /* Stations already cooking / pouring it are told to stop, as a void does
+             * (rh_close_pos_order). Written after the order's notes are removed and with no
+             * order_id (the order row is about to go), so it survives the delete. */
+            $stopStations = [];
+            foreach ($items as $it) {
+                if (in_array((string)$it['kds_status'], ['preparing', 'in_progress', 'ready', 'collection'], true)
+                    && in_array((string)$it['station'], ['kitchen', 'bar', 'coffee_bar'], true)) {
+                    $stopStations[(string)$it['station']] = true;
+                }
+            }
+            if ($stopStations) {
+                $stopMsg = 'STOP — order ' . $reference . ' deleted. Do not serve it.';
+                $shortReason = trim((string)$reason);
+                if ($shortReason !== '') {
+                    $stopMsg .= ' Reason: ' . $shortReason;
+                }
+                $stopMsg = mb_substr($stopMsg, 0, 255);
+                $stopIns = $pdo->prepare("INSERT INTO station_messages (station, message, sent_by, sent_by_name, source, priority, order_id, order_ref, is_acknowledged, acknowledged_at) VALUES (?, ?, ?, ?, 'pos', 'urgent', NULL, ?, 0, NULL)");
+                foreach (array_keys($stopStations) as $stn) {
+                    $stopIns->execute([$stn, $stopMsg, $userId > 0 ? $userId : null, mb_substr($actorName, 0, 120), mb_substr($reference, 0, 40)]);
+                }
+            }
         }
         if ($hasReadyNotifs) {
             $pdo->prepare("DELETE FROM pos_ready_notifications WHERE order_id = ?")->execute([$orderId]);

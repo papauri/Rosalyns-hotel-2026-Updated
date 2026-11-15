@@ -33,7 +33,7 @@ $currency_symbol = getSetting('currency_symbol') ?: 'MWK ';
  * and admin/stock-orders.php each already carry their own copy; there is no shared include. */
 function drift_calculateVatParts(float $grossAmount): array
 {
-    $vatEnabled = in_array(getSetting('vat_enabled'), ['1', 1, true, 'true', 'on'], true);
+    $vatEnabled = rh_vat_enabled();
     $vatRate = $vatEnabled ? (float)getSetting('vat_rate') : 0.0;
     if ($grossAmount <= 0 || $vatRate <= 0) {
         return ['net' => round($grossAmount, 2), 'vat' => 0.0, 'gross' => round($grossAmount, 2)];
@@ -46,41 +46,6 @@ function drift_calculateVatParts(float $grossAmount): array
 function drift_money(float $amount, string $currencySymbol): string
 {
     return htmlspecialchars($currencySymbol, ENT_QUOTES, 'UTF-8') . ' ' . number_format($amount, 2);
-}
-
-/* Recompute this cashier's expected cash/mobile/card for a window using the FIXED
- * split-aware logic (mirrors admin/pos.php close_shift after the D2 fix) — sourcing
- * split-order tenders from stock_order_splits instead of stock_orders.payment_method. */
-function drift_recomputeExpected(PDO $pdo, int $userId, string $windowStart, string $windowEnd): array
-{
-    $nonSplit = $pdo->prepare("
-        SELECT COALESCE(SUM(CASE WHEN payment_method='cash' THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END),0) AS cash,
-               COALESCE(SUM(CASE WHEN payment_method='mobile_money' THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END),0) AS mobile,
-               COALESCE(SUM(CASE WHEN payment_method IN ('card_manual','card_pos') THEN total_amount + COALESCE(tip_amount,0) ELSE 0 END),0) AS card
-        FROM stock_orders
-        WHERE created_by = ? AND status = 'paid' AND COALESCE(split_count,1) <= 1
-          AND ((paid_at IS NOT NULL AND paid_at >= ? AND paid_at < ?) OR (paid_at IS NULL AND created_at >= ? AND created_at < ?))
-    ");
-    $nonSplit->execute([$userId, $windowStart, $windowEnd, $windowStart, $windowEnd]);
-    $ns = $nonSplit->fetch(PDO::FETCH_ASSOC) ?: ['cash' => 0, 'mobile' => 0, 'card' => 0];
-
-    $split = $pdo->prepare("
-        SELECT COALESCE(SUM(CASE WHEN s.payment_method='cash' THEN s.split_amount + COALESCE(s.tip_amount,0) ELSE 0 END),0) AS cash,
-               COALESCE(SUM(CASE WHEN s.payment_method='mobile_money' THEN s.split_amount + COALESCE(s.tip_amount,0) ELSE 0 END),0) AS mobile,
-               COALESCE(SUM(CASE WHEN s.payment_method IN ('card_manual','card_pos') THEN s.split_amount + COALESCE(s.tip_amount,0) ELSE 0 END),0) AS card
-        FROM stock_order_splits s
-        INNER JOIN stock_orders o ON o.id = s.order_id
-        WHERE o.created_by = ? AND o.status = 'paid' AND COALESCE(o.split_count,1) > 1
-          AND ((o.paid_at IS NOT NULL AND o.paid_at >= ? AND o.paid_at < ?) OR (o.paid_at IS NULL AND o.created_at >= ? AND o.created_at < ?))
-    ");
-    $split->execute([$userId, $windowStart, $windowEnd, $windowStart, $windowEnd]);
-    $sp = $split->fetch(PDO::FETCH_ASSOC) ?: ['cash' => 0, 'mobile' => 0, 'card' => 0];
-
-    return [
-        'cash'   => round((float)$ns['cash']   + (float)$sp['cash'], 2),
-        'mobile' => round((float)$ns['mobile'] + (float)$sp['mobile'], 2),
-        'card'   => round((float)$ns['card']   + (float)$sp['card'], 2),
-    ];
 }
 
 // ---------------------------------------------------------------------------
@@ -189,35 +154,15 @@ $shiftKpiAffectedCount = 0;
 $shiftKpiOverrideAffectedCount = 0;
 foreach ($closeRows as $c) {
     // Each close against its OWN window (from where the user's previous close stopped, to when this one
-    // was recorded), the same window the till counted - never the whole day (owner 2026-11-10).
-    $cw = rh_pos_close_window($pdo, $c);
-    $recomputed = drift_recomputeExpected($pdo, (int)$c['user_id'], $cw['from'], $cw['end']);
-    // Closes recorded after the opening float was included store expected cash WITH the float;
-    // older ones do not. Accept either so a float alone never shows up as "drift".
-    $deltaCash = round($recomputed['cash'] - (float)$c['expected_cash'], 2);
-    $fl = rh_pos_shift_float($pdo, (int)$c['user_id'], $cw['from'], $cw['end']);
-    if ($fl['recorded'] && abs($deltaCash) > 0.01 && abs(round($recomputed['cash'] + $fl['amount'] - (float)$c['expected_cash'], 2)) <= 0.01) {
-        $deltaCash = 0.0;
-    }
-    $deltaMobile = round($recomputed['mobile'] - (float)$c['expected_mobile'], 2);
-    $deltaCard = round($recomputed['card'] - (float)$c['expected_card'], 2);
-    $affected = abs($deltaCash) > 0.01 || abs($deltaMobile) > 0.01 || abs($deltaCard) > 0.01;
-    if (!$affected) continue;
+    // was recorded), re-read through the till's own maths (rh_pos_shift_totals via rh_pos_close_drift):
+    // payer, refund/void payouts, 86 add-back and float exactly as the close counts them (step 9 B1).
+    $d = rh_pos_close_drift($pdo, $c);
+    if (!$d['affected']) continue;
     $isOverride = stripos((string)($c['notes'] ?? ''), 'OVERRIDE') !== false;
     $shiftKpiAffectedCount++;
     if ($isOverride) $shiftKpiOverrideAffectedCount++;
-    $shiftDrift[] = $c + [
-        'recomputed_cash' => $recomputed['cash'],
-        'recomputed_mobile' => $recomputed['mobile'],
-        'recomputed_card' => $recomputed['card'],
-        'delta_cash' => $deltaCash,
-        'delta_mobile' => $deltaMobile,
-        'delta_card' => $deltaCard,
-        'recomputed_variance_cash' => round((float)$c['declared_cash'] - $recomputed['cash'], 2),
-        'recomputed_variance_mobile' => round((float)$c['declared_mobile'] - $recomputed['mobile'], 2),
-        'recomputed_variance_card' => round((float)$c['declared_card'] - $recomputed['card'], 2),
-        'is_override' => $isOverride,
-    ];
+    unset($d['affected']);
+    $shiftDrift[] = $c + $d + ['is_override' => $isOverride];
 }
 ?>
 <!DOCTYPE html>

@@ -375,6 +375,24 @@ if (!function_exists('rh_pos_partial_refunds')) {
     }
 }
 
+if (!function_exists('rh_pos_refund_paid_out_sql')) {
+    /**
+     * When a REFUNDED order's money actually left the drawer - the ONE rule shared by the Z / shift
+     * payouts (rh_pos_shift_reversals) and End of Day "Refunds paid out" (rh_pos_eod_summary), so the
+     * two never date a refund differently. Returns [$atExpr, $notPendingExpr] over order alias $o:
+     *  - $atExpr: refunded_at, or the latest settlement (refund_date_processed) of its non-86 refund rows
+     *    when they were raised pending and settled later (refunds are dated by payout day);
+     *  - $notPendingExpr: no non-86 refund row of the order is still pending/processing (nothing paid out yet).
+     * Pure (SQL text only, no params).
+     */
+    function rh_pos_refund_paid_out_sql(string $o = 'o'): array
+    {
+        $at = "GREATEST($o.refunded_at, COALESCE((SELECT MAX(pr.refund_date_processed) FROM payments pr WHERE pr.booking_type = 'restaurant' AND pr.booking_id = $o.id AND pr.payment_type = 'refund' AND pr.deleted_at IS NULL AND pr.payment_reference NOT LIKE 'REF86-%' AND pr.refund_status = 'completed'), $o.refunded_at))";
+        $notPending = "NOT EXISTS (SELECT 1 FROM payments pp WHERE pp.booking_type = 'restaurant' AND pp.booking_id = $o.id AND pp.payment_type = 'refund' AND pp.deleted_at IS NULL AND pp.payment_reference NOT LIKE 'REF86-%' AND pp.refund_status IN ('pending','processing'))";
+        return [$at, $notPending];
+    }
+}
+
 if (!function_exists('rh_pos_shift_reversals')) {
     /**
      * Refund / void payouts of PAID orders in [start,end): money that actually left the drawer, per
@@ -392,8 +410,7 @@ if (!function_exists('rh_pos_shift_reversals')) {
         // A refunded order counts when its money actually left the drawer: refunded_at, or the latest
         // settlement of its (non-86) refund rows when they were raised pending and settled later.
         // While any such row is still pending/processing nothing has been paid out yet.
-        $refundAt = "GREATEST(o.refunded_at, COALESCE((SELECT MAX(pr.refund_date_processed) FROM payments pr WHERE pr.booking_type = 'restaurant' AND pr.booking_id = o.id AND pr.payment_type = 'refund' AND pr.deleted_at IS NULL AND pr.payment_reference NOT LIKE 'REF86-%' AND pr.refund_status = 'completed'), o.refunded_at))";
-        $refundNotPending = "NOT EXISTS (SELECT 1 FROM payments pp WHERE pp.booking_type = 'restaurant' AND pp.booking_id = o.id AND pp.payment_type = 'refund' AND pp.deleted_at IS NULL AND pp.payment_reference NOT LIKE 'REF86-%' AND pp.refund_status IN ('pending','processing'))";
+        [$refundAt, $refundNotPending] = rh_pos_refund_paid_out_sql('o');
         $refundCond = $hasRefundedAt ? "(o.status = 'refunded' AND $refundNotPending AND $refundAt >= ? AND $refundAt < ?)" : "(1 = 0)";
         $sql = "
             SELECT o.id, o.status, o.payment_method, o.total_amount, COALESCE(o.tip_amount,0) AS tip,
@@ -1086,6 +1103,41 @@ if (!function_exists('rh_pos_close_revenue')) {
     }
 }
 
+if (!function_exists('rh_pos_close_drift')) {
+    /**
+     * Drift of a STORED shift close against today's till maths (POS Ledger Drift Report, read only):
+     * the close's own window (rh_pos_close_window) re-read through rh_pos_shift_totals - the exact
+     * figures the close itself uses (payer = who took the money, refund/void payouts in the window,
+     * REF86 add-back, split legs). Closes store expected cash as the DRAWER figure (float + net cash
+     * takings); older closes stored net cash without the float, so cash is compared on whichever
+     * basis the stored figure was written in (drawer first) and a float alone is never drift.
+     * Returns recomputed_* / delta_* / recomputed_variance_* for cash, mobile, card and 'affected'.
+     */
+    function rh_pos_close_drift(PDO $pdo, array $close): array
+    {
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        $w = rh_pos_close_window($pdo, $close);
+        $t = rh_pos_shift_totals($pdo, (int)$close['user_id'], $w['from'], $w['end'], $w['day_start']);
+        $storedCash = (float)($close['expected_cash'] ?? 0);
+        $cash = (float)$t['drawer_cash'];
+        if (abs(round($cash - $storedCash, 2)) > $tol && abs(round((float)$t['cash'] - $storedCash, 2)) <= $tol) {
+            $cash = (float)$t['cash']; // an older close stored without the opening float
+        }
+        $re = ['cash' => round($cash, 2), 'mobile' => round((float)$t['mobile'], 2), 'card' => round((float)$t['card'], 2)];
+        $out = ['affected' => false];
+        foreach ($re as $k => $v) {
+            $delta = round($v - (float)($close['expected_' . $k] ?? 0), 2);
+            $out['recomputed_' . $k] = $v;
+            $out['delta_' . $k] = $delta;
+            $out['recomputed_variance_' . $k] = round((float)($close['declared_' . $k] ?? 0) - $v, 2);
+            if (abs($delta) > $tol) {
+                $out['affected'] = true;
+            }
+        }
+        return $out;
+    }
+}
+
 if (!function_exists('rh_pos_shift_user_ids')) {
     /** Every user with till activity (sales taken, tabs opened, payouts, voids) in [start,end). */
     function rh_pos_shift_user_ids(PDO $pdo, string $start, string $end): array
@@ -1148,7 +1200,7 @@ if (!function_exists('rh_pos_eod_summary')) {
     /**
      * End-of-day POS block for a business date, on the same rules as the till and the ledger:
      * sales are summed by paid_at inside that date's business window (whatever the status is
-     * now); voids by voided_at and refunds by refunded_at, each only in their own window.
+     * now); voids by voided_at and refunds by their payout day (rh_pos_refund_paid_out_sql), each only in their own window.
      * Returns ['totals','by_type','top_items','void_reasons'].
      */
     function rh_pos_eod_summary(PDO $pdo, string $date): array
@@ -1199,7 +1251,10 @@ if (!function_exists('rh_pos_eod_summary')) {
         $out['totals']['voided_value'] = (float)($r['v'] ?? 0);
 
         if ($hasRefundedAt) {
-            $st = $pdo->prepare("SELECT COUNT(*) AS n, COALESCE(SUM(o.total_amount),0) AS v FROM stock_orders o WHERE o.status = 'refunded' AND o.refunded_at >= ? AND o.refunded_at < ?");
+            // Dated by payout day, exactly as the Z: a refund raised pending counts when it is settled,
+            // never on the day it was raised (step 9 B2).
+            [$refundAt, $refundNotPending] = rh_pos_refund_paid_out_sql('o');
+            $st = $pdo->prepare("SELECT COUNT(*) AS n, COALESCE(SUM(o.total_amount),0) AS v FROM stock_orders o WHERE o.status = 'refunded' AND $refundNotPending AND $refundAt >= ? AND $refundAt < ?");
             $st->execute([$a, $b]);
             $r = $st->fetch(PDO::FETCH_ASSOC) ?: [];
             $out['totals']['refunded_count'] = (int)($r['n'] ?? 0);

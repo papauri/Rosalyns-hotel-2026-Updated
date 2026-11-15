@@ -276,6 +276,10 @@ when prompted."
 - Guides (Rate Plans, part 3 Price change): the first choice is now "Amount by room type": Same for all room types (then one Adjustment Type + Value) or Different per room type (the room type rows first, then "Amount for any room type left empty above"). Update step order/screenshots.
 - Assistant: no change.
 
+### POS / KDS core review fixes (2026-11-16, NEXT_BUILD_ORDER step 9) — SHIPPED (hashes: see NEXT_BUILD_ORDER.md row 9)
+- Guides (POS till, KDS/BDS/CDS, Orders & Tabs, Drift report, End of Day): a retried Fire / Add to tab after a lost connection no longer sends the order twice; the till now gets a "ready" alert for every later round and after a recall; ready alerts, My orders and sent notes stay on the till after the stations close until the next opening; the closed-station warning follows the station each dish goes to (coffee bar included) and updates live; a new round on an old tab no longer shows as overdue; notes and rush flags go only to the stations on the order; voiding the last unfinished dish sends the ready alert; deleting a live order sends a STOP note to the station; KDS Bump help no longer mentions a Recall button. Drift report compares against the till's own shift totals (no false drift for a tab settled by another cashier or a refund). End of Day counts a POS refund on the day it is paid out (same as the Z). Voiding a room-service charge after the order closed lowers the order total too (Z / End of Day "Charged to room" match the folio). A discount bigger than the order now stores the real discount.
+- Assistant: POS figures it reads (stock_orders totals, Z/EOD helpers) now agree with the folio and payout day; check any answer about drift, EOD refunds or room-service voids.
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` fails in unchanged code: claim-check self-test (Room Board "Tomorrow"; staff
   activity "4 of 3 staff accounts"), History Summary "K1,068,000," flagged; digest-recipients fail.

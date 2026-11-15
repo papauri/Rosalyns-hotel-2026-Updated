@@ -9611,7 +9611,7 @@ function voidBookingCharge(int $chargeId, string $voidReason, ?int $voidedBy = n
         $pdo->beginTransaction();
 
         // Get charge details (need extra fields for stock restoration)
-        $stmt = $pdo->prepare("SELECT booking_id, voided, charge_type, source_item_id, quantity, stock_tracked FROM booking_charges WHERE id = ? FOR UPDATE");
+        $stmt = $pdo->prepare("SELECT booking_id, voided, charge_type, source_item_id, quantity, stock_tracked, line_total FROM booking_charges WHERE id = ? FOR UPDATE");
         $stmt->execute([$chargeId]);
         $charge = $stmt->fetch(PDO::FETCH_ASSOC);
 
@@ -9718,7 +9718,7 @@ function voidBookingCharge(int $chargeId, string $voidReason, ?int $voidedBy = n
 
         // The charge's UNSERVED kitchen line goes with it (tracked or not): void + stock flag cleared, so a
         // later 86 / order close cannot settle its stock a second time. A served line is left as it is.
-        // Runs after the stock call above (that reads the line status). Order totals are not touched.
+        // Runs after the stock call above (that reads the line status). Order totals: see the block below.
         if (in_array($charge['charge_type'], ['food', 'drink'], true) && !empty($charge['source_item_id'])) {
             try {
                 $lineOrderId = 0;
@@ -9751,6 +9751,24 @@ function voidBookingCharge(int $chargeId, string $voidReason, ?int $voidedBy = n
                     rh_log_event('pos', 'warning', "Charge #{$chargeId} voided but its unserved kitchen line could not be closed - check the order on the stations.", ['charge_id' => $chargeId, 'error' => $lineEx->getMessage()]);
                 }
             }
+        }
+
+        // A charge of a CLOSED room-service order (charged to room) takes its money off the order too, so
+        // the order total, the Z / End of Day "Charged to room" line and the folio agree (step 9 B3). Same
+        // transaction: a DB failure here rolls the whole void back. Logged in the order audit.
+        $totOrderId = 0;
+        try {
+            $toStmt = $pdo->prepare("SELECT stock_order_id FROM booking_charges WHERE id = ?");
+            $toStmt->execute([$chargeId]);
+            $totOrderId = (int)$toStmt->fetchColumn();
+        } catch (Throwable $toEx) {
+            $totOrderId = 0; // legacy schema without booking_charges.stock_order_id
+        }
+        if ($totOrderId > 0) {
+            if (!function_exists('rh_lower_order_total_for_voided_charge')) {
+                require_once __DIR__ . '/../admin/includes/restaurant-payment-sync.php';
+            }
+            rh_lower_order_total_for_voided_charge($pdo, $totOrderId, (float)($charge['line_total'] ?? 0), 'Folio charge #' . $chargeId . ' voided: ' . $voidReason, $voidedBy);
         }
 
         // Recalculate booking financials

@@ -105,7 +105,7 @@ $stationWindow = rh_station_business_window($STATION);
 // Use the restaurant-wide union window as the ticket cutoff so orders fired before this
 // station opens (e.g. a drink order placed at 10:55 before the bar opens at 11:00) still
 // appear on all relevant station displays.  Per-station window is kept for served/allday.
-$unionWindow = rh_station_union_business_window();
+$unionWindow = rh_station_union_trading_window(); // till-facing lists (POS inbox, My orders): opening to the NEXT opening, so they do not vanish when the stations close (step 9 A3)
 
 function kds_log(PDO $pdo, int $orderId, ?int $itemId, string $event, ?string $from, ?string $to, array $user, ?string $ip): void
 {
@@ -245,6 +245,14 @@ function kds_station_label(string $station): string
         'coffee_bar' => 'Coffee Bar',
         default => 'Kitchen',
     };
+}
+
+/** Stations that have (non-void) lines on this order - who an order-level note / rush is for. */
+function kds_order_stations(PDO $pdo, int $orderId): array
+{
+    $st = $pdo->prepare("SELECT DISTINCT station FROM stock_order_items WHERE order_id = ? AND kds_status <> 'void' AND station IN ('kitchen', 'bar', 'coffee_bar') ORDER BY station");
+    $st->execute([$orderId]);
+    return array_map('strval', $st->fetchAll(PDO::FETCH_COLUMN));
 }
 
 function kds_notify_pos_collection(PDO $pdo, int $orderId, string $station, string $itemName, array $actor): void
@@ -687,7 +695,7 @@ try {
         kds_ensure_station_messages_table($pdo);
         $userId = (int)$user['id'];
         $businessStart = (string)$unionWindow['start_sql'];
-        $businessEnd = (string)$unionWindow['end_sql'];
+        $businessEnd = (string)$unionWindow['trading_end_sql'];
         /* The till's chat history with the stations. Pull (a) every note this user sent today
            (replied to or not), (b) recent inbound non-station rows, (c) station→POS direct
            notes: all of today's, acknowledged or not, plus any older one still awaiting action.
@@ -852,7 +860,7 @@ try {
            status, age, and per-station progress so the till can show a live tracker.
            Also returns is_priority (RUSH flag) and per-station item breakdown. */
         $businessStart = (string)$unionWindow['start_sql'];
-        $businessEnd = (string)$unionWindow['end_sql'];
+        $businessEnd = (string)$unionWindow['trading_end_sql'];
         $stmt = $pdo->prepare("
             SELECT o.id, o.reference, o.order_type, o.status, o.total_amount,
                    o.payment_method, o.table_number, o.customer_name,
@@ -974,8 +982,8 @@ try {
             kds_ensure_station_messages_table($pdo);
             $tableLabel = $order['table_number'] ?: strtoupper(str_replace('_', ' ', (string)($order['order_type'] ?? '')));
             $noteMsg = 'Note updated on order ' . $order['reference'] . ' (' . $tableLabel . '): ' . ($newNote ?: '(cleared)');
-            // Target all active stations by inserting one message per active station
-            foreach (['kitchen', 'bar', 'coffee_bar'] as $stn) {
+            // One message per station that has (non-void) lines on this order
+            foreach (kds_order_stations($pdo, $orderId) as $stn) { // only the stations with lines on this order (step 9 A7)
                 $pdo->prepare("INSERT INTO station_messages (station, message, sent_by, sent_by_name, source, priority, order_id, order_ref, is_acknowledged, acknowledged_at) VALUES (?, ?, ?, ?, 'pos', 'urgent', ?, ?, 0, NULL)")
                     ->execute([$stn, mb_substr($noteMsg, 0, 255), (int)$user['id'], $user['full_name'] ?? $user['username'] ?? '', $orderId, (string)$order['reference']]);
             }
@@ -1021,7 +1029,7 @@ try {
             $rushMsg = $newPriority
                 ? 'RUSH flagged by cashier on order ' . $order['reference'] . ' (' . $tableLabel . ') — priority prep required.'
                 : 'Rush cleared by cashier on order ' . $order['reference'] . ' (' . $tableLabel . ') — standard service timing.';
-            foreach (['kitchen', 'bar', 'coffee_bar'] as $stn) {
+            foreach (kds_order_stations($pdo, $orderId) as $stn) { // only the stations with lines on this order (step 9 A7)
                 $pdo->prepare("INSERT INTO station_messages (station, message, sent_by, sent_by_name, source, priority, order_id, order_ref, is_acknowledged, acknowledged_at) VALUES (?, ?, ?, ?, 'pos', ?, ?, ?, 0, NULL)")
                     ->execute([$stn, mb_substr($rushMsg, 0, 255), (int)$user['id'], $user['full_name'] ?? $user['username'] ?? '', $newPriority ? 'urgent' : 'normal', $orderId, (string)$order['reference']]);
             }
@@ -1332,6 +1340,10 @@ try {
         } catch (Throwable $e) {
             error_log('void_item station msg: ' . $e->getMessage());
         }
+
+        // 86 of the last unfinished line at its station: everything left there is ready, so tell
+        // the till (the line's own station; no-op when nothing live is left there or not all ready).
+        kds_maybe_notify_ready($pdo, $orderId, (string)($it['station'] ?: $STATION));
 
         jok(['item_id' => $itemId, 'order_id' => $orderId, 'item_status' => 'void', 'order_status' => $newOrderStatus, 'order_total' => $newTotal, 'stock' => $stockOutcome, 'pending_refund' => $refundInfo['allocated']]);
     }
@@ -1902,7 +1914,7 @@ try {
         $place = implode(',', array_fill(0, count($ids), '?'));
         // Always return ALL items on matching orders so each station can see the full context.
         // Each item carries an `is_mine` flag (1/0) so the frontend can highlight vs grey-out.
-        $itemSql = "SELECT id, order_id, item_name, quantity, notes, kds_status, started_at, ready_at, menu_type, station,
+        $itemSql = "SELECT id, order_id, item_name, quantity, notes, kds_status, started_at, ready_at, created_at, menu_type, station,
                            IF(station = ?, 1, 0) AS is_mine
                       FROM stock_order_items
                      WHERE order_id IN ($place)

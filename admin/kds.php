@@ -92,7 +92,7 @@ $ids = array_column($orders, 'id');
 $itemsByOrder = [];
 if ($ids) {
     $place = implode(',', array_fill(0, count($ids), '?'));
-    $itemSql = "SELECT id, order_id, item_name, quantity, notes, kds_status, started_at, ready_at, menu_type, station,
+    $itemSql = "SELECT id, order_id, item_name, quantity, notes, kds_status, started_at, ready_at, created_at, menu_type, station,
                        IF(station = ?, 1, 0) AS is_mine
                   FROM stock_order_items
                  WHERE order_id IN ($place)
@@ -869,7 +869,14 @@ $bootstrap['fingerprint'] = md5(
         }
 
         function ticketHtml(t) {
-            const firedAt = t.fired_at || t.kitchen_printed_at;
+            /* Timer = the oldest line this station still has to finish. A tab's next round is
+               new work (its own clock), while a round 1 still cooking keeps its own age;
+               fired_at (first fire) stays the fallback and is never rewritten. */
+            const _openLines = (t.items || []).filter(i => !['ready', 'collection', 'served', 'void'].includes(i.kds_status) && i.created_at);
+            const _mineOpen = _openLines.filter(i => i.is_mine == 1 || i.is_mine === true);
+            const _clockLines = _mineOpen.length ? _mineOpen : _openLines;
+            const _oldestOpen = _clockLines.reduce((min, i) => (!min || String(i.created_at) < min) ? String(i.created_at) : min, '');
+            const firedAt = (_oldestOpen && t.fired_at && _oldestOpen > String(t.fired_at)) ? _oldestOpen : (t.fired_at || t.kitchen_printed_at);
             const elapsed = elapsedSeconds(firedAt);
             const ec = elapsedClass(elapsed, t.kitchen_status);
             const isUrgent = elapsed > 720 && t.kitchen_status !== 'ready';
@@ -938,7 +945,7 @@ $bootstrap['fingerprint'] = md5(
                     ${hasPending
                         ? `<button class="t-act is-primary" data-loader-manual onclick="act('start_ticket',${t.id},null,this)" data-help="Start All|Mark every pending item on this ticket as &lsquo;preparing&rsquo;. Use it when you fire the whole ticket at once instead of starting each line individually.">Start all</button>`
                         : ''}
-                    <button class="t-act${allMyReady ? ' is-primary' : ''}" data-loader-manual onclick="act('bump_ticket',${t.id},null,this)" ${!hasMyItems?'disabled':''} data-help="Bump ticket|Mark this whole ticket as DELIVERED to the customer and clear it from the kitchen board.\nUse Bump when the runner has carried the food to the table or pickup counter.\nIt does NOT undo the order or refund money. Stock is deducted when a line is marked Ready, so Bump deducts whatever is still outstanding. If you bumped by mistake you have 10 minutes to use Recall, which puts the ticket back and restores that stock.">Bump</button>
+                    <button class="t-act${allMyReady ? ' is-primary' : ''}" data-loader-manual onclick="act('bump_ticket',${t.id},null,this)" ${!hasMyItems?'disabled':''} data-help="Bump ticket|Mark this whole ticket as DELIVERED to the customer and clear it from the kitchen board.\nUse Bump when the runner has carried the food to the table or pickup counter.\nIt does NOT undo the order or refund money. Stock is deducted when a line is marked Ready, so Bump deducts whatever is still outstanding. A bump cannot be undone from this board, so bump only once the food has gone out.">Bump</button>
                     <button class="t-act${isRush?' is-rush':''}" data-loader-manual onclick="togglePriority(${t.id},this)" data-help="Rush / Priority|Flag this ticket as urgent so FOH knows it needs express service. The ticket header turns red and it sorts to the top. Tap again to clear.">${isRush ? 'Un-rush' : 'Rush'}</button>
                     <button class="t-act t-act--note${noteCount ? ' has-notes' : ''}${unseenMsgs.length ? ' has-unread' : ''}" onclick="toggleTicketNotes(${t.id})" aria-expanded="${notesOpen ? 'true' : 'false'}" data-help="FOH notes|Messages between this station and the till for this ticket. Opens the thread and a box to reply."><i class="fas fa-comment-dots"></i>${noteCount ? `<span>${noteCount}</span>` : ''}</button>
                     <button class="t-act t-act--icon" data-loader-manual onclick="openFullOrder(${t.id}, this)" title="View whole order" aria-label="View whole order" data-help="View whole order|See every line on this order across all stations (Kitchen / Bar / Coffee Bar). Useful when timing your prep with the bar."><i class="fas fa-eye"></i></button>

@@ -516,7 +516,11 @@ function rh_record_item_wastage(PDO $pdo, int $menuItemId, string $menuType, flo
  * Raise PENDING refund rows (the cashier settles them through the refund flow) for money owed
  * back on an order, allocated across the order's original payment rows NEWEST FIRST and capped at
  * what is still refundable on each (original gross less pending/processing/completed refunds).
+ * Never more than the order's OVERPAYMENT: completed payment legs less refunds already raised
+ * (pending/processing/completed) less the order's current total_amount (payments exclude the tip, so
+ * does the total). Call it AFTER lowering the order total. A part-paid order still owing gets nothing.
  * Used when a paid or part-paid line is 86'd. Caller holds the stock_orders row lock.
+ * 'shortfall' = what could not be placed on a leg within that cap.
  *
  * @return array{allocated:float, rows:int, shortfall:float}
  */
@@ -541,6 +545,27 @@ function rh_create_pending_refund_allocation(PDO $pdo, int $orderId, string $ref
                                  AND deleted_at IS NULL
                             ORDER BY id DESC FOR UPDATE");
     $origSel->execute([$orderId]);
+    $origRows = $origSel->fetchAll(PDO::FETCH_ASSOC);
+
+    // Cap at the overpayment (step 9 B5): never refund money the guest still owes on the order.
+    $paidSum = 0.0;
+    foreach ($origRows as $o) {
+        $paidSum += (float)$o['total_amount'];
+    }
+    $allRef = $pdo->prepare("SELECT COALESCE(SUM(CASE WHEN COALESCE(refund_amount, 0) > 0 THEN refund_amount ELSE total_amount END), 0)
+                               FROM payments
+                              WHERE booking_type = 'restaurant' AND booking_id = ?
+                                AND payment_type = 'refund' AND deleted_at IS NULL
+                                AND COALESCE(refund_status, 'completed') IN ('pending', 'processing', 'completed')");
+    $allRef->execute([$orderId]);
+    $ordTot = $pdo->prepare("SELECT total_amount FROM stock_orders WHERE id = ?");
+    $ordTot->execute([$orderId]);
+    $overpaid = round($paidSum - (float)$allRef->fetchColumn() - (float)$ordTot->fetchColumn(), 2);
+    $amount = round(min($amount, max(0.0, $overpaid)), 2);
+    if ($amount <= $tolerance) {
+        return ['allocated' => 0.0, 'rows' => 0, 'shortfall' => 0.0];
+    }
+
     $refSum = $pdo->prepare("SELECT COALESCE(SUM(CASE WHEN COALESCE(refund_amount, 0) > 0 THEN refund_amount ELSE total_amount END), 0)
                                FROM payments
                               WHERE booking_type = 'restaurant' AND original_payment_id = ?
@@ -557,7 +582,7 @@ function rh_create_pending_refund_allocation(PDO $pdo, int $orderId, string $ref
 
     $left = $amount;
     $rows = 0;
-    foreach ($origSel->fetchAll(PDO::FETCH_ASSOC) as $o) {
+    foreach ($origRows as $o) {
         if ($left <= $tolerance) {
             break;
         }
@@ -949,7 +974,7 @@ function rh_room_service_charge_line(PDO $pdo, int $orderId, int $itemId, float 
  * kitchen_status is recomputed from the lines still live. Call it AFTER the charge's stock was settled
  * (rh_restore_room_service_charge_stock reads the line status). A SERVED line is left exactly as it is
  * (its flag 1 means the stock is taken; clearing it would make a later void take a fresh wastage).
- * Order totals are left alone (the folio total comes from the charges). Runs in the caller's transaction.
+ * Order totals are not changed here: rh_lower_order_total_for_voided_charge() does that. Runs in the caller's transaction.
  *
  * @return int|null the id of the line closed, or null when there was none to close
  */
@@ -999,4 +1024,58 @@ function rh_close_unserved_line_for_voided_charge(PDO $pdo, int $orderId, int $i
         // legacy event schema
     }
     return $lineId;
+}
+
+/**
+ * A voided folio charge on a CLOSED room-service order (status 'completed' = charged to room) takes its
+ * money off the order too (step 9 B3), so the order total, the Z / End of Day "Charged to room" line and
+ * the folio agree. Same maths as the KDS 86 (api/kds-action.php): prices are gross, the line comes off the
+ * total scaled by total/subtotal, and tax / discount / service charge scale with the subtotal. A served
+ * line counts too - the money left the folio. Orders in any other status are left alone (placed is refused
+ * by the void; voided / cancelled / refunded were reversed already; a paid order would need a refund).
+ * Locks the order row; runs in the caller's transaction and lets a DB error roll the whole void back.
+ * Writes a stock_order_audit row (old -> new total).
+ *
+ * @return array{old_total:float,new_total:float}|null null when the order was not changed
+ */
+function rh_lower_order_total_for_voided_charge(PDO $pdo, int $orderId, float $lineGross, string $reason, ?int $userId): ?array
+{
+    $tolerance = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+    $lineGross = round($lineGross, 2);
+    if ($orderId <= 0 || $lineGross <= $tolerance) {
+        return null;
+    }
+    $sel = $pdo->prepare("SELECT reference, status, subtotal, total_amount, tax_amount, discount_amount, service_charge
+                            FROM stock_orders WHERE id = ? FOR UPDATE");
+    $sel->execute([$orderId]);
+    $o = $sel->fetch(PDO::FETCH_ASSOC);
+    if (!$o || (string)$o['status'] !== 'completed') {
+        return null;
+    }
+    $oldSubtotal = (float)($o['subtotal'] ?: $o['total_amount']);
+    $oldTotal = (float)$o['total_amount'];
+    $ratio = $oldSubtotal > 0 ? ($oldTotal / $oldSubtotal) : 1.0;
+    $lineEffective = round($lineGross * $ratio, 2);
+    $newSubtotal = max(0.0, round($oldSubtotal - $lineGross, 2));
+    $newTotal = max(0.0, round($oldTotal - $lineEffective, 2));
+    $scale = $oldSubtotal > 0 ? ($newSubtotal / $oldSubtotal) : 0.0;
+    $newTax = round((float)$o['tax_amount'] * $scale, 2);
+    $newDiscount = round((float)$o['discount_amount'] * $scale, 2);
+    $newService = round((float)$o['service_charge'] * $scale, 2);
+    $pdo->prepare("UPDATE stock_orders SET subtotal = ?, total_amount = ?, tax_amount = ?, discount_amount = ?, service_charge = ?, updated_at = NOW() WHERE id = ?")
+        ->execute([$newSubtotal, $newTotal, $newTax, $newDiscount, $newService, $orderId]);
+
+    $actorName = '';
+    if ($userId !== null && $userId > 0) {
+        $an = $pdo->prepare("SELECT COALESCE(NULLIF(full_name, ''), username) FROM admin_users WHERE id = ?");
+        $an->execute([$userId]);
+        $actorName = (string)$an->fetchColumn();
+    }
+    $pdo->prepare("INSERT INTO stock_order_audit (order_id, actor_id, actor_name, event, details, ip_address) VALUES (?, ?, ?, 'folio_charge_voided', ?, ?)")
+        ->execute([
+            $orderId, $userId !== null && $userId > 0 ? $userId : null, $actorName,
+            mb_substr($reason . ' | line ' . number_format($lineGross, 2) . ' removed, total ' . number_format($oldTotal, 2) . ' -> ' . number_format($newTotal, 2), 0, 500),
+            $_SERVER['REMOTE_ADDR'] ?? null,
+        ]);
+    return ['old_total' => round($oldTotal, 2), 'new_total' => $newTotal];
 }

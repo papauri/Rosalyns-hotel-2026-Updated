@@ -55,6 +55,21 @@ $siteName = getSetting('site_name') ?: 'Hotel';
 $restaurantWindow = rh_station_union_trading_window();
 $kitchenWindow    = rh_station_business_window('kitchen');
 $barWindow        = rh_station_business_window('bar');
+/* Closed-station warning (step 9 A5): every station's opening spans around today as epoch ms, so the
+ * till judges "closed" at the moment of the send on the hotel clock (not once at page load), for the
+ * station each line is actually routed to (kitchen / bar / coffee bar). */
+$posStationClock = [];
+$posClockToday = new DateTimeImmutable('now', rh_site_timezone());
+foreach (rh_station_definitions() as $posStKey => $posStDef) {
+    $posSpans = [];
+    foreach (['-1 day', '+0 day', '+1 day'] as $posShift) {
+        $posW = rh_station_window_for_date($posStKey, $posClockToday->modify($posShift)->format('Y-m-d'));
+        $posSpans[] = [$posW['start']->getTimestamp() * 1000, $posW['end']->getTimestamp() * 1000];
+    }
+    $posStH = rh_station_hours($posStKey);
+    $posStationClock[$posStKey] = ['label' => (string)$posStDef['label'], 'hours' => $posStH['opens_at'] . ' – ' . $posStH['closes_at'], 'spans' => $posSpans];
+}
+unset($posClockToday, $posStKey, $posStDef, $posSpans, $posShift, $posW, $posStH);
 
 if (!ensureStockTablesExist()) {
     http_response_code(500);
@@ -696,7 +711,25 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 $tabType = (string)$tab['order_type'];
+                $maxLineBefore = $pdo->prepare("SELECT COALESCE(MAX(id), 0) FROM stock_order_items WHERE order_id = ?");
+                $maxLineBefore->execute([$tabOrderId]);
+                $maxLineBefore = (int)$maxLineBefore->fetchColumn();
                 [$addedAmount, $addedCost, $addedCount, $folioItems] = pos_appendCartItemsToOrder($pdo, $tabOrderId, $tabType);
+
+                /* A station that gets new lines starts a new "ready" cycle: drop its earlier ready
+                 * notification, or kds_maybe_notify_ready() (one row per order + station) finds the
+                 * round-1 row and the cashier is never told round 2 is ready. A station still holding
+                 * round-1 work keeps nothing here either way (its alert is suppressed while lines are
+                 * pending). Same transaction as the round. */
+                try {
+                    $pdo->prepare("DELETE FROM pos_ready_notifications
+                                    WHERE order_id = ?
+                                      AND station COLLATE utf8mb4_unicode_ci IN (SELECT st FROM (SELECT DISTINCT station COLLATE utf8mb4_unicode_ci AS st FROM stock_order_items WHERE order_id = ? AND id > ?) AS new_round)")
+                        ->execute([$tabOrderId, $tabOrderId, $maxLineBefore]);
+                } catch (PDOException $readyEx) {
+                    // The table is created on first use by the stations; nothing to clear yet.
+                    if (strpos((string)$readyEx->getCode(), '42S02') === false) throw $readyEx;
+                }
 
                 // Accumulate the order financials. total_amount already reflects any
                 // earlier discount; we add the new gross to both subtotal and total.
@@ -724,8 +757,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 // Re-activate the kitchen status so the newly added pending lines show as
-                // fresh work on the station boards, then fire them.
-                $pdo->prepare("UPDATE stock_orders SET kitchen_status='new', kitchen_printed_at=NOW() WHERE id=?")->execute([$tabOrderId]);
+                // fresh work on the station boards, then fire them. Same rule as the stations'
+                // kds_recompute_order_status(): only pending lines -> 'new'; pending next to lines
+                // already started / ready / served (round 1 still cooking or out) -> 'in_progress',
+                // so round 1 does not fall back to "new" ('recalled' is kept). kitchen_printed_at
+                // marks this round (the board timer reads it); fired_at stays the first fire.
+                $pdo->prepare("UPDATE stock_orders
+                                  SET kitchen_status = CASE
+                                          WHEN kitchen_status = 'recalled' THEN 'recalled'
+                                          WHEN EXISTS (SELECT 1 FROM stock_order_items soi WHERE soi.order_id = stock_orders.id AND soi.kds_status NOT IN ('pending', 'void')) THEN 'in_progress'
+                                          ELSE 'new' END,
+                                      kitchen_printed_at = NOW()
+                                WHERE id = ?")->execute([$tabOrderId]);
                 pos_fireKitchen($pdo, $tabOrderId, $user['id'], $user['full_name']);
 
                 pos_logAudit($pdo, $tabOrderId, $user['id'], $user['full_name'], 'items_added_to_tab', json_encode([
@@ -795,7 +838,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                  * column the `?? 0` fallback always evaluated to 0, so the guard was
                  * dead and a second discount overwrote the first — total_amount reduced
                  * twice, discount_amount recording only the last one. */
-                $stmt = $pdo->prepare("SELECT id, reference, total_amount, status, order_type, created_by, COALESCE(discount_amount,0) AS discount_amount, COALESCE(split_count,1) AS split_count, COALESCE(split_paid_count,0) AS split_paid_count FROM stock_orders WHERE id=? FOR UPDATE");
+                $stmt = $pdo->prepare("SELECT id, reference, total_amount, COALESCE(subtotal, total_amount) AS subtotal, status, order_type, created_by, COALESCE(discount_amount,0) AS discount_amount, COALESCE(split_count,1) AS split_count, COALESCE(split_paid_count,0) AS split_paid_count FROM stock_orders WHERE id=? FOR UPDATE");
                 $stmt->execute([$orderId]);
                 $row = $stmt->fetch(PDO::FETCH_ASSOC);
                 if (!$row) throw new RuntimeException('Order not found.');
@@ -875,8 +918,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($dealDiscount > 0) {
                         $dealReason = $dealValidation['reason'];
                         $row['total_amount'] = max(0.01, round((float)$row['total_amount'] - $dealDiscount, 2));
+                        /* Stored discount = what actually came off (subtotal - stored total): the total is
+                         * clamped at 0.01, so a discount bigger than the bill must not be stored in full (B4). */
                         $pdo->prepare("UPDATE stock_orders SET total_amount=?, discount_amount=?, discount_reason=? WHERE id=?")
-                            ->execute([$row['total_amount'], $dealDiscount, $dealReason, $orderId]);
+                            ->execute([$row['total_amount'], max(0.0, round((float)$row['subtotal'] - (float)$row['total_amount'], 2)), $dealReason, $orderId]);
                         pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'deal_discount_applied', json_encode(['amount' => $dealDiscount, 'deals' => $dealReason]));
                     }
 
@@ -886,7 +931,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if ($discountAmount > 0) {
                         if (!hasPermission($user['id'], 'pos_discount')) throw new RuntimeException('You do not have permission to apply discounts.');
                         $discountedTotal = max(0.01, round((float)$row['total_amount'] - $discountAmount, 2));
-                        $combinedDiscount = round($dealDiscount + $discountAmount, 2);
+                        // Deal + manual, as actually taken off: subtotal - stored total (clamp-safe, B4).
+                        $combinedDiscount = max(0.0, round((float)$row['subtotal'] - $discountedTotal, 2));
                         $combinedReason   = mb_substr(trim((isset($dealReason) && $dealReason ? $dealReason . ' + ' : '') . $discountReason), 0, 255);
                         $pdo->prepare("UPDATE stock_orders SET total_amount=?, discount_amount=?, discount_reason=? WHERE id=?")
                             ->execute([$discountedTotal, $combinedDiscount, $combinedReason ?: null, $orderId]);
@@ -1313,13 +1359,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Deal discounts — auto-applied, no pos_discount permission required,
                 // therefore priced server-side from the order's own lines. The client
                 // figure only ever caps it downwards.
+                $orderSubtotal = (float)$totalAmount; // gross, as stored in stock_orders.subtotal by pos_buildOrderFromPost()
                 $dealValidation   = pos_resolve_deal_discount($pdo, trim($_POST['deal_ids'] ?? ''), (float)($_POST['deal_discount_amount'] ?? 0), (float)$totalAmount, $orderId);
                 $dealDiscount = $dealValidation['amount'];
                 if ($dealDiscount > 0) {
                     $dealReason = $dealValidation['reason'];
                     $totalAmount = max(0.01, round($totalAmount - $dealDiscount, 2));
+                    // Stored discount = subtotal - stored total (the total is clamped at 0.01; B4).
                     $pdo->prepare("UPDATE stock_orders SET total_amount=?, discount_amount=?, discount_reason=? WHERE id=?")
-                        ->execute([$totalAmount, $dealDiscount, $dealReason, $orderId]);
+                        ->execute([$totalAmount, max(0.0, round($orderSubtotal - $totalAmount, 2)), $dealReason, $orderId]);
                     pos_logAudit($pdo, $orderId, $user['id'], $user['full_name'], 'deal_discount_applied', json_encode(['amount' => $dealDiscount, 'deals' => $dealReason]));
                 }
 
@@ -1333,9 +1381,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($discountAmount > 0) {
                     if (!hasPermission($user['id'], 'pos_discount')) throw new RuntimeException('You do not have permission to apply discounts.');
                     $totalAmount = max(0.01, round($totalAmount - $discountAmount, 2));
-                    // If a deal already set discount_amount, add to it
-                    $existingDiscount = (float)($dealDiscount);
-                    $combinedDiscount = round($existingDiscount + $discountAmount, 2);
+                    // Deal + manual, as actually taken off: subtotal - stored total (clamp-safe, B4).
+                    $combinedDiscount = max(0.0, round($orderSubtotal - $totalAmount, 2));
                     $combinedReason   = mb_substr(trim((isset($dealReason) && $dealReason ? $dealReason . ' + ' : '') . $discountReason), 0, 255);
                     $pdo->prepare("UPDATE stock_orders SET total_amount=?, discount_amount=?, discount_reason=? WHERE id=?")
                         ->execute([$totalAmount, $combinedDiscount, $combinedReason ?: null, $orderId]);
@@ -1416,7 +1463,8 @@ $allMenuItems = $pdo->query("
            COALESCE(mi.category, 'Other') AS sub_category,
            mi.show_pos, mi.show_room_service, mi.is_available,
            mi.barcode,
-           mc.name AS cat_name, mc.slug AS menu_type, mc.sort_order AS cat_sort
+           mc.name AS cat_name, mc.slug AS menu_type, mc.sort_order AS cat_sort,
+           COALESCE(mi.station, mc.default_station) AS station
     FROM menu_items mi
     JOIN menu_categories mc ON mc.id = mi.category_id
     WHERE mc.is_active = 1
@@ -1451,6 +1499,8 @@ foreach ($allMenuItems as $item) {
         'show_rs'     => $isRs,
         'is_available'=> $isAvail,
         'barcode'     => $item['barcode'] ?? null,
+        // Same routing rule as pos_appendCartItemsToOrder(): unknown -> kitchen.
+        'station'     => in_array($item['station'] ?? '', ['kitchen', 'bar', 'coffee_bar'], true) ? $item['station'] : 'kitchen',
     ];
 }
 $categories['__ALL__']['count'] = $posVisibleCount;
@@ -3985,6 +4035,7 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         const posKitchenHours = <?php echo json_encode($kitchenWindow['opens_at'] . ' – ' . $kitchenWindow['closes_at']); ?>;
         const posBarOpen = <?php echo $barWindow['is_open_now'] ? 'true' : 'false'; ?>;
         const posBarHours = <?php echo json_encode($barWindow['opens_at'] . ' – ' . $barWindow['closes_at']); ?>;
+        const posStationClock = <?php echo json_encode($posStationClock, JSON_HEX_TAG | JSON_HEX_AMP); ?>;
         const posCsrfToken = <?php echo json_encode($csrf_token); ?>;
         const posLastOrderId    = <?php echo (int)$lastOrderId; ?>;
         const posLastOrderEmail = <?php echo json_encode($lastOrderCustomerEmail); ?>;
@@ -4055,14 +4106,43 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             form.appendChild(field);
         }
 
-        /* Force a fresh client_uuid. The AJAX park flow stays on the page, so without
-           this a second "Fire" would reuse the prior UUID and the server's idempotency
-           guard would return the first order instead of opening a new tab. */
+        /* Force a fresh client_uuid. The AJAX park flow stays on the page, so after a
+           send the server CONFIRMED (j.ok) the next send needs a new UUID, or the
+           server's idempotency guard would return the first order instead of opening
+           a new tab. Never call this before a retry: see posParkClientUuidFor(). */
         function posRefreshClientUuid(form) {
             if (!form) return;
             const existing = form.querySelector('[name="client_uuid"]');
             if (existing) existing.parentNode.removeChild(existing);
             posEnsureClientUuid(form);
+        }
+
+        /* Fire / Add-to-tab idempotency key (step 9 A1). The UUID belongs to ONE send of
+           ONE cart: it is kept while the same cart is re-sent to the same place (a retry
+           after a lost response or a network error replays on the server: one order, one
+           ticket), and replaced only after the server confirmed the send (j.ok) or when
+           the cart / action / tab changed. Both park (stock_orders.client_uuid) and
+           add_to_tab (idempotency_keys) dedupe on it server-side. */
+        let _posParkSendSig = '';
+        function posParkSendSignature(action, tabId) {
+            // Where the order goes is part of "the same send": a retry to another table / order type / guest gets a new key
+            // (QA 2026-11-16: firing the same cart to Table 6 after a lost Table 5 response must not replay Table 5).
+            const ctx = ['order_type', 'table_number', 'customer_name', 'covers'].map(nm => {
+                const el = document.querySelector('[name="' + nm + '"][form="payForm"]') || document.querySelector('#payForm [name="' + nm + '"]');
+                return el ? String(el.value || '') : '';
+            });
+            return JSON.stringify([action, String(tabId || ''), ctx, cart.map(l => [l.id, l.type, l.qty, l.note || ''])]);
+        }
+        function posParkClientUuidFor(form, sig) {
+            if (!form) return;
+            if (sig !== _posParkSendSig || !form.querySelector('[name="client_uuid"]')) {
+                posRefreshClientUuid(form);
+                _posParkSendSig = sig;
+            }
+        }
+        function posParkSendConfirmed(form) {
+            _posParkSendSig = '';
+            posRefreshClientUuid(form);
         }
 
         document.addEventListener('submit', e => {
@@ -4376,7 +4456,10 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 if (j && j.ok && j.changes) posApplyOrderChanges(j.changes);
                 if (j && j.ok && j.notifications && j.notifications.length) {
                     const fresh = j.notifications.filter(n => {
-                        const readyKey = [n.order_id, n.station, n.reference || n.id].join(':');
+                        /* Keyed on the notification row: a tab's next round and a recall
+                           each get a new row, so they alert again (order + station + reference
+                           never changed, which silenced every later "ready"). */
+                        const readyKey = ['n', n.id, n.order_id, n.station].join(':');
                         if (_seenReadyNotifications.has(readyKey)) return false;
                         posRememberSeen(_seenReadyNotifications, POS_READY_SEEN_KEY, readyKey);
                         return true;
@@ -6934,13 +7017,33 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             return cart.reduce((s, l) => s + l.price * l.qty, 0);
         }
 
-        /** Returns which station types are in the current cart */
+        /* Station each menu item is routed to (server rule: item station, else its category's). */
+        const posMenuStationById = new Map(menuList.map(m => [String(m.id), m.station || 'kitchen']));
+
+        /** Is this station open right now on the hotel clock (server time at load + time since). */
+        function posStationOpenNow(key) {
+            const st = posStationClock[key];
+            if (!st || !Array.isArray(st.spans)) return true;
+            const now = posServerClock.epochMs + (Date.now() - posServerClock.loadedAt);
+            // Hours repeat daily (no DST here): shift each span by whole days so a till left open
+            // for days still judges correctly.
+            const day = 86400000;
+            return st.spans.some(s => {
+                const k = Math.floor((now - s[0]) / day);
+                return now >= s[0] + k * day && now < s[1] + k * day;
+            });
+        }
+
+        /** Which stations the current cart is routed to, and which of them are closed now. */
         function cartStations() {
-            const hasFood = cart.some(l => l.type === 'food');
-            const hasDrink = cart.some(l => l.type === 'drink');
+            const stations = new Set(cart.map(l => posMenuStationById.get(String(l.id)) || 'kitchen'));
+            const closed = ['kitchen', 'bar', 'coffee_bar']
+                .filter(k => stations.has(k) && !posStationOpenNow(k))
+                .map(k => ({ key: k, label: (posStationClock[k] && posStationClock[k].label) || k, hours: (posStationClock[k] && posStationClock[k].hours) || '' }));
             return {
-                hasFood,
-                hasDrink
+                hasFood: stations.has('kitchen'),
+                hasDrink: stations.has('bar') || stations.has('coffee_bar'),
+                closed
             };
         }
 
@@ -7124,25 +7227,23 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (!btn || !label) return;
             const {
                 hasFood,
-                hasDrink
+                hasDrink,
+                closed
             } = cartStations();
-            let icon, text, stationOpen;
+            let icon, text;
+            const stationOpen = closed.length === 0;
             if (hasFood && hasDrink) {
                 icon = 'fa-fire';
                 text = 'Fire to Stations';
-                stationOpen = posKitchenOpen && posBarOpen;
             } else if (hasDrink) {
                 icon = 'fa-cocktail';
                 text = 'Send to Bar';
-                stationOpen = posBarOpen;
             } else if (hasFood) {
                 icon = 'fa-utensils';
                 text = 'Send to Kitchen';
-                stationOpen = posKitchenOpen;
             } else {
                 icon = 'fa-fire';
                 text = 'Fire Order';
-                stationOpen = true;
             }
             // Override label when appending to an existing tab
             if (typeof _activeTab !== 'undefined' && _activeTab) {
@@ -7578,12 +7679,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             const kw = document.getElementById('payKitchenWarning');
             if (kw) {
                 const {
-                    hasFood,
-                    hasDrink
+                    closed
                 } = cartStations();
-                const warnParts = [];
-                if (hasFood && !posKitchenOpen) warnParts.push(`Kitchen is closed (${posKitchenHours})`);
-                if (hasDrink && !posBarOpen) warnParts.push(`Bar is closed (${posBarHours})`);
+                const warnParts = closed.map(c => `${escHtml(c.label)} is closed (${escHtml(c.hours)})`);
                 if (warnParts.length) {
                     const wtxt = document.getElementById('payKitchenWarningText');
                     if (wtxt) wtxt.innerHTML = '<strong>' + warnParts.join(' · ') + '</strong>. Tickets will sit unseen until they reopen.';
@@ -7848,19 +7946,12 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             if (!cart.length) return;
             // When appending to an existing tab the location/customer come from the tab itself.
             if (!_activeTab && !validateServiceContext()) return;
-            const {
-                hasFood,
-                hasDrink
-            } = cartStations();
-            const kitchenBlocked = hasFood && !posKitchenOpen;
-            const barBlocked = hasDrink && !posBarOpen;
-            if (kitchenBlocked || barBlocked) {
-                // Build a station-specific warning message
-                const parts = [];
-                if (kitchenBlocked) parts.push(`Kitchen (${posKitchenHours})`);
-                if (barBlocked) parts.push(`Bar (${posBarHours})`);
+            const closedStations = cartStations().closed;
+            if (closedStations.length) {
+                // Build a station-specific warning message (stations the lines are routed to, closed now)
+                const parts = closedStations.map(c => `${c.label} (${c.hours})`);
                 const closed = parts.join(' and ');
-                const emoji = hasFood && hasDrink ? '⚠️' : (kitchenBlocked ? '🍳' : '🍷');
+                const emoji = closedStations.length > 1 ? '⚠️' : ({ kitchen: '🍳', bar: '🍷', coffee_bar: '☕' }[closedStations[0].key] || '⚠️');
                 const el = document.getElementById('stationClosedEmoji');
                 if (el) el.textContent = emoji;
                 const ti = document.getElementById('stationClosedTitle');
@@ -7906,9 +7997,12 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 if (tabIdInput) tabIdInput.value = '';
                 actionInput.value = 'park';
             }
-            // New tab → fresh idempotency key each time (AJAX stays on page). Add-to-tab
-            // doesn't use client_uuid server-side, so a fresh value is harmless there too.
-            posRefreshClientUuid(f);
+            // Idempotency key: the same cart re-sent to the same place (retry after a lost
+            // response / network error) keeps its client_uuid so the server replays instead of
+            // opening a second tab or adding the round twice (park dedupes on
+            // stock_orders.client_uuid, add_to_tab on idempotency_keys). A new key is minted
+            // only after the server confirmed the send or when the cart / tab changed.
+            posParkClientUuidFor(f, posParkSendSignature(actionInput.value, addingToTab ? _activeTab.id : ''));
             // Remember this round for the "Repeat last round" button before the cart is cleared
             rememberLastRound();
             showPosActionLoader(addingToTab ? 'Adding to tab...' : 'Firing order...', addingToTab ? 'Appending your items to the open tab.' : 'Sending your ticket to the station display.', { subtle: true });
@@ -7926,6 +8020,8 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                     posToastReady(j.error || (addingToTab ? 'Failed to add to tab — please retry.' : 'Failed to fire order — please retry.'), true);
                     return;
                 }
+                // Confirmed by the server: the next send is a new order / round.
+                posParkSendConfirmed(f);
                 if (addingToTab) {
                     // Keep the tab active so the user can keep adding rounds; update running total
                     if (_activeTab && typeof j.new_total !== 'undefined') {
@@ -10614,6 +10710,9 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
                 posToastReady('A promotion changed - the total was updated. Check it, then confirm again.', true);
                 return;
             }
+            // A payment is its own sale: never reuse the key of an unconfirmed Fire / Add-to-tab
+            // send, or the server could answer "already recorded" with that unpaid tab.
+            if (_posParkSendSig) posParkSendConfirmed(e.target);
             showPosActionLoader('Taking payment...', 'Saving the order and sending station tickets.');
         });
 

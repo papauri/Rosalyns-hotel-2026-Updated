@@ -331,6 +331,8 @@ if (($argv[1] ?? '') === '--child') {
     require_once $zzRoot . '/admin/includes/pos-order-close.php';
     require_once $zzRoot . '/admin/includes/pos-order-delete.php';
     require_once $zzRoot . '/admin/includes/finance-account-sync.php';
+    require_once $zzRoot . '/includes/station-hours.php';
+    require_once $zzRoot . '/admin/includes/pos-shift-totals.php';
     $A = $GLOBALS['zz_admin'];
 
     try {
@@ -666,6 +668,166 @@ if (($argv[1] ?? '') === '--child') {
             };
             break;
 
+        /* ---------- Step 9 B1: drift report uses the till maths (payer, refund payouts) ---------- */
+        case 'S9_B1_drift':
+            $B = (int)zz_q('SELECT id FROM admin_users WHERE is_active = 1 AND id <> ? ORDER BY id LIMIT 1', [$A])->fetchColumn();
+            if ($B <= 0) { throw new RuntimeException('fixture: no second active user'); }
+            if (!rh_pos_col_exists($pdo, 'stock_orders', 'paid_by')) { throw new RuntimeException('fixture: stock_orders.paid_by missing'); }
+            $now = (string)$pdo->query('SELECT NOW()')->fetchColumn();
+            $bizDate = (string)rh_station_union_trading_window()['business_date'];
+            $closeAt = date('Y-m-d H:i:s', strtotime($now) + 2);
+            $close = ['id' => 0, 'user_id' => $B, 'shift_date' => $bizDate, 'closed_at' => $closeAt];
+            $w = rh_pos_close_window($pdo, $close);
+            $before = rh_pos_shift_totals($pdo, $B, $w['from'], $w['end'], $w['day_start']);
+            $beforeA = rh_pos_shift_totals($pdo, $A, $w['from'], $w['end'], $w['day_start']);
+            // Tab opened by A, settled by B in cash; then B pays back 10 of it (part refund, completed) in the window.
+            $o = zz_order('S9B1', 'walk_in', 'paid', null, 'served');
+            zz_q("UPDATE stock_orders SET payment_method = 'cash', paid_by = ?, created_by = ?, paid_at = DATE_SUB(NOW(), INTERVAL 1 SECOND) WHERE id = ?", [$B, $A, $o]);
+            zz_q("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+                    payment_method, payment_type, payment_status, recorded_by, created_at)
+                  VALUES (?, 'restaurant', ?, 'ZZ8C', CURDATE(), 100, 0, 0, 100, 'cash', 'full_payment', 'completed', ?, NOW())", ['ZZ8C-PAY-B1-' . $o, $o, $B]);
+            $pid = (int)$pdo->lastInsertId();
+            zz_q("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+                    payment_method, payment_type, payment_status, original_payment_id, refund_reason, refund_status, refund_amount, refund_date_processed, recorded_by, created_at)
+                  VALUES (?, 'restaurant', ?, 'ZZ8C', CURDATE(), 10, 0, 0, 10, 'cash', 'refund', 'completed', ?, 'other', 'completed', 10, NOW(), ?, NOW())", ['ZZ8C-REF-B1-' . $o, $o, $pid, $B]);
+            $after = rh_pos_shift_totals($pdo, $B, $w['from'], $w['end'], $w['day_start']);
+            $afterA = rh_pos_shift_totals($pdo, $A, $w['from'], $w['end'], $w['day_start']);
+            $exp = ['expected_cash' => $after['drawer_cash'], 'declared_cash' => $after['drawer_cash'], 'expected_mobile' => $after['mobile'], 'declared_mobile' => $after['mobile'],
+                    'expected_card' => $after['card'], 'declared_card' => $after['card']];
+            $d = rh_pos_close_drift($pdo, $close + $exp);
+            $dOld = rh_pos_close_drift($pdo, $close + array_merge($exp, ['expected_cash' => $after['cash']])); // a close stored without the float
+            $dOff = rh_pos_close_drift($pdo, $close + array_merge($exp, ['expected_cash' => $after['drawer_cash'] + 5]));
+            $GLOBALS['zz_after'] = static function () use ($before, $after, $beforeA, $afterA, $d, $dOld, $dOff): void {
+                zz_check('S9 B1: settler B takes the 100 cash sale', abs(($after['gross_cash'] - $before['gross_cash']) - 100) < 0.005, [$before['gross_cash'], $after['gross_cash']]);
+                zz_check('S9 B1: tab opener A takes none of it', abs($afterA['gross_cash'] - $beforeA['gross_cash']) < 0.005, [$beforeA['gross_cash'], $afterA['gross_cash']]);
+                zz_check('S9 B1: the 10 refund is a payout on B', abs(($after['refund_cash'] - $before['refund_cash']) - 10) < 0.005, [$before['refund_cash'], $after['refund_cash']]);
+                zz_check('S9 B1: close stored from the till maths shows no drift', $d['affected'] === false, $d);
+                zz_check('S9 B1: a close stored without the float shows no drift', $dOld['affected'] === false, $dOld);
+                zz_check('S9 B1: a real 5 gap is still reported', $dOff['affected'] === true && abs($dOff['delta_cash'] + 5) < 0.005, $dOff);
+            };
+            break;
+
+        /* ---------- Step 9 B2: a refund raised pending on day 1 and paid day 2 is End of Day day 2, same as the Z ---------- */
+        case 'S9_B2_eod_payout_day':
+            $d1 = '2001-04-10'; $d2 = '2001-04-12';
+            $w1 = rh_station_union_window_for_date($d1); $w2 = rh_station_union_window_for_date($d2);
+            $paidAt = date('Y-m-d H:i:s', strtotime($w1['start_sql']) + 3600);
+            $raisedAt = date('Y-m-d H:i:s', strtotime($w1['start_sql']) + 7200);
+            $payoutAt = date('Y-m-d H:i:s', strtotime($w2['start_sql']) + 3600);
+            $o = zz_order('S9B2', 'walk_in', 'refunded', null, 'served');
+            zz_q("UPDATE stock_orders SET payment_method = 'cash', tip_amount = 0, paid_at = ?, created_at = ?, refunded_at = ? WHERE id = ?", [$paidAt, $paidAt, $raisedAt, $o]);
+            zz_q("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+                    payment_method, payment_type, payment_status, recorded_by, created_at)
+                  VALUES (?, 'restaurant', ?, 'ZZ8C', ?, 100, 0, 0, 100, 'cash', 'full_payment', 'completed', ?, ?)", ['ZZ8C-PAY-B2-' . $o, $o, $d1, $A, $paidAt]);
+            $pid = (int)$pdo->lastInsertId();
+            zz_q("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+                    payment_method, payment_type, payment_status, original_payment_id, refund_reason, refund_status, refund_amount, recorded_by, created_at)
+                  VALUES (?, 'restaurant', ?, 'ZZ8C', ?, 100, 0, 0, 100, 'cash', 'refund', 'pending', ?, 'other', 'pending', 100, ?, ?)", ['ZZ8C-REF-B2-' . $o, $o, $d1, $pid, $A, $raisedAt]);
+            $rid = (int)$pdo->lastInsertId();
+            $pend1 = rh_pos_eod_summary($pdo, $d1)['totals']; $pend2 = rh_pos_eod_summary($pdo, $d2)['totals'];
+            $pendZ1 = rh_pos_shift_totals($pdo, null, $w1['start_sql'], $w1['trading_end_sql'], $w1['start_sql']);
+            zz_q("UPDATE payments SET refund_status = 'completed', payment_status = 'completed', refund_date_processed = ? WHERE id = ?", [$payoutAt, $rid]);
+            $paid1 = rh_pos_eod_summary($pdo, $d1)['totals']; $paid2 = rh_pos_eod_summary($pdo, $d2)['totals'];
+            $z2 = rh_pos_shift_totals($pdo, null, $w2['start_sql'], $w2['trading_end_sql'], $w2['start_sql']);
+            $z1 = rh_pos_shift_totals($pdo, null, $w1['start_sql'], $w1['trading_end_sql'], $w1['start_sql']);
+            $GLOBALS['zz_after'] = static function () use ($pend1, $pend2, $pendZ1, $paid1, $paid2, $z1, $z2): void {
+                zz_check('S9 B2: pending refund is in no End of Day (day 1 / day 2 = 0)', abs($pend1['refunded_value']) < 0.005 && abs($pend2['refunded_value']) < 0.005, [$pend1['refunded_value'], $pend2['refunded_value']]);
+                zz_check('S9 B2: pending refund is no payout on the day-1 Z', abs($pendZ1['refund_amount']) < 0.005, $pendZ1['refund_amount']);
+                zz_check('S9 B2: paid out day 2 -> End of Day day 2 = 100, day 1 = 0', abs($paid2['refunded_value'] - 100) < 0.005 && abs($paid1['refunded_value']) < 0.005, [$paid1['refunded_value'], $paid2['refunded_value']]);
+                zz_check('S9 B2: End of Day day 2 matches the day-2 Z payout', abs($paid2['refunded_value'] - $z2['refund_amount']) < 0.005 && abs($z1['refund_amount']) < 0.005, [$paid2['refunded_value'], $z2['refund_amount'], $z1['refund_amount']]);
+                zz_check('S9 B2: refund counted once (day-2 count 1)', (int)$paid2['refunded_count'] === 1 && (int)$paid1['refunded_count'] === 0, [$paid1['refunded_count'], $paid2['refunded_count']]);
+            };
+            break;
+
+        /* ---------- Step 9 B3: voiding one charge of a closed 2-item room-service order lowers the order ---------- */
+        case 'S9_B3_room_charge':
+        case 'S9_B3_discount':
+            zz_set_shop(false);
+            $disc = $GLOBALS['zz_case'] === 'S9_B3_discount';
+            $item1 = zz_item('S9B3a', null); $item2 = zz_item('S9B3b', null);
+            $b = zz_booking('S9B3');
+            $o = zz_order('S9B3', 'room_service', 'completed', $b, 'served', true);
+            $l1 = zz_line($o, $item1, 1, 'served', 0, 'ZZ8C S9 one');
+            $c1 = zz_rs_charge($b, $o, $item1, 1, $l1);
+            $l2 = zz_line($o, $item2, 1, 'served', 0, 'ZZ8C S9 two');
+            $c2 = zz_rs_charge($b, $o, $item2, 1, $l2);
+            $g1 = (float)zz_q('SELECT line_total FROM booking_charges WHERE id = ?', [$c1])->fetchColumn();
+            $g2 = (float)zz_q('SELECT line_total FROM booking_charges WHERE id = ?', [$c2])->fetchColumn();
+            $sub = round($g1 + $g2, 2);
+            $discount = $disc ? 20.0 : 0.0;
+            zz_q('UPDATE stock_orders SET subtotal = ?, total_amount = ?, discount_amount = ? WHERE id = ?', [$sub, round($sub - $discount, 2), $discount, $o]);
+            $ws = date('Y-m-d H:i:s', time() - 3600); $we = date('Y-m-d H:i:s', time() + 3600);
+            $bizDate = (string)rh_station_union_trading_window()['business_date'];
+            $zBefore = rh_pos_room_charges($pdo, null, $ws, $we);
+            $eodBefore = rh_pos_eod_summary($pdo, $bizDate)['totals'];
+            $vr = voidBookingCharge($c1, 'ZZ8C S9 void one charge', $A);
+            $vr2 = voidBookingCharge($c1, 'ZZ8C S9 void it again', $A);
+            $zAfter = rh_pos_room_charges($pdo, null, $ws, $we);
+            $eodAfter = rh_pos_eod_summary($pdo, $bizDate)['totals'];
+            $ord = zz_q('SELECT subtotal, total_amount, discount_amount FROM stock_orders WHERE id = ?', [$o])->fetch();
+            $folio = (float)zz_q('SELECT COALESCE(SUM(line_total), 0) FROM booking_charges WHERE stock_order_id = ? AND voided = 0', [$o])->fetchColumn();
+            $audit = (int)zz_q("SELECT COUNT(*) FROM stock_order_audit WHERE order_id = ? AND event = 'folio_charge_voided'", [$o])->fetchColumn();
+            // A placed / paid order is not changed by this rule (placed is refused, paid would need a refund).
+            $op = zz_order('S9B3p', 'room_service', 'paid', $b, 'served', true);
+            $lp = zz_line($op, $item2, 1, 'served', 0, 'ZZ8C S9 paid');
+            $cp = zz_rs_charge($b, $op, $item2, 1, $lp);
+            voidBookingCharge($cp, 'ZZ8C S9 void on a paid order', $A);
+            $paidTot = (float)zz_q('SELECT total_amount FROM stock_orders WHERE id = ?', [$op])->fetchColumn();
+            $GLOBALS['zz_after'] = static function () use ($vr, $vr2, $ord, $folio, $g1, $g2, $sub, $discount, $zBefore, $zAfter, $eodBefore, $eodAfter, $audit, $paidTot, $disc): void {
+                $tag = 'S9 B3' . ($disc ? ' (discount 20)' : '');
+                $ratio = ($sub - $discount) / $sub;
+                $drop = round($g1 * $ratio, 2);
+                $newTotal = round($sub - $discount - $drop, 2);
+                zz_check($tag . ': charge voided once (second void refused)', !empty($vr['success']) && empty($vr2['success']), [$vr, $vr2]);
+                zz_check($tag . ': order subtotal = the other line', abs((float)$ord['subtotal'] - $g2) < 0.005, $ord);
+                zz_check($tag . ': order total lowered by the line at the order ratio', abs((float)$ord['total_amount'] - $newTotal) < 0.005, [$ord, $newTotal]);
+                zz_check($tag . ': discount scales with the subtotal', abs((float)$ord['discount_amount'] - round($discount * $g2 / $sub, 2)) < 0.005, $ord);
+                if (!$disc) {
+                    zz_check($tag . ': order total = live folio charges of the order', abs((float)$ord['total_amount'] - $folio) < 0.005, [$ord['total_amount'], $folio]);
+                }
+                zz_check($tag . ': Z "Charged to room" drops by the same amount', abs(($zBefore['amount'] - $zAfter['amount']) - $drop) < 0.005 && $zBefore['count'] === $zAfter['count'], [$zBefore, $zAfter, $drop]);
+                zz_check($tag . ': End of Day "Charged to room" drops by the same amount', abs(($eodBefore['room_charge_amount'] - $eodAfter['room_charge_amount']) - $drop) < 0.005, [$eodBefore['room_charge_amount'], $eodAfter['room_charge_amount']]);
+                zz_check($tag . ': End of Day gross drops by the same amount', abs(($eodBefore['gross'] - $eodAfter['gross']) - $drop) < 0.005, [$eodBefore['gross'], $eodAfter['gross']]);
+                zz_check($tag . ': one order audit row', $audit === 1, (string)$audit);
+                zz_check($tag . ': a paid order is left alone', abs($paidTot - 100) < 0.005, (string)$paidTot);
+            };
+            break;
+
+        /* ---------- Step 9 B5: pending refund allocation never exceeds the overpayment ---------- */
+        case 'S9_B5_cap':
+            $mk = static function (string $tag, float $total, float $paid) use ($A): int {
+                $o = zz_order('S9B5' . $tag, 'walk_in', 'paid', null, 'served');
+                zz_q('UPDATE stock_orders SET subtotal = ?, total_amount = ? WHERE id = ?', [$total, $total, $o]);
+                zz_q("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+                        payment_method, payment_type, payment_status, recorded_by, created_at)
+                      VALUES (?, 'restaurant', ?, 'ZZ8C', CURDATE(), ?, 0, 0, ?, 'cash', 'full_payment', 'completed', ?, NOW())", ['ZZ8C-PAY-B5' . $tag . '-' . $o, $o, $paid, $paid, $A]);
+                return $o;
+            };
+            // part paid: total 100, paid 30, a 50 line 86'd -> total 50: the guest still owes 20, nothing to refund
+            $oPart = $mk('part', 100, 30);
+            zz_q('UPDATE stock_orders SET subtotal = 50, total_amount = 50 WHERE id = ?', [$oPart]);
+            $rPart = rh_create_pending_refund_allocation($pdo, $oPart, 'ZZ8C', 50, 'service_issue', 'ZZ8C 86', $A);
+            // fully paid 100, total lowered to 80, asked for 50 -> capped at the 20 overpaid
+            $oOver = $mk('over', 100, 100);
+            zz_q('UPDATE stock_orders SET subtotal = 80, total_amount = 80 WHERE id = ?', [$oOver]);
+            $rOver = rh_create_pending_refund_allocation($pdo, $oOver, 'ZZ8C', 50, 'service_issue', 'ZZ8C 86', $A);
+            // the normal 86: paid 100, total lowered to 70, asked for 30 -> 30; asked again -> 0 (already raised)
+            $oNorm = $mk('norm', 100, 100);
+            zz_q('UPDATE stock_orders SET subtotal = 70, total_amount = 70 WHERE id = ?', [$oNorm]);
+            $rNorm = rh_create_pending_refund_allocation($pdo, $oNorm, 'ZZ8C', 30, 'service_issue', 'ZZ8C 86', $A);
+            $rNorm2 = rh_create_pending_refund_allocation($pdo, $oNorm, 'ZZ8C', 30, 'service_issue', 'ZZ8C 86 again', $A);
+            $rows = static function (int $o): float {
+                return (float)zz_q("SELECT COALESCE(SUM(total_amount), 0) FROM payments WHERE booking_type = 'restaurant' AND booking_id = ? AND payment_type = 'refund'", [$o])->fetchColumn();
+            };
+            $sums = [$rows($oPart), $rows($oOver), $rows($oNorm)];
+            $GLOBALS['zz_after'] = static function () use ($rPart, $rOver, $rNorm, $rNorm2, $sums): void {
+                zz_check('S9 B5: part-paid order still owing gets no refund (was 30 before the cap)', $rPart['rows'] === 0 && abs($sums[0]) < 0.005, [$rPart, $sums[0]]);
+                zz_check('S9 B5: refund capped at the 20 overpaid', abs($rOver['allocated'] - 20) < 0.005 && abs($sums[1] - 20) < 0.005, [$rOver, $sums[1]]);
+                zz_check('S9 B5: normal 86 refunds the full 30', abs($rNorm['allocated'] - 30) < 0.005 && $rNorm['rows'] === 1, $rNorm);
+                zz_check('S9 B5: asking again raises nothing more', $rNorm2['rows'] === 0 && abs($sums[2] - 30) < 0.005, [$rNorm2, $sums[2]]);
+            };
+            break;
+
         default:
             throw new RuntimeException('unknown case ' . $GLOBALS['zz_case']);
         }
@@ -692,7 +854,8 @@ require $zzRoot . '/config/database.php';
 if (sha1(DB_NAME) !== ZZ_DB_SHA1) { fwrite(STDERR, "Refused: this suite runs on the Liwonde test database only.\n"); exit(9); }
 $cases = ['P1_voided', 'P1_cancelled', 'P1_refunded_shop', 'P1_refunded_rest', 'P1_live_rs_untracked', 'P1_live_plain',
           'P2_recall', 'P3_unserved_tracked', 'P3_unserved_untracked', 'P3_served', 'P3_served_delete', 'P4_86_untracked', 'P4_close_untracked',
-          'P4_close_nocharge', 'P5_refund_savepoint', 'P6_recall_refunded', 'P7_close_twins', 'P7_delete_twins', 'P7_86_twin', 'P7_86_after_served_void'];
+          'P4_close_nocharge', 'P5_refund_savepoint', 'P6_recall_refunded', 'P7_close_twins', 'P7_delete_twins', 'P7_86_twin', 'P7_86_after_served_void',
+          'S9_B1_drift', 'S9_B2_eod_payout_day', 'S9_B3_room_charge', 'S9_B3_discount', 'S9_B5_cap'];
 $only = array_slice($argv, 1);
 if ($only) {
     $cases = array_values(array_filter($cases, static function (string $c) use ($only): bool {
