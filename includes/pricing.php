@@ -14,6 +14,9 @@
  *   rh_apply_rate_plans(array $plans, ...) : array                 PURE plan selection (applyDynamicPricing's rule)
  *   rh_stay_totals_with_package(float $gross, float $pkgGross, bool $levy) : array   levy on the room part only
  *   rh_rate_plan_dropped($pdo, array $b, $in, $out, $nights, ?$roomTypeId) : array   staff date change: discount lost?
+ *   rh_rate_plan_effective(array $plan, int $roomId) : ?array      step 8h: a room type's own amount (or the plan's) + basis
+ *   rh_rate_plan_price(array $plan, int $roomId, float $price, ?float $F) : float   step 8h: one plan on one room type
+ *   rh_rate_plan_breakdown(...) / rh_rate_plan_validate_rooms(...)  step 8h: Rate Plans screen breakdown + save checks
  */
 
 if (!function_exists('applyDynamicPricing')) {
@@ -129,7 +132,9 @@ if (!function_exists('applyDynamicPricing')) {
             if (!_planMatchesStay($plan, $checkInDate, $checkOutDate, $nights, $daysUntilArrival)) {
                 continue;
             }
-            $value = (float)($plan['adjustment_value'] ?? 0);
+            // Step 8h: the direction comes from THIS room's adjustment (its own amount when the plan sets one).
+            $eff   = rh_rate_plan_effective($plan, $room_id);
+            $value = $eff ? (float)$eff['value'] : 0.0;
             if ($value > 0) {
                 $surcharges[] = $plan;
             } elseif ($value < 0) {
@@ -146,8 +151,8 @@ if (!function_exists('applyDynamicPricing')) {
         $currentPrice = $base_price;
         $appliedPos   = [];
         foreach ([[$surcharges, false], [$discounts, true]] as [$group, $isDiscount]) {
-            foreach (_rhRatePlanGroupPick($group, $currentPrice, $isDiscount) as $plan) {
-                $currentPrice = applyRatePlanToPrice($plan, $currentPrice);
+            foreach (_rhRatePlanGroupPick($group, $currentPrice, $isDiscount, $room_id) as $plan) {
+                $currentPrice = rh_rate_plan_price($plan, $room_id, $currentPrice);
                 $appliedPos[] = $plan;
             }
         }
@@ -189,8 +194,9 @@ if (!function_exists('applyDynamicPricing')) {
     /**
      * The plans of ONE direction that apply, starting from $price: all of them (in order) when every plan stacks,
      * else the single best one (discount: lowest result; surcharge: highest result; ties keep the earlier plan).
+     * $roomId (step 8h): judge each plan with that room type's own amount; null = the plan's default amount (legacy).
      */
-    function _rhRatePlanGroupPick(array $group, float $price, bool $isDiscount): array
+    function _rhRatePlanGroupPick(array $group, float $price, bool $isDiscount, ?int $roomId = null): array
     {
         if (!$group) {
             return [];
@@ -208,7 +214,7 @@ if (!function_exists('applyDynamicPricing')) {
         $bestPlan  = null;
         $bestPrice = null;
         foreach ($group as $plan) {
-            $candidate = applyRatePlanToPrice($plan, $price);
+            $candidate = $roomId === null ? applyRatePlanToPrice($plan, $price) : rh_rate_plan_price($plan, $roomId, $price);
             if ($bestPrice === null
                 || ($isDiscount && $candidate < $bestPrice - 0.00001)
                 || (!$isDiscount && $candidate > $bestPrice + 0.00001)) {
@@ -291,6 +297,276 @@ if (!function_exists('applyDynamicPricing')) {
         }
         // percentage: value of -10 = 10% discount, +20 = 20% surcharge
         return max(0.0, round($price * (1 + $value / 100), 2));
+    }
+
+    /* ── Step 8h (owner 2026-11-15): an amount per room type + price basis ─────────────────────────────────────────
+     * rate_plans.room_adjustments (JSON {"<room_id>":{"type":"percentage|fixed","value":n}}) and rate_plans.price_basis
+     * ('all_in' | 'base'), migration 086. A missing column reads as NULL / 'all_in' = exactly today's price. */
+
+    /**
+     * True once migration 086 added rate_plans.room_adjustments AND rate_plans.price_basis. One information_schema
+     * read per request. Tests can force it with $GLOBALS['rh_rate_plans_086_override'] = true|false.
+     */
+    function rh_rate_plans_086_ready(PDO $pdo): bool
+    {
+        if (array_key_exists('rh_rate_plans_086_override', $GLOBALS) && $GLOBALS['rh_rate_plans_086_override'] !== null) {
+            return (bool)$GLOBALS['rh_rate_plans_086_override'];
+        }
+        static $ready = null;
+        if ($ready !== null) {
+            return $ready;
+        }
+        try {
+            $st = $pdo->prepare("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'rate_plans' AND COLUMN_NAME IN ('room_adjustments', 'price_basis')");
+            $st->execute();
+            $ready = (int)$st->fetchColumn() === 2;
+        } catch (Throwable $e) {
+            error_log('rh_rate_plans_086_ready: ' . $e->getMessage());
+            $ready = false;
+        }
+        return $ready;
+    }
+
+    /**
+     * VAT and levy percentages inside a room price, read exactly as rh_stay_totals() reads them
+     * (VAT 0 when vat_mode() is off; levy 0 when switched off or negative).
+     * @return array{vat:float,levy:float}
+     */
+    function rh_rate_plan_tax_rates(): array
+    {
+        $mode = function_exists('vat_mode') ? vat_mode() : 'off';
+        $vatPct = $mode === 'off' ? 0.0 : (float)getSetting('vat_rate', 0);
+        $levyOn = in_array(getSetting('tourism_levy_enabled', '0'), ['1', 1, true, 'true', 'on'], true);
+        $levyPct = $levyOn ? max(0.0, (float)getSetting('tourism_levy_percent', 0)) : 0.0;
+        return ['vat' => max(0.0, $vatPct), 'levy' => $levyPct];
+    }
+
+    /** 1 + VAT + levy (as fractions): what one unit of base rate costs the guest all-in. 1.0 when both are off. */
+    function rh_rate_plan_tax_factor(): float
+    {
+        $r = rh_rate_plan_tax_rates();
+        return 1 + $r['vat'] / 100 + $r['levy'] / 100;
+    }
+
+    /** True when VAT and/or the levy actually add something (the basis choice only means something then). */
+    function rh_rate_plan_basis_matters(?float $factor = null): bool
+    {
+        return ($factor ?? rh_rate_plan_tax_factor()) > 1.0000001;
+    }
+
+    /**
+     * The plan's per-room-type amounts, cleaned: [room_id => ['type' => 'percentage'|'fixed', 'value' => float]].
+     * Bad JSON or bad rows are ignored (that room then uses the plan's own amount). Never adds keys to $plan.
+     */
+    function rh_rate_plan_overrides(array $plan): array
+    {
+        $raw = $plan['room_adjustments'] ?? null;
+        if ($raw === null || $raw === '') {
+            return [];
+        }
+        $data = is_array($raw) ? $raw : json_decode((string)$raw, true);
+        if (!is_array($data)) {
+            return [];
+        }
+        $out = [];
+        foreach ($data as $rid => $row) {
+            $rid = (int)$rid;
+            if ($rid <= 0 || !is_array($row) || !isset($row['value']) || !is_numeric($row['value'])) {
+                continue;
+            }
+            $type = ($row['type'] ?? '') === 'fixed' ? 'fixed' : (($row['type'] ?? '') === 'percentage' ? 'percentage' : null);
+            $value = round((float)$row['value'], 2);
+            if ($type === null || abs($value) < 0.000001) {
+                continue;
+            }
+            $out[$rid] = ['type' => $type, 'value' => $value];
+        }
+        ksort($out);
+        return $out;
+    }
+
+    /**
+     * The adjustment a plan makes for ONE room type, or null when the plan does not cover that room type.
+     * applies_to 'all': a listed room type uses its own amount, every other (incl. room types added later) the default.
+     * applies_to 'room_types': only the chosen room types; a listed one uses its own amount.
+     * @return array{type:string,value:float,basis:string,override:bool}|null
+     */
+    function rh_rate_plan_effective(array $plan, int $roomId): ?array
+    {
+        if (!_planAppliesToRoom($plan, $roomId)) {
+            return null;
+        }
+        $basis = (($plan['price_basis'] ?? 'all_in') === 'base') ? 'base' : 'all_in';
+        $ov = rh_rate_plan_overrides($plan);
+        if (isset($ov[$roomId])) {
+            return ['type' => $ov[$roomId]['type'], 'value' => $ov[$roomId]['value'], 'basis' => $basis, 'override' => true];
+        }
+        return [
+            'type'     => (($plan['adjustment_type'] ?? '') === 'fixed') ? 'fixed' : 'percentage',
+            'value'    => (float)($plan['adjustment_value'] ?? 0),
+            'basis'    => $basis,
+            'override' => false,
+        ];
+    }
+
+    /**
+     * PURE math of one adjustment on an all-in price $price.
+     *  percentage (either basis): round(P * (1 + p/100), 2) - the same guest total on either basis.
+     *  fixed on the all-in price:  P + value (today's rule, unrounded).
+     *  fixed on the base rate:     P + round(value * F, 2), F = 1 + VAT + levy (VAT and levy added on top of the amount).
+     * Never below 0. $factor is read only for fixed + base (null = rh_rate_plan_tax_factor()).
+     */
+    function rh_rate_plan_adjust(array $eff, float $price, ?float $factor = null): float
+    {
+        $value = (float)($eff['value'] ?? 0);
+        if (($eff['type'] ?? '') === 'fixed') {
+            if (($eff['basis'] ?? 'all_in') === 'base') {
+                $f = $factor ?? rh_rate_plan_tax_factor();
+                return max(0.0, round($price + round($value * $f, 2), 2));
+            }
+            return max(0.0, $price + $value);
+        }
+        return max(0.0, round($price * (1 + $value / 100), 2));
+    }
+
+    /** A plan's price for ONE room type (its own amount + the plan's basis). Not covered = $price unchanged. */
+    function rh_rate_plan_price(array $plan, int $roomId, float $price, ?float $factor = null): float
+    {
+        $eff = rh_rate_plan_effective($plan, $roomId);
+        return $eff === null ? $price : rh_rate_plan_adjust($eff, $price, $factor);
+    }
+
+    /** Short money text: 100,000 / 1,234.50 (no currency). */
+    function rh_rate_plan_money(float $v): string
+    {
+        return number_format($v, abs($v - round($v)) > 0.004 ? 2 : 0);
+    }
+
+    /** "+10%", "-MWK 5,000", "+MWK 5,000 before VAT/levy". */
+    function rh_rate_plan_adjustment_text(array $eff, string $cur = 'MWK'): string
+    {
+        $v = (float)($eff['value'] ?? 0);
+        $sign = $v > 0 ? '+' : ($v < 0 ? '-' : '');
+        if (($eff['type'] ?? '') === 'fixed') {
+            $t = $sign . $cur . ' ' . rh_rate_plan_money(abs($v));
+            return ($eff['basis'] ?? 'all_in') === 'base' ? $t . ' before VAT/levy' : $t;
+        }
+        $pct = rtrim(rtrim(number_format(abs($v), 2, '.', ''), '0'), '.');
+        return $sign . $pct . '%';
+    }
+
+    /**
+     * The breakdown staff see for one room type: standard all-in price and its split, the adjustment, the new all-in
+     * price and its split (rh_stay_totals(..., 'final'), rounding residue on the base), and the change.
+     * Null when the plan does not cover the room type.
+     */
+    function rh_rate_plan_breakdown(array $plan, int $roomId, float $standard, ?float $factor = null, string $cur = 'MWK'): ?array
+    {
+        $eff = rh_rate_plan_effective($plan, $roomId);
+        if ($eff === null) {
+            return null;
+        }
+        $new = round(rh_rate_plan_adjust($eff, $standard, $factor), 2);
+        $b = rh_stay_totals($standard, 'final');
+        $a = rh_stay_totals($new, 'final');
+        $diff = round($new - $standard, 2);
+        return [
+            'adjustment'      => $eff,
+            'adjustment_text' => rh_rate_plan_adjustment_text($eff, $cur),
+            'standard'        => round($standard, 2),
+            'before'          => ['base' => $b['net'], 'vat' => $b['vat'], 'levy' => $b['levy'], 'total' => $b['total_with_vat']],
+            'new'             => $new,
+            'after'           => ['base' => $a['net'], 'vat' => $a['vat'], 'levy' => $a['levy'], 'total' => $a['total_with_vat']],
+            'diff'            => $diff,
+            'pct'             => $standard > 0 ? round($diff / $standard * 100, 2) : null,
+            'vat_rate'        => $a['vat_rate'],
+            'levy_rate'       => $a['levy_rate'],
+        ];
+    }
+
+    /** One History line for a room type: "+10% (100,000 -> 110,000)"; '' when the plan does not cover it. */
+    function rh_rate_plan_room_hist_text(array $plan, int $roomId, float $standard, ?float $factor = null, string $cur = 'MWK'): string
+    {
+        $eff = rh_rate_plan_effective($plan, $roomId);
+        if ($eff === null) {
+            return '';
+        }
+        $new = rh_rate_plan_adjust($eff, $standard, $factor);
+        $t = rh_rate_plan_adjustment_text($eff, $cur);
+        return $standard > 0 ? $t . ' (' . rh_rate_plan_money($standard) . ' -> ' . rh_rate_plan_money($new) . ')' : $t;
+    }
+
+    /**
+     * PURE. Check and clean what the Rate Plans form posted for the per-room amounts and the basis.
+     *
+     * @param string $mode       'same' (one amount for all) | 'per_room'
+     * @param array  $posted     room_adj[<room_id>] => ['type' => ..., 'value' => ...] (a blank value = use the default)
+     * @param array  $coveredIds the room type ids the plan covers (applies_to 'room_types'), or null for 'all'
+     * @param array  $rooms      [room_id => ['name' => string, 'price' => float lowest price it sells at]] (active types)
+     * @return array{error:string, overrides:?array, basis:string}  overrides null = "same for all" (saved as NULL)
+     */
+    function rh_rate_plan_validate_rooms(string $defType, float $defValue, string $mode, array $posted, ?array $coveredIds,
+                                         array $rooms, string $basis, float $factor, string $cur = 'MWK'): array
+    {
+        $basis = ($basis === 'base' && rh_rate_plan_basis_matters($factor)) ? 'base' : 'all_in';
+        $fail = static function (string $msg) use ($basis): array {
+            return ['error' => $msg, 'overrides' => null, 'basis' => $basis];
+        };
+        $overrides = [];
+        if ($mode === 'per_room') {
+            foreach ($posted as $rid => $row) {
+                $rid = (int)$rid;
+                if ($rid <= 0 || !is_array($row)) {
+                    continue;
+                }
+                if ($coveredIds !== null && !in_array($rid, $coveredIds, true)) {
+                    continue; // not one of the chosen room types: dropped
+                }
+                if (!isset($rooms[$rid])) {
+                    return $fail('One of the room types is no longer active. Reopen the plan and try again.');
+                }
+                $raw = trim((string)($row['value'] ?? ''));
+                if ($raw === '') {
+                    continue; // blank = this room type uses the plan's own amount
+                }
+                $name = (string)$rooms[$rid]['name'];
+                $type = in_array($row['type'] ?? '', ['percentage', 'fixed'], true) ? (string)$row['type'] : 'percentage';
+                if (!is_numeric($raw) || abs(round((float)$raw, 2)) < 0.000001) {
+                    return $fail('The amount for ' . $name . ' must be a non-zero number (leave it empty to use the plan\'s own amount).');
+                }
+                $v = round((float)$raw, 2);
+                if ($type === 'percentage' && ($v <= -100 || $v > 1000)) {
+                    return $fail('The percentage for ' . $name . ' must be above -100 and at most 1000.');
+                }
+                if ($type === 'fixed' && abs($v) > 9999999) {
+                    return $fail('The fixed amount for ' . $name . ' cannot exceed 9,999,999 either way.');
+                }
+                $overrides[$rid] = ['type' => $type, 'value' => $v];
+            }
+            ksort($overrides);
+        }
+        // One plan is either all increases or all discounts (B2): the default and every room type amount agree.
+        foreach ($overrides as $rid => $o) {
+            if (($o['value'] > 0) !== ($defValue > 0)) {
+                return $fail('A plan is either an increase or a discount for every room type. ' . $rooms[$rid]['name'] . ' goes the other way from the plan\'s own amount: make a separate plan for it.');
+            }
+        }
+        // A fixed discount may not make a room type free or below 0.
+        $probe = ['adjustment_type' => $defType, 'adjustment_value' => $defValue, 'price_basis' => $basis,
+            'applies_to' => $coveredIds === null ? 'all' : 'room_types', 'room_type_ids' => $coveredIds === null ? null : json_encode(array_values($coveredIds)),
+            'room_adjustments' => $overrides ? json_encode($overrides) : null];
+        foreach ($rooms as $rid => $info) {
+            $eff = rh_rate_plan_effective($probe, (int)$rid);
+            if ($eff === null || $eff['type'] !== 'fixed' || $eff['value'] >= 0 || (float)$info['price'] <= 0) {
+                continue;
+            }
+            $price = (float)$info['price'];
+            if (rh_rate_plan_adjust($eff, $price, $factor) <= (defined('BALANCE_TOLERANCE') ? BALANCE_TOLERANCE : 0.01)) {
+                return $fail('The fixed discount for ' . $info['name'] . ' (' . rh_rate_plan_adjustment_text($eff, $cur) . ') would make it free: its lowest price is '
+                    . $cur . ' ' . rh_rate_plan_money($price) . '.');
+            }
+        }
+        return ['error' => '', 'overrides' => $overrides ?: null, 'basis' => $basis];
     }
 
     /**

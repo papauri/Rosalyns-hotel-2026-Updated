@@ -370,5 +370,37 @@ ok('overlap note: names the other discount, not the surcharge, not the seasonal 
     && strpos($msg, 'ZZ RP3 OV Disc') !== false && strpos($msg, 'ZZ RP3 OV Sur') === false && strpos($msg, 'FarSeason') === false && strpos($msg, 'discount plan(s)') !== false, $msg . ' ' . ($r['raw'] ?? ''));
 ok('overlap note: rolled back', !empty($r['rolled_back']) && empty($r['leak']) && (int)$pdo->query("SELECT COUNT(*) FROM rate_plans WHERE name LIKE 'ZZ RP3 OV%'")->fetchColumn() === 0);
 
+echo "== (e) step 8h: amount per room type, price basis, preview (rolled back; only once migration 086 ran) ==\n";
+$e8Rooms = array_map('intval', $pdo->query("SELECT id FROM rooms WHERE is_active = 1 AND price_per_night > 0 ORDER BY id LIMIT 2")->fetchAll(PDO::FETCH_COLUMN));
+if (!rh_rate_plans_086_ready($pdo) || count($e8Rooms) < 2) {
+    ok('skipped step 8h page checks: migration 086 not run here or fewer than 2 room types', true);
+} else {
+    [$e8A, $e8B] = $e8Rooms;
+    $e8Tax = ["INSERT INTO site_settings (setting_key, setting_value) VALUES ('vat_enabled','1'),('vat_rate','16.5'),('vat_pricing_mode','inclusive'),('tourism_levy_enabled','1'),('tourism_levy_percent','1') ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)"];
+    $e8Post = ['action' => 'save', 'name' => 'ZZ 8H Page', 'rule_type' => 'promotion', 'adjustment_type' => 'percentage', 'adjustment_value' => '10', 'applies_to' => 'all',
+        'priority' => '0', 'is_active' => '0', 'adj_mode' => 'per_room', 'price_basis' => 'base',
+        'room_adj' => [(string)$e8B => ['type' => 'fixed', 'value' => '5000'], (string)$e8A => ['type' => 'percentage', 'value' => '']]];
+    $r = rp3_page('admin/rate-plans.php', ['ajax' => true, 'setup' => $e8Tax, 'post' => $e8Post, 'verify' => [
+        "SELECT room_adjustments, price_basis FROM rate_plans WHERE name = 'ZZ 8H Page'",
+        "SELECT h.field, h.new_value FROM room_price_history h JOIN rate_plans p ON p.id = h.entity_id WHERE h.entity_type = 'rate_plan' AND p.name = 'ZZ 8H Page' ORDER BY h.id"]]);
+    $row = $r['verify'][0][0] ?? [];
+    $hist = array_column($r['verify'][1] ?? [], 'new_value', 'field');
+    $dbg = json_encode([$r['json'] ?? null, $row, $hist, $r['raw'] ?? '']);
+    $saved = json_decode((string)($row['room_adjustments'] ?? ''), true);
+    ok('8h save: own fixed amount for one room type, blank row left out, basis base', ($r['json']['success'] ?? false) === true && ($row['price_basis'] ?? '') === 'base'
+        && is_array($saved) && array_keys($saved) === [$e8B] && (float)$saved[$e8B]['value'] === 5000.0 && $saved[$e8B]['type'] === 'fixed', $dbg);
+    ok('8h save: History row per room type with its own amount (room_adj_' . $e8B . ')', isset($hist['room_adj_' . $e8B]) && strpos((string)$hist['room_adj_' . $e8B], 'before VAT/levy') !== false, $dbg);
+    ok('8h save: rolled back', !empty($r['rolled_back']) && empty($r['leak']));
+    $r = rp3_page('admin/rate-plans.php', ['ajax' => true, 'setup' => $e8Tax, 'post' => ['room_adj' => [(string)$e8B => ['type' => 'percentage', 'value' => '-5']]] + $e8Post,
+        'verify' => ["SELECT COUNT(*) AS n FROM rate_plans WHERE name = 'ZZ 8H Page'"]]);
+    ok('8h save: increase plan with a discount for one room type is refused, nothing saved', ($r['json']['success'] ?? true) === false
+        && stripos((string)($r['json']['message'] ?? ''), 'either an increase or a discount') !== false && (int)($r['verify'][0][0]['n'] ?? 1) === 0, json_encode($r['json'] ?? $r['raw']));
+    $r = rp3_page('admin/rate-plans.php', ['ajax' => true, 'setup' => $e8Tax, 'post' => ['action' => 'preview'] + $e8Post]);
+    $rows = array_column((array)($r['json']['rows'] ?? []), null, 'room_id');
+    $bdB = $rows[$e8B] ?? null;
+    ok('8h preview: a row per room type; own fixed on base adds 5,000 x (1 + VAT + levy)', $bdB !== null && abs((float)$bdB['diff'] - round(5000 * (1 + (float)$bdB['vat_rate'] / 100 + (float)$bdB['levy_rate'] / 100), 2)) <= BALANCE_TOLERANCE
+        && isset($rows[$e8A]) && $rows[$e8A]['adjustment_text'] === '+10%', json_encode($r['json'] ?? $r['raw']));
+}
+
 echo "\n$pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

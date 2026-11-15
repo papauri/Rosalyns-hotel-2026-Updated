@@ -18,13 +18,99 @@ $isAjax      = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER[
 /* ── Fetch all room types for scope selector ──────────────────────────── */
 $allRooms = $pdo->query("SELECT id, name FROM rooms WHERE is_active = 1 ORDER BY name ASC")->fetchAll(PDO::FETCH_ASSOC);
 
+/* ── Step 8h: per-room-type amounts + price basis (migration 086; until it runs the page works exactly as before) ── */
+require_once __DIR__ . '/../includes/pricing.php';
+$rp086 = rh_rate_plans_086_ready($pdo);
+$rpCur = (string)(getSetting('currency_symbol', 'MWK') ?: 'MWK');
+$rpFactor = rh_rate_plan_tax_factor();
+$rpTax = rh_rate_plan_tax_rates();
+$rpBasisMatters = rh_rate_plan_basis_matters($rpFactor);
+// Standard price per room type = its price per night (all-in); the lowest price it sells at guards fixed discounts.
+$rpRooms = [];
+if ($rp086) {
+    foreach ($pdo->query("SELECT id, name, price_per_night, price_single_occupancy, price_double_occupancy, price_triple_occupancy FROM rooms WHERE is_active = 1 ORDER BY name ASC")->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $std = (float)$r['price_per_night'];
+        $low = $std;
+        foreach (['price_single_occupancy', 'price_double_occupancy', 'price_triple_occupancy'] as $pc) {
+            if ($r[$pc] !== null && (float)$r[$pc] > 0 && ((float)$r[$pc] < $low || $low <= 0)) {
+                $low = (float)$r[$pc];
+            }
+        }
+        $rpRooms[(int)$r['id']] = ['name' => (string)$r['name'], 'standard' => $std, 'price' => $low];
+    }
+}
+$rpTaxNames = array_values(array_filter([$rpTax['vat'] > 0 ? 'VAT' : '', $rpTax['levy'] > 0 ? 'tourism levy' : '']));
+$rpTaxLabel = implode(' and ', $rpTaxNames);
+
+/** Step 8h: the plan the form describes (for the preview and the save checks). */
+$rpPostedPlan = static function (array $p, ?array $overrides, string $basis): array {
+    $appliesTo = in_array($p['applies_to'] ?? 'all', ['all', 'room_types'], true) ? $p['applies_to'] : 'all';
+    $ids = $appliesTo === 'room_types' ? array_values(array_unique(array_map('intval', (array)($p['room_type_ids'] ?? [])))) : null;
+    return [
+        'adjustment_type'  => ($p['adjustment_type'] ?? '') === 'fixed' ? 'fixed' : 'percentage',
+        'adjustment_value' => is_numeric($p['adjustment_value'] ?? null) ? round((float)$p['adjustment_value'], 2) : 0.0,
+        'applies_to'       => $appliesTo,
+        'room_type_ids'    => $ids === null ? null : json_encode($ids),
+        'room_adjustments' => $overrides ? json_encode($overrides) : null,
+        'price_basis'      => $basis,
+    ];
+};
+
 /* ── POST handlers ────────────────────────────────────────────────────── */
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!isset($_POST['csrf_token']) || !validateCsrfToken($_POST['csrf_token'])) {
         $message = 'Invalid security token. Please refresh and try again.';
         $messageType = 'error';
+        if ($isAjax) {
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode(['success' => false, 'message' => $message]);
+            exit;
+        }
     } else {
         $action = $_POST['action'] ?? '';
+
+        if ($action === 'preview') {
+            // Step 8h: read-only breakdown per room type for the modal (the server is the one place the math lives).
+            header('Content-Type: application/json; charset=utf-8');
+            if (!$rp086) {
+                echo json_encode(['success' => false, 'rows' => []]);
+                exit;
+            }
+            $pvAppliesTo = ($_POST['applies_to'] ?? 'all') === 'room_types' ? 'room_types' : 'all';
+            $pvCovered = $pvAppliesTo === 'room_types' ? array_values(array_unique(array_map('intval', (array)($_POST['room_type_ids'] ?? [])))) : null;
+            $pvMode = ($_POST['adj_mode'] ?? 'same') === 'per_room' ? 'per_room' : 'same';
+            $pvBasis = ($rpBasisMatters && ($_POST['price_basis'] ?? 'all_in') === 'base') ? 'base' : 'all_in';
+            // Rows with a bad value are left out of the preview (the save explains why).
+            $pvOverrides = [];
+            if ($pvMode === 'per_room') {
+                foreach ((array)($_POST['room_adj'] ?? []) as $rid => $row) {
+                    $rid = (int)$rid;
+                    if (!isset($rpRooms[$rid]) || !is_array($row) || ($pvCovered !== null && !in_array($rid, $pvCovered, true))) {
+                        continue;
+                    }
+                    $raw = trim((string)($row['value'] ?? ''));
+                    if ($raw === '' || !is_numeric($raw) || abs((float)$raw) < 0.005) {
+                        continue;
+                    }
+                    $pvOverrides[$rid] = ['type' => ($row['type'] ?? '') === 'fixed' ? 'fixed' : 'percentage', 'value' => round((float)$raw, 2)];
+                }
+            }
+            $pvPlan = $rpPostedPlan($_POST, $pvOverrides ?: null, $pvBasis);
+            $pvRows = [];
+            $pvValid = is_numeric($_POST['adjustment_value'] ?? null) && abs((float)$_POST['adjustment_value']) >= 0.005;
+            foreach ($rpRooms as $rid => $info) {
+                $eff = rh_rate_plan_effective($pvPlan, $rid);
+                if ($eff === null || abs($eff['value']) < 0.005 || (!$pvValid && !$eff['override'])) {
+                    continue;
+                }
+                $bd = rh_rate_plan_breakdown($pvPlan, $rid, (float)$info['standard'], $rpFactor, $rpCur);
+                if ($bd !== null) {
+                    $pvRows[] = ['room_id' => $rid, 'name' => $info['name']] + $bd;
+                }
+            }
+            echo json_encode(['success' => true, 'rows' => $pvRows, 'basis' => $pvBasis, 'currency' => $rpCur]);
+            exit;
+        }
 
         if ($action === 'save') {
             /* ── Validate & sanitise ── */
@@ -116,6 +202,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($validationError === '' && ($dupPlan = rh_find_duplicate($pdo, 'rate_plans', 'name', $name, [], $id ?: null))) {
                 $validationError = rh_duplicate_message('rate plan', (string)$dupPlan['value']);
             }
+            // Step 8h: per-room-type amounts + price basis (only once migration 086 ran).
+            $rpOverrides = null;
+            $rpBasis = 'all_in';
+            if ($validationError === '' && $rp086) {
+                $rv = rh_rate_plan_validate_rooms($adjType, $adjValue, ($_POST['adj_mode'] ?? 'same') === 'per_room' ? 'per_room' : 'same',
+                    (array)($_POST['room_adj'] ?? []), $appliesTo === 'room_types' ? $roomIdsPosted : null, $rpRooms,
+                    (string)($_POST['price_basis'] ?? 'all_in'), $rpFactor, $rpCur);
+                if ($rv['error'] !== '') {
+                    $validationError = $rv['error'];
+                } else {
+                    $rpOverrides = $rv['overrides'];
+                    $rpBasis = $rv['basis'];
+                }
+            }
+            $rpOverridesJson = $rpOverrides ? json_encode($rpOverrides, JSON_FORCE_OBJECT) : null;
 
             if ($validationError !== '') {
                 $message = $validationError;
@@ -124,6 +225,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // Price history (room_price_history): the plan's price rules before and after the save.
                 $rpHistFields = ['name', 'rule_type', 'start_date', 'end_date', 'days_of_week', 'min_nights', 'max_nights', 'days_before_min',
                     'days_before_max', 'adjustment_type', 'adjustment_value', 'applies_to', 'room_type_ids', 'priority', 'is_stacking', 'is_active'];
+                if ($rp086) {
+                    // B1: the new columns only exist after migration 086.
+                    $rpHistFields[] = 'price_basis';
+                    $rpHistFields[] = 'room_adjustments';
+                }
+                // Step 8h: one History row per room type whose amount or price changed: "Deluxe: +10% (100,000 -> 110,000)".
+                $rpRoomHist = static function (?array $before, ?array $after) use ($rpRooms, $rpFactor, $rpCur): array {
+                    $rows = [];
+                    foreach ($rpRooms as $rid => $info) {
+                        $o = $before ? rh_rate_plan_room_hist_text($before, $rid, (float)$info['standard'], $rpFactor, $rpCur) : '';
+                        $n = $after ? rh_rate_plan_room_hist_text($after, $rid, (float)$info['standard'], $rpFactor, $rpCur) : '';
+                        if ($o !== $n) {
+                            $rows['room_adj_' . $rid] = [$o === '' ? null : $info['name'] . ': ' . $o, $n === '' ? null : $info['name'] . ': ' . $n];
+                        }
+                    }
+                    return $rows;
+                };
+                $rpExtraSet = $rp086 ? ', price_basis=?, room_adjustments=?' : '';
+                $rpExtraCols = $rp086 ? ', price_basis, room_adjustments' : '';
+                $rpExtraMarks = $rp086 ? ',?,?' : '';
+                $rpExtraVals = $rp086 ? [$rpBasis, $rpOverridesJson] : [];
                 try {
                     if ($id) {
                         $rpHistBefore = rh_price_history_snapshot($pdo, 'rate_plans', (int)$id, $rpHistFields);
@@ -134,9 +256,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             days_before_min=?, days_before_max=?,
                             adjustment_type=?, adjustment_value=?,
                             applies_to=?, room_type_ids=?,
-                            priority=?, is_stacking=?, is_active=?
+                            priority=?, is_stacking=?, is_active=?" . $rpExtraSet . "
                             WHERE id=?");
-                        $stmt->execute([
+                        $stmt->execute(array_merge([
                             $name,
                             $description ?: null,
                             $ruleType,
@@ -154,13 +276,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $priority,
                             $isStacking,
                             $isActive,
-                            $id
-                        ]);
+                        ], $rpExtraVals, [$id]));
                         if ($rpHistBefore) {
                             $rpHistAfter = rh_price_history_snapshot($pdo, 'rate_plans', (int)$id, $rpHistFields);
                             $rpHistChanges = [];
                             foreach ($rpHistFields as $f) {
+                                if ($f === 'room_adjustments') {
+                                    continue; // logged per room type below (the raw JSON could pass 255 characters)
+                                }
                                 $rpHistChanges[$f] = [$rpHistBefore[$f] ?? null, $rpHistAfter[$f] ?? null];
+                            }
+                            if ($rp086) {
+                                $rpHistChanges += $rpRoomHist($rpHistBefore, $rpHistAfter);
                             }
                             rh_price_history_log($pdo, 'rate_plan', (int)$id, $rpHistChanges, $user);
                         }
@@ -175,9 +302,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                              days_before_min, days_before_max,
                              adjustment_type, adjustment_value,
                              applies_to, room_type_ids,
-                             priority, is_stacking, is_active)
-                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)");
-                        $insertParams = [
+                             priority, is_stacking, is_active" . $rpExtraCols . ")
+                            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?" . $rpExtraMarks . ")");
+                        $insertParams = array_merge([
                             $name,
                             $description ?: null,
                             $ruleType,
@@ -195,7 +322,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $priority,
                             $isStacking,
                             $isActive,
-                        ];
+                        ], $rpExtraVals);
                         // Re-check the name and insert together under a lock (double-click / two staff at once).
                         rh_with_create_lock($pdo, 'rate_plan', function () use ($pdo, $stmt, $insertParams, $name, &$savedId) {
                             $dup = rh_find_duplicate($pdo, 'rate_plans', 'name', $name);
@@ -207,7 +334,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         });
                         rh_log_event('rate_plans', 'info', "Rate plan created: {$name}", ['user' => $user['username']]);
                         if ($savedId) {
-                            rh_price_history_log($pdo, 'rate_plan', (int)$savedId, ['created' => [null, $name . ': ' . $adjType . ' ' . $adjValue]], $user);
+                            $rpCreated = ['created' => [null, $name . ': ' . $adjType . ' ' . $adjValue]];
+                            if ($rp086 && $rpOverrides) {
+                                // The room types with their own amount, as they start.
+                                $rpNewPlan = ['adjustment_type' => $adjType, 'adjustment_value' => $adjValue, 'applies_to' => $appliesTo,
+                                    'room_type_ids' => $roomTypeIds, 'price_basis' => $rpBasis, 'room_adjustments' => $rpOverridesJson];
+                                foreach ($rpRoomHist(null, $rpNewPlan) as $hf => $hv) {
+                                    if (isset($rpOverrides[(int)substr($hf, 9)])) {
+                                        $rpCreated[$hf] = $hv;
+                                    }
+                                }
+                            }
+                            rh_price_history_log($pdo, 'rate_plan', (int)$savedId, $rpCreated, $user);
                         }
                         $message = 'Rate plan created successfully.';
                     }
@@ -567,6 +705,151 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
         .toggle-switch input:checked+.toggle-track::after {
             left: 21px;
         }
+
+        /* Step 8h: amount per room type + breakdown */
+        .rp-seg {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+
+        .rp-seg label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            min-height: 44px;
+            padding: 6px 12px;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            margin: 0;
+        }
+
+        .rp-seg label:has(input:checked) {
+            border-color: var(--color-primary, #7E684B);
+            background: #f8f5f0;
+        }
+
+        .form-group .rp-seg input {
+            width: auto;
+        }
+
+        .rp-room-rows {
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 6px 12px;
+            margin-bottom: 14px;
+        }
+
+        .rp-room-row {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 150px 130px;
+            gap: 8px;
+            align-items: center;
+            padding: 6px 0;
+            border-bottom: 1px solid #f1f3f5;
+        }
+
+        .rp-room-row:last-child {
+            border-bottom: 0;
+        }
+
+        .rp-room-row__name {
+            font-size: 13px;
+            min-width: 0;
+            overflow-wrap: anywhere;
+        }
+
+        .rp-room-row__name small {
+            display: block;
+            color: #6c757d;
+        }
+
+        .rp-room-row select,
+        .rp-room-row input {
+            width: 100%;
+            min-height: 44px;
+            padding: 8px 10px;
+            border: 1px solid #ced4da;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+
+        @media (max-width: 560px) {
+            .rp-room-row {
+                grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+            }
+
+            .rp-room-row__name {
+                grid-column: 1 / -1;
+            }
+        }
+
+        .rp-breakdown:empty {
+            display: none;
+        }
+
+        .rp-breakdown {
+            margin-bottom: 14px;
+        }
+
+        .rp-bd {
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 10px 12px;
+            margin-top: 8px;
+            font-size: 13px;
+        }
+
+        .rp-bd__head {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            gap: 6px;
+            font-weight: 600;
+            margin-bottom: 6px;
+        }
+
+        .rp-bd__line {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+            gap: 4px 12px;
+            padding: 3px 0;
+        }
+
+        .rp-bd__split {
+            color: #6c757d;
+            font-size: 12px;
+        }
+
+        .rp-bd__change {
+            margin-top: 4px;
+            font-weight: 600;
+        }
+
+        .rp-room-prices {
+            margin-top: 6px;
+            font-size: 13px;
+        }
+
+        .rp-room-prices summary {
+            cursor: pointer;
+            color: #495057;
+            min-height: 32px;
+            display: list-item;
+        }
+
+        .rp-room-prices ul {
+            margin: 6px 0 0;
+            padding-left: 18px;
+        }
+
+        .rp-room-prices li {
+            margin: 2px 0;
+            overflow-wrap: anywhere;
+        }
     </style>
 </head>
 
@@ -620,6 +903,23 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
                         $adjClass = $adjVal < 0 ? 'adj-value--discount' : 'adj-value--surcharge';
                         $adjSign  = $adjVal > 0 ? '+' : '';
                         $adjDisplay = $adjSign . $adjVal . ($plan['adjustment_type'] === 'percentage' ? '%' : ' MWK');
+                        // Step 8h: own amounts per room type, the price basis, and the price each room type ends up at.
+                        $rpPlanOverrides = $rp086 ? rh_rate_plan_overrides($plan) : [];
+                        if ($rpPlanOverrides) {
+                            $adjDisplay .= ' (own amount for ' . count($rpPlanOverrides) . ' room type' . (count($rpPlanOverrides) === 1 ? '' : 's') . ')';
+                        }
+                        if ($rp086 && ($plan['price_basis'] ?? 'all_in') === 'base') {
+                            $adjDisplay .= ' on the base rate';
+                        }
+                        $rpLines = [];
+                        if ($rp086) {
+                            foreach ($rpRooms as $rpRid => $rpInfo) {
+                                $rpBd = rh_rate_plan_breakdown($plan, $rpRid, (float)$rpInfo['standard'], $rpFactor, $rpCur);
+                                if ($rpBd !== null && $rpInfo['standard'] > 0) {
+                                    $rpLines[] = [$rpInfo['name'], $rpBd];
+                                }
+                            }
+                        }
 
                         $ruleType = $plan['rule_type'];
                         $ruleLabel = $ruleLabels[$ruleType] ?? $ruleType;
@@ -667,6 +967,22 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
                                 </div>
                                 <?php if ($plan['description']): ?>
                                     <div style="font-size:13px; color:#6c757d;"><?php echo htmlspecialchars($plan['description']); ?></div>
+                                <?php endif; ?>
+                                <?php if ($rpLines): ?>
+                                    <details class="rp-room-prices">
+                                        <summary>Price per night by room type (<?php echo count($rpLines); ?>)</summary>
+                                        <ul>
+                                            <?php foreach ($rpLines as [$rpName, $rpBd]):
+                                                $rpUp = $rpBd['diff'] >= 0; ?>
+                                                <li><strong><?php echo htmlspecialchars($rpName); ?></strong>
+                                                    <?php echo htmlspecialchars($rpBd['adjustment_text']); ?>:
+                                                    <?php echo htmlspecialchars($rpCur . ' ' . rh_rate_plan_money($rpBd['standard']) . ' -> ' . rh_rate_plan_money($rpBd['new'])); ?>
+                                                    <span class="<?php echo $rpUp ? 'adj-value--surcharge' : 'adj-value--discount'; ?>">(<?php echo htmlspecialchars(($rpUp ? 'up by ' : 'down by ') . $rpCur . ' ' . rh_rate_plan_money(abs($rpBd['diff'])) . ($rpBd['pct'] !== null ? ', ' . rh_rate_plan_money(abs($rpBd['pct'])) . '%' : '')); ?>)</span>
+                                                </li>
+                                            <?php endforeach; ?>
+                                        </ul>
+                                        <p class="form-hint">Standard price = the room type's price per night with VAT and levy included. The second figure is what a stay this plan matches pays per night with this plan alone.</p>
+                                    </details>
                                 <?php endif; ?>
                             </div>
                             <div class="plan-card__actions">
@@ -822,9 +1138,51 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
                         <div class="form-group">
                             <label for="fieldAdjValue">Adjustment Value <span style="color:red">*</span></label>
                             <input type="number" id="fieldAdjValue" name="adjustment_value" step="0.01" placeholder="-10 = 10% off, +20 = 20% surcharge">
-                            <p class="form-hint">Negative = discount &nbsp;|&nbsp; Positive = surcharge</p>
+                            <p class="form-hint">Negative = discount &nbsp;|&nbsp; Positive = surcharge<?php if ($rp086): ?>. Used for every room type that has no amount of its own below.<?php endif; ?></p>
                         </div>
                     </div>
+
+                    <?php if ($rp086): ?>
+                        <!-- Step 8h: amount per room type, price basis, live breakdown -->
+                        <div class="form-group">
+                            <label>Amount by room type</label>
+                            <div class="rp-seg">
+                                <label><input type="radio" name="adj_mode" value="same" id="fieldAdjModeSame" checked> Same for all room types</label>
+                                <label><input type="radio" name="adj_mode" value="per_room" id="fieldAdjModePerRoom"> Different per room type</label>
+                            </div>
+                            <p class="form-hint">Different per room type: give a room type its own % or fixed amount. Leave a room type empty to use the amount above. One plan is either all increases or all discounts.</p>
+                        </div>
+                        <div class="rp-room-rows" id="rpRoomRows" style="display:none;">
+                            <?php foreach ($rpRooms as $rpRid => $rpInfo): ?>
+                                <div class="rp-room-row" data-room="<?php echo (int)$rpRid; ?>">
+                                    <span class="rp-room-row__name"><?php echo htmlspecialchars($rpInfo['name']); ?>
+                                        <small title="The room type's price per night with VAT and levy included">Standard <?php echo htmlspecialchars($rpCur . ' ' . rh_rate_plan_money((float)$rpInfo['standard'])); ?></small></span>
+                                    <select name="room_adj[<?php echo (int)$rpRid; ?>][type]" aria-label="<?php echo htmlspecialchars($rpInfo['name']); ?> adjustment type">
+                                        <option value="percentage">Percentage (%)</option>
+                                        <option value="fixed">Fixed (<?php echo htmlspecialchars($rpCur); ?>)</option>
+                                    </select>
+                                    <input type="number" step="0.01" name="room_adj[<?php echo (int)$rpRid; ?>][value]" placeholder="Plan amount" aria-label="<?php echo htmlspecialchars($rpInfo['name']); ?> adjustment value">
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                        <?php if ($rpBasisMatters): ?>
+                            <div class="form-group">
+                                <label for="fieldPriceBasis">Apply the adjustment to</label>
+                                <select id="fieldPriceBasis" name="price_basis">
+                                    <option value="all_in">The all-in price (<?php echo htmlspecialchars($rpTaxLabel); ?> included)</option>
+                                    <option value="base">The base rate before <?php echo htmlspecialchars($rpTaxLabel); ?></option>
+                                </select>
+                                <p class="form-hint">A percentage gives the same guest total on either choice, so nothing below changes for a percentage. A fixed amount on the base rate adds <?php echo htmlspecialchars($rpTaxLabel); ?> on top: <?php echo htmlspecialchars($rpCur); ?> 1,000 there costs the guest <?php echo htmlspecialchars($rpCur . ' ' . rh_rate_plan_money(round(1000 * $rpFactor, 2))); ?>.</p>
+                            </div>
+                        <?php else: ?>
+                            <input type="hidden" name="price_basis" id="fieldPriceBasis" value="all_in">
+                        <?php endif; ?>
+                        <div class="form-group">
+                            <label>What each room type will cost</label>
+                            <p class="form-hint">Per night, for a stay this plan matches, with this plan alone. Standard price = the room type's price per night with VAT and levy included. Base = the rate before VAT and levy.</p>
+                            <div class="rp-breakdown" id="rpBreakdown" aria-live="polite"></div>
+                        </div>
+                    <?php endif; ?>
 
                     <hr style="margin: 18px 0; border-color: #e9ecef;">
 
@@ -922,6 +1280,11 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
             const rt = plan ? plan.rule_type : 'seasonal';
             document.getElementById('fieldRuleType').value = rt;
             onRuleTypeChange(rt, plan);
+            if (typeof rpFillRoomRows === 'function') {
+                if (!plan && typeof setRoomTypeCheckboxes === 'function') setRoomTypeCheckboxes(null);
+                rpFillRoomRows(plan || null);
+                rpPreview();
+            }
 
             overlay.classList.add('active');
         }
@@ -1045,7 +1408,110 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
         function onAppliesToChange(val) {
             document.getElementById('roomTypesField').style.display = val === 'room_types' ? 'block' : 'none';
+            if (typeof rpSyncRoomRows === 'function') rpSyncRoomRows();
         }
+
+        <?php if ($rp086): ?>
+            // ── Step 8h: amount per room type + live breakdown (the numbers come from the server: action=preview) ──
+            const rpCur = <?php echo json_encode($rpCur); ?>;
+
+            function rpEsc(s) {
+                return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#039;');
+            }
+
+            function rpMoney(v) {
+                const n = Number(v || 0);
+                const dec = Math.abs(n - Math.round(n)) > 0.004 ? 2 : 0;
+                return n.toLocaleString('en-US', { minimumFractionDigits: dec, maximumFractionDigits: dec });
+            }
+
+            function rpPct(v) {
+                return String(Math.round(Math.abs(Number(v || 0)) * 100) / 100);
+            }
+
+            function rpMode() {
+                const per = document.getElementById('fieldAdjModePerRoom');
+                return per && per.checked ? 'per_room' : 'same';
+            }
+
+            // Show only the room types the plan covers, and only in "Different per room type".
+            function rpSyncRoomRows() {
+                const box = document.getElementById('rpRoomRows');
+                if (!box) return;
+                box.style.display = rpMode() === 'per_room' ? 'block' : 'none';
+                const all = document.getElementById('fieldAppliesTo').value !== 'room_types';
+                const chosen = Array.from(document.querySelectorAll('.rp-room-chk:checked')).map(c => c.value);
+                box.querySelectorAll('.rp-room-row').forEach(row => {
+                    row.style.display = (all || chosen.indexOf(row.dataset.room) !== -1) ? '' : 'none';
+                });
+            }
+
+            function rpFillRoomRows(plan) {
+                let ov = {};
+                if (plan && plan.room_adjustments) {
+                    try { ov = JSON.parse(plan.room_adjustments) || {}; } catch (e) { ov = {}; }
+                }
+                document.querySelectorAll('#rpRoomRows .rp-room-row').forEach(row => {
+                    const o = ov[String(row.dataset.room)];
+                    row.querySelector('select').value = o && o.type === 'fixed' ? 'fixed' : 'percentage';
+                    row.querySelector('input').value = o ? o.value : '';
+                });
+                const per = Object.keys(ov).length > 0;
+                document.getElementById('fieldAdjModePerRoom').checked = per;
+                document.getElementById('fieldAdjModeSame').checked = !per;
+                const basis = document.getElementById('fieldPriceBasis');
+                if (basis && basis.tagName === 'SELECT') basis.value = plan && plan.price_basis === 'base' ? 'base' : 'all_in';
+                rpSyncRoomRows();
+            }
+
+            function rpRenderBreakdown(rows) {
+                const box = document.getElementById('rpBreakdown');
+                if (!box) return;
+                if (!rows || !rows.length) {
+                    box.innerHTML = '<p class="form-hint">Enter an adjustment value to see each room type\'s new price.</p>';
+                    return;
+                }
+                box.innerHTML = rows.map(r => {
+                    const split = (p) => {
+                        const parts = ['Base ' + rpMoney(p.base)];
+                        if (Number(r.vat_rate) > 0) parts.push('VAT ' + rpMoney(p.vat));
+                        if (Number(r.levy_rate) > 0) parts.push('Levy ' + rpMoney(p.levy));
+                        return parts.join(' + ');
+                    };
+                    const up = Number(r.diff) >= 0;
+                    const change = (up ? 'Up by ' : 'Down by ') + rpCur + ' ' + rpMoney(Math.abs(r.diff)) + (r.pct !== null ? ' (' + rpPct(r.pct) + '%)' : '');
+                    return '<div class="rp-bd">' +
+                        '<div class="rp-bd__head"><span>' + rpEsc(r.name) + '</span><span class="' + (up ? 'adj-value--surcharge' : 'adj-value--discount') + '">' + rpEsc(r.adjustment_text) + (r.adjustment.override ? '' : ' (plan amount)') + '</span></div>' +
+                        '<div class="rp-bd__line" title="The room type\'s price per night with VAT and levy included"><span>Standard price</span><span>' + rpCur + ' ' + rpMoney(r.standard) + '</span></div>' +
+                        '<div class="rp-bd__line rp-bd__split" title="How the standard price splits: rate before tax, then VAT and levy"><span>Made of</span><span>' + rpEsc(split(r.before)) + '</span></div>' +
+                        '<div class="rp-bd__line" title="What the guest pays per night with this plan"><span>New price</span><span><strong>' + rpCur + ' ' + rpMoney(r.new) + '</strong></span></div>' +
+                        '<div class="rp-bd__line rp-bd__split" title="How the new price splits: rate before tax, then VAT and levy"><span>Made of</span><span>' + rpEsc(split(r.after)) + '</span></div>' +
+                        '<div class="rp-bd__change ' + (up ? 'adj-value--surcharge' : 'adj-value--discount') + '" title="New price minus standard price, per night">' + rpEsc(change) + ' per night</div>' +
+                        '</div>';
+                }).join('');
+            }
+
+            let rpPreviewTimer = null;
+            let rpPreviewSeq = 0;
+
+            function rpPreview() {
+                clearTimeout(rpPreviewTimer);
+                rpPreviewTimer = setTimeout(function() {
+                    const fd = new FormData(document.getElementById('planForm'));
+                    fd.set('action', 'preview');
+                    const seq = ++rpPreviewSeq;
+                    fetch(window.location.pathname, { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' }, body: fd })
+                        .then(r => r.json())
+                        .then(res => { if (seq === rpPreviewSeq && res && res.success) rpRenderBreakdown(res.rows); })
+                        .catch(function() {});
+                }, 300);
+            }
+
+            document.getElementById('planForm').addEventListener('change', function() { rpSyncRoomRows(); rpPreview(); });
+            document.getElementById('planForm').addEventListener('input', function(e) {
+                if (e.target && e.target.type === 'number') rpPreview();
+            });
+        <?php endif; ?>
 
         <?php if (!empty($allRooms)): ?>
 
@@ -1063,6 +1529,10 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
             _origEdit(plan);
             if (typeof setRoomTypeCheckboxes === 'function') {
                 setRoomTypeCheckboxes(plan ? plan.room_type_ids : null);
+            }
+            if (typeof rpSyncRoomRows === 'function') {
+                rpSyncRoomRows();
+                rpPreview();
             }
         };
 

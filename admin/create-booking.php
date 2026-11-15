@@ -1495,6 +1495,9 @@ try {
             'adjustment_type' => (string)$plan['adjustment_type'],
             'adjustment_value' => (float)$plan['adjustment_value'],
             'is_stacking' => (int)$plan['is_stacking'],
+            // Step 8h (migration 086; missing = today): own amount per room type + price basis.
+            'room_adjustments' => (object)rh_rate_plan_overrides($plan),
+            'price_basis' => (($plan['price_basis'] ?? 'all_in') === 'base') ? 'base' : 'all_in',
         ];
     }, _fetchActiveRatePlans($pdo))) ?: '[]';
 } catch (PDOException $e) {
@@ -2797,6 +2800,7 @@ try {
         const canUnderTier = <?php echo ga_can_under_tier($user) ? 'true' : 'false'; ?>; // may price a room below its guests' tier (same people as price override)
         const tierRankJs = { single: 1, double: 2, triple: 3 };
         const ratePlans = <?php echo $rate_plans_json; ?>;
+        const ratePlanTaxFactor = <?php echo json_encode(rh_rate_plan_tax_factor()); ?>; // 1 + VAT + levy (rh_rate_plan_tax_factor)
         const currency = '<?php echo htmlspecialchars($currency_symbol, ENT_QUOTES); ?>';
         const vatRate = <?php echo (float)$vat_rate_cfg; ?>;
         const vatMode = <?php echo json_encode(vat_mode()); ?>; // 'off' | 'inclusive' | 'exclusive'
@@ -3270,9 +3274,23 @@ try {
             return plan.rule_type === 'promotion';
         }
 
-        function applyRatePlanToPrice(plan, price) {
-            const value = Number(plan.adjustment_value || 0);
-            if (plan.adjustment_type === 'fixed') {
+        // Same as rh_rate_plan_effective() (includes/pricing.php): a room type's own amount, else the plan's.
+        function ratePlanEffective(plan, roomId) {
+            const ov = plan.room_adjustments && plan.room_adjustments[String(roomId)];
+            if (ov && Number(ov.value || 0) !== 0) {
+                return { type: ov.type === 'fixed' ? 'fixed' : 'percentage', value: Number(ov.value), basis: plan.price_basis === 'base' ? 'base' : 'all_in' };
+            }
+            return { type: plan.adjustment_type === 'fixed' ? 'fixed' : 'percentage', value: Number(plan.adjustment_value || 0), basis: plan.price_basis === 'base' ? 'base' : 'all_in' };
+        }
+
+        // Same as rh_rate_plan_price() (includes/pricing.php); the server re-prices on save.
+        function applyRatePlanToPrice(plan, price, roomId) {
+            const eff = ratePlanEffective(plan, roomId);
+            const value = eff.value;
+            if (eff.type === 'fixed') {
+                if (eff.basis === 'base') {
+                    return Math.max(0, Math.round((price + Math.round(value * ratePlanTaxFactor * 100) / 100) * 100) / 100);
+                }
                 return Math.max(0, price + value);
             }
             return Math.max(0, Math.round(price * (1 + value / 100) * 100) / 100);
@@ -3302,17 +3320,17 @@ try {
                 if (!group.some(plan => !Number(plan.is_stacking || 0))) return group;
                 let best = null, bestPrice = null;
                 group.forEach(plan => {
-                    const cand = applyRatePlanToPrice(plan, price);
+                    const cand = applyRatePlanToPrice(plan, price, roomId);
                     if (bestPrice === null || (isDiscount ? cand < bestPrice - 0.00001 : cand > bestPrice + 0.00001)) { bestPrice = cand; best = plan; }
                 });
                 return [best];
             };
-            const surcharges = matching.filter(plan => Number(plan.adjustment_value || 0) > 0);
-            const discounts = matching.filter(plan => Number(plan.adjustment_value || 0) < 0);
+            const surcharges = matching.filter(plan => ratePlanEffective(plan, roomId).value > 0);
+            const discounts = matching.filter(plan => ratePlanEffective(plan, roomId).value < 0);
             let currentRate = baseRate;
             const picked = [];
-            pickGroup(surcharges, currentRate, false).forEach(plan => { currentRate = applyRatePlanToPrice(plan, currentRate); picked.push(plan); });
-            pickGroup(discounts, currentRate, true).forEach(plan => { currentRate = applyRatePlanToPrice(plan, currentRate); picked.push(plan); });
+            pickGroup(surcharges, currentRate, false).forEach(plan => { currentRate = applyRatePlanToPrice(plan, currentRate, roomId); picked.push(plan); });
+            pickGroup(discounts, currentRate, true).forEach(plan => { currentRate = applyRatePlanToPrice(plan, currentRate, roomId); picked.push(plan); });
             const applied = matching.filter(plan => picked.indexOf(plan) !== -1); // priority order
             if (!applied.length) return empty;
             const totalDiscount = baseRate - currentRate;

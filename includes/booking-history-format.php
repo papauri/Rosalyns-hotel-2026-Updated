@@ -873,6 +873,8 @@ if (!function_exists('rh_hist_tol')) {
             'price_double_occupancy' => 'double-occupancy price', 'price_triple_occupancy' => 'triple-occupancy price',
             'price_override' => 'joined-rooms price', 'adjustment_value' => 'adjustment', 'adjustment_type' => 'adjustment type',
             'is_active' => 'switched on', 'deleted' => 'plan', 'created' => 'plan', 'name' => 'name'];
+        if (strpos($field, 'room_adj_') === 0) return 'amount for one room type'; // step 8h: "Deluxe: +10% (100,000 -> 110,000)"
+        if ($field === 'price_basis') return 'price basis';
         return $l[$field] ?? str_replace('_', ' ', $field);
     }
 
@@ -886,11 +888,13 @@ if (!function_exists('rh_hist_tol')) {
         $o = $r['old_value'] ?? null;
         $n = $r['new_value'] ?? null;
         $fmt = function ($v) use ($ctx, $field) {
+            if (($v === null || $v === '') && strpos($field, 'room_adj_') === 0) return '(not in the plan)';
             if ($v === null || $v === '') return '(blank)';
+            if ($field === 'price_basis') return $v === 'base' ? 'the rate before VAT and levy' : 'the all-in price';
             if (is_numeric($v) && in_array($field, ['price_per_night', 'price_single_occupancy', 'price_double_occupancy', 'price_triple_occupancy', 'price_override'], true)) {
                 return rh_hist_money((float)$v, $ctx['cur']);
             }
-            return rh_hist_clip($v, 60);
+            return rh_hist_clip($v, strpos($field, 'room_adj_') === 0 ? 140 : 60);
         };
         $what = ['room_type' => 'room type', 'individual_room' => 'room', 'room_combination' => 'joined rooms', 'rate_plan' => 'rate plan'][$type] ?? 'price';
         $label = ($name !== '' ? $name : ucfirst($what) . ' #' . $eid);

@@ -260,6 +260,10 @@ when prompted."
 - Guides (Payments): new filters Money in / Refunds (money out), Booking status (upcoming / in-house / checked out / no-show / cancelled), Group or company, Recorded by (staff), Room type, Amount from / to; on phones behind "More filters". The money cards follow the filters except Still owed and Today (their helpers say so). Each filter shows as a chip with its own Clear.
 - Assistant: no change to data it reads; if it links staff to filtered Bookings/Payments lists, the new GET params are kind / room_type / pay / filter=group_bookings (Bookings) and direction / booking_status / group / recorded_by / room_type / amount_from / amount_to (Payments).
 
+### Rate plans: per-room-type amounts, price basis, breakdown (2026-11-15, NEXT_BUILD_ORDER step 8h) — SHIPPED (hashes: see NEXT_BUILD_ORDER.md row 8h)
+- Guides (Rate Plans): one plan can now give each room type its own % or fixed amount ("Same for all room types" / "Different per room type"; a blank row uses the plan amount). New "Apply on" choice (only when VAT and/or levy is on): the full price incl. VAT + levy, or the base rate before VAT/levy (a fixed amount on the base rate adds VAT + levy on top; a percentage gives the same guest total either way). The modal shows a breakdown per room type: standard price, base + VAT + levy, new price, "Up by MWK X (Y%) per night". A plan must be all increases or all discounts (mixed is refused); a fixed discount that would make a room free is refused. Plan History shows one line per room type. Needs migration 086 (run at Liwonde; Rosalyn's on owner request - until then the old one-amount form shows there).
+- Assistant: rate_plans gains room_adjustments (JSON per room id) + price_basis; quotes go through rh_apply_rate_plans so prices are right; ai-tools.php:1856 (plan list) shows only the plan's main amount - add the per-room amounts at sync time.
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` fails in unchanged code: claim-check self-test (Room Board "Tomorrow"; staff
   activity "4 of 3 staff accounts"), History Summary "K1,068,000," flagged; digest-recipients fail.
