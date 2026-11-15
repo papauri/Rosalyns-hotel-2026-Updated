@@ -31,7 +31,7 @@ function check(bool $c, string $l, string $d = ''): bool { $c ? ok($l) : bad($l,
 function col(PDO $pdo, string $sql, array $p = []) { $s = $pdo->prepare($sql); $s->execute($p); return $s->fetchColumn(); }
 
 $run = strtoupper(bin2hex(random_bytes(3)));
-$made = ['rooms' => [], 'individual_rooms' => [], 'room_combinations' => [], 'bookings' => []];
+$made = ['rooms' => [], 'individual_rooms' => [], 'room_combinations' => [], 'bookings' => [], 'rate_plans' => [], 'blocked_dates' => []];
 $day = static fn(int $n): string => date('Y-m-d', strtotime('+' . $n . ' day'));
 $D = 600; // far future, clear of real bookings
 
@@ -78,6 +78,8 @@ function cleanup(PDO $pdo): void {
         }
         $pdo->prepare("DELETE FROM bookings WHERE id IN ($ph)")->execute($ids);
     }
+    foreach ($made['rate_plans'] ?? [] as $id) { $pdo->prepare('DELETE FROM rate_plans WHERE id = ?')->execute([$id]); }
+    foreach ($made['blocked_dates'] ?? [] as $id) { $pdo->prepare('DELETE FROM blocked_dates WHERE id = ?')->execute([$id]); }
     foreach ($made['room_combinations'] as $id) { $pdo->prepare('DELETE FROM room_combinations WHERE id = ?')->execute([$id]); }
     foreach ($made['individual_rooms'] as $id) {
         foreach (['room_maintenance_log', 'housekeeping_assignments', 'individual_room_blocked_dates'] as $t) {
@@ -98,6 +100,33 @@ try {
     $pdo->prepare("INSERT INTO room_combinations (combined_name, combined_room_type_id, room_a_id, room_b_id, price_override, max_guests_combined, is_active) VALUES (?, ?, ?, ?, NULL, 5, 0)")
         ->execute(['8E TEST PAIR ' . $run, $joined, $r1, $r2]);
     $combo = $made['room_combinations'][] = (int)$pdo->lastInsertId();
+
+    // Second fixture (follow-up): a member type with 5 rooms, a joined type with TWO Shared pairs (A = P1+P2,
+    // B = P3+P4), and two rate plans for the far-future window: -10% on the joined type only, +50% on the member
+    // type only. Made before any price is read (the rate-plan list is cached per run).
+    $M = $D + 100;
+    $mt2 = mk_type($pdo, '8E TEST MEMBER2', 400000, 2, 5);
+    $p1 = mk_room($pdo, $mt2, 'P1'); $p2 = mk_room($pdo, $mt2, 'P2'); $p3 = mk_room($pdo, $mt2, 'P3'); $p4 = mk_room($pdo, $mt2, 'P4'); $p5 = mk_room($pdo, $mt2, 'P5');
+    $j2 = mk_type($pdo, '8E TEST JOINED2', 735000, 5, 2);
+    $mkPair = static function (string $label, int $a, int $b, ?float $override, int $active) use ($pdo, $j2, $run): int {
+        global $made;
+        $pdo->prepare("INSERT INTO room_combinations (combined_name, combined_room_type_id, room_a_id, room_b_id, price_override, max_guests_combined, is_active) VALUES (?, ?, ?, ?, ?, 5, ?)")
+            ->execute(['8E TEST MP-' . $label . ' ' . $run, $j2, $a, $b, $override, $active]);
+        return $made['room_combinations'][] = (int)$pdo->lastInsertId();
+    };
+    $pairA = $mkPair('A', $p1, $p2, null, 1);
+    $pairB = $mkPair('B', $p3, $p4, 600000, 1);
+    $mkPlan = static function (string $name, array $typeIds, float $pct, int $from = 190) use ($pdo, $day, $D, $run): int {
+        global $made;
+        $pdo->prepare("INSERT INTO rate_plans (name, description, rule_type, start_date, end_date, adjustment_type, adjustment_value, applies_to, room_type_ids, priority, is_stacking, is_active)
+            VALUES (?, '8e test', 'seasonal', ?, ?, 'percentage', ?, 'room_types', ?, 0, 0, 1)")
+            ->execute([$name . ' ' . $run, $day($D + $from), $day($D + $from + 9), $pct, json_encode($typeIds)]);
+        return $made['rate_plans'][] = (int)$pdo->lastInsertId();
+    };
+    $planJ = $mkPlan('8E TEST JOINED -10', [$j2], -10);
+    $planM = $mkPlan('8E TEST MEMBER +50', [$mt2], 50);
+    $planUp = $mkPlan('8E TEST BOTH +50', [$mt2, $j2], 50, 300);   // one plan covering both types
+    $planDown = $mkPlan('8E TEST BOTH -10', [$mt2, $j2], -10, 320);
 
     echo "\n--- 1. joined type, pair inactive, no own rooms: sold out everywhere ---\n";
     $a = checkRoomAvailability($joined, $day($D), $day($D + 2));
@@ -190,10 +219,12 @@ try {
     echo "\n--- 9. price: pair override empty = the joined type's own price, one rate whatever the occupancy ---\n";
     $jrow = ['id' => $joined, 'price_per_night' => 735000, 'price_single_occupancy' => 100, 'price_triple_occupancy' => 999];
     $rate = rh_room_type_base_rate($jrow, ['id' => 0, 'room_id' => 0, 'occupancy_type' => 'triple', 'check_in_date' => $day($D + 40), 'check_out_date' => $day($D + 41)]);
-    check(abs($rate - 735000) < 0.01, 'Upgrade rack for a joined target = type price (not the occupancy price)', (string)$rate);
+    $exp9 = (float)applyDynamicPricing($pdo, $joined, $day($D + 40), $day($D + 41), 1, 735000)['final_price']; // any hotel-wide plan applies as on create
+    check(abs($rate - $exp9) < 0.01, 'Upgrade rack for a joined target = type price (+ its rate plans), not the occupancy price', $rate . ' vs ' . $exp9);
     $pdo->prepare('UPDATE room_combinations SET price_override = 500000 WHERE id = ?')->execute([$combo]);
     $rate2 = rh_room_type_base_rate($jrow, ['id' => 0, 'room_id' => 0, 'occupancy_type' => 'single', 'check_in_date' => $day($D + 40), 'check_out_date' => $day($D + 41)]);
-    check(abs($rate2 - 500000) < 0.01, 'With a pair override the upgrade rack is the override', (string)$rate2);
+    $exp9b = (float)applyDynamicPricing($pdo, $joined, $day($D + 40), $day($D + 41), 1, 500000)['final_price'];
+    check(abs($rate2 - $exp9b) < 0.01, 'With a pair override the upgrade rack is the override (+ rate plans)', $rate2 . ' vs ' . $exp9b);
     $pdo->prepare('UPDATE room_combinations SET price_override = NULL WHERE id = ?')->execute([$combo]);
     check(rh_room_type_base_rate(['price_per_night' => 300, 'price_double_occupancy' => 250], ['occupancy_type' => 'double']) === 250.0, 'Normal types keep their occupancy price');
 
@@ -229,6 +260,156 @@ try {
         'combined_room_type_id' => (string)$legacy, 'room_a_id' => (string)$r1, 'room_b_id' => (string)$r2, 'max_guests_combined' => '5', 'combination_sale_mode' => 'shared'],
         ["SELECT combined_room_type_id AS t FROM room_combinations WHERE id = $combo"]);
     check((int)($hr['verify'][0][0]['t'] ?? 0) === $joined && stripos(implode(' ', $hr['output_flash'] ?? []), 'only pair') !== false, 'Changing the Book As type of the last pair is refused', json_encode($hr['output_flash'] ?? $hr));
+
+    echo "\n--- 14. occupancy: a joined type with no active pair has 0 rooms in the reports ---\n";
+    check(rh_room_type_unit_total($joined, 2) === 0, 'Joined type, pair inactive: report rooms 0 (not the stored 2)', (string)rh_room_type_unit_total($joined, 2));
+    check(rh_room_type_unit_total($legacy, 2) === 2, 'Legacy type with no rooms keeps its stored count');
+    check(rh_room_type_unit_total($j2, 2) === 2 && rh_room_type_unit_total($mt2, 5) === 5, 'Two Shared pairs = 2 joined units; their 4 rooms still count under the member type (5)',
+        rh_room_type_unit_total($j2, 2) . '/' . rh_room_type_unit_total($mt2, 5));
+
+    echo "\n--- 15. more than one pair: which pair is given ---\n";
+    $av = checkRoomAvailability($j2, $day($M), $day($M + 2));
+    check(!empty($av['available']) && (int)$av['remaining_rooms'] === 2, 'Two free pairs = 2 joined rooms to sell', json_encode($av['remaining_rooms'] ?? null));
+    check(array_values(getRoomTypeNightlyAvailability($j2, $day($M), $day($M + 2))) === [2, 2], 'Nightly / calendar: 2 each night');
+    $free = getAvailableRoomCombinations($j2, $day($M), $day($M + 2));
+    check(array_map(fn($c) => (int)$c['id'], $free) === [$pairA, $pairB], 'Order for a later stay: by pair name (A, then B)');
+    check(count(rh_joined_quote_queue($free)) === 2, 'Quote queue offers the same 2 pairs');
+    $u1 = mk_booking($pdo, $j2, $day($M), $day($M + 2), 735000);
+    $av = checkRoomAvailability($j2, $day($M), $day($M + 2));
+    check((int)$av['remaining_rooms'] === 1, 'One unassigned joined booking holds a pair: 1 left', json_encode($av['remaining_rooms'] ?? null));
+    $u2 = mk_booking($pdo, $j2, $day($M), $day($M + 2), 735000);
+    $r1a = autoAssignIndividualRoom($u1);
+    $r2a = autoAssignIndividualRoom($u2);
+    $c1 = (int)col($pdo, 'SELECT room_combination_id FROM bookings WHERE id = ?', [$u1]);
+    $c2 = (int)col($pdo, 'SELECT room_combination_id FROM bookings WHERE id = ?', [$u2]);
+    check(!empty($r1a['success']) && !empty($r2a['success']) && $c1 === $pairA && $c2 === $pairB, 'Two bookings, same nights: first gets A, second gets B (never the same pair)', json_encode([$c1, $c2, $r2a['message'] ?? '']));
+    $u3 = mk_booking($pdo, $j2, $day($M), $day($M + 2), 735000);
+    $r3a = autoAssignIndividualRoom($u3);
+    check(empty($r3a['success']) && count(getBookingRoomIds($u3)) === 0, 'Third booking: no free pair, nothing assigned', (string)($r3a['message'] ?? ''));
+    $pdo->prepare("UPDATE bookings SET status = 'cancelled' WHERE id = ?")->execute([$u3]);
+
+    // Pair A partly booked as a single room: B is used.
+    $s1 = mk_booking($pdo, $mt2, $day($M + 10), $day($M + 12), 400000);
+    $pdo->prepare('UPDATE bookings SET individual_room_id = ? WHERE id = ?')->execute([$p1, $s1]);
+    syncBookingRooms($s1, [$p1]);
+    $av = checkRoomAvailability($j2, $day($M + 10), $day($M + 12));
+    check((int)$av['remaining_rooms'] === 1, 'Room P1 sold on its own: only pair B left', json_encode($av['remaining_rooms'] ?? null));
+    $u4 = mk_booking($pdo, $j2, $day($M + 10), $day($M + 12), 735000);
+    autoAssignIndividualRoom($u4);
+    check((int)col($pdo, 'SELECT room_combination_id FROM bookings WHERE id = ?', [$u4]) === $pairB, 'Joined booking gets pair B');
+
+    // A member room blocked / in maintenance, or the member type blocked: the pair is skipped.
+    $pdo->prepare("INSERT INTO individual_room_blocked_dates (individual_room_id, block_date, block_type, reason) VALUES (?, ?, 'manual', '8e test')")->execute([$p3, $day($M + 20)]);
+    $ids = array_map(fn($c) => (int)$c['id'], getAvailableRoomCombinations($j2, $day($M + 20), $day($M + 21)));
+    check($ids === [$pairA], 'Room P3 blocked that night: pair B skipped', json_encode($ids));
+    $pdo->prepare("UPDATE individual_rooms SET status = 'maintenance' WHERE id = ?")->execute([$p1]);
+    check(getAvailableRoomCombinations($j2, $day($M + 20), $day($M + 21)) === [] && empty(checkRoomAvailability($j2, $day($M + 20), $day($M + 21))['available']), 'And P1 in maintenance: no pair, joined type sold out');
+    check(rh_room_type_unit_total($j2, 2) === 1, 'Reports: a pair with a member in maintenance is not a sellable unit', (string)rh_room_type_unit_total($j2, 2));
+    $pdo->prepare("UPDATE individual_rooms SET status = 'available' WHERE id = ?")->execute([$p1]);
+    $pdo->prepare("INSERT INTO blocked_dates (room_id, block_date, block_type, reason) VALUES (?, ?, 'manual', '8e test')")->execute([$mt2, $day($M + 30)]);
+    $made['blocked_dates'][] = (int)$pdo->lastInsertId();
+    check(getAvailableRoomCombinations($j2, $day($M + 30), $day($M + 31)) === [] && array_values(getRoomTypeNightlyAvailability($j2, $day($M + 30), $day($M + 31))) === [0],
+        'Member type closed that night: both pairs skipped, calendar 0');
+
+    // Staff pick a specific pair.
+    $u5 = mk_booking($pdo, $j2, $day($M + 40), $day($M + 41), 735000);
+    $man = assignRoomCombinationToBooking($u5, $pairB);
+    check(!empty($man['success']) && getBookingRoomIds($u5) == [$p3, $p4], 'Manual pick: pair B given exactly', (string)($man['message'] ?? ''));
+    $cands = rh_room_assignment_candidates($j2, $day($M + 40), $day($M + 41), $u5);
+    $cur = array_values(array_filter($cands['items'], fn($i) => !empty($i['current'])));
+    check($cands['mode'] === 'combinations' && count($cands['items']) === 2 && count($cur) === 1 && (int)$cur[0]['id'] === $pairB, 'Picker lists both pairs, B marked current');
+
+    // A stay that starts today: a clean pair comes before one being cleaned (as single rooms do).
+    $pdo->prepare("UPDATE individual_rooms SET status = 'cleaning' WHERE id = ?")->execute([$p1]);
+    $ids = array_map(fn($c) => (int)$c['id'], getAvailableRoomCombinations($j2, $day(0), $day(1)));
+    check($ids === [$pairB, $pairA], 'Same-day stay: pair A being cleaned goes after clean pair B', json_encode($ids));
+    $pdo->prepare("UPDATE individual_rooms SET status = 'available' WHERE id = ?")->execute([$p1]);
+    $ids = array_map(fn($c) => (int)$c['id'], getAvailableRoomCombinations($j2, $day(0), $day(1)));
+    check($ids === [$pairA, $pairB], 'Both clean: back to name order', json_encode($ids));
+
+    echo "\n--- 16. upgrade into a joined type: priced like a new booking, on the pair it is given ---\n";
+    $ui = $day($D + 192); $uo = $day($D + 194);
+    $blk = mk_booking($pdo, $mt2, $ui, $uo, 400000); // P1 taken those nights, so pair A is not free
+    $pdo->prepare('UPDATE bookings SET individual_room_id = ? WHERE id = ?')->execute([$p1, $blk]);
+    syncBookingRooms($blk, [$p1]);
+    $up = mk_booking($pdo, $mt2, $ui, $uo, 600000); // booked under the member plan: 400,000 +50%
+    $opts = rh_room_change_options($pdo, $up);
+    $opt = array_values(array_filter($opts['options'], fn($o) => (int)$o['id'] === $j2))[0] ?? null;
+    $dyn = applyDynamicPricing($pdo, $j2, $ui, $uo, 2, 600000);
+    $expNight = (float)$dyn['final_price'];
+    check(in_array($planJ, array_map('intval', $dyn['rate_plan_ids'] ?? [(int)($dyn['rate_plan_id'] ?? 0)]), true) && !in_array($planM, array_map('intval', $dyn['rate_plan_ids'] ?? []), true),
+        'Joined-type plan applies, member-type plan does not', json_encode($dyn['rate_plan_ids'] ?? $dyn['rate_plan_id']));
+    check($opt !== null && $opt['available'] && abs((float)$opt['quote']['new_rack'] - $expNight) < 0.01, 'Options quote: pair B override 600,000 + the joined plan (-10%)', json_encode($opt['quote']['new_rack'] ?? $opt));
+    $mvReason = static fn(array $q): string => $q['direction'] === 'downgrade' ? 'downgrade_guest_request' : ($q['direction'] === 'upgrade' ? 'upgrade_guest_request' : 'change_guest_request');
+    $res = rh_apply_room_type_change($pdo, $up, $j2, 'charge', $mvReason($opt['quote']), '8e test move', ['id' => 0, 'full_name' => '8e test'], false);
+    check(!empty($res['success']), 'Upgrade done', (string)($res['message'] ?? ''));
+    $row = $pdo->prepare('SELECT room_id, room_combination_id, total_with_vat FROM bookings WHERE id = ?');
+    $row->execute([$up]);
+    $row = $row->fetch(PDO::FETCH_ASSOC);
+    check((int)$row['room_combination_id'] === $pairB && count(getBookingRoomIds($up)) === 2, 'Given the pair it was priced on (B)', json_encode($row));
+    check(abs((float)$row['total_with_vat'] - round($expNight * 2, 2)) <= BALANCE_TOLERANCE && abs((float)$row['total_with_vat'] - (float)$opt['quote']['charge_total']) <= BALANCE_TOLERANCE,
+        'Bill = booked rate x 2 nights + the rack difference = joined rate x 2; same as the quote', $row['total_with_vat'] . ' vs ' . ($expNight * 2));
+
+    echo "\n--- 16c. a plan covering BOTH types: the move costs what a new booking of the new type costs ---\n";
+    // Upgrade under +50% on both: booked member 600,000 (400,000 +50%), new joined booking 900,000 (pair B 600,000 +50%).
+    $ci = $day($D + 302); $co = $day($D + 304);
+    $blk2 = mk_booking($pdo, $mt2, $ci, $co, 600000);
+    $pdo->prepare('UPDATE bookings SET individual_room_id = ? WHERE id = ?')->execute([$p1, $blk2]);
+    syncBookingRooms($blk2, [$p1]); // pair A not free: pair B (override 600,000) is the one priced and given
+    $upB = mk_booking($pdo, $mt2, $ci, $co, (float)applyDynamicPricing($pdo, $mt2, $ci, $co, 2, 400000)['final_price']);
+    $newJ = (float)applyDynamicPricing($pdo, $j2, $ci, $co, 2, 600000)['final_price'];
+    $o = array_values(array_filter(rh_room_change_options($pdo, $upB)['options'], fn($x) => (int)$x['id'] === $j2))[0] ?? null;
+    check($o !== null && abs((float)$o['quote']['charge_total'] - round($newJ * 2, 2)) <= BALANCE_TOLERANCE, 'Upgrade under +50% on both: quote = new joined booking (no overcharge)', json_encode([$o['quote']['charge_total'] ?? null, $newJ * 2]));
+    $rU = rh_apply_room_type_change($pdo, $upB, $j2, 'charge', $mvReason($o['quote']), '8e test move', ['id' => 0, 'full_name' => '8e test'], false);
+    check(!empty($rU['success']) && abs((float)col($pdo, 'SELECT total_with_vat FROM bookings WHERE id = ?', [$upB]) - round($newJ * 2, 2)) <= BALANCE_TOLERANCE, 'Upgrade: saved bill = the quote', (string)($rU['message'] ?? ''));
+    // Downgrade under -10% on both: booked joined 540,000 (pair B 600,000 -10%), new member booking 360,000.
+    $ci = $day($D + 322); $co = $day($D + 324);
+    $dn = mk_booking($pdo, $j2, $ci, $co, (float)applyDynamicPricing($pdo, $j2, $ci, $co, 2, 600000)['final_price']);
+    $asD = assignRoomCombinationToBooking($dn, $pairB);
+    $newM = (float)applyDynamicPricing($pdo, $mt2, $ci, $co, 2, 400000)['final_price'];
+    $o = array_values(array_filter(rh_room_change_options($pdo, $dn)['options'], fn($x) => (int)$x['id'] === $mt2))[0] ?? null;
+    check(!empty($asD['success']) && $o !== null && $o['quote']['direction'] === 'downgrade' && abs((float)$o['quote']['charge_total'] - round($newM * 2, 2)) <= BALANCE_TOLERANCE,
+        'Downgrade under -10% on both: quote = new member booking (no overcharge)', json_encode([$o['quote']['charge_total'] ?? null, $newM * 2, $asD['message'] ?? '']));
+    $rD = rh_apply_room_type_change($pdo, $dn, $mt2, 'charge', $mvReason($o['quote']), '8e test move', ['id' => 0, 'full_name' => '8e test'], false);
+    check(!empty($rD['success']) && abs((float)col($pdo, 'SELECT total_with_vat FROM bookings WHERE id = ?', [$dn]) - round($newM * 2, 2)) <= BALANCE_TOLERANCE, 'Downgrade: saved bill = the quote', (string)($rD['message'] ?? ''));
+    // A move between two normal types is unchanged (catalogue racks, no plans).
+    check(rh_room_type_base_rate(['id' => $mt2, 'price_per_night' => 400000], ['check_in_date' => $ci, 'check_out_date' => $co, 'number_of_nights' => 2]) === 400000.0, 'Normal-type rack without the joined flag ignores plans');
+
+    echo "\n--- 16b. in-house guest upgraded into the joined type: moves to a clean pair now ---\n";
+    $ih = mk_booking($pdo, $mt2, $day(0), $day(2), 400000, 'checked-in');
+    $pdo->prepare('UPDATE bookings SET individual_room_id = ? WHERE id = ?')->execute([$p5, $ih]);
+    syncBookingRooms($ih, [$p5]);
+    $pdo->prepare("UPDATE individual_rooms SET status = 'occupied' WHERE id = ?")->execute([$p5]);
+    $pdo->prepare("UPDATE individual_rooms SET status = 'cleaning' WHERE id = ?")->execute([$p1]); // pair A not clean
+    $resIh = rh_apply_room_type_change($pdo, $ih, $j2, 'charge', 'upgrade_guest_request', '', ['id' => 0, 'full_name' => '8e test'], false);
+    $ihRooms = getBookingRoomIds($ih);
+    sort($ihRooms);
+    check(!empty($resIh['success']) && (int)col($pdo, 'SELECT room_combination_id FROM bookings WHERE id = ?', [$ih]) === $pairB && $ihRooms == [$p3, $p4],
+        'In-house: given clean pair B (A is being cleaned)', json_encode([$resIh['message'] ?? '', $ihRooms]));
+    check((string)col($pdo, 'SELECT status FROM individual_rooms WHERE id = ?', [$p5]) === 'cleaning'
+        && (string)col($pdo, 'SELECT status FROM individual_rooms WHERE id = ?', [$p3]) === 'occupied'
+        && (string)col($pdo, 'SELECT status FROM individual_rooms WHERE id = ?', [$p4]) === 'occupied', 'Old room to housekeeping, both pair rooms occupied');
+    $pdo->prepare("UPDATE individual_rooms SET status = 'available' WHERE id IN (?, ?, ?, ?)")->execute([$p1, $p3, $p4, $p5]);
+    $pdo->prepare("UPDATE booking_rooms SET released_at = NOW() WHERE booking_id = ?")->execute([$ih]);
+    $pdo->prepare("UPDATE bookings SET status = 'cancelled', individual_room_id = NULL, room_combination_id = NULL WHERE id = ?")->execute([$ih]);
+
+    echo "\n--- 17. a room is in only one active pair (save and activate) ---\n";
+    $hs = harness('admin/individual-rooms.php', ['action' => 'save_room_combination', 'combination_id' => '0', 'combined_name' => '8E TEST MP-C ' . $run,
+        'combined_room_type_id' => (string)$j2, 'room_a_id' => (string)$p1, 'room_b_id' => (string)$p5, 'max_guests_combined' => '5', 'combination_sale_mode' => 'shared', 'combination_is_active' => '1'],
+        ["SELECT COUNT(*) AS n FROM room_combinations WHERE combined_room_type_id = $j2"]);
+    check((int)($hs['verify'][0][0]['n'] ?? 0) === 2 && stripos(implode(' ', $hs['output_flash'] ?? []), 'already part of the active joined room') !== false, 'Save refused: P1 is already in active pair A', json_encode($hs['output_flash'] ?? $hs));
+    $pairC = $mkPair('C', $p2, $p5, null, 0);
+    $hc = harness('admin/individual-rooms.php', ['action' => 'activate_room_combination', 'combination_id' => (string)$pairC], ["SELECT is_active AS a FROM room_combinations WHERE id = $pairC"]);
+    check((int)($hc['verify'][0][0]['a'] ?? 1) === 0 && stripos(implode(' ', $hc['output_flash'] ?? []), 'already part of the active joined room') !== false, 'Activate refused: P2 is already in active pair A', json_encode($hc['output_flash'] ?? $hc));
+
+    echo "\n--- 18. Individual Rooms list: filter by the joined type, status cards = rows ---\n";
+    $src = (string)file_get_contents($root . '/admin/individual-rooms.php');
+    check(strpos($src, 'rcf.combined_room_type_id = ? AND rcf.is_active = 1') !== false, 'Type filter includes the member rooms of the type\'s active pairs');
+    check(strpos($src, "array_map(static function (\$r) { return (string)\$r['display_status']; }, \$individualRooms)") !== false && strpos($src, "(string)\$row['display_status'] !== (string)\$filter_status") !== false,
+        'Cards, Status filter and badge use one display status');
+    check(strpos($src, "row.dataset.filterHidden = match ? '' : '1';") !== false && strpos($src, 'rhPagerRefresh(true)') !== false, 'Card filter works with the 10-per-page pager');
+    check(strpos($src, "['maintenance', 'out_of_order', 'cleaning']") === false, 'A room being cleaned can still be assigned');
+    check(strpos($src, "\$irRowRef['display_status'] = 'inactive';") !== false, 'A switched-off room is shown Inactive and counted on no status card');
 
     echo "\n--- 13. static checks ---\n";
     $rm = (string)file_get_contents($root . '/admin/room-management.php');

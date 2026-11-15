@@ -1081,8 +1081,10 @@ $params = [];
 // Type is filtered in SQL (both rooms of a joined pair share the joined type). Status and floor
 // are filtered after joined pairs are merged into one row, so a pair is judged as one room.
 if ($filter_room_type) {
-    $whereClauses[] = 'ir.room_type_id = ?';
-    $params[] = $filter_room_type;
+    // A joined type sold through Shared pairs owns no rooms: its pairs' member rooms are its rows.
+    $whereClauses[] = '(ir.room_type_id = ? OR ir.id IN (SELECT rcf.room_a_id FROM room_combinations rcf WHERE rcf.combined_room_type_id = ? AND rcf.is_active = 1
+        UNION SELECT rcf2.room_b_id FROM room_combinations rcf2 WHERE rcf2.combined_room_type_id = ? AND rcf2.is_active = 1))';
+    array_push($params, $filter_room_type, $filter_room_type, $filter_room_type);
 }
 
 $stmt = $pdo->prepare("
@@ -1178,7 +1180,17 @@ $stmt = $pdo->prepare("
     ORDER BY r.name ASC, ir.floor ASC, ir.room_number ASC
 ");
 $stmt->execute($params);
-$individualRooms = $stmt->fetchAll(PDO::FETCH_ASSOC);
+// One row per room: on a changeover day a room has two "current" bookings (the guest leaving today and the one
+// arriving), which listed it twice. Keep the in-house guest's row.
+$individualRooms = [];
+foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $irFetched) {
+    $irKey = (int)$irFetched['id'];
+    if (!isset($individualRooms[$irKey])
+        || ((string)($individualRooms[$irKey]['active_booking_status'] ?? '') !== 'checked-in' && (string)($irFetched['active_booking_status'] ?? '') === 'checked-in')) {
+        $individualRooms[$irKey] = $irFetched;
+    }
+}
+$individualRooms = array_values($individualRooms);
 
 // A joined-only pair is ONE room: merge its two rows into one (label "101A + 101B", one status,
 // the pair's current / next booking). Shared-mode pairs and inactive pairs stay separate rows.
@@ -1234,8 +1246,25 @@ foreach ($individualRooms as $irRow) {
     $pairRow['max_guests_override'] = null;
     $mergedRooms[] = $pairRow;
 }
+// The status a row shows, filters on and is counted under (one rule for the cards, the Status filter and the
+// badge): out of service always shows; a guest checked in on the room (primary room OR booking_rooms, so both
+// rooms of a booked joined pair) shows Occupied; otherwise the room's own status. A future reservation never
+// hides the room's real state.
+foreach ($mergedRooms as &$irRowRef) {
+    $irPhysical = (string)($irRowRef['status'] ?? '');
+    if (isset($irRowRef['is_active']) && (int)$irRowRef['is_active'] === 0) {
+        $irRowRef['display_status'] = 'inactive'; // switched off: not sold, matches no status card
+    } elseif (in_array($irPhysical, rh_room_out_of_service_statuses(), true)) {
+        $irRowRef['display_status'] = $irPhysical;
+    } elseif ((string)($irRowRef['active_booking_status'] ?? '') === 'checked-in') {
+        $irRowRef['display_status'] = 'occupied';
+    } else {
+        $irRowRef['display_status'] = $irPhysical !== '' ? $irPhysical : 'available';
+    }
+}
+unset($irRowRef);
 $individualRooms = array_values(array_filter($mergedRooms, static function ($row) use ($filter_status, $filter_floor) {
-    if ($filter_status && (string)$row['status'] !== (string)$filter_status) {
+    if ($filter_status && (string)$row['display_status'] !== (string)$filter_status) {
         return false;
     }
     if ($filter_floor) {
@@ -1311,9 +1340,10 @@ foreach ($roomCombinations as $rcRow) {
 $floorsStmt = $pdo->query("SELECT DISTINCT floor FROM individual_rooms WHERE floor IS NOT NULL AND floor != '' ORDER BY floor");
 $floors = $floorsStmt->fetchAll(PDO::FETCH_COLUMN);
 
-// Get status summary
-// A joined-only pair counts once (status = the most restrictive of its two rooms).
-$statusSummary = array_count_values(rh_room_unit_statuses());
+// Status cards count the rows listed below (a joined-only pair is one row), by the status each row shows, so a
+// card's number is exactly the rows its click shows.
+$statusSummary = array_count_values(array_map(static function ($r) { return (string)$r['display_status']; }, $individualRooms));
+$irFiltersOn = $filter_room_type || $filter_status || $filter_floor;
 
 $currency = htmlspecialchars(getSetting('currency_symbol'));
 ?>
@@ -1504,7 +1534,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                             <tr>
                                 <td colspan="10" style="text-align: center; padding: 40px; color: #666;">
                                     <i class="fas fa-door-open" style="font-size: 48px; margin-bottom: 16px; display: block; color: #ddd;"></i>
-                                    No individual rooms found. Click "Add Individual Room" to create one.
+                                    <?php echo $irFiltersOn ? 'No rooms match these filters. Click Clear to see every room.' : 'No individual rooms found. Click "Add Individual Room" to create one.'; ?>
                                 </td>
                             </tr>
                         <?php else: ?>
@@ -1518,10 +1548,10 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                     $pairMemberNote = $room['pair']['a_number'] . ': ' . ucfirst(str_replace('_', ' ', (string)$room['pair']['a_status']))
                                         . ' / ' . $room['pair']['b_number'] . ': ' . ucfirst(str_replace('_', ' ', (string)$room['pair']['b_status']));
                                 }
-                                // Compute timeline-aware display status
-                                $displayStatus = $room['status'];
+                                // Display status: computed once above (cards, Status filter and badge agree)
+                                $displayStatus = (string)$room['display_status'];
                                 $statusIcon = 'check';
-                                $statusLabel = ucfirst(str_replace('_', ' ', $room['status']));
+                                $statusLabel = ucfirst(str_replace('_', ' ', $displayStatus));
                                 $hasActiveBooking = !empty($room['active_booking_ref']);
                                 $hasReservedBooking = !empty($room['reserved_booking_ref']);
                                 $hasNextBooking = !empty($room['next_booking_ref']);
@@ -1529,7 +1559,8 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                 // ── Assign Booking button logic ───────────────────────────────
                                 // Disable if room already has both an active AND a next booking,
                                 // or if the room is physically unavailable for assignment.
-                                $assignBlockedByStatus = in_array($room['status'], ['maintenance', 'out_of_order', 'cleaning']);
+                                // Housekeeping never takes a room out of the assign list (check-in is gated on a clean room).
+                                $assignBlockedByStatus = in_array($room['status'], ['maintenance', 'out_of_order'], true);
                                 $assignFullyScheduled  = $hasActiveBooking && $hasNextBooking;
                                 $assignDisabled        = $assignBlockedByStatus || $assignFullyScheduled;
 
@@ -1562,21 +1593,8 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                     ? htmlspecialchars($room['active_checkout'] ?? '', ENT_QUOTES, 'UTF-8')
                                     : '';
 
-                                // Timeline-aware status override
-                                if ($hasActiveBooking) {
-                                    // Room has an active checked-in booking (stay in progress)
-                                    $displayStatus = 'occupied';
-                                    $statusIcon = 'user';
-                                    $statusLabel = 'Occupied';
-                                } elseif ($hasReservedBooking) {
-                                    // Room has a future confirmed booking (reserved/upcoming)
-                                    // Show as available now with future booking details in booking columns
-                                    $displayStatus = 'available';
-                                    $statusIcon = 'check';
-                                    $statusLabel = 'Available';
-                                } else {
-                                    // No active or future bookings - use physical status
-                                    switch ($room['status']) {
+                                {
+                                    switch ($displayStatus) {
                                         case 'available':
                                             $statusIcon = 'check';
                                             $statusLabel = 'Available';
@@ -1596,6 +1614,10 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                         case 'out_of_order':
                                             $statusIcon = 'ban';
                                             $statusLabel = 'Out of Order';
+                                            break;
+                                        case 'inactive':
+                                            $statusIcon = 'ban';
+                                            $statusLabel = 'Inactive';
                                             break;
                                     }
                                 }
@@ -1645,6 +1667,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                                             'occupied'     => 'Occupied|A guest is currently checked in and the stay is active.',
                                             'cleaning'     => 'Cleaning|Housekeeping is preparing this room. It cannot accept a new guest until the status changes to Available.',
                                             'maintenance'  => 'Maintenance|Room is under repair and excluded from booking availability until you change the status.',
+                                            'inactive'     => 'Inactive|This room is switched off: it is not sold and is not counted on the status cards. Edit the room and tick Active to sell it again.',
                                             'out_of_order' => 'Out of Order|Completely unusable — excluded from all availability searches. Use for rooms with serious or long-term issues.',
                                         ];
                                         ?>
@@ -2784,14 +2807,27 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                 card.classList.toggle('active-filter', card.dataset.statusFilter === status);
             });
 
-            // Filter rows
+            // Filter rows. data-filter-hidden tells the table pager (admin-section-pagination.js) to leave a row out
+            // of its pages and counts; display covers a table too short to have a pager.
             const rows = tbody.querySelectorAll('tr[data-room-status]');
             let visibleCount = 0;
             rows.forEach(row => {
                 const match = row.dataset.roomStatus === status;
+                row.dataset.filterHidden = match ? '' : '1';
                 row.style.display = match ? '' : 'none';
+                if (!match) {
+                    const box = row.querySelector('.admin-bulk-check');
+                    if (box && box.checked) { box.checked = false; box.dispatchEvent(new Event('change', { bubbles: true })); }
+                }
                 if (match) visibleCount++;
             });
+            irRefreshPager(tbody);
+            // Land on the filtered rows (the shared anchor helper skips the scroll when they are already in view).
+            const irTable = tbody.closest('table');
+            if (irTable) {
+                if (window.rhAnchors && typeof window.rhAnchors.scrollToResults === 'function') window.rhAnchors.scrollToResults(irTable);
+                else irTable.scrollIntoView({ block: 'start' });
+            }
 
             // Show banner
             const statusLabels = {
@@ -2811,8 +2847,21 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             _activeStatusFilter = null;
             document.querySelectorAll('.status-card[data-status-filter]').forEach(c => c.classList.remove('active-filter'));
             const tbody = document.getElementById('roomsTableBody');
-            if (tbody) tbody.querySelectorAll('tr[data-room-status]').forEach(r => r.style.display = '');
+            if (tbody) {
+                tbody.querySelectorAll('tr[data-room-status]').forEach(r => { r.style.display = ''; r.dataset.filterHidden = ''; });
+                irRefreshPager(tbody);
+            }
             document.getElementById('filterBanner').classList.remove('visible');
+        }
+
+        // Back to page 1 of the matching rows (or show every row when the table is too short for a pager).
+        function irRefreshPager(tbody) {
+            const table = tbody.closest('table');
+            if (table && typeof table.rhPagerRefresh === 'function') {
+                table.rhPagerRefresh(true);
+            } else {
+                tbody.querySelectorAll('tr[data-room-status]').forEach(r => { r.hidden = false; });
+            }
         }
 
         // ── Sortable table columns ────────────────────────────────────────────

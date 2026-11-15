@@ -600,15 +600,19 @@ function exportOccupancyReport($output, string $start_date, string $end_date, st
     fputcsv($output, ['OCCUPANCY BY ROOM TYPE']);
     fputcsv($output, ['Room', 'Total Rooms', 'Bookings', 'Nights Booked', 'Guests', 'Occupancy Rate']);
 
+    // Same figures as admin/reports.php "Occupancy by Room Type": nights inside the period only (a stay holds
+    // check-in .. check-out minus 1), deleted / merged bookings left out, Rooms = the type's sellable units.
     $occStmt = $pdo->prepare("
-        SELECT r.name, r.total_rooms, COUNT(DISTINCT b.id) as bookings, COALESCE(SUM(b.number_of_nights), 0) as nights,
+        SELECT r.id, r.name, r.total_rooms, COUNT(DISTINCT b.id) as bookings,
+               COALESCE(SUM(GREATEST(0, DATEDIFF(LEAST(b.check_out_date, DATE_ADD(?, INTERVAL 1 DAY)), GREATEST(b.check_in_date, ?)))), 0) as nights,
                COALESCE(SUM(b.number_of_guests), 0) as guests
-        FROM rooms r LEFT JOIN bookings b ON r.id = b.room_id AND b.check_in_date <= ? AND b.check_out_date >= ?
+        FROM rooms r LEFT JOIN bookings b ON r.id = b.room_id AND b.deleted_at IS NULL AND b.check_in_date <= ? AND b.check_out_date > ?
             AND b.status IN ('confirmed', 'checked-in', 'checked-out')
         WHERE r.is_active = 1 GROUP BY r.id, r.name, r.total_rooms ORDER BY nights DESC
     ");
-    $occStmt->execute([$end_date, $start_date]);
+    $occStmt->execute([$end_date, $start_date, $end_date, $start_date]);
     while ($row = $occStmt->fetch(PDO::FETCH_ASSOC)) {
+        $row['total_rooms'] = function_exists('rh_room_type_unit_total') ? rh_room_type_unit_total((int)$row['id'], (int)$row['total_rooms']) : (int)$row['total_rooms'];
         $avail = $row['total_rooms'] * $daysInPeriod;
         $rate = $avail > 0 ? round(($row['nights'] / $avail) * 100, 1) : 0;
         fputcsv($output, [$row['name'], $row['total_rooms'], $row['bookings'], $row['nights'], $row['guests'], $rate . '%']);

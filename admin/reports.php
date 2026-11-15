@@ -507,7 +507,8 @@ try {
     ");
     $occupancyStmt->execute([':oe' => $end_date, ':os' => $start_date] + $rhOverlapParams('o1', $start_date, $end_date));
     $occupancyData = $occupancyStmt->fetchAll(PDO::FETCH_ASSOC);
-    // A joined room type is sold as pairs: its inventory is the number of pairs, not member rooms.
+    // Rooms per type = the type's sellable units (rh_room_type_unit_total: own rooms in service, a joined pair once,
+    // a joined type with no active pair 0), never the stored total_rooms figure, which drifts.
     foreach ($occupancyData as &$occRow) {
         $occRow['total_rooms'] = rh_room_type_unit_total((int)$occRow['room_type_id'], (int)$occRow['total_rooms']);
     }
@@ -1036,10 +1037,9 @@ try {
             + $rhOverlapParams('t3', $start_date, $end_date) + $rhOverlapParams('t4', $start_date, $end_date)
             + $rhOverlapParams('t5', $start_date, $end_date));
         $roomTypeAdr = $rtAdrStmt->fetchAll(PDO::FETCH_ASSOC);
-        // Per-type RevPAR base = that type's sellable units (same basis as rh_sellable_room_units()).
-        $sellableByType = rh_sellable_room_units_by_type();
+        // Per-type RevPAR base = that type's sellable units, the same figure as Occupancy by Room Type.
         foreach ($roomTypeAdr as &$adrRow) {
-            $adrRow['total_rooms'] = (int)($sellableByType[(int)$adrRow['room_type_id']] ?? 0);
+            $adrRow['total_rooms'] = rh_room_type_unit_total((int)$adrRow['room_type_id'], (int)$adrRow['total_rooms']);
         }
         unset($adrRow);
     } catch (Throwable $rtEx) { /* safe fallback */
@@ -2610,6 +2610,7 @@ try {
             <!-- Occupancy by Room Type (inside the occupancy pane) -->
             <div class="rh-panel">
                 <div class="rh-panel__head"><h2 class="rh-panel__title">Occupancy by Room Type</h2></div>
+                <p class="acct-muted" style="margin-bottom:12px; font-size:0.85em">Rooms = the type's rooms that can be sold now (out of order and maintenance left out; a joined room counted once, as its pairs). Occupancy Rate = Nights Booked &divide; (Rooms &times; Days in Period). A joined room built from two rooms of another type (a Shared pair) is also counted under that type, so this column can add up to more than the hotel's rooms; the headline occupancy above counts every physical room once. A type with no rooms shows a dash.</p>
                 <?php if (empty($occupancyData)): ?>
                     <p class="acct-empty">No occupancy data for this period.</p>
                 <?php else: ?>
@@ -2627,7 +2628,7 @@ try {
                         <tbody>
                             <?php foreach ($occupancyData as $occ):
                                 $roomAvail = $occ['total_rooms'] * $daysInPeriod;
-                                $roomOccRate = $roomAvail > 0 ? round(($occ['nights_booked'] / $roomAvail) * 100, 1) : 0;
+                                $roomOccRate = $roomAvail > 0 ? round(($occ['nights_booked'] / $roomAvail) * 100, 1) : null;
                             ?>
                                 <tr>
                                     <td><strong><?php echo htmlspecialchars($occ['room_name']); ?></strong></td>
@@ -2636,10 +2637,12 @@ try {
                                     <td><?php echo number_format($occ['nights_booked']); ?></td>
                                     <td><?php echo number_format($occ['total_guests']); ?></td>
                                     <td>
+                                        <?php if ($roomOccRate === null): ?>&ndash;<?php else: ?>
                                         <div class="acct-bar">
                                             <div class="acct-bar__fill" style="width: <?php echo min(100, $roomOccRate); ?>%"></div>
                                             <span class="acct-bar__label"><?php echo $roomOccRate; ?>%</span>
                                         </div>
+                                        <?php endif; ?>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
@@ -2652,7 +2655,7 @@ try {
                 <!-- Per Room Type ADR / RevPAR -->
                 <div class="rh-panel">
                     <div class="rh-panel__head"><h2 class="rh-panel__title">ADR &amp; RevPAR by Room Type</h2></div>
-                    <p class="acct-muted" style="margin-bottom:12px; font-size:0.85em">ADR = Revenue incl. VAT ÷ Nights Sold. RevPAR = Revenue incl. VAT ÷ (Sellable rooms of this type × Days in Period). Sellable rooms = the type's rooms minus out of order and maintenance, a joined pair counted once; the types add up to the hotel's sellable rooms used by the headline RevPAR. A type with no sellable rooms shows a dash. RevPAR below 40% of ADR means significant empty nights.</p>
+                    <p class="acct-muted" style="margin-bottom:12px; font-size:0.85em">ADR = Revenue incl. VAT ÷ Nights Sold. RevPAR = Revenue incl. VAT ÷ (Sellable rooms of this type × Days in Period). Sellable rooms = the type's rooms minus out of order and maintenance, a joined pair counted once (same Rooms figure as Occupancy by Room Type). A Shared joined pair's two rooms also count under their own type, so the types can add up to more than the hotel's sellable rooms used by the headline RevPAR. A type with no sellable rooms shows a dash. RevPAR below 40% of ADR means significant empty nights.</p>
                     <table class="acct-table">
                         <thead>
                             <tr>

@@ -59,10 +59,46 @@ function rh_room_change_reasons(string $direction): array
 }
 
 /**
- * Nightly rate of a joined ("Book As") room type for this booking, priced exactly as the create paths price it
- * (one rate whatever the occupancy): the pair's own rate override when set, else the type's price per night. The
- * pair is the one the booking already holds (same type), else the first pair free for its dates. Null when the
- * type is not sold through active pairs (caller uses the normal occupancy prices).
+ * The joined pair a move of booking $b into joined type $typeId uses: the pair the booking already holds (same
+ * type), else the FIRST pair getAvailableRoomCombinations() offers for the nights that move (an in-house guest:
+ * tonight on, clean rooms only). rh_apply_room_type_change() assigns exactly this pair inside its transaction, so
+ * the price shown, the price charged and the rooms given all come from one pair. Null when none is free.
+ */
+function rh_room_change_pair_choice(array $b, int $typeId): ?array
+{
+    global $pdo;
+    if ((int)($b['room_id'] ?? 0) === $typeId && (int)($b['room_combination_id'] ?? 0) > 0) {
+        $st = $pdo->prepare('SELECT rc.*, a.room_type_id AS room_a_type_id, bb.room_type_id AS room_b_type_id
+            FROM room_combinations rc JOIN individual_rooms a ON a.id = rc.room_a_id JOIN individual_rooms bb ON bb.id = rc.room_b_id WHERE rc.id = ?');
+        $st->execute([(int)$b['room_combination_id']]);
+        $row = $st->fetch(PDO::FETCH_ASSOC);
+        if ($row) {
+            return $row;
+        }
+    }
+    if (empty($b['check_in_date']) || empty($b['check_out_date'])) {
+        return null;
+    }
+    $inHouse = (string)($b['status'] ?? '') === 'checked-in';
+    $from = substr((string)$b['check_in_date'], 0, 10);
+    if ($inHouse && $from < date('Y-m-d')) {
+        $from = date('Y-m-d');
+    }
+    $to = substr((string)$b['check_out_date'], 0, 10);
+    if ($from >= $to) {
+        return null;
+    }
+    $free = getAvailableRoomCombinations($typeId, $from, $to, (int)($b['id'] ?? 0) ?: null, $inHouse);
+    return $free[0] ?? null;
+}
+
+/**
+ * Nightly rate of a joined ("Book As") room type for this booking, from the SAME source the create paths use
+ * (booking.php / admin/create-booking.php / mixed booking / the quote): the pair's own rate override when set,
+ * else the type's price per night (one rate whatever the occupancy), then the rate plans that target the joined
+ * type and match the stay (applyDynamicPricing). The pair is $room['joined_pair'] when the caller already chose it
+ * (rh_apply_room_type_change), else rh_room_change_pair_choice(). Null when the type is not sold through active
+ * pairs (caller uses the normal occupancy prices).
  */
 function rh_joined_type_rack_rate(array $room, array $b): ?float
 {
@@ -71,20 +107,12 @@ function rh_joined_type_rack_rate(array $room, array $b): ?float
     if ($typeId <= 0 || !function_exists('roomTypeHasActiveCombinations') || !roomTypeHasActiveCombinations($typeId)) {
         return null;
     }
-    $typeRate = (float)($room['price_per_night'] ?? 0);
-    $combo = null;
-    if ((int)($b['room_id'] ?? 0) === $typeId && (int)($b['room_combination_id'] ?? 0) > 0) {
-        $st = $pdo->prepare('SELECT price_override FROM room_combinations WHERE id = ?');
-        $st->execute([(int)$b['room_combination_id']]);
-        $row = $st->fetch(PDO::FETCH_ASSOC);
-        $combo = $row ?: null;
+    if (!function_exists('rh_joined_quote_rate')) {
+        require_once __DIR__ . '/joined-quote.php';
     }
-    if ($combo === null && !empty($b['check_in_date']) && !empty($b['check_out_date'])) {
-        $free = getAvailableRoomCombinations($typeId, substr((string)$b['check_in_date'], 0, 10), substr((string)$b['check_out_date'], 0, 10), (int)($b['id'] ?? 0) ?: null);
-        $combo = $free[0] ?? null;
-    }
-    $override = $combo['price_override'] ?? null;
-    return ($override !== null && $override !== '') ? (float)$override : $typeRate;
+    $pair = array_key_exists('joined_pair', $room) ? $room['joined_pair'] : rh_room_change_pair_choice($b, $typeId);
+    $base = rh_joined_quote_rate(is_array($pair) ? $pair : [], (float)($room['price_per_night'] ?? 0));
+    return rh_room_change_rate_with_plans($typeId, $b, $base);
 }
 
 /** Catalogue room rate per night (price basis) of a room type at this booking's occupancy, children not included. */
@@ -96,15 +124,34 @@ function rh_room_type_base_rate(array $room, array $b): float
     }
     $occ = (string)($b['occupancy_type'] ?? 'single');
     if ($occ === 'double' && (float)($room['price_double_occupancy'] ?? 0) > 0) {
-        return (float)$room['price_double_occupancy'];
+        $rate = (float)$room['price_double_occupancy'];
+    } elseif ($occ === 'triple' && (float)($room['price_triple_occupancy'] ?? 0) > 0) {
+        $rate = (float)$room['price_triple_occupancy'];
+    } elseif ($occ === 'single' && (float)($room['price_single_occupancy'] ?? 0) > 0) {
+        $rate = (float)$room['price_single_occupancy'];
+    } else {
+        $rate = (float)($room['price_per_night'] ?? 0);
     }
-    if ($occ === 'triple' && (float)($room['price_triple_occupancy'] ?? 0) > 0) {
-        return (float)$room['price_triple_occupancy'];
+    // A move to or from a joined type: the joined side is priced with its rate plans, so this side is too (same
+    // dates and nights), or a plan covering both types would skew the rack difference. Other moves: catalogue price.
+    if (!empty($room['with_rate_plans'])) {
+        $rate = rh_room_change_rate_with_plans((int)($room['id'] ?? 0), $b, $rate);
     }
-    if ($occ === 'single' && (float)($room['price_single_occupancy'] ?? 0) > 0) {
-        return (float)$room['price_single_occupancy'];
+    return $rate;
+}
+
+/** $base after the rate plans that target room type $typeId and match the booking's stay (applyDynamicPricing). */
+function rh_room_change_rate_with_plans(int $typeId, array $b, float $base): float
+{
+    global $pdo;
+    $in = substr((string)($b['check_in_date'] ?? ''), 0, 10);
+    $out = substr((string)($b['check_out_date'] ?? ''), 0, 10);
+    if ($typeId <= 0 || $in === '' || $out === '' || $out <= $in || !function_exists('applyDynamicPricing')) {
+        return $base;
     }
-    return (float)($room['price_per_night'] ?? 0);
+    $nights = max(1, (int)($b['number_of_nights'] ?? 0) ?: (int)round((strtotime($out) - strtotime($in)) / 86400));
+    $dyn = applyDynamicPricing($pdo, $typeId, $in, $out, $nights, $base);
+    return (float)($dyn['final_price'] ?? $base);
 }
 
 /**
@@ -148,6 +195,10 @@ function rh_room_change_quote(array $b, array $oldRoom, array $newRoom): array
 {
     $split = rh_booked_stay_split($b);
     [$stayed, $affected] = rh_room_change_nights($b);
+    // Joined type on either side: both racks include their rate plans for the same stay (equal footing).
+    if (roomTypeHasActiveCombinations((int)($oldRoom['id'] ?? 0)) || roomTypeHasActiveCombinations((int)($newRoom['id'] ?? 0))) {
+        $oldRoom['with_rate_plans'] = $newRoom['with_rate_plans'] = true;
+    }
     // The old type is priced with the child rule the booking was saved with, the new type with its own current rule.
     $oldRack = rh_room_type_rack_night(array_merge($oldRoom, rh_child_rule_snapshot(rh_child_rule_from_booking($b))), $b);
     $newRack = rh_room_type_rack_night($newRoom, $b);
@@ -229,6 +280,8 @@ function rh_room_change_options(PDO $pdo, int $bookingId): array
             $av = checkRoomAvailability((int)$room['id'], $from, $to, $bookingId, (int)($b['child_guests'] ?? 0));
             if (empty($av['available'])) {
                 $why = 'Fully booked for ' . date('j M', strtotime($from)) . ' - ' . date('j M', strtotime($to));
+            } elseif (roomTypeHasActiveCombinations((int)$room['id']) && rh_room_change_pair_choice($b, (int)$room['id']) === null) {
+                $why = 'No joined pair free' . ((string)$b['status'] === 'checked-in' ? ' and clean' : '') . ' for ' . date('j M', strtotime($from)) . ' - ' . date('j M', strtotime($to));
             }
         }
         $options[] = [
@@ -322,6 +375,17 @@ function rh_apply_room_type_change(PDO $pdo, int $bookingId, int $newRoomId, str
             throw new RuntimeException($childLimit);
         }
 
+        // A joined ("Book As") target is priced from, and given, ONE pair chosen here under the room-type locks
+        // (the same choice the options list quoted): never priced on one pair and handed another.
+        $joinedPair = null;
+        if (roomTypeHasActiveCombinations($newRoomId)) {
+            $joinedPair = rh_room_change_pair_choice($b, $newRoomId);
+            if ($joinedPair === null) {
+                throw new RuntimeException('No ' . $newRoom['name'] . ' pair is free' . ($status === 'checked-in' ? ' and clean from tonight' : '') . ' to ' . substr((string)$b['check_out_date'], 0, 10) . ', so the booking stays as it is.');
+            }
+            $newRoom['joined_pair'] = $joinedPair;
+        }
+
         $q = rh_room_change_quote($b, $oldRoom, $newRoom);
         $direction = $q['direction'];
         if ($direction === 'same') {
@@ -349,7 +413,16 @@ function rh_apply_room_type_change(PDO $pdo, int $bookingId, int $newRoomId, str
         }
 
         $oldRoomIds = getBookingRoomIds($bookingId);
-        if ($status === 'checked-in') {
+        if ($joinedPair !== null) {
+            // The member room types must still have the two rooms to give (a member-type booking sold a moment ago
+            // may hold no room yet). assignRoomCombinationToBooking() skips this when the caller owns the transaction.
+            $stockFrom = max(date('Y-m-d'), substr((string)$b['check_in_date'], 0, 10));
+            $stockTo = substr((string)$b['check_out_date'], 0, 10);
+            $stockErr = $stockFrom < $stockTo ? rh_joined_members_stock_error([$joinedPair], $stockFrom, $stockTo, $bookingId) : '';
+            if ($stockErr !== '') {
+                throw new RuntimeException($stockErr);
+            }
+        } elseif ($status === 'checked-in') {
             // The guest is in the building: never take their room away unless a room of the new type is free.
             // Same rule auto-assign applies to a guest moving in now: the new room must be clean.
             $freeRooms = getAvailableIndividualRooms($newRoomId, max(date('Y-m-d'), substr((string)$b['check_in_date'], 0, 10)),
@@ -381,8 +454,16 @@ function rh_apply_room_type_change(PDO $pdo, int $bookingId, int $newRoomId, str
             $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available + 1 WHERE id = ? AND rooms_available < total_rooms")->execute([(int)$b['room_id']]);
             $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available - 1 WHERE id = ? AND rooms_available > 0")->execute([$newRoomId]);
         }
-        // Physical room of the old type no longer fits: release it (a new one is picked after commit).
-        if (!empty($oldRoomIds)) {
+        $assigned = '';
+        if ($joinedPair !== null) {
+            // The priced pair is assigned in this same transaction (its booking_rooms replace the old rooms).
+            $pairRes = assignRoomCombinationToBooking($bookingId, (int)$joinedPair['id'], $actorId ?: null);
+            if (empty($pairRes['success'])) {
+                throw new RuntimeException((string)($pairRes['message'] ?? 'The joined rooms could not be reserved.'));
+            }
+            $assigned = (string)($pairRes['assigned_room_number'] ?? '');
+        } elseif (!empty($oldRoomIds)) {
+            // Physical room of the old type no longer fits: release it (a new one is picked after commit).
             rh_release_booking_room_assignment($bookingId);
         }
         $pdo->commit();
@@ -394,8 +475,7 @@ function rh_apply_room_type_change(PDO $pdo, int $bookingId, int $newRoomId, str
     }
 
     // Physical room: pick one of the new type. In-house: old room to housekeeping, new one occupied.
-    $assigned = '';
-    if (!empty($oldRoomIds) || $status === 'checked-in') {
+    if ($joinedPair === null && (!empty($oldRoomIds) || $status === 'checked-in')) {
         $as = autoAssignIndividualRoom($bookingId);
         if (!empty($as['success']) && !empty($as['assigned_room_number'])) {
             $assigned = (string)$as['assigned_room_number'];
@@ -407,12 +487,20 @@ function rh_apply_room_type_change(PDO $pdo, int $bookingId, int $newRoomId, str
         // even if the new assignment is missing and getBookingRoomIds() falls back to the last released set).
         $outOfService = function_exists('rh_room_out_of_service_statuses') ? rh_room_out_of_service_statuses() : ['maintenance', 'out_of_order'];
         $roomStatusQ = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ?");
+        // A room the guest keeps (e.g. 7A when moving into the joined 7A + 7B) is not left.
+        $keptRoomIds = $assigned !== '' ? array_map('intval', getBookingRoomIds($bookingId)) : [];
         foreach ($oldRoomIds as $rid) {
-            $roomStatusQ->execute([(int)$rid]);
-            if (in_array((string)$roomStatusQ->fetchColumn(), $outOfService, true)) {
+            if (in_array((int)$rid, $keptRoomIds, true)) {
                 continue;
             }
-            updateIndividualRoomStatus((int)$rid, 'cleaning', 'Guest moved to ' . $newRoom['name'] . ' (' . $b['booking_reference'] . ')', $actorId ?: null);
+            $roomStatusQ->execute([(int)$rid]);
+            $oldStatusNow = (string)$roomStatusQ->fetchColumn();
+            if (in_array($oldStatusNow, $outOfService, true)) {
+                continue;
+            }
+            if ($oldStatusNow !== 'cleaning') { // the joined-pair assign already sent it to housekeeping
+                updateIndividualRoomStatus((int)$rid, 'cleaning', 'Guest moved to ' . $newRoom['name'] . ' (' . $b['booking_reference'] . ')', $actorId ?: null);
+            }
             rh_ensure_checkout_cleaning_task((int)$rid, $bookingId, $actorId ?: null);
         }
         if ($assigned !== '') {

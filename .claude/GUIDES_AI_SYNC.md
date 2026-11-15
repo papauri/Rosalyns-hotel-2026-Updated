@@ -19,6 +19,18 @@ when prompted."
 
 ## Pending (oldest first)
 
+### Joined rooms follow-up (2026-11-15, step 8e follow-up) — hashes in TASKS.md
+- Guides (Bookings > Change room type, Individual Rooms, Reports > Occupancy): an upgrade into a joined room is now
+  priced like a new booking of it (the pair's rate, else the joined room price, plus the joined room's rate plans) and
+  the guest gets the exact pair it was priced on; an in-house guest moves to a clean pair. With two or more pairs the
+  first free pair by name is given; for a stay starting today a clean pair goes before one still being cleaned.
+  Individual Rooms: the status cards count the rows below (a room with a guest checked in = Occupied; a future
+  booking no longer hides a room being cleaned or under maintenance; a switched-off room shows Inactive), a card click works with the 10-per-page list, filtering by the Joined
+  Room type lists the pair's two rooms, a room being cleaned can still be assigned. Reports "Occupancy by Room Type"
+  Rooms = rooms that can be sold now (a joined room with no active pair = dash), same figure in ADR/RevPAR and CSV.
+- Assistant: includes/ai/ai-extras.php:680 falls back to rooms.total_rooms when rh_sellable_room_units_by_type() has no
+  entry (a Shared joined type) - rh_room_type_unit_total() now gives the per-type figure the reports use.
+
 ### Joined rooms on demand (2026-11-15, NEXT_BUILD_ORDER step 8e) — hashes in TASKS.md
 - Guides (Individual Rooms > Room Combinations, New Booking, Bookings check-in, Room Types): a joined room type
   with no ACTIVE pair now shows sold out everywhere (it was sold on its stored room count with no rooms behind it).

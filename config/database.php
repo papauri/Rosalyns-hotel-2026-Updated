@@ -3884,20 +3884,45 @@ function rh_room_type_sellable_count(int $roomTypeId, int $fallback = 0): int
 }
 
 /**
- * Total inventory of a room type for reports: the number of active joined-room pairs for a
- * joined type (a pair is ONE room), else the stored rooms.total_rooms figure.
+ * Sellable units of ONE room type for the per-type report tables (Occupancy by Room Type, the CSV export):
+ *  - a joined type with no active pair: 0 (never the stored total_rooms: it has no rooms behind it);
+ *  - a joined type with active pairs: its pairs whose two rooms are active and in service (a pair is ONE unit);
+ *  - a type with rooms of its own: those rooms minus maintenance / out of order, a joined-only pair once
+ *    (rh_sellable_room_units_by_type(), the hotel's occupancy base);
+ *  - a legacy type with no rooms set up: the stored rooms.total_rooms figure.
+ * A Shared pair's two rooms also count under their own type, so per-type figures can add up to more than
+ * the hotel's sellable rooms. No memo: the figures follow room edits within one request.
  */
 function rh_room_type_unit_total(int $roomTypeId, int $storedTotal): int
 {
     global $pdo;
-    if (roomTypeHasActiveCombinations($roomTypeId)) {
-        try {
-            $st = $pdo->prepare('SELECT COUNT(*) FROM room_combinations WHERE combined_room_type_id = ? AND is_active = 1');
-            $st->execute([$roomTypeId]);
-            return (int)$st->fetchColumn();
-        } catch (Throwable $e) {
-            error_log('rh_room_type_unit_total: ' . $e->getMessage());
+    try {
+        if (rh_joined_type_without_pairs($roomTypeId)) {
+            return 0;
         }
+        // Shared pairs (rooms of another type) in service: one unit each.
+        $shared = 0;
+        if (roomTypeHasActiveCombinations($roomTypeId)) {
+            $st = $pdo->prepare("SELECT COUNT(*) FROM room_combinations rc
+                JOIN individual_rooms a ON a.id = rc.room_a_id AND a.is_active = 1 AND a.status NOT IN ('maintenance', 'out_of_order')
+                JOIN individual_rooms b ON b.id = rc.room_b_id AND b.is_active = 1 AND b.status NOT IN ('maintenance', 'out_of_order')
+                WHERE rc.combined_room_type_id = ? AND rc.is_active = 1 AND rc.room_a_id <> rc.room_b_id
+                  AND NOT (a.room_type_id = rc.combined_room_type_id AND b.room_type_id = rc.combined_room_type_id)");
+            $st->execute([$roomTypeId]);
+            $shared = (int)$st->fetchColumn();
+        }
+        // Own rooms + joined-only pairs (rooms of this type sold only as the pair).
+        $byType = rh_sellable_room_units_by_type();
+        if (array_key_exists($roomTypeId, $byType) || $shared > 0) {
+            return (int)($byType[$roomTypeId] ?? 0) + $shared;
+        }
+        $st = $pdo->prepare('SELECT COUNT(*) FROM individual_rooms WHERE room_type_id = ? AND is_active = 1');
+        $st->execute([$roomTypeId]);
+        if ((int)$st->fetchColumn() > 0) {
+            return 0;
+        }
+    } catch (Throwable $e) {
+        error_log('rh_room_type_unit_total: ' . $e->getMessage());
     }
     return $storedTotal;
 }
@@ -4611,6 +4636,29 @@ function getAvailableRoomCombinations(int $roomTypeId, string $checkIn, string $
                 (string)($combination['room_b_number'] ?? ''),
             ]));
             $available[] = $combination;
+        }
+
+        // A stay starting today (or earlier): pairs whose two rooms are ready (nobody still in them, cleaning done)
+        // come first, as getAvailableIndividualRooms() and the staff picker order single rooms. Without this the
+        // first pair by name was given even when it was being turned over and another pair was clean, and the
+        // check-in clean-room gate then stopped the guest. Later stays keep the plain name order. Rooms the booking
+        // itself already holds count as ready. Stable: equal pairs keep the name order.
+        if (count($available) > 1 && substr($checkIn, 0, 10) <= date('Y-m-d')) {
+            $own = $excludeBookingId ? array_map('intval', getBookingRoomIds($excludeBookingId)) : [];
+            $isReady = static function (int $rid, string $status) use ($own): bool {
+                return in_array($rid, $own, true) || ($status !== 'occupied' && !rh_room_is_dirty_now($rid));
+            };
+            $keyed = [];
+            foreach ($available as $i => $c) {
+                $ready = $isReady((int)$c['room_a_id'], (string)($c['room_a_status'] ?? ''))
+                    && $isReady((int)$c['room_b_id'], (string)($c['room_b_status'] ?? ''));
+                $c['ready'] = $ready ? 1 : 0;
+                $keyed[] = [$ready ? 0 : 1, $i, $c];
+            }
+            usort($keyed, static function (array $x, array $y): int {
+                return [$x[0], $x[1]] <=> [$y[0], $y[1]];
+            });
+            $available = array_column($keyed, 2);
         }
 
         return $available;
@@ -5543,7 +5591,11 @@ function getRoomTypeNightlyAvailability(int $room_id, string $start_date, string
     // Joined-room types sell pairs whose rooms can belong to another type: watch those rooms too.
     $pairs = [];
     if ($hasPairs) {
-        $cst = $pdo->prepare("SELECT room_a_id, room_b_id FROM room_combinations WHERE combined_room_type_id = ? AND is_active = 1");
+        // Only pairs whose two rooms are active (as getAvailableRoomCombinations() sells them).
+        $cst = $pdo->prepare("SELECT rc.room_a_id, rc.room_b_id FROM room_combinations rc
+            JOIN individual_rooms a ON a.id = rc.room_a_id AND a.is_active = 1
+            JOIN individual_rooms bb ON bb.id = rc.room_b_id AND bb.is_active = 1
+            WHERE rc.combined_room_type_id = ? AND rc.is_active = 1 AND rc.room_a_id <> rc.room_b_id");
         $cst->execute([$room_id]);
         $pairs = $cst->fetchAll(PDO::FETCH_ASSOC);
         foreach ($pairs as $pr) {
@@ -5551,6 +5603,14 @@ function getRoomTypeNightlyAvailability(int $room_id, string $start_date, string
             $roomIds[] = (int)$pr['room_b_id'];
         }
         $roomIds = array_values(array_unique($roomIds));
+    }
+    if (empty($roomIds)) {
+        // Active pairs but none with two active rooms: nothing to sell on any night.
+        $zero = [];
+        for ($d = new DateTime($start), $e = new DateTime($end); $d < $e; $d->modify('+1 day')) {
+            $zero[$d->format('Y-m-d')] = 0;
+        }
+        return $zero;
     }
     $ownRoomIds = array_map('intval', array_column($rooms, 'id'));
     $idPh = implode(',', array_fill(0, count($roomIds), '?'));
