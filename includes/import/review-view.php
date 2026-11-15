@@ -302,15 +302,13 @@ if (!function_exists('import_rv_build')) {
             $it = $res['items'][$itemOf[$e['i']]];
             if (!$it['match']) {
                 $confirm['creates']++;
-            } elseif (!empty($it['ticked'])) {
-                $confirm['updates']++;
+            } elseif (array_diff((array)$it['ticked'], ['quantity'])) {
+                $confirm['updates']++;          // a quantity tick alone changes no field of the ingredient (it only adds a count line)
             } else {
                 $confirm['kept']++;
             }
             if (!empty($it['in_count'])) {
                 $confirm['in_count']++;
-            } elseif (!empty($it['balance'])) {
-                $confirm['no_price']++;
             }
             if ($it['match'] && isset($it['diff']['cost']) && in_array('cost', (array)$it['ticked'], true) && $e['s']) {
                 $confirm['cost_with_stock']++;
@@ -321,6 +319,36 @@ if (!function_exists('import_rv_build')) {
         }
         return ['entries' => $entries, 'qs' => $qs, 'item_of' => $itemOf, 'row_of' => $rowOf, 'sheet_qids' => $sheetQ, 'struct_qids' => $structQ, 'row_src' => $rowSrc,
             'entry_counts' => $counts, 'progress' => ['answered' => $done, 'total' => $tot, 'open' => $tot - $done], 'confirm' => $confirm];
+    }
+
+    /**
+     * Step 3 / 4 opening-count check over the whole job: not_counted = items with stock that will NOT be in the opening count, by reason
+     * (import_cont_not_counted; overlap = already in another unfinished opening count, read here); qty_tick = matched items that have an
+     * "Opening stock quantity" box (n) and how many are ticked; cost_tick = the same for "use the file's unit cost" (zero_to_tick = unticked items whose
+     * current cost is 0); no_price = the items with truly no usable cost (the old key, now exact).
+     */
+    function import_rv_count_check(PDO $pdo, array $res): array
+    {
+        $ids = [];
+        foreach ($res['items'] as $it) {
+            if (!empty($it['in_count']) && !empty($it['match']) && ($it['status'] ?? '') === 'ready') {
+                $ids[] = (int)$it['match']['id'];
+            }
+        }
+        $nc = import_cont_not_counted($res['items'], import_cont_open_opening_ids($pdo, $ids));
+        $t = import_cont_qty_targets($res['items']);
+        $ticked = count(array_filter($t, function ($x) {
+            return $x['ticked'];
+        }));
+        $c = import_cont_field_targets($res['items'], 'cost');
+        $cTicked = count(array_filter($c, function ($x) {
+            return $x['ticked'];
+        }));
+        $cZero = count(array_filter($c, function ($x) {
+            return !$x['ticked'] && $x['from_zero'];
+        }));
+        return ['not_counted' => $nc, 'no_price' => $nc['by']['no_cost']['n'], 'qty_tick' => ['n' => count($t), 'ticked' => $ticked, 'to_tick' => count($t) - $ticked],
+            'cost_tick' => ['n' => count($c), 'ticked' => $cTicked, 'to_tick' => count($c) - $cTicked, 'zero_to_tick' => $cZero]];
     }
 
     /** Search terms: every word must match. A word with "!" is a cell reference (sheet part loose, cell part exact); a word like C12 matches that cell only. */
@@ -694,7 +722,7 @@ if (!function_exists('import_rv_build')) {
                 'questions' => array_map(function ($id) use ($V) {
                     return $V['qs'][$id];
                 }, $V['struct_qids']),
-                'entry_counts' => $V['entry_counts'], 'progress' => $V['progress'], 'confirm' => $V['confirm'],
+                'entry_counts' => $V['entry_counts'], 'progress' => $V['progress'], 'confirm' => import_rv_count_check($pdo, $res) + $V['confirm'],
             ] + import_cont_overview($res) + ['handled' => import_cont_handled_rows($an)];
         } else {
             $out += ['can_confirm' => $res['can_confirm'], 'why_not' => $res['why_not'], 'entry_counts' => $V['entry_counts'], 'progress' => $V['progress']] + import_cont_overview($res);

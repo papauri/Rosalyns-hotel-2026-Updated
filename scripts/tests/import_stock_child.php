@@ -5,6 +5,10 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); }
  * rolled back at the end, DDL skipped). Prints one JSON line: {"checks":[[name, ok, detail], ...]}.
  * Every row it makes is named 'ZZT <run> ...'. Staged files (outside the database) are deleted in the finally block.
  */
+if (defined('DB_NAME') && stripos((string)DB_NAME, 'rosalyn') !== false) { // Rosalyn's is LIVE: DB tests run at the test hotel only
+    echo json_encode(['checks' => [["refused: Rosalyn's is live, run this from the Liwonde repo", false, '']]]), "\n";
+    exit;
+}
 $run = (string)($_POST['run'] ?? 'X');
 $checks = [];
 $ck = function (string $n, $c, string $d = '') use (&$checks) { $checks[] = [$n, (bool)$c, $d]; };
@@ -835,6 +839,125 @@ try {
     $ck('heal (redo): "Fix it again" puts the repair back', $hr['ok'] && import_job_review_summary($pdo, $jH2)['counts']['blocked'] === 0 && !import_job_heal_undo($pdo, $jH2, 'nonexistent00', true, $admin)['ok']);
     $cH2 = import_commit_stock($pdo, $jH2, $admin);
     $ck('heal: committing re-checks the repaired values against the file (the invariant) and imports the repaired quantity', $cH2['ok'] && $nameIn($n('Heal Lager')) === 1 && ($cH2['result']['fixed_for_you'] ?? 0) === 1, json_encode($cH2['error'] ?? $cH2['result'] ?? ''));
+
+    // ---- tick every matched quantity at once; the stock left out of the opening count, by its TRUE reason (2026-11-16) ---------------
+    $mkQ = function (string $name, string $unit, float $qty, float $cost) use ($pdo) {
+        $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit, par_level, reorder_point) VALUES (?, 'Pantry', ?, ?, ?, 0, 0)")->execute([$name, $unit, $qty, $cost]);
+        return (int)$pdo->lastInsertId();
+    };
+    $mkQ($n('QA Tia'), 'bottle', 0, 500);          // file 33 @ 600, cost ticked by hand        -> not ticked, then counted
+    $mkQ($n('QB Nocost'), 'bottle', 0, 0);         // no cost in stock, file 700, qty ticked     -> cost not ticked
+    $mkQ($n('QC Clash'), 'kg', 0, 100);            // unit clash, answered "skip"                -> skipped
+    $idQD = $mkQ($n('QD Overlap'), 'bottle', 0, 400); // already in another unfinished opening count -> overlap
+    $mkQ($n('QE Same'), 'bottle', 6, 300);         // stock already 6, file 6                    -> same (no box to tick)
+    $mkQ($n('QF Plain'), 'bottle', 0, 250);        // file 8 @ 250, not ticked                   -> not ticked
+    $pdo->prepare("INSERT INTO stock_counts (reference, count_date, scope, status, counted_by, notes, is_opening) VALUES (?, CURDATE(), 'full', 'submitted', ?, 'ZZT other opening count', 1)")->execute(['ZZT' . substr($run, 0, 6), $admin]);
+    $ocId = (int)$pdo->lastInsertId();
+    $pdo->prepare("INSERT INTO stock_count_lines (count_id, ingredient_id, system_quantity, actual_quantity, variance, cost_per_unit, variance_cost, reason_code) VALUES (?, ?, 0, 3, 3, 400, 1200, '')")->execute([$ocId, $idQD]);
+    $upQ = $upload($put($csv([
+        [$n('QA Tia'), '', '33', 'bottle', '600', '', ''], [$n('QB Nocost'), '', '4', 'bottle', '700', '', ''], [$n('QC Clash'), '', '5', 'bottle', '100', '', ''],
+        [$n('QD Overlap'), '', '7', 'bottle', '400', '', ''], [$n('QE Same'), '', '6', 'bottle', '300', '', ''], [$n('QF Plain'), '', '8', 'bottle', '250', '', ''],
+        [$n('QG New'), '', '5', 'bottle', '', '', ''],
+    ]), 'qty.csv'), 'zzt-qty-' . $run . '.csv', $admin);
+    $jQ = (int)$upQ['job_id'];
+    import_job_analyse($pdo, $jQ);
+    $kQ = function (string $s) use ($n) { return rh_ssi_key($n($s)); };
+    $t1 = import_job_set_update_fields($pdo, $jQ, $kQ('QA Tia'), ['cost'], $admin);
+    $t2 = import_job_set_update_fields($pdo, $jQ, $kQ('QB Nocost'), ['quantity'], $admin);
+    $t3 = import_job_set_update_fields($pdo, $jQ, $kQ('QD Overlap'), ['quantity'], $admin);
+    $sQ = $answerAll($jQ, $admin);
+    $ck('qty: the made-up list analyses, the ticks save and every question is answered (unit clash skipped)', $t1['ok'] && $t2['ok'] && $t3['ok'] && !empty($sQ['can_confirm']), json_encode([$t1, $t2, $t3, $sQ['stuck'] ?? ($sQ['why_not'] ?? '')]));
+    $names = function (array $b) { $x = $b['names']; sort($x); return $x; };
+    $ovQ = import_job_review_view($pdo, $jQ, null);
+    $cfQ = $ovQ['confirm'] ?? [];
+    $by = $cfQ['not_counted']['by'] ?? [];
+    $ck('pre-import warning: every item with stock that stays out is listed under its true reason (not ticked / cost not ticked / no cost / skipped / overlap / same)',
+        ($by['not_ticked'] ?? null) && $names($by['not_ticked']) === [$n('QA Tia'), $n('QF Plain')] && $names($by['cost_not_ticked']) === [$n('QB Nocost')] && $names($by['no_cost']) === [$n('QG New')]
+        && $names($by['skipped']) === [$n('QC Clash')] && $names($by['overlap']) === [$n('QD Overlap')] && $names($by['same']) === [$n('QE Same')], json_encode($by));
+    $ck('pre-import warning: the total is the sum of the reasons (7) and no_price counts only the item with truly no cost',
+        ($cfQ['not_counted']['total'] ?? -1) === 7 && array_sum(array_column($by, 'n')) === 7 && ($cfQ['no_price'] ?? -1) === 1, json_encode([$cfQ['not_counted']['total'] ?? null, $cfQ['no_price'] ?? null]));
+    $ck('pre-import: 4 matched items have a quantity box, 2 ticked; a quantity-only tick is not an "update" (1 updated, 4 kept)',
+        ($cfQ['qty_tick'] ?? []) === ['n' => 4, 'ticked' => 2, 'to_tick' => 2] && ($cfQ['updates'] ?? -1) === 1 && ($cfQ['kept'] ?? -1) === 4, json_encode([$cfQ['qty_tick'] ?? null, $cfQ['updates'] ?? null, $cfQ['kept'] ?? null]));
+    $upd = function () use ($pdo, $jQ) { $a = json_decode((string)import_job_get($pdo, $jQ)['answers_json'], true); return (array)($a['_updates'] ?? []); };
+    $dQ = import_job_tick_quantity($pdo, $jQ, 'set', true, '', $admin);
+    $ck('tick all (dry run): "This ticks 2 items. 2 already ticked." and nothing is written', $dQ['ok'] && $dQ['dry'] && $dQ['n'] === 2 && $dQ['already'] === 2 && $dQ['total'] === 4 && $dQ['no_cost'] === 0
+        && !in_array('quantity', (array)($upd()[$kQ('QA Tia')] ?? []), true), json_encode($dQ));
+    $ck('tick all: a wrong fingerprint and a bad mode are refused', !import_job_tick_quantity($pdo, $jQ, 'set', false, 'deadbeef', $admin)['ok'] && !import_job_tick_quantity($pdo, $jQ, 'all', false, '', $admin)['ok']);
+    import_job_set_update_fields($pdo, $jQ, $kQ('QF Plain'), ['quantity'], $admin);        // somebody ticks one by hand after the dry run
+    $stale = import_job_tick_quantity($pdo, $jQ, 'set', false, (string)$dQ['fingerprint'], $admin);
+    $ck('tick all: a stale fingerprint (the ticks changed since the dry run) is refused', !$stale['ok'] && stripos((string)$stale['error'], 'changed') !== false, json_encode($stale));
+    import_job_set_update_fields($pdo, $jQ, $kQ('QF Plain'), [], $admin);
+    $dR = import_job_tick_quantity($pdo, $jQ, 'set', true, '', $admin);
+    $race = import_job_tick_quantity($pdo, $jQ, 'set', false, (string)$dR['fingerprint'], $admin, function () use ($pdo, $jQ, $kQ, $mgr) {
+        import_job_set_update_fields($pdo, $jQ, $kQ('QF Plain'), ['quantity'], $mgr);      // another person, between the plan and the row lock
+    });
+    $ck('tick all: a change made between the plan and the row lock is refused under the lock (nothing written)', !$race['ok'] && !in_array('quantity', (array)($upd()[$kQ('QA Tia')] ?? []), true), json_encode($race));
+    import_job_set_update_fields($pdo, $jQ, $kQ('QF Plain'), [], $admin);
+    $dS = import_job_tick_quantity($pdo, $jQ, 'set', true, '', $admin);
+    $aS = import_job_tick_quantity($pdo, $jQ, 'set', false, (string)$dS['fingerprint'], $admin);
+    $u = $upd();
+    $ck('tick all: quantity is set on every matched item with a quantity box and the other ticks are kept (Tia keeps cost)', $aS['ok'] && $aS['applied'] === 2
+        && $u[$kQ('QA Tia')] === ['cost', 'quantity'] && $u[$kQ('QF Plain')] === ['quantity'] && $u[$kQ('QB Nocost')] === ['quantity'] && $u[$kQ('QD Overlap')] === ['quantity']
+        && !isset($u[$kQ('QE Same')]) && !isset($u[$kQ('QC Clash')]), json_encode($u));
+    $dC = import_job_tick_quantity($pdo, $jQ, 'clear', true, '', $admin);
+    $aC = import_job_tick_quantity($pdo, $jQ, 'clear', false, (string)$dC['fingerprint'], $admin);
+    $u = $upd();
+    $ck('clear all: only the quantity tick is removed (Tia keeps its cost tick, the others have none left)', $dC['n'] === 4 && $aC['ok'] && $aC['applied'] === 4 && $u === [$kQ('QA Tia') => ['cost']], json_encode($u));
+    $dS2 = import_job_tick_quantity($pdo, $jQ, 'set', true, '', $admin);
+    $aS2 = import_job_tick_quantity($pdo, $jQ, 'set', false, (string)$dS2['fingerprint'], $admin);
+    import_job_set_update_fields($pdo, $jQ, $kQ('QF Plain'), [], $admin);                  // leave one unticked on purpose
+    $sQ2 = $answerAll($jQ, $admin);                                                         // a ticked cost can bring a price question: answer it
+    $by2 = import_job_review_view($pdo, $jQ, null)['confirm']['not_counted']['by'] ?? [];
+    $ck('pre-import warning after tick all: only the one left unticked is "not ticked"; Tia is now counted', $dS2['n'] === 4 && $aS2['ok'] && !empty($sQ2['can_confirm'])
+        && $names($by2['not_ticked']) === [$n('QF Plain')] && $names($by2['cost_not_ticked']) === [$n('QB Nocost')] && $names($by2['overlap']) === [$n('QD Overlap')], json_encode($by2));
+    $cQ = import_commit_stock($pdo, $jQ, $admin);
+    $rQ = $cQ['result'] ?? [];
+    $srt = function ($x) { $x = (array)$x; sort($x); return $x; };
+    $ck('result: the left-out lists are split by true reason and match the warning (Tia is not called "no price")', $cQ['ok']
+        && $srt($rQ['stock_not_counted_no_cost'] ?? null) === [$n('QG New')] && $srt($rQ['stock_not_counted_not_ticked'] ?? null) === [$n('QF Plain')]
+        && $srt($rQ['stock_not_counted_cost_not_ticked'] ?? null) === [$n('QB Nocost')] && $srt($rQ['stock_not_counted_same'] ?? null) === [$n('QE Same')]
+        && !in_array($n('QA Tia'), array_merge((array)($rQ['stock_not_counted_no_cost'] ?? []), (array)($rQ['stock_not_counted_not_ticked'] ?? [])), true), json_encode($cQ['error'] ?? $rQ));
+    $ck('result: the overlap is still reported (1) and only Tia became a count line', ($rQ['left_out_overlap'] ?? -1) === 1 && ($rQ['count_lines'] ?? -1) === 1, json_encode([$rQ['left_out_overlap'] ?? null, $rQ['count_lines'] ?? null]));
+    $cmQ = import_job_tick_quantity($pdo, $jQ, 'set', true, '', $admin);
+    $cmC = import_job_tick_quantity($pdo, $jQ, 'clear', false, 'x', $admin);
+    $ck('tick all: a committed job is refused (dry run and apply)', !$cmQ['ok'] && !$cmC['ok'] && stripos((string)$cmQ['error'], 'committed') !== false, json_encode($cmQ));
+
+    // ---- the file's unit cost for every matched item (separate, opt-in), and the "current cost is 0" nudge -------------------------------
+    $mkQ($n('QH Zero'), 'bottle', 0, 0);           // no cost in stock, file 5 @ 900     -> "file has a cost, but it is not ticked"
+    $mkQ($n('QI Priced'), 'bottle', 0, 300);       // file 4 @ 350                       -> cost differs, current cost not 0
+    $mkQ($n('QJ Keep'), 'bottle', 0, 200);         // file 2 @ 200                       -> same cost, no cost box
+    $upC = $upload($put($csv([[$n('QH Zero'), '', '5', 'bottle', '900', '', ''], [$n('QI Priced'), '', '4', 'bottle', '350', '', ''], [$n('QJ Keep'), '', '2', 'bottle', '200', '', '']]), 'cost.csv'), 'zzt-cost-' . $run . '.csv', $admin);
+    $jC = (int)$upC['job_id'];
+    import_job_analyse($pdo, $jC);
+    $answerAll($jC, $admin);
+    $qd = import_job_tick_quantity($pdo, $jC, 'set', true, '', $admin);
+    $qa = import_job_tick_quantity($pdo, $jC, 'set', false, (string)$qd['fingerprint'], $admin);
+    $updC = function () use ($pdo, $jC) { $a = json_decode((string)import_job_get($pdo, $jC)['answers_json'], true); return (array)($a['_updates'] ?? []); };
+    $cfC = import_job_review_view($pdo, $jC, null)['confirm'] ?? [];
+    $ck('cost: with every quantity ticked, the item whose current cost is 0 is listed as "the file has a cost, but it is not ticked" (not "no cost in the file")',
+        $qa['ok'] && $names($cfC['not_counted']['by']['cost_not_ticked']) === [$n('QH Zero')] && $cfC['not_counted']['by']['no_cost']['n'] === 0
+        && ($cfC['cost_tick'] ?? []) === ['n' => 2, 'ticked' => 0, 'to_tick' => 2, 'zero_to_tick' => 1], json_encode([$cfC['not_counted'] ?? null, $cfC['cost_tick'] ?? null]));
+    $ck('cost: wrong combinations are refused (zero-cost scope for the quantity, clearing with the zero-cost scope, an unknown field)',
+        !import_job_tick_field($pdo, $jC, 'quantity', 'set', 'zero_cost', true, '', $admin)['ok'] && !import_job_tick_field($pdo, $jC, 'cost', 'clear', 'zero_cost', true, '', $admin)['ok']
+        && !import_job_tick_field($pdo, $jC, 'par', 'set', 'all', true, '', $admin)['ok']);
+    $zd = import_job_tick_field($pdo, $jC, 'cost', 'set', 'zero_cost', true, '', $admin);
+    $ck('cost nudge (dry run): only the item whose current cost is 0, nothing written', $zd['ok'] && $zd['n'] === 1 && $zd['from_zero'] === 1 && $zd['samples'] === [$n('QH Zero')] && $updC()[$kQ('QH Zero')] === ['quantity'], json_encode($zd));
+    $ck('cost nudge: a stale fingerprint is refused', !import_job_tick_field($pdo, $jC, 'cost', 'set', 'zero_cost', false, (string)$qd['fingerprint'], $admin)['ok']);
+    $za = import_job_tick_field($pdo, $jC, 'cost', 'set', 'zero_cost', false, (string)$zd['fingerprint'], $admin);
+    $uC = $updC();
+    $ck('cost nudge: cost is ticked for that item only and its quantity tick is kept', $za['ok'] && $za['applied'] === 1 && $uC[$kQ('QH Zero')] === ['quantity', 'cost'] && $uC[$kQ('QI Priced')] === ['quantity'] && $uC[$kQ('QJ Keep')] === ['quantity'], json_encode($uC));
+    $sC = $answerAll($jC, $admin);                 // a ticked cost is judged like a hand tick (price plausibility): answer whatever it asks
+    $cfC2 = import_job_review_view($pdo, $jC, null)['confirm'] ?? [];
+    $ck('cost nudge: the item is now in the opening count and nothing is left out for cost', !empty($sC['can_confirm']) && $cfC2['not_counted']['by']['cost_not_ticked']['n'] === 0 && $cfC2['not_counted']['total'] === 0 && $cfC2['in_count'] === 3, json_encode($cfC2['not_counted'] ?? $sC));
+    $cd = import_job_tick_field($pdo, $jC, 'cost', 'set', 'all', true, '', $admin);
+    $ca = import_job_tick_field($pdo, $jC, 'cost', 'set', 'all', false, (string)$cd['fingerprint'], $admin);
+    $uC = $updC();
+    $ck('cost (all): "Use the file\'s unit cost" ticks cost wherever the cost differs (1 more), keeps the quantity ticks, leaves the same-cost item alone',
+        $cd['n'] === 1 && $cd['already'] === 1 && $cd['total'] === 2 && $ca['ok'] && $uC[$kQ('QI Priced')] === ['quantity', 'cost'] && $uC[$kQ('QJ Keep')] === ['quantity'], json_encode([$cd, $uC]));
+    $xd = import_job_tick_field($pdo, $jC, 'cost', 'clear', 'all', true, '', $admin);
+    $xa = import_job_tick_field($pdo, $jC, 'cost', 'clear', 'all', false, (string)$xd['fingerprint'], $admin);
+    $uC = $updC();
+    $ck('cost (clear all): only the cost ticks go, every quantity tick stays', $xd['n'] === 2 && $xa['ok'] && $uC[$kQ('QH Zero')] === ['quantity'] && $uC[$kQ('QI Priced')] === ['quantity'] && $uC[$kQ('QJ Keep')] === ['quantity'], json_encode($uC));
 
     // ---- cleanup of staged files, purge ---------------------------------------------------------------
     $pg = import_purge_staged($pdo, true);

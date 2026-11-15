@@ -14,6 +14,9 @@ $root = dirname(__DIR__, 2);
 chdir($root);
 $_SERVER['REMOTE_ADDR'] = $_SERVER['REMOTE_ADDR'] ?? '127.0.0.1';
 require_once $root . '/config/database.php';
+if (stripos((string)DB_NAME, 'rosalyn') !== false) { // Rosalyn's is LIVE: DB tests run at the test hotel only
+    exit("Refusing to run on Rosalyn's (live). Run this from the Liwonde repo.\n");
+}
 require_once $root . '/admin/includes/import-schema.php';
 require_once $root . '/admin/includes/stock-sheet-import-lib.php';
 
@@ -108,7 +111,7 @@ $runRaw = function (array $cfg) use ($root, $clean) {
     return ['json' => $json, 'clean' => $clean($res), 'raw' => substr($out, 0, 300)];
 };
 if ($mgrName !== '') {
-    foreach (['review_page' => ['facets' => '1'], 'bulk' => ['btype' => 'case-price', 'sig' => 'per-unit', 'role' => 'per-unit', 'dry' => '1'], 'answer' => ['question' => 'x', 'answer' => 'skip'], 'skip' => ['mode' => 'blocked', 'dry' => '1'], 'unskip' => ['uids' => ['x']], 'unit_items' => ['sheet' => 'x'], 'unit_choice' => ['sheet' => 'x', 'mode' => 'suggested', 'dry' => '1'], 'heal_undo' => ['heal' => 'x'], 'fixed_list' => ['kind' => 'skipped']] as $act => $extra) {
+    foreach (['review_page' => ['facets' => '1'], 'bulk' => ['btype' => 'case-price', 'sig' => 'per-unit', 'role' => 'per-unit', 'dry' => '1'], 'answer' => ['question' => 'x', 'answer' => 'skip'], 'skip' => ['mode' => 'blocked', 'dry' => '1'], 'unskip' => ['uids' => ['x']], 'unit_items' => ['sheet' => 'x'], 'unit_choice' => ['sheet' => 'x', 'mode' => 'suggested', 'dry' => '1'], 'heal_undo' => ['heal' => 'x'], 'fixed_list' => ['kind' => 'skipped'], 'tick_all' => ['field' => 'quantity', 'mode' => 'set', 'dry' => '1']] as $act => $extra) {
         $r = $runRaw(['post' => ['action' => $act, 'job' => '{jid}'] + $extra, 'as_username' => $mgrName, 'setup' => $jobSetup, 'vars' => ['jid' => 'SELECT MAX(id) FROM import_jobs']]);
         ok("ownership: a manager cannot use '$act' on a job an administrator uploaded (not found, nothing read)", isset($r['json']['ok']) && $r['json']['ok'] === false && stripos((string)($r['json']['error'] ?? ''), 'not found') !== false && $r['clean'], json_encode($r['json'] ?? $r['raw']));
     }

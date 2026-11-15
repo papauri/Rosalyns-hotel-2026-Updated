@@ -11,6 +11,11 @@
  *   import_job_list_view($pdo, $jobId, $kind, $p)     skipped rows / repairs for Step 4 (grouped, searchable, paged)
  *   import_job_skipped_export($pdo, $jobId, $format)  the skipped rows as a file the person can fix and import later (csv | xlsx)
  *   import_learned_rows($items)                       what a COMMIT teaches the matcher (units / categories a person confirmed); written by commit-stock.php only
+ *   import_job_tick_field($pdo, $jobId, $field, $mode, $scope, $dry, $fp, $userId)   tick (mode set) / untick (mode clear) "Opening stock quantity"
+ *                                                     ($field quantity) or the file's unit cost ($field cost; scope zero_cost = only items whose current cost is 0)
+ *                                                     on every matched item at once; other ticks are kept. dry = describe only; apply needs the dry run's
+ *                                                     fingerprint (job row lock). import_job_tick_quantity() = the quantity shortcut.
+ *   import_cont_not_counted($items, $overlapIds, $cap) which items WITH STOCK stay out of the opening count, by true reason (Step 4 warning, Import result)
  *
  * Skipped rows are stored as answers_json['_skip_rows'][uid] = {why, code, grp, by, at}. The resolver turns them into status "skipped"
  * (import_resolve_inplace) so they never become items and never reach the database; commit re-resolves with the same answers.
@@ -766,6 +771,225 @@ if (!function_exists('import_job_skip')) {
         $body = (string)stream_get_contents($out['stream']);
         fclose($out['stream']);
         return ['ok' => true, 'name' => $base . '.xlsx', 'mime' => 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'body' => $body];
+    }
+
+    // ---------------------------------------------------------------- the stock quantity of matched items: tick all / untick all, and what stays out of the count
+
+    /**
+     * Matched (existing) items that HAVE a box to tick for $field ('quantity' = "Opening stock quantity", 'cost' = "Cost per unit"): the file's value
+     * differs from the stock now. $scope 'zero_cost' (cost only) = just the items whose current cost is 0 / blank. Skipped items are left out.
+     * Keyed by the update key (rh_ssi_key of the stock name; two typed names on one ingredient share one key).
+     * Returns [key => [name, ticked, no_cost (its count line would have no cost: the stock has none and a file cost is not ticked), zero (file quantity 0),
+     * from_zero (current cost is 0 / blank)]].
+     */
+    function import_cont_field_targets(array $items, string $field, string $scope = 'all'): array
+    {
+        $out = [];
+        foreach ($items as $it) {
+            if (empty($it['match']) || ($it['status'] ?? '') === 'skipped' || !isset($it['diff'][$field])) {
+                continue;
+            }
+            $fromZero = isset($it['diff']['cost']) && (float)($it['diff']['cost'][0] ?? 0) <= 0.00005;
+            if ($field === 'cost' && $scope === 'zero_cost' && !$fromZero) {
+                continue;
+            }
+            $key = rh_ssi_key((string)$it['match']['name']);
+            if (isset($out[$key])) {
+                continue;
+            }
+            $lc = $it['line_cost'] ?? null;
+            $out[$key] = [
+                'name' => (string)$it['match']['name'],
+                'ticked' => in_array($field, (array)($it['ticked'] ?? []), true),
+                'no_cost' => $lc === null || (float)$lc <= 0.00005,
+                'zero' => $it['balance'] !== null && (float)$it['balance'] <= 0.00005,
+                'from_zero' => $fromZero,
+            ];
+        }
+        return $out;
+    }
+
+    function import_cont_qty_targets(array $items): array
+    {
+        return import_cont_field_targets($items, 'quantity');
+    }
+
+    /** Ingredient ids (of $ids) that already sit in another unfinished opening count (draft or submitted). Read only; [] when the tables are missing. */
+    function import_cont_open_opening_ids(PDO $pdo, array $ids): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids))));
+        $out = [];
+        if (!$ids) {
+            return $out;
+        }
+        try {
+            foreach (array_chunk($ids, 400) as $chunk) {
+                $ph = implode(',', array_fill(0, count($chunk), '?'));
+                $st = $pdo->prepare("SELECT DISTINCT l.ingredient_id FROM stock_count_lines l INNER JOIN stock_counts c ON c.id = l.count_id
+                                     WHERE c.is_opening = 1 AND c.status IN ('draft','submitted') AND l.ingredient_id IN ($ph)");
+                $st->execute($chunk);
+                foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $id) {
+                    $out[(int)$id] = true;
+                }
+            }
+        } catch (Throwable $e) {
+            return [];
+        }
+        return $out;
+    }
+
+    /**
+     * Items WITH STOCK in the file (balance > 0) that will NOT be in the opening count, by their true reason (pure):
+     *   no_cost         no usable cost anywhere: a new item with no price, or an existing one ticked for quantity with no cost in stock and none in the file
+     *   not_ticked      an existing item whose "Opening stock quantity" is not ticked
+     *   cost_not_ticked an existing item ticked for quantity whose stock has no cost yet, while the file's cost is not ticked
+     *   same            an existing item whose stock already shows exactly this quantity (there is nothing to count)
+     *   skipped         the item's row(s) are skipped
+     *   overlap         the item is already in another unfinished opening count ($overlapIds = ingredient id => true), so it is left out of this one
+     * Items still waiting for an answer are not listed (they block Import anyway). Counts are exact; names are capped at $cap per reason.
+     */
+    function import_cont_not_counted(array $items, array $overlapIds = [], int $cap = 40): array
+    {
+        $by = [];
+        foreach (['no_cost', 'not_ticked', 'cost_not_ticked', 'same', 'skipped', 'overlap'] as $k) {
+            $by[$k] = ['n' => 0, 'names' => []];
+        }
+        foreach ($items as $it) {
+            $bal = $it['balance'] ?? null;
+            if ($bal === null || (float)$bal <= 0.00005) {
+                continue;
+            }
+            $st = (string)($it['status'] ?? '');
+            $ex = !empty($it['match']);
+            $ticked = (array)($it['ticked'] ?? []);
+            $why = null;
+            if ($st === 'skipped') {
+                $why = 'skipped';
+            } elseif ($st !== 'ready') {
+                continue;
+            } elseif (!empty($it['in_count'])) {
+                if ($ex && isset($overlapIds[(int)$it['match']['id']])) {
+                    $why = 'overlap';
+                }
+            } elseif (!$ex) {
+                $why = 'no_cost';
+            } elseif (in_array('quantity', $ticked, true)) {
+                $why = (isset($it['diff']['cost']) && !in_array('cost', $ticked, true) && $it['cost'] !== null && (float)$it['cost'] > 0) ? 'cost_not_ticked' : 'no_cost';
+            } elseif (isset($it['diff']['quantity'])) {
+                $why = 'not_ticked';
+            } else {
+                $why = 'same';
+            }
+            if ($why === null) {
+                continue;
+            }
+            $by[$why]['n']++;
+            if (count($by[$why]['names']) < $cap) {
+                $by[$why]['names'][] = (string)$it['name'];
+            }
+        }
+        return ['total' => array_sum(array_column($by, 'n')), 'by' => $by];
+    }
+
+    function import_job_tick_quantity(PDO $pdo, int $jobId, string $mode, bool $dry, string $fingerprint = '', int $userId = 0, ?callable $afterPlan = null): array
+    {
+        return import_job_tick_field($pdo, $jobId, 'quantity', $mode, 'all', $dry, $fingerprint, $userId, $afterPlan);
+    }
+
+    /**
+     * Tick (mode 'set') or untick (mode 'clear') one field - 'quantity' ("Opening stock quantity") or 'cost' ("use the file's unit cost") - on every
+     * matched item in one go. Set: every item of import_cont_field_targets($field, $scope) that is not ticked yet gets $field added to its own ticks
+     * (the other ticks stay as they are). $scope 'zero_cost' (cost only) = only items whose current cost is 0 / blank. Clear: $field is taken out of every
+     * stored tick list (the other ticks stay; scope 'all' only). dry = the numbers only, with a fingerprint of the exact set; the apply recomputes the set,
+     * refuses when the fingerprint differs, and writes under the job row lock (import_cont_save refuses when somebody changed the answers in between).
+     * Only while the job is analysed / reviewing. A ticked cost is checked exactly as a hand tick is (price plausibility, storage limit: recomputed).
+     */
+    function import_job_tick_field(PDO $pdo, int $jobId, string $field, string $mode, string $scope, bool $dry, string $fingerprint = '', int $userId = 0, ?callable $afterPlan = null): array
+    {
+        if (!in_array($field, ['quantity', 'cost'], true) || !in_array($scope, ['all', 'zero_cost'], true) || ($scope === 'zero_cost' && ($field !== 'cost' || $mode !== 'set'))) {
+            return ['ok' => false, 'error' => 'That choice cannot be applied to every item.'];
+        }
+        if (!in_array($mode, ['set', 'clear'], true)) {
+            return ['ok' => false, 'error' => 'Choose whether to tick or clear the ' . $field . '.'];
+        }
+        $state = import_job_state($pdo, $jobId);
+        if (!$state) {
+            return ['ok' => false, 'error' => 'That import cannot be reviewed.'];
+        }
+        if (!in_array($state['job']['status'], ['analysed', 'reviewing'], true)) {
+            return ['ok' => false, 'error' => 'This import is already ' . $state['job']['status'] . ' and cannot be changed.'];
+        }
+        $targets = import_cont_field_targets($state['res']['items'], $field, $scope);
+        $change = [];
+        if ($mode === 'set') {
+            foreach ($targets as $k => $t) {
+                if (!$t['ticked']) {
+                    $change[$k] = $t;
+                }
+            }
+        } else {
+            $stored = json_decode((string)($state['job']['answers_json'] ?? ''), true);
+            foreach ((array)(is_array($stored) ? ($stored['_updates'] ?? []) : []) as $k => $fields) {
+                if (in_array($field, array_map('strval', (array)$fields), true)) {
+                    $change[(string)$k] = $targets[(string)$k] ?? ['name' => (string)$k, 'ticked' => true, 'no_cost' => false, 'zero' => false, 'from_zero' => false];
+                }
+            }
+        }
+        ksort($change, SORT_STRING);
+        $answersHash = md5((string)($state['job']['answers_json'] ?? ''));
+        $fp = import_cont_hash(array_merge([$field . '-' . $mode . '-' . $scope, $answersHash], array_map('strval', array_keys($change))));
+        $already = count(array_filter($targets, function ($t) {
+            return $t['ticked'];
+        }));
+        $report = [
+            'field' => $field, 'scope' => $scope, 'mode' => $mode, 'n' => count($change), 'total' => count($targets), 'already' => $already, 'fingerprint' => $fp,
+            'no_cost' => $mode === 'set' && $field === 'quantity' ? count(array_filter($change, function ($t) {
+                return $t['no_cost'];
+            })) : 0,
+            'to_zero' => $mode === 'set' && $field === 'quantity' ? count(array_filter($change, function ($t) {
+                return $t['zero'];
+            })) : 0,
+            'from_zero' => $mode === 'set' && $field === 'cost' ? count(array_filter($change, function ($t) {
+                return $t['from_zero'];
+            })) : 0,
+            'samples' => array_slice(array_values(array_map(function ($t) {
+                return (string)$t['name'];
+            }, $change)), 0, 5),
+        ];
+        if ($dry) {
+            return ['ok' => true, 'dry' => true] + $report;
+        }
+        if (!$change) {
+            return ['ok' => true, 'applied' => 0] + $report;
+        }
+        if (!hash_equals($fp, $fingerprint)) {
+            return ['ok' => false, 'error' => 'The list changed since you looked at it, so nothing was changed. Check the new count and try again.'];
+        }
+        if ($afterPlan) {
+            $afterPlan();                  // tests only: lets another person change a tick between the plan above and the lock below
+        }
+        $keys = array_keys($change);
+        return import_cont_save($pdo, $jobId, $answersHash, function (&$answers) use ($keys, $mode, $field) {
+            foreach ($keys as $k) {
+                $cur = array_values(array_map('strval', (array)($answers['_updates'][$k] ?? [])));
+                if ($mode === 'set') {
+                    if (!in_array($field, $cur, true)) {
+                        $cur[] = $field;
+                    }
+                } else {
+                    $cur = array_values(array_diff($cur, [$field]));
+                }
+                if ($cur) {
+                    $answers['_updates'][$k] = $cur;
+                } else {
+                    unset($answers['_updates'][$k]);
+                }
+            }
+            if (isset($answers['_updates']) && !$answers['_updates']) {
+                unset($answers['_updates']);
+            }
+            return ['applied' => count($keys)];
+        }) + $report;
     }
 
     // ---------------------------------------------------------------- learning (written by commit only)

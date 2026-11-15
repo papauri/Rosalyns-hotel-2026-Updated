@@ -516,6 +516,133 @@
                 }).then(function (yes) { if (yes) { return apply(r.fingerprint); } });
             });
         }
+        function itemsWord(n) { return num(n, 0) + ' item' + (n === 1 ? '' : 's'); }
+        /**
+         * Tick (mode set) or clear (mode clear) one field on every matched item: field 'quantity' ("Opening stock quantity") or 'cost' (the file's unit
+         * cost; scope 'zero_cost' = only items whose current cost is 0). The server describes the exact set first, then applies exactly that set.
+         */
+        function tickAll(field, mode, scope, trigger) {
+            if (S.busy) { return Promise.resolve(); }
+            if (trigger) { trigger.disabled = true; }
+            var done = function () { if (trigger && document.body.contains(trigger)) { trigger.disabled = false; } };
+            var isQty = field === 'quantity', what = isQty ? 'quantity' : 'cost';
+            var base = { job: S.job, field: field, mode: mode, scope: scope || 'all' };
+            return post('tick_all', Object.assign({ dry: '1' }, base)).then(function (r) {
+                if (!r.ok) { msg(r.error || 'Could not check the items.'); return; }
+                if (!r.n) { msg(mode === 'set' ? 'Every one of those items already has its ' + what + ' ticked.' : 'No ' + what + ' is ticked, so there is nothing to clear.', 'ok'); return; }
+                var details = [];
+                if (mode === 'set' && isQty) {
+                    details.push('Only the quantity is ticked. Ticks you already set for cost, par level, pack size or category stay as they are.');
+                    if (r.no_cost) { details.push(itemsWord(r.no_cost) + ' of these ' + (r.no_cost === 1 ? 'has' : 'have') + ' no cost in stock and no cost ticked, so ' + (r.no_cost === 1 ? 'it stays' : 'they stay') + ' out of the count until you tick Cost (or add a cost later).'); }
+                    if (r.to_zero) { details.push(itemsWord(r.to_zero) + ' ' + (r.to_zero === 1 ? 'has' : 'have') + ' 0 in your file: the opening count will set ' + (r.to_zero === 1 ? 'its' : 'their') + ' stock to 0 once approved.'); }
+                } else if (mode === 'set') {
+                    details.push('Only the cost is ticked. Ticks you already set for quantity, par level, pack size or category stay as they are.');
+                    details.push('The cost per unit becomes the one written in your file (VAT not added or removed) when you press Import, before the opening count is approved. Recipe costs and the value of stock already on hand use it from then on. Every change is logged, old to new.');
+                    if (r.from_zero) { details.push(itemsWord(r.from_zero) + ' of these ' + (r.from_zero === 1 ? 'has' : 'have') + ' no cost in stock yet (0).'); }
+                    details.push('A price that looks wrong for this hotel still asks you a question before you can import.');
+                } else {
+                    details.push('Only the ' + what + ' tick is taken off. The other ticks stay as they are.');
+                }
+                (r.samples || []).forEach(function (x) { details.push(shortName(x)); });
+                if (r.n > (r.samples || []).length) { details.push('… and ' + num(r.n - (r.samples || []).length, 0) + ' more'); }
+                var msgSet = isQty
+                    ? 'This ticks ' + itemsWord(r.n) + '. ' + num(r.already, 0) + ' already ticked. Their stock from your file goes into the opening count, which a different manager must approve.'
+                    : 'This uses the unit cost from your file for ' + itemsWord(r.n) + '. ' + num(r.already, 0) + ' already ticked.';
+                return ask({
+                    title: mode === 'set' ? (isQty ? 'Tick the quantity for ' : 'Use the file\'s unit cost for ') + itemsWord(r.n) + '?' : 'Clear the ' + what + ' tick on ' + itemsWord(r.n) + '?',
+                    message: mode === 'set' ? msgSet
+                        : 'This clears the ' + what + ' tick on ' + itemsWord(r.n) + '. ' + (isQty ? 'Their stock will NOT be in the opening count unless you tick it again.' : 'They keep the cost they have in stock now.'),
+                    details: details, confirmText: mode === 'set' ? (isQty ? 'Tick ' : 'Use the file cost for ') + itemsWord(r.n) : 'Clear ' + itemsWord(r.n), tone: 'warning'
+                }).then(function (yes) {
+                    if (!yes) { return; }
+                    return post('tick_all', Object.assign({ fingerprint: r.fingerprint }, base, pagedExtra())).then(function (a) {
+                        if (!a.ok) { msg(a.error || 'Nothing was changed.'); return; }
+                        msg((mode === 'set' ? 'Ticked the ' + what + ' for ' : 'Cleared the ' + what + ' tick on ') + itemsWord(a.applied || 0) + '.', 'ok');
+                        return refresh(a.summary);
+                    });
+                });
+            }).then(done, done);
+        }
+        /** Step 3: one box for the items already in stock: tick / clear the opening stock quantity, and (separate, opt-in) the file's unit cost, on all. */
+        function paintTicks() {
+            var box = S.R && S.R.ticks;
+            if (!box) { return; }
+            clear(box);
+            var cf = S.sum.confirm || {};
+            var qt = cf.qty_tick || { n: 0, ticked: 0, to_tick: 0 }, ct = cf.cost_tick || { n: 0, ticked: 0, to_tick: 0 };
+            box.hidden = !qt.n && !ct.n;
+            if (box.hidden) { return; }
+            add(box, h('strong', null, 'Items already in stock: tick for all of them'));
+            if (qt.n) {
+                box.appendChild(helpLine(itemsWord(qt.n) + ' already in your stock ' + (qt.n === 1 ? 'has' : 'have') + ' a different quantity in your file. Each one goes into the opening count only when its quantity is ticked. Ticked now: ' + num(qt.ticked, 0) + ' of ' + num(qt.n, 0) + '.'));
+                var acts = h('div', 'di-actions');
+                var setB = h('button', 'btn-primary di-btn', 'Set quantity for every matched item (' + itemsWord(qt.n) + ')'); setB.type = 'button';
+                setB.disabled = !qt.to_tick;
+                setB.addEventListener('click', function () { tickAll('quantity', 'set', 'all', setB); });
+                acts.appendChild(setB);
+                if (qt.ticked) {
+                    var clrB = h('button', 'btn-secondary di-btn', 'Clear the quantity tick on all'); clrB.type = 'button';
+                    clrB.addEventListener('click', function () { tickAll('quantity', 'clear', 'all', clrB); });
+                    acts.appendChild(clrB);
+                }
+                box.appendChild(acts);
+            }
+            if (ct.n) {
+                box.appendChild(helpLine(itemsWord(ct.n) + ' already in your stock ' + (ct.n === 1 ? 'has' : 'have') + ' a different unit cost in your file. The cost in stock is kept unless you tick it. Ticked now: ' + num(ct.ticked, 0) + ' of ' + num(ct.n, 0) + '.'));
+                var acts2 = h('div', 'di-actions');
+                var costB = h('button', 'btn-secondary di-btn', 'Use the file\'s unit cost for every matched item (' + itemsWord(ct.n) + (ct.n === 1 ? ' differs)' : ' differ)')); costB.type = 'button';
+                costB.disabled = !ct.to_tick;
+                costB.addEventListener('click', function () { tickAll('cost', 'set', 'all', costB); });
+                acts2.appendChild(costB);
+                if (ct.ticked) {
+                    var clrC = h('button', 'btn-secondary di-btn', 'Clear the cost tick on all'); clrC.type = 'button';
+                    clrC.addEventListener('click', function () { tickAll('cost', 'clear', 'all', clrC); });
+                    acts2.appendChild(clrC);
+                }
+                box.appendChild(acts2);
+            }
+            box.appendChild(h('p', 'di-help', 'Each button ticks or clears one thing only; the other ticks stay as you set them, item by item. You see the number before anything changes.'));
+        }
+        /** Step 4: items with stock that will NOT be in the opening count, by their true reason, with the names (expandable). */
+        var NOT_COUNTED = [
+            ['not_ticked', function (n) { return itemsWord(n) + ' already in stock: the quantity is not ticked'; }],
+            ['cost_not_ticked', function (n) { return itemsWord(n) + ' already in stock: your file has a cost, but it is not ticked (the item\'s current cost is 0)'; }],
+            ['no_cost', function (n) { return itemsWord(n) + ' with no cost in your file (and none in stock)'; }],
+            ['skipped', function (n) { return itemsWord(n) + ' in skipped rows'; }],
+            ['overlap', function (n) { return itemsWord(n) + ' already in another opening count that is not approved yet'; }],
+            ['same', function (n) { return itemsWord(n) + ' where your stock already shows exactly this quantity (nothing to count)'; }]
+        ];
+        function notCountedBlock(nc, qt, ct) {
+            var by = (nc && nc.by) || {}, total = (nc && nc.total) || 0;
+            if (!total) { return null; }
+            var box = h('div', 'di-continue di-notcounted');
+            box.setAttribute('role', 'status');
+            add(box, h('p', 'di-warn', itemsWord(total) + ' with stock will NOT be in the opening count.'));
+            NOT_COUNTED.forEach(function (rc) {
+                var b = by[rc[0]];
+                if (!b || !b.n) { return; }
+                var d = h('details', 'di-details');
+                d.appendChild(h('summary', null, rc[1](b.n)));
+                var ul = h('ul', 'di-nonitems');
+                (b.names || []).forEach(function (n) { ul.appendChild(h('li', null, n)); });
+                if (b.n > (b.names || []).length) { ul.appendChild(h('li', 'di-small', '… and ' + num(b.n - (b.names || []).length, 0) + ' more (use the filters in step 3 to see them all)')); }
+                d.appendChild(ul); box.appendChild(d);
+            });
+            var acts = h('div', 'di-actions');
+            if (((by.not_ticked && by.not_ticked.n) || 0) > 0 && qt && qt.to_tick) {
+                var tb = h('button', 'btn-primary di-btn', 'Tick the quantity for every matched item (' + itemsWord(qt.to_tick) + ')'); tb.type = 'button';
+                tb.addEventListener('click', function () { tickAll('quantity', 'set', 'all', tb); });
+                acts.appendChild(tb);
+            }
+            if (((by.cost_not_ticked && by.cost_not_ticked.n) || 0) > 0 && ct && ct.zero_to_tick) {
+                var cb = h('button', 'btn-secondary di-btn', 'Use the file\'s cost where the current cost is 0 (' + itemsWord(ct.zero_to_tick) + ')'); cb.type = 'button';
+                cb.addEventListener('click', function () { tickAll('cost', 'set', 'zero_cost', cb); });
+                acts.appendChild(cb);
+            }
+            if (acts.firstChild) { box.appendChild(acts); }
+            box.appendChild(h('p', 'di-help', 'Only items with stock in your file are counted here. Open a line to see the names. Items left out of the count are still created or updated as listed above.'));
+            return box;
+        }
         function unskip(uids) {
             return post('unskip', Object.assign({ job: S.job, uids: uids }, pagedExtra())).then(function (r) {
                 if (!r.ok) { msg(r.error || 'Could not bring the row back.'); return; }
@@ -863,6 +990,8 @@
             S.R.cont = h('div', 'di-continue'); S.R.cont.hidden = true; S.R.cont.setAttribute('role', 'status'); S.R.cont.setAttribute('aria-live', 'polite'); p.appendChild(S.R.cont);
             // questions that belong to a whole sheet (one answer for all its items)
             S.R.sheetQs = h('div', 'di-qs di-sheetqs'); S.R.sheetQs.hidden = true; p.appendChild(S.R.sheetQs);
+            // items already in stock: tick / clear the opening stock quantity on all of them in one go
+            S.R.ticks = h('div', 'di-continue di-ticks'); S.R.ticks.hidden = true; p.appendChild(S.R.ticks);
             // the filter bar
             var bar = h('div', 'di-fbar'); S.R.bar = bar; S.R.barWrap = h('div', 'di-fwrap'); S.R.barWrap.appendChild(bar);
             var top = h('div', 'di-fbar-top');
@@ -1004,6 +1133,7 @@
             paintProgress();
             paintFilters();
             paintSheetQs();
+            paintTicks();
             paintBulk();
             if (S.f.view === 'cat') { paintCats(o); } else { paintList(o); }
             syncUrl();
@@ -1520,8 +1650,8 @@
             var cards = h('div', 'di-cards');
             add(cards,
                 card('New ingredients', num(cf.creates || 0, 0), 'Items not in your stock yet. They will be created.', 'good'),
-                card('Existing items updated', num(cf.updates || 0, 0), 'Existing items where you ticked a field to change.'),
-                card('Existing items left as they are', num(cf.kept || 0, 0), 'Matched to an ingredient already in stock, with nothing ticked.'),
+                card('Existing items updated', num(cf.updates || 0, 0), 'Existing items where you ticked cost, par level, pack size or category to change. A ticked quantity alone only adds a line to the opening count.'),
+                card('Existing items left as they are', num(cf.kept || 0, 0), 'Matched to an ingredient already in stock, with no field ticked to change (a ticked quantity still goes into the opening count).'),
                 card('Lines in the opening count', num(cf.in_count || 0, 0), 'Items with stock and a price. They go into one opening count that another manager must approve.'),
                 card('Rows left out', num(c.skipped || 0, 0), 'Rows you skipped, or left out because of an answer. They are not imported; the list is below.'),
                 card('Fixed for you', num(s.heal_total || 0, 0), 'Small spelling or format fixes made while reading the file, each with the cell it came from (list below, with Undo).'),
@@ -1541,10 +1671,11 @@
             if (cws) {
                 what.appendChild(h('p', 'di-warn', num(cws, 0) + ' cost change' + (cws === 1 ? ' affects an item that already has' : 's affect items that already have') + ' stock. Their recipe costs and stock value change as soon as you confirm, before the opening count is approved: ' + cwsNames.join(', ') + (cws > cwsNames.length ? ' and ' + num(cws - cwsNames.length, 0) + ' more' : '') + '.'));
             }
-            var noPriceN = cf.no_price || 0;
-            if (noPriceN) { what.appendChild(h('p', 'di-warn', num(noPriceN, 0) + ' item' + (noPriceN === 1 ? ' has' : 's have') + ' stock but no price in the file. They are created without a cost and their stock is left out of the opening count. Add the cost later.')); }
             p.appendChild(what);
             fixedSections(p);
+            // right before the Import button: the stock that will NOT be in the opening count, by its true reason (worked out on the server)
+            var ncBox = notCountedBlock(cf.not_counted, cf.qty_tick, cf.cost_tick);
+            if (ncBox) { p.appendChild(ncBox); }
             var why = h('p', 'di-why');
             var btn = h('button', 'btn-primary di-btn di-confirm');
             btn.type = 'button';
@@ -1694,12 +1825,23 @@
             p.appendChild(cards);
             if (r.next_step) { p.appendChild(h('p', 'di-note', r.next_step)); }
             if (r.learned) { p.appendChild(h('p', 'di-small', num(r.learned, 0) + ' unit or category choice' + (r.learned === 1 ? '' : 's') + ' you confirmed will be remembered and suggested next time (with "Remembered from your earlier import" as the reason).')); }
-            if (r.stock_not_counted_no_cost && r.stock_not_counted_no_cost.length) {
+            var nameList = function (names, text) {
+                if (!names || !names.length) { return; }
                 var d = h('details', 'di-details');
-                d.appendChild(h('summary', null, r.stock_not_counted_no_cost.length + ' item(s) have stock but no price, so their stock was left out of the count'));
+                d.appendChild(h('summary', null, text(names.length)));
                 var ul = h('ul', 'di-nonitems');
-                r.stock_not_counted_no_cost.forEach(function (n) { ul.appendChild(h('li', null, n)); });
+                names.forEach(function (n) { ul.appendChild(h('li', null, n)); });
                 d.appendChild(ul); p.appendChild(d);
+            };
+            if (r.stock_not_counted_not_ticked !== undefined) {
+                // imports from 2026-11-16 on: one list per true reason
+                nameList(r.stock_not_counted_not_ticked, function (n) { return itemsWord(n) + ' already in stock had stock in your file, but the quantity was not ticked, so their stock was left out of the count'; });
+                nameList(r.stock_not_counted_cost_not_ticked, function (n) { return itemsWord(n) + ' already in stock had no cost yet and Cost was not ticked, so their stock was left out of the count'; });
+                nameList(r.stock_not_counted_no_cost, function (n) { return itemsWord(n) + ' had stock but no cost (no price in the file and none in stock), so their stock was left out of the count'; });
+                nameList(r.stock_not_counted_same, function (n) { return itemsWord(n) + ' already had exactly this quantity in stock, so no count line was needed'; });
+            } else {
+                // older imports kept one mixed list: say only what is true of every name on it
+                nameList(r.stock_not_counted_no_cost, function (n) { return itemsWord(n) + ' had stock in the file that was left out of the count (no price, a quantity that was not ticked, or stock that already matched the file)'; });
             }
             if (r.left_out_overlap) { p.appendChild(h('p', 'di-small', num(r.left_out_overlap, 0) + ' stock line(s) were left out of the count because those ingredients are already in another opening count that is waiting for approval.')); }
             var nav = h('div', 'di-actions di-actions--grid');

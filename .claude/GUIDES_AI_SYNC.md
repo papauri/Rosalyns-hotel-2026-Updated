@@ -19,6 +19,15 @@ when prompted."
 
 ## Pending (oldest first)
 
+### Import wizard: tick all + honest not-counted reasons (2026-11-16, owner ask) — hashes in TASKS.md
+- Guides (Stock > Import, step 3/4 and result): two buttons for items already in stock, "Set quantity for every matched
+  item" and "Use the file's unit cost for every matched item" (each shows how many first, each can be cleared again);
+  before Import a warning lists every item with stock that will NOT be in the opening count, by reason (no cost in the
+  file / file cost not ticked / quantity not ticked / row skipped / already in another unfinished opening count) with a
+  fix button where one helps; the result screen lists "no price" and "not ticked" separately.
+- Assistant: includes/ai/ai-import.php:322 "will_update" leaves out quantity-only ticks; result_json has a new key
+  stock_not_counted_not_ticked (ai-import.php:200/323/594 read the result) - check at sync time.
+
 ### Stock count wipe + Delete on Import history (2026-11-15, owner ask) — hashes in TASKS.md
 - Guides (Settings > Clear Stock Data, Stock > Import): Clear Stock Data has a new section "Stock counts and the stock
   they added": lists every count, wipes all counts plus the batches/adjustments their approval added and puts item

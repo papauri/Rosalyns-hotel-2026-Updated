@@ -188,17 +188,15 @@ if (!function_exists('import_commit_stock')) {
             // so a rolled-back import teaches nothing
             $learnRows = import_learned_rows($v['res']['items']);
             $learned = $learnRows ? import_save_learned($pdo, $learnRows, $userId > 0 ? $userId : null) : 0;
-            $notCounted = [];
-            foreach ($v['res']['items'] as $it) {
-                if ($it['status'] === 'ready' && empty($it['in_count']) && ($it['balance'] ?? 0) > 0.00005) {
-                    $notCounted[] = $it['name'];
-                }
-            }
+            // stock left out of the count, by its TRUE reason (an unticked quantity is not "no price"); the overlap with another unfinished
+            // opening count is decided inside rh_ssi_apply under its lock and reported as left_out_overlap
+            $nc = import_cont_not_counted($v['res']['items'], [], PHP_INT_MAX)['by'];
             $result = [
                 'created' => (int)$ap['created'], 'updated' => (int)$ap['updated'], 'skipped_rows' => (int)$v['res']['counts']['skipped'],
                 'items' => count($plan['items']), 'opening_count_id' => $ap['count_id'], 'opening_count_ref' => $ap['count_ref'],
                 'count_lines' => (int)$ap['count_lines'], 'expiry_batches' => (int)$ap['batches'], 'left_out_overlap' => (int)($ap['left_out_overlap'] ?? 0),
-                'stock_not_counted_no_cost' => $notCounted, 'committed_at' => date('Y-m-d H:i:s'), 'learned' => $learned,
+                'stock_not_counted_no_cost' => $nc['no_cost']['names'], 'stock_not_counted_not_ticked' => $nc['not_ticked']['names'],
+                'stock_not_counted_cost_not_ticked' => $nc['cost_not_ticked']['names'], 'stock_not_counted_same' => $nc['same']['names'], 'committed_at' => date('Y-m-d H:i:s'), 'learned' => $learned,
                 'skipped_by_you' => (int)import_cont_overview($v['res'])['skipped_by_you'], 'fixed_for_you' => (int)array_sum($v['res']['heal_counts']),
                 'next_step' => 'A different manager must approve the opening count on Stock Count before any stock appears.',
             ];

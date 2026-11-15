@@ -352,7 +352,7 @@ if ($isAjax) {
     }
 
     // Opening an analysed job decodes and resolves its stored analysis: where this server's memory_limit cannot hold that (and cannot be raised), say so plainly.
-    if (in_array($action, ['summary', 'review_page', 'bulk', 'answer', 'fields', 'skip', 'unskip', 'unit_items', 'unit_choice', 'heal_undo', 'fixed_list'], true) && (int)($job['analysis_bytes'] ?? 0) > 0) {
+    if (in_array($action, ['summary', 'review_page', 'bulk', 'answer', 'fields', 'skip', 'unskip', 'unit_items', 'unit_choice', 'heal_undo', 'fixed_list', 'tick_all'], true) && (int)($job['analysis_bytes'] ?? 0) > 0) {
         $mem = import_mem_check_review((int)$job['analysis_bytes'], import_default_aliases());
         if (!$mem['ok']) {
             di_json(['ok' => false, 'error' => $mem['message'], 'state' => 'toobig']);
@@ -420,6 +420,18 @@ if ($isAjax) {
         $fields = is_array($fields) ? array_values(array_map('strval', $fields)) : [];
         $r = import_job_set_update_fields($pdo, $jobId, (string)($_POST['key'] ?? ''), $fields, $uid);
         if (!empty($r['ok'])) {
+            $r['summary'] = import_job_review_view($pdo, $jobId, !empty($_POST['paged']) ? di_filter_post() : null, ['facets' => true]);
+            $r['summary']['state'] = 'review';
+        }
+        di_json($r);
+    }
+
+    // Tick (mode=set) or clear (mode=clear) one field on every matched item at once: field=quantity ("Opening stock quantity") or cost (the file's unit cost;
+    // scope=zero_cost = only items whose current cost is 0). Other ticks stay. dry=1 only describes; apply needs its fingerprint.
+    if ($action === 'tick_all') {
+        $r = import_job_tick_field($pdo, $jobId, (string)($_POST['field'] ?? ''), (string)($_POST['mode'] ?? ''), (string)($_POST['scope'] ?? 'all'), !empty($_POST['dry']),
+            (string)($_POST['fingerprint'] ?? ''), $uid);
+        if (!empty($r['ok']) && empty($r['dry'])) {
             $r['summary'] = import_job_review_view($pdo, $jobId, !empty($_POST['paged']) ? di_filter_post() : null, ['facets' => true]);
             $r['summary']['state'] = 'review';
         }
