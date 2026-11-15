@@ -1191,22 +1191,6 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
                     <hr style="margin: 18px 0; border-color: #e9ecef;">
 
                     <p class="rp-section-title">3. Price change<small>How much the price goes up or down, for all room types or each one on its own.</small></p>
-                    <!-- Adjustment -->
-                    <div class="form-row">
-                        <div class="form-group">
-                            <label for="fieldAdjType">Adjustment Type</label>
-                            <select id="fieldAdjType" name="adjustment_type">
-                                <option value="percentage">Percentage (%)</option>
-                                <option value="fixed">Fixed Amount (MWK)</option>
-                            </select>
-                        </div>
-                        <div class="form-group">
-                            <label for="fieldAdjValue">Adjustment Value <span style="color:red">*</span></label>
-                            <input type="number" id="fieldAdjValue" name="adjustment_value" step="0.01" placeholder="-10 = 10% off, +20 = 20% surcharge">
-                            <p class="form-hint">Negative = discount &nbsp;|&nbsp; Positive = surcharge<?php if ($rp086): ?>. Used for every room type that has no amount of its own below.<?php endif; ?></p>
-                        </div>
-                    </div>
-
                     <?php if ($rp086): ?>
                         <!-- Step 8h: amount per room type, price basis, live breakdown -->
                         <div class="form-group">
@@ -1215,7 +1199,7 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
                                 <label><input type="radio" name="adj_mode" value="same" id="fieldAdjModeSame" checked> Same for all room types</label>
                                 <label><input type="radio" name="adj_mode" value="per_room" id="fieldAdjModePerRoom"> Different per room type</label>
                             </div>
-                            <p class="form-hint">Different per room type: give a room type its own % or fixed amount. Leave a room type empty to use the amount above. One plan is either all increases or all discounts.</p>
+                            <p class="form-hint">Different per room type: give a room type its own % or fixed amount. Leave a room type empty to use the amount below. One plan is either all increases or all discounts.</p>
                         </div>
                         <div class="rp-room-rows" id="rpRoomRows" style="display:none;">
                             <?php foreach ($rpRooms as $rpRid => $rpInfo): ?>
@@ -1230,6 +1214,26 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
                                 </div>
                             <?php endforeach; ?>
                         </div>
+                    <?php endif; ?>
+
+                    <!-- Adjustment (plan amount) -->
+                    <?php if ($rp086): ?><p class="form-hint rp-default-title" id="rpDefaultTitle" style="display:none; font-weight:600; color:#343a40; margin:4px 0 8px;">Amount for any room type left empty above</p><?php endif; ?>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="fieldAdjType">Adjustment Type</label>
+                            <select id="fieldAdjType" name="adjustment_type">
+                                <option value="percentage">Percentage (%)</option>
+                                <option value="fixed">Fixed Amount (MWK)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="fieldAdjValue">Adjustment Value <span style="color:red">*</span></label>
+                            <input type="number" id="fieldAdjValue" name="adjustment_value" step="0.01" placeholder="-10 = 10% off, +20 = 20% surcharge">
+                            <p class="form-hint">Negative = discount &nbsp;|&nbsp; Positive = surcharge<?php if ($rp086): ?>. <span id="rpDefaultHint">Used for every room type.</span><?php endif; ?></p>
+                        </div>
+                    </div>
+
+                    <?php if ($rp086): ?>
                         <?php if ($rpBasisMatters): ?>
                             <div class="form-group">
                                 <label for="fieldPriceBasis">Apply the adjustment to</label>
@@ -1482,6 +1486,11 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
                 const box = document.getElementById('rpRoomRows');
                 if (!box) return;
                 box.style.display = rpMode() === 'per_room' ? 'block' : 'none';
+                // "Same for all": one amount for every room type. "Different": the rows first, then this amount for any row left empty.
+                const dt = document.getElementById('rpDefaultTitle');
+                if (dt) dt.style.display = rpMode() === 'per_room' ? 'block' : 'none';
+                const dh = document.getElementById('rpDefaultHint');
+                if (dh) dh.textContent = rpMode() === 'per_room' ? 'Used for every room type left empty above.' : 'Used for every room type.';
                 const all = document.getElementById('fieldAppliesTo').value !== 'room_types';
                 const chosen = Array.from(document.querySelectorAll('.rp-room-chk:checked')).map(c => c.value);
                 box.querySelectorAll('.rp-room-row').forEach(row => {
