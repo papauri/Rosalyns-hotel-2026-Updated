@@ -815,9 +815,8 @@ $fb_rooms_posting_on = facebookShareVisible('rooms');
                             </div>
                             <div class="room-card-desc"><?php echo htmlspecialchars($room['short_description'] ?? $room['description'] ?? ''); ?></div>
 
-                            <div class="room-card-price"><?php echo $currency; ?> <?php echo number_format($room['price_per_night'], 0); ?><small>/night</small></div>
                             <?php $rmCardTax = rm_tax_line((float)$room['price_per_night'], $currency); ?>
-                            <?php if ($rmCardTax !== ''): ?><small class="helper-text room-card-tax" title="The price per night is the all-in amount the guest pays; this is the VAT and tourism levy inside it."><?php echo $rmCardTax; ?></small><?php endif; ?>
+                            <div class="room-card-price"><?php echo $currency; ?> <?php echo number_format($room['price_per_night'], 0); ?><small>/night</small><?php if ($rmCardTax !== ''): ?><span class="room-card-tax" title="The price per night is the all-in amount the guest pays; this is the VAT and tourism levy inside it."><?php echo $rmCardTax; ?></span><?php endif; ?></div>
 
                             <div class="room-card-details">
                                 <?php if ((float)($room['size_sqm'] ?? 0) > 0): ?><div class="detail-item"><i class="fas fa-expand-arrows-alt"></i> <?php echo (float)$room['size_sqm']; ?> sqm</div><?php endif; ?>
