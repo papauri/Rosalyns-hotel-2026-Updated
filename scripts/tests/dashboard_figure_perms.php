@@ -42,7 +42,7 @@ foreach ($keys as $k) {
 }
 
 // ---- 3. the Dashboard follows the keys
-$d = file_get_contents($root . '/admin/dashboard.php');
+$d = str_replace("\r\n", "\n", (string)file_get_contents($root . '/admin/dashboard.php')); // CRLF checkouts (Liwonde laptop) match too
 check(strpos($d, "\$pos_sales       = \$mod_pos && \$dash_perm('dashboard_pos_sales');") !== false, 'till sales follow dashboard_pos_sales');
 check(strpos($d, "\$show_takings    = moduleEnabled('finance') && \$dash_perm('dashboard_takings');") !== false, 'takings follow dashboard_takings');
 check(strpos($d, "\$show_owed       = moduleEnabled('finance') && \$dash_perm('dashboard_owed');") !== false, 'owed follows dashboard_owed');

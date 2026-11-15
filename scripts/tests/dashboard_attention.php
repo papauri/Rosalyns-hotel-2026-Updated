@@ -209,7 +209,7 @@ eq($stripped['rows'][1]['reference'], ['type' => 'details', 'summary' => 'x'], '
 eq([array_column($open, 'key'), array_column($clear, 'key'), $total], [['b', 'd', 'a'], ['c'], 8], 'red first, then biggest; zero = clear; total of open');
 
 /* ---- 6. admin/dashboard.php uses the one rule everywhere ---- */
-$d = (string)file_get_contents($root . '/admin/dashboard.php');
+$d = str_replace("\r\n", "\n", (string)file_get_contents($root . '/admin/dashboard.php')); // CRLF checkouts (Liwonde laptop) match too
 check(strpos($d, '$add($attn') === false, 'dashboard: no inline item list left');
 check(strpos($d, "\$ledeText .= \$attnTotal > 0 ? ' — ' . \$attnTotal . ' thing'") !== false && strpos($d, 'count($attnOpen) . \' thing') === false, 'dashboard: greeting "N things need you" uses the badge total (they always match)');
 check(strpos($d, '$attn = rh_dash_attention_items($attnGate, [') !== false && strpos($d, '], $can, isRestaurantEnabled());') !== false, 'dashboard: items from the helper, links through $can');
@@ -291,11 +291,11 @@ if (in_array('--db', $argv, true)) {
             // Housekeeping due: same SQL rule as housekeeping.php ?due=now (alias form).
             eq($n('SELECT COUNT(*) FROM housekeeping_assignments WHERE ' . rh_fd_housekeeping_due_sql()), $n('SELECT COUNT(*) FROM housekeeping_assignments ha LEFT JOIN individual_rooms ir ON ha.individual_room_id = ir.id WHERE ' . rh_fd_housekeeping_due_sql('ha')), 'DB housekeeping due = housekeeping.php ?due=now');
             // Gym expiring, rooms out of service, low stock: the page and the dashboard call the same helper.
-            $gm = (string)file_get_contents($root . '/admin/gym-members.php');
+            $gm = str_replace("\r\n", "\n", (string)file_get_contents($root . '/admin/gym-members.php')); // CRLF checkouts (Liwonde laptop) match too
             check(strpos($gm, 'rh_gym_member_filter_where()') !== false && $src("\$gmWhere['expiring']"), 'gym expiring: dashboard and Gym Members share rh_gym_member_filter_where');
-            $rm = (string)file_get_contents($root . '/admin/room-maintenance.php');
+            $rm = str_replace("\r\n", "\n", (string)file_get_contents($root . '/admin/room-maintenance.php')); // CRLF checkouts (Liwonde laptop) match too
             check(strpos($rm, 'rh_room_units_count(rh_fd_out_of_service_statuses())') !== false && $src('rh_room_units_count(rh_fd_out_of_service_statuses())'), 'rooms out of service: dashboard and the page notice share one count');
-            $si = (string)file_get_contents($root . '/admin/stock-ingredients.php');
+            $si = str_replace("\r\n", "\n", (string)file_get_contents($root . '/admin/stock-ingredients.php')); // CRLF checkouts (Liwonde laptop) match too
             check(strpos($si, "exactly the items the low-stock alert counts (rh_stock_alert_summary 'attention')") !== false && $src("\$stock['low_stock']        = \$stockAlerts['attention'];"), 'low stock: dashboard and ?filter=low share the alert rule');
             echo "DB part ran read-only on '$site'.\n";
         }
