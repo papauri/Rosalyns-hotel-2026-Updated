@@ -161,6 +161,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $roomIdsPosted = ($appliesTo === 'room_types') ? array_values(array_unique(array_map('intval', (array)($_POST['room_type_ids'] ?? [])))) : [];
             $badRoomIds = array_diff($roomIdsPosted, $validRoomIds);
 
+            // "Different per room type" with the bottom amount left empty (owner 2026-11-16: "adjustment value must
+            // be non zero" after filling the room amounts). For a plan on chosen room types where every chosen room
+            // type has its own amount, the bottom amount is never used for a price: store the first chosen room
+            // type's amount there (keeps the increase/discount checks). A plan on every room type still needs it:
+            // a room type added later would use it.
+            $perRoomBlankDefault = '';
+            if ($rp086 && ($_POST['adj_mode'] ?? 'same') === 'per_room' && (!is_numeric($adjRaw) || $adjValue == 0)) {
+                $rpPosted = (array)($_POST['room_adj'] ?? []);
+                $rpFilled = static function ($rid) use ($rpPosted): ?array {
+                    $row = $rpPosted[$rid] ?? null;
+                    $raw = is_array($row) ? trim((string)($row['value'] ?? '')) : '';
+                    if ($raw === '' || !is_numeric($raw) || abs(round((float)$raw, 2)) < 0.000001) {
+                        return null;
+                    }
+                    return ['type' => ($row['type'] ?? '') === 'fixed' ? 'fixed' : 'percentage', 'value' => round((float)$raw, 2)];
+                };
+                $rpCoverIds = $appliesTo === 'room_types' ? $roomIdsPosted : array_map('intval', array_keys($rpRooms));
+                $rpEmpty = [];
+                $rpFirst = null;
+                foreach ($rpCoverIds as $rpCid) {
+                    $rpAmt = $rpFilled($rpCid);
+                    if ($rpAmt === null) {
+                        $rpEmpty[] = (string)($rpRooms[$rpCid]['name'] ?? ('#' . $rpCid));
+                    } elseif ($rpFirst === null) {
+                        $rpFirst = $rpAmt;
+                    }
+                }
+                if ($appliesTo !== 'room_types') {
+                    $perRoomBlankDefault = 'Fill in "Amount for any room type left empty above": this plan covers every room type, so a room type added later uses that amount.'
+                        . ($rpEmpty ? ' Room types with no amount of their own: ' . implode(', ', $rpEmpty) . '.' : '');
+                } elseif ($rpEmpty) {
+                    $perRoomBlankDefault = 'Give these room types their own amount, or fill in "Amount for any room type left empty above": ' . implode(', ', $rpEmpty) . '.';
+                } elseif ($rpFirst !== null && !$badRoomIds) {
+                    $adjType  = $rpFirst['type'];
+                    $adjValue = $rpFirst['value'];
+                    $adjRaw   = (string)$adjValue;
+                }
+            }
+
             $validationError = '';
             if ($name === '') {
                 $validationError = 'Plan name is required.';
@@ -168,6 +207,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $validationError = 'Plan name cannot exceed 100 characters.';
             } elseif (mb_strlen($description) > 2000) {
                 $validationError = 'Description cannot exceed 2000 characters.';
+            } elseif ($perRoomBlankDefault !== '') {
+                $validationError = $perRoomBlankDefault;
             } elseif (!is_numeric($adjRaw) || $adjValue == 0) {
                 $validationError = 'Adjustment value must be a non-zero number.';
             } elseif ($adjType === 'percentage' && ($adjValue <= -100 || $adjValue > 1000)) {
@@ -1490,7 +1531,7 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
                 const dt = document.getElementById('rpDefaultTitle');
                 if (dt) dt.style.display = rpMode() === 'per_room' ? 'block' : 'none';
                 const dh = document.getElementById('rpDefaultHint');
-                if (dh) dh.textContent = rpMode() === 'per_room' ? 'Used for every room type left empty above.' : 'Used for every room type.';
+                if (dh) dh.textContent = rpMode() === 'per_room' ? 'Used for every room type left empty above. Can stay empty when the plan is for chosen room types and each has its own amount.' :'Used for every room type.';
                 const all = document.getElementById('fieldAppliesTo').value !== 'room_types';
                 const chosen = Array.from(document.querySelectorAll('.rp-room-chk:checked')).map(c => c.value);
                 box.querySelectorAll('.rp-room-row').forEach(row => {

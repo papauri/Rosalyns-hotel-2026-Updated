@@ -293,6 +293,10 @@ when prompted."
 - Guides (End of Day, Booking History, POS till / Orders & Tabs / tables, Drift report): End of Day revenue now counts a till refund on the day the money was paid out (pending refunds left out), same as the Z and EOD report; voiding a room-bill charge adds a "Charge voided: <item> MWK x" line (who, when, type, reason) to the booking's History; the till, Orders & Tabs settle and tables refuse to take payment for an order that is already on a guest's room bill; Drift report's shift section now says it re-works each closed shift the way the Z report does and compares it with what was recorded at close.
 - Assistant: new History action `charge_voided`; voiding a room-service charge also lowers the order's cost (total_cost), so margin answers change; EOD revenue refunds by payout day (rh_pos_refund_paid_out_sql).
 
+### Rate plan: bottom amount optional when every chosen room type has its own (2026-11-16, owner fault) — hashes in TASKS.md
+- Guides (Rate Plans): with "Different per room type", a plan for chosen room types where each has its own amount can leave "Amount for any room type left empty above" empty; a plan for all room types still needs it (a room type added later uses it); the error names any room type left without an amount.
+- Assistant: no change in what it reads (adjustment_value still set: the first chosen room type's amount).
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` fails in unchanged code: claim-check self-test (Room Board "Tomorrow"; staff
   activity "4 of 3 staff accounts"), History Summary "K1,068,000," flagged; digest-recipients fail.
