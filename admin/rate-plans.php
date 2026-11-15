@@ -706,6 +706,45 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
             left: 21px;
         }
 
+        /* Modal layout fixes (owner 2026-11-15): the generic .form-group rules made the Options toggles a block
+           label with a zero-width track (its knob covered the words) and stretched the room-type checkboxes. */
+        .form-group label.toggle-switch {
+            display: inline-flex;
+            margin-bottom: 0;
+            min-height: 32px;
+        }
+
+        .toggle-track {
+            display: inline-block;
+            flex: 0 0 40px;
+        }
+
+        .form-group input[type="checkbox"],
+        .form-group input[type="radio"] {
+            width: auto;
+            padding: 0;
+            flex: 0 0 auto;
+        }
+
+        .rp-section-title {
+            margin: 0 0 12px;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: .06em;
+            text-transform: uppercase;
+            color: var(--color-primary, #7E684B);
+        }
+
+        .rp-section-title small {
+            display: block;
+            margin-top: 2px;
+            font-size: 12px;
+            font-weight: 400;
+            letter-spacing: 0;
+            text-transform: none;
+            color: #6c757d;
+        }
+
         /* Step 8h: amount per room type + breakdown */
         .rp-seg {
             display: flex;
@@ -1029,6 +1068,7 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
                 <div class="rp-modal__body">
 
+                    <p class="rp-section-title">1. Name and when it applies</p>
                     <div class="form-row">
                         <div class="form-group">
                             <label for="fieldName">Plan Name <span style="color:red">*</span></label>
@@ -1126,6 +1166,31 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
                     <hr style="margin: 18px 0; border-color: #e9ecef;">
 
+                    <p class="rp-section-title">2. Which room types<small>Pick the room types this plan is for. Their prices are set in the next part.</small></p>
+                    <!-- Scope -->
+                    <div class="form-group">
+                        <label for="fieldAppliesTo">Applies To</label>
+                        <select id="fieldAppliesTo" name="applies_to" onchange="onAppliesToChange(this.value)">
+                            <option value="all">All Room Types</option>
+                            <option value="room_types">Selected Room Types Only</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group" id="roomTypesField" style="display:none;">
+                        <label>Select Room Types</label>
+                        <div style="display:flex; flex-wrap:wrap; gap:8px;">
+                            <?php foreach ($allRooms as $r): ?>
+                                <label style="display:flex; align-items:center; gap:5px; padding:5px 10px; border:1px solid #dee2e6; border-radius:4px; cursor:pointer; font-size:13px;">
+                                    <input type="checkbox" name="room_type_ids[]" class="rp-room-chk" value="<?php echo (int)$r['id']; ?>">
+                                    <?php echo htmlspecialchars($r['name']); ?>
+                                </label>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+
+                    <hr style="margin: 18px 0; border-color: #e9ecef;">
+
+                    <p class="rp-section-title">3. Price change<small>How much the price goes up or down, for all room types or each one on its own.</small></p>
                     <!-- Adjustment -->
                     <div class="form-row">
                         <div class="form-group">
@@ -1186,30 +1251,8 @@ $dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 
                     <hr style="margin: 18px 0; border-color: #e9ecef;">
 
-                    <!-- Scope -->
-                    <div class="form-group">
-                        <label for="fieldAppliesTo">Applies To</label>
-                        <select id="fieldAppliesTo" name="applies_to" onchange="onAppliesToChange(this.value)">
-                            <option value="all">All Room Types</option>
-                            <option value="room_types">Selected Room Types Only</option>
-                        </select>
-                    </div>
-
-                    <div class="form-group" id="roomTypesField" style="display:none;">
-                        <label>Select Room Types</label>
-                        <div style="display:flex; flex-wrap:wrap; gap:8px;">
-                            <?php foreach ($allRooms as $r): ?>
-                                <label style="display:flex; align-items:center; gap:5px; padding:5px 10px; border:1px solid #dee2e6; border-radius:4px; cursor:pointer; font-size:13px;">
-                                    <input type="checkbox" name="room_type_ids[]" class="rp-room-chk" value="<?php echo (int)$r['id']; ?>">
-                                    <?php echo htmlspecialchars($r['name']); ?>
-                                </label>
-                            <?php endforeach; ?>
-                        </div>
-                    </div>
-
-                    <hr style="margin: 18px 0; border-color: #e9ecef;">
-
                     <!-- Control -->
+                    <p class="rp-section-title">4. Settings</p>
                     <div class="form-row">
                         <div class="form-group">
                             <label for="fieldPriority">Priority (0–255)</label>

@@ -264,6 +264,10 @@ when prompted."
 - Guides (Rate Plans): one plan can now give each room type its own % or fixed amount ("Same for all room types" / "Different per room type"; a blank row uses the plan amount). New "Apply on" choice (only when VAT and/or levy is on): the full price incl. VAT + levy, or the base rate before VAT/levy (a fixed amount on the base rate adds VAT + levy on top; a percentage gives the same guest total either way). The modal shows a breakdown per room type: standard price, base + VAT + levy, new price, "Up by MWK X (Y%) per night". A plan must be all increases or all discounts (mixed is refused); a fixed discount that would make a room free is refused. Plan History shows one line per room type. Needs migration 086 (run at Liwonde; Rosalyn's on owner request - until then the old one-amount form shows there).
 - Assistant: rate_plans gains room_adjustments (JSON per room id) + price_basis; quotes go through rh_apply_rate_plans so prices are right; ai-tools.php:1856 (plan list) shows only the plan's main amount - add the per-room amounts at sync time.
 
+### Rate plan pop-up layout (2026-11-15, owner: "its not clearly arranged and this is hidden") — SHIPPED (hashes: see TASKS.md)
+- Guides (Rate Plans, Add/Edit pop-up): now in 4 numbered parts: 1. Name and when it applies, 2. Which room types (Applies To moved up, before the prices), 3. Price change (amounts, per room type, apply on, what each room type will cost), 4. Settings (Priority, Stack with other plans, Active - the two switches were cut off before and now show properly). Update any screenshot/step order.
+- Assistant: no change.
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` fails in unchanged code: claim-check self-test (Room Board "Tomorrow"; staff
   activity "4 of 3 staff accounts"), History Summary "K1,068,000," flagged; digest-recipients fail.
