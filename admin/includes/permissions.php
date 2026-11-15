@@ -1155,6 +1155,15 @@ function getAllPermissions()
             'page' => 'stock-clear.php',
             'group' => 'settings_advanced'
         ],
+        // Wipe all stock (owner 2026-11-16): Tier S, in no role default. Opens Clear Stock Data for its own top section only.
+        'stock_wipe_all' => [
+            'label' => 'Wipe all stock (full reset)',
+            'description' => 'Remove every stock item, batch, count, adjustment, wastage record, receiving entry, barcode, recipe line and recipe, supplier, purchase order and budget, plus all Import history, in one step after a full backup. Stock value goes to 0. Sales, orders, payments, bookings and menu items are not touched. Administrator accounts only',
+            'icon' => 'fa-eraser',
+            'category' => 'Settings',
+            'page' => 'stock-clear.php',
+            'group' => 'settings_advanced'
+        ],
         // Licence status (2026-11-07): administrator role only. Not in any role default; the page also hard-checks role === 'admin'.
         'licence' => [
             'label' => 'Licence',
@@ -1384,7 +1393,7 @@ function getDefaultPermissionsForRole(string $role)
 function rh_super_only_permissions(): array
 {
     return ['api_keys', 'ai_settings', 'module_settings', 'data_reset', 'whatsapp_settings', 'facebook_settings',
-            'email_server_settings', 'backup_restore'];
+            'email_server_settings', 'backup_restore', 'stock_wipe_all'];
 }
 
 /**
@@ -2180,7 +2189,7 @@ function getPermissionForPage(string $page)
         'ai-chat.php' => 'ai_assistant_use',       // admin/api/ai-chat.php (Assistant, Phase 2)
         'ai-action.php' => 'ai_assistant_actions', // admin/api/ai-action.php (Assistant, Phase 2)
         'data-import.php' => 'data_import',        // Import page (Phase 1b-UI); also needs stock_management for the stock target
-        'stock-clear.php' => 'data_reset',         // Clear Stock Data (administrator role only)
+        'stock-clear.php' => 'data_reset',         // Clear Stock Data (administrator role only); also opens for stock_wipe_all (getAlternatePermissionsForPage)
         'licence.php' => 'licence',                // Licence status (administrator role only)
         'user-management.php' => 'user_management',
         'process-checkin.php' => 'bookings',
@@ -2192,6 +2201,34 @@ function getPermissionForPage(string $page)
     ];
 
     return $map[$page] ?? null;
+}
+
+/**
+ * Other permissions that also open a page (any one is enough), on top of getPermissionForPage(). Kept separate so
+ * getPermissionForPage() keeps returning one key for every caller. The page itself still checks each action.
+ * Owner 2026-11-16: Clear Stock Data opens for stock_wipe_all too, for its "Wipe all stock" section only.
+ */
+function getAlternatePermissionsForPage(string $page): array
+{
+    $map = [
+        'stock-clear.php' => ['stock_wipe_all'],
+    ];
+    return $map[$page] ?? [];
+}
+
+/** True when the user holds the page's permission or one of its alternates (true when the page is unmapped). */
+function rhHasPagePermission(int $user_id, string $page): bool
+{
+    $perm = getPermissionForPage($page);
+    if ($perm === null || hasPermission($user_id, $perm)) {
+        return true;
+    }
+    foreach (getAlternatePermissionsForPage($page) as $alt) {
+        if (hasPermission($user_id, $alt)) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /**
@@ -2643,8 +2680,7 @@ function rhCanOpenPage(int $user_id, string $page): bool
     }
 
     $ok = true;
-    $perm = getPermissionForPage($page);
-    if ($perm !== null && !hasPermission($user_id, $perm)) {
+    if (!rhHasPagePermission($user_id, $page)) {
         $ok = false;
     }
 

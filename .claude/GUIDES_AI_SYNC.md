@@ -19,6 +19,15 @@ when prompted."
 
 ## Pending (oldest first)
 
+### Wipe all stock (full reset) permission + section (2026-11-16, owner ask) — hashes in TASKS.md
+- Guides (Settings > Clear Stock Data, User Management > permissions): new permission "Wipe all stock (full reset)"
+  (super admins always; a plain administrator only when a super admin switches it on; never managers/staff). Clear
+  Stock Data opens for it and shows a top section "Wipe all stock and every record": preview, then tick I understand +
+  type WIPE ALL + own password; removes every stock table's rows plus Import history; full backup + snapshot; the
+  stock part can be undone from Past clears; logged as stock_wipe_all. The older sections stay on Clear Stock Data.
+- Assistant: AI files and admin/system-logs.php:561 still check only data_reset; check at sync time whether the
+  Assistant should mention or respect stock_wipe_all.
+
 ### Import wizard: tick all + honest not-counted reasons (2026-11-16, owner ask) — hashes in TASKS.md
 - Guides (Stock > Import, step 3/4 and result): two buttons for items already in stock, "Set quantity for every matched
   item" and "Use the file's unit cost for every matched item" (each shows how many first, each can be cleared again);

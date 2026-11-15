@@ -84,7 +84,7 @@ $user['is_super_admin'] = rh_is_super_admin((int)$user['id']);
 $_SESSION['admin_is_super'] = $user['is_super_admin'];
 
 $_required_permission = getPermissionForPage($current_page);
-if ($_required_permission !== null && !hasPermission($user['id'], $_required_permission)) {
+if ($_required_permission !== null && !rhHasPagePermission((int)$user['id'], $current_page)) { // the page's key or one of its alternates
     // Deactivated accounts: hasPermission() returns false for inactive users on
     // every page, so without this check they'd redirect-loop. Kill the session.
     try {

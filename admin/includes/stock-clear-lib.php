@@ -299,6 +299,28 @@ function rh_sc_authorize(PDO $pdo, int $userId): array
     return [true, '', $u];
 }
 
+/**
+ * Active administrator-role account that holds stock_wipe_all (owner 2026-11-16, Tier S: super admins always; a plain
+ * administrator only when a super admin switched it on). Fails closed when the permission system is not loaded.
+ * [ok, plain reason, user row].
+ */
+function rh_sc_authorize_wipe_all(PDO $pdo, int $userId): array
+{
+    $st = $pdo->prepare("SELECT id, username, full_name, role, is_active FROM admin_users WHERE id = ?");
+    $st->execute([$userId]);
+    $u = $st->fetch(PDO::FETCH_ASSOC);
+    if (!$u || !(int)$u['is_active']) {
+        return [false, 'This account is not active.', null];
+    }
+    if ((string)$u['role'] !== 'admin') {
+        return [false, 'Only an administrator account can wipe all stock.', null];
+    }
+    if (!function_exists('hasPermission') || !hasPermission($userId, 'stock_wipe_all')) {
+        return [false, 'This account does not have permission to wipe all stock.', null];
+    }
+    return [true, '', $u];
+}
+
 /** The typed word must match exactly and the password must be this signed-in person's own. [ok, plain reason]. */
 function rh_sc_check_confirm(PDO $pdo, int $userId, string $expectedWord, string $typedWord, string $password): array
 {
@@ -504,6 +526,7 @@ function rh_sc_full_backup(PDO $pdo, string $root): array
  * @param array $actor  ['id'=>int,'username'=>string,'full_name'=>string]
  * @param array $opts   external_tx (bool)   caller owns the transaction: no begin/commit/rollback here (tests)
  *                      full_backup (callable|false)  default = the real full backup; false = skip (tests only; not allowed without external_tx)
+ *                      kind ('wipe_all')    marks the manifest as made by "Wipe all stock" (rh_sc_run_wipe_all only)
  * @return array{ok:bool,error:string,id:string,counts:array,sentence:string,snapshot:string,full_backup:string,groups:array,forced:array,residue:array}
  */
 function rh_sc_run_clear(PDO $pdo, string $root, array $actor, string $area, array $groupKeys, array $opts = []): array
@@ -650,6 +673,9 @@ function rh_sc_run_clear(PDO $pdo, string $root, array $actor, string $area, arr
             'undone_at'       => null,
             'undone_by'       => null,
         ];
+        if (($opts['kind'] ?? '') === 'wipe_all') {
+            $manifest['kind'] = 'wipe_all'; // made by "Wipe all stock" (stock_wipe_all may undo only these)
+        }
         if (@file_put_contents($p['manifest'], json_encode($manifest, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE)) === false) {
             throw new RuntimeException('The snapshot description could not be saved.');
         }
@@ -1670,4 +1696,181 @@ function rh_sc_run_count_wipe(PDO $pdo, string $root, array $actor, array $opts 
         'ok' => true, 'error' => '', 'blocked' => [], 'id' => $id, 'counts' => $tables, 'sentence' => $sentence,
         'snapshot' => basename($p['snapshot']), 'full_backup' => $fullBackupName, 'totals' => $totals + $residue, 'import' => $import,
     ];
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Wipe all stock and every record (owner 2026-11-16, permission stock_wipe_all)
+// ---------------------------------------------------------------------------------------------------------------------
+// The same clear as ticking every group (full backup + verified snapshot + Undo on the page), then every finished Import
+// history entry is removed with the Import feature's own import_job_delete(). Unfinished (in progress) imports are kept and
+// listed; a refused or failed import entry never fails the wipe. Import history comes back only from its backup copies.
+
+if (!defined('RH_SC_WIPE_ALL_WORD')) {
+    define('RH_SC_WIPE_ALL_WORD', 'WIPE ALL');
+}
+
+/**
+ * True when a manifest was made by "Wipe all stock" (marker kind = wipe_all, every group). A Clear with every group ticked,
+ * and any older manifest without the marker, is NOT one: those stay data_reset only.
+ */
+function rh_sc_manifest_is_full_wipe(array $man): bool
+{
+    if (($man['kind'] ?? '') !== 'wipe_all' || rh_sc_manifest_is_count_wipe($man) || ($man['area'] ?? '') !== 'stock') {
+        return false;
+    }
+    $all = array_keys(rh_sc_area('stock')['groups']);
+    return !array_diff($all, (array)($man['groups'] ?? []));
+}
+
+/** May this person undo this clear? data_reset: any clear. stock_wipe_all alone: only a clear made by "Wipe all stock". */
+function rh_sc_undo_allowed(bool $canReset, bool $canWipeAll, ?array $man): bool
+{
+    return $canReset || ($canWipeAll && is_array($man) && rh_sc_manifest_is_full_wipe($man));
+}
+
+/** Past clears this person sees: all of them with data_reset; with stock_wipe_all alone only the "Wipe all stock" ones. */
+function rh_sc_visible_clears(array $clears, bool $canReset): array
+{
+    return $canReset ? $clears : array_values(array_filter($clears, 'rh_sc_manifest_is_full_wipe'));
+}
+
+/** Load the Import delete helpers when they exist. True when import_job_delete() is available. */
+function rh_sc_load_import_delete(): bool
+{
+    if (!function_exists('import_job_delete')) {
+        $file = dirname(__DIR__, 2) . '/includes/import/delete.php';
+        if (is_file($file)) {
+            require_once $file;
+        }
+    }
+    return function_exists('import_job_delete') && function_exists('import_job_delete_block_reason');
+}
+
+/**
+ * Import history entries as they are now (read-only).
+ * @return array{total:int,removable:int,kept:array<int,array{job_id:int,name:string,status:string,reason:string}>,jobs:array}
+ */
+function rh_sc_wipe_all_import_summary(PDO $pdo): array
+{
+    $out = ['total' => 0, 'removable' => 0, 'kept' => [], 'jobs' => []];
+    if (!rh_sc_table_exists($pdo, 'import_jobs')) {
+        return $out;
+    }
+    $canDelete = rh_sc_load_import_delete();
+    $rows = $pdo->query('SELECT id, original_name, status, error_text FROM import_jobs ORDER BY id')->fetchAll(PDO::FETCH_ASSOC);
+    foreach ($rows as $j) {
+        $out['total']++;
+        $out['jobs'][] = $j;
+        $why = $canDelete ? import_job_delete_block_reason($j) : 'Removing Import history is not available on this system yet.';
+        if ($why === '') {
+            $out['removable']++;
+        } else {
+            $out['kept'][] = ['job_id' => (int)$j['id'], 'name' => (string)$j['original_name'], 'status' => (string)$j['status'], 'reason' => $why];
+        }
+    }
+    return $out;
+}
+
+/** What the full wipe would remove right now (read-only): the clear preview over every group, plus Import history. */
+function rh_sc_wipe_all_preview(PDO $pdo): array
+{
+    $pv = rh_sc_preview($pdo, 'stock', array_keys(rh_sc_area('stock')['groups']));
+    $pv['import'] = rh_sc_wipe_all_import_summary($pdo);
+    return $pv;
+}
+
+/**
+ * Run the full wipe. No permission check here: callers use rh_sc_wipe_all_request() (the page) or check first.
+ *
+ * @param array $opts external_tx / full_backup: passed to rh_sc_run_clear() (tests only); under external_tx the Import
+ *                    deletes run inside the caller's transaction too.
+ * @return array rh_sc_run_clear()'s result plus import (one row per entry: job_id,name,status,ok,error,snapshot),
+ *               import_removed and import_kept.
+ */
+function rh_sc_run_wipe_all(PDO $pdo, string $root, array $actor, array $opts = []): array
+{
+    $external = !empty($opts['external_tx']);
+    $clearOpts = array_intersect_key($opts, ['external_tx' => 1, 'full_backup' => 1]) + ['kind' => 'wipe_all'];
+    $r = rh_sc_run_clear($pdo, $root, $actor, 'stock', array_keys(rh_sc_area('stock')['groups']), $clearOpts);
+    $r += ['import' => [], 'import_removed' => 0, 'import_kept' => 0];
+    if (empty($r['ok'])) {
+        return $r; // the stock part did not complete: Import history is left alone
+    }
+
+    // Import history, one entry at a time, each with its own backup. Nothing here can undo the wipe above.
+    $import = [];
+    try {
+        $summary = rh_sc_wipe_all_import_summary($pdo);
+    } catch (Throwable $e) {
+        $summary = ['jobs' => []];
+        $import[] = ['job_id' => 0, 'name' => 'Import history', 'status' => '', 'ok' => false, 'error' => 'Could not be read (' . $e->getMessage() . '). Nothing in it was removed.', 'snapshot' => ''];
+    }
+    $canDelete = rh_sc_load_import_delete();
+    foreach ($summary['jobs'] as $j) {
+        $row = ['job_id' => (int)$j['id'], 'name' => (string)$j['original_name'], 'status' => (string)$j['status'], 'ok' => false, 'error' => '', 'snapshot' => ''];
+        try {
+            $why = $canDelete ? import_job_delete_block_reason($j) : 'Removing Import history is not available on this system yet.';
+            if ($why !== '') {
+                $row['error'] = 'Kept: ' . $why;
+            } elseif ($external !== $pdo->inTransaction()) {
+                $row['error'] = 'Kept: another change is still open on this connection.';
+            } else {
+                $d = import_job_delete($pdo, $root, (int)$j['id'], $actor, ['log_note' => 'Removed with the full stock wipe.', 'external_tx' => $external]);
+                $row['ok'] = !empty($d['ok']);
+                $row['error'] = $row['ok'] ? '' : 'Kept: ' . (string)($d['error'] ?? 'not removed.');
+                $row['snapshot'] = (string)($d['snapshot'] ?? '');
+            }
+        } catch (Throwable $e) {
+            if (!$external && $pdo->inTransaction()) {
+                try { $pdo->rollBack(); } catch (Throwable $e2) { /* the wipe itself is already committed */ }
+            }
+            $row['error'] = 'Kept: not removed (' . $e->getMessage() . ').';
+        }
+        $import[] = $row;
+    }
+    $removed = count(array_filter($import, static fn($x) => $x['ok']));
+    $kept = count($import) - $removed;
+    if (function_exists('logActivity')) {
+        logActivity((int)($actor['id'] ?? 0), 'stock_wipe_all',
+            'Wiped all stock and every record: ' . ($r['sentence'] !== '' ? $r['sentence'] : 'no stock rows') . '. Import history: '
+            . $removed . ' entr' . ($removed === 1 ? 'y' : 'ies') . ' removed, ' . $kept . ' kept. Snapshot ' . $r['snapshot']
+            . '; full backup ' . ($r['full_backup'] !== '' ? $r['full_backup'] : 'none') . '.');
+    }
+    $r['import'] = $import;
+    $r['import_removed'] = $removed;
+    $r['import_kept'] = $kept;
+    return $r;
+}
+
+/**
+ * The page's POST for "Wipe all stock": permission first, then the "I understand" tick, then the typed words WIPE ALL and
+ * the person's own password, then the run. The page counts a wrong-password lockout only for stage 'confirm'.
+ *
+ * @param array $post  the posted fields: wa_understand, confirm_word, confirm_password
+ * @param array $opts  passed to rh_sc_run_wipe_all() (tests only)
+ * @return array{ok:bool,stage:string,error:string,result:?array} stage: permission|understand|confirm|empty|run|done
+ */
+function rh_sc_wipe_all_request(PDO $pdo, string $root, array $actor, array $post, array $opts = []): array
+{
+    $uid = (int)($actor['id'] ?? 0);
+    [$okA, $whyA] = rh_sc_authorize_wipe_all($pdo, $uid);
+    if (!$okA) {
+        return ['ok' => false, 'stage' => 'permission', 'error' => rtrim((string)$whyA, '.') . '. Nothing was changed.', 'result' => null];
+    }
+    if (empty($post['wa_understand'])) {
+        return ['ok' => false, 'stage' => 'understand', 'error' => 'Nothing was changed. Tick "I understand" to show you have read what this does.', 'result' => null];
+    }
+    [$okC, $whyC] = rh_sc_check_confirm($pdo, $uid, RH_SC_WIPE_ALL_WORD, (string)($post['confirm_word'] ?? ''), (string)($post['confirm_password'] ?? ''));
+    if (!$okC) {
+        return ['ok' => false, 'stage' => 'confirm', 'error' => (string)$whyC, 'result' => null];
+    }
+    $pv = rh_sc_wipe_all_preview($pdo);
+    if ((int)$pv['total'] === 0 && (int)$pv['import']['removable'] === 0) {
+        return ['ok' => false, 'stage' => 'empty', 'error' => 'There is no stock data and no Import history that can be removed, so there is nothing to wipe. Nothing was changed.', 'result' => null];
+    }
+    $r = rh_sc_run_wipe_all($pdo, $root, $actor, $opts);
+    if (empty($r['ok'])) {
+        return ['ok' => false, 'stage' => 'run', 'error' => (string)$r['error'], 'result' => $r];
+    }
+    return ['ok' => true, 'stage' => 'done', 'error' => '', 'result' => $r];
 }

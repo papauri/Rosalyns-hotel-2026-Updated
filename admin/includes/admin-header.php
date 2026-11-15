@@ -65,8 +65,15 @@ if (!function_exists('_navItemVisible')) {
      */
     function _navItemVisible(string $href, ?string $permission_key, $moduleKey = null): bool
     {
-        if (!_canShowNavItem($permission_key)) return false;
         $_hrefBase = basename((string)(parse_url($href, PHP_URL_PATH) ?: $href));
+        // A page that also opens for another permission (getAlternatePermissionsForPage, e.g. Clear Stock Data for stock_wipe_all).
+        $_altOk = false;
+        if (!str_starts_with($href, '../') && function_exists('getAlternatePermissionsForPage')) {
+            foreach (getAlternatePermissionsForPage($_hrefBase) as $_alt) {
+                if (_canShowNavItem($_alt)) { $_altOk = true; break; }
+            }
+        }
+        if (!_canShowNavItem($permission_key) && !$_altOk) return false;
         if (!empty($GLOBALS['_rh_station_only'])) {
             $_allowed = str_starts_with($href, '../')
                 ? in_array($_hrefBase, $GLOBALS['_rh_station_guides'] ?? [], true)
@@ -82,7 +89,7 @@ if (!function_exists('_navItemVisible')) {
         }
         if (!str_starts_with($href, '../') && str_ends_with($_hrefBase, '.php')) {
             $_pagePerm = getPermissionForPage($_hrefBase);
-            if ($_pagePerm !== null && $_pagePerm !== $permission_key && !_canShowNavItem($_pagePerm)) return false;
+            if ($_pagePerm !== null && $_pagePerm !== $permission_key && !_canShowNavItem($_pagePerm) && !$_altOk) return false;
         }
         if ($moduleKey !== null && function_exists('rh_module_key_enabled')) {
             $keys = is_array($moduleKey) ? $moduleKey : [(string)$moduleKey];

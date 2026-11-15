@@ -22,10 +22,17 @@ $user = [
 $csrf_token = $csrf_token ?? generateCsrfToken();
 $current_page = 'stock-clear.php';
 
-// Administrator role only, and the data_reset permission (owner 2026-11-11: super admin only; a plain administrator only
-// when a super admin switched it on for them, or while no super admin exists).
-[$authOk, $authWhy] = rh_sc_authorize($pdo, $user['id']);
-if ($user['role'] !== 'admin' || !$authOk) {
+// Administrator role only. data_reset (owner 2026-11-11: super admin only; a plain administrator only when a super admin
+// switched it on for them, or while no super admin exists) opens the clear, count wipe and past clears. stock_wipe_all
+// (owner 2026-11-16, same tier) opens only the "Wipe all stock and every record" section. Either one opens the page;
+// every POST below re-checks its own permission.
+$canReset = false;
+$canWipeAll = false;
+if ($user['role'] === 'admin') {
+    [$canReset] = rh_sc_authorize($pdo, $user['id']);
+    [$canWipeAll] = rh_sc_authorize_wipe_all($pdo, $user['id']);
+}
+if (!$canReset && !$canWipeAll) {
     rhDenyAndRedirectHome($user['id'], $user['role'], basename($_SERVER['PHP_SELF']));
     exit;
 }
@@ -37,7 +44,7 @@ $allKeys = array_keys($A['groups']);
 
 $message = '';
 $error   = '';
-$view    = 'form';      // form | confirm | result | undone | cw_preview | cw_confirm | cw_result
+$view    = 'form';      // form | confirm | result | undone | cw_preview | cw_confirm | cw_result | wa_preview | wa_confirm | wa_result
 $preview = null;
 $result  = null;
 $undone  = null;
@@ -45,6 +52,8 @@ $picked  = [];
 $cwPreview = null;      // stock count wipe: preview (read-only)
 $cwResult  = null;      // stock count wipe: result
 $cwImport  = false;     // stock count wipe: also remove the Import history entries
+$waPreview = null;      // wipe all stock: preview (read-only)
+$waResult  = null;      // wipe all stock: result
 
 /** Too many wrong passwords in a row from this session: stop for ten minutes. */
 function sc_locked_out(): bool
@@ -82,6 +91,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = (string)($_POST['action'] ?? '');
     if (!validateCsrfToken($_POST['_tok'] ?? ($_POST['csrf_token'] ?? ''))) {
         $error = 'Invalid form token. Please refresh the page and try again. Nothing was changed.';
+    } elseif (in_array($action, ['preview', 'clear', 'cw_preview', 'cw_confirm', 'cw_wipe'], true) && !$canReset) {
+        $error = 'Your account cannot use this part of the page (it needs the Clear Stock Data permission). Nothing was changed.';
+    } elseif ($action === 'undo' && !rh_sc_undo_allowed($canReset, $canWipeAll, rh_sc_manifest($ROOT, (string)($_POST['clear_id'] ?? '')))) {
+        $error = 'Your account can only undo a full stock wipe. Nothing was changed.';
+    } elseif (in_array($action, ['wa_preview', 'wa_confirm', 'wa_wipe'], true) && !$canWipeAll) {
+        $error = 'Your account cannot wipe all stock (it needs the "Wipe all stock (full reset)" permission). Nothing was changed.';
+    } elseif ($action === 'wa_preview' || $action === 'wa_confirm') {
+        // Wipe all stock, steps 1 and 2 (read-only). Nothing to remove never reaches the confirm screen.
+        $waPreview = rh_sc_wipe_all_preview($pdo);
+        $waEmpty = (int)$waPreview['total'] === 0 && (int)$waPreview['import']['removable'] === 0;
+        $view = ($action === 'wa_confirm' && !$waEmpty) ? 'wa_confirm' : 'wa_preview';
+    } elseif ($action === 'wa_wipe') {
+        if (sc_locked_out()) {
+            $error = 'Too many wrong attempts. Nothing was changed. Wait ten minutes and try again.';
+            $waPreview = rh_sc_wipe_all_preview($pdo);
+            $view = 'wa_preview';
+        } else {
+            @set_time_limit(900);
+            @ignore_user_abort(true);
+            $wr = rh_sc_wipe_all_request($pdo, $ROOT, $user, $_POST);
+            if ($wr['stage'] === 'confirm') {
+                sc_note_failure();
+            } elseif (in_array($wr['stage'], ['empty', 'run', 'done'], true)) {
+                $_SESSION['sc_fail'] = ['n' => 0, 't' => 0];
+            }
+            if ($wr['ok']) {
+                $waResult = $wr['result'];
+                $view = 'wa_result';
+            } else {
+                $error = $wr['error'];
+                $waPreview = rh_sc_wipe_all_preview($pdo);
+                $waEmpty = (int)$waPreview['total'] === 0 && (int)$waPreview['import']['removable'] === 0;
+                $view = $waEmpty ? 'wa_preview' : 'wa_confirm';
+            }
+        }
     } elseif ($action === 'preview') {
         $picked = sc_posted_groups($allKeys);
         if (!$picked) {
@@ -174,8 +218,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'That action is not recognised. Nothing was changed.';
     }
 }
-if ($view === 'form' && $cwPreview === null) {
+if ($view === 'form' && $cwPreview === null && $canReset) {
     $cwPreview = rh_sc_count_wipe_preview($pdo); // read-only summary for the section on the first screen
+}
+if ($view === 'form' && $waPreview === null && $canWipeAll) {
+    $waPreview = rh_sc_wipe_all_preview($pdo); // read-only summary for the wipe-all section on the first screen
 }
 $currency = (string)getSetting('currency_symbol');
 $cwStatus = ['draft' => 'Being counted', 'submitted' => 'Waiting for approval', 'approved' => 'Approved', 'rejected' => 'Rejected'];
@@ -183,12 +230,13 @@ $cwStatus = ['draft' => 'Being counted', 'submitted' => 'Waiting for approval', 
 // What each group would remove right now (read-only), for the first screen.
 $groupCounts = [];
 $residueNow = ['alerts' => 0, 'review_cache' => 0, 'tool_cache' => 0];
-if ($view === 'form' || $view === 'undone' || $view === 'result') {
+if ($canReset && ($view === 'form' || $view === 'undone' || $view === 'result')) {
     foreach ($A['groups'] as $k => $g) {
         $groupCounts[$k] = rh_sc_counts($pdo, $area, $g['tables']);
     }
 }
-$pastClears = rh_sc_list_clears($ROOT, $area);
+// Past clears: all of them with data_reset; only the full wipes (which they may undo) with stock_wipe_all alone.
+$pastClears = rh_sc_visible_clears(rh_sc_list_clears($ROOT, $area), $canReset);
 
 $e = static fn($v): string => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
 ?>
@@ -212,7 +260,11 @@ $e = static fn($v): string => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
     <div class="content" id="sc-page">
         <div class="content-header">
             <h2><i class="fas fa-eraser" style="color:var(--gold)"></i> Clear Stock Data</h2>
-            <p class="sc-lead">Empty stock data at this hotel so it can be set up again (for example before a fresh import). A backup is taken first, and every clear can be undone. Wiping stock counts (further down) is the one exception: it has no Undo.</p>
+            <?php if ($canReset): ?>
+                <p class="sc-lead">Empty stock data at this hotel so it can be set up again (for example before a fresh import). A backup is taken first, and every clear can be undone. Wiping stock counts (further down) is the one exception: it has no Undo.</p>
+            <?php else: ?>
+                <p class="sc-lead">Wipe all stock data and Import history at this hotel so it can be set up again. A full backup is taken first, and the stock part can be undone from this page.</p>
+            <?php endif; ?>
         </div>
 
         <?php if ($message): ?>
@@ -526,7 +578,187 @@ $e = static fn($v): string => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
                 <?php endif; ?>
             </div>
 
+        <?php elseif ($view === 'wa_result' && $waResult): ?>
+            <!-- ================= WIPE ALL STOCK: RESULT ================= -->
+            <div class="sc-card">
+                <h3><i class="fas fa-check-circle"></i> All stock and its records wiped</h3>
+                <p>Removed: <strong><?php echo $e($waResult['sentence'] !== '' ? $waResult['sentence'] : 'no stock records (there were none)'); ?></strong>.</p>
+                <p class="sc-small">Stock value is now 0. Sales, orders, payments, bookings and menu items were not touched. System Logs and the import wizard's learned matches stay.
+                    <?php if ((int)($waResult['residue']['alerts_resolved'] ?? 0) > 0): ?><?php echo (int)$waResult['residue']['alerts_resolved']; ?> open stock alert(s) were closed. <?php endif; ?>
+                    Cached stock figures and review panels were cleared so no old numbers remain.</p>
+                <div class="sc-kpis">
+                    <div class="sc-kpi">
+                        <span class="sc-kpi__label">Snapshot of what was removed</span>
+                        <span class="sc-kpi__value sc-kpi__value--file"><?php echo $e($waResult['snapshot']); ?></span>
+                        <span class="sc-kpi__help">Kept on the server in the backups folder. This is what Undo puts back (stock records only).</span>
+                    </div>
+                    <div class="sc-kpi">
+                        <span class="sc-kpi__label">Full database backup taken first</span>
+                        <span class="sc-kpi__value sc-kpi__value--file"><?php echo $e($waResult['full_backup']); ?></span>
+                        <span class="sc-kpi__help">The safety copy of everything, listed on the Backups page.</span>
+                    </div>
+                    <div class="sc-kpi">
+                        <span class="sc-kpi__label">Import history entries removed</span>
+                        <span class="sc-kpi__value sc-kpi__value--file"><?php echo number_format((int)$waResult['import_removed']); ?></span>
+                        <span class="sc-kpi__help">Each one has its own backup copy on the server. <?php echo number_format((int)$waResult['import_kept']); ?> kept (listed below).</span>
+                    </div>
+                </div>
+                <?php if (!empty($waResult['import'])): ?>
+                    <p class="sc-small"><strong>Import history entries:</strong></p>
+                    <ul class="sc-list">
+                        <?php foreach ($waResult['import'] as $ir): ?>
+                            <li><?php echo $e($ir['name'] !== '' ? $ir['name'] : ('Import #' . $ir['job_id'])); ?>:
+                                <?php echo $ir['ok'] ? 'removed' . ($ir['snapshot'] !== '' ? ' (backup copy ' . $e($ir['snapshot']) . ')' : '') . '.' : $e($ir['error'] !== '' ? $ir['error'] : 'kept.'); ?></li>
+                        <?php endforeach; ?>
+                    </ul>
+                <?php endif; ?>
+                <form method="POST" class="sc-confirm" autocomplete="off">
+                    <input type="hidden" name="_tok" value="<?php echo $e($csrf_token); ?>">
+                    <input type="hidden" name="action" value="undo">
+                    <input type="hidden" name="clear_id" value="<?php echo $e($waResult['id']); ?>">
+                    <p class="sc-small">Changed your mind? Undo puts the stock records back, as long as no new stock has been added since. It does not bring back Import history: only its backup copies hold that.</p>
+                    <div class="sc-confirm__row">
+                        <label>Type <strong>UNDO</strong> <input type="text" name="confirm_word" class="form-control" autocomplete="off" required></label>
+                        <label>Your password <input type="password" name="confirm_password" class="form-control" autocomplete="current-password" required></label>
+                        <button type="submit" class="sc-btn sc-btn--secondary"><i class="fas fa-rotate-left"></i> Undo this wipe</button>
+                    </div>
+                </form>
+                <p><a class="sc-link" href="stock-clear.php">Back to Clear Stock Data</a></p>
+            </div>
+
+        <?php elseif (($view === 'wa_preview' || $view === 'wa_confirm') && $waPreview): $waI = $waPreview['import']; $waNothing = (int)$waPreview['total'] === 0 && (int)$waI['removable'] === 0; ?>
+            <!-- ================= WIPE ALL STOCK: PREVIEW / CONFIRM ================= -->
+            <div class="sc-card sc-card--danger">
+                <h3><i class="fas fa-triangle-exclamation"></i> Wipe all stock and every record<?php echo $view === 'wa_confirm' ? ': confirm' : ''; ?></h3>
+                <p class="sc-warning"><strong>This removes all stock data at this hotel and every Import history entry.</strong> Sales, orders, payments, bookings and menu items are not touched.</p>
+
+                <?php if ($waNothing): ?>
+                    <div class="sc-alert sc-alert--info" role="status"><i class="fas fa-info-circle"></i> <div>There is no stock data and no Import history that can be removed, so there is nothing to wipe.</div></div>
+                    <p><a class="sc-link" href="stock-clear.php">Back</a></p>
+                <?php else: ?>
+                    <div class="sc-kpis">
+                        <div class="sc-kpi">
+                            <span class="sc-kpi__label">Stock records to be removed</span>
+                            <span class="sc-kpi__value sc-kpi__value--file"><?php echo number_format((int)$waPreview['total']); ?></span>
+                            <span class="sc-kpi__help">All rows in every stock table; the table below splits them by kind.</span>
+                        </div>
+                        <div class="sc-kpi">
+                            <span class="sc-kpi__label">Import history entries to be removed</span>
+                            <span class="sc-kpi__value sc-kpi__value--file"><?php echo number_format((int)$waI['removable']); ?></span>
+                            <span class="sc-kpi__help">Finished, failed or cancelled entries on the Import page<?php echo $waI['kept'] ? '; ' . number_format(count($waI['kept'])) . ' in progress kept' : ''; ?>.</span>
+                        </div>
+                    </div>
+                    <p class="sc-small">What will be removed (counts as of now). Each row says what the records are.</p>
+                    <div class="sc-tablewrap">
+                        <table class="sc-table">
+                            <thead>
+                                <tr>
+                                    <th>Records<span class="sc-th-help">What kind of record it is</span></th>
+                                    <th class="sc-num">To be removed<span class="sc-th-help">How many rows are in it right now</span></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($waPreview['counts'] as $t => $n): ?>
+                                    <tr>
+                                        <td><strong><?php echo $e(ucfirst($A['table_labels'][$t][1])); ?></strong><br><span class="sc-small"><?php echo $e($A['table_labels'][$t][2]); ?></span></td>
+                                        <td class="sc-num"><?php echo number_format((int)$n); ?></td>
+                                    </tr>
+                                <?php endforeach; ?>
+                                <tr>
+                                    <td><strong>Import history entries</strong><br><span class="sc-small">finished, failed or cancelled imports listed on the Import page</span></td>
+                                    <td class="sc-num"><?php echo number_format((int)$waI['removable']); ?></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p class="sc-small"><i class="fas fa-broom"></i> Also closed: <?php echo (int)$waPreview['residue']['alerts']; ?> open stock alert(s) and <?php echo (int)$waPreview['residue']['review_cache']; ?> saved stock review panel(s), plus cached stock figures.</p>
+                    <?php if ($waI['kept']): ?>
+                        <div class="sc-alert sc-alert--info" role="status"><i class="fas fa-info-circle"></i>
+                            <div><strong><?php echo number_format(count($waI['kept'])); ?> Import history entr<?php echo count($waI['kept']) === 1 ? 'y is' : 'ies are'; ?> still in progress and will be kept:</strong>
+                                <ul>
+                                    <?php foreach (array_slice($waI['kept'], 0, 30) as $k): ?>
+                                        <li><?php echo $e($k['name'] !== '' ? $k['name'] : ('Import #' . $k['job_id'])); ?>: <?php echo $e($k['reason']); ?></li>
+                                    <?php endforeach; ?>
+                                    <?php if (count($waI['kept']) > 30): ?><li>and <?php echo count($waI['kept']) - 30; ?> more.</li><?php endif; ?>
+                                </ul>
+                            </div>
+                        </div>
+                    <?php endif; ?>
+
+                    <?php if ($view === 'wa_preview'): ?>
+                        <form method="POST" class="sc-actions">
+                            <input type="hidden" name="_tok" value="<?php echo $e($csrf_token); ?>">
+                            <input type="hidden" name="action" value="wa_confirm">
+                            <button type="submit" class="sc-btn sc-btn--primary"><i class="fas fa-arrow-right"></i> Continue to confirm</button>
+                            <a class="sc-link" href="stock-clear.php">Cancel, change nothing</a>
+                        </form>
+                    <?php else: ?>
+                        <div class="sc-alert sc-alert--bad" role="note"><i class="fas fa-exclamation-triangle"></i>
+                            <div><strong>What this will do:</strong>
+                                <ul>
+                                    <li>Every stock item, batch, count, adjustment, wastage record, receiving entry, barcode, recipe line and recipe, supplier, purchase order and budget is removed.</li>
+                                    <li>Stock value goes to 0, and stock reports and valuations change from now on.</li>
+                                    <li>Import history is removed (entries still in progress are kept).</li>
+                                    <li>Sales, orders, payments, bookings and menu items are not touched.</li>
+                                    <li>System Logs and the import wizard's learned matches stay.</li>
+                                    <li>The stock part can be undone from this page while the stock tables are still empty. Import history can only come back by restoring its backup copies.</li>
+                                </ul>
+                            </div>
+                        </div>
+                        <form method="POST" autocomplete="off">
+                            <input type="hidden" name="_tok" value="<?php echo $e($csrf_token); ?>">
+                            <input type="hidden" name="action" value="wa_wipe">
+                            <div class="sc-groups">
+                                <label class="sc-group">
+                                    <input type="checkbox" name="wa_understand" value="1" class="sc-group__box" required>
+                                    <span class="sc-group__body">
+                                        <span class="sc-group__title">I understand</span>
+                                        <span class="sc-group__help">I have read what this does. All stock data and Import history at this hotel will be removed.</span>
+                                    </span>
+                                </label>
+                            </div>
+                            <p class="sc-small">Before anything is removed, the system saves a full backup of the whole database and a snapshot of exactly these rows. If either cannot be saved, nothing is changed. This can take up to a minute; keep the page open.</p>
+                            <div class="sc-confirm"><div class="sc-confirm__row">
+                                <label>Type <strong>WIPE ALL</strong> to confirm <input type="text" name="confirm_word" class="form-control" autocomplete="off" required></label>
+                                <label>Your own password <input type="password" name="confirm_password" class="form-control" autocomplete="current-password" required></label>
+                            </div></div>
+                            <div class="sc-actions">
+                                <button type="submit" class="sc-btn sc-btn--danger"><i class="fas fa-eraser"></i> Back up and wipe everything</button>
+                                <a class="sc-link" href="stock-clear.php">Cancel, change nothing</a>
+                            </div>
+                        </form>
+                    <?php endif; ?>
+                <?php endif; ?>
+            </div>
+
         <?php else: ?>
+            <?php if ($canWipeAll && $waPreview): $waI = $waPreview['import']; $waNothing = (int)$waPreview['total'] === 0 && (int)$waI['removable'] === 0; ?>
+            <!-- ================= WIPE ALL STOCK: SECTION ================= -->
+            <form method="POST" class="sc-card sc-card--danger">
+                <input type="hidden" name="_tok" value="<?php echo $e($csrf_token); ?>">
+                <input type="hidden" name="action" value="wa_preview">
+                <h3><i class="fas fa-triangle-exclamation"></i> Wipe all stock and every record</h3>
+                <p class="sc-small">One step for a complete fresh start: removes every stock item and everything recorded against it, recipes, suppliers, purchase orders and budgets, and every finished Import history entry. A full backup is taken first. Sales, orders, payments, bookings and menu items are not touched.</p>
+                <div class="sc-kpis">
+                    <div class="sc-kpi">
+                        <span class="sc-kpi__label">Stock records now</span>
+                        <span class="sc-kpi__value sc-kpi__value--file"><?php echo number_format((int)$waPreview['total']); ?></span>
+                        <span class="sc-kpi__help">Rows across every stock table: items, batches, counts, changes, wastage, receiving, barcodes, recipes, suppliers, purchase orders and budgets.</span>
+                    </div>
+                    <div class="sc-kpi">
+                        <span class="sc-kpi__label">Import history entries</span>
+                        <span class="sc-kpi__value sc-kpi__value--file"><?php echo number_format((int)$waI['removable']); ?></span>
+                        <span class="sc-kpi__help">Finished entries on the Import page that would be removed<?php echo $waI['kept'] ? '; ' . number_format(count($waI['kept'])) . ' still in progress would be kept' : ''; ?>.</span>
+                    </div>
+                </div>
+                <div class="sc-actions">
+                    <button type="submit" class="sc-btn sc-btn--secondary" <?php echo $waNothing ? 'disabled' : ''; ?>><i class="fas fa-eye"></i> Show me what will be removed</button>
+                    <?php if ($waNothing): ?><span class="sc-small">There is nothing to wipe.</span><?php endif; ?>
+                </div>
+            </form>
+            <?php endif; ?>
+
+            <?php if ($canReset): ?>
             <!-- ================= CHOOSE ================= -->
             <form method="POST" id="sc-choose" class="sc-card">
                 <input type="hidden" name="_tok" value="<?php echo $e($csrf_token); ?>">
@@ -605,14 +837,15 @@ $e = static fn($v): string => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
                     <?php if ((int)$cwT['counts'] === 0 && empty($cwPreview['blocked'])): ?><span class="sc-small">There are no stock counts to wipe.</span><?php endif; ?>
                 </div>
             </form>
+            <?php endif; /* $canReset */ ?>
 
             <!-- ================= PAST CLEARS ================= -->
             <div class="sc-card">
                 <h3><i class="fas fa-clock-rotate-left"></i> Past clears</h3>
                 <?php if (!$pastClears): ?>
-                    <p class="sc-small">No stock has been cleared with this page yet.</p>
+                    <p class="sc-small"><?php echo $canReset ? 'No stock has been cleared with this page yet.' : 'No "Wipe all stock" has been done with this page yet.'; ?></p>
                 <?php else: ?>
-                    <p class="sc-small">Newest first. Undo puts back exactly what that clear removed, and only if none of those records exist again.</p>
+                    <p class="sc-small">Newest first.<?php echo $canReset ? '' : ' Only wipes made with "Wipe all stock" are listed here.'; ?> Undo puts back exactly what that clear removed, and only if none of those records exist again.</p>
                     <div class="sc-tablewrap">
                         <table class="sc-table">
                             <thead>
