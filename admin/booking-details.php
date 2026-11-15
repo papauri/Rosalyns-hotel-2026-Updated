@@ -886,14 +886,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['booking_action'])) {
 
                         // "Guest has left": a room cleaned before checkout is not sent to cleaning again - say so.
                         $coCleaningRooms = 0;
+                        $coMaintRooms = 0;
                         $coRoomIds = $updatedRoomCount > 0 ? getBookingRoomIds((int)$booking_id, true) : [];
                         if ($coRoomIds) {
-                            $coSt = $pdo->prepare("SELECT COUNT(*) FROM individual_rooms WHERE status = 'cleaning' AND id IN (" . implode(',', array_fill(0, count($coRoomIds), '?')) . ")");
+                            $coSt = $pdo->prepare("SELECT SUM(status = 'cleaning'), SUM(status = 'maintenance') FROM individual_rooms WHERE id IN (" . implode(',', array_fill(0, count($coRoomIds), '?')) . ")");
                             $coSt->execute(array_values($coRoomIds));
-                            $coCleaningRooms = (int)$coSt->fetchColumn();
+                            $coCounts = $coSt->fetch(PDO::FETCH_NUM) ?: [0, 0];
+                            $coCleaningRooms = (int)$coCounts[0];
+                            $coMaintRooms = (int)$coCounts[1];
                         }
                         $checkout_message = 'Guest checked out successfully. Room availability restored.' .
-                            ($updatedRoomCount > 0 ? ($coCleaningRooms > 0 ? ' Room assignment marked for cleaning.' : ' Room was already cleaned after the guest left.') : '');
+                            ($updatedRoomCount > 0
+                                ? ($coCleaningRooms > 0 ? ' Room assignment marked for cleaning.' : ($coMaintRooms > 0 ? ' Room is in maintenance; its clean waits until the maintenance is finished.' : ' Room was already cleaned after the guest left.'))
+                                : '');
 
                         if ($invoice_result['success']) {
                             if (!$invoice_result['idempotent']) {

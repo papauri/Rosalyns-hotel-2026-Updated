@@ -604,3 +604,16 @@
     background: #f8fafc;
     border-radius: 8px;
 }
+
+/* Step 12a: row action buttons and the filter Clear button are full 44px touch targets (tablet use). */
+.rm-row-actions .btn,
+.rm-filter-clear {
+    min-height: 44px;
+    min-width: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* 12a: .btn is inline-flex, so honour [hidden] on the filter Clear button */
+.rm-filter-clear[hidden]{display:none !important;}

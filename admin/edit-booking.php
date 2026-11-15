@@ -213,6 +213,14 @@ if ($booking && $booking['room_id'] && $can_move_room && $is_joined_type) {
                     $reason = (string)($roomCheck['error'] ?? ucfirst(str_replace('_', ' ', (string)$room['status'])));
                 }
             }
+            // Step 12a (R3): a room a joined-room booking still needs is not offered (same rule as the assign list).
+            if ($isAvailable && !$isOwnRoom) {
+                $neededBy = rh_room_needed_for_joined((int)$room['id'], (string)$checkIn, (string)$checkOut, (int)$booking_id);
+                if ($neededBy !== null) {
+                    $isAvailable = false;
+                    $reason = 'Needed for joined-room booking ' . $neededBy . ' (assign that booking its pair first)';
+                }
+            }
             if ($isOwnRoom) {
                 $isAvailable = true; // the guest's own room
                 $reason = '';
@@ -519,9 +527,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                 }
                 // In-house room move: old room to housekeeping, new room occupied.
                 if ($edit_mode === 'inhouse' && $roomPointerChanged) {
+                    // Step 12a (R4): same rule as the room-assign move (rh_release_room_after_move): an out-of-service
+                    // room keeps its status, an occupied one goes to cleaning with its departure clean (once). Rooms
+                    // the booking still holds after the change (e.g. the other room of a joined pair) are left alone.
+                    $newRoomIds = array_map('intval', getBookingRoomIds((int)$booking_id));
                     foreach ($oldRoomIds as $rid) {
-                        if ((int)$rid !== (int)$individual_room_id) {
-                            updateIndividualRoomStatus((int)$rid, 'cleaning', 'Guest moved rooms (' . $booking['booking_reference'] . ')', (int)($user['id'] ?? 0) ?: null);
+                        if (!in_array((int)$rid, $newRoomIds, true)) {
+                            rh_release_room_after_move((int)$rid, (int)$booking_id, 'Guest moved rooms (' . $booking['booking_reference'] . ')', (int)($user['id'] ?? 0) ?: null);
                         }
                     }
                     updateBookingRoomsStatus((int)$booking_id, 'occupied', 'Guest moved in: ' . $booking['booking_reference'], (int)($user['id'] ?? 0) ?: null);

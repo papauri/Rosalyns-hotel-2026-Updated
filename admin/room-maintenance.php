@@ -1576,10 +1576,10 @@ try {
                 <table class="staff-workload-table">
                     <thead>
                         <tr>
-                            <th>Staff Member</th>
-                            <th>Active Tasks</th>
-                            <th>High Priority Pending</th>
-                            <th>Completed Today</th>
+                            <th data-help="Staff Member|An active staff account that can be given maintenance jobs.">Staff Member</th>
+                            <th data-help="Active Tasks|Jobs assigned to this person that are pending or in progress right now.">Active Tasks</th>
+                            <th data-help="High Priority Pending|Of those, Urgent or High priority jobs not started yet.">High Priority Pending</th>
+                            <th data-help="Completed Today|Jobs this person marked done today that are still waiting to be verified.">Completed Today</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -1598,11 +1598,9 @@ try {
 
         <!-- Maintenance Schedules Table -->
         <?php
-        $sched_per_page    = 10;
-        $sched_page        = max(1, (int)($_GET['sched_page'] ?? 1));
-        $sched_total       = count($schedules);
-        $sched_total_pages = $sched_total > 0 ? (int)ceil($sched_total / $sched_per_page) : 1;
-        $sched_display     = array_slice($schedules, ($sched_page - 1) * $sched_per_page, $sched_per_page);
+        // Every task is in the table; the shared pager (admin-section-pagination.js) shows
+        // 10 per page with the "Show" picker, so the search and status filter cover every task, not one page.
+        $sched_display = $schedules;
         ?>
         <div class="table-card" id="maintenanceSchedulesContainer" data-rh-results>
             <div class="rm-table-toolbar">
@@ -1617,6 +1615,7 @@ try {
                         <option value="verified">Verified</option>
                         <option value="cancelled">Cancelled</option>
                     </select>
+                    <button type="button" id="tableFilterClear" class="btn btn-secondary rm-filter-clear" onclick="clearTableFilter()" hidden>Clear</button>
                 </div>
             </div>
             <p id="rmStatusHelp" class="rm-status-help">
@@ -1626,14 +1625,14 @@ try {
                 <thead>
                     <tr>
                         <th class="admin-bulk-col"><?php echo adminBulkAllBox('Select all visible schedules'); ?></th>
-                        <th>Room</th>
-                        <th>Title</th>
-                        <th>Type</th>
-                        <th>Priority</th>
-                        <th>Status</th>
-                        <th>Scheduled</th>
-                        <th>Assigned To</th>
-                        <th>Actions</th>
+                        <th data-help="Room|The room the work is for (room number and name).">Room</th>
+                        <th data-help="Title|A short name for the job, e.g. what needs fixing.">Title</th>
+                        <th data-help="Type|The kind of job (for example repair, preventive or inspection).">Type</th>
+                        <th data-help="Priority|How urgent the job is.">Priority</th>
+                        <th data-help="Status|Pending (not started), In Progress, Completed (done, waiting to be checked), Verified (checked; the room is released) or Cancelled.">Status</th>
+                        <th data-help="Scheduled|The day the job is due (or starts). A green play icon shows the start time, a green tick the finish time.">Scheduled</th>
+                        <th data-help="Assigned To|The staff member doing the job.">Assigned To</th>
+                        <th data-help="Actions|Start, mark done, edit, view history, verify a finished job, or delete it.">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -1729,20 +1728,6 @@ try {
                 <?php adminBulkButton('delete', 'Delete', 'fa-trash', 'Delete {n} selected schedule(s)? This cannot be undone.', 'btn-danger', '', 'Delete', 'danger'); ?>
             <?php adminBulkBarEnd(); ?>
         </div>
-        <?php if ($sched_total_pages > 1): ?>
-            <nav style="display:flex;align-items:center;justify-content:center;gap:6px;padding:16px 0;flex-wrap:wrap;">
-                <?php for ($pg = 1; $pg <= $sched_total_pages; $pg++):
-                    $pgHref = 'room-maintenance.php?' . http_build_query(['sched_page' => $pg]);
-                    $pgActive = ($pg === $sched_page);
-                ?>
-                    <a href="<?php echo htmlspecialchars($pgHref, ENT_QUOTES, 'UTF-8'); ?>"
-                        style="padding:6px 12px;border:1px solid <?php echo $pgActive ? 'var(--color-primary,#766550)' : '#dee2e6'; ?>;background:<?php echo $pgActive ? 'var(--color-primary,#766550)' : '#fff'; ?>;color:<?php echo $pgActive ? '#fff' : '#374151'; ?>;border-radius:4px;font-size:13px;text-decoration:none;"><?php echo $pg; ?></a>
-                <?php endfor; ?>
-                <span style="padding:6px 8px;font-size:12px;color:#888;">
-                    Showing <?php echo (($sched_page - 1) * $sched_per_page) + 1; ?>–<?php echo min($sched_page * $sched_per_page, $sched_total); ?> of <?php echo $sched_total; ?>
-                </span>
-            </nav>
-        <?php endif; ?>
 
         <!-- Maintenance Log -->
         <?php if (!empty($maintenanceLogs)): ?>
@@ -1753,12 +1738,12 @@ try {
                 <table>
                     <thead>
                         <tr>
-                            <th>Room</th>
-                            <th>From</th>
-                            <th>To</th>
-                            <th>Reason</th>
-                            <th>By</th>
-                            <th>At</th>
+                            <th data-help="Room|The room whose status changed.">Room</th>
+                            <th data-help="From|The room status before the change.">From</th>
+                            <th data-help="To|The room status after the change.">To</th>
+                            <th data-help="Reason|Why the status changed (a checkout, a maintenance task, a manual change...).">Reason</th>
+                            <th data-help="By|The staff member who made the change (blank when the system did it).">By</th>
+                            <th data-help="At|When the change was made.">At</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -2450,23 +2435,52 @@ try {
                     var curStats = document.getElementById('rmStatsDashboard');
                     var nextData = doc.getElementById('rmScheduleData');
                     var curData = document.getElementById('rmScheduleData');
-                    if (next && cur) cur.outerHTML = next.outerHTML;
+                    if (next && cur) {
+                        // Keep what the user typed / chose: the toolbar is inside the replaced block.
+                        var keepQuery = (document.getElementById('tableSearch') || {}).value || '';
+                        var keepStatus = (document.getElementById('tableStatusFilter') || {}).value || '';
+                        cur.outerHTML = next.outerHTML;
+                        if (document.getElementById('tableSearch')) document.getElementById('tableSearch').value = keepQuery;
+                        if (document.getElementById('tableStatusFilter')) document.getElementById('tableStatusFilter').value = keepStatus;
+                        // The new table has no pager yet: let the shared pager mount on it.
+                        if (window.AdminAutoSectionPagination) window.AdminAutoSectionPagination.init();
+                        if (window.AdminBulk) window.AdminBulk.refresh();
+                        filterTable(true);
+                    }
                     if (nextStats && curStats) curStats.innerHTML = nextStats.innerHTML;
                     if (nextData && curData) curData.textContent = nextData.textContent;
                 }).catch(function() {});
         }
 
-        function filterTable() {
-            var query = (document.getElementById('tableSearch').value || '').toLowerCase();
+        // Searches every task (not just the page on screen). data-filter-hidden tells the shared pager
+        // (admin-section-pagination.js) to leave a row out of its pages and counts; display covers a table too
+        // short to have a pager. keepPlace = true (after a refresh / Clear): no scroll.
+        function filterTable(keepPlace) {
+            var query = (document.getElementById('tableSearch').value || '').trim().toLowerCase();
             var status = (document.getElementById('tableStatusFilter').value || '').toLowerCase();
-            var rows = document.querySelectorAll('#maintenanceSchedulesContainer tbody tr[data-status]');
-            rows.forEach(function(row) {
+            var container = document.getElementById('maintenanceSchedulesContainer');
+            var table = container ? container.querySelector('table') : null;
+            if (!table) return;
+            table.querySelectorAll('tbody tr[data-status]').forEach(function(row) {
                 var text = row.textContent.toLowerCase();
                 var rowStat = (row.getAttribute('data-status') || '').toLowerCase();
-                var matchTxt = !query || text.includes(query);
-                var matchSt = !status || rowStat === status;
-                row.style.display = matchTxt && matchSt ? '' : 'none';
+                var match = (!query || text.includes(query)) && (!status || rowStat === status);
+                row.dataset.filterHidden = match ? '' : '1';
+                row.style.display = match ? '' : 'none';
             });
+            if (typeof table.rhPagerRefresh === 'function') table.rhPagerRefresh(true);
+            var clearBtn = document.getElementById('tableFilterClear');
+            if (clearBtn) clearBtn.hidden = !(query || status);
+            if (keepPlace !== true && (query || status)) {
+                if (window.rhAnchors && typeof window.rhAnchors.scrollToResults === 'function') window.rhAnchors.scrollToResults(table);
+                else table.scrollIntoView({ block: 'start' });
+            }
+        }
+
+        function clearTableFilter() {
+            document.getElementById('tableSearch').value = '';
+            document.getElementById('tableStatusFilter').value = '';
+            filterTable(true);
         }
 
         // ── Confirm modal helpers ───────────────────────────────────────────

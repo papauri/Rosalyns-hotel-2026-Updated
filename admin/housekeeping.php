@@ -220,6 +220,21 @@ function getCheckoutCleanupRooms(PDO $pdo): array
 
     $notExistsClause = implode(' AND ', $notExistsConditions);
 
+    // Step 12a (R7): a booking holds every room in booking_rooms (a second room, both rooms of a joined pair), not
+    // only its primary pointer. Checkout stamps released_at on those rows, so a released row counts when it was
+    // released at checkout (within 10 minutes of checkout_completed_at); rows released earlier by a room move
+    // are not this checkout's rooms (the move queued their own clean).
+    $holds = static function (string $b): string {
+        $rel = "(br.released_at IS NULL OR br.released_at >= DATE_SUB(COALESCE({$b}.checkout_completed_at, {$b}.check_out_date), INTERVAL 10 MINUTE))";
+        return "({$b}.individual_room_id = ir.id"
+            . (bookingAvailabilityTableExists('booking_rooms')
+                ? " OR EXISTS (SELECT 1 FROM booking_rooms br WHERE br.booking_id = {$b}.id AND br.individual_room_id = ir.id AND {$rel})"
+                : '')
+            . ')';
+    };
+    $holdsB = $holds('b');
+    $holdsB2 = $holds('b2');
+
     // Collapse to exactly one row per room by selecting only the most recent
     // qualifying booking for that room (latest checkout, then latest id). Without
     // this, a room with two past bookings produced two rows -> two cleanups.
@@ -232,7 +247,7 @@ function getCheckoutCleanupRooms(PDO $pdo): array
             b.guest_name,
             b.check_out_date
         FROM individual_rooms ir
-        INNER JOIN bookings b ON b.individual_room_id = ir.id
+        INNER JOIN bookings b ON {$holdsB}
         WHERE b.status = 'checked-out'
           AND b.deleted_at IS NULL
           AND b.check_out_date <= CURDATE()
@@ -240,7 +255,7 @@ function getCheckoutCleanupRooms(PDO $pdo): array
           AND b.id = (
               SELECT b2.id
               FROM bookings b2
-              WHERE b2.individual_room_id = ir.id
+              WHERE {$holdsB2}
                 AND b2.status = 'checked-out'
                 AND b2.deleted_at IS NULL
                 AND b2.check_out_date <= CURDATE()
@@ -1658,9 +1673,12 @@ foreach ($assignments as $a) {
                     <p class="hk-bulk-helper">
                         <i class="fas fa-hand-pointer"></i> Click a room card to select it, then choose a staff member and click Assign Selected.
                     </p>
-                    <div class="occupied-rooms-list">
+                    <?php /* A list so the shared pager (admin-section-pagination.js, ul.ck-rows) shows 10 cards per page with the "Show" picker. */ ?>
+                    <ul class="occupied-rooms-list ck-rows">
                         <?php foreach ($occupiedRooms as $room): ?>
-                            <div class="occupied-room-card <?php echo $room['occupancy_type'] === 'checkout_today' ? 'checkout-today' : ''; ?>"
+                            <?php $hkOccClass = $room['occupancy_type'] === 'checkout_today' ? 'checkout-today' : ($room['occupancy_type'] === 'overdue_checkout' ? 'overdue-checkout' : ''); ?>
+                            <li class="occupied-room-item">
+                            <div class="occupied-room-card <?php echo $hkOccClass; ?>"
                                 data-room-id="<?php echo $room['id']; ?>"
                                 onclick="toggleRoomCard(this)"
                                 role="button"
@@ -1668,7 +1686,7 @@ foreach ($assignments as $a) {
                                 onkeydown="if(event.key==='Enter'||event.key===' ')toggleRoomCard(this)">
                                 <div class="room-header">
                                     <span class="room-number"><?php echo htmlspecialchars($room['room_number'] . ' ' . ($room['room_name'] ?? '')); ?></span>
-                                    <span class="occupancy-badge"><?php echo $room['occupancy_type'] === 'checkout_today' ? '<i class="fas fa-sign-out-alt"></i> Checkout Today' : '<i class="fas fa-bed"></i> Occupied'; ?></span>
+                                    <span class="occupancy-badge"><?php echo $room['occupancy_type'] === 'checkout_today' ? '<i class="fas fa-sign-out-alt"></i> Checkout Today' : ($room['occupancy_type'] === 'overdue_checkout' ? '<i class="fas fa-clock"></i> Overdue' : '<i class="fas fa-bed"></i> Occupied'); ?></span>
                                 </div>
                                 <div class="guest-info"><i class="fas fa-user"></i> <?php echo htmlspecialchars($room['guest_name'] ?? 'Guest'); ?><?php if (trim((string)($room['room_guest_name'] ?? '')) !== ''): ?> <small class="room-guest-line">&middot; Room guest: <?php echo htmlspecialchars((string)$room['room_guest_name']); ?></small><?php endif; ?></div>
                                 <div class="date-info"><i class="fas fa-calendar-alt"></i> Checkout: <strong><?php echo htmlspecialchars(date('M j, Y', strtotime($room['check_out_date']))); ?></strong></div>
@@ -1695,8 +1713,9 @@ foreach ($assignments as $a) {
                                     </button>
                                 <?php endif; ?>
                             </div>
+                            </li>
                         <?php endforeach; ?>
-                    </div>
+                    </ul>
                 </form>
                 <?php if (array_filter($occupiedRooms, static function ($r) { return in_array($r['occupancy_type'], ['checkout_today', 'overdue_checkout'], true); })): ?>
                     <p class="hk-bulk-helper">
@@ -1720,10 +1739,10 @@ foreach ($assignments as $a) {
                 <table class="staff-workload-table">
                     <thead>
                         <tr>
-                            <th>Staff Member</th>
-                            <th>Active Tasks</th>
-                            <th>High Priority Pending</th>
-                            <th>Completed Today</th>
+                            <th data-help="Staff Member|An active staff account that can be given housekeeping tasks.">Staff Member</th>
+                            <th data-help="Active Tasks|Tasks assigned to this person that are pending or in progress right now.">Active Tasks</th>
+                            <th data-help="High Priority Pending|Of those, tasks marked High priority that have not been started yet.">High Priority Pending</th>
+                            <th data-help="Completed Today|Tasks this person marked done today (hotel time).">Completed Today</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -1772,20 +1791,21 @@ foreach ($assignments as $a) {
                         <option value="verified">Verified</option>
                         <option value="blocked">Blocked</option>
                     </select>
+                    <button type="button" id="tableFilterClear" class="btn btn-secondary hk-filter-clear" onclick="clearTableFilter()" hidden>Clear</button>
                 </div>
             </div>
             <table id="assignmentsTable">
                 <thead>
                     <tr>
                         <th class="admin-bulk-col"><?php echo adminBulkAllBox('Select all visible assignments'); ?></th>
-                        <th>Room</th>
-                        <th>Type</th>
-                        <th>Priority</th>
-                        <th>Status</th>
-                        <th>Scheduled</th>
-                        <th>Assigned To</th>
-                        <th>Notes</th>
-                        <th>Actions</th>
+                        <th data-help="Room|The room this task is for (room number and name).">Room</th>
+                        <th data-help="Type|What kind of job it is: checkout cleanup after a guest leaves, regular cleaning, deep clean, turn-down or maintenance.">Type</th>
+                        <th data-help="Priority|How urgent the task is: High, Medium or Low.">Priority</th>
+                        <th data-help="Status|Where the task is: Pending (not started), In Progress, Completed, Verified (checked by a supervisor) or Blocked (waiting, e.g. room in maintenance).">Status</th>
+                        <th data-help="Scheduled|The day (and time, if set) the task is due.">Scheduled</th>
+                        <th data-help="Assigned To|The staff member doing the task. Unassigned means nobody has it yet.">Assigned To</th>
+                        <th data-help="Notes|Instructions or remarks saved with the task.">Notes</th>
+                        <th data-help="Actions|Start, mark done, edit, view the task's history, or verify a finished task.">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -2309,7 +2329,11 @@ foreach ($assignments as $a) {
         }
 
         function selectAllOccupied() {
-            const checkboxes = document.querySelectorAll('.room-checkbox');
+            // Only the room cards on screen (the list is paged): what you see is what gets selected.
+            const checkboxes = Array.from(document.querySelectorAll('.room-checkbox')).filter(cb => {
+                const item = cb.closest('.occupied-room-item');
+                return !item || !item.hidden;
+            });
             const allChecked = Array.from(checkboxes).every(cb => cb.checked);
             checkboxes.forEach(cb => {
                 cb.checked = !allChecked;
@@ -2509,25 +2533,56 @@ foreach ($assignments as $a) {
                     var curStats = document.getElementById('hkStatsDashboard');
                     var nextData = doc.getElementById('hkAssignmentData');
                     var curData = document.getElementById('hkAssignmentData');
-                    if (next && cur) cur.innerHTML = next.innerHTML;
+                    if (next && cur) {
+                        cur.innerHTML = next.innerHTML;
+                        hkRemountPager(cur);
+                    }
                     if (nextStats && curStats) curStats.innerHTML = nextStats.innerHTML;
                     if (nextData && curData) curData.textContent = nextData.textContent;
                     if (window.AdminBulk) window.AdminBulk.refresh();
+                    filterTable(true); // keep the search / status filter after the refresh
                 }).catch(function() {});
         }
 
+        // The rows were replaced: drop the old pager (it points at the old rows) and let the shared pager mount again.
+        function hkRemountPager(table) {
+            Array.prototype.forEach.call(table.parentNode.querySelectorAll(':scope > [data-admin-auto-pagination-nav]'), function(nav) {
+                nav.parentNode.removeChild(nav);
+            });
+            delete table.dataset.adminAutoPaginationBound;
+            delete table.rhPagerRefresh;
+            if (window.AdminAutoSectionPagination) window.AdminAutoSectionPagination.init();
+        }
+
         // ── Table search + status filter ────────────────────────────────────
-        function filterTable() {
-            var query = (document.getElementById('tableSearch').value || '').toLowerCase();
+        // Searches every row (not just the page on screen). data-filter-hidden tells the shared pager
+        // (admin-section-pagination.js) to leave a row out of its pages and counts; display covers a table too
+        // short to have a pager. $keepPlace = true (after a refresh): no scroll.
+        function filterTable(keepPlace) {
+            var query = (document.getElementById('tableSearch').value || '').trim().toLowerCase();
             var status = (document.getElementById('tableStatusFilter').value || '').toLowerCase();
-            var rows = document.querySelectorAll('#assignmentsTable tbody tr[data-status]');
-            rows.forEach(function(row) {
+            var table = document.getElementById('assignmentsTable');
+            if (!table) return;
+            table.querySelectorAll('tbody tr[data-status]').forEach(function(row) {
                 var text = row.textContent.toLowerCase();
                 var rowStat = (row.getAttribute('data-status') || '').toLowerCase();
-                var matchTxt = !query || text.includes(query);
-                var matchSt = !status || rowStat === status;
-                row.style.display = matchTxt && matchSt ? '' : 'none';
+                var match = (!query || text.includes(query)) && (!status || rowStat === status);
+                row.dataset.filterHidden = match ? '' : '1';
+                row.style.display = match ? '' : 'none';
             });
+            if (typeof table.rhPagerRefresh === 'function') table.rhPagerRefresh(true);
+            var clearBtn = document.getElementById('tableFilterClear');
+            if (clearBtn) clearBtn.hidden = !(query || status);
+            if (keepPlace !== true && (query || status)) {
+                if (window.rhAnchors && typeof window.rhAnchors.scrollToResults === 'function') window.rhAnchors.scrollToResults(table);
+                else table.scrollIntoView({ block: 'start' });
+            }
+        }
+
+        function clearTableFilter() {
+            document.getElementById('tableSearch').value = '';
+            document.getElementById('tableStatusFilter').value = '';
+            filterTable(true);
         }
 
         // ── Confirm modal helpers ───────────────────────────────────────────

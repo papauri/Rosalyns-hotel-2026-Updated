@@ -109,6 +109,7 @@ date_default_timezone_set(RH_TIMEZONE);
 require_once __DIR__ . '/../includes/user-timezone.php';
 require_once __DIR__ . '/../includes/cancellation-policy.php'; // functions only (cancellation & no-show policies)
 require_once __DIR__ . '/../includes/booking-pay-state.php'; // pure: a booking's payment status from its money (step 8i)
+require_once __DIR__ . '/../includes/room-status-rules.php'; // pure: room status rules (checkout target, check-in hard block, step 12a)
 
 // Create PDO connection with performance optimizations
 try {
@@ -3174,6 +3175,21 @@ function evaluateCheckInRoomReady(int $bookingId, ?int $userId, bool $override =
     if (!$rooms) {
         return $res;
     }
+    // Step 12a (R2): the "not clean" override only covers a room that still needs cleaning. A room another guest
+    // is in, or one under maintenance / out of order, is always refused (the override would wipe that status).
+    $hard = [];
+    foreach ($rooms as $r) {
+        $why = rh_checkin_room_hard_block((string)$r['status']);
+        if ($why !== null) {
+            $hard[] = 'Room ' . $r['room_number'] . ' (' . $why . ')';
+        }
+    }
+    if ($hard) {
+        $res['rooms'] = $rooms;
+        $res['allowed'] = false;
+        $res['message'] = 'Check-in blocked: ' . implode(', ', $hard) . '. Move the booking to another room first, or release the room when it is really free.';
+        return $res;
+    }
     $labels = [];
     foreach ($rooms as $r) {
         $why = (string)$r['status'] !== 'available'
@@ -3699,6 +3715,24 @@ function syncBookingRooms(int $bookingId, array $individualRoomIds, ?int $roomCo
     }
 }
 
+/**
+ * Is this room held right now by a checked-in booking OTHER than $excludeBookingId (its primary room, or an
+ * unreleased booking_rooms row)? Used before a checkout / release / status change touches the room.
+ */
+function rh_room_held_by_other_inhouse(int $roomId, int $excludeBookingId = 0): bool
+{
+    global $pdo;
+    $st = $pdo->prepare("
+        SELECT COUNT(*) FROM bookings b
+        WHERE b.id <> ? AND b.status = 'checked-in'
+          AND (b.individual_room_id = ? OR EXISTS (
+                SELECT 1 FROM booking_rooms br
+                WHERE br.booking_id = b.id AND br.individual_room_id = ? AND br.released_at IS NULL))
+    ");
+    $st->execute([$excludeBookingId, $roomId, $roomId]);
+    return (int)$st->fetchColumn() > 0;
+}
+
 function updateBookingRoomsStatus(int $bookingId, string $newStatus, string $reason, ?int $performedBy = null): int
 {
     global $pdo;
@@ -3717,20 +3751,12 @@ function updateBookingRoomsStatus(int $bookingId, string $newStatus, string $rea
     if ($newStatus === 'available') {
         $keep = [];
         $occStmt = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ?");
-        $otherStmt = $pdo->prepare("
-            SELECT COUNT(*) FROM bookings b
-            WHERE b.id <> ? AND b.status = 'checked-in'
-              AND (b.individual_room_id = ? OR EXISTS (
-                    SELECT 1 FROM booking_rooms br
-                    WHERE br.booking_id = b.id AND br.individual_room_id = ? AND br.released_at IS NULL))
-        ");
         foreach ($roomIds as $roomId) {
             $occStmt->execute([$roomId]);
             if ((string)$occStmt->fetchColumn() !== 'occupied') {
                 continue;
             }
-            $otherStmt->execute([$bookingId, $roomId, $roomId]);
-            if ((int)$otherStmt->fetchColumn() > 0) {
+            if (rh_room_held_by_other_inhouse((int)$roomId, $bookingId)) {
                 continue;
             }
             $keep[] = $roomId;
@@ -3751,6 +3777,48 @@ function updateBookingRoomsStatus(int $bookingId, string $newStatus, string $rea
         $refStmt = $pdo->prepare("SELECT booking_reference FROM bookings WHERE id = ?");
         $refStmt->execute([$bookingId]);
         $bookingRef = (string)($refStmt->fetchColumn() ?: ('Booking #' . $bookingId));
+        // Step 12a (R1): the guest leaving does not make every room dirty. A room another in-house guest still
+        // holds, or one that is out of order / in maintenance, keeps its status and gets no task; a room with an
+        // active maintenance task that blocks it goes to maintenance and its departure clean waits there (same
+        // rule as processGuestCheckout()).
+        $targetStmt = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ?");
+        $cleanRooms = [];
+        foreach ($roomIds as $roomId) {
+            $targetStmt->execute([$roomId]);
+            $target = rh_vacated_room_target(
+                (string)$targetStmt->fetchColumn(),
+                rh_room_held_by_other_inhouse((int)$roomId, $bookingId),
+                rh_room_has_active_maintenance($pdo, (int)$roomId)
+            );
+            if ($target === 'cleaning') {
+                $cleanRooms[] = $roomId;
+                continue;
+            }
+            if ($target !== 'maintenance') {
+                continue; // left as it is
+            }
+            $earlyTarget = rh_checkout_early_clean_target($pdo, (int)$roomId, $bookingId);
+            if ($earlyTarget !== null) {
+                $applied = rh_checkout_apply_early_clean((int)$roomId, $earlyTarget, $bookingRef, $performedBy);
+            } else {
+                // The 'Maintenance assignment active' prefix lets the maintenance reconcile release the room later.
+                $applied = updateRoomStatus((int)$roomId, 'maintenance', "Maintenance assignment active (guest checkout - Booking #{$bookingRef})", $performedBy, ['force' => true, 'notes' => $bookingRef]);
+                if (!empty($applied['success'])) {
+                    rh_ensure_checkout_cleaning_task((int)$roomId, $bookingId, $performedBy);
+                }
+            }
+            if (!empty($applied['success'])) {
+                $updated++;
+            }
+        }
+        $roomIds = $cleanRooms;
+        if (empty($roomIds)) {
+            if ($updated > 0) {
+                require_once __DIR__ . '/cache.php';
+                clearRoomCache();
+            }
+            return $updated;
+        }
         $plainRooms = [];
         foreach ($roomIds as $roomId) {
             $earlyTarget = rh_checkout_early_clean_target($pdo, (int)$roomId, $bookingId);
@@ -3840,6 +3908,46 @@ function rh_ensure_checkout_cleaning_task(int $individualRoomId, int $bookingId,
     } catch (Throwable $e) {
         error_log('rh_ensure_checkout_cleaning_task warning: ' . $e->getMessage());
     }
+}
+
+/**
+ * An in-house guest moved out of this room (room change). Same rule as checkout (rh_vacated_room_target()):
+ * a room another in-house guest holds, or one out of order / in maintenance, keeps its status and gets no task;
+ * a room with an active blocking maintenance task goes to maintenance (its clean waits); an occupied room goes
+ * to cleaning. Every status change is logged in room_maintenance_log; the departure clean is created once.
+ * Works inside the caller's transaction or on its own. Returns the status set, or null when nothing changed.
+ */
+function rh_release_room_after_move(int $roomId, int $bookingId, string $reason, ?int $performedBy = null): ?string
+{
+    global $pdo;
+    if ($roomId <= 0) {
+        return null;
+    }
+    if (!function_exists('rh_room_has_active_maintenance')) {
+        require_once __DIR__ . '/../includes/room-management.php';
+    }
+    $st = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ?");
+    $st->execute([$roomId]);
+    $old = (string)$st->fetchColumn();
+    if ($old === '') {
+        return null;
+    }
+    $target = rh_vacated_room_target($old, rh_room_held_by_other_inhouse($roomId, $bookingId), rh_room_has_active_maintenance($pdo, $roomId));
+    if ($target === null) {
+        return null;
+    }
+    if ($target === 'maintenance') {
+        // The 'Maintenance assignment active' prefix lets the maintenance reconcile release the room later.
+        updateRoomStatus($roomId, 'maintenance', 'Maintenance assignment active (' . $reason . ')', $performedBy, ['force' => true]);
+    } elseif ($old === 'occupied') {
+        $pdo->prepare("UPDATE individual_rooms SET status = 'cleaning' WHERE id = ?")->execute([$roomId]);
+        $pdo->prepare("INSERT INTO room_maintenance_log (individual_room_id, status_from, status_to, reason, performed_by) VALUES (?, 'occupied', 'cleaning', ?, ?)")
+            ->execute([$roomId, $reason, $performedBy]);
+    }
+    rh_ensure_checkout_cleaning_task($roomId, $bookingId, $performedBy);
+    require_once __DIR__ . '/cache.php';
+    clearRoomCache();
+    return $target;
 }
 
 /**
@@ -6495,6 +6603,15 @@ function rh_validate_booking_stay_change(int $bookingId, string $newCheckIn, str
             if ($locked !== null) {
                 return $fail($label . ' was just taken by booking ' . $locked . ' for ' . $a . ' to ' . $b . '.');
             }
+            // Step 12a (R3): moving to a room (or pair) a joined-room booking still needs is refused, the same
+            // rule as assigning a room. Rooms the booking already holds are not re-judged.
+            if ($explicitRoom > 0 && !in_array($rid, array_map('intval', getBookingRoomIds($bookingId)), true)) {
+                $neededBy = rh_room_needed_for_joined($rid, $a, $b, $bookingId);
+                if ($neededBy !== null) {
+                    return $fail($label . ' is needed for joined-room booking ' . $neededBy . ' for ' . $a . ' to ' . $b
+                        . ' (no other free pair is left). Assign that booking its pair first, or pick another room.');
+                }
+            }
         }
     }
 
@@ -8874,12 +8991,7 @@ function assignIndividualRoomToBooking(int $bookingId, int $individualRoomId, bo
         $prevRoomId = (int)($booking['previous_individual_room_id'] ?? 0);
         if ($prevRoomId > 0 && $prevRoomId !== $individualRoomId && (string)$booking['status'] === 'checked-in') {
             // A room that is out of service (maintenance / out of order) keeps its status and gets no cleaning task.
-            $prevSt = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ?");
-            $prevSt->execute([$prevRoomId]);
-            if (!in_array((string)$prevSt->fetchColumn(), rh_room_out_of_service_statuses(), true)) {
-                $pdo->prepare("UPDATE individual_rooms SET status = 'cleaning' WHERE id = ? AND status = 'occupied'")->execute([$prevRoomId]);
-                rh_ensure_checkout_cleaning_task($prevRoomId, $bookingId, $performedBy);
-            }
+            rh_release_room_after_move($prevRoomId, $bookingId, 'Guest moved rooms (' . (string)($booking['booking_reference'] ?? ('Booking #' . $bookingId)) . ')', $performedBy);
         }
 
         // A room becomes 'occupied' when the guest actually checks in (updateBookingRoomsStatus

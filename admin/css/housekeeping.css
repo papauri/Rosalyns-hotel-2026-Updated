@@ -640,3 +640,46 @@
         min-height: 44px;
     }
 }
+
+/* Step 12a: occupied room cards are list items so the shared pager pages them (10 per page + "Show" picker).
+   The grid stays even where .ck-rows (admin-cockpit.css) is loaded. */
+ul.occupied-rooms-list.ck-rows {
+    display: grid;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.occupied-room-item {
+    display: flex;
+    min-width: 0;
+}
+
+.occupied-room-item[hidden] {
+    display: none;
+}
+
+.occupied-room-item > .occupied-room-card {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+/* A guest past their checkout date reads "Overdue", not "Occupied". */
+.occupied-room-card.overdue-checkout {
+    border-color: #fecaca;
+    background: linear-gradient(135deg, #fff5f5 0%, #fee2e2 100%);
+}
+
+.occupied-room-card.overdue-checkout .occupancy-badge {
+    background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
+    color: #991b1b;
+}
+
+/* Clear button next to the assignments search: a full touch target. */
+.hk-filter-clear {
+    min-height: 44px;
+    min-width: 44px;
+}
+
+/* 12a: .btn is inline-flex, so honour [hidden] on the filter Clear button */
+.hk-filter-clear[hidden]{display:none !important;}

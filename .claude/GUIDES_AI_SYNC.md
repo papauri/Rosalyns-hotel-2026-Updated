@@ -135,6 +135,18 @@ when prompted."
   refuse-at-Rosalyn's guard; 7 data-dependent fails at Liwonde (briefing left-owing + refunds, 4 alert checks, digest
   recipients) - they also fail on the previous code; idea: cancellations decision could offer the policy as an option.
 
+### Individual rooms + housekeeping review (2026-11-16, NEXT_BUILD_ORDER step 12a) — SHIPPED (hashes: see NEXT_BUILD_ORDER.md row 12a)
+- Staff-visible: checkout no longer sends an out-of-order room, a room still holding another checked-in guest, or a
+  room under blocking maintenance to Cleaning (maintenance rooms show "Room is in maintenance; its clean waits");
+  check-in "not clean" override only covers dirty/cleaning rooms (occupied/maintenance/out of order always refused);
+  changing a booking's room refuses a pair room a waiting joined-room booking needs; in-house move puts the old room
+  on the Housekeeping list; Individual Rooms refuses statuses that contradict bookings, Cleaning creates one task;
+  Create Checkout Cleanup covers every room of a booking; Maintenance "Block room during maintenance" unticked =
+  room stays on sale (owner 2026-11-16); Housekeeping + Maintenance filters page 10 + picker, Clear, search all
+  rows; column helpers; overdue guests show "Overdue".
+- Guides: housekeeping, maintenance, individual rooms, check-in/checkout pages. Assistant: room status / checkout
+  answers must not say a maintenance or out-of-order room was sent to cleaning.
+
 ## Synced 2026-11-14 (guides: step 6, 844f21f / 4a02c11 · Assistant: step 7) — entries kept for reference
 
 **Both parts of every entry below are DONE. Stashes "PARKED 2026-11-14 guides + Assistant sync" (Rosalyn's) and

@@ -12,6 +12,45 @@ require_once __DIR__ . '/../includes/price-history.php';
 require_once __DIR__ . '/includes/child-charge-fields.php';
 /** @var string $csrf_token */
 
+/**
+ * Step 12a (R5): a manual status change must not contradict the bookings (rh_room_status_contradiction()):
+ * no Available / Cleaning while a guest is checked in, no Occupied while nobody is. Returns the message for the
+ * first room that fails, or null when every room may change.
+ */
+function ir_status_contradiction_message(array $roomIds, string $newStatus): ?string
+{
+    global $pdo;
+    $numStmt = $pdo->prepare('SELECT room_number FROM individual_rooms WHERE id = ?');
+    foreach ($roomIds as $rid) {
+        $rid = (int)$rid;
+        if ($rid <= 0) {
+            continue;
+        }
+        $why = rh_room_status_contradiction($newStatus, rh_room_held_by_other_inhouse($rid, 0));
+        if ($why !== null) {
+            $numStmt->execute([$rid]);
+            $num = (string)($numStmt->fetchColumn() ?: ('#' . $rid));
+            return 'Room ' . $num . ' cannot be set to ' . ucfirst(str_replace('_', ' ', $newStatus)) . ': ' . $why . '.';
+        }
+    }
+    return null;
+}
+
+/**
+ * After a manual status change (inside the caller's transaction): a room set to Cleaning gets its housekeeping
+ * task (createHousekeepingAssignment() skips a room that already has an open one, so never twice).
+ */
+function ir_status_change_followup(int $roomId, string $oldStatus, string $newStatus, $userId): void
+{
+    if ($newStatus !== 'cleaning') {
+        return;
+    }
+    if (!function_exists('createHousekeepingAssignment')) {
+        require_once __DIR__ . '/../includes/room-management.php';
+    }
+    createHousekeepingAssignment($roomId, $userId !== null ? (int)$userId : null, ['notes' => 'Room set to Cleaning on Individual Rooms']);
+}
+
 /** Common field checks for an individual room (add + edit). Returns an error string or null. */
 function ir_validate_room_fields(PDO $pdo, int $room_type_id, string $room_number, string $room_name, string $floor, string $notes, $maxGuestsRaw, $childMultRaw, int $display_order): ?string
 {
@@ -578,6 +617,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $error = 'Invalid status.';
             } elseif (rhStatusBlocksRoom((string)$new_status) && !$canBlockRooms) {
                 $error = rhBlockRoomsDeniedMessage();
+            } elseif (($irContra = ir_status_contradiction_message($statusIds, (string)$new_status)) !== null) {
+                $error = $irContra;
             } else {
                 $pdo->beginTransaction();
                 try {
@@ -597,6 +638,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         }
                         $stmt->execute([$new_status, $id]);
                         $logStmt->execute([$id, $current['status'], $new_status, $reason, $user['id'] ?? null]);
+                        ir_status_change_followup((int)$id, (string)$current['status'], (string)$new_status, $user['id'] ?? null);
                         $changed++;
                     }
                     if ($changed > 0) {
@@ -640,6 +682,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $error = 'Invalid status.';
                 } elseif (rhStatusBlocksRoom((string)$new_status) && !$canBlockRooms) {
                     $error = rhBlockRoomsDeniedMessage();
+                } elseif (($irContra = ir_status_contradiction_message(ir_expand_pair_ids((array)$room_ids), (string)$new_status)) !== null) {
+                    $error = $irContra . ' Nothing was changed.';
                 } else {
                     // A joined room counts as ONE selected unit and moves both of its rooms.
                     $bulkPairMap = rh_joined_only_pair_map();
@@ -678,6 +722,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                     VALUES (?, ?, ?, 'Bulk status change', ?)
                                 ");
                                 $logStmt->execute([$room_id, $current['status'], $new_status, $user['id'] ?? null]);
+                                ir_status_change_followup($room_id, (string)$current['status'], (string)$new_status, $user['id'] ?? null);
                             }
                         }
                         $pdo->commit();
@@ -1354,16 +1399,6 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="csrf-token" content="<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>">
-    <script>
-        (function() {
-            var _t = '<?= htmlspecialchars($csrf_token, ENT_QUOTES) ?>';
-            var _f = window.fetch;
-            window.fetch = function(u, o) {
-                if (o && o.body instanceof FormData && !o.body.has('csrf_token')) o.body.append('csrf_token', _t);
-                return _f.apply(this, arguments);
-            };
-        })();
-    </script>
     <title>Individual Rooms Management - Admin Panel</title>
 
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1376,6 +1411,21 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
 
 <body>
     <?php require_once 'includes/admin-header.php'; ?>
+    <script>
+        // Every page POST carries the admin token. In the page body (inside #rh-admin-page), not <head>: the admin
+        // in-place navigation drops head scripts, so saves failed with "Security token invalid" after opening this
+        // screen from the menu. Installed once per token (same pattern as room-management.php).
+        (function() {
+            var _t = <?php echo json_encode($csrf_token); ?>;
+            if (window.__irCsrfToken === _t) return;
+            window.__irCsrfToken = _t;
+            var _f = window.fetch;
+            window.fetch = function(u, o) {
+                if (o && o.body instanceof FormData && !o.body.has('csrf_token')) o.body.append('csrf_token', _t);
+                return _f.apply(this, arguments);
+            };
+        })();
+    </script>
 
     <div class="content">
         <div class="page-header">

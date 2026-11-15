@@ -354,13 +354,31 @@ function createHousekeepingAssignment(int $roomId, ?int $performedBy, array $opt
             $notes .= ' - ' . $options['notes'];
         }
 
-        // Create assignment
-        $stmt = $pdo->prepare("
-            INSERT INTO housekeeping_assignments
-            (individual_room_id, status, due_date, priority, notes, created_by, created_at)
-            VALUES (?, 'pending', CURDATE(), ?, ?, ?, NOW())
-        ");
-        $stmt->execute([$roomId, $priority, $notes, $performedBy]);
+        // Create assignment. A checkout task records which booking it belongs to (linked_booking_id) when the
+        // column exists, so the departure clean is traceable and never created twice for that booking.
+        static $hasLinkedCol = null;
+        if ($hasLinkedCol === null) {
+            try {
+                $hasLinkedCol = (int)$pdo->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'housekeeping_assignments' AND COLUMN_NAME = 'linked_booking_id'")->fetchColumn() > 0;
+            } catch (Throwable $e) {
+                $hasLinkedCol = false;
+            }
+        }
+        if ($linkedBookingId > 0 && $hasLinkedCol) {
+            $stmt = $pdo->prepare("
+                INSERT INTO housekeeping_assignments
+                (individual_room_id, status, due_date, priority, notes, created_by, linked_booking_id, created_at)
+                VALUES (?, 'pending', CURDATE(), ?, ?, ?, ?, NOW())
+            ");
+            $stmt->execute([$roomId, $priority, $notes, $performedBy, $linkedBookingId]);
+        } else {
+            $stmt = $pdo->prepare("
+                INSERT INTO housekeeping_assignments
+                (individual_room_id, status, due_date, priority, notes, created_by, created_at)
+                VALUES (?, 'pending', CURDATE(), ?, ?, ?, NOW())
+            ");
+            $stmt->execute([$roomId, $priority, $notes, $performedBy]);
+        }
 
         // Update room's housekeeping status
         $pdo->prepare("UPDATE individual_rooms SET housekeeping_status = 'pending' WHERE id = ?")->execute([$roomId]);
@@ -494,11 +512,14 @@ function rh_room_has_active_maintenance(PDO $pdo, int $roomId): bool
         $params[] = date('Y-m-d'); // hotel timezone (RH_TIMEZONE is the PHP default timezone)
     }
     $completedCond = "status = 'completed'" . (rh_maint_schedule_column_exists($pdo, 'verified_at') ? ' AND verified_at IS NULL' : '');
+    // Owner 2026-11-16 ("Obey the tick"): a task with "Block room during maintenance" unticked leaves the room on
+    // sale and in service - the same rule availability and assignment already use (block_room = 1).
+    $blockCond = rh_maint_schedule_column_exists($pdo, 'block_room') ? ' AND block_room = 1' : '';
 
     try {
         $st = $pdo->prepare("
             SELECT 1 FROM room_maintenance_schedules
-            WHERE individual_room_id = ?
+            WHERE individual_room_id = ?{$blockCond}
               AND (status = 'in_progress' OR ({$plannedCond}) OR ({$completedCond}))
             LIMIT 1
         ");
@@ -603,6 +624,17 @@ function processGuestCheckout(int $bookingId, ?int $performedBy = null, array $o
         foreach (array_keys($roomsToRelease) as $roomId) {
             if ($roomId <= 0) {
                 continue;
+            }
+            // Step 12a (R1): a room another in-house guest still holds, or one that is out of order / in
+            // maintenance, keeps its status and gets no task (rh_vacated_room_target(), same rule as
+            // updateBookingRoomsStatus()).
+            if ($nextStatus === ROOM_STATUS_CLEANING) {
+                $stNow = $pdo->prepare("SELECT status FROM individual_rooms WHERE id = ?");
+                $stNow->execute([$roomId]);
+                if (rh_vacated_room_target((string)$stNow->fetchColumn(), rh_room_held_by_other_inhouse($roomId, $bookingId), false) === null) {
+                    $workflowResults['rooms'][$roomId] = ['room_update' => ['success' => true, 'message' => 'Room left as it is'], 'housekeeping' => null];
+                    continue;
+                }
             }
             // A room with an active maintenance schedule goes to maintenance, not cleaning; the
             // housekeeping task is still created and waits until maintenance releases the room.
