@@ -98,6 +98,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $category = rh_clean_text($_POST['category'] ?? '');
             if ($category === '__new__') {
                 $category = rh_clean_text($_POST['new_category'] ?? '');
+                // A "new" category typed with other capitals than one already on this menu joins that one (no "Drinks" and "drinks").
+                if ($category !== '') {
+                    $sameCat = $pdo->prepare("SELECT category FROM `{$table}` WHERE LOWER(TRIM(category)) = LOWER(?) ORDER BY id ASC LIMIT 1");
+                    $sameCat->execute([$category]);
+                    $existingCat = $sameCat->fetchColumn();
+                    if ($existingCat !== false && trim((string)$existingCat) !== '') {
+                        $category = (string)$existingCat;
+                    }
+                }
             }
             $description = mb_substr(trim((string)($_POST['description'] ?? '')), 0, 2000);
             $rawPrice = str_replace(',', '', trim((string)($_POST['price'] ?? '')));
@@ -1806,6 +1815,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             const ul = mmEl('mmIngUnitLine');
             if (!ing) {
                 MM_STATE.draftId = 0;
+                mmEl('mmIngQty').classList.remove('mm-need');
                 sel.innerHTML = '<option value="base">unit</option>';
                 sel.disabled = true;
                 mmEl('mmIngPreview').textContent = '';
@@ -1870,22 +1880,30 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             mmSetPreview(out, d);
         }
 
+        /* Adds the picked stock item to the list. Returns true when added (Save uses it too), false after showing why not. */
         function mmStockAdd() {
             const ing = mmFindIng(mmEl('mmIngPick').value);
             const q = parseFloat(mmEl('mmIngQty').value);
+            if (!MM_STATE.ready) { // still loading, or the load failed: a line added now would be lost on save
+                Alert.show('What this item uses from stock is still loading. Wait a moment; if this stays, close the form and open it again.', 'error');
+                return false;
+            }
             if (!ing) {
                 Alert.show('Choose a stock item first.', 'error');
-                return;
-            }
-            if (!(q > 0)) {
-                Alert.show('Type how much one sale uses.', 'error');
-                return;
+                return false;
             }
             if (MM_STATE.lines.some(function(l) {
                     return l.ingredient_id === ing.id;
                 })) {
+                mmEl('mmIngPick').value = '';
+                mmEl('mmIngQty').value = '';
+                mmIngChosen();
                 Alert.show(ing.name + ' is already added. Change the amount in the list above.', 'error');
-                return;
+                return false;
+            }
+            if (!(q > 0)) {
+                Alert.show('Type how much one sale uses.', 'error');
+                return false;
             }
             const nl = mmDraftLine(ing);
             nl.qty = q;
@@ -1895,17 +1913,17 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 else if (!mmPiecesOk(q)) {
                     mmEl('mmIngQty').focus();
                     Alert.show('Type whole pieces (1, 2, 3). A quarter, half or three-quarters of a piece is also fine (tap ¼, ½ or ¾).', 'error');
-                    return;
+                    return false;
                 } else if (!(mmPer(nl) > 0)) {
                     Alert.show('The number of pieces in one ' + ing.unit + ' of ' + ing.name + ' is not set. Set it in Stock, or choose "' + ing.unit + '" in the unit box.', 'error');
-                    return;
+                    return false;
                 }
             } else if (nl.entry === 'small') {
                 if (!mmSmallOf(ing.unit)) nl.entry = 'base';
                 else if (!mmSmallOk(q)) {
                     mmEl('mmIngQty').focus();
                     Alert.show('Type whole ' + (mmSmallOf(ing.unit) === 'g' ? 'grams' : 'ml') + ', like 250. No decimals.', 'error');
-                    return;
+                    return false;
                 }
             } else if (nl.entry === 'pack' && !(ing.pack_size > 0)) nl.entry = 'base';
             MM_STATE.lines.push(nl);
@@ -1914,6 +1932,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             mmEl('mmIngQty').value = '';
             mmIngChosen();
             mmStockRender();
+            return true;
         }
 
         async function mmSubmit(e) {
@@ -1945,12 +1964,22 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 mmEl('mmPrice').focus();
                 return fail('Enter the price (more than 0). For a free item, tick "This item is free".');
             }
+            // A stock item still in the box above Add: never lose it silently, never nag when it is already listed.
             const waiting = mmFindIng(mmEl('mmIngPick').value);
-            if (waiting && !MM_STATE.lines.some(function(l) {
-                    return l.ingredient_id === waiting.id;
-                })) { // picked in the box above Add but never added: it would be lost silently
-                mmEl('mmIngQty').focus();
-                return fail(waiting.name + ' is picked but not added. Press Add to keep it, or clear the Stock item box.');
+            if (waiting) {
+                if (MM_STATE.lines.some(function(l) {
+                        return l.ingredient_id === waiting.id;
+                    })) {
+                    mmEl('mmIngPick').value = ''; // already in the list: nothing to add
+                    mmEl('mmIngQty').value = '';
+                    mmIngChosen();
+                } else if (parseFloat(mmEl('mmIngQty').value) > 0) {
+                    if (!mmStockAdd()) return; // same checks as the Add button; its message is already showing
+                } else {
+                    mmEl('mmIngQty').classList.add('mm-need');
+                    mmEl('mmIngQty').focus();
+                    return fail('Type how much ' + waiting.name + ' one sale uses, or clear the Stock item box.');
+                }
             }
             const fd = new FormData(form);
             fd.set('price', mmEl('mmFree').checked ? '0' : mmEl('mmPrice').value);
@@ -2207,8 +2236,9 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 if (!data.ok) throw new Error(data.error);
                 MM_STATE.ing = null;
                 const list = await mmLoadIngredients();
+                const madeId = parseInt(data.id, 10);
                 const made = list.find(function(i) {
-                    return i.id === data.id;
+                    return i.id === madeId;
                 });
                 if (made) {
                     mmEl('mmIngCat').value = '';
@@ -2217,7 +2247,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                     mmEl('mmIngPick').value = String(made.id);
                     mmIngChosen();
                 }
-                Alert.show(data.reused ? 'That stock item is already there. It is picked for you.' : 'Stock item added. Type how much one sale uses, then press Add.', 'success');
+                Alert.show(data.reused ? 'That stock item is already there. It is picked for you.' : 'Stock item added and picked. Type how much one sale uses.', 'success');
                 closeIngredientModal();
             } catch (e) {
                 Alert.show('Could not add the stock item: ' + e.message, 'error');

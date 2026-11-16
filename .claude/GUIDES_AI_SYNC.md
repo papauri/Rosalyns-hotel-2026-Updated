@@ -344,6 +344,10 @@ when prompted."
 - Guides (Stock > Import, guide 23): "look very similar" no longer asks about two names that differ by one whole word (Black tea / Black tie, sweet red / sweet rose); the question that stays shows each row's quantity and unit cost and says "Use X for both" makes ONE item and ADDS the quantities (different sheets: you are then asked add or first sheet only), and that answer no longer leaves the item stuck. Case-price question shows the unit, the counted quantity, the line value and what each answer does (example pack, quantity stays in the sheet's unit). Value check: every disagreeing row has "Most likely: ..." on Step 3 and a "What it most likely means" column in the stock-check workbook; the Summary states the counted fact. "trays" reads as "tray".
 - Assistant: question texts it may relay changed (possible-typo, case-price); value-check rows carry `why` / `why_code` (qty-changed, no-qty, no-value, no-fit) and groups `why_*` counts. includes/ai/ai-import.php needs no change (it keys on question type).
 
+### Menu items: Save adds a picked stock item (2026-11-17, owner fault "keeps saying something is picked but not added") - hashes in TASKS.md
+- Guides (Menu Management, add/edit item): you no longer have to press Add before Save. A stock item picked with an amount typed is added when you press Save; one already in the list is just cleared; picked with no amount, Save asks "Type how much X one sale uses, or clear the Stock item box." A "New category" typed with other capitals (drinks / Drinks) joins the existing category. New stock item from "Not in the list?" is picked for you.
+- Assistant: no change in what it reads (same tables, same recipe lines).
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` at Liwonde: 7 data-dependent fails (left-owing + refunds briefing, 4 alert checks, digest
   recipients); ai_review_engine "nothing to add for this person" fails on HEAD too. (Tomorrow / 4 of 3 / K1,068,000 now pass.)

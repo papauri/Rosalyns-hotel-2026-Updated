@@ -417,6 +417,18 @@ $bcSetup = [
 $r = $page($basePost + ['barcode' => "zz-bc-$hr"], $bcSetup, [], $verifyAdd);
 check($clean($r) && ($r['json']['success'] ?? true) === false && stripos((string)($r['json']['message'] ?? ''), 'barcode') !== false && (int)(($r['verify'][0][0] ?? [])['n'] ?? 1) === 0, 'Page: a barcode already on another item is refused and nothing is saved', json_encode($r['json'] ?? $r));
 
+// "New category" typed with other capitals and spaces than one already on the menu joins it (no second web category, one till category).
+$r = $page(array_merge($basePost, ['category' => '__new__', 'new_category' => '  zzmp   cat ' . strtolower($hr) . ' ']), ["INSERT INTO food_menu (item_name, price, category, station) VALUES ('ZZMP $hr Seed', 100, 'ZZMP Cat $hr', 'kitchen')"], [], [
+    "SELECT COUNT(DISTINCT BINARY category) AS n FROM food_menu WHERE LOWER(category) = LOWER('ZZMP Cat $hr')",
+    "SELECT COUNT(*) AS n FROM food_menu WHERE BINARY category = 'ZZMP Cat $hr'",
+    "SELECT COUNT(*) AS n FROM menu_items WHERE item_name = 'ZZMP $hr Item' AND BINARY category = 'ZZMP Cat $hr'",
+    "SELECT COUNT(*) AS n FROM menu_categories WHERE LOWER(name) = LOWER('ZZMP Cat $hr')",
+]);
+$n = static fn(array $r, int $i): int => (int)(($r['verify'][$i][0] ?? [])['n'] ?? -1);
+check($clean($r) && ($r['json']['success'] ?? false) === true && $n($r, 0) === 1 && $n($r, 1) === 2 && $n($r, 2) === 1 && $n($r, 3) === 1, 'Page: a new category typed in other capitals joins the existing one (web + till)', json_encode($r['json'] ?? $r['verify'] ?? $r));
+$r = $page(array_merge($basePost, ['category' => '__new__', 'new_category' => "ZZMP Fresh $hr"]), [], [], ["SELECT COUNT(*) AS n FROM food_menu WHERE BINARY category = 'ZZMP Fresh $hr'", "SELECT COUNT(*) AS n FROM menu_categories WHERE name = 'ZZMP Fresh $hr'"]);
+check($clean($r) && ($r['json']['success'] ?? false) === true && $n($r, 0) === 1 && $n($r, 1) === 1, 'Page: a brand-new category is created on the web menu and the till', json_encode($r['json'] ?? $r['verify'] ?? $r));
+
 // Toggle, delete (never sold, sold, on an open order) on seeded rows (website row + till row + recipe).
 $seed = static function (string $tag) use ($hr): array {
     $slug = 'zzmp-' . strtolower($hr) . '-' . $tag;
