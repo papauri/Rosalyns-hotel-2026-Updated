@@ -360,6 +360,10 @@ when prompted."
 - Guides (Stock › Fix crate prices): Preview now has a "Divide this batch" box per batch still holding stock (batches already at a price for one start unticked) and shows the new cost as the average cost of the stock held; open purchase-order lines still at the crate price are divided too (line total old → new, order total recomputed; check the quantity is in single units, not crates, and send the supplier the corrected order if it was already sent). Staff activity shows the whole "Corrected a crate price" entry.
 - Assistant: no change in what it reads (PO unit_cost/line_total/total_cost may now change through this page; activity text longer).
 
+### Fix crate prices page redone (2026-11-17, owner "UI all over the place … explanation needs to be easier") - hashes in TASKS.md
+- Guides (Stock › Fix crate prices): page is now 3 steps: 1 Type the crate size (box next to the item name; "Choose CSV file" then "Fill from list"; "May be a case price" is a filter tick), 2 Check (Preview → "Now: X each → After: Y each", value before/after), 3 Save (Confirm and correct). Short 3-line intro + "More detail". Screenshots for the guide should be retaken.
+- Assistant: no change.
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` at Liwonde: 7 data-dependent fails (left-owing + refunds briefing, 4 alert checks, digest
   recipients); ai_review_engine "nothing to add for this person" fails on HEAD too. (Tomorrow / 4 of 3 / K1,068,000 now pass.)
