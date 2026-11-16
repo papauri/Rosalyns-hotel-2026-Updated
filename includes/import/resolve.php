@@ -118,6 +118,24 @@ if (!function_exists('import_resolve')) {
                 $q['auto_reason'] = (string)$q['pre']['reason'];
                 continue;
             }
+            // the same name under two different headings (A85): two items, each named with its heading - picked for the person (visible, changeable)
+            // only when no stock item already has that name (then which heading it belongs to is the person's call) and every new name fits
+            if (($q['type'] ?? '') === 'duplicate-no-batch' && !empty($q['section_split'])) {
+                $typed = $rowName[($q['row_uids'][0] ?? '')] ?? '';
+                $fits = true;
+                foreach ($q['section_split'] as $cat) {
+                    if (mb_strlen(import_section_item_name($typed, (string)$cat)) > 100) {
+                        $fits = false;
+                    }
+                }
+                if ($typed !== '' && $fits && import_match_existing($typed, $ctx)['row'] === null) {
+                    $q['answer'] = 'section-items';
+                    $q['answer_detail'] = ['key' => 'section-items', 'auto' => true];
+                    $q['auto'] = true;
+                    $q['auto_reason'] = '"' . $typed . '" is under ' . count($q['section_split']) . ' different headings and is not in stock yet, so each is its own item, named with its heading.';
+                    continue;
+                }
+            }
             // a correction this hotel made before ("Heinken" is "Heineken"): offered as the answer, visible, and changeable
             if (($q['type'] ?? '') === 'possible-typo' && ($q['against'] ?? '') === 'existing' && !empty($q['suggestion']['name'])) {
                 $typed = $rowName[($q['row_uids'][0] ?? '')] ?? '';
@@ -251,9 +269,9 @@ if (!function_exists('import_resolve')) {
             }
             $hasPq = false;
             foreach ((array)($sh['columns'] ?? []) as $c) {
-                if (($c['state'] ?? '') === 'mapped' && ($c['field'] ?? '') === 'purchase_qty') {
-                    $hasPq = true;          // a value column next to a Purchase Qty may be a buying list (A74): not read as a stock value here
-                }
+                if (($c['state'] ?? '') === 'mapped' && in_array(($c['field'] ?? ''), ['purchase_qty', 'sell_price'], true)) {
+                    $hasPq = true;          // a value column next to a Purchase Qty may be a buying list (A74), next to a selling price it may be valued
+                }                           // at the selling price: not read as a stock value here
             }
             $cleanSheet = trim((string)preg_replace('/^[^\p{L}\p{N}]+/u', '', (string)$sh['name']));
             $cleanSheet = $cleanSheet !== '' ? $cleanSheet : (string)$sh['name'];
@@ -261,6 +279,9 @@ if (!function_exists('import_resolve')) {
                 $f = $row['fields'];
                 if (!isset($f['unit_price']) || !is_numeric($f['unit_price']['value']) || (float)$f['unit_price']['value'] <= 0) {
                     continue;
+                }
+                if (!empty($row['pack_rule']) && (!empty($row['pack_rule']['decided']) || (string)($row['pack_rule']['ask'] ?? '') !== '')) {
+                    continue;               // the row's own bought-as / pack / served-by cells decide (or ask about) its price basis
                 }
                 $name = (string)($f['item_name']['value'] ?? '');
                 $hasConflict = false;
@@ -361,7 +382,7 @@ if (!function_exists('import_resolve')) {
                 $row['question_ids'][] = $q['id'];
             }
             $analysis['questions'][$found]['case_evidence'] = $slim;
-            $analysis['questions'][$found]['pack_hint'] = $j['pack_hint'];
+            $analysis['questions'][$found]['pack_hint'] = $j['pack_hint'] ?? ($analysis['questions'][$found]['pack_hint'] ?? null);   // a size from the name stays when the evidence has none
             if ($pre) {
                 $analysis['questions'][$found]['pre'] = $pre;
             }
@@ -497,7 +518,7 @@ if (!function_exists('import_resolve')) {
                     'price_source' => isset($f['unit_price']) ? $f['unit_price']['source'] : null, 'price_how' => isset($f['unit_price']) ? $f['unit_price']['how'] : null,
                     'price_raw' => isset($f['unit_price']['raw']) ? $f['unit_price']['raw'] : null,
                     'unit_raw' => isset($f['unit']) ? $f['unit']['value'] : null, 'unit_source' => isset($f['unit']) ? $f['unit']['source'] : null,
-                    'pack' => null, 'pack_source' => null, 'expiry' => isset($f['expiry']) ? $f['expiry']['value'] : null, 'expiry_source' => isset($f['expiry']) ? $f['expiry']['source'] : null,
+                    'pack' => null, 'pack_source' => null, 'pack_cell' => null, 'pack_name' => null, 'pack_info' => null, 'pack_reason' => '', 'pack_auto' => false, 'pack_sell' => null, 'expiry' => isset($f['expiry']) ? $f['expiry']['value'] : null, 'expiry_source' => isset($f['expiry']) ? $f['expiry']['source'] : null,
                     'batch' => isset($f['batch']) ? $f['batch']['value'] : null, 'max' => isset($f['max_level']) ? $f['max_level']['value'] : null,
                     'min' => isset($f['min_level']) ? $f['min_level']['value'] : null, 'remarks' => isset($f['remarks']) ? $f['remarks']['value'] : null,
                     'qty' => isset($row['computed']['qty_total']) ? $row['computed']['qty_total']['value'] : null,
@@ -510,6 +531,21 @@ if (!function_exists('import_resolve')) {
                 $dupQ = null;
                 $needPack = false;
                 $origPriceSource = isset($f['unit_price']) ? $f['unit_price']['source'] : null;
+                $pr = $row['pack_rule'] ?? null;
+                if ($pr) {
+                    // the row's own bought-as / pack size / served-by cells (validator, pack-rule.php): a decided per-pack price is divided by the
+                    // pack size from the SAME row (the pack belongs to this row's price cell); a "per case or per unit?" answer below overrides it
+                    $fin['pack_name'] = $pr['pack_name'] ?? null;
+                    $fin['pack_info'] = $pr['info_pack'] ?? null;
+                    $fin['pack_reason'] = (string)($pr['reason'] ?? '');
+                    $fin['pack_sell'] = isset($pr['sell']) && !empty($pr['sell']) && empty($pr['served_portion']) ? (float)$pr['sell'] : null;
+                    if (!empty($pr['pack']) && $origPriceSource !== null) {
+                        $fin['pack'] = (int)$pr['pack'];
+                        $fin['pack_source'] = $origPriceSource;
+                        $fin['pack_cell'] = $pr['pack_src'] ?? null;
+                        $fin['pack_auto'] = true;
+                    }
+                }
                 foreach ($row['question_ids'] as $qid) {
                     $q = $qById[$qid] ?? null;
                     if (!$q) {
@@ -560,9 +596,45 @@ if (!function_exists('import_resolve')) {
                                     // the pack belongs to the price in THIS cell only (money rule): it is never divided into another cell's price
                                     $fin['pack'] = $p;
                                     $fin['pack_source'] = $origPriceSource ?? (string)($q['cells'][0] ?? '');
+                                    $fin['pack_auto'] = false;
+                                    $fin['pack_reason'] = '';
                                 } else {
                                     $needPack = true;
                                 }
+                            } elseif ($a === 'per-unit' && !empty($fin['pack_auto'])) {
+                                $fin['pack'] = null;            // the person said the price is for one unit: the row's pack is not divided into it
+                                $fin['pack_source'] = null;
+                                $fin['pack_auto'] = false;
+                                $fin['pack_reason'] = '';
+                            }
+                            break;
+                        case 'count-unit':
+                            // bought by the case, served by the tot: counted in single units -> the price is divided by the row's own pack size and the
+                            // person picks the unit (the sheet names none for one single); counted in cases -> as written (QA Q3)
+                            if ($a === 'single' && $pr && !empty($pr['info_pack']) && $origPriceSource !== null) {
+                                $fin['unit_raw'] = null;
+                                $fin['unit_source'] = null;
+                                $fin['pack'] = (int)$pr['info_pack'];
+                                $fin['pack_source'] = $origPriceSource;
+                                $fin['pack_cell'] = $pr['pack_src'] ?? ($f['pack_size']['source'] ?? null);
+                                $fin['pack_auto'] = false;
+                                $fin['pack_reason'] = '';
+                            } elseif ($a === 'skip') {
+                                $skip = 'Skipped by you.';
+                            }
+                            break;
+                        case 'pack-price-check':
+                            // both a per-unit and a per-pack price, and they disagree: the person picks one (the per-unit price is the default reading)
+                            if ($a === 'pack' && isset($f['pack_price']) && !empty($pr['info_pack'])) {
+                                $fin['price'] = $f['pack_price']['value'];
+                                $fin['price_source'] = $f['pack_price']['source'];
+                                $fin['price_how'] = 'chosen-pack-price';
+                                $fin['price_raw'] = null;
+                                $fin['pack'] = (int)$pr['info_pack'];
+                                $fin['pack_source'] = $f['pack_price']['source'];
+                                $fin['pack_cell'] = $pr['pack_src'] ?? ($f['pack_size']['source'] ?? null);
+                            } elseif ($a === 'skip') {
+                                $skip = 'Skipped by you.';
                             }
                             break;
                         case 'possible-typo':
@@ -579,6 +651,12 @@ if (!function_exists('import_resolve')) {
                             break;
                         case 'duplicate-no-batch':
                         case 'duplicate-batch-clash':
+                            if ($a === 'section-items' && isset($q['section_split'][$row['uid']])) {
+                                $fin['name'] = import_section_item_name((string)$fin['name'], (string)$q['section_split'][$row['uid']]);
+                                $fin['name_how'] = 'name + heading';
+                                $rec['warnings'][] = 'Named "' . $fin['name'] . '": the same name is under another heading too (' . $fin['name_source'] . ' + ' . (string)$row['category_source'] . ').';
+                                break;
+                            }
                             $dupQ = $q;
                             break;
                         default:
@@ -829,10 +907,24 @@ if (!function_exists('import_resolve')) {
             }
             // the pack is divided only into the price of the cell whose per-case answer set it (money rule)
             $pack = null;
+            $packAuto = false;
+            $packName = null;
+            $packInfo = null;
+            $packReason = '';
             foreach ($ms as $m) {
+                if ($m['fin']['pack_name'] !== null && $packName === null) {
+                    $packName = (string)$m['fin']['pack_name'];
+                }
+                if ($m['fin']['pack_info'] && $packInfo === null) {
+                    $packInfo = (int)$m['fin']['pack_info'];
+                }
+                if ($m['fin']['pack_reason'] !== '' && $packReason === '' && $m['fin']['price_source'] === $first['price_source']) {
+                    $packReason = $m['fin']['pack_reason'];
+                }
                 if ($m['fin']['pack']) {
                     if ($m['fin']['pack_source'] !== null && $m['fin']['pack_source'] === $first['price_source']) {
                         $pack = $m['fin']['pack'];
+                        $packAuto = !empty($m['fin']['pack_auto']);
                     } else {
                         $warn[] = 'A pack size of ' . (int)$m['fin']['pack'] . ' was entered for the case price in ' . $m['fin']['pack_source'] . ', but the price used is the one in '
                             . ($first['price_source'] ?? 'another cell') . ', so the pack size is not applied to it.';
@@ -881,10 +973,10 @@ if (!function_exists('import_resolve')) {
             if ($first['price'] !== null) {
                 if ($pack) {
                     $cost = round((float)$first['price'] / $pack, 4);
-                    $costHow = 'case price / pack size ' . $pack;
+                    $costHow = $packAuto && $packReason !== '' ? $packReason : 'case price / pack size ' . $pack;
                 } else {
                     $cost = round((float)$first['price'], 4);
-                    $costHow = $first['price_how'] ?? 'as-written';
+                    $costHow = ($packReason !== '' && ($first['price_how'] ?? 'as-written') === 'as-written') ? $packReason : ($first['price_how'] ?? 'as-written');
                 }
             }
             // match with what is already in stock
@@ -898,6 +990,15 @@ if (!function_exists('import_resolve')) {
             if ($rawUnit !== null && $rawUnit !== '') {
                 // self-healing "unit-spelling": btl / Bottles -> bottle, LTR -> L (the same unit, spelled the way stock spells it; never a conversion)
                 $unit = import_unit_canon((string)$rawUnit, $synonyms);
+                if ($unitOptions && !in_array($unit, $unitOptions, true)) {
+                    // "Can" / "Each": the same word as a unit this hotel already uses, only in other capitals -> the hotel's spelling
+                    foreach ($unitOptions as $uo) {
+                        if (mb_strtolower($uo) === mb_strtolower($unit)) {
+                            $unit = $uo;
+                            break;
+                        }
+                    }
+                }
                 $unitHow = 'from the sheet';
                 if (trim((string)$rawUnit) !== $unit) {
                     $hid = substr(sha1('unit-spelling|' . ($first['unit_source'] ?? $it['nk'])), 0, 12);
@@ -995,7 +1096,30 @@ if (!function_exists('import_resolve')) {
             $keptCurrent = false;
             $costApplied = !$ex || ($cost !== null && isset($diff['cost']) && (in_array('cost', $tickedRaw, true) || $carryCost));
             $storeProblems = ($cost !== null && $costApplied) ? import_cost_storage_problems(['cost' => $cost, 'pack' => $pack], $costLimits) : [];
-            if ($cost !== null && $costApplied && $priceCheckOk && !$storeProblems && $rowRank === 0 && !$open) {
+            // an existing item whose stored cost IS this row's whole-pack price (a crate price kept as the cost of one bottle) and the row's own cells
+            // divide it: the drop is explained by the row, so it is shown with that reason instead of being asked about (A84)
+            $packExplained = false;
+            // ... and only when something says the row's price really is a pack price: it is above what one unit sells for, or the stored cost is
+            // already flagged as a case price by this hotel's own data (QA Q2). Otherwise the price check asks as before.
+            $packSell = null;
+            foreach ($ms as $mm) {
+                if ($mm['fin']['price_source'] === $first['price_source'] && ($mm['fin']['pack_sell'] ?? null) !== null) {
+                    $packSell = (float)$mm['fin']['pack_sell'];
+                }
+            }
+            // the stored cost IS the whole pack's price, decided from the file alone (no selling price needed): it equals this row's undivided pack
+            // price, or it is at least the divided cost x the pack size (2% slack). Then the quantity is never counted at it unless Cost is ticked (B2).
+            $storedIsPack = $ex && $pack && $cost !== null && $cost > 0 && (float)$ex['cost_per_unit'] > 0 && (
+                ($first['price'] !== null && abs((float)$ex['cost_per_unit'] - (float)$first['price']) <= max(0.5, 0.005 * (float)$first['price']))
+                || (float)$ex['cost_per_unit'] >= $cost * $pack * 0.98);
+            if ($ex && $pack && $packAuto && $cost !== null && (float)$ex['cost_per_unit'] > 0 && $first['price'] !== null
+                && abs((float)$ex['cost_per_unit'] - (float)$first['price']) <= max(0.5, 0.005 * (float)$first['price'])
+                && (($packSell !== null && (float)$first['price'] > $packSell) || isset($costSuspects[(int)$ex['id']]))) {
+                $packExplained = true;
+                $warn[] = 'The cost now in stock (' . import_fmt_money($ex['cost_per_unit']) . ' per ' . $ex['unit'] . ') is the price of the whole ' . mb_strtolower((string)($packName ?? 'pack'))
+                    . ' of ' . (int)$pack . '. ' . $packReason . ' Tick Cost to change it.';
+            }
+            if ($cost !== null && $costApplied && $priceCheckOk && !$storeProblems && $rowRank === 0 && !$open && !$packExplained) {
                 $exCost = $ex ? (float)$ex['cost_per_unit'] : 0.0;
                 $exId = $ex ? (int)$ex['id'] : 0;
                 $catKey = import_pc_cat_key($ex ? $ex['category'] : $first['category']);
@@ -1071,7 +1195,14 @@ if (!function_exists('import_resolve')) {
             if ($balance !== null && ($balance > 0.00005 || $zeroTicked)) {
                 if ($ex) {
                     $inCount = in_array('quantity', $ticked, true) && $effCost !== null && $effCost > 0;
-                    if (in_array('quantity', $ticked, true) && !$inCount) {
+                    $packHeld = false;
+                    if ($inCount && $storedIsPack && !in_array('cost', $ticked, true)) {
+                        // the stored cost is the whole crate's price: counting at it would value every bottle at a crate (accounting A2 / B2). Never auto-ticked.
+                        $inCount = false;
+                        $packHeld = true;
+                        $warn[] = 'The quantity stays out of the opening count until Cost is ticked: the cost now in stock is the price of the whole ' . mb_strtolower((string)($packName ?? 'pack')) . '.';
+                    }
+                    if (in_array('quantity', $ticked, true) && !$inCount && !$packHeld) {
                         $warn[] = 'Ticked to set the stock quantity, but there is no cost, so it is left out of the opening count.';
                     }
                 } else {
@@ -1108,6 +1239,7 @@ if (!function_exists('import_resolve')) {
                 'category' => $first['category'], 'category_how' => $first['category_how'], 'category_source' => $first['category_source'],
                 'unit' => $unit, 'unit_raw' => $rawUnit, 'unit_how' => $unitHow, 'unit_source' => $first['unit_source'],
                 'price' => $first['price'], 'price_source' => $first['price_source'], 'cost' => $cost, 'cost_how' => $costHow, 'pack' => $pack,
+                'pack_name' => $pack ? $packName : null, 'pack_info' => $packInfo, 'pack_reason' => $packReason, 'pack_auto' => $packAuto,
                 'balance' => $balance, 'max' => $max, 'min' => $min, 'remarks' => $remarks, 'batches' => $batches,
                 'rows' => $rowRefs, 'uids' => $uidList, 'sheet' => $ms[0]['sheet'], 'clean_sheet' => $ms[0]['cleanSheet'],
                 'match' => $ex ? ['id' => (int)$ex['id'], 'name' => (string)$ex['name'], 'how' => $first['match_name'] !== null ? (!empty($first['match_auto']) ? 'learned' : 'chosen') : $matchHow, 'archived' => (int)$ex['is_archived'] === 1] : null,

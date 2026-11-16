@@ -12,6 +12,7 @@
  */
 
 require_once __DIR__ . '/structure.php';
+require_once __DIR__ . '/pack-rule.php';
 
 if (!function_exists('import_validate_sheet')) {
 
@@ -21,8 +22,133 @@ if (!function_exists('import_validate_sheet')) {
             'item_name' => 'Item name', 'batch' => 'Batch', 'qty_primary' => 'Bar/Kitchen balance',
             'qty_secondary' => 'Stores balance', 'qty_single' => 'Balance', 'unit' => 'Unit', 'expiry' => 'Expiry date',
             'max_level' => 'Max level', 'min_level' => 'Min level', 'unit_price' => 'Unit price', 'remarks' => 'Remarks',
-            'category' => 'Category',
+            'category' => 'Category', 'pack_name' => 'Bought as', 'pack_size' => 'Pack size', 'served_by' => 'Sold / served by',
+            'pack_price' => 'Price per pack', 'sell_price' => 'Selling price',
         ];
+    }
+
+    /**
+     * Apply import_pack_decide() to one validated row: row['pack_rule'] (slim), the stock unit as a field (from its own cell), and a question for
+     * THAT row only when it does not add up (cost above the selling price, a per-pack price with no pack size, two prices that disagree).
+     */
+    function import_validate_pack_rule(array &$row, array &$rowQs, array $vocab, string $sheetName, int $r): void
+    {
+        $f = $row['fields'];
+        $sell = null;
+        $sellSrc = null;
+        foreach ((array)$row['ignored'] as $ig) {
+            if (($ig['field'] ?? '') === 'sell_price' && empty($ig['unknown']) && $ig['value'] !== null) {
+                $p = import_parse_number($ig['value']);
+                if ($p['status'] === 'ok' && $p['value'] > 0) {
+                    $sell = (float)$p['value'];
+                    $sellSrc = (string)$ig['source'];
+                }
+            }
+        }
+        $hasOne = isset($f['unit_price']);
+        $hasPackPrice = isset($f['pack_price']);
+        $in = [
+            'price' => $hasPackPrice ? $f['pack_price']['value'] : ($hasOne ? $f['unit_price']['value'] : null),
+            'price_src' => $hasPackPrice ? $f['pack_price']['source'] : ($hasOne ? $f['unit_price']['source'] : null),
+            'price_is_pack' => $hasPackPrice, 'unit_price' => ($hasPackPrice && $hasOne) ? $f['unit_price']['value'] : null,
+            'pack_name' => $f['pack_name']['value'] ?? null, 'pack_name_src' => $f['pack_name']['source'] ?? null,
+            'pack_size' => $f['pack_size']['value'] ?? null, 'pack_size_src' => $f['pack_size']['source'] ?? null,
+            'served' => $f['served_by']['value'] ?? null, 'served_src' => $f['served_by']['source'] ?? null,
+            'unit' => $f['unit']['value'] ?? null, 'unit_src' => $f['unit']['source'] ?? null,
+            'sell' => $sell, 'sell_src' => $sellSrc,
+        ];
+        $d = import_pack_decide($in, $vocab);
+        if ($d === null) {
+            return;
+        }
+        if ($d['unit'] !== null && $d['unit_how'] !== 'unit') {
+            $row['fields']['unit'] = ['value' => $d['unit'], 'source' => (string)$d['unit_src'], 'how' => 'stock-unit:' . $d['unit_how']];
+        }
+        if ($hasPackPrice && !$hasOne) {
+            // the per-pack price is the row's price (the same cell); its pack is divided below (resolve) only as decided here
+            $row['fields']['unit_price'] = $f['pack_price'];
+        }
+        if ($hasPackPrice && $hasOne && $d['pack']) {
+            // both prices: the per-one price is used; the pack price only checked it
+            $d['info_pack'] = $d['pack'];
+            $d['pack'] = null;
+            $d['pack_src'] = null;
+            $d['cost'] = (float)$f['unit_price']['value'];
+            $d['reason'] = $d['ask'] === '' ? 'The price per ' . mb_strtolower((string)$d['unit']) . ' (' . $f['unit_price']['source'] . ') is used; the price per pack ('
+                . $f['pack_price']['source'] . ') agrees with it: ' . import_pack_num($f['pack_price']['value']) . ' / ' . $d['info_pack'] . '.' : '';
+        }
+        $row['pack_rule'] = ['decided' => $d['decided'] && $d['ask'] === '', 'unit_how' => $d['unit_how'], 'pack' => $d['pack'], 'pack_src' => $d['pack_src'],
+            'pack_name' => $d['pack_name'], 'pack_name_src' => $d['pack_name_src'], 'info_pack' => $d['info_pack'], 'reason' => $d['reason'], 'ask' => $d['ask'],
+            'cost' => $d['cost'], 'sell' => $sell, 'sell_src' => $sellSrc, 'served_portion' => $d['served_portion']];
+        if ($d['ask'] === '') {
+            return;
+        }
+        $nm = $f['item_name']['value'];
+        $u = $d['unit'] !== null ? mb_strtolower((string)$d['unit']) : 'unit';
+        $priceSrc = (string)($row['fields']['unit_price']['source'] ?? $in['price_src']);
+        if ($d['ask'] === 'pack-price-differs') {
+            $one = (float)$f['unit_price']['value'];
+            $pk = (int)$d['info_pack'];
+            $q = import_q('pack-price-check', 'Row ' . $r . ' "' . $nm . '": the price per ' . $u . ' is ' . import_fmt_money($one) . ' (' . $f['unit_price']['source'] . '), but the price per pack is '
+                . import_fmt_money($f['pack_price']['value']) . ' (' . $f['pack_price']['source'] . ') for ' . $pk . ', which is ' . import_fmt_money(round((float)$f['pack_price']['value'] / $pk, 4)) . ' per ' . $u
+                . '. They do not agree. Which is right?', [
+                'sheet' => $sheetName, 'row' => $r, 'cells' => [$f['unit_price']['source'], $f['pack_price']['source']],
+                'options' => [['key' => 'unit', 'label' => 'The price per ' . $u . ': ' . import_fmt_money($one)],
+                    ['key' => 'pack', 'label' => 'The price per pack divided by ' . $pk . ': ' . import_fmt_money(round((float)$f['pack_price']['value'] / $pk, 4)) . ' per ' . $u]],
+            ]);
+            $rowQs[] = $q;
+            return;
+        }
+        $price = (float)$row['fields']['unit_price']['value'];
+        $hint = $d['pack'] ?: ($d['info_pack'] ?: null);
+        $bw = mb_strtolower((string)($d['pack_name'] ?? 'pack'));
+        if ($d['ask'] === 'count-unit') {
+            // bought by the case, served by the tot / glass: is the count in cases or in single units? (QA Q3)
+            $pk = (int)$d['info_pack'];
+            $qSrc = (string)($row['computed']['qty_total']['sources'][0] ?? $row['ref']);
+            $q = import_q('count-unit', 'Row ' . $r . ' "' . $nm . '": bought by the ' . $bw . ' of ' . $pk . ' (' . $d['pack_name_src'] . ') and served by the ' . mb_strtolower((string)$f['served_by']['value'])
+                . '. Is the count (' . $qSrc . ') in ' . $bw . 's, or in single units (' . $pk . ' to a ' . $bw . ')?', [
+                'sheet' => $sheetName, 'row' => $r, 'cells' => [$qSrc, (string)$d['pack_name_src']],
+                'options' => [['key' => 'pack', 'label' => 'In ' . $bw . 's: the stock unit is ' . $bw . ' and ' . import_fmt_money($price) . ' is the price of one ' . $bw],
+                    ['key' => 'single', 'label' => 'In single units: ' . import_fmt_money($price) . ' / ' . $pk . ' = ' . import_fmt_money(round($price / $pk, 4)) . ' each (you pick the unit next)']],
+            ]);
+            $rowQs[] = $q;
+            return;
+        }
+        if ($d['ask'] === 'odd-pack-size') {
+            $text = 'Row ' . $r . ' "' . $nm . '": the pack size cell (' . (string)($f['pack_size']['source'] ?? '') . ') says ' . import_pack_num($d['odd_size'] ?? 0)
+                . ', which is not a believable number of units in one ' . $bw . ', so the price ' . import_fmt_money($price) . ' (' . $priceSrc . ') is not divided by it. Is it the price of one ' . $u . ', or of a whole pack?';
+            $hint = null;
+        } elseif ($d['ask'] === 'price-below-sell') {
+            $text = 'Row ' . $r . ' "' . $nm . '": the price ' . import_fmt_money($price) . ' (' . $priceSrc . ') is already at or below its selling price of ' . import_fmt_money($d['sell'] ?? 0) . ' per ' . $u
+                . ' (' . (string)($d['sell_src'] ?? '') . '), so dividing it by the ' . $bw . ' of ' . (int)$d['pack'] . ' (' . import_fmt_money($d['cost']) . ' per ' . $u . ') looks wrong. Is it the price of one ' . $u . ', or of the whole ' . $bw . '?';
+        } elseif ($d['ask'] === 'no-pack-size') {
+            $text = 'Row ' . $r . ' "' . $nm . '": the price ' . import_fmt_money($price) . ' (' . $priceSrc . ') is in a price-per-pack column, but the row does not say how many '
+                . $u . ' one pack holds. Is it the price of one ' . $u . ', or of a whole pack?';
+        } else {
+            $per = $d['pack'] ? ' = ' . import_fmt_money($d['cost']) . ' per ' . $u . ' (bought by the ' . mb_strtolower((string)$d['pack_name']) . ' of ' . $d['pack'] . ')' : ' per ' . $u;
+            $text = 'Row ' . $r . ' "' . $nm . '": the price ' . import_fmt_money($price) . ' (' . $priceSrc . ')' . $per . ' is more than its selling price of ' . import_fmt_money($sell)
+                . ' per ' . $u . ' (' . $sellSrc . '). A cost above the selling price usually means the price is for a bigger pack. Is it the price of one ' . $u . ', or of a whole pack?';
+        }
+        $q = import_q('case-price', $text, [
+            'sheet' => $sheetName, 'row' => $r, 'cells' => [$priceSrc],
+            'options' => import_cc_case_options($row, $price, $price / max(2, (int)($hint ?: 2))), 'case_ratio' => null,
+        ]);
+        if ($hint) {
+            $q['pack_hint'] = (int)$hint;
+        }
+        $q['pack_rule'] = true;
+        $rowQs[] = $q;
+    }
+
+    /** "Tall Horse" + heading "WHITE WINE BY BOTTLE" -> "Tall Horse (White wine by bottle)": both parts are the cells' own words (a heading in capitals is written in sentence case). */
+    function import_section_item_name(string $name, string $category): string
+    {
+        $c = trim((string)preg_replace('/^[^\p{L}\p{N}]+/u', '', import_norm_ws($category)));
+        if (import_is_upper_label($c)) {
+            $c = mb_strtoupper(mb_substr(mb_strtolower($c), 0, 1)) . mb_substr(mb_strtolower($c), 1);
+        }
+        return import_norm_ws($name) . ' (' . $c . ')';
     }
 
     function import_cell_source(string $sheetName, array $cell): string
@@ -173,13 +299,15 @@ if (!function_exists('import_validate_sheet')) {
             if (in_array($info['kind'], ['section', 'total', 'note', 'repeat-header', 'orphan'], true)) {
                 $cellRef = isset($by['item_name']) ? import_cell_ref($r, $by['item_name']) : import_cell_ref($r, 1);
                 $skipped[] = [
-                    'row' => $r, 'kind' => $info['kind'], 'label' => $info['label'], 'source' => import_source_ref($name, $cellRef),
+                    'row' => $r, 'kind' => $info['kind'], 'label' => $info['label'], 'source' => $info['label_ref'] ?? import_source_ref($name, $cellRef),
                     'status' => 'skipped', 'reason' => $info['reason'],
                 ];
             }
         }
 
-        $numberFields = ['qty_primary', 'qty_secondary', 'qty_single', 'max_level', 'min_level', 'unit_price'];
+        $numberFields = ['qty_primary', 'qty_secondary', 'qty_single', 'max_level', 'min_level', 'unit_price', 'pack_size', 'pack_price'];
+        $packVocab = import_pack_vocab($aliases);
+        $packCols = isset($by['pack_name']) || isset($by['pack_size']) || isset($by['served_by']) || isset($by['pack_price']);
         $hasUnitCol = isset($by['unit']);
         $undoHeals = array_flip(array_map('strval', (array)($opts['undo_heals'] ?? [])));
         $synonyms = (array)($aliases['unit_synonyms'] ?? []);
@@ -256,7 +384,7 @@ if (!function_exists('import_validate_sheet')) {
                 if ($p['status'] === 'empty') {
                     continue;
                 }
-                if ($p['status'] === 'invalid' && $f !== 'unit_price') {
+                if ($p['status'] === 'invalid' && !in_array($f, ['unit_price', 'pack_price', 'pack_size'], true)) {
                     // self-healing "number-unit" ("12 pcs"): reversible (the person can undo it, which brings the question back)
                     $hid = substr(sha1('number-unit|' . $src), 0, 12);
                     $hv = isset($undoHeals[$hid]) ? null : import_heal_number_unit($cell['v'], $unitWords);
@@ -332,7 +460,7 @@ if (!function_exists('import_validate_sheet')) {
             }
 
             // ---- text fields ----
-            foreach (['batch', 'unit', 'remarks'] as $f) {
+            foreach (['batch', 'unit', 'remarks', 'pack_name', 'served_by'] as $f) {
                 if (!isset($by[$f])) {
                     continue;
                 }
@@ -418,6 +546,12 @@ if (!function_exists('import_validate_sheet')) {
                 $row['warnings'][] = ['code' => 'no-quantity', 'text' => 'No quantity found for this row, so no opening stock is proposed.'];
             }
 
+            // ---- bought-as / pack size / served-by / per-pack price: the stock unit and the price basis from the row's own cells (pack-rule.php) ----
+            $unitPack = (!$packCols && isset($row['fields']['unit'])) ? import_pack_parse_text((string)$row['fields']['unit']['value'], $packVocab) : null;
+            if ($packCols || ($unitPack !== null && $unitPack['word'] !== null)) {
+                import_validate_pack_rule($row, $rowQs, $packVocab, $name, $r);
+            }
+
             $row['_qs'] = $rowQs;
             $rows[] = $row;
         }
@@ -457,6 +591,20 @@ if (!function_exists('import_validate_sheet')) {
                 continue;
             }
             $why = $hasBatchCol ? 'and the Batch column is blank or the same for them' : 'with no batch';
+            // the same name under DIFFERENT category headings ("Tall Horse" under red wines and under white wines): most likely two products.
+            // Offered as its own answer (each item named with its heading); picked for the person only when no stock item has that name (resolve).
+            $split = [];
+            if (!$hasBatchCol) {
+                foreach ($idxs as $i) {
+                    $cat = $rows[$i]['category'];
+                    $catKey = $cat !== null ? import_norm_text((string)$cat) : '';
+                    if ($catKey === '' || $rows[$i]['category_source'] === null || in_array($catKey, array_map('import_norm_text', $split), true)) {
+                        $split = [];
+                        break;
+                    }
+                    $split[$rows[$i]['uid']] = (string)$cat;
+                }
+            }
             $q = import_q($hasBatchCol ? 'duplicate-batch-clash' : 'duplicate-no-batch',
                 'Row ' . $rowNums[0] . ' "' . $nm . '" appears ' . count($idxs) . ' times (rows ' . implode(', ', $rowNums) . ') ' . $why . ' — are these separate batches or a duplicate?', [
                 'sheet' => $name, 'row' => $rowNums[0], 'rows' => $rowNums,
@@ -472,6 +620,16 @@ if (!function_exists('import_validate_sheet')) {
             $q['row_uids'] = array_map(function ($i) use ($rows) {
                 return $rows[$i]['uid'];
             }, $idxs);
+            if ($split) {
+                $names = [];
+                foreach ($split as $cat) {
+                    $names[] = import_section_item_name($nm, $cat);
+                }
+                $q['options'][] = ['key' => 'section-items', 'label' => 'Different items, one under each heading: import them as ' . implode(' and ', array_map(function ($x) {
+                    return '"' . $x . '"';
+                }, $names))];
+                $q['section_split'] = $split;
+            }
             $questions[] = $q;
         }
 

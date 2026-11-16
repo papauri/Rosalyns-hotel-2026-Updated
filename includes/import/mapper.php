@@ -9,6 +9,7 @@
  */
 
 require_once __DIR__ . '/text-util.php';
+require_once __DIR__ . '/pack-rule.php';
 
 if (!function_exists('import_match_header')) {
 
@@ -168,9 +169,15 @@ if (!function_exists('import_match_header')) {
         return in_array($field, $aliases['derived'] ?? [], true);
     }
 
+    /** The quantity columns (bar / stores / single balance): one family. */
+    function import_qty_fields(): array
+    {
+        return ['qty_primary', 'qty_secondary', 'qty_single'];
+    }
+
     function import_field_kind(string $field): string
     {
-        if (in_array($field, ['qty_primary', 'qty_secondary', 'qty_single', 'max_level', 'min_level', 'unit_price'], true)) {
+        if (in_array($field, ['qty_primary', 'qty_secondary', 'qty_single', 'max_level', 'min_level', 'unit_price', 'pack_size', 'pack_price', 'sell_price'], true)) {
             return 'number';
         }
         if ($field === 'expiry') {
@@ -198,15 +205,36 @@ if (!function_exists('import_match_header')) {
                 $present[$info['suggested_field']] = true;
             }
         }
+        $idx = import_alias_index($aliases);
         foreach ($columns as $c => $info) {
             $from = $info['field'];
             if ($info['state'] !== 'mapped' || $from === null || !isset($fallbacks[$from]) || !import_field_is_derived($from, $aliases)) {
                 continue;
             }
             $to = (string)$fallbacks[$from];
-            if ($to === '' || isset($present[$to]) || import_field_is_derived($to, $aliases)) {
+            if ($to === '' || import_field_is_derived($to, $aliases)) {
                 continue;
             }
+            // the quantity columns are one family: a "Total Balance" never stands in for the quantity when the sheet has a bar, stores or
+            // balance column of its own (it is then their sum, and an uncalculated sum must stay unknown)
+            $family = in_array($to, import_qty_fields(), true) ? import_qty_fields() : [$to];
+            if (array_intersect_key($present, array_flip($family))) {
+                continue;
+            }
+            // the heading must also name the field it stands in for ("Total BALANCE", "MIN qty"): a bare "Total" / "Grand total" never does
+            $tokens = array_flip(import_header_tokens((string)$info['header'], $idx));
+            $named = false;
+            foreach ((array)($aliases['fields'][$to] ?? []) as $p) {
+                $pn = import_norm_text((string)$p);
+                if ($pn !== '' && strpos($pn, ' ') === false && isset($tokens[$pn])) {
+                    $named = true;
+                    break;
+                }
+            }
+            if (!$named) {
+                continue;
+            }
+            $present[$to] = true;           // one column stands in, never two
             $columns[$c]['field'] = $to;
             $columns[$c]['derived'] = false;
             $columns[$c]['fallback_from'] = $from;
@@ -358,12 +386,24 @@ if (!function_exists('import_match_header')) {
                     if (!is_numeric($v)) {
                         $good++;
                     }
+                } elseif ($info['field'] === 'pack_name' || $info['field'] === 'served_by') {
+                    // a bought-as / served-by cell must be a unit, pack or portion word (or a pack written out: "Case of 24"): "Packing Date" is not
+                    $pv = $pv ?? import_pack_vocab($aliases);
+                    $wn = import_norm_text((string)$v);
+                    if (import_pack_word_kind((string)$v, $pv) !== '' || isset($pv['unit'][$wn]) || (is_string($v) && import_pack_parse_text($v, $pv) !== null)) {
+                        $good++;
+                    }
                 } else {
                     $good++;
                 }
             }
             $info['shape'] = ['filled' => $total, 'fits' => $good];
-            if ($total >= 3 && $good / $total < 0.7) {
+            if ($total >= 3 && $good / $total < 0.7 && in_array($info['field'], ['pack_name', 'served_by'], true)) {
+                // a heading that only looked like "bought as" / "served by" ("Packing Date"): its cells are not unit words, so it is simply not read
+                $info['state'] = 'unmapped';
+                $info['field'] = null;
+                $info['not_units'] = true;
+            } elseif ($total >= 3 && $good / $total < 0.7) {
                 $info['state'] = 'question';
                 $info['suggested_field'] = $info['field'];
                 $info['field'] = null;
@@ -394,5 +434,285 @@ if (!function_exists('import_match_header')) {
             return 'Columns in ' . $sheetName . ' both look like "' . $label . '" (column ' . $info['letter'] . ' "' . $h . '"). Which one holds the real ' . strtolower($label) . '?';
         }
         return 'I am not sure what column ' . $info['letter'] . ' "' . $h . '" in ' . $sheetName . ' is. Is it "' . $label . '"?';
+    }
+
+    /** What the cells of one column look like: counts of filled cells, numbers, small whole numbers, container / unit / portion words. */
+    function import_map_value_profile(array $sheet, int $col, array $rows, array $vocab, array $unitWords): array
+    {
+        $p = ['filled' => 0, 'num' => 0, 'small_int' => 0, 'container' => 0, 'portion' => 0, 'unitword' => 0, 'samples' => []];
+        foreach ($rows as $r) {
+            $cell = $sheet['cells'][$r][$col] ?? null;
+            if (!import_cell_usable($cell)) {
+                continue;
+            }
+            $v = $cell['v'];
+            if (is_string($v) && (trim($v) === '' || import_is_empty_marker($v))) {
+                continue;
+            }
+            $p['filled']++;
+            if (count($p['samples']) < 5) {
+                $p['samples'][] = is_string($v) ? import_norm_ws($v) : $v;
+            }
+            $n = import_parse_number($v);
+            if ($n['status'] === 'ok') {
+                $p['num']++;
+                if ($n['value'] >= 1 && $n['value'] <= 1000 && abs($n['value'] - round($n['value'])) < 1e-9) {
+                    $p['small_int']++;
+                }
+                continue;
+            }
+            $w = import_norm_text((string)$v);
+            if (isset($vocab['container'][$w])) {
+                $p['container']++;
+            } elseif (isset($vocab['portion'][$w])) {
+                $p['portion']++;
+            } elseif (isset($unitWords[$w])) {
+                $p['unitword']++;
+            }
+        }
+        return $p;
+    }
+
+    /**
+     * Reading a column from its VALUES as well as its heading (owner 2026-11-17: "pick up other patterns or abnormal column names"). Only ever
+     * makes a heading question unnecessary when the values leave no doubt; every column read this way says so ('how_values', shown in step 2):
+     *   - a typo-level heading ("Unit Bougth As") whose values fit that field (container words, small whole numbers, numbers) -> mapped;
+     *   - an unrecognised heading over container words -> bought as; over unit words (bottle, can, shot) -> sold / served by (or unit);
+     *     small whole numbers right next to the bought-as column -> pack size;
+     *   - two price columns the headings cannot tell apart, one higher on (nearly) every row -> the lower is the cost, the higher the selling price.
+     * Uses up to 2,000 rows under the heading whose name cell is filled. Never touches a mapped column, a guard-word heading or a shape question.
+     */
+    function import_map_infer_by_values(array &$map, array $sheet, int $headerRow, array $aliases): void
+    {
+        $nameCol = $map['by_field']['item_name'] ?? null;
+        if ($nameCol === null) {
+            return;
+        }
+        $rows = [];
+        $last = min((int)($sheet['dims']['rows'] ?? 0), $headerRow + 2000);
+        for ($r = $headerRow + 1; $r <= $last; $r++) {
+            if (import_cell_text($sheet['cells'][$r][$nameCol] ?? null) !== '') {
+                $rows[] = $r;
+            }
+        }
+        if (count($rows) < 3) {
+            return;
+        }
+        $vocab = import_pack_vocab($aliases);
+        $unitWords = [];
+        foreach (array_merge((array)($aliases['units'] ?? []), array_keys((array)($aliases['unit_synonyms'] ?? []))) as $u) {
+            $unitWords[import_norm_text((string)$u)] = true;
+        }
+        $taken = [];
+        foreach ($map['columns'] as $info) {
+            if ($info['state'] === 'mapped' && $info['field'] !== null) {
+                $taken[$info['field']] = true;
+            }
+        }
+        $words = function (array $p) {
+            return $p['container'] + $p['portion'] + $p['unitword'];
+        };
+        $fits = function (string $field, array $p) use ($words) {
+            if ($p['filled'] < 3) {
+                return false;
+            }
+            if ($field === 'pack_name') {
+                return $p['container'] > 0 && $p['container'] + $p['unitword'] >= 0.7 * $p['filled'];
+            }
+            if ($field === 'served_by' || $field === 'unit') {
+                return $words($p) >= 0.7 * $p['filled'];
+            }
+            if ($field === 'pack_size') {
+                return $p['small_int'] >= 0.8 * $p['filled'];
+            }
+            // a plain number says nothing about WHICH number (balance, par, reorder level, price): a misspelt number heading stays a question
+            return false;
+        };
+        $promote = function (int $c, string $field, string $why) use (&$map, &$taken, $aliases) {
+            $map['columns'][$c]['field'] = $field;
+            $map['columns'][$c]['derived'] = import_field_is_derived($field, $aliases);
+            $map['columns'][$c]['state'] = 'mapped';
+            $map['columns'][$c]['how_values'] = $why;
+            unset($map['columns'][$c]['suggested_field'], $map['columns'][$c]['clash']);
+            $taken[$field] = true;
+        };
+        // 1) a misspelt heading confirmed by its values: the field the heading is closest to (a typo-level match, or the whole heading within
+        //    a typing slip of a bought-as / served-by / pack-size phrase: "Unit Bougth As") whose cells fit that field without doubt
+        $idx = import_alias_index($aliases);
+        foreach ($map['columns'] as $c => $info) {
+            if ($info['state'] !== 'question' || !empty($info['clash']) || !empty($info['shape_fail']) || empty($info['suggested_field'])) {
+                continue;
+            }
+            $cands = [];
+            if ((float)($info['candidates'][0]['conf'] ?? 0) === 0.6) {
+                $cands[] = [(string)$info['suggested_field'], (string)($info['candidates'][0]['alias'] ?? $info['suggested_field'])];
+            }
+            $key = implode(' ', import_header_tokens((string)$info['header'], $idx));
+            $best = null;
+            foreach ($idx['list'] as $a) {
+                if (!in_array($a['field'], ['pack_name', 'served_by', 'pack_size'], true) || strlen($a['norm']) < 6) {
+                    continue;
+                }
+                $sim = import_similarity($key, $a['norm']);
+                if ($sim >= 0.8 && ($best === null || $sim > $best[2])) {
+                    $best = [$a['field'], $a['norm'], $sim];
+                }
+            }
+            if ($best !== null) {
+                array_unshift($cands, [$best[0], $best[1]]);
+            }
+            $p = null;
+            foreach ($cands as [$f, $alias]) {
+                if (isset($taken[$f])) {
+                    continue;
+                }
+                $p = $p ?? import_map_value_profile($sheet, $c, $rows, $vocab, $unitWords);
+                if ($fits($f, $p)) {
+                    $promote($c, $f, 'the heading is close to "' . $alias . '" and ' . $p['filled'] . ' of its cells fit');
+                    break;
+                }
+            }
+        }
+        // 2) an unrecognised heading: container words / unit words / pack sizes beside the bought-as column
+        $packCol = null;
+        foreach ($map['columns'] as $c => $info) {
+            if ($info['state'] === 'mapped' && $info['field'] === 'pack_name') {
+                $packCol = $c;
+            }
+        }
+        $profiles = [];
+        foreach ($map['columns'] as $c => $info) {
+            if ($info['state'] === 'unmapped') {
+                $profiles[$c] = import_map_value_profile($sheet, $c, $rows, $vocab, $unitWords);
+            }
+        }
+        foreach ($profiles as $c => $p) {
+            if ($p['filled'] >= 3 && !isset($taken['pack_name']) && $p['container'] >= 0.6 * $p['filled'] && $words($p) >= 0.8 * $p['filled']) {
+                $promote($c, 'pack_name', 'mostly container words such as "' . $p['samples'][0] . '"');
+                $packCol = $c;
+                unset($profiles[$c]);
+            }
+        }
+        foreach ($profiles as $c => $p) {
+            if ($p['filled'] >= 3 && $words($p) >= 0.8 * $p['filled'] && $p['container'] < 0.5 * $p['filled']) {
+                $f = $packCol !== null ? 'served_by' : 'unit';
+                if (!isset($taken['unit']) && !isset($taken['served_by'])) {
+                    $promote($c, $f, 'mostly unit words such as "' . $p['samples'][0] . '"');
+                    unset($profiles[$c]);
+                }
+            }
+        }
+        if ($packCol !== null && !isset($taken['pack_size'])) {
+            foreach ([$packCol + 1, $packCol - 1] as $c) {
+                if (isset($profiles[$c]) && $profiles[$c]['filled'] >= 3 && $profiles[$c]['small_int'] >= 0.9 * $profiles[$c]['filled']) {
+                    $promote($c, 'pack_size', 'small whole numbers next to the bought-as column');
+                    break;
+                }
+            }
+        }
+        // 3) two price columns the headings cannot tell apart: the one that is higher on (nearly) every row is the selling price
+        $clash = [];
+        foreach ($map['columns'] as $c => $info) {
+            if ($info['state'] === 'question' && !empty($info['clash']) && ($info['suggested_field'] ?? '') === 'unit_price') {
+                $clash[] = $c;
+            }
+        }
+        if (count($clash) === 2 && !isset($taken['sell_price'])) {
+            [$a, $b] = $clash;
+            $n = 0;
+            $aLow = 0;
+            $bLow = 0;
+            foreach ($rows as $r) {
+                $ca = $sheet['cells'][$r][$a] ?? null;
+                $cb = $sheet['cells'][$r][$b] ?? null;
+                if (!import_cell_usable($ca) || !import_cell_usable($cb)) {
+                    continue;
+                }
+                $va = import_parse_number($ca['v']);
+                $vb = import_parse_number($cb['v']);
+                if ($va['status'] !== 'ok' || $vb['status'] !== 'ok' || $va['value'] <= 0 || $vb['value'] <= 0) {
+                    continue;
+                }
+                $n++;
+                $aLow += $va['value'] < $vb['value'] ? 1 : 0;
+                $bLow += $vb['value'] < $va['value'] ? 1 : 0;
+            }
+            if ($n >= 5 && max($aLow, $bLow) >= 0.9 * $n) {
+                [$cost, $sell] = $aLow > $bLow ? [$a, $b] : [$b, $a];
+                $promote($cost, 'unit_price', 'lower than the other price column on ' . max($aLow, $bLow) . ' of ' . $n . ' rows, so it is the cost');
+                $promote($sell, 'sell_price', 'higher than the other price column on ' . max($aLow, $bLow) . ' of ' . $n . ' rows, so it is the selling price');
+            }
+        }
+        $map['by_field'] = [];
+        foreach ($map['columns'] as $c => $info) {
+            if ($info['state'] === 'mapped') {
+                $map['by_field'][$info['field']] = $map['by_field'][$info['field']] ?? $c;
+            }
+        }
+    }
+
+    /**
+     * HOOK for an optional helper (the Assistant lead's column reader; Import works fully without it): the columns of an analysis that are not
+     * read with confidence (a heading question, or an unrecognised heading with data), each with its heading, cell and up to 5 sample values
+     * taken from the analysed rows. Returns [['sheet','letter','header','ref','state','suggested_field','samples'=>[...]], ...]. Pure, read-only.
+     * (Values of unread columns are not kept in the rows: pass $sheetsCells = [sheet name => reader sheet] to sample those too.)
+     */
+    function import_unsure_columns(array $analysis, array $sheetsCells = []): array
+    {
+        $out = [];
+        foreach ((array)($analysis['sheets'] ?? []) as $sh) {
+            foreach ((array)($sh['columns'] ?? []) as $c) {
+                if (!in_array($c['state'] ?? '', ['question', 'unmapped'], true) || ($c['header'] ?? '') === '') {
+                    continue;
+                }
+                $samples = [];
+                $grid = $sheetsCells[(string)$sh['name']] ?? null;
+                if ($grid && !empty($sh['header_row'])) {
+                    foreach ((array)($sh['rows'] ?? []) as $row) {
+                        $cell = $grid['cells'][(int)$row['row']][(int)$c['col']] ?? null;
+                        if (import_cell_usable($cell)) {
+                            $samples[] = $cell['v'];
+                        }
+                        if (count($samples) >= 5) {
+                            break;
+                        }
+                    }
+                }
+                $out[] = ['sheet' => (string)$sh['name'], 'letter' => (string)$c['letter'], 'header' => (string)$c['header'], 'ref' => (string)($c['header_ref'] ?? ''),
+                    'state' => (string)$c['state'], 'suggested_field' => $c['suggested_field'] ?? null, 'samples' => $samples];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * HOOK, the other half: a SUGGESTED reading of an unsure column (["sheet" => "Sheet1", "letter" => "F", "field" => "pack_name", "why" => ...]) is
+     * attached to that column as 'suggested' and is NEVER an answer: the person confirms it like any other answer (the column's own question).
+     * Only a known field is accepted, only on a column that is unsure; anything else is dropped (rule 4). Returns how many were attached.
+     */
+    function import_attach_column_suggestions(array &$analysis, array $suggest, array $aliases): int
+    {
+        $known = array_keys((array)($aliases['fields'] ?? []));
+        $n = 0;
+        foreach ($suggest as $s) {
+            $field = (string)($s['field'] ?? '');
+            if (!in_array($field, $known, true)) {
+                continue;
+            }
+            foreach ($analysis['sheets'] as &$sh) {
+                if ((string)$sh['name'] !== (string)($s['sheet'] ?? '')) {
+                    continue;
+                }
+                foreach ($sh['columns'] as &$c) {
+                    if ((string)$c['letter'] === (string)($s['letter'] ?? '') && in_array($c['state'], ['question', 'unmapped'], true)) {
+                        $c['suggested'] = ['field' => $field, 'why' => mb_substr((string)($s['why'] ?? ''), 0, 200), 'confirmed' => false];
+                        $n++;
+                    }
+                }
+                unset($c);
+            }
+            unset($sh);
+        }
+        return $n;
     }
 }

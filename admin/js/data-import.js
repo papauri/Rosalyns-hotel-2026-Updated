@@ -11,7 +11,8 @@
     var FIELD_LABEL = {
         item_name: 'Item name', batch: 'Batch', qty_primary: 'Balance (bar / kitchen)', qty_secondary: 'Balance (stores)', qty_single: 'Balance',
         unit: 'Unit', expiry: 'Expiry date', max_level: 'Par / maximum level', min_level: 'Reorder level', unit_price: 'Unit price',
-        remarks: 'Remarks', category: 'Category',
+        remarks: 'Remarks', category: 'Category', pack_name: 'Bought as (pack)', pack_size: 'Pack size', served_by: 'Sold / served by', pack_price: 'Price per pack',
+        sell_price: 'Selling price',
         // columns that are recognised but never imported (shown greyed)
         min_qty: 'Minimum quantity', lead_time: 'Lead time (days)', qty_total: 'Total balance', days_to_expiry: 'Days to expiry',
         status: 'Status', action: 'Action', purchase_qty: 'Quantity to order', total_cost: 'Total value', row_no: 'Row number'
@@ -544,6 +545,10 @@
                     details.push('Only the cost is ticked. Ticks you already set for quantity, par level, pack size or category stay as they are.');
                     details.push('The cost per unit becomes the one written in your file (VAT not added or removed) when you press Import, before the opening count is approved. Recipe costs and the value of stock already on hand use it from then on. Every change is logged, old to new.');
                     if (r.from_zero) { details.push(itemsWord(r.from_zero) + ' of these ' + (r.from_zero === 1 ? 'has' : 'have') + ' no cost in stock yet (0).'); }
+                    if (r.value && r.value.items_counted) {
+                        details.push('Value of the counts in your file: ' + num(r.value.before, 2) + ' at the current costs → ' + num(r.value.after, 2) + ' at the file\'s costs (' + itemsWord(r.value.items_counted) + '; ' + num(r.value.down, 0) + ' cost' + (r.value.down === 1 ? '' : 's') + ' go down, ' + num(r.value.up, 0) + ' go up).');
+                    }
+                    if (r.value && r.value.by_pack) { details.push(itemsWord(r.value.by_pack) + ': the price in your file is per crate / case and is divided by the pack size on the same row (for example 20 to a crate) into the cost of one unit.'); }
                     details.push('A price that looks wrong for this hotel still asks you a question before you can import.');
                 } else {
                     details.push('Only the ' + what + ' tick is taken off. The other ticks stay as they are.');
@@ -863,6 +868,7 @@
                     }
                     else if (c.field === 'lead_time') { what = 'Not imported: the import does not set lead times.'; }
                     else if (c.field === 'row_no') { what = 'Not imported: a row number or code, not stock data.'; }
+                    else if (c.field === 'sell_price') { what = 'Not imported: used only to check that a cost per unit is below what one unit sells for.'; }
                     else { what = 'Not imported: worked out from other columns.'; }
                 }
                 else if (!c.field) { as = '—'; what = c.header ? 'Not imported: not recognised as stock data.' : 'Empty column.'; }
@@ -871,6 +877,12 @@
                     as = FIELD_LABEL[c.field] || c.field;
                     what = 'Imported' + (c.filled !== null && c.filled !== undefined ? ' (' + c.filled + ' filled)' : '') + '.';
                     if (c.fallback_from === 'min_qty') { what += ' Used as the reorder level because the sheet has no reorder level column.'; }
+                    if (c.fallback_from === 'qty_total') { what += ' Used as the stock quantity because the sheet has no other quantity column.'; }
+                    if (c.field === 'pack_name') { what += ' What the item is bought in; with the pack size it turns a price per crate / case into the cost of one unit.'; }
+                    if (c.field === 'pack_size') { what += ' How many units one bought pack holds.'; }
+                    if (c.field === 'served_by') { what += ' The stock unit when it is a whole bottle / can / piece; a shot or glass keeps the bought unit.'; }
+                    if (c.field === 'pack_price') { what += ' A price for a whole pack: divided by the pack size into the cost of one unit.'; }
+                    if (c.how_values) { what += ' (Recognised from the values in the column: ' + c.how_values + '.)'; }
                 }
                 var td1 = h('td', null, c.letter); td1.setAttribute('data-label', 'Column');
                 var td2 = h('td'); td2.setAttribute('data-label', 'Heading in your file');
@@ -891,7 +903,7 @@
         var STATUS_ORDER = ['needs-answer', 'blocked', 'ready', 'skipped'];
         var TYPE_LABEL = {
             'possible-typo': 'Did you mean (possible typo)', 'duplicate-no-batch': 'Same name twice, no batch', 'duplicate-batch-clash': 'Same name twice, same batch',
-            'conflict': 'Two values for one item', 'merge-conflict': 'Rows of one item disagree', 'case-price': 'Case price or price per unit',
+            'conflict': 'Two values for one item', 'merge-conflict': 'Rows of one item disagree', 'case-price': 'Case price or price per unit', 'pack-price-check': 'Price per unit and per pack disagree', 'count-unit': 'Counted in packs or single units',
             'price-check': 'Price looks unusual', 'same-item-two-sheets': 'Same item on two sheets', 'unit-clash': 'Unit differs from stock',
             'archived-match': 'Matches an archived item', 'ambiguous-match': 'Several possible matches', 'cost-too-large': 'Price too large to store',
             'value-too-long': 'Text too long to store', 'bad-value': 'Value is not a number', 'formula-name': 'Name looks like a formula', 'section-or-item': 'Heading or item?'
@@ -1669,11 +1681,17 @@
         function rowsN(n) { return num(n, 0) + ' row' + (n === 1 ? '' : 's'); }
         function valueCheckBlock() {
             var vc = (S.sum && S.sum.value_check) || null;
-            if (!vc || !vc.show) { return null; }
+            if (!vc || (!vc.show && !(vc.selling || []).length)) { return null; }
             var cur = vc.currency ? vc.currency + ' ' : '';
             var money = function (x) { return cur + num(x, 2); };
             var box = h('div', 'di-what di-valuecheck');
             var multi = Object.keys(vc.sheets || {}).length > 1;
+            (vc.selling || []).forEach(function (g) {
+                box.appendChild(h('p', null, (multi ? 'Sheet "' + g.sheet + '": ' : '') + 'The \'' + g.header + '\' column is the stock valued at the SELLING price (Quantity × Selling price on ' + num(g.agree, 0) + ' of ' + rowsN(g.compared) + '). Column total ' + money(g.column_total) + '; Quantity × Selling price total ' + money(g.calc_total || 0) + '. It is not a cost, so it is not compared with Quantity × Unit Cost.'));
+                if (g.differ) { box.appendChild(h('p', 'di-warn', rowsN(g.differ) + ' of this column ' + (g.differ === 1 ? 'differs' : 'differ') + ' from Quantity × Selling price: listed below and in the stock check download.')); }
+                box.appendChild(helpLine('What the stock would sell for, not what it cost. The import never reads this column; costs come from the unit price column.'));
+            });
+            if (!vc.show) { return box; }
             (vc.groups || []).forEach(function (g) {
                 var parts = [];
                 if (g.more_n) { parts.push(money(g.more_sum) + ' more on ' + rowsN(g.more_n)); }

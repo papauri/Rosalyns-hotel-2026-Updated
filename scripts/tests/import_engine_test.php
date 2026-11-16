@@ -3,6 +3,7 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); } // nev
 // Data Import engine (Phase 1a): PURE tests, no database. Runs in seconds.
 // Run from the project root: php scripts/tests/import_engine_test.php
 //
+// Covers (2026-11-17 also): bought-as / pack-size / served-by layouts, a corpus of 7 synthetic layouts (fixtures/import/build_bar_layouts.php).
 // Covers: pure-PHP zip reader (+ zip-bomb / truncation / encryption caps), xlsx reader quirks, csv reader,
 // header mapper, structure finder (sections / totals / notes), validator, duplicate + conflict + case-price
 // questions, "nothing invented" invariant, security cases, and (when present) the real hotel files.
@@ -1046,7 +1047,7 @@ $dupPhrase = [];
 foreach ($al['fields'] as $fv => $ps) { foreach ($ps as $p) { $nv = import_norm_text($p); if (isset($hdrNorm[$nv]) && $hdrNorm[$nv] !== $fv) { $dupPhrase[] = $p; } $hdrNorm[$nv] = $fv; } }
 $t(!$dupPhrase, 'vocabulary: no header phrase is listed under two fields (the database picks the first by id, so a duplicate could flip) ' . implode(', ', $dupPhrase));
 $t(in_array('min_qty', $al['derived'], true) && in_array('lead_time', $al['derived'], true) && ($al['field_fallbacks']['min_qty'] ?? '') === 'min_level', 'vocabulary: Min Qty and Lead Time are derived (greyed); Min Qty stands in for the reorder level only as a fallback');
-$t(import_merge_aliases($al, ['fields' => ['item_name' => ['zz']]])['field_fallbacks'] === ['min_qty' => 'min_level'], 'merging learned header words keeps the keyed fallback list intact');
+$t(import_merge_aliases($al, ['fields' => ['item_name' => ['zz']]])['field_fallbacks'] === ['min_qty' => 'min_level', 'qty_total' => 'qty_single'], 'merging learned header words keeps the keyed fallback list intact');
 // Invented rows only (ZZT ...). Row 3 has no expiry: the cell stays blank and must stay blank.
 $expRows = [
     ['ZZT Lager 330ml', 'ZZT Beers', 'bottle', 24, 6, 12, 48, 3, '850.50', '20412.00', '2027-03-27', 'Active'],
@@ -1432,6 +1433,260 @@ $t(import_cs_cluster_refs($grp) === [], 'groups: when the higher prices are as m
 $t(import_cs_judge(['cost' => 36000, 'own_pack' => 12, 'value_pack' => ['n' => 12, 'value' => 72000, 'qty' => 24, 'source' => 'S!F2'], 'unit' => 'bottle'])['verdict'] === 'case'
     && import_cs_judge(['cost' => 36000, 'value_pack' => ['n' => 3, 'value' => 288000, 'qty' => 24, 'source' => 'S!F2'], 'unit' => 'bottle']) === null,
     'value cell: qty x price / 12 with its own pack of 12 decides; a whole ratio that is no known pack size says nothing (a changed count looks the same)');
+
+
+// ---- bar-sheet layouts and a corpus of other layouts (owner 2026-11-17: "read files like this without so many questions", "diverse enough") ----
+echo "-- bought as / pack size / served by: the corpus (2026-11-17) --\n";
+require_once __DIR__ . '/fixtures/import/build_bar_layouts.php';
+$cpCtx = ['existing' => [], 'unit_options' => ['bottle', 'can', 'crate', 'case', 'kg', 'each', 'pcs', 'carton', 'packet', 'tray'], 'corrections' => []];
+$cpRun = function (string $key, array $ctx = [], array $answers = []) use ($put, $al, $cpCtx) {
+    $f = fx_corpus()[$key];
+    $p = $put($f['bytes'], $f['name']);
+    $an = import_analyze_file($p, $f['name'], $al);
+    $res = import_resolve($an, $answers, $ctx + $cpCtx);
+    $all = array_merge($res['questions'], array_values($res['extra_questions']));
+    $open = array_values(array_filter($all, function ($q) { return $q['answer'] === null; }));
+    $auto = array_values(array_filter($all, function ($q) { return $q['answer'] !== null && !empty($q['auto']); }));
+    $items = [];
+    foreach ($res['items'] as $it) { $items[$it['name']] = $it; }
+    $cols = [];
+    foreach ($an['sheets'] as $s) { foreach ($s['columns'] as $c) { $cols[$s['name']][$c['letter']] = $c['state'] === 'mapped' ? $c['field'] : $c['state']; } }
+    $reader = substr($f['name'], -5) === '.xlsx' ? import_xlsx_read($p) : import_csv_read($p, $f['name']);
+    return ['an' => $an, 'res' => $res, 'open' => $open, 'auto' => $auto, 'items' => $items, 'cols' => $cols, 'inv' => import_assert_no_invented_values($an, $reader), 'path' => $p];
+};
+$cpItem = function (array $r, string $name, $unit, $pack, $cost, $qty) {
+    $it = $r['items'][$name] ?? null;
+    return $it && (string)$it['unit'] === (string)$unit && $it['pack'] === $pack && ($cost === null ? $it['cost'] === null : abs((float)$it['cost'] - $cost) < 0.0001) && abs((float)$it['balance'] - $qty) < 0.0001;
+};
+$cpCounts = [];
+
+// 1) the bar tracker layout (title A1, headings row 3, headings merged in A or typed in B, value column at selling price, TOTAL line)
+$bt = $cpRun('bar_tracker');
+$cpCounts['bar_tracker'] = count($bt['open']);
+$t($bt['cols']['Sheet1'] === ['A' => 'item_name', 'B' => 'qty_single', 'C' => 'unit_price', 'D' => 'sell_price', 'E' => 'total_cost', 'F' => 'pack_name', 'G' => 'pack_size', 'H' => 'served_by'],
+    'bar layout: every heading is read with no question (Total Balance = the quantity, Selling price never the unit price, bought as / pack size / served by) ' . json_encode($bt['cols']));
+$btSh = $bt['an']['sheets'][0];
+$t(array_column($btSh['categories'], 'name') === ['LOCAL LAGERS', 'SOFT DRINKS', 'SPIRITS', 'HOUSE WINE', 'RED BY BOTTLE', 'WHITE BY BOTTLE'],
+    'bar layout: headings typed in column B (name cell empty) and merged headings (one with a word in the bought-as column) are categories, never items');
+$btKinds = [];
+foreach ($btSh['skipped_rows'] as $sr) { $btKinds[$sr['row']] = $sr['kind']; }
+$t(($btKinds[4] ?? '') === 'section' && ($btKinds[10] ?? '') === 'section' && ($btKinds[19] ?? '') === 'total' && substr((string)($btSh['skipped_rows'][0]['source'] ?? ''), -3) === '!B4',
+    'bar layout: the B-column heading points at its own cell, the merged "SPIRITS" + "Bottle" row is a heading, TOTAL is a total line');
+$t($cpItem($bt, 'Zebra Lager', 'bottle', 24, 2000, 40) && $cpItem($bt, 'Kudu Lager', 'bottle', 12, 3000, 10),
+    'bar layout: crate price / pack size = cost per bottle (48,000 / 24 = 2,000), decided from the row, quantity in bottles');
+$t(strpos((string)$bt['items']['Zebra Lager']['cost_how'], '48,000 / 24 = 2,000 per bottle') !== false && $bt['items']['Zebra Lager']['pack_name'] === 'Crate',
+    'bar layout: the divided cost carries its plain one-line reason and the pack word "Crate" from the cell');
+$t($cpItem($bt, 'Fizz Tonic', 'can', null, 2500, 6) && (int)$bt['items']['Fizz Tonic']['pack_info'] === 24,
+    'bar layout: same bought and sold unit (Can / Can): the price is per can, the 24 is information only (no "can of 24 cans")');
+$t($cpItem($bt, 'Moon Gin', 'bottle', null, 30000, 12) && $cpItem($bt, 'Valley Red', 'Casket', null, 60000, 3),
+    'bar layout: served by the shot / glass: counted and costed per bottle / casket (the bought unit)');
+$t(isset($bt['items']['Twin Peak (Red by bottle)'], $bt['items']['Twin Peak (White by bottle)']) && count($bt['auto']) === 1 && $bt['auto'][0]['type'] === 'duplicate-no-batch'
+    && $bt['auto'][0]['answer'] === 'section-items' && (float)$bt['items']['Twin Peak (Red by bottle)']['balance'] === 2.0,
+    'bar layout: the same name under two different headings = two items named with their heading, decided with a reason (no question)');
+$t($cpItem($bt, 'Paper Straw', 'each', null, null, 50), 'bar layout: Pack of 100 sold Each with price 0: unit each, no cost (0 = no price)');
+$t(count($bt['open']) === 1 && $bt['open'][0]['type'] === 'case-price' && strpos($bt['open'][0]['text'], 'Over Lager') !== false && strpos($bt['open'][0]['text'], 'selling price of 3,000') !== false
+    && (int)($bt['open'][0]['pack_hint'] ?? 0) === 24,
+    'bar layout: only the row that does not add up is asked (5,000 per bottle after dividing, above its selling price 3,000), with the pack pre-filled');
+$t($bt['inv'] === [], 'bar layout: INVARIANT holds (unit from the served-by / bought-as cell, pack size from its cell)' . json_encode($bt['inv']));
+$btU = $cpRun('bar_tracker', [], [$bt['open'][0]['qkey'] => ['key' => 'per-unit']]);
+$t($cpItem($btU, 'Over Lager', 'bottle', null, 120000, 5), 'bar layout: answering "one unit" takes the row\'s pack out again (cost = the price as written)');
+// value column at the SELLING price: one summary line, no row reported
+$btVc = import_vc_finish(import_vc_collect($bt['an']), $bt['res']['questions'], $bt['res']['items']);
+$t($btVc['differ'] === 0 && count($btVc['selling']) === 1 && $btVc['selling'][0]['header'] === 'Stock Value' && $btVc['selling'][0]['agree'] === $btVc['selling'][0]['compared'],
+    'value column: Quantity x Selling price on every row = stock at selling price, said once, never compared with the cost ' . json_encode($btVc['selling']));
+$t(import_vc_overview($btVc)['selling'][0]['letter'] === 'E', 'value column: the selling-price line reaches the screen summary');
+
+// 2) mangled headings: Bal, U/Price, S.Price, "Unit Bougth As" (a typing slip, confirmed by its container words), Pcs per ctn, Sold by
+$mg = $cpRun('mangled');
+$cpCounts['mangled'] = count($mg['open']);
+$t($mg['cols']['mangled'] === ['A' => 'item_name', 'B' => 'qty_single', 'C' => 'unit_price', 'D' => 'sell_price', 'E' => 'pack_name', 'F' => 'pack_size', 'G' => 'served_by'] && !$mg['open'],
+    'mangled headings: all read, no question ' . json_encode($mg['cols']));
+$mgCol = null;
+foreach ($mg['an']['sheets'][0]['columns'] as $c) { if ($c['letter'] === 'E') { $mgCol = $c; } }
+$t(strpos((string)($mgCol['how_values'] ?? ''), 'close to "unit bought as"') !== false, 'mangled headings: a heading read with the help of its values says so (shown in step 2)');
+$t($cpItem($mg, 'Alpha Juice', 'bottle', 12, 2000, 10) && $cpItem($mg, 'Delta Crisps', 'packet', 10, 600, 5) && $cpItem($mg, 'Gamma Water', 'bottle', null, 500, 30) && $mg['inv'] === [],
+    'mangled headings: Ctn of 12 -> 2,000 per bottle, Box of 10 -> 600 per packet, Bottle of 1 -> per bottle');
+
+// 3) the pack written in the NAME ("Hill Lager 6 pack"): decided only when the price agrees (far above its peers); a size alone ("24x500ml") is asked
+$pn = $cpRun('pack_in_name');
+$cpCounts['pack_in_name'] = count($pn['open']);
+$t($cpItem($pn, 'Hill Lager 6 pack', 'can', 6, 700, 6) && count($pn['auto']) === 1 && strpos((string)$pn['auto'][0]['auto_reason'], '"6 pack"') !== false,
+    'pack in the name: "6 pack" + a price 7x its peers = 700 per can, answered for the person with the reason');
+$t(count($pn['open']) === 1 && strpos($pn['open'][0]['text'], 'Mountain Water') !== false && (int)($pn['open'][0]['pack_hint'] ?? 0) === 24 && $cpItem($pn, 'Sun Cola 330ml', 'can', null, 600, 24),
+    'pack in the name: "24x500ml" (no pack word) is still asked, with 24 pre-filled; ordinary rows are untouched');
+
+// 4) the pack written in the UNIT cell ("Case of 24", "Crate(12)", "ctn/12")
+$pu = $cpRun('pack_in_unit');
+$cpCounts['pack_in_unit'] = count($pu['open']);
+$t(!$pu['open'] && $cpItem($pu, 'Tomato Paste', 'case', null, 36000, 4) && $cpItem($pu, 'Cooking Oil', 'crate', null, 60000, 3) && $cpItem($pu, 'Table Napkins', 'carton', null, 9000, 10)
+    && $cpItem($pu, 'Farm Eggs', 'tray', null, 3000, 5) && $pu['inv'] === [],
+    'pack in the unit cell: counted and priced per case / crate / carton (the word from the cell, checked by the invariant), no question');
+$puRow = $pu['an']['sheets'][0]['rows'][0];
+$t(($puRow['fields']['unit']['how'] ?? '') === 'stock-unit:pack-cell' && $puRow['fields']['unit']['value'] === 'Case' && (int)$puRow['pack_rule']['info_pack'] === 24,
+    'pack in the unit cell: "Case of 24" -> unit "Case" (how = pack-cell), 24 kept as information');
+
+// 5) a per-unit AND a per-pack price: the per-unit price is used; the pack price only checks it (the row that disagrees is asked)
+$up = $cpRun('unit_and_pack_price');
+$cpCounts['unit_and_pack_price'] = count($up['open']);
+$t($up['cols']['unit and pack price']['F'] === 'pack_price' && $cpItem($up, 'Lake Lager', 'bottle', null, 1000, 48) && $cpItem($up, 'Rift Stout', 'bottle', null, 1500, 24),
+    'per-unit + per-pack price: the per-unit price is the cost when the pack price agrees');
+$t(count($up['open']) === 1 && $up['open'][0]['type'] === 'pack-price-check' && strpos($up['open'][0]['text'], 'Delta Cider') !== false,
+    'per-unit + per-pack price: only the row whose prices disagree is asked');
+$upP = $cpRun('unit_and_pack_price', [], [$up['open'][0]['qkey'] => ['key' => 'pack']]);
+$t($cpItem($upP, 'Delta Cider', 'bottle', 6, 2500, 12), 'per-unit + per-pack price: answering "the pack price" divides 15,000 by the 6 on the row');
+
+// 6) a two-sheet workbook (kitchen: plain unit + cost; bar: bought as / units per pack / served by)
+$ts = $cpRun('two_sheets');
+$cpCounts['two_sheets'] = count($ts['open']);
+$t(!$ts['open'] && $cpItem($ts, 'Wheat Flour', 'kg', null, 1200, 20) && $cpItem($ts, 'Sky Lager', 'bottle', 24, 1500, 48) && $cpItem($ts, 'Reed Rum', 'bottle', null, 25000, 6),
+    'two sheets: the kitchen sheet is read as before, the bar sheet divides crate prices (tot = a portion, so the rum is per bottle)');
+
+// 7) notes above the headings (a CSV whose headings are not on the first line)
+$nf = $cpRun('notes_first');
+$cpCounts['notes_first'] = count($nf['open']);
+$t(!$nf['open'] && $nf['an']['sheets'][0]['header_row'] === 4 && $cpItem($nf, 'Mango Juice', 'bottle', 12, 1500, 12) && $cpItem($nf, 'Lime Cordial', 'bottle', null, 9000, 4),
+    'notes first: headings found on line 4 ("Bought In", "Qty per Case", "Sold As"), crate price divided, no question');
+echo 'corpus open questions per layout: ' . json_encode($cpCounts) . "\n";
+
+// guards: the old layouts keep their meaning
+$adj = import_analyze_file($put(fx_xlsx(['sheets' => [['name' => 'BAR', 'rows' => [
+    1 => ['A' => fx_S('Item Name'), 'B' => fx_S('Bar Balance'), 'C' => fx_S('Stores Balance'), 'D' => fx_S('Total Balance'), 'E' => fx_S('Unit Price (MWK)')],
+    2 => ['A' => fx_S('ZZ Lager'), 'B' => fx_N(3), 'C' => fx_N(4), 'D' => fx_FM('B2+C2'), 'E' => fx_N(900)],
+    3 => ['A' => fx_S('ZZ Stout'), 'B' => fx_N(1), 'C' => fx_N(2), 'D' => fx_FM('B3+C3'), 'E' => fx_N(950)],
+    4 => ['A' => fx_S('ZZ Cider'), 'B' => fx_N(5), 'C' => fx_N(0), 'D' => fx_FM('B4+C4'), 'E' => fx_N(990)],
+]]]]), 'adj.xlsx'), 'adj.xlsx', $al);
+$adjD = $adj['sheets'][0]['columns'][3];
+$t($adjD['field'] === 'qty_total' && !empty($adjD['derived']) && empty($adjD['fallback_from']) && (float)$adj['sheets'][0]['rows'][0]['computed']['qty_total']['value'] === 7.0,
+    'guard: with Bar + Stores balances, an uncalculated "Total Balance" stays greyed (never the quantity); the quantity is still bar + stores');
+$bare = import_analyze_file($csvRows([['Item', 'Price', 'Total'], ['ZZ A', 10, 50], ['ZZ B', 20, 60], ['ZZ C', 30, 90]], 'bare.csv'), 'bare.csv', $al);
+$t($bare['sheets'][0]['columns'][2]['field'] === 'qty_total' && !empty($bare['sheets'][0]['columns'][2]['derived']),
+    'guard: a bare "Total" heading never stands in for the quantity');
+$two = import_analyze_file($csvRows([['Item', 'Qty', 'Price', 'Cost'], ['ZZ A', 1, 1500, 1000], ['ZZ B', 2, 2500, 2000], ['ZZ C', 3, 900, 600], ['ZZ D', 1, 4000, 3100], ['ZZ E', 2, 1200, 800]], 'two.csv'), 'two.csv', $al);
+$twoF = array_map(function ($c) { return $c['state'] === 'mapped' ? $c['field'] : $c['state']; }, $two['sheets'][0]['columns']);
+$t($twoF === ['item_name', 'qty_single', 'sell_price', 'unit_price'] && !array_filter($two['questions'], function ($q) { return $q['type'] === 'mapping-unsure'; }),
+    'two price columns the headings cannot tell apart: the one higher on every row is the selling price, the lower the cost ' . json_encode($twoF));
+$pr = import_pack_parse_text('Case of 24', import_pack_vocab($al));
+$t($pr['word'] === 'Case' && $pr['n'] === 24 && import_pack_parse_text('Crate(20)', import_pack_vocab($al))['n'] === 20 && import_pack_parse_text('ctn/12', import_pack_vocab($al))['word'] === 'ctn'
+    && import_pack_parse_text("24's", import_pack_vocab($al))['word'] === null && import_pack_parse_text('Castle Lager', import_pack_vocab($al)) === null && import_pack_parse_text('Room 12', import_pack_vocab($al)) === null,
+    'pack patterns: "Case of 24", "Crate(20)", "ctn/12", "24\'s"; a plain name or "Room 12" is no pack');
+
+// an EXISTING item whose stored cost is the crate price (kept per bottle): the divided cost is shown old -> new, ticked by a person, never asked
+$exZ = ['id' => 501, 'name' => 'Zebra Lager', 'category' => 'Bar', 'unit' => 'bottle', 'current_quantity' => 30, 'cost_per_unit' => 48000, 'par_level' => 0, 'reorder_point' => 0, 'notes' => '',
+    'pack_name' => null, 'pack_size' => null, 'is_archived' => 0, 'recipes' => 0];
+$exK = ['id' => 502, 'name' => 'Kudu Lager', 'unit' => 'crate', 'cost_per_unit' => 36000] + $exZ;
+$bx = $cpRun('bar_tracker', ['existing' => [$exZ, $exK]], ['_updates' => [rh_ssi_key('Zebra Lager') => ['cost', 'quantity', 'pack']]]);
+$zi = $bx['items']['Zebra Lager'];
+$t($zi['action'] === 'update' && $zi['diff']['cost'] === [48000.0, 2000.0] && in_array('cost', $zi['ticked'], true) && $zi['diff']['pack'] === [null, 24.0]
+    && !array_filter($bx['open'], function ($q) { return $q['type'] === 'price-check'; })
+    && count(array_filter($zi['warnings'], function ($w) { return strpos($w, 'is the price of the whole crate of 24') !== false; })) === 1,
+    'existing item: cost 48,000 -> 2,000 shown old -> new, applied only when ticked; no price question (the old cost is the row\'s own crate price) ' . json_encode($zi['warnings']));
+$bx0 = $cpRun('bar_tracker', ['existing' => [$exZ]]);
+$t(!in_array('cost', $bx0['items']['Zebra Lager']['ticked'], true) && isset($bx0['items']['Zebra Lager']['diff']['cost']), 'existing item: nothing changes until Cost is ticked');
+$t((bool)array_filter($bx['open'], function ($q) { return $q['type'] === 'unit-clash' && strpos($q['text'], 'Kudu Lager') !== false; }),
+    'existing item counted in crates while the sheet counts bottles: still a unit question (a real difference)');
+$sc = import_cont_cost_scale(import_cont_field_targets($bx0['res']['items'], 'cost'));
+$t(abs($sc['before'] - 40 * 48000) < 0.01 && abs($sc['after'] - 40 * 2000) < 0.01 && $sc['by_pack'] === 1 && $sc['down'] === 1,
+    'tick cost for all: the summary gives the value before -> after (1,920,000 -> 80,000) and how many costs come from a crate price ' . json_encode($sc));
+$bxDup = $cpRun('bar_tracker', ['existing' => [['id' => 503, 'name' => 'Twin Peak', 'unit' => 'bottle', 'cost_per_unit' => 20000] + $exZ]]);
+$t(count(array_filter($bxDup['open'], function ($q) { return $q['type'] === 'duplicate-no-batch'; })) === 1,
+    'same name under two headings but the name is already in stock: which heading it is stays the person\'s choice (one question)');
+
+// the hook for an optional column reader: unsure columns with samples; a suggestion is attached, never an answer
+$hk = import_analyze_file($csvRows([['Item', 'Qty', 'Zorbl'], ['ZZ A', 1, 'x1'], ['ZZ B', 2, 'x2'], ['ZZ C', 3, 'x3']], 'hook.csv'), 'hook.csv', $al);
+$hkCells = [];
+foreach (import_csv_read($tmpFiles[count($tmpFiles) - 1], 'hook.csv')['sheets'] as $s) { $hkCells[$s['name']] = $s; }
+$uns = import_unsure_columns($hk, $hkCells);
+$t(count($uns) === 1 && $uns[0]['letter'] === 'C' && $uns[0]['samples'] === ['x1', 'x2', 'x3'], 'hook: the unsure column is listed with its heading and sample values ' . json_encode($uns));
+$hk2 = $hk;
+$t(import_attach_column_suggestions($hk2, [['sheet' => $uns[0]['sheet'], 'letter' => 'C', 'field' => 'remarks', 'why' => 'notes'], ['sheet' => $uns[0]['sheet'], 'letter' => 'C', 'field' => 'shelf_colour']], $al) === 1
+    && $hk2['sheets'][0]['columns'][2]['state'] === 'unmapped' && $hk2['sheets'][0]['columns'][2]['suggested']['field'] === 'remarks',
+    'hook: a suggestion is attached to the column only (still unmapped until a person confirms); an unknown field is dropped');
+
+
+// review fixes: a row the pack cells do NOT decide keeps the old case-price checks; a stray lower-case note in column B is not a heading
+$ud = $csvRows([['Item', 'Qty', 'Unit Price', 'Bought As', 'Units per pack', 'Sold by'],
+    ['Zulu One', 5, 24000, 'Crate', 24, 'Bottle'], ['Zulu Two', 5, 24500, 'Crate', 24, 'Bottle'], ['Zulu Three', 5, 23500, 'Crate', 24, 'Bottle'],
+    ['Zulu Four', 5, 24200, 'Crate', 24, 'Bottle'], ['Zulu Five', 5, 24800, 'Crate', 24, 'Bottle'],
+    ['Zulu Blank', 5, 30000, 'Crate', '', 'Bottle']], 'undecided.csv');
+$udR = import_resolve(import_analyze_file($ud, 'undecided.csv', $al), [], $cpCtx);
+$t((bool)array_filter($udR['questions'], function ($q) { return $q['type'] === 'case-price' && $q['answer'] === null && strpos($q['text'], 'Zulu Blank') !== false; }),
+    'undecided row: "Crate" with a blank pack size among decided peers is still asked (never read as 30,000 per bottle silently)');
+$so = $csvRows([['Item', 'Qty', 'Sold by', 'Price'], ['Yak One', 3, 'Bottle', 1000], ['Yak Two', 3, 'Bottle', 1100], ['Yak Three', 3, 'Bottle', 1200],
+    ['Yak Four', 3, 'Bottle', 1050], ['Yak Five', 3, 'Bottle', 1150], ['Yak Crate', 3, 'Bottle', 24000]], 'soldby.csv');
+$soR = import_resolve(import_analyze_file($so, 'soldby.csv', $al), [], $cpCtx);
+$t((bool)array_filter($soR['questions'], function ($q) { return $q['type'] === 'case-price' && $q['answer'] === null && strpos($q['text'], 'Yak Crate') !== false; }),
+    'only a "Sold by" column (no bought-as word): nothing is decided, the crate-sized price is still asked');
+$nt = import_analyze_file($csvRows([['Item Name', 'Total Balance', 'Unit Price'], ['', 'LAGERS', ''], ['Zebra Ale', 1, 100], ['Kudu Ale', 2, 200],
+    ['', 'checked by store', ''], ['Eland Ale', 3, 300], ['Oryx Ale', 4, 400]], 'note.csv'), 'note.csv', $al);
+$ntK = [];
+foreach ($nt['sheets'][0]['skipped_rows'] as $sr) { $ntK[$sr['label'] !== '' ? $sr['label'] : 'row' . $sr['row']] = $sr['kind']; }
+$t(array_column($nt['sheets'][0]['categories'], 'name') === ['LAGERS'] && in_array('orphan', $ntK, true) && !isset($ntK['checked by store']),
+    'a heading typed in column B counts only when it looks like one (capitals that set headings apart, or a section word); a lower-case note stays a row with no name ' . json_encode($ntK));
+$pk = import_pack_decide(['price' => 5000, 'pack_name' => '2026-11-01', 'served' => 'Bottle', 'pack_size' => 12], import_pack_vocab($al));
+$t($pk !== null && $pk['pack'] === null && !$pk['decided'] && $pk['unit'] === 'Bottle', 'a bought-as cell that is not a unit word (a date) is never the stock unit and decides nothing');
+$pkd = import_analyze_file($csvRows([['Item', 'Qty', 'Unit', 'Price', 'Packing Date'], ['Ibis Rice', 2, 'kg', 900, '2026-10-01'], ['Heron Beans', 3, 'kg', 800, '2026-10-02'],
+    ['Crane Oats', 4, 'kg', 700, '2026-10-03']], 'packdate.csv'), 'packdate.csv', $al);
+$pkdE = $pkd['sheets'][0]['columns'][4];
+$t($pkdE['state'] === 'unmapped' && !empty($pkdE['not_units']) && !array_filter($pkd['questions'], function ($q) { return $q['type'] === 'mapping-unsure'; })
+    && ($pkd['sheets'][0]['rows'][0]['fields']['unit']['value'] ?? '') === 'kg',
+    'a heading that only looks like "bought as" ("Packing Date") over dates is simply not read: no question, the unit column is untouched');
+// ---- review fix round (accounting A1 A2, QA Q1 Q2 Q3) ----
+$fxHead = ['Item Name', 'Total Balance', 'Unit Price', 'Selling price', 'Stock Value', 'Unit Bought As', 'Total Per Unit', 'Unit sold/Served by'];
+$fxRun = function (array $rows, array $ctx = [], array $answers = []) use ($csvRows, $al, $fxHead, $cpCtx) {
+    $an = import_analyze_file($csvRows(array_merge([$fxHead], $rows), 'fx.csv'), 'fx.csv', $al);
+    $res = import_resolve($an, $answers, $ctx + $cpCtx);
+    $items = [];
+    foreach ($res['items'] as $it) { $items[$it['name']] = $it; }
+    $open = array_values(array_filter(array_merge($res['questions'], array_values($res['extra_questions'])), function ($q) { return $q['answer'] === null; }));
+    return ['an' => $an, 'res' => $res, 'items' => $items, 'open' => $open];
+};
+// A1: rows that do not fit Quantity x Selling price are listed even when most rows fit
+$a1 = $fxRun([['Quail A', 2, 1000, 3000, 6000, 'Bottle', 1, 'Bottle'], ['Quail B', 3, 1000, 3000, 9000, 'Bottle', 1, 'Bottle'], ['Quail C', 4, 1000, 3000, 12000, 'Bottle', 1, 'Bottle'],
+    ['Quail D', 5, 1000, 3000, 15000, 'Bottle', 1, 'Bottle'], ['Quail E', 1, 1000, 3000, 9999, 'Bottle', 1, 'Bottle']]);
+$a1Vc = import_vc_finish(import_vc_collect($a1['an']), $a1['res']['questions'], $a1['res']['items']);
+$a1Row = array_values(array_filter($a1Vc['rows'], function ($x) { return ($x['why_code'] ?? '') === 'sell-differs'; }));
+$t(count($a1Vc['selling']) === 1 && $a1Vc['selling'][0]['differ'] === 1 && abs($a1Vc['selling'][0]['calc_total'] - 45000) < 0.01 && count($a1Row) === 1 && $a1Row[0]['name'] === 'Quail E'
+    && $a1Vc['differ'] === 1 && $a1Vc['show'] === true,
+    'A1: a value column read at the selling price still lists the row that does not fit (9,999 vs 1 x 3,000), with both totals ' . json_encode($a1Vc['selling']));
+// A2: an existing item whose stored cost is the crate price, Quantity ticked, Cost NOT ticked: out of the opening count, never auto-ticked
+$a2 = $cpRun('bar_tracker', ['existing' => [$exZ]], ['_updates' => [rh_ssi_key('Zebra Lager') => ['quantity']]]);
+$a2i = $a2['items']['Zebra Lager'];
+$t($a2i['ticked'] === ['quantity'] && $a2i['in_count'] === false && count(array_filter($a2i['warnings'], function ($w) { return strpos($w, 'stays out of the opening count until Cost is ticked') !== false; })) === 1
+    && import_cont_not_counted_reason($a2i) === 'cost_not_ticked',
+    'A2: quantity ticked on an item whose stored cost is the crate price: not counted at the crate price per bottle, Cost is not ticked for the person');
+// Q1: a crate row whose price is already at or below what one bottle sells for is asked (never 2,521 / 20 = 126.05 silently); a year in the pack column is asked
+$q1 = $fxRun([['Robin Lager', 10, 2521, 3500, 35000, 'Crate', 20, 'Bottle'], ['Finch Lager', 10, 50000, 3000, 30000, 'Crate', 2026, 'Bottle']]);
+$q1R = array_values(array_filter($q1['open'], function ($q) { return $q['type'] === 'case-price' && strpos($q['text'], 'Robin Lager') !== false && strpos($q['text'], 'at or below its selling price') !== false; }));
+$q1F = array_values(array_filter($q1['open'], function ($q) { return $q['type'] === 'case-price' && strpos($q['text'], 'Finch Lager') !== false && strpos($q['text'], 'says 2,026') !== false; }));
+$t(count($q1R) === 1 && (int)($q1R[0]['pack_hint'] ?? 0) === 20, 'Q1: Crate | 20 | Bottle at 2,521 with a selling price of 3,500 is asked (that row only)');
+$t(count($q1F) === 1 && $q1['items']['Finch Lager']['pack'] === null && abs((float)$q1['items']['Finch Lager']['cost'] - 50000) < 0.001,
+    'Q1: 2026 in the pack column is not a pack size: never divided by, asked ' . json_encode(array_column($q1['open'], 'text')));
+$q1one = $fxRun([['Robin Lager', 10, 2521, 3500, 35000, 'Crate', 20, 'Bottle']]);   // the question key belongs to this file
+$q1u = $fxRun([['Robin Lager', 10, 2521, 3500, 35000, 'Crate', 20, 'Bottle']], [], [($q1one['open'][0]['qkey'] ?? 'x') => ['key' => 'per-unit']]);
+$t($q1u['items']['Robin Lager']['pack'] === null && abs((float)$q1u['items']['Robin Lager']['cost'] - 2521) < 0.001 && !$q1u['open'], 'Q1: answered "one bottle": 2,521 per bottle');
+// Q2: an existing item whose stored cost is already a correct per-bottle cost keeps the price check (no "whole crate" explanation)
+$exR = ['id' => 601, 'name' => 'Robin Lager', 'cost_per_unit' => 2521] + $exZ;
+$q2 = $fxRun([['Robin Lager', 10, 2521, 3500, 35000, 'Crate', 20, 'Bottle']], ['existing' => [$exR]], ['_updates' => [rh_ssi_key('Robin Lager') => ['cost']]]);
+$t(!array_filter($q2['items']['Robin Lager']['warnings'], function ($w) { return strpos($w, 'is the price of the whole') !== false; })
+    && (bool)array_filter($q2['open'], function ($q) { return in_array($q['type'], ['case-price', 'price-check'], true); }),
+    'Q2: a stored cost that is already per bottle is never "explained" as a crate price; the row is still asked about');
+// Q3: bought by the case of 12, served by the tot: is the count in cases or in bottles? asked; "single units" divides and lets the person pick the unit
+$q3 = $fxRun([['Wren Rum', 3, 60000, 2000, 6000, 'Case', 12, 'Tot']]);
+$q3Q = array_values(array_filter($q3['open'], function ($q) { return $q['type'] === 'count-unit'; }));
+$t(count($q3Q) === 1 && strpos($q3Q[0]['text'], 'in cases, or in single units (12 to a case)') !== false, 'Q3: Case | 12 | Tot asks whether the count is in cases or single units ' . json_encode($q3Q[0]['text'] ?? null));
+$q3s = $fxRun([['Wren Rum', 3, 60000, 2000, 6000, 'Case', 12, 'Tot']], [], [($q3Q[0]['qkey'] ?? 'x') => ['key' => 'single']]);
+$q3p = $fxRun([['Wren Rum', 3, 60000, 2000, 6000, 'Case', 12, 'Tot']], [], [($q3Q[0]['qkey'] ?? 'x') => ['key' => 'pack']]);
+$t($q3s['items']['Wren Rum']['pack'] === 12 && abs((float)$q3s['items']['Wren Rum']['cost'] - 5000) < 0.001 && $q3s['items']['Wren Rum']['unit'] === null
+    && mb_strtolower((string)$q3p['items']['Wren Rum']['unit']) === 'case' && abs((float)$q3p['items']['Wren Rum']['cost'] - 60000) < 0.001,
+    'Q3: "single units" = 60,000 / 12 = 5,000 each with the unit for the person to pick; "in cases" = 60,000 per case ' . json_encode([$q3s['items']['Wren Rum']['unit'] ?? 'x', $q3p['items']['Wren Rum']['unit'] ?? 'x']));
+// B2: NO selling-price column, existing item stored at the crate price, Quantity ticked, Cost not: out of the count, one warning (decided from the file alone)
+$b2An = import_analyze_file($csvRows([['Item Name', 'Total Balance', 'Unit Price', 'Unit Bought As', 'Total Per Unit', 'Unit sold/Served by'],
+    ['Zebra Lager', 40, 48000, 'Crate', 24, 'Bottle']], 'b2.csv'), 'b2.csv', $al);
+$b2 = import_resolve($b2An, ['_updates' => [rh_ssi_key('Zebra Lager') => ['quantity']]], ['existing' => [$exZ]] + $cpCtx);
+$b2i = $b2['items'][0];
+$b2w = array_values(array_filter($b2i['warnings'], function ($w) { return strpos($w, 'opening count') !== false; }));
+$t($b2i['ticked'] === ['quantity'] && $b2i['in_count'] === false && count($b2w) === 1 && strpos($b2w[0], 'stays out of the opening count until Cost is ticked') !== false,
+    'B2: with no selling price, a stored crate price (48,000 = the row\'s crate price) never values the bottle count; one warning ' . json_encode($b2i['warnings']));
 
 // cleanup
 foreach ($tmpFiles as $f) { @unlink($f); }

@@ -169,7 +169,7 @@ if (!function_exists('import_analyze_file')) {
 
         import_recompute_statuses($analysis);
         if (($opts['crosscheck'] ?? true) !== false) {
-            import_crosscheck($analysis, $opts);
+            import_crosscheck($analysis, $opts + ['pack_vocab' => import_pack_vocab($aliases)]);
         }
         $analysis['totals'] = import_analysis_totals($analysis);
         return $analysis;
@@ -253,8 +253,9 @@ if (!function_exists('import_analyze_file')) {
     function import_assert_no_invented_values(array $analysis, array $readerCells): array
     {
         $bySheet = import_cells_by_sheet($readerCells);
-        $allowed = ['item_name', 'batch', 'qty_primary', 'qty_secondary', 'qty_single', 'unit', 'expiry', 'max_level', 'min_level', 'unit_price', 'remarks'];
-        $numeric = ['qty_primary', 'qty_secondary', 'qty_single', 'max_level', 'min_level', 'unit_price'];
+        $allowed = ['item_name', 'batch', 'qty_primary', 'qty_secondary', 'qty_single', 'unit', 'expiry', 'max_level', 'min_level', 'unit_price', 'remarks',
+            'pack_name', 'pack_size', 'served_by', 'pack_price'];
+        $numeric = ['qty_primary', 'qty_secondary', 'qty_single', 'max_level', 'min_level', 'unit_price', 'pack_size', 'pack_price'];
         $bad = [];
         foreach ($analysis['sheets'] as $sh) {
             if (($sh['triage']['action'] ?? '') !== 'import' && $sh['rows']) {
@@ -317,6 +318,12 @@ if (!function_exists('import_analyze_file')) {
                         $hv = import_heal_number_unit($cell['v'], null);
                         if ($hv === null || $hv['unit'] !== $fd['value']) {
                             $bad[] = $where . ': unit "' . $fd['value'] . '" is not the unit word written in ' . $fd['source'];
+                        }
+                    } elseif ($f === 'unit' && ($fd['how'] ?? '') === 'stock-unit:pack-cell') {
+                        // "Case of 24" read as the unit "Case": the word must be written, as a whole word, in that very cell
+                        $cv = is_string($cell['v']) ? import_norm_ws($cell['v']) : '';
+                        if (!is_string($fd['value']) || $fd['value'] === '' || !preg_match('/(?<![\p{L}])' . preg_quote($fd['value'], '/') . '(?![\p{L}])/u', $cv)) {
+                            $bad[] = $where . ': unit "' . $fd['value'] . '" is not a word written in ' . $fd['source'];
                         }
                     } elseif (in_array($f, $numeric, true)) {
                         $p = import_parse_number($cell['v']);

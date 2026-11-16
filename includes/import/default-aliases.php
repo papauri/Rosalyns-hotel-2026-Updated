@@ -24,7 +24,9 @@ if (!function_exists('import_default_aliases')) {
             // Bump when phrases are added: import_seed_aliases() then tops every existing hotel up ONCE (INSERT IGNORE on the
             // alias hash, so nothing is ever doubled). v2 (2026-11-16): our own Stock > Ingredients CSV export headings and
             // renamed copies of it ("Current Quantity level", "Minimum Quantity level", "Lead Time (days)" ...). v3 (2026-11-16): unit spelling "trays" -> "tray".
-            'version' => 3,
+            // v4 (2026-11-17): bar-sheet layouts with a bought-as / pack size / served-by / selling price column (pack_name, pack_size, served_by,
+            // pack_price, sell_price), container and portion words, "Total Balance" as the quantity when the sheet has no other quantity column.
+            'version' => 4,
             'fields' => [
                 'item_name' => [
                     'item name', 'item', 'items', 'item description', 'description', 'product', 'product name',
@@ -35,10 +37,11 @@ if (!function_exists('import_default_aliases')) {
                 'qty_primary' => [
                     'bar balance', 'kitchen balance', 'bar stock', 'kitchen stock', 'bar qty', 'kitchen qty',
                     'bar quantity', 'kitchen quantity', 'bar', 'kitchen', 'counter balance', 'shop balance',
+                    'bar bal', 'kitchen bal', // v4
                 ],
                 'qty_secondary' => [
                     'stores balance', 'store balance', 'stores', 'store', 'stores qty', 'store qty',
-                    'stores quantity', 'store quantity', 'stores stock', 'store stock', 'main store', 'main store balance',
+                    'stores quantity', 'store quantity', 'stores stock', 'store stock', 'main store', 'main store balance', 'stores bal', 'store bal',
                 ],
                 'qty_single' => [
                     'balance', 'qty', 'quantity', 'stock', 'stock balance', 'on hand', 'qty on hand',
@@ -47,6 +50,7 @@ if (!function_exists('import_default_aliases')) {
                     // v2. "Current Qty", "Closing Qty", "Qty Available" ... already read as Balance through "qty"; adding them
                     // word for word would only turn headings like "Main Store Current Qty" into questions, so they are left out.
                     'current quantity level', 'current level', 'current stock level', 'in stock', 'on hand qty',
+                    'bal', 'closing bal', 'stock bal', // v4: "Bal" written short
                 ],
                 'unit' => [
                     'unit', 'units', 'uom', 'unit of measure', 'unit of measurement', 'measure', 'measurement',
@@ -76,7 +80,41 @@ if (!function_exists('import_default_aliases')) {
                 'unit_price' => [
                     'unit price', 'price', 'cost', 'unit cost', 'cost price', 'buying price', 'purchase price',
                     'rate', 'price per unit', 'cost per unit', 'unit rate',
-                    'cost unit', 'unit cost price', 'avg cost', 'average cost', 'weighted average cost', 'buying cost',
+                    'cost unit', 'unit cost price',
+                    'avg cost', 'average cost', 'weighted average cost', 'buying cost',
+                    'u price', 'u cost', 'price each', // v4 (appended last: the table keeps the seed's order)
+                ],
+                // v4: what the item is BOUGHT in (crate, case, carton ...). No bare "pack", "case", "crate": those are cell values in these sheets
+                // (and "Pack Qty" must stay a quantity). A column read as this field whose cells are not unit / pack words ("Packing Date") is
+                // turned back into a question by the value check (import_map_check_shapes).
+                'pack_name' => [
+                    'unit bought as', 'bought as', 'bought in', 'purchased as', 'purchase unit', 'purchasing unit', 'buying unit', 'unit of purchase',
+                    'purchase uom', 'order unit', 'pack name', 'pack type', 'pack unit', 'packaging', 'packing', 'case crate', 'crate case', 'bought unit',
+                ],
+                // v4: how many stock units one bought pack holds
+                'pack_size' => [
+                    'total per unit', 'units per pack', 'units per case', 'units per crate', 'units per carton', 'units per box', 'units in pack',
+                    'units in case', 'qty per case', 'qty per pack', 'qty per crate', 'qty per carton', 'qty per ctn', 'qty case', 'qty ctn', 'qty pack',
+                    'quantity per case', 'quantity per pack', 'quantity per crate', 'pack size', 'case size', 'crate size', 'carton size', 'items per pack',
+                    'pcs per pack', 'pcs per carton', 'pcs per ctn', 'pcs per case', 'pieces per pack', 'bottles per crate', 'bottles per case',
+                    'cans per case', 'no per case', 'number per case', 'conversion factor', 'pack count',
+                ],
+                // v4: how the item is SOLD or served (bottle, can, shot, glass, each). Read as the stock unit when it is a whole container;
+                // a shot or glass sold from a bottle or casket keeps the bought unit (see import_pack_decide()).
+                'served_by' => [
+                    'unit sold served by', 'unit sold by', 'unit served by', 'sold served by', 'sold by', 'served by', 'sold as', 'served as',
+                    'selling unit', 'sales unit', 'issue unit', 'issue uom', 'unit sold', 'serving unit', 'sold per', 'served per', 'unit of sale',
+                ],
+                // v4: a price written PER PACK (per case / crate / carton): divided by the pack size into the cost of one stock unit
+                'pack_price' => [
+                    'price per case', 'price per crate', 'price per pack', 'price per carton', 'price per ctn', 'price per box', 'case price', 'crate price',
+                    'pack price', 'carton price', 'ctn price', 'cost per case', 'cost per crate', 'cost per pack', 'cost per carton', 'cost per ctn',
+                    'case cost', 'crate cost', 'pack cost', 'carton cost',
+                ],
+                // v4: the SELLING price (never a cost). Not imported: used only to check that a cost per unit is below what the unit sells for.
+                'sell_price' => [
+                    'selling price', 'sell price', 'sale price', 'sales price', 'selling', 'retail price', 'menu price', 'bar price', 'price per shot',
+                    'price per glass', 'shot price', 'glass price', 's price', 'selling price per unit', 'retail', 'sp',
                 ],
                 'remarks' => ['remarks', 'remark', 'comments', 'comment', 'notes', 'note', 'observations'],
                 'category' => ['category', 'categories', 'department', 'dept', 'group', 'type', 'section', 'class'],
@@ -101,9 +139,20 @@ if (!function_exists('import_default_aliases')) {
                     'commodity code',
                 ],
             ],
-            'derived' => ['qty_total', 'days_to_expiry', 'status', 'action', 'purchase_qty', 'total_cost', 'row_no', 'lead_time', 'min_qty'],
-            // derived field => the field it stands in for when the sheet has NO column of that field (stored as kind field_fallback)
-            'field_fallbacks' => ['min_qty' => 'min_level'],
+            'derived' => ['qty_total', 'days_to_expiry', 'status', 'action', 'purchase_qty', 'total_cost', 'row_no', 'lead_time', 'min_qty', 'sell_price'],
+            // derived field => the field it stands in for when the sheet has NO column of that field (stored as kind field_fallback).
+            // v4: a "Total Balance" is the quantity when the sheet has no other quantity column at all (never from the bare word "total").
+            'field_fallbacks' => ['min_qty' => 'min_level', 'qty_total' => 'qty_single'],
+            // v4: words that name a CONTAINER something is bought in (a price per one of them may be divided by its pack size) ...
+            'container_words' => [
+                'crate', 'crates', 'case', 'cases', 'carton', 'cartons', 'ctn', 'ctns', 'box', 'boxes', 'bx', 'tray', 'trays', 'pack', 'packs',
+                'pallet', 'pallets', 'bale', 'bales', 'outer', 'outers', 'dozen', 'doz', 'bundle', 'bundles', 'packet', 'packets', 'pkt', 'pkts', 'sleeve', 'sleeves',
+            ],
+            // ... and words for a PORTION served out of a bottle / casket (never a stock unit of its own)
+            'portion_words' => [
+                'shot', 'shots', 'tot', 'tots', 'glass', 'glasses', 'measure', 'measures', 'cup', 'cups', 'serving', 'servings',
+                'portion', 'portions', 'scoop', 'scoops', 'slice', 'slices', 'pint', 'pints', 'single', 'double', 'dash',
+            ],
             'units' => [
                 'piece', 'pieces', 'pc', 'pcs', 'each', 'ea', 'bottle', 'bottles', 'btl', 'btls', 'can', 'cans', 'kg', 'kgs',
                 'kilo', 'kilos', 'kilogram', 'kilograms', 'g', 'gram', 'grams', 'litre', 'litres', 'liter', 'liters',
@@ -112,7 +161,7 @@ if (!function_exists('import_default_aliases')) {
                 'sachets', 'bag', 'bags', 'tin', 'tins', 'jar', 'jars', 'tray', 'trays', 'set', 'sets', 'pair',
                 'pairs', 'bundle', 'bundles', 'gallon', 'gallons', 'drum', 'drums', 'sack', 'sacks', 'tub',
                 'tubs', 'unit', 'units', 'bunch', 'bunches', 'head', 'heads', 'loaf', 'loaves', 'ream', 'reams',
-                'keg', 'kegs', 'sheet', 'sheets', 'tube', 'tubes',
+                'keg', 'kegs', 'sheet', 'sheets', 'tube', 'tubes', 'casket', 'caskets', 'cask', 'casks',
             ],
             // different spellings of the SAME unit -> the spelling stock uses (format only, never a conversion: kg stays kg, a dozen is not 12).
             // A hotel can add rows (import_aliases kind unit_synonym, term = the spelling, maps_to = the unit).
@@ -125,7 +174,7 @@ if (!function_exists('import_default_aliases')) {
                 'pkt' => 'packet', 'pkts' => 'packet', 'packet' => 'packet', 'packets' => 'packet',
                 'ctn' => 'carton', 'ctns' => 'carton', 'cartons' => 'carton',
                 'doz' => 'dozen', 'dz' => 'dozen', 'cans' => 'can', 'boxes' => 'box', 'bx' => 'box', 'sachets' => 'sachet',
-                'trays' => 'tray', 'tray' => 'tray',
+                'trays' => 'tray', 'tray' => 'tray', 'caskets' => 'casket', 'casks' => 'cask',
             ],
             'section_words' => [
                 'beers', 'beer', 'spirits', 'wines', 'wine', 'soft drinks', 'juices', 'liqueurs', 'protein',

@@ -115,9 +115,10 @@ if (!function_exists('rh_import_setting_defaults')) {
             $rows[] = ['derived', (string)$f, ''];
         }
         $kinds = ['units' => 'unit', 'section_words' => 'section_word', 'total_words' => 'total_word',
-            'summary_phrases' => 'summary_phrase', 'skip_sheet_words' => 'skip_sheet_word', 'noise_tokens' => 'noise_token', 'guard_words' => 'guard_word'];
+            'summary_phrases' => 'summary_phrase', 'skip_sheet_words' => 'skip_sheet_word', 'noise_tokens' => 'noise_token', 'guard_words' => 'guard_word',
+            'container_words' => 'container_word', 'portion_words' => 'portion_word'];
         foreach ($kinds as $key => $kind) {
-            foreach ($d[$key] as $w) {
+            foreach ((array)($d[$key] ?? []) as $w) {
                 $rows[] = [$kind, (string)$w, ''];
             }
         }
@@ -191,9 +192,11 @@ if (!function_exists('rh_import_setting_defaults')) {
             return $out;
         }
         $listKey = ['unit' => 'units', 'section_word' => 'section_words', 'total_word' => 'total_words',
-            'summary_phrase' => 'summary_phrases', 'skip_sheet_word' => 'skip_sheet_words', 'noise_token' => 'noise_tokens', 'guard_word' => 'guard_words'];
+            'summary_phrase' => 'summary_phrases', 'skip_sheet_word' => 'skip_sheet_words', 'noise_token' => 'noise_tokens', 'guard_word' => 'guard_words',
+            'container_word' => 'container_words', 'portion_word' => 'portion_words'];
         $res = ['version' => $out['version'], 'fields' => [], 'derived' => [], 'units' => [], 'section_words' => [],
-            'total_words' => [], 'summary_phrases' => [], 'skip_sheet_words' => [], 'noise_tokens' => [], 'unit_synonyms' => [], 'field_fallbacks' => [], 'guard_words' => []];
+            'total_words' => [], 'summary_phrases' => [], 'skip_sheet_words' => [], 'noise_tokens' => [], 'unit_synonyms' => [], 'field_fallbacks' => [], 'guard_words' => [],
+            'container_words' => [], 'portion_words' => []];
         foreach ($rows as $r) {
             $k = $r['kind'];
             if ($k === 'unit_synonym') {
@@ -216,6 +219,11 @@ if (!function_exists('rh_import_setting_defaults')) {
         }
         if (!$res['unit_synonyms']) {
             $res['unit_synonyms'] = $out['unit_synonyms'];
+        }
+        foreach (['container_words', 'portion_words'] as $k) {        // v4 kinds: a hotel seeded before v4 (or a cut-short seed) still reads packs
+            if (!$res[$k]) {
+                $res[$k] = (array)($out[$k] ?? []);
+            }
         }
         return $res;
     }
@@ -267,6 +275,32 @@ if (!function_exists('rh_import_setting_defaults')) {
             }
             $ins->execute([$kind, $term, $maps, import_alias_hash($kind, $term, $maps), $userId]);
             $n += $ins->rowCount();
+        }
+        return $n;
+    }
+
+    /**
+     * Column headings a person confirmed in an import ([field => [heading as written, ...]], the job's _overrides aliases), saved as this hotel's
+     * own header words (kind 'field', is_hotel_learned = 1, who / when): import_load_aliases() reads them next time, so the same heading maps
+     * without a question. Called inside the commit transaction only (a rolled-back import teaches nothing). Only known fields; idempotent.
+     */
+    function import_save_learned_headers(PDO $pdo, array $byField, ?int $userId): int
+    {
+        $known = array_keys(import_default_aliases()['fields']);
+        $ins = $pdo->prepare('INSERT IGNORE INTO import_aliases (kind, term, maps_to, alias_hash, is_hotel_learned, created_by) VALUES (?, ?, ?, ?, 1, ?)');
+        $n = 0;
+        foreach ($byField as $field => $heads) {
+            if (!in_array((string)$field, $known, true)) {
+                continue;
+            }
+            foreach ((array)$heads as $h) {
+                $term = mb_substr(import_norm_text((string)$h), 0, 191);
+                if ($term === '') {
+                    continue;
+                }
+                $ins->execute(['field', $term, (string)$field, import_alias_hash('field', $term, (string)$field), $userId]);
+                $n += $ins->rowCount();
+            }
         }
         return $n;
     }

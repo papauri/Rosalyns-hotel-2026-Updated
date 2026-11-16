@@ -123,8 +123,17 @@ if (!function_exists('import_vc_collect')) {
                 if ($single) {
                     $vals = $vals ? reset($vals) : null;
                 }
+                $sell = null;
+                foreach ((array)$r['ignored'] as $ig) {
+                    if (($ig['field'] ?? '') === 'sell_price' && empty($ig['unknown']) && $ig['value'] !== null) {
+                        $ps = import_parse_number($ig['value']);
+                        $sell = $ps['status'] === 'ok' ? (float)$ps['value'] : null;
+                    }
+                }
+                // [11] the pack the row's own bought-as / pack-size cells divide its price by (pack-rule.php), [12] the selling price of one unit
                 $rows[] = ['', (int)$r['row'], (string)$f['item_name']['value'], (string)($r['category'] ?? ''),
-                    isset($f['unit']) ? (string)$f['unit']['value'] : '', $qty, $price, isset($f['unit_price']) ? (string)$f['unit_price']['source'] : '', $vals, $pq, $cq];
+                    isset($f['unit']) ? (string)$f['unit']['value'] : '', $qty, $price, isset($f['unit_price']) ? (string)$f['unit_price']['source'] : '', $vals, $pq, $cq,
+                    !empty($r['pack_rule']['pack']) ? (int)$r['pack_rule']['pack'] : null, $sell];
             }
             $out[] = ['name' => (string)$sh['name'], 'index' => (int)($sh['index'] ?? 0), 'header_row' => (int)($sh['header_row'] ?? 0),
                 'qty_cols' => $qtyCols, 'qty_heads' => $qtyHeads, 'price_col' => $priceCol, 'price_head' => $priceHead,
@@ -196,8 +205,12 @@ if (!function_exists('import_vc_collect')) {
     function import_vc_finish(array $col, array $questions, array $items = []): array
     {
         $pack = [];
+        $perUnit = [];         // case-price questions answered "one unit": the row's own pack (pack-rule) is not divided in
         $packAt = [];           // sheet + row => pack: a case-price question added at resolve time (case-signals.php) is not in the collected ids
         foreach ($questions as $q) {
+            if (($q['type'] ?? '') === 'case-price' && ($q['answer'] ?? null) === 'per-unit') {
+                $perUnit[$q['id']] = true;
+            }
             if (($q['type'] ?? '') === 'case-price' && ($q['answer'] ?? null) === 'per-case') {
                 $p = (int)($q['answer_detail']['pack_size'] ?? 0);
                 if ($p >= 2) {
@@ -209,6 +222,7 @@ if (!function_exists('import_vc_collect')) {
             }
         }
         $groups = [];
+        $selling = [];
         $all = [];
         $missing = import_vc_missing($items);
         $sheetsOut = [];
@@ -218,13 +232,16 @@ if (!function_exists('import_vc_collect')) {
             $valOf = function (array $r, string $letter) {
                 return is_array($r[8]) ? ($r[8][$letter] ?? null) : $r[8];
             };
-            $packed = function (array $r) use ($pack, $packAt, $sh) {
+            $packed = function (array $r) use ($pack, $packAt, $perUnit, $sh) {
                 foreach ($r[10] as $qid) {
                     if (isset($pack[$qid])) {
                         return $pack[$qid];
                     }
+                    if (isset($perUnit[$qid])) {
+                        return null;
+                    }
                 }
-                return $packAt[(string)$sh['name'] . "\x1f" . (int)$r[1]] ?? null;
+                return $packAt[(string)$sh['name'] . "\x1f" . (int)$r[1]] ?? ($r[11] ?? null);
             };
             foreach ($sh['value_cols'] as $letter => $header) {
                 // a "Total Cost" that is Purchase Qty x Unit Price (a buying list) is not a stock value: recognised, not reported
@@ -264,6 +281,61 @@ if (!function_exists('import_vc_collect')) {
                     if ($n > 0 && $agreeP > $agreeQ && $agreeP * 2 >= $n) {
                         continue;
                     }
+                }
+                // a value column worked out at the SELLING price (quantity x selling price on most rows, more often than quantity x cost) is what the
+                // stock would sell for, not what it cost: said once in the summary, never compared row by row with the cost (A86)
+                $nS = 0;
+                $agreeS = 0;
+                $agreeC = 0;
+                foreach ($sh['rows'] as $r) {
+                    $v = $valOf($r, $letter);
+                    if ($r[5] === null || $v === null || ($r[12] ?? null) === null) {
+                        continue;
+                    }
+                    $nS++;
+                    $cs = $r[5] * $r[12];
+                    if (abs($v - $cs) <= import_vc_tolerance($cs)) {
+                        $agreeS++;
+                    }
+                    if ($r[6] !== null) {
+                        $pk = $packed($r);
+                        $cc = $r[5] * ($pk ? $r[6] / $pk : $r[6]);
+                        if (abs($v - $cc) <= import_vc_tolerance($cc)) {
+                            $agreeC++;
+                        }
+                    }
+                }
+                if ($nS >= 3 && $agreeS > $agreeC && $agreeS * 10 >= $nS * 6) {
+                    // the rows that do NOT fit Quantity x Selling price are still listed one by one (accounting A1): never hidden by the majority
+                    $fm = function ($x) {
+                        return rtrim(rtrim(number_format((float)$x, 2, '.', ','), '0'), '.');
+                    };
+                    $colTotal = 0.0;
+                    $calcS = 0.0;
+                    $diffS = 0;
+                    foreach ($sh['rows'] as $r) {
+                        $v = $valOf($r, $letter);
+                        $colTotal += $v !== null ? (float)$v : 0.0;
+                        if ($r[5] === null || $v === null || ($r[12] ?? null) === null) {
+                            continue;
+                        }
+                        $cs = $r[5] * $r[12];
+                        $calcS += $cs;
+                        $d = $v - $cs;
+                        if (abs($d) <= import_vc_tolerance($cs)) {
+                            continue;
+                        }
+                        $diffS++;
+                        $all[] = ['sheet' => $sh['name'], 'si' => $si, 'row' => $r[1], 'name' => $r[2], 'category' => $r[3], 'unit' => $r[4], 'qty' => $r[5],
+                            'why_code' => 'sell-differs', 'why' => 'Differs from Quantity x Selling price (' . $fm($r[5]) . ' x ' . $fm($r[12]) . ' = ' . $fm(round($cs, 2)) . ').',
+                            'price' => $r[12], 'pack' => null, 'cost' => $r[12], 'calc' => round($cs, 2), 'value' => $v, 'diff' => round($d, 2), 'abs' => abs($d),
+                            'kind' => abs($r[5]) < 1e-9 ? 'no-qty' : ($d > 0 ? 'more' : 'less'), 'header' => $header, 'basis' => 'selling',
+                            'implied' => abs($r[12]) > 0.00005 ? round($v / $r[12], 2) : null,
+                            'cell' => import_source_ref($sh['name'], $letter . $r[1]), 'price_cell' => ''];
+                    }
+                    $selling[] = ['sheet' => $sh['name'], 'header' => $header, 'letter' => $letter, 'compared' => $nS, 'agree' => $agreeS, 'differ' => $diffS,
+                        'calc_total' => round($calcS, 2), 'column_total' => round($colTotal, 2)];
+                    continue;
                 }
                 $g = ['sheet' => $sh['name'], 'header' => $header, 'letter' => $letter, 'compared' => 0, 'differ' => 0, 'more_n' => 0, 'more_sum' => 0.0,
                     'less_n' => 0, 'less_sum' => 0.0, 'no_qty_n' => 0, 'calc_total' => 0.0, 'column_total' => 0.0, 'packs' => 0,
@@ -322,12 +394,12 @@ if (!function_exists('import_vc_collect')) {
             unset($x['abs'], $x['si']);
         }
         unset($x);
-        $differ = array_sum(array_column($groups, 'differ'));
+        $differ = array_sum(array_column($groups, 'differ')) + array_sum(array_column($selling, 'differ'));
         $rowsN = 0;
         foreach ((array)($col['sheets'] ?? []) as $sh) {
             $rowsN += (int)($sh['n_rows'] ?? count($sh['rows']));
         }
-        return ['groups' => $groups, 'rows' => $all, 'missing' => $missing, 'sheets' => $sheetsOut, 'rows_n' => $rowsN,
+        return ['groups' => $groups, 'selling' => $selling, 'rows' => $all, 'missing' => $missing, 'sheets' => $sheetsOut, 'rows_n' => $rowsN,
             'differ' => (int)$differ, 'missing_n' => count($missing), 'show' => $differ > 0 || count($missing) > 0];
     }
 
@@ -342,7 +414,7 @@ if (!function_exists('import_vc_collect')) {
             $sheets[$s['name']] = ['qty_heads' => $s['qty_heads'], 'price_head' => $s['price_head']];
         }
         return ['show' => (bool)$fin['show'], 'differ' => (int)$fin['differ'], 'missing_n' => (int)$fin['missing_n'], 'groups' => $groups, 'sheets' => $sheets,
-            'missing_sample' => array_slice(array_column($fin['missing'], 'name'), 0, 10)];
+            'missing_sample' => array_slice(array_column($fin['missing'], 'name'), 0, 10), 'selling' => (array)($fin['selling'] ?? [])];
     }
 
     /** One page of the disagreeing rows (sorted by the largest difference first). $size 0 = every row. */

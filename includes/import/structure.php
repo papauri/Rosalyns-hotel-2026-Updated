@@ -114,6 +114,26 @@ if (!function_exists('import_structure_sheet')) {
         return 'value';
     }
 
+    /** The row's only filled cell when it is words (not a number): ['col' => int, 'text' => string], else null. */
+    function import_struct_lone_text(array $cells): ?array
+    {
+        $found = null;
+        foreach ($cells as $c => $cell) {
+            if (!empty($cell['merged_into']) || !import_cell_usable($cell)) {
+                continue;
+            }
+            $v = $cell['v'];
+            if (is_string($v) && (trim($v) === '' || import_is_empty_marker($v))) {
+                continue;
+            }
+            if ($found !== null || !is_string($v) || import_parse_number($v)['status'] === 'ok' || !preg_match('/\p{L}{2}/u', $v)) {
+                return null;
+            }
+            $found = ['col' => (int)$c, 'text' => import_norm_ws($v)];
+        }
+        return $found;
+    }
+
     function import_row_is_blank(array $cells): bool
     {
         foreach ($cells as $cell) {
@@ -194,6 +214,7 @@ if (!function_exists('import_structure_sheet')) {
 
         $res['header_row'] = $header['row'];
         $map = import_map_columns($sheet, $header['row'], $aliases);
+        import_map_infer_by_values($map, $sheet, (int)$header['row'], $aliases);    // the values confirm or fill in what the headings leave unsure
         $res['by_field'] = $map['by_field'];
 
         // sheet looks like a dashboard/summary by name but also has item columns => ask; else skip
@@ -307,19 +328,38 @@ if (!function_exists('import_structure_sheet')) {
 
             // signals from the mapped data columns
             $sig = ['value' => 0, 'zero' => 0, 'text' => 0];
+            $numFilled = 0;     // number columns holding anything at all (a value, a zero or words)
             $strong = false;    // a real price / unit / batch / expiry / remarks value
             foreach ($dataCols as $c => $kind) {
                 $s = import_cell_signal($cells[$c] ?? null, $kind);
                 if (isset($sig[$s])) {
                     $sig[$s]++;
                 }
+                if ($kind === 'number' && $s !== 'empty') {
+                    $numFilled++;
+                }
                 $f = $map['columns'][$c]['field'];
-                if ($s === 'value' && in_array($f, ['unit_price', 'unit', 'batch', 'expiry', 'remarks'], true)) {
+                if ($s === 'value' && in_array($f, ['unit_price', 'pack_price', 'unit', 'batch', 'expiry', 'remarks'], true)) {
                     $strong = true;
                 }
             }
 
             if ($label === '') {
+                // a heading typed one column to the right ("ENERGY DRINKS" in the quantity column, the item-name cell empty): the row's ONLY
+                // filled cell, words not a number, short. It is the category for the rows below, exactly like a heading in the name column.
+                $only = import_struct_lone_text($cells);
+                if ($only !== null && !import_label_is_total($only['text'], $aliases) && count(import_label_tokens($only['text'])) <= 6 && mb_strlen($only['text']) <= 70
+                    && ((import_is_upper_label($only['text']) && $capsDiscriminates) || import_label_has_section_word($only['text'], $aliases))) {   // like a heading in the name column (A7): capitals that set headings apart, or a section word; a stray note stays an orphan
+                    $info['label'] = $only['text'];
+                    $info['kind'] = 'section';
+                    $curCat = $only['text'];
+                    $curCatRef = import_source_ref($name, import_cell_ref($r, $only['col']));
+                    $info['label_ref'] = $curCatRef;
+                    $info['reason'] = 'Category heading (written in column ' . import_num_to_col($only['col']) . ', the name cell is empty): items below belong to it.';
+                    $catIndex[] = ['name' => $only['text'], 'ref' => $curCatRef, 'row' => $r, 'items' => 0];
+                    $res['rows'][$r] = $info;
+                    continue;
+                }
                 $info['kind'] = 'orphan';
                 $info['reason'] = 'Has values but no item name.';
                 $res['rows'][$r] = $info;
@@ -339,6 +379,27 @@ if (!function_exists('import_structure_sheet')) {
             }
 
             $merged = $labelCell && (!empty($labelCell['merge_span']) && $labelCell['merge_span'][1] >= 2);
+            // a label merged ACROSS a number column (so that column cannot hold an item's count or price on this row), with no number anywhere
+            // and only a word in a text column beside it ("VODKA" merged A:D with "Bottle" in the bought-as column): a heading, not an item
+            if ($merged && $numFilled === 0 && $sig['value'] > 0 && count(import_label_tokens($label)) < 7 && strlen($label) <= 70) {
+                $span = (int)$labelCell['merge_span'][1];
+                $coversNumber = false;
+                foreach ($dataCols as $c => $kind) {
+                    if ($kind === 'number' && $c > $nameCol && $c < $nameCol + $span) {
+                        $coversNumber = true;
+                        break;
+                    }
+                }
+                if ($coversNumber) {
+                    $curCat = $label;
+                    $curCatRef = import_source_ref($name, import_cell_ref($r, $nameCol));
+                    $info['kind'] = 'section';
+                    $info['reason'] = 'Category heading (merged across the number columns): items below belong to it.';
+                    $catIndex[] = ['name' => $label, 'ref' => $curCatRef, 'row' => $r, 'items' => 0];
+                    $res['rows'][$r] = $info;
+                    continue;
+                }
+            }
             if ($sig['value'] === 0 && $sig['text'] === 0) {
                 $words = count(import_label_tokens($label));
                 if ($sig['zero'] === 0) {

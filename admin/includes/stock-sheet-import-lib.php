@@ -153,6 +153,15 @@ if (!function_exists('rh_ssi_norm_unit')) {
     }
 }
 
+if (!function_exists('rh_ssi_pack_name')) {
+    /** The pack word stored with a pack size: the sheet's own bought-as word when the Import read one ("Case", "Carton"), else "crate" (this CLI's bar sheets). */
+    function rh_ssi_pack_name(array $it): string
+    {
+        $w = trim((string)($it['pack_name'] ?? ''));
+        return $w !== '' ? mb_substr(mb_strtolower($w), 0, 30) : 'crate';
+    }
+}
+
 if (!function_exists('rh_ssi_units_compatible')) {
     /** Is a sheet unit the same thing as the ingredient's stock unit (each / pcs / piece count as one)? */
     function rh_ssi_units_compatible(string $sheetUnit, string $existingUnit): bool
@@ -688,7 +697,7 @@ if (!function_exists('rh_ssi_apply')) {
                 }
                 $ins->execute([
                     mb_substr($it['name'], 0, 255), $it['dept'], $it['unit'], $it['cost'] ?? 0, $it['notes'] !== '' ? $it['notes'] : null,
-                    $it['reorder'], $it['par'], $it['pack'] ? 'crate' : null, $it['pack'] ?: null,
+                    $it['reorder'], $it['par'], $it['pack'] ? rh_ssi_pack_name($it) : null, $it['pack'] ?: null,
                 ]);
                 $it['id'] = (int)$pdo->lastInsertId();
                 $it['system_qty'] = 0.0;
@@ -717,7 +726,8 @@ if (!function_exists('rh_ssi_apply')) {
                         $set[] = 'reorder_point = ?';
                         $args[] = $it['reorder'];
                     } elseif ($field === 'pack' && $it['pack']) {
-                        $set[] = "pack_name = 'crate'";
+                        $set[] = 'pack_name = ?';
+                        $args[] = rh_ssi_pack_name($it);
                         $set[] = 'pack_size = ?';
                         $args[] = $it['pack'];
                     } elseif ($field === 'notes') {

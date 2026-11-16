@@ -811,9 +811,41 @@ if (!function_exists('import_job_skip')) {
                 'no_cost' => $lc === null || (float)$lc <= 0.00005,
                 'zero' => $it['balance'] !== null && (float)$it['balance'] <= 0.00005,
                 'from_zero' => $fromZero,
+                // the scale of a cost change (A88): the file's count valued at the current cost and at the file's cost; a cost divided by the
+                // row's own pack size (crate price -> bottle) is counted so the summary can say why many costs drop
+                'old_cost' => isset($it['diff']['cost']) ? (float)$it['diff']['cost'][0] : null, 'new_cost' => isset($it['diff']['cost']) ? (float)$it['diff']['cost'][1] : null,
+                'qty' => $it['balance'] !== null ? (float)$it['balance'] : null, 'by_pack' => !empty($it['pack']) && !empty($it['pack_auto']),
             ];
         }
         return $out;
+    }
+
+    /** Value before -> after of ticking Cost on $targets: sum of the file's count x current cost and x the file's cost (items with a count), and how many
+     *  of the new costs come from a price per pack divided by the row's own pack size. Money: rounded to 2 places, compared nowhere. */
+    function import_cont_cost_scale(array $targets): array
+    {
+        $before = 0.0;
+        $after = 0.0;
+        $counted = 0;
+        $byPack = 0;
+        $down = 0;
+        $up = 0;
+        foreach ($targets as $t) {
+            if (!empty($t['by_pack'])) {
+                $byPack++;
+            }
+            if (($t['new_cost'] ?? null) !== null && ($t['old_cost'] ?? null) !== null) {
+                $down += $t['new_cost'] < $t['old_cost'] ? 1 : 0;
+                $up += $t['new_cost'] > $t['old_cost'] ? 1 : 0;
+            }
+            if (($t['qty'] ?? null) === null || ($t['new_cost'] ?? null) === null) {
+                continue;
+            }
+            $counted++;
+            $before += (float)$t['qty'] * (float)$t['old_cost'];
+            $after += (float)$t['qty'] * (float)$t['new_cost'];
+        }
+        return ['before' => round($before, 2), 'after' => round($after, 2), 'items_counted' => $counted, 'by_pack' => $byPack, 'down' => $down, 'up' => $up];
     }
 
     function import_cont_qty_targets(array $items): array
@@ -963,6 +995,7 @@ if (!function_exists('import_job_skip')) {
             'from_zero' => $mode === 'set' && $field === 'cost' ? count(array_filter($change, function ($t) {
                 return $t['from_zero'];
             })) : 0,
+            'value' => $mode === 'set' && $field === 'cost' ? import_cont_cost_scale($change) : null,
             'samples' => array_slice(array_values(array_map(function ($t) {
                 return (string)$t['name'];
             }, $change)), 0, 5),

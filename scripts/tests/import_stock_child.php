@@ -1083,6 +1083,39 @@ try {
     $planBad = import_build_stock_plan($resBad, $stG['ctx']);
     $ck('Green fix: the commit-time guard refuses a pack size without its divided cost', is_string($planBad) && strpos($planBad, 'pack size is ticked without the cost') !== false, is_string($planBad) ? $planBad : 'plan built');
 
+    // ---- bar layout: bought as / pack size / served by, read from the database's own alias table (seed v4), committed (2026-11-17) ----
+    $dbAl4 = import_load_aliases($pdo);
+    $ck('alias seed v4: the new kinds load back from the table (container / portion words, Total Balance as the quantity fallback, selling price greyed)',
+        $dbAl4['container_words'] === import_default_aliases()['container_words'] && $dbAl4['portion_words'] === import_default_aliases()['portion_words']
+        && ($dbAl4['field_fallbacks']['qty_total'] ?? '') === 'qty_single' && in_array('sell_price', $dbAl4['derived'], true)
+        && in_array('unit bought as', $dbAl4['fields']['pack_name'] ?? [], true));
+    $fhB = fopen('php://memory', 'w+');
+    foreach ([['Item Name', 'Total Balance', 'Unit Price (MWK)', 'Selling price', 'Stock Value', 'Unit Bought As', 'Total Per Unit', 'Unit sold/Served by'],
+        [$n('BR Lager'), 40, 48000, 5000, 200000, 'Crate', 24, 'Bottle'], [$n('BR Tonic'), 6, 2500, 6000, 36000, 'Can', 24, 'Can'],
+        [$n('BR Gin'), 12, 30000, 2500, 30000, 'Bottle', 1, 'Shot']] as $rB) { fputcsv($fhB, $rB); }
+    rewind($fhB);
+    $pB = $put(stream_get_contents($fhB), 'bar-layout.csv');
+    $uB = $upload($pB, 'bar-layout.csv', $admin);
+    $jB = (int)($uB['job_id'] ?? 0);
+    if ($jB) { import_job_analyse($pdo, $jB); }
+    $sB = $jB ? import_job_review_summary($pdo, $jB) : ['questions' => []];
+    $openB = array_filter((array)($sB['questions'] ?? []), function ($q) { return $q['blocking'] && $q['answer'] === null; });
+    $ck('bar layout (database aliases): no question at all', $jB > 0 && isset($sB['questions']) && !$openB, json_encode([$uB, array_keys($sB), $sB['error'] ?? null, array_column($openB, 'text')]));
+    $cB = $jB ? import_commit_stock($pdo, $jB, $admin) : ['ok' => false];
+    $ingB = [];
+    foreach ($pdo->query("SELECT name, unit, cost_per_unit, pack_name, pack_size FROM stock_ingredients WHERE name LIKE 'ZZT $run BR %'")->fetchAll(PDO::FETCH_ASSOC) as $x) { $ingB[$x['name']] = $x; }
+    $lB = $ingB[$n('BR Lager')] ?? [];
+    $tB = $ingB[$n('BR Tonic')] ?? [];
+    $gB = $ingB[$n('BR Gin')] ?? [];
+    $ck('bar layout commit: crate price / 24 = 2,000 per bottle with the pack "crate" of 24; tonic 2,500 per can with no pack; gin per bottle',
+        !empty($cB['ok']) && ($lB['unit'] ?? '') === 'bottle' && abs((float)($lB['cost_per_unit'] ?? 0) - 2000) < 0.0001 && ($lB['pack_name'] ?? '') === 'crate' && (int)($lB['pack_size'] ?? 0) === 24
+        && mb_strtolower((string)($tB['unit'] ?? '')) === 'can' && abs((float)($tB['cost_per_unit'] ?? 0) - 2500) < 0.0001 && array_key_exists('pack_size', $tB) && $tB['pack_size'] === null
+        && ($gB['unit'] ?? '') === 'bottle' && abs((float)($gB['cost_per_unit'] ?? 0) - 30000) < 0.0001, json_encode([$cB['error'] ?? null, $ingB]));
+    // a heading a person confirmed is remembered for this hotel (written in the commit transaction only)
+    $nLearn = import_save_learned_headers($pdo, ['pack_name' => [$n('Packed In')], 'shelf_colour' => ['x']], $admin);
+    $ck('learned headings: a confirmed heading is saved for this hotel and read back next time; an unknown field is not saved',
+        $nLearn === 1 && in_array(import_norm_text($n('Packed In')), import_load_aliases($pdo)['fields']['pack_name'] ?? [], true));
+
     // ---- cleanup of staged files, purge ---------------------------------------------------------------
     $pg = import_purge_staged($pdo, true);
     $ck('purge: runs and reports counts', is_array($pg) && isset($pg['files_deleted']));

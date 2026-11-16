@@ -61,6 +61,7 @@ if (!function_exists('import_commit_stock')) {
             if (!$ex) {
                 $plan['items'][$key] = $base + [
                     'dept' => (string)$it['category'], 'unit' => (string)$it['unit'], 'cost' => $it['cost'], 'pack' => $it['pack'] ?: null,
+                    'pack_name' => $it['pack'] ? ($it['pack_name'] ?? null) : null,
                     'action' => 'create', 'existing' => null, 'changes' => [], 'par' => (float)($it['max'] ?? 0), 'reorder' => (float)($it['min'] ?? 0),
                     'notes' => (string)($it['remarks'] ?? ''),
                 ];
@@ -84,6 +85,7 @@ if (!function_exists('import_commit_stock')) {
             $plan['items'][$key] = $base + [
                 'dept' => isset($t['category']) ? (string)$it['category'] : (string)$ex['category'], 'unit' => (string)$ex['unit'],
                 'cost' => isset($t['cost']) ? $it['cost'] : null, 'pack' => isset($t['pack']) ? ($it['pack'] ?: null) : null,
+                'pack_name' => isset($t['pack']) && $it['pack'] ? ($it['pack_name'] ?? null) : null,
                 'action' => 'update', 'existing' => $ex, 'changes' => $changes,
                 'par' => isset($t['par']) ? (float)$it['max'] : (float)$ex['par_level'],
                 'reorder' => (isset($t['par']) && $it['min'] !== null) ? (float)$it['min'] : (float)$ex['reorder_point'],
@@ -192,6 +194,8 @@ if (!function_exists('import_commit_stock')) {
             // so a rolled-back import teaches nothing
             $learnRows = import_learned_rows($v['res']['items']);
             $learned = $learnRows ? import_save_learned($pdo, $learnRows, $userId > 0 ? $userId : null) : 0;
+            // a column heading a person confirmed ("Yes, use it as ...") is remembered for this hotel, so the same layout is not asked again (A87)
+            $learned += import_save_learned_headers($pdo, (array)(import_job_answers($job)['_overrides']['aliases'] ?? []), $userId > 0 ? $userId : null);
             // stock left out of the count, by its TRUE reason (an unticked quantity is not "no price"); the overlap with another unfinished
             // opening count is decided inside rh_ssi_apply under its lock and reported as left_out_overlap
             $nc = import_cont_not_counted($v['res']['items'], [], PHP_INT_MAX)['by'];

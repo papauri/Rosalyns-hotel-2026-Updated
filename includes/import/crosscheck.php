@@ -352,9 +352,16 @@ if (!function_exists('import_crosscheck')) {
                 continue;
             }
             $priced = [];
+            $ruled = [];        // rows whose bought-as / pack / served-by cells already decide the price basis (pack-rule.php): peers at their cost per unit, never asked here
             foreach ($sh['rows'] as $i => $row) {
                 if (isset($row['fields']['unit_price']) && $row['fields']['unit_price']['value'] > 0) {
                     $priced[$i] = (float)$row['fields']['unit_price']['value'];
+                    if (!empty($row['pack_rule']) && (!empty($row['pack_rule']['decided']) || (string)($row['pack_rule']['ask'] ?? '') !== '')) {
+                        $ruled[$i] = true;       // decided by the row, or asked by its own question; an undecided row keeps this check
+                        if (!empty($row['pack_rule']['decided']) && is_numeric($row['pack_rule']['cost']) && (float)$row['pack_rule']['cost'] > 0) {
+                            $priced[$i] = (float)$row['pack_rule']['cost'];
+                        }
+                    }
                 }
             }
             if (count($priced) < $minPeers + 1) {
@@ -374,6 +381,9 @@ if (!function_exists('import_crosscheck')) {
                 $catGroups[$ck] = count($list) - 1 >= $minPeers ? import_cc_group($list) : null;
             }
             foreach ($priced as $i => $price) {
+                if (isset($ruled[$i])) {
+                    continue;
+                }
                 $row = $sh['rows'][$i];
                 $cat = $row['category'];
                 $scope = 'sheet';
@@ -400,6 +410,21 @@ if (!function_exists('import_crosscheck')) {
                     'case_ratio' => round($price / $med, 2),
                 ]);
                 $q['row_uids'] = [$row['uid']];
+                // the item NAME says the pack ("Lager 6 pack", "Water case of 12") and the price is far above its peers: both agree, so it is
+                // answered "per case of N" for the person (shown with its reason, changeable) - but only when the stock unit is not that pack
+                $pv = $opts['pack_vocab'] ?? null;
+                if ($pv) {
+                    $pp = import_pack_parse_text((string)$row['fields']['item_name']['value'], $pv);
+                    $ru = isset($row['fields']['unit']) ? import_pack_canon((string)$row['fields']['unit']['value'], $pv) : '';
+                    if ($pp !== null) {
+                        $q['pack_hint'] = (int)$pp['n'];          // "24x500ml": the size the person will most likely type (pre-filled, never saved by itself)
+                    }
+                    if ($pp !== null && $pp['word'] !== null && $ru !== '' && $ru !== import_pack_canon($pp['word'], $pv) && round($price / $pp['n']) >= 1) {
+                        $q['pre'] = ['pack' => (int)$pp['n'], 'reason' => 'The item name says "' . $pp['match'] . '" and the price ' . import_fmt_money($price) . ' is about '
+                            . round($price / $med, 1) . ' times the usual ' . import_fmt_money($med) . ', so it is the price of the ' . mb_strtolower($pp['word']) . ': '
+                            . import_fmt_money(round($price / $pp['n'], 4)) . ' per ' . $row['fields']['unit']['value'] . '.'];
+                    }
+                }
                 import_register_question($analysis, $q);
             }
         }
