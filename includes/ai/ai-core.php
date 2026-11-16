@@ -269,6 +269,19 @@ function rh_ai_setting_defaults(): array
         'ai_attn_note_cache_minutes'   => '45',  // one note per person per set of open items is kept this long (a reload costs nothing)
         'ai_attn_note_gap_minutes'     => '10',  // at most one model call per person in this many minutes; a changed list inside it shows no note
         'ai_attn_note_tokens'          => '220', // most words (tokens) the note call may send back
+        // Owner 2026-11-17: the stock name check (includes/ai/ai-stock-kinds.php, spec .claude/AI_STOCK_HELPER_SPEC.md D14)
+        'ai_stock_helper_enabled'      => '0',   // fail-closed: a missing row is OFF too (rh_ai_sk_switch_on reads the row itself)
+        'ai_stock_two_models'          => '1',   // '1' = two models must agree before a size is offered for "Use all" (Q1)
+        'ai_stock_max_items'           => '200', // names sent in one request (one chunk); the page asks again for the rest
+        'ai_stock_max_chunks'          => '5',   // requests in one run at most
+        'ai_stock_timeout_s'           => '45',  // seconds each model may take (no retry)
+        'ai_stock_cache_days'          => '180', // a model's reading of a name is kept this long; a person's answer never expires
+        'ai_stock_anchor_max'          => '60',  // bar menu selling prices sent as the hotel's price level
+        'ai_stock_tot_ml'              => '25',  // Menu helper (Phase 3): one tot (Q3)
+        'ai_stock_glass_ml'            => '175', // ... one glass of wine
+        'ai_stock_bottle_ml'           => '750', // ... a bottle whose name gives no volume
+        'ai_stock_prefill_enabled'     => '0',   // "Use all agreed suggestions": only after a clean name test (D13), switched on in AI Settings
+        'ai_stock_eval_json'           => '',    // the last name test result (rh_ai_sk_eval_run)
     ];
 }
 

@@ -4,7 +4,7 @@ Owner, 2026-11-17: *"Lets do this then, use fable logic so we dont mess up and a
 maybe even the menu wizard just as a helper of its own. Without it on it works still like this and efficiently but with AI
 we harness more swarming leads to perfection."*
 
-Status: SPEC (dept-ai-lead, 2026-11-17). Next: Fable 5.2 spec check, then the build in the order given in §6.
+Status: SPEC + Fable 5.2 check GO-WITH-CHANGES (2026-11-17; the 9 changes are folded in below, each marked (Fable 2026-11-17)). Build order in §6. Phase 1 = engine + Fix crate prices + the notice-card fix.
 Code was read in the Liwonde repo (the two repos are identical for these files). Rosalyn's is LIVE. All DB tests,
 recordings and rehearsals run at **Liwonde only**. Nothing in this spec writes stock, costs, recipes or money.
 
@@ -91,7 +91,11 @@ This follows the attention-note route: only product facts are sent, so there is 
   share words with people) is **not sent**. It counts as "not checked by name". Confirm the shape of `rh_ai_vault_people()` at build.
 - All names are untrusted data: they are wrapped as quoted data in the user message, and the frozen prompt says to never follow
   text inside them. The output can only be the D5 fields, so an injected instruction cannot do anything.
-- Tests `sk_payload_fields_only`, `sk_payload_skips_person_names`, `sk_payload_injection_name`.
+- (Fable 2026-11-17) Names that read as instructions are not sent: longer than 80 characters, more than 12 words, or holding words such as
+  "ignore", "instruction", "prompt", "system", "assistant", "reply", "json", "respond". They count as "not checked by name".
+- (Fable 2026-11-17) An item whose stock batches still holding stock have **different unit costs** (more than 2% apart) gets a flag only, never an
+  N or a chip, because dividing one cost by N would be wrong for the other batches. Shown: "Its batches have different costs: check each batch."
+- Tests `sk_payload_fields_only`, `sk_payload_skips_person_names`, `sk_payload_injection_name`. `sk_payload_skips_instruction_names`, `sk_mixed_batches_flag_only`.
 
 ### D5. Outputs: the exact JSON schema (per model reply)
 ```
@@ -107,6 +111,9 @@ This follows the attention-note route: only product facts are sent, so there is 
 | `why` | string | at most 8 words, no figures |
 
 Menu calls add one key, `s` (`whole` / `measure`). The bottle volume is **parsed locally** from the stock name (regex `(\d+(?:\.\d+)?)\s*(ml|cl|l|litre)`), never taken from the model. The measure kind is derived locally from `t` (spirit or liqueur gives tot; wine or sparkling wine gives glass), and its size is a hotel setting (D12).
+
+(Fable 2026-11-17) Volume regex: word boundaries, case-insensitive, `\b(\d+(?:\.\d+)?)\s?(ml|cl|l|ltr|litre|liter)\b`, result 50-5000 ml, and
+exactly ONE match in the name (two volumes, e.g. "6 x 330ml 2l", give no volume).
 
 ### D6. Validation (server; anything invalid becomes "no suggestion", never a guess)
 - Strict JSON. Code fences are stripped, then the outer `{...}` is taken, the same as `rh_ai_menu_read_proposal()`.
@@ -127,6 +134,9 @@ Menu calls add one key, `s` (`whole` / `measure`). The bottle volume is **parsed
 ### D7. Batching, cache and teaching
 - **One call per list per model**, not one per item. One call takes at most `ai_stock_max_items` items (default 200). 171 items means **one call per model**. A longer list is split into chunks of 200, and D6 keeps whatever a
   truncated reply completed.
+- (Fable 2026-11-17) **One chunk per request, capped per run**: the endpoint handles one chunk (at most `ai_stock_max_items`) per request and returns
+  "more to check". The browser asks again until done, at most `ai_stock_max_chunks` (default 5) requests per run. Each request stays
+  well inside a 60 s gateway, and a cut request loses one chunk only.
 - **Cache**: a new table `ai_stock_kinds`, one per hotel (each hotel has its own DB):
   `id, name_key CHAR(64)` (sha256 of `rh_ssi_key(name) . '|' . lower(trim(unit))`), `name_norm VARCHAR(190), unit VARCHAR(30),
   type VARCHAR(20), sale VARCHAR(8) NULL, unit_ml INT NULL, pack_n SMALLINT NULL, judged_cost DECIMAL(14,4) NULL,
@@ -144,6 +154,12 @@ Menu calls add one key, `s` (`whole` / `measure`). The bottle volume is **parsed
   - (a) "Fill from list" CSV rows marked Y (per-unit). Rows with N teach only at Confirm.
   - (b) an Import answer on a case-price question: `per-case` + N, or `per-unit`.
   - (c) Menu Save with a suggested amount kept (type and sale kept as knowledge only).
+- (Fable 2026-11-17) **A cached row (person or model) counts only while the current cost is nearer `judged_cost` than `judged_cost / N`**
+  (compared on a log scale). Otherwise the item is checked again. A row with no N counts only within 0.5% of `judged_cost`.
+  Model rows also stop counting when the voters' model ids change (the row keeps the ids it was judged with).
+- (Fable 2026-11-17) A person's **"price of one"** row never silences a model crate flag. The item is still sent to the voters, and if they say
+  crate the row shows "Check this one: <name> said this is the price of one on <date>", **with no chip**. AI Settings lists every
+  taught row (item, what was taught, who, when) with a **Remove** button (admin/manager).
 - Rail: a taught row **only ever suggests** (same as an agreed model suggestion, D10). It never pre-answers or pre-fills.
   Learned knowledge changes only knowledge and wording, never tools, permissions, limits or the confirm step.
 - Tests `sk_cache_hit_no_call`, `sk_cache_cost_change_resends`, `sk_cache_after_fix_local`, `sk_person_beats_model`,
@@ -211,6 +227,10 @@ Import lead's exact change in `import_case_evidence_pass()` (resolve.php, the `$
 2. `[$j, $pre] = rh_ai_sk_combine($j, $ai, $pre)` (pure; implements the table above; it may turn `$pre` into null but never sets it).
 3. When `$j` is still null, `continue` as today. Otherwise go down **today's path unchanged** (find or add the question, the unticked-existing skip, `case_evidence`, `pack_hint`).
 4. `case_evidence` gains `ai: {v, n, c, agree}` for display only. `q['pre']` is never written from `$ai` (test).
+5. (Fable 2026-11-17) `rh_ai_sk_combine()` returns verdict `ask` whenever AI changes anything. Resolve **recomputes `$pre` after the combine step**
+   (today `$pre` is set at resolve.php:329 straight after the judge; it moves below the combine call).
+6. (Fable 2026-11-17) `import_job_set_ai_case()` re-reads the job **under a row lock** (`SELECT ... FOR UPDATE` in a transaction) and merges **only**
+   `_ai_case` into the stored answers, so an answer saved at the same moment is never lost.
 - Tests `sk_combine_table` (every row above), `sk_no_pre_from_ai`, `sk_ai_withdraws_pre_only_high_both`,
   `sk_snapshot_same_for_all_viewers`, `sk_apply_gate_off_identical`, `sk_apply_gate_cli_same_as_web`, `sk_key_stable_after_typo_answer`.
 
@@ -225,6 +245,11 @@ Import lead's exact change in `import_case_evidence_pass()` (resolve.php, the `$
 | single voter: medium | flag only | flag only, no N | question, no N |
 | any low/invalid | dropped | (as if not asked) | (as if not asked) |
 - A taught **person** row acts as "agreed" and wins over any model result.
+- (Fable 2026-11-17) Only an **agreed** N may become an Import `pack_hint`. A single high vote gets a chip only.
+- (Fable 2026-11-17) When the rules (`import_cs_judge`) carry any `against` (a cost at or under the selling price, or in line with deliveries), there
+  is **no chip and no hint**, only the flag line with both reasons. The Fix page runs `import_cs_judge` too (through `import_cs_stock_flags`),
+  and an item with against-evidence is never in "Use all agreed suggestions".
+- (Fable 2026-11-17) With fewer than 5 menu anchor prices nothing is "agreed" (the best result is "size unclear"), because the price level is unknown.
 - Rail: infer the obvious case (agreed), ask when unclear (split or single), and never decide.
 - Tests `sk_agree_both`, `sk_agree_n_split`, `sk_agree_verdict_split`, `sk_single_caps`, `sk_person_row_as_agreed`.
 
@@ -259,6 +284,8 @@ Import lead's exact change in `import_case_evidence_pass()` (resolve.php, the `$
   a seeded setting `ai_stock_bottle_ml` (owner can change it), not code.
   In the item modal, a link whose amount differs from the suggestion shows: `Suggested by the Assistant: 0.0333 bottle (one 25 ml tot of a 750 ml bottle). Use this`.
   It is a person's click, then **Save as today**.
+- (Fable 2026-11-17) "Whole = 1" only for single-container units (bottle, can, each, piece, unit, sachet, packet). Any other unit gives no suggestion.
+- (Fable 2026-11-17) "Use this" appears only when **both voters agree on `t` and `s`**. A suggestion that assumes 750 ml is **text only** (no "Use this").
 - Food items: no amount suggestion (portions are a kitchen decision; `rh_ai_menu_propose` already exists for recipes).
 - **Out of scope here:** the "stock cost per sale is above the selling price" warning. That is plain arithmetic, useful with
   the Assistant off, and belongs to the restaurant lead as a non-AI patch (Q2). Until then the helper adds a cost line to a
@@ -278,11 +305,14 @@ Import lead's exact change in `import_case_evidence_pass()` (resolve.php, the `$
   **"Crate-price name test"** uploads that CSV (Item, Category, Unit, Cost, N, Y columns; the parser reuses `rh_scf_csv_prefill`
   header matching), runs both voters once in eval mode (`rh_ai_eval_mode`, usage uid 0) and reports:
   - **recall:** crate rows flagged (agreed or unclear) ≥ 92% of the rows the owner marked with an N;
-  - **pre-fill safety:** an agreed N that differs from the owner's N ≤ 1, and **0** rows marked Y (per bottle) given an agreed crate chip;
+  - **pre-fill safety** (Fable 2026-11-17): an agreed N that differs from the owner's N = **0**, and **0** rows marked Y (per bottle) given an agreed crate chip;
   - **noise:** split/unclear on Y rows ≤ 3.
   The raw model replies are stored **in the Liwonde DB** (`ai_tool_cache`, key `sk_eval|<model>|<sha>`, no expiry), **never in
   files** (they hold Rosalyn's product names and the repo is public). Test `sk_replay_recorded` (Liwonde DB) replays them through
   the fake transport. It is skipped with a plain line when no recording exists.
+- (Fable 2026-11-17) The name test runs with the **target hotel's own anchors** (its menu prices, as the live helper would) and reports how many
+  anchors it had. With fewer than 5 anchors nothing counts as "agreed" (D10). A **skipped replay is not a clean run** for the
+  completion count.
 - **Nightly:** the existing nightly eval runs `sk_replay_recorded` + `sk_ground_truth_synthetic` (no model spend). A live re-run
   happens only when the Fast/Fallback model changes (the existing model-upgrade check), costing about US$0.05 each time.
 - **Completion:** this helper's eval group must have 14 clean daily runs before `ai_feature_state` can (re)turn `complete`.
@@ -290,7 +320,7 @@ Import lead's exact change in `import_case_evidence_pass()` (resolve.php, the `$
   fault via `rh_ai_fault_add()`. Code is never patched by the helper itself.
 
 ### D14. Settings (seeded by the migration, defaults in `rh_ai_setting_defaults()`; shown in AI Settings with a plain helper line each)
-`ai_stock_helper_enabled` 0 · `ai_stock_two_models` 1 · `ai_stock_max_items` 200 · `ai_stock_timeout_s` 45 · `ai_stock_cache_days` 180 ·
+`ai_stock_helper_enabled` 0 · `ai_stock_two_models` 1 · `ai_stock_max_items` 200 · `ai_stock_max_chunks` 5 · `ai_stock_timeout_s` 45 · `ai_stock_cache_days` 180 ·
 `ai_stock_anchor_max` 60 · `ai_stock_tot_ml` 25 · `ai_stock_glass_ml` 175 · `ai_stock_bottle_ml` 750.
 No permission keys are added. The helper uses `ai_assistant_use` plus each page's own permission.
 
@@ -306,6 +336,8 @@ outside its container).
    (an empty cell is invisible).
 3. Line JSON: pass `src` through to the preview rows for grouping only (`rh_scf_lines_from_json` keeps `src ∈ {typed, csv, suggested}`,
    with typed as the default). The preview groups by it. **No maths change.**
+3b. (Fable 2026-11-17) `src = suggested` is written into the `stock_cost_correction` log line ("crate size from a suggestion, checked by the person"),
+   so System Logs show which corrections came from a suggestion.
 4. After `rh_scf_apply()` returns ok: `rh_ai_sk_learn_fix($pdo, $user, $rows)`, which teaches N at **Confirm only** (a filled box can still be edited or abandoned). After a CSV fill: `rh_ai_sk_learn_csv(...)`, which teaches **Y rows only**
    (guarded; does nothing when off).
 5. The button "Check names for crate prices" (from the JS mount) posts `action=check&surface=fix`. The server reads the grid itself.
@@ -323,6 +355,9 @@ outside its container).
 4. `admin/data-import.php`: the mount on the review screen. "Check names for crate prices" posts `action=check&surface=import&job=ID`.
    The server reads the job's rows through `import_job_case_rows()` (names, unit, price, category or sheet name; never notes). A chip "Use crate of N"
    answers through the **existing** answer endpoint (same CSRF, same `import_answer_allowed` validation).
+4b. (Fable 2026-11-17) While the helper is ON and some names in the job were not checked (never run, cut short, or a new file row), the Confirm
+   step says so in one line before Confirm: "12 item names were not checked for crate prices. Check names first, or confirm without it."
+   It never blocks Confirm.
 5. `includes/ai/ai-import.php` (mine): the `import_job` tool explains `case_evidence.ai` in plain words.
 
 ## 5. Menu Management (c): the hook contract
@@ -356,6 +391,12 @@ Ship order (each its own ship, ship gate in DEPARTMENTS.md): **1-9** (helper OFF
 **11** (Import) → **12** (Menu). Accounting lead reviews #10 (costs). One qa-auditor review per ship.
 `.gitignore` is not touched (nothing is written to files).
 
+### §6b. Owner fault folded in (2026-11-17): the Assistant notice card covered page buttons
+The `.rh-ai-notice-card` (`admin/includes/ai-panel.php` + `admin/css/ai-panel.css`, fixed bottom-right, z 9997) covered Preview on
+Fix crate prices. One shared pattern: the card shows for a few seconds, then **collapses into a small pill** ("1 notice") docked beside
+the Assistant button. The pill is small and takes no clicks outside itself, so it cannot cover page actions; tapping it opens the card again.
+Hovering over or focusing the card holds it open. The same applies to every notice on every page.
+
 ## 7. Minimal live test plan (the owner, in the app, at Liwonde only; shells never spend)
 1. AI Settings (Liwonde): turn **Stock name check** on. Check that Fast and Fallback are ticked.
 2. Fill the CSV (N for crate items, Y for per-bottle items), then AI Settings → **Crate-price name test** → upload. Expect recall ≥ 92% of N rows,
@@ -386,6 +427,10 @@ Rosalyn's: stays OFF until the owner switches it on after Liwonde passes.
   (PATCH_QUEUE), not gated behind the Assistant.
 - **Q3. Bar measures for the Menu suggestion: one tot = 25 ml, one glass of wine = 175 ml, an unmarked bottle = 750 ml?**
   **Recommend: yes**, seeded at both hotels and changeable in AI Settings (no hard-coded hotel facts).
+
+`ASSUMPTION:` (2026-11-17; the owner delegated AI decisions, so these are settled with the recommended answers) Q1: two models must agree.
+Q2: the cost-above-selling-price warning in Menu Management works with the Assistant OFF (restaurant lead, non-AI, Phase 3).
+Q3: measures of 25 ml (tot), 175 ml (glass) and 750 ml (unmarked bottle), seeded and editable in AI Settings.
 
 `ASSUMPTION:` (logged here, the owner can override) only admin/manager answers teach the hotel-wide cache; learning runs only
 while the helper is ON; the helper ships OFF at both hotels.

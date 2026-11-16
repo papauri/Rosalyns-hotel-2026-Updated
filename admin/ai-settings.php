@@ -27,6 +27,7 @@ require_once 'admin-init.php';
 
 require_once __DIR__ . '/../includes/ai/ai-catalog.php';
 require_once __DIR__ . '/../includes/ai/ai-selfheal.php'; // Phase 4b: memory, faults, daily checks, guardrail
+require_once __DIR__ . '/../includes/ai/ai-stock-kinds.php'; // owner 2026-11-17: stock name check (switch, settings, taught answers)
 
 $csrf_token = $csrf_token ?? generateCsrfToken();
 $h = static function ($v): string {
@@ -203,6 +204,74 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             rh_ai_save_settings($limitPairs, $pdo);
             logActivity($uid, 'ai_settings', 'Assistant limits saved: ' . (int)$cap . ' tokens/day, $' . round((float)$budget, 2) . '/month, ' . (int)$rate . ' messages/10 min, keep chats ' . ((int)$ret ?: 'always'));
             $aiFlash('success', 'Limits saved.', 'ai-limits');
+        }
+
+        // ── Owner 2026-11-17: stock name check ──
+        if ($action === 'save_stock_helper') {
+            if (!rh_ai_sk_ready($pdo)) {
+                throw new RuntimeException('The stock name check needs its database update (087) first.');
+            }
+            $num = static function (string $k, int $lo, int $hi, string $label): string {
+                $v = trim((string)($_POST[$k] ?? ''));
+                if (!ctype_digit($v) || (int)$v < $lo || (int)$v > $hi) {
+                    throw new RuntimeException($label . ': a whole number from ' . $lo . ' to ' . $hi . '.');
+                }
+                return (string)(int)$v;
+            };
+            $pairs = [
+                'ai_stock_helper_enabled' => (string)($_POST['ai_stock_helper_enabled'] ?? '0') === '1' ? '1' : '0',
+                'ai_stock_two_models'     => (string)($_POST['ai_stock_two_models'] ?? '1') === '0' ? '0' : '1',
+                'ai_stock_max_items'      => $num('ai_stock_max_items', 20, 300, 'Names in one request'),
+                'ai_stock_max_chunks'     => $num('ai_stock_max_chunks', 1, 10, 'Requests in one run'),
+                'ai_stock_timeout_s'      => $num('ai_stock_timeout_s', 10, 45, 'Seconds each model may take'),
+                'ai_stock_cache_days'     => $num('ai_stock_cache_days', 1, 730, 'Days a reading is kept'),
+                'ai_stock_anchor_max'     => $num('ai_stock_anchor_max', 0, 200, 'Bar prices sent'),
+            ];
+            $pairs['ai_stock_prefill_enabled'] = (string)($_POST['ai_stock_prefill_enabled'] ?? '0') === '1' ? '1' : '0';
+            if ($pairs['ai_stock_prefill_enabled'] === '1') {
+                // D13: "Use all" only after a clean name test with the models in use (and 5+ bar prices)
+                $skLast = rh_ai_sk_eval_last();
+                if (($skLast['status'] ?? '') !== 'pass' || (string)($skLast['models'] ?? '') !== (string)rh_ai_sk_voters($pdo)['ids'] || count(rh_ai_sk_anchors($pdo)) < 5) {
+                    throw new RuntimeException('"Use all agreed suggestions" stays off until the crate-price name test below has passed with the models in use now. Nothing was saved.');
+                }
+            }
+            rh_ai_save_settings($pairs, $pdo);
+            logActivity($uid, 'ai_settings', 'Stock name check settings saved: ' . ($pairs['ai_stock_prefill_enabled'] === '1' ? 'Use all on, ' : 'Use all off, ') . ($pairs['ai_stock_helper_enabled'] === '1' ? 'on' : 'off') . ', two models ' . ($pairs['ai_stock_two_models'] === '1' ? 'must agree' : 'off')
+                . ', ' . $pairs['ai_stock_max_items'] . ' names a request, ' . $pairs['ai_stock_max_chunks'] . ' requests a run, ' . $pairs['ai_stock_timeout_s'] . ' s, kept ' . $pairs['ai_stock_cache_days'] . ' days, ' . $pairs['ai_stock_anchor_max'] . ' bar prices');
+            $aiFlash('success', 'Stock name check settings saved.', 'ai-stock-check');
+        }
+        if ($action === 'stock_truth_upload') {
+            $f = $_FILES['truth_file'] ?? null;
+            if (!$f || (int)($f['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK || !is_uploaded_file((string)$f['tmp_name'])) {
+                throw new RuntimeException('Choose the crate list (CSV) first.');
+            }
+            $tr = rh_ai_sk_truth_from_csv((string)file_get_contents((string)$f['tmp_name']));
+            if (!$tr['ok']) {
+                throw new RuntimeException($tr['error']);
+            }
+            if (!rh_ai_sk_truth_save($tr['rows'])) {
+                throw new RuntimeException('The answer list could not be kept on the server. Please try again.');
+            }
+            logActivity($uid, 'ai_settings', 'Stock name check: answer list uploaded (' . count($tr['rows']) . ' names)');
+            $aiFlash('success', 'Answer list kept: ' . count($tr['rows']) . ' names (names, units and your answers only). Now press Run the name test.', 'ai-stock-check');
+        }
+        if ($action === 'stock_eval_run') {
+            $ev = rh_ai_sk_eval_run($pdo);
+            if ($ev['status'] !== 'pass' && rh_ai_setting('ai_stock_prefill_enabled', '0') === '1') {
+                rh_ai_save_settings(['ai_stock_prefill_enabled' => '0'], $pdo); // a test that no longer passes switches "Use all" off
+            }
+            logActivity($uid, 'ai_settings', 'Stock name check: name test ' . $ev['status'] . ' - ' . mb_substr($ev['reason'], 0, 200));
+            $aiFlash($ev['status'] === 'pass' ? 'success' : 'error', 'Name test: ' . $ev['reason'], 'ai-stock-check');
+        }
+        if ($action === 'stock_taught_remove') {
+            if (!rh_ai_sk_can_teach($user)) {
+                throw new RuntimeException('Only an administrator or manager can remove a taught answer.');
+            }
+            if (!rh_ai_sk_taught_remove($pdo, (int)($_POST['taught_id'] ?? 0))) {
+                throw new RuntimeException('That answer was already removed.');
+            }
+            logActivity($uid, 'ai_settings', 'Stock name check: removed taught answer #' . (int)($_POST['taught_id'] ?? 0));
+            $aiFlash('success', 'Removed. The next check reads that name again.', 'ai-stock-check');
         }
 
         // ── Phase 4b: learning, daily checks, memory, faults ──
@@ -970,6 +1039,128 @@ $fmtPrice = static function ($v): string {
                         <li><span class="ai-muted"><?php echo $h($n['at'] ?? ''); ?></span> <?php echo $h($n['text'] ?? ''); ?></li>
                     <?php endforeach; ?>
                 </ul>
+                <?php endif; ?>
+            </div>
+        </div>
+
+        <!-- Owner 2026-11-17: stock name check -->
+        <div class="rh-panel ai-card" id="ai-stock-check">
+            <div class="rh-panel__head"><h2 class="rh-panel__title">Stock name check <i class="help" data-tip="On Stock > Fix crate prices, the Assistant reads each item's name and says when its price looks like the price of a whole crate. It only suggests: nothing changes until a person presses a suggestion, previews and confirms.">?</i></h2></div>
+            <div class="rh-panel__body">
+                <?php if (!rh_ai_sk_ready($pdo)): ?>
+                    <p class="help-text">Needs one database update (087). Until it is run, nothing of this check is shown anywhere.</p>
+                <?php else: $skTaught = rh_ai_sk_taught_list($pdo, 100); ?>
+                <form method="POST" action="ai-settings.php" class="ai-limits-grid">
+                    <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
+                    <input type="hidden" name="action" value="save_stock_helper">
+                    <div class="form-group">
+                        <label for="ai_sk_on"><strong>Stock name check</strong></label>
+                        <select id="ai_sk_on" name="ai_stock_helper_enabled" class="form-control">
+                            <option value="0"<?php echo ($settings['ai_stock_helper_enabled'] ?? '0') !== '1' ? ' selected' : ''; ?>>Off - Fix crate prices works exactly as before</option>
+                            <option value="1"<?php echo ($settings['ai_stock_helper_enabled'] ?? '0') === '1' ? ' selected' : ''; ?>>On - suggestions on Fix crate prices</option>
+                        </select>
+                        <p class="help-text">Only works while the Assistant itself is on. Item names, units, prices and bar menu prices are sent; never notes, suppliers or people.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="ai_sk_two"><strong>Two models must agree</strong></label>
+                        <select id="ai_sk_two" name="ai_stock_two_models" class="form-control">
+                            <option value="1"<?php echo ($settings['ai_stock_two_models'] ?? '1') !== '0' ? ' selected' : ''; ?>>Yes - Fast and the cheapest other chosen model</option>
+                            <option value="0"<?php echo ($settings['ai_stock_two_models'] ?? '1') === '0' ? ' selected' : ''; ?>>No - Fast only (cheaper; nothing is offered for "Use all")</option>
+                        </select>
+                        <p class="help-text">A crate size goes into "Use all agreed suggestions" only when both models give the same size and there are at least 5 bar prices.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="ai_sk_prefill"><strong>Use all agreed suggestions</strong></label>
+                        <select id="ai_sk_prefill" name="ai_stock_prefill_enabled" class="form-control">
+                            <option value="0"<?php echo ($settings['ai_stock_prefill_enabled'] ?? '0') !== '1' ? ' selected' : ''; ?>>Off - each size is filled one at a time</option>
+                            <option value="1"<?php echo ($settings['ai_stock_prefill_enabled'] ?? '0') === '1' ? ' selected' : ''; ?>>On - one button fills every agreed size</option>
+                        </select>
+                        <p class="help-text">Can only be switched on after the name test below has passed with the models in use now. A filled box still needs Preview and Confirm.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="ai_sk_items"><strong>Names in one request</strong></label>
+                        <input type="number" min="20" max="300" step="1" id="ai_sk_items" name="ai_stock_max_items" class="form-control" value="<?php echo $h((int)($settings['ai_stock_max_items'] ?? 200)); ?>">
+                        <p class="help-text">The page asks again for the rest. 200 by default.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="ai_sk_chunks"><strong>Requests in one run</strong></label>
+                        <input type="number" min="1" max="10" step="1" id="ai_sk_chunks" name="ai_stock_max_chunks" class="form-control" value="<?php echo $h((int)($settings['ai_stock_max_chunks'] ?? 5)); ?>">
+                        <p class="help-text">A cap on one press of "Check names". 5 by default.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="ai_sk_to"><strong>Seconds each model may take</strong></label>
+                        <input type="number" min="10" max="45" step="1" id="ai_sk_to" name="ai_stock_timeout_s" class="form-control" value="<?php echo $h((int)($settings['ai_stock_timeout_s'] ?? 45)); ?>">
+                        <p class="help-text">No second try: a model that does not answer in time simply gives no reading.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="ai_sk_days"><strong>Days a reading is kept</strong></label>
+                        <input type="number" min="1" max="730" step="1" id="ai_sk_days" name="ai_stock_cache_days" class="form-control" value="<?php echo $h((int)($settings['ai_stock_cache_days'] ?? 180)); ?>">
+                        <p class="help-text">A kept reading costs nothing. A changed price or a different model reads the name again. Taught answers never expire.</p>
+                    </div>
+                    <div class="form-group">
+                        <label for="ai_sk_anchor"><strong>Bar prices sent</strong></label>
+                        <input type="number" min="0" max="200" step="1" id="ai_sk_anchor" name="ai_stock_anchor_max" class="form-control" value="<?php echo $h((int)($settings['ai_stock_anchor_max'] ?? 60)); ?>">
+                        <p class="help-text">Bar menu items with a price, sent as this hotel's price level. 60 by default.</p>
+                    </div>
+                    <div class="ai-actions ai-limits-save">
+                        <button type="submit" class="btn btn-primary btn-sm"><i class="fas fa-save"></i> Save stock name check</button>
+                    </div>
+                </form>
+
+                <h3 class="ai-subhead">Crate-price name test</h3>
+                <?php $skEval = rh_ai_sk_eval_last(); $skTruthN = count(rh_ai_sk_truth_load()); ?>
+                <p class="help-text">Checks the readings the models already gave on Fix crate prices against your own answers (crate size, or Y when the price is already for one). It calls no model and costs nothing. Answer list on the server: <?php echo $skTruthN > 0 ? (int)$skTruthN . ' names' : 'none yet'; ?>.</p>
+                <p class="help-text"><strong>Last result:</strong> <?php echo $skEval ? $h(($skEval['status'] === 'pass' ? 'passed' : ($skEval['status'] === 'fail' ? 'not passed' : 'not run')) . ' on ' . ($skEval['at'] ?? '') . '. ' . ($skEval['reason'] ?? '')) : 'not run yet.'; ?></p>
+                <div class="ai-actions">
+                    <form method="POST" action="ai-settings.php" enctype="multipart/form-data">
+                        <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
+                        <input type="hidden" name="action" value="stock_truth_upload">
+                        <label for="ai_sk_truth" class="help-text">Crate list (CSV with Item, Unit, Units in one crate/case, Real per-unit price?)</label>
+                        <input type="file" id="ai_sk_truth" name="truth_file" accept=".csv,text/csv" class="form-control">
+                        <button type="submit" class="btn btn-secondary btn-sm"><i class="fas fa-upload"></i> Keep answer list</button>
+                    </form>
+                    <form method="POST" action="ai-settings.php">
+                        <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
+                        <input type="hidden" name="action" value="stock_eval_run">
+                        <button type="submit" class="btn btn-secondary btn-sm"><i class="fas fa-clipboard-check"></i> Run the name test</button>
+                    </form>
+                </div>
+
+                <h3 class="ai-subhead">Taught answers</h3>
+                <p class="help-text">What administrators and managers said about an item's price on Fix crate prices. A taught answer only suggests; remove it and the next check reads the name again.</p>
+                <?php if (!$skTaught): ?>
+                    <p class="help-text">None yet.</p>
+                <?php else: ?>
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead><tr>
+                                <th>Item <i class="help" data-tip="The item name as stored (lower case) and its unit.">?</i></th>
+                                <th>What was taught <i class="help" data-tip="The price of a crate of N, or the price of one, at the price shown.">?</i></th>
+                                <th>Who and when <i class="help" data-tip="The person who answered and when.">?</i></th>
+                                <th><span class="ai-muted">Remove</span> <i class="help" data-tip="Forget this answer; the next check reads the name again.">?</i></th>
+                            </tr></thead>
+                            <tbody>
+                                <?php foreach ($skTaught as $t): ?>
+                                    <tr>
+                                        <td><?php echo $h($t['name_norm']); ?> <span class="ai-muted">(<?php echo $h($t['unit']); ?>)</span></td>
+                                        <td><?php echo (int)$t['one_unit'] === 1 ? 'Price of one' : 'Price of a crate of ' . (int)$t['pack_n']; ?> at <?php echo $h(number_format((float)$t['judged_cost'], 2)); ?></td>
+                                        <td><?php echo $h(trim((string)$t['person_name']) !== '' ? $t['person_name'] : 'Unknown'); ?> <span class="ai-muted"><?php echo $h($t['updated_at']); ?></span></td>
+                                        <td>
+                                            <?php if (rh_ai_sk_can_teach($user)): ?>
+                                            <form method="POST" action="ai-settings.php">
+                                                <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
+                                                <input type="hidden" name="action" value="stock_taught_remove">
+                                                <input type="hidden" name="taught_id" value="<?php echo (int)$t['id']; ?>">
+                                                <button type="submit" class="btn btn-secondary btn-sm">Remove</button>
+                                            </form>
+                                            <?php endif; ?>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php endif; ?>
                 <?php endif; ?>
             </div>
         </div>

@@ -106,7 +106,10 @@ if (!function_exists('rh_scf_apply')) {
                 $errors[] = 'Item #' . $id . ' is in the list twice.';
                 continue;
             }
-            $line = ['id' => $id, 'n' => $n, 'pack' => (string)($r['pack'] ?? '')];
+            // src (display and log only, never in the maths): where the number came from. 'suggested' = a size chip of the
+            // Assistant's stock name check pressed by the person; 'csv' = Fill from list; anything else = typed.
+            $src = in_array($r['src'] ?? '', ['suggested', 'csv'], true) ? (string)$r['src'] : 'typed';
+            $line = ['id' => $id, 'n' => $n, 'pack' => (string)($r['pack'] ?? ''), 'src' => $src];
             if ($withOld) {
                 $line['old'] = (string)($r['old'] ?? '');
                 // What the preview showed: every batch holding stock [id, cost] and every PO line it divides [id, cost, ordered, received].
@@ -207,7 +210,7 @@ if (!function_exists('rh_scf_apply')) {
                     $po[] = [$p['id'], sprintf('%.4F', $p['old_cost']), sprintf('%.6F', $p['ordered']), sprintf('%.6F', $p['received'])];
                 }
             }
-            $out[] = ['id' => $r['id'], 'n' => (string)$r['n'], 'pack' => $r['pack'], 'old' => sprintf('%.4F', $r['old_cost']), 'b' => $b, 'po' => $po];
+            $out[] = ['id' => $r['id'], 'n' => (string)$r['n'], 'pack' => $r['pack'], 'old' => sprintf('%.4F', $r['old_cost']), 'b' => $b, 'po' => $po, 'src' => $r['src'] ?? 'typed'];
         }
         return $out;
     }
@@ -509,7 +512,7 @@ if (!function_exists('rh_scf_apply')) {
                 'old_cost' => $old, 'new_cost' => $new, 'n' => $n, 'pack' => $pack,
                 'old_value' => round($qty * $old, 2), 'new_value' => round($qty * $new, 2), 'batches' => $bRows,
                 'held_cost' => $new, 'held_mixed' => $mixed, 'basis' => $basis, 'div_n' => $divN, 'held_qty' => $heldQty,
-                'po_lines' => $pRows,
+                'po_lines' => $pRows, 'src' => (string)($line['src'] ?? 'typed'),
             ];
             $out['rows'][] = $row;
             $out['before'] += $row['old_value'];
@@ -582,7 +585,7 @@ if (!function_exists('rh_scf_apply')) {
             $po[] = $pt['ref'] . ' total ' . rh_scf_fmt($pt['old_total']) . ' → ' . rh_scf_fmt($pt['new_total']);
         }
         return $row['name'] . ': cost per ' . $row['unit'] . ' ' . rh_scf_fmt($row['old_cost']) . ' → ' . rh_scf_fmt($row['new_cost'])
-            . ' (' . $row['pack'] . ' of ' . $row['n'] . '); value ' . rh_scf_fmt($row['old_value']) . ' → ' . rh_scf_fmt($row['new_value'])
+            . ' (' . $row['pack'] . ' of ' . $row['n'] . (($row['src'] ?? '') === 'suggested' ? '; crate size from a suggestion, checked by the person' : '') . '); value ' . rh_scf_fmt($row['old_value']) . ' → ' . rh_scf_fmt($row['new_value'])
             . '; batches divided: ' . ($bat ? implode(', ', $bat) : 'none')
             . ($kept ? '; batches left as they were: ' . implode(', ', $kept) . '; new cost = average of the stock held' : '')
             . '; purchase order lines: ' . ($po ? implode('; ', $po) : 'none changed')

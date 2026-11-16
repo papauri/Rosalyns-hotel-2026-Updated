@@ -52,16 +52,73 @@ define('RH_AI_PANEL_RENDERED', true);
         <button type="button" class="btn btn-secondary btn-sm" data-ai-notice-hide>Hide</button>
     </div>
 </div>
+<button type="button" class="rh-ai-notice-pill" id="rhAiNoticePill" aria-controls="rhAiNotice" aria-expanded="false" hidden><i class="fas fa-circle-info" aria-hidden="true"></i> <?php echo count($unseen) === 1 ? '1 notice' : (int)count($unseen) . ' notices'; ?></button>
 <script>
+/* Owner fault 2026-11-17: the card covered page buttons (Preview on Fix crate prices). It now shows for a few seconds and then
+   folds into a small pill beside the Assistant button; the pill opens it again. Hovering or focusing the card keeps it open. */
 (function () {
     var c = document.getElementById('rhAiNotice');
+    var pill = document.getElementById('rhAiNoticePill');
     if (!c) { return; }
     var k = 'rh_ai_notice_hidden';
     var hidden = null;
+    var timer = null;
     try { hidden = sessionStorage.getItem(k); } catch (e) { hidden = null; }
-    if (hidden !== c.getAttribute('data-notice')) { c.hidden = false; }
-    c.querySelector('[data-ai-notice-hide]').addEventListener('click', function () {
+    function place() {
+        if (!pill) { return; }
+        var l = document.querySelector('.rh-ai-launch');
+        if (l && l.getClientRects().length) { // a fixed element has no offsetParent: ask for its boxes instead
+            var r = l.getBoundingClientRect();
+            pill.style.right = Math.max(8, Math.round(window.innerWidth - r.left + 8)) + 'px';
+            pill.style.bottom = Math.max(8, Math.round(window.innerHeight - r.bottom)) + 'px';
+        } else {
+            pill.style.right = '';
+            pill.style.bottom = '';
+        }
+    }
+    function fold() {
+        timer = null;
+        if (c.hidden || c.contains(document.activeElement) || c.matches(':hover')) { return; }
         c.hidden = true;
+        if (pill) { place(); pill.hidden = false; pill.setAttribute('aria-expanded', 'false'); }
+    }
+    function later(ms) {
+        if (timer) { clearTimeout(timer); }
+        timer = setTimeout(fold, ms);
+    }
+    function open() {
+        c.hidden = false;
+        if (pill) { pill.hidden = true; pill.setAttribute('aria-expanded', 'true'); }
+        later(6000);
+    }
+    if (hidden !== c.getAttribute('data-notice')) { open(); }
+    c.addEventListener('mouseenter', function () { if (timer) { clearTimeout(timer); timer = null; } });
+    c.addEventListener('mouseleave', function () { later(3000); });
+    c.addEventListener('focusin', function () { if (timer) { clearTimeout(timer); timer = null; } });
+    c.addEventListener('focusout', function () { later(3000); });
+    if (pill) {
+        pill.addEventListener('click', function () {
+            open();
+            var b = c.querySelector('a, button');
+            if (b) { b.focus(); }
+        });
+        window.addEventListener('resize', function () { if (!pill.hidden) { place(); } });
+    }
+    // Escape folds the open card into the pill; Escape on the pill puts the pill away for this page
+    document.addEventListener('keydown', function (e) {
+        if (e.key !== 'Escape') { return; }
+        if (!c.hidden) {
+            if (timer) { clearTimeout(timer); timer = null; }
+            c.hidden = true;
+            if (pill) { place(); pill.hidden = false; pill.setAttribute('aria-expanded', 'false'); pill.focus(); }
+        } else if (pill && !pill.hidden && document.activeElement === pill) {
+            pill.hidden = true;
+        }
+    });
+    c.querySelector('[data-ai-notice-hide]').addEventListener('click', function () {
+        if (timer) { clearTimeout(timer); timer = null; }
+        c.hidden = true;
+        if (pill) { pill.hidden = true; }
         try { sessionStorage.setItem(k, c.getAttribute('data-notice')); } catch (e) { /* private mode */ }
     });
 })();

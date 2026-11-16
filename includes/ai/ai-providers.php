@@ -980,6 +980,9 @@ function rh_ai_chat_resilient(array $req, ?string $fallbackModel = null): array
     if ($r['error'] === '') {
         return $r + ['used_fallback' => false];
     }
+    if (!empty($req['no_retry'])) {
+        return $r + ['used_fallback' => false]; // the caller counts a failure as "no answer" (stock name check: a voter simply does not vote)
+    }
     if ($r['retryable']) {
         $r = rh_ai_chat($req);
         if ($r['error'] === '') {
@@ -1053,6 +1056,13 @@ function rh_ai_chat_multi(array $reqs, ?string $fallbackModel = null): array
     curl_multi_close($mh);
     $ordered = [];
     foreach ($reqs as $k => $req) {
+        if (!isset($out[$k]) && !empty($req['no_retry']) && isset($handles[$k])) {
+            // sent once and not answered: no second call (stock name check, owner 2026-11-17)
+            $ordered[$k] = ['text' => '', 'tool_calls' => [], 'usage' => ['in' => 0, 'out' => 0, 'cache_read' => 0, 'cache_write' => 0], 'stop' => 'error',
+                'error' => 'The provider did not answer in time.', 'http' => 0, 'retryable' => true, 'model_missing' => false, 'ms' => $ms,
+                'provider' => (string)($req['provider'] ?? ''), 'model' => (string)($req['model'] ?? ''), 'used_fallback' => false];
+            continue;
+        }
         $ordered[$k] = $out[$k] ?? rh_ai_chat_resilient($req, $fallbackModel);
     }
     return $ordered;

@@ -364,6 +364,10 @@ when prompted."
 - Guides (Stock › Fix crate prices): page is now 3 steps: 1 Type the crate size (box next to the item name; "Choose CSV file" then "Fill from list"; "May be a case price" is a filter tick), 2 Check (Preview → "Now: X each → After: Y each", value before/after), 3 Save (Confirm and correct). Short 3-line intro + "More detail". Screenshots for the guide should be retaken.
 - Assistant: no change.
 
+### Assistant: stock name check, phase 1 (2026-11-17, owner "use it … just as a helper … without it on it works still like this") - hashes in TASKS.md
+- Guides (AI Settings; Stock › Fix crate prices): AI Settings has a "stock name check" switch (OFF by default), a list of what it learned from people (remove a wrong one), and pre-fill stays locked until the name test passes on the hotel's own answers. On Fix crate prices, with it on: "Check names" marks items whose price looks like a crate price for that kind of drink and offers "Use N" per row; "Use all" appears only after the name test passes. You still Preview and Confirm. The Assistant notice now folds into a small pill beside the Assistant button after a few seconds (Escape folds it).
+- Assistant (dept-ai-lead's own feature): new tool surface ai-stock-helper endpoint; settings ai_stock_helper_enabled / ai_stock_prefill_enabled; table ai_stock_kinds.
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` at Liwonde: 7 data-dependent fails (left-owing + refunds briefing, 4 alert checks, digest
   recipients); ai_review_engine "nothing to add for this person" fails on HEAD too. (Tomorrow / 4 of 3 / K1,068,000 now pass.)

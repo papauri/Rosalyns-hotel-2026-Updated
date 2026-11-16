@@ -14,6 +14,10 @@ require_once '../includes/alert.php';
 require_once 'includes/procurement-schema.php';
 require_once __DIR__ . '/../includes/form-validation.php';
 require_once __DIR__ . '/includes/stock-cost-fix-lib.php';
+// Assistant stock name check (owner 2026-11-17): optional; everything below works the same without it (fail-closed, OFF by default).
+if (is_file(__DIR__ . '/../includes/ai/ai-stock-kinds.php')) {
+    require_once __DIR__ . '/../includes/ai/ai-stock-kinds.php';
+}
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -62,7 +66,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
             [$lines, $lineErrors] = rh_scf_attach_divide($lines, $_POST['divide'] ?? null);
         }
         foreach ($lines as $id => $l) {
-            $scf_typed[$id] = ['n' => $l['n'], 'pack' => $l['pack']];
+            $scf_typed[$id] = ['n' => $l['n'], 'pack' => $l['pack'], 'src' => $l['src'] ?? 'typed'];
         }
         if ($lineErrors) {
             $scf_problems = $lineErrors;
@@ -83,7 +87,15 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     $scf_prefill = null;
                 } else {
                     foreach ($scf_prefill['fill'] as $id => $n) {
-                        $scf_typed[$id] = ['n' => (string)$n, 'pack' => $scf_typed[$id]['pack'] ?? ''];
+                        $scf_typed[$id] = ['n' => (string)$n, 'pack' => $scf_typed[$id]['pack'] ?? '', 'src' => 'csv'];
+                    }
+                    // Assistant stock name check (when on): rows marked Y teach "price of one" (administrator / manager only).
+                    if (function_exists('rh_ai_sk_learn_csv') && $scf_prefill['real']) {
+                        try {
+                            rh_ai_sk_learn_csv($pdo, $user, $scf_items, $scf_prefill['real']);
+                        } catch (Throwable $e) {
+                            error_log('stock-cost-fix learn csv: ' . $e->getMessage());
+                        }
                     }
                 }
             }
@@ -97,6 +109,14 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
         } elseif ($action === 'apply') {
             $res = rh_scf_apply($pdo, $lines, (int)$user['id'], (string)$user['username']);
             if ($res['ok']) {
+                // Assistant stock name check (when on): each confirmed size teaches "crate of N" (administrator / manager only).
+                if (function_exists('rh_ai_sk_learn_fix')) {
+                    try {
+                        rh_ai_sk_learn_fix($pdo, $user, $res['rows']);
+                    } catch (Throwable $e) {
+                        error_log('stock-cost-fix learn: ' . $e->getMessage());
+                    }
+                }
                 $cnt = count($res['rows']);
                 $_SESSION['stock_msg'] = 'Corrected ' . $cnt . ' item' . ($cnt === 1 ? '' : 's') . '. Their stock value went from '
                     . $currency_symbol . ' ' . number_format($res['before'], 2) . ' to ' . $currency_symbol . ' ' . number_format($res['after'], 2)
@@ -316,6 +336,10 @@ $csrf_token = generateCsrfToken();
                     </div>
                 <?php endif; ?>
 
+                <?php if (function_exists('rh_ai_sk_mount') && $scf_items) {
+                    rh_ai_sk_mount($pdo, $user, 'fix', $scf_items, $scf_flags, ['btn_class' => 'scf-btn scf-btn--ghost']);
+                } ?>
+
                 <div class="scf-toolbar">
                     <label>Search <input type="search" id="scf-search" placeholder="Item name" autocomplete="off"></label>
                     <label>Category
@@ -362,6 +386,7 @@ $csrf_token = generateCsrfToken();
                                     $qty = (float)$it['current_quantity'];
                                     $cost = (float)$it['cost_per_unit'];
                                     $tN = $scf_typed[$id]['n'] ?? '';
+                                    $tSrc = in_array($scf_typed[$id]['src'] ?? '', ['suggested', 'csv'], true) ? (string)$scf_typed[$id]['src'] : '';
                                     $tPack = $scf_typed[$id]['pack'] ?? '';
                                     if ($tPack === '' && $tN === '' && trim((string)($it['pack_name'] ?? '')) !== '') {
                                         $tPack = (string)$it['pack_name'];
@@ -372,7 +397,7 @@ $csrf_token = generateCsrfToken();
                                             <br><span class="scf-muted"><?php echo htmlspecialchars((string)$it['category'] !== '' ? (string)$it['category'] : '(no category)'); ?> · <?php echo htmlspecialchars(rh_scf_qty_unit($qty, (string)$it['unit'])); ?> in stock</span>
                                             <?php if ($flag): ?><br><span class="scf-flag"><span class="badge badge-warning">May be a case price</span> <i class="help" tabindex="0" role="button" aria-label="Why it may be a case price" data-tip="<?php echo htmlspecialchars((string)$flag['reason']); ?>">?</i></span><?php endif; ?>
                                         </td>
-                                        <td><input type="number" class="scf-n" min="2" max="99999" step="1" inputmode="numeric" value="<?php echo htmlspecialchars((string)$tN); ?>" aria-label="Units in one crate or case for <?php echo htmlspecialchars((string)$it['name']); ?>"></td>
+                                        <td><input type="number" class="scf-n" min="2" max="99999" step="1" inputmode="numeric" value="<?php echo htmlspecialchars((string)$tN); ?>"<?php echo $tSrc !== '' && trim((string)$tN) !== '' ? ' data-src="' . $tSrc . '"' : ''; ?> aria-label="Units in one crate or case for <?php echo htmlspecialchars((string)$it['name']); ?>"></td>
                                         <td><input type="text" class="scf-pack" maxlength="30" placeholder="crate" value="<?php echo htmlspecialchars((string)$tPack); ?>" aria-label="Pack name for <?php echo htmlspecialchars((string)$it['name']); ?>"></td>
                                         <td class="num"><?php echo $scf_cur . ' ' . rh_scf_fmt($cost); ?></td>
                                         <td class="num"><?php echo $scf_cur . ' ' . number_format($qty * $cost, 2); ?></td>
@@ -427,6 +452,9 @@ $csrf_token = generateCsrfToken();
                         </ul>
                     </div>
                 <?php endif; ?>
+                <?php $scf_pvSugN = count(array_filter($scf_pv['rows'], function ($x) { return ($x['src'] ?? '') === 'suggested'; })); if ($scf_pvSugN > 0): ?>
+                    <p class="scf-muted"><strong><?php echo (int)$scf_pvSugN; ?> <?php echo $scf_pvSugN === 1 ? 'item uses' : 'items use'; ?> a crate size from a suggestion.</strong> They are listed first: check each size against the invoice before you confirm.</p>
+                <?php endif; ?>
                 <div class="table-responsive">
                     <table class="scf-table" id="scf-preview-table">
                         <thead>
@@ -439,9 +467,16 @@ $csrf_token = generateCsrfToken();
                             </tr>
                         </thead>
                         <tbody>
-                            <?php foreach ($scf_pv['rows'] as $r): ?>
+                            <?php
+                            // Sizes taken from a suggestion are listed first, in their own group (display only; the maths is the same).
+                            $scf_pvRows = $scf_pv['rows'];
+                            $scf_pvSug = count(array_filter($scf_pvRows, function ($x) { return ($x['src'] ?? '') === 'suggested'; }));
+                            if ($scf_pvSug > 0) {
+                                usort($scf_pvRows, function ($a, $b) { return (($a['src'] ?? '') === 'suggested' ? 0 : 1) <=> (($b['src'] ?? '') === 'suggested' ? 0 : 1); });
+                            }
+                            foreach ($scf_pvRows as $r): ?>
                                 <tr data-scf-pv="1" data-qty="<?php echo htmlspecialchars(sprintf('%.6F', $r['qty'])); ?>" data-divn="<?php echo htmlspecialchars(sprintf('%.4F', $r['div_n'])); ?>">
-                                    <td class="scf-item"><strong><?php echo htmlspecialchars($r['name']); ?></strong><br><span class="scf-muted"><?php echo htmlspecialchars($r['pack']); ?> of <?php echo (int)$r['n']; ?> · <?php echo htmlspecialchars(rh_scf_qty_unit($r['qty'], (string)$r['unit'])); ?> in stock</span></td>
+                                    <td class="scf-item"><strong><?php echo htmlspecialchars($r['name']); ?></strong><?php if (($r['src'] ?? '') === 'suggested'): ?><br><span class="badge badge-warning">From a suggestion: check the crate size</span><?php endif; ?><br><span class="scf-muted"><?php echo htmlspecialchars($r['pack']); ?> of <?php echo (int)$r['n']; ?> · <?php echo htmlspecialchars(rh_scf_qty_unit($r['qty'], (string)$r['unit'])); ?> in stock</span></td>
                                     <td class="num"><span class="scf-pair">Now: <span class="scf-amt"><?php echo $scf_cur . ' ' . rh_scf_fmt($r['old_cost']); ?></span> each</span><span class="scf-pair">After: <span class="scf-down scf-amt"><?php echo $scf_cur; ?> <span class="scf-new-cost"><?php echo rh_scf_fmt($r['new_cost']); ?></span></span> each <i class="help" tabindex="0" role="button" aria-label="How the new price is worked out" data-tip="<?php echo htmlspecialchars($r['basis']); ?>">?</i></span></td>
                                     <td class="num"><span class="scf-pair">Before: <span class="scf-amt"><?php echo $scf_cur . ' ' . number_format($r['old_value'], 2); ?></span></span><span class="scf-pair">After: <span class="scf-down scf-amt"><?php echo $scf_cur; ?> <span class="scf-new-value"><?php echo number_format($r['new_value'], 2); ?></span></span></span></td>
                                     <td>
@@ -595,6 +630,7 @@ $csrf_token = generateCsrfToken();
                 if (!e.target.classList.contains('scf-n')) return;
                 var row = e.target.closest('tr');
                 if (row) row.classList.toggle('scf-row--typed', e.target.value.trim() !== '');
+                if (e.isTrusted) e.target.removeAttribute('data-src');
                 e.target.removeAttribute('aria-invalid');
                 cards();
             });
@@ -639,7 +675,8 @@ $csrf_token = generateCsrfToken();
                     return;
                 }
                 var p = row.querySelector('.scf-pack');
-                out.push({ id: parseInt(row.getAttribute('data-id'), 10), n: n, pack: p ? p.value.trim() : '' });
+                var src = nEl.getAttribute('data-src');
+                out.push({ id: parseInt(row.getAttribute('data-id'), 10), n: n, pack: p ? p.value.trim() : '', src: src === 'suggested' || src === 'csv' ? src : 'typed' });
             });
             if (bad && act === 'preview') {
                 e.preventDefault();

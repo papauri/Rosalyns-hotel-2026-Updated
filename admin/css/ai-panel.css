@@ -1193,6 +1193,48 @@ html.rh-ai-resizing .rh-ai-resize {
     align-items: center;
 }
 
+/* Owner fault 2026-11-17: the card folds into this small pill after a few seconds, so it never sits over page buttons.
+   The script docks it just left of the Assistant button; without that button it takes the button's own corner. */
+.rh-ai-notice-pill {
+    position: fixed;
+    right: 14px;
+    bottom: 64px;
+    z-index: 9997;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+    padding: 0 14px;
+    border: 1px solid var(--admin-warning-border, #9a7c53);
+    border-radius: 999px;
+    background: var(--admin-surface, #fff);
+    color: var(--admin-text, #1f2a37);
+    font: inherit;
+    font-size: 0.82rem;
+    font-weight: 600;
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.10);
+    cursor: pointer;
+}
+
+.rh-ai-notice-pill[hidden] {
+    display: none;
+}
+
+.rh-ai-notice-pill i {
+    color: var(--admin-warning-border, #9a7c53);
+}
+
+.rh-ai-notice-pill:focus-visible {
+    outline: 2px solid var(--admin-warning-border, #9a7c53);
+    outline-offset: 2px;
+}
+
+@media print {
+    .rh-ai-notice-pill {
+        display: none !important;
+    }
+}
+
 /* ── Phases 4c + 5: alert count, alerts list, idle lock, password on risky cards, draft text ── */
 .rh-ai-launch__count,
 .rh-ai-icon__count {
