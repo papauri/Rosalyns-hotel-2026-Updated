@@ -5,7 +5,7 @@
  *
  * An earlier import stored the price of a whole crate / case as the cost of ONE bottle or can. Staff type how many units are in
  * one crate (or fill the numbers from the owner's CSV), Preview shows old -> new cost, value and the batches affected, and
- * Confirm divides the cost (and the cost of every batch that still holds stock) by that number in one transaction.
+ * Confirm divides the cost (and the cost of each ticked batch still holding stock, and open order lines still at the crate price) in one transaction.
  * The logic, rules and the history ASSUMPTION are in admin/includes/stock-cost-fix-lib.php.
  * Permission: stock_management (the same as editing stock items); module: stock.
  */
@@ -57,6 +57,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = (string)($_POST['action'] ?? '');
         $withOld = $action === 'apply';
         [$lines, $lineErrors] = rh_scf_lines_from_json((string)($_POST[$withOld ? 'apply_json' : 'grid_json'] ?? ''), $withOld);
+        if ($withOld && !$lineErrors) {
+            // The ticked "Divide this batch" boxes (unticked ones are not posted).
+            [$lines, $lineErrors] = rh_scf_attach_divide($lines, $_POST['divide'] ?? null);
+        }
         foreach ($lines as $id => $l) {
             $scf_typed[$id] = ['n' => $l['n'], 'pack' => $l['pack']];
         }
@@ -159,11 +163,7 @@ foreach ($scf_typed as $t) {
 
 $scf_applyJson = '';
 if ($scf_preview && !$scf_preview['errors'] && $scf_preview['rows']) {
-    $applyRows = [];
-    foreach ($scf_preview['rows'] as $r) {
-        $applyRows[] = ['id' => $r['id'], 'n' => (string)$r['n'], 'pack' => $r['pack'], 'old' => sprintf('%.4F', $r['old_cost'])];
-    }
-    $scf_applyJson = json_encode($applyRows);
+    $scf_applyJson = json_encode(rh_scf_apply_payload($scf_preview['rows']));
 }
 
 $csrf_token = generateCsrfToken();
@@ -208,6 +208,11 @@ $csrf_token = generateCsrfToken();
         .scf-batches { margin:0; padding:0; list-style:none; font-size:.8rem; }
         .scf-batches li { margin:0 0 3px; overflow-wrap:anywhere; }
         .scf-check { color:#8a6a2f; font-weight:600; }
+        .scf-batches li + li { margin-top:6px; padding-top:6px; border-top:1px dashed var(--au-border-soft,#efeae1); }
+        .scf-tick { display:inline-flex; align-items:center; gap:8px; min-height:44px; padding:0 4px 0 0; cursor:pointer; font-weight:600; color:var(--au-text,#3e3930); }
+        .scf-tick input[type="checkbox"] { width:20px; height:20px; margin:0; accent-color:var(--au-accent-deep,#7E684B); cursor:pointer; }
+        .scf-held { margin:8px 0 0; padding:8px 10px; background:#f3ecdf; border-radius:var(--au-radius-sm,4px); font-size:.8rem; color:var(--au-text,#3e3930); }
+        .scf-po-note { margin:0 0 14px; padding:10px 12px; border:1px solid var(--au-border,#e6e0d6); border-radius:var(--au-radius-sm,4px); font-size:.88rem; }
         .scf-list { margin:6px 0 0; padding-left:18px; font-size:.86rem; max-height:220px; overflow:auto; overflow-wrap:anywhere; }
         .scf-msg { display:none; margin:0 0 12px; padding:10px 12px; border-radius:var(--au-radius-sm,4px); background:#f0e3e3; color:#8a3a3a; font-size:.88rem; }
         .scf-msg.is-shown { display:block; }
@@ -234,7 +239,7 @@ $csrf_token = generateCsrfToken();
 
         <div class="scf-card">
             <p><strong>When to use this:</strong> an item's cost is the price of a whole crate or case, but it is stored as the cost of one bottle or can. Type how many units are in one crate or case, press <strong>Preview</strong>, check the numbers, then <strong>Confirm</strong>. The cost per unit is divided by that number.</p>
-            <p class="scf-muted"><strong>What changes:</strong> the item's cost per unit, its pack (for example crate of 24), and the cost of each batch that still holds stock (the cost future sales use). <strong>What stays:</strong> the unit, quantities in stock, minimum, reorder and par levels, recipes, and past records (approved stock counts, adjustments, deliveries and used-up batches keep their numbers). Each corrected item is recorded in System Logs and Staff activity. Items without a cost are not listed: there is nothing to divide.</p>
+            <p class="scf-muted"><strong>What changes:</strong> the item's cost per unit, its pack (for example crate of 24), the cost of each batch still holding stock that you tick (the cost future sales use), and the price of open purchase order lines still to receive at the crate price. <strong>What stays:</strong> the unit, quantities in stock, minimum, reorder and par levels, recipes, and past records (approved stock counts, adjustments, deliveries, received order lines and used-up batches keep their numbers). Each corrected item is recorded in System Logs and Staff activity. Items without a cost are not listed: there is nothing to divide.</p>
         </div>
 
         <?php if ($scf_problems): ?>
@@ -250,34 +255,65 @@ $csrf_token = generateCsrfToken();
                 <div class="ck-kpis ck-kpis--4" style="margin-bottom:14px;">
                     <div class="ck-kpi"><span class="ck-kpi__label">Items to correct <i class="help" tabindex="0" role="button" aria-label="About items to correct" data-tip="Items with a number in Units in one crate/case that passed the checks.">?</i></span><span class="ck-kpi__value"><?php echo (int)$scf_pvCount; ?></span></div>
                     <div class="ck-kpi"><span class="ck-kpi__label">Value before <i class="help" tabindex="0" role="button" aria-label="About value before" data-tip="In stock times the cost per unit now, added up for these items.">?</i></span><span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo $scf_cur; ?></span> <?php echo number_format($scf_pv['before'], 2); ?></span></div>
-                    <div class="ck-kpi"><span class="ck-kpi__label">Value after <i class="help" tabindex="0" role="button" aria-label="About value after" data-tip="In stock times the new cost per unit (old cost divided by the units in one crate or case, 4 decimals), added up for these items.">?</i></span><span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo $scf_cur; ?></span> <?php echo number_format($scf_pv['after'], 2); ?></span></div>
-                    <div class="ck-kpi"><span class="ck-kpi__label">Change <i class="help" tabindex="0" role="button" aria-label="About change" data-tip="Value after minus value before: how much the stock value of these items goes down.">?</i></span><span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo $scf_cur; ?></span> <?php echo number_format($scf_pv['after'] - $scf_pv['before'], 2); ?></span></div>
+                    <div class="ck-kpi"><span class="ck-kpi__label">Value after <i class="help" tabindex="0" role="button" aria-label="About value after" data-tip="In stock times the new cost per unit (the average cost of the stock held after the change, 4 decimals), added up for these items. It follows the Divide this batch boxes.">?</i></span><span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo $scf_cur; ?></span> <span id="scf-pv-after" data-before="<?php echo htmlspecialchars(sprintf('%.2F', $scf_pv['before'])); ?>"><?php echo number_format($scf_pv['after'], 2); ?></span></span></div>
+                    <div class="ck-kpi"><span class="ck-kpi__label">Change <i class="help" tabindex="0" role="button" aria-label="About change" data-tip="Value after minus value before: how much the stock value of these items goes down.">?</i></span><span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo $scf_cur; ?></span> <span id="scf-pv-change"><?php echo number_format($scf_pv['after'] - $scf_pv['before'], 2); ?></span></span></div>
                 </div>
+                <?php if ($scf_pv['pos']): ?>
+                    <div class="scf-po-note">
+                        <strong>Open purchase orders that change</strong> <i class="help" tabindex="0" role="button" aria-label="About open purchase orders that change" data-tip="Lines still to receive whose price per unit is the old crate price are divided by the same number, so the next delivery is booked at the right cost. The order total is the sum of its line totals. Received lines and received, closed or cancelled orders are not changed.">?</i>
+                        <ul class="scf-list">
+                            <?php foreach ($scf_pv['pos'] as $po): ?>
+                                <li><?php echo htmlspecialchars($po['ref']); ?>: total <?php echo $scf_cur . ' ' . number_format($po['old_total'], 2); ?> → <?php echo number_format($po['new_total'], 2); ?><?php if ($po['status'] !== 'draft'): ?> <span class="scf-check">Already sent to the supplier: send them the corrected order.</span><?php endif; ?> <span class="scf-check">Check each line's quantity is in single units, not crates, before sending: only the price per unit is divided.</span></li>
+                            <?php endforeach; ?>
+                        </ul>
+                    </div>
+                <?php endif; ?>
+                <form method="POST" action="stock-cost-fix.php" id="scf-confirm-form">
+                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
+                    <input type="hidden" name="action" value="apply">
+                    <input type="hidden" name="apply_json" value="<?php echo htmlspecialchars($scf_applyJson, ENT_QUOTES); ?>">
                 <div class="table-responsive">
                     <table class="scf-table" id="scf-preview-table">
                         <thead>
                             <tr>
                                 <th>Item <i class="help" tabindex="0" role="button" aria-label="About item" data-tip="The stock item and its unit. The unit does not change.">?</i></th>
                                 <th>Pack <i class="help" tabindex="0" role="button" aria-label="About pack" data-tip="The pack saved on the item: its name and how many units are in one.">?</i></th>
-                                <th class="num">Cost per unit <i class="help" tabindex="0" role="button" aria-label="About cost per unit" data-tip="Cost per unit now, then the new cost: now divided by the units in one crate or case, rounded to 4 decimals.">?</i></th>
+                                <th class="num">Cost per unit <i class="help" tabindex="0" role="button" aria-label="About cost per unit" data-tip="Cost per unit now, then the new cost: the average cost of the stock held after the change, batch by batch (left in each batch times its cost after, divided by all left), rounded to 4 decimals. With no stock in batches: the cost now divided by the units in one crate or case.">?</i></th>
                                 <th class="num">Value in stock <i class="help" tabindex="0" role="button" aria-label="About value in stock" data-tip="In stock times the cost per unit, now and after.">?</i></th>
-                                <th>Batches changed <i class="help" tabindex="0" role="button" aria-label="About batches changed" data-tip="Batches of this item that still hold stock: their cost is divided by the same number. Used-up batches keep their numbers. Check marks a batch whose cost is not the item's cost: it may already be a per-unit price.">?</i></th>
+                                <th>Batches holding stock <i class="help" tabindex="0" role="button" aria-label="About batches holding stock" data-tip="Each batch of this item that still holds stock. A ticked batch has its cost divided by the same number; an unticked one keeps its cost. A batch whose cost is clearly below the item's cost starts unticked: it may already be a price for one unit. The item's new cost is the average of the stock held after the change. Used-up batches keep their numbers.">?</i></th>
+                                <th>Open purchase orders <i class="help" tabindex="0" role="button" aria-label="About open purchase orders" data-tip="Lines of draft, sent or part-received orders still to receive, in the item's unit. A line priced at the old cost is divided; a line ordered by the crate, or already priced for one unit, is not changed.">?</i></th>
                             </tr>
                         </thead>
                         <tbody>
                             <?php foreach ($scf_pv['rows'] as $r): ?>
-                                <tr>
+                                <tr data-scf-pv="1" data-qty="<?php echo htmlspecialchars(sprintf('%.6F', $r['qty'])); ?>" data-divn="<?php echo htmlspecialchars(sprintf('%.4F', $r['div_n'])); ?>">
                                     <td><strong><?php echo htmlspecialchars($r['name']); ?></strong><br><span class="scf-muted"><?php echo htmlspecialchars($r['unit']); ?> · <?php echo $scf_fmtQty($r['qty']); ?> in stock</span></td>
                                     <td><?php echo htmlspecialchars($r['pack']); ?> of <?php echo (int)$r['n']; ?></td>
-                                    <td class="num"><?php echo $scf_cur . ' ' . rh_scf_fmt($r['old_cost']); ?><span class="scf-arrow">→</span><span class="scf-down"><?php echo rh_scf_fmt($r['new_cost']); ?></span></td>
-                                    <td class="num"><?php echo $scf_cur . ' ' . number_format($r['old_value'], 2); ?><span class="scf-arrow">→</span><span class="scf-down"><?php echo number_format($r['new_value'], 2); ?></span></td>
+                                    <td class="num"><?php echo $scf_cur . ' ' . rh_scf_fmt($r['old_cost']); ?><span class="scf-arrow">→</span><span class="scf-down scf-new-cost"><?php echo rh_scf_fmt($r['new_cost']); ?></span><br><span class="scf-muted"><?php echo htmlspecialchars($r['basis']); ?></span></td>
+                                    <td class="num"><?php echo $scf_cur . ' ' . number_format($r['old_value'], 2); ?><span class="scf-arrow">→</span><span class="scf-down scf-new-value"><?php echo number_format($r['new_value'], 2); ?></span></td>
                                     <td>
                                         <?php if (!$r['batches']): ?>
                                             <span class="scf-muted">None hold stock</span>
                                         <?php else: ?>
                                             <ul class="scf-batches">
-                                                <?php foreach ($r['batches'] as $b): ?>
-                                                    <li><?php echo htmlspecialchars($b['number'] !== '' ? $b['number'] : ('#' . $b['id'])); ?>: <?php echo $scf_fmtQty($b['remaining']); ?> left, <?php echo rh_scf_fmt($b['old']); ?> → <?php echo rh_scf_fmt($b['new']); ?><?php if ($b['differs']): ?> <span class="scf-check">Check: not the item's cost</span><?php endif; ?></li>
+                                                <?php foreach ($r['batches'] as $b): $bLabel = $b['number'] !== '' ? $b['number'] : ('#' . $b['id']); ?>
+                                                    <li>
+                                                        <label class="scf-tick"><input type="checkbox" class="scf-divide" name="divide[]" value="<?php echo (int)$r['id'] . ':' . (int)$b['id']; ?>" data-rem="<?php echo htmlspecialchars(sprintf('%.6F', $b['remaining'])); ?>" data-old="<?php echo htmlspecialchars(sprintf('%.4F', $b['old'])); ?>" data-div="<?php echo htmlspecialchars(sprintf('%.4F', $b['divided'])); ?>"<?php echo $b['default'] ? ' checked' : ''; ?>> Divide this batch</label>
+                                                        <span><?php echo htmlspecialchars($bLabel); ?>: <?php echo $scf_fmtQty($b['remaining']); ?> left, <?php echo rh_scf_fmt($b['old']); ?> → <?php echo rh_scf_fmt($b['divided']); ?> if divided</span>
+                                                        <?php if ($b['reason'] !== ''): ?><br><span class="scf-check"><?php echo htmlspecialchars($b['reason']); ?></span><?php endif; ?>
+                                                    </li>
+                                                <?php endforeach; ?>
+                                            </ul>
+                                            <p class="scf-held" data-scf-held="1"<?php echo $r['held_mixed'] ? '' : ' hidden'; ?>>Some batches keep their cost, so the new cost per <?php echo htmlspecialchars($r['unit']); ?> is the average over all the stock held, not the old cost divided by <?php echo (int)$r['n']; ?>.</p>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <?php if (!$r['po_lines']): ?>
+                                            <span class="scf-muted">None open</span>
+                                        <?php else: ?>
+                                            <ul class="scf-batches">
+                                                <?php foreach ($r['po_lines'] as $pl): ?>
+                                                    <li class="<?php echo $pl['kind'] === 'divide' ? 'scf-down' : 'scf-muted'; ?>"><?php echo htmlspecialchars(rh_scf_po_line_text($pl, $r['unit'], $currency_symbol)); ?></li>
                                                 <?php endforeach; ?>
                                             </ul>
                                         <?php endif; ?>
@@ -287,12 +323,10 @@ $csrf_token = generateCsrfToken();
                         </tbody>
                     </table>
                 </div>
-                <form method="POST" action="stock-cost-fix.php" id="scf-confirm-form" class="scf-actions" style="margin-top:14px;">
-                    <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrf_token); ?>">
-                    <input type="hidden" name="action" value="apply">
-                    <input type="hidden" name="apply_json" value="<?php echo htmlspecialchars($scf_applyJson, ENT_QUOTES); ?>">
+                <div class="scf-actions" style="margin-top:14px;">
                     <span class="scf-muted"><?php echo $scf_pv['errors'] ? 'Fix the items named above, then preview again.' : 'If a number is wrong, change it in the list below and press Preview again.'; ?></span>
                     <button type="submit" class="scf-btn scf-btn--primary" id="scf-confirm" <?php echo $scf_applyJson === '' ? 'disabled' : ''; ?>><i class="fas fa-check"></i> Confirm and correct <?php echo (int)$scf_pvCount; ?> item<?php echo $scf_pvCount === 1 ? '' : 's'; ?></button>
+                </div>
                 </form>
             </div>
         <?php endif; ?>
@@ -552,6 +586,43 @@ $csrf_token = generateCsrfToken();
             document.getElementById('scf-grid-json').value = JSON.stringify(out);
         });
         var confirmForm = document.getElementById('scf-confirm-form');
+        // "Divide this batch": the new cost is the average of the stock held after the change (left x cost after, over the
+        // batches; old / N when no batch holds stock), the same rule the server applies on Confirm. Keeps cost, value and cards in step.
+        function heldCost(tr) {
+            var boxes = tr.querySelectorAll('input.scf-divide');
+            var q = 0, v = 0, mixed = false;
+            Array.prototype.forEach.call(boxes, function (b) {
+                var rem = parseFloat(b.getAttribute('data-rem')) || 0;
+                var c = parseFloat(b.getAttribute(b.checked ? 'data-div' : 'data-old')) || 0;
+                if (!b.checked) mixed = true;
+                q += rem; v += rem * c;
+            });
+            var cost = q > 0.0000005 ? Math.round(v / q * 10000) / 10000 : (parseFloat(tr.getAttribute('data-divn')) || 0);
+            var value = Math.round((parseFloat(tr.getAttribute('data-qty')) || 0) * cost * 100) / 100;
+            var c1 = tr.querySelector('.scf-new-cost');
+            if (c1) c1.textContent = cost.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 4 });
+            var v1 = tr.querySelector('.scf-new-value');
+            if (v1) { v1.textContent = money(value); v1.setAttribute('data-v', String(value)); }
+            var p = tr.querySelector('[data-scf-held]');
+            if (p) p.hidden = !mixed;
+        }
+        function pvCards() {
+            var after = 0;
+            Array.prototype.forEach.call(document.querySelectorAll('#scf-preview-table .scf-new-value'), function (el) {
+                after += parseFloat(el.getAttribute('data-v') || el.textContent.replace(/,/g, '')) || 0;
+            });
+            var a = document.getElementById('scf-pv-after');
+            var ch = document.getElementById('scf-pv-change');
+            if (a) a.textContent = money(after);
+            if (a && ch) ch.textContent = money(after - (parseFloat(a.getAttribute('data-before')) || 0));
+        }
+        if (confirmForm) {
+            confirmForm.addEventListener('change', function (e) {
+                if (!e.target.classList || !e.target.classList.contains('scf-divide')) return;
+                var tr = e.target.closest('tr');
+                if (tr) { heldCost(tr); pvCards(); }
+            });
+        }
         if (confirmForm) {
             confirmForm.addEventListener('submit', function () {
                 var b = document.getElementById('scf-confirm');

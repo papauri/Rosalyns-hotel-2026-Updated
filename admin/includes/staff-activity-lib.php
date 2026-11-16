@@ -467,7 +467,10 @@ if (!function_exists('rh_sa_parse_filters')) {
                 $d = '';
             }
             if ($d !== '') {
-                $text .= ': ' . (function_exists('mb_substr') ? mb_substr($d, 0, 140) : substr($d, 0, 140));
+                // Most details are a short hint (140 characters). A crate-price correction is a full before/after record
+                // (value, batches, purchase order lines), so it keeps its whole text; the page escapes it.
+                $max = $action === 'stock_cost_correction' ? 4000 : 140;
+                $text .= ': ' . (function_exists('mb_substr') ? mb_substr($d, 0, $max) : substr($d, 0, $max));
             }
         }
         return $text;

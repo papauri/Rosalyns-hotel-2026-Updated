@@ -356,6 +356,10 @@ when prompted."
 - Guides (Stock, new page after Buying): Stock › Fix crate prices: type how many units are in one crate/case (or "Fill from list" with the CSV: Item + Units in one crate/case; rows marked Y skipped; unmatched names listed), Preview (old → new cost and value per item, totals), Confirm. Cost and the stock still held are divided; unit and quantities unchanged; past counts and deliveries keep their numbers. Refused: an item on a stock count not yet approved (approve or delete that count first), or a cost changed since Preview. Stock items' "May be a case price" note links here. Staff activity shows "Corrected a crate price".
 - Assistant: new page stock-cost-fix.php, permission stock_management, activity action stock_cost_correction; nothing else it reads changed.
 
+### Fix crate prices: purchase orders, per-batch ticks, full log text (2026-11-17, owner "fix these") - hashes in TASKS.md
+- Guides (Stock › Fix crate prices): Preview now has a "Divide this batch" box per batch still holding stock (batches already at a price for one start unticked) and shows the new cost as the average cost of the stock held; open purchase-order lines still at the crate price are divided too (line total old → new, order total recomputed; check the quantity is in single units, not crates, and send the supplier the corrected order if it was already sent). Staff activity shows the whole "Corrected a crate price" entry.
+- Assistant: no change in what it reads (PO unit_cost/line_total/total_cost may now change through this page; activity text longer).
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` at Liwonde: 7 data-dependent fails (left-owing + refunds briefing, 4 alert checks, digest
   recipients); ai_review_engine "nothing to add for this person" fails on HEAD too. (Tomorrow / 4 of 3 / K1,068,000 now pass.)

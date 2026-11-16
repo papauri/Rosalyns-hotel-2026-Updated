@@ -37,6 +37,12 @@ check($f['from'] === '2026-11-02' && $f['to'] === '2026-11-05' && $f['user'] ===
 $f = rh_sa_parse_filters(['from' => '2026-13-45', 'to' => 'x', 'type' => 'evil', 'user' => '-4', 'p' => '9999'], '2026-11-07');
 check($f['from'] === '2026-11-07' && $f['type'] === 'all' && $f['user'] === 0, 'bad date / type / user fall back safely');
 
+// ---- Crate-price correction (pure): full details kept, counted as Stock; other actions still cut at 140 ----
+$cd = 'Cola: cost per bottle 1,200.0000 → 50.0000 (crate of 24); value 24,000 → 1,000; purchase order lines: PO-7 line #3 10 bottle at 1,200 → 50, line total 12,000 → 500; item #42. ' . str_repeat('x', 100);
+$cw = rh_sa_named_action_text('stock_cost_correction', $cd);
+check(strpos($cw, 'Corrected a crate price: Cola') === 0 && substr($cw, -110) === 'item #42. ' . str_repeat('x', 100) && rh_sa_action_type('stock_cost_correction') === 'stock', 'crate-price correction: whole details kept, type Stock');
+check(mb_strlen(rh_sa_named_action_text('supplier_deleted', str_repeat('y', 300))) === mb_strlen('Deleted a supplier: ') + 140, 'other named actions still cut at 140 characters');
+
 // ---- Timeline pager (pure): shared pager, key 'sa', newest 1000 lines reachable ----
 $pg = rh_sa_pager([], 25);
 check($pg['size'] === 10 && $pg['pages'] === 3 && $pg['page'] === 1 && $pg['more'] && rh_lp_summary($pg, 10) === "Showing 1\u{2013}10 of 25", 'pager: 10 per page by default, total shown', rh_lp_summary($pg, 10));
