@@ -57,8 +57,9 @@
   <ul>
     <li><strong>Create Checkout Cleanup</strong> and <strong>Add Assignment</strong> buttons at the top right.</li>
     <li>Number cards: <strong>Today's Tasks</strong>, <strong>Pending Tasks</strong>, <strong>In Progress</strong>, <strong>Completed Today</strong>, <strong>High Priority</strong>. A <strong>Blocked</strong> card appears only when at least one task is blocked. Click a card to open a window (for example <em>"Pending Tasks - Quick Insights"</em>) listing up to 12 matching tasks with the room, who it is assigned to, the due date and the notes. The <strong>High Priority</strong> card counts open tasks only.</li>
-    <li><strong>Occupied Rooms</strong> list. Shown only when at least one guest is checked in. Each room card shows the room, the guest name and the check-out date. When the booking has a name for that room, the card adds <em>Room guest: [name]</em> (the person sleeping in that room) next to the lead booker's name (the person who made the booking and pays). A card marked <strong>Checkout Today</strong> has a guest leaving today.</li>
+    <li><strong>Occupied Rooms</strong> list. Shown only when at least one guest is checked in. A guest still in after the check-out date shows <strong>Overdue</strong>. Each room card shows the room, the guest name and the check-out date. When the booking has a name for that room, the card adds <em>Room guest: [name]</em> (the person sleeping in that room) next to the lead booker's name (the person who made the booking and pays). A card marked <strong>Checkout Today</strong> has a guest leaving today.</li>
     <li><strong>Staff Workload</strong> table (columns <strong>Staff Member</strong>, <strong>Active Tasks</strong>, <strong>High Priority Pending</strong>, <strong>Completed Today</strong>). It lists only staff who have an open task or finished one today.</li>
+    <li><strong>Lists and filters.</strong> Lists show 10 rows per page; use the picker to show more. <strong>Clear</strong> removes the filters. Search looks through every row, not only the page you can see.</li>
     <li><strong>All Assignments</strong> table with a search box (<em>"Search room, staff…"</em>) and a status filter (<strong>All Statuses</strong>, <strong>Pending</strong>, <strong>In Progress</strong>, <strong>Completed</strong>, <strong>Verified</strong>, <strong>Blocked</strong>). Columns: <strong>Room</strong>, <strong>Type</strong>, <strong>Priority</strong>, <strong>Status</strong>, <strong>Scheduled</strong>, <strong>Assigned To</strong>, <strong>Notes</strong>, <strong>Actions</strong>. The Scheduled column shows the due date, and under it the scheduled time, the time the task was started and the time it was completed when they exist. Notes are cut off after 30 characters.</li>
   </ul>
   <p>The buttons in the Actions column are small icons. Point at one to see its name. They are, left to right: <strong>Mark as started</strong> (only on Pending tasks), <strong>Mark done</strong> (Pending and In progress tasks), <strong>Edit</strong> (every task except Verified ones), <strong>View History</strong>, <strong>Verify</strong> (only on Completed tasks) and a red bin to delete.</p>
@@ -114,7 +115,7 @@
   <h2 id="flow">What happens to a room after check-out</h2>
   <p>You do not have to create the clean by hand. This is the normal flow:</p>
   <ol class="steps">
-    <li>Reception checks the guest out (see the Reception and Bookings guide). The room status changes to <strong>Cleaning</strong>. If the room has an active maintenance job (in progress, planned with a start date that has arrived, or completed but not yet verified), it goes to <strong>Maintenance</strong> instead. The cleaning task is still created and waits until maintenance releases the room.</li>
+    <li>Reception checks the guest out (see the Reception and Bookings guide). The room status changes to <strong>Cleaning</strong>. If the room has an active maintenance job (in progress, planned with a start date that has arrived, or completed but not yet verified), it goes to <strong>Maintenance</strong> instead. The cleaning task is still created and waits until maintenance releases the room. A room that is Out of Order, or that still holds another checked-in guest, is not sent to Cleaning.</li>
     <li>At the same moment a cleaning task is created for the room. It is <strong>Pending</strong>, due today, with the note <em>"Room turnover cleaning"</em>.</li>
     <li>Open <strong>Housekeeping</strong>. The task is in the <strong>All Assignments</strong> table. Assign it to a cleaner by clicking <strong>Edit</strong> and choosing a name in <strong>Assigned To</strong>.</li>
     <li>The cleaner starts the job. Click <strong>Mark as started</strong>. The status becomes <strong>In Progress</strong>.</li>
@@ -170,6 +171,7 @@
     <li>A box asks <em>"Create checkout cleanup assignments for all rooms that need it?"</em>. Click <strong>Create</strong>.</li>
     <li>You will see <em>"Created 3 checkout cleanup assignments."</em> (the number is however many were made, which can be 0).</li>
   </ol>
+  <p>For a group or joined-room booking, the cleanups cover every room of that booking.</p>
   <p>The system looks at each room whose latest booking is checked out (or still checked in past its check-out date) with a check-out date of today or earlier. If that room has never had a checkout cleanup task, it creates one: type <strong>Checkout Cleanup</strong>, priority <strong>High</strong>, due today, <strong>Unassigned</strong>, note <em>"Checkout cleanup required"</em>. A room is never given a second checkout cleanup, even if you run this again.</p>
 
   <h2 id="hk-bulk">How to assign cleaning to occupied rooms</h2>
@@ -252,6 +254,7 @@
   </ol>
   <p>Once a request is Completed or Verified it no longer stops the room being booked, but the room only leaves Maintenance when the request is Verified or Cancelled. The screen shows the help text <em>"Completed does not release the room."</em> above the table. In the Edit window the status list reads <strong>Completed (room stays in Maintenance)</strong>, <strong>Verified (releases the room)</strong> and <strong>Cancelled (releases the room)</strong>.</p>
 
+  <p>If you untick <strong>Block room during maintenance</strong>, the room stays on sale while the request is open.</p>
   <h2 id="mt-bulk">How to assign maintenance to several rooms</h2>
   <ol class="steps">
     <li>In <strong>Rooms Needing Maintenance</strong>, click each room card you want, or click <strong>Select All</strong>.</li>
@@ -275,6 +278,7 @@
   <ul>
     <li>Without the permission <strong>Check-in to Room Not Clean</strong> you will see <em>"Check-in blocked: Room 12 (cleaning pending) is not marked clean yet. Ask housekeeping to finish the room, or ask someone with the "Check-in to Room Not Clean" permission."</em> Ask housekeeping to click <strong>Mark done</strong> on the task, then check the guest in again.</li>
     <li>With that permission, a box titled <strong>Room not marked clean</strong> asks you to confirm. Click <strong>Check in anyway</strong> to go ahead. The check-in is recorded in the booking timeline as <em>"Checked in to a room not marked clean"</em>, with your name.</li>
+    <li>The override covers only a room that is not clean (Dirty or Cleaning). An Occupied, Maintenance or Out of Order room is always refused, even with the permission.</li>
     <li>Moving a guest who is already in the hotel to another room is stricter: the new room must be clean, because the guest moves in now. Reception sees <em>"Room 12 is not clean yet, so the guest cannot move in now. Open Housekeeping and mark the cleanup as completed, or pick a clean room."</em> The <strong>Check-in to Room Not Clean</strong> permission applies to check-in only.</li>
   </ul>
 

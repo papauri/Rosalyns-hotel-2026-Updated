@@ -19,6 +19,10 @@ when prompted."
 
 ## Pending (oldest first)
 
+(none - everything below was synced 2026-11-16)
+
+## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
+
 ### Import stock check: value column warning + stock check workbook (2026-11-16, owner ask) — hashes in TASKS.md
 - Guides (Stock > Import, review / confirm / result / history): when the sheet's value column (e.g. "Stock Value")
   disagrees with Quantity x Unit Cost, a warning shows how many rows and how much more/less (MWK), with the rows (10 per
@@ -341,8 +345,8 @@ when prompted."
 - Assistant: question texts it may relay changed (possible-typo, case-price); value-check rows carry `why` / `why_code` (qty-changed, no-qty, no-value, no-fit) and groups `why_*` counts. includes/ai/ai-import.php needs no change (it keys on question type).
 
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
-- `ai_assistant_test` fails in unchanged code: claim-check self-test (Room Board "Tomorrow"; staff
-  activity "4 of 3 staff accounts"), History Summary "K1,068,000," flagged; digest-recipients fail.
+- `ai_assistant_test` at Liwonde: 7 data-dependent fails (left-owing + refunds briefing, 4 alert checks, digest
+  recipients); ai_review_engine "nothing to add for this person" fails on HEAD too. (Tomorrow / 4 of 3 / K1,068,000 now pass.)
 - `ai-decisions` ~1620/1777 dept-takings/VAT still on payment_date (matches Reports); "Open refunds"
   link filters Payments by payment_date.
 - Guide 14 says "AI Assistant" vs "the Assistant"; `rh_ai_t_guest_history` drops no-email bookings

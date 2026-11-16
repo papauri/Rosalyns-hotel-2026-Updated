@@ -233,6 +233,8 @@ try {
     $dashSql = preg_match('/\$financialStmt = \$pdo->prepare\("(.*?)"\);/s', (string)file_get_contents($root . '/' . $dash), $mm) ? $mm[1] : '';
     $vatRow = null;
     foreach ((array)($t['evidence']['rows'] ?? []) as $r) { if (strpos((string)$r['label'], 'VAT owed') === 0) { $vatRow = $r; } }
+    // the dashboard builds its SQL with the shared helpers (" . rh_pay_count_day_sql() . "): put each helper's own SQL in their place
+    $dashSql = preg_replace_callback('/"\s*\.\s*(rh_[a-z_]+_sql)\(\)\s*\.\s*"/', static fn($m) => function_exists($m[1]) ? (string)call_user_func($m[1]) : $m[0], $dashSql);
     if ($dashSql !== '') {
         $st = $pdo->prepare($dashSql);
         $st->execute([$ctx['from'], $ctx['to']]);
@@ -302,7 +304,7 @@ try {
     $net = static function (PDO $db, string $type, string $f, string $t): float {
         $st = $db->prepare("SELECT COALESCE(SUM(CASE WHEN COALESCE(payment_type, '') != 'refund' AND payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') THEN total_amount - vat_amount ELSE 0 END), 0)
                                  - COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed', 'processing') THEN refund_amount - vat_amount ELSE 0 END), 0)
-                            FROM payments WHERE deleted_at IS NULL AND booking_type = ? AND payment_date BETWEEN ? AND ?");
+                            FROM payments WHERE deleted_at IS NULL AND booking_type = ? AND " . rh_pay_count_day_sql() . " BETWEEN ? AND ?"); // a refund on its payout day
         $st->execute([$type, $f, $t]);
         return (float)$st->fetchColumn();
     };

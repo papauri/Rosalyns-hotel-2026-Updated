@@ -143,6 +143,7 @@
     <li>Click <strong>Confirm payment</strong>. You will see <em>"Paid ORD-... &mdash; MWK 12,000.00 &middot; cash. Change: MWK 3,000.00."</em></li>
   </ol>
   <p>What happens next: food items are sent to the Kitchen screen. Bar and Coffee Bar drinks are marked as handed over (served) straight away, so they do not wait on the Bar or Coffee Bar screens. Stock for those drinks comes off at that moment.</p>
+  <p>The closed-station warning follows the station each dish goes to (the coffee bar included), and it updates while the screen is open. If the connection drops after you press Fire or Add to tab, pressing it again sends the order only once.</p>
   <div class="note"><p>If a station is closed when you send an order, you see a window headed with the closed station, its opening hours and the word "Closed" (for example "Kitchen (06:00 – 23:00) Closed"), saying the ticket "will sit unseen on the station display until it reopens". Click <strong>Cancel</strong> to stop, or <strong>Fire Anyway</strong> to send it. For payment the same warning is shown inside the <strong>Take payment</strong> window.</p></div>
 
   <h2 id="tab">How to open a tab (send now, pay later, keep a table open)</h2>
@@ -245,6 +246,7 @@
   </table>
 
   <h2 id="room" data-module="bookings">How to charge an order to a guest's room</h2>
+  <p>An order that is already on a guest's room bill cannot be paid at the till, from Orders &amp; Tabs or from a table. The system refuses it.</p>
   <p>Room orders are never paid at the till. They are added to the guest's room bill (folio) and paid at check-out or through Payments.</p>
   <ol class="steps">
     <li>Click the <strong>Room Service</strong> button above the menu (or click <strong>Room</strong> as the order type). The menu shows only items that are switched on for room service.</li>
@@ -275,6 +277,7 @@
     <li>In shop mode (the restaurant module is off), a voided sale is different. The screen asks <em>"Put the goods back in stock?"</em>. <strong>OK</strong> puts the goods back on the shelf. <strong>Cancel</strong> means the goods are damaged, and they are recorded as waste.</li>
   </ol>
   <p>Many tabs at once: select them and click <strong>Bulk void</strong>. You see <em>"3 tabs voided."</em> A void is permanent and is recorded with your name and reason.</p>
+  <p>Voiding a room-service charge after its order has closed also lowers the order's total, so the Z-report and the End of Day "Charged to room" figure match the guest's folio. The void is written in the booking's History as <em>Charge voided</em>.</p>
   <div class="note"><p>A room-service order that has been delivered can still be voided while the guest is in-house; after check-out use a credit on the booking instead. See the <a href="05-room-service.html">Room service guide</a>.</p></div>
   <div class="note"><p>A paid order cannot be voided from the Tabs tray because only open tabs are listed. Managers and admins can void a paid order from <strong>Orders &amp; Tabs</strong> (see the Stock guide). A paid order can also be refunded from <strong>Recent</strong>.</p></div>
 
@@ -308,6 +311,8 @@
   <ul>
     <li>The first time you tap on the till, the browser may ask to allow notifications. Choose <strong>Allow</strong> so the alert also shows when the till is in another tab.</li>
     <li>Ready alerts go only to the person who placed the order, even if you can see other cashiers' tabs (see <a href="#perms">Who can do what</a>).</li>
+    <li>Each later round of the same order gets its own ready alert, and so does a recall. Voiding the last unfinished dish also sends the ready alert.</li>
+    <li>Ready alerts, <strong>My orders</strong> and sent notes stay on the till after the stations close, until the next opening.</li>
     <li>If an order is cancelled or voided, its ready alert is cleared from the till.</li>
     <li>No sound? Turn the device volume up and check the till tab is not muted in the browser.</li>
   </ul>

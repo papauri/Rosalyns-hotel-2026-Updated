@@ -996,6 +996,19 @@ function rh_ai_t_get_booking(PDO $db, array $user, array $a): array
         'cancellation_fee' => function_exists('rh_ai_cancel_fee_facts') ? rh_ai_cancel_fee_facts($db, $b) : null,
         'link' => 'booking-details.php?id=' . (int)$b['id'], 'link_label' => 'Open booking',
     ];
+    // Payment status in the screens' own four words (step 8i, includes/booking-pay-state.php): from the bill's money, the same
+    // Paid / Balance due / Credit figures Booking Details feeds it (booking-details.php), never one payment record's status
+    if (function_exists('rh_booking_pay_state')) {
+        $m = (array)$out['money'];
+        $paidF = isset($m['paid']) ? (float)$m['paid'] : (float)($b['amount_paid'] ?? 0);
+        $credit = isset($m['paid'], $m['total']) ? max(0.0, (float)$m['paid'] - (float)$m['total']) : 0.0;
+        if ($credit <= BALANCE_TOLERANCE) {
+            $credit = (float)($b['credit_balance'] ?? 0);
+        }
+        $ps = rh_booking_pay_state(['amount_paid' => $paidF, 'amount_due' => isset($m['balance_due']) ? (float)$m['balance_due'] : (float)($b['amount_due'] ?? 0),
+            'credit_balance' => $credit, 'status' => (string)$b['status'], 'payment_status' => (string)($b['payment_status'] ?? '')], ['currency' => rh_ai_currency()]);
+        $out['payment_status'] = (string)$ps['label'];
+    }
     if ($out['special_requests'] === '') {
         unset($out['special_requests']);
     }
@@ -1841,6 +1854,12 @@ function rh_ai_t_guest_history(PDO $db, array $user, array $a): array
         'returning_guest' => (int)$h['completed_stays'] >= 1, 'last_stay' => $last,
         'recent' => array_map(static fn($r) => ['reference' => $r['booking_reference'], 'check_in' => $r['check_in_date'], 'check_out' => $r['check_out_date'], 'status' => $r['status']], (array)$h['recent_other']),
         'means' => 'The booking page\'s Guest history rule: one guest = one booking email; completed stays = checked-out bookings (rooms booked together count once); bookings_found = every booking under this email, any status.'];
+    // bookings that matched the search but carry no email are not in this history (never a silent gap): say how many
+    $noEmail = count(array_filter($rows, static fn($r) => trim((string)$r['guest_email']) === ''));
+    if ($noEmail > 0) {
+        $out['also_matched_without_email'] = $noEmail;
+        $out['without_email_means'] = 'Bookings that matched the search but have no guest email: they are not in this history (it follows the booking email). Search Bookings for them.';
+    }
     if (is_array($h['money'])) {
         $out['money'] = ['received' => rh_ai_money((float)$h['money']['received']), 'refunded' => rh_ai_money((float)$h['money']['refunded']), 'moved_to_credit_notes' => rh_ai_money((float)$h['money']['to_credit']),
             'means' => 'Received = money taken from the guest net of refunds, all their room bookings. Refunded = paid back in full (moved_to_credit_notes is the part that became guest credit).'];
@@ -1852,15 +1871,51 @@ function rh_ai_t_guest_history(PDO $db, array $user, array $a): array
 function rh_ai_t_rate_plans_and_deals(PDO $db, array $user, array $a): array
 {
     $plans = [];
+    $read = true;
+    if (!function_exists('rh_rate_plan_effective')) {
+        require_once dirname(__DIR__, 2) . '/includes/pricing.php';
+    }
+    // Step 8h (migration 086): an amount per room type + "apply on". Read only where the columns exist (a hotel before 086 keeps the one amount)
+    $per = function_exists('rh_rate_plans_086_ready') && function_exists('rh_rate_plan_effective') && rh_rate_plans_086_ready($db);
     try {
-        foreach ($db->query("SELECT name, description, rule_type, start_date, end_date, days_of_week, min_nights, max_nights, days_before_min, days_before_max, adjustment_type, adjustment_value, applies_to, room_type_ids
+        $types = $per ? $db->query("SELECT id, name FROM rooms WHERE is_active = 1 ORDER BY display_order, id")->fetchAll(PDO::FETCH_KEY_PAIR) : [];
+        $basisMatters = $per && function_exists('rh_rate_plan_basis_matters') && rh_rate_plan_basis_matters();
+        foreach ($db->query("SELECT name, description, rule_type, start_date, end_date, days_of_week, min_nights, max_nights, days_before_min, days_before_max, adjustment_type, adjustment_value, applies_to, room_type_ids"
+                             . ($per ? ', room_adjustments, price_basis' : '') . "
                              FROM rate_plans WHERE is_active = 1 ORDER BY priority DESC, name LIMIT 30")->fetchAll(PDO::FETCH_ASSOC) as $p) {
+            if ($per) {
+                // the amount each room type actually gets (the pricing rule itself: its own amount, else the plan amount; 0 = keeps its normal price)
+                $amounts = [];
+                $kept = [];
+                foreach ($types as $rid => $tname) {
+                    $eff = rh_rate_plan_effective($p, (int)$rid);
+                    if ($eff === null) {
+                        continue;
+                    }
+                    if (abs((float)$eff['value']) < 0.005) {
+                        $kept[] = (string)$tname;
+                        continue;
+                    }
+                    $amounts[] = ['room_type' => (string)$tname, 'change' => $eff['type'] === 'fixed' ? 'fixed amount per night' : 'percentage', 'value' => round((float)$eff['value'], 2)];
+                }
+                $p['amount_by_room_type'] = $amounts ?: 'none - no room type changes price under this plan';
+                if ($kept) {
+                    $p['room_types_keeping_their_normal_price'] = $kept;
+                }
+                if ($basisMatters) {
+                    $p['apply_on'] = (($p['price_basis'] ?? 'all_in') === 'base') ? 'the rate before VAT and levy (a fixed amount gets VAT and levy added on top)' : 'the full price including VAT and levy';
+                }
+                // the one stored amount is only the first chosen room type's when the amounts differ: amount_by_room_type is the figure to use
+                unset($p['adjustment_type'], $p['adjustment_value'], $p['room_adjustments'], $p['price_basis'], $p['room_type_ids']);
+                $p['value_means'] = 'negative = a discount, positive = an increase; percentage values are per cent, fixed values are money per night (' . rh_ai_currency() . ').';
+            }
             $plans[] = array_filter($p, static fn($v) => $v !== null && $v !== '');
         }
     } catch (Throwable $e) {
         $plans = [];
+        $read = false;
     }
-    $out = ['rate_plans' => $plans, 'link' => 'rate-plans.php', 'link_label' => 'Open Rate Plans'];
+    $out = ['rate_plans' => $read ? $plans : 'The rate plans could not be read just now - open Rate Plans to see them.', 'link' => 'rate-plans.php', 'link_label' => 'Open Rate Plans'];
     $uid = (int)$user['id'];
     if ((hasPermission($uid, 'pos_till') || hasPermission($uid, 'menu')) && rh_module_key_enabled('pos')) {
         try {

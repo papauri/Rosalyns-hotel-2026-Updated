@@ -65,6 +65,7 @@
   </table>
   <p>On the Payments list, a room payment shows a small <strong>Booked at</strong> line under the booking name (booked rate a night &times; nights). Each row has a <strong>History</strong> button (see <a href="#history">How to see the history of a payment</a>).</p>
   <p>A refund line counts against the guest only once it is <strong>Processing</strong> or <strong>Completed</strong>. A <strong>Pending</strong> or <strong>Failed</strong> refund does not change the balance yet.</p>
+  <p><strong>Refunds count on the day they were paid out.</strong> A refund shows on the Payments list on the day it was paid out, in the <strong>Payment Date</strong> column and in the date sort. Every report and End of Day counts it on that same day. A refund that is still pending shows the day it was raised and is in no period's totals. The time under <strong>Payment Date</strong> is when the record was saved.</p>
   <p><strong>One refund rule everywhere.</strong> A refund is the <strong>full amount paid back, VAT included</strong>, once it is <strong>Processing</strong> or <strong>Completed</strong>. Payments, Accounting, Reports and End of Day (screen, PDF and email) all use this rule. Refunds still <strong>awaiting approval</strong> are shown apart and are not in the total. The refund cards split the total into <strong>Paid back in cash / bank</strong> and <strong>Moved to credit notes (no cash out)</strong>, and they say their dates: <em>"Refunds on all dates"</em> when no date filter is set.</p>
   <p>The Payments page shows these buttons at the top: <strong>Record Payment</strong>, <strong>Export CSV</strong>, <strong>Dashboard</strong>, and <strong>Invoices</strong> (Invoices only appears when invoicing is switched on for your hotel). Below them are four figure cards. Click a card to see the rows behind its figure:</p>
   <ul>
@@ -74,6 +75,8 @@
     <li><strong>Refunds (filtered)</strong>: refunds paid back or being paid, for the dates shown. It opens those refund rows and keeps your status filter. A line under it shows refunds awaiting approval, and the split between <strong>Paid back in cash / bank</strong> and <strong>Moved to credit notes (no cash out)</strong>.</li>
   </ul>
   <p>Collected and Refunds follow your filters. Still owed and Today do not.</p>
+  <p><strong>More filters.</strong> Under the cards (on a phone, behind <strong>More filters</strong>) you can narrow the list by <strong>Money in / Refunds</strong> (money out), <strong>Booking status</strong> (upcoming, in-house, checked out, no-show, cancelled), <strong>Group or company</strong>, <strong>Recorded by</strong> (staff member), <strong>Room type</strong>, and <strong>Amount from</strong> and <strong>Amount to</strong>. Each filter you set shows as a chip with its own <strong>Clear</strong>.</p>
+  <p><strong>Click a row.</strong> Click anywhere on a Payments row (or a row in the list of accounts that owe money) to open it, instead of only the eye button.</p>
   <p>Each payment row reads <strong>Received</strong>, then one of <em>"Booking still owes MWK x"</em>, <em>"Bill settled"</em> or <em>"Not confirmed yet"</em>. A refund row for an overpayment that was moved to a credit note reads <em>"Refund: Moved to credit note"</em>. The list shows 10 rows to a page; use the <strong>Show</strong> picker (10, 25, 50, 100) to see more.</p>
 
   <h2 id="find">How to find a payment</h2>
@@ -117,6 +120,7 @@
   <p>On a booking that is on a company account (company pays later), the Record payment window asks <strong>Paid by</strong>: <strong>The guest</strong> or the company. Nothing is picked for you, and you must choose one. Choosing the company records the money against the company's share. Needs <strong>Add Payments</strong>, and <strong>Company Accounts</strong> to record a company payment.</p>
 
   <h2 id="history">How to see the history of a payment</h2>
+  <p>The <strong>Payment Details</strong> window shows who paid, who received the money, the group and any credit note used. <strong>Refunded</strong> counts only refunds that were actually made; a refund still pending is on its own line. Every add, edit, refund and delete of a payment is written in its History.</p>
   <p>The History window lists every step for the payment in order: when it happened, who did it (name and role), what happened, and the amounts before and after where money changed. It changes nothing.</p>
   <ol class="steps">
     <li>On the Payments list, click the <strong>History</strong> button on the row. You can also click <strong>History</strong> at the top of <strong>Payment Details</strong>.</li>
@@ -179,6 +183,7 @@
   <div class="note"><p>Every edit and every refund is written to the <strong>payment audit log</strong>, with who did it and when. A deleted pending payment is written there too, with who removed it and the reason.</p></div>
 
   <h2 id="sent">What the guest is sent, and when</h2>
+  <p>The room invoice email shows the invoice's own totals. Its last row is the balance still due. The tourism levy is charged once on the room booking.</p>
   <p>The rule is simple. A <strong>quotation</strong> is a price before the stay. An <strong>invoice</strong> asks for money. A <strong>receipt</strong> says money came in. A <strong>credit note</strong> or <strong>refund notice</strong> says money went back.</p>
   <table>
     <thead><tr><th>What happened</th><th>What the guest is sent</th><th>How</th></tr></thead>
@@ -222,6 +227,7 @@
   <p>If the box is empty you will see <em>"Enter an email address."</em> or <em>"Enter a phone number."</em> For till payments the window also has a <strong>Print</strong> button.</p>
 
   <h2 id="refund">How to refund a payment (refund a guest)</h2>
+  <p>A payment that is already partly refunded can be refunded again, up to the amount still left on it.</p>
   <ol class="steps">
     <li>Open the payment and click <strong>Refund</strong> (or the undo arrow on the Payments list, then <strong>Open Refund</strong> to confirm).</li>
     <li>Check the strip: <strong>Original Payment</strong>, <strong>Already Refunded</strong>, <strong>Refundable Balance</strong>. Earlier refunds appear under <strong>Refund History</strong>.</li>
@@ -385,6 +391,7 @@
   </ul>
 
   <h2 id="accounting">Accounting dashboard and VAT</h2>
+  <p>The payment-method counts on the Accounting dashboard, and the <strong>received this month</strong> figure on Company accounts, count a refund on the day it was paid out, the same day as End of Day and Reports.</p>
   <p><strong>Money</strong> &rarr; <strong>Accounting</strong>. Pick a period with <strong>This month</strong>, <strong>Today</strong>, <strong>7 days</strong>, <strong>30 days</strong>, <strong>This year</strong>, <strong>All time</strong>, or set <strong>From</strong> and <strong>To</strong> and click <strong>Apply</strong>. It opens on this month.</p>
   <table>
     <thead><tr><th>Figure</th><th>Meaning</th></tr></thead>

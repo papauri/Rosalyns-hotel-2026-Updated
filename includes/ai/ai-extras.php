@@ -677,7 +677,8 @@ function rh_ai_t_rate_suggestions(PDO $db, array $user, array $a): array
     }
     $out = [];
     foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
-        $units = (int)($cap[(int)$r['id']] ?? (int)$r['total_rooms']);
+        // the per-type figure Reports > Occupancy by Room Type uses (a joined type with no active pair = 0, a Shared pair = one unit)
+        $units = function_exists('rh_room_type_unit_total') ? rh_room_type_unit_total((int)$r['id'], (int)$r['total_rooms']) : (int)($cap[(int)$r['id']] ?? (int)$r['total_rooms']);
         $capacity = $units * $days;
         $occ = $capacity > 0 ? round((float)$r['sold'] * 100 / $capacity, 1) : null;
         $miss = (int)($lost[(int)$r['id']] ?? 0);

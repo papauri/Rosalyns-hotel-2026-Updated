@@ -157,6 +157,11 @@ function rh_ai_system_area_line(array $user, string $t): ?array
     if (preg_match('/\b(api|provider|secret|encryption)\s*keys?\b|\bignore (all |your |the |my )?(previous |prior |earlier )?(rules|instructions)\b|\b(show|reveal|tell|give|send|print|display|share)\b.{0,30}\b(passwords?|secrets?|access tokens?)\b/u', $t)) {
         return ["I can't show or change keys, passwords or system settings, and my rules stay the same whatever is asked in chat.", []];
     }
+    // 2026-11-16: wiping stock / stock counts / Import history is Clear Stock Data's (data_reset / stock_wipe_all, own password); the Assistant has no tool for it
+    if (!preg_match('/^\s*(how|where|why|what is|what are|who|when)\b/u', $t)
+        && preg_match('/\b(wipe|purge|erase)\b.{0,40}\b(stock|inventory|stock counts?|import history|imports?)\b|\breset\b.{0,20}\b(all (the )?stock|stock data|inventory)\b|\bclear\b.{0,20}\b(all (the )?stock|stock data|import history)\b|\bdelete\b.{0,30}\b(import history|import (entry|entries|jobs?)|stock counts?|all (the )?stock)\b/u', $t)) {
+        return ["I can't wipe or clear stock, stock counts or Import history - an administrator does that on Clear Stock Data (or Delete on Import history), with their own password.", $link('stock-clear.php', 'Open Clear Stock Data')];
+    }
     if (!preg_match('/^\s*(how|where|why|what is|what are)\b/u', $t)
         && preg_match('/\b(create|add|make|set ?up|open|delete|remove|disable|deactivate|block|reset|change|edit|give|grant)\b.{0,40}\b(staff (logins?|accounts?|users?)|logins?|user (accounts?|logins?)|new users?|users?|permissions?|user roles?|passwords?)\b/u', $t)) {
         return ["I can't create or change staff logins, passwords or permissions - an admin does that on User Management.", $link('user-management.php', 'Open User Management')];

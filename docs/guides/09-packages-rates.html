@@ -126,6 +126,7 @@
   <div class="note"><p>A new room is always created as <strong>Active</strong>. The Add window has no Active tick box. To hide it, use the active on/off icon on its card afterwards.</p></div>
 
   <h2 id="room-prices">How to change room prices</h2>
+  <p>On the Room Types cards and price fields, the VAT and the tourism levy are shown inside the price, each line only when it is switched on. On a joined room pair, a blank Rate Override uses the joined type's own price and rate plans.</p>
   <ol class="steps">
     <li>Open <strong>Settings</strong> &rarr; <strong>Rooms</strong> and click <strong>Edit Room</strong> on the room.</li>
     <li>Go to the <strong>Pricing</strong> section. The window title reads <em>Edit: [room name]</em>.</li>
@@ -195,6 +196,7 @@
 
   <h2 id="plan-add">How to create a rate plan</h2>
   <p>A rate plan raises or lowers the nightly room price automatically when a booking matches its conditions. Use a minus number for a discount and a plus number for an extra charge.</p>
+  <p>The window has four numbered parts: <strong>1. Name and when it applies</strong>, <strong>2. Which room types</strong>, <strong>3. Price change</strong> and <strong>4. Settings</strong>. Work down them in that order.</p>
   <ol class="steps">
     <li>Open <strong>Settings</strong> &rarr; <strong>Rate Plans</strong> and click <strong>New Rate Plan</strong>.</li>
     <li>Type a <strong>Plan Name</strong> (required, up to 100 characters), for example <em>Festive Season Surcharge</em>.</li>
@@ -209,11 +211,17 @@
       </ul>
     </li>
     <li>Optionally type a <strong>Description (optional)</strong>. It is a note for staff only and is not shown to guests.</li>
-    <li>Choose the <strong>Adjustment Type</strong>: <strong>Percentage (%)</strong> or <strong>Fixed Amount (MWK)</strong>.</li>
-    <li>Type the <strong>Adjustment Value</strong> (required). A negative number is a discount and a positive number is a surcharge. Example: <em>-10</em> is 10% off, <em>+20</em> is a 20% surcharge. A fixed amount of <em>-15000</em> takes MWK 15,000 off each night.</li>
-    <li>Choose <strong>Applies To</strong>: <strong>All Room Types</strong> or <strong>Selected Room Types Only</strong>. If you choose the second, tick the room types under <strong>Select Room Types</strong>. Only active room types are listed.</li>
-    <li>Set <strong>Priority (0–255)</strong>. A higher number is checked first.</li>
-    <li>Under <strong>Options</strong>, switch <strong>Stack with other plans</strong> on if this plan may combine with others, and leave <strong>Active</strong> on for the plan to start working.</li>
+    <li>Under <strong>2. Which room types</strong>, choose <strong>Applies To</strong>: <strong>All Room Types</strong> or <strong>Selected Room Types Only</strong>. If you choose the second, tick the room types under <strong>Select Room Types</strong>. Only active room types are listed.</li>
+    <li>Under <strong>3. Price change</strong>, choose <strong>Amount by room type</strong>:
+      <ul>
+        <li><strong>Same for all room types</strong>: choose the <strong>Adjustment Type</strong> (<strong>Percentage (%)</strong> or <strong>Fixed Amount (MWK)</strong>) and type the <strong>Adjustment Value</strong> (required). A negative number is a discount and a positive number is a surcharge. Example: <em>-10</em> is 10% off, <em>+20</em> is a 20% surcharge. A fixed amount of <em>-15000</em> takes MWK 15,000 off each night.</li>
+        <li><strong>Different per room type</strong>: each room type row has its own amount (a percentage or a fixed amount). Put <em>0</em> for a room type that keeps its normal price. A room type left out of the plan keeps its normal price too. The <strong>Amount for any room type left empty above</strong> box is used only for room types with no amount of their own; leave it empty or 0 if every room type you chose has its own amount. A room type you do not choose is not changed. One plan is either all increases or all discounts; a mix is refused.</li>
+      </ul>
+    </li>
+    <li>If VAT or the tourism levy is switched on, <strong>Apply the adjustment to</strong> appears under the price change. Choose <strong>The all-in price</strong> (VAT and levy included, the default) or <strong>The base rate before VAT</strong>. A percentage gives the same guest total either way. A fixed amount on the base rate has VAT and levy added on top.</li>
+    <li>The price change box shows what each room type costs now and what it will cost with the plan, and how much it goes up or down per night. Check it before you save.</li>
+    <li>Under <strong>4. Settings</strong>, set <strong>Priority (0–255)</strong>. A higher number is checked first.</li>
+    <li>Under <strong>4. Settings</strong>, switch <strong>Stack with other plans</strong> on if this plan may combine with others, and leave <strong>Active</strong> on for the plan to start working.</li>
     <li>Click <strong>Save Rate Plan</strong>. You will see <em>"Rate plan created successfully."</em> inside the window, and the card appears on the page behind it. Click <strong>Close</strong> when finished.</li>
   </ol>
   <div class="note"><p>If the new plan is a surcharge or a discount and another active plan in the same direction can meet it on the same room types, the message adds <em>Note: it can meet other active surcharge plan(s) on the same room types: [names].</em> (or <em>discount</em>). It explains that when a stay matches several, and any is non-stacking, only one applies: the highest price for surcharges, the lowest price for discounts. The plan is still saved.</p></div>

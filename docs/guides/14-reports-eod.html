@@ -53,7 +53,7 @@
       <tr><td><strong>VAT Register</strong></td><td>Total VAT collected, gross and net revenue, <strong>VAT by Revenue Source</strong>, <strong>Monthly VAT Summary</strong>, <strong>VAT by Quarter</strong> and the <strong>Transaction VAT Register</strong> line by line. A fold-out <strong>VAT Filing Guide</strong> explains how to use it.</td></tr>
       <tr><td><strong>Aging &amp; AR</strong></td><td><strong>Receivables Aging Summary</strong> in bands 0&ndash;30, 31&ndash;60, 61&ndash;90 and 90+ days, and the <strong>Outstanding Accounts Ledger</strong>.</td></tr>
       <tr><td><strong>Bookings</strong></td><td>Booking status breakdown, bookings by room type, recent bookings. Booking values are the full amount including VAT and levy: <strong>Total Value (incl. VAT &amp; levy)</strong>, <strong>Avg Booking Value (incl. VAT &amp; levy)</strong>. In the room-type table the column <strong>Revenue (excl. VAT, incl. levy)</strong> is the room income before VAT, with the levy counted in.</td></tr>
-      <tr><td><strong>Occupancy</strong></td><td>Overall occupancy rate (rooms sold against sellable rooms: all rooms minus out of order and maintenance), occupancy by room type, ADR and RevPAR by room type.</td></tr>
+      <tr><td><strong>Occupancy</strong></td><td>Overall occupancy rate (rooms sold against sellable rooms: all rooms minus out of order and maintenance), occupancy by room type, ADR and RevPAR by room type. In <strong>Occupancy by Room Type</strong>, the <strong>Rooms</strong> figure is the rooms that can be sold now. A joined room with no active pair shows a dash, and the same figure is used in ADR, RevPAR and the CSV.</td></tr>
       <tr><td><strong>Guests</strong></td><td>Guest origin countries, guest reviews summary, repeat guests. Spend figures include VAT and levy: <strong>Avg Spend per Guest (incl. VAT &amp; levy)</strong>, <strong>Revenue (incl. VAT &amp; levy)</strong>, <strong>Total Spent (incl. VAT &amp; levy)</strong>.</td></tr>
       <tr><td><strong>Conference</strong></td><td>Status tables for conference, gym and event enquiries, conference room utilisation, gym and event revenue trends. Conference money is the full amount: <strong>Conference Revenue (incl. VAT)</strong>, <strong>Value (incl. VAT)</strong>, <strong>Revenue (incl. VAT)</strong>.</td></tr>
       <tr><td><strong>POS</strong> (named after your till), <strong>Stock</strong>, <strong>Staff</strong>, <strong>Voids</strong></td><td>Till sales, stock value and wastage, activity per user, and voided orders and refunds, for the chosen dates.</td></tr>
@@ -81,6 +81,7 @@
     <tbody>
       <tr><td>Heading line</td><td>One sentence summing up the day and how many items need attention.</td></tr>
       <tr><td><strong>Revenue earned</strong></td><td>The headline. The money the hotel <em>earned</em> on this day, VAT and levy included: the room nights guests stayed that night (at the rate each guest booked), charges put on guest bills that day, and till sales paid that day. Conferences and events count on their <strong>event date</strong>, not when they were paid. Gym counts on the day it is paid. If a cancelled booking kept its first night, that money counts on the booking's check-in date (shown as <strong>Kept on cancellations</strong>). Food charged to a room is counted once only. A line under it compares with yesterday and shows the cash collected.</td></tr>
+      <tr><td><strong>Kept on no-shows</strong></td><td>Money kept under the no-show policy. It is counted on the booking's check-in date and shown as its own line. It is not in ADR or RevPAR. Past days' totals can change when this rule applies.</td></tr>
       <tr><td><strong>Cash collected</strong></td><td>A separate line: the money actually received that day minus refunds paid out that day, whatever it was for. A deposit paid today for a stay next month is cash collected today but is not revenue earned until it is earned. The two figures are different on purpose.</td></tr>
       <tr><td><strong>Occupancy</strong>, <strong>ADR</strong></td><td>Rooms sold against sellable rooms (the card reads <em>"X of Y sellable rooms sold"</em>), and the average room rate including VAT and levy (ADR). RevPAR is shown under ADR.</td></tr>
       <tr><td><strong>Cash to bank</strong></td><td>The cash taken today, after cash refunds. The <strong>Cash refunds already taken off</strong> line shows the refunds taken off (on the PDF and email it is <strong>Less cash refunds paid</strong>). Count the till; it must match. Other methods are listed below it.</td></tr>
@@ -93,6 +94,7 @@
   </table>
   <h3>Refunds on End of Day</h3>
   <p>Refunds use the same rule as Payments, Accounting and Reports: the <strong>full amount paid back, VAT included</strong>, once it is Processing or Completed. This is the same on the screen, the PDF and the email. Refunds still awaiting approval are shown apart and are not taken off.</p>
+  <p>A refund counts on the day it was paid out, not the day it was raised. A till (POS) refund follows the same rule. A pending refund is left out of End of Day until it is paid out.</p>
   <h3>Revenue earned and Cash collected</h3>
   <p><strong>Revenue earned</strong> is what the hotel earned that day. <strong>Cash collected</strong> is the money that came in that day, minus refunds paid out. They are different on purpose: a deposit paid today for next month is cash collected today, but it is revenue earned only on the day it is earned.</p>
   <p>The email, PDF, WhatsApp message, Print and CSV use the same figures as the screen: <strong>Revenue earned</strong> first, then <strong>Cash collected</strong>.</p>
@@ -147,7 +149,17 @@
     <li><strong>Tip/VAT overstatement register</strong>: each affected sale with the recorded total, the correct total, and how much revenue and VAT were overstated. Refunded sales are marked.</li>
     <li><strong>Historical shift-close accuracy</strong>: closed shifts whose expected figures would be different today, and whether a manager override was used at the time.</li>
   </ul>
+  <p>The shift section re-works each closed shift the way the Z-report does, and compares the result with what was recorded when the shift closed. A refund, or a tab settled by another cashier, is counted correctly, so it does not show as drift.</p>
   <p>If the lists are empty you will see a green line saying no drift was found. Whether to correct any past figure is a decision for finance or the owner.</p>
+
+  <h2 id="assistant-stays">Ask the Assistant about a stay, a fee or a setting</h2>
+  <p>The Assistant can answer these questions from a booking's History, with the time and the staff member who did it:</p>
+  <ul>
+    <li>"When did [first name] check in or check out?", "Has [name] left or arrived?", "Who checked them in or out?"</li>
+    <li>"Who cancelled [name]'s booking?", "Was [name] a no-show?", "Did [name] extend?", "Was [name] moved?"</li>
+  </ul>
+  <p>Lower-case names and the hotel's name in the question are fine. If several guests share the name, it lists them with their booking references and dates, so you can pick the right one.</p>
+  <p>It can also quote the cancellation fee on a booking, from the policy locked on that booking, and show what each room of a group owes. A pending, tentative or expired booking shows no fee. The Assistant quotes a fee but never lowers or waives it; that stays on Booking Details. It can say who changed a setting, but only when staff activity and System Logs are on.</p>
 
   <h2 id="rules">Rules the system enforces</h2>
   <ul>

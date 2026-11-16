@@ -421,6 +421,37 @@
   <p><strong>Undo a clear:</strong> the page lists past clears under <strong>Past clears</strong>, newest first. Click <strong>Undo this clear</strong> on the one you want, type <strong>UNDO</strong> and your password. Undo puts back only the records that clear removed. It refuses if new stock has been added since.</p>
   <p class="warn-note">If something goes wrong: <em>"Nothing was changed. To go ahead, type the word CLEAR exactly, in capital letters."</em> Type it exactly as shown. <em>"Nothing was changed. That password is not correct."</em> Enter your own password again. <em>"New stock has been added since this clear. Undo would mix old and new data, so nothing was changed."</em> Undo is not possible for that clear. Tell your administrator.</p>
 
+  <h3>Clear only the stock counts</h3>
+  <p>Use this when stock counts were entered by mistake. It needs the same permission as Clear Stock Data.</p>
+  <ol>
+    <li>Open <strong>Clear Stock Data</strong> and go to the section <strong>Stock counts and the stock they added</strong>.</li>
+    <li>Press <strong>Review the counts first</strong>. The page shows every count (counted, waiting, approved or rejected) and the stock value that would be taken back.</li>
+    <li>Tick <strong>I understand</strong>, type <strong>WIPE</strong> and your own password.</li>
+    <li>Press <strong>Back up and wipe the counts</strong>.</li>
+  </ol>
+  <ul>
+    <li><strong>What happens to stock:</strong> the approved counts' stock is taken back, so stock goes back to what it was before the counts. Item quantities are put back too.</li>
+    <li><strong>Optional:</strong> tick <strong>Also remove the Import history entries that created these counts</strong> to remove those history entries as well.</li>
+    <li><strong>No Undo on this page.</strong> The full backup taken first is the only way to bring the counts back.</li>
+    <li><strong>Refused</strong> when stock has moved since the counts, or an item that keeps its stock had its cost averaged by a count. The page names the item.</li>
+  </ul>
+  <h3>Wipe all stock and every record (full reset)</h3>
+  <p>This empties all stock and every Import history entry, so the stock can be set up again. It needs the permission <strong>Wipe all stock (full reset)</strong>. Super admins always have it. A plain administrator has it only when a super admin switches it on. Managers and staff never see it.</p>
+  <ol>
+    <li>Open <strong>Clear Stock Data</strong> and go to the section <strong>Wipe all stock and every record</strong>.</li>
+    <li>Press <strong>Show me what will be removed</strong>. Check the counts: stock records, and Import history entries (finished, failed or cancelled).</li>
+    <li>Press <strong>Continue to confirm</strong>.</li>
+    <li>Tick <strong>I understand</strong>, type <strong>WIPE ALL</strong> and your own password.</li>
+    <li>Press <strong>Back up and wipe everything</strong>.</li>
+  </ol>
+  <ul>
+    <li><strong>Never touched:</strong> sales, orders, payments, bookings and menu items.</li>
+    <li><strong>Backup first:</strong> a full backup of the whole database, then a snapshot of the rows being removed. If either fails, nothing is removed.</li>
+    <li><strong>Undo:</strong> the stock part can be undone under <strong>Past clears</strong>, as long as no new stock has been added since. Undo does not bring back Import history.</li>
+    <li>The action is logged as <em>stock_wipe_all</em>.</li>
+  </ul>
+  <p class="warn-note">If something goes wrong: <em>"Nothing was changed. Tick "I understand" to show you have read what this does."</em> Tick the box. For the full reset, type <strong>WIPE ALL</strong> exactly, in capital letters.</p>
+
   <h2 id="rules">Rules the system enforces</h2>
   <ul>
     <li>Selling is never blocked by stock. Sales and station actions go ahead at zero stock, and the stock goes below zero until the next delivery or count. Wastage and manual subtractions are still refused if they are more than the stock on record.</li>
@@ -428,6 +459,9 @@
     <li>An opening stock count needs a unit cost on every counted line and, unless an administrator has switched the second-person rule off, a different approver than the counter.</li>
     <li>An item can be in only one open opening count at a time. An open count is one still being counted or waiting for approval.</li>
     <li>Receiving more than a purchase order line expects needs a written over-delivery note.</li>
+    <li>An archived item cannot be received by barcode. Archiving an item that a recipe uses is refused, and the message names the dishes. Saving a recipe with an archived item is refused, and a warning lists the recipes that already use one.</li>
+    <li>Throwing out an empty or closed batch is refused. Backdated wastage before an approved count is refused with <em>"this loss is already in the count of [date]"</em>.</li>
+    <li>A second click on <strong>Receive</strong> or <strong>Stock in</strong> is ignored.</li>
     <li>Items with no cost cannot be received by barcode, and a count that adds stock for an ingredient with no cost cannot be approved. Set the cost first.</li>
     <li>Manual adjustments are for Admin and Manager roles only and need a reason of at least 8 characters.</li>
     <li>Every stock count shortage needs a reason and a manager's approval. The approved count cannot be undone.</li>

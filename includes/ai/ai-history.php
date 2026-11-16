@@ -87,7 +87,8 @@ function rh_ai_hist_is_payment(array $e): bool
         return false;
     }
     $w = rh_ai_hist_what($e);
-    return $w !== '' && stripos($w, 'Payment status set to') !== 0 && !preg_match('/\bremoved$/i', $w);
+    // "Payment status set to ..." / "Payment status now ..." (step 8i) are status lines, not money received
+    return $w !== '' && stripos($w, 'Payment status set to') !== 0 && stripos($w, 'Payment status now') !== 0 && !preg_match('/\bremoved$/i', $w);
 }
 
 /** The latest step of these kinds (steps are oldest first), or null. */

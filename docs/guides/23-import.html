@@ -88,6 +88,7 @@
     <li>A card for each sheet, with the columns that were understood and the ones left out, and why. A sheet that does not look like a stock list says so under <strong>Why</strong>.</li>
   </ul>
   <p>Check this list, then click <strong>Continue to review</strong>. If a sheet or column needs an answer first, the page shows the question inside that sheet's card.</p>
+  <p><strong>Column headings it knows.</strong> Import recognises the headings of our own Stock &rarr; Ingredients export and common variants, so an export from this hotel goes through with no questions. For example: <em>Current Quantity level</em> or <em>Current Qty</em> is the balance; <em>Unit Cost</em>, <em>Cost/Unit</em> or <em>Average cost</em> is the unit price; <em>Max qty</em> or <em>Order up to</em> is the par level; <em>Next Expiry</em> is the expiry date. <em>Lead Time</em> is greyed out (not imported). <em>Min Qty</em> or <em>Minimum Quantity level</em> is greyed out when your sheet also has a <em>Reorder Point</em> column; otherwise it is used as the reorder level. A heading with words such as total, value, amount or days is used only when it matches exactly; otherwise Import asks you which column to use.</p>
 
   <h3>Step 3: Review and answer</h3>
   <p>Each line is one stock item as it would be imported. The grey tag under each value shows the cell it was read from. Answer the questions that sit under an item. The page updates after every answer, and your answers are kept if you leave the page and come back.</p>
@@ -131,9 +132,37 @@
     <li><strong>Still need an answer</strong>: questions and blocked rows to sort out first.</li>
   </ul>
   <p>Below the numbers, Step 4 lists the rows left out, then the fixes. See <a href="#blocked">Rows left out</a> and <a href="#fixed">Fixed for you</a>.</p>
+  <p><strong>Items already in stock: tick for all of them.</strong> If some items are already in your stock, a box shows two buttons. Each button ticks one thing for every matched item and shows how many it will change first:</p>
+  <ol class="steps">
+    <li>Press <strong>Set quantity for every matched item</strong> to tick the opening stock quantity for all of them. Each one then goes into the opening count with the file's quantity.</li>
+    <li>Press <strong>Use the file's unit cost for every matched item</strong> to tick the cost for all of them. The cost in stock is replaced by the file's cost.</li>
+    <li>To undo, press <strong>Clear the quantity tick on all</strong> or <strong>Clear the cost tick on all</strong>. Each button ticks or clears one thing only. Your other ticks stay as you set them.</li>
+  </ol>
+  <p>Nothing in stock changes until you press <strong>Confirm and import</strong>.</p>
+  <p><strong>Before you confirm: items that will NOT be in the opening count.</strong> Just above the Import button, Import lists every item that has stock in your file but will not be counted, with the reason. The page says <em>"&hellip; with stock will NOT be in the opening count."</em> Press a reason to see the names. The reasons are:</p>
+  <ul>
+    <li><em>"already in stock: the quantity is not ticked"</em>: tick the quantity for it (or use the button above).</li>
+    <li><em>"already in stock: your file has a cost, but it is not ticked"</em>: the item has no cost in stock yet, so tick the cost.</li>
+    <li><em>"with no cost in your file (and none in stock)"</em>: add a unit cost to the file, upload again, or leave it out.</li>
+    <li><em>"in skipped rows"</em>: the row was left out on purpose.</li>
+    <li><em>"already in another opening count that is not approved yet"</em>: approve or cancel that count first.</li>
+    <li><em>"where your stock already shows exactly this quantity"</em>: nothing needs counting.</li>
+  </ul>
+  <p>The result screen lists the items with no price and the items whose quantity was not ticked as two separate lines.</p>
+  <p><strong>The sheet's value column.</strong> If your sheet has a value column (for example <em>Stock Value</em>) that does not agree with Quantity &times; Unit Cost, a warning shows on Steps 3 and 4. It gives the number of rows and how much more or less the sheet shows (in MWK), with the rows listed 10 per page. Import always uses Quantity &times; Unit Cost, so the warning changes nothing that is imported.</p>
+  <p><strong>Download the stock check (Excel).</strong> This button makes a workbook for the manager. It has a Summary sheet; a sheet named after your value column with the rows that disagree (biggest gap first, red where the sheet shows more, green where it shows less, the quantity the value implies, and a blank <em>Manager's explanation</em> column); and a <em>Missing prices</em> sheet with the items that have stock but no unit cost. It is offered on Steps 3 and 4, after Import, and from Import history. Downloading it is logged in the activity log.</p>
   <p>Press <strong>Confirm and import</strong>. The result page shows <strong>Ingredients created</strong>, <strong>Ingredients updated</strong>, <strong>Rows skipped</strong> (rows that are not items, or were left out), <strong>Left out by you</strong>, <strong>Fixed for you</strong>, <strong>Opening count lines</strong> and <strong>Expiry batches</strong>. Use <strong>Open the opening count</strong> to see the count that is waiting for approval. Press <strong>Download the updated stock workbook</strong> for an Excel copy of your stock (see <a href="#export">Export your stock to Excel</a>).</p>
 
   <p><strong>My imports.</strong> At the bottom of the page is a list of the imports you started in the last 30 days. An administrator sees everyone's. Open one to carry on where you stopped, or cancel one you no longer need. Press <strong>Download</strong> on a row to get the original file back, with its original name. The Download button shows only while the hotel still keeps its copy. That copy is deleted when the import is confirmed, cancelled or after 30 days, and then the button is gone. Only the person who uploaded the file, or an administrator, can download it.</p>
+  <h3>Delete an entry from Import history</h3>
+  <p>On a finished import (committed, failed or cancelled) the history list shows a <strong>Delete</strong> button. It is shown only to people who have <strong>Clear Stock Data</strong> (super admins; a plain administrator only if a super admin switches it on for them; never managers or other staff). Steps:</p>
+  <ol class="steps">
+    <li>Press <strong>Delete</strong> on the row.</li>
+    <li>Type <strong>DELETE</strong> in capital letters, and type your own password.</li>
+    <li>Press <strong>Delete from history</strong>. Press <strong>Keep it</strong> to change your mind and keep the entry.</li>
+  </ol>
+  <p>This removes the history entry and its stored file (a backup copy is kept on the server). It does <strong>not</strong> undo the stock the import brought in. To remove that stock, use <strong>Clear Stock Data</strong>.</p>
+  <p>After a delete, the page no longer says the same file was already imported, so it can be uploaded again. If the word is wrong, the page says <em>"Type the word DELETE exactly, in capital letters."</em> The delete is logged as <em>import_history_delete</em>.</p>
 
   <h2 id="questions">What the questions mean</h2>
   <p>Import asks a question only when something is unclear. Every question has a few answers to pick from. The page does not pick one for you. Confirm stays off until every question is answered.</p>
@@ -317,6 +346,7 @@
   <ul>
     <li><strong>The same file again is blocked.</strong> The page says <em>"This file was already imported on &hellip; by &hellip;"</em>. Only an administrator can import it again, by ticking <strong>Import again</strong> on the upload step.</li>
     <li><strong>Cancel.</strong> Click <strong>Cancel this import</strong> on Steps 2 to 4. The page says <em>"Nothing has been saved to your stock, and the uploaded copy will be deleted."</em> Confirm the cancel, and the page says <em>"The import was cancelled and the uploaded copy deleted."</em> A cancelled import teaches Import nothing.</li>
+    <li><strong>Busy or changed list.</strong> If another import is being saved, the page says <em>"another import is being saved"</em>. A new-item row whose name now exists is refused, and the page asks you to <em>"review the import again"</em>.</li>
     <li><strong>Clean-up.</strong> The uploaded copy is kept on the server only while you work on it. It is deleted when you finish, when you cancel, or after 7 days.</li>
   </ul>
 

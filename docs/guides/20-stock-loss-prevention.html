@@ -158,6 +158,17 @@
   <h3>Everything leaves a trail</h3>
   <p>Every stock movement is saved with the ingredient, the amount, the cost, the reason, the source and the person. Order events (placed, paid, voided and so on) are saved with who did them. You can read the stock trail in <strong>Stock Reports</strong> &rarr; <strong>Adjustments</strong>. The Source column shows where each change came from: for example <strong>pos_order</strong> or <strong>room_service</strong> (a sale), <strong>void_restore</strong> (stock put back), <strong>wastage</strong>, <strong>expiry</strong>, <strong>recall</strong>, <strong>variance</strong> (an approved count) and <strong>manual</strong> (an <strong>Adjust</strong>).</p>
 
+  <h3>Spot gaps with the stock-check workbook</h3>
+  <p>When you import a stock list from Excel, Import can check the sheet's own value column (for example <em>Stock Value</em>) against Quantity &times; Unit Cost. It never changes what is imported. It shows a warning when they disagree, and it lists the items that have stock but no unit cost.</p>
+  <ol class="steps">
+    <li>Open Admin menu &rarr; <strong>Stock</strong> &rarr; <strong>Import</strong> and open the import.</li>
+    <li>Press <strong>Download the stock check (Excel)</strong>. It is also on the review and result steps, and in Import history.</li>
+    <li>Open the workbook. The <strong>Summary</strong> sheet gives the totals. The sheet for the value column lists each row that disagrees, biggest gap first. Red means the sheet shows more, green means less.</li>
+    <li>Type the reason in the blank <strong>Manager's explanation</strong> column, and keep the workbook with the stock records.</li>
+    <li>The <strong>Missing prices</strong> sheet lists items with stock but no unit cost. Add their cost, then upload again.</li>
+  </ol>
+  <p>Clearing stock counts or wiping all stock also removes counts from the stock records. See <a href="08-stock-orders.html#clear">How to clear stock data</a>.</p>
+
   <h2 id="weekly">Weekly routine for managers</h2>
   <p>Set aside about 30 minutes, at the same time each week.</p>
   <ol class="steps">

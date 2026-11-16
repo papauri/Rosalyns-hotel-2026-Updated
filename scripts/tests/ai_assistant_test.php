@@ -179,6 +179,24 @@ try {
     if (getenv('AI_TEST_DASH_FIGURES_ONLY')) { echo "$pass passed, $fail failed\n"; exit(1); }
 }
 
+/* 2026-11-16 (Rosalyn's is LIVE since 2026-11-09): every block below writes test rows (bookings, payments, refunds, charges,
+ * settings) inside rolled-back transactions - the money cases included. Refused BEFORE connecting when this tree or its
+ * .env points at Rosalyn's: the database part runs at the Liwonde test hotel only. */
+$aitEnvDb = '';
+if (is_readable($root . '/.env')) {
+    foreach ((array)file($root . '/.env', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $aitLine) {
+        if (preg_match('/^\s*DB_NAME\s*=\s*["\']?([^"\'\s]*)/', (string)$aitLine, $aitM)) {
+            $aitEnvDb = $aitM[1];
+        }
+    }
+}
+if (stripos($aitEnvDb, 'rosalyn') !== false || stripos((string)realpath($root), 'rosalyn') !== false) {
+    bad('refused: the database checks (money cases included) never run against Rosalyn\'s (LIVE); run this suite from the Liwonde folder');
+    echo "$pass passed, $fail failed" . ($skip ? ", $skip skipped" : '') . "\n";
+    exit(1);
+}
+unset($aitEnvDb, $aitLine, $aitM);
+
 require_once $root . '/config/database.php';
 require_once $root . '/admin/includes/permissions.php';
 require_once $root . '/includes/ai/ai-catalog.php';
@@ -7314,6 +7332,114 @@ try {
     }
 } catch (Throwable $e) {
     bad('Sync 2026-11-14 database checks threw', get_class($e) . ': ' . $e->getMessage());
+}
+
+// ── Sync 2026-11-16 (GUIDES_AI_SYNC pending: import reasons + stock check, wipe permissions, joined rooms, refunds by payout
+//    day, rate plans per room type, payment status words). Pure first, then Liwonde-only database checks (rolled back). ──
+echo "\n-- Sync 2026-11-16 --\n";
+require_once $root . '/includes/ai/ai-history.php';
+require_once $root . '/includes/pricing.php';
+try {
+    // History: "Payment status now ..." (step 8i) is a status line, never "the latest payment"
+    $s6Pay = ['at' => '2026-11-16 10:00:00', 'who' => 'A', 'what' => 'Payment received: MWK 500.00 cash', 'detail' => '', 'kind' => 'payment'];
+    $s6Now = ['at' => '2026-11-16 10:01:00', 'who' => 'A', 'what' => 'Payment status now part paid', 'detail' => 'Payment status: unpaid → partial', 'kind' => 'payment'];
+    $s6Sum = implode(' ', rh_ai_history_summary([['at' => '2026-11-15 09:00:00', 'who' => 'A', 'what' => 'Booking created', 'detail' => '', 'kind' => 'created'], $s6Pay, $s6Now], false));
+    check(rh_ai_hist_is_payment($s6Pay) && !rh_ai_hist_is_payment($s6Now) && stripos($s6Sum, 'status now') === false && stripos($s6Sum, 'MWK 500.00') !== false,
+        'History Summary: "Payment status now ..." is not read as the latest payment (the real payment is)', $s6Sum);
+    // Import, committed: each true reason said apart; an older mixed list is never called "no price"
+    $s6New = ['state' => 'committed', 'import' => ['job' => 9, 'file' => 'f'], 'committed_at' => '2026-11-16 09:00:00', 'downloads' => '',
+        'result' => ['created' => 1, 'updated' => 2, 'stock_not_counted' => ['no_price' => 3, 'quantity_not_ticked' => 4, 'cost_not_ticked' => 5, 'in_another_unapproved_opening_count' => 0],
+            'already_matching_no_count_line_needed' => 6, 'stock_check' => ['value_column_rows_that_disagree' => 7, 'items_with_stock_but_no_unit_cost' => 3]]];
+    $s6Old = $s6New;
+    $s6Old['result'] = ['created' => 1, 'updated' => 2, 'stock_not_counted_mixed_reasons' => 8];
+    $s6TN = rh_ai_import_local_text($s6New, ['focus' => 'summary']);
+    $s6TO = rh_ai_import_local_text($s6Old, ['focus' => 'summary']);
+    check(strpos($s6TN, '4 items already in stock, but the quantity was not ticked') !== false && strpos($s6TN, '3 items with no price') !== false && strpos($s6TN, '5 items already in stock with no cost yet') !== false
+        && strpos($s6TN, '6 items already had exactly this quantity') !== false && strpos($s6TN, '7 rows where the file\'s value column disagrees') !== false
+        && strpos($s6TO, '8 items with stock were left out') !== false && stripos($s6TO, 'no price were left out') === false,
+        'Import result: stock left out of the opening count is given by its true reason (no price / quantity not ticked / cost not ticked; already matching apart); an older mixed list is never called "no price"', json_encode([$s6TN, $s6TO]));
+    $s6Src = (string)file_get_contents($root . '/includes/ai/ai-import.php');
+    check(strpos($s6Src, "\$res['stock_not_counted_not_ticked']") !== false && strpos($s6Src, "\$cf['not_counted']['by']") !== false && strpos($s6Src, "\$ov['value_check']") !== false && strpos($s6Src, "'left_out_overlap'") !== false,
+        'Import facts read the Import screen\'s own not-counted reasons (review and result), the overlap count and the value-column check');
+    // Wipes and deletes: no tool, one plain line
+    $s6Keys = strtolower(implode(' ', array_merge(array_keys(rh_ai_action_registry()), array_keys(rh_ai_tool_registry()), array_column(rh_ai_action_registry(), 'tool'))));
+    $s6U = ['id' => 0, 'role' => 'admin'];
+    $s6W = [rh_ai_system_area_line($s6U, 'wipe all stock'), rh_ai_system_area_line($s6U, 'please delete the import history'), rh_ai_system_area_line($s6U, 'clear stock data now'),
+        rh_ai_system_area_line($s6U, 'how do i wipe all stock?'), rh_ai_system_area_line($s6U, 'remove 2 kg flour from stock')];
+    check(!preg_match('/wipe|purge|clear_stock|stock_clear|data_reset|import_history|delete_import/', $s6Keys) && $s6W[0] !== null && $s6W[1] !== null && $s6W[2] !== null
+        && strpos((string)$s6W[0][0], 'Clear Stock Data') !== false && $s6W[3] === null && $s6W[4] === null,
+        'wipes: the Assistant has no wipe / clear / delete-import tool; "wipe all stock" or "delete the import history" gets one plain line pointing to Clear Stock Data (a how-to question and a stock change are not caught)', json_encode([$s6W, $s6Keys === '' ? 'no keys' : 'keys read']));
+    // Joined rooms, refunds by payout day, rate plans, payment status: by their source
+    $s6Ex = (string)file_get_contents($root . '/includes/ai/ai-extras.php');
+    $s6Dec = (string)file_get_contents($root . '/includes/ai/ai-decisions.php');
+    $s6Tl = (string)file_get_contents($root . '/includes/ai/ai-tools.php');
+    $s6Rp = substr($s6Tl, (int)strpos($s6Tl, 'function rh_ai_t_rate_plans_and_deals('), 5200);
+    check(strpos($s6Ex, 'rh_room_type_unit_total((int)$r[\'id\'], (int)$r[\'total_rooms\'])') !== false && !preg_match('/payment_date BETWEEN \?/', $s6Dec)
+        && substr_count($s6Dec, 'rh_pay_count_day_sql() . " BETWEEN ? AND ?') >= 4 && strpos($s6Rp, 'rh_rate_plans_086_ready($db)') !== false && strpos($s6Rp, 'rh_rate_plan_effective($p') !== false
+        && strpos($s6Tl, "\$out['payment_status'] = (string)\$ps['label']") !== false,
+        'by source: rate suggestions use the reports\' per-type room count (rh_room_type_unit_total); Decisions money counts a refund on its payout day (rh_pay_count_day_sql); the rate plan list reads the per-room-type amounts only after migration 086 through the pricing rule; get_booking words payment status with rh_booking_pay_state');
+} catch (Throwable $e) {
+    bad('Sync 2026-11-16 pure checks threw', get_class($e) . ': ' . $e->getMessage());
+}
+try {
+    $s6Adm = $pdo->query("SELECT id, role, username, full_name FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+    if (stripos((string)DB_NAME, 'rosalyn') !== false) {
+        skip('Sync 2026-11-16 database checks: Rosalyn\'s is LIVE, they run at the test hotel only');
+    } elseif (!$s6Adm) {
+        skip('Sync 2026-11-16 database checks: no admin');
+    } else {
+        $pdo->beginTransaction();
+        try {
+            // Payment status words on a real booking equal the screens' rule fed with the booking's own bill
+            $s6Bk = (int)$pdo->query("SELECT id FROM bookings WHERE deleted_at IS NULL AND status IN ('confirmed','checked-in','checked-out') ORDER BY id DESC LIMIT 1")->fetchColumn();
+            if ($s6Bk > 0) {
+                $s6G = rh_ai_t_get_booking($pdo, $s6Adm, ['booking_id' => $s6Bk]);
+                $s6Due = (float)($s6G['money']['balance_due'] ?? -1);
+                $s6Paid = (float)($s6G['money']['paid'] ?? -1);
+                $s6L = (string)($s6G['payment_status'] ?? '');
+                $s6Exp = $s6Due > BALANCE_TOLERANCE ? ($s6Paid > BALANCE_TOLERANCE ? 'Part paid (' : 'Unpaid') : 'Paid in full';
+                check($s6L !== '' && strpos($s6L, $s6Exp) === 0 && !in_array(strtolower($s6L), ['completed', 'partial', 'paid'], true),
+                    'get_booking: payment status in the screens\' words, from the bill (' . $s6Exp . ')', json_encode([$s6L, $s6Paid, $s6Due]));
+            } else {
+                skip('get_booking payment status: no confirmed / in-house / checked-out booking at this hotel');
+            }
+            // Rate plan list: each room type's own amount (migration 086), the stored single amount never shown as the plan's
+            if (function_exists('rh_rate_plans_086_ready') && rh_rate_plans_086_ready($pdo)) {
+                $s6Rooms = $pdo->query("SELECT id, name FROM rooms WHERE is_active = 1 ORDER BY display_order, id LIMIT 2")->fetchAll(PDO::FETCH_KEY_PAIR);
+                if (count($s6Rooms) === 2) {
+                    [$s6R1, $s6R2] = array_keys($s6Rooms);
+                    $pdo->prepare("INSERT INTO rate_plans (name, rule_type, adjustment_type, adjustment_value, applies_to, room_type_ids, priority, is_stacking, is_active, room_adjustments, price_basis)
+                                   VALUES ('ZZ AI sync 1116 plan', 'promotion', 'percentage', -10, 'room_types', ?, 0, 0, 1, ?, 'all_in')")
+                        ->execute([json_encode([(int)$s6R1, (int)$s6R2]), json_encode([(string)$s6R1 => ['type' => 'fixed', 'value' => -5000]], JSON_FORCE_OBJECT)]);
+                    $s6Rt = rh_ai_t_rate_plans_and_deals($pdo, $s6Adm, []);
+                    $s6P = array_values(array_filter((array)$s6Rt['rate_plans'], static fn($p) => is_array($p) && ($p['name'] ?? '') === 'ZZ AI sync 1116 plan'))[0] ?? [];
+                    $s6A = array_column((array)($s6P['amount_by_room_type'] ?? []), null, 'room_type');
+                    check(($s6A[$s6Rooms[$s6R1]]['change'] ?? '') === 'fixed amount per night' && abs((float)($s6A[$s6Rooms[$s6R1]]['value'] ?? 0) + 5000) < 0.01
+                        && ($s6A[$s6Rooms[$s6R2]]['change'] ?? '') === 'percentage' && abs((float)($s6A[$s6Rooms[$s6R2]]['value'] ?? 0) + 10) < 0.01 && count($s6A) === 2 && !isset($s6P['adjustment_value']),
+                        'rate plan list: each chosen room type gets its own amount (fixed -5000 / -10%), the stored single amount is not shown as the plan\'s', json_encode($s6P));
+                } else {
+                    skip('rate plan list per room type: fewer than two room types');
+                }
+            } else {
+                skip('rate plan list per room type: migration 086 not run here');
+            }
+            // Rate suggestions: the sellable rooms per type equal the Occupancy-by-room-type figure
+            $s6Rs = rh_ai_t_rate_suggestions($pdo, $s6Adm, ['days' => 30]);
+            $s6Bad = [];
+            foreach ($pdo->query("SELECT id, name, total_rooms FROM rooms WHERE is_active = 1")->fetchAll(PDO::FETCH_ASSOC) as $s6T) {
+                foreach ((array)($s6Rs['room_types'] ?? []) as $s6X) {
+                    if (($s6X['room_type'] ?? '') === $s6T['name'] && (int)$s6X['sellable_rooms'] !== rh_room_type_unit_total((int)$s6T['id'], (int)$s6T['total_rooms'])) {
+                        $s6Bad[] = $s6T['name'];
+                    }
+                }
+            }
+            check(!empty($s6Rs['room_types']) && !$s6Bad, 'rate suggestions: sellable rooms per type = the Reports figure (a joined type with no pair = 0)', json_encode($s6Bad));
+        } finally {
+            $pdo->rollBack();
+        }
+    }
+} catch (Throwable $e) {
+    bad('Sync 2026-11-16 database checks threw', get_class($e) . ': ' . $e->getMessage());
 }
 if (getenv('AI_TEST_SYNC_ONLY')) {
     echo "$pass passed, $fail failed" . ($skip ? ", $skip skipped" : '') . "\n";

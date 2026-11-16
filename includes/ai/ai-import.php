@@ -197,8 +197,26 @@ if (!function_exists('rh_ai_import_tools')) {
                         $out[$as] = (int)$res[$k];
                     }
                 }
-                if (isset($res['stock_not_counted_no_cost'])) {
-                    $out['stock_not_counted_no_price'] = count((array)$res['stock_not_counted_no_cost']);
+                // stock left out of the opening count, by its TRUE reason (the result screen's own lists, includes/import/commit-stock.php);
+                // an import confirmed before 2026-11-16 kept ONE mixed list (no price, quantity not ticked or already matching): never called "no price"
+                if (isset($res['stock_not_counted_not_ticked'])) {
+                    $out['stock_not_counted'] = [
+                        'no_price' => count((array)($res['stock_not_counted_no_cost'] ?? [])),
+                        'quantity_not_ticked' => count((array)$res['stock_not_counted_not_ticked']),
+                        'cost_not_ticked' => count((array)($res['stock_not_counted_cost_not_ticked'] ?? [])),
+                        'in_another_unapproved_opening_count' => (int)($res['left_out_overlap'] ?? 0),
+                    ];
+                    $out['already_matching_no_count_line_needed'] = count((array)($res['stock_not_counted_same'] ?? []));
+                } elseif (isset($res['stock_not_counted_no_cost'])) {
+                    $out['stock_not_counted_mixed_reasons'] = count((array)$res['stock_not_counted_no_cost']);
+                    $out['mixed_reasons_are'] = 'An older import: one list mixing no price, a quantity that was not ticked, and stock that already matched the file. The reason per item is not recorded.';
+                    if (!empty($res['left_out_overlap'])) {
+                        $out['stock_not_counted'] = ['in_another_unapproved_opening_count' => (int)$res['left_out_overlap']];
+                    }
+                }
+                if (is_array($res['stock_check'] ?? null)) {
+                    // report only: the sheet's own value column against Quantity x Unit Cost, and stock with no unit cost (never changed what was imported)
+                    $out['stock_check'] = ['value_column_rows_that_disagree' => (int)($res['stock_check']['differ'] ?? 0), 'items_with_stock_but_no_unit_cost' => (int)($res['stock_check']['missing'] ?? 0)];
                 }
                 if (!empty($res['opening_count_ref'])) {
                     $out['opening_count'] = (string)$res['opening_count_ref'];
@@ -207,8 +225,11 @@ if (!function_exists('rh_ai_import_tools')) {
                     $out['next_step'] = (string)$res['next_step'];
                 }
             }
+            // the Import screen offers "Download stock check" only while the job's stored details are kept (admin/data-import.php 'check')
+            $chk = (string)($job['analysis_json'] ?? '') !== '' && is_array($out['stock_check'] ?? null) &&($out['stock_check']['value_column_rows_that_disagree'] + $out['stock_check']['items_with_stock_but_no_unit_cost']) > 0;
             return $base + ['state' => 'committed', 'import' => $head, 'committed_at' => (string)$job['committed_at'], 'result' => $out,
-                'downloads' => 'On the Import screen: "Download the updated stock workbook" on this import\'s result, and "Export current stock" at any time.'];
+                'downloads' => 'On the Import screen: "Download the updated stock workbook" on this import\'s result, and "Export current stock" at any time.'
+                    . ($chk ? ' "Download stock check" (the rows where the file\'s value column disagrees with Quantity x Unit Cost, and the items with stock but no price) is on this import\'s result and in Import history.' : '')];
         }
         if (in_array($job['status'], ['cancelled', 'failed'], true)) {
             return $base + ['state' => (string)$job['status'], 'import' => $head, 'why' => rh_ai_import_ql((string)($job['error_text'] ?? ''))];
@@ -319,11 +340,39 @@ if (!function_exists('rh_ai_import_tools')) {
         $ov = function_exists('import_job_review_view') ? import_job_review_view($db, $jid, null) : ['ok' => false];
         if (!empty($ov['ok']) && is_array($ov['confirm'] ?? null)) {
             $cf = $ov['confirm'];
+            // will_update = an item field changes; a ticked quantity alone changes no field (it only adds an opening count line), so it is in matched_nothing_to_change
             $f['ready_now'] = ['will_create' => (int)$cf['creates'], 'will_update' => (int)$cf['updates'], 'matched_nothing_to_change' => (int)$cf['kept'],
-                'opening_count_lines' => (int)$cf['in_count'], 'stock_with_no_price_not_counted' => (int)$cf['no_price']];
+                'opening_count_lines' => (int)$cf['in_count'], 'stock_with_no_price_not_counted' => (int)$cf['no_price'],
+                'means' => 'matched_nothing_to_change = matched items whose own details do not change (a ticked quantity on them still goes into the opening count); opening_count_lines = items whose stock goes into the opening count.'];
+            // items with stock that will NOT be in the opening count, by their TRUE reason (the Step 4 warning's own counts, import_cont_not_counted)
+            $by = (array)($cf['not_counted']['by'] ?? []);
+            if ($by) {
+                $why = ['no_cost' => 'no cost in the file and none in stock', 'not_ticked' => 'already in stock: quantity not ticked', 'cost_not_ticked' => 'already in stock with cost 0: the file\'s cost is not ticked',
+                    'skipped' => 'in skipped rows', 'overlap' => 'already in another opening count that is not approved yet', 'same' => 'stock already shows exactly this quantity (nothing to count)'];
+                $f['stock_not_in_opening_count'] = ['total' => (int)($cf['not_counted']['total'] ?? 0), 'by_reason' => []];
+                foreach ($why as $k => $label) {
+                    $n = (int)($by[$k]['n'] ?? 0);
+                    if ($n > 0) {
+                        $names = array_slice((array)($by[$k]['names'] ?? []), 0, 10);
+                        $f['stock_not_in_opening_count']['by_reason'][] = ['reason' => $label, 'code' => $k, 'items' => $n, 'first_names' => array_map(static fn($v) => rh_ai_import_q((string)$v), $names), 'names_unshown' => max(0, $n - count($names))];
+                    }
+                }
+                $f['stock_not_in_opening_count']['how_to_fix'] = 'On the Import screen (Step 3 / 4): "Set quantity for every matched item" and "Use the file\'s unit cost for every matched item" tick them all (each shows how many first); a row skipped or an item with no cost is fixed in the file or by answering its question.';
+            }
             $f['entries_still_waiting'] = (int)$cf['to_answer'];
             if (is_array($ov['handled'] ?? null)) {
                 $f['handled_by_the_reader'] = ['headings_used_as_categories' => (int)$ov['handled']['sections'], 'total_lines_left_out' => (int)$ov['handled']['totals'], 'notes_left_out' => (int)$ov['handled']['notes']];
+            }
+        }
+        // report only: the sheet's own value column against Quantity x Unit Cost (import_vc_overview: counts and sums, never changes what is imported)
+        $vc = (array)($ov['value_check'] ?? []);
+        if (!empty($vc['show'])) {
+            $f['value_check'] = ['rows_that_disagree' => (int)($vc['differ'] ?? 0), 'items_with_stock_but_no_unit_cost' => (int)($vc['missing_n'] ?? 0), 'currency' => (string)($vc['currency'] ?? ''), 'columns' => [],
+                'means' => 'The file\'s own value column (e.g. "Stock Value") against Quantity x Unit Cost. more = the sheet shows more than Quantity x Unit Cost, less = it shows less. A report only: it never changes what is imported. "Download stock check" on the Import screen lists every row.'];
+            foreach ((array)($vc['groups'] ?? []) as $g) {
+                $f['value_check']['columns'][] = ['sheet' => rh_ai_import_q((string)($g['sheet'] ?? '')), 'column' => rh_ai_import_q((string)($g['header'] ?? '')), 'rows_compared' => (int)($g['compared'] ?? 0),
+                    'rows_that_disagree' => (int)($g['differ'] ?? 0), 'sheet_shows_more_rows' => (int)($g['more_n'] ?? 0), 'sheet_shows_more_by' => round((float)($g['more_sum'] ?? 0), 2),
+                    'sheet_shows_less_rows' => (int)($g['less_n'] ?? 0), 'sheet_shows_less_by' => round((float)($g['less_sum'] ?? 0), 2)];
             }
         }
         // rows left out, by reason (the overview's counts), and the first few with the plain reason and the cell
@@ -591,8 +640,24 @@ if (!function_exists('rh_ai_import_tools')) {
             if (isset($x['opening_count'])) {
                 $more[] = 'Opening count ' . $x['opening_count'] . (isset($x['opening_count_lines']) ? ' with ' . (int)$x['opening_count_lines'] . ' lines' : '') . '.' . (isset($x['next_step']) ? ' ' . $x['next_step'] : '');
             }
-            if (!empty($x['stock_not_counted_no_price'])) {
-                $more[] = (int)$x['stock_not_counted_no_price'] . ' items with stock but no price were left out of the opening count.';
+            $nc = (array)($x['stock_not_counted'] ?? []);
+            $ncWords = ['quantity_not_ticked' => 'already in stock, but the quantity was not ticked', 'cost_not_ticked' => 'already in stock with no cost yet, and the file\'s cost was not ticked',
+                'no_price' => 'with no price (none in the file and none in stock)', 'in_another_unapproved_opening_count' => 'already in another opening count waiting for approval'];
+            foreach ($ncWords as $k => $w) {
+                if (!empty($nc[$k])) {
+                    $more[] = (int)$nc[$k] . ' items ' . $w . ': their stock was left out of the opening count.';
+                }
+            }
+            if (!empty($x['stock_not_counted_mixed_reasons'])) {
+                $more[] = (int)$x['stock_not_counted_mixed_reasons'] . ' items with stock were left out of the opening count (no price, a quantity that was not ticked, or stock that already matched the file; this older import did not record which).';
+            }
+            if (!empty($x['already_matching_no_count_line_needed'])) {
+                $more[] = (int)$x['already_matching_no_count_line_needed'] . ' items already had exactly this quantity in stock, so no count line was needed.';
+            }
+            $sc = (array)($x['stock_check'] ?? []);
+            if (!empty($sc['value_column_rows_that_disagree']) || !empty($sc['items_with_stock_but_no_unit_cost'])) {
+                $more[] = 'Stock check (report only, nothing imported was changed): ' . (int)($sc['value_column_rows_that_disagree'] ?? 0) . ' rows where the file\'s value column disagrees with Quantity x Unit Cost, '
+                    . (int)($sc['items_with_stock_but_no_unit_cost'] ?? 0) . ' items with stock but no unit cost.';
             }
             return $out . ($more ? "\n\n" . implode("\n", array_map(static fn($l) => '- ' . $l, $more)) : '') . "\n\nThe lists are on this import's result on the Import screen. " . (string)($r['downloads'] ?? '');
         }
@@ -742,8 +807,18 @@ if (!function_exists('rh_ai_import_tools')) {
         $out = '**' . $head . ':** ' . $read . ' rows read (' . (int)$f['items_in_file'] . ' items).';
         if (is_array($f['ready_now'] ?? null)) {
             $x = $f['ready_now'];
-            $out .= "\n\nReady to import now: " . (int)$x['will_create'] . ' new, ' . (int)$x['will_update'] . ' updated, ' . (int)$x['matched_nothing_to_change'] . ' matched with nothing to change.'
-                . ' Still waiting for an answer or blocked: ' . (int)$f['entries_still_waiting'] . '.';
+            $out .= "\n\nReady to import now: " . (int)$x['will_create'] . ' new, ' . (int)$x['will_update'] . ' updated, ' . (int)$x['matched_nothing_to_change'] . ' matched with no change to the item (a ticked quantity still goes into the opening count).'
+                . ' Opening count lines: ' . (int)$x['opening_count_lines'] . '. Still waiting for an answer or blocked: ' . (int)$f['entries_still_waiting'] . '.';
+        }
+        if (is_array($f['stock_not_in_opening_count'] ?? null) && (int)$f['stock_not_in_opening_count']['total'] > 0) {
+            $nc = $f['stock_not_in_opening_count'];
+            $out .= "\n\nItems with stock that will NOT be in the opening count: " . (int)$nc['total'] . ' ('
+                . implode('; ', array_map(static fn($g) => (string)$g['reason'] . ': ' . (int)$g['items'], (array)$nc['by_reason'])) . '). ' . (string)($nc['how_to_fix'] ?? '');
+        }
+        if (is_array($f['value_check'] ?? null)) {
+            $vc = $f['value_check'];
+            $out .= "\n\nStock check (report only, never changes the import): " . (int)$vc['rows_that_disagree'] . ' rows where the file\'s value column disagrees with Quantity x Unit Cost, '
+                . (int)$vc['items_with_stock_but_no_unit_cost'] . ' items with stock but no unit cost. "Download stock check" on the Import screen lists them.';
         }
         $out .= "\n\n- " . $skipLine . "\n- " . $fixLine
             . "\n- Open questions: " . (int)$f['open_questions_total'] . ($f['open_questions_by_type'] ? ' (' . implode('; ', array_map(static fn($g) => (string)($g['label'] ?? $g['type']) . ': ' . (int)$g['open'], (array)$f['open_questions_by_type'])) . ')' : '') . '.';

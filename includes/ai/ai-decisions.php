@@ -252,8 +252,11 @@ function rh_dec_base(PDO $db, int $days, ?string $to = null): array
     $to = $to ?? date('Y-m-d');
     $from = date('Y-m-d', strtotime($to . ' -' . ($days - 1) . ' days'));
     try {
+        if (!function_exists('rh_pay_count_day_sql')) {
+            require_once dirname(__DIR__, 2) . '/admin/includes/finance-refunds.php'; // the one day rule (pure), as the dashboard
+        }
         $st = $db->prepare("SELECT COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0)
-                            FROM payments WHERE payment_date BETWEEN ? AND ? AND deleted_at IS NULL");
+                            FROM payments WHERE " . rh_pay_count_day_sql() . " BETWEEN ? AND ? AND deleted_at IS NULL");
         $st->execute([$from, $to]);
         return ['ok' => true, 'amount' => round((float)$st->fetchColumn(), 2), 'from' => $from, 'to' => $to, 'days' => $days];
     } catch (Throwable $e) {
@@ -1623,7 +1626,7 @@ function rh_dec_dept_takings(PDO $db, string $from, string $to): ?array
                 " . rh_refund_settled_sum_sql() . " AS refunds,
                 COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END), 0)
                     - COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END), 0) AS vat
-            FROM payments WHERE payment_date BETWEEN ? AND ? AND deleted_at IS NULL GROUP BY booking_type");
+            FROM payments WHERE " . rh_pay_count_day_sql() . " BETWEEN ? AND ? AND deleted_at IS NULL GROUP BY booking_type"); // a refund on its payout day, as Reports / the dashboard
         $st->execute([$from, $to]);
         $out = [];
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
@@ -1772,12 +1775,15 @@ function rh_dec_f_tax(PDO $db, array $ctx): array
     $bkOn = rh_dec_mod('bookings');
     $levyOn = in_array(getSetting('tourism_levy_enabled'), ['1', 1, true, 'true', 'on'], true) && $bkOn !== false; // unreadable switch: checked anyway, partial
     try {
-        // Mirrors admin/accounting-dashboard.php total_vat_collected word for word
+        if (!function_exists('rh_pay_count_day_sql')) {
+            require_once dirname(__DIR__, 2) . '/admin/includes/finance-refunds.php'; // the one day rule (pure)
+        }
+        // Mirrors admin/accounting-dashboard.php total_vat_collected word for word (a refund counts on its payout day)
         $st = $db->prepare("SELECT COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END), 0)
                 - COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END), 0)
                 as total_vat_collected,
                 COUNT(*) AS n
-            FROM payments WHERE payment_date BETWEEN ? AND ? AND deleted_at IS NULL");
+            FROM payments WHERE " . rh_pay_count_day_sql() . " BETWEEN ? AND ? AND deleted_at IS NULL");
         $st->execute([$from, $to]);
         $agg = $st->fetch(PDO::FETCH_ASSOC) ?: ['total_vat_collected' => 0, 'n' => 0];
         $levy = $levyOn && function_exists('rh_tourism_levy_for_period') ? (float)rh_tourism_levy_for_period($db, $from, $to) : 0.0;
@@ -1792,7 +1798,7 @@ function rh_dec_f_tax(PDO $db, array $ctx): array
         $rowsIn = [];
         if ($vatOn && $rate > 0) {
             $st = $db->prepare("SELECT payment_reference, booking_type, booking_id, payment_date, payment_amount, vat_amount, vat_rate, total_amount FROM payments
-                                WHERE payment_date BETWEEN ? AND ? AND deleted_at IS NULL AND COALESCE(payment_type, '') != 'refund'
+                                WHERE " . rh_pay_count_day_sql() . " BETWEEN ? AND ? AND deleted_at IS NULL AND COALESCE(payment_type, '') != 'refund'
                                 AND payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND total_amount > ?");
             $st->execute([$from, $to, BALANCE_TOLERANCE]);
             $rowsIn = $st->fetchAll(PDO::FETCH_ASSOC);
