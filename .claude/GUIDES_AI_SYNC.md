@@ -352,6 +352,10 @@ when prompted."
 - Guides (Stock > Import, guide 23; Stock items): Step 3 can show a case question already "Answered for you" with a one-line reason when this hotel's own data is clear (selling price of a linked recipe, the item's pack size × known cost, or the sheet's value cell); it can be changed. Step 4 card "Read as case prices". Ticking Pack also ticks Cost (warning says so); answering "keep the current price" drops the Pack tick; a pack without its divided cost is refused. Stock items list: "May be a case price" note under Avg cost / unit, its ? says what it compared; it changes nothing.
 - Assistant (AI_REQUEST): new import summary keys `auto_reason`, `pack_hint`, `case_evidence`, item `cost_suspect`, overview `case_auto`.
 
+### Stock: Fix crate prices (2026-11-17, owner ask "Correction tool 'price was for a crate of N'") - hashes in TASKS.md
+- Guides (Stock, new page after Buying): Stock › Fix crate prices: type how many units are in one crate/case (or "Fill from list" with the CSV: Item + Units in one crate/case; rows marked Y skipped; unmatched names listed), Preview (old → new cost and value per item, totals), Confirm. Cost and the stock still held are divided; unit and quantities unchanged; past counts and deliveries keep their numbers. Refused: an item on a stock count not yet approved (approve or delete that count first), or a cost changed since Preview. Stock items' "May be a case price" note links here. Staff activity shows "Corrected a crate price".
+- Assistant: new page stock-cost-fix.php, permission stock_management, activity action stock_cost_correction; nothing else it reads changed.
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` at Liwonde: 7 data-dependent fails (left-owing + refunds briefing, 4 alert checks, digest
   recipients); ai_review_engine "nothing to add for this person" fails on HEAD too. (Tomorrow / 4 of 3 / K1,068,000 now pass.)

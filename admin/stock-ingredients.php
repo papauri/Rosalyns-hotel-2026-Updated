@@ -888,7 +888,7 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                             <td class="qty-num col-optional-lg" style="text-align:right;"><?php echo number_format((float)$i['yield_percent'], 1); ?></td>
                             <td class="qty-num" style="text-align:right;"><?php echo $currency_symbol . ' ' . number_format((float)$i['cost_per_unit'], 2); ?>
                                 <?php if (isset($caseCostFlags[(int)$i['id']])): ?>
-                                    <div class="cost-case-note"><span class="badge badge-warning">May be a case price</span> <i class="help" data-tip="<?php echo htmlspecialchars($caseCostFlags[(int)$i['id']]['reason'] . ' Nothing has been changed. If it is a case price, correct it through Import: answer the case question with the pack size and tick Cost.'); ?>">?</i></div>
+                                    <div class="cost-case-note"><span class="badge badge-warning">May be a case price</span> <i class="help" data-tip="<?php echo htmlspecialchars($caseCostFlags[(int)$i['id']]['reason'] . ' Nothing has been changed. If it is a case price, correct it on Stock › Fix crate prices: type how many units are in one crate or case and the cost is divided by that number.'); ?>">?</i> <a class="cost-case-fix" style="display:inline-flex;align-items:center;min-height:44px;" href="stock-cost-fix.php?item=<?php echo (int)$i['id']; ?>">Fix crate prices</a></div>
                                 <?php endif; ?>
                             </td>
                             <td class="col-optional-lg">

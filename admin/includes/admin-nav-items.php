@@ -52,6 +52,7 @@ function rh_admin_nav_groups(): array
             ['stock-recipes.php',         'fas fa-book-open',       'Recipes',         'stock_management', '', ['stock', 'restaurant_page']],
             ['stock-barcode-receive.php', 'fas fa-barcode',         'Receive Stock',   'stock_management', '', 'stock'],
             ['stock-reorder.php',         'fas fa-cart-flatbed',    'Buying',          'stock_management', '', 'stock'],
+            ['stock-cost-fix.php',        'fas fa-wine-bottle',     'Fix crate prices', 'stock_management', '', 'stock'],   // owner 2026-11-17: a crate price stored as the cost of one bottle / can
             ['purchase-orders.php',       'fas fa-file-invoice',    'Purchase Orders', 'stock_management', '', 'stock'],
             ['stock-budget.php',          'fas fa-scale-balanced',  'Budget',          'stock_budget',     '', 'stock'],
             ['stock-suppliers.php',       'fas fa-truck-field',     'Suppliers',       'stock_management', '', 'stock'],

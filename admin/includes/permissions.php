@@ -2197,6 +2197,7 @@ function getPermissionForPage(string $page)
         'stock-suppliers.php' => 'stock_management',
         'purchase-orders.php' => 'stock_management',
         'stock-reorder.php' => 'stock_management',
+        'stock-cost-fix.php' => 'stock_management', // Fix crate prices (owner 2026-11-17): the same permission as editing stock items
         'gym-classes.php' => 'gym',
     ];
 
@@ -2327,6 +2328,7 @@ function getModuleForPage(string $page)
         'gym-classes.php' => 'gym',
         'purchase-orders.php' => 'stock',
         'stock-reorder.php' => 'stock',
+        'stock-cost-fix.php' => 'stock',
         'stock-suppliers.php' => 'stock',
         'data-import.php' => 'stock', // Import (stock lists); it also checks rh_import_enabled(), which is fail-closed
         'stock-clear.php' => 'stock', // Clear Stock Data

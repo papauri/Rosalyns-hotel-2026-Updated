@@ -458,6 +458,7 @@ if (!function_exists('rh_sa_parse_filters')) {
             'refund_created' => 'Created a refund', 'stock_count_deleted' => 'Deleted a stock count', 'stock_count_rejected' => 'Rejected a stock count',
             'supplier_deleted' => 'Deleted a supplier', 'barcode_registered' => 'Registered a barcode', 'barcode_receive_batch' => 'Received stock by barcode',
             'barcode_item_registered' => 'Registered a new item by barcode',
+            'stock_cost_correction' => 'Corrected a crate price', // Stock > Fix crate prices (admin/includes/stock-cost-fix-lib.php)
         ];
         $text = $names[$action] ?? ucfirst(rh_sa_prettify($action));
         if (!in_array($action, ['login_success', 'logout', 'login_failed', 'login_blocked'], true) && trim($details) !== '') {

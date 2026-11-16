@@ -467,6 +467,16 @@
             renderPage(resetPage ? 1 : currentPage, false);
         };
 
+        // Turn to the page that holds one row (a row the filter shows), e.g. to point at a field that needs a fix
+        // on another page. Returns false when the row is filtered out or not part of this table.
+        table.rhPagerShowRow = function (row) {
+            rows = collectItems(table, tbody);
+            var idx = matchingRows().indexOf(row);
+            if (idx < 0) return false;
+            renderPage(Math.floor(idx / perPage()) + 1, false);
+            return true;
+        };
+
         renderPage(1, false);
     }
 
