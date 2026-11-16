@@ -422,3 +422,13 @@
     background: #f8fafc;
     border-radius: 8px;
 }
+
+/* "May be a case price" note under Avg cost / unit (read-only; includes/import/case-signals.php) */
+.cost-case-note {
+    margin-top: 3px;
+    font-weight: 400;
+}
+.cost-case-note .badge {
+    font-size: 11px;
+    text-transform: none;
+}

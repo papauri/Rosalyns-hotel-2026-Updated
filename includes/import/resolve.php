@@ -26,6 +26,7 @@ require_once dirname(__DIR__, 2) . '/admin/includes/stock-sheet-import-lib.php';
 require_once dirname(__DIR__) . '/form-validation.php';                           // rh_clean_text (same cleaning as the manual Add form)
 require_once __DIR__ . '/price-check.php';                                         // plausibility of a price (evidence from this hotel's own data) + storage limits
 require_once __DIR__ . '/infer.php';                                               // evidence-based unit / category suggestions + unit spelling
+require_once __DIR__ . '/case-signals.php';                                        // "is this a case price?" - the one shared judge (also used by Stock > Ingredients)
 
 if (!function_exists('import_resolve')) {
 
@@ -106,6 +107,15 @@ if (!function_exists('import_resolve')) {
             if (isset($answers[$k]) && is_array($answers[$k])) {
                 $q['answer'] = (string)($answers[$k]['key'] ?? '');
                 $q['answer_detail'] = $answers[$k];
+                continue;
+            }
+            // decisive evidence from this hotel's own data (import_case_evidence_pass): answered "per case" for the person, shown with its
+            // reason, changeable (a stored answer above always wins); the cost still goes through the price check and confirm
+            if (($q['type'] ?? '') === 'case-price' && !empty($q['pre']['pack'])) {
+                $q['answer'] = 'per-case';
+                $q['answer_detail'] = ['key' => 'per-case', 'pack_size' => (int)$q['pre']['pack'], 'auto' => true];
+                $q['auto'] = true;
+                $q['auto_reason'] = (string)$q['pre']['reason'];
                 continue;
             }
             // a correction this hotel made before ("Heinken" is "Heineken"): offered as the answer, visible, and changeable
@@ -214,6 +224,167 @@ if (!function_exists('import_resolve')) {
     }
 
     /**
+     * "Per case or per unit?" from this hotel's own data (case-signals.php), BEFORE the answers are applied, so the rows' statuses count it.
+     * For every priced row: the matched existing item (typed name, or the stored "did you mean" answer), its pack size, current cost, recipe
+     * selling price, real deliveries, the row's own value cell and the same-category same-unit groups of the file. Then:
+     *   - nothing to say -> nothing (the engine's own case-price question, if any, stays as it is);
+     *   - the row already has the engine's case-price question -> its text gets the reason; decisive evidence pre-answers it;
+     *   - otherwise a case-price question is added to the row (same type, options and stable key as the engine's), pre-answered when decisive;
+     *     for an EXISTING item an open (not decisive) question is added only once Cost or Pack is ticked (its file cost is not written otherwise).
+     * Decisive = strong evidence, nothing against it, and the item's OWN whole pack size (import_cs_judge). Never pre-answered when the row's
+     * price is in a conflict question (the chosen price may come from another cell, A29). Registration appends to the row directly (no scan).
+     * ctx['case_evidence'] = import_cs_load_evidence() (optional: without it only the pack, cost, value and group signals are used).
+     */
+    function import_case_evidence_pass(array &$analysis, array $answers, array $ctx, array $synonyms): void
+    {
+        $ev = (array)($ctx['case_evidence'] ?? []);
+        $csp = (array)($ctx['case_signal_params'] ?? []);
+        $qIndex = [];
+        foreach ($analysis['questions'] as $i => $q) {
+            $qIndex[$q['id']] = $i;
+        }
+        $rowsInfo = [];          // [shIdx, rowKey, ex|null, unit, group]
+        $groupItems = [];
+        foreach ($analysis['sheets'] as $shIdx => $sh) {
+            if (($sh['triage']['action'] ?? '') !== 'import' || empty($sh['rows'])) {
+                continue;
+            }
+            $hasPq = false;
+            foreach ((array)($sh['columns'] ?? []) as $c) {
+                if (($c['state'] ?? '') === 'mapped' && ($c['field'] ?? '') === 'purchase_qty') {
+                    $hasPq = true;          // a value column next to a Purchase Qty may be a buying list (A74): not read as a stock value here
+                }
+            }
+            $cleanSheet = trim((string)preg_replace('/^[^\p{L}\p{N}]+/u', '', (string)$sh['name']));
+            $cleanSheet = $cleanSheet !== '' ? $cleanSheet : (string)$sh['name'];
+            foreach ($sh['rows'] as $rk => $row) {
+                $f = $row['fields'];
+                if (!isset($f['unit_price']) || !is_numeric($f['unit_price']['value']) || (float)$f['unit_price']['value'] <= 0) {
+                    continue;
+                }
+                $name = (string)($f['item_name']['value'] ?? '');
+                $hasConflict = false;
+                foreach ((array)$row['question_ids'] as $qid) {
+                    $q = $analysis['questions'][$qIndex[$qid] ?? -1] ?? null;
+                    if (!$q) {
+                        continue;
+                    }
+                    if ($q['type'] === 'conflict') {
+                        $hasConflict = true;
+                    } elseif ($q['type'] === 'possible-typo' && ($q['against'] ?? '') === 'existing') {
+                        $a = $answers[import_q_key($q)]['key'] ?? null;
+                        if (is_string($a) && strpos($a, 'use:') === 0) {
+                            $name = substr($a, 4);
+                        }
+                    }
+                }
+                $m = import_match_existing($name, $ctx);
+                $ex = $m['row'];
+                $rowUnit = isset($f['unit']) ? import_unit_canon((string)$f['unit']['value'], $synonyms) : '';
+                $unit = $ex ? (string)$ex['unit'] : $rowUnit;
+                $cat = $row['category'] !== null && $row['category'] !== '' ? $row['category'] : $cleanSheet;
+                $vp = null;
+                $qty = isset($row['computed']['qty_total']) && is_numeric($row['computed']['qty_total']['value']) ? (float)$row['computed']['qty_total']['value'] : null;
+                if (!$hasPq && $qty !== null && $qty > 0) {
+                    foreach ((array)$row['ignored'] as $ig) {
+                        if (($ig['field'] ?? '') !== 'total_cost' || !empty($ig['unknown']) || $ig['value'] === null) {
+                            continue;
+                        }
+                        $pv = import_parse_number($ig['value']);
+                        if ($pv['status'] !== 'ok' || (float)$pv['value'] <= 0) {
+                            continue;
+                        }
+                        $val = (float)$pv['value'];
+                        $n = (int)round($qty * (float)$f['unit_price']['value'] / $val);
+                        if ($n >= 2 && $n <= 100000 && abs($val - $qty * (float)$f['unit_price']['value'] / $n) <= max(0.5, 0.005 * $val)) {
+                            $vp = ['n' => $n, 'value' => $val, 'qty' => $qty, 'source' => (string)$ig['source']];
+                        }
+                        break;
+                    }
+                }
+                $uid = (string)$row['uid'];
+                $rowsInfo[$uid] = [$shIdx, $rk, $ex, $unit, $vp, $hasConflict];
+                $groupItems[$uid] = ['group' => import_cs_group_key($cat, $rowUnit), 'cost' => (float)$f['unit_price']['value']];
+            }
+        }
+        if (!$rowsInfo) {
+            return;
+        }
+        $refs = import_cs_cluster_refs($groupItems, $csp);
+        unset($groupItems);
+        $short = $analysis['file']['short'] ?? 'f';
+        foreach ($rowsInfo as $uid => [$shIdx, $rk, $ex, $unit, $vp, $hasConflict]) {
+            $row = &$analysis['sheets'][$shIdx]['rows'][$rk];
+            $price = (float)$row['fields']['unit_price']['value'];
+            $id = $ex ? (int)$ex['id'] : 0;
+            $j = import_cs_judge([
+                'cost' => $price, 'unit' => $unit, 'current' => $ex ? (float)$ex['cost_per_unit'] : null, 'own_pack' => $ex['pack_size'] ?? null,
+                'sell' => $id ? ($ev['sell'][$id] ?? null) : null, 'receipts' => $id ? ($ev['receipts'][$id] ?? []) : [],
+                'other_packs' => $id ? array_values($ev['packs'][$id] ?? []) : [], 'value_pack' => $vp, 'cluster' => $refs[$uid] ?? null,
+            ], $csp);
+            if ($j === null) {
+                unset($row);
+                continue;
+            }
+            $pre = ($j['verdict'] === 'case' && !$hasConflict) ? ['pack' => (int)$j['pack'], 'reason' => $j['reason']] : null;
+            $slim = ['verdict' => $j['verdict'], 'strong' => $j['strong'], 'weak' => $j['weak'], 'against' => $j['against'], 'reason' => $j['reason'], 'pack_hint' => $j['pack_hint']];
+            $found = null;
+            foreach ((array)$row['question_ids'] as $qid) {
+                if (isset($qIndex[$qid]) && $analysis['questions'][$qIndex[$qid]]['type'] === 'case-price') {
+                    $found = $qIndex[$qid];
+                    break;
+                }
+            }
+            // An existing item's file cost is only written when Cost (or Pack) is ticked (A38): an open question for an unticked item would
+            // block Confirm for nothing, so it is added then (recomputed); a decisive answer is shown always (it changes no field by itself).
+            $ticks = $ex ? array_map('strval', (array)($answers['_updates'][rh_ssi_key((string)$ex['name'])] ?? [])) : [];
+            if ($found === null && $ex && !$pre && !in_array('cost', $ticks, true) && !in_array('pack', $ticks, true)) {
+                unset($row);
+                continue;
+            }
+            if ($found !== null) {
+                $analysis['questions'][$found]['text'] .= ' What this hotel\'s own data says: ' . $j['reason'];
+            } else {
+                $src = (string)$row['fields']['unit_price']['source'];
+                $hint = $j['pack_hint'] ?? $j['pack'] ?? 2;
+                $q = import_q('case-price', import_case_q_text($row, $price, $unit, $src, $j['reason']), [
+                    'sheet' => $analysis['sheets'][$shIdx]['name'], 'row' => $row['row'], 'cells' => [$src],
+                    'options' => import_cc_case_options($row, $price, $price / max(2, (int)$hint)),
+                    'case_ratio' => null,
+                ]);
+                $q['id'] = 'q' . $short . '-' . (count($analysis['questions']) + 1);
+                $q['answer'] = null;
+                $q['row_uids'] = [$uid];
+                $analysis['questions'][] = $q;
+                $found = count($analysis['questions']) - 1;
+                $qIndex[$q['id']] = $found;
+                $row['question_ids'][] = $q['id'];
+            }
+            $analysis['questions'][$found]['case_evidence'] = $slim;
+            $analysis['questions'][$found]['pack_hint'] = $j['pack_hint'];
+            if ($pre) {
+                $analysis['questions'][$found]['pre'] = $pre;
+            }
+            unset($row);
+        }
+    }
+
+    /** Text of a case-price question added from the hotel's evidence: the row's unit as written, the reason, what each answer does. */
+    function import_case_q_text(array $row, float $price, string $unit, string $src, string $reason): string
+    {
+        $u = trim((string)($row['fields']['unit']['value'] ?? '')) !== '' ? trim((string)$row['fields']['unit']['value']) : $unit;
+        $per = $u !== '' ? 'per ' . $u : 'per unit';
+        $qty = $row['computed']['qty_total']['value'] ?? null;
+        $t = 'Row ' . $row['row'] . ' "' . $row['fields']['item_name']['value'] . '": the unit price is ' . import_fmt_money($price) . ' ' . $per . ' (' . $src . '). '
+            . 'This hotel\'s own data says it may be a case price: ' . $reason;
+        if ($qty !== null && is_numeric($qty) && (float)$qty > 0) {
+            $t .= ' The sheet counts ' . import_cc_qty((float)$qty) . ($u !== '' ? ' ' . $u : '') . ', so as written this line is worth ' . import_fmt_money(round((float)$qty * $price, 2)) . '.';
+        }
+        return $t . ' Is that the price of one unit, or of a whole case/pack? The quantity stays in the sheet\'s unit' . ($u !== '' ? ' (' . $u . ')' : '')
+            . ', so choose "whole pack" only if the quantity was counted in single units, not in packs.';
+    }
+
+    /**
      * The whole picture after the person's answers. See the file header for the shapes. Works on its own copy of $analysis.
      */
     function import_resolve(array $analysis, array $answers, array $ctx = []): array
@@ -237,6 +408,7 @@ if (!function_exists('import_resolve')) {
         $synonyms = (array)($ctx['unit_synonyms'] ?? import_default_aliases()['unit_synonyms']);
         $resolveHeals = [];
         $resolveHealN = 0;
+        import_case_evidence_pass($analysis, $answers, $ctx, $synonyms);
         import_apply_answers($analysis, $answers, $ctx);
 
         $qById = [];
@@ -278,6 +450,8 @@ if (!function_exists('import_resolve')) {
                 $pcPeers[import_pc_cat_key($e['category'])][] = ['unit' => mb_strtolower(import_unit_canon((string)$e['unit'], $synonyms)), 'cost' => (float)$e['cost_per_unit'], 'id' => (int)$e['id']];
             }
         }
+        // stock items whose STORED cost may already be a case price (the same judge as the Stock > Ingredients note): a warning on the item, never a question
+        $costSuspects = import_cs_stock_flags((array)($ctx['existing'] ?? []), (array)($ctx['case_evidence'] ?? []), (array)($ctx['case_signal_params'] ?? []));
 
         $packLabels = [];       // question id => [option key => "60,000 per case of 12 = 5,000 each"]
         $rowsOut = [];          // uid => record
@@ -603,6 +777,7 @@ if (!function_exists('import_resolve')) {
             $first = $ms[0]['fin'];
             $open = $it['open'];
             $warn = [];
+            $costSuspect = null;
             // price / unit must agree across the merged rows, else a question
             foreach (['price' => 'unit price', 'unit_raw' => 'unit'] as $fld => $word) {
                 $vals = [];
@@ -790,6 +965,12 @@ if (!function_exists('import_resolve')) {
                 if ($balance !== null && abs((float)$ex['current_quantity'] - $balance) > 0.00005) {
                     $diff['quantity'] = [(float)$ex['current_quantity'], $balance];
                 }
+                if (isset($costSuspects[(int)$ex['id']])) {
+                    $cs = $costSuspects[(int)$ex['id']];
+                    $warn[] = 'The cost now in stock (' . import_fmt_money($ex['cost_per_unit']) . ' per ' . $ex['unit'] . ') may be the price of a whole case: '
+                        . $cs['reason'] . ' Check it; to replace it with the file\'s cost, tick Cost.';
+                    $costSuspect = ['reason' => $cs['reason'], 'verdict' => $cs['verdict'], 'cost' => (float)$ex['cost_per_unit']];
+                }
             } elseif ($unit === null) {
                 $noUnitByItem[] = count($outItems);
             }
@@ -807,7 +988,12 @@ if (!function_exists('import_resolve')) {
             // The file's cost is only judged (and size-checked) when it will actually be applied: a new item, or an existing item whose
             // cost the person ticked. An unticked cost changes nothing; if it is ticked later, the question appears then (recomputed).
             $ukey = rh_ssi_key((string)($ex['name'] ?? ''));
-            $costApplied = !$ex || ($cost !== null && isset($diff['cost']) && in_array('cost', array_map('strval', (array)($updates[$ukey] ?? [])), true));
+            $tickedRaw = array_map('strval', (array)($updates[$ukey] ?? []));
+            // a pack size from a per-case answer is only right together with its divided cost (else the case price stays the cost of one unit):
+            // ticking Pack also ticks Cost, so the carried cost is price-checked and size-checked like a hand tick
+            $carryCost = $ex && $pack && isset($diff['pack']) && isset($diff['cost']) && in_array('pack', $tickedRaw, true) && !in_array('cost', $tickedRaw, true);
+            $keptCurrent = false;
+            $costApplied = !$ex || ($cost !== null && isset($diff['cost']) && (in_array('cost', $tickedRaw, true) || $carryCost));
             $storeProblems = ($cost !== null && $costApplied) ? import_cost_storage_problems(['cost' => $cost, 'pack' => $pack], $costLimits) : [];
             if ($cost !== null && $costApplied && $priceCheckOk && !$storeProblems && $rowRank === 0 && !$open) {
                 $exCost = $ex ? (float)$ex['cost_per_unit'] : 0.0;
@@ -855,6 +1041,7 @@ if (!function_exists('import_resolve')) {
                     if ($ex && $exCost > 0 && $xq['answer'] === 'current') {
                         // the cost field is left alone for this item; the opening balance (if any) still imports at the current cost
                         unset($diff['cost']);
+                        $keptCurrent = true;
                         $warn[] = 'You chose to keep the current cost ' . import_fmt_money($exCost) . '; the file\'s ' . import_fmt_money($cost) . ' is not used.';
                     }
                 }
@@ -863,6 +1050,16 @@ if (!function_exists('import_resolve')) {
             $ticked = $ex ? array_values(array_filter($ticked, function ($f) use ($diff) {
                 return isset($diff[$f]);
             })) : [];
+            if ($ex && $pack && in_array('pack', $ticked, true) && !in_array('cost', $ticked, true)) {
+                if (isset($diff['cost'])) {
+                    $ticked[] = 'cost';
+                    $warn[] = 'Pack is ticked, so Cost is changed with it: ' . import_pack_label($first['price'], $pack) . ' ' . $unit
+                        . '. A pack size without its divided cost would leave the case price as the cost of one ' . $unit . '. Untick Pack to keep the current cost.';
+                } elseif ($keptCurrent) {
+                    $ticked = array_values(array_diff($ticked, ['pack']));
+                    $warn[] = 'The pack size of ' . (int)$pack . ' is not saved: you kept the current cost, and a pack size goes in only with the cost divided by it.';
+                }
+            }
             // costs and stock on hand (accounting rule A11): stock with no cost is left out of the opening count
             $effCost = $cost;
             if ($ex && !in_array('cost', $ticked, true)) {
@@ -914,7 +1111,7 @@ if (!function_exists('import_resolve')) {
                 'balance' => $balance, 'max' => $max, 'min' => $min, 'remarks' => $remarks, 'batches' => $batches,
                 'rows' => $rowRefs, 'uids' => $uidList, 'sheet' => $ms[0]['sheet'], 'clean_sheet' => $ms[0]['cleanSheet'],
                 'match' => $ex ? ['id' => (int)$ex['id'], 'name' => (string)$ex['name'], 'how' => $first['match_name'] !== null ? (!empty($first['match_auto']) ? 'learned' : 'chosen') : $matchHow, 'archived' => (int)$ex['is_archived'] === 1] : null,
-                'action' => $action, 'diff' => $diff, 'ticked' => $ticked, 'in_count' => $inCount, 'warnings' => $warn, 'open' => $itemOpen,
+                'action' => $action, 'diff' => $diff, 'ticked' => $ticked, 'in_count' => $inCount, 'warnings' => $warn, 'open' => $itemOpen, 'cost_suspect' => $costSuspect,
                 'row_status' => max(array_map(function ($x) {
                     return import_status_rank($x['rec']['status']);
                 }, $ms)),

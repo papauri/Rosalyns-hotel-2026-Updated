@@ -196,11 +196,15 @@ if (!function_exists('import_vc_collect')) {
     function import_vc_finish(array $col, array $questions, array $items = []): array
     {
         $pack = [];
+        $packAt = [];           // sheet + row => pack: a case-price question added at resolve time (case-signals.php) is not in the collected ids
         foreach ($questions as $q) {
             if (($q['type'] ?? '') === 'case-price' && ($q['answer'] ?? null) === 'per-case') {
                 $p = (int)($q['answer_detail']['pack_size'] ?? 0);
                 if ($p >= 2) {
                     $pack[$q['id']] = $p;
+                    if (isset($q['sheet'], $q['row'])) {
+                        $packAt[(string)$q['sheet'] . "\x1f" . (int)$q['row']] = $p;
+                    }
                 }
             }
         }
@@ -214,13 +218,13 @@ if (!function_exists('import_vc_collect')) {
             $valOf = function (array $r, string $letter) {
                 return is_array($r[8]) ? ($r[8][$letter] ?? null) : $r[8];
             };
-            $packed = function (array $r) use ($pack) {
+            $packed = function (array $r) use ($pack, $packAt, $sh) {
                 foreach ($r[10] as $qid) {
                     if (isset($pack[$qid])) {
                         return $pack[$qid];
                     }
                 }
-                return null;
+                return $packAt[(string)$sh['name'] . "\x1f" . (int)$r[1]] ?? null;
             };
             foreach ($sh['value_cols'] as $letter => $header) {
                 // a "Total Cost" that is Purchase Qty x Unit Price (a buying list) is not a stock value: recognised, not reported

@@ -67,6 +67,10 @@ if (!function_exists('import_commit_stock')) {
                 continue;
             }
             $t = array_flip($it['ticked']);
+            // backup of the resolver's rule: a per-case pack size never goes in without its divided cost (the case price would stay the cost of one unit)
+            if (isset($t['pack']) && !empty($it['pack']) && isset($it['diff']['pack']) && isset($it['diff']['cost']) && !isset($t['cost'])) {
+                return '"' . $it['name'] . '": the pack size is ticked without the cost divided by it. Please review again.';
+            }
             $changes = [];
             foreach (['category', 'cost', 'par', 'pack'] as $f) {
                 if (isset($t[$f]) && isset($it['diff'][$f])) {

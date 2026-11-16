@@ -621,7 +621,14 @@ if (!function_exists('import_job_skip')) {
                 }
             }
         }
-        return ['skipped_by_code' => $skip, 'skipped_by_you' => $byYou, 'heal_counts' => $res['heal_counts'], 'heal_total' => array_sum($res['heal_counts']), 'heals_undone' => count($res['heals_undone'])];
+        $caseAuto = 0;          // case-price questions answered "per case" for the person from this hotel's own data (case-signals.php)
+        foreach ((array)($res['questions'] ?? []) as $q) {
+            if (($q['type'] ?? '') === 'case-price' && !empty($q['auto']) && ($q['answer'] ?? null) === 'per-case') {
+                $caseAuto++;
+            }
+        }
+        return ['skipped_by_code' => $skip, 'skipped_by_you' => $byYou, 'heal_counts' => $res['heal_counts'], 'heal_total' => array_sum($res['heal_counts']), 'heals_undone' => count($res['heals_undone']),
+            'case_auto' => $caseAuto];
     }
 
     /** Rows the engine handled by itself (not items): headings used as categories, total lines left out, notes / repeated headings / stray rows left out. */

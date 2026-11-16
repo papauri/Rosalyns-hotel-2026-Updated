@@ -348,6 +348,10 @@ when prompted."
 - Guides (Menu Management, add/edit item): you no longer have to press Add before Save. A stock item picked with an amount typed is added when you press Save; one already in the list is just cleared; picked with no amount, Save asks "Type how much X one sale uses, or clear the Stock item box." A "New category" typed with other capitals (drinks / Drinks) joins the existing category. New stock item from "Not in the list?" is picked for you.
 - Assistant: no change in what it reads (same tables, same recipe lines).
 
+### Import: case price vs unit price + "May be a case price" note (2026-11-17, owner ask "add logic in determining during import to decide and also flag any suspect") - hashes in TASKS.md
+- Guides (Stock > Import, guide 23; Stock items): Step 3 can show a case question already "Answered for you" with a one-line reason when this hotel's own data is clear (selling price of a linked recipe, the item's pack size × known cost, or the sheet's value cell); it can be changed. Step 4 card "Read as case prices". Ticking Pack also ticks Cost (warning says so); answering "keep the current price" drops the Pack tick; a pack without its divided cost is refused. Stock items list: "May be a case price" note under Avg cost / unit, its ? says what it compared; it changes nothing.
+- Assistant (AI_REQUEST): new import summary keys `auto_reason`, `pack_hint`, `case_evidence`, item `cost_suspect`, overview `case_auto`.
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` at Liwonde: 7 data-dependent fails (left-owing + refunds briefing, 4 alert checks, digest
   recipients); ai_review_engine "nothing to add for this person" fails on HEAD too. (Tomorrow / 4 of 3 / K1,068,000 now pass.)

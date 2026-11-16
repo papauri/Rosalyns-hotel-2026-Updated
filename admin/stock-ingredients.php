@@ -622,6 +622,15 @@ if (!$error || strpos($error, 'Stock tables not yet') === false) {
             $ingFlagRow['has_history'] = $hasStockQty || isset($ingHistoryUsed[(int)$ingFlagRow['id']]);
         }
         unset($ingFlagRow);
+        // Read-only "May be a case price" note under Avg cost / unit: the same judge the Import review uses (includes/import/case-signals.php),
+        // worked out before the low-stock filter so similar items are compared with every item. Changes nothing.
+        $caseCostFlags = [];
+        try {
+            require_once __DIR__ . '/../includes/import/case-signals.php';
+            $caseCostFlags = import_cs_stock_flags($ingredients, import_cs_load_evidence($pdo));
+        } catch (Throwable $e) {
+            $caseCostFlags = [];
+        }
         // Rebuild the refused Add / Edit form: the stored row (for the unit lock) with what was typed on top.
         if (!empty($_SESSION['stock_ingredient_form_keep']) && is_array($_SESSION['stock_ingredient_form_keep'])) {
             $keepForm = $_SESSION['stock_ingredient_form_keep'];
@@ -816,7 +825,7 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                         <th style="text-align:right;">Current <i class="help" data-tip="How much you have on hand right now (sum of all active batches). Updated automatically when you receive stock or when a recipe is sold/wasted.">?</i></th>
                         <th class="col-optional-lg" style="text-align:right;">Min <i class="help" data-tip="The low-stock line: the reorder point if you set one, otherwise the minimum quantity. At or below it the row turns yellow (Low) and shows up in reorder reports.">?</i></th>
                         <th class="col-optional-lg" style="text-align:right;">Yield % <i class="help" data-tip="Usable yield after prep losses. Example: 1 kg raw chicken at 75 % yield gives 750 g cooked. The recipe builder uses this to figure out how much RAW stock to deduct per portion. Set to 100 % for items with no trim/cook loss (rice, water, oil).">?</i></th>
-                        <th style="text-align:right;">Avg cost / unit <i class="help" data-tip="Weighted-average cost across all batches received. Recalculated automatically every time you stock-in at a different price. This drives recipe food-cost %.">?</i></th>
+                        <th style="text-align:right;">Avg cost / unit <i class="help" data-tip="Weighted-average cost across all batches received. Recalculated automatically every time you stock-in at a different price. This drives recipe food-cost %. A &quot;May be a case price&quot; note appears when this hotel's own data suggests the cost is for a whole case: the menu selling price of a linked recipe, its delivery costs, its pack size, or most items of the same category and unit costing far less. The note changes nothing; its ? says what it compared.">?</i></th>
                         <th class="col-optional-lg">Next expiry <i class="help" data-tip="The earliest expiry date among all active batches of this ingredient. Click Batches to see/edit each batch individually. Green = plenty of time, yellow = within your alert window, red = ≤ 3 days or already expired.">?</i></th>
                         <th>Status <i class="help" data-tip="OK · Low (≤ min) · Critical (zero or below) · Archived (hidden from recipes).">?</i></th>
                         <th>Actions</th>
@@ -877,7 +886,11 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                             <td class="qty-num <?php echo $qtyClass; ?>" style="text-align:right;"><?php echo number_format($cur, 3); ?></td>
                             <td class="qty-num col-optional-lg" style="text-align:right;"><?php echo number_format($min, 3); ?></td>
                             <td class="qty-num col-optional-lg" style="text-align:right;"><?php echo number_format((float)$i['yield_percent'], 1); ?></td>
-                            <td class="qty-num" style="text-align:right;"><?php echo $currency_symbol . ' ' . number_format((float)$i['cost_per_unit'], 2); ?></td>
+                            <td class="qty-num" style="text-align:right;"><?php echo $currency_symbol . ' ' . number_format((float)$i['cost_per_unit'], 2); ?>
+                                <?php if (isset($caseCostFlags[(int)$i['id']])): ?>
+                                    <div class="cost-case-note"><span class="badge badge-warning">May be a case price</span> <i class="help" data-tip="<?php echo htmlspecialchars($caseCostFlags[(int)$i['id']]['reason'] . ' Nothing has been changed. If it is a case price, correct it through Import: answer the case question with the pack size and tick Cost.'); ?>">?</i></div>
+                                <?php endif; ?>
+                            </td>
                             <td class="col-optional-lg">
                                 <?php if (!empty($i['next_expiry'])): ?>
                                     <div class="exp-pill <?php echo $expCls; ?>">

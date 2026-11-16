@@ -120,7 +120,8 @@ if (!function_exists('import_job_analyse')) {
         sort($u, SORT_NATURAL | SORT_FLAG_CASE);
         return ['existing' => $existing, 'unit_options' => $u, 'corrections' => import_load_name_corrections($pdo),
             'price_evidence' => import_job_price_evidence($pdo, $existing), 'cost_limits' => import_cost_limits($pdo),
-            'learned' => import_load_learned($pdo), 'unit_synonyms' => (array)$aliasSet['unit_synonyms']];
+            'learned' => import_load_learned($pdo), 'unit_synonyms' => (array)$aliasSet['unit_synonyms'],
+            'case_evidence' => import_cs_load_evidence($pdo)];       // recipe selling prices, real deliveries, barcode / order pack sizes (case-signals.php)
     }
 
     /**
@@ -641,6 +642,9 @@ if (!function_exists('import_job_analyse')) {
             }
             $qs[] = $extraQ + [
                 'conflict_values' => $cv, 'pack_size' => $q['answer_detail']['pack_size'] ?? null,
+                'auto_reason' => $q['auto_reason'] ?? null,         // a per-case answer this hotel's own data gave (case-signals.php), shown with the answer
+                'pack_hint' => $q['pack_hint'] ?? null,             // a pack size the data suggests for the pack box (typed in only when the person saves)
+                'case_evidence' => $q['case_evidence'] ?? null,
                 'id' => $q['id'], 'key' => $q['qkey'], 'type' => $q['type'], 'text' => $q['text'], 'blocking' => (bool)$q['blocking'],
                 'bad' => !empty($q['bad']), 'sheet' => $q['sheet'], 'row' => $q['row'], 'cells' => $q['cells'], 'options' => $q['options'],
                 'default' => $q['default'], 'answer' => ($allOut && ($q['answer'] ?? null) === null) ? '_skipped' : $q['answer'], 'auto_filled' => !empty($q['auto']), 'row_uids' => $q['row_uids'] ?? [],

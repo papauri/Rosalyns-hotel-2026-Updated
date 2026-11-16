@@ -381,7 +381,8 @@
                 q.cells.forEach(function (ref, i) { cl.appendChild(h('span', 'di-src', ref)); if (i < q.cells.length - 1) { cl.appendChild(document.createTextNode(' ')); } });
                 c.appendChild(cl);
             }
-            if (q.auto_filled && answered) { c.appendChild(h('p', 'di-q-note', 'Remembered from an earlier import. Change it if it is wrong.')); }
+            if (q.auto_filled && answered && q.auto_reason) { c.appendChild(h('p', 'di-q-note', 'Answered for you from this hotel\'s own data (a case of ' + (q.pack_size || '') + '): ' + q.auto_reason + ' Change it if it is wrong.')); }
+            else if (q.auto_filled && answered) { c.appendChild(h('p', 'di-q-note', 'Remembered from an earlier import. Change it if it is wrong.')); }
             if (wasSkipped) {
                 c.appendChild(h('p', 'di-q-note', 'The rows of this question are left out of the import. You can bring them back from the Skipped list in step 4.'));
                 return c;
@@ -419,7 +420,7 @@
                     pi.setAttribute('aria-label', 'Units in the case');
                     add(packBox, h('span', null, 'Units in one case/pack: '), pi, h('button', 'btn-primary di-btn', 'Save'));
                     packBox.hidden = checked !== 'per-case';
-                    if (q.pack_size) { pi.value = q.pack_size; }
+                    if (q.pack_size) { pi.value = q.pack_size; } else if (q.pack_hint) { pi.value = q.pack_hint; }   // a size this hotel's data suggests: saved only when the person clicks Save
                     var sv = packBox.querySelector('button');
                     sv.type = 'button';
                     sv.addEventListener('click', function () { save(q, 'per-case', pi.value, c); });
@@ -1137,7 +1138,7 @@
         }
         function absorb(r) {
             // r = a page reply (lite) or an answer/bulk/fields reply's summary (overview + page)
-            ['can_confirm', 'why_not', 'entry_counts', 'progress', 'confirm', 'counts', 'questions', 'sheets', 'totals', 'warnings', 'file', 'job', 'skipped_by_code', 'skipped_by_you', 'heal_counts', 'heal_total', 'heals_undone', 'handled', 'value_check'].forEach(function (k) { if (r[k] !== undefined) { S.sum[k] = r[k]; } });
+            ['can_confirm', 'why_not', 'entry_counts', 'progress', 'confirm', 'counts', 'questions', 'sheets', 'totals', 'warnings', 'file', 'job', 'skipped_by_code', 'skipped_by_you', 'heal_counts', 'heal_total', 'heals_undone', 'handled', 'value_check', 'case_auto'].forEach(function (k) { if (r[k] !== undefined) { S.sum[k] = r[k]; } });
             var pg = r.page;
             if (!pg) { return; }
             if (pg.facets) { S.facets = pg.facets; } else if (S.page && S.page.facets) { pg.facets = S.page.facets; }
@@ -1751,6 +1752,7 @@
                 card('Lines in the opening count', num(cf.in_count || 0, 0), 'Items with stock and a price. They go into one opening count that another manager must approve.'),
                 card('Rows left out', num(c.skipped || 0, 0), 'Rows you skipped, or left out because of an answer. They are not imported; the list is below.'),
                 card('Fixed for you', num(s.heal_total || 0, 0), 'Small spelling or format fixes made while reading the file, each with the cell it came from (list below, with Undo).'),
+                s.case_auto ? card('Read as case prices', num(s.case_auto, 0), 'Prices this hotel\'s own data shows are for a whole case (the item\'s own pack size, with its cost in stock, deliveries or menu selling price). The cost is the price divided by the pack size. Each question in step 3 says why and can be changed.') : null,
                 card('Still need an answer', num(toAnswer, 0), 'Questions or blocked rows to sort out before you can confirm.', toAnswer ? 'bad' : 'good'));
             p.appendChild(cards);
             var what = h('div', 'di-what');

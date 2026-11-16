@@ -614,6 +614,14 @@ $t($q7 && array_column($q7['options'], 'key') === ['file', 'current', 'skip'] &&
 $r8 = $pcRun([['Zeta', '', '5', 'bottle', '287.5', '', '']], [$pcRow(7, 'Zeta', 2875)]);
 $t(($pcQ($r8)['evidence']['reason'] ?? '') === 'missing-zero', 'price check: x0.1 is read as a missing zero');
 $r9 = $pcRun([['Zeta', '', '5', 'bottle', '12,000', '', '']], [$pcRow(7, 'Zeta', 500, ['pack_name' => 'crate', 'pack_size' => 24])]);
+// 2026-11-17: 12,000 = its own pack of 24 x the cost in stock is decisive: the case question is answered "per case of 24" for the person,
+// so the cost is 500 and the price check has nothing to ask. Answering "per unit" brings the old pack-size-up price question back.
+$cq9 = null;
+foreach ($r9['questions'] as $q) { if ($q['type'] === 'case-price') { $cq9 = $q; } }
+$it9 = $r9['items'][0] ?? [];
+$t($cq9 && $cq9['answer'] === 'per-case' && (int)$cq9['answer_detail']['pack_size'] === 24 && !empty($cq9['auto']) && strpos((string)$cq9['auto_reason'], 'pack of 24 times the cost in stock now') !== false
+    && abs(($it9['cost'] ?? 0) - 500) < 0.00005 && $pcQ($r9) === null, 'case evidence: x24 on an item with its own pack of 24 is pre-answered "per case of 24" (cost 500, no price question)', json_encode($cq9['auto_reason'] ?? null));
+$r9 = $pcRun([['Zeta', '', '5', 'bottle', '12,000', '', '']], [$pcRow(7, 'Zeta', 500, ['pack_name' => 'crate', 'pack_size' => 24])], [], ['_updates' => [rh_ssi_key('Zeta') => ['cost']], $cq9['qkey'] => ['key' => 'per-unit']]);
 $q9 = $pcQ($r9);
 $t($q9 && $q9['evidence']['reason'] === 'pack-size-up' && (int)$q9['evidence']['pack_size'] === 24 && strpos($q9['text'], 'case price typed as a unit price') !== false, 'price check: x24 on an item with a 24 pack is flagged as a case price typed as a unit price');
 $r10 = $pcRun([['Zeta', '', '5', 'bottle', '6,000', '', '']], [$pcRow(7, 'Zeta', 500), $pcRow(8, 'Other', 900, ['pack_name' => 'crate', 'pack_size' => 12])]);
@@ -1333,6 +1341,97 @@ $t(strpos($sumText, '5 of 5 rows: the value fits a different quantity at the sam
 $t(strpos(import_rv_role_label('use-suggestion', 'possible-typo'), 'quantities added') !== false && import_rv_role_label('use-suggestion', 'conflict') === 'Use the suggested match for all', 'bulk "use the suggestion" on possible-typo questions says rows of one sheet become one item with the quantities added');
 // units: "trays" is the same unit as "tray"
 $t(import_unit_canon('trays', $al['unit_synonyms']) === 'tray' && import_unit_canon('Tray', $al['unit_synonyms']) === 'tray', 'unit spelling: trays -> tray, Tray -> tray');
+
+echo "-- case or unit from this hotel's own data (2026-11-17) --\n";
+// a sheet with no headings (category = sheet name) that mixes unit-priced beers with spirits: the engine's spread rule cannot see a crate
+$csRows = [];
+foreach ([['Lager A', 2500], ['Lager B', 2800], ['Lager C', 3000], ['Lager D', 3500], ['Lager E', 4000]] as [$nm, $pr]) { $csRows[] = [$nm, '', '10', 'bottle', (string)$pr, '', '']; }
+foreach ([['Gin Dry', 30000], ['Vodka Blue', 45000], ['Rum Dark', 60000], ['Whisky Twelve', 190000], ['Whisky Fifteen', 250000], ['Brandy Old', 120000]] as [$nm, $pr]) { $csRows[] = [$nm, '', '5', 'bottle', (string)$pr, '', '']; }
+$csRows[] = ['Kuchi', '', '60', 'bottle', '41,322', '', ''];
+$csEx = function ($id, $name, $cost, array $o = []) use ($exRow) { return array_merge($exRow($id, $name), ['cost_per_unit' => $cost, 'category' => 'fix'], $o); };
+$csCase = function (array $res, string $name) {
+    foreach ($res['questions'] as $q) { if ($q['type'] === 'case-price' && strpos($q['text'], '"' . $name . '"') !== false) { return $q; } }
+    return null;
+};
+$cs0 = $fmRun($csRows);
+$t($csCase($cs0, 'Kuchi') === null && $csCase($cs0, 'Whisky Twelve') === null, 'case evidence: with no evidence at all the mixed sheet asks nothing about Kuchi or the whisky (the gap the owner saw)');
+// own pack 24 and the cost in stock is a bottle price: 41,322 = 24 x 1,721.75 -> decided "per case of 24"
+$csA = $fmRun($csRows, [], ['existing' => [$csEx(50, 'Kuchi', 1721.75, ['pack_name' => 'crate', 'pack_size' => 24]), $csEx(51, 'Whisky Twelve', 185000)]]);
+$qA = $csCase($csA, 'Kuchi');
+$iA = $fmItem($csA, 'Kuchi');
+$t($qA && $qA['answer'] === 'per-case' && (int)$qA['answer_detail']['pack_size'] === 24 && !empty($qA['auto']) && $iA && abs($iA['cost'] - 1721.75) < 0.00005 && (int)$iA['pack'] === 24,
+    'case evidence: a Kuchekuche-like crate price in a sheet with spirits is pre-answered "per case of 24" from its own pack size (cost 1,721.75)', json_encode([$qA['answer'] ?? null, $iA['cost'] ?? null]));
+$t($csCase($csA, 'Whisky Twelve') === null, 'case evidence: a real spirit bottle price (190,000, in stock at 185,000) is not flagged');
+// a stored "per unit" answer always wins over the pre-answer
+$csA2 = $fmRun($csRows, [$qA['qkey'] => ['key' => 'per-unit']], ['existing' => [$csEx(50, 'Kuchi', 1721.75, ['pack_name' => 'crate', 'pack_size' => 24])]]);
+$t(($csCase($csA2, 'Kuchi')['answer'] ?? '') === 'per-unit' && abs(($fmItem($csA2, 'Kuchi')['cost'] ?? 0) - 41322) < 0.00005, 'case evidence: the person\'s "per unit" answer replaces the pre-answer (cost 41,322 as written)');
+// real deliveries say ~1,720 a bottle but no pack size is known -> asked (not decided), and Confirm waits for it
+$evRec = ['receipts' => [50 => [1700, 1750, 1720]], 'sell' => [], 'packs' => []];
+$csB0 = $fmRun($csRows, [], ['existing' => [$csEx(50, 'Kuchi', 41322)], 'case_evidence' => $evRec]);
+$t($csCase($csB0, 'Kuchi') === null && !empty($fmItem($csB0, 'Kuchi')['cost_suspect']), 'case evidence: an existing item with Cost not ticked gets the stored-cost warning, not a question (its file cost is not written)');
+$csB = $fmRun($csRows, ['_updates' => [rh_ssi_key('Kuchi') => ['cost']]], ['existing' => [$csEx(50, 'Kuchi', 41322)], 'case_evidence' => $evRec]);
+$qB = $csCase($csB, 'Kuchi');
+$t($qB && $qB['answer'] === null && strpos($qB['text'], 'usual delivery cost of 1,720') !== false && !$csB['can_confirm'], 'case evidence: deliveries at ~1,720 a bottle make 41,322 a question (no pack size known, so not decided)', (string)($qB['text'] ?? ''));
+// opening counts are not deliveries: a cost history equal to the crate price (what a wrong import writes) is not evidence either way
+$t($csCase($fmRun($csRows, [], ['existing' => [$csEx(50, 'Kuchi', 41322)], 'price_evidence' => ['history' => [50 => [41322, 41322, 41322]]]]), 'Kuchi') === null, 'case evidence: batch / opening-count history is not read as deliveries (nothing to say without real evidence)');
+// selling price from a recipe link: 36,000 a bottle but the menu sells it for 2,000 a bottle
+$fz = [['Fizzy', '', '24', 'bottle', '36,000', '', '']];
+$evSell = ['sell' => [60 => ['per_unit' => 2000.0, 'item' => 'Fizzy (glass)', 'price' => 2000.0, 'qty' => 1.0]], 'receipts' => [], 'packs' => []];
+$fzT = ['_updates' => [rh_ssi_key('Fizzy') => ['cost']]];
+$csS = $fmRun($fz, $fzT, ['existing' => [$csEx(60, 'Fizzy', 36000)], 'case_evidence' => $evSell]);
+$qS = $csCase($csS, 'Fizzy');
+$t($qS && $qS['answer'] === null && strpos($qS['text'], 'menu sells it for about 2,000 per bottle') !== false && in_array('sell', $qS['case_evidence']['strong'], true), 'case evidence: a cost 18 times the recipe-linked selling price asks "per case?" with the reason', (string)($qS['text'] ?? ''));
+$csS2 = $fmRun($fz, [], ['existing' => [$csEx(60, 'Fizzy', 36000, ['pack_size' => 24])], 'case_evidence' => $evSell]);
+$t(($csCase($csS2, 'Fizzy')['answer'] ?? null) === 'per-case' && abs(($fmItem($csS2, 'Fizzy')['cost'] ?? 0) - 1500) < 0.00005, 'case evidence: selling price + its own pack of 24 (1,500 each, under the 2,000 selling price) is decided per case');
+$csS3 = $fmRun($fz, $fzT, ['existing' => [$csEx(60, 'Fizzy', 36000, ['pack_size' => 12])], 'case_evidence' => $evSell]);
+$t(($qS3 = $csCase($csS3, 'Fizzy')) && $qS3['answer'] === null && (int)$qS3['pack_hint'] === 12, 'case evidence: a pack of 12 would still cost 3,000 each, above the 2,000 selling price -> asked, not decided (12 offered for the pack box)');
+// a tot-priced recipe (25 ml of a 750 ml bottle = 0.0333 bottle at 5,000 -> 150,000 a bottle) does not flag a 190,000 bottle
+$evTot = ['sell' => [51 => ['per_unit' => 150000.0, 'item' => 'Whisky tot', 'price' => 5000.0, 'qty' => 0.0333]], 'receipts' => [], 'packs' => []];
+$t($csCase($fmRun($csRows, [], ['existing' => [$csEx(51, 'Whisky Twelve', 185000)], 'case_evidence' => $evTot]), 'Whisky Twelve') === null, 'case evidence: a spirit sold by the tot (150,000 a bottle through its recipe) is not flagged at 190,000');
+// Green: a per-case answer on an existing item; ticking Pack alone carries the divided cost with it
+$grRows = [];
+foreach (['G1', 'G2', 'G3', 'G4', 'G5'] as $gn) { $grRows[] = ['Lite ' . $gn, '', '3', 'bottle', '2,500', '', '']; }
+$grRows[] = ['Green', '', '94', 'bottle', '50,420', '', ''];
+$grEx = [$csEx(70, 'Green', 50420)];
+$gr0 = $fmRun($grRows, [], ['existing' => $grEx]);
+$gq = $csCase($gr0, 'Green');
+$grAns = $gq ? [$gq['qkey'] => ['key' => 'per-case', 'pack_size' => 20], '_updates' => [rh_ssi_key('Green') => ['pack']]] : [];
+$gr1 = $fmRun($grRows, $grAns, ['existing' => $grEx]);
+$gi = $fmItem($gr1, 'Green');
+$t($gq !== null && $gi && in_array('pack', $gi['ticked'], true) && in_array('cost', $gi['ticked'], true) && abs($gi['cost'] - 2521) < 0.00005 && $gi['cost_applied'] === true
+    && count(array_filter($gi['warnings'], function ($w) { return strpos($w, 'Pack is ticked, so Cost is changed with it: 50,420 per case of 20 = 2,521 each') !== false; })) === 1,
+    'Green fix: ticking Pack on a per-case row also ticks Cost (2,521 each) and says so', json_encode([$gi['ticked'] ?? null, $gi['warnings'] ?? null]));
+// ... and when the price check is answered "keep the current price", the pack size is not saved either
+$grEv = ['history' => [70 => [50000, 50420, 50300, 50100]]];
+$gr2 = $fmRun($grRows, $grAns, ['existing' => $grEx, 'price_evidence' => $grEv]);
+$gpq = $pcQ($gr2);
+$gr3 = $gpq ? $fmRun($grRows, $grAns + [$gpq['qkey'] => ['key' => 'current']], ['existing' => $grEx, 'price_evidence' => $grEv]) : null;
+$gi3 = $gr3 ? $fmItem($gr3, 'Green') : null;
+$t($gpq !== null && $gi3 && !in_array('pack', $gi3['ticked'], true) && !in_array('cost', $gi3['ticked'], true)
+    && count(array_filter($gi3['warnings'], function ($w) { return strpos($w, 'pack size of 20 is not saved') !== false; })) === 1, 'Green fix: "keep the current price" also leaves the pack size alone (never a pack without its divided cost)', json_encode($gi3['warnings'] ?? null));
+// an EXISTING item whose stored cost already looks like a case price: a plain warning, never a question
+$csW = $fmRun([['Budget Lager', '', '12', 'bottle', '156,000', '', '']], [], ['existing' => [$csEx(80, 'Budget Lager', 156000)], 'case_evidence' => ['sell' => [80 => ['per_unit' => 3000.0, 'item' => 'Budget Lager', 'price' => 3000.0, 'qty' => 1.0]], 'receipts' => [], 'packs' => []]]);
+$iW = $fmItem($csW, 'Budget Lager');
+$t($iW && !empty($iW['cost_suspect']) && count(array_filter($iW['warnings'], function ($w) { return strpos($w, 'The cost now in stock (156,000 per bottle) may be the price of a whole case') !== false; })) === 1,
+    'case evidence: an existing item whose stored cost is 52 times its selling price gets a plain "may be a case price" warning', json_encode($iW['warnings'] ?? null));
+// the shared stock check (the same judge the Stock > Ingredients note uses)
+$stk = [['id' => 1, 'category' => 'Bar', 'unit' => 'bottle', 'cost_per_unit' => 156000, 'pack_size' => null, 'is_archived' => 0],
+    ['id' => 2, 'category' => 'Bar', 'unit' => 'bottle', 'cost_per_unit' => 190000, 'pack_size' => null, 'is_archived' => 0],
+    ['id' => 3, 'category' => 'Bar', 'unit' => 'bottle', 'cost_per_unit' => 156000, 'pack_size' => null, 'is_archived' => 1]];
+$fl = import_cs_stock_flags($stk, ['sell' => [1 => ['per_unit' => 3000.0, 'item' => 'Lager', 'price' => 3000.0, 'qty' => 1.0], 2 => ['per_unit' => 150000.0, 'item' => 'Whisky tot', 'price' => 5000.0, 'qty' => 0.0333], 3 => ['per_unit' => 3000.0, 'item' => 'x', 'price' => 3000.0, 'qty' => 1.0]], 'receipts' => [], 'packs' => []]);
+$t(isset($fl[1]) && !isset($fl[2]) && !isset($fl[3]), 'stock check: a lager stored at 52 times its selling price is flagged; a whisky sold by the tot and an archived item are not');
+// groups of the same category and unit: a few prices far above a bigger group are suspect; a second kind of product (spirits) is not
+$grp = [];
+foreach ([2500, 2800, 3000, 3500, 4000] as $i => $c) { $grp['b' . $i] = ['group' => 'bar|bottle', 'cost' => $c]; }
+$grp['crate1'] = ['group' => 'bar|bottle', 'cost' => 72000];
+$grp['crate2'] = ['group' => 'bar|bottle', 'cost' => 66000];
+$refs = import_cs_cluster_refs($grp);
+$t(isset($refs['crate1'], $refs['crate2']) && count($refs) === 2 && abs($refs['crate1']['median'] - 3000) < 0.001, 'groups: two prices ~20x five bottle prices of the same category and unit are suspect');
+foreach ([30000, 45000, 60000, 120000, 190000, 250000] as $i => $c) { $grp['s' . $i] = ['group' => 'bar|bottle', 'cost' => $c]; }
+$t(import_cs_cluster_refs($grp) === [], 'groups: when the higher prices are as many as the lower ones (spirits next to beers), nothing is flagged by the groups');
+$t(import_cs_judge(['cost' => 36000, 'own_pack' => 12, 'value_pack' => ['n' => 12, 'value' => 72000, 'qty' => 24, 'source' => 'S!F2'], 'unit' => 'bottle'])['verdict'] === 'case'
+    && import_cs_judge(['cost' => 36000, 'value_pack' => ['n' => 3, 'value' => 288000, 'qty' => 24, 'source' => 'S!F2'], 'unit' => 'bottle']) === null,
+    'value cell: qty x price / 12 with its own pack of 12 decides; a whole ratio that is no known pack size says nothing (a changed count looks the same)');
 
 // cleanup
 foreach ($tmpFiles as $f) { @unlink($f); }

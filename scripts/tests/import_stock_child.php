@@ -1020,6 +1020,69 @@ try {
     $finX = $anX ? import_vc_finish(import_vc_collect($anX), $anX['questions']) : ['differ' => -1, 'groups' => [1]];
     $ck('value check: our own stock export read back raises no value warning (its Total Cost is a buying cost)', $bytesV !== '' && $finX['differ'] === 0 && !$finX['groups'], json_encode([$bV['error'] ?? '', $finX['differ'], count($finX['groups'])]));
 
+    // ---- case or unit from this hotel's own data (2026-11-17): loader, stock note, Green fix through a real job + plan ---------------
+    $insI = $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit, par_level, reorder_point, pack_name, pack_size) VALUES (?, ?, 'bottle', ?, ?, 0, 0, ?, ?)");
+    $catCs = $n('CS Bar');
+    $insI->execute([$n('CS Lager'), $catCs, 12, 156000, null, null]);
+    $idLager = (int)$pdo->lastInsertId();
+    $insI->execute([$n('CS Whisky'), $catCs, 6, 190000, null, null]);
+    $idWhisky = (int)$pdo->lastInsertId();
+    $slug = 'zzt-cs-' . strtolower(preg_replace('/\W+/', '', $run));
+    $pdo->prepare("INSERT INTO menu_categories (name, slug, is_active) VALUES (?, ?, 1)")->execute([$n('CS Menu'), $slug]);
+    $mcat = (int)$pdo->lastInsertId();
+    $insM = $pdo->prepare('INSERT INTO menu_items (category_id, item_name, price, is_available) VALUES (?, ?, ?, 1)');
+    $insR = $pdo->prepare('INSERT INTO stock_recipes (menu_item_id, menu_type, portions_per_recipe) VALUES (?, ?, 1)');
+    $insRI = $pdo->prepare('INSERT INTO stock_recipe_ingredients (recipe_id, ingredient_id, quantity_per_portion, yield_percent) VALUES (?, ?, ?, 100)');
+    foreach ([[$n('CS Lager bottle'), 3000, $idLager, 1], [$n('CS Whisky tot'), 5000, $idWhisky, 0.0333]] as [$mn, $mp, $iid, $qpp]) {
+        $insM->execute([$mcat, $mn, $mp]);
+        $insR->execute([(int)$pdo->lastInsertId(), $slug]);
+        $insRI->execute([(int)$pdo->lastInsertId(), $iid, $qpp]);
+    }
+    $evCs = import_cs_load_evidence($pdo);
+    $ck('case evidence loader: the recipe-linked selling price per stock unit (menu price / quantity per portion)',
+        abs(($evCs['sell'][$idLager]['per_unit'] ?? 0) - 3000) < 0.001 && abs(($evCs['sell'][$idWhisky]['per_unit'] ?? 0) - 5000 / 0.0333) < 0.01, json_encode([$evCs['sell'][$idLager] ?? null, $evCs['sell'][$idWhisky] ?? null]));
+    $ingCs = $pdo->query('SELECT id, name, category, unit, cost_per_unit, pack_size, is_archived FROM stock_ingredients WHERE id IN (' . $idLager . ',' . $idWhisky . ')')->fetchAll(PDO::FETCH_ASSOC);
+    $flCs = import_cs_stock_flags($ingCs, $evCs);
+    $ck('stock note: the lager stored at 52 times its selling price is flagged, the whisky sold by the tot is not', isset($flCs[$idLager]) && !isset($flCs[$idWhisky]), json_encode(array_keys($flCs)));
+    $upCs = $upload($put($csv([[$n('CS Lager'), '', '12', 'bottle', '150000', '', '']]), 'cs.csv'), 'zzt-cs-' . $run . '.csv', $admin);
+    import_job_analyse($pdo, (int)$upCs['job_id']);
+    $sCs = import_job_review_summary($pdo, (int)$upCs['job_id']);
+    $itCs = null;
+    foreach ($sCs['items'] as $it0) { if ($it0['name'] === $n('CS Lager')) { $itCs = $it0; } }
+    $caseCs = null;
+    foreach ($sCs['questions'] as $q0) { if ($q0['type'] === 'case-price') { $caseCs = $q0; } }
+    $ck('import review: an existing item whose stored cost looks like a case price gets the plain warning (Cost not ticked: no question)', $itCs && !empty($itCs['cost_suspect']) && $caseCs === null, json_encode([$itCs['warnings'] ?? null, $caseCs['text'] ?? null]));
+    import_job_set_update_fields($pdo, (int)$upCs['job_id'], rh_ssi_key($n('CS Lager')), ['cost'], $admin);
+    $caseCs = null;
+    foreach (import_job_review_summary($pdo, (int)$upCs['job_id'])['questions'] as $q0) { if ($q0['type'] === 'case-price') { $caseCs = $q0; } }
+    $ck('import review: once Cost is ticked the crate-like file price is asked per case, with the selling-price reason', $caseCs && $caseCs['answer'] === null && strpos((string)$caseCs['text'], 'menu sells it for about 3,000 per bottle') !== false, (string)($caseCs['text'] ?? ''));
+    // Green: a per-case answer with its pack; Pack ticked alone carries the divided cost into the plan
+    $insI->execute([$n('CS Green'), $catCs, 94, 50420, null, null]);
+    $grRowsC = [];
+    foreach (['A', 'B', 'C', 'D', 'E'] as $gn) { $grRowsC[] = [$n('CS Lite ' . $gn), '', '3', 'bottle', '2500', '', '']; }
+    $grRowsC[] = [$n('CS Green'), '', '94', 'bottle', '50420', '', ''];
+    $upG = $upload($put($csv($grRowsC), 'csg.csv'), 'zzt-csg-' . $run . '.csv', $admin);
+    $jG = (int)$upG['job_id'];
+    import_job_analyse($pdo, $jG);
+    $sG = import_job_review_summary($pdo, $jG);
+    $gq = null;
+    foreach ($sG['questions'] as $q0) { if ($q0['type'] === 'case-price' && strpos((string)$q0['text'], 'CS Green') !== false) { $gq = $q0; } }
+    $aG = $gq ? import_job_answer($pdo, $jG, $gq['id'], ['key' => 'per-case', 'pack_size' => '20'], $admin) : ['ok' => false];
+    $tG = import_job_set_update_fields($pdo, $jG, rh_ssi_key($n('CS Green')), ['pack'], $admin);
+    $answerAll($jG, $admin);            // the carried cost is price-checked like a hand tick: "the file's price is right"
+    $stG = import_job_state($pdo, $jG);
+    $giG = null;
+    foreach ($stG['res']['items'] as $it0) { if ($it0['name'] === $n('CS Green')) { $giG = $it0; } }
+    $planG = import_build_stock_plan($stG['res'], $stG['ctx']);
+    $pG = is_array($planG) ? ($planG['items'][rh_ssi_key($n('CS Green'))] ?? null) : null;
+    $ck('Green fix: Pack ticked alone on a per-case row puts the divided cost (2,521) in the plan with the pack of 20',
+        !empty($aG['ok']) && !empty($tG['ok']) && $giG && in_array('cost', $giG['ticked'], true) && $pG && abs((float)$pG['cost'] - 2521) < 0.00005 && (int)$pG['pack'] === 20
+        && isset($pG['changes']['cost'], $pG['changes']['pack']), json_encode([$aG['error'] ?? null, $tG['error'] ?? null, $giG['ticked'] ?? null, $giG['status'] ?? null, is_array($planG) ? ($pG['cost'] ?? null) : $planG]));
+    $resBad = $stG['res'];
+    foreach ($resBad['items'] as $bi => $it0) { if ($it0['name'] === $n('CS Green')) { $resBad['items'][$bi]['ticked'] = ['pack']; } }
+    $planBad = import_build_stock_plan($resBad, $stG['ctx']);
+    $ck('Green fix: the commit-time guard refuses a pack size without its divided cost', is_string($planBad) && strpos($planBad, 'pack size is ticked without the cost') !== false, is_string($planBad) ? $planBad : 'plan built');
+
     // ---- cleanup of staged files, purge ---------------------------------------------------------------
     $pg = import_purge_staged($pdo, true);
     $ck('purge: runs and reports counts', is_array($pg) && isset($pg['files_deleted']));
