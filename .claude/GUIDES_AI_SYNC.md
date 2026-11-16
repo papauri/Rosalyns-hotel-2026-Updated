@@ -336,6 +336,10 @@ when prompted."
 - Assistant: no change in what it reads (adjustment_value still set: the first chosen room type's amount).
 - Follow-up (same day, owner): a room type at 0 keeps its normal price and is left out of the plan; bottom amount empty or 0 = room types without their own amount keep their normal price; the plan then covers exactly the room types that change (so a room type added later is untouched). Replaces the line above about all-room-type plans needing the bottom amount.
 
+### Import: clearer flags (2026-11-16, owner ask "RBH REVISED STOCK NOV26") - pending ship
+- Guides (Stock > Import, guide 23): "look very similar" no longer asks about two names that differ by one whole word (Black tea / Black tie, sweet red / sweet rose); the question that stays shows each row's quantity and unit cost and says "Use X for both" makes ONE item and ADDS the quantities (different sheets: you are then asked add or first sheet only), and that answer no longer leaves the item stuck. Case-price question shows the unit, the counted quantity, the line value and what each answer does (example pack, quantity stays in the sheet's unit). Value check: every disagreeing row has "Most likely: ..." on Step 3 and a "What it most likely means" column in the stock-check workbook; the Summary states the counted fact. "trays" reads as "tray".
+- Assistant: question texts it may relay changed (possible-typo, case-price); value-check rows carry `why` / `why_code` (qty-changed, no-qty, no-value, no-fit) and groups `why_*` counts. includes/ai/ai-import.php needs no change (it keys on question type).
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` fails in unchanged code: claim-check self-test (Room Board "Tomorrow"; staff
   activity "4 of 3 staff accounts"), History Summary "K1,068,000," flagged; digest-recipients fail.

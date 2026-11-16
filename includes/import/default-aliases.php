@@ -23,8 +23,8 @@ if (!function_exists('import_default_aliases')) {
         return [
             // Bump when phrases are added: import_seed_aliases() then tops every existing hotel up ONCE (INSERT IGNORE on the
             // alias hash, so nothing is ever doubled). v2 (2026-11-16): our own Stock > Ingredients CSV export headings and
-            // renamed copies of it ("Current Quantity level", "Minimum Quantity level", "Lead Time (days)" ...).
-            'version' => 2,
+            // renamed copies of it ("Current Quantity level", "Minimum Quantity level", "Lead Time (days)" ...). v3 (2026-11-16): unit spelling "trays" -> "tray".
+            'version' => 3,
             'fields' => [
                 'item_name' => [
                     'item name', 'item', 'items', 'item description', 'description', 'product', 'product name',
@@ -125,6 +125,7 @@ if (!function_exists('import_default_aliases')) {
                 'pkt' => 'packet', 'pkts' => 'packet', 'packet' => 'packet', 'packets' => 'packet',
                 'ctn' => 'carton', 'ctns' => 'carton', 'cartons' => 'carton',
                 'doz' => 'dozen', 'dz' => 'dozen', 'cans' => 'can', 'boxes' => 'box', 'bx' => 'box', 'sachets' => 'sachet',
+                'trays' => 'tray', 'tray' => 'tray',
             ],
             'section_words' => [
                 'beers', 'beer', 'spirits', 'wines', 'wine', 'soft drinks', 'juices', 'liqueurs', 'protein',

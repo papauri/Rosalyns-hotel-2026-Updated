@@ -574,6 +574,9 @@ if (!function_exists('import_rv_build')) {
             'per-unit' => 'The price is for one unit, for all', 'two-batches' => 'Separate batches of the same item, for all', 'duplicate' => 'A duplicate: import once, for all',
             'separate-items' => 'Different items, for all', 'item' => 'An item (out of stock), for all', 'section' => 'A category heading, for all',
             'first' => 'The same stock written twice: first sheet only, for all', 'add' => 'Separate stock: add the balances, for all'];
+        if ($role === 'use-suggestion' && $type === 'possible-typo') {
+            return 'Use the suggested name for all (two rows of one sheet become ONE item with the quantities added; a name from your stock list links to that item)';
+        }
         if ($role === 'keep') {
             return $type === 'possible-typo' ? 'Create each as a new item (keep the name as written in the file)' : 'Keep as written in the file, for all';
         }

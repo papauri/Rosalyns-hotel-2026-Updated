@@ -399,6 +399,7 @@ if (!function_exists('import_resolve')) {
                                     $fin['match_auto'] = !empty($q['auto']);
                                 } else {
                                     $fin['name'] = $chosen;
+                                    $fin['typo_merged'] = true;      // the person said the two spellings are one item (rows of one sheet are added together below)
                                 }
                             }
                             break;
@@ -499,6 +500,34 @@ if (!function_exists('import_resolve')) {
                         $rowsOut[$uid]['reason'] = 'Two different items cannot share one name in stock. Rename one in the sheet and upload again, or skip it.';
                         $rowsOut[$uid]['blocked_code'] = 'separate-items';
                         $cands[$j]['dropped'] = true;
+                    }
+                } elseif ($a === null && $res === null && count(array_filter($idxs, function ($j) use ($cands) {
+                    return $cands[$j]['dup'] !== null || ($cands[$j]['group']['resolution'] ?? null) !== null;
+                })) === 0 && count(array_filter($idxs, function ($j) use ($cands) {
+                    return !empty($cands[$j]['fin']['typo_merged']);
+                })) > 0) {
+                    // the rows share a name only because the person answered a possible-typo question "Use X for both": one item, quantities
+                    // added (that answer is the person's decision; there is no duplicate question on these rows to wait for).
+                    // Counts in different units are never added (4 bottle + 2 crate is not 6 of either): those rows are blocked with a plain reason.
+                    $uk = [];
+                    $ur = [];
+                    foreach ($idxs as $j) {
+                        $raw = trim((string)($cands[$j]['fin']['unit_raw'] ?? ''));
+                        if ($raw !== '') {
+                            $uk[import_unit_key($raw)] = true;
+                            $ur[import_unit_key($raw)] = $raw;
+                        }
+                    }
+                    if (count($uk) > 1) {
+                        foreach ($idxs as $j) {
+                            $uid = $cands[$j]['rec']['uid'];
+                            $rowsOut[$uid]['status'] = 'blocked';
+                            $rowsOut[$uid]['reason'] = 'The two spellings have different units (' . implode(' / ', array_values($ur)) . '), so their counts cannot be added. Keep them separate (answer "keep both" on the spelling question), or fix the unit in the sheet and upload again.';
+                            $rowsOut[$uid]['blocked_code'] = 'typo-units-differ';
+                            $cands[$j]['dropped'] = true;
+                        }
+                    } else {
+                        $sheetItems[] = ['members' => $idxs, 'sheet' => $sheetName, 'nk' => $nk];
                     }
                 } else {
                     // unanswered: shown merged, but not importable until answered (the engine already marks the rows needs-answer)

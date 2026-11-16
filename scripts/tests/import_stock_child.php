@@ -438,7 +438,8 @@ try {
             if ($ii % 40 == 39) { $nm = $n($words[($ii - 1) % 16] . ' ' . sprintf('%05d', $ii - 1) . 'x'); }           // looks like a typo of the previous item
             $price = 1000 + ($ii % 50) * 10; if ($ii % 23 == 0) { $price *= 40; }                                       // a case-sized price now and then
             if ($ii % 211 == 0 && $ii > 0) { $nm = $n($words[($ii - 1) % 16] . ' ' . sprintf('%05d', $ii - 1)); }       // the same name twice
-            fputcsv($fh, [$nm, '', mt_rand(0, 50), ['bottle', 'kg', 'each', 'L'][$ii % 4], $price, mt_rand(10, 100), '']);
+            // the look-alike row keeps the previous item's unit (a typo of a name, not of a unit): "Use X for both" adds counts only in one unit
+            fputcsv($fh, [$nm, '', mt_rand(0, 50), ['bottle', 'kg', 'each', 'L'][($ii % 40 == 39 ? $ii - 1 : $ii) % 4], $price, mt_rand(10, 100), '']);
         }
     }
     rewind($fh);
@@ -634,8 +635,9 @@ try {
         if (empty($x['ok']) || $x['applied'] === 0) { break; }
         $bulkRounds++; $bulkApplied += $x['applied'];
     }
+    // (2026-11-16: was > 100 answers while "Use X for both" merged look-alikes across units and raised unit/price follow-ups; same-unit look-alikes need fewer)
     $left = array_values(array_filter(import_job_review_summary($pdo, $jBig)['questions'], function ($q) { return $q['blocking'] && ($q['answer'] === null || $q['answer'] === '') && $q['options']; }));
-    $ck('bulk: group after group the job is brought down to a handful of single questions (a question whose rows were all skipped by another answer is finished, so one round can settle several groups)', $bulkRounds >= 1 && $bulkApplied > 100 && count($left) < 40, $bulkRounds . ' rounds, ' . $bulkApplied . ' answers, ' . count($left) . ' left');
+    $ck('bulk: group after group the job is brought down to a handful of single questions (a question whose rows were all skipped by another answer is finished, so one round can settle several groups)', $bulkRounds >= 1 && $bulkApplied > 50 && count($left) < 40, $bulkRounds . ' rounds, ' . $bulkApplied . ' answers, ' . count($left) . ' left');
     foreach ($left as $q) {
         $keys = array_column($q['options'], 'key');
         $pick = in_array('skip', $keys, true) ? 'skip' : (in_array('two-batches', $keys, true) ? 'two-batches' : (in_array('per-unit', $keys, true) ? 'per-unit' : $keys[0]));

@@ -766,6 +766,8 @@ for ($z = 0; $z < 2000 && $simOk; $z++) {
     if (abs(strlen($a) - strlen($b)) * 5 > max(strlen($a), strlen($b)) && import_similarity($a, $b) >= 0.8) { $simOk = false; }
 }
 $t($simOk, 'speed: a length difference of more than a fifth always means a similarity under 0.8 (the header matcher skips those)');
+// md5s re-frozen 2026-11-16 (flag-quality round): only the possible-typo / case-price question texts and option labels changed; with every question text
+// and option label blanked the old and new engines give the same output on both inputs (checked against the previous commit's engine).
 $tmpAnal = $put('', 'frozen.csv');
 $fhz = fopen($tmpAnal, 'w'); fputcsv($fhz, ['Item Name', 'Batch', 'Balance', 'Unit', 'Unit Price', 'Max Level', 'Expiry Date']);
 $wordsZ = ['Lager', 'Stout', 'Cider', 'Vodka', 'Rum', 'Flour', 'Sugar', 'Rice', 'Beans', 'Salt', 'Oil', 'Soap', 'Bleach', 'Mop', 'Paper', 'Pen'];
@@ -784,11 +786,11 @@ fclose($fhz);
 $tz = microtime(true);
 $anz = import_analyze_file($tmpAnal, 'g5k.csv', $al, ['max_bytes' => 50 << 20]);
 $secz = microtime(true) - $tz;
-$t(md5(json_encode($anz)) === 'eec1072db2624a61ef1cbd9067550585', 'speed: a generated 5,000-item sheet analyses to byte-identical output (json md5 frozen from the code before the speed-up)');
+$t(md5(json_encode($anz)) === '71ff50179a34b36e459b152a9a706d89', 'speed: a generated 5,000-item sheet analyses to byte-identical output (json md5 frozen from the code before the speed-up)');
 $t($secz < 15, 'speed: 5,000 items analyse in well under 15 s (' . round($secz, 1) . ' s; it was 4-6 s before, 20,000 items 73 s, now about 11 s)');
 $anx = import_analyze_file($root . '/scripts/tests/fixtures/import/synthetic_stock.xlsx', 'synthetic_stock.xlsx', $al, ['max_bytes' => 50 << 20]);
 $anxNoHeal = $anx; unset($anxNoHeal['heals'], $anxNoHeal['heal_totals']);
-$t(md5(json_encode($anxNoHeal)) === 'aac36d4c9fd13190f06ba65555c00866', 'speed: the synthetic workbook analyses to byte-identical output apart from the new "Fixed for you" list (json md5 frozen from the code before the speed-up; the repair key is the only difference, see the next check)');
+$t(md5(json_encode($anxNoHeal)) === '18c6166fd11012e6a56bbdd0ef8e77a6', 'speed: the synthetic workbook analyses to byte-identical output apart from the new "Fixed for you" list (json md5 frozen from the code before the speed-up; the repair key is the only difference, see the next check)');
 $t(count($anx['heals'] ?? []) === 1 && $anx['heals'][0]['rule'] === 'number-format' && $anx['heals'][0]['before'] === '1,800' && $anx['heals'][0]['after'] === '1800' && strpos($anx['heals'][0]['source'], 'I18') !== false && $anx['heal_totals'] === ['number-format' => 1], 'repairs: the one text number with a thousands separator in the synthetic workbook (BAR!I18 "1,800") is now listed as a repair; no other repair fires and nothing else in the output moved');
 // Memory: a file that cannot fit ends with a plain message, never a fatal error; a normal file works under a small limit. Each case is a child
 // process with its own memory_limit (a fatal error would leave no result line at all).
@@ -1027,7 +1029,7 @@ $kinds = array_count_values(array_column($lr, 0));
 $t(($kinds['learned_unit_item'] ?? 0) === 3 && ($kinds['learned_category'] ?? 0) === 1 && ($kinds['learned_unit_cat'] ?? 0) === 1 && !in_array('zz delta', array_column($lr, 1), true) && !in_array('zz eps', array_column($lr, 1), true) && !in_array('zz zeta', array_column($lr, 1), true), 'learning: only NEW, READY items whose unit/category a person confirmed teach anything (not defaults, not unanswered, not matched ones); 3 agreeing items teach the category habit');
 
 // ---- nothing changes where no rule fires ----
-$t(!array_key_exists('heals', $anz) && md5(json_encode($anz)) === 'eec1072db2624a61ef1cbd9067550585', 'engine output is byte-identical where no rule fires: the generated 5,000-item sheet has no repair key and keeps its frozen md5');
+$t(!array_key_exists('heals', $anz) && md5(json_encode($anz)) === '71ff50179a34b36e459b152a9a706d89', 'engine output is byte-identical where no rule fires: the generated 5,000-item sheet has no repair key and keeps its frozen md5');
 
 // ---- our own Stock > Ingredients export + a renamed copy of it read with ZERO header questions (owner 2026-11-16) ----
 echo "-- our own export headings and renamed copies --\n";
@@ -1244,7 +1246,7 @@ $wd = isset($rd['sheets'][1]) ? $cellsOf($rd['sheets'][1]) : [];
 $wm = isset($rd['sheets'][2]) ? $cellsOf($rd['sheets'][2]) : [];
 $diffSum = 0; $diffNames = [];
 foreach ($wd as $r => $cs) { if ($r > 1) { $diffSum += (float)($cs[9] ?? 0); $diffNames[] = $cs[2] ?? ''; } }
-$t(count($wd) === 6 && $diffNames === array_column($vcF['rows'], 'name') && abs($diffSum - (5300 - 3050)) < 0.005 && ($wd[1][8] ?? '') === 'Sheet "Stock Value" says' && ($wd[1][11] ?? '') === "Manager's explanation",
+$t(count($wd) === 6 && $diffNames === array_column($vcF['rows'], 'name') && abs($diffSum - (5300 - 3050)) < 0.005 && ($wd[1][8] ?? '') === 'Sheet "Stock Value" says' && ($wd[1][12] ?? '') === "Manager's explanation",
     'stock check workbook: the wrong-value tab has the 5 rows in order, differences add up to 5,300 - 3,050, and a blank explanation column', json_encode([count($wd), $diffSum]));
 $t(count($wm) === 2 && ($wm[2][2] ?? '') === 'ZZV No price' && ($wm[1][6] ?? '') === 'Unit Cost (fill in)', 'stock check workbook: the missing-prices tab lists the one item, with a "Unit Cost (fill in)" column');
 $ws = isset($rd['sheets'][0]) ? $cellsOf($rd['sheets'][0]) : [];
@@ -1256,6 +1258,81 @@ $t($noF, 'stock check workbook: values only, no formulas');
 $rdi = import_xlsx_read((string)import_vc_workbook($vcInj, ['file' => 'x.csv'])['body'], true);
 $injOk = false; foreach ($rdi['sheets'][1]['cells'] ?? [] as $cs) { foreach ($cs as $cl) { if ($cl['v'] === '=HYPERLINK("x")' && empty($cl['is_formula'])) { $injOk = true; } } }
 $t($injOk, 'stock check workbook: an item name that looks like a formula is written as plain text');
+
+// ---- flag quality (owner 2026-11-16, "RBH REVISED STOCK NOV26"): typo false positives, case-price consequences, value-check reasons ----
+echo "-- flag quality --\n";
+// possible-typo: one whole different word (not a near-spelling) = a different product. Synthetic names of the same shapes as the owner file.
+$distinctPairs = [['syrup peach', 'syrup pear'], ['green tea', 'green tie'], ['harbour red', 'harbour rose'], ['cape sweet red', 'cape sweet rose'], ['bramfidich12years 12years', 'bramiivet12years 12years']];
+foreach ($distinctPairs as [$d1, $d2]) {
+    $t(import_name_score_norm($d1, $d2) >= 0.85 && import_cc_distinct_one_word($d1, $d2), 'typo guard: "' . $d1 . '" / "' . $d2 . '" scored as similar before, now one different word = different products');
+}
+$nearPairs = [['hill stoot', 'hill stout'], ['heinkn', 'heineken'], ['kestrel lagr', 'kestrel lager'], ['windowhoek lager', 'windhoek lager'], ['budwiser', 'budweiser'], ['all purpose claner', 'all purpose cleaner'], ['reedbed stuot', 'reedbed stout'], ['heinekin', 'heineken']];
+foreach ($nearPairs as [$d1, $d2]) {
+    $t(!import_cc_distinct_one_word($d1, $d2), 'typo guard keeps a near-spelling as a question: "' . $d1 . '" / "' . $d2 . '"');
+}
+$t(!import_cc_distinct_one_word('red wine dry', 'dry wine red'), 'typo guard: two words differing is not decided by this rule');
+$fq = $fmRun([['Syrup Peach', '', '3', 'bottle', '900', '', ''], ['Syrup Pear', '', '2', 'bottle', '950', '', ''], ['Green Tea', '', '5', 'each', '40', '', ''], ['Green Tie', '', '1', 'each', '700', '', '']]);
+$t($fmQ($fq, 'possible-typo') === null, 'typo guard: Syrup Peach / Syrup Pear and Green Tea / Green Tie raise no possible-typo question');
+// a typo that stays: the text shows each row's quantity and cost and says "Use ... for both" adds the quantities; answering it gives one ready item
+$tyRows = [['Hilltop Stout', '', '4', 'bottle', '660', '', ''], ['Hilltop Stoot', '', '6', 'bottle', '680', '', ''], ['Pale Ale', '', '6', 'bottle', '600', '', '']];
+$fq = $fmRun($tyRows);
+$tq = $fmQ($fq, 'possible-typo');
+$t($tq !== null && strpos($tq['text'], 'row 2: 4 bottle, 660 each') !== false && strpos($tq['text'], 'row 3: 6 bottle, 680 each') !== false
+    && strpos($tq['text'], 'merges them into ONE item and ADDS the quantities (4 + 6 = 10 bottle)') !== false && strpos($tq['options'][1]['label'], 'quantities added') !== false,
+    'typo text: each row\'s quantity and unit cost, and "Use ... for both" merges and ADDS the quantities (4 + 6 = 10)', (string)($tq['text'] ?? ''));
+$fq2 = $fmRun($tyRows, $tq ? [$tq['qkey'] => ['key' => 'use:Hilltop Stout']] : []);
+$hs = $fmItem($fq2, 'Hilltop Stout');
+$t($hs && (float)$hs['balance'] === 10.0 && $fmItem($fq2, 'Hilltop Stoot') === null && $fmQ($fq2, 'merge-conflict') !== null, 'typo "Use X for both": one item, balance 4 + 6 = 10; the two prices are asked about side by side', json_encode($hs['balance'] ?? null));
+$fq3 = $fmRun([['Hilltop Stout', '', '4', 'bottle', '660', '', ''], ['Hilltop Stoot', '', '6', 'bottle', '660', '', '']], []);
+$tq3 = $fmQ($fq3, 'possible-typo');
+$fq3 = $fmRun([['Hilltop Stout', '', '4', 'bottle', '660', '', ''], ['Hilltop Stoot', '', '6', 'bottle', '660', '', '']], $tq3 ? [$tq3['qkey'] => ['key' => 'use:Hilltop Stout']] : []);
+$t(count($fq3['items']) === 1 && $fq3['items'][0]['status'] === 'ready' && $fq3['can_confirm'] && (float)$fq3['items'][0]['balance'] === 10.0, 'typo "Use X for both" (same price): one READY item of 10, the import can be confirmed (no dead end)', json_encode($fq3['counts']));
+$fq4 = $fmRun([['Hilltop Stout', '', '4', 'bottle', '660', '', ''], ['Hilltop Stoot', '', '6', 'bottle', '660', '', '']], $tq3 ? [$tq3['qkey'] => ['key' => 'keep']] : []);
+$t(count($fq4['items']) === 2 && $fq4['can_confirm'], 'typo "keep both": two items as written');
+$fu = [['Hilltop Stout', '', '4', 'bottle', '660', '', ''], ['Hilltop Stoot', '', '2', 'crate', '660', '', '']];
+$tqU = $fmQ($fmRun($fu), 'possible-typo');
+$fqU = $fmRun($fu, $tqU ? [$tqU['qkey'] => ['key' => 'use:Hilltop Stout']] : []);
+$blkU = array_values(array_filter($fqU['rows'], function ($r) { return ($r['blocked_code'] ?? '') === 'typo-units-differ'; }));
+$t($tqU !== null && strpos($tqU['text'], 'units differ (bottle / crate), so their counts cannot be added') !== false && count($blkU) === 2 && !$fqU['can_confirm'] && strpos($blkU[0]['reason'], 'different units (bottle / crate)') !== false && !array_filter($fqU['items'], function ($it) { return (float)$it['balance'] === 6.0; }),
+    'typo "Use X for both" with different units (4 bottle + 2 crate): never added, both rows blocked with a plain reason', json_encode($fqU['counts']));
+$fs = [['Hilltop Stout', '', '4', 'bottle', '660', '', ''], ['Hilltop Stoot', '', '2', 'bottles', '660', '', '']];
+$tqS = $fmQ($fmRun($fs), 'possible-typo');
+$fqS = $fmRun($fs, $tqS ? [$tqS['qkey'] => ['key' => 'use:Hilltop Stout']] : []);
+$t(count($fqS['items']) === 1 && (float)$fqS['items'][0]['balance'] === 6.0 && $fqS['can_confirm'], 'typo "Use X for both" with the same unit (bottle / bottles): one item, 4 + 2 = 6');
+// "did you mean the existing ..." never offers a different product that differs by one whole word, still offers a near-spelling
+$exT = function ($id, $name) { return ['id' => $id, 'name' => $name, 'category' => 'Pantry', 'unit' => 'each', 'current_quantity' => 1, 'cost_per_unit' => 50, 'par_level' => 0, 'reorder_point' => 0, 'notes' => '', 'pack_name' => null, 'pack_size' => null, 'is_archived' => 0, 'recipes' => 0]; };
+$fq5 = $fmRun([['Green Tie', '', '1', 'each', '700', '', ''], ['Kestrel Lagr', '', '2', 'bottle', '500', '', '']], [], ['existing' => [$exT(5, 'Green Tea'), $exT(6, 'Kestrel Lager')]]);
+$exQs = array_values(array_filter($fq5['questions'], function ($q) { return $q['type'] === 'possible-typo' && ($q['against'] ?? '') === 'existing'; }));
+$t(count($exQs) === 1 && strpos($exQs[0]['text'], '"Kestrel Lagr" is not in the existing list, but "Kestrel Lager" is. Did you mean "Kestrel Lager"? In the sheet: row 3: 2 bottle, 500 each.') !== false && strpos($exQs[0]['text'], 'instead of creating a new item') !== false,
+    'existing list: Green Tie is not offered as Green Tea; Kestrel Lagr -> Kestrel Lager is, with its row, quantity and cost', json_encode(array_column($exQs, 'text')));
+// case-price: the unit as written, the counted quantity, the line value and what each answer does (option keys unchanged)
+$cpRows = [['Peer A', '', '10', 'kgs', '1000', '', ''], ['Peer B', '', '10', 'kgs', '1100', '', ''], ['Peer C', '', '10', 'kgs', '900', '', ''], ['Peer D', '', '10', 'kgs', '1050', '', ''],
+    ['Peer E', '', '10', 'kgs', '950', '', ''], ['Bulk Meal', '', '12', 'kgs', '20000', '', '']];
+$fq6 = $fmRun($cpRows);
+$cpq = $fmQ($fq6, 'case-price');
+$t($cpq !== null && strpos($cpq['text'], '20,000 per kgs') !== false && strpos($cpq['text'], 'The sheet counts 12 kgs, so as written this line is worth 240,000') !== false
+    && strpos($cpq['text'], 'Is that the price of one unit, or of a whole case/pack?') !== false && strpos($cpq['text'], 'counted in single units') !== false,
+    'case-price text: unit as written, counted quantity and line value, and that the quantity stays in the sheet\'s unit', (string)($cpq['text'] ?? ''));
+$t($cpq !== null && array_column($cpq['options'], 'key') === ['per-unit', 'per-case'] && strpos($cpq['options'][0]['label'], '12 kgs counted at 20,000 = 240,000') !== false
+    && strpos($cpq['options'][1]['label'], 'for example 20 -> 1,000 per kgs, 12 kgs = 12,000') !== false,
+    'case-price options: same keys; "one unit" shows 12 x 20,000, "whole pack" shows an example pack (price / usual price) and what it does', json_encode($cpq['options'] ?? null));
+// value check: a grounded "what it most likely means" per row
+$t(import_vc_why(68.3, 3000, 84900, 'packet') === ['qty-changed', 'The value was worked out for 28.3 packet; the count now says 68.3 (40 more). The quantity was changed without updating the value.'], 'value reason: value / cost lands on 28.3 -> the quantity was changed (40 more)');
+$t(import_vc_why(20, 1000, 46000, 'bottle')[1] === 'The value was worked out for 46 bottle; the count now says 20 (26 fewer). The quantity was changed without updating the value.', 'value reason: fewer');
+$t(import_vc_why(0, 500, 47500, 'bottle') === ['no-qty', 'The sheet counts 0 but still values 95 bottle. If they were sold or used, the value was not updated; if not, they are missing from the count.'], 'value reason: counts 0 but still valued');
+$t(import_vc_why(22, 6000, 0, 'kgs')[0] === 'no-value' && strpos(import_vc_why(22, 6000, 0, 'kgs')[1], 'counts 22 kgs but values them at 0') !== false, 'value reason: counted but valued at 0');
+$t(import_vc_why(3, 1000, 4321, 'kg')[0] === 'no-fit' && strpos(import_vc_why(3, 1000, 4321, 'kg')[1], 'does not fit a whole quantity') !== false, 'value reason: a value that fits no quantity -> cost changed or a typing mistake');
+$t(import_vc_why(3, 5, 17, 'kg')[0] === 'no-fit', 'value reason: with a tiny unit cost (0.1 step under 1) nothing is claimed to fit');
+$whys = array_column($vcF['rows'], 'why_code');
+$t($whys === ['qty-changed', 'qty-changed', 'no-qty', 'qty-changed', 'qty-changed'] && strpos($vcF['rows'][0]['why'], 'worked out for 5 kg; the count now says 1 (4 fewer)') !== false && $pg['rows'][0]['why'] === $vcF['rows'][0]['why'],
+    'value reason: built once in the rows (the Step 3 page carries the same text)', json_encode(array_column($vcF['rows'], 'why')));
+$t(($wd[1][11] ?? '') === 'What it most likely means' && ($wd[1][12] ?? '') === "Manager's explanation" && ($wd[2][11] ?? '') === $vcF['rows'][0]['why'] && !isset($wd[2][12]),
+    'stock check workbook: "What it most likely means" before the blank "Manager\'s explanation"');
+$t(strpos($sumText, '5 of 5 rows: the value fits a different quantity at the same unit cost (1 of them now counts 0), so the quantity was changed') !== false && strpos($sumText, 'most likely not recalculated') === false,
+    'stock check workbook: the summary states the counted fact (5 of 5 fit a different quantity), not a guess');
+$t(strpos(import_rv_role_label('use-suggestion', 'possible-typo'), 'quantities added') !== false && import_rv_role_label('use-suggestion', 'conflict') === 'Use the suggested match for all', 'bulk "use the suggestion" on possible-typo questions says rows of one sheet become one item with the quantities added');
+// units: "trays" is the same unit as "tray"
+$t(import_unit_canon('trays', $al['unit_synonyms']) === 'tray' && import_unit_canon('Tray', $al['unit_synonyms']) === 'tray', 'unit spelling: trays -> tray, Tray -> tray');
 
 // cleanup
 foreach ($tmpFiles as $f) { @unlink($f); }

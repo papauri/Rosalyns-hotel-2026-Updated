@@ -157,6 +157,41 @@ if (!function_exists('import_vc_collect')) {
         return $out;
     }
 
+    /**
+     * "What it most likely means" for one disagreeing row, worked out from its own cells only (shown on Step 3 and in the workbook).
+     * value / unit cost is the quantity the sheet's value was worked out for. It "fits" when a quantity to 0.1 times the cost gives the value
+     * within 0.5 (currency rounding) and the 0.1 step is worth at least 1 (with a tiny cost every value would fit, which proves nothing).
+     * Returns [code, text]: code qty-changed | no-qty (counts 0, still valued) | no-value (counted, valued at 0) | no-fit. Never says loss or theft (a gap is not proof of loss).
+     */
+    function import_vc_why(?float $qty, float $cost, float $value, string $unit): array
+    {
+        $u = trim($unit) !== '' ? ' ' . trim($unit) : '';
+        $fq = function (float $v): string {
+            return rtrim(rtrim(number_format($v, 3, '.', ','), '0'), '.');
+        };
+        $fits = false;
+        $iq = null;
+        if (abs($cost) > 0.00005 && 0.1 * abs($cost) >= 1) {
+            $iq = round($value / $cost, 1);
+            $fits = $iq >= 0 && abs($iq * $cost - $value) <= 0.5;
+        }
+        $zero = $qty !== null && abs($qty) < 1e-9;
+        if (!$zero && $qty !== null && abs($value) <= 0.5) {
+            return ['no-value', 'The sheet counts ' . $fq($qty) . $u . ' but values them at 0. The quantity was entered or changed without updating the value.'];
+        }
+        if ($zero) {
+            $fits = $fits && $iq > 0;
+            return ['no-qty', 'The sheet counts 0 but still values ' . ($fits ? $fq($iq) . $u : 'stock') . '. If ' . ($fits ? 'they were' : 'it was')
+                . ' sold or used, the value was not updated; if not, ' . ($fits ? 'they are' : 'it is') . ' missing from the count.'];
+        }
+        if ($fits && $qty !== null) {
+            $d = round($qty - $iq, 3);
+            return ['qty-changed', 'The value was worked out for ' . $fq($iq) . $u . '; the count now says ' . $fq($qty) . ' (' . $fq(abs($d)) . ($d > 0 ? ' more' : ' fewer')
+                . '). The quantity was changed without updating the value.'];
+        }
+        return ['no-fit', 'The value does not fit a whole quantity at this unit cost: the unit cost was changed, or there is a typing mistake.'];
+    }
+
     /** The comparison. $questions = the analysis questions after the answers were applied (answer / answer_detail); $items = the resolved items (missing prices). */
     function import_vc_finish(array $col, array $questions, array $items = []): array
     {
@@ -227,7 +262,8 @@ if (!function_exists('import_vc_collect')) {
                     }
                 }
                 $g = ['sheet' => $sh['name'], 'header' => $header, 'letter' => $letter, 'compared' => 0, 'differ' => 0, 'more_n' => 0, 'more_sum' => 0.0,
-                    'less_n' => 0, 'less_sum' => 0.0, 'no_qty_n' => 0, 'calc_total' => 0.0, 'column_total' => 0.0, 'packs' => 0];
+                    'less_n' => 0, 'less_sum' => 0.0, 'no_qty_n' => 0, 'calc_total' => 0.0, 'column_total' => 0.0, 'packs' => 0,
+                    'why_qty-changed' => 0, 'why_no-qty' => 0, 'why_no-value' => 0, 'why_no-fit' => 0];
                 foreach ($sh['rows'] as $ord => $r) {
                     $v = $valOf($r, $letter);
                     if ($r[5] === null || $r[6] === null || $v === null) {
@@ -258,7 +294,10 @@ if (!function_exists('import_vc_collect')) {
                     if ($noQty) {
                         $g['no_qty_n']++;
                     }
+                    $why = import_vc_why($r[5] === null ? null : (float)$r[5], (float)$cost, (float)$v, (string)$r[4]);
+                    $g['why_' . $why[0]] = ($g['why_' . $why[0]] ?? 0) + 1;
                     $all[] = ['sheet' => $sh['name'], 'si' => $si, 'row' => $r[1], 'name' => $r[2], 'category' => $r[3], 'unit' => $r[4], 'qty' => $r[5],
+                        'why_code' => $why[0], 'why' => $why[1],
                         'price' => $r[6], 'pack' => $pk, 'cost' => $cost, 'calc' => round($calc, 2), 'value' => $v, 'diff' => round($diff, 2), 'abs' => abs($diff),
                         'kind' => $noQty ? 'no-qty' : ($diff > 0 ? 'more' : 'less'), 'header' => $header,
                         'implied' => abs($cost) > 0.00005 ? round($v / $cost, 2) : null,
@@ -395,10 +434,19 @@ if (!function_exists('import_vc_collect')) {
             $w->row($si, $rn++, [1 => $s($label, $tx), 2 => is_string($val) ? $s($val, $tx) : $n($val, is_int($val) ? $qn : $nm)]);
         }
         $rn++;
-        $notes = [
-            'The import uses Quantity x Unit Cost for every row. The sheet\'s "' . $valueHead . '" column is never imported; where it disagrees, it was most likely not recalculated after quantities or costs were changed.',
-            'A gap is NOT proof of loss: it can be stock sold or used since an older count, a typing or counting mistake, or real loss. Ask the manager to explain each row in the last column of the next tab, starting at the top.',
-        ];
+        $wQ = array_sum(array_column($fin['groups'], 'why_qty-changed'));
+        $wZ = array_sum(array_column($fin['groups'], 'why_no-qty'));
+        $wQ += array_sum(array_column($fin['groups'], 'why_no-value'));       // valued at 0 = worked out for a quantity of 0
+        $wN = array_sum(array_column($fin['groups'], 'why_no-fit'));
+        $notes = ['The import uses Quantity x Unit Cost for every row. The sheet\'s "' . $valueHead . '" column is never imported.'];
+        if ($wQ + $wZ > 0) {
+            $notes[] = ($wQ + $wZ) . ' of ' . (int)$fin['differ'] . ' rows: the value fits a different quantity at the same unit cost' . ($wZ > 0 ? ' (' . $wZ . ' of them now count' . ($wZ === 1 ? 's' : '') . ' 0)' : '')
+                . ', so the quantity was changed and the "' . $valueHead . '" column was not updated.';
+        }
+        if ($wN > 0) {
+            $notes[] = $wN . ' of ' . (int)$fin['differ'] . ' rows: the value fits no whole quantity at this unit cost, so the unit cost was changed or there is a typing mistake.';
+        }
+        $notes[] = 'A gap is NOT proof of loss: it can be stock sold or used since an older count, a typing or counting mistake, or real loss. The column "What it most likely means" on the next tab explains each row from its own cells; ask the manager to explain each row in the last column, starting at the top.';
         foreach ($fin['sheets'] as $sh) {
             foreach ($sh['value_cols'] as $letter => $hd) {
                 $r = max(1, (int)$sh['header_row'] + 1);
@@ -421,14 +469,14 @@ if (!function_exists('import_vc_collect')) {
         $tab = mb_substr($valueHead, 0, 24) . ' wrong';
         $cols = $multi ? [18] : [];
         $frz = [$multi ? 2 : 1, 1];          // the header row and the row number stay in view
-        $di = $w->addSheet($tab, ['cols' => array_merge($cols, [8, 28, 20, 10, 10, 14, 16, 16, 16, 14, 40]), 'freeze' => $frz]);
+        $di = $w->addSheet($tab, ['cols' => array_merge($cols, [8, 28, 20, 10, 10, 14, 16, 16, 16, 14, 48, 40]), 'freeze' => $frz]);
         $hdr = [];
         $c = 1;
         if ($multi) {
             $hdr[$c++] = $s('Sheet', $h);
         }
         foreach (['Sheet row', 'Item', 'Category', 'Unit', 'Qty in sheet', 'Unit cost', 'Correct value (Qty x Cost)', 'Sheet "' . $valueHead . '" says',
-            'Difference (sheet minus correct)', 'Qty the sheet value implies', 'Manager\'s explanation'] as $lbl) {
+            'Difference (sheet minus correct)', 'Qty the sheet value implies', 'What it most likely means', 'Manager\'s explanation'] as $lbl) {
             $hdr[$c++] = $s($lbl, $h);
         }
         $w->row($di, 1, $hdr, 42.0);
@@ -449,6 +497,7 @@ if (!function_exists('import_vc_collect')) {
             $cells[$c++] = $n($d['value'], $nm);
             $cells[$c++] = $n($d['diff'], $d['diff'] > 0 ? $red : $grn);
             $cells[$c++] = $d['implied'] === null ? $s('', $tx) : $n($d['implied'], $qn);
+            $cells[$c++] = $s((string)($d['why'] ?? ''), $tx);
             $cells[$c++] = $s('', $fill);
             $w->row($di, $rn++, $cells);
         }

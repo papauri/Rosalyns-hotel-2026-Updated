@@ -60,6 +60,7 @@ if (!function_exists('import_crosscheck')) {
                         'price_src' => isset($f['unit_price']) ? $f['unit_price']['source'] : null,
                         'unit' => isset($f['unit']) ? $f['unit']['value'] : null,
                         'unit_src' => isset($f['unit']) ? $f['unit']['source'] : null,
+                        'qty' => $row['computed']['qty_total']['value'] ?? null,      // the counted quantity the import uses (unknown = null)
                     ];
                 }
             }
@@ -294,6 +295,50 @@ if (!function_exists('import_crosscheck')) {
     }
 
     /**
+     * The case-price question text: the row's unit as written, the counted quantity and what the line is worth as written, then what each
+     * answer does. Everything comes from the row's own cells and the peers' median; the pack size in the example is only an illustration
+     * (the price divided to about the usual one), never applied.
+     */
+    function import_cc_case_text(array $row, float $price, float $med, string $where, string $src): string
+    {
+        $u = trim((string)($row['fields']['unit']['value'] ?? ''));
+        $per = $u !== '' ? 'per ' . $u : 'per unit';
+        $qty = $row['computed']['qty_total']['value'] ?? null;
+        $t = 'Row ' . $row['row'] . ' "' . $row['fields']['item_name']['value'] . '": the unit price is ' . import_fmt_money($price) . ' ' . $per . ' (' . $src . '), about '
+            . round($price / $med, 1) . ' times the usual ' . import_fmt_money($med) . ' in its ' . $where . '.';
+        if ($qty !== null && (float)$qty > 0) {
+            $t .= ' The sheet counts ' . import_cc_qty((float)$qty) . ($u !== '' ? ' ' . $u : '') . ', so as written this line is worth ' . import_fmt_money(round((float)$qty * $price, 2)) . '.';
+        } elseif ($qty !== null) {
+            $t .= ' The sheet counts 0, so this answer only sets the cost of one ' . ($u !== '' ? $u : 'unit') . ' for later stock.';
+        }
+        return $t . ' Is that the price of one unit, or of a whole case/pack? The quantity stays in the sheet\'s unit' . ($u !== '' ? ' (' . $u . ')' : '')
+            . ', so choose "whole pack" only if the quantity was counted in single units, not in packs.';
+    }
+
+    /** Options of the case-price question: the keys never change (per-unit / per-case); the labels say what each answer does with this row's numbers. */
+    function import_cc_case_options(array $row, float $price, float $med): array
+    {
+        $u = trim((string)($row['fields']['unit']['value'] ?? ''));
+        $one = $u !== '' ? $u : 'unit';
+        $qty = $row['computed']['qty_total']['value'] ?? null;
+        $hasQty = $qty !== null && (float)$qty > 0;
+        $unitLbl = 'One ' . $one . ' costs ' . import_fmt_money($price) . ' (import as written)';
+        if ($hasQty) {
+            $unitLbl .= ': ' . import_cc_qty((float)$qty) . ' ' . $one . ' counted at ' . import_fmt_money($price) . ' = ' . import_fmt_money(round((float)$qty * $price, 2));
+        }
+        $ex = max(2, (int)round($price / $med));
+        $each = round($price / $ex, 4);
+        $caseLbl = 'It is the price of a whole case/pack: I will type how many ' . $one . ' one case/pack holds (for example ' . $ex . ' -> ' . import_fmt_money($each) . ' per ' . $one;
+        if ($hasQty) {
+            $caseLbl .= ', ' . import_cc_qty((float)$qty) . ' ' . $one . ' = ' . import_fmt_money(round((float)$qty * $each, 2));
+        }
+        return [
+            ['key' => 'per-unit', 'label' => $unitLbl],
+            ['key' => 'per-case', 'label' => $caseLbl . ')'],
+        ];
+    }
+
+    /**
      * "Price looks like a case price" questions: a price far ABOVE the others in its category (or the sheet), judged on a log scale from
      * the peers' own spread - the same rule as the price check (price-check.php): ask when ln(price / median) is more than
      * k x max(robust spread of the peers' logs, floor). No fixed ratio: a sheet of widely different prices tolerates more.
@@ -349,20 +394,67 @@ if (!function_exists('import_crosscheck')) {
                     continue;
                 }
                 $src = $row['fields']['unit_price']['source'];
-                $q = import_q('case-price', 'Row ' . $row['row'] . ' "' . $row['fields']['item_name']['value'] . '" has a unit price of ' . import_fmt_money($price)
-                    . ' (' . $src . '), about ' . round($price / $med, 1) . ' times the usual ' . import_fmt_money($med) . ' in its ' . ($scope === 'category' ? 'category "' . $cat . '"' : 'sheet')
-                    . '. Is that the price of one unit, or of a whole case/pack?', [
+                $q = import_q('case-price', import_cc_case_text($row, $price, $med, $scope === 'category' ? 'category "' . $cat . '"' : 'sheet', $src), [
                     'sheet' => $sh['name'], 'row' => $row['row'], 'cells' => [$src],
-                    'options' => [
-                        ['key' => 'per-unit', 'label' => 'Price of one unit (import as written)'],
-                        ['key' => 'per-case', 'label' => 'Price of a whole case/pack (I will enter the pack size)'],
-                    ],
+                    'options' => import_cc_case_options($row, $price, $med),
                     'case_ratio' => round($price / $med, 2),
                 ]);
                 $q['row_uids'] = [$row['uid']];
                 import_register_question($analysis, $q);
             }
         }
+    }
+
+    /**
+     * Two normalised names that differ in exactly ONE word, where that word pair is not a near-spelling of each other, are different
+     * products, not a typing mistake ("essence almond" / "essence lemon", "black tea" / "black tie", "sweet red" / "sweet rose").
+     * Near-spelling = edit distance at most max(1, 20% of the longer word) OR at least 80% similar letters ("heinken" / "heineken",
+     * "windowhoek" / "windhoek", "stoot" / "stout" stay a question). Generic text rule, no hotel words.
+     */
+    function import_cc_distinct_one_word(string $k1, string $k2): bool
+    {
+        $w1 = explode(' ', $k1);
+        $w2 = explode(' ', $k2);
+        if (count($w1) !== count($w2)) {
+            return false;
+        }
+        $diff = [];
+        foreach ($w1 as $i => $w) {
+            if ($w !== $w2[$i]) {
+                $diff[] = [$w, $w2[$i]];
+            }
+        }
+        if (count($diff) !== 1) {
+            return false;
+        }
+        [$a, $b] = $diff[0];
+        $long = max(strlen($a), strlen($b));
+        $dist = levenshtein($a, $b);
+        similar_text($a, $b, $pct);
+        return $dist > max(1, (int)floor(0.2 * $long)) && $pct < 79.9999;
+    }
+
+    /** "row 9: 4 bottle, 660 each" for the possible-typo text (what the person compares before merging). */
+    function import_cc_row_desc(array $e): string
+    {
+        $u = trim((string)($e['unit'] ?? ''));
+        $q = ($e['qty'] ?? null) !== null ? import_cc_qty((float)$e['qty']) . ($u !== '' ? ' ' . $u : '') : 'quantity unknown';
+        $p = (($e['price'] ?? null) !== null && (float)$e['price'] > 0) ? import_fmt_money($e['price']) . ' each' : 'no unit cost';
+        return 'row ' . $e['row'] . ': ' . $q . ', ' . $p;
+    }
+
+    /** The rows of one name, described (at most 3, then "and N more rows"). */
+    function import_cc_rows_desc(array $rows): string
+    {
+        $parts = array_map('import_cc_row_desc', array_slice($rows, 0, 3));
+        $more = count($rows) - 3;
+        return implode('; ', $parts) . ($more > 0 ? '; and ' . $more . ' more row' . ($more > 1 ? 's' : '') : '');
+    }
+
+    /** A quantity as text: up to 3 decimals, no trailing zeros (4, 28.3, 1,250). */
+    function import_cc_qty(float $v): string
+    {
+        return rtrim(rtrim(number_format($v, 3, '.', ','), '0'), '.');
     }
 
     /** Possible-typo suggestions (non-blocking). Names in $pools are compared pairwise or against known names. */
@@ -400,7 +492,7 @@ if (!function_exists('import_crosscheck')) {
                         continue;
                     }
                     $score = import_name_score_norm($k, $k2);
-                    if ($score < $min) {
+                    if ($score < $min || import_cc_distinct_one_word($k, $k2)) {
                         continue;
                     }
                     $sug = [['name' => $names[$k2]['name'], 'score' => round($score, 3)]];
@@ -413,15 +505,47 @@ if (!function_exists('import_crosscheck')) {
                     }
                     $n1 = $names[$k]['name'];
                     $n2 = $names[$k2]['name'];
-                    $c1 = count($names[$k]['rows']);
-                    $c2 = count($names[$k2]['rows']);
-                    $q = import_q('possible-typo', '"' . $n1 . '" (' . $c1 . ' row' . ($c1 > 1 ? 's' : '') . ') and "' . $n2 . '" (' . $c2 . ' row' . ($c2 > 1 ? 's' : '') . ') look very similar. Is one a typing mistake?', [
+                    $rowsAll = array_merge($names[$k]['rows'], $names[$k2]['rows']);
+                    $sheetsOf = array_unique(array_map(function ($e) {
+                        return $e['a'] . '|' . $e['s'];
+                    }, $rowsAll));
+                    // what "Use X for both" really does on each path (resolve.php): one sheet = one item, quantities added;
+                    // two sheets = one name, then the "same item on two sheets" question (add, or first sheet only); two files = one name only
+                    $tail = '';
+                    if ($mode === 'files') {
+                        $effect = '"Use ... for both" only gives them the same name: each file is imported on its own, with its own quantity.';
+                    } elseif (count($sheetsOf) > 1) {
+                        $effect = '"Use ... for both" gives them one name; because they are on different sheets you are then asked whether to add the quantities together or use the first sheet only.';
+                    } else {
+                        $units = array_unique(array_map(function ($e) {
+                            return import_unit_key((string)($e['unit'] ?? ''));
+                        }, $rowsAll));
+                        $qs = array_column($rowsAll, 'qty');
+                        $sumTxt = '';
+                        if (count($qs) === count($rowsAll) && !in_array(null, $qs, true) && count($units) === 1) {
+                            $u0 = trim((string)($rowsAll[0]['unit'] ?? ''));
+                            $sumTxt = ' (' . implode(' + ', array_map(function ($v) {
+                                return import_cc_qty((float)$v);
+                            }, $qs)) . ' = ' . import_cc_qty((float)array_sum($qs)) . ($u0 !== '' ? ' ' . $u0 : '') . ')';
+                        }
+                        $effect = '"Use ... for both" merges them into ONE item and ADDS the quantities' . $sumTxt . '. If they are different products, keep both.';
+                        $tail = ' (one item, quantities added)';
+                        $unitsSet = array_values(array_filter(array_unique(array_map(function ($e) {
+                            return trim((string)($e['unit'] ?? ''));
+                        }, $rowsAll)), 'strlen'));
+                        if (count(array_filter(array_keys(array_flip(array_map('import_unit_key', $unitsSet))), 'strlen')) > 1) {
+                            $effect = 'Their units differ (' . implode(' / ', $unitsSet) . '), so their counts cannot be added: keep both, or fix the unit in the sheet first.';
+                            $tail = '';
+                        }
+                    }
+                    $q = import_q('possible-typo', '"' . $n1 . '" (' . import_cc_rows_desc($names[$k]['rows']) . ') and "' . $n2 . '" (' . import_cc_rows_desc($names[$k2]['rows'])
+                        . ') look very similar. Is one a typing mistake? ' . $effect, [
                         'sheet' => $names[$k]['rows'][0]['sheet'], 'row' => null, 'blocking' => false, 'default' => 'keep',
                         'cells' => [import_source_ref($names[$k]['rows'][0]['sheet'], 'row ' . $names[$k]['rows'][0]['row']), import_source_ref($names[$k2]['rows'][0]['sheet'], 'row ' . $names[$k2]['rows'][0]['row'])],
                         'options' => [
                             ['key' => 'keep', 'label' => 'They are different — keep both as written'],
-                            ['key' => 'use:' . $n1, 'label' => 'Use "' . $n1 . '" for both'],
-                            ['key' => 'use:' . $n2, 'label' => 'Use "' . $n2 . '" for both'],
+                            ['key' => 'use:' . $n1, 'label' => 'Use "' . $n1 . '" for both' . $tail],
+                            ['key' => 'use:' . $n2, 'label' => 'Use "' . $n2 . '" for both' . $tail],
                         ],
                         'suggestion' => $sug[0],
                     ]);
@@ -443,12 +567,16 @@ if (!function_exists('import_crosscheck')) {
                 if (isset($knownKeys[$k])) {
                     continue;
                 }
-                $sug = import_suggest_names($info['name'], $known, ['min_score' => $min, 'max' => 1]);
+                // one whole word differs (Black tea / Black tie): a different product, not a spelling of the existing one - the next closest is tried
+                $sug = array_values(array_filter(import_suggest_names($info['name'], $known, ['min_score' => $min, 'max' => 3]), function ($x) use ($k) {
+                    return !import_cc_distinct_one_word($k, import_norm_text($x['name']));
+                }));
                 if (!$sug) {
                     continue;
                 }
                 $best = $sug[0]['name'];
-                $q = import_q('possible-typo', '"' . $info['name'] . '" is not in the existing list, but "' . $best . '" is. Did you mean "' . $best . '"?', [
+                $q = import_q('possible-typo', '"' . $info['name'] . '" is not in the existing list, but "' . $best . '" is. Did you mean "' . $best . '"? In the sheet: '
+                    . import_cc_rows_desc($info['rows']) . '. "Yes" puts ' . (count($info['rows']) > 1 ? 'these rows' : 'this row') . ' on the existing "' . $best . '" instead of creating a new item. If it is a different product, answer no.', [
                     'sheet' => $info['rows'][0]['sheet'], 'row' => null, 'blocking' => false, 'default' => 'keep',
                     'cells' => [$info['rows'][0]['sheet'] . '!row ' . $info['rows'][0]['row']],
                     'options' => [

@@ -1698,7 +1698,7 @@
             var colHead = heads.length === 1 ? heads[0] : 'Value column';
             det.appendChild(h('summary', null, 'Show the ' + rowsN(vc.differ) + ' (largest difference first)'));
             var st = { page: 1, size: 10, loaded: false };
-            var info = helpLine('Quantity and Unit cost are read from your sheet; Quantity × Unit cost is what the import uses; "' + colHead + '" is the sheet\'s own figure (never imported); Difference = the sheet\'s figure minus Quantity × Unit cost.');
+            var info = helpLine('Quantity and Unit cost are read from your sheet; Quantity × Unit cost is what the import uses; "' + colHead + '" is the sheet\'s own figure (never imported); Difference = the sheet\'s figure minus Quantity × Unit cost. "Most likely" is worked out from the row\'s own cells: the sheet\'s figure divided by the unit cost shows which quantity it was worked out for.');
             var sizeSel = h('select', 'di-select'); sizeSel.setAttribute('aria-label', 'Rows per page');
             [[10, 'Show 10'], [25, 'Show 25'], [50, 'Show 50'], [100, 'Show 100'], [0, 'Show all']].forEach(function (o) { var op = h('option', null, o[1]); op.value = String(o[0]); sizeSel.appendChild(op); });
             var wrap = h('div', 'di-tablewrap'), tb = h('table', 'di-table di-lt'), thead = h('thead'), htr = h('tr');
@@ -1722,6 +1722,7 @@
                         var t4 = cell('Quantity × Unit cost'); t4.textContent = money(x.calc);
                         var t5 = cell(colHead); t5.textContent = money(x.value);
                         var t6 = cell('Difference'); add(t6, h('strong', null, (x.diff > 0 ? '+' : '−') + money(Math.abs(x.diff))), h('div', 'di-small', x.diff > 0 ? 'the sheet shows more' : 'the sheet shows less'));
+                        if (x.why) { t6.appendChild(h('div', 'di-small', 'Most likely: ' + x.why)); }
                         add(tr, t1, t2, t3, t4, t5, t6); body.appendChild(tr);
                     });
                     clear(pgBox);
