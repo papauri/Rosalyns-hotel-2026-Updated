@@ -84,6 +84,12 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Group documents print each distinct cancellation policy text ("For REF1, REF2: ..."). No money moves in any of these. History: "Made the primary room of the group", "Primary room of the group moved", "Group invoice number kept", "Added to a group", "Rooms added to the group", "Removed from the group", "Group invoice number left with the group", "Room removed from the group".
 - Guides: Bookings (groups), booking details group table, FAQ "how do I join two bookings into one group / take a room out". Assistant: group answers must know these exist; it has no actions for them (screen only).
 
+### Group bookings Ship C2: move credit between rooms, move group payment to a leaving room (2026-11-18, owner ask) — hashes in TASKS.md
+- Booking details "Rooms in this group": when one room has credit and others owe, "Use this credit for the rooms that owe" (review each room's owed now → after, then confirm). It issues one credit note on the room with credit and applies it to the owing rooms; payments and receipts never move. Unused credit stays on its room. Refused when any room is company-billed. Needs Issue refunds (refund_payment).
+- Remove from group: optional "Move part of the group payment to this room" (default none, at most what the room owes and what the other rooms can give); shown before confirm, done in the same step as the removal. Needs Issue refunds.
+- A cancelled or no-show room gives only its credit, never what its policy kept. History: "Credit moved to rooms that owe", "Credit received from another room", "Group payment moved to a room that left", "Group payment received on leaving the group".
+- Guides: booking details group table, Remove from group, credit notes page, FAQ "a room left early and has credit, others owe". Assistant: knows these screen actions exist; no Assistant action.
+
 
 ## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
 

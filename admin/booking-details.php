@@ -88,6 +88,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_bdNeed = rhBookingActionPermission((string)$_POST['action']); // correct_stay_after_checkout (group bookings plan A8)
     } elseif (in_array((string)($_POST['action'] ?? ''), ['group_op_preview', 'group_op_apply'], true)) {
         $_bdNeed = 'edit_booking'; // Make primary room / Remove from group (group bookings plan R3 / R6)
+    } elseif (in_array((string)($_POST['action'] ?? ''), ['group_credit_preview', 'group_credit_apply'], true)) {
+        $_bdNeed = 'refund_payment'; // A5: a room's credit pays the rooms that owe (money moves through a credit note)
     } elseif (isset($_POST['adjust_dates']) || isset($_POST['adjust_dates_preview'])) {
         $_bdNeed = rhBookingActionPermission('adjust_dates');
     } elseif (isset($_POST['update_payment'])) {
@@ -1290,7 +1292,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_note'])) {
 
 // Group table actions (group bookings plan R3 "Make primary room", R6 "Remove from group"; rule A6): review
 // (group_op_preview, read only) then confirm (group_op_apply, re-checked under the row locks against the reviewed state).
-// edit_booking is checked above. No money moves. JSON only.
+// edit_booking is checked above. Money moves only on Remove with an amount (D-R6, needs refund_payment too). JSON only.
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] ?? ''), ['group_op_preview', 'group_op_apply'], true)) {
     require_once __DIR__ . '/../includes/booking-group-ops.php';
     header('Content-Type: application/json; charset=utf-8');
@@ -1310,14 +1312,51 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] 
     }
     $goOpts = ['user_id' => (int)($user['id'] ?? 0), 'user_name' => (string)($user['full_name'] ?? ($user['username'] ?? '')),
         'dry_run' => !$goApply, 'expect_state' => $goApply ? (string)$_POST['state'] : ''];
+    // D-R6 (accounting lead): optional "move part of the group payment to this room" on Remove. The amount is reviewed
+    // first (rh_group_lump_quote) and moved inside the removal's own transaction (after_detach -> rh_group_lump_apply),
+    // so the room leaves with the money or nothing changes at all. Moving money also needs refund_payment.
+    $goMove = null;
+    $goMoveAmt = 0.0;
+    $goCanMove = hasPermission((int)($user['id'] ?? 0), 'refund_payment');
+    if ($goOp === 'remove') {
+        require_once __DIR__ . '/../includes/group-credit-move.php';
+        $goMoveRaw = trim(str_replace([',', ' '], '', (string)($_POST['move_amount'] ?? '')));
+        if ($goMoveRaw !== '' && (!is_numeric($goMoveRaw) || (float)$goMoveRaw < 0)) {
+            http_response_code(422);
+            echo json_encode(['success' => false, 'message' => 'Enter the amount to move as a number, 0 or more.']);
+            exit;
+        }
+        $goMoveAmt = $goMoveRaw === '' ? 0.0 : round((float)$goMoveRaw, 2);
+        if ($goMoveAmt > BALANCE_TOLERANCE && !$goCanMove) {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'message' => 'Moving group money needs the "Issue & settle refunds" permission. Set the amount to 0 to remove the room only.']);
+            exit;
+        }
+        if (!$goApply) {
+            $goMove = rh_group_lump_quote($pdo, $goTarget, $goRoot, $goMoveAmt);
+            if (!$goMove['ok']) {
+                echo json_encode(['success' => false, 'message' => (string)$goMove['error']]);
+                exit;
+            }
+        } elseif ($goMoveAmt > BALANCE_TOLERANCE) {
+            $goMoveState = trim((string)($_POST['move_state'] ?? ''));
+            $goOpts['after_detach'] = static function (PDO $pdo, array $r) use ($goTarget, $goMoveAmt, $goMoveState, $goOpts, &$goMove): void {
+                $goMove = rh_group_lump_apply($pdo, $goTarget, (int)$r['new_root'], $goMoveAmt, $goMoveState, $goOpts);
+            };
+        }
+    }
     try {
-        // C2 (accounting lead) plugs its optional "move part of a lump sum to the leaving room" step in here through
-        // $goOpts['after_detach'] for op=remove (runs inside the same transaction, after the room is detached).
         $goRes = $goOp === 'make_primary' ? rh_group_repoint($pdo, $goRoot, $goTarget, $goOpts) : rh_group_remove($pdo, $goTarget, $goOpts);
+        if ($goApply && function_exists('rh_payment_audit_flush')) {
+            rh_payment_audit_flush($pdo); // payment History of a D-R6 move, written once the removal is committed
+        }
     } catch (Throwable $goE) {
         error_log('group_op ' . $goOp . ' booking ' . $goTarget . ': ' . $goE->getMessage());
         http_response_code(409);
-        echo json_encode(['success' => false, 'message' => 'Nothing was changed: the change could not be saved. Reload the page and try again.']);
+        $goErr = (class_exists('RhGroupMoneyRefused', false) && $goE instanceof RhGroupMoneyRefused)
+            ? $goE->getMessage()
+            : 'Nothing was changed: the change could not be saved. Reload the page and try again.';
+        echo json_encode(['success' => false, 'message' => $goErr]);
         exit;
     }
     if (empty($goRes['success'])) {
@@ -1337,7 +1376,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] 
     if ($goApply) {
         $goMsg = $goOp === 'make_primary'
             ? 'Primary room is now ' . $goRes['new_label'] . '. No money moved.'
-            : $goRes['label'] . ' is now an individual booking. No money moved.';
+            : $goRes['label'] . ' is now an individual booking. ' . (is_array($goMove) && !empty($goMove['credit_notes'])
+                ? $goMoney((float)$goMove['amount']) . ' of the group payment moved to it (credit note ' . implode(', ', $goMove['credit_notes']) . ').'
+                : 'No money moved.');
         echo json_encode(['success' => true, 'message' => $goMsg, 'reload' => 'booking-details.php?id=' . ($goOp === 'remove' ? $goTarget : (int)$booking_id)]);
         exit;
     }
@@ -1370,11 +1411,86 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] 
             ? 'The group invoice number ' . $goRes['invoice_number'] . ' stays with the group; this room gets its own number when its invoice is made.'
             : 'This room gets its own invoice for its own stay.'];
         $goLines[] = ['Cancellation policy', 'Kept as booked.'];
-        $goLines[] = ['Money', 'No money moves. Payments stay on the room they were recorded on.'];
+        $goLines[] = ['Money', 'Payments stay on the room they were recorded on.'];
+        if (is_array($goMove) && $goMove['amount'] > BALANCE_TOLERANCE) {
+            $goLines[] = ['Group payment moved to this room', $goMoney((float)$goMove['amount']) . ' (at most ' . $goMoney((float)$goMove['max']) . '), by a credit note from each room below. No payment row or receipt is changed.'];
+            foreach ($goMove['sources'] as $goS) {
+                if ($goS['take'] > BALANCE_TOLERANCE) {
+                    $goLines[] = [$goS['label'] . ' gives ' . $goMoney((float)$goS['take']), 'Paid ' . $goMoney((float)$goS['paid']) . ' -> ' . $goMoney((float)$goS['paid_after'])
+                        . ', owed ' . $goMoney((float)$goS['owed']) . ' -> ' . $goMoney((float)$goS['owed_after'])];
+                }
+            }
+            $goLines[] = [$goMove['leaving']['label'] . ' (leaving)', 'Paid ' . $goMoney((float)$goMove['leaving']['paid']) . ' -> ' . $goMoney((float)$goMove['leaving']['paid_after'])
+                . ', owed ' . $goMoney((float)$goMove['leaving']['owed']) . ' -> ' . $goMoney((float)$goMove['leaving']['owed_after'])];
+            $goLines[] = ['All these rooms together', 'Paid ' . $goMoney(round((float)$goMove['group_paid_before'] + (float)$goMove['leaving']['paid'], 2)) . ' before and after: the money only moves between them.'];
+        } else {
+            $goLines[] = ['Group payment moved to this room', 'None.' . (is_array($goMove) && $goMove['note'] !== '' ? ' ' . $goMove['note'] : '')];
+        }
         $goTitle = 'Remove from group';
         $goBtn = 'Confirm: remove from group';
     }
-    echo json_encode(['success' => true, 'state' => $goRes['state'], 'title' => $goTitle, 'button' => $goBtn, 'lines' => $goLines], JSON_INVALID_UTF8_SUBSTITUTE);
+    $goMoveOut = is_array($goMove) ? ['can' => $goCanMove && $goMove['max'] > BALANCE_TOLERANCE, 'max' => (float)$goMove['max'],
+        'amount' => (float)$goMove['amount'], 'state' => (string)$goMove['state']] : null;
+    echo json_encode(['success' => true, 'state' => $goRes['state'], 'title' => $goTitle, 'button' => $goBtn, 'lines' => $goLines, 'move' => $goMoveOut], JSON_INVALID_UTF8_SUBSTITUTE);
+    exit;
+}
+
+// A5 "Use this credit for the rooms that owe" (group bookings plan A5, accounting lead 2026-11-18): review
+// (group_credit_preview, read only) then confirm (group_credit_apply: re-read under the row locks, refused when any
+// figure changed). One credit note on the room with the credit, used on each room that owes. refund_payment is checked
+// above. JSON only.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] ?? ''), ['group_credit_preview', 'group_credit_apply'], true)) {
+    require_once __DIR__ . '/../includes/group-credit-move.php';
+    header('Content-Type: application/json; charset=utf-8');
+    $gcApply = (string)$_POST['action'] === 'group_credit_apply';
+    $gcSource = (int)($_POST['source_id'] ?? 0);
+    $gcRoot = rh_group_ops_root($pdo, (int)$booking_id);
+    if ($gcSource <= 0 || $gcRoot <= 0 || rh_group_ops_root($pdo, $gcSource) !== $gcRoot) {
+        http_response_code(422);
+        echo json_encode(['success' => false, 'message' => 'That room is not in this group. Reload the page.']);
+        exit;
+    }
+    if ($gcApply && trim((string)($_POST['state'] ?? '')) === '') {
+        http_response_code(422);
+        echo json_encode(['success' => false, 'message' => 'Review the move first.']);
+        exit;
+    }
+    $gcOpts = ['user_id' => (int)($user['id'] ?? 0), 'user_name' => (string)($user['full_name'] ?? ($user['username'] ?? '')),
+        'dry_run' => !$gcApply, 'expect_state' => $gcApply ? trim((string)$_POST['state']) : ''];
+    try {
+        $gcRes = rh_group_credit_move($pdo, $gcSource, $gcOpts);
+    } catch (Throwable $gcE) {
+        error_log('group_credit_move booking ' . $gcSource . ': ' . $gcE->getMessage());
+        http_response_code(409);
+        echo json_encode(['success' => false, 'message' => ($gcE instanceof RhGroupMoneyRefused) ? $gcE->getMessage() : 'Nothing was changed: the move could not be saved. Reload the page and try again.']);
+        exit;
+    }
+    if (empty($gcRes['success'])) {
+        if ($gcApply) {
+            http_response_code(409);
+        }
+        echo json_encode(['success' => false, 'message' => (string)$gcRes['error']]);
+        exit;
+    }
+    $gcM = static fn(float $v): string => (string)$currency_symbol . ' ' . number_format($v, 2);
+    if ($gcApply) {
+        echo json_encode(['success' => true, 'message' => $gcM((float)$gcRes['moved']) . ' of the credit on ' . $gcRes['source']['ref'] . ' now pays the rooms that owe (credit note ' . $gcRes['credit_note'] . ').',
+            'reload' => 'booking-details.php?id=' . (int)$booking_id]);
+        exit;
+    }
+    $gcNet = static fn(float $v): string => $v < -BALANCE_TOLERANCE ? $gcM(abs($v)) . ' in credit' : $gcM(max(0.0, $v)) . ' owed';
+    $gcLines = [['Room with the credit', $gcRes['source']['label'] . ': credit ' . $gcM((float)$gcRes['source']['credit']) . ' -> ' . $gcM((float)$gcRes['source']['credit_after'])
+        . ' (paid ' . $gcM((float)$gcRes['source']['paid']) . ' -> ' . $gcM((float)$gcRes['source']['paid_after']) . ')']];
+    foreach ($gcRes['rooms'] as $gcR) {
+        $gcLines[] = [$gcR['label'], 'Owed ' . $gcM((float)$gcR['owed']) . ' -> ' . $gcM((float)$gcR['owed_after']) . ' (gets ' . $gcM((float)$gcR['apply']) . ')'];
+    }
+    $gcLines[] = ['Moved', $gcM((float)$gcRes['moved']) . ' by one credit note issued on ' . $gcRes['source']['ref'] . ' and used on the rooms above, split by what each room owes.'];
+    if ($gcRes['left_over'] > BALANCE_TOLERANCE) {
+        $gcLines[] = ['Left as credit', $gcM((float)$gcRes['left_over']) . ' stays as credit on ' . $gcRes['source']['ref'] . ' (more than the other rooms owe). Refund it or issue a credit note as usual.'];
+    }
+    $gcLines[] = ['Group net position', $gcNet((float)$gcRes['net_before']) . ' -> ' . $gcNet((float)$gcRes['net_after']) . ' (unchanged: the money only moves between rooms)'];
+    $gcLines[] = ['Payments and receipts', 'No payment is moved or changed; every receipt stays as it is. Cancelled and no-show rooms are not paid from credit here.'];
+    echo json_encode(['success' => true, 'state' => $gcRes['state'], 'title' => 'Use this credit for the rooms that owe', 'button' => 'Confirm: move ' . $gcM((float)$gcRes['moved']), 'lines' => $gcLines], JSON_INVALID_UTF8_SUBSTITUTE);
     exit;
 }
 
@@ -2373,6 +2489,14 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         $bd_grp = rh_group_room_table($pdo, (int)$booking['id'], (string)$currency_symbol);
         $bd_go_on = !empty($bd_perm_edit) && !empty($bd_grp['rows']) && count($bd_grp['rows']) > 1; // R3 / R6 group actions
         $bd_grp_t = $bd_grp['totals'];
+        // A5: "Use this credit for the rooms that owe" on a room in credit while another open room owes (refund_payment).
+        $bd_gc_owing = [];
+        foreach ($bd_grp['rows'] as $gr) {
+            if ($gr['owed'] > BALANCE_TOLERANCE && !in_array(strtolower((string)$gr['status']), ['cancelled', 'no-show', 'expired'], true)) {
+                $bd_gc_owing[] = (int)$gr['id'];
+            }
+        }
+        $bd_gc_on = !empty($bd_gc_owing) && count($bd_grp['rows']) > 1 && hasPermission((int)($user['id'] ?? 0), 'refund_payment');
         $bd_m = static function (float $v) use ($currency_symbol): string {
             return htmlspecialchars((string)$currency_symbol) . ' ' . number_format($v, 2);
         };
@@ -2386,7 +2510,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             'credit' => 'Paid above what the room is billed, held for the payer. Empty when the room is not in credit.',
             'owed' => "What is still to be paid on the room: Billed less Paid, never below zero. The same figure as Balance due on that room's own page.",
             'rate' => 'The nightly rate the room was booked at (VAT and levy included) times its nights. Never today\'s price.',
-            'net' => 'Owed by all rooms less the credit held on any room. Display only: credit on one room is not moved to another here.',
+            'net' => 'Owed by all rooms less the credit held on any room. "Use this credit for the rooms that owe" moves a room\'s credit to the rooms that owe by a credit note; this figure stays the same.',
         ];
         ?>
         <section class="bd-group-rooms" aria-labelledby="bdGroupRoomsTitle">
@@ -2421,7 +2545,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                             <th scope="col" class="num">Credit <i class="help" data-tip="<?php echo htmlspecialchars($bd_grp_help['credit']); ?>">?</i></th>
                             <th scope="col" class="num">Owed <i class="help" data-tip="<?php echo htmlspecialchars($bd_grp_help['owed']); ?>">?</i></th>
                             <?php if ($bd_go_on): ?>
-                            <th scope="col">Group <i class="help" data-tip="Make primary: that room becomes the group's lead (contact, documents, folio); the group invoice number stays the same. Remove: the room becomes an individual booking with its own payments, balance and invoice. You see what changes before anything is saved. No money moves.">?</i></th>
+                            <th scope="col">Group <i class="help" data-tip="Make primary: that room becomes the group's lead (contact, documents, folio); the group invoice number stays the same. Remove: the room becomes an individual booking with its own payments, balance and invoice; you can also move part of the group payment to it. You see what changes before anything is saved.">?</i></th>
                             <?php endif; ?>
                         </tr>
                     </thead>
@@ -2441,7 +2565,11 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                             <td data-label="Billed" class="num"><?php echo $bd_m($gr['billed']); ?></td>
                             <td data-label="Paid" class="num"><?php echo $bd_m($gr['paid']); ?></td>
                             <td data-label="Refunds" class="num"><?php echo $gr['refunds'] > BALANCE_TOLERANCE ? $bd_m($gr['refunds']) : '&mdash;'; ?><?php if ($gr['credit_note_refunds'] > BALANCE_TOLERANCE): ?> <i class="help" data-tip="<?php echo htmlspecialchars($bd_m($gr['credit_note_refunds']) . ' of this room\'s payments was moved to a credit note (not paid out, so not counted here).'); ?>">?</i><?php endif; ?></td>
-                            <td data-label="Credit" class="num"><?php echo $gr['credit'] > BALANCE_TOLERANCE ? $bd_m($gr['credit']) : '&mdash;'; ?></td>
+                            <td data-label="Credit" class="num"><?php echo $gr['credit'] > BALANCE_TOLERANCE ? $bd_m($gr['credit']) : '&mdash;'; ?><?php
+                                if ($bd_gc_on && $gr['credit'] > BALANCE_TOLERANCE && array_diff($bd_gc_owing, [(int)$gr['id']])): ?>
+                                <span class="bd-group-rooms__credit-use"><button type="button" class="btn-secondary btn-sm" data-group-credit="<?php echo (int)$gr['id']; ?>">Use this credit for the rooms that owe</button>
+                                <i class="help" data-tip="Pays the other rooms that still owe from this room's credit, split by what each owes. One credit note is issued on this room and used on those rooms; no payment or receipt changes. Cancelled and no-show rooms are left out. You see every room's figures before anything is saved.">?</i></span>
+                                <?php endif; ?></td>
                             <td data-label="Owed" class="num"><?php echo $bd_m($gr['owed']); ?></td>
                             <?php if ($bd_go_on): ?>
                             <td data-label="Group" class="bd-group-rooms__ops">
@@ -2457,9 +2585,9 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 </table>
             </div>
         </section>
-        <?php if ($bd_go_on): ?>
-        <!-- Group table actions (R3 / R6): review, then confirm. Inside the page container so in-place navigation keeps it.
-             C2 TODO (accounting lead): the optional "move part of a lump sum to the leaving room" step joins the Remove review here. -->
+        <?php if ($bd_go_on || $bd_gc_on): ?>
+        <!-- Group table actions (R3 / R6, A5 credit move, D-R6 move on remove): review, then confirm. Inside the page
+             container so in-place navigation keeps it. -->
         <div class="modal-overlay" id="groupOpModal" role="dialog" aria-modal="true" aria-labelledby="groupOpTitle">
             <div class="modal-content">
                 <div class="modal-header">
@@ -2469,6 +2597,16 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 <div class="modal-body">
                     <p class="bd-sc-note" style="margin-top:0;">Check what changes. Nothing is saved until you confirm.</p>
                     <div class="bd-sc-review"><dl id="groupOpLines"></dl></div>
+                    <div id="groupOpMove" class="bd-group-op-move" hidden>
+                        <label for="groupOpMoveAmt">Move part of the group payment to this room
+                            <i class="help" data-tip="Optional. Money the other rooms have paid moves to this room, so it leaves with its share paid. It is taken first from any room's credit, then in proportion to what each room paid, by a credit note from each room that gives. No payment or receipt changes. At most what this room owes and what the other rooms paid. Leave 0 to move nothing.">?</i>
+                        </label>
+                        <div class="bd-group-op-move__row">
+                            <input type="number" id="groupOpMoveAmt" min="0" step="0.01" value="0" inputmode="decimal">
+                            <button type="button" class="btn-secondary btn-sm" id="groupOpMoveReview">Review with this amount</button>
+                        </div>
+                        <small id="groupOpMoveMax" class="bd-group-op-move__max"></small>
+                    </div>
                     <p id="groupOpError" class="bd-group-op-error" role="alert" style="color:#b42318;font-weight:600;" hidden></p>
                 </div>
                 <div class="modal-actions modal-footer">
@@ -2487,48 +2625,92 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             var lines = document.getElementById('groupOpLines');
             var err = document.getElementById('groupOpError');
             var confirmBtn = document.getElementById('groupOpConfirm');
+            var moveBox = document.getElementById('groupOpMove');
+            var moveAmt = document.getElementById('groupOpMoveAmt');
+            var moveMax = document.getElementById('groupOpMoveMax');
+            var titleEl = document.getElementById('groupOpTitle');
             function showError(m) { err.textContent = m || ''; err.hidden = !m; }
-            function post(action, extra) {
+            function post(action, data) {
                 var fd = new FormData();
                 fd.append('action', action);
                 fd.append('csrf_token', csrf);
-                fd.append('op', current.op);
-                fd.append('target_id', String(current.target));
-                if (extra) Object.keys(extra).forEach(function (k) { fd.append(k, extra[k]); });
+                Object.keys(data || {}).forEach(function (k) { fd.append(k, data[k]); });
                 return fetch('booking-details.php?id=' + bookingId, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
                     .then(function (r) { return r.json().catch(function () { return { success: false, message: 'Unexpected reply (' + r.status + '). Reload the page and try again.' }; }); })
                     .catch(function () { return { success: false, message: 'No connection. Nothing was changed.' }; });
             }
+            function payload() {
+                if (current.kind === 'credit') return { source_id: String(current.target) };
+                var d = { op: current.op, target_id: String(current.target) };
+                if (current.op === 'remove') { d.move_amount = current.moveAmount; if (current.moveState) d.move_state = current.moveState; }
+                return d;
+            }
             function close() { modal.classList.remove('active'); current = null; }
+            function review() {
+                var ref = current;
+                lines.innerHTML = '';
+                showError('');
+                confirmBtn.disabled = true;
+                ref.state = '';
+                ref.moveState = '';
+                post(ref.kind === 'credit' ? 'group_credit_preview' : 'group_op_preview', payload()).then(function (res) {
+                    if (current !== ref) return;
+                    if (!res || !res.success) { showError((res && res.message) || 'Could not check this change.'); return; }
+                    ref.state = res.state;
+                    titleEl.textContent = res.title;
+                    (res.lines || []).forEach(function (l) {
+                        var dt = document.createElement('dt'); dt.textContent = l[0];
+                        var dd = document.createElement('dd'); dd.textContent = l[1];
+                        lines.appendChild(dt); lines.appendChild(dd);
+                    });
+                    if (ref.op === 'remove' && res.move) {
+                        ref.moveState = res.move.state;
+                        if (res.move.can || res.move.amount > 0) {
+                            moveBox.hidden = false;
+                            moveAmt.max = String(res.move.max);
+                            moveMax.textContent = 'At most ' + Number(res.move.max).toFixed(2) + '. Change the amount, then review again before you confirm.';
+                        }
+                    }
+                    confirmBtn.textContent = res.button || 'Confirm';
+                    confirmBtn.disabled = false;
+                });
+            }
+            function open(next, title) {
+                current = next;
+                moveBox.hidden = true;
+                moveAmt.value = '0';
+                moveMax.textContent = '';
+                confirmBtn.textContent = 'Confirm';
+                titleEl.textContent = title;
+                modal.classList.add('active');
+                review();
+            }
             modal.querySelectorAll('[data-group-op-close]').forEach(function (b) { b.addEventListener('click', close); });
             document.querySelectorAll('[data-group-op]').forEach(function (btn) {
                 btn.addEventListener('click', function () {
-                    current = { op: btn.getAttribute('data-group-op'), target: parseInt(btn.getAttribute('data-target'), 10), state: '' };
-                    lines.innerHTML = '';
-                    showError('');
-                    confirmBtn.disabled = true;
-                    confirmBtn.textContent = 'Confirm';
-                    document.getElementById('groupOpTitle').textContent = current.op === 'remove' ? 'Remove from group' : 'Make primary room';
-                    modal.classList.add('active');
-                    post('group_op_preview').then(function (res) {
-                        if (!current) return;
-                        if (!res || !res.success) { showError((res && res.message) || 'Could not check this change.'); return; }
-                        current.state = res.state;
-                        document.getElementById('groupOpTitle').textContent = res.title;
-                        (res.lines || []).forEach(function (l) {
-                            var dt = document.createElement('dt'); dt.textContent = l[0];
-                            var dd = document.createElement('dd'); dd.textContent = l[1];
-                            lines.appendChild(dt); lines.appendChild(dd);
-                        });
-                        confirmBtn.textContent = res.button || 'Confirm';
-                        confirmBtn.disabled = false;
-                    });
+                    var op = btn.getAttribute('data-group-op');
+                    open({ kind: 'op', op: op, target: parseInt(btn.getAttribute('data-target'), 10), state: '', moveAmount: '0', moveState: '' },
+                        op === 'remove' ? 'Remove from group' : 'Make primary room');
                 });
+            });
+            document.querySelectorAll('[data-group-credit]').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    open({ kind: 'credit', op: '', target: parseInt(btn.getAttribute('data-group-credit'), 10), state: '' }, 'Use this credit for the rooms that owe');
+                });
+            });
+            // A changed amount must be reviewed again before it can be confirmed.
+            moveAmt.addEventListener('input', function () { if (current) { confirmBtn.disabled = true; showError(''); } });
+            document.getElementById('groupOpMoveReview').addEventListener('click', function () {
+                if (!current || current.op !== 'remove') return;
+                current.moveAmount = (moveAmt.value || '0').trim();
+                review();
             });
             confirmBtn.addEventListener('click', function () {
                 if (!current || !current.state) return;
                 confirmBtn.disabled = true;
-                post('group_op_apply', { state: current.state }).then(function (res) {
+                var data = payload();
+                data.state = current.state;
+                post(current.kind === 'credit' ? 'group_credit_apply' : 'group_op_apply', data).then(function (res) {
                     if (!res || !res.success) { showError((res && res.message) || 'Nothing was changed.'); return; }
                     window.location.href = res.reload || ('booking-details.php?id=' + bookingId);
                 });

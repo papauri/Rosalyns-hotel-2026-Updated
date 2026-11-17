@@ -243,7 +243,12 @@ if (!function_exists('applyCreditNote')) {
                 throw new RuntimeException('Valid booking ID is required.');
             }
 
-            $pdo->beginTransaction();
+            // A caller's transaction is joined (group credit move, plan A5 / D-R6): the caller then commits or rolls back
+            // and flushes the payment History; on its own the function opens and commits its own, as before.
+            $ownTx = !$pdo->inTransaction();
+            if ($ownTx) {
+                $pdo->beginTransaction();
+            }
 
             // Lock the CN row
             $cnStmt = $pdo->prepare("SELECT * FROM credit_notes WHERE id = ? FOR UPDATE");
@@ -259,7 +264,9 @@ if (!function_exists('applyCreditNote')) {
             if ($cn['expires_at'] !== null && $cn['expires_at'] < date('Y-m-d')) {
                 // Auto-expire
                 $pdo->prepare("UPDATE credit_notes SET status='expired', updated_at=NOW() WHERE id=?")->execute([$creditNoteId]);
-                $pdo->commit();
+                if ($ownTx) {
+                    $pdo->commit();
+                }
                 throw new RuntimeException('This credit note has expired and can no longer be used.');
             }
 
@@ -460,9 +467,11 @@ if (!function_exists('applyCreditNote')) {
                         . ' (note balance left ' . number_format(max(0, $newBalance), 2) . ').' . ($notes !== '' ? ' ' . $notes : '')]);
             }
 
-            $pdo->commit();
-            if (function_exists('rh_payment_audit_flush')) {
-                rh_payment_audit_flush($pdo);
+            if ($ownTx) {
+                $pdo->commit();
+                if (function_exists('rh_payment_audit_flush')) {
+                    rh_payment_audit_flush($pdo);
+                }
             }
 
             rh_log_event('credit-notes', 'info', "Credit note {$cn['credit_note_number']} applied", [
@@ -504,7 +513,8 @@ if (!function_exists('applyCreditNote')) {
                 'error'             => null,
             ];
         } catch (Throwable $e) {
-            if ($pdo->inTransaction()) {
+            // Joined transaction: never roll back the caller's work here; it gets success=false and rolls back itself.
+            if (!empty($ownTx) && $pdo->inTransaction()) {
                 $pdo->rollBack();
             }
             error_log('[credit-notes] applyCreditNote: ' . $e->getMessage());

@@ -1335,3 +1335,53 @@
 @media (max-width: 480px) {
     .booking-details-page { padding: 20px 14px 14px; }
 }
+
+/* Group money moves (plan A5 + D-R6): credit button under the Credit figure, amount box in the Remove review. */
+.bd-group-rooms__credit-use {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.bd-group-rooms__credit-use .btn-sm {
+    white-space: normal;
+    text-align: left;
+    min-height: 44px;
+}
+
+.bd-group-op-move {
+    margin-top: 12px;
+    padding: 12px;
+    border: 1px solid #ddd2c2;
+    border-radius: 8px;
+}
+
+.bd-group-op-move label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+
+.bd-group-op-move__row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.bd-group-op-move__row input {
+    flex: 1 1 140px;
+    min-height: 44px;
+    max-width: 220px;
+}
+
+.bd-group-op-move__max {
+    display: block;
+    margin-top: 6px;
+    color: #5f5446;
+}
+#groupOpMoveReview {
+    min-height: 44px;
+}

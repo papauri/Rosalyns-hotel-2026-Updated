@@ -581,11 +581,12 @@ if (!function_exists('rh_group_repoint')) {
                 rh_group_ops_log($row, 'Group invoice number left with the group', 'This room held the group invoice number; it stays with the group and this room gets its own number when its invoice is made.',
                     $before, '(none yet)', $opts, $meta);
             }
-            rh_group_ops_log($newRow, 'Room removed from the group', rh_group_ops_label($row) . ' was taken out of this group and is now an individual booking. No money moved.',
+            rh_group_ops_log($newRow, 'Room removed from the group', rh_group_ops_label($row) . ' was taken out of this group and is now an individual booking.'
+                . (isset($opts['after_detach']) ? '' : ' No money moved.'),
                 (string)$row['booking_reference'], null, $opts, $meta);
 
             // C2 hook (group bookings plan D-R6, accounting lead): optionally move part of a group lump-sum payment to the
-            // leaving room, in this same transaction. Not built here; C2 passes $opts['after_detach'].
+            // leaving room, in this same transaction (includes/group-credit-move.php rh_group_lump_apply).
             if (isset($opts['after_detach']) && is_callable($opts['after_detach'])) {
                 ($opts['after_detach'])($pdo, $out);
             }
