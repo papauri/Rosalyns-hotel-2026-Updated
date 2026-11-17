@@ -84,6 +84,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $_bdNeed = null;
     if (isset($_POST['booking_action'])) {
         $_bdNeed = rhBookingActionPermission((string)$_POST['booking_action']);
+    } elseif (in_array((string)($_POST['action'] ?? ''), ['preview_stay_correction', 'stay_correction_apply'], true)) {
+        $_bdNeed = rhBookingActionPermission((string)$_POST['action']); // correct_stay_after_checkout (group bookings plan A8)
     } elseif (isset($_POST['adjust_dates'])) {
         $_bdNeed = rhBookingActionPermission('adjust_dates');
     } elseif (isset($_POST['update_payment'])) {
@@ -1283,13 +1285,82 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_note'])) {
     }
 }
 
+// Correct a CHECKED-OUT room's dates (group bookings plan A8, owner 2026-11-17): review (preview_stay_correction, read
+// only) then save (stay_correction_apply, re-quoted under the row lock). Permission correct_stay_after_checkout is checked
+// above; a refund leg also needs refund_payment. JSON only; a refused save answers 4xx so it is never logged as done.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] ?? ''), ['preview_stay_correction', 'stay_correction_apply'], true)) {
+    require_once __DIR__ . '/../includes/stay-correction.php';
+    header('Content-Type: application/json; charset=utf-8');
+    $scUid = (int)($user['id'] ?? 0);
+    $scCanRefund = hasPermission($scUid, 'refund_payment');
+    $scIn = trim((string)($_POST['new_check_in'] ?? ''));
+    $scOut = trim((string)($_POST['new_check_out'] ?? ''));
+    $scRateRaw = trim(str_replace([',', ' '], '', (string)($_POST['extra_rate'] ?? '')));
+    if ($scRateRaw !== '' && !is_numeric($scRateRaw)) {
+        http_response_code(422);
+        echo json_encode(['success' => false, 'message' => 'Enter the rate a night as a number.']);
+        exit;
+    }
+    $scRate = $scRateRaw === '' ? null : (float)$scRateRaw;
+    if ((string)$_POST['action'] === 'preview_stay_correction') {
+        $scSt = $pdo->prepare('SELECT * FROM bookings WHERE id = ?');
+        $scSt->execute([$booking_id]);
+        $scB = $scSt->fetch(PDO::FETCH_ASSOC);
+        $scQ = $scB ? rh_stay_correction_quote($pdo, $scB, $scIn, $scOut, $scRate, null, (string)$currency_symbol)
+            : ['ok' => false, 'error' => 'Booking not found.'];
+        if (empty($scQ['ok'])) {
+            echo json_encode(['success' => false, 'message' => (string)$scQ['error']]);
+            exit;
+        }
+        echo json_encode(['success' => true, 'quote' => rh_stay_correction_public($scQ), 'can_refund' => $scCanRefund], JSON_INVALID_UTF8_SUBSTITUTE);
+        exit;
+    }
+    try {
+        $scRes = rh_stay_correction_apply($pdo, (int)$booking_id, [
+            'new_check_in' => $scIn, 'new_check_out' => $scOut, 'extra_rate' => $scRateRaw,
+            'rate_reason' => (string)($_POST['rate_reason'] ?? ''), 'reason' => (string)($_POST['reason'] ?? ''),
+            'expected_new_bill' => $_POST['expected_new_bill'] ?? null, 'expected_money_back' => $_POST['expected_money_back'] ?? null,
+            'clash_ack' => !empty($_POST['clash_ack']), 'money_back_mode' => (string)($_POST['money_back_mode'] ?? ''),
+            'money_back_typed' => (string)($_POST['money_back_typed'] ?? ''),
+            'can_correct' => hasPermission($scUid, 'correct_stay_after_checkout'), 'can_refund' => $scCanRefund,
+        ], $user);
+    } catch (Throwable $scE) {
+        http_response_code(409);
+        echo json_encode(['success' => false, 'message' => $scE->getMessage()]);
+        exit;
+    }
+    $scQ = $scRes['quote'];
+    $scMsg = 'Stay corrected: ' . date('j M Y', strtotime($scQ['new_check_in'])) . ' to ' . date('j M Y', strtotime($scQ['new_check_out']))
+        . ' (' . (int)$scQ['new_nights'] . ' night' . ((int)$scQ['new_nights'] === 1 ? '' : 's') . '). Bill now '
+        . rh_stay_correction_money((float)$scRes['after']['bill'], (string)$currency_symbol) . ', owed '
+        . rh_stay_correction_money((float)$scRes['after']['amount_due'], (string)$currency_symbol) . '.';
+    if ($scRes['refund_total'] > BALANCE_TOLERANCE) {
+        $scMsg .= ' Refunded ' . rh_stay_correction_money((float)$scRes['refund_total'], (string)$currency_symbol) . ' to the original payment(s).';
+    }
+    // Nothing is emailed from an after-checkout correction (the payer may be a company that paid one lump sum for the
+    // group); staff send a credit note or refund notice from the document itself if wanted.
+    foreach ($scRes['credit_notes'] as $scCn) {
+        $scMsg .= ' Credit note ' . $scCn['number'] . ' for ' . rh_stay_correction_money((float)$scCn['amount'], (string)$currency_symbol) . ' issued (not emailed).';
+    }
+    $scMsg .= rh_stay_correction_refresh_invoices($pdo, (int)$booking_id);
+    if ((string)$scQ['new_check_in'] < date('Y-m-d')) {
+        $scMsg .= ' End of Day reports for the past days concerned now show the corrected nights; copies already sent are out of date.';
+    }
+    $_SESSION['success_message'] = $scMsg;
+    echo json_encode(['success' => true, 'message' => $scMsg]);
+    exit;
+}
+
 // Handle date adjustment
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['adjust_dates'])) {
     $new_check_in = trim($_POST['new_check_in'] ?? '');
     $new_check_out = trim($_POST['new_check_out'] ?? '');
     $adjustment_reason = trim($_POST['adjustment_reason'] ?? '');
 
-    if (empty($new_check_in) || empty($new_check_out)) {
+    if (($_early_booking['status'] ?? '') === 'checked-out') {
+        // A checked-out room goes through Correct Stay Dates (review, money back, permission correct_stay_after_checkout).
+        $_SESSION['error_message'] = 'This guest has checked out. Use Correct Stay Dates to change the dates of a checked-out stay.';
+    } elseif (empty($new_check_in) || empty($new_check_out)) {
         $_SESSION['error_message'] = 'Please provide both check-in and check-out dates.';
     } elseif (empty($adjustment_reason)) {
         $_SESSION['error_message'] = 'Please provide a reason for the date adjustment.';
@@ -1685,6 +1756,10 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         $bd_closed = in_array($booking['status'], ['checked-out', 'cancelled', 'no-show', 'expired'], true);
         $can_cancel = !$bd_deleted && !in_array($booking['status'], ['checked-in', 'checked-out', 'cancelled', 'no-show', 'expired'], true);
         $can_adjust_dates = !$bd_deleted && !$bd_closed;
+        // A checked-out room's dates can be corrected after the guest left (group bookings plan A8): its own permission.
+        // Never cancelled, expired or no-show (no-show uses the no-show / arrival path).
+        $bd_can_correct_stay = !$bd_deleted && ($booking['status'] ?? '') === 'checked-out'
+            && hasPermission((int)($user['id'] ?? 0), 'correct_stay_after_checkout');
         $bd_perm_delete = hasPermission((int)($user['id'] ?? 0), 'delete_booking');
         $bd_perm_edit = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
         $bd_perm_checkin = hasPermission((int)($user['id'] ?? 0), 'checkin_guest');
@@ -1882,6 +1957,11 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 <?php if ($can_adjust_dates && $bd_perm_edit): ?>
                     <button type="button" class="action-btn adjust-dates" onclick="openDateAdjustModal()">
                         <i class="fas fa-calendar-alt"></i> Adjust Stay Dates
+                    </button>
+                <?php endif; ?>
+                <?php if ($bd_can_correct_stay): ?>
+                    <button type="button" class="action-btn adjust-dates" onclick="openStayCorrectModal()" data-help="Correct Stay Dates|The guest has checked out. Put in the dates they really stayed (late arrival, early or late departure). You see the new bill, what was paid and what is owed or goes back before anything is saved.">
+                        <i class="fas fa-calendar-check"></i> Correct Stay Dates
                     </button>
                 <?php endif; ?>
                 <?php
@@ -2150,30 +2230,88 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 <?php echo htmlspecialchars($gb['room_name']); ?><?php echo trim((string)($gb['room_guest_name'] ?? '')) !== '' ? ' (' . htmlspecialchars((string)$gb['room_guest_name']) . ')' : ''; ?> &mdash; <strong><?php echo htmlspecialchars($gb['booking_reference']); ?></strong>
             </a>
             <?php endforeach; ?>
-            <?php
-            // Group total = every live room in the group at its full amount (room + VAT + levy), owner 2026-10-23.
-            // A no-show room still bills its booked stay (owner 2026-11-13: a no-show pays 100%), so it stays in, as on
-            // the group invoice; one charged under the group no-show charge bills that folio charge only and stays out.
-            $bd_grp_out = static function (array $r) use ($pdo): bool {
-                $st = (string)($r['status'] ?? '');
-                return in_array($st, ['cancelled', 'expired'], true)
-                    || ($st === 'no-show' && rh_noshow_fee_tagged($pdo, (int)($r['id'] ?? 0)));
-            };
-            $bd_group_total = rh_booking_full_total($bd_row_fresh);
-            $bd_group_rows = [$bd_row_fresh];
-            foreach ($group_bookings as $gb) {
-                if (!$bd_grp_out($gb)) {
-                    $bd_group_total += rh_booking_full_total($gb);
-                    $bd_group_rows[] = $gb;
-                }
-            }
-            if ($bd_grp_out(['status' => $booking['status'] ?? '', 'id' => $booking['id'] ?? 0])) {
-                $bd_group_total -= rh_booking_full_total($bd_row_fresh);
-                array_shift($bd_group_rows);
-            }
-            ?>
-            <span class="bd-group-notice__label">Group total (incl. VAT &amp; levy): <strong><?php echo $currency_symbol; ?><?php echo number_format($bd_group_total, 2); ?></strong><?php echo $bd_group_rows ? rh_booking_total_info_btn($bd_group_rows, ['currency' => $currency_symbol]) : ''; ?></span>
         </div>
+        <?php
+        // Group rooms table (group bookings plan A4, owner 2026-11-17): every room of the group, every status (a deleted
+        // room is left out), each room's figures exactly as its own page shows them (getBookingFolioSummary). The group
+        // totals are the sum over ALL rooms, never only the rows on this page of the table. This is the page's only
+        // group total (the old "Group total" line is replaced by Billed here).
+        require_once __DIR__ . '/../includes/group-room-table.php';
+        $bd_grp = rh_group_room_table($pdo, (int)$booking['id'], (string)$currency_symbol);
+        $bd_grp_t = $bd_grp['totals'];
+        $bd_m = static function (float $v) use ($currency_symbol): string {
+            return htmlspecialchars((string)$currency_symbol) . ' ' . number_format($v, 2);
+        };
+        $bd_d = static function (string $ymd): string {
+            return $ymd !== '' ? htmlspecialchars(date('j M Y', strtotime($ymd))) : '&mdash;';
+        };
+        $bd_grp_help = [
+            'billed' => "What the room is billed: the stay at its booked rate plus any extras on its bill (VAT and levy included). A cancelled room bills only what it kept. The same figure as Total on that room's own page.",
+            'paid' => "Money received for the room, less any money paid back or moved to a credit note. The same figure as Paid on that room's own page.",
+            'refunds' => 'Money paid back out to the payer for this room (completed or in progress). Money moved to a credit note is not counted here: it is already taken off Paid.',
+            'credit' => 'Paid above what the room is billed, held for the payer. Empty when the room is not in credit.',
+            'owed' => "What is still to be paid on the room: Billed less Paid, never below zero. The same figure as Balance due on that room's own page.",
+            'rate' => 'The nightly rate the room was booked at (VAT and levy included) times its nights. Never today\'s price.',
+            'net' => 'Owed by all rooms less the credit held on any room. Display only: credit on one room is not moved to another here.',
+        ];
+        ?>
+        <section class="bd-group-rooms" aria-labelledby="bdGroupRoomsTitle">
+            <h3 id="bdGroupRoomsTitle" class="bd-group-rooms__title">
+                <i class="fas fa-layer-group" aria-hidden="true"></i> Rooms in this group (<?php echo (int)$bd_grp_t['rooms']; ?>)
+                <i class="help" data-tip="Every room booked together under this group, whatever its status (checked out, no-show, cancelled). Each row shows that room's own figures; open a row to see its booking.">?</i>
+            </h3>
+            <dl class="bd-group-rooms__totals">
+                <div><dt>Billed <i class="help" data-tip="<?php echo htmlspecialchars('All rooms added together. ' . $bd_grp_help['billed']); ?>">?</i></dt><dd><?php echo $bd_m($bd_grp_t['billed']); ?></dd></div>
+                <div><dt>Paid <i class="help" data-tip="<?php echo htmlspecialchars('All rooms added together. ' . $bd_grp_help['paid']); ?>">?</i></dt><dd><?php echo $bd_m($bd_grp_t['paid']); ?></dd></div>
+                <div><dt>Refunds <i class="help" data-tip="<?php echo htmlspecialchars('All rooms added together. ' . $bd_grp_help['refunds']); ?>">?</i></dt><dd><?php echo $bd_m($bd_grp_t['refunds']); ?></dd></div>
+                <div><dt>Credit <i class="help" data-tip="<?php echo htmlspecialchars('All rooms added together. ' . $bd_grp_help['credit']); ?>">?</i></dt><dd><?php echo $bd_m($bd_grp_t['credit']); ?></dd></div>
+                <div><dt>Owed <i class="help" data-tip="<?php echo htmlspecialchars('All rooms added together. ' . $bd_grp_help['owed']); ?>">?</i></dt><dd><?php echo $bd_m($bd_grp_t['owed']); ?></dd></div>
+                <div class="bd-group-rooms__net"><dt>Net position <i class="help" data-tip="<?php echo htmlspecialchars($bd_grp_help['net']); ?>">?</i></dt><dd><?php
+                    echo $bd_grp_t['net'] < -BALANCE_TOLERANCE
+                        ? $bd_m(abs($bd_grp_t['net'])) . ' in credit'
+                        : $bd_m(max(0.0, $bd_grp_t['net'])) . ' owed';
+                ?></dd></div>
+            </dl>
+            <p class="rh-group-split-help">Each row is one room. Billed, Paid, Refunds, Credit and Owed are that room's own figures, the same as on its page.</p>
+            <div class="rh-group-split-wrap bd-group-rooms__wrap">
+                <table class="rh-group-split bd-group-rooms__table">
+                    <thead>
+                        <tr>
+                            <th scope="col">Room <i class="help" data-tip="The room type and room number, the guest staying in it and its booking reference.">?</i></th>
+                            <th scope="col">Dates <i class="help" data-tip="Check-in to check-out. The check-out day is not a night.">?</i></th>
+                            <th scope="col">Rate &times; nights <i class="help" data-tip="<?php echo htmlspecialchars($bd_grp_help['rate']); ?>">?</i></th>
+                            <th scope="col">Status <i class="help" data-tip="Where the room's booking is now.">?</i></th>
+                            <th scope="col" class="num">Billed <i class="help" data-tip="<?php echo htmlspecialchars($bd_grp_help['billed']); ?>">?</i></th>
+                            <th scope="col" class="num">Paid <i class="help" data-tip="<?php echo htmlspecialchars($bd_grp_help['paid']); ?>">?</i></th>
+                            <th scope="col" class="num">Refunds <i class="help" data-tip="<?php echo htmlspecialchars($bd_grp_help['refunds']); ?>">?</i></th>
+                            <th scope="col" class="num">Credit <i class="help" data-tip="<?php echo htmlspecialchars($bd_grp_help['credit']); ?>">?</i></th>
+                            <th scope="col" class="num">Owed <i class="help" data-tip="<?php echo htmlspecialchars($bd_grp_help['owed']); ?>">?</i></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($bd_grp['rows'] as $gr): ?>
+                        <tr<?php echo (int)$gr['id'] === (int)$booking['id'] ? ' class="is-current" aria-current="true"' : ''; ?>>
+                            <td data-label="Room">
+                                <a class="bd-group-rooms__link" href="booking-details.php?id=<?php echo (int)$gr['id']; ?>">
+                                    <span class="rh-group-split-room"><?php echo htmlspecialchars($gr['room']); ?><?php echo $gr['room_number'] !== '' ? ' ' . htmlspecialchars($gr['room_number']) : ''; ?><?php echo $gr['is_root'] ? ' <small>(lead)</small>' : ''; ?></span>
+                                    <?php if ($gr['guest'] !== ''): ?><small><?php echo htmlspecialchars($gr['guest']); ?></small><?php endif; ?>
+                                    <small><?php echo htmlspecialchars($gr['ref']); ?></small>
+                                </a>
+                            </td>
+                            <td data-label="Dates"><?php echo $bd_d($gr['check_in']); ?> &ndash; <?php echo $bd_d($gr['check_out']); ?></td>
+                            <td data-label="Rate x nights"><?php echo $gr['rate_compact'] !== '' ? htmlspecialchars($gr['rate_compact']) . ' night' . ($gr['nights'] === 1 ? '' : 's') : '&mdash;'; ?></td>
+                            <td data-label="Status"><?php echo htmlspecialchars(ucwords(str_replace(['-', '_'], ' ', $gr['status']))); ?></td>
+                            <td data-label="Billed" class="num"><?php echo $bd_m($gr['billed']); ?></td>
+                            <td data-label="Paid" class="num"><?php echo $bd_m($gr['paid']); ?></td>
+                            <td data-label="Refunds" class="num"><?php echo $gr['refunds'] > BALANCE_TOLERANCE ? $bd_m($gr['refunds']) : '&mdash;'; ?><?php if ($gr['credit_note_refunds'] > BALANCE_TOLERANCE): ?> <i class="help" data-tip="<?php echo htmlspecialchars($bd_m($gr['credit_note_refunds']) . ' of this room\'s payments was moved to a credit note (not paid out, so not counted here).'); ?>">?</i><?php endif; ?></td>
+                            <td data-label="Credit" class="num"><?php echo $gr['credit'] > BALANCE_TOLERANCE ? $bd_m($gr['credit']) : '&mdash;'; ?></td>
+                            <td data-label="Owed" class="num"><?php echo $bd_m($gr['owed']); ?></td>
+                        </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+        </section>
         <?php endif; ?>
 
         <?php
@@ -2896,6 +3034,222 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             </form>
         </div>
     </div>
+
+    <?php if ($bd_can_correct_stay): ?>
+    <!-- Correct Stay Dates (checked-out room, group bookings plan A8): review, then confirm -->
+    <?php $bd_sc_line = rh_booked_rate_line($booking, null, ['currency' => (string)$currency_symbol]); ?>
+    <div class="modal-overlay" id="stayCorrectModal" role="dialog" aria-modal="true" aria-labelledby="stayCorrectTitle">
+        <div class="modal-content">
+            <form id="stayCorrectForm" novalidate>
+            <div class="modal-header">
+                <h3 id="stayCorrectTitle"><i class="fas fa-calendar-check" style="color: var(--color-lux-gold, #8F6A35);"></i> Correct Stay Dates</h3>
+                <button type="button" class="modal-close" aria-label="Close" onclick="closeStayCorrectModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p class="bd-sc-note" style="margin-top:0;">The guest has checked out. Put in the dates they really stayed. Nothing is saved until you review the figures and confirm.</p>
+                <div class="bd-sc-review">
+                    <dl>
+                        <dt>Booked dates</dt>
+                        <dd><?php echo htmlspecialchars(date('j M Y', strtotime((string)$booking['check_in_date'])) . ' – ' . date('j M Y', strtotime((string)$booking['check_out_date']))); ?></dd>
+                        <dt>Nights</dt>
+                        <dd><?php echo (int)$booking['number_of_nights']; ?></dd>
+                        <dt>Booked rate</dt>
+                        <dd><?php echo !empty($bd_sc_line['ok']) ? htmlspecialchars((string)$bd_sc_line['text']) : '&mdash;'; ?></dd>
+                    </dl>
+                </div>
+                <div class="form-group">
+                    <label for="scNewIn">Check-in date they really arrived *</label>
+                    <input type="date" id="scNewIn" name="new_check_in" value="<?php echo htmlspecialchars(substr((string)$booking['check_in_date'], 0, 10)); ?>" max="<?php echo date('Y-m-d'); ?>" required>
+                </div>
+                <div class="form-group">
+                    <label for="scNewOut">Check-out date they really left *</label>
+                    <input type="date" id="scNewOut" name="new_check_out" value="<?php echo htmlspecialchars(substr((string)$booking['check_out_date'], 0, 10)); ?>" max="<?php echo date('Y-m-d'); ?>" required>
+                </div>
+                <div class="form-group" id="scRateGroup" hidden>
+                    <label for="scRate">Rate a night for the extra night(s) <i class="help" data-tip="Starts at the rate the room was booked at (VAT and levy included). Change it only if a different rate was agreed; a reason is then required.">?</i></label>
+                    <input type="text" inputmode="decimal" id="scRate" name="extra_rate" autocomplete="off">
+                </div>
+                <div class="form-group" id="scRateReasonGroup" hidden>
+                    <label for="scRateReason">Why a different rate? *</label>
+                    <input type="text" id="scRateReason" name="rate_reason" maxlength="300" autocomplete="off">
+                </div>
+                <div class="form-group">
+                    <label for="scReason">Reason for the correction *</label>
+                    <textarea id="scReason" name="reason" maxlength="300" placeholder="e.g. Guest arrived a day late; guest left a day early" required></textarea>
+                </div>
+
+                <div id="scReview" class="bd-sc-review" hidden aria-live="polite">
+                    <dl>
+                        <dt>Dates</dt><dd id="scRvDates">-</dd>
+                        <dt>Nights</dt><dd id="scRvNights">-</dd>
+                        <dt>Rate &times; nights</dt><dd id="scRvRate">-</dd>
+                        <dt>Bill</dt><dd id="scRvBill">-</dd>
+                        <dt>Paid</dt><dd id="scRvPaid">-</dd>
+                        <dt class="bd-sc-strong" id="scRvResultLabel">Owed</dt><dd class="bd-sc-strong" id="scRvResult">-</dd>
+                        <dt>Invoice</dt><dd id="scRvInvoice">-</dd>
+                    </dl>
+                    <p class="bd-sc-note" id="scRvPlan" hidden></p>
+                    <p class="bd-sc-note">Receipts do not change. End of Day reports for the days concerned will show the corrected nights; copies already sent will be out of date.</p>
+                </div>
+
+                <div id="scClash" class="bd-sc-warn" hidden>
+                    <p id="scClashText" style="margin:0 0 0.4rem;"></p>
+                    <label class="bd-sc-choice"><input type="checkbox" id="scClashAck" name="clash_ack" value="1"> I understand, save anyway</label>
+                </div>
+
+                <div id="scMoneyBack" class="bd-sc-warn" hidden>
+                    <p id="scMoneyBackText" style="margin:0 0 0.4rem;"></p>
+                    <label class="bd-sc-choice"><input type="radio" name="money_back_mode" value="refund" id="scModeRefund"> Refund to the original payment(s)</label>
+                    <p class="bd-sc-note" id="scRefundNoPerm" hidden style="margin:0 0 0.4rem;">You do not have the refund permission: choose a credit note, or ask someone who can refund.</p>
+                    <label class="bd-sc-choice"><input type="radio" name="money_back_mode" value="credit_note" id="scModeCredit"> Credit note</label>
+                    <div class="form-group" style="margin:0.4rem 0 0;">
+                        <label for="scTyped">Type the amount going back to confirm *</label>
+                        <input type="text" inputmode="decimal" id="scTyped" name="money_back_typed" autocomplete="off">
+                    </div>
+                </div>
+
+                <div id="scError" role="alert" class="bd-sc-warn" style="background:#fef2f2;color:#a03030;" hidden></div>
+            </div>
+            <div class="modal-actions modal-footer">
+                <button type="button" class="btn-secondary" onclick="closeStayCorrectModal()">Close</button>
+                <button type="button" class="btn-secondary" id="scReviewBtn">Review</button>
+                <button type="submit" class="btn-primary" id="scConfirmBtn" disabled>Confirm Correction</button>
+            </div>
+            </form>
+        </div>
+    </div>
+    <script>
+    (function () {
+        var form = document.getElementById('stayCorrectForm');
+        if (!form) return;
+        var bookingId = <?php echo (int)$booking_id; ?>;
+        var csrf = <?php echo json_encode((string)$csrf_token); ?>;
+        var cur = <?php echo json_encode((string)$currency_symbol); ?>;
+        var reviewed = null;
+        function el(id) { return document.getElementById(id); }
+        function money(v) {
+            var n = Number(v) || 0;
+            return cur + ' ' + n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        }
+        function day(s) {
+            var p = String(s || '').split('-').map(Number);
+            if (p.length !== 3) return s;
+            var d = new Date(Date.UTC(p[0], p[1] - 1, p[2]));
+            return d.getUTCDate() + ' ' + ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getUTCMonth()] + ' ' + d.getUTCFullYear();
+        }
+        function showError(msg) {
+            var e = el('scError');
+            e.textContent = msg || '';
+            e.hidden = !msg;
+        }
+        function invalidate() {
+            reviewed = null;
+            el('scConfirmBtn').disabled = true;
+            el('scReview').hidden = true;
+            el('scClash').hidden = true;
+            el('scMoneyBack').hidden = true;
+        }
+        function post(action) {
+            var fd = new FormData(form);
+            fd.append('action', action);
+            fd.append('csrf_token', csrf);
+            fd.append('id', String(bookingId));
+            if (reviewed && action === 'stay_correction_apply') {
+                fd.append('expected_new_bill', String(reviewed.new_bill));
+                fd.append('expected_money_back', String(reviewed.money_back));
+            }
+            return fetch('booking-details.php?id=' + bookingId, {
+                method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' }
+            }).then(function (r) {
+                return r.json().catch(function () { return { success: false, message: 'Unexpected reply (' + r.status + '). Reload the page and try again.' }; });
+            });
+        }
+        function review() {
+            showError('');
+            invalidate();
+            var btn = el('scReviewBtn');
+            btn.disabled = true;
+            post('preview_stay_correction').then(function (res) {
+                btn.disabled = false;
+                if (!res || !res.success) { showError((res && res.message) || 'Could not work out the figures.'); return; }
+                var q = res.quote;
+                reviewed = q;
+                el('scRvDates').textContent = day(q.check_in) + ' – ' + day(q.check_out) + '  →  ' + day(q.new_check_in) + ' – ' + day(q.new_check_out);
+                el('scRvNights').textContent = q.old_nights + ' → ' + q.new_nights;
+                el('scRvRate').textContent = q.rate_line_new;
+                el('scRvBill').textContent = money(q.old_bill) + ' → ' + money(q.new_bill);
+                el('scRvPaid').textContent = money(q.paid);
+                if (q.money_back > 0) {
+                    el('scRvResultLabel').textContent = 'Goes back to the payer';
+                    el('scRvResult').textContent = money(q.money_back) + ' (owed ' + money(q.old_due) + ' → ' + money(q.new_due) + ')';
+                } else {
+                    el('scRvResultLabel').textContent = 'Owed';
+                    el('scRvResult').textContent = money(q.old_due) + ' → ' + money(q.new_due);
+                }
+                el('scRvInvoice').textContent = q.invoices && q.invoices.length ? q.invoices.join(', ') + ' (same number, new figures)' : 'None issued';
+                el('scRvPlan').textContent = q.plan_note || '';
+                el('scRvPlan').hidden = !q.plan_note;
+                var rateGroup = el('scRateGroup');
+                rateGroup.hidden = !(q.extra_nights > 0);
+                if (q.extra_nights > 0 && el('scRate').value.trim() === '') el('scRate').value = Number(q.per_night).toFixed(2);
+                el('scRateReasonGroup').hidden = !q.rate_changed;
+                if (q.clashes && q.clashes.length) {
+                    el('scClashText').textContent = 'This room had another booking on the added night(s): ' + q.clashes.map(function (c) {
+                        return c.ref + ' (' + (c.guest || 'guest') + ', ' + day(c.check_in) + ' – ' + day(c.check_out) + ')';
+                    }).join('; ') + '. Check the room really was free before saving.';
+                    el('scClashAck').checked = false;
+                    el('scClash').hidden = false;
+                }
+                if (q.money_back > 0) {
+                    el('scMoneyBackText').textContent = money(q.money_back) + ' was paid that the guest no longer owes. Choose how it goes back. It is never left on the booking as credit.';
+                    el('scModeRefund').disabled = !res.can_refund;
+                    el('scRefundNoPerm').hidden = !!res.can_refund;
+                    el('scModeRefund').checked = false;
+                    el('scModeCredit').checked = false;
+                    el('scTyped').value = '';
+                    el('scMoneyBack').hidden = false;
+                }
+                el('scReview').hidden = false;
+                el('scConfirmBtn').disabled = false;
+            }).catch(function () { btn.disabled = false; showError('Could not reach the server. Try again.'); });
+        }
+        ['scNewIn', 'scNewOut', 'scRate'].forEach(function (id) {
+            el(id).addEventListener('change', invalidate);
+            el(id).addEventListener('input', invalidate);
+        });
+        el('scReviewBtn').addEventListener('click', review);
+        form.addEventListener('submit', function (e) {
+            e.preventDefault();
+            if (!reviewed) { review(); return; }
+            showError('');
+            var btn = el('scConfirmBtn');
+            btn.disabled = true;
+            btn.textContent = 'Saving...';
+            post('stay_correction_apply').then(function (res) {
+                if (res && res.success) {
+                    window.location.href = 'booking-details.php?id=' + bookingId;
+                    return;
+                }
+                btn.disabled = false;
+                btn.textContent = 'Confirm Correction';
+                showError((res && res.message) || 'Nothing was saved.');
+            }).catch(function () {
+                btn.disabled = false;
+                btn.textContent = 'Confirm Correction';
+                showError('Could not reach the server. Nothing was saved.');
+            });
+        });
+        window.openStayCorrectModal = function () {
+            showError('');
+            invalidate();
+            el('stayCorrectModal').classList.add('active');
+        };
+        window.closeStayCorrectModal = function () {
+            el('stayCorrectModal').classList.remove('active');
+        };
+    })();
+    </script>
+    <?php endif; ?>
 
     <!-- Date Adjustment Modal -->
     <div class="modal-overlay" id="dateAdjustModal">

@@ -90,6 +90,7 @@ function getAllRoles()
                 'checkin_guest',
                 'checkout_guest',
                 'checkin_room_not_ready', // override the clean-room check-in rule (logged)
+                'correct_stay_after_checkout', // correct a checked-out room's dates (owner 2026-11-17: administrators + managers by default)
                 'room_dashboard',
                 'individual_rooms',
                 'block_rooms',
@@ -443,6 +444,16 @@ function getAllPermissions()
             'icon' => 'fa-broom',
             'category' => 'Guest Services',
             'page' => 'bookings.php',
+            'group' => 'guest_services'
+        ],
+        // Group bookings plan A8 (owner 2026-11-17): on for administrators and managers by default, grantable to any other
+        // role or person on the permissions screen. Server-side check in booking-details.php and includes/stay-correction.php.
+        'correct_stay_after_checkout' => [
+            'label' => 'Correct Stay After Check-out',
+            'description' => 'Correct the dates of a room that has already checked out (late arrival, early or late departure). The bill is re-worked at the booked rate; money going back is a refund or a credit note. A reason is always required and kept in the booking history',
+            'icon' => 'fa-calendar-check',
+            'category' => 'Guest Services',
+            'page' => '', // not a page: Booking Details
             'group' => 'guest_services'
         ],
         'checkout_with_balance' => [
@@ -2906,6 +2917,8 @@ function rhBookingActionPermission(string $action, string $status = ''): ?string
             return 'cancel_booking';
         case 'payment': case 'update_payment': case 'consolidation_record':
             return 'payment_add';
+        case 'preview_stay_correction': case 'stay_correction_apply':
+            return 'correct_stay_after_checkout'; // a checked-out room's dates (group bookings plan A8, owner 2026-11-17)
         case 'adjust_dates': case 'admin_update_checkout_date':
         // Owner 2026-10-19: confirming/converting a booking and guest-bill (folio) charges need Edit Booking.
         case 'confirm': case 'confirmed': case 'convert': case 'convert_tentative':

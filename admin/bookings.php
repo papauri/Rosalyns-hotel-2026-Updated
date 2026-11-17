@@ -1728,7 +1728,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $pdo->prepare("SELECT id FROM bookings WHERE id = ? FOR UPDATE")->execute([$booking_id]);
                         $balGate = evaluateCheckoutBalance($pdo, (int)$booking_id, (int)($user['id'] ?? 0), !empty($_POST['confirm_checkout_with_balance']));
                         if ($balGate['allowed']) {
-                            $upd = $pdo->prepare("UPDATE bookings SET status = 'checked-out', updated_at = NOW() WHERE id = ?");
+                            $upd = $pdo->prepare("UPDATE bookings SET status = 'checked-out', checkout_completed_at = NOW(), updated_at = NOW() WHERE id = ?");
                             $upd->execute([$booking_id]);
 
                             // Restore room availability

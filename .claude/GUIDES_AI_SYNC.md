@@ -19,7 +19,47 @@ when prompted."
 
 ## Pending (oldest first)
 
-(none - everything below was synced 2026-11-16)
+### Group bookings Ship A: Correct Stay Dates after checkout + group table (2026-11-17, owner ask) — hashes in TASKS.md
+- **Guides (Bookings > booking details):**
+  - A checked-out room has a new "Correct Stay Dates" button. It needs the "Correct a stay after checkout" permission (default admin and manager) and a reason, and goes through preview → confirm.
+  - It is used when a guest really arrived late or early, or left early or late.
+  - Extra nights are charged at the booked rate (a changed rate needs a reason). Money owed back goes out as a refund to the original payment or as a credit note.
+  - The room's invoice is rebuilt with the same number. Receipts do not change.
+  - Past End of Day figures for those dates change.
+  - A room with a cancellation policy cannot have nights cut this way yet.
+- **Guides (group table):** a booking in a group shows every room (no-show included) with:
+  - dates and nights;
+  - booked rate × nights;
+  - billed, paid, owed, credit and refunds;
+  - group totals over all rooms, and the net position (owed − credit).
+- **Assistant:**
+  - knows the new action and permission;
+  - group figures = the sum of the rooms, all statuses;
+  - stays read-only on this. It points staff to Correct Stay Dates and never does the correction itself.
+
+### Assistant: full booking / group breakdown when asked about a booking (2026-11-17, owner ask, for the next sync)
+Owner: "I also like how you broke down everything you know about the booking including days. Put this sort of details in the steps for the AI when we are ready to sync later."
+
+When staff ask about a booking or a group, the Assistant answers in the same structured way as the ICTAm breakdown. It is read-only, and it only states figures it has checked (rail: never claim absence unverified). The answer covers:
+- **Group summary:** reference, number of rooms, how the group is stored (lead room + linked rooms), and a payer or company account if any.
+- **Dates and nights:** booked check-in → check-out and number of nights, per room. It calls out rooms whose dates differ from the group's.
+- **Money per room:**
+  - booked rate per night × nights = bill (including VAT and levy);
+  - paid;
+  - owed or credit;
+  - how a lump sum was split (e.g. 15,000,000 split as 937,500 per room);
+  - folio charges.
+- **Group totals:** billed, paid, owed (with the sum written out, e.g. 16 × 129,000 = 2,064,000), refunds, net position.
+- **Status timeline:** each room's history in plain words with dates and times, in local time. Raw log times are UTC, so read them via the app.
+  - When each room checked in, and who marked a no-show (with the note).
+  - Rate corrections, old → new, with the approval note.
+  - Checked out, and "with outstanding balance, authorised by X".
+- **What stands out:** e.g. dates never corrected after checkout, a no-show still carrying a share of the lump sum, a missing checkout time.
+  It points to the screen to fix each one; it never fixes anything itself, and preview → confirm stays.
+
+Guides: none for this entry. The guide entries for the group bookings ships are logged separately when they ship.
+Depends on the group bookings ships (Ship A group table, A8 correction after checkout), so the Assistant reuses the same figures (getBookingFolioSummary per room, group = sum of rooms, all statuses).
+
 
 ## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
 

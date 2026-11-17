@@ -279,6 +279,150 @@
     font-size: 0.82rem;
 }
 
+/* Rooms in this group (group bookings plan A4): totals cards + one row per room (cards on phones, shared
+   .rh-group-split pattern from admin-components.css). */
+.bd-group-rooms {
+    margin: 0 0 0.9rem;
+    padding: 0.8rem 1rem;
+    background: #fff;
+    border: 1px solid #ddd2c2;
+    border-radius: 10px;
+    min-width: 0;
+}
+
+.bd-group-rooms__title {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.45rem;
+    margin: 0 0 0.6rem;
+    font-size: 0.95rem;
+    font-weight: 600;
+    color: #5A4A3A;
+}
+
+.bd-group-rooms__totals {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 0.5rem;
+    margin: 0 0 0.6rem;
+}
+
+.bd-group-rooms__totals > div {
+    min-width: 0;
+    padding: 0.45rem 0.65rem;
+    background: #f7f3ee;
+    border-radius: 8px;
+}
+
+.bd-group-rooms__totals dt {
+    font-size: 0.78rem;
+    color: var(--bd-muted);
+}
+
+.bd-group-rooms__totals dd {
+    margin: 0.15rem 0 0;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+}
+
+.bd-group-rooms__net {
+    border: 1px solid #ddd2c2;
+}
+
+.rh-group-split-wrap.bd-group-rooms__wrap {
+    max-height: none;
+    overflow-x: auto;
+}
+
+.bd-group-rooms__link {
+    display: block;
+    min-height: 44px;
+    color: inherit;
+    text-decoration: none;
+}
+
+.bd-group-rooms__link:hover .rh-group-split-room,
+.bd-group-rooms__link:focus-visible .rh-group-split-room {
+    text-decoration: underline;
+}
+
+.bd-group-rooms__link small {
+    display: block;
+}
+
+.bd-group-rooms__table tr.is-current td {
+    background: #fffaf0;
+}
+
+/* Correct Stay Dates (checked-out room, plan A8): review card. */
+.bd-sc-review {
+    margin: 0 0 1rem;
+    padding: 0.8rem 1rem;
+    background: #f8f9fb;
+    border-radius: 10px;
+}
+
+.bd-sc-review dl {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+    gap: 0.35rem 0.8rem;
+    margin: 0;
+    font-size: 0.85rem;
+}
+
+.bd-sc-review dt {
+    color: var(--bd-muted);
+}
+
+.bd-sc-review dd {
+    margin: 0;
+    font-weight: 600;
+    text-align: right;
+    overflow-wrap: anywhere;
+    font-variant-numeric: tabular-nums;
+}
+
+.bd-sc-review .bd-sc-strong {
+    padding-top: 0.35rem;
+    border-top: 1px solid #e3e6ea;
+}
+
+.bd-sc-note {
+    margin: 0.6rem 0 0;
+    font-size: 0.8rem;
+    color: var(--bd-muted);
+}
+
+.bd-sc-warn {
+    margin: 0 0 1rem;
+    padding: 0.7rem 0.9rem;
+    background: #fff7ed;
+    color: #9a3412;
+    border-radius: 8px;
+    font-size: 0.85rem;
+}
+
+.bd-sc-choice {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 44px;
+    font-size: 0.88rem;
+}
+
+.bd-sc-choice input {
+    width: 20px;
+    height: 20px;
+    flex: 0 0 auto;
+}
+
+#stayCorrectModal .modal-footer .btn-primary,
+#stayCorrectModal .modal-footer .btn-secondary {
+    min-height: 44px;
+}
+
 /* Summary strip */
 .rh-strip__value.bd-strip__value--text {
     font-size: 1rem;

@@ -403,6 +403,7 @@ if (!function_exists('rh_sa_parse_filters')) {
                 'settle' => 'Settled an order', 'settle_refund' => 'Settled a refund', 'settle_order' => 'Settled an order',
                 'settle_table_order' => 'Settled a table order', 'record_payment' => 'Recorded a payment on an account',
                 'generate_receipt' => 'Generated a receipt', 'email_receipt' => 'Emailed a receipt', 'run_backup' => 'Ran a backup',
+                'stay_correction_apply' => 'Corrected the dates of a checked-out stay',
             ],
         ];
     }
