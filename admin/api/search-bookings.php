@@ -53,7 +53,7 @@ try {
         // Search room bookings
         if ($recent) {
             // Get recent bookings (last 30 days)
-            $stmt = $pdo->prepare("
+            $roomRecentSelect = "
                 SELECT
                     b.id,
                     b.booking_reference,
@@ -76,10 +76,11 @@ try {
                     r.name as room_name
                 FROM bookings b
                 LEFT JOIN rooms r ON b.room_id = r.id
-                WHERE b.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                WHERE b.deleted_at IS NULL AND %s
                 ORDER BY b.created_at DESC
                 LIMIT 10
-            ");
+            ";
+            $stmt = $pdo->prepare(sprintf($roomRecentSelect, 'b.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)'));
             $stmt->execute();
         } else {
             // Search by booking reference, guest name, or ID
@@ -107,7 +108,7 @@ try {
                     r.name as room_name
                 FROM bookings b
                 LEFT JOIN rooms r ON b.room_id = r.id
-                WHERE (
+                WHERE b.deleted_at IS NULL AND (
                     b.booking_reference LIKE ?
                     OR b.guest_name LIKE ?
                     OR b.room_guest_name LIKE ?
@@ -122,6 +123,48 @@ try {
         }
 
         $bookings = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($recent) {
+            // Group bookings Ship B1 (owner 2026-11-17): rooms older than 30 days that still owe (the receivables rule,
+            // rh_receivable_status_sql) are listed after the recent ones, so an old group's owing rooms can be paid.
+            require_once __DIR__ . '/../includes/receivables.php';
+            $olderStmt = $pdo->prepare(sprintf($roomRecentSelect,
+                'b.created_at < DATE_SUB(NOW(), INTERVAL 30 DAY) AND b.amount_due > ? AND ' . rh_receivable_status_sql('room', 'b')));
+            $olderStmt->execute([(float)BALANCE_TOLERANCE]);
+            $bookings = array_merge($bookings, $olderStmt->fetchAll(PDO::FETCH_ASSOC));
+        }
+        // Group label (Ship B1): "Room x of N, group <lead ref>" for a room in a group (lead + rooms pointing at it, not
+        // deleted; lead first, then by id - the order of the group room table).
+        if ($bookings) {
+            $gIds = array_map(static fn($r) => (int)$r['id'], $bookings);
+            $gStmt = $pdo->prepare("
+                SELECT b.id, lb.booking_reference AS group_lead_ref,
+                       (SELECT COUNT(*) FROM bookings g WHERE g.deleted_at IS NULL
+                          AND (g.id = COALESCE(NULLIF(b.primary_booking_id, 0), b.id) OR g.primary_booking_id = COALESCE(NULLIF(b.primary_booking_id, 0), b.id))) AS group_size,
+                       (SELECT COUNT(*) FROM bookings g WHERE g.deleted_at IS NULL
+                          AND (g.id = COALESCE(NULLIF(b.primary_booking_id, 0), b.id)
+                               OR (g.primary_booking_id = COALESCE(NULLIF(b.primary_booking_id, 0), b.id)
+                                   AND b.id <> COALESCE(NULLIF(b.primary_booking_id, 0), b.id) AND g.id <= b.id))) AS group_pos
+                FROM bookings b
+                LEFT JOIN bookings lb ON lb.id = COALESCE(NULLIF(b.primary_booking_id, 0), b.id)
+                WHERE b.id IN (" . implode(',', array_fill(0, count($gIds), '?')) . ")
+            ");
+            $gStmt->execute($gIds);
+            $gInfo = [];
+            foreach ($gStmt->fetchAll(PDO::FETCH_ASSOC) as $gr) {
+                $gInfo[(int)$gr['id']] = $gr;
+            }
+            foreach ($bookings as &$gb) {
+                $gr = $gInfo[(int)$gb['id']] ?? null;
+                $gSize = $gr ? (int)$gr['group_size'] : 1;
+                $gb['group_size'] = $gSize;
+                $gb['group_pos'] = $gr ? (int)$gr['group_pos'] : 1;
+                $gb['group_lead_ref'] = $gr ? (string)($gr['group_lead_ref'] ?? '') : '';
+                $gb['group_label'] = $gSize > 1
+                    ? 'Room ' . $gb['group_pos'] . ' of ' . $gSize . ', group ' . $gb['group_lead_ref']
+                    : '';
+            }
+            unset($gb);
+        }
     } elseif ($type === 'conference') {
         // Search conference bookings
         if ($recent) {

@@ -60,6 +60,12 @@ When staff ask about a booking or a group, the Assistant answers in the same str
 Guides: none for this entry. The guide entries for the group bookings ships are logged separately when they ship.
 Depends on the group bookings ships (Ship A group table, A8 correction after checkout), so the Assistant reuses the same figures (getBookingFolioSummary per room, group = sum of rooms, all statuses).
 
+### Group bookings Ship B1: payments on no-show / cancelled rooms that still owe + booking search (2026-11-17, owner ask) — hashes in TASKS.md
+- Payments > Add Payment and Bookings > Payments & balance now accept a payment on a no-show room, a cancelled room whose kept fee or extras still owe, and an expired hold carrying the group no-show charge, only while it owes. The room keeps its status. Such a room can never be overpaid (the overpay tick does not apply): "This no-show booking owes MWK X. A payment on it cannot be more than that."
+- A room that owes nothing still refuses: "This no-show booking owes nothing. No payment can be recorded." Deleted rooms refuse everywhere.
+- Add Payment booking search: deleted rooms no longer listed; a room in a group shows "Room x of N, group <lead ref>"; the recent list also shows up to 10 older rooms that still owe.
+- Guides: Payments (Add Payment, search), no-show/cancelled sections, FAQ "can I take money on a no-show". Assistant: payment answers must not say no-show/cancelled rooms cannot take payments.
+
 
 ## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
 

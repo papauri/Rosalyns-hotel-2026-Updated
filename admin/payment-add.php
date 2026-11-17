@@ -563,12 +563,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
                 // Lifecycle guard: block new payments on terminal / fully-settled bookings
+                $lcTerminalStatus = '';   // set for a no-show / cancelled / expired room: it may never be overpaid
                 if ($bookingType === 'room') {
-                    $lcStmt = $pdo->prepare("SELECT status, amount_paid, amount_due, total_amount, deleted_at FROM bookings WHERE id = ?");
+                    $lcStmt = $pdo->prepare("SELECT id, status, amount_paid, amount_due, total_amount, deleted_at FROM bookings WHERE id = ?");
                     $lcStmt->execute([$bookingId]);
                     $lcRow = $lcStmt->fetch(PDO::FETCH_ASSOC);
                     if ($lcRow && !empty($lcRow['deleted_at'])) {
                         throw new Exception('This booking has been deleted. Restore it before recording a payment.');
+                    }
+                    // A no-show / cancelled / expired room is judged on its real amount_due only: bring it up to date first.
+                    if ($lcRow && in_array((string)$lcRow['status'], BOOKING_TERMINAL_STATUSES, true)) {
+                        if (!recalculateBookingFinancials((int)$bookingId)) {
+                            throw new Exception('Could not recalculate the booking balance. Nothing was recorded.');
+                        }
+                        $lcStmt->execute([$bookingId]);
+                        $lcRow = $lcStmt->fetch(PDO::FETCH_ASSOC) ?: $lcRow;
+                        $lcTerminalStatus = (string)$lcRow['status'];
                     }
                     if ($lcRow) {
                         $lcCheck = bookingAllowsAction($lcRow, 'record_payment');
@@ -606,7 +616,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (isset($lockTables[$bookingType])) {
                     $pdo->prepare("SELECT id FROM {$lockTables[$bookingType]} WHERE id = ? FOR UPDATE")->execute([$bookingId]);
                     $histOwedBefore = rh_account_balance_due($pdo, $bookingType, (int)$bookingId);
-                    $limitErr = rh_payment_limit_error($paymentAmount, $histOwedBefore, !empty($_POST['confirm_overpay']));
+                    // Ship B1: a no-show / cancelled / expired room takes at most what it owes, tick or no tick
+                    // (an overpay there would sit as credit with no credit note).
+                    if ($lcTerminalStatus !== '' && $paymentAmount > (float)$histOwedBefore + BALANCE_TOLERANCE) {
+                        throw new Exception('This ' . $lcTerminalStatus . ' booking owes ' . $currency_symbol . ' '
+                            . number_format(max(0, (float)$histOwedBefore), 2) . '. A payment on it cannot be more than that. Nothing was recorded.');
+                    }
+                    $limitErr =rh_payment_limit_error($paymentAmount, $histOwedBefore, !empty($_POST['confirm_overpay']));
                     if ($limitErr !== null && $bookingType === 'room') {
                         // Say what the room was booked at (x nights) next to the balance and the amount typed.
                         $limitErr = rh_payment_limit_error($paymentAmount, $histOwedBefore, !empty($_POST['confirm_overpay']),
@@ -1573,7 +1589,8 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
                 if (_activeType === 'room') {
                     ref  = b.booking_reference || '';
                     name = b.guest_name || '';
-                    sub  = (b.room_name || '') + ' &bull; ' + (b.check_in_date || '') + ' → ' + (b.check_out_date || '');
+                    sub  = _esc(b.room_name || '') + ' &bull; ' + _esc(b.check_in_date || '') + ' → ' + _esc(b.check_out_date || '')
+                        + (b.group_label ? ' &bull; ' + _esc(b.group_label) : '');
                 } else {
                     ref  = b.enquiry_reference || '';
                     name = b.organization_name || b.contact_name || '';
@@ -1615,7 +1632,7 @@ function updateConferenceEnquiryPayments(PDO $pdo, int $enquiryId)
 
             if (_activeType === 'room') {
                 el('psc-name').textContent = b.guest_name || '';
-                el('psc-ref').textContent  = (b.booking_reference || '') + ' · ' + (b.room_name || '');
+                el('psc-ref').textContent  = (b.booking_reference || '') + ' · ' + (b.room_name || '') + (b.group_label ? ' · ' + b.group_label : '');
                 el('psc-meta').innerHTML   =
                     _metaItem('Check-in',  b.check_in_date) +
                     _metaItem('Check-out', b.check_out_date) +

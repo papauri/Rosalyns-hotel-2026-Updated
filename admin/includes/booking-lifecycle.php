@@ -60,9 +60,27 @@ function bookingAllowsAction(array $booking, string $action): array
             return ['allowed' => true, 'reason' => ''];
 
         case 'record_payment':
-            if ($terminal) {
+            if (!empty($booking['deleted_at'])) {
                 return ['allowed' => false, 'reason' =>
-                    "Payments cannot be recorded against a {$status} booking."];
+                    'This booking has been deleted. Restore it before recording a payment.'];
+            }
+            if ($terminal) {
+                // Group bookings Ship B1 (owner 2026-11-17): a terminal room takes a payment ONLY while it really owes,
+                // the same rule as rh_receivable_status_sql('room') - a no-show still owing, a cancelled room whose kept
+                // fee / folio extras still owe, an expired room ONLY when it carries its group no-show charge
+                // (rh_noshow_fee_tag). The stored amount_due alone decides: no total - paid fallback (a cancelled
+                // booking's total can still be the full stay), so a missing amount_due refuses.
+                if ($status === 'expired' && !bookingLifecycleNoshowFeeTagged($booking)) {
+                    return ['allowed' => false, 'reason' =>
+                        'Payments cannot be recorded against an expired booking.'];
+                }
+                $hasDue = array_key_exists('amount_due', $booking) && $booking['amount_due'] !== null && $booking['amount_due'] !== ''
+                    && is_numeric($booking['amount_due']);
+                if (!$hasDue || (float)$booking['amount_due'] <= BALANCE_TOLERANCE) {
+                    return ['allowed' => false, 'reason' =>
+                        "This {$status} booking owes nothing. No payment can be recorded."];
+                }
+                return ['allowed' => true, 'reason' => ''];
             }
             if ($closed) {
                 // Allow payment on checked-out if there is still a balance due
@@ -107,6 +125,24 @@ function bookingAllowsAction(array $booking, string $action): array
     }
 
     return ['allowed' => true, 'reason' => ''];
+}
+
+/**
+ * True when an expired room carries its group no-show / expiry charge (tag '[noshow-fee:<id>]').
+ * Uses $booking['noshow_fee_tagged'] when the caller supplies it; otherwise one lookup by id on the app connection.
+ * No id or no connection = not tagged (the payment is refused).
+ */
+function bookingLifecycleNoshowFeeTagged(array $booking): bool
+{
+    if (array_key_exists('noshow_fee_tagged', $booking)) {
+        return !empty($booking['noshow_fee_tagged']);
+    }
+    $id = (int)($booking['id'] ?? 0);
+    $pdo = $GLOBALS['pdo'] ?? null;
+    if ($id <= 0 || !($pdo instanceof PDO) || !function_exists('rh_noshow_fee_tagged')) {
+        return false;
+    }
+    return rh_noshow_fee_tagged($pdo, $id);
 }
 
 /**

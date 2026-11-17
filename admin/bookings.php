@@ -2599,8 +2599,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $pdo->beginTransaction();
             try {
                 // Lock the booking, re-derive its balance, then apply the same lifecycle rule as every
-                // other payment path (no payment on a cancelled / no-show / expired booking, nor on a
-                // settled checked-out one).
+                // other payment path (a cancelled / no-show / tagged expired room only while it still owes,
+                // never on a settled checked-out one).
                 $cr_stmt = $pdo->prepare("SELECT * FROM bookings WHERE id = ? FOR UPDATE");
                 $cr_stmt->execute([$booking_id]);
                 $cr_bk = $cr_stmt->fetch(PDO::FETCH_ASSOC);
@@ -2623,7 +2623,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     exit;
                 }
                 // Nothing owed = no payment; more than owed only with the explicit tick (balance re-read under the lock).
-                $cr_limitErr = rh_payment_limit_error($pay_amount, rh_account_balance_due($pdo, 'room', $booking_id), !empty($_POST['confirm_overpay']));
+                $cr_owed = rh_account_balance_due($pdo, 'room', $booking_id);
+                // Ship B1: a no-show / cancelled / expired room takes at most what it owes, tick or no tick.
+                if (in_array((string)($cr_bk['status'] ?? ''), BOOKING_TERMINAL_STATUSES, true) && $pay_amount > (float)$cr_owed + BALANCE_TOLERANCE) {
+                    $pdo->rollBack();
+                    header('Content-Type: application/json');
+                    echo json_encode(['success' => false, 'message' => 'This ' . (string)$cr_bk['status'] . ' booking owes ' . $currency_symbol . ' '
+                        . number_format(max(0, (float)$cr_owed), 2) . '. A payment on it cannot be more than that. Nothing was recorded.']);
+                    exit;
+                }
+                $cr_limitErr = rh_payment_limit_error($pay_amount, $cr_owed, !empty($_POST['confirm_overpay']));
                 if ($cr_limitErr !== null) {
                     $pdo->rollBack();
                     header('Content-Type: application/json');
@@ -4579,7 +4588,9 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                             $can_invoice = in_array($bk_status, ['confirmed', 'checked-in', 'checked-out'], true) && $bk_due > BALANCE_TOLERANCE;
                                             $can_receipt = !$bk_deleted && $bk_paid > BALANCE_TOLERANCE && !in_array($bk_status, ['no-show', 'expired'], true);
                                             $can_consolidate = $_perm_pay && ($bk_holding || $bk_inhouse
-                                                || ($bk_status === 'checked-out' && ($bk_due > BALANCE_TOLERANCE || $bk_credit > BALANCE_TOLERANCE)));
+                                                || ($bk_status === 'checked-out' && ($bk_due > BALANCE_TOLERANCE || $bk_credit > BALANCE_TOLERANCE))
+                                                // Ship B1: a no-show / cancelled room that still owes can take a payment here (server gate decides).
+                                                || (!$bk_deleted && in_array($bk_status, ['no-show', 'cancelled'], true) && $bk_due > BALANCE_TOLERANCE));
                                             $can_make_tentative = $bk_status === 'pending' && !in_array($booking['payment_status'], ['paid', 'partial'], true);
                                             $can_delete = $_perm_delete && !$bk_inhouse && $bk_paid <= BALANCE_TOLERANCE && $bk_folio <= BALANCE_TOLERANCE;
                                             ?>
