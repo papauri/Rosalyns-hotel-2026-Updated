@@ -303,11 +303,17 @@ if (!function_exists('rh_hist_tables')) {
         $p = $a['payment'];
         $isRefund = (string)($p['payment_type'] ?? '') === 'refund';
         $amt = $isRefund ? (float)rh_hist_col($p, ['refund_amount', 'total_amount'], 0) : (float)($p['total_amount'] ?? 0);
+        // Status now: the same words as the Payments list (rh_pay_row_state): "Received" = the money came in, plus the
+        // bill's position read from the account (one query for this one payment); a refund reads its refund step.
+        require_once __DIR__ . '/../admin/includes/finance-refunds.php';
+        $acct = rh_hist_rows($pdo, 'payments', 'SELECT ' . rh_pay_row_account_cols_sql() . ' FROM payments p' . rh_pay_row_account_joins_sql() . 'WHERE p.id = ?', [$id]);
+        $st = rh_pay_row_state(($acct[0] ?? []) + $p, defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01, $cur);
+        $stWords = $st['label'] . ($st['note'] !== '' ? ' · ' . $st['note'] : '');
         return ['found' => true, 'title' => ($isRefund ? 'Refund ' : 'Payment ') . $p['payment_reference'], 'facts' => [
             ['label' => $isRefund ? 'Refund amount' : 'Amount', 'value' => rh_hist_money($amt, $cur), 'help' => $isRefund ? 'The money this refund gives back, in full.' : 'The full amount received on this payment, VAT included.'],
             ['label' => 'Method', 'value' => rh_hist_words((string)($p['payment_method'] ?? '')), 'help' => 'How the money was paid or given back.'],
             ['label' => 'Account', 'value' => rh_hist_words((string)($p['booking_type'] ?? '')) . ' ' . (string)($p['booking_reference'] ?? ''), 'help' => 'The booking or account this payment belongs to.'],
-            ['label' => 'Status now', 'value' => rh_hist_words((string)($p['payment_status'] ?? '')), 'help' => 'Where this payment stands today.'],
+            ['label' => 'Status now', 'value' => $stWords, 'help' => 'Where this payment stands today. Received means the money came in; the words after it say whether the bill is settled or still owes.'],
         ], 'events' => rh_payment_history($pdo, $id)];
     }
 }

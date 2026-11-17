@@ -139,14 +139,16 @@ $totalRoomInventory = 0;
 $overallOccupancyRate = 0;
 $overallOccupancy = ['total_nights_booked' => 0, 'total_bookings' => 0, 'total_guests' => 0, 'total_adults' => 0, 'total_children' => 0, 'avg_guests_per_booking' => 0];
 
-$statusLabels = [
-    'pending' => 'Pending',
-    'partial' => 'Partial Payment',
-    'paid' => 'Paid',
-    'completed' => 'Completed',
-    'refunded' => 'Refunded',
-    'cancelled' => 'Cancelled'
-];
+// Payment Status Mix: a payment row's status is the TRANSACTION's ("Received" = the money came in, never "the bill is
+// paid"), in the same words as the Payments list (rh_pay_row_state). Refund rows are left out of this mix; older 'paid'
+// rows are folded into 'completed' below so "Received" is one line; credit-note redemptions (guest credit used, not
+// money received) get their own 'credit_note' line.
+$statusLabels = [];
+foreach (['pending', 'partial', 'completed', 'credit_note', 'refunded', 'cancelled'] as $stKey) {
+    $statusLabels[$stKey] = $stKey === 'credit_note'
+        ? rh_pay_row_state(['payment_status' => 'completed', 'payment_method' => 'credit_note'], (float)BALANCE_TOLERANCE)['label']
+        : rh_pay_row_state(['payment_status' => $stKey], (float)BALANCE_TOLERANCE)['label'];
+}
 
 // New analytics defaults
 $priorRevenue = 0.0;
@@ -189,15 +191,23 @@ try {
 
     // 1. Payment Status Overview (date-filtered)
     $statusStmt = $pdo->prepare("
-        SELECT payment_status, COUNT(*) as count, COALESCE(SUM(total_amount), 0) as total_amount
+        SELECT CASE WHEN payment_method = 'credit_note' AND payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded')
+                    THEN 'credit_note' ELSE payment_status END AS payment_status,
+               COUNT(*) as count, COALESCE(SUM(total_amount), 0) as total_amount
         FROM payments WHERE deleted_at IS NULL
         AND COALESCE(payment_type, '') <> 'refund'
         AND payment_date >= ? AND payment_date <= ?
-        GROUP BY payment_status
+        GROUP BY 1
     ");
     $statusStmt->execute([$start_date, $end_date]);
     while ($row = $statusStmt->fetch(PDO::FETCH_ASSOC)) {
-        $statusData[$row['payment_status']] = $row;
+        $stKey = $row['payment_status'] === 'paid' ? 'completed' : (string)$row['payment_status']; // both read "Received"
+        if (isset($statusData[$stKey])) {
+            $statusData[$stKey]['count'] += $row['count'];
+            $statusData[$stKey]['total_amount'] += $row['total_amount'];
+        } else {
+            $statusData[$stKey] = ['payment_status' => $stKey] + $row;
+        }
         $totalStatusCount += $row['count'];
     }
 
@@ -1883,12 +1893,6 @@ try {
                             </thead>
                             <tbody>
                                 <?php
-                                $statusLabels = [
-                                    'pending' => 'Pending',
-                                    'processing' => 'Processing',
-                                    'completed' => 'Completed',
-                                    'failed' => 'Failed'
-                                ];
                                 $statusColors = [
                                     'pending' => '#ffc107',
                                     'processing' => '#17a2b8',
@@ -1899,7 +1903,8 @@ try {
                                     <tr>
                                         <td>
                                             <span class="badge-sm" style="background: <?php echo $statusColors[$status['refund_status']] ?? '#6c757d'; ?>; color: white;">
-                                                <?php echo $statusLabels[$status['refund_status']] ?? ucfirst($status['refund_status']); ?>
+                                                <?php // Refund steps in the Payments list's words: Awaiting approval / Being paid / Paid out / Failed (never "Completed")
+                                                echo htmlspecialchars(rh_refund_status_label((string)$status['refund_status'])); ?>
                                             </span>
                                         </td>
                                         <td><?php echo number_format($status['count']); ?></td>

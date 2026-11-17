@@ -410,7 +410,9 @@ try {
                 WHEN p.booking_type = 'gym' THEN CONCAT(gi.name, ' (', gi.reference_number, ')')
                 WHEN p.booking_type = 'event' THEN CONCAT(ei.name, ' (', ei.reference_number, ')')
                 ELSE 'Unknown'
-            END as booking_description
+            END as booking_description,
+            -- The account's bill position for the row's status words (rh_pay_row_state, same as the Payments list).
+            " . rh_pay_row_account_cols_sql() . "
         FROM payments p
         LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
         LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
@@ -2116,10 +2118,14 @@ if (!isset($folio_fnb)) {
                                         <td class="num" data-label="Amount"><strong><?php echo $ckPlain($payment['total_amount']); ?></strong><?php if ((float)$payment['vat_amount'] > 0): ?><small>incl. VAT</small><?php endif; ?></td>
                                         <td data-label="Method"><?php echo $ckH(ucfirst(str_replace('_', ' ', (string)$payment['payment_method']))); ?></td>
                                         <?php
-                                        $pst = (string)$payment['payment_status'];
-                                        $pstTone = in_array($pst, ['completed', 'paid'], true) ? 'green' : (in_array($pst, ['pending', 'partial'], true) ? 'amber' : (in_array($pst, ['failed', 'cancelled'], true) ? 'red' : 'muted'));
+                                        // "Received" = this payment's money came in; the bill's own position is the line under it
+                                        // (rh_pay_row_state, same words as the Payments list). Refund rows read their refund step.
+                                        $pstState = rh_pay_row_state($payment, (float)BALANCE_TOLERANCE, (string)$currency_symbol);
+                                        $ckTone = ['ok' => 'green', 'warn' => 'amber', 'alert' => 'red', 'muted' => 'muted'];
+                                        $pstTone = $ckTone[rh_pay_row_pill_tone($pstState['badge'])];
+                                        $pstNoteTone = ['owe' => '#c0392b', 'ok' => '#1f7a45', 'warn' => '#8a5a00', 'muted' => '#666'][$pstState['tone']] ?? '#666';
                                         ?>
-                                        <td data-label="Status"><span class="ck-pill ck-pill--<?php echo $pstTone; ?>"><?php echo $ckH(ucfirst(str_replace('_', ' ', $pst))); ?></span></td>
+                                        <td data-label="Status"><span class="ck-pill ck-pill--<?php echo $pstTone; ?>"><?php echo $ckH($pstState['label']); ?></span><?php if ($pstState['note'] !== ''): ?><br><small style="color: <?php echo $pstNoteTone; ?>;"><?php echo $ckH($pstState['note']); ?></small><?php endif; ?></td>
                                         <td><a class="ck-table__cell-link" href="payment-details.php?id=<?php echo (int)$payment['id']; ?>" aria-label="View payment <?php echo $ckH($payment['payment_reference']); ?>"><i class="fas fa-eye"></i></a></td>
                                     </tr>
                                 <?php endforeach; endif; ?>

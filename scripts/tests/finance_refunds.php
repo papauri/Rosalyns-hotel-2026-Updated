@@ -88,6 +88,17 @@ $s = rh_pay_row_state(['payment_type' => 'refund', 'payment_status' => 'complete
 eq([$s['label'], $s['note'], $s['amount_sign']], ['Refund: Moved to credit note', 'Guest credit, no cash out', '-'], 'credit-note leg never reads "Paid out"');
 $s = rh_pay_row_state(['payment_type' => 'refund', 'payment_status' => 'completed', 'refund_status' => 'completed', 'payment_method' => 'cash'] + $base, $tol);
 eq($s['label'], 'Refund: Paid out', 'cash refund reads Paid out');
+// ---- credit-note REDEMPTION (applyCreditNote / group credit move receiving room): guest credit used, not money received
+$s = rh_pay_row_state(['payment_method' => 'credit_note'] + $base, $tol, 'MWK');
+check($s['label'] !== 'Received', 'redemption (completed, credit_note) is NOT "Received"');
+eq([$s['label'], $s['badge'], $s['note'], $s['tone']], ['Paid from credit note', 'neutral', 'Booking still owes MWK 50,000', 'owe'], 'redemption reads "Paid from credit note", neutral badge, bill note kept');
+$s = rh_pay_row_state(['payment_status' => 'paid', 'payment_method' => ' Credit_Note ', 'account_amount_due' => '0'] + $base, $tol);
+eq([$s['label'], $s['note']], ['Paid from credit note', 'Bill settled'], 'redemption on an older paid row, method normalised');
+eq(rh_pay_row_pill_tone($s['badge']), 'muted', 'redemption pill is neutral (muted), not green');
+$s = rh_pay_row_state(['payment_method' => 'cash'] + $base, $tol, 'MWK');
+eq($s['label'], 'Received', 'cash payment still reads Received');
+$s = rh_pay_row_state(['payment_status' => 'pending', 'payment_method' => 'credit_note'] + $base, $tol, 'MWK');
+eq($s['label'], 'Pending (not received)', 'pending credit-note row keeps its pending words');
 eq(rh_refund_split_text(477559.57, 477559.57, 'MWK'), 'Paid back in cash / bank: MWK 0 · Moved to credit notes (guest credit, no cash out): MWK 477,560', 'split: all moved to credit notes (Liwonde case)');
 eq(rh_refund_split_text(500000, 0, 'MWK'), '', 'split: nothing to credit notes = no line');
 eq(rh_refund_split_text(1000, 250.5, '', 2), 'Paid back in cash / bank: 749.50 · Moved to credit notes (guest credit, no cash out): 250.50', 'split: mixed, 2 decimals');
@@ -117,6 +128,39 @@ check(strpos($pay, '<span class="ck-kpi__label">Still owed</span>') !== false &&
 check(strpos($pay, '> 0.001') === false, 'payments: no raw 0.001 money comparison');
 $rep = (string)file_get_contents($root . '/admin/reports.php');
 check(substr_count($rep, 'rh_refund_settled_sql()') >= 2, 'reports: refund reasons and trends count paid-out refunds only');
+
+// ---- G1 (owner 2026-11-18): every payment-ROW status reads like the Payments list ("Received" + the bill's note)
+eq(rh_pay_row_pill_tone('completed'), 'ok', 'pill tone: Received is ok');
+eq(rh_pay_row_pill_tone('refunded'), 'muted', 'pill tone: refunded / paid-out refund is muted');
+eq(rh_pay_row_pill_tone('warning'), 'warn', 'pill tone: refund awaiting approval is warn');
+eq(rh_pay_row_pill_tone('info'), 'warn', 'pill tone: refund being paid is warn');
+eq(rh_pay_row_pill_tone('failed'), 'alert', 'pill tone: failed is alert');
+eq(rh_pay_row_pill_tone('owe'), 'alert', 'pill tone: still-owes note is alert');
+eq(rh_pay_row_pill_tone('ok'), 'ok', 'pill tone: bill-settled note is ok');
+eq(rh_pay_row_pill_tone('pending'), 'warn', 'pill tone: pending payment is warn');
+eq(rh_pay_row_pill_tone('something-new'), 'muted', 'pill tone: unknown is muted');
+$cols = rh_pay_row_account_cols_sql();
+check(strpos($cols, 'AS account_amount_due') !== false && strpos($cols, 'AS account_status') !== false
+    && strpos($cols, 'AS account_in_rule') !== false && strpos($cols, 'AS account_unconfirmed') !== false, 'account columns: all four rh_pay_row_state keys');
+check(strpos($cols, rh_receivable_status_sql('room', 'b')) !== false && strpos($cols, rh_receivable_status_sql('gym', 'gi')) !== false
+    && strpos($cols, rh_unconfirmed_status_sql('event', 'ei')) !== false, 'account columns: the shared receivables + not-confirmed rules');
+check(strpos($cols, "WHEN b.deleted_at IS NOT NULL THEN 'deleted'") !== false && strpos($cols, 'so.') === false, 'account columns: deleted booking named, till order has no bill');
+$joins = rh_pay_row_account_joins_sql();
+check(strpos($joins, 'LEFT JOIN gym_inquiries gi') !== false && strpos($joins, 'LEFT JOIN event_inquiries ei') !== false && strpos($joins, 'stock_orders') === false, 'account joins: b, ci, gi, ei only');
+$pd = (string)file_get_contents($root . '/admin/payment-details.php');
+check(strpos($pd, 'rh_pay_row_account_cols_sql()') !== false && strpos($pd, 'rh_pay_row_state(') !== false, 'payment details: status from rh_pay_row_state with the account columns');
+check(strpos($pd, "\$pd_pill((string)\$payment['payment_status'])") === false && strpos($pd, "\$pd_pill((string)\$otherPayment['payment_status'])") === false
+    && strpos($pd, "ucfirst(str_replace('_', ' ', (string)\$payment['payment_status']))") === false, 'payment details: no raw payment_status words (header, Status row, other payments)');
+check(strpos($pd, "\$pd_pill((string)(\$r['refund_status']") === false, 'payment details: refunds-against rows read their refund step, never "Completed"');
+$ad = (string)file_get_contents($root . '/admin/accounting-dashboard.php');
+check(strpos($ad, '$pstState = rh_pay_row_state($payment, (float)BALANCE_TOLERANCE') !== false && strpos($ad, "ucfirst(str_replace('_', ' ', \$pst))") === false, 'accounting: Recent payments status via rh_pay_row_state');
+$bh = (string)file_get_contents($root . '/includes/booking-history.php');
+check(strpos($bh, "rh_hist_words((string)(\$p['payment_status']") === false && strpos($bh, 'rh_pay_row_state(') !== false, 'history: Status now via rh_pay_row_state');
+check(strpos($rep, "'completed' => 'Completed'") === false && strpos($rep, 'rh_refund_status_label((string)$status[\'refund_status\'])') !== false, 'reports: status mix + refunds by status never say "Completed"');
+$rx = (string)file_get_contents($root . '/api/reports-export.php');
+check(strpos($rx, "CASE WHEN payment_type = 'refund' THEN 'refund' ELSE 'payment' END AS row_kind") !== false && substr_count($rx, "ucfirst(\$row['payment_status'])") === 1, 'export: status breakdown splits refunds out, words via rh_pay_row_state');
+check(strpos($rx, "CASE WHEN payment_method = 'credit_note' THEN 'credit_note' ELSE '' END AS payment_method") !== false, 'export: credit-note redemptions get their own line');
+check(strpos($rep, "THEN 'credit_note' ELSE payment_status END AS payment_status") !== false && strpos($rep, "'completed', 'credit_note', 'refunded'") !== false, 'reports: status mix gives redemptions their own line');
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

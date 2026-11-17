@@ -180,23 +180,44 @@ function exportOverviewReport($output, string $start_date, string $end_date, str
     fputcsv($output, ['PAYMENT STATUS BREAKDOWN']);
     fputcsv($output, ['Status', 'Count', 'Total Amount']);
 
+    // Same three columns; the Status words follow the Payments list (rh_pay_row_state): "Received" = the money came in.
+    // Refund rows (stored as payment_status 'completed') get their own refund-step lines so money going out never
+    // reads "Received"; credit-note redemptions get their own "Paid from credit note" line (guest credit used, not
+    // money received); older 'paid' rows share the "Received" line.
     $statusQuery = "
         SELECT
+            CASE WHEN payment_type = 'refund' THEN 'refund' ELSE 'payment' END AS row_kind,
             payment_status,
+            CASE WHEN payment_type = 'refund' THEN COALESCE(refund_status, '') ELSE '' END AS refund_status,
+            CASE WHEN payment_method = 'credit_note' THEN 'credit_note' ELSE '' END AS payment_method,
             COUNT(*) as count,
             SUM(total_amount) as total_amount
         FROM payments
         WHERE deleted_at IS NULL
-        GROUP BY payment_status
-        ORDER BY payment_status
+        GROUP BY 1, 2, 3, 4
+        ORDER BY 1, 2, 3, 4
     ";
     $statusStmt = $pdo->query($statusQuery);
 
+    $statusLines = [];
     while ($row = $statusStmt->fetch(PDO::FETCH_ASSOC)) {
+        $label = rh_pay_row_state([
+            'payment_type' => $row['row_kind'] === 'refund' ? 'refund' : 'payment',
+            'payment_status' => (string)$row['payment_status'],
+            'refund_status' => (string)$row['refund_status'],
+            'payment_method' => (string)$row['payment_method'],
+        ], (float)BALANCE_TOLERANCE)['label'];
+        if (!isset($statusLines[$label])) {
+            $statusLines[$label] = ['count' => 0, 'total' => 0.0];
+        }
+        $statusLines[$label]['count'] += (int)$row['count'];
+        $statusLines[$label]['total'] += (float)$row['total_amount'];
+    }
+    foreach ($statusLines as $label => $line) {
         fputcsv($output, [
-            ucfirst($row['payment_status']),
-            $row['count'],
-            $currency_symbol . ' ' . number_format($row['total_amount'], 2)
+            $label,
+            $line['count'],
+            $currency_symbol . ' ' . number_format($line['total'], 2)
         ]);
     }
     fputcsv($output, []);

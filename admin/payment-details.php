@@ -4,6 +4,7 @@ require_once 'admin-init.php';
 require_once 'includes/finance-schema.php';
 require_once __DIR__ . '/includes/finance-account-sync.php';
 require_once __DIR__ . '/../includes/booked-rate.php';
+require_once __DIR__ . '/includes/finance-refunds.php'; // rh_pay_row_state: a payment row says Received + the bill's position
 
 $user = [
     'id' => $_SESSION['admin_user_id'],
@@ -57,11 +58,15 @@ $stmt = $pdo->prepare("
             WHEN p.booking_type = 'conference' THEN ci.{$conferenceFields['phone']}
             ELSE NULL
         END as customer_phone,
-        p.{$paymentTransactionColumn} as transaction_reference_value
+        p.{$paymentTransactionColumn} as transaction_reference_value,
+        -- The account's bill position for the status words (rh_pay_row_state): same columns as the Payments list.
+        " . rh_pay_row_account_cols_sql() . "
     FROM payments p
     LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
     LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
     LEFT JOIN stock_orders so ON p.booking_type = 'restaurant' AND p.booking_id = so.id
+    LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id
+    LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id
     WHERE p.id = ? AND p.deleted_at IS NULL
 ");
 $stmt->execute([$paymentId]);
@@ -382,7 +387,7 @@ if ($payment['booking_type'] === 'room' && !empty($booking) && is_array($booking
 
 // Refunds issued AGAINST this specific payment (when this is the original)
 $refundsAgainstStmt = $pdo->prepare("
-    SELECT id, payment_reference, payment_date, refund_amount, refund_reason, refund_status, refund_notes, total_amount, created_at
+    SELECT id, payment_reference, payment_date, refund_amount, refund_reason, refund_status, refund_notes, total_amount, created_at, payment_method
     FROM payments
     WHERE original_payment_id = ? AND payment_type = 'refund' AND deleted_at IS NULL
     ORDER BY created_at DESC
@@ -499,14 +504,32 @@ if ($pdCanEditPayment && $pdEditRefusal === null && !empty($booking)) {
     <div class="content finance-page">
         <?php
         $pd_is_refund = (($payment['payment_type'] ?? '') === 'refund');
-        $pd_status_map = ['completed' => 'ok', 'paid' => 'ok', 'refunded' => 'muted', 'partially_refunded' => 'warn', 'pending' => 'warn', 'failed' => 'alert', 'cancelled' => 'alert'];
-        $pd_status_cls = $pd_status_map[(string)$payment['payment_status']] ?? 'muted';
+        // A payment row's status is the TRANSACTION's: "Received" means the money came in, never that the bill is
+        // settled; the bill's own position is the note beside it (rh_pay_row_state, same words as the Payments list).
+        // Refund rows read their refund step ("Refund: Paid out"), never "Received".
+        $pdAcctKeys = ['account_amount_due' => null, 'account_status' => null, 'account_in_rule' => 0, 'account_unconfirmed' => 0];
+        $pdAcct = array_intersect_key($payment, $pdAcctKeys) + $pdAcctKeys;
+        $pd_row_state = static function (array $row) use ($pdAcct, $currency_symbol): array {
+            // Rows on this page all belong to the same account as this payment: reuse its bill columns (no query per row).
+            return rh_pay_row_state(array_intersect_key($row, ['payment_type' => 1, 'payment_status' => 1, 'refund_status' => 1, 'payment_method' => 1]) + $pdAcct,
+                (float)BALANCE_TOLERANCE, (string)$currency_symbol);
+        };
+        $pd_row_pill = static function (array $state, bool $noteBelow = true): string {
+            $html = '<span class="rh-pill rh-pill--' . rh_pay_row_pill_tone($state['badge']) . '">' . htmlspecialchars($state['label']) . '</span>';
+            if ($state['note'] !== '') {
+                $html .= $noteBelow
+                    ? '<div class="rh-page-head__meta">' . htmlspecialchars($state['note']) . '</div>'
+                    : ' <span class="rh-pill rh-pill--' . rh_pay_row_pill_tone($state['tone']) . '">' . htmlspecialchars($state['note']) . '</span>';
+            }
+            return $html;
+        };
+        $pdState = $pd_row_state($payment);
         ?>
         <header class="rh-page-head">
             <div class="rh-page-head__main">
                 <div class="rh-page-head__title">
                     <h1>Payment <?php echo htmlspecialchars($payment['payment_reference']); ?></h1>
-                    <span class="rh-pill rh-pill--<?php echo $pd_status_cls; ?>"><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)$payment['payment_status']))); ?></span>
+                    <?php echo $pd_row_pill($pdState, false); ?>
                     <?php if ($pd_is_refund): ?>
                         <span class="rh-pill rh-pill--alert">Refund</span>
                     <?php endif; ?>
@@ -685,7 +708,7 @@ if ($pdCanEditPayment && $pdEditRefusal === null && !empty($booking)) {
                             <tr><th scope="row">Reference</th><td><?php echo htmlspecialchars($payment['payment_reference']); ?></td></tr>
                             <tr><th scope="row">Date</th><td><?php echo date('F j, Y', strtotime($payment['payment_date'])); ?></td></tr>
                             <tr><th scope="row">Method</th><td><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)$payment['payment_method']))); ?></td></tr>
-                            <tr><th scope="row">Status</th><td><?php echo $pd_pill((string)$payment['payment_status']); ?></td></tr>
+                            <tr><th scope="row" title="Received = this payment's money came in. The line under it says whether the bill is settled or still owes.">Status</th><td><?php echo $pd_row_pill($pdState); ?></td></tr>
                             <?php if (!empty($payment['transaction_reference_value'])): ?>
                                 <tr><th scope="row">Transaction reference</th><td><?php echo htmlspecialchars($payment['transaction_reference_value']); ?></td></tr>
                             <?php endif; ?>
@@ -771,7 +794,7 @@ if ($pdCanEditPayment && $pdEditRefusal === null && !empty($booking)) {
                                             <td><?php echo date('M j, Y', strtotime($r['payment_date'])); ?></td>
                                             <td class="num"><strong><?php echo $currency_symbol . number_format((float)($r['refund_amount'] ?: $r['total_amount']), 0); ?></strong></td>
                                             <td><?php echo htmlspecialchars(ucfirst(str_replace('_', ' ', (string)($r['refund_reason'] ?? '-')))); ?></td>
-                                            <td><?php echo $pd_pill((string)($r['refund_status'] ?? 'pending')); ?></td>
+                                            <td><?php echo $pd_row_pill($pd_row_state(['payment_type' => 'refund', 'refund_status' => (string)($r['refund_status'] ?? 'pending')] + $r)); ?></td>
                                             <td><a class="rh-mini-link" href="payment-details.php?id=<?php echo (int)$r['id']; ?>">View</a></td>
                                         </tr>
                                     <?php endforeach; ?>
@@ -803,7 +826,7 @@ if ($pdCanEditPayment && $pdEditRefusal === null && !empty($booking)) {
                                             <td><?php echo htmlspecialchars($otherPayment['payment_reference']); ?></td>
                                             <td><?php echo date('M j, Y', strtotime($otherPayment['payment_date'])); ?></td>
                                             <td class="num"><strong><?php echo $currency_symbol; ?><?php echo number_format($otherPayment['total_amount'], 0); ?></strong></td>
-                                            <td><?php echo $pd_pill((string)$otherPayment['payment_status']); ?></td>
+                                            <td><?php echo $pd_row_pill($pd_row_state($otherPayment)); ?></td>
                                             <td><a class="rh-mini-link" href="payment-details.php?id=<?php echo (int)$otherPayment['id']; ?>">View</a></td>
                                         </tr>
                                     <?php endforeach; ?>

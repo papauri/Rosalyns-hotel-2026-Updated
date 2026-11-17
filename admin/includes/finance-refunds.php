@@ -229,6 +229,12 @@ if (!function_exists('rh_pay_row_state')) {
             'tone' => '',
             'amount_sign' => '',
         ];
+        if ($received && strtolower(trim((string)($row['payment_method'] ?? ''))) === 'credit_note') {
+            // A credit-note redemption (applyCreditNote; also the receiving room of a group credit move) is guest credit
+            // used, not money received (pos-shift-totals / eod-revenue rule): its own neutral label; the bill note stays.
+            $out['label'] = 'Paid from credit note';
+            $out['badge'] = 'neutral';
+        }
         if (!$received && !in_array($ps, ['pending', 'partial'], true)) {
             return $out; // failed / cancelled: the transaction did not happen; no bill note
         }
@@ -263,5 +269,54 @@ if (!function_exists('rh_pay_row_state')) {
             $out['tone'] = 'ok';
         }
         return $out;
+    }
+}
+
+if (!function_exists('rh_pay_row_account_cols_sql')) {
+    /**
+     * The four account columns rh_pay_row_state() reads (account_amount_due, account_status, account_in_rule,
+     * account_unconfirmed), for a SELECT over payments p with the account joins of rh_fin_payments_from(): bookings b,
+     * conference_inquiries ci, gym_inquiries gi, event_inquiries ei (restaurant orders carry no bill: NULL). Same CASEs
+     * as the Payments list query, so every screen's row note follows the one receivables rule. No leading comma.
+     */
+    function rh_pay_row_account_cols_sql(): string
+    {
+        require_once __DIR__ . '/receivables.php';
+        $acct = ['room' => 'b', 'conference' => 'ci', 'gym' => 'gi', 'event' => 'ei'];
+        $due = $status = $rule = $unconf = '';
+        foreach ($acct as $type => $a) {
+            $due .= " WHEN p.booking_type = '{$type}' THEN {$a}.amount_due";
+            $status .= $type === 'room'
+                ? " WHEN p.booking_type = 'room' THEN CASE WHEN b.deleted_at IS NOT NULL THEN 'deleted' ELSE b.status END"
+                : " WHEN p.booking_type = '{$type}' THEN {$a}.status";
+            $rule .= " WHEN p.booking_type = '{$type}' AND {$a}.id IS NOT NULL AND (" . rh_receivable_status_sql($type, $a) . ") THEN 1";
+            $unconf .= " WHEN p.booking_type = '{$type}' AND {$a}.id IS NOT NULL AND (" . rh_unconfirmed_status_sql($type, $a) . ") THEN 1";
+        }
+        return "CASE{$due} ELSE NULL END AS account_amount_due,"
+            . " CASE{$status} ELSE NULL END AS account_status,"
+            . " CASE{$rule} ELSE 0 END AS account_in_rule,"
+            . " CASE{$unconf} ELSE 0 END AS account_unconfirmed";
+    }
+}
+
+if (!function_exists('rh_pay_row_account_joins_sql')) {
+    /** The account joins rh_pay_row_account_cols_sql() needs, on payments p (no stock_orders: a till order has no bill). */
+    function rh_pay_row_account_joins_sql(): string
+    {
+        return " LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id"
+            . " LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id"
+            . " LEFT JOIN gym_inquiries gi ON p.booking_type = 'gym' AND p.booking_id = gi.id"
+            . " LEFT JOIN event_inquiries ei ON p.booking_type = 'event' AND p.booking_id = ei.id ";
+    }
+}
+
+if (!function_exists('rh_pay_row_pill_tone')) {
+    /** rh_pay_row_state() badge/tone -> the plain colour word a screen maps to its own pill classes: ok | warn | alert | muted. */
+    function rh_pay_row_pill_tone(string $badgeOrTone): string
+    {
+        $map = ['completed' => 'ok', 'ok' => 'ok', 'refunded' => 'muted', 'muted' => 'muted', 'neutral' => 'muted',
+            'warning' => 'warn', 'info' => 'warn', 'pending' => 'warn', 'partial' => 'warn', 'warn' => 'warn',
+            'failed' => 'alert', 'rejected' => 'alert', 'cancelled' => 'alert', 'owe' => 'alert'];
+        return $map[strtolower(trim($badgeOrTone))] ?? 'muted';
     }
 }
