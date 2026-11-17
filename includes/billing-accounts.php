@@ -207,7 +207,114 @@ if (!function_exists('rh_billing_ready')) {
                 ) x GROUP BY x.booking_id");
             $st->execute(array_merge($chunk, $chunk));
             foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
-                $out[(int)$r['booking_id']] = round(max(0.0, (float)$r['net']), 2);
+                $out[(int)$r['booking_id']] = (float)$r['net'];
+            }
+        }
+        // Ship C2b (same-payer rule): company money that reached the booking by a credit note funded only by that company's
+        // payments (a same-company move between rooms) is the company's too, less what was refunded of it.
+        $cnPays = rh_billing_company_cn_payments($pdo, 'booking', $ids);
+        if ($cnPays) {
+            $back = rh_billing_cn_payment_refunds($pdo, array_keys($cnPays));
+            foreach ($cnPays as $pid => $c) {
+                $out[$c['booking_id']] = ($out[$c['booking_id']] ?? 0.0) + $c['amount'] - ($back[$pid] ?? 0.0);
+            }
+        }
+        foreach ($out as $bid => $v) {
+            $out[$bid] = round(max(0.0, $v), 2);
+        }
+        return $out;
+    }
+
+    /**
+     * Ship C2b (owner 2026-11-18, same-payer rule). Company money paid by CREDIT NOTE: payment rows made by a credit note
+     * (payment_method credit_note, not a refund, canonical paid status, not deleted) whose note was funded ONLY by refund
+     * legs (completed / processing, not deleted) against ONE company's payment rows (billing_remittance_lines), on a room
+     * booking that is billed to that same company (its own company, else its primary's). A note funded by a guest payment,
+     * by both, by two companies, or used on a room of another payer is not company money (as before).
+     * $by: 'booking' ($ids = booking ids) | 'payment' ($ids = payment ids) | 'account' ($ids = [account id]) | 'all' (every
+     * company; $ids ignored).
+     * @return array<int, array{booking_id:int,account_id:int,amount:float,day:string}> payment id => row
+     */
+    function rh_billing_company_cn_payments(PDO $pdo, string $by, array $ids): array
+    {
+        $ids = array_values(array_unique(array_filter(array_map('intval', $ids), static fn($i) => $i > 0)));
+        $whole = in_array($by, ['account', 'all'], true);
+        if ((!$ids && $by !== 'all') || !rh_billing_ready($pdo) || !in_array($by, ['booking', 'payment', 'account', 'all'], true)) {
+            return [];
+        }
+        // 1) The credit-note payment rows asked for, with the company their booking is billed to (two queries, no fan-out).
+        $cand = [];
+        $chunks = $whole ? [[]] : array_chunk($ids, 500);
+        foreach ($chunks as $chunk) {
+            $filter = $whole ? '' : ' AND p.' . ($by === 'booking' ? 'booking_id' : 'id') . ' IN (' . implode(',', array_fill(0, count($chunk), '?')) . ')';
+            $st = $pdo->prepare("SELECT p.id, p.booking_id, p.credit_note_id, p.total_amount, DATE(p.payment_date) AS day,
+                    COALESCE(NULLIF(b.billing_account_id, 0), pb.billing_account_id, 0) AS acc
+                FROM payments p JOIN bookings b ON b.id = p.booking_id LEFT JOIN bookings pb ON pb.id = b.primary_booking_id
+                WHERE p.booking_type = 'room' AND p.payment_method = 'credit_note' AND COALESCE(p.payment_type, '') <> 'refund'
+                  AND p.payment_status IN ('completed','paid','refunded','partially_refunded') AND p.deleted_at IS NULL
+                  AND p.credit_note_id IS NOT NULL" . $filter);
+            $st->execute($chunk);
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                if ((int)$r['acc'] > 0 && ($by !== 'account' || (int)$r['acc'] === $ids[0])) {
+                    $cand[(int)$r['id']] = $r;
+                }
+            }
+        }
+        if (!$cand) {
+            return [];
+        }
+        // 2) Notes funded only by legs against ONE company's payments: credit note id => that company.
+        $notes = array_values(array_unique(array_map(static fn($r) => (int)$r['credit_note_id'], $cand)));
+        $funded = [];
+        foreach (array_chunk($notes, 500) as $chunk) {
+            $st = $pdo->prepare("SELECT f.credit_note_id, MIN(r.billing_account_id) AS acc FROM payments f
+                    LEFT JOIN billing_remittance_lines l ON l.payment_id = f.original_payment_id
+                    LEFT JOIN billing_remittances r ON r.id = l.remittance_id
+                WHERE f.credit_note_id IN (" . implode(',', array_fill(0, count($chunk), '?')) . ")
+                  AND f.payment_type = 'refund' AND f.refund_status IN ('completed','processing') AND f.deleted_at IS NULL
+                GROUP BY f.credit_note_id
+                HAVING COUNT(*) = COUNT(r.id) AND MIN(r.billing_account_id) = MAX(r.billing_account_id)");
+            $st->execute($chunk);
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+                $funded[(int)$r['credit_note_id']] = (int)$r['acc'];
+            }
+        }
+        $out = [];
+        foreach ($cand as $pid => $r) {
+            $acc = $funded[(int)$r['credit_note_id']] ?? 0;
+            if ($acc > 0 && $acc === (int)$r['acc']) {
+                $out[$pid] = ['booking_id' => (int)$r['booking_id'], 'account_id' => $acc, 'amount' => round((float)$r['total_amount'], 2), 'day' => (string)$r['day']];
+            }
+        }
+        return $out;
+    }
+
+    /**
+     * Refunds (completed / processing, not deleted) of the given payment rows: payment id => total. $from (Y-m-d) set =
+     * only refunds that count on that day or later (the day a refund was paid out, rh_pay_count_day_sql).
+     */
+    function rh_billing_cn_payment_refunds(PDO $pdo, array $paymentIds, ?string $from = null): array
+    {
+        $paymentIds = array_values(array_unique(array_filter(array_map('intval', $paymentIds), static fn($i) => $i > 0)));
+        $out = [];
+        if (!$paymentIds) {
+            return $out;
+        }
+        $day = '';
+        if ($from !== null) {
+            if (!function_exists('rh_pay_count_day_sql') && is_file(__DIR__ . '/../admin/includes/finance-refunds.php')) {
+                require_once __DIR__ . '/../admin/includes/finance-refunds.php';
+            }
+            $day = ' AND ' . (function_exists('rh_pay_count_day_sql') ? rh_pay_count_day_sql('f') : 'DATE(f.payment_date)') . ' >= ?';
+        }
+        foreach (array_chunk($paymentIds, 500) as $chunk) {
+            $st = $pdo->prepare("SELECT f.original_payment_id, SUM(f.total_amount) FROM payments f
+                WHERE f.original_payment_id IN (" . implode(',', array_fill(0, count($chunk), '?')) . ")
+                  AND f.payment_type = 'refund' AND f.refund_status IN ('completed','processing') AND f.deleted_at IS NULL" . $day . '
+                GROUP BY f.original_payment_id');
+            $st->execute($from !== null ? array_merge($chunk, [$from]) : $chunk);
+            foreach ($st->fetchAll(PDO::FETCH_NUM) as $r) {
+                $out[(int)$r[0]] = round((float)$r[1], 2);
             }
         }
         return $out;
@@ -462,6 +569,11 @@ if (!function_exists('rh_billing_ready')) {
             $st = $pdo->prepare('SELECT payment_id FROM billing_remittance_lines WHERE booking_id IN (' . implode(',', array_fill(0, count($out['ids']), '?')) . ')');
             $st->execute($out['ids']);
             $out['leg_ids'] = array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN));
+            // C2b: company money moved in by a same-company credit note counts as company paid, so it is listed too.
+            foreach (array_keys(rh_billing_company_cn_payments($pdo, 'booking', $out['ids'])) as $cnPayId) {
+                $out['leg_ids'][] = (int)$cnPayId;
+            }
+            $out['leg_ids'] = array_values(array_unique($out['leg_ids']));
         }
         return $out;
     }
@@ -511,6 +623,10 @@ if (!function_exists('rh_billing_ready')) {
         $st = $pdo->prepare('SELECT payment_id FROM billing_remittance_lines WHERE booking_id = ?');
         $st->execute([$bookingId]);
         $legs = array_flip(array_map('intval', $st->fetchAll(PDO::FETCH_COLUMN)));
+        // Ship C2b: company money that came by a same-company credit note is the company's too (refunded to the company).
+        foreach (array_keys(rh_billing_company_cn_payments($pdo, 'booking', [$bookingId])) as $cnPid) {
+            $legs[(int)$cnPid] = true;
+        }
         if (!$legs) {
             return null;
         }
@@ -586,6 +702,11 @@ if (!function_exists('rh_billing_ready')) {
         $st->execute([$legId]);
         $acc = $st->fetch(PDO::FETCH_ASSOC);
         if (!$acc) {
+            // Ship C2b: company money paid by a same-company credit note.
+            $cnPay = rh_billing_company_cn_payments($pdo, 'payment', [$legId])[$legId] ?? null;
+            $acc = $cnPay ? rh_billing_account($pdo, (int)$cnPay['account_id']) : null;
+        }
+        if (!$acc) {
             return null;
         }
         $to = (string)(rh_billing_email_list((string)($acc['billing_email'] ?? ''))[0] ?? '');
@@ -622,7 +743,20 @@ if (!function_exists('rh_billing_ready')) {
             JOIN billing_remittance_lines l ON l.payment_id = f.original_payment_id JOIN billing_remittances r ON r.id = l.remittance_id
             WHERE f.payment_type = 'refund' AND f.refund_status IN ('completed','processing') AND f.deleted_at IS NULL AND " . $refundDay . " >= ?" . $accSql);
         $st->execute($args);
-        return round($in - (float)$st->fetchColumn(), 2);
+        $out = $in - (float)$st->fetchColumn();
+        // Ship C2b (same-payer rule): a leg above that only moved the company's money into a credit note used on a room
+        // billed to the SAME company is not money given back: the use is added back (dated on its payment day), less any
+        // refund of that use (dated like the refunds above). A note left unused, or used elsewhere, still counts as given back.
+        $cnPays = $accountId !== null ? rh_billing_company_cn_payments($pdo, 'account', [$accountId]) : rh_billing_company_cn_payments($pdo, 'all', [0]);
+        if ($cnPays) {
+            foreach ($cnPays as $c) {
+                if ($c['day'] >= $from) {
+                    $out += $c['amount'];
+                }
+            }
+            $out -= array_sum(rh_billing_cn_payment_refunds($pdo, array_keys($cnPays), $from));
+        }
+        return round($out, 2);
     }
 
     /** Short status words for lists: '' when the booking is not on account (callers keep their normal label). */
@@ -1074,7 +1208,10 @@ if (!function_exists('rh_billing_ready')) {
         return ['remittance_id' => $remId, 'reference' => $ref, 'amount' => $amount, 'legs' => $legs, 'account' => $acc];
     }
 
-    /** True when a payment row is part of a company payment (Edit payment refuses those: void and record again). */
+    /**
+     * True when a payment row is company money: part of a company payment (Edit payment refuses those: void and record
+     * again), or (Ship C2b) a payment made by a credit note funded only by that company's money on a room it is billed for.
+     */
     function rh_billing_payment_is_company_leg(PDO $pdo, int $paymentId): bool
     {
         if (!rh_billing_ready($pdo) || $paymentId <= 0) {
@@ -1082,7 +1219,7 @@ if (!function_exists('rh_billing_ready')) {
         }
         $st = $pdo->prepare('SELECT COUNT(*) FROM billing_remittance_lines WHERE payment_id = ?');
         $st->execute([$paymentId]);
-        return (int)$st->fetchColumn() > 0;
+        return (int)$st->fetchColumn() > 0 || rh_billing_company_cn_payments($pdo, 'payment', [$paymentId]) !== [];
     }
 
     /* ── company documents: statement + payment advice ─────────────────────────── */

@@ -90,6 +90,11 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - A cancelled or no-show room gives only its credit, never what its policy kept. History: "Credit moved to rooms that owe", "Credit received from another room", "Group payment moved to a room that left", "Group payment received on leaving the group".
 - Guides: booking details group table, Remove from group, credit notes page, FAQ "a room left early and has credit, others owe". Assistant: knows these screen actions exist; no Assistant action.
 
+### Group bookings Ship C2b: same-company credit moves (2026-11-18, owner "same-payer rule") — hashes in TASKS.md
+- Both C2 moves now also work when EVERY room is billed to the SAME company: only that company's money moves (credit note made out to the company); a guest's own extra money stays on its room (review says so); a receiving room takes at most what the company owes on it (never the guest's extras). Mixed guest/company or two companies: still refused, with the reason.
+- Company accounts / company invoice: the moved money counts as the receiving room's company payment and comes off the giving room's; "company money received" does not drop. A company credit-note payment cannot be edited (change it on Credit Notes); refunds of it go to the company.
+- History says "company money of <company>". Guides: same pages as C2 + Company accounts page. Assistant: knows the rule; no Assistant action.
+
 
 ## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
 

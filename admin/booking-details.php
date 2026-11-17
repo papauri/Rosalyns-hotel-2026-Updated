@@ -1414,6 +1414,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] 
         $goLines[] = ['Money', 'Payments stay on the room they were recorded on.'];
         if (is_array($goMove) && $goMove['amount'] > BALANCE_TOLERANCE) {
             $goLines[] = ['Group payment moved to this room', $goMoney((float)$goMove['amount']) . ' (at most ' . $goMoney((float)$goMove['max']) . '), by a credit note from each room below. No payment row or receipt is changed.'];
+            if (($goMove['payer']['mode'] ?? '') === 'company') {
+                $goLines[] = ['Whose money', 'Company money of ' . $goMove['payer']['name'] . ' only: each credit note is made out to ' . $goMove['payer']['name']
+                    . ', and this room gets at most what ' . $goMove['payer']['name'] . ' owes on it (' . $goMoney((float)($goMove['leaving']['company_due'] ?? 0)) . '). Guests\' own payments stay where they are.'];
+            } else {
+                $goLines[] = ['Whose money', 'The guests\' own payments (no room here is billed to a company).'];
+            }
             foreach ($goMove['sources'] as $goS) {
                 if ($goS['take'] > BALANCE_TOLERANCE) {
                     $goLines[] = [$goS['label'] . ' gives ' . $goMoney((float)$goS['take']), 'Paid ' . $goMoney((float)$goS['paid']) . ' -> ' . $goMoney((float)$goS['paid_after'])
@@ -1481,12 +1487,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] 
     $gcNet = static fn(float $v): string => $v < -BALANCE_TOLERANCE ? $gcM(abs($v)) . ' in credit' : $gcM(max(0.0, $v)) . ' owed';
     $gcLines = [['Room with the credit', $gcRes['source']['label'] . ': credit ' . $gcM((float)$gcRes['source']['credit']) . ' -> ' . $gcM((float)$gcRes['source']['credit_after'])
         . ' (paid ' . $gcM((float)$gcRes['source']['paid']) . ' -> ' . $gcM((float)$gcRes['source']['paid_after']) . ')']];
+    $gcCo = ($gcRes['payer']['mode'] ?? '') === 'company';
+    $gcCoName = $gcCo ? (string)$gcRes['payer']['name'] : '';
+    $gcLines[] = ['Whose money', $gcCo
+        ? 'Company money of ' . $gcCoName . ' only: the credit note is made out to ' . $gcCoName . ', and each room gets at most what ' . $gcCoName . ' owes on it.'
+        : 'The guests\' own money (no room here is billed to a company).'];
     foreach ($gcRes['rooms'] as $gcR) {
-        $gcLines[] = [$gcR['label'], 'Owed ' . $gcM((float)$gcR['owed']) . ' -> ' . $gcM((float)$gcR['owed_after']) . ' (gets ' . $gcM((float)$gcR['apply']) . ')'];
+        $gcLines[] = [$gcR['label'], 'Owed ' . $gcM((float)$gcR['owed']) . ' -> ' . $gcM((float)$gcR['owed_after']) . ' (gets ' . $gcM((float)$gcR['apply']) . ')'
+            . ($gcCo ? '; ' . $gcCoName . ' owes ' . $gcM((float)$gcR['company_due']) . ' of it' : '')];
     }
-    $gcLines[] = ['Moved', $gcM((float)$gcRes['moved']) . ' by one credit note issued on ' . $gcRes['source']['ref'] . ' and used on the rooms above, split by what each room owes.'];
+    $gcLines[] = ['Moved', $gcM((float)$gcRes['moved']) . ' by one credit note issued on ' . $gcRes['source']['ref'] . ' and used on the rooms above, split by what each room owes'
+        . ($gcCo ? ' ' . $gcCoName : '') . '.'];
     if ($gcRes['left_over'] > BALANCE_TOLERANCE) {
-        $gcLines[] = ['Left as credit', $gcM((float)$gcRes['left_over']) . ' stays as credit on ' . $gcRes['source']['ref'] . ' (more than the other rooms owe). Refund it or issue a credit note as usual.'];
+        $gcGuest = $gcCo ? (float)$gcRes['guest_credit'] : 0.0;
+        $gcLines[] = ['Left as credit', $gcM((float)$gcRes['left_over']) . ' stays as credit on ' . $gcRes['source']['ref']
+            . ($gcGuest > BALANCE_TOLERANCE ? ' (' . $gcM($gcGuest) . ' of it is the guest\'s own money, which cannot pay ' . $gcCoName . '\'s bill)' : ' (more than the other rooms owe)')
+            . '. Refund it or issue a credit note as usual.'];
     }
     $gcLines[] = ['Group net position', $gcNet((float)$gcRes['net_before']) . ' -> ' . $gcNet((float)$gcRes['net_after']) . ' (unchanged: the money only moves between rooms)'];
     $gcLines[] = ['Payments and receipts', 'No payment is moved or changed; every receipt stays as it is. Cancelled and no-show rooms are not paid from credit here.'];

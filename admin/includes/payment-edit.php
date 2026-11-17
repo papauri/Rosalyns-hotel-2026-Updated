@@ -64,12 +64,13 @@ if (!function_exists('rh_payment_edit_refusal')) {
         if ((string)($p['booking_type'] ?? '') !== 'room') {
             return 'Only room booking payments can be edited for now. Correct this one with a refund or a credit note.';
         }
+        // Credit note first (Ship C2b): a company's money moved by a credit note is a company leg too, but is changed on Credit Notes.
+        if ((string)($p['payment_method'] ?? '') === 'credit_note' || !empty($p['credit_note_id'])) {
+            return 'This payment came from a credit note. Change or void the credit note on Credit Notes instead.';
+        }
         if (!empty($p['_company_leg'])) {
             // Part of a company payment split across bookings (migration 084): editing one line would break the split.
             return 'This is part of a company payment split across bookings. Refund it and record the company payment again on Company accounts.';
-        }
-        if ((string)($p['payment_method'] ?? '') === 'credit_note' || !empty($p['credit_note_id'])) {
-            return 'This payment came from a credit note. Change or void the credit note on Credit Notes instead.';
         }
         if (!in_array((string)($p['payment_status'] ?? ''), ['completed', 'paid', 'partially_refunded', 'refunded'], true)) {
             return 'Only a payment that was received can be edited here. A pending payment is changed with Edit on the payment form.';

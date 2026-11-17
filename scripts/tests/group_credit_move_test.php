@@ -65,6 +65,28 @@ $pay = static function (int $id, float $amt) use ($pdo): void {
         ->execute(['GCMT' . random_int(10000000, 99999999), $id, $amt, $amt]);
     recalculateBookingFinancials($id);
 };
+// A company payment: a payment row + a remittance of $accId with its line (as rh_billing_record_remittance writes them).
+$coPay = static function (int $id, float $amt, int $accId) use ($pdo): int {
+    $pdo->prepare("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+            payment_method, payment_type, payment_status, created_at) VALUES (?, 'room', ?, 'GCMT', CURDATE(), ?, 0, 0, ?, 'bank_transfer', 'partial_payment', 'completed', NOW())")
+        ->execute(['GCMT' . random_int(10000000, 99999999), $id, $amt, $amt]);
+    $pid = (int)$pdo->lastInsertId();
+    $pdo->prepare("INSERT INTO billing_remittances (billing_account_id, remittance_reference, received_date, payment_method, amount) VALUES (?, ?, CURDATE(), 'bank_transfer', ?)")
+        ->execute([$accId, 'GCMT-REM-' . $pid, $amt]);
+    $pdo->prepare('INSERT INTO billing_remittance_lines (remittance_id, booking_id, payment_id, amount) VALUES (?, ?, ?, ?)')->execute([(int)$pdo->lastInsertId(), $id, $pid, $amt]);
+    recalculateBookingFinancials($id);
+    return $pid;
+};
+$charge = static function (int $id, float $gross) use ($pdo): void {
+    $pdo->prepare("INSERT INTO booking_charges (booking_id, charge_type, description, quantity, unit_price, line_subtotal, vat_rate, vat_amount, line_total, posted_at, voided)
+        VALUES (?, 'other', 'Bar (GCMT test)', 1, ?, ?, 0, 0, ?, NOW(), 0)")->execute([$id, $gross, $gross, $gross]);
+    recalculateBookingFinancials($id);
+};
+$histLike = static function (int $id, string $text) use ($pdo): int {
+    $st = $pdo->prepare('SELECT COUNT(*) FROM booking_timeline_logs WHERE booking_id = ? AND description LIKE ?');
+    $st->execute([$id, '%' . $text . '%']);
+    return (int)$st->fetchColumn();
+};
 $group = static function (int $rootId, array $members) use ($pdo): void {
     foreach ($members as $m) { $pdo->prepare('UPDATE bookings SET primary_booking_id = ? WHERE id = ?')->execute([$rootId, $m]); }
 };
@@ -97,6 +119,8 @@ $pdo->beginTransaction();
 try {
     $pdo->prepare('INSERT INTO billing_accounts (name) VALUES (?)')->execute(['GCMT Company']);
     $acc = (int)$pdo->lastInsertId();
+    $pdo->prepare('INSERT INTO billing_accounts (name) VALUES (?)')->execute(['GCMT Company 2']);
+    $acc2 = (int)$pdo->lastInsertId();
 
     // ===== A5: credit fully used, split across 2 owing rooms (+ a cancelled and a no-show room that owe: left out) =====
     $A = $mk(); $B = $mk(); $C = $mk(); $D = $mk(); $E = $mk(['status' => 'no-show']);
@@ -160,17 +184,89 @@ try {
     ok('A5 partly used: moves 50, 250 stays as credit on the source', !empty($res['success']) && $near($res['moved'], 50) && $near($fig($F)['credit'], 250) && $near($fig($G)['owed'], 0), json_encode([$res['error'], $fig($F), $fig($G)]));
     ok('A5 partly used: credit note fully used, net unchanged', $cnCount() === $cn0 + 1 && $near(rh_group_room_table($pdo, $F)['totals']['net'], $tF0['totals']['net']));
 
-    // ===== A5: different payers refused (company-billed room) =====
+    // ===== A5 same payer (Ship C2b): every room billed to the same company -> only the company's money moves =====
     $H = $mk(['billing_account_id' => $acc, 'billing_covers' => 'stay']); $I = $mk();
     $group($H, [$I]);
-    $pay($H, $billed($H) + 100); $pay($I, $billed($I) - 100);
+    $coPay($H, $billed($H) + 100, $acc); $coPay($I, $billed($I) - 100, $acc);
     $pv = rh_group_credit_move($pdo, $H, $opts + ['dry_run' => true]);
-    ok('A5 payer refusal: company-billed group refused', empty($pv['success']) && stripos($pv['error'], 'GCMT Company') !== false, $pv['error']);
+    ok('A5 same company: preview ok, payer is the company', !empty($pv['success']) && $pv['payer']['mode'] === 'company' && $pv['payer']['name'] === 'GCMT Company', $pv['error']);
+    ok('A5 same company: moves 100, I gets what the company owes on it', $near($pv['moved'], 100) && $near($pv['rooms'][0]['company_due'] ?? -1, 100) && $near($pv['guest_credit'], 0), json_encode($pv['rooms']));
+    $cpm0 = rh_billing_company_paid_map($pdo, [$H, $I]);
+    $rn0 = rh_billing_received_net($pdo, date('Y-m-d'), $acc);
+    $rnAll0 = rh_billing_received_net($pdo, date('Y-m-d'));
+    $tH0 = rh_group_room_table($pdo, $H);
+    $p6 = $paySnap([$H, $I]);
+    $res = rh_group_credit_move($pdo, $H, $opts + ['expect_state' => $pv['state']]);
+    ok('A5 same company: confirm ok', !empty($res['success']), $res['error']);
+    $cpm1 = rh_billing_company_paid_map($pdo, [$H, $I]);
+    ok('A5 same company: giver company paid -100, receiver +100', $near(($cpm1[$H] ?? 0) - ($cpm0[$H] ?? 0), -100) && $near(($cpm1[$I] ?? 0) - ($cpm0[$I] ?? 0), 100), json_encode([$cpm0, $cpm1]));
+    ok('A5 same company: company money received unchanged (this company and all)', $near(rh_billing_received_net($pdo, date('Y-m-d'), $acc), $rn0) && $near(rh_billing_received_net($pdo, date('Y-m-d')), $rnAll0),
+        $rn0 . ' -> ' . rh_billing_received_net($pdo, date('Y-m-d'), $acc));
+    ok('A5 same company: group net / billed unchanged, I owes 0', $near(rh_group_room_table($pdo, $H)['totals']['net'], $tH0['totals']['net']) && $near($fig($I)['owed'], 0) && $near(rh_booking_bill_split($pdo, $I)['company_due'], 0));
+    $cnRow = $pdo->query("SELECT guest_name, reason_notes FROM credit_notes WHERE credit_note_number = " . $pdo->quote($res['credit_note']))->fetch(PDO::FETCH_ASSOC);
+    ok('A5 same company: credit note made out to the company', ($cnRow['guest_name'] ?? '') === 'GCMT Company' && stripos((string)$cnRow['reason_notes'], 'Company money of GCMT Company') !== false, json_encode($cnRow));
+    $added6 = $newRows([$H, $I], $p6);
+    $legH = array_values(array_filter($added6, static fn($r) => (int)$r['booking_id'] === $H && $r['payment_type'] === 'refund'));
+    $cnPayI = array_values(array_filter($added6, static fn($r) => (int)$r['booking_id'] === $I && $r['payment_type'] !== 'refund'));
+    ok('A5 same company: legs only on the company payment of H', count($legH) >= 1 && count($cnPayI) === 1);
+    $cnPid = (int)($cnPayI[0]['id'] ?? 0);
+    ok('A5 same company: the credit-note payment on I is a company leg (edit refused, refunds go to the company)', rh_billing_payment_is_company_leg($pdo, $cnPid)
+        && (rh_billing_refund_recipient($pdo, ['booking_type' => 'room', 'id' => $cnPid, 'payment_type' => ''])['name'] ?? '') === 'GCMT Company');
+    // QA C2b: the receiving room's company invoice lists the moved money it counts as paid (invoice foots).
+    ok('A5 same company: I company invoice lists the moved credit-note payment', in_array($cnPid, rh_billing_split_for_ids($pdo, [$I], $I)['leg_ids'] ?? [], true),
+        json_encode(rh_billing_split_for_ids($pdo, [$I], $I)['leg_ids'] ?? null));
+    $plan = rh_billing_refund_plan($pdo, $I, [['id' => $cnPid, 'total_amount' => 100, 'already_refunded' => 0]], 1);
+    ok('A5 same company: refund plan on I treats it as company money', is_array($plan) && ($plan[0]['payer'] ?? '') === 'company', json_encode($plan));
+    ok('A5 same company: History says company money of the company', $histLike($H, 'company money of GCMT Company') === 1 && $histLike($I, 'company money of GCMT Company') === 1);
+    // Refunded out to the company: I's company paid back to before, the company really got 100 back (counted once).
+    $pdo->exec('SAVEPOINT gcmt_refund_out');
+    $pdo->prepare("INSERT INTO payments (payment_reference, booking_type, booking_id, booking_reference, payment_date, payment_amount, vat_rate, vat_amount, total_amount,
+            payment_method, payment_type, payment_status, original_payment_id, refund_reason, refund_status, refund_amount, created_at)
+        VALUES (?, 'room', ?, 'GCMT', CURDATE(), 100, 0, 0, 100, 'bank_transfer', 'refund', 'completed', ?, 'other', 'completed', 100, NOW())")
+        ->execute(['GCMT' . random_int(10000000, 99999999), $I, $cnPid]);
+    recalculateBookingFinancials($I);
+    ok('A5 same company refunded out: I company paid back to before, received net -100 (this company and all)', $near(rh_billing_company_paid_map($pdo, [$I])[$I] ?? 0, $cpm0[$I] ?? 0)
+        && $near(rh_billing_received_net($pdo, date('Y-m-d'), $acc), $rn0 - 100) && $near(rh_billing_received_net($pdo, date('Y-m-d')), $rnAll0 - 100),
+        json_encode([rh_billing_company_paid_map($pdo, [$I]), $rn0, rh_billing_received_net($pdo, date('Y-m-d'), $acc), $rnAll0, rh_billing_received_net($pdo, date('Y-m-d'))]));
+    $pdo->exec('ROLLBACK TO SAVEPOINT gcmt_refund_out');
+
+    // ===== A5 refusals: mixed guest / company, and two companies =====
     $J = $mk(); $K = $mk(['billing_account_id' => $acc, 'billing_covers' => 'stay']);
     $group($J, [$K]);
     $pay($J, $billed($J) + 100); $pay($K, $billed($K) - 100);
     $pv = rh_group_credit_move($pdo, $J, $opts + ['dry_run' => true]);
-    ok('A5 payer refusal: guest credit to a company room refused', empty($pv['success']) && stripos($pv['error'], 'company') !== false, $pv['error']);
+    ok('A5 payer refusal: guest credit to a company room refused (mixed)', empty($pv['success']) && stripos($pv['error'], 'same payer') !== false && stripos($pv['error'], 'GCMT Company') !== false, $pv['error']);
+    $W = $mk(['billing_account_id' => $acc, 'billing_covers' => 'stay']); $X = $mk(['billing_account_id' => $acc2, 'billing_covers' => 'stay']);
+    $group($W, [$X]);
+    $coPay($W, $billed($W) + 100, $acc); $coPay($X, $billed($X) - 100, $acc2);
+    $pv = rh_group_credit_move($pdo, $W, $opts + ['dry_run' => true]);
+    ok('A5 payer refusal: two different companies refused', empty($pv['success']) && stripos($pv['error'], 'different companies') !== false, $pv['error']);
+
+    // ===== A5 same company: the guest's own surplus never pays the company's bill =====
+    $Y = $mk(['billing_account_id' => $acc, 'billing_covers' => 'stay']); $Z = $mk();
+    $group($Y, [$Z]);
+    $coPay($Y, $billed($Y), $acc); $pay($Y, 100); $coPay($Z, $billed($Z) - 100, $acc);
+    $pv = rh_group_credit_move($pdo, $Y, $opts + ['dry_run' => true]);
+    ok('A5 same company: credit that is all guest money refused', empty($pv['success']) && stripos($pv['error'], 'guest\'s own money') !== false, $pv['error']);
+    $Y2 = $mk(['billing_account_id' => $acc, 'billing_covers' => 'stay']); $Z2 = $mk();
+    $group($Y2, [$Z2]);
+    $coPay($Y2, $billed($Y2) + 60, $acc); $pay($Y2, 40); $coPay($Z2, $billed($Z2) - 100, $acc);
+    $pv = rh_group_credit_move($pdo, $Y2, $opts + ['dry_run' => true]);
+    ok('A5 same company: mixed credit -> only the company 60 moves, the guest 40 stays', !empty($pv['success']) && $near($pv['moved'], 60) && $near($pv['guest_credit'], 40) && $near($pv['left_over'], 40),
+        json_encode([$pv['error'], $pv['moved'], $pv['guest_credit'], $pv['left_over']]));
+    $res = rh_group_credit_move($pdo, $Y2, $opts + ['expect_state' => $pv['state'] ?? '']);
+    ok('A5 same company: mixed credit applied, 40 guest credit left on Y2', !empty($res['success']) && $near($fig($Y2)['credit'], 40) && $near($fig($Z2)['owed'], 40), json_encode([$res['error'], $fig($Y2), $fig($Z2)]));
+
+    // ===== A5 same company: a receiver with guest extras (covers 'stay') gets only what the company owes =====
+    $AA = $mk(['billing_account_id' => $acc, 'billing_covers' => 'stay']); $BB = $mk();
+    $group($AA, [$BB]);
+    $coPay($AA, $billed($AA) + 200, $acc); $coPay($BB, $billed($BB) - 50, $acc); $charge($BB, 80);
+    $pv = rh_group_credit_move($pdo, $AA, $opts + ['dry_run' => true]);
+    ok('A5 same company: receiver capped at the company due (50 of 130 owed)', !empty($pv['success']) && $near($pv['moved'], 50) && $near($pv['rooms'][0]['company_due'] ?? -1, 50)
+        && $near($pv['rooms'][0]['owed'] ?? -1, 130) && $near($pv['left_over'], 150), json_encode([$pv['error'], $pv['rooms'], $pv['moved']]));
+    $res = rh_group_credit_move($pdo, $AA, $opts + ['expect_state' => $pv['state'] ?? '']);
+    ok('A5 same company: after the move BB owes only its guest extras', !empty($res['success']) && $near($fig($BB)['owed'], 80) && $near(rh_booking_bill_split($pdo, $BB)['company_due'], 0)
+        && $near(rh_booking_bill_split($pdo, $BB)['guest_due'], 80), json_encode([$res['error'], rh_booking_bill_split($pdo, $BB)]));
 
     // ===== D-R6: lump-sum move inside rh_group_remove (after_detach) =====
     $L = $mk(); $M = $mk(); $N = $mk(); $O = $mk();
@@ -207,9 +303,11 @@ try {
 
     // Payer refusal inside the remove.
     $pdo->exec('SAVEPOINT gcmt_payer');
-    $pdo->prepare('UPDATE bookings SET billing_account_id = ?, billing_covers = ? WHERE id = ?')->execute([$acc, 'stay', $L]);
+    $pdo->prepare('UPDATE bookings SET billing_account_id = ?, billing_covers = ? WHERE id = ?')->execute([$acc, 'stay', $M]);
     $qp = rh_group_lump_quote($pdo, $N, $L, 100);
-    ok('D-R6 different payers refused', !$qp['ok'] && stripos($qp['error'], 'company') !== false, $qp['error']);
+    ok('D-R6 different payers refused (guest rooms + one company room)', !$qp['ok'] && stripos($qp['error'], 'same payer') !== false, $qp['error']);
+    $qp0 = rh_group_lump_quote($pdo, $N, $L, 0);
+    ok('D-R6 different payers: review shows max 0 with the reason', $qp0['ok'] && $near($qp0['max'], 0) && stripos($qp0['note'], 'same payer') !== false, json_encode([$qp0['max'], $qp0['note']]));
     $pdo->exec('ROLLBACK TO SAVEPOINT gcmt_payer');
 
     // Partial move: 250 to N.
@@ -272,6 +370,49 @@ try {
     }]);
     ok('D-R6 cancelled source: moved, it still owes 0', !empty($res['success']) && $near($fig($V)['owed'], 0) && $near($fig($V)['credit'], 0), json_encode([$res['error'] ?? '', $fig($V)]));
 
+    // ===== D-R6 same company (Ship C2b): an inherited member leaves; its company billing is copied, company money follows =====
+    $CC = $mk(['billing_account_id' => $acc, 'billing_covers' => 'stay']); $DD = $mk(); $EE = $mk();
+    $group($CC, [$DD, $EE]);
+    $coPay($CC, $billed($CC) + 200, $acc); $coPay($DD, $billed($DD), $acc); $pay($DD, 30); // DD: 30 of guest money above the bill
+    $g7 = [$CC, $DD, $EE];
+    $cpm7 = rh_billing_company_paid_map($pdo, $g7);
+    $rn7 = rh_billing_received_net($pdo, date('Y-m-d'), $acc);
+    $paid7 = $sumPaid($g7);
+    $q = rh_group_lump_quote($pdo, $EE, $CC, 250);
+    ok('D-R6 same company: quote ok, payer is the company', $q['ok'] && $q['payer']['mode'] === 'company' && $near($q['leaving']['company_due'] ?? -1, $fig($EE)['owed']), json_encode([$q['error'], $q['payer']]));
+    $takes7 = array_column($q['sources'], 'take', 'id');
+    ok('D-R6 same company: all 250 from CC (DD holds guest money above its bill, so it gives only company surplus: none)', $near(array_sum($takes7), 250)
+        && $near((float)($takes7[$CC] ?? 0), 250) && !isset($takes7[$DD]), json_encode($q['sources']));
+    $pv = rh_group_remove($pdo, $EE, $opts + ['dry_run' => true]);
+    $res = rh_group_remove($pdo, $EE, $opts + ['expect_state' => $pv['state'], 'after_detach' => static function (PDO $pdo, array $r) use ($EE, $q, $opts): void {
+        rh_group_lump_apply($pdo, $EE, (int)$r['new_root'], 250, $q['state'], $opts);
+    }]);
+    ok('D-R6 same company: remove + move 250 ok', !empty($res['success']), $res['error'] ?? '');
+    $cpm7b = rh_billing_company_paid_map($pdo, $g7);
+    ok('D-R6 same company: EE keeps the company and its company paid is 250', (int)$pdo->query('SELECT COALESCE(billing_account_id, 0) FROM bookings WHERE id = ' . $EE)->fetchColumn() === $acc
+        && $near($cpm7b[$EE] ?? 0, 250), json_encode($cpm7b));
+    ok('D-R6 same company: Σ company paid, Σ paid and company money received unchanged', $near(array_sum($cpm7b), array_sum($cpm7)) && $near($sumPaid($g7), $paid7)
+        && $near(rh_billing_received_net($pdo, date('Y-m-d'), $acc), $rn7), json_encode([$cpm7, $cpm7b]));
+    ok('D-R6 same company: DD guest money untouched (still 30 credit)', $near($fig($DD)['credit'], 30) && $near(rh_booking_bill_split($pdo, $DD)['guest_paid'], 30), json_encode([$fig($DD), rh_booking_bill_split($pdo, $DD)]));
+    ok('D-R6 same company: credit note made out to the company, History says so', (int)$pdo->query("SELECT COUNT(*) FROM credit_notes WHERE id > $cnMax0 AND booking_id IN ($CC, $DD) AND guest_name = 'GCMT Company'")->fetchColumn() === 1
+        && $histLike($EE, 'company money of GCMT Company') === 1 && $histLike($CC, 'company money of GCMT Company') === 1);
+
+    // D-R6 same company, the PRIMARY leaves: billing goes to the new root too.
+    $FF = $mk(['billing_account_id' => $acc, 'billing_covers' => 'stay']); $GG = $mk();
+    $group($FF, [$GG]);
+    $coPay($FF, $billed($FF) - 120, $acc); $coPay($GG, $billed($GG) + 100, $acc);
+    $g8 = [$FF, $GG];
+    $cpm8 = rh_billing_company_paid_map($pdo, $g8);
+    $q = rh_group_lump_quote($pdo, $FF, $FF, 120);
+    $pv = rh_group_remove($pdo, $FF, $opts + ['dry_run' => true]);
+    $res = rh_group_remove($pdo, $FF, $opts + ['expect_state' => $pv['state'], 'after_detach' => static function (PDO $pdo, array $r) use ($FF, $q, $opts): void {
+        rh_group_lump_apply($pdo, $FF, (int)$r['new_root'], 120, $q['state'], $opts);
+    }]);
+    $cpm8b = rh_billing_company_paid_map($pdo, $g8);
+    ok('D-R6 same company, primary leaves: moved 120, FF owes 0, company paid +120 / -120', $q['ok'] && !empty($res['success']) && $near($fig($FF)['owed'], 0)
+        && $near(($cpm8b[$FF] ?? 0) - ($cpm8[$FF] ?? 0), 120) && $near(($cpm8b[$GG] ?? 0) - ($cpm8[$GG] ?? 0), -120), json_encode([$q['error'], $res['error'] ?? '', $cpm8, $cpm8b]));
+    ok('D-R6 same company, primary leaves: GG still billed to the company', rh_booking_bill_split($pdo, $GG)['account_id'] === $acc || (int)rh_booking_bill_split($pdo, $GG)['account_id'] === $acc);
+
     // A closed leaving room takes nothing.
     $S = $mk(); $T = $mk(['status' => 'no-show']);
     $group($S, [$T]);
@@ -291,7 +432,9 @@ $GLOBALS['rh_payment_audit_queue'] = []; // the rolled-back rows must not reach 
 $leak = (int)$pdo->query("SELECT COUNT(*) FROM bookings WHERE booking_reference LIKE 'GCMT-%'")->fetchColumn()
     + (int)$pdo->query("SELECT COUNT(*) FROM payments WHERE payment_reference LIKE 'GCMT%' OR booking_reference LIKE 'GCMT%'")->fetchColumn()
     + (int)$pdo->query("SELECT COUNT(*) FROM credit_notes WHERE booking_reference LIKE 'GCMT-%'")->fetchColumn()
-    + (int)$pdo->query("SELECT COUNT(*) FROM billing_accounts WHERE name = 'GCMT Company'")->fetchColumn()
+    + (int)$pdo->query("SELECT COUNT(*) FROM billing_accounts WHERE name LIKE 'GCMT Company%'")->fetchColumn()
+    + (int)$pdo->query("SELECT COUNT(*) FROM billing_remittances WHERE remittance_reference LIKE 'GCMT-%'")->fetchColumn()
+    + (int)$pdo->query("SELECT COUNT(*) FROM booking_charges WHERE description = 'Bar (GCMT test)'")->fetchColumn()
     + (int)$pdo->query("SELECT COUNT(*) FROM booking_timeline_logs WHERE booking_reference LIKE 'GCMT-%'")->fetchColumn();
 ok('leak check: no test rows left', $leak === 0, (string)$leak);
 $ictamAfter = $pdo->query("SELECT GROUP_CONCAT(CONCAT(id, ':', COALESCE(primary_booking_id, 0), ':', amount_paid) ORDER BY id) FROM bookings WHERE id = 2100008837 OR primary_booking_id = 2100008837")->fetchColumn();
