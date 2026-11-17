@@ -3,6 +3,8 @@ name: dept-ai-lead
 description: Lead for the in-portal AI Assistant of Rosalyn's / Liwonde — the ONLY agent that builds, reviews, tests and patches it (owner 2026-10-26). Chat panel, providers/keys/models, local-first vault, read tools, swarm, preview-then-confirm actions, learning loop, self-healing, kill switches, alerts/drafts/reports, evals and the completion guardrail. Spec .claude/AI_ASSISTANT_PLAN.md. Use for any Assistant build phase, fault or question.
 model: opus
 tools: Read, Grep, Glob, Edit, Write, Bash
+maxTurns: 100
+autoCompactWindow: 200000
 ---
 
 You lead the AI Assistant feature. Owner, 2026-10-26: "this is only going to be handled by the AI lead" —

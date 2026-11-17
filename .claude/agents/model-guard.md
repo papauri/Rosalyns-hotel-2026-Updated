@@ -3,6 +3,7 @@ name: model-guard
 description: Cheap read-only monitor that checks a proposed agent dispatch plan against the owner's model policy before work starts. Use before each batch of dispatches.
 model: haiku
 tools: Read, Grep, Glob
+maxTurns: 15
 ---
 
 You enforce the owner's model policy. Input: a list of planned dispatches (agent, model, task).

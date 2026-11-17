@@ -21,7 +21,7 @@ Every `dept-*-lead` and `ui-lead` reads this file after
 | `dept-ai-lead` | In-portal AI Assistant (owner 2026-10-26: handled **only** by this lead) | everything in `.claude/AI_ASSISTANT_PLAN.md`: panel, providers/keys/models, vault, tools, swarm, confirm actions, learning, self-healing, kill switches, evals, completion guardrail, its guide pages. Opus 5.5. Other leads never edit AI files |
 | `dept-import-lead` | Data Import (owner 2026-11-03) | the Import button: reads Excel/CSV/Word/PDF lists (stock, bookings, suppliers; NO staff-list import; `data_import` permission default admin+manager), maps to tables, review-then-confirm, never invents data; works with or without the Assistant. Spec `.claude/IMPORT_PLAN.md`. Sonnet. Assistant-side hook = `dept-ai-lead` |
 | `ui-lead` | Cross-system UI | one visual language across every department; reviews UI requests from the leads |
-| `artifacts-lead` | Sales showcase (owner 2026-11-12) | the anonymised interactive demo of the core features (business-type picker + MSP panel track) in `OneDrive\MSP\Showcase`; same lead in both hotel repos and msp-control-panel. Every lead: when you ship a change to a screen the demo mirrors (`SHOWCASE.md` lists them), add it to the daily SYNC QUEUE for the artifacts lead |
+| `artifacts-lead` | Sales showcase (owner 2026-11-12) | the anonymised interactive demo of the core features (business-type picker + MSP panel track) in `OneDrive\MSP\Showcase`; same lead in both hotel repos and msp-control-panel. Every lead: when you ship a change to a screen the demo mirrors (`SHOWCASE.md` lists them), add it to the SYNC QUEUE; the artifacts lead works through the whole queue once a week (or when the owner asks), never after each ship (owner 2026-11-17) |
 
 Each lead is responsible for its department end to end: it audits, fixes, tests, and is the
 one the orchestrator asks when something in that department breaks. Leads are peers: when a
@@ -153,8 +153,10 @@ The feature freeze in BUILD_PLAN.md ("PRODUCTION READINESS GATE") still stands. 
    - Safety net: the full set once a day in the background (first ship of the day or when the owner deploys);
      it never blocks a push.
 2. **One independent review before every commit** (see "Right first time" 3–5): `qa-auditor`
-   (opus for logic/money/stock/auth/security, haiku for small markup/docs), or `dept-accounting-lead` as the
-   gate for money changes. BLOCKERs fail; everything else is `LATER:`.
+   (opus) for anything with logic (money, stock, bookings, auth, security, any PHP logic or SQL, anything in
+   `includes/`, `api/`, `config/`), or `dept-accounting-lead` as the gate for money changes. Only when EVERY
+   changed hunk is CSS, markup, docs or help text: `qa-quick` (sonnet) instead; if it answers ESCALATE, the
+   change goes to `qa-auditor` (owner 2026-11-17). BLOCKERs fail; everything else is `LATER:`.
 3. **Browser check before anything ships** that touches a screen — no MCP browser tools
    (too many tokens). Serve the repo with `php -S 0.0.0.0:8000 -t . scripts/tests/dev-router.php`
    and drive it with `node scripts/tests/browser_check.mjs steps.json` (headless Chrome;
@@ -162,6 +164,9 @@ The feature freeze in BUILD_PLAN.md ("PRODUCTION READINESS GATE") still stands. 
    If port 8000 is already taken by a plain `php -S` (no router), use another port and set
    `BASE=http://localhost:<port>`.
 4. Then port to Liwonde (`php -l` the copied files; owner 2026-10-30: tests run at Rosalyn's only, never re-run at Liwonde), commit and push both.
+   Work already committed at Rosalyn's (not shipped with `ship.php`): `php scripts/port-commit.php <commit>`
+   (dry run), then `--commit --push`. It copies or patches every clean file and lists only the FAIL files;
+   an agent (Sonnet) ports only those (owner 2026-11-17).
 5. **Guides and KB — always last, only when the owner prompts** (owner 2026-11-14; was once a day):
    every ship adds an entry to `.claude/GUIDES_AI_SYNC.md` (what staff now SEE or DO, what the
    Assistant reads that changed) in the same commit. Nobody runs the sync until the owner asks (end
@@ -213,6 +218,12 @@ The feature freeze in BUILD_PLAN.md ("PRODUCTION READINESS GATE") still stands. 
 9. Max 2 builders at once; read-only audits may run beside them.
 10. **No idle dev servers** (owner 2026-11-11): stop every `php -S` the moment its browser check is
     done; at session start and end, stop any `php -S` still running. Never reuse an old one.
+11. **Turn caps (owner 2026-11-17).** Every agent has a `maxTurns` cap and an earlier auto-compact in its
+    frontmatter (leads and specialists 100, qa-auditor 40, guides 60, qa-quick 20). Size each brief to finish
+    well inside it: one task per brief, split anything bigger. An agent that hits the cap hands back a PARTIAL
+    result and its edits stay half-done in the working tree: never ship, never run `ship.php --all-changed`
+    and never commit while a PARTIAL result is in the tree. Resume that agent once only if its context is
+    small; otherwise send a fresh brief for just the remainder (rule 4).
 
 ## UI decisions (shared patterns; step 9 and later reuse these, no redesign)
 
