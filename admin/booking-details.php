@@ -2502,6 +2502,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         // totals are the sum over ALL rooms, never only the rows on this page of the table. This is the page's only
         // group total (the old "Group total" line is replaced by Billed here).
         require_once __DIR__ . '/../includes/group-room-table.php';
+        require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can_join (who may be the primary room)
         $bd_grp = rh_group_room_table($pdo, (int)$booking['id'], (string)$currency_symbol);
         $bd_go_on = !empty($bd_perm_edit) && !empty($bd_grp['rows']) && count($bd_grp['rows']) > 1; // R3 / R6 group actions
         $bd_grp_t = $bd_grp['totals'];
@@ -2589,7 +2590,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                             <td data-label="Owed" class="num"><?php echo $bd_m($gr['owed']); ?></td>
                             <?php if ($bd_go_on): ?>
                             <td data-label="Group" class="bd-group-rooms__ops">
-                                <?php if (!$gr['is_root']): ?>
+                                <?php if (!$gr['is_root'] && rh_group_can_join(['status' => (string)$gr['status'], 'amount_due' => 0], true)['ok']): /* G4: never a no-show / cancelled / expired room */ ?>
                                 <button type="button" class="btn-secondary btn-sm" data-group-op="make_primary" data-target="<?php echo (int)$gr['id']; ?>">Make primary</button>
                                 <?php endif; ?>
                                 <button type="button" class="btn-secondary btn-sm" data-group-op="remove" data-target="<?php echo (int)$gr['id']; ?>">Remove</button>

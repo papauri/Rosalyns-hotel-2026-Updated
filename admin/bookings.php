@@ -4181,6 +4181,7 @@ $today_str = $today->format('Y-m-d');
 // $month_bookings are already set by the DB stats query above.
 // Confirm / Convert buttons need Edit Booking (owner 2026-10-19; enforced server-side too).
 $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
+require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can_join decides the Make a group ticks
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -4574,8 +4575,10 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                             <?php endif; ?>
                                         </td>
                                         <td data-label="Guest">
-                                            <?php if ($bkCanConfirm && !$is_deleted_row && !in_array((string)$booking['status'], ['cancelled', 'expired', 'no-show'], true)): /* R5: tick rooms to make a group */ ?>
+                                            <?php $bk_gj = ($bkCanConfirm && !$is_deleted_row) ? rh_group_can_join(['deleted_at' => null] + $booking) : ['ok' => false, 'can_lead' => false]; ?>
+                                            <?php if ($bk_gj['ok']): /* R5 / G4: tick rooms to make a group (same rule as the server) */ ?>
                                             <input type="checkbox" class="bk-group-pick" value="<?php echo (int)$booking['id']; ?>"
+                                                data-can-lead="<?php echo $bk_gj['can_lead'] ? '1' : '0'; ?>"
                                                 data-ref="<?php echo htmlspecialchars((string)$booking['booking_reference'], ENT_QUOTES); ?>"
                                                 data-guest="<?php echo htmlspecialchars((string)$booking['guest_name'], ENT_QUOTES); ?>"
                                                 aria-label="<?php echo htmlspecialchars('Tick ' . $booking['booking_reference'] . ' to make a group', ENT_QUOTES); ?>"
@@ -11817,13 +11820,19 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             var p = picks();
             if (p.length < 2) return;
             ids = p.map(function (c) { return parseInt(c.value, 10); });
-            leads.innerHTML = p.map(function (c, i) {
-                return '<label style="display:block;margin:4px 0;"><input type="radio" name="bkGroupLead" value="' + esc(c.value) + '"' + (i === 0 ? ' checked' : '') + '> '
-                    + esc(c.getAttribute('data-ref')) + ' &ndash; ' + esc(c.getAttribute('data-guest')) + '</label>';
+            // G4: a no-show or cancelled room can join but never be the primary room (the server refuses it too).
+            var canLead = function (c) { return c.getAttribute('data-can-lead') !== '0'; };
+            var first = p.filter(canLead)[0] || p[0];
+            leads.innerHTML = p.map(function (c) {
+                var ok = canLead(c);
+                return '<label style="display:block;margin:4px 0;"><input type="radio" name="bkGroupLead" value="' + esc(c.value) + '"'
+                    + (c === first ? ' checked' : '') + (ok ? '' : ' disabled') + '> '
+                    + esc(c.getAttribute('data-ref')) + ' &ndash; ' + esc(c.getAttribute('data-guest'))
+                    + (ok ? '' : ' <small>(no-show or cancelled: cannot be the primary room)</small>') + '</label>';
             }).join('');
             leads.querySelectorAll('input[name="bkGroupLead"]').forEach(function (r) { r.addEventListener('change', function () { preview(r.value); }); });
             modal.style.display = 'flex';
-            preview(ids[0]);
+            preview(parseInt(first.value, 10));
         });
         confirmBtn.addEventListener('click', function () {
             var lead = leads.querySelector('input[name="bkGroupLead"]:checked');

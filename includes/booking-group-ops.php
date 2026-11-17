@@ -167,6 +167,42 @@ if (!function_exists('rh_group_repoint')) {
             'owed' => round((float)($fs['balance_due'] ?? 0), 2)];
     }
 
+    /**
+     * G4 (owner 2026-11-18): may this booking be put in a group? The ONE rule for the All Bookings ticks, the Make a group
+     * review and its confirm. A live booking (any status but the ones below) and a no-show may always join. A cancelled
+     * booking may join only while it still owes a kept fee (amount_due above BALANCE_TOLERANCE, the "Cancelled - fee owed"
+     * rule). Expired and deleted bookings never join. A no-show or cancelled booking can never be the primary room.
+     * It joins as it is: its own balance, payments and cancellation snapshot stay on it.
+     *
+     * $row: status, deleted_at, amount_due (+ booking_reference / room_name / guest names for the message).
+     * $asLead: the row is the chosen primary room.
+     * @return array{ok:bool,reason:string,can_lead:bool} reason: a plain sentence when ok is false, else ''.
+     *   can_lead: whether it could be the primary room (false for no-show / cancelled, and whenever ok is false).
+     */
+    function rh_group_can_join(array $row, bool $asLead = false): array
+    {
+        $status = strtolower(trim((string)($row['status'] ?? '')));
+        $label = rh_group_ops_label($row);
+        $owes = function_exists('rh_cancelled_fee_owed_label')
+            ? rh_cancelled_fee_owed_label($status, $row['amount_due'] ?? 0) !== ''
+            : ($status === 'cancelled' && round((float)($row['amount_due'] ?? 0), 2) > (float)BALANCE_TOLERANCE);
+        $no = static fn(string $why): array => ['ok' => false, 'reason' => $why, 'can_lead' => false];
+        if (!empty($row['deleted_at'])) {
+            return $no($label . ' is deleted. Restore it first or untick it.');
+        }
+        if ($status === 'expired') {
+            return $no($label . ' is expired. An expired booking cannot be put in a group.');
+        }
+        if ($status === 'cancelled' && !$owes) {
+            return $no($label . ' is cancelled and owes nothing. Only a cancelled booking that still owes its kept fee can be put in a group.');
+        }
+        $closed = in_array($status, ['cancelled', 'no-show'], true);
+        if ($asLead && $closed) {
+            return $no($label . ' is ' . ($status === 'no-show' ? 'a no-show' : 'cancelled') . ', so it cannot be the primary room. Choose a live booking as the primary room.');
+        }
+        return ['ok' => true, 'reason' => '', 'can_lead' => !$closed];
+    }
+
     /** Run $fn inside the caller's transaction, or a new one that is committed / rolled back here. */
     function rh_group_ops_tx(PDO $pdo, callable $fn): array
     {
@@ -199,7 +235,9 @@ if (!function_exists('rh_group_repoint')) {
      * group locked (all statuses incl. cancelled / checked-out / no-show / deleted). No money moves.
      *
      * $opts: user_id (int), user_name (string), dry_run (bool: validate + preview only, nothing written or locked),
-     *        expect_state (string: the preview's 'state'; a different group refuses), log (bool, default true).
+     *        expect_state (string: the preview's 'state'; a different group refuses), log (bool, default true),
+     *        allow_closed_root (bool, rh_group_remove only: no live room is left, so a no-show / cancelled room may take over).
+     *        G4: otherwise a no-show, cancelled or expired $newRoot refuses with a plain message.
      *
      * @return array{success:bool,error:string,state:string,old_root:int,new_root:int,ids:int[],invoice_number:string,
      *   invoice_copied:bool,billing:string,company:string,chase_copied:int,old_label:string,new_label:string}
@@ -230,6 +268,14 @@ if (!function_exists('rh_group_repoint')) {
             }
             if (!empty($new['deleted_at'])) {
                 $out['error'] = 'A deleted room cannot be the primary room. Restore it first.';
+                return $out;
+            }
+            // G4: a no-show / cancelled / expired room is never made the primary room (rh_group_can_join's lead rule).
+            // allow_closed_root: only rh_group_remove when no live room is left to hand the group to.
+            if (empty($opts['allow_closed_root']) && !rh_group_can_join(['deleted_at' => null] + $new, true)['ok']) {
+                $nSt = strtolower(trim((string)$new['status']));
+                $out['error'] = rh_group_ops_label($new) . ' is ' . ($nSt === 'no-show' ? 'a no-show' : str_replace('-', ' ', $nSt))
+                    . ', so it cannot be the primary room. Choose a live room of the group.';
                 return $out;
             }
             $out['state'] = rh_group_ops_state($oldRoot, $rows, [$newRoot]);
@@ -310,9 +356,10 @@ if (!function_exists('rh_group_repoint')) {
 
     /**
      * R5: make one group of $ids with $leadId as its primary room. $ids may include the lead and rooms already in the
-     * lead's own group (left as they are). Refused: a deleted, cancelled, expired or no-show booking; a booking in
-     * another group; fewer than 2 bookings; a joining booking not on the lead's company account when the lead is on one.
-     * Each booking keeps its own payments, balance and cancellation snapshot. When the lead is a non-primary room of its
+     * lead's own group (left as they are). Refused (rh_group_can_join, G4): a deleted or expired booking, a cancelled booking
+     * that owes nothing, a no-show or cancelled booking as the lead; also a booking in another group; fewer than 2 bookings;
+     * a joining booking not on the lead's company account when the lead is on one. A no-show, and a cancelled booking still
+     * owing its kept fee, may join. Each booking keeps its own payments, balance and cancellation snapshot. When the lead is a non-primary room of its
      * group, the group is first re-pointed to it (rh_group_repoint). Chase stages: each single's key -> the group key.
      *
      * $opts: as rh_group_repoint (user_id, user_name, dry_run, expect_state).
@@ -335,7 +382,7 @@ if (!function_exists('rh_group_repoint')) {
             $ph = implode(',', array_fill(0, count($ids), '?'));
             $st = $pdo->prepare("SELECT b.id, b.booking_reference, b.guest_name, b.room_guest_name, b.status, b.deleted_at, b.primary_booking_id,
                     b.billing_account_id, b.billing_reference, b.billing_due_date, b.billing_covers, b.final_invoice_number,
-                    b.check_in_date, b.check_out_date, COALESCE((SELECT r.name FROM rooms r WHERE r.id = b.room_id), '') AS room_name,
+                    b.check_in_date, b.check_out_date, b.amount_due, COALESCE((SELECT r.name FROM rooms r WHERE r.id = b.room_id), '') AS room_name,
                     (SELECT COUNT(*) FROM bookings m WHERE m.primary_booking_id = b.id) AS member_count
                 FROM bookings b WHERE b.id IN ($ph) ORDER BY b.id" . ($dry ? '' : ' FOR UPDATE'));
             $st->execute($ids);
@@ -352,12 +399,9 @@ if (!function_exists('rh_group_repoint')) {
             $groupRows = rh_group_ops_rows($pdo, $groupRoot, !$dry); // the lead's own group (or just the lead)
             foreach ($rows as $id => $r) {
                 $label = rh_group_ops_label($r);
-                if (!empty($r['deleted_at'])) {
-                    $out['error'] = $label . ' is deleted. Restore it first or untick it.';
-                    return $out;
-                }
-                if (in_array(strtolower((string)$r['status']), ['cancelled', 'expired', 'no-show'], true)) {
-                    $out['error'] = $label . ' is ' . str_replace('-', ' ', strtolower((string)$r['status'])) . '. Only live bookings can be put in a group.';
+                $can = rh_group_can_join($r, $id === $leadId); // G4: the same rule as the list's ticks
+                if (!$can['ok']) {
+                    $out['error'] = $can['reason'];
                     return $out;
                 }
                 $inLeadGroup = isset($groupRows[$id]);
@@ -427,7 +471,10 @@ if (!function_exists('rh_group_repoint')) {
             foreach ($joining as $id) {
                 $up->execute([$leadId, $id]);
                 $chase += rh_group_copy_chase($pdo, $id, $leadId);
-                rh_group_ops_log($rows[$id], 'Added to a group', 'Joined the group led by ' . rh_group_ops_label($leadRow) . '. Its payments, balance and cancellation policy stay on this room.',
+                $jSt = strtolower((string)$rows[$id]['status']);
+                $jNote = $jSt === 'no-show' ? ' Joined as a no-show: a group payment pays it only what it still owes.'
+                    : ($jSt === 'cancelled' ? ' Joined as a cancelled booking: only its kept fee counts in the group.' : '');
+                rh_group_ops_log($rows[$id], 'Added to a group', 'Joined the group led by ' . rh_group_ops_label($leadRow) . '. Its payments, balance and cancellation policy stay on this room.' . $jNote,
                     '(individual booking)', (string)$leadRow['booking_reference'], $opts, ['lead' => $leadId]);
             }
             if ($before !== '' && rh_group_ops_invoice_number($pdo, $allIds, $leadId) !== $before) {
@@ -482,6 +529,7 @@ if (!function_exists('rh_group_repoint')) {
             }
             $out['old_root'] = $root;
             $newRoot = $root;
+            $closedRoot = false; // G4: true only when no live room is left and the group goes to a no-show / cancelled one
             if ($bookingId === $root) {
                 $newRoot = (int)($opts['new_root'] ?? 0);
                 if ($newRoot <= 0 || !isset($rows[$newRoot]) || $newRoot === $root) {
@@ -496,6 +544,7 @@ if (!function_exists('rh_group_repoint')) {
                         foreach ($rows as $id => $r) {
                             if ($id !== $root && empty($r['deleted_at'])) {
                                 $newRoot = $id;
+                                $closedRoot = true;
                                 break;
                             }
                         }
@@ -520,7 +569,7 @@ if (!function_exists('rh_group_repoint')) {
             $out['remaining'] = count(array_diff($live, [$bookingId])); // live rooms left in the group
 
             if ($newRoot !== $root) {
-                $rp = rh_group_repoint($pdo, $root, $newRoot, ['dry_run' => $dry, 'expect_state' => ''] + $opts);
+                $rp = rh_group_repoint($pdo, $root, $newRoot, ['dry_run' => $dry, 'expect_state' => '', 'allow_closed_root' => $closedRoot] + $opts);
                 if (empty($rp['success'])) {
                     $out['error'] = $rp['error'];
                     return $out;

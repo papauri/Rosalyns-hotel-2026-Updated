@@ -18,6 +18,7 @@ require_once $root . '/includes/billing-accounts.php';
 require_once $root . '/includes/cancellation-policy.php';
 require_once $root . '/config/invoice.php';
 require_once $root . '/includes/booking-group-ops.php';
+require_once $root . '/admin/includes/group-payment.php'; // G4: whole-group payment cap on a joined no-show / cancelled room (read-only preview)
 
 $pass = 0; $fail = 0;
 function ok(string $name, bool $cond, string $detail = ''): void {
@@ -157,14 +158,18 @@ try {
     $L = $mk();
     $S1 = $mk();
     $S2 = $mk(['billing_account_id' => $acc[1]]);
-    $X = $mk(['status' => 'cancelled']);
+    $X = $mk(['status' => 'cancelled', 'cancellation_retained_amount' => 0]);
+    recalculateBookingFinancials($X);
     $Y = $mk(['status' => 'expired']);
     $testIds = array_merge($testIds, [$L, $S1, $S2, $X, $Y]);
     $addChase($S1, 'room', 'r7');
     $mk0 = $money([$L, $S1, $S2]);
     $pk0 = $paySnap([$L, $S1, $S2]);
-    ok('R5: a cancelled booking refuses', empty(rh_group_make($pdo, $L, [$L, $X], $opts + ['dry_run' => true])['success']));
-    ok('R5: an expired booking refuses', empty(rh_group_make($pdo, $L, [$L, $Y], $opts + ['dry_run' => true])['success']));
+    $rX = rh_group_make($pdo, $L, [$L, $X], $opts + ['dry_run' => true]);
+    ok('R5 / G4: a cancelled booking that owes nothing refuses', (float)$get($X)['amount_due'] <= $tol && empty($rX['success'])
+        && stripos($rX['error'], 'cancelled and owes nothing') !== false, $get($X)['amount_due'] . ' ' . $rX['error']);
+    $rY = rh_group_make($pdo, $L, [$L, $Y], $opts + ['dry_run' => true]);
+    ok('R5 / G4: an expired booking refuses (even when it owes)', empty($rY['success']) && stripos($rY['error'], 'expired') !== false, $rY['error']);
     ok('R5: a deleted booking refuses', empty(rh_group_make($pdo, $L, [$L, $F], $opts + ['dry_run' => true])['success']));
     ok('R5: a booking in another group refuses', empty(rh_group_make($pdo, $L, [$L, $E], $opts + ['dry_run' => true])['success']));
     ok('R5: one booking alone refuses', empty(rh_group_make($pdo, $L, [$L], $opts + ['dry_run' => true])['success']));
@@ -190,6 +195,78 @@ try {
     $r = rh_group_make($pdo, $S1, [$S1, $W], $opts + ['expect_state' => (string)($pv['state'] ?? '')]); // review state = confirm state
     ok('R5: a non-primary lead re-points its group, then the single joins', !empty($r['success']) && $r['repointed']
         && (int)$get($S1)['primary_booking_id'] === 0 && (int)$get($L)['primary_booking_id'] === $S1 && (int)$get($S2)['primary_booking_id'] === $S1 && (int)$get($W)['primary_booking_id'] === $S1, $r['error']);
+
+    // ---- G4 (owner 2026-11-18): a no-show, and a cancelled room still owing its kept fee, may join ----------------
+    $cj = static fn(array $r, bool $lead = false): array => rh_group_can_join($r + ['booking_reference' => 'GOPT-X'], $lead);
+    ok('G4 rule: live booking joins and can lead', $cj(['status' => 'confirmed', 'amount_due' => 0]) === ['ok' => true, 'reason' => '', 'can_lead' => true]);
+    ok('G4 rule: no-show joins, cannot lead', ($r = $cj(['status' => 'no-show', 'amount_due' => 0]))['ok'] && !$r['can_lead']);
+    ok('G4 rule: cancelled owing joins, cannot lead', ($r = $cj(['status' => 'cancelled', 'amount_due' => 50]))['ok'] && !$r['can_lead']);
+    ok('G4 rule: cancelled owing nothing / within tolerance refused', !$cj(['status' => 'cancelled', 'amount_due' => 0])['ok'] && !$cj(['status' => 'cancelled', 'amount_due' => $tol / 2])['ok']);
+    ok('G4 rule: expired refused even when owing', !$cj(['status' => 'expired', 'amount_due' => 100])['ok']);
+    ok('G4 rule: deleted refused', !$cj(['status' => 'no-show', 'amount_due' => 100, 'deleted_at' => '2026-11-01 10:00:00'])['ok']);
+    ok('G4 rule: no-show / cancelled owing as the lead refused with a plain message',
+        stripos($cj(['status' => 'no-show'], true)['reason'], 'cannot be the primary room') !== false && !$cj(['status' => 'cancelled', 'amount_due' => 50], true)['ok']);
+
+    $gSnap = json_encode(['tiers' => [['days' => 7, 'pct' => 50]], 'kind' => 'individual', 'noshow_pct' => 100, 'policy_version' => 1, 'text' => 'GOPT G4 policy']);
+    $L4 = $mk();
+    $N4 = $mk(['status' => 'no-show', 'cancellation_policy_snapshot' => $gSnap]);
+    $C4 = $mk(['cancellation_policy_snapshot' => $gSnap]);
+    $testIds = array_merge($testIds, [$L4, $N4, $C4]);
+    recalculateBookingFinancials($N4);
+    $pdo->prepare("UPDATE bookings SET status = 'cancelled', cancellation_retained_amount = 500 WHERE id = ?")->execute([$C4]);
+    recalculateBookingFinancials($C4);
+    $keep = static function (int $id) use ($get): string {
+        $b = $get($id);
+        return json_encode([$b['status'], $b['cancellation_policy_snapshot'], $b['cancellation_retained_amount'] ?? null, $b['amount_due'], $b['amount_paid']]);
+    };
+    $k0 = [$N4 => $keep($N4), $C4 => $keep($C4)];
+    $g4m0 = $money([$L4, $N4, $C4]);
+    $g4p0 = $paySnap([$L4, $N4, $C4]);
+    ok('G4 setup: the cancelled room owes its kept fee, billed = the kept fee only', (float)$get($C4)['amount_due'] > $tol && abs($g4m0[$C4]['billed'] - 500) <= $tol, json_encode($g4m0[$C4]));
+    $r = rh_group_make($pdo, $N4, [$N4, $L4], $opts + ['dry_run' => true]);
+    ok('G4: a no-show as the primary room refuses', empty($r['success']) && stripos($r['error'], 'cannot be the primary room') !== false, $r['error']);
+    $r = rh_group_make($pdo, $C4, [$C4, $L4], $opts);
+    ok('G4: a cancelled room as the primary room refuses (confirm path too), nothing written', empty($r['success']) && stripos($r['error'], 'cannot be the primary room') !== false
+        && (int)$get($L4)['primary_booking_id'] === 0, $r['error']);
+    $pv = rh_group_make($pdo, $L4, [$L4, $N4, $C4], $opts + ['dry_run' => true]);
+    ok('G4 preview: ok; group totals = sum of each room (the cancelled one counts only its kept fee)', !empty($pv['success'])
+        && abs($pv['totals']['billed'] - round($g4m0[$L4]['billed'] + $g4m0[$N4]['billed'] + $g4m0[$C4]['billed'], 2)) <= $tol
+        && abs($pv['totals']['owed'] - $sumOwed($g4m0)) <= $tol, json_encode([$pv['error'], $pv['totals']]));
+    $r = rh_group_make($pdo, $L4, [$L4, $N4, $C4], $opts + ['expect_state' => (string)($pv['state'] ?? '')]);
+    ok('G4: the no-show and the cancelled room owing join', !empty($r['success']) && (int)$get($N4)['primary_booking_id'] === $L4 && (int)$get($C4)['primary_booking_id'] === $L4, $r['error']);
+    ok('G4: status, cancellation snapshot, kept fee and balance unchanged on both', $keep($N4) === $k0[$N4] && $keep($C4) === $k0[$C4], json_encode([$keep($N4), $keep($C4)]));
+    ok('G4: every room\'s billed / paid / owed unchanged, no payment row moved', $money([$L4, $N4, $C4]) == $g4m0 && $paySnap([$L4, $N4, $C4]) === $g4p0);
+    $hd = static function (int $id) use ($pdo): string {
+        $st = $pdo->prepare("SELECT description FROM booking_timeline_logs WHERE booking_id = ? AND action = 'Added to a group' ORDER BY id DESC LIMIT 1");
+        $st->execute([$id]);
+        return (string)$st->fetchColumn();
+    };
+    ok('G4: History on each joining room says how it joined', stripos($hd($N4), 'Joined as a no-show') !== false && stripos($hd($C4), 'Joined as a cancelled booking') !== false
+        && $hist($L4, 'Rooms added to the group') === 1, $hd($N4) . ' | ' . $hd($C4));
+    // B1 cap (admin/includes/group-payment.php): a huge whole-group payment pays each closed room only what it owes; the extra goes to the live lead.
+    $gp = rh_group_pay_preview($pdo, $L4, 999999999.0);
+    $ap = array_column($gp['rooms'], 'apply', 'id');
+    $ow = array_column($gp['rooms'], 'owed', 'id');
+    ok('G4 group payment: the no-show and cancelled rooms count, each capped at what it owes; the extra lands on the live lead',
+        !empty($gp['can_group']) && isset($ap[$N4], $ap[$C4]) && abs($ap[$N4] - $ow[$N4]) <= $tol && abs($ap[$C4] - $ow[$C4]) <= $tol
+        && (int)$gp['excess_room_id'] === $L4, json_encode([$gp['reason'], $ap, $ow, $gp['excess_room_id']]));
+    // R3 Make primary follows the same lead rule: a joined no-show / cancelled room is never made primary.
+    $r = rh_group_repoint($pdo, $L4, $N4, $opts + ['dry_run' => true]);
+    $r2 = rh_group_repoint($pdo, $L4, $C4, $opts);
+    ok('G4 R3: Make primary on a joined no-show / cancelled room refuses with a plain message, nothing written',
+        empty($r['success']) && stripos($r['error'], 'a no-show, so it cannot be the primary room') !== false && empty($r2['success'])
+        && stripos($r2['error'], 'cancelled, so it cannot be the primary room') !== false && (int)$get($L4)['primary_booking_id'] === 0, $r['error'] . ' | ' . $r2['error']);
+    // Removing the primary room when every other room is no-show / cancelled still hands the group on (no live room left).
+    $Z = $mk();
+    $Z1 = $mk(['status' => 'no-show']);
+    $Z2 = $mk(['status' => 'cancelled']);
+    $testIds = array_merge($testIds, [$Z, $Z1, $Z2]);
+    $pdo->prepare('UPDATE bookings SET primary_booking_id = ? WHERE id IN (?, ?)')->execute([$Z, $Z1, $Z2]);
+    $pv = rh_group_remove($pdo, $Z, $opts + ['dry_run' => true]);
+    $r = rh_group_remove($pdo, $Z, $opts + ['expect_state' => (string)($pv['state'] ?? '')]);
+    ok('G4 R6: the primary room leaves a group of only no-show / cancelled rooms: handed to the first of them', !empty($r['success']) && $r['repointed']
+        && (int)$r['new_root'] === $Z1 && (int)$get($Z1)['primary_booking_id'] === 0 && (int)$get($Z2)['primary_booking_id'] === $Z1 && (int)$get($Z)['primary_booking_id'] === 0,
+        (string)($r['error'] ?? ''));
 
     // Distinct policy texts on group documents.
     $snap = static fn(string $t) => json_encode(['tiers' => [['days' => 7, 'pct' => 50]], 'kind' => 'individual', 'noshow_pct' => 100, 'policy_version' => 1, 'text' => $t]);

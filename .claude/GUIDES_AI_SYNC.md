@@ -99,6 +99,11 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Clicking/tapping anywhere on a booking row (not on a button) now opens the full booking page (Booking Details), at every width. The (i) summary icon still opens the quick summary. Ctrl/Cmd-click opens the booking in a new tab.
 - Guides: All Bookings page ("click a row to open the booking"). Assistant: no change.
 
+### Group follow-up G4: a no-show / owing cancelled room can join a group (2026-11-18, owner "Yes it can still join") — hashes in TASKS.md
+- All Bookings: the group tick now also shows on no-show rooms and on cancelled rooms that still owe a kept fee. Make a group lets them join; they keep their own owed amount and cancellation terms. A group payment pays them only what they still owe; credit from other rooms never moves into them.
+- A no-show or cancelled room can never be the group's primary room (the lead choice is greyed out; Make primary is hidden on its booking page).
+- History on the joining room: "Added to a group … Joined as a no-show: a group payment pays it only what it still owes." / "… Joined as a cancelled booking: only its kept fee counts in the group." Guides: All Bookings Make a group, booking details group table. Assistant: knows the joining rule; no Assistant action.
+
 
 ## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
 

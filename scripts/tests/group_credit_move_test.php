@@ -173,6 +173,21 @@ try {
     $again = rh_group_credit_move($pdo, $A, $opts + ['dry_run' => true]);
     ok('A5: no credit left -> nothing to move', empty($again['success']) && stripos($again['error'], 'no credit') !== false, $again['error']);
 
+    // ===== G4 (owner 2026-11-18): a no-show and a cancelled room still owing, joined through Make a group, never receive credit =====
+    $GA = $mk(); $GB = $mk(); $GN = $mk(['status' => 'no-show']); $GC = $mk();
+    $pay($GA, $billed($GA) + 120);
+    $pdo->prepare("UPDATE bookings SET status = 'cancelled', cancellation_retained_amount = 500 WHERE id = ?")->execute([$GC]); recalculateBookingFinancials($GC);
+    $gmPv = rh_group_make($pdo, $GA, [$GA, $GB, $GN, $GC], $opts + ['dry_run' => true]);
+    $gmRes = rh_group_make($pdo, $GA, [$GA, $GB, $GN, $GC], $opts + ['expect_state' => (string)($gmPv['state'] ?? '')]);
+    ok('G4: no-show + cancelled-owing rooms joined through Make a group', !empty($gmRes['success'])
+        && (int)$pdo->query('SELECT COUNT(*) FROM bookings WHERE primary_booking_id = ' . $GA)->fetchColumn() === 3, (string)($gmRes['error'] ?? $gmPv['error'] ?? ''));
+    ok('G4: both closed rooms still owe (so leaving them out is the rule, not an accident)', $fig($GN)['owed'] > $tol && $fig($GC)['owed'] > $tol, json_encode([$fig($GN), $fig($GC)]));
+    $gp0 = $paySnap([$GA, $GB, $GN, $GC]);
+    $pv = rh_group_credit_move($pdo, $GA, $opts + ['dry_run' => true]);
+    ok('G4: credit move preview: only the open owing room receives (joined no-show / cancelled left out)', !empty($pv['success']) && array_column($pv['rooms'], 'id') === [$GB],
+        json_encode([$pv['error'], array_column($pv['rooms'], 'id')]));
+    ok('G4: preview wrote nothing', $paySnap([$GA, $GB, $GN, $GC]) === $gp0 && $cnCount() === 1);
+
     // ===== A5: credit partly used (more credit than owed): the rest stays as credit on the source =====
     $F = $mk(); $G = $mk();
     $group($F, [$G]);
