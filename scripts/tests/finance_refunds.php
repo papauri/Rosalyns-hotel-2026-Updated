@@ -160,7 +160,8 @@ check(strpos($rep, "'completed' => 'Completed'") === false && strpos($rep, 'rh_r
 $rx = (string)file_get_contents($root . '/api/reports-export.php');
 check(strpos($rx, "CASE WHEN payment_type = 'refund' THEN 'refund' ELSE 'payment' END AS row_kind") !== false && substr_count($rx, "ucfirst(\$row['payment_status'])") === 1, 'export: status breakdown splits refunds out, words via rh_pay_row_state');
 check(strpos($rx, "CASE WHEN payment_method = 'credit_note' THEN 'credit_note' ELSE '' END AS payment_method") !== false, 'export: credit-note redemptions get their own line');
-check(strpos($rep, "THEN 'credit_note' ELSE payment_status END AS payment_status") !== false && strpos($rep, "'completed', 'credit_note', 'refunded'") !== false, 'reports: status mix gives redemptions their own line');
+$mixSrc = (string)file_get_contents($root . '/admin/includes/reports-status-mix.php');
+check(strpos($rep, "THEN 'credit_note' ELSE payment_status END AS payment_status") !== false && strpos($mixSrc, "'completed', 'credit_note', 'partially_refunded', 'refunded', 'failed'") !== false, 'reports: status mix gives redemptions, part refunded and failed their own lines (reports-status-mix.php)');
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

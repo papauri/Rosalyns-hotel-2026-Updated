@@ -123,6 +123,11 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Confirming the same review twice never runs it twice; after a lost connection the message says the result is unknown (check History). The bookings CSV export neutralises cells that start like a spreadsheet formula.
 - History as each single action. Guides: All Bookings bulk bar. Assistant: knows the bulk bar actions; no Assistant action.
 
+### Reports: payment status mix adds up + credit-note payments as End of Day (2026-11-18, owner audit) — hashes in TASKS.md
+- Payment Status Mix shows every status (incl. Received, part refunded / refunded, Paid from credit note, Failed) with a Total row equal to the payments in the period; the three Received lines = Gross Revenue. Helper text per line.
+- Gross revenue, payment methods, daily / monthly trends and prior-period comparison no longer count payments made from a credit note (same as End of Day). Net Revenue takes off only the VAT on counted payments; VAT Collection shows "VAT on payments counted" and "VAT on credit-note payments" apart.
+- CSV export: status breakdown follows the chosen dates, has a Total row, refund rows after it; no "Credit note" method line. Guides: Reports (Payment Status Mix, VAT Collection). Assistant: revenue answers use the same rule.
+
 
 ## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
 
