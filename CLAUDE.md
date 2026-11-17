@@ -87,6 +87,8 @@ do not re-derive plans or re-scan the repo ad hoc.
    DEPARTMENTS.md cost rule 11), sessions auto-compact at 250k (`.claude/settings.json`), and
    `scripts/claude-hooks/read-guard.php` blocks whole reads of files over 400 lines / 40 KB. Work already
    committed at Rosalyn's is ported with `php scripts/port-commit.php <commit>`, not an agent.
+   Weekly (owner 2026-11-18): `Rosalyns-hotel-2026/.claude/scripts/usage-report.js --save` replaces COST_LOG.md;
+   see build-loop SKILL.md "Cost tracking".
 
 ## Code conventions (enforced by qa-auditor)
 

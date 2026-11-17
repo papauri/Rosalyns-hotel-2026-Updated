@@ -47,22 +47,18 @@ inside a brief; cite the domain number and the SYSTEM_MAP.md section instead.
 - Between tasks: the one-line ticker only.
 - At the end of the run: exactly one SESSION SUMMARY (or PROJECT COMPLETE report).
 
-## Cost tracking (silent — never printed mid-run)
+## Cost tracking (weekly report, owner 2026-11-18)
 
-`.claude/COST_LOG.md` is the ledger; `.claude/scripts/gen-dashboard.js` renders it. You own
-it; agents don't log their own cost.
+`.claude/COST_LOG.md` (per-dispatch estimates) is retired: no rows to write, no dashboard to run.
+Cost comes from the logs Claude Code already writes, read by a plain script (no AI calls):
 
-1. Before each dispatch, estimate `chars(prompt) ÷ 4` input + model overhead (~3000 opus /
-   ~2000 sonnet / ~1000 haiku) + output budget (planning ≈3000, build ≈4000, polish ≈2000,
-   QA ≈1500). Append the row: timestamp, task ID, agent, model, est in/out/total, tier;
-   Actual/Accuracy/Flag as `—`.
-2. **High-cost dispatches proceed automatically.** If an estimate exceeds 35,000 tokens, do
-   not stop the loop — flag the row `HIGH-COST` and dispatch anyway. Instead of asking, split
-   the task in half via the planner when it is splittable. Cost is reported once, in the
-   SESSION SUMMARY.
-3. After each agent's task notification, fill Actual Tokens from `subagent_tokens` and
-   Accuracy = `round(actual/estimate × 100)%`.
-4. Run `node .claude/scripts/gen-dashboard.js` every 3 completed tasks and at end of run.
+1. Once a week, in the first session of the week or with the weekly SYNC QUEUE pass, run
+   `node .claude/scripts/usage-report.js --save`. It covers ALL projects and writes
+   `MSP/usage-reports/<date>.md` plus one row in `MSP/usage-reports/HISTORY.md`.
+2. Tell the owner in one line: calls per commit against last week's row, and any non-zero count
+   under "Are the 2026-11-17 limits working?" (runs past `maxTurns`, main sessions over 300k).
+3. SESSION SUMMARY `Est. cost`: add up the `total_tokens` from the agents' task notifications.
+   Never estimate per dispatch.
 
 ## Cost & safety rails (non-negotiable)
 

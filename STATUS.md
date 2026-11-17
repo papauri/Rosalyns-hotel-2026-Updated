@@ -24,6 +24,10 @@ Measured 10-17 Nov: about 55 model calls per commit, 97% on Opus, department-lea
 - `scripts/port-commit.php` (in Rosalyn's): ports work already committed at Rosalyn's to Liwonde without an agent.
   Tested on 4 past agent-made ports (incl. drifted `config/database.php`): identical results.
 - artifacts-lead (showcase) works the SYNC QUEUE once a week, not after each ship.
+- Weekly usage report (owner 2026-11-18): `Rosalyns-hotel-2026/.claude/scripts/usage-report.js --save`
+  (one copy; plain node, no AI calls) reads Claude Code's own session logs for ALL projects and writes
+  `MSP/usage-reports/<date>.md` + a row in `MSP/usage-reports/HISTORY.md`. COST_LOG.md is retired.
+  Baseline 10-16 Nov: 22,793 calls, 50 per hotel commit, 95% Opus, 53 agent runs past today's caps.
 
 ## Hard rules
 - **ROSALYN'S IS LIVE**, with real guests and money.

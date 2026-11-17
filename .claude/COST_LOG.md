@@ -1,5 +1,9 @@
 # COST_LOG — Rosalyn's Hotel 2026 build system
 
+> **RETIRED 2026-11-18 (owner).** No new rows. Weekly cost now comes from
+> `Rosalyns-hotel-2026/.claude/scripts/usage-report.js`, which reads Claude Code's own session logs
+> (see `MSP/usage-reports/HISTORY.md`). Kept for history only.
+
 > Append-only. One row per agent dispatch (build-planner, specialist, ui-designer,
 > qa-auditor, codebase-scout). Written by the `/build-loop` orchestrator, not by the
 > dispatched agents themselves.
