@@ -28,6 +28,7 @@ require_once __DIR__ . '/../includes/booking-created-by.php'; // "by …" under 
 require_once __DIR__ . '/../includes/late-stay.php'; // late check-in / leave-date choices: one quote for assess and settle
 require_once __DIR__ . '/../includes/stay-nights.php'; // add / take off nights: one quote for the review card and the save
 require_once __DIR__ . '/../includes/billing-accounts.php'; // company pays later (migration 084): who owes the balance
+require_once __DIR__ . '/includes/bookings-bulk.php'; // ticked rows: review, confirm, result per room (also the shared email senders)
 $message = '';
 $error = '';
 $currency_symbol = (string)getSetting('currency_symbol', 'MWK');
@@ -351,12 +352,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('Booking not found');
             }
 
-            // Include email functions
-            require_once '../config/email.php';
-            // System Logs > Emails sent: every email resent here is about this booking (the sender adds the kind).
-            // Script scope: cleared in the finally below so it never reaches the scheduler that runs after the page.
-            $emailCtx = rh_email_context(rh_email_ctx_account('room', $booking_id, (string)($booking['booking_reference'] ?? '')));
-
             // Parse CC emails
             $cc_array = [];
             if (!empty($cc_emails)) {
@@ -366,62 +361,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 });
             }
 
-            // Send appropriate email based on type
-            $email_result = ['success' => false, 'message' => 'Invalid email type'];
-
-            try {
-            switch ($email_type) {
-                case 'booking_received':
-                    $email_result = sendBookingReceivedEmail($booking);
-                    break;
-                case 'booking_confirmed':
-                    $email_result = sendBookingConfirmedEmail($booking);
-                    break;
-                case 'tentative_confirmed':
-                    $booking['tentative_expires_at'] = $booking['tentative_expires_at'] ?? date('Y-m-d H:i:s', strtotime('+48 hours'));
-                    $email_result = sendTentativeBookingConfirmedEmail($booking);
-                    break;
-                case 'tentative_converted':
-                    $email_result = sendTentativeBookingConvertedEmail($booking);
-                    break;
-                case 'booking_cancelled':
-                    // Never tell a guest with a live reservation that it was cancelled.
-                    if (!in_array($booking['status'], ['cancelled', 'expired', 'no-show'], true)) {
-                        throw new Exception('A cancellation email can only be resent for a cancelled, expired or no-show booking.');
-                    }
-                    $cancellation_reason = 'Resent by admin';
-                    $email_result = sendBookingCancelledEmail($booking, $cancellation_reason);
-                    break;
-                case 'booking_reminder':
-                    // Reminder emails are only valid for active bookings. A no-show
-                    // (or any closed status) is explicitly excluded here so it can
-                    // never receive a late/overdue alert — no-show takes precedence
-                    // over any time-based checkout logic. sendBookingReminderEmail()
-                    // enforces the same rule again as defence-in-depth.
-                    if (!in_array($booking['status'], ['confirmed', 'pending', 'checked-in'], true)) {
-                        throw new Exception('Reminder emails are only for active bookings (no-show, cancelled and closed bookings are excluded).');
-                    }
-                    $email_result = sendBookingReminderEmail($booking);
-                    break;
-                case 'invoice':
-                    require_once '../config/invoice.php';
-                    $cc_recipients = array_values(array_filter($cc_array));
-                    $inv_smtp = getEmailSetting('smtp_username', '');
-                    if (!empty($inv_smtp) && !in_array($inv_smtp, $cc_recipients)) {
-                        $cc_recipients[] = $inv_smtp;
-                    }
-                    $email_result = sendPaymentInvoiceEmailWithCC($booking_id, $cc_recipients);
-                    if ($email_result['success']) {
-                        logBookingAudit($booking_id, 'email_sent', null, null, 'Invoice email resent by admin (' . ($user['full_name'] ?? ($user['username'] ?? '')) . ')', $booking['booking_reference'] ?? null);
-                    }
-                    break;
-                default:
-                    throw new Exception('Invalid email type selected');
-            }
-            } finally {
-                $emailCtx = null;
-                rh_email_context_clear();
-            }
+            // Send the chosen email (admin/includes/bookings-bulk.php: the same sender the bulk Send a reminder /
+            // Resend confirmation use; it sets and clears the email-log context for this booking).
+            $email_result = bookings_send_booking_email($pdo, $booking, (string)$email_type, array_values($cc_array), $user);
 
             if ($email_result['success']) {
                 $message = 'Email sent successfully to ' . htmlspecialchars($booking['guest_email']);
@@ -1585,20 +1527,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 echo json_encode(['success' => false, 'message' => 'Invalid booking ID']);
                 exit;
             }
-            require_once '../config/invoice.php';
-            $cc_recipients = [];
-            $invoice_recipients = getEmailSetting('invoice_recipients', '');
-            $smtp_username     = getEmailSetting('smtp_username', '');
-            if (!empty($invoice_recipients)) {
-                $cc_recipients = array_filter(array_map('trim', explode(',', $invoice_recipients)));
-            }
-            if (!empty($smtp_username) && !in_array($smtp_username, $cc_recipients)) {
-                $cc_recipients[] = $smtp_username;
-            }
-            $result = sendPaymentInvoiceEmailWithCC($bid, $cc_recipients);
-            if ($result['success']) {
-                logBookingAudit($bid, 'email_sent', null, null, 'Invoice email sent by admin (' . ($user['full_name'] ?? ($user['username'] ?? '')) . ')');
-            }
+            // Same sender as the bulk Email invoice (admin/includes/bookings-bulk.php): CC, send, History line.
+            $result = bookings_send_invoice_email($bid, $user);
             header('Content-Type: application/json');
             echo json_encode($result);
             exit;
@@ -2938,26 +2868,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception('You do not have permission to make a group (Edit Booking).');
             }
             require_once __DIR__ . '/../includes/booking-group-ops.php';
-            $gmIds = array_values(array_unique(array_filter(array_map('intval', (array)($_POST['booking_ids'] ?? [])))));
+            $gmIds = adminBulkIds('booking_ids');
             $gmLead = (int)($_POST['lead_id'] ?? 0);
             $gmApply = $action === 'group_make_apply';
             if ($gmApply && trim((string)($_POST['state'] ?? '')) === '') {
                 throw new Exception('Review the group first.');
             }
-            $gmRes = rh_group_make($pdo, $gmLead, $gmIds, [
+            header('Content-Type: application/json');
+            // Add to a group (G5a): the ticked rooms join the group that holds this reference; its primary room leads.
+            if (array_key_exists('group_ref', $_POST)) {
+                $gmFor = rh_bk_bulk_group_lead_for_ref($pdo, (string)$_POST['group_ref']);
+                if ($gmFor['lead'] <= 0) {
+                    echo json_encode(['success' => false, 'message' => $gmFor['error'], 'skipped' => []]);
+                    exit;
+                }
+                $gmLead = (int)$gmFor['lead'];
+            }
+            // G5a: a ticked room that cannot join (rh_group_can_join) or sits in another group is skipped with its reason.
+            $gmFilter = rh_bk_bulk_group_filter($pdo, $gmLead, $gmIds);
+            $gmRes = rh_group_make($pdo, $gmLead, $gmFilter['ids'], [
                 'user_id' => (int)($user['id'] ?? 0),
                 'user_name' => (string)($user['full_name'] ?? ($user['username'] ?? '')),
                 'dry_run' => !$gmApply,
                 'expect_state' => $gmApply ? (string)$_POST['state'] : '',
             ]);
-            header('Content-Type: application/json');
             if (empty($gmRes['success'])) {
-                echo json_encode(['success' => false, 'message' => (string)$gmRes['error']]);
+                echo json_encode(['success' => false, 'message' => (string)$gmRes['error'], 'skipped' => $gmFilter['skipped']], JSON_INVALID_UTF8_SUBSTITUTE);
                 exit;
             }
             if ($gmApply) {
-                echo json_encode(['success' => true, 'message' => 'Group made: ' . count($gmRes['joined']) . ' room(s) joined. No money moved.',
-                    'lead' => (int)$gmRes['lead']]);
+                $gmSkipN = count($gmFilter['skipped']);
+                echo json_encode(['success' => true, 'message' => 'Group made: ' . count($gmRes['joined']) . ' room(s) joined'
+                    . ($gmSkipN ? ', ' . $gmSkipN . ' skipped' : '') . '. No money moved.',
+                    'lead' => (int)$gmRes['lead'], 'joined' => array_map('intval', $gmRes['joined']), 'skipped' => $gmFilter['skipped']], JSON_INVALID_UTF8_SUBSTITUTE);
                 exit;
             }
             $gmRooms = [];
@@ -2968,7 +2911,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             echo json_encode(['success' => true, 'state' => (string)$gmRes['state'], 'rooms' => $gmRooms, 'totals' => $gmRes['totals'],
                 'repointed' => !empty($gmRes['repointed']), 'invoice_number' => (string)$gmRes['invoice_number'],
-                'company' => (string)$gmRes['company'], 'currency' => (string)$currency_symbol], JSON_INVALID_UTF8_SUBSTITUTE);
+                'company' => (string)$gmRes['company'], 'currency' => (string)$currency_symbol, 'lead' => (int)$gmRes['lead'],
+                'skipped' => $gmFilter['skipped']], JSON_INVALID_UTF8_SUBSTITUTE);
+            exit;
+        } elseif ($action === 'preview_bookings_bulk' || $action === 'bookings_bulk_apply') {
+            // All Bookings bulk bar (G5a): Remove from group, Send a reminder, Resend confirmation, Email invoice.
+            // Review (read only) lists every ticked room with what will happen or why it is skipped; confirm re-checks
+            // the review and does each room on its own through the single action's code (admin/includes/bookings-bulk.php).
+            if (!isAjaxRequest()) {
+                throw new Exception('Invalid request');
+            }
+            $bbOp = (string)($_POST['op'] ?? '');
+            $bbIds = adminBulkIds();
+            header('Content-Type: application/json');
+            if ($action === 'preview_bookings_bulk') {
+                $bbPlan = rh_bk_bulk_plan($pdo, $bbOp, $bbIds, (int)($user['id'] ?? 0));
+                echo json_encode(empty($bbPlan['success']) ? ['success' => false, 'message' => $bbPlan['error']] : [
+                    'success' => true, 'state' => $bbPlan['state'], 'rooms' => $bbPlan['rooms'], 'will' => $bbPlan['will'], 'skip' => $bbPlan['skip'],
+                ], JSON_INVALID_UTF8_SUBSTITUTE);
+                exit;
+            }
+            @set_time_limit(300); // up to 50 emails, one after another
+            $bbRes = rh_bk_bulk_apply($pdo, $bbOp, $bbIds, $user, trim((string)($_POST['state'] ?? '')));
+            echo json_encode(empty($bbRes['success']) ? ['success' => false, 'message' => $bbRes['error']] : [
+                'success' => true, 'message' => $bbRes['message'], 'results' => $bbRes['results'], 'done' => $bbRes['done'],
+            ], JSON_INVALID_UTF8_SUBSTITUTE);
             exit;
         } elseif ($action === 'room_change_options') {
             // Upgrade / downgrade picker: every other active room type with availability and a quote.
@@ -3598,6 +3565,16 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         $export_params = array_merge($export_params, $export_more['params']);
         $export_where_clauses = array_merge($export_where_clauses, rh_bk_tab_clauses($active_tab_override)['clauses']);
 
+        // Export selected (bulk bar, G5a): ?ids=1,2,3 exports just the ticked bookings (not deleted), whatever the filters.
+        // An ids list with no valid id exports the header only, never the whole filtered list.
+        if (isset($_GET['ids'])) {
+            $export_ids = rh_bk_bulk_get_ids($_GET['ids']);
+            $export_where_clauses = $export_ids
+                ? ['b.deleted_at IS NULL', 'b.id IN (' . implode(',', array_fill(0, count($export_ids), '?')) . ')']
+                : ['1 = 0'];
+            $export_params = $export_ids;
+        }
+
         $export_where_sql = !empty($export_where_clauses) ? 'WHERE ' . implode(' AND ', $export_where_clauses) : '';
 
         $export_stmt = $pdo->prepare("
@@ -3677,6 +3654,12 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
     } catch (PDOException $e) {
         $error = 'Export failed: ' . $e->getMessage();
     }
+}
+
+// Print arrival list (bulk bar, G5a): the ticked bookings on one printable page (read only, like the export).
+if (isset($_GET['export']) && $_GET['export'] === 'arrivals') {
+    rh_bk_bulk_print_arrivals($pdo, rh_bk_bulk_get_ids($_GET['ids'] ?? null), $currency_symbol, $user);
+    exit;
 }
 
 // ─── Auto-expire tentative bookings whose deadline has passed ────────────
@@ -4471,17 +4454,27 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
 
                 <?php if (!empty($bookings)): ?>
                     <?php $bk_can_open_payment = rhCanLinkTo((int)($user['id'] ?? 0), 'payment-details.php'); // once per page: link payment refs to the payment record ?>
-                    <?php if ($bkCanConfirm): ?>
-                    <div id="bkGroupBar" class="bk-group-bar" style="display:none;flex-wrap:wrap;align-items:center;gap:10px;margin:0 0 10px;padding:10px 14px;background:#FAF6F0;border:1px solid #E5DACB;border-radius:6px;">
-                        <span><strong id="bkGroupCount">0</strong> ticked on this page <i class="help" data-tip="Tick two or more bookings on this page (the box beside the guest name), then Make a group. You choose the primary room and see every room's paid and owed before anything is saved. Each booking keeps its own payments, balance and cancellation policy. Cancelled, expired, no-show and deleted bookings cannot be ticked. Ticks are cleared when you change page.">?</i></span>
-                        <button type="button" class="btn btn-primary btn-sm" id="bkGroupMake">Make a group</button>
-                        <button type="button" class="btn btn-secondary btn-sm" id="bkGroupClear">Clear ticks</button>
-                    </div>
-                    <?php endif; ?>
+                    <?php /* Bulk bar (G5a, shared admin-bulk.js): shows "N selected" + the actions once a row is ticked. Every
+                       action that writes or sends opens a review of each ticked room first (bkBulkModal / bkGroupModal). */ ?>
+                    <?php adminBulkBarStart('bookings_bulk', '#booking-results', (string)($csrf_token ?? '')); ?>
+                        <?php if ($bkCanConfirm): ?>
+                        <button type="button" class="btn btn-primary btn-sm" data-bulk-op="group_make" data-bk-bulk-op="group_make"><i class="fas fa-object-group" aria-hidden="true"></i> Make a group</button>
+                        <button type="button" class="btn btn-secondary btn-sm" data-bulk-op="group_add" data-bk-bulk-op="group_add"><i class="fas fa-plus" aria-hidden="true"></i> Add to a group</button>
+                        <button type="button" class="btn btn-secondary btn-sm" data-bulk-op="remove_group" data-bk-bulk-op="remove_group" data-title="Remove from group" data-confirm="Confirm: take them out"><i class="fas fa-object-ungroup" aria-hidden="true"></i> Remove from group</button>
+                        <?php endif; ?>
+                        <button type="button" class="btn btn-secondary btn-sm" data-bulk-op="reminder" data-bk-bulk-op="reminder" data-title="Send a reminder" data-confirm="Confirm: send the reminders"><i class="fas fa-bell" aria-hidden="true"></i> Send a reminder</button>
+                        <button type="button" class="btn btn-secondary btn-sm" data-bulk-op="confirmation" data-bk-bulk-op="confirmation" data-title="Resend confirmation" data-confirm="Confirm: resend"><i class="fas fa-envelope" aria-hidden="true"></i> Resend confirmation</button>
+                        <button type="button" class="btn btn-secondary btn-sm" data-bulk-op="invoice" data-bk-bulk-op="invoice" data-title="Email invoice" data-confirm="Confirm: email the invoices"><i class="fas fa-file-invoice" aria-hidden="true"></i> Email invoice</button>
+                        <button type="button" class="btn btn-secondary btn-sm" data-bulk-op="export" data-bk-bulk-op="export"><i class="fas fa-file-csv" aria-hidden="true"></i> Export selected</button>
+                        <button type="button" class="btn btn-secondary btn-sm" data-bulk-op="print" data-bk-bulk-op="print"><i class="fas fa-print" aria-hidden="true"></i> Print arrival list</button>
+                        <i class="help" data-tip="Tick bookings with the box at the left of each row (the top box ticks every row shown). Each action first lists every ticked room with what will happen to it, or why it is skipped, and nothing is done until you confirm. Export and Print only read. Ticks are cleared when you change page.">?</i>
+                    <?php adminBulkBarEnd(); ?>
+                    <label class="bk-bulk-all-phone"><?php echo adminBulkAllBox('Select all bookings shown'); ?> <span>Select all shown</span></label>
                     <div class="table-responsive">
                         <table class="booking-table bookings-table rh-phone-actions rh-fold-actions" data-server-sort="1" data-hotel-today="<?php echo htmlspecialchars(date('Y-m-d'), ENT_QUOTES); ?>">
                             <thead>
                                 <tr>
+                                    <th class="admin-bulk-col bk-col-pick" scope="col"><label class="bk-pick"><?php echo adminBulkAllBox('Select all bookings shown'); ?></label></th>
                                     <?php rh_server_sort_th('Ref', 'ref', $bk_sort_key, $bk_sort_dir, 'col-optional bk-col-ref'); ?>
                                     <?php rh_server_sort_th('Guest Name', 'guest', $bk_sort_key, $bk_sort_dir); ?>
                                     <?php rh_server_sort_th('Room', 'room', $bk_sort_key, $bk_sort_dir, 'col-optional-lg'); ?>
@@ -4564,6 +4557,21 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                         data-created="<?php echo htmlspecialchars(date('Y-m-d', strtotime($booking['created_at'])), ENT_QUOTES); ?>"
                                         data-expiring-soon="<?php echo $expires_soon ? '1' : '0'; ?>"
                                         data-tentative="<?php echo $is_tentative ? '1' : '0'; ?>">
+                                        <td class="admin-bulk-col bk-col-pick" data-label="Select">
+                                            <?php if (!$is_deleted_row): /* G5a: any booking not deleted can be ticked; each action skips what it cannot do */ ?>
+                                            <?php
+                                            $bk_gj = rh_group_can_join($booking);
+                                            $bk_in_group = (int)($bk_group_rooms[(int)$booking['id']] ?? 1) > 1;
+                                            echo '<label class="bk-pick">' . str_replace('data-bulk-row', 'data-bulk-row'
+                                                . ' data-ref="' . htmlspecialchars((string)$booking['booking_reference'], ENT_QUOTES) . '"'
+                                                . ' data-guest="' . htmlspecialchars((string)$booking['guest_name'], ENT_QUOTES) . '"'
+                                                . ' data-group-ok="' . ($bk_gj['ok'] ? '1' : '0') . '"'
+                                                . ' data-can-lead="' . ($bk_gj['can_lead'] ? '1' : '0') . '"'
+                                                . ' data-in-group="' . ($bk_in_group ? '1' : '0') . '"',
+                                                adminBulkRowBox((int)$booking['id'], 'Select ' . $booking['booking_reference'] . ' (' . $booking['guest_name'] . ')')) . '</label>';
+                                            ?>
+                                            <?php endif; ?>
+                                        </td>
                                         <td class="col-optional bk-col-ref" data-label="Reference">
                                             <strong><?php echo htmlspecialchars($booking['booking_reference']); ?></strong>
                                             <?php if ($is_tentative): ?>
@@ -4575,15 +4583,6 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                             <?php endif; ?>
                                         </td>
                                         <td data-label="Guest">
-                                            <?php $bk_gj = ($bkCanConfirm && !$is_deleted_row) ? rh_group_can_join(['deleted_at' => null] + $booking) : ['ok' => false, 'can_lead' => false]; ?>
-                                            <?php if ($bk_gj['ok']): /* R5 / G4: tick rooms to make a group (same rule as the server) */ ?>
-                                            <input type="checkbox" class="bk-group-pick" value="<?php echo (int)$booking['id']; ?>"
-                                                data-can-lead="<?php echo $bk_gj['can_lead'] ? '1' : '0'; ?>"
-                                                data-ref="<?php echo htmlspecialchars((string)$booking['booking_reference'], ENT_QUOTES); ?>"
-                                                data-guest="<?php echo htmlspecialchars((string)$booking['guest_name'], ENT_QUOTES); ?>"
-                                                aria-label="<?php echo htmlspecialchars('Tick ' . $booking['booking_reference'] . ' to make a group', ENT_QUOTES); ?>"
-                                                style="margin:0 6px 0 0;vertical-align:middle;width:16px;height:16px;">
-                                            <?php endif; ?>
                                             <strong class="rh-guest-name" title="<?php echo htmlspecialchars((string)$booking['guest_name'], ENT_QUOTES); ?>"><?php echo htmlspecialchars($booking['guest_name']); ?></strong><span class="rh-phone-sub bk-ref-twin"><?php echo htmlspecialchars($booking['booking_reference']); ?></span><?php /* Flag twin: the Ref cell's flag, shown under the guest when the Ref column drops out (bookings.css, laptops). */ if ($is_tentative): ?><span class="rh-phone-sub bk-flag-twin bk-flag-twin--tentative"><i class="fas fa-clock"></i> Tentative</span><?php elseif ($is_missed_checkin): ?><span class="rh-phone-sub bk-flag-twin bk-flag-twin--danger"><i class="fas fa-exclamation-triangle"></i> Missed Check-in</span><?php elseif ($is_overdue_checkout): ?><span class="rh-phone-sub bk-flag-twin bk-flag-twin--warn"><i class="fas fa-clock"></i> <?php echo $checkout_overdue_state === 'late' ? 'Late checkout' : 'Overdue checkout'; ?></span><?php endif; ?>
                                             <?php if (trim((string)($booking['room_guest_name'] ?? '')) !== ''): ?>
                                                 <br><small class="room-guest-line" style="color:#555;">Room guest: <?php echo htmlspecialchars((string)$booking['room_guest_name']); ?></small>
@@ -11723,7 +11722,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
     </div>
 
     <?php if ($bkCanConfirm): ?>
-    <!-- Make a group (group bookings plan R5): pick the primary room, review, confirm. Inside the page container. -->
+    <!-- Make a group / Add to a group (group bookings plan R5, G5a): pick the primary room (or the group), review, confirm. Inside the page container. -->
     <div id="bkGroupModal" class="admin-modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="bkGroupTitle">
         <div class="admin-modal admin-modal--md">
             <div class="admin-modal__header">
@@ -11731,13 +11730,21 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 <button type="button" class="admin-modal__close" data-bk-group-close aria-label="Close">&times;</button>
             </div>
             <div class="admin-modal__body">
-                <p style="margin-top:0;">Choose the primary room (the group's contact, documents and folio). Nothing is saved until you confirm. No money moves: each booking keeps its own payments, balance and cancellation policy.</p>
-                <fieldset style="border:0;padding:0;margin:0 0 12px;">
+                <p id="bkGroupIntro" style="margin-top:0;">Choose the primary room (the group's contact, documents and folio). Nothing is saved until you confirm. No money moves: each booking keeps its own payments, balance and cancellation policy.</p>
+                <fieldset id="bkGroupLeadSet" style="border:0;padding:0;margin:0 0 12px;">
                     <legend style="font-weight:600;margin-bottom:6px;">Primary room <i class="help" data-tip="The room that leads the group. Its guest is the group contact and the group documents are made from it. You can change it later with Make primary on the booking page.">?</i></legend>
                     <div id="bkGroupLeads"></div>
                 </fieldset>
+                <div id="bkGroupRefSet" class="bk-group-ref" hidden>
+                    <label for="bkGroupRef">Reference of any room in the group <i class="help" data-tip="Type the booking reference of any room already in the group. The ticked bookings join that group under its primary room.">?</i></label>
+                    <div class="bk-group-ref__row">
+                        <input type="text" id="bkGroupRef" class="form-control" autocomplete="off" maxlength="64">
+                        <button type="button" class="btn btn-secondary" id="bkGroupRefCheck">Check</button>
+                    </div>
+                </div>
                 <div id="bkGroupReview"></div>
-                <p id="bkGroupError" role="alert" style="display:none;color:#b42318;font-weight:600;"></p>
+                <div id="bkGroupSkips"></div>
+                <p id="bkGroupError" class="rh-form-error" role="alert" hidden></p>
             </div>
             <div class="admin-modal__footer">
                 <button type="button" class="btn btn-secondary" data-bk-group-close>Cancel</button>
@@ -11745,50 +11752,155 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             </div>
         </div>
     </div>
+    <?php endif; ?>
+
+    <!-- Bulk review (G5a): every ticked room with what will happen or why it is skipped, then Confirm, then the result. -->
+    <div id="bkBulkModal" class="admin-modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="bkBulkTitle">
+        <div class="admin-modal admin-modal--md">
+            <div class="admin-modal__header">
+                <h3 id="bkBulkTitle" class="admin-modal__title">Review</h3>
+                <button type="button" class="admin-modal__close" data-bk-bulk-close aria-label="Close">&times;</button>
+            </div>
+            <div class="admin-modal__body">
+                <p id="bkBulkIntro" class="bk-bulk-intro"></p>
+                <div id="bkBulkList"></div>
+                <p id="bkBulkError" class="rh-form-error" role="alert" hidden></p>
+            </div>
+            <div class="admin-modal__footer">
+                <button type="button" class="btn btn-secondary" id="bkBulkCancel" data-bk-bulk-close>Cancel</button>
+                <button type="button" class="btn btn-primary" id="bkBulkConfirm" disabled>Confirm</button>
+            </div>
+        </div>
+    </div>
     <script>
     (function () {
-        var bar = document.getElementById('bkGroupBar');
-        var modal = document.getElementById('bkGroupModal');
-        if (!bar || !modal) return;
-        var csrf = <?php echo json_encode((string)($csrf_token ?? '')); ?>;
-        var picks = function () { return Array.prototype.slice.call(document.querySelectorAll('.bk-group-pick:checked')); };
-        var leads = document.getElementById('bkGroupLeads');
-        var review = document.getElementById('bkGroupReview');
-        var err = document.getElementById('bkGroupError');
-        var confirmBtn = document.getElementById('bkGroupConfirm');
-        var ids = [], state = '', seq = 0;
+        // Bulk bar actions (G5a). Document-delegated and looked up at event time: live search, tabs and paging replace
+        // #booking-results, and the admin SPA runs this script again on every visit (the guard keeps one set of listeners).
+        if (window.__bkBulkInit) return;
+        window.__bkBulkInit = true;
+        var byId = function (id) { return document.getElementById(id); };
         function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
-        function showError(m) { err.textContent = m || ''; err.style.display = m ? '' : 'none'; }
-        function sync() {
-            var n = picks().length;
-            document.getElementById('bkGroupCount').textContent = String(n);
-            bar.style.display = n > 0 ? 'flex' : 'none';
-            document.getElementById('bkGroupMake').disabled = n < 2;
+        function picked() {
+            var scope = byId('booking-results');
+            if (!scope) return [];
+            return Array.prototype.slice.call(scope.querySelectorAll('input[data-bulk-row]:checked'))
+                .filter(function (c) { return !c.disabled && c.getClientRects().length > 0; });
         }
-        document.querySelectorAll('.bk-group-pick').forEach(function (c) { c.addEventListener('change', sync); });
-        document.getElementById('bkGroupClear').addEventListener('click', function () {
-            picks().forEach(function (c) { c.checked = false; });
-            sync();
-        });
-        function post(action, extra) {
+        function csrf() {
+            var i = document.querySelector('#booking-results form[data-bulk-bar] input[name="csrf_token"]');
+            return i ? i.value : '';
+        }
+        function post(action, fields, ids, idKey) {
             var fd = new FormData();
             fd.append('action', action);
-            fd.append('csrf_token', csrf);
-            ids.forEach(function (id) { fd.append('booking_ids[]', String(id)); });
-            Object.keys(extra || {}).forEach(function (k) { fd.append(k, extra[k]); });
+            fd.append('csrf_token', csrf());
+            (ids || []).forEach(function (id) { fd.append(idKey + '[]', String(id)); });
+            Object.keys(fields || {}).forEach(function (k) { fd.append(k, fields[k]); });
             return fetch('bookings.php', { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
                 .then(function (r) { return r.json().catch(function () { return { success: false, message: 'Unexpected reply (' + r.status + '). Reload the page and try again.' }; }); })
                 .catch(function () { return { success: false, message: 'No connection. Nothing was changed.' }; });
         }
-        function preview(leadId) {
-            var my = ++seq;
-            state = '';
-            confirmBtn.disabled = true;
-            showError('');
+        function open(m) { m.style.display = 'flex'; }
+        function shut(m) { m.style.display = 'none'; }
+        function roomTable(head, rows) {
+            var h = '<div class="rh-group-split-wrap"><table class="rh-group-split bk-bulk-table"><thead><tr><th>Room <i class="help" data-tip="The booking reference, room and guest.">?</i></th><th>'
+                + esc(head) + '</th></tr></thead><tbody>';
+            rows.forEach(function (r) {
+                var ok = r.will !== undefined ? r.will : r.ok;
+                h += '<tr class="' + (ok ? 'bk-bulk-go' : 'bk-bulk-skip') + '"><td>' + esc(r.label) + '</td><td>' + esc(r.text) + '</td></tr>';
+            });
+            return h + '</tbody></table></div>';
+        }
+        function skipList(skipped) {
+            if (!skipped || !skipped.length) return '';
+            return '<div class="bk-bulk-skips"><p><strong>Skipped (' + skipped.length + ')</strong> <i class="help" data-tip="These ticked bookings are left as they are. The reason says why.">?</i></p><ul>'
+                + skipped.map(function (s) {
+                    var why = String(s.reason || '');
+                    return '<li>' + esc(why.indexOf(String(s.label || '')) === 0 ? why : (s.label + ': ' + why)) + '</li>';
+                }).join('') + '</ul></div>';
+        }
+        function idsOf(p) { return p.map(function (c) { return c.value; }); }
+
+        /* ---- Remove from group, Send a reminder, Resend confirmation, Email invoice ---- */
+        var bulk = { op: '', ids: [], state: '', seq: 0, done: false, label: 'Confirm' };
+        function bulkError(m) { var e = byId('bkBulkError'); if (!e) return; e.textContent = m || ''; e.hidden = !m; }
+        function openBulk(btn) {
+            var m = byId('bkBulkModal');
+            var p = picked();
+            if (!m || !p.length) return;
+            var my = ++bulk.seq;
+            bulk.op = btn.getAttribute('data-bk-bulk-op');
+            bulk.ids = idsOf(p);
+            bulk.state = '';
+            bulk.done = false;
+            bulk.label = btn.getAttribute('data-confirm') || 'Confirm';
+            byId('bkBulkTitle').textContent = btn.getAttribute('data-title') || 'Review';
+            var c = byId('bkBulkConfirm');
+            c.textContent = bulk.label;
+            c.disabled = true;
+            c.hidden = false;
+            byId('bkBulkCancel').textContent = 'Cancel';
+            byId('bkBulkIntro').textContent = 'Checking ' + p.length + ' ticked booking' + (p.length === 1 ? '' : 's') + '…';
+            byId('bkBulkList').innerHTML = '';
+            bulkError('');
+            open(m);
+            post('preview_bookings_bulk', { op: bulk.op }, bulk.ids, 'bulk_ids').then(function (res) {
+                if (my !== bulk.seq) return;
+                if (!res || !res.success) { byId('bkBulkIntro').textContent = ''; bulkError((res && res.message) || 'Could not check the ticked bookings.'); return; }
+                byId('bkBulkIntro').textContent = res.will
+                    ? res.will + ' will go ahead' + (res.skip ? ', ' + res.skip + ' skipped' : '') + '. Nothing is done until you confirm. Each booking is done on its own.'
+                    : 'Nothing to do: every ticked booking is skipped (the reason is beside each one).';
+                byId('bkBulkList').innerHTML = roomTable('What will happen', res.rooms || []);
+                bulk.state = res.state || '';
+                c.disabled = !res.will || !bulk.state;
+            });
+        }
+        function confirmBulk() {
+            var c = byId('bkBulkConfirm');
+            if (!bulk.state || c.disabled) return;
+            var my = bulk.seq;
+            c.disabled = true;
+            c.textContent = 'Working…';
+            bulkError('');
+            post('bookings_bulk_apply', { op: bulk.op, state: bulk.state }, bulk.ids, 'bulk_ids').then(function (res) {
+                if (my !== bulk.seq) return;
+                if (!res || !res.success) { c.textContent = bulk.label; bulkError((res && res.message) || 'Nothing was done.'); return; }
+                bulk.done = (res.done || 0) > 0;
+                c.hidden = true;
+                byId('bkBulkCancel').textContent = 'Close';
+                byId('bkBulkIntro').textContent = res.message || '';
+                byId('bkBulkList').innerHTML = roomTable('Result', res.results || []);
+            });
+        }
+        function closeBulk() {
+            var m = byId('bkBulkModal');
+            if (m) shut(m);
+            bulk.seq++;
+            bulk.state = '';
+            if (bulk.done) window.location.reload();
+        }
+
+        /* ---- Make a group / Add to a group (group_make_preview / group_make_apply) ---- */
+        var grp = { mode: 'make', ids: [], state: '', seq: 0, done: false };
+        function grpError(m) { var e = byId('bkGroupError'); if (!e) return; e.textContent = m || ''; e.hidden = !m; }
+        function grpFields() {
+            if (grp.mode === 'add') return { group_ref: (byId('bkGroupRef').value || '').trim() };
+            var l = byId('bkGroupLeads').querySelector('input[name="bkGroupLead"]:checked');
+            return { lead_id: l ? l.value : '0' };
+        }
+        function grpPreview() {
+            var my = ++grp.seq;
+            var c = byId('bkGroupConfirm');
+            var review = byId('bkGroupReview');
+            grp.state = '';
+            c.disabled = true;
+            grpError('');
+            byId('bkGroupSkips').innerHTML = '';
             review.innerHTML = '<p>Checking&hellip;</p>';
-            post('group_make_preview', { lead_id: String(leadId) }).then(function (res) {
-                if (my !== seq) return;
-                if (!res || !res.success) { review.innerHTML = ''; showError((res && res.message) || 'Could not check this group.'); return; }
+            post('group_make_preview', grpFields(), grp.ids, 'booking_ids').then(function (res) {
+                if (my !== grp.seq) return;
+                byId('bkGroupSkips').innerHTML = skipList(res && res.skipped);
+                if (!res || !res.success) { review.innerHTML = ''; grpError((res && res.message) || 'Could not check this group.'); return; }
                 var cur = res.currency || '';
                 var m = function (v) { return esc(cur + ' ' + Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })); };
                 var h = '<div class="rh-group-split-wrap"><table class="rh-group-split"><thead><tr>'
@@ -11810,43 +11922,135 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                     + (res.repointed ? '<dt style="font-weight:600;">Primary room</dt><dd style="margin:0 0 6px;">The room you chose is in a group already; it becomes that group\'s primary room first.</dd>' : '')
                     + '</dl>';
                 review.innerHTML = h;
-                state = res.state || '';
-                confirmBtn.disabled = !state;
+                grp.state = res.state || '';
+                c.disabled = !grp.state;
             });
         }
-        function close() { modal.style.display = 'none'; seq++; state = ''; }
-        modal.querySelectorAll('[data-bk-group-close]').forEach(function (b) { b.addEventListener('click', close); });
-        document.getElementById('bkGroupMake').addEventListener('click', function () {
-            var p = picks();
-            if (p.length < 2) return;
-            ids = p.map(function (c) { return parseInt(c.value, 10); });
-            // G4: a no-show or cancelled room can join but never be the primary room (the server refuses it too).
-            var canLead = function (c) { return c.getAttribute('data-can-lead') !== '0'; };
-            var first = p.filter(canLead)[0] || p[0];
-            leads.innerHTML = p.map(function (c) {
-                var ok = canLead(c);
-                return '<label style="display:block;margin:4px 0;"><input type="radio" name="bkGroupLead" value="' + esc(c.value) + '"'
-                    + (c === first ? ' checked' : '') + (ok ? '' : ' disabled') + '> '
-                    + esc(c.getAttribute('data-ref')) + ' &ndash; ' + esc(c.getAttribute('data-guest'))
+        function openGroup(mode) {
+            var modal = byId('bkGroupModal');
+            var p = picked();
+            if (!modal || !p.length) return;
+            grp.mode = mode === 'add' ? 'add' : 'make';
+            grp.ids = idsOf(p);
+            grp.state = '';
+            grp.done = false;
+            grp.seq++;
+            var add = grp.mode === 'add';
+            byId('bkGroupTitle').textContent = add ? 'Add to a group' : 'Make a group';
+            byId('bkGroupIntro').textContent = add
+                ? 'The ticked bookings join an existing group under its primary room. Nothing is saved until you confirm. No money moves: each booking keeps its own payments, balance and cancellation policy.'
+                : 'Choose the primary room (the group\'s contact, documents and folio). Nothing is saved until you confirm. No money moves: each booking keeps its own payments, balance and cancellation policy.';
+            byId('bkGroupLeadSet').hidden = add;
+            byId('bkGroupRefSet').hidden = !add;
+            var c = byId('bkGroupConfirm');
+            c.textContent = add ? 'Confirm: add to the group' : 'Confirm: make the group';
+            c.hidden = false;
+            c.disabled = true;
+            byId('bkGroupReview').innerHTML = '';
+            byId('bkGroupSkips').innerHTML = '';
+            grpError('');
+            if (add) {
+                var inGroup = p.filter(function (x) { return x.getAttribute('data-in-group') === '1'; })[0];
+                byId('bkGroupRef').value = inGroup ? (inGroup.getAttribute('data-ref') || '') : '';
+                open(modal);
+                if (byId('bkGroupRef').value) { grpPreview(); } else { byId('bkGroupRef').focus(); }
+                return;
+            }
+            // G4: a no-show or cancelled room can join but never be the primary room; a room that cannot join is skipped.
+            var canJoin = p.filter(function (x) { return x.getAttribute('data-group-ok') === '1'; });
+            var canLead = function (x) { return x.getAttribute('data-can-lead') === '1'; };
+            var first = canJoin.filter(canLead)[0] || null;
+            byId('bkGroupLeads').innerHTML = canJoin.length ? canJoin.map(function (x) {
+                var ok = canLead(x);
+                return '<label style="display:block;margin:4px 0;"><input type="radio" name="bkGroupLead" value="' + esc(x.value) + '"'
+                    + (x === first ? ' checked' : '') + (ok ? '' : ' disabled') + '> '
+                    + esc(x.getAttribute('data-ref')) + ' &ndash; ' + esc(x.getAttribute('data-guest'))
                     + (ok ? '' : ' <small>(no-show or cancelled: cannot be the primary room)</small>') + '</label>';
-            }).join('');
-            leads.querySelectorAll('input[name="bkGroupLead"]').forEach(function (r) { r.addEventListener('change', function () { preview(r.value); }); });
-            modal.style.display = 'flex';
-            preview(parseInt(first.value, 10));
-        });
-        confirmBtn.addEventListener('click', function () {
-            var lead = leads.querySelector('input[name="bkGroupLead"]:checked');
-            if (!lead || !state) return;
-            confirmBtn.disabled = true;
-            post('group_make_apply', { lead_id: lead.value, state: state }).then(function (res) {
-                if (!res || !res.success) { showError((res && res.message) || 'Nothing was changed.'); return; }
-                window.location.href = 'booking-details.php?id=' + encodeURIComponent(String(res.lead || lead.value));
+            }).join('') : '<p>None of the ticked bookings can be put in a group (see the reasons below).</p>';
+            open(modal);
+            grpPreview();
+        }
+        function confirmGroup() {
+            var c = byId('bkGroupConfirm');
+            if (!grp.state || c.disabled) return;
+            var my = grp.seq;
+            var fields = grpFields();
+            fields.state = grp.state;
+            c.disabled = true;
+            grpError('');
+            post('group_make_apply', fields, grp.ids, 'booking_ids').then(function (res) {
+                if (my !== grp.seq) return;
+                if (!res || !res.success) { grpError((res && res.message) || 'Nothing was changed.'); return; }
+                var lead = String(res.lead || fields.lead_id || '');
+                if (!res.skipped || !res.skipped.length) {
+                    window.location.href = 'booking-details.php?id=' + encodeURIComponent(lead);
+                    return;
+                }
+                grp.done = true;
+                c.hidden = true;
+                byId('bkGroupReview').innerHTML = '<p><strong>' + esc(res.message || '') + '</strong></p>'
+                    + '<p><a class="btn btn-primary" href="booking-details.php?id=' + encodeURIComponent(lead) + '">Open the group</a></p>';
+                byId('bkGroupSkips').innerHTML = skipList(res.skipped);
             });
+        }
+        function closeGroup() {
+            var m = byId('bkGroupModal');
+            if (m) shut(m);
+            grp.seq++;
+            grp.state = '';
+            if (grp.done) window.location.reload();
+        }
+
+        /* ---- Export selected / Print arrival list (read only) ---- */
+        function readOnly(kind) {
+            var p = picked();
+            if (!p.length) return;
+            var url = 'bookings.php?export=' + (kind === 'print' ? 'arrivals' : 'csv') + '&ids=' + encodeURIComponent(idsOf(p).join(','));
+            if (kind === 'print') {
+                window.open(url, '_blank', 'noopener');
+                return;
+            }
+            var a = document.createElement('a');
+            a.href = url;
+            a.setAttribute('download', '');
+            a.hidden = true;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+        }
+
+        document.addEventListener('click', function (ev) {
+            var t = ev.target;
+            if (!t || !t.closest) return;
+            var b = t.closest('#booking-results form[data-bulk-bar] [data-bk-bulk-op]');
+            if (b) {
+                ev.preventDefault();
+                if (b.disabled) return;
+                var op = b.getAttribute('data-bk-bulk-op');
+                if (op === 'group_make' || op === 'group_add') { openGroup(op === 'group_add' ? 'add' : 'make'); }
+                else if (op === 'export' || op === 'print') { readOnly(op); }
+                else { openBulk(b); }
+                return;
+            }
+            if (t.closest('[data-bk-bulk-close]')) { closeBulk(); return; }
+            if (t.closest('#bkBulkConfirm')) { confirmBulk(); return; }
+            if (t.closest('[data-bk-group-close]')) { closeGroup(); return; }
+            if (t.closest('#bkGroupConfirm')) { confirmGroup(); return; }
+            if (t.closest('#bkGroupRefCheck')) { grpPreview(); return; }
         });
-        sync();
+        document.addEventListener('change', function (ev) {
+            if (ev.target && ev.target.matches && ev.target.matches('#bkGroupLeads input[name="bkGroupLead"]')) grpPreview();
+        });
+        document.addEventListener('keydown', function (ev) {
+            if (ev.key === 'Enter' && ev.target && ev.target.id === 'bkGroupRef') { ev.preventDefault(); grpPreview(); }
+        });
+        // The bar never posts on its own: every action goes through the review above.
+        document.addEventListener('submit', function (ev) {
+            var f = ev.target;
+            if (f && f.matches && f.matches('#booking-results form[data-bulk-bar]')) ev.preventDefault();
+        });
     })();
     </script>
-    <?php endif; ?>
 
     <?php rh_render_send_receipt_script($csrf_token ?? ''); ?>
     <?php require_once __DIR__ . '/includes/history-panel.php'; ?>

@@ -2413,7 +2413,7 @@ hr.menu-divider {
     .bookings-table td.actions-cell .quick-action[data-help]::after,
     .bookings-table td.actions-cell .quick-action[data-help]::before { display: none; }
     .bookings-table .guest-email,
-    .bookings-table td:first-child strong,
+    .bookings-table td.bk-col-ref strong,
     .bookings-table td small { white-space: nowrap; }
 }
 
@@ -2676,12 +2676,13 @@ table.bookings-table td small.bk-status-note {
 
     :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr {
         display: grid;
-        grid-template-columns: minmax(0, 1fr) auto;
+        /* G5a: the tick sits in its own left track beside every line of the card. */
+        grid-template-columns: 44px minmax(0, 1fr) auto;
         grid-template-areas:
-            "name status"
-            "stay act"
-            "money act"
-            "rate act";
+            "pick name status"
+            "pick stay act"
+            "pick money act"
+            "pick rate act";
         column-gap: 10px;
         row-gap: 1px;
         align-items: center;
@@ -2840,8 +2841,17 @@ table.bookings-table td small.bk-status-note {
        missed check-in, late / overdue checkout, expires soon. */
     :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > td[data-label="Reference"] {
         display: block;
-        grid-column: 1 / -1;
+        grid-column: 2 / -1;
         font-size: 12px;
+    }
+
+    /* The tick (G5a): its own left track, the full height of the card's first lines. */
+    :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > td.bk-col-pick {
+        grid-area: pick;
+        align-self: start;
+        justify-self: start;
+        width: 44px;
+        margin-left: -6px;
     }
 
     :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > td[data-label="Reference"] > :is(strong, br) {
@@ -2854,7 +2864,7 @@ table.bookings-table td small.bk-status-note {
     }
 
     :is(.admin-content, #rh-admin-page) table.booking-table.bookings-table:not(.mobile-enhanced) > tbody > tr > td[data-label="Total"] > .expires-soon {
-        grid-column: 1 / -1;
+        grid-column: 2 / -1;
         font-size: 12px;
     }
 
@@ -3014,5 +3024,109 @@ table.bookings-table .bk-guests-twin {
     .bookings-more-filters__row > .bookings-toolbar__input--status {
         flex: 1 1 100%;
         width: 100%;
+    }
+}
+
+/* ==========================================================================
+   All Bookings bulk selection (G5a): the tick column at the far left, the phone "Select all shown" row,
+   the bulk bar's buttons on a phone, and the review / result lists in the bulk dialogs.
+   Shared pieces (checkbox, bar, 44px touch box) are in admin-styles.css.
+   ========================================================================== */
+.bookings-table .bk-pick {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    min-height: 32px;
+    margin: 0;
+    cursor: pointer;
+}
+
+.bk-bulk-all-phone {
+    display: none;
+}
+
+.bk-bulk-table tr.bk-bulk-skip td {
+    color: dimgray;
+}
+
+.bk-bulk-table tr.bk-bulk-go td:last-child {
+    font-weight: 600;
+}
+
+.bk-bulk-intro {
+    margin-top: 0;
+    font-weight: 600;
+}
+
+.bk-bulk-skips {
+    margin: 12px 0 0;
+}
+
+.bk-bulk-skips p {
+    margin: 0 0 4px;
+}
+
+.bk-bulk-skips ul {
+    margin: 0;
+    padding-left: 18px;
+}
+
+.bk-group-ref {
+    margin: 0 0 12px;
+}
+
+.bk-group-ref > label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 600;
+}
+
+.bk-group-ref__row {
+    display: flex;
+    gap: 8px;
+}
+
+.bk-group-ref__row > input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+@media (max-width: 1024px), (pointer: coarse) {
+    .bookings-table .bk-pick {
+        min-width: 44px;
+        min-height: 44px;
+    }
+}
+
+@media (max-width: 640px) {
+    /* thead is hidden on phones: this row carries the select-all tick. */
+    .bk-bulk-all-phone {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        margin: 0 0 6px -6px;
+        font-weight: 600;
+        cursor: pointer;
+    }
+
+    /* The actions in one row that scrolls sideways, so the bar stays short; Clear stays below on the left. */
+    #booking-results .admin-bulk-bar__controls {
+        flex: 1 1 100%;
+        flex-wrap: nowrap;
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+        overscroll-behavior-x: contain;
+        padding-bottom: 4px;
+    }
+
+    #booking-results .admin-bulk-bar__controls > .btn {
+        flex: 0 0 auto;
+        white-space: nowrap;
+        font-size: 13px;
+    }
+
+    #booking-results .admin-bulk-bar__controls > .help {
+        display: none;
     }
 }

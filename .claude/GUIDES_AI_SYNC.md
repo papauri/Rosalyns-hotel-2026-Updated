@@ -113,6 +113,11 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Each room has "Who's staying" (optional name, up to 150 characters, any status incl. after check-out; Edit booking permission). Empty = the lead booker's name shows again. A checked-out room's invoice PDF is rebuilt with the new name. History on that room: "Name on the room changed" (old → new).
 - Guides: booking details group table. Assistant: knows both buttons; no Assistant action.
 
+### Group follow-up G5a: All Bookings tick column, select all and bulk actions (2026-11-18, owner "Yes I want them all") — hashes in TASKS.md
+- All Bookings: the tick is its own first column (also on phones), with a header tick for select all / none. A bar shows "N selected · Clear" and the actions: Make a group, Add to an existing group, Remove from group, Send a reminder (late / overdue bookings, as the single button), Resend confirmation, Email invoice, Export selected (CSV), Print arrival list.
+- Every action (except export / print) shows a review list of each ticked room — what will happen, or "skipped: reason" — then Confirm; each room is done or skipped on its own, with a result list. Same rules and permissions as each single button. At most 50 rooms per send, 200 per remove.
+- History / email log as the single actions; one "bookings_bulk_apply" activity line per bulk confirm. Guides: All Bookings (ticks, bulk bar, each action). Assistant: knows the bulk bar exists; no Assistant action.
+
 
 ## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
 
