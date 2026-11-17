@@ -29,8 +29,8 @@ R3 **Make any room the primary room.** It moves the group's primary-room role, c
    The History records it.
 R4 **Add a payment to a booking from Payments / Accounting.** Search a booking or group, pick a room or the whole group, then record
    the payment through the same path as take-payment: same receipt numbering, allocation, overpay guard, History and EOD.
-   ASSUMPTION: "add payments on bookings and not just take payments" = record against an EXISTING booking from the Payments page.
-   The owner confirms in the first message of the session.
+   OWNER (2026-11-17): BOTH, i.e. record payments received AND add extra charges (see D-R4).
+
 R5 **Bundle bookings into a group.** Select bookings in the list and press "Make a group". Choose the primary room. Payments already on
    each booking stay with that booking's room; group totals add them up.
 R6 **Remove rooms from a group.** The room becomes an individual booking with its own payments, balance and invoice. The cancellation
@@ -58,7 +58,7 @@ R7 **Accounting stays exact after any R1/R3/R5/R6.**
    - Read the ICTAm group at LIWONDE: its rooms, dates, payments, how the group is stored.
    - Grep CODE_INDEX for group, primary, booking_rooms, take-payment and payment-add.
    - Write the current model (tables, columns, files, lines) into §Current model below.
-   - Ask the owner the R4 question.
+   - (Owner questions already answered: see Decisions.)
 1. **Spec decisions (rooms + accounting leads together, ONE agent each, read-only).** Settle the R1 early-departure rule, R5/R6
    money ownership, the R6 cancellation tier, and any schema change (migration, additive). Write them into §Decisions.
 2. **Fable spec check** (if available). Fold its required changes into §Decisions.
@@ -76,4 +76,15 @@ Each ship: one builder per area, one QA, one fix round, `/compact` between ships
 (step 0 fills this in)
 
 ## Decisions
-(step 1 fills this in)
+**Owner answers, 2026-11-17, before the session. These are settled; do not re-ask.**
+- **D-R4 Add payment = BOTH.** From Payments/Accounting staff can:
+  - (a) record money received against an EXISTING booking or group, choosing a room or the whole group, through the same path as take-payment;
+  - (b) add an extra CHARGE to a booking (late checkout, damages, extras), with a reason, as a preview → confirm. It shows in owed, folio and invoice.
+- **D-R1a Early departure:** unused nights are charged by the existing cancellation tiers (group or individual, locked at booking). The amount is shown before confirm, and staff can override with a reason recorded.
+- **D-R1b Early arrival / late checkout:** an extra night defaults to the room's booked nightly rate. Staff can change it, with a reason recorded. The screen shows rate × nights.
+- **D-R6 Removing a room from a group:**
+  - payments recorded on that room go with it;
+  - for lump sums paid to the group, staff choose how much (if any) moves to the room, shown before confirm;
+  - group and room totals must still add up exactly.
+
+(Step 1: the leads add the remaining decisions here: the R5 cancellation tier when bundling, the R6 tier after removal, and any schema/migration.)
