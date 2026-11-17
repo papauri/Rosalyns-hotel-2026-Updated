@@ -95,6 +95,10 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Company accounts / company invoice: the moved money counts as the receiving room's company payment and comes off the giving room's; "company money received" does not drop. A company credit-note payment cannot be edited (change it on Credit Notes); refunds of it go to the company.
 - History says "company money of <company>". Guides: same pages as C2 + Company accounts page. Assistant: knows the rule; no Assistant action.
 
+### All Bookings row click opens the full booking (2026-11-18, owner "show the full booking and not the summary") — hashes in TASKS.md
+- Clicking/tapping anywhere on a booking row (not on a button) now opens the full booking page (Booking Details), at every width. The (i) summary icon still opens the quick summary. Ctrl/Cmd-click opens the booking in a new tab.
+- Guides: All Bookings page ("click a row to open the booking"). Assistant: no change.
+
 
 ## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
 

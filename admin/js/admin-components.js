@@ -1248,10 +1248,12 @@
         }, 0);
     }, true); // capture: some row handlers stop propagation
 
-    // All Bookings phone list row: a tap anywhere on the row that is not a control opens the
-    // booking summary, through the row's own View button (same handler as tapping it).
-    // Tablets and desktop too (owner 2026-11-14: "clicking a row on desktop to open too"): the list may stay a
-    // table or become cards (.mobile-enhanced, admin-mobile.js); either way the row keeps its own View button.
+    // All Bookings row: a tap/click anywhere on the row that is not a control opens the FULL booking page
+    // (owner 2026-11-18: "show the full booking and not the summary because we already have a booking summary
+    // icon"), through the row's own "Full details" link so the admin SPA loads it like any other link.
+    // Ctrl/Cmd-click opens it in a new tab. A row without that link falls back to its View (summary) button.
+    // Every width (owner 2026-11-14: "clicking a row on desktop to open too"): the list may stay a
+    // table or become cards (.mobile-enhanced, admin-mobile.js); either way the row keeps its own links.
     document.addEventListener('click', function (e) {
         var phone = mq ? mq.matches : window.innerWidth <= 640;
         if (e.defaultPrevented || !e.target || !e.target.closest) return;
@@ -1260,6 +1262,12 @@
         if (e.target.closest('a, button, input, select, textarea, label, summary, [role="button"], .actions-more')) return;
         var sel = window.getSelection ? window.getSelection() : null;
         if (sel && !sel.isCollapsed && tr.contains(sel.anchorNode)) return; // the user is selecting text
+        var full = tr.querySelector('.actions-more-menu a[href^="booking-details.php"]');
+        if (full) {
+            if (e.ctrlKey || e.metaKey) window.open(full.href, '_blank', 'noopener');
+            else full.click();
+            return;
+        }
         var view = tr.querySelector('.quick-action.view');
         if (view) view.click();
     });
