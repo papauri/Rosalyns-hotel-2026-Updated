@@ -2166,6 +2166,7 @@ function getPermissionForPage(string $page)
         'credit-notes.php' => 'invoices',
         'billing-accounts.php' => 'company_accounts',
         'payment-add.php' => 'payment_add',
+        'charge-add.php' => 'edit_booking', // Add charge (group bookings Ship B2); checked-out rooms also need correct_stay_after_checkout
         'payment-refund.php' => 'refund_payment',
         'edit-booking.php' => 'edit_booking',
         'reports.php' => 'reports',
@@ -2319,6 +2320,7 @@ function getModuleForPage(string $page)
         'payment-details.php' => 'finance',
         'payment-refund.php' => 'finance',
         'payment-add.php' => 'finance',
+        'charge-add.php' => 'finance',
         'receipts.php' => 'finance',
         'invoices.php' => ['finance', 'billing'],
         'credit-notes.php' => ['finance', 'advance_booking'],

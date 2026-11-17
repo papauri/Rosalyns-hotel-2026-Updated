@@ -1148,6 +1148,7 @@ try {
         LEFT JOIN rooms r ON b.room_id = r.id
         WHERE (b.id = :pid OR b.primary_booking_id = :pid2)
           AND b.id != :current
+          AND b.deleted_at IS NULL
         ORDER BY b.id ASC
     ");
     $sib_stmt->execute([':pid' => $primary_id_for_group, ':pid2' => $primary_id_for_group, ':current' => $booking_id]);

@@ -572,6 +572,11 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                 <a href="payment-add.php" class="acct-quick-action acct-quick-action--accent">
                     <i class="fas fa-plus"></i> Record Payment
                 </a>
+                <?php if (hasPermission((int)$user['id'], 'edit_booking')): ?>
+                <a href="charge-add.php" class="acct-quick-action" title="Add an extra charge (late checkout, damages, extras) to a room booking or its group, with a reason">
+                    <i class="fas fa-file-circle-plus"></i> Add charge
+                </a>
+                <?php endif; ?>
                 <a href="<?php echo htmlspecialchars('payments.php?' . http_build_query(array_merge($_GET, ['export' => 'csv']))); ?>" class="acct-quick-action">
                     <i class="fas fa-file-csv"></i> Export CSV
                 </a>

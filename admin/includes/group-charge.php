@@ -29,9 +29,18 @@ if (!function_exists('rh_group_charge_rooms')) {
      *
      * @return array{root:int,lead:int,rooms:array<int,array{id:int,booking_reference:string,guest:string,status:string,room:string,can:bool,reason:string}>}
      */
-    function rh_group_charge_rooms(PDO $pdo, int $bookingId, bool $lock = false): array
+    function rh_group_charge_rooms(PDO $pdo, int $bookingId, bool $lock = false, array $opts = []): array
     {
+        // $opts (Payments > Add charge only, group bookings Ship B2): 'path' marks the caller (folded into the plan's sig so a
+        // preview from one screen can never be confirmed through the other); 'allow_checked_out' lets a checked-out room take
+        // the charge (that screen passes it only for staff holding correct_stay_after_checkout). Booking Details passes none.
+        $path = (string)($opts['path'] ?? '');
+        $allowCo = $path !== '' && !empty($opts['allow_checked_out']);
         $out = ['root' => 0, 'lead' => 0, 'rooms' => []];
+        if ($path !== '') {
+            $out['path'] = $path;
+            $out['allow_checked_out'] = $allowCo;
+        }
         if ($bookingId <= 0) {
             return $out;
         }
@@ -42,7 +51,7 @@ if (!function_exists('rh_group_charge_rooms')) {
             return $out;
         }
         $q = $pdo->prepare("
-            SELECT b.id, b.booking_reference, b.status, b.amount_paid, b.amount_due, b.total_amount,
+            SELECT b.id, b.booking_reference, b.status, b.amount_paid, b.amount_due, b.total_amount, b.credit_balance,
                    COALESCE(NULLIF(TRIM(b.room_guest_name), ''), b.guest_name) AS guest, COALESCE(r.name, '') AS room_type
             FROM bookings b
             LEFT JOIN rooms r ON r.id = b.room_id
@@ -55,7 +64,7 @@ if (!function_exists('rh_group_charge_rooms')) {
         foreach ($rows as $r) {
             $id = (int)$r['id'];
             $allow = bookingAllowsAction($r, 'add_charge');
-            $rooms[] = [
+            $room = [
                 'id'                => $id,
                 'booking_reference' => (string)$r['booking_reference'],
                 'guest'             => (string)$r['guest'],
@@ -64,6 +73,17 @@ if (!function_exists('rh_group_charge_rooms')) {
                 'can'               => !empty($allow['allowed']),
                 'reason'            => (string)($allow['reason'] ?? ''),
             ];
+            if ($path !== '') {
+                $isCo = (string)$r['status'] === 'checked-out';
+                if ($isCo) {
+                    $room['can'] = $allowCo;
+                    $room['reason'] = $allowCo ? '' : 'Checked out: adding a charge after check-out needs the Correct Stay After Check-out permission.';
+                }
+                $room['checked_out'] = $isCo;
+                $room['amount_due'] = round(max(0.0, (float)($r['amount_due'] ?? 0)), 2);
+                $room['credit_balance'] = round(max(0.0, (float)($r['credit_balance'] ?? 0)), 2);
+            }
+            $rooms[] = $room;
         }
         // The lead first, the rest in id order (share 1 = the lead).
         usort($rooms, static function (array $a, array $b) use ($lead): int {
@@ -172,7 +192,10 @@ if (!function_exists('rh_group_charge_plan')) {
         foreach ($out['skipped'] as $s) {
             $sigParts[] = 'x' . $s['id'];
         }
-        $out['sig'] = hash('sha256', $mode . '|' . implode(',', $sigParts));
+        // A caller path (Payments > Add charge) is part of the sig, with its checked-out rule, so the two screens' previews
+        // never match each other. No path (Booking Details) = the sig exactly as before.
+        $sigPrefix = !empty($group['path']) ? (string)$group['path'] . '|' . (!empty($group['allow_checked_out']) ? 'co' : 'open') . '|' : '';
+        $out['sig'] = hash('sha256', $sigPrefix . $mode . '|' . implode(',', $sigParts));
         $out['ok'] = true;
         return $out;
     }
@@ -187,17 +210,21 @@ if (!function_exists('rh_group_charge_post')) {
      * @return array{success:bool,message:string,plan:array,charges:array<int,array{booking_id:int,charge_id:int,amount:float}>}
      */
     function rh_group_charge_post(PDO $pdo, int $bookingId, string $mode, string $chargeType, string $description, float $quantity,
-        float $unitPrice, array $user, string $expectSig = ''): array
+        float $unitPrice, array $user, string $expectSig = '', array $opts = []): array
     {
+        // $opts: 'path' + 'allow_checked_out' as rh_group_charge_rooms (the locked re-plan uses the same rule, so the sig
+        // matches the preview), 'reason' (Payments > Add charge: kept in History with owed old -> new on every room).
         $res = ['success' => false, 'message' => '', 'plan' => [], 'charges' => []];
         $ownTx = !$pdo->inTransaction();
+        $reason = trim((string)($opts['reason'] ?? ''));
+        $roomOpts = array_intersect_key($opts, ['path' => 1, 'allow_checked_out' => 1]);
         try {
             if ($ownTx) {
                 $pdo->beginTransaction();
             } else {
                 $pdo->exec('SAVEPOINT rh_grp_charge');
             }
-            $group = rh_group_charge_rooms($pdo, $bookingId, true);
+            $group = rh_group_charge_rooms($pdo, $bookingId, true, $roomOpts);
             $plan = rh_group_charge_plan($group, $mode, $description, $quantity, $unitPrice);
             $res['plan'] = $plan;
             if (!$plan['ok']) {
@@ -215,7 +242,15 @@ if (!function_exists('rh_group_charge_post')) {
             if ($plan['skipped']) {
                 $skippedText = ' Not charged: ' . implode(', ', array_map(static fn ($s) => $s['booking_reference'] . ' (' . $s['status'] . ')', $plan['skipped'])) . '.';
             }
+            $statusById = [];
+            foreach ($group['rooms'] as $gr) {
+                $statusById[(int)$gr['id']] = (string)$gr['status'];
+            }
             foreach ($plan['lines'] as $l) {
+                $owedBefore = null;
+                if ($reason !== '') { // what the room owed when the charge went on (re-worked first, as Add Payment does)
+                    $owedBefore = function_exists('rh_account_balance_due') ? rh_account_balance_due($pdo, 'room', (int)$l['booking_id']) : null;
+                }
                 $r = addBookingCharge((int)$l['booking_id'], $chargeType, (string)$l['description'], (float)$l['quantity'], (float)$l['unit_price'], null, $userId ?: null);
                 if (empty($r['success'])) {
                     throw new RuntimeException('Room ' . $l['booking_reference'] . ': ' . ($r['message'] ?? 'the charge could not be added') . ' Nothing was added.');
@@ -226,10 +261,26 @@ if (!function_exists('rh_group_charge_post')) {
                     ? 'Group line "' . $l['description'] . '" ' . $cur . ' ' . number_format($amount, 2) . ' added on this room (the group\'s lead) for the whole group.'
                     : 'Group charge "' . $description . '" ' . $cur . ' ' . number_format($plan['total'], 2) . ' split evenly across ' . $n . ' rooms (' . $refs . '): '
                         . $cur . ' ' . number_format($amount, 2) . ' on this room (share ' . $l['share'] . ' of ' . $n . ').' . $skippedText;
-                logBookingEvent((int)$l['booking_id'], (string)$l['booking_reference'], 'Group charge added', 'update', $note . ' Charge #' . (int)$r['charge_id'] . '.',
-                    null, null, 'admin', $userId ?: null, $who,
-                    ['charge_id' => (int)$r['charge_id'], 'amount' => $amount, 'group_total' => $plan['total'], 'group_mode' => $mode,
-                        'group_rooms' => $n, 'charge_type' => $chargeType, 'opened_from_booking_id' => $bookingId]);
+                $meta = ['charge_id' => (int)$r['charge_id'], 'amount' => $amount, 'group_total' => $plan['total'], 'group_mode' => $mode,
+                    'group_rooms' => $n, 'charge_type' => $chargeType, 'opened_from_booking_id' => $bookingId];
+                $oldVal = null;
+                $newVal = null;
+                if ($reason !== '') {
+                    $owedSt = $pdo->prepare('SELECT amount_due FROM bookings WHERE id = ?');
+                    $owedSt->execute([(int)$l['booking_id']]);
+                    $owedAfter = (float)$owedSt->fetchColumn();
+                    $wasCo = ($statusById[(int)$l['booking_id']] ?? '') === 'checked-out';
+                    $note .= ($wasCo ? ' Added after check-out.' : '') . ' Reason: ' . $reason . '.';
+                    $oldVal = 'Owed ' . $cur . ' ' . number_format((float)$owedBefore, 2);
+                    $newVal = 'Owed ' . $cur . ' ' . number_format($owedAfter, 2);
+                    $meta += ['reason' => $reason, 'source' => (string)($opts['path'] ?? ''), 'after_checkout' => $wasCo,
+                        'owed_before' => round((float)$owedBefore, 2), 'owed_after' => round($owedAfter, 2)];
+                }
+                $logged = logBookingEvent((int)$l['booking_id'], (string)$l['booking_reference'], 'Group charge added', 'update', $note . ' Charge #' . (int)$r['charge_id'] . '.',
+                    $oldVal, $newVal, 'admin', $userId ?: null, $who, $meta);
+                if ($reason !== '' && !$logged) { // Add charge path: the reason must reach History or nothing is posted
+                    throw new RuntimeException('Room ' . $l['booking_reference'] . ': the booking history could not be written. Nothing was added.');
+                }
             }
             $sumCents = 0;
             foreach ($res['charges'] as $c) {

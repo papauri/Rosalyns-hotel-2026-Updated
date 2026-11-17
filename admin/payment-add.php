@@ -616,6 +616,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (isset($lockTables[$bookingType])) {
                     $pdo->prepare("SELECT id FROM {$lockTables[$bookingType]} WHERE id = ? FOR UPDATE")->execute([$bookingId]);
                     $histOwedBefore = rh_account_balance_due($pdo, $bookingType, (int)$bookingId);
+                    if ($bookingType === 'room') {
+                        // Re-check the room under the lock (status / balance may have changed since the check above),
+                        // so the never-overpay cap for a no-show / cancelled / expired room cannot be skipped.
+                        $lcStmt->execute([$bookingId]);
+                        $lcRow = $lcStmt->fetch(PDO::FETCH_ASSOC);
+                        if (!$lcRow || !empty($lcRow['deleted_at'])) {
+                            throw new Exception('This booking has been deleted. Restore it before recording a payment.');
+                        }
+                        $lcTerminalStatus = in_array((string)$lcRow['status'], BOOKING_TERMINAL_STATUSES, true) ? (string)$lcRow['status'] : '';
+                        $lcCheck = bookingAllowsAction($lcRow, 'record_payment');
+                        if (!$lcCheck['allowed']) {
+                            throw new Exception($lcCheck['reason']);
+                        }
+                    }
                     // Ship B1: a no-show / cancelled / expired room takes at most what it owes, tick or no tick
                     // (an overpay there would sit as credit with no credit note).
                     if ($lcTerminalStatus !== '' && $paymentAmount > (float)$histOwedBefore + BALANCE_TOLERANCE) {

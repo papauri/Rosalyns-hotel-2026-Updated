@@ -4359,6 +4359,28 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                 </tr>
                             </thead>
                             <tbody>
+                                <?php
+                                // An expired room that carries the group expiry charge (rh_noshow_fee_tag) and still owes can take a
+                                // payment like a no-show room (the server gate, bookingAllowsAction, decides). One query for the page.
+                                $bk_tagged_expired = [];
+                                $bk_te_ids = [];
+                                foreach ($bookings as $bk_te_row) {
+                                    if ((string)$bk_te_row['status'] === 'expired' && empty($bk_te_row['deleted_at'])
+                                        && (float)($bk_te_row['amount_due'] ?? 0) > BALANCE_TOLERANCE) {
+                                        $bk_te_ids[] = (int)$bk_te_row['id'];
+                                    }
+                                }
+                                if ($bk_te_ids) {
+                                    try {
+                                        $bk_te_st = $pdo->prepare("SELECT DISTINCT booking_id FROM booking_charges WHERE booking_id IN ("
+                                            . implode(',', array_fill(0, count($bk_te_ids), '?')) . ") AND description LIKE CONCAT('%[noshow-fee:', booking_id, ']')");
+                                        $bk_te_st->execute($bk_te_ids);
+                                        $bk_tagged_expired = array_fill_keys(array_map('intval', $bk_te_st->fetchAll(PDO::FETCH_COLUMN)), true);
+                                    } catch (Throwable $bk_te_e) {
+                                        error_log('bookings.php tagged expired lookup: ' . $bk_te_e->getMessage());
+                                    }
+                                }
+                                ?>
                                 <?php foreach ($bookings as $booking): ?>
                                     <?php
                                     $is_tentative = ($booking['status'] === 'tentative' || $booking['is_tentative'] == 1);
@@ -4590,7 +4612,8 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                             $can_consolidate = $_perm_pay && ($bk_holding || $bk_inhouse
                                                 || ($bk_status === 'checked-out' && ($bk_due > BALANCE_TOLERANCE || $bk_credit > BALANCE_TOLERANCE))
                                                 // Ship B1: a no-show / cancelled room that still owes can take a payment here (server gate decides).
-                                                || (!$bk_deleted && in_array($bk_status, ['no-show', 'cancelled'], true) && $bk_due > BALANCE_TOLERANCE));
+                                                || (!$bk_deleted && in_array($bk_status, ['no-show', 'cancelled'], true) && $bk_due > BALANCE_TOLERANCE)
+                                                || (!$bk_deleted && $bk_status === 'expired' && $bk_due > BALANCE_TOLERANCE && isset($bk_tagged_expired[(int)$booking['id']])));
                                             $can_make_tentative = $bk_status === 'pending' && !in_array($booking['payment_status'], ['paid', 'partial'], true);
                                             $can_delete = $_perm_delete && !$bk_inhouse && $bk_paid <= BALANCE_TOLERANCE && $bk_folio <= BALANCE_TOLERANCE;
                                             ?>

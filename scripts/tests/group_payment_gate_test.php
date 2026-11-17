@@ -137,6 +137,29 @@ $r = gpg_run('admin/payment-add.php', $addPost('100'), ['setup' => [gpg_booking_
 ok('untagged expired: refused', (int)($r['verify'][1][0]['n'] ?? 9) === 0 && !empty($r['found']['Payments cannot be recorded against an expired booking.']),
     json_encode([$r['verify'] ?? $r, $r['found'] ?? []]));
 
+// Tagged expired (group expiry charge [noshow-fee:<id>] on the folio): takes a payment while it owes, capped at what it owes.
+$gpgTagSql = static function (string $ref, float $amt): string {
+    return "INSERT INTO booking_charges (booking_id, charge_type, description, quantity, unit_price, line_subtotal, vat_rate, vat_amount, line_total, posted_at, added_by, voided)
+        SELECT id, 'other', CONCAT('Expiry charge (gate test) [noshow-fee:', id, ']'), 1, $amt, $amt, 0, 0, $amt, NOW(), NULL, 0 FROM bookings WHERE booking_reference = " . gpg_q($ref);
+};
+$ref = gpg_ref('GPX');
+$r = gpg_run('admin/payment-add.php', $addPost('10'), ['setup' => [gpg_booking_sql($ref, 'expired'), $gpgTagSql($ref, 100.0)], 'verify' => gpg_state($ref), 'ref' => $ref]);
+$st = $r['verify'][0][0] ?? [];
+ok('tagged expired owing: payment recorded', (int)($r['verify'][1][0]['n'] ?? 0) === 1 && $near($r['verify'][1][0]['total'] ?? 0, 10), json_encode($r['verify'] ?? $r));
+ok('  ... status stays expired', ($st['status'] ?? '') === 'expired', json_encode($st));
+
+$ref = gpg_ref('GPX');
+$r = gpg_run('admin/payment-add.php', $addPost('999999', ['confirm_overpay' => '1']), ['setup' => [gpg_booking_sql($ref, 'expired'), $gpgTagSql($ref, 100.0)], 'verify' => gpg_state($ref), 'ref' => $ref,
+    'grep' => ['This expired booking owes ', 'A payment on it cannot be more than that. Nothing was recorded.']]);
+ok('tagged expired, more than owed WITH the tick: refused (capped)', (int)($r['verify'][1][0]['n'] ?? 9) === 0 && !empty($r['found']['A payment on it cannot be more than that. Nothing was recorded.']),
+    json_encode([$r['verify'] ?? $r, $r['found'] ?? []]));
+
+$ref = gpg_ref('GPX');
+$r = gpg_run('admin/payment-add.php', $addPost('10'), ['setup' => [gpg_booking_sql($ref, 'expired'), $gpgTagSql($ref, 100.0), gpg_paid_sql($ref, 999999.0)], 'verify' => gpg_state($ref), 'ref' => $ref,
+    'grep' => ['This expired booking owes nothing. No payment can be recorded.']]);
+ok('settled tagged expired: refused, nothing recorded', (int)($r['verify'][1][0]['n'] ?? 9) === 1 && !empty($r['found']['This expired booking owes nothing. No payment can be recorded.']),
+    json_encode([$r['verify'] ?? $r, $r['found'] ?? []]));
+
 echo "== Payments & balance (bookings.php) on a no-show room ==\n";
 $ref = gpg_ref('GPC');
 $r = gpg_run('admin/bookings.php', ['action' => 'consolidation_record', 'id' => '{bid}', 'amount' => '60', 'payment_method' => 'cash', 'payment_type' => 'partial_payment', 'payment_date' => $today],
@@ -160,6 +183,20 @@ ok('search: live rooms found', isset($rows[$live], $rows[$mem]), json_encode(arr
 ok('search: deleted room left out', !isset($rows[$dead]), json_encode(array_keys($rows)));
 ok('group label: member = "Room 2 of 2, group <lead ref>"', ($rows[$mem]['group_label'] ?? '') === 'Room 2 of 2, group ' . $live, (string)($rows[$mem]['group_label'] ?? ''));
 ok('group label: lead = "Room 1 of 2, group <lead ref>"', ($rows[$live]['group_label'] ?? '') === 'Room 1 of 2, group ' . $live, (string)($rows[$live]['group_label'] ?? ''));
+
+// Deleted lead: the label names the first room not deleted (lead first, then by id), never the deleted lead.
+$p = gpg_ref('GPR');
+$root = $p . 'R'; $m1 = $p . 'A'; $m2 = $p . 'B';
+$r = gpg_run('admin/api/search-bookings.php', [], ['get' => ['type' => 'room', 'q' => $p], 'setup' => [
+    gpg_booking_sql($root, 'confirmed'), gpg_booking_sql($m1, 'confirmed'), gpg_booking_sql($m2, 'confirmed'),
+    "SET @gpg_root := " . gpg_bq($root),
+    "UPDATE bookings SET primary_booking_id = @gpg_root WHERE booking_reference IN (" . gpg_q($m1) . ", " . gpg_q($m2) . ")",
+    "UPDATE bookings SET deleted_at = NOW() WHERE booking_reference = " . gpg_q($root),
+]]);
+$rows = [];
+foreach ((array)($r['json']['bookings'] ?? []) as $b) { $rows[(string)$b['booking_reference']] = $b; }
+ok('deleted lead: label names the first live room', ($rows[$m2]['group_label'] ?? '') === 'Room 2 of 2, group ' . $m1, (string)($rows[$m2]['group_label'] ?? json_encode(array_keys($rows) ?: ($r['raw'] ?? $r))));
+ok('  ... and on that room itself', ($rows[$m1]['group_label'] ?? '') === 'Room 1 of 2, group ' . $m1, (string)($rows[$m1]['group_label'] ?? ''));
 
 $old = gpg_ref('GPO'); $oldPaid = gpg_ref('GPP');
 $r = gpg_run('admin/api/search-bookings.php', [], ['get' => ['type' => 'room', 'recent' => '1'], 'setup' => [

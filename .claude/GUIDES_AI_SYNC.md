@@ -66,6 +66,12 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Add Payment booking search: deleted rooms no longer listed; a room in a group shows "Room x of N, group <lead ref>"; the recent list also shows up to 10 older rooms that still owe.
 - Guides: Payments (Add Payment, search), no-show/cancelled sections, FAQ "can I take money on a no-show". Assistant: payment answers must not say no-show/cancelled rooms cannot take payments.
 
+### Group bookings Ship B2: Add charge from Payments / Accounting + small fixes (2026-11-18, owner ask) — hashes in TASKS.md
+- New "Add charge" button on Payments Ledger and the Accounting Dashboard (page admin/charge-add.php, needs Edit Booking). Pick a booking, then "This room only" or the whole group (one line on the group's lead room, or split evenly across the rooms), charge type, description, quantity, price (VAT included, no levy), and a reason (required). Preview shows each room's owed now → after; Confirm posts it. History: "Charge added" / "Group charge added" with the reason and owed old → new.
+- A checked-out room can take a charge here only (not from booking details), and only with the "Correct Stay After Check-out" permission (admin + manager). No-show, cancelled, expired and deleted rooms are refused. Issued invoices are rebuilt under the same number. Extra nights still go through Correct Stay Dates / Extend stay.
+- Bookings: an expired room carrying its group no-show charge that still owes now has Payments & balance in the More menu. Booking details' group list leaves deleted rooms out.
+- Guides: Payments (Add charge), Accounting dashboard shortcuts, group bookings section, FAQ "how do I charge a guest who has already checked out". Assistant: can say charges after check-out go through Payments > Add charge with the permission; must not say checked-out rooms can never be charged.
+
 
 ## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
 

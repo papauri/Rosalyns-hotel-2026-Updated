@@ -1723,6 +1723,9 @@ if (!isset($folio_fnb)) {
             </div>
             <nav class="ck-hero__actions" aria-label="Accounting shortcuts">
                 <a class="ck-btn ck-btn--primary" href="payment-add.php" title="Manually record a new payment against a booking or invoice"><i class="fas fa-plus"></i><span>Record payment</span></a>
+                <?php if (hasPermission((int)$user['id'], 'edit_booking')): ?>
+                <a class="ck-btn" href="charge-add.php" title="Add an extra charge (late checkout, damages, extras) to a room booking or its group, with a reason"><i class="fas fa-file-circle-plus"></i><span>Add charge</span></a>
+                <?php endif; ?>
                 <a class="ck-btn" href="payments.php" title="View all individual payment records across all booking types"><i class="fas fa-list"></i><span>Payments</span></a>
                 <?php if ($acct_billing): ?>
                 <a class="ck-btn" href="invoices.php" title="View, search, and download <?php echo $ckH($acct_party); ?> and client invoices"><i class="fas fa-file-invoice-dollar"></i><span>Invoices</span></a>

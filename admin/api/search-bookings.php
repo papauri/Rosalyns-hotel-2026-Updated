@@ -17,7 +17,7 @@ require_once __DIR__ . '/../../includes/booked-rate.php';
 
 /** @var PDO $pdo */
 
-requireApiAnyPermission(['payment_add', 'payments']);
+requireApiAnyPermission(['payment_add', 'payments', 'edit_booking']); // edit_booking: Add charge (admin/charge-add.php)
 
 // DIAGNOSTIC: Log to help identify the issue
 error_log("search-bookings.php: Starting - Request: " . $_SERVER['REQUEST_URI']);
@@ -44,6 +44,10 @@ $recent = isset($_GET['recent']) ? (int)$_GET['recent'] : 0;
 if (!in_array($type, ['room', 'conference', 'gym', 'event'], true)) {
     echo json_encode(['error' => 'Invalid booking type', 'bookings' => []]);
     exit;
+}
+// edit_booking alone (Add charge) searches room bookings only; conference / gym / event stay payment-only.
+if ($type !== 'room') {
+    requireApiAnyPermission(['payment_add', 'payments']);
 }
 
 try {
@@ -137,7 +141,7 @@ try {
         if ($bookings) {
             $gIds = array_map(static fn($r) => (int)$r['id'], $bookings);
             $gStmt = $pdo->prepare("
-                SELECT b.id, lb.booking_reference AS group_lead_ref,
+                SELECT b.id, lb.booking_reference AS group_lead_ref, COALESCE(NULLIF(b.primary_booking_id, 0), b.id) AS group_root,
                        (SELECT COUNT(*) FROM bookings g WHERE g.deleted_at IS NULL
                           AND (g.id = COALESCE(NULLIF(b.primary_booking_id, 0), b.id) OR g.primary_booking_id = COALESCE(NULLIF(b.primary_booking_id, 0), b.id))) AS group_size,
                        (SELECT COUNT(*) FROM bookings g WHERE g.deleted_at IS NULL
@@ -153,12 +157,41 @@ try {
             foreach ($gStmt->fetchAll(PDO::FETCH_ASSOC) as $gr) {
                 $gInfo[(int)$gr['id']] = $gr;
             }
+            // The label names the group's effective lead (rh_booking_group_effective_lead: the lead, or the room that took
+            // over from a cancelled lead); if that room is deleted, the first room not deleted (lead first, then by id).
+            $gLeadRef = [];
+            $gLeadSt = $pdo->prepare('SELECT id, booking_reference, deleted_at FROM bookings WHERE id = ? OR primary_booking_id = ? ORDER BY (id = ?) DESC, id');
+            foreach ($gInfo as $gr) {
+                $gRoot = (int)$gr['group_root'];
+                if ($gRoot <= 0 || isset($gLeadRef[$gRoot]) || (int)$gr['group_size'] <= 1) {
+                    continue;
+                }
+                $gLeadSt->execute([$gRoot, $gRoot, $gRoot]);
+                $gMembers = $gLeadSt->fetchAll(PDO::FETCH_ASSOC);
+                $gEff = function_exists('rh_booking_group_effective_lead') ? rh_booking_group_effective_lead($pdo, $gRoot) : $gRoot;
+                $gPick = '';
+                foreach ($gMembers as $gm) {
+                    if ((int)$gm['id'] === $gEff && empty($gm['deleted_at'])) {
+                        $gPick = (string)$gm['booking_reference'];
+                        break;
+                    }
+                }
+                if ($gPick === '') {
+                    foreach ($gMembers as $gm) {
+                        if (empty($gm['deleted_at'])) {
+                            $gPick = (string)$gm['booking_reference'];
+                            break;
+                        }
+                    }
+                }
+                $gLeadRef[$gRoot] = $gPick !== '' ? $gPick : (string)($gr['group_lead_ref'] ?? '');
+            }
             foreach ($bookings as &$gb) {
                 $gr = $gInfo[(int)$gb['id']] ?? null;
                 $gSize = $gr ? (int)$gr['group_size'] : 1;
                 $gb['group_size'] = $gSize;
                 $gb['group_pos'] = $gr ? (int)$gr['group_pos'] : 1;
-                $gb['group_lead_ref'] = $gr ? (string)($gr['group_lead_ref'] ?? '') : '';
+                $gb['group_lead_ref'] = $gr ? (string)($gLeadRef[(int)$gr['group_root']] ?? ($gr['group_lead_ref'] ?? '')) : '';
                 $gb['group_label'] = $gSize > 1
                     ? 'Room ' . $gb['group_pos'] . ' of ' . $gSize . ', group ' . $gb['group_lead_ref']
                     : '';
