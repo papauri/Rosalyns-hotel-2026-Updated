@@ -29,6 +29,7 @@ require_once __DIR__ . '/../includes/late-stay.php'; // late check-in / leave-da
 require_once __DIR__ . '/../includes/stay-nights.php'; // add / take off nights: one quote for the review card and the save
 require_once __DIR__ . '/../includes/billing-accounts.php'; // company pays later (migration 084): who owes the balance
 require_once __DIR__ . '/includes/bookings-bulk.php'; // ticked rows: review, confirm, result per room (also the shared email senders)
+require_once __DIR__ . '/includes/booking-row-actions.php'; // one booking's confirm / assign / check-in, shared with the bulk bar
 $message = '';
 $error = '';
 $currency_symbol = (string)getSetting('currency_symbol', 'MWK');
@@ -445,87 +446,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             logBookingAudit($booking_id, 'tentative', ['status' => $booking['status'] ?? 'confirmed'], ['status' => 'tentative', 'tentative_expires_at' => $expires_at], 'Made tentative by admin', $booking['booking_reference'] ?? null);
         } elseif ($action === 'convert_tentative') {
             $booking_id = (int)($_POST['id'] ?? 0);
-
-            if ($booking_id <= 0) {
-                throw new Exception('Invalid booking id');
-            }
-
-            // Get booking details WITH room information
-            $stmt = $pdo->prepare("
-                SELECT b.*, r.name as room_name, r.slug as room_slug
-                FROM bookings b
-                LEFT JOIN rooms r ON b.room_id = r.id
-                WHERE b.id = ?
-            ");
-            $stmt->execute([$booking_id]);
-            $booking = $stmt->fetch(PDO::FETCH_ASSOC);
-
-            if (!$booking) {
-                throw new Exception('Booking not found');
-            }
-
-            if ($booking['status'] !== 'tentative' || $booking['is_tentative'] != 1) {
-                throw new Exception('This is not a tentative booking');
-            }
-
-            // Convert exactly once: the status condition in the UPDATE decides the winner, so a
-            // double click / second tab can neither double-decrement stock nor send two emails.
-            $pdo->beginTransaction();
-            $update_stmt = $pdo->prepare("UPDATE bookings SET status = 'confirmed', is_tentative = 0, tentative_expires_at = NULL, converted_to_confirmed_at = NOW(), converted_from_tentative = 1 WHERE id = ? AND status = 'tentative' AND is_tentative = 1");
-            $update_stmt->execute([$booking_id]);
-            if ($update_stmt->rowCount() !== 1) {
-                $pdo->rollBack();
-                throw new Exception('This booking was already converted or changed.');
-            }
-
-            // Decrement room availability — tentative bookings don't consume rooms_available,
-            // but confirmed bookings do; apply the same decrement as pending→confirmed.
-            $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available - 1 WHERE id = ? AND rooms_available > 0")
-                ->execute([$booking['room_id']]);
-            $pdo->commit();
-
-            $autoAssignMessage = '';
-            if (in_array($booking['payment_status'] ?? '', ['paid', 'completed'], true) && empty($booking['individual_room_id'])) {
-                $autoAssignResult = autoAssignConfirmedPaidBooking($booking_id);
-                if ($autoAssignResult['success'] && !empty($autoAssignResult['assigned_room_number'])) {
-                    $autoAssignMessage = ' Room ' . htmlspecialchars($autoAssignResult['assigned_room_number']) . ' auto-assigned.';
-                } elseif (!$autoAssignResult['success']) {
-                    $autoAssignMessage = ' (Room auto-assignment skipped: ' . htmlspecialchars($autoAssignResult['message']) . ')';
-                }
-            }
-
-            // Log the conversion
-            $log_stmt = $pdo->prepare("
-                INSERT INTO tentative_booking_log (
-                    booking_id, action, action_reason, performed_by, created_at
-                ) VALUES (?, 'converted', ?, ?, NOW())
-            ");
-            $log_stmt->execute([
-                $booking_id,
-                'Converted from tentative to confirmed by admin',
-                $user['id']
-            ]);
-
-            // Send conversion email
-            require_once '../config/email.php';
-            $email_result = sendTentativeBookingConvertedEmail($booking);
-
-            // Log email result for debugging
-            error_log("Email sending result for booking {$booking_id}: " . json_encode($email_result));
-
-            if ($email_result['success']) {
-                if (isset($email_result['preview_url'])) {
-                    $message = 'Tentative booking converted to confirmed!' . $autoAssignMessage . ' <a href="../' . htmlspecialchars($email_result['preview_url']) . '" target="_blank">View email preview</a> (Development Mode)';
-                } else {
-                    $message = 'Tentative booking converted to confirmed!' . $autoAssignMessage . ' Conversion email sent to ' . htmlspecialchars($booking['guest_email']);
-                }
-            } else {
-                $message = 'Tentative booking converted!' . $autoAssignMessage . ' <strong>Email failed:</strong> ' . htmlspecialchars($email_result['message']);
-                error_log("FAILED to send email for converted booking {$booking_id}: " . $email_result['message']);
-            }
-
-            rh_log_event('bookings', 'info', 'Tentative booking confirmed', ['booking_id' => $booking_id, 'ref' => $booking['booking_reference'] ?? null, 'by' => $user['username'] ?? null]);
-            logBookingAudit($booking_id, 'confirmed', ['status' => 'tentative', 'is_tentative' => 1], ['status' => 'confirmed', 'is_tentative' => 0], 'Converted from tentative to confirmed by admin', $booking['booking_reference'] ?? null);
+            // Shared with the bulk Confirm: admin/includes/booking-row-actions.php (same checks, email, History).
+            $convertRes = bookings_convert_tentative_booking($pdo, $booking_id, $user);
+            $message = $convertRes['message'];
         } elseif ($action === 'convert_to_tentative') {
             $booking_id = (int)($_POST['id'] ?? 0);
 
@@ -612,140 +535,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (!isAjaxRequest()) {
                 throw new Exception('Invalid request');
             }
-            $booking_id = (int)($_POST['booking_id'] ?? 0);
-            $combination_id = (int)($_POST['combination_id'] ?? 0);
-            if ($booking_id <= 0 || $combination_id <= 0) {
-                throw new Exception('Invalid booking or room pair selection');
+            // Shared with the bulk Assign rooms: admin/includes/booking-row-actions.php.
+            $pairRes = bookings_assign_room_pair($pdo, (int)($_POST['booking_id'] ?? 0), (int)($_POST['combination_id'] ?? 0), $user);
+            if (empty($pairRes['success'])) {
+                throw new Exception($pairRes['message']);
             }
-            $bkStmt = $pdo->prepare("SELECT id, status, booking_reference, individual_room_id, room_combination_id FROM bookings WHERE id = ? AND deleted_at IS NULL");
-            $bkStmt->execute([$booking_id]);
-            $bookingToAssign = $bkStmt->fetch(PDO::FETCH_ASSOC);
-            if (!$bookingToAssign) {
-                throw new Exception('Booking not found');
-            }
-            $validation = validateRoomAssignment($bookingToAssign);
-            if (!$validation['allowed']) {
-                throw new Exception(getBookingActionErrorMessage('assign_room', $validation['reason']));
-            }
-            $comboResult = assignRoomCombinationToBooking($booking_id, $combination_id, isset($user['id']) ? (int)$user['id'] : null);
-            if (empty($comboResult['success'])) {
-                throw new Exception('Those joined rooms could not be assigned: ' . ($comboResult['message'] ?: 'they are unavailable for the booking dates') . '.');
-            }
-            logBookingAudit(
-                $booking_id,
-                'room_assigned',
-                ['individual_room_id' => $bookingToAssign['individual_room_id'] ?? null, 'room_combination_id' => $bookingToAssign['room_combination_id'] ?? null],
-                ['individual_room_id' => $comboResult['assigned_room_id'], 'room_combination_id' => $combination_id],
-                'Joined rooms ' . $comboResult['assigned_room_number'] . ' assigned manually by admin',
-                $bookingToAssign['booking_reference'] ?? null
-            );
             header('Content-Type: application/json');
-            echo json_encode(['success' => true, 'message' => $comboResult['message']]);
+            echo json_encode(['success' => true, 'message' => $pairRes['message']]);
             exit;
         } elseif ($action === 'assign_individual_room') {
             if (!isAjaxRequest()) {
                 throw new Exception('Invalid request');
             }
 
-            $booking_id = (int)($_POST['booking_id'] ?? 0);
-            $individual_room_id = (int)($_POST['individual_room_id'] ?? 0);
-            $allowChildPolicyOverride = isset($_POST['allow_child_policy_override']) && $_POST['allow_child_policy_override'] === '1';
-            $childPolicyOverrideNote = trim((string)($_POST['child_policy_override_note'] ?? ''));
-
-            if ($booking_id <= 0 || $individual_room_id <= 0) {
-                header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'message' => 'Invalid booking or room selection']);
-                exit;
-            }
-
-            $bkStmt = $pdo->prepare("SELECT id, status, room_id, individual_room_id, child_guests, booking_reference, check_in_date FROM bookings WHERE id = ? AND deleted_at IS NULL");
-            $bkStmt->execute([$booking_id]);
-            $bookingToAssign = $bkStmt->fetch(PDO::FETCH_ASSOC);
-
-            if (!$bookingToAssign) {
-                header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'message' => 'Booking not found']);
-                exit;
-            }
-
-            // Use centralized validation for room assignment
-            $validation = validateRoomAssignment($bookingToAssign);
-            if (!$validation['allowed']) {
-                header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'message' => getBookingActionErrorMessage('assign_room', $validation['reason'])]);
-                exit;
-            }
-
-            if (roomTypeHasActiveCombinations((int)$bookingToAssign['room_id'])) {
-                // A joined-room booking takes the whole pair the chosen room belongs to
-                // (e.g. "Assign" on one member room in Individual Rooms).
-                $pairSt = $pdo->prepare("SELECT id FROM room_combinations WHERE is_active = 1 AND combined_room_type_id = ? AND (room_a_id = ? OR room_b_id = ?) ORDER BY id LIMIT 1");
-                $pairSt->execute([(int)$bookingToAssign['room_id'], $individual_room_id, $individual_room_id]);
-                $pairId = (int)$pairSt->fetchColumn();
-                header('Content-Type: application/json');
-                if ($pairId <= 0) {
-                    echo json_encode(['success' => false, 'message' => 'This is a joined-room booking and that room is not part of one of its pairs. Assign it a pair from Bookings.']);
-                    exit;
-                }
-                $comboResult = assignRoomCombinationToBooking($booking_id, $pairId, isset($user['id']) ? (int)$user['id'] : null);
-                if (empty($comboResult['success'])) {
-                    echo json_encode(['success' => false, 'message' => 'Those joined rooms could not be assigned: ' . ($comboResult['message'] ?: 'they are unavailable for the booking dates') . '.']);
-                    exit;
-                }
-                logBookingAudit($booking_id, 'room_assigned', ['individual_room_id' => $bookingToAssign['individual_room_id'] ?? null],
-                    ['individual_room_id' => $comboResult['assigned_room_id'], 'room_combination_id' => $pairId],
-                    'Joined rooms ' . $comboResult['assigned_room_number'] . ' assigned manually by admin', $bookingToAssign['booking_reference'] ?? null);
-                echo json_encode(['success' => true, 'message' => $comboResult['message']]);
-                exit;
-            }
-
-            $policyInfo = getIndividualRoomEffectivePolicy((int)$bookingToAssign['room_id'], $individual_room_id);
-            if (!$policyInfo) {
-                header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'message' => 'Selected room does not match this booking room type']);
-                exit;
-            }
-
-            if ((int)($bookingToAssign['child_guests'] ?? 0) > 0 && empty($policyInfo['policy']['children_allowed'])) {
-                if (!$allowChildPolicyOverride || $childPolicyOverrideNote === '') {
-                    header('Content-Type: application/json');
-                    echo json_encode(['success' => false, 'message' => 'This booking includes children. Assigning a room that does not accept children requires an override note.']);
-                    exit;
-                }
-            }
-
-            // Room-status gate with a clear, actionable reason (out of service; or not clean
-            // when an in-house guest would move in now). A reservation may take a room that is
-            // still being turned over: check-in is what waits for housekeeping.
-            $hkBlock = getRoomHousekeepingAssignmentBlock($individual_room_id, (string)$bookingToAssign['status'] === 'checked-in');
-            if ($hkBlock && !empty($hkBlock['blocked'])) {
-                header('Content-Type: application/json');
-                echo json_encode(['success' => false, 'message' => $hkBlock['message']]);
-                exit;
-            }
-
-            $assigned = assignIndividualRoomToBooking($booking_id, $individual_room_id, $allowChildPolicyOverride, $childPolicyOverrideNote, $user['id'] ?? null);
-
-            if (!$assigned) {
-                header('Content-Type: application/json');
-                $assignWhy = rh_room_assign_last_error();
-                echo json_encode(['success' => false, 'message' => 'Selected room could not be assigned' . ($assignWhy !== '' ? ': ' . $assignWhy : ' - it is unavailable for the booking dates (it may overlap another reservation, a block, a maintenance window or a housekeeping task).') . ' Check the room timeline and try again.']);
-                exit;
-            }
-
-            // Note: assignIndividualRoomToBooking() locks the booking + room, re-validates, and keeps the
-            // room's status as is (it becomes 'occupied' at check-in).
-            logBookingAudit(
-                $booking_id,
-                'room_assigned',
-                ['individual_room_id' => $bookingToAssign['individual_room_id'] ?? null],
-                ['individual_room_id' => $individual_room_id],
-                $allowChildPolicyOverride ? 'Child policy override: ' . $childPolicyOverrideNote : 'Room assigned manually by admin',
-                $bookingToAssign['booking_reference'] ?? null
+            // Shared with the bulk Assign rooms: admin/includes/booking-row-actions.php (same gates, same locked assign).
+            $assignRes = bookings_assign_individual_room(
+                $pdo,
+                (int)($_POST['booking_id'] ?? 0),
+                (int)($_POST['individual_room_id'] ?? 0),
+                $user,
+                isset($_POST['allow_child_policy_override']) && $_POST['allow_child_policy_override'] === '1',
+                trim((string)($_POST['child_policy_override_note'] ?? ''))
             );
-
             header('Content-Type: application/json');
-            echo json_encode(['success' => true, 'message' => 'Room assigned successfully']);
+            echo json_encode(['success' => !empty($assignRes['success']), 'message' => $assignRes['message']]);
             exit;
         } elseif ($action === 'update_status') {
             $booking_id = (int)($_POST['id'] ?? 0);
@@ -760,43 +573,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // - Check-in only allowed when confirmed AND paid
             // - Cancel check-in (undo) allowed only when currently checked-in
             if ($new_status === 'checked-in') {
-                // Use centralized validation
-                $check = $pdo->prepare("SELECT id, status, payment_status, individual_room_id, booking_reference, check_in_date, check_out_date" . rh_checkin_rule_select() . " FROM bookings WHERE id = ?");
-                $check->execute([$booking_id]);
-                $booking = $check->fetch(PDO::FETCH_ASSOC);
-
-                if (!$booking) {
-                    throw new Exception('Booking not found');
-                }
-
-                // Use the validation helper function
-                $validation = validateCheckIn($booking);
-                if (!$validation['allowed']) {
-                    throw new Exception(getBookingActionErrorMessage('check_in', $validation['reason']));
-                }
-
-                // Late arrival (owner 2026-11-12 "Dont assume, have options"): front desk says what happened -
-                // arrived on the booked date, arriving today, or (stay over) already stayed and left. Re-checked here.
-                $ciWindow = rh_late_stay_window($booking);
-                $ciChoice = rh_late_checkin_choice($ciWindow, $_POST['late_arrival'] ?? null);
-                if (!$ciChoice['ok']) {
-                    throw new Exception($ciChoice['error']);
-                }
-
-                // A joined-room booking with no rooms yet is given a free pair now (or the check-in is refused). Not for
-                // "already stayed and left": nobody moves in.
-                if ($ciChoice['choice'] !== 'ended') {
-                    $joinedPair = rh_checkin_ensure_joined_pair((int)$booking_id);
-                    if (!$joinedPair['ok']) {
-                        throw new Exception($joinedPair['message']);
-                    }
-                }
-
-                // The clean-room gate protects a guest moving in. "Already stayed and left" (owner 2026-11-13): nobody moves in,
-                // so no gate (said in History below); a room another in-house guest holds is never touched by that path.
-                $roomGate = $ciChoice['choice'] === 'ended'
-                    ? ['allowed' => true, 'override' => false, 'needs_confirm' => false, 'message' => '', 'rooms' => []]
-                    : evaluateCheckInRoomReady($booking_id, (int)($user['id'] ?? 0), !empty($_POST['confirm_checkin_room_not_ready']));
+                // Gates in order (confirmed + payment + date, late-arrival choice, joined pair, clean room): shared with
+                // the bulk Check in, admin/includes/booking-row-actions.php.
+                $ciGates = bookings_checkin_gates($pdo, (int)$booking_id, $user, $_POST);
+                $booking = $ciGates['booking'];
+                $validation = $ciGates['validation'];
+                $ciWindow = $ciGates['window'];
+                $ciChoice = $ciGates['choice'];
+                $roomGate = $ciGates['room_gate'];
                 if (!$roomGate['allowed']) {
                     header('Content-Type: application/json');
                     echo json_encode(['success' => false, 'message' => $roomGate['message'], 'needs_confirm_room' => $roomGate['needs_confirm']]);
@@ -852,95 +636,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     exit;
                 }
 
-                $pdo->beginTransaction();
-                $stmt = $pdo->prepare("UPDATE bookings SET status = 'checked-in' WHERE id = ?");
-                $stmt->execute([$booking_id]);
-
-                updateBookingRoomsStatus(
-                    $booking_id,
-                    'occupied',
-                    'Guest checked in: ' . ($booking['booking_reference'] ?? ('Booking #' . $booking_id)),
-                    $user['id'] ?? null
-                );
-                $pdo->commit();
-
-                // Timeline event (outside transaction — non-fatal if it fails)
-                logBookingCheckIn($booking_id, $booking['booking_reference'] ?? '', 'admin', $user['id'] ?? null, $user['full_name'] ?? null);
-                if ($roomGate['override']) {
-                    logCheckInRoomNotReadyOverride($booking_id, (string)($booking['booking_reference'] ?? ''), $roomGate['rooms'], $user['id'] ?? null, $user['full_name'] ?? null);
-                }
-                if (!empty($validation['via_arrangement'])) {
-                    logCheckInUnderArrangement($booking_id, (string)($booking['booking_reference'] ?? ''), (string)$validation['arrangement_note'], $user['id'] ?? null, $user['full_name'] ?? null);
-                }
-
-                $scheduledCheckIn = new DateTime((string)($booking['check_in_date'] ?? 'today'));
-                $scheduledCheckIn->setTime(0, 0, 0);
-                $todayCheckIn = new DateTime('today');
-                $isLateCheckIn = $scheduledCheckIn < $todayCheckIn;
-                $lateDays = $isLateCheckIn ? (int)$scheduledCheckIn->diff($todayCheckIn)->days : 0;
-
-                $message = 'Guest checked in!';
-                $checkInEventContext = [
-                    'booking_id' => $booking_id,
-                    'ref' => $booking['booking_reference'] ?? null,
-                    'scheduled_check_in' => $booking['check_in_date'] ?? null,
-                    'is_late_checkin' => $isLateCheckIn,
-                    'days_late' => $lateDays,
-                    'by' => $user['username'] ?? null,
-                ];
-                $ciActualArrival = $ciChoice['choice'] !== '' ? rh_late_checkin_arrival($ciWindow, $ciChoice['choice']) : null;
-                if ($ciChoice['choice'] !== '') {
-                    $checkInEventContext['arrival_choice'] = $ciChoice['choice'];
-                    $checkInEventContext['actual_arrival'] = $ciActualArrival;
-                }
-                if ($checkin_note !== '') {
-                    $checkInEventContext['note'] = $checkin_note;
-                }
-                rh_log_event(
-                    'bookings',
-                    $isLateCheckIn ? 'warning' : 'info',
-                    $isLateCheckIn ? 'Late guest check-in completed' : 'Guest checked in',
-                    $checkInEventContext
-                );
-
-                $checkInAuditNote = $checkin_note !== '' ? ('Check-in note: ' . $checkin_note) : null;
-                if ($isLateCheckIn && $lateDays > 0) {
-                    // The chosen option and the actual arrival date go in the note (History) and in new_values
-                    // (actual_arrival is what the checkout settlement reads back for "nights actually stayed").
-                    $lateDescriptor = $ciChoice['choice'] !== ''
-                        ? rh_late_checkin_note($ciWindow, $ciChoice['choice'])
-                        : 'Late check-in (' . $lateDays . ' day(s) overdue)';
-                    $checkInAuditNote = $checkInAuditNote !== null
-                        ? ($lateDescriptor . ' - ' . $checkInAuditNote)
-                        : $lateDescriptor;
-                    if ($ciChoice['choice'] !== '') {
-                        logBookingEvent((int)$booking_id, (string)($booking['booking_reference'] ?? ''), 'Late check-in', 'check_in', $lateDescriptor,
-                            (string)$booking['check_in_date'], (string)$ciActualArrival, 'admin', $user['id'] ?? null, $user['full_name'] ?? null,
-                            ['arrival_choice' => $ciChoice['choice'], 'actual_arrival' => $ciActualArrival, 'late_days' => $lateDays]);
-                    }
-                }
-                $ciAuditNew = ['status' => 'checked-in'];
-                if ($ciChoice['choice'] !== '') {
-                    $ciAuditNew['arrival_choice'] = $ciChoice['choice'];
-                    $ciAuditNew['actual_arrival'] = $ciActualArrival;
-                }
-                logBookingAudit(
-                    $booking_id,
-                    'checked-in',
-                    ['status' => 'confirmed'],
-                    $ciAuditNew,
-                    $checkInAuditNote,
-                    $booking['booking_reference'] ?? null
-                );
-
-                // "Email the guest a check-in confirmation" box (owner 2026-11-12). No field (old cached page, the
-                // Assistant's check-in) = today's behaviour here: no email. Never blocks the check-in.
-                if (array_key_exists('email_guest', $_POST)) {
-                    require_once __DIR__ . '/../config/email.php';
-                    $ciEmailWanted = rh_checkin_email_choice($_POST, false);
-                    $ciEmailSent = rh_checkin_guest_email($pdo, (int)$booking_id, $ciEmailWanted, isset($user['id']) ? (int)$user['id'] : null, $user['full_name'] ?? null);
-                    $message .= $ciEmailWanted ? ($ciEmailSent ? ' Check-in email sent.' : ' The check-in email could not be sent.') : ' No email sent (you chose not to).';
-                }
+                // Status, rooms occupied, History, late-arrival note, optional email: shared with the bulk Check in.
+                $ciDone = bookings_checkin_commit($pdo, $ciGates, $user, $_POST);
+                $message = $ciDone['message'];
             } elseif ($new_status === 'cancel-checkin') {
                 $check = $pdo->prepare("SELECT id, status, booking_reference FROM bookings WHERE id = ?");
                 $check->execute([$booking_id]);
@@ -1040,92 +738,23 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     rh_log_event('bookings', 'info', 'Booking status changed', ['booking_id' => $booking_id, 'from' => $current_status, 'to' => $new_status, 'by' => $user['username'] ?? null]);
                     logBookingAudit($booking_id, $new_status, ['status' => $current_status], ['status' => $new_status], null, $current_booking['booking_reference'] ?? null);
                 } else {
-                // Update booking status; if leaving tentative, clear tentative fields so badge counts stay accurate
-                $clear_tentative_flag = ($new_status !== 'tentative') ? ', is_tentative = 0, tentative_expires_at = NULL' : '';
-                $confirmRoomUpdated = null;
                 if (in_array($current_status, ['pending', 'tentative'], true) && $new_status === 'confirmed') {
-                    // Confirming a hold takes a room out of stock: one transaction that locks the booking row and
-                    // every room type sharing its rooms (read BEFORE the transaction, locked in ascending id),
-                    // re-checks availability, and only then changes the status and the room counter. Two people
-                    // confirming at once, or confirming while someone books, can never both claim the last room.
-                    $confirmLockIds = rh_related_room_type_ids($pdo, [(int)$room_id]);
-                    $pdo->beginTransaction();
-                    try {
-                        $lockBk = $pdo->prepare("SELECT status FROM bookings WHERE id = ? FOR UPDATE");
-                        $lockBk->execute([$booking_id]);
-                        $lockedStatus = $lockBk->fetchColumn();
-                        if (!in_array($lockedStatus, ['pending', 'tentative'], true)) {
-                            throw new Exception('This booking was changed by someone else a moment ago. Refresh the page and check its status.');
-                        }
-                        rh_lock_room_types($pdo, $confirmLockIds);
-                        $availabilityCheck = checkRoomAvailability($room_id, $current_booking['check_in_date'], $current_booking['check_out_date'], $booking_id);
-                        if (!$availabilityCheck['available']) {
-                            throw new Exception(getBookingActionErrorMessage('confirm', $availabilityCheck['error'] ?? 'No rooms available'));
-                        }
-                        $pdo->prepare("UPDATE bookings SET status = ?{$clear_tentative_flag} WHERE id = ?")->execute([$new_status, $booking_id]);
-                        $update_room = $pdo->prepare("UPDATE rooms SET rooms_available = rooms_available - 1 WHERE id = ? AND rooms_available > 0");
-                        $update_room->execute([$room_id]);
-                        $confirmRoomUpdated = $update_room->rowCount() > 0;
-                        $pdo->commit();
-                    } catch (Throwable $confirmEx) {
-                        if ($pdo->inTransaction()) {
-                            $pdo->rollBack();
-                        }
-                        throw rh_is_lock_conflict($confirmEx) ? new Exception(rh_lock_conflict_message()) : $confirmEx;
-                    }
+                    // Confirming a hold (locked availability re-check, status, room counter, History, confirmation
+                    // email, automatic room when paid): shared with the bulk Confirm, admin/includes/booking-row-actions.php.
+                    $confirmRes = bookings_confirm_hold($pdo, (int)$booking_id, $user, $current_booking);
+                    $message = $confirmRes['message'];
                 } else {
+                    // Update booking status; if leaving tentative, clear tentative fields so badge counts stay accurate
+                    $clear_tentative_flag = ($new_status !== 'tentative') ? ', is_tentative = 0, tentative_expires_at = NULL' : '';
                     $stmt = $pdo->prepare("UPDATE bookings SET status = ?{$clear_tentative_flag} WHERE id = ?");
                     $stmt->execute([$new_status, $booking_id]);
+                    $message = 'Booking status updated!';
+                    rh_log_event('bookings', 'info', 'Booking status changed', ['booking_id' => $booking_id, 'from' => $current_status, 'to' => $new_status, 'by' => $user['username'] ?? null]);
+                    logBookingAudit($booking_id, $new_status, ['status' => $current_status], ['status' => $new_status], null, $current_booking['booking_reference'] ?? null);
                 }
-                $message = 'Booking status updated!';
-                rh_log_event('bookings', 'info', 'Booking status changed', ['booking_id' => $booking_id, 'from' => $current_status, 'to' => $new_status, 'by' => $user['username'] ?? null]);
-                logBookingAudit($booking_id, $new_status, ['status' => $current_status], ['status' => $new_status], null, $current_booking['booking_reference'] ?? null);
                 }
 
-                // Handle room availability changes
-                if (in_array($current_status, ['pending', 'tentative'], true) && $new_status === 'confirmed') {
-                    // (Availability re-check, status change and room counter were done in the locked transaction above.)
-                    if (!$confirmRoomUpdated) {
-                        // This shouldn't happen if availability checks are working, but handle it
-                        $message .= ' (Warning: Could not update room availability - room may be fully booked)';
-                    } else {
-                        $message .= ' Room availability updated.';
-                    }
-
-                    // Send booking confirmed email
-                    $booking_stmt = $pdo->prepare("
-                        SELECT b.*, r.name as room_name
-                        FROM bookings b
-                        LEFT JOIN rooms r ON b.room_id = r.id
-                        WHERE b.id = ?
-                    ");
-                    $booking_stmt->execute([$booking_id]);
-                    $booking = $booking_stmt->fetch(PDO::FETCH_ASSOC);
-
-                    if ($booking) {
-                        // Include email functions
-                        require_once '../config/email.php';
-
-                        // Send booking confirmed email
-                        $email_result = sendBookingConfirmedEmail($booking);
-
-                        if ($email_result['success']) {
-                            $message .= ' Confirmation email sent to guest.';
-                        } else {
-                            $message .= ' (Note: Confirmation email failed: ' . $email_result['message'] . ')';
-                        }
-
-                        // Auto-assign individual room only once the booking is confirmed and paid.
-                        if (in_array($booking['payment_status'] ?? '', ['paid', 'completed'], true) && empty($booking['individual_room_id'])) {
-                            $autoAssignResult = autoAssignConfirmedPaidBooking($booking_id);
-                            if ($autoAssignResult['success'] && !empty($autoAssignResult['assigned_room_number'])) {
-                                $message .= ' Room ' . htmlspecialchars($autoAssignResult['assigned_room_number']) . ' auto-assigned.';
-                            } else {
-                                $message .= ' (Note: Auto-assign skipped - ' . htmlspecialchars($autoAssignResult['message']) . ')';
-                            }
-                        }
-                    }
-                } elseif ($new_status === 'cancelled' && !empty($cancelledNow)) {
+                if ($new_status === 'cancelled' && !empty($cancelledNow)) {
                     // (Stock release, room release and refund were done atomically by cancelRoomBookingSettled above.)
                     // Every booking cancelled by this request that was confirmed gets the guest email + the log rows.
                     require_once '../config/email.php';
@@ -2884,23 +2513,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
                 $gmLead = (int)$gmFor['lead'];
             }
+            // G5b one-time confirm: the review's token is used once (a replay gets the first result back).
+            if (!isset($_SESSION['rh_bk_bulk_once']) || !is_array($_SESSION['rh_bk_bulk_once'])) {
+                $_SESSION['rh_bk_bulk_once'] = [];
+            }
+            $gmScope = 'group|' . $gmLead . '|' . implode(',', $gmIds);
+            if ($gmApply) {
+                $gmReply = rh_bk_bulk_once_run($_SESSION['rh_bk_bulk_once'], trim((string)($_POST['once'] ?? '')), $gmScope, static function () use ($pdo, $gmLead, $gmIds, $user): array {
+                    $gmFilter = rh_bk_bulk_group_filter($pdo, $gmLead, $gmIds);
+                    $gmRes = rh_group_make($pdo, $gmLead, $gmFilter['ids'], [
+                        'user_id' => (int)($user['id'] ?? 0),
+                        'user_name' => (string)($user['full_name'] ?? ($user['username'] ?? '')),
+                        'dry_run' => false,
+                        'expect_state' => (string)$_POST['state'],
+                    ]);
+                    if (empty($gmRes['success'])) {
+                        return ['success' => false, 'message' => (string)$gmRes['error'], 'skipped' => $gmFilter['skipped']];
+                    }
+                    $gmSkipN = count($gmFilter['skipped']);
+                    return ['success' => true, 'message' => 'Group made: ' . count($gmRes['joined']) . ' room(s) joined'
+                        . ($gmSkipN ? ', ' . $gmSkipN . ' skipped' : '') . '. No money moved.',
+                        'lead' => (int)$gmRes['lead'], 'joined' => array_map('intval', $gmRes['joined']), 'skipped' => $gmFilter['skipped']];
+                });
+                echo json_encode($gmReply, JSON_INVALID_UTF8_SUBSTITUTE);
+                exit;
+            }
             // G5a: a ticked room that cannot join (rh_group_can_join) or sits in another group is skipped with its reason.
             $gmFilter = rh_bk_bulk_group_filter($pdo, $gmLead, $gmIds);
             $gmRes = rh_group_make($pdo, $gmLead, $gmFilter['ids'], [
                 'user_id' => (int)($user['id'] ?? 0),
                 'user_name' => (string)($user['full_name'] ?? ($user['username'] ?? '')),
-                'dry_run' => !$gmApply,
-                'expect_state' => $gmApply ? (string)$_POST['state'] : '',
+                'dry_run' => true,
+                'expect_state' => '',
             ]);
             if (empty($gmRes['success'])) {
                 echo json_encode(['success' => false, 'message' => (string)$gmRes['error'], 'skipped' => $gmFilter['skipped']], JSON_INVALID_UTF8_SUBSTITUTE);
-                exit;
-            }
-            if ($gmApply) {
-                $gmSkipN = count($gmFilter['skipped']);
-                echo json_encode(['success' => true, 'message' => 'Group made: ' . count($gmRes['joined']) . ' room(s) joined'
-                    . ($gmSkipN ? ', ' . $gmSkipN . ' skipped' : '') . '. No money moved.',
-                    'lead' => (int)$gmRes['lead'], 'joined' => array_map('intval', $gmRes['joined']), 'skipped' => $gmFilter['skipped']], JSON_INVALID_UTF8_SUBSTITUTE);
                 exit;
             }
             $gmRooms = [];
@@ -2912,7 +2559,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             echo json_encode(['success' => true, 'state' => (string)$gmRes['state'], 'rooms' => $gmRooms, 'totals' => $gmRes['totals'],
                 'repointed' => !empty($gmRes['repointed']), 'invoice_number' => (string)$gmRes['invoice_number'],
                 'company' => (string)$gmRes['company'], 'currency' => (string)$currency_symbol, 'lead' => (int)$gmRes['lead'],
-                'skipped' => $gmFilter['skipped']], JSON_INVALID_UTF8_SUBSTITUTE);
+                'skipped' => $gmFilter['skipped'], 'once' => rh_bk_bulk_once_issue($_SESSION['rh_bk_bulk_once'], $gmScope)], JSON_INVALID_UTF8_SUBSTITUTE);
             exit;
         } elseif ($action === 'preview_bookings_bulk' || $action === 'bookings_bulk_apply') {
             // All Bookings bulk bar (G5a): Remove from group, Send a reminder, Resend confirmation, Email invoice.
@@ -2923,19 +2570,35 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             $bbOp = (string)($_POST['op'] ?? '');
             $bbIds = adminBulkIds();
+            // G5b one-time confirm: the review's token is used once (a replay gets the first result back).
+            if (!isset($_SESSION['rh_bk_bulk_once']) || !is_array($_SESSION['rh_bk_bulk_once'])) {
+                $_SESSION['rh_bk_bulk_once'] = [];
+            }
+            $bbScope = 'bulk|' . $bbOp . '|' . implode(',', $bbIds);
             header('Content-Type: application/json');
             if ($action === 'preview_bookings_bulk') {
                 $bbPlan = rh_bk_bulk_plan($pdo, $bbOp, $bbIds, (int)($user['id'] ?? 0));
                 echo json_encode(empty($bbPlan['success']) ? ['success' => false, 'message' => $bbPlan['error']] : [
                     'success' => true, 'state' => $bbPlan['state'], 'rooms' => $bbPlan['rooms'], 'will' => $bbPlan['will'], 'skip' => $bbPlan['skip'],
+                    'once' => rh_bk_bulk_once_issue($_SESSION['rh_bk_bulk_once'], $bbScope),
                 ], JSON_INVALID_UTF8_SUBSTITUTE);
                 exit;
             }
             @set_time_limit(300); // up to 50 emails, one after another
-            $bbRes = rh_bk_bulk_apply($pdo, $bbOp, $bbIds, $user, trim((string)($_POST['state'] ?? '')));
-            echo json_encode(empty($bbRes['success']) ? ['success' => false, 'message' => $bbRes['error']] : [
-                'success' => true, 'message' => $bbRes['message'], 'results' => $bbRes['results'], 'done' => $bbRes['done'],
-            ], JSON_INVALID_UTF8_SUBSTITUTE);
+            // Assign rooms: the room picked per booking in the review (checked again when it is assigned).
+            $bbChoices = [];
+            foreach ((array)($_POST['choices'] ?? []) as $bbCid => $bbPick) {
+                if (is_string($bbPick) && preg_match('/^[rc]:[0-9]{1,10}$/', $bbPick) && (int)$bbCid > 0) {
+                    $bbChoices[(int)$bbCid] = $bbPick;
+                }
+            }
+            $bbReply = rh_bk_bulk_once_run($_SESSION['rh_bk_bulk_once'], trim((string)($_POST['once'] ?? '')), $bbScope, static function () use ($pdo, $bbOp, $bbIds, $user, $bbChoices): array {
+                $bbRes = rh_bk_bulk_apply($pdo, $bbOp, $bbIds, $user, trim((string)($_POST['state'] ?? '')), null, $bbChoices);
+                return empty($bbRes['success']) ? ['success' => false, 'message' => $bbRes['error']] : [
+                    'success' => true, 'message' => $bbRes['message'], 'results' => $bbRes['results'], 'done' => $bbRes['done'],
+                ];
+            });
+            echo json_encode($bbReply, JSON_INVALID_UTF8_SUBSTITUTE);
             exit;
         } elseif ($action === 'room_change_options') {
             // Upgrade / downgrade picker: every other active room type with availability and a quote.
@@ -3626,7 +3289,8 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         ]);
 
         foreach ($export_data as $row) {
-            fputcsv($output, [
+            // Guest-typed text that a spreadsheet would run as a formula gets a leading apostrophe (G5b).
+            fputcsv($output, array_map('rh_bk_bulk_csv_cell', [
                 $row['booking_reference'],
                 $row['guest_name'],
                 $row['guest_email'],
@@ -3646,7 +3310,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                 $row['occupancy_type'],
                 $row['special_requests'],
                 $row['created_at']
-            ]);
+            ]));
         }
 
         fclose($output);
@@ -4457,6 +4121,14 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                     <?php /* Bulk bar (G5a, shared admin-bulk.js): shows "N selected" + the actions once a row is ticked. Every
                        action that writes or sends opens a review of each ticked room first (bkBulkModal / bkGroupModal). */ ?>
                     <?php adminBulkBarStart('bookings_bulk', '#booking-results', (string)($csrf_token ?? '')); ?>
+                        <?php /* G5b front-desk actions: each runs the row's own Confirm / Assign room / Check in, room by room. */ ?>
+                        <?php if ($bkCanConfirm): ?>
+                        <button type="button" class="btn btn-secondary btn-sm" data-bulk-op="confirm" data-bk-bulk-op="confirm" data-title="Confirm bookings" data-confirm="Confirm: confirm them"><i class="fas fa-check" aria-hidden="true"></i> Confirm</button>
+                        <?php endif; ?>
+                        <button type="button" class="btn btn-secondary btn-sm" data-bulk-op="assign" data-bk-bulk-op="assign" data-title="Assign rooms" data-confirm="Confirm: assign the rooms"><i class="fas fa-door-closed" aria-hidden="true"></i> Assign rooms</button>
+                        <?php if (hasPermission((int)($user['id'] ?? 0), 'checkin_guest')): ?>
+                        <button type="button" class="btn btn-secondary btn-sm" data-bulk-op="checkin" data-bk-bulk-op="checkin" data-title="Check in" data-confirm="Confirm: check them in"><i class="fas fa-sign-in-alt" aria-hidden="true"></i> Check in</button>
+                        <?php endif; ?>
                         <?php if ($bkCanConfirm): ?>
                         <button type="button" class="btn btn-primary btn-sm" data-bulk-op="group_make" data-bk-bulk-op="group_make"><i class="fas fa-object-group" aria-hidden="true"></i> Make a group</button>
                         <button type="button" class="btn btn-secondary btn-sm" data-bulk-op="group_add" data-bk-bulk-op="group_add"><i class="fas fa-plus" aria-hidden="true"></i> Add to a group</button>
@@ -11790,15 +11462,24 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             var i = document.querySelector('#booking-results form[data-bulk-bar] input[name="csrf_token"]');
             return i ? i.value : '';
         }
-        function post(action, fields, ids, idKey) {
+        // G5b: after a Confirm whose reply never arrived (or was not readable) the server may have done some or all of it.
+        var UNKNOWN = 'No reply from the server, so the result is unknown: some bookings may already be done. Close this, refresh the list and check each booking\'s History before trying again.';
+        function post(action, fields, ids, idKey, isApply) {
             var fd = new FormData();
             fd.append('action', action);
             fd.append('csrf_token', csrf());
             (ids || []).forEach(function (id) { fd.append(idKey + '[]', String(id)); });
             Object.keys(fields || {}).forEach(function (k) { fd.append(k, fields[k]); });
             return fetch('bookings.php', { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
-                .then(function (r) { return r.json().catch(function () { return { success: false, message: 'Unexpected reply (' + r.status + '). Reload the page and try again.' }; }); })
-                .catch(function () { return { success: false, message: 'No connection. Nothing was changed.' }; });
+                .then(function (r) {
+                    return r.json().catch(function () {
+                        return isApply ? { success: false, unknown: true, message: UNKNOWN }
+                            : { success: false, message: 'Unexpected reply (' + r.status + '). Reload the page and try again.' };
+                    });
+                })
+                .catch(function () {
+                    return isApply ? { success: false, unknown: true, message: UNKNOWN } : { success: false, message: 'No connection. Nothing was changed.' };
+                });
         }
         function open(m) { m.style.display = 'flex'; }
         function shut(m) { m.style.display = 'none'; }
@@ -11807,9 +11488,23 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 + esc(head) + '</th></tr></thead><tbody>';
             rows.forEach(function (r) {
                 var ok = r.will !== undefined ? r.will : r.ok;
-                h += '<tr class="' + (ok ? 'bk-bulk-go' : 'bk-bulk-skip') + '"><td>' + esc(r.label) + '</td><td>' + esc(r.text) + '</td></tr>';
+                var pick = '';
+                if (ok && r.options && r.options.length) {
+                    // Assign rooms (G5b): the proposed room, which the person may change before confirming.
+                    pick = '<br><select class="form-control bk-bulk-pick" data-bk-pick="' + esc(r.id) + '" aria-label="' + esc('Room for ' + r.label) + '">'
+                        + r.options.map(function (o) {
+                            return '<option value="' + esc(o.value) + '"' + (o.value === r.pick ? ' selected' : '') + '>' + esc(o.label) + '</option>';
+                        }).join('') + '</select>';
+                }
+                h += '<tr class="' + (ok ? 'bk-bulk-go' : 'bk-bulk-skip') + '"><td>' + esc(r.label) + '</td><td>' + esc(r.text) + pick + '</td></tr>';
             });
             return h + '</tbody></table></div>';
+        }
+        // A Confirm whose result is unknown: no second try from this dialog; Close reloads the list.
+        function unknownResult(confirmBtn, cancelBtn, showError, msg) {
+            confirmBtn.hidden = true;
+            if (cancelBtn) cancelBtn.textContent = 'Close';
+            showError(msg || UNKNOWN);
         }
         function skipList(skipped) {
             if (!skipped || !skipped.length) return '';
@@ -11822,7 +11517,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
         function idsOf(p) { return p.map(function (c) { return c.value; }); }
 
         /* ---- Remove from group, Send a reminder, Resend confirmation, Email invoice ---- */
-        var bulk = { op: '', ids: [], state: '', seq: 0, done: false, label: 'Confirm' };
+        var bulk = { op: '', ids: [], state: '', once: '', seq: 0, done: false, label: 'Confirm' };
         function bulkError(m) { var e = byId('bkBulkError'); if (!e) return; e.textContent = m || ''; e.hidden = !m; }
         function openBulk(btn) {
             var m = byId('bkBulkModal');
@@ -11832,6 +11527,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             bulk.op = btn.getAttribute('data-bk-bulk-op');
             bulk.ids = idsOf(p);
             bulk.state = '';
+            bulk.once = '';
             bulk.done = false;
             bulk.label = btn.getAttribute('data-confirm') || 'Confirm';
             byId('bkBulkTitle').textContent = btn.getAttribute('data-title') || 'Review';
@@ -11852,6 +11548,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                     : 'Nothing to do: every ticked booking is skipped (the reason is beside each one).';
                 byId('bkBulkList').innerHTML = roomTable('What will happen', res.rooms || []);
                 bulk.state = res.state || '';
+                bulk.once = res.once || '';
                 c.disabled = !res.will || !bulk.state;
             });
         }
@@ -11859,11 +11556,18 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             var c = byId('bkBulkConfirm');
             if (!bulk.state || c.disabled) return;
             var my = bulk.seq;
+            var fields = { op: bulk.op, state: bulk.state, once: bulk.once };
+            var list = byId('bkBulkList');
+            Array.prototype.forEach.call(list ? list.querySelectorAll('select[data-bk-pick]') : [], function (s) {
+                fields['choices[' + s.getAttribute('data-bk-pick') + ']'] = s.value;
+                s.disabled = true;
+            });
             c.disabled = true;
             c.textContent = 'Working…';
             bulkError('');
-            post('bookings_bulk_apply', { op: bulk.op, state: bulk.state }, bulk.ids, 'bulk_ids').then(function (res) {
+            post('bookings_bulk_apply', fields, bulk.ids, 'bulk_ids', true).then(function (res) {
                 if (my !== bulk.seq) return;
+                if (res && res.unknown) { bulk.done = true; unknownResult(c, byId('bkBulkCancel'), bulkError, res.message); return; }
                 if (!res || !res.success) { c.textContent = bulk.label; bulkError((res && res.message) || 'Nothing was done.'); return; }
                 bulk.done = (res.done || 0) > 0;
                 c.hidden = true;
@@ -11881,7 +11585,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
         }
 
         /* ---- Make a group / Add to a group (group_make_preview / group_make_apply) ---- */
-        var grp = { mode: 'make', ids: [], state: '', seq: 0, done: false };
+        var grp = { mode: 'make', ids: [], state: '', once: '', seq: 0, done: false };
         function grpError(m) { var e = byId('bkGroupError'); if (!e) return; e.textContent = m || ''; e.hidden = !m; }
         function grpFields() {
             if (grp.mode === 'add') return { group_ref: (byId('bkGroupRef').value || '').trim() };
@@ -11893,6 +11597,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             var c = byId('bkGroupConfirm');
             var review = byId('bkGroupReview');
             grp.state = '';
+            grp.once = '';
             c.disabled = true;
             grpError('');
             byId('bkGroupSkips').innerHTML = '';
@@ -11923,6 +11628,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                     + '</dl>';
                 review.innerHTML = h;
                 grp.state = res.state || '';
+                grp.once = res.once || '';
                 c.disabled = !grp.state;
             });
         }
@@ -11976,10 +11682,16 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             var my = grp.seq;
             var fields = grpFields();
             fields.state = grp.state;
+            fields.once = grp.once;
             c.disabled = true;
             grpError('');
-            post('group_make_apply', fields, grp.ids, 'booking_ids').then(function (res) {
+            post('group_make_apply', fields, grp.ids, 'booking_ids', true).then(function (res) {
                 if (my !== grp.seq) return;
+                if (res && res.unknown) {
+                    grp.done = true;
+                    unknownResult(c, document.querySelector('#bkGroupModal .admin-modal__footer [data-bk-group-close]'), grpError, res.message);
+                    return;
+                }
                 if (!res || !res.success) { grpError((res && res.message) || 'Nothing was changed.'); return; }
                 var lead = String(res.lead || fields.lead_id || '');
                 if (!res.skipped || !res.skipped.length) {

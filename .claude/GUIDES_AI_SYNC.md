@@ -118,6 +118,11 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Every action (except export / print) shows a review list of each ticked room — what will happen, or "skipped: reason" — then Confirm; each room is done or skipped on its own, with a result list. Same rules and permissions as each single button. At most 50 rooms per send, 200 per remove.
 - History / email log as the single actions; one "bookings_bulk_apply" activity line per bulk confirm. Guides: All Bookings (ticks, bulk bar, each action). Assistant: knows the bulk bar exists; no Assistant action.
 
+### Group follow-up G5b: bulk Confirm, Assign rooms, Check in (2026-11-18, owner) — hashes in TASKS.md
+- All Bookings bulk bar adds Confirm (tentative / pending → confirmed), Assign rooms (the review proposes a free room per booking, never the same room twice for overlapping nights; each proposal can be changed before Confirm) and Check in (same gates as the single button: room assigned, payment rule, arrival day, room clean; late arrivals are skipped; no check-in email from the bulk bar).
+- Confirming the same review twice never runs it twice; after a lost connection the message says the result is unknown (check History). The bookings CSV export neutralises cells that start like a spreadsheet formula.
+- History as each single action. Guides: All Bookings bulk bar. Assistant: knows the bulk bar actions; no Assistant action.
+
 
 ## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
 

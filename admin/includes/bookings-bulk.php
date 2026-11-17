@@ -8,6 +8,12 @@
  *   reminder     -> bookings_send_booking_email()  (bookings.php resend_email, type booking_reminder)
  *   confirmation -> bookings_send_booking_email()  (bookings.php resend_email, the type the Resend menu picks for the status)
  *   invoice      -> bookings_send_invoice_email()  (bookings.php send_invoice_email)
+ *   confirm      -> bookings_convert_tentative_booking() / bookings_confirm_hold()  (convert_tentative / update_status)
+ *   assign       -> bookings_assign_individual_room() / bookings_assign_room_pair() (the review proposes a free room
+ *                   per booking, never one room twice for overlapping nights; the person may change each)
+ *   checkin      -> bookings_checkin_gates() + bookings_checkin_commit()            (update_status checked-in, all gates)
+ * Confirm is one-time (G5b): the review issues a token kept in the session (rh_bk_bulk_once_*); a repeated confirm
+ * returns the first result instead of doing it again.
  * Make a group / Add to a group stay on group_make_preview / group_make_apply (rh_group_make); this file only gives
  * them the per-room filter (rh_bk_bulk_group_filter) so a room that cannot join is skipped with its reason.
  *
@@ -16,6 +22,7 @@
 
 require_once __DIR__ . '/bulk-actions.php';
 require_once __DIR__ . '/../../includes/booking-group-ops.php';
+require_once __DIR__ . '/booking-row-actions.php';
 
 if (!function_exists('rh_bk_bulk_ops')) {
 
@@ -27,6 +34,10 @@ if (!function_exists('rh_bk_bulk_ops')) {
             'reminder' => ['label' => 'Send a reminder', 'single' => 'resend_email', 'verb' => 'sent', 'max' => 50],
             'confirmation' => ['label' => 'Resend confirmation', 'single' => 'resend_email', 'verb' => 'sent', 'max' => 50],
             'invoice' => ['label' => 'Email invoice', 'single' => 'send_invoice_email', 'verb' => 'sent', 'max' => 50],
+            // G5b: the front-desk actions, each through its single action's code (admin/includes/booking-row-actions.php).
+            'confirm' => ['label' => 'Confirm', 'single' => 'update_status', 'status' => 'confirmed', 'verb' => 'confirmed', 'max' => 50],
+            'assign' => ['label' => 'Assign rooms', 'single' => 'assign_individual_room', 'verb' => 'given a room', 'max' => 50],
+            'checkin' => ['label' => 'Check in', 'single' => 'update_status', 'status' => 'checked-in', 'verb' => 'checked in', 'max' => 50],
         ];
     }
 
@@ -72,7 +83,7 @@ if (!function_exists('rh_bk_bulk_ops')) {
      * What will happen to one room: ['will' => bool, 'why' => short skip reason (outcome summary), 'text' => the line shown].
      * Read only. Same rules as the single action (and its button).
      */
-    function rh_bk_bulk_room_plan(PDO $pdo, string $op, array $b, ?string $today = null): array
+    function rh_bk_bulk_room_plan(PDO $pdo, string $op, array $b, ?string $today = null, int $userId = 0): array
     {
         $skip = static fn(string $why, string $text): array => ['will' => false, 'why' => $why, 'text' => $text];
         $status = strtolower(trim((string)($b['status'] ?? '')));
@@ -135,8 +146,141 @@ if (!function_exists('rh_bk_bulk_ops')) {
                     $text .= ' Still billed to ' . $res['company'] . ' (copied from the group).';
                 }
                 return ['will' => true, 'why' => '', 'text' => $text];
+            case 'confirm':
+                // Same rules as the row's Confirm: a tentative hold is converted (convert_tentative); a pending booking
+                // (or a tentative one without the hold flag) goes through Status -> Confirmed, which needs a free room.
+                $words = str_replace('-', ' ', $status);
+                if ($status === 'tentative' && (int)($b['is_tentative'] ?? 0) === 1) {
+                    $text = 'Confirms the tentative booking. ' . ($emailOk ? 'Emails ' . $email . ' that it is confirmed.' : 'No email address, so no email is sent.');
+                } elseif (in_array($status, ['pending', 'tentative'], true)) {
+                    $avail = checkRoomAvailability((int)$b['room_id'], (string)$b['check_in_date'], (string)$b['check_out_date'], (int)$b['id']);
+                    if (empty($avail['available'])) {
+                        return $skip('no room free', 'Skipped: ' . getBookingActionErrorMessage('confirm', (string)($avail['error'] ?? 'No rooms available')));
+                    }
+                    $text = 'Confirms the booking. ' . ($emailOk ? 'Emails ' . $email . ' the booking confirmed email.' : 'No email address, so no email is sent.');
+                } else {
+                    return $skip('not pending or tentative', 'Skipped: only a pending or tentative booking can be confirmed (this one is ' . $words . ').');
+                }
+                if (in_array((string)($b['payment_status'] ?? ''), ['paid', 'completed'], true) && empty($b['individual_room_id'])) {
+                    $text .= ' It is paid, so a free room is given automatically.';
+                }
+                return ['will' => true, 'why' => '', 'text' => $text];
+            case 'checkin':
+                // Same gates as the row's Check in (validateCheckIn, late arrival, clean room). The bulk bar never asks the
+                // questions the single dialog asks, so a late arrival or a room not marked clean is skipped, never assumed.
+                if ($status !== 'confirmed') {
+                    return $skip('not confirmed', 'Skipped: only a confirmed booking can be checked in (this one is ' . str_replace('-', ' ', $status) . ').');
+                }
+                $v = validateCheckIn($b);
+                if (!$v['allowed']) {
+                    $msg = getBookingActionErrorMessage('check_in', (string)$v['reason']);
+                    if (strpos((string)$v['reason'], 'not been reached') !== false) {
+                        return $skip('arrival date not reached', 'Skipped: the arrival date (' . substr((string)$b['check_in_date'], 0, 10) . ') has not come yet.');
+                    }
+                    return $skip(strpos((string)$v['reason'], 'payment') !== false ? 'no payment yet' : 'refused', 'Skipped: ' . $msg);
+                }
+                $win = rh_late_stay_window($b);
+                if ((int)$win['late_days'] > 0) {
+                    return $skip('late arrival', 'Skipped: the guest was due ' . (int)$win['late_days'] . ' day(s) ago. Use Check in on its row to say when they arrived.');
+                }
+                if (!getBookingRoomIds((int)$b['id'])) {
+                    return $skip('no room assigned', 'Skipped: no room assigned yet. Assign a room first.');
+                }
+                $gate = evaluateCheckInRoomReady((int)$b['id'], $userId, false);
+                if (!$gate['allowed']) {
+                    return $skip('room not ready', !empty($gate['needs_confirm'])
+                        ? 'Skipped: the room is not marked clean yet. Use Check in on its row if the guest must go in anyway.'
+                        : 'Skipped: ' . (string)$gate['message']);
+                }
+                $text = 'Checks the guest in to room ' . getBookingRoomLabel((int)$b['id']) . '. No email is sent.';
+                if (!empty($v['via_arrangement'])) {
+                    $text .= ' Allowed by its pay-later arrangement.';
+                }
+                return ['will' => true, 'why' => '', 'text' => $text];
         }
         return $skip('unknown action', 'Skipped: unknown action.');
+    }
+
+    /**
+     * Assign rooms: the free rooms (or joined pairs) one booking could take, the same list as its row's Assign room
+     * picker (rh_room_assignment_candidates; an in-house guest needs a clean room from today). Left out: rooms that need
+     * the children override note and rooms out of service. Read only.
+     * @return array{ok:bool,why:string,text:string,ci:string,co:string,options:array} options: [{value,label,rooms:int[]}]
+     *   value 'r:<individual room id>' or 'c:<room_combinations id>'.
+     */
+    function rh_bk_bulk_assign_options(PDO $pdo, array $b): array
+    {
+        $out = ['ok' => false, 'why' => '', 'text' => '', 'ci' => '', 'co' => '', 'options' => []];
+        $status = strtolower(trim((string)($b['status'] ?? '')));
+        if (!empty($b['deleted_at'])) {
+            return ['why' => 'deleted', 'text' => 'Skipped: this booking is deleted. Restore it first.'] + $out;
+        }
+        $v = validateRoomAssignment($b);
+        if (!$v['allowed']) {
+            return ['why' => 'not confirmed', 'text' => 'Skipped: a room is only assigned to a confirmed or in-house booking (this one is ' . str_replace('-', ' ', $status) . ').'] + $out;
+        }
+        if (getBookingRoomIds((int)$b['id'])) {
+            return ['why' => 'has a room', 'text' => 'Skipped: already has room ' . getBookingRoomLabel((int)$b['id']) . '. Use Assign room on its row to change it.'] + $out;
+        }
+        $inHouse = $status === 'checked-in';
+        $ci = substr((string)$b['check_in_date'], 0, 10);
+        $co = substr((string)$b['check_out_date'], 0, 10);
+        if ($inHouse && $ci < date('Y-m-d')) {
+            $ci = date('Y-m-d');
+        }
+        $out['ci'] = $ci;
+        $out['co'] = $co;
+        $cand = rh_room_assignment_candidates((int)$b['room_id'], $ci, $co, (int)$b['id'], $inHouse);
+        $children = (int)($b['child_guests'] ?? 0) > 0;
+        $pairs = [];
+        if ($cand['mode'] === 'combinations') {
+            $cids = array_map(static fn($i) => (int)$i['id'], array_filter($cand['items'], static fn($i) => !empty($i['available'])));
+            if ($cids) {
+                $st = $pdo->prepare('SELECT id, room_a_id, room_b_id FROM room_combinations WHERE id IN (' . implode(',', array_fill(0, count($cids), '?')) . ')');
+                $st->execute(array_values($cids));
+                foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $p) {
+                    $pairs[(int)$p['id']] = [(int)$p['room_a_id'], (int)$p['room_b_id']];
+                }
+            }
+        }
+        foreach ($cand['items'] as $it) {
+            if (empty($it['available'])) {
+                continue;
+            }
+            $note = trim((string)($it['turnover'] ?? ''));
+            if ($cand['mode'] === 'combinations') {
+                if (!isset($pairs[(int)$it['id']])) {
+                    continue;
+                }
+                $out['options'][] = ['value' => 'c:' . (int)$it['id'], 'label' => 'Rooms ' . $it['label'] . ($note !== '' ? ' (' . $note . ')' : ''), 'rooms' => $pairs[(int)$it['id']]];
+                continue;
+            }
+            if ($children && (int)$it['children_allowed'] === 0) {
+                continue; // needs the children override note: only from its row
+            }
+            $hk = getRoomHousekeepingAssignmentBlock((int)$it['id'], $inHouse);
+            if ($hk && !empty($hk['blocked'])) {
+                continue;
+            }
+            $out['options'][] = ['value' => 'r:' . (int)$it['id'], 'label' => 'Room ' . $it['label'] . ($note !== '' ? ' (' . $note . ')' : ''), 'rooms' => [(int)$it['id']]];
+        }
+        if (!$out['options']) {
+            return ['why' => 'no free room', 'text' => 'Skipped: no free ' . ($cand['mode'] === 'combinations' ? 'pair of joined rooms' : 'room of its type') . ' for these dates.'] + $out;
+        }
+        $out['ok'] = true;
+        $out['text'] = 'Gets the room chosen here (' . count($out['options']) . ' free for these dates). The price does not change.';
+        return $out;
+    }
+
+    /** Whether any room of $rooms is already used in $taken ([[roomId, ci, co], ...]) on an overlapping night. */
+    function rh_bk_bulk_rooms_clash(array $taken, array $rooms, string $ci, string $co): ?int
+    {
+        foreach ($taken as [$rid, $tci, $tco]) {
+            if (in_array((int)$rid, $rooms, true) && $ci < $tco && $tci < $co) {
+                return (int)$rid;
+            }
+        }
+        return null;
     }
 
     /**
@@ -162,7 +306,7 @@ if (!function_exists('rh_bk_bulk_ops')) {
             $out['error'] = 'Tick at most ' . $ops[$op]['max'] . ' bookings for ' . $ops[$op]['label'] . ' in one go.';
             return $out;
         }
-        $need = function_exists('rhBookingActionPermission') ? rhBookingActionPermission($ops[$op]['single']) : null;
+        $need = function_exists('rhBookingActionPermission') ? rhBookingActionPermission($ops[$op]['single'], (string)($ops[$op]['status'] ?? '')) : null;
         $denied = $need !== null && !hasPermission($userId, $need);
         $deniedText = '';
         if ($denied) {
@@ -170,19 +314,69 @@ if (!function_exists('rh_bk_bulk_ops')) {
             $deniedText = 'Skipped: you do not have permission to do that (' . ($all[$need]['label'] ?? $need) . ').';
         }
         $rows = rh_bk_bulk_rows($pdo, $ids);
+        $assign = [];
+        if ($op === 'assign' && !$denied) {
+            // Joined-room bookings are proposed first (they need a whole pair), then the rest; a room proposed for one
+            // booking is never proposed again for another booking with overlapping nights.
+            $order = $ids;
+            $joined = [];
+            foreach ($ids as $id) {
+                $joined[$id] = isset($rows[$id]) && roomTypeHasActiveCombinations((int)$rows[$id]['room_id']) ? 0 : 1;
+            }
+            usort($order, static fn($a, $b) => [$joined[$a], array_search($a, $ids, true)] <=> [$joined[$b], array_search($b, $ids, true)]);
+            $taken = [];
+            foreach ($order as $id) {
+                if (!isset($rows[$id])) {
+                    continue;
+                }
+                $o = rh_bk_bulk_assign_options($pdo, $rows[$id]);
+                $o['pick'] = '';
+                if ($o['ok']) {
+                    foreach ($o['options'] as $opt) {
+                        if (rh_bk_bulk_rooms_clash($taken, $opt['rooms'], $o['ci'], $o['co']) === null) {
+                            $o['pick'] = $opt['value'];
+                            foreach ($opt['rooms'] as $rid) {
+                                $taken[] = [$rid, $o['ci'], $o['co']];
+                            }
+                            break;
+                        }
+                    }
+                    if ($o['pick'] === '') {
+                        $o['ok'] = false;
+                        $o['why'] = 'no free room';
+                        $o['text'] = 'Skipped: every free room for these dates is already proposed for another ticked booking.';
+                    }
+                }
+                $assign[$id] = $o;
+            }
+            $out['order'] = array_values(array_filter($order, static fn($id) => isset($rows[$id])));
+        }
         foreach ($ids as $id) {
             $b = $rows[$id] ?? null;
+            $extra = [];
             if ($b === null) {
                 $p = ['will' => false, 'why' => 'not found', 'text' => 'Skipped: this booking no longer exists. Reload the list.'];
                 $label = '#' . $id;
             } else {
                 $label = rh_group_ops_label($b);
-                $p = $denied ? ['will' => false, 'why' => 'no permission', 'text' => $deniedText] : rh_bk_bulk_room_plan($pdo, $op, $b, $today);
+                if ($denied) {
+                    $p = ['will' => false, 'why' => 'no permission', 'text' => $deniedText];
+                } elseif ($op === 'assign') {
+                    $o = $assign[$id];
+                    $p = ['will' => (bool)$o['ok'], 'why' => (string)$o['why'], 'text' => (string)$o['text']];
+                    if ($o['ok']) {
+                        $extra = ['options' => array_map(static fn($x) => ['value' => $x['value'], 'label' => $x['label']], $o['options']), 'pick' => $o['pick']];
+                    }
+                } else {
+                    $p = rh_bk_bulk_room_plan($pdo, $op, $b, $today, $userId);
+                }
             }
-            $out['rooms'][] = ['id' => $id, 'label' => $label, 'will' => (bool)$p['will'], 'why' => (string)$p['why'], 'text' => (string)$p['text']];
+            $out['rooms'][] = ['id' => $id, 'label' => $label, 'will' => (bool)$p['will'], 'why' => (string)$p['why'], 'text' => (string)$p['text']] + $extra;
             $out[$p['will'] ? 'will' : 'skip']++;
         }
-        $out['state'] = sha1($op . '|' . json_encode(array_map(static fn($r) => [$r['id'], $r['will'], $r['text']], $out['rooms'])));
+        // Assign rooms: the free-room count and the proposals may move between review and confirm; what counts is
+        // which bookings will get a room (the room itself is re-checked under lock when it is assigned).
+        $out['state'] = sha1($op . '|' . json_encode(array_map(static fn($r) => $op === 'assign' ? [$r['id'], $r['will'], $r['why']] : [$r['id'], $r['will'], $r['text']], $out['rooms'])));
         $out['success'] = true;
         return $out;
     }
@@ -288,7 +482,7 @@ if (!function_exists('rh_bk_bulk_ops')) {
      * @return array{success:bool,error:string,message:string,results:array,done:int}
      *   results: [{id,label,ok,text}] in the ticked order; message: "3 sent, 1 skipped (no email address x1)."
      */
-    function rh_bk_bulk_apply(PDO $pdo, string $op, array $ids, array $user, string $state, ?string $today = null): array
+    function rh_bk_bulk_apply(PDO $pdo, string $op, array $ids, array $user, string $state, ?string $today = null, array $choices = []): array
     {
         $out = ['success' => false, 'error' => '', 'message' => '', 'results' => [], 'done' => 0];
         $plan = rh_bk_bulk_plan($pdo, $op, $ids, (int)($user['id'] ?? 0), $today);
@@ -308,10 +502,27 @@ if (!function_exists('rh_bk_bulk_ops')) {
                 $isRoot[$k] = rh_group_ops_root($pdo, (int)$r['id']) === (int)$r['id'] ? 1 : 0;
             }
             usort($order, static fn($a, $b) => [$isRoot[$a], $a] <=> [$isRoot[$b], $b]);
+        } elseif ($op === 'assign' && isset($plan['order'])) {
+            // Same order as the proposals: joined-room bookings first.
+            $keyOf = [];
+            foreach ($plan['rooms'] as $k => $r) {
+                $keyOf[(int)$r['id']] = $k;
+            }
+            $order = [];
+            foreach ($plan['order'] as $id) {
+                $order[] = $keyOf[(int)$id];
+            }
+            foreach ($plan['rooms'] as $k => $r) {
+                if (!in_array($k, $order, true)) {
+                    $order[] = $k;
+                }
+            }
         }
         $results = [];
         $skipped = [];
         $done = 0;
+        $taken = []; // Assign rooms: [roomId, ci, co] given in this batch
+        $failVerb = ['remove_group' => 'refused', 'confirm' => 'refused', 'assign' => 'refused', 'checkin' => 'refused'][$op] ?? 'sending failed';
         foreach ($order as $k) {
             $r = $plan['rooms'][$k];
             $res = ['id' => (int)$r['id'], 'label' => (string)$r['label'], 'ok' => false, 'text' => (string)$r['text']];
@@ -321,7 +532,14 @@ if (!function_exists('rh_bk_bulk_ops')) {
                 continue;
             }
             try {
-                if ($op === 'remove_group') {
+                if ($op === 'confirm' || $op === 'assign' || $op === 'checkin') {
+                    $one = rh_bk_bulk_apply_one($pdo, $op, $r, $user, $choices, $taken);
+                    $res['ok'] = $one['ok'];
+                    $res['text'] = $one['text'];
+                    if (!$one['ok']) {
+                        adminBulkSkip($skipped, $one['why']);
+                    }
+                } elseif ($op === 'remove_group') {
                     $g = rh_group_remove($pdo, (int)$r['id'], $opts);
                     if (!empty($g['success'])) {
                         $res['ok'] = true;
@@ -353,8 +571,8 @@ if (!function_exists('rh_bk_bulk_ops')) {
                 }
             } catch (Throwable $e) {
                 error_log('bookings bulk ' . $op . ' booking ' . (int)$r['id'] . ': ' . $e->getMessage());
-                $res['text'] = ($op === 'remove_group' ? 'Skipped: nothing was changed (' : 'Not sent: ') . $e->getMessage() . ($op === 'remove_group' ? ').' : '');
-                adminBulkSkip($skipped, $op === 'remove_group' ? 'refused' : 'sending failed');
+                $res['text'] = ($failVerb === 'refused' ? 'Skipped: nothing was changed (' : 'Not sent: ') . $e->getMessage() . ($failVerb === 'refused' ? ').' : '');
+                adminBulkSkip($skipped, $failVerb);
             }
             if ($res['ok']) {
                 $done++;
@@ -368,6 +586,170 @@ if (!function_exists('rh_bk_bulk_ops')) {
         $out['message'] = $msg !== '' ? $msg : $err;
         $out['results'] = array_values($results);
         return $out;
+    }
+
+    /**
+     * One room of a bulk Confirm / Assign rooms / Check in, through the single action's own function. Throws what the
+     * single action throws (the caller turns it into "Skipped: nothing was changed (...)").
+     * $r: the plan row (id, options, pick). $choices: [bookingId => 'r:ID' | 'c:ID'] the person picked in the review.
+     * $taken: rooms given earlier in this batch ([roomId, ci, co]), updated here.
+     * @return array{ok:bool,why:string,text:string}
+     */
+    function rh_bk_bulk_apply_one(PDO $pdo, string $op, array $r, array $user, array $choices, array &$taken): array
+    {
+        $id = (int)$r['id'];
+        if ($op === 'confirm') {
+            $st = $pdo->prepare('SELECT status, is_tentative FROM bookings WHERE id = ?');
+            $st->execute([$id]);
+            $now = $st->fetch(PDO::FETCH_ASSOC) ?: [];
+            $res = ((string)($now['status'] ?? '') === 'tentative' && (int)($now['is_tentative'] ?? 0) === 1)
+                ? bookings_convert_tentative_booking($pdo, $id, $user)
+                : bookings_confirm_hold($pdo, $id, $user);
+            $text = 'Confirmed. ' . ($res['email_ok'] ? 'Confirmation email sent.' : 'The confirmation email was not sent' . ($res['email_error'] !== '' ? ': ' . $res['email_error'] : '') . '.');
+            if ($res['auto_note'] !== '') {
+                $text .= ' ' . $res['auto_note'];
+            }
+            return ['ok' => true, 'why' => '', 'text' => $text];
+        }
+        if ($op === 'checkin') {
+            // No answers posted: a late arrival or a room not marked clean is refused here, as in the review.
+            $g = bookings_checkin_gates($pdo, $id, $user, []);
+            if (empty($g['room_gate']['allowed'])) {
+                return ['ok' => false, 'why' => 'room not ready', 'text' => 'Skipped: ' . (!empty($g['room_gate']['needs_confirm'])
+                    ? 'the room is not marked clean yet. Use Check in on its row if the guest must go in anyway.'
+                    : (string)$g['room_gate']['message'])];
+            }
+            bookings_checkin_commit($pdo, $g, $user, []);
+            return ['ok' => true, 'why' => '', 'text' => 'Checked in to room ' . getBookingRoomLabel($id) . '. No email sent.'];
+        }
+        // assign
+        $pick = isset($choices[$id]) && is_string($choices[$id]) ? trim($choices[$id]) : (string)($r['pick'] ?? '');
+        if (!preg_match('/^[rc]:[0-9]{1,10}$/', $pick)) {
+            return ['ok' => false, 'why' => 'no room chosen', 'text' => 'Skipped: no room was chosen.'];
+        }
+        $opt = null;
+        foreach ((array)($r['options'] ?? []) as $o) {
+            if ($o['value'] === $pick) {
+                $opt = $o;
+                break;
+            }
+        }
+        if ($opt === null) {
+            return ['ok' => false, 'why' => 'room no longer free', 'text' => 'Skipped: the room chosen is no longer free for these dates. Nothing was changed.'];
+        }
+        $rows = rh_bk_bulk_rows($pdo, [$id]);
+        $b = $rows[$id] ?? null;
+        if ($b === null) {
+            throw new Exception('This booking no longer exists.');
+        }
+        $o = rh_bk_bulk_assign_options($pdo, $b);
+        $rooms = [];
+        foreach ($o['options'] as $fresh) {
+            if ($fresh['value'] === $pick) {
+                $rooms = $fresh['rooms'];
+            }
+        }
+        if (!$rooms) {
+            // Given to another ticked booking earlier in this batch: say so (clearer than "no longer free").
+            $pickRooms = [(int)substr($pick, 2)];
+            if ($pick[0] === 'c') {
+                $pr = $pdo->prepare('SELECT room_a_id, room_b_id FROM room_combinations WHERE id = ?');
+                $pr->execute([(int)substr($pick, 2)]);
+                $pickRooms = array_map('intval', array_values($pr->fetch(PDO::FETCH_NUM) ?: []));
+            }
+            if ($o['ci'] !== '' && rh_bk_bulk_rooms_clash($taken, $pickRooms, $o['ci'], $o['co']) !== null) {
+                return ['ok' => false, 'why' => 'room chosen twice', 'text' => 'Skipped: ' . $opt['label'] . ' was already given to another ticked booking for overlapping nights. Nothing was changed.'];
+            }
+            return ['ok' => false, 'why' => 'room no longer free', 'text' => 'Skipped: ' . ($o['ok'] ? 'the room chosen is no longer free for these dates.' : substr((string)$o['text'], 9)) . ' Nothing was changed.'];
+        }
+        $clash = rh_bk_bulk_rooms_clash($taken, $rooms, $o['ci'], $o['co']);
+        if ($clash !== null) {
+            return ['ok' => false, 'why' => 'room chosen twice', 'text' => 'Skipped: ' . $opt['label'] . ' was already given to another ticked booking for overlapping nights. Nothing was changed.'];
+        }
+        $num = (int)substr($pick, 2);
+        $res = $pick[0] === 'c'
+            ? bookings_assign_room_pair($pdo, $id, $num, $user)
+            : bookings_assign_individual_room($pdo, $id, $num, $user, false, '');
+        if (empty($res['success'])) {
+            return ['ok' => false, 'why' => 'refused', 'text' => 'Skipped: ' . (string)$res['message']];
+        }
+        foreach ($rooms as $rid) {
+            $taken[] = [(int)$rid, $o['ci'], $o['co']];
+        }
+        return ['ok' => true, 'why' => '', 'text' => 'Given room ' . getBookingRoomLabel($id, preg_replace('/^Rooms? /', '', (string)$opt['label'])) . '. The price did not change.'];
+    }
+
+    /**
+     * One-time confirm (G5b): the review issues a token kept in the session; the confirm that carries it runs once.
+     * A repeated confirm (double click, a retried request) gets the first result back and nothing is done again.
+     * $store: the session array ($_SESSION['rh_bk_bulk_once']). Tokens live 3 hours, at most 30 are kept.
+     */
+    function rh_bk_bulk_once_issue(array &$store, string $scope): string
+    {
+        $now = time();
+        foreach ($store as $t => $e) {
+            if (!is_array($e) || ($now - (int)($e['at'] ?? 0)) > 10800) {
+                unset($store[$t]);
+            }
+        }
+        while (count($store) >= 30) {
+            array_shift($store);
+        }
+        $token = bin2hex(random_bytes(16));
+        $store[$token] = ['scope' => sha1($scope), 'at' => $now, 'state' => 'new', 'reply' => null];
+        return $token;
+    }
+
+    /**
+     * Run $run once for $token. Returns $run's reply; a replay returns the stored reply with replayed = true.
+     * A reply with success false (nothing done) is stored too and given back as it was.
+     * Unknown / expired / other-scope token: refused, nothing done.
+     */
+    function rh_bk_bulk_once_run(array &$store, string $token, string $scope, callable $run): array
+    {
+        $e = $token !== '' && isset($store[$token]) && is_array($store[$token]) ? $store[$token] : null;
+        if ($e === null || !hash_equals((string)$e['scope'], sha1($scope))) {
+            return ['success' => false, 'message' => 'This review has expired or no longer matches the ticked bookings. Nothing was done. Close it and review again.'];
+        }
+        if ($e['state'] === 'done') {
+            $reply = (array)$e['reply'];
+            if (!empty($reply['success'])) {
+                $reply['replayed'] = true;
+                $reply['message'] = 'Already done: this confirm was received before, so nothing was done again. ' . (string)($reply['message'] ?? '');
+            }
+            return $reply;
+        }
+        if ($e['state'] === 'running') {
+            return ['success' => false, 'unknown' => true, 'message' => 'This confirm was already started and its result is unknown. Close this, refresh the list and check each booking\'s History before trying again.'];
+        }
+        $store[$token]['state'] = 'running';
+        try {
+            $reply = $run();
+        } catch (Throwable $ex) {
+            error_log('bookings bulk once-run: ' . $ex->getMessage());
+            $reply = ['success' => false, 'unknown' => true, 'message' => 'Something went wrong part way, so the result is unknown. Close this, refresh the list and check each booking\'s History before trying again.'];
+        }
+        $store[$token]['state'] = 'done';
+        $store[$token]['reply'] = $reply;
+        return $reply;
+    }
+
+    /**
+     * CSV export cell: a text cell that a spreadsheet would read as a formula (starts with = + - @, tab or CR) gets a
+     * leading apostrophe. Numbers (-50.00) and phone numbers (+265 99 123 4567) are left as they are.
+     */
+    function rh_bk_bulk_csv_cell($v)
+    {
+        if (!is_string($v) || $v === '') {
+            return $v;
+        }
+        if (!in_array($v[0], ['=', '+', '-', '@', "\t", "\r"], true)) {
+            return $v;
+        }
+        if (preg_match('/^-?[0-9]+(\.[0-9]+)?$/', $v) || preg_match('/^\+?[0-9][0-9 ]*$/', $v)) {
+            return $v;
+        }
+        return "'" . $v;
     }
 
     /**

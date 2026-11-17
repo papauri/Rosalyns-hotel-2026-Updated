@@ -62,6 +62,12 @@ getBookingFolioSummary($src);
 rh_billing_ready($pdo);
 rh_cancel_policy_column_ready($pdo);
 rh_invoice_paid_refusal($pdo, 'room', $src);
+ensureBookingAuditTable($pdo);
+$anyType = (int)$pdo->query('SELECT id FROM rooms ORDER BY id LIMIT 1')->fetchColumn();
+rh_room_assignment_candidates($anyType, date('Y-m-d', strtotime('+500 days')), date('Y-m-d', strtotime('+501 days')), 0, false);
+roomTypeHasActiveCombinations($anyType);
+evaluateCheckInRoomReady($src, 0, false);
+$auditGblkBefore = (int)$pdo->query("SELECT COUNT(*) FROM booking_audit_log WHERE booking_reference LIKE 'GBLK-%'")->fetchColumn();
 $ictamBefore = $pdo->query("SELECT GROUP_CONCAT(CONCAT(id, ':', COALESCE(primary_booking_id, 0)) ORDER BY id) FROM bookings WHERE id = 2100008837 OR primary_booking_id = 2100008837")->fetchColumn();
 
 $cols = array_column($pdo->query('SHOW COLUMNS FROM bookings')->fetchAll(PDO::FETCH_ASSOC), 'Field');
@@ -99,6 +105,13 @@ $room = static function (array $plan, int $id): array {
     return [];
 };
 $yesterday = date('Y-m-d', strtotime($today . ' -1 day'));
+$audit = static function (int $id, string $action) use ($pdo): int {
+    $st = $pdo->prepare('SELECT COUNT(*) FROM booking_audit_log WHERE booking_id = ? AND action = ?');
+    $st->execute([$id, $action]);
+    return (int)$st->fetchColumn();
+};
+$day = static fn(int $d): string => date('Y-m-d', strtotime($today . ' ' . ($d >= 0 ? '+' : '') . $d . ' days'));
+$tag = strtoupper(bin2hex(random_bytes(3)));
 
 $pdo->beginTransaction();
 try {
@@ -208,6 +221,144 @@ try {
     $arr = rh_bk_bulk_arrival_rows($pdo, [$P1, $P5, $P2]);
     ok('arrival list: deleted left out, sorted by check-in', array_column($arr, 'reference') === [(string)$get($P2)['booking_reference'], (string)$get($P1)['booking_reference']], json_encode(array_column($arr, 'reference')));
     ok('arrival list: balance is what is still owed', abs($arr[1]['balance'] - 500.0) < (float)BALANCE_TOLERANCE, (string)($arr[1]['balance'] ?? ''));
+
+    // ---- G5b fixtures: a throw-away room type with three clean rooms (no joined pairs), all rolled back ------------
+    $pdo->prepare("INSERT INTO rooms (name, description, short_description, price_per_night, max_guests, rooms_available, total_rooms, is_active, slug) VALUES (?, '', '', 100, 2, 3, 3, 1, ?)")
+        ->execute(['ZZ GBLK type ' . $tag, 'zz-gblk-' . strtolower($tag)]);
+    $T = (int)$pdo->lastInsertId();
+    $mkRoom = static function (string $num) use ($pdo, $T, $tag): int {
+        $pdo->prepare("INSERT INTO individual_rooms (room_type_id, room_number, room_name, floor, status, housekeeping_status, is_active) VALUES (?, ?, 'zz gblk', 1, 'available', 'completed', 1)")
+            ->execute([$T, 'ZB' . $num . $tag]);
+        return (int)$pdo->lastInsertId();
+    };
+    $R1 = $mkRoom('1');
+    $R2 = $mkRoom('2');
+    $R3 = $mkRoom('3');
+    $onT = ['room_id' => $T, 'number_of_guests' => 2, 'adult_guests' => 2, 'child_guests' => 0, 'is_tentative' => 0, 'payment_status' => 'unpaid'];
+    $giveRoom = static function (int $bid, int $rid) use ($pdo): void {
+        $pdo->prepare('UPDATE bookings SET individual_room_id = ? WHERE id = ?')->execute([$rid, $bid]);
+        syncBookingRooms($bid, [$rid]);
+    };
+
+    // ---- Confirm: tentative hold / pending / not confirmable / no room free / permission ------------------------------
+    $K1 = $mk(['status' => 'tentative', 'is_tentative' => 1, 'check_in_date' => $day(410), 'check_out_date' => $day(412)] + $onT);
+    $K2 = $mk(['status' => 'pending', 'check_in_date' => $day(410), 'check_out_date' => $day(412)] + $onT);
+    $K3 = $mk(['check_in_date' => $day(410), 'check_out_date' => $day(412)] + $onT);
+    $pdo->prepare("INSERT INTO rooms (name, description, short_description, price_per_night, max_guests, rooms_available, total_rooms, is_active, slug) VALUES (?, '', '', 100, 2, 0, 0, 1, ?)")
+        ->execute(['ZZ GBLK full ' . $tag, 'zz-gblk-full-' . strtolower($tag)]);
+    $Tfull = (int)$pdo->lastInsertId();
+    $K4 = $mk(['status' => 'pending', 'check_in_date' => $day(410), 'check_out_date' => $day(412), 'room_id' => $Tfull] + $onT);
+    $cp = rh_bk_bulk_plan($pdo, 'confirm', [$K1, $K2, $K3, $K4], $adminId);
+    ok('confirm: a tentative hold is converted (same as the row)', !empty($room($cp, $K1)['will']) && strpos($room($cp, $K1)['text'], 'Confirms the tentative booking') === 0, $room($cp, $K1)['text'] ?? '');
+    ok('confirm: a pending booking with a free room will be confirmed', !empty($room($cp, $K2)['will']) && strpos($room($cp, $K2)['text'], 'Confirms the booking.') === 0, $room($cp, $K2)['text'] ?? '');
+    ok('confirm: a confirmed booking is skipped', ($room($cp, $K3)['why'] ?? '') === 'not pending or tentative');
+    ok('confirm: no free room of its type is skipped', ($room($cp, $K4)['why'] ?? '') === 'no room free', json_encode($room($cp, $K4)));
+    $cpNo = rh_bk_bulk_plan($pdo, 'confirm', [$K2], 0);
+    ok('confirm: no Edit Booking -> skipped for permission', ($room($cpNo, $K2)['why'] ?? '') === 'no permission');
+
+    // ---- Assign rooms: one proposal per room, never the same room twice for overlapping nights -----------------------
+    $A1 = $mk(['check_in_date' => $day(400), 'check_out_date' => $day(402)] + $onT);
+    $A2 = $mk(['check_in_date' => $day(400), 'check_out_date' => $day(402)] + $onT);
+    $A3 = $mk(['check_in_date' => $day(401), 'check_out_date' => $day(403)] + $onT);
+    $A4 = $mk(['check_in_date' => $day(401), 'check_out_date' => $day(404)] + $onT);
+    $A5 = $mk(['status' => 'pending', 'check_in_date' => $day(400), 'check_out_date' => $day(402)] + $onT);
+    $A6 = $mk(['check_in_date' => $day(402), 'check_out_date' => $day(403)] + $onT); // starts on A1's checkout day
+    $ap1 = rh_bk_bulk_plan($pdo, 'assign', [$A1, $A2, $A3, $A4, $A5], $adminId);
+    $picks = array_filter([$room($ap1, $A1)['pick'] ?? '', $room($ap1, $A2)['pick'] ?? '', $room($ap1, $A3)['pick'] ?? '']);
+    ok('assign: three overlapping bookings get three different rooms', count($picks) === 3 && count(array_unique($picks)) === 3, json_encode($picks));
+    ok('assign: the fourth overlapping booking is skipped (every free room already proposed)', ($room($ap1, $A4)['why'] ?? '') === 'no free room'
+        && strpos($room($ap1, $A4)['text'], 'already proposed') !== false, $room($ap1, $A4)['text'] ?? '');
+    ok('assign: a pending booking is skipped', ($room($ap1, $A5)['why'] ?? '') === 'not confirmed');
+    ok('assign: each will-row lists the free rooms to pick from', count($room($ap1, $A1)['options'] ?? []) === 3);
+    $amtA = (float)$get($A1)['total_with_vat'];
+    // The person picks A1's room for A2 too: A1 gets it, A2 is refused (room chosen twice), A3 keeps its proposal.
+    $dup = (string)$room($ap1, $A1)['pick'];
+    $aa = rh_bk_bulk_apply($pdo, 'assign', [$A1, $A2, $A3, $A4, $A5], $admin, $ap1['state'], null, [$A2 => $dup]);
+    $res = array_column($aa['results'] ?? [], null, 'id');
+    ok('assign apply: 2 given a room', !empty($aa['success']) && $aa['done'] === 2, $aa['message'] ?? $aa['error']);
+    ok('assign apply: the same room chosen twice is refused', !$res[$A2]['ok'] && strpos($res[$A2]['text'], 'already given to another ticked booking') !== false, $res[$A2]['text'] ?? '');
+    ok('assign apply: rooms held as chosen', getBookingRoomIds($A1) === [(int)substr($dup, 2)] && getBookingRoomIds($A2) === []
+        && getBookingRoomIds($A3) === [(int)substr((string)$room($ap1, $A3)['pick'], 2)], json_encode([getBookingRoomIds($A1), getBookingRoomIds($A3)]));
+    ok('assign apply: History "room_assigned" via the row\'s own path', $audit($A1, 'room_assigned') === 1 && $audit($A3, 'room_assigned') === 1 && $audit($A2, 'room_assigned') === 0);
+    ok('assign apply: the price did not change', abs((float)$get($A1)['total_with_vat'] - $amtA) < (float)BALANCE_TOLERANCE
+        && strpos($res[$A1]['text'], 'The price did not change') !== false, $res[$A1]['text'] ?? '');
+    ok('assign: the checkout day is free (A6 can take A1\'s room)', in_array($dup, array_column($room(rh_bk_bulk_plan($pdo, 'assign', [$A6], $adminId), $A6)['options'] ?? [], 'value'), true));
+    // A stale choice (a room given away since) is refused, nothing changed.
+    $ap2 = rh_bk_bulk_plan($pdo, 'assign', [$A2], $adminId);
+    $aa2 = rh_bk_bulk_apply($pdo, 'assign', [$A2], $admin, $ap2['state'], null, [$A2 => $dup]);
+    ok('assign: a room no longer free is refused', !empty($aa2['success']) && $aa2['done'] === 0 && ($aa2['results'][0]['text'] ?? '') === 'Skipped: the room chosen is no longer free for these dates. Nothing was changed.'
+        && getBookingRoomIds($A2) === [], json_encode($aa2));
+    // Availability re-checked at confirm: the last free room is taken by another booking after the review.
+    $ap3 = rh_bk_bulk_plan($pdo, 'assign', [$A2], $adminId);
+    $last = (int)substr((string)($room($ap3, $A2)['pick'] ?? 'r:0'), 2);
+    $single = bookings_assign_individual_room($pdo, $A4, $last, $admin);
+    $aa3 = rh_bk_bulk_apply($pdo, 'assign', [$A2], $admin, $ap3['state']);
+    ok('assign: taken since the review -> nothing done', !empty($single['success']) && empty($aa3['success']) && strpos($aa3['error'], 'changed since you reviewed') !== false
+        && getBookingRoomIds($A2) === [], ($single['message'] ?? '') . ' / ' . ($aa3['error'] ?? $aa3['message']));
+
+    // ---- Check in: every gate skips with a plain reason ------------------------------------------------------------
+    $C1 = $mk(['check_in_date' => $today, 'check_out_date' => $day(2), 'payment_status' => 'paid'] + $onT);
+    $giveRoom($C1, $R1);
+    $C2 = $mk(['check_in_date' => $day(5), 'check_out_date' => $day(7), 'payment_status' => 'paid'] + $onT);
+    $C3 = $mk(['check_in_date' => $today, 'check_out_date' => $day(2), 'amount_due' => 500, 'amount_paid' => 0, 'checkin_without_payment' => 0] + $onT);
+    $C4 = $mk(['check_in_date' => $yesterday, 'check_out_date' => $day(2), 'payment_status' => 'paid'] + $onT);
+    $giveRoom($C4, $R2);
+    $C5 = $mk(['check_in_date' => $today, 'check_out_date' => $day(2), 'payment_status' => 'paid'] + $onT);
+    $C6 = $mk(['check_in_date' => $today, 'check_out_date' => $day(2), 'payment_status' => 'paid'] + $onT);
+    $giveRoom($C6, $R3);
+    $pdo->prepare("UPDATE individual_rooms SET status = 'cleaning', housekeeping_status = 'pending' WHERE id = ?")->execute([$R3]);
+    $C7 = $mk(['status' => 'pending', 'check_in_date' => $today, 'check_out_date' => $day(2), 'payment_status' => 'paid'] + $onT);
+    $cips = [$C1, $C2, $C3, $C4, $C5, $C6, $C7];
+    $cip = rh_bk_bulk_plan($pdo, 'checkin', $cips, $adminId);
+    $whys = array_column($cip['rooms'], 'why', 'id');
+    ok('checkin: arriving today, paid, clean room -> will check in', !empty($room($cip, $C1)['will']) && strpos($room($cip, $C1)['text'], 'No email is sent') !== false, $room($cip, $C1)['text'] ?? '');
+    ok('checkin: arrival in the future skipped', $whys[$C2] === 'arrival date not reached');
+    ok('checkin: no payment skipped', $whys[$C3] === 'no payment yet', $whys[$C3] . ' ' . $room($cip, $C3)['text']);
+    ok('checkin: late arrival skipped (needs the row\'s question)', $whys[$C4] === 'late arrival');
+    ok('checkin: no room assigned skipped', $whys[$C5] === 'no room assigned');
+    ok('checkin: room not clean skipped', $whys[$C6] === 'room not ready', $room($cip, $C6)['text'] ?? '');
+    ok('checkin: pending skipped', $whys[$C7] === 'not confirmed');
+    ok('checkin: no Check-in permission -> skipped', ($room(rh_bk_bulk_plan($pdo, 'checkin', [$C1], 0), $C1)['why'] ?? '') === 'no permission');
+
+    // ---- One-time confirm: the bulk apply runs once; a replay gives the first result back -------------------------
+    $store = [];
+    $scope = 'bulk|checkin|' . implode(',', $cips);
+    $tok = rh_bk_bulk_once_issue($store, $scope);
+    $runs = 0;
+    $run = static function () use ($pdo, $cips, $admin, $cip, &$runs): array {
+        $runs++;
+        $r = rh_bk_bulk_apply($pdo, 'checkin', $cips, $admin, $cip['state']);
+        return ['success' => !empty($r['success']), 'message' => $r['success'] ? $r['message'] : $r['error'], 'results' => $r['results']];
+    };
+    $first = rh_bk_bulk_once_run($store, $tok, $scope, $run);
+    ok('checkin apply: 1 checked in, 6 skipped', !empty($first['success']) && strpos($first['message'], '1 checked in, 6 skipped') === 0, $first['message']);
+    $irSt = $pdo->prepare('SELECT status FROM individual_rooms WHERE id = ?');
+    $irSt->execute([$R1]);
+    ok('checkin apply: booking checked in, its room occupied, History written', $get($C1)['status'] === 'checked-in' && $irSt->fetchColumn() === 'occupied' && $audit($C1, 'checked-in') === 1);
+    ok('checkin apply: the skipped ones are unchanged', $get($C6)['status'] === 'confirmed' && $get($C4)['status'] === 'confirmed');
+    $again = rh_bk_bulk_once_run($store, $tok, $scope, $run);
+    ok('replay: first result returned, nothing run again', $runs === 1 && !empty($again['replayed']) && strpos($again['message'], 'Already done:') === 0 && $audit($C1, 'checked-in') === 1, $again['message']);
+    ok('replay: another scope (other ticked rows) refused', strpos(rh_bk_bulk_once_run($store, $tok, 'bulk|checkin|1', $run)['message'], 'no longer matches') !== false && $runs === 1);
+    ok('replay: an unknown token refused', empty(rh_bk_bulk_once_run($store, 'nope', $scope, $run)['success']) && $runs === 1);
+    $tok2 = rh_bk_bulk_once_issue($store, 'x');
+    $store[$tok2]['state'] = 'running';
+    ok('a confirm still running answers "result unknown"', !empty(rh_bk_bulk_once_run($store, $tok2, 'x', $run)['unknown']) && $runs === 1);
+    $tok3 = rh_bk_bulk_once_issue($store, 'y');
+    $boom = rh_bk_bulk_once_run($store, $tok3, 'y', static function (): array { throw new RuntimeException('db gone'); });
+    ok('a confirm that breaks part way answers "result unknown"', !empty($boom['unknown']) && empty($boom['success']) && strpos($boom['message'], 'result is unknown') !== false);
+    $tok4 = rh_bk_bulk_once_issue($store, 'z');
+    $nope = rh_bk_bulk_once_run($store, $tok4, 'z', static fn(): array => ['success' => false, 'message' => 'The bookings changed since you reviewed them.']);
+    ok('a refused confirm is given back as it was on replay', rh_bk_bulk_once_run($store, $tok4, 'z', $run) === $nope && $runs === 1);
+
+    // ---- CSV export: formula-looking text gets an apostrophe; numbers and phone numbers do not ---------------------
+    $csv = ['=HYPERLINK("x")' => "'=HYPERLINK(\"x\")", '+cmd' => "'+cmd", '-cmd|x' => "'-cmd|x", '@SUM(A1)' => "'@SUM(A1)", "\tx" => "'\tx", "\rx" => "'\rx",
+        '+265 99 123 4567' => '+265 99 123 4567', '-50.00' => '-50.00', '' => '', 'Alice' => 'Alice', 'a=b' => 'a=b'];
+    $bad = [];
+    foreach ($csv as $in => $want) {
+        if (rh_bk_bulk_csv_cell((string)$in) !== $want) { $bad[] = json_encode((string)$in); }
+    }
+    ok('csv: formula cells neutralised, numbers / phones / plain text untouched', !$bad, implode(', ', $bad));
+    ok('csv: non-strings untouched', rh_bk_bulk_csv_cell(12.5) === 12.5 && rh_bk_bulk_csv_cell(null) === null);
 } catch (Throwable $e) {
     ok('no exception', false, $e->getMessage() . ' @' . $e->getFile() . ':' . $e->getLine());
 } finally {
@@ -218,7 +369,10 @@ try {
 
 // ---- leak check ----------------------------------------------------------------------------------------------
 $leak = (int)$pdo->query("SELECT COUNT(*) FROM bookings WHERE booking_reference LIKE 'GBLK-%'")->fetchColumn()
-    + (int)$pdo->query("SELECT COUNT(*) FROM booking_timeline_logs WHERE booking_reference LIKE 'GBLK-%'")->fetchColumn();
+    + (int)$pdo->query("SELECT COUNT(*) FROM booking_timeline_logs WHERE booking_reference LIKE 'GBLK-%'")->fetchColumn()
+    + (int)$pdo->query("SELECT COUNT(*) FROM rooms WHERE slug LIKE 'zz-gblk-%'")->fetchColumn()
+    + (int)$pdo->query("SELECT COUNT(*) FROM individual_rooms WHERE room_name = 'zz gblk'")->fetchColumn()
+    + ((int)$pdo->query("SELECT COUNT(*) FROM booking_audit_log WHERE booking_reference LIKE 'GBLK-%'")->fetchColumn() - $auditGblkBefore);
 ok('leak check: no test row left behind', $leak === 0, (string)$leak);
 ok('the mirrored ICTAm group is untouched',
     $pdo->query("SELECT GROUP_CONCAT(CONCAT(id, ':', COALESCE(primary_booking_id, 0)) ORDER BY id) FROM bookings WHERE id = 2100008837 OR primary_booking_id = 2100008837")->fetchColumn() === $ictamBefore);
