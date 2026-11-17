@@ -139,9 +139,10 @@ ok('the stay cannot end after today', $has($l['future'] ?? '', 'cannot end after
 echo "== A8 guards ==\n";
 $gd = gst_child('guards');
 if (!empty($gd['has_snap_col'])) {
-    $msg = 'This booking has a cancellation policy; unused nights on it can be corrected after the next update.';
-    ok('snapshot: cutting nights at the end refused', ($gd['cut'] ?? '') === $msg, (string)($gd['cut'] ?? ''));
-    ok('snapshot: cutting nights at the start refused', ($gd['cut_late_arrival'] ?? '') === $msg, (string)($gd['cut_late_arrival'] ?? ''));
+    // Ship A2 (D-R1a) lifted the A8 guard: cuts on a room with a policy are quoted with the unused-nights fee
+    // (fee figures are covered by scripts/tests/unused_nights_fee_test.php).
+    ok('snapshot: cutting nights at the end allowed (Ship A2)', ($gd['cut'] ?? 'x') === '', (string)($gd['cut'] ?? ''));
+    ok('snapshot: cutting nights at the start allowed (Ship A2)', ($gd['cut_late_arrival'] ?? 'x') === '', (string)($gd['cut_late_arrival'] ?? ''));
     ok('snapshot: adding a night allowed', !empty($gd['add_ok']));
     ok('snapshot: moving the dates (same nights) allowed', !empty($gd['move_ok']));
 } else {

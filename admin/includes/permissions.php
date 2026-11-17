@@ -2925,6 +2925,8 @@ function rhBookingActionPermission(string $action, string $status = ''): ?string
         // Owner 2026-10-19: confirming/converting a booking and guest-bill (folio) charges need Edit Booking.
         case 'confirm': case 'confirmed': case 'convert': case 'convert_tentative':
         case 'add_charge': case 'add_menu_item': case 'void_charge':
+        // Make a group / Make primary room / Remove from group (group bookings plan R3 / R5 / R6).
+        case 'group_make_preview': case 'group_make_apply': case 'group_op_preview': case 'group_op_apply':
             return 'edit_booking';
     }
     return null;

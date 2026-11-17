@@ -353,7 +353,10 @@ if (!function_exists('rh_cancel_policy_column_ready')) {
         return $snap === null ? '' : trim($snap['text']);
     }
 
-    /** The stored fine print of a booking's group lead (documents for a group print the lead's once), or ''. */
+    /**
+     * The stored fine print of a booking's group lead (documents for a group print the lead's once), or ''. When the
+     * group's rooms hold different snapshots, every distinct text once, each headed by the bookings it covers.
+     */
     function rh_booking_policy_text_by_id(PDO $pdo, int $bookingId, bool $lead = true): string
     {
         if ($bookingId <= 0 || !rh_cancel_policy_column_ready($pdo)) {
@@ -370,7 +373,29 @@ if (!function_exists('rh_cancel_policy_column_ready')) {
                     $b = $leadRow;
                 }
             }
-            return $b ? rh_booking_policy_text($b) : '';
+            $text = $b ? rh_booking_policy_text($b) : '';
+            if ($b && $lead) {
+                // Rooms of one group can carry different snapshots (bookings grouped later keep their own, group bookings
+                // plan A6): the group's documents then print each distinct text once, with the bookings it applies to.
+                $root = (int)($b['primary_booking_id'] ?? 0) > 0 ? (int)$b['primary_booking_id'] : (int)$b['id'];
+                $gs = $pdo->prepare('SELECT * FROM bookings WHERE (id = ? OR primary_booking_id = ?) AND deleted_at IS NULL ORDER BY (id = ?) DESC, id ASC');
+                $gs->execute([$root, $root, $root]);
+                $byText = [];
+                foreach ($gs->fetchAll(PDO::FETCH_ASSOC) as $g) {
+                    $t = rh_booking_policy_text($g);
+                    if ($t !== '') {
+                        $byText[$t][] = (string)$g['booking_reference'];
+                    }
+                }
+                if (count($byText) > 1) {
+                    $parts = [];
+                    foreach ($byText as $t => $refs) {
+                        $parts[] = 'For ' . implode(', ', $refs) . ":\n" . $t;
+                    }
+                    return implode("\n\n", $parts);
+                }
+            }
+            return $text;
         } catch (Throwable $e) {
             error_log('rh_booking_policy_text_by_id: ' . $e->getMessage());
             return '';

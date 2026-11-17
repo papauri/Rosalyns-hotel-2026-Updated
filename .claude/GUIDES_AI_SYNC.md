@@ -78,6 +78,12 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Adjust Stay Dates no longer leaves paid money as credit: staff choose a refund or a credit note. Correct Stay Dates after check-out can now cut nights on rooms with a policy.
 - Guides: check-out (early leave / late arrival), Adjust Stay Dates, Add / take off nights, cancellation policy page, FAQ "why was money kept when the guest left early". Assistant: its "Correct check-out" / "Change booking" cards do not show the kept amount yet and the save refuses when a fee applies — tell staff to use the screen (dept-ai-lead).
 
+### Group bookings Ship C1: make primary, make a group, remove from group (2026-11-18, owner ask) — hashes in TASKS.md
+- All Bookings has tick boxes (this page only; cancelled / expired / no-show / deleted cannot be ticked) and a "Make a group" bar: pick the primary room, review each room's paid / owed and the group totals, confirm. Refused when payers differ (company vs guest, two companies) or a booking is already in another group.
+- Booking details "Rooms in this group" table: "Make primary" and "Remove" per room (review, then confirm; Edit Booking). The group invoice number never changes on a primary switch. A removed room becomes an individual booking with its own payments, balance, invoice and cancellation policy; if it held the group number, the number stays with the group (in a group of 2, with the room left) and the removed room gets its own number on its next invoice. Removing the primary room hands the group to another room first.
+- Group documents print each distinct cancellation policy text ("For REF1, REF2: ..."). No money moves in any of these. History: "Made the primary room of the group", "Primary room of the group moved", "Group invoice number kept", "Added to a group", "Rooms added to the group", "Removed from the group", "Group invoice number left with the group", "Room removed from the group".
+- Guides: Bookings (groups), booking details group table, FAQ "how do I join two bookings into one group / take a room out". Assistant: group answers must know these exist; it has no actions for them (screen only).
+
 
 ## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
 

@@ -86,6 +86,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_bdNeed = rhBookingActionPermission((string)$_POST['booking_action']);
     } elseif (in_array((string)($_POST['action'] ?? ''), ['preview_stay_correction', 'stay_correction_apply'], true)) {
         $_bdNeed = rhBookingActionPermission((string)$_POST['action']); // correct_stay_after_checkout (group bookings plan A8)
+    } elseif (in_array((string)($_POST['action'] ?? ''), ['group_op_preview', 'group_op_apply'], true)) {
+        $_bdNeed = 'edit_booking'; // Make primary room / Remove from group (group bookings plan R3 / R6)
     } elseif (isset($_POST['adjust_dates']) || isset($_POST['adjust_dates_preview'])) {
         $_bdNeed = rhBookingActionPermission('adjust_dates');
     } elseif (isset($_POST['update_payment'])) {
@@ -1286,6 +1288,96 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_note'])) {
     }
 }
 
+// Group table actions (group bookings plan R3 "Make primary room", R6 "Remove from group"; rule A6): review
+// (group_op_preview, read only) then confirm (group_op_apply, re-checked under the row locks against the reviewed state).
+// edit_booking is checked above. No money moves. JSON only.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] ?? ''), ['group_op_preview', 'group_op_apply'], true)) {
+    require_once __DIR__ . '/../includes/booking-group-ops.php';
+    header('Content-Type: application/json; charset=utf-8');
+    $goApply = (string)$_POST['action'] === 'group_op_apply';
+    $goOp = (string)($_POST['op'] ?? '');
+    $goTarget = (int)($_POST['target_id'] ?? 0);
+    $goRoot = rh_group_ops_root($pdo, (int)$booking_id);
+    if (!in_array($goOp, ['make_primary', 'remove'], true) || $goTarget <= 0 || $goRoot <= 0 || rh_group_ops_root($pdo, $goTarget) !== $goRoot) {
+        http_response_code(422);
+        echo json_encode(['success' => false, 'message' => 'That room is not in this group. Reload the page.']);
+        exit;
+    }
+    if ($goApply && trim((string)($_POST['state'] ?? '')) === '') {
+        http_response_code(422);
+        echo json_encode(['success' => false, 'message' => 'Review the change first.']);
+        exit;
+    }
+    $goOpts = ['user_id' => (int)($user['id'] ?? 0), 'user_name' => (string)($user['full_name'] ?? ($user['username'] ?? '')),
+        'dry_run' => !$goApply, 'expect_state' => $goApply ? (string)$_POST['state'] : ''];
+    try {
+        // C2 (accounting lead) plugs its optional "move part of a lump sum to the leaving room" step in here through
+        // $goOpts['after_detach'] for op=remove (runs inside the same transaction, after the room is detached).
+        $goRes = $goOp === 'make_primary' ? rh_group_repoint($pdo, $goRoot, $goTarget, $goOpts) : rh_group_remove($pdo, $goTarget, $goOpts);
+    } catch (Throwable $goE) {
+        error_log('group_op ' . $goOp . ' booking ' . $goTarget . ': ' . $goE->getMessage());
+        http_response_code(409);
+        echo json_encode(['success' => false, 'message' => 'Nothing was changed: the change could not be saved. Reload the page and try again.']);
+        exit;
+    }
+    if (empty($goRes['success'])) {
+        if ($goApply) {
+            http_response_code(409);
+        }
+        echo json_encode(['success' => false, 'message' => (string)$goRes['error']]);
+        exit;
+    }
+    $goMoney = static fn(float $v): string => (string)$currency_symbol . ' ' . number_format($v, 2);
+    $goPayer = static function (string $billing, string $company, string $who): string {
+        if ($billing === 'copied') {
+            return $company . ' (copied onto ' . $who . ', so the payer does not change)';
+        }
+        return $billing === 'none' ? 'The guest (unchanged)' : $company . ' (unchanged)';
+    };
+    if ($goApply) {
+        $goMsg = $goOp === 'make_primary'
+            ? 'Primary room is now ' . $goRes['new_label'] . '. No money moved.'
+            : $goRes['label'] . ' is now an individual booking. No money moved.';
+        echo json_encode(['success' => true, 'message' => $goMsg, 'reload' => 'booking-details.php?id=' . ($goOp === 'remove' ? $goTarget : (int)$booking_id)]);
+        exit;
+    }
+    $goLines = [];
+    if ($goOp === 'make_primary') {
+        $goC = $pdo->prepare('SELECT guest_name, guest_email, guest_phone FROM bookings WHERE id = ?');
+        $goC->execute([$goTarget]);
+        $goCt = $goC->fetch(PDO::FETCH_ASSOC) ?: [];
+        $goLines = [
+            ['Primary room now', $goRes['old_label']],
+            ['New primary room', $goRes['new_label']],
+            ['Group contact', trim((string)($goCt['guest_name'] ?? '') . ' ' . implode(' ', array_filter([(string)($goCt['guest_email'] ?? ''), (string)($goCt['guest_phone'] ?? '')])))],
+            ['Group invoice number', $goRes['invoice_number'] !== '' ? $goRes['invoice_number'] . ' (kept, never changes)' : 'None issued yet'],
+            ['Who pays', $goPayer($goRes['billing'], $goRes['company'], 'the new primary room')],
+            ['Money', 'No money moves. Every room keeps its own payments, balance and cancellation policy.'],
+        ];
+        $goTitle = 'Make primary room';
+        $goBtn = 'Confirm: make primary';
+    } else {
+        $goLines = [
+            ['Room leaving', $goRes['label']],
+            ['Its figures', 'Billed ' . $goMoney((float)$goRes['room']['billed']) . ', paid ' . $goMoney((float)$goRes['room']['paid']) . ', owed ' . $goMoney((float)$goRes['room']['owed']) . ' (stay on this room)'],
+        ];
+        if ($goRes['repointed']) {
+            $goLines[] = ['Group primary room', 'This is the primary room: ' . $goRes['new_label'] . ' becomes the primary room first (contact, documents and the group invoice number move to it).'];
+        }
+        $goLines[] = ['Rooms left in the group', (string)(int)$goRes['remaining'] . ' not cancelled' . ($goRes['remaining'] < 2 ? ' (that room then stands on its own with its own bill)' : '')];
+        $goLines[] = ['Who pays this room', $goPayer($goRes['billing'] === 'own' ? 'same' : $goRes['billing'], $goRes['company'], 'this room')];
+        $goLines[] = ['Invoice', $goRes['invoice_cleared']
+            ? 'The group invoice number ' . $goRes['invoice_number'] . ' stays with the group; this room gets its own number when its invoice is made.'
+            : 'This room gets its own invoice for its own stay.'];
+        $goLines[] = ['Cancellation policy', 'Kept as booked.'];
+        $goLines[] = ['Money', 'No money moves. Payments stay on the room they were recorded on.'];
+        $goTitle = 'Remove from group';
+        $goBtn = 'Confirm: remove from group';
+    }
+    echo json_encode(['success' => true, 'state' => $goRes['state'], 'title' => $goTitle, 'button' => $goBtn, 'lines' => $goLines], JSON_INVALID_UTF8_SUBSTITUTE);
+    exit;
+}
+
 // Correct a CHECKED-OUT room's dates (group bookings plan A8, owner 2026-11-17): review (preview_stay_correction, read
 // only) then save (stay_correction_apply, re-quoted under the row lock). Permission correct_stay_after_checkout is checked
 // above; a refund leg also needs refund_payment. JSON only; a refused save answers 4xx so it is never logged as done.
@@ -2279,6 +2371,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         // group total (the old "Group total" line is replaced by Billed here).
         require_once __DIR__ . '/../includes/group-room-table.php';
         $bd_grp = rh_group_room_table($pdo, (int)$booking['id'], (string)$currency_symbol);
+        $bd_go_on = !empty($bd_perm_edit) && !empty($bd_grp['rows']) && count($bd_grp['rows']) > 1; // R3 / R6 group actions
         $bd_grp_t = $bd_grp['totals'];
         $bd_m = static function (float $v) use ($currency_symbol): string {
             return htmlspecialchars((string)$currency_symbol) . ' ' . number_format($v, 2);
@@ -2327,6 +2420,9 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                             <th scope="col" class="num">Refunds <i class="help" data-tip="<?php echo htmlspecialchars($bd_grp_help['refunds']); ?>">?</i></th>
                             <th scope="col" class="num">Credit <i class="help" data-tip="<?php echo htmlspecialchars($bd_grp_help['credit']); ?>">?</i></th>
                             <th scope="col" class="num">Owed <i class="help" data-tip="<?php echo htmlspecialchars($bd_grp_help['owed']); ?>">?</i></th>
+                            <?php if ($bd_go_on): ?>
+                            <th scope="col">Group <i class="help" data-tip="Make primary: that room becomes the group's lead (contact, documents, folio); the group invoice number stays the same. Remove: the room becomes an individual booking with its own payments, balance and invoice. You see what changes before anything is saved. No money moves.">?</i></th>
+                            <?php endif; ?>
                         </tr>
                     </thead>
                     <tbody>
@@ -2347,12 +2443,99 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                             <td data-label="Refunds" class="num"><?php echo $gr['refunds'] > BALANCE_TOLERANCE ? $bd_m($gr['refunds']) : '&mdash;'; ?><?php if ($gr['credit_note_refunds'] > BALANCE_TOLERANCE): ?> <i class="help" data-tip="<?php echo htmlspecialchars($bd_m($gr['credit_note_refunds']) . ' of this room\'s payments was moved to a credit note (not paid out, so not counted here).'); ?>">?</i><?php endif; ?></td>
                             <td data-label="Credit" class="num"><?php echo $gr['credit'] > BALANCE_TOLERANCE ? $bd_m($gr['credit']) : '&mdash;'; ?></td>
                             <td data-label="Owed" class="num"><?php echo $bd_m($gr['owed']); ?></td>
+                            <?php if ($bd_go_on): ?>
+                            <td data-label="Group" class="bd-group-rooms__ops">
+                                <?php if (!$gr['is_root']): ?>
+                                <button type="button" class="btn-secondary btn-sm" data-group-op="make_primary" data-target="<?php echo (int)$gr['id']; ?>">Make primary</button>
+                                <?php endif; ?>
+                                <button type="button" class="btn-secondary btn-sm" data-group-op="remove" data-target="<?php echo (int)$gr['id']; ?>">Remove</button>
+                            </td>
+                            <?php endif; ?>
                         </tr>
                         <?php endforeach; ?>
                     </tbody>
                 </table>
             </div>
         </section>
+        <?php if ($bd_go_on): ?>
+        <!-- Group table actions (R3 / R6): review, then confirm. Inside the page container so in-place navigation keeps it.
+             C2 TODO (accounting lead): the optional "move part of a lump sum to the leaving room" step joins the Remove review here. -->
+        <div class="modal-overlay" id="groupOpModal" role="dialog" aria-modal="true" aria-labelledby="groupOpTitle">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3 id="groupOpTitle">Group</h3>
+                    <button type="button" class="modal-close" aria-label="Close" data-group-op-close>&times;</button>
+                </div>
+                <div class="modal-body">
+                    <p class="bd-sc-note" style="margin-top:0;">Check what changes. Nothing is saved until you confirm.</p>
+                    <div class="bd-sc-review"><dl id="groupOpLines"></dl></div>
+                    <p id="groupOpError" class="bd-group-op-error" role="alert" style="color:#b42318;font-weight:600;" hidden></p>
+                </div>
+                <div class="modal-actions modal-footer">
+                    <button type="button" class="btn-secondary" data-group-op-close>Close</button>
+                    <button type="button" class="btn-primary" id="groupOpConfirm" disabled>Confirm</button>
+                </div>
+            </div>
+        </div>
+        <script>
+        (function () {
+            var modal = document.getElementById('groupOpModal');
+            if (!modal) return;
+            var bookingId = <?php echo (int)$booking_id; ?>;
+            var csrf = <?php echo json_encode((string)$csrf_token); ?>;
+            var current = null;
+            var lines = document.getElementById('groupOpLines');
+            var err = document.getElementById('groupOpError');
+            var confirmBtn = document.getElementById('groupOpConfirm');
+            function showError(m) { err.textContent = m || ''; err.hidden = !m; }
+            function post(action, extra) {
+                var fd = new FormData();
+                fd.append('action', action);
+                fd.append('csrf_token', csrf);
+                fd.append('op', current.op);
+                fd.append('target_id', String(current.target));
+                if (extra) Object.keys(extra).forEach(function (k) { fd.append(k, extra[k]); });
+                return fetch('booking-details.php?id=' + bookingId, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                    .then(function (r) { return r.json().catch(function () { return { success: false, message: 'Unexpected reply (' + r.status + '). Reload the page and try again.' }; }); })
+                    .catch(function () { return { success: false, message: 'No connection. Nothing was changed.' }; });
+            }
+            function close() { modal.classList.remove('active'); current = null; }
+            modal.querySelectorAll('[data-group-op-close]').forEach(function (b) { b.addEventListener('click', close); });
+            document.querySelectorAll('[data-group-op]').forEach(function (btn) {
+                btn.addEventListener('click', function () {
+                    current = { op: btn.getAttribute('data-group-op'), target: parseInt(btn.getAttribute('data-target'), 10), state: '' };
+                    lines.innerHTML = '';
+                    showError('');
+                    confirmBtn.disabled = true;
+                    confirmBtn.textContent = 'Confirm';
+                    document.getElementById('groupOpTitle').textContent = current.op === 'remove' ? 'Remove from group' : 'Make primary room';
+                    modal.classList.add('active');
+                    post('group_op_preview').then(function (res) {
+                        if (!current) return;
+                        if (!res || !res.success) { showError((res && res.message) || 'Could not check this change.'); return; }
+                        current.state = res.state;
+                        document.getElementById('groupOpTitle').textContent = res.title;
+                        (res.lines || []).forEach(function (l) {
+                            var dt = document.createElement('dt'); dt.textContent = l[0];
+                            var dd = document.createElement('dd'); dd.textContent = l[1];
+                            lines.appendChild(dt); lines.appendChild(dd);
+                        });
+                        confirmBtn.textContent = res.button || 'Confirm';
+                        confirmBtn.disabled = false;
+                    });
+                });
+            });
+            confirmBtn.addEventListener('click', function () {
+                if (!current || !current.state) return;
+                confirmBtn.disabled = true;
+                post('group_op_apply', { state: current.state }).then(function (res) {
+                    if (!res || !res.success) { showError((res && res.message) || 'Nothing was changed.'); return; }
+                    window.location.href = res.reload || ('booking-details.php?id=' + bookingId);
+                });
+            });
+        })();
+        </script>
+        <?php endif; ?>
         <?php endif; ?>
 
         <?php

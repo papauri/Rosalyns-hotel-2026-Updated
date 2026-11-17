@@ -2928,6 +2928,48 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'data' => $booking
             ]);
             exit;
+        } elseif ($action === 'group_make_preview' || $action === 'group_make_apply') {
+            // "Make a group" from the ticked rows (group bookings plan R5, rule A6): review (read only), then confirm
+            // (re-checked under the row locks against the reviewed state). Each booking keeps its own money and policy.
+            if (!isAjaxRequest()) {
+                throw new Exception('Invalid request');
+            }
+            if (!hasPermission((int)($user['id'] ?? 0), 'edit_booking')) {
+                throw new Exception('You do not have permission to make a group (Edit Booking).');
+            }
+            require_once __DIR__ . '/../includes/booking-group-ops.php';
+            $gmIds = array_values(array_unique(array_filter(array_map('intval', (array)($_POST['booking_ids'] ?? [])))));
+            $gmLead = (int)($_POST['lead_id'] ?? 0);
+            $gmApply = $action === 'group_make_apply';
+            if ($gmApply && trim((string)($_POST['state'] ?? '')) === '') {
+                throw new Exception('Review the group first.');
+            }
+            $gmRes = rh_group_make($pdo, $gmLead, $gmIds, [
+                'user_id' => (int)($user['id'] ?? 0),
+                'user_name' => (string)($user['full_name'] ?? ($user['username'] ?? '')),
+                'dry_run' => !$gmApply,
+                'expect_state' => $gmApply ? (string)$_POST['state'] : '',
+            ]);
+            header('Content-Type: application/json');
+            if (empty($gmRes['success'])) {
+                echo json_encode(['success' => false, 'message' => (string)$gmRes['error']]);
+                exit;
+            }
+            if ($gmApply) {
+                echo json_encode(['success' => true, 'message' => 'Group made: ' . count($gmRes['joined']) . ' room(s) joined. No money moved.',
+                    'lead' => (int)$gmRes['lead']]);
+                exit;
+            }
+            $gmRooms = [];
+            foreach ($gmRes['rooms'] as $gmR) {
+                $gmRooms[] = ['id' => (int)$gmR['id'], 'label' => (string)$gmR['label'], 'status' => (string)$gmR['status'],
+                    'dates' => (string)$gmR['check_in'] . ' to ' . (string)$gmR['check_out'], 'joining' => !empty($gmR['joining']),
+                    'lead' => !empty($gmR['lead']), 'billed' => (float)$gmR['billed'], 'paid' => (float)$gmR['paid'], 'owed' => (float)$gmR['owed']];
+            }
+            echo json_encode(['success' => true, 'state' => (string)$gmRes['state'], 'rooms' => $gmRooms, 'totals' => $gmRes['totals'],
+                'repointed' => !empty($gmRes['repointed']), 'invoice_number' => (string)$gmRes['invoice_number'],
+                'company' => (string)$gmRes['company'], 'currency' => (string)$currency_symbol], JSON_INVALID_UTF8_SUBSTITUTE);
+            exit;
         } elseif ($action === 'room_change_options') {
             // Upgrade / downgrade picker: every other active room type with availability and a quote.
             if (!isAjaxRequest()) {
@@ -4428,6 +4470,13 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
 
                 <?php if (!empty($bookings)): ?>
                     <?php $bk_can_open_payment = rhCanLinkTo((int)($user['id'] ?? 0), 'payment-details.php'); // once per page: link payment refs to the payment record ?>
+                    <?php if ($bkCanConfirm): ?>
+                    <div id="bkGroupBar" class="bk-group-bar" style="display:none;flex-wrap:wrap;align-items:center;gap:10px;margin:0 0 10px;padding:10px 14px;background:#FAF6F0;border:1px solid #E5DACB;border-radius:6px;">
+                        <span><strong id="bkGroupCount">0</strong> ticked on this page <i class="help" data-tip="Tick two or more bookings on this page (the box beside the guest name), then Make a group. You choose the primary room and see every room's paid and owed before anything is saved. Each booking keeps its own payments, balance and cancellation policy. Cancelled, expired, no-show and deleted bookings cannot be ticked. Ticks are cleared when you change page.">?</i></span>
+                        <button type="button" class="btn btn-primary btn-sm" id="bkGroupMake">Make a group</button>
+                        <button type="button" class="btn btn-secondary btn-sm" id="bkGroupClear">Clear ticks</button>
+                    </div>
+                    <?php endif; ?>
                     <div class="table-responsive">
                         <table class="booking-table bookings-table rh-phone-actions rh-fold-actions" data-server-sort="1" data-hotel-today="<?php echo htmlspecialchars(date('Y-m-d'), ENT_QUOTES); ?>">
                             <thead>
@@ -4525,6 +4574,13 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                             <?php endif; ?>
                                         </td>
                                         <td data-label="Guest">
+                                            <?php if ($bkCanConfirm && !$is_deleted_row && !in_array((string)$booking['status'], ['cancelled', 'expired', 'no-show'], true)): /* R5: tick rooms to make a group */ ?>
+                                            <input type="checkbox" class="bk-group-pick" value="<?php echo (int)$booking['id']; ?>"
+                                                data-ref="<?php echo htmlspecialchars((string)$booking['booking_reference'], ENT_QUOTES); ?>"
+                                                data-guest="<?php echo htmlspecialchars((string)$booking['guest_name'], ENT_QUOTES); ?>"
+                                                aria-label="<?php echo htmlspecialchars('Tick ' . $booking['booking_reference'] . ' to make a group', ENT_QUOTES); ?>"
+                                                style="margin:0 6px 0 0;vertical-align:middle;width:16px;height:16px;">
+                                            <?php endif; ?>
                                             <strong class="rh-guest-name" title="<?php echo htmlspecialchars((string)$booking['guest_name'], ENT_QUOTES); ?>"><?php echo htmlspecialchars($booking['guest_name']); ?></strong><span class="rh-phone-sub bk-ref-twin"><?php echo htmlspecialchars($booking['booking_reference']); ?></span><?php /* Flag twin: the Ref cell's flag, shown under the guest when the Ref column drops out (bookings.css, laptops). */ if ($is_tentative): ?><span class="rh-phone-sub bk-flag-twin bk-flag-twin--tentative"><i class="fas fa-clock"></i> Tentative</span><?php elseif ($is_missed_checkin): ?><span class="rh-phone-sub bk-flag-twin bk-flag-twin--danger"><i class="fas fa-exclamation-triangle"></i> Missed Check-in</span><?php elseif ($is_overdue_checkout): ?><span class="rh-phone-sub bk-flag-twin bk-flag-twin--warn"><i class="fas fa-clock"></i> <?php echo $checkout_overdue_state === 'late' ? 'Late checkout' : 'Overdue checkout'; ?></span><?php endif; ?>
                                             <?php if (trim((string)($booking['room_guest_name'] ?? '')) !== ''): ?>
                                                 <br><small class="room-guest-line" style="color:#555;">Room guest: <?php echo htmlspecialchars((string)$booking['room_guest_name']); ?></small>
@@ -11662,6 +11718,126 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             </div>
         </div>
     </div>
+
+    <?php if ($bkCanConfirm): ?>
+    <!-- Make a group (group bookings plan R5): pick the primary room, review, confirm. Inside the page container. -->
+    <div id="bkGroupModal" class="admin-modal-overlay" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="bkGroupTitle">
+        <div class="admin-modal admin-modal--md">
+            <div class="admin-modal__header">
+                <h3 id="bkGroupTitle" class="admin-modal__title">Make a group</h3>
+                <button type="button" class="admin-modal__close" data-bk-group-close aria-label="Close">&times;</button>
+            </div>
+            <div class="admin-modal__body">
+                <p style="margin-top:0;">Choose the primary room (the group's contact, documents and folio). Nothing is saved until you confirm. No money moves: each booking keeps its own payments, balance and cancellation policy.</p>
+                <fieldset style="border:0;padding:0;margin:0 0 12px;">
+                    <legend style="font-weight:600;margin-bottom:6px;">Primary room <i class="help" data-tip="The room that leads the group. Its guest is the group contact and the group documents are made from it. You can change it later with Make primary on the booking page.">?</i></legend>
+                    <div id="bkGroupLeads"></div>
+                </fieldset>
+                <div id="bkGroupReview"></div>
+                <p id="bkGroupError" role="alert" style="display:none;color:#b42318;font-weight:600;"></p>
+            </div>
+            <div class="admin-modal__footer">
+                <button type="button" class="btn btn-secondary" data-bk-group-close>Cancel</button>
+                <button type="button" class="btn btn-primary" id="bkGroupConfirm" disabled>Confirm: make the group</button>
+            </div>
+        </div>
+    </div>
+    <script>
+    (function () {
+        var bar = document.getElementById('bkGroupBar');
+        var modal = document.getElementById('bkGroupModal');
+        if (!bar || !modal) return;
+        var csrf = <?php echo json_encode((string)($csrf_token ?? '')); ?>;
+        var picks = function () { return Array.prototype.slice.call(document.querySelectorAll('.bk-group-pick:checked')); };
+        var leads = document.getElementById('bkGroupLeads');
+        var review = document.getElementById('bkGroupReview');
+        var err = document.getElementById('bkGroupError');
+        var confirmBtn = document.getElementById('bkGroupConfirm');
+        var ids = [], state = '', seq = 0;
+        function esc(s) { var d = document.createElement('div'); d.textContent = s == null ? '' : String(s); return d.innerHTML; }
+        function showError(m) { err.textContent = m || ''; err.style.display = m ? '' : 'none'; }
+        function sync() {
+            var n = picks().length;
+            document.getElementById('bkGroupCount').textContent = String(n);
+            bar.style.display = n > 0 ? 'flex' : 'none';
+            document.getElementById('bkGroupMake').disabled = n < 2;
+        }
+        document.querySelectorAll('.bk-group-pick').forEach(function (c) { c.addEventListener('change', sync); });
+        document.getElementById('bkGroupClear').addEventListener('click', function () {
+            picks().forEach(function (c) { c.checked = false; });
+            sync();
+        });
+        function post(action, extra) {
+            var fd = new FormData();
+            fd.append('action', action);
+            fd.append('csrf_token', csrf);
+            ids.forEach(function (id) { fd.append('booking_ids[]', String(id)); });
+            Object.keys(extra || {}).forEach(function (k) { fd.append(k, extra[k]); });
+            return fetch('bookings.php', { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function (r) { return r.json().catch(function () { return { success: false, message: 'Unexpected reply (' + r.status + '). Reload the page and try again.' }; }); })
+                .catch(function () { return { success: false, message: 'No connection. Nothing was changed.' }; });
+        }
+        function preview(leadId) {
+            var my = ++seq;
+            state = '';
+            confirmBtn.disabled = true;
+            showError('');
+            review.innerHTML = '<p>Checking&hellip;</p>';
+            post('group_make_preview', { lead_id: String(leadId) }).then(function (res) {
+                if (my !== seq) return;
+                if (!res || !res.success) { review.innerHTML = ''; showError((res && res.message) || 'Could not check this group.'); return; }
+                var cur = res.currency || '';
+                var m = function (v) { return esc(cur + ' ' + Number(v || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })); };
+                var h = '<div class="rh-group-split-wrap"><table class="rh-group-split"><thead><tr>'
+                    + '<th>Room <i class="help" data-tip="The booking reference, room and guest. Joining = it moves into the group now.">?</i></th>'
+                    + '<th>Dates <i class="help" data-tip="Check-in to check-out. The check-out day is not a night.">?</i></th>'
+                    + '<th class="num">Billed <i class="help" data-tip="What this room\'s stay and extras come to. Stays on this room.">?</i></th>'
+                    + '<th class="num">Paid <i class="help" data-tip="Payments recorded on this room. They stay on this room.">?</i></th>'
+                    + '<th class="num">Owed <i class="help" data-tip="Still unpaid on this room. It stays on this room.">?</i></th>'
+                    + '</tr></thead><tbody>';
+                (res.rooms || []).forEach(function (r) {
+                    h += '<tr><td>' + esc(r.label) + (r.lead ? ' <small>(primary)</small>' : '') + (r.joining && !r.lead ? ' <small>(joining)</small>' : '') + '</td>'
+                        + '<td>' + esc(r.dates) + '</td><td class="num">' + m(r.billed) + '</td><td class="num">' + m(r.paid) + '</td><td class="num">' + m(r.owed) + '</td></tr>';
+                });
+                var t = res.totals || {};
+                h += '<tr><th>Group total</th><td></td><td class="num"><strong>' + m(t.billed) + '</strong></td><td class="num"><strong>' + m(t.paid) + '</strong></td><td class="num"><strong>' + m(t.owed) + '</strong></td></tr>';
+                h += '</tbody></table></div><dl class="bk-group-facts" style="margin:10px 0 0;">'
+                    + '<dt style="font-weight:600;">Who pays</dt><dd style="margin:0 0 6px;">' + esc(res.company ? res.company + ' (company account)' : 'Each guest, as booked') + '</dd>'
+                    + '<dt style="font-weight:600;">Group invoice number</dt><dd style="margin:0 0 6px;">' + esc(res.invoice_number ? res.invoice_number + ' (kept)' : 'Given when the group invoice is made') + '</dd>'
+                    + (res.repointed ? '<dt style="font-weight:600;">Primary room</dt><dd style="margin:0 0 6px;">The room you chose is in a group already; it becomes that group\'s primary room first.</dd>' : '')
+                    + '</dl>';
+                review.innerHTML = h;
+                state = res.state || '';
+                confirmBtn.disabled = !state;
+            });
+        }
+        function close() { modal.style.display = 'none'; seq++; state = ''; }
+        modal.querySelectorAll('[data-bk-group-close]').forEach(function (b) { b.addEventListener('click', close); });
+        document.getElementById('bkGroupMake').addEventListener('click', function () {
+            var p = picks();
+            if (p.length < 2) return;
+            ids = p.map(function (c) { return parseInt(c.value, 10); });
+            leads.innerHTML = p.map(function (c, i) {
+                return '<label style="display:block;margin:4px 0;"><input type="radio" name="bkGroupLead" value="' + esc(c.value) + '"' + (i === 0 ? ' checked' : '') + '> '
+                    + esc(c.getAttribute('data-ref')) + ' &ndash; ' + esc(c.getAttribute('data-guest')) + '</label>';
+            }).join('');
+            leads.querySelectorAll('input[name="bkGroupLead"]').forEach(function (r) { r.addEventListener('change', function () { preview(r.value); }); });
+            modal.style.display = 'flex';
+            preview(ids[0]);
+        });
+        confirmBtn.addEventListener('click', function () {
+            var lead = leads.querySelector('input[name="bkGroupLead"]:checked');
+            if (!lead || !state) return;
+            confirmBtn.disabled = true;
+            post('group_make_apply', { lead_id: lead.value, state: state }).then(function (res) {
+                if (!res || !res.success) { showError((res && res.message) || 'Nothing was changed.'); return; }
+                window.location.href = 'booking-details.php?id=' + encodeURIComponent(String(res.lead || lead.value));
+            });
+        });
+        sync();
+    })();
+    </script>
+    <?php endif; ?>
 
     <?php rh_render_send_receipt_script($csrf_token ?? ''); ?>
     <?php require_once __DIR__ . '/includes/history-panel.php'; ?>
