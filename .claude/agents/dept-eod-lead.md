@@ -3,7 +3,6 @@ name: dept-eod-lead
 description: Lead for the End of Day report and every timed report email of Rosalyn's / Liwonde (owner 2026-11-13) — the End of Day page, its PDF, the manual Email/WhatsApp send, the daily reports timer email, the station report emails (kitchen/bar/coffee bar), who receives each one (To/CC/BCC/MSP copy), when it is sent, test-mode redirect at Liwonde, never-twice dedupe and the System Logs trail. Owns .claude/EOD_SPEC.md. Liaises with the accounting, restaurant, rooms, events-gym and AI leads for the figures it shows. Use for any "the end of day report is wrong / didn't arrive / went to the wrong person / arrived twice" question or change.
 model: opus
 tools: Read, Grep, Glob, Edit, Write, Bash
-maxTurns: 100
 autoCompactWindow: 200000
 ---
 

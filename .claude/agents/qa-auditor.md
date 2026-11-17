@@ -3,7 +3,6 @@ name: qa-auditor
 description: Read-only quality gate for Rosalyn's Hotel. Checks ONLY the diff of the task just completed — lint, security rules, acceptance criteria, domain-specific money/booking invariants. Nothing is marked done until this passes. Opus, for every diff with logic (PHP/SQL, includes/, api/, config/, money, stock, bookings, auth, security) and every diff qa-quick hands back as ESCALATE. Diffs that are only CSS, markup, docs or help text go to qa-quick instead (owner 2026-11-17).
 model: opus
 tools: Read, Grep, Glob, Bash
-maxTurns: 40
 autoCompactWindow: 200000
 ---
 

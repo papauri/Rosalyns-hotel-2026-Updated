@@ -15,9 +15,9 @@ Deeper trackers:
 ## Token cost controls (owner 2026-11-17)
 Measured 10-17 Nov: about 55 model calls per commit, 97% on Opus, department-lead runs averaging 60-105 steps with
 250-470k context, main sessions up to 600k. Now enforced by config, not just rules:
-- Agent frontmatter: `maxTurns` (leads/specialists 100, qa-auditor 40, guides 60) + `autoCompactWindow: 200000`;
-  medium effort for ui-lead, ui-designer, artifacts-lead. A capped agent hands back PARTIAL: never ship or commit
-  while its half-done edits are in the tree (DEPARTMENTS.md cost rule 11).
+- Agent frontmatter: `autoCompactWindow: 200000`; medium effort for ui-lead, ui-designer, artifacts-lead.
+  NO turn caps: `maxTurns` removed from every agent 2026-11-18 (owner: caps left work half-done and cost more
+  in the next session). Do not add them back (DEPARTMENTS.md cost rule 11).
 - New `qa-quick` agent (Sonnet) for CSS/markup/docs-only diffs; it escalates anything with logic to `qa-auditor` (Opus).
 - `.claude/settings.json`: `autoCompactWindow: 250000` for main sessions.
 - `scripts/claude-hooks/read-guard.php`: blocks whole reads of files over 400 lines / 40 KB (use offset/limit).

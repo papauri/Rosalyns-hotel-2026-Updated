@@ -56,7 +56,7 @@ Cost comes from the logs Claude Code already writes, read by a plain script (no 
    `node .claude/scripts/usage-report.js --save`. It covers ALL projects and writes
    `MSP/usage-reports/<date>.md` plus one row in `MSP/usage-reports/HISTORY.md`.
 2. Tell the owner in one line: calls per commit against last week's row, and any non-zero count
-   under "Are the 2026-11-17 limits working?" (runs past `maxTurns`, main sessions over 300k).
+   under "Are the 2026-11-17 limits working?" (main sessions over 300k).
 3. SESSION SUMMARY `Est. cost`: add up the `total_tokens` from the agents' task notifications.
    Never estimate per dispatch.
 
@@ -67,8 +67,8 @@ Cost comes from the logs Claude Code already writes, read by a plain script (no 
 - Model tiers (owner 2026-11-11; DEPARTMENTS.md cost rule 2 wins on any conflict): Opus for anything
   touching logic (planner, build, fix, logic QA) · Sonnet for very small sure tasks, port FAIL files and
   qa-quick · haiku read-only/lint/mapping/guides · Fable only for cost rule 2's three cases.
-- Turn caps (owner 2026-11-17): agents stop at their `maxTurns` and hand back PARTIAL. Never ship
-  or commit while a PARTIAL result is in the tree; see DEPARTMENTS.md cost rule 11.
+- No turn caps (owner 2026-11-18): agents run to the end of their brief; never add `maxTurns` or a
+  step limit (DEPARTMENTS.md cost rule 11).
 - Max 2 specialists concurrent.
 - Commit and push each QA-passed task to `origin/main`, one commit per task, after the gate
   passes — never force-push, never rewrite pushed history.

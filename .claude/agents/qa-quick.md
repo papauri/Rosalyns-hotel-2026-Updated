@@ -4,7 +4,6 @@ description: Cheap read-only gate (owner 2026-11-17) for diffs that are ONLY CSS
 model: sonnet
 effort: medium
 tools: Read, Grep, Glob, Bash
-maxTurns: 20
 autoCompactWindow: 150000
 ---
 

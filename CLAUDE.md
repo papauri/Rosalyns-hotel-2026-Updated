@@ -83,7 +83,7 @@ do not re-derive plans or re-scan the repo ad hoc.
    `.claude/archive/`, never read unless asked.
 5. Briefs carry the facts (paths, lines, rule, test cases) so agents don't re-discover them; reports
    under 150 words. Haiku for lint/docs/guides, Opus for build and logic QA, Sonnet only for very small sure tasks (owner 2026-11-09).
-6. Hard limits, not just rules (owner 2026-11-17): agents have `maxTurns` caps (PARTIAL hand-back:
+6. Hard limits, not just rules (owner 2026-11-17): agents have NO turn caps (owner 2026-11-18,
    DEPARTMENTS.md cost rule 11), sessions auto-compact at 250k (`.claude/settings.json`), and
    `scripts/claude-hooks/read-guard.php` blocks whole reads of files over 400 lines / 40 KB. Work already
    committed at Rosalyn's is ported with `php scripts/port-commit.php <commit>`, not an agent.

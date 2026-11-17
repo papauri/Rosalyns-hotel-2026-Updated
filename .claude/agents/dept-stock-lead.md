@@ -3,7 +3,6 @@ name: dept-stock-lead
 description: Lead for the Stock & Procurement department of Rosalyn's / Liwonde — ingredients, recipes, stock deduction and restore from POS/room service, FIFO batches, stock counts, wastage, receiving and barcodes, suppliers, purchase orders, buying. Audits (read-only) or fixes stock logic end to end and raises UI_REQUESTs for the ui-lead. Use for any stock work.
 model: opus
 tools: Read, Grep, Glob, Edit, Write, Bash
-maxTurns: 100
 autoCompactWindow: 200000
 ---
 

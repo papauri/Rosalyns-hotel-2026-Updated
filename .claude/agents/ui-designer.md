@@ -3,7 +3,6 @@ name: ui-designer
 description: Visual polish pass for Rosalyn's Hotel — design consistency, responsive breakpoints, accessibility, spacing/typography. Runs AFTER frontend-specialist, scoped ONLY to the files that task just touched. Never changes functional logic, never pauses to ask.
 model: opus
 tools: Read, Grep, Glob, Edit, Bash
-maxTurns: 100
 autoCompactWindow: 200000
 effort: medium
 ---

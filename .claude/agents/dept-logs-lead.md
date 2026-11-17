@@ -3,7 +3,6 @@ name: dept-logs-lead
 description: Lead for Logs & Audit Trail of Rosalyn's / Liwonde (owner 2026-11-14) — the System Logs page and every section on it (Staff activity, Needs attention, events, booking audit, Emails sent, logins, admin activity, POS/KDS, API calls, offline sync), the central activity hook, booking/payment History trails, and the Hotel Settings change log (who changed which setting, when, old → new, secrets masked). Audits (read-only) or fixes logging end to end and raises UI_REQUESTs for the ui-lead. Use for any "who changed this / why isn't this in the logs / the logs are wrong" question or change.
 model: opus
 tools: Read, Grep, Glob, Edit, Write, Bash
-maxTurns: 100
 autoCompactWindow: 200000
 ---
 

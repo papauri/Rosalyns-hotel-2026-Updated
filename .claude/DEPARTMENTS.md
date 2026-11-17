@@ -218,12 +218,10 @@ The feature freeze in BUILD_PLAN.md ("PRODUCTION READINESS GATE") still stands. 
 9. Max 2 builders at once; read-only audits may run beside them.
 10. **No idle dev servers** (owner 2026-11-11): stop every `php -S` the moment its browser check is
     done; at session start and end, stop any `php -S` still running. Never reuse an old one.
-11. **Turn caps (owner 2026-11-17).** Every agent has a `maxTurns` cap and an earlier auto-compact in its
-    frontmatter (leads and specialists 100, qa-auditor 40, guides 60, qa-quick 20). Size each brief to finish
-    well inside it: one task per brief, split anything bigger. An agent that hits the cap hands back a PARTIAL
-    result and its edits stay half-done in the working tree: never ship, never run `ship.php --all-changed`
-    and never commit while a PARTIAL result is in the tree. Resume that agent once only if its context is
-    small; otherwise send a fresh brief for just the remainder (rule 4).
+11. **No turn caps (owner 2026-11-18).** Agents run to the end of their brief. Do not add `maxTurns` back to
+    any agent and do not invent a step limit in a brief: the 17 Nov caps stopped builders half-done, and
+    finishing that work in the next session cost more. Auto-compact (`autoCompactWindow` in the frontmatter)
+    stays; it is not a cap. Keep each brief to one task.
 
 ## UI decisions (shared patterns; step 9 and later reuse these, no redesign)
 

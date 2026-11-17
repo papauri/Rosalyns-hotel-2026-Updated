@@ -3,7 +3,6 @@ name: build-planner
 description: Owns .claude/BUILD_PLAN.md and .claude/COVERAGE_MATRIX.md. Reads CORE_SYSTEM_BRIEF.md, PROJECT_CONTEXT.md and SYSTEM_MAP.md, then emits a BATCH of fully-specified, exact-scope dispatch briefs per cycle. Never edits application code. Use at the start of every /build-loop cycle.
 model: opus
 tools: Read, Grep, Glob, Write, Edit
-maxTurns: 40
 autoCompactWindow: 200000
 ---
 

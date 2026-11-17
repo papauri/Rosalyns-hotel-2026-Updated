@@ -76,9 +76,40 @@ $suites = [
     'Linked data health'    => 'scripts/data-health.php',
 ];
 $failed = 0;
+// Progress + ETA (owner 2026-11-18): each line shows [n/total] and the time left; a small JSON file in the system temp
+// folder lets the Claude Code status line show it with no AI cost. ETA uses each suite's time from the last full run.
+$rtHotel = preg_replace('/[^A-Za-z0-9_-]/', '', basename(dirname(__DIR__)));
+$rtTmp = rtrim(sys_get_temp_dir(), '/\\');
+$rtProgressFile = $rtTmp . '/hotel-tests-progress-' . $rtHotel . '.json';
+$rtTimesFile = $rtTmp . '/hotel-tests-times-' . $rtHotel . '.json';
+$rtPrev = is_file($rtTimesFile) ? (json_decode((string)@file_get_contents($rtTimesFile), true) ?: []) : [];
+$rtTimes = [];
+$rtStart = time();
+$rtTotal = count($suites);
+$rtDone = 0;
+$rtEta = static function () use ($suites, &$rtTimes, $rtPrev, &$rtDone): int {
+    $avg = $rtTimes ? array_sum($rtTimes) / count($rtTimes) : 20.0;
+    $left = 0.0;
+    foreach (array_keys($suites) as $i => $n) {
+        if ($i >= $rtDone) {
+            $left += isset($rtPrev[$n]) ? (float)$rtPrev[$n] : $avg;
+        }
+    }
+    return (int)round($left);
+};
+$rtWrite = static function (string $current, bool $finished) use ($rtProgressFile, $rtHotel, $rtStart, $rtTotal, &$rtDone, &$failed, $rtEta): void {
+    @file_put_contents($rtProgressFile, json_encode(['hotel' => $rtHotel, 'pid' => getmypid(), 'started' => $rtStart, 'updated' => time(),
+        'done' => $rtDone, 'total' => $rtTotal, 'failed' => $failed, 'current' => $current, 'eta_seconds' => $finished ? 0 : $rtEta(),
+        'finished' => $finished]));
+};
+$rtMin = static fn(int $s): string => $s >= 60 ? (int)round($s / 60) . ' min' : $s . ' s';
 foreach ($suites as $name => $file) {
+    $rtWrite($name, false);
+    $rtT0 = microtime(true);
     $out = [];
     exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($file) . ' 2>&1', $out, $code);
+    $rtTimes[$name] = round(microtime(true) - $rtT0, 1);
+    $rtDone++;
     $text = implode("\n", $out);
     $pass = preg_match_all('/^PASS\b/m', $text);
     $fail = preg_match_all('/^FAIL\b/m', $text);
@@ -89,12 +120,16 @@ foreach ($suites as $name => $file) {
     }
     $ok = $code === 0 && $fail === 0 && $pass > 0;
     $failed += $ok ? 0 : 1;
-    printf("%-24s %s  (%d passed, %d failed)\n", $name, $ok ? 'OK  ' : 'FAIL', $pass, $fail);
+    printf("%-24s %s  (%d passed, %d failed)  [%d/%d, about %s left]\n", $name, $ok ? 'OK  ' : 'FAIL', $pass, $fail,
+        $rtDone, $rtTotal, $rtMin($rtEta()));
     if (!$ok) {
         foreach (array_slice(array_filter($out, fn($l) => preg_match('/FAIL|Fatal|Error/', $l)), 0, 5) as $l) {
             echo "    $l\n";
         }
     }
 }
+$rtWrite('', true);
+@file_put_contents($rtTimesFile, json_encode($rtTimes));
 echo $failed ? "\n$failed suite(s) failed.\n" : "\nAll suites passed.\n";
+echo 'Took ' . $rtMin(time() - $rtStart) . ".\n";
 exit($failed ? 1 : 0);
