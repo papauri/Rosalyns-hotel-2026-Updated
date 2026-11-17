@@ -37,7 +37,7 @@ if (!function_exists('rh_group_room_table')) {
 
     /**
      * @return array{root:int, rows:array<int,array>, totals:array{billed:float,paid:float,owed:float,credit:float,refunds:float,net:float,rooms:int}}
-     *         rows: id, ref, room, room_number, guest, check_in, check_out, nights, rate_compact, rate_text, status,
+     *         rows: id, ref, room, room_number, guest (room_guest_name, else the booker), room_guest_name (raw, '' = not set), check_in, check_out, nights, rate_compact, rate_text, status,
      *               billed, paid, owed, credit, refunds, credit_note_refunds, is_root
      */
     function rh_group_room_table(PDO $pdo, int $bookingId, string $cur = ''): array
@@ -88,7 +88,7 @@ if (!function_exists('rh_group_room_table')) {
             }
             $row = [
                 'id' => $id, 'ref' => (string)$b['booking_reference'], 'room' => (string)$b['room_name'], 'room_number' => $roomNo,
-                'guest' => $guest, 'check_in' => substr((string)$b['check_in_date'], 0, 10), 'check_out' => substr((string)$b['check_out_date'], 0, 10),
+                'guest' => $guest, 'room_guest_name' => trim((string)($b['room_guest_name'] ?? '')), 'check_in' => substr((string)$b['check_in_date'], 0, 10), 'check_out' => substr((string)$b['check_out_date'], 0, 10),
                 'nights' => (int)($b['number_of_nights'] ?? 0),
                 'rate_compact' => !empty($line['ok']) ? (string)$line['compact'] : '', 'rate_text' => !empty($line['ok']) ? (string)$line['text'] : '',
                 'status' => (string)$b['status'],

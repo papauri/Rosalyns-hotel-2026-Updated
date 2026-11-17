@@ -88,6 +88,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_bdNeed = rhBookingActionPermission((string)$_POST['action']); // correct_stay_after_checkout (group bookings plan A8)
     } elseif (in_array((string)($_POST['action'] ?? ''), ['group_op_preview', 'group_op_apply'], true)) {
         $_bdNeed = 'edit_booking'; // Make primary room / Remove from group (group bookings plan R3 / R6)
+    } elseif ((string)($_POST['action'] ?? '') === 'group_room_guest_save') {
+        $_bdNeed = 'edit_booking'; // G3 "Who's staying" on a group room (checked again in the helper)
     } elseif (in_array((string)($_POST['action'] ?? ''), ['group_credit_preview', 'group_credit_apply'], true)) {
         $_bdNeed = 'refund_payment'; // A5: a room's credit pays the rooms that owe (money moves through a credit note)
     } elseif (isset($_POST['adjust_dates']) || isset($_POST['adjust_dates_preview'])) {
@@ -1290,6 +1292,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['add_note'])) {
     }
 }
 
+// G3 (owner 2026-11-18): "Who's staying" on any room of this group from the group table (includes/group-row-actions.php).
+// edit_booking is checked above and again in the helper; the room must be in this group and not deleted. JSON only.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && (string)($_POST['action'] ?? '') === 'group_room_guest_save') {
+    require_once __DIR__ . '/../includes/group-row-actions.php';
+    header('Content-Type: application/json; charset=utf-8');
+    $rgRes = rh_group_room_guest_save($pdo, (int)$booking_id, (int)($_POST['target_id'] ?? 0), $_POST['room_guest_name'] ?? '', [
+        'user_id' => (int)($user['id'] ?? 0), 'user_name' => (string)($user['full_name'] ?? ($user['username'] ?? '')),
+    ]);
+    if (!$rgRes['success']) {
+        http_response_code((int)$rgRes['status']);
+    }
+    echo json_encode(['success' => $rgRes['success'], 'message' => $rgRes['message'], 'value' => $rgRes['value'], 'display' => $rgRes['display'],
+        'changed' => $rgRes['changed']], JSON_INVALID_UTF8_SUBSTITUTE);
+    exit;
+}
+
 // Group table actions (group bookings plan R3 "Make primary room", R6 "Remove from group"; rule A6): review
 // (group_op_preview, read only) then confirm (group_op_apply, re-checked under the row locks against the reviewed state).
 // edit_booking is checked above. Money moves only on Remove with an amount (D-R6, needs refund_payment too). JSON only.
@@ -2031,6 +2049,32 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         $bd_perm_checkout = hasPermission((int)($user['id'] ?? 0), 'checkout_guest');
         $bd_perm_cancel = hasPermission((int)($user['id'] ?? 0), 'cancel_booking');
         $bd_perm_pay = hasPermission((int)($user['id'] ?? 0), 'payment_add');
+        $bd_perm_correct = hasPermission((int)($user['id'] ?? 0), 'correct_stay_after_checkout');
+        // G2 (owner 2026-11-18): "Change dates" in another group room's row lands here with ?open=dates&from=<that page>.
+        // The dialog is picked from this page's own button flags (no new date rule); otherwise the plain reason shows.
+        require_once __DIR__ . '/../includes/group-row-actions.php';
+        $bd_open_dates = '';
+        $bd_open_dates_reason = '';
+        $bd_jump_from = 0;
+        $bd_jump_from_ref = '';
+        if ($_SERVER['REQUEST_METHOD'] === 'GET' && (string)($_GET['open'] ?? '') === 'dates') {
+            $bd_open_dates = $bd_can_correct_stay ? 'correct' : (($can_adjust_dates && $bd_perm_edit) ? 'adjust' : '');
+            if ($bd_open_dates === '') {
+                $bd_open_dates_reason = rh_group_row_date_path((string)$booking['status'], $bd_deleted, $bd_perm_edit, $bd_perm_correct)['reason']
+                    ?: 'This room\'s dates cannot be changed here.';
+            }
+            $bd_jump_try = filter_var($_GET['from'] ?? 0, FILTER_VALIDATE_INT);
+            if ($bd_jump_try && (int)$bd_jump_try !== (int)$booking_id) {
+                require_once __DIR__ . '/../includes/booking-group-ops.php';
+                $bd_jump_root = rh_group_ops_root($pdo, (int)$booking_id);
+                if ($bd_jump_root > 0 && rh_group_ops_root($pdo, (int)$bd_jump_try) === $bd_jump_root) {
+                    $bd_jump_from = (int)$bd_jump_try;
+                    $bd_jump_st = $pdo->prepare('SELECT booking_reference FROM bookings WHERE id = ?');
+                    $bd_jump_st->execute([$bd_jump_from]);
+                    $bd_jump_from_ref = (string)($bd_jump_st->fetchColumn() ?: '');
+                }
+            }
+        }
         // Room-type change (upgrade / downgrade): before departure, never on a missed arrival.
         $bd_can_change_type = !$bd_deleted && $bd_perm_edit
             && (in_array($booking['status'], ['pending', 'tentative', 'confirmed'], true) && (string)$booking['check_in_date'] >= date('Y-m-d')
@@ -2054,6 +2098,16 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         ?>
 
         <a href="<?php echo htmlspecialchars($bd_back_url, ENT_QUOTES); ?>" class="bd-back"><i class="fas fa-arrow-left"></i> Back to <?php echo htmlspecialchars($bd_back_label); ?></a>
+        <?php if ($bd_jump_from > 0 || $bd_open_dates_reason !== ''): ?>
+        <div class="bd-group-jump" role="status">
+            <?php if ($bd_open_dates_reason !== ''): ?>
+            <p class="bd-group-jump__reason"><i class="fas fa-circle-info" aria-hidden="true"></i> <?php echo htmlspecialchars($bd_open_dates_reason); ?></p>
+            <?php endif; ?>
+            <?php if ($bd_jump_from > 0): ?>
+            <a class="btn-secondary btn-sm bd-group-jump__back" href="booking-details.php?id=<?php echo (int)$bd_jump_from; ?>"><i class="fas fa-arrow-left" aria-hidden="true"></i> Back to the group<?php echo $bd_jump_from_ref !== '' ? ' (' . htmlspecialchars($bd_jump_from_ref) . ')' : ''; ?></a>
+            <?php endif; ?>
+        </div>
+        <?php endif; ?>
 
         <!-- Header: identity on the left, actions on the right -->
         <header class="rh-page-head">
@@ -2492,7 +2546,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             <?php foreach ($group_bookings as $gb): ?>
             <a href="booking-details.php?id=<?php echo (int)$gb['id']; ?>" class="bd-group-notice__link">
                 <i class="fas fa-door-open"></i>
-                <?php echo htmlspecialchars($gb['room_name']); ?><?php echo trim((string)($gb['room_guest_name'] ?? '')) !== '' ? ' (' . htmlspecialchars((string)$gb['room_guest_name']) . ')' : ''; ?> &mdash; <strong><?php echo htmlspecialchars($gb['booking_reference']); ?></strong>
+                <?php echo htmlspecialchars($gb['room_name']); ?><span data-who-notice="<?php echo (int)$gb['id']; ?>"><?php echo trim((string)($gb['room_guest_name'] ?? '')) !== '' ? ' (' . htmlspecialchars((string)$gb['room_guest_name']) . ')' : ''; ?></span> &mdash; <strong><?php echo htmlspecialchars($gb['booking_reference']); ?></strong>
             </a>
             <?php endforeach; ?>
         </div>
@@ -2552,8 +2606,8 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 <table class="rh-group-split bd-group-rooms__table">
                     <thead>
                         <tr>
-                            <th scope="col">Room <i class="help" data-tip="The room type and room number, the guest staying in it and its booking reference.">?</i></th>
-                            <th scope="col">Dates <i class="help" data-tip="Check-in to check-out. The check-out day is not a night.">?</i></th>
+                            <th scope="col">Room <i class="help" data-tip="The room type and room number, the guest staying in it and its booking reference. Who's staying: set or clear the name of who sleeps in that room (empty shows the lead booker).">?</i></th>
+                            <th scope="col">Dates <i class="help" data-tip="Check-in to check-out. The check-out day is not a night. Change dates opens that room's own Adjust Stay Dates (before check-out) or Correct Stay Dates (after check-out); you see the new bill before anything is saved.">?</i></th>
                             <th scope="col">Rate &times; nights <i class="help" data-tip="<?php echo htmlspecialchars($bd_grp_help['rate']); ?>">?</i></th>
                             <th scope="col">Status <i class="help" data-tip="Where the room's booking is now.">?</i></th>
                             <th scope="col" class="num">Billed <i class="help" data-tip="<?php echo htmlspecialchars($bd_grp_help['billed']); ?>">?</i></th>
@@ -2567,16 +2621,46 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                         </tr>
                     </thead>
                     <tbody>
-                        <?php foreach ($bd_grp['rows'] as $gr): ?>
-                        <tr<?php echo (int)$gr['id'] === (int)$booking['id'] ? ' class="is-current" aria-current="true"' : ''; ?>>
+                        <?php foreach ($bd_grp['rows'] as $gr):
+                            $gr_cur = (int)$gr['id'] === (int)$booking['id'];
+                            // G2: the date path this room's own page would offer this user (rows never include a deleted room).
+                            $gr_dates = rh_group_row_date_path((string)$gr['status'], false, $bd_perm_edit, $bd_perm_correct);
+                        ?>
+                        <tr<?php echo $gr_cur ? ' class="is-current" aria-current="true"' : ''; ?>>
                             <td data-label="Room">
                                 <a class="bd-group-rooms__link" href="booking-details.php?id=<?php echo (int)$gr['id']; ?>">
                                     <span class="rh-group-split-room"><?php echo htmlspecialchars($gr['room']); ?><?php echo $gr['room_number'] !== '' ? ' ' . htmlspecialchars($gr['room_number']) : ''; ?><?php echo $gr['is_root'] ? ' <small>(lead)</small>' : ''; ?></span>
-                                    <?php if ($gr['guest'] !== ''): ?><small><?php echo htmlspecialchars($gr['guest']); ?></small><?php endif; ?>
+                                    <small data-who-name="<?php echo (int)$gr['id']; ?>"<?php echo $gr['guest'] === '' ? ' hidden' : ''; ?>><?php echo htmlspecialchars($gr['guest']); ?></small>
                                     <small><?php echo htmlspecialchars($gr['ref']); ?></small>
                                 </a>
+                                <?php if ($bd_perm_edit): /* G3: "Who's staying" (optional name on this room), any status, never a deleted room */ ?>
+                                <div class="bd-group-rooms__who" data-who="<?php echo (int)$gr['id']; ?>">
+                                    <button type="button" class="btn-secondary btn-sm bd-group-rooms__act" data-who-edit aria-expanded="false" aria-controls="bdWho<?php echo (int)$gr['id']; ?>" aria-label="<?php echo htmlspecialchars("Who's staying in " . $gr['ref']); ?>"><i class="fas fa-user-pen" aria-hidden="true"></i> Who's staying</button>
+                                    <div class="bd-group-rooms__who-panel" id="bdWho<?php echo (int)$gr['id']; ?>" data-who-panel hidden>
+                                        <label for="bdWhoIn<?php echo (int)$gr['id']; ?>">Who's staying in this room <small>(optional)</small>
+                                            <i class="help" data-tip="The name(s) of the guest(s) sleeping in this room, for example &quot;Mr &amp; Mrs Banda&quot;. Shown in this table, on housekeeping, the calendar and the room's invoice lines. Leave it empty to show the lead booker's name. At most 150 characters. Saved in the room's History.">?</i>
+                                        </label>
+                                        <input type="text" id="bdWhoIn<?php echo (int)$gr['id']; ?>" maxlength="150" autocomplete="off" value="<?php echo htmlspecialchars((string)$gr['room_guest_name']); ?>" placeholder="Not set: the lead booker's name shows">
+                                        <div class="bd-group-rooms__who-row">
+                                            <button type="button" class="btn-primary btn-sm" data-who-save>Save</button>
+                                            <button type="button" class="btn-secondary btn-sm" data-who-cancel>Cancel</button>
+                                        </div>
+                                    </div>
+                                    <small class="bd-group-rooms__who-msg" data-who-msg role="status" aria-live="polite"></small>
+                                </div>
+                                <?php endif; ?>
                             </td>
-                            <td data-label="Dates"><?php echo $bd_d($gr['check_in']); ?> &ndash; <?php echo $bd_d($gr['check_out']); ?></td>
+                            <td data-label="Dates"><?php echo $bd_d($gr['check_in']); ?> &ndash; <?php echo $bd_d($gr['check_out']); ?>
+                                <?php if ($gr_dates['path'] !== ''): /* G2: that room's own existing path (Adjust / Correct Stay Dates) */ ?>
+                                <div class="bd-group-rooms__dates-act">
+                                    <?php if ($gr_cur): ?>
+                                    <button type="button" class="btn-secondary btn-sm bd-group-rooms__act" onclick="<?php echo $gr_dates['path'] === 'correct' ? 'openStayCorrectModal()' : 'openDateAdjustModal()'; ?>" title="<?php echo htmlspecialchars($gr_dates['label']); ?>"><i class="fas fa-calendar-alt" aria-hidden="true"></i> Change dates</button>
+                                    <?php else: ?>
+                                    <a class="btn-secondary btn-sm bd-group-rooms__act" href="booking-details.php?id=<?php echo (int)$gr['id']; ?>&amp;open=dates&amp;from=<?php echo (int)$booking['id']; ?>" title="<?php echo htmlspecialchars('Opens ' . $gr['ref'] . ' with ' . $gr_dates['label']); ?>" aria-label="<?php echo htmlspecialchars('Change dates for ' . $gr['ref']); ?>"><i class="fas fa-calendar-alt" aria-hidden="true"></i> Change dates</a>
+                                    <?php endif; ?>
+                                </div>
+                                <?php endif; ?>
+                            </td>
                             <td data-label="Rate x nights"><?php echo $gr['rate_compact'] !== '' ? htmlspecialchars($gr['rate_compact']) . ' night' . ($gr['nights'] === 1 ? '' : 's') : '&mdash;'; ?></td>
                             <td data-label="Status"><?php echo htmlspecialchars(ucwords(str_replace(['-', '_'], ' ', $gr['status']))); ?></td>
                             <td data-label="Billed" class="num"><?php echo $bd_m($gr['billed']); ?></td>
@@ -2602,6 +2686,62 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 </table>
             </div>
         </section>
+        <?php if ($bd_perm_edit): ?>
+        <script>
+        // G3 "Who's staying": save one room's optional name from the group table (JSON, CSRF, edit_booking).
+        (function () {
+            var bookingId = <?php echo (int)$booking_id; ?>;
+            var csrf = <?php echo json_encode((string)$csrf_token); ?>;
+            document.querySelectorAll('[data-who]').forEach(function (box) {
+                var id = parseInt(box.getAttribute('data-who'), 10);
+                var btn = box.querySelector('[data-who-edit]');
+                var panel = box.querySelector('[data-who-panel]');
+                var input = panel.querySelector('input');
+                var saveBtn = panel.querySelector('[data-who-save]');
+                var msg = box.querySelector('[data-who-msg]');
+                var saved = input.value;
+                function say(text, isError) { msg.textContent = text || ''; msg.classList.toggle('is-error', !!isError); }
+                function toggle(open) {
+                    panel.hidden = !open;
+                    btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+                    if (open) { input.value = saved; say(''); input.focus(); }
+                }
+                function save() {
+                    if (saveBtn.disabled) return;
+                    saveBtn.disabled = true;
+                    say('Saving...');
+                    var fd = new FormData();
+                    fd.append('action', 'group_room_guest_save');
+                    fd.append('csrf_token', csrf);
+                    fd.append('target_id', String(id));
+                    fd.append('room_guest_name', input.value);
+                    fetch('booking-details.php?id=' + bookingId, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                        .then(function (r) { return r.json().catch(function () { return { success: false, message: 'Unexpected reply (' + r.status + '). Reload the page and try again.' }; }); })
+                        .catch(function () { return { success: false, message: 'No connection. Nothing was changed.' }; })
+                        .then(function (res) {
+                            saveBtn.disabled = false;
+                            if (!res || !res.success) { say((res && res.message) || 'Nothing was changed.', true); return; }
+                            saved = res.value || '';
+                            input.value = saved;
+                            document.querySelectorAll('[data-who-name="' + id + '"]').forEach(function (el) { el.textContent = res.display || ''; el.hidden = !res.display; });
+                            document.querySelectorAll('[data-who-notice="' + id + '"]').forEach(function (el) { el.textContent = saved ? ' (' + saved + ')' : ''; });
+                            toggle(false);
+                            say(res.message || 'Saved.');
+                            // This page's own header shows the name too: load it again so it matches.
+                            if (res.changed && id === bookingId) { window.location.href = 'booking-details.php?id=' + bookingId; }
+                        });
+                }
+                btn.addEventListener('click', function () { toggle(panel.hidden); });
+                panel.querySelector('[data-who-cancel]').addEventListener('click', function () { toggle(false); btn.focus(); });
+                saveBtn.addEventListener('click', save);
+                input.addEventListener('keydown', function (e) {
+                    if (e.key === 'Enter') { e.preventDefault(); save(); }
+                    if (e.key === 'Escape') { toggle(false); btn.focus(); }
+                });
+            });
+        })();
+        </script>
+        <?php endif; ?>
         <?php if ($bd_go_on || $bd_gc_on): ?>
         <!-- Group table actions (R3 / R6, A5 credit move, D-R6 move on remove): review, then confirm. Inside the page
              container so in-place navigation keeps it. -->
@@ -4588,6 +4728,19 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             });
         }
     </script>
+
+    <?php if ($bd_open_dates !== ''): ?>
+    <script>
+    // G2: arrived from "Change dates" in a group table row: open this room's own date dialog (picked on the server).
+    (function () {
+        function go() {
+            var fn = window[<?php echo json_encode($bd_open_dates === 'correct' ? 'openStayCorrectModal' : 'openDateAdjustModal'); ?>];
+            if (typeof fn === 'function') fn();
+        }
+        if (document.readyState === 'loading') { document.addEventListener('DOMContentLoaded', go); } else { setTimeout(go, 0); }
+    })();
+    </script>
+    <?php endif; ?>
 
     <?php rh_render_send_receipt_script($csrf_token ?? ''); ?>
     <?php require_once __DIR__ . '/includes/history-panel.php'; ?>

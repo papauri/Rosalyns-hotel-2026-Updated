@@ -1385,3 +1385,92 @@
 #groupOpMoveReview {
     min-height: 44px;
 }
+
+/* Group table row actions (owner 2026-11-18, G2 + G3): "Change dates" under the dates, "Who's staying" under the room. */
+.bd-group-rooms__act {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+    margin-top: 6px;
+    white-space: nowrap;
+    text-decoration: none;
+}
+
+.bd-group-rooms__who-panel {
+    margin-top: 8px;
+    padding: 10px;
+    border: 1px solid var(--bd-line);
+    border-radius: 8px;
+    min-width: 220px;
+}
+
+.bd-group-rooms__who-panel label {
+    display: block;
+    font-weight: 600;
+    margin-bottom: 6px;
+}
+
+.bd-group-rooms__who-panel input[type="text"] {
+    width: 100%;
+    min-height: 44px;
+    box-sizing: border-box;
+}
+
+.bd-group-rooms__who-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.bd-group-rooms__who-row .btn-sm {
+    min-height: 44px;
+}
+
+/* 44px tap targets: beat the shared :is(.admin-content, #rh-admin-page) .btn-sm height (ID specificity). */
+#rh-admin-page .btn-sm.bd-group-rooms__act,
+#rh-admin-page .bd-group-rooms__who-row .btn-sm,
+#rh-admin-page .btn-sm.bd-group-jump__back,
+.admin-content .btn-sm.bd-group-rooms__act,
+.admin-content .bd-group-rooms__who-row .btn-sm,
+.admin-content .btn-sm.bd-group-jump__back {
+    min-height: 44px;
+}
+
+.bd-group-rooms__who-msg {
+    display: block;
+    color: var(--bd-ok);
+}
+
+.bd-group-rooms__who-msg:empty {
+    display: none;
+}
+
+.bd-group-rooms__who-msg.is-error {
+    color: var(--bd-danger);
+    font-weight: 600;
+}
+
+/* Arrived from another group room's "Change dates": the way back, or why the dates cannot change here. */
+.bd-group-jump {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px 16px;
+    margin: 0 0 12px;
+}
+
+.bd-group-jump__reason {
+    margin: 0;
+    color: var(--bd-ink);
+    font-weight: 600;
+}
+
+.bd-group-jump__back {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 44px;
+    text-decoration: none;
+}

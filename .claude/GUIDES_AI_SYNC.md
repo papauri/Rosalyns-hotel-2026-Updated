@@ -108,6 +108,11 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Payment details (top badge, Status row, other payments), Accounting dashboard recent payments, booking History "Status now", Reports (Payment Status Mix) and the reports export now use the Payments list words: "Received" (the money came in) + whether the bill is settled or still owes MWK X. Refunds show their step ("Refund: Paid out", "Refund: Moved to credit note"); a payment made from a credit note reads "Paid from credit note" (guest credit used, not money received). Pending / failed / cancelled keep their own words.
 - Guides: Payment details, Accounting dashboard, Reports pages. Assistant: payment rows' status words changed (it should say "Received" + bill position, never "Completed" for a part-paid bill); no Assistant action.
 
+### Group follow-ups G2 + G3: change any room's dates and name who's staying, from the group table (2026-11-18, owner) — hashes in TASKS.md
+- Booking details "Rooms in this group": each room has "Change dates". On the room you are on, its own date dialog opens; on another room it opens that room's page with the right dialog already open (Adjust Stay Dates before check-out, Correct Stay Dates after) and "Back to the group". Hidden on cancelled / no-show / expired rooms and for staff without that dialog's permission.
+- Each room has "Who's staying" (optional name, up to 150 characters, any status incl. after check-out; Edit booking permission). Empty = the lead booker's name shows again. A checked-out room's invoice PDF is rebuilt with the new name. History on that room: "Name on the room changed" (old → new).
+- Guides: booking details group table. Assistant: knows both buttons; no Assistant action.
+
 
 ## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
 
