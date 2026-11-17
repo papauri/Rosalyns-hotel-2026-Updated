@@ -9,9 +9,9 @@
  *   - kept nights stay at the BOOKED nightly rate (rh_booked_stay_split, gross: VAT and levy inside), with the same
  *     rate-plan rule as a date change (rh_rate_plan_dropped); extra nights default to that same rate (D-R1b) and staff
  *     may set another rate a night, with a reason;
- *   - a room whose booking carries a cancellation policy snapshot cannot have nights CUT here yet (the unused-nights
- *     fee comes with the next update); moving the dates without changing the count, or adding nights, is allowed.
- *     A room without a snapshot gets no automatic unused-nights fee (owner answer 1, 2026-11-17);
+ *   - nights CUT here keep the unused-nights fee (D-R1a, rh_unused_nights_quote: the room's own snapshot tier, notice
+ *     = the actual leave date, or the actual arrival date when nights at the start were dropped); staff may change
+ *     the amount (0..cap) with a reason. A room without a snapshot gets no automatic fee (owner answer 1, 2026-11-17);
  *   - a lower bill first clears what is owed; money that must go back is a refund to the original payment(s) or a
  *     credit note, chosen by staff (never left as credit_balance). A refund needs refund_payment;
  *   - a clash with another booking on the room for the added nights is a warning staff must tick, not a block;
@@ -152,9 +152,11 @@ if (!function_exists('rh_stay_correction_quote')) {
      * @return array ok, error, check_in/check_out (old), new_check_in, new_check_out, old_nights, new_nights,
      *   kept_nights, extra_nights, per_night, extra_rate, rate_changed, old_room_total, new_room_total, room_delta,
      *   old_bill, new_bill, paid, old_due, new_due, money_back, rate_line_old, rate_line_new, plan_note, invoices,
-     *   clashes, has_snapshot, totals, new_child_supplement, drop
+     *   clashes, has_snapshot, totals, new_child_supplement, drop, unused (rh_unused_nights_quote), fee_choice, fee_kept, fee_error
+     * $feeOverride / $feeReason: staff's amount kept for unused nights ('' = the policy quote) and the reason.
      */
-    function rh_stay_correction_quote(PDO $pdo, array $b, string $newIn, string $newOut, ?float $extraRate = null, ?string $today = null, string $cur = ''): array
+    function rh_stay_correction_quote(PDO $pdo, array $b, string $newIn, string $newOut, ?float $extraRate = null, ?string $today = null, string $cur = '',
+        string $feeOverride = '', string $feeReason = ''): array
     {
         $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
         $today = $today ?? date('Y-m-d');
@@ -198,10 +200,6 @@ if (!function_exists('rh_stay_correction_quote')) {
         $split = rh_booked_stay_split($b);
         $oldNights = (int)$split['nights'];
         $hasSnap = rh_stay_correction_has_snapshot($b);
-        if ($newNights < $oldNights && $hasSnap) {
-            $out['error'] = 'This booking has a cancellation policy; unused nights on it can be corrected after the next update.';
-            return $out;
-        }
         if ($extraRate !== null && ($extraRate < 0 || !is_finite($extraRate))) {
             $out['error'] = 'The rate a night cannot be below zero.';
             return $out;
@@ -233,6 +231,10 @@ if (!function_exists('rh_stay_correction_quote')) {
         }
         $oldRoom = round((float)$split['total_with_vat'], 2);
         $newRoom = round((float)$tt['total_with_vat'], 2);
+        // Kept for unused nights (D-R1a): notice = the actual leave date (the arrival date when the start was dropped).
+        $un = rh_unused_nights_quote($pdo, $b, $newIn, $newOut, $newIn > $oldIn ? $newIn : $newOut, ['new_gross' => $newRoom, 'cur' => $cur]);
+        $unChoice = rh_unused_nights_choice($un, $feeOverride, $feeReason);
+        $kept = $unChoice['ok'] && $un['source'] === 'policy' ? round((float)$unChoice['amount'], 2) : 0.0;
 
         // Bill / paid exactly as the booking page shows them (getBookingFolioSummary): the room part changes, extras stay.
         $fs = getBookingFolioSummary((int)$b['id']);
@@ -242,7 +244,7 @@ if (!function_exists('rh_stay_correction_quote')) {
         }
         $oldBill = round((float)$fs['grand_total'], 2);
         $paid = round((float)$fs['amount_paid'], 2);
-        $newBill = round($oldBill - $oldRoom + $newRoom, 2);
+        $newBill = round($oldBill - $oldRoom + $newRoom + $kept, 2);
         $oldDue = round(max(0.0, $oldBill - $paid), 2);
         $newDue = round(max(0.0, $newBill - $paid), 2);
         // Money that goes back because of THIS change only (an older credit is not this change's).
@@ -279,6 +281,7 @@ if (!function_exists('rh_stay_correction_quote')) {
             'invoices' => rh_stay_correction_invoice_numbers($pdo, $b),
             'clashes' => rh_stay_correction_clashes($pdo, $b, $newIn, $newOut),
             'has_snapshot' => $hasSnap,
+            'unused' => $un, 'fee_choice' => $unChoice, 'fee_kept' => $kept, 'fee_error' => $unChoice['ok'] ? '' : (string)$unChoice['error'],
             'totals' => $tt, 'new_child_supplement' => $newChild, 'drop' => $drop,
         ];
     }
@@ -286,7 +289,9 @@ if (!function_exists('rh_stay_correction_quote')) {
     /** The quote without internal arrays, for the review dialog (JSON). */
     function rh_stay_correction_public(array $q): array
     {
-        unset($q['totals'], $q['drop'], $q['new_child_supplement']);
+        $un = isset($q['unused']) && is_array($q['unused']) ? rh_unused_nights_public($q['unused']) : null;
+        unset($q['totals'], $q['drop'], $q['new_child_supplement'], $q['unused'], $q['fee_choice']);
+        $q['unused'] = $un;
         return $q;
     }
 
@@ -300,6 +305,9 @@ if (!function_exists('rh_stay_correction_quote')) {
             . ' (' . $q['rate_line_new'] . '). Bill ' . rh_stay_correction_money((float)$q['old_bill'], $cur) . ' -> '
             . rh_stay_correction_money((float)$q['new_bill'], $cur) . ', paid ' . rh_stay_correction_money((float)$q['paid'], $cur)
             . ', owed ' . rh_stay_correction_money((float)$q['old_due'], $cur) . ' -> ' . rh_stay_correction_money((float)$q['new_due'], $cur) . '.';
+        if ((float)($q['fee_kept'] ?? 0) > 0) {
+            $s .= ' Kept for unused nights: ' . rh_stay_correction_money((float)$q['fee_kept'], $cur) . ' (in the new bill).';
+        }
         if ($q['plan_note'] !== '') {
             $s .= ' ' . $q['plan_note'];
         }
@@ -366,9 +374,13 @@ if (!function_exists('rh_stay_correction_quote')) {
             $lock->execute([$bookingId]);
             $b = $lock->fetch(PDO::FETCH_ASSOC) ?: $b;
 
-            $q = rh_stay_correction_quote($pdo, $b, $newIn, $newOut, $extraRate, null, $cur);
+            $q = rh_stay_correction_quote($pdo, $b, $newIn, $newOut, $extraRate, null, $cur,
+                (string)($in['un_fee_override'] ?? ''), (string)($in['un_fee_reason'] ?? ''));
             if (empty($q['ok'])) {
                 throw new Exception($q['error']);
+            }
+            if ($q['fee_error'] !== '') {
+                throw new Exception($q['fee_error']);
             }
             if (abs((float)$q['new_bill'] - (float)$in['expected_new_bill']) > $tol
                 || abs((float)$q['money_back'] - (float)$in['expected_money_back']) > $tol) {
@@ -410,11 +422,17 @@ if (!function_exists('rh_stay_correction_quote')) {
             if (!empty($q['drop']['removed']) && function_exists('rh_rate_plan_drop_clear')) {
                 rh_rate_plan_drop_clear($pdo, $bookingId);
             }
+            // Kept for unused nights: the folio row goes in BEFORE the recalc, so money back / owed already include it.
+            $unPost = rh_unused_nights_fee_post($pdo, $b, $q['unused'], $q['fee_choice'], $uid, $who, 'Correct stay after check-out');
             if (!recalculateBookingFinancials($bookingId)) {
                 throw new Exception('Could not recalculate the booking balance - nothing was changed.');
             }
 
             $describe = rh_stay_correction_describe($q, $cur);
+            if ($unPost['history'] !== '' && (float)$q['fee_kept'] <= 0) {
+                $describe .= ' ' . $unPost['history'];
+            }
+
             if ($q['rate_changed']) {
                 $describe .= ' Extra night rate changed from ' . rh_stay_correction_money((float)$q['per_night'], $cur) . ' to '
                     . rh_stay_correction_money((float)$q['extra_rate'], $cur) . ' a night. Rate reason: ' . $rateReason . '.';

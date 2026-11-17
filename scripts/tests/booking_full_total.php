@@ -119,9 +119,9 @@ foreach (['exclusive', 'inclusive'] as $mode) {
     ok("[$mode] dashboard pending card uses the fallback for the old row", isset($totals[$c]) && strpos($totals[$c], '58,250') !== false, json_encode($totals));
 
     // Booking details page: folio total and the group total (A + B = 216,500)
-    $r = bft_run('admin/booking-details.php', ['method' => 'GET', 'get' => ['id' => (string)$baseId], 'setup' => $setup, 'grep' => ['116,500.00', '216,500.00', 'Group total']]);
+    $r = bft_run('admin/booking-details.php', ['method' => 'GET', 'get' => ['id' => (string)$baseId], 'setup' => $setup, 'grep' => ['116,500.00', '216,500.00', 'Rooms in this group']]);
     ok("[$mode] booking details shows the full total", !empty($r['found']['116,500.00']), $r['raw'] ?? '');
-    ok("[$mode] booking details shows the group total (all rooms, full amounts)", !empty($r['found']['216,500.00']) && !empty($r['found']['Group total']));
+    ok("[$mode] booking details shows the group total (all rooms, full amounts)", !empty($r['found']['216,500.00']) && !empty($r['found']['Rooms in this group']), json_encode($r['found'] ?? null));
 
     // Payment-add booking search
     $r = bft_run('admin/api/search-bookings.php', ['method' => 'GET', 'get' => ['type' => 'room', 'q' => $tg], 'setup' => $setup]);

@@ -86,7 +86,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $_bdNeed = rhBookingActionPermission((string)$_POST['booking_action']);
     } elseif (in_array((string)($_POST['action'] ?? ''), ['preview_stay_correction', 'stay_correction_apply'], true)) {
         $_bdNeed = rhBookingActionPermission((string)$_POST['action']); // correct_stay_after_checkout (group bookings plan A8)
-    } elseif (isset($_POST['adjust_dates'])) {
+    } elseif (isset($_POST['adjust_dates']) || isset($_POST['adjust_dates_preview'])) {
         $_bdNeed = rhBookingActionPermission('adjust_dates');
     } elseif (isset($_POST['update_payment'])) {
         $_bdNeed = rhBookingActionPermission('payment');
@@ -1307,10 +1307,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] 
         $scSt = $pdo->prepare('SELECT * FROM bookings WHERE id = ?');
         $scSt->execute([$booking_id]);
         $scB = $scSt->fetch(PDO::FETCH_ASSOC);
-        $scQ = $scB ? rh_stay_correction_quote($pdo, $scB, $scIn, $scOut, $scRate, null, (string)$currency_symbol)
+        $scQ = $scB ? rh_stay_correction_quote($pdo, $scB, $scIn, $scOut, $scRate, null, (string)$currency_symbol,
+                (string)($_POST['un_fee_override'] ?? ''), (string)($_POST['un_fee_reason'] ?? ''))
             : ['ok' => false, 'error' => 'Booking not found.'];
         if (empty($scQ['ok'])) {
             echo json_encode(['success' => false, 'message' => (string)$scQ['error']]);
+            exit;
+        }
+        if ((string)$scQ['fee_error'] !== '') {
+            echo json_encode(['success' => false, 'message' => (string)$scQ['fee_error']]);
             exit;
         }
         echo json_encode(['success' => true, 'quote' => rh_stay_correction_public($scQ), 'can_refund' => $scCanRefund], JSON_INVALID_UTF8_SUBSTITUTE);
@@ -1323,7 +1328,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] 
             'expected_new_bill' => $_POST['expected_new_bill'] ?? null, 'expected_money_back' => $_POST['expected_money_back'] ?? null,
             'clash_ack' => !empty($_POST['clash_ack']), 'money_back_mode' => (string)($_POST['money_back_mode'] ?? ''),
             'money_back_typed' => (string)($_POST['money_back_typed'] ?? ''),
+            'un_fee_override' => (string)($_POST['un_fee_override'] ?? ''), 'un_fee_reason' => (string)($_POST['un_fee_reason'] ?? ''),
             'can_correct' => hasPermission($scUid, 'correct_stay_after_checkout'), 'can_refund' => $scCanRefund,
+
         ], $user);
     } catch (Throwable $scE) {
         http_response_code(409);
@@ -1353,6 +1360,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] 
 }
 
 // Handle date adjustment
+// Adjust Stay Dates: what would be kept for unused nights (read-only JSON, D-R1a). Notice date = today.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['adjust_dates_preview'])) {
+    header('Content-Type: application/json');
+    $adpSt = $pdo->prepare('SELECT * FROM bookings WHERE id = ? AND deleted_at IS NULL');
+    $adpSt->execute([$booking_id]);
+    $adpB = $adpSt->fetch(PDO::FETCH_ASSOC);
+    $adpIn = trim((string)($_POST['new_check_in'] ?? ''));
+    $adpOut = trim((string)($_POST['new_check_out'] ?? ''));
+    if (!$adpB) {
+        echo json_encode(['success' => false, 'message' => 'Booking not found.']);
+        exit;
+    }
+    $adpCalc = calculateDateAdjustmentAmount($adpB, $adpIn, $adpOut);
+    $adpInD = DateTime::createFromFormat('!Y-m-d', $adpIn);
+    $adpOutD = DateTime::createFromFormat('!Y-m-d', $adpOut);
+    if ($adpInD && $adpOutD && $adpOutD > $adpInD && empty($adpCalc['error'])) {
+        if (!function_exists('rh_rate_plan_dropped')) {
+            require_once __DIR__ . '/../includes/pricing.php';
+        }
+        $adpDrop = rh_rate_plan_dropped($pdo, $adpB, $adpIn, $adpOut, (int)$adpInD->diff($adpOutD)->days, (int)$adpB['room_id']);
+        $adpCalc = calculateDateAdjustmentAmount($adpB, $adpIn, $adpOut, (float)$adpDrop['per_night']);
+    }
+    if (!empty($adpCalc['error'])) {
+        echo json_encode(['success' => false, 'message' => (string)$adpCalc['error']]);
+        exit;
+    }
+    $adpQ = rh_unused_nights_quote($pdo, $adpB, $adpIn, $adpOut, date('Y-m-d'), ['new_gross' => (float)$adpCalc['new_total_amount'], 'cur' => (string)$currency_symbol]);
+    echo json_encode(['success' => true, 'unused' => rh_unused_nights_public($adpQ)], JSON_INVALID_UTF8_SUBSTITUTE);
+    exit;
+}
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['adjust_dates'])) {
     $new_check_in = trim($_POST['new_check_in'] ?? '');
     $new_check_out = trim($_POST['new_check_out'] ?? '');
@@ -1381,7 +1419,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['adjust_dates'])) {
             $new_check_out,
             $adjustment_reason,
             $user['id'],
-            $user['full_name']
+            $user['full_name'],
+            ['override' => (string)($_POST['un_fee_override'] ?? ''), 'reason' => (string)($_POST['un_fee_reason'] ?? ''),
+             'quoted' => (string)($_POST['un_fee_quoted'] ?? '')]
         );
 
         if ($result['success']) {
@@ -2606,7 +2646,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                                 </div>
                             <?php endforeach; ?>
                             <div class="payment-tax-row payment-tax-row--sub">
-                                <span>Extras (excl. VAT<?php echo $bd_extras_levy > 0 ? ' and levy' : ''; ?>)<br><small class="bd-muted">folio charges; their VAT is in the VAT row<?php echo $bd_extras_levy > 0 ? ', the no-show charge' . "'" . 's levy in the levy row' : ''; ?></small></span>
+                                <span>Extras (excl. VAT<?php echo $bd_extras_levy > 0 ? ' and levy' : ''; ?>)<br><small class="bd-muted">folio charges; their VAT is in the VAT row<?php echo $bd_extras_levy > 0 ? ', the levy of a no-show or unused-nights charge in the levy row' : ''; ?></small></span>
                                 <strong class="bd-amt"><?php echo $currency_symbol; ?><?php echo number_format($bd_extras_net, 2); ?></strong>
                             </div>
                             <div class="payment-tax-row">
@@ -2615,7 +2655,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                             </div>
                             <?php if ($bd_levy_row > 0): ?>
                                 <div class="payment-tax-row">
-                                    <span>+ Tourism Levy<?php echo $booking_levy_percent > 0 ? ' (' . number_format($booking_levy_percent, 2) . '%)' : ''; ?><br><small class="bd-muted"><?php echo $bd_extras_levy > 0 ? 'on the no-show charge (taxed like a room night)' : 'on the room, not on packages or extras'; ?></small></span>
+                                    <span>+ Tourism Levy<?php echo $booking_levy_percent > 0 ? ' (' . number_format($booking_levy_percent, 2) . '%)' : ''; ?><br><small class="bd-muted"><?php echo $bd_extras_levy > 0 ? 'on the room and on no-show / unused-nights charges (taxed like a room night)' : 'on the room, not on packages or extras'; ?></small></span>
                                     <strong class="bd-amt"><?php echo $currency_symbol; ?><?php echo number_format($bd_levy_row, 2); ?></strong>
                                 </div>
                             <?php endif; ?>
@@ -3093,6 +3133,20 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     <p class="bd-sc-note">Receipts do not change. End of Day reports for the days concerned will show the corrected nights; copies already sent will be out of date.</p>
                 </div>
 
+                <div id="scFee" class="bd-sc-warn" hidden>
+                    <p id="scFeeText" style="margin:0 0 0.4rem;"></p>
+                    <div id="scFeeEdit" hidden>
+                        <div class="form-group" style="margin:0 0 0.4rem;">
+                            <label for="scFeeOverride" id="scFeeOverrideLabel">Amount kept (leave empty for the policy amount)</label>
+                            <input type="number" min="0" step="0.01" inputmode="decimal" id="scFeeOverride" name="un_fee_override" autocomplete="off">
+                        </div>
+                        <div class="form-group" style="margin:0;">
+                            <label for="scFeeReason">Reason (needed when the amount differs from the policy)</label>
+                            <input type="text" id="scFeeReason" name="un_fee_reason" maxlength="300" autocomplete="off">
+                        </div>
+                    </div>
+                </div>
+
                 <div id="scClash" class="bd-sc-warn" hidden>
                     <p id="scClashText" style="margin:0 0 0.4rem;"></p>
                     <label class="bd-sc-choice"><input type="checkbox" id="scClashAck" name="clash_ack" value="1"> I understand, save anyway</label>
@@ -3190,6 +3244,18 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 el('scRvInvoice').textContent = q.invoices && q.invoices.length ? q.invoices.join(', ') + ' (same number, new figures)' : 'None issued';
                 el('scRvPlan').textContent = q.plan_note || '';
                 el('scRvPlan').hidden = !q.plan_note;
+                var un = q.unused || null;
+                if (un && un.unused > 0 && un.text) {
+                    el('scFeeText').textContent = un.text;
+                    el('scFeeEdit').hidden = !un.overridable;
+                    if (un.overridable) {
+                        el('scFeeOverride').max = Number(un.cap).toFixed(2);
+                        el('scFeeOverrideLabel').textContent = 'Amount kept (leave empty for ' + money(un.amount) + '; 0 to ' + money(un.cap) + ')';
+                    }
+                    el('scFee').hidden = false;
+                } else {
+                    el('scFee').hidden = true;
+                }
                 var rateGroup = el('scRateGroup');
                 rateGroup.hidden = !(q.extra_nights > 0);
                 if (q.extra_nights > 0 && el('scRate').value.trim() === '') el('scRate').value = Number(q.per_night).toFixed(2);
@@ -3214,7 +3280,8 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 el('scConfirmBtn').disabled = false;
             }).catch(function () { btn.disabled = false; showError('Could not reach the server. Try again.'); });
         }
-        ['scNewIn', 'scNewOut', 'scRate'].forEach(function (id) {
+        ['scNewIn', 'scNewOut', 'scRate', 'scFeeOverride', 'scFeeReason'].forEach(function (id) {
+
             el(id).addEventListener('change', invalidate);
             el(id).addEventListener('input', invalidate);
         });
@@ -3311,6 +3378,21 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     <div style="display: flex; justify-content: space-between; padding-top: 8px; border-top: 1px solid #d0e8ff;">
                         <span style="font-size: 12px; font-weight: 600; color: #1a7a96;">Room charge change (room only):</span>
                         <span id="previewDelta" style="font-size: 14px; font-weight: 700; color: var(--color-lux-ink, #231F1C);">-</span>
+                    </div>
+                </div>
+
+                <div id="dateAdjustFee" style="background: #fbf8f2; border: 1px solid #e3d9c6; padding: 12px; border-radius: 8px; margin-bottom: 16px;" hidden>
+                    <p id="dateAdjustFeeText" style="margin: 0 0 8px; font-size: 13px;"></p>
+                    <input type="hidden" name="un_fee_quoted" id="dateAdjustFeeQuoted" value="">
+                    <div id="dateAdjustFeeEdit" hidden>
+                        <div class="form-group">
+                            <label for="dateAdjustFeeOverride" id="dateAdjustFeeOverrideLabel">Amount kept (leave empty for the policy amount)</label>
+                            <input type="number" min="0" step="0.01" inputmode="decimal" name="un_fee_override" id="dateAdjustFeeOverride" autocomplete="off">
+                        </div>
+                        <div class="form-group" style="margin-bottom: 0;">
+                            <label for="dateAdjustFeeReason">Reason (needed when the amount differs from the policy)</label>
+                            <input type="text" name="un_fee_reason" id="dateAdjustFeeReason" maxlength="300" autocomplete="off">
+                        </div>
                     </div>
                 </div>
 
@@ -3769,9 +3851,40 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             fb.innerHTML = '';
         }
 
+        // Kept for unused nights (D-R1a): the server quotes it (the same helper the save runs under the lock).
+        var _bdFeeSeq = 0;
+        function bdUnusedNightsPreview(newIn, newOut) {
+            var box = document.getElementById('dateAdjustFee');
+            if (!box) return;
+            var seq = ++_bdFeeSeq;
+            box.hidden = true;
+            document.getElementById('dateAdjustFeeQuoted').value = '';
+            if (!newIn || !newOut) return;
+            var fd = new FormData();
+            fd.append('adjust_dates_preview', '1');
+            fd.append('csrf_token', _bkDetailsCsrf);
+            fd.append('new_check_in', newIn);
+            fd.append('new_check_out', newOut);
+            fetch('booking-details.php?id=' + encodeURIComponent(String(<?php echo (int)$booking_id; ?>)), { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                .then(function (r) { return r.json(); })
+                .then(function (res) {
+                    if (seq !== _bdFeeSeq || !res || !res.success || !res.unused || !(res.unused.unused > 0) || !res.unused.text) return;
+                    var un = res.unused;
+                    document.getElementById('dateAdjustFeeText').textContent = un.text;
+                    document.getElementById('dateAdjustFeeEdit').hidden = !un.overridable;
+                    if (un.overridable) {
+                        document.getElementById('dateAdjustFeeQuoted').value = Number(un.amount).toFixed(2);
+                        document.getElementById('dateAdjustFeeOverride').max = Number(un.cap).toFixed(2);
+                        document.getElementById('dateAdjustFeeOverrideLabel').textContent = 'Amount kept (leave empty for ' + currencySymbol + ' ' + Number(un.amount).toFixed(2) + '; 0 to ' + currencySymbol + ' ' + Number(un.cap).toFixed(2) + ')';
+                    }
+                    box.hidden = false;
+                }).catch(function () {});
+        }
         function previewDateAdjustment() {
             const newCheckIn = document.getElementById('newCheckIn').value;
             const newCheckOut = document.getElementById('newCheckOut').value;
+            bdUnusedNightsPreview(newCheckIn, newCheckOut);
+
             const preview = document.getElementById('dateAdjustPreview');
             const error = document.getElementById('dateAdjustError');
             const submitBtn = document.getElementById('dateAdjustSubmitBtn');

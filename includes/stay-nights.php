@@ -14,6 +14,8 @@
  *     (owner D4 2026-11-13): a refund to the original payment(s) in full, or a credit note. The amount is shown and
  *     must be typed back. Nothing paid / less paid than the new bill: the balance simply goes down.
  *   - the save re-quotes under the row lock and refuses when the figures differ from what staff reviewed.
+ *   - taking nights off keeps the unused-nights fee (D-R1a, rh_unused_nights_quote, notice = today): the policy amount
+ *     is shown, staff may change it (0..cap) with a reason; the folio row is posted before the recalc.
  *
  * Only checked-in bookings. Pure functions here never write; rh_stay_nights_apply() is one transaction.
  */
@@ -37,7 +39,8 @@ if (!function_exists('rh_stay_nights_quote')) {
      *               current_text, new_text, old_total, new_total, total_delta, folio, paid, old_due, new_due,
      *               money_back, plan_note, drop, reprice, available, availability_error
      */
-    function rh_stay_nights_quote(PDO $pdo, array $b, int $delta, ?string $today = null, bool $checkAvailability = false, string $cur = ''): array
+    function rh_stay_nights_quote(PDO $pdo, array $b, int $delta, ?string $today = null, bool $checkAvailability = false, string $cur = '',
+        string $feeOverride = '', string $feeReason = ''): array
     {
         $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
         $today = $today ?? date('Y-m-d');
@@ -94,8 +97,17 @@ if (!function_exists('rh_stay_nights_quote')) {
         $paid = round((float)($b['amount_paid'] ?? 0), 2);
         $oldTotal = round((float)$rp['old_gross'], 2);
         $newTotal = round((float)$rp['new_gross'], 2);
+        // Kept for unused nights (D-R1a): nights taken off ahead of time, notice = today.
+        $un = null;
+        $unChoice = ['ok' => true, 'error' => '', 'amount' => 0.0, 'overridden' => false, 'reason' => ''];
+        $kept = 0.0;
+        if ($delta < 0) {
+            $un = rh_unused_nights_quote($pdo, $b, $in, $newOut, $today, ['new_gross' => $newTotal, 'cur' => $cur]);
+            $unChoice = rh_unused_nights_choice($un, $feeOverride, $feeReason);
+            $kept = $unChoice['ok'] && $un['source'] === 'policy' ? round((float)$unChoice['amount'], 2) : 0.0;
+        }
         $oldBill = round($oldTotal + $folio, 2);
-        $newBill = round($newTotal + $folio, 2);
+        $newBill = round($newTotal + $folio + $kept, 2);
         $oldDue = round(max(0.0, $oldBill - $paid), 2);
         $newDue = round(max(0.0, $newBill - $paid), 2);
         // Money that has to go back because of THIS change only (an older credit, if any, is not this change's).
@@ -119,6 +131,7 @@ if (!function_exists('rh_stay_nights_quote')) {
                 : '',
             'drop' => $drop, 'reprice' => $rp,
             'available' => null, 'availability_error' => '',
+            'unused' => $un, 'fee_choice' => $unChoice, 'fee_kept' => $kept, 'fee_error' => $unChoice['ok'] ? '' : (string)$unChoice['error'],
         ];
 
         if ($delta > 0 && $checkAvailability && !$pdo->inTransaction()) {
@@ -154,6 +167,9 @@ if (!function_exists('rh_stay_nights_quote')) {
             . ' -> ' . rh_stay_nights_money((float)$q['new_due'], $cur) . '.';
         if ($q['plan_note'] !== '') {
             $s .= ' ' . $q['plan_note'];
+        }
+        if ((float)($q['fee_kept'] ?? 0) > 0) {
+            $s .= ' Kept for unused nights: ' . rh_stay_nights_money((float)$q['fee_kept'], $cur) . ' (in the new balance).';
         }
         return $s;
     }
@@ -210,9 +226,21 @@ if (!function_exists('rh_stay_nights_quote')) {
             $lock->execute([$bookingId]);
             $b = $lock->fetch(PDO::FETCH_ASSOC) ?: $b;
 
-            $q = rh_stay_nights_quote($pdo, $b, $delta, null, false, $cur);
+            $q = rh_stay_nights_quote($pdo, $b, $delta, null, false, $cur,
+                (string)($in['un_fee_override'] ?? ''), (string)($in['un_fee_reason'] ?? ''));
             if (empty($q['ok'])) {
                 throw new Exception($q['error']);
+            }
+            if ($q['fee_error'] !== '') {
+                throw new Exception($q['fee_error']);
+            }
+            // A policy amount nobody was shown is never kept: the review sends back the quoted figure.
+            if (is_array($q['unused']) && !empty($q['unused']['overridable']) && (float)$q['unused']['amount'] > $tol) {
+                $quoted = str_replace([',', ' '], '', trim((string)($in['un_fee_quoted'] ?? '')));
+                if ($quoted === '' || !is_numeric($quoted) || abs((float)$quoted - (float)$q['unused']['amount']) > $tol) {
+                    throw new Exception('The amount kept for unused nights is now ' . rh_stay_nights_money((float)$q['unused']['amount'], $cur)
+                        . '. Nothing was saved - review the change again.');
+                }
             }
             if (abs((float)$q['new_total'] - (float)$in['expected_new_total']) > $tol
                 || abs((float)$q['total_delta'] - (float)$in['expected_total_delta']) > $tol) {
@@ -252,6 +280,11 @@ if (!function_exists('rh_stay_nights_quote')) {
                 (string)$q['new_check_out'], (float)$q['reprice']['new_child_supplement']);
             if (!empty($q['drop']['removed'])) {
                 rh_rate_plan_drop_clear($pdo, $bookingId);
+            }
+            // Kept for unused nights: the folio row goes in BEFORE the recalc, so money back / owed already include it.
+            $unPost = ['history' => ''];
+            if (is_array($q['unused'])) {
+                $unPost = rh_unused_nights_fee_post($pdo, $b, $q['unused'], $q['fee_choice'], $uid, $who, 'Take off nights');
             }
             if (!recalculateBookingFinancials($bookingId)) {
                 throw new Exception('Could not recalculate the booking balance - nothing was changed.');
@@ -379,12 +412,17 @@ if (!function_exists('rh_stay_nights_quote')) {
                 $describe .= ' ' . rh_stay_nights_money($cnOne['amount'], $cur) . ' moved to credit note ' . $cnOne['number']
                     . ($cnOne['payer'] === 'company' ? ' (made out to ' . $cnOne['name'] . ', which paid it)' : '') . '.';
             }
+            if ($unPost['history'] !== '' && (float)$q['fee_kept'] <= 0) {
+                $describe .= ' ' . $unPost['history'];
+            }
             $describe .= ' Reason: ' . $reason;
             $meta = [
                 'delta_nights' => $delta, 'old' => $before, 'new' => $after, 'per_night' => $q['per_night'], 'money_back' => $q['money_back'],
                 'money_back_mode' => $mode, 'refunded' => $refundTotal, 'credit_note' => $creditNote['number'] ?? null, 'reason' => $reason,
                 'rate_plan_removed' => !empty($q['drop']['removed']),
+                'kept_for_unused_nights' => (float)$q['fee_kept'],
             ];
+
             if (function_exists('logBookingEvent')) {
                 logBookingEvent($bookingId, (string)$b['booking_reference'], $delta > 0 ? 'Nights added' : 'Nights taken off', 'update', $describe,
                     $q['old_check_out'], $q['new_check_out'], 'admin', $uid ?: null, $who !== '' ? $who : null, $meta);

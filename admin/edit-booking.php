@@ -296,6 +296,33 @@ function eb_tier_policy(PDO $pdo, array $roomTypeRow, int $individualRoomId): ar
     return $policy;
 }
 
+// Kept for unused nights (D-R1a): read-only quote for the edit form when nights are cut (notice date = today).
+// The save runs the same quote under the row lock and refuses a different figure.
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking && isset($_POST['un_quote'])) {
+    header('Content-Type: application/json');
+    if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
+        echo json_encode(['success' => false, 'message' => 'Invalid security token. Reload the page.']);
+        exit;
+    }
+    $uqIn = (string)($_POST['check_in_date'] ?? '');
+    $uqOut = (string)($_POST['check_out_date'] ?? '');
+    if (!$can_edit_stay || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $uqIn) || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $uqOut) || $uqOut <= $uqIn) {
+        echo json_encode(['success' => true, 'unused' => null]);
+        exit;
+    }
+    $uqNights = (int)round((strtotime($uqOut) - strtotime($uqIn)) / 86400);
+    $uqOcc = (string)($_POST['occupancy_type'] ?? ($booking['occupancy_type'] ?? 'single'));
+    if (!in_array($uqOcc, ['single', 'double', 'triple'], true)) {
+        $uqOcc = (string)($booking['occupancy_type'] ?? 'single');
+    }
+    $uqChild = max(0, (int)($_POST['child_guests'] ?? ($booking['child_guests'] ?? 0)));
+    $uqDrop = rh_rate_plan_dropped($pdo, $booking, $uqIn, $uqOut, $uqNights, (int)$booking['room_id']);
+    $uqRp = edit_booking_reprice($booking, array_merge($roomTypeRow, rh_child_rule_snapshot(rh_child_rule_from_booking($booking))), $uqNights, $uqOcc, $uqChild, (float)$uqDrop['per_night']);
+    $uqQ = rh_unused_nights_quote($pdo, $booking, $uqIn, $uqOut, date('Y-m-d'), ['new_gross' => (float)$uqRp['gross'], 'cur' => (string)$currency_symbol]);
+    echo json_encode(['success' => true, 'unused' => (int)$uqQ['unused'] > 0 ? rh_unused_nights_public($uqQ) : null], JSON_INVALID_UTF8_SUBSTITUTE);
+    exit;
+}
+
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -478,9 +505,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && $booking) {
                     }
                     // Children are priced with the rule the booking was saved with (its snapshot), so editing never reprices on today's rule.
                     $rp = edit_booking_reprice($locked, array_merge($roomTypeRow, rh_child_rule_snapshot(rh_child_rule_from_booking($locked))), $number_of_nights, $occupancy_type, $child_guests, (float)$ebDrop['per_night']);
+                    // Kept for unused nights (D-R1a, only when nights are cut; notice = today). $locked = the row before the UPDATE.
+                    $ebUn = null;
+                    $ebUnChoice = null;
+                    if ($datesChanged) {
+                        $ebUn = rh_unused_nights_quote($pdo, $locked, $check_in, $check_out, date('Y-m-d'), ['new_gross' => (float)$rp['gross'], 'cur' => (string)$currency_symbol]);
+                        $ebUnChoice = rh_unused_nights_choice($ebUn, (string)($_POST['un_fee_override'] ?? ''), (string)($_POST['un_fee_reason'] ?? ''), (string)($_POST['un_fee_quoted'] ?? ''));
+                        if (!$ebUnChoice['ok']) {
+                            throw new Exception($ebUnChoice['error']);
+                        }
+                        if (!empty($ebUn['overridable']) && (float)$ebUn['amount'] > BALANCE_TOLERANCE && trim((string)($_POST['un_fee_quoted'] ?? '')) === '') {
+                            throw new Exception('the amount kept for unused nights (' . number_format((float)$ebUn['amount'], 2) . ') was not shown before saving. Check the dates again; nothing was changed.');
+                        }
+                    }
                     rh_write_booking_stay_totals($pdo, (int)$booking_id, $rp['totals'], null, null, null, $rp['child_supplement']);
                     if (!empty($ebDrop['removed'])) {
                         rh_rate_plan_drop_clear($pdo, (int)$booking_id);
+                    }
+                    if ($ebUn !== null && (int)$ebUn['unused'] > 0) {
+                        $ebUnPost = rh_unused_nights_fee_post($pdo, $locked, $ebUn, $ebUnChoice, (int)($user['id'] ?? 0),
+                            (string)($user['full_name'] ?? ($user['username'] ?? '')), 'Edit booking');
+                        if (!empty($ebUnPost['posted'])) {
+                            $changes['unused_nights_fee'] = ['old' => '-', 'new' => $currency_sym . ' ' . number_format((float)$ebUnPost['amount'], 2) . ' kept for unused nights'];
+                        }
                     }
                     $newGross = $rp['gross'];
                     if (abs($newGross - $storedGross) > BALANCE_TOLERANCE) {
@@ -917,6 +964,20 @@ $back_url = 'booking-details.php?id=' . $booking_id;
                         </div>
                     <?php endif; ?>
                     <small id="ebPlanDrop" style="display:block; color:#b42318; margin-top:8px;" role="status" hidden></small>
+                    <div id="ebUnused" hidden style="margin-top:10px; padding:10px 12px; background:#fbf8f2; border:1px solid #e3d9c6; border-radius:6px; font-size:13px;">
+                        <p id="ebUnusedText" style="margin:0 0 8px;" role="status"></p>
+                        <input type="hidden" name="un_fee_quoted" id="ebUnusedQuoted" value="">
+                        <div id="ebUnusedEdit" hidden>
+                            <div class="form-group" style="margin-bottom:8px;">
+                                <label for="ebUnusedOverride" id="ebUnusedOverrideLabel">Amount kept (leave empty for the policy amount)</label>
+                                <input type="number" min="0" step="0.01" inputmode="decimal" name="un_fee_override" id="ebUnusedOverride" autocomplete="off">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label for="ebUnusedReason">Reason for a different amount (needed when it differs from the policy)</label>
+                                <input type="text" name="un_fee_reason" id="ebUnusedReason" maxlength="300" autocomplete="off">
+                            </div>
+                        </div>
+                    </div>
                     <small id="ebPriceNote" style="color:#777; display:block; margin-top:8px;">
                         <?php if ($eb_rate['ok']): ?>
                             Booked at = the room rate a night (incl. taxes) &times; nights, at the price the booking was made at. Date changes are charged at this rate; today's room price does not change it.
@@ -1048,6 +1109,45 @@ $back_url = 'booking-details.php?id=' . $booking_id;
                     + (D.start && D.end ? ' (' + dayMonYear(D.start) + ' to ' + dayMonYear(D.end) + ')' : '');
             }
 
+            // Kept for unused nights (D-R1a): asked from the server (the same quote the save makes) when nights are cut.
+            let unSeq = 0, unTimer = null;
+            function unusedQuote(ci, co, occ, children) {
+                const box = $('ebUnused');
+                if (!box) return;
+                const seq = ++unSeq;
+                $('ebUnusedQuoted').value = '';
+                clearTimeout(unTimer);
+                if (!ci || !co || (ci === P.checkIn && co === P.checkOut)) {
+                    box.hidden = true;
+                    return;
+                }
+                unTimer = setTimeout(function() {
+                    const fd = new FormData();
+                    fd.append('un_quote', '1');
+                    fd.append('csrf_token', document.querySelector('input[name="csrf_token"]').value);
+                    fd.append('check_in_date', ci);
+                    fd.append('check_out_date', co);
+                    fd.append('occupancy_type', occ);
+                    fd.append('child_guests', String(children));
+                    fetch(window.location.href, { method: 'POST', body: fd, credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+                        .then(r => r.json())
+                        .then(res => {
+                            if (seq !== unSeq) return;
+                            const un = res && res.success ? res.unused : null;
+                            if (!un || !un.text) { box.hidden = true; return; }
+                            $('ebUnusedText').textContent = un.text;
+                            $('ebUnusedEdit').hidden = !un.overridable;
+                            if (un.overridable) {
+                                $('ebUnusedQuoted').value = Number(un.amount).toFixed(2);
+                                $('ebUnusedOverride').max = Number(un.cap).toFixed(2);
+                                $('ebUnusedOverrideLabel').textContent = 'Amount kept (leave empty for ' + money(un.amount) + '; 0 to ' + money(un.cap) + ')';
+                            }
+                            box.hidden = false;
+                        })
+                        .catch(() => {});
+                }, 300);
+            }
+
             // Same rule as the server: booked nightly rate + (rack for new occupancy/children - rack for old).
             function preview() {
                 const ci = $('check_in_date') ? $('check_in_date').value : '';
@@ -1072,7 +1172,9 @@ $back_url = 'booking-details.php?id=' . $booking_id;
                         : '';
                     dropEl.hidden = !dropReason;
                 }
+                unusedQuote(ci, co, occ, children);
                 const night = Math.max(0, P.bookedNight + rack(occ, children) - rack(P.occupancy, P.children) + addBack);
+
                 const total = Math.round((night * nights + P.packageGross) * 100) / 100;
                 const delta = total - P.currentTotal;
                 $('ebNewTotal').textContent = money(total);

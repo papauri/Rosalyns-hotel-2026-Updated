@@ -72,6 +72,12 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Bookings: an expired room carrying its group no-show charge that still owes now has Payments & balance in the More menu. Booking details' group list leaves deleted rooms out.
 - Guides: Payments (Add charge), Accounting dashboard shortcuts, group bookings section, FAQ "how do I charge a guest who has already checked out". Assistant: can say charges after check-out go through Payments > Add charge with the permission; must not say checked-out rooms can never be charged.
 
+### Group bookings Ship A2: Kept for unused nights (2026-11-18, owner ask) — hashes in TASKS.md
+- When a stay gets shorter (leaves early, arrives late and pays only nights stayed, dates changed, nights taken off, check-out date corrected, edit/modify booking), the room's saved cancellation tiers decide how much of the unused nights is kept: shown before confirm as "rate × nights × %". Staff can change the amount (0 up to the bill reduction) with a reason. A booking with no saved cancellation policy keeps nothing (ICTAm included).
+- The amount kept is a line on the bill (VAT and levy inside), on the invoice; History "Kept for unused nights" / "No fee kept for unused nights". Notice date: the leave date at checkout/after-checkout, the arrival date for late-arrival nights, today for future changes (never later than today).
+- Adjust Stay Dates no longer leaves paid money as credit: staff choose a refund or a credit note. Correct Stay Dates after check-out can now cut nights on rooms with a policy.
+- Guides: check-out (early leave / late arrival), Adjust Stay Dates, Add / take off nights, cancellation policy page, FAQ "why was money kept when the guest left early". Assistant: its "Correct check-out" / "Change booking" cards do not show the kept amount yet and the save refuses when a fee applies — tell staff to use the screen (dept-ai-lead).
+
 
 ## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
 

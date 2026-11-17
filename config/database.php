@@ -10008,14 +10008,75 @@ function rh_noshow_fee_tag(int $bookingId): string
 }
 
 /**
- * A folio charge description as people see it: drops a trailing no-show / expiry tag ("[noshow-fee:<id>]") and nothing
- * else. Display only: the stored description keeps the tag (it is the idempotency key rh_noshow_fee_tagged matches).
+ * The tag a "kept for unused nights" folio row carries at the end of its description (group bookings plan A3, D-R1a).
+ * Every cut posts its own row with the same tag; readers SUM the live (not voided) rows per row.
+ */
+function rh_unused_nights_tag(int $bookingId): string
+{
+    return '[unused-nights:' . $bookingId . ']';
+}
+
+/**
+ * A folio charge description as people see it: drops a trailing no-show / expiry tag ("[noshow-fee:<id>]") or a
+ * kept-for-unused-nights tag ("[unused-nights:<id>]") and nothing else. Display only: the stored description keeps
+ * the tag (it is the key the levy readers match).
  */
 function rh_charge_display_desc(?string $desc): string
 {
     $desc = (string)$desc;
-    $out = preg_replace('/\s*\[noshow-fee:\d+\]\s*$/', '', $desc);
+    $out = preg_replace('/\s*\[(?:noshow-fee|unused-nights):\d+\]\s*$/', '', $desc);
     return $out === null ? $desc : $out;
+}
+
+/**
+ * VAT / levy inside an amount kept for unused nights, on a basis that does not move when the stay is cut or extended:
+ * the booking's ROOM part only (packages carry no levy and are not nights) - room VAT and levy as a share of the room
+ * gross, scaled so a fee larger than what is left of the stay is never capped (rh_room_night_share caps at 1.0). Pure.
+ * @return array{gross:float,vat:float,levy:float,net:float}
+ */
+function rh_unused_nights_share(array $b, float $amount): array
+{
+    $amount = round(max(0.0, $amount), 2);
+    $split = rh_booked_stay_split($b);
+    $roomGross = (float)$split['room_gross'];
+    $pkgVat = 0.0;
+    if ((float)$split['package_gross'] > 0) {
+        if (!function_exists('rh_stay_totals')) {
+            require_once __DIR__ . '/../includes/pricing.php';
+        }
+        $pkgVat = (float)rh_stay_totals((float)$split['package_gross'], 'price', false)['vat'];
+    }
+    $roomVat = max(0.0, (float)($b['vat_amount'] ?? 0) - $pkgVat);
+    $levy = max(0.0, (float)($b['tourism_levy_amount'] ?? 0));
+    if ($amount <= 0 || $roomGross <= BALANCE_TOLERANCE) {
+        return ['gross' => $amount, 'vat' => 0.0, 'levy' => 0.0, 'net' => $amount];
+    }
+    $k = max(1.0, ceil($amount / $roomGross));
+    return rh_room_night_share(['total_with_vat' => $roomGross * $k, 'vat_amount' => $roomVat * $k, 'tourism_levy_amount' => $levy * $k], $amount);
+}
+
+/**
+ * Tourism levy inside a booking's live "kept for unused nights" rows (any status), worked out row by row (the invoice
+ * does the same, so the two always agree to the cent). 0 when none. Read-only.
+ */
+function rh_unused_nights_levy(PDO $pdo, array $b): float
+{
+    $bookingId = (int)($b['id'] ?? 0);
+    if ($bookingId <= 0 || (float)($b['tourism_levy_amount'] ?? 0) <= 0) {
+        return 0.0;
+    }
+    try {
+        $st = $pdo->prepare('SELECT line_total FROM booking_charges WHERE booking_id = ? AND voided = 0 AND description LIKE ?');
+        $st->execute([$bookingId, '%' . rh_unused_nights_tag($bookingId)]);
+        $sum = 0.0;
+        foreach ($st->fetchAll(PDO::FETCH_COLUMN) as $lt) {
+            $sum += rh_unused_nights_share($b, (float)$lt)['levy'];
+        }
+        return round($sum, 2);
+    } catch (Throwable $e) {
+        error_log('rh_unused_nights_levy: ' . $e->getMessage());
+        return 0.0;
+    }
 }
 
 /**
@@ -10338,6 +10399,8 @@ function getBookingFolioSummary(int $bookingId): array
             $baseLevy = 0.0;
             $extrasLevy = rh_noshow_fee_levy($pdo, $booking);
         }
+        // Kept for unused nights (D-R1a, any status): its levy share is in the extras like the no-show charge's.
+        $extrasLevy = round($extrasLevy + rh_unused_nights_levy($pdo, $booking), 2);
         $extrasSubtotal = (float)($folioTotals['folio_subtotal'] ?? 0);
         $extrasVat = (float)($folioTotals['folio_vat'] ?? 0);
         $extrasTotal = (float)($folioTotals['folio_total'] ?? 0);
@@ -11911,9 +11974,11 @@ function calculateDateAdjustmentAmount(array $booking, string $newCheckIn, strin
  * @param string $reason Reason for adjustment
  * @param int $adjustedBy Admin user ID
  * @param string $adjustedByName Admin user name
+ * @param array  $fee  Kept for unused nights when nights are cut (D-R1a): override ('' = the policy quote), reason,
+ *                     quoted (the quote staff reviewed). Notice date = today (a shortening keyed in ahead).
  * @return array Result with success status and details
  */
-function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string $newCheckOut, string $reason, int $adjustedBy, string $adjustedByName): array
+function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string $newCheckOut, string $reason, int $adjustedBy, string $adjustedByName, array $fee = []): array
 {
     global $pdo;
 
@@ -11987,6 +12052,21 @@ function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string
             }
         }
 
+        // Kept for unused nights (D-R1a): quoted on the locked row before the write; notice = today.
+        $unQ = rh_unused_nights_quote($pdo, $booking, $newCheckIn, $newCheckOut, date('Y-m-d'), ['new_gross' => (float)$calculation['new_total_amount']]);
+        $unChoice = rh_unused_nights_choice($unQ, (string)($fee['override'] ?? ''), (string)($fee['reason'] ?? ''), (string)($fee['quoted'] ?? ''));
+        if (!$unChoice['ok']) {
+            $pdo->rollBack();
+            return ['success' => false, 'message' => $unChoice['error']];
+        }
+        // A policy amount nobody was shown is never kept: the review must send back the quoted figure.
+        if (!empty($unQ['overridable']) && (float)($unQ['amount'] ?? 0) > BALANCE_TOLERANCE
+            && trim((string)($fee['quoted'] ?? '')) === '') {
+            $pdo->rollBack();
+            return ['success' => false, 'message' => 'Review the dates again: the amount kept for unused nights ('
+                . number_format((float)$unQ['amount'], 2) . ') was not shown before saving. Nothing was changed.'];
+        }
+
         // Reprice at the booked nightly rate: write net/levy/VAT/total_with_vat/nights/dates
         // consistently, then let recalculateBookingFinancials() derive amount_due,
         // credit_balance and payment_status (no direct amount_due writes).
@@ -11998,6 +12078,8 @@ function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string
         if (!empty($dateDrop['removed'])) {
             rh_rate_plan_drop_clear($pdo, $bookingId);
         }
+        // The kept amount's folio row goes in BEFORE the recalc, so owed / credit already include it.
+        $unPost = rh_unused_nights_fee_post($pdo, $booking, $unQ, $unChoice, $adjustedBy, $adjustedByName, 'Adjust stay dates');
         if (!recalculateBookingFinancials($bookingId)) {
             $pdo->rollBack();
             return ['success' => false, 'message' => 'Could not recalculate the booking balance.'];
@@ -12007,6 +12089,14 @@ function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string
         $finRow = $finStmt->fetch(PDO::FETCH_ASSOC) ?: [];
         $creditBalance = (float)($finRow['credit_balance'] ?? 0);
         $folioTotal = (float)($finRow['folio_charges_total'] ?? 0);
+        // L1 (same guard as admin_update_checkout_date): a shorter stay must never leave paid money sitting on the
+        // booking as credit ("overpayment lives in the credit note only"). Nothing is saved; staff use a refund or a
+        // credit note ("Add / take off nights", or Check out & settle).
+        if (round($creditBalance, 2) > round(max(0.0, (float)($booking['credit_balance'] ?? 0)), 2) + BALANCE_TOLERANCE) {
+            $pdo->rollBack();
+            return ['success' => false, 'message' => 'These dates would leave ' . getSetting('currency_symbol', 'MWK') . ' ' . number_format($creditBalance, 2)
+                . ' paid that the guest no longer owes. Nothing was changed. Use "Add / take off nights" (refund or credit note), or Check out & settle if the guest is leaving today.'];
+        }
 
         // Record adjustment in audit table
         $adjustmentStmt = $pdo->prepare("
@@ -12079,6 +12169,9 @@ function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string
             $deltaText,
             $creditNote
         );
+        if ($unPost['history'] !== '') {
+            $description .= ' ' . $unPost['history'];
+        }
 
         logBookingEvent(
             $bookingId,
@@ -12113,7 +12206,9 @@ function processBookingDateAdjustment(int $bookingId, string $newCheckIn, string
             'calculation' => $calculation,
             'credit_balance' => $creditBalance > 0 ? $creditBalance : null,
             'rate_plan_removed' => $dateDrop,
-            'message' => 'Booking dates adjusted successfully.' . ($creditBalance > 0 ? " Guest has a credit balance of " . $adjCs . ' ' . number_format($creditBalance, 2) . "." : '')
+            'unused_nights' => ['kept' => $unPost['amount'], 'text' => $unPost['history']],
+            'message' => 'Booking dates adjusted successfully.'
+ . ($creditBalance > 0 ? " Guest has a credit balance of " . $adjCs . ' ' . number_format($creditBalance, 2) . "." : '')
         ];
     } catch (Throwable $e) {
         if ($pdo->inTransaction()) {

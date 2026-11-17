@@ -1137,16 +1137,20 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
         }
         foreach ($folioCharges as $fk => $fc) {
             $fBid = (int)($fc['booking_id'] ?? 0);
-            if ($fBid <= 0 || !preg_match('/\[noshow-fee:' . $fBid . '\]\s*$/', (string)($fc['description'] ?? ''))) {
+            // Also a "kept for unused nights" row (D-R1a, any status): same treatment, on the room-part basis.
+            if ($fBid <= 0 || !preg_match('/\[(noshow-fee|unused-nights):' . $fBid . '\]\s*$/', (string)($fc['description'] ?? ''), $fTagM)) {
                 continue;
             }
             $fRow = $rowById[$fBid] ?? [];
-            if (!array_key_exists('tourism_levy_amount', $fRow) || !array_key_exists('total_with_vat', $fRow)) {
-                $fSt = $pdo->prepare('SELECT id, total_with_vat, total_amount, vat_amount, tourism_levy_amount FROM bookings WHERE id = ?');
+            if (!array_key_exists('tourism_levy_amount', $fRow) || !array_key_exists('total_with_vat', $fRow) || !array_key_exists('package_total', $fRow)
+                || !array_key_exists('number_of_nights', $fRow)) {
+                $fSt = $pdo->prepare('SELECT id, total_with_vat, total_amount, vat_amount, tourism_levy_amount, package_total, number_of_nights FROM bookings WHERE id = ?');
                 $fSt->execute([$fBid]);
                 $fRow = $fSt->fetch(PDO::FETCH_ASSOC) ?: [];
             }
-            $fLevy = rh_room_night_share($fRow, (float)$fc['line_total'])['levy'];
+            $fLevy = ($fTagM[1] === 'unused-nights' && function_exists('rh_unused_nights_share'))
+                ? rh_unused_nights_share($fRow, (float)$fc['line_total'])['levy']
+                : rh_room_night_share($fRow, (float)$fc['line_total'])['levy'];
             if ($fLevy <= 0) {
                 continue;
             }

@@ -713,4 +713,273 @@ if (!function_exists('rh_cancel_policy_column_ready')) {
         $text = trim($text);
         return $text === '' ? '' : '<p style="' . $style . '">' . nl2br(htmlspecialchars($text, ENT_QUOTES, 'UTF-8')) . '</p>';
     }
+
+    /* ---------------------------------------------------------------------------------------------------------------
+     * Kept for unused nights (group bookings plan D-R1a / A1-A3, owner 2026-11-17). When a stay loses nights (shortened,
+     * early check-out, late arrival charged only for the nights stayed, a correction after check-out) the room keeps
+     * the policy's tier % of the unused nights: unused nights x booked rate a night x tier %. The tier comes from the
+     * room's OWN snapshot; days = first unused night - notice date. Capped at the bill reduction. Pending / tentative
+     * = 0; no snapshot = no fee (owner answer 1). Staff may set any amount 0..cap, with a reason when it differs.
+     * Booked as ONE folio row per cut (charge_type 'other', tag rh_unused_nights_tag()), posted before the recalc.
+     * ------------------------------------------------------------------------------------------------------------- */
+
+    /** Staff-text money for the unused-nights texts. */
+    function rh_unused_nights_money(float $v, string $cur): string
+    {
+        return function_exists('rh_booked_rate_money') ? rh_booked_rate_money($v, $cur) : trim($cur) . ' ' . number_format($v, 2);
+    }
+
+    /**
+     * Read-only quote. $b = the booking row BEFORE the cut (old dates and totals; the caller's locked row on a save).
+     * $noticeDate (Y-m-d): checkout / after-checkout correction = the leave date; late arrival = the arrival date;
+     * a shortening keyed in ahead = today. $opts: new_gross (the new stay gross when the caller reprices it itself,
+     * e.g. with a dropped rate plan added back), cur.
+     * @return array source ('no_cut' | 'none' = no snapshot | 'status' = not charged in this status | 'policy'),
+     *   overridable, applies, unused, old_nights, new_nights, per_night, base, pct, tier_days, days, first_unused,
+     *   notice_date, cap, full, amount, capped, kind, version, tier_label, text
+     */
+    function rh_unused_nights_quote(PDO $pdo, array $b, string $newIn, string $newOut, string $noticeDate, array $opts = []): array
+    {
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        $cur = isset($opts['cur']) && $opts['cur'] !== '' ? (string)$opts['cur']
+            : (function_exists('getSetting') ? trim((string)getSetting('currency_symbol', 'MWK')) : 'MWK');
+        if (!function_exists('rh_booked_rate_money') && is_file(__DIR__ . '/booked-rate.php')) {
+            require_once __DIR__ . '/booked-rate.php';
+        }
+        $out = ['source' => 'no_cut', 'overridable' => false, 'applies' => false, 'unused' => 0, 'old_nights' => 0, 'new_nights' => 0,
+                'per_night' => 0.0, 'base' => 0.0, 'pct' => 0.0, 'tier_days' => 0, 'days' => 0, 'first_unused' => '',
+                'notice_date' => $noticeDate, 'cap' => 0.0, 'full' => 0.0, 'amount' => 0.0, 'capped' => false, 'kind' => '',
+                'version' => 0, 'tier_label' => '', 'text' => ''];
+        // The snapshot: the row's own key, else ONLY that column (never the whole row: the caller may already have
+        // written the new dates, and the quote must stay on the pre-cut figures it was given).
+        if (!array_key_exists('cancellation_policy_snapshot', $b) && (int)($b['id'] ?? 0) > 0 && rh_cancel_policy_column_ready($pdo)) {
+            try {
+                $st = $pdo->prepare('SELECT cancellation_policy_snapshot FROM bookings WHERE id = ?');
+                $st->execute([(int)$b['id']]);
+                $v = $st->fetchColumn();
+                $b['cancellation_policy_snapshot'] = ($v === false) ? null : $v;
+            } catch (Throwable $e) {
+                error_log('rh_unused_nights_quote snapshot: ' . $e->getMessage());
+            }
+        }
+        $oldIn = substr((string)($b['check_in_date'] ?? ''), 0, 10);
+        $oldOut = substr((string)($b['check_out_date'] ?? ''), 0, 10);
+        $split = rh_booked_stay_split($b);
+        $oldNights = (int)$split['nights'];
+        $inD = DateTimeImmutable::createFromFormat('!Y-m-d', $newIn);
+        $outD = DateTimeImmutable::createFromFormat('!Y-m-d', $newOut);
+        if (!$inD || !$outD || $outD <= $inD) {
+            return $out;
+        }
+        $newNights = (int)$inD->diff($outD)->days;
+        $unused = max(0, $oldNights - $newNights);
+        $out['old_nights'] = $oldNights;
+        $out['new_nights'] = $newNights;
+        $out['unused'] = $unused;
+        if ($unused === 0) {
+            return $out; // moving the dates without changing the count (or adding nights) is not a cut
+        }
+        $perNight = round((float)$split['per_night'], 2);
+        $base = round((float)$split['per_night'] * $unused, 2);
+        // First unused night: the old arrival when nights at the start were dropped, else the new check-out.
+        $first = $newIn > $oldIn ? $oldIn : ($newOut < $oldOut ? max($newOut, $oldIn) : $oldIn);
+        $nD = DateTimeImmutable::createFromFormat('!Y-m-d', $noticeDate);
+        if (!$nD || $nD->format('Y-m-d') !== $noticeDate) {
+            $nD = new DateTimeImmutable('today');
+            $out['notice_date'] = $nD->format('Y-m-d');
+        }
+        $fD = DateTimeImmutable::createFromFormat('!Y-m-d', $first);
+        $days = $fD ? (int)$nD->diff($fD)->format('%r%a') : 0;
+        $newGross = isset($opts['new_gross']) && is_numeric($opts['new_gross'])
+            ? (float)$opts['new_gross'] : (float)rh_reprice_at_booked_rate($b, $newNights)['new_gross'];
+        $cap = max(0.0, round((float)$split['total_with_vat'] - $newGross, 2));
+        $out['per_night'] = $perNight;
+        $out['base'] = $base;
+        $out['first_unused'] = $first;
+        $out['days'] = $days;
+        $out['cap'] = $cap;
+        $nightsWord = $unused === 1 ? '1 night' : $unused . ' nights';
+
+        $snap = rh_cancel_policy_snapshot($b);
+        if ($snap === null) {
+            $out['source'] = 'none';
+            $out['text'] = 'No cancellation policy saved on this booking - no fee for the ' . $nightsWord . ' not used.';
+            return $out;
+        }
+        $out['kind'] = $snap['kind'];
+        $out['version'] = (int)$snap['policy_version'];
+        $status = strtolower((string)($b['status'] ?? ''));
+        if (!in_array($status, ['confirmed', 'checked-in', 'checked-out'], true)) {
+            $out['source'] = 'status';
+            $out['text'] = (in_array($status, ['pending', 'tentative'], true) ? 'Not confirmed yet (' . $status . ')' : 'Status ' . ($status !== '' ? $status : 'unknown'))
+                . ': no fee for the ' . $nightsWord . ' not used.';
+            return $out;
+        }
+        $out['source'] = 'policy';
+        $out['overridable'] = true;
+        $tier = rh_cancel_policy_tier($snap['tiers'], $days);
+        $pct = $tier === null ? 0.0 : (float)$tier['pct'];
+        $when = $days < 0 ? 'Told after the first unused night' : ($days === 0 ? 'Told on the first unused night' : 'Told ' . $days . ' day' . ($days === 1 ? '' : 's') . ' before the first unused night');
+        $out['tier_days'] = $tier === null ? 0 : (int)$tier['days'];
+        $out['tier_label'] = $when . ($tier === null ? ': outside every fee window' : ': ' . rh_cancel_policy_pct_label($pct) . '% (' . $snap['kind'] . ' policy v' . (int)$snap['policy_version'] . ')');
+        $full = round($base * $pct / 100, 2);
+        $amount = min($full, $cap);
+        if ($amount < $tol) {
+            $amount = 0.0;
+        }
+        $out['pct'] = round($pct, 2);
+        $out['full'] = $full;
+        $out['amount'] = round($amount, 2);
+        $out['capped'] = $full - $cap > $tol;
+        $out['applies'] = $out['amount'] > $tol;
+        $out['text'] = 'Kept for unused nights: ' . rh_unused_nights_money($perNight, $cur) . ' x ' . $nightsWord . ' x ' . rh_cancel_policy_pct_label($pct) . '% = '
+            . rh_unused_nights_money($full, $cur)
+            . ($out['capped'] ? ' (capped at the bill reduction: ' . rh_unused_nights_money($out['amount'], $cur) . ')' : '')
+            . '. ' . $out['tier_label'] . '.';
+        return $out;
+    }
+
+    /**
+     * Staff's choice on a quote: $override '' = the quote; else an amount 0..cap. A reason is required when it differs
+     * from the quote. $expected (the quote staff reviewed, '' = not sent): must equal the quote made now.
+     * @return array{ok:bool,error:string,amount:float,overridden:bool,reason:string}
+     */
+    function rh_unused_nights_choice(array $q, $override, $reason, $expected = ''): array
+    {
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        $cur = function_exists('getSetting') ? trim((string)getSetting('currency_symbol', 'MWK')) : 'MWK';
+        $reason = mb_substr(trim((string)preg_replace('/\s+/u', ' ', (string)$reason)), 0, 300);
+        $res = ['ok' => false, 'error' => '', 'amount' => (float)($q['amount'] ?? 0), 'overridden' => false, 'reason' => $reason];
+        $exp = str_replace([',', ' '], '', trim((string)$expected));
+        if ($exp !== '' && is_numeric($exp) && abs((float)$exp - (float)($q['amount'] ?? 0)) > $tol) {
+            $res['error'] = 'The amount kept for unused nights changed since you reviewed it (it is now '
+                . rh_unused_nights_money((float)($q['amount'] ?? 0), $cur) . '). Nothing was saved - review it again.';
+            return $res;
+        }
+        $raw = str_replace([',', ' '], '', trim((string)$override));
+        if ($raw === '') {
+            $res['ok'] = true;
+            return $res;
+        }
+        if (!is_numeric($raw)) {
+            $res['error'] = 'Enter the amount kept for unused nights as a number.';
+            return $res;
+        }
+        $v = round((float)$raw, 2);
+        if (empty($q['overridable'])) {
+            if ($v > $tol) {
+                $res['error'] = 'No amount can be kept for unused nights on this booking (no cancellation policy applies to it).';
+                return $res;
+            }
+            $res['amount'] = 0.0;
+            $res['ok'] = true;
+            return $res;
+        }
+        if ($v < 0 || $v - (float)$q['cap'] > $tol) {
+            $res['error'] = 'The amount kept for unused nights must be between 0 and ' . rh_unused_nights_money((float)$q['cap'], $cur) . ' (the bill reduction).';
+            return $res;
+        }
+        $res['amount'] = $v < $tol ? 0.0 : $v;
+        $res['overridden'] = abs($res['amount'] - (float)$q['amount']) > $tol;
+        if ($res['overridden'] && mb_strlen($reason) < 3) {
+            $res['error'] = 'Say why the amount kept for unused nights differs from the policy (' . rh_unused_nights_money((float)$q['amount'], $cur) . ').';
+            return $res;
+        }
+        $res['ok'] = true;
+        return $res;
+    }
+
+    /**
+     * Book the kept amount: ONE folio row (charge_type 'other', tag rh_unused_nights_tag(), VAT = the room-night share)
+     * when the amount is above BALANCE_TOLERANCE, and one History entry (quote, amount kept, override reason) whenever
+     * the policy applied. Call it inside the caller's transaction under the booking row lock, AFTER the new stay totals
+     * are written and BEFORE recalculateBookingFinancials. $b = the locked row before the cut; $q its quote made under
+     * the lock; $choice from rh_unused_nights_choice (must be ok). Throws on a failure (the caller rolls back).
+     * @return array{posted:bool,amount:float,charge_id:int,history:string}
+     */
+    function rh_unused_nights_fee_post(PDO $pdo, array $b, array $q, array $choice, int $userId, string $userName, string $where): array
+    {
+        $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+        $cur = function_exists('getSetting') ? trim((string)getSetting('currency_symbol', 'MWK')) : 'MWK';
+        $res = ['posted' => false, 'amount' => 0.0, 'charge_id' => 0, 'history' => ''];
+        $bookingId = (int)($b['id'] ?? 0);
+        if ($bookingId <= 0 || (int)($q['unused'] ?? 0) <= 0) {
+            return $res;
+        }
+        if (empty($choice['ok'])) {
+            throw new Exception((string)($choice['error'] ?? 'Check the amount kept for unused nights.'));
+        }
+        if (($q['source'] ?? '') !== 'policy') {
+            $res['history'] = (string)$q['text'];
+            return $res;
+        }
+        $amount = round(max(0.0, (float)$choice['amount']), 2);
+        if ($amount - (float)$q['cap'] > $tol) {
+            throw new Exception('The amount kept for unused nights is above the bill reduction. Nothing was saved.');
+        }
+        $nightsWord = (int)$q['unused'] === 1 ? '1 night' : (int)$q['unused'] . ' nights';
+        $hist = (string)$q['text'];
+        if (!empty($choice['overridden'])) {
+            $hist .= ' Amount kept set by ' . ($userName !== '' ? $userName : 'staff') . ': ' . rh_unused_nights_money($amount, $cur)
+                . ' (policy ' . rh_unused_nights_money((float)$q['amount'], $cur) . '). Reason: ' . (string)$choice['reason'] . '.';
+        }
+        if ($amount > $tol) {
+            $share = rh_unused_nights_share($b, $amount);
+            $desc = 'Kept for unused nights - ' . $nightsWord . ' from ' . date('j M Y', strtotime((string)$q['first_unused']))
+                . (!empty($choice['overridden']) ? ' (amount set by staff)' : ' at ' . rh_cancel_policy_pct_label((float)$q['pct']) . '%')
+                . ' ' . rh_unused_nights_tag($bookingId);
+            rh_noshow_fee_insert_row($pdo, $b, $desc, $amount, (float)$share['vat'], $userId, '');
+            $res['charge_id'] = (int)$pdo->lastInsertId();
+            $res['posted'] = true;
+            $res['amount'] = $amount;
+        } else {
+            $hist .= ' Nothing kept.';
+        }
+        $res['history'] = $hist;
+        if (!function_exists('logBookingEvent') && is_file(__DIR__ . '/booking-timeline.php')) {
+            require_once __DIR__ . '/booking-timeline.php';
+        }
+        if (function_exists('logBookingEvent')) {
+            logBookingEvent($bookingId, (string)($b['booking_reference'] ?? ''), $amount > $tol ? 'Kept for unused nights' : 'No fee kept for unused nights', 'financial',
+                $hist . ' (' . $where . ')',
+                'policy ' . number_format((float)$q['amount'], 2), 'kept ' . number_format($amount, 2),
+                $userId > 0 ? 'admin' : 'system', $userId > 0 ? $userId : null, $userId > 0 ? ($userName !== '' ? $userName : null) : 'System',
+                ['where' => $where, 'unused_nights' => (int)$q['unused'], 'per_night' => (float)$q['per_night'], 'pct' => (float)$q['pct'],
+                 'days' => (int)$q['days'], 'notice_date' => (string)$q['notice_date'], 'first_unused' => (string)$q['first_unused'],
+                 'quote' => (float)$q['amount'], 'cap' => (float)$q['cap'], 'kept' => $amount, 'overridden' => !empty($choice['overridden']),
+                 'override_reason' => !empty($choice['overridden']) ? (string)$choice['reason'] : null, 'charge_id' => $res['charge_id'] ?: null,
+                 'policy_version' => (int)$q['version'], 'kind' => (string)$q['kind']]);
+        }
+        return $res;
+    }
+
+    /** The quote as plain data for a review dialog (JSON). */
+    function rh_unused_nights_public(array $q): array
+    {
+        return array_intersect_key($q, array_flip(['source', 'overridable', 'applies', 'unused', 'per_night', 'pct', 'days', 'first_unused',
+            'notice_date', 'cap', 'full', 'amount', 'capped', 'text', 'tier_label']));
+    }
+
+    /**
+     * The shared form block for a server-rendered form: the quote text, and when staff may change it an amount field
+     * (empty = the quote) + a reason field + the reviewed quote (hidden). Fields: un_fee_override, un_fee_reason,
+     * un_fee_quoted. '' when no night is cut. Escaped.
+     */
+    function rh_unused_nights_fields_html(array $q): string
+    {
+        if ((int)($q['unused'] ?? 0) <= 0 || (string)($q['text'] ?? '') === '') {
+            return '';
+        }
+        $h = static fn ($v): string => htmlspecialchars((string)$v, ENT_QUOTES, 'UTF-8');
+        $s = '<div class="rh-unused-nights" style="margin:10px 0;padding:10px 12px;border:1px solid #e3d9c6;border-radius:8px;background:#fbf8f2;">'
+            . '<p style="margin:0 0 6px;font-size:13px;">' . $h($q['text']) . '</p>';
+        if (!empty($q['overridable'])) {
+            $s .= '<input type="hidden" name="un_fee_quoted" value="' . $h(number_format((float)$q['amount'], 2, '.', '')) . '">'
+                . '<label style="display:block;font-size:13px;margin:4px 0;">Amount kept (leave empty for ' . $h(number_format((float)$q['amount'], 2)) . '; 0 to '
+                . $h(number_format((float)$q['cap'], 2)) . ')<br><input type="number" name="un_fee_override" min="0" max="' . $h(number_format((float)$q['cap'], 2, '.', ''))
+                . '" step="0.01" inputmode="decimal" style="min-height:44px;width:100%;max-width:240px;"></label>'
+                . '<label style="display:block;font-size:13px;margin:4px 0;">Reason (needed when the amount differs)<br><input type="text" name="un_fee_reason" maxlength="300" style="min-height:44px;width:100%;"></label>';
+        }
+        return $s . '</div>';
+    }
 }

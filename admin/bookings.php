@@ -152,7 +152,7 @@ function getSignedDateDiffDays(DateTimeInterface $fromDate, DateTimeInterface $t
  * current_text "K356,000 × 3 nights = K1,068,000", new_text "K356,000 × 4 nights = K1,424,000" (the same
  * rh_reprice_at_booked_rate() figure the save writes), delta and a plain delta_text. Read-only.
  */
-function bookings_stay_rate_preview(array $bk, int $newNights, string $cur, ?string $newIn = null, ?string $newOut = null): array
+function bookings_stay_rate_preview(array $bk, int $newNights, string $cur, ?string $newIn = null, ?string $newOut = null, string $noticeDate = ''): array
 {
     $newNights = max(1, $newNights);
     // RP-3: the same discount check the save makes (only when the dates actually change).
@@ -162,6 +162,13 @@ function bookings_stay_rate_preview(array $bk, int $newNights, string $cur, ?str
         $drop = rh_rate_plan_dropped($GLOBALS['pdo'], $bk, $newIn, $newOut, $newNights, (int)$bk['room_id']);
     }
     $rp = rh_reprice_at_booked_rate($bk, $newNights, (float)$drop['per_night']);
+    // Kept for unused nights (D-R1a): the same quote the save makes; notice = today unless the caller gives the leave date.
+    $un = null;
+    if ($newOut !== null) {
+        $unQ = rh_unused_nights_quote($GLOBALS['pdo'], $bk, $newIn, $newOut, $noticeDate !== '' ? $noticeDate : date('Y-m-d'),
+            ['new_gross' => (float)$rp['new_gross'], 'cur' => $cur]);
+        $un = (int)$unQ['unused'] > 0 ? rh_unused_nights_public($unQ) : null;
+    }
     $now = rh_booked_rate_line($bk, null, ['currency' => $cur]);
     $new = rh_booked_rate_change_for_booking($bk, $rp, $newNights, ['currency' => $cur]);
     $delta = round((float)$rp['delta'], 2);
@@ -183,7 +190,36 @@ function bookings_stay_rate_preview(array $bk, int $newNights, string $cur, ?str
         'plan_note' => !empty($drop['removed'])
             ? 'The ' . $drop['plan_name'] . ' discount will be removed: ' . $drop['reason'] . '. ' . rh_hist_money((float)$drop['per_night'], $cur) . ' a night is added back to the rate.'
             : '',
+        'unused' => $un,
     ];
+}
+
+/**
+ * Kept for unused nights on a save (D-R1a): quote on the locked pre-cut row, staff's choice from the POST
+ * (un_fee_override / un_fee_reason / un_fee_quoted). Throws (the caller rolls back) when the choice is invalid or a
+ * policy amount was never shown. Returns [quote, choice].
+ */
+function bookings_unused_nights_checked(PDO $pdo, array $bk, string $newIn, string $newOut, string $noticeDate, float $newGross, string $cur): array
+{
+    $q = rh_unused_nights_quote($pdo, $bk, $newIn, $newOut, $noticeDate, ['new_gross' => $newGross, 'cur' => $cur]);
+    $c = rh_unused_nights_choice($q, (string)($_POST['un_fee_override'] ?? ''), (string)($_POST['un_fee_reason'] ?? ''), (string)($_POST['un_fee_quoted'] ?? ''));
+    if (!$c['ok']) {
+        throw new Exception($c['error']);
+    }
+    if (!empty($q['overridable']) && (float)$q['amount'] > BALANCE_TOLERANCE && trim((string)($_POST['un_fee_quoted'] ?? '')) === '') {
+        throw new Exception('Review the change again: the amount kept for unused nights (' . number_format((float)$q['amount'], 2)
+            . ') was not shown before saving. Nothing was changed.');
+    }
+    return [$q, $c];
+}
+
+/**
+ * Checkout settlement (D-R1a): the unused-nights quote for one rh_late_stay_quote() choice. Notice date = the actual
+ * arrival when nights at the start were dropped ("charge only the nights actually stayed"), else the leave date.
+ */
+function bookings_checkout_unused_notice(array $bk, array $lq): string
+{
+    return (string)$lq['new_check_in'] > substr((string)$bk['check_in_date'], 0, 10) ? (string)$lq['new_check_in'] : (string)$lq['leave_date'];
 }
 
 // Read-only fee quote for the cancel dialog (cancellation policy): GET ?action=cancel_quote&id=N. Changes nothing.
@@ -1376,9 +1412,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $mbDrop = rh_rate_plan_dropped($pdo, $current, (string)($updates['check_in_date'] ?? $current['check_in_date']),
                     (string)($updates['check_out_date'] ?? $current['check_out_date']), (int)$updates['number_of_nights'], (int)$current['room_id']);
                 $mbRp = rh_reprice_at_booked_rate($current, (int)$updates['number_of_nights'], (float)$mbDrop['per_night']);
+                // Kept for unused nights (D-R1a, only when nights are cut; notice = today). $current = the locked row
+                // before the UPDATE above, so the quote is on the old dates.
+                [$mbUn, $mbUnChoice] = bookings_unused_nights_checked($pdo, $current, (string)($updates['check_in_date'] ?? $current['check_in_date']),
+                    (string)($updates['check_out_date'] ?? $current['check_out_date']), date('Y-m-d'), (float)$mbRp['new_gross'], (string)$currency_symbol);
                 rh_write_booking_stay_totals($pdo, $booking_id, $mbRp['totals'], null, null, null, $mbRp['new_child_supplement']);
                 if (!empty($mbDrop['removed'])) {
                     rh_rate_plan_drop_clear($pdo, $booking_id);
+                }
+                if ((int)$mbUn['unused'] > 0) {
+                    $mbUnPost = rh_unused_nights_fee_post($pdo, $current, $mbUn, $mbUnChoice, (int)($user['id'] ?? 0),
+                        (string)($user['full_name'] ?? ($user['username'] ?? '')), 'Quick modify');
                 }
             }
 
@@ -1396,6 +1440,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $message = 'Booking updated successfully.';
+            if (!empty($mbUnPost['posted'])) {
+                $message .= ' Kept for unused nights: ' . $currency_symbol . ' ' . number_format((float)$mbUnPost['amount'], 2) . ' (added to the bill).';
+            }
             if (isset($mbRp)) {
                 $mbLine = rh_booked_rate_change_for_booking($current, $mbRp, (int)$updates['number_of_nights'], ['currency' => $currency_symbol]);
                 if ($mbLine['ok']) {
@@ -1851,10 +1898,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $lnA = rh_booked_rate_change_for_booking($abk, $qA['reprice'], (int)$qA['nights'], ['currency' => $currency_symbol]);
                         $lineA = !empty($lnA['ok']) ? (string)$lnA['text'] : '';
                     }
+                    // Kept for unused nights (D-R1a): the policy amount comes off the refund (staff may change it on the form).
+                    $unA = rh_unused_nights_quote($pdo, $abk, (string)$qA['new_check_in'], (string)$qA['new_check_out'],
+                        bookings_checkout_unused_notice($abk, $qA), ['new_gross' => (float)$qA['new_gross'], 'cur' => (string)$currency_symbol]);
+                    $keptA = (int)$unA['unused'] > 0 && $unA['source'] === 'policy' ? (float)$unA['amount'] : 0.0;
                     $quotesA[$ymdA][$basisA] = [
+                        'unused'        => (int)$unA['unused'] > 0 ? rh_unused_nights_public($unA) : null,
+                        'refundable_before_fee' => $qA['refundable'],
                         'direction'     => $qA['direction'],
                         'amount'        => $qA['amount'],
-                        'refundable'    => $qA['refundable'],
+                        'refundable'    => round(max(0.0, (float)$qA['refundable'] - $keptA), 2),
                         'nights'        => $qA['nights'],
                         'extra_nights'  => $qA['extra_nights'],
                         'unused_nights' => $qA['unused_nights'],
@@ -1871,11 +1924,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // checkout_settle refunds with). Read only. Store credit is offered only when the refund setting says "ask".
             foreach ($quotesA as $ymdA => $rowA) {
                 foreach ($rowA as $basisA => $qA) {
-                    if ($qA['direction'] !== 'refund' || (float)$qA['refundable'] <= BALANCE_TOLERANCE) {
+                    // Before the unused-nights amount: staff may lower it on the form, so name every method the refund could use.
+                    if ($qA['direction'] !== 'refund' || (float)$qA['refundable_before_fee'] <= BALANCE_TOLERANCE) {
                         continue;
                     }
                     $methodsA = [];
-                    foreach (allocateBookingRefunds($pdo, (int)$booking_id, (float)$qA['refundable']) as $allocA) {
+                    foreach (allocateBookingRefunds($pdo, (int)$booking_id, (float)$qA['refundable_before_fee']) as $allocA) {
+
                         $methodsA[ucfirst(str_replace('_', ' ', (string)(($allocA['payment']['payment_method'] ?? '') ?: 'other')))] = true;
                     }
                     $quotesA[$ymdA][$basisA]['refund_methods'] = implode(', ', array_keys($methodsA));
@@ -1955,6 +2010,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $settlement_pay_id = 0;
+            $unSPost = null; // kept-for-unused-nights row posted by a 'leave' settlement (D-R1a)
             $settlementPaymentReference = null;
             $earlyRefundLegs = []; // refund notices go out after the commit (money returned = guest is told)
             $refundTotal = 0.0;
@@ -1993,6 +2049,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (empty($q['ok'])) {
                         throw new Exception($q['error']);
                     }
+                    // Kept for unused nights (D-R1a): quoted on the locked row before the reprice, checked against the review.
+                    [$unS, $unSChoice] = bookings_unused_nights_checked($pdo, $sbk, (string)$q['new_check_in'], (string)$q['new_check_out'],
+                        bookings_checkout_unused_notice($sbk, $q), (float)$q['new_gross'], (string)$currency_symbol);
 
                     if ($q['reprice'] !== null) {
                         // Booked rate × the nights for the leave date; the leave date (never today) is the new check-out.
@@ -2000,6 +2059,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             $pdo, $booking_id, $q['reprice']['totals'], (int)$q['nights'],
                             $q['new_check_in'], $q['new_check_out'], $q['reprice']['new_child_supplement']
                         );
+                        // The folio row goes in BEFORE the recalc, so the refund below already leaves it out.
+                        if ((int)$unS['unused'] > 0) {
+                            $unSPost = rh_unused_nights_fee_post($pdo, $sbk, $unS, $unSChoice, (int)($user['id'] ?? 0), $settleProcessedBy, 'Check out & settle');
+                        }
                         if (!recalculateBookingFinancials($booking_id)) {
                             throw new Exception('Could not recalculate the booking balance.');
                         }
@@ -2224,6 +2287,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $after_s = $afterS->fetch(PDO::FETCH_ASSOC) ?: [];
                 if ($q !== null) {
                     $settleDescribe = rh_late_stay_describe($q, $currency_symbol);
+                    if (!empty($unSPost['posted'])) {
+                        $settleDescribe .= ' Kept for unused nights: ' . $currency_symbol . ' ' . number_format((float)$unSPost['amount'], 2) . '.';
+                    }
                 } else {
                     $settleDescribe = 'Checkout settlement skipped (handled outside the system): booked stay '
                         . rh_late_stay_fmt((string)$sbk['check_in_date']) . ' to ' . rh_late_stay_fmt((string)$sbk['check_out_date'])
@@ -2908,7 +2974,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 echo json_encode(['success' => false, 'message' => 'Check-out must be after check-in']);
                 exit;
             }
-            echo json_encode(['success' => true] + bookings_stay_rate_preview($spBk, $spNights, $currency_symbol, $spIn->format('Y-m-d'), $spOut->format('Y-m-d')));
+            // Notice date for the unused-nights quote: 'leave' (admin checkout-date correction) = the new check-out, but never
+            // later than today (a future check-out is a notice given today, as Add / take off nights); else today.
+            $spNotice = (string)($_POST['un_notice'] ?? '') === 'leave' ? min(date('Y-m-d'), $spOut->format('Y-m-d')) : '';
+            echo json_encode(['success' => true] + bookings_stay_rate_preview($spBk, $spNights, $currency_symbol, $spIn->format('Y-m-d'), $spOut->format('Y-m-d'), $spNotice));
             exit;
         } elseif ($action === 'stay_nights_quote' || $action === 'stay_nights_apply') {
             // Add / take off nights on an in-house stay (owner 2026-11-13). The quote is the review card; the apply
@@ -2929,12 +2998,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     echo json_encode(['success' => false, 'message' => 'Booking not found']);
                     exit;
                 }
-                $snQ = rh_stay_nights_quote($pdo, $snBk, $snDelta, null, true, $currency_symbol);
+                $snQ = rh_stay_nights_quote($pdo, $snBk, $snDelta, null, true, $currency_symbol,
+                    (string)($_POST['un_fee_override'] ?? ''), (string)($_POST['un_fee_reason'] ?? ''));
                 if (empty($snQ['ok'])) {
                     echo json_encode(['success' => false, 'message' => $snQ['error']]);
                     exit;
                 }
-                unset($snQ['drop'], $snQ['reprice']);
+                if ($snQ['fee_error'] !== '') {
+                    echo json_encode(['success' => false, 'message' => $snQ['fee_error']]);
+                    exit;
+                }
+                $snQ['unused'] = is_array($snQ['unused']) ? rh_unused_nights_public($snQ['unused']) : null;
+                unset($snQ['drop'], $snQ['reprice'], $snQ['fee_choice']);
                 echo json_encode(['success' => true, 'quote' => $snQ + [
                     'reference' => (string)$snBk['booking_reference'],
                     'guest_name' => (string)$snBk['guest_name'],
@@ -2954,6 +3029,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'money_back_mode' => (string)($_POST['money_back_mode'] ?? ''),
                     'money_back_typed' => $_POST['money_back_typed'] ?? null,
                     'can_refund' => $snCanRefund,
+                    'un_fee_override' => (string)($_POST['un_fee_override'] ?? ''),
+                    'un_fee_reason' => (string)($_POST['un_fee_reason'] ?? ''),
+                    'un_fee_quoted' => (string)($_POST['un_fee_quoted'] ?? ''),
                 ], $user);
             } catch (Throwable $snEx) {
                 echo json_encode(['success' => false, 'message' => $snEx->getMessage()]);
@@ -3205,9 +3283,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 // RP-3: a length-of-stay / weekend / seasonal discount the new stay no longer qualifies for is removed.
                 $acdDrop = rh_rate_plan_dropped($pdo, $acd_locked, (string)$acd_locked['check_in_date'], $new_checkout, $newNights_acd, (int)$acd_locked['room_id']);
                 $rpAcd = rh_reprice_at_booked_rate($acd_locked, $newNights_acd, (float)$acdDrop['per_night']);
+                // Kept for unused nights (D-R1a): notice = the leave date (the corrected check-out), never later than today
+                // (a future check-out is a notice given today; same figure as the preview above).
+                [$acdUn, $acdUnChoice] = bookings_unused_nights_checked($pdo, $acd_locked, substr((string)$acd_locked['check_in_date'], 0, 10), $new_checkout,
+                    min(date('Y-m-d'), substr((string)$new_checkout, 0, 10)), (float)$rpAcd['new_gross'], (string)$currency_symbol);
                 rh_write_booking_stay_totals($pdo, $booking_id, $rpAcd['totals'], $newNights_acd, (string)$acd_locked['check_in_date'], $new_checkout, $rpAcd['new_child_supplement']);
                 if (!empty($acdDrop['removed'])) {
                     rh_rate_plan_drop_clear($pdo, $booking_id);
+                }
+                $acdUnPost = ['posted' => false, 'amount' => 0.0, 'history' => ''];
+                if ((int)$acdUn['unused'] > 0) {
+                    $acdUnPost = rh_unused_nights_fee_post($pdo, $acd_locked, $acdUn, $acdUnChoice, (int)($user['id'] ?? 0),
+                        (string)($user['full_name'] ?? ($user['username'] ?? '')), 'Admin: change checkout date');
                 }
                 recalculateBookingFinancials($booking_id);
                 // L1 (2026-11-13): a shorter stay must never leave paid money sitting on the booking as credit
@@ -3233,6 +3320,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $totalWithVat_acd = $rpAcd['new_gross'];
 
             $logReason = "Admin checkout date change: {$oldCheckout_acd} → {$new_checkout} ({$newNights_acd} nights)"
+                . (!empty($acdUnPost['posted']) ? '. Kept for unused nights: ' . $currency_symbol . ' ' . number_format((float)$acdUnPost['amount'], 2) : '')
                 . ($change_reason ? '. Reason: ' . $change_reason : '');
             bookings_log_status_change($pdo, $booking_id, 'checked-in', 'checked-in', $user['id'] ?? null, $logReason);
 
@@ -6176,6 +6264,48 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
         }
 
         // The quote for the current choice, or null (with a reason) when the choice is incomplete.
+        // Kept for unused nights (D-R1a): the amount staff keep (the policy amount, or what they typed) comes off the
+        // refund. A different leave date / basis clears what was typed.
+        function csApplyFee(q) {
+            if (!q || !q.unused || !q.unused.text || q.direction !== 'refund') return q;
+            const un = q.unused;
+            const st = window._csState || {};
+            const key = String(q.stay_text) + '|' + String(un.amount) + '|' + String(un.cap);
+            const ovEl = document.getElementById('cs_fee_override');
+            const rsEl = document.getElementById('cs_fee_reason');
+            if (st.feeKey !== key) {
+                st.feeKey = key;
+                if (ovEl) ovEl.value = '';
+                if (rsEl) rsEl.value = '';
+            }
+            // Same rule as the server: the policy amount, or what staff typed when it may be changed.
+            let kept = Number(un.amount) || 0;
+            const ov = un.overridable && ovEl ? String(ovEl.value || '').trim() : '';
+            if (ov !== '' && isFinite(parseFloat(ov))) kept = Math.min(Math.max(0, parseFloat(ov)), Number(un.cap));
+
+            const before = q.refundable_before_fee != null ? parseFloat(q.refundable_before_fee) : parseFloat(q.refundable || 0);
+            const out = Object.assign({}, q, {
+                kept: kept,
+                refundable: Math.max(0, Math.round((before - kept) * 100) / 100),
+                amount: Math.round((parseFloat(q.amount) - kept) * 100) / 100
+            });
+            if (kept > 0.005) out.describe = q.describe + ' Kept for unused nights: ' + fmt(kept) + ' (the bill goes down by ' + fmt(out.amount) + ').';
+            return out;
+        }
+        function csRenderFee(q) {
+            const box = document.getElementById('cs_fee');
+            if (!box) return;
+            const un = q && q.unused;
+            if (!un || !un.text) { box.hidden = true; return; }
+            document.getElementById('cs_fee_text').textContent = un.text;
+            document.getElementById('cs_fee_edit').hidden = !un.overridable;
+            if (un.overridable) {
+                document.getElementById('cs_fee_override').max = Number(un.cap).toFixed(2);
+                document.getElementById('cs_fee_override_label').textContent = 'Amount kept (leave empty for ' + fmt(un.amount) + '; 0 to ' + fmt(un.cap) + ')';
+            }
+            box.hidden = false;
+        }
+
         function csCurrentQuote() {
             const s = window._csState && window._csState.s;
             const sel = csSelectedLeave();
@@ -6189,7 +6319,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 if (!b) return { q: null, why: 'Choose how to count the nights.', row: row, date: sel.date };
                 basis = b.value;
             }
-            const q = row[basis];
+            const q = csApplyFee(row[basis]);
             if (!q) return { q: null, why: 'That way of counting is not possible for this date.' };
             return { q: q, basis: basis, date: sel.date, row: row };
         }
@@ -6224,6 +6354,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             }
 
             const cur = csCurrentQuote();
+            csRenderFee(cur.q);
             chargeRow.style.display = 'none';
             refundRow.style.display = 'none';
             quoteEl.hidden = false;
@@ -6263,7 +6394,8 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 ['Nights', q.nights + ' night(s): ' + q.stay_text],
                 ...(q.new_rate_text ? [['Room for these nights<br><small style="color:#666;">booked rate &times; nights</small>', escHtml(q.new_rate_text)]] : []),
                 ...(q.direction === 'charge' ? [['Extra nights', String(q.extra_nights)], ['Added to the bill', '<strong>' + fmt(q.amount) + '</strong>']] : []),
-                ...(q.direction === 'refund' ? [['Unused nights', String(q.unused_nights)], ['Bill reduced by', fmt(q.amount)], ['Refund now (capped at paid)', '<strong>' + fmt(q.refundable) + '</strong>']] : []),
+                ...(q.direction === 'refund' ? [['Unused nights', String(q.unused_nights)], ...(q.kept > 0.005 ? [['Kept for unused nights', fmt(q.kept)]] : []), ['Bill reduced by', fmt(q.amount)], ['Refund now (capped at paid)', '<strong>' + fmt(q.refundable) + '</strong>']] : []),
+
                 ['Paid so far', fmt(s.amount_paid)],
                 [window._csOnAccount ? 'Guest owes after checkout' : 'Balance after checkout', '<strong>' + fmt(balanceAfter) + '</strong>'],
                 ...(companyAfter !== null ? [[escHtml(window._csCompanyName) + ' owes after checkout<br><small style="color:#666;">stays on the company account</small>', fmt(companyAfter)]] : [])
@@ -6538,6 +6670,12 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             if (!cur.skip) {
                 formData.set('leave_date', cur.date);
                 if (csNeedsBasis(st.s, cur.date)) formData.set('stay_basis', cur.basis);
+                if (q.unused && q.unused.overridable) {
+                    // The quote shown is sent back: the server refuses a different figure.
+                    formData.set('un_fee_quoted', Number(q.unused.amount).toFixed(2));
+                    formData.set('un_fee_override', String(document.getElementById('cs_fee_override').value || '').trim());
+                    formData.set('un_fee_reason', String(document.getElementById('cs_fee_reason').value || '').trim());
+                }
                 // A refund goes back to the original payment method(s), or store credit when allowed (as the normal Refund).
                 if (q.direction === 'charge' && received > 0) {
                     formData.set('amount_received', received.toFixed(2));
@@ -6640,7 +6778,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         other.focus();
                     }
                 }
-                if (t.name === 'cs_leave' || t.name === 'cs_basis' || t.name === 'cs_refund_as' || t.id === 'cs_leave_other' || t.id === 'cs_amount_received') {
+                if (t.name === 'cs_leave' || t.name === 'cs_basis' || t.name === 'cs_refund_as' || t.id === 'cs_leave_other' || t.id === 'cs_amount_received' || t.id === 'cs_fee_override') {
                     const errEl = document.getElementById('cs_error');
                     if (errEl && e.type === 'change') errEl.style.display = 'none';
                     if (typeof window.renderCheckoutSettlement === 'function') window.renderCheckoutSettlement();
@@ -7487,6 +7625,20 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     <!-- Step 2: review, money back, reason -->
                     <div id="sn_step2" hidden>
                         <div id="sn_review" class="rh-review-card"></div>
+                        <div id="sn_fee" class="rh-review-card" hidden>
+                            <strong id="sn_fee_text"></strong>
+                            <div id="sn_fee_edit" hidden>
+                                <div class="form-group rh-mt">
+                                    <label for="sn_fee_override" id="sn_fee_override_label">Amount kept (leave empty for the policy amount)</label>
+                                    <input type="number" id="sn_fee_override" class="form-control" min="0" step="0.01" inputmode="decimal" autocomplete="off">
+                                </div>
+                                <div class="form-group">
+                                    <label for="sn_fee_reason">Reason for a different amount (needed when it differs from the policy)</label>
+                                    <input type="text" id="sn_fee_reason" class="form-control" maxlength="300" autocomplete="off">
+                                </div>
+                                <button type="button" class="btn btn-secondary btn-sm" id="sn_fee_apply">Update the figures</button>
+                            </div>
+                        </div>
                         <div id="sn_moneyback" class="rh-review-card rh-review-card--warn" hidden>
                             <strong id="sn_moneyback_title"></strong>
                             <p class="rh-choice-q">How does it go back?</p>
@@ -7550,6 +7702,16 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         <input type="date" id="acd_new_checkout" name="new_checkout" class="form-control" required style="border-color: var(--au-purple, #8b5cf6);">
                         <small style="color: var(--au-muted, #6b7280); display:block; margin-top:4px;">Can be in the past (e.g. to correct an overdue record). Total &amp; amount due will be recalculated.</small>
                         <div id="acd_rate_preview" class="bk-rate-preview" hidden aria-live="polite" style="background:#f7f3ee;border-radius:6px;padding:10px 12px;margin-top:10px;font-size:13px;line-height:1.6;"></div>
+                        <div id="acd_fee" hidden style="background:#fbf8f2;border:1px solid #e3d9c6;border-radius:6px;padding:10px 12px;margin-top:10px;font-size:13px;">
+                            <div class="form-group" style="margin-bottom:8px;">
+                                <label for="acd_fee_override" id="acd_fee_override_label">Amount kept for unused nights (leave empty for the policy amount)</label>
+                                <input type="number" min="0" step="0.01" inputmode="decimal" name="un_fee_override" id="acd_fee_override" class="form-control" autocomplete="off">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label for="acd_fee_reason">Reason for a different amount (needed when it differs from the policy)</label>
+                                <input type="text" name="un_fee_reason" id="acd_fee_reason" class="form-control" maxlength="300" autocomplete="off">
+                            </div>
+                        </div>
                     </div>
                     <div class="form-group">
                         <label for="acd_reason">Reason (required):</label>
@@ -7637,6 +7799,21 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                                 <option value="mobile_money">Mobile Money</option>
                                 <option value="other">Other</option>
                             </select>
+                        </div>
+                    </div>
+
+                    <!-- Kept for unused nights (D-R1a): the policy amount, which staff may change with a reason -->
+                    <div id="cs_fee" hidden style="background:#fbf8f2;border:1px solid #e3d9c6;border-radius:6px;padding:10px 12px;margin:10px 0;font-size:13px;">
+                        <p id="cs_fee_text" style="margin:0 0 8px;"></p>
+                        <div id="cs_fee_edit" hidden>
+                            <div class="form-group" style="margin-bottom:8px;">
+                                <label for="cs_fee_override" id="cs_fee_override_label">Amount kept (leave empty for the policy amount)</label>
+                                <input type="number" min="0" step="0.01" inputmode="decimal" id="cs_fee_override" class="form-control" autocomplete="off">
+                            </div>
+                            <div class="form-group" style="margin-bottom:0;">
+                                <label for="cs_fee_reason">Reason for a different amount (needed when it differs from the policy)</label>
+                                <input type="text" id="cs_fee_reason" class="form-control" maxlength="300" autocomplete="off">
+                            </div>
                         </div>
                     </div>
 
@@ -9371,13 +9548,14 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
 
         // ── Booked rate x new nights (read-only quote from the server: the same reprice the save uses) ──
         // Resolves to the preview object, or null when there is nothing to show; never blocks the action.
-        function bkStayRateQuote(bookingId, checkIn, checkOut) {
+        function bkStayRateQuote(bookingId, checkIn, checkOut, notice) {
             if (!bookingId || !checkOut) return Promise.resolve(null);
             const fd = new FormData();
             fd.append('action', 'stay_price_preview');
             fd.append('booking_id', bookingId);
             if (checkIn) fd.append('new_check_in', checkIn);
             fd.append('new_check_out', checkOut);
+            if (notice) fd.append('un_notice', notice);
             return postBookingAction(fd, 'Could not work out the new total.', 15000)
                 .then(d => (d && d.ok ? d : null))
                 .catch(() => null);
@@ -9396,6 +9574,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 ['Difference: ', q.delta_text]
             ];
             if (q.plan_note) rows.push(['Discount: ', q.plan_note]); // RP-3: a discount the new dates no longer qualify for
+            if (q.unused && q.unused.text) rows.push(['Unused nights: ', q.unused.text]); // D-R1a: kept for unused nights
             rows.forEach(r => {
                 const line = document.createElement('div');
                 const b = document.createElement('strong');
@@ -9413,17 +9592,48 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
 
         function bkStayRateDetails(q) {
             if (!q) return [];
-            return q.plan_note
+            const out = q.plan_note
                 ? ['Room: ' + q.new_text, 'Difference: ' + q.delta_text, q.plan_note]
                 : ['Room at the booked rate: ' + q.new_text, 'Difference: ' + q.delta_text];
+            if (q.unused && q.unused.text) out.push(q.unused.text);
+            return out;
         }
 
-        function bkRefreshStayRate(previewId, bookingId, checkIn, checkOut) {
+        // Kept for unused nights (D-R1a): the amount / reason fields under a date preview (prefix_fee block).
+        function bkFeeSync(prefix, q) {
+            const box = document.getElementById(prefix + '_fee');
+            if (!box) return;
+            const un = q && q.unused;
+            const on = !!(un && un.overridable && un.unused > 0);
+            box.hidden = !on;
+            const ov = document.getElementById(prefix + '_fee_override');
+            const rs = document.getElementById(prefix + '_fee_reason');
+            if (!on) {
+                if (ov) ov.value = '';
+                if (rs) rs.value = '';
+                return;
+            }
+            const money = v => _currencySymbol + ' ' + Number(v || 0).toFixed(2);
+            if (ov) ov.max = Number(un.cap).toFixed(2);
+            const lab = document.getElementById(prefix + '_fee_override_label');
+            if (lab) lab.textContent = 'Amount kept for unused nights (leave empty for ' + money(un.amount) + '; 0 to ' + money(un.cap) + ')';
+        }
+        // On save: the quote shown in the confirm box is the one sent back (the server refuses any other figure).
+        function bkFeeOnSubmit(prefix, fd, q) {
+            const un = q && q.unused;
+            fd.set('un_fee_quoted', un && un.overridable ? Number(un.amount).toFixed(2) : '');
+            const ov = String(document.getElementById(prefix + '_fee_override')?.value || '').trim();
+            if (!(un && un.overridable) || ov === '') return [];
+            const rs = String(document.getElementById(prefix + '_fee_reason')?.value || '').trim();
+            return ['Amount kept for unused nights set by staff: ' + _currencySymbol + ' ' + Number(ov).toFixed(2) + (rs ? '. Reason: ' + rs : '')];
+        }
+
+        function bkRefreshStayRate(previewId, bookingId, checkIn, checkOut, notice) {
             const el = document.getElementById(previewId);
             if (!el) return Promise.resolve(null);
-            const key = [bookingId, checkIn || '', checkOut || ''].join('|');
+            const key = [bookingId, checkIn || '', checkOut || '', notice || ''].join('|');
             el.dataset.quoteKey = key;
-            return bkStayRateQuote(bookingId, checkIn, checkOut).then(q => {
+            return bkStayRateQuote(bookingId, checkIn, checkOut, notice).then(q => {
                 if (el.dataset.quoteKey === key) bkRenderStayRate(el, q); // ignore an older answer that arrives late
                 return q;
             });
@@ -9434,9 +9644,12 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
         window.bkRenderStayRate = bkRenderStayRate;
         window.bkStayRateDetails = bkStayRateDetails;
         window.bkRefreshStayRate = bkRefreshStayRate;
+        window.bkFeeSync = bkFeeSync;
+        window.bkFeeOnSubmit = bkFeeOnSubmit;
 
         document.getElementById('acd_new_checkout')?.addEventListener('change', function() {
-            bkRefreshStayRate('acd_rate_preview', document.getElementById('acd_booking_id')?.value, '', this.value);
+            bkRefreshStayRate('acd_rate_preview', document.getElementById('acd_booking_id')?.value, '', this.value, 'leave')
+                .then(q => bkFeeSync('acd', q));
         });
 
         // ── Add / take off nights (owner 2026-11-13) ─────────────────────────
@@ -9444,7 +9657,16 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
         // same helper the save uses). Step 2: the review card (nights x booked rate, new total, new balance, money
         // back), a required reason, and for money going back the refund / credit note choice with the amount retyped.
         // Confirm posts the reviewed figures; the server re-quotes under the lock and refuses any difference.
-        const snState = { id: 0, ref: '', guest: '', checkout: '', delta: 1, quote: null, seq: 0, busy: false };
+        const snState = { id: 0, ref: '', guest: '', checkout: '', delta: 1, quote: null, seq: 0, busy: false, feeOv: '', feeRs: '' };
+        // Kept for unused nights (D-R1a): the amount staff typed and its reason, as last sent with a quote.
+        function snFeeInputs() {
+            return { ov: String((snEl('sn_fee_override') || {}).value || '').trim(), rs: String((snEl('sn_fee_reason') || {}).value || '').trim() };
+        }
+        function snFeeReset() {
+            if (snEl('sn_fee_override')) snEl('sn_fee_override').value = '';
+            if (snEl('sn_fee_reason')) snEl('sn_fee_reason').value = '';
+            snState.feeOv = ''; snState.feeRs = '';
+        }
 
         function snEl(id) { return document.getElementById(id); }
         // Show / hide with inline display (page CSS gives .btn and .alert a display that beats the hidden attribute).
@@ -9497,6 +9719,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             snLine(el, 'New check-out:', q.new_check_out_fmt + ' (' + q.new_nights + (q.new_nights === 1 ? ' night' : ' nights') + ' in total)');
             snLine(el, 'Room after the change:', q.new_text || snMoney(q.new_total));
             snLine(el, 'Difference:', (q.total_delta >= 0 ? '+' : '−') + snMoney(Math.abs(q.total_delta)));
+            if (q.unused && q.unused.unused > 0 && q.unused.text) snLine(el, 'Unused nights:', q.unused.text);
             if (q.delta > 0 && q.available === false) {
                 const p = document.createElement('div');
                 p.className = 'rh-text-danger';
@@ -9513,6 +9736,10 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             fd.append('action', 'stay_nights_quote');
             fd.append('booking_id', String(snState.id));
             fd.append('delta', String(snState.delta));
+            const fi = snFeeInputs();
+            fd.append('un_fee_override', fi.ov);
+            fd.append('un_fee_reason', fi.rs);
+            snState.feeOv = fi.ov; snState.feeRs = fi.rs;
             return postBookingAction(fd, 'Could not work out the new total.', 20000)
                 .then(d => {
                     if (seq !== snState.seq) return;
@@ -9530,6 +9757,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             if (d === 0) d += by; // there is no "0 nights" change
             if (d > 60 || d < -60) return;
             snState.delta = d;
+            snFeeReset();
             snShowError('');
             snEl('sn_delta_text').textContent = snDeltaLabel(d);
             clearTimeout(snTimer);
@@ -9561,6 +9789,19 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             if (q.plan_note) snLine(el, 'Discount:', q.plan_note);
             if (q.pay_later) snLine(el, 'Pay-later booking:', 'the balance stays owed under the agreed arrangement; the guest is not chased.');
             if (q.delta > 0) snLine(el, 'Room availability:', q.available === false ? 'NOT available' : 'checked - the room is free on the added night(s).');
+
+            const fee = snEl('sn_fee');
+            const un = q.unused;
+            const showFee = !!(un && un.unused > 0 && un.text);
+            snShow(fee, showFee);
+            if (showFee) {
+                snEl('sn_fee_text').textContent = un.text + (parseFloat(q.fee_kept || 0) > 0.01 ? ' Amount kept on this change: ' + snMoney(q.fee_kept) + '.' : '');
+                snEl('sn_fee_edit').hidden = !un.overridable;
+                if (un.overridable) {
+                    snEl('sn_fee_override').max = Number(un.cap).toFixed(2);
+                    snEl('sn_fee_override_label').textContent = 'Amount kept (leave empty for ' + snMoney(un.amount) + '; 0 to ' + snMoney(un.cap) + ')';
+                }
+            }
 
             const mb = snEl('sn_moneyback');
             const back = parseFloat(q.money_back || 0);
@@ -9598,6 +9839,14 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             fd.append('expected_new_total', String(q.new_total));
             fd.append('expected_total_delta', String(q.total_delta));
             fd.append('reason', reason);
+            const fi = snFeeInputs();
+            if (fi.ov !== snState.feeOv || fi.rs !== snState.feeRs) {
+                snShowError('Press "Update the figures" after changing the amount kept for unused nights.');
+                return;
+            }
+            fd.append('un_fee_override', fi.ov);
+            fd.append('un_fee_reason', fi.rs);
+            if (q.unused && q.unused.overridable) fd.append('un_fee_quoted', Number(q.unused.amount).toFixed(2));
             const back = parseFloat(q.money_back || 0);
             if (back > 0.01) {
                 const mode = document.querySelector('#extendStayForm input[name="sn_mode"]:checked');
@@ -9629,6 +9878,27 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                 });
         }
 
+        function snFeeUpdate() {
+            const q = snState.quote;
+            if (!q || snState.busy) return;
+            const fd = new FormData();
+            fd.append('action', 'stay_nights_quote');
+            fd.append('booking_id', String(snState.id));
+            fd.append('delta', String(q.delta));
+            const fi = snFeeInputs();
+            fd.append('un_fee_override', fi.ov);
+            fd.append('un_fee_reason', fi.rs);
+            postBookingAction(fd, 'Could not work out the new total.', 20000)
+                .then(d => {
+                    if (!d.quote) throw new Error('Could not work out the new total.');
+                    snState.feeOv = fi.ov; snState.feeRs = fi.rs;
+                    snState.quote = d.quote;
+                    snShowError('');
+                    snRenderReview(d.quote);
+                })
+                .catch(err => snShowError(err.message || 'Could not work out the new total.'));
+        }
+
         function openExtendStayModal(bookingId, bookingRef, currentCheckout, guestName) {
             const modal = document.getElementById('extendStayModal');
             if (!modal) return;
@@ -9651,6 +9921,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             const daysToTomorrow = Math.round((todayUtc - coUtc) / 86400000) + 1;
             snState.delta = Math.max(1, isFinite(daysToTomorrow) ? daysToTomorrow : 1);
             snEl('sn_reason').value = '';
+            snFeeReset();
             snShowError('');
             snSetStep(1);
             setBookingPageModalOpen(modal, true);
@@ -9667,6 +9938,8 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
         snEl('sn_review_btn')?.addEventListener('click', snGoReview);
         snEl('sn_back')?.addEventListener('click', function() { snShowError(''); snSetStep(1); });
         snEl('sn_confirm_btn')?.addEventListener('click', snConfirm);
+        snEl('sn_fee_apply')?.addEventListener('click', snFeeUpdate);
+
 
         // ── Admin Change Checkout Date Modal ──────────────────────────────────
         function openAdminChangeDateModal(bookingId, bookingRef, currentCheckout, guestName) {
@@ -9680,6 +9953,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             document.getElementById('acd_new_checkout').max = '';
             document.getElementById('acd_reason').value = '';
             bkRenderStayRate(document.getElementById('acd_rate_preview'), null);
+            bkFeeSync('acd', null);
             setBookingPageModalOpen(modal, true);
         }
 
@@ -9708,13 +9982,13 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             const newCheckout = document.getElementById('acd_new_checkout')?.value || '';
             const submitBtn = this.querySelector('button[type="submit"]');
             const form = this;
-            bkStayRateQuote(formData.get('booking_id'), '', newCheckout).then(rateQ => confirmAdminAction({
+            bkStayRateQuote(formData.get('booking_id'), '', newCheckout, 'leave').then(rateQ => confirmAdminAction({
                     title: 'Confirm checkout date change',
                     message: 'Update checkout date for booking ' + (bookingRef || 'this booking') + '?',
                     details: [
                         'Current: ' + (currentCheckout || '—'),
                         'New: ' + (newCheckout || '—')
-                    ].concat(bkStayRateDetails(rateQ)),
+                    ].concat(bkStayRateDetails(rateQ), bkFeeOnSubmit('acd', formData, rateQ)),
                     confirmText: 'Save Change',
                     icon: 'fa-calendar-pen',
                     tone: 'warning'
@@ -10508,6 +10782,16 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                         </div>
                     </div>
                     <div id="mb_rate_preview" class="bk-rate-preview" hidden aria-live="polite" style="background:#f7f3ee;border-radius:6px;padding:10px 12px;margin-top:10px;font-size:13px;line-height:1.6;"></div>
+                    <div id="mb_fee" hidden style="background:#fbf8f2;border:1px solid #e3d9c6;border-radius:6px;padding:10px 12px;margin-top:10px;font-size:13px;">
+                        <div class="form-group" style="margin-bottom:8px;">
+                            <label for="mb_fee_override" id="mb_fee_override_label">Amount kept for unused nights (leave empty for the policy amount)</label>
+                            <input type="number" min="0" step="0.01" inputmode="decimal" name="un_fee_override" id="mb_fee_override" class="form-control" autocomplete="off">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0;">
+                            <label for="mb_fee_reason">Reason for a different amount (needed when it differs from the policy)</label>
+                            <input type="text" name="un_fee_reason" id="mb_fee_reason" class="form-control" maxlength="300" autocomplete="off">
+                        </div>
+                    </div>
                     <div class="grid-3">
                         <div class="form-group">
                             <label>Adults</label>
@@ -10621,6 +10905,8 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     modal.dataset.loadedIn = b.check_in_date || '';
                     modal.dataset.loadedOut = b.check_out_date || '';
                     bkRenderStayRate(document.getElementById('mb_rate_preview'), null);
+                    bkFeeSync('mb', null);
+
                     set('mb_adults', b.adult_guests);
                     set('mb_children', b.child_guests);
                     set('mb_guests', b.number_of_guests);
@@ -10646,10 +10932,12 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
             document.getElementById(id)?.addEventListener('change', function() {
                 if (!mbDatesChanged()) {
                     bkRenderStayRate(document.getElementById('mb_rate_preview'), null);
+                    bkFeeSync('mb', null);
                     return;
                 }
                 bkRefreshStayRate('mb_rate_preview', document.getElementById('mb_booking_id')?.value,
-                    document.getElementById('mb_check_in')?.value, document.getElementById('mb_check_out')?.value);
+                    document.getElementById('mb_check_in')?.value, document.getElementById('mb_check_out')?.value)
+                    .then(q => bkFeeSync('mb', q));
             });
         });
 
@@ -10685,7 +10973,7 @@ $bkCanConfirm = hasPermission((int)($user['id'] ?? 0), 'edit_booking');
                     'Stay: ' + (fd.get('check_in_date') || '-') + ' to ' + (fd.get('check_out_date') || '-'),
                     'Guests: ' + (fd.get('number_of_guests') || '-') + ' total, ' + (fd.get('adult_guests') || '-') + ' adult(s), ' + (fd.get('child_guests') || '0') + ' child guest(s)',
                     'Date changes reprice the stay at the booked rate.'
-                ].concat(bkStayRateDetails(mbRateQ)),
+                ].concat(bkStayRateDetails(mbRateQ), bkFeeOnSubmit('mb', fd, mbRateQ)),
                 confirmText: 'Save Changes',
                 icon: 'fa-pen-to-square'
             });
