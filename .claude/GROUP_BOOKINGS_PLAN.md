@@ -72,7 +72,7 @@ R7 **Accounting stays exact after any R1/R3/R5/R6.**
 4. **Ship A2 (D-R1a).** A1, A2 and A3 on all six paths, late arrival included (owner answer 2). The A8 guard is lifted. Tell dept-eod-lead about the "Kept for unused nights" line.
 5. **Ship B (R4).** A7 first: a no-show or cancelled room that still owes can take a payment. Then open the group charge from Payments / Accounting, and the search fixes (deleted rooms, room x of N).
 5b. **Ship C (R3 + R5 + R6 + the A5 move-credit action).** ONE A6 re-point helper with three callers. D-R6 lump-sum move = A5's issue + apply pair.
-5c. **Owner answer 3 backfill at Rosalyn's**, after Ship A ships.
+5c. **DONE 2026-11-17: Owner answer 3 backfill at Rosalyn's** (14 rows; 2100008851 already had it, 2100008852 is the no-show).
    - One UPDATE guarded by the 15 ids, status 'checked-out' and checkout_completed_at IS NULL.
    - The time comes from the log converted UTC→local (log 14:15 = local 16:15).
    - Ask the owner at the permission prompt.
