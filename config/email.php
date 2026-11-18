@@ -2482,6 +2482,64 @@ function rh_email_cancel_policy_blocks(array $vars, bool $withFee = false): stri
 }
 
 /**
+ * A group's LEAD room, passed as its own stored row (Confirm, Resend confirmation / received, bulk resend), lifted to the
+ * party's totals so the "your booking" emails print what the whole party owes, as the emails sent when the party was
+ * booked do (booking.php / create-booking.php pass party totals) and as the group invoice does. Sums total_with_vat,
+ * amount_due, total_amount, vat_amount, tourism_levy_amount, child_supplement_total and the guest counts over
+ * rh_email_booked_rate_rows() (the party's live rooms) and adds all_references. Unchanged when: not a lead (a member's
+ * email stays its own room), one live room, the caller already passed party totals (its owed differs from the stored
+ * row's), or a read fails. Read-only. Never used for per-room emails (invoice, receipt, cancellation, reminders).
+ */
+function rh_email_party_booking(PDO $pdo, array $booking): array
+{
+    $id = (int)($booking['id'] ?? 0);
+    if ($id <= 0 || !empty($booking['all_references']) || !empty($booking['primary_booking_id'])) {
+        return $booking;
+    }
+    $rows = rh_email_booked_rate_rows($pdo, $id);
+    if (count($rows) < 2) {
+        return $booking;
+    }
+    $self = null;
+    foreach ($rows as $r) {
+        if ((int)($r['id'] ?? 0) === $id) {
+            $self = $r;
+        }
+    }
+    $tol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+    if ($self === null || !empty($self['primary_booking_id'])
+        || abs((float)rh_booking_owed($booking)['owed'] - (float)rh_booking_owed($self)['owed']) > $tol) {
+        return $booking;
+    }
+    $sum = ['total_with_vat' => 0.0, 'total_amount' => 0.0, 'vat_amount' => 0.0, 'tourism_levy_amount' => 0.0, 'child_supplement_total' => 0.0];
+    $guests = ['number_of_guests' => 0, 'adult_guests' => 0, 'child_guests' => 0];
+    $refs = [];
+    $childRooms = 0;
+    foreach ($rows as $r) {
+        $sum['total_with_vat'] += (float)rh_booking_owed($r)['owed'];
+        foreach (['total_amount', 'vat_amount', 'tourism_levy_amount', 'child_supplement_total'] as $k) {
+            $sum[$k] += (float)($r[$k] ?? 0);
+        }
+        $children = (int)($r['child_guests'] ?? 0);
+        $guests['number_of_guests'] += (int)($r['number_of_guests'] ?? 0);
+        $guests['child_guests'] += $children;
+        $guests['adult_guests'] += (int)($r['adult_guests'] ?? max(1, (int)($r['number_of_guests'] ?? 1) - $children));
+        $childRooms += $children > 0 ? 1 : 0;
+        $refs[] = (string)($r['booking_reference'] ?? '');
+    }
+    foreach ($sum as $k => $v) {
+        $booking[$k] = round($v, 2);
+    }
+    $booking['amount_due'] = $booking['total_with_vat'];
+    foreach ($guests as $k => $v) {
+        $booking[$k] = $v;
+    }
+    $booking['rooms_in_group'] = max(1, $childRooms);
+    $booking['all_references'] = array_values(array_filter($refs, 'strlen'));
+    return $booking;
+}
+
+/**
  * The live rooms of a booking's party, as stored bookings rows (b.*, room_name = room type, room_label = the room
  * number(s) assigned): rh_booking_group_ids() (not deleted, not cancelled / no-show / expired / checked out), the lead
  * first, then id order. A booking outside a group, or one that is no longer live, gives just its own row.
@@ -2856,6 +2914,10 @@ function sendBookingReceivedEmail(array $booking)
     global $pdo, $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url;
 
     try {
+        // A group lead's own stored row (Confirm / Resend): print the whole party's total, as when it was booked.
+        if ($pdo instanceof PDO) {
+            $booking = rh_email_party_booking($pdo, $booking);
+        }
         // Get room details
         $stmt = $pdo->prepare("SELECT * FROM rooms WHERE id = ?");
         $stmt->execute([$booking['room_id']]);
@@ -2960,6 +3022,10 @@ function sendBookingConfirmedEmail(array $booking)
     global $pdo, $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url;
 
     try {
+        // A group lead's own stored row (Confirm / Resend): print the whole party's total, as when it was booked.
+        if ($pdo instanceof PDO) {
+            $booking = rh_email_party_booking($pdo, $booking);
+        }
         // Get room details
         $stmt = $pdo->prepare("SELECT * FROM rooms WHERE id = ?");
         $stmt->execute([$booking['room_id']]);
@@ -4878,6 +4944,10 @@ function sendTentativeBookingConfirmedEmail(array $booking)
     global $pdo, $email_from_name, $email_from_email, $email_admin_email, $email_site_name, $email_site_url;
 
     try {
+        // A group lead's own stored row (Confirm / Resend): print the whole party's total, as when it was booked.
+        if ($pdo instanceof PDO) {
+            $booking = rh_email_party_booking($pdo, $booking);
+        }
         // Get room details
         $stmt = $pdo->prepare("SELECT * FROM rooms WHERE id = ?");
         $stmt->execute([$booking['room_id']]);

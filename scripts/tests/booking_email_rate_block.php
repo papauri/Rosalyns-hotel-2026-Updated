@@ -152,7 +152,7 @@ if (!$roomA || !$roomB) {
         // Party: lead + a second room of another type + a cancelled third room
         $R = $prefix . 'P';
         $lead = $add($R, $roomA, 300000, 'confirmed', null, 'Early Bird', 10000);
-        $add($R . '-2', $roomB, 240000, 'confirmed', $lead, 'Early Bird', 10000);
+        $memberId = $add($R . '-2', $roomB, 240000, 'confirmed', $lead, 'Early Bird', 10000);
         $add($R . '-3', $roomA, 150000, 'cancelled', $lead, 'Early Bird', 10000);
         // As the public booking page passes it: party totals, no rate plan columns, every reference made.
         $v = buildBookingEmailVariables(['id' => $lead, 'booking_reference' => $R, 'room_id' => $roomA['id'], 'guest_name' => 'Zz Rate Mail Test',
@@ -168,6 +168,29 @@ if (!$roomA || !$roomB) {
         ok('stored party: one plan line for every room', $has($blk, 'Rate plan for every room: Early Bird - ' . $m(10000) . ' a night off'), $blk);
         ok('stored party: total_amount_formatted untouched', $v['total_amount_formatted'] === number_format(540000, 0), (string)$v['total_amount_formatted']);
 
+        // Confirm / Resend: the lead's OWN stored row (one room's figures) is lifted to the party's live rooms.
+        $stLead = $pdo->prepare("SELECT b.*, r.name AS room_name FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id WHERE b.id = ?");
+        $stLead->execute([$lead]);
+        $leadRow = $stLead->fetch(PDO::FETCH_ASSOC);
+        $lifted = rh_email_party_booking($pdo, $leadRow);
+        ok('party lift: lead row owes the live rooms (300,000 + 240,000, cancelled room out)', abs((float)$lifted['total_with_vat'] - 540000) < 0.01 && abs((float)$lifted['amount_due'] - 540000) < 0.01 && abs((float)$lifted['total_amount'] - 540000) < 0.01, json_encode([$lifted['total_with_vat'], $lifted['amount_due'], $lifted['total_amount']]));
+        ok('party lift: guests summed, both live references', (int)$lifted['number_of_guests'] === 4 && $lifted['all_references'] === [$R, $R . '-2'], json_encode([$lifted['number_of_guests'], $lifted['all_references']]));
+        $v = buildBookingEmailVariables($lifted, $roomA);
+        $blk = (string)($v['booked_rate_block'] ?? '');
+        ok('party lift: email total is the party total', $v['total_amount_formatted'] === number_format(540000, 0), (string)$v['total_amount_formatted']);
+        ok('party lift: every live room rate printed (agrees with the total)', $has($blk, $m(100000) . ' × 3 nights') && $has($blk, $m(80000) . ' × 3 nights'), $blk);
+        $v1 = buildBookingEmailVariables($leadRow, $roomA);
+        ok('without the lift the row prints one room (shows the old fault)', $v1['total_amount_formatted'] === number_format(300000, 0), (string)$v1['total_amount_formatted']);
+        // Already party totals (public / front-desk create): unchanged, so never counted twice.
+        $already = ['total_with_vat' => 540000, 'total_amount' => 540000] + $leadRow;
+        ok('party lift: party totals already passed stay as they are', rh_email_party_booking($pdo, $already) === $already);
+        $withRefs = $leadRow + ['all_references' => [$R]];
+        ok('party lift: a payload with all_references stays as it is', rh_email_party_booking($pdo, $withRefs) === $withRefs);
+        // A member room's email stays its own room.
+        $stLead->execute([$memberId]);
+        $memberRow = $stLead->fetch(PDO::FETCH_ASSOC);
+        ok('party lift: member room unchanged', is_array($memberRow) && rh_email_party_booking($pdo, $memberRow) === $memberRow);
+
         // Single stored room: plan label + its money vars filled
         $S = $prefix . 'S';
         $sid = $add($S, $roomA, 300000, 'pending', null, 'Early Bird', 10000);
@@ -176,6 +199,9 @@ if (!$roomA || !$roomB) {
         $blk = (string)($v['booked_rate_block'] ?? '');
         ok('stored single: plan label and discount vars filled', $v['rate_plan_label'] === 'Early Bird' && $v['rate_plan_discount_formatted'] === number_format(30000, 0), json_encode([$v['rate_plan_label'], $v['rate_plan_discount_formatted']]));
         ok('stored single: rate x nights, no reference list', $has($blk, $m(100000) . ' × 3 nights') && !$has($blk, 'Your rooms'), $blk);
+        $stLead->execute([$sid]);
+        $singleRow = $stLead->fetch(PDO::FETCH_ASSOC);
+        ok('party lift: single room unchanged', is_array($singleRow) && rh_email_party_booking($pdo, $singleRow) === $singleRow);
         $r = rh_render_booking_email_template_row('booking_received', ['subject' => 's', 'html_body' => '<p>{{rate_plan_label}}</p>', 'text_body' => ''], $v);
         ok('stored single: booking_received gets the block', $has($r['html_body'], 'Your rate') && $has($r['html_body'], '<p>Early Bird</p>'), $r['html_body']);
     } catch (Throwable $e) {
