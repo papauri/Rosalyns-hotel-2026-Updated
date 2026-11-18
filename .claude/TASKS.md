@@ -6,13 +6,19 @@ Status: TODO · DOING · REVIEW · SHIPPED · BLOCKED (owner).
 
 ## Open
 - PRIORITY ORDER (owner 2026-11-19: "lets sort them by priority"). Run top down, one per fresh session; owner can reorder.
+  NEXT SESSION PLAN (owner 2026-11-19), in this order, one ship at a time:
+    a. Ship M2 (item 2).
+    b. Step 13 (item 3).
+    c. Fix the gaps in PDFs and emails = ALL of item 5 (owner: "Fix gaps in PDF and emails"; no longer "owner picks which").
+    d. U3 (item 7) with owner rules: only staff with permission can change a main unit (new permission, default admin+manager unless the owner says otherwise); full History/System Logs of who, when, old -> new; every other place that uses the item (recipes, counts, stock value, reports, POS deduction, menu costs) shows the new unit at once, value identical before and after.
+    Items 1 (blocked), 4 and 6 are not in this session unless the owner asks.
   1. ROSALYN'S OPENING COUNT IN SHOTS (STEP U line, FOUND 2026-11-18): count 20261117-0710 stores shots/glasses as bottles (Whiskys 602 "bottles" = MWK 73.2m, house red 235 = 16.5m, liqueurs 252 = 11.5m) -> stock value and cost of sales wrong at the live hotel. BLOCKED: owner/bar manager names the lines counted in shots/glasses; then run the U1 "counted in the smaller measure" correction at Rosalyn's on the owner's ask (Preview + Confirm, History old -> new).
   2. SHIP M2 (QUEUE line): a credit-note move still reads as a refund on Payments, Accounting dashboard and guest history. dept-accounting-lead opus, Liwonde first.
   3. NEXT_BUILD_ORDER step 13: a booking can show "Unpaid" yet be missing from the Unpaid tab, so balances get missed. dept-accounting-lead opus.
   4. NEXT_BUILD_ORDER step 15: rate plan leftovers; festive prices live from 18 Dec. Owner question first: merge Rosalyn's festive plans (before the next mirror run).
   5. SHIP Q3 GAPS (owner picks which): group invoice email / booked-rate lines without the room's guest name, invoice PDF room line without nights, quotation PDF one room only, other group emails (reminder, pre-arrival, check-in, cancellation, no-show, extend, modified) do not list the rooms.
   6. NEXT_BUILD_ORDER step 14: rare POS/KDS faults (extra tab after a lost reply; lock clash). Moves up when Rosalyn's starts POS sales.
-  7. STEP U3: "Change main unit" per item (bottle <-> shot/glass) with Preview + Confirm, stock value identical before and after; accounting lead checks.
+  7. STEP U3: "Change main unit" per item (bottle <-> shot/glass) with Preview + Confirm, stock value identical before and after; accounting lead checks. Owner rules 2026-11-19: permitted users only, full who/when log, every affected place updates at once (see NEXT SESSION PLAN d).
   8. Screens, no wrong data: step 9b (other pop-ups on phones/tablets), step 10 (Bookings list on tablets), Recipes ingredient row layout (UI_REQUEST 2026-11-19), step 16 (filter polish).
   9. Owner decisions on hold: 4th Street Red + Rose wine costs ("not yet"); AI stock helper phases 2+3 / S3 (ask first); AI Review panels (parked).
   ALWAYS LAST, only when the owner prompts: Guides + Assistant sync (.claude/GUIDES_AI_SYNC.md Pending).
