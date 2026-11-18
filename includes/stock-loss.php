@@ -138,6 +138,7 @@ if (!function_exists('rh_stock_alert_level')) {
                 WHERE sa.created_at >= DATE_SUB(NOW(), INTERVAL {$days} DAY)
                   AND (sa.source_type IN ('manual', 'expiry', 'recall')
                        OR (sa.source_type = 'wastage' AND EXISTS (SELECT 1 FROM stock_wastage w WHERE w.id = sa.source_id AND w.batch_id IS NOT NULL)))
+                  " . (function_exists('rh_stock_measure_fix_sql') ? 'AND NOT ' . rh_stock_measure_fix_sql('sa') : '') . "
                 ORDER BY sa.created_at DESC, sa.id DESC
                 LIMIT 100
             ");

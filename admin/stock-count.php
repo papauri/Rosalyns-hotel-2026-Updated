@@ -35,6 +35,11 @@ $user = [
 /* Who can approve or reject a submitted count: the "Approve stock counts" permission (admin and manager by
  * default; any user can be given it in User Management). Not the same as who may open the page. */
 $canApprove = hasPermission((int)$user['id'], 'stock_count_approve');
+/* Count measures (Step U1): set an item measure from a count line = Stock Items or approve permission; correct an
+ * APPROVED count that was counted in the smaller measure = both. */
+$canMeasure = $canApprove || hasPermission((int)$user['id'], 'stock_management');
+$canFix = $canApprove && hasPermission((int)$user['id'], 'stock_management');
+$scMeasureReady = rh_stock_measure_ready($pdo); // migration 088 has run
 /* Two-person rule for stock counts: ON unless a global admin switched it off in Hotel Settings
  * (then whoever counted can approve or reject their own count). */
 $secondRuleOn = rh_sca_second_approver_required();
@@ -437,7 +442,7 @@ function scReadPostedLines(array $post, array $ownIds): array
                 throw new RuntimeException('That is too many lines for one save (the limit is 5,000), so nothing was saved. Start smaller counts, one category or a few chosen items at a time.');
             }
             $payload = [];
-            foreach (['actual', 'cost', 'reason', 'notes', 'touched'] as $k) {
+            foreach (['actual', 'cost', 'reason', 'notes', 'touched', 'mode', 'big', 'small'] as $k) { // mode/big/small: count measures (Step U1)
                 if (!array_key_exists($k, $row) || $row[$k] === null) {
                     continue;
                 }
@@ -476,7 +481,13 @@ function scSaveCountLines(PDO $pdo, int $countId, array $post, array $user, bool
      * line). They are read back from the database, never from the posted form: a tampered or
      * stale hidden field would otherwise set the variance - and, once approved, the stock
      * adjustment - to any figure. */
-    $snapSel = $pdo->prepare("SELECT ingredient_id, system_quantity, cost_per_unit, actual_quantity, variance" . ($hasCol ? ', counted_at' : '') . " FROM stock_count_lines WHERE id = ? AND count_id = ?");
+    /* Count measures (Step U1): an item with a measure can be typed in the stock unit, the other measure, or both
+     * ("2 bottles + 7 shots"). The reading saved is always worked out HERE from what was typed (never the page's own
+     * figure) at 6 dp, and what was typed, how, and N are kept on the line. */
+    $mReady = rh_stock_measure_ready($pdo);
+    $snapSel = $pdo->prepare("SELECT scl.ingredient_id, scl.system_quantity, scl.cost_per_unit, scl.actual_quantity, scl.variance" . ($hasCol ? ', scl.counted_at' : '')
+        . ($mReady ? ', i.measure_big_name, i.measure_small_name, i.measure_per_big, i.measure_stock_side' : '')
+        . " FROM stock_count_lines scl" . ($mReady ? ' INNER JOIN stock_ingredients i ON i.id = scl.ingredient_id' : '') . " WHERE scl.id = ? AND scl.count_id = ?");
     foreach ($lines as $lineId => $payload) {
         $lineId = (int)$lineId;
         $actualRaw = trim((string)($payload['actual'] ?? ''));
@@ -493,6 +504,63 @@ function scSaveCountLines(PDO $pdo, int $countId, array $post, array $user, bool
         $snap = $snapSel->fetch(PDO::FETCH_ASSOC);
         if (!$snap) {
             continue;
+        }
+        $measure = $mReady ? rh_stock_measure_get($snap) : null;
+        $entrySet = false; // true = write the entry_* fields below
+        $entry = null;     // [mode, big, small, n] or null = clear them
+        if ($mReady && array_key_exists('mode', $payload)) {
+            $pMode = (string)$payload['mode'];
+            if (!in_array($pMode, ['stock', 'big', 'small', 'both'], true)) {
+                throw new RuntimeException('A reading was sent with a measure the server does not know, so nothing was saved. Reload the page and save again.');
+            }
+            if ($measure === null) {
+                $pMode = 'stock';
+            }
+            if ($pMode !== 'stock') {
+                $num = static function (string $k) use ($payload): ?float {
+                    $raw = trim((string)($payload[$k] ?? ''));
+                    if ($raw === '') {
+                        return null;
+                    }
+                    if (!is_numeric($raw)) {
+                        throw new RuntimeException('A reading is not a number, so nothing was saved. Type digits only (for example 12 or 2.5), or 0 if there is none, then save again.');
+                    }
+                    if ((float)$raw < 0) {
+                        throw new RuntimeException('A reading is negative, so nothing was saved. A reading is what is physically there, so it can’t be below 0 - type 0 if there is none.');
+                    }
+                    if ((float)$raw > 99999999) {
+                        throw new RuntimeException('A reading is too large (the limit is 99,999,999), so nothing was saved. Check it for an extra digit and save again.');
+                    }
+                    return (float)$raw;
+                };
+                $b = $num('big');
+                $sm = $num('small');
+                if ($pMode === $measure['side']) {
+                    // Typed in the measure that IS the stock unit: that is a plain stock-unit reading.
+                    $v = $pMode === 'big' ? $b : $sm;
+                    $isBlank = ($v === null);
+                    $actual = $v ?? 0.0;
+                    $pMode = 'stock';
+                } else {
+                    $isBlank = $pMode === 'big' ? $b === null : ($pMode === 'small' ? $sm === null : ($b === null && $sm === null));
+                    $actual = 0.0;
+                    if (!$isBlank) {
+                        $actual = (float)rh_stock_measure_to_stock($pMode, $b ?? 0.0, $sm ?? 0.0, (float)$measure['n'], $measure['side']);
+                        $entry = [$pMode, $pMode === 'small' ? null : ($b ?? 0.0), $pMode === 'big' ? null : ($sm ?? 0.0), $measure['n']];
+                    }
+                }
+                if ($actual > 99999999) {
+                    throw new RuntimeException('A reading is too large (the limit is 99,999,999), so nothing was saved. Check it for an extra digit and save again.');
+                }
+            }
+            if ($pMode === 'stock' && !$isBlank && $measure !== null) {
+                $entry = ['stock', null, null, $measure['n']];
+            }
+            $entrySet = true;
+        } elseif ($mReady && ($isBlank || !scLineIsCounted($snap, $hasCol) || abs($actual - (float)$snap['actual_quantity']) > 0.00005)) {
+            // Older page (no mode sent) changed the reading: it was typed in the stock unit.
+            $entry = ($isBlank || $measure === null) ? null : ['stock', null, null, $measure['n']];
+            $entrySet = true;
         }
         $sys    = (float)$snap['system_quantity'];
         $cost   = (float)$snap['cost_per_unit'];
@@ -526,6 +594,10 @@ function scSaveCountLines(PDO $pdo, int $countId, array $post, array $user, bool
             array_push($params, $costSet, $costSet);
         }
         $wasCounted = scLineIsCounted($snap, $hasCol);
+        if ($entrySet) {
+            $sql .= ", entry_mode = ?, entry_big = ?, entry_small = ?, entry_per_big = ?";
+            array_push($params, ...($entry ?? [null, null, null, null]));
+        }
 
         if ($isBlank) {
             /* Blank = "not counted". With the counted_at column that is always recorded; without
@@ -561,6 +633,269 @@ function scSaveCountLines(PDO $pdo, int $countId, array $post, array $user, bool
     }
 
     $pdo->commit();
+}
+
+/* ============== Count measures (Step U1, owner 2026-11-18: bar stock counted in shots or glasses) ==============
+ * The item measure itself lives on stock_ingredients (see rh_stock_measure_* in config/database.php). */
+
+/* Recompute a SUBMITTED count's totals from its lines (after a line was re-worked before approval). */
+function scRefreshSubmittedTotals(PDO $pdo, int $countId): void
+{
+    $t = $pdo->prepare("SELECT COALESCE(SUM(variance_cost),0) AS t, COALESCE(SUM(CASE WHEN variance_cost<0 THEN variance_cost ELSE 0 END),0) AS s, COALESCE(SUM(CASE WHEN variance_cost>0 THEN variance_cost ELSE 0 END),0) AS p FROM stock_count_lines WHERE count_id = ?");
+    $t->execute([$countId]);
+    $r = $t->fetch(PDO::FETCH_ASSOC);
+    $pdo->prepare("UPDATE stock_counts SET total_variance_cost = ?, shortage_cost = ?, surplus_cost = ?, updated_at = NOW() WHERE id = ? AND status = 'submitted'")
+        ->execute([(float)$r['t'], (float)$r['s'], (float)$r['p'], $countId]);
+}
+
+/* What the counter typed on a line, in words ("602 bottles", "7 shots", "2 bottles + 7 shots"). */
+function scLineTypedLabel(array $ln, ?array $m, string $unit): string
+{
+    $mode = (string)($ln['entry_mode'] ?? '');
+    if ($m !== null && in_array($mode, ['big', 'small', 'both'], true)) {
+        return rh_stock_measure_label($mode, $ln['entry_big'], $ln['entry_small'], $m);
+    }
+    $q = (float)$ln['actual_quantity'];
+    return rh_stock_qty_fmt($q, 0) . ' ' . ($m !== null ? rh_stock_measure_plural($m['side'] === 'big' ? $m['big'] : $m['small'], $q) : $unit);
+}
+
+/* Change how a line on a SUBMITTED count was typed (an approver, before approval): the stock unit <-> the other single
+ * measure. The number typed keeps its value ("602" bottles -> "602" shots); the reading is worked out again and the
+ * difference moves by exactly the change (what should be there is unchanged). A line typed in both measures keeps its
+ * mode (only N can change for it). Runs inside the caller's transaction. Returns a plain sentence, '' if nothing changed. */
+function scSetLineMode(PDO $pdo, int $countId, int $lineId, string $newMode, int $userId): string
+{
+    $q = $pdo->prepare("SELECT scl.*, sc.status, sc.reference, i.name AS ingredient_name, i.unit, i.measure_big_name, i.measure_small_name, i.measure_per_big, i.measure_stock_side
+        FROM stock_count_lines scl INNER JOIN stock_counts sc ON sc.id = scl.count_id INNER JOIN stock_ingredients i ON i.id = scl.ingredient_id
+        WHERE scl.id = ? AND scl.count_id = ? FOR UPDATE");
+    $q->execute([$lineId, $countId]);
+    $ln = $q->fetch(PDO::FETCH_ASSOC);
+    if (!$ln) {
+        throw new RuntimeException('That line is not part of this count. Reload the count and try again.');
+    }
+    if ((string)$ln['status'] !== 'submitted') {
+        throw new RuntimeException('How a line was typed can only be changed on a count waiting for approval. On a count still being counted, change it on the line itself.');
+    }
+    $m = rh_stock_measure_get($ln);
+    if ($m === null) {
+        throw new RuntimeException($ln['ingredient_name'] . ' has no count measure, so there is nothing to switch to.');
+    }
+    if (!scLineIsCounted($ln, scHasLineCol($pdo, 'counted_at'))) {
+        throw new RuntimeException('That line has no reading, so how it was typed can’t be changed.');
+    }
+    $old = (string)($ln['entry_mode'] ?? '');
+    if ($old === '' || $old === $m['side']) {
+        $old = 'stock';
+    }
+    if ($old === 'both') {
+        throw new RuntimeException('This line was typed in both measures (' . scLineTypedLabel($ln, $m, (string)$ln['unit']) . '), so only how many ' . rh_stock_measure_plural($m['small'], 2) . ' make one ' . $m['big'] . ' can be changed for it.');
+    }
+    $other = $m['side'] === 'big' ? 'small' : 'big';
+    if ($newMode !== 'stock' && $newMode !== $other) {
+        throw new RuntimeException('Choose how the line was typed: in ' . rh_stock_measure_plural($m[$m['side']], 2) . ' or in ' . rh_stock_measure_plural($m[$other], 2) . '.');
+    }
+    if ($newMode === $old) {
+        return '';
+    }
+    $typed = $old === 'stock' ? (float)$ln['actual_quantity'] : (float)($old === 'big' ? $ln['entry_big'] : $ln['entry_small']);
+    $newAct = $newMode === 'stock' ? round($typed, 6) : rh_stock_measure_to_stock($newMode, $typed, $typed, (float)$m['n'], $m['side']);
+    if ($newAct === null) {
+        throw new RuntimeException('The reading could not be worked out with this measure. Nothing was changed.');
+    }
+    $oldLabel = scLineTypedLabel($ln, $m, (string)$ln['unit']);
+    $oldAct = (float)$ln['actual_quantity'];
+    $var = round((float)$ln['variance'] + ($newAct - $oldAct), 6);
+    $vc = round($var * (float)$ln['cost_per_unit'], 4);
+    $reason = (string)($ln['reason_code'] ?? '');
+    if ($var < -0.0001 && $reason === '') {
+        $reason = 'correction'; // a shortage needs a reason before approval; this one comes from the measure change
+    }
+    $pdo->prepare("UPDATE stock_count_lines SET actual_quantity = ?, variance = ?, variance_cost = ?, reason_code = ?, entry_mode = ?, entry_big = ?, entry_small = ?, entry_per_big = ? WHERE id = ?")
+        ->execute([$newAct, $var, $vc, $reason, $newMode, $newMode === 'big' ? $typed : null, $newMode === 'small' ? $typed : null, $m['n'], $lineId]);
+    scRefreshSubmittedTotals($pdo, $countId);
+    $ln2 = array_merge($ln, ['actual_quantity' => $newAct, 'entry_mode' => $newMode, 'entry_big' => $newMode === 'big' ? $typed : null, 'entry_small' => $newMode === 'small' ? $typed : null]);
+    $newLabel = scLineTypedLabel($ln2, $m, (string)$ln['unit']);
+    $unit = (string)$ln['unit'];
+    logActivity($userId, 'stock_count_line_measure_changed', 'Count ' . displayCountReference((string)$ln['reference']) . ' (#' . $countId . '), ' . $ln['ingredient_name'] . ' (#' . (int)$ln['ingredient_id'] . '): reading changed before approval from "' . $oldLabel . '" (' . rh_stock_qty_fmt($oldAct, 0, '') . ' ' . $unit . ') to "' . $newLabel . '" (' . rh_stock_qty_fmt($newAct, 0, '') . ' ' . $unit . '); difference ' . rh_stock_qty_fmt((float)$ln['variance'], 0, '') . ' -> ' . rh_stock_qty_fmt($var, 0, '') . ' ' . $unit);
+    return $ln['ingredient_name'] . ': reading changed from ' . $oldLabel . ' to ' . $newLabel . ' (' . rh_stock_qty_fmt($newAct, 2) . ' ' . $unit . ').';
+}
+
+/* "These were counted in the smaller measure" for an APPROVED count (owner 2026-11-18): the counter typed shots in a
+ * line kept in bottles, so the count added N times too much. Plan only (no writes); $lock = FOR UPDATE inside a transaction.
+ * Maths: counted A -> A' = A / N; the count added R = A - A' too much; difference V -> V' = V - R; value falls by R x cost.
+ * The count's own surplus batches lose R in proportion to what each received (rescaled); cost per unit is unchanged.
+ * Refused (with the reason) when it can't be put right exactly: the count did not add stock; V' would be a shortage;
+ * a later approved count of the item already reset it; the item is already counted on an open count; or sales since
+ * the count used more than A' from those batches. Sales and other movements since the count stay as recorded.
+ * @throws RuntimeException */
+function scMeasureFixPlan(PDO $pdo, int $countId, int $lineId, bool $lock): array
+{
+    if (!rh_stock_measure_ready($pdo)) {
+        throw new RuntimeException('Count measures are not set up yet (database update 088 has not run).');
+    }
+    $fu = $lock ? ' FOR UPDATE' : '';
+    $cq = $pdo->prepare("SELECT * FROM stock_counts WHERE id = ?" . $fu);
+    $cq->execute([$countId]);
+    $c = $cq->fetch(PDO::FETCH_ASSOC);
+    if (!$c || (string)$c['status'] !== 'approved') {
+        throw new RuntimeException('Only an approved count can be corrected this way. While a count is open, change how the line was typed on the count itself.');
+    }
+    $lq = $pdo->prepare("SELECT * FROM stock_count_lines WHERE id = ? AND count_id = ?" . $fu);
+    $lq->execute([$lineId, $countId]);
+    $l = $lq->fetch(PDO::FETCH_ASSOC);
+    if (!$l) {
+        throw new RuntimeException('That line is not part of this count. Reload the count and try again.');
+    }
+    $iq = $pdo->prepare("SELECT id, name, unit, current_quantity, cost_per_unit, measure_big_name, measure_small_name, measure_per_big, measure_stock_side FROM stock_ingredients WHERE id = ?" . $fu);
+    $iq->execute([(int)$l['ingredient_id']]);
+    $ing = $iq->fetch(PDO::FETCH_ASSOC);
+    if (!$ing) {
+        throw new RuntimeException('That stock item no longer exists.');
+    }
+    $nm = (string)$ing['name'];
+    $m = rh_stock_measure_get($ing);
+    if ($m === null) {
+        throw new RuntimeException($nm . ' has no count measure. Set one first (for example bottle and shot, 30 shots in a bottle) with Set measure or on Stock Items.');
+    }
+    if ($m['side'] !== 'big' || (float)$m['n'] <= 1.00005) {
+        throw new RuntimeException('This correction is for items kept in the bigger measure (' . $m['big'] . ') with more than one ' . $m['small'] . ' in it. Check the measure of ' . $nm . ' first.');
+    }
+    $mode = (string)($l['entry_mode'] ?? '');
+    if ($mode === 'small') {
+        throw new RuntimeException('This line of ' . $nm . ' is already in ' . rh_stock_measure_plural($m['small'], 2) . ' (corrected before, or typed that way), so there is nothing to correct.');
+    }
+    if ($mode !== '' && $mode !== 'stock' && $mode !== $m['side']) {
+        throw new RuntimeException('This line of ' . $nm . ' was typed as ' . scLineTypedLabel($l, $m, (string)$ing['unit']) . ', so it was already worked out from that measure.');
+    }
+    $n = (float)$m['n'];
+    $cost = (float)$l['cost_per_unit'];
+    $A = (float)$l['actual_quantity'];
+    $V = (float)$l['variance'];
+    if ($V <= 0.0001 || empty($l['adjustment_id'])) {
+        throw new RuntimeException('When this count was approved, the line of ' . $nm . ' did not add stock, so there is nothing to take back. Do a new count of the item instead.');
+    }
+    if ($cost <= 0.0) { // no unit cost on the line: use the cost the surplus was posted at
+        $acq = $pdo->prepare("SELECT cost_at_time FROM stock_adjustments WHERE id = ?");
+        $acq->execute([(int)$l['adjustment_id']]);
+        $cost = max(0.0, (float)($acq->fetchColumn() ?: 0));
+    }
+    $A2 = round($A / $n, 6);
+    $R = round($A - $A2, 6);
+    $V2 = round($V - $R, 6);
+    if ($V2 < -0.000001) {
+        throw new RuntimeException('Read as ' . rh_stock_measure_plural($m['small'], 2) . ', ' . rh_stock_qty_fmt($A, 0) . ' is ' . rh_stock_qty_fmt($A2, 2) . ' ' . $ing['unit'] . ', less than the ' . rh_stock_qty_fmt($A - $V, 2) . ' that should have been there, so this count found a shortage, not extra stock. That can’t be put right exactly from here: do a new count of ' . $nm . ' instead.');
+    }
+    $later = $pdo->prepare("SELECT sc.reference FROM stock_count_lines scl INNER JOIN stock_counts sc ON sc.id = scl.count_id
+        WHERE scl.ingredient_id = ? AND sc.status = 'approved' AND sc.id <> ? AND (sc.approved_at > ? OR (sc.approved_at = ? AND sc.id > ?)) ORDER BY sc.approved_at LIMIT 1");
+    $later->execute([(int)$ing['id'], $countId, (string)$c['approved_at'], (string)$c['approved_at'], $countId]);
+    $laterRef = $later->fetchColumn();
+    if ($laterRef !== false) {
+        throw new RuntimeException($nm . ' was counted again in count ' . displayCountReference((string)$laterRef) . ', approved later, which already set its stock. Correct it with a new count instead.');
+    }
+    $hasCountedAt = scHasLineCol($pdo, 'counted_at');
+    $open = $pdo->prepare("SELECT sc.reference FROM stock_count_lines scl INNER JOIN stock_counts sc ON sc.id = scl.count_id
+        WHERE scl.ingredient_id = ? AND sc.status IN ('draft','submitted') AND NOT " . scUncountedSql($hasCountedAt) . " LIMIT 1");
+    $open->execute([(int)$ing['id']]);
+    $openRef = $open->fetchColumn();
+    if ($openRef !== false) {
+        throw new RuntimeException($nm . ' already has a reading on open count ' . displayCountReference((string)$openRef) . ', taken against the stock as it is now. Finish or delete that count first, or clear that reading, then correct this one.');
+    }
+    $base = 'Stock count surplus ' . (string)$c['reference'];
+    $bq = $pdo->prepare("SELECT id, batch_number, quantity_received, quantity_remaining, status FROM stock_batches WHERE ingredient_id = ? AND (notes = ? OR notes LIKE ?) ORDER BY id" . $fu);
+    $bq->execute([(int)$ing['id'], $base, addcslashes($base, '%_\\') . ' %']);
+    $batches = $bq->fetchAll(PDO::FETCH_ASSOC);
+    $recv = 0.0;
+    foreach ($batches as $b) {
+        $recv += (float)$b['quantity_received'];
+    }
+    if (!$batches || $recv < $R - 0.000001) {
+        throw new RuntimeException('The stock batches this count added for ' . $nm . ' hold ' . rh_stock_qty_fmt($recv, 2) . ' ' . $ing['unit'] . ', less than the ' . rh_stock_qty_fmt($R, 2) . ' to take back, so they can’t be matched exactly. Do a new count of the item instead.');
+    }
+    $plan = [];
+    $left = $R;
+    $k = count($batches);
+    foreach ($batches as $i => $b) {
+        $rec = (float)$b['quantity_received'];
+        $x = $i === $k - 1 ? round($left, 6) : round($R * $rec / $recv, 6);
+        $left = round($left - $x, 6);
+        $rem = (float)$b['quantity_remaining'];
+        if ($rem - $x < -0.000001 || $rec - $x < -0.000001) {
+            throw new RuntimeException('Since the count, sales and other stock movements took ' . rh_stock_qty_fmt($rec - $rem, 2) . ' ' . $ing['unit'] . ' from batch ' . $b['batch_number'] . ' of ' . $nm . ', more than the corrected count leaves in it. That can’t be put right exactly from here: do a new count of the item instead.');
+        }
+        $plan[] = ['id' => (int)$b['id'], 'number' => (string)$b['batch_number'], 'received' => $rec, 'remaining' => $rem, 'take' => $x,
+            'new_received' => round($rec - $x, 6), 'new_remaining' => max(0.0, round($rem - $x, 6)), 'status' => (string)$b['status']];
+    }
+    $cur = (float)$ing['current_quantity'];
+    if ($cur - $R < -0.000001) {
+        throw new RuntimeException($nm . ' has only ' . rh_stock_qty_fmt($cur, 2) . ' ' . $ing['unit'] . ' in stock now, less than the ' . rh_stock_qty_fmt($R, 2) . ' to take back. Do a new count of the item instead.');
+    }
+    // Stock is valued at quantity x average cost, so take the R back out of the average at the cost it came in at.
+    $avgOld = (float)$ing['cost_per_unit'];
+    $rest = round($cur - $R, 6);
+    $avgNew = $avgOld;
+    if ($rest > 0.000001) {
+        $avgNew = round(max(0.0, ($cur * $avgOld - $R * $cost) / $rest), 4);
+    }
+    $mv = $pdo->prepare("SELECT COALESCE(SUM(CASE WHEN quantity_change < 0 THEN quantity_change ELSE 0 END),0) AS out_q, COALESCE(SUM(CASE WHEN quantity_change > 0 THEN quantity_change ELSE 0 END),0) AS in_q, COUNT(*) AS n
+        FROM stock_adjustments WHERE ingredient_id = ? AND created_at > ? AND NOT (source_type = 'variance' AND source_id = ?)");
+    $mv->execute([(int)$ing['id'], (string)$c['approved_at'], $countId]);
+    $moves = $mv->fetch(PDO::FETCH_ASSOC);
+    return [
+        'count' => $c, 'line' => $l, 'ing' => $ing, 'measure' => $m, 'n' => $n, 'cost' => $cost,
+        'A' => $A, 'A2' => $A2, 'R' => $R, 'V' => $V, 'V2' => $V2,
+        'old_value' => round($A * $cost, 2), 'new_value' => round($A2 * $cost, 2), 'value_change' => round(-$R * $cost, 2),
+        'old_var_cost' => (float)$l['variance_cost'], 'new_var_cost' => round($V2 * $cost, 4),
+        'stock_now' => $cur, 'stock_after' => round($cur - $R, 6), 'batches' => $plan, 'avg_old' => $avgOld, 'avg_new' => $avgNew,
+        'moves_out' => (float)$moves['out_q'], 'moves_in' => (float)$moves['in_q'], 'moves_n' => (int)$moves['n'],
+    ];
+}
+
+/* Apply the correction planned above, in one transaction, after re-checking everything under row locks. Running it a
+ * second time is refused (the line is then in the smaller measure). Writes one 'manual' stock adjustment of -R (a
+ * correction of the count, not a loss), the rescaled batches, the line (now typed in the smaller measure) and the count
+ * totals; logs old -> new ('stock_count_measure_correction'). */
+function scMeasureFixApply(PDO $pdo, int $countId, int $lineId, int $userId): array
+{
+    $pdo->beginTransaction();
+    try {
+        $p = scMeasureFixPlan($pdo, $countId, $lineId, true);
+        $ing = $p['ing'];
+        $m = $p['measure'];
+        $ref = displayCountReference((string)$p['count']['reference']);
+        $bu = $pdo->prepare("UPDATE stock_batches SET status = CASE WHEN status = 'active' AND quantity_remaining - ? < 0.0000005 THEN 'depleted' ELSE status END,
+            quantity_received = quantity_received - ?, quantity_remaining = GREATEST(0, quantity_remaining - ?) WHERE id = ?");
+        foreach ($p['batches'] as $b) {
+            $bu->execute([$b['take'], $b['take'], $b['take'], $b['id']]);
+        }
+        $pdo->prepare("UPDATE stock_ingredients SET current_quantity = current_quantity - ?, cost_per_unit = ?, updated_at = NOW() WHERE id = ?")->execute([$p['R'], $p['avg_new'], (int)$ing['id']]);
+        $reason = mb_substr('Stock count ' . $ref . ' correction: counted in ' . rh_stock_measure_plural($m['small'], 2) . ', not ' . rh_stock_measure_plural($m['big'], 2)
+            . ' (' . rh_stock_qty_fmt($p['A'], 0, '') . ' ' . rh_stock_measure_plural($m['small'], $p['A']) . ' = ' . rh_stock_qty_fmt($p['A2'], 0, '') . ' ' . $ing['unit'] . ')'
+            . '; average cost ' . number_format($p['avg_old'], 4, '.', '') . ' -> ' . number_format($p['avg_new'], 4, '.', ''), 0, 255);
+        // 'manual' (never shrinkage) with source_id = the count: rh_stock_measure_fix_sql() keeps it out of the loss lists.
+        $pdo->prepare("INSERT INTO stock_adjustments (ingredient_id, quantity_change, reason, source_type, source_id, cost_at_time, adjusted_by) VALUES (?, ?, ?, 'manual', ?, ?, ?)")
+            ->execute([(int)$ing['id'], -$p['R'], $reason, $countId, $p['cost'], $userId]);
+        $adjId = (int)$pdo->lastInsertId();
+        $pdo->prepare("UPDATE stock_count_lines SET actual_quantity = ?, variance = ?, variance_cost = ?, entry_mode = 'small', entry_big = NULL, entry_small = ?, entry_per_big = ? WHERE id = ? AND count_id = ?")
+            ->execute([$p['A2'], $p['V2'], $p['new_var_cost'], $p['A'], $p['n'], $lineId, $countId]);
+        $dv = round($p['old_var_cost'] - $p['new_var_cost'], 4);
+        $pdo->prepare("UPDATE stock_counts SET total_variance_cost = total_variance_cost - ?, surplus_cost = surplus_cost - ? WHERE id = ?")->execute([$dv, $dv, $countId]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+    $u = (string)$ing['unit'];
+    logActivity($userId, 'stock_count_measure_correction', 'Count ' . $ref . ' (#' . $countId . '), ' . $ing['name'] . ' (#' . (int)$ing['id'] . '): counted in ' . rh_stock_measure_plural($m['small'], 2) . ' (' . rh_stock_qty_fmt($p['n'], 0, '') . ' in one ' . $m['big'] . '). Counted '
+        . rh_stock_qty_fmt($p['A'], 0, '') . ' -> ' . rh_stock_qty_fmt($p['A2'], 0, '') . ' ' . $u . '; difference ' . rh_stock_qty_fmt($p['V'], 0, '') . ' -> ' . rh_stock_qty_fmt($p['V2'], 0, '') . ' ' . $u
+        . '; stock ' . rh_stock_qty_fmt($p['stock_now'], 0, '') . ' -> ' . rh_stock_qty_fmt($p['stock_after'], 0, '') . ' ' . $u
+        . '; average cost ' . number_format($p['avg_old'], 4, '.', '') . ' -> ' . number_format($p['avg_new'], 4, '.', '') . '; value ' . number_format($p['old_value'], 2, '.', '') . ' -> ' . number_format($p['new_value'], 2, '.', '')
+        . '; batches ' . implode(', ', array_map(static fn($b) => $b['number'] . ' ' . rh_stock_qty_fmt($b['received'], 0, '') . ' -> ' . rh_stock_qty_fmt($b['new_received'], 0, ''), $p['batches'])) . '; adjustment #' . $adjId);
+    if (function_exists('rh_clear_stock_dashboard_cache')) {
+        rh_clear_stock_dashboard_cache();
+    }
+    return $p;
 }
 
 /* Release the "one approval at a time" lock (see approve_count). Safe to call twice or with an empty name. */
@@ -1096,6 +1431,66 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST' && scPostTruncated($_POST))
                 exit;
             }
 
+            /* Set an item's count measure from a count line (Stock Items or "Approve stock counts" permission). Re-works that
+             * item's typed lines on open counts; an approver may also change how this line was typed (submitted count). */
+            if ($action === 'set_measure') {
+                if (!$canMeasure) {
+                    throw new RuntimeException('You can’t change count measures. That needs the Stock Items permission or the ' . SC_PERM_NAME . ' permission - ' . SC_ASK_PERM . '.');
+                }
+                if (!rh_stock_measure_ready($pdo)) {
+                    throw new RuntimeException('Count measures are not set up yet (database update 088 has not run).');
+                }
+                $countId = (int)($_POST['count_id'] ?? 0);
+                $lineId = (int)($_POST['line_id'] ?? 0);
+                [$mNew, $mErr] = rh_stock_measure_from_input($_POST);
+                if ($mErr !== null) {
+                    throw new RuntimeException($mErr);
+                }
+                $pdo->beginTransaction();
+                $cq = $pdo->prepare("SELECT sc.id, sc.reference, sc.status, scl.ingredient_id FROM stock_counts sc INNER JOIN stock_count_lines scl ON scl.count_id = sc.id WHERE sc.id = ? AND scl.id = ? FOR UPDATE");
+                $cq->execute([$countId, $lineId]);
+                $cRow = $cq->fetch(PDO::FETCH_ASSOC);
+                if (!$cRow) {
+                    throw new RuntimeException('That line is not part of this count. Reload the count and try again.');
+                }
+                if (!in_array((string)$cRow['status'], ['draft', 'submitted'], true)) {
+                    throw new RuntimeException('This count is ' . scStatusLabel((string)$cRow['status']) . ', so its lines are not re-worked. Change the measure on Stock Items' . ((string)$cRow['status'] === 'approved' ? ', or use “Counted in the smaller measure?” on the line' : '') . '.');
+                }
+                $mRes = rh_stock_measure_save($pdo, (int)$cRow['ingredient_id'], $mNew, (int)$user['id'], 'stock count ' . displayCountReference((string)$cRow['reference']));
+                $lineMsg = '';
+                $lineMode = (string)($_POST['line_mode'] ?? '');
+                if ($lineMode !== '' && $lineMode !== 'keep') {
+                    if (!$canApprove || (string)$cRow['status'] !== 'submitted') {
+                        throw new RuntimeException('Only someone with the ' . SC_PERM_NAME . ' permission can change how a line was typed, and only while the count waits for approval.');
+                    }
+                    $lineMsg = scSetLineMode($pdo, $countId, $lineId, $lineMode, (int)$user['id']);
+                }
+                $pdo->commit();
+                $msg = $mRes['changed'] ? ('Count measure ' . ($mNew === null ? 'removed.' : 'saved: ' . rh_stock_measure_describe($mNew) . '.')) : '';
+                if ($mRes['lines'] > 0) {
+                    $msg .= ' ' . $mRes['lines'] . ' counted line' . ($mRes['lines'] === 1 ? '' : 's') . ' on ' . $mRes['counts'] . ' open count' . ($mRes['counts'] === 1 ? ' was' : 's were') . ' worked out again with it.';
+                }
+                $msg = trim($msg . ' ' . $lineMsg);
+                $_SESSION['stock_msg'] = $msg !== '' ? $msg : 'Nothing changed.';
+                header('Location: stock-count.php?id=' . $countId);
+                exit;
+            }
+
+            /* "These were counted in the smaller measure" on an APPROVED count: confirm after the preview. */
+            if ($action === 'measure_fix') {
+                if (!$canFix) {
+                    throw new RuntimeException('You can’t correct an approved count. That needs both the Stock Items permission and the ' . SC_PERM_NAME . ' permission - ' . SC_ASK_PERM . '.');
+                }
+                $countId = (int)($_POST['count_id'] ?? 0);
+                $lineId = (int)($_POST['line_id'] ?? 0);
+                $fx = scMeasureFixApply($pdo, $countId, $lineId, (int)$user['id']);
+                $_SESSION['stock_msg'] = $fx['ing']['name'] . ' corrected: counted ' . rh_stock_qty_fmt($fx['A'], 0) . ' ' . rh_stock_measure_plural($fx['measure']['small'], $fx['A'])
+                    . ' = ' . rh_stock_qty_fmt($fx['A2'], 2) . ' ' . $fx['ing']['unit'] . '. Stock went from ' . rh_stock_qty_fmt($fx['stock_now'], 2) . ' to ' . rh_stock_qty_fmt($fx['stock_after'], 2)
+                    . ' ' . $fx['ing']['unit'] . ' (value ' . $currency . ' ' . number_format($fx['value_change'], 2) . ').';
+                header('Location: stock-count.php?id=' . $countId);
+                exit;
+            }
+
             if ($action === 'reopen_count') {
                 $countId = (int)($_POST['count_id'] ?? 0);
                 $pdo->beginTransaction();
@@ -1211,8 +1606,9 @@ if ($activeId) {
     $activeCount = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
 
     if ($activeCount) {
+        $mCols = $scMeasureReady ? ', i.measure_big_name, i.measure_small_name, i.measure_per_big, i.measure_stock_side' : '';
         $lstmt = $pdo->prepare("
-            SELECT scl.*, i.name AS ingredient_name, i.unit, i.category
+            SELECT scl.*, i.name AS ingredient_name, i.unit, i.category{$mCols}
             FROM stock_count_lines scl
             INNER JOIN stock_ingredients i ON i.id = scl.ingredient_id
             WHERE scl.count_id = ?
@@ -1253,7 +1649,7 @@ $theftRadar = $pdo->query("
            COALESCE(SUM(CASE WHEN sa.source_type IN ('pos_order','room_service') THEN ABS(sa.quantity_change) WHEN sa.source_type = 'void_restore' THEN -ABS(sa.quantity_change) ELSE 0 END), 0) AS sold,
            COALESCE(SUM(CASE WHEN sa.source_type = 'wastage' THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS wasted,
            COALESCE(SUM(CASE WHEN sa.source_type = 'variance' AND sa.quantity_change < 0 THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS shortage,
-           COALESCE(SUM(CASE WHEN sa.source_type = 'manual' AND sa.quantity_change < 0 THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS manual_out
+           COALESCE(SUM(CASE WHEN sa.source_type = 'manual' AND sa.quantity_change < 0 AND NOT " . rh_stock_measure_fix_sql('sa') . " THEN ABS(sa.quantity_change) ELSE 0 END), 0) AS manual_out
     FROM stock_ingredients i
     LEFT JOIN stock_adjustments sa ON sa.ingredient_id = i.id AND sa.created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
     WHERE i.is_archived = 0
@@ -1507,6 +1903,64 @@ $csrf_token = generateCsrfToken();
                 </div>
             <?php endif; ?>
 
+            <?php if ($canFix && $scMeasureReady && $activeCount['status'] === 'approved' && isset($_GET['fix'])):
+                /* Preview of "these were counted in the smaller measure" (Step U1). Nothing is saved until Confirm. */
+                $fixPlan = null;
+                $fixErr = '';
+                try {
+                    $fixPlan = scMeasureFixPlan($pdo, (int)$activeCount['id'], (int)$_GET['fix'], false);
+                } catch (RuntimeException $fe) {
+                    $fixErr = $fe->getMessage();
+                } catch (Throwable $fe) {
+                    error_log('stock-count measure fix preview: ' . $fe->getMessage());
+                    $fixErr = 'The correction could not be worked out. Nothing was changed. Reload the page and try again.';
+                }
+            ?>
+                <div class="sc-info-note sc-fix" id="sc-fix">
+                    <h3 class="sc-fix__title">Correct a reading typed in the smaller measure</h3>
+                    <?php if ($fixPlan === null): ?>
+                        <p class="sc-fix__err" role="alert"><?php echo htmlspecialchars($fixErr); ?></p>
+                        <div class="sc-actions"><a class="btn-secondary" href="stock-count.php?id=<?php echo (int)$activeCount['id']; ?>">Back to the count</a></div>
+                    <?php else:
+                        $fp = $fixPlan;
+                        $fu = (string)$fp['ing']['unit'];
+                        $fSmalls = rh_stock_measure_plural($fp['measure']['small'], 2);
+                        $fBigs = rh_stock_measure_plural($fp['measure']['big'], 2);
+                        $fq = static fn(float $q): string => rh_stock_measure_plural($fp['measure']['big'], $q); // stock unit = the bigger measure here
+                    ?>
+                        <p><strong><?php echo htmlspecialchars((string)$fp['ing']['name']); ?></strong> was counted as <?php echo htmlspecialchars(rh_stock_qty_fmt($fp['A'], 0)); ?> <?php echo htmlspecialchars($fq($fp['A'])); ?>. If those were <?php echo htmlspecialchars($fSmalls); ?> (<?php echo htmlspecialchars(rh_stock_qty_fmt($fp['n'], 0)); ?> in one <?php echo htmlspecialchars($fp['measure']['big']); ?>), the count really found <?php echo htmlspecialchars(rh_stock_qty_fmt($fp['A2'], 2)); ?> <?php echo htmlspecialchars($fq($fp['A2'])); ?>. This is what correcting it changes:</p>
+                        <dl class="sc-fix__grid">
+                            <dt>Counted <span class="sc-fix__help">the reading on this count, in <?php echo htmlspecialchars($fu); ?></span></dt>
+                            <dd><?php echo htmlspecialchars(rh_stock_qty_fmt($fp['A'], 2)); ?> → <strong><?php echo htmlspecialchars(rh_stock_qty_fmt($fp['A2'], 2)); ?></strong></dd>
+                            <dt>Extra stock the count added <span class="sc-fix__help">counted minus what should have been there</span></dt>
+                            <dd><?php echo htmlspecialchars(rh_stock_qty_fmt($fp['V'], 2)); ?> → <strong><?php echo htmlspecialchars(rh_stock_qty_fmt($fp['V2'], 2)); ?></strong></dd>
+                            <dt>Stock now <span class="sc-fix__help">on hand today; <?php echo htmlspecialchars(rh_stock_qty_fmt($fp['R'], 2)); ?> <?php echo htmlspecialchars($fq($fp['R'])); ?> come off</span></dt>
+                            <dd><?php echo htmlspecialchars(rh_stock_qty_fmt($fp['stock_now'], 2)); ?> → <strong><?php echo htmlspecialchars(rh_stock_qty_fmt($fp['stock_after'], 2)); ?></strong></dd>
+                            <dt>Average cost <span class="sc-fix__help">what one <?php echo htmlspecialchars($fu); ?> in stock is valued at; the <?php echo htmlspecialchars(rh_stock_qty_fmt($fp['R'], 2)); ?> taken back came in at <?php echo htmlspecialchars($currency); ?> <?php echo number_format($fp['cost'], 2); ?> each</span></dt>
+                            <dd><?php echo htmlspecialchars($currency); ?> <?php echo number_format($fp['avg_old'], 4); ?> → <strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($fp['avg_new'], 4); ?></strong></dd>
+                            <dt>Value counted <span class="sc-fix__help">counted × <?php echo htmlspecialchars($currency); ?> <?php echo number_format($fp['cost'], 2); ?> per <?php echo htmlspecialchars($fu); ?>, the cost on this count</span></dt>
+                            <dd><?php echo htmlspecialchars($currency); ?> <?php echo number_format($fp['old_value'], 2); ?> → <strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($fp['new_value'], 2); ?></strong> (<?php echo number_format($fp['value_change'], 2); ?>)</dd>
+                            <dt>Count surplus value <span class="sc-fix__help">the extra stock this count added, in money</span></dt>
+                            <dd><?php echo htmlspecialchars($currency); ?> <?php echo number_format($fp['old_var_cost'], 2); ?> → <strong><?php echo htmlspecialchars($currency); ?> <?php echo number_format($fp['new_var_cost'], 2); ?></strong></dd>
+                        </dl>
+                        <p class="sc-fix__sub">Batches this count created <span class="sc-fix__help">(received / still left, before → after; first in, first out stays in order)</span></p>
+                        <ul class="sc-fix__list">
+                            <?php foreach ($fp['batches'] as $fb): ?>
+                                <li><?php echo htmlspecialchars($fb['number']); ?>: received <?php echo htmlspecialchars(rh_stock_qty_fmt($fb['received'], 2)); ?> → <?php echo htmlspecialchars(rh_stock_qty_fmt($fb['new_received'], 2)); ?>, left <?php echo htmlspecialchars(rh_stock_qty_fmt($fb['remaining'], 2)); ?> → <?php echo htmlspecialchars(rh_stock_qty_fmt($fb['new_remaining'], 2)); ?></li>
+                            <?php endforeach; ?>
+                        </ul>
+                        <p class="sc-fix__sub"><?php if ($fp['moves_n'] > 0): ?><?php echo (int)$fp['moves_n']; ?> stock movement<?php echo $fp['moves_n'] === 1 ? '' : 's'; ?> since the count was approved (<?php echo htmlspecialchars(rh_stock_qty_fmt(-$fp['moves_out'], 2)); ?> out, <?php echo htmlspecialchars(rh_stock_qty_fmt($fp['moves_in'], 2)); ?> in) stay as recorded.<?php else: ?>No stock has moved since the count was approved.<?php endif; ?> The correction is saved as one stock adjustment and shows in the item's history and the activity log.</p>
+                        <form method="POST" class="sc-actions">
+                            <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                            <input type="hidden" name="count_id" value="<?php echo (int)$activeCount['id']; ?>">
+                            <input type="hidden" name="line_id" value="<?php echo (int)$fp['line']['id']; ?>">
+                            <button type="button" class="btn-primary" onclick="scConfirm(this.form, 'measure_fix', <?php echo htmlspecialchars(json_encode('Correct ' . $fp['ing']['name'] . ' on this count to ' . rh_stock_qty_fmt($fp['A2'], 2) . ' ' . $fq($fp['A2']) . ' (' . rh_stock_qty_fmt($fp['A'], 0) . ' ' . $fSmalls . ')? ' . rh_stock_qty_fmt($fp['R'], 2) . ' ' . $fq($fp['R']) . ' come off stock. This cannot be undone here.', JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_TAG | JSON_HEX_AMP), ENT_QUOTES, 'UTF-8'); ?>, 'Correct the count')">Correct the count</button>
+                            <a class="btn-secondary" href="stock-count.php?id=<?php echo (int)$activeCount['id']; ?>">Cancel</a>
+                        </form>
+                    <?php endif; ?>
+                </div>
+            <?php endif; ?>
+
             <form method="POST" id="countForm">
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                 <input type="hidden" name="count_id" value="<?php echo (int)$activeCount['id']; ?>">
@@ -1552,7 +2006,7 @@ $csrf_token = generateCsrfToken();
                                 <th class="col-optional-md" style="text-align:right;">In stock at start <i class="help" tabindex="0" role="button" aria-label="About stock at the start" data-tip="What the system showed on hand for this item when the count was started.">?</i></th>
                                 <th class="col-optional-md" style="text-align:right;">Should be there <i class="help" tabindex="0" role="button" aria-label="About stock that should be there" data-tip="The start figure plus sales, deliveries and wastage recorded since the count started. Blank until the item is counted.">?</i></th>
                                 <?php endif; ?>
-                                <th style="text-align:right;">Counted <i class="help" tabindex="0" role="button" aria-label="About counted" data-tip="What you physically counted, in the ingredient&#x27;s own unit.">?</i></th>
+                                <th style="text-align:right;">Counted <i class="help" tabindex="0" role="button" aria-label="About counted" data-tip="What you physically counted, in the ingredient&#x27;s own unit. An item with a count measure (for example bottle and shot) can be typed in either measure or both, and is worked out into its own unit.">?</i></th>
                                 <?php if ($isOpeningCount): ?><th style="text-align:right;">Unit cost (<?php echo htmlspecialchars($currency); ?>) <i class="help" tabindex="0" role="button" aria-label="About unit cost" data-tip="What one unit of this item cost you. Needed for every item on an opening count so the stock can be valued.">?</i></th><?php endif; ?>
                                 <?php if (!$blindCount): ?>
                                 <th style="text-align:right;">Difference <i class="help" tabindex="0" role="button" aria-label="About difference" data-tip="Counted minus what should be there. A minus figure means stock is missing.">?</i></th>
@@ -1575,6 +2029,16 @@ $csrf_token = generateCsrfToken();
                                     $rowClass = ($ln['_level'] ?? 'none') === 'block' ? 'row-block' : (($ln['_level'] ?? 'none') === 'alert' ? 'row-flag' : '');
                                 }
                                 $varClass = (!$lineCounted || abs($var) < 0.0001) ? 'var-zero' : ($var > 0 ? 'var-pos' : 'var-neg');
+                                /* Count measure (Step U1): how this line can be / was typed. */
+                                $lm = $scMeasureReady ? rh_stock_measure_get($ln) : null;
+                                $lmMode = (string)($ln['entry_mode'] ?? '');
+                                if ($lm === null || !in_array($lmMode, ['big', 'small', 'both'], true) || $lmMode === $lm['side']) {
+                                    $lmMode = 'stock';
+                                }
+                                $lmOther = $lm ? ($lm['side'] === 'big' ? 'small' : 'big') : '';
+                                $lmFix = $lm && $canFix && $activeCount['status'] === 'approved' && $lm['side'] === 'big' && $lm['n'] > 1.00005
+                                    && $lmMode === 'stock' && $var > 0.0001 && !empty($ln['adjustment_id']);
+                                $lmVal = static fn($v): string => $v === null ? '' : rh_stock_qty_fmt((float)$v, 0, '');
                             ?>
                                 <?php
                                 $reasonCode = trim((string)($ln['reason_code'] ?? ''));
@@ -1588,6 +2052,22 @@ $csrf_token = generateCsrfToken();
                                     <td data-label="Ingredient">
                                         <div style="font-weight:600;"><?php echo htmlspecialchars($ln['ingredient_name']); ?></div>
                                         <div style="font-size:10px; color:#6c757d;"><?php echo htmlspecialchars($ln['category']); ?> · <?php echo htmlspecialchars($ln['unit']); ?> · <?php echo $currency; ?> <?php echo number_format((float)$ln['cost_per_unit'], 2); ?>/<?php echo htmlspecialchars($ln['unit']); ?></div>
+                                        <?php if ($lm): ?><div class="sc-mnote" title="This item's count measure: it can be counted in either measure or both."><?php echo htmlspecialchars(rh_stock_qty_fmt($lm['n'], 0) . ' ' . rh_stock_measure_plural($lm['small'], $lm['n']) . ' in one ' . $lm['big']); ?></div><?php endif; ?>
+                                        <?php if ($canMeasure && $scMeasureReady && in_array((string)$activeCount['status'], ['draft', 'submitted'], true)): ?>
+                                            <button type="button" class="sc-mset" onclick="scMeasureOpen(this)"
+                                                data-line="<?php echo (int)$ln['id']; ?>"
+                                                data-name="<?php echo htmlspecialchars((string)$ln['ingredient_name'], ENT_QUOTES, 'UTF-8'); ?>"
+                                                data-unit="<?php echo htmlspecialchars((string)$ln['unit'], ENT_QUOTES, 'UTF-8'); ?>"
+                                                data-big="<?php echo htmlspecialchars($lm['big'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                                                data-small="<?php echo htmlspecialchars($lm['small'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                                                data-n="<?php echo $lm ? htmlspecialchars(rh_stock_qty_fmt($lm['n'], 0, ''), ENT_QUOTES, 'UTF-8') : ''; ?>"
+                                                data-side="<?php echo htmlspecialchars($lm['side'] ?? '', ENT_QUOTES, 'UTF-8'); ?>"
+                                                data-mode="<?php echo htmlspecialchars((string)($ln['entry_mode'] ?? '') === 'both' ? 'both' : $lmMode, ENT_QUOTES, 'UTF-8'); ?>"
+                                                data-counted="<?php echo $lineCounted ? '1' : '0'; ?>"><i class="fas fa-ruler" aria-hidden="true"></i> <?php echo $lm ? 'Change measure' : 'Set measure'; ?></button>
+                                        <?php endif; ?>
+                                        <?php if ($lmFix): ?>
+                                            <a class="sc-mset" href="stock-count.php?id=<?php echo (int)$activeCount['id']; ?>&amp;fix=<?php echo (int)$ln['id']; ?>#sc-fix" title="If this reading was really in <?php echo htmlspecialchars(rh_stock_measure_plural($lm['small'], 2)); ?>, see what correcting it would change before anything is saved."><i class="fas fa-wrench" aria-hidden="true"></i> Counted in <?php echo htmlspecialchars(rh_stock_measure_plural($lm['small'], 2)); ?>?</a>
+                                        <?php endif; ?>
                                     </td>
                                     <?php if (!$blindCount): ?>
                                     <td class="col-optional-md" data-label="In stock at start" style="text-align:right;"><?php echo rh_stock_qty_fmt($sys, 4); ?></td>
@@ -1595,23 +2075,49 @@ $csrf_token = generateCsrfToken();
                                     <?php endif; ?>
                                     <td data-label="Counted" style="text-align:right;">
                                         <?php if ($editable): ?>
-                                            <input class="qty" type="number" step="0.000001" min="0"
+                                            <?php if ($lm): ?>
+                                            <div class="sc-measure" data-mode="<?php echo htmlspecialchars($lmMode); ?>" data-n="<?php echo htmlspecialchars(rh_stock_qty_fmt($lm['n'], 0, '')); ?>" data-side="<?php echo htmlspecialchars($lm['side']); ?>"
+                                                data-big="<?php echo htmlspecialchars($lm['big'], ENT_QUOTES, 'UTF-8'); ?>" data-small="<?php echo htmlspecialchars($lm['small'], ENT_QUOTES, 'UTF-8'); ?>"
+                                                data-bigs="<?php echo htmlspecialchars(rh_stock_measure_plural($lm['big'], 2), ENT_QUOTES, 'UTF-8'); ?>" data-smalls="<?php echo htmlspecialchars(rh_stock_measure_plural($lm['small'], 2), ENT_QUOTES, 'UTF-8'); ?>">
+                                                <select class="sc-mmode" name="line[<?php echo (int)$ln['id']; ?>][mode]" aria-label="Counted in" title="Which measure you typed this count in" onchange="scMeasureMode(this)">
+                                                    <option value="stock"<?php echo $lmMode === 'stock' ? ' selected' : ''; ?>>In <?php echo htmlspecialchars(rh_stock_measure_plural($lm[$lm['side']], 2)); ?></option>
+                                                    <option value="<?php echo $lmOther; ?>"<?php echo $lmMode === $lmOther ? ' selected' : ''; ?>>In <?php echo htmlspecialchars(rh_stock_measure_plural($lm[$lmOther], 2)); ?></option>
+                                                    <option value="both"<?php echo $lmMode === 'both' ? ' selected' : ''; ?>>In <?php echo htmlspecialchars(rh_stock_measure_plural($lm['big'], 2) . ' + ' . rh_stock_measure_plural($lm['small'], 2)); ?></option>
+                                                </select>
+                                            <?php endif; ?>
+                                            <input class="qty" type="number" step="0.000001" min="0"<?php echo ($lm && $lmMode !== 'stock') ? ' hidden' : ''; ?>
                                                 name="line[<?php echo (int)$ln['id']; ?>][actual]"
                                                 value="<?php echo $lineCounted ? number_format($act, 6, '.', '') : ''; ?>"
                                                 placeholder="not counted"
                                                 <?php if (!$blindCount): ?>data-system="<?php echo number_format((float)($expectedAt ?? $ln['_preview']), 6, '.', ''); ?>"<?php endif; ?>
 
                                                 data-cost="<?php echo number_format((float)$ln['cost_per_unit'], 4, '.', ''); ?>"
-                                                oninput="recalcRow(this)">
+                                                oninput="recalcRow(this)<?php echo $lm ? '; scMeasureConv(this)' : ''; ?>">
                                             <input type="hidden" class="touched" name="line[<?php echo (int)$ln['id']; ?>][touched]" value="0">
+                                            <?php if ($lm): ?>
+                                                <?php foreach (['big', 'small'] as $lmPart): $lmShow = $lmMode === 'both' || $lmMode === $lmPart; ?>
+                                                <span class="sc-mfield" data-part="<?php echo $lmPart; ?>"<?php echo $lmShow ? '' : ' hidden'; ?>>
+                                                    <input class="qty sc-m<?php echo $lmPart; ?>" type="number" step="any" min="0" name="line[<?php echo (int)$ln['id']; ?>][<?php echo $lmPart; ?>]"
+                                                        value="<?php echo $lmShow ? htmlspecialchars($lmVal($ln['entry_' . $lmPart] ?? null)) : ''; ?>" placeholder="0"
+                                                        aria-label="<?php echo htmlspecialchars(rh_stock_measure_plural($lm[$lmPart], 2)); ?> counted"
+                                                        oninput="scMeasureInput(this)" onchange="applyStockLineFilters()">
+                                                    <span class="sc-munit"><?php echo htmlspecialchars(rh_stock_measure_plural($lm[$lmPart], 2)); ?></span>
+                                                </span>
+                                                <?php endforeach; ?>
+                                                <div class="sc-mconv" aria-live="polite" title="What you typed, worked out in the other measure"></div>
+                                                <div class="sc-mcost" title="Cost of one <?php echo htmlspecialchars($lm['small']); ?>: the unit cost divided by how many are in one <?php echo htmlspecialchars($lm['big']); ?>"></div>
+                                            </div>
+                                            <?php endif; ?>
                                         <?php else: ?>
                                             <?php echo $lineCounted ? rh_stock_qty_fmt($act, 4) : '<span style="color:#6c757d;">not counted</span>'; ?>
+                                            <?php if ($lineCounted && $lm && $lmMode !== 'stock'): ?><div class="sc-mnote" title="What the counter typed; the figure above is that worked out in <?php echo htmlspecialchars((string)$ln['unit']); ?>">counted as <?php echo htmlspecialchars(scLineTypedLabel($ln, $lm, (string)$ln['unit'])); ?></div><?php endif; ?>
                                         <?php endif; ?>
                                     </td>
                                     <?php if ($isOpeningCount): ?>
                                     <td data-label="Unit cost (<?php echo htmlspecialchars($currency); ?>)" style="text-align:right;">
                                         <?php if ($editable): ?>
-                                            <input class="qty qty--cost" type="number" step="0.0001" min="0" name="line[<?php echo (int)$ln['id']; ?>][cost]" value="<?php echo (float)$ln['cost_per_unit'] > 0 ? number_format((float)$ln['cost_per_unit'], 4, '.', '') : ''; ?>" placeholder="required">
+                                            <input class="qty qty--cost" type="number" step="0.0001" min="0" name="line[<?php echo (int)$ln['id']; ?>][cost]" value="<?php echo (float)$ln['cost_per_unit'] > 0 ? number_format((float)$ln['cost_per_unit'], 4, '.', '') : ''; ?>" placeholder="required"<?php echo $lm ? ' oninput="scMeasureConv(this)"' : ''; ?>>
+                                            <?php if ($lm): ?><div class="sc-mnote" title="The unit cost is for one of the item's own unit, not for one <?php echo htmlspecialchars($lm[$lmOther]); ?>">per <?php echo htmlspecialchars($lm[$lm['side']]); ?></div><?php endif; ?>
                                         <?php else: ?>
                                             <?php echo number_format((float)$ln['cost_per_unit'], 4); ?>
                                         <?php endif; ?>
@@ -1800,6 +2306,115 @@ $csrf_token = generateCsrfToken();
                     applyStockLineFilters();
                 });
 
+                /* Count measures (Step U1). The reading box ([actual]) always holds the figure in the item's own unit:
+                 * typing in the other measure (or both) works it out into that box, so the difference, the filters and
+                 * Submit see one figure. The server works it out again from what was typed; the page figure is a preview. */
+                function scMRound(n) { return Math.round(n * 1e6) / 1e6; }
+                function scMFmt(n, dp) { const t = scMRound(n).toFixed(dp); return t.indexOf('.') < 0 ? t : t.replace(/0+$/, '').replace(/\.$/, ''); }
+                function scMeasureParts(box) {
+                    return {
+                        n: parseFloat(box.dataset.n) || 1,
+                        side: box.dataset.side === 'small' ? 'small' : 'big',
+                        big: box.querySelector('.sc-mbig'),
+                        small: box.querySelector('.sc-msmall'),
+                        mode: box.querySelector('.sc-mmode')
+                    };
+                }
+                function scMeasureConv(el) {
+                    const tr = el.closest('tr');
+                    const box = tr ? tr.querySelector('.sc-measure') : null;
+                    if (!box) return;
+                    const p = scMeasureParts(box);
+                    const act = tr.querySelector('input[name$="][actual]"]');
+                    const conv = box.querySelector('.sc-mconv');
+                    const costEl = box.querySelector('.sc-mcost');
+                    const mode = p.mode.value;
+                    const v = act && act.value.trim() !== '' ? parseFloat(act.value) : null;
+                    if (v === null || isNaN(v)) {
+                        conv.textContent = '';
+                    } else if (mode === 'stock') {
+                        // Typed in the item's own unit: show it in the other measure too.
+                        const other = p.side === 'big' ? v * p.n : v / p.n;
+                        conv.textContent = '= ' + scMFmt(other, 2) + ' ' + (p.side === 'big' ? box.dataset.smalls : box.dataset.bigs);
+                    } else {
+                        conv.textContent = '= ' + scMFmt(v, 4) + ' ' + (p.side === 'big' ? box.dataset.bigs : box.dataset.smalls);
+                    }
+                    const costIn = tr.querySelector('input[name$="][cost]"]');
+                    const cost = costIn ? parseFloat(costIn.value) : parseFloat(act ? act.dataset.cost : '');
+                    if (costEl) {
+                        costEl.textContent = cost > 0 ? '1 ' + box.dataset.small + ' = ' + currency + ' ' + (p.side === 'big' ? cost / p.n : cost).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '';
+                    }
+                }
+                function scMeasureInput(el) {
+                    const tr = el.closest('tr');
+                    const box = tr ? tr.querySelector('.sc-measure') : null;
+                    if (!box) return;
+                    const p = scMeasureParts(box);
+                    const act = tr.querySelector('input[name$="][actual]"]');
+                    const mode = p.mode.value;
+                    if (mode !== 'stock' && act) {
+                        const bv = mode === 'small' ? '' : p.big.value.trim();
+                        const sv = mode === 'big' ? '' : p.small.value.trim();
+                        if (bv === '' && sv === '') {
+                            act.value = '';
+                        } else {
+                            const b = parseFloat(bv) || 0;
+                            const s = parseFloat(sv) || 0;
+                            act.value = String(scMRound(p.side === 'big' ? b + s / p.n : b * p.n + s));
+                        }
+                        recalcRow(act);
+                    }
+                    scMeasureConv(el);
+                }
+                /* Switch how a line is typed. One number typed alone carries over as typed ("602" bottles -> "602"
+                 * shots: the usual fix when shots were typed as bottles); leaving "both" keeps the amount it meant. */
+                function scMeasureMode(sel) {
+                    const tr = sel.closest('tr');
+                    const box = sel.closest('.sc-measure');
+                    const p = scMeasureParts(box);
+                    const act = tr.querySelector('input[name$="][actual]"]');
+                    const other = p.side === 'big' ? 'small' : 'big';
+                    const sideEl = p.side === 'big' ? p.big : p.small;
+                    const otherEl = p.side === 'big' ? p.small : p.big;
+                    const prev = box.dataset.mode || 'stock';
+                    const next = sel.value;
+                    if (prev === 'both') {
+                        if (next === other) {
+                            const v = act.value.trim();
+                            otherEl.value = v === '' ? '' : String(scMRound(p.side === 'big' ? parseFloat(v) * p.n : parseFloat(v) / p.n));
+                        }
+                    } else {
+                        const single = prev === 'stock' ? act.value : otherEl.value;
+                        if (next === 'stock') {
+                            act.value = single;
+                        } else if (next === other) {
+                            otherEl.value = single;
+                        } else { // both
+                            sideEl.value = prev === 'stock' ? single : '';
+                            otherEl.value = prev === other ? single : '';
+                        }
+                    }
+                    if (next !== 'both') {
+                        if (next !== other) otherEl.value = '';
+                        sideEl.value = '';
+                    }
+                    box.dataset.mode = next;
+                    act.hidden = next !== 'stock';
+                    box.querySelectorAll('.sc-mfield').forEach(function (f) {
+                        f.hidden = !(next === 'both' || next === f.dataset.part);
+                    });
+                    if (next === 'stock') {
+                        recalcRow(act);
+                        scMeasureConv(act);
+                    } else {
+                        scMeasureInput(sel);
+                    }
+                    applyStockLineFilters();
+                }
+                document.addEventListener('DOMContentLoaded', function () {
+                    document.querySelectorAll('#countForm .sc-measure').forEach(function (box) { scMeasureConv(box); });
+                });
+
                 function rejectPrompt(form) {
                     const r = prompt('Reject count — reason (min 8 characters):');
                     if (!r || r.trim().length < 8) {
@@ -1840,15 +2455,21 @@ $csrf_token = generateCsrfToken();
                         Object.keys(byId).forEach(function (id) {
                             const f = byId[id];
                             let changed = !!(f.touched && f.touched.value === '1');
-                            ['actual', 'cost', 'notes'].forEach(function (k) {
+                            ['actual', 'cost', 'notes', 'big', 'small'].forEach(function (k) {
                                 if (f[k] && f[k].value !== f[k].defaultValue) changed = true;
                             });
                             if (f.reason && Array.from(f.reason.options).some(function (o) { return o.selected !== o.defaultSelected; })) changed = true;
+                            if (f.mode && Array.from(f.mode.options).some(function (o) { return o.selected !== o.defaultSelected; })) changed = true;
                             if (!changed) return;
                             const row = { id: parseInt(id, 10), actual: f.actual ? f.actual.value : '', touched: f.touched && f.touched.value === '1' ? '1' : '0' };
                             if (f.cost) row.cost = f.cost.value;
                             if (f.reason) row.reason = f.reason.value;
                             if (f.notes) row.notes = f.notes.value;
+                            if (f.mode) { // count measure: the server works the reading out from these (Step U1)
+                                row.mode = f.mode.value;
+                                row.big = f.big ? f.big.value : '';
+                                row.small = f.small ? f.small.value : '';
+                            }
                             dirty.push(row);
                         });
                         for (let i = 0; i < dirty.length; i += 50) {
@@ -2264,6 +2885,165 @@ $csrf_token = generateCsrfToken();
             form.submit();
         }
     </script>
+    <?php if (!empty($activeCount) && $canMeasure && $scMeasureReady && in_array((string)$activeCount['status'], ['draft', 'submitted'], true)):
+        $scmSizes = rh_stock_measure_sizes();
+        $scmLineMode = $canApprove && (string)$activeCount['status'] === 'submitted';
+    ?>
+    <div id="scMeasureModal" class="modal-overlay" data-modal role="dialog" aria-modal="true" aria-labelledby="scMeasureTitle">
+        <div class="modal-content sc-mmodal">
+            <form method="POST" id="scMeasureForm" onsubmit="return scMeasureSubmit(this)">
+                <div class="modal-header">
+                    <h3 class="modal-title" id="scMeasureTitle">Count measure</h3>
+                    <button type="button" class="modal-close" aria-label="Close" onclick="scMeasureClose()">&times;</button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                    <input type="hidden" name="action" value="set_measure">
+                    <input type="hidden" name="count_id" value="<?php echo (int)$activeCount['id']; ?>">
+                    <input type="hidden" name="line_id" id="scm_line" value="">
+                    <p class="sc-mhelp" id="scm_intro"></p>
+                    <div class="sc-mgrid">
+                        <label>Bigger measure <span class="sc-mhelp">the whole container, e.g. bottle</span>
+                            <input type="text" name="measure_big_name" id="scm_big" maxlength="30" placeholder="e.g. bottle" oninput="scMeasureModalSync()"></label>
+                        <label>Smaller measure <span class="sc-mhelp">what is poured, e.g. shot or glass</span>
+                            <input type="text" name="measure_small_name" id="scm_small" maxlength="30" placeholder="e.g. shot" oninput="scMeasureModalSync()"></label>
+                        <label>How many smaller in one bigger <span class="sc-mhelp">1 to <?php echo (int)RH_STOCK_MEASURE_MAX_N; ?></span>
+                            <input type="number" name="measure_per_big" id="scm_n" step="any" min="1" max="<?php echo (int)RH_STOCK_MEASURE_MAX_N; ?>" placeholder="e.g. 30"></label>
+                        <label>Which one is the stock unit <span class="sc-mhelp">the item's own unit; normally the bigger</span>
+                            <select name="measure_stock_side" id="scm_side" onchange="scMeasureModalSync()">
+                                <option value="big">The bigger measure</option>
+                                <option value="small">The smaller measure</option>
+                            </select></label>
+                    </div>
+                    <div class="sc-msuggest" id="scm_suggest" hidden>
+                        <p class="sc-mhelp" id="scm_suggest_txt"></p>
+                        <button type="button" class="btn-secondary" id="scm_use_shot" onclick="scMeasureUse('shot')">Use shots</button>
+                        <button type="button" class="btn-secondary" id="scm_use_glass" onclick="scMeasureUse('glass')">Use glasses</button>
+                    </div>
+                    <?php if ($scmLineMode): ?>
+                    <label class="sc-mline" id="scm_mode_wrap">How this line was typed <span class="sc-mhelp">switching keeps the number typed and works the reading and difference out again</span>
+                        <select name="line_mode" id="scm_mode">
+                            <option value="keep">Keep as it is</option>
+                            <option value="stock" id="scm_mode_stock">In the stock unit</option>
+                            <option value="small" id="scm_mode_other">In the other measure</option>
+                        </select></label>
+                    <?php endif; ?>
+                    <p class="sc-mhelp">Saving re-works this item's readings on counts not yet approved. Approved counts are never changed. Clear the names and the number to remove the measure.</p>
+                    <p class="sc-merr" id="scm_err" role="alert" hidden></p>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" onclick="scMeasureClose()">Cancel</button>
+                    <button type="submit" class="btn btn-primary">Save measure</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <script>
+        /* Set measure from a count line (Step U1). Suggestions come from a size in the item name and the shot / glass
+         * sizes in Settings; they only fill the fields when Use is pressed. */
+        var SCM_ML = <?php echo json_encode(['shot' => $scmSizes['shot_ml'], 'glass' => $scmSizes['glass_ml']]); ?>;
+        var scmData = null;
+        function scmNameMl(name) {
+            var m = /(\d+(?:[.,]\d+)?)\s*(ml|cl|l|ltr|litres?|liters?)(?![a-z])/i.exec(name || '');
+            if (!m) return null;
+            var v = parseFloat(m[1].replace(',', '.'));
+            var u = m[2].toLowerCase();
+            var ml = u === 'ml' ? v : (u === 'cl' ? v * 10 : v * 1000);
+            return ml > 0 && ml <= 100000 ? ml : null;
+        }
+        function scmPlural(n) { return /(s|x|z|ch|sh)$/i.test(n) ? n + 'es' : n + 's'; }
+        function scMeasureOpen(btn) {
+            var form = document.getElementById('countForm');
+            var dirty = form && Array.from(form.querySelectorAll('[name^="line["]')).some(function (el) {
+                if (el.classList.contains('touched')) return el.value === '1';
+                if (el.tagName === 'SELECT') return Array.from(el.options).some(function (o) { return o.selected !== o.defaultSelected; });
+                return el.value !== el.defaultValue;
+            });
+            if (dirty) {
+                scShowBanner('Save your readings first', 'Some readings on this page are not saved yet. Press Save readings, then set the measure, so nothing typed is lost.', true);
+                return;
+            }
+            scmData = btn.dataset;
+            document.getElementById('scm_line').value = btn.dataset.line;
+            document.getElementById('scm_big').value = btn.dataset.big || '';
+            document.getElementById('scm_small').value = btn.dataset.small || '';
+            document.getElementById('scm_n').value = btn.dataset.n || '';
+            document.getElementById('scm_side').value = btn.dataset.side === 'small' ? 'small' : 'big';
+            document.getElementById('scm_intro').textContent = 'Stock, prices and sales for ' + btn.dataset.name + ' stay in its own unit (' + btn.dataset.unit + '). A count can then be typed in either measure or both.';
+            var err = document.getElementById('scm_err');
+            err.hidden = true;
+            var wrap = document.getElementById('scm_mode_wrap');
+            if (wrap) {
+                document.getElementById('scm_mode').value = 'keep';
+                wrap.hidden = btn.dataset.counted !== '1' || btn.dataset.mode === 'both';
+            }
+            scMeasureModalSync();
+            var modal = document.getElementById('scMeasureModal');
+            modal.classList.add('active');
+            document.body.classList.add('modal-open');
+            document.getElementById('scm_big').focus();
+        }
+        function scMeasureClose() {
+            document.getElementById('scMeasureModal').classList.remove('active');
+            if (!document.querySelector('.modal-overlay.active')) document.body.classList.remove('modal-open');
+        }
+        function scMeasureModalSync() {
+            if (!scmData) return;
+            var big = document.getElementById('scm_big').value.trim() || 'bigger measure';
+            var small = document.getElementById('scm_small').value.trim() || 'smaller measure';
+            var side = document.getElementById('scm_side').value;
+            var ml = scmNameMl(scmData.name);
+            var box = document.getElementById('scm_suggest');
+            if (ml && (SCM_ML.shot > 0 || SCM_ML.glass > 0)) {
+                var parts = [];
+                if (SCM_ML.shot > 0) parts.push(Math.round(ml / SCM_ML.shot * 10000) / 10000 + ' shots of ' + SCM_ML.shot + ' ml');
+                if (SCM_ML.glass > 0) parts.push(Math.round(ml / SCM_ML.glass * 10000) / 10000 + ' glasses of ' + SCM_ML.glass + ' ml');
+                document.getElementById('scm_suggest_txt').textContent = 'The name says ' + ml + ' ml: that is ' + parts.join(' or ') + '. Check it before saving.';
+                document.getElementById('scm_use_shot').hidden = !(SCM_ML.shot > 0);
+                document.getElementById('scm_use_glass').hidden = !(SCM_ML.glass > 0);
+                box.hidden = false;
+            } else {
+                box.hidden = true;
+            }
+            var st = document.getElementById('scm_mode_stock');
+            var ot = document.getElementById('scm_mode_other');
+            if (st && ot) {
+                st.textContent = 'In ' + scmPlural(side === 'big' ? big : small) + ' (the stock unit)';
+                ot.value = side === 'big' ? 'small' : 'big';
+                ot.textContent = 'In ' + scmPlural(side === 'big' ? small : big);
+            }
+        }
+        function scMeasureUse(kind) {
+            var ml = scmNameMl(scmData ? scmData.name : '');
+            if (!ml || !(SCM_ML[kind] > 0)) return;
+            if (document.getElementById('scm_big').value.trim() === '') document.getElementById('scm_big').value = 'bottle';
+            document.getElementById('scm_small').value = kind;
+            document.getElementById('scm_n').value = Math.round(ml / SCM_ML[kind] * 10000) / 10000;
+            document.getElementById('scm_side').value = 'big';
+            scMeasureModalSync();
+        }
+        function scMeasureSubmit(form) {
+            var big = document.getElementById('scm_big').value.trim();
+            var small = document.getElementById('scm_small').value.trim();
+            var nRaw = document.getElementById('scm_n').value.trim();
+            var n = parseFloat(nRaw);
+            var msg = '';
+            if (big === '' && small === '' && nRaw === '') {
+                msg = '';
+            } else if (big === '' || small === '') {
+                msg = 'Type both measure names (for example bottle and shot), or clear all the fields to remove the measure.';
+            } else if (big.toLowerCase() === small.toLowerCase()) {
+                msg = 'The bigger and the smaller measure need different names.';
+            } else if (isNaN(n) || n < 1 || n > <?php echo (int)RH_STOCK_MEASURE_MAX_N; ?>) {
+                msg = 'How many ' + scmPlural(small) + ' make one ' + big + ' must be a number from 1 to <?php echo (int)RH_STOCK_MEASURE_MAX_N; ?>.';
+            }
+            var err = document.getElementById('scm_err');
+            err.textContent = msg;
+            err.hidden = msg === '';
+            return msg === '';
+        }
+    </script>
+    <?php endif; ?>
     <?php /* Modals sit before the footer: admin-footer.php closes #rh-admin-page, and the admin SPA
        only swaps that container, so markup printed after it is lost on in-place navigation. */ ?>
     <?php require_once 'includes/admin-footer.php'; ?>

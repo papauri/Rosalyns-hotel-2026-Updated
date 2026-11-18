@@ -432,3 +432,28 @@
     font-size: 11px;
     text-transform: none;
 }
+
+/* Count measure (Step U1): bottle / shot field set in the item form. */
+.ing-measure {
+    margin: 14px 0 0;
+    padding: 10px 12px 12px;
+    border: 1px solid var(--admin-surface-border, #eaecef);
+    border-radius: 8px;
+    min-width: 0;
+}
+
+.ing-measure legend {
+    padding: 0 6px;
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.ing-measure .btn-secondary {
+    min-height: 44px;
+    margin: 8px 8px 0 0;
+}
+
+.ing-measure-suggest[hidden],
+.ing-measure .btn-secondary[hidden] {
+    display: none;
+}

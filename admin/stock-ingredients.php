@@ -110,6 +110,16 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 if ($action === 'update' && $editId <= 0) {
                     throw new RuntimeException('Invalid ingredient.');
                 }
+                /* Optional count measure (Step U1): "bottle" and "shot", N shots in a bottle, which one is the stock unit.
+                 * Only a form that showed the fields (measure_present) can change it, so other posts never wipe a measure. */
+                $measureOn = rh_stock_measure_ready($pdo) && !empty($_POST['measure_present']);
+                $measureNew = null;
+                if ($measureOn) {
+                    [$measureNew, $measureErr] = rh_stock_measure_from_input($_POST);
+                    if ($measureErr !== null) {
+                        throw new RuntimeException($measureErr);
+                    }
+                }
                 if ($prefSupplier !== null) {
                     $supChk = $pdo->prepare("SELECT COUNT(*) FROM stock_suppliers WHERE id = ?");
                     $supChk->execute([$prefSupplier]);
@@ -118,7 +128,9 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                rh_with_create_lock($pdo, 'stock_ingredient', function () use ($pdo, $action, $name, $category, $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier, $packName, $packSize, $piecesPerUnit, $editId, &$message) {
+                rh_with_create_lock($pdo, 'stock_ingredient', function () use ($pdo, $action, $name, $category, $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier, $packName, $packSize, $piecesPerUnit, $editId, $measureOn, $measureNew, $user, &$message) {
+                  $pdo->beginTransaction(); // the item and its count measure (plus the open count lines it re-works) change together
+                  try {
                     // Archived ingredients still block the name (restoring one would clash).
                     $dup = rh_find_duplicate($pdo, 'stock_ingredients', 'name', $name, [], $action === 'update' ? $editId : null);
                     if ($dup) {
@@ -130,7 +142,11 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ");
                         $stmt->execute([$name, $category ?: 'General', $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier, $packName !== '' ? $packName : null, $packSize, $piecesPerUnit]);
+                        $newIngId = (int)$pdo->lastInsertId();
                         $message = "Ingredient \"{$name}\" added.";
+                        if ($measureOn && $measureNew !== null) {
+                            rh_stock_measure_save($pdo, $newIngId, $measureNew, (int)$user['id'], 'Stock Items (new item)');
+                        }
                     } else {
                         /* A unit change does not convert anything: quantity on hand, batches, cost per
                          * unit, recipe quantities, par/reorder levels and pack sizes would all stay as
@@ -163,7 +179,23 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         ");
                         $stmt->execute([$name, $category ?: 'General', $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier, $packName !== '' ? $packName : null, $packSize, $piecesPerUnit, $editId]);
                         $message = "Ingredient updated.";
+                        if ($measureOn) {
+                            $mRes = rh_stock_measure_save($pdo, $editId, $measureNew, (int)$user['id']);
+                            if ($mRes['changed']) {
+                                $message .= ' Count measure ' . ($measureNew === null ? 'removed.' : 'saved: ' . rh_stock_measure_describe($measureNew) . '.');
+                                if ($mRes['lines'] > 0) {
+                                    $message .= ' ' . $mRes['lines'] . ' counted line' . ($mRes['lines'] === 1 ? '' : 's') . ' on ' . $mRes['counts'] . ' open count' . ($mRes['counts'] === 1 ? ' was' : 's were') . ' re-worked with it.';
+                                }
+                            }
+                        }
                     }
+                    $pdo->commit();
+                  } catch (Throwable $txE) {
+                    if ($pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    throw $txE;
+                  }
                 });
             } elseif ($action === 'archive') {
                 $id = (int)($_POST['id'] ?? 0);
@@ -558,7 +590,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
     // person starting again (the reason is shown inside the form).
     if ($error && in_array((string)($action ?? ''), ['add', 'update'], true)) {
         $keep = [];
-        foreach (['id', 'name', 'category', 'unit', 'min_quantity', 'yield_percent', 'notes', 'reorder_point', 'par_level', 'preferred_supplier_id', 'lead_time_days', 'pack_name', 'pack_size', 'pieces_per_unit'] as $keepField) {
+        foreach (['id', 'name', 'category', 'unit', 'min_quantity', 'yield_percent', 'notes', 'reorder_point', 'par_level', 'preferred_supplier_id', 'lead_time_days', 'pack_name', 'pack_size', 'pieces_per_unit', 'measure_big_name', 'measure_small_name', 'measure_per_big', 'measure_stock_side'] as $keepField) {
             $keep[$keepField] = (string)($_POST[$keepField] ?? '');
         }
         $_SESSION['stock_ingredient_form_keep'] = ['action' => (string)$action, 'error' => $error, 'post' => $keep];
@@ -583,6 +615,8 @@ $categories = [];
 $batchesByIngredient = [];
 $supplierOptions = [];
 $stockFormReopen = null; // set when the last Add / Edit was refused
+$measureReady = rh_stock_measure_ready($pdo); // migration 088: count measures (bottle / shot)
+$measureSizes = $measureReady ? rh_stock_measure_sizes() : ["shot_ml" => 0, "glass_ml" => 0];
 try {
     $supplierOptions = $pdo->query("SELECT id, name FROM stock_suppliers WHERE is_active = 1 ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) { $supplierOptions = []; }
@@ -1081,6 +1115,42 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                         <input type="number" name="pieces_per_unit" id="ing_pieces" step="any" min="0.01" placeholder="e.g. 6">
                     </div>
                 </div>
+                <?php if ($measureReady): ?>
+                <fieldset class="ing-measure" id="ing_measure">
+                    <legend>Count in a smaller or bigger measure (optional) <i class="help" data-tip="For bar stock counted by the shot or glass. Stock, prices and sales stay in the unit above; a stock count can then be typed in either measure or both, e.g. 2 bottles + 7 shots, and is worked out into the stock unit. Clear all four fields to remove it.">?</i></legend>
+                    <input type="hidden" name="measure_present" value="1">
+                    <div class="form-row">
+                        <div>
+                            <label for="ing_m_big">Bigger measure <i class="help" data-tip="The whole container, e.g. bottle, jug, box.">?</i></label>
+                            <input type="text" name="measure_big_name" id="ing_m_big" maxlength="30" placeholder="e.g. bottle" oninput="ingMeasureSync()">
+                        </div>
+                        <div>
+                            <label for="ing_m_small">Smaller measure <i class="help" data-tip="What is poured or served from it, e.g. shot, tot, glass.">?</i></label>
+                            <input type="text" name="measure_small_name" id="ing_m_small" maxlength="30" placeholder="e.g. shot" oninput="ingMeasureSync()">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div>
+                            <label for="ing_m_n" id="ing_m_n_lbl">How many smaller in one bigger <i class="help" data-tip="How many of the smaller measure make one of the bigger, e.g. 30 shots of 25 ml in a 750 ml bottle. 1 to <?php echo (int)RH_STOCK_MEASURE_MAX_N; ?>.">?</i></label>
+                            <input type="number" name="measure_per_big" id="ing_m_n" step="any" min="1" max="<?php echo (int)RH_STOCK_MEASURE_MAX_N; ?>" placeholder="e.g. 30" oninput="ingMeasureSync()">
+                        </div>
+                        <div>
+                            <label for="ing_m_side">Which one is the stock unit <i class="help" data-tip="The measure that IS the unit above. Normally the bigger one (stock kept in bottles, counted in shots).">?</i></label>
+                            <select name="measure_stock_side" id="ing_m_side" onchange="this.dataset.touched = '1'; ingMeasureSync()">
+                                <option value="big">The bigger measure</option>
+                                <option value="small">The smaller measure</option>
+                            </select>
+                        </div>
+                    </div>
+                    <p class="field-note" id="ing_m_hint" hidden></p>
+                    <div class="ing-measure-suggest" id="ing_m_suggest" hidden>
+                        <p class="field-note" id="ing_m_suggest_txt"></p>
+                        <button type="button" class="btn-secondary" id="ing_m_use_shot" onclick="ingMeasureUse('shot')">Use shots</button>
+                        <button type="button" class="btn-secondary" id="ing_m_use_glass" onclick="ingMeasureUse('glass')">Use glasses</button>
+                    </div>
+                    <button type="button" class="btn-secondary" onclick="ingMeasureClear()">Clear measure</button>
+                </fieldset>
+                <?php endif; ?>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn-secondary" onclick="closeModal('ingredientModal')">Cancel</button>
@@ -1372,6 +1442,13 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 document.getElementById('ing_pack_name').value = data.pack_name || '';
                 document.getElementById('ing_pack_size').value = data.pack_size ? parseFloat(data.pack_size) : '';
                 document.getElementById('ing_pieces').value = data.pieces_per_unit ? parseFloat(data.pieces_per_unit) : '';
+                if (document.getElementById('ing_measure')) {
+                    document.getElementById('ing_m_big').value = data.measure_big_name || '';
+                    document.getElementById('ing_m_small').value = data.measure_small_name || '';
+                    document.getElementById('ing_m_n').value = data.measure_per_big ? parseFloat(data.measure_per_big) : '';
+                    document.getElementById('ing_m_side').value = data.measure_stock_side === 'small' ? 'small' : 'big';
+                    document.getElementById('ing_m_side').dataset.touched = data.measure_stock_side ? '1' : '';
+                }
             } else {
                 document.getElementById('ingredientModalTitle').textContent = 'Add <?php echo $stockNoun; ?>';
                 document.getElementById('ing_action').value = 'add';
@@ -1379,7 +1456,83 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 setIngredientUnitLock(false, 'g');
             }
             ingredientPiecesSync();
+            if (document.getElementById('ing_measure')) {
+                if (!data) document.getElementById('ing_m_side').dataset.touched = '';
+                ingMeasureSync();
+            }
             openModal('ingredientModal');
+        }
+
+        /* Count measure (Step U1). The suggestion reads a size in the name (750ml, 75cl, 1L, 1.5 L) and the shot/glass
+         * sizes from Settings; it only fills the fields when the person presses Use, and nothing is saved until Save. */
+        const ING_MEASURE_ML = <?php echo json_encode(['shot' => $measureSizes['shot_ml'], 'glass' => $measureSizes['glass_ml']]); ?>;
+        function ingMeasureNameMl(name) {
+            const m = /(\d+(?:[.,]\d+)?)\s*(ml|cl|l|ltr|litres?|liters?)(?![a-z])/i.exec(name || '');
+            if (!m) return null;
+            const v = parseFloat(m[1].replace(',', '.'));
+            const u = m[2].toLowerCase();
+            const ml = u === 'ml' ? v : (u === 'cl' ? v * 10 : v * 1000);
+            return ml > 0 && ml <= 100000 ? ml : null;
+        }
+        function ingMeasureRound(n) { return Math.round(n * 10000) / 10000; }
+        function ingMeasurePlural(w) { return w ? (/(s|x|z|ch|sh)$/i.test(w) ? w + 'es' : w + 's') : w; }
+        function ingMeasureSync() {
+            const box = document.getElementById('ing_measure');
+            if (!box) return;
+            const big = document.getElementById('ing_m_big').value.trim();
+            const small = document.getElementById('ing_m_small').value.trim();
+            const n = parseFloat(document.getElementById('ing_m_n').value);
+            const side = document.getElementById('ing_m_side');
+            const unit = (document.getElementById('ing_unit').value || '').trim().toLowerCase();
+            // Which measure is the stock unit follows the unit name until the person picks one.
+            if (side.dataset.touched !== '1') {
+                const sl = small.toLowerCase();
+                side.value = (sl && unit && (sl === unit || sl + 's' === unit || unit + 's' === sl)) ? 'small' : 'big';
+            }
+            side.options[0].textContent = big ? 'The bigger measure (' + big + ')' : 'The bigger measure';
+            side.options[1].textContent = small ? 'The smaller measure (' + small + ')' : 'The smaller measure';
+            document.getElementById('ing_m_n_lbl').firstChild.textContent = (small && big ? 'How many ' + small + ' in one ' + big : 'How many smaller in one bigger') + ' ';
+            const hint = document.getElementById('ing_m_hint');
+            if (big && small && n >= 1) {
+                hint.textContent = side.value === 'big'
+                    ? 'Example: a count of 2 ' + ingMeasurePlural(big) + ' + 7 ' + ingMeasurePlural(small) + ' is saved as ' + ingMeasureRound(2 + 7 / n) + ' ' + (unit || big) + ' in stock.'
+                    : 'Example: a count of 2 ' + ingMeasurePlural(big) + ' + 7 ' + ingMeasurePlural(small) + ' is saved as ' + ingMeasureRound(2 * n + 7) + ' ' + (unit || small) + ' in stock.';
+                hint.hidden = false;
+            } else {
+                hint.hidden = true;
+            }
+            const ml = ingMeasureNameMl(document.getElementById('ing_name').value);
+            const parts = [];
+            ['shot', 'glass'].forEach(function (k) {
+                const btn = document.getElementById('ing_m_use_' + k);
+                const per = ING_MEASURE_ML[k];
+                const ok = !!(ml && per > 0);
+                btn.hidden = !ok;
+                if (ok) {
+                    const v = ingMeasureRound(ml / per);
+                    btn.textContent = 'Use ' + v + ' ' + (k === 'shot' ? 'shots' : 'glasses');
+                    btn.dataset.n = String(v);
+                    parts.push(v + ' ' + (k === 'shot' ? 'shots' : 'glasses') + ' of ' + per + ' ml');
+                }
+            });
+            document.getElementById('ing_m_suggest').hidden = parts.length === 0;
+            document.getElementById('ing_m_suggest_txt').textContent = parts.length ? 'The name says ' + ml + ' ml: about ' + parts.join(' or ') + ' (sizes from Settings). Nothing is filled in until you press Use.' : '';
+        }
+        function ingMeasureUse(kind) {
+            const btn = document.getElementById('ing_m_use_' + kind);
+            document.getElementById('ing_m_n').value = btn.dataset.n || '';
+            if (!document.getElementById('ing_m_small').value.trim()) document.getElementById('ing_m_small').value = kind;
+            if (!document.getElementById('ing_m_big').value.trim()) document.getElementById('ing_m_big').value = 'bottle';
+            ingMeasureSync();
+        }
+        function ingMeasureClear() {
+            ['ing_m_big', 'ing_m_small', 'ing_m_n'].forEach(function (id) { document.getElementById(id).value = ''; });
+            document.getElementById('ing_m_side').dataset.touched = '';
+            ingMeasureSync();
+        }
+        if (document.getElementById('ing_measure')) {
+            document.getElementById('ing_name').addEventListener('input', ingMeasureSync);
+            document.getElementById('ing_unit').addEventListener('change', ingMeasureSync);
         }
 
         /* Pieces in one unit: only for container units (packet, box, tray...); a dozen is always 12. */

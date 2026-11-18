@@ -1125,3 +1125,219 @@ table.count-list td.sc-row-actions form {
         width: 100%;
     }
 }
+
+/* ===== Count measures (Step U1): a line typed in bottles, shots or both ===== */
+.lines-table .sc-measure {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+}
+
+.lines-table .sc-measure [hidden],
+.lines-table input.qty[hidden] {
+    display: none !important;
+}
+
+.lines-table select.sc-mmode {
+    padding: 5px;
+    border: 1px solid #d6d8db;
+    border-radius: 5px;
+    font-size: 12px;
+    max-width: 160px;
+    min-height: 2.75rem;
+}
+
+.lines-table .sc-mfield {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.sc-munit,
+.sc-mconv,
+.sc-mcost,
+.sc-mnote {
+    font-size: 11px;
+    color: #6c757d;
+    line-height: 1.35;
+}
+
+.sc-mconv {
+    color: #1e3a8a;
+    font-weight: 600;
+}
+
+.sc-mset {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 2.75rem;
+    padding: 0 6px;
+    margin-left: -6px;
+    background: none;
+    border: 0;
+    color: var(--color-primary, #0a1929);
+    font-size: 12px;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.sc-mset:focus-visible {
+    outline: 2px solid var(--color-primary, #0a1929);
+    outline-offset: 2px;
+}
+
+.sc-fix__title {
+    margin: 0 0 8px;
+    font-size: 15px;
+}
+
+.sc-fix__grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 16px;
+    margin: 10px 0;
+}
+
+.sc-fix__grid dt {
+    font-weight: 600;
+}
+
+.sc-fix__grid dd {
+    margin: 0;
+    text-align: right;
+}
+
+.sc-fix__help {
+    display: block;
+    font-weight: 400;
+    font-size: 12px;
+    color: #475569;
+}
+
+.sc-fix__sub {
+    margin: 8px 0 4px;
+}
+
+.sc-fix__list {
+    margin: 0 0 8px;
+    padding-left: 18px;
+}
+
+.sc-fix__err {
+    margin: 0 0 8px;
+    color: #991b1b;
+}
+
+.sc-fix .sc-actions :is(button, a) {
+    min-height: 2.75rem;
+}
+
+.sc-mmodal {
+    max-width: min(96vw, 32rem);
+    width: min(96vw, 32rem);
+}
+
+.sc-mgrid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px;
+}
+
+.sc-mgrid label,
+.sc-mline {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.sc-mline {
+    margin-top: 12px;
+}
+
+.sc-mline[hidden] {
+    display: none;
+}
+
+.sc-mgrid :is(input, select),
+.sc-mline select {
+    min-height: 2.75rem;
+    padding: 6px 8px;
+    border: 1px solid #d6d8db;
+    border-radius: 5px;
+    font-size: 14px;
+    width: 100%;
+    min-width: 0;
+}
+
+.sc-mhelp {
+    font-size: 12px;
+    font-weight: 400;
+    color: #6c757d;
+    margin: 0;
+}
+
+.sc-mmodal .modal-body > .sc-mhelp {
+    margin: 0 0 10px;
+}
+
+.sc-msuggest {
+    margin-top: 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    align-items: center;
+}
+
+.sc-msuggest[hidden] {
+    display: none;
+}
+
+.sc-msuggest .sc-mhelp {
+    flex: 1 1 100%;
+}
+
+.sc-msuggest .btn-secondary {
+    min-height: 2.75rem;
+}
+
+.sc-merr {
+    margin: 10px 0 0;
+    color: #991b1b;
+    font-size: 13px;
+}
+
+@media (max-width: 40rem) {
+    .lines-table .sc-measure {
+        align-items: stretch;
+    }
+
+    .lines-table select.sc-mmode {
+        width: 100%;
+        max-width: 100%;
+    }
+
+    .lines-table .sc-mfield {
+        display: flex;
+    }
+
+    .lines-table .sc-mfield input.qty {
+        flex: 1 1 auto;
+    }
+
+    .sc-mgrid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .sc-fix__grid {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    .sc-fix__grid dd {
+        text-align: left;
+        margin-bottom: 6px;
+    }
+}

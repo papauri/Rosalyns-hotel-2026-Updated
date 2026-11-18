@@ -13955,6 +13955,299 @@ function rh_stock_qty_fmt(float $n, int $minDec = 2, string $thousands = ','): s
     return $out === '-0.00' ? '0.00' : $out;
 }
 
+/* ===== Stock counted in a smaller or bigger measure (Step U1, owner 2026-11-18; migration 088) =====
+ * An item may carry two count measures: a BIG one ("bottle") and a SMALL one ("shot"), N small in one big, and which of the
+ * two IS the stock unit (measure_stock_side). A count line can then be typed in the stock unit, in the other measure, or in
+ * both ("2 bottles + 7 shots"); the saved actual_quantity is always the stock-unit figure at 6 dp. Nothing here touches
+ * pieces_per_unit (packets/dozens) - that is a separate feature. */
+
+if (!defined('RH_STOCK_MEASURE_MAX_N')) {
+    define('RH_STOCK_MEASURE_MAX_N', 1000);
+}
+
+/** True when migration 088 added all eight measure columns. Cached per request. Every reader of the new columns checks this first. */
+function rh_stock_measure_ready(?PDO $db = null): bool
+{
+    static $ready = null;
+    if ($ready !== null) {
+        return $ready;
+    }
+    global $pdo;
+    $db = $db ?? $pdo;
+    try {
+        $st = $db->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND (
+              (TABLE_NAME = 'stock_ingredients' AND COLUMN_NAME IN ('measure_big_name','measure_small_name','measure_per_big','measure_stock_side'))
+           OR (TABLE_NAME = 'stock_count_lines' AND COLUMN_NAME IN ('entry_mode','entry_big','entry_small','entry_per_big')))");
+        $ready = ((int)$st->fetchColumn() === 8);
+    } catch (Throwable $e) {
+        $ready = false;
+    }
+    return $ready;
+}
+
+/** The item's measure from a stock_ingredients row, or null when it has none (any of the four missing / N out of range). */
+function rh_stock_measure_get(array $ing): ?array
+{
+    $big = trim((string)($ing['measure_big_name'] ?? ''));
+    $small = trim((string)($ing['measure_small_name'] ?? ''));
+    $n = (float)($ing['measure_per_big'] ?? 0);
+    $side = (string)($ing['measure_stock_side'] ?? '');
+    if ($big === '' || $small === '' || $n < 1 || $n > RH_STOCK_MEASURE_MAX_N || ($side !== 'big' && $side !== 'small')) {
+        return null;
+    }
+    return ['big' => $big, 'small' => $small, 'n' => round($n, 4), 'side' => $side];
+}
+
+/**
+ * A typed count reading converted to stock units, 6 dp. $mode: 'big' (only $big used), 'small' (only $small), 'both'.
+ * side 'big' (stock unit = the big measure): big x 1 + small / N.  side 'small' (stock unit = the small one): big x N + small.
+ * Returns null for a bad mode, a negative or missing value, or N outside 1..RH_STOCK_MEASURE_MAX_N.
+ */
+function rh_stock_measure_to_stock(string $mode, ?float $big, ?float $small, float $n, string $side): ?float
+{
+    if ($n < 1 || $n > RH_STOCK_MEASURE_MAX_N || ($side !== 'big' && $side !== 'small')) {
+        return null;
+    }
+    $bigF = $side === 'big' ? 1.0 : $n;
+    $smallF = $side === 'big' ? 1.0 / $n : 1.0;
+    if ($mode === 'big') {
+        $small = 0.0;
+    } elseif ($mode === 'small') {
+        $big = 0.0;
+    } elseif ($mode !== 'both') {
+        return null;
+    }
+    if ($big === null || $small === null || $big < 0 || $small < 0 || !is_finite($big) || !is_finite($small)) {
+        return null;
+    }
+    return round($big * $bigF + $small * $smallF, 6);
+}
+
+/** "bottle" -> "bottles", "glass" -> "glasses"; one stays singular. */
+function rh_stock_measure_plural(string $name, float $qty): string
+{
+    if (abs($qty - 1.0) < 0.0000005 || $name === '') {
+        return $name;
+    }
+    if (preg_match('/(s|x|z|ch|sh)$/i', $name)) {
+        return $name . 'es';
+    }
+    return $name . 's';
+}
+
+/** What the counter typed, in words: "2 bottles + 7 shots", "7 shots", "2 bottles". '' for a stock-unit reading. */
+function rh_stock_measure_label(string $mode, $big, $small, array $m): string
+{
+    $part = static function ($q, string $name): string {
+        $q = (float)$q;
+        return rh_stock_qty_fmt($q, 0) . ' ' . rh_stock_measure_plural($name, $q);
+    };
+    if ($mode === 'big') {
+        return $part($big, $m['big']);
+    }
+    if ($mode === 'small') {
+        return $part($small, $m['small']);
+    }
+    if ($mode === 'both') {
+        return $part($big, $m['big']) . ' + ' . $part($small, $m['small']);
+    }
+    return '';
+}
+
+/**
+ * Read and check the four measure fields from a form ($in keys measure_big_name, measure_small_name, measure_per_big,
+ * measure_stock_side). All four empty = remove the measure. Returns [?array measure, ?string error].
+ */
+function rh_stock_measure_from_input(array $in): array
+{
+    $clean = static fn($v): string => trim((string)preg_replace('/[\x00-\x1F\x7F]+/u', ' ', (string)$v));
+    $big = $clean($in['measure_big_name'] ?? '');
+    $small = $clean($in['measure_small_name'] ?? '');
+    $nRaw = trim((string)($in['measure_per_big'] ?? ''));
+    $side = (string)($in['measure_stock_side'] ?? '');
+    if ($big === '' && $small === '' && $nRaw === '') {
+        return [null, null];
+    }
+    if ($big === '' || $small === '') {
+        return [null, 'Type both measure names (for example bottle and shot), or clear all the measure fields to remove the measure.'];
+    }
+    if (mb_strlen($big) > 30 || mb_strlen($small) > 30) {
+        return [null, 'Measure names can be at most 30 characters.'];
+    }
+    if (mb_strtolower($big) === mb_strtolower($small)) {
+        return [null, 'The bigger and the smaller measure need different names.'];
+    }
+    if ($nRaw === '' || !is_numeric($nRaw)) {
+        return [null, 'Type how many ' . rh_stock_measure_plural($small, 2) . ' make one ' . $big . ' (a number).'];
+    }
+    $n = round((float)$nRaw, 4);
+    if ($n < 1 || $n > RH_STOCK_MEASURE_MAX_N) {
+        return [null, 'How many ' . rh_stock_measure_plural($small, 2) . ' make one ' . $big . ' must be between 1 and ' . RH_STOCK_MEASURE_MAX_N . '.'];
+    }
+    if ($side !== 'big' && $side !== 'small') {
+        return [null, 'Choose which measure is the stock unit.'];
+    }
+    return [['big' => $big, 'small' => $small, 'n' => $n, 'side' => $side], null];
+}
+
+/** Shot and glass sizes in ml for suggestions (settings; the Assistant's sizes as a fallback; 0 = not set). */
+function rh_stock_measure_sizes(): array
+{
+    $get = static function (string $key, string $fallback): float {
+        $v = function_exists('getSetting') ? (string)getSetting($key, '') : '';
+        if (!is_numeric($v) || (float)$v <= 0) {
+            $v = function_exists('getSetting') ? (string)getSetting($fallback, '') : '';
+        }
+        return (is_numeric($v) && (float)$v > 0) ? (float)$v : 0.0;
+    };
+    return ['shot_ml' => $get('stock_measure_shot_ml', 'ai_stock_tot_ml'), 'glass_ml' => $get('stock_measure_glass_ml', 'ai_stock_glass_ml')];
+}
+
+/** Size in ml read from an item name ("Gin 750ml", "75cl", "1L", "1.5 L"), or null. */
+function rh_stock_measure_name_ml(string $name): ?float
+{
+    if (!preg_match('/(\d+(?:[.,]\d+)?)\s*(ml|cl|l|ltr|litres?|liters?)(?![a-z])/i', $name, $m)) {
+        return null;
+    }
+    $v = (float)str_replace(',', '.', $m[1]);
+    $u = strtolower($m[2]);
+    $ml = $u === 'ml' ? $v : ($u === 'cl' ? $v * 10 : $v * 1000);
+    return ($ml > 0 && $ml <= 100000) ? $ml : null;
+}
+
+/** Suggested N from the size in the name: ['ml'=>750, 'shot'=>30.0, 'glass'=>4.2857] (a size is null when its setting is not set). Never saved by itself. */
+function rh_stock_measure_suggest(string $name): ?array
+{
+    $ml = rh_stock_measure_name_ml($name);
+    if ($ml === null) {
+        return null;
+    }
+    $s = rh_stock_measure_sizes();
+    return [
+        'ml' => $ml,
+        'shot' => $s['shot_ml'] > 0 ? round($ml / $s['shot_ml'], 4) : null,
+        'glass' => $s['glass_ml'] > 0 ? round($ml / $s['glass_ml'], 4) : null,
+    ];
+}
+
+/** "bottle / shot x 30 (stock unit: bottle)" or "none". */
+function rh_stock_measure_describe(?array $m): string
+{
+    if (!$m) {
+        return 'none';
+    }
+    return $m['big'] . ' / ' . $m['small'] . ' x ' . rh_stock_qty_fmt((float)$m['n'], 0, '') . ' (stock unit: ' . ($m['side'] === 'big' ? $m['big'] : $m['small']) . ')';
+}
+
+/**
+ * SQL true for a stock adjustment that is a "counted in shots" correction of an approved count (Step U1): source_type
+ * 'manual' (so shrinkage reports never count it), source_id = the count, reason "Stock count REF correction: ...".
+ * Loss lists ("taken off by hand", Needs review) leave these out: they undo part of a count surplus, not a loss.
+ * A stock take-off by hand always has source_id NULL (a hand ADD carries its batch id, hence quantity_change < 0), so
+ * typing the same reason by hand does not hide a loss.
+ */
+function rh_stock_measure_fix_sql(string $alias = 'sa'): string
+{
+    $a = preg_replace('/[^A-Za-z0-9_]/', '', $alias);
+    return "({$a}.source_type = 'manual' AND {$a}.quantity_change < 0 AND {$a}.source_id IS NOT NULL AND COALESCE({$a}.reason, '') LIKE 'Stock count % correction:%')";
+}
+
+/**
+ * Save an item's measure ($new null = remove it) and re-convert, from their stored typed figures, that item's lines on
+ * DRAFT and SUBMITTED (not yet decided) counts, all in one transaction. Approved and rejected counts are never rewritten.
+ * A re-converted line keeps its expected figure: variance moves by exactly the change in the counted quantity.
+ * Removing the measure is refused while an open count line was typed in it. Logs who, old -> new ('stock_measure_changed').
+ * @return array{changed:bool, old:?array, new:?array, lines:int, counts:int}
+ * @throws RuntimeException with a plain message when refused.
+ */
+function rh_stock_measure_save(PDO $pdo, int $ingId, ?array $new, int $userId, string $where = 'Stock Items'): array
+{
+    if (!rh_stock_measure_ready($pdo)) {
+        throw new RuntimeException('Count measures are not set up yet (database update 088 has not run).');
+    }
+    $ownTx = !$pdo->inTransaction();
+    if ($ownTx) {
+        $pdo->beginTransaction();
+    }
+    try {
+        $q = $pdo->prepare("SELECT id, name, unit, measure_big_name, measure_small_name, measure_per_big, measure_stock_side FROM stock_ingredients WHERE id = ? FOR UPDATE");
+        $q->execute([$ingId]);
+        $ing = $q->fetch(PDO::FETCH_ASSOC);
+        if (!$ing) {
+            throw new RuntimeException('That stock item no longer exists.');
+        }
+        $old = rh_stock_measure_get($ing);
+        $same = ($old === null && $new === null)
+            || ($old !== null && $new !== null && $old['big'] === $new['big'] && $old['small'] === $new['small']
+                && abs((float)$old['n'] - (float)$new['n']) < 0.00005 && $old['side'] === $new['side']);
+        $res = ['changed' => !$same, 'old' => $old, 'new' => $new, 'lines' => 0, 'counts' => 0];
+        if ($same) {
+            if ($ownTx) {
+                $pdo->commit();
+            }
+            return $res;
+        }
+
+        $lq = $pdo->prepare("SELECT scl.id, scl.count_id, scl.actual_quantity, scl.variance, scl.cost_per_unit, scl.entry_mode, scl.entry_big, scl.entry_small, sc.status
+            FROM stock_count_lines scl INNER JOIN stock_counts sc ON sc.id = scl.count_id
+            WHERE scl.ingredient_id = ? AND sc.status IN ('draft','submitted') AND scl.entry_mode IN ('big','small','both')
+            ORDER BY scl.id FOR UPDATE");
+        $lq->execute([$ingId]);
+        $lines = $lq->fetchAll(PDO::FETCH_ASSOC);
+        if ($new === null && $lines) {
+            throw new RuntimeException('The measure of ' . $ing['name'] . ' can’t be removed: ' . count($lines) . ' line' . (count($lines) === 1 ? ' on an open count was' : 's on open counts were')
+                . ' counted in it. Change those lines to the stock unit first, or finish those counts.');
+        }
+
+        $pdo->prepare("UPDATE stock_ingredients SET measure_big_name = ?, measure_small_name = ?, measure_per_big = ?, measure_stock_side = ?, updated_at = NOW() WHERE id = ?")
+            ->execute($new === null ? [null, null, null, null, $ingId] : [$new['big'], $new['small'], $new['n'], $new['side'], $ingId]);
+
+        $upd = $pdo->prepare("UPDATE stock_count_lines SET actual_quantity = ?, variance = ?, variance_cost = ?, entry_per_big = ? WHERE id = ?");
+        $submitted = [];
+        $counts = [];
+        foreach ($lines as $l) {
+            $act = rh_stock_measure_to_stock((string)$l['entry_mode'], $l['entry_big'] !== null ? (float)$l['entry_big'] : null,
+                $l['entry_small'] !== null ? (float)$l['entry_small'] : null, (float)$new['n'], $new['side']);
+            if ($act === null) {
+                throw new RuntimeException('A counted line of ' . $ing['name'] . ' could not be re-worked with the new measure. Nothing was changed.');
+            }
+            $var = round((float)$l['variance'] + ($act - (float)$l['actual_quantity']), 6);
+            $upd->execute([$act, $var, round($var * (float)$l['cost_per_unit'], 4), $new['n'], (int)$l['id']]);
+            $counts[(int)$l['count_id']] = true;
+            if ($l['status'] === 'submitted') {
+                $submitted[(int)$l['count_id']] = true;
+            }
+        }
+        if ($submitted) {
+            $tots = $pdo->prepare("UPDATE stock_counts sc
+                INNER JOIN (SELECT count_id, COALESCE(SUM(variance_cost),0) AS t, COALESCE(SUM(CASE WHEN variance_cost<0 THEN variance_cost ELSE 0 END),0) AS s,
+                                   COALESCE(SUM(CASE WHEN variance_cost>0 THEN variance_cost ELSE 0 END),0) AS p
+                            FROM stock_count_lines WHERE count_id = ? GROUP BY count_id) x ON x.count_id = sc.id
+                SET sc.total_variance_cost = x.t, sc.shortage_cost = x.s, sc.surplus_cost = x.p, sc.updated_at = NOW()
+                WHERE sc.id = ? AND sc.status = 'submitted'");
+            foreach (array_keys($submitted) as $cid) {
+                $tots->execute([$cid, $cid]);
+            }
+        }
+        $res['lines'] = count($lines);
+        $res['counts'] = count($counts);
+        if (function_exists('logActivity')) {
+            logActivity($userId, 'stock_measure_changed', 'Count measure of stock item ' . $ing['name'] . ' (#' . $ingId . ') changed in ' . $where . ': '
+                . rh_stock_measure_describe($old) . ' -> ' . rh_stock_measure_describe($new)
+                . ($lines ? '; re-worked ' . count($lines) . ' counted line' . (count($lines) === 1 ? '' : 's') . ' on ' . count($counts) . ' open count' . (count($counts) === 1 ? '' : 's') : ''));
+        }
+        if ($ownTx) {
+            $pdo->commit();
+        }
+        return $res;
+    } catch (Throwable $e) {
+        if ($ownTx && $pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+}
+
 /** Units that are a container of smaller pieces (a packet of 6, a box, a dozen...). Same list as Menu Management's pieces entry. */
 function rh_stock_unit_is_container(string $unit): bool
 {
