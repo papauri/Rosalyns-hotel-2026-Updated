@@ -22,7 +22,7 @@
   <div class="facts">
     <dl>
       <dt>Who uses it</dt><dd>Store keepers, chefs, managers, accountants.</dd>
-      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Stock</strong>: <strong>Stock Overview</strong>, <strong>Ingredients</strong>, <strong>Recipes</strong>, <strong>Receive Stock</strong>, <strong>Buying</strong>, <strong>Purchase Orders</strong>, <strong>Budget</strong>, <strong>Suppliers</strong>, <strong>Stock Count</strong>, <strong>Wastage</strong>, <strong>Batch Tracker</strong>, <strong>Stock Reports</strong>. Admin menu &rarr; <strong>Restaurant &amp; Bar</strong>: <strong>Orders &amp; Tabs</strong>.</dd>
+      <dt>Where to find it</dt><dd>Admin menu &rarr; <strong>Stock</strong>: <strong>Stock Overview</strong>, <strong>Ingredients</strong>, <strong>Recipes</strong>, <strong>Receive Stock</strong>, <strong>Buying</strong>, <strong>Purchase Orders</strong>, <strong>Budget</strong>, <strong>Suppliers</strong>, <strong>Stock Count</strong>, <strong>Wastage</strong>, <strong>Batch Tracker</strong>, <strong>Stock Reports</strong>, <strong>Fix crate prices</strong>. Admin menu &rarr; <strong>Restaurant &amp; Bar</strong>: <strong>Orders &amp; Tabs</strong>.</dd>
       <dt>Permission needed</dt><dd>See the table "Who can do what".</dd>
       <dt>Only shown when</dt><dd>The <strong>Stock Management</strong> switch is on in Settings &rarr; Modules. Recipes and Tables also need the <strong>Restaurant &amp; Food Service</strong> switch.</dd>
     </dl>
@@ -50,6 +50,7 @@
       <li><a href="#batches">How to deal with expiring and recalled batches</a></li>
       <li><a href="#reports">How to read Stock Reports</a></li>
       <li><a href="#orders">How to use Orders &amp; Tabs</a></li>
+      <li><a href="#crate">How to fix a crate price (Fix crate prices)</a></li>
       <li><a href="#clear">How to clear stock data (start stock again)</a></li>
       <li><a href="#rules">Rules the system enforces</a></li>
       <li><a href="#problems">Problems and fixes</a></li>
@@ -397,6 +398,15 @@
   <p>Tick the box on each order, or the box in the header for every order on the page. A bar appears with how many are selected: <strong>Cancel</strong> (open, unpaid, not started), <strong>Void</strong> (Admin and Manager; one reason for all), <strong>Delete</strong> (needs <strong>Delete Orders</strong>; one reason for all), <strong>Reconcile</strong> (Admin and Manager; orders that need review) and <strong>Export</strong> (the selected rows as a CSV file). Each order goes through the same checks as its own button; the result says how many were done and why any were skipped.</p>
   <p>The <strong>Receipt</strong> page can be printed, saved as PDF or emailed to the guest. <strong>Manual consolidation</strong> on it lets a manager add a discount (with a reason of at least 4 characters) or a service charge before payment. Once paid, totals are final.</p>
 
+  <h2 id="crate">How to fix a crate price saved as the price of one bottle (Fix crate prices)</h2>
+  <p>Some drinks were saved with the price of a whole crate or case as the price of one bottle or can, so stock value and the cost of each sale look far too high. Open Admin menu &rarr; Stock &rarr; <strong>Fix crate prices</strong>. You need the <strong>Stock Management</strong> permission. The page has three steps.</p>
+  <ol class="steps">
+    <li><strong>Type the crate size.</strong> Next to each item whose price is for a whole crate, type how many bottles or cans are in one crate (for example 24). Leave the others blank. Use <strong>Search</strong>, <strong>Category</strong> and <strong>Unit</strong> to find items; numbers you type stay when you change page or filter. To load many at once, save your list in Excel as CSV (File &rsaquo; Save As &rsaquo; CSV UTF-8), choose it and press <strong>Fill from list</strong>. Excel files are refused.</li>
+    <li><strong>Check.</strong> Press <strong>Preview</strong>. It shows the price of one before and after for every item you typed (example: 24,000 for a crate of 24 becomes 1,000 each), each batch still in stock with a <strong>Divide this batch</strong> tick, and open purchase order lines still to receive at the crate price. Items that need a look are listed first. Nothing is saved yet.</li>
+    <li><strong>Save.</strong> If the numbers look right, press <strong>Confirm</strong>. If one is wrong, change it in step 1 and press <strong>Preview again</strong>.</li>
+  </ol>
+  <p>What changes: the price of one, the crate size saved on the item, the price of each ticked batch still in stock, and open purchase order lines still at the crate price. What stays: the unit, quantities in stock, minimum, reorder and par levels, recipes, and past records (stock counts, adjustments, deliveries, received order lines and used-up batches). Each corrected item is recorded in System Logs and Staff activity.</p>
+  <div class="note"><p>Items without a price are not listed: there is nothing to divide. An item on a stock count that is not yet approved is refused and the count is named; approve or delete that count first.</p></div>
   <h2 id="clear">How to clear stock data (start stock again)</h2>
   <p>Use this only when you want to wipe, erase, reset or empty stock and start again (also called deleting all stock), for example before re-importing a full stock list. It is <strong>Super admin only</strong> (permission <strong>Clear Stock Data</strong>). A Super Admin can switch it on for one Administrator. If the hotel has no Super Admin, Administrators keep it. Managers do not see it.</p>
   <ol>

@@ -383,6 +383,7 @@ function rh_kb_sys_page_guides(): array
         'gym-classes.php' => ['17-gym-management.html', 'classes'],
         'gym-management.php' => ['17-gym-management.html', 'packages'],
         'gym-reports.php' => ['17-gym-management.html', 'reports'],
+        'stock-cost-fix.php' => ['08-stock-orders.html', 'crate'],
     ];
 }
 
