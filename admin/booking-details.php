@@ -1330,6 +1330,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] 
     }
     $goOpts = ['user_id' => (int)($user['id'] ?? 0), 'user_name' => (string)($user['full_name'] ?? ($user['username'] ?? '')),
         'dry_run' => !$goApply, 'expect_state' => $goApply ? (string)$_POST['state'] : ''];
+    // Ship Q1 (owner 2026-11-18): keep / drop the group's "check in now, pay later" for a room that inherits it. Only
+    // the two known values pass; rh_group_remove refuses a missing one when the room needs the choice.
+    if ($goOp === 'remove' && in_array((string)($_POST['pay_later'] ?? ''), ['keep', 'drop'], true)) {
+        $goOpts['pay_later'] = (string)$_POST['pay_later'];
+    }
     // D-R6 (accounting lead): optional "move part of the group payment to this room" on Remove. The amount is reviewed
     // first (rh_group_lump_quote) and moved inside the removal's own transaction (after_detach -> rh_group_lump_apply),
     // so the room leaves with the money or nothing changes at all. Moving money also needs refund_payment.
@@ -1396,7 +1401,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] 
             ? 'Primary room is now ' . $goRes['new_label'] . '. No money moved.'
             : $goRes['label'] . ' is now an individual booking. ' . (is_array($goMove) && !empty($goMove['credit_notes'])
                 ? $goMoney((float)$goMove['amount']) . ' of the group payment moved to it (credit note ' . implode(', ', $goMove['credit_notes']) . ').'
-                : 'No money moved.');
+                : 'No money moved.')
+            . (($goRes['pay_later'] ?? '') === 'keep' ? ' It keeps check in now, pay later.' : (($goRes['pay_later'] ?? '') === 'drop' ? ' Pay later dropped: it pays on its own.' : ''));
         echo json_encode(['success' => true, 'message' => $goMsg, 'reload' => 'booking-details.php?id=' . ($goOp === 'remove' ? $goTarget : (int)$booking_id)]);
         exit;
     }
@@ -1429,6 +1435,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] 
             ? 'The group invoice number ' . $goRes['invoice_number'] . ' stays with the group; this room gets its own number when its invoice is made.'
             : 'This room gets its own invoice for its own stay.'];
         $goLines[] = ['Cancellation policy', 'Kept as booked.'];
+        if (!empty($goRes['pay_later_needed'])) {
+            $goLines[] = ['Check in now, pay later', 'This room has it from its group' . ($goRes['pay_later_note'] !== '' ? ' (note: ' . $goRes['pay_later_note'] . ')' : '')
+                . '. Choose below whether it keeps it.'];
+        }
         $goLines[] = ['Money', 'Payments stay on the room they were recorded on.'];
         if (is_array($goMove) && $goMove['amount'] > BALANCE_TOLERANCE) {
             $goLines[] = ['Group payment moved to this room', $goMoney((float)$goMove['amount']) . ' (at most ' . $goMoney((float)$goMove['max']) . '), by a credit note from each room below. No payment row or receipt is changed.'];
@@ -1455,7 +1465,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && in_array((string)($_POST['action'] 
     }
     $goMoveOut = is_array($goMove) ? ['can' => $goCanMove && $goMove['max'] > BALANCE_TOLERANCE, 'max' => (float)$goMove['max'],
         'amount' => (float)$goMove['amount'], 'state' => (string)$goMove['state']] : null;
-    echo json_encode(['success' => true, 'state' => $goRes['state'], 'title' => $goTitle, 'button' => $goBtn, 'lines' => $goLines, 'move' => $goMoveOut], JSON_INVALID_UTF8_SUBSTITUTE);
+    echo json_encode(['success' => true, 'state' => $goRes['state'], 'title' => $goTitle, 'button' => $goBtn, 'lines' => $goLines, 'move' => $goMoveOut,
+        'pay_later' => !empty($goRes['pay_later_needed'])], JSON_INVALID_UTF8_SUBSTITUTE);
     exit;
 }
 
@@ -2841,6 +2852,13 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                         </div>
                         <small id="groupOpMoveMax" class="bd-group-op-move__max"></small>
                     </div>
+                    <fieldset id="groupOpPayLater" class="rh-choices" hidden>
+                        <legend>Check in now, pay later
+                            <i class="help" data-tip="This room checks in now and pays later because its group does. Once it leaves the group it no longer gets that from the group. Choose one.">?</i>
+                        </legend>
+                        <label class="rh-choice"><input type="radio" name="group_op_pay_later" value="keep"> <span>Keep pay later for this room<small>The group's pay-later switch and note are copied onto this room.</small></span></label>
+                        <label class="rh-choice"><input type="radio" name="group_op_pay_later" value="drop"> <span>Drop it - this room pays on its own<small>Normal check-in payment rules apply to this room.</small></span></label>
+                    </fieldset>
                     <p id="groupOpError" class="bd-group-op-error" role="alert" style="color:#b42318;font-weight:600;" hidden></p>
                 </div>
                 <div class="modal-actions modal-footer">
@@ -2863,6 +2881,11 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             var moveAmt = document.getElementById('groupOpMoveAmt');
             var moveMax = document.getElementById('groupOpMoveMax');
             var titleEl = document.getElementById('groupOpTitle');
+            var payLaterBox = document.getElementById('groupOpPayLater');
+            function payLaterPick() {
+                var c = payLaterBox.querySelector('input[name="group_op_pay_later"]:checked');
+                return c ? c.value : '';
+            }
             function showError(m) { err.textContent = m || ''; err.hidden = !m; }
             function post(action, data) {
                 var fd = new FormData();
@@ -2876,7 +2899,11 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             function payload() {
                 if (current.kind === 'credit') return { source_id: String(current.target) };
                 var d = { op: current.op, target_id: String(current.target) };
-                if (current.op === 'remove') { d.move_amount = current.moveAmount; if (current.moveState) d.move_state = current.moveState; }
+                if (current.op === 'remove') {
+                    d.move_amount = current.moveAmount;
+                    if (current.moveState) d.move_state = current.moveState;
+                    if (!payLaterBox.hidden && payLaterPick()) d.pay_later = payLaterPick();
+                }
                 return d;
             }
             function close() { modal.classList.remove('active'); current = null; }
@@ -2887,6 +2914,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 confirmBtn.disabled = true;
                 ref.state = '';
                 ref.moveState = '';
+                payLaterBox.hidden = true;
                 post(ref.kind === 'credit' ? 'group_credit_preview' : 'group_op_preview', payload()).then(function (res) {
                     if (current !== ref) return;
                     if (!res || !res.success) { showError((res && res.message) || 'Could not check this change.'); return; }
@@ -2905,6 +2933,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                             moveMax.textContent = 'At most ' + Number(res.move.max).toFixed(2) + '. Change the amount, then review again before you confirm.';
                         }
                     }
+                    if (ref.op === 'remove' && res.pay_later) payLaterBox.hidden = false;
                     confirmBtn.textContent = res.button || 'Confirm';
                     confirmBtn.disabled = false;
                 });
@@ -2914,6 +2943,8 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                 moveBox.hidden = true;
                 moveAmt.value = '0';
                 moveMax.textContent = '';
+                payLaterBox.hidden = true;
+                payLaterBox.querySelectorAll('input[type="radio"]').forEach(function (r) { r.checked = false; });
                 confirmBtn.textContent = 'Confirm';
                 titleEl.textContent = title;
                 modal.classList.add('active');
@@ -2934,6 +2965,7 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             });
             // A changed amount must be reviewed again before it can be confirmed.
             moveAmt.addEventListener('input', function () { if (current) { confirmBtn.disabled = true; showError(''); } });
+            payLaterBox.addEventListener('change', function () { showError(''); });
             document.getElementById('groupOpMoveReview').addEventListener('click', function () {
                 if (!current || current.op !== 'remove') return;
                 current.moveAmount = (moveAmt.value || '0').trim();
@@ -2941,6 +2973,10 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             });
             confirmBtn.addEventListener('click', function () {
                 if (!current || !current.state) return;
+                if (current.op === 'remove' && !payLaterBox.hidden && !payLaterPick()) {
+                    showError('Choose whether this room keeps pay later or pays on its own.');
+                    return;
+                }
                 confirmBtn.disabled = true;
                 var data = payload();
                 data.state = current.state;

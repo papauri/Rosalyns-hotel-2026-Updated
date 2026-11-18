@@ -195,6 +195,32 @@ try {
     rh_mark_booking_no_show($pdo, $mq, $admin, 'Test');
     ok('Off + policy full: refund 2,330 exactly as before (no charge)', $near(gn_refunds($pdo, $mq), 2330) && gn_rows($pdo, $mq) === []);
 
+    // ---- Ship Q2 (owner 2026-11-18): a member room's unpaid no-show fee (or a cancelled member's kept fee) never blocks
+    // the group's check-out. The gate is per booking (evaluateCheckoutBalance / rh_checkout_with_gate); the fee stays
+    // owed on that room. No user = no "check out with balance" permission, so any balance on the lead would block.
+    $setMode('first_night');
+    $setPolicy('none');
+    $qp = gn_booking($pdo, 'confirmed', 2);
+    $qm = gn_booking($pdo, 'confirmed', 2, $qp);
+    $qc = gn_booking($pdo, 'confirmed', 2, $qp);
+    gn_pay($pdo, $qp, 2330);
+    rh_mark_booking_no_show($pdo, $qm, $admin, 'Test');
+    $pdo->prepare("UPDATE bookings SET status = 'cancelled', amount_due = 1165, payment_status = 'unpaid' WHERE id = ?")->execute([$qc]); // kept fee owed
+    $pdo->prepare("UPDATE bookings SET status = 'checked-in' WHERE id = ?")->execute([$qp]);
+    $qDue = static fn(int $id): float => (float)$pdo->query('SELECT amount_due FROM bookings WHERE id = ' . $id)->fetchColumn();
+    $qmDue = $qDue($qm);
+    $gateQ = evaluateCheckoutBalance($pdo, $qp, null, false);
+    ok('Q2: the no-show room owes its fee (1,165) and the cancelled room its kept fee (1,165)', $near($qmDue, 1165) && $near($qDue($qc), 1165), json_encode([$qmDue, $qDue($qc)]));
+    ok('Q2: the paid lead passes the checkout gate with no override (member fees not counted)', !empty($gateQ['allowed']) && $near($gateQ['balance'], 0)
+        && empty($gateQ['needs_confirm']) && empty($gateQ['override']), json_encode($gateQ));
+    $coQ = rh_checkout_with_gate($pdo, $qp, null, false);
+    $qpStatus = (string)$pdo->query('SELECT status FROM bookings WHERE id = ' . (int)$qp)->fetchColumn();
+    ok('Q2: the lead checks out through the real checkout path, no override', !empty($coQ['success']) && empty($coQ['override']) && $qpStatus === 'checked-out', json_encode([$coQ, $qpStatus]));
+    ok('Q2: after the lead checks out, both fees are still owed on their own rooms (unchanged)', $near($qDue($qm), 1165) && $near($qDue($qc), 1165)
+        && count(gn_rows($pdo, $qm)) === 1, json_encode([$qDue($qm), $qDue($qc)]));
+    $setMode('0');
+    $setPolicy('full');
+
     $seen = $chk->prepare('SELECT COUNT(*) FROM bookings WHERE id IN (?, ?)');
     $seen->execute([$p, $m2]);
     ok('nothing visible outside the transaction (no implicit commit)', (int)$seen->fetchColumn() === 0);

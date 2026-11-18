@@ -216,6 +216,34 @@ try {
     ok('remove primary only: it leaves, the group is handed on', !empty($ha['success']) && $ha['done'] === 1 && (int)$get($H)['primary_booking_id'] === 0
         && (int)$get($H3)['primary_booking_id'] === $H2, json_encode([$get($H)['primary_booking_id'], $get($H2)['primary_booking_id'], $get($H3)['primary_booking_id']]));
     ok('remove: a deleted booking is skipped', ($room(rh_bk_bulk_plan($pdo, 'remove_group', [$P5], $adminId), $P5)['why'] ?? '') === 'deleted');
+    // Ship Q1 (owner 2026-11-18): rooms inheriting the group's pay later get a keep / drop pick (per room, no default).
+    $off = ['checkin_without_payment' => 0, 'checkin_arrangement_note' => null];
+    $K1 = $mk(['checkin_without_payment' => 1, 'checkin_arrangement_note' => 'GBLK monthly account']);
+    $K2 = $mk($off);
+    $K3 = $mk($off);
+    $K4 = $mk($off);
+    $K5 = $mk(['checkin_without_payment' => 1, 'checkin_arrangement_note' => 'GBLK own']);
+    $pdo->prepare('UPDATE bookings SET primary_booking_id = ? WHERE id IN (?, ?, ?, ?)')->execute([$K1, $K2, $K3, $K4, $K5]);
+    $kp = rh_bk_bulk_plan($pdo, 'remove_group', [$K2, $K3, $K4, $K5], $adminId);
+    $kOpts = array_column($room($kp, $K2)['options'] ?? [], 'value');
+    ok('Q1 plan: an inheriting room offers keep / drop with nothing picked, and says so', $kOpts === ['', 'keep', 'drop'] && ($room($kp, $K2)['pick'] ?? 'x') === ''
+        && strpos($room($kp, $K2)['text'] ?? '', 'pay later from its group (note: GBLK monthly account)') !== false, json_encode($room($kp, $K2)));
+    ok('Q1 plan: a room with its own switch gets no pick', !isset($room($kp, $K5)['options']) && $kp['will'] === 4);
+    $ka = rh_bk_bulk_apply($pdo, 'remove_group', [$K2, $K3, $K4, $K5], $admin, $kp['state'], null, [$K2 => 'keep', $K3 => 'drop']);
+    $rK = static function (array $res, int $id): array { foreach ($res['results'] as $x) { if ((int)$x['id'] === $id) { return $x; } } return []; };
+    ok('Q1 apply: keep / drop applied, a missing pick is refused for that room only', !empty($ka['success']) && $ka['done'] === 3
+        && !empty($rK($ka, $K2)['ok']) && strpos($rK($ka, $K2)['text'], 'Keeps check in now, pay later') !== false
+        && !empty($rK($ka, $K3)['ok']) && strpos($rK($ka, $K3)['text'], 'Pay later dropped') !== false
+        && empty($rK($ka, $K4)['ok']) && strpos($rK($ka, $K4)['text'], 'Skipped: ') === 0 && !empty($rK($ka, $K5)['ok']), json_encode($ka));
+    $bK2 = $get($K2);
+    $bK3 = $get($K3);
+    ok('Q1 apply: keep copies the switch + note; drop copies nothing; the unpicked room stays in the group', (int)$bK2['checkin_without_payment'] === 1
+        && $bK2['checkin_arrangement_note'] === 'GBLK monthly account' && (int)$bK2['primary_booking_id'] === 0
+        && (int)$bK3['checkin_without_payment'] === 0 && (int)$bK3['primary_booking_id'] === 0 && (int)$get($K4)['primary_booking_id'] === $K1
+        && (int)$get($K5)['checkin_without_payment'] === 1 && $get($K5)['checkin_arrangement_note'] === 'GBLK own', json_encode([$bK2['checkin_without_payment'], $bK3['checkin_without_payment']]));
+    ok('Q1 apply: History "Kept pay-later from group" / "Dropped pay-later from group" once each, none on the others',
+        $hist($K2, 'Kept pay-later from group') === 1 && $hist($K3, 'Dropped pay-later from group') === 1 && $hist($K4, 'Removed from the group') === 0
+        && $hist($K5, 'Kept pay-later from group') + $hist($K5, 'Dropped pay-later from group') === 0);
 
     // ---- Print arrival list rows ------------------------------------------------------------------------------------
     $arr = rh_bk_bulk_arrival_rows($pdo, [$P1, $P5, $P2]);

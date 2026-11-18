@@ -161,6 +161,15 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
   stock_measure_changed, stock_count_line_measure_changed, stock_count_measure_correction. Counts it reads stay in the
   stock unit.
 
+### Ship Q: group remove keeps / drops pay later, rooms' own names + dates in emails (2026-11-19, owner) - hashes in TASKS.md
+- Guides (Bookings › Groups): removing a room that gets "check in now, pay later" from its group (single Remove or bulk
+  Remove) asks "Keep pay later for this room" or "Drop it - this room pays on its own"; History "Kept pay-later from
+  group" / "Dropped pay-later from group". A no-show room's unpaid fee never stops the rest of the group checking out;
+  the fee stays owed on that room. Received / Confirmed / Tentative / quotation emails list each room with its own
+  dates and nights and "Who's staying" name when entered.
+- Assistant: rh_group_remove opts take the pay-later choice (keep/drop), refused when needed and missing; email rate
+  block rh_email_booked_rate_rows rows carry per-room dates/nights + room_guest_name.
+
 ## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
 
 ### Import stock check: value column warning + stock check workbook (2026-11-16, owner ask) — hashes in TASKS.md

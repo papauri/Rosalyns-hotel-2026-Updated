@@ -381,6 +381,60 @@ try {
     $newRootS = (int)$get($SB)['primary_booking_id'] === 0 ? $SB : $SC;
     ok('ARR primary room removed: the room taking over carries the arrangement, the members follow it', !empty($r['success']) && (int)$get($newRootS)['checkin_without_payment'] === 1
         && (int)$get($newRootS === $SB ? $SC : $SB)['primary_booking_id'] === $newRootS, json_encode([$r['error'] ?? '', $get($SB)['primary_booking_id'], $get($SC)['primary_booking_id']]));
+
+    // ---- Ship Q1 (owner 2026-11-18): Remove from group asks keep / drop for a room INHERITING pay later ---------------
+    $TA = $mk(['checkin_without_payment' => 1, 'checkin_arrangement_note' => 'GOPT pays at month end & <b>']);
+    $TB = $mk($off);
+    $TC = $mk($off);
+    $TD = $mk($off);
+    $TE = $mk(['checkin_without_payment' => 1, 'checkin_arrangement_note' => 'GOPT own TE note']);
+    $testIds = array_merge($testIds, [$TA, $TB, $TC, $TD, $TE]);
+    $pdo->prepare('UPDATE bookings SET primary_booking_id = ? WHERE id IN (?, ?, ?, ?)')->execute([$TA, $TB, $TC, $TD, $TE]);
+    $pv = rh_group_remove($pdo, $TB, $opts + ['dry_run' => true]);
+    ok('Q1 preview: an inheriting room needs the choice; the lead\'s note is shown; preview never refuses', !empty($pv['success']) && $pv['pay_later_needed'] === true
+        && $pv['pay_later_note'] === 'GOPT pays at month end & <b>' && $pv['pay_later'] === '', json_encode($pv));
+    $r = rh_group_remove($pdo, $TB, $opts + ['expect_state' => (string)$pv['state']]);
+    $bTB = $get($TB);
+    ok('Q1: no choice is refused (not defaulted), the room stays in the group, nothing logged', empty($r['success']) && stripos($r['error'], 'keeps pay later or pays on its own') !== false
+        && (int)$bTB['primary_booking_id'] === $TA && (int)$bTB['checkin_without_payment'] === 0 && $hist($TB, 'Removed from the group') === 0, json_encode([$r['error'], $bTB['primary_booking_id']]));
+    $r = rh_group_remove($pdo, $TB, $opts + ['expect_state' => (string)$pv['state'], 'pay_later' => 'maybe']);
+    ok('Q1: an unknown choice is refused too', empty($r['success']) && (int)$get($TB)['primary_booking_id'] === $TA, (string)$r['error']);
+    $r = rh_group_remove($pdo, $TB, $opts + ['expect_state' => (string)$pv['state'], 'pay_later' => 'keep']);
+    $bTB = $get($TB);
+    ok('Q1 keep: the room is individual with the switch on and the lead\'s note copied', !empty($r['success']) && $r['pay_later'] === 'keep' && (int)$bTB['primary_booking_id'] === 0
+        && (int)$bTB['checkin_without_payment'] === 1 && $bTB['checkin_arrangement_note'] === 'GOPT pays at month end & <b>', json_encode([$r['error'] ?? '', $bTB['checkin_without_payment'], $bTB['checkin_arrangement_note']]));
+    ok('Q1 keep: History "Kept pay-later from group" on the room (once), none on the lead; the lead keeps its own switch', $hist($TB, 'Kept pay-later from group') === 1
+        && $hist($TB, 'Dropped pay-later from group') === 0 && $hist($TA, 'Kept pay-later from group') === 0 && (int)$get($TA)['checkin_without_payment'] === 1);
+    ok('Q1 keep: the room passes its own check-in gate as an arrangement', rh_checkin_payment_gate($get($TB)) === 'arrangement');
+    $pv = rh_group_remove($pdo, $TC, $opts + ['dry_run' => true]);
+    $r = rh_group_remove($pdo, $TC, $opts + ['expect_state' => (string)$pv['state'], 'pay_later' => 'drop']);
+    $bTC = $get($TC);
+    ok('Q1 drop: the room is individual, switch stays off, no note copied', !empty($r['success']) && $r['pay_later'] === 'drop' && (int)$bTC['primary_booking_id'] === 0
+        && (int)$bTC['checkin_without_payment'] === 0 && $bTC['checkin_arrangement_note'] === null, json_encode([$r['error'] ?? '', $bTC['checkin_without_payment']]));
+    ok('Q1 drop: History "Dropped pay-later from group" on the room (once)', $hist($TC, 'Dropped pay-later from group') === 1 && $hist($TC, 'Kept pay-later from group') === 0);
+    ok('Q1 drop: the room no longer passes its check-in gate as an arrangement (it pays on its own)', rh_checkin_payment_gate($get($TC)) !== 'arrangement', (string)rh_checkin_payment_gate($get($TC)));
+    $pv = rh_group_remove($pdo, $TE, $opts + ['dry_run' => true]);
+    $r = rh_group_remove($pdo, $TE, $opts + ['expect_state' => (string)$pv['state'], 'pay_later' => 'drop']);
+    $bTE = $get($TE);
+    ok('Q1: a room with its OWN switch needs no choice; a passed choice is ignored; nothing logged', empty($pv['pay_later_needed']) && !empty($r['success'])
+        && $r['pay_later'] === '' && (int)$bTE['checkin_without_payment'] === 1 && $bTE['checkin_arrangement_note'] === 'GOPT own TE note'
+        && $hist($TE, 'Dropped pay-later from group') === 0, json_encode([$pv['pay_later_needed'] ?? null, $r['error'] ?? '']));
+    // State: the choice appearing after the review (lead's switch turned on) fails the review check, not the choice check.
+    $UA = $mk($off);
+    $UB = $mk($off);
+    $UC = $mk($off);
+    $testIds = array_merge($testIds, [$UA, $UB, $UC]);
+    $pdo->prepare('UPDATE bookings SET primary_booking_id = ? WHERE id IN (?, ?)')->execute([$UA, $UB, $UC]);
+    $pv = rh_group_remove($pdo, $UB, $opts + ['dry_run' => true]);
+    ok('Q1: a group without pay later asks nothing', !empty($pv['success']) && empty($pv['pay_later_needed']));
+    $pdo->prepare('UPDATE bookings SET checkin_without_payment = 1 WHERE id = ?')->execute([$UA]);
+    $r = rh_group_remove($pdo, $UB, $opts + ['expect_state' => (string)$pv['state']]);
+    ok('Q1: lead\'s pay later switched on after the review -> "group changed, review again"', empty($r['success']) && stripos($r['error'], 'changed since you reviewed') !== false
+        && (int)$get($UB)['primary_booking_id'] === $UA, (string)$r['error']);
+    // Removing the root itself never asks (it holds its own switch; the room taking over gets it copied as before).
+    $pv = rh_group_remove($pdo, $UA, $opts + ['dry_run' => true]);
+    $r = rh_group_remove($pdo, $UA, $opts + ['expect_state' => (string)$pv['state']]);
+    ok('Q1: removing the primary room needs no choice', empty($pv['pay_later_needed']) && !empty($r['success']) && $hist($UA, 'Kept pay-later from group') === 0, (string)($r['error'] ?? ''));
 } catch (Throwable $e) {
     ok('no exception', false, $e->getMessage() . ' @' . $e->getLine());
 } finally {

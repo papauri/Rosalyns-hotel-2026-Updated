@@ -521,6 +521,10 @@ if (!function_exists('rh_group_repoint')) {
      * with the group and the room gets a new one when its own invoice is made.
      *
      * $opts: user_id, user_name, dry_run, expect_state, new_root (int),
+     *        pay_later ('keep'|'drop', Ship Q1 owner 2026-11-18): needed only when the room INHERITS "check in now, pay
+     *        later" from its lead (lead checkin_without_payment = 1, the room's own = 0; pay_later_needed in the result).
+     *        keep = the lead's switch + note are copied onto the room; drop = nothing copied, the room pays on its own.
+     *        A missing / unknown choice when one is needed is refused (never defaulted); ignored when not needed.
      *        after_detach (callable(PDO $pdo, array $result): void) - runs inside the same transaction after the room is
      *        detached (C2 hook: the accounting lead's optional "move part of a lump sum to the leaving room" step;
      *        throwing rolls the whole removal back).
@@ -532,7 +536,8 @@ if (!function_exists('rh_group_repoint')) {
     {
         $out = ['success' => false, 'error' => '', 'state' => '', 'booking_id' => $bookingId, 'old_root' => 0, 'new_root' => 0,
             'repointed' => false, 'billing' => 'none', 'company' => '', 'invoice_number' => '', 'invoice_cleared' => false,
-            'chase_copied' => 0, 'label' => '', 'new_label' => '', 'room' => [], 'remaining' => 0];
+            'chase_copied' => 0, 'label' => '', 'new_label' => '', 'room' => [], 'remaining' => 0,
+            'pay_later_needed' => false, 'pay_later_note' => '', 'pay_later' => ''];
         $dry = !empty($opts['dry_run']);
         $work = static function () use ($pdo, $bookingId, $opts, $dry, $out): array {
             $root = $bookingId > 0 ? rh_group_ops_root($pdo, $bookingId) : 0;
@@ -577,7 +582,12 @@ if (!function_exists('rh_group_repoint')) {
             }
             $out['new_root'] = $newRoot;
             $out['new_label'] = rh_group_ops_label($rows[$newRoot]);
-            $out['state'] = rh_group_ops_state($root, $rows, [$bookingId, $newRoot]);
+            // Ship Q1: a member that inherits the lead's pay-later arrangement (read from the locked rows) needs FOH's
+            // keep / drop choice. The root itself always holds its own switch, so it never needs one.
+            $payLaterNeeded = $bookingId !== $root && !empty($rows[$root]['checkin_without_payment']) && empty($row['checkin_without_payment']);
+            $out['pay_later_needed'] = $payLaterNeeded;
+            $out['pay_later_note'] = $payLaterNeeded ? trim((string)($rows[$root]['checkin_arrangement_note'] ?? '')) : '';
+            $out['state'] = rh_group_ops_state($root, $rows, [$bookingId, $newRoot, $payLaterNeeded ? 'pl' : '']);
             if (($opts['expect_state'] ?? '') !== '' && !hash_equals((string)$opts['expect_state'], $out['state'])) {
                 $out['error'] = 'The group changed since you reviewed it. Close this and review again.';
                 return $out;
@@ -610,6 +620,15 @@ if (!function_exists('rh_group_repoint')) {
             }
             $holdsGroupNo = $before !== '' && trim((string)($row['final_invoice_number'] ?? '')) === $before;
             $out['invoice_cleared'] = $holdsGroupNo;
+            $payLater = '';
+            if ($payLaterNeeded) {
+                $payLater = in_array($opts['pay_later'] ?? '', ['keep', 'drop'], true) ? (string)$opts['pay_later'] : '';
+                if ($payLater === '' && !$dry) {
+                    $out['error'] = 'This room checks in now and pays later because its group does. Choose whether it keeps pay later or pays on its own.';
+                    return $out;
+                }
+                $out['pay_later'] = $payLater;
+            }
             if ($dry) {
                 $out['success'] = true;
                 return $out;
@@ -639,13 +658,25 @@ if (!function_exists('rh_group_repoint')) {
                 $pdo->prepare('UPDATE bookings SET final_invoice_number = NULL, final_invoice_path = NULL, final_invoice_generated = 0 WHERE id = ?')->execute([$bookingId]);
             }
             $out['chase_copied'] = rh_group_copy_chase($pdo, $root, $bookingId);
+            if ($payLater === 'keep') { // same copy as rh_group_repoint's arrangement copy
+                $pdo->prepare('UPDATE bookings SET checkin_without_payment = 1, checkin_arrangement_note = ? WHERE id = ?')
+                    ->execute([$rows[$root]['checkin_arrangement_note'] ?? null, $bookingId]);
+            }
 
             $newRow = $rows[$newRoot];
-            $meta = ['group_root' => $newRoot, 'old_root' => $root, 'billing' => $out['billing'], 'invoice_cleared' => $holdsGroupNo, 'chase_copied' => $out['chase_copied']];
+            $meta = ['group_root' => $newRoot, 'old_root' => $root, 'billing' => $out['billing'], 'invoice_cleared' => $holdsGroupNo, 'chase_copied' => $out['chase_copied'],
+                'pay_later' => $payLater];
             $bill = $out['billing'] === 'copied' ? ' Still billed to ' . $out['company'] . ' (copied from the group).' : '';
             rh_group_ops_log($row, 'Removed from the group', 'Taken out of the group led by ' . rh_group_ops_label($newRow)
                 . '. It is now an individual booking with its own payments, balance and invoice; its cancellation policy is kept.' . $bill,
                 (string)$newRow['booking_reference'], '(individual booking)', $opts, $meta);
+            if ($payLater === 'keep') {
+                rh_group_ops_log($row, 'Kept pay-later from group', 'This room had "check in now, pay later" from its group. It keeps it now that it is an individual booking.'
+                    . ($out['pay_later_note'] !== '' ? ' Note: ' . $out['pay_later_note'] : ''), 'On (from the group)', 'On (own)', $opts, $meta);
+            } elseif ($payLater === 'drop') {
+                rh_group_ops_log($row, 'Dropped pay-later from group', 'This room had "check in now, pay later" from its group. It was dropped: this room pays on its own.',
+                    'On (from the group)', 'Off', $opts, $meta);
+            }
             if ($holdsGroupNo) {
                 rh_group_ops_log($row, 'Group invoice number left with the group', 'This room held the group invoice number; it stays with the group and this room gets its own number when its invoice is made.',
                     $before, '(none yet)', $opts, $meta);

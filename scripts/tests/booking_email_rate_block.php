@@ -104,6 +104,34 @@ ok('booking without id: no warnings', $warn === $w0);
 $b = rh_email_booked_rate_block([$row(['id' => 950, 'room_name' => '<i>Suite</i>', 'rate_plan_label' => '<script>alert(1)</script>', 'rate_plan_discount' => 1000])], 950, 300000.0, $cur);
 ok('HTML in rate plan label / room name is escaped', !$has($b, '<script>') && !$has($b, '<i>') && $has($b, '&lt;script&gt;alert(1)&lt;/script&gt;') && $has($b, '&lt;i&gt;Suite'), $b);
 
+// ───────────── 5b. Ship Q3 (owner 2026-11-18): each room's occupant and its own dates ─────────────
+$q3 = [
+    $row(['id' => 970, 'booking_reference' => 'TRBQ', 'room_label' => '12', 'room_guest_name' => 'Mr & Mrs <Banda>',
+        'check_in_date' => '2026-12-01', 'check_out_date' => '2026-12-04']),
+    $row(['id' => 971, 'booking_reference' => 'TRBQ-2', 'room_name' => 'Garden Suite', 'room_label' => '14', 'room_guest_name' => null,
+        'check_in_date' => '2026-12-02', 'check_out_date' => '2026-12-04', 'number_of_nights' => 2, 'total_amount' => 160000, 'total_with_vat' => 160000,
+        'primary_booking_id' => 970]),
+];
+$b = rh_email_booked_rate_block($q3, 970, 460000.0, $cur);
+$q3NoName = $q3;
+$q3NoName[0]['room_guest_name'] = '';
+$bNo = rh_email_booked_rate_block($q3NoName, 970, 460000.0, $cur);
+ok('Q3: the named room\'s rate line names its occupant (escaped once)', $has($b, 'Room 1: Deluxe Room – Mr &amp; Mrs &lt;Banda&gt; - MWK 100,000.00 × 3 nights')
+    && !$has($b, '&amp;amp;') && !$has($b, '<Banda>'), $b);
+ok('Q3: the unnamed room\'s rate line is exactly as before, with its own nights (rate × 2 nights)',
+    $has($b, '>Room 2: Garden Suite - MWK 80,000.00 × 2 nights</p>') && $has($bNo, '>Room 2: Garden Suite - MWK 80,000.00 × 2 nights</p>')
+    && $has($bNo, '>Room 1: Deluxe Room - MWK 100,000.00 × 3 nights</p>'), $b);
+ok('Q3: Your rooms lists the occupant and that room\'s own dates and nights',
+    $has($b, '>TRBQ - Deluxe Room - 12 - Guest: Mr &amp; Mrs &lt;Banda&gt; - 01 Dec 2026 to 04 Dec 2026 (3 nights)</p>'), $b);
+ok('Q3: a room with no occupant shows no Guest part, but its own dates (2 nights)',
+    $has($b, '>TRBQ-2 - Garden Suite - 14 - 02 Dec 2026 to 04 Dec 2026 (2 nights)</p>') && substr_count($b, 'Guest:') === 1, $b);
+ok('Q3: text part reads the occupant plainly', $has(rh_email_block_plain($b), 'Guest: Mr & Mrs <Banda> - 01 Dec 2026 to 04 Dec 2026 (3 nights)'), rh_email_block_plain($b));
+$b1 = rh_email_booked_rate_block([$row(['id' => 972, 'room_guest_name' => 'Solo Guest', 'check_in_date' => '2026-12-01', 'check_out_date' => '2026-12-04'])], 972, 300000.0, $cur);
+ok('Q3: a single room is unchanged (no occupant in the rate line, no room list)', $has($b1, '>Room: Deluxe Room - MWK 100,000.00 × 3 nights</p>') && !$has($b1, 'Solo Guest') && !$has($b1, 'Your rooms'), $b1);
+$b1n = rh_email_booked_rate_block([$row(['id' => 973, 'number_of_nights' => 1, 'total_amount' => 100000, 'total_with_vat' => 100000,
+    'check_in_date' => '2026-12-03', 'check_out_date' => '2026-12-04', 'booking_reference' => 'TRBQ1']), $row(['id' => 974, 'booking_reference' => 'TRBQ1-2', 'primary_booking_id' => 973])], 973, 400000.0, $cur);
+ok('Q3: one night reads "(1 night)"; a row without dates shows no date part', $has($b1n, 'TRBQ1 - Deluxe Room - 03 Dec 2026 to 04 Dec 2026 (1 night)</p>') && $has($b1n, '>TRBQ1-2 - Deluxe Room</p>'), $b1n);
+
 // ───────────── 6. Template filler (in-memory templates, nothing stored is read) ─────────────
 $block = rh_email_booked_rate_block([$row(['id' => 960, 'rate_plan_label' => "O'Brien Rate", 'rate_plan_discount' => 10000])], 960, 300000.0, $cur);
 $vars = ['booking_reference' => 'TRBT', 'booked_rate_block' => $block, 'cancellation_policy_text' => '<p>Cancelled less than 7 days before arrival: 50%.</p>', 'cancellation_fee_charged' => ''];

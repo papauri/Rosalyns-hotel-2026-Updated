@@ -2491,9 +2491,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
             @set_time_limit(300); // up to 50 emails, one after another
             // Assign rooms: the room picked per booking in the review (checked again when it is assigned).
+            // Remove from group (Ship Q1): keep / drop pay later per room that inherits it from its group.
             $bbChoices = [];
+            $bbPickRe = $bbOp === 'remove_group' ? '/^(keep|drop)$/' : '/^[rc]:[0-9]{1,10}$/';
             foreach ((array)($_POST['choices'] ?? []) as $bbCid => $bbPick) {
-                if (is_string($bbPick) && preg_match('/^[rc]:[0-9]{1,10}$/', $bbPick) && (int)$bbCid > 0) {
+                if (is_string($bbPick) && preg_match($bbPickRe, $bbPick) && (int)$bbCid > 0) {
                     $bbChoices[(int)$bbCid] = $bbPick;
                 }
             }
@@ -11428,7 +11430,9 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 var pick = '';
                 if (ok && r.options && r.options.length) {
                     // Assign rooms (G5b): the proposed room, which the person may change before confirming.
-                    pick = '<br><select class="form-control bk-bulk-pick" data-bk-pick="' + esc(r.id) + '" aria-label="' + esc('Room for ' + r.label) + '">'
+                    // Remove from group (Ship Q1): keep / drop the pay later the room has from its group (no default).
+                    pick = '<br><select class="form-control bk-bulk-pick" data-bk-pick="' + esc(r.id) + '" aria-label="'
+                        + esc((bulk.op === 'remove_group' ? 'Pay later for ' : 'Room for ') + r.label) + '">'
                         + r.options.map(function (o) {
                             return '<option value="' + esc(o.value) + '"' + (o.value === r.pick ? ' selected' : '') + '>' + esc(o.label) + '</option>';
                         }).join('') + '</select>';
@@ -11536,8 +11540,16 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             } else if (bulk.op === 'noshow') {
                 fields.note = noteEl ? noteEl.value.trim() : '';
             }
-            [reasonEl, noteEl, emailEl].forEach(function (x) { if (x) x.disabled = true; });
             var list = byId('bkBulkList');
+            if (bulk.op === 'remove_group' && list) {
+                var unpicked = Array.prototype.filter.call(list.querySelectorAll('select[data-bk-pick]'), function (s) { return !s.value; });
+                if (unpicked.length) {
+                    bulkError('Choose keep or drop pay later for every room that asks (' + unpicked.length + ' left).');
+                    unpicked[0].focus();
+                    return;
+                }
+            }
+            [reasonEl, noteEl, emailEl].forEach(function (x) { if (x) x.disabled = true; });
             Array.prototype.forEach.call(list ? list.querySelectorAll('select[data-bk-pick]') : [], function (s) {
                 fields['choices[' + s.getAttribute('data-bk-pick') + ']'] = s.value;
                 s.disabled = true;

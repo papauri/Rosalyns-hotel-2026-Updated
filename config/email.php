@@ -2603,7 +2603,10 @@ function rh_email_rate_plan_text(array $row, string $currency): string
  *  - Your rate: rh_booked_rate_line() guest_text of every room (rh_booked_rate_group_lines: "Room: ..." / "Room 1: ..."),
  *    only when those rooms add up to $owed (BALANCE_TOLERANCE per room); else this room's own line when it alone is
  *    $owed; else no rate line (never a figure that disagrees with the total). Then the rate plan line(s).
- *  - Your rooms: each live room's reference with its room type (and number) when the party has more than one room.
+ *  - Your rooms: each live room's reference with its room type (and number) when the party has more than one room,
+ *    then (Ship Q3, owner 2026-11-18) "Guest: <occupant>" when bookings.room_guest_name is entered and THAT room's own
+ *    "d M Y to d M Y (N nights)". In a party of more than one room the rate line names the occupant too
+ *    (rh_room_label_with_guest); a room without a name prints its rate line as before.
  */
 function rh_email_booked_rate_block(array $rows, int $selfId, float $owed, string $currency, array $fallbackRefs = []): string
 {
@@ -2627,8 +2630,13 @@ function rh_email_booked_rate_block(array $rows, int $selfId, float $owed, strin
         $sum = 0.0;
         $allOk = true;
         $self = null;
+        $multi = count($rows) > 1;
         foreach ($rows as $i => $r) {
-            $br = rh_booked_rate_line($r, null, ['currency' => $currency, 'room_name' => (string)($r['room_name'] ?? '')]);
+            $rn = (string)($r['room_name'] ?? '');
+            if ($multi && function_exists('rh_room_label_with_guest')) {
+                $rn = rh_room_label_with_guest($rn, $r['room_guest_name'] ?? '');
+            }
+            $br = rh_booked_rate_line($r, null, ['currency' => $currency, 'room_name' => $rn]);
             $lines[$i] = $br;
             $allOk = $allOk && !empty($br['ok']);
             $sum += (float)$br['total'];
@@ -2689,7 +2697,24 @@ function rh_email_booked_rate_block(array $rows, int $selfId, float $owed, strin
             $type = trim((string)($r['room_name'] ?? ''));
             $no = trim((string)($r['room_label'] ?? ''));
             $room = $no !== '' && stripos($type, $no) === false ? trim($type . ' - ' . $no, ' -') : $type;
-            $refs[] = trim(trim((string)($r['booking_reference'] ?? '')) . ($room !== '' ? ' - ' . $room : ''), ' -');
+            $guest = trim((string)($r['room_guest_name'] ?? ''));
+            $ci = strtotime((string)($r['check_in_date'] ?? ''));
+            $co = strtotime((string)($r['check_out_date'] ?? ''));
+            $dates = '';
+            if (!empty($r['check_in_date']) && !empty($r['check_out_date']) && $ci !== false && $co !== false) {
+                $nights = (int)round(($co - $ci) / 86400);
+                if ($nights <= 0) {
+                    $nights = (int)($r['number_of_nights'] ?? 0);
+                }
+                $dates = date('d M Y', $ci) . ' to ' . date('d M Y', $co) . ($nights > 0 ? ' (' . $nights . ' night' . ($nights === 1 ? '' : 's') . ')' : '');
+            }
+            $refs[] = implode(' - ', array_filter([
+                trim(trim((string)($r['booking_reference'] ?? '')) . ($room !== '' ? ' - ' . $room : ''), ' -'),
+                $guest !== '' ? 'Guest: ' . $guest : '',
+                $dates,
+            ], static function (string $x): bool {
+                return $x !== '';
+            }));
         }
     } elseif (!$rows) {
         $refs = array_map(static function ($r): string {

@@ -333,6 +333,11 @@ if (!function_exists('rh_bk_bulk_ops')) {
                 if (($res['billing'] ?? '') === 'copied') {
                     $text .= ' Still billed to ' . $res['company'] . ' (copied from the group).';
                 }
+                if (!empty($res['pay_later_needed'])) { // Ship Q1: FOH picks keep / drop for this room in the review
+                    $text .= ' It has check in now, pay later from its group' . ($res['pay_later_note'] !== '' ? ' (note: ' . $res['pay_later_note'] . ')' : '')
+                        . ': choose whether it keeps it.';
+                    return ['will' => true, 'why' => '', 'text' => $text, 'pay_later' => true];
+                }
                 return ['will' => true, 'why' => '', 'text' => $text];
             case 'confirm':
                 // Same rules as the row's Confirm: a tentative hold is converted (convert_tentative); a pending booking
@@ -561,6 +566,14 @@ if (!function_exists('rh_bk_bulk_ops')) {
                     }
                 } else {
                     $p = rh_bk_bulk_room_plan($pdo, $op, $b, $today, $userId);
+                    if ($op === 'remove_group' && !empty($p['pay_later'])) {
+                        // Ship Q1 ASSUMPTION: one choice per room (rooms can come from different groups); none preselected.
+                        $extra = ['options' => [
+                            ['value' => '', 'label' => 'Choose: keep or drop pay later'],
+                            ['value' => 'keep', 'label' => 'Keep pay later for this room'],
+                            ['value' => 'drop', 'label' => 'Drop it - this room pays on its own'],
+                        ], 'pick' => ''];
+                    }
                     if ($op === 'cancel' || $op === 'noshow') {
                         $extra = ['cols' => $p['cols'] ?? null];
                         if ($op === 'cancel') {
@@ -795,10 +808,12 @@ if (!function_exists('rh_bk_bulk_ops')) {
                         adminBulkSkip($skipped, $one['why']);
                     }
                 } elseif ($op === 'remove_group') {
-                    $g = rh_group_remove($pdo, (int)$r['id'], $opts);
+                    // Ship Q1: the room's keep / drop pick (only used when it inherits pay later; refused when missing).
+                    $g = rh_group_remove($pdo, (int)$r['id'], $opts + ['pay_later' => (string)($choices[(int)$r['id']] ?? '')]);
                     if (!empty($g['success'])) {
                         $res['ok'] = true;
-                        $res['text'] = 'Now an individual booking. No money moved.';
+                        $res['text'] = 'Now an individual booking. No money moved.'
+                            . (($g['pay_later'] ?? '') === 'keep' ? ' Keeps check in now, pay later.' : (($g['pay_later'] ?? '') === 'drop' ? ' Pay later dropped: it pays on its own.' : ''));
                     } elseif ((string)$g['error'] === 'This booking is not in a group.') {
                         // Every other room of its group was ticked and has left: it is on its own already.
                         $res['ok'] = true;
