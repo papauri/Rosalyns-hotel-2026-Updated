@@ -123,6 +123,10 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Confirming the same review twice never runs it twice; after a lost connection the message says the result is unknown (check History). The bookings CSV export neutralises cells that start like a spreadsheet formula.
 - History as each single action. Guides: All Bookings bulk bar. Assistant: knows the bulk bar actions; no Assistant action.
 
+### Group follow-up G5c: bulk Cancel and Mark no-show (2026-11-18, owner) — hashes in TASKS.md
+- All Bookings bulk bar adds Cancel (one reason for all, "Email the guest" tick) and Mark no-show (optional note). The review shows each room's fee kept, refund, guest credit (or no-show fee) and what will happen; nothing changes until Confirm. Fees are the automatic ones (policy locked at booking, else the hotel rule / no-show setting); to change one room's fee, cancel it from its own booking. Rooms of one group that are all ticked are cancelled together. No-show needs a confirmed booking whose arrival date has passed.
+- History, refunds and emails as the single row's Cancel / No-show. Guides: All Bookings bulk bar + cancelling a booking. Assistant: knows the bulk Cancel / no-show; no Assistant action.
+
 ### Check-in: group members use the lead's pay-later arrangement (2026-11-18, owner audit) — hashes in TASKS.md
 - A room in a group whose lead booking has "check in now, pay later" (or a company account) can now be checked in unpaid from booking details, All Bookings and the check-in page (it was refused on save before).
 - Make primary copies the pay-later switch and its note to the new lead (History: "Check in before payment copied", Off → On). Cancel check-in now writes History ("Check-in undone", Checked in → Confirmed).
