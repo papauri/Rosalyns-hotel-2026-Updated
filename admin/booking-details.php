@@ -2399,6 +2399,47 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         $bd_arr_note = $bd_arr_on ? trim((string)($booking['checkin_arrangement_note'] ?? '')) : '';
         $bd_arr_editable = $bd_arr_ready && $bdCanEditBooking && !$bd_deleted
             && in_array((string)$booking['status'], ['pending', 'tentative', 'confirmed'], true);
+        // Group / company context (owner 2026-11-18, "make sure they make sense"): the check-in gate also lets a room in
+        // before payment when it is on a company account, or when its group's lead room has the switch on or a company
+        // (rh_checkin_arrangement_inherited). Say so here, and on a lead say which rooms its switch covers.
+        $bd_arr_from = '';   // why this room may already check in before payment without its own switch (plain text)
+        $bd_arr_covers = ''; // lead room: the other rooms its switch covers (plain text)
+        if ($bd_arr_ready && !$bd_deleted) {
+            try {
+                $bdArrSt = $pdo->prepare('SELECT * FROM bookings WHERE id = ?');
+                $bdArrSt->execute([(int)$booking['id']]);
+                $bdArrRow = $bdArrSt->fetch(PDO::FETCH_ASSOC) ?: [];
+                $bdArrLead = (int)($bdArrRow['primary_booking_id'] ?? 0);
+                if ($bdArrLead === (int)$booking['id']) {
+                    $bdArrLead = 0;
+                }
+                if (!$bd_arr_on && $bdArrRow && rh_checkin_arrangement_inherited($bdArrRow)) {
+                    if ((int)($bdArrRow['billing_account_id'] ?? 0) > 0) {
+                        $bd_arr_from = 'this booking is on a company account (see Who pays)';
+                    } else {
+                        $bdArrP = $pdo->prepare('SELECT * FROM bookings WHERE id = ?');
+                        $bdArrP->execute([$bdArrLead]);
+                        $bdArrPRow = $bdArrP->fetch(PDO::FETCH_ASSOC) ?: [];
+                        $bdArrRef = (string)($bdArrPRow['booking_reference'] ?? '');
+                        $bdArrRef = $bdArrRef !== '' ? 'the group\'s lead room ' . $bdArrRef : 'the group\'s lead room';
+                        $bd_arr_from = !empty($bdArrPRow['checkin_without_payment'])
+                            ? $bdArrRef . ' has Check in before payment on, and that covers this room'
+                            : $bdArrRef . ' is on a company account, and that covers this room';
+                    }
+                }
+                if ($bdArrLead <= 0) {
+                    $bdArrM = $pdo->prepare('SELECT COUNT(*) FROM bookings WHERE primary_booking_id = ? AND id <> ? AND deleted_at IS NULL'
+                        . " AND status IN ('pending', 'tentative', 'confirmed')");
+                    $bdArrM->execute([(int)$booking['id'], (int)$booking['id']]);
+                    $bdArrN = (int)$bdArrM->fetchColumn();
+                    if ($bdArrN > 0) {
+                        $bd_arr_covers = 'Group: when this is on, ' . ($bdArrN === 1 ? 'the other room' : 'the ' . $bdArrN . ' other rooms') . ' of this group not yet checked in can also be checked in before payment.';
+                    }
+                }
+            } catch (Throwable $bdArrEx) {
+                error_log('booking-details arrangement context: ' . $bdArrEx->getMessage());
+            }
+        }
         ?>
         <?php if ($bd_arr_editable): ?>
             <form method="POST" class="booking-status-alert booking-status-alert--info bd-arrangement" id="bd-checkin-arrangement">
@@ -2409,6 +2450,12 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                     <strong>Check in before payment</strong>
                 </label>
                 <span class="bd-arrangement__help">For an agreed pay-later arrangement (a company invoiced later, the owner's stay). The guest can be checked in with nothing paid; the balance stays owed.</span>
+                <?php if ($bd_arr_from !== ''): ?>
+                <span class="bd-arrangement__help"><strong>Already allowed:</strong> <?php echo htmlspecialchars($bd_arr_from); ?>. This room can be checked in before payment even with this switch off.</span>
+                <?php endif; ?>
+                <?php if ($bd_arr_covers !== ''): ?>
+                <span class="bd-arrangement__help"><?php echo htmlspecialchars($bd_arr_covers); ?></span>
+                <?php endif; ?>
                 <label class="bd-arrangement__note">
                     <span>Why (required when on)</span>
                     <input type="text" name="checkin_arrangement_note" maxlength="255" placeholder="e.g. ICTAM - invoiced monthly" value="<?php echo htmlspecialchars($bd_arr_note, ENT_QUOTES); ?>">
@@ -2418,7 +2465,12 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
         <?php elseif ($bd_arr_on): ?>
             <div class="booking-status-alert booking-status-alert--info">
                 <i class="fas fa-handshake"></i>
-                <span><strong>Pay-later arrangement:</strong> this guest may be checked in before paying<?php echo $bd_arr_note !== '' ? ' (' . htmlspecialchars($bd_arr_note) . ')' : ''; ?>. The balance stays owed.</span>
+                <span><strong>Pay-later arrangement:</strong> this guest may be checked in before paying<?php echo $bd_arr_note !== '' ? ' (' . htmlspecialchars($bd_arr_note) . ')' : ''; ?>. The balance stays owed.<?php echo $bd_arr_covers !== '' ? ' ' . htmlspecialchars($bd_arr_covers) : ''; ?></span>
+            </div>
+        <?php elseif ($bd_arr_from !== '' && in_array((string)$booking['status'], ['pending', 'tentative', 'confirmed'], true)): ?>
+            <div class="booking-status-alert booking-status-alert--info">
+                <i class="fas fa-handshake"></i>
+                <span><strong>Pay-later arrangement:</strong> this guest may be checked in before paying because <?php echo htmlspecialchars($bd_arr_from); ?>. The balance stays owed.</span>
             </div>
         <?php endif; ?>
 
@@ -2584,24 +2636,22 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
             'net' => 'Owed by all rooms less the credit held on any room. "Use this credit for the rooms that owe" moves a room\'s credit to the rooms that owe by a credit note; this figure stays the same.',
         ];
         ?>
-        <section class="bd-group-rooms" aria-labelledby="bdGroupRoomsTitle">
-            <h3 id="bdGroupRoomsTitle" class="bd-group-rooms__title">
-                <i class="fas fa-layer-group" aria-hidden="true"></i> Rooms in this group (<?php echo (int)$bd_grp_t['rooms']; ?>)
-                <i class="help" data-tip="Every room booked together under this group, whatever its status (checked out, no-show, cancelled). Each row shows that room's own figures; open a row to see its booking.">?</i>
-            </h3>
-            <dl class="bd-group-rooms__totals">
-                <div><dt>Billed <i class="help" data-tip="<?php echo htmlspecialchars('All rooms added together. ' . $bd_grp_help['billed']); ?>">?</i></dt><dd><?php echo $bd_m($bd_grp_t['billed']); ?></dd></div>
-                <div><dt>Paid <i class="help" data-tip="<?php echo htmlspecialchars('All rooms added together. ' . $bd_grp_help['paid']); ?>">?</i></dt><dd><?php echo $bd_m($bd_grp_t['paid']); ?></dd></div>
-                <div><dt>Refunds <i class="help" data-tip="<?php echo htmlspecialchars('All rooms added together. ' . $bd_grp_help['refunds']); ?>">?</i></dt><dd><?php echo $bd_m($bd_grp_t['refunds']); ?></dd></div>
-                <div><dt>Credit <i class="help" data-tip="<?php echo htmlspecialchars('All rooms added together. ' . $bd_grp_help['credit']); ?>">?</i></dt><dd><?php echo $bd_m($bd_grp_t['credit']); ?></dd></div>
-                <div><dt>Owed <i class="help" data-tip="<?php echo htmlspecialchars('All rooms added together. ' . $bd_grp_help['owed']); ?>">?</i></dt><dd><?php echo $bd_m($bd_grp_t['owed']); ?></dd></div>
-                <div class="bd-group-rooms__net"><dt>Net position <i class="help" data-tip="<?php echo htmlspecialchars($bd_grp_help['net']); ?>">?</i></dt><dd><?php
-                    echo $bd_grp_t['net'] < -BALANCE_TOLERANCE
-                        ? $bd_m(abs($bd_grp_t['net'])) . ' in credit'
-                        : $bd_m(max(0.0, $bd_grp_t['net'])) . ' owed';
-                ?></dd></div>
-            </dl>
-            <p class="rh-group-split-help">Each row is one room. Billed, Paid, Refunds, Credit and Owed are that room's own figures, the same as on its page.</p>
+        <?php
+        $bd_grp_net_txt = $bd_grp_t['net'] < -BALANCE_TOLERANCE
+            ? $bd_m(abs($bd_grp_t['net'])) . ' in credit'
+            : $bd_m(max(0.0, $bd_grp_t['net'])) . ' owed';
+        ?>
+        <?php /* Foldable (owner 2026-11-18): open by default; each viewer's last choice is remembered in this browser. */ ?>
+        <details class="bd-group-rooms" id="bdGroupRooms" open>
+            <summary class="bd-group-rooms__summary">
+                <h3 id="bdGroupRoomsTitle" class="bd-group-rooms__title">
+                    <i class="fas fa-layer-group" aria-hidden="true"></i> Rooms in this group (<?php echo (int)$bd_grp_t['rooms']; ?>)
+                    <i class="help" data-tip="Every room booked together under this group, whatever its status (checked out, no-show, cancelled). Each row shows that room's own figures; open a row to see its booking. Click the title to fold or unfold this section.">?</i>
+                </h3>
+                <span class="bd-group-rooms__peek">Group: <?php echo $bd_grp_net_txt; ?></span>
+                <i class="fas fa-chevron-down bd-group-rooms__chev" aria-hidden="true"></i>
+            </summary>
+            <p class="rh-group-split-help">Each row is one room. Billed, Paid, Refunds, Credit and Owed are that room's own figures, the same as on its page. The last row adds up every room.</p>
             <div class="rh-group-split-wrap bd-group-rooms__wrap">
                 <table class="rh-group-split bd-group-rooms__table">
                     <thead>
@@ -2683,9 +2733,36 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                         </tr>
                         <?php endforeach; ?>
                     </tbody>
+                    <tfoot>
+                        <?php /* Group totals: every room of the group added together (rh_group_room_table totals, never only the rows shown). */ ?>
+                        <tr class="bd-group-rooms__total">
+                            <th scope="row" colspan="4" data-label="Group total">All <?php echo (int)$bd_grp_t['rooms']; ?> rooms <i class="help" data-tip="Every room of the group added together, whatever its status.">?</i></th>
+                            <td data-label="Billed" class="num"><?php echo $bd_m($bd_grp_t['billed']); ?></td>
+                            <td data-label="Paid" class="num"><?php echo $bd_m($bd_grp_t['paid']); ?></td>
+                            <td data-label="Refunds" class="num"><?php echo $bd_m($bd_grp_t['refunds']); ?></td>
+                            <td data-label="Credit" class="num"><?php echo $bd_m($bd_grp_t['credit']); ?></td>
+                            <td data-label="Owed" class="num"><?php echo $bd_m($bd_grp_t['owed']); ?></td>
+                            <?php if ($bd_go_on): ?><td class="bd-group-rooms__total-pad" aria-hidden="true"></td><?php endif; ?>
+                        </tr>
+                    </tfoot>
                 </table>
             </div>
-        </section>
+            <p class="bd-group-rooms__net">Net position: <strong><?php echo $bd_grp_net_txt; ?></strong> <i class="help" data-tip="<?php echo htmlspecialchars($bd_grp_help['net']); ?>">?</i></p>
+        </details>
+        <script>
+        // Remember this viewer's fold choice for the group rooms section (browser only; the page works without it).
+        (function () {
+            var d = document.getElementById('bdGroupRooms');
+            if (!d) return;
+            var key = 'rh.bd.groupRoomsOpen';
+            // A help "?" in the title shows its tip; it never folds the section.
+            d.querySelector('summary').addEventListener('click', function (e) { if (e.target.closest('.help')) e.preventDefault(); });
+            try { if (window.localStorage.getItem(key) === '0') d.open = false; } catch (e) {}
+            d.addEventListener('toggle', function () {
+                try { window.localStorage.setItem(key, d.open ? '1' : '0'); } catch (e) {}
+            });
+        })();
+        </script>
         <?php if ($bd_perm_edit): ?>
         <script>
         // G3 "Who's staying": save one room's optional name from the group table (JSON, CSRF, edit_booking).

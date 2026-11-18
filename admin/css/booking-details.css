@@ -301,36 +301,143 @@
     color: #5A4A3A;
 }
 
-.bd-group-rooms__totals {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
-    gap: 0.5rem;
-    margin: 0 0 0.6rem;
+/* Foldable title row (owner 2026-11-18): the summary of the <details>; the peek shows the group's net while folded. */
+.bd-group-rooms__summary {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.35rem 0.75rem;
+    min-height: 44px;
+    cursor: pointer;
+    list-style: none;
 }
 
-.bd-group-rooms__totals > div {
-    min-width: 0;
-    padding: 0.45rem 0.65rem;
-    background: #f7f3ee;
-    border-radius: 8px;
+.bd-group-rooms__summary::-webkit-details-marker {
+    display: none;
 }
 
-.bd-group-rooms__totals dt {
-    font-size: 0.78rem;
+.bd-group-rooms__summary:focus-visible {
+    outline: 2px solid var(--gold, #7E684B);
+    outline-offset: 2px;
+    border-radius: 6px;
+}
+
+.bd-group-rooms__summary .bd-group-rooms__title {
+    margin: 0;
+}
+
+.bd-group-rooms__peek {
+    margin-left: auto;
+    font-size: 0.85rem;
     color: var(--bd-muted);
+    font-variant-numeric: tabular-nums;
 }
 
-.bd-group-rooms__totals dd {
-    margin: 0.15rem 0 0;
+.bd-group-rooms__chev {
+    color: var(--bd-muted);
+    transition: transform 0.15s ease;
+}
+
+.bd-group-rooms[open] .bd-group-rooms__chev {
+    transform: rotate(180deg);
+}
+
+.bd-group-rooms[open] > .bd-group-rooms__summary {
+    margin-bottom: 0.6rem;
+}
+
+.bd-group-rooms[open] .bd-group-rooms__peek {
+    display: none;
+}
+
+/* Group totals: the table's last row. */
+.bd-group-rooms__table tfoot th,
+.bd-group-rooms__table tfoot td {
+    padding: 8px 10px;
+    border-top: 2px solid #ddd2c2;
+    background: #f7f3ee;
     font-weight: 600;
+    text-align: left;
+}
+
+.bd-group-rooms__table tfoot td.num {
+    text-align: right;
     font-variant-numeric: tabular-nums;
-    overflow-wrap: anywhere;
+}
+
+/* Money may wrap after "MWK" so all ten columns fit beside the side menu (the figure itself never breaks). */
+.rh-group-split.bd-group-rooms__table td.num {
+    white-space: normal;
+}
+
+/* Buttons in the rows may wrap too, so the last column never hides behind the side menu. */
+.bd-group-rooms__table tbody button {
+    white-space: normal;
+    word-break: normal;
+    overflow-wrap: normal;
+}
+
+.bd-group-rooms__ops .btn-sm {
+    margin: 0 0 4px;
+}
+
+.rh-group-split.bd-group-rooms__table :is(th, td) {
+    padding-left: 6px;
+    padding-right: 6px;
 }
 
 .bd-group-rooms__net {
-    border: 1px solid #ddd2c2;
+    margin: 0.6rem 0 0;
+    font-size: 0.9rem;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
 }
 
+@media (max-width: 48rem) {
+    /* Phones: the totals row is one more card, like the room rows above it. */
+    .rh-group-split-wrap .bd-group-rooms__table tfoot {
+        display: block;
+        margin-top: 8px;
+    }
+
+    .rh-group-split-wrap .bd-group-rooms__table tfoot tr {
+        display: block;
+        border: 1px solid #ddd2c2;
+        border-radius: 8px;
+        overflow: hidden;
+    }
+
+    .rh-group-split-wrap .bd-group-rooms__table tfoot th,
+    .rh-group-split-wrap .bd-group-rooms__table tfoot td {
+        display: flex;
+        justify-content: space-between;
+        align-items: baseline;
+        gap: 12px;
+        min-height: 36px;
+        padding: 6px 12px;
+        border-top: 1px solid #e8e0d6;
+    }
+
+    .rh-group-split-wrap .bd-group-rooms__table tfoot th {
+        border-top: 0;
+    }
+
+    .rh-group-split-wrap .bd-group-rooms__table tfoot td::before {
+        content: attr(data-label);
+        font-size: 12.5px;
+        font-weight: 600;
+        color: var(--admin-muted, #5f6b7c);
+    }
+
+    .rh-group-split-wrap .bd-group-rooms__table tfoot .bd-group-rooms__total-pad {
+        display: none;
+    }
+
+    .bd-group-rooms__peek {
+        margin-left: 0;
+        flex-basis: 100%;
+    }
+}
 .rh-group-split-wrap.bd-group-rooms__wrap {
     max-height: none;
     overflow-x: auto;

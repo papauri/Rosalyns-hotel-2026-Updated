@@ -55,16 +55,52 @@ if (!function_exists('rh_billing_panel_save')) {
         if (!$split['on_account'] && !$canEdit) {
             return;
         }
+        // Group context (owner 2026-11-18, "make sure it makes sense"): the lead room's choice covers every room of the group
+        // that has no company of its own (rh_booking_billing from_primary); a room's own company covers that room only.
+        $grpLeadId = (int)($booking['primary_booking_id'] ?? 0);
+        $grpLeadLink = '';
+        $grpFollow = 0;
+        $grpOwn = 0;
+        try {
+            if ($grpLeadId > 0) {
+                $gst = $pdo->prepare('SELECT booking_reference FROM bookings WHERE id = ?');
+                $gst->execute([$grpLeadId]);
+                $grpLeadRef = (string)($gst->fetchColumn() ?: '');
+                $grpLeadLink = $grpLeadRef !== '' ? '<a href="booking-details.php?id=' . $grpLeadId . '">' . $e($grpLeadRef) . '</a>' : 'the lead room';
+            } else {
+                $gst = $pdo->prepare('SELECT SUM(COALESCE(billing_account_id, 0) <= 0) AS follow, SUM(COALESCE(billing_account_id, 0) > 0) AS own
+                    FROM bookings WHERE primary_booking_id = ? AND deleted_at IS NULL');
+                $gst->execute([(int)$booking['id']]);
+                $gRow = $gst->fetch(PDO::FETCH_ASSOC) ?: [];
+                $grpFollow = (int)($gRow['follow'] ?? 0);
+                $grpOwn = (int)($gRow['own'] ?? 0);
+            }
+        } catch (Throwable $gEx) {
+            error_log('rh_billing_panel_render group: ' . $gEx->getMessage());
+        }
+        $grpIsLead = $grpLeadId <= 0 && ($grpFollow + $grpOwn) > 0;
+        $grpThisRoom = ($grpLeadId > 0 || $grpIsLead) ? ' for this room' : '';
+        $grpRooms = static fn(int $n): string => $n === 1 ? 'other room' : $n . ' other rooms';
+        $grpCoverLine = '';
+        if ($grpIsLead) {
+            $grpCoverLine = $grpFollow > 0
+                ? 'Group: this choice also covers the ' . $grpRooms($grpFollow) . ' of this group' . ($grpOwn > 0 ? ' (' . $grpOwn . ' more ' . ($grpOwn === 1 ? 'has its' : 'have their') . ' own company)' : '') . '. Each room keeps its own bill.'
+                : 'Group: every other room of this group has its own company, so this choice covers this room only.';
+        } elseif ($grpLeadId > 0) {
+            $grpCoverLine = $ownId <= 0
+                ? 'Group: this room follows the lead room ' . $grpLeadLink . ' (' . ($split['on_account'] ? 'on account with ' . (string)$split['name'] : 'the guest pays') . '). Change who pays there for the whole group, or choose a company here for this room only.'
+                : 'Group: this room has its own company, so this choice is for this room only. The lead room ' . $grpLeadLink . ' decides for the rooms without their own company.';
+        }
         echo '<section class="booking-status-alert booking-status-alert--info bd-billing" id="bd-who-pays" aria-label="Who pays">';
         echo '<i class="fas fa-building" aria-hidden="true"></i><div class="bd-billing__body">';
         if ($split['on_account']) {
             echo '<p class="bd-billing__line"><strong>On account - ' . $e($split['name']) . '</strong>'
                 . ($split['reference'] !== '' ? ' &middot; LPO ' . $e($split['reference']) : '')
                 . ($split['due_date'] !== '' ? ' &middot; due ' . $e(date('j M Y', strtotime($split['due_date']))) . ($split['days_past_due'] > 0 ? ' (' . (int)$split['days_past_due'] . ' days late)' : '') : '')
-                . (!empty($booking['primary_booking_id']) && $ownId <= 0 ? ' &middot; set on the group\'s main booking' : '') . '</p>';
+                . (!empty($booking['primary_booking_id']) && $ownId <= 0 ? ' &middot; set on the group\'s lead room' : '') . '</p>';
             echo '<p class="bd-billing__line">'
-                . 'Company owes <strong>' . $e(rh_billing_money((float)$split['company_due'])) . '</strong> &middot; guest owes <strong>'
-                . $e(rh_billing_money((float)$split['guest_due'])) . '</strong> &middot; extras paid by ' . ($split['covers'] === 'everything' ? 'the company' : 'the guest')
+                . 'Company owes <strong>' . $e(rh_billing_money((float)$split['company_due'])) . '</strong>' . $grpThisRoom . ' &middot; guest owes <strong>'
+                . $e(rh_billing_money((float)$split['guest_due'])) . '</strong>' . $grpThisRoom . ' &middot; extras paid by ' . ($split['covers'] === 'everything' ? 'the company' : 'the guest')
                 . ' <i class="help" data-tip="Company owes: the room stay' . ($split['covers'] === 'everything' ? ' and the extras' : '') . ' less what the company has paid. Guest owes: the extras the company does not cover, less what the guest paid.">?</i></p>';
             echo '<p class="bd-arrangement__help bd-billing__line">The company share is never chased from the guest and does not block checkout. Invoices and statements go to '
                 . ($split['billing_email'] !== '' ? $e($split['billing_email']) : '<strong>no billing email yet - add one on Company accounts</strong>') . '.</p>';
@@ -79,6 +115,10 @@ if (!function_exists('rh_billing_panel_save')) {
             }
         } else {
             echo '<p class="bd-billing__line"><strong>Who pays:</strong> the guest. Put the booking on a company account when a company pays later (LPO).</p>';
+        }
+        if ($grpCoverLine !== '') {
+            // $grpLeadLink is built escaped above; the rest is fixed text and numbers.
+            echo '<p class="bd-arrangement__help bd-billing__line">' . str_replace($e($grpLeadLink), $grpLeadLink, $e($grpCoverLine)) . '</p>';
         }
         if ($canEdit && !(!empty($booking['primary_booking_id']) && $ownId <= 0 && $split['on_account'])) {
             echo '<form method="POST" class="bd-arrangement bd-billing__form">';
