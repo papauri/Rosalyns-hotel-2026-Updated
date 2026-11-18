@@ -55,8 +55,8 @@ $tomorrow = date('Y-m-d', strtotime($report_date . ' +1 day'));
 $isToday  = ($report_date === $eod_today);
 // Money received on its payment date; a refund on the day it was paid out (rh_refund_eod_date_sql, F4). Named :d
 // repeats are fine here (this page prepares with emulation on).
-// Payments made WITH a credit note are guest credit used, not money received (rh_eod_cash_row_sql): left out of the
-// cash view and shown on their own line.
+// Every credit-note row is left out of the cash view (rh_eod_cash_row_sql, Ship M): a payment made WITH a note is
+// guest credit used, money moved onto a note is guest credit issued, not a refund. Both show on the Guest credit lines.
 $eodPayDaySql = "((COALESCE(payment_type, '') <> 'refund' AND DATE(payment_date) = :d) OR (payment_type = 'refund' AND " . rh_refund_eod_date_sql() . " = :d))"
     . " AND " . rh_eod_cash_row_sql();
 
@@ -188,8 +188,8 @@ try {
             COALESCE(SUM(CASE WHEN booking_type='gym'        AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN vat_amount   ELSE 0 END), 0) AS gym_vat,
             COALESCE(SUM(CASE WHEN booking_type='event'      AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS events_gross,
             COALESCE(SUM(CASE WHEN booking_type='event'      AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN vat_amount   ELSE 0 END), 0) AS events_vat,
-            COALESCE(SUM(CASE WHEN payment_type='refund' AND refund_status IN ('completed','processing') THEN " . rh_refund_amount_sql() . " ELSE 0 END), 0) AS refunds,
-            COALESCE(SUM(CASE WHEN payment_type='refund' AND refund_status IN ('completed','processing') THEN vat_amount   ELSE 0 END), 0) AS refund_vat,
+            COALESCE(SUM(CASE WHEN " . rh_refund_payout_sql() . " THEN " . rh_refund_amount_sql() . " ELSE 0 END), 0) AS refunds,
+            COALESCE(SUM(CASE WHEN " . rh_refund_payout_sql() . " THEN vat_amount   ELSE 0 END), 0) AS refund_vat,
             COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS pending,
             COUNT(*) AS txn_count,
             COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN 1 ELSE 0 END), 0) AS collected_count
@@ -220,7 +220,8 @@ if ($folioFnbMoved > 0) {
 
 $gross_revenue = (float)$rev['room_gross'] + (float)$rev['conf_gross'] + (float)$rev['fnb_gross'] + (float)$rev['gym_gross'] + (float)$rev['events_gross'];
 $net_revenue   = $gross_revenue - (float)$rev['refunds'];
-$total_vat     = (float)$rev['room_vat'] + (float)$rev['conf_vat'] + (float)$rev['fnb_vat'] + (float)$rev['gym_vat'] + (float)$rev['events_vat'] - (float)($rev['refund_vat'] ?? 0);
+// VAT counted once (rh_vat_once_sql): VAT on money received less VAT on real refunds; credit-note rows are out above.
+$total_vat     =(float)$rev['room_vat'] + (float)$rev['conf_vat'] + (float)$rev['fnb_vat'] + (float)$rev['gym_vat'] + (float)$rev['events_vat'] - (float)($rev['refund_vat'] ?? 0);
 
 // ---------------------------------------------------------------------------
 // 2b) REVENUE EARNED (the headline) — owner decision 2026-10-18: what was earned on the day.
@@ -338,28 +339,22 @@ try {
 }
 
 // ---------------------------------------------------------------------------
-// 7b) Credit notes — issued and redeemed today
+// 7b) Guest credit (Ship M, owner 2026-11-18): credit notes issued / used / still owed, one shared source
+// (admin/includes/guest-credit.php) with the PDF, e-mail and CSV. Moving money onto a note is not a refund.
 // ---------------------------------------------------------------------------
-$cn_issued_today   = 0.0;
-$cn_issued_count   = 0;
-$cn_redeemed_today = 0.0;
+$guest_credit = ['opening' => 0.0, 'issued' => 0.0, 'issued_count' => 0, 'used' => 0.0, 'voided' => 0.0, 'expired' => 0.0, 'closing' => 0.0, 'failed' => true];
+$vat_credit_note_info = 0.0; // VAT inside payments made WITH a credit note: information only, not in VAT collected
 try {
     // Expire any stale CNs first
     if (function_exists('checkExpiredCreditNotes')) {
         checkExpiredCreditNotes($pdo);
     }
-    $cnIssStmt = $pdo->prepare("SELECT COUNT(*) AS cnt, COALESCE(SUM(original_amount),0) AS total FROM credit_notes WHERE DATE(issued_at) = ?");
-    $cnIssStmt->execute([$report_date]);
-    $cnIssRow = $cnIssStmt->fetch(PDO::FETCH_ASSOC);
-    if ($cnIssRow) {
-        $cn_issued_count = (int)$cnIssRow['cnt'];
-        $cn_issued_today = (float)$cnIssRow['total'];
-    }
-
-    $cnRedStmt = $pdo->prepare("SELECT COALESCE(SUM(amount_applied),0) FROM credit_note_applications WHERE DATE(applied_at) = ?");
-    $cnRedStmt->execute([$report_date]);
-    $cn_redeemed_today = (float)$cnRedStmt->fetchColumn();
-} catch (Throwable $e) { /* credit_notes table may not exist yet */
+    $guest_credit = rh_guest_credit_summary($pdo, $report_date, $report_date);
+    $vatInfoStmt = $pdo->prepare("SELECT COALESCE(SUM(" . rh_vat_credit_note_info_sql() . "),0) FROM payments WHERE DATE(payment_date) = ? AND deleted_at IS NULL");
+    $vatInfoStmt->execute([$report_date]);
+    $vat_credit_note_info = (float)$vatInfoStmt->fetchColumn();
+} catch (Throwable $e) {
+    error_log('EOD guest credit: ' . $e->getMessage());
 }
 
 // ---------------------------------------------------------------------------
@@ -462,7 +457,7 @@ try {
         SELECT
             COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS gross_revenue,
             COALESCE(SUM(CASE WHEN booking_type='room' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS room_gross,
-            COALESCE(SUM(CASE WHEN payment_type='refund' AND refund_status IN ('completed','processing') THEN " . rh_refund_amount_sql() . " ELSE 0 END), 0) AS refunds
+            COALESCE(SUM(CASE WHEN " . rh_refund_payout_sql() . " THEN " . rh_refund_amount_sql() . " ELSE 0 END), 0) AS refunds
         FROM payments
         WHERE $eodPayDaySql
           AND deleted_at IS NULL
@@ -543,15 +538,6 @@ try {
     error_log('EOD cash refunds: ' . $e->getMessage());
 }
 $method_totals['cash'] -= $cash_refunds_out;
-// Refunds moved into credit notes: in the refunds total, but no cash out - shown apart (F5).
-$refunds_to_credit = 0.0;
-$cn_redeemed_pay = 0.0; // payments made with a credit note: guest credit used, no new money (own line)
-try {
-    $refunds_to_credit = rh_eod_refunds_to_credit($pdo, $report_date);
-    $cn_redeemed_pay = rh_eod_credit_notes_redeemed($pdo, $report_date);
-} catch (Throwable $e) {
-    error_log('EOD refunds to credit / credit notes redeemed: ' . $e->getMessage());
-}
 $non_cash_total = $method_totals['mobile_money'] + $method_totals['card'] + $method_totals['bank_transfer'] + $method_totals['other'];
 // Average per payment received: refund and pending rows are not payments received, so they are not in the divisor.
 $revenue_per_transaction = (int)($rev['collected_count'] ?? 0) > 0 ? $gross_revenue / (int)$rev['collected_count'] : 0;
@@ -639,8 +625,7 @@ if ($mod_pos && (int)$pos_totals['voided_count'] > 0) {
     $addAlert('warn', 'fa-ban', 'POS voids to review', (int)$pos_totals['voided_count'] . ' void' . ((int)$pos_totals['voided_count'] === 1 ? '' : 's') . ' worth ' . $money((float)$pos_totals['voided_value']) . '.');
 }
 if ((float)$rev['refunds'] > 0) {
-    $addAlert('watch', 'fa-rotate-left', 'Refunds processed', $money((float)$rev['refunds']) . ' refunded today'
-        . ($refunds_to_credit > 0.004 ? ' (of which ' . $money($refunds_to_credit) . ' moved to credit notes, no cash out)' : '') . '.');
+    $addAlert('watch', 'fa-rotate-left', 'Refunds processed', $money((float)$rev['refunds']) . ' paid back to guests today.');
 }
 if ($mod_housekeeping && ((int)$housekeeping['pending'] + (int)$housekeeping['in_progress']) > 0) {
     $addAlert('watch', 'fa-broom', 'Housekeeping not fully closed', ((int)$housekeeping['pending'] + (int)$housekeeping['in_progress']) . ' room task' . (((int)$housekeeping['pending'] + (int)$housekeeping['in_progress']) === 1 ? '' : 's') . ' still open.');
@@ -695,8 +680,7 @@ try {
         SELECT $tDayExpr AS day,
                COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded')
                                   AND COALESCE(payment_type,'') <> 'refund' THEN total_amount ELSE 0 END), 0) AS gross,
-               COALESCE(SUM(CASE WHEN payment_type='refund'
-                                  AND refund_status IN ('completed','processing') THEN " . rh_refund_amount_sql() . " ELSE 0 END), 0) AS refunds
+               COALESCE(SUM(CASE WHEN " . rh_refund_payout_sql() . " THEN " . rh_refund_amount_sql() . " ELSE 0 END), 0) AS refunds
         FROM payments
         WHERE $tDayExpr BETWEEN DATE(:a) AND DATE(:b)
           AND " . rh_eod_cash_row_sql() . "
@@ -991,6 +975,10 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         // Health
         'Daily Health Score',
         'Daily Health Label',
+        // Guest credit (Ship M): appended at the end so existing columns keep their place
+        'Guest Credit Issued',
+        'Guest Credit Used',
+        'Guest Credit Still Owed',
     ]);
 
     fputcsv($out, [
@@ -1054,6 +1042,9 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
         (int)$tomorrow_preview['departures'],
         $daily_health_score,
         $daily_health_label,
+        !empty($guest_credit['failed']) ? 'Unavailable' : number_format((float)$guest_credit['issued'], 2, '.', ''),
+        !empty($guest_credit['failed']) ? 'Unavailable' : number_format((float)$guest_credit['used'], 2, '.', ''),
+        !empty($guest_credit['failed']) ? 'Unavailable' : number_format((float)$guest_credit['closing'], 2, '.', ''),
     ]);
 
     fclose($out);
@@ -1396,8 +1387,6 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                 <?php endif; ?>
                 <ul class="ck-kv eod-kv">
                     <?php if ($cash_refunds_out > 0.004) { echo $kv('Cash refunds already taken off', '&minus;' . $money($cash_refunds_out)); } ?>
-                    <?php if ($refunds_to_credit > 0.004) { echo $kv('Refunds moved to credit notes (guest credit, no cash out)', $money($refunds_to_credit)); } ?>
-                    <?php if ($cn_redeemed_pay > 0.004) { echo $kv('Credit notes redeemed (guest credit used, no new money)', $money($cn_redeemed_pay)); } ?>
                     <?php echo $kv('Cash collected (all methods, after refunds)', $money($cash_collected)); ?>
                     <?php echo $kv('Non-cash collected', $money($non_cash_total)); ?>
                     <?php echo $kv('Pending today', $money($rev['pending']), (float)$rev['pending'] > 0 ? 'eod-warn' : ''); ?>
@@ -1600,7 +1589,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                     <?php if ($mod_gym || abs((float)$earned['gym_gross']) > 0.004): ?><p class="eod-sub"><?php echo htmlspecialchars($earned['cash_basis_note']); ?></p><?php endif; ?>
 
                     <h3 class="eod-pane-title">Cash collected</h3>
-                    <p class="eod-sub">Money received on this day (payments by date received, less refunds paid out). Used for cash to bank and the payment method mix.</p>
+                    <p class="eod-sub">Money received on this day (payments by date received, less refunds paid back to guests in cash, bank or mobile money). Used for cash to bank and the payment method mix. Money moved onto a credit note is guest credit, not a refund: see Guest credit below.</p>
                     <div class="eod-table-wrap">
                         <table class="eod-table no-auto-pagination no-card-mobile">
                             <thead>
@@ -1637,7 +1626,7 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                                 </tr>
                                 <?php if ((float)$rev['refunds'] > 0): ?>
                                     <tr class="eod-table__neg">
-                                        <td>Less: refunds<?php if ($refunds_to_credit > 0.004): ?> <span class="eod-sub">(of which <?php echo $money($refunds_to_credit); ?> moved to credit notes, no cash out)</span><?php endif; ?></td>
+                                        <td title="<?php echo htmlspecialchars(rh_ship_m_help('refunds')); ?>">Less: refunds</td>
                                         <td class="num">&minus;<?php echo $money($rev['refunds']); ?></td>
                                         <td class="num"><?php echo (float)($rev['refund_vat'] ?? 0) > 0.004 ? '&minus;' . $money($rev['refund_vat']) : '&mdash;'; ?></td>
                                         <td class="num">&mdash;</td>
@@ -1649,12 +1638,20 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                                     <td class="num"><strong><?php echo $money($total_vat); ?></strong></td>
                                     <td class="num">&mdash;</td>
                                 </tr>
+                                <?php if ($vat_credit_note_info > (float)BALANCE_TOLERANCE): ?>
+                                    <tr>
+                                        <td title="<?php echo htmlspecialchars(rh_ship_m_help('vat_info')); ?>"><?php echo htmlspecialchars(rh_ship_m_help('vat_info_label')); ?> <span class="eod-sub"><?php echo htmlspecialchars(rh_ship_m_help('vat_info')); ?></span></td>
+                                        <td class="num">&mdash;</td>
+                                        <td class="num"><?php echo $money($vat_credit_note_info); ?></td>
+                                        <td class="num">&mdash;</td>
+                                    </tr>
+                                <?php endif; ?>
                             </tbody>
                         </table>
                     </div>
                     <ul class="ck-kv eod-kv eod-kv--cols">
                         <?php
-                        echo $kv('VAT collected', $money($total_vat) . $sub('VAT ' . ($vatEnabled ? 'enabled' : 'disabled')));
+                        echo $kv('<span title="' . htmlspecialchars(rh_ship_m_help('vat')) . '">VAT collected</span>', $money($total_vat) . $sub('VAT ' . ($vatEnabled ? 'enabled' : 'disabled') . '; counted once, when the guest first paid'));
                         echo $kv('Transactions', (int)$rev['txn_count'] . $sub('avg ' . $money($revenue_per_transaction)));
                         echo $kv('Outstanding folio', $money($outstanding_folio) . ' <a class="eod-link" href="payments.php">Collect &rarr;</a>', $outstanding_folio > 0 ? 'eod-warn' : '');
                         if ($outstanding_accounts > 0) {
@@ -1666,10 +1663,22 @@ $netPctTxt = abs($net_change) < 0.01 ? 'flat' : ($prevHasTakings ? number_format
                         if ($outstanding_failed) {
                             echo $kv('Outstanding total', 'Unavailable' . $sub('some accounts could not be read'), 'eod-warn');
                         }
-                        if ($cn_issued_count > 0 || $cn_redeemed_today > 0) {
+                        // Guest credit (Ship M): credit notes issued / used / still owed (shared lines, admin/includes/guest-credit.php)
+                        $gcLines = rh_guest_credit_lines($guest_credit, false);
+                        if (!$gcLines) {
+                            echo $kv('Guest credit', 'Unavailable' . $sub('credit notes could not be read'), 'eod-warn');
+                        } elseif ((float)$guest_credit['issued'] > (float)BALANCE_TOLERANCE || abs((float)$guest_credit['used']) > (float)BALANCE_TOLERANCE || (float)$guest_credit['closing'] > (float)BALANCE_TOLERANCE) {
                             $cnLink = (function_exists('rh_module_key_enabled') && rh_module_key_enabled('advance_booking')) ? ' <a class="eod-link" href="credit-notes.php">View &rarr;</a>' : '';
-                            echo $kv('Credit notes issued', $money($cn_issued_today) . $sub((int)$cn_issued_count . ' note' . ($cn_issued_count !== 1 ? 's' : '')) . $cnLink);
-                            echo $kv('Credit notes redeemed', $money($cn_redeemed_today) . $sub('applied to bookings'));
+                            foreach ($gcLines as $gc) {
+                                $gcVal = $money($gc['amount']);
+                                if ($gc['key'] === 'issued' && (int)$guest_credit['issued_count'] > 0) {
+                                    $gcVal .= $sub((int)$guest_credit['issued_count'] . ' note' . ((int)$guest_credit['issued_count'] !== 1 ? 's' : ''));
+                                }
+                                if ($gc['key'] === 'closing') {
+                                    $gcVal .= $cnLink;
+                                }
+                                echo $kv('<span title="' . htmlspecialchars($gc['help']) . '">' . htmlspecialchars($gc['label']) . '</span>', $gcVal);
+                            }
                         }
                         ?>
                     </ul>

@@ -13,6 +13,7 @@ require_once __DIR__ . '/includes/receivables.php';
 require_once __DIR__ . '/includes/finance-refunds.php'; // the one refund rule: gross total_amount, completed + processing
 require_once __DIR__ . '/includes/eod-revenue.php'; // rh_eod_cash_row_sql: a payment made WITH a credit note is not money received (End of Day rule)
 require_once __DIR__ . '/includes/reports-status-mix.php'; // Payment Status Mix: one line per status present
+require_once __DIR__ . '/includes/guest-credit.php'; // Ship M: guest credit held on credit notes (not revenue, not a refund)
 require_once __DIR__ . '/../includes/conference-pricing.php';
 require_once __DIR__ . '/../includes/booked-rate.php';
 
@@ -125,7 +126,6 @@ $avgRevenuePerBooking = 0;
 $cancellationRate = 0;
 $totalStatusCount = 0;
 $totalRefunds = 0;
-$refundsToCredit = 0.0; // refunds moved into credit notes (no cash out), inside $totalRefunds
 $pendingRefunds = 0;
 $completedRefunds = 0;
 $error = null;
@@ -157,6 +157,8 @@ $priorEndDate = '';
 $periodDays = 1;
 $totalCreditNotesIssued = 0.0;
 $totalCreditNotesRedeemed = 0.0;
+$guestCredit = ['failed' => true]; // until read: shown as unavailable, never as "nothing owed"
+$guestCreditLines = [];
 $deferredRevenue = 0.0;
 $deferredBookings = 0;
 $vatByQuarter = [];
@@ -203,19 +205,17 @@ try {
 
     // 2. Revenue by Booking Type (date filtered). Money received follows the End of Day cash rule (rh_eod_cash_row_sql):
     // a payment made WITH a credit note is guest credit used, not new money, so it is left out of the count and the
-    // revenue (it has its own "Paid from credit note" line in the Payment Status Mix). VAT is left as recorded, so
-    // VAT Collected still equals the VAT Register.
+    // revenue (it has its own "Paid from credit note" line in the Payment Status Mix). VAT is counted once (Ship M,
+    // owner 2026-11-18, rh_vat_once_sql): VAT on money received less VAT on real refunds; the VAT inside credit-note
+    // payments is information only (total_vat_credit_note), never in VAT Collected.
     $rhCashRow = rh_eod_cash_row_sql();
     $revenueByTypeStmt = $pdo->prepare("
         SELECT booking_type,
                SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' AND {$rhCashRow} THEN 1 ELSE 0 END) as count,
                COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' AND {$rhCashRow} THEN total_amount ELSE 0 END), 0) as total_revenue,
-               COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount
-                                 WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN -vat_amount
-                                 ELSE 0 END), 0) as total_vat,
-               COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' AND {$rhCashRow} THEN vat_amount
-                                 WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN -vat_amount
-                                 ELSE 0 END), 0) as total_vat_counted
+               COALESCE(SUM(" . rh_vat_once_sql() . "), 0) as total_vat,
+               COALESCE(SUM(" . rh_vat_once_sql() . "), 0) as total_vat_counted,
+               COALESCE(SUM(" . rh_vat_credit_note_info_sql() . "), 0) as total_vat_credit_note
         FROM payments
         WHERE (payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') OR payment_type = 'refund') AND deleted_at IS NULL
         AND " . rh_pay_count_day_sql() . " >= ? AND " . rh_pay_count_day_sql() . " <= ?
@@ -229,10 +229,11 @@ try {
         $totalVatCollected += $revenue['total_vat'];
         $totalVatCounted += $revenue['total_vat_counted'];
         $totalTransactions += $revenue['count'];
+        $totalVatCreditNote += (float)$revenue['total_vat_credit_note'];
     }
-    // VAT on credit-note payments: already counted when the guest first paid, so it is not
-    // taken off Gross Revenue again (ASSUMPTION 2026-11-18 until the owner rules on VAT Collected).
-    $totalVatCreditNote = round($totalVatCollected - $totalVatCounted, 2);
+    // VAT inside credit-note payments: information only (Ship M, owner 2026-11-18); already counted when the guest
+    // first paid, so it is neither in VAT Collected nor taken off Gross Revenue again.
+    $totalVatCreditNote = round($totalVatCreditNote, 2);
 
     // 3. Outstanding (all-time): the accounts' amount_due through the one shared receivables rule
     // (rooms, confirmed conference / event / gym accounts, tabs) - the same figure as Aging, Invoices and End of Day.
@@ -283,12 +284,12 @@ try {
     $monthlyRevenueStmt = $pdo->prepare("
         SELECT DATE_FORMAT(" . rh_pay_count_day_sql() . ", '%Y-%m') as month,
                DATE_FORMAT(" . rh_pay_count_day_sql() . ", '%b %Y') as month_label,
-               SUM(CASE WHEN payment_type = 'refund' THEN 0 WHEN {$rhCashRow} THEN 1 ELSE 0 END) as transaction_count,
-               COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN -" . rh_refund_amount_sql() . " WHEN {$rhCashRow} THEN total_amount ELSE 0 END), 0) as monthly_revenue, -- net of refunds paid out, the End of Day cash rule (credit-note payments left out)
-               COALESCE(SUM(CASE WHEN payment_type = 'refund' THEN -vat_amount ELSE vat_amount END), 0) as monthly_vat
+               SUM(CASE WHEN NOT {$rhCashRow} THEN 0 WHEN payment_type = 'refund' THEN 0 ELSE 1 END) as transaction_count,
+               COALESCE(SUM(CASE WHEN NOT {$rhCashRow} THEN 0 WHEN payment_type = 'refund' THEN -" . rh_refund_amount_sql() . " ELSE total_amount END), 0) as monthly_revenue, -- net of real refunds paid out (Ship M); credit-note rows are guest credit, left out
+               COALESCE(SUM(" . rh_vat_once_sql() . "), 0) as monthly_vat
         FROM payments
         WHERE ((payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund')
-               OR (payment_type = 'refund' AND refund_status IN ('completed', 'processing')))
+               OR (payment_type = 'refund' AND " . rh_refund_payout_sql() . "))
         AND deleted_at IS NULL
         AND " . rh_pay_count_day_sql() . " >= ? AND " . rh_pay_count_day_sql() . " <= ?
         GROUP BY month, month_label ORDER BY month ASC
@@ -299,13 +300,9 @@ try {
     // 7. VAT Collected
     $vatCollectedStmt = $pdo->prepare("
         SELECT " . rh_pay_count_day_sql() . " as date, SUM(CASE WHEN payment_type = 'refund' THEN 0 WHEN {$rhCashRow} THEN 1 ELSE 0 END) as transaction_count,
-               COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount
-                                 WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN -vat_amount
-                                 ELSE 0 END), 0) as vat_collected,
-               COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' AND {$rhCashRow} THEN vat_amount
-                                 WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN -vat_amount
-                                 ELSE 0 END), 0) as vat_counted,
-               COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' AND NOT {$rhCashRow} THEN vat_amount ELSE 0 END), 0) as vat_credit_note,
+               COALESCE(SUM(" . rh_vat_once_sql() . "), 0) as vat_collected,
+               COALESCE(SUM(" . rh_vat_once_sql() . "), 0) as vat_counted,
+               COALESCE(SUM(" . rh_vat_credit_note_info_sql() . "), 0) as vat_credit_note,
                COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' AND {$rhCashRow} THEN total_amount ELSE 0 END), 0) as total_revenue
         FROM payments
         WHERE (payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') OR payment_type = 'refund') AND deleted_at IS NULL
@@ -353,24 +350,20 @@ try {
         SELECT refund_reason, COUNT(*) as count,
                COALESCE(SUM(" . rh_refund_amount_sql() . "), 0) as total_amount
         FROM payments
-        WHERE " . rh_refund_settled_sql() . " AND deleted_at IS NULL
+        WHERE " . rh_refund_payout_sql() . " AND deleted_at IS NULL -- real payouts only (Ship M): money moved onto a credit note is guest credit, not a refund
         AND " . rh_pay_count_day_sql() . " >= ? AND " . rh_pay_count_day_sql() . " <= ?
         GROUP BY refund_reason
         ORDER BY total_amount DESC
     ");
     $refundReasonStmt->execute([$start_date, $end_date]);
     $refundReasons = $refundReasonStmt->fetchAll(PDO::FETCH_ASSOC);
-    // Of those, the part moved into credit notes (overpayments, store credit): guest credit, no cash out.
-    $refundCreditStmt = $pdo->prepare("SELECT " . rh_refund_to_credit_sum_sql() . " FROM payments WHERE deleted_at IS NULL AND " . rh_pay_count_day_sql() . " >= ? AND " . rh_pay_count_day_sql() . " <= ?");
-    $refundCreditStmt->execute([$start_date, $end_date]);
-    $refundsToCredit = (float)$refundCreditStmt->fetchColumn();
 
-    // 10. Refund Status Breakdown
+    // 10. Refund Status Breakdown (credit-note rows left out: they are guest credit, Ship M)
     $refundStatusStmt = $pdo->prepare("
         SELECT refund_status, COUNT(*) as count,
                COALESCE(SUM(" . rh_refund_amount_sql() . "), 0) as total_amount
         FROM payments
-        WHERE payment_type = 'refund' AND deleted_at IS NULL
+        WHERE payment_type = 'refund' AND deleted_at IS NULL AND COALESCE(payment_method, '') <> 'credit_note'
         AND " . rh_pay_count_day_sql() . " >= ? AND " . rh_pay_count_day_sql() . " <= ?
         GROUP BY refund_status
         ORDER BY refund_status ASC
@@ -384,7 +377,7 @@ try {
                COALESCE(SUM(" . rh_refund_amount_sql() . "), 0) as daily_refunds,
                refund_reason
         FROM payments
-        WHERE " . rh_refund_settled_sql() . " AND deleted_at IS NULL -- refunds paid out only, as Total Refunds
+        WHERE " . rh_refund_payout_sql() . " AND deleted_at IS NULL -- real payouts only, as Total Refunds
         AND " . rh_pay_count_day_sql() . " >= ? AND " . rh_pay_count_day_sql() . " <= ?
         GROUP BY date, refund_reason
         ORDER BY date ASC
@@ -854,6 +847,7 @@ try {
         AND ((COALESCE(p.payment_type, '') != 'refund' AND p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded'))
              OR (p.payment_type = 'refund' AND p.refund_status IN ('completed', 'processing')))
         AND p.deleted_at IS NULL
+        AND COALESCE(p.payment_method, '') <> 'credit_note' -- Ship M: VAT counted once, credit-note rows never in the register
         AND p.vat_amount > 0
         ORDER BY payment_date ASC, p.id ASC
         LIMIT 500
@@ -871,6 +865,7 @@ try {
         AND ((COALESCE(p.payment_type, '') != 'refund' AND p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded'))
              OR (p.payment_type = 'refund' AND p.refund_status IN ('completed', 'processing')))
         AND p.deleted_at IS NULL
+        AND COALESCE(p.payment_method, '') <> 'credit_note' -- Ship M: VAT counted once, credit-note rows never in the register
         AND p.vat_amount > 0
     ");
     $vatRegisterTotStmt->execute([$start_date, $end_date]);
@@ -888,6 +883,7 @@ try {
         AND ((COALESCE(payment_type, '') != 'refund' AND payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded'))
              OR (payment_type = 'refund' AND refund_status IN ('completed', 'processing')))
         AND deleted_at IS NULL AND vat_amount > 0
+        AND COALESCE(payment_method, '') <> 'credit_note'
         GROUP BY booking_type ORDER BY total_vat DESC
     ");
     $vatByTypeStmt->execute([$start_date, $end_date]);
@@ -942,22 +938,12 @@ try {
     // ============================================
     // CREDIT NOTES
     // ============================================
-    $cnData = ['total_issued' => 0, 'total_redeemed' => 0, 'count' => 0];
-    try {
-        $cnStmt = $pdo->prepare("
-            SELECT COALESCE(SUM(original_amount), 0) as total_issued,
-                   COALESCE(SUM(amount_used), 0) as total_redeemed,
-                   COUNT(*) as count
-            FROM credit_notes
-            WHERE issued_at >= ? AND issued_at <= DATE_ADD(?, INTERVAL 1 DAY)
-              AND status != 'voided'
-        ");
-        $cnStmt->execute([$start_date, $end_date]);
-        $cnData = $cnStmt->fetch(PDO::FETCH_ASSOC) ?: $cnData;
-    } catch (Throwable $cnEx) { /* credit_notes table may not exist yet */
-    }
-    $totalCreditNotesIssued   = (float)($cnData['total_issued'] ?? 0);
-    $totalCreditNotesRedeemed = (float)($cnData['total_redeemed'] ?? 0);
+    // Guest credit (Ship M, owner 2026-11-18): opening, issued, used, voided, expired and still owed for the period,
+    // the same helper as End of Day (admin/includes/guest-credit.php). 'failed' => shown as unavailable, never as 0.
+    $guestCredit = rh_guest_credit_summary($pdo, $start_date, $end_date);
+    $guestCreditLines = rh_guest_credit_lines($guestCredit, true);
+    $totalCreditNotesIssued   = (float)($guestCredit['issued'] ?? 0);
+    $totalCreditNotesRedeemed = (float)($guestCredit['used'] ?? 0);
 
     // ============================================
     // DEFERRED REVENUE (deposits on future bookings)
@@ -998,6 +984,7 @@ try {
               AND ((COALESCE(payment_type,'') != 'refund' AND payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded'))
                    OR (payment_type = 'refund' AND refund_status IN ('completed', 'processing')))
               AND deleted_at IS NULL AND vat_amount > 0
+              AND COALESCE(payment_method, '') <> 'credit_note'
             GROUP BY yr, qtr
             ORDER BY yr ASC, qtr ASC
         ");
@@ -1079,6 +1066,8 @@ try {
     $priorStartDate = $priorEndDate = '';
     $periodDays = 1;
     $totalCreditNotesIssued = $totalCreditNotesRedeemed = 0.0;
+    $guestCredit = ['failed' => true];
+    $guestCreditLines = [];
     $deferredRevenue = 0.0;
     $deferredBookings = 0;
     $vatByQuarter = [];
@@ -1228,8 +1217,8 @@ try {
                                 <p>Outstanding = money owed but not yet paid. Go to the <strong>Aging &amp; AR</strong> tab to see how long each balance has been outstanding. Anything over 60 days needs urgent follow-up; over 90 days consider a formal notice or write-off.</p>
                             </div>
                             <div>
-                                <h4>🔁 Credit Notes</h4>
-                                <p>Credit notes are not deducted from Net Revenue: the cash is still held, so they appear as an italic memo line under it. If a guest paid but you issued a credit note for a service failure, the credit note is a liability until used. <strong>Issued</strong> = total value created. <strong>Redeemed</strong> = used against a future payment.</p>
+                                <h4>🔁 Guest Credit</h4>
+                                <p>Money the hotel holds for guests on credit notes (overpayments, store credit and goodwill). Moving money onto a credit note is guest credit, not a refund and not revenue, so it is not deducted from Net Revenue. <strong>Issued</strong> = new credit notes. <strong>Used</strong> = credit spent on bills (no new money). <strong>Still owed</strong> = what the hotel still owes guests at the end of the period.</p>
                             </div>
                             <div>
                                 <h4>📅 Prior Period Comparison</h4>
@@ -1260,9 +1249,9 @@ try {
                         <span class="rh-strip__sub"><?php echo $grossMarginPct; ?>% margin · After <?php echo htmlspecialchars(rh_pos_short_label()); ?> COGS</span>
                     </div>
                     <div class="rh-strip__cell">
-                        <span class="rh-strip__label">VAT Collected</span>
+                        <span class="rh-strip__label" title="<?php echo htmlspecialchars(rh_ship_m_help('vat')); ?>">VAT Collected</span>
                         <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($totalVatCollected, 2); ?></strong>
-                        <span class="rh-strip__sub">At <?php echo $vatRate; ?>% · VAT payable</span>
+                        <span class="rh-strip__sub">At <?php echo $vatRate; ?>% · VAT payable · counted once, when the guest first paid</span>
                     </div>
                     <div class="rh-strip__cell">
                         <span class="rh-strip__label">Outstanding</span>
@@ -1338,18 +1327,18 @@ try {
                                     <td style="text-align:right"><?php echo rh_reports_delta($grossRevenue, $priorRevenue); ?></td>
                                 </tr>
                                 <tr style="color: var(--color-text-secondary)">
-                                    <td>– Refunds Issued</td>
+                                    <td title="<?php echo htmlspecialchars(rh_ship_m_help('refunds')); ?>">– Refunds Issued</td>
                                     <td style="text-align:right">(<?php echo number_format($totalRefunds, 2); ?>)</td>
                                     <td style="text-align:right"></td>
                                 </tr>
                                 <tr style="color: var(--color-text-secondary)">
-                                    <td title="The VAT inside the payments Gross Revenue counts, less the VAT on refunds. VAT on credit-note payments is left out because those payments are not in Gross Revenue.">– VAT on payments counted</td>
+                                    <td title="<?php echo htmlspecialchars(rh_ship_m_help('vat')); ?>">– VAT Collected</td>
                                     <td style="text-align:right">(<?php echo number_format($totalVatCounted, 2); ?>)</td>
                                     <td style="text-align:right"></td>
                                 </tr>
                                 <?php if (abs($totalVatCreditNote) > BALANCE_TOLERANCE): ?>
                                 <tr style="color: var(--color-text-secondary); font-size: 0.85em">
-                                    <td title="VAT on payments made from a guest's credit note. It was already counted when the guest first paid, so it is not taken off again here. Shown for information only.">Memo: VAT on credit-note payments (already counted when first paid)</td>
+                                    <td title="<?php echo htmlspecialchars(rh_ship_m_help('vat_info')); ?>">Memo: <?php echo htmlspecialchars(rh_ship_m_help('vat_info_label')); ?></td>
                                     <td style="text-align:right"><?php echo number_format($totalVatCreditNote, 2); ?></td>
                                     <td style="text-align:right"></td>
                                 </tr>
@@ -1371,14 +1360,20 @@ try {
                                     <td style="text-align:right"><?php echo number_format($grossProfit, 2); ?></td>
                                     <td style="text-align:right"></td>
                                 </tr>
-                                <?php if ($totalCreditNotesIssued > 0): ?>
-                                    <?php /* Memo only: not subtracted above, so the rows foot to Net Revenue. */ ?>
+                                <?php /* Guest credit (Ship M): memo only, not subtracted above, so the rows foot to Net Revenue. */ ?>
+                                <?php if (!empty($guestCredit['failed'])): ?>
                                     <tr class="acct-memo-row">
-                                        <td title="Credit notes are value promised to guests, not money paid out, so they are not deducted from Net Revenue.">Memo: Credit Notes Issued (not deducted; the cash is still held)</td>
-                                        <td style="text-align:right"><?php echo number_format($totalCreditNotesIssued, 2); ?></td>
-                                        <td style="text-align:right"><?php echo number_format($totalCreditNotesRedeemed, 2); ?> redeemed</td>
+                                        <td title="What the hotel owes guests on credit notes. Not a refund, not revenue.">Memo: Guest credit</td>
+                                        <td style="text-align:right">Unavailable</td>
+                                        <td style="text-align:right"></td>
                                     </tr>
-                                <?php endif; ?>
+                                <?php else: foreach ($guestCreditLines as $gcLine): ?>
+                                    <tr class="acct-memo-row">
+                                        <td title="<?php echo htmlspecialchars($gcLine['help']); ?>">Memo: <?php echo htmlspecialchars($gcLine['label']); ?></td>
+                                        <td style="text-align:right"><?php echo number_format((float)$gcLine['amount'], 2); ?></td>
+                                        <td style="text-align:right"></td>
+                                    </tr>
+                                <?php endforeach; endif; ?>
                                 <?php if ($deferredRevenue > 0): ?>
                                     <tr style="color: var(--color-text-secondary); border-top: 1px dashed var(--color-lux-clay-50)">
                                         <td title="Deferred Revenue — payments collected for stays that have not yet occurred. Under accrual accounting these are liabilities, not earned income.">⚠ Deferred Revenue (unearned)</td>
@@ -1434,12 +1429,12 @@ try {
                                     <td>Total Transactions</td>
                                     <td style="text-align:right"><?php echo number_format($totalTransactions); ?> <?php echo rh_reports_delta((float)$totalTransactions, (float)$priorTxns); ?></td>
                                 </tr>
-                                <?php if ($totalCreditNotesIssued > 0): ?>
+                                <?php foreach ($guestCreditLines as $gcLine): if (!in_array($gcLine['key'], ['issued', 'closing'], true)) { continue; } ?>
                                     <tr>
-                                        <td title="Credit notes issued in this period.">Credit Notes Issued</td>
-                                        <td style="text-align:right; color: #c82333"><?php echo $currency_symbol . ' ' . number_format($totalCreditNotesIssued, 2); ?></td>
+                                        <td title="<?php echo htmlspecialchars($gcLine['help']); ?>"><?php echo htmlspecialchars($gcLine['label']); ?></td>
+                                        <td style="text-align:right"><?php echo $currency_symbol . ' ' . number_format((float)$gcLine['amount'], 2); ?></td>
                                     </tr>
-                                <?php endif; ?>
+                                <?php endforeach; ?>
                                 <?php if ($mod_bookings): ?>
                                 <tr style="font-weight:600">
                                     <td>Revenue Forecast (upcoming)</td>
@@ -1636,7 +1631,7 @@ try {
                         <span class="rh-strip__sub">After refunds of <?php echo $currency_symbol . ' ' . number_format($totalRefunds, 2); ?></span>
                     </div>
                     <div class="rh-strip__cell">
-                        <span class="rh-strip__label">VAT Collected</span>
+                        <span class="rh-strip__label" title="<?php echo htmlspecialchars(rh_ship_m_help('vat')); ?>">VAT Collected</span>
                         <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($totalVatCollected, 2); ?></strong>
                         <span class="rh-strip__sub"><a href="?tab=vat&start_date=<?php echo htmlspecialchars($start_date); ?>&end_date=<?php echo htmlspecialchars($end_date); ?>" class="acct-link">Full VAT Register →</a></span>
                     </div>
@@ -1801,14 +1796,14 @@ try {
                                 <p>No VAT data for this period</p>
                             </div>
                         <?php else: ?>
-                            <p class="acct-muted" style="margin-bottom:12px; font-size:0.85em">One row per day (refunds by the day they were paid out). VAT on payments counted sits beside Total Revenue and is the VAT taken off for Net Revenue. VAT on credit-note payments is guest credit being used: that VAT was already counted when the guest first paid. The two VAT columns together make VAT Collected.</p>
+                            <p class="acct-muted" style="margin-bottom:12px; font-size:0.85em">One row per day (refunds by the day they were paid out). VAT Collected counts each payment once. The credit-note column is information only.</p>
                             <table class="report-table">
                                 <thead>
                                     <tr>
                                         <th title="The payment date, or the payout day for a refund.">Date</th>
                                         <th title="Payments counted in Total Revenue that day (refunds and credit-note payments left out).">Transactions</th>
-                                        <th title="VAT inside the payments counted in Total Revenue, less the VAT on refunds paid out that day.">VAT on payments counted</th>
-                                        <th title="VAT inside payments made from a guest's credit note. Already counted when the guest first paid.">VAT on credit-note payments (already counted when first paid)</th>
+                                        <th title="<?php echo htmlspecialchars(rh_ship_m_help('vat')); ?>">VAT Collected</th>
+                                        <th title="<?php echo htmlspecialchars(rh_ship_m_help('vat_info')); ?>"><?php echo htmlspecialchars(rh_ship_m_help('vat_info_label')); ?></th>
                                         <th title="Money received that day (VAT included), credit-note payments left out. The same rule as Gross Revenue.">Total Revenue</th>
                                     </tr>
                                 </thead>
@@ -1846,8 +1841,7 @@ try {
                         <div class="rh-strip__cell">
                             <span class="rh-strip__label">Total Refunds</span>
                             <strong class="rh-strip__value">-<?php echo $currency_symbol . ' ' . number_format($totalRefunds, 2); ?></strong>
-                            <span class="rh-strip__sub">Refunds dated <?php echo htmlspecialchars(date('j M Y', strtotime($start_date)) . ' to ' . date('j M Y', strtotime($end_date))); ?> (VAT included): money paid back plus overpayments or store credit moved to a credit note. Same rule as Payments and Accounting.</span>
-                            <?php $repRefundSplit = rh_refund_split_text((float)$totalRefunds, (float)$refundsToCredit, (string)$currency_symbol, 2); if ($repRefundSplit !== ''): ?><span class="rh-strip__sub"><?php echo htmlspecialchars($repRefundSplit); ?></span><?php endif; ?>
+                            <span class="rh-strip__sub">Refunds dated <?php echo htmlspecialchars(date('j M Y', strtotime($start_date)) . ' to ' . date('j M Y', strtotime($end_date))); ?> (VAT included). <?php echo htmlspecialchars(rh_ship_m_help('refunds')); ?></span>
                         </div>
                         <div class="rh-strip__cell">
                             <span class="rh-strip__label">Pending Refunds</span>
@@ -2049,7 +2043,7 @@ try {
 
                 <div class="rh-strip" role="group" aria-label="Summary">
                     <div class="rh-strip__cell">
-                        <span class="rh-strip__label">Total VAT Collected</span>
+                        <span class="rh-strip__label" title="<?php echo htmlspecialchars(rh_ship_m_help('vat')); ?>">Total VAT Collected</span>
                         <strong class="rh-strip__value"><?php echo $currency_symbol . ' ' . number_format($vatRegisterTotal, 2); ?></strong>
                         <span class="rh-strip__sub">At <?php echo $vatRate; ?>% · Tax-inclusive revenue</span>
                     </div>

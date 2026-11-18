@@ -50,27 +50,16 @@ if (!function_exists('rh_eod_pay_day_sql')) {
     }
 
     /**
-     * SQL condition: a payments row that is part of the CASH view (payments received, cash collected, payment mix,
-     * transactions). A payment made WITH a credit note (non-refund row, payment_method 'credit_note',
-     * config/credit-notes.php) is guest credit being used, not new money: it is left out and shown on its own line
-     * ("Credit notes redeemed"). Refund rows always stay (a refund moved INTO a credit note stays in the refunds total).
+     * SQL condition (parenthesised): a payments row that is part of the CASH view (payments received, cash
+     * collected, refunds paid out, payment mix, transactions, VAT). Ship M (owner 2026-11-18): EVERY credit-note
+     * row (payment_method 'credit_note', config/credit-notes.php) leaves the cash view: a payment made WITH a note
+     * is guest credit used, money moved INTO a note (or put back on it) is guest credit issued, not a refund. Both
+     * are reported on the Guest credit lines (admin/includes/guest-credit.php), never as cash.
      */
     function rh_eod_cash_row_sql(string $alias = ''): string
     {
         $a = rh_refund_alias($alias);
-        return "NOT (COALESCE({$a}payment_type, '') <> 'refund' AND COALESCE({$a}payment_method, '') = 'credit_note')";
-    }
-}
-
-if (!function_exists('rh_eod_credit_notes_redeemed')) {
-    /** Payments made with a credit note on $date (guest credit used, no new money), gross. */
-    function rh_eod_credit_notes_redeemed(PDO $pdo, string $date): float
-    {
-        $st = $pdo->prepare("SELECT COALESCE(SUM(total_amount),0) FROM payments
-            WHERE DATE(payment_date) = ? AND deleted_at IS NULL AND COALESCE(payment_type, '') <> 'refund'
-              AND payment_method = 'credit_note' AND payment_status IN ('completed','paid','refunded','partially_refunded')");
-        $st->execute([$date]);
-        return (float)$st->fetchColumn();
+        return "(COALESCE({$a}payment_method, '') <> 'credit_note')";
     }
 }
 
@@ -398,9 +387,10 @@ if (!function_exists('rh_eod_payment_mix')) {
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
             $mix[(string)$r['method']] = ['method' => (string)$r['method'], 'cnt' => (int)$r['cnt'], 'total' => (float)$r['total']];
         }
-        // Refunds by the day they were paid out (rh_refund_eod_date_sql). Refunds moved into a credit note
-        // ('credit_note') are not money leaving any till or account: they stay out of the mix (shown apart,
-        // rh_eod_refunds_to_credit) so Non-cash collected is never lowered by them.
+        // Refunds by the day they were paid out (rh_refund_eod_date_sql). Money moved onto a credit note
+        // ('credit_note') is guest credit, not a refund and not money leaving any till or account: it stays out of
+        // the mix (Ship M: it is on the Guest credit lines, admin/includes/guest-credit.php) so Non-cash collected
+        // is never lowered by it.
         $rf = $pdo->prepare("
             SELECT COALESCE(NULLIF(payment_method,''), ?) AS method, COALESCE(SUM(" . rh_refund_amount_sql() . "),0) AS refunded
             FROM payments
@@ -432,20 +422,6 @@ if (!function_exists('rh_eod_cash_refunds_out')) {
         $st = $pdo->prepare("SELECT COALESCE(SUM(" . rh_refund_amount_sql() . "),0) FROM payments
             WHERE " . rh_refund_eod_date_sql() . " = ? AND deleted_at IS NULL AND payment_type = 'refund'
               AND refund_status IN ('completed','processing') AND LOWER(COALESCE(payment_method,'')) LIKE '%cash%'");
-        $st->execute([$date]);
-        return (float)$st->fetchColumn();
-    }
-}
-
-if (!function_exists('rh_eod_refunds_to_credit')) {
-    /**
-     * Refunds paid out on $date whose money went INTO a credit note (rh_refund_to_credit_sql): part of "Refunds
-     * paid out" (the refunds total stays in full), shown apart as "moved to credit notes (no cash out)".
-     */
-    function rh_eod_refunds_to_credit(PDO $pdo, string $date): float
-    {
-        $st = $pdo->prepare("SELECT " . rh_refund_to_credit_sum_sql() . " FROM payments
-            WHERE " . rh_refund_eod_date_sql() . " = ? AND deleted_at IS NULL");
         $st->execute([$date]);
         return (float)$st->fetchColumn();
     }

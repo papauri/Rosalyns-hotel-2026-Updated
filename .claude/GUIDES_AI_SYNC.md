@@ -138,6 +138,17 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - CSV export: status breakdown follows the chosen dates, has a Total row, refund rows after it; no "Credit note" method line. Guides: Reports (Payment Status Mix, VAT Collection). Assistant: revenue answers use the same rule.
 
 
+### Ship M: guest credit is not a refund, VAT counted once (2026-11-18, owner) - hashes in TASKS.md
+- Guides (End of Day page/PDF/email/WhatsApp, Reports page + CSV export, timed Accounting Summary CSV): "Refunds"
+  now counts only money really paid back to a guest; money moved onto a credit note is no longer a refund. New
+  "Guest credit" lines: issued, used, voided, expired unused, still owed (Reports adds "Guest credit at start").
+  "Moved to credit notes" and "Credit notes redeemed" lines are gone. "VAT on payments counted" is now "VAT
+  Collected" (VAT on money received less VAT on real refunds); "VAT inside credit-note payments (information only)"
+  shows beside it. Payments list, Accounting dashboard and guest history keep the old refund total until Ship M2.
+- Assistant: new helpers rh_refund_payout_sql, rh_vat_once_sql, rh_vat_credit_note_info_sql (finance-refunds.php)
+  and admin/includes/guest-credit.php (rh_guest_credit_summary / rh_guest_credit_lines); rh_eod_refunds_to_credit and
+  rh_eod_credit_notes_redeemed removed. includes/ai/ai-insights.php ~315 still says "Moved to credit notes" - check at sync.
+
 ## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
 
 ### Import stock check: value column warning + stock check workbook (2026-11-16, owner ask) — hashes in TASKS.md

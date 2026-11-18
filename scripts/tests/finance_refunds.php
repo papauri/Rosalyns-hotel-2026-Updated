@@ -29,6 +29,18 @@ eq(rh_refund_amount_sql("x; DROP TABLE payments"), 'total_amount', 'a bad alias 
 check(strpos(rh_refund_settled_sum_sql(), 'refund_amount') === false && strpos(rh_refund_settled_sum_sql(), 'THEN total_amount') !== false, 'settled sum adds total_amount');
 check(strpos(rh_refund_pending_sum_sql(), "refund_status = 'pending'") !== false && strpos(rh_refund_pending_sum_sql(), 'processing') === false, 'pending sum is pending only');
 check(strpos(rh_refund_settled_count_sql(), 'THEN 1 ELSE 0') !== false && strpos(rh_refund_pending_count_sql(), 'THEN 1 ELSE 0') !== false, 'counts count rows');
+// Ship M (owner 2026-11-18): a real payout leaves out credit-note rows; VAT counted once; credit-note VAT is information only
+eq(rh_refund_payout_sql(), "(payment_type = 'refund' AND refund_status IN ('completed','processing') AND COALESCE(payment_method, '') <> 'credit_note')", 'payout = settled minus credit-note rows, parenthesised');
+eq(rh_refund_payout_sql('p'), "(p.payment_type = 'refund' AND p.refund_status IN ('completed','processing') AND COALESCE(p.payment_method, '') <> 'credit_note')", 'payout, alias p');
+check(strpos(rh_refund_payout_sum_sql(), rh_refund_payout_sql()) !== false && strpos(rh_refund_payout_sum_sql(), 'THEN total_amount') !== false, 'payout sum adds total_amount of payouts only');
+check(strpos(rh_refund_payout_count_sql(), rh_refund_payout_sql()) !== false && strpos(rh_refund_payout_count_sql(), 'THEN 1 ELSE 0') !== false, 'payout count counts payouts only');
+$vo = rh_vat_once_sql();
+check(strpos($vo, "COALESCE(payment_method, '') <> 'credit_note' THEN vat_amount") !== false && strpos($vo, 'WHEN ' . rh_refund_payout_sql() . ' THEN -vat_amount') !== false
+    && strpos($vo, "payment_status IN ('completed','paid','refunded','partially_refunded')") !== false && strpos($vo, 'ELSE 0 END)') !== false, 'VAT once: + received non-credit-note VAT, - payout VAT, else 0');
+check(strpos(rh_vat_once_sql('p'), 'p.vat_amount') !== false && strpos(rh_vat_once_sql('p'), 'COALESCE(p.payment_method') !== false, 'VAT once, alias p');
+$vi = rh_vat_credit_note_info_sql();
+check(strpos($vi, "COALESCE(payment_method, '') = 'credit_note' THEN vat_amount") !== false && strpos($vi, "COALESCE(payment_type, '') <> 'refund'") !== false
+    && strpos($vi, '-vat_amount') === false && strpos($vi, 'credit_note_id') === false, 'VAT info: redemptions only, never a refund row, not keyed on credit_note_id');
 
 // ---- refund lifecycle words
 eq(rh_refund_status_label('pending'), 'Awaiting approval', 'pending words');
@@ -127,7 +139,7 @@ check(strpos($pay, "rh_receivable_status_sql('conference', 'ci')") !== false && 
 check(strpos($pay, '<span class="ck-kpi__label">Still owed</span>') !== false && strpos($pay, '<span class="ck-kpi__label">Pending / Partial</span>') === false, 'payments: Still owed card replaces Pending / Partial');
 check(strpos($pay, '> 0.001') === false, 'payments: no raw 0.001 money comparison');
 $rep = (string)file_get_contents($root . '/admin/reports.php');
-check(substr_count($rep, 'rh_refund_settled_sql()') >= 2, 'reports: refund reasons and trends count paid-out refunds only');
+check(substr_count($rep, 'rh_refund_payout_sql()') >= 3, 'reports: refund reasons, trends and monthly count real payouts only (Ship M)');
 
 // ---- G1 (owner 2026-11-18): every payment-ROW status reads like the Payments list ("Received" + the bill's note)
 eq(rh_pay_row_pill_tone('completed'), 'ok', 'pill tone: Received is ok');

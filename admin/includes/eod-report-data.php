@@ -14,6 +14,7 @@
  */
 
 require_once __DIR__ . '/eod-revenue.php'; // pure at include (finance-refunds.php, pos-shift-totals.php)
+require_once __DIR__ . '/guest-credit.php'; // Guest credit lines (Ship M); pure at include
 
 if (!function_exists('rh_eod_report_data')) {
     /**
@@ -70,7 +71,9 @@ if (!function_exists('rh_eod_report_data')) {
 
             // 3) Cash view: money received on the day, refunds on the day they were paid out (rh_eod_pay_day_sql).
             $ok = "payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type,'') <> 'refund'";
-            $rf = "payment_type='refund' AND refund_status IN ('completed','processing')";
+            // Refunds = real payouts only (Ship M): money moved onto a credit note is guest credit, not a refund. With
+            // the cash-row rule below, total_vat - refund_vat is VAT counted once (rh_vat_once_sql).
+            $rf = rh_refund_payout_sql();
             $st = $pdo->prepare("
                 SELECT
                     COALESCE(SUM(CASE WHEN booking_type='room'       AND $ok THEN total_amount ELSE 0 END),0) AS room_gross,
@@ -91,7 +94,11 @@ if (!function_exists('rh_eod_report_data')) {
             ");
             $st->execute([$date, $date]);
             $rev = $st->fetch(PDO::FETCH_ASSOC) ?: [];
-            $creditNotesRedeemed = rh_eod_credit_notes_redeemed($pdo, $date); // guest credit used: its own line, not cash
+            // Guest credit (issued / used / still owed) and the VAT inside credit-note payments (information only).
+            $guestCredit = rh_guest_credit_summary($pdo, $date, $date);
+            $st = $pdo->prepare("SELECT COALESCE(SUM(" . rh_vat_credit_note_info_sql() . "),0) FROM payments WHERE DATE(payment_date) = ? AND deleted_at IS NULL");
+            $st->execute([$date]);
+            $vatCreditNoteInfo = (float)$st->fetchColumn();
             $rev['total_vat'] = (float)($rev['total_vat'] ?? 0) - (float)($rev['refund_vat'] ?? 0);
             // The F&B part of room payments (room service on the folio) is F&B, not room revenue.
             $folioFnb = rh_eod_folio_fnb_allocation($pdo, $date);
@@ -121,7 +128,6 @@ if (!function_exists('rh_eod_report_data')) {
             }
             $cashRefundsOut = rh_eod_cash_refunds_out($pdo, $date);
             $methodTotals['cash'] -= $cashRefundsOut;
-            $refundsToCredit = rh_eod_refunds_to_credit($pdo, $date);
 
             // 6) POS (trading window; voids / refunds by their own time).
             $posSummary = rh_pos_eod_summary($pdo, $date);
@@ -247,7 +253,7 @@ if (!function_exists('rh_eod_report_data')) {
             'earned' => $earned, 'earned_total' => (float)$earned['total'],
             'adr' => $adr, 'revpar' => $revpar,
             'methods' => $methods, 'method_totals' => $methodTotals, 'cash_total' => (float)$methodTotals['cash'],
-            'cash_refunds_out' => $cashRefundsOut, 'refunds_to_credit' => $refundsToCredit, 'credit_notes_redeemed' => $creditNotesRedeemed,
+            'cash_refunds_out' => $cashRefundsOut, 'guest_credit' => $guestCredit, 'vat_credit_note_info' => $vatCreditNoteInfo,
             'pos' => $pos, 'pos_by_type' => $posSummary['by_type'] ?? [], 'top_items' => $posSummary['top_items'] ?? [],
             'void_reasons' => $posSummary['void_reasons'] ?? [],
             'hk' => $hk, 'reviewRow' => $reviewRow,
@@ -302,7 +308,7 @@ if (!function_exists('rh_eod_headline_facts')) {
             $add('fnb_revenue', 'Food, drink and till sales earned', $earned['fnb_gross'] ?? 0, 'money', 'Till sales on the trading day less voids and refunds, plus food and drink posted to guest bills');
         }
         $add('cash_collected', 'Cash collected (all methods, after refunds)', $d['net'] ?? 0, 'money', 'Payments received on this day less refunds paid out on this day');
-        $add('refunds_paid_out', 'Refunds paid out', $rev['refunds'] ?? 0, 'money', 'The full amount paid back, on the day it was paid out');
+        $add('refunds_paid_out', 'Refunds paid out', $rev['refunds'] ?? 0, 'money', 'The full amount paid back to guests in cash, bank or mobile money, on the day it was paid out. Moving money onto a credit note is guest credit, not a refund');
         $add('cash_to_reconcile', 'Cash to reconcile', $d['cash_total'] ?? 0, 'money', 'Cash payments received less cash refunds paid out');
         if (empty($d['outstanding_failed'])) {
             $add('still_owed', 'Still owed', $d['still_owed'] ?? 0, 'money', 'Room folios, conference / event / gym accounts and open tabs, as of now');
@@ -339,11 +345,10 @@ if (!function_exists('rh_eod_headline_lines')) {
         $lines = [];
         $lines[] = 'Revenue earned: ' . $m($d['earned_total'] ?? 0) . ' (' . ($chg >= 0 ? '+' : '-') . $m(abs($chg)) . ' against the day before)';
         $lines[] = 'Cash collected (after refunds): ' . $m($d['net'] ?? 0) . ((float)($rev['refunds'] ?? 0) > 0.004 ? ' (refunds paid out ' . $m($rev['refunds']) . ')' : '');
-        if ((float)($d['refunds_to_credit'] ?? 0) > 0.004) {
-            $lines[] = 'Of the refunds, moved to credit notes (guest credit, no cash out): ' . $m($d['refunds_to_credit']);
-        }
-        if ((float)($d['credit_notes_redeemed'] ?? 0) > 0.004) {
-            $lines[] = 'Credit notes redeemed (guest credit used, no new money): ' . $m($d['credit_notes_redeemed']);
+        if (isset($d['guest_credit']) && is_array($d['guest_credit'])) {
+            foreach (rh_guest_credit_lines($d['guest_credit'], false) as $gc) {
+                $lines[] = $gc['label'] . ': ' . $m($gc['amount']);
+            }
         }
         $lines[] = 'Cash to reconcile: ' . $m($d['cash_total'] ?? 0);
         if ($on('bookings')) {

@@ -68,9 +68,15 @@ No cron, no server timer, ever (owner 2026-11-12): R4/R5 run inside `includes/au
   One condition for both: `rh_eod_pay_day_sql()` (eod-revenue.php, 2 params). (F4 fixed.)
 - Payments made WITH a credit note (non-refund rows, `payment_method = 'credit_note'`) are guest credit being used,
   not money: `rh_eod_cash_row_sql()` leaves them out of payments received, cash collected, transactions, the
-  payment mix, the F&B share of room payments, the previous-day and 7-day cash, on every surface. They show as
-  "Credit notes redeemed (guest credit used, no new money)" (`rh_eod_credit_notes_redeemed`), beside "Moved to
-  credit notes". Earned revenue is unchanged. (Accounting gate B2.)
+  payment mix, the F&B share of room payments, the previous-day and 7-day cash, on every surface. Earned revenue
+  is unchanged. (Accounting gate B2.)
+- Ship M (owner 2026-11-18): guest credit is not a refund and not revenue; VAT is counted once. Every credit-note
+  row (payment made WITH a note, or money moved ONTO a note) is out of the cash view (`rh_eod_cash_row_sql`).
+  Refunds = real payouts only (`rh_refund_payout_sql`). VAT = VAT on money received less VAT on real refunds
+  (`rh_vat_once_sql`); the VAT inside credit-note payments is information only (`rh_vat_credit_note_info_sql`).
+  Guest credit has its own lines on every surface from `rh_guest_credit_summary` / `rh_guest_credit_lines`
+  (admin/includes/guest-credit.php): issued, used, voided, expired unused, still owed (+ "at start" on Reports).
+  The old "Moved to credit notes" / "Credit notes redeemed" lines are gone.
 
 **1.4 The report mailer** (`includes/report-mailer.php` `sendReportEmail`)
 - Arguments: recipients, subject, html, attachments, textBody, ccEmails.
@@ -118,7 +124,7 @@ Invalid addresses dropped; a set but unusable list does not fall back. The page 
 | Never twice | No dedupe (intended); each click sends. |
 | Figures fail | Nothing is sent: "The End of Day figures could not be loaded, so nothing was sent" + `rh_log_event` error (F6 fixed). |
 | Log | `rh_log_event('eod-report', …, 'EOD email send', {date, recipients, cc, test_mode, success})`; Emails sent kind `end_of_day_report`. |
-| Content | "The day in brief" (only when the AI lead's hook returns text), score, KPI strip with a helper line per tile, alerts, earned by source, cash collected (credit-note refunds said apart), front office, POS, payment mix, top items, housekeeping (module-gated), tomorrow, footer "Figures as at HH:MM; later changes show on the End of Day page." + `eod-report-D.pdf` from `buildEodPdf(rh_eod_report_data(...))`. |
+| Content | "The day in brief" (only when the AI lead's hook returns text), score, KPI strip with a helper line per tile, alerts, earned by source, cash collected (real refunds only), Guest credit lines, front office, POS, payment mix, top items, housekeeping (module-gated), tomorrow, footer "Figures as at HH:MM; later changes show on the End of Day page." + `eod-report-D.pdf` from `buildEodPdf(rh_eod_report_data(...))`. |
 | Permission | `reports` + CSRF. |
 
 ### R2 — End of Day WhatsApp (clicked)
@@ -136,7 +142,7 @@ Permission `reports` + CSRF. Same PDF as R1 and R4 (L6 fixed).
 | Field | Answer |
 |---|---|
 | Trigger | `rh_job_daily_reports` (auto-email-jobs.php), once per trading day D after it ends. |
-| Report day | D = last ended trading day for EVERY part: bookings CSV (created on D or arriving D, not deleted), station-day CSV (trading window, Z rule), accounting CSV (money received on D, refunds paid out on D, shift closes of D, still-owed snapshot from the shared receivables rule — F3 fixed), stock health (now), **End of Day for D** (owner B1). |
+| Report day | D = last ended trading day for EVERY part: bookings CSV (created on D or arriving D, not deleted), station-day CSV (trading window, Z rule), accounting CSV (money received on D, real refunds paid out on D (Ship M), VAT counted once (`rh_vat_once_sql`), GUEST CREDIT section, shift closes of D, still-owed snapshot from the shared receivables rule — F3 fixed), stock health (now), **End of Day for D** (owner B1). |
 | End of Day part | Section `end-of-day` in `rh_daily_reports_build_and_send($…, ['eod' => ['date' => D]])`: `rh_eod_report_data()` → one attachment `eod-report-D.pdf` + headline lines (`rh_eod_headline_lines`) + "The day in brief" block when available. If it fails, the CSVs still go and the email says "End of Day report could not be loaded". |
 | To / CC | §2.1 / `rh_daily_reports_cc_all` (daily reports copy + End of Day copy, never a To). |
 | Test mode | Plan sends only to the test address, `[TEST] `, stage `test:day:D`, no CC; mailer drops the hidden copy. |
@@ -208,10 +214,9 @@ WhatsApp, timed R4 PDF — is built from ONE function, `rh_eod_report_data($pdo,
 | Figure | Source | Date basis | Page | R1/R2/R3/R4 (shared builder) | R4 CSVs |
 |---|---|---|---|---|---|
 | Revenue earned (+ parts) | `rh_eod_earned_revenue` | rooms: night D; folio: posted D; POS: trading D; conference/events: event date; gym: payments on D, gym refunds on the day paid out | = | = | – |
-| Payments received / cash collected / VAT | inline SQL over `rh_eod_pay_day_sql` | money in: payment date; refunds: day paid out (F4) | = | = | accounting CSV: same day rule |
-| Refunds paid out (full amount) | `rh_refund_amount_sql`, completed + processing | day paid out | = | = | = |
-| of which moved to credit notes | `rh_eod_refunds_to_credit` (`rh_refund_to_credit_sql`) | day paid out | shown apart (cash panel, refunds row, alert) | shown apart (email row, PDF row, WhatsApp line, headline line) | in the refund total |
-| Credit notes redeemed (guest credit used, no new money) | `rh_eod_credit_notes_redeemed`; out of every cash figure via `rh_eod_cash_row_sql` | payment date | own line (cash panel) | own line (email, PDF, WhatsApp, headline line) | accounting CSV still lists it under its method (accounting's own report) |
+| Payments received / cash collected / VAT | inline SQL over `rh_eod_pay_day_sql`; VAT counted once (`rh_vat_once_sql`, Ship M) | money in: payment date; refunds: day paid out (F4) | = | = | accounting CSV: same day rule |
+| Refunds paid out (full amount) | `rh_refund_amount_sql` over `rh_refund_payout_sql` (completed + processing, not credit-note rows; Ship M) | day paid out | = | = | = |
+| Guest credit (issued / used / voided / expired unused / still owed) | `rh_guest_credit_summary` + `rh_guest_credit_lines`; credit-note rows out of every cash figure via `rh_eod_cash_row_sql` | issue / use / void day; expiry = day after `expires_at` | own lines (cash panel) | own lines (email, PDF, WhatsApp, headline line) | accounting CSV: GUEST CREDIT section |
 | Payment mix / Non-cash collected | `rh_eod_payment_mix` (non-cash refunds netted by method; credit-note moves left out — F5) | as above | = | = | own method table |
 | Cash to reconcile | cash rows − `rh_eod_cash_refunds_out` | as above | = ("Cash to bank" card) | = | – |
 | Still owed | `rh_eod_outstanding_split` / `rh_receivable_rows` | snapshot now | = | = | = (F3) |
@@ -245,7 +250,8 @@ Day rules shown to staff: `rh_eod_day_rules_note()` now also says "Cash collecte
   source fails; bookings CSV skips deleted bookings.
 - F4 FIXED (money) — refunds on the day paid out (`rh_refund_eod_date_sql`) on the page, shared builder, gym
   earned, payment mix, cash refunds out, 7-day trend and the accounting CSV.
-- F5 FIXED (money) — credit-note refunds out of the non-cash mix, shown apart everywhere; refunds total unchanged.
+- F5 FIXED (money) — credit-note refunds out of the non-cash mix. SUPERSEDED 2026-11-18 by Ship M (owner): money
+  moved onto a credit note is guest credit, no longer in the refunds total; see the Ship M note in §1.
 - Accounting gate 2026-11-13, B1 FIXED — refund day = first day paid out, never moves (audit-derived, §1.3).
 - Accounting gate 2026-11-13, B2 FIXED — credit-note redemptions out of received / cash / mix, own line (§1.3).
 - F6 FIXED — figures that cannot be loaded send / print nothing.

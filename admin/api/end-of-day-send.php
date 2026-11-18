@@ -99,8 +99,12 @@ $revpar = (float)$d['revpar'];
 $methods = $d['methods'];
 $method_totals = $d['method_totals'];
 $cash_refunds_out = (float)$d['cash_refunds_out'];
-$refunds_to_credit = (float)$d['refunds_to_credit'];
-$cn_redeemed = (float)($d['credit_notes_redeemed'] ?? 0);
+// Guest credit (Ship M): credit notes issued / used / still owed; shown only when there is any. Not a refund.
+$gc_summary = (array)($d['guest_credit'] ?? []);
+$gc_lines = $gc_summary ? rh_guest_credit_lines($gc_summary, false) : [];
+$gc_tol = (float)BALANCE_TOLERANCE;
+$gc_show = $gc_lines && ((float)($gc_summary['issued'] ?? 0) > $gc_tol || abs((float)($gc_summary['used'] ?? 0)) > $gc_tol || (float)($gc_summary['closing'] ?? 0) > $gc_tol);
+$vat_cn_info = (float)($d['vat_credit_note_info'] ?? 0);
 $pos = $d['pos'];
 $top = array_slice($d['top_items'], 0, 5);
 $reviews = ['c' => (int)($d['reviewRow']['cnt'] ?? 0), 'a' => (float)($d['reviewRow']['avg_rating'] ?? 0)];
@@ -200,13 +204,16 @@ if ($channel === 'whatsapp') {
     $lines[] = "  (" . rh_eod_day_rules_note($date, function_exists('rh_pos_short_label') ? rh_pos_short_label() : 'POS') . ")";
     $lines[] = '';
     $lines[] = "Cash collected: *" . _money($currency_symbol, $net) . "*  (received " . _money($currency_symbol, $gross) . ((float)$rev['refunds'] > 0 ? ", refunds -" . _money($currency_symbol, (float)$rev['refunds']) : '') . ")";
-    if ($refunds_to_credit > 0.004) {
-        $lines[] = "  of the refunds, moved to credit notes (no cash out): " . _money($currency_symbol, $refunds_to_credit);
-    }
-    if ($cn_redeemed > 0.004) {
-        $lines[] = "Credit notes redeemed (guest credit used, no new money): " . _money($currency_symbol, $cn_redeemed);
-    }
     $lines[] = "VAT in cash collected: " . _money($currency_symbol, (float)$rev['total_vat']);
+    if ($vat_cn_info > $gc_tol) {
+        $lines[] = "  " . rh_ship_m_help('vat_info_label') . ": " . _money($currency_symbol, $vat_cn_info);
+    }
+    if ($gc_show) {
+        foreach ($gc_lines as $gc) {
+            $lines[] = $gc['label'] . ": " . _money($currency_symbol, (float)$gc['amount']);
+        }
+        $lines[] = "  (Guest credit = credit notes the hotel holds for guests: not a refund, not revenue)";
+    }
     $lines[] = '';
     if ($eodModBookings) {
         $lines[] = "━━━━━━━━━━ 🛏️ ROOMS ━━━━━━━━━━";
@@ -436,16 +443,13 @@ $html .= '<tr><td colspan="2" style="padding:6px 12px;border-bottom:1px solid #e
 $html .= $section_head('Cash Collected');
 $html .= '<tr style="background:#F3ECE4;"><td style="padding:8px 12px;font-weight:700;border-bottom:1px solid #e5d9c9;">Payments received</td><td style="padding:8px 12px;text-align:right;font-weight:700;border-bottom:1px solid #e5d9c9;">' . _money($currency_symbol, $gross) . '</td></tr>';
 if ((float)$rev['refunds'] > 0) {
-    $html .= '<tr><td style="padding:8px 12px;border-bottom:1px solid #eee;color:#b91c1c;">Less: Refunds paid out</td><td style="padding:8px 12px;text-align:right;color:#b91c1c;border-bottom:1px solid #eee;">&minus;' . _money($currency_symbol, (float)$rev['refunds']) . '</td></tr>';
-    if ($refunds_to_credit > 0.004) {
-        $html .= $row('of which moved to credit notes (guest credit, no cash out)', _money($currency_symbol, $refunds_to_credit));
-    }
+    $html .= '<tr><td style="padding:8px 12px;border-bottom:1px solid #eee;color:#b91c1c;">Less: Refunds paid out' . $kpiHelp(rh_ship_m_help('refunds')) . '</td><td style="padding:8px 12px;text-align:right;color:#b91c1c;border-bottom:1px solid #eee;">&minus;' . _money($currency_symbol, (float)$rev['refunds']) . '</td></tr>';
 }
 $html .= '<tr style="background:#F3ECE4;"><td style="padding:8px 12px;font-weight:700;border-bottom:1px solid #e5d9c9;">CASH COLLECTED (NET)</td><td style="padding:8px 12px;text-align:right;font-weight:700;border-bottom:1px solid #e5d9c9;">' . _money($currency_symbol, $net) . '</td></tr>';
-if ($cn_redeemed > 0.004) {
-    $html .= $row('Credit notes redeemed (guest credit used, no new money)', _money($currency_symbol, $cn_redeemed));
+$html .= '<tr><td style="padding:8px 12px;border-bottom:1px solid #eee;color:#5e554d;">VAT in Cash Collected' . $kpiHelp(rh_ship_m_help('vat')) . '</td><td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right;">' . _money($currency_symbol, (float)$rev['total_vat']) . '</td></tr>';
+if ($vat_cn_info > $gc_tol) {
+    $html .= '<tr><td style="padding:8px 12px;border-bottom:1px solid #eee;color:#5e554d;">' . htmlspecialchars(rh_ship_m_help('vat_info_label')) . $kpiHelp(rh_ship_m_help('vat_info')) . '</td><td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right;">' . _money($currency_symbol, $vat_cn_info) . '</td></tr>';
 }
-$html .= $row('VAT in Cash Collected', _money($currency_symbol, (float)$rev['total_vat']));
 $html .= $row('Total Transactions', (string)(int)$rev['txn_count']);
 $html .= $row('Pending / Partial', _money($currency_symbol, (float)$rev['pending']));
 $html .= $row('Outstanding Folio', _money($currency_symbol, $outstanding));
@@ -453,6 +457,13 @@ if ($outstanding_accounts > 0) { $html .= $row('Outstanding Accounts', _money($c
 if ($outstanding_tabs > 0) { $html .= $row('Open Tabs (unpaid)', _money($currency_symbol, $outstanding_tabs)); }
 if ($outstanding_failed) { $html .= $row('Outstanding total', 'Unavailable'); }
 $html .= $row('Payment Capture Rate', number_format($payment_capture_rate, 1) . '%');
+if ($gc_show) {
+    // Guest credit (Ship M): credit notes the hotel holds for guests; not a refund, not revenue.
+    $html .= $section_head('Guest Credit');
+    foreach ($gc_lines as $gc) {
+        $html .= '<tr><td style="padding:8px 12px;border-bottom:1px solid #eee;color:#5e554d;">' . htmlspecialchars($gc['label']) . $kpiHelp($gc['help']) . '</td><td style="padding:8px 12px;border-bottom:1px solid #eee;text-align:right;">' . _money($currency_symbol, (float)$gc['amount']) . '</td></tr>';
+    }
+}
 
 if ($eodModBookings) {
     $html .= $section_head('Front Office Activity');

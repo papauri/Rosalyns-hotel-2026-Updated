@@ -237,16 +237,22 @@ function buildAccountingSummary(string $startDate, string $endDate): array
                 OR (payment_type = 'refund' AND " . rh_refund_eod_date_sql() . " BETWEEN :s2 AND :e2))";
     $periodParams = ['s' => $startDate, 'e' => $endDate, 's2' => $startDate, 'e2' => $endDate];
 
+    /* Ship M (owner 2026-11-18): credit-note rows are guest credit, not cash (rh_eod_cash_row_sql); a refund counts
+       only when money really went back to the guest (rh_refund_payout_sql); VAT is counted once (rh_vat_once_sql). */
+    require_once __DIR__ . '/../admin/includes/eod-revenue.php';
+    require_once __DIR__ . '/../admin/includes/guest-credit.php';
+    $cashRowSql = rh_eod_cash_row_sql();
+
     /* Revenue by booking_type from payments */
     $sumStmt = $pdo->prepare(
         "SELECT booking_type,
-                COUNT(CASE WHEN COALESCE(payment_type, '') <> 'refund' THEN 1 END) AS tx_count,
-                SUM(CASE WHEN payment_type = 'refund' THEN -total_amount ELSE total_amount END) AS gross,
-                SUM(CASE WHEN payment_type = 'refund' THEN -vat_amount ELSE vat_amount END) AS vat
+                COUNT(CASE WHEN COALESCE(payment_type, '') <> 'refund' AND " . $cashRowSql . " THEN 1 END) AS tx_count,
+                SUM(CASE WHEN NOT " . $cashRowSql . " THEN 0 WHEN payment_type = 'refund' THEN -total_amount ELSE total_amount END) AS gross,
+                SUM(" . rh_vat_once_sql() . ") AS vat
          FROM payments
          WHERE deleted_at IS NULL
            AND ((payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund')
-                OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
+                OR (payment_type = 'refund' AND " . rh_refund_payout_sql() . "))
            AND $inPeriod
          GROUP BY booking_type"
     );
@@ -270,8 +276,9 @@ function buildAccountingSummary(string $startDate, string $endDate): array
         "SELECT payment_method, COUNT(CASE WHEN COALESCE(payment_type, '') <> 'refund' THEN 1 END) AS tx_count, SUM(CASE WHEN payment_type = 'refund' THEN -total_amount ELSE total_amount END) AS gross
          FROM payments
          WHERE deleted_at IS NULL
+           AND " . $cashRowSql . "
            AND ((payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund')
-                OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
+                OR (payment_type = 'refund' AND " . rh_refund_payout_sql() . "))
            AND $inPeriod
          GROUP BY payment_method
          ORDER BY gross DESC"
@@ -286,6 +293,21 @@ function buildAccountingSummary(string $startDate, string $endDate): array
             $r['tx_count'], rh_money((float)$r['gross']),
         ]);
     }
+
+    fputcsv($fp, []);
+
+    /* Guest credit (Ship M): money held for guests on credit notes; not revenue, not a refund. */
+    $gcSummary = rh_guest_credit_summary($pdo, $startDate, $endDate);
+    fputcsv($fp, ['GUEST CREDIT (money held for guests on credit notes; not revenue, not a refund)']);
+    fputcsv($fp, ['Line', 'Amount', 'What it means']);
+    if (!empty($gcSummary['failed'])) {
+        fputcsv($fp, ['Guest credit', 'Unavailable', 'Could not be read; not the same as nothing owed.']);
+    } else {
+        foreach (rh_guest_credit_lines($gcSummary, true) as $gl) {
+            fputcsv($fp, [$gl['label'], rh_money((float)$gl['amount']), $gl['help']]);
+        }
+    }
+    fputcsv($fp, ['About the VAT figures above', '', rh_ship_m_help('vat')]);
 
     fputcsv($fp, []);
 

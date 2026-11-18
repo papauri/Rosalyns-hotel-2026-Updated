@@ -499,15 +499,26 @@ function buildEodPdf(
         $pdf->Cell(33, $ROW, $m($net), 0, 0, 'R', true);
         $yL += $ROW;
         $i = 0;
-        // Refunds moved into credit notes stay in the refunds total but are no cash out (F5): said apart.
-        if ((float)($d['refunds_to_credit'] ?? 0) > 0.004) {
-            $rowL('Refunds to credit notes (no cash)', $m((float)$d['refunds_to_credit']), false, $i++);
-        }
-        // Payments made with a credit note are not money received (B2): their own line.
-        if ((float)($d['credit_notes_redeemed'] ?? 0) > 0.004) {
-            $rowL('Credit notes redeemed (no new money)', $m((float)$d['credit_notes_redeemed']), false, $i++);
-        }
+        // VAT counted once (Ship M): VAT on money received less VAT on real refunds.
         $rowL('VAT in cash collected', $m((float)($rev['total_vat'] ?? 0)), false, $i++);
+        if ((float)($d['vat_credit_note_info'] ?? 0) > (defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01)) {
+            $rowL('Credit-note VAT (info only)', $m((float)$d['vat_credit_note_info']), false, $i++);
+        }
+        // Guest credit (Ship M): credit notes issued / used / still owed; not a refund, not revenue.
+        if (isset($d['guest_credit']) && is_array($d['guest_credit']) && function_exists('rh_guest_credit_lines')) {
+            $gcLines = rh_guest_credit_lines($d['guest_credit'], false);
+            $gcTol = defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01;
+            if ($gcLines && ((float)$d['guest_credit']['issued'] > $gcTol || abs((float)$d['guest_credit']['used']) > $gcTol || (float)$d['guest_credit']['closing'] > $gcTol)) {
+                foreach ($gcLines as $gc) {
+                    $rowL($gc['label'], $m((float)$gc['amount']), false, $i++);
+                }
+                $pdf->SetFont('helvetica', 'I', 6);
+                $pdf->SetTextColorArray($TEXT2);
+                $pdf->SetXY($LM, $yL);
+                $pdf->MultiCell($COL, 3.2, 'Refunds = money paid back to guests in cash, bank or mobile money. Guest credit = credit notes the hotel holds for guests: not a refund, not revenue.', 0, 'L', false, 1);
+                $yL = $pdf->GetY() + 1;
+            }
+        }
     } else {
     $secL('Revenue by Source');
     $i = 0;
@@ -550,6 +561,9 @@ function buildEodPdf(
     $i = 0;
 
     $rowL('VAT Collected', $m((float)($rev['total_vat'] ?? 0)), false, $i++);
+    if ((float)($d['vat_credit_note_info'] ?? 0) > (defined('BALANCE_TOLERANCE') ? (float)BALANCE_TOLERANCE : 0.01)) {
+        $rowL('Credit-note VAT (info only)', $m((float)$d['vat_credit_note_info']), false, $i++);
+    }
     }
     $rowL('Transactions',  (string)(int)($rev['txn_count'] ?? 0), false, $i++);
     if ((float)($rev['pending'] ?? 0) > 0) {

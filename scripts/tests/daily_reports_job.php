@@ -286,22 +286,25 @@ dr_check(substr_count($pst, 'COALESCE(p.refund_date_processed, p.updated_at, p.c
 // Accounting gate B2: payments made with a credit note are not money received.
 $rev = dr_src('admin/includes/eod-revenue.php');
 $crs = rh_eod_cash_row_sql();
-dr_check($crs === "NOT (COALESCE(payment_type, '') <> 'refund' AND COALESCE(payment_method, '') = 'credit_note')", 'B2: cash rows exclude credit-note payments, keep every refund row');
+dr_check($crs === "(COALESCE(payment_method, '') <> 'credit_note')", 'Ship M: cash rows exclude every credit-note row (payments made with a note and money moved onto one)');
 dr_check(strpos($data, "WHERE \" . rh_eod_pay_day_sql() . \" AND \" . rh_eod_cash_row_sql() . \" AND deleted_at IS NULL") !== false
-    && substr_count($data, 'rh_eod_cash_row_sql()') === 2 && strpos($data, "'credit_notes_redeemed' => \$creditNotesRedeemed") !== false, 'B2: shared builder (day + previous day) leaves them out and reports them apart');
+    && substr_count($data, 'rh_eod_cash_row_sql()') === 2 && strpos($data, "'guest_credit' => \$guestCredit") !== false
+    && strpos($data, '$rf = rh_refund_payout_sql();') !== false, 'Ship M: shared builder (day + previous day) leaves them out, refunds = real payouts, guest credit reported apart');
 dr_check(strpos($rev, "AND \" . rh_eod_cash_row_sql() . \"\n              AND deleted_at IS NULL\n            GROUP BY method") !== false, 'B2: payment mix leaves them out');
 dr_check(strpos($pst, "AND COALESCE(payment_method, '') <> 'credit_note' -- guest credit used") !== false, 'B2: F&B share of room payments ignores them');
 dr_check(strpos($page, "    . \" AND \" . rh_eod_cash_row_sql();") !== false && strpos($page, "AND \" . rh_eod_cash_row_sql() . \"\n          AND deleted_at IS NULL") !== false
-    && strpos($page, "Credit notes redeemed (guest credit used, no new money)") !== false, 'B2: page payments, previous day and trend leave them out; own line');
-dr_check(strpos($eodSend, "Credit notes redeemed (guest credit used, no new money)") === strpos($eodSend, "Credit notes redeemed (guest credit used, no new money)") && substr_count($eodSend, 'Credit notes redeemed (guest credit used, no new money)') === 2
-    && strpos(dr_src('includes/eod-pdf-builder.php'), "'Credit notes redeemed (no new money)'") !== false, 'B2: e-mail, WhatsApp and PDF show the line');
+    && strpos($page, '$gcLines = rh_guest_credit_lines($guest_credit, false);') !== false && strpos($page, 'Credit notes redeemed') === false, 'Ship M: page payments, previous day and trend leave them out; Guest credit lines');
+dr_check(strpos($eodSend, 'rh_guest_credit_lines($gc_summary, false)') !== false && strpos($eodSend, 'Credit notes redeemed') === false
+    && strpos(dr_src('includes/eod-pdf-builder.php'), 'rh_guest_credit_lines($d[\'guest_credit\'], false)') !== false && strpos(dr_src('includes/eod-pdf-builder.php'), 'Credit notes redeemed') === false, 'Ship M: e-mail, WhatsApp and PDF show the Guest credit lines');
+$gcl = array_column(rh_guest_credit_lines(['issued' => 350, 'issued_count' => 2, 'used' => 0, 'voided' => 0, 'expired' => 0, 'closing' => 350, 'opening' => 0], false), 'label');
+dr_check($gcl === ['Guest credit issued', 'Guest credit used', 'Guest credit still owed'], 'Ship M: day lines = issued, used, still owed (no opening, no zero voided / expired)', $gcl);
 dr_check(strpos($rev, 'function rh_eod_earned_revenue(') !== false && strpos(substr($rev, (int)strpos($rev, 'function rh_eod_earned_revenue('), 9000), 'rh_eod_cash_row_sql') === false, 'B2: earned revenue unchanged');
 dr_check(strpos($page, "error_log('EOD day in brief (page): '") !== false && strpos($eodSend, "error_log('EOD day in brief (send): '") !== false
     && strpos($send, "error_log('EOD day in brief (timed): '") !== false, 'AI brief / mount wrapped: an error prints nothing and is logged');
 dr_check(substr_count(rh_eod_pay_day_sql(), '?') === 2 && strpos(rh_eod_pay_day_sql(), rh_refund_eod_date_sql()) !== false, 'F4: one day condition (2 params) for money in and refunds out');
 $rev = dr_src('admin/includes/eod-revenue.php');
-dr_check(strpos($rev, "AND COALESCE(payment_method,'') <> 'credit_note'") !== false && strpos($rev, 'function rh_eod_refunds_to_credit(') !== false
-    && strpos($rev, 'rh_refund_to_credit_sum_sql()') !== false, 'F5: credit-note refunds stay out of the non-cash mix and are shown apart');
+dr_check(strpos($rev, "AND COALESCE(payment_method,'') <> 'credit_note'") !== false && strpos($rev, 'function rh_eod_refunds_to_credit(') === false
+    && strpos($rev, 'function rh_eod_credit_notes_redeemed(') === false, 'Ship M (supersedes F5): credit-note refunds stay out of the non-cash mix; the old to-credit / redeemed helpers are gone (Guest credit instead)');
 $rb = dr_src('includes/report-builders.php');
 dr_check(strpos($rb, '$owedRows = rh_receivable_rows($pdo, rh_receivable_mods(), $owedFailed);') !== false && strpos($rb, "b.amount_due > 0\n") === false
     && strpos($rb, "WHERE b.deleted_at IS NULL\n              AND ((DATE(b.created_at)") !== false && strpos($rb, 'rh_refund_eod_date_sql()') !== false,

@@ -320,3 +320,71 @@ if (!function_exists('rh_pay_row_pill_tone')) {
         return $map[strtolower(trim($badgeOrTone))] ?? 'muted';
     }
 }
+
+if (!function_exists('rh_refund_payout_sql')) {
+    /**
+     * Ship M (owner 2026-11-18): a REAL PAYOUT is a paid-out refund (completed / processing) whose money went back to
+     * the guest in cash, bank or mobile money. Money moved onto a credit note (an overpayment or store credit moved
+     * into a note, or a credit-note payment put back on its note) is guest credit, not a refund: every
+     * payment_method 'credit_note' row is left out. Used by End of Day, Reports and the report exports.
+     * Balances keep rh_refund_settled_sql (a booking's net paid still deducts the overpayment held as credit).
+     * Returns a parenthesised SQL condition.
+     */
+    function rh_refund_payout_sql(string $alias = ''): string
+    {
+        $a = rh_refund_alias($alias);
+        return '(' . rh_refund_settled_sql($alias) . " AND COALESCE({$a}payment_method, '') <> 'credit_note')";
+    }
+
+    /** SQL aggregate: real payouts (rh_refund_payout_sql), gross, positive. */
+    function rh_refund_payout_sum_sql(string $alias = ''): string
+    {
+        return 'COALESCE(SUM(CASE WHEN ' . rh_refund_payout_sql($alias) . ' THEN ' . rh_refund_amount_sql($alias) . ' ELSE 0 END), 0)';
+    }
+
+    /** SQL aggregate: how many real payouts. */
+    function rh_refund_payout_count_sql(string $alias = ''): string
+    {
+        return 'COALESCE(SUM(CASE WHEN ' . rh_refund_payout_sql($alias) . ' THEN 1 ELSE 0 END), 0)';
+    }
+
+    /**
+     * SQL expression (one row's part of VAT Collected; wrap in SUM): VAT counted once, when the guest first paid
+     * (Ship M). + the VAT on money received (non-refund rows in completed / paid / refunded / partially_refunded, not
+     * paid WITH a credit note; a NULL method keeps its VAT), - the VAT on real payouts. VAT inside credit-note rows
+     * is never in it (it was counted when the money first came in).
+     */
+    function rh_vat_once_sql(string $alias = ''): string
+    {
+        $a = rh_refund_alias($alias);
+        return "(CASE WHEN COALESCE({$a}payment_type, '') <> 'refund'"
+            . " AND {$a}payment_status IN ('completed','paid','refunded','partially_refunded')"
+            . " AND COALESCE({$a}payment_method, '') <> 'credit_note' THEN {$a}vat_amount"
+            . ' WHEN ' . rh_refund_payout_sql($alias) . " THEN -{$a}vat_amount ELSE 0 END)";
+    }
+
+    /**
+     * SQL expression (wrap in SUM): the VAT inside payments made WITH a credit note (information only; already
+     * counted when the guest first paid, never in VAT Collected). Redemptions only; the VAT on money moved onto a
+     * note is not shown anywhere.
+     */
+    function rh_vat_credit_note_info_sql(string $alias = ''): string
+    {
+        $a = rh_refund_alias($alias);
+        return "(CASE WHEN COALESCE({$a}payment_type, '') <> 'refund'"
+            . " AND {$a}payment_status IN ('completed','paid','refunded','partially_refunded')"
+            . " AND COALESCE({$a}payment_method, '') = 'credit_note' THEN {$a}vat_amount ELSE 0 END)";
+    }
+
+    /** The plain helper texts Ship M uses on every screen (one source). */
+    function rh_ship_m_help(string $key): string
+    {
+        $t = [
+            'refunds' => 'Money paid back to guests in cash, bank or mobile money. Moving money onto a credit note is guest credit, not a refund.',
+            'vat' => 'VAT on money received, less VAT on real refunds. Counted once, when the guest first paid.',
+            'vat_info_label' => 'VAT inside credit-note payments (information only)',
+            'vat_info' => 'Already counted when the guest first paid; not in VAT Collected.',
+        ];
+        return $t[$key] ?? '';
+    }
+}

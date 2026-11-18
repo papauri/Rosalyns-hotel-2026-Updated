@@ -34,7 +34,8 @@ require_once __DIR__ . '/../config/database.php';
 require_once __DIR__ . '/../includes/licence-guard.php'; rh_licence_guard_request(); // licence: read-only / locked; does nothing unless this build is licensed
 require_once __DIR__ . '/../admin/includes/finance-schema.php';
 require_once __DIR__ . '/../admin/includes/finance-refunds.php'; // rh_pay_count_day_sql: a refund counts on its payout day
-require_once __DIR__ . '/../admin/includes/eod-revenue.php'; // rh_eod_cash_row_sql: a credit-note payment is not money received
+require_once __DIR__ . '/../admin/includes/eod-revenue.php'; // rh_eod_cash_row_sql: a credit-note row is not money in or out
+require_once __DIR__ . '/../admin/includes/guest-credit.php'; // Ship M: guest credit lines (not refunds, not revenue)
 require_once __DIR__ . '/../admin/includes/reports-status-mix.php'; // the Reports page's status-mix lines, reused for the CSV
 require_once __DIR__ . '/../includes/conference-pricing.php';
 require_once __DIR__ . '/../admin/includes/permissions.php';
@@ -156,20 +157,19 @@ function exportOverviewReport($output, string $start_date, string $end_date, str
     // Summary Statistics
     fputcsv($output, ['SUMMARY STATISTICS']);
 
-    // Money received follows the End of Day cash rule (rh_eod_cash_row_sql), as the Reports page: a payment made WITH a
-    // credit note is guest credit used, not new money, so it is left out of the transactions and revenue (it has its
-    // own "Paid from credit note" status line below). VAT stays as recorded, as the page's VAT Collected.
+    // Money received follows the End of Day cash rule (rh_eod_cash_row_sql), as the Reports page. Ship M (owner
+    // 2026-11-18): every credit-note row leaves the cash view. A payment made WITH a credit note is guest credit used
+    // (it has its own "Paid from credit note" status line below); money moved onto a credit note is guest credit
+    // issued, not a refund. Only real payouts are taken off. VAT is counted once (rh_vat_once_sql), as VAT Collected.
     $cashRow = rh_eod_cash_row_sql();
     $summaryQuery = "
         SELECT
             COUNT(CASE WHEN COALESCE(payment_type, '') != 'refund' AND {$cashRow} THEN 1 END) as total_transactions,
-            SUM(CASE WHEN COALESCE(payment_type, '') = 'refund' THEN -total_amount WHEN {$cashRow} THEN total_amount ELSE 0 END) as total_revenue,
-            SUM(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END)
-                - COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END), 0)
-                as total_vat
+            SUM(CASE WHEN NOT {$cashRow} THEN 0 WHEN COALESCE(payment_type, '') = 'refund' THEN -total_amount ELSE total_amount END) as total_revenue,
+            COALESCE(SUM(" . rh_vat_once_sql() . "), 0) as total_vat
         FROM payments
         WHERE (payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund'
-               OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
+               OR (payment_type = 'refund' AND " . rh_refund_payout_sql() . "))
         AND deleted_at IS NULL
         $date_filter
     ";
@@ -222,6 +222,9 @@ function exportOverviewReport($output, string $start_date, string $end_date, str
             ];
             continue;
         }
+        if ($row['payment_method'] === 'credit_note') {
+            continue; // Ship M: money moved onto (or put back on) a credit note is guest credit, not a refund (GUEST CREDIT below)
+        }
         $label = rh_pay_row_state([
             'payment_type' => 'refund',
             'payment_status' => (string)$row['payment_status'],
@@ -255,6 +258,19 @@ function exportOverviewReport($output, string $start_date, string $end_date, str
     }
     fputcsv($output, []);
 
+    // Guest credit (Ship M, owner 2026-11-18): money held for guests on credit notes; the same lines as the Reports page
+    // and End of Day (admin/includes/guest-credit.php). Not a refund, not revenue. Unreadable -> "Unavailable", never 0.
+    fputcsv($output, ['GUEST CREDIT (not refunds, not revenue)']);
+    fputcsv($output, ['Line', 'Amount', 'What it means']);
+    $guestCreditLines = rh_guest_credit_lines(rh_guest_credit_summary($pdo, $start_date, $end_date), true);
+    if (!$guestCreditLines) {
+        fputcsv($output, ['Guest credit', 'Unavailable', 'Could not be read; try again.']);
+    }
+    foreach ($guestCreditLines as $gcLine) {
+        fputcsv($output, [$gcLine['label'], $currency_symbol . ' ' . number_format((float)$gcLine['amount'], 2), $gcLine['help']]);
+    }
+    fputcsv($output, []);
+
     // Revenue by Booking Type
     fputcsv($output, ['REVENUE BY BOOKING TYPE']);
     fputcsv($output, ['Booking Type', 'Transactions', 'Revenue', 'VAT Amount']);
@@ -263,11 +279,11 @@ function exportOverviewReport($output, string $start_date, string $end_date, str
         SELECT
             booking_type,
             COUNT(CASE WHEN COALESCE(payment_type, '') != 'refund' AND {$cashRow} THEN 1 END) as count,
-            SUM(CASE WHEN COALESCE(payment_type, '') = 'refund' THEN -total_amount WHEN {$cashRow} THEN total_amount ELSE 0 END) as total_revenue,
-            SUM(CASE WHEN COALESCE(payment_type, '') = 'refund' THEN -vat_amount ELSE vat_amount END) as total_vat
+            SUM(CASE WHEN NOT {$cashRow} THEN 0 WHEN COALESCE(payment_type, '') = 'refund' THEN -total_amount ELSE total_amount END) as total_revenue,
+            COALESCE(SUM(" . rh_vat_once_sql() . "), 0) as total_vat
         FROM payments
         WHERE (payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund'
-               OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
+               OR (payment_type = 'refund' AND " . rh_refund_payout_sql() . "))
         AND deleted_at IS NULL
         $date_filter
         GROUP BY booking_type
@@ -336,17 +352,18 @@ function exportRevenueReport($output, string $start_date, string $end_date, stri
     fputcsv($output, ['DAILY REVENUE']);
     fputcsv($output, ['Date', 'Transactions', 'Revenue', 'VAT Amount']);
 
+    // Ship M (owner 2026-11-18): the cash-row rule (credit-note rows are guest credit, not money in or out), real
+    // payouts only, VAT counted once, as the overview and the Reports page.
+    $cashRow = rh_eod_cash_row_sql();
     $dailyQuery = "
         SELECT
             " . rh_pay_count_day_sql() . " as date,
-            COUNT(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN 1 END) as transaction_count,
-            SUM(CASE WHEN COALESCE(payment_type, '') = 'refund' THEN -total_amount ELSE total_amount END) as daily_revenue,
-            SUM(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END)
-                - COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END), 0)
-                as daily_vat
+            COUNT(CASE WHEN COALESCE(payment_type, '') != 'refund' AND {$cashRow} THEN 1 END) as transaction_count,
+            SUM(CASE WHEN NOT {$cashRow} THEN 0 WHEN COALESCE(payment_type, '') = 'refund' THEN -total_amount ELSE total_amount END) as daily_revenue,
+            COALESCE(SUM(" . rh_vat_once_sql() . "), 0) as daily_vat
         FROM payments
         WHERE (payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund'
-               OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
+               OR (payment_type = 'refund' AND " . rh_refund_payout_sql() . "))
         AND deleted_at IS NULL
         $date_filter
         GROUP BY date
@@ -382,7 +399,7 @@ function exportRevenueReport($output, string $start_date, string $end_date, stri
         LEFT JOIN bookings b ON p.booking_type = 'room' AND p.booking_id = b.id
         LEFT JOIN conference_inquiries ci ON p.booking_type = 'conference' AND p.booking_id = ci.id
         WHERE (p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(p.payment_type, '') != 'refund'
-               OR (p.payment_type = 'refund' AND p.refund_status IN ('completed','processing')))
+               OR (p.payment_type = 'refund' AND " . rh_refund_payout_sql('p') . ")) -- real payouts only (Ship M)
         AND p.deleted_at IS NULL
         AND " . rh_pay_count_day_sql('p') . " >= ? AND " . rh_pay_count_day_sql('p') . " <= ?
         GROUP BY client_name, p.booking_type
@@ -504,17 +521,19 @@ function exportVATReport($output, string $start_date, string $end_date, string $
     fputcsv($output, ['DAILY VAT COLLECTION']);
     fputcsv($output, ['Date', 'Transactions', 'VAT Collected', 'Total Revenue']);
 
+    // Ship M (owner 2026-11-18): VAT counted once, when the guest first paid (rh_vat_once_sql); the VAT inside
+    // credit-note payments is information only (TOTALS). Revenue: the cash-row rule and real payouts only.
+    $cashRow = rh_eod_cash_row_sql();
     $dailyQuery = "
         SELECT
             " . rh_pay_count_day_sql() . " as date,
-            COUNT(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN 1 END) as transaction_count,
-            SUM(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END)
-                - COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END), 0)
-                as vat_collected,
-            SUM(CASE WHEN COALESCE(payment_type, '') = 'refund' THEN -total_amount ELSE total_amount END) as total_revenue
+            COUNT(CASE WHEN COALESCE(payment_type, '') != 'refund' AND {$cashRow} THEN 1 END) as transaction_count,
+            COALESCE(SUM(" . rh_vat_once_sql() . "), 0) as vat_collected,
+            COALESCE(SUM(" . rh_vat_credit_note_info_sql() . "), 0) as vat_credit_note_info,
+            SUM(CASE WHEN NOT {$cashRow} THEN 0 WHEN COALESCE(payment_type, '') = 'refund' THEN -total_amount ELSE total_amount END) as total_revenue
         FROM payments
         WHERE (payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund'
-               OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
+               OR (payment_type = 'refund' AND " . rh_refund_payout_sql() . "))
         AND deleted_at IS NULL
         $date_filter
         GROUP BY date
@@ -525,6 +544,7 @@ function exportVATReport($output, string $start_date, string $end_date, string $
 
     $totalVat = 0;
     $totalRevenue = 0;
+    $totalVatInfo = 0.0;
 
     while ($row = $dailyStmt->fetch(PDO::FETCH_ASSOC)) {
         fputcsv($output, [
@@ -536,12 +556,14 @@ function exportVATReport($output, string $start_date, string $end_date, string $
 
         $totalVat += $row['vat_collected'];
         $totalRevenue += $row['total_revenue'];
+        $totalVatInfo += (float)$row['vat_credit_note_info'];
     }
 
     fputcsv($output, []);
     fputcsv($output, ['TOTALS']);
-    fputcsv($output, ['Total VAT Collected:', $currency_symbol . ' ' . number_format($totalVat, 2)]);
+    fputcsv($output, ['Total VAT Collected:', $currency_symbol . ' ' . number_format($totalVat, 2), rh_ship_m_help('vat')]);
     fputcsv($output, ['Total Revenue:', $currency_symbol . ' ' . number_format($totalRevenue, 2)]);
+    fputcsv($output, [rh_ship_m_help('vat_info_label') . ':', $currency_symbol . ' ' . number_format($totalVatInfo, 2), rh_ship_m_help('vat_info')]);
     fputcsv($output, []);
 
     // VAT by Booking Type
@@ -551,14 +573,12 @@ function exportVATReport($output, string $start_date, string $end_date, string $
     $typeQuery = "
         SELECT
             booking_type,
-            COUNT(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN 1 END) as count,
-            SUM(CASE WHEN COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END)
-                - COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END), 0)
-                as vat_collected,
-            SUM(CASE WHEN COALESCE(payment_type, '') = 'refund' THEN -total_amount ELSE total_amount END) as total_revenue
+            COUNT(CASE WHEN COALESCE(payment_type, '') != 'refund' AND {$cashRow} THEN 1 END) as count,
+            COALESCE(SUM(" . rh_vat_once_sql() . "), 0) as vat_collected,
+            SUM(CASE WHEN NOT {$cashRow} THEN 0 WHEN COALESCE(payment_type, '') = 'refund' THEN -total_amount ELSE total_amount END) as total_revenue
         FROM payments
         WHERE (payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund'
-               OR (payment_type = 'refund' AND refund_status IN ('completed','processing')))
+               OR (payment_type = 'refund' AND " . rh_refund_payout_sql() . "))
         AND deleted_at IS NULL
         $date_filter
         GROUP BY booking_type
@@ -952,7 +972,7 @@ function exportVoidsReport($output, string $start_date, string $end_date, string
     rpx_section($output, 'POS REFUNDS', ['When', 'Reference', 'Amount', 'Reason'],
         "SELECT payment_reference, ABS(total_amount) AS amount, refund_reason, created_at AS refunded_at FROM payments
          WHERE booking_type='restaurant' AND payment_type='refund' AND deleted_at IS NULL
-           AND COALESCE(refund_status,'completed') IN ('completed','processing') AND created_at BETWEEN ? AND ?
+           AND COALESCE(refund_status,'completed') IN ('completed','processing') AND COALESCE(payment_method,'') <> 'credit_note' AND created_at BETWEEN ? AND ?
          ORDER BY created_at DESC LIMIT 100", $p,
         function ($r) use ($cs) { return [$r['refunded_at'], $r['payment_reference'], $cs . ' ' . number_format((float)$r['amount'], 2), $r['refund_reason']]; });
 }

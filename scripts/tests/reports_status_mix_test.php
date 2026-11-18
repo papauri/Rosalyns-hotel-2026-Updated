@@ -62,6 +62,7 @@ $sqlDaily = $grab($rep, '/\$dailyRevenueStmt = \$pdo->prepare\((".*?")\);/s');
 $sqlPrior = $grab($rep, '/\$priorRevStmt = \$pdo->prepare\((".*?")\);/s');
 $sqlMonthly = $grab($rep, '/\$monthlyRevenueStmt = \$pdo->prepare\((".*?")\);/s');
 $sqlVatDay = $grab($rep, '/\$vatCollectedStmt = \$pdo->prepare\((".*?")\);/s');
+$sqlRefReasons = $grab($rep, '/\$refundReasonStmt = \$pdo->prepare\((".*?")\);/s');
 foreach (['revenue by type (Gross Revenue)' => $sqlRevType, 'payment methods' => $sqlMethods, 'daily trend' => $sqlDaily, 'prior period' => $sqlPrior, 'monthly' => $sqlMonthly, 'VAT collection revenue' => $sqlVatDay] as $n => $s) {
     check($s !== '' && strpos($s, '{$rhCashRow}') !== false, "Reports $n leaves credit-note payments out (cash-row rule)");
 }
@@ -132,16 +133,20 @@ if (stripos((string)getSetting('site_name', ''), 'liwonde') === false && stripos
             foreach ($run($sqlRevType, [$D1, $D1]) as $r) { $gross += (float)$r['total_revenue']; $txns += (int)$r['count']; }
             check(near($gross, 350) && $txns === 3, 'Gross Revenue = 350 (100 + 200 + 50), the 70 paid from a credit note left out', "$gross / $txns");
             check(near($gross, $pm['received_total']), 'Gross Revenue = the mix\'s three Received lines');
-            // Net Revenue VAT: only the VAT on payments Gross counts (35) less refund VAT (2) = 33; the 7 on the credit-note payment stays out
-            $vAll = 0.0; $vCounted = 0.0;
-            foreach ($run($sqlRevType, [$D1, $D1]) as $r) { $vAll += (float)$r['total_vat']; $vCounted += (float)$r['total_vat_counted']; }
-            check(near($vAll, 40) && near($vCounted, 33) && near($vAll - $vCounted, 7), 'VAT: collected 40 = counted 33 + credit-note 7', json_encode([$vAll, $vCounted]));
-            check(near($gross - $vCounted, 317), 'Net Revenue (before refunds) = 350 - 33, not 350 - 40');
+            // Ship M (owner 2026-11-18): VAT counted once. VAT on money received (35); the 2 inside the 20 moved INTO a credit
+            // note is not a refund, and the 7 inside the credit-note payment is information only. Collected = counted = 35.
+            $vAll = 0.0; $vCounted = 0.0; $vInfo = 0.0;
+            foreach ($run($sqlRevType, [$D1, $D1]) as $r) { $vAll += (float)$r['total_vat']; $vCounted += (float)$r['total_vat_counted']; $vInfo += (float)$r['total_vat_credit_note']; }
+            check(near($vAll, 35) && near($vCounted, 35) && near($vInfo, 7), 'VAT once: collected 35 = counted 35; credit-note VAT 7 is information only', json_encode([$vAll, $vCounted, $vInfo]));
+            check(near($gross - $vCounted, 315), 'Net Revenue (before refunds) = 350 - 35');
+            $rr = 0.0;
+            foreach ($run($sqlRefReasons, [$D1, $D1]) as $r) { $rr += (float)$r['total_amount']; }
+            check(near($rr, 0), 'Total Refunds = 0: the 20 moved into a credit note is guest credit, not a refund', (string)$rr);
             $vd = $run($sqlVatDay, [$D1, $D1]);
             $vdC = array_sum(array_map('floatval', array_column($vd, 'vat_counted')));
             $vdN = array_sum(array_map('floatval', array_column($vd, 'vat_credit_note')));
             $vdR = array_sum(array_map('floatval', array_column($vd, 'total_revenue')));
-            check(near($vdC, 33) && near($vdN, 7) && near($vdR, 350), 'VAT Collection rows: counted 33 beside revenue 350, credit-note VAT 7 apart', json_encode([$vdC, $vdN, $vdR]));
+            check(near($vdC, 35) && near($vdN, 7) && near($vdR, 350), 'VAT Collection rows: counted 35 beside revenue 350, credit-note VAT 7 information only', json_encode([$vdC, $vdN, $vdR]));
             // Export method breakdown: no credit-note line (neither the payment nor the refund moved into a credit note)
             $em = $run($sqlExpMethods, [$D1, $D1]);
             $emT = 0.0; $emCn = false;
@@ -155,7 +160,7 @@ if (stripos((string)getSetting('site_name', ''), 'liwonde') === false && stripos
             $pr = $run($sqlPrior, [$D1, $D1])[0] ?? [];
             check(near((float)($pr['revenue'] ?? 0), 350), 'prior-period figure uses the same rule');
             $mo = array_sum(array_map('floatval', array_column($run($sqlMonthly, [$D1, $D1]), 'monthly_revenue')));
-            check(near($mo, 330), 'monthly net = 350 received - 20 refunded into a credit note (End of Day rule)', (string)$mo);
+            check(near($mo, 350), 'monthly net = 350: the 20 moved into a credit note is not taken off (Ship M)', (string)$mo);
             // Export status breakdown: only the period's rows
             $ex = $run($sqlExpStatus, [$D1, $D1]);
             $exPayCount = 0; $exPayTotal = 0.0;
