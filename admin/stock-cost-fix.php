@@ -164,6 +164,17 @@ $scf_fmtQty = function ($q): string {
     return $s === '-0' ? '0' : $s;
 };
 $scf_cur = htmlspecialchars($currency_symbol);
+// ?item=<id> (Menu Management's "Fix crate prices" link): the page opens filtered to that stock item.
+$scf_focusName = '';
+$scf_focusId = isset($_GET['item']) ? (int)$_GET['item'] : 0;
+if ($scf_focusId > 0) {
+    foreach ($scf_items as $it) {
+        if ((int)$it['id'] === $scf_focusId) {
+            $scf_focusName = (string)$it['name'];
+            break;
+        }
+    }
+}
 
 // Figure cards for the default filter (bottle + can); the page script keeps them in step with the filters.
 $scf_listed = 0;
@@ -625,6 +636,13 @@ $csrf_token = generateCsrfToken();
         [search, cat, unit, flagOnly].forEach(function (el) {
             if (el) el.addEventListener(el === search ? 'input' : 'change', applyFilter);
         });
+        // Opened from Menu Management for one stock item: list just that item, whatever its unit.
+        var focusName = <?php echo json_encode($scf_focusName, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+        if (focusName && search) {
+            search.value = focusName;
+            if (unit) unit.value = '';
+            applyFilter();
+        }
         if (table) {
             table.addEventListener('input', function (e) {
                 if (!e.target.classList.contains('scf-n')) return;

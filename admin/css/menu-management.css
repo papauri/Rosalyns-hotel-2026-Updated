@@ -1016,6 +1016,38 @@ tr.drag-over > td {
     font-size: 13px;
 }
 
+/* One sale's stock cost is above the selling price: the line in the item form, the badge on the row */
+.mm-cost-warn {
+    margin: 8px 0 0;
+    padding: 8px 12px;
+    border: 1px solid rgba(198, 40, 40, 0.3);
+    border-left: 4px solid var(--mm-danger);
+    border-radius: var(--mm-radius);
+    background: var(--mm-bg-soft);
+    color: var(--mm-text);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.mm-cost-warn-link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+    color: var(--mm-accent-dark);
+    font-weight: 600;
+    text-decoration: underline;
+}
+
+.mm-cost-flag {
+    display: block;
+    margin-top: 3px;
+}
+
+.mm-cost-flag .mm-tag {
+    margin-bottom: 0;
+    white-space: normal;
+}
+
 /* ============================================================
    Phones: each row becomes a card, the form fills the screen
    ============================================================ */

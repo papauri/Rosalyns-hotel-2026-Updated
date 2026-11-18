@@ -44,6 +44,26 @@ check(rh_recipe_preview_text('Sausages', 'each', 'Pack', 10.0, 10.0) === 'Each s
 check(rh_recipe_preview_text('Rice', 'kg', null, null, 0.15) === 'Each sale uses 0.15 kg of Rice.', 'Preview sentence: no pack, decimal weight');
 check(rh_recipe_preview_text('Beer', 'bottle', 'Crate', 24.0, 0.5) === 'Each sale uses 0.5 bottles of Beer. 1 crate (24 bottles) lasts 48 sales.', 'Preview sentence: crate serves 48');
 
+/* ---- 1b. Stock cost of one sale against the selling price (the warning in the item form and on the row) ---- */
+$tol = (float)BALANCE_TOLERANCE;
+$ln = static fn(int $ing, float $qty, float $cost, ?float $yield = null): array => ['ingredient_id' => $ing, 'quantity_per_portion' => $qty, 'cost_per_unit' => $cost] + ($yield === null ? [] : ['yield_percent' => $yield]);
+$c = rh_menu_cost_check([$ln(7, 1, 41322)], 3000.0);
+check($c['over'] === true && near($c['cost'], 41322.0) && $c['top_ingredient_id'] === 7, 'Over the price: 1 x 41,322 against 3,000 is flagged, and names the stock item to check');
+$c = rh_menu_cost_check([$ln(7, 1, 1500)], 3000.0);
+check($c['over'] === false && near($c['cost'], 1500.0), 'Under the price: 1 x 1,500 against 3,000 is not flagged');
+$c = rh_menu_cost_check([], 3000.0);
+check($c['over'] === false && near($c['cost'], 0.0) && $c['top_ingredient_id'] === 0, 'No stock links: cost 0, not flagged');
+$c = rh_menu_cost_check([$ln(3, 2, 500), $ln(9, 0.5, 9000), $ln(4, 1, 100)], 5000.0);
+check($c['over'] === true && near($c['cost'], 5600.0) && $c['top_ingredient_id'] === 9, 'Several links add up (1,000 + 4,500 + 100 = 5,600 over 5,000); the dearest one is named');
+$c = rh_menu_cost_check([$ln(5, 0.15, 2000, 50.0)], 500.0);
+check($c['over'] === true && near($c['cost'], 600.0), 'Yield counts: 0.150 kg at 2,000 with 50% yield costs 600, over a 500 price');
+check(rh_menu_cost_check([$ln(5, 0.15, 2000, 0.0)], 500.0)['over'] === false, 'A yield of 0 means no loss: 300 against 500 is not flagged');
+check(rh_menu_cost_over_price(3000.0, 3000.0) === false, 'Tolerance edge: cost equal to the price is not flagged');
+check(rh_menu_cost_over_price(3000.0 + $tol / 2, 3000.0) === false, 'Tolerance edge: cost half a tolerance step (' . ($tol / 2) . ') over the price is not flagged');
+check(rh_menu_cost_over_price(3000.0 + $tol * 2, 3000.0) === true, 'Tolerance edge: cost two tolerance steps over the price is flagged');
+check(rh_menu_cost_over_price(2999.99, 3000.0) === false, 'Tolerance edge: cost just under the price is not flagged');
+check(rh_menu_cost_over_price(500.0, 0.0) === false && rh_menu_cost_check([$ln(7, 1, 500)], 0.0)['over'] === false, 'A free item (price 0) is never flagged');
+
 /* ---- 2. Database behaviour, one rolled-back transaction ---- */
 if (!ensureStockTablesExist()) { bad('Stock tables exist'); echo "\n$pass passed, $fail failed\n"; exit(1); }
 $adminId = (int)col($pdo, "SELECT id FROM admin_users WHERE is_active = 1 ORDER BY id LIMIT 1");
@@ -102,6 +122,8 @@ try {
     $after = (float)col($pdo, "SELECT current_quantity FROM stock_ingredients WHERE id = ?", [$sausage]);
     check($okSale && $near($before - $after, 3.0), 'A sale of 3 takes 3 each off the shelf, not 3 packs', "before=$before after=$after");
     check($near(rh_menu_recipe_cost($pdo, $pos['id'], $pos['slug']), 1500.0), 'Cost per item = 1 each x 1,500 = 1,500');
+    $cc = rh_menu_cost_check(rh_menu_recipe_lines($pdo, $pos['id'], $pos['slug']), 1700.0);
+    check($cc['over'] === false && $near($cc['cost'], 1500.0), 'Saved link, 1 each (1,500) against a 1,700 price: not flagged');
     $snap = $pdo->prepare("SELECT MIN(FLOOR(GREATEST(0, i.current_quantity) / (sri.quantity_per_portion / $yieldSql))) FROM stock_recipes sr INNER JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id INNER JOIN stock_ingredients i ON i.id = sri.ingredient_id WHERE sr.menu_item_id = ? AND sr.menu_type = ? AND sri.quantity_per_portion > 0");
     $snap->execute([$pos['id'], $pos['slug']]);
     check((int)$snap->fetchColumn() === 97, 'Portions left (till stock figure) counts each, not packs: 97 left', (string)$snap->fetchColumn());
@@ -114,6 +136,9 @@ try {
     $after = (float)col($pdo, "SELECT current_quantity FROM stock_ingredients WHERE id = ?", [$sausage]);
     check($near($before - $after, 20.0), 'A sale of 2 with a Pack line takes 20 each', "before=$before after=$after");
     check($near(rh_menu_recipe_cost($pdo, $pos['id'], $pos['slug']), 15000.0), 'Cost per item with a Pack line = 10 x 1,500 = 15,000');
+    $cc = rh_menu_cost_check(rh_menu_recipe_lines($pdo, $pos['id'], $pos['slug']), 1700.0);
+    check($cc['over'] === true && $near($cc['cost'], 15000.0) && $cc['top_ingredient_id'] === $sausage, 'Saved link, a whole Pack (15,000) against a 1,700 price: flagged, and points at the stock item');
+    check($near($cc['cost'], rh_menu_recipe_cost($pdo, $pos['id'], $pos['slug'])), 'The warning uses the same cost figure as rh_menu_recipe_cost()');
 
     // Decimals and yield; a line that omits yield keeps the one the stock team set.
     $res = rh_menu_recipe_save($pdo, $pos['id'], $pos['slug'], null, null, [['ingredient_id' => $rice, 'quantity' => 0.150, 'unit' => 'base', 'yield_percent' => 50]], $adminId);

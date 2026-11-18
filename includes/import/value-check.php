@@ -207,16 +207,24 @@ if (!function_exists('import_vc_collect')) {
         $pack = [];
         $perUnit = [];         // case-price questions answered "one unit": the row's own pack (pack-rule) is not divided in
         $packAt = [];           // sheet + row => pack: a case-price question added at resolve time (case-signals.php) is not in the collected ids
+        $perUnitAt = [];        // sheet + row => true: the same for "one unit" (a divided price asked about at resolve time, A83)
         foreach ($questions as $q) {
             if (($q['type'] ?? '') === 'case-price' && ($q['answer'] ?? null) === 'per-unit') {
                 $perUnit[$q['id']] = true;
+                if (isset($q['sheet'], $q['row'])) {
+                    foreach ((array)($q['group_rows'] ?? [$q['row']]) as $gr) {     // one question asked for several rows covers each (resolve.php, A83)
+                        $perUnitAt[(string)$q['sheet'] . "\x1f" . (int)$gr] = true;
+                    }
+                }
             }
             if (($q['type'] ?? '') === 'case-price' && ($q['answer'] ?? null) === 'per-case') {
                 $p = (int)($q['answer_detail']['pack_size'] ?? 0);
                 if ($p >= 2) {
                     $pack[$q['id']] = $p;
                     if (isset($q['sheet'], $q['row'])) {
-                        $packAt[(string)$q['sheet'] . "\x1f" . (int)$q['row']] = $p;
+                        foreach ((array)($q['group_rows'] ?? [$q['row']]) as $gr) {
+                            $packAt[(string)$q['sheet'] . "\x1f" . (int)$gr] = $p;
+                        }
                     }
                 }
             }
@@ -232,7 +240,7 @@ if (!function_exists('import_vc_collect')) {
             $valOf = function (array $r, string $letter) {
                 return is_array($r[8]) ? ($r[8][$letter] ?? null) : $r[8];
             };
-            $packed = function (array $r) use ($pack, $packAt, $perUnit, $sh) {
+            $packed = function (array $r) use ($pack, $packAt, $perUnit, $perUnitAt, $sh) {
                 foreach ($r[10] as $qid) {
                     if (isset($pack[$qid])) {
                         return $pack[$qid];
@@ -241,7 +249,8 @@ if (!function_exists('import_vc_collect')) {
                         return null;
                     }
                 }
-                return $packAt[(string)$sh['name'] . "\x1f" . (int)$r[1]] ?? ($r[11] ?? null);
+                $at = (string)$sh['name'] . "\x1f" . (int)$r[1];
+                return $packAt[$at] ?? (isset($perUnitAt[$at]) ? null : ($r[11] ?? null));
             };
             foreach ($sh['value_cols'] as $letter => $header) {
                 // a "Total Cost" that is Purchase Qty x Unit Price (a buying list) is not a stock value: recognised, not reported

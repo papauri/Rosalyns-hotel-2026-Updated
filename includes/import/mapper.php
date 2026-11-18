@@ -231,7 +231,21 @@ if (!function_exists('import_match_header')) {
                     break;
                 }
             }
-            if (!$named) {
+            // ... and name nothing else: "Total Stock Cost", "Total Balance Value", "Total Qty Sold" are other figures, never the quantity.
+            // Every word must come from the derived field's own phrases ("total", "balance", "min", "qty") or be a one-word name of the field
+            $own = [];
+            foreach ((array)($aliases['fields'][$from] ?? []) as $p) {
+                foreach (explode(' ', import_norm_text((string)$p)) as $w) {
+                    $own[$w] = true;
+                }
+            }
+            foreach ((array)($aliases['fields'][$to] ?? []) as $p) {
+                $pn = import_norm_text((string)$p);
+                if ($pn !== '' && strpos($pn, ' ') === false) {
+                    $own[$pn] = true;
+                }
+            }
+            if (!$named || array_diff_key($tokens, $own)) {
                 continue;
             }
             $present[$to] = true;           // one column stands in, never two
@@ -605,7 +619,11 @@ if (!function_exists('import_match_header')) {
         if ($packCol !== null && !isset($taken['pack_size'])) {
             foreach ([$packCol + 1, $packCol - 1] as $c) {
                 if (isset($profiles[$c]) && $profiles[$c]['filled'] >= 3 && $profiles[$c]['small_int'] >= 0.9 * $profiles[$c]['filled']) {
-                    $promote($c, 'pack_size', 'small whole numbers next to the bought-as column');
+                    // a number that prices are DIVIDED by is never taken from its place alone (it could be a count, or a bottle size in ml):
+                    // the person confirms the heading once, and a confirmed heading is remembered for this hotel (A87)
+                    $map['columns'][$c]['state'] = 'question';
+                    $map['columns'][$c]['suggested_field'] = 'pack_size';
+                    $map['columns'][$c]['value_hint'] = 'small whole numbers next to the bought-as column';
                     break;
                 }
             }
@@ -617,7 +635,9 @@ if (!function_exists('import_match_header')) {
                 $clash[] = $c;
             }
         }
-        if (count($clash) === 2 && !isset($taken['sell_price'])) {
+        // ... and only when both headings are plain price words ("Cost" / "Price"): a heading with a word of its own ("Old price" / "New price",
+        // "Price USD" / "Price MWK") says something the values cannot, so those two stay a question
+        if (count($clash) === 2 && !isset($taken['sell_price']) && (float)$map['columns'][$clash[0]]['conf'] >= 1.0 && (float)$map['columns'][$clash[1]]['conf'] >= 1.0) {
             [$a, $b] = $clash;
             $n = 0;
             $aLow = 0;

@@ -262,6 +262,8 @@ if (!function_exists('import_resolve')) {
             $qIndex[$q['id']] = $i;
         }
         $rowsInfo = [];          // [shIdx, rowKey, ex|null, unit, group]
+        $autoInfo = [];          // rows whose price the pack rule divides with no selling price to check it: [shIdx, rowKey, ex|null, unit, value pack, pack]
+        $checkedPeers = [];      // sheet + pack word + pack => prices of rows whose division a selling price on the same row checked (A83)
         $groupItems = [];
         foreach ($analysis['sheets'] as $shIdx => $sh) {
             if (($sh['triage']['action'] ?? '') !== 'import' || empty($sh['rows'])) {
@@ -280,8 +282,19 @@ if (!function_exists('import_resolve')) {
                 if (!isset($f['unit_price']) || !is_numeric($f['unit_price']['value']) || (float)$f['unit_price']['value'] <= 0) {
                     continue;
                 }
+                $autoPack = 0;
                 if (!empty($row['pack_rule']) && (!empty($row['pack_rule']['decided']) || (string)($row['pack_rule']['ask'] ?? '') !== '')) {
-                    continue;               // the row's own bought-as / pack / served-by cells decide (or ask about) its price basis
+                    // the row's own bought-as / pack / served-by cells decide (or ask about) its price basis. One case is still judged below (A83):
+                    // a price DIVIDED on those words alone, with no selling price of the same unit beside it to check the division against
+                    $prr = $row['pack_rule'];
+                    if (!empty($prr['decided']) && (int)($prr['pack'] ?? 0) >= 2 && !empty($prr['sell']) && empty($prr['served_portion'])) {
+                        // a division its own selling price checked: kept as a peer for the rows of the same sheet + pack that have no selling price
+                        $checkedPeers[$shIdx . "\x1f" . mb_strtolower((string)($prr['pack_name'] ?? '')) . "\x1f" . (int)$prr['pack']][] = (float)$f['unit_price']['value'];
+                    }
+                    if (empty($prr['decided']) || empty($prr['pack']) || (int)$prr['pack'] < 2 || (!empty($prr['sell']) && empty($prr['served_portion']))) {
+                        continue;
+                    }
+                    $autoPack = (int)$prr['pack'];
                 }
                 $name = (string)($f['item_name']['value'] ?? '');
                 $hasConflict = false;
@@ -324,16 +337,125 @@ if (!function_exists('import_resolve')) {
                     }
                 }
                 $uid = (string)$row['uid'];
+                if ($autoPack) {
+                    $autoInfo[$uid] = [$shIdx, $rk, $ex, $unit, $vp, $autoPack];      // kept out of the same-category groups: its price is a pack price
+                    continue;
+                }
                 $rowsInfo[$uid] = [$shIdx, $rk, $ex, $unit, $vp, $hasConflict];
                 $groupItems[$uid] = ['group' => import_cs_group_key($cat, $rowUnit), 'cost' => (float)$f['unit_price']['value']];
             }
         }
-        if (!$rowsInfo) {
+        if (!$rowsInfo && !$autoInfo) {
             return;
         }
         $refs = import_cs_cluster_refs($groupItems, $csp);
         unset($groupItems);
         $short = $analysis['file']['short'] ?? 'f';
+        // A83: a pack price divided with NO selling price beside it. Divided silently only when this hotel's own data agrees with the division:
+        // the cost in stock or its deliveries are about price / N, the sheet's value cell is qty x price / N, the judge's own decisive "case of N",
+        // or the menu sells one unit for less than the price and more than price / N, or checked rows of the same sheet + pack price alike. Otherwise it is asked (pack pre-filled; like rows share one question).
+        // An existing item with neither Cost nor Pack ticked is not asked: its file cost is not written (A38), and the opening count never uses
+        // a stored crate price (B2).
+        $agreeTol = log(1 + (float)import_cs_params($csp)['agree_tol']);
+        $near = function (float $a, ?float $b) use ($agreeTol) {
+            return $b !== null && $a > 0 && $b > 0 && abs(log($a / $b)) <= $agreeTol;
+        };
+        $askGroups = [];
+        foreach ($autoInfo as $uid => [$shIdx, $rk, $ex, $unit, $vp, $n]) {
+            $row = &$analysis['sheets'][$shIdx]['rows'][$rk];
+            $price = (float)$row['fields']['unit_price']['value'];
+            $each = $price / $n;
+            $id = $ex ? (int)$ex['id'] : 0;
+            $cur = $ex && (float)$ex['cost_per_unit'] > 0 ? (float)$ex['cost_per_unit'] : null;
+            $rec = [];
+            foreach ($id ? (array)($ev['receipts'][$id] ?? []) : [] as $rv) {
+                if (is_numeric($rv) && (float)$rv > 0) {
+                    $rec[] = (float)$rv;
+                }
+            }
+            $recMed = $rec ? import_cs_median($rec) : null;
+            $sellEv = $id ? ($ev['sell'][$id] ?? null) : null;
+            $sellPer = is_array($sellEv) && (float)($sellEv['per_unit'] ?? 0) > 0 ? (float)$sellEv['per_unit'] : null;
+            $j = import_cs_judge([
+                'cost' => $price, 'unit' => $unit, 'current' => $cur, 'own_pack' => $ex['pack_size'] ?? null, 'sell' => $sellEv, 'receipts' => $rec,
+                'other_packs' => $id ? array_values($ev['packs'][$id] ?? []) : [], 'value_pack' => $vp, 'cluster' => null,
+            ], $csp);
+            // ... or at least two rows of the same sheet bought by the same pack had their division checked by their own selling price, and this
+            // price sits among theirs (Heineken 110,000 next to Castle / Amstel / Windhoek cases at 115,000-156,000, each checked: a case price too)
+            $peers = $checkedPeers[$shIdx . "\x1f" . mb_strtolower((string)($row['pack_rule']['pack_name'] ?? '')) . "\x1f" . $n] ?? [];
+            $peerAgree = count($peers) >= 2 && $price >= min($peers) / (1 + (float)import_cs_params($csp)['agree_tol'])
+                && $price <= max($peers) * (1 + (float)import_cs_params($csp)['agree_tol']);
+            $agree = $peerAgree || $near($each, $cur) || $near($each, $recMed) || (is_array($vp) && (int)$vp['n'] === $n)
+                || ($j !== null && $j['verdict'] === 'case' && (int)$j['pack'] === $n)
+                || ($sellPer !== null && $price > $sellPer && $each <= $sellPer);
+            if ($agree && !($j !== null && $j['against'])) {
+                unset($row);
+                continue;
+            }
+            $ticks = $ex ? array_map('strval', (array)($answers['_updates'][rh_ssi_key((string)$ex['name'])] ?? [])) : [];
+            if ($ex && !in_array('cost', $ticks, true) && !in_array('pack', $ticks, true)) {
+                unset($row);
+                continue;
+            }
+            $src = (string)$row['fields']['unit_price']['source'];
+            $u = trim((string)($row['fields']['unit']['value'] ?? '')) !== '' ? mb_strtolower(trim((string)$row['fields']['unit']['value'])) : ($unit !== '' ? $unit : 'unit');
+            $bw = mb_strtolower((string)($row['pack_rule']['pack_name'] ?? '')) ?: 'pack';
+            // Rows with nothing for or against are asked TOGETHER: one question per sheet + pack word + pack size + unit (a bar sheet of 40
+            // crate rows and no selling price is one question, not 40). A row this hotel's own data argues against keeps its own question.
+            $against = ($j !== null && $j['against']) ? (string)$j['reason'] : '';
+            $gk = $against !== '' ? 'own:' . $uid : implode("\x1f", [$shIdx, $bw, $n, $u]);
+            $askGroups[$gk][] = ['uid' => $uid, 'rk' => $rk, 'price' => $price, 'each' => $each, 'src' => $src, 'u' => $u, 'bw' => $bw, 'n' => $n,
+                'shIdx' => $shIdx, 'against' => $against];
+            unset($row);
+        }
+        foreach ($askGroups as $members) {
+            $m0 = $members[0];
+            $shIdx = $m0['shIdx'];
+            [$u, $bw, $n] = [$m0['u'], $m0['bw'], $m0['n']];
+            $row0 = $analysis['sheets'][$shIdx]['rows'][$m0['rk']];
+            $name0 = (string)$row0['fields']['item_name']['value'];
+            if (count($members) === 1) {
+                $text = 'Row ' . $row0['row'] . ' "' . $name0 . '": the price ' . import_fmt_money($m0['price']) . ' (' . $m0['src'] . ') would be divided by the ' . $bw . ' of ' . $n
+                    . ' = ' . import_fmt_money(round($m0['each'], 4)) . ' per ' . $u . ', because the row says it is bought by the ' . $bw . '. The sheet has no selling price to check that against, and '
+                    . ($m0['against'] !== '' ? 'this hotel\'s own data points the other way: ' . $m0['against'] : 'nothing this hotel already holds (cost in stock, deliveries, the sheet\'s value) confirms it.')
+                    . ' Is ' . import_fmt_money($m0['price']) . ' the price of one ' . $u . ', or of the whole ' . $bw . '?';
+                $options = import_cc_case_options($row0, $m0['price'], $m0['each']);
+            } else {
+                $list = [];
+                foreach (array_slice($members, 0, 5) as $m) {
+                    $r = $analysis['sheets'][$shIdx]['rows'][$m['rk']];
+                    $list[] = '"' . $r['fields']['item_name']['value'] . '" row ' . $r['row'] . ' ' . import_fmt_money($m['price']) . ' -> ' . import_fmt_money(round($m['each'], 4));
+                }
+                $more = count($members) > 5 ? ' and ' . (count($members) - 5) . ' more' : '';
+                $text = count($members) . ' rows of "' . $analysis['sheets'][$shIdx]['name'] . '" say they are bought by the ' . $bw . ' of ' . $n . ', so each price would be divided by ' . $n
+                    . ' to get the price of one ' . $u . ' (' . implode('; ', $list) . $more . '). The sheet has no selling price to check that against, and nothing this hotel already holds'
+                    . ' (cost in stock, deliveries, the sheet\'s value) confirms it. Is each price the price of one ' . $u . ', or of the whole ' . $bw . '? Your answer is used for all ' . count($members) . ' rows.';
+                $options = [
+                    ['key' => 'per-unit', 'label' => 'Each price is for one ' . $u . ' (import as written: "' . $name0 . '" ' . import_fmt_money($m0['price']) . ' per ' . $u . ')'],
+                    ['key' => 'per-case', 'label' => 'Each price is for a whole ' . $bw . ': I will type how many ' . $u . ' one ' . $bw . ' holds (for example ' . $n . ' -> "'
+                        . $name0 . '" ' . import_fmt_money(round($m0['each'], 4)) . ' per ' . $u . ')'],
+                ];
+            }
+            $q = import_q('case-price', $text, [
+                'sheet' => $analysis['sheets'][$shIdx]['name'], 'row' => $row0['row'], 'cells' => array_values(array_column($members, 'src')),
+                'options' => $options, 'case_ratio' => null,
+            ]);
+            $q['id'] = 'q' . $short . '-' . (count($analysis['questions']) + 1);
+            $q['answer'] = null;
+            $q['row_uids'] = array_values(array_column($members, 'uid'));
+            $q['group_rows'] = [];                      // every row the answer covers (value-check.php reads it)
+            foreach ($members as $m) {
+                $q['group_rows'][] = (int)$analysis['sheets'][$shIdx]['rows'][$m['rk']]['row'];
+            }
+            $q['pack_hint'] = $n;
+            $q['pack_rule'] = true;
+            $q['no_sell_check'] = true;
+            $analysis['questions'][] = $q;
+            $qIndex[$q['id']] = count($analysis['questions']) - 1;
+            foreach ($members as $m) {
+                $analysis['sheets'][$shIdx]['rows'][$m['rk']]['question_ids'][] = $q['id'];
+            }
+        }
         foreach ($rowsInfo as $uid => [$shIdx, $rk, $ex, $unit, $vp, $hasConflict]) {
             $row = &$analysis['sheets'][$shIdx]['rows'][$rk];
             $price = (float)$row['fields']['unit_price']['value'];

@@ -407,11 +407,11 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                         <?php foreach ($items as $item):
                             $pos = $posMap[rh_menu_pos_key((string)$item['item_name'], (string)$item['category'])] ?? null;
                             $lines = $pos ? ($recipeBy[$pos['id'] . '|' . $pos['slug']] ?? []) : [];
-                            $cost = 0.0;
-                            foreach ($lines as $l) {
-                                $cost += ((float)$l['quantity_per_portion'] / rh_stock_yield_factor((float)$l['yield_percent'])) * (float)$l['cost_per_unit'];
-                            }
                             $price = (float)$item['price'];
+                            // Stock cost of one sale, and whether it is above the price (rh_menu_cost_check, menu-recipe-lib.php).
+                            $costCheck = rh_menu_cost_check($lines, $price);
+                            $cost = $costCheck['cost'];
+                            $costOver = $costCheck['over'];
                             $showPos = !isset($item['show_pos']) || (int)$item['show_pos'] === 1;
                             $showRs = !isset($item['show_room_service']) || (int)$item['show_room_service'] === 1;
                             $avail = (int)$item['is_available'] === 1;
@@ -458,6 +458,9 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                                         <?php endforeach; ?>
                                         <?php if (count($lines) > 2): ?><span class="mm-sub">+<?= count($lines) - 2 ?> more</span><?php endif; ?>
                                         <span class="mm-sub">Cost <?= number_format($cost, 2) ?><?= $price > 0 ? ' (' . round($cost / $price * 100) . '% of price)' : '' ?></span>
+                                        <?php if ($costOver): ?>
+                                            <span class="mm-cost-flag"><span class="mm-tag mm-tag-off">Costs more than it sells for</span> <i class="help" data-tip="<?= htmlspecialchars('Compares the stock cost of one sale (each linked stock item: the amount one sale uses × its cost per unit) with this item\'s price. Here one sale uses ' . $currencySymbol . ' ' . number_format($cost, 2) . ' of stock but sells for ' . $currencySymbol . ' ' . number_format($price, 2) . '. Open Edit to check the amounts, or the stock cost may be a crate price.', ENT_QUOTES, 'UTF-8') ?>">?</i></span>
+                                        <?php endif; ?>
                                     <?php else: ?>
                                         <span class="mm-sub">Not linked to stock</span>
                                     <?php endif; ?>
@@ -701,6 +704,13 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                             <span>Stock cost for one sale: <strong id="mmCostTotal">-</strong></span>
                             <span id="mmCostPct"></span>
                         </div>
+                        <?php /* One sale's stock cost is above the price (owner 2026-11-17). Filled by mmStockTotals(). */ ?>
+                        <p class="mm-cost-warn" id="mmCostWarn" role="status" hidden>
+                            <span id="mmCostWarnText"></span>
+                            <?php if (hasPermission((int)$user['id'], 'stock_management')): ?>
+                                <a id="mmCostWarnLink" class="mm-cost-warn-link" href="stock-cost-fix.php" target="_blank" rel="noopener">Fix crate prices</a>
+                            <?php endif; ?>
+                        </p>
                     </section>
                 </div>
                 <div class="mm-modal-foot">
@@ -767,6 +777,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
            onclick handlers above (the admin SPA re-exports them after in-place navigation).
            ============================================================ */
         const MM_CURRENCY = <?= json_encode($currencySymbol) ?>;
+        const MM_TOL = <?= json_encode((float)BALANCE_TOLERANCE) ?>; // money tolerance, the same one rh_menu_cost_over_price() uses
         const MM_CSRF = <?= json_encode($csrf_token) ?>;
         const MM_RECIPE_API = 'api/menu-recipe.php';
         const MM_CATS = {
@@ -1784,19 +1795,38 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
 
         function mmStockTotals() {
             const wrap = mmEl('mmStockTotals');
+            const warn = mmEl('mmCostWarn');
             if (!MM_STATE.lines.length) {
                 wrap.hidden = true;
+                warn.hidden = true;
                 return;
             }
             let cost = 0;
+            let topId = 0;
+            let topCost = 0;
             MM_STATE.lines.forEach(function(l) {
                 const y = l.yield_percent > 0 ? l.yield_percent / 100 : 1;
-                cost += mmLineExact(l) / y * l.cost;
+                const c = mmLineExact(l) / y * l.cost;
+                cost += c;
+                if (c > topCost) {
+                    topCost = c;
+                    topId = l.ingredient_id;
+                }
             });
             wrap.hidden = false;
             mmEl('mmCostTotal').textContent = mmFmtMoney(cost);
             const price = mmEl('mmFree').checked ? 0 : (parseFloat(mmEl('mmPrice').value) || 0);
             mmEl('mmCostPct').textContent = price > 0 ? 'Stock cost is ' + (cost / price * 100).toFixed(1) + '% of the price. You keep ' + mmFmtMoney(price - cost) + '.' : '';
+            // One sale's stock costs more than the item sells for (same rule as rh_menu_cost_over_price: a free item is never flagged).
+            const over = price > MM_TOL && (cost - price) > MM_TOL;
+            warn.hidden = !over;
+            if (over) {
+                const text = 'One sale uses ' + mmFmtMoneyShort(Math.round(cost * 100) / 100) + ' of stock but sells for ' + mmFmtMoneyShort(price) + '. Check the stock link amount, or the stock cost may be a crate price.';
+                const tx = mmEl('mmCostWarnText');
+                if (tx.textContent !== text) tx.textContent = text;
+                const link = mmEl('mmCostWarnLink'); // only printed for staff who may open Fix crate prices
+                if (link) link.href = 'stock-cost-fix.php' + (topId > 0 ? '?item=' + encodeURIComponent(topId) : '');
+            }
         }
 
         /* The picked stock item (the Item dropdown holds the stock item id). */

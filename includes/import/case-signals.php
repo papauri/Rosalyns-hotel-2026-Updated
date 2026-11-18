@@ -29,7 +29,9 @@ if (!function_exists('import_cs_judge')) {
 
     function import_cs_params(array $o = []): array
     {
-        return array_merge(['k' => 3.0, 'spread_floor' => 0.02, 'struct_tol' => 0.05, 'min_group' => 4, 'jump' => 2.0], $o);
+        // agree_tol: how close the cost in stock / the usual delivery cost must be to price / N for a pack price divided with no selling price
+        // beside it to count as confirmed by this hotel's own data (resolve.php, A83)
+        return array_merge(['k' => 3.0, 'spread_floor' => 0.02, 'struct_tol' => 0.05, 'min_group' => 4, 'jump' => 2.0, 'agree_tol' => 0.2], $o);
     }
 
     function import_cs_median(array $a): ?float

@@ -1538,14 +1538,51 @@ $t($cpItem($upP, 'Delta Cider', 'bottle', 6, 2500, 12), 'per-unit + per-pack pri
 // 6) a two-sheet workbook (kitchen: plain unit + cost; bar: bought as / units per pack / served by)
 $ts = $cpRun('two_sheets');
 $cpCounts['two_sheets'] = count($ts['open']);
-$t(!$ts['open'] && $cpItem($ts, 'Wheat Flour', 'kg', null, 1200, 20) && $cpItem($ts, 'Sky Lager', 'bottle', 24, 1500, 48) && $cpItem($ts, 'Reed Rum', 'bottle', null, 25000, 6),
-    'two sheets: the kitchen sheet is read as before, the bar sheet divides crate prices (tot = a portion, so the rum is per bottle)');
+// A83 (owner S1): the bar sheet has NO selling price, so a crate price is not divided on the row's words alone: the two crate rows
+// (same sheet, crate of 24, bottle) share ONE question, pack 24 pre-filled; the kitchen sheet and the rum (bottle of 1) are untouched
+$tsQ = $ts['open'][0] ?? [];
+$t(count($ts['open']) === 1 && ($tsQ['type'] ?? '') === 'case-price' && !empty($tsQ['no_sell_check']) && (int)($tsQ['pack_hint'] ?? 0) === 24
+    && count($tsQ['row_uids'] ?? []) === 2 && ($tsQ['group_rows'] ?? []) === [2, 3] && strpos((string)$tsQ['text'], 'Sky Lager') !== false && strpos((string)$tsQ['text'], 'Star Cola') !== false
+    && $cpItem($ts, 'Wheat Flour', 'kg', null, 1200, 20) && $cpItem($ts, 'Reed Rum', 'bottle', null, 25000, 6),
+    'two sheets: no selling price -> the two crate rows are ONE question (pack 24 pre-filled); kitchen sheet and the rum (bottle of 1) need nothing ' . json_encode(array_map(function ($q) { return [$q['type'], substr($q['text'], 0, 120)]; }, $ts['open'])));
+$tsC = $cpRun('two_sheets', [], [$tsQ['qkey'] => ['key' => 'per-case', 'pack_size' => 24]]);
+$t(!$tsC['open'] && $cpItem($tsC, 'Sky Lager', 'bottle', 24, 1500, 48) && $cpItem($tsC, 'Star Cola', 'bottle', 24, 500, 30) && $tsC['inv'] === [],
+    'two sheets: answering "the whole crate" (24) divides BOTH rows: 36,000 -> 1,500 and 12,000 -> 500 per bottle, pack 24 saved');
+$tsU = $cpRun('two_sheets', [], [$tsQ['qkey'] => ['key' => 'per-unit']]);
+$t(!$tsU['open'] && $cpItem($tsU, 'Sky Lager', 'bottle', null, 36000, 48) && $cpItem($tsU, 'Star Cola', 'bottle', null, 12000, 30),
+    'two sheets: answering "one bottle" keeps BOTH prices as written and takes the row pack out (no pack saved)');
+$tsVc = import_vc_finish(import_vc_collect($tsU['an']), $tsU['res']['questions'], $tsU['res']['items']);
+$t(is_array($tsVc), 'two sheets: the value check runs with a grouped "one unit" answer');
 
 // 7) notes above the headings (a CSV whose headings are not on the first line)
 $nf = $cpRun('notes_first');
 $cpCounts['notes_first'] = count($nf['open']);
-$t(!$nf['open'] && $nf['an']['sheets'][0]['header_row'] === 4 && $cpItem($nf, 'Mango Juice', 'bottle', 12, 1500, 12) && $cpItem($nf, 'Lime Cordial', 'bottle', null, 9000, 4),
-    'notes first: headings found on line 4 ("Bought In", "Qty per Case", "Sold As"), crate price divided, no question');
+$nfQ = $nf['open'][0] ?? [];
+$t(count($nf['open']) === 1 && $nf['an']['sheets'][0]['header_row'] === 4 && ($nfQ['type'] ?? '') === 'case-price' && (int)($nfQ['pack_hint'] ?? 0) === 12 && count($nfQ['row_uids'] ?? []) === 2
+    && $cpItem($nf, 'Lime Cordial', 'bottle', null, 9000, 4),
+    'notes first: headings found on line 4 ("Bought In", "Qty per Case", "Sold As"); no selling price -> the two case rows are ONE question (12 pre-filled) ' . json_encode(array_map(function ($q) { return [$q['type'], substr($q['text'], 0, 120)]; }, $nf['open'])));
+$nfC = $cpRun('notes_first', [], [$nfQ['qkey'] => ['key' => 'per-case', 'pack_size' => 12]]);
+$t(!$nfC['open'] && $cpItem($nfC, 'Mango Juice', 'bottle', 12, 1500, 12) && $cpItem($nfC, 'Guava Juice', 'bottle', 12, 2000, 6),
+    'notes first: answering "the whole case" (12) divides both: 18,000 -> 1,500 and 24,000 -> 2,000 per bottle');
+// 8) A83 peers: a case row with no selling price beside case rows of the same sheet + pack whose selling price checked the division.
+// Priced among them -> divided like them, no question (the real RBH sheet's Heineken); priced far below them -> asked.
+$peerCsv = fx_csv([
+    ['Description', 'Closing Balance', 'Cost Price', 'Selling Price', 'Bought In', 'Qty per Case', 'Sold As'],
+    ['Lake Lager', 10, 115000, 14000, 'Case', 24, 'Bottle'],
+    ['Hill Lager', 12, 120000, 14000, 'Case', 24, 'Bottle'],
+    ['River Lager', 33, 110000, '', 'Case', 24, 'Bottle'],
+    ['Odd Lager', 5, 4800, '', 'Case', 24, 'Bottle'],
+]);
+$peerP = $put($peerCsv, 'peers.csv');
+$peerAn = import_analyze_file($peerP, 'peers.csv', $al);
+$peerRes = import_resolve($peerAn, [], $cpCtx);
+$peerOpen = array_values(array_filter(array_merge($peerRes['questions'], array_values($peerRes['extra_questions'])), function ($q) { return $q['answer'] === null; }));
+$peerItems = [];
+foreach ($peerRes['items'] as $it) { $peerItems[$it['name']] = $it; }
+$t(isset($peerItems['River Lager']) && abs((float)$peerItems['River Lager']['cost'] - 110000 / 24) < 0.001 && (int)$peerItems['River Lager']['pack'] === 24,
+    'A83 peers: a case price with no selling price, among checked case prices of the same sheet, is divided like them (110,000 / 24)');
+$t(count($peerOpen) === 1 && strpos((string)$peerOpen[0]['text'], 'Odd Lager') !== false && !empty($peerOpen[0]['no_sell_check']),
+    'A83 peers: a case price far below its checked peers is still asked ' . json_encode(array_map(function ($q) { return substr($q['text'], 0, 100); }, $peerOpen)));
 echo 'corpus open questions per layout: ' . json_encode($cpCounts) . "\n";
 
 // guards: the old layouts keep their meaning

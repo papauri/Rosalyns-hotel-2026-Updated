@@ -288,3 +288,44 @@ if (!function_exists('rh_recipe_qty_to_base')) {
         return $del->rowCount();
     }
 }
+
+if (!function_exists('rh_menu_cost_over_price')) {
+
+    /**
+     * True when the stock one sale uses costs more than the item sells for (owner 2026-11-17).
+     * Price is the menu price exactly as typed: no VAT is added or taken off (the same figure the
+     * "% of price" line uses). A free item (price 0) is never flagged: it is given away on purpose.
+     * Money is compared with BALANCE_TOLERANCE, so a cost equal to the price (or a cent over) is not flagged.
+     */
+    function rh_menu_cost_over_price(float $cost, float $price): bool
+    {
+        return $price > BALANCE_TOLERANCE && ($cost - $price) > BALANCE_TOLERANCE;
+    }
+
+    /**
+     * Stock cost of ONE sale from an item's stock link lines, and whether it is above the price.
+     * Each line: quantity_per_portion, cost_per_unit, optional yield_percent and ingredient_id
+     * (the rows of rh_menu_recipe_lines() or Menu Management's list query). Same arithmetic as
+     * rh_menu_recipe_cost(): sum of (amount per sale / yield) x cost per unit.
+     *
+     * @return array{cost:float,over:bool,top_ingredient_id:int} top_ingredient_id = the stock item
+     *         that costs the most per sale (0 when unknown), the one to open on Fix crate prices.
+     */
+    function rh_menu_cost_check(array $lines, float $price): array
+    {
+        $cost = 0.0;
+        $topId = 0;
+        $topCost = 0.0;
+        foreach ($lines as $l) {
+            $yield = isset($l['yield_percent']) ? (float)$l['yield_percent'] : 100.0;
+            $c = ((float)($l['quantity_per_portion'] ?? 0) / rh_stock_yield_factor($yield)) * (float)($l['cost_per_unit'] ?? 0);
+            $cost += $c;
+            if ($c > $topCost) {
+                $topCost = $c;
+                $topId = (int)($l['ingredient_id'] ?? 0);
+            }
+        }
+        $cost = round($cost, 4);
+        return ['cost' => $cost, 'over' => rh_menu_cost_over_price($cost, $price), 'top_ingredient_id' => $topId];
+    }
+}
