@@ -553,8 +553,8 @@ if (!function_exists('import_rv_build')) {
         $sug = isset($q['suggestion']['name']) ? (string)$q['suggestion']['name'] : null;
         foreach ((array)$q['options'] as $o) {
             $k = (string)$o['key'];
-            if ($k === 'per-case') {
-                continue;                       // needs a pack size typed per question: never bulk
+            if ($k === 'per-case' || (($q['type'] ?? '') === 'measure-n' && $k === 'n')) {
+                continue;                       // needs a pack size / "how many in one" typed per question: never bulk
             }
             if ($sug !== null && $k === 'use:' . $sug) {
                 $out['use-suggestion'] = $k;

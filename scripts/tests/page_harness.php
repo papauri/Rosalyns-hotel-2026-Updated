@@ -124,6 +124,8 @@ function __h_finish(): void
     foreach (($GLOBALS['__h_cfg']['verify'] ?? []) as $sql) {
         try { $res['verify'][] = $pdo->query($sql)->fetchAll(); } catch (Throwable $e) { $res['verify'][] = 'ERR ' . $e->getMessage(); }
     }
+    // Optional cfg.session_keys = [key,...]: those session values after the page ran (e.g. a POST/redirect/GET message).
+    foreach ((array)($GLOBALS['__h_cfg']['session_keys'] ?? []) as $sk) { $res['session'][$sk] = $_SESSION[$sk] ?? null; }
     $res['ddl_skipped'] = $GLOBALS['__h_ddl'] ?? [];
     // The marker must still be visible on the harness connection; if not, the outer transaction
     // ended mid-run and anything written afterwards was autocommitted.
@@ -224,7 +226,7 @@ $_SERVER['SERVER_NAME'] = 'localhost';
 $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
 if (!empty($cfg['ajax'])) { $_SERVER['HTTP_X_REQUESTED_WITH'] = 'XMLHttpRequest'; }
 $_POST = ($cfg['post'] ?? []) + ['csrf_token' => $_SESSION['csrf_token']];
-if ($__h_vars) { foreach ($_POST as $pk => $pv) { if (is_string($pv)) { $_POST[$pk] = strtr($pv, $__h_vars); } } }
+if ($__h_vars) { foreach ($_POST as $pk => $pv) { if (is_string($pv)) { $_POST[$pk] = strtr($pv, $__h_vars); } elseif (is_array($pv)) { foreach ($pv as $pk2 => $pv2) { if (is_string($pv2)) { $_POST[$pk][$pk2] = strtr($pv2, $__h_vars); } } } } } // {name} in list fields (name[]) too
 $_GET = $cfg['get'] ?? [];
 if ($__h_vars) { foreach ($_GET as $gk => $gv) { if (is_string($gv)) { $_GET[$gk] = strtr($gv, $__h_vars); } } } // {name} in GET values too
 $_REQUEST = $_POST + $_GET;

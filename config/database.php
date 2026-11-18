@@ -14100,7 +14100,21 @@ function rh_stock_measure_sizes(): array
         }
         return (is_numeric($v) && (float)$v > 0) ? (float)$v : 0.0;
     };
-    return ['shot_ml' => $get('stock_measure_shot_ml', 'ai_stock_tot_ml'), 'glass_ml' => $get('stock_measure_glass_ml', 'ai_stock_glass_ml')];
+    $out = ['shot_ml' => $get('stock_measure_shot_ml', 'ai_stock_tot_ml'), 'glass_ml' => $get('stock_measure_glass_ml', 'ai_stock_glass_ml')];
+    // Step U2: the hotel's Drink measures list is the one place sizes are kept; its "shot" and "glass" win when listed.
+    if (function_exists('rh_drink_measures_list')) {
+        $byName = [];
+        foreach (rh_drink_measures_list() as $dm) {
+            $byName[mb_strtolower($dm['name'])] = (float)$dm['ml'];
+        }
+        if (isset($byName['shot'])) {
+            $out['shot_ml'] = $byName['shot'];
+        }
+        if (isset($byName['glass']) || isset($byName['glass of wine'])) {
+            $out['glass_ml'] = $byName['glass'] ?? $byName['glass of wine'];
+        }
+    }
+    return $out;
 }
 
 /** Size in ml read from an item name ("Gin 750ml", "75cl", "1L", "1.5 L"), or null. */
@@ -14246,6 +14260,360 @@ function rh_stock_measure_save(PDO $pdo, int $ingId, ?array $new, int $userId, s
         }
         throw $e;
     }
+}
+
+/* ===== Drink measures (Step U2, owner 2026-11-19; migration 089) =====
+ * The hotel keeps ONE list of measures with their size in ml (shot 30 ml, glass of wine 175 ml...), site setting
+ * stock_measures_list (JSON). With an item's size per stock unit (a volume unit itself, else stock_ingredients.volume_ml,
+ * else a size in the name) a recipe line can be typed as "2 shots" or "50 ml": it is worked out here, ONCE, into the
+ * stock unit at 6 dp and saved in quantity_per_portion, so the till, room service, the kitchen screens and cost of sale
+ * read the same figure as before. Measures and sizes never change a stored stock quantity or cost.
+ * Same maths as admin/js/stock-drink-measures.js (keep the two in step). */
+
+if (!defined('RH_DRINK_MEASURES_MAX')) {
+    define('RH_DRINK_MEASURES_MAX', 20);
+}
+if (!defined('RH_DRINK_MEASURE_MAX_ML')) {
+    define('RH_DRINK_MEASURE_MAX_ML', 5000);
+}
+
+/** True when migration 089 added volume_ml and the three recipe-line entry columns. Cached per request. */
+function rh_stock_drink_ready(?PDO $db = null): bool
+{
+    // Tests only: $GLOBALS['rh_drink_ready_force'] = false acts as a hotel that has not run 089 yet.
+    if (isset($GLOBALS['rh_drink_ready_force']) && is_bool($GLOBALS['rh_drink_ready_force'])) {
+        return $GLOBALS['rh_drink_ready_force'];
+    }
+    static $ready = null;
+    if ($ready !== null) {
+        return $ready;
+    }
+    global $pdo;
+    $db = $db ?? $pdo;
+    try {
+        $st = $db->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND (
+              (TABLE_NAME = 'stock_ingredients' AND COLUMN_NAME = 'volume_ml')
+           OR (TABLE_NAME = 'stock_recipe_ingredients' AND COLUMN_NAME IN ('entry_measure','entry_qty','entry_ml')))");
+        $ready = ((int)$st->fetchColumn() === 4);
+    } catch (Throwable $e) {
+        $ready = false;
+    }
+    return $ready;
+}
+
+/**
+ * Check a typed list of measures (rows with name + ml). Blank rows are skipped. Returns [list, ?error]; list rows are
+ * ['name' => string, 'ml' => float]. Names 1-30 characters, unique (any case), not "ml" (always offered on its own);
+ * ml above 0 and at most RH_DRINK_MEASURE_MAX_ML; at most RH_DRINK_MEASURES_MAX rows.
+ */
+function rh_drink_measures_clean(array $rows): array
+{
+    $out = [];
+    $seen = [];
+    foreach ($rows as $r) {
+        if (!is_array($r)) {
+            continue;
+        }
+        $name = trim((string)preg_replace('/\s+/u', ' ', (string)preg_replace('/[\x00-\x1F\x7F]+/u', ' ', (string)($r['name'] ?? ''))));
+        $mlRaw = trim(str_replace(',', '', (string)($r['ml'] ?? '')));
+        if ($name === '' && $mlRaw === '') {
+            continue;
+        }
+        if ($name === '') {
+            return [[], 'Type a name for every measure that has a size (for example shot).'];
+        }
+        if (mb_strlen($name) > 30) {
+            return [[], 'Measure names can be at most 30 characters.'];
+        }
+        if (preg_match('/[<>&"]/u', $name)) {
+            return [[], 'Measure names cannot use the signs < > & or ". Use letters, numbers and spaces.'];
+        }
+        $key = mb_strtolower($name);
+        if (preg_match('/^(ml|mls|millilit(re|er)s?)$/u', $key)) {
+            return [[], 'ml is always offered on its own. Give this measure another name.'];
+        }
+        if (isset($seen[$key])) {
+            return [[], '"' . $name . '" is in the list twice. Keep one.'];
+        }
+        if ($mlRaw === '' || !is_numeric($mlRaw)) {
+            return [[], 'Type the size of one ' . $name . ' in ml (a number).'];
+        }
+        $ml = round((float)$mlRaw, 2);
+        if ($ml <= 0 || $ml > RH_DRINK_MEASURE_MAX_ML) {
+            return [[], 'The size of one ' . $name . ' must be above 0 and at most ' . number_format(RH_DRINK_MEASURE_MAX_ML) . ' ml.'];
+        }
+        $seen[$key] = true;
+        $out[] = ['name' => $name, 'ml' => $ml];
+    }
+    if (count($out) > RH_DRINK_MEASURES_MAX) {
+        return [[], 'Keep the list to ' . RH_DRINK_MEASURES_MAX . ' measures or fewer.'];
+    }
+    return [$out, null];
+}
+
+/** The hotel's measures list from settings, each entry checked on its own (a bad entry is left out). [] when not set. */
+function rh_drink_measures_list(): array
+{
+    if (!function_exists('getSetting')) {
+        return [];
+    }
+    $rows = json_decode((string)getSetting('stock_measures_list', ''), true);
+    if (!is_array($rows)) {
+        return [];
+    }
+    $out = [];
+    $seen = [];
+    foreach ($rows as $r) {
+        [$one, $err] = rh_drink_measures_clean([$r]);
+        if ($err !== null || !$one) {
+            continue;
+        }
+        $k = mb_strtolower($one[0]['name']);
+        if (!isset($seen[$k])) {
+            $seen[$k] = true;
+            $out[] = $one[0];
+        }
+    }
+    return array_slice($out, 0, RH_DRINK_MEASURES_MAX);
+}
+
+/** "shot 30 ml, glass of wine 175 ml" or "none" (History wording). */
+function rh_drink_measures_describe(array $list): string
+{
+    if (!$list) {
+        return 'none';
+    }
+    return implode(', ', array_map(static fn(array $m): string => $m['name'] . ' ' . rh_stock_qty_fmt((float)$m['ml'], 0, '') . ' ml', $list));
+}
+
+/**
+ * Save the hotel's measures list (already checked by rh_drink_measures_clean). Returns true when it changed.
+ * Logs who, old -> new ('stock_measures_list_changed'). Recipes keep their saved stock figures.
+ * @throws RuntimeException when the setting could not be written.
+ */
+function rh_drink_measures_save(PDO $pdo, array $list, int $userId): bool
+{
+    $old = rh_drink_measures_list();
+    if (rh_drink_measures_describe($old) === rh_drink_measures_describe($list)) {
+        return false;
+    }
+    $st = $pdo->prepare("INSERT INTO site_settings (setting_key, setting_value, setting_group) VALUES ('stock_measures_list', ?, 'stock')
+                         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value), updated_at = CURRENT_TIMESTAMP");
+    $st->execute([json_encode(array_values($list))]);
+    global $_SITE_SETTINGS;
+    unset($_SITE_SETTINGS['stock_measures_list']);
+    if (function_exists('deleteCache')) {
+        deleteCache('setting_stock_measures_list');
+    }
+    if (function_exists('logActivity')) {
+        logActivity($userId, 'stock_measures_list_changed', 'Drink measures list changed on Stock Items: ' . rh_drink_measures_describe($old) . ' -> ' . rh_drink_measures_describe($list));
+    }
+    return true;
+}
+
+/** ml in ONE of a stock unit that is itself a volume (ml 1, cl 10, litre 1000), else null. */
+function rh_drink_unit_ml(string $unit): ?float
+{
+    $u = mb_strtolower(trim($unit));
+    if (preg_match('/^(ml|mls|millilit(re|er)s?)$/u', $u)) {
+        return 1.0;
+    }
+    if (preg_match('/^(cl|centilit(re|er)s?)$/u', $u)) {
+        return 10.0;
+    }
+    if (preg_match('/^(l|ltrs?|litres?|liters?)$/u', $u)) {
+        return 1000.0;
+    }
+    return null;
+}
+
+/** A weight unit (g, kg, lb, oz...): drink measures never apply. */
+function rh_drink_unit_is_weight(string $unit): bool
+{
+    return (bool)preg_match('/^(mg|g|gm|grams?|kgs?|kilograms?|kilos?|lbs?|pounds?|oz|ounces?)$/iu', trim($unit));
+}
+
+/**
+ * How many ml one stock unit holds, from (1) a stock unit that is a volume (always wins: 1 L is 1,000 ml whatever the
+ * name says), else (2) the item's volume_ml, else (3) a size in its name. When the stock unit is the SMALL side of a count
+ * measure (stock kept in shots), one stock unit is the bottle size / N.
+ * @return ?array{per_unit:float, container:?float, source:string} source 'unit' | 'item' | 'name'; null when not known.
+ */
+function rh_drink_item_ml(array $ing): ?array
+{
+    $unit = (string)($ing['unit'] ?? '');
+    $u = rh_drink_unit_ml($unit);
+    if ($u !== null) {
+        return ['per_unit' => $u, 'container' => null, 'source' => 'unit'];
+    }
+    if (rh_drink_unit_is_weight($unit) || rh_stock_unit_is_container($unit)) {
+        // Weights have no ml. A crate / case / pack holds many bottles, so a size (typed or in the name, "Beer 330ml")
+        // is one bottle, never the whole stock unit: no ml measures (the item's own count measure still works).
+        return null;
+    }
+    $vol = (isset($ing['volume_ml']) && is_numeric($ing['volume_ml']) && (float)$ing['volume_ml'] > 0) ? (float)$ing['volume_ml'] : null;
+    $src = 'item';
+    if ($vol === null) {
+        $vol = rh_stock_measure_name_ml((string)($ing['name'] ?? ''));
+        $src = 'name';
+    }
+    if ($vol === null) {
+        return null;
+    }
+    $m = rh_stock_measure_get($ing);
+    $per = ($m !== null && $m['side'] === 'small') ? $vol / (float)$m['n'] : $vol;
+    return ['per_unit' => $per, 'container' => $vol, 'source' => $src];
+}
+
+/**
+ * The measures a recipe line of this item can be typed in, keyed by lower-case name:
+ *  - the item's own count measure (Step U1, stock kept in the bigger one): "shot", N in one bottle - works with no size;
+ *  - when the item's size is known: every measure on the hotel's list (same name as the item's own = the item's own wins)
+ *    and "ml" (not for stock already kept in ml).
+ * Each: name, kind 'item' | 'list' | 'ml', ml (size of one, null when unknown), n (item kind only).
+ */
+function rh_drink_measure_options(array $ing, ?array $list = null): array
+{
+    if (rh_drink_unit_is_weight((string)($ing['unit'] ?? ''))) {
+        return [];
+    }
+    $list = $list ?? rh_drink_measures_list();
+    $opts = [];
+    $m = rh_stock_measure_get($ing);
+    $size = rh_drink_item_ml($ing);
+    if ($m !== null && $m['side'] === 'big') {
+        $opts[mb_strtolower($m['small'])] = [
+            'name' => $m['small'], 'kind' => 'item', 'n' => (float)$m['n'],
+            'ml' => ($size !== null && $size['container'] !== null) ? round($size['container'] / (float)$m['n'], 4) : null,
+        ];
+    }
+    if ($size !== null) {
+        foreach ($list as $dm) {
+            $k = mb_strtolower($dm['name']);
+            if (!isset($opts[$k])) {
+                $opts[$k] = ['name' => $dm['name'], 'kind' => 'list', 'ml' => (float)$dm['ml'], 'n' => null];
+            }
+        }
+        if (!($size['source'] === 'unit' && abs($size['per_unit'] - 1.0) < 1e-9)) {
+            $opts['ml'] = ['name' => 'ml', 'kind' => 'ml', 'ml' => 1.0, 'n' => null];
+        }
+    }
+    return $opts;
+}
+
+/**
+ * "2 shots" of an item -> stock units, 6 dp. Item kind: qty / N. List / ml: qty x ml of one / ml in one stock unit.
+ * @return array{qty:float, name:string, ml:?float} qty = stock units; name = the measure's own spelling; ml = size of one
+ * @throws RuntimeException with a plain message (bad amount, a measure this item cannot use, too small to record).
+ */
+function rh_drink_measure_to_stock(float $qty, string $measure, array $ing, ?array $list = null): array
+{
+    if (!is_finite($qty) || $qty <= 0 || $qty > 100000) {
+        throw new RuntimeException('Type an amount greater than 0 (at most 100,000).');
+    }
+    $opts = rh_drink_measure_options($ing, $list);
+    $key = mb_strtolower(trim($measure));
+    if (!isset($opts[$key])) {
+        throw new RuntimeException('"' . trim($measure) . '" can’t be used for this item. Set its bottle size in Stock, or type the amount in ' . (string)($ing['unit'] ?? 'its stock unit') . '.');
+    }
+    $o = $opts[$key];
+    if ($o['kind'] === 'item') {
+        $stock = $qty / (float)$o['n'];
+    } else {
+        $size = rh_drink_item_ml($ing);
+        $stock = $qty * (float)$o['ml'] / (float)$size['per_unit'];
+    }
+    $stock = round($stock, 6);
+    if ($stock <= 0) {
+        throw new RuntimeException('That amount is too small to record (smallest is 0.000001 of the stock unit).');
+    }
+    if ($stock > 99999999) {
+        throw new RuntimeException('That amount is too large.');
+    }
+    return ['qty' => $stock, 'name' => $o['name'], 'ml' => $o['ml']];
+}
+
+/** Extra stock_ingredients columns the measure maths reads, for a SELECT list (", i.volume_ml, i.measure_..."); '' before 088/089. */
+function rh_drink_ing_cols(string $alias = 'i'): string
+{
+    $a = preg_replace('/[^a-z0-9_]/i', '', $alias);
+    $p = $a === '' ? '' : $a . '.';
+    $cols = '';
+    if (rh_stock_drink_ready()) {
+        $cols .= ", {$p}volume_ml";
+    }
+    if (function_exists('rh_stock_measure_ready') && rh_stock_measure_ready()) {
+        $cols .= ", {$p}measure_big_name, {$p}measure_small_name, {$p}measure_per_big, {$p}measure_stock_side";
+    }
+    return $cols;
+}
+
+/** "shot" -> "shots", "glass of wine" -> "glasses of wine", "ml" stays "ml". */
+function rh_drink_plural(string $name, float $qty): string
+{
+    if (preg_match('/^(ml|mls)$/i', $name)) {
+        return 'ml';
+    }
+    if (preg_match('/^(\S+)(\s+of\s+.+)$/iu', $name, $mm)) {
+        return rh_stock_measure_plural($mm[1], $qty) . $mm[2];
+    }
+    return rh_stock_measure_plural($name, $qty);
+}
+
+/**
+ * A saved recipe line's typed measure to show again: ['measure' => 'shot', 'qty' => 2.0], or null when there is none or
+ * it no longer gives the saved figure (a size changed since): the line is then shown in the stock unit, unchanged.
+ */
+function rh_drink_line_entry(array $line, array $ing, ?array $list = null): ?array
+{
+    $name = trim((string)($line['entry_measure'] ?? ''));
+    $q = $line['entry_qty'] ?? null;
+    if ($name === '' || $q === null || !is_numeric($q) || (float)$q <= 0) {
+        return null;
+    }
+    try {
+        $r = rh_drink_measure_to_stock((float)$q, $name, $ing, $list);
+    } catch (Throwable $e) {
+        return null;
+    }
+    return abs($r['qty'] - (float)($line['quantity_per_portion'] ?? 0)) <= 0.0000015 ? ['measure' => $r['name'], 'qty' => (float)$q] : null;
+}
+
+/** Bottle size typed on the item form: [?float ml, ?string error]. Blank or 0 = not set. */
+function rh_drink_volume_from_input($raw): array
+{
+    $s = trim(str_replace(',', '', (string)$raw));
+    if ($s === '' || (is_numeric($s) && (float)$s == 0.0)) {
+        return [null, null];
+    }
+    if (!is_numeric($s) || (float)$s < 0 || (float)$s > 100000) {
+        return [null, 'Bottle size must be a number of ml above 0 (at most 100,000).'];
+    }
+    return [round((float)$s, 2), null];
+}
+
+/**
+ * Save an item's bottle size (ml, null = not set). Logs who, old -> new ('stock_volume_changed') when it changed.
+ * Stock quantities, cost and saved recipe figures are not touched. Returns true when it changed.
+ */
+function rh_drink_volume_save(PDO $pdo, int $ingId, ?float $new, int $userId, string $where = 'Stock Items'): bool
+{
+    $q = $pdo->prepare("SELECT name, volume_ml FROM stock_ingredients WHERE id = ?");
+    $q->execute([$ingId]);
+    $row = $q->fetch(PDO::FETCH_ASSOC);
+    if (!$row) {
+        throw new RuntimeException('That stock item no longer exists.');
+    }
+    $old = ($row['volume_ml'] !== null && (float)$row['volume_ml'] > 0) ? (float)$row['volume_ml'] : null;
+    if (($old === null && $new === null) || ($old !== null && $new !== null && abs($old - $new) < 0.005)) {
+        return false;
+    }
+    $pdo->prepare("UPDATE stock_ingredients SET volume_ml = ?, updated_at = NOW() WHERE id = ?")->execute([$new, $ingId]);
+    if (function_exists('logActivity')) {
+        $fmt = static fn(?float $v): string => $v === null ? 'not set' : rh_stock_qty_fmt($v, 0, '') . ' ml';
+        logActivity($userId, 'stock_volume_changed', 'Bottle size of stock item ' . $row['name'] . ' (#' . $ingId . ') changed in ' . $where . ': ' . $fmt($old) . ' -> ' . $fmt($new));
+    }
+    return true;
 }
 
 /** Units that are a container of smaller pieces (a packet of 6, a box, a dozen...). Same list as Menu Management's pieces entry. */

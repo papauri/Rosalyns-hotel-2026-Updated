@@ -771,6 +771,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
     </div><!-- /.mm-restaurant -->
 
     <script src="js/admin-form-guard.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-form-guard.js'); ?>"></script>
+    <script src="js/stock-drink-measures.js?v=<?php echo @filemtime(__DIR__ . '/js/stock-drink-measures.js'); ?>"></script>
     <script>
         /* ============================================================
            Menu Management page script. Top-level functions are used by the inline
@@ -1102,8 +1103,10 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             });
             const data = await res.json();
             if (!data.ok) throw new Error(data.error || 'Could not load the stock list');
+            MM_STATE.measures = Array.isArray(data.measures) ? data.measures : [];
+            if (window.RHDrink) RHDrink.setReady(data.drink_ready === true); // before 089: no measures, the stock unit stays the default
             MM_STATE.ing = data.ingredients.map(function(i) {
-                return {
+                return mmDrinkFields({
                     id: parseInt(i.id, 10),
                     name: i.name,
                     category: i.category || 'General',
@@ -1113,7 +1116,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                     pack_name: i.pack_name || '',
                     pack_size: parseFloat(i.pack_size) || 0,
                     pieces: parseFloat(i.pieces_per_unit) || 0
-                };
+                }, i);
             });
             const cats = [];
             MM_STATE.ing.forEach(function(i) {
@@ -1132,6 +1135,46 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             });
             mmIngRenderPicker();
             return MM_STATE.ing;
+        }
+
+        /* Drink measures (Step U2): the bottle size and count measure an item carries, under the stock column names RHDrink reads. */
+        function mmDrinkFields(o, src) {
+            o.volume_ml = src.volume_ml || null;
+            o.measure_big_name = src.measure_big_name || '';
+            o.measure_small_name = src.measure_small_name || '';
+            o.measure_per_big = src.measure_per_big || null;
+            o.measure_stock_side = src.measure_stock_side || '';
+            return o;
+        }
+
+        /* An entry 'm:shot' = typed as a drink measure. */
+        function mmIsMeasure(entry) {
+            return typeof entry === 'string' && entry.indexOf('m:') === 0;
+        }
+
+        /* Alert.show writes HTML: stock item and measure names typed by staff go through this first. */
+        function mmTxt(v) {
+            return String(v == null ? '' : v).replace(/[&<>"']/g, function(c) {
+                return {
+                    '&': '&amp;',
+                    '<': '&lt;',
+                    '>': '&gt;',
+                    '"': '&quot;',
+                    "'": '&#39;'
+                }[c];
+            });
+        }
+
+        function mmMeasureName(entry) {
+            return mmIsMeasure(entry) ? entry.slice(2) : '';
+        }
+
+        /* Drink measures this line can be typed in. ml is left out for litre stock (its own "ml" choice already covers it). */
+        function mmMeasureOpts(l) {
+            if (!window.RHDrink) return [];
+            return RHDrink.options(l, MM_STATE.measures || []).filter(function(o) {
+                return !(o.kind === 'ml' && mmSmallOf(l.unit));
+            });
         }
 
         /* Money without forced decimals: MWK 15,300 (or MWK 2,550.5). */
@@ -1222,6 +1265,14 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             if (i.cost > 0) t += ' Costs ' + mmFmtMoneyShort(i.cost) + ' for 1 ' + i.unit + (per > 0 ? ' (' + mmFmtMoneyShort(i.cost / per) + ' for 1 piece)' : '') + '.';
             const sm = mmSmallOf(i.unit);
             if (sm) t += ' Type ' + (sm === 'g' ? 'grams' : 'ml') + ' (1,000 ' + sm + ' = 1 ' + i.unit + ').';
+            const mo = mmMeasureOpts(i);
+            if (mo.length) {
+                const sz = window.RHDrink ? RHDrink.itemMl(i) : null;
+                if (sz && sz.source !== 'unit' && sz.container) t += ' 1 ' + (i.measure_stock_side === 'small' && i.measure_big_name ? i.measure_big_name : i.unit) + ' = ' + mmFmtQty(sz.container, 2) + ' ml.';
+                t += ' You can also choose ' + mo.slice(0, 3).map(function(o) {
+                    return o.name;
+                }).join(', ') + (mo.length > 3 ? ' and more' : '') + ' in the unit box.';
+            }
             return t;
         }
 
@@ -1465,7 +1516,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 if (!data.ok) throw new Error(data.error || 'Could not load what this item uses');
                 if (MM_STATE.editing !== it) return; // another item was opened meanwhile
                 MM_STATE.lines = (data.lines || []).map(function(l) {
-                    return {
+                    const o = mmDrinkFields({
                         ingredient_id: parseInt(l.ingredient_id, 10),
                         name: l.name,
                         unit: l.unit,
@@ -1476,8 +1527,28 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                         entry: 'base', // existing links keep their exact base-unit meaning
                         pieces: parseFloat(l.pieces_per_unit) || 0,
                         yield_percent: parseFloat(l.yield_percent) || 100
-                    };
-                }).map(mmShowAsPieces);
+                    }, l);
+                    // Typed as a drink measure ("2 shots") and still giving the saved figure: show it that way again.
+                    // Only when this screen offers that measure; "ml" of litre stock (typed in Recipes) opens as the ml
+                    // choice here; anything else opens in the stock unit with the saved figure, never a measure's count.
+                    if (l.entry_match && l.entry_match.measure) {
+                        const want = String(l.entry_match.measure).toLowerCase();
+                        const hit = mmMeasureOpts(o).find(function(x) { return x.name.toLowerCase() === want; });
+                        const eq = parseFloat(l.entry_match.qty) || 0;
+                        if (hit && eq > 0) {
+                            o.entry = 'm:' + hit.name;
+                            o.qty = eq;
+                            o.fromMeasure = true;
+                        } else if (want === 'ml' && mmSmallOf(o.unit) === 'ml' && eq > 0 && Math.abs(eq / 1000 - o.qty) < 0.0000015) {
+                            o.entry = 'small';
+                            o.qty = eq;
+                            o.fromMeasure = true;
+                        }
+                    }
+                    return o;
+                }).map(function(o) {
+                    return o.fromMeasure ? o : mmShowAsPieces(o);
+                });
                 MM_STATE.ready = true;
                 mmStockRender();
             } catch (e) {
@@ -1538,6 +1609,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
 
         function mmLineBase(l) {
             const q = parseFloat(l.qty) || 0;
+            if (mmIsMeasure(l.entry)) return (window.RHDrink && RHDrink.toStock(q, mmMeasureName(l.entry), l, MM_STATE.measures || [])) || 0;
             if (l.entry === 'small') return Math.round(q / 1000 * 1000000) / 1000000;
             if (l.entry === 'pieces') {
                 const per = mmPer(l);
@@ -1567,6 +1639,11 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
         }
 
         function mmQtyMode(inp, entry, unit) {
+            if (mmIsMeasure(entry)) {
+                inp.inputMode = 'decimal';
+                inp.placeholder = mmMeasureName(entry) === 'ml' ? 'ml' : 'How many';
+                return;
+            }
             const whole = entry === 'pieces' || entry === 'small';
             inp.inputMode = whole ? 'numeric' : 'decimal';
             const sw = entry === 'small' ? (mmSmallOf(unit) || 'g') : (entry === 'base' ? mmNativeSmall(unit) : '');
@@ -1580,11 +1657,19 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             if (!(v > 0) || was === now) return text;
             const per = mmPer(l);
             let base;
-            if (was === 'small') base = v / 1000;
+            if (mmIsMeasure(was)) base = mmLineBase(Object.assign({}, l, {
+                qty: v,
+                entry: was
+            }));
+            else if (was === 'small') base = v / 1000;
             else if (was === 'pack') base = l.pack_size > 0 ? v * l.pack_size : 0;
             else if (was === 'pieces') base = per > 0 ? v / per : 0;
             else base = v;
             if (!(base > 0)) return text;
+            if (mmIsMeasure(now)) {
+                const one = window.RHDrink ? RHDrink.perOne(l, MM_STATE.measures || [], mmMeasureName(now)) : null;
+                return one > 0 ? mmFmtQty(base / one, 4) : '';
+            }
             if (now === 'small') {
                 const g = Math.round(base * 1000);
                 return Math.abs(g - base * 1000) < 0.001 && g >= 1 ? String(g) : '';
@@ -1628,7 +1713,21 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             return t;
         }
 
+        /* "2 shots = 0.06 bottle off stock for each one sold. Costs MWK 1,800.00 per sale. 1 bottle lasts 16.67 sales." */
+        function mmMeasureText(l) {
+            const k = parseFloat(l.qty) || 0;
+            const mn = mmMeasureName(l.entry);
+            if (!(k > 0)) return 'Type how many ' + RHDrink.plural(mn, 2) + ' one sale uses.';
+            const base = mmLineBase(l);
+            if (!(base > 0)) return mn + ' cannot be used for ' + l.name + ' now. Choose ' + l.unit + ' in the unit box.';
+            let t = mmFmtQty(k, 4) + ' ' + RHDrink.plural(mn, k) + ' = ' + mmFmtQty(base, 6) + ' ' + mmPlural(l.unit, base) + ' off stock for each one sold.';
+            if (l.cost > 0) t += ' Costs ' + mmFmtMoney(base * l.cost) + ' per sale.';
+            if (1 / base >= 1) t += ' 1 ' + l.unit + ' lasts ' + mmSales(1 / base) + '.';
+            return t;
+        }
+
         function mmPreviewText(l) {
+            if (mmIsMeasure(l.entry)) return mmMeasureText(l);
             if (l.entry === 'pieces') return mmPiecesText(l);
             if (l.entry === 'small') return mmSmallText(l);
             const base = mmLineBase(l);
@@ -1643,7 +1742,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
         /* The pieces working is small grey print; every other sentence keeps the normal preview look. */
         function mmSetPreview(el, l) {
             el.textContent = mmPreviewText(l);
-            el.classList.toggle('mm-math', l.entry === 'pieces' || l.entry === 'small');
+            el.classList.toggle('mm-math', l.entry === 'pieces' || l.entry === 'small' || mmIsMeasure(l.entry));
         }
 
         function mmUnitOptions(sel, l, current) {
@@ -1673,7 +1772,15 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 pc.disabled = !(per > 0);
                 sel.appendChild(pc);
             }
-            sel.value = current === 'pack' && l.pack_size > 0 ? 'pack' : (current === 'pieces' && per > 0 ? 'pieces' : (current === 'small' && smallWord ? 'small' : 'base'));
+            let mHit = '';
+            mmMeasureOpts(l).forEach(function(o) { // drink measures: shot (25 ml), glass of wine (175 ml), ml...
+                const m = document.createElement('option');
+                m.value = 'm:' + o.name;
+                m.textContent = RHDrink.label(o, l);
+                sel.appendChild(m);
+                if (mmIsMeasure(current) && mmMeasureName(current).toLowerCase() === o.name.toLowerCase()) mHit = m.value;
+            });
+            sel.value = mHit || (current === 'pack' && l.pack_size > 0 ? 'pack' : (current === 'pieces' && per > 0 ? 'pieces' : (current === 'small' && smallWord ? 'small' : 'base')));
             sel.disabled = Array.prototype.filter.call(sel.options, function(o) {
                 return !o.disabled;
             }).length < 2;
@@ -1860,6 +1967,10 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 MM_STATE.draftId = ing.id;
                 mmEl('mmIngQty').value = ''; // a number typed for another stock item means something else here: start empty
                 prev = mmIsContainer(ing.unit) && mmPer(ing) > 0 ? 'pieces' : (mmSmallOf(ing.unit) ? 'small' : 'base'); // pieces for packets with pieces set, whole g / ml for kg and litres
+                const own = mmMeasureOpts(ing).filter(function(o) {
+                    return o.kind === 'item';
+                })[0];
+                if (own && prev === 'base') prev = 'm:' + own.name; // a bottle counted in shots: "1 shot" is the easy default
             }
             mmUnitOptions(sel, ing, prev);
             MM_STATE.draftUnit = sel.value;
@@ -1880,6 +1991,11 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 pack_name: ing.pack_name,
                 pack_size: ing.pack_size,
                 pieces: ing.pieces,
+                volume_ml: ing.volume_ml,
+                measure_big_name: ing.measure_big_name,
+                measure_small_name: ing.measure_small_name,
+                measure_per_big: ing.measure_per_big,
+                measure_stock_side: ing.measure_stock_side,
                 qty: mmEl('mmIngQty').value,
                 entry: mmEl('mmIngUnit').value
             };
@@ -1900,7 +2016,8 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 out.classList.remove('mm-math');
                 const sw = d.entry === 'small' ? mmSmallOf(ing.unit) : (d.entry === 'base' ? mmNativeSmall(ing.unit) : '');
                 const word = sw === 'g' ? 'grams' : 'ml';
-                if (d.entry === 'pieces') out.textContent = 'Type how many pieces one sale uses (1 for one sausage), or tap a number.';
+                if (mmIsMeasure(d.entry)) out.textContent = 'Type how many ' + RHDrink.plural(mmMeasureName(d.entry), 2) + ' one sale uses, or tap a number.';
+                else if (d.entry === 'pieces') out.textContent = 'Type how many pieces one sale uses (1 for one sausage), or tap a number.';
                 else if (sw) out.textContent = 'Type how many ' + word + ' one sale uses (like 250), or tap a number.';
                 else if (d.entry === 'pack') out.textContent = 'Type how many ' + mmPlural((ing.pack_name || 'pack').toLowerCase(), 2) + ' one sale uses (' + (ing.pack_name || 'pack').toLowerCase() + ' = ' + mmQtyUnit(ing.pack_size, ing.unit, 3) + ').';
                 else if (mmIsContainer(ing.unit)) out.textContent = 'Type how many ' + mmPlural(ing.unit, 2) + ' one sale uses (0.5 = half a ' + ing.unit + ')' + (mmPer(ing) > 0 ? ', or choose "pieces" in the unit box.' : '.');
@@ -1928,7 +2045,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 mmEl('mmIngPick').value = '';
                 mmEl('mmIngQty').value = '';
                 mmIngChosen();
-                Alert.show(ing.name + ' is already added. Change the amount in the list above.', 'error');
+                Alert.show(mmTxt(ing.name) + ' is already added. Change the amount in the list above.', 'error');
                 return false;
             }
             if (!(q > 0)) {
@@ -1945,7 +2062,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                     Alert.show('Type whole pieces (1, 2, 3). A quarter, half or three-quarters of a piece is also fine (tap ¼, ½ or ¾).', 'error');
                     return false;
                 } else if (!(mmPer(nl) > 0)) {
-                    Alert.show('The number of pieces in one ' + ing.unit + ' of ' + ing.name + ' is not set. Set it in Stock, or choose "' + ing.unit + '" in the unit box.', 'error');
+                    Alert.show(mmTxt('The number of pieces in one ' + ing.unit + ' of ' + ing.name + ' is not set. Set it in Stock, or choose "' + ing.unit + '" in the unit box.'), 'error');
                     return false;
                 }
             } else if (nl.entry === 'small') {
@@ -1953,6 +2070,12 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 else if (!mmSmallOk(q)) {
                     mmEl('mmIngQty').focus();
                     Alert.show('Type whole ' + (mmSmallOf(ing.unit) === 'g' ? 'grams' : 'ml') + ', like 250. No decimals.', 'error');
+                    return false;
+                }
+            } else if (mmIsMeasure(nl.entry)) {
+                if (!(mmLineBase(nl) > 0)) {
+                    mmEl('mmIngQty').focus();
+                    Alert.show(mmTxt(ing.name + ': that amount is too small to record, or ' + mmMeasureName(nl.entry) + ' cannot be used for this item. Choose ' + ing.unit + ' in the unit box.'), 'error');
                     return false;
                 }
             } else if (nl.entry === 'pack' && !(ing.pack_size > 0)) nl.entry = 'base';
@@ -1970,8 +2093,8 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             if (MM_STATE.busy) return;
             const form = mmEl('mmItemForm');
             const fail = function(msg) {
-                if (window.RHFormGuard) RHFormGuard.showError(form, msg);
-                else Alert.show(msg, 'error');
+                if (window.RHFormGuard) RHFormGuard.showError(form, msg); // textContent
+                else Alert.show(mmTxt(msg), 'error'); // HTML: names in msg are staff-typed
             };
             if (window.RHFormGuard) RHFormGuard.showError(form, '');
             const invalid = form.querySelector('.rh-input-invalid');
@@ -2019,6 +2142,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                     if (!(parseFloat(ln.qty) > 0)) return fail('Type how much ' + ln.name + ' one sale uses, or remove it.');
                     if (ln.entry === 'small' && !mmSmallOk(parseFloat(ln.qty))) return fail(ln.name + ': type whole ' + (mmSmallOf(ln.unit) === 'ml' ? 'ml' : 'grams') + ' (like 250), or choose ' + ln.unit + ' in the unit box.');
                     if (ln.entry === 'pieces' && !mmPiecesOk(parseFloat(ln.qty))) return fail(ln.name + ': type whole pieces (1, 2, 3). A quarter, half or three-quarters of a piece is also fine.');
+                    if (mmIsMeasure(ln.entry) && !(mmLineBase(ln) > 0)) return fail(ln.name + ': ' + mmMeasureName(ln.entry) + ' cannot be worked out for this item. Choose ' + ln.unit + ' in the unit box.');
                     if (ln.entry === 'pieces' && !(mmPer(ln) > 0)) return fail(ln.name + ': the number of pieces in one ' + ln.unit + ' is not set. Set it in Stock, or choose \"' + ln.unit + '\" in the unit box.');
                 }
                 fd.set('recipe_changed', '1');
@@ -2026,8 +2150,10 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                     const o = {
                         ingredient_id: l.ingredient_id,
                         quantity: parseFloat(l.qty),
-                        unit: l.entry
+                        unit: mmIsMeasure(l.entry) ? 'measure' : l.entry
                     };
+                    // A drink measure is sent as typed ("2" + "shot"); the server works out the stock figure itself.
+                    if (mmIsMeasure(l.entry)) o.measure = mmMeasureName(l.entry);
                     // Pieces are sent as typed; the server divides by the stock item's own pieces-in-a-unit and stores 6 decimals.
                     if (l.yield_percent > 0) o.yield_percent = l.yield_percent;
                     return o;
@@ -2054,7 +2180,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 }
                 mmCloseItem();
                 MM_STATE.ing = null; // stock amounts change after a sale: reload the list next time
-                Alert.show(res.message || 'Saved.', 'success');
+                Alert.show(mmTxt(res.message || 'Saved.'), 'success');
                 mmRefresh();
             } catch (err) {
                 fail('Network error. Please try again.');
@@ -2090,7 +2216,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                     id: id,
                     menu_type: tab
                 });
-                Alert.show(res.message || 'Done', res.success ? 'success' : 'error');
+                Alert.show(mmTxt(res.message || 'Done'), res.success ? 'success' : 'error');
                 if (res.success) mmRefresh();
             } catch (e) {
                 Alert.show('Could not change availability. Please try again.', 'error');
@@ -2120,7 +2246,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                         id: id,
                         menu_type: tab
                     });
-                    Alert.show(res.message || 'Done', res.success ? 'success' : 'error');
+                    Alert.show(mmTxt(res.message || 'Done'), res.success ? 'success' : 'error');
                     if (res.success) mmRefresh();
                 } catch (e) {
                     Alert.show('Could not delete. Please try again.', 'error');
@@ -2280,7 +2406,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 Alert.show(data.reused ? 'That stock item is already there. It is picked for you.' : 'Stock item added and picked. Type how much one sale uses.', 'success');
                 closeIngredientModal();
             } catch (e) {
-                Alert.show('Could not add the stock item: ' + e.message, 'error');
+                Alert.show('Could not add the stock item: ' + mmTxt(e.message), 'error');
             }
         }
 

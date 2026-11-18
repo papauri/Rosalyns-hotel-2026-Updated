@@ -308,8 +308,8 @@ if (!function_exists('import_analyze_file')) {
                         if ($iso !== $fd['value']) {
                             $bad[] = $where . ': expiry ' . $fd['value'] . ' does not match ' . $fd['source'];
                         }
-                    } elseif (in_array($f, $numeric, true) && ($fd['how'] ?? '') === 'healed:number-unit') {
-                        // self-healed "12 pcs": the number must be exactly the digits of that cell (no conversion, no guess)
+                    } elseif (in_array($f, $numeric, true) && in_array($fd['how'] ?? '', ['healed:number-unit', 'measure-cell'], true)) {
+                        // self-healed "12 pcs" / a count in a measure "66 shots": the number must be exactly the digits of that cell (no conversion, no guess)
                         $hv = import_heal_number_unit($cell['v'], null);
                         if ($hv === null || abs((float)$hv['value'] - (float)$fd['value']) > 1e-9) {
                             $bad[] = $where . ': ' . $f . ' ' . json_encode($fd['value']) . ' is not the number written in ' . $fd['source'];

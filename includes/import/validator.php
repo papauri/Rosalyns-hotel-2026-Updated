@@ -13,6 +13,7 @@
 
 require_once __DIR__ . '/structure.php';
 require_once __DIR__ . '/pack-rule.php';
+require_once __DIR__ . '/measure.php';                // quantities counted in shots / tots / glasses (Step U2 d)
 
 if (!function_exists('import_validate_sheet')) {
 
@@ -106,11 +107,22 @@ if (!function_exists('import_validate_sheet')) {
             // bought by the case, served by the tot / glass: is the count in cases or in single units? (QA Q3)
             $pk = (int)$d['info_pack'];
             $qSrc = (string)($row['computed']['qty_total']['sources'][0] ?? $row['ref']);
-            $q = import_q('count-unit', 'Row ' . $r . ' "' . $nm . '": bought by the ' . $bw . ' of ' . $pk . ' (' . $d['pack_name_src'] . ') and served by the ' . mb_strtolower((string)$f['served_by']['value'])
-                . '. Is the count (' . $qSrc . ') in ' . $bw . 's, or in single units (' . $pk . ' to a ' . $bw . ')?', [
+            $opts = [['key' => 'pack', 'label' => 'In ' . $bw . 's: the stock unit is ' . $bw . ' and ' . import_fmt_money($price) . ' is the price of one ' . $bw],
+                ['key' => 'single', 'label' => 'In single units: ' . import_fmt_money($price) . ' / ' . $pk . ' = ' . import_fmt_money(round($price / $pk, 4)) . ' each (you pick the unit next)']];
+            $served = trim((string)$f['served_by']['value']);
+            $sw = import_norm_text($served);
+            $orServed = '';
+            if (!empty($d['served_portion']) && $sw !== '' && strpos($sw, ' ') === false && !in_array($sw, import_measure_generic_words(), true)) {
+                // counted in the served measure itself (Step U2 d): the count is turned into single units with "how many tots in one?" (asked or from the item's size)
+                $swp = import_measure_plural(mb_strtolower($served), 2);
+                $orServed = ', or in ' . $swp;
+                $opts[] = ['key' => 'portion', 'label' => 'In ' . $swp . ': ' . import_fmt_money($price) . ' / ' . $pk . ' = ' . import_fmt_money(round($price / $pk, 4))
+                    . ' each single unit, and the count is turned into single units (you pick the unit next, then how many ' . $swp . ' are in one)'];
+            }
+            $q = import_q('count-unit', 'Row ' . $r . ' "' . $nm . '": bought by the ' . $bw . ' of ' . $pk . ' (' . $d['pack_name_src'] . ') and served by the ' . mb_strtolower($served)
+                . '. Is the count (' . $qSrc . ') in ' . $bw . 's, or in single units (' . $pk . ' to a ' . $bw . ')' . $orServed . '?', [
                 'sheet' => $sheetName, 'row' => $r, 'cells' => [$qSrc, (string)$d['pack_name_src']],
-                'options' => [['key' => 'pack', 'label' => 'In ' . $bw . 's: the stock unit is ' . $bw . ' and ' . import_fmt_money($price) . ' is the price of one ' . $bw],
-                    ['key' => 'single', 'label' => 'In single units: ' . import_fmt_money($price) . ' / ' . $pk . ' = ' . import_fmt_money(round($price / $pk, 4)) . ' each (you pick the unit next)']],
+                'options' => $opts,
             ]);
             $rowQs[] = $q;
             return;
@@ -311,6 +323,25 @@ if (!function_exists('import_validate_sheet')) {
         $hasUnitCol = isset($by['unit']);
         $undoHeals = array_flip(array_map('strval', (array)($opts['undo_heals'] ?? [])));
         $synonyms = (array)($aliases['unit_synonyms'] ?? []);
+        // a quantity column whose heading names a measure ("Bar Balance (tots)") is counted in that measure (Step U2 d); the word comes from the heading cell
+        $measWords = import_measure_words($aliases);
+        $colMeas = [];
+        foreach (['qty_primary', 'qty_secondary', 'qty_single'] as $qf) {
+            if (isset($by[$qf], $struct['columns'][$by[$qf]])) {
+                $hw = import_measure_in_text((string)($struct['columns'][$by[$qf]]['header'] ?? ''), $measWords);
+                if ($hw !== null) {
+                    $colMeas[$qf] = ['word' => $hw, 'src' => (string)($struct['columns'][$by[$qf]]['header_ref'] ?? '')];
+                }
+            }
+        }
+        // a price column headed "Price per tot" is the price of one measure: never multiplied into a bottle price (asked in resolve)
+        $priceMeas = null;
+        if (isset($by['unit_price'], $struct['columns'][$by['unit_price']])) {
+            $hw = import_measure_in_text((string)($struct['columns'][$by['unit_price']]['header'] ?? ''), $measWords);
+            if ($hw !== null) {
+                $priceMeas = ['word' => $hw, 'src' => (string)($struct['columns'][$by['unit_price']]['header_ref'] ?? '')];
+            }
+        }
         $heals = [];
         $healTotals = [];
         // every repair is counted; the first 1000 of each rule per sheet are kept as records (a CSV where every number has a thousands separator would otherwise
@@ -366,6 +397,7 @@ if (!function_exists('import_validate_sheet')) {
 
             // ---- numbers ----
             $healUnits = [];
+            $qtyMeas = [];
             foreach ($numberFields as $f) {
                 if (!isset($by[$f])) {
                     continue;
@@ -383,6 +415,16 @@ if (!function_exists('import_validate_sheet')) {
                 $src = import_cell_source($name, $cell);
                 if ($p['status'] === 'empty') {
                     continue;
+                }
+                $isQty = in_array($f, ['qty_primary', 'qty_secondary', 'qty_single'], true);
+                if ($p['status'] === 'invalid' && $isQty) {
+                    // "66 shots": a count in a measure (Step U2 d) - the number and the word are both this cell's own; turned into the stock unit later (resolve)
+                    $mc = import_measure_cell($cell['v'], $measWords);
+                    if ($mc !== null && !import_measure_in_name($nameText, $mc['word'])) {
+                        $row['fields'][$f] = ['value' => $mc['value'], 'source' => $src, 'how' => 'measure-cell'];
+                        $qtyMeas[$f] = ['word' => $mc['word'], 'src' => $src];
+                        continue;
+                    }
                 }
                 if ($p['status'] === 'invalid' && !in_array($f, ['unit_price', 'pack_price', 'pack_size'], true)) {
                     // self-healing "number-unit" ("12 pcs"): reversible (the person can undo it, which brings the question back)
@@ -426,6 +468,9 @@ if (!function_exists('import_validate_sheet')) {
                         'text' => 'Read "' . $before . '" as the number ' . import_fmt_heal_num($p['value']) . ' (separators, a decimal comma or a currency word removed; the digits are the cell\'s own).']);
                 }
                 $row['fields'][$f] = ['value' => $p['value'], 'source' => $src, 'how' => $cell['formula'] ? 'formula-result' : 'as-written'];
+                if ($isQty && isset($colMeas[$f]) && !import_measure_in_name($nameText, $colMeas[$f]['word'])) {
+                    $qtyMeas[$f] = $colMeas[$f];
+                }
                 if ($f === 'unit_price') {
                     // the price as typed (for the price check: "2.875" vs "2,875"); never imported, only compared
                     $row['fields'][$f]['raw'] = import_norm_ws((string)(($cell['raw'] !== null && $cell['raw'] !== '') ? $cell['raw'] : $cell['v']));
@@ -541,6 +586,28 @@ if (!function_exists('import_validate_sheet')) {
             }
             if ($parts && !$unknownQty) {
                 $row['computed']['qty_total'] = ['value' => array_sum($parts), 'sources' => $srcs, 'how' => 'sum-of-cells'];
+            }
+            // ---- counted in a measure: which quantity cells, in which word (turned into the stock unit by resolve, never here) ----
+            if ($qtyMeas) {
+                $mWords = [];
+                foreach ($qtyMeas as $qm) {
+                    $mWords[import_measure_singular($qm['word'])] = $qm['word'];
+                }
+                if (count($mWords) > 1) {
+                    $qSrcs = [];
+                    foreach ($qtyMeas as $qf => $qm) {
+                        $qSrcs[] = $row['fields'][$qf]['source'];
+                    }
+                    $rowQs[] = import_q('bad-value', 'Row ' . $r . ': the quantity cells are counted in different measures ("' . implode('" and "', array_values($mWords)) . '"), so the stock cannot be worked out. Fix it in the sheet and upload again, or skip this row.', [
+                        'sheet' => $name, 'row' => $r, 'cells' => array_values(array_unique($qSrcs)), 'bad' => true,
+                        'options' => [['key' => 'skip', 'label' => 'Skip this row']],
+                    ]);
+                } else {
+                    $row['qty_measure'] = $qtyMeas;
+                }
+            }
+            if ($priceMeas !== null && isset($row['fields']['unit_price'])) {
+                $row['price_measure'] = $priceMeas;
             }
             if (!isset($row['fields']['qty_primary']) && !isset($row['fields']['qty_secondary']) && !isset($row['fields']['qty_single'])) {
                 $row['warnings'][] = ['code' => 'no-quantity', 'text' => 'No quantity found for this row, so no opening stock is proposed.'];

@@ -120,6 +120,19 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         throw new RuntimeException($measureErr);
                     }
                 }
+                /* Optional bottle size in ml (Step U2): only a form that showed the field (volume_present) can change it. A stock
+                 * unit that is itself a volume (litre, ml) or a weight never keeps one. */
+                $volOn = rh_stock_drink_ready($pdo) && !empty($_POST['volume_present']);
+                $volNew = null;
+                if ($volOn) {
+                    [$volNew, $volErr] = rh_drink_volume_from_input($_POST['volume_ml'] ?? '');
+                    if ($volErr !== null) {
+                        throw new RuntimeException($volErr);
+                    }
+                    if (rh_drink_unit_ml($unit) !== null || rh_drink_unit_is_weight($unit) || rh_stock_unit_is_container($unit)) { // litre stock, weights, crates / packs: no bottle size
+                        $volNew = null;
+                    }
+                }
                 if ($prefSupplier !== null) {
                     $supChk = $pdo->prepare("SELECT COUNT(*) FROM stock_suppliers WHERE id = ?");
                     $supChk->execute([$prefSupplier]);
@@ -128,7 +141,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
-                rh_with_create_lock($pdo, 'stock_ingredient', function () use ($pdo, $action, $name, $category, $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier, $packName, $packSize, $piecesPerUnit, $editId, $measureOn, $measureNew, $user, &$message) {
+                rh_with_create_lock($pdo, 'stock_ingredient', function () use ($pdo, $action, $name, $category, $unit, $minQty, $yield, $notes, $reorderPoint, $parLevel, $leadTime, $prefSupplier, $packName, $packSize, $piecesPerUnit, $editId, $measureOn, $measureNew, $volOn, $volNew, $user, &$message) {
                   $pdo->beginTransaction(); // the item and its count measure (plus the open count lines it re-works) change together
                   try {
                     // Archived ingredients still block the name (restoring one would clash).
@@ -146,6 +159,9 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         $message = "Ingredient \"{$name}\" added.";
                         if ($measureOn && $measureNew !== null) {
                             rh_stock_measure_save($pdo, $newIngId, $measureNew, (int)$user['id'], 'Stock Items (new item)');
+                        }
+                        if ($volOn && $volNew !== null) {
+                            rh_drink_volume_save($pdo, $newIngId, $volNew, (int)$user['id'], 'Stock Items (new item)');
                         }
                     } else {
                         /* A unit change does not convert anything: quantity on hand, batches, cost per
@@ -188,6 +204,9 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                                 }
                             }
                         }
+                        if ($volOn && rh_drink_volume_save($pdo, $editId, $volNew, (int)$user['id'])) {
+                            $message .= ' Bottle size ' . ($volNew === null ? 'cleared.' : 'saved: ' . rh_stock_qty_fmt($volNew, 0) . ' ml.') . ' Stock and saved recipe amounts are unchanged.';
+                        }
                     }
                     $pdo->commit();
                   } catch (Throwable $txE) {
@@ -197,6 +216,27 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw $txE;
                   }
                 });
+            } elseif ($action === 'save_drink_measures') {
+                // The hotel's one list of drink measures (Step U2). Sizes only: stock, cost and saved recipes do not change.
+                if (!rh_stock_drink_ready($pdo)) {
+                    throw new RuntimeException('Drink measures are not set up on this system yet.');
+                }
+                $dmNames = $_POST['measure_name'] ?? [];
+                $dmMls = $_POST['measure_ml'] ?? [];
+                if (!is_array($dmNames) || !is_array($dmMls) || count($dmNames) > 100) {
+                    throw new RuntimeException('The measures list was not sent correctly. Reload the page and try again.');
+                }
+                $dmRows = [];
+                foreach (array_values($dmNames) as $dmK => $dmName) {
+                    $dmRows[] = ['name' => rh_clean_text((string)$dmName), 'ml' => (string)(array_values($dmMls)[$dmK] ?? '')];
+                }
+                [$dmList, $dmErr] = rh_drink_measures_clean($dmRows);
+                if ($dmErr !== null) {
+                    throw new RuntimeException($dmErr);
+                }
+                $message = rh_drink_measures_save($pdo, $dmList, (int)$user['id'])
+                    ? 'Drink measures saved. Stock, cost and recipe amounts already saved are unchanged.'
+                    : 'No change to the drink measures.';
             } elseif ($action === 'archive') {
                 $id = (int)($_POST['id'] ?? 0);
                 /* Owner 2026-10-19: an archived ingredient drops out of the stock valuation, so stock
@@ -590,7 +630,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
     // person starting again (the reason is shown inside the form).
     if ($error && in_array((string)($action ?? ''), ['add', 'update'], true)) {
         $keep = [];
-        foreach (['id', 'name', 'category', 'unit', 'min_quantity', 'yield_percent', 'notes', 'reorder_point', 'par_level', 'preferred_supplier_id', 'lead_time_days', 'pack_name', 'pack_size', 'pieces_per_unit', 'measure_big_name', 'measure_small_name', 'measure_per_big', 'measure_stock_side'] as $keepField) {
+        foreach (['id', 'name', 'category', 'unit', 'min_quantity', 'yield_percent', 'notes', 'reorder_point', 'par_level', 'preferred_supplier_id', 'lead_time_days', 'pack_name', 'pack_size', 'pieces_per_unit', 'measure_big_name', 'measure_small_name', 'measure_per_big', 'measure_stock_side', 'volume_ml'] as $keepField) {
             $keep[$keepField] = (string)($_POST[$keepField] ?? '');
         }
         $_SESSION['stock_ingredient_form_keep'] = ['action' => (string)$action, 'error' => $error, 'post' => $keep];
@@ -617,6 +657,8 @@ $supplierOptions = [];
 $stockFormReopen = null; // set when the last Add / Edit was refused
 $measureReady = rh_stock_measure_ready($pdo); // migration 088: count measures (bottle / shot)
 $measureSizes = $measureReady ? rh_stock_measure_sizes() : ["shot_ml" => 0, "glass_ml" => 0];
+$drinkReady = rh_stock_drink_ready($pdo); // migration 089: bottle size + the hotel's drink measures list
+$drinkList = $drinkReady ? rh_drink_measures_list() : [];
 try {
     $supplierOptions = $pdo->query("SELECT id, name FROM stock_suppliers WHERE is_active = 1 ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
 } catch (Throwable $e) { $supplierOptions = []; }
@@ -674,6 +716,7 @@ if (!$error || strpos($error, 'Stock tables not yet') === false) {
                 foreach ($ingredients as $ingKeepRow) {
                     if ((int)$ingKeepRow['id'] === (int)($keepData['id'] ?? 0)) {
                         $keepData['unit_locked'] = !empty($ingKeepRow['unit_locked']);
+                        $keepData['cost_per_unit'] = (string)$ingKeepRow['cost_per_unit']; // for the cost-per-measure line
                         $keepData['unit'] = $keepData['unit_locked'] ? (string)$ingKeepRow['unit'] : $keepData['unit'];
                         break;
                     }
@@ -796,13 +839,16 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 <?php if (!empty($ingredients)): ?>
                     <a class="btn-secondary" href="?<?php echo $ingFilter !== '' ? 'filter=' . $ingFilter . '&amp;' : ''; ?>export=csv" style="display:inline-flex; align-items:center; gap:6px; text-decoration:none;" title="<?php echo $ingFilter === 'low' ? 'Download low-stock ' . strtolower($stockNounPl) . ' only (this filtered list)' : 'Download all ' . strtolower($stockNounPl); ?> as an Excel-compatible spreadsheet"><i class="fas fa-file-excel"></i> <?php echo $ingFilter === 'low' ? 'Export low-stock items' : 'Export to Excel'; ?></a>
                 <?php endif; ?>
+                <?php if ($drinkReady): ?>
+                    <button type="button" class="btn-secondary" onclick="openModal('drinkMeasuresModal')" title="The hotel's list of drink measures (shot, glass of wine...) and their size in ml, used to type recipes and counts in measures"><i class="fas fa-wine-glass"></i> Drink measures</button>
+                <?php endif; ?>
                 <button class="btn-add" onclick="openIngredientModal()"><i class="fas fa-plus"></i> Add <?php echo $stockNoun; ?></button>
             </div>
         </div>
 
-        <?php if ($message): showAlert($message, 'success');
+        <?php if ($message): showAlert(htmlspecialchars($message, ENT_QUOTES, 'UTF-8'), 'success'); // the toast shows HTML; item names are staff-typed
         endif; ?>
-        <?php if ($error):   showAlert($error,   'error');
+        <?php if ($error):   showAlert(htmlspecialchars($error, ENT_QUOTES, 'UTF-8'),   'error');
         endif; ?>
 
         <div class="info-banner">
@@ -1115,6 +1161,26 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                         <input type="number" name="pieces_per_unit" id="ing_pieces" step="any" min="0.01" placeholder="e.g. 6">
                     </div>
                 </div>
+                <?php if ($drinkReady): ?>
+                <fieldset class="ing-measure" id="ing_drink">
+                    <legend>Bottle size and drink measures (optional) <i class="help" data-tip="For drinks. With the size of one bottle, recipes can be typed as 2 shots or 50 ml and are worked out into the stock unit. Stock, cost and sales stay in the unit above. Sizes of a shot, glass and so on come from the Drink measures list.">?</i></legend>
+                    <input type="hidden" name="volume_present" value="1">
+                    <div class="form-row" id="ing_vol_row">
+                        <div>
+                            <label for="ing_vol" id="ing_vol_lbl">Size of one bottle in ml <i class="help" data-tip="How many ml one of the stock unit holds, e.g. 1000 for a 1 litre bottle or 750 for a 75 cl bottle. Leave empty when the name already says it (Gin 750ml).">?</i></label>
+                            <input type="number" name="volume_ml" id="ing_vol" step="any" min="0" max="100000" placeholder="e.g. 750">
+                        </div>
+                    </div>
+                    <p class="field-note" id="ing_drink_line"></p>
+                    <div class="ing-drink-pick" id="ing_drink_pick_row" hidden>
+                        <label for="ing_drink_pick">Show it in <i class="help" data-tip="Pick a measure from the hotel's list to see how many are in one bottle and what one costs. Nothing is saved from here.">?</i></label>
+                        <select id="ing_drink_pick" aria-label="Measure to show"></select>
+                        <?php if ($measureReady): ?>
+                            <button type="button" class="btn-secondary" id="ing_drink_use" onclick="ingDrinkUse()" title="Fills the count measure below (smaller measure and how many in one bigger). Check it, then press Save.">Use this for counting</button>
+                        <?php endif; ?>
+                    </div>
+                </fieldset>
+                <?php endif; ?>
                 <?php if ($measureReady): ?>
                 <fieldset class="ing-measure" id="ing_measure">
                     <legend>Count in a smaller or bigger measure (optional) <i class="help" data-tip="For bar stock counted by the shot or glass. Stock, prices and sales stay in the unit above; a stock count can then be typed in either measure or both, e.g. 2 bottles + 7 shots, and is worked out into the stock unit. Clear all four fields to remove it.">?</i></legend>
@@ -1362,6 +1428,46 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
         </div>
     </div>
 
+    <?php if ($drinkReady): ?>
+    <!-- Drink measures (Step U2): the hotel's one list of measures and their size in ml -->
+    <div class="modal-overlay" id="drinkMeasuresModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Drink measures</h3>
+                <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('drinkMeasuresModal')">&times;</button>
+            </div>
+            <form method="POST" id="drinkMeasuresForm" data-busy-text="Saving...">
+                <div class="modal-body">
+                    <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                    <input type="hidden" name="action" value="save_drink_measures">
+                    <p class="field-note">One list for the whole hotel. In Menu Management and Recipes a drink can then be typed as 2 shots or 1 glass of wine, and it is worked out into the stock unit when saved. Changing a size here does not change stock, cost or recipe amounts already saved. ml can always be used, so it is not in the list.</p>
+                    <div class="dm-list">
+                        <div class="dm-row dm-head">
+                            <span>Measure <i class="help" data-tip="The name staff pick, e.g. shot, tot, double, glass of wine, cocktail pour. Up to 30 characters.">?</i></span>
+                            <span>Size in ml <i class="help" data-tip="How many ml one of this measure holds, e.g. 25 or 30 for a shot, 175 for a glass of wine. Above 0, at most <?php echo number_format(RH_DRINK_MEASURE_MAX_ML); ?>.">?</i></span>
+                            <span></span>
+                        </div>
+                        <div id="dm_rows">
+                            <?php foreach ($drinkList as $dm): ?>
+                                <div class="dm-row">
+                                    <input type="text" name="measure_name[]" maxlength="30" value="<?php echo htmlspecialchars($dm['name']); ?>" aria-label="Measure name">
+                                    <input type="number" name="measure_ml[]" step="any" min="0.01" max="<?php echo (int)RH_DRINK_MEASURE_MAX_ML; ?>" value="<?php echo htmlspecialchars(rh_stock_qty_fmt((float)$dm['ml'], 0, '')); ?>" aria-label="Size in ml">
+                                    <button type="button" class="btn-secondary dm-remove" onclick="dmRemoveRow(this)" aria-label="Remove this measure">Remove</button>
+                                </div>
+                            <?php endforeach; ?>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-secondary dm-add" onclick="dmAddRow()"><i class="fas fa-plus"></i> Add a measure</button>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-secondary" onclick="closeModal('drinkMeasuresModal')">Cancel</button>
+                    <button type="submit" class="btn-primary">Save measures</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <script src="js/stock-drink-measures.js?v=<?php echo @filemtime(__DIR__ . '/js/stock-drink-measures.js'); ?>"></script>
+    <?php endif; ?>
     <?php require_once 'includes/admin-footer.php'; ?>
     <script src="js/admin-form-guard.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-form-guard.js'); ?>"></script>
     <script>
@@ -1460,6 +1566,11 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 if (!data) document.getElementById('ing_m_side').dataset.touched = '';
                 ingMeasureSync();
             }
+            if (document.getElementById('ing_drink')) {
+                document.getElementById('ing_vol').value = data && parseFloat(data.volume_ml) > 0 ? parseFloat(data.volume_ml) : '';
+                ingDrinkCost = data ? (parseFloat(data.cost_per_unit) || 0) : 0;
+                ingDrinkSync();
+            }
             openModal('ingredientModal');
         }
 
@@ -1533,6 +1644,124 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
         if (document.getElementById('ing_measure')) {
             document.getElementById('ing_name').addEventListener('input', ingMeasureSync);
             document.getElementById('ing_unit').addEventListener('change', ingMeasureSync);
+        }
+
+        /* Bottle size and drink measures (Step U2). Same maths as the server (admin/js/stock-drink-measures.js).
+         * One plain line: "1 L bottle · 1 shot = 30 ml → 1 bottle = 33.3 shots · cost per shot MWK 900.00". */
+        const ING_DRINK_LIST = <?php echo json_encode($drinkList); ?>;
+        const ING_DRINK_CUR = <?php echo json_encode((string)$currency_symbol); ?>;
+        let ingDrinkCost = 0;
+        function ingDrinkVal(id) {
+            const el = document.getElementById(id);
+            return el ? el.value : '';
+        }
+        function ingDrinkItem() {
+            return {
+                name: ingDrinkVal('ing_name'),
+                unit: ingDrinkVal('ing_unit'),
+                volume_ml: ingDrinkVal('ing_vol'),
+                measure_big_name: ingDrinkVal('ing_m_big').trim(),
+                measure_small_name: ingDrinkVal('ing_m_small').trim(),
+                measure_per_big: ingDrinkVal('ing_m_n'),
+                measure_stock_side: document.getElementById('ing_measure') ? ingDrinkVal('ing_m_side') : ''
+            };
+        }
+        /* The word for one stock unit in the line: the unit itself (bottle, can...), "bottle" for pieces. */
+        function ingDrinkWord(unit) {
+            return unit && !/^(pcs|pieces?|each|ea|units?)$/i.test(unit) ? unit : 'bottle';
+        }
+        function ingDrinkSize(ml) {
+            return ml >= 1000 ? RHDrink.fmt(ml / 1000, 3) + ' L' : RHDrink.fmt(ml, 2) + ' ml';
+        }
+        function ingDrinkSync() {
+            const box = document.getElementById('ing_drink');
+            if (!box || !window.RHDrink) return;
+            const ing = ingDrinkItem();
+            const unit = (ing.unit || '').trim();
+            const weight = RHDrink.isWeight(unit) || RHDrink.isContainer(unit) || /^(slices?|tsp|tbsp)$/i.test(unit); // crates / packs hold many bottles: no bottle size
+            box.hidden = weight; // kg / g stock, spoons, slices: no drink measures
+            const volUnit = RHDrink.unitMl(unit) !== null;
+            document.getElementById('ing_vol_row').hidden = volUnit;
+            const lbl = document.getElementById('ing_vol_lbl');
+            const smallSide = ing.measure_stock_side === 'small' && ing.measure_big_name;
+            const bigWord = smallSide ? ing.measure_big_name : ingDrinkWord(unit);
+            lbl.firstChild.textContent = 'Size of one ' + bigWord + ' in ml ';
+            const line = document.getElementById('ing_drink_line');
+            const pickRow = document.getElementById('ing_drink_pick_row');
+            const pick = document.getElementById('ing_drink_pick');
+            const size = weight ? null : RHDrink.itemMl(Object.assign({}, ing, { unit: unit }));
+            if (!size) {
+                line.textContent = weight ? '' : 'Type the size of one ' + bigWord + ' in ml (or put it in the name, like Gin 750ml) to use shots, glasses or ml in recipes.';
+                pickRow.hidden = true;
+                return;
+            }
+            const whole = size.source === 'unit' ? size.perUnit : size.container; // ml in one whole bottle (or one litre)
+            const wholeWord = size.source === 'unit' ? unit : bigWord;
+            const src = size.source === 'name' ? ' (from the name)' : '';
+            if (!ING_DRINK_LIST.length) {
+                line.textContent = '1 ' + wholeWord + ' = ' + ingDrinkSize(whole) + src + '. Add shots, glasses and so on under Drink measures to see how many are in one.';
+                pickRow.hidden = true;
+                return;
+            }
+            const keep = pick.value;
+            if (pick.options.length !== ING_DRINK_LIST.length) {
+                pick.innerHTML = '';
+                ING_DRINK_LIST.forEach(function (m) {
+                    const o = document.createElement('option');
+                    o.value = m.name;
+                    o.textContent = m.name + ' (' + RHDrink.fmt(m.ml, 2) + ' ml)';
+                    pick.appendChild(o);
+                });
+            }
+            const shot = ING_DRINK_LIST.find(function (m) { return m.name.toLowerCase() === 'shot'; });
+            pick.value = keep && ING_DRINK_LIST.some(function (m) { return m.name === keep; }) ? keep : (shot ? shot.name : ING_DRINK_LIST[0].name);
+            const m = ING_DRINK_LIST.find(function (x) { return x.name === pick.value; });
+            const n = whole / m.ml;
+            let t;
+            if (size.source === 'unit' && size.perUnit < 100) {
+                // Stock kept in ml or cl: say what one measure is in that unit.
+                t = 'Stock in ' + unit + ' · 1 ' + m.name + ' = ' + RHDrink.fmt(m.ml / size.perUnit, 2) + ' ' + unit;
+            } else {
+                t = (size.source === 'unit' ? '1 ' + unit : ingDrinkSize(whole) + ' ' + wholeWord) + src + ' · 1 ' + m.name + ' = ' + RHDrink.fmt(m.ml, 2) + ' ml → 1 ' + wholeWord + ' = ' + RHDrink.fmt(n, 1) + ' ' + RHDrink.plural(m.name, n);
+            }
+            if (ingDrinkCost > 0) t += ' · cost per ' + m.name + ' ' + ING_DRINK_CUR + ' ' + (ingDrinkCost * m.ml / size.perUnit).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            line.textContent = t;
+            pickRow.hidden = false;
+            const use = document.getElementById('ing_drink_use');
+            if (use) use.dataset.n = String(Math.round(n * 10000) / 10000);
+        }
+        /* Fills the count measure (Step U1) with the picked measure: suggestion only, saved with Save. */
+        function ingDrinkUse() {
+            const pick = document.getElementById('ing_drink_pick');
+            const use = document.getElementById('ing_drink_use');
+            if (!pick || !use || !document.getElementById('ing_measure') || !(parseFloat(use.dataset.n) > 0)) return;
+            const unit = (document.getElementById('ing_unit').value || '').trim();
+            document.getElementById('ing_m_small').value = pick.value;
+            document.getElementById('ing_m_n').value = use.dataset.n;
+            if (!document.getElementById('ing_m_big').value.trim()) document.getElementById('ing_m_big').value = ingDrinkWord(unit);
+            ingMeasureSync();
+            ingDrinkSync();
+            document.getElementById('ing_m_n').focus();
+        }
+        if (document.getElementById('ing_drink')) {
+            document.getElementById('ingredientForm').addEventListener('input', ingDrinkSync);
+            document.getElementById('ingredientForm').addEventListener('change', ingDrinkSync);
+        }
+        /* Drink measures list: add / remove rows (blank rows are ignored on Save). */
+        function dmAddRow() {
+            const body = document.getElementById('dm_rows');
+            if (!body) return;
+            const row = document.createElement('div');
+            row.className = 'dm-row';
+            row.innerHTML = '<input type="text" name="measure_name[]" maxlength="30" placeholder="e.g. tot" aria-label="Measure name">' +
+                '<input type="number" name="measure_ml[]" step="any" min="0.01" max="<?php echo (int)RH_DRINK_MEASURE_MAX_ML; ?>" placeholder="e.g. 30" aria-label="Size in ml">' +
+                '<button type="button" class="btn-secondary dm-remove" onclick="dmRemoveRow(this)" aria-label="Remove this measure">Remove</button>';
+            body.appendChild(row);
+            row.querySelector('input').focus();
+        }
+        function dmRemoveRow(btn) {
+            const row = btn.closest('.dm-row');
+            if (row) row.remove();
         }
 
         /* Pieces in one unit: only for container units (packet, box, tray...); a dozen is always 12. */

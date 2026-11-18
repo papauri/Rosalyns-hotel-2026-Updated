@@ -27,6 +27,7 @@ require_once dirname(__DIR__) . '/form-validation.php';                         
 require_once __DIR__ . '/price-check.php';                                         // plausibility of a price (evidence from this hotel's own data) + storage limits
 require_once __DIR__ . '/infer.php';                                               // evidence-based unit / category suggestions + unit spelling
 require_once __DIR__ . '/case-signals.php';                                        // "is this a case price?" - the one shared judge (also used by Stock > Ingredients)
+require_once __DIR__ . '/measure.php';                                             // counts in shots / tots / glasses -> the stock unit (Step U2 d)
 
 if (!function_exists('import_resolve')) {
 
@@ -84,6 +85,9 @@ if (!function_exists('import_resolve')) {
             if ($p < 2 || $p > 100000) {
                 return 'The pack size must be a whole number from 2 to 100000.';
             }
+        }
+        if (($q['type'] ?? '') === 'measure-n' && $a['key'] === 'n' && import_measure_n_valid($a['pack_size'] ?? null) === null) {
+            return 'Enter how many are in one (a number from 1 to ' . import_measure_fmt(import_measure_max_n()) . ').';
         }
         return '';
     }
@@ -319,7 +323,7 @@ if (!function_exists('import_resolve')) {
                 $cat = $row['category'] !== null && $row['category'] !== '' ? $row['category'] : $cleanSheet;
                 $vp = null;
                 $qty = isset($row['computed']['qty_total']) && is_numeric($row['computed']['qty_total']['value']) ? (float)$row['computed']['qty_total']['value'] : null;
-                if (!$hasPq && $qty !== null && $qty > 0) {
+                if (!$hasPq && $qty !== null && $qty > 0 && empty($row['qty_measure'])) {
                     foreach ((array)$row['ignored'] as $ig) {
                         if (($ig['field'] ?? '') !== 'total_cost' || !empty($ig['unknown']) || $ig['value'] === null) {
                             continue;
@@ -517,7 +521,7 @@ if (!function_exists('import_resolve')) {
     {
         $u = trim((string)($row['fields']['unit']['value'] ?? '')) !== '' ? trim((string)$row['fields']['unit']['value']) : $unit;
         $per = $u !== '' ? 'per ' . $u : 'per unit';
-        $qty = $row['computed']['qty_total']['value'] ?? null;
+        $qty = empty($row['qty_measure']) ? ($row['computed']['qty_total']['value'] ?? null) : null;       // a count in tots is not in the price's unit
         $t = 'Row ' . $row['row'] . ' "' . $row['fields']['item_name']['value'] . '": the unit price is ' . import_fmt_money($price) . ' ' . $per . ' (' . $src . '). '
             . 'This hotel\'s own data says it may be a case price: ' . $reason;
         if ($qty !== null && is_numeric($qty) && (float)$qty > 0) {
@@ -645,6 +649,8 @@ if (!function_exists('import_resolve')) {
                     'min' => isset($f['min_level']) ? $f['min_level']['value'] : null, 'remarks' => isset($f['remarks']) ? $f['remarks']['value'] : null,
                     'qty' => isset($row['computed']['qty_total']) ? $row['computed']['qty_total']['value'] : null,
                     'qty_unknown' => (bool)array_intersect(array_keys($row['unknown']), ['qty_primary', 'qty_secondary', 'qty_single']),
+                    'qty_meas' => import_measure_row_split($row),           // part of the count in shots / tots / glasses (Step U2 d): turned into the stock unit below
+                    'price_meas' => $row['price_measure'] ?? null,          // the price column is headed as a price per tot (asked below, never multiplied)
                     'category' => $row['category'] !== null && $row['category'] !== '' ? $row['category'] : $cleanSheet,
                     'category_how' => $row['category'] !== null && $row['category'] !== '' ? 'section-row' : 'sheet-name',
                     'category_source' => $row['category'] !== null && $row['category'] !== '' ? $row['category_source'] : null,
@@ -741,6 +747,19 @@ if (!function_exists('import_resolve')) {
                                 $fin['pack_cell'] = $pr['pack_src'] ?? ($f['pack_size']['source'] ?? null);
                                 $fin['pack_auto'] = false;
                                 $fin['pack_reason'] = '';
+                            } elseif ($a === 'portion' && $pr && !empty($pr['info_pack']) && $origPriceSource !== null && isset($f['served_by'])) {
+                                // counted in the served measure itself (Step U2 d): single units as above, and the whole count is in that measure
+                                $fin['unit_raw'] = null;
+                                $fin['unit_source'] = null;
+                                $fin['pack'] = (int)$pr['info_pack'];
+                                $fin['pack_source'] = $origPriceSource;
+                                $fin['pack_cell'] = $pr['pack_src'] ?? ($f['pack_size']['source'] ?? null);
+                                $fin['pack_auto'] = false;
+                                $fin['pack_reason'] = '';
+                                if ($fin['qty'] !== null && is_numeric($fin['qty'])) {
+                                    $fin['qty_meas'] = ['word' => mb_strtolower(trim((string)$f['served_by']['value'])), 'amount' => (float)$fin['qty'], 'plain' => 0.0,
+                                        'srcs' => (array)($row['computed']['qty_total']['sources'] ?? [])];
+                                }
                             } elseif ($a === 'skip') {
                                 $skip = 'Skipped by you.';
                             }
@@ -1101,6 +1120,39 @@ if (!function_exists('import_resolve')) {
                     $costHow = ($packReason !== '' && ($first['price_how'] ?? 'as-written') === 'as-written') ? $packReason : ($first['price_how'] ?? 'as-written');
                 }
             }
+            // ---- a price column headed "per tot": the price of ONE measure. Never multiplied by N into a stock-unit cost; asked (Step U2 d, accounting gate) ----
+            $pm = null;
+            foreach ($ms as $mm) {
+                if (!empty($mm['fin']['price_meas']) && $mm['fin']['price_source'] !== null && $mm['fin']['price_source'] === $first['price_source']) {
+                    $pm = $mm['fin']['price_meas'];
+                    break;
+                }
+            }
+            if ($pm !== null && $cost !== null) {
+                $pw = import_measure_singular((string)$pm['word']);
+                $xq = $ans(import_xq('price-per-measure', $ms[0]['sheet'] . '|' . $pw,
+                    'Sheet "' . $ms[0]['sheet'] . '": the price column is headed as a price per ' . $pw . ' (' . $pm['src'] . '). A cost is kept per stock unit (bottle, can ...) and a price per '
+                    . $pw . ' is never multiplied up into one. Leave the cost blank for these items (add it later in Stock), or use each price exactly as written (not divided by a pack size, not multiplied) as the cost of one stock unit?',
+                    [['key' => 'drop', 'label' => 'Leave the cost blank (add it later in Stock)'], ['key' => 'keep', 'label' => 'Use each price exactly as written as the cost of one stock unit, not divided or multiplied by anything (the heading is wrong)']],
+                    ['sheet' => $ms[0]['sheet'], 'cells' => [(string)$pm['src']]]));
+                $xq = import_measure_share_xq($extra, $xq, array_map(function ($x) {
+                    return $x['rec']['uid'];
+                }, $ms), [(string)$first['price_source']]);
+                if ($xq['answer'] === null) {
+                    $open[] = $xq['id'];
+                } elseif ($xq['answer'] === 'drop') {
+                    $cost = null;
+                    $costHow = null;
+                    $first['price'] = null;
+                    $pack = null;
+                    $warn[] = 'The price in ' . $first['price_source'] . ' is a price per ' . $pw . ', so no cost is set: add the cost of one stock unit later in Stock.';
+                } elseif ($xq['answer'] === 'keep' && $pack) {
+                    // "exactly as written": the pack-price division above is undone; the pack size itself stays as the sheet gave it
+                    $cost = round((float)$first['price'], 4);
+                    $costHow = 'as-written';
+                    $warn[] = 'The price in ' . $first['price_source'] . ' is used exactly as written as the cost of one stock unit, not divided by the pack of ' . $pack . '.';
+                }
+            }
             // match with what is already in stock
             $lookupName = $first['match_name'] ?? $first['name'];
             $m = import_match_existing($lookupName, $ctx);
@@ -1133,6 +1185,143 @@ if (!function_exists('import_resolve')) {
                             'source' => (string)($first['unit_source'] ?? ''), 'before' => trim((string)$rawUnit), 'after' => $unit, 'undoable' => true, 'item' => $first['name'],
                             'text' => 'Read the unit "' . trim((string)$rawUnit) . '" as "' . $unit . '" (the same unit, spelled the way your stock spells it).'];
                         }
+                    }
+                }
+            }
+            // ---- a count in shots / tots / glasses: turned into the stock unit with N (Step U2 d, measure.php). Never a guess: the item's own measure,
+            // its size / the hotel's measure size, or the person's answer. Costs are never divided by N. ----
+            $qtyHow = null;
+            $measureSave = null;
+            $measWords = [];
+            foreach ($ms as $mm) {
+                if (!empty($mm['fin']['qty_meas']) && (float)$mm['fin']['qty_meas']['amount'] > 0) {    // 0 tots is 0 bottles whatever N is: nothing to ask
+                    $measWords[import_measure_singular((string)$mm['fin']['qty_meas']['word'])] = (string)$mm['fin']['qty_meas']['word'];
+                }
+            }
+            if ($measWords && !$unknownQty) {
+                $stockUnit = $ex ? (string)$ex['unit'] : (string)($unit ?? '');
+                if ($stockUnit === '') {
+                    // a new item with no unit in the file: the unit the person already chose for it (or for its sheet), the same answers the no-unit pass reads
+                    $cand = '';
+                    $uf = $unitFor[(string)$it['nk']] ?? null;
+                    if (is_array($uf) && isset($uf['unit'])) {
+                        $cand = (string)$uf['unit'];
+                    } else {
+                        $nu = $answers[import_xq('no-unit', (string)$ms[0]['sheet'], '', [])['qkey']]['key'] ?? '';
+                        $cand = (is_string($nu) && strpos($nu, 'unit:') === 0) ? substr($nu, 5) : '';
+                    }
+                    foreach ($unitOptions as $uo) {
+                        if ($cand !== '' && mb_strtolower((string)$uo) === mb_strtolower($cand)) {
+                            $stockUnit = (string)$uo;
+                            break;
+                        }
+                    }
+                }
+                $nBy = [];
+                $howBy = [];
+                $waitMeas = false;
+                $askOpen = false;
+                foreach ($measWords as $ws => $wWritten) {
+                    $d = import_measure_decide(['word' => $wWritten, 'stock_unit' => $stockUnit, 'name' => (string)$first['name'], 'existing' => $ex,
+                        'list' => (array)($ctx['drink_measures'] ?? []), 'synonyms' => $synonyms, 'nk' => (string)$it['nk'],
+                        'containers' => (array)($ctx['container_words'] ?? import_default_aliases()['container_words'])]);
+                    if ($d['mode'] === 'wait') {
+                        $waitMeas = true;
+                        continue;
+                    }
+                    if ($d['mode'] === 'none') {
+                        $nBy[$ws] = 1.0;
+                        $howBy[$ws] = '';
+                        continue;
+                    }
+                    if ($d['kept'] !== null) {
+                        $warn[] = '"' . ($ex['name'] ?? $first['name']) . '" already has its own count measure (' . import_measure_fmt((float)$d['kept']['n']) . ' ' . import_measure_plural((string)$d['kept']['small'], (float)$d['kept']['n']) . ' in one '
+                            . $d['kept']['big'] . '), not in ' . $wWritten . ': it is kept as it is.';
+                    }
+                    if ($d['mode'] === 'n') {
+                        $nBy[$ws] = (float)$d['n'];
+                        $howBy[$ws] = $d['how'] === 'item' ? 'this item\'s own count measure'
+                            : import_measure_fmt((float)$d['size_ml']) . ' ml / ' . import_measure_fmt((float)$d['measure_ml']) . ' ml ' . $ws . ' on your measures list';
+                        continue;
+                    }
+                    // ask: one question per measure + size + stock unit (items without a size are asked one by one)
+                    $sizeTxt = $d['size_ml'] !== null ? ' ' . import_measure_fmt((float)$d['size_ml']) . ' ml' : '';
+                    $wp = import_measure_plural($ws, 2);
+                    $xq = $ans(import_xq('measure-n', $d['key'],
+                        'How many ' . $wp . ' are in one' . $sizeTxt . ' ' . $stockUnit . ($d['size_ml'] === null ? ' of "' . ($ex['name'] ?? $first['name']) . '"' : '') . '? The count'
+                        . ' is written in ' . $wWritten . ' and stock is kept in ' . import_measure_plural($stockUnit, 2) . '. Type a number from 1 to ' . import_measure_fmt(import_measure_max_n())
+                        . '; it is saved on the item as its count measure. Costs are not changed by it.',
+                        [['key' => 'n', 'label' => 'Use this number'], ['key' => 'skip', 'label' => 'Skip these rows']],
+                        ['sheet' => $ms[0]['sheet'], 'measure_word' => $ws, 'measure_unit' => $stockUnit, 'measure_size_ml' => $d['size_ml']]));
+                    $cellsM = [];
+                    foreach ($ms as $mm) {
+                        if (!empty($mm['fin']['qty_meas'])) {
+                            $cellsM = array_merge($cellsM, (array)$mm['fin']['qty_meas']['srcs']);
+                        }
+                    }
+                    $nAns = ($xq['answer'] === 'n') ? import_measure_n_valid($xq['answer_detail']['pack_size'] ?? null) : null;
+                    if ($xq['answer'] === 'n' && $nAns === null) {
+                        $xq['answer'] = null;               // a number outside 1..max is no answer: asked again
+                        $xq['answer_detail'] = null;
+                    }
+                    $xq = import_measure_share_xq($extra, $xq, array_map(function ($x) {
+                        return $x['rec']['uid'];
+                    }, $ms), $cellsM);
+                    if ($xq['answer'] === 'skip') {
+                        foreach ($ms as $mm) {
+                            $rowsOut[$mm['rec']['uid']]['status'] = 'skipped';
+                            $rowsOut[$mm['rec']['uid']]['reason'] = 'Skipped by you.';
+                        }
+                        continue 2;
+                    }
+                    if ($nAns === null) {
+                        $open[] = $xq['id'];
+                        $askOpen = true;
+                        continue;
+                    }
+                    $nBy[$ws] = $nAns;
+                    $howBy[$ws] = 'your answer';
+                    if ($measureSave === null) {
+                        $measureSave = ['big' => $stockUnit, 'small' => $ws, 'n' => $nAns, 'side' => 'big', 'qkey' => $xq['qkey']];
+                    }
+                }
+                if ($waitMeas || $askOpen) {
+                    $balance = null;
+                    $batches = [];
+                    $measureSave = null;
+                    $warn[] = 'Part of the count is in ' . implode(' / ', array_values($measWords)) . ': the stock is worked out once '
+                        . ($waitMeas ? 'the unit is chosen' : 'you say how many are in one ' . $stockUnit) . '.';
+                } else {
+                    $balance = null;
+                    $how = [];
+                    $conv = [];
+                    foreach ($ms as $k => $mm) {
+                        $q = $mm['fin']['qty'];
+                        $qm = $mm['fin']['qty_meas'];
+                        if ($q !== null && !empty($qm) && (float)$qm['amount'] > 0) {
+                            $ws = import_measure_singular((string)$qm['word']);
+                            $q = round((float)$qm['plain'] + (float)$qm['amount'] / $nBy[$ws], 6);
+                            if ($howBy[$ws] !== '') {
+                                $how[] = import_measure_text((float)$qm['plain'], (float)$qm['amount'], (string)$qm['word'], $nBy[$ws], $stockUnit, $q, $howBy[$ws]);
+                            }
+                        }
+                        $conv[$k] = $q;
+                        if ($q !== null) {
+                            $balance = round(($balance ?? 0) + $q, 6);
+                        }
+                    }
+                    $qtyHow = $how ? implode(' ', $how) : null;
+                    $batches = [];
+                    foreach ($ms as $k => $mm) {
+                        $q = $conv[$k];
+                        $label = $mm['fin']['batch'];
+                        $exp = $mm['fin']['expiry'];
+                        if ($q !== null && $q > 0 && ($exp !== null || ($label !== null && $label !== ''))) {
+                            $batches[] = ['label' => $label !== null ? mb_substr($label, 0, 50) : '', 'qty' => $q, 'expiry' => $exp, 'source' => $mm['fin']['expiry_source'] ?? $mm['fin']['name_source']];
+                        }
+                    }
+                    if ($ex && $measureSave !== null && !empty($ex['_measure'])) {
+                        $measureSave = null;                // an item's own measure is never replaced by an import
                     }
                 }
             }
@@ -1306,6 +1495,9 @@ if (!function_exists('import_resolve')) {
                     $warn[] = 'The pack size of ' . (int)$pack . ' is not saved: you kept the current cost, and a pack size goes in only with the cost divided by it.';
                 }
             }
+            if ($ex && $measureSave !== null && !in_array('quantity', $ticked, true)) {
+                $measureSave = null;                        // the answer is saved on an existing item only together with the count it converted
+            }
             // costs and stock on hand (accounting rule A11): stock with no cost is left out of the opening count
             $effCost = $cost;
             if ($ex && !in_array('cost', $ticked, true)) {
@@ -1363,6 +1555,7 @@ if (!function_exists('import_resolve')) {
                 'price' => $first['price'], 'price_source' => $first['price_source'], 'cost' => $cost, 'cost_how' => $costHow, 'pack' => $pack,
                 'pack_name' => $pack ? $packName : null, 'pack_info' => $packInfo, 'pack_reason' => $packReason, 'pack_auto' => $packAuto,
                 'balance' => $balance, 'max' => $max, 'min' => $min, 'remarks' => $remarks, 'batches' => $batches,
+                'qty_how' => $qtyHow, 'measure_save' => $measureSave,
                 'rows' => $rowRefs, 'uids' => $uidList, 'sheet' => $ms[0]['sheet'], 'clean_sheet' => $ms[0]['cleanSheet'],
                 'match' => $ex ? ['id' => (int)$ex['id'], 'name' => (string)$ex['name'], 'how' => $first['match_name'] !== null ? (!empty($first['match_auto']) ? 'learned' : 'chosen') : $matchHow, 'archived' => (int)$ex['is_archived'] === 1] : null,
                 'action' => $action, 'diff' => $diff, 'ticked' => $ticked, 'in_count' => $inCount, 'warnings' => $warn, 'open' => $itemOpen, 'cost_suspect' => $costSuspect,

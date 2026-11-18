@@ -1116,6 +1116,75 @@ try {
     $ck('learned headings: a confirmed heading is saved for this hotel and read back next time; an unknown field is not saved',
         $nLearn === 1 && in_array(import_norm_text($n('Packed In')), import_load_aliases($pdo)['fields']['pack_name'] ?? [], true));
 
+    // ---- Step U2 d (owner 2026-11-19): a count in tots, turned into bottles with N; N is asked when unknown and saved on the item ----
+    if (rh_stock_measure_ready($pdo)) {
+        $insM = $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit, par_level, reorder_point) VALUES (?, 'Bar', 'bottle', 1, ?, 0, 0)");
+        $insM->execute([$n('MS Gin'), 9000]);
+        $idMG = (int)$pdo->lastInsertId();
+        $insM->execute([$n('MS Brandy'), 12000]);
+        $idMB = (int)$pdo->lastInsertId();
+        $insM->execute([$n('MS Cane'), 7000]);     // an existing item with no count measure yet: the answer is saved on it
+        $idMC = (int)$pdo->lastInsertId();
+        rh_stock_measure_save($pdo, $idMG, ['big' => 'bottle', 'small' => 'tot', 'n' => 20.0, 'side' => 'big'], $admin, 'ZZT test');
+        rh_stock_measure_save($pdo, $idMB, ['big' => 'bottle', 'small' => 'shot', 'n' => 30.0, 'side' => 'big'], $admin, 'ZZT test');
+        $fhM = fopen('php://memory', 'w+');
+        foreach ([['Item Name', 'Balance (tots)', 'Unit', 'Unit Price'], [$n('MS Rum'), '66', 'bottle', '9000'], [$n('MS Gin'), '40', 'bottle', '9000'], [$n('MS Brandy'), '45', 'bottle', '12000'], [$n('MS Cane'), '50', 'bottle', '7000']] as $rM) { fputcsv($fhM, $rM); }
+        rewind($fhM);
+        $uM = $upload($put(stream_get_contents($fhM), 'tots.csv'), 'zzt-tots-' . $run . '.csv', $admin);
+        $jM = (int)($uM['job_id'] ?? 0);
+        if ($jM) { import_job_analyse($pdo, $jM); }
+        $sM = import_job_review_summary($pdo, $jM);
+        $qM = [];
+        foreach ((array)($sM['questions'] ?? []) as $q0) { if ($q0['type'] === 'measure-n' && $q0['answer'] === null) { $qM[] = $q0; } }
+        $qRum = $qBr = $qCa = null;
+        foreach ($qM as $q0) { if (strpos($q0['text'], $n('MS Rum')) !== false) { $qRum = $q0; } if (strpos($q0['text'], $n('MS Brandy')) !== false) { $qBr = $q0; } if (strpos($q0['text'], $n('MS Cane')) !== false) { $qCa = $q0; } }
+        $ck('tots (database): asked "How many tots are in one bottle of …?" for the new Rum, Brandy (its own measure is in shots) and Cane (no measure yet); Gin uses its own 20 tots in one bottle',
+            count($qM) === 3 && $qRum && $qBr && $qCa && strpos($qRum['text'], 'How many tots are in one bottle of') === 0, json_encode([$uM['error'] ?? null, array_column($qM, 'text')]));
+        $bad = $qRum ? import_job_answer($pdo, $jM, $qRum['id'], ['key' => 'n', 'pack_size' => '0'], $admin) : ['ok' => true];
+        $ck('tots (database): 0 is refused as an answer', empty($bad['ok']));
+        $aR = $qRum ? import_job_answer($pdo, $jM, $qRum['id'], ['key' => 'n', 'pack_size' => '30'], $admin) : ['ok' => false];
+        $aBr = $qBr ? import_job_answer($pdo, $jM, $qBr['id'], ['key' => 'n', 'pack_size' => '25'], $admin) : ['ok' => false];
+        $aCa = $qCa ? import_job_answer($pdo, $jM, $qCa['id'], ['key' => 'n', 'pack_size' => '25'], $admin) : ['ok' => false];
+        $tkM = [];   // a person ticks "Quantity" on the existing items once the count can be worked out
+        foreach ([$n('MS Gin'), $n('MS Brandy'), $n('MS Cane')] as $nm) { $tkM[] = !empty(import_job_set_update_fields($pdo, $jM, rh_ssi_key($nm), ['quantity'], $admin)['ok']); }
+        $restM = $answerAll($jM, $admin);
+        $logRumQ = $pdo->prepare("SELECT COUNT(*) FROM admin_activity_log WHERE action = 'stock_measure_changed' AND details LIKE ?");
+        $cfM = $jM ? import_commit_stock($pdo, $jM, $admin, ['fail_after_apply' => true]) : ['ok' => true];
+        $logRumQ->execute(['%' . $n('MS Rum') . '%']);
+        $ck('tots (database): a commit that fails after the stock writes leaves nothing: no Rum, no saved measure on Cane, no measure log line, the job not imported',
+            empty($cfM['ok']) && (int)$pdo->query("SELECT COUNT(*) FROM stock_ingredients WHERE name = " . $pdo->quote($n('MS Rum')))->fetchColumn() === 0
+            && $pdo->query("SELECT measure_per_big FROM stock_ingredients WHERE id = " . $idMC)->fetchColumn() === null
+            && (int)$logRumQ->fetchColumn() === 0 && import_job_get($pdo, $jM)['status'] !== 'committed', json_encode([$cfM['error'] ?? null]));
+        $cM = $jM ? import_commit_stock($pdo, $jM, $admin) : ['ok' => false];
+        $resM = $cM['result'] ?? [];
+        $ingM = [];
+        foreach ($pdo->query("SELECT id, name, current_quantity, cost_per_unit, measure_big_name, measure_small_name, measure_per_big, measure_stock_side FROM stock_ingredients WHERE name LIKE 'ZZT $run MS %'")->fetchAll(PDO::FETCH_ASSOC) as $x) { $ingM[$x['name']] = $x; }
+        $rumM = $ingM[$n('MS Rum')] ?? [];
+        $ck('tots (database): commit ok; the new Rum carries "30 tots in one bottle" (saved through the item-measure path), cost 9,000 per bottle never divided',
+            !empty($aR['ok']) && !empty($aBr['ok']) && !empty($aCa['ok']) && $tkM === [true, true, true] && !empty($cM['ok']) && ($resM['measures_saved'] ?? -1) === 2
+            && ($rumM['measure_big_name'] ?? '') === 'bottle' && ($rumM['measure_small_name'] ?? '') === 'tot' && abs((float)($rumM['measure_per_big'] ?? 0) - 30) < 0.0001 && ($rumM['measure_stock_side'] ?? '') === 'big'
+            && abs((float)($rumM['cost_per_unit'] ?? 0) - 9000) < 0.0001, json_encode([$aR['error'] ?? null, $aBr['error'] ?? null, $restM['stuck'] ?? null, $cM['error'] ?? null, $resM['measures_saved'] ?? null, $rumM]));
+        $brM = $ingM[$n('MS Brandy')] ?? [];
+        $ginM = $ingM[$n('MS Gin')] ?? [];
+        $ck('tots (database): an item that already has its own measure keeps it (Brandy: 30 shots, Gin: 20 tots); the answer is never written over it',
+            ($brM['measure_small_name'] ?? '') === 'shot' && abs((float)($brM['measure_per_big'] ?? 0) - 30) < 0.0001 && ($ginM['measure_small_name'] ?? '') === 'tot' && abs((float)($ginM['measure_per_big'] ?? 0) - 20) < 0.0001);
+        $caM = $ingM[$n('MS Cane')] ?? [];
+        $ck('tots (database): an existing item with no measure, Quantity ticked: the answer "25 tots in one bottle" is saved on it',
+            ($caM['measure_small_name'] ?? '') === 'tot' && abs((float)($caM['measure_per_big'] ?? 0) - 25) < 0.0001 && ($caM['measure_big_name'] ?? '') === 'bottle', json_encode($caM));
+        $lineM = $pdo->prepare('SELECT actual_quantity FROM stock_count_lines WHERE count_id = ? AND ingredient_id = ?');
+        $actM = [];
+        foreach (['MS Rum' => (int)($rumM['id'] ?? 0), 'MS Gin' => $idMG, 'MS Brandy' => $idMB, 'MS Cane' => $idMC] as $k0 => $id0) {
+            $lineM->execute([(int)($resM['opening_count_id'] ?? 0), $id0]);
+            $v0 = $lineM->fetchColumn();
+            $actM[$k0] = $v0 === false ? null : (float)$v0;
+        }
+        $ck('tots (database): the opening count lines hold bottles: 66 / 30 = 2.2, 40 / 20 = 2, 45 / 25 = 1.8, 50 / 25 = 2',
+            $actM['MS Rum'] !== null && abs($actM['MS Rum'] - 2.2) < 0.000001 && $actM['MS Gin'] !== null && abs($actM['MS Gin'] - 2) < 0.000001 && $actM['MS Brandy'] !== null && abs($actM['MS Brandy'] - 1.8) < 0.000001 && $actM['MS Cane'] !== null && abs($actM['MS Cane'] - 2) < 0.000001, json_encode([$resM['opening_count_id'] ?? null, $actM]));
+        $logM = $pdo->prepare("SELECT COUNT(*) FROM admin_activity_log WHERE action = 'stock_measure_changed' AND details LIKE ?");
+        $logM->execute(['%' . $n('MS Rum') . '%Import #' . $jM . '%']);
+        $ck('tots (database): the saved measure is in the activity log as stock_measure_changed "in Import #…"', (int)$logM->fetchColumn() === 1);
+    }
+
     // ---- cleanup of staged files, purge ---------------------------------------------------------------
     $pg = import_purge_staged($pdo, true);
     $ck('purge: runs and reports counts', is_array($pg) && isset($pg['files_deleted']));

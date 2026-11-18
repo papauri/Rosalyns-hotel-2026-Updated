@@ -457,3 +457,75 @@
 .ing-measure .btn-secondary[hidden] {
     display: none;
 }
+
+/* Bottle size + drink measures (Step U2): item form line and picker, and the hotel's Drink measures list. */
+.ing-drink-pick {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.ing-drink-pick select {
+    min-height: 44px;
+    min-width: 0;
+    flex: 1 1 160px;
+}
+
+.ing-drink-pick .btn-secondary {
+    margin: 0;
+}
+
+.ing-measure[hidden],
+.ing-drink-pick[hidden],
+.modal-content .form-row[hidden] {
+    display: none;
+}
+
+.dm-list {
+    margin: 10px 0;
+}
+
+.dm-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 110px auto;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.dm-row.dm-head {
+    font-size: 12px;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.dm-row input {
+    width: 100%;
+    min-height: 44px;
+    box-sizing: border-box;
+    min-width: 0;
+}
+
+.dm-row .dm-remove,
+.dm-add {
+    min-height: 44px;
+    margin: 0;
+}
+
+@media (max-width: 480px) {
+    .dm-row {
+        grid-template-columns: minmax(0, 1fr) 80px auto;
+        gap: 6px;
+    }
+
+    .dm-row .dm-remove {
+        padding-left: 8px;
+        padding-right: 8px;
+    }
+}
+
+.dm-row.dm-head span {
+    text-align: left;
+}

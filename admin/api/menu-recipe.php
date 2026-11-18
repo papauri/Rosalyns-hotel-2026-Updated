@@ -45,12 +45,16 @@ try {
 
         case 'list_ingredients': {
                 $rows = $pdo->query(
-                    "SELECT id, name, category, unit, cost_per_unit, current_quantity, min_quantity, yield_percent, pack_name, pack_size, pieces_per_unit
+                    "SELECT id, name, category, unit, cost_per_unit, current_quantity, min_quantity, yield_percent, pack_name, pack_size, pieces_per_unit"
+                    . rh_drink_ing_cols('') . "
                  FROM stock_ingredients
                  WHERE is_archived = 0
                  ORDER BY category, name"
                 )->fetchAll(PDO::FETCH_ASSOC);
-                echo json_encode(['ok' => true, 'ingredients' => $rows]);
+                // The hotel's drink measures (shot, glass of wine...) so a line can be typed as "2 shots" (Step U2).
+                // drink_ready false (migration 089 not run yet): the screen offers no measures at all, the stock unit stays.
+                $drinkOn = rh_stock_drink_ready($pdo);
+                echo json_encode(['ok' => true, 'ingredients' => $rows, 'measures' => $drinkOn ? rh_drink_measures_list() : [], 'drink_ready' => $drinkOn]);
                 break;
             }
 

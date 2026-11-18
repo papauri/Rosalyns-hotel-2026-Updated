@@ -242,6 +242,16 @@
     width: 100%;
 }
 
+/* Drink measure picker under the amount (shot, glass, ml): full width, finger-sized. */
+.ing-row .qty-cell select.measure-pick {
+    width: 100%;
+    min-height: 44px;
+}
+
+.ing-row .qty-cell select.measure-pick[hidden] {
+    display: none;
+}
+
 .row-actions {
     display: flex;
     gap: 10px;

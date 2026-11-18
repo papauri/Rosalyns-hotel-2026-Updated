@@ -73,6 +73,13 @@ foreach ((array)@scandir(dirname(__DIR__, 2) . '/storage/imports') as $f) { if (
 $run = strtoupper(bin2hex(random_bytes(3)));
 $cfg = base64_encode(json_encode(['post' => ['run' => $run]]));
 $out = shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($root . '/scripts/tests/page_harness.php') . ' scripts/tests/import_stock_child.php ' . escapeshellarg($cfg) . ' 2>&1');
+// the child can run longer than the server's wait_timeout: this (idle) link may have been dropped meanwhile - reconnect like config/database.php
+try { $pdo->query('SELECT 1'); } catch (Throwable $e) {
+    $pdo = new PDO('mysql:host=' . DB_HOST . ';port=' . DB_PORT . ';dbname=' . DB_NAME . ';charset=' . DB_CHARSET, DB_USER, DB_PASS,
+        [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION, PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC, PDO::ATTR_EMULATE_PREPARES => false, PDO::ATTR_TIMEOUT => 10]);
+    echo "  (reconnected to the database after the child run)
+";
+}
 $h = ['error' => 'no result'];
 if (preg_match('/@@RESULT@@(.*)$/m', (string)$out, $m)) { $x = json_decode($m[1], true); if (is_array($x)) { $h = $x; } }
 ok('harness: the scenarios ran and were rolled back, nothing leaked', !empty($h['rolled_back']) && empty($h['leak']) && empty($h['marker_lost']), substr((string)$out, -600));

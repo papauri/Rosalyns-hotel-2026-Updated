@@ -1725,6 +1725,161 @@ $b2w = array_values(array_filter($b2i['warnings'], function ($w) { return strpos
 $t($b2i['ticked'] === ['quantity'] && $b2i['in_count'] === false && count($b2w) === 1 && strpos($b2w[0], 'stays out of the opening count until Cost is ticked') !== false,
     'B2: with no selling price, a stored crate price (48,000 = the row\'s crate price) never values the bottle count; one warning ' . json_encode($b2i['warnings']));
 
+// ---- Step U2 d (owner 2026-11-19): quantities counted in shots / tots / glasses are turned into the stock unit with N; never guessed ----
+echo "-- counts in shots / tots / glasses --\n";
+$muRun = function (array $rows, array $ctx = [], array $answers = []) use ($csvRows, $al) {
+    $p = $csvRows($rows, 'mu.csv');
+    $an = import_analyze_file($p, 'mu.csv', $al);
+    $res = import_resolve($an, $answers, $ctx + ['existing' => [], 'unit_options' => ['bottle', 'each', 'tot'], 'corrections' => []]);
+    $items = [];
+    foreach ($res['items'] as $it) { $items[$it['name']] = $it; }
+    $open = array_values(array_filter(array_merge($res['questions'], array_values($res['extra_questions'])), function ($q) { return $q['answer'] === null; }));
+    return ['an' => $an, 'res' => $res, 'items' => $items, 'open' => $open, 'inv' => import_assert_no_invented_values($an, import_csv_read($p, 'mu.csv'))];
+};
+$muOpen = function (array $r, string $type) { return array_values(array_filter($r['open'], function ($q) use ($type) { return $q['type'] === $type; })); };
+$exGin = ['id' => 701, 'name' => 'Gin', 'category' => 'Bar', 'unit' => 'bottle', 'current_quantity' => 1, 'cost_per_unit' => 9000, 'par_level' => 0, 'reorder_point' => 0, 'notes' => '',
+    'pack_name' => null, 'pack_size' => null, 'is_archived' => 0, 'recipes' => 0, '_measure' => ['big' => 'bottle', 'small' => 'shot', 'n' => 30.0, 'side' => 'big'], '_ml' => 750.0];
+$ginTick = ['_updates' => [rh_ssi_key('Gin') => ['quantity']]];
+$muW = import_measure_words($al);
+$t(isset($muW['shots'], $muW['tot'], $muW['glasses'], $muW['pours']) && !isset($muW['measure']) && !isset($muW['single']) && !isset($muW['portion']),
+    'U2d: shots / tots / glasses / pours are measure words (the hotel\'s portion words); "measure", "single", "portion" name no amount and are not');
+$t(import_measure_singular('glasses') === 'glass' && import_measure_singular('tots') === 'tot' && import_measure_plural('glass', 5) === 'glasses' && import_measure_plural('bottle', 2.2) === 'bottles' && import_measure_plural('L', 3) === 'L',
+    'U2d: glasses -> glass, tots -> tot; 5 glasses, 2.2 bottles, 3 L');
+$t(import_measure_n_valid('30') === 30.0 && import_measure_n_valid('33.3333') === 33.3333 && import_measure_n_valid('0') === null && import_measure_n_valid('0.5') === null && import_measure_n_valid('1001') === null
+    && import_measure_n_valid('abc') === null && import_measure_n_valid('-5') === null && import_measure_n_valid(null) === null,
+    'U2d: "how many in one" is a number from 1 to the item-measure limit (decimals allowed); 0, 0.5, 1001, text and negatives are refused');
+// a heading in shots + the item's own count measure (Step U1): 66 shots = 2.2 bottles, nothing asked, nothing saved
+$m1 = $muRun([['Item Name', 'Balance (shots)', 'Unit', 'Unit Price'], ['Gin', '66', 'bottle', '9000']], ['existing' => [$exGin]], $ginTick);
+$m1i = $m1['items']['Gin'];
+$t(abs($m1i['balance'] - 2.2) < 0.0000005 && $m1i['diff']['quantity'] === [1.0, 2.2] && $m1i['in_count'] === true && $m1i['measure_save'] === null && !$m1['open']
+    && strpos((string)$m1i['qty_how'], '66 shots = 2.2 bottles (30 shots in one bottle') !== false && abs((float)$m1i['cost'] - 9000) < 0.00005,
+    'U2d: "Balance (shots)" 66 with the item\'s own measure (30 shots in one bottle) = 2.2 bottles, shown as "66 shots = 2.2 bottles", cost unchanged ' . json_encode([$m1i['balance'], $m1i['qty_how']]));
+$t($m1['inv'] === [] && ($m1['an']['sheets'][0]['rows'][0]['fields']['qty_single']['value'] ?? null) === 66, 'U2d: the row keeps the count as written (66, its own cell); the conversion is the resolver\'s, never stored as a source value');
+// size / the hotel's measures list: 750 ml / 25 ml tot = 30, nothing asked, nothing saved
+$m2 = $muRun([['Item Name', 'Balance (tots)', 'Unit', 'Unit Price'], ['Vodka 750ml', '60', 'bottle', '9000']], ['drink_measures' => [['name' => 'Tot', 'ml' => 25]]]);
+$t(abs($m2['items']['Vodka 750ml']['balance'] - 2) < 0.0000005 && !$m2['open'] && $m2['items']['Vodka 750ml']['measure_save'] === null
+    && strpos((string)$m2['items']['Vodka 750ml']['qty_how'], '750 ml / 25 ml tot') !== false,
+    'U2d: no item measure: the size in the name (750 ml) / the tot on the hotel\'s measures list (25 ml) = 30 tots in one bottle: 60 tots = 2 bottles');
+// unknown: ONE question for like items (same measure + size), stock waits; an answer converts both and is saved on each new item
+$muRows3 = [['Item Name', 'Balance (tots)', 'Unit', 'Unit Price'], ['Rum 750ml', '66', 'bottle', '9000'], ['Brandy 750ml', '45', 'bottle', '12000']];
+$m3 = $muRun($muRows3);
+$m3q = $muOpen($m3, 'measure-n');
+$t(count($m3q) === 1 && count($m3q[0]['row_uids']) === 2 && count($m3['open']) === 1 && strpos($m3q[0]['text'], 'How many tots are in one 750 ml bottle?') === 0
+    && $m3['items']['Rum 750ml']['balance'] === null && $m3['items']['Brandy 750ml']['status'] === 'needs-answer',
+    'U2d: with no measure and no tot size, ONE question "How many tots are in one 750 ml bottle?" for both items; no stock is proposed until it is answered ' . json_encode(array_column($m3['open'], 'text')));
+$m3k = $m3q[0]['qkey'] ?? 'x';
+$m3a = $muRun($muRows3, [], [$m3k => ['key' => 'n', 'pack_size' => 30]]);
+$t(abs($m3a['items']['Rum 750ml']['balance'] - 2.2) < 0.0000005 && abs($m3a['items']['Brandy 750ml']['balance'] - 1.5) < 0.0000005 && !$m3a['open']
+    && ($m3a['items']['Rum 750ml']['measure_save']['n'] ?? null) === 30.0 && ($m3a['items']['Rum 750ml']['measure_save']['small'] ?? '') === 'tot'
+    && ($m3a['items']['Rum 750ml']['measure_save']['big'] ?? '') === 'bottle' && ($m3a['items']['Brandy 750ml']['measure_save']['side'] ?? '') === 'big'
+    && abs((float)$m3a['items']['Rum 750ml']['cost'] - 9000) < 0.00005 && abs((float)$m3a['items']['Brandy 750ml']['cost'] - 12000) < 0.00005,
+    'U2d: answered 30: 66 tots = 2.2 bottles, 45 tots = 1.5 bottles, "30 tots in one bottle" saved on each new item; the costs (9,000 / 12,000 per bottle) are never divided by 30');
+$m3b = $muRun($muRows3, [], [$m3k => ['key' => 'n', 'pack_size' => 0]]);
+$t(count($muOpen($m3b, 'measure-n')) === 1 && $m3b['items']['Rum 750ml']['balance'] === null && import_answer_allowed($m3q[0], ['key' => 'n', 'pack_size' => '0']) !== ''
+    && import_answer_allowed($m3q[0], ['key' => 'n', 'pack_size' => '30']) === '' && import_answer_allowed($m3q[0], ['key' => 'n']) !== '',
+    'U2d: 0 (or no number) is no answer: refused when typed and still asked');
+$m3s = $muRun($muRows3, [], [$m3k => ['key' => 'skip']]);
+$t(!$m3s['items'] && !$m3s['open'], 'U2d: "Skip these rows" leaves both items out');
+// two quantity columns: bottles in the store + tots at the bar
+$m4 = $muRun([['Item Name', 'Stores', 'Bar (shots)', 'Unit', 'Unit Price'], ['Gin', '2', '15', 'bottle', '9000']], ['existing' => [$exGin]], $ginTick);
+$t(abs($m4['items']['Gin']['balance'] - 2.5) < 0.0000005 && !$m4['open'] && strpos((string)$m4['items']['Gin']['qty_how'], '2 bottles + 15 shots = 2.5 bottles') === 0,
+    'U2d: "Stores" 2 bottles + "Bar (shots)" 15 shots = 2.5 bottles (the plain column is not converted) ' . json_encode($m4['items']['Gin']['qty_how']));
+// a different measure word than the item's own: asked, and the item's own measure is never replaced
+$m4t = $muRun([['Item Name', 'Bar (tots)', 'Unit', 'Unit Price'], ['Gin', '15', 'bottle', '9000']], ['existing' => [$exGin]], $ginTick);
+$m4tq = $muOpen($m4t, 'measure-n');
+$m4ta = $muRun([['Item Name', 'Bar (tots)', 'Unit', 'Unit Price'], ['Gin', '15', 'bottle', '9000']], ['existing' => [$exGin]], $ginTick + [($m4tq[0]['qkey'] ?? 'x') => ['key' => 'n', 'pack_size' => 30]]);
+$t(count($m4tq) === 1 && abs($m4ta['items']['Gin']['balance'] - 0.5) < 0.0000005 && $m4ta['items']['Gin']['measure_save'] === null
+    && (bool)array_filter($m4ta['items']['Gin']['warnings'], function ($w) { return strpos($w, 'already has its own count measure (30 shots in one bottle)') !== false; }),
+    'U2d: counted in tots but the item\'s own measure is in shots: asked (never assumed equal), converted, and the item\'s own measure is kept');
+// "66 shots" typed in the quantity cell itself
+$m5 = $muRun([['Item Name', 'Balance', 'Unit', 'Unit Price'], ['Gin', '66 shots', 'bottle', '9000']], ['existing' => [$exGin]], $ginTick);
+$m5f = $m5['an']['sheets'][0]['rows'][0]['fields'];
+$t(abs($m5['items']['Gin']['balance'] - 2.2) < 0.0000005 && ($m5f['qty_single']['how'] ?? '') === 'measure-cell' && ($m5f['qty_single']['value'] ?? null) === 66 && ($m5f['unit']['value'] ?? '') === 'bottle' && $m5['inv'] === [],
+    'U2d: a cell "66 shots" is 66 counted in shots (number and word from that cell; the unit column stays the unit) = 2.2 bottles; invariant holds');
+$tamper = $m5['an'];
+$tamper['sheets'][0]['rows'][0]['fields']['qty_single']['value'] = 2.2;
+$t(count(import_assert_no_invented_values($tamper, import_csv_read($csvRows([['Item Name', 'Balance', 'Unit', 'Unit Price'], ['Gin', '66 shots', 'bottle', '9000']], 'mu.csv'), 'mu.csv'))) === 1,
+    'U2d: invariant: a converted number put in place of the cell\'s own 66 is caught');
+// glassware counted in glasses is a count of things
+$m6 = $muRun([['Item Name', 'Qty (glasses)', 'Unit', 'Unit Price'], ['Wine Glass', '12', 'each', '500'], ['House Red 750ml', '10', 'bottle', '8000']], ['drink_measures' => [['name' => 'Glass', 'ml' => 150]]]);
+$t($m6['items']['Wine Glass']['balance'] === 12 && $m6['items']['Wine Glass']['qty_how'] === null && abs($m6['items']['House Red 750ml']['balance'] - 2) < 0.0000005
+    && strpos((string)$m6['items']['House Red 750ml']['qty_how'], '(5 glasses in one bottle') !== false,
+    'U2d: "Wine Glass" counted under "Qty (glasses)" stays 12 (glassware); House Red 750 ml: 10 glasses / (750 / 150) = 2 bottles');
+// the stock unit IS the measure: nothing to convert
+$m11 = $muRun([['Item Name', 'Balance (tots)', 'Unit', 'Unit Price'], ['Gin', '66', 'tot', '300']]);
+$t(abs((float)$m11['items']['Gin']['balance'] - 66) < 0.0000005 && $m11['items']['Gin']['qty_how'] === null && !$m11['open'], 'U2d: stock kept in tots and counted in tots: 66 as written');
+// empty, 0 and negative counts in tots: empty stays empty, 0 tots is 0 bottles with nothing asked, a negative is held as today
+$mE = $muRun([['Item Name', 'Balance (tots)', 'Unit', 'Unit Price'], ['Ea Rum', '', 'bottle', '9000'], ['Eb Rum', '0', 'bottle', '9000'], ['Ec Rum', '-30', 'bottle', '9000']]);
+$t($mE['items']['Ea Rum']['balance'] === null && $mE['items']['Eb Rum']['balance'] !== null && abs((float)$mE['items']['Eb Rum']['balance']) < 0.0000005 && !$muOpen($mE, 'measure-n')
+    && $mE['items']['Ec Rum']['status'] === 'blocked' && count($muOpen($mE, 'bad-value')) === 1,
+    'U2d: an empty tots cell stays empty (not 0), "0" tots is 0 bottles without asking how many are in one, "-30" is held like any negative count');
+// two measures in one row: never mixed, asked as a bad value
+$m10 = $muRun([['Item Name', 'Stores', 'Bar (tots)', 'Unit', 'Unit Price'], ['Gin', '3 glasses', '15', 'bottle', '9000']]);
+$t(count(array_filter($m10['open'], function ($q) { return $q['type'] === 'bad-value' && strpos($q['text'], 'different measures') !== false; })) === 1 && $m10['items']['Gin']['status'] === 'blocked',
+    'U2d: glasses in one cell and tots in the other: the row is held with a plain question, never added together');
+// a new item with no unit: waits for the unit, then converts with it
+$m12r = [['Item Name', 'Balance (tots)', 'Unit Price'], ['Gin 750ml', '66', '9000']];
+$m12 = $muRun($m12r, ['drink_measures' => [['name' => 'Tot', 'ml' => 25]]]);
+$m12q = $muOpen($m12, 'no-unit');
+$m12a = $muRun($m12r, ['drink_measures' => [['name' => 'Tot', 'ml' => 25]]], [($m12q[0]['qkey'] ?? 'x') => ['key' => 'unit:bottle']]);
+$t($m12['items']['Gin 750ml']['balance'] === null && count($m12q) === 1 && abs($m12a['items']['Gin 750ml']['balance'] - 2.2) < 0.0000005 && $m12a['items']['Gin 750ml']['unit'] === 'bottle' && !$m12a['open'],
+    'U2d: no unit in the file: the tots wait for the unit; once "bottle" is chosen, 66 tots / (750 / 25) = 2.2 bottles');
+// a price headed "per tot": asked, never multiplied by N
+$m9 = $muRun([['Item Name', 'Balance', 'Unit', 'Price/tot'], ['Gin', '3', 'bottle', '900']]);
+$m9q = $muOpen($m9, 'price-per-measure');
+$m9d = $muRun([['Item Name', 'Balance', 'Unit', 'Price/tot'], ['Gin', '3', 'bottle', '900']], [], [($m9q[0]['qkey'] ?? 'x') => ['key' => 'drop']]);
+$m9k = $muRun([['Item Name', 'Balance', 'Unit', 'Price/tot'], ['Gin', '3', 'bottle', '900']], [], [($m9q[0]['qkey'] ?? 'x') => ['key' => 'keep']]);
+$t(count($m9q) === 1 && $m9d['items']['Gin']['cost'] === null && $m9d['items']['Gin']['in_count'] === false && abs((float)$m9k['items']['Gin']['cost'] - 900) < 0.00005 && !$m9d['open'] && !$m9k['open'],
+    'U2d: a price column headed "Price/tot" is asked about: leave the cost blank, or use 900 as written; never 900 x 30');
+// a container stock unit: "Beer 330ml" is one bottle's size, never the crate's, so N is asked (or comes from a volume typed on the item)
+$mcCtx = ['drink_measures' => [['name' => 'Glass', 'ml' => 150]], 'unit_options' => ['crate', 'bottle']];
+$mcRows = [['Item Name', 'Qty (glasses)', 'Unit', 'Unit Price'], ['Beer 330ml', '11', 'crate', '24000']];
+$mc1 = $muRun($mcRows, $mcCtx);
+$mc1q = $muOpen($mc1, 'measure-n');
+$exBeer = ['id' => 702, 'name' => 'Beer 330ml', 'category' => 'Bar', 'unit' => 'crate', 'current_quantity' => 1, 'cost_per_unit' => 24000, 'par_level' => 0, 'reorder_point' => 0, 'notes' => '',
+    'pack_name' => null, 'pack_size' => null, 'is_archived' => 0, 'recipes' => 0, '_measure' => null, '_ml' => 330.0, '_ml_source' => 'name'];
+$beerTick = ['_updates' => [rh_ssi_key('Beer 330ml') => ['quantity']]];
+$mc2 = $muRun($mcRows, ['existing' => [$exBeer]] + $mcCtx, $beerTick);
+$exBeer['_ml'] = 7920.0;
+$exBeer['_ml_source'] = 'item';
+$mc3 = $muRun([['Item Name', 'Qty (glasses)', 'Unit', 'Unit Price'], ['Beer 330ml', '66', 'crate', '24000']], ['existing' => [$exBeer]] + $mcCtx, $beerTick);
+$mc4 = $muRun($mcRows, $mcCtx, [($mc1q[0]['qkey'] ?? 'x') => ['key' => 'n', 'pack_size' => '24']]);
+$t(count($mc1q) === 1 && strpos($mc1q[0]['text'], 'How many glasses are in one crate of "Beer 330ml"?') === 0 && $mc1['items']['Beer 330ml']['balance'] === null
+    && count($muOpen($mc2, 'measure-n')) === 1 && $mc2['items']['Beer 330ml']['balance'] === null
+    && abs((float)$mc3['items']['Beer 330ml']['balance'] - 1.25) < 0.0000005 && !$mc3['open']
+    && abs((float)$mc4['items']['Beer 330ml']['balance'] - 11 / 24) < 0.0000005 && abs((float)$mc4['items']['Beer 330ml']['cost'] - 24000) < 0.00005,
+    'U2d: stock in crates: 330 ml in the name is one bottle, not the crate: never 330 / 150 = 2.2 glasses in a crate; asked (new item and existing item with only the name size); a volume typed on the item (7,920 ml) is used; answered 24: 11 glasses = 0.458 crates, cost 24,000 per crate unchanged '
+    . json_encode([array_column($mc1['open'], 'text'), $mc2['items']['Beer 330ml']['balance'], $mc3['items']['Beer 330ml']['balance']]));
+// a price headed "per tot" on a row with a pack size: "use as written" is exactly the sheet's price, never divided by the pack
+$ppRows = [['Item Name', 'Total Balance', 'Price/tot', 'Unit Bought As', 'Total Per Unit', 'Unit sold/Served by'], ['Lager', '40', '48000', 'Crate', '24', 'Bottle']];
+$pp = $muRun($ppRows);
+$ppq = $muOpen($pp, 'price-per-measure');
+$ppk = $muRun($ppRows, [], [($ppq[0]['qkey'] ?? 'x') => ['key' => 'keep']]);
+$ppKeepLabel = array_values(array_filter($ppq[0]['options'] ?? [], function ($o) { return $o['key'] === 'keep'; }))[0]['label'] ?? '';
+$t(count($ppq) === 1 && abs((float)$ppk['items']['Lager']['cost'] - 48000) < 0.00005 && strpos($ppKeepLabel, 'exactly as written') !== false && strpos($ppKeepLabel, 'not divided or multiplied') !== false
+    && (bool)array_filter($ppk['items']['Lager']['warnings'], function ($w) { return strpos($w, 'not divided by the pack of 24') !== false; }),
+    'U2d: "Price/tot" with a crate of 24: "use each price exactly as written" gives 48,000, not 48,000 / 24, and says so on the item ' . json_encode([$ppk['items']['Lager']['cost'] ?? null, $ppKeepLabel]));
+// bought by the case, served by the tot, counted in tots (the count-unit question's third answer)
+$q3t = $fxRun([['Wren Rum', 66, 60000, 2000, 6000, 'Case', 12, 'Tot']]);
+$q3tQ = array_values(array_filter($q3t['open'], function ($q) { return $q['type'] === 'count-unit'; }));
+$q3tKeys = array_column($q3tQ[0]['options'] ?? [], 'key');
+$q3tA = [($q3tQ[0]['qkey'] ?? 'x') => ['key' => 'portion']];
+$q3t2 = $fxRun([['Wren Rum', 66, 60000, 2000, 6000, 'Case', 12, 'Tot']], [], $q3tA);
+$q3tNu = array_values(array_filter($q3t2['open'], function ($q) { return $q['type'] === 'no-unit'; }));
+$q3tA[$q3tNu[0]['qkey'] ?? 'y'] = ['key' => 'unit:bottle'];
+$q3t3 = $fxRun([['Wren Rum', 66, 60000, 2000, 6000, 'Case', 12, 'Tot']], [], $q3tA);
+$q3tMn = array_values(array_filter($q3t3['open'], function ($q) { return $q['type'] === 'measure-n'; }));
+$q3tA[$q3tMn[0]['qkey'] ?? 'z'] = ['key' => 'n', 'pack_size' => '30'];
+$q3t4 = $fxRun([['Wren Rum', 66, 60000, 2000, 6000, 'Case', 12, 'Tot']], [], $q3tA);
+$q3ti = $q3t4['items']['Wren Rum'];
+$t($q3tKeys === ['pack', 'single', 'portion'] && strpos($q3tQ[0]['text'], ', or in tots?') !== false && count($q3tNu) === 1 && count($q3tMn) === 1
+    && strpos($q3tMn[0]['text'], 'How many tots are in one bottle of "Wren Rum"?') === 0
+    && abs($q3ti['balance'] - 2.2) < 0.0000005 && abs((float)$q3ti['cost'] - 5000) < 0.00005 && ($q3ti['measure_save']['n'] ?? null) === 30.0 && !$q3t4['open'],
+    'U2d: Case | 12 | Tot counted "in tots": 60,000 / 12 = 5,000 per bottle (not / 30), the unit is picked, then 66 tots / 30 = 2.2 bottles ' . json_encode([$q3tKeys, $q3tMn[0]['text'] ?? null, $q3ti['balance'] ?? null]));
+$t(count($fxRun([['Wren Gin', 3, 60000, 2000, 6000, 'Case', 12, 'Glass']])['open']) === 1
+    && array_column(array_values(array_filter($fxRun([['Wren Pop', 3, 60000, 2000, 6000, 'Case', 12, 'Single']])['open'], function ($q) { return $q['type'] === 'count-unit'; }))[0]['options'] ?? [], 'key') === ['pack', 'single'],
+    'U2d: served by "Single" (no fixed amount) gets no "in singles" answer');
+
 // cleanup
 foreach ($tmpFiles as $f) { @unlink($f); }
 @rmdir($tmpDir);

@@ -129,9 +129,11 @@ if (!function_exists('rh_recipe_qty_to_base')) {
     /** Recipe lines of one menu item (POS item id + category slug), with the stock item details. */
     function rh_menu_recipe_lines(PDO $pdo, int $menuItemId, string $menuType): array
     {
+        $drink = function_exists('rh_stock_drink_ready') && rh_stock_drink_ready($pdo);
         $st = $pdo->prepare(
             "SELECT ri.id, ri.ingredient_id, ri.quantity_per_portion, ri.yield_percent,
-                    i.name, i.unit, i.cost_per_unit, i.pack_name, i.pack_size, i.pieces_per_unit, i.is_archived
+                    i.name, i.unit, i.cost_per_unit, i.pack_name, i.pack_size, i.pieces_per_unit, i.is_archived"
+                    . ($drink ? ", ri.entry_measure, ri.entry_qty, ri.entry_ml" . rh_drink_ing_cols('i') : '') . "
                FROM stock_recipes sr
                JOIN stock_recipe_ingredients ri ON ri.recipe_id = sr.id
                JOIN stock_ingredients i ON i.id = ri.ingredient_id
@@ -139,7 +141,16 @@ if (!function_exists('rh_recipe_qty_to_base')) {
               ORDER BY i.name"
         );
         $st->execute([$menuItemId, $menuType]);
-        return $st->fetchAll(PDO::FETCH_ASSOC);
+        $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        if ($drink) {
+            // A line typed as a measure ("2 shots") is shown that way again only while it still gives the saved figure.
+            $list = rh_drink_measures_list();
+            foreach ($rows as &$r) {
+                $r['entry_match'] = rh_drink_line_entry($r, $r, $list);
+            }
+            unset($r);
+        }
+        return $rows;
     }
 
     /**
@@ -164,7 +175,8 @@ if (!function_exists('rh_recipe_qty_to_base')) {
      *
      * @param ?int $portions / ?string $notes null = keep the recipe's current value (1 / empty for a new recipe)
      * Pieces per packet is read from the stock item and is NEVER written from here (it is set in Stock only).
-     * @param array $lines each: ingredient_id, quantity (as typed), unit ('base'|'pack'|'pieces'|'small', default base),
+     * @param array $lines each: ingredient_id, quantity (as typed), unit ('base'|'pack'|'pieces'|'small'|'measure', default base;
+     *                     'measure' also needs measure = the drink measure's name, e.g. shot, ml),
      *                     yield_percent (optional, 1-100; omitted = keep what the item had, else 100)
      * @return array{recipe_id:int,lines_written:int}
      * @throws RuntimeException|InvalidArgumentException on bad input (nothing is written)
@@ -194,7 +206,9 @@ if (!function_exists('rh_recipe_qty_to_base')) {
             $keepYield[(int)$r['ingredient_id']] = (float)$r['yield_percent'];
         }
 
-        $ingStmt = $pdo->prepare("SELECT id, name, unit, pack_size, pieces_per_unit, is_archived FROM stock_ingredients WHERE id = ?");
+        $drink = function_exists('rh_stock_drink_ready') && rh_stock_drink_ready($pdo);
+        $drinkList = $drink ? rh_drink_measures_list() : [];
+        $ingStmt = $pdo->prepare("SELECT id, name, unit, pack_size, pieces_per_unit, is_archived" . ($drink ? rh_drink_ing_cols('') : '') . " FROM stock_ingredients WHERE id = ?");
         $clean = [];
         $seen = [];
         foreach ($lines as $line) {
@@ -231,8 +245,21 @@ if (!function_exists('rh_recipe_qty_to_base')) {
             if ($entryUnit === 'small' && rh_recipe_small_unit((string)$ing['unit']) === null) {
                 throw new RuntimeException($ing['name'] . ': grams / ml can only be used for stock counted in kg or litres (use the stock unit instead).');
             }
+            $entry = [null, null, null];
             try {
-                $base = rh_recipe_qty_to_base((float)($line['quantity'] ?? 0), $entryUnit, $packSize, $piecesPer);
+                if ($entryUnit === 'measure') {
+                    // Typed as a drink measure ("2 shots", "50 ml"): worked out here from the item and the hotel's list,
+                    // never from a figure the screen sent. Saved in the stock unit like every other line.
+                    if (!$drink) {
+                        throw new RuntimeException('drink measures are not set up yet. Type the amount in the stock unit.');
+                    }
+                    $typed = (float)($line['quantity'] ?? 0);
+                    $conv = rh_drink_measure_to_stock($typed, (string)($line['measure'] ?? ''), $ing, $drinkList);
+                    $base = $conv['qty'];
+                    $entry = [$conv['name'], round($typed, 4), $conv['ml'] !== null ? round((float)$conv['ml'], 4) : null];
+                } else {
+                    $base = rh_recipe_qty_to_base((float)($line['quantity'] ?? 0), $entryUnit, $packSize, $piecesPer);
+                }
             } catch (RuntimeException $e) {
                 throw new RuntimeException($ing['name'] . ': ' . $e->getMessage());
             }
@@ -241,7 +268,7 @@ if (!function_exists('rh_recipe_qty_to_base')) {
             } else {
                 $yld = $keepYield[$ingId] ?? 100.0;
             }
-            $clean[] = [$ingId, $base, $yld];
+            $clean[] = [$ingId, $base, $yld, $entry];
         }
 
         $ownTx = !$pdo->inTransaction();
@@ -262,11 +289,18 @@ if (!function_exists('rh_recipe_qty_to_base')) {
             $recipeId = (int)$pdo->lastInsertId();
 
             $pdo->prepare("DELETE FROM stock_recipe_ingredients WHERE recipe_id = ?")->execute([$recipeId]);
-            $ins = $pdo->prepare(
-                "INSERT INTO stock_recipe_ingredients (recipe_id, ingredient_id, quantity_per_portion, yield_percent) VALUES (?, ?, ?, ?)"
-            );
-            foreach ($clean as [$ingId, $base, $yld]) {
-                $ins->execute([$recipeId, $ingId, $base, $yld]);
+            if ($drink) {
+                $ins = $pdo->prepare(
+                    "INSERT INTO stock_recipe_ingredients (recipe_id, ingredient_id, quantity_per_portion, yield_percent, entry_measure, entry_qty, entry_ml)
+                     VALUES (?, ?, ?, ?, ?, ?, ?)"
+                );
+            } else {
+                $ins = $pdo->prepare(
+                    "INSERT INTO stock_recipe_ingredients (recipe_id, ingredient_id, quantity_per_portion, yield_percent) VALUES (?, ?, ?, ?)"
+                );
+            }
+            foreach ($clean as [$ingId, $base, $yld, $entry]) {
+                $ins->execute($drink ? [$recipeId, $ingId, $base, $yld, $entry[0], $entry[1], $entry[2]] : [$recipeId, $ingId, $base, $yld]);
             }
             if ($ownTx) {
                 $pdo->commit();

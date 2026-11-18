@@ -100,9 +100,20 @@ if (!function_exists('import_job_analyse')) {
     {
         $hasPack = (int)$pdo->query("SELECT COUNT(*) FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'stock_ingredients' AND COLUMN_NAME = 'pack_size'")->fetchColumn() > 0;
         $packCols = $hasPack ? 'pack_name, pack_size,' : 'NULL AS pack_name, NULL AS pack_size,';
-        $existing = $pdo->query("SELECT id, name, category, unit, current_quantity, cost_per_unit, par_level, reorder_point, notes, {$packCols} is_archived,
+        $drinkCols = function_exists('rh_drink_ing_cols') ? rh_drink_ing_cols('i') : '';        // size + count measure (Step U1/U2), '' before 088/089
+        $existing = $pdo->query("SELECT id, name, category, unit, current_quantity, cost_per_unit, par_level, reorder_point, notes, {$packCols} is_archived{$drinkCols},
                                         (SELECT COUNT(*) FROM stock_recipe_ingredients x WHERE x.ingredient_id = i.id) AS recipes
                                  FROM stock_ingredients i ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
+        if ($drinkCols !== '') {
+            // counts in shots / tots / glasses (measure.php): the item's own measure and ml in one stock unit, worked out once here so the resolver stays pure
+            foreach ($existing as &$e) {
+                $e['_measure'] = function_exists('rh_stock_measure_get') ? rh_stock_measure_get($e) : null;
+                $ml = function_exists('rh_drink_item_ml') ? rh_drink_item_ml($e) : null;
+                $e['_ml'] = is_array($ml) ? (float)$ml['per_unit'] : null;
+                $e['_ml_source'] = is_array($ml) ? (string)($ml['source'] ?? '') : '';      // 'item' = a volume typed on the item (the only size a crate item may use)
+            }
+            unset($e);
+        }
         $units = [];
         $aliasSet = import_load_aliases($pdo);
         foreach ($aliasSet['units'] as $u) {
@@ -120,8 +131,9 @@ if (!function_exists('import_job_analyse')) {
         sort($u, SORT_NATURAL | SORT_FLAG_CASE);
         return ['existing' => $existing, 'unit_options' => $u, 'corrections' => import_load_name_corrections($pdo),
             'price_evidence' => import_job_price_evidence($pdo, $existing), 'cost_limits' => import_cost_limits($pdo),
-            'learned' => import_load_learned($pdo), 'unit_synonyms' => (array)$aliasSet['unit_synonyms'],
-            'case_evidence' => import_cs_load_evidence($pdo)];       // recipe selling prices, real deliveries, barcode / order pack sizes (case-signals.php)
+            'learned' => import_load_learned($pdo), 'unit_synonyms' => (array)$aliasSet['unit_synonyms'], 'container_words' => (array)($aliasSet['container_words'] ?? []),
+            'case_evidence' => import_cs_load_evidence($pdo),        // recipe selling prices, real deliveries, barcode / order pack sizes (case-signals.php)
+            'drink_measures' => function_exists('rh_drink_measures_list') ? rh_drink_measures_list() : []];     // the hotel's measures list (shot 25 ml ...)
     }
 
     /**
@@ -427,6 +439,9 @@ if (!function_exists('import_job_analyse')) {
         $keep = ['key' => $a['key']];
         if (($q['type'] ?? '') === 'case-price' && $a['key'] === 'per-case') {
             $keep['pack_size'] = (int)$a['pack_size'];
+        }
+        if (($q['type'] ?? '') === 'measure-n' && $a['key'] === 'n') {
+            $keep['pack_size'] = import_measure_n_valid($a['pack_size'] ?? null);        // how many tots in one bottle: 1..max, 4 dp (checked before)
         }
         $keep['by'] = $userId > 0 ? $userId : null;
         $keep['at'] = date('Y-m-d H:i:s');

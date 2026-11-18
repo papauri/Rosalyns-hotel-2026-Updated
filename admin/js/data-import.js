@@ -428,9 +428,24 @@
                     pi.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); save(q, 'per-case', pi.value, c); } });
                     q._pi = pi;
                 }
+                if (o.key === 'n' && q.type === 'measure-n') {
+                    // "how many tots in one bottle?": a number the person types (1 or more; decimals allowed), saved on the item at import
+                    packBox = h('div', 'di-pack');
+                    var ni = document.createElement('input');
+                    ni.type = 'number'; ni.min = '1'; ni.step = 'any'; ni.inputMode = 'decimal'; ni.className = 'di-pack-in';
+                    ni.setAttribute('aria-label', 'How many in one');
+                    add(packBox, h('span', null, 'How many in one: '), ni, h('button', 'btn-primary di-btn', 'Save'));
+                    packBox.hidden = checked !== 'n';
+                    if (q.pack_size) { ni.value = q.pack_size; }
+                    var nsv = packBox.querySelector('button');
+                    nsv.type = 'button';
+                    nsv.addEventListener('click', function () { save(q, 'n', ni.value, c); });
+                    ni.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); save(q, 'n', ni.value, c); } });
+                    q._pi = ni;
+                }
                 r.addEventListener('change', function () {
-                    if (q.type === 'case-price') {
-                        if (o.key === 'per-case') { packBox.hidden = false; q._pi.focus(); return; }
+                    if (q.type === 'case-price' || q.type === 'measure-n') {
+                        if (o.key === (q.type === 'case-price' ? 'per-case' : 'n')) { packBox.hidden = false; q._pi.focus(); return; }
                         packBox.hidden = true;
                     }
                     // Arrow keys walk through the options and fire a change each time: wait until the choice settles.
@@ -461,6 +476,9 @@
         function save(q, key, pack, cardEl) {
             if (q.type === 'case-price' && key === 'per-case') {
                 if (!/^\d+$/.test(String(pack || '').trim()) || Number(pack) < 2 || Number(pack) > 100000) { msg('Enter how many units are in the case (a whole number from 2 to 100000).'); return; }
+            }
+            if (q.type === 'measure-n' && key === 'n') {
+                if (!/^\d+(\.\d+)?$/.test(String(pack || '').trim()) || Number(pack) < 1) { msg('Enter how many are in one (a number, 1 or more).'); return; }
             }
             cardEl.classList.add('is-saving');
             Array.prototype.forEach.call(cardEl.querySelectorAll('input,button'), function (x) { x.disabled = true; });
@@ -904,6 +922,7 @@
         var TYPE_LABEL = {
             'possible-typo': 'Did you mean (possible typo)', 'duplicate-no-batch': 'Same name twice, no batch', 'duplicate-batch-clash': 'Same name twice, same batch',
             'conflict': 'Two values for one item', 'merge-conflict': 'Rows of one item disagree', 'case-price': 'Case price or price per unit', 'pack-price-check': 'Price per unit and per pack disagree', 'count-unit': 'Counted in packs or single units',
+            'measure-n': 'How many in one bottle', 'price-per-measure': 'Price per shot or glass',
             'price-check': 'Price looks unusual', 'same-item-two-sheets': 'Same item on two sheets', 'unit-clash': 'Unit differs from stock',
             'archived-match': 'Matches an archived item', 'ambiguous-match': 'Several possible matches', 'cost-too-large': 'Price too large to store',
             'value-too-long': 'Text too long to store', 'bad-value': 'Value is not a number', 'formula-name': 'Name looks like a formula', 'section-or-item': 'Heading or item?'
@@ -1610,6 +1629,7 @@
             var t4 = cell('Opening stock');
             add(t4, h('span', null, it.balance === null || it.balance === undefined ? '—' : num(it.balance)));
             if (it.balance_sources && it.balance_sources.length) { t4.appendChild(h('div', 'di-capline')); it.balance_sources.forEach(function (x) { t4.appendChild(src(x)); t4.appendChild(document.createTextNode(' ')); }); }
+            if (it.qty_how) { t4.appendChild(h('div', 'di-small', it.qty_how)); }      // a count in shots / tots / glasses, turned into the stock unit
             if ((it.batches || []).some(function (b) { return b.expiry; })) {
                 var bt = h('div', 'di-small');
                 bt.textContent = it.batches.filter(function (b) { return b.expiry; }).map(function (b) { return (b.label ? b.label + ' ' : '') + num(b.qty) + ' exp ' + b.expiry; }).join('; ');

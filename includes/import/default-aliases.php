@@ -26,7 +26,8 @@ if (!function_exists('import_default_aliases')) {
             // renamed copies of it ("Current Quantity level", "Minimum Quantity level", "Lead Time (days)" ...). v3 (2026-11-16): unit spelling "trays" -> "tray".
             // v4 (2026-11-17): bar-sheet layouts with a bought-as / pack size / served-by / selling price column (pack_name, pack_size, served_by,
             // pack_price, sell_price), container and portion words, "Total Balance" as the quantity when the sheet has no other quantity column.
-            'version' => 4,
+            // v5 (2026-11-19, Step U2 d): "pour" / "pours" as portion words (a bar count written in pours is turned into bottles).
+            'version' => 5,
             'fields' => [
                 'item_name' => [
                     'item name', 'item', 'items', 'item description', 'description', 'product', 'product name',
@@ -151,7 +152,7 @@ if (!function_exists('import_default_aliases')) {
             // ... and words for a PORTION served out of a bottle / casket (never a stock unit of its own)
             'portion_words' => [
                 'shot', 'shots', 'tot', 'tots', 'glass', 'glasses', 'measure', 'measures', 'cup', 'cups', 'serving', 'servings',
-                'portion', 'portions', 'scoop', 'scoops', 'slice', 'slices', 'pint', 'pints', 'single', 'double', 'dash',
+                'portion', 'portions', 'scoop', 'scoops', 'slice', 'slices', 'pint', 'pints', 'single', 'double', 'dash', 'pour', 'pours',
             ],
             'units' => [
                 'piece', 'pieces', 'pc', 'pcs', 'each', 'ea', 'bottle', 'bottles', 'btl', 'btls', 'can', 'cans', 'kg', 'kgs',

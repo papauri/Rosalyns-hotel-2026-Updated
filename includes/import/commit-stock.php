@@ -181,6 +181,41 @@ if (!function_exists('import_commit_stock')) {
                     . '). Counted by the import - a second manager must approve it. Ingredients not in the file are not in this count.';
                 $pdo->prepare('UPDATE stock_counts SET notes = ? WHERE id = ? AND is_opening = 1')->execute([$note, (int)$ap['count_id']]);
             }
+            // "how many tots in one bottle?" answered on the review screen: saved on the item as its count measure (Step U2 d), through the stock
+            // lead's own path (rh_stock_measure_save: checked, logged as stock_measure_changed), in this same transaction. Never a raw UPDATE.
+            $measureSaved = 0;
+            foreach ($v['res']['items'] as $it) {
+                if ($it['status'] !== 'ready' || empty($it['measure_save']) || !isset($plan['items'][rh_ssi_key($it['name'])])) {
+                    continue;
+                }
+                if (!function_exists('rh_stock_measure_ready') || !rh_stock_measure_ready($pdo)) {
+                    break;                              // before database update 088 there is nowhere to keep it: the converted count still goes in
+                }
+                $ms = $it['measure_save'];
+                [$mNew, $mErr] = rh_stock_measure_from_input(['measure_big_name' => (string)$ms['big'], 'measure_small_name' => (string)$ms['small'],
+                    'measure_per_big' => (string)$ms['n'], 'measure_stock_side' => (string)$ms['side']]);
+                if ($mNew === null) {
+                    throw new RuntimeException('"' . $it['name'] . '": the count measure could not be saved (' . (string)$mErr . '). Please review again.');
+                }
+                if ($it['match']) {
+                    $ingId = (int)$it['match']['id'];
+                } else {
+                    $fq = $pdo->prepare('SELECT id FROM stock_ingredients WHERE name = ? ORDER BY id DESC LIMIT 1');
+                    $fq->execute([$it['name']]);
+                    $ingId = (int)$fq->fetchColumn();
+                }
+                if ($ingId <= 0) {
+                    throw new RuntimeException('"' . $it['name'] . '" was not found after the import, so its count measure could not be saved. Nothing was imported.');
+                }
+                $cur = $pdo->prepare('SELECT measure_big_name, measure_small_name, measure_per_big, measure_stock_side FROM stock_ingredients WHERE id = ?');
+                $cur->execute([$ingId]);
+                $curRow = $cur->fetch(PDO::FETCH_ASSOC) ?: [];
+                if (rh_stock_measure_get($curRow) !== null) {
+                    continue;                           // an item's own measure (set since the review) is never replaced by an import
+                }
+                rh_stock_measure_save($pdo, $ingId, $mNew, $userId, 'Import #' . $jobId);
+                $measureSaved++;
+            }
             if (PHP_SAPI === 'cli' && !empty($opts['fail_after_apply'])) {
                 throw new RuntimeException('Forced failure after the writes (test).');
             }
@@ -205,6 +240,7 @@ if (!function_exists('import_commit_stock')) {
                 'count_lines' => (int)$ap['count_lines'], 'expiry_batches' => (int)$ap['batches'], 'left_out_overlap' => (int)($ap['left_out_overlap'] ?? 0),
                 'stock_not_counted_no_cost' => $nc['no_cost']['names'], 'stock_not_counted_not_ticked' => $nc['not_ticked']['names'],
                 'stock_not_counted_cost_not_ticked' => $nc['cost_not_ticked']['names'], 'stock_not_counted_same' => $nc['same']['names'], 'committed_at' => date('Y-m-d H:i:s'), 'learned' => $learned,
+                'measures_saved' => $measureSaved,
                 'skipped_by_you' => (int)import_cont_overview($v['res'])['skipped_by_you'], 'fixed_for_you' => (int)array_sum($v['res']['heal_counts']),
                 'next_step' => 'A different manager must approve the opening count on Stock Count before any stock appears.',
             ];

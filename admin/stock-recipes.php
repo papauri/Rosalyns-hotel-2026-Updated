@@ -53,8 +53,9 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_recipe') {
 
         $ingredients = [];
         if ($recipeId) {
+            $drink = rh_stock_drink_ready($pdo);
             $stm = $pdo->prepare("
-                SELECT sri.*, i.name AS ingredient_name, i.unit, i.cost_per_unit
+                SELECT sri.*, i.name AS ingredient_name, i.name, i.unit, i.cost_per_unit" . ($drink ? rh_drink_ing_cols('i') : '') . "
                 FROM stock_recipe_ingredients sri
                 INNER JOIN stock_ingredients i ON i.id = sri.ingredient_id
                 WHERE sri.recipe_id = ?
@@ -62,6 +63,14 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'get_recipe') {
             ");
             $stm->execute([$recipeId]);
             $ingredients = $stm->fetchAll(PDO::FETCH_ASSOC);
+            if ($drink) {
+                // A line typed as a drink measure ("2 shots") is shown that way again while it still gives the saved figure.
+                $dmList = rh_drink_measures_list();
+                foreach ($ingredients as &$ln) {
+                    $ln['entry_match'] = rh_drink_line_entry($ln, $ln, $dmList);
+                }
+                unset($ln);
+            }
         }
         echo json_encode([
             'ok' => true,
@@ -92,9 +101,10 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 $qtys     = $_POST['quantity_per_portion'] ?? [];
                 $yields   = $_POST['yield_percent'] ?? [];
                 $delim    = $_POST['delete_ingredient'] ?? [];
+                $measures = $_POST['entry_measure'] ?? []; // drink measure each line was typed in ('' = the stock unit)
 
                 if ($itemId <= 0) throw new RuntimeException('Menu item required.');
-                if (!is_array($ingIds) || !is_array($qtys) || !is_array($yields)) {
+                if (!is_array($ingIds) || !is_array($qtys) || !is_array($yields) || !is_array($measures)) {
                     throw new RuntimeException('Recipe lines are malformed.');
                 }
                 if ($portions > 10000) throw new RuntimeException('Portions per recipe is too large.');
@@ -106,7 +116,9 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                 // and the same ingredient is not repeated.
                 $lines = [];
                 $seenIng = [];
-                $ingNameStmt = $pdo->prepare("SELECT name, is_archived FROM stock_ingredients WHERE id = ?");
+                $drink = rh_stock_drink_ready($pdo);
+                $dmList = $drink ? rh_drink_measures_list() : [];
+                $ingNameStmt = $pdo->prepare("SELECT name, unit, is_archived" . ($drink ? rh_drink_ing_cols('') : '') . " FROM stock_ingredients WHERE id = ?");
                 $count = count($ingIds);
                 for ($k = 0; $k < $count; $k++) {
                     if (!empty($delim[$k])) continue;
@@ -134,10 +146,26 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                         throw new RuntimeException('"' . $ingName . '" appears more than once in this recipe. Combine the quantities into one line.');
                     }
                     $seenIng[$iid] = true;
-                    $lines[] = [$iid, (float)$qRaw, (float)$yRaw];
+                    $qty = (float)$qRaw;
+                    $entry = [null, null, null];
+                    $mRaw = trim((string)($measures[$k] ?? ''));
+                    if ($mRaw !== '') {
+                        // Typed as a drink measure: the stock figure is worked out here, never taken from the screen.
+                        if (!$drink) {
+                            throw new RuntimeException($ingName . ': drink measures are not set up yet. Type the amount in ' . $ingRow['unit'] . '.');
+                        }
+                        try {
+                            $conv = rh_drink_measure_to_stock((float)$qRaw, $mRaw, $ingRow, $dmList);
+                        } catch (RuntimeException $ce) {
+                            throw new RuntimeException($ingName . ': ' . $ce->getMessage());
+                        }
+                        $qty = $conv['qty'];
+                        $entry = [$conv['name'], round((float)$qRaw, 4), $conv['ml'] !== null ? round((float)$conv['ml'], 4) : null];
+                    }
+                    $lines[] = [$iid, $qty, (float)$yRaw, $entry];
                 }
 
-                rh_with_create_lock($pdo, 'stock_recipe', function () use ($pdo, $itemId, $type, $portions, $lines, $user, &$message) {
+                rh_with_create_lock($pdo, 'stock_recipe', function () use ($pdo, $itemId, $type, $portions, $lines, $user, $drink, &$message) {
                     $pdo->beginTransaction();
                     // Find or create recipe (one recipe per menu item + type)
                     $rs = $pdo->prepare("SELECT id FROM stock_recipes WHERE menu_item_id = ? AND menu_type = ?");
@@ -155,10 +183,12 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Wipe all ingredients then re-insert (simple & atomic)
                     $pdo->prepare("DELETE FROM stock_recipe_ingredients WHERE recipe_id = ?")->execute([$recipeId]);
 
-                    $insIng = $pdo->prepare("INSERT INTO stock_recipe_ingredients (recipe_id, ingredient_id, quantity_per_portion, yield_percent) VALUES (?, ?, ?, ?)");
+                    $insIng = $drink
+                        ? $pdo->prepare("INSERT INTO stock_recipe_ingredients (recipe_id, ingredient_id, quantity_per_portion, yield_percent, entry_measure, entry_qty, entry_ml) VALUES (?, ?, ?, ?, ?, ?, ?)")
+                        : $pdo->prepare("INSERT INTO stock_recipe_ingredients (recipe_id, ingredient_id, quantity_per_portion, yield_percent) VALUES (?, ?, ?, ?)");
                     $saved = 0;
                     foreach ($lines as $ln) {
-                        $insIng->execute([$recipeId, $ln[0], $ln[1], $ln[2]]);
+                        $insIng->execute($drink ? [$recipeId, $ln[0], $ln[1], $ln[2], $ln[3][0], $ln[3][1], $ln[3][2]] : [$recipeId, $ln[0], $ln[1], $ln[2]]);
                         $saved++;
                     }
 
@@ -223,7 +253,7 @@ if (!$error || strpos($error, 'not yet') === false) {
             GROUP BY mc.slug, mi.id, mi.item_name, mi.price, sr.id, sr.portions_per_recipe
             ORDER BY mc.sort_order ASC, mi.item_name ASC
         ")->fetchAll(PDO::FETCH_ASSOC);
-        $ingredients = $pdo->query("SELECT id, name, category, unit, cost_per_unit, current_quantity FROM stock_ingredients WHERE is_archived = 0 ORDER BY category, name")->fetchAll(PDO::FETCH_ASSOC);
+        $ingredients = $pdo->query("SELECT id, name, category, unit, cost_per_unit, current_quantity" . rh_drink_ing_cols('') . " FROM stock_ingredients WHERE is_archived = 0 ORDER BY category, name")->fetchAll(PDO::FETCH_ASSOC);
         // Recipes saved before archived items were refused: listed only (nothing is changed), so staff can fix them.
         $archivedInRecipes = $pdo->query("
             SELECT COALESCE(mi.item_name, CONCAT('menu item #', sr.menu_item_id)) AS dish, i.name AS ingredient
@@ -264,9 +294,9 @@ $csrf_token = generateCsrfToken();
             <a href="stock-ingredients.php" class="btn-add"><i class="fas fa-carrot"></i> Manage Ingredients</a>
         </div>
 
-        <?php if ($message): showAlert($message, 'success');
+        <?php if ($message): showAlert(htmlspecialchars($message, ENT_QUOTES, 'UTF-8'), 'success'); // the toast shows HTML; item names are staff-typed
         endif; ?>
-        <?php if ($error):   showAlert($error,   'error');
+        <?php if ($error):   showAlert(htmlspecialchars($error, ENT_QUOTES, 'UTF-8'),   'error');
         endif; ?>
         <?php if (!empty($archivedInRecipes)):
             $airList = [];
@@ -368,7 +398,7 @@ $csrf_token = generateCsrfToken();
                 </div>
                 <div class="col">Qty / portion
                     <i class="fas fa-circle-question help"
-                        title="How much of the ingredient (in its base unit) goes into ONE portion. e.g. 0.05 kg = 50 g."></i>
+                        title="How much of the ingredient (in its base unit) goes into ONE portion. e.g. 0.05 kg = 50 g. For a drink you can pick a measure under the box (shot, glass, ml) and type how many: it is worked out into the stock unit when you save."></i>
                 </div>
                 <div class="col">Yield %
                     <i class="fas fa-circle-question help"
@@ -435,6 +465,7 @@ $csrf_token = generateCsrfToken();
         </form>
     </template>
 
+    <script src="js/stock-drink-measures.js?v=<?php echo @filemtime(__DIR__ . '/js/stock-drink-measures.js'); ?>"></script>
     <script>
         let ingredients = <?php echo json_encode(array_map(fn($i) => [
                                 'id' => (int)$i['id'],
@@ -442,8 +473,17 @@ $csrf_token = generateCsrfToken();
                                 'unit' => $i['unit'],
                                 'cost' => (float)$i['cost_per_unit'],
                                 'category' => $i['category'] ?? 'General',
-                                'qty' => (float)($i['current_quantity'] ?? 0)
+                                'qty' => (float)($i['current_quantity'] ?? 0),
+                                'volume_ml' => $i['volume_ml'] ?? null,
+                                'measure_big_name' => $i['measure_big_name'] ?? '',
+                                'measure_small_name' => $i['measure_small_name'] ?? '',
+                                'measure_per_big' => $i['measure_per_big'] ?? null,
+                                'measure_stock_side' => $i['measure_stock_side'] ?? ''
                             ], $ingredients)); ?>;
+        // The hotel's drink measures (Stock Items > Drink measures): shot, glass of wine... with their ml.
+        let drinkMeasures = <?php echo json_encode(rh_stock_drink_ready($pdo) ? rh_drink_measures_list() : []); ?>;
+        // Before migration 089 the server refuses measures, so none are offered (the stock unit only).
+        if (window.RHDrink) RHDrink.setReady(<?php echo rh_stock_drink_ready($pdo) ? 'true' : 'false'; ?>);
         const currencySymbol = <?php echo json_encode($currency_symbol); ?>;
         const fmtMoney = n => Number(n || 0).toLocaleString('en-US', {
             minimumFractionDigits: 2,
@@ -533,7 +573,7 @@ $csrf_token = generateCsrfToken();
                 }
                 recalcCost();
             } catch (e) {
-                editor.innerHTML = '<p style="color:#c82333;">Error: ' + e.message + '</p>';
+                editor.textContent = ''; const errP = document.createElement('p'); errP.style.color = '#c82333'; errP.textContent = 'Error: ' + e.message; editor.appendChild(errP);
             }
         }
 
@@ -583,10 +623,11 @@ $csrf_token = generateCsrfToken();
             const ingId = prefill ? prefill.ingredient_id : '';
             row.innerHTML = `
                 <div class="ing-pick-wrap">
-                    <select name="ingredient_id[]" required onchange="recalcCost()">${buildOptions(ingId)}</select>
+                    <select name="ingredient_id[]" required onchange="recipeIngChanged(this)">${buildOptions(ingId)}</select>
                 </div>
                 <div class="qty-cell">
-                    <input type="number" name="quantity_per_portion[]" placeholder="e.g. 0.05" step="0.000001" min="0" required oninput="recalcCost()" title="How much per portion in the ingredient's base unit (g, ml, kg, etc.)">
+                    <input type="number" name="quantity_per_portion[]" placeholder="e.g. 0.05" step="any" min="0" required oninput="recalcCost()" title="How much per portion: in the stock unit, or in the measure picked below">
+                    <select name="entry_measure[]" class="measure-pick" onchange="recipeMeasureChanged(this)" aria-label="Type this amount in" title="Type the amount in the stock unit or in a drink measure (shot, glass, ml). The stock unit figure is worked out when you save." hidden></select>
                     <span class="raw-qty"></span>
                 </div>
                 <input type="number" name="yield_percent[]" placeholder="100" step="0.1" min="0.1" max="100" value="100" oninput="recalcCost()" title="Usable percentage after preparation (peel, trim, cook). 100 = no loss.">
@@ -595,12 +636,73 @@ $csrf_token = generateCsrfToken();
                 <input type="hidden" name="delete_ingredient[]" value="0">
             `;
             rows.appendChild(row);
+            const em = prefill && prefill.entry_match && prefill.entry_match.measure ? prefill.entry_match : null;
+            fillMeasurePick(row, em ? em.measure : '');
             if (prefill) {
                 const qtyInput = row.querySelector('input[name="quantity_per_portion[]"]');
                 const yldInput = row.querySelector('input[name="yield_percent[]"]');
-                qtyInput.value = Number(prefill.quantity_per_portion);
+                // A line typed as "2 shots" opens as 2 + shot again; every other line shows its stock-unit figure.
+                qtyInput.value = em && row.querySelector('.measure-pick').value === em.measure ? Number(em.qty) : Number(prefill.quantity_per_portion);
                 yldInput.value = Number(prefill.yield_percent);
             }
+            recalcCost();
+        }
+
+        /* Drink measures (Step U2): same maths as the server (admin/js/stock-drink-measures.js). */
+        function rowIng(row) {
+            const id = parseInt(row.querySelector('select[name="ingredient_id[]"]').value || '0', 10);
+            return ingredients.find(i => i.id === id) || null;
+        }
+
+        function fillMeasurePick(row, selected) {
+            const pick = row.querySelector('.measure-pick');
+            const ing = rowIng(row);
+            const opts = ing && window.RHDrink ? RHDrink.options(ing, drinkMeasures) : [];
+            pick.innerHTML = '';
+            const base = document.createElement('option');
+            base.value = '';
+            base.textContent = ing ? ing.unit + ' (stock unit)' : 'stock unit';
+            pick.appendChild(base);
+            opts.forEach(o => {
+                const op = document.createElement('option');
+                op.value = o.name;
+                op.textContent = RHDrink.label(o, ing);
+                pick.appendChild(op);
+            });
+            const hit = opts.find(o => o.name.toLowerCase() === String(selected || '').toLowerCase());
+            pick.value = hit ? hit.name : '';
+            pick.dataset.prev = pick.value;
+            pick.hidden = !opts.length;
+        }
+
+        /* Stock units for what is typed in the row (a measure is worked out; else the number as typed). */
+        function rowStockQty(row) {
+            const qty = parseFloat(row.querySelector('input[name="quantity_per_portion[]"]').value) || 0;
+            const m = row.querySelector('.measure-pick').value;
+            if (!m) return qty;
+            const ing = rowIng(row);
+            return ing && window.RHDrink ? (RHDrink.toStock(qty, m, ing, drinkMeasures) || 0) : 0;
+        }
+
+        function recipeIngChanged(sel) {
+            fillMeasurePick(sel.closest('.ing-row'), '');
+            recalcCost();
+        }
+
+        /* Changing the measure keeps the same amount: 0.06 bottle = 2 shots (of 30 ml in a 1 L bottle). */
+        function recipeMeasureChanged(pick) {
+            const row = pick.closest('.ing-row');
+            const qtyInput = row.querySelector('input[name="quantity_per_portion[]"]');
+            const ing = rowIng(row);
+            const was = pick.dataset.prev || '';
+            const now = pick.value;
+            const v = parseFloat(qtyInput.value);
+            if (ing && v > 0 && window.RHDrink) {
+                const stock = was ? RHDrink.toStock(v, was, ing, drinkMeasures) : v;
+                const one = now ? RHDrink.perOne(ing, drinkMeasures, now) : 1;
+                qtyInput.value = stock > 0 && one > 0 ? RHDrink.fmt(stock / one, now ? 4 : 6) : '';
+            }
+            pick.dataset.prev = now;
             recalcCost();
         }
 
@@ -662,7 +764,9 @@ $csrf_token = generateCsrfToken();
             let total = 0;
             rows.forEach(r => {
                 const sel = r.querySelector('select');
-                const qty = parseFloat(r.querySelector('input[name="quantity_per_portion[]"]').value) || 0;
+                const typed = parseFloat(r.querySelector('input[name="quantity_per_portion[]"]').value) || 0;
+                const measure = r.querySelector('.measure-pick') ? r.querySelector('.measure-pick').value : '';
+                const qty = rowStockQty(r);
                 const yld = Math.max(0.1, parseFloat(r.querySelector('input[name="yield_percent[]"]').value) || 100);
                 const opt = sel.selectedOptions[0];
                 const cost = opt ? parseFloat(opt.dataset.cost || 0) : 0;
@@ -672,7 +776,12 @@ $csrf_token = generateCsrfToken();
                 total += lineCost;
 
                 const rawSpan = r.querySelector('.raw-qty');
-                if (qty > 0) {
+                if (measure && typed > 0) {
+                    // "= 0.06 bottle · MWK 1,800.00" (what one portion takes off stock, and what it costs)
+                    rawSpan.textContent = qty > 0 ?
+                        `= ${RHDrink.fmt(qty, 6)} ${unit}` + (cost > 0 ? ` · ${currencySymbol} ${fmtMoney(qty * cost)}` : '') + (yld < 100 ? ` (deducts ${raw.toFixed(3)} ${unit} at ${yld}% yield)` : '') :
+                        `${measure} cannot be worked out for this item. Pick the stock unit.`;
+                } else if (qty > 0) {
                     rawSpan.textContent = (yld < 100) ?
                         `Deducts ${raw.toFixed(3)} ${unit} (${yld}% yield)` :
                         `${qty} ${unit} per portion`;
@@ -680,7 +789,7 @@ $csrf_token = generateCsrfToken();
                     rawSpan.textContent = '';
                 }
                 const lineSpan = r.querySelector('.line-cost');
-                lineSpan.textContent = (qty > 0 && opt) ? currencySymbol + ' ' + fmtMoney(lineCost) : '—';
+                lineSpan.textContent = (qty > 0 && opt && opt.value) ? currencySymbol + ' ' + fmtMoney(lineCost) : '—';
             });
             const price = parseFloat(currentItem.item.price) || 0;
             const pct = price > 0 ? (total / price) * 100 : 0;
