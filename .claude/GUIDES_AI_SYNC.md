@@ -543,6 +543,10 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Assistant: no change in tools.
 - Manager quick guide PDF sent to the owner 2026-11-19 (OneDrive\MSP\Rosalyns-Stock-Quick-Guide.pdf).
 
+### Stock: yield explained plainly (2026-11-19) - Rosalyn's 1f0953a / Liwonde 6e3dc69
+- Guides: guide 08 already updated in this ship (chips example). Other guides that mention yield (recipes/menu, KB answers) should use the same example: 10 kg potatoes peeled to 8 kg = 80 %; 250 g chips plate takes 313 g raw; sack makes 32 plates, not 40; type the plate amount; rice/pasta dry amount at 100 %.
+- Assistant: if it explains yield, use the same example and rule (raw taken off = plate amount / yield).
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` at Liwonde: 7 data-dependent fails (left-owing + refunds briefing, 4 alert checks, digest
   recipients); ai_review_engine "nothing to add for this person" fails on HEAD too. (Tomorrow / 4 of 3 / K1,068,000 now pass.)
