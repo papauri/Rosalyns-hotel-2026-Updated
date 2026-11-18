@@ -149,6 +149,18 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
   and admin/includes/guest-credit.php (rh_guest_credit_summary / rh_guest_credit_lines); rh_eod_refunds_to_credit and
   rh_eod_credit_notes_redeemed removed. includes/ai/ai-insights.php ~315 still says "Moved to credit notes" - check at sync.
 
+### Stock Step U1: count in shots / glasses (2026-11-18, owner) - hashes in TASKS.md
+- Guides (Stock › Items, Stock › Stock count): an item can have a measure ("1 bottle = 25 shots", or glasses, cups...;
+  which one is the stock unit), suggested from the size in the name and the shot/glass size settings. On a count line
+  staff pick stock unit / bottles / shots / both ("2 bottles + 7 shots"); the line shows what it converts to and the
+  cost per shot. "Set measure" from the count line (Approve stock counts or stock management). Changing N re-works
+  draft and submitted counts, never approved ones. Approved count typed in bottles but counted in shots: "These were
+  counted in shots" correction, Preview -> Confirm, once per line; it does not show as missing stock.
+- Assistant: new columns stock_ingredients.measure_* and stock_count_lines.entry_*; helpers rh_stock_measure_* in
+  config/database.php (rh_stock_measure_fix_sql excludes the correction from loss lists); activity actions
+  stock_measure_changed, stock_count_line_measure_changed, stock_count_measure_correction. Counts it reads stay in the
+  stock unit.
+
 ## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
 
 ### Import stock check: value column warning + stock check workbook (2026-11-16, owner ask) — hashes in TASKS.md
