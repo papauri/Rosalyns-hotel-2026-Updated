@@ -2843,14 +2843,22 @@ function rh_checkin_arrangement_columns_present(?PDO $db = null): bool
  * Extra SELECT columns the check-in rule reads, for queries that name their columns (a "b.*" query already has them).
  * The arrangement columns are only named when migration 083 has run, so a SELECT never names a missing column.
  * $alias: table alias without the dot ('' = none).
+ * id / primary_booking_id / billing_account_id are what rh_checkin_arrangement_inherited() reads (a group member under a
+ * pay-later primary, a booking on a company account): without them the save points refused what the list offered.
  */
 function rh_checkin_rule_select(string $alias = ''): string
 {
     $p = preg_replace('/[^A-Za-z0-9_]/', '', $alias);
     $p = $p !== '' ? $p . '.' : '';
-    $cols = ", {$p}amount_due, {$p}amount_paid, {$p}total_amount, {$p}vat_amount, {$p}total_with_vat, {$p}folio_charges_total";
+    $cols = ", {$p}id, {$p}primary_booking_id, {$p}amount_due, {$p}amount_paid, {$p}total_amount, {$p}vat_amount, {$p}total_with_vat, {$p}folio_charges_total";
     if (rh_checkin_arrangement_columns_present()) {
         $cols .= ", {$p}checkin_without_payment, {$p}checkin_arrangement_note";
+    }
+    if (!function_exists('rh_billing_ready') && is_file(__DIR__ . '/../includes/billing-accounts.php')) {
+        require_once __DIR__ . '/../includes/billing-accounts.php';
+    }
+    if (function_exists('rh_billing_ready') && rh_billing_ready()) {
+        $cols .= ", {$p}billing_account_id"; // migration 084: only named once the column exists
     }
     return $cols;
 }

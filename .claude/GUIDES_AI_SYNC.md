@@ -123,6 +123,11 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Confirming the same review twice never runs it twice; after a lost connection the message says the result is unknown (check History). The bookings CSV export neutralises cells that start like a spreadsheet formula.
 - History as each single action. Guides: All Bookings bulk bar. Assistant: knows the bulk bar actions; no Assistant action.
 
+### Check-in: group members use the lead's pay-later arrangement (2026-11-18, owner audit) — hashes in TASKS.md
+- A room in a group whose lead booking has "check in now, pay later" (or a company account) can now be checked in unpaid from booking details, All Bookings and the check-in page (it was refused on save before).
+- Make primary copies the pay-later switch and its note to the new lead (History: "Check in before payment copied", Off → On). Cancel check-in now writes History ("Check-in undone", Checked in → Confirmed).
+- Guides: Groups (pay later for the whole group), Check-in (undo). Assistant: group members inherit the lead's pay-later arrangement at check-in.
+
 ### Reports: payment status mix adds up + credit-note payments as End of Day (2026-11-18, owner audit) — hashes in TASKS.md
 - Payment Status Mix shows every status (incl. Received, part refunded / refunded, Paid from credit note, Failed) with a Total row equal to the payments in the period; the three Received lines = Gross Revenue. Helper text per line.
 - Gross revenue, payment methods, daily / monthly trends and prior-period comparison no longer count payments made from a credit note (same as End of Day). Net Revenue takes off only the VAT on counted payments; VAT Collection shows "VAT on payments counted" and "VAT on credit-note payments" apart.

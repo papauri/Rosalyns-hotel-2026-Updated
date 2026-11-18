@@ -14,7 +14,8 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); }
  *       rows; refund back to the original method; "already stayed and left" rooms follow the checkout housekeeping rule.
  *       D10e-f, D11, D12 (2026-11-13 round 2): ended stay skips the clean-room gate; checkout_completed_at; refund method
  *       line per amount; store credit only when refund_method_default = ask.
- * Fixtures are throw-away rows found by unique tags; the final invoice is pre-marked generated (no PDF / email).
+ * Fixtures are throw-away rows found by unique tags; the final invoice is pre-marked generated (no invoice PDF / email).
+ * A checkout still writes a statement PDF (invoices/STMT-ZLS<tag>.pdf): the run removes the ones its own tags wrote.
  */
 $root = dirname(__DIR__, 2);
 chdir($root);
@@ -94,7 +95,15 @@ function lso_run(array $cfg): array {
 function lso_clean(array $r, string $label): void {
     ok("$label: harness rolled back, nothing left behind", empty($r['leak']) && empty($r['marker_lost']) && !empty($r['rolled_back']), json_encode([$r['error'] ?? null, $r['raw'] ?? null]));
 }
-function lso_tag(): string { return strtoupper(bin2hex(random_bytes(3))); }
+/** Every tag this run used: the statement PDFs a checkout writes (invoices/STMT-ZLS<tag>.pdf) are removed at the end. */
+$lsoTags = [];
+function lso_tag(): string { global $lsoTags; $t = strtoupper(bin2hex(random_bytes(3))); $lsoTags[] = $t; return $t; }
+/** The History (booking_audit_log) row with this action, found by action, not by position (other rows, e.g.
+ *  payment_status_changed, may be written before it). */
+function lso_aud(array $aud, string $action): array {
+    foreach ($aud as $row) { if (($row['action'] ?? '') === $action) { return $row; } }
+    return [];
+}
 $today = date('Y-m-d');
 $ago = function (int $n) use ($today): string { return date('Y-m-d', strtotime($today . ' -' . $n . ' day')); };
 /** Room type + clean room + booking ZLS<tag>: $status, stay $in -> $out, 100 a night, nothing paid (a confirmed one reads
@@ -222,9 +231,11 @@ lso_clean($r, 'D6c');
 $row = $r['verify'][0][0] ?? [];
 $aud = $r['verify'][2] ?? [];
 ok('D6c "already stayed and left": checked out at the booked dates, total unchanged, no payment', ($row['status'] ?? '') === 'checked-out' && ($row['check_out_date'] ?? '') === $ago(1) && (int)$row['number_of_nights'] === 3 && abs((float)$row['total_with_vat'] - 300) < $tol && ($r['verify'][1] ?? null) === [], json_encode([$row, $r['json'] ?? null, $r['raw'] ?? null]));
-$nv0 = json_decode((string)($aud[0]['new_values'] ?? ''), true) ?: [];
-$nv1 = json_decode((string)($aud[1]['new_values'] ?? ''), true) ?: [];
-ok('D6c History: checked-in (choice ended, no check-in email) + checked-out (leave = booked date, 0 extra)', count($aud) >= 2 && ($nv0['arrival_choice'] ?? '') === 'ended' && strpos((string)$aud[0]['note'], 'no check-in email') !== false && ($aud[1]['action'] ?? '') === 'checked-out' && ($nv1['leave_date'] ?? '') === $ago(1) && (int)($nv1['extra_nights'] ?? -1) === 0, json_encode($aud));
+$audIn = lso_aud($aud, 'checked-in');
+$audOut = lso_aud($aud, 'checked-out');
+$nv0 = json_decode((string)($audIn['new_values'] ?? ''), true) ?: [];
+$nv1 = json_decode((string)($audOut['new_values'] ?? ''), true) ?: [];
+ok('D6c History: checked-in (choice ended, no check-in email) + checked-out (leave = booked date, 0 extra)', $audIn !== [] && $audOut !== [] && ($nv0['arrival_choice'] ?? '') === 'ended' && strpos((string)$audIn['note'], 'no check-in email') !== false && ($nv1['leave_date'] ?? '') === $ago(1) && (int)($nv1['extra_nights'] ?? -1) === 0, json_encode($aud));
 ok('D6c the booking no longer holds its room', (int)($r['verify'][4][0]['n'] ?? -1) === 0, json_encode($r['verify'][4] ?? null));
 ok('D6c no check-in email even with the box ticked', stripos((string)($r['json']['message'] ?? ''), 'No check-in email sent') !== false, json_encode($r['json'] ?? null));
 $t = lso_tag();
@@ -327,7 +338,8 @@ $r = lso_run(['post' => $noOverride, 'setup' => $fx, 'vars' => ['b' => $bid($t)]
 lso_clean($r, 'D10e');
 $aud = $r['verify'][2] ?? [];
 ok('D10e ended stay: no clean-room gate (no override needed), recorded and checked out', !empty($r['json']['success']) && empty($r['json']['needs_confirm_room']) && ($r['verify'][0][0]['status'] ?? '') === 'checked-out', json_encode([$r['json'] ?? null, $r['raw'] ?? null]));
-ok('D10e History: "Clean-room check skipped"', strpos((string)($aud[0]['note'] ?? ''), 'Clean-room check skipped') !== false, (string)($aud[0]['note'] ?? ''));
+$audIn = lso_aud($aud, 'checked-in');
+ok('D10e History: "Clean-room check skipped"', strpos((string)($audIn['note'] ?? ''), 'Clean-room check skipped') !== false, json_encode($aud));
 // f) a normal late check-in ("arriving today") still meets the gate
 $t = lso_tag();
 $fx = lso_fixture($t, 'confirmed', $ago(2), date('Y-m-d', strtotime($today . ' +1 day')), 3);
@@ -401,6 +413,16 @@ $r = lso_run(['post' => ['action' => 'checkout_settle', 'id' => '{b}', 'settleme
     'setup' => array_merge($fx, [$ask]), 'vars' => ['b' => $bid($t)], 'verify' => $scVerify]);
 lso_clean($r, 'D12e');
 ok('D12e unknown refund method refused, nothing changed', empty($r['json']['success']) && ($r['verify'][0][0]['status'] ?? '') === 'checked-in' && ($r['verify'][4] ?? null) === [], json_encode([$r['json'] ?? null, $r['verify'][0] ?? null]));
+
+// The database is rolled back but a checkout's statement PDF is a file: remove only the ones this run's tags wrote.
+$pdfLeft = 0;
+foreach (array_unique($lsoTags) as $t) {
+    foreach (['STMT-ZLS', 'STMT-ZLN'] as $pre) {
+        $f = $root . '/invoices/' . $pre . $t . '.pdf';
+        if (is_file($f) && !@unlink($f)) { $pdfLeft++; }
+    }
+}
+ok('cleanup: no statement PDF from this run left in invoices/', $pdfLeft === 0, (string)$pdfLeft);
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail ? 1 : 0);

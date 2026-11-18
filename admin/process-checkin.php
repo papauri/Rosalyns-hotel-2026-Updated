@@ -206,6 +206,11 @@ try {
                 }
             }
 
+            // History + audit, the same rows as the Bookings list's cancel check-in (who, when, checked in -> confirmed).
+            rh_log_event('bookings', 'info', 'Check-in cancelled', ['booking_id' => $booking_id, 'by' => $user['username'] ?? null]);
+            logBookingAudit((int)$booking_id, 'check-in cancelled', ['status' => 'checked-in'], ['status' => 'confirmed'], null,
+                $booking['booking_reference'] ?? null);
+
             // Send status update email
             if ($booking) {
                 $email_result = sendSimpleStatusUpdateEmail($booking, 'confirmed');

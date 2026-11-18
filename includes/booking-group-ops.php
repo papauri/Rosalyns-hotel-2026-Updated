@@ -34,7 +34,10 @@ if (!function_exists('rh_group_repoint')) {
     /** Every row of a group (root first), ALL statuses incl. deleted; FOR UPDATE when $lock. Keyed by id. */
     function rh_group_ops_rows(PDO $pdo, int $root, bool $lock = false): array
     {
-        $st = $pdo->prepare('SELECT b.id, b.booking_reference, b.guest_name, b.room_guest_name, b.status, b.deleted_at, b.primary_booking_id,
+        // Pay-later arrangement (migration 083) only named once its columns exist.
+        $arr = function_exists('rh_checkin_arrangement_columns_present') && rh_checkin_arrangement_columns_present($pdo)
+            ? ' b.checkin_without_payment, b.checkin_arrangement_note,' : '';
+        $st = $pdo->prepare('SELECT b.id, b.booking_reference, b.guest_name, b.room_guest_name, b.status, b.deleted_at, b.primary_booking_id,' . $arr . '
                 b.billing_account_id, b.billing_reference, b.billing_due_date, b.billing_covers, b.final_invoice_number,
                 b.check_in_date, b.check_out_date, COALESCE((SELECT r.name FROM rooms r WHERE r.id = b.room_id), \'\') AS room_name
             FROM bookings b
@@ -243,12 +246,13 @@ if (!function_exists('rh_group_repoint')) {
      *   invoice_copied:bool,billing:string,company:string,chase_copied:int,old_label:string,new_label:string}
      *   billing: 'none' (guest pays) | 'same' (both rooms on the same company) | 'copied' (the old root's company copied).
      *   ids: every row now pointing at $newRoot (the old root included). On a refusal success=false and error says why.
+     *   arrangement_copied: the old root's "Check in before payment" (+ note) is / would be copied onto the new root.
      */
     function rh_group_repoint(PDO $pdo, int $oldRoot, int $newRoot, array $opts = []): array
     {
         $out = ['success' => false, 'error' => '', 'state' => '', 'old_root' => $oldRoot, 'new_root' => $newRoot, 'ids' => [],
             'invoice_number' => '', 'invoice_copied' => false, 'billing' => 'none', 'company' => '', 'chase_copied' => 0,
-            'old_label' => '', 'new_label' => ''];
+            'arrangement_copied' => false, 'old_label' => '', 'new_label' => ''];
         $dry = !empty($opts['dry_run']);
         $work = static function () use ($pdo, $oldRoot, $newRoot, $opts, $dry, $out): array {
             if ($oldRoot <= 0 || $newRoot <= 0 || $oldRoot === $newRoot) {
@@ -306,6 +310,11 @@ if (!function_exists('rh_group_repoint')) {
                 }
             }
 
+            // Pay-later arrangement: set on the primary only and the members inherit it (rh_checkin_arrangement_inherited),
+            // so the new primary takes the old root's switch + note. The old root keeps its own values; a new root that
+            // already has the switch keeps its own note.
+            $out['arrangement_copied'] = !empty($old['checkin_without_payment']) && empty($new['checkin_without_payment']);
+
             $live = rh_group_ops_live_ids($rows);
             $before = rh_group_ops_invoice_number($pdo, $live, $oldRoot);
             $out['invoice_number'] = $before;
@@ -325,6 +334,10 @@ if (!function_exists('rh_group_repoint')) {
                 $pdo->prepare('UPDATE bookings SET billing_account_id = ?, billing_reference = ?, billing_due_date = ?, billing_covers = ? WHERE id = ?')
                     ->execute([$ob['billing_account_id'], $ob['billing_reference'], $ob['billing_due_date'], $ob['billing_covers'], $newRoot]);
             }
+            if ($out['arrangement_copied']) {
+                $pdo->prepare('UPDATE bookings SET checkin_without_payment = 1, checkin_arrangement_note = ? WHERE id = ?')
+                    ->execute([$old['checkin_arrangement_note'] ?? null, $newRoot]);
+            }
             // Owner answer 4: the group keeps its old invoice number (written onto the new root only when it would flip).
             if ($before !== '' && rh_group_ops_invoice_number($pdo, $live, $newRoot) !== $before) {
                 $pdo->prepare('UPDATE bookings SET final_invoice_number = ? WHERE id = ?')->execute([$before, $newRoot]);
@@ -333,13 +346,20 @@ if (!function_exists('rh_group_repoint')) {
             $out['chase_copied'] = rh_group_copy_chase($pdo, $oldRoot, $newRoot);
 
             if (($opts['log'] ?? true) !== false) {
-                $meta = ['old_root' => $oldRoot, 'new_root' => $newRoot, 'invoice_number' => $before, 'billing' => $out['billing'], 'chase_copied' => $out['chase_copied']];
+                $meta = ['old_root' => $oldRoot, 'new_root' => $newRoot, 'invoice_number' => $before, 'billing' => $out['billing'], 'chase_copied' => $out['chase_copied'],
+                    'arrangement_copied' => $out['arrangement_copied']];
                 $inv = $before !== '' ? ' Group invoice number ' . $before . ' kept.' : '';
                 $bill = $out['billing'] === 'copied' ? ' Company account ' . $out['company'] . ' copied onto the new primary room.' : '';
                 rh_group_ops_log($new, 'Made the primary room of the group', 'This room is now the group\'s primary room (contact, documents and folio). No money moved.' . $inv . $bill,
                     (string)$old['booking_reference'], (string)$new['booking_reference'], $opts, $meta);
                 rh_group_ops_log($old, 'Primary room of the group moved', 'The group\'s primary room moved to ' . $out['new_label'] . '. No money moved.' . $inv,
                     (string)$old['booking_reference'], (string)$new['booking_reference'], $opts, $meta);
+                if ($out['arrangement_copied']) {
+                    $arrNote = trim((string)($old['checkin_arrangement_note'] ?? ''));
+                    rh_group_ops_log($new, 'Check in before payment copied', 'The group\'s pay-later arrangement ("Check in before payment") was copied from '
+                        . $out['old_label'] . ' onto this room, the new primary room, so every room of the group keeps it.'
+                        . ($arrNote !== '' ? ' Note: ' . $arrNote : ''), 'Off', 'On', $opts, $meta);
+                }
                 if ($out['invoice_copied']) {
                     rh_group_ops_log($new, 'Group invoice number kept', 'The group invoice number was written onto this room so it stays the same.',
                         trim((string)($new['final_invoice_number'] ?? '')) !== '' ? (string)$new['final_invoice_number'] : '(none)', $before, $opts, $meta);

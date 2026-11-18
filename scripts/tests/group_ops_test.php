@@ -338,6 +338,49 @@ try {
     $pv = rh_group_remove($pdo, $X, $opts + ['dry_run' => true]);
     $r = rh_group_remove($pdo, $X, $opts + ['expect_state' => (string)($pv['state'] ?? '')]);
     ok('R6 group of 2: member leaves, root keeps its number', !empty($r['success']) && trim((string)$get($V)['final_invoice_number']) === 'GOPT-INV-V' && trim((string)$get($X)['final_invoice_number']) === '', $r['error'] ?? '');
+
+    // ---- Check-in audit 2026-11-18: the pay-later arrangement ("Check in before payment") follows Make primary ------
+    $off = ['checkin_without_payment' => 0, 'checkin_arrangement_note' => null];
+    $PA = $mk(['checkin_without_payment' => 1, 'checkin_arrangement_note' => 'GOPT invoiced monthly']);
+    $PB = $mk($off);
+    $PC = $mk($off);
+    $testIds = array_merge($testIds, [$PA, $PB, $PC]);
+    $pdo->prepare('UPDATE bookings SET primary_booking_id = ? WHERE id IN (?, ?)')->execute([$PA, $PB, $PC]);
+    $pv = rh_group_repoint($pdo, $PA, $PB, $opts + ['dry_run' => true]);
+    ok('ARR preview: says the arrangement would be copied, nothing written', !empty($pv['success']) && !empty($pv['arrangement_copied']) && (int)$get($PB)['checkin_without_payment'] === 0, json_encode($pv));
+    $r = rh_group_repoint($pdo, $PA, $PB, $opts + ['expect_state' => $pv['state']]);
+    $bPA = $get($PA);
+    $bPB = $get($PB);
+    ok('ARR Make primary copies "Check in before payment" + its note onto the new primary', !empty($r['success']) && (int)$bPB['checkin_without_payment'] === 1 && $bPB['checkin_arrangement_note'] === 'GOPT invoiced monthly', json_encode([$r['error'] ?? '', $bPB['checkin_without_payment'], $bPB['checkin_arrangement_note']]));
+    ok('ARR the old root keeps its own values', (int)$bPA['checkin_without_payment'] === 1 && $bPA['checkin_arrangement_note'] === 'GOPT invoiced monthly');
+    ok('ARR History on the new primary only', $hist($PB, 'Check in before payment copied') === 1 && $hist($PA, 'Check in before payment copied') === 0);
+    $pcRow = ['payment_status' => 'unpaid', 'amount_due' => 100, 'amount_paid' => 0, 'total_with_vat' => 100, 'folio_charges_total' => 0] + $get($PC);
+    ok('ARR a member still inherits it at check-in (gate = arrangement)', rh_checkin_payment_gate($pcRow) === 'arrangement', (string)$pcRow['primary_booking_id']);
+    // The new root already has its own arrangement: kept as it is, nothing copied, no History row.
+    $QA = $mk(['checkin_without_payment' => 1, 'checkin_arrangement_note' => 'GOPT old note']);
+    $QB = $mk(['checkin_without_payment' => 1, 'checkin_arrangement_note' => 'GOPT own note']);
+    $testIds = array_merge($testIds, [$QA, $QB]);
+    $pdo->prepare('UPDATE bookings SET primary_booking_id = ? WHERE id = ?')->execute([$QA, $QB]);
+    $r = rh_group_repoint($pdo, $QA, $QB, $opts);
+    ok('ARR new root with its own arrangement keeps its own note, nothing logged', !empty($r['success']) && empty($r['arrangement_copied']) && $get($QB)['checkin_arrangement_note'] === 'GOPT own note' && $hist($QB, 'Check in before payment copied') === 0);
+    // Old root without it: the new root's values are never touched (an own "off" is not copied over an "on").
+    $RA = $mk($off);
+    $RB = $mk(['checkin_without_payment' => 0, 'checkin_arrangement_note' => 'GOPT left alone']);
+    $testIds = array_merge($testIds, [$RA, $RB]);
+    $pdo->prepare('UPDATE bookings SET primary_booking_id = ? WHERE id = ?')->execute([$RA, $RB]);
+    $r = rh_group_repoint($pdo, $RA, $RB, $opts);
+    ok('ARR old root without the arrangement: nothing copied', !empty($r['success']) && empty($r['arrangement_copied']) && (int)$get($RB)['checkin_without_payment'] === 0 && $get($RB)['checkin_arrangement_note'] === 'GOPT left alone');
+    // Remove the primary room (R6 root leaves -> re-point): the room taking over gets the arrangement too.
+    $SA = $mk(['checkin_without_payment' => 1, 'checkin_arrangement_note' => 'GOPT invoiced monthly']);
+    $SB = $mk($off);
+    $SC = $mk($off);
+    $testIds = array_merge($testIds, [$SA, $SB, $SC]);
+    $pdo->prepare('UPDATE bookings SET primary_booking_id = ? WHERE id IN (?, ?)')->execute([$SA, $SB, $SC]);
+    $pv = rh_group_remove($pdo, $SA, $opts + ['dry_run' => true]);
+    $r = rh_group_remove($pdo, $SA, $opts + ['expect_state' => (string)($pv['state'] ?? '')]);
+    $newRootS = (int)$get($SB)['primary_booking_id'] === 0 ? $SB : $SC;
+    ok('ARR primary room removed: the room taking over carries the arrangement, the members follow it', !empty($r['success']) && (int)$get($newRootS)['checkin_without_payment'] === 1
+        && (int)$get($newRootS === $SB ? $SC : $SB)['primary_booking_id'] === $newRootS, json_encode([$r['error'] ?? '', $get($SB)['primary_booking_id'], $get($SC)['primary_booking_id']]));
 } catch (Throwable $e) {
     ok('no exception', false, $e->getMessage() . ' @' . $e->getLine());
 } finally {
