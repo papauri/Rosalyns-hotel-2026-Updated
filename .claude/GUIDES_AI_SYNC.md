@@ -531,6 +531,12 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Guides (Menu Management): red "Costs more than it sells for" badge on a row, and a warning in the Edit form, when one sale's stock cost is above the price (free items never); "Fix crate prices" link (stock managers) opens that stock item on Fix crate prices.
 - Assistant: no change in tools; new helper rh_menu_cost_check() in admin/includes/menu-recipe-lib.php could back a "which menu items lose money" answer.
 
+### Stock Step U2: drink measures everywhere (2026-11-19) - Rosalyn's 321699c / Liwonde 20c492a
+- Guides (Stock > Ingredients): hotel measures list (shot, tot, glass, pour... with ml; names refuse < > & "); an item can have its own volume in ml, shown as "1 L bottle = 33 shots"; crate/case/pack items never take a size from their name. Needs migration 089 (Rosalyn's: not yet run).
+- Guides (Recipes + Menu Management): a recipe line can be typed as "2 shots", "50 ml", "1 glass"; it shows the stock-unit fraction and cost live and is saved in the stock unit, so the till and kitchen deduct as before.
+- Guides (Stock > Import, guide 23): measure columns (tots per bottle, price per tot) are read; an unclear measure word or count is asked; a price-per-tot price is kept as written.
+- Assistant: part (e) (suggest bottle size / measure for unsized names, spec AI_STOCK_HELPER_SPEC.md) only when the owner prompts; helpers rh_drink_* in config/database.php can back measure answers.
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` at Liwonde: 7 data-dependent fails (left-owing + refunds briefing, 4 alert checks, digest
   recipients); ai_review_engine "nothing to add for this person" fails on HEAD too. (Tomorrow / 4 of 3 / K1,068,000 now pass.)
