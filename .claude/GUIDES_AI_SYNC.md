@@ -526,6 +526,11 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Guides (emails): a group's Booking received / Confirmed / Tentative email from the lead room shows the whole party's total (all rooms), not the lead room only.
 - Assistant: no change in tools; if it explains check-in before payment for a group room, the lead room's switch or company covers rooms without their own.
 
+### Step S1: import crate check + menu cost warning (2026-11-19) - Rosalyn's 1af010e / Liwonde efea0f2
+- Guides (Stock > Import, guide 23): a row saying "bought by the case of N" with NO selling price beside it is divided only when the hotel's own data agrees (cost in stock, deliveries, the sheet's value, menu price, or other checked case rows of the same sheet at a similar price); otherwise one question asks "price of one or of the whole case?" (N pre-filled), and like rows share one question. A pack-size column found only by its place is asked once.
+- Guides (Menu Management): red "Costs more than it sells for" badge on a row, and a warning in the Edit form, when one sale's stock cost is above the price (free items never); "Fix crate prices" link (stock managers) opens that stock item on Fix crate prices.
+- Assistant: no change in tools; new helper rh_menu_cost_check() in admin/includes/menu-recipe-lib.php could back a "which menu items lose money" answer.
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` at Liwonde: 7 data-dependent fails (left-owing + refunds briefing, 4 alert checks, digest
   recipients); ai_review_engine "nothing to add for this person" fails on HEAD too. (Tomorrow / 4 of 3 / K1,068,000 now pass.)
