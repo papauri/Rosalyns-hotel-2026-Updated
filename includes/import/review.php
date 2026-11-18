@@ -235,6 +235,7 @@ if (!function_exists('import_job_analyse')) {
                 'force_sheets' => array_values(array_map('strval', (array)($ov['force_sheets'] ?? []))),
                 'undo_heals' => array_values(array_map('strval', array_keys((array)($answers['_heal_undo'] ?? [])))),     // self-healing fixes the person took back
                 'max_bytes' => max(1, (int)rh_import_setting('data_import_max_mb', $pdo)) * 1048576,
+                'drink_measures' => array_values((array)($ctx['drink_measures'] ?? [])),     // "66 jiggers" on a sheet is a count in the hotel's own measure
             ],
         ];
     }

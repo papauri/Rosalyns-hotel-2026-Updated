@@ -128,6 +128,85 @@ check($v === null && $e === null && $v2 === null && $e2 === null, 'Blank or 0 bo
 [$v2, $e2] = rh_drink_volume_from_input('abc');
 check($v === null && is_string($e) && is_string($e2), 'Negative or non-number bottle size refused');
 
+/* ---------- 1b. The hotel's own measures (owner 2026-11-19: "be able to have custom measurements and make sure it works") ---------- */
+$LC = [['name' => 'jigger', 'ml' => '44'], ['name' => 'double', 'ml' => '60'], ['name' => 'half tot', 'ml' => '12.5'], ['name' => 'carafe', 'ml' => '500'],
+       ['name' => 'cup', 'ml' => '250'], ['name' => 'small glass of wine', 'ml' => '125'], ['name' => 'glass of wine', 'ml' => '175']];
+[$LCc, $e] = rh_drink_measures_clean($LC);
+check($e === null && array_column($LCc, 'name') === ['jigger', 'double', 'half tot', 'carafe', 'cup', 'small glass of wine', 'glass of wine'] && $LCc[2]['ml'] === 12.5,
+    'Custom list accepted as typed (jigger 44, double 60, half tot 12.5, carafe 500, cup 250, small glass of wine 125): order kept, 12.5 ml kept', json_encode([$LCc, $e]));
+foreach (['shot / shots' => [['name' => 'shot', 'ml' => 25], ['name' => 'shots', 'ml' => 30]], 'glasses / glass' => [['name' => 'glasses', 'ml' => 175], ['name' => 'glass', 'ml' => 175]],
+          'Jigger / jiggers' => [['name' => 'Jigger', 'ml' => 44], ['name' => 'jiggers', 'ml' => 44]], 'half tot / Half Tots' => [['name' => 'half tot', 'ml' => 12.5], ['name' => 'Half Tots', 'ml' => 12.5]],
+          'glass of wine / glasses of wine' => [['name' => 'glass of wine', 'ml' => 175], ['name' => 'glasses of wine', 'ml' => 175]]] as $what => $rows) {
+    [$l, $e] = rh_drink_measures_clean($rows);
+    check($l === [] && is_string($e) && strpos($e, 'plural') !== false, "A name and its plural are one measure, refused with a plain message: $what", (string)$e);
+}
+[$l, $e] = rh_drink_measures_clean([['name' => 'tot', 'ml' => 25], ['name' => 'half tot', 'ml' => 12.5], ['name' => 'tot of gin', 'ml' => 25]]);
+check($e === null && count($l) === 3, 'Names that only share a word (tot, half tot, tot of gin) are different measures', (string)$e);
+$v750 = ['name' => 'ZZ Vodka', 'unit' => 'bottle', 'volume_ml' => '750', 'cost_per_unit' => 30000];
+$wine = ['name' => 'ZZ House Wine', 'unit' => 'bottle', 'volume_ml' => '750'];
+check(array_keys(rh_drink_measure_options($v750, $LCc)) === ['jigger', 'double', 'half tot', 'carafe', 'cup', 'small glass of wine', 'glass of wine', 'ml'],
+    'Every custom measure is offered for a bottle with a size, in the list\'s order, then ml', json_encode(array_keys(rh_drink_measure_options($v750, $LCc))));
+check(conv(2, 'jigger', $v750, $LCc) === 0.117333 && conv(2, 'jiggers', $v750, $LCc) === 0.117333 && conv(2, 'Jiggers', $v750, $LCc) === 0.117333,
+    '2 jiggers (44 ml) of a 750 ml bottle = 0.117333 bottle, typed as jigger, jiggers or Jiggers');
+check(conv(1, 'half tot', $v750, $LCc) === 0.016667 && conv(3, 'half tots', $v750, $LCc) === 0.05 && conv(3, '  Half   Tots ', $v750, $LCc) === 0.05,
+    'Two-word name: 1 half tot (12.5 ml) = 0.016667, 3 half tots = 0.05 (spaces and case tidied)');
+check(conv(1, 'carafe', $wine, $LCc) === 0.666667 && conv(2, 'small glasses of wine', $wine, $LCc) === 0.333333 && conv(2, 'cups', ['name' => 'ZZ Milk', 'unit' => 'L'], $LCc) === 0.5,
+    '1 carafe of a 750 ml bottle = 0.666667; 2 small glasses of wine = 0.333333; 2 cups of litre stock = 0.5 L');
+check(conv(4, 'doubles', ['name' => 'ZZ Rum', 'unit' => 'ml'], $LCc) === 240.0, 'Stock kept in ml: 4 doubles (60 ml) = 240 ml');
+$r = rh_drink_measure_to_stock(2, 'JIGGERS', $v750, $LCc);
+check($r['name'] === 'jigger' && near($r['ml'], 44), 'The list\'s own spelling is what gets saved (JIGGERS -> jigger, 44 ml)', json_encode($r));
+check(abs(round(0.117333 * 30000, 2) - 3519.99) < (float)BALANCE_TOLERANCE, '0.117333 bottle at MWK 30,000 costs MWK 3,519.99');
+check(conv(1, 'pony', $v750, $LCc) === null && refused(fn() => rh_drink_measure_to_stock(1, 'ponies', $v750, $LCc)) !== '', 'A measure not on the list is still refused');
+check(rh_drink_plural('half tot', 2) === 'half tots' && rh_drink_plural('small glass of wine', 2) === 'small glasses of wine' && rh_drink_plural('carafe', 1) === 'carafe'
+    && rh_drink_plural('jigger', 3) === 'jiggers', 'Plurals: half tots, small glasses of wine, 1 carafe, 3 jiggers');
+// Removed or renamed: the saved stock figure is never touched; the line simply shows in the stock unit.
+$jl = ['entry_measure' => 'jigger', 'entry_qty' => '2.0000', 'entry_ml' => '44', 'quantity_per_portion' => '0.117333'];
+$noJig = array_values(array_filter($LCc, fn($m) => $m['name'] !== 'jigger'));
+$renamed = array_map(fn($m) => $m['name'] === 'jigger' ? ['name' => 'pony', 'ml' => 44.0] : $m, $LCc);
+check(rh_drink_line_entry($jl, $v750, $LCc) === ['measure' => 'jigger', 'qty' => 2.0], 'Saved "2 jiggers" (0.117333) is shown again as 2 jiggers');
+check(rh_drink_line_entry($jl, $v750, $noJig) === null && rh_drink_line_entry($jl, $v750, $renamed) === null && $jl['quantity_per_portion'] === '0.117333',
+    'After jigger is removed or renamed the line shows in bottles (0.117333), nothing recalculated');
+// The item's own count measure with a custom small name (bottle / jigger x 17).
+$ownJ = ['name' => 'ZZ Gin', 'unit' => 'bottle', 'measure_big_name' => 'bottle', 'measure_small_name' => 'jigger', 'measure_per_big' => '17', 'measure_stock_side' => 'big'];
+$ownJv = $ownJ + ['volume_ml' => '750'];
+check(array_keys(rh_drink_measure_options($ownJ, $LCc)) === ['jigger'] && conv(2, 'jiggers', $ownJ, $LCc) === 0.117647, 'Item counted as bottle / jigger x 17 (no size): 2 jiggers = 0.117647 bottle');
+check(conv(2, 'jigger', $ownJv, $LCc) === 0.117647 && rh_drink_measure_options($ownJv, $LCc)['jigger']['kind'] === 'item', 'With a size too, the item\'s own 17 jiggers wins over the list\'s 44 ml jigger');
+// Import: a custom one-word name on a sheet is a measure word; a word nobody set up is still asked.
+require_once __DIR__ . '/../../includes/import/default-aliases.php';
+require_once __DIR__ . '/../../includes/import/analyze.php';
+require_once __DIR__ . '/../../includes/import/resolve.php';
+$al = import_default_aliases();
+$mw0 = import_measure_words($al);
+$mw = import_measure_words($al, $LCc);
+check(isset($mw['jigger'], $mw['jiggers'], $mw['carafe'], $mw['carafes'], $mw['cup'], $mw['double'], $mw['doubles'], $mw['shots']) && !isset($mw['half tot'], $mw['half'], $mw['ml']),
+    'Import measure words: the list\'s one-word names in one and many (jigger / jiggers, carafes, doubles) plus the usual ones; two-word names are not read from a sheet', json_encode(array_keys($mw)));
+check(!isset($mw0['jigger']) && !isset($mw0['double']), 'Without the hotel list nothing new is a measure word (double still names no amount)');
+check(import_measure_cell('34 jiggers', $mw) === ['value' => 34, 'word' => 'jiggers'] && import_measure_cell('34 jiggers', $mw0) === null && import_measure_cell('3 ponies', $mw) === null,
+    'Import cell "34 jiggers" is a count in jiggers (only with the list); "3 ponies" is not');
+$imp = function (array $rows, array $list): array {
+    $p = tempnam(sys_get_temp_dir(), 'zzdmi') . '.csv';
+    $fh = fopen($p, 'w');
+    foreach ($rows as $row) { fputcsv($fh, $row); }
+    fclose($fh);
+    $an = import_analyze_file($p, 'zz.csv', import_default_aliases(), ['drink_measures' => $list]);
+    $res = import_resolve($an, [], ['existing' => [], 'unit_options' => ['bottle', 'each'], 'corrections' => [], 'drink_measures' => $list]);
+    @unlink($p);
+    $items = [];
+    foreach ($res['items'] as $it) { $items[$it['name']] = $it; }
+    $open = array_values(array_filter(array_merge($res['questions'], array_values($res['extra_questions'])), fn($q) => $q['answer'] === null));
+    return ['items' => $items, 'open' => $open];
+};
+$jig = [['name' => 'jigger', 'ml' => 37.5]];
+$i1 = $imp([['Item Name', 'Balance', 'Unit', 'Unit Price'], ['Vodka 750ml', '40 jiggers', 'bottle', '9000']], $jig);
+check(abs((float)($i1['items']['Vodka 750ml']['balance'] ?? -1) - 2) < 0.0000005 && !$i1['open'], 'Import "40 jiggers" of Vodka 750ml with jigger 37.5 ml on the list = 2 bottles, nothing asked',
+    json_encode([$i1['items']['Vodka 750ml']['balance'] ?? null, $i1['items']['Vodka 750ml']['qty_how'] ?? null, array_column($i1['open'], 'type')]));
+$i2 = $imp([['Item Name', 'Balance (jiggers)', 'Unit', 'Unit Price'], ['Vodka 750ml', '60', 'bottle', '9000']], $jig);
+check(abs((float)($i2['items']['Vodka 750ml']['balance'] ?? -1) - 3) < 0.0000005 && !$i2['open'], 'Import heading "Balance (jiggers)" 60 = 3 bottles', json_encode([$i2['items']['Vodka 750ml']['balance'] ?? null, array_column($i2['open'], 'type')]));
+$i3 = $imp([['Item Name', 'Balance', 'Unit', 'Unit Price'], ['Vodka 750ml', '40 ponies', 'bottle', '9000']], $jig);
+check(count($i3['open']) > 0 && abs((float)($i3['items']['Vodka 750ml']['balance'] ?? 0) - 40) > 0.001, 'Import "40 ponies" (not set up anywhere) is asked, never guessed', json_encode(array_column($i3['open'], 'type')));
+$i4 = $imp([['Item Name', 'Balance', 'Unit', 'Unit Price'], ['Vodka 750ml', '40 tots', 'bottle', '9000']], $jig);
+check(count($i4['open']) > 0, 'Import "40 tots" when the list has no tot size: asked how many in one bottle', json_encode(array_column($i4['open'], 'type')));
+
 /* ---------- 2. PHP and the screens' JS give the same answers ---------- */
 $cases = [
     [$vodka, $L30, 'shot', 2], [$u1, $L30, 'shot', 2], [$u1v, $L25, 'shot', 2], [$u1v, $L25, 'ml', 50], [$litre, $L30, 'ml', 50],
@@ -135,6 +214,9 @@ $cases = [
     [['name' => 'ZZ Wine', 'unit' => 'cl'], $L30, 'glass of wine', 1], [['name' => 'ZZ Sugar', 'unit' => 'kg', 'volume_ml' => 1000], $L30, 'shot', 1],
     [$vodka, $L30, 'pint', 1], [['name' => 'ZZ Wine 75cl', 'unit' => 'bottle'], $L30, 'glass of wine', 1], [['name' => 'ZZ Beer 330ml', 'unit' => 'crate'], $L25, 'ml', 330],
     [$crateTyped, $L25, 'shot', 1], [$crateU1, $L25, 'bottle', 2], [$crateU1, $L25, 'ml', 330],
+    // the hotel's own measures (1b): plural typing, two-word names, decimal ml, the item's own jigger
+    [$v750, $LCc, 'jiggers', 2], [$v750, $LCc, 'Half  Tots', 3], [$wine, $LCc, 'carafe', 1], [$wine, $LCc, 'small glasses of wine', 2], [$ownJ, $LCc, 'jiggers', 2],
+    [$ownJv, $LCc, 'jigger', 2], [['name' => 'ZZ Rum', 'unit' => 'ml'], $LCc, 'doubles', 4], [$v750, $LCc, 'ponies', 1],
 ];
 $php = [];
 foreach ($cases as [$ing, $list, $m, $qty]) {
@@ -143,6 +225,7 @@ foreach ($cases as [$ing, $list, $m, $qty]) {
 $jsFile = realpath(__DIR__ . '/../../admin/js/stock-drink-measures.js');
 $runner = 'global.window={};require(' . json_encode($jsFile) . ');const c=JSON.parse(Buffer.from(process.argv[2],"base64").toString());'
     . 'const r=c.map(x=>({opts:window.RHDrink.options(x[0],x[1]).map(o=>o.name),qty:window.RHDrink.toStock(x[3],x[2],x[0],x[1])}));'
+    . 'r.push({plurals:["half tot","small glass of wine","glass of wine","carafe","jigger","box","ml"].map(n=>window.RHDrink.plural(n,2))});'
     . 'window.RHDrink.setReady(false);r.push({notReady:c.map(x=>window.RHDrink.options(x[0],x[1]).length+(window.RHDrink.toStock(x[3],x[2],x[0],x[1])===null?0:1)).reduce((a,b)=>a+b,0)});'
     . 'console.log(JSON.stringify(r));';
 $runFile = tempnam(sys_get_temp_dir(), 'zzdm') . '.js';
@@ -158,7 +241,9 @@ if (!is_array($js)) {
             && (($js[$k]['qty'] === null && $php[$k]['qty'] === null) || ($js[$k]['qty'] !== null && $php[$k]['qty'] !== null && near($js[$k]['qty'], $php[$k]['qty'], 0.0000001)));
         check($same, 'Screen and server agree: ' . $c[3] . ' ' . $c[2] . ' of ' . $c[0]['name'] . ' (' . $c[0]['unit'] . ')', json_encode(['js' => $js[$k] ?? null, 'php' => $php[$k]]));
     }
-    check(($js[count($cases)]['notReady'] ?? null) === 0, 'Before migration 089 (RHDrink.setReady(false)) the screens offer no measures and work nothing out', json_encode($js[count($cases)] ?? null));
+    $plPhp = array_map(fn($n) => rh_drink_plural($n, 2), ['half tot', 'small glass of wine', 'glass of wine', 'carafe', 'jigger', 'box', 'ml']);
+    check(($js[count($cases)]['plurals'] ?? null) === $plPhp, 'Screen and server write the same plurals (' . implode(', ', $plPhp) . ')', json_encode($js[count($cases)] ?? null));
+    check(($js[count($cases) + 1]['notReady'] ?? null) === 0, 'Before migration 089 (RHDrink.setReady(false)) the screens offer no measures and work nothing out', json_encode($js[count($cases) + 1] ?? null));
 }
 
 /* ---------- 3. Saved recipes and sales, one rolled-back transaction ---------- */
@@ -273,6 +358,16 @@ check(stripos($flash($r), 'not sent correctly') !== false && (string)($r['verify
 $r = $page('admin/stock-ingredients.php', ['post' => ['action' => 'save_drink_measures', 'csrf_token' => 'nope', 'measure_name' => ['tot'], 'measure_ml' => ['30']], 'verify' => [$listSql]]);
 check(stripos($flash($r), 'token') !== false && (string)($r['verify'][0][0]['setting_value'] ?? '') === $listBefore, 'Without the security token nothing is saved');
 
+// The hotel's own measures through the page: two-word names, decimal ml, a plural twin refused.
+$r = $page('admin/stock-ingredients.php', ['post' => ['action' => 'save_drink_measures', 'measure_name' => ['jigger', 'half tot', 'carafe', $mark], 'measure_ml' => ['44', '12.5', '500', '60']], 'verify' => [$listSql, $logSql]]);
+$safe($r, 'Custom measures list save');
+$saved = json_decode((string)($r['verify'][0][0]['setting_value'] ?? ''), true);
+check(is_array($saved) && array_column($saved, 'name') === ['jigger', 'half tot', 'carafe', $mark] && near($saved[1]['ml'] ?? null, 12.5) && near($saved[2]['ml'] ?? null, 500),
+    'Custom measures saved as typed (jigger 44, half tot 12.5, carafe 500), in that order', json_encode($saved) . ' ' . $flash($r));
+check(strpos((string)($r['verify'][1][0]['details'] ?? ''), 'half tot 12.5 ml') !== false, 'The change log shows the decimal size (half tot 12.5 ml)', json_encode($r['verify'][1] ?? null));
+$r = $page('admin/stock-ingredients.php', ['post' => ['action' => 'save_drink_measures', 'measure_name' => ['jigger', 'Jiggers'], 'measure_ml' => ['44', '44']], 'verify' => [$listSql]]);
+check(stripos($flash($r), 'plural') !== false && (string)($r['verify'][0][0]['setting_value'] ?? '') === $listBefore, 'jigger + Jiggers is refused with a plain message, the list is unchanged', $flash($r));
+
 // Bottle size on the item form.
 $ingName = "ZZT DM $run Gin";
 $setup = ["INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit) VALUES ('$ingName', 'ZZDM', 'bottle', 4, 24000)",
@@ -319,6 +414,37 @@ $r = $page('admin/stock-recipes.php', ['setup' => $setupG, 'vars' => $varsR, 'me
 $J = $r['json'] ?? null;
 $jl = is_array($J) ? ($J['ingredients'][0] ?? $J['recipe']['ingredients'][0] ?? null) : null;
 check(is_array($jl) && ($jl['entry_match']['measure'] ?? '') === 'shot' && near($jl['entry_match']['qty'] ?? null, 2), 'Recipes get_recipe returns the line as 2 shots', substr(json_encode($J), 0, 400));
+
+// A recipe typed in the hotel's own measure, then that measure removed or renamed: the saved line never changes.
+$listJig = "INSERT INTO site_settings (setting_key, setting_value, setting_group) VALUES ('stock_measures_list', '[{\"name\":\"jigger\",\"ml\":44},{\"name\":\"half tot\",\"ml\":12.5}]', 'stock') ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)";
+$setupJ = [
+    "INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit, volume_ml) VALUES ('ZZT DM $run Vodka', 'ZZDM', 'bottle', 5, 30000, 750)",
+    "INSERT INTO menu_items (category_id, item_name, price, is_available) VALUES ($catId, 'ZZT DM $run Vodka tot', 5000, 1)",
+    $listJig,
+];
+$r = $page('admin/stock-recipes.php', ['setup' => $setupJ, 'vars' => $varsR, 'post' => array_merge($postR, ['entry_measure' => ['jiggers']]), 'verify' => [$sriSql]]);
+$S = $r['verify'][0] ?? [];
+$safe($r, 'Stock > Recipes save in jiggers');
+check(near($S[0]['q'] ?? null, 0.117333) && ($S[0]['m'] ?? '') === 'jigger' && near($S[0]['eq'] ?? null, 2) && near($S[0]['ml'] ?? null, 44),
+    'Recipes "2 jiggers" of a 750 ml bottle saved as 0.117333 with the measure jigger (44 ml)', json_encode($S) . ' ' . $flash($r));
+$r = $page('admin/stock-recipes.php', ['setup' => $setupJ, 'vars' => $varsR, 'post' => array_merge($postR, ['quantity_per_portion' => ['3'], 'entry_measure' => ['half tots']]), 'verify' => [$sriSql]]);
+check(near($r['verify'][0][0]['q'] ?? null, 0.05) && ($r['verify'][0][0]['m'] ?? '') === 'half tot', 'Recipes "3 half tots" (12.5 ml) saved as 0.05 bottle', json_encode($r['verify'][0] ?? null) . ' ' . $flash($r));
+$jigLine = "INSERT INTO stock_recipe_ingredients (recipe_id, ingredient_id, quantity_per_portion, yield_percent, entry_measure, entry_qty, entry_ml) SELECT sr.id, i.id, 0.117333, 100, 'jigger', 2, 44 FROM stock_recipes sr JOIN menu_items mi ON mi.id = sr.menu_item_id JOIN stock_ingredients i ON i.name = 'ZZT DM $run Vodka' WHERE mi.item_name = 'ZZT DM $run Vodka tot'";
+$setupJL = array_merge($setupJ, [
+    "INSERT INTO stock_recipes (menu_item_id, menu_type, portions_per_recipe) SELECT mi.id, mc.slug, 1 FROM menu_items mi JOIN menu_categories mc ON mc.id = mi.category_id WHERE mi.item_name = 'ZZT DM $run Vodka tot'",
+    $jigLine,
+]);
+foreach (['removed' => [['half tot'], ['12.5']], 'renamed to pony' => [['pony', 'half tot'], ['44', '12.5']]] as $how => [$names, $mls]) {
+    $r = $page('admin/stock-ingredients.php', ['setup' => $setupJL, 'post' => ['action' => 'save_drink_measures', 'measure_name' => $names, 'measure_ml' => $mls], 'verify' => [$sriSql, $listSql]]);
+    $S = $r['verify'][0] ?? [];
+    check(near($S[0]['q'] ?? null, 0.117333) && ($S[0]['m'] ?? '') === 'jigger' && near($S[0]['eq'] ?? null, 2) && near($S[0]['ml'] ?? null, 44) && strpos((string)($r['verify'][1][0]['setting_value'] ?? ''), 'jigger') === false,
+        "jigger $how from the list: the saved recipe line is unchanged (0.117333 bottle, typed as 2 jigger)", json_encode($r['verify'] ?? null) . ' ' . $flash($r));
+}
+$setupJG = array_merge($setupJL, ["UPDATE site_settings SET setting_value = '[{\"name\":\"pony\",\"ml\":44}]' WHERE setting_key = 'stock_measures_list'"]);
+$r = $page('admin/stock-recipes.php', ['setup' => $setupJG, 'vars' => $varsR, 'method' => 'GET', 'get' => ['ajax' => 'get_recipe', 'menu_item_id' => '{mi}', 'menu_type' => 'x']]);
+$J = $r['json'] ?? null;
+$jl2 = is_array($J) ? ($J['ingredients'][0] ?? $J['recipe']['ingredients'][0] ?? null) : null;
+check(is_array($jl2) && ($jl2['entry_match'] ?? null) === null && near($jl2['quantity_per_portion'] ?? null, 0.117333), 'After the rename, Recipes opens the line in bottles (0.117333), no stale measure', substr(json_encode($J), 0, 400));
 
 // The three screens render the new parts.
 $r = $page('admin/stock-ingredients.php', ['method' => 'GET', 'grep' => ['id="drinkMeasuresModal"', 'id="ing_drink"', 'name="volume_present"', 'stock-drink-measures.js', 'name="measure_name[]"', 'Drink measures']]);

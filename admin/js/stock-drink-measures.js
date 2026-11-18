@@ -12,7 +12,7 @@
     var MAX_N = 1000; // RH_STOCK_MEASURE_MAX_N
     var ready = true; // false = the hotel has not run migration 089: no measures at all (the server would refuse them)
 
-    function lc(s) { return String(s == null ? '' : s).trim().toLowerCase(); }
+    function lc(s) { return String(s == null ? '' : s).replace(/\s+/g, ' ').trim().toLowerCase(); }
     function round(n, dp) { var f = Math.pow(10, dp); return Math.round(n * f) / f; }
 
     /* ml in ONE of a stock unit that is itself a volume (ml 1, cl 10, litre 1000), else null. */
@@ -90,9 +90,13 @@
         return out;
     }
 
+    /* The option a typed measure means: its own name (any case), else the one it is the plural of ("jiggers" -> jigger).
+       Same as rh_drink_option_key(); the list never holds a name and its plural together. */
     function find(ing, list, name) {
-        var k = lc(name), opts = options(ing, list);
-        for (var i = 0; i < opts.length; i++) { if (lc(opts[i].name) === k) return opts[i]; }
+        var k = lc(name), opts = options(ing, list), i;
+        if (!k) return null;
+        for (i = 0; i < opts.length; i++) { if (lc(opts[i].name) === k) return opts[i]; }
+        for (i = 0; i < opts.length; i++) { if (lc(plural(opts[i].name, 2)) === k) return opts[i]; }
         return null;
     }
 
@@ -123,12 +127,12 @@
         return stock > 0 && stock <= 99999999 ? stock : null;
     }
 
-    /* "shot" -> "shots", "glass of wine" -> "glasses of wine", "ml" stays. */
+    /* "shot" -> "shots", "small glass of wine" -> "small glasses of wine", "ml" stays. */
     function plural(name, qty) {
         name = String(name || '');
         if (/^(ml|mls)$/i.test(name)) return 'ml';
         if (Math.abs(parseFloat(qty) - 1) < 0.0000005 || !name) return name;
-        var mm = /^(\S+)(\s+of\s+.+)$/i.exec(name);
+        var mm = /^(.+?)(\s+of\s+.+)$/i.exec(name);
         if (mm) return plural(mm[1], qty) + mm[2];
         return /(s|x|z|ch|sh)$/i.test(name) ? name + 'es' : name + 's';
     }

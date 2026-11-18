@@ -1072,100 +1072,105 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                 <input type="hidden" name="action" id="ing_action" value="add">
                 <input type="hidden" name="id" id="ing_id" value="">
-                <div class="form-row">
-                    <div>
-                        <label>Name * <i class="help" data-tip="The name shown in dropdowns and reports. Be specific (e.g. 'Chicken breast (boneless)' not just 'Chicken').">?</i></label>
-                        <input type="text" name="name" id="ing_name" required maxlength="200">
-                    </div>
-                    <div>
-                        <label>Category <i class="help" data-tip="<?php echo $stockIsFood ? 'Used to group ingredients in the recipe-builder dropdown. Pick consistent names like Dairy, Meat, Pantry, Vegetables, Beverages.' : 'Used to group stock items in lists and reports. Pick consistent names like Groceries, Beverages, Household.'; ?>">?</i></label>
-                        <input type="text" name="category" id="ing_category" placeholder="<?php echo $stockIsFood ? 'e.g. Dairy, Meat, Produce' : 'e.g. Groceries, Beverages, Household'; ?>" maxlength="100">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div>
-                        <label>Unit * <i class="help" data-tip="<?php echo $stockIsFood ? 'The base unit for ALL stock movements of this ingredient — receipts, recipe quantities, wastage. Choose carefully; changing it later breaks existing recipes.' : 'The base unit for ALL stock movements of this item — receipts, sales deductions, wastage. Retail products normally use Pieces (pcs).'; ?>">?</i></label>
-                        <select name="unit" id="ing_unit" required>
-                            <option value="g">Grams (g)</option>
-                            <option value="kg">Kilograms (kg)</option>
-                            <option value="ml">Millilitres (ml)</option>
-                            <option value="L">Litres (L)</option>
-                            <option value="pcs">Pieces (pcs)</option>
-                            <option value="packet">Packets</option>
-                            <option value="box">Boxes</option>
-                            <option value="dozen">Dozens (12)</option>
-                            <option value="slice">Slices</option>
-                            <option value="tsp">Teaspoons (tsp)</option>
-                            <option value="tbsp">Tablespoons (tbsp)</option>
-                        </select>
-                        <?php /* Locked units are not submitted by a disabled select, so a hidden mirror carries the value. */ ?>
-                        <input type="hidden" name="unit" id="ing_unit_keep" value="" disabled>
-                        <p class="field-note" id="ing_unit_note" hidden><i class="fas fa-lock"></i> Create a new ingredient to change unit. This one has stock, batches, adjustments or recipes in its current unit.</p>
-                    </div>
-                    <div>
-                        <label>Min quantity (low-stock threshold) <i class="help" data-tip="When current stock drops to or below this number, the <?php echo $stockNounLow; ?> turns yellow on the dashboard and appears in reorder reports. Leave at 0 if you don't want low-stock alerts.">?</i></label>
-                        <input type="number" name="min_quantity" id="ing_min" step="0.001" min="0" value="0">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div>
-                        <label>Default yield % <i class="help" data-tip="How much of the raw weight ends up usable on the plate after trim/cook losses. The recipe builder uses this to compute how much RAW stock to deduct per portion.">?</i></label>
-                        <input type="number" name="yield_percent" id="ing_yield" step="0.1" min="0.1" max="100" value="100">
-                        <div class="yield-explainer">
-                            <strong>What yield means:</strong> if you buy 1 kg of raw chicken at <strong>75 %</strong> yield, you'll plate only <strong>0.75 kg</strong>. To serve a 150 g portion the system will deduct <strong>200 g raw</strong> (150 ÷ 0.75). Use <strong>100 %</strong> for items with no loss (rice, oil, spices, bottled drinks).
+                <fieldset class="ing-section">
+                    <legend>Basic details</legend>
+                    <div class="ing-grid">
+                        <div class="ing-field">
+                            <label for="ing_name">Name * <i class="help" data-tip="The name shown in dropdowns and reports. Be specific (e.g. 'Chicken breast (boneless)' not just 'Chicken').">?</i></label>
+                            <input type="text" name="name" id="ing_name" required maxlength="200">
+                        </div>
+                        <div class="ing-field">
+                            <label for="ing_category">Category <i class="help" data-tip="<?php echo $stockIsFood ? 'Used to group ingredients in the recipe-builder dropdown. Pick consistent names like Dairy, Meat, Pantry, Vegetables, Beverages.' : 'Used to group stock items in lists and reports. Pick consistent names like Groceries, Beverages, Household.'; ?>">?</i></label>
+                            <input type="text" name="category" id="ing_category" placeholder="<?php echo $stockIsFood ? 'e.g. Dairy, Meat, Produce' : 'e.g. Groceries, Beverages, Household'; ?>" maxlength="100">
+                        </div>
+                        <div class="ing-field ing-span">
+                            <label for="ing_notes">Notes <i class="help" data-tip="Internal notes — e.g. preferred supplier, preparation tips. Shown under the name in the table.">?</i></label>
+                            <input type="text" name="notes" id="ing_notes" maxlength="500">
                         </div>
                     </div>
-                    <div>
-                        <label>Notes <i class="help" data-tip="Internal notes — e.g. preferred supplier, preparation tips. Shown under the name in the table.">?</i></label>
-                        <input type="text" name="notes" id="ing_notes" maxlength="500">
+                </fieldset>
+                <fieldset class="ing-section">
+                    <legend>Units and packs</legend>
+                    <div class="ing-grid">
+                        <div class="ing-field">
+                            <label for="ing_unit">Unit * <i class="help" data-tip="<?php echo $stockIsFood ? 'The base unit for ALL stock movements of this ingredient — receipts, recipe quantities, wastage. Choose carefully; changing it later breaks existing recipes.' : 'The base unit for ALL stock movements of this item — receipts, sales deductions, wastage. Retail products normally use Pieces (pcs).'; ?>">?</i></label>
+                            <select name="unit" id="ing_unit" required>
+                                <option value="g">Grams (g)</option>
+                                <option value="kg">Kilograms (kg)</option>
+                                <option value="ml">Millilitres (ml)</option>
+                                <option value="L">Litres (L)</option>
+                                <option value="pcs">Pieces (pcs)</option>
+                                <option value="packet">Packets</option>
+                                <option value="box">Boxes</option>
+                                <option value="dozen">Dozens (12)</option>
+                                <option value="slice">Slices</option>
+                                <option value="tsp">Teaspoons (tsp)</option>
+                                <option value="tbsp">Tablespoons (tbsp)</option>
+                            </select>
+                            <?php /* Locked units are not submitted by a disabled select, so a hidden mirror carries the value. */ ?>
+                            <input type="hidden" name="unit" id="ing_unit_keep" value="" disabled>
+                        </div>
+                        <div class="ing-field">
+                            <label for="ing_yield">Default yield % <i class="help" data-tip="How much of the raw weight ends up usable on the plate after trim/cook losses. The recipe builder uses this to compute how much RAW stock to deduct per portion.">?</i></label>
+                            <input type="number" name="yield_percent" id="ing_yield" step="0.1" min="0.1" max="100" value="100">
+                        </div>
+                        <div class="ing-span">
+                            <p class="field-note" id="ing_unit_note" hidden><i class="fas fa-lock"></i> Create a new ingredient to change unit. This one has stock, batches, adjustments or recipes in its current unit.</p>
+                            <div class="yield-explainer">
+                                <strong>What yield means:</strong> if you buy 1 kg of raw chicken at <strong>75 %</strong> yield, you'll plate only <strong>0.75 kg</strong>. To serve a 150 g portion the system will deduct <strong>200 g raw</strong> (150 ÷ 0.75). Use <strong>100 %</strong> for items with no loss (rice, oil, spices, bottled drinks).
+                            </div>
+                        </div>
+                        <div class="ing-field">
+                            <label for="ing_pack_name">Bought in packs? Pack name <i class="help" data-tip="Optional. If you buy this item by the crate, case, tray or box, enter the name here and how many single units are inside. Stock, counts and recipes stay in the unit above; purchase orders and buying suggestions can then use whole packs.">?</i></label>
+                            <input type="text" name="pack_name" id="ing_pack_name" maxlength="30" placeholder="e.g. crate, case, tray, box">
+                        </div>
+                        <div class="ing-field">
+                            <label for="ing_pack_size">Units in one pack <i class="help" data-tip="How many of the stock unit are in one pack, e.g. 24 for a crate of 24 bottles. Leave blank if you do not buy this item in packs.">?</i></label>
+                            <input type="number" name="pack_size" id="ing_pack_size" step="0.001" min="0" placeholder="e.g. 24">
+                        </div>
+                        <div class="ing-field" id="ing_pieces_row" hidden>
+                            <label id="ing_pieces_lbl">Pieces in one packet <i class="help" data-tip="Optional. How many single pieces are inside one of this unit, e.g. 6 sausages in a packet. Menu Management then lets staff type whole pieces (1 sausage) and works out the part of the packet. A dozen is always 12.">?</i></label>
+                            <input type="number" name="pieces_per_unit" id="ing_pieces" step="any" min="0.01" placeholder="e.g. 6">
+                        </div>
                     </div>
-                </div>
-                <div class="form-row">
-                    <div>
-                        <label>Reorder point <i class="help" data-tip="When stock hits this level, the item appears in the Reorder / Buying report. Usually set to cover your supplier's lead time. Falls back to Min quantity if left at 0.">?</i></label>
-                        <input type="number" name="reorder_point" id="ing_reorder" step="0.001" min="0" value="0">
+                </fieldset>
+                <fieldset class="ing-section">
+                    <legend>Stock levels and supplier</legend>
+                    <div class="ing-grid ing-grid-3">
+                        <div class="ing-field">
+                            <label for="ing_min">Min quantity (low-stock threshold) <i class="help" data-tip="When current stock drops to or below this number, the <?php echo $stockNounLow; ?> turns yellow on the dashboard and appears in reorder reports. Leave at 0 if you don't want low-stock alerts.">?</i></label>
+                            <input type="number" name="min_quantity" id="ing_min" step="0.001" min="0" value="0">
+                        </div>
+                        <div class="ing-field">
+                            <label for="ing_reorder">Reorder point <i class="help" data-tip="When stock hits this level, the item appears in the Reorder / Buying report. Usually set to cover your supplier's lead time. Falls back to Min quantity if left at 0.">?</i></label>
+                            <input type="number" name="reorder_point" id="ing_reorder" step="0.001" min="0" value="0">
+                        </div>
+                        <div class="ing-field">
+                            <label for="ing_par">Par level (order up to) <i class="help" data-tip="Target stock level to top up to when reordering. Suggested order = Par − on hand − on order.">?</i></label>
+                            <input type="number" name="par_level" id="ing_par" step="0.001" min="0" value="0">
+                        </div>
                     </div>
-                    <div>
-                        <label>Par level (order up to) <i class="help" data-tip="Target stock level to top up to when reordering. Suggested order = Par − on hand − on order.">?</i></label>
-                        <input type="number" name="par_level" id="ing_par" step="0.001" min="0" value="0">
+                    <div class="ing-grid">
+                        <div class="ing-field">
+                            <label for="ing_supplier">Preferred supplier <i class="help" data-tip="Default supplier used to group this item on the Reorder report and pre-fill purchase orders.">?</i></label>
+                            <select name="preferred_supplier_id" id="ing_supplier">
+                                <option value="0">— None —</option>
+                                <?php foreach ($supplierOptions as $so): ?>
+                                    <option value="<?php echo (int)$so['id']; ?>"><?php echo htmlspecialchars($so['name']); ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="ing-field">
+                            <label for="ing_lead">Supplier lead time (days) <i class="help" data-tip="Typical days from placing an order to delivery. Used to prioritise urgent reorders.">?</i></label>
+                            <input type="number" name="lead_time_days" id="ing_lead" min="0" max="365" value="0">
+                        </div>
                     </div>
-                </div>
-                <div class="form-row">
-                    <div>
-                        <label>Preferred supplier <i class="help" data-tip="Default supplier used to group this item on the Reorder report and pre-fill purchase orders.">?</i></label>
-                        <select name="preferred_supplier_id" id="ing_supplier">
-                            <option value="0">— None —</option>
-                            <?php foreach ($supplierOptions as $so): ?>
-                                <option value="<?php echo (int)$so['id']; ?>"><?php echo htmlspecialchars($so['name']); ?></option>
-                            <?php endforeach; ?>
-                        </select>
-                    </div>
-                    <div>
-                        <label>Supplier lead time (days) <i class="help" data-tip="Typical days from placing an order to delivery. Used to prioritise urgent reorders.">?</i></label>
-                        <input type="number" name="lead_time_days" id="ing_lead" min="0" max="365" value="0">
-                    </div>
-                </div>
-                <div class="form-row">
-                    <div>
-                        <label>Bought in packs? Pack name <i class="help" data-tip="Optional. If you buy this item by the crate, case, tray or box, enter the name here and how many single units are inside. Stock, counts and recipes stay in the unit above; purchase orders and buying suggestions can then use whole packs.">?</i></label>
-                        <input type="text" name="pack_name" id="ing_pack_name" maxlength="30" placeholder="e.g. crate, case, tray, box">
-                    </div>
-                    <div>
-                        <label>Units in one pack <i class="help" data-tip="How many of the stock unit are in one pack, e.g. 24 for a crate of 24 bottles. Leave blank if you do not buy this item in packs.">?</i></label>
-                        <input type="number" name="pack_size" id="ing_pack_size" step="0.001" min="0" placeholder="e.g. 24">
-                    </div>
-                </div>
-                <div class="form-row" id="ing_pieces_row" hidden>
-                    <div>
-                        <label id="ing_pieces_lbl">Pieces in one packet <i class="help" data-tip="Optional. How many single pieces are inside one of this unit, e.g. 6 sausages in a packet. Menu Management then lets staff type whole pieces (1 sausage) and works out the part of the packet. A dozen is always 12.">?</i></label>
-                        <input type="number" name="pieces_per_unit" id="ing_pieces" step="any" min="0.01" placeholder="e.g. 6">
-                    </div>
-                </div>
+                </fieldset>
                 <?php if ($drinkReady): ?>
-                <fieldset class="ing-measure" id="ing_drink">
+                <fieldset class="ing-section ing-measure" id="ing_drink">
                     <legend>Bottle size and drink measures (optional) <i class="help" data-tip="For drinks. With the size of one bottle, recipes can be typed as 2 shots or 50 ml and are worked out into the stock unit. Stock, cost and sales stay in the unit above. Sizes of a shot, glass and so on come from the Drink measures list.">?</i></legend>
                     <input type="hidden" name="volume_present" value="1">
-                    <div class="form-row" id="ing_vol_row">
+                    <div class="ing-grid" id="ing_vol_row">
                         <div>
                             <label for="ing_vol" id="ing_vol_lbl">Size of one bottle in ml <i class="help" data-tip="How many ml one of the stock unit holds, e.g. 1000 for a 1 litre bottle or 750 for a 75 cl bottle. Leave empty when the name already says it (Gin 750ml).">?</i></label>
                             <input type="number" name="volume_ml" id="ing_vol" step="any" min="0" max="100000" placeholder="e.g. 750">
@@ -1182,10 +1187,10 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 </fieldset>
                 <?php endif; ?>
                 <?php if ($measureReady): ?>
-                <fieldset class="ing-measure" id="ing_measure">
+                <fieldset class="ing-section ing-measure" id="ing_measure">
                     <legend>Count in a smaller or bigger measure (optional) <i class="help" data-tip="For bar stock counted by the shot or glass. Stock, prices and sales stay in the unit above; a stock count can then be typed in either measure or both, e.g. 2 bottles + 7 shots, and is worked out into the stock unit. Clear all four fields to remove it.">?</i></legend>
                     <input type="hidden" name="measure_present" value="1">
-                    <div class="form-row">
+                    <div class="ing-grid">
                         <div>
                             <label for="ing_m_big">Bigger measure <i class="help" data-tip="The whole container, e.g. bottle, jug, box.">?</i></label>
                             <input type="text" name="measure_big_name" id="ing_m_big" maxlength="30" placeholder="e.g. bottle" oninput="ingMeasureSync()">
@@ -1194,8 +1199,6 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                             <label for="ing_m_small">Smaller measure <i class="help" data-tip="What is poured or served from it, e.g. shot, tot, glass.">?</i></label>
                             <input type="text" name="measure_small_name" id="ing_m_small" maxlength="30" placeholder="e.g. shot" oninput="ingMeasureSync()">
                         </div>
-                    </div>
-                    <div class="form-row">
                         <div>
                             <label for="ing_m_n" id="ing_m_n_lbl">How many smaller in one bigger <i class="help" data-tip="How many of the smaller measure make one of the bigger, e.g. 30 shots of 25 ml in a 750 ml bottle. 1 to <?php echo (int)RH_STOCK_MEASURE_MAX_N; ?>.">?</i></label>
                             <input type="number" name="measure_per_big" id="ing_m_n" step="any" min="1" max="<?php echo (int)RH_STOCK_MEASURE_MAX_N; ?>" placeholder="e.g. 30" oninput="ingMeasureSync()">
@@ -1441,7 +1444,7 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                     <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
                     <input type="hidden" name="action" value="save_drink_measures">
                     <p class="field-note">One list for the whole hotel. In Menu Management and Recipes a drink can then be typed as 2 shots or 1 glass of wine, and it is worked out into the stock unit when saved. Changing a size here does not change stock, cost or recipe amounts already saved. ml can always be used, so it is not in the list.</p>
-                    <div class="dm-list">
+                    <div class="dm-list" role="group" aria-label="Drink measures">
                         <div class="dm-row dm-head">
                             <span>Measure <i class="help" data-tip="The name staff pick, e.g. shot, tot, double, glass of wine, cocktail pour. Up to 30 characters.">?</i></span>
                             <span>Size in ml <i class="help" data-tip="How many ml one of this measure holds, e.g. 25 or 30 for a shot, 175 for a glass of wine. Above 0, at most <?php echo number_format(RH_DRINK_MEASURE_MAX_ML); ?>.">?</i></span>
@@ -1602,7 +1605,7 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
             }
             side.options[0].textContent = big ? 'The bigger measure (' + big + ')' : 'The bigger measure';
             side.options[1].textContent = small ? 'The smaller measure (' + small + ')' : 'The smaller measure';
-            document.getElementById('ing_m_n_lbl').firstChild.textContent = (small && big ? 'How many ' + small + ' in one ' + big : 'How many smaller in one bigger') + ' ';
+            document.getElementById('ing_m_n_lbl').firstChild.textContent = (small && big ? 'How many ' + ingMeasurePlural(small) + ' in one ' + big : 'How many smaller in one bigger') + ' ';
             const hint = document.getElementById('ing_m_hint');
             if (big && small && n >= 1) {
                 hint.textContent = side.value === 'big'

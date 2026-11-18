@@ -66,6 +66,14 @@ check(rh_stock_measure_describe($m) === 'bottle / shot x 30 (stock unit: bottle)
 $sizes = rh_stock_measure_sizes();
 check($sizes['shot_ml'] > 0 && $sizes['glass_ml'] > 0, 'Shot and glass sizes are set (settings seeded by 088)', json_encode($sizes));
 
+// A custom smaller measure (owner 2026-11-19): bottle / jigger x 17, and a two-word name.
+[$xj, $e] = rh_stock_measure_from_input(['measure_big_name' => 'bottle', 'measure_small_name' => 'jigger', 'measure_per_big' => '17', 'measure_stock_side' => 'big']);
+check($e === null && $xj === ['big' => 'bottle', 'small' => 'jigger', 'n' => 17.0, 'side' => 'big'], 'Custom count measure bottle / jigger x 17 accepted', json_encode([$xj, $e]));
+check(rh_stock_measure_to_stock('small', null, 34, 17, 'big') === 2.0 && rh_stock_measure_to_stock('both', 1, 5, 17, 'big') === round(1 + 5 / 17, 6),
+    '34 jiggers = 2 bottles; 1 bottle + 5 jiggers = 1.294118 bottles');
+check(rh_stock_measure_label('both', 1, 5, $xj) === '1 bottle + 5 jiggers' && rh_stock_measure_label('small', null, 3, ['big' => 'bottle', 'small' => 'half tot']) === '3 half tots',
+    'Typed label reads "1 bottle + 5 jiggers" / "3 half tots"');
+
 /* ---------- 2. Through the real pages ---------- */
 $harness = __DIR__ . '/page_harness.php';
 $run = strtoupper(bin2hex(random_bytes(3)));

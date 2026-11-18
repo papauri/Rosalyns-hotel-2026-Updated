@@ -14309,7 +14309,8 @@ function rh_stock_drink_ready(?PDO $db = null): bool
 function rh_drink_measures_clean(array $rows): array
 {
     $out = [];
-    $seen = [];
+    $seen = [];     // lower-case name AND its plural => the lower-case name it belongs to
+    $names = [];    // lower-case name => the name as typed
     foreach ($rows as $r) {
         if (!is_array($r)) {
             continue;
@@ -14332,8 +14333,15 @@ function rh_drink_measures_clean(array $rows): array
         if (preg_match('/^(ml|mls|millilit(re|er)s?)$/u', $key)) {
             return [[], 'ml is always offered on its own. Give this measure another name.'];
         }
-        if (isset($seen[$key])) {
+        if (isset($seen[$key]) && $seen[$key] === $key) {
             return [[], '"' . $name . '" is in the list twice. Keep one.'];
+        }
+        // "shot" and "shots" (or "glass" and "glasses") are one measure: "2 shots" must find exactly one of them.
+        $plKey = mb_strtolower(rh_drink_plural($name, 2));
+        foreach ([$key, $plKey] as $k) {
+            if (isset($seen[$k])) {
+                return [[], '"' . $name . '" is the same measure as "' . $names[$seen[$k]] . '" (one is the plural of the other). Keep one.'];
+            }
         }
         if ($mlRaw === '' || !is_numeric($mlRaw)) {
             return [[], 'Type the size of one ' . $name . ' in ml (a number).'];
@@ -14342,7 +14350,9 @@ function rh_drink_measures_clean(array $rows): array
         if ($ml <= 0 || $ml > RH_DRINK_MEASURE_MAX_ML) {
             return [[], 'The size of one ' . $name . ' must be above 0 and at most ' . number_format(RH_DRINK_MEASURE_MAX_ML) . ' ml.'];
         }
-        $seen[$key] = true;
+        $seen[$key] = $key;
+        $seen[$plKey] = $seen[$plKey] ?? $key;
+        $names[$key] = $name;
         $out[] = ['name' => $name, 'ml' => $ml];
     }
     if (count($out) > RH_DRINK_MEASURES_MAX) {
@@ -14512,8 +14522,8 @@ function rh_drink_measure_to_stock(float $qty, string $measure, array $ing, ?arr
         throw new RuntimeException('Type an amount greater than 0 (at most 100,000).');
     }
     $opts = rh_drink_measure_options($ing, $list);
-    $key = mb_strtolower(trim($measure));
-    if (!isset($opts[$key])) {
+    $key = rh_drink_option_key($opts, $measure);
+    if ($key === null) {
         throw new RuntimeException('"' . trim($measure) . '" can’t be used for this item. Set its bottle size in Stock, or type the amount in ' . (string)($ing['unit'] ?? 'its stock unit') . '.');
     }
     $o = $opts[$key];
@@ -14554,10 +14564,32 @@ function rh_drink_plural(string $name, float $qty): string
     if (preg_match('/^(ml|mls)$/i', $name)) {
         return 'ml';
     }
-    if (preg_match('/^(\S+)(\s+of\s+.+)$/iu', $name, $mm)) {
+    if (preg_match('/^(.+?)(\s+of\s+.+)$/iu', $name, $mm)) {
         return rh_stock_measure_plural($mm[1], $qty) . $mm[2];
     }
     return rh_stock_measure_plural($name, $qty);
+}
+
+/**
+ * The key in rh_drink_measure_options() that a typed measure means, or null: the name itself (any case, spaces tidied), else
+ * the measure whose plural it is ("2 jiggers" -> jigger, "glasses of wine" -> glass of wine). The list never holds a name
+ * and its plural together (rh_drink_measures_clean), so there is at most one match.
+ */
+function rh_drink_option_key(array $opts, string $typed): ?string
+{
+    $key = mb_strtolower(trim((string)preg_replace('/\s+/u', ' ', $typed)));
+    if ($key === '') {
+        return null;
+    }
+    if (isset($opts[$key])) {
+        return $key;
+    }
+    foreach ($opts as $k => $o) {
+        if (mb_strtolower(rh_drink_plural((string)$o['name'], 2)) === $key) {
+            return (string)$k;
+        }
+    }
+    return null;
 }
 
 /**

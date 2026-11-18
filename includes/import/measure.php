@@ -10,7 +10,8 @@
  * Only an ANSWERED N is saved on the item (at commit, rh_stock_measure_save). Costs are never divided by N. Measure words are the hotel's
  * portion words (import_aliases kind portion_word) minus the generic ones below, which name no fixed amount of a drink.
  *
- *   import_measure_words($aliases)          portion words a quantity can be counted in (normalised word => true)
+ *   import_measure_words($aliases, $list)   portion words a quantity can be counted in (normalised word => true), plus the hotel's own
+ *                                           Drink measures list names (one-word names, one and many: jigger / jiggers)
  *   import_measure_in_text($text, $words)   the first measure word written in a heading, or null
  *   import_measure_cell($v, $words)         "66 shots" -> ['value'=>66, 'word'=>'shots'] (number and word both from that cell), or null
  *   import_measure_decide(...)              where N comes from for one item: none / wait / n / ask
@@ -26,7 +27,12 @@ if (!function_exists('import_measure_words')) {
         return ['measure', 'measures', 'single', 'singles', 'double', 'doubles', 'dash', 'dashes', 'portion', 'portions', 'serving', 'servings'];
     }
 
-    function import_measure_words(array $aliases): array
+    /**
+     * $list = the hotel's Drink measures list ([['name','ml']], Stock Items). A one-word name on it is a measure word even when it is one of the
+     * generic words above ("double 60 ml": the hotel has said what one holds). Names of more than one word ("half tot") are not read from a
+     * sheet: such a count is still asked about, never guessed.
+     */
+    function import_measure_words(array $aliases, array $list = []): array
     {
         $skip = array_flip(import_measure_generic_words());
         $out = [];
@@ -35,6 +41,14 @@ if (!function_exists('import_measure_words')) {
             if ($n !== '' && strpos($n, ' ') === false && !isset($skip[$n])) {
                 $out[$n] = true;
             }
+        }
+        foreach ($list as $dm) {
+            $n = is_array($dm) ? import_norm_text((string)($dm['name'] ?? '')) : '';
+            if ($n === '' || strpos($n, ' ') !== false || preg_match('/^(ml|mls|cl|l)$/', $n)) {
+                continue;
+            }
+            $out[$n] = true;
+            $out[import_norm_text(import_measure_plural($n, 2))] = true;
         }
         return $out;
     }

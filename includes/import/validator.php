@@ -324,7 +324,7 @@ if (!function_exists('import_validate_sheet')) {
         $undoHeals = array_flip(array_map('strval', (array)($opts['undo_heals'] ?? [])));
         $synonyms = (array)($aliases['unit_synonyms'] ?? []);
         // a quantity column whose heading names a measure ("Bar Balance (tots)") is counted in that measure (Step U2 d); the word comes from the heading cell
-        $measWords = import_measure_words($aliases);
+        $measWords = import_measure_words($aliases, (array)($opts['drink_measures'] ?? []));      // + the hotel's own Drink measures (jigger, carafe ...)
         $colMeas = [];
         foreach (['qty_primary', 'qty_secondary', 'qty_single'] as $qf) {
             if (isset($by[$qf], $struct['columns'][$by[$qf]])) {

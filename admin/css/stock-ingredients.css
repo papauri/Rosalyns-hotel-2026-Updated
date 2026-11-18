@@ -529,3 +529,159 @@
 .dm-row.dm-head span {
     text-align: left;
 }
+
+/* Item form + Drink measures (owner 2026-11-19): a wider dialog, fields grouped in cards, two columns on desktop, one on phones. */
+#ingredientModal .modal-content {
+    max-width: 880px;
+}
+
+#drinkMeasuresModal .modal-content {
+    max-width: 640px;
+}
+
+#ingredientModal .ing-section {
+    margin: 14px 0 0;
+    padding: 12px 16px 16px;
+    border: 1px solid var(--admin-surface-border, #e3e6ea);
+    border-radius: 10px;
+    background: #fff;
+    min-width: 0;
+}
+
+/* Legend sits inside the card as its heading (float keeps it within the border). */
+#ingredientModal .ing-section > legend {
+    float: left;
+    width: 100%;
+    margin: 0 0 12px;
+    padding: 0 0 8px;
+    border-bottom: 1px solid var(--admin-surface-border, #eef0f2);
+    font-size: 14px;
+    font-weight: 600;
+    color: #2f3540;
+}
+
+#ingredientModal .ing-section > :not(legend) {
+    clear: both;
+}
+
+#ingredientModal .ing-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 12px 16px;
+    align-items: end;
+}
+
+#ingredientModal .ing-grid.ing-grid-3 {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+#ingredientModal .ing-grid + .ing-grid {
+    margin-top: 12px;
+}
+
+#ingredientModal .ing-grid > * {
+    min-width: 0;
+}
+
+#ingredientModal .ing-grid > .ing-span {
+    grid-column: 1 / -1;
+}
+
+#ingredientModal .ing-grid > [hidden],
+#ingredientModal .ing-grid[hidden],
+#ingredientModal .ing-section[hidden] {
+    display: none;
+}
+
+#ingredientModal .ing-span > .field-note {
+    margin: 0 0 8px;
+}
+
+#ingredientModal .ing-span > .yield-explainer {
+    margin-top: 0;
+}
+
+#ingredientModal input:not([type="hidden"]),
+#ingredientModal select,
+#drinkMeasuresModal input,
+#ingredientModal .modal-footer button,
+#drinkMeasuresModal .modal-footer button {
+    min-height: 44px;
+    box-sizing: border-box;
+}
+
+#ingredientModal input:focus-visible,
+#ingredientModal select:focus-visible,
+#ingredientModal button:focus-visible,
+#drinkMeasuresModal input:focus-visible,
+#drinkMeasuresModal button:focus-visible {
+    outline: 2px solid var(--color-primary, #766550);
+    outline-offset: 2px;
+}
+
+#ingredientModal .ing-section > .field-note:empty {
+    display: none;
+}
+
+/* Drink measures list: a small table (measure | size in ml | remove); fixed columns so rows line up with the heading. */
+#drinkMeasuresModal .dm-list {
+    margin: 12px 0 0;
+    padding: 4px 12px 12px;
+    border: 1px solid var(--admin-surface-border, #e3e6ea);
+    border-radius: 10px;
+}
+
+#drinkMeasuresModal .dm-row {
+    grid-template-columns: minmax(0, 1fr) 120px 104px;
+    gap: 8px 10px;
+    margin: 0;
+    padding: 8px 0 0;
+}
+
+#drinkMeasuresModal .dm-row.dm-head {
+    padding: 8px 0;
+    border-bottom: 1px solid var(--admin-surface-border, #eef0f2);
+    color: #3f4654;
+}
+
+#drinkMeasuresModal .dm-row .btn-secondary.dm-remove {
+    width: 100%;
+    padding-left: 8px;
+    padding-right: 8px;
+}
+
+#drinkMeasuresModal .dm-add {
+    margin-top: 12px;
+}
+
+@media (max-width: 768px) {
+    #ingredientModal .ing-grid,
+    #ingredientModal .ing-grid.ing-grid-3 {
+        grid-template-columns: minmax(0, 1fr);
+    }
+
+    #ingredientModal .ing-section {
+        padding: 10px 12px 12px;
+    }
+}
+
+@media (max-width: 480px) {
+    #drinkMeasuresModal .dm-list {
+        padding: 4px 8px 10px;
+    }
+
+    #drinkMeasuresModal .dm-row {
+        grid-template-columns: minmax(0, 1fr) 88px 84px;
+        gap: 6px;
+    }
+}
+
+/* Buttons inside the two dialogs: one flat outlined style (colours come from the shared admin theme). */
+#ingredientModal .modal-body .btn-secondary,
+#drinkMeasuresModal .modal-body .btn-secondary {
+    border-style: solid;
+    border-width: 1px;
+    border-radius: 8px;
+    padding: 10px 16px;
+    cursor: pointer;
+}
