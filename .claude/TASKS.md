@@ -11,7 +11,8 @@ Status: TODO · DOING · REVIEW · SHIPPED · BLOCKED (owner).
     b. Step 13 (item 3).
     c. Fix the gaps in PDFs and emails = ALL of item 5 (owner: "Fix gaps in PDF and emails"; no longer "owner picks which").
     d. U3 (item 7) with owner rules: only staff with permission can change a main unit (new permission, default admin+manager unless the owner says otherwise); full History/System Logs of who, when, old -> new; every other place that uses the item (recipes, counts, stock value, reports, POS deduction, menu costs) shows the new unit at once, value identical before and after.
-    Items 1 (blocked), 4 and 6 are not in this session unless the owner asks.
+    e. Step 14 (item 6), added by owner 2026-11-19: rare POS/KDS faults (extra tab after a lost reply; lock clash). dept-restaurant-lead opus, Liwonde first (Rosalyn's has no POS sales yet).
+    Items 1 (blocked) and 4 are not in this session unless the owner asks.
   1. ROSALYN'S OPENING COUNT IN SHOTS (STEP U line, FOUND 2026-11-18): count 20261117-0710 stores shots/glasses as bottles (Whiskys 602 "bottles" = MWK 73.2m, house red 235 = 16.5m, liqueurs 252 = 11.5m) -> stock value and cost of sales wrong at the live hotel. BLOCKED: owner/bar manager names the lines counted in shots/glasses; then run the U1 "counted in the smaller measure" correction at Rosalyn's on the owner's ask (Preview + Confirm, History old -> new).
   2. SHIP M2 (QUEUE line): a credit-note move still reads as a refund on Payments, Accounting dashboard and guest history. dept-accounting-lead opus, Liwonde first.
   3. NEXT_BUILD_ORDER step 13: a booking can show "Unpaid" yet be missing from the Unpaid tab, so balances get missed. dept-accounting-lead opus.
