@@ -691,7 +691,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
                 $current_status = $current_booking['status'];
                 $room_id = $current_booking['room_id'];
-                $cancelledNow = []; // bookings cancelled by this request: [id, previous_status]
 
                 // Validate status transition using helper function
                 $transitionValidation = validateBookingStatusTransition($current_status, $new_status);
@@ -700,34 +699,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 }
 
                 if ($new_status === 'cancelled') {
-                    // Cancellation: status change + room/stock release + bill treatment +
-                    // refund all commit together (one transaction, booking row locked).
-                    $cancellation_reason = $_POST['cancellation_reason'] ?? 'Cancelled by admin';
-                    // Group booking (owner 2026-10-20): the dialog asks each time. scope=group cancels every live
-                    // room of the group in ONE transaction (all go or none); scope=single (or none) is one room.
-                    $cancelGroupIds = ($_POST['scope'] ?? '') === 'group' ? rh_booking_group_ids($pdo, (int)$booking_id) : [];
-                    if (count($cancelGroupIds) > 1) {
-                        // Cancellation policy: the fee the dialog showed (none posted for bookings without a policy).
-                        $grpRes = rh_cancel_booking_group($pdo, $cancelGroupIds, (int)($user['id'] ?? 0), (string)$cancellation_reason, 'completed', rh_cancel_fee_choice_from_post($_POST, true));
-                        if (!$grpRes['success']) {
-                            throw new Exception('Cancellation failed - nothing was changed. ' . $grpRes['error']);
-                        }
-                        $message = $grpRes['message'];
-                        foreach ($grpRes['cancelled'] as $gc) {
-                            $cancelledNow[] = ['id' => $gc['id'], 'previous_status' => $gc['previous_status']];
-                            rh_log_event('bookings', 'info', 'Booking status changed (group cancel)', ['booking_id' => $gc['id'], 'ref' => $gc['reference'], 'to' => $new_status, 'group' => $cancelGroupIds, 'by' => $user['username'] ?? null]);
-                            logBookingAudit($gc['id'], $new_status, ['status' => $gc['previous_status']], ['status' => $new_status], 'Cancelled with its group (' . count($cancelGroupIds) . ' rooms)', $gc['reference']);
-                        }
-                    } else {
-                        $cancelRes = cancelRoomBookingSettled($pdo, (int)$booking_id, (int)($user['id'] ?? 0), (string)$cancellation_reason, 'completed', rh_cancel_fee_choice_from_post($_POST, false));
-                        if (!$cancelRes['success']) {
-                            throw new Exception('Cancellation failed - nothing was changed. ' . $cancelRes['error']);
-                        }
-                        $cancelledNow[] = ['id' => (int)$booking_id, 'previous_status' => (string)$current_status];
-                        $message = 'Booking cancelled. ' . $cancelRes['summary'];
-                        rh_log_event('bookings', 'info', 'Booking status changed', ['booking_id' => $booking_id, 'from' => $current_status, 'to' => $new_status, 'mode' => $cancelRes['mode'], 'refund' => $cancelRes['refund_total'], 'by' => $user['username'] ?? null]);
-                        logBookingAudit($booking_id, $new_status, ['status' => $current_status], ['status' => $new_status], null, $current_booking['booking_reference'] ?? null);
-                    }
+                    // Cancellation (one room, or the whole group when scope=group: all go or none), History, and the
+                    // guest email for each room that was confirmed: shared with the bulk Cancel,
+                    // admin/includes/booking-row-actions.php bookings_cancel_commit().
+                    $cancelDone = bookings_cancel_commit($pdo, (int)$booking_id, (string)$current_status, $current_booking['booking_reference'] ?? null, $user, $_POST);
+                    $message = $cancelDone['message'];
                 } elseif ($new_status === 'checked-out') {
                     // Checkout always passes the balance gate (override needs the permission + explicit confirm).
                     $coRes = rh_checkout_with_gate($pdo, (int)$booking_id, (int)($user['id'] ?? 0), !empty($_POST['confirm_checkout_with_balance']), $user['full_name'] ?? ($user['username'] ?? null));
@@ -752,77 +728,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     rh_log_event('bookings', 'info', 'Booking status changed', ['booking_id' => $booking_id, 'from' => $current_status, 'to' => $new_status, 'by' => $user['username'] ?? null]);
                     logBookingAudit($booking_id, $new_status, ['status' => $current_status], ['status' => $new_status], null, $current_booking['booking_reference'] ?? null);
                 }
-                }
-
-                if ($new_status === 'cancelled' && !empty($cancelledNow)) {
-                    // (Stock release, room release and refund were done atomically by cancelRoomBookingSettled above.)
-                    // Every booking cancelled by this request that was confirmed gets the guest email + the log rows.
-                    require_once '../config/email.php';
-                    $cancellation_reason = $_POST['cancellation_reason'] ?? 'Cancelled by admin';
-                    foreach ($cancelledNow as $cn) {
-                        if ($cn['previous_status'] !== 'confirmed') {
-                            continue;
-                        }
-                        $booking_stmt = $pdo->prepare("
-                            SELECT b.*, r.name as room_name
-                            FROM bookings b
-                            LEFT JOIN rooms r ON b.room_id = r.id
-                            WHERE b.id = ?
-                        ");
-                        $booking_stmt->execute([$cn['id']]);
-                        $booking = $booking_stmt->fetch(PDO::FETCH_ASSOC);
-                        if (!$booking) {
-                            continue;
-                        }
-                        // Owner 2026-11-12: staff may untick "Email the guest" to cancel quietly (no email, no WhatsApp).
-                        // A form without the field (page loaded before this change) keeps the old behaviour.
-                        $cancelEmailSkipped = !rh_cancel_email_choice($_POST, rh_cancel_email_default_ticked('list', (string)$cn['previous_status']));
-                        if ($cancelEmailSkipped) {
-                            $email_result = ['success' => false, 'message' => rh_cancel_email_skipped_reason()];
-                            rh_email_send_log_not_sent('booking_cancelled', (string)$booking['guest_email'], (string)$booking['guest_name'],
-                                rh_email_ctx_account('room', $booking['id'], $booking['booking_reference']), 'Staff chose not to email the guest');
-                            if (rh_cancel_email_default_ticked('list', (string)$cn['previous_status'])) {
-                                sendBookingCancelledHotelAlert($booking); // unticked: nothing to the guest; the hotel's own WhatsApp alert still goes
-                            }
-                        } else {
-                            // Send cancellation email
-                            $email_result = sendBookingCancelledEmail($booking, $cancellation_reason);
-                        }
-
-                        // Log cancellation to database
-                        $email_sent = $email_result['success'];
-                        $email_status = $email_result['message'];
-                        logCancellationToDatabase(
-                            $booking['id'],
-                            $booking['booking_reference'],
-                            'room',
-                            $booking['guest_email'],
-                            $user['id'],
-                            $cancellation_reason,
-                            $email_sent,
-                            $email_status
-                        );
-
-                        // Log cancellation to file
-                        logCancellationToFile(
-                            $booking['booking_reference'],
-                            'room',
-                            $booking['guest_email'],
-                            $user['full_name'] ?? $user['username'],
-                            $cancellation_reason,
-                            $email_sent,
-                            $email_status
-                        );
-
-                        $refTag = count($cancelledNow) > 1 ? (' [' . $booking['booking_reference'] . ']') : '';
-                        if ($cancelEmailSkipped) {
-                            $message .= ' No email sent' . $refTag . ' (you chose not to).';
-                        } elseif ($email_sent) {
-                            $message .= ' Cancellation email sent' . $refTag . '.';
-                        } else {
-                            $message .= ' (Email failed' . $refTag . ': ' . $email_status . ')';
-                        }
-                    }
                 }
             }
 
@@ -2592,8 +2497,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $bbChoices[(int)$bbCid] = $bbPick;
                 }
             }
-            $bbReply = rh_bk_bulk_once_run($_SESSION['rh_bk_bulk_once'], trim((string)($_POST['once'] ?? '')), $bbScope, static function () use ($pdo, $bbOp, $bbIds, $user, $bbChoices): array {
-                $bbRes = rh_bk_bulk_apply($pdo, $bbOp, $bbIds, $user, trim((string)($_POST['state'] ?? '')), null, $bbChoices);
+            // G5c Cancel: one reason for every room (required) + the "Email the guest" tick; Mark no-show: an optional note.
+            $bbIn = [
+                'cancellation_reason' => trim((string)($_POST['cancellation_reason'] ?? '')),
+                'email_guest' => (string)($_POST['email_guest'] ?? '0') === '1' ? '1' : '0',
+                'note' => trim((string)($_POST['note'] ?? '')),
+            ];
+            if ($bbOp === 'cancel' && $bbIn['cancellation_reason'] === '') {
+                // Checked before the one-time token is used, so the same review can still be confirmed.
+                echo json_encode(['success' => false, 'message' => 'Give one reason for the cancellation. Nothing was done.']);
+                exit;
+            }
+            $bbReply = rh_bk_bulk_once_run($_SESSION['rh_bk_bulk_once'], trim((string)($_POST['once'] ?? '')), $bbScope, static function () use ($pdo, $bbOp, $bbIds, $user, $bbChoices, $bbIn): array {
+                $bbRes = rh_bk_bulk_apply($pdo, $bbOp, $bbIds, $user, trim((string)($_POST['state'] ?? '')), null, $bbChoices, $bbIn);
                 return empty($bbRes['success']) ? ['success' => false, 'message' => $bbRes['error']] : [
                     'success' => true, 'message' => $bbRes['message'], 'results' => $bbRes['results'], 'done' => $bbRes['done'],
                 ];
@@ -4128,6 +4044,10 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                         <button type="button" class="btn btn-secondary btn-sm" data-bulk-op="assign" data-bk-bulk-op="assign" data-title="Assign rooms" data-confirm="Confirm: assign the rooms"><i class="fas fa-door-closed" aria-hidden="true"></i> Assign rooms</button>
                         <?php if (hasPermission((int)($user['id'] ?? 0), 'checkin_guest')): ?>
                         <button type="button" class="btn btn-secondary btn-sm" data-bulk-op="checkin" data-bk-bulk-op="checkin" data-title="Check in" data-confirm="Confirm: check them in"><i class="fas fa-sign-in-alt" aria-hidden="true"></i> Check in</button>
+                        <?php endif; ?>
+                        <?php if (hasPermission((int)($user['id'] ?? 0), 'cancel_booking')): /* G5c: the row's own Cancel / No-show, room by room */ ?>
+                        <button type="button" class="btn btn-secondary btn-sm" data-bulk-op="cancel" data-bk-bulk-op="cancel" data-title="Cancel bookings" data-confirm="Confirm: cancel them"><i class="fas fa-ban" aria-hidden="true"></i> Cancel</button>
+                        <button type="button" class="btn btn-secondary btn-sm" data-bulk-op="noshow" data-bk-bulk-op="noshow" data-title="Mark no-show" data-confirm="Confirm: mark them no-show"><i class="fas fa-user-slash" aria-hidden="true"></i> Mark no-show</button>
                         <?php endif; ?>
                         <?php if ($bkCanConfirm): ?>
                         <button type="button" class="btn btn-primary btn-sm" data-bulk-op="group_make" data-bk-bulk-op="group_make"><i class="fas fa-object-group" aria-hidden="true"></i> Make a group</button>
@@ -11436,6 +11356,20 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             <div class="admin-modal__body">
                 <p id="bkBulkIntro" class="bk-bulk-intro"></p>
                 <div id="bkBulkList"></div>
+                <?php /* G5c: what Cancel / Mark no-show ask once for every room (shown only for those two). */ ?>
+                <div id="bkBulkExtra" class="bk-bulk-extra" hidden>
+                    <div data-bk-extra="cancel" hidden>
+                        <label for="bkBulkReason" class="form-label">Reason for cancelling (required) <i class="help" data-tip="One reason for every room going ahead. It is written to each booking's History and, when the guest is emailed, put in the cancellation email.">?</i></label>
+                        <textarea id="bkBulkReason" class="form-control" rows="2" maxlength="500" required></textarea>
+                        <label class="bk-bulk-check"><input type="checkbox" id="bkBulkEmail"> Email the guest <i class="help" data-tip="Ticked: each room that was confirmed gets the cancellation email, as with the row's Cancel. Rooms not confirmed yet get no email. Unticked: no email to any guest.">?</i></label>
+                        <p class="bk-bulk-note">Each room's fee is the automatic one from its own cancellation policy. To change one room's fee, open that booking and cancel it there. Rooms of one group that are all ticked are cancelled together (all or none).</p>
+                    </div>
+                    <div data-bk-extra="noshow" hidden>
+                        <label for="bkBulkNote" class="form-label">Note (optional) <i class="help" data-tip="Written to each booking's History with the no-show. Each guest with an email address gets the no-show email, as with the row's No-show.">?</i></label>
+                        <textarea id="bkBulkNote" class="form-control" rows="2" maxlength="500"></textarea>
+                        <p class="bk-bulk-note">Each room's no-show fee is the automatic one. To change one room's fee, open that booking.</p>
+                    </div>
+                </div>
                 <p id="bkBulkError" class="rh-form-error" role="alert" hidden></p>
             </div>
             <div class="admin-modal__footer">
@@ -11483,9 +11417,12 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
         }
         function open(m) { m.style.display = 'flex'; }
         function shut(m) { m.style.display = 'none'; }
-        function roomTable(head, rows) {
-            var h = '<div class="rh-group-split-wrap"><table class="rh-group-split bk-bulk-table"><thead><tr><th>Room <i class="help" data-tip="The booking reference, room and guest.">?</i></th><th>'
-                + esc(head) + '</th></tr></thead><tbody>';
+        // cols (G5c Cancel / Mark no-show): money columns between Room and the text, [{key, label, tip}] read from r.cols.
+        function roomTable(head, rows, cols, headTip) {
+            cols = cols || [];
+            var h = '<div class="rh-group-split-wrap"><table class="rh-group-split bk-bulk-table"><thead><tr><th>Room <i class="help" data-tip="The booking reference, room and guest.">?</i></th>'
+                + cols.map(function (c) { return '<th>' + esc(c.label) + ' <i class="help" data-tip="' + esc(c.tip) + '">?</i></th>'; }).join('')
+                + '<th>' + esc(head) + ' <i class="help" data-tip="' + esc(headTip || 'What is done to this booking, or why it is skipped and left as it is.') + '">?</i></th></tr></thead><tbody>';
             rows.forEach(function (r) {
                 var ok = r.will !== undefined ? r.will : r.ok;
                 var pick = '';
@@ -11496,9 +11433,34 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                             return '<option value="' + esc(o.value) + '"' + (o.value === r.pick ? ' selected' : '') + '>' + esc(o.label) + '</option>';
                         }).join('') + '</select>';
                 }
-                h += '<tr class="' + (ok ? 'bk-bulk-go' : 'bk-bulk-skip') + '"><td>' + esc(r.label) + '</td><td>' + esc(r.text) + pick + '</td></tr>';
+                h += '<tr class="' + (ok ? 'bk-bulk-go' : 'bk-bulk-skip') + '"><td data-label="Room">' + esc(r.label) + '</td>'
+                    + cols.map(function (c) {
+                        var v = r.cols && r.cols[c.key] != null ? r.cols[c.key] : '-';
+                        return '<td data-label="' + esc(c.label) + '">' + esc(v) + '</td>';
+                    }).join('')
+                    + '<td data-label="' + esc(head) + '">' + esc(r.text) + pick + '</td></tr>';
             });
             return h + '</tbody></table></div>';
+        }
+        // G5c money columns of the review (the result shows the text only: it carries what was kept and refunded).
+        var BULK_COLS = {
+            cancel: [
+                { key: 'fee', label: 'Fee kept', tip: 'The cancellation fee from the policy locked when this room was booked, and what it is worked out on (rate × nights). Hotel rule: this booking has no policy, so the hotel\'s cancellation setting applies and the amounts are written to its History.' },
+                { key: 'refund', label: 'Refund', tip: 'Money the guest paid that goes back to them as a pending refund, after the fee kept.' },
+                { key: 'credit', label: 'Guest credit', tip: 'Money the guest paid that stays with the hotel as credit for a later stay, instead of a refund.' }
+            ],
+            noshow: [
+                { key: 'fee', label: 'No-show fee', tip: 'What this room is charged for not arriving: the no-show charge in the policy locked at booking, the group no-show charge, or the booked stay (rate × nights) when no charge is set.' }
+            ]
+        };
+        function bulkExtra(op) {
+            var x = byId('bkBulkExtra');
+            if (!x) return;
+            x.hidden = !BULK_COLS[op];
+            Array.prototype.forEach.call(x.querySelectorAll('[data-bk-extra]'), function (s) { s.hidden = s.getAttribute('data-bk-extra') !== op; });
+            var r = byId('bkBulkReason'); if (r) { r.value = ''; r.disabled = false; }
+            var n = byId('bkBulkNote'); if (n) { n.value = ''; n.disabled = false; }
+            var e = byId('bkBulkEmail'); if (e) { e.checked = false; e.disabled = false; }
         }
         // A Confirm whose result is unknown: no second try from this dialog; Close reloads the list.
         function unknownResult(confirmBtn, cancelBtn, showError, msg) {
@@ -11535,10 +11497,12 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             c.textContent = bulk.label;
             c.disabled = true;
             c.hidden = false;
-            byId('bkBulkCancel').textContent = 'Cancel';
+            // "Cancel" would read as the bulk Cancel itself in that review: the dismiss button says Go back there.
+            byId('bkBulkCancel').textContent = bulk.op === 'cancel' ? 'Go back' : 'Cancel';
             byId('bkBulkIntro').textContent = 'Checking ' + p.length + ' ticked booking' + (p.length === 1 ? '' : 's') + '…';
             byId('bkBulkList').innerHTML = '';
             bulkError('');
+            bulkExtra('');
             open(m);
             post('preview_bookings_bulk', { op: bulk.op }, bulk.ids, 'bulk_ids').then(function (res) {
                 if (my !== bulk.seq) return;
@@ -11546,7 +11510,13 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 byId('bkBulkIntro').textContent = res.will
                     ? res.will + ' will go ahead' + (res.skip ? ', ' + res.skip + ' skipped' : '') + '. Nothing is done until you confirm. Each booking is done on its own.'
                     : 'Nothing to do: every ticked booking is skipped (the reason is beside each one).';
-                byId('bkBulkList').innerHTML = roomTable('What will happen', res.rooms || []);
+                byId('bkBulkList').innerHTML = roomTable('What will happen', res.rooms || [], BULK_COLS[bulk.op]);
+                if (BULK_COLS[bulk.op] && res.will) {
+                    bulkExtra(bulk.op);
+                    // Same default as the row's Cancel: ticked when a room going ahead was confirmed (only those are emailed).
+                    var e = byId('bkBulkEmail');
+                    if (e) e.checked = (res.rooms || []).some(function (r) { return r.will && r.email_default; });
+                }
                 bulk.state = res.state || '';
                 bulk.once = res.once || '';
                 c.disabled = !res.will || !bulk.state;
@@ -11557,6 +11527,16 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             if (!bulk.state || c.disabled) return;
             var my = bulk.seq;
             var fields = { op: bulk.op, state: bulk.state, once: bulk.once };
+            var reasonEl = byId('bkBulkReason'), noteEl = byId('bkBulkNote'), emailEl = byId('bkBulkEmail');
+            if (bulk.op === 'cancel') {
+                var why = reasonEl ? reasonEl.value.trim() : '';
+                if (!why) { bulkError('Give one reason for the cancellation. It is written to every room\'s History.'); if (reasonEl) reasonEl.focus(); return; }
+                fields.cancellation_reason = why;
+                fields.email_guest = emailEl && emailEl.checked ? '1' : '0';
+            } else if (bulk.op === 'noshow') {
+                fields.note = noteEl ? noteEl.value.trim() : '';
+            }
+            [reasonEl, noteEl, emailEl].forEach(function (x) { if (x) x.disabled = true; });
             var list = byId('bkBulkList');
             Array.prototype.forEach.call(list ? list.querySelectorAll('select[data-bk-pick]') : [], function (s) {
                 fields['choices[' + s.getAttribute('data-bk-pick') + ']'] = s.value;
@@ -11568,12 +11548,16 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
             post('bookings_bulk_apply', fields, bulk.ids, 'bulk_ids', true).then(function (res) {
                 if (my !== bulk.seq) return;
                 if (res && res.unknown) { bulk.done = true; unknownResult(c, byId('bkBulkCancel'), bulkError, res.message); return; }
-                if (!res || !res.success) { c.textContent = bulk.label; bulkError((res && res.message) || 'Nothing was done.'); return; }
+                if (!res || !res.success) {
+                    [reasonEl, noteEl, emailEl].forEach(function (x) { if (x) x.disabled = false; });
+                    c.textContent = bulk.label; bulkError((res && res.message) || 'Nothing was done.'); return;
+                }
                 bulk.done = (res.done || 0) > 0;
                 c.hidden = true;
+                bulkExtra('');
                 byId('bkBulkCancel').textContent = 'Close';
                 byId('bkBulkIntro').textContent = res.message || '';
-                byId('bkBulkList').innerHTML = roomTable('Result', res.results || []);
+                byId('bkBulkList').innerHTML = roomTable('Result', res.results || [], null, 'What was done to this booking, or why it was skipped and left as it is.');
             });
         }
         function closeBulk() {

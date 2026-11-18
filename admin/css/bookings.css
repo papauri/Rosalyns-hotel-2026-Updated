@@ -3063,6 +3063,48 @@ table.bookings-table .bk-guests-twin {
     margin: 12px 0 0;
 }
 
+/* G5c bulk Cancel / Mark no-show: the reason, email tick and note asked once for every room. */
+.bk-bulk-extra {
+    margin: 14px 0 0;
+}
+
+.bk-bulk-extra .form-label {
+    display: block;
+    margin-bottom: 6px;
+    font-weight: 600;
+}
+
+.bk-bulk-extra textarea {
+    width: 100%;
+    min-height: 44px;
+}
+
+.bk-bulk-check {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 44px;
+    margin: 8px 0 0;
+    cursor: pointer;
+}
+
+.bk-bulk-check input[type="checkbox"] {
+    width: 20px;
+    height: 20px;
+    margin: 0;
+}
+
+.bk-bulk-note {
+    margin: 6px 0 0;
+    font-size: 13px;
+    color: var(--admin-muted, #5f6b7c);
+}
+
+/* After a bulk action finishes its Confirm button is hidden; .btn's display rule must not bring it back. */
+#bkBulkModal .btn[hidden] {
+    display: none !important;
+}
+
 .bk-bulk-skips p {
     margin: 0 0 4px;
 }

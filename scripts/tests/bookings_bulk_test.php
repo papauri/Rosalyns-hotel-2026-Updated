@@ -350,6 +350,104 @@ try {
     $nope = rh_bk_bulk_once_run($store, $tok4, 'z', static fn(): array => ['success' => false, 'message' => 'The bookings changed since you reviewed them.']);
     ok('a refused confirm is given back as it was on replay', rh_bk_bulk_once_run($store, $tok4, 'z', $run) === $nope && $runs === 1);
 
+    // ---- G5c Cancel: per-room review (locked policy fee), skips, groups, apply through the row's own Cancel ----------
+    // No email: applied test rooms are pending (only a confirmed room is emailed), have no address, and email_guest is '0'.
+    // Confirmed rooms (X6, X7, X8) are only planned or refused before any write, never cancelled.
+    $snapP = static fn(int $ns = 100) => json_encode(['tiers' => [['days' => 7, 'pct' => 50]], 'kind' => 'individual', 'noshow_pct' => $ns, 'policy_version' => 1, 'text' => 'GBLK G5c policy']);
+    $X0 = ['status' => 'pending', 'amount_paid' => 0, 'total_with_vat' => 2400, 'guest_email' => '', 'check_in_date' => $day(5), 'check_out_date' => $day(7)] + $onT;
+    $X1 = $mk($X0);                                                    // no policy: the hotel rule
+    $X2 = $mk(['cancellation_policy_snapshot' => $snapP()] + $X0);     // policy: 50% inside 7 days
+    $X3 = $mk(['status' => 'cancelled'] + $X0);
+    $X4 = $mk(['status' => 'checked-in'] + $X0);
+    $X5 = $mk(['status' => 'checked-out'] + $X0);
+    $X6 = $mk(['status' => 'confirmed'] + $X0);
+    // A confirmed room under the policy (a pending room owes no fee): planned only, never applied (no email loop).
+    $X8 = $mk(['status' => 'confirmed', 'cancellation_policy_snapshot' => $snapP()] + $X0);
+    $xp = rh_bk_bulk_plan($pdo, 'cancel', [$X1, $X2, $X3, $X4, $X5, $X6, $X8], $adminId);
+    $xw = array_column($xp['rooms'], 'why', 'id');
+    ok('cancel: no policy -> will cancel under the hotel rule, nothing quoted', !empty($room($xp, $X1)['will']) && ($room($xp, $X1)['quoted'] ?? 'x') === ''
+        && ($room($xp, $X1)['cols']['fee'] ?? '') === 'Hotel rule', json_encode($room($xp, $X1)));
+    $q8 = rh_cancel_policy_dialog_quote($pdo, $X8)['single'] ?? [];
+    ok('cancel: policy room quotes the locked fee = the single Cancel dialog\'s quote', !empty($room($xp, $X8)['will']) && !empty($room($xp, $X8)['policy'])
+        && ($room($xp, $X8)['quoted'] ?? '') === number_format((float)($q8['amount'] ?? -1), 2, '.', '')
+        && abs((float)($q8['amount'] ?? 0) - 1200.0) < (float)BALANCE_TOLERANCE && strpos($room($xp, $X8)['text'], 'Fee kept: ') !== false
+        && strpos((string)($room($xp, $X8)['cols']['fee'] ?? ''), ' x ') !== false, json_encode([$room($xp, $X8), $q8['amount'] ?? null]));
+    ok('cancel: already cancelled / checked in / checked out skipped', $xw[$X3] === 'already cancelled' && $xw[$X4] === 'checked in' && $xw[$X5] === 'checked out', json_encode($xw));
+    ok('cancel: email tick default as the row (confirmed yes, pending no)', !empty($room($xp, $X6)['email_default']) && empty($room($xp, $X1)['email_default']));
+    ok('cancel: no Cancel Booking permission -> skipped', ($room(rh_bk_bulk_plan($pdo, 'cancel', [$X1], 0), $X1)['why'] ?? '') === 'no permission');
+    $xp2 = rh_bk_bulk_plan($pdo, 'cancel', [$X1, $X2, $X3], $adminId);
+    ok('cancel apply: no reason -> refused, nothing done', strpos((string)rh_bk_bulk_apply($pdo, 'cancel', [$X1, $X2, $X3], $admin, $xp2['state'], null, [], ['email_guest' => '0'])['error'], 'Give one reason') === 0
+        && $get($X1)['status'] === 'pending');
+    $xa = rh_bk_bulk_apply($pdo, 'cancel', [$X1, $X2, $X3], $admin, $xp2['state'], null, [], ['cancellation_reason' => 'GBLK bulk test', 'email_guest' => '0']);
+    $xr = array_column($xa['results'] ?? [], null, 'id');
+    ok('cancel apply: 2 cancelled, 1 skipped', !empty($xa['success']) && $xa['done'] === 2 && strpos($xa['message'], '2 cancelled, 1 skipped') === 0, $xa['message'] ?? $xa['error']);
+    ok('cancel apply: statuses + History through the row\'s path', $get($X1)['status'] === 'cancelled' && $get($X2)['status'] === 'cancelled'
+        && $audit($X1, 'cancelled') === 1 && $audit($X2, 'cancelled') === 1 && $hist($X2, 'Cancellation settled') === 1 && $get($X3)['status'] === 'cancelled');
+    ok('cancel apply: result per room', strpos($xr[$X2]['text'] ?? '', 'Cancelled. ') === 0 && !$xr[$X3]['ok'], json_encode($xr));
+    // A fee that changed after the review stops the confirm (the fee is in the review token).
+    $X7 = $mk(['status' => 'confirmed', 'cancellation_policy_snapshot' => $snapP()] + $X0); // fee 1200, then 2400 after the change
+    $xp3 = rh_bk_bulk_plan($pdo, 'cancel', [$X7], $adminId);
+    $pdo->prepare('UPDATE bookings SET cancellation_policy_snapshot = ? WHERE id = ?')
+        ->execute([json_encode(['tiers' => [['days' => 7, 'pct' => 100]], 'kind' => 'individual', 'noshow_pct' => 100, 'policy_version' => 2, 'text' => 'GBLK G5c policy 2']), $X7]);
+    $xa3 = rh_bk_bulk_apply($pdo, 'cancel', [$X7], $admin, $xp3['state'], null, [], ['cancellation_reason' => 'GBLK bulk test', 'email_guest' => '0']);
+    ok('cancel: fee changed since the review -> nothing done', empty($xa3['success']) && strpos((string)$xa3['error'], 'changed since you reviewed') !== false
+        && $get($X7)['status'] === 'confirmed', ($xa3['error'] ?? '') . ' ' . ($xa3['message'] ?? ''));
+    // Behind the token, the single path's own guard: a quoted fee that no longer matches is refused (bulk passes the
+    // reviewed figure as fee_quoted, rh_bk_bulk_cancel_one -> bookings_cancel_commit -> cancelRoomBookingSettled).
+    $x9 = cancelRoomBookingSettled($pdo, $X7, $adminId, 'GBLK bulk test', 'completed', ['quoted' => '1200.00', 'override' => '', 'reason' => '']);
+    ok('cancel: a stale quoted fee is refused by the single path, nothing changed', empty($x9['success']) && strpos((string)$x9['error'], 'cancellation fee changed') !== false
+        && $get($X7)['status'] === 'confirmed', json_encode($x9));
+    // Whole group ticked: cancelled together (all or none), the group's summed fee checked like the single "Whole group".
+    $G1 = $mk(['cancellation_policy_snapshot' => $snapP()] + $X0);
+    $G2 = $mk(['primary_booking_id' => $G1, 'cancellation_policy_snapshot' => $snapP()] + $X0);
+    $gp = rh_bk_bulk_plan($pdo, 'cancel', [$G2, $G1], $adminId);
+    $gs = [$G1, $G2];
+    sort($gs);
+    ok('cancel: whole group ticked -> together, summed fee', ($room($gp, $G1)['group'] ?? []) === $gs && ($room($gp, $G2)['group'] ?? []) === $gs
+        && ($room($gp, $G1)['group_quoted'] ?? '') === number_format(round((float)$room($gp, $G1)['quoted'] + (float)$room($gp, $G2)['quoted'], 2), 2, '.', '')
+        && strpos($room($gp, $G1)['text'], 'cancelled together') !== false, json_encode($gp['rooms']));
+    $ga = rh_bk_bulk_apply($pdo, 'cancel', [$G2, $G1], $admin, $gp['state'], null, [], ['cancellation_reason' => 'GBLK bulk test', 'email_guest' => '0']);
+    $gr = array_column($ga['results'] ?? [], null, 'id');
+    ok('cancel apply: whole group cancelled together', !empty($ga['success']) && $ga['done'] === 2 && $get($G1)['status'] === 'cancelled' && $get($G2)['status'] === 'cancelled'
+        && strpos($gr[$G1]['text'] ?? '', 'with its whole group') !== false && strpos($gr[$G2]['text'] ?? '', 'with its whole group') !== false
+        && $audit($G1, 'cancelled') === 1 && $audit($G2, 'cancelled') === 1, json_encode($ga));
+    // Part of a group ticked: that room alone, as the single "Only this room".
+    $H1 = $mk($X0);
+    $H2 = $mk(['primary_booking_id' => $H1] + $X0);
+    $H3 = $mk(['primary_booking_id' => $H1] + $X0);
+    $hp = rh_bk_bulk_plan($pdo, 'cancel', [$H2], $adminId);
+    $ha = rh_bk_bulk_apply($pdo, 'cancel', [$H2], $admin, $hp['state'], null, [], ['cancellation_reason' => 'GBLK bulk test', 'email_guest' => '0']);
+    ok('cancel: part of a group ticked -> only that room', empty($room($hp, $H2)['group']) && !empty($ha['success']) && $ha['done'] === 1
+        && $get($H2)['status'] === 'cancelled' && $get($H1)['status'] === 'pending' && $get($H3)['status'] === 'pending', json_encode($ha));
+    // Whole group ticked but one room cannot be cancelled: the group is skipped, the review names the room to untick.
+    $J1 = $mk($X0);
+    $J2 = $mk(['primary_booking_id' => $J1, 'status' => 'checked-in'] + $X0);
+    $jp = rh_bk_bulk_plan($pdo, 'cancel', [$J1, $J2], $adminId);
+    ok('cancel: group with an in-house room -> all skipped, says which to untick', empty($room($jp, $J1)['will']) && ($room($jp, $J2)['why'] ?? '') === 'checked in'
+        && ($room($jp, $J1)['why'] ?? '') === 'its group cannot all be cancelled' && strpos($room($jp, $J1)['text'], 'Untick') !== false && $jp['will'] === 0, json_encode($jp['rooms']));
+
+    // ---- G5c Mark no-show: only what the row's No-show allows; fee per room; apply through rh_mark_booking_no_show ------
+    $N0 = ['status' => 'confirmed', 'amount_paid' => 0, 'guest_email' => '', 'check_in_date' => $yesterday, 'check_out_date' => $day(2)] + $onT;
+    $N1 = $mk($N0);
+    $N2 = $mk(['check_in_date' => $today] + $N0);
+    $N3 = $mk(['status' => 'pending'] + $N0);
+    $N4 = $mk(['status' => 'no-show'] + $N0);
+    $N5 = $mk(['cancellation_policy_snapshot' => $snapP(100)] + $N0);
+    $np = rh_bk_bulk_plan($pdo, 'noshow', [$N1, $N2, $N3, $N4, $N5], $adminId);
+    $nw = array_column($np['rooms'], 'why', 'id');
+    ok('noshow: confirmed, arrival passed -> will, no email address said', !empty($room($np, $N1)['will']) && strpos($room($np, $N1)['text'], 'No email address') !== false, $room($np, $N1)['text'] ?? '');
+    ok('noshow: arrival today / pending / already no-show skipped', $nw[$N2] === 'arrival date not passed' && $nw[$N3] === 'not confirmed' && $nw[$N4] === 'already no-show', json_encode($nw));
+    ok('noshow: policy 100% -> the booked stay keeps billing', strpos((string)($room($np, $N5)['cols']['fee'] ?? ''), 'Booked stay') === 0, json_encode($room($np, $N5)));
+    ok('noshow: no Cancel Booking permission -> skipped', ($room(rh_bk_bulk_plan($pdo, 'noshow', [$N1], 0), $N1)['why'] ?? '') === 'no permission');
+    $np2 = rh_bk_bulk_plan($pdo, 'noshow', [$N1, $N2], $adminId);
+    $na = rh_bk_bulk_apply($pdo, 'noshow', [$N1, $N2], $admin, $np2['state'], null, [], ['note' => 'GBLK bulk test']);
+    $nr = array_column($na['results'] ?? [], null, 'id');
+    ok('noshow apply: 1 marked, 1 skipped', !empty($na['success']) && $na['done'] === 1 && strpos($na['message'], '1 marked no-show, 1 skipped') === 0, $na['message'] ?? $na['error']);
+    ok('noshow apply: status + History through the row\'s path', $get($N1)['status'] === 'no-show' && $audit($N1, 'no-show') === 1 && $hist($N1, 'Guest marked as no-show') === 1
+        && $get($N2)['status'] === 'confirmed' && strpos($nr[$N1]['text'] ?? '', 'Marked no-show.') === 0, json_encode($nr));
+    $na2 = rh_bk_bulk_apply($pdo, 'noshow', [$N1, $N2], $admin, $np2['state'], null, [], []);
+    ok('noshow: a second confirm on the same review does nothing (state changed)', empty($na2['success']) && $audit($N1, 'no-show') === 1);
+
     // ---- CSV export: formula-looking text gets an apostrophe; numbers and phone numbers do not ---------------------
     $csv = ['=HYPERLINK("x")' => "'=HYPERLINK(\"x\")", '+cmd' => "'+cmd", '-cmd|x' => "'-cmd|x", '@SUM(A1)' => "'@SUM(A1)", "\tx" => "'\tx", "\rx" => "'\rx",
         '+265 99 123 4567' => '+265 99 123 4567', '-50.00' => '-50.00', '' => '', 'Alice' => 'Alice', 'a=b' => 'a=b'];

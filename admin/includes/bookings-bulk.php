@@ -38,7 +38,195 @@ if (!function_exists('rh_bk_bulk_ops')) {
             'confirm' => ['label' => 'Confirm', 'single' => 'update_status', 'status' => 'confirmed', 'verb' => 'confirmed', 'max' => 50],
             'assign' => ['label' => 'Assign rooms', 'single' => 'assign_individual_room', 'verb' => 'given a room', 'max' => 50],
             'checkin' => ['label' => 'Check in', 'single' => 'update_status', 'status' => 'checked-in', 'verb' => 'checked in', 'max' => 50],
+            // G5c: Cancel and Mark no-show (permission cancel_booking, per room, through the single action's code). Both
+            // can email the guest, so they keep the 50-room cap of the send ops.
+            'cancel' => ['label' => 'Cancel', 'single' => 'update_status', 'status' => 'cancelled', 'verb' => 'cancelled', 'max' => 50],
+            'noshow' => ['label' => 'Mark no-show', 'single' => 'noshow', 'verb' => 'marked no-show', 'max' => 50],
         ];
+    }
+
+    /** "MWK 1,250.00" in the hotel's currency (the booked-rate formatter when present). */
+    function rh_bk_bulk_money(float $v): string
+    {
+        $cur = function_exists('getSetting') ? trim((string)getSetting('currency_symbol', 'MWK')) : 'MWK';
+        return function_exists('rh_booked_rate_money') ? rh_booked_rate_money($v, $cur) : $cur . ' ' . number_format($v, 2);
+    }
+
+    /**
+     * Bulk Cancel, one room (G5c), read only: the single Cancel's rules (validateBookingStatusTransition +
+     * validateBookingCancellation) and its money preview (rh_cancel_policy_preview: the fee from the policy locked at
+     * booking, refund, guest credit). Never a fee override: the automatic fee only.
+     * @return array{will:bool,why:string,text:string,cols:?array,quoted:string,policy:bool}
+     *   cols: {fee, refund, credit} plain text for the review columns; quoted: the fee figure the confirm must send back
+     *   ('' = no policy on this room, nothing posted, as the single dialog).
+     */
+    function rh_bk_bulk_cancel_room(PDO $pdo, array $b): array
+    {
+        $status = strtolower(trim((string)($b['status'] ?? '')));
+        $skip = static fn(string $why, string $text): array => ['will' => false, 'why' => $why, 'text' => $text, 'cols' => null, 'quoted' => '', 'policy' => false];
+        if ($status === 'cancelled') {
+            return $skip('already cancelled', 'Skipped: already cancelled.');
+        }
+        if ($status === 'checked-in') {
+            return $skip('checked in', 'Skipped: the guest is in house, so it cannot be cancelled. Check them out instead.');
+        }
+        if ($status === 'checked-out') {
+            return $skip('checked out', 'Skipped: the guest has already checked out, so it cannot be cancelled.');
+        }
+        if ($status === 'no-show') {
+            return $skip('no-show', 'Skipped: it is marked no-show, so it cannot be cancelled.');
+        }
+        $t = validateBookingStatusTransition($status, 'cancelled');
+        $v = validateBookingCancellation($b);
+        if (empty($t['allowed']) || empty($v['allowed'])) {
+            return $skip('cannot be cancelled', 'Skipped: a ' . str_replace('-', ' ', $status) . ' booking cannot be cancelled.');
+        }
+        $p = rh_cancel_policy_preview($pdo, $b);
+        if ($p['source'] !== 'policy') {
+            $mode = function_exists('getCancellationRefundMode') ? getCancellationRefundMode() : '';
+            $label = function_exists('getCancellationRefundModeLabel') ? getCancellationRefundModeLabel($mode) : $mode;
+            return ['will' => true, 'why' => '', 'policy' => false, 'quoted' => '',
+                'cols' => ['fee' => 'Hotel rule', 'refund' => 'Worked out at cancel', 'credit' => 'Worked out at cancel'],
+                'text' => 'Cancels this room. No cancellation policy on this booking, so the hotel rule applies: ' . $label
+                    . '. Paid ' . rh_bk_bulk_money((float)$p['paid']) . '. The amounts kept and refunded are written to its History.'];
+        }
+        $fee = (float)$p['amount'];
+        $text = 'Cancels this room. ' . $p['tier_label'] . '.';
+        $text .= $fee > (float)BALANCE_TOLERANCE ? ' Fee kept: ' . $p['fee_text'] . '.' : ' No fee.';
+        if ((float)$p['refund'] > (float)BALANCE_TOLERANCE) {
+            $text .= ' Refund ' . rh_bk_bulk_money((float)$p['refund']) . '.';
+        }
+        if ((float)$p['credit'] > (float)BALANCE_TOLERANCE) {
+            $text .= ' ' . rh_bk_bulk_money((float)$p['credit']) . ' stays as guest credit.';
+        }
+        if ((float)$p['owed'] > (float)BALANCE_TOLERANCE) {
+            $text .= ' Still owed after the cancel: ' . rh_bk_bulk_money((float)$p['owed']) . '.';
+        }
+        return ['will' => true, 'why' => '', 'text' => $text, 'policy' => true, 'quoted' => number_format($fee, 2, '.', ''),
+            'cols' => [
+                'fee' => $fee > (float)BALANCE_TOLERANCE ? rh_bk_bulk_money($fee) . ' ' . (string)$p['basis'] : 'None',
+                'refund' => (float)$p['refund'] > (float)BALANCE_TOLERANCE ? rh_bk_bulk_money((float)$p['refund']) : 'None',
+                'credit' => (float)$p['credit'] > (float)BALANCE_TOLERANCE ? rh_bk_bulk_money((float)$p['credit']) : 'None',
+            ]];
+    }
+
+    /**
+     * Bulk Mark no-show, one room (G5c), read only: the single No-show's rules (confirmed, arrival date passed) and the
+     * charge rh_mark_booking_no_show() will post: the policy's no-show % locked at booking (100% = the booked stay keeps
+     * billing), else the group no-show charge when the setting is on and the room is in a group, else none.
+     * @return array{will:bool,why:string,text:string,cols:?array}
+     */
+    function rh_bk_bulk_noshow_room(PDO $pdo, array $b, string $today): array
+    {
+        $status = strtolower(trim((string)($b['status'] ?? '')));
+        $skip = static fn(string $why, string $text): array => ['will' => false, 'why' => $why, 'text' => $text, 'cols' => null];
+        if ($status === 'no-show') {
+            return $skip('already no-show', 'Skipped: already marked no-show.');
+        }
+        if ($status !== 'confirmed') {
+            return $skip('not confirmed', 'Skipped: only a confirmed booking can be marked no-show (this one is ' . str_replace('-', ' ', $status) . ').');
+        }
+        $ci = substr((string)($b['check_in_date'] ?? ''), 0, 10);
+        if ($ci === '' || $ci >= $today) {
+            return $skip('arrival date not passed', 'Skipped: the arrival date (' . $ci . ') has not passed yet.');
+        }
+        $tv = validateBookingStatusTransition($status, 'no-show');
+        if (empty($tv['allowed'])) {
+            return $skip('refused', 'Skipped: ' . getBookingActionErrorMessage('noshow', (string)$tv['reason']));
+        }
+        $q = rh_cancellation_fee_quote($pdo, $b, 'noshow');
+        if ($q['source'] === 'policy') {
+            if ((float)$q['pct'] >= 100) {
+                $fee = 'Booked stay ' . rh_bk_bulk_money((float)$q['base']);
+                $text = 'No-show policy 100%: the booked stay keeps billing (' . rh_bk_bulk_money((float)$q['base']) . ' ' . $q['basis'] . ').';
+            } elseif (!empty($q['applies'])) {
+                $fee = rh_bk_bulk_money((float)$q['amount']) . ' ' . $q['basis'];
+                $text = 'No-show charge ' . $q['fee_text'] . ' replaces the booked stay.';
+            } else {
+                $fee = 'None';
+                $text = 'No-show policy 0%: nothing is charged and the booked stay is no longer billed.';
+            }
+        } else {
+            $mode = rh_group_noshow_charge_mode();
+            if ($mode !== '' && rh_group_noshow_fee_applies($pdo, $b)) {
+                $a = rh_group_noshow_fee_amount($b, $mode);
+                $names = ['none' => 'nothing', 'first_night' => 'the first night', 'full' => 'the full stay'];
+                $fee = (float)$a['amount'] > (float)BALANCE_TOLERANCE ? rh_bk_bulk_money((float)$a['amount']) . ' ' . rh_cancel_policy_basis($b) : 'None';
+                $text = 'Group no-show charge (' . ($names[$mode] ?? $mode) . '): ' . ((float)$a['amount'] > (float)BALANCE_TOLERANCE ? rh_bk_bulk_money((float)$a['amount']) : 'nothing')
+                    . ' replaces the booked stay.';
+            } else {
+                $stay = (float)($b['total_with_vat'] ?? 0);
+                $fee = 'Booked stay ' . rh_bk_bulk_money($stay);
+                $text = 'No no-show charge is set, so the booked stay keeps billing (' . rh_bk_bulk_money($stay) . ' ' . rh_cancel_policy_basis($b) . ').';
+            }
+        }
+        $pol = function_exists('getSetting') ? (string)getSetting('no_show_refund_policy', 'none') : 'none';
+        $refundWords = ['first_night' => 'money paid above what is kept goes into a pending refund (hotel setting: first night kept)',
+            'full' => 'money paid above what is kept goes into a pending refund (hotel setting: full refund)'];
+        if ((float)($b['amount_paid'] ?? 0) > (float)BALANCE_TOLERANCE) {
+            $text .= ' Paid ' . rh_bk_bulk_money((float)$b['amount_paid']) . ': ' . ($refundWords[$pol] ?? 'no automatic refund (hotel setting)') . '.';
+        }
+        $email = trim((string)($b['guest_email'] ?? ''));
+        $text .= ' Room released. ' . ($email !== '' ? 'Emails ' . $email . ' the no-show notice.' : 'No email address, so no email is sent.');
+        return ['will' => true, 'why' => '', 'text' => $text, 'cols' => ['fee' => $fee]];
+    }
+
+    /**
+     * Bulk Cancel groups (G5c). A group whose every live room (rh_booking_group_ids) is ticked is cancelled together,
+     * all or none, like the single Cancel's "Whole group" (rh_cancel_booking_group checks the sum of the rooms' fees).
+     * If one of its rooms cannot be cancelled, every room of that group is skipped and the review names the room to
+     * untick (the others are then cancelled one by one). A group only partly ticked: each ticked room on its own, like
+     * the single Cancel's "Only this room". Updates $rooms (plan rows) in place: group (sorted ids), group_quoted, text.
+     */
+    function rh_bk_bulk_cancel_groups(PDO $pdo, array &$rooms): void
+    {
+        $at = [];
+        foreach ($rooms as $k => $r) {
+            $at[(int)$r['id']] = $k;
+        }
+        $seen = [];
+        foreach ($rooms as $r) {
+            $id = (int)$r['id'];
+            if (isset($seen[$id]) || in_array((string)$r['why'], ['not found', 'deleted'], true)) {
+                continue;
+            }
+            $g = array_values(array_unique(array_map('intval', rh_booking_group_ids($pdo, $id))));
+            sort($g);
+            if (count($g) < 2 || !in_array($id, $g, true) || array_diff($g, array_keys($at))) {
+                continue; // not in a group, or only part of its group ticked: this room on its own
+            }
+            foreach ($g as $gid) {
+                $seen[$gid] = true;
+            }
+            $labelOf = static fn(int $gid): string => (string)$rooms[$at[$gid]]['label'];
+            $blocked = array_values(array_filter($g, static fn($gid) => empty($rooms[$at[$gid]]['will'])));
+            if ($blocked) {
+                $names = implode(', ', array_map($labelOf, $blocked));
+                foreach ($g as $gid) {
+                    if (in_array($gid, $blocked, true)) {
+                        continue; // keeps its own reason
+                    }
+                    $rooms[$at[$gid]] = ['will' => false, 'why' => 'its group cannot all be cancelled', 'group' => $g, 'cols' => null, 'quoted' => '', 'policy' => false,
+                        'text' => 'Skipped: every room of its group is ticked, so the group is cancelled together (all or none), but ' . $names
+                            . ' cannot be cancelled. Untick ' . $names . ' to cancel the other rooms one by one.'] + $rooms[$at[$gid]];
+                }
+                continue;
+            }
+            $anyPolicy = false;
+            $sum = 0.0;
+            foreach ($g as $gid) {
+                if (!empty($rooms[$at[$gid]]['policy'])) {
+                    $anyPolicy = true;
+                    $sum = round($sum + (float)$rooms[$at[$gid]]['quoted'], 2);
+                }
+            }
+            $all = implode(', ', array_map($labelOf, $g));
+            foreach ($g as $gid) {
+                $rooms[$at[$gid]]['group'] = $g;
+                $rooms[$at[$gid]]['group_quoted'] = $anyPolicy ? number_format($sum, 2, '.', '') : '';
+                $rooms[$at[$gid]]['text'] = 'Every room of its group is ticked, so the ' . count($g) . ' rooms (' . $all . ') are cancelled together, all or none. ' . $rooms[$at[$gid]]['text'];
+            }
+        }
     }
 
     /** The ticked bookings (b.* + room type name), keyed by id, in the order given. Missing ids are left out. */
@@ -197,6 +385,10 @@ if (!function_exists('rh_bk_bulk_ops')) {
                     $text .= ' Allowed by its pay-later arrangement.';
                 }
                 return ['will' => true, 'why' => '', 'text' => $text];
+            case 'cancel':
+                return rh_bk_bulk_cancel_room($pdo, $b);
+            case 'noshow':
+                return rh_bk_bulk_noshow_room($pdo, $b, $today ?? date('Y-m-d'));
         }
         return $skip('unknown action', 'Skipped: unknown action.');
     }
@@ -369,14 +561,40 @@ if (!function_exists('rh_bk_bulk_ops')) {
                     }
                 } else {
                     $p = rh_bk_bulk_room_plan($pdo, $op, $b, $today, $userId);
+                    if ($op === 'cancel' || $op === 'noshow') {
+                        $extra = ['cols' => $p['cols'] ?? null];
+                        if ($op === 'cancel') {
+                            $extra['quoted'] = (string)($p['quoted'] ?? '');
+                            $extra['policy'] = !empty($p['policy']);
+                            // The review's "Email the guest" tick: the row Cancel's default (a confirmed room is emailed).
+                            $extra['email_default'] = function_exists('rh_cancel_email_default_ticked')
+                                ? rh_cancel_email_default_ticked('list', (string)$b['status'])
+                                : strtolower((string)$b['status']) === 'confirmed';
+                        }
+                    }
                 }
             }
             $out['rooms'][] = ['id' => $id, 'label' => $label, 'will' => (bool)$p['will'], 'why' => (string)$p['why'], 'text' => (string)$p['text']] + $extra;
-            $out[$p['will'] ? 'will' : 'skip']++;
+        }
+        if ($op === 'cancel' && !$denied) {
+            rh_bk_bulk_cancel_groups($pdo, $out['rooms']);
+        }
+        foreach ($out['rooms'] as $r) {
+            $out[$r['will'] ? 'will' : 'skip']++;
         }
         // Assign rooms: the free-room count and the proposals may move between review and confirm; what counts is
         // which bookings will get a room (the room itself is re-checked under lock when it is assigned).
-        $out['state'] = sha1($op . '|' . json_encode(array_map(static fn($r) => $op === 'assign' ? [$r['id'], $r['will'], $r['why']] : [$r['id'], $r['will'], $r['text']], $out['rooms'])));
+        // Cancel / Mark no-show: the text carries every amount; the fee figure and the group are in the token too, so a
+        // fee or a group that changed after the review stops the confirm (nothing done).
+        $out['state'] = sha1($op . '|' . json_encode(array_map(static function ($r) use ($op) {
+            if ($op === 'assign') {
+                return [$r['id'], $r['will'], $r['why']];
+            }
+            if ($op === 'cancel') {
+                return [$r['id'], $r['will'], $r['text'], $r['quoted'] ?? '', $r['group'] ?? [], $r['group_quoted'] ?? ''];
+            }
+            return [$r['id'], $r['will'], $r['text']];
+        }, $out['rooms'])));
         $out['success'] = true;
         return $out;
     }
@@ -482,9 +700,16 @@ if (!function_exists('rh_bk_bulk_ops')) {
      * @return array{success:bool,error:string,message:string,results:array,done:int}
      *   results: [{id,label,ok,text}] in the ticked order; message: "3 sent, 1 skipped (no email address x1)."
      */
-    function rh_bk_bulk_apply(PDO $pdo, string $op, array $ids, array $user, string $state, ?string $today = null, array $choices = []): array
+    function rh_bk_bulk_apply(PDO $pdo, string $op, array $ids, array $user, string $state, ?string $today = null, array $choices = [], array $in = []): array
     {
         $out = ['success' => false, 'error' => '', 'message' => '', 'results' => [], 'done' => 0];
+        // Cancel: one reason for every room (required); email_guest '1' / '0' (the review's tick). Mark no-show: an
+        // optional note, as the single button's.
+        $reason = trim((string)($in['cancellation_reason'] ?? ''));
+        if ($op === 'cancel' && $reason === '') {
+            $out['error'] = 'Give one reason for the cancellation. Nothing was done.';
+            return $out;
+        }
         $plan = rh_bk_bulk_plan($pdo, $op, $ids, (int)($user['id'] ?? 0), $today);
         if (empty($plan['success'])) {
             $out['error'] = $plan['error'];
@@ -522,7 +747,8 @@ if (!function_exists('rh_bk_bulk_ops')) {
         $skipped = [];
         $done = 0;
         $taken = []; // Assign rooms: [roomId, ci, co] given in this batch
-        $failVerb = ['remove_group' => 'refused', 'confirm' => 'refused', 'assign' => 'refused', 'checkin' => 'refused'][$op] ?? 'sending failed';
+        $failVerb = ['remove_group' => 'refused', 'confirm' => 'refused', 'assign' => 'refused', 'checkin' => 'refused', 'cancel' => 'refused', 'noshow' => 'refused'][$op] ?? 'sending failed';
+        $groupDone = []; // Cancel: bookingId => result of its whole-group cancel (done at the group's first ticked room)
         foreach ($order as $k) {
             $r = $plan['rooms'][$k];
             $res = ['id' => (int)$r['id'], 'label' => (string)$r['label'], 'ok' => false, 'text' => (string)$r['text']];
@@ -531,8 +757,37 @@ if (!function_exists('rh_bk_bulk_ops')) {
                 $results[$k] = $res;
                 continue;
             }
+            if ($op === 'cancel' && isset($groupDone[(int)$r['id']])) {
+                $one = $groupDone[(int)$r['id']];
+                $res['ok'] = $one['ok'];
+                $res['text'] = $one['text'];
+                if (!$one['ok']) {
+                    adminBulkSkip($skipped, $one['why']);
+                } else {
+                    $done++;
+                }
+                $results[$k] = $res;
+                continue;
+            }
             try {
-                if ($op === 'confirm' || $op === 'assign' || $op === 'checkin') {
+                if ($op === 'cancel') {
+                    $one = rh_bk_bulk_cancel_one($pdo, $r, $user, $reason, (string)($in['email_guest'] ?? '0') === '1');
+                    foreach ($one['others'] as $gid => $gres) {
+                        $groupDone[(int)$gid] = $gres;
+                    }
+                    $res['ok'] = $one['ok'];
+                    $res['text'] = $one['text'];
+                    if (!$one['ok']) {
+                        adminBulkSkip($skipped, $one['why']);
+                    }
+                } elseif ($op === 'noshow') {
+                    $one = rh_bk_bulk_noshow_one($pdo, (int)$r['id'], $user, trim((string)($in['note'] ?? '')));
+                    $res['ok'] = $one['ok'];
+                    $res['text'] = $one['text'];
+                    if (!$one['ok']) {
+                        adminBulkSkip($skipped, $one['why']);
+                    }
+                } elseif ($op === 'confirm' || $op === 'assign' || $op === 'checkin') {
                     $one = rh_bk_bulk_apply_one($pdo, $op, $r, $user, $choices, $taken);
                     $res['ok'] = $one['ok'];
                     $res['text'] = $one['text'];
@@ -571,8 +826,37 @@ if (!function_exists('rh_bk_bulk_ops')) {
                 }
             } catch (Throwable $e) {
                 error_log('bookings bulk ' . $op . ' booking ' . (int)$r['id'] . ': ' . $e->getMessage());
-                $res['text'] = ($failVerb === 'refused' ? 'Skipped: nothing was changed (' : 'Not sent: ') . $e->getMessage() . ($failVerb === 'refused' ? ').' : '');
-                adminBulkSkip($skipped, $failVerb);
+                $after = '';
+                if ($op === 'cancel' || $op === 'noshow') {
+                    // The cancel / no-show commits before its email: an error after it must not read "nothing was changed".
+                    $st = $pdo->prepare('SELECT status FROM bookings WHERE id = ?');
+                    $st->execute([(int)$r['id']]);
+                    $now = (string)$st->fetchColumn();
+                    if ($now === ($op === 'cancel' ? 'cancelled' : 'no-show')) {
+                        $after = $now;
+                    }
+                }
+                if ($after !== '') {
+                    $res['ok'] = true;
+                    $res['text'] = ($op === 'cancel' ? 'Cancelled' : 'Marked no-show') . ', but something went wrong after it (' . $e->getMessage() . '). Open the booking and check its History.';
+                } else {
+                    $res['text'] = ($failVerb === 'refused' ? 'Skipped: nothing was changed (' : 'Not sent: ') . $e->getMessage() . ($failVerb === 'refused' ? ').' : '');
+                    adminBulkSkip($skipped, $failVerb);
+                }
+                // A whole-group cancel is tried once (all or none): its other rooms take this outcome, never a retry.
+                $grp = $op === 'cancel' ? array_map('intval', (array)($r['group'] ?? [])) : [];
+                if (count($grp) > 1) {
+                    $stG = $pdo->prepare('SELECT status FROM bookings WHERE id = ?');
+                    foreach ($grp as $gid) {
+                        if ($gid === (int)$r['id'] || isset($groupDone[$gid])) {
+                            continue;
+                        }
+                        $stG->execute([$gid]);
+                        $groupDone[$gid] = (string)$stG->fetchColumn() === 'cancelled'
+                            ? ['ok' => true, 'why' => '', 'text' => 'Cancelled with its whole group, but something went wrong after it (' . $e->getMessage() . '). Open the booking and check its History.']
+                            : ['ok' => false, 'why' => 'refused', 'text' => 'Skipped: its group was not cancelled, nothing was changed (' . $e->getMessage() . ').'];
+                    }
+                }
             }
             if ($res['ok']) {
                 $done++;
@@ -586,6 +870,109 @@ if (!function_exists('rh_bk_bulk_ops')) {
         $out['message'] = $msg !== '' ? $msg : $err;
         $out['results'] = array_values($results);
         return $out;
+    }
+
+    /**
+     * One room (or, for a whole ticked group, every room of it) of a bulk Cancel, through the single Cancel's own
+     * bookings_cancel_commit(): same money (locked policy fee, re-checked against the figure the review showed), History
+     * and guest email. No fee override in bulk. Throws what the single action throws (nothing was changed).
+     * $r: the plan row (id, quoted, group, group_quoted). $email: the review's "Email the guest" tick.
+     * @return array{ok:bool,why:string,text:string,others:array} others: [bookingId => {ok,why,text}] for the rest of a group.
+     */
+    function rh_bk_bulk_cancel_one(PDO $pdo, array $r, array $user, string $reason, bool $email): array
+    {
+        $id = (int)$r['id'];
+        $st = $pdo->prepare('SELECT status, booking_reference FROM bookings WHERE id = ?');
+        $st->execute([$id]);
+        $now = $st->fetch(PDO::FETCH_ASSOC);
+        if (!$now) {
+            throw new Exception('This booking no longer exists.');
+        }
+        $group = array_map('intval', (array)($r['group'] ?? []));
+        if ((string)$now['status'] === 'cancelled') {
+            // Cancelled by someone else after the review was checked again: not ours, nothing done (its group neither).
+            $others = [];
+            foreach ($group as $gid) {
+                if ($gid !== $id) {
+                    $others[$gid] = ['ok' => false, 'why' => 'group changed', 'text' => 'Skipped: its group changed since the review (a room was cancelled by someone else). Nothing was changed. Review again.'];
+                }
+            }
+            return ['ok' => false, 'why' => 'already cancelled', 'text' => 'Skipped: someone else cancelled it since the review. Nothing was changed.', 'others' => $others];
+        }
+        $t = validateBookingStatusTransition((string)$now['status'], 'cancelled');
+        if (empty($t['allowed'])) {
+            throw new Exception((string)$t['reason']);
+        }
+        $in = ['cancellation_reason' => $reason, 'email_guest' => $email ? '1' : '0', 'scope' => count($group) > 1 ? 'group' : 'single'];
+        $quoted = count($group) > 1 ? (string)($r['group_quoted'] ?? '') : (string)($r['quoted'] ?? '');
+        if ($quoted !== '') {
+            $in['fee_quoted'] = $quoted;
+        }
+        $c = bookings_cancel_commit($pdo, $id, (string)$now['status'], $now['booking_reference'] ?? null, $user, $in);
+        $per = [];
+        foreach ($c['cancelled'] as $x) {
+            $mail = $c['email'][(int)$x['id']] ?? '';
+            $text = 'Cancelled' . (count($group) > 1 ? ' with its whole group' : '') . '. ' . trim((string)$x['summary']);
+            if ($mail === 'sent') {
+                $text .= ' Cancellation email sent.';
+            } elseif ($mail === 'not sent') {
+                $text .= ' No email sent (you chose not to).';
+            } elseif ($mail !== '') {
+                $text .= ' The cancellation email was not sent (' . substr($mail, 8) . ').';
+            } else {
+                $text .= ' No email (the booking was not confirmed).';
+            }
+            $per[(int)$x['id']] = ['ok' => true, 'why' => '', 'text' => $text];
+        }
+        if (!isset($per[$id])) {
+            // Defensive: the group function did not list this room. Report what the booking says now.
+            $st->execute([$id]);
+            $s = (string)(($st->fetch(PDO::FETCH_ASSOC) ?: [])['status'] ?? '');
+            $per[$id] = $s === 'cancelled'
+                ? ['ok' => true, 'why' => '', 'text' => 'Cancelled. ' . (string)$c['message']]
+                : ['ok' => false, 'why' => 'refused', 'text' => 'Skipped: nothing was changed.'];
+        }
+        $mine = $per[$id];
+        unset($per[$id]);
+        foreach ($group as $gid) {
+            if ($gid !== $id && !isset($per[$gid])) {
+                $per[$gid] = ['ok' => false, 'why' => 'refused', 'text' => 'Skipped: its group was cancelled without this room. Open the booking to check it.'];
+            }
+        }
+        return $mine + ['others' => $per];
+    }
+
+    /**
+     * One room of a bulk Mark no-show, through the single button's rh_mark_booking_no_show() (orders, status, rooms,
+     * holds, refund in one transaction, History) and the same guest no-show email (sent here, not after the page).
+     * @return array{ok:bool,why:string,text:string}
+     */
+    function rh_bk_bulk_noshow_one(PDO $pdo, int $id, array $user, string $note): array
+    {
+        require_once __DIR__ . '/../../includes/booking-functions.php';
+        $ns = rh_mark_booking_no_show($pdo, $id, (int)($user['id'] ?? 0), (string)($user['full_name'] ?? ($user['username'] ?? '')), $note);
+        if (empty($ns['success'])) {
+            return ['ok' => false, 'why' => 'refused', 'text' => 'Skipped: nothing was changed (' . (string)$ns['error'] . ').'];
+        }
+        $bk = $ns['booking'];
+        $rf = $ns['refund'];
+        $text = 'Marked no-show. Room released.';
+        if (!empty($ns['closed_orders'])) {
+            $text .= ' Closed order(s) ' . implode(', ', $ns['closed_orders']) . '.';
+        }
+        if (!empty($rf['created'])) {
+            $text .= ' Pending refund ' . $rf['refund_ref'] . ' (' . rh_bk_bulk_money((float)$rf['refund_amount']) . ') queued.';
+        } elseif (!empty($rf['error'])) {
+            $text .= ' WARNING: the automatic refund could not be created (' . $rf['error'] . ') - raise it manually in Payments.';
+        }
+        if (!empty($bk['guest_email'])) {
+            require_once __DIR__ . '/../../config/email.php';
+            $m = sendNoShowEmail($bk, (float)($rf['refund_amount'] ?? 0.0), (string)($rf['refund_ref'] ?? ''));
+            $text .= !empty($m['success']) ? ' No-show email sent.' : ' The no-show email was not sent (' . (string)($m['message'] ?? 'unknown error') . ').';
+        } else {
+            $text .= ' No email address, so no email was sent.';
+        }
+        return ['ok' => true, 'why' => '', 'text' => $text];
     }
 
     /**

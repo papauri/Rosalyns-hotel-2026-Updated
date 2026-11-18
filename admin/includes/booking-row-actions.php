@@ -9,6 +9,7 @@
  *   bookings_assign_room_pair()           <- assign_room_combination
  *   bookings_checkin_gates() + bookings_checkin_commit() <- update_status checked-in (the "already stayed and left"
  *                                            path stays in bookings.php: the bulk bar never takes it)
+ *   bookings_cancel_commit()              <- update_status cancelled (one room or the whole group + guest email, G5c)
  * Each joins a caller's open transaction instead of opening its own (the test hotel's tests run inside one).
  */
 
@@ -528,5 +529,128 @@ if (!function_exists('bookings_convert_tentative_booking')) {
             $message .= $ciEmailWanted ? ($ciEmailSent ? ' Check-in email sent.' : ' The check-in email could not be sent.') : ' No email sent (you chose not to).';
         }
         return ['message' => $message];
+    }
+
+    /**
+     * Cancel one booking, or its whole group when $in['scope'] is 'group' and it has 2+ live rooms (all go or none):
+     * the cancel branch + guest email loop of update_status -> cancelled, moved here unchanged and shared with the bulk
+     * Cancel (G5c). Money stays inside cancelRoomBookingSettled() / rh_cancel_booking_group() (policy fee from the
+     * locked snapshot, quoted figure re-checked under the row lock). The status transition is checked by the caller.
+     * $in: the posted fields (cancellation_reason, scope, fee_quoted, fee_override, fee_override_pct, fee_override_reason,
+     * email_guest). Throws "Cancellation failed - nothing was changed. ..." on a refusal.
+     * @return array{message:string,cancelled:array,email:array} cancelled: [{id,previous_status,reference,summary}];
+     *   email: [bookingId => 'sent' | 'not sent' | 'failed: ...'] for each emailed (previously confirmed) room.
+     */
+    function bookings_cancel_commit(PDO $pdo, int $booking_id, string $current_status, ?string $booking_reference, array $user, array $in): array
+    {
+        $new_status = 'cancelled';
+        $cancelledNow = []; // bookings cancelled by this request: [id, previous_status]
+        $done = [];
+        // Cancellation: status change + room/stock release + bill treatment +
+        // refund all commit together (one transaction, booking row locked).
+        $cancellation_reason = $in['cancellation_reason'] ?? 'Cancelled by admin';
+        // Group booking (owner 2026-10-20): the dialog asks each time. scope=group cancels every live
+        // room of the group in ONE transaction (all go or none); scope=single (or none) is one room.
+        $cancelGroupIds = ($in['scope'] ?? '') === 'group' ? rh_booking_group_ids($pdo, (int)$booking_id) : [];
+        if (count($cancelGroupIds) > 1) {
+            // Cancellation policy: the fee the dialog showed (none posted for bookings without a policy).
+            $grpRes = rh_cancel_booking_group($pdo, $cancelGroupIds, (int)($user['id'] ?? 0), (string)$cancellation_reason, 'completed', rh_cancel_fee_choice_from_post($in, true));
+            if (!$grpRes['success']) {
+                throw new Exception('Cancellation failed - nothing was changed. ' . $grpRes['error']);
+            }
+            $message = $grpRes['message'];
+            foreach ($grpRes['cancelled'] as $gc) {
+                $cancelledNow[] = ['id' => $gc['id'], 'previous_status' => $gc['previous_status']];
+                $done[] = ['id' => (int)$gc['id'], 'previous_status' => (string)$gc['previous_status'], 'reference' => (string)$gc['reference'], 'summary' => (string)$gc['summary']];
+                rh_log_event('bookings', 'info', 'Booking status changed (group cancel)', ['booking_id' => $gc['id'], 'ref' => $gc['reference'], 'to' => $new_status, 'group' => $cancelGroupIds, 'by' => $user['username'] ?? null]);
+                logBookingAudit($gc['id'], $new_status, ['status' => $gc['previous_status']], ['status' => $new_status], 'Cancelled with its group (' . count($cancelGroupIds) . ' rooms)', $gc['reference']);
+            }
+        } else {
+            $cancelRes = cancelRoomBookingSettled($pdo, (int)$booking_id, (int)($user['id'] ?? 0), (string)$cancellation_reason, 'completed', rh_cancel_fee_choice_from_post($in, false));
+            if (!$cancelRes['success']) {
+                throw new Exception('Cancellation failed - nothing was changed. ' . $cancelRes['error']);
+            }
+            $cancelledNow[] = ['id' => (int)$booking_id, 'previous_status' => (string)$current_status];
+            $done[] = ['id' => (int)$booking_id, 'previous_status' => (string)$current_status, 'reference' => (string)($cancelRes['booking_reference'] ?? ''), 'summary' => (string)$cancelRes['summary']];
+            $message = 'Booking cancelled. ' . $cancelRes['summary'];
+            rh_log_event('bookings', 'info', 'Booking status changed', ['booking_id' => $booking_id, 'from' => $current_status, 'to' => $new_status, 'mode' => $cancelRes['mode'], 'refund' => $cancelRes['refund_total'], 'by' => $user['username'] ?? null]);
+            logBookingAudit($booking_id, $new_status, ['status' => $current_status], ['status' => $new_status], null, $booking_reference);
+        }
+
+        $emailOut = [];
+        if (!empty($cancelledNow)) {
+            // (Stock release, room release and refund were done atomically by cancelRoomBookingSettled above.)
+            // Every booking cancelled by this request that was confirmed gets the guest email + the log rows.
+            require_once __DIR__ . '/../../config/email.php';
+            $cancellation_reason = $in['cancellation_reason'] ?? 'Cancelled by admin';
+            foreach ($cancelledNow as $cn) {
+                if ($cn['previous_status'] !== 'confirmed') {
+                    continue;
+                }
+                $booking_stmt = $pdo->prepare("
+                    SELECT b.*, r.name as room_name
+                    FROM bookings b
+                    LEFT JOIN rooms r ON b.room_id = r.id
+                    WHERE b.id = ?
+                ");
+                $booking_stmt->execute([$cn['id']]);
+                $booking = $booking_stmt->fetch(PDO::FETCH_ASSOC);
+                if (!$booking) {
+                    continue;
+                }
+                // Owner 2026-11-12: staff may untick "Email the guest" to cancel quietly (no email, no WhatsApp).
+                // A form without the field (page loaded before this change) keeps the old behaviour.
+                $cancelEmailSkipped = !rh_cancel_email_choice($in, rh_cancel_email_default_ticked('list', (string)$cn['previous_status']));
+                if ($cancelEmailSkipped) {
+                    $email_result = ['success' => false, 'message' => rh_cancel_email_skipped_reason()];
+                    rh_email_send_log_not_sent('booking_cancelled', (string)$booking['guest_email'], (string)$booking['guest_name'],
+                        rh_email_ctx_account('room', $booking['id'], $booking['booking_reference']), 'Staff chose not to email the guest');
+                    if (rh_cancel_email_default_ticked('list', (string)$cn['previous_status'])) {
+                        sendBookingCancelledHotelAlert($booking); // unticked: nothing to the guest; the hotel's own WhatsApp alert still goes
+                    }
+                } else {
+                    // Send cancellation email
+                    $email_result = sendBookingCancelledEmail($booking, $cancellation_reason);
+                }
+
+                // Log cancellation to database
+                $email_sent = $email_result['success'];
+                $email_status = $email_result['message'];
+                logCancellationToDatabase(
+                    $booking['id'],
+                    $booking['booking_reference'],
+                    'room',
+                    $booking['guest_email'],
+                    $user['id'],
+                    $cancellation_reason,
+                    $email_sent,
+                    $email_status
+                );
+
+                // Log cancellation to file
+                logCancellationToFile(
+                    $booking['booking_reference'],
+                    'room',
+                    $booking['guest_email'],
+                    $user['full_name'] ?? $user['username'],
+                    $cancellation_reason,
+                    $email_sent,
+                    $email_status
+                );
+
+                $refTag = count($cancelledNow) > 1 ? (' [' . $booking['booking_reference'] . ']') : '';
+                if ($cancelEmailSkipped) {
+                    $message .= ' No email sent' . $refTag . ' (you chose not to).';
+                    $emailOut[(int)$cn['id']] = 'not sent';
+                } elseif ($email_sent) {
+                    $message .= ' Cancellation email sent' . $refTag . '.';
+                    $emailOut[(int)$cn['id']] = 'sent';
+                } else {
+                    $message .= ' (Email failed' . $refTag . ': ' . $email_status . ')';
+                    $emailOut[(int)$cn['id']] = 'failed: ' . $email_status;
+                }
+            }
+        }
+        return ['message' => $message, 'cancelled' => $done, 'email' => $emailOut];
     }
 }
