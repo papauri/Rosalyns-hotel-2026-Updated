@@ -500,6 +500,11 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Guides (Stock > Import, guide 23): Import now recognises quantity ("Total Balance"), selling price, "bought as" (crate/case), "how many in one" and "sold/served by" columns, also from misspelt headings and from the values; a crate/case price is divided by how many are in it automatically with a reason (same unit = price of one); a Stock Value at selling price is recognised and only rows that differ are listed; section rows and TOTAL rows are skipped; a name in two sections becomes two items with the section added. It still asks a row when the numbers don't add up (price already at or below selling price, odd pack size, cases vs single units). An existing item still on a crate price stays out of the opening count until Cost is ticked.
 - Assistant: import summary carries the value-at-selling-price line (differ, both totals); new hook import_unsure_columns / import_attach_column_suggestions for the AI column reader (not built yet).
 
+### Group booking page + group emails (2026-11-18) - Rosalyn's e7d69dd, a54a28c / Liwonde 5f4b5b0, c31882f
+- Guides (Bookings > booking details, group bookings): "Rooms in this group" folds open/closed (remembered); the totals are now the table's last row "All N rooms" with the Net position under it. Who pays: on the lead room it says which other rooms that choice covers; on another room it says it follows the lead room (link) unless it has its own company. Check in before payment: shows "Already allowed" when the room's company, or the lead room's switch or company, already lets it check in before paying; on the lead room it says which other rooms its switch covers.
+- Guides (emails): a group's Booking received / Confirmed / Tentative email from the lead room shows the whole party's total (all rooms), not the lead room only.
+- Assistant: no change in tools; if it explains check-in before payment for a group room, the lead room's switch or company covers rooms without their own.
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` at Liwonde: 7 data-dependent fails (left-owing + refunds briefing, 4 alert checks, digest
   recipients); ai_review_engine "nothing to add for this person" fails on HEAD too. (Tomorrow / 4 of 3 / K1,068,000 now pass.)
