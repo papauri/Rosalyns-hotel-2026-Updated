@@ -402,7 +402,7 @@ $csrf_token = generateCsrfToken();
                 </div>
                 <div class="col">Yield %
                     <i class="fas fa-circle-question help"
-                        title="Usable portion after trim/peel/cooking. 100% = no loss. 80% = 20% lost. Stock deducts the RAW quantity (qty ÷ yield)."></i>
+                        title="How much of the raw item ends up on the plate after peeling, trimming or cooking. Type the amount on the plate in Qty; stock takes off the raw amount (qty ÷ yield). Example: 250 g of chips at 80 % takes 313 g of raw potato. 100 % = nothing thrown away."></i>
                 </div>
                 <div class="col">Line cost
                     <i class="fas fa-circle-question help"
@@ -630,7 +630,7 @@ $csrf_token = generateCsrfToken();
                     <select name="entry_measure[]" class="measure-pick" onchange="recipeMeasureChanged(this)" aria-label="Type this amount in" title="Type the amount in the stock unit or in a drink measure (shot, glass, ml). The stock unit figure is worked out when you save." hidden></select>
                     <span class="raw-qty"></span>
                 </div>
-                <input type="number" name="yield_percent[]" placeholder="100" step="0.1" min="0.1" max="100" value="100" oninput="recalcCost()" title="Usable percentage after preparation (peel, trim, cook). 100 = no loss.">
+                <input type="number" name="yield_percent[]" placeholder="100" step="0.1" min="0.1" max="100" value="100" oninput="recalcCost()" title="Part of the raw item left after peeling, trimming or cooking. Potatoes peeled 10 kg to 8 kg = 80. 100 = nothing thrown away.">
                 <span class="line-cost" style="font-size:13px; font-weight:600; color:#3f4654;">—</span>
                 <button type="button" class="remove" title="Remove this ingredient" onclick="this.closest('.ing-row').remove(); recalcCost();"><i class="fas fa-times"></i></button>
                 <input type="hidden" name="delete_ingredient[]" value="0">
