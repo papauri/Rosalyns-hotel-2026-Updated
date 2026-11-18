@@ -537,6 +537,12 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Guides (Stock > Import, guide 23): measure columns (tots per bottle, price per tot) are read; an unclear measure word or count is asked; a price-per-tot price is kept as written.
 - Assistant: part (e) (suggest bottle size / measure for unsized names, spec AI_STOCK_HELPER_SPEC.md) only when the owner prompts; helpers rh_drink_* in config/database.php can back measure answers.
 
+### Stock: custom drink measures + Edit ingredient layout (2026-11-19) - Rosalyn's e415694 / Liwonde 13b2c0e
+- Guides (Stock > Ingredients): the Drink measures list takes the hotel's own measures (jigger, half tot, carafe...) with any ml; plurals typed on recipe lines are understood ("2 jiggers"); the same name twice (shot / shots) is refused. Edit ingredient is now a wide dialog in five sections (Basic details, Units and packs, Stock levels and supplier, Bottle size and drink measures, Count measure). Screenshots in guide 08 need refreshing.
+- Guides (Stock > Import, guide 23): one-word measures from the hotel list are read from a sheet ("40 jiggers"); multi-word or unknown words are asked.
+- Assistant: no change in tools.
+- Manager quick guide PDF sent to the owner 2026-11-19 (OneDrive\MSP\Rosalyns-Stock-Quick-Guide.pdf).
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` at Liwonde: 7 data-dependent fails (left-owing + refunds briefing, 4 alert checks, digest
   recipients); ai_review_engine "nothing to add for this person" fails on HEAD too. (Tomorrow / 4 of 3 / K1,068,000 now pass.)
