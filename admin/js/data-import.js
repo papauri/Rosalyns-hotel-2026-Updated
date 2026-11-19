@@ -1796,13 +1796,15 @@
             var what = h('div', 'di-what');
             add(what, h('h4', 'di-h4', 'What happens when you press Confirm'));
             var ul = h('ul', 'di-facts');
+            var menuLi = h('li', null, 'Nothing is deleted and recipes are not touched. Stock quantities only change once the opening count is approved.');
             [
                 'New ingredients are created and the changes you ticked are made to existing ones.',
                 'The stock quantities are filed as an opening stock count. They are NOT added to your stock yet: a different manager must approve that count on the Stock Count page first.',
-                'Nothing is deleted and recipes are not touched. Stock quantities only change once the opening count is approved.',
+                menuLi,
                 'The copy of your file on the server is deleted afterwards.'
-            ].forEach(function (t) { ul.appendChild(h('li', null, t)); });
+            ].forEach(function (t) { ul.appendChild(typeof t === 'string' ? h('li', null, t) : t); });
             what.appendChild(ul);
+            drinksSection(p, menuLi);
             var cws = cf.cost_with_stock || 0, cwsNames = cf.cost_with_stock_names || [];
             if (cws) {
                 what.appendChild(h('p', 'di-warn', num(cws, 0) + ' cost change' + (cws === 1 ? ' affects an item that already has' : 's affect items that already have') + ' stock. Their recipe costs and stock value change as soon as you confirm, before the opening count is approved: ' + cwsNames.join(', ') + (cws > cwsNames.length ? ' and ' + num(cws - cwsNames.length, 0) + ' more' : '') + '.'));
@@ -1848,6 +1850,142 @@
             }
             nav.appendChild(btn);
             add(p, why, nav);
+        }
+        /**
+         * Step 4 "Drinks for the menu": rows of the file with a selling price, worked out on the server (includes/import/drinks.php).
+         * Nothing goes on the menu without a tick; every tick and category is saved on the server at once and the list is fetched again.
+         */
+        var DRINK_HEADS = [
+            ['Drink', 'The item name from your file, with the cell it came from.'],
+            ['Sold as', 'One sale: the "served by" cell of your file (a shot, a glass), or one main unit when there is none. Each sale takes this much off stock.'],
+            ['Price (VAT included)', 'The selling price cell exactly as written. It already includes VAT; nothing is added to it.'],
+            ['Category', 'Where the drink goes on the menu: your file\'s category column, or "Bar" when it has none. A drink already on the menu keeps its category.'],
+            ['Cost of one', 'What one sale costs you: the item\'s cost per main unit times the share of it one sale uses.'],
+            ['Profit of one', 'Price minus cost of one. A warning shows when a drink sells below what it costs.'],
+            ['Put on the menu', 'Tick to add the drink to the drinks menu and the till, or to change its price there. Unticked drinks change nothing.']
+        ];
+        function drinksSection(p, menuLi) {
+            var sec = h('div', 'di-what di-drinks');
+            var st = { q: '', show: 'all', page: 1, size: 10 };
+            var head = h('h4', 'di-h4', 'Drinks for the menu');
+            var intro = helpLine('Your file has a selling price for these drinks. Tick the ones that should go on the drinks menu and the till at that price. Nothing is added or changed on the menu unless you tick it.');
+            var key = h('details', 'di-details di-colkey');
+            key.appendChild(h('summary', null, 'What the columns mean'));
+            var dl = h('dl', 'di-colkey-list');
+            DRINK_HEADS.forEach(function (c) { add(dl, h('dt', null, c[0]), h('dd', null, c[1])); });
+            key.appendChild(dl);
+            var note = h('p', 'di-small'), perm = h('p', 'di-warn'); perm.hidden = true;
+            var ctrl = h('div', 'di-bulk-row');
+            var si = document.createElement('input'); si.type = 'search'; si.className = 'di-fin'; si.placeholder = 'Search'; si.maxLength = 100; si.setAttribute('aria-label', 'Search the drinks');
+            var sh = h('select', 'di-select'); sh.setAttribute('aria-label', 'Show');
+            [['all', 'All drinks'], ['ticked', 'Ticked'], ['add', 'New on the menu'], ['update', 'Price change'], ['below', 'Sells below cost']].forEach(function (o) { var op = h('option', null, o[1]); op.value = o[0]; sh.appendChild(op); });
+            var sz = h('select', 'di-select'); sz.setAttribute('aria-label', 'Rows per page');
+            [[10, 'Show 10'], [25, 'Show 25'], [50, 'Show 50'], [100, 'Show 100']].forEach(function (o) { var op = h('option', null, o[1]); op.value = String(o[0]); sz.appendChild(op); });
+            var listId = 'diDrinkCats' + S.job;
+            var dlCats = document.createElement('datalist'); dlCats.id = listId;
+            var allIn = document.createElement('input'); allIn.type = 'text'; allIn.className = 'di-fin'; allIn.maxLength = 100; allIn.setAttribute('list', listId); allIn.setAttribute('aria-label', 'Category for every new drink');
+            var allBtn = h('button', 'btn-secondary di-btn', 'Set for all'); allBtn.type = 'button';
+            var allWrap = h('div', 'di-drinks-all'); add(allWrap, allIn, allBtn);
+            add(ctrl, ctlWrap('Search', si, 'Finds a drink, a category or a cell such as F12.'), ctlWrap('Show', sh, 'Only some of the drinks.'),
+                ctlWrap('Rows per page', sz, 'How many drinks to show at once.'),
+                ctlWrap('Category for all new drinks', allWrap, 'Puts every drink that would be added in this category. Drinks already on the menu keep theirs.'));
+            var wrap = h('div', 'di-tablewrap'), tb = h('table', 'di-table di-lt'), thead = h('thead'), htr = h('tr');
+            DRINK_HEADS.forEach(function (c) { var th = h('th', null, c[0]); th.title = c[1]; htr.appendChild(th); });
+            thead.appendChild(htr); tb.appendChild(thead);
+            var body = h('tbody'); tb.appendChild(body); wrap.appendChild(tb);
+            var info = h('p', 'di-help'); info.setAttribute('role', 'status');
+            var pgBox = h('div');
+            add(sec, head, intro, key, perm, ctrl, dlCats, info, wrap, pgBox, note);
+            sec.hidden = true;
+            p.appendChild(sec);
+            var money = function (cur, x) { return x === null || x === undefined ? '—' : cur + num(x, 2); };
+            var setMenuLi = function (c) {
+                var n = (c && c.ticked) || 0;
+                menuLi.textContent = n ? 'Nothing is deleted. ' + num(n, 0) + ' ticked drink' + (n === 1 ? '' : 's') + ' go' + (n === 1 ? 'es' : '') + ' on the drinks menu and the till (' + num(c.add || 0, 0) + ' new, ' + num(c.update || 0, 0) + ' price change' + (c.update === 1 ? '' : 's') + '); a new drink gets a stock link of one measure, an existing stock link is never replaced. Other recipes are not touched. Stock quantities only change once the opening count is approved.'
+                    : 'Nothing is deleted and recipes are not touched. Stock quantities only change once the opening count is approved.';
+            };
+            var draw = function (r) {
+                var cur = r.currency ? r.currency + ' ' : '';
+                var c = r.counts || {};
+                sec.hidden = !(c.listed || r.waiting);
+                setMenuLi(c);
+                head.textContent = 'Drinks for the menu (' + num(c.ticked || 0, 0) + ' of ' + num(c.listed || 0, 0) + ' ticked)';
+                perm.hidden = !!r.can_menu;
+                perm.textContent = 'Your account cannot change the menu (it needs the Menu permission), so these drinks cannot be ticked. The stock part of the import is not affected.';
+                clear(dlCats);
+                (r.cats || []).forEach(function (x) { var op = document.createElement('option'); op.value = x; dlCats.appendChild(op); });
+                if (!allIn.value) { allIn.value = r.default_category || 'Bar'; }
+                allBtn.disabled = !r.can_menu; allIn.disabled = !r.can_menu;
+                note.textContent = (r.waiting ? num(r.waiting, 0) + ' more item' + (r.waiting === 1 ? '' : 's') + ' with a selling price will show here once answered in step 3. ' : '') + (c.below ? num(c.below, 0) + ' drink' + (c.below === 1 ? ' sells' : 's sell') + ' below what one costs (marked). ' : '');
+                note.hidden = !note.textContent;
+                clear(body);
+                (r.rows || []).forEach(function (x) {
+                    var tr = h('tr', 'di-row');
+                    var t1 = cell('Drink'); add(t1, itemNameEl(x.name), h('div', 'di-capline'), src(x.name_source));
+                    var t2 = cell('Sold as'); add(t2, h('span', null, x.measure), x.measure_source ? h('div', 'di-capline') : null, src(x.measure_source));
+                    if (x.measure_note) { t2.appendChild(h('div', 'di-small', x.measure_note)); }
+                    var t3 = cell('Price (VAT included)'); add(t3, h('strong', null, money(cur, x.price)), h('div', 'di-capline'), src(x.price_source));
+                    if (x.action === 'update') { t3.appendChild(h('div', 'di-small', 'On the menu now: ' + money(cur, x.old_price))); }
+                    var t4 = cell('Category');
+                    if (x.action === 'add' && x.tickable) {
+                        var ci = document.createElement('input'); ci.type = 'text'; ci.className = 'di-fin'; ci.maxLength = 100; ci.value = x.category; ci.setAttribute('list', listId);
+                        ci.setAttribute('aria-label', 'Menu category for ' + x.name); ci.disabled = !r.can_menu;
+                        ci.addEventListener('change', function () {
+                            var v = ci.value.trim();
+                            if (!v || v === x.category) { ci.value = x.category; return; }
+                            save({ mode: 'category', key: x.key, value: v });
+                        });
+                        t4.appendChild(ci);
+                        t4.appendChild(h('div', 'di-small', x.category_from === 'column' ? 'From your file\'s category column' : 'No category column: "' + x.category_default + '"'));
+                    } else {
+                        add(t4, h('span', null, x.category), x.action !== 'add' && x.menu_id ? h('div', 'di-small', 'Its category on the menu now') : null);
+                    }
+                    var t5 = cell('Cost of one'); t5.textContent = money(cur, x.cost);
+                    if (x.cost_note) { t5.appendChild(h('div', 'di-small', x.cost_note)); }
+                    var t6 = cell('Profit of one'); add(t6, h('strong', null, money(cur, x.profit)));
+                    if (x.below) { t6.appendChild(h('div', 'di-warn', 'Sells below cost')); }
+                    var t7 = cell('Put on the menu');
+                    if (x.tickable) {
+                        var lb = h('label', 'di-drink-tick'), cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = !!x.ticked; cb.disabled = !r.can_menu;
+                        cb.setAttribute('aria-label', (x.action === 'update' ? 'Update the price of ' : 'Add ') + x.name);
+                        cb.addEventListener('change', function () { save({ mode: 'tick', key: x.key, on: cb.checked ? '1' : '0' }, cb); });
+                        add(lb, cb, ' ', x.action === 'update' ? 'Update price ' + money(cur, x.old_price) + ' → ' + money(cur, x.price) : 'Add to the menu');
+                        t7.appendChild(lb);
+                        if (x.action === 'update' && x.menu_name && x.menu_name !== x.name) { t7.appendChild(h('div', 'di-small', 'On the menu as "' + x.menu_name + '"')); }
+                    } else {
+                        t7.appendChild(h('span', 'di-small', x.why_not || 'Cannot be ticked.'));
+                    }
+                    add(tr, t1, t2, t3, t4, t5, t6, t7); body.appendChild(tr);
+                });
+                info.textContent = r.total ? num(r.total, 0) + ' drink' + (r.total === 1 ? '' : 's') + ' in this list.' : 'Nothing matches.';
+                clear(pgBox);
+                if (r.pages > 1) { pgBox.appendChild(pagerEl({ page: r.page, pages: r.pages, size: r.size, total: r.total }, function (n) { st.page = n; load(); })); }
+            };
+            var q = function () { return { job: S.job, q: st.q, show: st.show, page: st.page, size: st.size }; };
+            var load = function () {
+                post('drinks_list', q()).then(function (r) {
+                    if (!r.ok) { msg(r.error || 'The drinks list could not be loaded.'); return; }
+                    draw(r);
+                });
+            };
+            var save = function (data, cb) {
+                if (cb) { cb.disabled = true; }
+                var d = q(); Object.keys(data).forEach(function (k) { d[k] = data[k]; });
+                post('drinks_set', d).then(function (r) {
+                    if (!r.ok) { msg(r.error || 'That could not be saved.'); load(); return; }
+                    msg('');
+                    if (r.list && r.list.ok) { draw(r.list); } else { load(); }
+                });
+            };
+            si.addEventListener('input', debounce(function () { st.q = si.value.trim(); st.page = 1; load(); }, 300));
+            sh.addEventListener('change', function () { st.show = sh.value; st.page = 1; load(); });
+            sz.addEventListener('change', function () { st.size = parseInt(sz.value, 10) || 10; st.page = 1; load(); });
+            allBtn.addEventListener('click', function () {
+                var v = allIn.value.trim();
+                if (!v) { msg('Type a category first.'); return; }
+                save({ mode: 'category_all', value: v });
+            });
+            load();
         }
         /** Step 4 lists, worked out on the server: the rows left out (with the reason, a way back and a download) and the "Fixed for you" repairs (with Undo). */
         function fixedSections(p) {
@@ -1958,8 +2096,11 @@
                 card('Left out by you', num(r.skipped_by_you || 0, 0), 'Blocked or unanswered rows you chose to leave out. The uploaded file is deleted now, so only the copy you downloaded can be fixed and imported later.'),
                 card('Fixed for you', num(r.fixed_for_you || 0, 0), 'Small spelling or format fixes made while reading the file.'),
                 card('Opening count lines', num(r.count_lines, 0), 'Stock quantities filed for approval. They are not in stock yet.'),
-                card('Expiry batches', num(r.expiry_batches, 0), 'Dated batches filed with the count, so expiry is tracked once approved.'));
+                card('Expiry batches', num(r.expiry_batches, 0), 'Dated batches filed with the count, so expiry is tracked once approved.'),
+                (r.drinks_added || r.drinks_updated) ? card('Drinks added to the menu', num(r.drinks_added || 0, 0), 'Ticked drinks now on the drinks menu and the till at your file\'s selling price (VAT included).', 'good') : null,
+                (r.drinks_added || r.drinks_updated) ? card('Drink prices changed', num(r.drinks_updated || 0, 0), 'Drinks already on the menu whose price you ticked to change. Each change is in System Logs (old and new price).') : null);
             p.appendChild(cards);
+            if (r.drinks_linked) { p.appendChild(h('p', 'di-small', num(r.drinks_linked, 0) + ' drink' + (r.drinks_linked === 1 ? '' : 's') + ' got a stock link: each sale takes one measure off stock.')); }
             if (r.next_step) { p.appendChild(h('p', 'di-note', r.next_step)); }
             if (r.learned) { p.appendChild(h('p', 'di-small', num(r.learned, 0) + ' unit or category choice' + (r.learned === 1 ? '' : 's') + ' you confirmed will be remembered and suggested next time (with "Remembered from your earlier import" as the reason).')); }
             var nameList = function (names, text) {

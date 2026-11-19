@@ -11,6 +11,8 @@
  *   - ONE opening count left SUBMITTED with staged expiry batches: a different manager approves it (two-person rule) and only then does
  *     stock appear. Nothing is stocked in directly, no quantity is UPDATEd, nothing is deleted/archived, recipes are untouched.
  *   - stock on hand with no cost is NOT put in the count (shown as a warning on the review screen).
+ *   - drinks a person TICKED under "Drinks for the menu" go on the drinks menu + till at the sheet's selling price (VAT included), with
+ *     a one-measure stock link (includes/import/drinks.php; needs the Menu permission too). Unticked = the menu is not touched.
  * One DB transaction, all-or-nothing, one import commit at a time (named lock, taken before the transaction). A second call for a
  * committed job changes nothing and returns the stored result.
  * Everything is re-validated here (import_job_revalidate): the browser's statuses are never read.
@@ -18,6 +20,7 @@
  */
 
 require_once __DIR__ . '/review.php';
+require_once __DIR__ . '/drinks.php';
 require_once dirname(__DIR__, 2) . '/admin/includes/procurement-schema.php';
 
 if (!function_exists('import_commit_stock')) {
@@ -127,10 +130,19 @@ if (!function_exists('import_commit_stock')) {
         if ((int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote($commitLock) . ', 10)')->fetchColumn() !== 1) {
             return import_commit_fail('Another import is being saved right now, so nothing was imported. Wait a few seconds and press Import again.');
         }
+        // drinks ticked for the menu: also the lock Menu Management takes for an add / edit, so the two never write the menu at once
+        $menuLock = import_drinks_any_ticked(import_job_answers($job)) ? import_drinks_menu_lock_name() : '';
         try {
+            if ($menuLock !== '' && (int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote($menuLock) . ', 10)')->fetchColumn() !== 1) {
+                $menuLock = '';
+                return import_commit_fail('Somebody is saving a menu item right now, so nothing was imported. Wait a few seconds and press Import again.');
+            }
             return import_commit_stock_locked($pdo, $jobId, $userId, $opts);
         } finally {
             try {
+                if ($menuLock !== '') {
+                    $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote($menuLock) . ')');
+                }
                 $pdo->query('SELECT RELEASE_LOCK(' . $pdo->quote($commitLock) . ')');
             } catch (Throwable $e) {
                 // closing the connection releases it
@@ -175,6 +187,11 @@ if (!function_exists('import_commit_stock')) {
                 $pdo->rollBack();
                 return import_commit_fail('There is nothing ready to import.');
             }
+            $answersNow = import_job_answers($job);
+            if (import_drinks_any_ticked($answersNow) && !import_drinks_can_menu($userId)) {
+                $pdo->rollBack();
+                return import_commit_fail('Drinks are ticked for the menu, and your account cannot change the menu (it needs the Menu permission). Untick them, or ask a manager who has it. Nothing was imported.');
+            }
             $ap = rh_ssi_apply($pdo, $plan, $userId);
             if ($ap['count_id']) {
                 $note = 'Stock sheet import ' . date('Y-m-d') . ': opening balances from "' . mb_substr((string)$job['original_name'], 0, 120) . '" (Import #' . $jobId
@@ -216,6 +233,8 @@ if (!function_exists('import_commit_stock')) {
                 rh_stock_measure_save($pdo, $ingId, $mNew, $userId, 'Import #' . $jobId);
                 $measureSaved++;
             }
+            // "Drinks for the menu": only the ticked rows, re-checked now (after the stock part, so a new item and its measure exist)
+            $drinks = import_drinks_commit($pdo, (array)$v['res']['items'], $answersNow, $jobId, $userId);
             if (PHP_SAPI === 'cli' && !empty($opts['fail_after_apply'])) {
                 throw new RuntimeException('Forced failure after the writes (test).');
             }
@@ -241,6 +260,7 @@ if (!function_exists('import_commit_stock')) {
                 'stock_not_counted_no_cost' => $nc['no_cost']['names'], 'stock_not_counted_not_ticked' => $nc['not_ticked']['names'],
                 'stock_not_counted_cost_not_ticked' => $nc['cost_not_ticked']['names'], 'stock_not_counted_same' => $nc['same']['names'], 'committed_at' => date('Y-m-d H:i:s'), 'learned' => $learned,
                 'measures_saved' => $measureSaved,
+                'drinks_added' => $drinks['added'], 'drinks_updated' => $drinks['updated'], 'drinks_linked' => $drinks['linked'], 'drinks_names' => $drinks['names'],
                 'skipped_by_you' => (int)import_cont_overview($v['res'])['skipped_by_you'], 'fixed_for_you' => (int)array_sum($v['res']['heal_counts']),
                 'next_step' => 'A different manager must approve the opening count on Stock Count before any stock appears.',
             ];

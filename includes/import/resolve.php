@@ -617,6 +617,13 @@ if (!function_exists('import_resolve')) {
             }
             $cleanSheet = trim((string)preg_replace('/^[^\p{L}\p{N}]+/u', '', (string)$sh['name']));
             $cleanSheet = mb_substr($cleanSheet !== '' ? $cleanSheet : (string)$sh['name'], 0, 100);
+            $catColNo = 0;          // the sheet's own category column (a heading row's cell is in the item-name column, so the two never mix)
+            foreach ((array)($sh['columns'] ?? []) as $shCol) {
+                if (($shCol['field'] ?? '') === 'category' && empty($shCol['derived']) && isset($shCol['letter'])) {
+                    $catColNo = import_col_to_num((string)$shCol['letter']);
+                    break;
+                }
+            }
             // freeRows: each row is released as soon as it has been read (the rows of a 20,000-row file are most of the memory of the analysis), so
             // the rows and the candidates built from them never both exist in full.
             $rowsHolder = [];
@@ -654,6 +661,16 @@ if (!function_exists('import_resolve')) {
                     'category' => $row['category'] !== null && $row['category'] !== '' ? $row['category'] : $cleanSheet,
                     'category_how' => $row['category'] !== null && $row['category'] !== '' ? 'section-row' : 'sheet-name',
                     'category_source' => $row['category'] !== null && $row['category'] !== '' ? $row['category_source'] : null,
+                    'category_col' => $catColNo > 0 && $row['category'] !== null && $row['category'] !== ''
+                        && (import_parse_ref(import_split_source((string)$row['category_source'])[1])[1] ?? 0) === $catColNo,
+                    // the selling price is never imported into stock (a derived column); it is only carried, with its cell, to the "Drinks for the
+                    // menu" list (drinks.php), where nothing reaches the menu without a person's tick. unknown = a formula with no saved value.
+                    'sells' => array_values(array_map(function ($ig) {
+                        return ['value' => $ig['value'] ?? null, 'source' => (string)($ig['source'] ?? ''), 'unknown' => !empty($ig['unknown'])];
+                    }, array_filter((array)($row['ignored'] ?? []), function ($ig) {
+                        return ($ig['field'] ?? '') === 'sell_price';
+                    }))),
+                    'served_by' => isset($f['served_by']) ? $f['served_by']['value'] : null, 'served_by_source' => isset($f['served_by']) ? $f['served_by']['source'] : null,
                 ];
                 $skip = '';
                 $dupQ = null;
@@ -1563,6 +1580,11 @@ if (!function_exists('import_resolve')) {
                     return import_status_rank($x['rec']['status']);
                 }, $ms)),
                 'unanswered' => $it['unanswered'],
+                // carried as read (never used for stock): every selling-price cell of the item's rows, how it is served, where the category came from
+                'sells' => array_merge(...array_map(function ($x) {
+                    return (array)($x['fin']['sells'] ?? []);
+                }, $ms)),
+                'served_by' => $first['served_by'] ?? null, 'served_by_source' => $first['served_by_source'] ?? null, 'category_col' => !empty($first['category_col']),
             ];
         }
         // one "which unit?" question per sheet for NEW items with no unit anywhere in the file

@@ -10,7 +10,9 @@
  * Access: admin-init.php (session, data_import permission, stock module) + this file (kill switch data_import_enabled, fail-closed,
  * and stock_management). A job can only be opened by the person who uploaded it, or an admin.
  *
- * AJAX (POST, CSRF, JSON): upload | summary | review_page | bulk | answer | fields | skip | unskip | unit_items | unit_choice | heal_undo | fixed_list | cancel | confirm | list | delete.
+ * AJAX (POST, CSRF, JSON): upload | summary | review_page | bulk | answer | fields | skip | unskip | unit_items | unit_choice | heal_undo | fixed_list | drinks_list | drinks_set | cancel | confirm | list | delete.
+ * drinks_list / drinks_set = Step 4 "Drinks for the menu" (includes/import/drinks.php): rows with a selling price, ticked one by one (unticked by
+ * default); ticking and importing a ticked drink also need the Menu permission.
  * delete = remove one finished entry from Import history (owner 2026-11-15): same high-level permission as Clear Stock Data (rh_sc_authorize:
  * administrator + data_reset), the typed word DELETE and the person's own password; a backup is written first (includes/import/delete.php).
  * GET ?action=csv&job=ID downloads the preview CSV; GET ?action=skipped&job=ID&format=csv|xlsx downloads the rows that were left out;
@@ -409,7 +411,7 @@ if ($isAjax) {
     }
 
     // Opening an analysed job decodes and resolves its stored analysis: where this server's memory_limit cannot hold that (and cannot be raised), say so plainly.
-    if (in_array($action, ['summary', 'review_page', 'bulk', 'answer', 'fields', 'skip', 'unskip', 'unit_items', 'unit_choice', 'heal_undo', 'fixed_list', 'tick_all', 'value_rows'], true) && (int)($job['analysis_bytes'] ?? 0) > 0) {
+    if (in_array($action, ['summary', 'review_page', 'bulk', 'answer', 'fields', 'skip', 'unskip', 'unit_items', 'unit_choice', 'heal_undo', 'fixed_list', 'drinks_list', 'drinks_set', 'tick_all', 'value_rows'], true) && (int)($job['analysis_bytes'] ?? 0) > 0) {
         $mem = import_mem_check_review((int)$job['analysis_bytes'], import_default_aliases());
         if (!$mem['ok']) {
             di_json(['ok' => false, 'error' => $mem['message'], 'state' => 'toobig']);
@@ -553,6 +555,22 @@ if ($isAjax) {
     if ($action === 'fixed_list') {       // Step 4 lists: rows left out (kind=skipped) and repairs (kind=heals), grouped / searched / paged on the server
         di_json(import_job_list_view($pdo, $jobId, (($_POST['kind'] ?? '') === 'heals') ? 'heals' : 'skipped', ['q' => (string)($_POST['q'] ?? ''), 'code' => (string)($_POST['code'] ?? ''),
             'page' => (int)($_POST['page'] ?? 1), 'size' => (int)($_POST['size'] ?? 50)]));
+    }
+
+    // Step 4 "Drinks for the menu": rows with a selling price, each ticked (or not) by a person; nothing goes on the menu without a tick
+    $drinksQuery = function () {
+        return ['q' => (string)($_POST['q'] ?? ''), 'show' => (string)($_POST['show'] ?? 'all'), 'page' => (int)($_POST['page'] ?? 1), 'size' => (int)($_POST['size'] ?? 10)];
+    };
+    if ($action === 'drinks_list') {
+        di_json(import_job_drinks_view($pdo, $jobId, $uid, $drinksQuery()));
+    }
+    if ($action === 'drinks_set') {      // mode tick (key, on) | category (key, value) | category_all (value); needs the Menu permission too
+        $r = import_job_drinks_set($pdo, $jobId, $uid, ['mode' => (string)($_POST['mode'] ?? ''), 'key' => (string)($_POST['key'] ?? ''),
+            'on' => ($_POST['on'] ?? '0') === '1', 'value' => (string)($_POST['value'] ?? '')]);
+        if (!empty($r['ok'])) {
+            $r['list'] = import_job_drinks_view($pdo, $jobId, $uid, $drinksQuery());
+        }
+        di_json($r);
     }
 
     if ($action === 'cancel') {

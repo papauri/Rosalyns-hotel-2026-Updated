@@ -451,3 +451,30 @@
     .di-healed .di-lt tr.di-row td:nth-child(2) { grid-column: 1 / -1; }
     .di-healed .di-lt tr.di-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+/* Step 4 "Drinks for the menu" (includes/import/drinks.php): same list look as the other Step 4 lists */
+.di-drinks .di-bulk-row { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr) minmax(0, 2fr); margin-bottom: 4px; }
+.di-drinks .di-tablewrap { background: #fff; }
+.di-drinks-all { display: flex; gap: 6px; min-width: 0; }
+.di-drinks-all .di-fin { flex: 1 1 auto; min-width: 0; }
+.di-drinks .di-lt th:nth-child(1) { width: 20%; }
+.di-drinks .di-lt th:nth-child(2) { width: 11%; }
+.di-drinks .di-lt th:nth-child(3) { width: 12%; }
+.di-drinks .di-lt th:nth-child(4) { width: 17%; }
+.di-drinks .di-lt th:nth-child(5), .di-drinks .di-lt th:nth-child(6) { width: 10%; }
+.di-drinks .di-lt th:nth-child(7) { width: 20%; }
+.di-drinks .di-lt td .di-fin { width: 100%; box-sizing: border-box; }
+.di-drinks .di-lt td .di-warn { margin: 4px 0 0; }
+.di-drink-tick { display: inline-flex; gap: 6px; align-items: flex-start; cursor: pointer; text-align: left; line-height: 1.35; }
+.di-drink-tick input { margin-top: 2px; flex: 0 0 auto; }
+@container ditbl (max-width: 899px) {
+    .di-drinks .di-lt tr.di-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container ditbl (max-width: 559px) {
+    .di-drinks .di-lt tr.di-row { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 1024px) {
+    .di-drinks .di-bulk-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+    .di-drinks .di-bulk-row { grid-template-columns: minmax(0, 1fr); }
+}

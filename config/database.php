@@ -14696,6 +14696,48 @@ function rh_drink_measure_to_stock(float $qty, string $measure, array $ing, ?arr
     return ['qty' => $stock, 'name' => $o['name'], 'ml' => $o['ml']];
 }
 
+/**
+ * Cost of ONE serving of a stock item, from the item's CURRENT main unit and cost (one shared helper: the import's "Drinks for the
+ * menu" list and the drinks profit view use it). $measure '' or the main unit itself (any capitals, plural) = one main unit; the big
+ * side of the item's own count measure when stock is kept in the small one (a bottle of 25 shots) = N; anything else = a drink
+ * measure this item can use (rh_drink_measure_options). The money is never rounded here beyond 4 dp.
+ * @return ?array{qty:float, cost:?float, name:string, kind:string} qty = stock units in one serving (6 dp); cost = qty x cost_per_unit,
+ *         null when the item has no cost yet; kind 'unit' | 'measure'. null when that measure cannot be worked out for this item.
+ */
+function rh_drink_measure_cost(array $ing, string $measure = '', ?array $list = null): ?array
+{
+    $unit = trim((string)($ing['unit'] ?? ''));
+    $m = mb_strtolower(trim((string)preg_replace('/\s+/u', ' ', $measure)));
+    $costPer = (isset($ing['cost_per_unit']) && is_numeric($ing['cost_per_unit']) && (float)$ing['cost_per_unit'] > 0) ? (float)$ing['cost_per_unit'] : null;
+    $same = function (string $name) use ($m): bool {
+        $n = mb_strtolower(trim($name));
+        return $n !== '' && ($m === $n || $m === mb_strtolower(rh_drink_plural($name, 2)));
+    };
+    $own = rh_stock_measure_get($ing);
+    if ($m === '' || $same($unit)) {
+        $qty = 1.0;
+        $name = $unit;
+        $kind = 'unit';
+    } elseif ($own !== null && $own['side'] === 'small' && $same($own['big'])) {
+        $qty = round((float)$own['n'], 6);
+        $name = $own['big'];
+        $kind = 'unit';
+    } else {
+        if (rh_drink_unit_is_weight($unit)) {
+            return null;
+        }
+        try {
+            $c = rh_drink_measure_to_stock(1.0, $measure, $ing, $list);
+        } catch (RuntimeException $e) {
+            return null;
+        }
+        $qty = (float)$c['qty'];
+        $name = (string)$c['name'];
+        $kind = 'measure';
+    }
+    return ['qty' => $qty, 'cost' => $costPer !== null ? round($qty * $costPer, 4) : null, 'name' => $name, 'kind' => $kind];
+}
+
 /** Extra stock_ingredients columns the measure maths reads, for a SELECT list (", i.volume_ml, i.measure_..."); '' before 088/089. */
 function rh_drink_ing_cols(string $alias = 'i'): string
 {

@@ -223,6 +223,15 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
   Use this for counting fills the count measure with it (saved with Save). For recipes and the menu too, add the
   measure under Drink measures. Manager Guides: stock.html measures paragraph, one line.
 - Assistant: nothing to change.
+### Import: Drinks for the menu (2026-11-19, owner, drinks profit projection P1) - Liwonde 994f0f8, Rosalyn's see TASKS.md
+- Guides (08 Stock + Import guide): step 4 Confirm now lists "Drinks for the menu" when the file has a selling price:
+  name, sold as, price (VAT included, used exactly, never added), category (file's column, else Bar; per row or
+  "Set for all"), cost of one, profit of one, below-cost warning. Nothing goes on the menu unless ticked; a drink
+  already on the menu shows "Update price X -> Y". Ticking needs Import + Menu permissions. Ticked drinks go on the
+  drinks menu and the till (bar) with a one-measure stock link; History / System Logs show old -> new.
+- Manager Guides: stock.html import paragraph, one or two lines. Rebuild stock, check 2 pages.
+- Assistant: answer "which drinks did the import offer for the menu" (AI_REQUEST to the AI lead; data in the
+  import job's answers `_drinks` + activity log `drink_menu_import`).
 ## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
 
 ### Import stock check: value column warning + stock check workbook (2026-11-16, owner ask) — hashes in TASKS.md
