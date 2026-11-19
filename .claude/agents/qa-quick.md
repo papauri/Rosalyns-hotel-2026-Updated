@@ -3,7 +3,7 @@ name: qa-quick
 description: Cheap read-only gate (owner 2026-11-17) for diffs that are ONLY CSS, markup/layout, docs, guides or help text, or lint-only fixes. Hands anything with logic back as ESCALATE so it goes to qa-auditor (Opus). Never used for money, stock, bookings, auth, security, migrations or the Assistant's rails.
 model: sonnet
 effort: medium
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, PowerShell
 autoCompactWindow: 150000
 ---
 

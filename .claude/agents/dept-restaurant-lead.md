@@ -2,7 +2,7 @@
 name: dept-restaurant-lead
 description: Lead for the Restaurant & Bar department of Rosalyn's / Liwonde — POS till, open tabs, KDS/BDS/CDS, Orders & Tabs, deals & promos, room service, restaurant tables, station chat. Audits (read-only) or fixes its department end to end and raises UI_REQUESTs for the ui-lead. Use for any POS/F&B work.
 model: opus
-tools: Read, Grep, Glob, Edit, Write, Bash
+tools: Read, Grep, Glob, Edit, Write, Bash, PowerShell
 autoCompactWindow: 200000
 ---
 

@@ -2,7 +2,7 @@
 name: dept-guest-site-lead
 description: Lead for the Guest Website department of Rosalyn's / Liwonde — the public site (home, rooms, booking flow, check availability, booking lookup, restaurant, events, conference, gym pages, contact, reviews, FAQ), its in-site navigation, loader, SEO/meta and guest-facing emails' links. Audits (read-only) or fixes the guest experience end to end and raises UI_REQUESTs for the ui-lead. Use for any public-site work.
 model: opus
-tools: Read, Grep, Glob, Edit, Write, Bash
+tools: Read, Grep, Glob, Edit, Write, Bash, PowerShell
 autoCompactWindow: 200000
 ---
 
