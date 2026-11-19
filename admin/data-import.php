@@ -648,6 +648,7 @@ $jsV = @filemtime(__DIR__ . '/js/data-import.js');
              data-max="<?php echo (int)$maxBytes; ?>"
              data-max-text="<?php echo htmlspecialchars(di_mb_text($maxBytes), ENT_QUOTES); ?>"
              data-can-reimport="<?php echo $canReimport ? '1' : '0'; ?>"
+             data-can-stock-reports="<?php echo (function_exists('rhCanLinkTo') && rhCanLinkTo($uid, 'stock-reports.php')) ? '1' : '0'; ?>"
              data-page="data-import.php">
 
             <p class="di-intro">Bring a stock list in from Excel or CSV. You will see exactly how each column and row will be read, answer anything that is unclear, and only then confirm. Nothing is saved to your stock until you press Confirm.</p>

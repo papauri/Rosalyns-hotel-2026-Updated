@@ -112,7 +112,8 @@ if (!function_exists('import_default_aliases')) {
                     'pack price', 'carton price', 'ctn price', 'cost per case', 'cost per crate', 'cost per pack', 'cost per carton', 'cost per ctn',
                     'case cost', 'crate cost', 'pack cost', 'carton cost',
                 ],
-                // v4: the SELLING price (never a cost). Not imported: used only to check that a cost per unit is below what the unit sells for.
+                // v4: the SELLING price (never a cost, VAT included). Not a stock field: listed in Step 4 "Drinks for the menu" (only ticked
+                // drinks go on the menu + till at this price) and used to check that a cost per unit is below what the unit sells for.
                 'sell_price' => [
                     'selling price', 'sell price', 'sale price', 'sales price', 'selling', 'retail price', 'menu price', 'bar price', 'price per shot',
                     'price per glass', 'shot price', 'glass price', 's price', 'selling price per unit', 'retail', 'sp',

@@ -99,6 +99,8 @@
 .di-table td .di-qlink { display: block; width: auto; }
 .di-upd { padding: 4px 0; }
 .di-pager { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-top: 8px; font-size: 13px; }
+.di-pager-mid { display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px; }
+.di-pager .di-pager-size { width: auto; max-width: 140px; min-height: 44px; }
 
 /* Review list (Step 3): one pattern that always fits its card.
    Wide card: a real table with fixed column widths (the helper lines live in the "What the columns mean" key, not under every heading).
@@ -464,6 +466,10 @@
 .di-drinks .di-lt th:nth-child(7) { width: 20%; }
 .di-drinks .di-lt td .di-fin { width: 100%; box-sizing: border-box; }
 .di-drinks .di-lt td .di-warn { margin: 4px 0 0; }
+/* a money figure never breaks mid-number ("MWK 8," / "791.67"); the table takes the room it needs and scrolls inside its card */
+.di-drinks .di-money { white-space: nowrap; overflow-wrap: normal; }
+.di-drinks .di-lt { table-layout: auto; }
+.di-drinks { min-width: 0; max-width: 100%; }
 .di-drink-tick { display: inline-flex; gap: 6px; align-items: flex-start; cursor: pointer; text-align: left; line-height: 1.35; }
 .di-drink-tick input { margin-top: 2px; flex: 0 0 auto; }
 @container ditbl (max-width: 899px) {

@@ -1880,6 +1880,20 @@ $t(count($fxRun([['Wren Gin', 3, 60000, 2000, 6000, 'Case', 12, 'Glass']])['open
     && array_column(array_values(array_filter($fxRun([['Wren Pop', 3, 60000, 2000, 6000, 'Case', 12, 'Single']])['open'], function ($q) { return $q['type'] === 'count-unit'; }))[0]['options'] ?? [], 'key') === ['pack', 'single'],
     'U2d: served by "Single" (no fixed amount) gets no "in singles" answer');
 
+// owner fault 2026-11-20: Step 2 told the owner the selling price column was "Not imported" although Step 4 "Drinks for the menu" uses it.
+// The column is still kept out of stock (derived), but the mapping table must say it is recognised and where it is used.
+$diJs = (string)file_get_contents($root . '/admin/js/data-import.js');
+$diSell = preg_match("/c\\.field === 'sell_price'\\) \\{ what = '([^']*)'/", $diJs, $diM) ? $diM[1] : '';
+$t($diSell !== '' && stripos($diSell, 'not imported') === false && strpos($diSell, 'Recognised') === 0 && strpos($diSell, 'Drinks for the menu') !== false
+    && strpos($diSell, 'tick') !== false && strpos($diSell, 'below') !== false
+    && strpos($diJs, "(c.derived && c.field !== 'sell_price') || !c.field ? 'is-grey'") !== false && strpos($diJs, "c.derived && c.field === 'sell_price') { sellCols++;") !== false,
+    'Step 2: the selling price column reads as recognised and used in Step 4 "Drinks for the menu" (tick), not "Not imported", is not greyed or counted as a column left out ' . json_encode($diSell));
+$diPhp = (string)file_get_contents($root . '/admin/data-import.php');
+$t(strpos($diJs, "if (drinksOnMenu && canStockReports) {") !== false && strpos($diJs, "pp.href = 'stock-reports.php?tab=profit'") !== false
+    && strpos($diPhp, "rhCanLinkTo(\$uid, 'stock-reports.php')") !== false
+    && strpos((string)file_get_contents($root . '/admin/stock-reports.php'), "'profit' => 'Projected profit'") !== false,
+    'Result: "See projected profit" opens Stock Reports tab=profit, only when the import put drinks on the menu and the person can open Stock Reports');
+
 // cleanup
 foreach ($tmpFiles as $f) { @unlink($f); }
 @rmdir($tmpDir);

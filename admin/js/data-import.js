@@ -12,7 +12,7 @@
         item_name: 'Item name', batch: 'Batch', qty_primary: 'Balance (bar / kitchen)', qty_secondary: 'Balance (stores)', qty_single: 'Balance',
         unit: 'Unit', expiry: 'Expiry date', max_level: 'Par / maximum level', min_level: 'Reorder level', unit_price: 'Unit price',
         remarks: 'Remarks', category: 'Category', pack_name: 'Bought as (pack)', pack_size: 'Pack size', served_by: 'Sold / served by', pack_price: 'Price per pack',
-        sell_price: 'Selling price',
+        sell_price: 'Selling price (VAT included)',
         // columns that are recognised but never imported (shown greyed)
         min_qty: 'Minimum quantity', lead_time: 'Lead time (days)', qty_total: 'Total balance', days_to_expiry: 'Days to expiry',
         status: 'Status', action: 'Action', purchase_qty: 'Quantity to order', total_cost: 'Total value', row_no: 'Row number'
@@ -66,6 +66,7 @@
         var csrf = root.getAttribute('data-csrf');
         var page = root.getAttribute('data-page') || 'data-import.php';
         var canReimport = root.getAttribute('data-can-reimport') === '1';
+        var canStockReports = root.getAttribute('data-can-stock-reports') === '1';     // the same check the menu uses to link Stock Reports
         var maxText = root.getAttribute('data-max-text') || '';
         var msgEl = root.querySelector('#diMsg');
         var steps = root.querySelector('#diSteps');
@@ -806,13 +807,18 @@
             p.appendChild(line);
             (s.warnings || []).forEach(function (w) { p.appendChild(h('p', 'di-warn', typeof w === 'string' ? w : (w.text || ''))); });
             var cards = h('div', 'di-cards');
+            // a selling price column is used (Step 4 "Drinks for the menu"), so it is not counted as "not imported"
+            var sellCols = 0;
+            (s.sheets || []).forEach(function (sh) {
+                if (sh.action === 'import') { (sh.columns || []).forEach(function (c) { if (c.derived && c.field === 'sell_price') { sellCols++; } }); }
+            });
             add(cards,
                 card('Sheets read', num(t.sheets_total, 0), 'Tabs (sheets) in the workbook, including ones we skip.'),
                 card('Sheets to import', num(t.sheets_imported, 0), 'Sheets that look like a stock list and will be read.'),
                 card('Items found', num(t.items_read, 0), 'Stock item rows read from those sheets, before any checking.'),
                 card('Categories', num(t.categories, 0), 'Heading rows (like "BEERS") that group the items below them. They are not items.'),
                 card('Total lines left out', num(t.skipped_totals_rows, 0), 'Rows such as "TOTAL" or "GRAND TOTAL". They are never imported.'),
-                card('Columns not imported', num(t.ignored_derived_columns, 0), 'Calculated columns (totals, days to expiry, status). We take the real numbers, not these.'));
+                card('Columns not imported', num(Math.max(0, (t.ignored_derived_columns || 0) - sellCols), 0),'Calculated columns (totals, days to expiry, status). We take the real numbers, not these.'));
             p.appendChild(cards);
 
             var open = {};
@@ -876,7 +882,7 @@
             var body = h('tbody');
             var hasReorderCol = (sh.columns || []).some(function (x) { return x.field === 'min_level' && !x.derived && x.state === 'mapped'; });
             (sh.columns || []).forEach(function (c) {
-                var r = h('tr', c.derived || !c.field ? 'is-grey' : '');
+                var r = h('tr', (c.derived && c.field !== 'sell_price') || !c.field ? 'is-grey' : '');
                 var what, as;
                 if (c.derived) {
                     as = FIELD_LABEL[c.field] || c.field;
@@ -886,7 +892,7 @@
                     }
                     else if (c.field === 'lead_time') { what = 'Not imported: the import does not set lead times.'; }
                     else if (c.field === 'row_no') { what = 'Not imported: a row number or code, not stock data.'; }
-                    else if (c.field === 'sell_price') { what = 'Not imported: used only to check that a cost per unit is below what one unit sells for.'; }
+                    else if (c.field === 'sell_price') { what = 'Recognised. Used in Step 4 "Drinks for the menu", where you tick drinks to put them on the menu and till at this price (VAT included, nothing added). Also checks that the cost of one unit is below it.'; }
                     else { what = 'Not imported: worked out from other columns.'; }
                 }
                 else if (!c.field) { as = '—'; what = c.header ? 'Not imported: not recognised as stock data.' : 'Empty column.'; }
@@ -1290,7 +1296,11 @@
         }
 
         // ---------- the list ----------
-        function pagerEl(pg, goTo) {
+        /**
+         * The one pager of the import lists: Previous / Next (each disabled at its end), a page box that goes to the page on Enter or
+         * when it changes (clamped to 1..pages), and, when onSize is given, a rows-per-page picker (10 / 25 / 50 / 100).
+         */
+        function pagerEl(pg, goTo, onSize) {
             var bar = h('div', 'di-pager');
             var from = pg.total === 0 ? 0 : (pg.page - 1) * pg.size + 1, to = Math.min(pg.page * pg.size, pg.total);
             var prev = h('button', 'btn-secondary di-btn', 'Previous'), nxt = h('button', 'btn-secondary di-btn', 'Next');
@@ -1299,8 +1309,21 @@
             nxt.addEventListener('click', function () { goTo(pg.page + 1); });
             var mid = h('span', 'di-pager-mid');
             var inp = document.createElement('input'); inp.type = 'number'; inp.min = '1'; inp.max = String(pg.pages); inp.value = String(pg.page); inp.className = 'di-pack-in di-pager-in'; inp.setAttribute('aria-label', 'Go to page');
-            inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); var v = Math.max(1, Math.min(pg.pages, parseInt(inp.value, 10) || 1)); if (v !== pg.page) { goTo(v); } } });
+            var gone = false;
+            var jump = function () {
+                var v = Math.max(1, Math.min(pg.pages, parseInt(inp.value, 10) || 1));
+                inp.value = String(v);
+                if (v !== pg.page && !gone) { gone = true; goTo(v); }
+            };
+            inp.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); jump(); } });
+            inp.addEventListener('change', jump);
             add(mid, 'Showing ' + num(from, 0) + '–' + num(to, 0) + ' of ' + num(pg.total, 0) + ' · page ', inp, ' of ' + num(pg.pages, 0));
+            if (onSize) {
+                var sz = h('select', 'di-select di-pager-size'); sz.setAttribute('aria-label', 'Rows per page');
+                [10, 25, 50, 100].forEach(function (n) { var op = h('option', null, 'Show ' + n); op.value = String(n); if (n === pg.size) { op.selected = true; } sz.appendChild(op); });
+                sz.addEventListener('change', function () { onSize(parseInt(sz.value, 10) || 10); });
+                add(mid, ' ', sz);
+            }
             add(bar, prev, mid, nxt);
             return bar;
         }
@@ -1924,7 +1947,7 @@
                     var t1 = cell('Drink'); add(t1, itemNameEl(x.name), h('div', 'di-capline'), src(x.name_source));
                     var t2 = cell('Sold as'); add(t2, h('span', null, x.measure), x.measure_source ? h('div', 'di-capline') : null, src(x.measure_source));
                     if (x.measure_note) { t2.appendChild(h('div', 'di-small', x.measure_note)); }
-                    var t3 = cell('Price (VAT included)'); add(t3, h('strong', null, money(cur, x.price)), h('div', 'di-capline'), src(x.price_source));
+                    var t3 = cell('Price (VAT included)'); add(t3, h('strong', 'di-money', money(cur, x.price)), h('div', 'di-capline'), src(x.price_source));
                     if (x.action === 'update') { t3.appendChild(h('div', 'di-small', 'On the menu now: ' + money(cur, x.old_price))); }
                     var t4 = cell('Category');
                     if (x.action === 'add' && x.tickable) {
@@ -1940,9 +1963,9 @@
                     } else {
                         add(t4, h('span', null, x.category), x.action !== 'add' && x.menu_id ? h('div', 'di-small', 'Its category on the menu now') : null);
                     }
-                    var t5 = cell('Cost of one'); t5.textContent = money(cur, x.cost);
+                    var t5 = cell('Cost of one'); t5.appendChild(h('span', 'di-money', money(cur, x.cost)));
                     if (x.cost_note) { t5.appendChild(h('div', 'di-small', x.cost_note)); }
-                    var t6 = cell('Profit of one'); add(t6, h('strong', null, money(cur, x.profit)));
+                    var t6 = cell('Profit of one'); add(t6, h('strong', 'di-money', money(cur, x.profit)));
                     if (x.below) { t6.appendChild(h('div', 'di-warn', 'Sells below cost')); }
                     var t7 = cell('Put on the menu');
                     if (x.tickable) {
@@ -1959,7 +1982,12 @@
                 });
                 info.textContent = r.total ? num(r.total, 0) + ' drink' + (r.total === 1 ? '' : 's') + ' in this list.' : 'Nothing matches.';
                 clear(pgBox);
-                if (r.pages > 1) { pgBox.appendChild(pagerEl({ page: r.page, pages: r.pages, size: r.size, total: r.total }, function (n) { st.page = n; load(); })); }
+                st.page = r.page; st.size = r.size; sz.value = String(r.size);
+                if (r.total > 10) {
+                    pgBox.appendChild(pagerEl({ page: r.page, pages: r.pages, size: r.size, total: r.total },
+                        function (n) { st.page = n; load(); },
+                        function (n) { st.size = n; st.page = 1; load(); }));
+                }
             };
             var q = function () { return { job: S.job, q: st.q, show: st.show, page: st.page, size: st.size }; };
             var load = function () {
@@ -2057,11 +2085,12 @@
             heads.forEach(function (x) { htr.appendChild(h('th', null, x)); });
             thead.appendChild(htr); tb.appendChild(thead);
             var body = h('tbody'); tb.appendChild(body); wrap.appendChild(tb);
-            var pg = h('div', 'di-pager'), info = h('p', 'di-help'); info.setAttribute('role', 'status');
+            var pg = h('div'), info = h('p', 'di-help'); info.setAttribute('role', 'status');
+            st.size = 10;       // owner rule 2026-11-12: lists show 10 a page, with a picker for more
             add(ctrl, ctlWrap('Search', si, 'Finds an item name, a cell such as C12, or a word in the reason.'), ctlWrap('Kind', gs, 'Only one kind of ' + (kind === 'heals' ? 'fix' : 'reason') + '.'));
             add(box, ctrl, info, wrap, pg);
             var load = function () {
-                post('fixed_list', { job: S.job, kind: kind, q: st.q, code: st.code, page: st.page }).then(function (r) {
+                post('fixed_list', { job: S.job, kind: kind, q: st.q, code: st.code, page: st.page, size: st.size }).then(function (r) {
                     if (!r.ok) { msg(r.error || 'The list could not be loaded.'); return; }
                     clear(gs);
                     var all = h('option', null, 'All kinds'); all.value = ''; gs.appendChild(all);
@@ -2070,10 +2099,12 @@
                     r.rows.forEach(function (row) { var tr = h('tr', 'di-row'); fillRow(row, tr); body.appendChild(tr); });
                     info.textContent = r.total ? num(r.total, 0) + ' in this list.' : 'Nothing matches.';
                     clear(pg);
-                    var pv = h('button', 'btn-secondary di-btn', 'Previous'), nx = h('button', 'btn-secondary di-btn', 'Next'); pv.type = 'button'; nx.type = 'button';
-                    pv.disabled = r.page <= 1; nx.disabled = r.page >= r.pages;
-                    pv.addEventListener('click', function () { st.page = r.page - 1; load(); }); nx.addEventListener('click', function () { st.page = r.page + 1; load(); });
-                    if (r.pages > 1) { add(pg, pv, h('span', 'di-pager-in', ' Page ' + r.page + ' of ' + r.pages + ' '), nx); }
+                    st.page = r.page;
+                    if (r.total > 10) {
+                        pg.appendChild(pagerEl({ page: r.page, pages: r.pages, size: st.size, total: r.total },
+                            function (n) { st.page = n; load(); },
+                            function (n) { st.size = n; st.page = 1; load(); }));
+                    }
                 });
             };
             si.addEventListener('input', debounce(function () { st.q = si.value.trim(); st.page = 1; load(); }, 300));
@@ -2141,6 +2172,14 @@
                 var a = h('a', 'btn-primary di-btn', 'Open the opening count' + (r.opening_count_ref ? ' (' + r.opening_count_ref + ')' : ''));
                 a.href = 'stock-count.php?id=' + encodeURIComponent(r.opening_count_id);
                 nav.appendChild(a);
+            }
+            // drinks this import put on the menu (or linked) at the sheet's selling price: their projected profit is on Stock Reports
+            var drinksOnMenu = (r.drinks_added || 0) + (r.drinks_updated || 0) + (r.drinks_linked || 0) > 0;
+            if (drinksOnMenu && canStockReports) {
+                var pp = h('a', 'btn-secondary di-btn', 'See projected profit'); pp.href = 'stock-reports.php?tab=profit';
+                pp.title = 'Stock Reports, Projected profit: stock on hand times the menu price, minus what the stock cost.';
+                nav.appendChild(pp);
+                p.appendChild(h('p', 'di-small', 'See projected profit opens Stock Reports > Projected profit for every drink on the menu. It uses stock on hand, so stock from this import counts there once its opening count is approved.'));
             }
             var b = h('a', 'btn-secondary di-btn', 'See the ingredients'); b.href = 'stock-ingredients.php';
             var again = h('button', 'btn-secondary di-btn', 'Import another file'); again.type = 'button';

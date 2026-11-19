@@ -632,6 +632,11 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Guides: guide 08 already updated in this ship (chips example). Other guides that mention yield (recipes/menu, KB answers) should use the same example: 10 kg potatoes peeled to 8 kg = 80 %; 250 g chips plate takes 313 g raw; sack makes 32 plates, not 40; type the plate amount; rice/pasta dry amount at 100 %.
 - Assistant: if it explains yield, use the same example and rule (raw taken off = plate amount / yield).
 
+### Import: selling price recognised in Step 2, Step 4 pager, "See projected profit" link (2026-11-20, owner fault) - hashes in TASKS.md
+- **Guides (23 Import):** Step 2 now shows the selling price column as "Recognised", used in Step 4 "Drinks for the menu" (no longer "Not imported"). Step 4 lists: Previous / Next, type a page number, Show 10/25/50/100. Finished screen: "See projected profit" link (people who can open Stock Reports) opens Stock Reports > Projected profit.
+- **Manager Guides (stock):** check the import line still matches (no "Not imported" wording).
+- **Assistant:** no overlap.
+
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` at Liwonde: 7 data-dependent fails (left-owing + refunds briefing, 4 alert checks, digest
   recipients); ai_review_engine "nothing to add for this person" fails on HEAD too. (Tomorrow / 4 of 3 / K1,068,000 now pass.)
