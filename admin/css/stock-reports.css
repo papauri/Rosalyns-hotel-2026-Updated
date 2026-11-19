@@ -399,6 +399,12 @@ td:first-child .spp-drink {
     color: var(--color-text-primary);
 }
 
+/* Long message in a pill (Projected vs actual "Needs two approved counts ..."): wraps on phones. */
+.spp-flag--wrap {
+    white-space: normal;
+    border-radius: 0.75rem;
+}
+
 .spp-flag--bad {
     background: var(--color-error-bg);
     color: var(--color-error-text);

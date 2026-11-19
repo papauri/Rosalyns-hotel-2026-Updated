@@ -12,6 +12,7 @@ require_once 'admin-init.php';
 require_once '../includes/alert.php';
 require_once __DIR__ . '/includes/log-pager.php'; // rh_lp_page_size / rh_lp_size_picker: rows per page (?size=)
 require_once __DIR__ . '/includes/stock-projected-profit.php'; // Projected profit tab (drinks profit projection P2)
+require_once __DIR__ . '/includes/stock-projected-vs-actual.php'; // Projected vs actual tab (drinks profit projection P3)
 
 $message = '';
 $error = '';
@@ -25,7 +26,7 @@ if (!ensureStockTablesExist()) {
     exit;
 }
 
-$tabs = ['inventory' => 'Inventory', 'stock_in' => 'Stock-In', 'usage' => 'Usage', 'wastage' => 'Wastage', 'yield' => 'Yield', 'adjustments' => 'Adjustments', 'expiry' => 'Expiry', 'profit' => 'Projected profit'];
+$tabs = ['inventory' => 'Inventory', 'stock_in' => 'Stock-In', 'usage' => 'Usage', 'wastage' => 'Wastage', 'yield' => 'Yield', 'adjustments' => 'Adjustments', 'expiry' => 'Expiry', 'profit' => 'Projected profit', 'pva' => 'Projected vs actual'];
 $tab = $_GET['tab'] ?? 'inventory';
 if (!is_string($tab) || !isset($tabs[$tab])) {
     $tab = 'inventory';
@@ -34,9 +35,12 @@ if (!is_string($tab) || !isset($tabs[$tab])) {
 $sppVatRate = rh_spp_vat_rate();
 $sppVatOut = $sppVatRate > 0 && (($_GET['vat'] ?? '1') !== '0');
 $sppFilter = in_array($_GET['filter'] ?? '', ['below', 'noprice', 'unknown'], true) ? (string)$_GET['filter'] : '';
-$sppKeep = $tab === 'profit' ? array_filter(['vat' => ($sppVatRate > 0 && !$sppVatOut) ? '0' : '', 'filter' => $sppFilter], 'strlen') : [];
+// Projected vs actual: same VAT switch; filter cards (unaccounted stock / needs two counts / till differs).
+$pvaFilter = $tab === 'pva' && in_array($_GET['filter'] ?? '', ['gap', 'needs', 'till'], true) ? (string)$_GET['filter'] : '';
+$sppKeep = in_array($tab, ['profit', 'pva'], true) ? array_filter(['vat' => ($sppVatRate > 0 && !$sppVatOut) ? '0' : '', 'filter' => $tab === 'pva' ? $pvaFilter : $sppFilter], 'strlen') : [];
 $sppQs = $sppKeep ? '&' . http_build_query($sppKeep) : '';
 $sppData = null;
+$pvaData = null;
 
 function stock_reports_normalize_date(mixed $value, string $fallback): string
 {
@@ -45,8 +49,8 @@ function stock_reports_normalize_date(mixed $value, string $fallback): string
     }
 
     $date = DateTime::createFromFormat('Y-m-d', $value);
-    $errors = DateTime::getLastErrors();
-    if ($date === false || !is_array($errors) || $errors['warning_count'] > 0 || $errors['error_count'] > 0) {
+    $errors = DateTime::getLastErrors(); // PHP 8.2+: false when there was nothing wrong (it used to make every date fall back to the default)
+    if ($date === false || (is_array($errors) && ($errors['warning_count'] > 0 || $errors['error_count'] > 0)) || $date->format('Y-m-d') !== $value) {
         return $fallback;
     }
 
@@ -104,6 +108,11 @@ function stock_reports_helper_content(string $tab, string $dateFrom, string $dat
             . 'Only drinks sold as one stock item are here (a cocktail mixing several is left out). The totals count each stock item once: its stock cost once, and its sales from the row that would bring in the least, marked "In totals", so the totals never overstate. '
             . 'Items whose cost is not known are left out of every total. "No selling price yet" lists drink stock only (bottles, cans, kegs, or items with a bottle size or pour measure).  With "Take VAT out" on, sales and profit are shown without VAT; the menu is not changed.';
         $content['example'] = 'Jameson: 12 bottles of 750 ml on hand, cost ' . $currencySymbol . ' 45,000.00 a bottle, sold by the 25 ml shot at ' . $currencySymbol . ' 3,500.00 (VAT included). That is 30 shots a bottle, so projected sales are 12 x 30 x 3,500 = ' . $currencySymbol . ' 1,260,000.00, stock cost ' . $currencySymbol . ' 540,000.00, profit ' . $currencySymbol . ' 720,000.00 and margin 57.1% (VAT left in).';
+    } elseif ($tab === 'pva') {
+        $content['summary'] = 'How much of each drink went with nothing to show for it (free pours, spillage, stock that went missing) and what that is worth. Only a stock count can show this: a till sale is what takes a drink off stock, so the till alone never shows a free pour. '
+            . 'For each stock item the report uses its first and its last approved count between the From and To dates (spot and category counts cover only some items, so each item has its own pair). Unaccounted = opening count + stock received - closing count - sold - wasted - taken off by hand, all between those two counts. Recorded wastage is not unaccounted. '
+            . 'Each stock item is counted once and valued at the menu price of its drink that brings in the least, and at its current cost. Items with fewer than two approved counts in the range show a message instead of a figure. The second line compares what the till took for those drinks with the sales at today\'s menu prices (price changes, discounts, free drinks).';
+        $content['example'] = 'Jameson (750 ml, sold by the 25 ml shot at ' . $currencySymbol . ' 3,500.00, cost ' . $currencySymbol . ' 45,000.00 a bottle): opening count 10 bottles, 6 received, 1.5 sold, 1 wasted, so 13.5 expected, but the closing count found 11.5. 2 bottles = 60 shots are unaccounted: ' . $currencySymbol . ' 210,000.00 at menu price (VAT left in) and ' . $currencySymbol . ' 90,000.00 at cost.';
     }
 
     return $content;
@@ -474,6 +483,47 @@ try {
             stock_reports_metric('Projected profit', stock_reports_money((float)$sppT['profit'], $currency_symbol), 'Projected sales minus stock cost'),
             stock_reports_metric('Margin', $sppT['margin'] !== null ? number_format((float)$sppT['margin'], 1) . '%' : '–', $sppT['margin'] !== null ? 'Profit as a share of projected sales, ' . $sppVatWord : 'No projected sales yet'),
         ];
+    } elseif ($tab === 'pva') {
+        $pvaData = rh_spva_build(rh_spva_load($pdo, $dateFrom, $dateTo), $sppVatRate, $sppVatOut);
+        $pvaT = $pvaData['totals'];
+        if ($pvaFilter === 'gap') {
+            $pvaAll = array_values(array_filter($pvaData['rows'], static fn(array $r): bool => $r['qualified'] && $r['gap_units'] > 0.000001));
+        } elseif ($pvaFilter === 'needs') {
+            $pvaAll = array_values(array_filter($pvaData['rows'], static fn(array $r): bool => !$r['qualified']));
+        } elseif ($pvaFilter === 'till') {
+            $pvaAll = array_values(array_filter($pvaData['rows'], static fn(array $r): bool => $r['qualified'] && $r['till_drift'] !== null && abs($r['till_drift']) > BALANCE_TOLERANCE));
+        } else {
+            $pvaAll = $pvaData['rows'];
+        }
+        $totalCount = count($pvaAll);
+        $rows = array_slice($pvaAll, $offset, $perPage);
+        if (($_GET['export'] ?? '') === 'csv') {
+            // Plain columns; a figure that cannot be worked out stays blank (never 0).
+            $pvaNum = static fn($v) => $v === null ? '' : $v;
+            $pvaVat = $sppVatOut ? ' (VAT taken out)' : '';
+            $rows = array_map(static function (array $r) use ($pvaNum, $pvaVat): array {
+                $q = $r['qualified'];
+                return ['Stock item' => $r['stock_name'], 'Unit' => $r['unit'], 'Valued as' => $r['drink'], 'One measure' => $r['sale'],
+                    'Measures per unit' => round((float)$r['per_unit'], 2), 'Menu price' . $pvaVat => $r['price'],
+                    'Opening count' => $q ? $r['opening']['reference'] . ' ' . substr($r['opening']['at'], 0, 16) : '', 'Opening qty' => $q ? $r['opening_qty'] : '',
+                    'Closing count' => $q ? $r['closing']['reference'] . ' ' . substr($r['closing']['at'], 0, 16) : '', 'Closing qty' => $q ? $r['closing_qty'] : '',
+                    'Received (units)' => $q ? round($r['received'], 4) : '', 'Actual used (measures)' => $q ? round($r['used'], 2) : '',
+                    'Sold (measures)' => $q ? round($r['sold'], 2) : '', 'Wasted (measures)' => $q ? round($r['wasted'], 2) : '', 'Taken off by hand (measures)' => $q ? round($r['manual_out'], 2) : '',
+                    'Unaccounted (measures)' => $q ? round($r['gap'], 2) : '', 'Unaccounted (units)' => $q ? round($r['gap_units'], 4) : '',
+                    'Unaccounted at menu price' . $pvaVat => $q ? $r['gap_menu'] : '', 'Unaccounted at cost' => $q ? $pvaNum($r['gap_cost']) : '',
+                    'Till took' . $pvaVat => $q ? $pvaNum($r['till_taken']) : '', 'Sold at menu price' . $pvaVat => $q ? $pvaNum($r['till_menu']) : '',
+                    'Till minus menu price' => $q ? $pvaNum($r['till_drift']) : '', 'Mixed drinks not priced' => $q && $r['till_partly'] ? 'Yes' : '',
+                    'Note' => $q ? '' : 'Needs two approved counts between these dates'];
+            }, $rows);
+        }
+        $pvaVatWord = $pvaT['vat_out'] ? 'VAT taken out' : 'VAT included';
+        $pvaNone = (int)$pvaT['qualified'] === 0;
+        $analysis_cards = [
+            stock_reports_metric('Unaccounted measures', $pvaNone ? '–' : rh_stock_qty_fmt(round((float)$pvaT['gap_measures'], 2), 0), $pvaNone ? 'No drink has two approved counts in these dates' : number_format((int)$pvaT['qualified']) . ' counted stock item(s)'),
+            stock_reports_metric('Unaccounted at menu price', $pvaNone ? '–' : stock_reports_money((float)$pvaT['gap_menu'], $currency_symbol), $pvaVatWord),
+            stock_reports_metric('Unaccounted at cost', $pvaNone ? '–' : stock_reports_money((float)$pvaT['gap_cost'], $currency_symbol), (int)$pvaT['cost_unknown'] > 0 ? number_format((int)$pvaT['cost_unknown']) . ' item(s) with no cost left out' : 'At today\'s cost of one unit'),
+            stock_reports_metric('Till vs menu price', (int)$pvaT['till_rows'] > 0 ? stock_reports_money((float)$pvaT['till_drift'], $currency_symbol) : '–', (int)$pvaT['till_rows'] > 0 ? 'Took ' . stock_reports_money((float)$pvaT['till_taken'], $currency_symbol) . ' vs ' . stock_reports_money((float)$pvaT['till_menu'], $currency_symbol) . ' at menu price' : 'No till sales tied to a counted drink'),
+        ];
     }
 } catch (Throwable $e) {
     error_log('DB Error [stock-reports]: ' . $e->getMessage());
@@ -581,8 +631,21 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                 <input id="stock-report-from" type="date" name="from" value="<?php echo htmlspecialchars($dateFrom); ?>">
                 <label class="filter-bar__label" for="stock-report-to">To</label>
                 <input id="stock-report-to" type="date" name="to" value="<?php echo htmlspecialchars($dateTo); ?>">
+                <?php if ($tab === 'pva' && $sppVatRate > 0 && !$sppVatOut): ?><input type="hidden" name="vat" value="0"><?php endif; ?>
                 <button type="submit" class="btn-add">Apply</button>
-                <a class="btn-export" href="?tab=<?php echo $tab; ?>&from=<?php echo urlencode($dateFrom); ?>&to=<?php echo urlencode($dateTo); ?>&export=csv"><i class="fas fa-download"></i> CSV</a>
+                <?php if ($tab === 'pva'):
+                    if ($sppVatRate > 0):
+                        $pvaSwitchKeep = array_filter(['tab' => 'pva', 'from' => $dateFrom, 'to' => $dateTo, 'vat' => $sppVatOut ? '0' : '', 'filter' => $pvaFilter, 'size' => $perPage !== 10 ? (string)$perPage : ''], 'strlen'); ?>
+                    <a class="spp-switch<?php echo $sppVatOut ? ' is-on' : ''; ?>" role="switch" aria-checked="<?php echo $sppVatOut ? 'true' : 'false'; ?>" href="?<?php echo htmlspecialchars(http_build_query($pvaSwitchKeep), ENT_QUOTES, 'UTF-8'); ?>">
+                        <span class="spp-switch__track" aria-hidden="true"><span class="spp-switch__knob"></span></span>
+                        Take VAT out
+                    </a>
+                    <i class="help" tabindex="0" role="button" aria-label="About Take VAT out" data-tip="Menu prices and till takings include VAT (<?php echo htmlspecialchars(rtrim(rtrim(number_format($sppVatRate, 2), '0'), '.'), ENT_QUOTES, 'UTF-8'); ?>%). On: the menu-price value of unaccounted stock and the till line are shown without VAT, the same way the till splits VAT out of a sale (price divided by 1 plus the rate). The cost value never has VAT in it. Off: prices as on the menu.">?</i>
+                    <?php else: ?>
+                    <span class="filter-bar__snapshot">VAT is off: prices as on the menu</span>
+                    <?php endif; ?>
+                <?php endif; ?>
+                <a class="btn-export" href="?tab=<?php echo $tab; ?>&from=<?php echo urlencode($dateFrom); ?>&to=<?php echo urlencode($dateTo); ?><?php echo htmlspecialchars($sppQs, ENT_QUOTES, 'UTF-8'); ?>&export=csv"><i class="fas fa-download"></i> CSV</a>
             </form>
         <?php else: ?>
             <div class="filter-bar">
@@ -651,6 +714,10 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
             'Stock cost' => 'On hand times the current cost of one unit, counted once per stock item, for the same items as Projected sales. Items whose cost is not known are left out, never counted as 0.',
             'Projected profit' => 'Projected sales minus stock cost, for the same stock items.',
             'Margin' => 'Projected profit as a percent of projected sales. Shows a dash (–) when there are no projected sales.',
+            'Unaccounted measures' => 'Measures of drink that went between each stock item\'s opening and closing count with nothing to show for it: opening count + received - closing count - sold - wasted - taken off by hand. Added up over the counted stock items, each in its own measure (shot, glass, bottle). Below zero means more was found than expected. Only items with two approved counts in the dates count.',
+            'Unaccounted at menu price' => 'Unaccounted measures times the menu price of the drink each stock item is valued at (the one that brings in the least), added up. Without VAT when Take VAT out is on. Items whose cost is not known still count here. An item where more was found than expected counts below zero and lowers the total; use the Unaccounted stock card to see the losses on their own.',
+            'Unaccounted at cost' => 'Unaccounted stock in its main unit times today\'s cost of one unit, added up. Items whose cost is not known are left out, never counted as 0. An item where more was found than expected counts below zero and lowers the total.',
+            'Till vs menu price' => 'What the till took for the counted drinks sold between their two counts (after order discounts), minus the same sales at today\'s menu price. Below zero: discounts, free drinks or a price that has gone up since. Only till items sold as one stock item count; mixed drinks (cocktails) cannot be priced per stock item and are left out.',
         ];
         ?>
         <?php if (!empty($analysis_cards)): ?>
@@ -689,6 +756,34 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                     </span>
                 <?php endforeach; ?>
                 <?php if ($sppFilter !== ''): ?><a class="spp-filter spp-filter--clear" href="<?php echo htmlspecialchars($sppCardHref($sppFilter), ENT_QUOTES, 'UTF-8'); ?>">Show all menu prices</a><?php endif; ?>
+            </nav>
+        <?php endif; ?>
+
+        <?php if ($tab === 'pva' && is_array($pvaData)):
+            $pvaT = $pvaData['totals'];
+            $pvaCardHref = function (string $f) use ($sppVatRate, $sppVatOut, $pvaFilter, $perPage, $dateFrom, $dateTo): string {
+                $q = array_filter(['tab' => 'pva', 'from' => $dateFrom, 'to' => $dateTo, 'vat' => ($sppVatRate > 0 && !$sppVatOut) ? '0' : '', 'filter' => $pvaFilter === $f ? '' : $f, 'size' => $perPage !== 10 ? (string)$perPage : ''], 'strlen');
+                return '?' . http_build_query($q);
+            };
+            $pvaFilters = [
+                'gap' => ['Unaccounted stock', (int)$pvaT['with_gap'], 'Counted stock items where less was found at the closing count than the sales, wastage and hand changes explain. Shown in red. Click to list only these.', 'spp-filter--bad'],
+                'needs' => ['Needs two counts', (int)$pvaT['needs'], 'Drinks with fewer than two approved counts between these dates, so nothing can be worked out for them. Count them again (a spot count is enough) and approve it. Click to list them.', ''],
+                'till' => ['Till differs from menu price', (int)$pvaT['till_differs'], 'Counted drinks where what the till took is not the same as the sales at today\'s menu price (discounts, free drinks, a price change). Click to list them.', ''],
+            ]; ?>
+            <?php if ((int)$pvaT['items'] > 0 && (int)$pvaT['qualified'] === 0): ?>
+                <p class="spp-caption">No drink has two approved counts between these dates, so nothing can be worked out yet. <span class="spp-caption__note">Count the drinks again (a spot count is enough), approve the count, then pick dates that take in both counts.</span></p>
+            <?php endif; ?>
+            <nav class="spp-filters" aria-label="Projected vs actual filters">
+                <?php foreach ($pvaFilters as $fk => [$fLabel, $fCount, $fTip, $fClass]): ?>
+                    <span class="spp-filter-wrap">
+                    <a class="spp-filter <?php echo $fClass; ?><?php echo $pvaFilter === $fk ? ' is-active' : ''; ?>" href="<?php echo htmlspecialchars($pvaCardHref($fk), ENT_QUOTES, 'UTF-8'); ?>" <?php echo $pvaFilter === $fk ? 'aria-current="true"' : ''; ?>>
+                        <span class="spp-filter__count"><?php echo number_format($fCount); ?></span>
+                        <span class="spp-filter__label"><?php echo htmlspecialchars($fLabel); ?></span>
+                    </a>
+                    <i class="help" tabindex="0" role="button" aria-label="About <?php echo htmlspecialchars($fLabel); ?>" data-tip="<?php echo htmlspecialchars($fTip); ?>">?</i>
+                    </span>
+                <?php endforeach; ?>
+                <?php if ($pvaFilter !== ''): ?><a class="spp-filter spp-filter--clear" href="<?php echo htmlspecialchars($pvaCardHref($pvaFilter), ENT_QUOTES, 'UTF-8'); ?>">Show all drinks</a><?php endif; ?>
             </nav>
         <?php endif; ?>
 
@@ -924,11 +1019,82 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
+                <?php elseif ($tab === 'pva'):
+                    $pvaQty = static fn(float $n): string => rh_stock_qty_fmt(round($n, 2), 0);
+                    $pvaWhen = static fn(array $c): string => $c['reference'] . ' · ' . date('j M Y H:i', strtotime($c['at']));
+                    $pvaMoney = static fn(?float $v): string => $v === null ? '–' : stock_reports_money($v, $currency_symbol); ?>
+                    <thead>
+                        <tr>
+                            <th>Drink <i class="help" tabindex="0" role="button" aria-label="About drink" data-tip="The stock item, the menu drink it is valued at and its measure. A stock item sold in more than one measure is valued at the drink that brings in the least per bottle (or other unit), so the figures never overstate. All measures on this row are in that measure.">?</i></th>
+                            <th>Opening count <i class="help" tabindex="0" role="button" aria-label="About opening count" data-tip="The first approved count of this stock item between the From and To dates, with what it found in the item&#x27;s main unit. Each item uses its own counts.">?</i></th>
+                            <th>Closing count <i class="help" tabindex="0" role="button" aria-label="About closing count" data-tip="The last approved count of this stock item between the From and To dates, with what it found. Everything on the row happened between the opening and closing count, not between the From and To dates.">?</i></th>
+                            <th class="stock-table__num-head">Actual used <i class="help" tabindex="0" role="button" aria-label="About actual used" data-tip="Opening count + stock received - closing count, in measures: everything that left between the two counts. Under it: how much of that was recorded as wasted (wastage, recalls, expiry, sales voided to wastage) or taken off by hand.">?</i></th>
+                            <th class="stock-table__num-head">Sold <i class="help" tabindex="0" role="button" aria-label="About sold" data-tip="Measures the till and room service took off stock between the two counts, less what voids put back. Sales voided to wastage count as wasted, not sold.">?</i></th>
+                            <th class="stock-table__num-head">Unaccounted <i class="help" tabindex="0" role="button" aria-label="About unaccounted" data-tip="Actual used minus sold, wasted and taken off by hand, in measures: drink that went with nothing to show for it (free pours, spillage, missing stock). Recorded wastage is not in it. Below zero means more was found than expected.">?</i></th>
+                            <th class="stock-table__num-head">At menu price <i class="help" tabindex="0" role="button" aria-label="About unaccounted at menu price" data-tip="Unaccounted measures times the menu price of one measure<?php echo $sppVatOut ? ', with VAT taken out' : ', VAT included as on the menu'; ?>: what that drink would have brought in.">?</i></th>
+                            <th class="stock-table__num-head">At cost <i class="help" tabindex="0" role="button" aria-label="About unaccounted at cost" data-tip="Unaccounted stock in its main unit times today&#x27;s cost of one unit. Cost not known when the stock item has no cost yet: never counted as 0.">?</i></th>
+                            <th class="stock-table__num-head">Till vs menu price <i class="help" tabindex="0" role="button" aria-label="About till vs menu price" data-tip="What the till took for this drink&#x27;s sales between the two counts (after order discounts), and the difference from the same sales at today&#x27;s menu price<?php echo $sppVatOut ? ', both without VAT' : ''; ?>. Only till items that take this stock item alone can be priced: when mixed drinks (cocktails) also used it, the row says so.">?</i></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($rows as $r): ?>
+                            <tr class="<?php echo !empty($r['qualified']) && $r['gap_units'] > 0.000001 ? 'spp-row--below' : ''; ?>">
+                                <td <?php echo stock_reports_label_attr('Drink'); ?>>
+                                    <span class="spp-drink">
+                                        <strong><?php echo htmlspecialchars($r['stock_name']); ?></strong>
+                                        <span class="spp-sub"><?php echo htmlspecialchars('Valued as ' . $r['drink'] . ' · ' . $r['sale'] . ' · ' . stock_reports_money((float)$r['price'], $currency_symbol) . ($sppVatOut ? ' without VAT' : '')); ?></span>
+                                    </span>
+                                </td>
+                                <?php if (!$r['qualified']): ?>
+                                    <td colspan="8" <?php echo stock_reports_label_attr('Counts'); ?>>
+                                        <span class="spp-drink">
+                                            <span class="spp-flag spp-flag--muted spp-flag--wrap">Needs two approved counts between these dates — count it again to see the gap</span>
+                                            <span class="spp-sub"><?php echo $r['last_count'] ? htmlspecialchars('Only count in these dates: ' . $pvaWhen($r['last_count'])) : 'No approved count in these dates'; ?></span>
+                                        </span>
+                                    </td>
+                                <?php else: ?>
+                                    <td <?php echo stock_reports_label_attr('Opening count'); ?>><span class="spp-drink"><span><?php echo htmlspecialchars($pvaQty($r['opening_qty']) . ' ' . $r['unit']); ?></span><span class="spp-sub"><?php echo htmlspecialchars($pvaWhen($r['opening'])); ?></span></span></td>
+                                    <td <?php echo stock_reports_label_attr('Closing count'); ?>><span class="spp-drink"><span><?php echo htmlspecialchars($pvaQty($r['closing_qty']) . ' ' . $r['unit']); ?></span><span class="spp-sub"><?php echo htmlspecialchars($pvaWhen($r['closing']) . ($r['received'] > 0.000001 ? ' · ' . $pvaQty($r['received']) . ' ' . $r['unit'] . ' received between' : '')); ?></span></span></td>
+                                    <td class="stock-table__num" <?php echo stock_reports_label_attr('Actual used'); ?>><span class="spp-drink"><span><?php echo htmlspecialchars($pvaQty($r['used'])); ?></span><?php if (abs($r['wasted']) > 0.000001 || abs($r['manual_out']) > 0.000001): ?><span class="spp-sub"><?php echo htmlspecialchars('Wasted ' . $pvaQty($r['wasted']) . ' · by hand ' . $pvaQty($r['manual_out'])); ?></span><?php endif; ?></span></td>
+                                    <td class="stock-table__num" <?php echo stock_reports_label_attr('Sold'); ?>><?php echo htmlspecialchars($pvaQty($r['sold'])); ?></td>
+                                    <td class="stock-table__num stock-table__value" <?php echo stock_reports_label_attr('Unaccounted'); ?>>
+                                        <span class="spp-drink">
+                                            <span><?php echo htmlspecialchars($pvaQty($r['gap'])); ?></span>
+                                            <?php if ($r['gap_units'] > 0.000001): ?><span class="spp-flag spp-flag--bad">Unaccounted</span><?php elseif ($r['gap_units'] < -0.000001): ?><span class="spp-flag spp-flag--muted">More found than expected</span><?php endif; ?>
+                                        </span>
+                                    </td>
+                                    <td class="stock-table__num stock-table__value" <?php echo stock_reports_label_attr('At menu price'); ?>><?php echo htmlspecialchars($pvaMoney($r['gap_menu'])); ?></td>
+                                    <td class="stock-table__num" <?php echo stock_reports_label_attr('At cost'); ?>><?php echo $r['gap_cost'] !== null ? htmlspecialchars($pvaMoney($r['gap_cost'])) : '<span class="spp-flag spp-flag--muted">Cost not known</span>'; ?></td>
+                                    <td class="stock-table__num" <?php echo stock_reports_label_attr('Till vs menu price'); ?>>
+                                        <span class="spp-drink">
+                                            <?php if ($r['till_drift'] !== null): ?>
+                                                <span><?php echo htmlspecialchars($pvaMoney($r['till_drift'])); ?></span>
+                                                <span class="spp-sub"><?php echo htmlspecialchars('Took ' . $pvaMoney($r['till_taken']) . ' vs ' . $pvaMoney($r['till_menu'])); ?></span>
+                                            <?php elseif ($r['sold'] > 0.000001): ?>
+                                                <span class="spp-flag spp-flag--muted">Not tied to this drink</span>
+                                            <?php else: ?>
+                                                <span>–</span>
+                                            <?php endif; ?>
+                                            <?php if ($r['till_partly']): ?><span class="spp-sub"><?php echo htmlspecialchars($pvaQty($r['till_untied']) . ' sold in mixed drinks: not priced'); ?></span><?php endif; ?>
+                                        </span>
+                                    </td>
+                                <?php endif; ?>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
                 <?php endif; ?>
                 <?php if (empty($rows)): ?>
                     <tbody>
                         <tr>
-                            <td colspan="8" class="stock-table__empty"><?php echo $tab === 'profit' ? ($sppFilter === '' ? 'No drink on the menu is linked to a stock item on its own yet. Link a drink to its stock item on the Menu page.' : 'Nothing to show for this filter.') : 'No data for the selected range.'; ?></td>
+                            <td colspan="<?php echo $tab === 'pva' ? 9 : 8; ?>" class="stock-table__empty"><?php
+                                if ($tab === 'profit') {
+                                    echo $sppFilter === '' ? 'No drink on the menu is linked to a stock item on its own yet. Link a drink to its stock item on the Menu page.' : 'Nothing to show for this filter.';
+                                } elseif ($tab === 'pva') {
+                                    echo $pvaFilter === '' ? 'No drink on the menu is linked to a stock item on its own yet, so there is nothing to compare. Link a drink to its stock item on the Menu page.' : 'Nothing to show for this filter.';
+                                } else {
+                                    echo 'No data for the selected range.';
+                                }
+                            ?></td>
                         </tr>
                     </tbody>
                 <?php endif; ?>

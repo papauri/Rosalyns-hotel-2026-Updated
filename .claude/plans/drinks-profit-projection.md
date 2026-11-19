@@ -67,7 +67,7 @@ invoices/*.pdf. Never print secrets. Guides + Assistant sync NOT in this session
   45,000, shot 25 ml at MK 3,500 -> sales 1,260,000, cost 540,000, profit 720,000, 57%); VAT switch; no
   price; below cost; money via BALANCE_TOLERANCE rules.
 
-### P3 - Projected vs actual (dept-stock-lead + dept-accounting-lead review; after P2, same session if budget allows, else the next)
+### P3 - SHIPPED 2026-11-20 (Liwonde d10a051) - Projected vs actual (dept-stock-lead + dept-accounting-lead review; after P2, same session if budget allows, else the next)
 - For a date range: what the stock used SHOULD have earned (used measures x menu price) vs what the till
   actually took for those drinks. Gap = free pours, spillage or missing money. Read-only report, no writes.
 - Own test: scripts/tests/stock_projected_vs_actual.php (Liwonde only).

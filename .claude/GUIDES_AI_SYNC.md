@@ -241,6 +241,20 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Manager Guides: stock.html reports paragraph, one or two lines. Rebuild stock, check 2 pages.
 - Assistant: answer "what profit will our drinks stock make" (AI_REQUEST to the AI lead; reuse
   admin/includes/stock-projected-profit.php rh_spp_load + rh_spp_build, same totals rule and VAT switch).
+
+### Stock Reports: Projected vs actual tab (2026-11-20, owner, drinks profit projection P3) - Liwonde d10a051, Rosalyn's see TASKS.md
+- Guides (08 Stock): Stock Reports > Projected vs actual: pick dates; per drink, between ITS OWN first and last
+  approved counts in those dates: opening/closing count, actual used, sold (till + room service, voids put back),
+  unaccounted measures (free pours, spillage, missing) at menu price (Take VAT out switch as Projected profit) and at
+  today's cost; recorded wastage is never in the gap. Second line "Till vs menu price" = what the till took vs sold x
+  today's menu price (happy hour/deals, discounts, comps, price changes; order discounts shared across the bill's
+  lines). Fewer than two approved counts = "count it again" message, no figure. Cocktails count as sold but are not
+  in the till line. Totals net extra stock found against losses (card help says so). Read-only. Also: Stock-In,
+  Usage, Wastage, Yield, Adjustments now honour From/To (were stuck on last 30 days).
+- Manager Guides: stock.html - illustrated, simple "count -> report -> gap" explanation (owner asked 2026-11-20;
+  manager-guides-lead dispatched the same day).
+- Assistant: answer "how much drink went missing between counts" (AI_REQUEST to the AI lead; reuse
+  admin/includes/stock-projected-vs-actual.php, same per-item snapping, totals and VAT rules).
 ## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
 
 ### Import stock check: value column warning + stock check workbook (2026-11-16, owner ask) — hashes in TASKS.md
