@@ -2163,6 +2163,53 @@ try {
     $openTabs = $tabsFallback->fetchAll(PDO::FETCH_ASSOC);
 }
 
+/* Did an unconfirmed Fire reach the server? (step 14) The till asks before it sends an edited cart
+ * or opens Pay after a Fire whose reply was lost: if that send committed, the till reuses the
+ * order instead of opening a second tab. Read-only; the caller's own orders only. LOCK IN SHARE
+ * MODE waits for a park still committing under the same client_uuid. */
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'park_lookup') {
+    header('Content-Type: application/json; charset=utf-8');
+    $lookupUuid = mb_substr(trim((string)($_GET['client_uuid'] ?? '')), 0, 64);
+    if ($lookupUuid === '') {
+        echo json_encode(['ok' => false, 'error' => 'Missing client_uuid']);
+        exit;
+    }
+    try {
+        $pdo->beginTransaction();
+        $lk = $pdo->prepare("SELECT id, reference, total_amount, status, order_type, created_by FROM stock_orders WHERE client_uuid = ? LIMIT 1 LOCK IN SHARE MODE");
+        $lk->execute([$lookupUuid]);
+        $lkRow = $lk->fetch(PDO::FETCH_ASSOC);
+        $lkLines = [];
+        if ($lkRow && (int)$lkRow['created_by'] === (int)$user['id']) {
+            $lkLineStmt = $pdo->prepare("SELECT item_name, quantity FROM stock_order_items WHERE order_id = ? AND kds_status <> 'void' ORDER BY id");
+            $lkLineStmt->execute([(int)$lkRow['id']]);
+            $lkLines = $lkLineStmt->fetchAll(PDO::FETCH_ASSOC);
+        }
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) $pdo->rollBack();
+        error_log('pos park_lookup: ' . $e->getMessage());
+        echo json_encode(['ok' => false, 'error' => 'Could not check the last send.']);
+        exit;
+    }
+    if (!$lkRow || (int)$lkRow['created_by'] !== (int)$user['id']) {
+        echo json_encode(['ok' => true, 'found' => false]);
+        exit;
+    }
+    echo json_encode([
+        'ok' => true,
+        'found' => true,
+        'order_id' => (int)$lkRow['id'],
+        'reference' => (string)$lkRow['reference'],
+        'total' => (float)$lkRow['total_amount'],
+        'status' => (string)$lkRow['status'],
+        'order_type' => (string)$lkRow['order_type'],
+        'station_label' => 'Station',
+        'lines' => $lkLines,
+    ]);
+    exit;
+}
+
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'tabs') {
     header('Content-Type: application/json; charset=utf-8');
     echo json_encode([
@@ -4147,6 +4194,40 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
         function posParkSendConfirmed(form) {
             _posParkSendSig = '';
             posRefreshClientUuid(form);
+        }
+        /* A Fire (park) whose reply never came back may still have committed (step 14). Before
+           the cart is sent with a NEW key (it was edited) or paid as a new sale, ask the server
+           whether that send landed, so the till reuses the order instead of leaving a second,
+           orphan open tab. Returns {state:'none'} | {state:'found', order} | {state:'offline'}. */
+        async function posParkLookupUnconfirmed(form) {
+            if (!_posParkSendSig) return { state: 'none' };
+            let sentAction = '';
+            try { sentAction = String(JSON.parse(_posParkSendSig)[0] || ''); } catch (e) { sentAction = ''; }
+            const uuidEl = form ? form.querySelector('[name="client_uuid"]') : null;
+            if (sentAction !== 'park' || !uuidEl || !uuidEl.value) return { state: 'none' };
+            try {
+                const r = await fetch('pos.php?ajax=park_lookup&client_uuid=' + encodeURIComponent(uuidEl.value), { credentials: 'same-origin', headers: { 'X-Requested-With': 'XMLHttpRequest' } });
+                const j = await r.json();
+                if (!j || !j.ok) return { state: 'offline' };
+                if (!j.found || j.status === 'cancelled' || j.status === 'voided') return { state: 'none' };
+                return { state: 'found', order: j };
+            } catch (e) {
+                return { state: 'offline' };
+            }
+        }
+        /* The earlier Fire did land: show it as fired (same window as a normal Fire) and never send it again. */
+        function posParkShowEarlierSend(form, order) {
+            posParkSendConfirmed(form);
+            if (order.status === 'placed') {
+                showPosParkSuccess(order);
+                posToastReady('Order ' + (order.reference || '') + ' had already reached the station - nothing was sent twice. Use Add more for anything new.', false);
+            } else {
+                cart = [];
+                renderCart();
+                updateRepeatButton();
+                posToastReady('Order ' + (order.reference || '') + ' was already recorded (' + String(order.status || '').replace(/_/g, ' ') + ') - nothing was sent twice.', false);
+            }
+            refreshOpenTabs(false);
         }
 
         document.addEventListener('submit', e => {
@@ -7646,7 +7727,44 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
     `).join('');
         }
 
-        function openPayModal() {
+        /* Pay after a Fire whose reply was lost (step 14): if that Fire committed, this cart is
+           already an open tab, so settle that tab instead of selling it again as a new order. */
+        let _posPayLookupBusy = false;
+        async function openPayModal() {
+            if (posPaymentsBlocked()) return;
+            if (!cart.length) return;
+            if (_posParkSendSig) {
+                if (_posPayLookupBusy) return;
+                const f = document.getElementById('payForm');
+                _posPayLookupBusy = true;
+                showPosActionLoader('Checking the last send...', 'Making sure the earlier Fire is not charged twice.', { subtle: true });
+                let earlier;
+                try { earlier = await posParkLookupUnconfirmed(f); } finally { hidePosActionLoader(); _posPayLookupBusy = false; }
+                if (earlier.state === 'offline') {
+                    posToastReady('Could not check whether the last Fire reached the station. Check the connection, then try again.', true);
+                    return;
+                }
+                if (earlier.state === 'found') {
+                    const o = earlier.order;
+                    const sameCart = posParkSendSignature('park', '') === _posParkSendSig;
+                    if (sameCart && o.status === 'placed' && o.order_type !== 'room_service') {
+                        posParkSendConfirmed(f);
+                        cart = [];
+                        renderCart();
+                        updateRepeatButton();
+                        refreshOpenTabs(false);
+                        posToastReady('Order ' + (o.reference || '') + ' had already reached the station - settling that tab.', false);
+                        openPayForTab(parseInt(o.order_id, 10) || 0, parseFloat(o.total) || 0, String(o.reference || ''), true);
+                        return;
+                    }
+                    posParkShowEarlierSend(f, o);
+                    return;
+                }
+            }
+            openPayModalNow();
+        }
+
+        function openPayModalNow() {
             if (posPaymentsBlocked()) return;
             if (!cart.length) return;
             if (!validateServiceContext()) return;
@@ -8006,7 +8124,24 @@ Use for dine-in: staff can prepare while the customer is still seated."><span id
             // opening a second tab or adding the round twice (park dedupes on
             // stock_orders.client_uuid, add_to_tab on idempotency_keys). A new key is minted
             // only after the server confirmed the send or when the cart / tab changed.
-            posParkClientUuidFor(f, posParkSendSignature(actionInput.value, addingToTab ? _activeTab.id : ''));
+            const sendSig = posParkSendSignature(actionInput.value, addingToTab ? _activeTab.id : '');
+            if (_posParkSendSig && sendSig !== _posParkSendSig) {
+                // The cart / place changed after a Fire with no reply: did that Fire land? (step 14)
+                showPosActionLoader('Checking the last send...', 'Making sure the earlier Fire is not sent twice.', { subtle: true });
+                const earlier = await posParkLookupUnconfirmed(f);
+                hidePosActionLoader();
+                if (earlier.state === 'offline') {
+                    window._posParkSubmitInFlight = false;
+                    posToastReady('Could not check whether the last Fire reached the station. Check the connection, then try again.', true);
+                    return;
+                }
+                if (earlier.state === 'found') {
+                    window._posParkSubmitInFlight = false;
+                    posParkShowEarlierSend(f, earlier.order);
+                    return;
+                }
+            }
+            posParkClientUuidFor(f, sendSig);
             // Remember this round for the "Repeat last round" button before the cart is cleared
             rememberLastRound();
             showPosActionLoader(addingToTab ? 'Adding to tab...' : 'Firing order...', addingToTab ? 'Appending your items to the open tab.' : 'Sending your ticket to the station display.', { subtle: true });

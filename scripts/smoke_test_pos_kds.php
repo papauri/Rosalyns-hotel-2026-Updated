@@ -29,6 +29,18 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); } // nev
 
 require_once __DIR__ . '/../config/database.php';
 
+/* Test hotel only (step 14): this run writes real orders, stock movements and messages and then
+ * removes them, so it must never touch a live hotel. Hard refusal unless BOTH the configured
+ * database and the one actually connected are the Liwonde test database (sha1, so the name stays
+ * out of the public repo). Exit 9 so a caller can tell a refusal from a test failure. */
+const SMOKE_POS_TEST_DB_SHA1 = '3b8976ab1ff31dab31141c7344d737ecc8725d41';
+if (sha1((string)(defined('DB_NAME') ? DB_NAME : '')) !== SMOKE_POS_TEST_DB_SHA1
+    || sha1((string)$pdo->query('SELECT DATABASE()')->fetchColumn()) !== SMOKE_POS_TEST_DB_SHA1) {
+    fwrite(STDERR, "Refused: smoke_test_pos_kds runs on the Liwonde test database only (this is not it). Nothing was written.\n");
+    echo "[SKIP] POS/KDS smoke: not the Liwonde test database - refused, nothing written\n";
+    exit(9);
+}
+
 $pass = 0;
 $fail = 0;
 /** @var int[] $createdOrderIds */

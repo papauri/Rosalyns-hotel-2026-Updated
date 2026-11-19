@@ -7,8 +7,8 @@
  *
  * Runs THIS tree's code against the TEST hotel's database: the DB_* constants are defined from that tree's
  * .env BEFORE config/database.php loads (its own define()s then only warn), the database name must match
- * the Liwonde sha1 BEFORE anything connects, and the file cache points at a scratch folder. Refuses this
- * tree, any path containing "Rosalyn", and any other database. Rosalyn's is never connected to.
+ * the Liwonde sha1 BEFORE anything connects, and the file cache points at a scratch folder. Refuses any
+ * path containing "Rosalyn" and any other database (the Liwonde tree may test itself). Rosalyn's is never connected to.
  * Each case runs in its own child PHP process on a PDO subclass holding ONE outer transaction that is
  * always ROLLED BACK (the code under test sees "no transaction"; its begin / commit / rollBack become
  * SAVEPOINT / RELEASE / ROLLBACK TO; implicit-commit statements are skipped); a marker row proves the outer
@@ -28,7 +28,8 @@ function zz9_target(array $argv, string $root): array
     if ($dbArg === null) { fwrite(STDERR, "Refused: pass --db=<path to the Liwonde test hotel root>.\n"); exit(2); }
     $target = realpath($dbArg);
     if ($target === false || !is_readable($target . DIRECTORY_SEPARATOR . '.env')) { fwrite(STDERR, "Refused: --db path has no readable .env.\n"); exit(2); }
-    if (strcasecmp((string)realpath($root), $target) === 0 || stripos($target, 'Rosalyn') !== false) { fwrite(STDERR, "Refused: never against Rosalyn's (live).\n"); exit(9); }
+    // The Liwonde tree may test itself (step 14); the .env database-name check below refuses every other database.
+    if (stripos($target, 'Rosalyn') !== false) { fwrite(STDERR, "Refused: never against Rosalyn's (live).\n"); exit(9); }
     $env = [];
     foreach (file($target . DIRECTORY_SEPARATOR . '.env', FILE_IGNORE_NEW_LINES | FILE_SKIP_EMPTY_LINES) as $line) {
         $line = trim((string)$line);
@@ -425,6 +426,66 @@ if (($argv[1] ?? '') === '--child') {
             };
             break;
 
+        /* ---------- Step 14 (1): Fire reply lost -> the till asks park_lookup before Pay / an edited send ---------- */
+        case 'C14_lookup_own':
+            $k = zz_item('C14 dish', 'kitchen');
+            $u = 'zz9-' . bin2hex(random_bytes(8));
+            $o = zz_order('C14', 'new', 100);
+            zz_q('UPDATE stock_orders SET client_uuid = ? WHERE id = ?', [$u, $o]);
+            zz_line($o, $k, 'kitchen', 'pending', 'ZZ9 C14 dish');
+            zz_line($o, $k, 'kitchen', 'void', 'ZZ9 C14 voided');
+            zz_page('admin/pos.php', [], ['ajax' => 'park_lookup', 'client_uuid' => $u]);
+            $GLOBALS['zz_after'] = static function ($resp) use ($o): void {
+                zz_check('C14 lookup: the committed Fire is found (same order, total, status placed)', !empty($resp['ok']) && !empty($resp['found'])
+                    && (int)($resp['order_id'] ?? 0) === $o && abs((float)($resp['total'] ?? 0) - 100) < BALANCE_TOLERANCE && ($resp['status'] ?? '') === 'placed', $resp);
+                zz_check('C14 lookup: lists the live lines only (voided line left out)', count((array)($resp['lines'] ?? [])) === 1, $resp);
+                zz_check('C14 lookup: read-only, still one order with that uuid', (int)zz_v('SELECT COUNT(*) FROM stock_orders WHERE id = ?', [$o]) === 1);
+            };
+            break;
+
+        case 'C14_lookup_other_cashier': // another cashier's order is never shown (own orders only)
+            $u = 'zz9-' . bin2hex(random_bytes(8));
+            $o = zz_order('C14o', 'new', 100);
+            $other = (int)zz_v('SELECT id FROM admin_users WHERE id <> ? ORDER BY id LIMIT 1', [$GLOBALS['zz_admin']]);
+            zz_q('UPDATE stock_orders SET client_uuid = ?, created_by = ? WHERE id = ?', [$u, $other, $o]);
+            zz_page('admin/pos.php', [], ['ajax' => 'park_lookup', 'client_uuid' => $u]);
+            $GLOBALS['zz_after'] = static function ($resp) use ($other): void {
+                zz_check('C14 lookup: another cashier\'s order -> not found', $other > 0 && !empty($resp['ok']) && empty($resp['found']) && !isset($resp['order_id']), $resp);
+            };
+            break;
+
+        case 'C14_lookup_unknown': // the Fire never reached the server -> not found, the till sends again
+            zz_page('admin/pos.php', [], ['ajax' => 'park_lookup', 'client_uuid' => 'zz9-' . bin2hex(random_bytes(8))]);
+            $GLOBALS['zz_after'] = static function ($resp): void {
+                zz_check('C14 lookup: unknown uuid -> ok, not found', !empty($resp['ok']) && empty($resp['found']), $resp);
+            };
+            break;
+
+        /* ---------- Step 14 (3): the LAST dish of a round going ready writes the till's ready row ---------- */
+        case 'C14_first_dish_ready':
+            $k = zz_item('C14r dish', 'kitchen');
+            $o = zz_order('C14r', 'in_progress', 200);
+            $l1 = zz_line($o, $k, 'kitchen', 'preparing', 'ZZ9 C14r dish 1');
+            zz_line($o, $k, 'kitchen', 'preparing', 'ZZ9 C14r dish 2');
+            zz_page('api/kds-action.php', ['action' => 'ready_item', 'item_id' => (string)$l1, 'station' => 'kitchen']);
+            $GLOBALS['zz_after'] = static function ($resp) use ($o): void {
+                zz_check('C14 ready: first of two dishes ready -> no whole-order ready row yet', !empty($resp['ok'])
+                    && (int)zz_v("SELECT COUNT(*) FROM pos_ready_notifications WHERE order_id = ? AND station = 'kitchen'", [$o]) === 0, $resp);
+            };
+            break;
+
+        case 'C14_last_dish_ready':
+            $k = zz_item('C14l dish', 'kitchen');
+            $o = zz_order('C14l', 'in_progress', 200);
+            zz_line($o, $k, 'kitchen', 'ready', 'ZZ9 C14l dish 1');
+            $l2 = zz_line($o, $k, 'kitchen', 'preparing', 'ZZ9 C14l dish 2');
+            zz_page('api/kds-action.php', ['action' => 'ready_item', 'item_id' => (string)$l2, 'station' => 'kitchen']);
+            $GLOBALS['zz_after'] = static function ($resp) use ($o): void {
+                zz_check('C14 ready: the last dish ready -> one ready row for the cashier who placed it', !empty($resp['ok'])
+                    && (int)zz_v("SELECT COUNT(*) FROM pos_ready_notifications WHERE order_id = ? AND station = 'kitchen' AND placed_by = ?", [$o, $GLOBALS['zz_admin']]) === 1, $resp);
+            };
+            break;
+
         /* ---------- A3: after the stations close, the till still gets ready alerts and My orders ---------- */
         case 'A3_poll_after_close':
             zz_hours_closed(180, 30);
@@ -710,6 +771,7 @@ if (($argv[1] ?? '') === '--child') {
  * ===================================================================================================== */
 [$zz9Target] = zz9_target($argv, $zz9Root);
 $cases = ['A1_park_first', 'A1_park_retry', 'A1_tab_first', 'A1_tab_retry', 'A6_tab_all_pending', 'A2_round2_ready',
+          'C14_lookup_own', 'C14_lookup_other_cashier', 'C14_lookup_unknown', 'C14_first_dish_ready', 'C14_last_dish_ready',
           'A3_poll_after_close', 'A3_my_orders_after_close', 'A7_note', 'A7_rush', 'A8_86_last', 'A8_86_not_last', 'A9_delete_stop',
           'B4_pay_existing', 'B4_pay_new', 'B4_normal_discount',
           'S12_1_refund_pending', 'S12_1_refund_paid_today', 'S12_2_total_cost', 'S12_3_paid_with_folio', 'S12_3_pay_refused', 'S12_3_pay_after_void', 'S12_4_history'];

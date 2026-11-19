@@ -9728,12 +9728,40 @@ function voidBookingCharge(int $chargeId, string $voidReason, ?int $voidedBy = n
     global $pdo;
 
     try {
+        // Lock order (step 14): the kitchen order row BEFORE the charge, the same order as the
+        // station 86 (api/kds-action.php void_item: stock_orders -> lines -> booking_charges ->
+        // bookings), so a folio void and an 86 on the same order queue instead of deadlocking.
+        // The order id is read BEFORE the transaction starts, so no read snapshot is taken before
+        // the wait on the order lock (later plain reads then see a just-committed 86).
+        $lockedOrderId = 0;
+        $hasOrderLink = true;
+        try {
+            $preSo = $pdo->prepare("SELECT stock_order_id FROM booking_charges WHERE id = ?");
+            $preSo->execute([$chargeId]);
+            $lockedOrderId = (int)$preSo->fetchColumn();
+        } catch (Throwable $preSoEx) {
+            $hasOrderLink = false; // legacy schema without booking_charges.stock_order_id
+        }
+
         $pdo->beginTransaction();
+        if ($lockedOrderId > 0) {
+            $pdo->prepare("SELECT id FROM stock_orders WHERE id = ? FOR UPDATE")->execute([$lockedOrderId]);
+        }
 
         // Get charge details (need extra fields for stock restoration)
         $stmt = $pdo->prepare("SELECT booking_id, voided, charge_type, description, source_item_id, quantity, stock_tracked, line_total FROM booking_charges WHERE id = ? FOR UPDATE");
         $stmt->execute([$chargeId]);
         $charge = $stmt->fetch(PDO::FETCH_ASSOC);
+
+        if ($charge && $hasOrderLink) {
+            // Locking read (current row, not the snapshot of the first read above).
+            $postSo = $pdo->prepare("SELECT stock_order_id FROM booking_charges WHERE id = ? FOR UPDATE");
+            $postSo->execute([$chargeId]);
+            if ((int)$postSo->fetchColumn() !== $lockedOrderId) { // re-linked between the two reads: never act on an unlocked order
+                $pdo->rollBack();
+                return ['success' => false, 'message' => 'The charge changed while it was being voided. Please try again.'];
+            }
+        }
 
         if (!$charge) {
             $pdo->rollBack();
@@ -9759,7 +9787,8 @@ function voidBookingCharge(int $chargeId, string $voidReason, ?int $voidedBy = n
                 SELECT so.reference FROM booking_charges bc
                 JOIN stock_orders so ON so.id = bc.stock_order_id
                 WHERE bc.id = ? AND so.status = 'placed'
-            ");
+                FOR UPDATE
+            "); // locking read: the current order status, not the snapshot taken before the order lock
             $ordStmt->execute([$chargeId]);
             $openOrderRef = $ordStmt->fetchColumn();
         } catch (Throwable $ordEx) {

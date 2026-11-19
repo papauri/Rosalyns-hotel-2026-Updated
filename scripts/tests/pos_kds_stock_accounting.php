@@ -11,8 +11,9 @@
  * step runs admin/pos.php, api/kds-action.php or admin/room-service-dashboard.php in a child PHP
  * process (this file with --child) signed in as the first active admin, committing like the real till.
  * A shutdown handler deletes every row the run created (by marker / linkage, never by blind range),
- * receipt PDFs whose names carry the run's receipt numbers, finance_sequences rows (only when no
- * non-test payment / booking / credit note exists), resets every AUTO_INCREMENT to its start value and
+ * receipt PDFs whose names carry the run's receipt numbers, puts the finance_sequences counters back
+ * (only when no payment / booking / credit note from outside the run arrived meanwhile), resets every
+ * AUTO_INCREMENT to its start value and
  * prints "Liwonde clean: yes/no" against the start snapshot.
  *
  * Settings: two scenarios use an IN-MEMORY setting override inside one child process only: shop mode
@@ -106,8 +107,8 @@ if (!in_array('--confirm-db', $argv, true)) {
 $_SERVER['HTTP_HOST'] = 'localhost';
 $_SERVER['REMOTE_ADDR'] = '127.0.0.1';
 require $__zzRoot . '/config/database.php';
-if (sha1(DB_NAME) !== ZZ_DB_SHA1) {
-    fwrite(STDERR, 'Refusing: database is ' . DB_NAME . ", this test runs at Liwonde only.\n");
+if (sha1(DB_NAME) !== ZZ_DB_SHA1 || sha1((string)$pdo->query('SELECT DATABASE()')->fetchColumn()) !== ZZ_DB_SHA1) {
+    fwrite(STDERR, "Refusing: not the Liwonde test database, this test runs at Liwonde only. Nothing changed.\n");
     exit(2);
 }
 require_once $__zzRoot . '/includes/station-hours.php';
@@ -281,6 +282,8 @@ function zz_snapshot(): array
     foreach (zz_q("SELECT TABLE_NAME AS t, COLUMN_NAME AS c FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND EXTRA LIKE '%auto_increment%'") as $r) { $snap['aicol'][(string)$r['t']] = (string)$r['c']; }
     $snap['files'] = zz_files();
     $snap['station_hours'] = zz_station_hours_rows();
+    // Receipt / invoice / credit-note counters at the start: put back after the run (Liwonde holds mirrored data).
+    $snap['fin_seq'] = zz_has_table('finance_sequences') ? zz_q("SELECT id, next_number FROM finance_sequences ORDER BY id") : [];
     return $snap;
 }
 function zz_files(): array
@@ -398,14 +401,24 @@ function zz_cleanup(array $state): array
     foreach ($runRc as $rc) {
         $del('system_event_log', "id >= ? AND created_at >= ? AND source = 'receipts' AND context_json LIKE ?", [(int)($ai['system_event_log'] ?? 1), $runStart, '%"' . $rc . '"%']);
     }
-    // finance_sequences: only when nothing real could have drawn a number (no non-test payments / bookings / credit notes).
-    $realP = (int)zz_one("SELECT COUNT(*) FROM payments");
-    $realB = (int)zz_one("SELECT COUNT(*) FROM bookings");
-    $realC = zz_has_table('credit_notes') ? (int)zz_one("SELECT COUNT(*) FROM credit_notes") : 0;
-    if ($realP === 0 && $realB === 0 && $realC === 0) {
+    // finance_sequences: put the counters back (new sequence rows removed, existing ones reset to their start
+    // value) only when nothing real drew a number during the run: no payment / booking / credit note newer
+    // than the start snapshot is left once the run's own rows are gone. Otherwise keep them (no number reused).
+    $newReal = [];
+    foreach (['payments', 'bookings', 'credit_notes'] as $t) {
+        if (!zz_has_table($t) || !isset($snap['aicol'][$t], $ai[$t])) { continue; }
+        $n = (int)zz_one("SELECT COUNT(*) FROM `$t` WHERE `" . $snap['aicol'][$t] . "` >= ?", [(int)$ai[$t]]);
+        if ($n > 0) { $newReal[] = "$t=$n"; }
+    }
+    if (!$newReal && zz_has_table('finance_sequences')) {
         $del('finance_sequences', "id >= ?", [(int)($ai['finance_sequences'] ?? 1)]);
-    } else {
-        $log[] = "finance_sequences KEPT: non-test rows exist (payments=$realP bookings=$realB credit_notes=$realC) - owner decision";
+        $fsUp = $pdo->prepare("UPDATE finance_sequences SET next_number = ? WHERE id = ? AND next_number <> ?");
+        foreach (($snap['fin_seq'] ?? []) as $fs) {
+            $fsUp->execute([(int)$fs['next_number'], (int)$fs['id'], (int)$fs['next_number']]);
+            if ($fsUp->rowCount() > 0) { $log[] = "finance_sequences #{$fs['id']} next_number reset to {$fs['next_number']}"; }
+        }
+    } elseif ($newReal) {
+        $log[] = 'finance_sequences KEPT: rows not made by this run arrived meanwhile (' . implode(' ', $newReal) . ') - no number is handed out twice';
     }
     // PDFs: only new files whose names carry one of the run's receipt numbers / order references.
     $before = array_flip($snap['files'] ?? []);
@@ -453,6 +466,7 @@ function zz_clean_check(array $snap): array
         $now[$t] = $cnt;
     }
     if (isset($snap['station_hours']) && zz_station_hours_rows() !== $snap['station_hours']) { $diff[] = 'station hours settings changed: ' . json_encode(zz_station_hours_rows()); }
+    if (isset($snap['fin_seq']) && zz_has_table('finance_sequences') && zz_q("SELECT id, next_number FROM finance_sequences ORDER BY id") != $snap['fin_seq']) { $diff[] = 'finance_sequences counters changed'; }
     $newFiles = array_values(array_diff(zz_files(), $snap['files'] ?? []));
     foreach ($newFiles as $f) { $diff[] = "new file $f"; }
     return ['diff' => $diff, 'counts' => $now, 'new_files' => $newFiles];
@@ -472,13 +486,13 @@ if (in_array('--cleanup-only', $argv, true)) {
 /* ---------------- start guards ---------------- */
 echo "\n=== POS -> KDS -> stock -> accounting, real endpoints (" . date('Y-m-d H:i:s') . ", " . DB_NAME . ") ===\n";
 if (is_file($STATE_FILE)) { fwrite(STDERR, "A previous run left $STATE_FILE - run with --cleanup-only first.\n"); exit(2); }
-$startCounts = [];
-foreach (['stock_orders', 'payments', 'bookings', 'stock_ingredients', 'stock_recipes', 'stock_batches', 'finance_sequences', 'credit_notes', 'booking_charges', 'stock_shift_closes'] as $t) {
-    $startCounts[$t] = zz_has_table($t) ? (int)zz_one("SELECT COUNT(*) FROM `$t`") : 0;
-}
-$busy = array_filter($startCounts, static fn($n) => $n > 0);
-if ($busy) {
-    fwrite(STDERR, 'Refusing: Liwonde is not in the agreed empty state (' . json_encode($busy) . ") - real data may exist. Nothing changed.\n");
+/* Step 14: Liwonde is the test hotel and now holds mirrored bookings / payments / stock, so the run no longer
+ * needs an empty database. It touches only its own 'ZZ POSTEST' rows (cleanup by marker / linkage, never by
+ * blind range) and the clean check compares every table with the start snapshot. Marker rows left by an
+ * earlier run still stop it (run --cleanup-only first). */
+$leftover = (int)zz_one("SELECT COUNT(*) FROM stock_ingredients WHERE name LIKE ?", [ZZ . '%']) + (int)zz_one("SELECT COUNT(*) FROM menu_items WHERE item_name LIKE ?", [ZZ . '%']);
+if ($leftover > 0) {
+    fwrite(STDERR, "Refusing: $leftover '" . ZZ . "' rows from an earlier run are still here - clean them up first. Nothing changed.\n");
     exit(2);
 }
 $admin = zz_q("SELECT id, username, full_name FROM admin_users WHERE is_active = 1 AND role = 'admin' ORDER BY id LIMIT 1")[0] ?? null;
