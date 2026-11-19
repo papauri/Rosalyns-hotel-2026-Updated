@@ -659,12 +659,20 @@
     border-top: 1px solid #f3f4f6;
 }
 
+/* Payment words as written (Paid in full / Part paid (MWK X left) / Unpaid / Refunded), coloured like the
+   Bookings list's rh-pill by rh_booking_pay_state's class (step 13). */
 .tooltip-payment {
     font-size: 10px;
     font-weight: 600;
-    text-transform: capitalize;
-    color: #059669;
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 1px solid #ddd2c2;
+    background: #f4f0ea;
+    color: #4a3f31;
 }
+.tooltip-payment--ok    { background: #e3f5ea; color: #14532d; border-color: #a7dbb8; }
+.tooltip-payment--warn  { background: #fef3c7; color: #78350f; border-color: #f2d27a; }
+.tooltip-payment--alert { background: #fde8e8; color: #991b1b; border-color: #f3b4b4; }
 
 .tooltip-amount {
     font-size: 10px;

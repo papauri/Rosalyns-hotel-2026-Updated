@@ -3,7 +3,8 @@ if (PHP_SAPI !== 'cli') { http_response_code(403); exit("CLI only.\n"); } // nev
 /**
  * Bookings list filter rules (admin/includes/bookings-list-filters.php). NO DATABASE.
  * Date builder per date type (arrival/departure/staying/booked; checked against an in-PHP evaluation over fixture bookings), tab -> clauses map,
- * ?filter= / ?payment_status= resolution, overdue-arrival filter, Paid/Unpaid row flags (SQL NULL semantics).
+ * ?filter= / ?payment_status= resolution, overdue-arrival filter, Paid/Unpaid row flags (step 13: the badge's key).
+ * Last block (Liwonde only, read-only): the tab / Payment-filter SQL equals the badge for every booking.
  * Usage (repo root): php scripts/tests/bookings_filters.php
  */
 $root = dirname(__DIR__, 2);
@@ -200,15 +201,25 @@ usort($bkRows, static function ($x, $y) {
 });
 eq(array_column($bkRows, 'n'), ['2', '10', 'EXEC-101', 'Classic', 'Deluxe'], 'Room sort rule: 2, 10, EXEC-101, then unassigned type names A-Z');
 
-// ---- Paid / Unpaid flags (match SQL incl. NULL)
-eq(rh_bk_payment_flags('paid', 'confirmed'), ['paid' => true, 'unpaid' => false], 'paid');
-eq(rh_bk_payment_flags('completed', 'checked-out'), ['paid' => true, 'unpaid' => false], 'completed counts as paid');
-eq(rh_bk_payment_flags('partial', 'checked-in'), ['paid' => false, 'unpaid' => true], 'partial is unpaid');
+// ---- Paid / Unpaid flags (step 13: from the badge's key, rh_booking_pay_state; replaces the stored-status flags)
+eq(rh_bk_payment_flags('paid', 'confirmed'), ['paid' => true, 'unpaid' => false], 'badge paid -> Paid tab');
+eq(rh_bk_payment_flags('paid', 'cancelled'), ['paid' => true, 'unpaid' => false], 'badge paid, cancelled -> still Paid tab (as before)');
+eq(rh_bk_payment_flags('partial', 'checked-in'), ['paid' => false, 'unpaid' => true], 'part paid -> Unpaid tab');
+eq(rh_bk_payment_flags('unpaid', 'pending'), ['paid' => false, 'unpaid' => true], 'unpaid -> Unpaid tab');
 eq(rh_bk_payment_flags('unpaid', 'cancelled'), ['paid' => false, 'unpaid' => false], 'cancelled never unpaid');
+eq(rh_bk_payment_flags('partial', 'no-show'), ['paid' => false, 'unpaid' => false], 'no-show never unpaid');
 eq(rh_bk_payment_flags('unpaid', 'expired'), ['paid' => false, 'unpaid' => false], 'expired never unpaid');
-eq(rh_bk_payment_flags('refunded', 'confirmed'), ['paid' => false, 'unpaid' => false], 'refunded is neither');
-eq(rh_bk_payment_flags('', 'pending'), ['paid' => false, 'unpaid' => true], "'' is unpaid (SQL '' NOT IN -> true)");
-eq(rh_bk_payment_flags(null, 'pending'), ['paid' => false, 'unpaid' => false], 'NULL is neither (SQL NULL semantics)');
+eq(rh_bk_payment_flags('refunded', 'cancelled'), ['paid' => false, 'unpaid' => false], 'refunded is neither');
+
+// ---- the SQL twin of the badge (rh_bk_pay_key_sql): same rule, tolerance inlined, used by tabs / filter / sort
+$pk = rh_bk_pay_key_sql('b');
+check(strpos($pk, sprintf('%.4F', rh_pay_state_tol())) !== false, 'pay key SQL uses BALANCE_TOLERANCE');
+check(strpos($pk, 'b.amount_paid') !== false && strpos($pk, 'b.amount_due') !== false && strpos($pk, 'b.credit_balance') !== false, 'pay key SQL reads the money columns');
+check(strpos($pk, '?') === false, 'pay key SQL has no placeholders (tab clauses carry no params)');
+eq(rh_bk_tab_clauses('paid')['clauses'], [$pk . " = 'paid'"], 'Paid tab = badge paid');
+check(in_array($pk . " IN ('partial', 'unpaid')", rh_bk_tab_clauses('unpaid')['clauses'], true), 'Unpaid tab = badge part paid or unpaid');
+check(in_array("b.status NOT IN ('cancelled', 'no-show', 'expired')", rh_bk_tab_clauses('unpaid')['clauses'], true), 'Unpaid tab keeps cancelled / no-show / expired out');
+eq(rh_bk_pay_clause('refunded')['clauses'], [$pk . " = 'refunded'"], 'pay refunded = badge refunded');
 
 // ---- rows per page (?size=): whitelist, "All" only up to RH_BK_ALL_ROWS_MAX rows
 eq(rh_bk_page_size(null), '10', 'absent size -> 10');
@@ -270,12 +281,94 @@ check(strpos(rh_bk_joined_sql(false), 'room_combinations') === false, 'joined ru
 check(strpos(rh_bk_kind_clause('single'), 'NOT (COALESCE(b.primary_booking_id') !== false, 'single = not group and not joined');
 eq(rh_bk_pay_clause('paid')['clauses'], rh_bk_tab_clauses('paid')['clauses'], 'pay paid = Paid tab');
 eq(rh_bk_pay_clause('unpaid')['clauses'], rh_bk_tab_clauses('unpaid')['clauses'], 'pay unpaid = Unpaid tab');
-check(in_array("b.payment_status = 'partial'", rh_bk_pay_clause('part')['clauses'], true), 'pay part = Unpaid tab + partial');
+check(in_array(rh_bk_pay_key_sql('b') . " = 'partial'", rh_bk_pay_clause('part')['clauses'], true), 'pay part = Unpaid tab + badge part paid');
 eq(rh_bk_tab_map()['group_bookings'] ?? '', 'group-bookings', '?filter=group_bookings opens the Group tab');
 eq(rh_bk_filter_key('group_bookings'), 'group_bookings', 'group_bookings is a known filter key');
 eq(rh_bk_more_scope_words('joined', 'Family <Suite>', 'part'), ', joined-room bookings only, room type Family <Suite>, part paid', 'notice words (caller escapes)');
 eq(rh_bk_more_scope_words('', '', ''), '', 'notice words: none');
 check(strpos(rh_bk_joined_sql(true), 'combined_room_type_id IS NOT NULL') !== false, 'joined rule: NULL type ids skipped (Single never turns NULL)');
+
+// ---- Step 13 cross-check (LIWONDE only, READ-ONLY): every booking's tab / filter membership from the real SQL equals
+// its badge (rh_booking_pay_state) - group rooms, company-billed rooms, cancelled / no-show / expired included.
+// Path check FIRST: at Rosalyn's (live) the database is never even opened by this test.
+if (stripos($root, 'Liwonde') !== false) { require $root . '/config/database.php'; }
+if (stripos($root, 'Liwonde') === false || stripos((string)getSetting('site_name', ''), 'liwonde') === false) {
+    echo "SKIP cross-check: runs at Liwonde (the test platform) only; Rosalyn's is live.\n";
+} else {
+    $xSql = static function (array $clauses): string { return '(' . implode(' AND ', $clauses) . ')'; };
+    $xRows = $pdo->query("SELECT b.id, b.status, b.payment_status, b.amount_paid, b.amount_due, b.credit_balance,
+            COALESCE(b.primary_booking_id, 0) AS grp, COALESCE(b.billing_account_id, 0) AS acct,
+            " . $xSql(rh_bk_tab_clauses('paid')['clauses']) . " AS in_paid,
+            " . $xSql(rh_bk_tab_clauses('unpaid')['clauses']) . " AS in_unpaid,
+            " . $xSql(rh_bk_pay_clause('part')['clauses']) . " AS in_part,
+            " . $xSql(rh_bk_pay_clause('refunded')['clauses']) . " AS in_refunded,
+            " . rh_bk_pay_key_sql('b') . " AS sql_key
+        FROM bookings b")->fetchAll(PDO::FETCH_ASSOC);
+    $xMis = []; $xGrp = 0; $xAcct = 0; $xClosed = 0;
+    foreach ($xRows as $r) {
+        $k = rh_booking_pay_state($r)['key'];
+        $f = rh_bk_payment_flags($k, (string)$r['status']);
+        $closed = in_array(strtolower(trim((string)$r['status'])), ['cancelled', 'no-show', 'expired'], true);
+        $want = [$k, $f['paid'], $f['unpaid'], $k === 'partial' && !$closed, $k === 'refunded'];
+        $got = [(string)$r['sql_key'], (bool)$r['in_paid'], (bool)$r['in_unpaid'], (bool)$r['in_part'], (bool)$r['in_refunded']];
+        if ($want !== $got) { $xMis[] = '#' . $r['id'] . ' ' . json_encode(['want' => $want, 'got' => $got]); }
+        $xGrp += (int)$r['grp'] > 0 ? 1 : 0;
+        $xAcct += (int)$r['acct'] > 0 ? 1 : 0;
+        $xClosed += $closed ? 1 : 0;
+    }
+    echo 'cross-check: ' . count($xRows) . ' bookings, ' . $xGrp . ' group rooms, ' . $xAcct . ' company-billed, ' . $xClosed . ' closed; mismatches ' . count($xMis) . "\n";
+    check(count($xRows) > 0, 'cross-check: Liwonde has bookings');
+    check($xGrp > 0 && $xClosed > 0, 'cross-check covers group rooms and closed bookings');
+    // Liwonde has no company-billed rooms today (billing_account_id unset): fixture rows run through the SAME SQL in a
+    // derived table (no writes), company legs and tolerance edges included. A company leg is a bookings row with its own
+    // figures; the rule never reads billing_account_id, like the badge.
+    $fx = [
+        // id, status, payment_status, paid, due, credit, billing_account_id
+        [9001, 'confirmed', 'partial', 50000, 25000, 0, 7],          // company leg, part paid
+        [9002, 'checked-out', 'paid', 75000, 0, 0, 7],               // company leg, paid in full
+        [9003, 'confirmed', 'unpaid', 0, 75000, 0, 7],               // company leg, nothing paid (billed later)
+        [9004, 'confirmed', 'paid', 75000, 0.004, 0, 0],             // due within tolerance -> paid
+        [9005, 'confirmed', 'partial', 0.004, 1000, 0, 0],           // paid within tolerance -> unpaid
+        [9006, 'confirmed', 'completed', 60000, 15000, 0, 0],        // stale stored 'completed' with money owed -> part paid
+        [9007, 'cancelled', 'refunded', 0, 0, 0, 0],                 // refunded
+        [9008, 'cancelled', 'unpaid', 0, 0, 0, 0],                   // void, nothing billed -> unpaid (not Paid in full)
+        [9009, 'cancelled', 'paid', 20000, 0, 0, 0],                 // kept fee paid -> paid
+        [9010, 'no-show', 'partial', 10000, 40000, 0, 0],            // no-show owing -> part paid, not in Unpaid tab
+        [9011, 'confirmed', 'paid', 90000, 0, 15000, 0],             // overpaid (credit) -> paid
+        [9012, 'expired', null, 0, 0, 0, 0],                         // NULL stored status, nothing billed -> unpaid
+        [9013, 'confirmed', null, 0, 5000, 0, 0],                    // NULL stored status -> unpaid (old rule: neither)
+    ];
+    $fxSel = []; $fxPar = [];
+    foreach ($fx as $r) {
+        $fxSel[] = 'SELECT ? AS id, ? AS status, ? AS payment_status, CAST(? AS DECIMAL(12,3)) AS amount_paid, CAST(? AS DECIMAL(12,3)) AS amount_due, CAST(? AS DECIMAL(12,3)) AS credit_balance, ? AS billing_account_id';
+        array_push($fxPar, ...$r);
+    }
+    $fxStmt = $pdo->prepare('SELECT b.*, ' . $xSql(rh_bk_tab_clauses('paid')['clauses']) . ' AS in_paid, '
+        . $xSql(rh_bk_tab_clauses('unpaid')['clauses']) . ' AS in_unpaid, ' . $xSql(rh_bk_pay_clause('part')['clauses']) . ' AS in_part, '
+        . $xSql(rh_bk_pay_clause('refunded')['clauses']) . ' AS in_refunded, ' . rh_bk_pay_key_sql('b') . ' AS sql_key FROM (' . implode(' UNION ALL ', $fxSel) . ') b');
+    $fxStmt->execute($fxPar);
+    $fxMis = []; $fxN = 0;
+    foreach ($fxStmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $fxN++;
+        $k = rh_booking_pay_state($r)['key'];
+        $f = rh_bk_payment_flags($k, (string)$r['status']);
+        $closed = in_array((string)$r['status'], ['cancelled', 'no-show', 'expired'], true);
+        $want = [$k, $f['paid'], $f['unpaid'], $k === 'partial' && !$closed, $k === 'refunded'];
+        $got = [(string)$r['sql_key'], (bool)$r['in_paid'], (bool)$r['in_unpaid'], (bool)$r['in_part'], (bool)$r['in_refunded']];
+        if ($want !== $got) { $fxMis[] = '#' . $r['id'] . ' ' . json_encode(['want' => $want, 'got' => $got]); }
+    }
+    echo 'fixture cross-check: ' . $fxN . ' rows (3 company legs); mismatches ' . count($fxMis) . "\n";
+    check($fxN === count($fx) && count($fxMis) === 0, 'fixture cross-check (company legs, tolerance edges, NULL status): SQL = badge', implode('; ', $fxMis));
+    $fxKeys = [];
+    foreach ($fx as $r) { $fxKeys[$r[0]] = rh_booking_pay_state(['status' => $r[1], 'payment_status' => $r[2], 'amount_paid' => $r[3], 'amount_due' => $r[4], 'credit_balance' => $r[5]])['key']; }
+    eq([$fxKeys[9001], $fxKeys[9004], $fxKeys[9005], $fxKeys[9006], $fxKeys[9007], $fxKeys[9008], $fxKeys[9010]], ['partial', 'paid', 'unpaid', 'partial', 'refunded', 'unpaid', 'partial'], 'fixture keys are the expected badge words');
+    check(count($xMis) === 0, 'cross-check: tab / filter SQL = badge for every booking (0 mismatches)', implode('; ', array_slice($xMis, 0, 5)));
+    // The tab badge counts use the same clauses (SUM over the tab rule): they equal the row-by-row badge counts.
+    $xCnt = $pdo->query("SELECT SUM(" . implode(' AND ', rh_bk_tab_clauses('paid')['clauses']) . ") AS p, SUM(" . implode(' AND ', rh_bk_tab_clauses('unpaid')['clauses']) . ") AS u FROM bookings b")->fetch(PDO::FETCH_ASSOC);
+    $xWantP = 0; $xWantU = 0;
+    foreach ($xRows as $r) { $f = rh_bk_payment_flags(rh_booking_pay_state($r)['key'], (string)$r['status']); $xWantP += $f['paid'] ? 1 : 0; $xWantU += $f['unpaid'] ? 1 : 0; }
+    check((int)$xCnt['p'] === $xWantP && (int)$xCnt['u'] === $xWantU, 'tab counts (Paid ' . $xWantP . ', Unpaid ' . $xWantU . ') = the badges', json_encode($xCnt));
+}
 
 echo "\n$pass passed, $fail failed\n";
 exit($fail ? 1 : 0);

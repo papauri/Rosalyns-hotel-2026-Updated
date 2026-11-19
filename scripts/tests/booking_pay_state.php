@@ -68,6 +68,21 @@ ok('key: cancelled, nothing billed or paid = unpaid', rh_pay_state_key(0, 0, tru
 ok('key: cancelled, all refunded = refunded', rh_pay_state_key(0, 0, true, 0, true) === 'refunded');
 ok('key: cancelled, refund but fee still owed = unpaid', rh_pay_state_key(0, 50, true, 50, true) === 'unpaid');
 
+// Step 13 (owner 2026-11-19): the label comes from the money, never the stored word, and every screen prints these
+// four labels only (Bookings tabs / filter / badge, booking lookup, individual rooms, calendar, export).
+$s = ps(['amount_paid' => 60000, 'amount_due' => 15000, 'status' => 'confirmed', 'payment_status' => 'completed']);
+ok('stale stored "completed" with money owed: Part paid (MWK 15,000.00 left)', $s['key'] === 'partial' && $s['label'] === 'Part paid (MWK 15,000.00 left)' && $s['short'] === 'Part paid', json_encode($s));
+$s = ps(['amount_paid' => 0, 'amount_due' => 5000, 'status' => 'confirmed', 'payment_status' => null]);
+ok('NULL stored status: Unpaid from the money', $s['key'] === 'unpaid' && $s['label'] === 'Unpaid', json_encode($s));
+$s = ps(['amount_paid' => 10000, 'amount_due' => 40000, 'status' => 'no-show', 'payment_status' => 'partial']);
+ok('no-show still owing: Part paid (MWK 40,000.00 left)', $s['key'] === 'partial' && $s['left'] === 40000.0, json_encode($s));
+$labels = [];
+foreach ([[0, 10, 'confirmed', 'unpaid'], [5, 10, 'confirmed', 'partial'], [10, 0, 'confirmed', 'paid'], [0, 0, 'cancelled', 'refunded']] as [$p, $d, $st, $ps]) {
+    $x = ps(['amount_paid' => $p, 'amount_due' => $d, 'status' => $st, 'payment_status' => $ps]);
+    $labels[$x['key']] = [$x['short'], $x['class']];
+}
+ok('four keys, their short labels and pill classes', $labels === ['unpaid' => ['Unpaid', 'alert'], 'partial' => ['Part paid', 'warn'], 'paid' => ['Paid in full', 'ok'], 'refunded' => ['Refunded', 'alert']], json_encode($labels));
+
 /* ── Database part (TEST hotel only) ───────────────────────────────────────────────────────────────────────────── */
 if (in_array('--db', $argv, true)) {
     echo "== database (rolled back) ==\n";

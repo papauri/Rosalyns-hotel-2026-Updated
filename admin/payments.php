@@ -384,8 +384,8 @@ $kpiStmt = $pdo->prepare("
         COALESCE(SUM(CASE WHEN payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') <> 'refund' THEN vat_amount   ELSE 0 END), 0) AS vat_collected,
         COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') AND COALESCE(payment_type, '') <> 'refund' THEN total_amount ELSE 0 END), 0) AS pending_total,
         COALESCE(SUM(CASE WHEN payment_status IN ('pending','partial') AND COALESCE(payment_type, '') <> 'refund' THEN 1 ELSE 0 END), 0) AS pending_count,
-        " . rh_refund_settled_sum_sql() . " AS refunds_total,
-        " . rh_refund_settled_count_sql() . " AS refunds_count,
+        " . rh_refund_payout_sum_sql() . " AS refunds_total,
+        " . rh_refund_payout_count_sql() . " AS refunds_count,
         " . rh_refund_pending_sum_sql() . " AS refunds_pending_total,
         " . rh_refund_pending_count_sql() . " AS refunds_pending_count,
         " . rh_refund_to_credit_sum_sql() . " AS refunds_to_credit_total
@@ -649,9 +649,10 @@ $quickActive = function ($s, $e) use ($startDate, $endDate) {
                 <span class="ck-kpi__value ck-kpi__value--money"><span class="ck-cur"><?php echo htmlspecialchars($currency_symbol); ?></span><?php echo number_format((float)($kpi['refunds_total'] ?? 0), 0); ?></span>
                 <span class="ck-kpi__sub"><?php echo number_format((int)($kpi['refunds_count'] ?? 0)); ?> refund<?php echo (int)($kpi['refunds_count'] ?? 0) === 1 ? '' : 's'; ?> paid out or being paid<?php if ((int)($kpi['refunds_pending_count'] ?? 0) > 0): ?> ·
                     <a href="<?php echo htmlspecialchars('payments.php?' . http_build_query(array_merge($_GET, ['refund_status' => 'pending', 'page' => 1, 'balance' => null, 'export' => null, 'direction' => null]))); ?>" class="acct-link"><?php echo htmlspecialchars($currency_symbol) . number_format((float)($kpi['refunds_pending_total'] ?? 0), 0); ?> awaiting approval</a><?php endif; ?></span>
-                <?php $payRefundSplit = rh_refund_split_text((float)($kpi['refunds_total'] ?? 0), (float)($kpi['refunds_to_credit_total'] ?? 0), (string)$currency_symbol); ?>
-                <?php if ($payRefundSplit !== ''): ?><span class="ck-kpi__sub" style="margin-top:0"><?php echo htmlspecialchars($payRefundSplit); ?></span><?php endif; ?>
-                <span class="ck-kpi__sub" style="margin-top:0">Refunds for <?php echo htmlspecialchars($payScopeWords); ?> (VAT included): money paid back plus overpayments or store credit moved to a credit note. Awaiting approval is not in the total. Accounting and Reports use the same rule for their own dates.</span>
+                <?php /* Ship M2 (owner 2026-11-19): Refunds = real payouts only (rh_refund_payout_sql). Money moved onto a credit note is guest credit: its own line, never in the total. */ ?>
+                <?php $payToCredit = round(max(0.0, (float)($kpi['refunds_to_credit_total'] ?? 0)), 2); ?>
+                <?php if ($payToCredit > BALANCE_TOLERANCE): ?><span class="ck-kpi__sub" style="margin-top:0">Moved to guest credit (credit notes; not a refund, not in this total): <?php echo htmlspecialchars($currency_symbol . number_format($payToCredit, 0)); ?></span><?php endif; ?>
+                <span class="ck-kpi__sub" style="margin-top:0">Refunds for <?php echo htmlspecialchars($payScopeWords); ?> (VAT included). <?php echo htmlspecialchars(rh_ship_m_help('refunds')); ?> Awaiting approval is not in the total. The list this card opens also shows money moved to guest credit (method Credit note). End of Day, Reports and Accounting use the same rule for their own dates.</span>
             </div>
         </div>
 

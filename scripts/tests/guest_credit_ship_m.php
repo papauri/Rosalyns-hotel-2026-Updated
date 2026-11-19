@@ -168,5 +168,55 @@ if (stripos((string)getSetting('site_name', ''), 'liwonde') === false || stripos
     }
 }
 
+// ---- T4: Ship M2 (owner 2026-11-19): Payments, Accounting and guest history count refunds by the PAYOUT rule; a move
+// onto a credit note is never a refund; every balance / received figure stays on the settled rule (unchanged).
+$m2Pay = (string)file_get_contents($root . '/admin/payments.php');
+$m2Acc = (string)file_get_contents($root . '/admin/accounting-dashboard.php');
+$m2Gh = (string)file_get_contents($root . '/includes/guest-history.php');
+check(strpos($m2Pay, 'rh_refund_payout_sum_sql() . " AS refunds_total') !== false && strpos($m2Pay, 'rh_refund_payout_count_sql() . " AS refunds_count') !== false, 'T4 Payments refunds card: payout sum + count');
+check(strpos($m2Acc, 'rh_refund_payout_sum_sql() . " as total_refunds_issued') !== false && strpos($m2Acc, 'rh_refund_payout_count_sql() . " as refunds_settled_count') !== false, 'T4 Accounting KPI: payout sum + count');
+check(strpos($m2Acc, 'rh_refund_payout_sum_sql() . " AS refunds') !== false && strpos($m2Acc, 'rh_refund_to_credit_sum_sql() . " AS to_credit') !== false, 'T4 Accounting trend: payouts, moves to credit apart');
+check(substr_count($m2Acc, 'rh_refund_payout_sql()') >= 2, 'T4 Accounting refund lists / reasons: payout rule');
+check(strpos($m2Acc, 'rh_refund_settled_sum_sql()') === false, 'T4 Accounting: no refund total left on the settled rule');
+check(preg_match('/\$cat_revenue_net\s*=.*total_refunds_issued.*total_refunds_to_credit/', $m2Acc) === 1, 'T4 Accounting Net = gross - refunds paid out - moved to guest credit (same value as before)');
+check(strpos($m2Gh, "rh_refund_payout_sum_sql('p') . \" AS refunded") !== false, 'T4 guest history Refunded: payout rule');
+check(strpos($m2Gh, "' WHEN ' . rh_refund_settled_sql(\$a) . ' THEN -'") !== false, 'T4 guest history Received: still the settled rule (unchanged)');
+if (isset($pdo) && $pdo instanceof PDO && stripos($root, 'Liwonde') !== false && stripos((string)getSetting('site_name', ''), 'liwonde') !== false) {
+    // Read-only over every Liwonde payment row.
+    $m2 = $pdo->query("SELECT " . rh_refund_payout_sum_sql() . " AS payout, " . rh_refund_to_credit_sum_sql() . " AS to_credit, "
+        . rh_refund_settled_sum_sql() . " AS settled, COALESCE(SUM(CASE WHEN " . rh_refund_payout_sql() . " AND " . rh_refund_to_credit_sql() . " THEN 1 ELSE 0 END), 0) AS overlap,
+        COALESCE(SUM(CASE WHEN " . rh_refund_to_credit_sql() . " THEN 1 ELSE 0 END), 0) AS moves
+        FROM payments WHERE deleted_at IS NULL")->fetch(PDO::FETCH_ASSOC);
+    check((int)$m2['moves'] > 0, 'T4 Liwonde has credit-note moves to test against', (string)$m2['moves']);
+    check((int)$m2['overlap'] === 0, 'T4 a credit-note move is never in the payout (refund) total');
+    check(abs((float)$m2['payout'] + (float)$m2['to_credit'] - (float)$m2['settled']) <= BALANCE_TOLERANCE, 'T4 payouts + moved to credit = settled exactly (balances / Net unchanged)', json_encode($m2));
+    // Guest history for every guest with a move: Received equals the settled rule computed independently; refunded +
+    // to_credit = everything Received takes off.
+    require_once $root . '/includes/guest-history.php';
+    $m2Emails = $pdo->query("SELECT DISTINCT b.guest_email FROM payments p JOIN bookings b ON b.id = p.booking_id
+        WHERE p.booking_type = 'room' AND p.deleted_at IS NULL AND b.deleted_at IS NULL AND " . rh_refund_to_credit_sql('p') . " AND COALESCE(b.guest_email, '') <> ''")->fetchAll(PDO::FETCH_COLUMN);
+    $m2Bad = [];
+    foreach ($m2Emails as $em) {
+        $h = rh_guest_history($pdo, (string)$em, 0, true);
+        if (empty($h['money'])) { continue; }
+        $q = $pdo->prepare("SELECT COALESCE(SUM(GREATEST(0, t.paid - t.settled)), 0) AS received, COALESCE(SUM(t.settled), 0) AS settled FROM (
+                SELECT p.booking_id,
+                       SUM(CASE WHEN p.payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(p.payment_type,'') <> 'refund' THEN p.total_amount ELSE 0 END) AS paid,
+                       " . rh_refund_settled_sum_sql('p') . " AS settled
+                FROM payments p JOIN bookings b ON b.id = p.booking_id
+                WHERE p.booking_type = 'room' AND p.deleted_at IS NULL AND b.deleted_at IS NULL AND LOWER(TRIM(b.guest_email)) = LOWER(TRIM(?))
+                GROUP BY p.booking_id) t");
+        $q->execute([$em]);
+        $want = $q->fetch(PDO::FETCH_ASSOC);
+        if (abs((float)$h['money']['received'] - (float)$want['received']) > BALANCE_TOLERANCE
+            || abs((float)$h['money']['refunded'] + (float)$h['money']['to_credit'] - (float)$want['settled']) > BALANCE_TOLERANCE) {
+            $m2Bad[] = json_encode(['money' => $h['money'], 'want' => $want]);
+        }
+    }
+    check(count($m2Emails) > 0 && $m2Bad === [], 'T4 guest history (' . count($m2Emails) . ' guests with a move): Received unchanged, refunded + to credit = settled', implode('; ', $m2Bad));
+} else {
+    echo "SKIP T4 DB part: runs at Liwonde (the test platform) only.\n";
+}
+
 echo "\nguest_credit_ship_m: $pass passed, $fail failed\n";
 exit($fail > 0 ? 1 : 0);

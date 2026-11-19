@@ -911,7 +911,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // All upcoming bookings
             $uStmt = $pdo->prepare("
                 SELECT b.id, b.booking_reference, b.guest_name, b.room_guest_name, b.guest_email, b.guest_phone,
-                       b.check_in_date, b.check_out_date, b.status, b.payment_status,
+                       b.check_in_date, b.check_out_date, b.status, b.payment_status, b.amount_paid, b.amount_due, b.credit_balance,
                        b.total_amount, b.total_with_vat, b.vat_amount, b.number_of_nights, b.tourism_levy_amount, b.tourism_levy_percent, b.vat_rate,
                        b.child_supplement_total, b.child_guests, b.child_price_multiplier, b.child_charge_mode, b.child_charge_amount, b.free_children,
                        b.package_total, b.rate_plan_label, b.rate_plan_discount, r.name AS room_type_name
@@ -976,6 +976,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     'check_out'       => $active['check_out_date'],
                     'status'          => $active['status'],
                     'payment_status'  => $active['payment_status'] ?? 'pending',
+                    // Step 13: the badge words from the booking's money, as on the Bookings list (rh_booking_pay_state).
+                    'payment_label'   => rh_booking_pay_state($active, ['currency' => $sym])['label'],
+                    'payment_class'   => rh_booking_pay_state($active, ['currency' => $sym])['class'],
                     'total_amount'    => $sym . ' ' . number_format(rh_booking_full_total($active), 0),
                     'total_breakdown' => rh_booking_total_breakdown($active, ['currency' => $sym]),
                     'nights_remaining' => max(0, (int)($active['nights_remaining'] ?? 0)),
@@ -996,6 +999,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 'check_out'      => $b['check_out_date'],
                 'status'         => $b['status'],
                 'payment_status' => $b['payment_status'] ?? 'pending',
+                'payment_label'  => rh_booking_pay_state($b, ['currency' => $sym])['label'],
+                'payment_class'  => rh_booking_pay_state($b, ['currency' => $sym])['class'],
                 'total_amount'   => $sym . ' ' . number_format(rh_booking_full_total($b), 0),
                 'total_breakdown' => rh_booking_total_breakdown($b, ['currency' => $sym]),
             ], $upcoming);
@@ -3155,16 +3160,8 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             expired: 'Expired',
             'no-show': 'No Show'
         };
-        const _payLabels = {
-            // bookings.payment_status enum: unpaid / partial / paid
-            unpaid: 'Unpaid',
-            partial: 'Partial',
-            paid: 'Paid',
-            // legacy / other tables
-            pending: 'Pending',
-            refunded: 'Refunded',
-            failed: 'Failed'
-        };
+        // Payment badge: the server sends rh_booking_pay_state()'s label and class (step 13: Paid in full / Part paid
+        // (MWK X left) / Unpaid / Refunded, the same words as the Bookings list); colour by class, the rh-pill colours.
         const _statusColors = {
             // Room statuses
             available: '#15803d',
@@ -3182,14 +3179,10 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
             expired: '#6b7280',
             'no-show': '#dc2626'
         };
-        const _payColors = {
-            unpaid: '#b91c1c',
-            partial: '#1d4ed8',
-            paid: '#15803d',
-            pending: '#92400e',
-            refunded: '#6b7280',
-            failed: '#b91c1c'
-        };
+        const _payClassColors = { ok: '#15803d', warn: '#92400e', alert: '#b91c1c' };
+        function _payBadge(bk) {
+            return _badge(_esc(bk.payment_label || ''), _payClassColors[bk.payment_class] || '#6b7280');
+        }
 
         function _badge(text, color) {
             return `<span style="display:inline-flex;align-items:center;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;background:${color}18;color:${color};border:1px solid ${color}40;">${text}</span>`;
@@ -3300,7 +3293,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                             <div class="rd-occ-col">
                                 <div class="rd-occ-label">Payment</div>
                                 <div class="rd-occ-value">
-                                    ${_badge(_payLabels[active.payment_status] || active.payment_status, _payColors[active.payment_status] || '#6b7280')}
+                                    ${_payBadge(active)}
                                     <span style="font-size:12px;color:#5E554D;margin-left:4px;">${active.total_amount}</span>${window.rhTotalInfoHtml ? window.rhTotalInfoHtml(active.total_breakdown) : ''}
                                 </div>
                             </div>
@@ -3362,7 +3355,7 @@ $currency = htmlspecialchars(getSetting('currency_symbol'));
                             <div class="rd-up-dates">${_fmtDate(b.check_in)} → ${_fmtDate(b.check_out)} <span style="color:#766550;font-weight:500;">(${nights}n)</span></div>
                             <div class="rd-up-badges">
                                 ${_badge(_statusLabels[b.status] || b.status, _statusColors[b.status] || '#6b7280')}
-                                ${_badge(_payLabels[b.payment_status] || b.payment_status, _payColors[b.payment_status] || '#6b7280')}
+                                ${_payBadge(b)}
                                 <span style="font-size:11px;color:#5E554D;">${b.total_amount}</span>${window.rhTotalInfoHtml ? window.rhTotalInfoHtml(b.total_breakdown) : ''}
                             </div>
                         </div>`;

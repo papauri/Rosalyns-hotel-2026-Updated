@@ -17,6 +17,10 @@
  *     total_amount of completed/paid/refunded/partially_refunded non-refund rows, minus refunds paid out
  *     (admin/includes/finance-refunds.php: refund_status completed/processing, full total_amount), deleted payment
  *     rows ignored, each booking floored at 0, then added up. Voided/failed/pending payments never count.
+ *   - Refunded (Ship M2, owner 2026-11-19) = real payouts only (rh_refund_payout_sql: money paid back in cash, bank or
+ *     mobile money). Money moved onto a credit note is guest credit, not a refund: it is To credit (rh_refund_to_credit_sql)
+ *     and shown on its own. Received is NOT changed by this: it still takes off both (the canonical net-paid rule above,
+ *     rh_refund_settled_sql = payouts + moves to credit), so refunded + to_credit = everything Received takes off.
  *   - Money is only read when the caller says the viewer may see it; otherwise it is null (never 0).
  *   - A failed query gives ok=false: callers show a dash, never "0" or "First stay".
  */
@@ -63,7 +67,7 @@ if (!function_exists('rh_guest_history_email_sql')) {
             'is_returning' => false,
             'last_stay' => null,          // latest checked-out booking: id, booking_reference, check_in_date, check_out_date
             'recent_other' => [],         // latest other bookings (not deleted), newest check-in first
-            'money' => null,              // ['received' => net, 'refunded' => refunds paid out, 'to_credit' => part moved to credit notes] or null
+            'money' => null,              // ['received' => net, 'refunded' => real payouts only, 'to_credit' => moved to credit notes (guest credit, not in refunded)] or null
         ];
     }
 
@@ -131,7 +135,7 @@ if (!function_exists('rh_guest_history_email_sql')) {
                     FROM (
                         SELECT p.booking_id,
                                COALESCE(SUM(" . rh_guest_history_paid_case_sql('p') . "), 0) AS net,
-                               " . rh_refund_settled_sum_sql('p') . " AS refunded,
+                               " . rh_refund_payout_sum_sql('p') . " AS refunded,
                                " . rh_refund_to_credit_sum_sql('p') . " AS to_credit
                         FROM payments p
                         INNER JOIN bookings b ON b.id = p.booking_id
@@ -145,7 +149,7 @@ if (!function_exists('rh_guest_history_email_sql')) {
                 $out['money'] = [
                     'received' => round((float)($mr['received'] ?? 0), 2),
                     'refunded' => round((float)($mr['refunded'] ?? 0), 2),
-                    'to_credit' => round((float)($mr['to_credit'] ?? 0), 2), // part of refunded moved into credit notes (no cash out)
+                    'to_credit' => round((float)($mr['to_credit'] ?? 0), 2), // moved into credit notes (guest credit, no cash out); not part of refunded (Ship M2)
                 ];
             }
         } catch (Throwable $e) {

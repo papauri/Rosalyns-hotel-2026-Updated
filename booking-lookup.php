@@ -375,8 +375,10 @@ try {
                         <div class="result-item">
                             <label>Payment Status</label>
                             <div class="value">
-                                <span class="status-badge status-<?php echo $booking['payment_status']; ?>">
-                                    <?php echo ucfirst($booking['payment_status'] ?: 'unpaid'); ?>
+                                <?php /* Step 13: the same words as the staff screens, from the booking's money (rh_booking_pay_state). */
+                                $lookup_pay = rh_booking_pay_state($booking, ['currency' => (string)$currency_symbol]); ?>
+                                <span class="status-badge status-<?php echo htmlspecialchars($lookup_pay['key'], ENT_QUOTES); ?>">
+                                    <?php echo htmlspecialchars($lookup_pay['label']); ?>
                                 </span>
                             </div>
                         </div>

@@ -3163,6 +3163,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                                      r.name as room_name, ir.room_number as individual_room_number, ir.room_name as individual_room_name,
                                      b.check_in_date, b.check_out_date, b.number_of_nights,
                                      b.number_of_guests, b.total_amount, b.total_with_vat, b.vat_amount, b.status, b.payment_status, b.occupancy_type,
+                                     b.amount_paid, b.amount_due, b.credit_balance,
                                      b.special_requests, b.created_at,
                                      (
                                          SELECT px.payment_reference
@@ -3223,7 +3224,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'csv') {
                 $row['number_of_guests'],
                 number_format(rh_booking_full_total($row), 2, '.', ''),
                 $row['status'],
-                $row['payment_status'],
+                rh_booking_pay_state($row, ['currency' => (string)getSetting('currency_symbol', 'MWK')])['label'], // step 13: the badge's words
                 $row['payment_reference'],
                 $row['occupancy_type'],
                 $row['special_requests'],
@@ -3421,6 +3422,7 @@ try {
             'check_out' => (string)($row['check_out_date'] ?? ''),
             'amount' => rh_booking_full_total($row),
             'payment_status' => (string)($row['payment_status'] ?? ''),
+            'payment_label' => rh_booking_pay_state($row, ['currency' => (string)getSetting('currency_symbol', 'MWK')])['label'], // step 13: the badge's words
             'details_href' => 'booking-details.php?id=' . (int)($row['id'] ?? 0),
         ];
     };
@@ -3438,7 +3440,7 @@ try {
                    b.check_in_date,
                    b.check_out_date,
                    b.total_amount, b.total_with_vat, b.vat_amount,
-                   b.payment_status,
+                   b.payment_status, b.amount_paid, b.amount_due, b.credit_balance,
                    r.name AS room_name,
                    ir.room_name AS individual_room_name,
                    ir.room_number AS individual_room_number
@@ -4143,7 +4145,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                         data-focus="booking-<?php echo (int)$booking['id']; ?>"
                                         data-status="<?php echo htmlspecialchars($is_deleted_row ? 'deleted' : $booking['status'], ENT_QUOTES); ?>"
                                         data-payment-status="<?php echo htmlspecialchars((string)($booking['payment_status'] ?? ''), ENT_QUOTES); ?>"
-                                        <?php $bk_pay_flags = rh_bk_payment_flags($booking['payment_status'] ?? null, (string)$booking['status']); /* same rule as the Paid / Unpaid badges */ ?>
+                                        <?php $bk_pay_flags = rh_bk_payment_flags(rh_booking_pay_state($booking)['key'], (string)$booking['status']); /* step 13: the badge's own rule, the same as the tab SQL (rh_bk_pay_key_sql) */ ?>
                                         data-paid="<?php echo $bk_pay_flags['paid'] ? '1' : '0'; ?>"
                                         data-unpaid="<?php echo $bk_pay_flags['unpaid'] ? '1' : '0'; ?>"
                                         data-check-in="<?php echo htmlspecialchars($booking['check_in_date'], ENT_QUOTES); ?>"
@@ -4215,17 +4217,8 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                                             // never a payment record's 'completed'.
                                             $bk_pay_state = rh_booking_pay_state($booking, ['currency' => $currency_symbol]);
                                             $status = $bk_pay_state['key'];
-                                            // Map payment statuses to user-friendly labels
-                                            $status_labels = [
-                                                'paid' => 'Paid in full',
-                                                'unpaid' => 'Unpaid',
-                                                'partial' => 'Part paid',
-                                                'completed' => 'Paid',
-                                                'pending' => 'Pending',
-                                                'failed' => 'Failed',
-                                                'refunded' => 'Refunded',
-                                                'partially_refunded' => 'Partial Refund'
-                                            ];
+                                            // The badge words: rh_booking_pay_state()'s short label (the amount left is printed on its own line).
+                                            $status_labels = [$status => $bk_pay_state['short']];
                                             // Part-paid: what is still to pay (amount_due), shown under the payment badge; 0 = nothing shown.
                                             $bk_left_to_pay = $is_deleted_row ? 0.0 : rh_bk_left_to_pay($status, $booking['status'] ?? '', $booking['amount_due'] ?? 0, $booking['amount_paid'] ?? 0);
                                             $bk_left_text = $bk_left_to_pay > 0 ? $currency_symbol . ' ' . number_format($bk_left_to_pay, 2) . ' left to pay' : '';
@@ -5130,7 +5123,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                         isVisible = status === 'no-show';
                         break;
                     case 'paid':
-                        // Server rule (rh_bk_payment_flags): the booking's own payment status only.
+                        // Server rule (rh_bk_payment_flags): the badge's rule from the booking's money (step 13).
                         isVisible = row.dataset.paid === '1';
                         break;
                     case 'unpaid':
@@ -6225,7 +6218,7 @@ require_once __DIR__ . '/../includes/booking-group-ops.php'; // G4: rh_group_can
                 rowsEl.innerHTML = rows.map(function(row) {
                     const detailsHref = row.details_href ? String(row.details_href) : ('booking-details.php?id=' + encodeURIComponent(String(row.id || '0')));
                     const stayText = formatBookingsInsightDate(row.check_in) + ' - ' + formatBookingsInsightDate(row.check_out);
-                    const paymentLabel = formatBookingsInsightStatus(row.payment_status || 'unknown');
+                    const paymentLabel = row.payment_label ? String(row.payment_label) : formatBookingsInsightStatus(row.payment_status || 'unknown');
                     const statusLabel = formatBookingsInsightStatus(row.status || 'unknown');
 
                     return '<tr>' +

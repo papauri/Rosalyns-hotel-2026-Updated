@@ -195,12 +195,12 @@ try {
                 - COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END), 0)
                 as total_vat_collected,
             COALESCE(SUM(CASE WHEN payment_status IN ('pending', 'partial') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) as total_pending,
-            " . rh_refund_settled_sum_sql() . " as total_refunds_issued,
+            " . rh_refund_payout_sum_sql() . " as total_refunds_issued,
             " . rh_refund_to_credit_sum_sql() . " as total_refunds_to_credit,
             COALESCE(SUM(CASE WHEN payment_status = 'refunded' THEN total_amount ELSE 0 END), 0) as total_refunded,
             COALESCE(SUM(CASE WHEN payment_status = 'cancelled' THEN total_amount ELSE 0 END), 0) as total_cancelled,
             " . rh_refund_pending_sum_sql() . " as pending_refunds,
-            " . rh_refund_settled_count_sql() . " as refunds_settled_count,
+            " . rh_refund_payout_count_sql() . " as refunds_settled_count,
             " . rh_refund_pending_count_sql() . " as refunds_pending_count,
             COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status = 'completed' THEN total_amount ELSE 0 END), 0) as completed_refunds
         FROM payments
@@ -211,6 +211,7 @@ try {
     $financialSummary = $financialStmt->fetch(PDO::FETCH_ASSOC);
 
     // The 10 latest refund rows of the same period (paid out, being paid or awaiting approval) for the Refunds modal.
+    // Ship M2: real payouts only (money moved onto a credit note is guest credit, not a refund), so the list matches the count.
     // Read-only and on its own: a failure here only leaves the modal list empty.
     try {
         $acctRefundStmt = $pdo->prepare("
@@ -219,7 +220,7 @@ try {
             FROM payments
             WHERE " . rh_pay_count_day_sql() . " BETWEEN ? AND ?
               AND deleted_at IS NULL
-              AND ((" . rh_refund_settled_sql() . ") OR (" . rh_refund_pending_sql() . "))
+              AND ((" . rh_refund_payout_sql() . ") OR (" . rh_refund_pending_sql() . "))
             ORDER BY payment_date DESC, id DESC
             LIMIT 10
         ");
@@ -389,8 +390,7 @@ try {
             COUNT(*) as count,
             COALESCE(SUM(" . rh_refund_amount_sql() . "), 0) as total_amount
         FROM payments
-        WHERE payment_type = 'refund'
-          AND refund_status IN ('completed','processing')
+        WHERE " . rh_refund_payout_sql() . "
           AND " . rh_pay_count_day_sql() . " BETWEEN ? AND ?
           AND deleted_at IS NULL
         GROUP BY refund_reason
@@ -574,7 +574,8 @@ try {
             COALESCE(SUM(CASE WHEN booking_type = 'restaurant' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS fnb_rev,
             COALESCE(SUM(CASE WHEN booking_type = 'gym' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS gym_rev,
             COALESCE(SUM(CASE WHEN booking_type = 'event' AND payment_status IN ('completed','paid','refunded','partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS events_rev,
-            " . rh_refund_settled_sum_sql() . " AS refunds,
+            " . rh_refund_payout_sum_sql() . " AS refunds,
+            " . rh_refund_to_credit_sum_sql() . " AS to_credit,
             COUNT(*) AS txn_count
         FROM payments
         WHERE deleted_at IS NULL
@@ -727,7 +728,11 @@ if (!isset($folio_fnb)) {
         // Pre-computed values used in the redesigned layout.
         // -----------------------------------------------------------------
         $cat_revenue_gross = (float)($financialSummary['total_collected'] ?? 0);
-        $cat_revenue_net   = $cat_revenue_gross - (float)($financialSummary['total_refunds_issued'] ?? 0);
+        // Ship M2 (owner 2026-11-19): Refunds = real payouts only; money moved onto a credit note is guest credit. Net
+        // revenue is unchanged: gross - refunds paid out - money moved to guest credit (together the old settled refunds),
+        // because this gross still counts credit-note payments (Reports gates them out), so counting the move as kept
+        // money here would count an overpayment twice once its credit note is spent.
+        $cat_revenue_net   = $cat_revenue_gross - (float)($financialSummary['total_refunds_issued'] ?? 0) - (float)($financialSummary['total_refunds_to_credit'] ?? 0);
         $cat_revenue_room  = (float)($roomSummary['room_collected'] ?? 0);
         $cat_revenue_conf  = (float)($confSummary['conf_collected'] ?? 0);
         $cat_revenue_fnb   = (float)($restaurantSummary['restaurant_collected'] ?? 0);
@@ -843,7 +848,7 @@ if (!isset($folio_fnb)) {
         </div>
 
         <template id="acct-insight-template-net-revenue">
-            <p class="acct-insight-intro">Net revenue is gross collection minus refunds. It shows the money the business actually retained.</p>
+            <p class="acct-insight-intro">Net revenue is gross collection minus refunds paid out and minus money moved to guest credit (credit notes the hotel still holds for guests). It shows the money the business actually retained.</p>
             <table class="acct-insight-table">
                 <thead>
                     <tr>
@@ -857,8 +862,12 @@ if (!isset($folio_fnb)) {
                         <td class="num"><strong><?php echo $currency_symbol . number_format($cat_revenue_gross, 2); ?></strong></td>
                     </tr>
                     <tr>
-                        <td>Refunds issued</td>
+                        <td>Refunds paid out<br><small><?php echo htmlspecialchars(rh_ship_m_help('refunds')); ?></small></td>
                         <td class="num">&minus;<?php echo $currency_symbol . number_format($cat_refunds, 2); ?></td>
+                    </tr>
+                    <tr>
+                        <td>Moved to guest credit<br><small>Overpayments or store credit moved onto a credit note. Held for the guest: not a refund and not kept revenue.</small></td>
+                        <td class="num">&minus;<?php echo $currency_symbol . number_format($cat_refunds_to_credit, 2); ?></td>
                     </tr>
                     <tr>
                         <td>Net retained revenue</td>
@@ -971,15 +980,14 @@ if (!isset($folio_fnb)) {
             <?php
             $acctRfCount = (int)($financialSummary['refunds_settled_count'] ?? 0);
             $acctRfPendingCount = (int)($financialSummary['refunds_pending_count'] ?? 0);
-            $acctRfCredit = round(max(0.0, $cat_refunds_to_credit), 2);
-            $acctRfCash = round(max(0.0, round($cat_refunds, 2) - $acctRfCredit), 2);
+            $acctRfCredit = round(max(0.0, $cat_refunds_to_credit), 2); // Ship M2: guest credit, not in the refunds total
             $acctRfListHref = 'payments.php?' . http_build_query(['start_date' => $startDate, 'end_date' => $endDate, 'refund_status' => 'completed,processing']);
             $acctRfPendingHref = 'payments.php?' . http_build_query(['start_date' => $startDate, 'end_date' => $endDate, 'refund_status' => 'pending']);
             $acctRfCanDetails = function_exists('rhCanLinkTo') && rhCanLinkTo((int)($user['id'] ?? 0), 'payment-details.php');
             $acctRfCanPayments = function_exists('rhCanLinkTo') && rhCanLinkTo((int)($user['id'] ?? 0), 'payments.php');
             $acctRfCur = htmlspecialchars((string)$currency_symbol);
             ?>
-            <p class="acct-insight-intro">Refunds <?php echo $showAll ? 'on all dates' : 'dated ' . htmlspecialchars(date('j M Y', strtotime($startDate)) . ' - ' . date('j M Y', strtotime($endDate))); ?>, VAT included. A refund counts once it is paid out or being paid; refunds awaiting approval are shown on their own and are not in the total.</p>
+            <p class="acct-insight-intro">Refunds <?php echo $showAll ? 'on all dates' : 'dated ' . htmlspecialchars(date('j M Y', strtotime($startDate)) . ' - ' . date('j M Y', strtotime($endDate))); ?>, VAT included. <?php echo htmlspecialchars(rh_ship_m_help('refunds')); ?> A refund counts once it is paid out or being paid; refunds awaiting approval are shown on their own and are not in the total.</p>
             <table class="acct-insight-table">
                 <thead>
                     <tr>
@@ -989,15 +997,11 @@ if (!isset($folio_fnb)) {
                 </thead>
                 <tbody>
                     <tr>
-                        <td><strong>Refunds total</strong> (<?php echo number_format($acctRfCount); ?> refund<?php echo $acctRfCount === 1 ? '' : 's'; ?>)</td>
+                        <td><strong>Refunds total</strong> (<?php echo number_format($acctRfCount); ?> refund<?php echo $acctRfCount === 1 ? '' : 's'; ?>)<br><small>Paid back in cash, bank or mobile money</small></td>
                         <td class="num"><strong><?php echo $acctRfCur . number_format($cat_refunds, 2); ?></strong></td>
                     </tr>
                     <tr>
-                        <td>Paid back in cash / bank</td>
-                        <td class="num"><?php echo $acctRfCur . number_format($acctRfCash, 2); ?></td>
-                    </tr>
-                    <tr>
-                        <td>Moved to credit notes (guest credit, no cash out)</td>
+                        <td>Moved to guest credit, not in the total<br><small>Overpayments or store credit moved onto a credit note; no cash out (see Credit notes)</small></td>
                         <td class="num"><?php echo $acctRfCur . number_format($acctRfCredit, 2); ?></td>
                     </tr>
                     <tr>
@@ -1007,7 +1011,7 @@ if (!isset($folio_fnb)) {
                 </tbody>
             </table>
             <?php if (!empty($acctRefundRows)): ?>
-            <p class="acct-insight-intro" style="margin-top:14px;">Latest <?php echo count($acctRefundRows); ?> refund<?php echo count($acctRefundRows) === 1 ? '' : 's'; ?> in these dates, newest first (awaiting approval included and marked):</p>
+            <p class="acct-insight-intro" style="margin-top:14px;">Latest <?php echo count($acctRefundRows); ?> refund<?php echo count($acctRefundRows) === 1 ? '' : 's'; ?> in these dates, newest first (awaiting approval included and marked; money moved to guest credit is not listed):</p>
             <table class="acct-insight-table">
                 <thead>
                     <tr>
@@ -1651,7 +1655,7 @@ if (!isset($folio_fnb)) {
             $byDay = [];
             foreach ($dailyTrend as $d) {
                 $byDay[$d['day']] = [
-                    'net' => (float)$d['room_rev'] + (float)$d['conf_rev'] + (float)$d['fnb_rev'] + (float)$d['gym_rev'] + (float)$d['events_rev'] - (float)$d['refunds'],
+                    'net' => (float)$d['room_rev'] + (float)$d['conf_rev'] + (float)$d['fnb_rev'] + (float)$d['gym_rev'] + (float)$d['events_rev'] - (float)$d['refunds'] - (float)($d['to_credit'] ?? 0),
                     'txn' => (int)$d['txn_count'],
                 ];
             }
@@ -1765,12 +1769,12 @@ if (!isset($folio_fnb)) {
 
         <!-- ============ KPI STRIP ============ -->
         <section class="ck-kpis" aria-label="Key figures">
-            <div class="ck-kpi ck-kpi--dark js-acct-insight-trigger" title="Net Revenue - total money collected after deducting refunds. This is what the business actually kept." <?php echo $ckTrig('net-revenue', 'Net Revenue Breakdown'); ?> aria-label="Open net revenue breakdown">
+            <div class="ck-kpi ck-kpi--dark js-acct-insight-trigger" title="Net Revenue - total money collected after deducting refunds paid out and money moved to guest credit. This is what the business actually kept." <?php echo $ckTrig('net-revenue', 'Net Revenue Breakdown'); ?> aria-label="Open net revenue breakdown">
                 <span class="ck-kpi__icon"><i class="fas fa-coins"></i></span>
                 <span class="ck-kpi__label">Net revenue</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><?php echo $ckMoney($cat_revenue_net); ?></span>
                 <span class="ck-meter"><span style="width:<?php echo $cat_revenue_gross > 0 ? max(0, min(100, round($cat_revenue_net / $cat_revenue_gross * 100))) : 0; ?>%"></span></span>
-                <span class="ck-kpi__sub">Gross <?php echo $ckPlain($cat_revenue_gross); ?> &minus; refunds <?php echo $ckPlain($cat_refunds); ?></span>
+                <span class="ck-kpi__sub">Gross <?php echo $ckPlain($cat_revenue_gross); ?> &minus; refunds <?php echo $ckPlain($cat_refunds); ?><?php if ($cat_refunds_to_credit > BALANCE_TOLERANCE): ?> &minus; moved to guest credit <?php echo $ckPlain($cat_refunds_to_credit); ?><?php endif; ?></span>
             </div>
             <?php if ($canSeeOwed): ?>
             <div class="ck-kpi<?php echo $cat_recv_total > BALANCE_TOLERANCE ? ' ck-kpi--alert' : ''; ?> js-acct-insight-trigger" title="Receivables - money that <?php echo $ckH($acct_party); ?>s/clients owe but have not yet paid." <?php echo $ckTrig('receivables', 'Receivables Follow-up'); ?> aria-label="Open receivables follow-up">
@@ -1799,13 +1803,13 @@ if (!isset($folio_fnb)) {
                     <?php if (!empty($levyEnabled)): ?> &middot; <span title="Tourism levy on bookings taken in this period, after refunds, including levy on money kept from cancellations">Tourism levy <?php echo $ckPlain($cat_levy_period); ?></span><?php endif; ?>
                 </span>
             </div>
-            <div class="ck-kpi<?php echo $cat_pending_refunds > BALANCE_TOLERANCE ? ' ck-kpi--warn' : ''; ?> js-acct-insight-trigger" title="Refunds - open the detail: cash or bank, moved to credit notes, awaiting approval and the latest refunds" <?php echo $ckTrig('refunds', 'Refunds Detail'); ?> aria-label="Open refunds detail">
+            <div class="ck-kpi<?php echo $cat_pending_refunds > BALANCE_TOLERANCE ? ' ck-kpi--warn' : ''; ?> js-acct-insight-trigger" title="Refunds - open the detail: paid back in cash, bank or mobile money, awaiting approval and the latest refunds (money moved to guest credit shown apart)" <?php echo $ckTrig('refunds', 'Refunds Detail'); ?> aria-label="Open refunds detail">
                 <span class="ck-kpi__icon"><i class="fas fa-rotate-left"></i></span>
                 <span class="ck-kpi__label">Refunds</span>
                 <span class="ck-kpi__value ck-kpi__value--money"><?php echo $ckMoney($cat_refunds); ?></span>
                 <span class="ck-kpi__sub"><?php echo $cat_pending_refunds > BALANCE_TOLERANCE ? 'Awaiting approval ' . $ckPlain($cat_pending_refunds) . ' (not in the total)' : 'None awaiting approval'; ?></span>
-                <?php $catRefundSplit = rh_refund_split_text($cat_refunds, $cat_refunds_to_credit, (string)$currency_symbol, 2); if ($catRefundSplit !== ''): ?><span class="ck-kpi__sub" style="margin-top:0"><?php echo $ckH($catRefundSplit); ?></span><?php endif; ?>
-                <span class="ck-kpi__sub" style="margin-top:0"><?php echo $showAll ? 'Refunds on all dates' : 'Refunds dated ' . $ckH($periodLabel); ?> (VAT included): money paid back plus overpayments or store credit moved to a credit note. Payments shows the same rule for the dates it is filtered to (all dates when unfiltered).</span>
+                <?php if ($cat_refunds_to_credit > BALANCE_TOLERANCE): ?><span class="ck-kpi__sub" style="margin-top:0">Moved to guest credit (not a refund, not in this total): <?php echo $ckPlain($cat_refunds_to_credit); ?></span><?php endif; ?>
+                <span class="ck-kpi__sub" style="margin-top:0"><?php echo $showAll ? 'Refunds on all dates' : 'Refunds dated ' . $ckH($periodLabel); ?> (VAT included). <?php echo $ckH(rh_ship_m_help('refunds')); ?> Payments, End of Day and Reports use the same rule.</span>
             </div>
             <?php if ($mod_pos && $pos_gross > 0): ?>
             <div class="ck-kpi<?php echo $pos_margin_pct < 0 ? ' ck-kpi--alert' : ''; ?>" title="POS gross margin - revenue minus recorded cost of goods"<?php if (function_exists('rhCanLinkTo') && rhCanLinkTo((int)($user['id'] ?? 0), 'pos-accounting.php')): ?> data-href="pos-accounting.php"<?php endif; ?>>
@@ -2174,8 +2178,8 @@ if (!isset($folio_fnb)) {
                                     <?php if ($mod_pos): ?><th class="num"><?php echo $ckH(rh_pos_short_label()); ?></th><?php endif; ?>
                                     <?php if ($mod_gym): ?><th class="num">Gym</th><?php endif; ?>
                                     <?php if ($mod_events): ?><th class="num">Events</th><?php endif; ?>
-                                    <th class="num" title="Refunds issued on this day (subtracted from Net Total)">Refunds</th>
-                                    <th class="num" title="Net Total - all revenue sources combined, minus refunds">Net total</th>
+                                    <th class="num" title="Refunds paid back in cash, bank or mobile money on this day (subtracted from Net Total). Money moved to guest credit is shown under it, also subtracted, but it is not a refund.">Refunds</th>
+                                    <th class="num" title="Net Total - all revenue sources combined, minus refunds paid out and money moved to guest credit">Net total</th>
                                     <th class="num" title="Number of individual payment records on this day">Txns</th>
                                 </tr>
                             </thead>
@@ -2183,7 +2187,7 @@ if (!isset($folio_fnb)) {
                                 <?php if (empty($dailyTrend)): ?>
                                     <tr><td colspan="9" class="ck-table__empty">No payments in the last 14 days of this period.</td></tr>
                                 <?php else: foreach ($dailyTrend as $d):
-                                    $net = (float)$d['room_rev'] + (float)$d['conf_rev'] + (float)$d['fnb_rev'] + (float)$d['gym_rev'] + (float)$d['events_rev'] - (float)$d['refunds'];
+                                    $net = (float)$d['room_rev'] + (float)$d['conf_rev'] + (float)$d['fnb_rev'] + (float)$d['gym_rev'] + (float)$d['events_rev'] - (float)$d['refunds'] - (float)($d['to_credit'] ?? 0);
                                 ?>
                                     <tr>
                                         <td data-label="Date"><strong><?php echo $ckH(date('D, M j', strtotime($d['day']))); ?></strong> <small><?php echo $ckH(date('Y', strtotime($d['day']))); ?></small></td>
@@ -2192,7 +2196,7 @@ if (!isset($folio_fnb)) {
                                         <?php if ($mod_pos): ?><td class="num" data-label="<?php echo $ckH(rh_pos_short_label()); ?>"><?php echo $ckPlain($d['fnb_rev']); ?></td><?php endif; ?>
                                         <?php if ($mod_gym): ?><td class="num" data-label="Gym"><?php echo $ckPlain($d['gym_rev']); ?></td><?php endif; ?>
                                         <?php if ($mod_events): ?><td class="num" data-label="Events"><?php echo $ckPlain($d['events_rev']); ?></td><?php endif; ?>
-                                        <td class="num" data-label="Refunds"><?php echo (float)$d['refunds'] > 0 ? '&minus;' . $ckPlain($d['refunds']) : '&mdash;'; ?></td>
+                                        <td class="num" data-label="Refunds"><?php echo (float)$d['refunds'] > BALANCE_TOLERANCE ? '&minus;' . $ckPlain($d['refunds']) : '&mdash;'; ?><?php if ((float)($d['to_credit'] ?? 0) > BALANCE_TOLERANCE): ?><br><small title="Moved onto a credit note: guest credit, not a refund">&minus;<?php echo $ckPlain($d['to_credit']); ?> to guest credit</small><?php endif; ?></td>
                                         <td class="num" data-label="Net total"><strong><?php echo $ckPlain($net); ?></strong></td>
                                         <td class="num" data-label="Txns"><?php echo (int)$d['txn_count']; ?></td>
                                     </tr>
@@ -2205,7 +2209,7 @@ if (!isset($folio_fnb)) {
                 <?php if (!empty($refundReasons)): ?>
                 <!-- Refunds by reason -->
                 <div class="ck-pane" role="tabpanel" data-ck-pane="refunds" hidden>
-                    <p class="ck-panel__sub" style="margin:0 0 10px">Total refunds issued: <strong><?php echo $ckPlain($cat_refunds); ?></strong><?php if ($cat_pending_refunds > 0): ?> &middot; pending <?php echo $ckPlain($cat_pending_refunds); ?><?php endif; ?></p>
+                    <p class="ck-panel__sub" style="margin:0 0 10px">Total refunds paid out (cash, bank or mobile money; money moved to guest credit is not a refund and not listed): <strong><?php echo $ckPlain($cat_refunds); ?></strong><?php if ($cat_pending_refunds > 0): ?> &middot; pending <?php echo $ckPlain($cat_pending_refunds); ?><?php endif; ?></p>
                     <div class="ck-table-wrap">
                         <table class="no-card-mobile no-scroll ck-table">
                             <thead><tr><th>Reason</th><th class="num">Count</th><th class="num">Total</th><th class="num">% of refunds</th></tr></thead>

@@ -17,6 +17,7 @@
 
 require_once __DIR__ . '/front-desk-counts.php'; // rh_fd_balance_tolerance: the one "owing" rule
 require_once __DIR__ . '/../../includes/smart-search.php'; // the shared word-by-word / phone-number search matcher
+require_once __DIR__ . '/../../includes/booking-pay-state.php'; // pure: rh_pay_state_key / rh_booking_pay_state (the badge rule)
 
 if (!function_exists('rh_bk_search_where')) {
     /**
@@ -222,7 +223,7 @@ if (!function_exists('rh_bk_valid_date')) {
             'guests'    => 'b.number_of_guests',
             'total'     => rh_bk_full_total_sql('b'),
             'status'    => 'b.status',
-            'payment'   => 'b.payment_status', // the booking's own status (from its money), not one payment record's (step 8i)
+            'payment'   => rh_bk_pay_key_sql('b'), // the badge's key from the booking's money (step 13), not one payment record's
             'created'   => 'b.created_at',
         ];
     }
@@ -258,6 +259,37 @@ if (!function_exists('rh_bk_valid_date')) {
         return ($f === '' && ($p === 'unpaid' || $p === 'paid')) ? $p : '';
     }
 
+    /**
+     * SQL twin of rh_booking_pay_state()'s key (includes/booking-pay-state.php, step 13 owner 2026-11-19): 'paid',
+     * 'partial', 'unpaid' or 'refunded' from the row's own money, exactly as the badge and the pop-up decide it, so the
+     * Paid / Unpaid tabs, their counts, the Payment filter and the export can never disagree with the badge.
+     *   paid = ROUND(GREATEST(0, amount_paid), 2), due = ROUND(GREATEST(0, amount_due), 2),
+     *   credit = ROUND(GREATEST(0, credit_balance), 2), billed = GREATEST(0, ROUND(paid + due - credit, 2)),
+     *   closed = status cancelled / no-show / expired, refundedOut = stored payment_status 'refunded' (the row carries no
+     *   refund total; the PHP rule reads the same flag).
+     *   closed AND paid <= tol AND refundedOut AND due <= tol         -> 'refunded'
+     *   closed AND billed <= tol AND paid <= tol AND NOT refundedOut  -> 'unpaid'
+     *   due <= tol -> 'paid'; paid > tol -> 'partial'; else 'unpaid'.
+     * Every room of a group and every company-billed room is one bookings row with its own figures, like its badge.
+     * Constant text (the tolerance is a number, BALANCE_TOLERANCE), never user input.
+     */
+    function rh_bk_pay_key_sql(string $b = 'b'): string
+    {
+        $tol = sprintf('%.4F', rh_pay_state_tol());
+        $paid = "ROUND(GREATEST(0, COALESCE({$b}.amount_paid, 0)), 2)";
+        $due = "ROUND(GREATEST(0, COALESCE({$b}.amount_due, 0)), 2)";
+        $credit = "ROUND(GREATEST(0, COALESCE({$b}.credit_balance, 0)), 2)";
+        $billed = "GREATEST(0, ROUND({$paid} + {$due} - {$credit}, 2))";
+        $closed = "LOWER(TRIM(COALESCE({$b}.status, ''))) IN ('cancelled', 'no-show', 'expired')";
+        $refundedOut = "LOWER(TRIM(COALESCE({$b}.payment_status, ''))) = 'refunded'";
+        return "(CASE"
+            . " WHEN {$closed} AND {$paid} <= {$tol} AND {$refundedOut} AND {$due} <= {$tol} THEN 'refunded'"
+            . " WHEN {$closed} AND {$billed} <= {$tol} AND {$paid} <= {$tol} AND NOT ({$refundedOut}) THEN 'unpaid'"
+            . " WHEN {$due} <= {$tol} THEN 'paid'"
+            . " WHEN {$paid} > {$tol} THEN 'partial'"
+            . " ELSE 'unpaid' END)";
+    }
+
     /** Tab => extra list WHERE pieces (no params) and its default order; the badge query uses the same rules. */
     function rh_bk_tab_clauses(string $tab): array
     {
@@ -272,9 +304,11 @@ if (!function_exists('rh_bk_valid_date')) {
             case 'expiring-soon':
                 return ['clauses' => ["b.status = 'tentative'", 'b.tentative_expires_at IS NOT NULL', 'b.tentative_expires_at BETWEEN NOW() AND DATE_ADD(NOW(), INTERVAL 24 HOUR)'], 'order' => 'b.tentative_expires_at ASC'];
             case 'paid':
-                return ['clauses' => ["b.payment_status IN ('paid', 'completed')"], 'order' => null];
+                // Step 13: the badge's rule (rh_bk_pay_key_sql), any booking status, as before.
+                return ['clauses' => [rh_bk_pay_key_sql('b') . " = 'paid'"], 'order' => null];
             case 'unpaid':
-                return ['clauses' => ["b.payment_status NOT IN ('paid', 'completed', 'refunded')", "b.status NOT IN ('cancelled', 'no-show', 'expired')"], 'order' => null];
+                // Unpaid or part paid by the badge's rule; cancelled / no-show / expired stay out, as before.
+                return ['clauses' => [rh_bk_pay_key_sql('b') . " IN ('partial', 'unpaid')", "b.status NOT IN ('cancelled', 'no-show', 'expired')"], 'order' => null];
             case 'today-bookings':
                 return ['clauses' => ['DATE(b.created_at) = CURDATE()'], 'order' => null];
             case 'week-bookings':
@@ -289,19 +323,16 @@ if (!function_exists('rh_bk_valid_date')) {
     }
 
     /**
-     * Paid / Unpaid for one row, exactly as the SQL above decides it (the booking's own payment_status; a NULL
-     * payment status is neither, like SQL's NULL IN / NOT IN). Feeds the on-screen tab filter.
+     * Paid / Unpaid for one row, exactly as the SQL above decides it. $payKey = rh_booking_pay_state($row)['key'] (the
+     * badge), $status = the booking status. Feeds the on-screen tab filter.
      */
-    function rh_bk_payment_flags($payment_status, $status): array
+    function rh_bk_payment_flags(string $payKey, $status): array
     {
-        if ($payment_status === null) {
-            return ['paid' => false, 'unpaid' => false];
-        }
-        $p = strtolower(trim((string)$payment_status));
+        $k = strtolower(trim($payKey));
         $s = strtolower(trim((string)$status));
         return [
-            'paid' => in_array($p, ['paid', 'completed'], true),
-            'unpaid' => !in_array($p, ['paid', 'completed', 'refunded'], true) && !in_array($s, ['cancelled', 'no-show', 'expired'], true),
+            'paid' => $k === 'paid',
+            'unpaid' => in_array($k, ['partial', 'unpaid'], true) && !in_array($s, ['cancelled', 'no-show', 'expired'], true),
         ];
     }
 
@@ -509,11 +540,10 @@ if (!function_exists('rh_bk_kind_filter')) {
 
     /**
      * ['clauses' => [...], 'params' => [...]] for a ?pay= value, or null. Only existing rules, never a new money rule:
-     *   paid      the Paid tab (booking payment status paid / completed)
-     *   unpaid    the Unpaid tab (not paid / completed / refunded, not cancelled / no-show / expired; part paid included)
-     *   part      the Unpaid tab's rows whose payment status is 'partial' (recalculateBookingFinancials: something paid,
-     *             something still to pay)
-     *   refunded  payment status 'refunded' (recalculateBookingFinancials: a cancelled booking whose money all went back)
+     *   paid      the Paid tab (the badge reads Paid in full: rh_bk_pay_key_sql 'paid')
+     *   unpaid    the Unpaid tab (badge Unpaid or Part paid, not cancelled / no-show / expired)
+     *   part      the Unpaid tab's rows whose badge reads Part paid (something paid, something still to pay)
+     *   refunded  the badge reads Refunded (a closed booking whose money all went back)
      *   fee_owed  the Still owed (receivables) rule for cancelled and no-show rooms: amount due above BALANCE_TOLERANCE
      *             (bound) and a no-show, or a cancelled room that kept a fee or still has folio extras posted
      *             (rh_receivable_status_sql). Expired holds carrying a group no-show charge are not included here.
@@ -526,9 +556,9 @@ if (!function_exists('rh_bk_kind_filter')) {
             case 'unpaid':
                 return ['clauses' => rh_bk_tab_clauses('unpaid')['clauses'], 'params' => []];
             case 'part':
-                return ['clauses' => array_merge(rh_bk_tab_clauses('unpaid')['clauses'], ["b.payment_status = 'partial'"]), 'params' => []];
+                return ['clauses' => array_merge(rh_bk_tab_clauses('unpaid')['clauses'], [rh_bk_pay_key_sql('b') . " = 'partial'"]), 'params' => []];
             case 'refunded':
-                return ['clauses' => ["b.payment_status = 'refunded'"], 'params' => []];
+                return ['clauses' => [rh_bk_pay_key_sql('b') . " = 'refunded'"], 'params' => []];
             case 'fee_owed':
                 return ['clauses' => [
                     'b.amount_due > ?',

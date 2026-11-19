@@ -683,7 +683,10 @@ $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
 
                                                 // Payment info
                                                 // Step 8i: from the booking's money (paid so far vs balance due), never a payment record's status.
-                                                $paymentStatus = htmlspecialchars(rh_booking_pay_state($booking, ['currency' => (string)getSetting('currency_symbol')])['label'], ENT_QUOTES, 'UTF-8');
+                                                // Step 13: the label keeps its own words (no Title Case) and its class colours the tooltip like the list's pill.
+                                                $calPayState = rh_booking_pay_state($booking, ['currency' => (string)getSetting('currency_symbol')]);
+                                                $paymentStatus = htmlspecialchars($calPayState['label'], ENT_QUOTES, 'UTF-8');
+                                                $paymentClass = in_array($calPayState['class'], ['ok', 'warn', 'alert'], true) ? $calPayState['class'] : 'muted';
                                                 $totalAmount = number_format(rh_booking_full_total($booking), 2); // full amount incl. VAT & levy
                                                 $currencySymbol = getSetting('currency_symbol');
                                                 // The room rate a night it was BOOKED at × nights (the row's own columns, no query).
@@ -711,6 +714,7 @@ $calendarMonthLabel = $monthNames[(int)$currentMonth] . ' ' . $currentYear;
                                                     'data-check-out' => $checkOut,
                                                     'data-nights' => $nights,
                                                     'data-payment-status' => $paymentStatus,
+                                                    'data-payment-class' => $paymentClass,
                                                     'data-amount' => $currencySymbol . ' ' . $totalAmount,
                                                     'data-booked-rate' => htmlspecialchars($calRateCompact, ENT_QUOTES, 'UTF-8'),
                                                     'data-booking-id' => intval($booking['id']),

@@ -591,7 +591,9 @@
                 checkIn: trigger.dataset.checkIn || '',
                 checkOut: trigger.dataset.checkOut || '',
                 nights: trigger.dataset.nights || '0',
-                paymentStatus: trigger.dataset.paymentStatus || 'Pending',
+                paymentStatus: trigger.dataset.paymentStatus || '',
+                // ok / warn / alert from rh_booking_pay_state (step 13): the same colours as the Bookings list pill.
+                paymentClass: /^(ok|warn|alert|muted)$/.test(trigger.dataset.paymentClass || '') ? trigger.dataset.paymentClass : 'muted',
                 amount: trigger.dataset.amount || '',
                 bookedRate: trigger.dataset.bookedRate || ''
             };
@@ -636,7 +638,7 @@
                     <span class="tooltip-value">${this.escapeHtml(data.bookedRate)}</span>
                 </div>` : ''}
                 <div class="tooltip-footer">
-                    <span class="tooltip-payment ${this.slugify(data.paymentStatus)}">${this.escapeHtml(data.paymentStatus)}</span>
+                    <span class="tooltip-payment tooltip-payment--${data.paymentClass}">${this.escapeHtml(data.paymentStatus)}</span>
                     <span class="tooltip-amount">${this.escapeHtml(data.amount)}</span>
                 </div>
             `;

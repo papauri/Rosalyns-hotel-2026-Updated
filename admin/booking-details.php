@@ -3448,10 +3448,13 @@ unset($_SESSION['success_message'], $_SESSION['error_message']);
                         <div><dt>Completed stays<br><small class="bd-muted">checked-out stays under this email, this one included; rooms booked together count once; in-house and upcoming not counted</small></dt><dd><?php echo $gh_ok ? (int) $guest_history['completed_stays'] : '&ndash;'; ?></dd></div>
                         <div><dt>Other bookings<br><small class="bd-muted">every other booking under this email, any status</small></dt><dd><?php echo $gh_ok ? (int) $guest_history['other_bookings'] : '&ndash;'; ?></dd></div>
                         <?php if (is_array($guest_history['money'])): ?>
-                        <div><dt>Received<br><small class="bd-muted">money paid in across all their bookings, this one included, less refunds</small></dt><dd><?php echo htmlspecialchars((string)$currency_symbol) . number_format((float)$guest_history['money']['received'], 0); ?></dd></div>
+                        <div><dt>Received<br><small class="bd-muted">money paid in across all their bookings, this one included, less refunds and less money moved to guest credit</small></dt><dd><?php echo htmlspecialchars((string)$currency_symbol) . number_format((float)$guest_history['money']['received'], 0); ?></dd></div>
+                        <?php /* Ship M2: Refunded = real payouts only; money moved onto a credit note is its own line (guest credit, not a refund). Received is unchanged. */ ?>
                         <?php if ((float)$guest_history['money']['refunded'] > BALANCE_TOLERANCE): ?>
-                        <?php $gh_split = rh_refund_split_text((float)$guest_history['money']['refunded'], (float)($guest_history['money']['to_credit'] ?? 0), (string)$currency_symbol, 0); ?>
-                        <div><dt>Refunded<br><small class="bd-muted"><?php echo htmlspecialchars($gh_split !== '' ? $gh_split . '; already taken off Received' : 'paid back in cash / bank, in full; already taken off Received'); ?></small></dt><dd><?php echo htmlspecialchars((string)$currency_symbol) . number_format((float)$guest_history['money']['refunded'], 0); ?></dd></div>
+                        <div><dt>Refunded<br><small class="bd-muted">paid back in cash, bank or mobile money; already taken off Received</small></dt><dd><?php echo htmlspecialchars((string)$currency_symbol) . number_format((float)$guest_history['money']['refunded'], 0); ?></dd></div>
+                        <?php endif; ?>
+                        <?php if ((float)($guest_history['money']['to_credit'] ?? 0) > BALANCE_TOLERANCE): ?>
+                        <div><dt>Moved to guest credit<br><small class="bd-muted">overpayments or store credit moved onto a credit note; not a refund, held for the guest; already taken off Received</small></dt><dd><?php echo htmlspecialchars((string)$currency_symbol) . number_format((float)$guest_history['money']['to_credit'], 0); ?></dd></div>
                         <?php endif; ?>
                         <?php endif; ?>
                     </dl>

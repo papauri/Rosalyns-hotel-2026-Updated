@@ -133,7 +133,7 @@ foreach ($pages as $rel) {
     check(preg_match('/THEN\s+-?refund_amount\b|SUM\(\s*refund_amount\s*\)|-refund_amount\b/', $src) === 0, "$rel: no refund total reads refund_amount");
 }
 $pay = (string)file_get_contents($root . '/admin/payments.php');
-check(strpos($pay, 'rh_refund_settled_sum_sql() . " AS refunds_total') !== false && strpos($pay, 'rh_refund_pending_sum_sql() . " AS refunds_pending_total') !== false, 'payments: Refunds card uses the helper, pending apart');
+check(strpos($pay, 'rh_refund_payout_sum_sql() . " AS refunds_total') !== false && strpos($pay, 'rh_refund_pending_sum_sql() . " AS refunds_pending_total') !== false, 'payments: Refunds card uses the payout helper (Ship M2), pending apart');
 check(strpos($pay, '$payState = rh_pay_row_state($payment, (float)BALANCE_TOLERANCE') !== false, 'payments: row wording via rh_pay_row_state with BALANCE_TOLERANCE');
 check(strpos($pay, "rh_receivable_status_sql('conference', 'ci')") !== false && strpos($pay, 'END as account_in_rule') !== false, 'payments: row note uses the receivables rule, in the list query');
 check(strpos($pay, '<span class="ck-kpi__label">Still owed</span>') !== false && strpos($pay, '<span class="ck-kpi__label">Pending / Partial</span>') === false, 'payments: Still owed card replaces Pending / Partial');
