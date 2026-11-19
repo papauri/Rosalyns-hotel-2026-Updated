@@ -641,5 +641,9 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
   when one email is found; `balances_due` per-row fallback (speed).
 
 ## Synced
+- 2026-11-20 (owner prompted), PART DONE: Guides for every Pending entry above, Rosalyn's 909510e / Liwonde 8704293.
+  Manager Guides: Stock, Bookings, Money and End of Day, Staff and Permissions refreshed; Daily checklist no change.
+  Assistant: built at Liwonde, not yet committed; waiting on its test run (see TASKS.md SYNC 2026-11-20).
+  The Pending entries stay until the Assistant part ships; after that, move them all here.
 - Through 943ca16: Rosalyn's 55827b0 / Liwonde 717b36e (and earlier 859473d / 8f7301d, 5085f61 / 2c82b0e).
   Full history: `.claude/TASKS.md` Shipped + `.claude/archive/`.
