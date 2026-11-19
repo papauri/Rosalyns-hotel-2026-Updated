@@ -1229,8 +1229,12 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                     </div>
                     <p class="field-note" id="ing_drink_line"></p>
                     <div class="ing-drink-pick" id="ing_drink_pick_row" hidden>
-                        <label for="ing_drink_pick">Show it in <i class="help" data-tip="Pick a measure from the hotel's list to see how many are in one bottle and what one costs. Nothing is saved from here.">?</i></label>
+                        <label for="ing_drink_pick">Show it in <i class="help" data-tip="Pick a measure from the hotel's list, or choose Other amount and type its name and ml, to see how many are in one bottle and what one costs. Nothing is saved from here unless you press Use this for counting and then Save. To use a new measure in recipes and the menu too, add it under Drink measures.">?</i></label>
                         <select id="ing_drink_pick" aria-label="Measure to show"></select>
+                        <span class="ing-drink-custom" id="ing_drink_custom" hidden>
+                            <input type="text" id="ing_drink_cname" maxlength="30" placeholder="Name, e.g. double" aria-label="Name of this measure">
+                            <input type="number" id="ing_drink_cml" step="any" min="0.01" max="<?php echo (int)RH_DRINK_MEASURE_MAX_ML; ?>" placeholder="ml, e.g. 35" aria-label="Size of this measure in ml">
+                        </span>
                         <?php if ($measureReady): ?>
                             <button type="button" class="btn-secondary" id="ing_drink_use" onclick="ingDrinkUse()" title="Fills the count measure below (smaller measure and how many in one bigger). Check it, then press Save.">Use this for counting</button>
                         <?php endif; ?>
@@ -1842,6 +1846,8 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
          * One plain line: "1 L bottle · 1 shot = 30 ml → 1 bottle = 33.3 shots · cost per shot MWK 900.00". */
         const ING_DRINK_LIST = <?php echo json_encode($drinkList); ?>;
         const ING_DRINK_CUR = <?php echo json_encode((string)$currency_symbol); ?>;
+        const ING_DRINK_CUSTOM = '__other__'; // value of the "Other amount" option
+        const ING_DRINK_MAX_ML = <?php echo (int)RH_DRINK_MEASURE_MAX_ML; ?>;
         let ingDrinkCost = 0;
         function ingDrinkVal(id) {
             const el = document.getElementById(id);
@@ -1890,13 +1896,8 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
             const whole = size.source === 'unit' ? size.perUnit : size.container; // ml in one whole bottle (or one litre)
             const wholeWord = size.source === 'unit' ? unit : bigWord;
             const src = size.source === 'name' ? ' (from the name)' : '';
-            if (!ING_DRINK_LIST.length) {
-                line.textContent = '1 ' + wholeWord + ' = ' + ingDrinkSize(whole) + src + '. Add shots, glasses and so on under Drink measures to see how many are in one.';
-                pickRow.hidden = true;
-                return;
-            }
             const keep = pick.value;
-            if (pick.options.length !== ING_DRINK_LIST.length) {
+            if (pick.options.length !== ING_DRINK_LIST.length + 1) {
                 pick.innerHTML = '';
                 ING_DRINK_LIST.forEach(function (m) {
                     const o = document.createElement('option');
@@ -1904,10 +1905,39 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                     o.textContent = m.name + ' (' + RHDrink.fmt(m.ml, 2) + ' ml)';
                     pick.appendChild(o);
                 });
+                const oc = document.createElement('option');
+                oc.value = ING_DRINK_CUSTOM;
+                oc.textContent = 'Other amount (type it)';
+                pick.appendChild(oc);
             }
             const shot = ING_DRINK_LIST.find(function (m) { return m.name.toLowerCase() === 'shot'; });
-            pick.value = keep && ING_DRINK_LIST.some(function (m) { return m.name === keep; }) ? keep : (shot ? shot.name : ING_DRINK_LIST[0].name);
-            const m = ING_DRINK_LIST.find(function (x) { return x.name === pick.value; });
+            pick.value = keep && (keep === ING_DRINK_CUSTOM || ING_DRINK_LIST.some(function (m) { return m.name === keep; })) ? keep
+                : (shot ? shot.name : (ING_DRINK_LIST.length ? ING_DRINK_LIST[0].name : ING_DRINK_CUSTOM));
+            pickRow.hidden = false;
+            const use = document.getElementById('ing_drink_use');
+            const useTip = 'Fills the count measure below (smaller measure and how many in one bigger). Check it, then press Save.';
+            // Other amount: a name and its ml typed here, for this item only (the count measure, with Use this for
+            // counting + Save). The hotel's list used by recipes and the menu is changed under Drink measures.
+            const custom = pick.value === ING_DRINK_CUSTOM;
+            document.getElementById('ing_drink_custom').hidden = !custom;
+            let m;
+            if (custom) {
+                const cname = document.getElementById('ing_drink_cname').value.trim();
+                const cml = parseFloat(document.getElementById('ing_drink_cml').value);
+                if (!(cml > 0) || cml > ING_DRINK_MAX_ML) {
+                    line.textContent = '1 ' + wholeWord + ' = ' + ingDrinkSize(whole) + src + '. Type the size of your measure in ml to see how many are in one.';
+                    if (use) { use.dataset.n = ''; use.dataset.name = ''; use.disabled = true; use.title = 'Type the size in ml first.'; }
+                    return;
+                }
+                m = { name: cname || 'measure', ml: cml };
+                if (use) {
+                    use.disabled = !cname;
+                    use.title = cname ? useTip : 'Type a name for this measure first, e.g. double.';
+                }
+            } else {
+                m = ING_DRINK_LIST.find(function (x) { return x.name === pick.value; });
+                if (use) { use.disabled = false; use.title = useTip; }
+            }
             const n = whole / m.ml;
             let t;
             if (size.source === 'unit' && size.perUnit < 100) {
@@ -1918,17 +1948,18 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
             }
             if (ingDrinkCost > 0) t += ' · cost per ' + m.name + ' ' + ING_DRINK_CUR + ' ' + (ingDrinkCost * m.ml / size.perUnit).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
             line.textContent = t;
-            pickRow.hidden = false;
-            const use = document.getElementById('ing_drink_use');
-            if (use) use.dataset.n = String(Math.round(n * 10000) / 10000);
+            if (use) {
+                use.dataset.n = String(Math.round(n * 10000) / 10000);
+                use.dataset.name = m.name;
+            }
         }
         /* Fills the count measure (Step U1) with the picked measure: suggestion only, saved with Save. */
         function ingDrinkUse() {
             const pick = document.getElementById('ing_drink_pick');
             const use = document.getElementById('ing_drink_use');
-            if (!pick || !use || !document.getElementById('ing_measure') || !(parseFloat(use.dataset.n) > 0)) return;
+            if (!pick || !use || use.disabled || !document.getElementById('ing_measure') || !(parseFloat(use.dataset.n) > 0) || !use.dataset.name) return;
             const unit = (document.getElementById('ing_unit').value || '').trim();
-            document.getElementById('ing_m_small').value = pick.value;
+            document.getElementById('ing_m_small').value = use.dataset.name;
             document.getElementById('ing_m_n').value = use.dataset.n;
             if (!document.getElementById('ing_m_big').value.trim()) document.getElementById('ing_m_big').value = ingDrinkWord(unit);
             ingMeasureSync();

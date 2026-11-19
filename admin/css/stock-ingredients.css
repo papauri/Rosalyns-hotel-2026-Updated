@@ -477,8 +477,27 @@
     margin: 0;
 }
 
+/* "Other amount": name + ml typed in place, next to the measure picker. */
+.ing-drink-custom {
+    display: flex;
+    flex: 1 1 260px;
+    gap: 8px;
+    min-width: 0;
+}
+
+.ing-drink-custom input {
+    min-height: 44px;
+    min-width: 0;
+    flex: 1 1 0;
+}
+
+.ing-drink-custom input[type="number"] {
+    flex: 0 1 110px;
+}
+
 .ing-measure[hidden],
 .ing-drink-pick[hidden],
+.ing-drink-custom[hidden],
 .modal-content .form-row[hidden] {
     display: none;
 }
