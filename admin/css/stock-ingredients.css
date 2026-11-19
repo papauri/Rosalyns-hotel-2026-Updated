@@ -685,3 +685,98 @@
     padding: 10px 16px;
     cursor: pointer;
 }
+
+/* Change main unit (Step U3): the offer in the item form and the preview dialog. */
+.ing-unit-change {
+    margin-top: 10px;
+    padding-top: 10px;
+    border-top: 1px solid var(--admin-surface-border, #eaecef);
+}
+
+.ing-unit-change[hidden],
+#unitChangeModal [hidden] {
+    display: none;
+}
+
+#unitChangeModal .modal-footer .btn-primary,
+#unitChangeModal .modal-footer .btn-secondary {
+    min-height: 44px;
+}
+
+#unitChangeModal .uc-summary {
+    font-weight: 600;
+    margin: 0 0 6px;
+}
+
+#unitChangeModal .uc-value {
+    margin: 10px 0;
+    padding: 8px 10px;
+    border: 1px solid var(--admin-surface-border, #eaecef);
+    border-radius: 8px;
+    font-weight: 600;
+}
+
+#unitChangeModal .uc-lines {
+    border: 1px solid var(--admin-surface-border, #eaecef);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+#unitChangeModal .uc-line {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 1fr);
+    gap: 8px;
+    padding: 8px 10px;
+    border-top: 1px solid var(--admin-surface-border, #eaecef);
+    font-size: 14px;
+    overflow-wrap: anywhere;
+}
+
+#unitChangeModal .uc-line.uc-head {
+    border-top: 0;
+    font-weight: 600;
+}
+
+#unitChangeModal .uc-place {
+    font-weight: 600;
+}
+
+#unitChangeModal .uc-errors {
+    margin-top: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--admin-danger, #c0392b);
+    border-radius: 8px;
+}
+
+#unitChangeModal .uc-errors p,
+#unitChangeModal .uc-errors ul {
+    margin: 0 0 4px;
+}
+
+#unitChangeModal .uc-history h4 {
+    margin: 14px 0 6px;
+    font-size: 14px;
+}
+
+#unitChangeModal .uc-history ul {
+    margin: 0;
+    padding-left: 18px;
+    font-size: 14px;
+}
+
+@media (max-width: 600px) {
+    #unitChangeModal .uc-line {
+        grid-template-columns: minmax(0, 1fr);
+        gap: 2px;
+    }
+
+    #unitChangeModal .uc-line.uc-head {
+        display: none;
+    }
+
+    #unitChangeModal .uc-line .uc-old::before,
+    #unitChangeModal .uc-line .uc-new::before {
+        content: attr(data-label);
+        font-weight: 600;
+    }
+}

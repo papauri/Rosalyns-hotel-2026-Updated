@@ -42,6 +42,7 @@ maintenance_audit_log (CASCADE). Everything else is an id column with NO FK — 
 - `order_id`: pos_ready_notifications, station_messages, stock_kds_events, **print_jobs** (+ print_job_items via job_id; queued/sent/failed jobs CANCELLED in `rh_close_pos_order` and `rh_close_refunded_order_lines`, jobs + markers DELETED with the order in `rh_delete_pos_order`; printed jobs are history; data-health FAIL check) (+ booking_charges.stock_order_id);
   stock_order_items unserved lines of a REFUNDED order are CLOSED by `rh_close_refunded_order_lines()` (till refund + payments refund sync); data-health FAIL check covers it
 - `payment_id`: credit_note_applications, mra_submission_queue, payment_audit_log, receipt_events
+- `ingredient_id` (no FK): **stock_unit_changes** (Step U3, migration 090) is KEEP history: an item with a main-unit change is archived, never deleted; a count that a later unit change follows cannot be taken back (stock-clear-lib); data-health WARN "Main-unit changes whose stock item is missing"
 - `member_id`: gym_attendance, gym_class_enrollments, gym_member_audit_log, gym_reminder_log, gym_slot_reservations
 - `event_id`: event_inquiries · `conference_id`: payments
 - `individual_room_id`: booking_rooms, bookings, housekeeping_assignments, individual_room_amenities,

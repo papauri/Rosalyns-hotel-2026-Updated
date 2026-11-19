@@ -12782,6 +12782,9 @@ function deductStockForMenuItem(int $menuItemId, string $menuType, float $portio
     try {
         if ($ownTx) $pdo->beginTransaction();
 
+        // Step U3: read before the recipe rows (same snapshot); checked again once the ingredients are locked.
+        $unitMark = rh_stock_unit_change_mark($pdo);
+
         // Fetch recipe + ingredients
         $stmt = $pdo->prepare("
             SELECT sri.ingredient_id, sri.quantity_per_portion, sri.yield_percent
@@ -12847,6 +12850,13 @@ function deductStockForMenuItem(int $menuItemId, string $menuType, float $portio
         }
 
         ksort($needByIngredient); // lock order: ingredients by ascending id (same as restore and the sweep)
+        /* Step U3: an item that changed its main unit (bottle -> shot) after the recipe was read would be deducted in the
+         * old unit. Lock the items (ascending, as deductStockBatchFIFO does next) and check; a change waits or fails it. */
+        if ($needByIngredient && rh_stock_unit_changes_ready($pdo)) {
+            $unitIds = array_keys($needByIngredient);
+            $pdo->prepare('SELECT id FROM stock_ingredients WHERE id IN (' . implode(',', array_fill(0, count($unitIds), '?')) . ') ORDER BY id FOR UPDATE')->execute($unitIds);
+            rh_stock_unit_change_guard($pdo, $unitIds, $unitMark);
+        }
         foreach ($needByIngredient as $ingredientId => $rawNeeded) {
             if ($dupDeductions) {
                 $dupDeductions->execute([$sourceType, $sourceId, $ingredientId]);
@@ -13246,6 +13256,9 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
     try {
         if ($ownTx) $pdo->beginTransaction();
 
+        // Step U3: read before the trail / recipe rows (same snapshot); checked again once the ingredients are locked.
+        $unitMark = rh_stock_unit_change_mark($pdo);
+
         // Use the caller-supplied source type to find the original deduction adjustments.
         // Room-service charges use 'room_service'; POS orders use 'pos_order'.
         $sourceType = in_array($originalSourceType, ['pos_order', 'room_service', 'manual', 'variance', 'wastage'], true)
@@ -13344,6 +13357,10 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
                 }
             }
 
+            /* Step U3: a deduction recorded before the item changed its main unit (bottle -> shot) is in the old unit.
+             * It goes back in today's unit: quantity x factor, cost / factor (same value). Pairing above is by count. */
+            $unitFactors = $hits ? rh_stock_unit_change_factors($pdo, array_keys($adjOrder)) : [];
+
             $seenAdj = [];
             foreach ($hits as $h) {
                 $adjId = (int)$h['adjustment_id'];
@@ -13351,20 +13368,28 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
                 if (isset($alreadyRestoredAdj[$adjId])) {
                     continue;
                 }
+                $unitScale = $unitFactors ? rh_stock_unit_change_scale($unitFactors, $ingId, $adjId) : 1.0;
                 // The LEFT JOIN can multiply rows when one adjustment spans several batches.
                 // Add quantity_change once per adjustment to avoid over-restoring the ingredient total.
                 if (!isset($seenAdj[$adjId])) {
                     $seenAdj[$adjId] = true;
                     $restQ = abs((float)$h['quantity_change']) * $traceScale;
+                    if ($unitScale !== 1.0) {
+                        $restQ = round($restQ * $unitScale, 6);
+                    }
                     $byIngredient[$ingId] = ($byIngredient[$ingId] ?? 0) + $restQ;
                     // The restore is valued at the FIFO cost the stock left at (not today's average),
                     // so usage minus restores nets to exactly what is still out.
-                    $restCostNum[$ingId] = ($restCostNum[$ingId] ?? 0.0) + $restQ * (float)$h['cost_at_time'];
+                    $restCostNum[$ingId] = ($restCostNum[$ingId] ?? 0.0) + $restQ * ((float)$h['cost_at_time'] / $unitScale);
                     $restCostDen[$ingId] = ($restCostDen[$ingId] ?? 0.0) + $restQ;
                 }
                 if (!empty($h['batch_id'])) {
                     $bid = (int)$h['batch_id'];
-                    $byBatch[$bid] = ($byBatch[$bid] ?? 0) + (float)$h['quantity_deducted'] * $traceScale;
+                    $bq = (float)$h['quantity_deducted'] * $traceScale;
+                    if ($unitScale !== 1.0) {
+                        $bq = round($bq * $unitScale, 6);
+                    }
+                    $byBatch[$bid] = ($byBatch[$bid] ?? 0) + $bq;
                 }
             }
         }
@@ -13402,6 +13427,8 @@ function restoreStockForMenuItem(int $menuItemId, string $menuType, float $porti
             $lockIds = array_map('intval', array_keys($byIngredient));
             sort($lockIds);
             $pdo->prepare("SELECT id FROM stock_ingredients WHERE id IN (" . implode(',', array_fill(0, count($lockIds), '?')) . ") ORDER BY id FOR UPDATE")->execute($lockIds);
+            // Step U3: an item that changed its main unit since the rows above were read would be restored in the wrong unit.
+            rh_stock_unit_change_guard($pdo, $lockIds, $unitMark);
         }
 
         if ($usedRecipeFallback && !empty($byIngredient) && empty($byBatch)) {
@@ -13766,6 +13793,21 @@ function rh_stock_backcost_settled_deficit(PDO $pdo, int $ingredientId, float $d
         ");
         $st->execute([$ingredientId]);
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+        // Main-unit change (Step U3): sales recorded up to the item's latest change are in an old unit, and a change needs
+        // stock of 0 or more, so none of them is part of a deficit opened after it. They are left as they are (their cost
+        // of sale never changes); fills recorded before the change belong to them and are not counted either.
+        $unitChgAdj = 0;
+        $unitChgAt = null;
+        if ($rows && function_exists('rh_stock_unit_changes_ready') && rh_stock_unit_changes_ready($pdo)) {
+            $uc = $pdo->prepare('SELECT last_adjustment_id, changed_at FROM stock_unit_changes WHERE ingredient_id = ? ORDER BY id DESC LIMIT 1 LOCK IN SHARE MODE');
+            $uc->execute([$ingredientId]);
+            $ucRow = $uc->fetch(PDO::FETCH_ASSOC);
+            if ($ucRow) {
+                $unitChgAdj = (int)$ucRow['last_adjustment_id'];
+                $unitChgAt = (string)$ucRow['changed_at'];
+                $rows = array_values(array_filter($rows, static fn($r) => (int)$r['adj_id'] > $unitChgAdj));
+            }
+        }
         if (!$rows) {
             return $result;
         }
@@ -13775,8 +13817,9 @@ function rh_stock_backcost_settled_deficit(PDO $pdo, int $ingredientId, float $d
         $filled = [];
         foreach (array_chunk($orderIds, 200) as $chunk) {
             $ph = implode(',', array_fill(0, count($chunk), '?'));
-            $as = $pdo->prepare("SELECT order_id, details FROM stock_order_audit WHERE event = 'cost_filled' AND order_id IN ($ph)");
-            $as->execute($chunk);
+            $as = $pdo->prepare("SELECT order_id, details FROM stock_order_audit WHERE event = 'cost_filled' AND order_id IN ($ph)"
+                . ($unitChgAt !== null ? ' AND created_at >= ?' : ''));
+            $as->execute($unitChgAt !== null ? array_merge($chunk, [$unitChgAt]) : $chunk);
             foreach ($as->fetchAll(PDO::FETCH_ASSOC) as $ar) {
                 $d = json_decode((string)$ar['details'], true);
                 if (is_array($d) && (int)($d['ingredient_id'] ?? 0) === $ingredientId) {
@@ -14288,6 +14331,87 @@ function rh_stock_measure_save(PDO $pdo, int $ingId, ?array $new, int $userId, s
             $pdo->rollBack();
         }
         throw $e;
+    }
+}
+
+/* ===== Change main unit (Step U3, owner 2026-11-19; migration 090) =====
+ * An item with a count measure (bottle of 30 shots) can switch its stock unit between the two measures. The switch
+ * (admin/includes/stock-unit-change-lib.php) rescales the live numbers at once and writes one stock_unit_changes row.
+ * The movement trail (stock_adjustments, stock_batch_deductions) is never rewritten: a row recorded up to that change's
+ * last_adjustment_id is in the OLD unit, so anything that puts such a row back (restoreStockForMenuItem) scales it with
+ * rh_stock_unit_change_scale(). Without the table everything here is a no-op (factor 1). */
+function rh_stock_unit_changes_ready(?PDO $db = null): bool
+{
+    global $pdo;
+    $db = $db ?? $pdo;
+    return rh_stock_measure_ready($db) && rh_stock_table_present($db, 'stock_unit_changes');
+}
+
+/** Factor of one change: new side small = quantities x N, new side big = quantities / N. */
+function rh_stock_unit_change_factor(float $n, string $newSide): float
+{
+    if ($n <= 0) {
+        return 1.0;
+    }
+    return $newSide === 'small' ? $n : 1.0 / $n;
+}
+
+/** Changes of these items, oldest first: [ingredient_id => [[last_adjustment_id, factor], ...]]. A plain read: call it in the
+ *  same transaction snapshot as the trail rows it scales. $lock = a locking read (latest commit; waits for a change being
+ *  saved and holds off a new one until this transaction ends), for callers that write in today's unit. */
+function rh_stock_unit_change_factors(PDO $db, array $ingIds, bool $lock = false): array
+{
+    $ingIds = array_values(array_unique(array_filter(array_map('intval', $ingIds), static fn(int $i): bool => $i > 0)));
+    if (!$ingIds || !rh_stock_unit_changes_ready($db)) {
+        return [];
+    }
+    $st = $db->prepare('SELECT ingredient_id, last_adjustment_id, measure_n, new_side FROM stock_unit_changes WHERE ingredient_id IN ('
+        . implode(',', array_fill(0, count($ingIds), '?')) . ') ORDER BY id ASC' . ($lock ? ' LOCK IN SHARE MODE' : ''));
+    $st->execute($ingIds);
+    $out = [];
+    foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+        $out[(int)$r['ingredient_id']][] = [(int)$r['last_adjustment_id'], rh_stock_unit_change_factor((float)$r['measure_n'], (string)$r['new_side'])];
+    }
+    return $out;
+}
+
+/** Multiplier that turns a trail row (stock_adjustments id $adjId) of the item into today's unit: the product of every later
+ *  change's factor (a row recorded before two changes passes through both). */
+function rh_stock_unit_change_scale(array $factors, int $ingId, int $adjId): float
+{
+    $f = 1.0;
+    foreach ($factors[$ingId] ?? [] as $chg) {
+        if ($adjId <= $chg[0]) {
+            $f *= $chg[1];
+        }
+    }
+    return $f;
+}
+
+/** Newest change id of ALL items (0 = none), a plain read. Read it FIRST, before the recipe / trail rows a deduction or restore
+ *  uses, so it belongs to the same snapshot; then, holding the ingredient row locks, pass it to rh_stock_unit_change_guard(). */
+function rh_stock_unit_change_mark(PDO $db): int
+{
+    if (!rh_stock_unit_changes_ready($db)) {
+        return 0;
+    }
+    return (int)$db->query('SELECT COALESCE(MAX(id), 0) FROM stock_unit_changes')->fetchColumn();
+}
+
+/** Throws when one of these items changed its main unit after $mark was read (the numbers read with it would be in the old
+ *  unit). A locking read, so it sees the latest commit: call it while holding the ingredient row locks (a change holds them
+ *  until it commits). */
+function rh_stock_unit_change_guard(PDO $db, array $ingIds, int $mark): void
+{
+    $ingIds = array_values(array_unique(array_filter(array_map('intval', $ingIds), static fn(int $i): bool => $i > 0)));
+    if (!$ingIds || !rh_stock_unit_changes_ready($db)) {
+        return;
+    }
+    $st = $db->prepare('SELECT COUNT(*) FROM stock_unit_changes WHERE ingredient_id IN ('
+        . implode(',', array_fill(0, count($ingIds), '?')) . ') AND id > ? LOCK IN SHARE MODE');
+    $st->execute(array_merge($ingIds, [$mark]));
+    if ((int)$st->fetchColumn() > 0) {
+        throw new RuntimeException('stock item changed its main unit while this was being worked out; please try again');
     }
 }
 

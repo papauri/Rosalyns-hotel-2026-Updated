@@ -207,6 +207,16 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Assistant: quotation answers should use the group stay total for group quotes (includes/quotation-convert.php
   rh_qc_quote_amount); room lists from includes/group-room-list.php.
 
+### Stock Step U3: Change main unit (bottle <-> shot / glass) (2026-11-19, owner, Bundle D) - Liwonde a1dba0e, Rosalyn's see TASKS.md
+- Guides (08 Stock; 18 Staff Access): Stock Items > item > Change main unit switches the item between its two measures
+  (needs a count measure first, e.g. bottle and shot, 30 in one). Preview lists every place that changes (on hand,
+  cost of one, batches, recipes, open counts, open orders) with old -> new and the stock value before and after
+  (always the same); Confirm applies it at once; History / System Logs show who, when, old -> new. New permission
+  "Change main unit" (stock_change_unit, Restaurant & Stock, default admin + manager). A count made before a unit
+  change can no longer be taken back on Clear Stock Data (correct it with a new count).
+- Manager Guides: stock.html "Coming soon: Change main unit" becomes a real short section; staff-access.html risky
+  permissions table: Change main unit no longer "Coming soon". Rebuild stock + staff-access, check 2 pages each.
+- Assistant: stock answers should give quantities in the item's current unit; a unit change is in stock_unit_changes.
 ## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
 
 ### Import stock check: value column warning + stock check workbook (2026-11-16, owner ask) — hashes in TASKS.md

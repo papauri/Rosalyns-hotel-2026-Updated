@@ -460,6 +460,7 @@ if (!function_exists('rh_sa_parse_filters')) {
             'supplier_deleted' => 'Deleted a supplier', 'barcode_registered' => 'Registered a barcode', 'barcode_receive_batch' => 'Received stock by barcode',
             'barcode_item_registered' => 'Registered a new item by barcode',
             'stock_cost_correction' => 'Corrected a crate price', // Stock > Fix crate prices (admin/includes/stock-cost-fix-lib.php)
+            'stock_main_unit_changed' => 'Changed the main unit of a stock item', // Stock Items > Change main unit (admin/includes/stock-unit-change-lib.php)
         ];
         $text = $names[$action] ?? ucfirst(rh_sa_prettify($action));
         if (!in_array($action, ['login_success', 'logout', 'login_failed', 'login_blocked'], true) && trim($details) !== '') {
@@ -468,9 +469,9 @@ if (!function_exists('rh_sa_parse_filters')) {
                 $d = '';
             }
             if ($d !== '') {
-                // Most details are a short hint (140 characters). A crate-price correction is a full before/after record
-                // (value, batches, purchase order lines), so it keeps its whole text; the page escapes it.
-                $max = $action === 'stock_cost_correction' ? 4000 : 140;
+                // Most details are a short hint (140 characters). A crate-price correction or a main-unit change is a full
+                // before/after record (value, batches, purchase order lines), so it keeps its whole text; the page escapes it.
+                $max = in_array($action, ['stock_cost_correction', 'stock_main_unit_changed'], true) ? 4000 : 140;
                 $text .= ': ' . (function_exists('mb_substr') ? mb_substr($d, 0, $max) : substr($d, 0, $max));
             }
         }

@@ -1247,6 +1247,22 @@ function rh_sc_cw_gather(PDO $pdo, bool $lock): array
                 $costed[(int)$a['ingredient_id']] = true;
             }
         }
+        // Step U3: an item whose main unit changed (bottle -> shot) after a count moved it holds today's unit, while the count's
+        // movements are in the old one: taking them off would mix units.
+        if (function_exists('rh_stock_unit_changes_ready') && rh_stock_unit_changes_ready($pdo)) {
+            $firstAdj = [];
+            foreach ($adjs as $a) {
+                $ai = (int)$a['ingredient_id'];
+                $firstAdj[$ai] = min($firstAdj[$ai] ?? PHP_INT_MAX, (int)$a['id']);
+            }
+            $ucSel = $pdo->prepare('SELECT COUNT(*) FROM stock_unit_changes WHERE ingredient_id = ? AND last_adjustment_id >= ?');
+            foreach ($firstAdj as $ai => $minAdj) {
+                $ucSel->execute([$ai, $minAdj]);
+                if ((int)$ucSel->fetchColumn() > 0) {
+                    $block($nm($ai) . ' changed its main unit after the count, so the count cannot be taken back. Correct it with a new count instead.');
+                }
+            }
+        }
         foreach ($out['ings'] as $i) {
             $iid = (int)$i['id'];
             $cur = (float)$i['current_quantity'];

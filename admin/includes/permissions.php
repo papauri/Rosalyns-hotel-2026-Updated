@@ -127,7 +127,8 @@ function getAllRoles()
                 'ai_assistant_use',     // Assistant: chat (ASSUMPTION 2026-10-26, owner can change per person)
                 'ai_assistant_actions', // Assistant: may confirm its action cards
                 'ai_usage_view',        // Assistant: see usage and estimated cost
-                'data_import'           // Import: bring stock lists in from Excel/CSV (owner 2026-11-03: admin + manager only; reaches existing managers through this default, no backfill rows needed)
+                'data_import',          // Import: bring stock lists in from Excel/CSV (owner 2026-11-03: admin + manager only; reaches existing managers through this default, no backfill rows needed)
+                'stock_change_unit'     // Stock Items: Change main unit, e.g. bottle <-> shot (owner 2026-11-19: admin + manager by default)
             ]
         ],
         'receptionist' => [
@@ -845,6 +846,16 @@ function getAllPermissions()
             'icon' => 'fa-file-import',
             'category' => 'Restaurant & Stock',
             'page' => 'data-import.php',
+            'group' => 'stock_write'
+        ],
+        // Change main unit (Step U3, owner 2026-11-19): switch an item between its two measures (bottle <-> shot); everything
+        // using the item is rescaled at once. Needs this AND Ingredients & Recipes (stock_management).
+        'stock_change_unit' => [
+            'label' => 'Change main unit',
+            'description' => 'Switch a stock item between its two measures (for example bottle and shot); stock, batches, recipes and open orders are converted',
+            'icon' => 'fa-arrow-right-arrow-left',
+            'category' => 'Restaurant & Stock',
+            'page' => 'stock-ingredients.php',
             'group' => 'stock_write'
         ],
         'stock_wastage' => [

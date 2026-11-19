@@ -33,6 +33,44 @@ if (!ensureStockTablesExist()) {
     ensureProcurementSchema($pdo);
 }
 
+// Change main unit (Step U3, migration 090): needs stock_change_unit + stock_management.
+require_once __DIR__ . '/includes/stock-unit-change-lib.php';
+$canChangeUnit = !$error && rh_suc_allowed((int)$user['id']) && rh_stock_unit_changes_ready($pdo);
+
+// Preview (JSON, nothing saved): what changes place by place, stock value before = after.
+if (!$error && $_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['unit_change_preview'])) {
+    $out = ['ok' => false, 'errors' => ['Changing the main unit is not available.'], 'fingerprint' => '', 'lines' => [], 'history' => []];
+    if ($canChangeUnit) {
+        $pv = rh_suc_preview($pdo, (int)$_GET['unit_change_preview'], (int)$user['id']);
+        $pl = $pv['plan'] ?? null;
+        $out = [
+            'ok' => !empty($pv['ok']),
+            'errors' => array_values((array)($pv['errors'] ?? [])),
+            'fingerprint' => !empty($pv['ok']) ? (string)$pv['fingerprint'] : '',
+            'name' => $pl ? (string)$pl['name'] : '',
+            'old_unit' => $pl ? (string)$pl['old_unit'] : '',
+            'new_unit' => $pl ? (string)$pl['new_unit'] : '',
+            'measure' => $pl ? ('1 ' . $pl['big'] . ' = ' . rh_suc_fmt($pl['n']) . ' ' . rh_stock_measure_plural($pl['small'], $pl['n'])) : '',
+            'value_before' => $pl ? $currency_symbol . ' ' . number_format((float)$pl['value_before'], 2) : '',
+            'value_after' => $pl ? $currency_symbol . ' ' . number_format((float)$pl['value_after'], 2) : '',
+            'lines' => array_values((array)($pv['lines'] ?? [])),
+            'history' => [],
+        ];
+        foreach ((array)($pv['history'] ?? []) as $h) {
+            $out['history'][] = [
+                'when' => date('j M Y H:i', strtotime((string)$h['changed_at'])),
+                'who' => (string)($h['who'] ?? '') !== '' ? (string)$h['who'] : 'Unknown user',
+                'change' => $h['old_unit'] . ' -> ' . $h['new_unit'],
+                'value' => $currency_symbol . ' ' . number_format((float)$h['value_before'], 2) . ' -> ' . number_format((float)$h['value_after'], 2),
+            ];
+        }
+    }
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode($out, JSON_UNESCAPED_UNICODE);
+    exit;
+}
+
 // ---- POST handling ----
 if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
     $token = $_POST['csrf_token'] ?? '';
@@ -41,7 +79,20 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
     } else {
         $action = $_POST['action'] ?? '';
         try {
-            if ($action === 'add' || $action === 'update') {
+            if ($action === 'unit_change_apply') {
+                // Confirm: one transaction, re-checks that the preview is still current (fingerprint).
+                if (!$canChangeUnit) {
+                    throw new RuntimeException('You do not have permission to change main units.');
+                }
+                $res = rh_suc_apply($pdo, (int)($_POST['id'] ?? 0), (string)($_POST['fingerprint'] ?? ''), (int)$user['id']);
+                if (empty($res['ok'])) {
+                    throw new RuntimeException(implode(' ', (array)$res['errors']));
+                }
+                $rp = $res['plan'];
+                $message = $rp['name'] . ': main unit changed from ' . $rp['old_unit'] . ' to ' . $rp['new_unit']
+                    . '. Stock, batches, recipes and open orders were converted; stock value stays '
+                    . $currency_symbol . ' ' . number_format((float)$rp['value_after'], 2) . '.';
+            } elseif ($action === 'add' || $action === 'update') {
                 $name = rh_clean_text($_POST['name'] ?? '');
                 $category = rh_clean_text($_POST['category'] ?? 'General');
                 $unit = rh_clean_text($_POST['unit'] ?? 'g');
@@ -291,7 +342,7 @@ if (!$error && $_SERVER['REQUEST_METHOD'] === 'POST') {
                     throw new RuntimeException('Ingredient not found.');
                 }
                 $hasHistory = abs((float)$curVal) > 0.00005;
-                foreach (['stock_adjustments', 'stock_batches', 'stock_in_log', 'stock_wastage', 'stock_purchase_order_items', 'stock_count_lines'] as $histTable) {
+                foreach (['stock_adjustments', 'stock_batches', 'stock_in_log', 'stock_wastage', 'stock_purchase_order_items', 'stock_count_lines', 'stock_unit_changes'] as $histTable) {
                     if ($hasHistory) {
                         break;
                     }
@@ -680,7 +731,7 @@ if (!$error || strpos($error, 'Stock tables not yet') === false) {
         // has no stock and no history at all (everything else is archived).
         $ingUnitUsed = [];
         $ingHistoryUsed = [];
-        foreach (['stock_recipe_ingredients', 'stock_batches', 'stock_adjustments', 'stock_in_log', 'stock_wastage', 'stock_purchase_order_items', 'stock_count_lines'] as $usedTable) {
+        foreach (['stock_recipe_ingredients', 'stock_batches', 'stock_adjustments', 'stock_in_log', 'stock_wastage', 'stock_purchase_order_items', 'stock_count_lines', 'stock_unit_changes'] as $usedTable) {
             try {
                 foreach ($pdo->query("SELECT DISTINCT ingredient_id FROM `{$usedTable}`")->fetchAll(PDO::FETCH_COLUMN) as $usedId) {
                     $ingHistoryUsed[(int)$usedId] = true;
@@ -1218,6 +1269,12 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                         <button type="button" class="btn-secondary" id="ing_m_use_glass" onclick="ingMeasureUse('glass')">Use glasses</button>
                     </div>
                     <button type="button" class="btn-secondary" onclick="ingMeasureClear()">Clear measure</button>
+                    <?php if ($canChangeUnit): ?>
+                    <div class="ing-unit-change" id="ing_uc" hidden>
+                        <p class="field-note" id="ing_uc_txt"></p>
+                        <button type="button" class="btn-secondary" id="ing_uc_btn" onclick="ucOpen()">Change main unit</button>
+                    </div>
+                    <?php endif; ?>
                 </fieldset>
                 <?php endif; ?>
                 </div>
@@ -1471,6 +1528,44 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
     </div>
     <script src="js/stock-drink-measures.js?v=<?php echo @filemtime(__DIR__ . '/js/stock-drink-measures.js'); ?>"></script>
     <?php endif; ?>
+
+    <?php if ($canChangeUnit): ?>
+    <!-- Change main unit (Step U3): preview first, nothing is saved until Confirm. -->
+    <div class="modal-overlay" id="unitChangeModal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>Change main unit: <span id="uc_name"></span></h3>
+                <button type="button" class="modal-close" aria-label="Close" onclick="closeModal('unitChangeModal')">&times;</button>
+            </div>
+            <form method="POST" id="unitChangeForm" onsubmit="if (document.getElementById('uc_fp').value === '') return false; setTimeout(function () { document.getElementById('uc_confirm').disabled = true; }, 0); return true;">
+                <div class="modal-body">
+                    <input type="hidden" name="csrf_token" value="<?php echo $csrf_token; ?>">
+                    <input type="hidden" name="action" value="unit_change_apply">
+                    <input type="hidden" name="id" id="uc_id" value="">
+                    <input type="hidden" name="fingerprint" id="uc_fp" value="">
+                    <p class="field-note" id="uc_loading">Working out the preview...</p>
+                    <div id="uc_body" hidden>
+                        <p class="uc-summary" id="uc_summary"></p>
+                        <p class="field-note">Stock, batches, recipe amounts, minimum / reorder / par levels, open purchase orders and counts that are not approved yet are converted. Approved counts and past movements stay as they were recorded. Nothing changes until you press Confirm.</p>
+                        <div class="uc-value"><span id="uc_value"></span> <i class="help" data-tip="Stock value = quantity on hand x cost of one, worked out over the open batches. It must be the same before and after; if it would differ by more than 0.01 the change is refused.">?</i></div>
+                        <div class="uc-lines" id="uc_lines" role="table" aria-label="What changes">
+                            <div class="uc-line uc-head" role="row"><span role="columnheader">Place <i class="help" data-tip="Where this item's amount is kept: stock on hand, each batch, recipes, open purchase orders and counts not approved yet.">?</i></span><span role="columnheader">Now <i class="help" data-tip="The amount as it is stored today, in the current main unit.">?</i></span><span role="columnheader">After the change <i class="help" data-tip="The same amount written in the new main unit. Prices per unit change the other way, so values stay the same.">?</i></span></div>
+                        </div>
+                    </div>
+                    <div class="uc-errors" id="uc_errors" role="alert" hidden></div>
+                    <div class="uc-history" id="uc_history_wrap" hidden>
+                        <h4>Earlier main-unit changes</h4>
+                        <ul id="uc_history"></ul>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn-secondary" onclick="closeModal('unitChangeModal')">Cancel</button>
+                    <button type="submit" class="btn-primary" id="uc_confirm" disabled>Confirm</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    <?php endif; ?>
     <?php require_once 'includes/admin-footer.php'; ?>
     <script src="js/admin-form-guard.js?v=<?php echo @filemtime(__DIR__ . '/js/admin-form-guard.js'); ?>"></script>
     <script>
@@ -1574,7 +1669,101 @@ $stockNounLow = $stockIsFood ? 'ingredient' : 'stock item';
                 ingDrinkCost = data ? (parseFloat(data.cost_per_unit) || 0) : 0;
                 ingDrinkSync();
             }
+            ucSync(data && data.id ? data : null);
             openModal('ingredientModal');
+        }
+
+        /* Change main unit (Step U3): offered on a saved item with a saved bottle / shot measure. The preview and the
+         * change are done by the server; this only shows them. */
+        let ucItemId = 0;
+        function ucSync(data) {
+            const box = document.getElementById('ing_uc');
+            if (!box) return;
+            const n = data ? parseFloat(data.measure_per_big) : 0;
+            const big = data ? String(data.measure_big_name || '') : '';
+            const small = data ? String(data.measure_small_name || '') : '';
+            if (!data || !(n > 1) || big === '' || small === '') {
+                ucItemId = 0;
+                box.hidden = true;
+                return;
+            }
+            ucItemId = parseInt(data.id, 10) || 0;
+            const onSmall = data.measure_stock_side === 'small';
+            document.getElementById('ing_uc_txt').textContent = 'Stock is kept in ' + (onSmall ? small : big) + '. To keep it in '
+                + (onSmall ? big : small) + ' instead and convert stock, batches, recipes and open orders, use Change main unit. '
+                + 'You will see a preview first. Edits above that are not saved yet are dropped.';
+            box.hidden = !(ucItemId > 0);
+        }
+
+        function ucOpen() {
+            if (!(ucItemId > 0)) return;
+            const id = ucItemId;
+            closeModal('ingredientModal');
+            document.getElementById('uc_id').value = id;
+            document.getElementById('uc_fp').value = '';
+            document.getElementById('uc_name').textContent = '';
+            document.getElementById('uc_loading').hidden = false;
+            document.getElementById('uc_body').hidden = true;
+            document.getElementById('uc_errors').hidden = true;
+            document.getElementById('uc_history_wrap').hidden = true;
+            document.getElementById('uc_confirm').disabled = true;
+            openModal('unitChangeModal');
+            fetch('stock-ingredients.php?unit_change_preview=' + encodeURIComponent(id), { credentials: 'same-origin', headers: { 'Accept': 'application/json' }, cache: 'no-store' })
+                .then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+                .then(ucShow)
+                .catch(function () { ucShow({ ok: false, errors: ['The preview could not be loaded. Close this and try again.'], lines: [], history: [] }); });
+        }
+
+        function ucShow(d) {
+            if (String(document.getElementById('uc_id').value) === '') return;
+            document.getElementById('uc_loading').hidden = true;
+            document.getElementById('uc_name').textContent = d.name || '';
+            const lines = document.getElementById('uc_lines');
+            lines.querySelectorAll('.uc-line:not(.uc-head)').forEach(function (el) { el.remove(); });
+            if (d.old_unit) {
+                document.getElementById('uc_summary').textContent = 'Main unit: ' + d.old_unit + ' -> ' + d.new_unit + ' (' + d.measure + ').';
+                document.getElementById('uc_value').textContent = 'Stock value before: ' + d.value_before + '. After: ' + d.value_after + '.';
+                (d.lines || []).forEach(function (l) {
+                    const row = document.createElement('div');
+                    row.className = 'uc-line';
+                    row.setAttribute('role', 'row');
+                    [['uc-place', l.place, ''], ['uc-old', l.old, 'Now: '], ['uc-new', l.new, 'After: ']].forEach(function (c) {
+                        const s = document.createElement('span');
+                        s.className = c[0];
+                        s.setAttribute('role', 'cell');
+                        s.setAttribute('data-label', c[2]);
+                        s.textContent = c[1];
+                        row.appendChild(s);
+                    });
+                    lines.appendChild(row);
+                });
+                document.getElementById('uc_body').hidden = false;
+            } else {
+                document.getElementById('uc_body').hidden = true;
+            }
+            const errs = document.getElementById('uc_errors');
+            errs.textContent = '';
+            if (!d.ok) {
+                const p = document.createElement('p');
+                p.textContent = 'This change cannot be made yet:';
+                const ul = document.createElement('ul');
+                (d.errors && d.errors.length ? d.errors : ['Unknown reason.']).forEach(function (t) {
+                    const li = document.createElement('li'); li.textContent = t; ul.appendChild(li);
+                });
+                errs.appendChild(p);
+                errs.appendChild(ul);
+                errs.hidden = false;
+            }
+            const hl = document.getElementById('uc_history');
+            hl.textContent = '';
+            (d.history || []).forEach(function (h) {
+                const li = document.createElement('li');
+                li.textContent = h.when + ', ' + h.who + ': ' + h.change + ' (stock value ' + h.value + ')';
+                hl.appendChild(li);
+            });
+            document.getElementById('uc_history_wrap').hidden = !(d.history && d.history.length);
+            document.getElementById('uc_fp').value = d.ok ? (d.fingerprint || '') : '';
+            document.getElementById('uc_confirm').disabled = !(d.ok && d.fingerprint);
         }
 
         /* Count measure (Step U1). The suggestion reads a size in the name (750ml, 75cl, 1L, 1.5 L) and the shot/glass

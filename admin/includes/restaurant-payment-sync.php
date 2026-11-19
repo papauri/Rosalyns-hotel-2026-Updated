@@ -455,6 +455,9 @@ function rh_record_item_wastage(PDO $pdo, int $menuItemId, string $menuType, flo
                     $dedSel->execute([$usageSourceType, $usageSourceId, $iid]);
                     $restSel->execute($hasRestoreCol ? [$usageSourceType, $usageSourceId, $iid] : [$usageSourceId, $iid]);
                     $skipRestored = (int)$restSel->fetchColumn();
+                    // Main-unit change (Step U3): a usage row recorded before a change is in the old unit. The wastage
+                    // row is written in today's unit (quantity x scale) at the same value (old qty x its own cost).
+                    $unitFactors = function_exists('rh_stock_unit_change_factors') ? rh_stock_unit_change_factors($pdo, [$iid], true) : [];
                     $uq = 0.0;
                     $uc = 0.0;
                     foreach ($dedSel->fetchAll(PDO::FETCH_ASSOC) as $d) {
@@ -465,7 +468,8 @@ function rh_record_item_wastage(PDO $pdo, int $menuItemId, string $menuType, flo
                         if (strncasecmp((string)$d['reason'], 'Voided to wastage', 17) === 0) {
                             continue;
                         }
-                        $uq += (float)$d['q'];
+                        $unitScale = $unitFactors ? rh_stock_unit_change_scale($unitFactors, $iid, (int)$d['id']) : 1.0;
+                        $uq += round((float)$d['q'] * $unitScale, 6);
                         $uc += (float)$d['q'] * (float)$d['cost_at_time'];
                         $usageIds[] = (int)$d['id'];
                     }

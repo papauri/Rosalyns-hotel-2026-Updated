@@ -103,6 +103,9 @@ $checks[] = ['WARN', 'Purchase-order lines whose order is missing',
     "SELECT x.id FROM stock_purchase_order_items x LEFT JOIN stock_purchase_orders p ON p.id = x.purchase_order_id WHERE p.id IS NULL"];
 $checks[] = ['WARN', 'Opening-stock batches whose stock count is missing',
     "SELECT x.id FROM stock_opening_batches x LEFT JOIN stock_counts c ON c.id = x.count_id WHERE c.id IS NULL"];
+// Main-unit changes (migration 090) are KEEP history; an item that has one is archived, never deleted.
+$checks[] = ['WARN', 'Main-unit changes whose stock item is missing',
+    "SELECT x.id FROM stock_unit_changes x LEFT JOIN stock_ingredients i ON i.id = x.ingredient_id WHERE i.id IS NULL"];
 // An item may be in only one open (being counted / waiting for approval) opening stock count: two would add its opening stock twice.
 $checks[] = ['WARN', 'Items in more than one open opening stock count',
     "SELECT l.ingredient_id FROM stock_count_lines l INNER JOIN stock_counts c ON c.id = l.count_id
