@@ -217,6 +217,12 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Manager Guides: stock.html "Coming soon: Change main unit" becomes a real short section; staff-access.html risky
   permissions table: Change main unit no longer "Coming soon". Rebuild stock + staff-access, check 2 pages each.
 - Assistant: stock answers should give quantities in the item's current unit; a unit change is in stock_unit_changes.
+### Stock: "Show it in" takes a custom amount (2026-11-19, owner) - Liwonde bcb7d15, Rosalyn's 23da18b
+- Guides (08 Stock): Add / Edit ingredient > Bottle size and drink measures > Show it in: last option "Other
+  amount (type it)": type a name and ml (e.g. double, 35) to see how many are in one bottle and the cost of one;
+  Use this for counting fills the count measure with it (saved with Save). For recipes and the menu too, add the
+  measure under Drink measures. Manager Guides: stock.html measures paragraph, one line.
+- Assistant: nothing to change.
 ## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
 
 ### Import stock check: value column warning + stock check workbook (2026-11-16, owner ask) — hashes in TASKS.md
