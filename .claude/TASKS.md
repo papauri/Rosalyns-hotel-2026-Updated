@@ -5,6 +5,7 @@ and when work ships. One line per task: status · what · where it stands · nex
 Status: TODO · DOING · REVIEW · SHIPPED · BLOCKED (owner).
 
 ## Open
+- NEXT SESSION (owner 2026-11-19, owner starts it): DRINKS PROFIT PROJECTION - TODO. Full plan + owner decisions + file facts: `.claude/plans/drinks-profit-projection.md` (read only that). P1 import keeps the selling price and lists drinks for the manager to tick into the menu (dept-import-lead) -> P2 "Projected profit" view on Stock with a VAT switch (dept-stock-lead) -> P3 projected vs actual (stock + accounting review). Liwonde first, port to Rosalyn's, one qa-auditor per ship. THEN item 8 screen tidy-ups (own session) -> THEN Guides + Assistant + Manager Guides sync (only on owner prompt).
 - PRIORITY ORDER (owner 2026-11-19: "lets sort them by priority"). Run top down, one per fresh session; owner can reorder.
   NEXT SESSION PLAN (owner 2026-11-19): ship ALL of it in ONE session, bundled by lead (not by priority) so no lead jumps between areas, and save tokens.
     EMAIL RULE (owner 2026-11-19): emails are SENT only through the SMTP settings (PHPMailer + .env, ProManaged mailbox), NEVER through the owner's Outlook (a past session sent the stock quick guide via Outlook COM; now blocked by global hook ~/.claude/hooks/no-outlook-send.mjs). Recipients unchanged.
