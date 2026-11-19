@@ -16,6 +16,12 @@ when prompted."
   brief for all Assistant items (only if a grep of `includes/ai/` finds an overlap), ONE combined
   review, ship both hotels, then move the done entries to "Synced" with the sync commit hash.
 - Both hotels share this list; the file lives in both repos (keep them identical).
+- **Manager Guides (owner 2026-11-19: "always up to date"):** illustrated 2-page PDFs in
+  `OneDrive\MSP\Manager Guides` (outside both repos; area map + last-synced line in its README.md).
+  Every sync also checks each Pending entry against that map; where a manager-level fact changed
+  (a step, rule, permission, button or "coming soon" item), the `guides-kb-lead` brief includes the
+  matching `source\*.html` edit, then `php build.php` there and a page-count/visual check (2 pages
+  each). Record "Manager Guides: <which> refreshed" or "Manager Guides: no change" in the Synced entry.
 
 ## Pending (oldest first)
 
