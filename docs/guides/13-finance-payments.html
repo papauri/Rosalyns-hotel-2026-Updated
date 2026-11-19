@@ -66,18 +66,18 @@
   <p>On the Payments list, a room payment shows a small <strong>Booked at</strong> line under the booking name (booked rate a night &times; nights). Each row has a <strong>History</strong> button (see <a href="#history">How to see the history of a payment</a>).</p>
   <p>A refund line counts against the guest only once it is <strong>Processing</strong> or <strong>Completed</strong>. A <strong>Pending</strong> or <strong>Failed</strong> refund does not change the balance yet.</p>
   <p><strong>Refunds count on the day they were paid out.</strong> A refund shows on the Payments list on the day it was paid out, in the <strong>Payment Date</strong> column and in the date sort. Every report and End of Day counts it on that same day. A refund that is still pending shows the day it was raised and is in no period's totals. The time under <strong>Payment Date</strong> is when the record was saved.</p>
-  <p><strong>One refund rule everywhere.</strong> A refund is the <strong>full amount paid back, VAT included</strong>, once it is <strong>Processing</strong> or <strong>Completed</strong>. Payments, Accounting, Reports and End of Day (screen, PDF and email) all use this rule. Refunds still <strong>awaiting approval</strong> are shown apart and are not in the total. The refund cards split the total into <strong>Paid back in cash / bank</strong> and <strong>Moved to credit notes (no cash out)</strong>, and they say their dates: <em>"Refunds on all dates"</em> when no date filter is set.</p>
-  <p>The Payments page shows these buttons at the top: <strong>Record Payment</strong>, <strong>Export CSV</strong>, <strong>Dashboard</strong>, and <strong>Invoices</strong> (Invoices only appears when invoicing is switched on for your hotel). Below them are four figure cards. Click a card to see the rows behind its figure:</p>
+  <p><strong>One refund rule everywhere.</strong> A refund is the <strong>full amount paid back, VAT included</strong>, once it is <strong>Processing</strong> or <strong>Completed</strong>. Payments, Accounting, Reports and End of Day (screen, PDF and email) all use this rule. Refunds still <strong>awaiting approval</strong> are shown apart and are not in the total. Only money really paid back to the guest (cash, bank or mobile money) is in <strong>Refunds</strong>. Money moved onto a credit note is not a refund: it shows on its own line, <strong>Moved to guest credit</strong>, and is never in the refunds total. The refund cards show the refunds total, then a separate line <strong>Moved to guest credit</strong> that is not part of it, and they say their dates: <em>"Refunds on all dates"</em> when no date filter is set.</p>
+  <p>The Payments page shows these buttons at the top: <strong>Record Payment</strong>, <strong>Add charge</strong> (an extra charge on a room or its group, see <a href="07-reception-bookings.html#charge-after-checkout">Charge a guest who has already checked out</a>), <strong>Export CSV</strong>, <strong>Dashboard</strong>, and <strong>Invoices</strong> (Invoices only appears when invoicing is switched on for your hotel). Below them are four figure cards. Click a card to see the rows behind its figure:</p>
   <ul>
     <li><strong>Collected (filtered)</strong>: money received (VAT included) for the dates shown, before refunds are taken off. It opens the fold-out <strong>Breakdown by source, method and status</strong>.</li>
     <li><strong>Still owed</strong> (this card was called <em>Pending</em>): what accounts still have to pay on bookings, conferences, events and open tabs, after every payment received, part-payments included. It opens the accounts owing. See <a href="#owing">How to see who still owes money</a>.</li>
     <li><strong>Today</strong>: money received today from every source, with the last 7 days and this month. It opens today's money received.</li>
-    <li><strong>Refunds (filtered)</strong>: refunds paid back or being paid, for the dates shown. It opens those refund rows and keeps your status filter. A line under it shows refunds awaiting approval, and the split between <strong>Paid back in cash / bank</strong> and <strong>Moved to credit notes (no cash out)</strong>.</li>
+    <li><strong>Refunds (filtered)</strong>: refunds paid back or being paid, for the dates shown. It opens those refund rows and keeps your status filter. A line under it shows refunds awaiting approval. When money was moved onto a credit note, another line shows <strong>Moved to guest credit</strong>: it is guest credit, not a refund, and is not in this total.</li>
   </ul>
   <p>Collected and Refunds follow your filters. Still owed and Today do not.</p>
   <p><strong>More filters.</strong> Under the cards (on a phone, behind <strong>More filters</strong>) you can narrow the list by <strong>Money in / Refunds</strong> (money out), <strong>Booking status</strong> (upcoming, in-house, checked out, no-show, cancelled), <strong>Group or company</strong>, <strong>Recorded by</strong> (staff member), <strong>Room type</strong>, and <strong>Amount from</strong> and <strong>Amount to</strong>. Each filter you set shows as a chip with its own <strong>Clear</strong>.</p>
   <p><strong>Click a row.</strong> Click anywhere on a Payments row (or a row in the list of accounts that owe money) to open it, instead of only the eye button.</p>
-  <p>Each payment row reads <strong>Received</strong>, then one of <em>"Booking still owes MWK x"</em>, <em>"Bill settled"</em> or <em>"Not confirmed yet"</em>. A refund row for an overpayment that was moved to a credit note reads <em>"Refund: Moved to credit note"</em>. The list shows 10 rows to a page; use the <strong>Show</strong> picker (10, 25, 50, 100) to see more.</p>
+  <p>Each payment row reads <strong>Received</strong>, then one of <em>"Booking still owes MWK x"</em>, <em>"Bill settled"</em> or <em>"Not confirmed yet"</em>. A payment never reads "Completed" while the bill still owes money. A refund row shows its step: <em>"Refund: Paid out"</em>, or <em>"Refund: Moved to credit note"</em> for an overpayment or store credit moved onto a credit note. A payment made from a credit note reads <em>"Paid from credit note"</em>: it is guest credit used, not money received. The list shows 10 rows to a page; use the <strong>Show</strong> picker (10, 25, 50, 100) to see more.</p>
 
   <h2 id="find">How to find a payment</h2>
   <ol class="steps">
@@ -120,7 +120,7 @@
   <p>On a booking that is on a company account (company pays later), the Record payment window asks <strong>Paid by</strong>: <strong>The guest</strong> or the company. Nothing is picked for you, and you must choose one. Choosing the company records the money against the company's share. Needs <strong>Add Payments</strong>, and <strong>Company Accounts</strong> to record a company payment.</p>
 
   <h2 id="history">How to see the history of a payment</h2>
-  <p>The <strong>Payment Details</strong> window shows who paid, who received the money, the group and any credit note used. <strong>Refunded</strong> counts only refunds that were actually made; a refund still pending is on its own line. Every add, edit, refund and delete of a payment is written in its History.</p>
+  <p>The <strong>Payment Details</strong> window shows who paid, who received the money, the group and any credit note used. On a booking, <strong>Refunded</strong> counts only money paid back to the guest; money moved onto a credit note is on its own <strong>Moved to guest credit</strong> line. A refund still pending is on its own line. Every add, edit, refund and delete of a payment is written in its History.</p>
   <p>The History window lists every step for the payment in order: when it happened, who did it (name and role), what happened, and the amounts before and after where money changed. It changes nothing.</p>
   <ol class="steps">
     <li>On the Payments list, click the <strong>History</strong> button on the row. You can also click <strong>History</strong> at the top of <strong>Payment Details</strong>.</li>
@@ -253,6 +253,8 @@
   <h3 id="refund-who-paid">Refunds on a company account: the refund follows who paid</h3>
   <p>On a booking that is on a company account, a refund comes out of whoever paid that money. The company's share is refunded to the company, and the guest's share goes back to the guest. The refund notice or credit note for the company is made out to the company, and it goes to the company's billing email. Needs <strong>Issue &amp; settle refunds</strong>.</p>
 
+  <h3 id="moved-to-credit">Moved to guest credit (not a refund)</h3>
+  <p>When an overpayment or store credit is moved onto a credit note, no cash goes out. It is not a refund and is never in the refunds total. It shows on its own <strong>Moved to guest credit</strong> line on the Payments and Accounting pages, on Booking Details, and on End of Day as the <strong>Guest credit</strong> lines (issued, used, voided, expired unused, still owed). Net revenue on Accounting reads <em>Gross &minus; refunds &minus; moved to guest credit</em>.</p>
   <h2 id="settle">How to settle a pending refund</h2>
   <ol class="steps">
     <li>Open the refund line (reference starting with REF). A panel <strong>Settle this refund</strong> shows when it is Pending or Processing.</li>
@@ -396,11 +398,11 @@
   <table>
     <thead><tr><th>Figure</th><th>Meaning</th></tr></thead>
     <tbody>
-      <tr><td>Net revenue</td><td>Money collected after refunds.</td></tr>
+      <tr><td>Net revenue</td><td>Money collected after refunds paid out and money moved to guest credit. The card reads <em>"Gross &minus; refunds &minus; moved to guest credit"</em>.</td></tr>
       <tr><td>Owed to us</td><td>What customers owe and have not paid.</td></tr>
       <tr><td>Cash today</td><td>Cash and mobile money received today. Card, bank transfer and credit are not included.</td></tr>
       <tr><td>VAT collected</td><td>Tax collected from guests and customers. It is not the hotel's income.</td></tr>
-      <tr><td>Refunds</td><td>The full amount paid back in the period (VAT included), Processing or Completed. The card says its dates (<em>"Refunds on all dates"</em> for All time). Click it to open <strong>Refunds detail</strong>.</td></tr>
+      <tr><td>Refunds</td><td>The full amount really paid back to the guest in the period (VAT included), in cash, bank or mobile money, Processing or Completed. Money moved onto a credit note is not in this total; it shows on its own <strong>Moved to guest credit</strong> line. The card says its dates (<em>"Refunds on all dates"</em> for All time). Click it to open <strong>Refunds detail</strong>.</td></tr>
       <tr><td>POS margin</td><td>Till profit for the period. Click the card to open POS accounting.</td></tr>
     </tbody>
   </table>
@@ -409,7 +411,7 @@
   <ol class="steps">
     <li>Open <strong>Money</strong> &rarr; <strong>Accounting</strong> and pick your period.</li>
     <li>Click the <strong>Refunds</strong> card. The <strong>Refunds detail</strong> window opens.</li>
-    <li>Read the total and the number of refunds, then the split: <strong>Paid back in cash / bank</strong> and <strong>Moved to credit notes (guest credit, no cash out)</strong>. Refunds <strong>awaiting approval</strong> are shown on their own and are not in the total.</li>
+    <li>Read the total and the number of refunds. A separate <strong>Moved to guest credit</strong> line, when shown, is guest credit, not a refund, and is not in the total. Refunds <strong>awaiting approval</strong> are shown on their own and are not in the total.</li>
     <li>Under that are the 10 latest refunds. Click one to open its payment. The <strong>Payments</strong> buttons show only for staff who can open Payments.</li>
   </ol>
   <p>Money: this window only shows figures. It does not move any money.</p>

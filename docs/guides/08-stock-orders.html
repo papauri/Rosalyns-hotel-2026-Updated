@@ -138,8 +138,24 @@
     <li>If you buy this item by the crate, case, tray or box, fill in <strong>Bought in packs?</strong> with the pack name (for example <em>crate</em>) and <strong>Units in one pack</strong> (this is the pack size, for example <em>24</em> for a crate of 24 bottles). Leave both blank if you never buy it in packs. If you type a size but no name, the pack is called <em>pack</em>. A name with no size is ignored. The stock, counts and recipes for the item stay in the <strong>Unit</strong> you chose above (for example bottles), never in packs.</li>
     <li>Click <strong>Save</strong>. You will see <em>"Ingredient &quot;Chicken breast&quot; added."</em></li>
   </ol>
+  <h3 id="measures">Count in shots, glasses or cups (measures)</h3>
+  <p>Some items are bought in bottles but used in shots, glasses or cups. Give the item a measure so the count can use both. Open the item with <strong>Edit</strong> and find <strong>Bottle size and drink measures</strong>. For example, <em>1 bottle = 25 shots</em>. The size in the item's name and the shot and glass sizes in settings suggest one. Check it, choose which one is the <strong>stock unit</strong>, and click <strong>Save</strong>.</p>
+  <ul>
+    <li><strong>Show it in</strong>: pick a measure to see how many are in one bottle and what one costs. The last choice, <strong>Other amount (type it)</strong>, lets you type a name and ml (for example <em>double, 35</em>). Use it for counting, then click <strong>Save</strong>. For recipes and the menu, add the measure under <strong>Drink measures</strong>.</li>
+    <li><strong>On a stock count line</strong> pick the stock unit, bottles, shots, or both (for example <em>2 bottles + 7 shots</em>). The line shows what that comes to in the stock unit and the cost per shot. <strong>Set measure</strong> on a count line needs <strong>Approve stock counts</strong>.</li>
+    <li>Changing the number of measures re-works draft and submitted counts. Approved counts are never changed.</li>
+    <li>If an approved count was typed in bottles but really counted in shots, the line shows a <strong>Counted in shots?</strong> link. Click it, check the preview, then <strong>Confirm</strong>. It is done once per line and does not show as missing stock.</li>
+  </ul>
+  <h3 id="change-main-unit">Change the main unit (bottle to shot)</h3>
+  <ol class="steps">
+    <li>Open <strong>Stock</strong> &rarr; <strong>Stock Items</strong> and open the item. It needs a count measure first, for example bottle and shot with 30 shots in a bottle.</li>
+    <li>Click <strong>Change main unit</strong> and switch the item between its two measures.</li>
+    <li>Read the preview. It lists every place that changes (on hand, cost of one, batches, recipes, open counts and open orders) as old &rarr; new. It also shows the stock value before and after; these are always the same.</li>
+    <li>Click <strong>Confirm</strong>. The change applies at once. History and System Logs show who did it, when, and old &rarr; new.</li>
+  </ol>
+  <p>Needs the <strong>Change main unit</strong> permission (Restaurant &amp; Stock; administrators and managers have it). A count made before a unit change can no longer be taken back with <strong>Clear Stock Data</strong>. Correct it with a new count instead.</p>
   <p>Stock quantities are kept to <strong>6 decimal places</strong>, so small parts of a packet add up properly: 6 sales of 1 piece from a packet of 6 take exactly 1 packet off. On screen the numbers are shown shorter.</p>
-  <p>Have your stock list in Excel? Use <a href="23-import.html">Import</a> &mdash; it files an opening count that a second manager approves.</p>
+  <p>Have your stock list in Excel? Use <a href="23-import.html">Import</a> &mdash; it files an opening count that a second manager approves. For drinks, step 4 of Import (Confirm) can also offer <strong>Drinks for the menu</strong> when the file has a selling price; see <a href="23-import.html">Import</a>.</p>
   <p>Names are checked as you type. An ingredient name already used by another ingredient is flagged: <em>"A stock item with this name already exists (archived items count too)."</em> If the save is refused, the form stays open with what you typed and the reason shown.</p>
   <h3>Other actions on each row</h3>
   <ul>
@@ -368,13 +384,28 @@
   <p>Discarding a batch from the Ingredients page (<strong>Batches</strong> &rarr; <strong>Discard</strong>) is for the Admin and Manager roles only and needs a reason of at least 8 characters. Batches that expire and are removed automatically also appear in Wastage.</p>
 
   <h2 id="reports">How to read Stock Reports</h2>
-  <p>Open Admin menu &rarr; Stock &rarr; <strong>Stock Reports</strong>. Tabs: <strong>Inventory</strong>, <strong>Stock-In</strong>, <strong>Usage</strong>, <strong>Wastage</strong>, <strong>Yield</strong>, <strong>Adjustments</strong>, <strong>Expiry</strong>.</p>
+  <p>Open Admin menu &rarr; Stock &rarr; <strong>Stock Reports</strong>. Tabs: <strong>Inventory</strong>, <strong>Stock-In</strong>, <strong>Usage</strong>, <strong>Wastage</strong>, <strong>Yield</strong>, <strong>Adjustments</strong>, <strong>Expiry</strong>, and <strong>Projected profit</strong> and <strong>Projected vs actual</strong> (below).</p>
   <ul>
     <li>Inventory and Expiry are a snapshot of now. The other tabs cover a date range (the last 30 days to start with): set <strong>From</strong> and <strong>To</strong> and click <strong>Apply</strong>.</li>
     <li><strong>Usage</strong> and <strong>Yield</strong> follow the same rule as the rest of the system: a dish voided or 86'd after cooking started counts as wastage, not usage. The <strong>Wastage</strong> tab includes expired batches and recalls. The <strong>Yield</strong> tab counts recalled batches in <strong>Wasted</strong> and <strong>Loss cost</strong>.</li>
     <li>Every tab has a <strong>CSV</strong> download and a "how to read this report" hint with an example.</li>
     <li>Columns: Inventory (Ingredient, Category, Current qty, Cost / unit, Stock value, Active batches); Stock-In (Date, Ingredient, Batch, Qty, Unit cost, Total, Supplier, By); Usage (Ingredient, Quantity used, Cost); Wastage (Date, Ingredient, Qty, Cost, Reason, By); Yield (Ingredient, Used, Wasted, Expired, Yield %, Loss cost); Adjustments (When, Ingredient, Source, change in quantity, Reason, By); Expiry (Batch, Ingredient, Expiry date, Days left, Remaining, Status).</li>
+    <li>Stock-In, Usage, Wastage, Yield and Adjustments follow the <strong>From</strong> and <strong>To</strong> dates you set, and click <strong>Apply</strong>.</li>
   </ul>
+  <h3 id="projected-profit">Projected profit (what the drinks stock should make)</h3>
+  <ol class="steps">
+    <li>Open <strong>Stock</strong> &rarr; <strong>Stock Reports</strong> &rarr; <strong>Projected profit</strong>.</li>
+    <li>Read one row per menu price of a drink that is sold as itself (one stock item): on hand, measures per unit, selling price, projected sales, stock cost, projected profit and margin.</li>
+    <li>Use the top cards. Each stock item is counted once, at its lowest menu price (<strong>In totals</strong>). A drink whose cost is not known is left out.</li>
+  </ol>
+  <p><strong>Take VAT out</strong> is on by default when VAT is on. It shows sales and profit without VAT. The menu is not changed. The filter cards show <strong>Sells below cost</strong> (red), <strong>No selling price yet</strong> (with a link to the Menu page) and <strong>Cost not known</strong>. This tab only reads figures; it changes nothing.</p>
+  <h3 id="projected-vs-actual">Projected vs actual (the missing drink between two counts)</h3>
+  <ol class="steps">
+    <li>Open <strong>Stock Reports</strong> &rarr; <strong>Projected vs actual</strong> and pick the dates.</li>
+    <li>For each drink the report uses its own first and last <em>approved</em> counts inside those dates. It shows the opening and closing count, the actual amount used, and the amount sold (till and room service, with voids put back).</li>
+    <li>The <strong>unaccounted</strong> measures (free pours, spillage, missing) are valued at the menu price, with the same <strong>Take VAT out</strong> switch as Projected profit, and at today's cost. Recorded wastage is never counted in the gap.</li>
+  </ol>
+  <p>The second line, <strong>Till vs menu price</strong>, compares what the till took with what was sold at today's menu price. Differences come from happy hour, deals, discounts, comps and price changes. Cocktails count as sold but are not in the till line. The totals net the extra stock found against the losses. If a drink has fewer than two approved counts in the dates, the page says <em>"count it again"</em> and shows no figure. This tab is read only.</p>
 
   <h2 id="orders">How to use Orders &amp; Tabs</h2>
   <p>Open Admin menu &rarr; Restaurant &amp; Bar &rarr; <strong>Orders &amp; Tabs</strong> (page title <strong>Restaurant Orders</strong>). Orders are taken at the POS Till, not on this page. This page is the office view of all orders.</p>

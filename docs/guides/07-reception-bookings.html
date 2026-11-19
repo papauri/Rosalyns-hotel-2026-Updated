@@ -73,6 +73,7 @@
       <li><a href="#checkout">How to check a guest out</a></li>
       <li><a href="#cancel">How to cancel a booking or mark a no-show</a></li>
       <li><a href="#delete">How to delete and restore a booking</a></li>
+      <li><a href="#groups">How to work with a group of rooms</a></li>
       <li><a href="#tentative">Tentative bookings</a></li>
       <li><a href="#blocked">How to block dates</a></li>
       <li><a href="#rooms">Individual rooms</a></li>
@@ -95,6 +96,7 @@
     <li>Red banner <strong>Missed Check-ins!</strong>: confirmed or pending bookings whose check-in date has passed without a check-in. Amber banner <strong>Overdue Checkouts!</strong>: checked-in guests past their check-out date, or due today and still in after the check-out time (marked <em>Late checkout</em> on the row). Each has a <strong>View Details</strong> button.</li>
     <li>The table: Ref, Guest Name, Room, Check In, Check Out, Nights, Guests, Total, Status, Payment, Created, Actions. The list shows 10 bookings per page, with Prev and Next buttons.</li>
     <li><strong>Show more rows.</strong> Next to the line <em>"Showing 1&ndash;10 of N"</em> there is a <strong>Show</strong> picker: <strong>10</strong>, <strong>25</strong>, <strong>50</strong>, <strong>100</strong> or <strong>All</strong> (All shows up to 500 bookings). It starts on 10. Your choice stays when you change page, tab, sort or search.</li>
+    <li><strong>Tick boxes and the bulk bar.</strong> The first column has a tick box on every row, with a tick in the header to select or clear all rows on the page. Cancelled, expired, no-show and deleted bookings cannot be ticked. When rows are ticked a bar shows <em>"N selected"</em> and <strong>Clear</strong>, with the actions <strong>Make a group</strong>, <strong>Add to a group</strong>, <strong>Remove from group</strong>, <strong>Send a reminder</strong>, <strong>Resend confirmation</strong>, <strong>Email invoice</strong>, <strong>Export selected</strong> (CSV), <strong>Print arrival list</strong>, <strong>Confirm</strong>, <strong>Assign rooms</strong>, <strong>Check in</strong>, <strong>Cancel</strong> and <strong>Mark no-show</strong>. Each action (except export and print) first shows a review list of every ticked room: what will happen, or <em>"skipped: reason"</em>. Nothing changes until you press Confirm. Each room is done or skipped on its own, and a result list follows. Each action needs the same permission as its single button. Up to 50 rooms are sent at a time, and up to 200 when removing from a group.</li>
     <li><strong>Rows fit the screen.</strong> On a narrower screen the reference moves under the guest, the check-out date moves under check-in, and the status moves under the total.</li>
     <li><strong>Guests.</strong> Every row shows how many guests the booking has. On a phone it is on the second line, for example "27 Nov -> 29 Nov &middot; 2 nights &middot; 4 guests". On a tablet or laptop where the Guests column is hidden, it shows as "4 guests" under the Check In and Check Out dates. On a wide screen the Guests column is shown.</li>
     <li><strong>Payment column.</strong> The payment badge reads <strong>Paid in full</strong>, <strong>Part paid (MWK x left)</strong>, <strong>Unpaid</strong> or <strong>Refunded</strong>. It is worked out from the money on the booking. A cancelled or no-show booking with nothing paid and nothing owed shows <strong>Unpaid</strong>. Click the payment reference to open the payment record (only if you are allowed to see payments; if not, the reference is plain text).</li>
@@ -159,7 +161,7 @@
 
   <h2 id="details">The Booking Details page (one booking in full)</h2>
   <p>Click anywhere on a booking row on the Bookings list (not on a button) to open <strong>Booking Details</strong>. On a phone or tablet the dialog starts with one summary block: guest, room, dates and nights, total, balance and the booked rate &times; nights. Tap that block or <strong>Full Details</strong> to open the full page.</p>
-  <p>Click <strong>More</strong> &rarr; <strong>Full details</strong> on the Bookings list, or click a booking on the Calendar. The page is called <strong>Booking</strong> followed by the reference. Use it to see a guest's bill, what they have paid and everything that was done to the booking. Needs <strong>View Bookings</strong>. Each button on it needs the same permission as on the list (see the table at the top).</p>
+  <p>Click <strong>More</strong> &rarr; <strong>Full details</strong> on the Bookings list, or click a booking on the Calendar. The page is called <strong>Booking</strong> followed by the reference. Use it to see a guest's bill, what they have paid and everything that was done to the booking. Needs <strong>View Bookings</strong>. Each button on it needs the same permission as on the list (see the table at the top). Ctrl-click (Cmd-click on a Mac) on a row opens the booking in a new tab. On the list, the small <strong>i</strong> button still opens the quick summary.</p>
   <ul>
     <li>Across the top: the reference, the guest, the dates and nights, the status, and <strong>Outstanding balance</strong> when money is owed. The buttons shown depend on the status: <strong>Confirm Booking</strong> or <strong>Convert to Confirmed</strong>, <strong>Mark No-Show</strong>, <strong>Upgrade / Change Type</strong>, <strong>Cancel Booking</strong> (for rooms booked together as a group: <strong>Cancel Whole Group (N rooms)</strong> and <strong>Cancel This Room Only</strong>) and <strong>Restore Booking</strong> (deleted bookings).</li>
     <li><strong>Stay details</strong>: guest, room, dates, guests, special requests. When the room has its own guest, the header and the stay details show <strong>Room guest: [name]</strong> and a <strong>Guest name for this room</strong> row. <strong>Adjust Stay Dates</strong> changes the dates (see <a href="#dates">How to change the stay dates</a>).</li>
@@ -311,6 +313,8 @@
     <li>Click <strong>Confirm Late Check-In</strong>, or <strong>Record completed stay</strong> for a guest who has already left. Every choice is written in the booking's History.</li>
   </ol>
 
+  <h3 id="pay-later-group">Check-in with pay later, for a room in a group</h3>
+  <p>A room in a group whose lead booking is set to <strong>Check in now, pay later</strong> (or is on a company account) can be checked in unpaid, from Booking Details, the All Bookings list and the check-in page. Make primary copies that setting to the new lead room (History: <em>"Check-in before payment copied"</em>). <strong>Undo check-in</strong> puts a checked-in room back to Confirmed and writes <em>"Check-in undone"</em> in its History.</p>
   <h2 id="payment">How to take a payment</h2>
   <p>The <strong>Payments &amp; balance</strong> window lists refunded payments and every refund. <strong>Total charged</strong> is the bill, including a kept fee or a no-show charge.</p>
   <ul>
@@ -325,6 +329,13 @@
   </ul>
   <p>The <strong>Payment breakdown</strong> adds up line by line. <strong>Room base</strong>, <strong>Packages</strong> and <strong>Extras</strong> (all excl. VAT) make <strong>Subtotal (excl. VAT and levy)</strong>. Then come <strong>Tourism Levy</strong>, <strong>VAT</strong> and <strong>Total</strong>, then <strong>Paid</strong> and <strong>Balance</strong>. A rate plan discount is a row that says it is already taken off the room rate. A surcharge is a row such as <em>Festive Season surcharge (already in the room rate) +10,000 &times; 3 nights</em>. Neither is added again. When the guest has paid too much the last line reads <strong>Credit owed to guest</strong>.</p>
 
+  <h3 id="owing-rooms">Payments on a no-show or cancelled room that still owes</h3>
+  <p>A no-show room, a cancelled room whose kept fee or extras still owe, and an expired hold that carries the group no-show charge can take a payment, but only while it owes money. Use <strong>Payments &amp; balance</strong> from the More menu, or <strong>Add Payment</strong> on the Payments page. The room keeps its status.</p>
+  <ul>
+    <li>The amount cannot be more than the room still owes. The <em>"guest paid more than owed"</em> tick does not apply here. You will see <em>"This no-show booking owes MWK X. A payment on it cannot be more than that."</em></li>
+    <li>A room that owes nothing refuses: <em>"This no-show booking owes nothing. No payment can be recorded."</em></li>
+    <li>Deleted rooms cannot take a payment. Needs <strong>Add Payments</strong>.</li>
+  </ul>
   <h2 id="company">How to put a booking on a company account (company pays later)</h2>
   <p>Use this when a company pays for the stay later, on an LPO or order number. Needs <strong>Put bookings on a company account</strong>. The company must already exist: add it on <strong>Money</strong> &rarr; <strong>Company Accounts</strong> (needs <strong>Company accounts</strong>).</p>
   <ol class="steps">
@@ -371,6 +382,14 @@
   </ol>
   <div class="note"><p>After check-out the folio is locked: <em>"Folio charges cannot be modified after check-out. Raise a credit note if an adjustment is needed."</em> On cancelled or no-show bookings: <em>"Folio charges cannot be modified on a cancelled booking."</em></p></div>
 
+  <h3 id="charge-after-checkout">Charge a guest who has already checked out</h3>
+  <ol class="steps">
+    <li>Open <strong>Money</strong> &rarr; <strong>Payments</strong> or the <strong>Accounting</strong> dashboard, and click <strong>Add charge</strong>.</li>
+    <li>Pick the booking. Under <em>Who is this charge for?</em> choose <strong>This room only</strong>, or the whole group (one line on the lead room, or split evenly across the rooms).</li>
+    <li>Choose the charge type, description, quantity and price. The price includes VAT and has no levy. Type a <strong>reason</strong>; it is required.</li>
+    <li>Check the preview (owed now and owed after, for each room), then click <strong>Confirm</strong>.</li>
+  </ol>
+  <p>A checked-out room can take a charge only from this page, and only with the <strong>Correct Stay After Check-out</strong> permission (administrators and managers have it). Cancelled, no-show, expired and deleted rooms are refused. An issued invoice is rebuilt under the same number. Extra nights are not added here: use <strong>Correct Stay Dates</strong> below.</p>
   <h2 id="dates">How to change the stay dates (extend a stay by a night)</h2>
   <ol class="steps">
     <li>On the booking page click <strong>Adjust Stay Dates</strong>. The button is not shown for cancelled, checked-out or no-show bookings.</li>
@@ -397,6 +416,14 @@
   </ul>
   <p>Administrators can use <strong>More</strong> &rarr; <strong>Change checkout date</strong> for an overdue guest and must type a reason.</p>
 
+  <h3 id="correct-dates">Correct stay dates after check-out (Correct Stay Dates)</h3>
+  <p>Use this when a guest really arrived late or early, or left early or late, and the checked-out booking shows the wrong nights. It needs the <strong>Correct Stay After Check-out</strong> permission (administrators and managers have it).</p>
+  <ol class="steps">
+    <li>Open the checked-out booking and click <strong>Correct Stay Dates</strong>.</li>
+    <li>Type the real dates and a reason. A changed rate needs its own reason.</li>
+    <li>Check the preview, then confirm.</li>
+  </ol>
+  <p>Extra nights are charged at the booked rate. Money owed back goes to the guest as a refund to the original payment, or as a credit note (you choose). The room's invoice is rebuilt under the same number. Receipts do not change. Past End of Day figures for those dates change too. A room with a cancellation policy can have nights cut this way.</p>
   <h2 id="edit">How to edit a booking</h2>
   <p>What you can change depends on where the booking is in its life, exactly like at a real front desk:</p>
   <table>
@@ -489,6 +516,9 @@
   <p>A same-day departure still bills 1 night. Every choice is written in the booking's History.</p>
   <div class="warn"><p>If the guest still owes money and you do not have <strong>Check-out With Balance</strong> you will see <em>"Checkout blocked: the guest still owes MWK 50,000.00. Record the payment first, or ask someone with the "Check out with balance" permission."</em> If you do have it, you are asked to confirm (on the list <em>"Check out with balance?"</em> with a <strong>Check Out with Balance</strong> button; on the booking page <em>"This guest still owes ... Check out anyway with the outstanding balance?"</em>). It is recorded in the timeline as "Checked out with outstanding balance".</p></div>
 
+  <h3 id="kept-nights">Kept for unused nights</h3>
+  <p>When a stay gets shorter (the guest leaves early, arrives late and pays only for nights stayed, the dates change, nights are taken off, or the check-out date is corrected), the room's saved cancellation tiers decide how much of the unused nights the hotel keeps. The amount is shown before you confirm as <em>rate &times; nights &times; %</em>. Staff can change it, from 0 up to the bill reduction, with a reason. A booking with no saved cancellation policy keeps nothing.</p>
+  <p>The amount kept is a line on the bill and the invoice, with VAT and levy inside. History says <em>"Kept for unused nights"</em> or <em>"No fee kept for unused nights"</em>. The notice date is the leave date at check-out, the arrival date for late arrivals, and today for later changes (never later than today).</p>
   <h2 id="cancel">How to cancel a booking or mark a no-show</h2>
   <h3>Cancel</h3>
   <ol class="steps">
@@ -614,6 +644,36 @@
   <p><strong>Joined-room rules.</strong> A joined room type with no <strong>active</strong> pair is shown as sold out everywhere. Choose <strong>On their own and as the joined room</strong> for a pair such as 7A + 7B that should still sell each room alone: the two rooms join only for the nights a joined booking takes them. Saving or switching on a pair gives it to joined bookings still waiting for rooms, and the message lists who got it and who still waits. The last pair of a joined type cannot be deleted or re-typed; deactivate it instead. A blank <strong>Rate Override</strong> uses the joined type's own price and rate plans.</p>
   <p>Room cleaning and repairs are covered in the <a href="06-housekeeping.html">Housekeeping guide</a>. Prices are covered in the <a href="09-packages-rates.html">Packages and Rates guide</a>.</p>
 
+  <h2 id="groups">How to work with a group of rooms</h2>
+  <p>A group is several rooms booked together under one lead booking. Each room keeps its own dates, guest name, payments, balance and cancellation terms. Money is never moved by making or changing a group, except when you choose to move credit or part of a group payment (see <em>Moving credit</em> below).</p>
+  <h3>Make a group</h3>
+  <ol class="steps">
+    <li>Open <strong>Front Desk</strong> &rarr; <strong>Bookings</strong>. Tick the rooms (on a phone, tick them one by one).</li>
+    <li>Click <strong>Make a group</strong> on the bar. Pick the primary room (the lead room: contact, documents and folio).</li>
+    <li>Check each room's paid and owed amounts and the group totals, then confirm.</li>
+  </ol>
+  <p>It is refused when the payers differ (guest and company, or two companies), or when a room is already in another group. A no-show or cancelled room that still owes can join; it pays only what it still owes, and credit from other rooms never moves into it. A no-show or cancelled room can never be the primary room.</p>
+  <h3>The Rooms in this group table (Booking Details)</h3>
+  <p>Every room shows, including no-shows: dates and nights; booked rate &times; nights; billed, paid, owed, credit and refunds. Under the table are the group totals over all rooms and the net position (owed minus credit). Each room has these buttons (they need <strong>Edit Booking</strong>, and the date buttons need the same permission as the date dialog):</p>
+  <ul>
+    <li><strong>Make primary</strong>: that room becomes the lead after a review and confirm. The group invoice number does not change.</li>
+    <li><strong>Remove</strong>: the room becomes an individual booking with its own payments, balance, invoice and cancellation policy. If the room held the group invoice number, the number stays with the group. Removing the primary room hands the group to another room first. If the room is set to pay later, you choose <strong>Keep pay later for this room</strong> or <strong>Drop it - this room pays on its own</strong>.</li>
+    <li><strong>Change dates</strong>: opens that room's date dialog (Adjust Stay Dates before check-out, Correct Stay Dates after). On another room it opens that room's page with the dialog open, and a <strong>Back to the group</strong> link.</li>
+    <li><strong>Who's staying</strong>: an optional name for the room (up to 150 characters), also after check-out. Empty means the lead booker's name shows again. A checked-out room's invoice is rebuilt with the new name.</li>
+  </ul>
+  <h3>Moving credit and part of a group payment</h3>
+  <ol class="steps">
+    <li>When one room has credit and others owe, click <strong>Use this credit for the rooms that owe</strong> in the table. Review each room's owed now and after, then confirm. One credit note is made on the room with credit and applied to the rooms that owe. Needs <strong>Issue refunds</strong>.</li>
+    <li>When you remove a room, you can tick <strong>Move part of the group payment to this room</strong>. It is shown before you confirm. The removal and the move happen in the same step.</li>
+  </ol>
+  <p>A cancelled or no-show room gives up only its credit, never what its cancellation policy kept. If every room is billed to the same company, only that company's money moves, and the credit note is made out to the company. Guests' own extra money stays on its room. Refused when the rooms are billed to different payers.</p>
+  <h3>Groups and check-in, invoices and emails</h3>
+  <ul>
+    <li>A group member can check in unpaid when the lead booking is set to pay later (see <a href="#pay-later-group">Check-in with pay later</a>).</li>
+    <li>Group invoices and quotations list every room. Cancelled rooms are left out of a quotation. Each room's own cancellation policy text is printed (<em>"For REF1, REF2: ..."</em>).</li>
+    <li>Confirmation, reminder, check-in, cancellation and modified emails list each room with its own dates and nights, and its <em>Who's staying</em> name when one is entered.</li>
+  </ul>
+  <p><strong>If something goes wrong.</strong> A group action is refused with the reason shown on the screen. Read the reason, fix the room it names, and try again. For bulk actions, a skipped room says <em>"skipped: reason"</em> in the result list; the other rooms are still done.</p>
   <h2 id="guest">The guest's side: booking form and look-up</h2>
   <h3>Book Your Stay (booking.php)</h3>
   <p>Guests book on the website. They choose a <strong>Check-in Date</strong> and <strong>Check-out Date</strong>, <strong>Number of Guests</strong> (1 to 20) and <strong>Of whom children (under 12)</strong>, pick a room (the page then moves to <strong>Guest Information</strong> and stays there), enter <strong>Full Name</strong>, <strong>Email Address</strong>, <strong>Phone Number</strong> (required), <strong>Country</strong>, <strong>Address</strong> and <strong>Special Requests (Optional)</strong>, choose any add-on packages, and click <strong>Confirm Booking</strong>.</p>
@@ -674,6 +734,8 @@
       <tr><td>A complimentary upgrade needs a manager...</td><td>Keeping the price on an upgrade or downgrade is a revenue decision.</td><td>Charge the difference, or ask a manager.</td></tr>
       <tr><td>This booking has ... paid against it. Refund or void the payments first</td><td>Bookings with money on them cannot be deleted.</td><td>Refund / void the payments and void folio charges, or cancel the booking instead.</td></tr>
       <tr><td><em>"Group of 3 bookings (BR-...): nothing was cancelled. BR-... could not be cancelled: ..."</em> (or <em>nothing was deleted</em>)</td><td>One room of a group could not be cancelled or deleted, so none of them were.</td><td>Fix the room named in the message, then cancel or delete the group again.</td></tr>
+      <tr><td><em>"This no-show booking owes nothing. No payment can be recorded."</em></td><td>A no-show or cancelled room has no balance left to pay.</td><td>Nothing to do. Check the Payments list if the guest still wants to pay.</td></tr>
+      <tr><td><em>"This no-show booking owes MWK X. A payment on it cannot be more than that."</em></td><td>The amount typed is more than the room still owes.</td><td>Type the amount owed, or less.</td></tr>
       <tr><td><em>"Order ORD-... is part-paid. Settle or refund it in Orders &amp; Tabs first, then try again."</em></td><td>A room tab or room-service order on the booking is part-paid. Nothing was changed.</td><td>Settle or refund the order in <strong>Orders &amp; Tabs</strong>, then repeat the cancel, delete or no-show.</td></tr>
       <tr><td><em>"Order ORD-... is still open - close it in Orders &amp; Tabs first."</em></td><td>Undo check-in was tried while the guest has an open order.</td><td>Close the order, then undo the check-in.</td></tr>
       <tr><td>Cannot restore as confirmed: the room type is no longer free...</td><td>The room was sold while the booking was deleted.</td><td>Rebook the guest on other dates or another room type.</td></tr>

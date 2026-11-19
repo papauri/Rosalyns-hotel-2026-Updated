@@ -498,6 +498,26 @@
     <p>Open <strong>Website</strong> &rarr; <strong>Facebook Settings</strong>. Add the redirect address shown there to your Facebook app (<strong>Facebook Login</strong> &rarr; <strong>Settings</strong> &rarr; <strong>Valid OAuth Redirect URIs</strong>), type the <strong>App ID</strong> and <strong>App Secret</strong>, click <strong>Save and connect with Facebook</strong> and approve the three permissions. If it was connected before and stopped, click <strong>Reconnect</strong>. See <a href="11-social-facebook-sharing.html#connect">How to connect the Facebook Page</a>.</p>
   </details>
 
+  <details class="faq" id="faq-charge-after-checkout" data-module="bookings">
+    <summary>How do I charge a guest who has already checked out?</summary>
+    <p>Open <strong>Money</strong> &rarr; <strong>Payments</strong> (or the <strong>Accounting</strong> dashboard) and click <strong>Add charge</strong>. Pick the booking, choose <strong>This room only</strong> or the whole group, fill in the charge and a reason, check the preview and click <strong>Confirm</strong>. You need <strong>Correct Stay After Check-out</strong> (administrators and managers have it). For extra nights use <strong>Correct Stay Dates</strong> on the booking.</p>
+  </details>
+  <details class="faq" id="faq-kept-nights" data-module="bookings">
+    <summary>Why was money kept when the guest left early?</summary>
+    <p>The room's cancellation policy keeps a share of the nights not stayed, so the bill goes down by less. The amount is shown before you confirm as <em>rate &times; nights &times; %</em>, and History says <em>"Kept for unused nights"</em>. A booking with no saved cancellation policy keeps nothing. Staff can change the amount, from 0 up to the bill reduction, with a reason.</p>
+  </details>
+  <details class="faq" id="faq-group-join" data-module="bookings">
+    <summary>How do I join two bookings into one group, or take a room out?</summary>
+    <p>To join: on <strong>Bookings</strong>, tick the rooms, click <strong>Make a group</strong>, pick the primary room and confirm. To take a room out: open the group's booking, click <strong>Remove</strong> on that room in <em>Rooms in this group</em>, and confirm. The room becomes its own booking with its own bill. Needs <strong>Edit Booking</strong>. See <a href="07-reception-bookings.html#groups">How to work with a group of rooms</a>.</p>
+  </details>
+  <details class="faq" id="faq-credit-others-owe" data-module="bookings">
+    <summary>A room left early and has credit, and other rooms in the group owe. What now?</summary>
+    <p>In <em>Rooms in this group</em> click <strong>Use this credit for the rooms that owe</strong>. Check each room's owed amount before and after, then confirm. One credit note is made and applied to the rooms that owe. No payment or receipt moves. It needs <strong>Issue refunds</strong>.</p>
+  </details>
+  <details class="faq" id="faq-no-show-payment" data-module="bookings">
+    <summary>Can I take money on a no-show?</summary>
+    <p>Yes, but only while the room still owes money. Use <strong>Payments &amp; balance</strong> from the booking's More menu, or <strong>Add Payment</strong>. You cannot pay more than is owed. If the room owes nothing you will see <em>"This no-show booking owes nothing. No payment can be recorded."</em></p>
+  </details>
   <details class="faq" id="faq-refund">
     <summary>How do I give a guest money back?</summary>
     <p>Open the payment and click <strong>Refund</strong>. Choose the amount, the reason and the status (use <strong>Pending</strong> until the money has actually gone out, then settle it). A refund counts in the reports on the day it was paid out; a pending refund counts in no period until then. Mobile money refunds must start as Pending or Processing. See <a href="13-finance-payments.html#refund">How to refund a payment</a>.</p>
@@ -589,7 +609,7 @@
 
   <details class="faq" id="faq-refund-totals">
     <summary>How are refunds counted, and what is the Refunds detail window?</summary>
-    <p>Everywhere (Payments, Accounting, Reports, End of Day) a refund is the full amount paid back, VAT included, once it is Processing or Completed. Refunds awaiting approval are shown apart. The cards split the total into <strong>Paid back in cash / bank</strong> and <strong>Moved to credit notes (no cash out)</strong>. On <strong>Money</strong> &rarr; <strong>Accounting</strong>, click the <strong>Refunds</strong> card to open <strong>Refunds detail</strong>. See <a href="13-finance-payments.html#refunds-detail">Refunds detail</a>. On Credit Notes, <strong>Still to use</strong> is the credit left on notes (it was called Outstanding).</p>
+    <p>Everywhere (Payments, Accounting, Reports, End of Day) a refund is the full amount paid back, VAT included, once it is Processing or Completed. Refunds awaiting approval are shown apart. Only money really paid back is a refund. Money moved onto a credit note shows on its own <strong>Moved to guest credit</strong> line: it is guest credit, not a refund, and is not in the total. On <strong>Money</strong> &rarr; <strong>Accounting</strong>, click the <strong>Refunds</strong> card to open <strong>Refunds detail</strong>. See <a href="13-finance-payments.html#refunds-detail">Refunds detail</a>. On Credit Notes, <strong>Still to use</strong> is the credit left on notes (it was called Outstanding).</p>
   </details>
 
   <details class="faq" id="faq-show-more-rows">
