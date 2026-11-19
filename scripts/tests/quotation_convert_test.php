@@ -104,6 +104,21 @@ check($a['changed'] && abs($a['amount'] - 1424000) < 0.001 && abs($a['quoted'] -
 $a = rh_qc_amount_choice(1068000, 712000);
 check($a['changed'] && abs($a['amount'] - 712000) < 0.001, 'lower current total: invoice uses the current total');
 
+// 6b. group quotes (Bundle B fix): one rule for preview, convert (converted_total) and the History note
+$grp = ['current_total' => 1068000.00, 'group_total' => 2848000.00];
+$a = rh_qc_quote_amount(1068000, $grp);
+check(!$a['changed'] && $a['basis'] === 'room' && abs($a['amount'] - 1068000) < 0.001, 'old one-room group quote: room vs room, no false change, converted_total = the room total');
+$a = rh_qc_quote_amount(1068000.004, $grp);
+check(!$a['changed'] && $a['basis'] === 'room', 'old one-room quote inside BALANCE_TOLERANCE still reads as one room');
+$a = rh_qc_quote_amount(2848000, $grp);
+check(!$a['changed'] && $a['basis'] === 'group' && abs($a['amount'] - 2848000) < 0.001, 'new group-sum quote: group vs group, no false change, converted_total = the group sum');
+$a = rh_qc_quote_amount(2492000, $grp);
+check($a['changed'] && $a['basis'] === 'group' && abs($a['amount'] - 2848000) < 0.001 && abs($a['quoted'] - 2492000) < 0.001, 'real price change on a group quote (room extended): still flagged, uses the group sum now');
+$a = rh_qc_quote_amount(1068000, ['current_total' => 1068000.00, 'group_total' => null]);
+check(!$a['changed'] && $a['basis'] === 'room' && abs($a['amount'] - 1068000) < 0.001, 'single booking, same total: unchanged behaviour');
+$a = rh_qc_quote_amount(1068000, ['current_total' => 1424000.00, 'group_total' => null]);
+check($a['changed'] && $a['basis'] === 'room' && abs($a['amount'] - 1424000) < 0.001, 'single booking, extended: still flagged against its own total');
+
 // 7. numbering series mirror the generators
 check(rh_qc_number_series('room', 'INV') === ['prefix' => 'INV', 'channel' => 'room'], 'room series = generateInvoicePDF (invoice_prefix, room)');
 check(rh_qc_number_series('conference', 'INV') === ['prefix' => 'CONF-INV', 'channel' => 'conference'], 'conference series = generateConferenceInvoicePDF (CONF-prefix, conference)');

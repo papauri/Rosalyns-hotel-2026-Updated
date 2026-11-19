@@ -10,6 +10,7 @@ require_once __DIR__ . '/email.php';
 require_once __DIR__ . '/../includes/finance-sequences.php';
 require_once __DIR__ . '/../admin/includes/finance-account-sync.php';
 require_once __DIR__ . '/../includes/quotation-convert.php'; // function-only: linked quotation invoice numbers
+require_once __DIR__ . '/../includes/group-room-list.php'; // rh_grl_*: a group's rooms with their own dates + nights (Bundle B)
 
 if (!function_exists('rh_invoice_signed_payments')) {
     /**
@@ -1377,9 +1378,10 @@ function buildInvoiceHTML(array $booking, string $invoice_number, string $site_n
             $keptOnly  = $removed !== '' && (strtolower((string)($grm['status'] ?? '')) === 'cancelled' || $noRoomChg);
             $grmNights = (int)($grm['number_of_nights'] ?? 0);
             $grmRoom   = (float)$docLines[$gi]['room'];
+            // Bundle B: the room's own dates with its nights ("18 Dec 2026 to 21 Dec 2026 (3 nights)", rh_grl_dates).
             $whoWhen   = implode(' - ', array_filter([
                 ($grm['rh_inv_guest'] ?? '') !== '' ? 'Guest: ' . $grm['rh_inv_guest'] : '',
-                !empty($grm['check_in_date']) ? date('d M Y', strtotime((string)$grm['check_in_date'])) . ' to ' . date('d M Y', strtotime((string)$grm['check_out_date'])) : '',
+                !empty($grm['check_in_date']) ? rh_grl_dates((string)$grm['check_in_date'], (string)($grm['check_out_date'] ?? ''), $grmNights) : '',
             ]));
             $title = '<b>' . rh_pdf_e(($removed !== '' ? $removed . ' room: ' : '') . rh_inv_room_title($grm)) . '</b>' . rh_inv_sub($whoWhen);
             if ($keptOnly) {
@@ -1805,9 +1807,10 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
             $keptOnly  = $removed !== '' && (strtolower((string)($grm['status'] ?? '')) === 'cancelled' || $noRoomChg);
             $grmNights = (int)($grm['number_of_nights'] ?? 0);
             $grmRoom   = (float)$docLines[$gi]['room'];
+            // Bundle B: the room's own dates with its nights ("18 Dec 2026 to 21 Dec 2026 (3 nights)", rh_grl_dates).
             $whoWhen   = implode(' - ', array_filter([
                 ($grm['rh_inv_guest'] ?? '') !== '' ? 'Guest: ' . $grm['rh_inv_guest'] : '',
-                !empty($grm['check_in_date']) ? date('d M Y', strtotime((string)$grm['check_in_date'])) . ' to ' . date('d M Y', strtotime((string)$grm['check_out_date'])) : '',
+                !empty($grm['check_in_date']) ? rh_grl_dates((string)$grm['check_in_date'], (string)($grm['check_out_date'] ?? ''), $grmNights) : '',
             ]));
             $title = '<strong>' . htmlspecialchars(($removed !== '' ? $removed . ' room: ' : '') . rh_inv_room_title($grm)) . '</strong>' . $subHtml($whoWhen);
             $paidHere = $currency_symbol . ' ' . number_format((float)($grm['rh_inv_paid'] ?? 0), 2);
@@ -1960,7 +1963,8 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
                 : '';
 
             // {{booked_rate}}: "Superior Suite - K356,000 x 3 nights", the nightly price the booking was made at
-            // (one line per room for a group), never today's price. Plain "x" / "-": PDF core font.
+            // (one line per room for a group, with the room's own guest when entered - Bundle B), never today's price.
+            // Plain "x" / "-": PDF core font.
             $bookedRateHtml = '';
             $brPdo = (isset($pdo) && $pdo instanceof PDO) ? $pdo : (($GLOBALS['pdo'] ?? null) instanceof PDO ? $GLOBALS['pdo'] : null);
             if ($brPdo !== null && (int)($booking['id'] ?? 0) > 0) {
@@ -1972,7 +1976,7 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
                     // A group: the rooms of the charges table, in its order (rh_inv_group_rooms: lead, live rooms by
                     // number, then the closed rooms that carry money, marked the same way).
                     foreach (array_values($group_bookings) as $brRow) {
-                        $brOne = rh_booked_rate_for_booking($brPdo, (int)($brRow['id'] ?? 0), false);
+                        $brOne = rh_booked_rate_for_booking($brPdo, (int)($brRow['id'] ?? 0), false, true);
                         if (!empty($brOne['ok'])) {
                             $brMark = (string)($brRow['rh_inv_removed'] ?? '');
                             $brTexts[] = ($brMark !== '' ? '(' . $brMark . ') ' : '') . $brOne['guest_text'];
@@ -1991,7 +1995,7 @@ function rh_inv_legacy_room_template(array $c, string $templateHtml): string
                     }
                 }
                 $bookedRateHtml = implode('<br>', array_map(static function (string $l): string {
-                    return htmlspecialchars(str_replace(['×', '·'], ['x', '-'], $l), ENT_QUOTES, 'UTF-8');
+                    return htmlspecialchars(str_replace(['×', '·', '–'], ['x', '-', '-'], $l), ENT_QUOTES, 'UTF-8');
                 }, $brLines));
             }
 
@@ -2506,6 +2510,8 @@ function sendInvoiceEmailToGuestWithCC(array $booking, string $invoice_file, arr
                             ' . ((float)($booking['amount_due'] ?? 0) > BALANCE_TOLERANCE ? '<p style="margin: 8px 0 0 0; font-size: 15px; color: #B71C1C; font-weight: 600;">Balance due: ' . $currency_symbol . ' ' . number_format((float)$booking['amount_due'], 2) . '</p>' : '<p style="margin: 8px 0 0 0; font-size: 15px; color: #2E7D32; font-weight: 600;">Paid in full</p>') . '
                         </div>
                     </div>
+
+                    ' . (function_exists('rh_email_group_rooms_html') ? rh_email_group_rooms_html($booking, true) : '') . '
 
                     <!-- NEXT STEPS -->
                     <div style="background: linear-gradient(135deg, #E3F2FD 0%, #BBDEFB 100%); border-radius: 12px; padding: 25px; margin: 0 0 30px 0;">

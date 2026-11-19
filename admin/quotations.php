@@ -71,7 +71,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     if (!function_exists('rh_doc_stay_lines')) {
                         require_once __DIR__ . '/../includes/pricing.php';
                     }
-                    $pdo->prepare("UPDATE quotations SET status = 'sent', sent_at = NOW(), total_amount = ?, updated_at = NOW() WHERE id = ?")->execute([rh_doc_stay_lines($booking)['total'], $quotation_id]);
+                    // A group (Bundle B): the email and PDF quote every live room, so the register keeps the group total.
+                    $rsGroup = function_exists('rh_grl_quote') ? rh_grl_quote($pdo, (int)$qRow['booking_id']) : null;
+                    $pdo->prepare("UPDATE quotations SET status = 'sent', sent_at = NOW(), total_amount = ?, updated_at = NOW() WHERE id = ?")->execute([$rsGroup !== null ? $rsGroup['total'] : rh_doc_stay_lines($booking)['total'], $quotation_id]);
                     $pdo->prepare("UPDATE bookings SET last_quotation_sent_at = NOW() WHERE id = ?")->execute([$qRow['booking_id']]);
                     $_SESSION['qt_flash'] = ['type' => 'success', 'msg' => 'Quotation resent to ' . ($qRow['guest_email'] ?? '')];
                 } else {
@@ -310,6 +312,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET' && isset($_GET['download'])) {
                     $rStmt = $pdo->prepare("SELECT * FROM rooms WHERE id = ? LIMIT 1");
                     $rStmt->execute([$dlRec['room_id'] ?? 0]);
                     $room      = $rStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+                    // A group quotation stored before Bundle B carries the one-room total: rebuild it in the one-room
+                    // layout. Same classifier as the convert (rh_qc_quote_amount): only a stored total within
+                    // BALANCE_TOLERANCE of the one room's total is a one-room quote; anything else is a group quote.
+                    $dlGroup = function_exists('rh_grl_quote') ? rh_grl_quote($pdo, (int)($dlRec['id'] ?? 0)) : null;
+                    if ($dlGroup !== null) {
+                        if (!function_exists('rh_doc_stay_lines')) {
+                            require_once __DIR__ . '/../includes/pricing.php';
+                        }
+                        $dlBasis = rh_qc_quote_amount((float)($dlQuote['total_amount'] ?? 0), [
+                            'current_total' => round((float)rh_doc_stay_lines($dlRec)['total'], 2),
+                            'group_total'   => round((float)$dlGroup['total'], 2),
+                        ])['basis'];
+                        if ($dlBasis === 'room') {
+                            $dlOpts['single_room'] = true;
+                        }
+                    }
                     $pdfBinary = generateQuotationPDF($dlRec, $room, $dlOpts);
                 }
                 // Save regenerated PDF
@@ -623,10 +641,12 @@ try {
                         <dd style="margin:0;"><?php echo htmlspecialchars(rh_qc_money((float)$cvAmt['quoted'], $currency_symbol)); ?>
                             <small style="<?php echo $cvHelp; ?>">The total on the quotation when it was sent.</small></dd>
 
-                        <dt style="font-weight:600;"><?php echo $cvType === 'room' ? 'Stay total now' : 'Enquiry total now'; ?></dt>
+                        <dt style="font-weight:600;"><?php echo $cvType === 'room' ? (($cvAmt['basis'] ?? 'room') === 'group' ? 'Group stay total now' : 'Stay total now') : 'Enquiry total now'; ?></dt>
                         <dd style="margin:0;"><?php echo htmlspecialchars(rh_qc_money((float)$cvAmt['current'], $currency_symbol)); ?>
                             <small style="<?php echo $cvHelp; ?>"><?php echo $cvType === 'room'
-                                ? 'The booking\'s own stay total at the booked rate &times; nights, VAT and tourism levy included. Never today\'s room price.'
+                                ? (($cvAmt['basis'] ?? 'room') === 'group'
+                                    ? 'Every live room of the group added up, each at its booked rate &times; nights, VAT and tourism levy included. Paid so far and Still owed below are this room only.'
+                                    : 'The booking\'s own stay total at the booked rate &times; nights, VAT and tourism levy included. Never today\'s room price.')
                                 : 'The enquiry\'s own total, VAT included.'; ?></small></dd>
 
                         <?php $cvExtras = $cvType === 'room' ? (float)($cvAcct['row']['folio_charges_total'] ?? 0) : 0.0; ?>
@@ -663,7 +683,7 @@ try {
                     <?php if (!empty($cvAmt['changed'])): ?>
                         <p style="background:#FFF3CD; color:#6b5203; border-radius:8px; padding:10px 12px; margin:0 0 14px; font-size:13px;">
                             <i class="fas fa-triangle-exclamation" style="margin-right:6px;"></i>
-                            The <?php echo $cvType === 'room' ? 'stay' : 'enquiry'; ?> total changed since the quotation: quoted <?php echo htmlspecialchars(rh_qc_money((float)$cvAmt['quoted'], $currency_symbol)); ?>, now <?php echo htmlspecialchars(rh_qc_money((float)$cvAmt['current'], $currency_symbol)); ?>.
+                            The <?php echo $cvType === 'room' ? (($cvAmt['basis'] ?? 'room') === 'group' ? 'group stay' : 'stay') : 'enquiry'; ?> total changed since the quotation: quoted <?php echo htmlspecialchars(rh_qc_money((float)$cvAmt['quoted'], $currency_symbol)); ?>, now <?php echo htmlspecialchars(rh_qc_money((float)$cvAmt['current'], $currency_symbol)); ?>.
                             The invoice uses the current total, <?php echo htmlspecialchars(rh_qc_money((float)$cvAmt['current'], $currency_symbol)); ?>.
                         </p>
                     <?php endif; ?>

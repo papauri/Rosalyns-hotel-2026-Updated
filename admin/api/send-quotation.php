@@ -112,6 +112,11 @@ try {
         require_once dirname(__DIR__, 2) . '/includes/pricing.php';
     }
     $quotedTotal = rh_doc_stay_lines($booking)['total'];
+    // A group (Bundle B): the PDF and the email quote every live room, so the register keeps the group total too.
+    $qGroup = function_exists('rh_grl_quote') ? rh_grl_quote($pdo, (int)$booking_id) : null;
+    if ($qGroup !== null) {
+        $quotedTotal = $qGroup['total'];
+    }
     $insStmt = $pdo->prepare("
         INSERT INTO quotations
             (booking_id, booking_type, quote_reference, booking_reference, guest_name,

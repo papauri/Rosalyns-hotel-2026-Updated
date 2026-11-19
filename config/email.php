@@ -20,6 +20,7 @@ require_once __DIR__ . '/../includes/email-identity.php';
 require_once __DIR__ . '/../includes/email-send-log.php';
 // Test platform guard: on the test hotel every email goes only to the test recipient (security 2026-11-14)
 require_once __DIR__ . '/../includes/test-platform-mail.php';
+require_once __DIR__ . '/../includes/group-room-list.php'; // rh_grl_*: the rooms of a group in every group email (Bundle B)
 
 // WhatsApp notification functions
 if (file_exists(__DIR__ . '/../includes/whatsapp-functions.php')) {
@@ -444,6 +445,7 @@ function sendSimpleStatusUpdateEmail(array $booking, string $status)
 
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">Status:</td><td style="padding:10px 0 10px 6px;color: ' . $msg['color'] . '; font-weight: bold; text-transform: uppercase;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;">' . htmlspecialchars($status) . '</td></tr></table>
         </div>
+        ' . rh_email_group_rooms_html($booking, false) . '
 
         <p>If you have any questions, please contact us at <a href="mailto:' . htmlspecialchars($email_from_email) . '">' . htmlspecialchars($email_from_email) . '</a>.</p>
         <p style="margin:28px 0 0;font-size:14px;color:#777;text-align:center;font-style:italic;">
@@ -2432,6 +2434,14 @@ function buildBookingEmailVariables(array $booking, ?array $room = null, array $
         }
     }
 
+    // {{group_rooms_block}} (Bundle B, owner 2026-11-19): every room of the booking's group with its own dates, the
+    // occupant's name when entered and its booked rate x nights; a cancelled / no-show room with its state and any fee
+    // kept, never as payable (includes/group-room-list.php). Escaped HTML; '' for a booking outside a group.
+    $vars['group_rooms_block'] = '';
+    if ($bookingId > 0 && isset($pdo) && $pdo instanceof PDO) {
+        $vars['group_rooms_block'] = rh_grl_block($pdo, $bookingId, ['money' => true])['html'];
+    }
+
     // Guest-supplied text goes into HTML email bodies: escape it here once so a name or request
     // like "<a href=...>" can never inject markup/links into mail sent from the hotel's address.
     // (renderBookingEmailTemplate() decodes the entities again for the plain-text subject/body.)
@@ -2694,27 +2704,7 @@ function rh_email_booked_rate_block(array $rows, int $selfId, float $owed, strin
     $refs = [];
     if (count($rows) > 1) {
         foreach ($rows as $r) {
-            $type = trim((string)($r['room_name'] ?? ''));
-            $no = trim((string)($r['room_label'] ?? ''));
-            $room = $no !== '' && stripos($type, $no) === false ? trim($type . ' - ' . $no, ' -') : $type;
-            $guest = trim((string)($r['room_guest_name'] ?? ''));
-            $ci = strtotime((string)($r['check_in_date'] ?? ''));
-            $co = strtotime((string)($r['check_out_date'] ?? ''));
-            $dates = '';
-            if (!empty($r['check_in_date']) && !empty($r['check_out_date']) && $ci !== false && $co !== false) {
-                $nights = (int)round(($co - $ci) / 86400);
-                if ($nights <= 0) {
-                    $nights = (int)($r['number_of_nights'] ?? 0);
-                }
-                $dates = date('d M Y', $ci) . ' to ' . date('d M Y', $co) . ($nights > 0 ? ' (' . $nights . ' night' . ($nights === 1 ? '' : 's') . ')' : '');
-            }
-            $refs[] = implode(' - ', array_filter([
-                trim(trim((string)($r['booking_reference'] ?? '')) . ($room !== '' ? ' - ' . $room : ''), ' -'),
-                $guest !== '' ? 'Guest: ' . $guest : '',
-                $dates,
-            ], static function (string $x): bool {
-                return $x !== '';
-            }));
+            $refs[] = rh_grl_line($r); // includes/group-room-list.php: the one room line every group email uses
         }
     } elseif (!$rows) {
         $refs = array_map(static function ($r): string {
@@ -2734,6 +2724,21 @@ function rh_email_booked_rate_block(array $rows, int $selfId, float $owed, strin
         $html .= "</div>\n";
     }
     return $html;
+}
+
+/**
+ * The group room list for a hard-coded email body (Bundle B): rh_grl_block() of the booking the email is about, escaped
+ * HTML; $money = add each room's booked rate x nights (only where the email already shows money). '' for a booking
+ * outside a group, without an id or on a read error.
+ */
+function rh_email_group_rooms_html(array $booking, bool $money): string
+{
+    global $pdo;
+    $id = (int)($booking['id'] ?? 0);
+    if ($id <= 0 || !($pdo instanceof PDO) || !function_exists('rh_grl_block')) {
+        return '';
+    }
+    return rh_grl_block($pdo, $id, ['money' => $money])['html'];
 }
 
 /** Plain-text version of an email block (one line per paragraph / heading) for the text part of the email. */
@@ -2775,8 +2780,10 @@ function rh_render_booking_email_template_row(string $templateKey, array $templa
     }
     // A block of HTML placed in the plain-text part goes in as plain lines.
     $textReplace = $replace;
-    if (isset($replace['{{booked_rate_block}}'])) {
-        $textReplace['{{booked_rate_block}}'] = htmlspecialchars(rh_email_block_plain($replace['{{booked_rate_block}}']), ENT_QUOTES, 'UTF-8');
+    foreach (['{{booked_rate_block}}', '{{group_rooms_block}}'] as $blockKey) {
+        if (isset($replace[$blockKey])) {
+            $textReplace[$blockKey] = htmlspecialchars(rh_email_block_plain($replace[$blockKey]), ENT_QUOTES, 'UTF-8');
+        }
     }
 
     // Variables arrive HTML-escaped (safe for the HTML body); the subject and plain-text part
@@ -2795,6 +2802,18 @@ function rh_render_booking_email_template_row(string $templateKey, array $templa
         $out['html_body'] .= $brBlock;
         if ($out['text_body'] !== '' && strpos((string)$template['text_body'], '{{booked_rate_block}}') === false) {
             $out['text_body'] .= "\n\n" . rh_email_block_plain($brBlock);
+        }
+    }
+    // Group room list (Bundle B): the reminder, cancelled and invoice emails of a group list every room (its own dates,
+    // occupant when entered, booked rate x nights; a closed room with its state). Added at the end when the stored
+    // template does not place {{group_rooms_block}} itself; '' (nothing added) for a booking outside a group. The
+    // booked-rate emails above already list the rooms in "Your rooms".
+    $grlKeys = ['booking_reminder', 'booking_cancelled', 'payment_invoice'];
+    $grlBlock = (string)($vars['group_rooms_block'] ?? '');
+    if ($grlBlock !== '' && in_array($templateKey, $grlKeys, true) && strpos((string)$template['html_body'], '{{group_rooms_block}}') === false) {
+        $out['html_body'] .= $grlBlock;
+        if ($out['text_body'] !== '' && strpos((string)$template['text_body'], '{{group_rooms_block}}') === false) {
+            $out['text_body'] .= "\n\n" . rh_email_block_plain($grlBlock);
         }
     }
     // Cancellation policy: the stored DB templates are never edited (live data). When a booking made under a policy is
@@ -3225,7 +3244,7 @@ function sendBookingModifiedEmail(array $booking, array $changes = [])
         <h1 style="color: #8B7355; text-align: center;">Booking Updated</h1>
         <p>Dear ' . htmlspecialchars($booking['guest_name']) . ',</p>
         <p>Your booking with <strong>' . htmlspecialchars($email_site_name) . '</strong> has been updated by our team. Please review the details below.</p>
-        ' . $changesHtml . '
+        ' . $changesHtml . rh_email_group_rooms_html($booking, true) . '
         <div style="background: #FAF6F0; border: 2px solid #C8A45A; padding: 20px; margin: 20px 0; border-radius: 10px;">
             <h2 style="color: #8B7355; margin-top: 0;;text-align:left;">Updated Booking Details</h2>
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">Booking Reference:</td><td style="padding:10px 0 10px 6px;color: #8B7355; font-weight: bold; font-size: 18px;;text-align:left;vertical-align:top;font-family:\'Segoe UI\',Tahoma,Verdana,sans-serif;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($booking['booking_reference']) . '</td></tr></table>
@@ -4508,6 +4527,7 @@ function sendBookingCancelledEmail(array $booking, string $cancellation_reason =
             </div>';
         }
 
+        $htmlBody .= rh_email_group_rooms_html($booking, true); // a group: every room with its state ('' otherwise)
         $htmlBody .= rh_email_cancel_policy_blocks($templateVars, true); // cancellation policy ('' without one)
 
         $htmlBody .= '
@@ -6258,7 +6278,7 @@ function sendNoShowEmail(array $booking, float $refund_amount = 0.0, string $ref
             </table>
         </div>
 
-        ' . $refundBlock . '
+        ' . rh_email_group_rooms_html($booking, true) . $refundBlock . '
 
         <div style="background:#f1f3f5;padding:15px 20px;border-radius:6px;margin:20px 0;">
             <p style="margin:0;font-size:14px;color:#555;">Need to reschedule or have questions? Contact us:<br>
@@ -6304,13 +6324,16 @@ function sendExtendStayEmail(array $booking, float $amount_delta = 0.0, string $
     $emailCtx = rh_email_context(['kind' => 'booking_extend_stay'] + rh_email_ctx_account('room', $booking['id'] ?? null, $booking['booking_reference'] ?? null)); // System Logs > Emails sent: what this email is about
     global $pdo, $email_from_email, $email_site_name;
 
-    // On a company account (migration 084): the guest is told the new dates only, never an amount to pay.
+    // On a company account (migration 084): the guest is told the new dates only, never an amount to pay (nor the
+    // group rooms' rates).
+    $grlMoney = true;
     if (!empty($booking['id'])) {
         if (!function_exists('rh_booking_billing') && is_file(__DIR__ . '/../includes/billing-accounts.php')) {
             require_once __DIR__ . '/../includes/billing-accounts.php';
         }
         if (function_exists('rh_billing_ready') && rh_billing_ready($pdo) && !empty(rh_booking_billing($pdo, $booking)['on_account'])) {
             $amount_delta = 0.0;
+            $grlMoney = false;
         }
     }
 
@@ -6387,7 +6410,7 @@ function sendExtendStayEmail(array $booking, float $amount_delta = 0.0, string $
             </table>
         </div>
 
-        ' . $deltaBlock . '
+        ' . rh_email_group_rooms_html($booking, $grlMoney) . $deltaBlock . '
 
         <div style="background:#f1f3f5;padding:15px 20px;border-radius:6px;margin:20px 0;">
             <p style="margin:0;font-size:14px;color:#555;">Any questions? Contact us:<br>
@@ -6715,6 +6738,23 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
         $room_subtotal  = $docLines['room'];
         $rate_per_night = $nights > 0 ? $room_subtotal / $nights : (float)$room['price_per_night'];
 
+        // A GROUP (Bundle B, owner 2026-11-19): every live room is quoted at its own stored price and the totals are the
+        // group's (rh_grl_quote: the same figures as the attached quotation PDF and the quotations register). null = a
+        // single booking: this email is exactly as before.
+        $grp = (function_exists('rh_grl_quote') && $pdo instanceof PDO) ? rh_grl_quote($pdo, (int)($booking['id'] ?? 0)) : null;
+        if ($grp !== null) {
+            $total         = $grp['total'];
+            $vat_amount    = $grp['vat'];
+            $levy_amount   = $grp['levy'];
+            $pkg_amount    = $grp['pkg'];
+            $child_supp    = $grp['child'];
+            $room_subtotal = $grp['room'];
+            $deposit_amt   = $grp['deposit'];
+            $deposit_req   = $deposit_amt > BALANCE_TOLERANCE;
+            $adults        = $grp['adults'];
+            $children      = $grp['children'];
+        }
+
         $fmt = static function (float $v) use ($currency): string {
             return htmlspecialchars($currency, ENT_QUOTES, 'UTF-8') . number_format($v, 0);
         };
@@ -6787,9 +6827,11 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
         <div style="background:#FAF6F0;border-radius:8px;padding:18px 22px;margin:20px 0;">
             <h2 style="color:#8B7355;font-family:Georgia,serif;font-weight:400;margin-top:0;font-size:18px;">Stay Details</h2>
             <table role="presentation" width="100%" cellspacing="0" cellpadding="0">'
-            . $trow('Check-in', date('l, F j, Y', strtotime($booking['check_in_date'])) . ' &mdash; from ' . htmlspecialchars($check_in_time))
-            . $trow('Check-out', date('l, F j, Y', strtotime($booking['check_out_date'])) . ' &mdash; by ' . htmlspecialchars($check_out_time))
-            . $trow('Duration', $nights . ' night' . ($nights !== 1 ? 's' : ''))
+            . $trow('Check-in', date('l, F j, Y', strtotime($grp !== null && $grp['ci'] !== '' ? $grp['ci'] : $booking['check_in_date'])) . ' &mdash; from ' . htmlspecialchars($check_in_time))
+            . $trow('Check-out', date('l, F j, Y', strtotime($grp !== null && $grp['co'] !== '' ? $grp['co'] : $booking['check_out_date'])) . ' &mdash; by ' . htmlspecialchars($check_out_time))
+            . ($grp !== null
+                ? $trow('Rooms', (int)$grp['count'] . ' rooms &mdash; each with its own dates below')
+                : $trow('Duration', $nights . ' night' . ($nights !== 1 ? 's' : '')))
             . $trow('Guests', $guest_label);
         if (!empty($booking['special_requests'])) {
             $htmlBody .= $trow('Special Requests', htmlspecialchars((string)$booking['special_requests']));
@@ -6801,9 +6843,18 @@ function sendTentativeQuotationEmail(array $booking, array $options = []): array
         $htmlBody .= '
         <div style="background:#FFF;border:1px solid #DDD;border-radius:8px;padding:18px 22px;margin:20px 0;">
             <h2 style="color:#8B7355;font-family:Georgia,serif;font-weight:400;margin-top:0;font-size:18px;">Pricing Breakdown</h2>
-            <table role="presentation" width="100%" cellspacing="0" cellpadding="0">'
-            . $trow($room_line, $fmt($room_subtotal));
-        $childLabel = $children > 0 ? rh_child_charge_label($booking, (string)$currency, $children, max(1, (int)($booking['rooms_in_group'] ?? 1))) : '';
+            <table role="presentation" width="100%" cellspacing="0" cellpadding="0">';
+        if ($grp !== null) {
+            // One row per live room: room (+ guest when entered), reference, dates, nights x its booked nightly rate.
+            foreach ($grp['rooms'] as $gr) {
+                $htmlBody .= $trow(htmlspecialchars($gr['label'] !== '' ? $gr['label'] : 'Room', ENT_QUOTES, 'UTF-8')
+                    . '<br><span style="font-size:12px;color:#888;">' . htmlspecialchars(trim($gr['ref'] . ' - ' . $gr['dates'], ' -'), ENT_QUOTES, 'UTF-8')
+                    . ' &middot; ' . (int)$gr['nights'] . ' night' . ((int)$gr['nights'] !== 1 ? 's' : '') . ' @ ' . $fmt($gr['rate']) . '/night</span>', $fmt($gr['room']));
+            }
+        } else {
+            $htmlBody .= $trow($room_line, $fmt($room_subtotal));
+        }
+        $childLabel = $children > 0 && $grp === null ? rh_child_charge_label($booking, (string)$currency, $children, max(1, (int)($booking['rooms_in_group'] ?? 1))) : '';
         if ($child_supp > 0 || ($childLabel !== '' && stripos($childLabel, 'free') !== false)) {
             $htmlBody .= $trow('Child supplement' . ($childLabel !== '' ? ' (' . htmlspecialchars($childLabel) . ')' : ($children > 0 ? ' (' . $children . ' child' . ($children !== 1 ? 'ren' : '') . ')' : '')), $fmt($child_supp));
         }
@@ -8274,6 +8325,7 @@ function sendPreArrivalReminderEmail(array $booking): array
             . ($roomName !== '' ? '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;border-bottom:1px solid #e8e0d4;">Room:</td><td style="padding:10px 0 10px 6px;color:#333;text-align:left;vertical-align:top;border-bottom:1px solid #e8e0d4;">' . htmlspecialchars($roomName) . '</td></tr></table>' : '')
             . ($checkInDate !== '' ? '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0;"><tr><td style="padding:10px 10px 10px 0;font-weight:bold;color:#1A1A1A;width:44%;vertical-align:top;">Check-in Date:</td><td style="padding:10px 0 10px 6px;color:#333;text-align:left;vertical-align:top;">' . htmlspecialchars($checkInDate) . '</td></tr></table>' : '') . '
         </div>
+        ' . rh_email_group_rooms_html($booking, false) . '
         <div style="background: #FDF6EC; padding: 15px; border-left: 4px solid #8B7355; border-radius: 5px; margin: 20px 0;">
             <p style="color: #5C4A32; margin: 0;">
                 Check-in is available from' . ($checkInTime !== '' ? ' <strong>' . htmlspecialchars($checkInTime) . '</strong>' : ' the afternoon') . '. If your plans have changed or you have any special requests, just reply to this email and we will be happy to help.
@@ -8286,6 +8338,10 @@ function sendPreArrivalReminderEmail(array $booking): array
         . ($reference !== '' ? ' (booking ' . $reference . ')' : '')
         . ($checkInDate !== '' ? ' begins ' . $checkInDate : ' begins soon')
         . '. We look forward to welcoming you.';
+    $grlText = (!empty($booking['id']) && $pdo instanceof PDO) ? rh_grl_block($pdo, (int)$booking['id'])['text'] : '';
+    if ($grlText !== '') {
+        $altBody .= "\n\n" . $grlText; // a group: every room with its own dates
+    }
 
     return sendEmail($toEmail, $name, $subject, wrapEmailTemplate($htmlBody, 'Your Stay Is Coming Up'), $altBody);
 }

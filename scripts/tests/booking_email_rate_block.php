@@ -152,6 +152,23 @@ foreach (['booking_cancelled', 'booking_reminder', 'refund_notification', 'payme
     $r = rh_render_booking_email_template_row($k, $tpl, $vars);
     ok("$k: no block", !$has($r['html_body'], 'Your rate') && !$has($r['text_body'], 'Your rate'));
 }
+// Bundle B: {{group_rooms_block}} is added to the reminder, cancelled and invoice emails only, once, HTML + text.
+$grlB = rh_grl_html(['TRBG - Deluxe Room - Guest: O\'Brien & Co - 01 Dec 2026 to 04 Dec 2026 (3 nights)', 'TRBG-2 - Garden Suite - Cancelled'], 'Rooms in your group');
+$gVars = ['booking_reference' => 'TRBG', 'group_rooms_block' => $grlB];
+foreach (['booking_reminder', 'booking_cancelled', 'payment_invoice'] as $k) {
+    $r = rh_render_booking_email_template_row($k, $tpl, $gVars);
+    ok("B: $k gets the group room list once", substr_count($r['html_body'], 'Rooms in your group') === 1 && $has($r['html_body'], 'O&#039;Brien &amp; Co'), $r['html_body']);
+    ok("B: $k text part lists the rooms plainly", $has($r['text_body'], "Rooms in your group\nTRBG - Deluxe Room - Guest: O'Brien & Co") && !$has($r['text_body'], '<p'), $r['text_body']);
+}
+foreach (['booking_confirmed', 'booking_received', 'refund_notification'] as $k) {
+    $r = rh_render_booking_email_template_row($k, $tpl, $gVars);
+    ok("B: $k does not get the group list (it has Your rooms / no rooms)", !$has($r['html_body'], 'Rooms in your group'));
+}
+$r = rh_render_booking_email_template_row('booking_reminder', ['subject' => 'x', 'html_body' => '<p>A</p>{{group_rooms_block}}<p>B</p>', 'text_body' => "A\n{{group_rooms_block}}\nB"], $gVars);
+ok('B: a template that places {{group_rooms_block}} shows it once, where placed (text too)', substr_count($r['html_body'], 'Rooms in your group') === 1
+    && strpos($r['html_body'], 'Rooms in your group') < strpos($r['html_body'], '<p>B</p>') && substr_count($r['text_body'], 'Rooms in your group') === 1 && !$has($r['text_body'], '<h3'), json_encode($r));
+$r = rh_render_booking_email_template_row('booking_reminder', $tpl, ['booking_reference' => 'TRBT', 'group_rooms_block' => '']);
+ok('B: a single booking (empty list): reminder output unchanged', $r['html_body'] === '<p>Hello TRBT</p>' && $r['text_body'] === 'Hello TRBT', json_encode($r));
 $r = rh_render_booking_email_template_row('booking_confirmed', $tpl, ['booking_reference' => 'TRBT', 'booked_rate_block' => '']);
 ok('empty block: template output unchanged', $r['html_body'] === '<p>Hello TRBT</p>' && $r['text_body'] === 'Hello TRBT', json_encode($r));
 
@@ -196,6 +213,30 @@ if (!$roomA || !$roomB) {
         ok('stored party: one plan line for every room', $has($blk, 'Rate plan for every room: Early Bird - ' . $m(10000) . ' a night off'), $blk);
         ok('stored party: total_amount_formatted untouched', $v['total_amount_formatted'] === number_format(540000, 0), (string)$v['total_amount_formatted']);
 
+        // Bundle B: the group room list (every room, the cancelled one with its state and no rate), names only when entered.
+        $pdo->prepare('UPDATE bookings SET room_guest_name = ? WHERE id = ?')->execute(['Mr <B> & Co', $memberId]);
+        $gl = rh_grl_block($pdo, $lead, ['money' => true]);
+        ok('B stored: group list has all three rooms, the lead first', count($gl['lines']) === 3 && strpos($gl['lines'][0], $R . ' - ') === 0, json_encode($gl['lines'], JSON_UNESCAPED_UNICODE));
+        ok('B stored: live rooms carry their booked rate x nights', $has($gl['lines'][0], ' × 3 nights = ') && $has($gl['lines'][1], ' × 3 nights = '), json_encode($gl['lines'], JSON_UNESCAPED_UNICODE));
+        ok('B stored: the cancelled room shows its state, never a rate (no fee kept)', substr($gl['lines'][2], -strlen(' - Cancelled')) === ' - Cancelled' && !$has($gl['lines'][2], '×'), $gl['lines'][2]);
+        ok('B stored: only the entered name is shown, escaped', substr_count($gl['html'], 'Guest:') === 1 && $has($gl['html'], 'Guest: Mr &lt;B&gt; &amp; Co'), $gl['html']);
+        $glNo = rh_grl_block($pdo, $memberId, ['money' => false]);
+        ok('B stored: from any room the same group; without money no rate', count($glNo['lines']) === 3 && !$has($glNo['html'], '×') && $has($glNo['html'], 'booking reference and dates'), $glNo['html']);
+        $v2 = buildBookingEmailVariables(['id' => $lead, 'booking_reference' => $R, 'room_id' => $roomA['id'], 'guest_name' => 'Zz Rate Mail Test'], $roomA);
+        ok('B stored: {{group_rooms_block}} var filled for a group', $v2['group_rooms_block'] === $gl['html']);
+        $brG = rh_booked_rate_for_booking($pdo, $memberId, false, true);
+        $brN = rh_booked_rate_for_booking($pdo, $memberId, false);
+        ok('B stored: {{booked_rate}} line names the entered guest only with $withGuest', strpos((string)$brG['guest_text'], $roomB['name'] . ' – Mr <B> & Co - ') === 0
+            && !$has((string)$brN['guest_text'], 'Mr <B>') && $brG['text'] === $brN['text'], json_encode([$brG['guest_text'], $brN['guest_text']], JSON_UNESCAPED_UNICODE));
+        $brL = rh_booked_rate_for_booking($pdo, $lead, false, true);
+        ok('B stored: no entered name = the line exactly as before', $brL['guest_text'] === rh_booked_rate_for_booking($pdo, $lead, false)['guest_text']);
+        $q = rh_grl_quote($pdo, $lead);
+        ok('B stored: group quotation = the two live rooms, cancelled room never quoted', is_array($q) && $q['count'] === 2 && abs($q['total'] - 540000) < BALANCE_TOLERANCE
+            && abs($q['room'] - 540000) < BALANCE_TOLERANCE && $q['deposit'] < BALANCE_TOLERANCE, json_encode($q, JSON_UNESCAPED_UNICODE));
+        ok('B stored: group quotation lines (rate per night from each room)', is_array($q) && abs($q['rooms'][0]['rate'] - 100000) < BALANCE_TOLERANCE && abs($q['rooms'][1]['rate'] - 80000) < BALANCE_TOLERANCE
+            && $has($q['rooms'][1]['label'], ' – Mr <B> & Co'), json_encode($q['rooms'] ?? null, JSON_UNESCAPED_UNICODE));
+        $pdo->prepare('UPDATE bookings SET room_guest_name = NULL WHERE id = ?')->execute([$memberId]);
+
         // Confirm / Resend: the lead's OWN stored row (one room's figures) is lifted to the party's live rooms.
         $stLead = $pdo->prepare("SELECT b.*, r.name AS room_name FROM bookings b LEFT JOIN rooms r ON r.id = b.room_id WHERE b.id = ?");
         $stLead->execute([$lead]);
@@ -232,6 +273,7 @@ if (!$roomA || !$roomB) {
         ok('party lift: single room unchanged', is_array($singleRow) && rh_email_party_booking($pdo, $singleRow) === $singleRow);
         $r = rh_render_booking_email_template_row('booking_received', ['subject' => 's', 'html_body' => '<p>{{rate_plan_label}}</p>', 'text_body' => ''], $v);
         ok('stored single: booking_received gets the block', $has($r['html_body'], 'Your rate') && $has($r['html_body'], '<p>Early Bird</p>'), $r['html_body']);
+        ok('B stored single: no group list, no group quotation', (string)($v['group_rooms_block'] ?? 'x') === '' && rh_grl_quote($pdo, $sid) === null && rh_grl_block($pdo, $sid)['html'] === '');
     } catch (Throwable $e) {
         ok('stored rows: no error', false, $e->getMessage());
     } finally {

@@ -69,7 +69,10 @@ if (!function_exists('quotationPdfClosingNotes')) {
  *   valid_days       int     Days quotation is valid (default 7)
  *   quotation_notes  string  Admin note (default '')
  *   watermark        string  Diagonal watermark text (tests, e.g. SAMPLE)
+ *   single_room      bool    Force the one-room layout for a group (a stored quotation rebuilt with its old total)
  * }
+ * A GROUP (two or more live rooms, Bundle B): every live room is its own line and the totals are the group's
+ * (rh_grl_quote(), the same figures the quotation email and the quotations register use).
  * @return string  Raw PDF binary string
  */
 function generateQuotationPDF(array $booking, array $room, array $options = []): string
@@ -117,6 +120,26 @@ function generateQuotationPDF(array $booking, array $room, array $options = []):
     $room_subtotal  = $docLines['room'];
     $rate_per_night = $nights > 0 ? $room_subtotal / $nights : (float)$room['price_per_night'];
 
+    // A GROUP (Bundle B, owner 2026-11-19): every live room of the group is quoted, each at its own stored price, and
+    // the totals are the group's sums (rh_grl_quote: the same figures the quotation email and the register use). A
+    // cancelled / no-show room is never quoted. null = a single booking: everything below is exactly as before.
+    $grp = null;
+    if (empty($options['single_room']) && function_exists('rh_grl_quote') && ($GLOBALS['pdo'] ?? null) instanceof PDO) {
+        $grp = rh_grl_quote($GLOBALS['pdo'], (int)($booking['id'] ?? 0));
+    }
+    if ($grp !== null) {
+        $total         = $grp['total'];
+        $vat_amount    = $grp['vat'];
+        $levy_amount   = $grp['levy'];
+        $pkg_amount    = $grp['pkg'];
+        $child_supp    = $grp['child'];
+        $room_subtotal = $grp['room'];
+        $deposit_amt   = $grp['deposit'];
+        $deposit_req   = $deposit_amt > BALANCE_TOLERANCE;
+        $adults        = $grp['adults'];
+        $children      = $grp['children'];
+    }
+
     $fmt = static function (float $v) use ($currency): string {
         return $currency . number_format($v, 0);
     };
@@ -148,6 +171,22 @@ function generateQuotationPDF(array $booking, array $room, array $options = []):
         ['Check-out', !empty($booking['check_out_date']) ? date('D, d M Y', strtotime((string)$booking['check_out_date'])) . ' by ' . $check_out_time : ''],
         ['Duration', $nights . ' night' . ($nights !== 1 ? 's' : '')],
     ];
+    if ($grp !== null) {
+        // A group: the rooms row says how many; the stay runs from the first arrival to the last departure; each
+        // room's own dates and nights are on its line below.
+        foreach ($meta as $mi => $mr) {
+            if ($mr[0] === 'Room') {
+                $meta[$mi] = ['Rooms', $grp['count'] . ' rooms - each with its own dates and rate below', true];
+            } elseif ($mr[0] === 'Check-in' && $grp['ci'] !== '') {
+                $meta[$mi][1] = date('D, d M Y', strtotime($grp['ci'])) . ' from ' . $check_in_time;
+            } elseif ($mr[0] === 'Check-out' && $grp['co'] !== '') {
+                $meta[$mi][1] = date('D, d M Y', strtotime($grp['co'])) . ' by ' . $check_out_time;
+            }
+        }
+        $meta = array_values(array_filter($meta, static function (array $mr): bool {
+            return $mr[0] !== 'Duration';
+        }));
+    }
     if (!empty($booking['special_requests'])) {
         $meta[] = ['Requests', trim((string)preg_replace('/\s+/', ' ', (string)$booking['special_requests'])), true];
     }
@@ -158,7 +197,22 @@ function generateQuotationPDF(array $booking, array $room, array $options = []):
         rh_pdf_e($fmt($rate_per_night)),
         rh_pdf_e($fmt($room_subtotal)),
     ]];
-    $childLabel = $children > 0 ? rh_child_charge_label($booking, (string)$currency, $children) : '';
+    if ($grp !== null) {
+        // One line per live room: room type / number (+ the guest when entered), its booking reference, dates and
+        // nights underneath, its own booked nightly rate and amount.
+        $itemRows = [];
+        $subStyle = 'color:' . hotel_brand_tokens()['colors']['muted_dark'] . ';font-size:7.5pt;';
+        foreach ($grp['rooms'] as $gr) {
+            $sub = trim($gr['ref'] . ' - ' . $gr['dates'], ' -');
+            $itemRows[] = [
+                rh_pdf_e($gr['label'] !== '' ? str_replace('–', '-', $gr['label']) : 'Room') . ($sub !== '' ? '<br/><span style="' . $subStyle . '">' . rh_pdf_e($sub) . '</span>' : ''),
+                rh_pdf_e((string)$gr['nights']),
+                rh_pdf_e($fmt($gr['rate'])),
+                rh_pdf_e($fmt($gr['room'])),
+            ];
+        }
+    }
+    $childLabel = $children > 0 && $grp === null ? rh_child_charge_label($booking, (string)$currency, $children) : '';
     if ($child_supp > 0 || ($childLabel !== '' && stripos($childLabel, 'free') !== false)) {
         $itemRows[] = [rh_pdf_e('Child supplement' . ($childLabel !== '' ? ' (' . $childLabel . ')' : ($children > 0 ? ' (' . $children . ' child' . ($children !== 1 ? 'ren' : '') . ')' : ''))), '', '', rh_pdf_e($fmt($child_supp))];
     }

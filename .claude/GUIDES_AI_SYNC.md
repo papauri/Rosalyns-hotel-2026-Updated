@@ -192,6 +192,15 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
   the cashier re-adds anything extra. No new screens.
 - Assistant: nothing to change (no AI wording touched).
 
+### Bundle B: group emails, invoice and quotation list every room (2026-11-19, owner) - Liwonde a2de61b, Rosalyn's see TASKS.md
+- Guides: group invoice email + booked-rate lines show each room's guest (only when entered); invoice PDF room line
+  shows "(N nights)"; a group quotation lists every live room and its total is the sum of the rooms (cancelled rooms
+  left out); reminder, pre-arrival, check-in, cancellation, no-show, extend and modified emails list the group's rooms
+  with their own dates; a cancelled / no-show room shows its state and "fee kept", never as payable. Convert to
+  invoice: an old one-room quote is compared room to room, a new group quote with the group stay total.
+- Assistant: quotation answers should use the group stay total for group quotes (includes/quotation-convert.php
+  rh_qc_quote_amount); room lists from includes/group-room-list.php.
+
 ## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
 
 ### Import stock check: value column warning + stock check workbook (2026-11-16, owner ask) — hashes in TASKS.md

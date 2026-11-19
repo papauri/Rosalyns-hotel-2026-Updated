@@ -231,5 +231,12 @@ check(($rl[2] ?? '') === 'Part of group BK-1 (3 rooms) - this room cancelled 10 
 $rl0 = rh_booked_rate_room_lines(['room' => 'Deluxe Room - 12', 'guest' => '', 'check_in' => '', 'check_out' => ''], '', 'BK-1', 3);
 check(($rl0[1] ?? '') === 'Part of group BK-1 (3 rooms)', 'room receipt lines: no note = unchanged group line', json_encode($rl0, JSON_UNESCAPED_UNICODE));
 
+// Bundle B: a group invoice's {{booked_rate}} lines carry the room's own guest (rh_booked_rate_for_booking(..., true) passes
+// "Type – Guest" as the room name); the PDF copy maps the en dash like the x so the core font prints it.
+$gn = rh_booked_rate_text($split(1068000, 3), ['currency' => 'K', 'room_name' => 'Superior Suite – Mr & Mrs Banda']);
+check($gn['guest_text'] === 'Superior Suite – Mr & Mrs Banda - K356,000.00 × 3 nights' && $gn['text'] === 'K356,000.00 × 3 nights = K1,068,000.00', 'guest name rides on the room name; money text unchanged', $gn['guest_text']);
+$gnPdf = str_replace(['×', '·', '–'], ['x', '-', '-'], 'Room 1: ' . $gn['guest_text']);
+check($gnPdf === 'Room 1: Superior Suite - Mr & Mrs Banda - K356,000.00 x 3 nights' && !preg_match('/[^\x20-\x7E]/', $gnPdf), 'PDF copy of a named room line is plain ASCII', $gnPdf);
+
 echo "\n{$pass} passed, {$fail} failed\n";
 exit($fail > 0 ? 1 : 0);

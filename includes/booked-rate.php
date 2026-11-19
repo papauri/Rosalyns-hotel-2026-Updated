@@ -223,9 +223,11 @@ if (!function_exists('rh_booked_rate_line')) {
 if (!function_exists('rh_booked_rate_for_booking')) {
     /**
      * Read one room booking and return its booked-rate line (see rh_booked_rate_line). $withToday: add today's price
-     * note (staff screens only, never guest documents). Read-only; a missing booking or read error gives ok = false.
+     * note (staff screens only, never guest documents). $withGuest (Bundle B): the room name carries the room's own
+     * guest when one was entered ("Deluxe Room – Mr Banda", rh_room_label_with_guest; never the booker's name in its
+     * place). Read-only; a missing booking or read error gives ok = false.
      */
-    function rh_booked_rate_for_booking(PDO $pdo, int $bookingId, bool $withToday = true): array
+    function rh_booked_rate_for_booking(PDO $pdo, int $bookingId, bool $withToday = true, bool $withGuest = false): array
     {
         $empty = rh_booked_rate_text(['room_gross' => 0, 'nights' => 1]);
         if ($bookingId <= 0) {
@@ -245,6 +247,13 @@ if (!function_exists('rh_booked_rate_for_booking')) {
             return $empty;
         }
         $today = $withToday ? rh_room_today_price_lookup($pdo, $b)['price'] : null;
+        $guest = $withGuest ? trim((string)($b['room_guest_name'] ?? '')) : '';
+        if ($guest !== '') {
+            $name = (string)($b['room_name'] ?? '');
+            return rh_booked_rate_line($b, $today, ['room_name' => function_exists('rh_room_label_with_guest')
+                ? rh_room_label_with_guest($name, $guest)
+                : trim($name . ' – ' . $guest, ' –')]);
+        }
         return rh_booked_rate_line($b, $today);
     }
 }

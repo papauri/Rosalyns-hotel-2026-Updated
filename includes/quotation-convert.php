@@ -265,6 +265,28 @@ if (!function_exists('rh_qc_amount_choice')) {
     }
 }
 
+if (!function_exists('rh_qc_quote_amount')) {
+    /**
+     * PURE. The ONE amount rule for the convert preview, the convert itself (quotations.converted_total) and its History
+     * note (Bundle B fix, 2026-11-19). A room booking in a group ($acct['group_total'] = rh_grl_quote()'s sum of the live
+     * rooms, null otherwise): a stored quote total within BALANCE_TOLERANCE of the one room's total is an older one-room
+     * quote and is compared one room vs one room, exactly as before; any other stored total is a group quote (the PDF,
+     * email and register quote every live room) and is compared with the group sum. 'amount' is the figure compared with
+     * (stored as converted_total); 'basis' = 'room' | 'group'. Paid / Still owed are never touched here.
+     *
+     * @return array{amount:float,quoted:float,current:float,changed:bool,basis:string}
+     */
+    function rh_qc_quote_amount(float $quoted, array $acct): array
+    {
+        $room = (float)($acct['current_total'] ?? 0);
+        $group = $acct['group_total'] ?? null;
+        if ($group === null || abs(round($quoted, 2) - round($room, 2)) <= rh_qc_tol()) {
+            return rh_qc_amount_choice($quoted, $room) + ['basis' => 'room'];
+        }
+        return rh_qc_amount_choice($quoted, (float)$group) + ['basis' => 'group'];
+    }
+}
+
 if (!function_exists('rh_qc_pick_existing_number')) {
     /** First non-blank invoice number among the candidates (in priority order), '' when none. */
     function rh_qc_pick_existing_number(array $candidates): string
@@ -575,10 +597,17 @@ if (!function_exists('rh_qc_account')) {
             $current = function_exists('rh_doc_stay_lines')
                 ? (float)rh_doc_stay_lines($row)['total']
                 : (float)(($row['total_with_vat'] ?? 0) ?: ((float)($row['total_amount'] ?? 0) + (float)($row['vat_amount'] ?? 0)));
+            // A group (Bundle B): the sum of the live rooms, the figure a group quotation carries (rh_grl_quote, the
+            // same one the quotation PDF, email and register use); null outside a group. See rh_qc_quote_amount().
+            if (!function_exists('rh_grl_quote')) {
+                require_once __DIR__ . '/group-room-list.php';
+            }
+            $grpQuote = rh_grl_quote($pdo, $id);
             return [
                 'exists' => true, 'status' => (string)($row['status'] ?? ''),
                 'paid' => (float)($row['amount_paid'] ?? 0), 'due' => (float)($row['amount_due'] ?? 0),
-                'current_total' => round($current, 2), 'ref' => (string)($row['booking_reference'] ?? ''),
+                'current_total' => round($current, 2), 'group_total' => $grpQuote !== null ? round((float)$grpQuote['total'], 2) : null,
+                'ref' => (string)($row['booking_reference'] ?? ''),
                 'name' => (string)($row['guest_name'] ?? ''), 'email' => (string)($row['guest_email'] ?? ''), 'row' => $row,
             ];
         }
@@ -748,7 +777,7 @@ if (!function_exists('rh_qc_preview')) {
         $el = rh_qc_eligibility($q, $acct, ['today' => $today, 'columns_present' => $cols] + $perms);
         $out = ['type' => $type, 'eligibility' => $el, 'account' => $acct, 'amount' => null, 'existing_number' => '', 'rate_text' => ''];
         if ($acct !== null) {
-            $out['amount'] = rh_qc_amount_choice((float)($q['total_amount'] ?? 0), (float)$acct['current_total']);
+            $out['amount'] = rh_qc_quote_amount((float)($q['total_amount'] ?? 0), $acct);
             $out['existing_number'] = rh_qc_existing_invoice_number($pdo, $type, (int)$q['booking_id'], $acct['row'])['number'];
             if ($type === 'room' && function_exists('rh_booked_rate_for_booking')) {
                 $line = rh_booked_rate_for_booking($pdo, (int)$q['booking_id'], false);
@@ -825,7 +854,7 @@ if (!function_exists('rh_qc_convert')) {
             if (!$el['ok']) {
                 throw new RuntimeException($el['reason']);
             }
-            $amount = rh_qc_amount_choice((float)($q['total_amount'] ?? 0), (float)$acct['current_total']);
+            $amount = rh_qc_quote_amount((float)($q['total_amount'] ?? 0), $acct); // converted_total = the figure compared
 
             $ex = rh_qc_existing_invoice_number($pdo, $type, $bookingId, $acct['row'], true);
             $reused = $ex['number'] !== '';
@@ -1009,14 +1038,15 @@ if (!function_exists('rh_qc_after_convert')) {
 
         $a = (array)$res['amount'];
         // Rooms: the quotation priced the STAY (booked rate x nights); the invoice also lists any extras on the bill.
-        $totalWord = $type === 'room' ? 'Stay total' : 'Invoice total';
-        $amountLine = $totalWord . ' ' . rh_qc_money((float)$a['amount'], $cur) . ($type === 'room' ? ' (booked rate × nights)' : '') . '.';
+        $isGroup = ($a['basis'] ?? 'room') === 'group';
+        $totalWord = $type === 'room' ? ($isGroup ? 'Group stay total' : 'Stay total') : 'Invoice total';
+        $amountLine = $totalWord . ' ' . rh_qc_money((float)$a['amount'], $cur) . ($type === 'room' ? ($isGroup ? ' (every live room, booked rate × nights)' : ' (booked rate × nights)') : '') . '.';
         $extras = $type === 'room' ? (float)($res['account']['row']['folio_charges_total'] ?? 0) : 0.0;
         if ($extras > rh_qc_tol()) {
             $amountLine .= ' Extras on the bill ' . rh_qc_money($extras, $cur) . ' are on the invoice too.';
         }
         if (!empty($a['changed'])) {
-            $amountLine .= ' Quoted ' . rh_qc_money((float)$a['quoted'], $cur) . '; the ' . ($type === 'room' ? 'stay' : 'enquiry')
+            $amountLine .= ' Quoted ' . rh_qc_money((float)$a['quoted'], $cur) . '; the ' . ($type === 'room' ? ($isGroup ? 'group stay' : 'stay') : 'enquiry')
                 . ' total is now ' . rh_qc_money((float)$a['current'], $cur) . ', so the invoice uses the current total.';
         }
         $numberLine = !empty($res['reused']) ? 'Uses invoice number ' . $num . ', already issued for this ' . $word . '.' : '';
