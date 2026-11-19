@@ -280,3 +280,171 @@
     }
 }
 
+/* Projected profit tab (drinks profit projection P2) */
+.spp-switch {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    min-height: 2.35rem;
+    padding: 0.3rem 0.7rem;
+    border: 1px solid color-mix(in srgb, var(--color-text-secondary) 25%, transparent);
+    border-radius: 999rem;
+    color: var(--color-text-primary);
+    text-decoration: none;
+    font-size: clamp(0.78rem, 0.74rem + 0.18vw, 0.9rem);
+    font-weight: 500;
+}
+
+.spp-switch__track {
+    position: relative;
+    width: 2.1rem;
+    height: 1.2rem;
+    border-radius: 999rem;
+    background: color-mix(in srgb, var(--color-text-secondary) 30%, transparent);
+    flex: 0 0 auto;
+}
+
+.spp-switch__knob {
+    position: absolute;
+    top: 0.15rem;
+    left: 0.15rem;
+    width: 0.9rem;
+    height: 0.9rem;
+    border-radius: 50%;
+    background: var(--color-background);
+}
+
+.spp-switch.is-on .spp-switch__track {
+    background: var(--color-primary);
+}
+
+.spp-switch.is-on .spp-switch__knob {
+    left: 1.05rem;
+}
+
+.spp-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: clamp(0.45rem, 0.38rem + 0.25vw, 0.7rem);
+    margin: 0 0 clamp(0.75rem, 0.62rem + 0.38vw, 1.08rem);
+}
+
+.spp-filter-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+}
+
+.spp-filter {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    min-height: 2.35rem;
+    padding: 0.35rem 0.8rem;
+    border: 1px solid color-mix(in srgb, var(--color-text-secondary) 25%, transparent);
+    border-radius: clamp(0.4rem, 0.34rem + 0.2vw, 0.56rem);
+    background: var(--color-background);
+    color: var(--color-text-primary);
+    text-decoration: none;
+    font-size: clamp(0.78rem, 0.74rem + 0.18vw, 0.9rem);
+}
+
+.spp-filter__count {
+    font-weight: 600;
+}
+
+.spp-filter.is-active {
+    border-color: var(--color-primary);
+    background: color-mix(in srgb, var(--color-primary) 10%, var(--color-background));
+}
+
+.spp-filter--bad .spp-filter__count {
+    color: var(--color-error-text);
+}
+
+.spp-filter--clear {
+    color: var(--color-primary);
+}
+
+.spp-drink {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 0.2rem;
+}
+
+td:first-child .spp-drink {
+    align-items: flex-start;
+}
+
+.spp-sub {
+    font-size: clamp(0.7rem, 0.66rem + 0.16vw, 0.8rem);
+    color: var(--color-text-secondary);
+}
+
+.spp-flag {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999rem;
+    padding: 0.15rem 0.55rem;
+    font-size: clamp(0.66rem, 0.62rem + 0.16vw, 0.76rem);
+    font-weight: 600;
+    white-space: nowrap;
+    background: color-mix(in srgb, var(--color-primary) 14%, var(--color-background));
+    color: var(--color-primary);
+}
+
+.spp-flag--muted {
+    background: color-mix(in srgb, var(--color-text-secondary) 14%, transparent);
+    color: var(--color-text-primary);
+}
+
+.spp-flag--bad {
+    background: var(--color-error-bg);
+    color: var(--color-error-text);
+}
+
+.stock-table tr.spp-row--below td {
+    background: color-mix(in srgb, var(--color-error-bg) 55%, transparent);
+}
+
+.spp-caption {
+    caption-side: top;
+    text-align: left;
+    padding: 0.6rem 0.8rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+}
+
+.spp-caption a,
+.spp-link {
+    color: var(--color-primary);
+}
+
+.spp-caption__note {
+    display: block;
+    font-weight: 400;
+    font-size: clamp(0.74rem, 0.7rem + 0.16vw, 0.84rem);
+    color: var(--color-text-secondary);
+}
+
+@media (max-width: 40rem) {
+    table .spp-caption {
+        display: block;
+        width: auto;
+    }
+
+    .spp-drink,
+    td:first-child .spp-drink {
+        align-items: flex-end;
+        text-align: right;
+    }
+
+    .spp-filter-wrap {
+        width: 100%;
+    }
+
+    .spp-filter {
+        flex: 1 1 auto;
+    }
+}

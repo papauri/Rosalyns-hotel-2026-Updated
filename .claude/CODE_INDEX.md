@@ -346,6 +346,9 @@ perms: stock_count_approve:44,stock_count:44
 ## admin/includes/stock-orders-filters.php (361 lines)
 fn: rh_so_void_window_sql:24,rh_so_order_type_expr:33,rh_so_not_room_service_sql:41,rh_so_folio_exclude_sql:53,rh_so_tender_methods:61,rh_so_tender_leg_sql:77,rh_so_ref86_by_method_sql:104,rh_so_ref86_for_tender:119,rh_so_plain_statuses:136,rh_so_status_list:144,rh_so_kitchen_groups:154,rh_so_normalize_filters:166,rh_so_date_basis:201,rh_so_list_where:225,rh_so_list_cap:319,rh_so_cap_notice:331,rh_so_has_amount:349,rh_so_legs_failed_notice:357
 
+## admin/includes/stock-projected-profit.php (321 lines)
+fn: rh_spp_vat_rate:33,rh_spp_net:43,rh_spp_is_drink_stock:57,rh_spp_load:76,rh_spp_stock_per_sale:127,rh_spp_sale_label:154,rh_spp_build:177
+
 ## admin/includes/stock-sheet-import-lib.php (1007 lines)
 fn: rh_ssi_ensure_table:15,rh_ssi_opening_lock_name:35,rh_ssi_release_opening_lock:41,rh_ssi_key:49,rh_ssi_num:58,rh_ssi_load_csv:67,rh_ssi_load_purchase_qty:99,rh_ssi_norm_unit:138,rh_ssi_pack_name:158,rh_ssi_units_compatible:167,rh_ssi_infer_pack:185,rh_ssi_half_crate_fits:219,rh_ssi_reorder_point:236,rh_ssi_merge_notes:252,rh_ssi_choose_unit:274,rh_ssi_spirit_section:292,rh_ssi_plan:306,rh_ssi_suggestions_csv:634,rh_ssi_apply:655,rh_ssi_report:834
 actions: update:544
@@ -598,8 +601,8 @@ actions: save_recipe:95,delete_recipe:204
 ajax: get_recipe:31
 js: fmtMoney:488,buildOptions:495,setFilter:515,filterMenu:522,loadRecipe:535,openMenuRecipeFromItem:580,initRecipePage:588,addIngRow:619,rowIng:652,fillMeasurePick:657,rowStockQty:679,recipeIngChanged:687,recipeMeasureChanged:693,quickAddIngredient:709,recalcCost:761,deleteRecipe:822
 
-## admin/stock-reports.php (818 lines)
-fn: stock_reports_normalize_date:33,stock_reports_metric:48,stock_reports_by_unit:58,stock_reports_money:68,stock_reports_helper_content:73,stock_reports_question_mark_help:99,stock_reports_csv_cell:435,stock_reports_yield_class:444,stock_reports_days_left_class:457,stock_reports_label_attr:474
+## admin/stock-reports.php (969 lines)
+fn: stock_reports_normalize_date:41,stock_reports_metric:56,stock_reports_by_unit:66,stock_reports_money:76,stock_reports_helper_content:81,stock_reports_question_mark_help:112,stock_reports_csv_cell:485,stock_reports_yield_class:494,stock_reports_days_left_class:507,stock_reports_label_attr:524
 
 ## admin/stock-suppliers.php (494 lines)
 fn: openSupplier:448,closeSupplier:466

@@ -232,6 +232,15 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Manager Guides: stock.html import paragraph, one or two lines. Rebuild stock, check 2 pages.
 - Assistant: answer "which drinks did the import offer for the menu" (AI_REQUEST to the AI lead; data in the
   import job's answers `_drinks` + activity log `drink_menu_import`).
+### Stock Reports: Projected profit tab (2026-11-20, owner, drinks profit projection P2) - Liwonde 5033c0f, Rosalyn's see TASKS.md
+- Guides (08 Stock): Stock Reports > Projected profit: one row per menu price of a drink sold as itself (one stock
+  item): on hand, measures per unit, selling price, projected sales, stock cost, projected profit, margin. Cards on
+  top = each stock item counted once, at its lowest-selling menu price ("In totals"); cost not known is left out.
+  "Take VAT out" switch (on by default when VAT is on) shows sales/profit without VAT; the menu is not changed.
+  Filter cards: Sells below cost (red), No selling price yet (drink stock only; link to the Menu page), Cost not known. Read-only.
+- Manager Guides: stock.html reports paragraph, one or two lines. Rebuild stock, check 2 pages.
+- Assistant: answer "what profit will our drinks stock make" (AI_REQUEST to the AI lead; reuse
+  admin/includes/stock-projected-profit.php rh_spp_load + rh_spp_build, same totals rule and VAT switch).
 ## Synced 2026-11-16 (guides + Assistant: every entry from 2026-11-14 to 2026-11-16 below, including the 2026-11-15/16 entries further down; hashes in TASKS.md) - entries kept for reference
 
 ### Import stock check: value column warning + stock check workbook (2026-11-16, owner ask) — hashes in TASKS.md

@@ -11,6 +11,7 @@ require_once 'admin-init.php';
 /** @var string $csrf_token */
 require_once '../includes/alert.php';
 require_once __DIR__ . '/includes/log-pager.php'; // rh_lp_page_size / rh_lp_size_picker: rows per page (?size=)
+require_once __DIR__ . '/includes/stock-projected-profit.php'; // Projected profit tab (drinks profit projection P2)
 
 $message = '';
 $error = '';
@@ -24,11 +25,18 @@ if (!ensureStockTablesExist()) {
     exit;
 }
 
-$tabs = ['inventory' => 'Inventory', 'stock_in' => 'Stock-In', 'usage' => 'Usage', 'wastage' => 'Wastage', 'yield' => 'Yield', 'adjustments' => 'Adjustments', 'expiry' => 'Expiry'];
+$tabs = ['inventory' => 'Inventory', 'stock_in' => 'Stock-In', 'usage' => 'Usage', 'wastage' => 'Wastage', 'yield' => 'Yield', 'adjustments' => 'Adjustments', 'expiry' => 'Expiry', 'profit' => 'Projected profit'];
 $tab = $_GET['tab'] ?? 'inventory';
-if (!isset($tabs[$tab])) {
+if (!is_string($tab) || !isset($tabs[$tab])) {
     $tab = 'inventory';
 }
+// Projected profit: "Take VAT out" switch (default on when VAT is on) and the filter cards (below cost / no price / cost not known).
+$sppVatRate = rh_spp_vat_rate();
+$sppVatOut = $sppVatRate > 0 && (($_GET['vat'] ?? '1') !== '0');
+$sppFilter = in_array($_GET['filter'] ?? '', ['below', 'noprice', 'unknown'], true) ? (string)$_GET['filter'] : '';
+$sppKeep = $tab === 'profit' ? array_filter(['vat' => ($sppVatRate > 0 && !$sppVatOut) ? '0' : '', 'filter' => $sppFilter], 'strlen') : [];
+$sppQs = $sppKeep ? '&' . http_build_query($sppKeep) : '';
+$sppData = null;
 
 function stock_reports_normalize_date(mixed $value, string $fallback): string
 {
@@ -91,6 +99,11 @@ function stock_reports_helper_content(string $tab, string $dateFrom, string $dat
         $content['example'] = 'If Net quantity change is strongly negative with many decrease events, audit adjustment reasons to separate valid consumption from shrinkage risk.';
     } elseif ($tab === 'expiry') {
         $content['example'] = 'If At-risk value (7d) is ' . $currencySymbol . ' 95,000.00, that is the estimated value likely to expire within 7 days unless consumed or transferred.';
+    } elseif ($tab === 'profit') {
+        $content['summary'] = 'What the drinks in stock right now would sell for at today\'s menu prices, what that stock cost, and the profit. One row per menu price: a drink sold by the shot and by the bottle has two rows. '
+            . 'Only drinks sold as one stock item are here (a cocktail mixing several is left out). The totals count each stock item once: its stock cost once, and its sales from the row that would bring in the least, marked "In totals", so the totals never overstate. '
+            . 'Items whose cost is not known are left out of every total. "No selling price yet" lists drink stock only (bottles, cans, kegs, or items with a bottle size or pour measure).  With "Take VAT out" on, sales and profit are shown without VAT; the menu is not changed.';
+        $content['example'] = 'Jameson: 12 bottles of 750 ml on hand, cost ' . $currencySymbol . ' 45,000.00 a bottle, sold by the 25 ml shot at ' . $currencySymbol . ' 3,500.00 (VAT included). That is 30 shots a bottle, so projected sales are 12 x 30 x 3,500 = ' . $currencySymbol . ' 1,260,000.00, stock cost ' . $currencySymbol . ' 540,000.00, profit ' . $currencySymbol . ' 720,000.00 and margin 57.1% (VAT left in).';
     }
 
     return $content;
@@ -424,6 +437,43 @@ try {
             stock_reports_metric('Expired recently', number_format($expiredRecent), 'Expired in or before this window'),
             stock_reports_metric('At-risk value (7d)', stock_reports_money($atRiskValue, $currency_symbol), 'Potential near-term write-off risk'),
         ];
+    } elseif ($tab === 'profit') {
+        $sppSrc = rh_spp_load($pdo);
+        $sppData = rh_spp_build($sppSrc['items'], $sppSrc['links'], $sppSrc['kitchen'], $sppVatRate, $sppVatOut, $sppSrc['list']);
+        $sppT = $sppData['totals'];
+        if ($sppFilter === 'noprice') {
+            $sppAll = $sppData['no_price'];
+        } elseif ($sppFilter === 'below') {
+            $sppAll = array_values(array_filter($sppData['lines'], static fn(array $l): bool => $l['below_cost']));
+        } elseif ($sppFilter === 'unknown') {
+            $sppAll = array_values(array_filter($sppData['lines'], static fn(array $l): bool => !$l['cost_known']));
+        } else {
+            $sppAll = $sppData['lines'];
+        }
+        $totalCount = count($sppAll);
+        $rows = array_slice($sppAll, $offset, $perPage);
+        if (($_GET['export'] ?? '') === 'csv') {
+            // The CSV gets plain columns; a cost that is not known stays blank (never 0).
+            $sppNum = static fn($v) => $v === null ? '' : $v;
+            $rows = array_map(static function (array $r) use ($sppFilter, $sppNum, $sppVatOut): array {
+                if ($sppFilter === 'noprice') {
+                    return ['Stock item' => $r['stock_name'], 'Category' => $r['category'], 'On hand' => $r['on_hand'], 'Unit' => $r['unit'],
+                        'Stock cost' => $sppNum($r['stock_cost']), 'Menu' => 'No selling price yet'];
+                }
+                return ['Drink' => $r['drink'], 'Stock item' => $r['stock_name'], 'One sale' => $r['sale'], 'On hand' => $r['on_hand'], 'Unit' => $r['unit'],
+                    'Measures per unit' => round((float)$r['per_unit'], 2), 'Selling price' . ($sppVatOut ? ' (VAT taken out)' : '') => $r['price'],
+                    'Projected sales' => $r['sales'], 'Stock cost' => $sppNum($r['stock_cost']), 'Projected profit' => $sppNum($r['profit']),
+                    'Margin %' => $sppNum($r['margin']), 'Sells below cost' => $r['below_cost'] ? 'Yes' : '', 'Cost not known' => $r['cost_known'] ? '' : 'Yes',
+                    'In totals' => $r['in_totals'] ? 'Yes' : ''];
+            }, $rows);
+        }
+        $sppVatWord = $sppT['vat_out'] ? 'VAT taken out' : 'VAT included';
+        $analysis_cards = [
+            stock_reports_metric('Projected sales', stock_reports_money((float)$sppT['sales'], $currency_symbol), $sppVatWord . ', ' . number_format((int)$sppT['items']) . ' stock item(s)'),
+            stock_reports_metric('Stock cost', stock_reports_money((float)$sppT['cost'], $currency_symbol), 'What that stock cost'),
+            stock_reports_metric('Projected profit', stock_reports_money((float)$sppT['profit'], $currency_symbol), 'Projected sales minus stock cost'),
+            stock_reports_metric('Margin', $sppT['margin'] !== null ? number_format((float)$sppT['margin'], 1) . '%' : '–', $sppT['margin'] !== null ? 'Profit as a share of projected sales, ' . $sppVatWord : 'No projected sales yet'),
+        ];
     }
 } catch (Throwable $e) {
     error_log('DB Error [stock-reports]: ' . $e->getMessage());
@@ -523,7 +573,7 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
             <?php endforeach; ?>
         </div>
 
-        <?php if (!in_array($tab, ['inventory', 'expiry'])): ?>
+        <?php if (!in_array($tab, ['inventory', 'expiry', 'profit'], true)): ?>
             <form method="GET" class="filter-bar">
                 <input type="hidden" name="tab" value="<?php echo htmlspecialchars($tab); ?>">
                 <?php if ($perPage !== 10 && $perPage <= 100): ?><input type="hidden" name="size" value="<?php echo (int)$perPage; ?>"><?php endif; ?>
@@ -537,7 +587,19 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
         <?php else: ?>
             <div class="filter-bar">
                 <span class="filter-bar__snapshot">Snapshot as of <?php echo date('Y-m-d H:i'); ?></span>
-                <a class="btn-export" href="?tab=<?php echo $tab; ?>&export=csv"><i class="fas fa-download"></i> CSV</a>
+                <?php if ($tab === 'profit'):
+                    if ($sppVatRate > 0):
+                        $sppSwitchKeep = array_filter(['tab' => 'profit', 'vat' => $sppVatOut ? '0' : '', 'filter' => $sppFilter, 'size' => $perPage !== 10 ? (string)$perPage : ''], 'strlen'); ?>
+                    <a class="spp-switch<?php echo $sppVatOut ? ' is-on' : ''; ?>" role="switch" aria-checked="<?php echo $sppVatOut ? 'true' : 'false'; ?>" href="?<?php echo htmlspecialchars(http_build_query($sppSwitchKeep), ENT_QUOTES, 'UTF-8'); ?>">
+                        <span class="spp-switch__track" aria-hidden="true"><span class="spp-switch__knob"></span></span>
+                        Take VAT out
+                    </a>
+                    <i class="help" tabindex="0" role="button" aria-label="About Take VAT out" data-tip="Menu prices include VAT (<?php echo htmlspecialchars(rtrim(rtrim(number_format($sppVatRate, 2), '0'), '.'), ENT_QUOTES, 'UTF-8'); ?>%). On: projected sales, profit, margin and the below-cost check use the price without VAT, the same way the till splits VAT out of a sale (price divided by 1 plus the rate). Off: prices as on the menu. The menu itself is never changed.">?</i>
+                    <?php else: ?>
+                    <span class="filter-bar__snapshot">VAT is off: prices as on the menu</span>
+                    <?php endif; ?>
+                <?php endif; ?>
+                <a class="btn-export" href="?tab=<?php echo $tab; ?><?php echo htmlspecialchars($sppQs, ENT_QUOTES, 'UTF-8'); ?>&export=csv"><i class="fas fa-download"></i> CSV</a>
             </div>
         <?php endif; ?>
 
@@ -585,6 +647,10 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
             'Expiring in 7 days' => 'Batches that expire between today and 7 days from now.',
             'Expired recently' => 'Batches already past their expiry date: those still listed, going back 30 days.',
             'At-risk value (7d)' => 'Quantity left times cost per unit, for batches that expire within 7 days or are already past their date.',
+            'Projected sales' => 'What the drinks in stock now would sell for at the current menu prices: on hand times measures in one unit times the selling price. Each stock item is counted once, from its row marked "In totals" (the menu price that would bring in the least). Without VAT when Take VAT out is on. Items whose cost is not known are left out.',
+            'Stock cost' => 'On hand times the current cost of one unit, counted once per stock item, for the same items as Projected sales. Items whose cost is not known are left out, never counted as 0.',
+            'Projected profit' => 'Projected sales minus stock cost, for the same stock items.',
+            'Margin' => 'Projected profit as a percent of projected sales. Shows a dash (–) when there are no projected sales.',
         ];
         ?>
         <?php if (!empty($analysis_cards)): ?>
@@ -599,6 +665,31 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                     </article>
                 <?php endforeach; ?>
             </section>
+        <?php endif; ?>
+
+        <?php if ($tab === 'profit' && is_array($sppData)):
+            $sppT = $sppData['totals'];
+            $sppCardHref = function (string $f) use ($sppVatRate, $sppVatOut, $sppFilter, $perPage): string {
+                $q = array_filter(['tab' => 'profit', 'vat' => ($sppVatRate > 0 && !$sppVatOut) ? '0' : '', 'filter' => $sppFilter === $f ? '' : $f, 'size' => $perPage !== 10 ? (string)$perPage : ''], 'strlen');
+                return '?' . http_build_query($q);
+            };
+            $sppFilters = [
+                'below' => ['Sells below cost', (int)$sppT['below_cost'], 'Menu prices where one sale costs more in stock than it sells for' . ($sppT['vat_out'] ? ' (price without VAT)' : '') . '. Shown in red. Click to list only these.', 'spp-filter--bad'],
+                'noprice' => ['No selling price yet', (int)$sppT['no_price'], 'Drink stock (bottles, cans, kegs, items with a bottle size or a pour measure) that is not sold on its own at any menu price. Kitchen ingredients and other stock are left out. Click to list them, then set a price on the Menu page.', ''],
+                'unknown' => ['Cost not known', (int)$sppT['cost_unknown'], 'Stock items with no cost per unit yet. Their rows show "Cost not known" and they are left out of every total, never counted as 0. Click to list their rows.', ''],
+            ]; ?>
+            <nav class="spp-filters" aria-label="Projected profit filters">
+                <?php foreach ($sppFilters as $fk => [$fLabel, $fCount, $fTip, $fClass]): ?>
+                    <span class="spp-filter-wrap">
+                    <a class="spp-filter <?php echo $fClass; ?><?php echo $sppFilter === $fk ? ' is-active' : ''; ?>" href="<?php echo htmlspecialchars($sppCardHref($fk), ENT_QUOTES, 'UTF-8'); ?>" <?php echo $sppFilter === $fk ? 'aria-current="true"' : ''; ?>>
+                        <span class="spp-filter__count"><?php echo number_format($fCount); ?></span>
+                        <span class="spp-filter__label"><?php echo htmlspecialchars($fLabel); ?></span>
+                    </a>
+                    <i class="help" tabindex="0" role="button" aria-label="About <?php echo htmlspecialchars($fLabel); ?>" data-tip="<?php echo htmlspecialchars($fTip); ?>">?</i>
+                    </span>
+                <?php endforeach; ?>
+                <?php if ($sppFilter !== ''): ?><a class="spp-filter spp-filter--clear" href="<?php echo htmlspecialchars($sppCardHref($sppFilter), ENT_QUOTES, 'UTF-8'); ?>">Show all menu prices</a><?php endif; ?>
+            </nav>
         <?php endif; ?>
 
         <div class="table-responsive" data-rh-results>
@@ -773,11 +864,71 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                             </tr>
                         <?php endforeach; ?>
                     </tbody>
+                <?php elseif ($tab === 'profit' && $sppFilter === 'noprice'): ?>
+                    <caption class="spp-caption">No selling price yet <span class="spp-caption__note">Drink stock that is not sold on its own at any menu price (kitchen ingredients and other stock are left out). <a href="menu-management.php">Set a price on the Menu page</a>.</span></caption>
+                    <thead>
+                        <tr>
+                            <th>Stock item <i class="help" tabindex="0" role="button" aria-label="About stock item" data-tip="A drink stock item (bottle, can, keg, or with a bottle size or pour measure) that no menu price sells on its own. Kitchen ingredients, weights and other stock are not listed.">?</i></th>
+                            <th>Category <i class="help" tabindex="0" role="button" aria-label="About category" data-tip="The stock category the item is filed under.">?</i></th>
+                            <th class="stock-table__num-head">On hand <i class="help" tabindex="0" role="button" aria-label="About on hand" data-tip="Stock on hand right now, in the item&#x27;s main unit. Stock below zero counts as nothing.">?</i></th>
+                            <th class="stock-table__num-head">Stock cost <i class="help" tabindex="0" role="button" aria-label="About stock cost" data-tip="On hand times the current cost of one unit. Cost not known when the item has no cost yet.">?</i></th>
+                            <th>Menu <i class="help" tabindex="0" role="button" aria-label="About menu" data-tip="Link the drink to this stock item on the Menu page to see its projected profit here.">?</i></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($rows as $r): ?>
+                            <tr>
+                                <td <?php echo stock_reports_label_attr('Stock item'); ?>><?php echo htmlspecialchars($r['stock_name']); ?></td>
+                                <td <?php echo stock_reports_label_attr('Category'); ?>><?php echo htmlspecialchars($r['category']); ?></td>
+                                <td class="stock-table__num" <?php echo stock_reports_label_attr('On hand'); ?>><?php echo htmlspecialchars(rh_stock_qty_fmt((float)$r['on_hand'], 0) . ' ' . $r['unit']); ?></td>
+                                <td class="stock-table__num" <?php echo stock_reports_label_attr('Stock cost'); ?>><?php echo $r['stock_cost'] !== null ? htmlspecialchars(stock_reports_money((float)$r['stock_cost'], $currency_symbol)) : '<span class="spp-flag spp-flag--muted">Cost not known</span>'; ?></td>
+                                <td <?php echo stock_reports_label_attr('Menu'); ?>><span class="spp-flag spp-flag--muted">No selling price yet</span> <a class="spp-link" href="menu-management.php">Menu page</a></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
+                <?php elseif ($tab === 'profit'): ?>
+                    <thead>
+                        <tr>
+                            <th>Drink <i class="help" tabindex="0" role="button" aria-label="About drink" data-tip="The drink as it is on the menu, with the stock item it comes from and what one sale takes off stock. A drink sold by the shot and by the bottle has a row for each price.">?</i></th>
+                            <th class="stock-table__num-head">On hand <i class="help" tabindex="0" role="button" aria-label="About on hand" data-tip="Stock on hand right now, in the stock item&#x27;s main unit. Stock below zero counts as nothing.">?</i></th>
+                            <th class="stock-table__num-head">Measures per unit <i class="help" tabindex="0" role="button" aria-label="About measures per unit" data-tip="How many of this sale one unit of stock gives, from the drink&#x27;s stock link: 1 divided by what one sale takes off stock, allowing for the link&#x27;s yield. A 750 ml bottle sold by the 25 ml shot gives 30.">?</i></th>
+                            <th class="stock-table__num-head">Selling price <i class="help" tabindex="0" role="button" aria-label="About selling price" data-tip="The menu price of one sale<?php echo $sppVatOut ? ', shown without VAT (the menu price, which includes VAT, is shown under it)' : ', VAT included as on the menu'; ?>.">?</i></th>
+                            <th class="stock-table__num-head">Projected sales <i class="help" tabindex="0" role="button" aria-label="About projected sales" data-tip="On hand times measures per unit times the selling price<?php echo $sppVatOut ? ', with VAT taken out of the total' : ''; ?>.">?</i></th>
+                            <th class="stock-table__num-head">Stock cost <i class="help" tabindex="0" role="button" aria-label="About stock cost" data-tip="On hand times the current cost of one unit. Cost not known when the stock item has no cost yet: never counted as 0.">?</i></th>
+                            <th class="stock-table__num-head">Projected profit <i class="help" tabindex="0" role="button" aria-label="About projected profit" data-tip="Projected sales minus stock cost for this row.">?</i></th>
+                            <th class="stock-table__num-head">Margin <i class="help" tabindex="0" role="button" aria-label="About margin" data-tip="Projected profit as a percent of projected sales. &quot;Sells below cost&quot; (red) means one sale costs more in stock than its selling price<?php echo $sppVatOut ? ' without VAT' : ''; ?>, so this can differ from the Menu page check, which uses the price with VAT. &quot;In totals&quot; marks the row the cards count for this stock item.">?</i></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <?php foreach ($rows as $r): ?>
+                            <tr class="<?php echo $r['below_cost'] ? 'spp-row--below' : ''; ?>">
+                                <td <?php echo stock_reports_label_attr('Drink'); ?>>
+                                    <span class="spp-drink">
+                                        <strong><?php echo htmlspecialchars($r['drink']); ?></strong><?php if (!$r['available']): ?> <span class="spp-flag spp-flag--muted">Switched off</span><?php endif; ?>
+                                        <span class="spp-sub"><?php echo htmlspecialchars($r['stock_name'] . ' · one sale = ' . $r['sale']); ?></span>
+                                    </span>
+                                </td>
+                                <td class="stock-table__num" <?php echo stock_reports_label_attr('On hand'); ?>><?php echo htmlspecialchars(rh_stock_qty_fmt((float)$r['on_hand'], 0) . ' ' . $r['unit']); ?></td>
+                                <td class="stock-table__num" <?php echo stock_reports_label_attr('Measures per unit'); ?>><?php echo htmlspecialchars(rh_stock_qty_fmt(round((float)$r['per_unit'], 2), 0)); ?></td>
+                                <td class="stock-table__num" <?php echo stock_reports_label_attr('Selling price'); ?>><span class="spp-drink"><?php echo htmlspecialchars(stock_reports_money((float)$r['price'], $currency_symbol)); ?><?php if ($sppT['vat_out']): ?><span class="spp-sub"><?php echo htmlspecialchars(stock_reports_money((float)$r['price_gross'], $currency_symbol)); ?> with VAT</span><?php endif; ?></span></td>
+                                <td class="stock-table__num stock-table__value" <?php echo stock_reports_label_attr('Projected sales'); ?>><?php echo htmlspecialchars(stock_reports_money((float)$r['sales'], $currency_symbol)); ?></td>
+                                <td class="stock-table__num" <?php echo stock_reports_label_attr('Stock cost'); ?>><?php echo $r['stock_cost'] !== null ? htmlspecialchars(stock_reports_money((float)$r['stock_cost'], $currency_symbol)) : '<span class="spp-flag spp-flag--muted">Cost not known</span>'; ?></td>
+                                <td class="stock-table__num stock-table__value" <?php echo stock_reports_label_attr('Projected profit'); ?>><?php echo $r['profit'] !== null ? htmlspecialchars(stock_reports_money((float)$r['profit'], $currency_symbol)) : '–'; ?></td>
+                                <td class="stock-table__num" <?php echo stock_reports_label_attr('Margin'); ?>>
+                                    <span class="spp-drink">
+                                        <span><?php echo $r['margin'] !== null ? htmlspecialchars(number_format((float)$r['margin'], 1)) . '%' : '–'; ?></span>
+                                        <?php if ($r['below_cost']): ?><span class="spp-flag spp-flag--bad">Sells below cost</span><?php endif; ?>
+                                        <?php if ($r['in_totals']): ?><span class="spp-flag">In totals</span><?php endif; ?>
+                                    </span>
+                                </td>
+                            </tr>
+                        <?php endforeach; ?>
+                    </tbody>
                 <?php endif; ?>
                 <?php if (empty($rows)): ?>
                     <tbody>
                         <tr>
-                            <td colspan="8" class="stock-table__empty">No data for the selected range.</td>
+                            <td colspan="8" class="stock-table__empty"><?php echo $tab === 'profit' ? ($sppFilter === '' ? 'No drink on the menu is linked to a stock item on its own yet. Link a drink to its stock item on the Menu page.' : 'Nothing to show for this filter.') : 'No data for the selected range.'; ?></td>
                         </tr>
                     </tbody>
                 <?php endif; ?>
@@ -792,11 +943,11 @@ $totalPages = $totalCount > 0 ? (int)ceil($totalCount / $perPage) : 1;
                     <?php if ($p === $page): ?>
                         <span class="current"><?php echo $p; ?></span>
                     <?php else: ?>
-                        <a href="?tab=<?php echo $tab; ?>&from=<?php echo urlencode($dateFrom); ?>&to=<?php echo urlencode($dateTo); ?><?php echo $perPage !== 10 ? '&size=' . (int)$perPage : ''; ?>&page=<?php echo $p; ?>"><?php echo $p; ?></a>
+                        <a href="?tab=<?php echo $tab; ?>&from=<?php echo urlencode($dateFrom); ?>&to=<?php echo urlencode($dateTo); ?><?php echo $perPage !== 10 ? '&size=' . (int)$perPage : ''; ?><?php echo htmlspecialchars($sppQs, ENT_QUOTES, 'UTF-8'); ?>&page=<?php echo $p; ?>"><?php echo $p; ?></a>
                     <?php endif; ?>
                 <?php endfor; ?>
                 <?php endif; /* page links */ ?>
-                <?php echo rh_lp_size_picker('stock-reports.php', ['tab' => $tab, 'from' => $dateFrom, 'to' => $dateTo], $perPage); ?>
+                <?php echo rh_lp_size_picker('stock-reports.php', ['tab' => $tab, 'from' => $dateFrom, 'to' => $dateTo] + $sppKeep, $perPage); ?>
             </div>
         <?php endif; ?>
     </div>
