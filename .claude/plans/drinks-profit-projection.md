@@ -72,6 +72,33 @@ invoices/*.pdf. Never print secrets. Guides + Assistant sync NOT in this session
   actually took for those drinks. Gap = free pours, spillage or missing money. Read-only report, no writes.
 - Own test: scripts/tests/stock_projected_vs_actual.php (Liwonde only).
 
+#### P3 session prompt (written 2026-11-20; P1 + P2 SHIPPED, see TASKS.md)
+Paste into a fresh session in Rosalyns-hotel-2026: "Read .claude/plans/drinks-profit-projection.md section P3 and build it."
+Facts for the brief (no exploring):
+- P1: Liwonde 994f0f8 / Rosalyn's 4ca9397. Drink -> stock link = menu recipe (admin/includes/menu-recipe-lib.php);
+  sales deduct only via it (admin/pos.php:418, admin/pos-order-close.php:423). Cost of one measure:
+  rh_drink_measure_cost() config/database.php ~14735.
+- P2: Liwonde 5033c0f / Rosalyn's b4ca6e1. admin/includes/stock-projected-profit.php rh_spp_load + rh_spp_build
+  (per-measure price, measures per unit, totals rule = each item once at lowest menu price, VAT out =
+  gross/(1+rate) like the till). Tab 'profit' in admin/stock-reports.php ($tabs line 28).
+- Usage today: admin/stock-reports.php usage tab ~line 220: stock_adjustments rows with source_type
+  'pos_order'/'room_service' minus 'void_restore', cost_at_time, view-void filter {$vwSa}.
+- Counts: admin/stock-count.php (3053 lines, CODE_INDEX + offset reads only).
+DESIGN TRAP (decide first, state in the brief): POS deductions are CAUSED by till sales, so "used x menu price"
+vs "till takings" only shows price changes, comps and voids, never free pours or spillage. The gap the owner
+wants needs the COUNT side: actual used = opening count + received - closing count - recorded wastage, between
+two approved counts; expected used = measures sold on the till (+ room service). Report per drink:
+actual used, sold, gap in measures, gap value at menu price (VAT switch as P2) and at cost; plus till takings vs
+sold x current menu price as a second, smaller line (price drift / comps / discounts). Date range snaps to two
+approved counts; if fewer than two counts exist, say so plainly instead of a figure.
+Dispatch: dept-stock-lead (opus) builds at Liwonde as a new tab in admin/stock-reports.php + calc in
+admin/includes/stock-projected-vs-actual.php (read-only, no writes, no migration); own test
+scripts/tests/stock_projected_vs_actual.php (Liwonde guard as in stock_projected_profit.php line 16): two counts
+with a known gap (e.g. 2 bottles = 60 shots unaccounted), sold-only = gap 0, received between counts, wastage
+recorded = not in the gap, void_restore, one count only = message, VAT switch. One qa-auditor (opus) with the
+accounting lead's money check folded in (dept-accounting-lead review = the plan's ask). Browser 1400/768/390.
+Commit Liwonde, copy/patch to Rosalyn's (compare base files first), push both, TASKS + GUIDES_AI_SYNC entry.
+
 ### Ship gate (each of P1, P2, P3)
 php -l; own test + import / stock suites only (no full suite unless a money write path changed); ONE
 qa-auditor (opus) per ship with the accounting lead's money check folded in; headless browser check
