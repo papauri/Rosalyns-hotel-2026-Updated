@@ -122,6 +122,168 @@ if (!function_exists('receipt_get_payment')) {
     }
 }
 
+if (!function_exists('rh_group_pay_siblings_cache')) {
+    /** The per-request sibling cache (payment id => that payment's legs), by reference. */
+    function &rh_group_pay_siblings_cache(): array
+    {
+        static $cache = [];
+        return $cache;
+    }
+}
+
+if (!function_exists('rh_group_pay_siblings_reset')) {
+    /** Forget every cached sibling set (call after writing payments in the same request). */
+    function rh_group_pay_siblings_reset(): void
+    {
+        $cache = &rh_group_pay_siblings_cache();
+        $cache = [];
+    }
+}
+
+if (!function_exists('rh_group_pay_siblings')) {
+    /**
+     * Every leg of the whole-group payment that $paymentId belongs to (admin/includes/group-payment.php
+     * rh_group_pay_record writes one payments row per room). Read-only, no migration: legs are matched on what the
+     * recorder writes to every leg in the same transaction: room payment, not deleted, not a refund, same payment
+     * date, method and processed_by, the "Part of a whole-group payment of" note, created within 10 seconds, and a
+     * booking of the same group (same root: primary_booking_id or itself). Only collected legs count (completed, paid,
+     * refunded, partially_refunded: the statuses that have a receipt). Ordered by payment id.
+     * A payment that is not a group leg returns [] (no query is run unless the note is on the row) or one row.
+     * Per-request cache: one lookup serves every leg of the group (the Receipts list hydrates each row), stored under
+     * every leg id it returned. $fresh = true, or rh_group_pay_siblings_reset(), bypasses it; a hit whose own leg no
+     * longer matches the row passed in (amount or receipt number edited this request) is re-read.
+     *
+     * @return array<int,array{payment_id:int,booking_id:int,booking_reference:string,room:string,receipt_number:string,
+     *     total_amount:float,cc_emails:string}>
+     */
+    function rh_group_pay_siblings(PDO $pdo, int $paymentId, ?array $payment = null, bool $fresh = false): array
+    {
+        $marker = 'Part of a whole-group payment of';
+        if ($paymentId <= 0) {
+            return [];
+        }
+        $cache = &rh_group_pay_siblings_cache();
+        if (!$fresh && array_key_exists($paymentId, $cache)) {
+            $hit = $cache[$paymentId];
+            $own = null;
+            foreach ($hit as $leg) {
+                if ($leg['payment_id'] === $paymentId) { $own = $leg; break; }
+            }
+            $stale = $payment !== null && (int)($payment['id'] ?? 0) === $paymentId && (
+                strpos((string)($payment['notes'] ?? ''), $marker) === false
+                || ($own !== null && (abs($own['total_amount'] - round((float)($payment['total_amount'] ?? 0), 2)) > (float)BALANCE_TOLERANCE
+                    || $own['receipt_number'] !== trim((string)($payment['receipt_number'] ?? '')))));
+            if (!$stale) {
+                return $hit;
+            }
+        }
+        if ($payment === null || (int)($payment['id'] ?? 0) !== $paymentId || !array_key_exists('notes', $payment) || !array_key_exists('created_at', $payment)) {
+            $ps = $pdo->prepare('SELECT * FROM payments WHERE id = ? AND deleted_at IS NULL');
+            $ps->execute([$paymentId]);
+            $payment = $ps->fetch(PDO::FETCH_ASSOC) ?: null;
+        }
+        if (!$payment || (string)($payment['booking_type'] ?? '') !== 'room' || (int)($payment['booking_id'] ?? 0) <= 0
+            || (string)($payment['payment_type'] ?? '') === 'refund' || !empty($payment['deleted_at'])
+            || strpos((string)($payment['notes'] ?? ''), $marker) === false || (string)($payment['created_at'] ?? '') === '') {
+            return [];
+        }
+        try {
+            $rs = $pdo->prepare('SELECT COALESCE(NULLIF(primary_booking_id, 0), id) FROM bookings WHERE id = ?');
+            $rs->execute([(int)$payment['booking_id']]);
+            $root = (int)$rs->fetchColumn();
+            if ($root <= 0) {
+                return [];
+            }
+            // Room numbers in the same query, resolved like getBookingRoomLabel()/getBookingRooms(): the active
+            // booking_rooms set, else the last released set, else bookings.individual_room_id; number else name.
+            $lbl = "COALESCE(NULLIF(TRIM(ir.room_number), ''), ir.room_name, '')";
+            $ord = "ORDER BY br.is_primary DESC, ir.room_number ASC, br.id ASC SEPARATOR '|~|'";
+            $hasBr = !function_exists('bookingAvailabilityTableExists') || bookingAvailabilityTableExists('booking_rooms');
+            $roomCols = ($hasBr
+                ? ", (SELECT GROUP_CONCAT($lbl $ord) FROM booking_rooms br JOIN individual_rooms ir ON ir.id = br.individual_room_id
+                        WHERE br.booking_id = b.id AND br.released_at IS NULL) AS rooms_active
+                   , (SELECT GROUP_CONCAT($lbl $ord) FROM booking_rooms br JOIN individual_rooms ir ON ir.id = br.individual_room_id
+                        WHERE br.booking_id = b.id AND br.released_at = (SELECT MAX(x.released_at) FROM booking_rooms x WHERE x.booking_id = b.id)) AS rooms_released"
+                : ", NULL AS rooms_active, NULL AS rooms_released")
+                . ", (SELECT $lbl FROM individual_rooms ir WHERE ir.id = b.individual_room_id) AS room_single";
+            $st = $pdo->prepare("SELECT p.id, p.booking_id, p.booking_reference, p.receipt_number, p.total_amount, p.cc_emails,
+                    b.booking_reference AS b_ref, r.name AS room_name $roomCols
+                FROM payments p
+                JOIN bookings b ON b.id = p.booking_id
+                LEFT JOIN rooms r ON r.id = b.room_id
+                WHERE p.booking_type = 'room' AND p.deleted_at IS NULL
+                  AND COALESCE(p.payment_type, '') <> 'refund'
+                  AND p.payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded')
+                  AND p.payment_date = ? AND p.payment_method = ? AND COALESCE(p.processed_by, '') = ?
+                  AND p.notes LIKE ?
+                  AND ABS(TIMESTAMPDIFF(SECOND, p.created_at, ?)) <= 10
+                  AND COALESCE(NULLIF(b.primary_booking_id, 0), b.id) = ?
+                ORDER BY p.id");
+            $st->execute([
+                (string)$payment['payment_date'], (string)$payment['payment_method'], (string)($payment['processed_by'] ?? ''),
+                '%' . $marker . '%', (string)$payment['created_at'], $root,
+            ]);
+            $out = [];
+            foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $bid = (int)$row['booking_id'];
+                $type = trim((string)($row['room_name'] ?? ''));
+                $set = $row['rooms_active'] ?? null;
+                if ($set === null) { $set = $row['rooms_released'] ?? null; }
+                if ($set === null) { $set = $row['room_single'] ?? null; }
+                $labels = array_values(array_unique(array_filter(array_map('trim', explode('|~|', (string)$set)), 'strlen')));
+                $no = implode(' + ', $labels);
+                $room = $no !== '' && stripos($type, $no) === false ? trim($type . ' - ' . $no, ' -') : $type;
+                $out[] = [
+                    'payment_id' => (int)$row['id'],
+                    'booking_id' => $bid,
+                    'booking_reference' => (string)($row['booking_reference'] ?: $row['b_ref']),
+                    'room' => $room,
+                    'receipt_number' => trim((string)($row['receipt_number'] ?? '')),
+                    'total_amount' => round((float)$row['total_amount'], 2),
+                    'cc_emails' => (string)($row['cc_emails'] ?? ''),
+                ];
+            }
+            // The payment asked about must be one of its own legs; anything else is not a group leg.
+            if (!in_array($paymentId, array_column($out, 'payment_id'), true)) {
+                $cache[$paymentId] = [];
+                return [];
+            }
+            foreach ($out as $leg) {
+                $cache[$leg['payment_id']] = $out;
+            }
+            return $out;
+        } catch (Throwable $e) {
+            error_log('rh_group_pay_siblings failed for payment ' . $paymentId . ': ' . $e->getMessage());
+            return [];
+        }
+    }
+}
+
+if (!function_exists('receipt_group_payment_context')) {
+    /**
+     * The 'group_payment' receipt context key: null for anything that is not a leg of a whole-group payment with at
+     * least two legs; else the live total (sum of the legs' current total_amount, never the figure in the note, which
+     * goes stale after Edit payment), the number of legs and one line per leg.
+     */
+    function receipt_group_payment_context(PDO $pdo, array $payment): ?array
+    {
+        if ((string)($payment['booking_type'] ?? '') !== 'room' || (string)($payment['payment_type'] ?? '') === 'refund'
+            || strpos((string)($payment['notes'] ?? ''), 'Part of a whole-group payment of') === false) {
+            return null;
+        }
+        $legs = rh_group_pay_siblings($pdo, (int)($payment['id'] ?? 0), $payment);
+        if (count($legs) < 2) {
+            return null;
+        }
+        return [
+            'total' => round(array_sum(array_column($legs, 'total_amount')), 2),
+            'count' => count($legs),
+            'this_payment_id' => (int)$payment['id'],
+            'legs' => $legs,
+        ];
+    }
+}
+
 if (!function_exists('receipt_shop_mode')) {
     /**
      * Shop / supermarket / retail till = the restaurant module is off (same test as isRestaurantEnabled(),
@@ -279,7 +441,36 @@ if (!function_exists('receipt_hydrate_context')) {
             'booked_rate' => $bookedRate,
             'order_items' => $orderItems,
             'order_totals' => $orderTotals,
+            // Leg of a whole-group payment (owner 2026-11-20): the whole amount and every room's receipt; null otherwise.
+            'group_payment' => receipt_group_payment_context($pdo, $payment),
         ];
+    }
+}
+
+if (!function_exists('receipt_group_payment_lines')) {
+    /**
+     * Plain-text lines of the whole-group section shared by the receipt PDF and email body: the headline, then one
+     * line per leg (booking ref - room - receipt number - amount, "(this receipt)" on the current leg).
+     * [] when the context has no group payment.
+     * @return string[]
+     */
+    function receipt_group_payment_lines(array $context, string $currency): array
+    {
+        $g = is_array($context['group_payment'] ?? null) ? $context['group_payment'] : null;
+        if (!$g || (int)($g['count'] ?? 0) < 2) {
+            return [];
+        }
+        $lines = ['Whole-group payment: ' . trim($currency) . ' ' . number_format((float)$g['total'], 2) . ' split across ' . (int)$g['count'] . ' rooms'];
+        foreach ((array)$g['legs'] as $leg) {
+            $parts = array_values(array_filter([
+                (string)$leg['booking_reference'],
+                (string)$leg['room'],
+                'receipt ' . ((string)$leg['receipt_number'] !== '' ? (string)$leg['receipt_number'] : '-'),
+                trim($currency) . ' ' . number_format((float)$leg['total_amount'], 2),
+            ], static fn ($p) => trim($p) !== ''));
+            $lines[] = implode(' - ', $parts) . ((int)$leg['payment_id'] === (int)($g['this_payment_id'] ?? 0) ? ' (this receipt)' : '');
+        }
+        return $lines;
     }
 }
 
@@ -487,6 +678,18 @@ if (!function_exists('receipt_build_pos_style_html_raw')) {
 
         $footerHtml = htmlspecialchars($footer, ENT_QUOTES, 'UTF-8');
 
+        // Leg of a whole-group payment: the whole amount and every room's receipt, below the totals (never a totals row).
+        $groupHtml = '';
+        $groupLines = receipt_group_payment_lines($context, (string)$currency);
+        if ($groupLines) {
+            $groupHtml = '<tr><td style="padding:14px 24px 0;"><div style="clear:both;background:#F7F3EE;border:1px solid #e8e0d5;border-radius:8px;padding:10px 12px;font-size:12px;color:#3f3933;line-height:1.6;">'
+                . '<strong>' . htmlspecialchars(array_shift($groupLines), ENT_QUOTES, 'UTF-8') . '</strong>';
+            foreach ($groupLines as $gl) {
+                $groupHtml .= '<br>' . htmlspecialchars($gl, ENT_QUOTES, 'UTF-8');
+            }
+            $groupHtml .= '</div></td></tr>';
+        }
+
         return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Receipt ' . $receiptNumber . '</title></head>'
             . '<body style="margin:0;padding:0;background:#f7f3ee;font-family:Arial,Helvetica,sans-serif;color:#1f1c18;">'
             . '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#f7f3ee;padding:22px 10px;">'
@@ -510,6 +713,7 @@ if (!function_exists('receipt_build_pos_style_html_raw')) {
             . $totalsHtml
             . '</table>'
             . '</td></tr>'
+            . $groupHtml
             . '<tr><td style="padding:18px 24px 22px;">'
             . '<div style="border-top:1px dashed #d9cec1;padding-top:10px;text-align:center;font-size:12px;color:#6a645d;line-height:1.5;">' . $footerHtml . '</div>'
             . '</td></tr>'
@@ -1175,6 +1379,12 @@ if (!function_exists('receipt_render_payment_pdf_html')) {
         }
 
         $body = $items . rh_pdf_spacer(3) . rh_pdf_totals_table($totals);
+        // Leg of a whole-group payment (owner 2026-11-20): a note under the totals with the whole amount and every
+        // room's receipt; "Total received" above stays this room's amount. Nothing for any other payment.
+        $groupLines = receipt_group_payment_lines($context, $cur);
+        if ($groupLines) {
+            $body .= rh_pdf_spacer(4) . rh_pdf_note(str_replace(['×', '·'], ['x', '-'], implode("\n", $groupLines)));
+        }
         // Room payment: the booking's (group lead's) stored cancellation policy text; '' without one = nothing printed.
         if (!$isRefund && (string)($payment['booking_type'] ?? '') === 'room' && function_exists('rh_booking_policy_text_by_id')
             && ($GLOBALS['pdo'] ?? null) instanceof PDO) {
@@ -1253,6 +1463,7 @@ if (!function_exists('receipt_generate_pdf')) {
                     $rcUpd->execute([$candidate, $paymentId]);
                     if ($rcUpd->rowCount() > 0) {
                         $lockedNumber = $candidate;
+                        rh_group_pay_siblings_reset(); // a cached group set may hold this leg without its number
                     } else {
                         $rcLock->execute([$paymentId]);
                         $lockedNumber = trim((string)($rcLock->fetchColumn() ?: ''));
@@ -1313,6 +1524,7 @@ if (!function_exists('receipt_send_email')) {
     function receipt_send_email(PDO $pdo, int $paymentId, ?string $recipient = null, ?array $user = null): array
     {
         receipt_ensure_schema($pdo);
+        rh_group_pay_siblings_reset(); // the send (and the stamping of every leg) reads the group fresh, once
         $payment = receipt_get_payment($pdo, $paymentId);
         if (!$payment) {
             throw new RuntimeException('Payment not found.');
@@ -1361,6 +1573,44 @@ if (!function_exists('receipt_send_email')) {
         } elseif (!empty($pdf['path']) && is_file($pdf['path'])) {
             $attachments[] = ['path' => $pdf['path'], 'name' => $pdf['receipt_number'] . '.pdf', 'mime' => 'application/pdf'];
         }
+        // Leg of a whole-group payment (owner 2026-11-20): ONE email carries every leg's receipt (same recipient as
+        // this leg). Each other leg's PDF is generated fresh; one that fails is left out (logged), the rest still go.
+        // The other legs' "CC emails" are added to the copies. Any other payment: exactly one PDF, as before.
+        $sentLegs = [$paymentId => (string)$pdf['receipt_number']];
+        $groupCtx = is_array($context['group_payment'] ?? null) ? $context['group_payment'] : null;
+        if ($groupCtx) {
+            $ordered = [];
+            $sentLegs = [];
+            foreach ((array)$groupCtx['legs'] as $leg) { // leg order (payment id) = the order printed on each receipt
+                $legId = (int)$leg['payment_id'];
+                foreach (array_map('trim', explode(',', (string)($leg['cc_emails'] ?? ''))) as $extraCc) {
+                    if ($extraCc !== '' && filter_var($extraCc, FILTER_VALIDATE_EMAIL) && !in_array($extraCc, $ccList, true)) {
+                        $ccList[] = $extraCc;
+                    }
+                }
+                if ($legId === $paymentId) {
+                    foreach ($attachments as $a) {
+                        $ordered[] = $a;
+                    }
+                    $sentLegs[$legId] = (string)$pdf['receipt_number'];
+                    continue;
+                }
+                try {
+                    $legPdf = receipt_generate_pdf($pdo, $legId, $user);
+                    if ((string)($legPdf['bytes'] ?? '') !== '') {
+                        $ordered[] = ['content' => $legPdf['bytes'], 'name' => $legPdf['receipt_number'] . '.pdf', 'mime' => 'application/pdf'];
+                    } elseif (!empty($legPdf['path']) && is_file($legPdf['path'])) {
+                        $ordered[] = ['path' => $legPdf['path'], 'name' => $legPdf['receipt_number'] . '.pdf', 'mime' => 'application/pdf'];
+                    } else {
+                        throw new RuntimeException('no PDF produced');
+                    }
+                    $sentLegs[$legId] = (string)$legPdf['receipt_number'];
+                } catch (Throwable $legEx) {
+                    error_log('Group receipt email for payment ' . $paymentId . ': receipt of payment ' . $legId . ' left out: ' . $legEx->getMessage());
+                }
+            }
+            $attachments = $ordered;
+        }
         $emailCtx = function_exists('rh_email_context') // System Logs > Emails sent: what this email is about
             ? rh_email_context(['kind' => 'receipt'] + rh_email_ctx_account((string)($payment['booking_type'] ?? ''), $payment['booking_id'] ?? null, $payment['booking_reference'] ?? null))
             : null;
@@ -1378,6 +1628,21 @@ if (!function_exists('receipt_send_email')) {
         }
         if (!empty($sendResult['preview']) || !empty($sendResult['preview_url'])) { // development mode: a preview file, nothing delivered
             return ['success' => true, 'preview' => true, 'message' => 'Email preview generated (development mode). No live email sent.'];
+        }
+
+        if (count($sentLegs) > 1) {
+            // Whole-group email: every attached leg is marked emailed (its own auto-send then reports already_sent).
+            $legIds = array_keys($sentLegs);
+            $pdo->prepare('UPDATE payments SET receipt_emailed_at = NOW(), receipt_email_count = receipt_email_count + 1, updated_at = NOW() WHERE id IN ('
+                . implode(',', array_fill(0, count($legIds), '?')) . ')')->execute($legIds);
+            $legNote = 'Receipt emailed (whole-group payment: ' . count($sentLegs) . ' receipts in one email: ' . implode(', ', $sentLegs) . ')';
+            foreach ($sentLegs as $legId => $legNo) {
+                receipt_log_event($pdo, (int)$legId, (string)$legNo, 'emailed', $to, 'email', $legNote, $user);
+            }
+            rh_log_event('receipts', 'info', 'Receipts emailed (whole-group payment)', ['payment_id' => $paymentId, 'payment_ids' => $legIds,
+                'receipt_numbers' => array_values($sentLegs), 'recipient' => $to]);
+            return ['success' => true, 'message' => 'Receipts emailed to ' . $to . ' (1 email, ' . count($sentLegs) . ' receipts: ' . implode(', ', $sentLegs) . ')',
+                'receipts' => count($sentLegs), 'payment_ids' => $legIds];
         }
 
         $pdo->prepare('UPDATE payments SET receipt_emailed_at = NOW(), receipt_email_count = receipt_email_count + 1, updated_at = NOW() WHERE id = ?')

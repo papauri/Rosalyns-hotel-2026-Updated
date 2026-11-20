@@ -543,11 +543,33 @@ if (!function_exists('rh_group_pay_after_commit')) {
             rh_email_overpay_credit_notes($pdo, $res['credit']);
         }
         require_once __DIR__ . '/../../config/receipts.php';
-        $emailed = 0;
-        foreach ($res['legs'] as $leg) {
+        // One email carries every room's receipt (receipt_send_email is group-aware, owner 2026-11-20). The leg of the
+        // group's effective lead goes first (its guest gets that email; the first leg when the lead took no share), so
+        // the other legs' auto-send finds them already emailed. receipt_after_payment still runs for EVERY leg: it also
+        // issues the paid-in-full statement of that room.
+        $order = $res['legs'];
+        $leadId = function_exists('rh_booking_group_effective_lead') ? rh_booking_group_effective_lead($pdo, (int)($order[0]['booking_id'] ?? 0)) : 0;
+        if ($leadId <= 0 && $order) {
+            $rs = $pdo->prepare('SELECT COALESCE(NULLIF(primary_booking_id, 0), id) FROM bookings WHERE id = ?');
+            $rs->execute([(int)$order[0]['booking_id']]);
+            $leadId = (int)$rs->fetchColumn();
+        }
+        foreach ($order as $i => $leg) {
+            if ((int)$leg['booking_id'] === $leadId) {
+                unset($order[$i]);
+                array_unshift($order, $leg);
+                break;
+            }
+        }
+        $order = array_values($order);
+        $emailed = 0;   // receipts emailed
+        $emails = 0;    // emails sent
+        foreach ($order as $leg) {
             try {
-                if (receipt_after_payment($pdo, (int)$leg['payment_id'], $user)['sent']) {
-                    $emailed++;
+                $after = receipt_after_payment($pdo, (int)$leg['payment_id'], $user);
+                if ($after['sent']) {
+                    $emails++;
+                    $emailed += max(1, (int)($after['result']['receipts'] ?? 1));
                 }
             } catch (Throwable $e) {
                 error_log('group payment receipt ' . (int)$leg['payment_id'] . ': ' . $e->getMessage());
@@ -565,7 +587,7 @@ if (!function_exists('rh_group_pay_after_commit')) {
             . ' room' . ($n === 1 ? '' : 's') . ' (receipts ' . implode(', ', array_column($res['legs'], 'receipt_number')) . ').'
             . ($owedAfter > BALANCE_TOLERANCE ? ' The group still owes ' . $cur . ' ' . number_format($owedAfter, 2) . '.' : ' Nothing more is owed by the group.')
             . (!empty($res['credit']) ? ' Overpayment: credit note ' . $res['credit']['credit_note_number'] . ' for ' . number_format((float)$res['credit']['excess'], 2) . ' issued.' : '')
-            . ($emailed > 0 ? ' ' . $emailed . ' receipt' . ($emailed === 1 ? '' : 's') . ' emailed.' : '');
-        return ['owed_after' => $owedAfter, 'emailed' => $emailed, 'message' => $msg];
+            . ($emailed > 0 ? ' Receipts emailed (' . $emails . ' email' . ($emails === 1 ? '' : 's') . ', ' . $emailed . ' receipt' . ($emailed === 1 ? '' : 's') . ').' : '');
+        return ['owed_after' => $owedAfter, 'emailed' => $emailed, 'emails' => $emails, 'message' => $msg];
     }
 }

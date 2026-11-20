@@ -338,7 +338,8 @@ if (!$port || !is_resource($smtp) || !is_file($spool . '.ready')) {
     ok('page: whole group -> one row and one receipt number per owing room, sum = amount', $clean($r) && (int)($v['n'] ?? 0) === $owingRooms
         && (int)($v['r'] ?? 0) === $owingRooms && $near($v['s'] ?? 0, 1000000.07), json_encode($v) . ' ' . substr((string)($r['raw'] ?? ''), 0, 300));
     ok('page: History on every room', (int)($r['verify'][1][0]['h'] ?? 0) === $owingRooms);
-    ok('page: one receipt email per room (captured, never delivered)', $receiptMails === $owingRooms, $receiptMails . ' receipt emails');
+    $rcpMail = array_values(array_filter($r['emails'], static fn($m) => preg_match('/receipt/i', (string)($m['subject'] ?? ''))));
+    ok('page: ONE receipt email carrying every room receipt (captured, never delivered)', $receiptMails === 1 && count(preg_grep('/\.pdf$/i', $rcpMail[0]['attachments'] ?? [])) === $owingRooms, $receiptMails . ' receipt emails, ' . count(preg_grep('/\.pdf$/i', $rcpMail[0]['attachments'] ?? [])) . ' attachments');
 
     $u = 'grppage-' . bin2hex(random_bytes(8));
     $r = gp_run(['booking_type' => 'room', 'booking_id' => (string)$lead, 'payment_amount' => '1000.00', 'payment_method' => 'cash', 'payment_status' => 'completed',
@@ -368,7 +369,8 @@ if (!$port || !is_resource($smtp) || !is_file($spool . '.ready')) {
     ok('Payments & balance: whole group -> one row + receipt per owing room, sum = amount', $clean($r) && !empty($r['json']['success'])
         && (int)($v['n'] ?? 0) === $owingRooms && (int)($v['r'] ?? 0) === $owingRooms && $near($v['s'] ?? 0, 1000000.07),
         json_encode($v) . ' ' . substr(json_encode($r['json'] ?? ($r['raw'] ?? '')), 0, 300));
-    ok('Payments & balance: one receipt email per room (captured)', $receiptMails === $owingRooms, $receiptMails . ' receipt emails');
+    $rcpMail = array_values(array_filter($r['emails'], static fn($m) => preg_match('/receipt/i', (string)($m['subject'] ?? ''))));
+    ok('Payments & balance: ONE receipt email carrying every room receipt (captured)', $receiptMails === 1 && count(preg_grep('/\.pdf$/i', $rcpMail[0]['attachments'] ?? [])) === $owingRooms, $receiptMails . ' receipt emails, ' . count(preg_grep('/\.pdf$/i', $rcpMail[0]['attachments'] ?? [])) . ' attachments');
     $u = 'grppage-' . bin2hex(random_bytes(8));
     $r = gp_run(['action' => 'consolidation_record', 'id' => (string)$lead, 'amount' => '1000.00', 'payment_method' => 'cash', 'payment_type' => 'partial_payment',
         'payment_date' => date('Y-m-d'), 'pay_scope' => 'group', 'group_expect' => '{}', 'client_uuid' => $u], [
