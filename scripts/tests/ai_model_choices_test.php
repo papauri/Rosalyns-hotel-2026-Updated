@@ -81,6 +81,8 @@ try {
         ['gemini-3.8-flash', 'Gemini 3.8 Flash'],     // in the built-in list, priced: the new top model
         ['gemini-3.9-flash', 'Gemini 3.9 Flash'],     // newer than anything known, no price yet
         ['gemini-3.7-flash', 'Gemini 3.7 Flash'],     // unknown, older than 3.8: never a choice
+        ['gemini-mystery-1', 'Gemini Mystery 1'],     // unknown family, no price: never a choice (fault 2026-11-21)
+        ['gemini-5-ultra', 'Gemini 5 Ultra'],         // big family, no price: never a choice (fault 2026-11-21)
     ]);
     $r2 = rh_ai_refresh_provider($pdo, 'google');
     $c2 = rh_ai_model_choices($pdo, 'google');
@@ -89,7 +91,7 @@ try {
         'a newer priced model populates the choices as the suggested Primary', json_encode([$shown2, $c2['suggest']]));
     check(($c2['status']['gemini-3.9-flash'] ?? '') === 'new_price' && in_array('gemini-3.9-flash', $shown2, true),
         'a newer version with no price is offered so its price can be typed (it never pushes a priced model out)', json_encode($c2['status']));
-    check(!array_intersect(['gemini-2.5-flash', 'gemini-3.7-flash', 'deep-research-preview-04-2026'], $shown2) && in_array('gemini-3.1-pro-preview', $shown2, true),
+    check(!array_intersect(['gemini-2.5-flash', 'gemini-3.7-flash', 'gemini-mystery-1', 'gemini-5-ultra', 'deep-research-preview-04-2026'], $shown2) && in_array('gemini-3.1-pro-preview', $shown2, true),
         'older, superseded and research models are removed from the choices; a big model stays on show', json_encode($shown2));
     check(($c2['status']['gemini-3.6-flash'] ?? '') === 'older' && $c2['older'] === ['gemini-3.6-flash'],
         'the model in use that is no longer a top choice is marked older, still in use', json_encode($c2['status']));
@@ -105,7 +107,7 @@ try {
     check($agree && strpos($msg2, 'Gemini 3.8 Flash (new)') !== false && strpos($msg2, 'Older, still in use') !== false && strpos($msg2, 'Gemini 3.6 Flash (Primary)') !== false,
         'the notice names exactly the models the table offers', $msg2);
     $notes = json_encode(rh_ai_notices());
-    check(strpos($notes, 'gemini-3.9-flash') !== false && strpos($notes, 'gemini-3.7-flash') === false && strpos($notes, 'deep-research') === false,
+    check(strpos($notes, 'gemini-3.9-flash') !== false && strpos($notes, 'gemini-3.7-flash') === false && strpos($notes, 'gemini-mystery-1') === false && strpos($notes, 'gemini-5-ultra') === false && strpos($notes, 'deep-research') === false,
         'the "set a price" notice names only the new model the table offers', $notes);
     $c2b = rh_ai_model_choices($pdo, 'google');
     check($ids($c2b['rows']) === $shown2 && $c2b['status'] === $c2['status'], 'the choices survive a reload (worked out from the saved list)');

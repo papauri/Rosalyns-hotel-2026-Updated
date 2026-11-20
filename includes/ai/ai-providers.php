@@ -563,6 +563,33 @@ function rh_ai_gemini_schema(array $s): array
 }
 
 /**
+ * Tools whose name every provider accepts (Gemini is the strictest: a letter or underscore first, then letters, digits,
+ * _ . : -, at most 64). One bad name makes the provider refuse the whole question (fault 2026-11-21), so such a tool is
+ * left out of the request; it is never renamed, so a call always maps back. One warning per set of bad names per
+ * PHP process, i.e. per chat request (its tool loop builds several provider requests), naming positions and lengths only, never the name itself.
+ */
+function rh_ai_tools_valid_names(array $tools): array
+{
+    static $logged = [];
+    $ok = [];
+    $bad = [];
+    foreach ($tools as $i => $tool) {
+        $name = is_array($tool) ? (string)($tool['name'] ?? '') : '';
+        if (preg_match('/^[A-Za-z_][A-Za-z0-9_.:-]{0,63}$/D', $name)) {
+            $ok[] = $tool;
+            continue;
+        }
+        $bad[] = (int)$i . ':' . strlen($name);
+    }
+    $sig = implode(',', $bad);
+    if ($bad && !isset($logged[$sig]) && function_exists('rh_log_event')) {
+        $logged[$sig] = true;
+        rh_log_event('assistant', 'warning', 'Assistant tool(s) left out: name not valid for the provider', ['left_out' => count($bad), 'position_length' => $sig, 'tools' => count($tools)]);
+    }
+    return $ok;
+}
+
+/**
  * Build the provider request. $req (normalised):
  *   provider, model, key, system_frozen, system_user (cached too), system_volatile, messages[], tools[],
  *   max_tokens, effort (minimal|low|medium|high), drop_optional (leave out effort / thinking settings after a 400).
@@ -573,27 +600,6 @@ function rh_ai_gemini_schema(array $s): array
  * role and short replies, low on Primary (owner 2026-10-28: "super swift").
  * @return array{url:string, headers:array, body:array}
  */
-/**
- * Tools whose name every provider accepts (Gemini is the strictest: a letter or underscore first, then letters, digits,
- * _ . : -, at most 64). One bad name makes the provider refuse the whole question (fault 2026-11-21), so such a tool is
- * left out of the request and logged (its position and length only); it is never renamed, so a call always maps back.
- */
-function rh_ai_tools_valid_names(array $tools): array
-{
-    $ok = [];
-    foreach ($tools as $i => $tool) {
-        $name = is_array($tool) ? (string)($tool['name'] ?? '') : '';
-        if (preg_match('/^[A-Za-z_][A-Za-z0-9_.:-]{0,63}$/D', $name)) {
-            $ok[] = $tool;
-            continue;
-        }
-        if (function_exists('rh_log_event')) {
-            rh_log_event('assistant', 'warning', 'Assistant tool left out: its name is not valid for the provider', ['position' => (int)$i, 'name_length' => strlen($name), 'tools' => count($tools)]);
-        }
-    }
-    return $ok;
-}
-
 function rh_ai_build_request(array $req, bool $responsesApi = false): array
 {
     $provider = (string)$req['provider'];

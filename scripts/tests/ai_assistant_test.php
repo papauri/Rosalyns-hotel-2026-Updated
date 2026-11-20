@@ -2780,8 +2780,8 @@ $aNames = array_column((array)(rh_ai_build_request(['provider' => 'anthropic', '
 $oNames = array_map(static fn($t) => $t['function']['name'], (array)(rh_ai_build_request(['provider' => 'openai', 'model' => 'gpt-5-mini', 'key' => $FAKE_KEY, 'messages' => [['role' => 'user', 'content' => 'hi']], 'tools' => $badTools])['body']['tools'] ?? []));
 $rNames = array_column((array)(rh_ai_build_request(['provider' => 'openai', 'model' => 'gpt-5-mini', 'key' => $FAKE_KEY, 'messages' => [['role' => 'user', 'content' => 'hi']], 'tools' => $badTools], true)['body']['tools'] ?? []), 'name');
 $evNew = array_slice($GLOBALS['__ai_test_log_events'] ?? [], $evBefore);
-check($gNames === ['how_to'] && $aNames === ['how_to'] && $oNames === ['how_to'] && $rNames === ['how_to'] && count($evNew) === 12 && strpos(json_encode($evNew), 'GUEST') === false,
-    'a tool with an invalid name is left out of every provider\'s request (never renamed) and logged without the name', json_encode([$gNames, $aNames, $oNames, $rNames, count($evNew)]));
+check($gNames === ['how_to'] && $aNames === ['how_to'] && $oNames === ['how_to'] && $rNames === ['how_to'] && count($evNew) === 1 && strpos(json_encode($evNew), 'GUEST') === false,
+    'a tool with an invalid name is left out of every provider\'s request (never renamed) and logged once, without the name', json_encode([$gNames, $aNames, $oNames, $rNames, count($evNew)]));
 if ($chatReady && !empty($adminU)) {
     rh_ai_vault_forget();
     $pdo->beginTransaction();
@@ -2841,7 +2841,8 @@ $g4 = [['model_id' => 'gemini-4-flash', 'rank' => 99, 'price_in' => 0.05, 'price
     ['model_id' => 'gemini-3.8-flash', 'rank' => 92, 'price_in' => 0.75, 'price_out' => 3.75], ['model_id' => 'gemini-3.6-flash', 'rank' => 90, 'price_in' => 0.75, 'price_out' => 3.75], ['model_id' => 'gemini-3.5-flash-lite', 'rank' => 86, 'price_in' => 0.3, 'price_out' => 2.5]];
 $sr4 = rh_ai_suggest_roles($g4);
 $rk4 = array_column(rh_ai_rank_models('google', [['model_id' => 'gemini-4-argon'], ['model_id' => 'gemini-4-flash'], ['model_id' => 'gemini-3.8-flash']]), 'model_id');
-check(($sr4['gemini-4-flash'] ?? '') === 'primary' && in_array('gemini-4-argon', $rk4, true) && in_array('gemini-4-flash', $rk4, true)
+// The 2026-10-28 rule: of the 3 cheapest that perform, the cheapest is Fast, the best of the other two Primary.
+check(($sr4['gemini-4-flash'] ?? '') === 'fast' && in_array('gemini-4-argon', $rk4, true) && in_array('gemini-4-flash', $rk4, true)
     && isset(rh_ai_suggest_roles(rh_ai_catalog_models('google'))['gemini-4-argon']),
     'a cheaper, better Gemini 4 model is suggested like any other (Gemini 4 Argon is in the built-in suggestion as Extra)', json_encode([$sr4, $rk4]));
 // Defaults: US$5 a month for a fresh install

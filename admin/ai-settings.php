@@ -725,6 +725,8 @@ $fmtPrice = static function ($v): string {
                         <form method="POST" action="ai-settings.php" autocomplete="off" class="ai-key-form">
                             <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
                             <input type="hidden" name="provider" value="<?php echo $h($p); ?>">
+                            <?php /* Browsers expect a username beside a password field (console warning); unnamed, so never sent. */ ?>
+                            <input type="text" autocomplete="username" value="<?php echo $h($meta['label']); ?> key" hidden aria-hidden="true" tabindex="-1">
                             <label class="ai-sr" for="ai-key-<?php echo $h($p); ?>"><?php echo $h($meta['label']); ?> key</label>
                             <input type="password" id="ai-key-<?php echo $h($p); ?>" name="api_key" class="form-control" autocomplete="new-password" spellcheck="false"
                                 placeholder="<?php echo $hasKey ? 'Paste a new key to replace it' : 'Paste the key'; ?>"<?php echo $saltMissing ? ' disabled' : ''; ?>>

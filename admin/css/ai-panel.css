@@ -283,7 +283,9 @@ html.rh-ai-is-open .rh-ai-launch {
     align-items: center;
     gap: 6px;
     min-height: 44px;
+    max-width: 100%;
     margin: 8px 8px 0 0;
+    overflow-wrap: anywhere;
 }
 
 /* Links to screens: a solid, quiet button (the admin .btn styles do not reach inside the panel). */
@@ -462,11 +464,21 @@ html.rh-ai-is-open .rh-ai-launch {
     display: none;
 }
 
+/* A long label ("Open all unpaid bookings arriving 23 Nov 2026 - 1 Dec 2026") wraps inside the panel, never past it. */
 .rh-ai-brief__link {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    white-space: nowrap;
+    max-width: 100%;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: left;
+    justify-content: flex-start;
+    line-height: 1.3;
+}
+
+.rh-ai-brief__link i {
+    flex: 0 0 auto;
 }
 
 .rh-ai-brief .rh-ai-brief__link.btn {
