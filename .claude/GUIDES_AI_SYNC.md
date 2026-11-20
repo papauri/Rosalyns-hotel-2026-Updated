@@ -25,6 +25,11 @@ when prompted."
 
 ## Pending (oldest first)
 
+### Whole-group payment receipts show the group total and every room (2026-11-20, owner fault) - Liwonde 7d5c105 / Rosalyn's 3781b20
+- **Guides (Payments / Receipts, Bookings group payment):** each room still gets its own receipt number, but every room's receipt PDF and email now show "Whole-group payment: <total> split across N rooms" and list each room (booking, room, receipt number, amount); emailing any of them (automatic or Email receipt) sends ONE email with every room's receipt attached, to the lead room's guest plus CC, and all are marked emailed.
+- **Assistant:** when asked about a group payment's receipt, say it is one receipt per room, each showing the group total, all sent together in one email.
+- **Manager Guides:** Money & End of Day - one line on group payment receipts.
+
 ### AI Settings: Check for newer models refreshes the pick lists (2026-11-20, owner fault) - Liwonde 69942d3 / Rosalyn's 214a0f1
 - **Guides (AI Settings page, admin only):** after Check for newer models the lists show the current top models and drop older ones; the model in use stays selected as '(older, still in use)' until someone saves another; a retired model shows a warning only.
 - **Assistant:** built by the AI lead; nothing more to sync.
