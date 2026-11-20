@@ -74,7 +74,7 @@ if (!function_exists('rh_sa_parse_filters')) {
             'setting_changes' => '^(setting_change)',
             'signins' => '^(login|logout)',
             'payments' => '^(refund|payment|receipt|invoice|credit_note)',
-            'till' => '^(pos|shift|till)',
+            'till' => '^(pos|shift|till|menu_items)',
             'kitchen' => '^(kds|bds|cds)',
             'stock' => '^(stock|barcode|supplier|wastage|purchase)',
             'settings' => '^(permissions|user|password|role|error_log|backup|licence|ai_|module|settings|cache)',
@@ -404,6 +404,7 @@ if (!function_exists('rh_sa_parse_filters')) {
                 'settle_table_order' => 'Settled a table order', 'record_payment' => 'Recorded a payment on an account',
                 'generate_receipt' => 'Generated a receipt', 'email_receipt' => 'Emailed a receipt', 'run_backup' => 'Ran a backup',
                 'stay_correction_apply' => 'Corrected the dates of a checked-out stay',
+                'menu_bulk_delete' => 'Deleted selected menu items', 'menu_delete_all' => 'Deleted all menu items', // Menu Management (owner 2026-11-21)
             ],
         ];
     }
@@ -461,6 +462,7 @@ if (!function_exists('rh_sa_parse_filters')) {
             'barcode_item_registered' => 'Registered a new item by barcode',
             'stock_cost_correction' => 'Corrected a crate price', // Stock > Fix crate prices (admin/includes/stock-cost-fix-lib.php)
             'stock_main_unit_changed' => 'Changed the main unit of a stock item', // Stock Items > Change main unit (admin/includes/stock-unit-change-lib.php)
+            'menu_items_bulk_deleted' => 'Deleted selected menu items', 'menu_items_all_deleted' => 'Deleted all menu items', // Menu Management bulk delete (owner 2026-11-21)
         ];
         $text = $names[$action] ?? ucfirst(rh_sa_prettify($action));
         if (!in_array($action, ['login_success', 'logout', 'login_failed', 'login_blocked'], true) && trim($details) !== '') {
@@ -471,7 +473,7 @@ if (!function_exists('rh_sa_parse_filters')) {
             if ($d !== '') {
                 // Most details are a short hint (140 characters). A crate-price correction or a main-unit change is a full
                 // before/after record (value, batches, purchase order lines), so it keeps its whole text; the page escapes it.
-                $max = in_array($action, ['stock_cost_correction', 'stock_main_unit_changed'], true) ? 4000 : 140;
+                $max = in_array($action, ['stock_cost_correction', 'stock_main_unit_changed', 'menu_items_bulk_deleted', 'menu_items_all_deleted'], true) ? 4000 : 140;
                 $text .= ': ' . (function_exists('mb_substr') ? mb_substr($d, 0, $max) : substr($d, 0, $max));
             }
         }

@@ -531,5 +531,80 @@ $apiRes = ['raw' => substr($out, -500)];
 if (preg_match('/@@RESULT@@(.*)$/m', $out, $m)) { $x = json_decode($m[1], true); if (is_array($x)) { $apiRes = $x; } }
 check($clean($apiRes) && !empty($apiRes['found']) && !in_array(false, $apiRes['found'], true), 'Picker data: list_ingredients carries name, category, unit, cost, stock on hand and pieces-per-unit', json_encode($apiRes['found'] ?? $apiRes['raw'] ?? $apiRes));
 
+/* ---- 4. Delete selected / Delete all (owner 2026-11-21): administrators with Clear Stock Data (data_reset) only ---- */
+// Three seeded items: never sold (deleted), sold (hidden), on an open order (left alone). One transaction per item.
+$staff = (int)col($pdo, "SELECT id FROM admin_users WHERE is_active = 1 ORDER BY id LIMIT 1");
+// Compact seed (the harness passes its whole set-up on one command line, which Windows caps at 8 KB).
+$bkSlug = 'zzmp-bk-' . strtolower($hr);
+$bkCat = "ZZMP bk $hr";
+$bulkSetup = [
+    "INSERT INTO menu_categories (name, slug, business_context, default_station, sort_order, shows_on_pos, shows_on_room_service, display_order, is_active) VALUES ('$bkCat', '$bkSlug', 'food_service', 'kitchen', 999, 1, 1, 999, 1)",
+    "INSERT INTO food_menu (item_name, price, category, station) VALUES ('ZZMP $hr bk1', 100, '$bkCat', 'kitchen'), ('ZZMP $hr bk2', 100, '$bkCat', 'kitchen'), ('ZZMP $hr bk3', 100, '$bkCat', 'kitchen')",
+    "INSERT INTO menu_items (category_id, item_name, price, category, station) SELECT c.id, f.item_name, 100, f.category, 'kitchen' FROM menu_categories c JOIN food_menu f ON f.category = c.name WHERE c.slug = '$bkSlug'",
+    "INSERT INTO stock_recipes (menu_item_id, menu_type) SELECT id, '$bkSlug' FROM menu_items WHERE category = '$bkCat'",
+    "INSERT INTO stock_orders (reference, order_type, customer_name, status, total_amount, subtotal, kitchen_status, created_by, created_at) VALUES ('ZZMPS$hr', 'walk_in', 'ZZMP', 'paid', 100, 100, 'served', $staff, NOW()), ('ZZMPO$hr', 'walk_in', 'ZZMP', 'placed', 100, 100, 'new', $staff, NOW())",
+    "INSERT INTO stock_order_items (order_id, menu_item_id, menu_type, item_name, quantity, unit_price, line_total, station, kds_status) SELECT o.id, mi.id, '$bkSlug', mi.item_name, 1, 100, 100, 'kitchen', 'served' FROM menu_items mi JOIN stock_orders o ON o.reference = IF(mi.item_name LIKE '%bk2', 'ZZMPS$hr', 'ZZMPO$hr') WHERE mi.category = '$bkCat' AND mi.item_name <> 'ZZMP $hr bk1'",
+];
+$bulkVars = ['a' => "SELECT id FROM food_menu WHERE item_name = 'ZZMP $hr bk1'", 'b' => "SELECT id FROM food_menu WHERE item_name = 'ZZMP $hr bk2'", 'c' => "SELECT id FROM food_menu WHERE item_name = 'ZZMP $hr bk3'"];
+$bulkVerify = [
+    "SELECT COUNT(*) AS q FROM food_menu WHERE item_name = 'ZZMP $hr bk1'",
+    "SELECT COUNT(*) AS q FROM menu_items WHERE item_name = 'ZZMP $hr bk1'",
+    "SELECT COUNT(*) AS q FROM stock_recipes WHERE menu_type = '$bkSlug'",
+    "SELECT is_available AS q FROM food_menu WHERE item_name = 'ZZMP $hr bk2'",
+    "SELECT show_pos AS q FROM menu_items WHERE item_name = 'ZZMP $hr bk2'",
+    "SELECT is_available AS q FROM food_menu WHERE item_name = 'ZZMP $hr bk3'",
+    "SELECT show_pos AS q FROM menu_items WHERE item_name = 'ZZMP $hr bk3'",
+    "SELECT COUNT(*) AS q FROM admin_activity_log WHERE action = 'menu_items_bulk_deleted' AND details LIKE '%Deleted: ZZMP $hr bk1 (food)%' AND details LIKE '%Hidden: ZZMP $hr bk2 (food)%' AND details LIKE '%Left: ZZMP $hr bk3 (food)%'",
+    "SELECT COUNT(*) AS q FROM admin_activity_log WHERE action = 'menu_items_all_deleted' AND details LIKE 'Food menu:%ZZMP $hr bk1 (food)%'",
+];
+$bulkPost = ['action' => 'menu_bulk_delete', 'menu_type' => 'food', 'ids' => ['{a}', '{b}', '{c}']];
+$r = $page($bulkPost, $bulkSetup, $bulkVars, $bulkVerify);
+check($clean($r) && ($r['json']['success'] ?? false) === true && (int)($r['json']['deleted'] ?? -1) === 1 && (int)($r['json']['hidden'] ?? -1) === 1 && (int)($r['json']['left'] ?? -1) === 1,
+    'Bulk: delete selected answers 1 deleted, 1 hidden (sold), 1 left (open order)', json_encode($r['json'] ?? $r['raw'] ?? $r));
+check($near($qty($r, 0), 0) && $near($qty($r, 1), 0) && $near($qty($r, 2), 2), 'Bulk: the never-sold item loses its website row, till row and stock link', json_encode($r['verify'] ?? ''));
+check($near($qty($r, 3), 0) && $near($qty($r, 4), 0), 'Bulk: the sold item is hidden (unavailable, off the till), kept for history', json_encode($r['verify'] ?? ''));
+check($near($qty($r, 5), 1) && $near($qty($r, 6), 1), 'Bulk: the item on an open order is untouched and does not stop the others', json_encode($r['verify'] ?? ''));
+check($near($qty($r, 7), 1), 'Bulk: System Logs gets one "menu_items_bulk_deleted" row naming what was deleted, hidden and left', json_encode($r['verify'][7] ?? ''));
+
+$r = $page(['action' => 'menu_bulk_delete', 'menu_type' => 'food', 'ids' => []], $bulkSetup, $bulkVars, $bulkVerify);
+check($clean($r) && ($r['json']['success'] ?? true) === false && $near($qty($r, 0), 1), 'Bulk: nothing ticked is refused', json_encode($r['json'] ?? $r));
+
+// A non-administrator, given Menu Management AND data_reset inside the rolled-back run: the role rule alone must refuse.
+$na = $pdo->query("SELECT id, username FROM admin_users WHERE is_active = 1 AND role <> 'admin' ORDER BY id LIMIT 1")->fetch(PDO::FETCH_ASSOC) ?: [];
+$nonAdmin = (string)($na['username'] ?? '');
+$naId = (int)($na['id'] ?? 0);
+$naSetup = array_merge($bulkSetup, ["INSERT INTO user_permissions (user_id, permission_key, is_granted, granted_by) VALUES ($naId, 'menu', 1, $staff), ($naId, 'data_reset', 1, $staff) ON DUPLICATE KEY UPDATE is_granted = 1"]);
+if ($nonAdmin !== '') {
+    $cfgAs = static fn(array $post, array $grep = [], string $method = 'POST'): array => ['post' => $post, 'ajax' => $method === 'POST', 'method' => $method, 'setup' => $naSetup, 'vars' => $bulkVars, 'verify' => $bulkVerify, 'grep' => $grep, 'as_username' => $nonAdmin];
+    $runAs = static function (array $cfg) use ($harness): array {
+        $out = (string)shell_exec(escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($harness) . ' admin/menu-management.php ' . escapeshellarg(base64_encode(json_encode($cfg))) . ' 2>&1');
+        return preg_match('/@@RESULT@@(.*)$/m', $out, $m) && is_array($x = json_decode($m[1], true)) ? $x : ['raw' => substr($out, -700)];
+    };
+    $r = $runAs($cfgAs($bulkPost));
+    check(($r['bytes'] ?? 0) > 0, 'Bulk: the non-administrator test account reaches the page (granted Menu Management for the test)', json_encode($r['raw'] ?? $r));
+    check($clean($r) && ($r['json']['success'] ?? true) === false && $near($qty($r, 0), 1) && $near($qty($r, 3), 1) && $near($qty($r, 7), 0), 'Bulk: a non-administrator is refused and nothing is deleted or logged', json_encode($r['json'] ?? $r['raw'] ?? $r));
+    $r = $runAs($cfgAs(['action' => 'menu_delete_all', 'scope' => 'food', 'confirm_text' => 'DELETE']));
+    check($clean($r) && ($r['json']['success'] ?? true) === false && $near($qty($r, 0), 1) && $near($qty($r, 8), 0), 'Bulk: a non-administrator cannot use Delete all', json_encode($r['json'] ?? $r['raw'] ?? $r));
+    $r = $runAs($cfgAs([], ['id="mmBulk"', 'class="mm-sel"'], 'GET'));
+    check($clean($r) && isset($r['found']) && !in_array(true, $r['found'], true) && ($r['bytes'] ?? 0) > 5000, 'Bulk: a non-administrator sees no tick boxes and no Delete selected / Delete all bar', json_encode($r['found'] ?? $r['raw'] ?? $r));
+} else {
+    echo "SKIP non-administrator checks: no active non-admin account\n";
+}
+$r = $page([], $bulkSetup, [], [], 'GET', ['id="mmBulk"', 'class="mm-sel"', 'class="mm-sel-cat"', 'id="mmSelAll"', 'function mmBulkDelete', 'function mmDeleteAll', 'Type DELETE to confirm']);
+check($clean($r) && !empty($r['found']) && !in_array(false, $r['found'], true), 'Bulk: an administrator with Clear Stock Data sees the tick boxes, Select all, Delete selected and Delete all', json_encode($r['found'] ?? $r['raw'] ?? $r));
+
+// Delete all: refused without the typed DELETE or a valid menu; with both, every item of that menu goes (rolled back).
+$r = $page(['action' => 'menu_delete_all', 'scope' => 'food', 'confirm_text' => 'delete'], $bulkSetup, $bulkVars, $bulkVerify);
+check($clean($r) && ($r['json']['success'] ?? true) === false && $near($qty($r, 0), 1), 'Delete all: without "DELETE" typed exactly nothing is deleted', json_encode($r['json'] ?? $r));
+$r = $page(['action' => 'menu_delete_all', 'scope' => 'everything', 'confirm_text' => 'DELETE'], $bulkSetup, $bulkVars, $bulkVerify);
+check($clean($r) && ($r['json']['success'] ?? true) === false && $near($qty($r, 0), 1), 'Delete all: an unknown menu choice is refused', json_encode($r['json'] ?? $r));
+$r = $page(['action' => 'menu_delete_all', 'scope' => 'food', 'confirm_text' => 'DELETE'], $bulkSetup, $bulkVars, $bulkVerify);
+check($clean($r) && ($r['json']['success'] ?? false) === true && $near($qty($r, 0), 0) && $near($qty($r, 3), 0) && $near($qty($r, 5), 1) && $near($qty($r, 8), 1),
+    'Delete all (food, rolled back): the seeded items follow the same rules and one "menu_items_all_deleted" row is logged', json_encode($r['json'] ?? $r['raw'] ?? $r) . json_encode($r['verify'] ?? ''));
+
+require_once $root . '/admin/includes/staff-activity-lib.php';
+check(rh_sa_action_type('menu_items_bulk_deleted') === 'till' && rh_sa_action_type('menu_items_all_deleted') === 'till', 'System Logs files the bulk-delete rows under "Till & orders"');
+check(strpos(rh_sa_named_action_text('menu_items_all_deleted', str_repeat('x', 600)), 'Deleted all menu items: ') === 0 && strlen(rh_sa_named_action_text('menu_items_all_deleted', str_repeat('x', 600))) > 600, 'System Logs shows the whole list of deleted items (not cut at 140 characters)');
+
 echo "\n$pass passed, $fail failed\n";
 exit($fail ? 1 : 0);

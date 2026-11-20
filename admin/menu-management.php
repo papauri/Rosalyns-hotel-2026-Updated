@@ -35,6 +35,63 @@ $fb_share_attrs     = facebookShareButtonAttrs('Feature on Facebook'); // title,
  * (menu_items) in one transaction - see includes/menu-pos-sync.php. Stock links (recipes) hang off
  * the till item. */
 
+// Delete selected / Delete all (owner 2026-11-21): the same people as Clear Stock Data, an active administrator
+// account holding data_reset (rh_sc_authorize). Everyone else keeps the one-item Delete only.
+$canBulkDelete = false;
+if ((string)$user['role'] === 'admin') {
+    require_once __DIR__ . '/includes/stock-clear-lib.php';
+    [$canBulkDelete] = rh_sc_authorize($pdo, (int)$user['id']);
+}
+
+/**
+ * Delete one website menu row and, when no other row shares it, its till copy and stock list (rh_menu_pos_remove).
+ * Own transaction. Returns ['mode' => deleted|archived|blocked|gone, 'name', 'open_lines', 'deals', 'stock_removed'].
+ * archived: it has sales history, so it was marked unavailable and hidden instead. blocked: on an open order, nothing changed.
+ */
+function rh_mm_delete_one(PDO $pdo, string $table, int $itemId): array
+{
+    $rowStmt = $pdo->prepare("SELECT item_name, category FROM `{$table}` WHERE id = ?");
+    $rowStmt->execute([$itemId]);
+    $webRow = $rowStmt->fetch(PDO::FETCH_ASSOC);
+    if (!$webRow) {
+        return ['mode' => 'gone', 'name' => '', 'open_lines' => 0, 'deals' => 0, 'stock_removed' => false];
+    }
+    $pos = rh_menu_pos_find($pdo, (string)$webRow['item_name'], (string)$webRow['category']);
+    // Another website row with the same name + category shares the till row: leave the till row alone.
+    $twins = 0;
+    foreach (['food_menu', 'drink_menu'] as $t) {
+        $tw = $pdo->prepare("SELECT COUNT(*) FROM `{$t}` WHERE LOWER(item_name) = LOWER(?) AND LOWER(category) = LOWER(?)" . ($t === $table ? ' AND id <> ?' : ''));
+        $tw->execute($t === $table ? [$webRow['item_name'], $webRow['category'], $itemId] : [$webRow['item_name'], $webRow['category']]);
+        $twins += (int)$tw->fetchColumn();
+    }
+
+    $pdo->beginTransaction();
+    try {
+        $res = ['mode' => 'deleted', 'open_lines' => 0, 'deals' => 0];
+        if ($pos && $twins === 0) {
+            $res = rh_menu_pos_remove($pdo, $pos['id'], $pos['slug']);
+        }
+        if ($res['mode'] === 'blocked') {
+            $pdo->rollBack();
+        } elseif ($res['mode'] === 'archived') {
+            $pdo->prepare("UPDATE `{$table}` SET is_available = 0 WHERE id = ?")->execute([$itemId]);
+            $pdo->commit();
+        } else {
+            $pdo->prepare("DELETE FROM `{$table}` WHERE id = ?")->execute([$itemId]);
+            $pdo->commit();
+        }
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        throw $e;
+    }
+    return [
+        'mode' => $res['mode'], 'name' => (string)$webRow['item_name'], 'open_lines' => (int)$res['open_lines'],
+        'deals' => (int)$res['deals'], 'stock_removed' => $res['mode'] === 'deleted' && $pos && $twins === 0,
+    ];
+}
+
 // Handle menu item actions
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     if (!validateCsrfToken($_POST['csrf_token'] ?? '')) {
@@ -226,42 +283,120 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $message = ($action === 'add' ? 'Menu item added.' : 'Menu item updated.') . $stockMsg;
             $jsonExtra = ['pos_id' => $pos['id']];
         } elseif ($action === 'delete') {
-            $itemId = (int)($_POST['id'] ?? 0);
-            $rowStmt = $pdo->prepare("SELECT item_name, category FROM `{$table}` WHERE id = ?");
-            $rowStmt->execute([$itemId]);
-            $webRow = $rowStmt->fetch(PDO::FETCH_ASSOC);
-            if (!$webRow) {
+            $res = rh_mm_delete_one($pdo, $table, (int)($_POST['id'] ?? 0));
+            if ($res['mode'] === 'gone') {
                 throw new RuntimeException('This item is already gone. Reload the page.');
             }
-            $pos = rh_menu_pos_find($pdo, (string)$webRow['item_name'], (string)$webRow['category']);
-            // Another website row with the same name + category shares the till row: leave the till row alone.
-            $twins = 0;
-            foreach (['food_menu', 'drink_menu'] as $t) {
-                $tw = $pdo->prepare("SELECT COUNT(*) FROM `{$t}` WHERE LOWER(item_name) = LOWER(?) AND LOWER(category) = LOWER(?)" . ($t === $table ? ' AND id <> ?' : ''));
-                $tw->execute($t === $table ? [$webRow['item_name'], $webRow['category'], $itemId] : [$webRow['item_name'], $webRow['category']]);
-                $twins += (int)$tw->fetchColumn();
-            }
-
-            $pdo->beginTransaction();
-            $mode = 'deleted';
-            $res = ['mode' => 'deleted', 'open_lines' => 0, 'deals' => 0];
-            if ($pos && $twins === 0) {
-                $res = rh_menu_pos_remove($pdo, $pos['id'], $pos['slug']);
-                $mode = $res['mode'];
-            }
-            if ($mode === 'blocked') {
-                $pdo->rollBack();
+            if ($res['mode'] === 'blocked') {
                 throw new RuntimeException('This item is on ' . $res['open_lines'] . ' open order line(s). Close or settle those orders first, then delete it (or mark it unavailable now).');
             }
-            if ($mode === 'archived') {
-                $pdo->prepare("UPDATE `{$table}` SET is_available = 0 WHERE id = ?")->execute([$itemId]);
-                $pdo->commit();
+            if ($res['mode'] === 'archived') {
                 $message = 'This item has sales history, so it cannot be deleted. It has been marked unavailable and hidden from the till and room service instead.';
             } else {
-                $pdo->prepare("DELETE FROM `{$table}` WHERE id = ?")->execute([$itemId]);
-                $pdo->commit();
-                $message = 'Menu item deleted.' . ($pos && $twins === 0 ? ' What it uses from stock was removed too.' : '') . ($res['deals'] > 0 ? ' (' . $res['deals'] . ' deal(s) updated.)' : '');
+                $message = 'Menu item deleted.' . ($res['stock_removed'] ? ' What it uses from stock was removed too.' : '') . ($res['deals'] > 0 ? ' (' . $res['deals'] . ' deal(s) updated.)' : '');
             }
+        } elseif ($action === 'menu_bulk_delete' || $action === 'menu_delete_all') {
+            // Delete selected / Delete all: same rule per item as the one-item Delete, one transaction per item, so an
+            // item on an open order is left alone without undoing the others. Never a whole-table DELETE.
+            if (!$canBulkDelete) {
+                if (function_exists('rh_sa_hook_mark_refused')) {
+                    rh_sa_hook_mark_refused();
+                }
+                http_response_code(403);
+                throw new RuntimeException('Only an administrator with the "Clear Stock Data" permission can delete several menu items at once.');
+            }
+            $todo = []; // table => ids
+            if ($action === 'menu_bulk_delete') {
+                $ids = $_POST['ids'] ?? [];
+                $ids = is_array($ids) ? array_values(array_unique(array_filter(array_map('intval', $ids), static function ($v) { return $v > 0; }))) : [];
+                if (!$ids) {
+                    throw new RuntimeException('Tick at least one item first.');
+                }
+                if (count($ids) > 5000) {
+                    throw new RuntimeException('Too many items in one go. Delete them in smaller groups.');
+                }
+                $todo[$table] = $ids;
+            } else {
+                $scope = (string)($_POST['scope'] ?? '');
+                $tables = $scope === 'food' ? ['food_menu'] : ($scope === 'drinks' ? ['drink_menu'] : ($scope === 'both' ? ['food_menu', 'drink_menu'] : []));
+                if (!$tables) {
+                    throw new RuntimeException('Choose which menu to delete.');
+                }
+                if (trim((string)($_POST['confirm_text'] ?? '')) !== 'DELETE') {
+                    throw new RuntimeException('Type DELETE to confirm.');
+                }
+                foreach ($tables as $t) {
+                    $todo[$t] = array_map('intval', $pdo->query("SELECT id FROM `{$t}` ORDER BY id")->fetchAll(PDO::FETCH_COLUMN));
+                }
+            }
+
+            // Same lock as add / edit, so a save cannot land half-way through.
+            $menuLockName = substr('rh_form_menu_item_' . (defined('DB_NAME') ? DB_NAME : 'db'), 0, 64);
+            if ((int)$pdo->query('SELECT GET_LOCK(' . $pdo->quote($menuLockName) . ', 10)')->fetchColumn() !== 1) {
+                $menuLockName = '';
+                throw new RuntimeException('Someone else is saving a menu item right now. Please try again in a moment.');
+            }
+            if (function_exists('set_time_limit')) {
+                @set_time_limit(300);
+            }
+
+            $done = ['deleted' => [], 'archived' => [], 'blocked' => []];
+            $deals = 0;
+            $failed = 0;
+            foreach ($todo as $t => $ids) {
+                $label = $t === 'food_menu' ? 'food' : 'drink';
+                foreach ($ids as $id) {
+                    try {
+                        $r = rh_mm_delete_one($pdo, $t, (int)$id);
+                    } catch (Throwable $e) {
+                        error_log('menu-management bulk delete #' . (int)$id . ': ' . $e->getMessage());
+                        $failed++;
+                        continue;
+                    }
+                    if ($r['mode'] === 'gone') {
+                        continue;
+                    }
+                    $done[$r['mode']][] = $r['name'] . ' (' . $label . ')';
+                    $deals += $r['deals'];
+                }
+            }
+            $nDel = count($done['deleted']);
+            $nArc = count($done['archived']);
+            $nBlk = count($done['blocked']);
+            $plural = static function (int $n, string $one, string $many): string { return $n . ' ' . ($n === 1 ? $one : $many); };
+
+            if ($nDel + $nArc + $nBlk + $failed === 0) {
+                $message = 'There was nothing to delete.';
+            } else {
+                $parts = [];
+                $parts[] = $plural($nDel, 'item', 'items') . ' deleted' . ($nDel > 0 ? ' (and what they use from stock)' : '') . '.';
+                if ($nArc > 0) {
+                    $parts[] = $plural($nArc, 'item has', 'items have') . ' sales history, so ' . ($nArc === 1 ? 'it was' : 'they were') . ' marked unavailable and hidden instead.';
+                }
+                if ($nBlk > 0) {
+                    $parts[] = $plural($nBlk, 'item is', 'items are') . ' on an open order and ' . ($nBlk === 1 ? 'was' : 'were') . ' left. Close or settle those orders first.';
+                }
+                if ($failed > 0) {
+                    $parts[] = $plural($failed, 'item', 'items') . ' could not be deleted (nothing changed for ' . ($failed === 1 ? 'it' : 'them') . '). Please try again.';
+                }
+                if ($deals > 0) {
+                    $parts[] = $plural($deals, 'deal', 'deals') . ' updated.';
+                }
+                $message = implode(' ', $parts);
+
+                // System Logs: who, what (every item name) and the outcome. The activity hook adds its own screen row.
+                $scopeText = count($todo) === 2 ? 'Food and drink menus' : (isset($todo['food_menu']) ? 'Food menu' : 'Drink menu');
+                $logDetails = $scopeText . ': ' . $nDel . ' deleted, ' . $nArc . ' hidden (sales history), ' . $nBlk . ' left (open orders)'
+                    . ($failed > 0 ? ', ' . $failed . ' failed' : '') . '.'
+                    . ($nDel > 0 ? ' Deleted: ' . implode(', ', $done['deleted']) . '.' : '')
+                    . ($nArc > 0 ? ' Hidden: ' . implode(', ', $done['archived']) . '.' : '')
+                    . ($nBlk > 0 ? ' Left: ' . implode(', ', $done['blocked']) . '.' : '');
+                if (mb_strlen($logDetails) > 3990) {
+                    $logDetails = mb_substr($logDetails, 0, 3980) . ' (more)';
+                }
+                logActivity((int)$user['id'], $action === 'menu_delete_all' ? 'menu_items_all_deleted' : 'menu_items_bulk_deleted', $logDetails);
+            }
+            $jsonExtra = ['deleted' => $nDel, 'hidden' => $nArc, 'left' => $nBlk, 'failed' => $failed];
         } elseif ($action === 'toggle_availability') {
             $itemId = (int)($_POST['id'] ?? 0);
             $rowStmt = $pdo->prepare("SELECT item_name, category, is_available FROM `{$table}` WHERE id = ?");
@@ -376,7 +511,7 @@ foreach (array_merge($food_items, $drink_items) as $it) {
 ksort($filterCats, SORT_NATURAL | SORT_FLAG_CASE);
 
 /** One menu tab: a card per category with a readable table of its items. */
-$mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $recipeBy, $currencySymbol, $stationLabels, $fb_menu_posting_on, $fb_share_attrs): void {
+$mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $recipeBy, $currencySymbol, $stationLabels, $fb_menu_posting_on, $fb_share_attrs, $canBulkDelete): void {
     $menuType = $tab === 'food' ? 'food' : 'drink';
     if (!$grouped) {
         echo '<div class="empty-state mm-empty-all"><p>No ' . ($tab === 'food' ? 'food' : 'drink') . ' items yet. Use "Add item" to create the first one.</p></div>';
@@ -394,6 +529,9 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 <table class="menu-table">
                     <thead>
                         <tr>
+                            <?php if ($canBulkDelete): ?>
+                                <th class="mm-sel-col"><input type="checkbox" class="mm-sel-cat" aria-label="Select every item shown in <?= htmlspecialchars((string)$category, ENT_QUOTES) ?>"></th>
+                            <?php endif; ?>
                             <th class="drag-col" title="Drag to reorder"></th>
                             <th>Item</th>
                             <th>Price (<?= htmlspecialchars($currencySymbol) ?>)</th>
@@ -428,6 +566,11 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                             <tr id="<?= $menuType ?>-row-<?= (int)$item['id'] ?>" class="mm-row" data-tab="<?= $tab ?>" data-cat="<?= htmlspecialchars((string)$item['category'], ENT_QUOTES) ?>"
                                 data-search="<?= htmlspecialchars($search, ENT_QUOTES) ?>" data-rs="<?= $showRs ? 1 : 0 ?>" data-avail="<?= $avail ? 1 : 0 ?>" data-stock="<?= $lines ? 1 : 0 ?>"
                                 data-item="<?= htmlspecialchars(json_encode($data, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT), ENT_QUOTES, 'UTF-8') ?>">
+                                <?php if ($canBulkDelete): ?>
+                                    <td class="mm-sel-col">
+                                        <label class="mm-sel-lbl"><input type="checkbox" class="mm-sel" value="<?= (int)$item['id'] ?>" aria-label="Select <?= htmlspecialchars((string)$item['item_name'], ENT_QUOTES) ?>"><span class="mm-sel-txt">Select</span></label>
+                                    </td>
+                                <?php endif; ?>
                                 <td class="drag-col">
                                     <span class="drag-handle" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></span>
                                 </td>
@@ -584,6 +727,19 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
                 Drinks <span class="mm-tab-n" data-tab-count="drinks"><?= count($drink_items) ?></span>
             </button>
         </div>
+
+        <?php if ($canBulkDelete): ?>
+            <!-- Delete selected / Delete all: administrators with the Clear Stock Data permission only -->
+            <div class="mm-bulk" id="mmBulk">
+                <label class="mm-checkbox-line mm-bulk-all"><input type="checkbox" id="mmSelAll"> <span>Select all shown</span></label>
+                <span class="mm-bulk-n" id="mmBulkN" aria-live="polite">0 selected</span>
+                <i class="help" data-tip="Ticked items on this tab that your search and filters show. Hidden items are never deleted. An item that has been sold is hidden instead of deleted, so past orders stay readable; an item on an open order is left alone.">?</i>
+                <span class="mm-bulk-actions">
+                    <button type="button" class="btn-action btn-delete" id="mmBulkDel" onclick="mmBulkDelete()" disabled>Delete selected</button>
+                    <button type="button" class="btn-action btn-delete" id="mmDelAll" onclick="mmDeleteAll()">Delete all menu items</button>
+                </span>
+            </div>
+        <?php endif; ?>
 
         <div id="mmCats" hidden data-food="<?= htmlspecialchars(json_encode($food_categories), ENT_QUOTES, 'UTF-8') ?>" data-drinks="<?= htmlspecialchars(json_encode($drink_categories), ENT_QUOTES, 'UTF-8') ?>"></div>
 
@@ -922,6 +1078,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             const all = total.food + total.drinks;
             const hits = shown.food + shown.drinks;
             mmEl('mmCount').textContent = filtering ? hits + ' of ' + all + (all === 1 ? ' item' : ' items') : all + (all === 1 ? ' item' : ' items');
+            mmBulkSync();
 
             if (scroll) {
                 // Results must land in view: bring the first match (or the no-match note) up under the toolbar.
@@ -2258,6 +2415,206 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
             });
         }
 
+        /* ---------- Delete selected / Delete all (administrators with the Clear Stock Data permission only) ---------- */
+        /* Rows on the active tab that the search and filters show: the only rows "Delete selected" can send. */
+        function mmBulkRows() {
+            return Array.prototype.slice.call(document.querySelectorAll('#' + MM_STATE.tab + '-tab .mm-row:not(.mm-hide)'));
+        }
+
+        function mmBulkSync() {
+            if (!mmEl('mmBulk')) return;
+            // A ticked row that is now hidden or on the other tab is never deleted: untick it so the count is honest.
+            document.querySelectorAll('#mmResults .mm-sel:checked').forEach(function(cb) {
+                const tr = cb.closest('.mm-row');
+                if (!tr || tr.classList.contains('mm-hide') || tr.dataset.tab !== MM_STATE.tab) cb.checked = false;
+            });
+            const rows = mmBulkRows();
+            let n = 0;
+            rows.forEach(function(tr) {
+                const cb = tr.querySelector('.mm-sel');
+                if (cb && cb.checked) n++;
+            });
+            mmEl('mmBulkN').textContent = n + ' selected';
+            mmEl('mmBulkDel').disabled = n === 0;
+            mmEl('mmBulkDel').textContent = n > 0 ? 'Delete selected (' + n + ')' : 'Delete selected';
+            const all = mmEl('mmSelAll');
+            all.checked = rows.length > 0 && n === rows.length;
+            all.indeterminate = n > 0 && n < rows.length;
+            all.disabled = rows.length === 0;
+            document.querySelectorAll('#mmResults .category-section').forEach(function(sec) {
+                const head = sec.querySelector('.mm-sel-cat');
+                if (!head) return;
+                const vis = sec.querySelectorAll('.mm-row:not(.mm-hide) .mm-sel');
+                let c = 0;
+                vis.forEach(function(cb) {
+                    if (cb.checked) c++;
+                });
+                head.checked = vis.length > 0 && c === vis.length;
+                head.indeterminate = c > 0 && c < vis.length;
+            });
+            mmEl('mmDelAll').disabled = document.querySelectorAll('#mmResults .mm-row').length === 0;
+        }
+
+        function mmBulkWire() {
+            if (!mmEl('mmBulk')) return;
+            mmEl('mmSelAll').addEventListener('change', function() {
+                const on = this.checked;
+                mmBulkRows().forEach(function(tr) {
+                    const cb = tr.querySelector('.mm-sel');
+                    if (cb) cb.checked = on;
+                });
+                mmBulkSync();
+            });
+            // One listener on the results area: the tab HTML is replaced after every save (mmRefresh).
+            mmEl('mmResults').addEventListener('change', function(ev) {
+                const t = ev.target;
+                if (!t || !t.classList) return;
+                if (t.classList.contains('mm-sel-cat')) {
+                    const sec = t.closest('.category-section');
+                    if (sec) sec.querySelectorAll('.mm-row:not(.mm-hide) .mm-sel').forEach(function(cb) {
+                        cb.checked = t.checked;
+                    });
+                    mmBulkSync();
+                } else if (t.classList.contains('mm-sel')) {
+                    mmBulkSync();
+                }
+            });
+        }
+
+        /* Posts and reads the JSON answer even when it is a refusal (403), so the plain reason reaches the user. */
+        async function mmBulkPost(fd) {
+            fd.append('csrf_token', MM_CSRF);
+            const r = await fetch(window.location.pathname, {
+                method: 'POST',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest'
+                },
+                body: fd
+            });
+            let res = null;
+            try {
+                res = await r.json();
+            } catch (e) {
+                res = null;
+            }
+            if (!res) throw new Error('HTTP ' + r.status);
+            return res;
+        }
+
+        function mmBulkOverlay(inner) {
+            const overlay = document.createElement('div');
+            overlay.className = 'mm-confirm-overlay';
+            overlay.innerHTML = '<div class="mm-confirm-card mm-bulk-card" role="alertdialog" aria-modal="true">' + inner + '</div>';
+            document.body.appendChild(overlay);
+            let busy = false;
+            const onKey = function(ev) {
+                if (ev.key === 'Escape' && !busy) close();
+            };
+            const close = function() {
+                if (overlay.parentNode) overlay.parentNode.removeChild(overlay);
+                document.removeEventListener('keydown', onKey);
+            };
+            document.addEventListener('keydown', onKey);
+            overlay.addEventListener('click', function(ev) {
+                if (ev.target === overlay && !busy) close();
+            });
+            overlay.querySelector('.mm-confirm-no').addEventListener('click', function() {
+                if (!busy) close();
+            });
+            return {
+                el: overlay,
+                close: close,
+                busy: function() {
+                    busy = true;
+                    overlay.querySelectorAll('button, input').forEach(function(b) {
+                        b.disabled = true;
+                    });
+                }
+            };
+        }
+
+        async function mmBulkSend(box, fd) {
+            box.busy();
+            const yes = box.el.querySelector('.mm-confirm-yes');
+            if (yes) yes.textContent = 'Deleting…';
+            try {
+                const res = await mmBulkPost(fd);
+                box.close();
+                Alert.show(mmTxt(res.message || 'Done'), res.success ? 'success' : 'error');
+                if (res.success) mmRefresh();
+            } catch (e) {
+                box.close();
+                Alert.show('The delete could not finish. The list has been reloaded to show what changed.', 'error');
+                mmRefresh();
+            }
+        }
+
+        function mmBulkDelete() {
+            const ids = [];
+            mmBulkRows().forEach(function(tr) {
+                const cb = tr.querySelector('.mm-sel');
+                if (cb && cb.checked) ids.push(cb.value);
+            });
+            if (!ids.length) return;
+            const kind = MM_STATE.tab === 'food' ? 'food' : 'drink';
+            const box = mmBulkOverlay(
+                '<p class="mm-confirm-msg">Delete ' + ids.length + ' selected ' + kind + ' item' + (ids.length === 1 ? '' : 's') + '?' +
+                '<small>What they use from stock is removed too. Items that have been sold are hidden instead, so past orders stay readable. Items on an open order are left alone.</small></p>' +
+                '<div class="mm-confirm-actions">' +
+                '  <button type="button" class="btn-action btn-delete mm-confirm-yes">Delete ' + ids.length + '</button>' +
+                '  <button type="button" class="btn-action mm-confirm-no">Cancel</button>' +
+                '</div>');
+            box.el.querySelector('.mm-confirm-yes').addEventListener('click', function() {
+                const fd = new FormData();
+                fd.append('action', 'menu_bulk_delete');
+                fd.append('menu_type', MM_STATE.tab);
+                ids.forEach(function(id) {
+                    fd.append('ids[]', id);
+                });
+                mmBulkSend(box, fd);
+            });
+        }
+
+        function mmDeleteAll() {
+            const nFood = document.querySelectorAll('#food-tab .mm-row').length;
+            const nDrinks = document.querySelectorAll('#drinks-tab .mm-row').length;
+            const cur = MM_STATE.tab;
+            const opt = function(val, label, n) {
+                return '<label class="mm-checkbox-line"><input type="radio" name="mmDelScope" value="' + val + '"' +
+                    (val === cur && n > 0 ? ' checked' : '') + (n === 0 ? ' disabled' : '') + '> <span>' + label + ' (' + n + ' item' + (n === 1 ? '' : 's') + ')</span></label>';
+            };
+            const box = mmBulkOverlay(
+                '<p class="mm-confirm-msg">Delete all menu items?' +
+                '<small>Every item in the menu you choose, including items your search or filters hide. What they use from stock is removed too. Items that have been sold are hidden instead; items on an open order are left alone. This cannot be undone.</small></p>' +
+                '<div class="mm-bulk-scope" role="radiogroup" aria-label="Which menu">' + opt('food', 'Food menu', nFood) + opt('drinks', 'Drinks menu', nDrinks) + opt('both', 'Food and drinks', nFood + nDrinks) + '</div>' +
+                '<label class="mm-bulk-type" for="mmDelAllText">Type DELETE to confirm</label>' +
+                '<input type="text" id="mmDelAllText" class="mm-bulk-input" autocomplete="off" spellcheck="false">' +
+                '<div class="mm-confirm-actions">' +
+                '  <button type="button" class="btn-action btn-delete mm-confirm-yes" disabled>Delete all</button>' +
+                '  <button type="button" class="btn-action mm-confirm-no">Cancel</button>' +
+                '</div>');
+            const yes = box.el.querySelector('.mm-confirm-yes');
+            const txt = box.el.querySelector('#mmDelAllText');
+            const scope = function() {
+                const r = box.el.querySelector('input[name="mmDelScope"]:checked');
+                return r ? r.value : '';
+            };
+            const sync = function() {
+                yes.disabled = !(txt.value.trim() === 'DELETE' && scope() !== '');
+            };
+            txt.addEventListener('input', sync);
+            box.el.addEventListener('change', sync);
+            txt.focus();
+            yes.addEventListener('click', function() {
+                if (yes.disabled) return;
+                const fd = new FormData();
+                fd.append('action', 'menu_delete_all');
+                fd.append('scope', scope());
+                fd.append('confirm_text', txt.value.trim());
+                mmBulkSend(box, fd);
+            });
+        }
+
         /* Re-read the lists from the server and keep the search and filters as they are. */
         function mmRefresh() {
             return fetch(window.location.pathname + '?tab=' + MM_STATE.tab, {
@@ -2434,6 +2791,7 @@ $mmRenderTab = static function (string $tab, array $grouped) use ($posMap, $reci
         }
 
         function mmInit() {
+            mmBulkWire();
             mmReadCats(document);
             mmInitFilters();
             mmInitDrag();

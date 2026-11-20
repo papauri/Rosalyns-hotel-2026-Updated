@@ -1304,3 +1304,122 @@ tr.drag-over > td {
         justify-content: flex-end;
     }
 }
+
+/* ============================================================
+   Delete selected / Delete all (administrators with Clear Stock Data only)
+   ============================================================ */
+.mm-bulk {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin: 0 0 16px;
+    padding: 10px 12px;
+    background: var(--mm-bg);
+    border: 1px solid var(--mm-border);
+    border-radius: var(--mm-radius);
+}
+
+.mm-bulk-n {
+    font-size: 13px;
+    color: var(--mm-muted);
+}
+
+.mm-bulk-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-left: auto;
+}
+
+.mm-bulk .btn-action:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.mm-sel-col {
+    width: 32px;
+    text-align: center;
+    padding: 0 6px !important;
+    vertical-align: middle !important;
+}
+
+.mm-sel-lbl {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.mm-sel-col input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+.mm-sel-txt {
+    display: none;
+}
+
+.mm-bulk-card {
+    max-width: 440px;
+    text-align: left;
+}
+
+.mm-bulk-scope {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: 0 0 16px;
+}
+
+.mm-bulk-type {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--mm-text);
+    margin: 0 0 4px;
+}
+
+.mm-bulk-input {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 8px 10px;
+    margin: 0 0 18px;
+    font-size: 14px;
+    border: 1px solid var(--mm-border-strong);
+    border-radius: var(--mm-radius);
+    color: var(--mm-text);
+    background: var(--mm-bg);
+}
+
+.mm-bulk-input:focus {
+    outline: 2px solid var(--mm-accent);
+    outline-offset: 1px;
+}
+
+@media (max-width: 768px) {
+    .mm-restaurant .mm-bulk-actions {
+        margin-left: 0;
+        flex: 1 1 100%;
+    }
+
+    .mm-restaurant .mm-bulk-actions .btn-action {
+        flex: 1 1 auto;
+        justify-content: center;
+        min-height: 40px;
+    }
+
+    .mm-restaurant .menu-table tbody td.mm-sel-col {
+        grid-column: 1 / -1;
+        width: auto;
+        text-align: left;
+        padding: 0 !important;
+    }
+
+    .mm-restaurant .mm-sel-txt {
+        display: inline;
+        font-size: 12px;
+        color: var(--mm-muted);
+    }
+}
