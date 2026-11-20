@@ -29,6 +29,14 @@ Measured 10-17 Nov: about 55 model calls per commit, 97% on Opus, department-lea
   `MSP/usage-reports/<date>.md` + a row in `MSP/usage-reports/HISTORY.md`. COST_LOG.md is retired.
   Baseline 10-16 Nov: 22,793 calls, 50 per hotel commit, 95% Opus, 53 agent runs past today's caps.
 
+## Clean-up 2026-11-21 (owner-approved, `cleanup` skill)
+- Nothing sensitive exposed in git. Secret-looking values in `scripts/tests` are made-up test data (kept).
+- Removed from git: `images/gym/personal-training.jpg` (8.1 MB, unused: no gym here) `81cf73c`.
+- To the Recycle Bin (local, not in git): 645 old `scripts/tests/sessions` files, 5 logs older than 30 days, the June
+  dump in `Database/`, 8 backups older than 30 days.
+- Kept: `includes/test-platform-mail.php` (real feature), all tests (they can no longer run in this folder: guard,
+  `.claude/LIVE_REPO`), invoices, cache, vendor, the import spreadsheets.
+
 ## Hard rules
 - **ROSALYN'S IS LIVE**, with real guests and money.
   - The local `.env` points at the live database.
