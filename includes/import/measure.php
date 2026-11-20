@@ -70,6 +70,10 @@ if (!function_exists('import_measure_words')) {
     function import_measure_plural(string $w, float $qty): string
     {
         $w = trim($w);
+        if (preg_match('/^(\d+(?:[.,]\d+)?)\s*(ml|cl|l)$/iu', $w, $vm)) {
+            // a bare volume served by ("25ml"): "25 ml measure" / "25 ml measures", never "25mls"
+            return $vm[1] . ' ' . mb_strtolower($vm[2]) . (abs($qty - 1.0) < 1e-9 ? ' measure' : ' measures');
+        }
         if (abs($qty - 1.0) < 1e-9 || mb_strlen($w) <= 2) {
             return $w;
         }
@@ -293,6 +297,82 @@ if (!function_exists('import_measure_words')) {
     function import_measure_fmt(float $x): string
     {
         return rtrim(rtrim(number_format($x, 6, '.', ','), '0'), '.');
+    }
+
+    /**
+     * The ONE volume written in a cell: "25ml", "Btl 750 ml", "75cl", "1L", "1.5 litres" -> [ml, the text without it]; null when there is
+     * none, or two different ones (never a pick). "1,000ml" is a thousand; "1,5L" is one and a half. A bare number ("Glass 175") is not a volume.
+     */
+    function import_served_volume_in(string $t): ?array
+    {
+        if (!preg_match_all('/(?<![\d.,])(\d{1,3}(?:,\d{3})+|\d+(?:[.,]\d+)?)\s*(ml|mls|millilit(?:re|er)s?|cl|centilit(?:re|er)s?|l|lt|ltrs?|litres?|liters?)(?![\p{L}\d])/iu', $t, $m, PREG_SET_ORDER)) {
+            return null;
+        }
+        $seen = [];
+        foreach ($m as $x) {
+            $num = preg_match('/^\d{1,3}(?:,\d{3})+$/', $x[1]) ? str_replace(',', '', $x[1]) : str_replace(',', '.', $x[1]);
+            $u = mb_strtolower($x[2]);
+            $ml = (float)$num * ($u[0] === 'm' ? 1 : ($u[0] === 'c' ? 10 : 1000));
+            $seen[(string)round($ml, 2)] = $ml;
+        }
+        if (count($seen) !== 1) {
+            return null;
+        }
+        $ml = round((float)array_values($seen)[0], 2);
+        if ($ml <= 0 || $ml > 100000) {
+            return null;
+        }
+        $rest = $t;
+        foreach ($m as $x) {
+            $rest = str_replace($x[0], ' ', $rest);
+        }
+        return [$ml, trim((string)preg_replace('/\s+/u', ' ', $rest))];
+    }
+
+    /**
+     * What one sale is, read from a "served by" cell (plain rules, owner 2026-11-20: hotels write it many ways). Never a guess:
+     *   'unit'  the stock unit itself ("Bottle", "Btl", "Btl 750ml"): one main unit; a volume written with it is that unit's size (size_ml)
+     *   'list'  a measure on the hotel's Drink measures list ("Shot", "shots", "Per shot", "1 shot"): measure = its name on the list
+     *   'ml'    a volume written in the cell ("25ml", "Tot 25ml", "Glass 175 ml", "Per tot 25 ml"): one sale is that many ml (ml)
+     *   'as_is' anything else ("Tot" when the list has no tot, "Glass 175" with no ml): the cell exactly as written
+     * word = the measure word (singular, lower case) for the screen. $list = [['name','ml']]; $synonyms = unit_synonyms ("btl" => "bottle").
+     */
+    function import_served_read(string $served, string $unit, array $list, array $synonyms): array
+    {
+        $out = ['kind' => 'as_is', 'measure' => $served, 'word' => '', 'ml' => null, 'size_ml' => null];
+        $t = mb_strtolower(trim((string)preg_replace('/\s+/u', ' ', $served)));
+        if ($t === '') {
+            return $out;
+        }
+        $vol = import_served_volume_in($t);
+        $rest = $vol ? $vol[1] : $t;
+        $rest = trim((string)preg_replace('/^(?:per|a|an|one|1|x)\s+/u', '', $rest));
+        $rest = trim((string)preg_replace('/\s+(?:of|x|@)$/u', '', $rest), " .-/()@");
+        $one = function (string $w): string {      // "glasses of wine" -> "glass of wine", "shots" -> "shot"
+            return preg_match('/^(.+?)(\s+of\s+.+)$/u', $w, $p) ? import_measure_singular($p[1]) . $p[2] : import_measure_singular($w);
+        };
+        $unitL = mb_strtolower(trim($unit));
+        $restU = (string)($synonyms[$rest] ?? $synonyms[$one($rest)] ?? $rest);
+        $unitU = (string)($synonyms[$unitL] ?? $unitL);
+        if ($rest !== '' && $unitU !== '' && $one($restU) === $one($unitU)) {
+            return ['kind' => 'unit', 'measure' => '', 'word' => '', 'ml' => null, 'size_ml' => $vol ? $vol[0] : null];
+        }
+        $listName = null;
+        foreach ($list as $dm) {
+            $n = is_array($dm) ? mb_strtolower(trim((string)($dm['name'] ?? ''))) : '';
+            if ($rest !== '' && $n !== '' && ($rest === $n || $one($rest) === $one($n))) {
+                $listName = (string)$dm['name'];
+                break;
+            }
+        }
+        if ($vol) {
+            return ['kind' => 'ml', 'measure' => 'ml', 'word' => $listName !== null ? mb_strtolower($listName) : $one($rest), 'ml' => $vol[0], 'size_ml' => null];
+        }
+        if ($listName !== null) {
+            return ['kind' => 'list', 'measure' => $listName, 'word' => mb_strtolower($listName), 'ml' => null, 'size_ml' => null];
+        }
+        $out['word'] = $one($rest);
+        return $out;
     }
 
     /** "66 shots = 2.2 bottles (30 shots in one bottle: your answer)"; plain stock written next to it is added in. */

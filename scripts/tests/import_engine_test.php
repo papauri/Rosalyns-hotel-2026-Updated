@@ -1894,6 +1894,65 @@ $t(strpos($diJs, "if (drinksOnMenu && canStockReports) {") !== false && strpos($
     && strpos((string)file_get_contents($root . '/admin/stock-reports.php'), "'profit' => 'Projected profit'") !== false,
     'Result: "See projected profit" opens Stock Reports tab=profit, only when the import put drinks on the menu and the person can open Stock Reports');
 
+// owner 2026-11-20: bottle sizes optional; the "served by" cell is read by plain rules (no AI, no guess): list measure / ml / stock unit / as written
+$svList = [['name' => 'shot', 'ml' => 25], ['name' => 'double', 'ml' => 50], ['name' => 'glass of wine', 'ml' => 175]];
+$svSyn = (array)import_default_aliases()['unit_synonyms'];
+$sv = function (string $cell, string $unit = 'bottle') use ($svList, $svSyn) { return import_served_read($cell, $unit, $svList, $svSyn); };
+$t($sv('Shot')['kind'] === 'list' && $sv('Shot')['measure'] === 'shot' && $sv('shots')['measure'] === 'shot' && $sv('Per shot')['measure'] === 'shot'
+    && $sv('1 Shot')['measure'] === 'shot' && $sv('Glasses of wine')['measure'] === 'glass of wine' && $sv('Double')['kind'] === 'list',
+    'served by: a measure on the hotel\'s list in any spelling (Shot, shots, Per shot, 1 Shot, Glasses of wine) is that list measure');
+$t($sv('25ml')['kind'] === 'ml' && $sv('25ml')['ml'] === 25.0 && $sv('Tot 25 ml')['ml'] === 25.0 && $sv('Tot 25 ml')['word'] === 'tot'
+    && $sv('Glass 175ml')['ml'] === 175.0 && $sv('2.5cl')['ml'] === 25.0 && $sv('Per tot 25ml')['word'] === 'tot' && $sv('Shot 25ml')['word'] === 'shot',
+    'served by: a volume written in the cell (25ml, Tot 25 ml, Glass 175ml, 2.5cl) is one sale of that many ml');
+$t($sv('Btl')['kind'] === 'unit' && $sv('Bottle')['kind'] === 'unit' && $sv('Btl 750ml')['kind'] === 'unit' && $sv('Btl 750ml')['size_ml'] === 750.0
+    && $sv('75cl Bottle')['size_ml'] === 750.0 && $sv('Bottle', 'Bottles')['kind'] === 'unit' && $sv('Can', 'can')['kind'] === 'unit',
+    'served by: the stock unit itself (Btl, Bottle, "Btl 750ml" with its size, "75cl Bottle") is one main unit');
+$t($sv('Tot')['kind'] === 'as_is' && $sv('Glass 175')['kind'] === 'as_is' && $sv('Glass 175')['ml'] === null && $sv('Single')['kind'] === 'as_is'
+    && $sv('Glass')['kind'] === 'as_is' && $sv('Glass')['measure'] === 'Glass' && $sv('')['kind'] === 'as_is' && $sv('25ml or 35ml')['kind'] === 'as_is'
+    && $sv('Measure')['kind'] === 'as_is',
+    'served by: never a guess - Tot / Single / Glass / Measure not on the list, a bare number (Glass 175) and two different volumes stay as written');
+$t(import_served_volume_in('1,000ml')[0] === 1000.0 && import_served_volume_in('1,5L')[0] === 1500.0 && import_served_volume_in('1 litre')[0] === 1000.0
+    && import_served_volume_in('750') === null && import_served_volume_in('0ml') === null && import_served_volume_in('Gin') === null,
+    'served by: volumes read from a cell (1,000ml, 1,5L, 1 litre); a bare number or 0 ml is not a volume');
+$drJs = (string)file_get_contents($root . '/admin/js/data-import.js');
+$drPhp = (string)file_get_contents($root . '/includes/import/drinks.php');
+$drFrom = (int)strpos($drJs, 'function sizesSection');
+$drBody = $drFrom > 0 ? substr($drJs, $drFrom, (int)strpos($drJs, 'function fixedSections') - $drFrom) : '';
+$t($drBody !== '' && strpos($drJs, "'Optional: add a bottle size so these can go on the menu") !== false && strpos($drJs, 'sizesSection(p);') !== false
+    && strpos($drBody, "post('sizes_list'") !== false && strpos($drBody, "post('sizes_set'") !== false
+    && strpos($drBody, 'showStep') === false && strpos($drBody, 'next.') === false
+    && strpos($drPhp, "'Add bottle size in Step 3 (optional)") !== false && stripos($drBody, 'smart') === false && stripos($drBody, 'magic') === false,
+    'Step 3 bottle sizes: an optional section with its own list that never touches Next; a drink without one says "Add bottle size in Step 3"');
+$skV = import_pack_vocab($al);
+$skOk = true;
+foreach (['Shot' => 'portion', 'Per shot' => 'portion', '1 Shot' => 'portion', 'Tot 25ml' => 'portion', 'Glass 175 ml' => 'portion', '25ml' => 'portion', 'Glasses of wine' => 'portion',
+    'Btl 750ml' => '', 'Glass 175' => '', 'Bottle' => '', 'Per case' => 'container'] as $cell => $want) {
+    if (import_served_kind($cell, $skV) !== $want) { $skOk = false; echo "  served kind $cell: " . import_served_kind($cell, $skV) . "\n"; }
+}
+$t($skOk, 'served by: "Per shot", "1 Shot", "Tot 25ml", "Glass 175 ml", "25ml" are portions; "Btl 750ml" and "Glass 175" (no ml) are not (never a guess)');
+$skP = import_pack_decide(['price' => 15000, 'unit' => 'bottle', 'served' => 'Glass 175ml'], $skV);
+$skP2 = import_pack_decide(['price' => 15000, 'served' => 'Btl'], $skV);
+$t($skP !== null && $skP['unit'] === 'bottle' && !empty($skP['served_portion']) && $skP2 !== null && $skP2['unit'] === 'Btl',
+    'stock unit: served by "Glass 175ml" keeps the Unit cell (bottle); with no Unit cell, a served-by unit word ("Btl") is the unit ' . json_encode([$skP['unit'] ?? null, $skP2['unit'] ?? null]));
+$skA = import_analyze_file($csvRows([['Item Name', 'Unit', 'Unit Price', 'Balance', 'Served By'], ['Kudu Gin', 'bottle', 20000, 2, 'Shot'], ['Oryx Rum', 'bottle', 18000, 2, 'Per shot'],
+    ['Eland Vodka', 'bottle', 15000, 2, 'Shot'], ['Ibis Wine', 'bottle', 15000, 2, 'Glass 175ml'], ['Heron Brandy', 'bottle', 12000, 2, 'Shot'], ['Crane Whisky', 'bottle', 30000, 2, 'shots']], 'served.csv'), 'served.csv', $al);
+$skF = null;
+foreach ($skA['sheets'][0]['columns'] as $c) { if ($c['letter'] === 'E') { $skF = $c['field'] ?? null; } }
+$t($skF === 'served_by', 'served by: a "Served By" column with "Per shot" and "Glass 175ml" among plain "Shot" cells is still read (not dropped as "not units") ' . json_encode($skF));
+// review 2026-11-20 (blocker): a served-by / measure column never replaces a Unit cell that is there (Castle Lager: 3 crates at 12000, never 3 bottles)
+$clP = $csvRows([['Item Name', 'Unit', 'Unit Price', 'Balance', 'Serving Size'], ['Castle Lager', 'Crate', 12000, 3, 'Bottle'], ['Carlsberg', 'Crate', 13000, 2, 'Bottle'],
+    ['Kuche Kuche', 'Crate', 11000, 4, 'Bottle']], 'castle.csv');
+$clA = import_analyze_file($clP, 'castle.csv', $al);
+$clR = import_resolve($clA, [], $cpCtx);
+$clI = null;
+foreach ($clR['items'] as $it) { if ($it['name'] === 'Castle Lager') { $clI = $it; } }
+$t($clI !== null && mb_strtolower((string)$clI['unit']) === 'crate' && abs((float)$clI['cost'] - 12000) < 0.0001 && abs((float)$clI['balance'] - 3) < 0.0001,
+    'unit cell wins: Unit "Crate" + Serving Size "Bottle" stays 3 crates at 12000 (the served-by column only adds how it is sold) ' . json_encode($clI ? [$clI['unit'], $clI['cost'], $clI['balance']] : null));
+$clD = import_pack_decide(['price' => 12000, 'unit' => 'Crate', 'served' => 'Bottle'], $skV);
+$t($clD !== null && $clD['unit'] === 'Crate' && $clD['pack'] === null, 'unit cell wins in the pack rule too (no pack worked out of a served-by word) ' . json_encode($clD['unit'] ?? null));
+$t(import_measure_plural('25ml', 2) === '25 ml measures' && import_measure_plural('25ml', 1) === '25 ml measure' && import_measure_plural('shot', 2) === 'shots',
+    'a bare volume served by reads "In 25 ml measures", never "25mls"');
+
 // cleanup
 foreach ($tmpFiles as $f) { @unlink($f); }
 @rmdir($tmpDir);

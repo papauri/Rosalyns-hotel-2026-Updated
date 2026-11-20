@@ -30,6 +30,11 @@ when prompted."
 - **Manager Guides (stock):** check the import line still matches (no "Not imported" wording).
 - **Assistant:** no overlap.
 
+### Import: optional bottle size for shot/glass drinks + more measure wording (2026-11-20, owner ask) - hashes in TASKS.md
+- **Guides (23 Import, 08 Stock):** Step 3 has an optional "bottle size" question for drinks sold by the shot or glass when the file gives no size: once per group, with a per-row change; never guessed; never blocks Next; a size under 50 ml or smaller than one measure saves with a warning. With a size, Step 4 can tick those drinks (cost per shot = bottle cost × shot ml / bottle ml). More wording is read: "Per shot", "1 Shot", "Tot 25ml", "25ml" ("In 25 ml measures"). If the file has a Unit column, it always sets the stock unit; a serving column only says how it is sold.
+- **Manager Guides (stock):** the import line can say "add a bottle size so shot drinks can go on the menu".
+- **Assistant (AI_REQUEST from dept-import-lead, owner "harness AI where possible"):** an Assistant hook that suggests served-by and bottle-size readings from unusual wording ("Single", "Measure", "Glass 175") for the import. Suggestions only, shown as "Read from your file", confirmed by the user; the import works fully with AI off. AI lead builds it in the next owner-prompted sync.
+
 ## Synced 2026-11-20 (guides Rosalyn's 909510e / Liwonde 8704293 · Assistant: see TASKS.md SYNC 2026-11-20 · Manager Guides: Stock, Bookings, Money and End of Day, Staff and Permissions refreshed) - entries kept for reference
 
 ### Group bookings Ship A: Correct Stay Dates after checkout + group table (2026-11-17, owner ask) — hashes in TASKS.md

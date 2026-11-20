@@ -10,7 +10,7 @@
  * Access: admin-init.php (session, data_import permission, stock module) + this file (kill switch data_import_enabled, fail-closed,
  * and stock_management). A job can only be opened by the person who uploaded it, or an admin.
  *
- * AJAX (POST, CSRF, JSON): upload | summary | review_page | bulk | answer | fields | skip | unskip | unit_items | unit_choice | heal_undo | fixed_list | drinks_list | drinks_set | cancel | confirm | list | delete.
+ * AJAX (POST, CSRF, JSON): upload | summary | review_page | bulk | answer | fields | skip | unskip | unit_items | unit_choice | heal_undo | fixed_list | drinks_list | drinks_set | sizes_list | sizes_set | cancel | confirm | list | delete.
  * drinks_list / drinks_set = Step 4 "Drinks for the menu" (includes/import/drinks.php): rows with a selling price, ticked one by one (unticked by
  * default); ticking and importing a ticked drink also need the Menu permission.
  * delete = remove one finished entry from Import history (owner 2026-11-15): same high-level permission as Clear Stock Data (rh_sc_authorize:
@@ -411,7 +411,7 @@ if ($isAjax) {
     }
 
     // Opening an analysed job decodes and resolves its stored analysis: where this server's memory_limit cannot hold that (and cannot be raised), say so plainly.
-    if (in_array($action, ['summary', 'review_page', 'bulk', 'answer', 'fields', 'skip', 'unskip', 'unit_items', 'unit_choice', 'heal_undo', 'fixed_list', 'drinks_list', 'drinks_set', 'tick_all', 'value_rows'], true) && (int)($job['analysis_bytes'] ?? 0) > 0) {
+    if (in_array($action, ['summary', 'review_page', 'bulk', 'answer', 'fields', 'skip', 'unskip', 'unit_items', 'unit_choice', 'heal_undo', 'fixed_list', 'drinks_list', 'drinks_set', 'sizes_list', 'sizes_set', 'tick_all', 'value_rows'], true) && (int)($job['analysis_bytes'] ?? 0) > 0) {
         $mem = import_mem_check_review((int)$job['analysis_bytes'], import_default_aliases());
         if (!$mem['ok']) {
             di_json(['ok' => false, 'error' => $mem['message'], 'state' => 'toobig']);
@@ -571,6 +571,15 @@ if ($isAjax) {
             $r['list'] = import_job_drinks_view($pdo, $jobId, $uid, $drinksQuery());
         }
         di_json($r);
+    }
+
+    // Step 3 "bottle size" (optional): drinks sold by a measure whose bottle size is not known; one answer per group, a different one per row
+    if ($action === 'sizes_list') {
+        di_json(import_job_sizes_view($pdo, $jobId, $uid, ['q' => (string)($_POST['q'] ?? ''), 'group' => (string)($_POST['group'] ?? ''), 'show' => (string)($_POST['show'] ?? 'all'),
+            'page' => (int)($_POST['page'] ?? 1), 'size' => (int)($_POST['size'] ?? 10)]));
+    }
+    if ($action === 'sizes_set') {      // mode group (key = group, value = ml or '') | row (key = item key, value = ml or '')
+        di_json(import_job_sizes_set($pdo, $jobId, $uid, ['mode' => (string)($_POST['mode'] ?? ''), 'key' => (string)($_POST['key'] ?? ''), 'value' => (string)($_POST['value'] ?? '')]));
     }
 
     if ($action === 'cancel') {

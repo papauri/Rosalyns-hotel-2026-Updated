@@ -233,6 +233,8 @@ if (!function_exists('import_commit_stock')) {
                 rh_stock_measure_save($pdo, $ingId, $mNew, $userId, 'Import #' . $jobId);
                 $measureSaved++;
             }
+            // bottle sizes a person gave in step 3 (optional), saved before the drinks so a shot / ml stock link can be worked out
+            $sizes = import_drinks_sizes_commit($pdo, (array)$v['res']['items'], $answersNow, $jobId, $userId);
             // "Drinks for the menu": only the ticked rows, re-checked now (after the stock part, so a new item and its measure exist)
             $drinks = import_drinks_commit($pdo, (array)$v['res']['items'], $answersNow, $jobId, $userId);
             if (PHP_SAPI === 'cli' && !empty($opts['fail_after_apply'])) {
@@ -259,7 +261,7 @@ if (!function_exists('import_commit_stock')) {
                 'count_lines' => (int)$ap['count_lines'], 'expiry_batches' => (int)$ap['batches'], 'left_out_overlap' => (int)($ap['left_out_overlap'] ?? 0),
                 'stock_not_counted_no_cost' => $nc['no_cost']['names'], 'stock_not_counted_not_ticked' => $nc['not_ticked']['names'],
                 'stock_not_counted_cost_not_ticked' => $nc['cost_not_ticked']['names'], 'stock_not_counted_same' => $nc['same']['names'], 'committed_at' => date('Y-m-d H:i:s'), 'learned' => $learned,
-                'measures_saved' => $measureSaved,
+                'measures_saved' => $measureSaved, 'sizes_saved' => $sizes['saved'], 'sizes_names' => $sizes['names'],
                 'drinks_added' => $drinks['added'], 'drinks_updated' => $drinks['updated'], 'drinks_linked' => $drinks['linked'], 'drinks_names' => $drinks['names'],
                 'skipped_by_you' => (int)import_cont_overview($v['res'])['skipped_by_you'], 'fixed_for_you' => (int)array_sum($v['res']['heal_counts']),
                 'next_step' => 'A different manager must approve the opening count on Stock Count before any stock appears.',

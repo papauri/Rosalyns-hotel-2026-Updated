@@ -199,6 +199,96 @@ try {
     $cC = import_commit_stock($pdo, $jC, $mgrNoMenu);
     $ck('unticked: an import with no drink ticked writes nothing to the menu, and needs no Menu permission', !empty($cC['ok']) && (int)$col('SELECT COUNT(*) FROM drink_menu WHERE item_name = ?', [$n('Juice')]) === 0
         && (int)$col('SELECT COUNT(*) FROM menu_items WHERE item_name = ?', [$n('Juice')]) === 0 && ($cC['result']['drinks_added'] ?? -1) === 0, json_encode($cC));
+
+    // ---- file D: bottle sizes in step 3 (optional, owner 2026-11-20): asked per group, a different one per row, never guessed ----------
+    $shotMl = null;
+    foreach (rh_drink_measures_list() as $dm) { if (mb_strtolower($dm['name']) === 'shot') { $shotMl = (float)$dm['ml']; } }
+    if (!rh_stock_drink_ready($pdo) || $shotMl === null) {
+        $ck('sizes: skipped (this database has no bottle size column or no "shot" on its Drink measures list)', true);
+    } else {
+        $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit) VALUES (?, 'ZZD', 'bottle', 0, 15000)")->execute([$n('Vodka')]);
+        $vodIng = (int)$pdo->lastInsertId();
+        $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit, volume_ml) VALUES (?, 'ZZD', 'bottle', 0, 18000, 700)")->execute([$n('Rum')]);
+        $pdo->prepare("INSERT INTO stock_ingredients (name, category, unit, current_quantity, cost_per_unit) VALUES (?, 'ZZD', 'bottle', 0, 9000)")->execute([$n('Tequila')]);
+        $teqIng = (int)$pdo->lastInsertId();
+        $headD = ['Item Name', 'Unit', 'Unit Price', 'Balance', 'Selling Price', 'Served By'];
+        $jD = $start($file($headD, [
+            [$n('Vodka'), 'bottle', '15000', '2', '1500', 'Shot'],
+            [$n('Rum'), 'bottle', '18000', '2', '1800', 'Per shot'],
+            [$n('Whisky'), 'bottle', '30000', '2', '2500', 'shots'],
+            [$n('Brandy 750ml'), 'bottle', '12000', '2', '1200', 'Shot'],
+            [$n('Red Wine'), 'bottle', '15000', '2', '3000', 'Glass 175ml'],
+            [$n('Tequila'), 'bottle', '9000', '2', '1000', 'Shot'],
+        ], 'd.csv'), 'zzd-d-' . $run . '.csv');
+        $sizes = function () use ($pdo, $jD, $admin) {
+            $v = import_job_sizes_view($pdo, $jD, $admin, ['size' => 100]);
+            $by = [];
+            foreach ((array)($v['rows'] ?? []) as $r) { $by[$r['name']] = $r; }
+            return [$v, $by];
+        };
+        [$sv0, $S0] = $sizes();
+        [, $D0] = $view($jD, $admin);
+        $why = (string)($D0[$n('Vodka')]['why_not'] ?? '');
+        $ck('sizes: a shot drink with no size anywhere is not tickable, and says "Add bottle size in Step 3"; nothing is filled in',
+            empty($D0[$n('Vodka')]['tickable']) && strpos($why, 'Add bottle size in Step 3') === 0 && array_key_exists('ml', $S0[$n('Vodka')] ?? []) && $S0[$n('Vodka')]['ml'] === null && $S0[$n('Vodka')]['from'] === '', json_encode([$D0[$n('Vodka')] ?? null, $S0[$n('Vodka')] ?? null]));
+        $ck('sizes: an item with its own saved size is never asked and costs one shot from it (18000 x ' . $shotMl . ' / 700)',
+            !isset($S0[$n('Rum')]) && !empty($D0[$n('Rum')]['tickable']) && abs((float)$D0[$n('Rum')]['cost'] - 18000 * $shotMl / 700) <= BALANCE_TOLERANCE, json_encode($D0[$n('Rum')] ?? null));
+        $ck('sizes: a size in the item name is shown as read from the file (its cell), and the drink can be ticked without an answer',
+            ($S0[$n('Brandy 750ml')]['from'] ?? '') === 'name' && abs((float)($S0[$n('Brandy 750ml')]['ml'] ?? 0) - 750) < 0.000001 && preg_match('/A5$/', (string)($S0[$n('Brandy 750ml')]['name_source'] ?? '')) === 1
+            && !empty($D0[$n('Brandy 750ml')]['tickable']), json_encode($S0[$n('Brandy 750ml')] ?? null));
+        $groups = array_column((array)($sv0['groups'] ?? []), null, 'key');
+        $ck('sizes: one group for the shot drinks kept in bottles, one for "175 ml (glass)"; blank by default; counts',
+            isset($groups['m:shot|bottle'], $groups['ml:175|bottle']) && $groups['m:shot|bottle']['ml'] === null && ($sv0['counts']['need'] ?? 0) === 5 && ($sv0['counts']['filled'] ?? -1) === 1,
+            json_encode([$sv0['groups'] ?? null, $sv0['counts'] ?? null]));
+        $rBad = import_job_sizes_set($pdo, $jD, $admin, ['mode' => 'group', 'key' => 'm:shot|bottle', 'value' => 'abc']);
+        $rOdd = import_job_sizes_set($pdo, $jD, $admin, ['mode' => 'group', 'key' => 'm:nothing|bottle', 'value' => '750']);
+        $ck('sizes: a size that is not a number of ml, or a group that is not in the list, is refused', empty($rBad['ok']) && empty($rOdd['ok']), json_encode([$rBad, $rOdd]));
+        $rSm = import_job_sizes_set($pdo, $jD, $admin, ['mode' => 'group', 'key' => 'm:shot|bottle', 'value' => '20']);
+        $rTiny = import_job_sizes_set($pdo, $jD, $admin, ['mode' => 'group', 'key' => 'm:shot|bottle', 'value' => '40']);
+        $ck('sizes: a bottle smaller than one shot, or under 50 ml, is kept but warned (never refused)',
+            !empty($rSm['ok']) && strpos((string)($rSm['warning'] ?? ''), 'less than one sale') !== false && !empty($rTiny['ok']) && strpos((string)($rTiny['warning'] ?? ''), 'very small') !== false,
+            json_encode([$rSm, $rTiny]));
+        $rG = import_job_sizes_set($pdo, $jD, $admin, ['mode' => 'group', 'key' => 'm:shot|bottle', 'value' => '750']);
+        $rW = import_job_sizes_set($pdo, $jD, $admin, ['mode' => 'row', 'key' => $S0[$n('Whisky')]['key'] ?? '', 'value' => '700']);
+        [, $D1] = $view($jD, $admin);
+        [, $S1] = $sizes();
+        $vo = $D1[$n('Vodka')] ?? [];
+        $ck('sizes: the group answer makes Vodka tickable; cost of one shot = 15000 / (750 / ' . $shotMl . '), the price stays exactly 1500',
+            !empty($rG['ok']) && !empty($vo['tickable']) && abs((float)$vo['cost'] - 15000 / (750 / $shotMl)) <= BALANCE_TOLERANCE && abs((float)$vo['price'] - 1500) < 0.000001
+            && ($S1[$n('Vodka')]['from'] ?? '') === 'group', json_encode([$rG, $vo]));
+        $ck('sizes: a row answer wins over the group (Whisky 700 ml: 30000 x ' . $shotMl . ' / 700); the name size wins over the group (Brandy stays 750 from its name)',
+            !empty($rW['ok']) && ($S1[$n('Whisky')]['from'] ?? '') === 'row' && abs((float)($D1[$n('Whisky')]['cost'] ?? 0) - 30000 * $shotMl / 700) <= BALANCE_TOLERANCE
+            && ($S1[$n('Brandy 750ml')]['from'] ?? '') === 'name', json_encode([$rW, $S1[$n('Whisky')] ?? null]));
+        $ck('sizes: the "175 ml" group is still blank, so Red Wine is still not tickable (a blank never blocks the import)', empty($D1[$n('Red Wine')]['tickable']) && strpos((string)($D1[$n('Red Wine')]['why_not'] ?? ''), 'Add bottle size in Step 3') === 0, json_encode($D1[$n('Red Wine')] ?? null));
+        import_job_sizes_set($pdo, $jD, $admin, ['mode' => 'row', 'key' => $S0[$n('Red Wine')]['key'] ?? '', 'value' => '750']);
+        foreach (['Vodka', 'Whisky', 'Red Wine', 'Tequila'] as $nm) { import_job_drinks_set($pdo, $jD, $admin, ['mode' => 'tick', 'key' => $D1[$n($nm)]['key'], 'on' => true]); }
+        $rClr = import_job_sizes_set($pdo, $jD, $admin, ['mode' => 'group', 'key' => 'm:shot|bottle', 'value' => '']);
+        [, $D2] = $view($jD, $admin);
+        $ck('sizes: clearing the group unticks the drinks that now have no size (Vodka, Tequila), never the ones with their own (Whisky)',
+            !empty($rClr['ok']) && (int)($rClr['unticked'] ?? 0) === 2 && empty($D2[$n('Vodka')]['ticked']) && !empty($D2[$n('Whisky')]['ticked']), json_encode([$rClr, $D2[$n('Vodka')]['ticked'] ?? null]));
+        import_job_sizes_set($pdo, $jD, $admin, ['mode' => 'group', 'key' => 'm:shot|bottle', 'value' => '750']);
+        foreach (['Vodka', 'Tequila'] as $nm) { import_job_drinks_set($pdo, $jD, $admin, ['mode' => 'tick', 'key' => $D1[$n($nm)]['key'], 'on' => true]); }
+        // since the review, somebody set Tequila's size in Stock: the import never replaces it
+        $pdo->prepare('UPDATE stock_ingredients SET volume_ml = 1000 WHERE id = ?')->execute([$teqIng]);
+        $cD = import_commit_stock($pdo, $jD, $admin);
+        $resD = $cD['result'] ?? [];
+        $vol = function (string $name) use ($col) { $v = $col('SELECT volume_ml FROM stock_ingredients WHERE name = ? ORDER BY id DESC LIMIT 1', [$name]); return $v === null || $v === false ? null : (float)$v; };
+        $ck('import: the typed sizes are saved on their stock items (Vodka 750 group, Whisky 700 row, Red Wine 750 row); counted in the result',
+            !empty($cD['ok']) && ($resD['sizes_saved'] ?? -1) === 3 && $vol($n('Vodka')) === 750.0 && $vol($n('Whisky')) === 700.0 && $vol($n('Red Wine')) === 750.0, json_encode([$cD['ok'] ?? null, $cD['error'] ?? null, $resD['sizes_saved'] ?? null]));
+        $ck('import: a size already on an item is never replaced (Rum 700, Tequila 1000 set in Stock since); a size from the name is not written (Brandy)',
+            $vol($n('Rum')) === 700.0 && $vol($n('Tequila')) === 1000.0 && $vol($n('Brandy 750ml')) === null, json_encode([$vol($n('Rum')), $vol($n('Tequila')), $vol($n('Brandy 750ml'))]));
+        $vlog = (string)$col("SELECT details FROM admin_activity_log WHERE action = 'stock_volume_changed' AND details LIKE ? ORDER BY id DESC LIMIT 1", ['%' . $n('Vodka') . '%Import #' . $jD . '%']);
+        $ck('history: the saved size is logged old -> new in System Logs (not set -> 750 ml, Import #)', strpos($vlog, 'not set -> 750 ml') !== false, $vlog);
+        $qpp = function (string $name, string $cat) use ($pdo, $col) {
+            $p = rh_menu_pos_find($pdo, $name, $cat);
+            return $p ? $col('SELECT sri.quantity_per_portion FROM stock_recipes sr JOIN stock_recipe_ingredients sri ON sri.recipe_id = sr.id WHERE sr.menu_item_id = ? AND sr.menu_type = ?', [$p['id'], $p['slug']]) : null;
+        };
+        $ck('import: each sale takes one shot (' . $shotMl . ' / 750 of a bottle of Vodka) and 175 ml (175 / 750 of a bottle of Red Wine) off stock',
+            abs((float)$qpp($n('Vodka'), 'Bar') - $shotMl / 750) < 0.000001 && abs((float)$qpp($n('Red Wine'), 'Bar') - 175 / 750) < 0.000001,
+            json_encode([$qpp($n('Vodka'), 'Bar'), $qpp($n('Red Wine'), 'Bar')]));
+        $ck('import: no stock quantity or cost was changed by a bottle size', abs((float)$col('SELECT current_quantity FROM stock_ingredients WHERE id = ?', [$vodIng])) < 0.000001
+            && abs((float)$col('SELECT cost_per_unit FROM stock_ingredients WHERE id = ?', [$vodIng]) - 15000) < 0.000001);
+    }
 } catch (Throwable $e) {
     $ck('child ran without an exception', false, $e->getMessage() . ' @ ' . basename($e->getFile()) . ':' . $e->getLine());
 } finally {

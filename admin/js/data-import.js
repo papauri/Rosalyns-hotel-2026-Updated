@@ -1138,6 +1138,7 @@
             S.R.results = h('div', 'di-tables'); S.R.results.id = 'diResults'; S.R.results.setAttribute('data-rh-results', '1');
             S.R.results.appendChild(h('p', 'di-muted di-loading', 'Loading the items…'));
             p.appendChild(S.R.results);
+            sizesSection(p);
             var nav = h('div', 'di-actions');
             var back = h('button', 'btn-secondary di-btn'); back.type = 'button'; add(back, h('i', 'fas fa-arrow-left'), ' Back'); back.addEventListener('click', function () { showStep(2); });
             var dl = h('a', 'btn-secondary di-btn', ' Download what will be imported (CSV)');
@@ -1827,6 +1828,10 @@
                 'The copy of your file on the server is deleted afterwards.'
             ].forEach(function (t) { ul.appendChild(typeof t === 'string' ? h('li', null, t) : t); });
             what.appendChild(ul);
+            post('sizes_list', { job: S.job, size: 10 }).then(function (r) {     // bottle sizes typed in step 3 (optional)
+                var n = r && r.ok && r.counts ? (r.counts.typed || 0) : 0;
+                if (n) { ul.insertBefore(h('li', null, 'The bottle size you typed in step 3 is saved on ' + num(n, 0) + ' stock item' + (n === 1 ? '' : 's') + ' (a size an item already has is never replaced). Stock quantities and costs do not change.'), menuLi); }
+            });
             drinksSection(p, menuLi);
             var cws = cf.cost_with_stock || 0, cwsNames = cf.cost_with_stock_names || [];
             if (cws) {
@@ -2015,6 +2020,126 @@
             });
             load();
         }
+        /**
+         * Step 3 "bottle size" (optional, owner 2026-11-20): drinks sold by a measure (a shot, a glass, 25 ml) whose bottle size is not known
+         * (includes/import/drinks.php). One answer per group, a different one on any row. A blank never blocks anything: those drinks just
+         * cannot go on the menu in step 4. Nothing is filled in by a guess; a size in the item's name shows as "Read from your file".
+         */
+        var SIZE_HEADS = [
+            ['Drink', 'The item name from your file, with the cell it came from.'],
+            ['Sold as', 'One sale: the "served by" cell of your file.'],
+            ['Bottle size (ml)', 'How many ml one bottle holds. Type a size for this drink only, or leave it blank to use the group\'s size. Under it: where the size in use comes from.'],
+            ['Menu in step 4', 'Whether this drink can be ticked for the menu in step 4 with the size it has now.']
+        ];
+        function sizesSection(p) {
+            var sec = h('div', 'di-what di-drinks di-sizes');
+            var st = { q: '', show: 'all', group: '', page: 1, size: 10 };
+            var head = h('h4', 'di-h4', 'Optional: add a bottle size so these can go on the menu');
+            var intro = helpLine('These drinks are sold by a measure (a shot, a glass), but neither your file nor your stock says how many ml one bottle holds, so the cost of one sale cannot be worked out. Type the size once for a group, or a different one on any row. Leave it blank if you are not sure: the import still works, those drinks just cannot be put on the menu in step 4.');
+            var key = h('details', 'di-details di-colkey');
+            key.appendChild(h('summary', null, 'What the columns mean'));
+            var kdl = h('dl', 'di-colkey-list');
+            SIZE_HEADS.forEach(function (c) { add(kdl, h('dt', null, c[0]), h('dd', null, c[1])); });
+            key.appendChild(kdl);
+            var groupsBox = h('div', 'di-size-groups');
+            var ctrl = h('div', 'di-bulk-row');
+            var si = document.createElement('input'); si.type = 'search'; si.className = 'di-fin'; si.placeholder = 'Search'; si.maxLength = 100; si.setAttribute('aria-label', 'Search the drinks without a bottle size');
+            var sh = h('select', 'di-select'); sh.setAttribute('aria-label', 'Show');
+            [['all', 'All'], ['blank', 'Without a size'], ['filled', 'With a size']].forEach(function (o) { var op = h('option', null, o[1]); op.value = o[0]; sh.appendChild(op); });
+            var gs = h('select', 'di-select'); gs.setAttribute('aria-label', 'Group');
+            var sz = h('select', 'di-select'); sz.setAttribute('aria-label', 'Rows per page');
+            [[10, 'Show 10'], [25, 'Show 25'], [50, 'Show 50'], [100, 'Show 100']].forEach(function (o) { var op = h('option', null, o[1]); op.value = String(o[0]); sz.appendChild(op); });
+            var gsWrap = ctlWrap('Group', gs, 'Only the drinks of one group.');
+            add(ctrl, ctlWrap('Search', si, 'Finds a drink or a cell such as A12.'), ctlWrap('Show', sh, 'Drinks with or without a size.'), gsWrap,
+                ctlWrap('Rows per page', sz, 'How many drinks to show at once.'));
+            var wrap = h('div', 'di-tablewrap'), tb = h('table', 'di-table di-lt'), thead = h('thead'), htr = h('tr');
+            SIZE_HEADS.forEach(function (c) { var th = h('th', null, c[0]); th.title = c[1]; htr.appendChild(th); });
+            thead.appendChild(htr); tb.appendChild(thead);
+            var body = h('tbody'); tb.appendChild(body); wrap.appendChild(tb);
+            var info = h('p', 'di-help'); info.setAttribute('role', 'status');
+            var pgBox = h('div');
+            add(sec, head, intro, key, groupsBox, ctrl, info, wrap, pgBox);
+            sec.hidden = true;
+            p.appendChild(sec);
+            var mlText = function (x) { return num(x, x % 1 ? 2 : 0) + ' ml'; };
+            var sizeInput = function (val, label, editable, onSave) {
+                var i = document.createElement('input'); i.type = 'text'; i.inputMode = 'decimal'; i.className = 'di-fin di-size-in'; i.maxLength = 10;
+                i.placeholder = 'e.g. 750'; i.value = val === null || val === undefined ? '' : String(val); i.setAttribute('aria-label', label); i.disabled = !editable;
+                i.addEventListener('change', function () {
+                    var v = i.value.trim().replace(/\s*ml$/i, '');
+                    if (v === (val === null || val === undefined ? '' : String(val))) { return; }
+                    onSave(v, i);
+                });
+                var w = h('div', 'di-size-wrap'); add(w, i, h('span', 'di-size-unit', 'ml'));
+                return w;
+            };
+            var draw = function (r) {
+                var c = r.counts || {};
+                sec.hidden = !c.need;
+                head.textContent = 'Optional: add a bottle size so these can go on the menu (' + num(c.filled || 0, 0) + ' of ' + num(c.need || 0, 0) + ' have one)';
+                clear(groupsBox);
+                (r.groups || []).forEach(function (g) {
+                    var row = h('div', 'di-size-group');
+                    var lab = h('div', 'di-size-glabel');
+                    add(lab, h('strong', null, g.label), h('div', 'di-small', num(g.count, 0) + ' drink' + (g.count === 1 ? '' : 's') + ', ' + num(g.filled, 0) + ' with a size. One bottle holds:'));
+                    add(row, lab, sizeInput(g.ml, 'Bottle size in ml for: ' + g.label, r.editable && r.drink_ready, function (v, i) { save({ mode: 'group', key: g.key, value: v }, i); }));
+                    row.appendChild(h('small', 'di-fhelp', g.ml !== null ? 'Used for every drink in this group, except one with its own size below or in its name. Clear it to leave them blank.' : 'Blank: these drinks stay off the menu list in step 4. A size typed on a row below wins over this one.'));
+                    groupsBox.appendChild(row);
+                });
+                if (!r.drink_ready) { groupsBox.appendChild(h('p', 'di-warn', 'This hotel\'s database cannot keep a bottle size yet, so sizes cannot be typed here.')); }
+                var gk = st.group;
+                clear(gs);
+                var o0 = h('option', null, 'All groups'); o0.value = ''; gs.appendChild(o0);
+                (r.groups || []).forEach(function (g) { var op = h('option', null, g.label); op.value = g.key; gs.appendChild(op); });
+                gs.value = gk;
+                gsWrap.hidden = (r.groups || []).length < 2;
+                clear(body);
+                (r.rows || []).forEach(function (x) {
+                    var tr = h('tr', 'di-row');
+                    var t1 = cell('Drink'); add(t1, itemNameEl(x.name), h('div', 'di-capline'), src(x.name_source));
+                    var t2 = cell('Sold as'); add(t2, h('span', null, x.measure), x.measure_source ? h('div', 'di-capline') : null, src(x.measure_source));
+                    var t3 = cell('Bottle size (ml)');
+                    t3.appendChild(sizeInput(x.row_ml, 'Bottle size in ml for ' + x.name, r.editable && r.drink_ready, function (v, i) { save({ mode: 'row', key: x.key, value: v }, i); }));
+                    var from = x.from === 'row' ? 'Your size for this drink: ' + mlText(x.ml)
+                        : x.from === 'name' ? 'Read from your file: ' + mlText(x.ml) + ' in its name' + (x.name_source ? ' (' + x.name_source + ')' : '')
+                        : x.from === 'group' ? 'Group size: ' + mlText(x.ml)
+                        : 'Blank: no size yet';
+                    t3.appendChild(h('div', 'di-small', from));
+                    var t4 = cell('Menu in step 4');
+                    t4.appendChild(h('span', 'di-small',x.tickable ? 'Can be ticked in step 4' : (x.why_not || 'Cannot be ticked.')));
+                    add(tr, t1, t2, t3, t4); body.appendChild(tr);
+                });
+                info.textContent = r.total ? num(r.total, 0) + ' drink' + (r.total === 1 ? '' : 's') + ' in this list.' : 'Nothing matches.';
+                clear(pgBox);
+                st.page = r.page; st.size = r.size; sz.value = String(r.size);
+                if (r.total > 10) {
+                    pgBox.appendChild(pagerEl({ page: r.page, pages: r.pages, size: r.size, total: r.total },
+                        function (n) { st.page = n; load(); },
+                        function (n) { st.size = n; st.page = 1; load(); }));
+                }
+            };
+            var q = function () { return { job: S.job, q: st.q, show: st.show, group: st.group, page: st.page, size: st.size }; };
+            var load = function () {
+                post('sizes_list', q()).then(function (r) {
+                    if (!r.ok) { msg(r.error || 'The bottle size list could not be loaded.'); return; }
+                    draw(r);
+                });
+            };
+            var save = function (data, inp) {
+                if (inp) { inp.disabled = true; }
+                var d = q(); Object.keys(data).forEach(function (k) { d[k] = data[k]; });
+                post('sizes_set', d).then(function (r) {
+                    if (!r.ok) { msg(r.error || 'That could not be saved.'); load(); return; }
+                    msg([r.warning || '', r.unticked ? num(r.unticked, 0) + ' drink' + (r.unticked === 1 ? ' was' : 's were') + ' unticked for the menu, because without a bottle size the cost of one sale is not known.' : ''].filter(Boolean).join(' '));
+                    load();
+                });
+            };
+            si.addEventListener('input', debounce(function () { st.q = si.value.trim(); st.page = 1; load(); }, 300));
+            sh.addEventListener('change', function () { st.show = sh.value; st.page = 1; load(); });
+            gs.addEventListener('change', function () { st.group = gs.value; st.page = 1; load(); });
+            sz.addEventListener('change', function () { st.size = parseInt(sz.value, 10) || 10; st.page = 1; load(); });
+            load();
+        }
         /** Step 4 lists, worked out on the server: the rows left out (with the reason, a way back and a download) and the "Fixed for you" repairs (with Undo). */
         function fixedSections(p) {
             var s = S.sum || {};
@@ -2131,6 +2256,7 @@
                 (r.drinks_added || r.drinks_updated) ? card('Drinks added to the menu', num(r.drinks_added || 0, 0), 'Ticked drinks now on the drinks menu and the till at your file\'s selling price (VAT included).', 'good') : null,
                 (r.drinks_added || r.drinks_updated) ? card('Drink prices changed', num(r.drinks_updated || 0, 0), 'Drinks already on the menu whose price you ticked to change. Each change is in System Logs (old and new price).') : null);
             p.appendChild(cards);
+            if (r.sizes_saved) { p.appendChild(h('p', 'di-small', num(r.sizes_saved, 0) + ' bottle size' + (r.sizes_saved === 1 ? ' was' : 's were') + ' saved on stock items (from step 3). Each change is in System Logs.')); }
             if (r.drinks_linked) { p.appendChild(h('p', 'di-small', num(r.drinks_linked, 0) + ' drink' + (r.drinks_linked === 1 ? '' : 's') + ' got a stock link: each sale takes one measure off stock.')); }
             if (r.next_step) { p.appendChild(h('p', 'di-note', r.next_step)); }
             if (r.learned) { p.appendChild(h('p', 'di-small', num(r.learned, 0) + ' unit or category choice' + (r.learned === 1 ? '' : 's') + ' you confirmed will be remembered and suggested next time (with "Remembered from your earlier import" as the reason).')); }

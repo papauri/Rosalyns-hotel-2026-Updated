@@ -404,7 +404,8 @@ if (!function_exists('import_match_header')) {
                     // a bought-as / served-by cell must be a unit, pack or portion word (or a pack written out: "Case of 24"): "Packing Date" is not
                     $pv = $pv ?? import_pack_vocab($aliases);
                     $wn = import_norm_text((string)$v);
-                    if (import_pack_word_kind((string)$v, $pv) !== '' || isset($pv['unit'][$wn]) || (is_string($v) && import_pack_parse_text($v, $pv) !== null)) {
+                    $wk = $info['field'] === 'served_by' ? import_served_kind((string)$v, $pv) : import_pack_word_kind((string)$v, $pv);   // "Per shot", "Tot 25ml" (owner 2026-11-20)
+                    if ($wk !== '' || isset($pv['unit'][$wn]) || (is_string($v) && import_pack_parse_text($v, $pv) !== null)) {
                         $good++;
                     }
                 } else {

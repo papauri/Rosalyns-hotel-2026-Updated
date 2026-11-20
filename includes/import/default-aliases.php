@@ -27,7 +27,8 @@ if (!function_exists('import_default_aliases')) {
             // v4 (2026-11-17): bar-sheet layouts with a bought-as / pack size / served-by / selling price column (pack_name, pack_size, served_by,
             // pack_price, sell_price), container and portion words, "Total Balance" as the quantity when the sheet has no other quantity column.
             // v5 (2026-11-19, Step U2 d): "pour" / "pours" as portion words (a bar count written in pours is turned into bottles).
-            'version' => 5,
+            // v6 (2026-11-20, bottle sizes): more ways a bar sheet heads its served-by column ("Served in", "Serving size", "Pour size").
+            'version' => 6,
             'fields' => [
                 'item_name' => [
                     'item name', 'item', 'items', 'item description', 'description', 'product', 'product name',
@@ -105,6 +106,7 @@ if (!function_exists('import_default_aliases')) {
                 'served_by' => [
                     'unit sold served by', 'unit sold by', 'unit served by', 'sold served by', 'sold by', 'served by', 'sold as', 'served as',
                     'selling unit', 'sales unit', 'issue unit', 'issue uom', 'unit sold', 'serving unit', 'sold per', 'served per', 'unit of sale',
+                    'served in', 'sold in', 'serving size', 'pour size', 'serving measure', 'selling measure',
                 ],
                 // v4: a price written PER PACK (per case / crate / carton): divided by the pack size into the cost of one stock unit
                 'pack_price' => [

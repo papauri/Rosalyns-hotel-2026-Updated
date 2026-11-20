@@ -104,6 +104,47 @@ if (!function_exists('import_drinks_build')) {
     }
 
     /**
+     * One sale of an item and its cost: rh_drink_measure_cost (the shared helper) for a unit / a list measure / the cell as written; for a
+     * volume written in the cell, the same ml conversion a recipe line typed in ml uses (rh_drink_measure_to_stock). null = cannot be worked out.
+     * @return ?array{qty:float, cost:?float, name:string, kind:string}
+     */
+    function import_drinks_sale_cost(array $ing, array $sv, string $served, array $list): ?array
+    {
+        if ($sv['kind'] !== 'ml') {
+            return rh_drink_measure_cost($ing, $sv['kind'] === 'as_is' ? $served : (string)$sv['measure'], $list);
+        }
+        $ml = (float)$sv['ml'];
+        $name = import_measure_fmt($ml) . ' ml';
+        $mc = null;
+        try {
+            $c = rh_drink_measure_to_stock($ml, 'ml', $ing, $list);
+            $mc = ['qty' => (float)$c['qty'], 'name' => $name, 'kind' => 'ml', 'ml' => $ml];
+        } catch (RuntimeException $e) {
+            $uMl = rh_drink_unit_ml((string)($ing['unit'] ?? ''));
+            if ($uMl !== null) {                // stock kept in ml / cl / L itself: no "ml" measure, the amount is in the stock unit
+                $mc = ['qty' => round($ml / $uMl, 6), 'name' => $name, 'kind' => 'unit', 'ml' => $ml];
+            }
+        }
+        if ($mc === null) {
+            return null;
+        }
+        $cp = (isset($ing['cost_per_unit']) && is_numeric($ing['cost_per_unit']) && (float)$ing['cost_per_unit'] > 0) ? (float)$ing['cost_per_unit'] : null;
+        $mc['cost'] = $cp !== null ? round($mc['qty'] * $cp, 4) : null;
+        return $mc;
+    }
+
+    /** The bottle-size question group: one per measure + stock unit ("shot|bottle"); the label says it in words. */
+    function import_drinks_size_group(array $sv, string $unit): array
+    {
+        $u = mb_strtolower(trim($unit));
+        if ($sv['kind'] === 'ml') {
+            $what = import_measure_fmt((float)$sv['ml']) . ' ml' . ($sv['word'] !== '' ? ' (' . $sv['word'] . ')' : '');
+            return ['key' => 'ml:' . import_measure_fmt((float)$sv['ml']) . '|' . $u, 'label' => 'Sold by ' . $what . ', kept in ' . import_measure_plural($unit, 2)];
+        }
+        return ['key' => 'm:' . $sv['word'] . '|' . $u, 'label' => 'Sold by the ' . $sv['word'] . ', kept in ' . import_measure_plural($unit, 2)];
+    }
+
+    /**
      * One row per item of the file that has a selling price (ready items only; a weight unit is food and never listed).
      * Returns ['rows' => [...], 'waiting' => n items with a price that still need an answer in step 3, 'cats' => existing menu categories].
      */
@@ -118,6 +159,8 @@ if (!function_exists('import_drinks_build')) {
         $db = import_drinks_db($pdo, $ingIds);
         $list = function_exists('rh_drink_measures_list') ? rh_drink_measures_list() : [];
         $ans = (array)($answers['_drinks'] ?? []);
+        $sizeAns = (array)($answers['_sizes'] ?? []);      // step 3 bottle sizes: g = per group, r = per row (optional, never guessed)
+        $synonyms = (array)(import_load_aliases($pdo)['unit_synonyms'] ?? []);      // "btl" = bottle (import_aliases, seeded)
         $rows = [];
         $waiting = 0;
         foreach ($items as $it) {
@@ -189,10 +232,58 @@ if (!function_exists('import_drinks_build')) {
                     $ing += ['measure_big_name' => $ms['big'], 'measure_small_name' => $ms['small'], 'measure_per_big' => $ms['n'], 'measure_stock_side' => $ms['side']];
                 }
             }
-            $mc = rh_drink_measure_cost($ing, $served, $list);
-            $measureLabel = $mc ? '1 ' . $mc['name'] : ($served !== '' ? '1 ' . $served : '1 ' . $unit);
+            // ---- the bottle size (optional, owner 2026-11-20): asked in step 3 for a drink sold by a measure whose size is not known. The item's
+            // own saved size (or a volume stock unit) always wins and is never asked; then the person's answer for this row, then a size written
+            // in its name ("Gin 750ml", read from your file), then the answer for its group. A blank stays blank: the drink is simply not tickable.
+            $sv = import_served_read($served, $unit, $list, $synonyms);
+            $own = rh_drink_item_ml($ing);
+            $isCont = rh_stock_unit_is_container($unit);
+            $size = ['need' => false, 'group' => '', 'group_label' => '', 'ml' => null, 'from' => '', 'row_ml' => null, 'name_ml' => null];
+            // an item whose own count measure already gives one sale ("25 shots in one bottle") needs no size
+            $worksNow = $own === null && import_drinks_sale_cost($ing, $sv, $served, $list) !== null;
+            if (in_array($sv['kind'], ['list', 'ml'], true) && !$isCont && $db['drink_ready'] && !$worksNow && ($own === null || $own['source'] === 'name')) {
+                $g = import_drinks_size_group($sv, $unit);
+                $size['need'] = true;
+                $size['sale_ml'] = $sv['kind'] === 'ml' ? (float)$sv['ml'] : null;   // ml of one sale (for the "smaller than one shot" warning)
+                if ($sv['kind'] === 'list') {
+                    foreach ($list as $dm) {
+                        if (is_array($dm) && mb_strtolower((string)($dm['name'] ?? '')) === mb_strtolower((string)$sv['measure']) && is_numeric($dm['ml'] ?? null)) {
+                            $size['sale_ml'] = (float)$dm['ml'];
+                        }
+                    }
+                }
+                $size['group'] = $g['key'];
+                $size['group_label'] = $g['label'];
+                $rowAns = $sizeAns['r'][(string)$it['key']]['ml'] ?? null;
+                $grpAns = $sizeAns['g'][$g['key']]['ml'] ?? null;
+                $size['row_ml'] = is_numeric($rowAns) && (float)$rowAns > 0 ? (float)$rowAns : null;
+                $size['name_ml'] = $own !== null ? (float)$own['container'] : null;
+                if ($size['row_ml'] !== null) {
+                    $size['ml'] = $size['row_ml'];
+                    $size['from'] = 'row';
+                } elseif ($size['name_ml'] !== null) {
+                    $size['ml'] = $size['name_ml'];
+                    $size['from'] = 'name';
+                } elseif (is_numeric($grpAns) && (float)$grpAns > 0) {
+                    $size['ml'] = (float)$grpAns;
+                    $size['from'] = 'group';
+                }
+                if ($size['ml'] !== null && $size['from'] !== 'name') {
+                    $ing['volume_ml'] = $size['ml'];
+                }
+            }
+            $mc = import_drinks_sale_cost($ing, $sv, $served, $list);
+            $measureLabel = $mc ? ($sv['kind'] === 'ml' ? $mc['name'] . ($sv['word'] !== '' ? ' (' . $sv['word'] . ')' : '') : '1 ' . $mc['name']) : ($served !== '' ? '1 ' . $served : '1 ' . $unit);
             if ($mc === null && $why === '') {
-                $why = 'Sold by "' . $served . '", which "' . (string)$it['name'] . '" cannot be measured in yet (set its bottle size or count measure in Stock). Add it on the Menu page after the import.';
+                if ($size['need']) {
+                    $why = 'Add bottle size in Step 3 (optional): how many ml one ' . $unit . ' of it holds. Without it the cost of one ' . ($sv['kind'] === 'ml' ? import_measure_fmt((float)$sv['ml']) . ' ml' : $sv['word']) . ' is not known.';
+                } elseif ($isCont && $sv['kind'] !== 'unit' && $served !== '') {
+                    $why = 'Kept in ' . import_measure_plural($unit, 2) . ': one ' . $unit . ' holds several, so a bottle size cannot be used to work out one ' . ($sv['word'] !== '' ? $sv['word'] : 'sale') . '. Set a count measure on the item in Stock, or add it on the Menu page after the import.';
+                } elseif ($sv['kind'] === 'as_is' && $served !== '') {
+                    $why = 'Sold by "' . $served . '", which is not on your Drink measures list (Stock Items), so one sale of "' . (string)$it['name'] . '" cannot be worked out. Add "' . ($sv['word'] !== '' ? $sv['word'] : $served) . '" to that list with its ml, or set a count measure on the item in Stock, then open this list again.';
+                } else {
+                    $why = 'Sold by "' . $served . '", which "' . (string)$it['name'] . '" cannot be measured in yet (set its bottle size or count measure in Stock). Add it on the Menu page after the import.';
+                }
             }
             $cost = $mc['cost'] ?? null;
             $profit = ($cost !== null && $price !== null) ? round($price - $cost, 4) : null;
@@ -246,7 +337,10 @@ if (!function_exists('import_drinks_build')) {
                 'price' => $price, 'price_source' => $priceSrc,
                 'measure' => $measureLabel, 'measure_source' => $served !== '' ? (string)($it['served_by_source'] ?? '') : '',
                 'measure_note' => $served === '' ? 'No "served by" cell: one ' . $unit . ' (the main unit).' : '',
-                'link' => $mc ? ['kind' => $mc['kind'], 'qty' => $mc['qty'], 'name' => $mc['name']] : null,
+                'link' => $mc ? ['kind' => $mc['kind'], 'qty' => $mc['qty'], 'name' => $mc['name'], 'ml' => $mc['ml'] ?? null] : null,
+                'unit' => $unit, 'size_need' => $size['need'], 'size_group' => $size['group'], 'size_group_label' => $size['group_label'],
+                'size_ml' => $size['ml'], 'size_from' => $size['from'], 'size_row_ml' => $size['row_ml'], 'size_name_ml' => $size['name_ml'],
+                'size_sale_ml' => $size['sale_ml'] ?? null,
                 'cost' => $cost, 'profit' => $profit, 'below' => $below,
                 'cost_note' => $mc === null ? 'Not known: the measure cannot be worked out.' : ($cost === null ? 'Not known: this item has no cost yet.' : ''),
                 'category' => $cat, 'category_default' => $catDefault, 'category_from' => $menu ? 'menu' : (!empty($it['category_col']) ? 'column' : 'default'),
@@ -396,11 +490,176 @@ if (!function_exists('import_drinks_build')) {
         });
     }
 
+    /**
+     * Step 3 "bottle size" list (optional, owner 2026-11-20): the drinks sold by a measure (shot, glass, 25 ml ...) whose bottle size is not
+     * known, grouped by measure + stock unit (one answer per group, a different one per row). A size written in the item's name is shown
+     * as read from the file; nothing is ever filled in by a guess. Never blocks anything: a blank just leaves that drink off the menu list.
+     */
+    function import_job_sizes_view(PDO $pdo, int $jobId, int $userId, array $p): array
+    {
+        $state = import_job_state($pdo, $jobId);
+        if (!$state || !in_array($state['job']['status'], ['analysed', 'reviewing', 'confirmed'], true)) {
+            return ['ok' => false, 'error' => 'This import cannot be reviewed any more.'];
+        }
+        $b = import_drinks_build($pdo, (array)$state['res']['items'], (array)$state['answers']);
+        $gAns = (array)($state['answers']['_sizes']['g'] ?? []);
+        $groups = [];
+        $all = [];
+        foreach ($b['rows'] as $r) {
+            if (empty($r['size_need'])) {
+                continue;
+            }
+            $all[] = $r;
+            $g = $r['size_group'];
+            if (!isset($groups[$g])) {
+                $ga = $gAns[$g]['ml'] ?? null;
+                $groups[$g] = ['key' => $g, 'label' => $r['size_group_label'], 'unit' => $r['unit'], 'count' => 0, 'filled' => 0, 'blank' => 0,
+                    'ml' => is_numeric($ga) && (float)$ga > 0 ? (float)$ga : null];
+            }
+            $groups[$g]['count']++;
+            $groups[$g][$r['size_ml'] !== null ? 'filled' : 'blank']++;
+        }
+        $groups = array_values($groups);
+        usort($groups, function ($a, $b) {
+            return $b['count'] <=> $a['count'] ?: strcmp($a['label'], $b['label']);
+        });
+        $q = mb_strtolower(trim(mb_substr((string)($p['q'] ?? ''), 0, 100)));
+        $grp = (string)($p['group'] ?? '');
+        $show = in_array($p['show'] ?? '', ['blank', 'filled'], true) ? (string)$p['show'] : 'all';
+        $rows = array_values(array_filter($all, function ($r) use ($q, $grp, $show) {
+            if ($q !== '' && mb_strpos(mb_strtolower($r['name'] . ' ' . $r['measure'] . ' ' . $r['name_source']), $q) === false) {
+                return false;
+            }
+            if ($grp !== '' && $r['size_group'] !== $grp) {
+                return false;
+            }
+            return $show === 'all' || ($show === 'blank' ? $r['size_ml'] === null : $r['size_ml'] !== null);
+        }));
+        $size = (int)($p['size'] ?? 10);
+        $size = in_array($size, [10, 25, 50, 100], true) ? $size : 10;
+        $pages = max(1, (int)ceil(count($rows) / $size));
+        $page = min($pages, max(1, (int)($p['page'] ?? 1)));
+        $out = array_map(function ($r) {
+            return ['key' => $r['key'], 'name' => $r['name'], 'name_source' => $r['name_source'], 'unit' => $r['unit'], 'measure' => $r['measure'],
+                'measure_source' => $r['measure_source'], 'group' => $r['size_group'], 'group_label' => $r['size_group_label'],
+                'ml' => $r['size_ml'], 'from' => $r['size_from'], 'row_ml' => $r['size_row_ml'], 'name_ml' => $r['size_name_ml'],
+                'tickable' => $r['tickable'], 'why_not' => $r['why_not']];
+        }, array_slice($rows, ($page - 1) * $size, $size));
+        $filled = $typed = 0;
+        foreach ($all as $r) {
+            $filled += $r['size_ml'] !== null ? 1 : 0;
+            $typed += ($r['size_ml'] !== null && in_array($r['size_from'], ['row', 'group'], true)) ? 1 : 0;
+        }
+        return ['ok' => true, 'groups' => $groups, 'rows' => $out, 'total' => count($rows), 'page' => $page, 'pages' => $pages, 'size' => $size,
+            'counts' => ['need' => count($all), 'filled' => $filled, 'blank' => count($all) - $filled, 'typed' => $typed], 'drink_ready' => function_exists('rh_stock_drink_ready') && rh_stock_drink_ready($pdo),
+            'editable' => in_array($state['job']['status'], ['analysed', 'reviewing'], true)];
+    }
+
+    /**
+     * Set or clear a bottle size: mode group (group, value) | row (key, value). value '' = blank (cleared). Validated as the item form does
+     * (rh_drink_volume_from_input). A ticked drink that can no longer go on the menu after the change is unticked in the same save.
+     */
+    function import_job_sizes_set(PDO $pdo, int $jobId, int $userId, array $p): array
+    {
+        $state = import_job_state($pdo, $jobId);
+        if (!$state || !in_array($state['job']['status'], ['analysed', 'reviewing'], true)) {
+            return ['ok' => false, 'error' => 'That import cannot be changed.'];
+        }
+        $mode = (string)($p['mode'] ?? '');
+        $key = mb_substr((string)($p['key'] ?? ''), 0, 200);
+        [$ml, $err] = rh_drink_volume_from_input(mb_substr((string)($p['value'] ?? ''), 0, 20));
+        if ($err !== null) {
+            return ['ok' => false, 'error' => $err];
+        }
+        $items = (array)$state['res']['items'];
+        $b = import_drinks_build($pdo, $items, (array)$state['answers']);
+        $known = false;
+        $saleMl = 0.0;
+        foreach ($b['rows'] as $r) {
+            if (!empty($r['size_need']) && (($mode === 'group' && $r['size_group'] === $key) || ($mode === 'row' && $r['key'] === $key))) {
+                $known = true;
+                $saleMl = max($saleMl, (float)($r['size_sale_ml'] ?? 0));
+            }
+        }
+        // a warning only (never refused): a bottle smaller than one sale, or under 50 ml, is most likely a typing slip ("75" for 750)
+        $warn = '';
+        if ($ml !== null && $saleMl > 0 && $ml < $saleMl) {
+            $warn = 'Check this size: ' . import_measure_fmt((float)$ml) . ' ml is less than one sale (' . import_measure_fmt($saleMl) . ' ml). It is kept; change it if it is a typing slip.';
+        } elseif ($ml !== null && $ml < 50) {
+            $warn = 'Check this size: ' . import_measure_fmt((float)$ml) . ' ml is very small for a bottle. It is kept; change it if it is a typing slip.';
+        }
+        if (!in_array($mode, ['group', 'row'], true)) {
+            return ['ok' => false, 'error' => 'Unknown change.'];
+        }
+        if (!$known) {
+            return ['ok' => false, 'error' => 'That drink or group is not in this list any more. Reload the list.'];
+        }
+        $now = date('Y-m-d H:i:s');
+        return import_cont_save($pdo, $jobId, '', function (array &$answers) use ($pdo, $items, $mode, $key, $ml, $userId, $now) {
+            $slot = $mode === 'group' ? 'g' : 'r';
+            if ($ml === null) {
+                unset($answers['_sizes'][$slot][$key]);
+            } else {
+                $answers['_sizes'][$slot][$key] = ['ml' => $ml, 'by' => $userId > 0 ? $userId : null, 'at' => $now];
+            }
+            $unticked = 0;
+            foreach (import_drinks_build($pdo, $items, $answers)['rows'] as $r) {
+                if (!$r['tickable'] && !empty($answers['_drinks'][$r['key']]['tick'])) {
+                    $answers['_drinks'][$r['key']]['tick'] = 0;
+                    $unticked++;
+                }
+            }
+            return ['changed' => 1, 'unticked' => $unticked];
+        }) + ['warning' => $warn];
+    }
+
+    /**
+     * At import (inside its transaction, after the stock part, before the drinks): save each bottle size a person gave in step 3 on its
+     * stock item (rh_drink_volume_save: logged old -> new; stock quantity, cost and recipes untouched). A size the item already has is
+     * never replaced; a size read from the item's name is not written (it is already known from the name).
+     * @return array{saved:int, names:array}
+     */
+    function import_drinks_sizes_commit(PDO $pdo, array $items, array $answers, int $jobId, int $userId): array
+    {
+        $out = ['saved' => 0, 'names' => []];
+        if (empty($answers['_sizes']) || !function_exists('rh_stock_drink_ready') || !rh_stock_drink_ready($pdo)) {
+            return $out;
+        }
+        $find = $pdo->prepare('SELECT id FROM stock_ingredients WHERE name = ? ORDER BY id DESC LIMIT 1');
+        $cur = $pdo->prepare('SELECT volume_ml FROM stock_ingredients WHERE id = ? FOR UPDATE');
+        foreach (import_drinks_build($pdo, $items, $answers)['rows'] as $r) {
+            if (empty($r['size_need']) || $r['size_ml'] === null || !in_array($r['size_from'], ['row', 'group'], true)) {
+                continue;
+            }
+            $ingId = (int)$r['ing_id'];
+            if ($ingId <= 0) {
+                $find->execute([$r['name']]);
+                $ingId = (int)$find->fetchColumn();
+            }
+            if ($ingId <= 0) {
+                throw new RuntimeException('"' . $r['name'] . '": its stock item was not found, so its bottle size could not be saved. Nothing was imported.');
+            }
+            $cur->execute([$ingId]);
+            $v = $cur->fetchColumn();
+            if ($v !== false && $v !== null && (float)$v > 0) {
+                continue;               // the item has a size already: never replaced by the import
+            }
+            if (rh_drink_volume_save($pdo, $ingId, (float)$r['size_ml'], $userId, 'Import #' . $jobId)) {
+                $out['saved']++;
+                $out['names'][] = $r['name'];
+            }
+        }
+        return $out;
+    }
+
     /** One line of the stock link: one measure of the stock item (in the measure itself when the hotel's database can keep it). */
     function import_drinks_link_line(int $ingId, array $link, bool $drinkReady): array
     {
         if ($link['kind'] === 'measure' && $drinkReady) {
             return ['ingredient_id' => $ingId, 'quantity' => 1, 'unit' => 'measure', 'measure' => (string)$link['name']];
+        }
+        if ($link['kind'] === 'ml' && $drinkReady && isset($link['ml']) && (float)$link['ml'] > 0) {
+            return ['ingredient_id' => $ingId, 'quantity' => (float)$link['ml'], 'unit' => 'measure', 'measure' => 'ml'];   // "25 ml" a sale
         }
         return ['ingredient_id' => $ingId, 'quantity' => (float)$link['qty'], 'unit' => 'base'];
     }

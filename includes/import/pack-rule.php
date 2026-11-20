@@ -17,6 +17,7 @@
  */
 
 require_once __DIR__ . '/text-util.php';
+require_once __DIR__ . '/measure.php';   // import_served_volume_in / import_measure_singular (pure)
 
 if (!function_exists('import_pack_vocab')) {
 
@@ -74,6 +75,40 @@ if (!function_exists('import_pack_vocab')) {
         }
         if (isset($vocab['portion'][$n])) {
             return 'portion';
+        }
+        return '';
+    }
+
+    /**
+     * The kind of a "served by" cell as hotels write it (owner 2026-11-20, plain rules): "Shot" as before; also "Per shot", "1 Shot", "a tot",
+     * "Tot 25ml", "Glass 175 ml", "Glass of wine" (the word before "of") -> the kind of its measure word; a volume alone ("25ml") -> portion.
+     * "Btl 750ml" stays '' (a unit word), "Glass 175" (no ml) stays '' (never a guess). Same reading as import_served_read (measure.php).
+     */
+    function import_served_kind(string $served, array $vocab): string
+    {
+        $k = import_pack_word_kind($served, $vocab);
+        if ($k !== '') {
+            return $k;
+        }
+        $t = mb_strtolower(trim((string)preg_replace('/\s+/u', ' ', $served)));
+        if ($t === '') {
+            return '';
+        }
+        $vol = import_served_volume_in($t);
+        $rest = $vol ? $vol[1] : $t;
+        $rest = trim((string)preg_replace('/^(?:per|a|an|one|1|x)\s+/u', '', $rest));
+        $rest = trim((string)preg_replace('/\s+(?:of|x|@)$/u', '', $rest), " .-/()@");
+        if ($rest === '') {
+            return $vol ? 'portion' : '';
+        }
+        if (preg_match('/^(.+?)\s+of\s+.+$/u', $rest, $p)) {
+            $rest = trim($p[1]);
+        }
+        foreach ([$rest, import_measure_singular($rest)] as $w) {
+            $k = import_pack_word_kind($w, $vocab);
+            if ($k !== '') {
+                return $k;
+            }
         }
         return '';
     }
@@ -187,11 +222,14 @@ if (!function_exists('import_pack_vocab')) {
         $unit = '';
         $unitSrc = null;
         $unitHow = '';
-        $servedKind = $served !== '' ? import_pack_word_kind($served, $vocab) : '';
-        if ($served !== '' && $servedKind !== 'portion') {
-            [$unit, $unitSrc, $unitHow] = [$served, $in['served_src'] ?? null, 'served'];
-        } elseif ($unitCol !== '' && import_pack_word_kind($unitCol, $vocab) !== 'portion') {
+        $servedKind = $served !== '' ? import_served_kind($served, $vocab) : '';   // "Per shot", "Tot 25ml" are portions too (owner 2026-11-20)
+        $unitColOk = $unitCol !== '' && import_pack_word_kind($unitCol, $vocab) !== 'portion';
+        if ($unitColOk) {
+            // a Unit cell that is there is the stock unit: a served-by / measure cell only ADDS how it is sold, it never replaces it
+            // (review 2026-11-20: Unit "Crate" + "Serving Size" "Bottle" stays 3 crates at the crate price, never 3 bottles at it)
             [$unit, $unitSrc, $unitHow] = [$unitCol, $in['unit_src'] ?? null, 'unit'];
+        } elseif ($served !== '' && $servedKind !== 'portion') {
+            [$unit, $unitSrc, $unitHow] = [$served, $in['served_src'] ?? null, 'served'];
         } elseif ($bought !== '') {
             // counted in what it is bought in; a pack read out of a cell ("Case of 24") gives the word only (how = pack-cell, re-parsed by the invariant)
             [$unit, $unitSrc, $unitHow] = $from !== '' ? [$bought, $boughtSrc, 'pack-cell'] : [$packName, $boughtSrc, 'bought'];
