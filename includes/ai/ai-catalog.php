@@ -322,19 +322,37 @@ function rh_ai_sync_models(PDO $db, string $provider, array $ranked): void
     );
     $ids = [];
     $ranked = array_values(array_filter($ranked, static fn($m) => !rh_ai_model_banned((string)($m['model_id'] ?? '')))); // never stored, so never listed or chosen
-    foreach (array_values($ranked) as $i => $m) {
-        $ids[] = $m['model_id'];
-        $up->execute([
-            $provider, mb_substr($m['model_id'], 0, 120), mb_substr((string)$m['label'], 0, 160),
-            $m['released_at'] ?? $m['created'] ?? null, $m['context_tokens'],
-            $m['price_in'], $m['price_out'], $m['rank'], $m['source'], $m['is_new'] ? 1 : 0, $i,
-        ]);
+    // All or nothing (fault 2026-11-20): a lock wait part-way used to leave only the first rows marked as listed.
+    $own = !$db->inTransaction();
+    if ($own) {
+        $db->beginTransaction();
     }
-    // Models the provider no longer offers go, unless someone chose them (they then show as "not offered").
-    if ($ids) {
-        $in = implode(',', array_fill(0, count($ids), '?'));
-        $db->prepare("DELETE FROM ai_models WHERE provider = ? AND is_selected = 0 AND model_id NOT IN ($in)")
-            ->execute(array_merge([$provider], $ids));
+    try {
+        $listedAt = (string)$db->query("SELECT NOW()")->fetchColumn(); // every row of this list is seen at or after this
+        foreach (array_values($ranked) as $i => $m) {
+            $ids[] = $m['model_id'];
+            $up->execute([
+                $provider, mb_substr($m['model_id'], 0, 120), mb_substr((string)$m['label'], 0, 160),
+                $m['released_at'] ?? $m['created'] ?? null, $m['context_tokens'],
+                $m['price_in'], $m['price_out'], $m['rank'], $m['source'], $m['is_new'] ? 1 : 0, $i,
+            ]);
+        }
+        // Models the provider no longer offers go, unless someone chose them (they then show as retired).
+        if ($ids) {
+            $in = implode(',', array_fill(0, count($ids), '?'));
+            $db->prepare("DELETE FROM ai_models WHERE provider = ? AND is_selected = 0 AND model_id NOT IN ($in)")
+                ->execute(array_merge([$provider], $ids));
+            // When this full list was saved: a chosen model seen before it is no longer offered (rh_ai_model_choices).
+            rh_ai_save_settings(['ai_models_listed_at_' . $provider => $listedAt], $db);
+        }
+        if ($own) {
+            $db->commit();
+        }
+    } catch (Throwable $e) {
+        if ($own && $db->inTransaction()) {
+            $db->rollBack();
+        }
+        throw $e;
     }
 }
 
@@ -522,16 +540,25 @@ function rh_ai_refresh_provider(PDO $db, string $provider): array
     $ranked = rh_ai_rank_models($provider, $list['models']);
     $before = array_column(rh_ai_models_for($db, $provider), 'model_id');
     rh_ai_sync_models($db, $provider, $ranked);
-    $newIds = array_diff(array_column($ranked, 'model_id'), $before);
+    $newIds = array_values(array_diff(array_column($ranked, 'model_id'), $before));
     $new = count($newIds);
-    // A newly listed model with no price is never used or suggested; tell the people who manage the settings.
-    $unpriced = array_values(array_filter($ranked, static fn($m) => in_array($m['model_id'], $newIds, true) && ($m['price_in'] === null || $m['price_out'] === null)));
-    if ($unpriced && function_exists('rh_ai_notify_settings')) {
-        rh_ai_notify_settings($db, 'model_new_price', 'New ' . (rh_ai_provider_list()[$provider]['label'] ?? $provider) . ' model(s) with no price yet: '
-            . implode(', ', array_slice(array_column($unpriced, 'model_id'), 0, 6)) . (count($unpriced) > 6 ? ' and more' : '')
-            . '. They are not used until a price is typed in Assistant Settings > Models (New - set price).');
+    // The notice and the Models table come from the same choices (fault 2026-11-20), so they always agree.
+    $ch = rh_ai_model_choices($db, $provider);
+    $pLabel = rh_ai_provider_list()[$provider]['label'] ?? $provider;
+    if (function_exists('rh_ai_notify_settings')) {
+        // Only a new model that is now a choice but still needs a price is announced (one the table shows).
+        $unpriced = array_values(array_intersect($ch['new_unpriced'], $newIds));
+        if ($unpriced) {
+            rh_ai_notify_settings($db, 'model_new_price', 'New ' . $pLabel . ' model(s) offered as a choice but with no price yet: '
+                . implode(', ', $unpriced) . '. They are not used until a price is typed in Assistant Settings > Models (New - set price).');
+        }
+        if ($ch['retired']) {
+            rh_ai_notify_settings($db, 'model_retired', $pLabel . ' no longer offers ' . implode(', ', $ch['retired'])
+                . ', still chosen. Nothing was switched: choose a replacement in Assistant Settings > Models and save.');
+        }
     }
-    return ['ok' => true, 'count' => count($ranked), 'new' => $new, 'message' => count($ranked) . ' chat models listed' . ($new ? ', ' . $new . ' new since the last check.' : '; nothing new.')];
+    return ['ok' => true, 'count' => count($ranked), 'new' => $new, 'new_ids' => $newIds, 'retired' => $ch['retired'],
+        'message' => rh_ai_model_choices_notice($ch, count($ranked), $newIds)];
 }
 
 /**
@@ -559,3 +586,6 @@ function rh_ai_model_refresh_run(PDO $db): array
     }
     return ['ran' => true, 'results' => $results];
 }
+
+// The Models table choices and the refresh notice (fault 2026-11-20).
+require_once __DIR__ . '/ai-model-choices.php';

@@ -126,7 +126,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if ($action === 'refresh_models') {
             $r = rh_ai_refresh_provider($pdo, $prov);
             logActivity($uid, 'ai_settings', 'Assistant model list checked for ' . $provLabel);
-            $aiFlash($r['ok'] ? 'success' : 'error', $provLabel . ': ' . $r['message'], 'ai-models-' . $prov);
+            $aiFlash(!$r['ok'] ? 'error' : (!empty($r['retired']) ? 'warning' : 'success'), $provLabel . ': ' . $r['message'], 'ai-models-' . $prov);
         }
 
         if ($action === 'save_models') {
@@ -748,11 +748,16 @@ $fmtPrice = static function ($v): string {
             <?php else: ?>
                 <p class="help-text">Ticked rows are the suggestion until you save your own choice: the three cheapest models that still perform (within 15 of the best priced model's rank) as Primary, Fallback and Fast, and the next cheapest priced models as Extra. Big models (Opus, Fable, Pro, Argon, or US$15+ per million out) and models with no price are never suggested for chat. Primary answers questions; Fast handles short replies; Fallback takes over if Primary fails; Extra is kept ready.</p>
                 <?php foreach ($modelsBy as $p => $rows): if (!$rows) { continue; }
+                    // The choices on offer (fault 2026-11-20): the current top models, plus the ones still in use.
+                    $choices = rh_ai_model_choices($pdo, $p);
+                    $rows = $choices['rows'];
+                    if (!$rows) { continue; }
+                    $mStatus = $choices['status'];
                     $hasSel = (bool)array_filter($rows, static fn($r) => (int)$r['is_selected'] === 1);
-                    $rankedForSuggest = array_map(static fn($r) => ['model_id' => $r['model_id'], 'rank' => (float)$r['capability_rank'], 'price_in' => $r['price_in_per_mtok'] !== null ? (float)$r['price_in_per_mtok'] : null, 'price_out' => $r['price_out_per_mtok'] !== null ? (float)$r['price_out_per_mtok'] : null], $rows);
-                    $suggest = $hasSel ? [] : rh_ai_suggest_roles($rankedForSuggest);
+                    $suggest = $choices['suggest'];
                     $newestDate = max(array_map(static fn($r) => (string)($r['released_at'] ?? ''), $rows));
                     $hasKeyP = !empty($states[$p]['has_key']);
+                    $retiredRows = array_values(array_filter($rows, static fn($r) => ($mStatus[(string)$r['model_id']] ?? '') === 'retired'));
                 ?>
                     <form method="POST" action="ai-settings.php" class="ai-models-form" id="ai-models-<?php echo $h($p); ?>">
                         <input type="hidden" name="csrf_token" value="<?php echo $h($csrf_token); ?>">
@@ -762,6 +767,14 @@ $fmtPrice = static function ($v): string {
                             <?php if ($p === $active): ?><span class="badge badge-success">In use</span><?php endif; ?>
                             <span class="ai-pick-count" data-ai-count>0 of 5 chosen</span>
                         </h3>
+                        <?php if ($retiredRows): ?>
+                            <div class="alert alert-warning" data-ai-retired><i class="fas fa-exclamation-triangle"></i><div>
+                                <?php echo $h($providers[$p]['label']); ?> no longer offers
+                                <?php echo $h(implode(', ', array_map(static fn($r) => $r['label'] . ' (' . ucfirst((string)($r['role'] ?? '')) . ')', $retiredRows))); ?>.
+                                Nothing was switched for you: tick a replacement below, give it that role and click Save models. If you think it is still offered, click Check for newer models.
+                            </div></div>
+                        <?php endif; ?>
+                        <p class="help-text">Shown: the current top models for this provider and any model still in use. Older versions and models that are not good value for chat are left out.</p>
                         <div class="table-container"><div class="table-responsive">
                         <table class="table ai-table">
                             <thead><tr>
@@ -771,20 +784,27 @@ $fmtPrice = static function ($v): string {
                                 <th>Context <i class="help" data-tip="How much text the model can read at once, in tokens (1 token is about 3/4 of a word). 1M = one million.">?</i></th>
                                 <th>Price in <i class="help" data-tip="US dollars per million tokens sent to the model. Used only to estimate cost on this page and against the monthly aim. Leave blank if unknown.">?</i></th>
                                 <th>Price out <i class="help" data-tip="US dollars per million tokens the model writes back. Used only for cost estimates and the monthly aim.">?</i></th>
-                                <th>Notes <i class="help" data-tip="Newest = most recently released in this list. New - set price = not in the built-in list; type its price from the provider's price page.">?</i></th>
+                                <th>Notes <i class="help" data-tip="Newest = most recently released in this list. New - set price = not in the built-in list; type its price from the provider's price page. Suggested = a current top model you have not chosen yet. No longer offered = the provider dropped a model you use; choose a replacement.">?</i></th>
                             </tr></thead>
                             <tbody>
                             <?php foreach ($rows as $m):
                                 $mid = (string)$m['model_id'];
                                 $ticked = $hasSel ? (int)$m['is_selected'] === 1 : isset($suggest[$mid]);
                                 $role = $hasSel ? (string)($m['role'] ?? '') : (string)($suggest[$mid] ?? '');
-                                $stale = $m['last_seen_at'] !== null && strtotime((string)$m['last_seen_at']) < time() - 86400 * 21 && (int)$m['is_selected'] === 1;
+                                $mSt = (string)($mStatus[$mid] ?? '');
+                                $retired = $mSt === 'retired';
                             ?>
-                                <tr>
-                                    <td><input type="checkbox" name="pick[]" value="<?php echo $h($mid); ?>" data-ai-pick<?php echo $ticked ? ' checked' : ''; ?> aria-label="Use <?php echo $h($m['label']); ?>"></td>
-                                    <td><strong><?php echo $h($m['label']); ?></strong><br><code class="ai-id"><?php echo $h($mid); ?></code></td>
+                                <tr<?php echo $retired ? ' data-ai-retired-row' : ''; ?>>
                                     <td>
-                                        <select name="role[<?php echo $h($mid); ?>]" class="form-control ai-role" aria-label="Role for <?php echo $h($m['label']); ?>">
+                                        <?php if ($retired): /* never submitted: saving needs a replacement, nothing is switched for you */ ?>
+                                            <input type="checkbox" checked disabled aria-label="<?php echo $h($m['label']); ?> is no longer offered">
+                                        <?php else: ?>
+                                            <input type="checkbox" name="pick[]" value="<?php echo $h($mid); ?>" data-ai-pick<?php echo $ticked ? ' checked' : ''; ?> aria-label="Use <?php echo $h($m['label']); ?>">
+                                        <?php endif; ?>
+                                    </td>
+                                    <td><strong><?php echo $h($m['label']); ?></strong><?php if ($mSt === 'older'): ?> <span class="ai-muted">(older, still in use)</span><?php endif; ?><br><code class="ai-id"><?php echo $h($mid); ?></code></td>
+                                    <td>
+                                        <select name="role[<?php echo $h($mid); ?>]" class="form-control ai-role" aria-label="Role for <?php echo $h($m['label']); ?>"<?php echo $retired ? ' disabled' : ''; ?>>
                                             <option value="">—</option>
                                             <?php foreach (rh_ai_model_roles() as $rk => $rl): ?>
                                                 <option value="<?php echo $h($rk); ?>"<?php echo $role === $rk ? ' selected' : ''; ?>><?php echo $h(ucfirst($rk)); ?></option>
@@ -797,7 +817,8 @@ $fmtPrice = static function ($v): string {
                                     <td>
                                         <?php if ($newestDate !== '' && (string)($m['released_at'] ?? '') === $newestDate): ?><span class="badge badge-info">Newest</span><?php endif; ?>
                                         <?php if ((int)$m['is_new'] === 1): ?><span class="badge badge-warning">New - set price</span><?php endif; ?>
-                                        <?php if ($stale): ?><span class="badge badge-muted">Not offered any more</span><?php endif; ?>
+                                        <?php if ($retired): ?><span class="badge badge-danger">No longer offered - choose a replacement</span><?php endif; ?>
+                                        <?php if ($hasSel && !$ticked && isset($suggest[$mid])): ?><span class="badge badge-info">Suggested: <?php echo $h(ucfirst($suggest[$mid])); ?></span><?php endif; ?>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>

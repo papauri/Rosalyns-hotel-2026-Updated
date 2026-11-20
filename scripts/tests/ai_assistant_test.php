@@ -641,7 +641,7 @@ if (!$schemaReady) {
     $encRow = rh_ai_encrypt($FAKE_KEY);
     $seed = [
         "INSERT INTO ai_providers (provider, api_key_enc, key_last4, status, last_test_at, last_test_ms, last_test_message) VALUES ('anthropic', '" . $encRow . "', 'WXYZ', 'ok', NOW(), 321, 'Connected. 7 chat models found.') ON DUPLICATE KEY UPDATE api_key_enc = VALUES(api_key_enc), key_last4 = 'WXYZ', status = 'ok'",
-        "INSERT INTO ai_models (provider, model_id, label, capability_rank, source, is_new, released_at) VALUES ('anthropic', 'claude-opus-5-5', 'Claude Opus 5.5', 95, 'catalog', 0, '2026-09-15'), ('anthropic', 'claude-opus-6', 'Claude Opus 6', 96.5, 'live', 1, '2026-10-20') ON DUPLICATE KEY UPDATE label = VALUES(label)",
+        "INSERT INTO ai_models (provider, model_id, label, capability_rank, source, is_new, released_at) VALUES ('anthropic', 'claude-opus-5-5', 'Claude Opus 5.5', 95, 'catalog', 0, '2026-09-15'), ('anthropic', 'claude-haiku-6', 'Claude Haiku 6', 86.5, 'live', 1, '2026-10-20') ON DUPLICATE KEY UPDATE label = VALUES(label)", // a newer version of a known small model (a big one is never a choice, fault 2026-11-20)
     ];
     // Admin view with a saved key
     $r = run_page('admin/ai-settings.php', ['method' => 'GET', 'setup' => array_merge($offSetup, $seed), 'dump_html' => $tmpHtml]);
@@ -2188,7 +2188,7 @@ if (!$chatReady || !$adm) {
             $n1m = $listCalls();
             $refAt = (string)rh_ai_settings($pdo, true)['ai_models_refreshed_at'];
             check($n1m >= 1 && strpos($refAt, date('Y-m-d')) === 0, 'model lists refresh when the last check was yesterday', json_encode([$dm1['note'], $n1m, $refAt]));
-            check(strpos(json_encode(rh_ai_notices()), 'model_new_price') !== false && strpos(json_encode(rh_ai_notices()), 'claude-opus-6') !== false, 'a newly listed model with no price tells the Assistant Settings people it waits for a price');
+            check(strpos(json_encode(rh_ai_notices()), 'claude-opus-6') === false && strpos(json_encode(rh_ai_notices()), 'claude-mystery-1') === false, 'a new big or unknown-family model with no price is not announced: it is never a choice on the Models table (fault 2026-11-20; the announced case is in ai_model_choices_test.php)');
             $dm2 = rh_ai_daily_models($pdo);
             check($listCalls() === $n1m && stripos((string)$dm2['note'], 'already checked today') !== false, 'model lists are not checked twice on the same day', (string)$dm2['note']);
             rh_ai_set_transport($queueTransport);

@@ -816,3 +816,18 @@ Replay local share ≥ 70 % after the cut (≥ 85 % if LATER 5–6 are ordered) 
 answers over 14 days · Fast p95 ≤ 3 s · the guardrail streak survives no-login days and reaches `complete` (14 clean
 runs) · ai test green at both hotels. Estimate: **1 round** for the cut; about 3 more 30-minute rounds if the owner
 orders the LATER list.
+
+### Fault 2026-11-20: model choices after "Check for newer models" (Liwonde first)
+`ASSUMPTION:` (AI lead, owner can override) The Models table and the refresh notice come from one function
+(`includes/ai/ai-model-choices.php`), worked out from the saved list so they survive a reload: the top choices are the
+existing suggestion (3 cheapest that perform, extras up to 5) over models the provider listed in its latest full check,
+minus older versions of a family that has a newer PRICED version; a newer version of a known model with no price yet is
+offered so its price can be typed. Big models (Opus/Pro/Ultra or out-price ≥ US$15) are never choices. A model in use
+that is no longer a top choice stays chosen as "(older, still in use)" until a person picks another and saves. A model
+in use that the provider no longer lists or closed is "No longer offered": nothing is picked for it, a warning and a
+notice ask for a replacement. The list sync is now one transaction with its time saved (`ai_models_listed_at_<provider>`);
+with no saved time only a closed model counts as retired. The list check and Test connection on Assistant Settings never
+switch a model. Kept per §Self-healing: a 404 during a chat still hands that role to the next priced model and notifies
+(`rh_ai_model_missing`), and a closed model still ticked is taken off its role at the next chat with a "choose another"
+notice, so a closed model shows as "No longer offered" only until then; the eval-gated `rh_ai_model_upgrade_check`
+(notify + undo) is unchanged.
