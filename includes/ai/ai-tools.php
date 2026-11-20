@@ -453,7 +453,7 @@ function rh_ai_paged_tools(): array
 {
     return ['search_bookings', 'arrivals_departures', 'in_house', 'room_board', 'balances_due', 'guest_history', 'money_leaks', 'inventory_watch',
         'work_queues', 'events_pipeline', 'guest_voice', 'reply_queue', 'kitchen_tickets', 'restaurant_sales', 'upsell_finder', 'who_is_online', 'check_availability', 'hotel_info',
-        'order_status', 'gym_watch', 'room_rates', 'upcoming_arrivals', 'booking_history', 'blocked_dates', 'menu_advisor', 'import_job'];
+        'order_status', 'gym_watch', 'room_rates', 'upcoming_arrivals', 'booking_history', 'blocked_dates', 'menu_advisor', 'import_job', 'group_breakdown'];
 }
 
 /** Provider-ready tool list [{name, description, schema}] for this person. */
@@ -1008,6 +1008,19 @@ function rh_ai_t_get_booking(PDO $db, array $user, array $a): array
         $ps = rh_booking_pay_state(['amount_paid' => $paidF, 'amount_due' => isset($m['balance_due']) ? (float)$m['balance_due'] : (float)($b['amount_due'] ?? 0),
             'credit_balance' => $credit, 'status' => (string)$b['status'], 'payment_status' => (string)($b['payment_status'] ?? '')], ['currency' => rh_ai_currency()]);
         $out['payment_status'] = (string)$ps['label'];
+    }
+    // Part of a group (sync 2026-11-20): one cheap count here; the room-by-room breakdown is the group_breakdown lookup.
+    try {
+        $st = $db->prepare("SELECT g.booking_reference, (SELECT COUNT(*) FROM bookings m WHERE (m.id = g.id OR m.primary_booking_id = g.id) AND m.deleted_at IS NULL)
+                            FROM bookings g WHERE g.id = (SELECT COALESCE(NULLIF(primary_booking_id, 0), id) FROM bookings WHERE id = ?)");
+        $st->execute([(int)$b['id']]);
+        $g = $st->fetch(PDO::FETCH_NUM);
+        if ($g && (int)$g[1] > 1) {
+            $out['group'] = ['rooms' => (int)$g[1], 'lead_reference' => (string)$g[0], 'this_is_the_lead' => (string)$g[0] === (string)$b['booking_reference'],
+                'note' => 'The money above is this room only. For every room, the group totals and what stands out, call group_breakdown.'];
+        }
+    } catch (Throwable $e) {
+        // no group line rather than a guessed one
     }
     if ($out['special_requests'] === '') {
         unset($out['special_requests']);
@@ -1861,8 +1874,8 @@ function rh_ai_t_guest_history(PDO $db, array $user, array $a): array
         $out['without_email_means'] = 'Bookings that matched the search but have no guest email: they are not in this history (it follows the booking email). Search Bookings for them.';
     }
     if (is_array($h['money'])) {
-        $out['money'] = ['received' => rh_ai_money((float)$h['money']['received']), 'refunded' => rh_ai_money((float)$h['money']['refunded']), 'moved_to_credit_notes' => rh_ai_money((float)$h['money']['to_credit']),
-            'means' => 'Received = money taken from the guest net of refunds, all their room bookings. Refunded = paid back in full (moved_to_credit_notes is the part that became guest credit).'];
+        $out['money'] = ['received' => rh_ai_money((float)$h['money']['received']), 'refunded' => rh_ai_money((float)$h['money']['refunded']), 'moved_to_guest_credit' => rh_ai_money((float)$h['money']['to_credit']),
+            'means' => 'Received = money taken from the guest net of refunds, all their room bookings. Refunded = real payouts only (cash, bank or mobile money), in full. moved_to_guest_credit = money put onto a credit note: guest credit, not a refund and not part of refunded.'];
         $out['currency'] = rh_ai_currency();
     }
     return $out;

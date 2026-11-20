@@ -25,6 +25,13 @@ when prompted."
 
 ## Pending (oldest first)
 
+### Import: selling price recognised in Step 2, Step 4 pager, "See projected profit" link (2026-11-20, owner fault) - hashes in TASKS.md
+- **Guides (23 Import):** Step 2 now shows the selling price column as "Recognised", used in Step 4 "Drinks for the menu" (no longer "Not imported"). Step 4 lists: Previous / Next, type a page number, Show 10/25/50/100. Finished screen: "See projected profit" link (people who can open Stock Reports) opens Stock Reports > Projected profit.
+- **Manager Guides (stock):** check the import line still matches (no "Not imported" wording).
+- **Assistant:** no overlap.
+
+## Synced 2026-11-20 (guides Rosalyn's 909510e / Liwonde 8704293 · Assistant: see TASKS.md SYNC 2026-11-20 · Manager Guides: Stock, Bookings, Money and End of Day, Staff and Permissions refreshed) - entries kept for reference
+
 ### Group bookings Ship A: Correct Stay Dates after checkout + group table (2026-11-17, owner ask) — hashes in TASKS.md
 - **Guides (Bookings > booking details):**
   - A checked-out room has a new "Correct Stay Dates" button. It needs the "Correct a stay after checkout" permission (default admin and manager) and a reason, and goes through preview → confirm.
@@ -632,11 +639,6 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
 - Guides: guide 08 already updated in this ship (chips example). Other guides that mention yield (recipes/menu, KB answers) should use the same example: 10 kg potatoes peeled to 8 kg = 80 %; 250 g chips plate takes 313 g raw; sack makes 32 plates, not 40; type the plate amount; rice/pasta dry amount at 100 %.
 - Assistant: if it explains yield, use the same example and rule (raw taken off = plate amount / yield).
 
-### Import: selling price recognised in Step 2, Step 4 pager, "See projected profit" link (2026-11-20, owner fault) - hashes in TASKS.md
-- **Guides (23 Import):** Step 2 now shows the selling price column as "Recognised", used in Step 4 "Drinks for the menu" (no longer "Not imported"). Step 4 lists: Previous / Next, type a page number, Show 10/25/50/100. Finished screen: "See projected profit" link (people who can open Stock Reports) opens Stock Reports > Projected profit.
-- **Manager Guides (stock):** check the import line still matches (no "Not imported" wording).
-- **Assistant:** no overlap.
-
 ## Known leftovers from earlier syncs (fix during a sync, never on their own)
 - `ai_assistant_test` at Liwonde: 7 data-dependent fails (left-owing + refunds briefing, 4 alert checks, digest
   recipients); ai_review_engine "nothing to add for this person" fails on HEAD too. (Tomorrow / 4 of 3 / K1,068,000 now pass.)
@@ -646,9 +648,7 @@ Depends on the group bookings ships (Ship A group table, A8 correction after che
   when one email is found; `balances_due` per-row fallback (speed).
 
 ## Synced
-- 2026-11-20 (owner prompted), PART DONE: Guides for every Pending entry above, Rosalyn's 909510e / Liwonde 8704293.
+- 2026-11-20 (owner prompted), DONE: Guides Rosalyn's 909510e / Liwonde 8704293; Assistant see TASKS.md SYNC 2026-11-20 (entries in the 'Synced 2026-11-20' section).
   Manager Guides: Stock, Bookings, Money and End of Day, Staff and Permissions refreshed; Daily checklist no change.
-  Assistant: built at Liwonde, not yet committed; waiting on its test run (see TASKS.md SYNC 2026-11-20).
-  The Pending entries stay until the Assistant part ships; after that, move them all here.
 - Through 943ca16: Rosalyn's 55827b0 / Liwonde 717b36e (and earlier 859473d / 8f7301d, 5085f61 / 2c82b0e).
   Full history: `.claude/TASKS.md` Shipped + `.claude/archive/`.

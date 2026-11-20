@@ -1470,8 +1470,8 @@ function rh_dec_refunds_by_staff(PDO $db, array $ctx): ?array
             require_once dirname(__DIR__, 2) . '/admin/includes/finance-refunds.php'; // the one refund rule (pure)
         }
         $st = $db->prepare("SELECT recorded_by, COUNT(*) AS times, COALESCE(SUM(" . rh_refund_amount_sql() . "), 0) AS amount FROM payments
-                            WHERE deleted_at IS NULL AND " . rh_refund_settled_sql() . " AND " . rh_refund_eod_date_sql() . " BETWEEN ? AND ?
-                            GROUP BY recorded_by ORDER BY amount DESC LIMIT 6");
+                            WHERE deleted_at IS NULL AND " . rh_refund_payout_sql() . " AND " . rh_refund_eod_date_sql() . " BETWEEN ? AND ?
+                            GROUP BY recorded_by ORDER BY amount DESC LIMIT 6"); // real payouts only (Ship M): a credit-note move is not a refund
         $st->execute([$ctx['from'], $ctx['to']]);
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
     } catch (Throwable $e) {
@@ -1612,21 +1612,23 @@ function rh_dec_dept_label(string $t): string
 
 /**
  * Takings per department for a range on the Reports profit rule (admin/reports.php "P&L / GROSS PROFIT"): money collected
- * (the Accounting dashboard's collected rule, gross) less refunds paid back in full, less VAT net of refunds' VAT = takings
- * excluding VAT. Unfiltered by module, so every payment is counted. null = unreadable.
+ * (the Accounting dashboard's collected rule, gross, credit-note payments left out: Ship M) less refunds paid out
+ * (rh_refund_payout_sum_sql: a credit-note move is not a refund), less VAT counted once (rh_vat_once_sql) = takings excluding VAT. Unfiltered by module, so every payment is counted. null = unreadable.
  */
 function rh_dec_dept_takings(PDO $db, string $from, string $to): ?array
 {
     try {
-        if (!function_exists('rh_refund_settled_sql')) {
-            require_once dirname(__DIR__, 2) . '/admin/includes/finance-refunds.php'; // the one refund rule (pure)
+        if (!function_exists('rh_eod_cash_row_sql')) {
+            require_once dirname(__DIR__, 2) . '/admin/includes/eod-revenue.php'; // the cash-view rule (loads the one refund rule too)
         }
+        // Reports P&L since Ship M (owner 2026-11-18, admin/reports.php): money received leaves out payments made WITH a
+        // credit note (End of Day cash rule), refunds are real payouts only, VAT is counted once (rh_vat_once_sql).
+        $cash = rh_eod_cash_row_sql();
         $st = $db->prepare("SELECT booking_type,
-                COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN total_amount ELSE 0 END), 0) AS collected,
-                " . rh_refund_settled_sum_sql() . " AS refunds,
-                COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' THEN vat_amount ELSE 0 END), 0)
-                    - COALESCE(SUM(CASE WHEN payment_type = 'refund' AND refund_status IN ('completed','processing') THEN vat_amount ELSE 0 END), 0) AS vat
-            FROM payments WHERE " . rh_pay_count_day_sql() . " BETWEEN ? AND ? AND deleted_at IS NULL GROUP BY booking_type"); // a refund on its payout day, as Reports / the dashboard
+                COALESCE(SUM(CASE WHEN payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND COALESCE(payment_type, '') != 'refund' AND {$cash} THEN total_amount ELSE 0 END), 0) AS collected,
+                " . rh_refund_payout_sum_sql() . " AS refunds,
+                COALESCE(SUM(" . rh_vat_once_sql() . "), 0) AS vat
+            FROM payments WHERE (payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') OR payment_type = 'refund') AND " . rh_pay_count_day_sql() . " BETWEEN ? AND ? AND deleted_at IS NULL GROUP BY booking_type"); // a refund on its payout day, as Reports / the dashboard
         $st->execute([$from, $to]);
         $out = [];
         foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {

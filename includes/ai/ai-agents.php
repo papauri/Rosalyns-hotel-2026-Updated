@@ -1398,6 +1398,10 @@ function rh_ai_answer_from_results(array $results): string
         } elseif ($tool === 'get_booking' && !empty($res['booking_id'])) {
             // One booking: its line, its own bill and what it includes (owner fault 2026-10-29: never a "(Looked up: ...)" stand-in)
             $txt = rh_ai_booking_line($res) . "\n\n" . rh_ai_booking_money_text($res) . "\n\n" . rh_ai_booking_included_text($res, false);
+            if (is_array($res['group'] ?? null)) { // part of a group: the money above is this room only
+                $txt .= "\n\nThis room is part of group " . $res['group']['lead_reference'] . ' (' . (int)$res['group']['rooms'] . ' rooms); the money above is this room only. Ask "group breakdown for '
+                    . $res['group']['lead_reference'] . '" for every room and the group totals.';
+            }
         } else {
             // No generic dump of other results (QA 2026-10-28): a filtered search's "0 matches" must never go out as
             // "none" without the checked total. The caller says plainly that it could not put the answer together.
@@ -2022,7 +2026,7 @@ function rh_ai_specialists(): array
         'front_desk' => ['label' => 'Front Desk & Rooms', 'brief' => 'reservations, availability, quotes, arrivals, departures, in-house guests, room assignment and guest history',
             'core' => ['search_bookings', 'get_booking', 'arrivals_departures', 'in_house', 'check_availability'],
             'tools' => ['search_bookings', 'get_booking', 'check_availability', 'quote_stay', 'room_rates', 'arrivals_departures', 'in_house', 'room_board', 'guest_history', 'rate_plans_and_deals', 'hotel_info',
-                'booking_history', 'upcoming_arrivals', 'booking_holds', 'blocked_dates']],
+                'booking_history', 'upcoming_arrivals', 'booking_holds', 'blocked_dates', 'group_breakdown']],
         'housekeeping' => ['label' => 'Housekeeping & Maintenance', 'brief' => 'room status, cleaning jobs, maintenance tasks, rooms off sale and rooms not ready for arrivals',
             'core' => ['work_queues', 'room_board'], 'tools' => ['work_queues', 'room_board']],
         'restaurant' => ['label' => 'Restaurant & Bar', 'brief' => 'till sales, top sellers, voids, refunds, slow tickets at the kitchen, bar and coffee stations, and where one order is',

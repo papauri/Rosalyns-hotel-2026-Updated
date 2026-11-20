@@ -346,7 +346,7 @@ function rh_ai_alerts_refresh(PDO $db, array $user): int
     if ($uid <= 0 || !rh_ai_extras_ready($db) || !function_exists('rh_ai_briefing_findings') || !hasPermission($uid, 'ai_assistant_use')) {
         return 0;
     }
-    $b = rh_ai_briefing_findings($db, $user);
+    $b = rh_ai_briefing_findings($db, $user, 0); // every finding: an urgent one is never cut by the briefing's top-N
     $keys = [];
     $up = $db->prepare("INSERT INTO ai_alerts (user_id, alert_key, kind, title, detail, link_url, link_label, item_count, score)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)

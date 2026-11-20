@@ -679,6 +679,9 @@ function rh_ai_pv_edit_booking(PDO $db, array $user, array $a): array
         if ($dropBits['row']) {
             $rows[] = $dropBits['row'];
         }
+        if ($nights < (int)$b['number_of_nights'] && ($h = rh_ai_unused_fee_handoff($db, $b, $ci, $co, date('Y-m-d'), $total, $rows, 'Edit booking')) !== null) {
+            return $h; // modify_booking quotes a shortening on today's notice
+        }
         $fp = [$total, true];
     }
     $fields = [['action', 'modify_booking'], ['id', (string)(int)$b['id']]];
@@ -748,6 +751,9 @@ function rh_ai_pv_new_checkout(PDO $db, array $user, array $a, bool $correction)
         $card['warn'][] = 'Use "Add / take off nights" on Bookings (refund or credit note, amount retyped), or Check out & settle if the guest is leaving today.';
         return ['card' => $card, 'steps' => [], 'fp' => [false], 'facts' => rh_ai_bk_facts($b) + ['new_checkout' => $new, 'handoff' => 'take off nights on the bookings screen']];
     }
+    if ($correction && $new < $old && ($h = rh_ai_unused_fee_handoff($db, $b, (string)$b['check_in_date'], $new, min(date('Y-m-d'), $new), $total, $rows, 'the check-out date correction')) !== null) {
+        return $h; // the notice date admin_update_checkout_date uses: a future check-out is a notice given today
+    }
     if ($correction) {
         $reason = trim((string)($a['reason'] ?? ''));
         $card = rh_ai_card_base('Correct check-out date', 'Administrators and managers: fixes a wrong check-out date. The stay is repriced at the booked nightly rate.', $rows, 'Correct the date',
@@ -765,6 +771,38 @@ function rh_ai_pv_new_checkout(PDO $db, array $user, array $a, bool $correction)
         array_unshift($card['notes'], $dropBits['note']);
     }
     return ['card' => $card, 'steps' => $steps, 'fp' => [$total], 'facts' => rh_ai_bk_facts($b) + ['new_checkout' => $new, 'new_total' => $total] + $dropBits['facts'], 'incomplete' => !$steps];
+}
+
+/**
+ * Kept for unused nights (D-R1a, sync 2026-11-20): when a shorter stay keeps money under the booking's cancellation
+ * policy, the Bookings save needs that amount reviewed (and may change it with a reason), which a chat card does not
+ * show, so the save would refuse. Such a cut is handed to the screen instead of offered as a card. The quote is the
+ * screen's own (rh_unused_nights_quote, same notice date and new total). null = no amount is kept: the card goes ahead.
+ */
+function rh_ai_unused_fee_handoff(PDO $db, array $b, string $newIn, string $newOut, string $notice, float $newGross, array $rows, string $screen): ?array
+{
+    if (!function_exists('rh_unused_nights_quote')) {
+        $lib = dirname(__DIR__) . '/cancellation-policy.php';
+        if (is_file($lib)) {
+            require_once $lib;
+        }
+    }
+    if (!function_exists('rh_unused_nights_quote')) {
+        return null;
+    }
+    try {
+        $q = rh_unused_nights_quote($db, $b, substr($newIn, 0, 10), substr($newOut, 0, 10), $notice, ['new_gross' => $newGross, 'cur' => rh_ai_currency()]);
+    } catch (Throwable $e) {
+        error_log('Assistant unused nights quote: ' . $e->getMessage());
+        return null; // the save's own check still stands
+    }
+    if ((empty($q['applies']) && empty($q['overridable'])) || (float)($q['amount'] ?? 0) <= BALANCE_TOLERANCE) {
+        return null; // the save's refusal: a kept amount above tolerance that was never shown (bookings_unused_nights_checked)
+    }
+    $card = rh_ai_card_base('Take off nights on Bookings', 'This booking\'s cancellation policy keeps an amount for the nights not used. That amount is reviewed on the Bookings screen, so this change is not made from the chat.', $rows, '',
+        ['handoff' => ['label' => 'Open the booking on Bookings', 'url' => 'bookings.php?search=' . rawurlencode((string)$b['booking_reference'])]]);
+    $card['warn'][] = 'Use ' . $screen . ' on Bookings: it shows the amount kept for unused nights, and a manager can change it with a reason.';
+    return ['card' => $card, 'steps' => [], 'fp' => [false], 'facts' => rh_ai_bk_facts($b) + ['handoff' => 'amount kept for unused nights is reviewed on the bookings screen', 'unused_nights' => (int)$q['unused']]];
 }
 
 function rh_ai_pv_extend_stay(PDO $db, array $user, array $a): array

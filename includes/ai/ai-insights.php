@@ -292,27 +292,31 @@ function rh_ai_t_money_leaks(PDO $db, array $user, array $a): array
         // so a refund approved days after it was asked for lands on the approval day, as on End of Day.
         $amt = rh_refund_amount_sql();
         $day = rh_refund_eod_date_sql();
+        // Ship M (2026-11-18): a refund is a real payout only (cash, bank, mobile money); money moved onto a credit note is
+        // guest credit, kept apart (moved_to_guest_credit), as on the Accounting dashboard. Rows are the payouts.
         $st = $db->prepare("SELECT booking_type, booking_reference, {$amt} AS refund_total, payment_method, refund_reason, refund_status, recorded_by, processed_by, {$day} AS paid_out_day
-                            FROM payments WHERE deleted_at IS NULL AND " . rh_refund_settled_sql() . " AND {$day} BETWEEN ? AND ?
+                            FROM payments WHERE deleted_at IS NULL AND " . rh_refund_payout_sql() . " AND {$day} BETWEEN ? AND ?
                             ORDER BY {$amt} DESC");
         $st->execute([$from, $to]);
         $rows = $st->fetchAll(PDO::FETCH_ASSOC);
         foreach ($rows as $r) {
             $staffIds[] = (int)$r['recorded_by'];
         }
-        $st = $db->prepare("SELECT " . rh_refund_settled_sum_sql() . " AS total, " . rh_refund_settled_count_sql() . " AS n, " . rh_refund_to_credit_sum_sql() . " AS to_credit
+        $st = $db->prepare("SELECT " . rh_refund_payout_sum_sql() . " AS total, " . rh_refund_payout_count_sql() . " AS n, " . rh_refund_to_credit_sum_sql() . " AS to_credit,
+                                   COALESCE(SUM(CASE WHEN " . rh_refund_to_credit_sql() . " THEN 1 ELSE 0 END), 0) AS n_credit
                             FROM payments WHERE deleted_at IS NULL AND payment_type = 'refund' AND {$day} BETWEEN ? AND ?");
         $st->execute([$from, $to]);
-        $agg = $st->fetch(PDO::FETCH_ASSOC) ?: ['total' => 0, 'n' => 0, 'to_credit' => 0];
+        $agg = $st->fetch(PDO::FETCH_ASSOC) ?: ['total' => 0, 'n' => 0, 'to_credit' => 0, 'n_credit' => 0];
         // Awaiting approval: every date (the Payments "awaiting approval" list it links to has no date filter)
         $pa = $db->query("SELECT " . rh_refund_pending_count_sql() . " AS n, " . rh_refund_pending_sum_sql() . " AS v FROM payments WHERE deleted_at IS NULL")->fetch(PDO::FETCH_ASSOC) ?: ['n' => 0, 'v' => 0];
         $tot = rh_ai_money((float)$agg['total']);
-        $toCredit = min($tot, rh_ai_money(max(0.0, (float)$agg['to_credit'])));
+        $toCredit = rh_ai_money(max(0.0, (float)$agg['to_credit']));
         $out['refunds'] = ['total' => $tot, 'count' => (int)$agg['n'],
-            'paid_back_cash_or_bank' => rh_ai_money(max(0.0, $tot - $toCredit)), 'moved_to_credit_notes' => $toCredit,
+            'moved_to_guest_credit' => $toCredit, 'moved_to_guest_credit_count' => (int)$agg['n_credit'],
             'awaiting_approval_count' => (int)$pa['n'], 'awaiting_approval_total' => rh_ai_money((float)$pa['v']),
             'waiting_to_be_processed' => (int)$pa['n'], 'rows' => array_slice($rows, 0, 6),
-            'note' => 'Shown in full (the whole amount paid back, VAT included), paid out or being paid. Moved to credit notes = guest credit, no cash out. Awaiting approval is not in the total.'];
+            'note' => (function_exists('rh_ship_m_help') ? rh_ship_m_help('refunds') : 'Money paid back to guests in cash, bank or mobile money. Moving money onto a credit note is guest credit, not a refund.')
+                . ' total = refunds paid out in full (VAT included), paid or being paid. moved_to_guest_credit is not a refund and not cash out. Awaiting approval is in neither.'];
     } catch (Throwable $e) {
         $out['refunds'] = ['error' => 'Could not be read.'];
     }
@@ -412,7 +416,7 @@ function rh_ai_t_money_leaks(PDO $db, array $user, array $a): array
     if (isset($out['refunds']['rows'])) {
         $out['refunds']['rows'] = array_map(static fn($r) => ['type' => $r['booking_type'], 'reference' => $r['booking_reference'], 'amount' => rh_ai_money((float)$r['refund_total']),
             'reason' => (string)$r['refund_reason'], 'status' => function_exists('rh_refund_status_label') ? rh_refund_status_label((string)$r['refund_status']) : $r['refund_status'],
-            'moved_to_credit_note' => (string)$r['payment_method'] === 'credit_note', 'date' => $r['paid_out_day'], 'staff_name' => (string)($names[(int)$r['recorded_by']] ?? $r['processed_by'] ?? '')], $out['refunds']['rows']);
+            'method' => str_replace('_', ' ', (string)$r['payment_method']), 'date' => $r['paid_out_day'], 'staff_name' => (string)($names[(int)$r['recorded_by']] ?? $r['processed_by'] ?? '')], $out['refunds']['rows']);
     }
     if (isset($out['till_voids']['rows'])) {
         $out['till_voids']['rows'] = array_map(static fn($r) => ['reference' => $r['reference'], 'amount' => rh_ai_money((float)$r['total_amount']), 'reason' => $r['reason'], 'staff_name' => (string)($names[(int)$r['voided_by']] ?? '')], $out['till_voids']['rows']);
@@ -1024,9 +1028,11 @@ function rh_ai_briefing_weights(string $lens): array
  * Each finding: id, kind (money|time|queue|decision), title, detail, count, amount (money kinds only),
  * items (rows with guest_name / reference / staff_name fields the vault tokenises), link (deep link the
  * person may open), score. Money findings exist only for people who hold a money permission.
+ * $max: findings kept after ranking (the briefing shows RH_AI_BRIEF_MAX); 0 = all of them (alerts: an urgent point
+ * is never dropped because bigger, non-urgent points filled the briefing).
  * @return array{lens:string, lens_label:string, date:string, currency:string, findings:array}
  */
-function rh_ai_briefing_findings(PDO $db, array $user): array
+function rh_ai_briefing_findings(PDO $db, array $user, int $max = RH_AI_BRIEF_MAX): array
 {
     $lens = rh_ai_briefing_lens($user);
     $cur = rh_ai_currency();
@@ -1188,7 +1194,7 @@ function rh_ai_briefing_findings(PDO $db, array $user): array
     }
     unset($x);
     usort($f, static fn($a, $b) => [$b['score'], $a['id']] <=> [$a['score'], $b['id']]);
-    return ['lens' => $lens, 'lens_label' => rh_ai_briefing_lens_label($lens), 'date' => date('Y-m-d'), 'currency' => $cur, 'findings' => array_slice($f, 0, RH_AI_BRIEF_MAX)];
+    return ['lens' => $lens, 'lens_label' => rh_ai_briefing_lens_label($lens), 'date' => date('Y-m-d'), 'currency' => $cur, 'findings' => $max > 0 ? array_slice($f, 0, $max) : $f];
 }
 
 if (!defined('RH_AI_FD_SHOW')) {
@@ -1350,8 +1356,8 @@ function rh_ai_brief_money(array $m, callable $add, bool $owedOk = false): void
     if (!empty($m['refunds']['total']) && (float)$m['refunds']['total'] > BALANCE_TOLERANCE) {
         $r = $m['refunds'];
         $add(['id' => 'refunds', 'kind' => 'money', 'severity' => $sev((float)$r['total']), 'title' => 'Refunds paid out', 'count' => $r['count'], 'amount' => $r['total'],
-            'detail' => $fmt($r['total']) . ' refunded in full on ' . $r['count'] . ' payment(s), ' . $range . '.'
-                . (function_exists('rh_refund_split_text') && ($split = rh_refund_split_text((float)$r['total'], (float)($r['moved_to_credit_notes'] ?? 0), $cur, 2)) !== '' ? ' ' . $split . '.' : ''),
+            'detail' => $fmt($r['total']) . ' paid back in full (cash, bank or mobile money) on ' . $r['count'] . ' refund(s), ' . $range . '.'
+                . ((float)($r['moved_to_guest_credit'] ?? 0) > BALANCE_TOLERANCE ? ' Separately, ' . $fmt($r['moved_to_guest_credit']) . ' was moved onto credit notes: guest credit, not a refund.' : ''),
             'items' => array_slice(array_map(static fn($x) => ['reference' => $x['reference'], 'staff_name' => $x['staff_name'], 'text' => ($x['reason'] !== '' ? $x['reason'] : 'no reason given'), 'amount' => $x['amount']], $r['rows']), 0, 4),
             'link' => ['payments.php?refund_status=completed%2Cprocessing&start_date=' . $m['from'] . '&end_date=' . $m['to'], 'Open refunds']]);
     }

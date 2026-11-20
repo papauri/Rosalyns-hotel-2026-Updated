@@ -35,6 +35,13 @@ function rh_ai_desk_tools(): array
             'schema' => ['properties' => ['booking_id' => ['type' => 'integer', 'minimum' => 1], 'reference' => ['type' => 'string', 'maxLength' => 40]]],
             'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 30, 'handler' => 'rh_ai_t_booking_history', 'step' => 'Reading the booking\'s history',
         ],
+        // Guides + Assistant sync 2026-11-20 (group bookings ships): the full group, room by room, from the Group rooms table
+        // on Booking Details (includes/group-room-table.php, one source). Read only: every group change stays on screens.
+        'group_breakdown' => [
+            'description' => 'A group booking (several rooms under one lead booking) room by room, the same figures as the Group rooms table on Booking Details: the lead booking and linked rooms, who pays (company account when on one), each room\'s own dates and nights (rooms whose dates differ from the lead\'s are marked), booked rate × nights, bill, folio charges, paid, owed, credit, refunds paid out and money moved to guest credit, any whole-group payment and how it was split across the rooms, each room\'s check-in / check-out / no-show / cancel steps (hotel-local time), group totals over every room in every status with the bill sum written out, and what stands out with the screen that fixes it. Read only: making a lead, adding or removing rooms, moving credit, changing dates and correcting a stay after check-out are done on Booking Details. Give a booking_id or reference of any room in the group.',
+            'schema' => ['properties' => ['booking_id' => ['type' => 'integer', 'minimum' => 1], 'reference' => ['type' => 'string', 'maxLength' => 40]]],
+            'perm' => ['bookings'], 'module' => ['bookings'], 'cache' => 30, 'handler' => 'rh_ai_t_group_breakdown', 'step' => 'Reading the group room by room',
+        ],
         'upcoming_arrivals' => [
             'description' => 'The next arrivals from a date (default today), soonest first: date, guest, room type, nights and status, and the date of the very next one. For "when is the next arrival" and arrivals on other days.',
             'schema' => ['properties' => ['from' => $date, 'days' => $days]],
@@ -656,6 +663,295 @@ function rh_ai_t_booking_history(PDO $db, array $user, array $a): array
     $out['stay'] = $steps !== null ? rh_ai_stay_facts_from($steps) : ['error' => 'could not be read just now'];
     $out += rh_ai_booking_emails($db, $id, (string)$b['booking_reference']);
     return $out;
+}
+
+/**
+ * PURE. Amounts written out as a sum, equal amounts grouped in the order they first appear:
+ * sixteen 129000s -> "16 × 129,000 = 2,064,000"; [100, 100, 50] -> "2 × 100 + 50 = 250"; one amount -> "129,000".
+ * @return array{text:string,total:float}
+ */
+function rh_ai_sum_written(array $amounts): array
+{
+    $groups = [];
+    $total = 0.0;
+    foreach ($amounts as $v) {
+        $v = round((float)$v, 2);
+        $k = number_format($v, 2, '.', '');
+        $groups[$k] = ($groups[$k] ?? 0) + 1;
+        $total = round($total + $v, 2);
+    }
+    if (!$groups) {
+        return ['text' => '', 'total' => 0.0];
+    }
+    $fmt = static fn(float $v): string => abs($v - round($v)) < 0.005 ? number_format($v, 0) : number_format($v, 2);
+    $terms = [];
+    foreach ($groups as $k => $n) {
+        $terms[] = ($n > 1 ? $n . ' × ' : '') . $fmt((float)$k);
+    }
+    if (count($amounts) === 1) {
+        return ['text' => $terms[0], 'total' => $total];
+    }
+    return ['text' => implode(' + ', $terms) . ' = ' . $fmt($total), 'total' => $total];
+}
+
+/**
+ * PURE. One room's stay steps in a short line from its History facts (rh_ai_stay_facts_from): check-in, check-out,
+ * no-show, cancellation and the latest date change, hotel-local times, who as a role only (never a name or a note).
+ */
+function rh_ai_group_stay_line(array $f): string
+{
+    $who = static function (array $x): string {
+        $w = (string)($x['role'] ?? '');
+        return $w !== '' ? $w : (string)($x['by'] ?? 'not recorded');
+    };
+    $bits = [];
+    foreach (['checked_in' => 'checked in', 'no_show' => 'marked no-show', 'cancelled' => 'cancelled', 'checked_out' => 'checked out'] as $k => $word) {
+        if (is_array($f[$k] ?? null)) {
+            $bits[] = $word . ' ' . substr((string)$f[$k]['at'], 0, 16) . ' (' . $who($f[$k]) . ')';
+        }
+    }
+    $dc = is_array($f['date_changes'] ?? null) ? $f['date_changes'] : [];
+    if ($dc) {
+        $bits[] = 'dates changed ' . substr((string)$dc[0]['at'], 0, 16) . (!empty($dc[0]['change']) ? ': ' . $dc[0]['change'] : '') . (count($dc) > 1 ? ' (' . count($dc) . ' changes)' : '');
+    }
+    return $bits ? implode('; ', $bits) : 'no check-in, check-out, no-show or cancel step recorded';
+}
+
+/**
+ * "Tell me about group X": every room of the group as the Group rooms table on Booking Details shows it
+ * (rh_group_room_table: bill, paid, owed, credit and refunds per room straight from getBookingFolioSummary - never worked
+ * out again here), folio charges by the folio's own rule (booking_charges, voided = 0), whole-group payments read from
+ * the split note group-payment.php writes (numbers only), each room's stay steps from its History panel (hotel-local,
+ * roles only) and what stands out with the screen that fixes it. Totals, the written sum and what stands out sit outside
+ * the room list, so paging the rooms never cuts them. Read only.
+ */
+function rh_ai_t_group_breakdown(PDO $db, array $user, array $a): array
+{
+    $b = rh_ai_desk_booking_row($db, $a);
+    if (!$b) {
+        return ['error' => empty($a['booking_id']) && empty($a['reference']) ? 'Give a booking id or reference.' : 'No booking found.'];
+    }
+    $open = ['link' => 'booking-details.php?id=' . (int)$b['id'], 'link_label' => 'Open booking'];
+    $cur = rh_ai_currency();
+    try {
+        require_once dirname(__DIR__) . '/group-room-table.php';
+        $t = rh_group_room_table($db, (int)$b['id'], $cur);
+    } catch (Throwable $e) {
+        error_log('Assistant group breakdown: ' . $e->getMessage());
+        return ['error' => 'The group could not be read just now. Open the booking to see its Group rooms table.'] + $open;
+    }
+    $rows = $t['rows'];
+    if (!$rows) {
+        return ['error' => 'No rooms found for this booking.'] + $open;
+    }
+    $tol = BALANCE_TOLERANCE;
+    $root = (int)$t['root'];
+    $lead = null;
+    foreach ($rows as $r) {
+        if (!empty($r['is_root'])) {
+            $lead = $r;
+            break;
+        }
+    }
+    $lead = $lead ?? $rows[0];
+    $ids = array_map(static fn($r) => (int)$r['id'], $rows);
+    $in = implode(',', array_fill(0, count($ids), '?'));
+    $charges = [];
+    $chargesOk = true;
+    try { // folio charges: the folio's own rule (getBookingFolioSummary: booking_charges, voided = 0)
+        $st = $db->prepare("SELECT booking_id, SUM(line_total) FROM booking_charges WHERE voided = 0 AND booking_id IN ($in) GROUP BY booking_id");
+        $st->execute($ids);
+        $charges = $st->fetchAll(PDO::FETCH_KEY_PAIR);
+    } catch (Throwable $e) {
+        $chargesOk = false;
+    }
+    // Whole-group payments: one payment row per room carrying the split note (admin/includes/group-payment.php). Only the
+    // note's own figures are read; any text staff typed with it is never passed on.
+    $lumps = [];
+    try {
+        $st = $db->prepare("SELECT booking_reference, payment_date, payment_method, total_amount, notes FROM payments
+                            WHERE booking_type = 'room' AND deleted_at IS NULL AND COALESCE(payment_type, '') <> 'refund'
+                              AND payment_status IN ('completed', 'paid', 'refunded', 'partially_refunded') AND booking_id IN ($in) AND notes LIKE ?
+                            ORDER BY payment_date, id");
+        $st->execute(array_merge($ids, ['%Part of a whole-group payment of %']));
+        foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $p) {
+            if (!preg_match('/Part of a whole-group payment of .*? ([\d,]+(?:\.\d{1,2})?) split across (\d+) rooms\./u', (string)$p['notes'], $m)) {
+                continue;
+            }
+            $amt = round((float)str_replace(',', '', $m[1]), 2);
+            $key = substr((string)$p['payment_date'], 0, 10) . '|' . $p['payment_method'] . '|' . $amt . '|' . $m[2];
+            if (!isset($lumps[$key])) {
+                $lumps[$key] = ['date' => substr((string)$p['payment_date'], 0, 10), 'method' => str_replace('_', ' ', (string)$p['payment_method']), 'amount' => $amt,
+                    'rooms_in_note' => (int)$m[2], 'legs' => []];
+            }
+            $lumps[$key]['legs'][] = round((float)$p['total_amount'], 2);
+        }
+    } catch (Throwable $e) {
+        $lumps = [];
+    }
+    $payments = [];
+    foreach ($lumps as $l) {
+        $sum = rh_ai_sum_written($l['legs']);
+        $payments[] = ['date' => $l['date'], 'method' => $l['method'], 'amount' => $l['amount'], 'split' => $sum['text'], 'rooms' => count($l['legs']),
+            'adds_up' => abs($sum['total'] - $l['amount']) <= $tol && count($l['legs']) === $l['rooms_in_note']];
+    }
+
+    $outRows = [];
+    $stands = [];
+    $byStatus = [];
+    $charged = 0.0;
+    $toCredit = 0.0;
+    $owing = 0.0;
+    $histCap = 40; // History steps per room up to this many rooms; a bigger group points at the History panel
+    foreach ($rows as $i => $r) {
+        $id = (int)$r['id'];
+        $st = (string)$r['status'];
+        $byStatus[$st] = ($byStatus[$st] ?? 0) + 1;
+        $fc = round((float)($charges[$id] ?? 0), 2);
+        $charged = round($charged + $fc, 2);
+        $toCredit = round($toCredit + (float)$r['credit_note_refunds'], 2);
+        if ((float)$r['owed'] > $tol) {
+            $owing = round($owing + (float)$r['owed'], 2);
+        }
+        $same = $r['check_in'] === $lead['check_in'] && $r['check_out'] === $lead['check_out'];
+        $row = ['booking_id' => $id, 'reference' => $r['ref']];
+        if (!empty($r['is_root'])) {
+            $row['lead'] = true;
+        }
+        $row += ['room_type' => $r['room'], 'room_number' => $r['room_number'] !== '' ? $r['room_number'] : 'not assigned', 'status' => $st];
+        if ($r['room_guest_name'] !== '') {
+            $row['room_guest_name'] = $r['room_guest_name'];
+        }
+        if (!empty($r['is_root']) || !$same) {
+            $row['check_in'] = $r['check_in'];
+            $row['check_out'] = $r['check_out'];
+        }
+        if (empty($r['is_root'])) {
+            $row['dates'] = $same ? 'same as the lead' : 'DIFFERENT from the lead';
+        }
+        $row['nights'] = (int)$r['nights'];
+        $row['booked_rate'] = $r['rate_compact'] !== '' ? $r['rate_compact'] : 'not recorded';
+        $row['billed'] = rh_ai_money((float)$r['billed']);
+        if ($fc > $tol) {
+            $row['folio_charges'] = $fc;
+        }
+        $row['paid'] = rh_ai_money((float)$r['paid']);
+        $row['owed'] = rh_ai_money((float)$r['owed']);
+        foreach (['credit' => 'credit', 'refunds' => 'refunds_paid_out', 'credit_note_refunds' => 'moved_to_guest_credit'] as $k => $as) {
+            if ((float)$r[$k] > $tol) {
+                $row[$as] = rh_ai_money((float)$r[$k]);
+            }
+        }
+        $facts = null;
+        if ($i < $histCap) {
+            $steps = rh_ai_booking_history_steps($db, $id);
+            $facts = $steps !== null ? rh_ai_stay_facts_from($steps) : null;
+            $row['stay'] = $facts !== null ? rh_ai_group_stay_line($facts) : 'could not be read just now';
+        } else {
+            $row['stay'] = 'see the History panel on Booking Details';
+        }
+        $outRows[] = $row;
+
+        // What stands out: each item says where staff fix it; the Assistant changes nothing.
+        $see = 'booking-details.php?id=' . $id;
+        if ($st === 'checked-out' && $facts !== null) {
+            $outDay = is_array($facts['checked_out']) ? substr((string)$facts['checked_out']['at'], 0, 10) : '';
+            if ($outDay === '') {
+                $stands[] = ['reference' => $r['ref'], 'what' => 'Checked out, but its History has no check-out step.', 'fix_on' => 'Booking Details > History', 'link' => $see];
+            } elseif ($outDay !== $r['check_out']) {
+                $stands[] = ['reference' => $r['ref'], 'what' => 'Checked out on ' . $outDay . ' but booked to leave ' . $r['check_out'] . '.',
+                    'fix_on' => 'Booking Details > Correct stay dates (needs the "Correct Stay After Check-out" permission; the bill is re-worked at the booked rate)', 'link' => $see];
+            }
+        }
+        if ((float)$r['owed'] > $tol && in_array($st, ['checked-out', 'no-show', 'cancelled'], true)) {
+            $stands[] = ['reference' => $r['ref'], 'what' => 'Still owes ' . rh_ai_fmt_cur($cur, (float)$r['owed']) . ' (' . $st . '). A ' . $st . ' room can still take a payment while it owes.',
+                'fix_on' => 'Payments > Add payment', 'link' => 'payment-add.php?booking_type=room&booking_id=' . $id];
+        }
+        if ($st === 'no-show' && (float)$r['paid'] > $tol) {
+            $stands[] = ['reference' => $r['ref'], 'what' => 'No-show with ' . rh_ai_fmt_cur($cur, (float)$r['paid']) . ' paid. What is kept follows the no-show policy saved on the booking; any money going back is a refund or credit note done by staff.',
+                'fix_on' => 'Booking Details', 'link' => $see];
+        }
+    }
+    $creditRooms = array_values(array_filter($rows, static fn($r) => (float)$r['credit'] > $tol));
+    if ($creditRooms && $owing > $tol && count($rows) > 1) {
+        foreach ($creditRooms as $r) {
+            $stands[] = ['reference' => $r['ref'], 'what' => 'Holds ' . rh_ai_fmt_cur($cur, (float)$r['credit']) . ' credit while rooms in the group owe ' . rh_ai_fmt_cur($cur, $owing) . '.',
+                'fix_on' => 'Booking Details > Group rooms > Use this credit for the rooms that owe', 'link' => 'booking-details.php?id=' . $root];
+        }
+    }
+    $sum = rh_ai_sum_written(array_map(static fn($r) => (float)$r['billed'], $rows));
+    $tot = $t['totals'];
+    $out = ['group' => count($rows) > 1, 'lead_booking_id' => $root, 'lead_reference' => $lead['ref'], 'rooms' => count($rows), 'rooms_by_status' => $byStatus,
+        'currency' => $cur];
+    // Who pays: the lead's booker, and the company when the lead is on a company account (company pays later).
+    try {
+        $st = $db->prepare('SELECT guest_name FROM bookings WHERE id = ?');
+        $st->execute([$root]);
+        $out['booked_by'] = ['guest_name' => (string)$st->fetchColumn()];
+        if (rh_ai_billing_on()) {
+            $split = rh_booking_bill_split($db, $root);
+            if (!empty($split['on_account'])) {
+                $out['billed_to'] = ['guest_name' => (string)($split['name'] ?? ''), 'how' => 'company account (company pays later)'];
+            }
+        }
+    } catch (Throwable $e) {
+        // who pays is left out rather than guessed
+    }
+    $out['totals'] = ['billed' => rh_ai_money((float)$tot['billed']), 'folio_charges' => $chargesOk ? $charged : 'could not be read', 'paid' => rh_ai_money((float)$tot['paid']),
+        'owed' => rh_ai_money((float)$tot['owed']), 'credit' => rh_ai_money((float)$tot['credit']), 'refunds_paid_out' => rh_ai_money((float)$tot['refunds']),
+        'moved_to_guest_credit' => $toCredit, 'net_position' => rh_ai_money((float)$tot['net'])];
+    $out['bill_sum'] = $sum['text'];
+    $out['totals_mean'] = 'Sums over every room of the group in every status (checked out, no-show and cancelled included), each room exactly as its own Booking Details shows it. '
+        . 'billed = booked rate × nights plus folio charges; paid is after refunds; net_position = owed minus credit (above 0 the group owes, below 0 it is in credit). '
+        . 'refunds_paid_out = money paid back in cash, bank or mobile money; moved_to_guest_credit is guest credit on a credit note, not a refund.';
+    if ($payments) {
+        $out['whole_group_payments'] = $payments;
+    }
+    $out['stands_out'] = $stands ?: 'nothing stands out in the money or stay steps';
+    $out['room_list'] = $outRows;
+    $out['read_only'] = 'Group changes (make lead, add or remove a room, move credit between rooms or companies, change dates or who is staying, correct a stay after check-out, add a charge) are done on Booking Details and Payments by staff; there is no chat card for them. '
+        . 'A charge after check-out goes on Payments > Add charge. A no-show or cancelled room can still take a payment. Rooms of the group follow the lead\'s pay-later arrangement, '
+        . 'and a quote or invoice for the group uses the group stay total (all rooms), not one room.';
+    return $out + $open;
+}
+
+/** Local wording for group_breakdown: the group line, totals with the written sum, what stands out, the rooms. */
+function rh_ai_desk_group_text(array $r): string
+{
+    $cur = (string)($r['currency'] ?? '');
+    $m = static fn($v) => rh_ai_fmt_cur($cur, (float)$v);
+    $t = (array)($r['totals'] ?? []);
+    if (empty($r['group'])) {
+        $head = '**' . $r['lead_reference'] . '** is a single room booking, not part of a group.';
+    } else {
+        $head = '**Group ' . $r['lead_reference'] . '**: ' . (int)$r['rooms'] . ' rooms (' . implode(', ', array_map(static fn($k, $v) => $v . ' ' . $k, array_keys((array)$r['rooms_by_status']), (array)$r['rooms_by_status'])) . ').';
+    }
+    $lines = [$head,
+        'Billed ' . $m($t['billed'] ?? 0) . ($r['bill_sum'] !== '' && !empty($r['group']) ? ' (' . $r['bill_sum'] . ')' : '') . ' · paid ' . $m($t['paid'] ?? 0) . ' · owed ' . $m($t['owed'] ?? 0)
+        . ((float)($t['credit'] ?? 0) > BALANCE_TOLERANCE ? ' · credit ' . $m($t['credit']) : '')
+        . ((float)($t['refunds_paid_out'] ?? 0) > BALANCE_TOLERANCE ? ' · refunds paid out ' . $m($t['refunds_paid_out']) : '')
+        . ((float)($t['moved_to_guest_credit'] ?? 0) > BALANCE_TOLERANCE ? ' · moved to guest credit ' . $m($t['moved_to_guest_credit']) : '') . '.'];
+    $rooms = [];
+    foreach (is_array($r['room_list'] ?? null) ? $r['room_list'] : [] as $x) {
+        if (!is_array($x)) {
+            continue;
+        }
+        $rooms[] = $x['reference'] . (!empty($x['lead']) ? ' (lead)' : '') . ' · ' . $x['room_type'] . ' ' . $x['room_number'] . ' · ' . $x['status']
+            . (isset($x['check_in']) ? ' · ' . $x['check_in'] . ' to ' . $x['check_out'] : '') . (($x['dates'] ?? '') === 'DIFFERENT from the lead' ? ' (dates differ from the lead)' : '')
+            . ' · ' . $x['booked_rate'] . ' · billed ' . $m($x['billed']) . ', paid ' . $m($x['paid']) . ', owes ' . $m($x['owed']);
+    }
+    $text = implode("\n", $lines) . rh_ai_local_lines($rooms);
+    $so = $r['stands_out'] ?? [];
+    if (is_array($so) && $so) {
+        $items = [];
+        foreach ($so as $s) {
+            if (is_array($s)) {
+                $items[] = $s['reference'] . ': ' . $s['what'] . ' Fix on ' . $s['fix_on'] . '.';
+            }
+        }
+        $text .= "\n\n**What stands out**" . rh_ai_local_lines($items);
+    }
+    return $text;
 }
 
 /**
@@ -1699,6 +1995,20 @@ function rh_ai_desk_read(PDO $db, array $user, int $conv, string $tool, array $a
  * $message: the person's own words (typos read); $state: rh_ai_focus_state(); $pageBooking: the booking open on screen.
  * @return array|null ['text','links','chips','cards'?,'focus'?,'focus_offer'?,'local'?,'route'?]
  */
+/**
+ * PURE. "group breakdown for X", "show the group rooms of X", "break down the group", "full group summary for X":
+ * the name or reference asked about ('' = the booking in focus / on screen), or null when it is not a group question.
+ */
+function rh_ai_desk_group_intent(string $l): ?string
+{
+    $l = trim($l, " ?.!");
+    if (preg_match('/^(?:(?:show|give|get|tell)(?: me)? )?(?:the )?(?:full |whole )?group(?: booking)? (?:breakdown|rooms|summary|details|totals)(?: (?:for|of) (.+))?$/u', $l, $m)
+        || preg_match('/^break ?down (?:the )?group(?: booking)?(?: (?:for|of) (.+))?$/u', $l, $m)) {
+        return trim((string)($m[1] ?? ''));
+    }
+    return null;
+}
+
 function rh_ai_desk_local(PDO $db, array $user, int $conv, string $message, array $state, int $pageBooking = 0, string $raw = ''): ?array
 {
     $m = rh_ai_desk_clean($message);
@@ -1718,6 +2028,21 @@ function rh_ai_desk_local(PDO $db, array $user, int $conv, string $message, arra
             $ci['note'] = trim($nm[1]); // the note exactly as typed (no wording dropped, no spelling changed)
         }
         return rh_ai_desk_card($db, $user, $conv, $ci, $state, $pageBooking);
+    }
+    // 1b. A group room by room (sync 2026-11-20): read only, local, zero tokens
+    if (($gw = rh_ai_desk_group_intent($l)) !== null) {
+        if (!rh_ai_tool_allowed($user, 'group_breakdown')) {
+            return rh_ai_desk_declined($user, 'group_breakdown');
+        }
+        $pick = rh_ai_desk_pick($db, $user, $conv, $gw, $state, $pageBooking);
+        if (isset($pick['reply'])) {
+            return $pick['reply'];
+        }
+        $r = rh_ai_desk_read($db, $user, $conv, 'group_breakdown', ['booking_id' => (int)$pick['id']]);
+        if ($r === null) {
+            return null;
+        }
+        return ['text' => rh_ai_desk_group_text((array)$r['result']), 'links' => $r['links'], 'chips' => ['Show its history'], 'focus' => (int)$pick['id'], 'focus_offer' => 0];
     }
     // 2. Who made a booking / its history
     if (($bi = rh_ai_desk_booking_intent($m)) !== null) {
