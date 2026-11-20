@@ -1271,18 +1271,55 @@ if (!function_exists('receipt_render_payment_pdf_html')) {
 
         // Exclusive: the line is net and VAT is added below. Inclusive/off: the line is the amount paid.
         $lineAmount = ($mode === 'exclusive' && $showVatAmount) ? $netShown : $gross;
-        $desc = rh_pdf_e((string)($context['description'] ?? 'Payment'));
-        if (!empty($context['booked_rate'])) {
-            // Plain "x" / "-" in the PDF: the core font (helvetica) has no multiplication sign or middle dot.
-            // One line per room (group bookings), each escaped.
-            $brLines = array_map(static function (string $l): string {
-                return rh_pdf_e(str_replace(['×', '·'], ['x', '-'], $l));
-            }, explode("\n", (string)$context['booked_rate']));
-            $desc .= '<br/><span style="color:' . $t['muted_dark'] . ';font-size:7.5pt;">' . implode('<br/>', $brLines) . '</span>';
-        }
+        // Plain "x" / "-" in the PDF: the core font (helvetica) has no multiplication sign, middle dot or dashes.
+        $pdfTxt = static function (string $s): string {
+            return rh_pdf_e(str_replace(['×', '·', '—', '–'], ['x', '-', '-', '-'], $s));
+        };
+        $brRaw = array_values(array_filter(array_map('trim', explode("\n", (string)($context['booked_rate'] ?? ''))), 'strlen'));
         $typeLabel = ucwords(str_replace('_', ' ', (string)($payment['payment_type'] ?? '')));
-        if ($typeLabel !== '') {
-            $desc .= '<br/><span style="color:' . $t['muted_dark'] . ';font-size:7.5pt;">' . rh_pdf_e($typeLabel) . '</span>';
+        if ((string)($payment['booking_type'] ?? '') === 'room' && $brRaw && strpos($brRaw[0], 'Room: ') === 0) {
+            // One room of a group (rh_booked_rate_room_lines): the room as the heading, then small labelled lines
+            // (Guest / Stay / Group / Payment) instead of one run of grey text. The booking ref is in the header grid.
+            $head = substr($brRaw[0], 6);
+            $guest = '';
+            if (($gp = strpos($head, ' - Guest: ')) !== false) {
+                $guest = substr($head, $gp + 10);
+                $head = substr($head, 0, $gp);
+            } elseif (strpos($head, 'Guest: ') === 0) {
+                $guest = substr($head, 7);
+                $head = '';
+            }
+            $label = static function (string $l) use ($t): string {
+                return '<span style="color:' . $t['muted'] . ';font-size:6.5pt;font-weight:bold;letter-spacing:0.8pt;">' . strtoupper(rh_pdf_e($l)) . '</span>&nbsp;&nbsp;';
+            };
+            $sub = [];
+            if (trim($guest) !== '') {
+                $sub[] = $label('Guest') . $pdfTxt(trim($guest));
+            }
+            foreach (array_slice($brRaw, 1) as $l) {
+                if (strpos($l, 'Part of group ') === 0) {
+                    $sub[] = $label('Group') . $pdfTxt(substr($l, 14));
+                } elseif (preg_match('/^(\d{2} \w{3} \d{4} to \d{2} \w{3} \d{4}) - (.+)$/u', $l, $m)) {
+                    $sub[] = $label('Stay') . $pdfTxt($m[1]) . '&nbsp;&nbsp;|&nbsp;&nbsp;' . $pdfTxt($m[2]);
+                } else {
+                    $sub[] = $label('Stay') . $pdfTxt($l);
+                }
+            }
+            if ($typeLabel !== '') {
+                $sub[] = $label('Payment') . rh_pdf_e(ucfirst(strtolower($typeLabel)));
+            }
+            $title = trim($head) !== '' ? $pdfTxt(trim($head)) : rh_pdf_e((string)($context['description'] ?? 'Payment'));
+            $desc = '<span style="font-size:10pt;font-weight:bold;">' . $title . '</span>'
+                . ($sub ? '<br/><span style="color:' . $t['muted_dark'] . ';font-size:7.5pt;line-height:1.5;">' . implode('<br/>', $sub) . '</span>' : '');
+        } else {
+            $desc = rh_pdf_e((string)($context['description'] ?? 'Payment'));
+            if ($brRaw) {
+                // One line per room (group bookings), each escaped.
+                $desc .= '<br/><span style="color:' . $t['muted_dark'] . ';font-size:7.5pt;">' . implode('<br/>', array_map($pdfTxt, $brRaw)) . '</span>';
+            }
+            if ($typeLabel !== '') {
+                $desc .= '<br/><span style="color:' . $t['muted_dark'] . ';font-size:7.5pt;">' . rh_pdf_e($typeLabel) . '</span>';
+            }
         }
         $itemCols = [
             ['label' => 'Item', 'width' => 52, 'align' => 'left'],
@@ -1381,9 +1418,37 @@ if (!function_exists('receipt_render_payment_pdf_html')) {
         $body = $items . rh_pdf_spacer(3) . rh_pdf_totals_table($totals);
         // Leg of a whole-group payment (owner 2026-11-20): a note under the totals with the whole amount and every
         // room's receipt; "Total received" above stays this room's amount. Nothing for any other payment.
-        $groupLines = receipt_group_payment_lines($context, $cur);
-        if ($groupLines) {
-            $body .= rh_pdf_spacer(4) . rh_pdf_note(str_replace(['×', '·'], ['x', '-'], implode("\n", $groupLines)));
+        $grp = is_array($context['group_payment'] ?? null) ? $context['group_payment'] : null;
+        if ($grp && (int)($grp['count'] ?? 0) >= 2) {
+            // Its own section: a headline with the whole amount, then one row per room's receipt (this one in bold)
+            // and the group total, in the same table style as the item list.
+            $headline = 'Whole-group payment: ' . trim($cur) . ' ' . number_format((float)$grp['total'], 2) . ' split across ' . (int)$grp['count'] . ' rooms';
+            $gRows = [];
+            foreach ((array)$grp['legs'] as $leg) {
+                $isThis = (int)$leg['payment_id'] === (int)($grp['this_payment_id'] ?? 0);
+                $b = static function (string $html) use ($isThis): string {
+                    return $isThis ? '<b>' . $html . '</b>' : $html;
+                };
+                $gRows[] = [
+                    $b($pdfTxt((string)$leg['booking_reference'])),
+                    $b($pdfTxt((string)$leg['room'])),
+                    $b($pdfTxt((string)$leg['receipt_number'] !== '' ? (string)$leg['receipt_number'] : '-'))
+                        . ($isThis ? '<br/><span style="color:' . $t['muted'] . ';font-size:6.5pt;font-weight:bold;letter-spacing:0.8pt;">THIS RECEIPT</span>' : ''),
+                    $b(rh_pdf_e($money((float)$leg['total_amount']))),
+                ];
+            }
+            $body .= rh_pdf_spacer(6) . rh_pdf_section_title('Whole-group payment', 45) . rh_pdf_spacer(2)
+                . '<table cellpadding="0" cellspacing="0" border="0" width="100%"><tr><td style="color:' . $t['text'] . ';font-size:9pt;">'
+                . rh_pdf_e($headline) . '. Each room has its own receipt; together they make up the one payment.</td></tr></table>'
+                . rh_pdf_spacer(2)
+                . rh_pdf_items_table([
+                    ['label' => 'Booking', 'width' => 22, 'align' => 'left'],
+                    ['label' => 'Room', 'width' => 32, 'align' => 'left'],
+                    ['label' => 'Receipt No.', 'width' => 26, 'align' => 'left'],
+                    ['label' => 'Amount', 'width' => 20, 'align' => 'right'],
+                ], $gRows)
+                . rh_pdf_spacer(2)
+                . rh_pdf_totals_table([['label' => 'Group total', 'value' => $money((float)$grp['total']), 'type' => 'strong']]);
         }
         // Room payment: the booking's (group lead's) stored cancellation policy text; '' without one = nothing printed.
         if (!$isRefund && (string)($payment['booking_type'] ?? '') === 'room' && function_exists('rh_booking_policy_text_by_id')
