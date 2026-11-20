@@ -16,8 +16,7 @@
  *  - Choices  = up to 10 (RH_AI_MODEL_CHOICES_MAX), best first by four equal parts: cheapest (price in + out), fastest
  *    (average reply time measured here, at least 5 replies in 30 days, else the kind: Flash-Lite/Haiku/mini, then
  *    Flash/Sonnet, then the rest), latest (version) and best (capability rank). Models with a price come first; one
- *    with no price only fills a free place and waits for a price, and only when it is a newer version of a family the
- *    built-in list knows and not a big family (an unknown family or a new Opus is never offered unpriced). The suggestion (rh_ai_suggest_roles, up to 5) is
+ *    with no price only fills a free place and waits for a price. The suggestion (rh_ai_suggest_roles, up to 5) is
  *    always among them.
  *  - In use, not a choice any more: stays chosen, marked "older, still in use" (cost and answers change only when a
  *    person picks another). In use but closed or no longer listed: "retired" - nothing is picked for it; a warning asks
@@ -184,31 +183,11 @@ function rh_ai_model_choices(PDO $db, string $provider): array
         $sb = ($pCheap[$b] ?? 0) + ($pFast[$b] ?? 0) + ($pNew[$b] ?? 0) + ($pBest[$b] ?? 0);
         return [($info[$b]['cost'] !== null), $sb, $info[$b]['rank'], $b] <=> [($info[$a]['cost'] !== null), $sa, $info[$a]['rank'], $a];
     });
-    // A model with no price fills a free place only when it is a newer version of a family the built-in list knows and
-    // not a big family (the 69942d3 rule, lost in the top-10 rewrite; fault 2026-11-21): a new unknown family or a new
-    // Opus is never a choice, so it is never announced either.
-    $catVer = [];
-    foreach (rh_ai_catalog_models($provider) as $c) {
-        $f = rh_ai_model_family((string)$c['model_id']);
-        $catVer[$f] = max($catVer[$f] ?? -1.0, rh_ai_model_version((string)$c['model_id']));
-    }
-    $candById = array_column($cands, null, 'model_id');
-    $unpricedOk = static function (string $id) use ($candById, $catVer, $fam, $ver): bool {
-        $m = $candById[$id] ?? null;
-        if ($m === null || (int)($m['is_new'] ?? 0) !== 1) {
-            return false;
-        }
-        $f = $fam($m);
-        return isset($catVer[$f]) && $ver($m) > $catVer[$f] && !rh_ai_model_is_big(['model_id' => $id, 'price_out' => null]);
-    };
     // The suggestion (up to 5) is always on offer; the best of the rest fill the places left, shown best first.
     $keep = array_flip(array_keys($suggest));
     foreach ($order as $id) {
         if (count($keep) >= RH_AI_MODEL_CHOICES_MAX) {
             break;
-        }
-        if ($info[$id]['cost'] === null && !isset($keep[$id]) && !$unpricedOk($id)) {
-            continue;
         }
         $keep[$id] = true;
     }

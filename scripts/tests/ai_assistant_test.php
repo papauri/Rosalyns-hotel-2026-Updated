@@ -2188,7 +2188,12 @@ if (!$chatReady || !$adm) {
             $n1m = $listCalls();
             $refAt = (string)rh_ai_settings($pdo, true)['ai_models_refreshed_at'];
             check($n1m >= 1 && strpos($refAt, date('Y-m-d')) === 0, 'model lists refresh when the last check was yesterday', json_encode([$dm1['note'], $n1m, $refAt]));
-            check(strpos(json_encode(rh_ai_notices()), 'claude-opus-6') === false && strpos(json_encode(rh_ai_notices()), 'claude-mystery-1') === false, 'a new big or unknown-family model with no price is not announced: it is never a choice on the Models table (fault 2026-11-20; the announced case is in ai_model_choices_test.php)');
+            // Top 10 (owner 2026-11-20): a new model with no price fills a free place on the Models table, so it is announced
+            // exactly when the table offers it, never otherwise (the notice and the table agree).
+            $chA = rh_ai_model_choices($pdo, 'anthropic');
+            $ntA = json_encode(rh_ai_notices());
+            check((strpos($ntA, 'claude-opus-6') !== false) === in_array('claude-opus-6', $chA['new_unpriced'], true) && (strpos($ntA, 'claude-mystery-1') !== false) === in_array('claude-mystery-1', $chA['new_unpriced'], true),
+                'a new model with no price is announced only when the Models table offers it (a free place in the top 10)', json_encode([$chA['new_unpriced'], $ntA]));
             $dm2 = rh_ai_daily_models($pdo);
             check($listCalls() === $n1m && stripos((string)$dm2['note'], 'already checked today') !== false, 'model lists are not checked twice on the same day', (string)$dm2['note']);
             rh_ai_set_transport($queueTransport);
