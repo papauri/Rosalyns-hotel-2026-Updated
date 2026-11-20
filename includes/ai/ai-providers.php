@@ -573,6 +573,27 @@ function rh_ai_gemini_schema(array $s): array
  * role and short replies, low on Primary (owner 2026-10-28: "super swift").
  * @return array{url:string, headers:array, body:array}
  */
+/**
+ * Tools whose name every provider accepts (Gemini is the strictest: a letter or underscore first, then letters, digits,
+ * _ . : -, at most 64). One bad name makes the provider refuse the whole question (fault 2026-11-21), so such a tool is
+ * left out of the request and logged (its position and length only); it is never renamed, so a call always maps back.
+ */
+function rh_ai_tools_valid_names(array $tools): array
+{
+    $ok = [];
+    foreach ($tools as $i => $tool) {
+        $name = is_array($tool) ? (string)($tool['name'] ?? '') : '';
+        if (preg_match('/^[A-Za-z_][A-Za-z0-9_.:-]{0,63}$/D', $name)) {
+            $ok[] = $tool;
+            continue;
+        }
+        if (function_exists('rh_log_event')) {
+            rh_log_event('assistant', 'warning', 'Assistant tool left out: its name is not valid for the provider', ['position' => (int)$i, 'name_length' => strlen($name), 'tools' => count($tools)]);
+        }
+    }
+    return $ok;
+}
+
 function rh_ai_build_request(array $req, bool $responsesApi = false): array
 {
     $provider = (string)$req['provider'];
@@ -581,7 +602,7 @@ function rh_ai_build_request(array $req, bool $responsesApi = false): array
     $frozen = (string)($req['system_frozen'] ?? '');
     $userBlock = (string)($req['system_user'] ?? '');
     $volatile = (string)($req['system_volatile'] ?? '');
-    $tools = array_values((array)($req['tools'] ?? []));
+    $tools = rh_ai_tools_valid_names(array_values((array)($req['tools'] ?? [])));
     usort($tools, static fn($a, $b) => strcmp((string)$a['name'], (string)$b['name'])); // deterministic = cacheable
     $max = max(16, (int)($req['max_tokens'] ?? 1024));
     $effort = in_array(($req['effort'] ?? ''), ['minimal', 'low', 'medium', 'high'], true) ? (string)$req['effort'] : 'low';

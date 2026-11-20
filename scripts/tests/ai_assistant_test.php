@@ -2768,6 +2768,72 @@ $gb2 = rh_ai_build_request(['provider' => 'google', 'model' => 'gemini-3.8-flash
 check(array_keys($gb1)[0] === 'systemInstruction' && $gb1['systemInstruction'] === $gb2['systemInstruction'] && $gb1['tools'] === $gb2['tools'] && $gb1['contents'][0] === $gb2['contents'][0]
     && ($gb1['contents'][2]['parts'][0]['text'] ?? '') === 'NOW 10:01' && ($gb1['contents'][2]['parts'][1]['text'] ?? '') === 'q2',
     'gemini: system prompt, tools and earlier chat are identical every call (cached); the time and screen go in front of this question only');
+// Fault 2026-11-21 ("How do I make a booking" -> Gemini HTTP 400 "Invalid function name"): the vault's last pass rewrote
+// tool NAMES when a vaulted value was a word of one (a guest vaulted as "group" made group_breakdown "[GUEST_1]_breakdown",
+// which sorts first). Names, schemas (enums) and the ids/names pairing a replayed call stay; texts are still scrubbed.
+$nameRe = '/^[A-Za-z_][A-Za-z0-9_.:-]{0,63}$/D';
+$badTools = [['name' => '[GUEST_1]_breakdown', 'description' => 'x', 'schema' => []], ['name' => '', 'description' => 'x', 'schema' => []], ['name' => '9lives', 'description' => 'x', 'schema' => []],
+    ['name' => 'how_to', 'description' => 'How-to', 'schema' => ['properties' => ['q' => ['type' => 'string']]]]];
+$evBefore = count($GLOBALS['__ai_test_log_events'] ?? []);
+$gNames = array_column((array)(rh_ai_build_request(['provider' => 'google', 'model' => 'gemini-3.8-flash', 'key' => $FAKE_KEY, 'messages' => [['role' => 'user', 'content' => 'hi']], 'tools' => $badTools])['body']['tools'][0]['functionDeclarations'] ?? []), 'name');
+$aNames = array_column((array)(rh_ai_build_request(['provider' => 'anthropic', 'model' => 'claude-haiku-5-5', 'key' => $FAKE_KEY, 'messages' => [['role' => 'user', 'content' => 'hi']], 'tools' => $badTools])['body']['tools'] ?? []), 'name');
+$oNames = array_map(static fn($t) => $t['function']['name'], (array)(rh_ai_build_request(['provider' => 'openai', 'model' => 'gpt-5-mini', 'key' => $FAKE_KEY, 'messages' => [['role' => 'user', 'content' => 'hi']], 'tools' => $badTools])['body']['tools'] ?? []));
+$rNames = array_column((array)(rh_ai_build_request(['provider' => 'openai', 'model' => 'gpt-5-mini', 'key' => $FAKE_KEY, 'messages' => [['role' => 'user', 'content' => 'hi']], 'tools' => $badTools], true)['body']['tools'] ?? []), 'name');
+$evNew = array_slice($GLOBALS['__ai_test_log_events'] ?? [], $evBefore);
+check($gNames === ['how_to'] && $aNames === ['how_to'] && $oNames === ['how_to'] && $rNames === ['how_to'] && count($evNew) === 12 && strpos(json_encode($evNew), 'GUEST') === false,
+    'a tool with an invalid name is left out of every provider\'s request (never renamed) and logged without the name', json_encode([$gNames, $aNames, $oNames, $rNames, count($evNew)]));
+if ($chatReady && !empty($adminU)) {
+    rh_ai_vault_forget();
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare("INSERT INTO ai_conversations (user_id, title) VALUES (?, 'aitest tool names')")->execute([(int)$adminU['id']]);
+        $tnConv = (int)$pdo->lastInsertId();
+        $tnQ = 'How do I make a booking';
+        $tnTeam = rh_ai_specialists_for_user($adminU);
+        $tnLanes = array_values(array_unique(array_merge(rh_ai_lanes_for($tnTeam, mb_strtolower($tnQ)), array_values(array_filter(['front_desk', 'system_guide'], static fn($k) => isset($tnTeam[$k]))))));
+        $tnSpecs = rh_ai_lane_specs($adminU, $tnTeam, $tnLanes, rh_ai_change_cards(mb_strtolower($tnQ)), ['hotel_info']);
+        $tnNames = array_column($tnSpecs, 'name');
+        sort($tnNames);
+        // Every first word of an offered tool's name (and an enum value) is a vaulted "guest" in this chat
+        foreach (array_unique(array_merge(array_map(static fn($n) => explode('_', $n)[0], $tnNames), ['group', 'confirmed'])) as $w) {
+            if (mb_strlen($w) >= 3) {
+                rh_ai_vault_token($pdo, $tnConv, 'GUEST', $w);
+            }
+        }
+        $tnFirst = $tnNames[0] ?? 'search_bookings';
+        $tnReq = rh_ai_vault_final_pass($pdo, $tnConv, ['provider' => 'google', 'model' => 'gemini-3.8-flash', 'key' => $FAKE_KEY, 'system_frozen' => 'FROZEN', 'tools' => $tnSpecs,
+            'messages' => [['role' => 'user', 'content' => $tnQ . ' for the group'], ['role' => 'assistant', 'content' => '', 'tool_calls' => [['id' => 'call_group_1', 'name' => $tnFirst, 'args' => ['query' => 'group'], 'sig' => 'sig_group']]],
+                ['role' => 'tool', 'tool_call_id' => 'call_group_1', 'name' => $tnFirst, 'content' => '{"note":"group stay"}']]]);
+        $tnBody = rh_ai_build_request($tnReq)['body'];
+        $tnDecl = (array)($tnBody['tools'][0]['functionDeclarations'] ?? []);
+        $tnOut = array_column($tnDecl, 'name');
+        $tnBad = array_values(array_filter($tnOut, static fn($n) => !preg_match($nameRe, (string)$n)));
+        $tnEnum = '';
+        foreach ($tnReq['tools'] as $t) {
+            if (isset($t['schema']['properties']['status']['enum'])) {
+                $tnEnum = implode(',', $t['schema']['properties']['status']['enum']);
+            }
+        }
+        $tnCallPart = $tnBody['contents'][1]['parts'][0] ?? []; // Gemini: thoughtSignature sits on the part, beside functionCall
+        $tnCall = $tnCallPart['functionCall'] ?? [];
+        $tnResp = $tnBody['contents'][2]['parts'][0]['functionResponse'] ?? [];
+        check(count($tnNames) > 3 && $tnOut === $tnNames && !$tnBad && ($tnEnum === '' || strpos($tnEnum, 'confirmed') !== false) && strpos($tnEnum, '[GUEST_') === false,
+            '"How do I make a booking" with tool-name words in the vault: every Gemini function name is valid and unchanged, schema enums too', json_encode(['bad' => $tnBad, 'out' => $tnOut, 'enum' => $tnEnum]));
+        check(($tnCall['name'] ?? '') === $tnFirst && ($tnCallPart['thoughtSignature'] ?? '') === 'sig_group' && ($tnResp['name'] ?? '') === $tnFirst
+            && $tnReq['messages'][1]['tool_calls'][0]['id'] === 'call_group_1' && $tnReq['messages'][2]['tool_call_id'] === 'call_group_1',
+            'a replayed tool call keeps its name, id and signature, and its result keeps the same name', json_encode([$tnCall, $tnResp]));
+        check(strpos((string)$tnReq['messages'][0]['content'], '[GUEST_') !== false && strpos(json_encode($tnReq['messages'][1]['tool_calls'][0]['args']), '[GUEST_') !== false
+            && strpos((string)$tnReq['messages'][2]['content'], '[GUEST_') !== false && stripos((string)$tnReq['messages'][2]['content'], 'group') === false,
+            'the last pass still scrubs the question, the call arguments and the tool result', json_encode($tnReq['messages']));
+    } finally {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        rh_ai_vault_forget();
+    }
+} else {
+    skip('tool names through the vault last pass (migration 071 not run here)');
+}
 // Gemini 4 allowed (owner 2026-11-20: "show and allow suggesting"; lifts the 2026-10-28 rule)
 check(!rh_ai_model_banned('gemini-4-argon') && !rh_ai_model_banned('models/gemini-4.1-flash') && !rh_ai_model_banned('Gemini-4-Flash-Lite') && !rh_ai_model_banned('gemini-3.8-flash') && !rh_ai_model_banned('claude-haiku-4-5'),
     'no model id is banned any more: Gemini 4 is shown and can be suggested');

@@ -871,5 +871,47 @@ function rh_ai_vault_final_pass(PDO $db, int $conv, array $req): array
         }
         return $x;
     };
-    return $walk($req);
+    // Fault 2026-11-21: the walk used to rewrite tool NAMES too (a vaulted "group" turned group_breakdown into
+    // "[GUEST_1]_breakdown"; Gemini refused the whole request, HTTP 400 "Invalid function name"). The server's own tool
+    // definitions (name + schema, enums included) and the ids/names that pair a replayed call with its result are never
+    // rewritten; every text the model reads (descriptions, messages, call arguments) still is.
+    $out = [];
+    foreach ($req as $k => $x) {
+        if ($k === 'tools' && is_array($x)) {
+            foreach ($x as $i => $t) {
+                if (is_array($t) && isset($t['description'])) {
+                    $t['description'] = $walk($t['description']);
+                }
+                $x[$i] = $t;
+            }
+            $out[$k] = $x;
+        } elseif ($k === 'messages' && is_array($x)) {
+            foreach ($x as $i => $m) {
+                if (!is_array($m)) {
+                    $x[$i] = $walk($m);
+                    continue;
+                }
+                foreach ($m as $mk => $mv) {
+                    if ($mk === 'role' || $mk === 'tool_call_id' || ($mk === 'name' && ($m['role'] ?? '') === 'tool')) {
+                        continue;
+                    }
+                    if ($mk === 'tool_calls' && is_array($mv)) {
+                        foreach ($mv as $ci => $c) {
+                            if (is_array($c) && array_key_exists('args', $c)) {
+                                $mv[$ci]['args'] = $walk($c['args']); // id, name and sig stay as the provider sent them
+                            }
+                        }
+                        $m[$mk] = $mv;
+                        continue;
+                    }
+                    $m[$mk] = $walk($mv);
+                }
+                $x[$i] = $m;
+            }
+            $out[$k] = $x;
+        } else {
+            $out[$k] = $walk([$k => $x])[$k]; // same skips as before (key, provider, model)
+        }
+    }
+    return $out;
 }
