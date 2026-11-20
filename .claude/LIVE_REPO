@@ -1,0 +1,4 @@
+# This repo's database is LIVE (real guests and money). Owner 2026-11-21: nothing is written to it without the
+# owner's say so. OneDrive\MSP\AI-Setup\hooks\guard.mjs reads this file and refuses test runs in this folder
+# (scripts/tests, run_tests.php, smoke_test*.php, ship.php without --tests=none). Run tests at Liwonde, push, then
+# port the change here. Never copy this file to Liwonde (port scripts skip .claude/).
